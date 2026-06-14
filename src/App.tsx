@@ -10,10 +10,12 @@ import {
 } from "./auth/userManagement";
 import Sidebar from "./components/Sidebar/Sidebar";
 import { SIDEBAR_TABS } from "./components/Sidebar/Tabs/tabRegistry";
-import { WorkspaceGate } from "./data/workspace/WorkspaceGate";
+import {
+  WorkspaceGate,
+  WorkspacePicker
+} from "./data/workspace/WorkspaceGate";
 
 import "./App.css";
-import "./data/workspace/WorkspaceGate.css";
 
 type AppContentProps = {
   session: AuthSession;
@@ -112,13 +114,15 @@ function NoAvailableTabs({ role }: { role: AuthSession["role"] }) {
 
 function App() {
   return (
-    <AuthGate>
-      {(session) => (
-        <WorkspaceGate session={session}>
-          <AppContent session={session} />
-        </WorkspaceGate>
-      )}
-    </AuthGate>
+    <WorkspacePicker>
+      <AuthGate>
+        {(session) => (
+          <WorkspaceGate session={session}>
+            <AppContent session={session} />
+          </WorkspaceGate>
+        )}
+      </AuthGate>
+    </WorkspacePicker>
   );
 }
 

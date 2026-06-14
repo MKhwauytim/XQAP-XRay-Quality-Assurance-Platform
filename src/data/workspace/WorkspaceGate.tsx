@@ -3,6 +3,112 @@ import type { ReactNode } from "react";
 import type { AuthSession } from "../../auth/authTypes";
 import { useWorkspace } from "./useWorkspace";
 
+import "./WorkspaceGate.css";
+
+// ─── WorkspacePicker ────────────────────────────────────────────────────────
+// Shown BEFORE authentication. Blocks until the user picks a directory and the
+// initial structure check completes. Once a directory is selected and checked
+// (whatever the result), it renders children so AuthGate can appear.
+
+type WorkspacePickerProps = {
+  children: ReactNode;
+};
+
+export function WorkspacePicker({ children }: WorkspacePickerProps) {
+  const {
+    isSupported,
+    status,
+    message,
+    pendingReconnect,
+    selectWorkspace,
+    reconnectWorkspace
+  } = useWorkspace();
+
+  // Browser does not support File System Access API
+  if (!isSupported || status === "unsupported_browser") {
+    return (
+      <div className="workspace-gate" dir="rtl">
+        <div className="workspace-gate-card">
+          <div className="workspace-gate-icon">🗂️</div>
+          <h2>متصفح غير مدعوم</h2>
+          <p>
+            هذا التطبيق يتطلب{" "}
+            <strong>Google Chrome</strong> أو{" "}
+            <strong>Microsoft Edge</strong> على سطح المكتب
+            للوصول المباشر إلى الملفات.
+          </p>
+          <p>يُرجى فتح التطبيق في متصفح مدعوم والمحاولة مجدداً.</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Checking in progress — show spinner before revealing login
+  if (status === "checking") {
+    return (
+      <div className="workspace-gate" dir="rtl">
+        <div className="workspace-gate-card">
+          <div className="workspace-gate-spinner" aria-hidden="true" />
+          <p className="workspace-gate-status">{message}</p>
+        </div>
+      </div>
+    );
+  }
+
+  // No directory selected yet — show the picker UI
+  if (status === "not_selected") {
+    return (
+      <div className="workspace-gate" dir="rtl">
+        <div className="workspace-gate-card">
+          <div className="workspace-gate-icon">📁</div>
+          <h2>اختر مساحة العمل</h2>
+          <p>
+            {pendingReconnect
+              ? "تم العثور على مساحة عمل سابقة. انقر على «إعادة الاتصال» للمتابعة، أو اختر مجلداً جديداً."
+              : "يجب تحديد المجلد الذي يحتوي على بيانات النظام للمتابعة."}
+          </p>
+
+          {pendingReconnect && (
+            <button
+              type="button"
+              onClick={() => {
+                void reconnectWorkspace();
+              }}
+            >
+              إعادة الاتصال بمساحة العمل
+            </button>
+          )}
+
+          <button
+            type="button"
+            className={pendingReconnect ? "secondary" : undefined}
+            onClick={() => {
+              void selectWorkspace();
+            }}
+          >
+            اختيار مجلد
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Directory picked and check done (ready / missing / error / etc.) — render
+  // children so AuthGate appears next
+  return <>{children}</>;
+}
+
+// ─── WorkspaceGate ──────────────────────────────────────────────────────────
+// Shown AFTER authentication. Reacts to the workspace structure check result
+// based on the authenticated session role.
+//
+// • ready            → renders app children
+// • missing_structure:
+//     admin          → offer to create the structure
+//     other roles    → "عنوان خاطئ" — wrong address, contact admin
+// • checking         → spinner (e.g. during createInitialStructure)
+// • anything else    → error + re-pick
+
 type WorkspaceGateProps = {
   session: AuthSession;
   children: ReactNode;
@@ -12,74 +118,77 @@ export function WorkspaceGate({ session, children }: WorkspaceGateProps) {
   const {
     status,
     message,
-    pendingReconnect,
     missingItems,
-    isSupported,
     selectWorkspace,
-    reconnectWorkspace,
     createInitialStructure
   } = useWorkspace();
 
-  // Browser doesn't support File System Access API
-  if (!isSupported || status === "unsupported_browser") {
-    return (
-      <div className="workspace-gate" dir="rtl">
-        <div className="workspace-gate-card">
-          <h2>متصفح غير مدعوم</h2>
-          <p>هذا التطبيق يتطلب Chrome أو Edge على سطح المكتب للوصول إلى الملفات.</p>
-          <p>يُرجى فتح التطبيق في Google Chrome أو Microsoft Edge.</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Ready — render the app
-  if (status === "ready") {
-    return <>{children}</>;
-  }
-
-  // Checking in progress
+  // Structure creation in progress
   if (status === "checking") {
     return (
       <div className="workspace-gate" dir="rtl">
         <div className="workspace-gate-card">
+          <div className="workspace-gate-spinner" aria-hidden="true" />
           <p className="workspace-gate-status">{message}</p>
         </div>
       </div>
     );
   }
 
-  // Missing structure — offer to create if admin
+  // Workspace is ready — render the full app
+  if (status === "ready") {
+    return <>{children}</>;
+  }
+
+  // Missing structure — role-gated response
   if (status === "missing_structure") {
     const isAdmin = session.role === "admin";
+
     return (
       <div className="workspace-gate" dir="rtl">
         <div className="workspace-gate-card">
-          <h2>بنية مساحة العمل غير مكتملة</h2>
-          <p>{message}</p>
-          {missingItems.length > 0 && (
-            <ul className="workspace-gate-missing">
-              {missingItems.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
-          )}
           {isAdmin ? (
-            <button
-              type="button"
-              onClick={() => void createInitialStructure(session.username)}
-            >
-              إنشاء بنية مساحة العمل
-            </button>
+            <>
+              <div className="workspace-gate-icon">🔧</div>
+              <h2>مساحة العمل غير مهيأة</h2>
+              <p>
+                المجلد المحدد لا يحتوي على بنية النظام المطلوبة. يمكنك
+                إنشاؤها الآن.
+              </p>
+              {missingItems.length > 0 && (
+                <ul className="workspace-gate-missing">
+                  {missingItems.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  void createInitialStructure(session.username);
+                }}
+              >
+                إنشاء بنية مساحة العمل
+              </button>
+            </>
           ) : (
-            <p className="workspace-gate-hint">
-              تواصل مع المسؤول لإنشاء بنية مساحة العمل.
-            </p>
+            <>
+              <div className="workspace-gate-icon">⚠️</div>
+              <h2>عنوان خاطئ</h2>
+              <p>
+                المجلد المحدد لا يحتوي على بنية نظام صالحة. تأكد من
+                اختيار المجلد الصحيح، أو تواصل مع مسؤول النظام لإعداد
+                مساحة العمل.
+              </p>
+            </>
           )}
+
           <button
             type="button"
             className="secondary"
-            onClick={() => void selectWorkspace()}
+            onClick={() => {
+              void selectWorkspace();
+            }}
           >
             اختيار مجلد آخر
           </button>
@@ -88,46 +197,20 @@ export function WorkspaceGate({ session, children }: WorkspaceGateProps) {
     );
   }
 
-  // Error, permission denied, invalid structure
-  if (
-    status === "error" ||
-    status === "permission_denied" ||
-    status === "invalid_structure"
-  ) {
-    return (
-      <div className="workspace-gate" dir="rtl">
-        <div className="workspace-gate-card">
-          <h2>تعذر فتح مساحة العمل</h2>
-          <p>{message}</p>
-          <button type="button" onClick={() => void selectWorkspace()}>
-            اختيار مجلد
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // not_selected — initial state or pending reconnect
+  // invalid_structure, error, permission_denied
   return (
     <div className="workspace-gate" dir="rtl">
       <div className="workspace-gate-card">
-        <h2>مساحة العمل</h2>
-        <p>
-          {pendingReconnect
-            ? "تم العثور على مساحة عمل سابقة. انقر لإعادة الاتصال."
-            : "اختر مجلد مساحة العمل للبدء."}
-        </p>
-        {pendingReconnect && (
-          <button type="button" onClick={() => void reconnectWorkspace()}>
-            إعادة الاتصال بمساحة العمل
-          </button>
-        )}
+        <div className="workspace-gate-icon">❌</div>
+        <h2>تعذر فتح مساحة العمل</h2>
+        <p>{message}</p>
         <button
           type="button"
-          className={pendingReconnect ? "secondary" : undefined}
-          onClick={() => void selectWorkspace()}
+          onClick={() => {
+            void selectWorkspace();
+          }}
         >
-          اختيار مجلد جديد
+          اختيار مجلد آخر
         </button>
       </div>
     </div>
