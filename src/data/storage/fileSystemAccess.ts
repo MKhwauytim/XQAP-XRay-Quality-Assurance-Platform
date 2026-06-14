@@ -12,6 +12,7 @@ import {
   REQUIRED_WORKSPACE_FILES,
   REQUIRED_WORKSPACE_FOLDERS,
   SYSTEM_SUBFOLDERS,
+  TOP_LEVEL_DATA_FOLDERS,
   WORKSPACE_FILE_NAMES
 } from "../workspace/workspaceDefaults";
 
@@ -153,7 +154,11 @@ export async function checkWorkspaceStructure(
   const missingItems: string[] = [];
   const invalidItems: string[] = [];
 
-  for (const folderName of REQUIRED_WORKSPACE_FOLDERS) {
+  const allTopFolders = [
+    ...REQUIRED_WORKSPACE_FOLDERS,
+    ...TOP_LEVEL_DATA_FOLDERS
+  ];
+  for (const folderName of allTopFolders) {
     try {
       await directoryHandle.getDirectoryHandle(folderName, { create: false });
     } catch {
@@ -311,6 +316,15 @@ export async function createWorkspaceStructure(
   await systemHandle.getDirectoryHandle(WORKSPACE_FILE_NAMES.auditFolder, {
     create: true
   });
+
+  await systemHandle.getDirectoryHandle(WORKSPACE_FILE_NAMES.backupsFolder, {
+    create: true
+  });
+
+  await directoryHandle.getDirectoryHandle(
+    WORKSPACE_FILE_NAMES.templatesFolder,
+    { create: true }
+  );
 
   await writeJsonFile(
     directoryHandle,
