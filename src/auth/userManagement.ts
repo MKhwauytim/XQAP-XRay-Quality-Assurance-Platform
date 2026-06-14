@@ -52,6 +52,10 @@ export const MANAGED_TABS = [
     label: "معالجة المجتمع"
   },
   {
+    id: "employee-workspace",
+    label: "مساحة الموظف"
+  },
+  {
     id: "template-builder",
     label: "بانئ النماذج"
   },
@@ -64,12 +68,15 @@ export const MANAGED_TABS = [
 export function createDefaultPermissions(): RolePermission[] {
   return [
     { role: "employee", tabId: "population", access: "view" },
+    { role: "employee", tabId: "employee-workspace", access: "edit" },
     { role: "employee", tabId: "template-builder", access: "none" },
     { role: "employee", tabId: "user-management", access: "none" },
     { role: "supervisor", tabId: "population", access: "view" },
+    { role: "supervisor", tabId: "employee-workspace", access: "edit" },
     { role: "supervisor", tabId: "template-builder", access: "none" },
     { role: "supervisor", tabId: "user-management", access: "none" },
     { role: "admin", tabId: "population", access: "edit" },
+    { role: "admin", tabId: "employee-workspace", access: "edit" },
     { role: "admin", tabId: "template-builder", access: "edit" },
     { role: "admin", tabId: "user-management", access: "edit" }
   ];
