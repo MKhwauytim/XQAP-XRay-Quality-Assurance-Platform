@@ -134,10 +134,6 @@ test("drawSample portAllocations total matches totalActual", () => {
   const result = drawSample(rows, { totalSampleSize: 60, rngSeed: "ports" }, "user");
   expect(result.ok).toBe(true);
   if (!result.ok) return;
-  const totalFromAllocations = result.data.portAllocations.reduce(
-    (s, p) => s + p.actualTotalDrawn,
-    0
-  );
   // portAllocations excludes spillover extra draws, so may differ.
   // But total rows in data.rows should match totalActual.
   expect(result.data.rows.length).toBe(result.data.totalActual);

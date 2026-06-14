@@ -1,5 +1,5 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
-import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { safeWriteJson } from "../storage/safeWrite";
 import type { MonthFolderInfo } from "../population/monthFolder";
 
 const POPULATION_FOLDER = "Population";
@@ -99,6 +99,7 @@ export async function createBackup(
           const fh = await monthBackupDir.getFileHandle(fileName, {
             create: true
           });
+          if (!fh.createWritable) continue;
           const writable = await fh.createWritable();
           await writable.write(content);
           await writable.close();

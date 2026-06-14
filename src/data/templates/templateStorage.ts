@@ -99,6 +99,7 @@ export async function deleteTemplate(
     const fileHandle = await dir.getFileHandle(`${templateId}.json`, {
       create: false
     });
+    if (!fileHandle.createWritable) return { ok: true };
     const writable = await fileHandle.createWritable();
     await writable.write("{}");
     await writable.close();
