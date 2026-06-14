@@ -12,5 +12,5 @@ export const BOOTSTRAP_ADMIN_USERNAME = "admin";
 
 export const BOOTSTRAP_ADMIN_PASSWORD_HASH: PasswordHashRecord = {
   algorithm: "argon2id",
-  encoded: "$argon2id$v=19$m=19456,t=2,p=1$Q0EXc66ZzrZ7R+3ZeFyg/w$s+dgmlDeJK2Lbr4LDEDQ62ks4mHie6/xhdbIbaIARyI"
+  encoded: "$argon2id$v=19$m=19456,t=2,p=1$Q0EXc66ZzrZ7R+3ZeFyg/w$hr4m5BK1wKMt5JwvYnSVyGZqHKC95FbPsoR9nVsoUIo"
 };
