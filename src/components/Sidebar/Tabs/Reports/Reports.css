@@ -1,0 +1,146 @@
+.rpt-page {
+  width: 100%;
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 28px;
+  direction: rtl;
+  font-family: "Aptos", "Segoe UI", Tahoma, Arial, sans-serif;
+  color: #172033;
+}
+
+.rpt-eyebrow {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #667085;
+  margin-bottom: 4px;
+}
+
+.rpt-header {
+  margin-bottom: 24px;
+}
+
+.rpt-header h1 {
+  font-size: 24px;
+  font-weight: 700;
+  color: #17365d;
+  margin: 0 0 6px;
+}
+
+.rpt-header p {
+  color: #667085;
+  font-size: 14px;
+  margin: 0;
+}
+
+.rpt-empty {
+  padding: 48px;
+  text-align: center;
+  color: #667085;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px dashed #dce4ee;
+  border-radius: 12px;
+  font-size: 15px;
+}
+
+.rpt-msg-ok {
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  background: #ecfdf5;
+  border: 1px solid #6ee7b7;
+  border-radius: 8px;
+  color: #065f46;
+  font-size: 13px;
+}
+
+.rpt-msg-error {
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  background: #fef2f2;
+  border: 1px solid #fca5a5;
+  border-radius: 8px;
+  color: #7f1d1d;
+  font-size: 13px;
+}
+
+.rpt-panel {
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid #dce4ee;
+  border-radius: 12px;
+  padding: 24px;
+}
+
+.rpt-panel h2 {
+  font-size: 16px;
+  font-weight: 700;
+  color: #17365d;
+  margin-bottom: 16px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #dce4ee;
+}
+
+.rpt-panel h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: #334155;
+  margin-bottom: 8px;
+}
+
+.rpt-controls {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.rpt-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #172033;
+}
+
+.rpt-select {
+  padding: 8px 12px;
+  border: 1px solid #dce4ee;
+  border-radius: 8px;
+  font-size: 14px;
+  background: #fff;
+  color: #172033;
+  min-width: 200px;
+}
+
+.rpt-action-row {
+  margin-bottom: 20px;
+}
+
+.rpt-btn-primary {
+  padding: 10px 24px;
+  background: #17365d;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.rpt-btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.rpt-info {
+  padding: 14px;
+  background: #f8fafc;
+  border: 1px solid #dce4ee;
+  border-radius: 8px;
+}
+
+.rpt-info p {
+  font-size: 13px;
+  color: #667085;
+  margin: 0;
+}
