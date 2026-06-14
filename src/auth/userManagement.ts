@@ -64,6 +64,10 @@ export const MANAGED_TABS = [
     label: "التقارير"
   },
   {
+    id: "archive",
+    label: "الأرشيف"
+  },
+  {
     id: "user-management",
     label: "إدارة المستخدمين"
   }
@@ -85,7 +89,10 @@ export function createDefaultPermissions(): RolePermission[] {
     { role: "supervisor", tabId: "reports", access: "view" },
     { role: "admin", tabId: "reports", access: "edit" },
     { role: "admin", tabId: "template-builder", access: "edit" },
-    { role: "admin", tabId: "user-management", access: "edit" }
+    { role: "admin", tabId: "user-management", access: "edit" },
+    { role: "employee", tabId: "archive", access: "none" },
+    { role: "supervisor", tabId: "archive", access: "view" },
+    { role: "admin", tabId: "archive", access: "edit" }
   ];
 }
 
