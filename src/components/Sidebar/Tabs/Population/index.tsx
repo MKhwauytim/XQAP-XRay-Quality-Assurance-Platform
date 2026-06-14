@@ -11,8 +11,24 @@ import {
 import type { SidebarTabModule } from "../tabTypes";
 
 import { readSession } from "../../../../auth/authSession";
+import { getManagedLoginUsers } from "../../../../auth/userManagement";
 import { currentMonthFolderInfo, formatMonthFolderName } from "../../../../data/population/monthFolder";
 import { saveMonthRun } from "../../../../data/population/populationStorage";
+import {
+  appendDistributionEvent,
+  loadDistributionLog,
+  saveDistributionCurrent
+} from "../../../../data/distribution/distributionStorage";
+import {
+  buildAssignEvent,
+  buildCompletedEvent,
+  buildReassignEvent,
+  buildReplacementRequestedEvent,
+  deriveCurrentDistribution
+} from "../../../../data/distribution/distributionLog";
+import type {
+  DistributionCurrentData
+} from "../../../../data/distribution/distributionTypes";
 import { drawSample } from "../../../../data/sampling/sampleAlgorithm";
 import { saveSampleMaster } from "../../../../data/sampling/sampleStorage";
 import type { SampleMasterData } from "../../../../data/sampling/sampleTypes";
@@ -360,6 +376,13 @@ export default function PopulationTab() {
   const [sampleSaveMessage, setSampleSaveMessage] =
     useState<SaveMessage>(null);
 
+  // Phase 4 — distribution
+  const [distributionCurrent, setDistributionCurrent] =
+    useState<DistributionCurrentData | null>(null);
+  const [distributionMessage, setDistributionMessage] =
+    useState<SaveMessage>(null);
+  const [isDistributing, setIsDistributing] = useState(false);
+
   const [uploads, setUploads] = useState<Record<UploadKey, UploadState>>({
     riskAgencyData: {
       file: null,
@@ -696,6 +719,127 @@ export default function PopulationTab() {
     }
   }
 
+  async function refreshDistribution(monthFolderName: string): Promise<void> {
+    if (!directoryHandle) return;
+    const sampleRows = sampleDrawResult?.rows ?? [];
+    const log = await loadDistributionLog(directoryHandle, monthFolderName);
+    const current = deriveCurrentDistribution(log, sampleRows);
+    setDistributionCurrent(current);
+    await saveDistributionCurrent(directoryHandle, monthFolderName, current);
+  }
+
+  async function handleAssign(
+    xrayImageId: string,
+    assignedTo: string
+  ): Promise<void> {
+    if (!directoryHandle || !sampleDrawResult) return;
+    setIsDistributing(true);
+    setDistributionMessage(null);
+    const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
+    const username = sessionRef.current?.username ?? "unknown";
+    const event = buildAssignEvent({ xrayImageId, assignedTo, eventBy: username });
+    const result = await appendDistributionEvent(
+      directoryHandle,
+      monthFolderName,
+      event
+    );
+    if (result.ok) {
+      await refreshDistribution(monthFolderName);
+      setDistributionMessage({ type: "ok", text: "تم التعيين." });
+    } else {
+      setDistributionMessage({ type: "error", text: result.error });
+    }
+    setIsDistributing(false);
+  }
+
+  async function handleReassign(
+    xrayImageId: string,
+    reassignedTo: string
+  ): Promise<void> {
+    if (!directoryHandle || !sampleDrawResult) return;
+    setIsDistributing(true);
+    setDistributionMessage(null);
+    const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
+    const username = sessionRef.current?.username ?? "unknown";
+    const existing = distributionCurrent?.entries.find(
+      (e) => e.xrayImageId === xrayImageId
+    );
+    const event = buildReassignEvent({
+      xrayImageId,
+      assignedTo: existing?.assignedTo ?? reassignedTo,
+      reassignedTo,
+      eventBy: username
+    });
+    const result = await appendDistributionEvent(
+      directoryHandle,
+      monthFolderName,
+      event
+    );
+    if (result.ok) {
+      await refreshDistribution(monthFolderName);
+      setDistributionMessage({ type: "ok", text: "تم إعادة التعيين." });
+    } else {
+      setDistributionMessage({ type: "error", text: result.error });
+    }
+    setIsDistributing(false);
+  }
+
+  async function handleMarkComplete(xrayImageId: string): Promise<void> {
+    if (!directoryHandle || !sampleDrawResult) return;
+    setIsDistributing(true);
+    setDistributionMessage(null);
+    const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
+    const username = sessionRef.current?.username ?? "unknown";
+    const existing = distributionCurrent?.entries.find(
+      (e) => e.xrayImageId === xrayImageId
+    );
+    const event = buildCompletedEvent({
+      xrayImageId,
+      assignedTo: existing?.assignedTo ?? username,
+      eventBy: username
+    });
+    const result = await appendDistributionEvent(
+      directoryHandle,
+      monthFolderName,
+      event
+    );
+    if (result.ok) {
+      await refreshDistribution(monthFolderName);
+      setDistributionMessage({ type: "ok", text: "تم تعليم الصف كمكتمل." });
+    } else {
+      setDistributionMessage({ type: "error", text: result.error });
+    }
+    setIsDistributing(false);
+  }
+
+  async function handleRequestReplacement(xrayImageId: string): Promise<void> {
+    if (!directoryHandle || !sampleDrawResult) return;
+    setIsDistributing(true);
+    setDistributionMessage(null);
+    const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
+    const username = sessionRef.current?.username ?? "unknown";
+    const existing = distributionCurrent?.entries.find(
+      (e) => e.xrayImageId === xrayImageId
+    );
+    const event = buildReplacementRequestedEvent({
+      xrayImageId,
+      assignedTo: existing?.assignedTo ?? username,
+      eventBy: username
+    });
+    const result = await appendDistributionEvent(
+      directoryHandle,
+      monthFolderName,
+      event
+    );
+    if (result.ok) {
+      await refreshDistribution(monthFolderName);
+      setDistributionMessage({ type: "ok", text: "تم تسجيل طلب الاستبدال." });
+    } else {
+      setDistributionMessage({ type: "error", text: result.error });
+    }
+    setIsDistributing(false);
+  }
+
   async function moveToNextPhase(): Promise<void> {
     if (currentPhase === 1) {
       await processPhaseOneAndMoveNext();
@@ -805,9 +949,22 @@ export default function PopulationTab() {
           />
         ) : null}
 
-        {currentPhase > 3 ? (
+        {currentPhase === 4 ? (
+          <PhaseFourDistribution
+            sampleDrawResult={sampleDrawResult}
+            distributionCurrent={distributionCurrent}
+            distributionMessage={distributionMessage}
+            isDistributing={isDistributing}
+            onAssign={handleAssign}
+            onReassign={handleReassign}
+            onMarkComplete={handleMarkComplete}
+            onRequestReplacement={handleRequestReplacement}
+          />
+        ) : null}
+
+        {currentPhase > 4 ? (
           <section className="placeholder-phase">
-            <h2>{PHASES[currentPhase - 1].title}</h2>
+            <h2>{PHASES[currentPhase - 1]?.title ?? ""}</h2>
             <p>سيتم تطوير هذه المرحلة لاحقاً.</p>
           </section>
         ) : null}
@@ -1322,6 +1479,221 @@ function SampleResultReport({ data }: SampleResultReportProps) {
         البذرة: <code>{data.rngSeed}</code> — تم السحب: {new Date(data.drawnAt).toLocaleString("ar-SA")}
       </p>
     </section>
+  );
+}
+
+type PhaseFourDistributionProps = {
+  sampleDrawResult: SampleMasterData | null;
+  distributionCurrent: DistributionCurrentData | null;
+  distributionMessage: SaveMessage;
+  isDistributing: boolean;
+  onAssign: (xrayImageId: string, assignedTo: string) => void;
+  onReassign: (xrayImageId: string, reassignedTo: string) => void;
+  onMarkComplete: (xrayImageId: string) => void;
+  onRequestReplacement: (xrayImageId: string) => void;
+};
+
+function PhaseFourDistribution({
+  sampleDrawResult,
+  distributionCurrent,
+  distributionMessage,
+  isDistributing,
+  onAssign,
+  onReassign,
+  onMarkComplete,
+  onRequestReplacement
+}: PhaseFourDistributionProps) {
+  const employees = getManagedLoginUsers()
+    .filter((u) => u.isActive)
+    .map((u) => ({ username: u.username, displayName: u.displayName }));
+
+  if (!sampleDrawResult) {
+    return (
+      <section className="placeholder-phase">
+        <h2>توزيع العينة</h2>
+        <p>يجب إتمام سحب العينة في المرحلة السابقة أولاً.</p>
+      </section>
+    );
+  }
+
+  const entryMap = new Map(
+    (distributionCurrent?.entries ?? []).map((e) => [e.xrayImageId, e])
+  );
+
+  return (
+    <section className="distribution-phase" aria-label="توزيع العينة">
+      <div className="phase-panel-header compact">
+        <div>
+          <h2>المرحلة 4: توزيع العينة</h2>
+          <p>
+            قم بتعيين كل صف من العينة لموظف مصرح له. يمكن إعادة التعيين وطلب
+            الاستبدال لاحقاً. جميع الأحداث محفوظة في سجل لا يمكن التعديل عليه.
+          </p>
+        </div>
+      </div>
+
+      {distributionCurrent ? (
+        <div className="processing-summary-grid" style={{ marginBottom: "16px" }}>
+          <SummaryCard label="إجمالي المعينة" value={distributionCurrent.totalAssigned} />
+          <SummaryCard label="قيد الانتظار" value={distributionCurrent.totalPending} />
+          <SummaryCard label="مكتملة" value={distributionCurrent.totalCompleted} />
+          <SummaryCard label="مستبدلة" value={distributionCurrent.totalReplaced} />
+        </div>
+      ) : null}
+
+      {distributionMessage ? (
+        <div
+          className={distributionMessage.type === "ok" ? "save-disk-success" : "save-disk-error"}
+          role="status"
+        >
+          {distributionMessage.text}
+        </div>
+      ) : null}
+
+      <div className="distribution-table-wrapper">
+        <div className="distribution-table" role="table">
+          <div className="distribution-header" role="row">
+            <span>معرف الأشعة</span>
+            <span>المنفذ</span>
+            <span>CertScan</span>
+            <span>الحالة</span>
+            <span>المعين إليه</span>
+            <span>الإجراء</span>
+          </div>
+
+          {sampleDrawResult.rows.map((row) => {
+            const entry = entryMap.get(row.xrayImageId);
+            return (
+              <DistributionRow
+                key={row.xrayImageId}
+                row={row}
+                entry={entry ?? null}
+                employees={employees}
+                isDisabled={isDistributing}
+                onAssign={onAssign}
+                onReassign={onReassign}
+                onMarkComplete={onMarkComplete}
+                onRequestReplacement={onRequestReplacement}
+              />
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+type DistributionRowProps = {
+  row: import("./processing/populationProcessingTypes").PreparedPopulationRow;
+  entry: import("../../../../data/distribution/distributionTypes").DistributionEntry | null;
+  employees: Array<{ username: string; displayName: string }>;
+  isDisabled: boolean;
+  onAssign: (xrayImageId: string, assignedTo: string) => void;
+  onReassign: (xrayImageId: string, reassignedTo: string) => void;
+  onMarkComplete: (xrayImageId: string) => void;
+  onRequestReplacement: (xrayImageId: string) => void;
+};
+
+function DistributionRow({
+  row,
+  entry,
+  employees,
+  isDisabled,
+  onAssign,
+  onReassign,
+  onMarkComplete,
+  onRequestReplacement
+}: DistributionRowProps) {
+  const [selectedEmployee, setSelectedEmployee] = useState("");
+  const status = entry?.status ?? "unassigned";
+  const assignedTo = entry?.assignedTo ?? "";
+
+  return (
+    <div className="distribution-row" role="row" data-status={status}>
+      <span className="dist-cell mono">{row.xrayImageId}</span>
+      <span className="dist-cell">{row.portName ?? ""}</span>
+      <span className="dist-cell">{row.certScanStatus}</span>
+      <span className={`dist-cell dist-status dist-status-${status}`}>
+        {status === "unassigned"
+          ? "غير معين"
+          : status === "pending"
+            ? "قيد الانتظار"
+            : status === "completed"
+              ? "مكتمل"
+              : status === "replacement-requested"
+                ? "طلب استبدال"
+                : "مستبدل"}
+      </span>
+      <span className="dist-cell">{assignedTo}</span>
+
+      <div className="dist-actions">
+        {status === "unassigned" || !entry ? (
+          <>
+            <select
+              className="dist-employee-select"
+              value={selectedEmployee}
+              onChange={(e) => setSelectedEmployee(e.target.value)}
+              disabled={isDisabled}
+            >
+              <option value="">اختر موظف</option>
+              {employees.map((emp) => (
+                <option key={emp.username} value={emp.username}>
+                  {emp.displayName}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="dist-btn dist-btn-assign"
+              disabled={!selectedEmployee || isDisabled}
+              onClick={() => onAssign(row.xrayImageId, selectedEmployee)}
+            >
+              تعيين
+            </button>
+          </>
+        ) : status === "pending" ? (
+          <>
+            <select
+              className="dist-employee-select"
+              value={selectedEmployee}
+              onChange={(e) => setSelectedEmployee(e.target.value)}
+              disabled={isDisabled}
+            >
+              <option value="">إعادة تعيين لـ...</option>
+              {employees.map((emp) => (
+                <option key={emp.username} value={emp.username}>
+                  {emp.displayName}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="dist-btn dist-btn-secondary"
+              disabled={!selectedEmployee || isDisabled}
+              onClick={() => onReassign(row.xrayImageId, selectedEmployee)}
+            >
+              إعادة
+            </button>
+            <button
+              type="button"
+              className="dist-btn dist-btn-success"
+              disabled={isDisabled}
+              onClick={() => onMarkComplete(row.xrayImageId)}
+            >
+              مكتمل
+            </button>
+            <button
+              type="button"
+              className="dist-btn dist-btn-warning"
+              disabled={isDisabled}
+              onClick={() => onRequestReplacement(row.xrayImageId)}
+            >
+              استبدال
+            </button>
+          </>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
