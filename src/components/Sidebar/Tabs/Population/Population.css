@@ -1301,3 +1301,66 @@
   font-size: 13px;
 }
 
+/* =========================================================
+   Phase 3 — Sampling
+   ========================================================= */
+
+.sampling-phase {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.sampling-config-panel {
+  background: var(--population-surface);
+  border: 1px solid var(--population-border);
+  border-radius: 12px;
+  padding: 24px;
+}
+
+.sampling-config-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.sampling-stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--population-muted);
+}
+
+.sampling-stat-card strong {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--population-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.sample-result-section {
+  background: var(--population-surface);
+  border: 1px solid var(--population-border);
+  border-radius: 12px;
+  padding: 24px;
+}
+
+.sample-allocation-row {
+  grid-template-columns:
+    minmax(120px, 1.2fr)
+    minmax(80px, 0.7fr)
+    minmax(80px, 0.7fr)
+    minmax(80px, 0.7fr)
+    minmax(90px, 0.8fr)
+    minmax(80px, 0.7fr);
+}
+
+.sample-allocation-row span:nth-child(n + 2) {
+  color: var(--population-primary);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  text-align: center;
+}
+

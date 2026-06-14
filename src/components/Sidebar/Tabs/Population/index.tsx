@@ -11,8 +11,11 @@ import {
 import type { SidebarTabModule } from "../tabTypes";
 
 import { readSession } from "../../../../auth/authSession";
-import { currentMonthFolderInfo } from "../../../../data/population/monthFolder";
+import { currentMonthFolderInfo, formatMonthFolderName } from "../../../../data/population/monthFolder";
 import { saveMonthRun } from "../../../../data/population/populationStorage";
+import { drawSample } from "../../../../data/sampling/sampleAlgorithm";
+import { saveSampleMaster } from "../../../../data/sampling/sampleStorage";
+import type { SampleMasterData } from "../../../../data/sampling/sampleTypes";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
 
 import { processBiWorkbook } from "./biData/biDataWorkbook";
@@ -348,6 +351,15 @@ export default function PopulationTab() {
   const [isSavingToDisk, setIsSavingToDisk] = useState(false);
   const [saveToDiskMessage, setSaveToDiskMessage] = useState<SaveMessage>(null);
 
+  // Phase 3 — sampling
+  const [sampleSize, setSampleSize] = useState(100);
+  const [sampleSeed, setSampleSeed] = useState(() => `رون-${Date.now()}`);
+  const [isDrawingSample, setIsDrawingSample] = useState(false);
+  const [sampleDrawResult, setSampleDrawResult] =
+    useState<SampleMasterData | null>(null);
+  const [sampleSaveMessage, setSampleSaveMessage] =
+    useState<SaveMessage>(null);
+
   const [uploads, setUploads] = useState<Record<UploadKey, UploadState>>({
     riskAgencyData: {
       file: null,
@@ -632,6 +644,58 @@ export default function PopulationTab() {
     }
   }
 
+  async function handleDrawSample(): Promise<void> {
+    if (!populationProcessingResult) {
+      setSampleSaveMessage({
+        type: "error",
+        text: "يجب تنفيذ معالجة المجتمع أولاً قبل سحب العينة."
+      });
+      return;
+    }
+
+    setIsDrawingSample(true);
+    setSampleSaveMessage(null);
+    setSampleDrawResult(null);
+
+    try {
+      const username = sessionRef.current?.username ?? "unknown";
+      const drawResult = drawSample(
+        populationProcessingResult.preparedRows,
+        { totalSampleSize: sampleSize, rngSeed: sampleSeed },
+        username
+      );
+
+      if (!drawResult.ok) {
+        setSampleSaveMessage({ type: "error", text: drawResult.reason });
+        return;
+      }
+
+      setSampleDrawResult(drawResult.data);
+
+      if (directoryHandle) {
+        const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
+        const saveResult = await saveSampleMaster(
+          directoryHandle,
+          monthFolderName,
+          drawResult.data
+        );
+        if (saveResult.ok) {
+          setSampleSaveMessage({
+            type: "ok",
+            text: `تم حفظ العينة في ${monthFolderName}/sample/sample.master.json`
+          });
+        } else {
+          setSampleSaveMessage({
+            type: "error",
+            text: `تم سحب العينة ولكن فشل الحفظ: ${saveResult.error}`
+          });
+        }
+      }
+    } finally {
+      setIsDrawingSample(false);
+    }
+  }
+
   async function moveToNextPhase(): Promise<void> {
     if (currentPhase === 1) {
       await processPhaseOneAndMoveNext();
@@ -727,10 +791,24 @@ export default function PopulationTab() {
           />
         ) : null}
 
-        {currentPhase > 2 ? (
+        {currentPhase === 3 ? (
+          <PhaseThreeSampling
+            populationSize={populationProcessingResult?.preparedRows.length ?? 0}
+            sampleSize={sampleSize}
+            sampleSeed={sampleSeed}
+            isDrawingSample={isDrawingSample}
+            sampleDrawResult={sampleDrawResult}
+            sampleSaveMessage={sampleSaveMessage}
+            onSampleSizeChange={setSampleSize}
+            onSampleSeedChange={setSampleSeed}
+            onDrawSample={() => { void handleDrawSample(); }}
+          />
+        ) : null}
+
+        {currentPhase > 3 ? (
           <section className="placeholder-phase">
             <h2>{PHASES[currentPhase - 1].title}</h2>
-            <p>سيتم تطوير هذه المرحلة لاحقاً بعد اعتماد منطق المعالجة.</p>
+            <p>سيتم تطوير هذه المرحلة لاحقاً.</p>
           </section>
         ) : null}
       </main>
@@ -1079,6 +1157,170 @@ function PhaseTwoReportAndProcessing({
           ) : null}
         </section>
       ) : null}
+    </section>
+  );
+}
+
+type PhaseThreeSamplingProps = {
+  populationSize: number;
+  sampleSize: number;
+  sampleSeed: string;
+  isDrawingSample: boolean;
+  sampleDrawResult: SampleMasterData | null;
+  sampleSaveMessage: SaveMessage;
+  onSampleSizeChange: (size: number) => void;
+  onSampleSeedChange: (seed: string) => void;
+  onDrawSample: () => void;
+};
+
+function PhaseThreeSampling({
+  populationSize,
+  sampleSize,
+  sampleSeed,
+  isDrawingSample,
+  sampleDrawResult,
+  sampleSaveMessage,
+  onSampleSizeChange,
+  onSampleSeedChange,
+  onDrawSample
+}: PhaseThreeSamplingProps) {
+  const samplingRate =
+    populationSize > 0
+      ? ((sampleSize / populationSize) * 100).toFixed(1)
+      : "0.0";
+
+  return (
+    <section className="sampling-phase" aria-label="اختيار العينة">
+      <div className="phase-panel-header compact">
+        <div>
+          <h2>المرحلة 3: اختيار العينة</h2>
+          <p>
+            يستخدم النظام خوارزمية Hamilton لتوزيع العينة على المنافذ بالتناسب،
+            مع الحفاظ على نسبة CertScan/NonCertscan لكل منفذ. السحب عشوائي حتمي
+            قابل للتكرار بنفس البذرة.
+          </p>
+        </div>
+      </div>
+
+      <div className="sampling-config-panel">
+        <div className="sampling-config-row">
+          <div className="sampling-stat-card">
+            <span>حجم المجتمع</span>
+            <strong>{formatNumber(populationSize)}</strong>
+          </div>
+
+          <label className="save-disk-label" htmlFor="sample-size">
+            حجم العينة المطلوب
+            <input
+              id="sample-size"
+              type="number"
+              min={1}
+              max={populationSize || 999999}
+              value={sampleSize}
+              className="save-disk-input"
+              style={{ width: "120px" }}
+              onChange={(e) => {
+                const v = parseInt(e.target.value, 10);
+                if (v > 0) onSampleSizeChange(v);
+              }}
+            />
+          </label>
+
+          <div className="sampling-stat-card">
+            <span>نسبة الأخذ</span>
+            <strong>{samplingRate}%</strong>
+          </div>
+        </div>
+
+        <label className="save-disk-label" htmlFor="sample-seed" style={{ marginTop: "12px" }}>
+          البذرة العشوائية (RNG Seed)
+          <input
+            id="sample-seed"
+            type="text"
+            value={sampleSeed}
+            className="certscan-paste-label"
+            style={{ fontFamily: "monospace", fontSize: "13px", padding: "8px 12px", border: "1px solid var(--population-border)", borderRadius: "8px", width: "340px" }}
+            onChange={(e) => onSampleSeedChange(e.target.value)}
+          />
+        </label>
+
+        <div className="processing-action-row" style={{ marginTop: "16px" }}>
+          <button
+            type="button"
+            className="primary-action"
+            onClick={onDrawSample}
+            disabled={isDrawingSample || populationSize === 0}
+          >
+            {isDrawingSample ? "جاري السحب..." : "سحب العينة وحفظها"}
+          </button>
+        </div>
+
+        {sampleSaveMessage ? (
+          <div
+            className={
+              sampleSaveMessage.type === "ok"
+                ? "save-disk-success"
+                : "save-disk-error"
+            }
+            role="status"
+          >
+            {sampleSaveMessage.text}
+          </div>
+        ) : null}
+      </div>
+
+      {sampleDrawResult ? (
+        <SampleResultReport data={sampleDrawResult} />
+      ) : null}
+    </section>
+  );
+}
+
+type SampleResultReportProps = {
+  data: SampleMasterData;
+};
+
+function SampleResultReport({ data }: SampleResultReportProps) {
+  return (
+    <section className="sample-result-section" aria-label="نتائج العينة">
+      <h3>نتائج سحب العينة</h3>
+
+      <div className="processing-summary-grid">
+        <SummaryCard label="المطلوب" value={data.totalRequested} />
+        <SummaryCard label="المسحوب فعلياً" value={data.totalActual} />
+        <SummaryCard label="CertScan" value={data.certScanActual} />
+        <SummaryCard label="NonCertScan" value={data.nonCertScanActual} />
+      </div>
+
+      <div className="report-sheet-table" role="table" style={{ marginTop: "16px" }}>
+        <div className="report-sheet-header sample-allocation-row" role="row">
+          <span>المنفذ</span>
+          <span>المجتمع</span>
+          <span>المخصص</span>
+          <span>Certscan</span>
+          <span>NonCertscan</span>
+          <span>المسحوب</span>
+        </div>
+
+        {data.portAllocations.map((p) => (
+          <div
+            key={p.portName}
+            className="report-sheet-row sample-allocation-row"
+            role="row"
+          >
+            <span>{p.portName}</span>
+            <span>{formatNumber(p.populationSize)}</span>
+            <span>{formatNumber(p.allocatedQuota)}</span>
+            <span>{formatNumber(p.actualCertScanDrawn)}</span>
+            <span>{formatNumber(p.actualNonCertScanDrawn)}</span>
+            <span>{formatNumber(p.actualTotalDrawn)}</span>
+          </div>
+        ))}
+      </div>
+
+      <p style={{ marginTop: "10px", fontSize: "12px", color: "var(--population-muted)" }}>
+        البذرة: <code>{data.rngSeed}</code> — تم السحب: {new Date(data.drawnAt).toLocaleString("ar-SA")}
+      </p>
     </section>
   );
 }
