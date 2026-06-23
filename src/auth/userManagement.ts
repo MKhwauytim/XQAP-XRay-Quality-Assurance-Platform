@@ -516,7 +516,7 @@ export function normalizeUserManagementState(
     const key = `${def.role}:${def.tabId}`;
     if (!mergedMap.has(key)) mergedMap.set(key, def);
   }
-  // Admin and user-management are always locked
+  // The admin role is always forced to full edit access on every tab.
   for (const p of mergedMap.values()) {
     if (p.role === "admin") mergedMap.set(`admin:${p.tabId}`, { ...p, access: "edit" });
   }
@@ -539,6 +539,9 @@ export function normalizeUserManagementState(
 // ── User helpers ──────────────────────────────────────────────────────────────
 
 export function createUserId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `user-${crypto.randomUUID()}`;
+  }
   return `user-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
@@ -581,6 +584,27 @@ export function createManagedUser(params: {
 
 export function getManagedLoginUsers(): ManagedLoginUser[] {
   return readUserManagementState().users;
+}
+
+/**
+ * Replace a managed user's stored password hash (used to transparently upgrade
+ * legacy PBKDF2 hashes to Argon2id after a successful login). No-op if the user
+ * is gone (e.g. bootstrap admin, which is not a managed user).
+ */
+export function persistUserPasswordHash(
+  userId: string,
+  passwordHash: PasswordHashRecord
+): void {
+  const state = readUserManagementState();
+  const index = state.users.findIndex((u) => u.id === userId);
+  if (index === -1) return;
+  const users = state.users.slice();
+  users[index] = {
+    ...users[index],
+    passwordHash,
+    updatedAt: new Date().toISOString(),
+  };
+  writeUserManagementState({ ...state, users }, true);
 }
 
 export function getPublicManagedUsers(): Array<{

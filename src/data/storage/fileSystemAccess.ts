@@ -652,7 +652,10 @@ export async function saveJsonWithRevisionCheck<
     return {
       ok: true,
       savedFile: preparedFile,
-      newHash: await hashText(JSON.stringify(preparedFile, null, 2))
+      // Must match readJsonFile's hash of the raw file text, which includes the
+      // trailing newline that safeWriteJson appends — otherwise reusing this as the
+      // next baseHash would spuriously report a conflict.
+      newHash: await hashText(`${JSON.stringify(preparedFile, null, 2)}\n`)
     };
   } catch {
     return {
@@ -714,6 +717,9 @@ function isPermissionError(error: unknown): boolean {
 }
 
 function createId(prefix: string): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `${prefix}-${crypto.randomUUID()}`;
+  }
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 

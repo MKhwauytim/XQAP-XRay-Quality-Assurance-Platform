@@ -91,13 +91,15 @@ Month folder names follow the pattern `{month}-{MonthName-en}-{year}` (e.g. `5-M
 ### Two persistence layers — don't mix them
 
 1. **Browser storage (auth & permissions)** — `src/auth/`
-   - Login: new passwords hashed with **Argon2id** via `hash-wasm` (m=19 MiB, t=2, p=1 — OWASP 2026 baseline). Legacy PBKDF2-SHA256 hashes are still verified for backwards compatibility. Bootstrap `admin` hash stored in `authConfig.ts`.
-   - Session → `sessionStorage`; managed users + role→tab permission matrix → `localStorage` (`xray_user_management_v1`), changes broadcast via custom DOM event (`subscribeToUserManagementChanges`).
-   - Roles: `employee` / `supervisor` / `admin` / `guest`. `App.tsx` filters tabs by role + permission matrix.
+   - Login: new passwords hashed with **Argon2id** via `hash-wasm` (m=19 MiB, t=2, p=1 — OWASP 2026 baseline). Legacy PBKDF2-SHA256 hashes are still verified for backwards compatibility, and are **transparently upgraded to Argon2id on successful login** (`needsRehash` → `persistUserPasswordHash`). Bootstrap `admin` hash stored in `authConfig.ts`.
+   - Session → `localStorage` (`authSession.ts`), persisted across browser restarts with a **7-day TTL** measured from `loginAt`; expired/invalid sessions are cleared on read. Managed users + role→tab permission matrix → `localStorage` (`xray_user_management_v1`), changes broadcast via custom DOM event (`subscribeToUserManagementChanges`).
+   - Roles: `guest` / `employee` / `supervisor` / `manager` / `admin` (5 roles — see `AuthRole` in `authTypes.ts`). `admin` is the bootstrap superuser; `manager` is the top managed role. `App.tsx` filters tabs by role + permission matrix.
    - `MANAGED_TABS` in `userManagement.ts` must list every tab; `createDefaultPermissions()` must include all role×tab combinations.
 
+   > **Security model — advisory only.** With no backend, all role/permission checks run in the browser and all business data is plain JSON on disk. A determined user can edit `localStorage` or the JSON files directly to self-elevate or tamper. The auth layer is a UX/role-routing guard, **not** a trust boundary. The bootstrap admin hash ships in the client bundle, so the passcode must be strong (it is offline-crackable). Do not treat this app as a defense against malicious insiders.
+
 2. **Workspace folder on disk (business data)** — `src/data/`
-   - Safe write layer: `safeWriteJson` / `safeReadJson` in `src/data/storage/safeWrite.ts` — temp→commit pattern with `.bak` snapshots.
+   - Safe write layer: `safeWriteJson` / `safeReadJson` in `src/data/storage/safeWrite.ts`. Each write: snapshot current → `{file}.bak`, stage serialized content in `{file}.tmp` and verify it, then commit to the live file and re-verify (rolling back from `.bak` on failure). The File System Access API has no atomic rename, so this is snapshot-and-verify, not a true atomic swap; `safeReadJson` recovers from `.bak` if the live file is corrupt.
    - `JsonEnvelope<TData>` wraps every JSON file: `{ metadata: { schemaVersion, revision, contentHash, ... }, data }`.
    - Web Locks API (with promise-chain fallback) prevents concurrent writes within a tab.
    - `WorkspaceProvider.tsx` / `useWorkspace.ts` — React context for directory handle.

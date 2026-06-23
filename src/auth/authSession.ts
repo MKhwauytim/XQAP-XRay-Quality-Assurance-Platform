@@ -1,6 +1,18 @@
 import { SESSION_KEY } from "./authConfig";
 import type { AuthSession } from "./authTypes";
 
+// Sessions persist across browser/tab restarts for this long, measured from loginAt.
+// After expiry the user must sign in again. (Stored in localStorage, not sessionStorage.)
+const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+function isExpired(session: AuthSession): boolean {
+  const loginTime = Date.parse(session.loginAt);
+  if (Number.isNaN(loginTime)) {
+    return true;
+  }
+  return Date.now() - loginTime > SESSION_TTL_MS;
+}
+
 function isValidSession(value: unknown): value is AuthSession {
   if (!value || typeof value !== "object") {
     return false;
@@ -27,7 +39,7 @@ function isValidSession(value: unknown): value is AuthSession {
 
 export function readSession(): AuthSession | null {
   try {
-    const rawValue = sessionStorage.getItem(SESSION_KEY);
+    const rawValue = localStorage.getItem(SESSION_KEY);
 
     if (!rawValue) {
       return null;
@@ -35,22 +47,22 @@ export function readSession(): AuthSession | null {
 
     const parsedValue: unknown = JSON.parse(rawValue);
 
-    if (!isValidSession(parsedValue)) {
-      sessionStorage.removeItem(SESSION_KEY);
+    if (!isValidSession(parsedValue) || isExpired(parsedValue)) {
+      localStorage.removeItem(SESSION_KEY);
       return null;
     }
 
     return parsedValue;
   } catch {
-    sessionStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(SESSION_KEY);
     return null;
   }
 }
 
 export function writeSession(session: AuthSession): void {
-  sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
 }
 
 export function clearSession(): void {
-  sessionStorage.removeItem(SESSION_KEY);
+  localStorage.removeItem(SESSION_KEY);
 }

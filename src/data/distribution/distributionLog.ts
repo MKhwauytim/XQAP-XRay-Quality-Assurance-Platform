@@ -9,13 +9,18 @@ import type {
 } from "./distributionTypes";
 
 export function createEventId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `evt-${crypto.randomUUID()}`;
+  }
   return `evt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 /**
- * Compute days remaining until the auditing deadline.
- * Deadline = 2 days before month-end of the given month/year.
- * e.g., for June 2025 (monthEnd = 30), deadline = 28th.
+ * Compute whole days remaining until the auditing deadline.
+ * Deadline = 2 days before month-end, at 23:59:59 local time of that day.
+ * e.g. June 2025 (monthEnd = 30) → deadline = 28th. The result is
+ * Math.ceil of the remaining time, so any part of "today" still counts as a
+ * full remaining day, and the value is clamped to a minimum of 0 once past due.
  */
 export function computeDaysRemainingForDeadline(month: number, year: number, fromDate = new Date()): number {
   const lastDay = new Date(year, month, 0).getDate(); // last day of month
