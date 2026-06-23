@@ -18,7 +18,13 @@ import {
   LOGIN_SYSTEM_VERSION
 } from "./authConfig";
 
-import { clearSession, readSession, writeSession } from "./authSession";
+import {
+  clearSession,
+  readPreviewRole,
+  readRealSession,
+  setPreviewRole,
+  writeSession
+} from "./authSession";
 import type { AuthRole, AuthSession, MessageType } from "./authTypes";
 import {
   createPasswordHash,
@@ -39,6 +45,10 @@ type AuthGateProps = {
 
 const ADMIN_ROLE: AuthRole = "admin";
 
+// Roles offered in the admin role-preview switcher, in descending privilege order.
+// "admin" means "no impersonation" (back to the real admin view).
+const PREVIEW_ROLE_IDS: AuthRole[] = ["admin", "manager", "supervisor", "employee", "guest"];
+
 function createSession(role: AuthRole, username: string): AuthSession {
   return {
     role,
@@ -54,7 +64,7 @@ function isBootstrapAdminSession(session: AuthSession): boolean {
 }
 
 function getInitialSession(): AuthSession | null {
-  const storedSession = readSession();
+  const storedSession = readRealSession();
 
   if (!storedSession) {
     return null;
@@ -123,6 +133,11 @@ export default function AuthGate({ children }: AuthGateProps) {
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [adminPasscode, setAdminPasscode] = useState("");
 
+  // Admin-only role-preview override (impersonate a role to test its view/permissions).
+  const [previewRole, setPreviewRoleState] = useState<AuthRole | null>(() =>
+    readPreviewRole()
+  );
+
   const altSequenceRef = useRef<string[]>([]);
   const altSequenceTimerRef = useRef<number | null>(null);
 
@@ -160,12 +175,20 @@ export default function AuthGate({ children }: AuthGateProps) {
     clearSession();
 
     setSession(null);
+    setPreviewRoleState(null);
     setSelectedUsername("");
     setPassword("");
     setAdminPasscode("");
     setIsAdminModalOpen(false);
     setMessage("");
     setMessageType("");
+  }, []);
+
+  // Switch the previewed role (admin only). Selecting "admin" exits preview mode.
+  const changePreviewRole = useCallback((role: AuthRole): void => {
+    const next = role === ADMIN_ROLE ? null : role;
+    setPreviewRole(next);
+    setPreviewRoleState(next);
   }, []);
 
   useEffect(() => {
@@ -335,17 +358,50 @@ export default function AuthGate({ children }: AuthGateProps) {
   }
 
   if (session) {
+    // Only a real admin may impersonate other roles. The effective session (with the
+    // role swapped) is what the rest of the app sees; identity/username stay real.
+    const isRealAdmin = session.role === ADMIN_ROLE;
+    const effectiveRole: AuthRole =
+      isRealAdmin && previewRole ? previewRole : session.role;
+    const isImpersonating = effectiveRole !== session.role;
+    const effectiveSession: AuthSession = isImpersonating
+      ? { ...session, role: effectiveRole }
+      : session;
+
     return (
       <>
-        <div className="auth-admin-toolbar" dir="rtl">
-          <span>وضع {getRoleLabel(session.role)}</span>
+        <div
+          className={`auth-admin-toolbar${isImpersonating ? " auth-toolbar-preview" : ""}`}
+          dir="rtl"
+        >
+          <span>
+            وضع {getRoleLabel(effectiveRole)}
+            {isImpersonating && <strong className="auth-preview-flag"> (معاينة)</strong>}
+          </span>
 
-          <button type="button" onClick={logout}>
-            تسجيل الخروج
-          </button>
+          <div className="auth-toolbar-end">
+            {isRealAdmin && (
+              <div className="auth-role-switcher" role="group" aria-label="معاينة الأدوار">
+                {PREVIEW_ROLE_IDS.map((roleId) => (
+                  <button
+                    key={roleId}
+                    type="button"
+                    className={`auth-role-seg${effectiveRole === roleId ? " active" : ""}`}
+                    onClick={() => changePreviewRole(roleId)}
+                    aria-pressed={effectiveRole === roleId}
+                  >
+                    {getRoleLabel(roleId)}
+                  </button>
+                ))}
+              </div>
+            )}
+            <button type="button" onClick={logout}>
+              تسجيل الخروج
+            </button>
+          </div>
         </div>
 
-        {renderAuthenticatedChildren(session)}
+        {renderAuthenticatedChildren(effectiveSession)}
       </>
     );
   }

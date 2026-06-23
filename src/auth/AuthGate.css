@@ -533,6 +533,77 @@
   border-color: rgba(255, 255, 255, 0.36);
 }
 
+/* ── Admin role-preview switcher ───────────────────────────── */
+
+/* Groups the segmented switch + logout button on the left end of the toolbar.
+   In RTL flex, first child (switcher) sits visually right of the logout button. */
+.auth-toolbar-end {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  direction: rtl;
+}
+
+/* Pill container — all segments connected into one switch */
+.auth-role-switcher {
+  display: flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  padding: 2px;
+  gap: 0;
+}
+
+/* Individual segments — no gap, no individual borders */
+.auth-admin-toolbar button.auth-role-seg {
+  padding: 3px 11px;
+  height: 26px;
+  font-size: 12px;
+  font-weight: 600;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.75);
+  cursor: pointer;
+  transition:
+    background   160ms cubic-bezier(0.4, 0, 0.2, 1),
+    color        160ms cubic-bezier(0.4, 0, 0.2, 1),
+    box-shadow   160ms cubic-bezier(0.4, 0, 0.2, 1);
+  white-space: nowrap;
+}
+
+.auth-admin-toolbar button.auth-role-seg:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #FFFFFF;
+}
+
+/* Active segment — white pill that looks like the sliding thumb */
+.auth-admin-toolbar button.auth-role-seg.active {
+  background: #FFFFFF;
+  color: #0F2744;
+  font-weight: 700;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.20);
+}
+
+/* When impersonating — amber bar + update active segment colour */
+.auth-admin-toolbar.auth-toolbar-preview {
+  background: linear-gradient(90deg, #92400E 0%, #B45309 100%);
+}
+
+.auth-admin-toolbar.auth-toolbar-preview .auth-role-switcher {
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.auth-admin-toolbar.auth-toolbar-preview button.auth-role-seg.active {
+  color: #92400E;
+}
+
+.auth-preview-flag {
+  color: #FDE68A;
+  font-weight: 800;
+}
+
 /* ── Employee Blank Page ───────────────────────────────────── */
 
 .employee-blank-page {

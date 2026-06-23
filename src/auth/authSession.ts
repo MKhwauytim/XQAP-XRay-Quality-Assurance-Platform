@@ -1,9 +1,38 @@
 import { SESSION_KEY } from "./authConfig";
-import type { AuthSession } from "./authTypes";
+import type { AuthRole, AuthSession } from "./authTypes";
 
 // Sessions persist across browser/tab restarts for this long, measured from loginAt.
 // After expiry the user must sign in again. (Stored in localStorage, not sessionStorage.)
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+// Admin-only role impersonation for testing other roles' views/permissions.
+// Stored in sessionStorage so it never outlives the tab and can't permanently change
+// what a user sees. Only applied when the real role is admin.
+const PREVIEW_ROLE_KEY = "xray_preview_role_v1";
+const VALID_ROLES: AuthRole[] = ["guest", "employee", "supervisor", "manager", "admin"];
+
+export function readPreviewRole(): AuthRole | null {
+  try {
+    const value = sessionStorage.getItem(PREVIEW_ROLE_KEY);
+    return value && (VALID_ROLES as string[]).includes(value)
+      ? (value as AuthRole)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setPreviewRole(role: AuthRole | null): void {
+  try {
+    if (role) {
+      sessionStorage.setItem(PREVIEW_ROLE_KEY, role);
+    } else {
+      sessionStorage.removeItem(PREVIEW_ROLE_KEY);
+    }
+  } catch {
+    /* sessionStorage unavailable — ignore */
+  }
+}
 
 function isExpired(session: AuthSession): boolean {
   const loginTime = Date.parse(session.loginAt);
@@ -37,7 +66,9 @@ function isValidSession(value: unknown): value is AuthSession {
   return hasValidRole && hasValidUsername && hasValidLoginDate;
 }
 
-export function readSession(): AuthSession | null {
+// The real authenticated session, ignoring any role-preview override. Use this for
+// identity/auth decisions (login validation, gating the impersonation control itself).
+export function readRealSession(): AuthSession | null {
   try {
     const rawValue = localStorage.getItem(SESSION_KEY);
 
@@ -59,10 +90,23 @@ export function readSession(): AuthSession | null {
   }
 }
 
+// The effective session used throughout the app UI: the real identity, with the role
+// swapped to the preview role when a real admin is impersonating another role. Username
+// and identity stay real, so actions remain attributed to the actual admin.
+export function readSession(): AuthSession | null {
+  const real = readRealSession();
+  if (!real || real.role !== "admin") {
+    return real;
+  }
+  const preview = readPreviewRole();
+  return preview && preview !== real.role ? { ...real, role: preview } : real;
+}
+
 export function writeSession(session: AuthSession): void {
   localStorage.setItem(SESSION_KEY, JSON.stringify(session));
 }
 
 export function clearSession(): void {
   localStorage.removeItem(SESSION_KEY);
+  setPreviewRole(null);
 }

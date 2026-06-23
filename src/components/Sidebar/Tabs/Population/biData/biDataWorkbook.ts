@@ -40,7 +40,9 @@ function detectBiSource(sheetName: string, customPatterns?: string[]): string | 
     }
   }
 
-  return null;
+  // No pattern matched — process the sheet anyway using its own name as the source.
+  // This handles files where sheet names don't follow the standard naming convention.
+  return sheetName;
 }
 
 const yieldToMain = () => new Promise((resolve) => setTimeout(resolve, 0));

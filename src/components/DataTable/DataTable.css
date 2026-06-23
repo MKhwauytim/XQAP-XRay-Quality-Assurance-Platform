@@ -108,7 +108,7 @@
   background: var(--c-surface, #FFFFFF);
   border: 1px solid var(--c-border, #D6E2EF);
   border-radius: var(--r-md, 12px);
-  overflow-x: hidden;
+  overflow-x: auto;
   overflow-y: auto;
   max-height: calc(100vh - 260px);
   box-shadow: var(--sh-xs, 0 1px 3px rgba(13, 31, 50, 0.06));
@@ -118,7 +118,9 @@
 
 .dt-table {
   width: 100%;
-  table-layout: fixed;
+  /* Auto layout so columns fit their content; long tables scroll horizontally
+     (see .dt-table-wrap overflow-x). widthFr / manual resize act as preferences. */
+  table-layout: auto;
   border-collapse: collapse;
   font-size: 12.5px;
   direction: rtl;
@@ -171,7 +173,7 @@
   flex-direction: column;
   gap: 2px;
   min-width: 0;
-  word-break: break-word;
+  white-space: nowrap;
   line-height: 1.35;
 }
 
@@ -242,6 +244,9 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* Columns auto-fit content, but a single very long value is capped and
+     ellipsized so it can't make one column absurdly wide. */
+  max-width: 340px;
 }
 
 .dt-td:first-child { border-left: none; text-align: right; }

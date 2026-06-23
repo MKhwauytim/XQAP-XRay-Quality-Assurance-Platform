@@ -48,6 +48,49 @@
   font-weight: 600;
 }
 
+/* ── View switcher (supervisor/admin "الكل" / "مسنداتي فقط" toggle) ─── */
+
+.ew-view-switcher {
+  display: inline-flex;
+  align-items: center;
+  background: var(--c-surface-2, #EEF2F7);
+  border: 1.5px solid var(--c-border, #D6E2EF);
+  border-radius: 999px;
+  padding: 2px;
+  gap: 0;
+  flex-shrink: 0;
+}
+
+.ew-view-seg {
+  padding: 4px 14px;
+  height: 28px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--c-ink-muted, #5E7A96);
+  cursor: pointer;
+  transition:
+    background 160ms cubic-bezier(0.4, 0, 0.2, 1),
+    color      160ms cubic-bezier(0.4, 0, 0.2, 1),
+    box-shadow 160ms cubic-bezier(0.4, 0, 0.2, 1);
+  white-space: nowrap;
+}
+
+.ew-view-seg:hover {
+  background: rgba(15, 39, 68, 0.06);
+  color: var(--c-ink, #0D1F32);
+}
+
+.ew-view-seg.active {
+  background: #FFFFFF;
+  color: var(--c-primary, #0F2744);
+  font-weight: 700;
+  box-shadow: 0 1px 4px rgba(15, 39, 68, 0.14);
+}
+
 /* ── Eyebrow / Header ──────────────────────────────────────── */
 
 .ew-eyebrow {

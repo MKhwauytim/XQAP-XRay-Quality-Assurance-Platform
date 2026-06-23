@@ -48,11 +48,22 @@ function AppContent({ session }: AppContentProps) {
 
   const allowedTabs = useMemo(
     () => {
-      return SIDEBAR_TABS.filter(
-        (tab) =>
-          tab.allowedRoles.includes(session.role) &&
-          hasRolePermission(permissions, session.role, tab.id, "view")
-      );
+      return SIDEBAR_TABS
+        .filter(
+          (tab) =>
+            tab.allowedRoles.includes(session.role) &&
+            hasRolePermission(permissions, session.role, tab.id, "view")
+        )
+        .map((tab) => {
+          if (!tab.subTabs || tab.subTabs.length === 0) return tab;
+          // employee-workspace sub-tabs are registered in MANAGED_TABS as "ew/<subId>".
+          // Filter to only sub-tabs the current role can view per the permission matrix.
+          const prefix = tab.id === "employee-workspace" ? "ew/" : `${tab.id}/`;
+          const allowedSubTabs = tab.subTabs.filter((sub) =>
+            hasRolePermission(permissions, session.role, `${prefix}${sub.id}`, "view")
+          );
+          return { ...tab, subTabs: allowedSubTabs };
+        });
     },
     [permissions, session.role]
   );
@@ -259,7 +270,9 @@ function App() {
       <AuthGate>
         {(session) => (
           <WorkspaceGate session={session}>
-            <AppContent session={session} />
+            {/* key on role so switching the admin role-preview remounts the app,
+                forcing components that read the session once at mount to re-read it. */}
+            <AppContent key={session.role} session={session} />
           </WorkspaceGate>
         )}
       </AuthGate>

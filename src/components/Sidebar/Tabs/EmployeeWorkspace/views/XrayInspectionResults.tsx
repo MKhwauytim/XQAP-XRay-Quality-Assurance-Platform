@@ -56,7 +56,7 @@ function buildSampleColumns(L: Labels): DataTableCol<DistributionEntry>[] {
     { id: "riskMessage",            label: L.col_risk_message,              widthFr: 15, accessor: (e) => e.row.riskMessage },
     { id: "biEnrichmentStatus",     label: L.col_bi_enrichment_status,      widthFr: 10, accessor: (e) => e.row.biEnrichmentStatus },
     { id: "reportNumber",           label: L.col_report_number,             widthFr: 10, accessor: (e) => e.row.reportNumber },
-    { id: "submittedAt",            label: "تاريخ رصد خبير الجودة",          widthFr: 14, isDate: true, accessor: () => null },
+    { id: "submittedAt",            label: L.col_expert_observation_date,    widthFr: 14, isDate: true, accessor: () => null },
   ];
 }
 
@@ -109,7 +109,12 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
       if (preset) {
         setReferralColConfig({
           order: preset.columnOrder,
-          hidden: sampleColumns.map((column) => column.id).filter((id) => !preset.visibleColumns.includes(id)),
+          // Only hide columns the preset actually knew about. Columns added in a newer
+          // version (e.g. "تاريخ رصد الخبير") aren't in the old columnOrder and must
+          // default to visible rather than being auto-hidden.
+          hidden: sampleColumns
+            .map((column) => column.id)
+            .filter((id) => !preset.visibleColumns.includes(id) && preset.columnOrder.includes(id)),
           widths: preset.widths ?? {},
           dateFmt: (preset.dateFmt ?? {}) as Record<string, DateFormatMode>,
         });
@@ -202,6 +207,10 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
   function renderCell(column: DataTableCol<ResultRow>, row: ResultRow, meta: CellMeta) {
     const value = column.accessor(row);
     if (!value) return <span className="dt-muted">{L.value_empty}</span>;
+    // The expert observation timestamp is shown with date AND time by default.
+    if (column.id === "submittedAt") {
+      return <span className="dt-cell">{formatDate(value, meta.dateFmt === "date" ? "datetime" : meta.dateFmt)}</span>;
+    }
     if (meta.isDate || looksLikeDate(value)) {
       return <span className="dt-cell">{formatDate(value, meta.dateFmt)}</span>;
     }
@@ -289,7 +298,13 @@ function getVisibleSampleColumns(
   config: ColConfig | null
 ): DataTableCol<DistributionEntry>[] {
   const cfg = config ?? buildDefaultReferralColConfig(sampleColumns);
-  return cfg.order
+  // Reconcile the saved order with the current columns so a newly added sample column
+  // (e.g. submittedAt) is appended instead of dropped.
+  const known = new Set(sampleColumns.map((c) => c.id));
+  const kept = cfg.order.filter((id) => known.has(id));
+  const keptSet = new Set(kept);
+  const appended = sampleColumns.filter((c) => !keptSet.has(c.id)).map((c) => c.id);
+  return [...kept, ...appended]
     .map((id) => sampleColumns.find((column) => column.id === id))
     .filter((column): column is DataTableCol<DistributionEntry> => Boolean(column))
     .filter((column) => !cfg.hidden.includes(column.id));
