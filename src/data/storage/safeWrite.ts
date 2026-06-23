@@ -43,6 +43,17 @@ async function writeText(
   await writable.close();
 }
 
+async function removeQuietly(
+  dir: DirectoryHandleLike,
+  name: string
+): Promise<void> {
+  try {
+    await dir.removeEntry?.(name);
+  } catch {
+    // best-effort cleanup — a leftover .tmp is harmless and overwritten next write
+  }
+}
+
 function parses(text: string | null): boolean {
   if (text === null) {
     return false;
@@ -66,15 +77,28 @@ export async function safeWriteJson<T>(
 ): Promise<void> {
   const serialized = `${JSON.stringify(value, null, 2)}\n`;
   const skipVerify = serialized.length > VERIFY_SIZE_LIMIT;
+  const tmpName = `${fileName}.tmp`;
 
-  await withResourceLock(fileName, async () => {
+  // Lock per directory+file so same-named files in different folders don't contend.
+  await withResourceLock(`${dir.name}/${fileName}`, async () => {
+    // 1. Snapshot the current good file to .bak (the rollback source).
     const current = await readText(dir, fileName);
     if (parses(current)) {
       await writeText(dir, `${fileName}.bak`, current as string);
     }
 
-    await writeText(dir, fileName, serialized);
+    // 2. Stage the new content in a temp file and verify it landed intact
+    //    BEFORE overwriting the live file.
+    await writeText(dir, tmpName, serialized);
+    const staged = await readText(dir, tmpName);
+    const stagedOk = skipVerify ? staged === serialized : parses(staged);
+    if (!stagedOk) {
+      await removeQuietly(dir, tmpName);
+      throw new Error(`Safe-write staging failed for ${fileName}.`);
+    }
 
+    // 3. Commit the verified content to the live file, then re-verify.
+    await writeText(dir, fileName, serialized);
     const verify = await readText(dir, fileName);
     const verifyOk = skipVerify ? verify === serialized : parses(verify);
     if (!verifyOk) {
@@ -82,8 +106,12 @@ export async function safeWriteJson<T>(
       if (parses(bak)) {
         await writeText(dir, fileName, bak as string);
       }
+      await removeQuietly(dir, tmpName);
       throw new Error(`Safe-write validation failed for ${fileName}.`);
     }
+
+    // 4. Best-effort cleanup of the temp file.
+    await removeQuietly(dir, tmpName);
   });
 }
 

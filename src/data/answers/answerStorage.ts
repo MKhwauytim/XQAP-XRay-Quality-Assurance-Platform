@@ -41,7 +41,11 @@ async function getAnswersDir(
 }
 
 function answerFileName(username: string): string {
-  return `${username}.answers.json`;
+  // Strip path-dangerous characters so a crafted username can't escape the
+  // answers folder (path traversal / separators). Usernames are otherwise
+  // admin-controlled and normalized lowercase.
+  const safe = username.replace(/[/\\:*?"<>|]/g, "_").replace(/\.+/g, ".");
+  return `${safe}.answers.json`;
 }
 
 export async function loadEmployeeAnswers(

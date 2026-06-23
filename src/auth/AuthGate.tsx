@@ -20,10 +20,15 @@ import {
 
 import { clearSession, readSession, writeSession } from "./authSession";
 import type { AuthRole, AuthSession, MessageType } from "./authTypes";
-import { verifyPasswordHash } from "./passwordCrypto";
+import {
+  createPasswordHash,
+  needsRehash,
+  verifyPasswordHash
+} from "./passwordCrypto";
 import {
   getManagedLoginUsers,
   normalizeUsername,
+  persistUserPasswordHash,
   subscribeToUserManagementChanges,
   type ManagedLoginUser
 } from "./userManagement";
@@ -93,6 +98,10 @@ function getRoleLabel(role: AuthRole): string {
 
   if (role === "supervisor") {
     return "المشرف";
+  }
+
+  if (role === "guest") {
+    return "ضيف";
   }
 
   return "الموظف";
@@ -261,6 +270,17 @@ export default function AuthGate({ children }: AuthGateProps) {
     if (!isPasswordValid) {
       showMessage("كلمة المرور غير صحيحة.", "bad");
       return;
+    }
+
+    // Transparently upgrade legacy/weak password hashes (e.g. PBKDF2 → Argon2id)
+    // now that we hold the plaintext. Non-fatal: keep the old hash on failure.
+    if (needsRehash(user.passwordHash)) {
+      try {
+        const upgraded = await createPasswordHash(password);
+        persistUserPasswordHash(user.id, upgraded);
+      } catch {
+        // ignore — login still succeeds with the existing hash
+      }
     }
 
     const nextSession = createSession(user.role, user.username);

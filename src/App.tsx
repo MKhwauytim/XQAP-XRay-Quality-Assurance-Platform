@@ -215,7 +215,7 @@ function AppContent({ session }: AppContentProps) {
       </section>
 
       <FeedbackWidget />
-      <TestPanel />
+      {import.meta.env.DEV && <TestPanel />}
     </main>
   );
 }
