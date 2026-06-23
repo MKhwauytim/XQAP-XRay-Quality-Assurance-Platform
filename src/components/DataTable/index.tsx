@@ -83,8 +83,10 @@ export type DataTableProps<TRow = unknown> = {
   /** Render the expanded content below the row. */
   renderExpanded?: (row: TRow, colCount: number) => ReactNode;
   onRowClick?: (row: TRow) => void;
-  /** Extra controls to render on the left side of the toolbar (month selectors, etc.). */
+  /** Extra controls to render on the right side of the toolbar (month selectors, etc.). */
   toolbarStart?: ReactNode;
+  /** Extra controls injected between the search box and the export button (left side). */
+  toolbarEndExtra?: ReactNode;
   /** Shows the column picker when true. Defaults to true for existing tables. */
   canConfigureColumns?: boolean;
   /** If provided, shows an XLSX export button that downloads visible+filtered rows. */
@@ -259,6 +261,7 @@ export default function DataTable<TRow>({
   renderExpanded,
   onRowClick,
   toolbarStart,
+  toolbarEndExtra,
   canConfigureColumns = true,
   exportFileName,
   initialColConfig,
@@ -551,6 +554,7 @@ export default function DataTable<TRow>({
               {L.dt_clear_filters} {activeFilterCount > 0 ? `(${activeFilterCount})` : ""}
             </button>
           )}
+          {toolbarEndExtra}
           {exportFileName && (
             <button type="button" className="dt-export-btn" onClick={handleExport}>
               {L.dt_export_xlsx}

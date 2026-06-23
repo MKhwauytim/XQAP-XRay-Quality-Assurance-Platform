@@ -665,27 +665,28 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           onRowClick={(e) =>
             setSelEntryId((cur) => (cur === e.xrayImageId ? null : e.xrayImageId))
           }
+          toolbarEndExtra={
+            canSeeAll ? (
+              <div className="ew-view-switcher" role="group" aria-label="نطاق العرض">
+                <button
+                  type="button"
+                  className={`ew-view-seg${!showMyOnly ? " active" : ""}`}
+                  onClick={() => setShowMyOnly(false)}
+                >
+                  الكل
+                </button>
+                <button
+                  type="button"
+                  className={`ew-view-seg${showMyOnly ? " active" : ""}`}
+                  onClick={() => setShowMyOnly(true)}
+                >
+                  مسنداتي فقط
+                </button>
+              </div>
+            ) : undefined
+          }
           toolbarStart={
             <>
-              {canSeeAll && (
-                <div className="ew-view-switcher" role="group" aria-label="نطاق العرض">
-                  <button
-                    type="button"
-                    className={`ew-view-seg${!showMyOnly ? " active" : ""}`}
-                    onClick={() => setShowMyOnly(false)}
-                  >
-                    الكل
-                  </button>
-                  <button
-                    type="button"
-                    className={`ew-view-seg${showMyOnly ? " active" : ""}`}
-                    onClick={() => setShowMyOnly(true)}
-                  >
-                    مسنداتي فقط
-                  </button>
-                </div>
-              )}
-
               <label className="ew-label" htmlFor="ref-month">
                 {L.label_month}
                 <select
