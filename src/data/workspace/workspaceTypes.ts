@@ -1,4 +1,5 @@
 import type { AuthRole } from "../../auth/authTypes";
+import type { PasswordHashRecord } from "../../auth/passwordCrypto";
 
 export const WORKSPACE_SCHEMA_VERSION = "1.0.0" as const;
 
@@ -85,7 +86,7 @@ export type ManagedUser = {
   id: string;
   username: string;
   displayName: string;
-  password: string;
+  passwordHash: PasswordHashRecord;
   role: AuthRole;
   isActive: boolean;
   hasCertScanLicense: boolean;
@@ -108,10 +109,17 @@ export type RolePermission = {
   access: PermissionLevel;
 };
 
+export type FeaturePermission = {
+  role: AuthRole;
+  featureId: string;
+  enabled: boolean;
+};
+
 export type UsersPermissionsData = {
   users: ManagedUser[];
   roles: ManagedRole[];
   permissions: RolePermission[];
+  featurePermissions?: FeaturePermission[];
 };
 
 export type UsersPermissionsFile = JsonEnvelope<UsersPermissionsData>;

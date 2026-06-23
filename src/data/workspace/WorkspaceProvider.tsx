@@ -31,6 +31,12 @@ import type {
   WorkspaceStatus
 } from "./workspaceTypes";
 
+import {
+  syncUsersFromDisk,
+  type ManagedLoginUser
+} from "../../auth/userManagement";
+import type { RolePermission } from "../../auth/userManagement";
+
 type WorkspaceProviderProps = {
   children: ReactNode;
 };
@@ -78,6 +84,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       if (result.status === "ready") {
         const files = await loadWorkspaceFiles(rawHandle);
         setLoadedFiles(files);
+        applyDiskUsers(files);
       }
     },
     []
@@ -141,7 +148,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       setStatus("checking");
       setMessage("جار اختيار وفحص مجلد مساحة العمل.");
 
-      const handle = await selectWorkspaceDirectory("read");
+      const handle = await selectWorkspaceDirectory("readwrite");
 
       await saveWorkspaceHandle(handle as unknown as FileSystemDirectoryHandle).catch(() => undefined);
 
@@ -158,6 +165,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       if (result.status === "ready") {
         const files = await loadWorkspaceFiles(handle);
         setLoadedFiles(files);
+        applyDiskUsers(files);
       } else {
         setLoadedFiles(emptyLoadedFiles);
       }
@@ -194,6 +202,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       if (result.status === "ready") {
         const files = await loadWorkspaceFiles(directoryHandle);
         setLoadedFiles(files);
+        applyDiskUsers(files);
       } else {
         setLoadedFiles(emptyLoadedFiles);
       }
@@ -231,6 +240,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
         if (result.status === "ready") {
           const files = await loadWorkspaceFiles(directoryHandle);
           setLoadedFiles(files);
+          applyDiskUsers(files);
         } else {
           setLoadedFiles(emptyLoadedFiles);
         }
@@ -310,3 +320,47 @@ function isAbortError(error: unknown): boolean {
 
   return (error as { name?: string }).name === "AbortError";
 }
+
+/**
+ * Convert users from the disk `UsersPermissionsFile` into `ManagedLoginUser`
+ * format and merge them into localStorage via `syncUsersFromDisk`.
+ * This bridges the workspace-file user system with the in-memory auth system.
+ */
+function applyDiskUsers(files: WorkspaceLoadedFiles): void {
+  const diskData = files.usersPermissions?.data;
+  if (!diskData || diskData.users.length === 0) {
+    return;
+  }
+
+  const now = new Date().toISOString();
+
+  const managedUsers: ManagedLoginUser[] = diskData.users.map((diskUser) => ({
+    id: diskUser.id,
+    username: diskUser.username,
+    displayName: diskUser.displayName,
+    role: diskUser.role,
+    passwordHash: diskUser.passwordHash,
+    isActive: diskUser.isActive,
+    hasCertScanLicense: diskUser.hasCertScanLicense,
+    createdAt: diskUser.createdAt ?? now,
+    updatedAt: diskUser.updatedAt ?? now
+  }));
+
+  const diskPermissions: RolePermission[] = diskData.permissions.map((p) => ({
+    role: p.role,
+    tabId: p.tabId,
+    access: p.access
+  }));
+
+  const diskFeaturePermissions = (diskData.featurePermissions ?? []).map((f) => ({
+    role: f.role,
+    featureId: f.featureId,
+    enabled: f.enabled,
+  }));
+
+  syncUsersFromDisk(
+    managedUsers,
+    diskPermissions.length > 0 ? diskPermissions : undefined,
+    diskFeaturePermissions.length > 0 ? diskFeaturePermissions : undefined
+  );
+}

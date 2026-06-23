@@ -1,0 +1,207 @@
+/* ── Somar Sans ────────────────────────────────────────────── */
+@font-face {
+  font-family: "Somar Sans";
+  src: url("./assets/fonts/SomarSans-Light.woff") format("woff");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Somar Sans";
+  src: url("./assets/fonts/SomarSans-Regular.woff") format("woff");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Somar Sans";
+  src: url("./assets/fonts/SomarSans-Medium.woff") format("woff");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Somar Sans";
+  src: url("./assets/fonts/SomarSans-Bold.woff") format("woff");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Civic Authority Design System  v2.0
+   Government X-Ray Quality Management System
+   ═══════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── Core palette ──────────────────────────────────────────── */
+  --c-navy:        #0F2744;
+  --c-navy-2:      #162F56;
+  --c-navy-3:      #1C3A68;
+  --c-navy-soft:   #E5ECF7;
+
+  --c-sky:         #1E6FBA;
+  --c-sky-2:       #2580CC;
+  --c-sky-light:   #E1EFFE;
+
+  --c-ink:         #0D1F32;
+  --c-ink-2:       #2C4260;
+  --c-ink-3:       #5E7A96;
+  --c-ink-4:       #9DB3C9;
+
+  --c-surface:     #FFFFFF;
+  --c-surface-2:   #F4F7FB;
+  --c-surface-3:   #EEF2F7;
+
+  --c-border:      #D6E2EF;
+  --c-border-2:    #BFD0E2;
+
+  /* ── Semantic ──────────────────────────────────────────────── */
+  --c-success:        #065F46;
+  --c-success-bg:     #D1FAE5;
+  --c-success-border: #6EE7B7;
+
+  --c-warning:        #92400E;
+  --c-warning-bg:     #FEF3C7;
+  --c-warning-border: #FCD34D;
+
+  --c-danger:         #991B1B;
+  --c-danger-bg:      #FEE2E2;
+  --c-danger-border:  #FCA5A5;
+
+  --c-info:           #1E40AF;
+  --c-info-bg:        #DBEAFE;
+  --c-info-border:    #93C5FD;
+
+  /* ── Shadows ───────────────────────────────────────────────── */
+  --sh-xs: 0 1px 3px rgba(13, 31, 50, 0.06), 0 1px 2px rgba(13, 31, 50, 0.04);
+  --sh-sm: 0 4px 12px rgba(13, 31, 50, 0.07), 0 2px 4px rgba(13, 31, 50, 0.04);
+  --sh-md: 0 10px 28px rgba(13, 31, 50, 0.09), 0 4px 10px rgba(13, 31, 50, 0.05);
+  --sh-lg: 0 24px 52px rgba(13, 31, 50, 0.12), 0 8px 20px rgba(13, 31, 50, 0.07);
+  --sh-xl: 0 48px 96px rgba(13, 31, 50, 0.15), 0 16px 36px rgba(13, 31, 50, 0.09);
+
+  /* ── Radii ─────────────────────────────────────────────────── */
+  --r-xs:  4px;
+  --r-sm:  8px;
+  --r-md:  12px;
+  --r-lg:  18px;
+  --r-xl:  24px;
+  --r-2xl: 32px;
+
+  /* ── Motion ────────────────────────────────────────────────── */
+  --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-out:    cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+  --t-fast:   120ms;
+  --t-base:   220ms;
+  --t-slow:   360ms;
+  --t-spring: 520ms;
+
+  /* ── Typography ────────────────────────────────────────────── */
+  --font-sans: "Somar Sans", "Plus Jakarta Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Code", "Consolas", ui-monospace, monospace;
+
+  --fw-light:    300;
+  --fw-regular:  400;
+  --fw-medium:   500;
+  --fw-semibold: 600;
+  --fw-bold:     700;
+  --fw-black:    800;
+
+  /* ── Legacy aliases — backward compat with all existing components ── */
+  --app-bg:            var(--c-surface-3);
+  --app-surface:       var(--c-surface);
+  --app-surface-soft:  var(--c-surface-2);
+  --app-text:          var(--c-ink);
+  --app-muted:         var(--c-ink-3);
+  --app-primary:       var(--c-navy);
+  --app-primary-hover: var(--c-navy-2);
+  --app-border:        var(--c-border);
+  --app-focus:         rgba(15, 39, 68, 0.22);
+  --app-shadow:        var(--sh-md);
+
+  font-family: var(--font-sans);
+  font-weight: var(--fw-regular);
+  color: var(--c-ink);
+  background: var(--c-surface-3);
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Reset ─────────────────────────────────────────────────── */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  width: 100%;
+  min-width: 320px;
+  min-height: 100%;
+  margin: 0;
+  padding: 0;
+  background: var(--c-surface-3);
+  scroll-behavior: smooth;
+}
+
+body {
+  width: 100%;
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+  background: var(--c-surface-3);
+}
+
+#root {
+  width: 100%;
+  min-width: 100%;
+  max-width: none;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+  background: var(--c-surface-3);
+}
+
+button, input, textarea, select {
+  font: inherit;
+}
+
+button {
+  touch-action: manipulation;
+}
+
+button, select, input, textarea {
+  transition:
+    background-color var(--t-base) var(--ease-smooth),
+    border-color     var(--t-base) var(--ease-smooth),
+    box-shadow       var(--t-base) var(--ease-smooth),
+    color            var(--t-base) var(--ease-smooth),
+    opacity          var(--t-fast) var(--ease-smooth),
+    transform        var(--t-fast) var(--ease-smooth);
+}
+
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid var(--app-focus);
+  outline-offset: 3px;
+}
+
+::selection {
+  background: rgba(30, 111, 186, 0.18);
+}
+
+/* ── Global scrollbar ───────────────────────────────────────── */
+
+::-webkit-scrollbar        { width: 6px; height: 6px; }
+::-webkit-scrollbar-track  { background: transparent; }
+::-webkit-scrollbar-thumb  { background: var(--c-border-2); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: var(--c-ink-4); }

@@ -1,8 +1,10 @@
-import type { PreparedPopulationRow } from "../../components/Sidebar/Tabs/Population/processing/populationProcessingTypes";
+import type { PreparedPopulationRow } from "../population/populationTypes";
+import type { StageAliasMappings } from "../population/populationConfig";
 
 export type SampleConfig = {
   totalSampleSize: number;
   rngSeed: string;
+  stageMappings?: StageAliasMappings;
 };
 
 export type PortAllocation = {
@@ -18,6 +20,16 @@ export type PortAllocation = {
   actualTotalDrawn: number;
 };
 
+export type StageAllocation = {
+  stageKey: "first" | "second" | "third" | "fourth";
+  stageLabel: string;
+  populationSize: number;
+  targetQuota: number;
+  actualDrawn: number;
+  certScanDrawn: number;
+  nonCertScanDrawn: number;
+};
+
 export type SampleMasterData = {
   rngSeed: string;
   totalRequested: number;
@@ -27,8 +39,13 @@ export type SampleMasterData = {
   certScanActual: number;
   nonCertScanActual: number;
   portAllocations: PortAllocation[];
+  stageAllocations: StageAllocation[];
   drawnAt: string;
   drawnBy: string;
+  /** Monotonically increasing counter — incremented on each row append. Used for CAS conflict detection. */
+  revision?: number;
+  /** Per-write UUID embedded by casLoop for cross-machine race detection. */
+  _writeToken?: string;
   rows: PreparedPopulationRow[];
 };
 

@@ -1,11 +1,14 @@
-import type { PreparedPopulationRow } from "../../components/Sidebar/Tabs/Population/processing/populationProcessingTypes";
+import type { PreparedPopulationRow } from "../population/populationTypes";
 import { hamiltonApportionment } from "./apportionment";
 import { createRng, drawWithoutReplacement, hashSeedString } from "./rng";
+import { getStageKey } from "../population/stageHelpers";
+import type { StageAliasMappings, StageSamplingRule } from "../population/populationConfig";
 import type {
   PortAllocation,
   SampleConfig,
   SampleDrawResult,
-  SampleMasterData
+  SampleMasterData,
+  StageAllocation
 } from "./sampleTypes";
 
 // Group population rows by portName
@@ -53,108 +56,373 @@ function splitCertScanQuota(
 
 export function drawSample(
   rows: PreparedPopulationRow[],
-  config: SampleConfig,
+  config: SampleConfig | { rngSeed: string; samplingRules: StageSamplingRule[]; stageMappings?: StageAliasMappings },
   username: string
 ): SampleDrawResult {
   if (rows.length === 0) {
     return { ok: false, reason: "لا توجد صفوف مجتمع للسحب منها." };
   }
 
-  if (config.totalSampleSize <= 0) {
-    return { ok: false, reason: "حجم العينة يجب أن يكون أكبر من صفر." };
+  // Check if old config (backward compatibility)
+  if ("totalSampleSize" in config) {
+    const sampleSize = config.totalSampleSize;
+    if (sampleSize <= 0) {
+      return { ok: false, reason: "حجم العينة يجب أن يكون أكبر من صفر." };
+    }
+
+    const rng = createRng(hashSeedString(config.rngSeed));
+    const portGroups = groupByPort(rows);
+
+    // Compute port-level allocations via Hamilton
+    const portKeys = Array.from(portGroups.keys());
+    const portSizes = portKeys.map((k) => ({
+      key: k,
+      size: portGroups.get(k)!.length
+    }));
+
+    const apportioned = hamiltonApportionment(portSizes, sampleSize);
+
+    const portAllocations: PortAllocation[] = [];
+    const allDrawnRows: PreparedPopulationRow[] = [];
+
+    let totalCertScanRequested = 0;
+    let totalNonCertScanRequested = 0;
+    let totalCertScanActual = 0;
+    let totalNonCertScanActual = 0;
+
+    for (const entry of apportioned) {
+      const portRows = portGroups.get(entry.key)!;
+      const certScanRows = portRows.filter((r) => r.certScanStatus === "Certscan");
+      const nonCertScanRows = portRows.filter(
+        (r) => r.certScanStatus === "NonCertscan"
+      );
+
+      const { certScanQuota, nonCertScanQuota } = splitCertScanQuota(
+        entry.allocated,
+        certScanRows.length,
+        nonCertScanRows.length
+      );
+
+      // Draw from each tier independently using the shared RNG
+      const drawnCert = drawWithoutReplacement(certScanRows, certScanQuota, rng);
+      const drawnNonCert = drawWithoutReplacement(
+        nonCertScanRows,
+        nonCertScanQuota,
+        rng
+      );
+
+      const portActualTotal = drawnCert.length + drawnNonCert.length;
+
+      portAllocations.push({
+        portName: entry.key,
+        populationSize: portRows.length,
+        certScanCount: certScanRows.length,
+        nonCertScanCount: nonCertScanRows.length,
+        allocatedQuota: entry.allocated,
+        certScanQuota,
+        nonCertScanQuota,
+        actualCertScanDrawn: drawnCert.length,
+        actualNonCertScanDrawn: drawnNonCert.length,
+        actualTotalDrawn: portActualTotal
+      });
+
+      allDrawnRows.push(...drawnCert, ...drawnNonCert);
+      totalCertScanRequested += certScanQuota;
+      totalNonCertScanRequested += nonCertScanQuota;
+      totalCertScanActual += drawnCert.length;
+      totalNonCertScanActual += drawnNonCert.length;
+    }
+
+    // Handle spillover
+    const underfill = sampleSize - allDrawnRows.length;
+
+    if (underfill > 0) {
+      const spillResult = applySpillover(
+        portGroups,
+        portAllocations,
+        allDrawnRows,
+        underfill,
+        rng
+      );
+      allDrawnRows.push(...spillResult.extraRows);
+      totalCertScanActual += spillResult.extraCert;
+      totalNonCertScanActual += spillResult.extraNonCert;
+    }
+
+    const data: SampleMasterData = {
+      rngSeed: config.rngSeed,
+      totalRequested: sampleSize,
+      totalActual: allDrawnRows.length,
+      certScanRequested: totalCertScanRequested,
+      nonCertScanRequested: totalNonCertScanRequested,
+      certScanActual: totalCertScanActual,
+      nonCertScanActual: totalNonCertScanActual,
+      portAllocations,
+      stageAllocations: [],
+      drawnAt: new Date().toISOString(),
+      drawnBy: username,
+      rows: allDrawnRows
+    };
+
+    return { ok: true, data };
   }
 
-  const rng = createRng(hashSeedString(config.rngSeed));
-  const portGroups = groupByPort(rows);
+  // STAGE-BY-STAGE ALGORITHM
+  const rngSeed = config.rngSeed;
+  const rules = config.samplingRules;
+  const rng = createRng(hashSeedString(rngSeed));
 
-  // Compute port-level allocations via Hamilton
-  const portKeys = Array.from(portGroups.keys());
-  const portSizes = portKeys.map((k) => ({
-    key: k,
-    size: portGroups.get(k)!.length
-  }));
-
-  const apportioned = hamiltonApportionment(portSizes, config.totalSampleSize);
-
-  const portAllocations: PortAllocation[] = [];
   const allDrawnRows: PreparedPopulationRow[] = [];
+  const portAllocationsMap = new Map<string, PortAllocation>();
+  const stageAllocations: StageAllocation[] = [];
 
   let totalCertScanRequested = 0;
   let totalNonCertScanRequested = 0;
   let totalCertScanActual = 0;
   let totalNonCertScanActual = 0;
+  let totalRequested = 0;
 
-  for (const entry of apportioned) {
-    const portRows = portGroups.get(entry.key)!;
-    const certScanRows = portRows.filter((r) => r.certScanStatus === "Certscan");
-    const nonCertScanRows = portRows.filter(
-      (r) => r.certScanStatus === "NonCertscan"
-    );
+  const stageKeys: Array<"first" | "second" | "third" | "fourth"> = ["first", "second", "third", "fourth"];
 
-    const { certScanQuota, nonCertScanQuota } = splitCertScanQuota(
-      entry.allocated,
-      certScanRows.length,
-      nonCertScanRows.length
-    );
+  // Pre-compute stage key for every row once — avoids repeated Arabic regex normalization
+  // inside every filter/loop below (was O(n × stages × passes)).
+  const rowStageKeys = new Map<string, ReturnType<typeof getStageKey>>();
+  for (const row of rows) {
+    rowStageKeys.set(row.xrayImageId, getStageKey(row.stage, config.stageMappings));
+  }
 
-    // Draw from each tier independently using the shared RNG
-    const drawnCert = drawWithoutReplacement(certScanRows, certScanQuota, rng);
-    const drawnNonCert = drawWithoutReplacement(
-      nonCertScanRows,
-      nonCertScanQuota,
-      rng
-    );
+  // Pre-index rules by stageKey to avoid repeated linear searches.
+  const rulesByStage = new Map(rules.map((r) => [r.stageKey, r]));
 
-    const portActualTotal = drawnCert.length + drawnNonCert.length;
+  // Pre-pass: compute targets for each stage, then redistribute any shortfall from
+  // stages 2/3/4 (where population < target) to the remaining stages with spare capacity.
+  const effectiveTargets = new Map<"first" | "second" | "third" | "fourth", number>();
+  const stageAvailableCounts = new Map<"first" | "second" | "third" | "fourth", number>();
+  const configuredValues = new Map<"first" | "second" | "third" | "fourth", number>();
 
-    portAllocations.push({
-      portName: entry.key,
-      populationSize: portRows.length,
-      certScanCount: certScanRows.length,
-      nonCertScanCount: nonCertScanRows.length,
-      allocatedQuota: entry.allocated,
-      certScanQuota,
-      nonCertScanQuota,
-      actualCertScanDrawn: drawnCert.length,
-      actualNonCertScanDrawn: drawnNonCert.length,
-      actualTotalDrawn: portActualTotal
+  for (const sk of stageKeys) {
+    const available = rows.filter((row) => rowStageKeys.get(row.xrayImageId) === sk).length;
+    stageAvailableCounts.set(sk, available);
+    const r = rulesByStage.get(sk);
+    if (!r) {
+      // Stage not configured by the operator — draw nothing for it.
+      effectiveTargets.set(sk, 0);
+      configuredValues.set(sk, 0);
+      continue;
+    }
+    let target = r.method === "percentage"
+      ? Math.round((r.value / 100) * available)
+      : r.value;
+    if (r.minRequiredCount > 0) {
+      target = available < r.minRequiredCount ? available : Math.max(target, r.minRequiredCount);
+    }
+    target = Math.min(target, available);
+    effectiveTargets.set(sk, target);
+    configuredValues.set(sk, r.value);
+  }
+
+  // Compute total shortfall for non-first stages
+  const redistributableStages: Array<"second" | "third" | "fourth"> = ["second", "third", "fourth"];
+  let totalShortfall = 0;
+  for (const sk of redistributableStages) {
+    const configured = configuredValues.get(sk) ?? 0;
+    const available = stageAvailableCounts.get(sk) ?? 0;
+    if (configured > 0 && available < configured) {
+      totalShortfall += configured - available;
+    }
+  }
+
+  // Redistribute shortfall to non-first stages that have spare capacity
+  if (totalShortfall > 0) {
+    const absorbers = redistributableStages
+      .map((sk) => ({
+        sk,
+        spare: (stageAvailableCounts.get(sk) ?? 0) - (effectiveTargets.get(sk) ?? 0),
+        weight: configuredValues.get(sk) ?? 0
+      }))
+      .filter((a) => a.spare > 0);
+
+    if (absorbers.length > 0) {
+      const totalWeight = absorbers.reduce((s, a) => s + a.weight, 0);
+      let remaining = totalShortfall;
+      for (const absorber of absorbers) {
+        const share = totalWeight > 0
+          ? Math.round((absorber.weight / totalWeight) * totalShortfall)
+          : 0;
+        const extra = Math.min(share, absorber.spare, remaining);
+        effectiveTargets.set(absorber.sk, (effectiveTargets.get(absorber.sk) ?? 0) + extra);
+        remaining -= extra;
+      }
+      // Distribute rounding remainder to the first absorber with capacity
+      if (remaining > 0) {
+        for (const absorber of absorbers) {
+          const cur = effectiveTargets.get(absorber.sk) ?? 0;
+          const cap = (stageAvailableCounts.get(absorber.sk) ?? 0) - cur;
+          if (cap > 0) {
+            const extra = Math.min(remaining, cap);
+            effectiveTargets.set(absorber.sk, cur + extra);
+            remaining -= extra;
+            if (remaining <= 0) break;
+          }
+        }
+      }
+    }
+  }
+
+  for (const stageKey of stageKeys) {
+    const stageRows = rows.filter((r) => rowStageKeys.get(r.xrayImageId) === stageKey);
+
+    if (stageRows.length === 0) {
+      continue;
+    }
+
+    const stageTarget = effectiveTargets.get(stageKey) ?? 0;
+    if (stageTarget <= 0) {
+      continue;
+    }
+
+    totalRequested += stageTarget;
+
+    const rule = rulesByStage.get(stageKey)!;
+    const portGroups = groupByPort(stageRows);
+    const portKeys = Array.from(portGroups.keys());
+    const portSizes = portKeys.map((k) => ({
+      key: k,
+      size: portGroups.get(k)!.length
+    }));
+
+    const apportioned = hamiltonApportionment(portSizes, stageTarget);
+    const stageDrawnRows: PreparedPopulationRow[] = [];
+    const stagePortAllocations: PortAllocation[] = [];
+
+    for (const entry of apportioned) {
+      const portRows = portGroups.get(entry.key)!;
+      const certScanRows = portRows.filter((r) => r.certScanStatus === "Certscan");
+      const nonCertScanRows = portRows.filter((r) => r.certScanStatus === "NonCertscan");
+
+      let portCertScanTarget = 0;
+      if (rule.certScanMethod === "percentage") {
+        portCertScanTarget = Math.round((rule.certScanPercentage / 100) * entry.allocated);
+      } else {
+        const stageCertScanRows = stageRows.filter((r) => r.certScanStatus === "Certscan");
+        if (stageCertScanRows.length > 0 && rule.certScanExactCount > 0) {
+          const certApportioned = hamiltonApportionment(
+            portKeys.map((k) => ({
+              key: k,
+              size: portGroups.get(k)!.filter((r) => r.certScanStatus === "Certscan").length
+            })),
+            Math.min(rule.certScanExactCount, stageCertScanRows.length)
+          );
+          portCertScanTarget = certApportioned.find((a) => a.key === entry.key)?.allocated ?? 0;
+        }
+      }
+
+      const certScanQuota = Math.min(entry.allocated, portCertScanTarget);
+      const actualCertQuota = Math.min(certScanQuota, certScanRows.length);
+      const drawnCert = drawWithoutReplacement(certScanRows, actualCertQuota, rng);
+
+      let nonCertScanQuota = entry.allocated - certScanQuota;
+      if (rule.certScanStrategy === "preferred" && actualCertQuota < certScanQuota) {
+        nonCertScanQuota += (certScanQuota - actualCertQuota);
+      }
+
+      const actualNonCertQuota = Math.min(nonCertScanQuota, nonCertScanRows.length);
+      const drawnNonCert = drawWithoutReplacement(nonCertScanRows, actualNonCertQuota, rng);
+
+      stageDrawnRows.push(...drawnCert, ...drawnNonCert);
+
+      totalCertScanRequested += certScanQuota;
+      totalNonCertScanRequested += nonCertScanQuota;
+      totalCertScanActual += drawnCert.length;
+      totalNonCertScanActual += drawnNonCert.length;
+
+      stagePortAllocations.push({
+        portName: entry.key,
+        populationSize: portRows.length,
+        certScanCount: certScanRows.length,
+        nonCertScanCount: nonCertScanRows.length,
+        allocatedQuota: entry.allocated,
+        certScanQuota,
+        nonCertScanQuota,
+        actualCertScanDrawn: drawnCert.length,
+        actualNonCertScanDrawn: drawnNonCert.length,
+        actualTotalDrawn: drawnCert.length + drawnNonCert.length
+      });
+    }
+
+    const stageUnderfill = stageTarget - stageDrawnRows.length;
+    if (stageUnderfill > 0) {
+      const spillResult = applySpillover(
+        portGroups,
+        stagePortAllocations,
+        stageDrawnRows,
+        stageUnderfill,
+        rng
+      );
+      stageDrawnRows.push(...spillResult.extraRows);
+      totalCertScanActual += spillResult.extraCert;
+      totalNonCertScanActual += spillResult.extraNonCert;
+
+      const allocByPort = new Map(stagePortAllocations.map((a) => [a.portName, a]));
+      for (const row of spillResult.extraRows) {
+        const portName = row.portName ?? "غير محدد";
+        const alloc = allocByPort.get(portName);
+        if (alloc) {
+          alloc.actualTotalDrawn += 1;
+          if (row.certScanStatus === "Certscan") {
+            alloc.actualCertScanDrawn += 1;
+          } else {
+            alloc.actualNonCertScanDrawn += 1;
+          }
+        }
+      }
+    }
+
+    allDrawnRows.push(...stageDrawnRows);
+
+    const STAGE_LABELS_MAP: Record<string, string> = {
+      first: "المستوى الأول", second: "المستوى الثاني",
+      third: "المستوى الثالث", fourth: "المستوى الرابع"
+    };
+    stageAllocations.push({
+      stageKey: stageKey as "first" | "second" | "third" | "fourth",
+      stageLabel: STAGE_LABELS_MAP[stageKey] ?? stageKey,
+      populationSize: stageRows.length,
+      targetQuota: stageTarget,
+      actualDrawn: stageDrawnRows.length,
+      certScanDrawn: stageDrawnRows.filter(r => r.certScanStatus === "Certscan").length,
+      nonCertScanDrawn: stageDrawnRows.filter(r => r.certScanStatus === "NonCertscan").length,
     });
 
-    allDrawnRows.push(...drawnCert, ...drawnNonCert);
-    totalCertScanRequested += certScanQuota;
-    totalNonCertScanRequested += nonCertScanQuota;
-    totalCertScanActual += drawnCert.length;
-    totalNonCertScanActual += drawnNonCert.length;
+    for (const alloc of stagePortAllocations) {
+      const existing = portAllocationsMap.get(alloc.portName);
+      if (existing) {
+        existing.populationSize += alloc.populationSize;
+        existing.certScanCount += alloc.certScanCount;
+        existing.nonCertScanCount += alloc.nonCertScanCount;
+        existing.allocatedQuota += alloc.allocatedQuota;
+        existing.certScanQuota += alloc.certScanQuota;
+        existing.nonCertScanQuota += alloc.nonCertScanQuota;
+        existing.actualCertScanDrawn += alloc.actualCertScanDrawn;
+        existing.actualNonCertScanDrawn += alloc.actualNonCertScanDrawn;
+        existing.actualTotalDrawn += alloc.actualTotalDrawn;
+      } else {
+        portAllocationsMap.set(alloc.portName, { ...alloc });
+      }
+    }
   }
 
-  // Handle spillover: ports that are undersized leave unfilled seats.
-  // Capacity-weighted spillover: redistribute unfilled quota to ports that still
-  // have remaining population, proportional to their remaining capacity.
-  const underfill =
-    config.totalSampleSize - allDrawnRows.length;
-
-  if (underfill > 0) {
-    const spillResult = applySpillover(
-      portGroups,
-      portAllocations,
-      allDrawnRows,
-      underfill,
-      rng
-    );
-    allDrawnRows.push(...spillResult.extraRows);
-    totalCertScanActual += spillResult.extraCert;
-    totalNonCertScanActual += spillResult.extraNonCert;
-  }
-
+  const portAllocations = Array.from(portAllocationsMap.values());
   const data: SampleMasterData = {
-    rngSeed: config.rngSeed,
-    totalRequested: config.totalSampleSize,
+    rngSeed,
+    totalRequested,
     totalActual: allDrawnRows.length,
     certScanRequested: totalCertScanRequested,
     nonCertScanRequested: totalNonCertScanRequested,
     certScanActual: totalCertScanActual,
     nonCertScanActual: totalNonCertScanActual,
     portAllocations,
+    stageAllocations,
     drawnAt: new Date().toISOString(),
     drawnBy: username,
     rows: allDrawnRows

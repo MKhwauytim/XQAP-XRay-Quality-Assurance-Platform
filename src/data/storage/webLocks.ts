@@ -25,10 +25,8 @@ async function withFallbackLock<T>(
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
-  fallbackChains.set(
-    name,
-    previous.then(() => gate)
-  );
+  const next = previous.then(() => gate);
+  fallbackChains.set(name, next);
 
   await previous.catch(() => undefined);
   try {
@@ -36,7 +34,7 @@ async function withFallbackLock<T>(
   } finally {
     release();
     // Drop the chain entry if no one queued behind us.
-    if (fallbackChains.get(name) === previous.then(() => gate)) {
+    if (fallbackChains.get(name) === next) {
       fallbackChains.delete(name);
     }
   }

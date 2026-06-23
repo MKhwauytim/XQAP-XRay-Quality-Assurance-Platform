@@ -1,0 +1,92 @@
+/* =========================================================
+   App.css — Application Shell
+   ========================================================= */
+
+.app-shell {
+  --sidebar-width:           280px;
+  --sidebar-collapsed-width: 84px;
+  --topbar-height:           44px;
+
+  width: 100%;
+  min-width: 100%;
+  max-width: none;
+  min-height: calc(100vh - var(--topbar-height));
+
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--sidebar-width);
+
+  margin: 0;
+  padding: 0;
+
+  background: var(--c-surface-3);
+  color: var(--c-ink);
+  direction: ltr;
+
+  transition: grid-template-columns var(--t-slow) var(--ease-spring);
+}
+
+.app-shell.sidebar-collapsed {
+  grid-template-columns: minmax(0, 1fr) var(--sidebar-collapsed-width);
+}
+
+.app-workspace {
+  grid-column: 1;
+  grid-row: 1;
+
+  width: 100%;
+  min-width: 0;
+  min-height: calc(100vh - var(--topbar-height));
+
+  direction: rtl;
+  background: transparent;
+}
+
+.tab-blank {
+  width: 100%;
+  min-height: calc(100vh - var(--topbar-height));
+  margin: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.app-backup-toast {
+  position: fixed;
+  inset-inline-start: 24px;
+  bottom: 24px;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(520px, calc(100vw - 48px));
+  padding: 12px 14px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #17365d;
+  box-shadow: 0 12px 28px rgba(15, 39, 68, 0.14);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.app-backup-toast button {
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 0 4px;
+}
+
+@media (max-width: 760px) {
+  .app-shell,
+  .app-shell.sidebar-collapsed {
+    display: flex;
+    flex-direction: column;
+    min-height: calc(100vh - var(--topbar-height));
+  }
+
+  .app-workspace {
+    min-height: calc(100vh - 220px);
+  }
+}

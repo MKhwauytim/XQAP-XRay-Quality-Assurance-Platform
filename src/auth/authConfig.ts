@@ -4,8 +4,6 @@ export const LOGIN_SYSTEM_VERSION = "1.2.0";
 
 export const SESSION_KEY = "xray_local_login_session_v1";
 
-export const PASSWORD_HASH_ITERATIONS = 600000;
-
 export const ADMIN_SHORTCUT_KEYS = ["a", "t", "ش", "ف"] as const;
 
 export const BOOTSTRAP_ADMIN_USERNAME = "admin";

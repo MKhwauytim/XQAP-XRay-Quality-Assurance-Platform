@@ -46,7 +46,7 @@ export function hamiltonApportionment(
     return { key: g.key, exact, floor, remainder: exact - floor, allocated: floor };
   });
 
-  let remaining = totalSeats - initial.reduce((s, r) => s + r.floor, 0);
+  const remaining = totalSeats - initial.reduce((s, r) => s + r.floor, 0);
 
   // Sort by remainder descending, breaking ties by key (stable)
   const sorted = initial.slice().sort((a, b) =>

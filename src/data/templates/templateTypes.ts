@@ -1,17 +1,41 @@
 export type TemplateFieldType =
   | "text"
+  | "textarea"
   | "number"
   | "dropdown"
   | "checkbox"
-  | "date";
+  | "date"
+  | "empty";
+
+export type TemplateFieldConditionOperator =
+  | "equals"
+  | "notEquals"
+  | "truthy"
+  | "falsy";
+
+export type TemplateFieldCondition = {
+  sourceFieldId: string;
+  operator: TemplateFieldConditionOperator;
+  value?: string | number | boolean;
+};
+
+export type TemplatePhase = {
+  phaseId: string;
+  title: string;
+  description?: string;
+  order: number;
+};
 
 export type TemplateField = {
   fieldId: string;
+  phaseId?: string;
   label: string;
   type: TemplateFieldType;
   required: boolean;
   options: string[];
   placeholder?: string;
+  condition?: TemplateFieldCondition | null;
+  order?: number;
 };
 
 export type TemplateSchema = {
@@ -22,6 +46,7 @@ export type TemplateSchema = {
   createdBy: string;
   updatedAt: string;
   updatedBy: string;
+  phases?: TemplatePhase[];
   fields: TemplateField[];
 };
 

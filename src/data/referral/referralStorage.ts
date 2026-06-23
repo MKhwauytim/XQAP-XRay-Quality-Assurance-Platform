@@ -1,0 +1,143 @@
+import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import {
+  appendReferralToEmployee,
+  appendReplacementToEmployee,
+  loadAllEmployeeFiles,
+} from "../answers/answerStorage";
+import {
+  loadAllSupervisorDecisions,
+  upsertReferralDecision,
+  upsertReplacementDecision,
+} from "../approvals/approvalStorage";
+import type {
+  ReferralLog,
+  ReferralRequest,
+  ReferralStatus,
+  ReplacementLog,
+  ReplacementRequest,
+} from "./referralTypes";
+
+// ── Referral requests ─────────────────────────────────────────────────────────
+
+/** Append a referral request to the originating employee's personal file (no shared file, no conflicts). */
+export async function appendReferralRequest(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  request: ReferralRequest
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  return appendReferralToEmployee(directoryHandle, monthFolderName, request);
+}
+
+/**
+ * Aggregate all employee files and supervisor decision files into a single ReferralLog.
+ * Requests are joined with supervisor decisions to produce the effective status.
+ */
+export async function loadReferralLog(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<ReferralLog> {
+  const [empFiles, allDecisions] = await Promise.all([
+    loadAllEmployeeFiles(directoryHandle, monthFolderName),
+    loadAllSupervisorDecisions(directoryHandle, monthFolderName),
+  ]);
+
+  const allRequests = empFiles.flatMap((f) => f.referralRequests ?? []);
+  const decisionMap = new Map(
+    allDecisions.flatMap((d) =>
+      d.referralDecisions.map((dec) => [dec.requestId, dec])
+    )
+  );
+
+  const requests = allRequests.map((r) => {
+    const dec = decisionMap.get(r.requestId);
+    return dec
+      ? { ...r, status: dec.status, reviewedBy: dec.reviewedBy, reviewedAt: dec.reviewedAt, reviewNotes: dec.reviewNotes }
+      : r;
+  });
+
+  return { monthFolderName, revision: 0, requests };
+}
+
+/** Write a supervisor approval/denial to the supervisor's own decisions file. */
+export async function updateReferralStatus(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  requestId: string,
+  updates: { status: ReferralStatus; reviewedBy: string; reviewedAt: string; reviewNotes?: string }
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  return upsertReferralDecision(directoryHandle, monthFolderName, updates.reviewedBy, {
+    requestId,
+    status: updates.status as "approved" | "denied",
+    reviewedBy: updates.reviewedBy,
+    reviewedAt: updates.reviewedAt,
+    reviewNotes: updates.reviewNotes,
+  });
+}
+
+/** Returns the set of xrayImageIds that are currently in a pending referral from the given employee. */
+export function getPendingReferralIds(log: ReferralLog, fromEmployee: string): Set<string> {
+  const ids = new Set<string>();
+  for (const req of log.requests) {
+    if (req.fromEmployee === fromEmployee && req.status === "pending") {
+      for (const id of req.xrayImageIds) ids.add(id);
+    }
+  }
+  return ids;
+}
+
+// ── Replacement requests ──────────────────────────────────────────────────────
+
+/** Append a replacement request to the requesting employee's personal file (no shared file, no conflicts). */
+export async function appendReplacementRequest(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  request: ReplacementRequest
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  return appendReplacementToEmployee(directoryHandle, monthFolderName, request);
+}
+
+/**
+ * Aggregate all employee files and supervisor decision files into a single ReplacementLog.
+ * Requests are joined with supervisor decisions to produce the effective status.
+ */
+export async function loadReplacementLog(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<ReplacementLog> {
+  const [empFiles, allDecisions] = await Promise.all([
+    loadAllEmployeeFiles(directoryHandle, monthFolderName),
+    loadAllSupervisorDecisions(directoryHandle, monthFolderName),
+  ]);
+
+  const allRequests = empFiles.flatMap((f) => f.replacementRequests ?? []);
+  const decisionMap = new Map(
+    allDecisions.flatMap((d) =>
+      d.replacementDecisions.map((dec) => [dec.requestId, dec])
+    )
+  );
+
+  const requests = allRequests.map((r) => {
+    const dec = decisionMap.get(r.requestId);
+    return dec
+      ? { ...r, status: dec.status, reviewedBy: dec.reviewedBy, reviewedAt: dec.reviewedAt, reviewNotes: dec.reviewNotes }
+      : r;
+  });
+
+  return { monthFolderName, revision: 0, requests };
+}
+
+/** Write a supervisor approval/denial to the supervisor's own decisions file. */
+export async function updateReplacementStatus(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  requestId: string,
+  updates: { status: ReferralStatus; reviewedBy: string; reviewedAt: string; reviewNotes?: string }
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  return upsertReplacementDecision(directoryHandle, monthFolderName, updates.reviewedBy, {
+    requestId,
+    status: updates.status as "approved" | "denied",
+    reviewedBy: updates.reviewedBy,
+    reviewedAt: updates.reviewedAt,
+    reviewNotes: updates.reviewNotes,
+  });
+}

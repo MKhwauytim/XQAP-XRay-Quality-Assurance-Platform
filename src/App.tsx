@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import AuthGate from "./auth/AuthGate";
+import { TestPanel } from "./test-runner/TestPanel";
 import type { AuthSession } from "./auth/authTypes";
 import {
   hasRolePermission,
@@ -10,6 +11,12 @@ import {
 } from "./auth/userManagement";
 import Sidebar from "./components/Sidebar/Sidebar";
 import { SIDEBAR_TABS } from "./components/Sidebar/Tabs/tabRegistry";
+import { FeedbackWidget } from "./components/FeedbackWidget/FeedbackWidget";
+import {
+  createDailyAdminBackupIfDue,
+} from "./data/backup/backupStorage";
+import { listMonthFolders } from "./data/population/populationStorage";
+import { useWorkspace } from "./data/workspace/useWorkspace";
 import {
   WorkspaceGate,
   WorkspacePicker
@@ -22,11 +29,16 @@ type AppContentProps = {
 };
 
 function AppContent({ session }: AppContentProps) {
+  const { directoryHandle, status: workspaceStatus } = useWorkspace();
   const [selectedTabId, setSelectedTabId] = useState("");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [permissions, setPermissions] = useState<RolePermission[]>(
     () => readUserManagementState().permissions
   );
+  const [bakWarning, setBakWarning] = useState<string | null>(null);
+  const [autoBackupNotice, setAutoBackupNotice] = useState<string | null>(null);
+  const [autoBackupRunning, setAutoBackupRunning] = useState(false);
+  const autoBackupAttemptKey = `${session.username}:${session.loginAt}:${directoryHandle?.name ?? ""}`;
 
   useEffect(() => {
     return subscribeToUserManagementChanges(() => {
@@ -45,11 +57,84 @@ function AppContent({ session }: AppContentProps) {
     [permissions, session.role]
   );
 
+  useEffect(() => {
+    const handler = (e: CustomEvent<{ tabId: string }>) => {
+      setSelectedTabId(e.detail.tabId);
+    };
+    window.addEventListener("app-navigate", handler as EventListener);
+    return () => window.removeEventListener("app-navigate", handler as EventListener);
+  }, []);
+
+  useEffect(() => {
+    const handler = (e: CustomEvent<{ fileName: string }>) => {
+      setBakWarning(
+        `تم استرداد الملف "${e.detail.fileName}" من النسخة الاحتياطية — قد تكون البيانات غير مكتملة، يُرجى المراجعة.`
+      );
+    };
+    window.addEventListener("data:recovered-from-bak", handler as EventListener);
+    return () => window.removeEventListener("data:recovered-from-bak", handler as EventListener);
+  }, []);
+
+  useEffect(() => {
+    if (session.role !== "admin" || !directoryHandle || workspaceStatus !== "ready") return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      if (!cancelled) setAutoBackupRunning(true);
+    }, 0);
+    void (async () => {
+      try {
+        const months = await listMonthFolders(directoryHandle);
+        const result = await createDailyAdminBackupIfDue(directoryHandle, months, session.username);
+        if (cancelled) return;
+        if (result.ok && "skipped" in result) {
+          setAutoBackupNotice(null);
+        } else if (result.ok) {
+          setAutoBackupNotice(`تم إنشاء النسخة الاحتياطية التلقائية: ${result.folderName}`);
+        } else {
+          setAutoBackupNotice(`تعذر إنشاء النسخة الاحتياطية التلقائية: ${result.error}`);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setAutoBackupNotice(
+            `تعذر إنشاء النسخة الاحتياطية التلقائية: ${error instanceof Error ? error.message : "خطأ غير معروف"}`
+          );
+        }
+      } finally {
+        if (!cancelled) setAutoBackupRunning(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [autoBackupAttemptKey, directoryHandle, session.role, session.username, workspaceStatus]);
+
   const activeTab =
     allowedTabs.find((tab) => tab.id === selectedTabId) ?? allowedTabs[0];
 
   const activeTabId = activeTab?.id ?? "";
-  const ActiveTabComponent = activeTab?.TabComponent;
+
+  // Lazy-mount: track which tabs have been visited so their state survives tab switches
+  const [mountedTabIds, setMountedTabIds] = useState<Set<string>>(
+    () => new Set(activeTabId ? [activeTabId] : [])
+  );
+
+  useEffect(() => {
+    if (activeTabId) {
+      setMountedTabIds((prev) =>
+        prev.has(activeTabId) ? prev : new Set([...prev, activeTabId])
+      );
+    }
+  }, [activeTabId]);
+
+  // Drop tabs that are no longer allowed (role change)
+  useEffect(() => {
+    const allowedIds = new Set(allowedTabs.map((t) => t.id));
+    setMountedTabIds((prev) => {
+      const next = new Set([...prev].filter((id) => allowedIds.has(id)));
+      return next.size !== prev.size ? next : prev;
+    });
+  }, [allowedTabs]);
 
   function toggleSidebar(): void {
     setIsSidebarCollapsed((current) => !current);
@@ -60,21 +145,77 @@ function AppContent({ session }: AppContentProps) {
       className={`app-shell ${isSidebarCollapsed ? "sidebar-collapsed" : ""}`}
       dir="rtl"
     >
+      {bakWarning && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            insetInline: 0,
+            zIndex: 9999,
+            background: "#fef3c7",
+            borderBottom: "1px solid #f59e0b",
+            padding: "10px 16px",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            fontSize: 13,
+            color: "#92400e",
+            direction: "rtl",
+          }}
+        >
+          <span>⚠️ {bakWarning}</span>
+          <button
+            onClick={() => setBakWarning(null)}
+            style={{
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              fontSize: 20,
+              color: "#92400e",
+              lineHeight: 1,
+              padding: "0 4px",
+            }}
+            aria-label="إغلاق"
+          >
+            ×
+          </button>
+        </div>
+      )}
+      {(autoBackupNotice || autoBackupRunning) && (
+        <div className="app-backup-toast" role="status" dir="rtl">
+          <span>{autoBackupRunning ? "جاري إنشاء النسخة الاحتياطية التلقائية..." : autoBackupNotice}</span>
+          {!autoBackupRunning && (
+            <button type="button" onClick={() => setAutoBackupNotice(null)} aria-label="إغلاق">
+              ×
+            </button>
+          )}
+        </div>
+      )}
       <Sidebar
         tabs={allowedTabs}
         activeTabId={activeTabId}
+        role={session.role}
         isCollapsed={isSidebarCollapsed}
         onTabSelect={setSelectedTabId}
         onToggleCollapse={toggleSidebar}
       />
 
       <section className="app-workspace" aria-label="مساحة العمل">
-        {ActiveTabComponent ? (
-          <ActiveTabComponent />
-        ) : (
-          <NoAvailableTabs role={session.role} />
+        {allowedTabs.length === 0 && <NoAvailableTabs role={session.role} />}
+        {allowedTabs.map((tab) =>
+          mountedTabIds.has(tab.id) ? (
+            <div
+              key={tab.id}
+              style={tab.id !== activeTabId ? { display: "none" } : undefined}
+            >
+              <tab.TabComponent />
+            </div>
+          ) : null
         )}
       </section>
+
+      <FeedbackWidget />
+      <TestPanel />
     </main>
   );
 }

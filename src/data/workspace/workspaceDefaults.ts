@@ -139,9 +139,9 @@ export function createDefaultUsersPermissions(
         isSystemRole: true
       },
       {
-        id: "admin",
-        label: "إدارة",
-        description: "صلاحيات إدارة النظام والمستخدمين والصلاحيات.",
+        id: "manager",
+        label: "مدير",
+        description: "صلاحيات إدارية وتشغيلية كاملة.",
         isSystemRole: true
       }
     ],

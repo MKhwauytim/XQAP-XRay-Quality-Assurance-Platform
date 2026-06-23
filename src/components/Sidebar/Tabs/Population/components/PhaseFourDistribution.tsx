@@ -1,0 +1,412 @@
+import { getManagedLoginUsers } from "../../../../../auth/userManagement";
+import type { SampleMasterData } from "../../../../../data/sampling/sampleTypes";
+import type { DistributionCurrentData } from "../../../../../data/distribution/distributionTypes";
+import type { PopulationConfig, EmployeeStageAllocation } from "../../../../../data/population/populationConfig";
+import SummaryCard from "./SummaryCard";
+import DistributionRow from "./DistributionRow";
+import { useState, useMemo } from "react";
+import { getStageKey, formatNumber } from "./helpers";
+import { calculateBulkAssignment } from "../../../../../data/distribution/bulkAssignment";
+
+type SaveMessage = { type: "ok" | "error"; text: string } | null;
+
+type PhaseFourDistributionProps = {
+  sampleDrawResult: SampleMasterData | null;
+  distributionCurrent: DistributionCurrentData | null;
+  distributionMessage: SaveMessage;
+  isDistributing: boolean;
+  config: PopulationConfig;
+  operatorUsername: string;
+  saveMonth: number;
+  saveYear: number;
+  onConfigChange: (config: PopulationConfig) => void;
+  onAssign: (xrayImageId: string, assignedTo: string) => Promise<void>;
+  onReassign: (xrayImageId: string, reassignedTo: string) => Promise<void>;
+  onMarkComplete: (xrayImageId: string) => Promise<void>;
+  onRequestReplacement: (xrayImageId: string) => Promise<void>;
+  onApplyBulkAssignment: (events: any[]) => Promise<void>;
+};
+
+const STAGE_LABELS: Record<string, string> = {
+  first:  "المستوى الأول",
+  second: "المستوى الثاني",
+  third:  "المستوى الثالث",
+  fourth: "المستوى الرابع"
+};
+
+export default function PhaseFourDistribution({
+  sampleDrawResult,
+  distributionCurrent,
+  distributionMessage,
+  isDistributing,
+  config,
+  operatorUsername,
+  saveMonth,
+  saveYear,
+  onConfigChange,
+  onAssign,
+  onReassign,
+  onMarkComplete,
+  onRequestReplacement,
+  onApplyBulkAssignment
+}: PhaseFourDistributionProps) {
+  const [activeTab, setActiveTab] = useState<"bulk" | "manual">("bulk");
+  const [selectedStageTab, setSelectedStageTab] = useState<"first" | "second" | "third" | "fourth">("first");
+  const [bulkError, setBulkError] = useState("");
+
+  const employees = useMemo(
+    () =>
+      getManagedLoginUsers()
+        .filter((u: any) => u.isActive)
+        .map((u: any) => ({
+          username: u.username,
+          displayName: u.displayName,
+          hasCertScanLicense: u.hasCertScanLicense
+        })),
+    []
+  );
+
+  const sampleRows = sampleDrawResult?.rows || [];
+
+  const stageSampleCounts = useMemo(
+    () => ({
+      first:  sampleRows.filter((r) => getStageKey(r.stage, config.stageMappings) === "first"),
+      second: sampleRows.filter((r) => getStageKey(r.stage, config.stageMappings) === "second"),
+      third:  sampleRows.filter((r) => getStageKey(r.stage, config.stageMappings) === "third"),
+      fourth: sampleRows.filter((r) => getStageKey(r.stage, config.stageMappings) === "fourth")
+    }),
+    [sampleRows, config.stageMappings]
+  );
+
+  const activeAllocations = useMemo(() => {
+    const list: EmployeeStageAllocation[] = [];
+    const stageKeys = ["first", "second", "third", "fourth"] as const;
+    for (const sKey of stageKeys) {
+      for (const emp of employees) {
+        const existing = config.employeeAllocations.find(
+          (a) => a.username === emp.username && a.stageKey === sKey
+        );
+        list.push({
+          username: emp.username,
+          stageKey: sKey,
+          method: existing?.method || "percentage",
+          value: existing?.value !== undefined ? existing.value : 0,
+          isActive: existing?.isActive || false,
+          maxWorkload: existing?.maxWorkload
+        });
+      }
+    }
+    return list;
+  }, [config.employeeAllocations, employees]);
+
+  const handleAllocationChange = (
+    username: string,
+    stageKey: "first" | "second" | "third" | "fourth",
+    field: keyof EmployeeStageAllocation,
+    val: any
+  ) => {
+    const updated = activeAllocations.map((alloc) =>
+      alloc.username === username && alloc.stageKey === stageKey
+        ? { ...alloc, [field]: val }
+        : alloc
+    );
+    onConfigChange({ ...config, employeeAllocations: updated });
+  };
+
+  const previewData = useMemo(() => {
+    if (!sampleDrawResult) return null;
+    const { events, errors } = calculateBulkAssignment({
+      rows: sampleRows,
+      allocations: activeAllocations,
+      employees: getManagedLoginUsers(),
+      operatorUsername,
+      stageMappings: config.stageMappings,
+      month: saveMonth,
+      year: saveYear,
+    });
+
+    const summaryMap: Record<string, { cert: number; normal: number; total: number }> = {};
+    for (const emp of employees) {
+      summaryMap[emp.username] = { cert: 0, normal: 0, total: 0 };
+    }
+
+    for (const evt of events) {
+      const row = sampleRows.find((r) => r.xrayImageId === evt.xrayImageId);
+      const data = summaryMap[evt.assignedTo];
+      if (data && row) {
+        data.total += 1;
+        if (row.certScanStatus === "Certscan") data.cert += 1;
+        else data.normal += 1;
+      }
+    }
+
+    return { summaryMap, errors };
+  }, [sampleDrawResult, sampleRows, activeAllocations, employees, operatorUsername, config.stageMappings]);
+
+  if (!sampleDrawResult) {
+    return (
+      <section className="placeholder-phase">
+        <h2>توزيع العينة</h2>
+        <p>يجب إتمام سحب العينة في المرحلة السابقة أولاً.</p>
+      </section>
+    );
+  }
+
+  const entryMap = new Map(
+    (distributionCurrent?.entries ?? []).map((e: any) => [e.xrayImageId, e])
+  );
+
+  const handleRunBulkAssignment = async () => {
+    setBulkError("");
+    const { events, errors } = calculateBulkAssignment({
+      rows: sampleRows,
+      allocations: activeAllocations,
+      employees: getManagedLoginUsers(),
+      operatorUsername,
+      stageMappings: config.stageMappings,
+      month: saveMonth,
+      year: saveYear,
+    });
+
+    if (errors.length > 0) {
+      setBulkError(`تحذير: ${errors.join(" | ")} — الصفوف المتأثرة ستبقى غير معينة ويمكن تعيينها يدوياً.`);
+    }
+
+    await onApplyBulkAssignment(events);
+  };
+
+  return (
+    <section className="distribution-phase" aria-label="توزيع العينة">
+      <div className="phase-panel-header compact">
+        <div>
+          <h2>المرحلة 4: توزيع العينة</h2>
+          <p>
+            توزيع العينة الكلية على الموظفين الفعالين. يدعم التوزيع الجماعي
+            الذكي حسب كوتا كل مستوى والتوزيع اليدوي لكل صف.
+          </p>
+        </div>
+      </div>
+
+      {/* Summary Cards */}
+      {distributionCurrent && (
+        <div className="processing-summary-grid">
+          <SummaryCard label="إجمالي المعينة" value={distributionCurrent.totalAssigned} />
+          <SummaryCard label="قيد الانتظار"   value={distributionCurrent.totalPending} />
+          <SummaryCard label="مكتملة"          value={distributionCurrent.totalCompleted} />
+          <SummaryCard label="مستبدلة"         value={distributionCurrent.totalReplaced} />
+        </div>
+      )}
+
+      {distributionMessage && (
+        <div
+          className={distributionMessage.type === "ok" ? "msg-success" : "msg-error"}
+          role="status"
+        >
+          {distributionMessage.text}
+        </div>
+      )}
+
+      {/* Tab bar */}
+      <div className="dist-tab-bar" role="tablist">
+        <button
+          role="tab"
+          type="button"
+          className={`dist-tab-btn${activeTab === "bulk" ? " active" : ""}`}
+          aria-selected={activeTab === "bulk"}
+          onClick={() => setActiveTab("bulk")}
+        >
+          ⚙️ التوزيع الجماعي الذكي
+        </button>
+        <button
+          role="tab"
+          type="button"
+          className={`dist-tab-btn${activeTab === "manual" ? " active" : ""}`}
+          aria-selected={activeTab === "manual"}
+          onClick={() => setActiveTab("manual")}
+        >
+          📝 المراجعة اليدوية
+        </button>
+      </div>
+
+      {activeTab === "bulk" ? (
+        <div className="distribution-phase">
+          {/* Stage selector */}
+          <div className="dist-stage-bar" role="tablist" aria-label="اختيار المستوى">
+            {(["first", "second", "third", "fourth"] as const).map((sk) => (
+              <button
+                key={sk}
+                role="tab"
+                type="button"
+                className={`dist-stage-btn${selectedStageTab === sk ? " active" : ""}`}
+                aria-selected={selectedStageTab === sk}
+                onClick={() => setSelectedStageTab(sk)}
+              >
+                {STAGE_LABELS[sk]} ({formatNumber(stageSampleCounts[sk].length)})
+              </button>
+            ))}
+          </div>
+
+          {/* Allocation config */}
+          <div className="dist-config-card">
+            <h3>إعدادات توزيع موظفي {STAGE_LABELS[selectedStageTab]}</h3>
+            <div className="dist-alloc-table report-sheet-table" role="table">
+              <div className="dist-alloc-header" role="row">
+                <span>الموظف</span>
+                <span>تفعيل بالمستوى</span>
+                <span>طريقة التوزيع</span>
+                <span>الحصة / النسبة</span>
+                <span>ترخيص CertScan</span>
+              </div>
+
+              {employees.map((emp) => {
+                const alloc = activeAllocations.find(
+                  (a) => a.username === emp.username && a.stageKey === selectedStageTab
+                )!;
+                return (
+                  <div key={emp.username} className="dist-alloc-row" role="row">
+                    <span>
+                      {emp.displayName}{" "}
+                      <code style={{ fontSize: "11px", color: "var(--p-muted)" }}>
+                        ({emp.username})
+                      </code>
+                    </span>
+
+                    <span>
+                      <input
+                        type="checkbox"
+                        checked={alloc.isActive}
+                        onChange={(e) =>
+                          handleAllocationChange(emp.username, selectedStageTab, "isActive", e.target.checked)
+                        }
+                      />
+                    </span>
+
+                    <span>
+                      <select
+                        className="save-disk-input"
+                        disabled={!alloc.isActive}
+                        value={alloc.method}
+                        onChange={(e) =>
+                          handleAllocationChange(emp.username, selectedStageTab, "method", e.target.value)
+                        }
+                      >
+                        <option value="percentage">نسبة مئوية (%)</option>
+                        <option value="exact">عدد محدد</option>
+                      </select>
+                    </span>
+
+                    <span>
+                      <input
+                        type="number"
+                        className="save-disk-input"
+                        disabled={!alloc.isActive}
+                        min={0}
+                        value={alloc.value}
+                        onChange={(e) =>
+                          handleAllocationChange(
+                            emp.username,
+                            selectedStageTab,
+                            "value",
+                            parseInt(e.target.value, 10) || 0
+                          )
+                        }
+                      />
+                    </span>
+
+                    <span>
+                      {emp.hasCertScanLicense ? (
+                        <span className="report-status ok">✅ مرخص</span>
+                      ) : (
+                        <span className="report-status muted">❌ غير مرخص</span>
+                      )}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Preview */}
+          {previewData && (
+            <div className="dist-preview-card">
+              <h3>معاينة حصص الموظفين الناتجة (الحجم الكلي)</h3>
+              <div className="dist-alloc-table report-sheet-table" role="table">
+                <div className="dist-preview-header" role="row">
+                  <span>الموظف</span>
+                  <span>عادية</span>
+                  <span>CertScan</span>
+                  <span>المجموع المتوقع</span>
+                </div>
+
+                {employees.map((emp) => {
+                  const counts = previewData.summaryMap[emp.username] || { cert: 0, normal: 0, total: 0 };
+                  return (
+                    <div key={emp.username} className="dist-preview-row" role="row">
+                      <span>{emp.displayName}</span>
+                      <span>{counts.normal}</span>
+                      <span>{counts.cert}</span>
+                      <strong>{counts.total}</strong>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {previewData.errors.length > 0 && (
+                <div className="dist-err-block" role="alert">
+                  ⚠️ {previewData.errors.join(" | ")}
+                </div>
+              )}
+            </div>
+          )}
+
+          {bulkError && (
+            <div className="msg-error" role="alert">
+              {bulkError}
+            </div>
+          )}
+
+          <div className="dist-footer-row">
+            <button
+              type="button"
+              className="primary-action"
+              onClick={handleRunBulkAssignment}
+              disabled={isDistributing}
+            >
+              {isDistributing ? "جاري توزيع وحفظ التعيينات..." : "تطبيق وحفظ التوزيع التلقائي"}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="distribution-table-wrapper">
+          <div className="distribution-table" role="table">
+            <div className="distribution-header" role="row">
+              <span>معرف الأشعة</span>
+              <span>المنفذ</span>
+              <span>CertScan</span>
+              <span>الحالة</span>
+              <span>خبير جودة الأشعة</span>
+              <span>الإجراء</span>
+            </div>
+
+            {sampleDrawResult.rows.map((row: any) => {
+              const entry = entryMap.get(row.xrayImageId);
+              return (
+                <DistributionRow
+                  key={row.xrayImageId}
+                  row={row}
+                  entry={entry ?? null}
+                  employees={employees}
+                  isDisabled={isDistributing}
+                  onAssign={onAssign}
+                  onReassign={onReassign}
+                  onMarkComplete={onMarkComplete}
+                  onRequestReplacement={onRequestReplacement}
+                />
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}

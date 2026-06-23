@@ -1,51 +1,46 @@
 /* eslint-disable react-refresh/only-export-components */
 
-import { useMemo, useState, type FormEvent } from "react";
+import {
+  Fragment,
+  useCallback,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 
 import type { AuthRole } from "../../../../auth/authTypes";
 import { readSession } from "../../../../auth/authSession";
 import { createPasswordHash } from "../../../../auth/passwordCrypto";
 import {
+  MANAGED_FEATURE_GROUPS,
   MANAGED_ROLES,
   MANAGED_TABS,
+  TAB_FEATURE_MAP,
   createManagedUser,
+  hasFeature,
   hasRolePermission,
   isUsernameAvailable,
   normalizeUsername,
   readUserManagementState,
   writeUserManagementState,
+  type FeaturePermission,
   type ManagedLoginUser,
   type PermissionLevel,
-  type UserManagementState
+  type RolePermission,
+  type UserManagementState,
 } from "../../../../auth/userManagement";
+import { useWorkspace } from "../../../../data/workspace/useWorkspace";
+import { readJsonFile, writeJsonFile } from "../../../../data/storage/fileSystemAccess";
+import { WORKSPACE_FILE_NAMES } from "../../../../data/workspace/workspaceDefaults";
+import type { UsersPermissionsFile } from "../../../../data/workspace/workspaceTypes";
+import { WORKSPACE_SCHEMA_VERSION } from "../../../../data/workspace/workspaceTypes";
 import type { SidebarTabModule } from "../tabTypes";
 
 import "./UserManagement.css";
+import { PageHeader } from "../../../../components/PageHeader/PageHeader";
 
-type UserFormState = {
-  username: string;
-  displayName: string;
-  password: string;
-  role: AuthRole;
-  hasCertScanLicense: boolean;
-};
-
-const INITIAL_FORM_STATE: UserFormState = {
-  username: "",
-  displayName: "",
-  password: "",
-  role: "employee",
-  hasCertScanLicense: false
-};
-
-const PERMISSION_LEVELS: Array<{
-  value: PermissionLevel;
-  label: string;
-}> = [
-  { value: "none", label: "بدون" },
-  { value: "view", label: "عرض" },
-  { value: "edit", label: "تعديل" }
-];
+// ── Tab config ────────────────────────────────────────────────────────────────
 
 function UserManagementIcon() {
   return (
@@ -58,99 +53,230 @@ function UserManagementIcon() {
 export const tabConfig: SidebarTabModule["tabConfig"] = {
   id: "user-management",
   label: "إدارة المستخدمين",
-  order: 90,
-  allowedRoles: ["employee", "supervisor", "admin"],
-  icon: <UserManagementIcon />
+  order: 40,
+  allowedRoles: ["admin"],
+  icon: <UserManagementIcon />,
 };
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+type PageSection = "users" | "page-permissions" | "feature-permissions";
+type FeatureSubGroup = "workspace" | "population" | "admin";
+
+type UserFormState = {
+  username: string;
+  displayName: string;
+  password: string;
+  role: AuthRole;
+  hasCertScanLicense: boolean;
+};
+
+const INITIAL_FORM: UserFormState = {
+  username: "",
+  displayName: "",
+  password: "",
+  role: "employee",
+  hasCertScanLicense: false,
+};
+
+const PERMISSION_LABELS: Record<PermissionLevel, string> = {
+  none: "لا وصول",
+  view: "عرض فقط",
+  edit: "تعديل كامل",
+};
+
+const PERMISSION_HELP: Record<PermissionLevel, string> = {
+  none: "لا تظهر الصفحة لهذا الدور.",
+  view: "تظهر الصفحة دون إجراءات تعديل.",
+  edit: "عرض الصفحة واستخدام أدواتها.",
+};
+
+// ── Main component ────────────────────────────────────────────────────────────
 
 export default function UserManagementTab() {
   const [state, setState] = useState<UserManagementState>(() =>
     readUserManagementState()
   );
-  const [form, setForm] = useState<UserFormState>(INITIAL_FORM_STATE);
+  const [section, setSection] = useState<PageSection>("users");
+  const [featureGroup, setFeatureGroup] = useState<FeatureSubGroup>("workspace");
+  const [form, setForm] = useState<UserFormState>(INITIAL_FORM);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [search, setSearch] = useState("");
+  const [roleFilter, setRoleFilter] = useState<AuthRole | "all">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState<"ok" | "bad" | "">("");
-  const [resetPasswords, setResetPasswords] = useState<Record<string, string>>(
-    {}
-  );
+  const [resetPasswords, setResetPasswords] = useState<Record<string, string>>({});
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [collapsedParents, setCollapsedParents] = useState<Set<string>>(new Set());
+
   const session = readSession();
+  const { directoryHandle } = useWorkspace();
+  const savingToDiskRef = useRef(false);
+
   const canEdit =
     session?.role === "admin" ||
     Boolean(
       session &&
-        hasRolePermission(
-          state.permissions,
-          session.role,
-          "user-management",
-          "edit"
-        )
+        hasRolePermission(state.permissions, session.role, "user-management", "edit") &&
+        hasFeature(state.featurePermissions, session.role, "manage-users")
     );
 
-  const activeUsersCount = useMemo(
-    () => state.users.filter((user) => user.isActive).length,
+  const canEditPermissions =
+    session?.role === "admin" ||
+    Boolean(
+      session &&
+        hasFeature(state.featurePermissions, session.role, "edit-permissions")
+    );
+
+  const canResetPasswords =
+    session?.role === "admin" ||
+    Boolean(
+      session &&
+        hasFeature(state.featurePermissions, session.role, "reset-passwords")
+    );
+
+  // ── Derived lists ───────────────────────────────────────────────────────────
+
+  const activeCount = useMemo(
+    () => state.users.filter((u) => u.isActive).length,
     [state.users]
   );
 
-  function persistState(nextState: UserManagementState): void {
-    setState(nextState);
-    writeUserManagementState(nextState);
-  }
+  const filteredUsers = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return state.users.filter((u) => {
+      if (q && !u.displayName.toLowerCase().includes(q) && !u.username.includes(q)) return false;
+      if (roleFilter !== "all" && u.role !== roleFilter) return false;
+      if (statusFilter === "active" && !u.isActive) return false;
+      if (statusFilter === "inactive" && u.isActive) return false;
+      return true;
+    });
+  }, [state.users, search, roleFilter, statusFilter]);
 
-  function showMessage(nextMessage: string, nextType: "ok" | "bad"): void {
-    setMessage(nextMessage);
-    setMessageType(nextType);
-  }
+  // ── Persistence ─────────────────────────────────────────────────────────────
 
-  async function handleAddUser(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  const saveUsersToDisk = useCallback(async (next: UserManagementState): Promise<void> => {
+    if (!directoryHandle || savingToDiskRef.current) return;
+    savingToDiskRef.current = true;
+    try {
+      const actor = readSession()?.username ?? "admin";
+      const existing = await readJsonFile<UsersPermissionsFile>(
+        directoryHandle,
+        WORKSPACE_FILE_NAMES.usersPermissions
+      );
+      const prevMeta = existing.ok ? existing.file.metadata : null;
+      const now = new Date().toISOString();
 
-    if (!canEdit) {
-      showMessage("صلاحيتك الحالية للعرض فقط.", "bad");
-      return;
+      const diskFile: UsersPermissionsFile = {
+        metadata: {
+          schemaVersion: WORKSPACE_SCHEMA_VERSION,
+          fileType: "users.permissions",
+          revision: prevMeta ? prevMeta.revision + 1 : 1,
+          createdAt: prevMeta?.createdAt ?? now,
+          createdBy: prevMeta?.createdBy ?? actor,
+          updatedAt: now,
+          updatedBy: actor,
+          contentHash: "",
+        },
+        data: {
+          users: next.users.map((u) => ({
+            id: u.id,
+            username: u.username,
+            displayName: u.displayName,
+            passwordHash: u.passwordHash,
+            role: u.role,
+            isActive: u.isActive,
+            hasCertScanLicense: u.hasCertScanLicense ?? false,
+            createdAt: u.createdAt,
+            createdBy: actor,
+            updatedAt: u.updatedAt,
+            updatedBy: actor,
+          })),
+          roles: [
+            { id: "guest",      label: "ضيف",  description: "وصول قراءة فقط.",          isSystemRole: true },
+            { id: "employee",   label: "موظف",  description: "صلاحيات تشغيلية.",          isSystemRole: true },
+            { id: "supervisor", label: "مشرف",  description: "صلاحيات إشرافية.",           isSystemRole: true },
+            { id: "manager",    label: "مدير",  description: "صلاحيات إدارية وتشغيلية.", isSystemRole: true },
+          ],
+          permissions: next.permissions.map((p) => ({
+            role: p.role,
+            tabId: p.tabId,
+            access: p.access,
+          })),
+          featurePermissions: next.featurePermissions.map((f) => ({
+            role: f.role,
+            featureId: f.featureId,
+            enabled: f.enabled,
+          })),
+        },
+      };
+
+      await writeJsonFile(directoryHandle, WORKSPACE_FILE_NAMES.usersPermissions, diskFile);
+    } catch {
+      // non-fatal — localStorage is the primary store
+    } finally {
+      savingToDiskRef.current = false;
     }
+  }, [directoryHandle]);
+
+  const persistState = useCallback(
+    (next: UserManagementState): void => {
+      setState(next);
+      writeUserManagementState(next);
+      void saveUsersToDisk(next);
+    },
+    [saveUsersToDisk]
+  );
+
+  // ── Message helpers ──────────────────────────────────────────────────────────
+
+  function showMsg(text: string, type: "ok" | "bad"): void {
+    setMessage(text);
+    setMessageType(type);
+    setTimeout(() => { setMessage(""); setMessageType(""); }, 5000);
+  }
+
+  // ── User CRUD ────────────────────────────────────────────────────────────────
+
+  async function handleAddUser(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!canEdit) { showMsg("صلاحيتك للعرض فقط.", "bad"); return; }
 
     const username = normalizeUsername(form.username);
     const displayName = form.displayName.trim();
-    const password = form.password;
 
-    if (!username || !displayName || !password) {
-      showMessage("أكمل اسم المستخدم والاسم الظاهر وكلمة المرور.", "bad");
+    if (!username || !displayName || !form.password) {
+      showMsg("أكمل جميع الحقول المطلوبة.", "bad");
       return;
     }
-
     if (username === "admin") {
-      showMessage("اسم المستخدم admin محجوز لمسؤول النظام الأساسي.", "bad");
+      showMsg("اسم المستخدم «admin» محجوز للمسؤول الأساسي.", "bad");
       return;
     }
-
     if (!isUsernameAvailable(state.users, username)) {
-      showMessage("اسم المستخدم موجود مسبقا.", "bad");
+      showMsg("اسم المستخدم موجود مسبقاً.", "bad");
       return;
     }
 
     setIsSaving(true);
-
     try {
-      const passwordHash = await createPasswordHash(password);
-      const nextUser = createManagedUser({
+      const passwordHash = await createPasswordHash(form.password);
+      const newUser = createManagedUser({
         username,
         displayName,
         role: form.role,
         passwordHash,
         isActive: true,
-        hasCertScanLicense: form.hasCertScanLicense
+        hasCertScanLicense: form.hasCertScanLicense,
       });
-
-      persistState({
-        ...state,
-        users: [...state.users, nextUser]
-      });
-
-      setForm(INITIAL_FORM_STATE);
-      showMessage("تمت إضافة المستخدم.", "ok");
+      persistState({ ...state, users: [...state.users, newUser] });
+      setForm(INITIAL_FORM);
+      setShowAddForm(false);
+      showMsg("تمت إضافة المستخدم.", "ok");
     } catch {
-      showMessage("تعذر إنشاء المستخدم. حاول مرة أخرى.", "bad");
+      showMsg("تعذر إنشاء المستخدم. حاول مرة أخرى.", "bad");
     } finally {
       setIsSaving(false);
     }
@@ -158,388 +284,645 @@ export default function UserManagementTab() {
 
   function updateUser(
     userId: string,
-    updater: (user: ManagedLoginUser) => ManagedLoginUser
+    updater: (u: ManagedLoginUser) => ManagedLoginUser
   ): void {
-    if (!canEdit) {
-      showMessage("صلاحيتك الحالية للعرض فقط.", "bad");
-      return;
-    }
-
+    if (!canEdit) { showMsg("صلاحيتك للعرض فقط.", "bad"); return; }
     persistState({
       ...state,
-      users: state.users.map((user) =>
-        user.id === userId
-          ? {
-              ...updater(user),
-              updatedAt: new Date().toISOString()
-            }
-          : user
-      )
+      users: state.users.map((u) =>
+        u.id === userId ? { ...updater(u), updatedAt: new Date().toISOString() } : u
+      ),
     });
-
-    showMessage("تم تحديث المستخدم.", "ok");
+    showMsg("تم تحديث المستخدم.", "ok");
   }
 
-  async function resetUserPassword(userId: string): Promise<void> {
-    if (!canEdit) {
-      showMessage("صلاحيتك الحالية للعرض فقط.", "bad");
-      return;
-    }
-
-    const nextPassword = resetPasswords[userId]?.trim() ?? "";
-
-    if (!nextPassword) {
-      showMessage("أدخل كلمة مرور جديدة للمستخدم.", "bad");
-      return;
-    }
-
+  async function handleResetPassword(userId: string): Promise<void> {
+    if (!canResetPasswords) { showMsg("لا تملك صلاحية إعادة تعيين كلمات المرور.", "bad"); return; }
+    const next = resetPasswords[userId]?.trim() ?? "";
+    if (!next) { showMsg("أدخل كلمة المرور الجديدة.", "bad"); return; }
     setIsSaving(true);
-
     try {
-      const passwordHash = await createPasswordHash(nextPassword);
-
-      updateUser(userId, (user) => ({
-        ...user,
-        passwordHash
-      }));
-
-      setResetPasswords((current) => ({
-        ...current,
-        [userId]: ""
-      }));
-      showMessage("تم تغيير كلمة المرور.", "ok");
+      const passwordHash = await createPasswordHash(next);
+      updateUser(userId, (u) => ({ ...u, passwordHash }));
+      setResetPasswords((r) => ({ ...r, [userId]: "" }));
+      showMsg("تم تغيير كلمة المرور.", "ok");
     } catch {
-      showMessage("تعذر تغيير كلمة المرور.", "bad");
+      showMsg("تعذر تغيير كلمة المرور.", "bad");
     } finally {
       setIsSaving(false);
     }
   }
 
-  function updatePermission(
-    role: AuthRole,
-    tabId: string,
-    access: PermissionLevel
-  ): void {
-    if (!canEdit) {
-      showMessage("صلاحيتك الحالية للعرض فقط.", "bad");
+  function handleDeleteUser(userId: string): void {
+    if (!canEdit) { showMsg("صلاحيتك للعرض فقط.", "bad"); return; }
+    if (session?.username && state.users.find((u) => u.id === userId)?.username === session.username) {
+      showMsg("لا يمكنك حذف حسابك الخاص.", "bad");
       return;
     }
+    persistState({ ...state, users: state.users.filter((u) => u.id !== userId) });
+    setConfirmDelete(null);
+    showMsg("تم حذف المستخدم.", "ok");
+  }
 
-    if (role === "admin" && tabId === "user-management") {
-      access = "edit";
+  // ── Permission updaters ──────────────────────────────────────────────────────
+
+  function updateTabPermission(role: AuthRole, tabId: string, access: PermissionLevel): void {
+    if (!canEditPermissions) { showMsg("لا تملك صلاحية تعديل المصفوفة.", "bad"); return; }
+    if (role === "admin") return;
+
+    const next: RolePermission[] = state.permissions.some(
+      (p) => p.role === role && p.tabId === tabId
+    )
+      ? state.permissions.map((p) =>
+          p.role === role && p.tabId === tabId ? { ...p, access } : p
+        )
+      : [...state.permissions, { role, tabId, access }];
+
+    persistState({ ...state, permissions: next });
+  }
+
+  function updateFeaturePermission(
+    role: AuthRole,
+    featureId: string,
+    enabled: boolean
+  ): void {
+    if (!canEditPermissions) { showMsg("لا تملك صلاحية تعديل المصفوفة.", "bad"); return; }
+    if (role === "admin") return;
+
+    const next: FeaturePermission[] = state.featurePermissions.some(
+      (f) => f.role === role && f.featureId === featureId
+    )
+      ? state.featurePermissions.map((f) =>
+          f.role === role && f.featureId === featureId ? { ...f, enabled } : f
+        )
+      : [...state.featurePermissions, { role, featureId, enabled }];
+
+    persistState({ ...state, featurePermissions: next });
+  }
+
+  function getTabAccess(role: AuthRole, tabId: string): PermissionLevel {
+    if (role === "admin") return "edit";
+    const explicit = state.permissions.find((p) => p.role === role && p.tabId === tabId);
+    if (explicit) return explicit.access;
+    // Sub-tab inherits from parent when no explicit rule is set
+    const tab = MANAGED_TABS.find((t) => t.id === tabId);
+    if (tab?.parentId) {
+      return state.permissions.find((p) => p.role === role && p.tabId === tab.parentId)?.access ?? "none";
     }
+    return "none";
+  }
 
-    const nextPermissions = state.permissions.map((permission) =>
-      permission.role === role && permission.tabId === tabId
-        ? { ...permission, access }
-        : permission
-    );
-
-    const permissionExists = nextPermissions.some(
-      (permission) => permission.role === role && permission.tabId === tabId
-    );
-
-    persistState({
-      ...state,
-      permissions: permissionExists
-        ? nextPermissions
-        : [...nextPermissions, { role, tabId, access }]
+  function toggleParent(tabId: string) {
+    setCollapsedParents((prev) => {
+      const next = new Set(prev);
+      if (next.has(tabId)) next.delete(tabId); else next.add(tabId);
+      return next;
     });
-
-    showMessage("تم تحديث الصلاحيات.", "ok");
   }
 
-  function getPermission(role: AuthRole, tabId: string): PermissionLevel {
+  function getFeatureEnabled(role: AuthRole, featureId: string): boolean {
+    if (role === "admin") return true;
     return (
-      state.permissions.find(
-        (permission) => permission.role === role && permission.tabId === tabId
-      )?.access ?? "none"
+      state.featurePermissions.find((f) => f.role === role && f.featureId === featureId)
+        ?.enabled ?? false
     );
   }
 
-  return (
-    <section className="user-management-page" aria-label="إدارة المستخدمين">
-      <header className="user-management-header">
-        <div>
-          <p className="user-management-eyebrow">Administration</p>
-          <h1>إدارة المستخدمين والصلاحيات</h1>
-          <p>
-            أضف الموظفين، حدد أدوارهم، واضبط صلاحيات كل دور على مستوى العرض أو
-            التعديل.
-          </p>
-        </div>
+  // ── Render helpers ───────────────────────────────────────────────────────────
 
-        <div className="user-management-stats" aria-label="ملخص المستخدمين">
-          <span>المستخدمون</span>
-          <strong>{state.users.length}</strong>
-          <span>النشطون</span>
-          <strong>{activeUsersCount}</strong>
-        </div>
-      </header>
+  const ROLE_BADGE_COLORS: Record<string, string> = {
+    guest: "um-badge-guest",
+    employee: "um-badge-employee",
+    supervisor: "um-badge-supervisor",
+    manager: "um-badge-manager",
+    admin: "um-badge-admin",
+  };
 
-      {message ? (
-        <div className={`user-management-message ${messageType}`} role="status">
-          {message}
-        </div>
-      ) : null}
+  function RoleBadge({ role }: { role: AuthRole }) {
+    const label = MANAGED_ROLES.find((r) => r.id === role)?.label ?? role;
+    return <span className={`um-role-badge ${ROLE_BADGE_COLORS[role] ?? ""}`}>{label}</span>;
+  }
 
-      {!canEdit ? (
-        <div className="user-management-message view-only" role="status">
-          لديك صلاحية عرض فقط. لا يمكن تعديل المستخدمين أو الصلاحيات.
-        </div>
-      ) : null}
+  // ── Section: Users ───────────────────────────────────────────────────────────
 
-      <div className="user-management-grid">
-        <section className="management-panel add-user-panel">
-          <div className="management-panel-header">
-            <h2>إضافة مستخدم</h2>
-            <p>أنشئ حساب موظف أو مشرف أو مسؤول.</p>
-          </div>
-
-          <form className="user-form" onSubmit={handleAddUser}>
-            <label>
-              <span>اسم المستخدم</span>
-              <input
-                value={form.username}
-                disabled={!canEdit || isSaving}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    username: event.target.value
-                  }))
-                }
-                autoComplete="off"
-                dir="ltr"
-              />
-            </label>
-
-            <label>
-              <span>الاسم الظاهر</span>
-              <input
-                value={form.displayName}
-                disabled={!canEdit || isSaving}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    displayName: event.target.value
-                  }))
-                }
-                autoComplete="off"
-              />
-            </label>
-
-            <label>
-              <span>الدور</span>
-              <select
-                value={form.role}
-                disabled={!canEdit || isSaving}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    role: event.target.value as AuthRole
-                  }))
-                }
+  function renderUsers() {
+    return (
+      <div className="um-section">
+        {/* Toolbar */}
+        <div className="um-users-toolbar">
+          <input
+            className="um-search"
+            type="search"
+            placeholder="ابحث باسم المستخدم أو الاسم الظاهر…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            dir="rtl"
+          />
+          <div className="um-filter-pills">
+            {(["all", "active", "inactive"] as const).map((s) => (
+              <button
+                key={s}
+                className={`um-filter-pill ${statusFilter === s ? "active" : ""}`}
+                onClick={() => setStatusFilter(s)}
               >
-                {MANAGED_ROLES.map((role) => (
-                  <option key={role.id} value={role.id}>
-                    {role.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+                {s === "all" ? "الكل" : s === "active" ? "نشط" : "موقوف"}
+              </button>
+            ))}
+          </div>
+          <div className="um-filter-pills">
+            <button
+              className={`um-filter-pill ${roleFilter === "all" ? "active" : ""}`}
+              onClick={() => setRoleFilter("all")}
+            >
+              كل الأدوار
+            </button>
+            {MANAGED_ROLES.map((r) => (
+              <button
+                key={r.id}
+                className={`um-filter-pill ${roleFilter === r.id ? "active" : ""}`}
+                onClick={() => setRoleFilter(r.id)}
+              >
+                {r.label}
+              </button>
+            ))}
+          </div>
+          {canEdit && (
+            <button
+              className="um-add-btn"
+              onClick={() => setShowAddForm((v) => !v)}
+            >
+              {showAddForm ? "إلغاء" : "+ إضافة مستخدم"}
+            </button>
+          )}
+        </div>
 
-            <label className="active-toggle">
+        {/* Add user form */}
+        {showAddForm && canEdit && (
+          <form className="um-add-form" onSubmit={handleAddUser}>
+            <h3 className="um-add-form-title">مستخدم جديد</h3>
+            <div className="um-add-form-grid">
+              <label>
+                <span>اسم المستخدم</span>
+                <input
+                  value={form.username}
+                  onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))}
+                  disabled={isSaving}
+                  autoComplete="off"
+                  dir="ltr"
+                />
+              </label>
+              <label>
+                <span>الاسم الظاهر</span>
+                <input
+                  value={form.displayName}
+                  onChange={(e) => setForm((f) => ({ ...f, displayName: e.target.value }))}
+                  disabled={isSaving}
+                  autoComplete="off"
+                />
+              </label>
+              <label>
+                <span>الدور</span>
+                <select
+                  value={form.role}
+                  onChange={(e) => setForm((f) => ({ ...f, role: e.target.value as AuthRole }))}
+                  disabled={isSaving}
+                >
+                  {MANAGED_ROLES.map((r) => (
+                    <option key={r.id} value={r.id}>{r.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>كلمة المرور</span>
+                <input
+                  type="password"
+                  value={form.password}
+                  onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
+                  disabled={isSaving}
+                  autoComplete="new-password"
+                />
+              </label>
+            </div>
+            <label className="um-certcheck">
               <input
                 type="checkbox"
                 checked={form.hasCertScanLicense}
-                disabled={!canEdit || isSaving}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    hasCertScanLicense: event.target.checked
-                  }))
-                }
+                onChange={(e) => setForm((f) => ({ ...f, hasCertScanLicense: e.target.checked }))}
+                disabled={isSaving}
               />
               <span>رخصة CertScan</span>
             </label>
-
-            <label>
-              <span>كلمة المرور</span>
-              <input
-                type="password"
-                value={form.password}
-                disabled={!canEdit || isSaving}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    password: event.target.value
-                  }))
-                }
-                autoComplete="new-password"
-              />
-            </label>
-
-            <button type="submit" disabled={!canEdit || isSaving}>
-              إضافة المستخدم
+            <button type="submit" className="um-submit-btn" disabled={isSaving}>
+              {isSaving ? "جارٍ الإضافة…" : "إضافة المستخدم"}
             </button>
           </form>
-        </section>
+        )}
 
-        <section className="management-panel users-panel">
-          <div className="management-panel-header">
-            <h2>المستخدمون</h2>
-            <p>تعديل الدور، حالة الحساب، أو كلمة المرور.</p>
-          </div>
-
-          {state.users.length === 0 ? (
-            <div className="management-empty-state">
-              لا يوجد مستخدمون مضافون بعد.
+        {/* User table */}
+        {filteredUsers.length === 0 ? (
+          <div className="um-empty">لا يوجد مستخدمون مطابقون.</div>
+        ) : (
+          <div className="um-user-table">
+            <div className="um-user-table-head">
+              <span>المستخدم</span>
+              <span>الدور</span>
+              <span>الحالة / CertScan</span>
+              <span>كلمة المرور</span>
+              <span></span>
             </div>
-          ) : (
-            <div className="users-table">
-              <div className="users-table-header">
-                <span>المستخدم</span>
-                <span>الدور</span>
-                <span>الحالة</span>
-                <span>كلمة المرور</span>
-              </div>
-
-              {state.users.map((user) => (
-                <article key={user.id} className="users-table-row">
-                  <div>
-                    <strong>{user.displayName}</strong>
-                    <span dir="ltr">{user.username}</span>
+            {filteredUsers.map((user) => {
+              const isConfirmingDelete = confirmDelete === user.id;
+              return (
+                <div key={user.id} className={`um-user-row ${!user.isActive ? "um-user-inactive" : ""}`}>
+                  {/* Name + username */}
+                  <div className="um-user-name">
+                    <div className="um-user-status-dot" data-active={user.isActive} />
+                    <div>
+                      <strong>{user.displayName}</strong>
+                      <span dir="ltr">{user.username}</span>
+                    </div>
                   </div>
 
+                  {/* Role select */}
                   <select
                     value={user.role}
                     disabled={!canEdit || isSaving}
-                    onChange={(event) =>
-                      updateUser(user.id, (current) => ({
-                        ...current,
-                        role: event.target.value as AuthRole
-                      }))
+                    onChange={(e) =>
+                      updateUser(user.id, (u) => ({ ...u, role: e.target.value as AuthRole }))
                     }
+                    className="um-role-select"
                   >
-                    {MANAGED_ROLES.map((role) => (
-                      <option key={role.id} value={role.id}>
-                        {role.label}
-                      </option>
+                    {MANAGED_ROLES.map((r) => (
+                      <option key={r.id} value={r.id}>{r.label}</option>
                     ))}
                   </select>
 
-                  <div>
-                    <label className="active-toggle">
+                  {/* Toggles */}
+                  <div className="um-user-toggles">
+                    <label className="um-toggle-label">
                       <input
                         type="checkbox"
                         checked={user.isActive}
                         disabled={!canEdit || isSaving}
-                        onChange={(event) =>
-                          updateUser(user.id, (current) => ({
-                            ...current,
-                            isActive: event.target.checked
-                          }))
+                        onChange={(e) =>
+                          updateUser(user.id, (u) => ({ ...u, isActive: e.target.checked }))
                         }
                       />
                       <span>{user.isActive ? "نشط" : "موقوف"}</span>
                     </label>
-                    <label className="active-toggle">
+                    <label className="um-toggle-label">
                       <input
                         type="checkbox"
                         checked={user.hasCertScanLicense ?? false}
                         disabled={!canEdit || isSaving}
-                        onChange={(event) =>
-                          updateUser(user.id, (current) => ({
-                            ...current,
-                            hasCertScanLicense: event.target.checked
-                          }))
+                        onChange={(e) =>
+                          updateUser(user.id, (u) => ({ ...u, hasCertScanLicense: e.target.checked }))
                         }
                       />
-                      <span>رخصة CertScan</span>
+                      <span>CertScan</span>
                     </label>
                   </div>
 
-                  <div className="password-reset">
+                  {/* Password reset */}
+                  <div className="um-password-reset">
                     <input
                       type="password"
                       value={resetPasswords[user.id] ?? ""}
-                      disabled={!canEdit || isSaving}
-                      onChange={(event) =>
-                        setResetPasswords((current) => ({
-                          ...current,
-                          [user.id]: event.target.value
-                        }))
+                      disabled={!canResetPasswords || isSaving}
+                      onChange={(e) =>
+                        setResetPasswords((r) => ({ ...r, [user.id]: e.target.value }))
                       }
                       placeholder="كلمة مرور جديدة"
                       autoComplete="new-password"
                     />
                     <button
                       type="button"
-                      onClick={() => void resetUserPassword(user.id)}
-                      disabled={!canEdit || isSaving}
+                      onClick={() => void handleResetPassword(user.id)}
+                      disabled={!canResetPasswords || isSaving}
                     >
                       تحديث
                     </button>
                   </div>
-                </article>
-              ))}
-            </div>
-          )}
-        </section>
-      </div>
 
-      <section className="management-panel permission-panel">
-        <div className="management-panel-header">
-          <h2>مصفوفة الصلاحيات</h2>
-          <p>حدد صلاحية كل دور لكل تبويب: بدون، عرض، أو تعديل.</p>
+                  {/* Delete */}
+                  <div className="um-user-actions">
+                    {isConfirmingDelete ? (
+                      <>
+                        <button
+                          className="um-delete-confirm"
+                          onClick={() => handleDeleteUser(user.id)}
+                        >
+                          تأكيد الحذف
+                        </button>
+                        <button
+                          className="um-delete-cancel"
+                          onClick={() => setConfirmDelete(null)}
+                        >
+                          إلغاء
+                        </button>
+                      </>
+                    ) : (
+                      canEdit && (
+                        <button
+                          className="um-delete-btn"
+                          onClick={() => setConfirmDelete(user.id)}
+                          title="حذف المستخدم"
+                        >
+                          ✕
+                        </button>
+                      )
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── Section: Page permissions (Matrix A) ─────────────────────────────────────
+
+  function renderPermCell(role: { id: AuthRole; label: string }, tabId: string, locked: boolean, inheritedFrom?: string) {
+    const isAdminRole = role.id === "admin";
+    const current = getTabAccess(role.id, tabId);
+    // Admin always has edit everywhere — no "inherited" badge, always locked
+    const hasExplicit = isAdminRole || state.permissions.some((p) => p.role === role.id && p.tabId === tabId);
+    const isInherited = !hasExplicit && Boolean(inheritedFrom);
+    const isLocked = locked || isAdminRole || !canEditPermissions;
+    return (
+      <div className="um-matrix-cell">
+        {isInherited && (
+          <div className="um-inherit-badge" title={`موروث من ${inheritedFrom}`}>موروث</div>
+        )}
+        <div className="um-seg-group">
+          {(["none", "view", "edit"] as PermissionLevel[]).map((lvl) => (
+            <button
+              key={lvl}
+              className={`um-seg-btn um-seg-${lvl} ${current === lvl ? "active" : ""}`}
+              disabled={isLocked}
+              onClick={() => updateTabPermission(role.id, tabId, lvl)}
+              title={
+                isAdminRole ? "مسؤول النظام يملك صلاحيات كاملة دائماً"
+                : locked ? "إدارة المستخدمين مقصورة على مسؤول النظام"
+                : PERMISSION_HELP[lvl]
+              }
+              aria-label={`${role.label}: ${tabId} - ${PERMISSION_LABELS[lvl]}`}
+            >
+              {PERMISSION_LABELS[lvl]}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  function renderPagePermissions() {
+    const topLevelTabs = MANAGED_TABS.filter((t) => !t.parentId);
+
+    return (
+      <div className="um-section">
+        <div className="um-matrix-desc">
+          حدد ما إذا كان كل دور يستطيع <strong>رؤية</strong> التبويب،
+          أو <strong>تعديله</strong> بشكل كامل، أو لا يملك وصولاً إليه.
+          تعطيل الوصول لصفحة يعطّل تلقائياً جميع ميزاتها.
+          التبويبات الفرعية ترث صلاحية أبيها ما لم تُحدَّد بشكل صريح.
         </div>
 
-        <div className="permission-matrix">
-          <div className="permission-row permission-header-row">
-            <span>الدور</span>
-            {MANAGED_TABS.map((tab) => (
-              <span key={tab.id}>{tab.label}</span>
-            ))}
-          </div>
-
-          {MANAGED_ROLES.map((role) => (
-            <div key={role.id} className="permission-row">
-              <div className="role-cell">
-                <strong>{role.label}</strong>
-                <span>{role.description}</span>
-              </div>
-
-              {MANAGED_TABS.map((tab) => {
-                const currentAccess = getPermission(role.id, tab.id);
-                const isProtectedAdminPermission =
-                  role.id === "admin" && tab.id === "user-management";
-
-                return (
-                  <fieldset key={tab.id} className="permission-options">
-                    <legend>{tab.label}</legend>
-
-                    {PERMISSION_LEVELS.map((level) => (
-                      <label key={level.value}>
-                        <input
-                          type="radio"
-                          name={`${role.id}-${tab.id}`}
-                          value={level.value}
-                          checked={currentAccess === level.value}
-                          disabled={!canEdit || isProtectedAdminPermission}
-                          onChange={() =>
-                            updatePermission(role.id, tab.id, level.value)
-                          }
-                        />
-                        <span>{level.label}</span>
-                      </label>
-                    ))}
-                  </fieldset>
-                );
-              })}
+        <div className="um-permission-legend" aria-label="شرح مستويات صلاحيات الصفحات">
+          {(["edit", "view", "none"] as PermissionLevel[]).map((lvl) => (
+            <div key={lvl} className={`um-permission-legend-item um-legend-${lvl}`}>
+              <span className="um-permission-dot" aria-hidden="true" />
+              <strong>{PERMISSION_LABELS[lvl]}</strong>
+              <span>{PERMISSION_HELP[lvl]}</span>
             </div>
           ))}
         </div>
-      </section>
+
+        <div className="um-perm-table-wrap">
+          <table className="um-perm-table">
+            <thead>
+              <tr>
+                <th className="um-perm-tab-col">الصفحة / التبويب</th>
+                {MANAGED_ROLES.map((r) => (
+                  <th key={r.id} className="um-perm-role-col">
+                    <RoleBadge role={r.id} />
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {topLevelTabs.map((tab) => {
+                const subTabs = MANAGED_TABS.filter((t) => t.parentId === tab.id);
+                const locked = false;
+                const hasSubTabs = subTabs.length > 0;
+                const isCollapsed = collapsedParents.has(tab.id);
+                return (
+                  <Fragment key={tab.id}>
+                    {/* Top-level tab row — clickable when it has sub-tabs */}
+                    <tr
+                      className={`um-perm-row-parent${hasSubTabs ? " um-perm-row-expandable" : ""}`}
+                      onClick={hasSubTabs ? () => toggleParent(tab.id) : undefined}
+                    >
+                      <td className="um-perm-tab-name">
+                        {hasSubTabs && (
+                          <span
+                            className="um-parent-chevron"
+                            style={{ transform: isCollapsed ? "rotate(0deg)" : "rotate(90deg)" }}
+                            aria-hidden="true"
+                          >›</span>
+                        )}
+                        <strong>{tab.label}</strong>
+                        {hasSubTabs && (
+                          <span className="um-subtabs-count">{subTabs.length}</span>
+                        )}
+                      </td>
+                      {MANAGED_ROLES.map((role) => (
+                        <td key={role.id} className="um-perm-cell">
+                          {renderPermCell(role, tab.id, locked)}
+                        </td>
+                      ))}
+                    </tr>
+                    {/* Sub-tab rows — hidden when parent is collapsed */}
+                    {!isCollapsed && subTabs.map((sub) => (
+                      <tr key={sub.id} className="um-perm-row-child">
+                        <td className="um-perm-tab-name um-perm-subtab">
+                          <span className="um-subtab-indicator">↳</span> {sub.label}
+                        </td>
+                        {MANAGED_ROLES.map((role) => (
+                          <td key={role.id} className="um-perm-cell">
+                            {renderPermCell(role, sub.id, false, tab.label)}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Section: Feature permissions (Matrix B) ───────────────────────────────────
+
+  function renderFeaturePermissions() {
+    const currentGroup = MANAGED_FEATURE_GROUPS.find((g) => g.groupId === featureGroup);
+
+    return (
+      <div className="um-section">
+        <div className="um-matrix-desc">
+          فعّل أو عطّل صلاحيات محددة لكل دور. الميزات المرتبطة بصفحة معطَّلة الوصول
+          تظهر بلون رمادي ولا تنتج أثراً — تعطيل الصفحة يلغيها تلقائياً.
+        </div>
+
+        <div className="um-feat-nav">
+          {MANAGED_FEATURE_GROUPS.map((g) => (
+            <button
+              key={g.groupId}
+              className={`um-feat-tab ${featureGroup === g.groupId ? "active" : ""}`}
+              onClick={() => setFeatureGroup(g.groupId as FeatureSubGroup)}
+            >
+              {g.label}
+            </button>
+          ))}
+        </div>
+
+        {currentGroup && (
+          <div className="um-feat-matrix-wrap">
+            <table className="um-feat-table">
+              <thead>
+                <tr>
+                  <th className="um-feat-label-col">الميزة</th>
+                  {MANAGED_ROLES.map((r) => (
+                    <th key={r.id} className="um-feat-role-col">
+                      <RoleBadge role={r.id} />
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {currentGroup.features.map((feat) => {
+                  // Find which tab this feature belongs to (for cascade display)
+                  const parentTabId = Object.entries(TAB_FEATURE_MAP).find(([, feats]) =>
+                    feats.includes(feat.id)
+                  )?.[0];
+
+                  return (
+                    <tr key={feat.id}>
+                      <td className="um-feat-name">
+                        <strong>{feat.label}</strong>
+                        <span>{feat.description}</span>
+                      </td>
+                      {MANAGED_ROLES.map((role) => {
+                        const pageBlocked =
+                          parentTabId != null &&
+                          getTabAccess(role.id, parentTabId) === "none";
+                        const enabled = getFeatureEnabled(role.id, feat.id);
+                        return (
+                          <td key={role.id} className="um-feat-cell">
+                            <label
+                              className={`um-toggle ${pageBlocked ? "um-toggle-cascade-off" : ""}`}
+                              title={
+                                pageBlocked
+                                  ? "يتطلب تفعيل صلاحية الصفحة أولاً"
+                                  : undefined
+                              }
+                            >
+                              <input
+                                type="checkbox"
+                                checked={enabled}
+                                disabled={pageBlocked || !canEditPermissions}
+                                onChange={(e) =>
+                                  updateFeaturePermission(role.id, feat.id, e.target.checked)
+                                }
+                              />
+                              <span className="um-toggle-slider" />
+                            </label>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── Render ───────────────────────────────────────────────────────────────────
+
+  return (
+    <section className="um-page" aria-label="إدارة المستخدمين">
+      <PageHeader
+        eyebrow="Administration"
+        title="إدارة المستخدمين والصلاحيات"
+        subtitle="أضف المستخدمين، حدد أدوارهم، واضبط صلاحيات كل دور على مصفوفتين مستقلتين."
+      >
+        <div className="um-stats">
+          <div className="um-stat">
+            <span>المستخدمون</span>
+            <strong>{state.users.length}</strong>
+          </div>
+          <div className="um-stat">
+            <span>النشطون</span>
+            <strong>{activeCount}</strong>
+          </div>
+          <div className="um-stat">
+            <span>الموقوفون</span>
+            <strong>{state.users.length - activeCount}</strong>
+          </div>
+        </div>
+      </PageHeader>
+
+      {/* Status message */}
+      {message && (
+        <div className={`um-message ${messageType}`} role="status">
+          {message}
+        </div>
+      )}
+
+      {!canEdit && section === "users" && (
+        <div className="um-message view-only">
+          لديك صلاحية عرض فقط — لا يمكن إضافة مستخدمين أو تعديلهم.
+        </div>
+      )}
+
+      {!canEditPermissions && section !== "users" && (
+        <div className="um-message view-only">
+          لديك صلاحية عرض المصفوفة فقط — لا يمكن تعديل الصلاحيات.
+        </div>
+      )}
+
+      {/* Section navigation */}
+      <nav className="um-nav" aria-label="أقسام إدارة المستخدمين">
+        {(
+          [
+            { id: "users",               label: "المستخدمون" },
+            { id: "page-permissions",    label: "صلاحيات الصفحات" },
+            { id: "feature-permissions", label: "صلاحيات الميزات" },
+          ] as { id: PageSection; label: string }[]
+        ).map((s) => (
+          <button
+            key={s.id}
+            className={`um-nav-btn ${section === s.id ? "active" : ""}`}
+            onClick={() => setSection(s.id)}
+          >
+            {s.label}
+          </button>
+        ))}
+      </nav>
+
+      {/* Section content */}
+      {section === "users" && renderUsers()}
+      {section === "page-permissions" && renderPagePermissions()}
+      {section === "feature-permissions" && renderFeaturePermissions()}
     </section>
   );
 }

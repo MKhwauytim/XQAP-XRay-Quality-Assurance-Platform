@@ -1,14 +1,28 @@
-import type { PreparedPopulationRow } from "../../components/Sidebar/Tabs/Population/processing/populationProcessingTypes";
+import type { PreparedPopulationRow } from "../population/populationTypes";
 import type {
   DistributionCurrentData,
   DistributionEntry,
   DistributionEvent,
   DistributionLog,
-  DistributionStatus
+  DistributionStatus,
+  EmployeeQuota
 } from "./distributionTypes";
 
 export function createEventId(): string {
   return `evt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * Compute days remaining until the auditing deadline.
+ * Deadline = 2 days before month-end of the given month/year.
+ * e.g., for June 2025 (monthEnd = 30), deadline = 28th.
+ */
+export function computeDaysRemainingForDeadline(month: number, year: number, fromDate = new Date()): number {
+  const lastDay = new Date(year, month, 0).getDate(); // last day of month
+  const deadlineDay = lastDay - 2;
+  const deadline = new Date(year, month - 1, deadlineDay, 23, 59, 59);
+  const msRemaining = deadline.getTime() - fromDate.getTime();
+  return Math.max(0, Math.ceil(msRemaining / (1000 * 60 * 60 * 24)));
 }
 
 export function buildAssignEvent(params: {
@@ -16,6 +30,8 @@ export function buildAssignEvent(params: {
   assignedTo: string;
   eventBy: string;
   notes?: string;
+  dailyQuota?: number;
+  daysRemainingAtAssignment?: number;
 }): DistributionEvent {
   return {
     eventId: createEventId(),
@@ -24,7 +40,9 @@ export function buildAssignEvent(params: {
     assignedTo: params.assignedTo,
     eventAt: new Date().toISOString(),
     eventBy: params.eventBy,
-    notes: params.notes
+    notes: params.notes,
+    dailyQuota: params.dailyQuota,
+    daysRemainingAtAssignment: params.daysRemainingAtAssignment,
   };
 }
 
@@ -39,7 +57,7 @@ export function buildReassignEvent(params: {
     eventId: createEventId(),
     eventType: "reassigned",
     xrayImageId: params.xrayImageId,
-    assignedTo: params.reassignedTo,
+    assignedTo: params.assignedTo,
     reassignedTo: params.reassignedTo,
     eventAt: new Date().toISOString(),
     eventBy: params.eventBy,
@@ -84,6 +102,7 @@ export function buildReplacedEvent(params: {
   assignedTo: string;
   replacedById: string;
   eventBy: string;
+  notes?: string;
 }): DistributionEvent {
   return {
     eventId: createEventId(),
@@ -92,7 +111,8 @@ export function buildReplacedEvent(params: {
     assignedTo: params.assignedTo,
     replacedById: params.replacedById,
     eventAt: new Date().toISOString(),
-    eventBy: params.eventBy
+    eventBy: params.eventBy,
+    notes: params.notes
   };
 }
 
@@ -159,6 +179,31 @@ export function deriveCurrentDistribution(
   const entries = Array.from(entryMap.values());
   const now = new Date().toISOString();
 
+  // Derive per-employee quotas from "assigned" events that carry dailyQuota
+  const quotaMap: Record<string, EmployeeQuota> = {};
+  const assignCountPerEmployee: Record<string, number> = {};
+  const firstAssignEventPerEmployee: Record<string, DistributionEvent> = {};
+
+  for (const evt of log.events) {
+    if (evt.eventType === "assigned") {
+      if (!firstAssignEventPerEmployee[evt.assignedTo]) {
+        firstAssignEventPerEmployee[evt.assignedTo] = evt;
+      }
+      assignCountPerEmployee[evt.assignedTo] = (assignCountPerEmployee[evt.assignedTo] ?? 0) + 1;
+
+      if (evt.dailyQuota !== undefined && evt.daysRemainingAtAssignment !== undefined) {
+        // Use the latest "assigned" event that carries an explicit quota
+        quotaMap[evt.assignedTo] = {
+          username: evt.assignedTo,
+          sampleCount: assignCountPerEmployee[evt.assignedTo],
+          dailyQuota: evt.dailyQuota,
+          daysRemainingAtAssignment: evt.daysRemainingAtAssignment,
+          assignedAt: evt.eventAt,
+        };
+      }
+    }
+  }
+
   return {
     monthFolderName: log.monthFolderName,
     derivedAt: now,
@@ -166,6 +211,7 @@ export function deriveCurrentDistribution(
     totalCompleted: entries.filter((e) => e.status === "completed").length,
     totalReplaced: entries.filter((e) => e.status === "replaced").length,
     totalPending: entries.filter((e) => e.status === "pending").length,
-    entries
+    entries,
+    quotas: Object.keys(quotaMap).length > 0 ? quotaMap : undefined,
   };
 }

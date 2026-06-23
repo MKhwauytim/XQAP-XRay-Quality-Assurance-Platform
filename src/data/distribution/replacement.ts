@@ -1,0 +1,166 @@
+/**
+ * Replacement business logic — candidate selection + atomic execution.
+ *
+ * Rules implemented (per spec §13.3 / §13.5):
+ *  1. Candidate must be same CertScan tier as the dead row (preserve ratio + license).
+ *  2. Candidate must not already be in the sample master (dedup, ISSUE-004).
+ *  3. Candidate must not already have a distribution event (dedup against owned rows).
+ *  4. Preferred pool: same stage → same port (recommended) or same stage (all).
+ *  5. Cascade: if same-stage pool empty, fall back to the stage with the most remaining
+ *     candidates of the same tier (spec §13.3 highest-supply cascade).
+ *  6. Execution is atomic-enough: sample row appended first (idempotent guard), then
+ *     distribution events written. Events are the source of truth; a partial failure
+ *     between the two writes can be detected and retried by the caller.
+ */
+
+import type { PreparedPopulationRow } from "../population/populationTypes";
+import type { DistributionEntry } from "./distributionTypes";
+import type { SampleMasterData } from "../sampling/sampleTypes";
+import { getStageKey } from "../population/stageHelpers";
+import type { StageAliasMappings } from "../population/populationConfig";
+import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import { appendSampleRow } from "../sampling/sampleStorage";
+import {
+  appendDistributionEvents,
+} from "./distributionStorage";
+import {
+  buildAssignEvent,
+  buildReplacedEvent,
+} from "./distributionLog";
+
+export type ReplacementCandidates = {
+  recommended: PreparedPopulationRow[];
+  all: PreparedPopulationRow[];
+};
+
+/**
+ * Compute valid replacement candidates for a dead distribution entry.
+ *
+ * @param entry       The entry being replaced (dead row).
+ * @param populationRows  All processed rows for the month.
+ * @param sampleMaster    Current sample master (rows in sample are excluded).
+ * @param allEntries      All distribution entries (owned rows are excluded).
+ * @param stageMappings   Optional stage alias overrides.
+ */
+export function getReplacementCandidates(
+  entry: DistributionEntry,
+  populationRows: PreparedPopulationRow[],
+  sampleMaster: SampleMasterData,
+  allEntries: DistributionEntry[],
+  stageMappings?: Partial<StageAliasMappings>
+): ReplacementCandidates {
+  // Build exclusion sets.
+  const sampleIds = new Set(sampleMaster.rows.map((r) => r.xrayImageId));
+  const ownedIds  = new Set(allEntries.map((e) => e.xrayImageId));
+  const deadStageKey = getStageKey(entry.row.stage, stageMappings);
+  const deadTier     = entry.row.certScanStatus;
+
+  // Base pool: valid id, not the dead row itself, not already sampled, not owned, same tier.
+  const base = populationRows.filter(
+    (row) =>
+      Boolean(row.xrayImageId) &&
+      row.xrayImageId !== entry.xrayImageId &&
+      !sampleIds.has(row.xrayImageId) &&
+      !ownedIds.has(row.xrayImageId) &&
+      row.certScanStatus === deadTier
+  );
+
+  // Primary pool: same stage.
+  const sameStage = base.filter(
+    (row) => getStageKey(row.stage, stageMappings) === deadStageKey
+  );
+
+  // Recommended: same stage AND same port (strict, no fallback).
+  const recommended = sameStage.filter(
+    (row) => row.portName === entry.row.portName
+  );
+
+  if (sameStage.length > 0) {
+    return { recommended, all: sameStage };
+  }
+
+  const rowsByStage = new Map<string, PreparedPopulationRow[]>();
+  for (const row of base) {
+    const stageKey = getStageKey(row.stage, stageMappings);
+    const rows = rowsByStage.get(stageKey) ?? [];
+    rows.push(row);
+    rowsByStage.set(stageKey, rows);
+  }
+
+  const fallbackStage = Array.from(rowsByStage.entries()).sort(
+    ([stageA, rowsA], [stageB, rowsB]) =>
+      rowsB.length - rowsA.length || stageA.localeCompare(stageB)
+  )[0];
+
+  return { recommended: [], all: fallbackStage?.[1] ?? [] };
+}
+
+export type ExecuteReplacementResult =
+  | { ok: true; updatedSample: SampleMasterData }
+  | { ok: false; error: string; partialSampleWrite?: true };
+
+/**
+ * Execute a replacement: atomically-enough appends the new row to the sample
+ * master and writes the distribution events.
+ *
+ * Ordering: sample append first (idempotent), then events (source of truth).
+ * If the events write fails after a successful sample append, the error result
+ * carries `partialSampleWrite: true` so the caller can surface a recoverable
+ * error and prompt the user to retry — on retry the sample append is a no-op.
+ *
+ * Pre-conditions:
+ *  - `deadEntry.status` should be "pending" (not already replaced/completed).
+ *  - `replacementRow` should still be eligible (callers should re-check after any delay).
+ */
+export async function executeReplacement(params: {
+  directoryHandle: DirectoryHandleLike;
+  monthFolderName: string;
+  deadEntry: DistributionEntry;
+  replacementRow: PreparedPopulationRow;
+  reason: string;
+  eventBy: string;
+}): Promise<ExecuteReplacementResult> {
+  const { directoryHandle, monthFolderName, deadEntry, replacementRow, reason, eventBy } = params;
+
+  // Guard: dead row must not already be replaced or completed.
+  if (deadEntry.status === "replaced" || deadEntry.status === "completed") {
+    return {
+      ok: false,
+      error: `لا يمكن استبدال هذه العينة — الحالة الحالية: ${deadEntry.status}.`
+    };
+  }
+
+  // Step 1: append replacement row to sample master (idempotent — safe to retry).
+  const sampleResult = await appendSampleRow(directoryHandle, monthFolderName, replacementRow);
+  if (!sampleResult.ok) {
+    return { ok: false, error: sampleResult.error };
+  }
+
+  // Step 2: write the distribution events (source of truth).
+  const events = [
+    buildAssignEvent({
+      xrayImageId: replacementRow.xrayImageId,
+      assignedTo: deadEntry.assignedTo,
+      eventBy,
+      notes: `استبدال للمعرف ${deadEntry.xrayImageId} — ${reason}`,
+    }),
+    buildReplacedEvent({
+      xrayImageId: deadEntry.xrayImageId,
+      assignedTo: deadEntry.assignedTo,
+      replacedById: replacementRow.xrayImageId,
+      eventBy,
+      notes: reason,
+    }),
+  ];
+
+  const eventsResult = await appendDistributionEvents(directoryHandle, monthFolderName, events);
+  if (!eventsResult.ok) {
+    return {
+      ok: false,
+      error: `تمت إضافة البديل للعينة لكن فشل تسجيل الحدث — يُرجى المحاولة مرة أخرى: ${eventsResult.error}`,
+      partialSampleWrite: true,
+    };
+  }
+
+  return { ok: true, updatedSample: sampleResult.data };
+}

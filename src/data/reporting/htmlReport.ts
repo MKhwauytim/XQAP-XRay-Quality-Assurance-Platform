@@ -80,12 +80,12 @@ export function openOrDownload(html: string, filename: string): void {
 }
 
 export function formatNum(n: number): string {
-  return n.toLocaleString("ar-SA");
+  return n.toLocaleString("ar-SA-u-nu-latn");
 }
 
 export function formatDate(iso: string): string {
   try {
-    return new Date(iso).toLocaleString("ar-SA");
+    return new Date(iso).toLocaleString("ar-SA-u-nu-latn");
   } catch {
     return iso;
   }

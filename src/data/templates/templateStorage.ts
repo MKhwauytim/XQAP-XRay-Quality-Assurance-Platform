@@ -59,7 +59,9 @@ export async function loadTemplate(
       dir,
       `${templateId}.json`
     );
-    return result.ok ? result.value : null;
+    return result.ok && typeof result.value.templateId === "string"
+      ? result.value
+      : null;
   } catch {
     return null;
   }
@@ -95,14 +97,15 @@ export async function deleteTemplate(
       await safeWriteJson(dir, INDEX_FILE, updated);
     }
 
-    // Overwrite the template file with empty placeholder (can't delete via FileSystemAccess without removeEntry)
-    const fileHandle = await dir.getFileHandle(`${templateId}.json`, {
-      create: false
-    });
-    if (!fileHandle.createWritable) return { ok: true };
-    const writable = await fileHandle.createWritable();
-    await writable.write("{}");
-    await writable.close();
+    if (dir.removeEntry) {
+      await dir.removeEntry(`${templateId}.json`);
+    } else {
+      await safeWriteJson(dir, `${templateId}.json`, {
+        deleted: true,
+        templateId,
+        deletedAt: new Date().toISOString()
+      });
+    }
 
     return { ok: true };
   } catch (err) {
@@ -117,4 +120,8 @@ export function createTemplateId(): string {
 
 export function createFieldId(): string {
   return `fld-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export function createPhaseId(): string {
+  return `phs-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }

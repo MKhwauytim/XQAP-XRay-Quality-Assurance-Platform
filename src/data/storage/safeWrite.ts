@@ -55,12 +55,17 @@ function parses(text: string | null): boolean {
   }
 }
 
+// Large files still get a raw read-back comparison, but skip the extra JSON.parse
+// to avoid doubling parse cost for population.final.json-sized writes.
+const VERIFY_SIZE_LIMIT = 512 * 1024; // 512 KB
+
 export async function safeWriteJson<T>(
   dir: DirectoryHandleLike,
   fileName: string,
   value: T
 ): Promise<void> {
   const serialized = `${JSON.stringify(value, null, 2)}\n`;
+  const skipVerify = serialized.length > VERIFY_SIZE_LIMIT;
 
   await withResourceLock(fileName, async () => {
     const current = await readText(dir, fileName);
@@ -71,7 +76,8 @@ export async function safeWriteJson<T>(
     await writeText(dir, fileName, serialized);
 
     const verify = await readText(dir, fileName);
-    if (!parses(verify)) {
+    const verifyOk = skipVerify ? verify === serialized : parses(verify);
+    if (!verifyOk) {
       const bak = await readText(dir, `${fileName}.bak`);
       if (parses(bak)) {
         await writeText(dir, fileName, bak as string);
@@ -97,6 +103,11 @@ export async function safeReadJson<T>(
 
   const bak = await readText(dir, `${fileName}.bak`);
   if (parses(bak)) {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("data:recovered-from-bak", { detail: { fileName } })
+      );
+    }
     return {
       ok: true,
       value: JSON.parse(bak as string) as T,

@@ -3,7 +3,7 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import type { SidebarTabModule } from "../tabTypes";
 import {
-  loadDistributionCurrent
+  loadOrDeriveDistributionCurrent
 } from "../../../../data/distribution/distributionStorage";
 import { listMonthFolders } from "../../../../data/population/populationStorage";
 import { buildDistributionReport } from "../../../../data/reporting/distributionReport";
@@ -12,6 +12,7 @@ import { buildSampleReport } from "../../../../data/reporting/sampleReport";
 import { loadSampleMaster } from "../../../../data/sampling/sampleStorage";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
 import "./Reports.css";
+import { PageHeader } from "../../../../components/PageHeader/PageHeader";
 
 function ReportsIcon(): ReactNode {
   return (
@@ -25,7 +26,7 @@ export const tabConfig: SidebarTabModule["tabConfig"] = {
   id: "reports",
   label: "التقارير",
   order: 25,
-  allowedRoles: ["supervisor", "admin"],
+  allowedRoles: ["guest", "supervisor", "manager", "admin"],
   icon: <ReportsIcon />
 };
 
@@ -73,7 +74,10 @@ export default function ReportsTab() {
         openOrDownload(html, `تقرير_العينة_${selectedMonth}.html`);
         setMessage({ type: "ok", text: "تم فتح التقرير." });
       } else if (reportType === "distribution") {
-        const data = await loadDistributionCurrent(directoryHandle, selectedMonth);
+        const sample = await loadSampleMaster(directoryHandle, selectedMonth);
+        const data = sample
+          ? await loadOrDeriveDistributionCurrent(directoryHandle, selectedMonth, sample.rows)
+          : null;
         if (!data) {
           setMessage({ type: "error", text: "لم يتم العثور على بيانات توزيع لهذا الشهر." });
           return;
@@ -99,13 +103,11 @@ export default function ReportsTab() {
 
   return (
     <section className="rpt-page" dir="rtl">
-      <header className="rpt-header">
-        <div>
-          <p className="rpt-eyebrow">Reports</p>
-          <h1>التقارير</h1>
-          <p>توليد تقارير HTML من بيانات العينة والتوزيع.</p>
-        </div>
-      </header>
+      <PageHeader
+        eyebrow="Reports"
+        title="التقارير"
+        subtitle="توليد تقارير HTML من بيانات العينة والتوزيع."
+      />
 
       {message ? (
         <div

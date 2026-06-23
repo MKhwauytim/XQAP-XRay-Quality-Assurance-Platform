@@ -59,6 +59,10 @@ export type DirectoryHandleLike = {
     name: string,
     options?: { create?: boolean }
   ) => Promise<DirectoryHandleLike>;
+  removeEntry?: (
+    name: string,
+    options?: { recursive?: boolean }
+  ) => Promise<void>;
   queryPermission?: (descriptor?: {
     mode?: FileSystemPermissionMode;
   }) => Promise<FileSystemPermissionState>;
@@ -91,7 +95,7 @@ export function isFileSystemAccessSupported(): boolean {
 }
 
 export async function selectWorkspaceDirectory(
-  mode: FileSystemPermissionMode = "read"
+  mode: FileSystemPermissionMode = "readwrite"
 ): Promise<DirectoryHandleLike> {
   const picker = (window as FilePickerWindow).showDirectoryPicker;
 
@@ -139,7 +143,7 @@ export async function checkWorkspaceStructure(
 ): Promise<WorkspaceStructureCheckResult> {
   const hasReadPermission = await ensureDirectoryPermission(
     directoryHandle,
-    "read"
+    "readwrite"
   );
 
   if (!hasReadPermission) {
@@ -147,7 +151,7 @@ export async function checkWorkspaceStructure(
       status: "permission_denied",
       missingItems: [],
       invalidItems: [],
-      message: "لم يتم منح صلاحية قراءة مجلد مساحة العمل."
+      message: "لم يتم منح صلاحية القراءة والكتابة لمجلد مساحة العمل."
     };
   }
 

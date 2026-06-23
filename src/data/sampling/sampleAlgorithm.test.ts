@@ -1,7 +1,9 @@
 import { expect, test } from "vitest";
 
-import type { PreparedPopulationRow } from "../../components/Sidebar/Tabs/Population/processing/populationProcessingTypes";
+import type { PreparedPopulationRow } from "../population/populationTypes";
+import type { StageSamplingRule } from "../population/populationConfig";
 import { drawSample } from "./sampleAlgorithm";
+import { getStageKey } from "../population/stageHelpers";
 
 function makeRow(
   id: string,
@@ -14,6 +16,7 @@ function makeRow(
     certScanStatus,
     stage: null,
     xrayEntryDate: null,
+    portCode: null,
     portType: null,
     declarationNumber: null,
     declarationDate: null,
@@ -138,3 +141,47 @@ test("drawSample portAllocations total matches totalActual", () => {
   // But total rows in data.rows should match totalActual.
   expect(result.data.rows.length).toBe(result.data.totalActual);
 });
+
+test("drawSample with stage-specific rules draws correct counts", () => {
+  // Setup rows in Stage 1 and Stage 2
+  const rows = [
+    ...makeRows("بري", 5, 5).map(r => ({ ...r, stage: "FIRST_STAGE" })), // 10 total
+    ...makeRows("بحري", 10, 10).map(r => ({ ...r, stage: "SECOND_STAGE" })) // 20 total
+  ];
+
+  const samplingRules: StageSamplingRule[] = [
+    {
+      stageKey: "first",
+      method: "percentage",
+      value: 100, // should draw 10
+      isLocked: true,
+      minRequiredCount: 0,
+      certScanPercentage: 0,
+      certScanExactCount: 0,
+      certScanMethod: "percentage",
+      certScanStrategy: "preferred"
+    },
+    {
+      stageKey: "second",
+      method: "exact",
+      value: 5, // should draw 5
+      isLocked: false,
+      minRequiredCount: 2,
+      certScanPercentage: 50, // 50% of 5 -> 2 certscan records
+      certScanExactCount: 0,
+      certScanMethod: "percentage",
+      certScanStrategy: "preferred"
+    }
+  ];
+
+  const result = drawSample(rows, { rngSeed: "stages-test", samplingRules }, "user");
+  expect(result.ok).toBe(true);
+  if (!result.ok) return;
+
+  expect(result.data.totalActual).toBe(15);
+  const firstStageDrawn = result.data.rows.filter(r => getStageKey(r.stage) === "first");
+  const secondStageDrawn = result.data.rows.filter(r => getStageKey(r.stage) === "second");
+  expect(firstStageDrawn).toHaveLength(10);
+  expect(secondStageDrawn).toHaveLength(5);
+});
+
