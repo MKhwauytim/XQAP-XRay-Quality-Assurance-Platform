@@ -42,6 +42,18 @@ export type ReplacementCandidates = {
  * @param allEntries      All distribution entries (owned rows are excluded).
  * @param stageMappings   Optional stage alias overrides.
  */
+function capRandom<T>(pool: T[], limit: number): T[] {
+  if (pool.length <= limit) return pool;
+  const copy = pool.slice();
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j]!, copy[i]!];
+  }
+  return copy.slice(0, limit);
+}
+
+const REPLACEMENT_POOL_LIMIT = 1000;
+
 export function getReplacementCandidates(
   entry: DistributionEntry,
   populationRows: PreparedPopulationRow[],
@@ -76,7 +88,10 @@ export function getReplacementCandidates(
   );
 
   if (sameStage.length > 0) {
-    return { recommended, all: sameStage };
+    return {
+      recommended: capRandom(recommended, REPLACEMENT_POOL_LIMIT),
+      all: capRandom(sameStage, REPLACEMENT_POOL_LIMIT),
+    };
   }
 
   const rowsByStage = new Map<string, PreparedPopulationRow[]>();
@@ -92,7 +107,7 @@ export function getReplacementCandidates(
       rowsB.length - rowsA.length || stageA.localeCompare(stageB)
   )[0];
 
-  return { recommended: [], all: fallbackStage?.[1] ?? [] };
+  return { recommended: [], all: capRandom(fallbackStage?.[1] ?? [], REPLACEMENT_POOL_LIMIT) };
 }
 
 export type ExecuteReplacementResult =

@@ -15,12 +15,13 @@ import "./DataTable.css";
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
-export type DateFormatMode = "date" | "time" | "month";
+export type DateFormatMode = "date" | "time" | "month" | "datetime";
 
 export const DATE_FORMAT_LABELS: Record<DateFormatMode, string> = {
-  date:  "التاريخ",
-  time:  "الوقت",
-  month: "الشهر",
+  date:     "التاريخ",
+  time:     "الوقت",
+  month:    "الشهر",
+  datetime: "التاريخ والوقت",
 };
 
 /** Column definition – generic over the row type */
@@ -118,6 +119,11 @@ export function formatDate(raw: string, mode: DateFormatMode): string {
     if (mode === "date")  return d.toLocaleDateString("ar-SA-u-nu-latn", { year: "numeric", month: "2-digit", day: "2-digit" });
     if (mode === "time")  return d.toLocaleTimeString("ar-SA-u-nu-latn", { hour: "2-digit", minute: "2-digit" });
     if (mode === "month") return d.toLocaleDateString("ar-SA-u-nu-latn", { year: "numeric", month: "long" });
+    if (mode === "datetime") {
+      const date = d.toLocaleDateString("ar-SA-u-nu-latn", { year: "numeric", month: "2-digit", day: "2-digit" });
+      const time = d.toLocaleTimeString("ar-SA-u-nu-latn", { hour: "2-digit", minute: "2-digit" });
+      return `${date} ${time}`;
+    }
   } catch { /**/ }
   return raw;
 }
@@ -347,17 +353,27 @@ export default function DataTable<TRow>({
     setDetectedDates(detected);
   }, [rows, columns]);
 
-  // Visible columns: ordered, not hidden, respecting adminOnly.
-  // alwaysVisible columns that are absent from the saved order (e.g. added after the
-  // config was persisted) are prepended so they always appear.
-  const orderedIds = new Set(colCfg.order);
-  const missingAlways = columns.filter((c) => c.alwaysVisible && !orderedIds.has(c.id));
-  const visibleCols = [
-    ...missingAlways,
-    ...colCfg.order
-      .map((id) => columns.find((c) => c.id === id))
-      .filter((c): c is DataTableCol<TRow> => !!c),
-  ].filter((c) => !colCfg.hidden.includes(c.id) && (!c.adminOnly || isAdmin));
+  // Reconcile the persisted column order with the current column set:
+  //  • keep known ids in their saved position,
+  //  • prepend any missing alwaysVisible columns (e.g. the row-select checkbox),
+  //  • append any other columns added after the config was persisted (so a newly
+  //    added column like "تاريخ رصد الخبير" never silently vanishes),
+  //  • drop ids for columns that no longer exist.
+  // visibleCols and the drag handlers all read from this normalized order.
+  const normalizedOrder = useMemo(() => {
+    const known = new Set(columns.map((c) => c.id));
+    const kept = colCfg.order.filter((id) => known.has(id));
+    const keptSet = new Set(kept);
+    const missingAlways = columns.filter((c) => c.alwaysVisible && !keptSet.has(c.id)).map((c) => c.id);
+    const missingRest = columns.filter((c) => !c.alwaysVisible && !keptSet.has(c.id)).map((c) => c.id);
+    return [...missingAlways, ...kept, ...missingRest];
+  }, [columns, colCfg.order]);
+
+  // Visible columns: normalized order, not hidden, respecting adminOnly.
+  const visibleCols = normalizedOrder
+    .map((id) => columns.find((c) => c.id === id))
+    .filter((c): c is DataTableCol<TRow> => !!c)
+    .filter((c) => !colCfg.hidden.includes(c.id) && (!c.adminOnly || isAdmin));
 
   // Global search — match any visible column's raw value (debounced to avoid per-keystroke scans)
   const searchTerm = debouncedSearch;
@@ -416,9 +432,12 @@ export default function DataTable<TRow>({
   function handleDrop(targetId: string): void {
     const srcId = dragColRef.current;
     if (!srcId || srcId === targetId) return;
-    const order = [...colCfg.order];
+    // Operate on the normalized order so columns missing from the persisted order
+    // (added in a newer version) can be reordered instead of corrupting the array.
+    const order = [...normalizedOrder];
     const sp = order.indexOf(srcId);
     const tp = order.indexOf(targetId);
+    if (sp < 0 || tp < 0) return;
     order.splice(sp, 1);
     order.splice(tp, 0, srcId);
     setColCfg({ ...colCfg, order });
@@ -756,9 +775,15 @@ function ColPickerPanel({
               onDrop={(e) => {
                 const srcId = e.dataTransfer.getData("colId");
                 if (!srcId || srcId === col.id) return;
-                const order = [...cfg.order];
+                // Normalize against the current columns so a column missing from the
+                // persisted order (added later) can be reordered safely.
+                const known = new Set(columns.map((c) => c.id));
+                const kept = cfg.order.filter((id) => known.has(id));
+                const keptSet = new Set(kept);
+                const order = [...kept, ...columns.filter((c) => !keptSet.has(c.id)).map((c) => c.id)];
                 const sp = order.indexOf(srcId);
                 const tp = order.indexOf(col.id);
+                if (sp < 0 || tp < 0) return;
                 order.splice(sp, 1);
                 order.splice(tp, 0, srcId);
                 onChange({ ...cfg, order });

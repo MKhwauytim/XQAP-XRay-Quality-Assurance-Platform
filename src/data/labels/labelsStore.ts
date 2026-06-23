@@ -59,6 +59,7 @@ export const DEFAULT_LABELS = {
   col_port_name:                 "المنفذ",
   col_xray_entry_date:           "تاريخ دخول صورة الأشعة",
   col_distribution_date:         "تاريخ التوزيع",
+  col_expert_observation_date:   "تاريخ رصد الخبير",
   col_plate_or_container_number: "لوحة / حاوية",
   col_answer_status:             "الحالة",
   col_xray_l1_result:            "نتيجة L1",

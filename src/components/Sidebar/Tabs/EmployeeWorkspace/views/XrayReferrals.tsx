@@ -93,6 +93,7 @@ function buildXrayColumns(L: Labels): DataTableCol<DistributionEntry>[] {
     ],
     accessor: () => null,
   },
+  { id: "submittedAt",            label: L.col_expert_observation_date,   widthFr: 13, isDate: true, accessor: () => null },
   { id: "xrayLevelOneResult",     label: L.col_xray_l1_result,            widthFr: 8,  accessor: (e) => e.row.xrayLevelOneResult },
   { id: "xrayLevelTwoResult",     label: L.col_xray_l2_result,            widthFr: 8,  accessor: (e) => e.row.xrayLevelTwoResult },
   { id: "certScanStatus",         label: L.col_certscan_status,           widthFr: 9,  accessor: (e) => e.row.certScanStatus },
@@ -111,7 +112,7 @@ function buildXrayColumns(L: Labels): DataTableCol<DistributionEntry>[] {
 
 const DEFAULT_VISIBLE = [
   "xrayImageId", "stage", "assignedTo", "portName",
-  "xrayEntryDate", "lastEventAt", "plateOrContainerNumber", "answerStatus",
+  "xrayEntryDate", "lastEventAt", "plateOrContainerNumber", "answerStatus", "submittedAt",
 ];
 
 const COL_KEY = "xray_ref_cols_v4";
@@ -217,6 +218,8 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   const [populationRows, setPopulationRows] = useState<PreparedPopulationRow[]>([]);
   const [replacementDialog, setReplacementDialog] = useState<ReplacementDialogState>(null);
   const [replacementError, setReplacementError] = useState<string | null>(null);
+  // Supervisor/admin-only filter: "مسنداتي فقط" shows only rows assigned to the current user.
+  const [showMyOnly, setShowMyOnly] = useState(false);
   const [replacementBusy, setReplacementBusy] = useState(false);
   const [colPreset, setColPreset]     = useState<ColConfig | undefined>(undefined);
   const [myQuota, setMyQuota]         = useState<{ dailyQuota: number; daysRemaining: number; sampleCount: number } | null>(null);
@@ -237,7 +240,8 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       if (p) {
         setColPreset({
           order:   p.columnOrder,
-          hidden:  baseColumns.map((c) => c.id).filter((id) => !p.visibleColumns.includes(id)),
+          // Only hide columns the preset knew about; columns added later default visible.
+          hidden:  baseColumns.map((c) => c.id).filter((id) => !p.visibleColumns.includes(id) && p.columnOrder.includes(id)),
           widths:  p.widths ?? {},
           dateFmt: (p.dateFmt ?? {}) as ColConfig["dateFmt"],
         });
@@ -245,12 +249,31 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     });
   }, [baseColumns, directoryHandle, username]);
 
+  // O(1) answer lookup keyed by `${xrayImageId}::${answeredBy}`.
+  const answersMap = useMemo(() => {
+    const m = new Map<string, ItemAnswer>();
+    for (const a of answers) {
+      m.set(`${a.xrayImageId}::${a.answeredBy}`, a);
+    }
+    return m;
+  }, [answers]);
+
   const columns = useMemo<DataTableCol<DistributionEntry>[]>(() => {
-    const mapped = baseColumns.map((col) =>
-      col.id === "stage"
-        ? { ...col, accessor: (entry: DistributionEntry) => formatStageLabel(entry.row.stage, stageMappings) }
-        : col
-    );
+    const mapped = baseColumns.map((col) => {
+      if (col.id === "stage") {
+        return { ...col, accessor: (entry: DistributionEntry) => formatStageLabel(entry.row.stage, stageMappings) };
+      }
+      // The submitted-at timestamp lives on the answer, not the distribution entry,
+      // so inject an accessor that reads it from the answers map (renders + exports).
+      if (col.id === "submittedAt") {
+        return {
+          ...col,
+          accessor: (entry: DistributionEntry) =>
+            answersMap.get(`${entry.xrayImageId}::${entry.assignedTo}`)?.submittedAt ?? null,
+        };
+      }
+      return col;
+    });
     // Checkbox column only for employees — admin/supervisor have no referral actions.
     // The accessor returns a stable empty string; actual checked state is read from
     // selectedIds inside renderCell so this memo doesn't re-create on every checkbox tick.
@@ -263,7 +286,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       accessor: () => "",
     };
     return [selectCol, ...mapped];
-  }, [baseColumns, stageMappings, canSeeAll]);
+  }, [baseColumns, stageMappings, canSeeAll, answersMap]);
 
   const effectiveColConfig = useMemo(
     () => colPreset ?? loadLocalColConfig(columns) ?? buildDefaultColConfig(columns),
@@ -275,14 +298,11 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     [columns, effectiveColConfig, canSeeAll]
   );
 
-  // O(1) answer lookup keyed by `${xrayImageId}::${answeredBy}`.
-  const answersMap = useMemo(() => {
-    const m = new Map<string, ItemAnswer>();
-    for (const a of answers) {
-      m.set(`${a.xrayImageId}::${a.answeredBy}`, a);
-    }
-    return m;
-  }, [answers]);
+  // Filtered view for supervisors/admins: "مسنداتي فقط" shows only their own assigned rows.
+  const displayEntries = useMemo(
+    () => (canSeeAll && showMyOnly ? entries.filter((e) => e.assignedTo === username) : entries),
+    [entries, canSeeAll, showMyOnly, username]
+  );
 
   const loadData = useCallback(async () => {
     if (!selMonth) return;
@@ -546,6 +566,10 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       ? formatStageLabel(entry.row.stage, stageMappings)
       : col.accessor(entry);
     if (!raw) return <span className="dt-muted">{L.value_empty}</span>;
+    // The expert observation timestamp is shown with date AND time by default.
+    if (col.id === "submittedAt") {
+      return <span className="dt-cell">{formatDate(raw, dateFmt === "date" ? "datetime" : dateFmt)}</span>;
+    }
     if (isDate) return <span className="dt-cell">{formatDate(raw, dateFmt)}</span>;
     return <span className="dt-cell">{raw}</span>;
   }
@@ -604,7 +628,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       {(loadState === "ready" || loadState === "idle") && (
         <DataTable<DistributionEntry>
           columns={columns}
-          rows={entries}
+          rows={displayEntries}
           getRowKey={(e) => e.xrayImageId}
           renderCell={renderCell}
           storageKey={COL_KEY}
@@ -643,6 +667,25 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           }
           toolbarStart={
             <>
+              {canSeeAll && (
+                <div className="ew-view-switcher" role="group" aria-label="نطاق العرض">
+                  <button
+                    type="button"
+                    className={`ew-view-seg${!showMyOnly ? " active" : ""}`}
+                    onClick={() => setShowMyOnly(false)}
+                  >
+                    الكل
+                  </button>
+                  <button
+                    type="button"
+                    className={`ew-view-seg${showMyOnly ? " active" : ""}`}
+                    onClick={() => setShowMyOnly(true)}
+                  >
+                    مسنداتي فقط
+                  </button>
+                </div>
+              )}
+
               <label className="ew-label" htmlFor="ref-month">
                 {L.label_month}
                 <select
