@@ -1,0 +1,2049 @@
+[
+  {
+    "id": "TC001",
+    "title": "Open the app shell after granting workspace access",
+    "description": "This verifies that a first-run user can choose a workspace folder and land in the role-filtered app shell after login.",
+    "category": "First-run setup",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Log in with managed user credentials"
+      },
+      {
+        "type": "action",
+        "description": "Choose a workspace folder"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the app shell is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the role-filtered navigation is displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC002",
+    "title": "Process and normalize a monthly population workbook",
+    "description": "This verifies that an admin can complete workbook processing and reach the normalized population review stage.",
+    "category": "Monthly Inspection Pipeline",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Log in as the bootstrap admin with valid credentials"
+      },
+      {
+        "type": "action",
+        "description": "Open the data import area"
+      },
+      {
+        "type": "action",
+        "description": "Upload a valid monthly risk or BI workbook"
+      },
+      {
+        "type": "action",
+        "description": "Process the imported workbook"
+      },
+      {
+        "type": "action",
+        "description": "Review the normalized population"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the normalized population is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the processed month is ready for the next pipeline step"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC003",
+    "title": "Select a workspace folder and enter the app",
+    "description": "This verifies that a user can grant workspace folder access and reach the app shell with the selected workspace loaded.",
+    "category": "Workspace Folder Selection",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Click the workspace folder selection control"
+      },
+      {
+        "type": "action",
+        "description": "Grant access to a workspace folder in the browser picker"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the app shell is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the selected workspace is loaded"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC004",
+    "title": "Restore a workspace snapshot from the archive",
+    "description": "This verifies that an admin can browse archive snapshots and restore a previous workspace backup.",
+    "category": "archive restore",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Log in as the bootstrap admin with valid credentials"
+      },
+      {
+        "type": "action",
+        "description": "Open the archive area"
+      },
+      {
+        "type": "action",
+        "description": "Open a workspace snapshot"
+      },
+      {
+        "type": "action",
+        "description": "Restore the selected snapshot"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the restored workspace snapshot is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a restore confirmation is visible"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC005",
+    "title": "Approve a pending referral request",
+    "description": "A supervisor or admin can review a pending referral request and approve it so the request is removed from the pending list.",
+    "category": "Employee Workspace - اعتماد الطلبات",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Open the workspace section"
+      },
+      {
+        "type": "action",
+        "description": "Open the approval requests section"
+      },
+      {
+        "type": "action",
+        "description": "Open the pending referral requests view"
+      },
+      {
+        "type": "action",
+        "description": "Approve a pending request"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the request is removed from the pending list"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the approval confirmation is visible"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC006",
+    "title": "Unlock the app as bootstrap admin",
+    "description": "This verifies that the bootstrap admin can open the hidden login flow and successfully enter the app shell.",
+    "category": "Bootstrap Admin Login",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Press the hidden keyboard shortcut to open the admin login modal"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the admin passcode field with a valid passcode"
+      },
+      {
+        "type": "action",
+        "description": "Submit the admin login form"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the admin session is active"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the app shell is displayed for the administrator"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC007",
+    "title": "Draw a stratified sample and save it",
+    "description": "This verifies that an admin can generate a sampled population with breakdown details and persist the sample successfully.",
+    "category": "Stratified Sample Drawing",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Log in as the bootstrap admin with valid credentials"
+      },
+      {
+        "type": "action",
+        "description": "Open the data management area"
+      },
+      {
+        "type": "action",
+        "description": "Open the stratified sample drawing flow"
+      },
+      {
+        "type": "action",
+        "description": "Enter a seed value for the draw"
+      },
+      {
+        "type": "action",
+        "description": "Draw the sample"
+      },
+      {
+        "type": "action",
+        "description": "Confirm saving the sample"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the sample breakdown is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the saved sample confirmation is visible"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC008",
+    "title": "Submit a completed inspection answer",
+    "description": "This verifies that a managed user can complete an inspection and submit it successfully from the assigned rows view.",
+    "category": "Employee Workspace - صور الأشعة المحالة",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Log in with managed user credentials"
+      },
+      {
+        "type": "action",
+        "description": "Open مساحة العمل"
+      },
+      {
+        "type": "action",
+        "description": "Open صور الأشعة المحالة"
+      },
+      {
+        "type": "action",
+        "description": "Select a month"
+      },
+      {
+        "type": "action",
+        "description": "Choose an inspection template"
+      },
+      {
+        "type": "action",
+        "description": "Search the rows"
+      },
+      {
+        "type": "action",
+        "description": "Expand an assigned row"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the inspection answer fields"
+      },
+      {
+        "type": "action",
+        "description": "Submit the inspection"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the inspection result is saved"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a submission confirmation is visible"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC009",
+    "title": "Sign in as a managed user",
+    "description": "This verifies that a managed user can enter valid credentials and open the role-filtered app shell.",
+    "category": "Managed User Login",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the user session is active"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the role-filtered app shell is displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC010",
+    "title": "Save a distributed assignment to employees",
+    "description": "This verifies that an admin can assign sampled rows to employees and persist the distribution snapshot and log.",
+    "category": "Distribution / Assignment",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Log in as the bootstrap admin with valid credentials"
+      },
+      {
+        "type": "action",
+        "description": "Open the data management area"
+      },
+      {
+        "type": "action",
+        "description": "Open the distribution flow"
+      },
+      {
+        "type": "action",
+        "description": "Select employees and quotas for the distribution"
+      },
+      {
+        "type": "action",
+        "description": "Start the assignment"
+      },
+      {
+        "type": "action",
+        "description": "Confirm saving the distribution"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the assignment summary is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the distribution save confirmation is visible"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC011",
+    "title": "Process imported population data and save the monthly output",
+    "description": "This verifies that imported population data can be processed, reviewed, and saved to the workspace as monthly output files.",
+    "category": "Population Processing & Save",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_USER}} into the username field"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_PASSWORD}} into the password field"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Open إدارة بيانات الأشعة"
+      },
+      {
+        "type": "action",
+        "description": "Open the processing flow"
+      },
+      {
+        "type": "action",
+        "description": "Review the imported workbook summary"
+      },
+      {
+        "type": "action",
+        "description": "Paste or update the CertScan registry text"
+      },
+      {
+        "type": "action",
+        "description": "Start population processing"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify processing statistics are displayed"
+      },
+      {
+        "type": "action",
+        "description": "Confirm saving the processed data to the workspace folder"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the monthly output has been saved"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC012",
+    "title": "Re-grant workspace folder access after a fresh prompt",
+    "description": "This verifies that a user can respond to a repeated workspace access prompt and return to the app shell.",
+    "category": "First-run setup",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Log in with managed user credentials"
+      },
+      {
+        "type": "action",
+        "description": "Choose a workspace folder"
+      },
+      {
+        "type": "action",
+        "description": "Choose the same workspace folder again when prompted"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the app shell is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify workspace content is available again"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC013",
+    "title": "Reject a pending referral request",
+    "description": "A supervisor or admin can review a pending referral request and reject it so the request is removed from the pending list.",
+    "category": "Employee Workspace - اعتماد الطلبات",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Open the workspace section"
+      },
+      {
+        "type": "action",
+        "description": "Open the approval requests section"
+      },
+      {
+        "type": "action",
+        "description": "Open the pending referral requests view"
+      },
+      {
+        "type": "action",
+        "description": "Reject a pending request"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the request is removed from the pending list"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the rejection confirmation is visible"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC014",
+    "title": "Browse backup snapshots and restore one",
+    "description": "This verifies that a supervisor or admin can open the archive, inspect a backup snapshot, and restore it successfully.",
+    "category": "Archive",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_USER}} into the username field"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_PASSWORD}} into the password field"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Select the archive tab"
+      },
+      {
+        "type": "action",
+        "description": "Open a backup snapshot"
+      },
+      {
+        "type": "action",
+        "description": "Restore the selected snapshot"
+      },
+      {
+        "type": "action",
+        "description": "Confirm the restore"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the restored snapshot is active"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the archive view reflects the restored workspace"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC015",
+    "title": "Browse assigned x-ray rows and save a draft inspection",
+    "description": "This verifies that a managed user can open assigned rows, inspect details, enter answers, and save a draft.",
+    "category": "Employee Workspace - صور الأشعة المحالة",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Log in with managed user credentials"
+      },
+      {
+        "type": "action",
+        "description": "Open مساحة العمل"
+      },
+      {
+        "type": "action",
+        "description": "Open صور الأشعة المحالة"
+      },
+      {
+        "type": "action",
+        "description": "Select a month"
+      },
+      {
+        "type": "action",
+        "description": "Choose an inspection template"
+      },
+      {
+        "type": "action",
+        "description": "Search the rows"
+      },
+      {
+        "type": "action",
+        "description": "Expand an assigned row"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the inspection answer fields"
+      },
+      {
+        "type": "action",
+        "description": "Save the inspection as a draft"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the expanded row details remain visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a draft confirmation is visible"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC016",
+    "title": "Approve a pending replacement request",
+    "description": "A supervisor or admin can review a pending replacement request and approve it so the request is resolved and the row status updates.",
+    "category": "Employee Workspace - اعتماد الطلبات",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Open the workspace section"
+      },
+      {
+        "type": "action",
+        "description": "Open the approval requests section"
+      },
+      {
+        "type": "action",
+        "description": "Open the pending replacement requests view"
+      },
+      {
+        "type": "action",
+        "description": "Approve a pending request"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the request is removed from the pending list"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the downstream status update is visible"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC017",
+    "title": "Review the workbook summary before processing population data",
+    "description": "This verifies that an admin can upload a monthly workbook and inspect the workbook summary before continuing the pipeline.",
+    "category": "Monthly Inspection Pipeline",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Log in as the bootstrap admin with valid credentials"
+      },
+      {
+        "type": "action",
+        "description": "Open the data import area"
+      },
+      {
+        "type": "action",
+        "description": "Upload a valid monthly risk or BI workbook"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a workbook summary is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the imported workbook is ready for processing"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC018",
+    "title": "Reject a pending replacement request",
+    "description": "A supervisor or admin can review a pending replacement request and reject it so the request is resolved without changing the row assignment.",
+    "category": "Employee Workspace - اعتماد الطلبات",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Open the workspace section"
+      },
+      {
+        "type": "action",
+        "description": "Open the approval requests section"
+      },
+      {
+        "type": "action",
+        "description": "Open the pending replacement requests view"
+      },
+      {
+        "type": "action",
+        "description": "Reject a pending request"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the request is removed from the pending list"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the row remains unchanged"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC019",
+    "title": "Complete a reasoned replacement swap",
+    "description": "An admin can select a replacement candidate, provide a reason, and confirm the swap so the distribution entry updates.",
+    "category": "Employee Workspace - Replacement Dialog",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Open the workspace section"
+      },
+      {
+        "type": "action",
+        "description": "Open the x-ray referrals view"
+      },
+      {
+        "type": "action",
+        "description": "Open the replacement workflow for an eligible row"
+      },
+      {
+        "type": "action",
+        "description": "Select a replacement candidate"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the reason field with a valid replacement reason"
+      },
+      {
+        "type": "action",
+        "description": "Confirm the replacement"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the replacement is applied"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the updated distribution entry is visible"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC020",
+    "title": "Reopen the app with a previously granted workspace",
+    "description": "This verifies that a previously chosen workspace is reused and the app opens without reselecting the folder.",
+    "category": "Workspace Folder Selection",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Click the workspace folder selection control"
+      },
+      {
+        "type": "action",
+        "description": "Grant access to a workspace folder in the browser picker"
+      },
+      {
+        "type": "action",
+        "description": "Reload the page"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the app shell is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the workspace remains loaded"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC021",
+    "title": "Preserve the configured sampling rules before drawing",
+    "description": "This verifies that an admin can review or adjust sampling rules and proceed to a valid sample draw.",
+    "category": "Stratified Sample Drawing",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Log in as the bootstrap admin with valid credentials"
+      },
+      {
+        "type": "action",
+        "description": "Open the data management area"
+      },
+      {
+        "type": "action",
+        "description": "Open the stratified sample drawing flow"
+      },
+      {
+        "type": "action",
+        "description": "Review the current sampling rules"
+      },
+      {
+        "type": "action",
+        "description": "Adjust the sampling rules to a valid configuration"
+      },
+      {
+        "type": "action",
+        "description": "Draw the sample"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the sample breakdown is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the drawn sample is ready to save"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC022",
+    "title": "Open the referral replacement workflow from an eligible row",
+    "description": "An admin can open the replacement workflow from an eligible distribution row and see replacement candidates for selection.",
+    "category": "Employee Workspace - Replacement Dialog",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Open the workspace section"
+      },
+      {
+        "type": "action",
+        "description": "Open the x-ray referrals view"
+      },
+      {
+        "type": "action",
+        "description": "Open the replacement workflow for an eligible row"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify replacement candidates are displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the reason field is available"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC023",
+    "title": "Import a monthly risk workbook and review the parsed summary",
+    "description": "This verifies that a user can upload a monthly risk workbook, optionally add BI data, and review the parsed workbook summary with row counts.",
+    "category": "Population Data Import",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_USER}} into the username field"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_PASSWORD}} into the password field"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Open إدارة بيانات الأشعة"
+      },
+      {
+        "type": "action",
+        "description": "Open the processing flow"
+      },
+      {
+        "type": "action",
+        "description": "Select the target month"
+      },
+      {
+        "type": "action",
+        "description": "Upload the risk Excel file"
+      },
+      {
+        "type": "action",
+        "description": "Upload the optional BI Excel file"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify workbook parsing progress is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the workbook summary and row counts are displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC024",
+    "title": "Review the assignment summary before saving",
+    "description": "This verifies that an admin can inspect the proposed employee allocation before confirming the distribution.",
+    "category": "Distribution / Assignment",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Log in as the bootstrap admin with valid credentials"
+      },
+      {
+        "type": "action",
+        "description": "Open the data management area"
+      },
+      {
+        "type": "action",
+        "description": "Open the distribution flow"
+      },
+      {
+        "type": "action",
+        "description": "Select employees and quotas for the distribution"
+      },
+      {
+        "type": "action",
+        "description": "Start the assignment"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the assignment summary is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the distribution can be confirmed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC025",
+    "title": "Create a template field and save it",
+    "description": "This verifies that an admin can add a new form field to the inspection template and save the updated template successfully.",
+    "category": "Template Builder",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_USER}} into the username field"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_PASSWORD}} into the password field"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Select the inspection template tab"
+      },
+      {
+        "type": "action",
+        "description": "Add a new form field"
+      },
+      {
+        "type": "action",
+        "description": "Set the field type and label"
+      },
+      {
+        "type": "action",
+        "description": "Save the template"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the updated template is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the new field is present in the template"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC026",
+    "title": "Create a managed user account",
+    "description": "An admin can add a new managed user with role and password and see the account appear in the user list.",
+    "category": "User Management",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_USER}} into the username field"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_PASSWORD}} into the password field"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Open the user management tab"
+      },
+      {
+        "type": "action",
+        "description": "Start adding a new user"
+      },
+      {
+        "type": "action",
+        "description": "Fill in a unique username into the username field"
+      },
+      {
+        "type": "action",
+        "description": "Fill in a display name into the display name field"
+      },
+      {
+        "type": "action",
+        "description": "Select a managed user role"
+      },
+      {
+        "type": "action",
+        "description": "Fill in a password into the password field"
+      },
+      {
+        "type": "action",
+        "description": "Save the new user"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the new user appears in the user list"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the user is shown as active"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC027",
+    "title": "Generate and download an Arabic report for a month",
+    "description": "This verifies that a supervisor or admin can select a month, generate the report, and download the self-contained HTML report.",
+    "category": "Reports",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_USER}} into the username field"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_PASSWORD}} into the password field"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Select the reports tab"
+      },
+      {
+        "type": "action",
+        "description": "Select a month"
+      },
+      {
+        "type": "action",
+        "description": "Generate the report"
+      },
+      {
+        "type": "action",
+        "description": "Download the report"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the report content is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the downloaded report is available"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC028",
+    "title": "Generate an Arabic HTML report for the current workspace",
+    "description": "This verifies that an admin can generate a report and reach the HTML report review step.",
+    "category": "Reports generation and HTML download",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Log in as the bootstrap admin with valid credentials"
+      },
+      {
+        "type": "action",
+        "description": "Open the reporting area"
+      },
+      {
+        "type": "action",
+        "description": "Generate the Arabic HTML report"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the generated report is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the report is ready for download"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC029",
+    "title": "Browse read-only inspection results for a selected month",
+    "description": "A managed user can select a month and review the read-only inspection results table for that month.",
+    "category": "Employee Workspace - نتائج فحص الأشعة",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Open the workspace section"
+      },
+      {
+        "type": "action",
+        "description": "Open the inspection results view"
+      },
+      {
+        "type": "action",
+        "description": "Select a month"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the inspection results table is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the results are read-only"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC030",
+    "title": "Save a template field visibility rule change",
+    "description": "This verifies that an admin can change a template field visibility rule and save the new version successfully.",
+    "category": "Template Builder",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_USER}} into the username field"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_PASSWORD}} into the password field"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Select the inspection template tab"
+      },
+      {
+        "type": "action",
+        "description": "Open an existing template version"
+      },
+      {
+        "type": "action",
+        "description": "Change a field visibility rule"
+      },
+      {
+        "type": "action",
+        "description": "Save the template"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a new template version is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the visibility rule change is present"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC031",
+    "title": "Update an existing user account",
+    "description": "An admin can change an existing user's status or role and see the updated account details reflected in the list.",
+    "category": "User Management",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_USER}} into the username field"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_PASSWORD}} into the password field"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Open the user management tab"
+      },
+      {
+        "type": "action",
+        "description": "Select an existing user from the list"
+      },
+      {
+        "type": "action",
+        "description": "Change the user role or status"
+      },
+      {
+        "type": "action",
+        "description": "Save the changes"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the selected user remains visible in the list"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the updated role or status is reflected"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC032",
+    "title": "Keep the generated seed when drawing a sample",
+    "description": "This verifies that an admin can use the automatically generated seed and still produce a reviewable sample.",
+    "category": "Stratified Sample Drawing",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Log in as the bootstrap admin with valid credentials"
+      },
+      {
+        "type": "action",
+        "description": "Open the data management area"
+      },
+      {
+        "type": "action",
+        "description": "Open the stratified sample drawing flow"
+      },
+      {
+        "type": "action",
+        "description": "Leave the seed value unchanged"
+      },
+      {
+        "type": "action",
+        "description": "Draw the sample"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the sample breakdown is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the generated sample is ready for confirmation"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC033",
+    "title": "Export the currently visible assigned rows",
+    "description": "This verifies that a managed user can switch row scope and export the visible assigned rows view.",
+    "category": "Employee Workspace - صور الأشعة المحالة",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Log in with managed user credentials"
+      },
+      {
+        "type": "action",
+        "description": "Open مساحة العمل"
+      },
+      {
+        "type": "action",
+        "description": "Open صور الأشعة المحالة"
+      },
+      {
+        "type": "action",
+        "description": "Select a month"
+      },
+      {
+        "type": "action",
+        "description": "Toggle to the assigned rows view"
+      },
+      {
+        "type": "action",
+        "description": "Search or filter the visible rows"
+      },
+      {
+        "type": "action",
+        "description": "Export the visible rows"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the filtered rows remain visible after export initiation"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the export action is available for the current view"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC034",
+    "title": "Export inspection results to XLSX",
+    "description": "A managed user can export the visible inspection results table to an XLSX file from the results view.",
+    "category": "Employee Workspace - نتائج فحص الأشعة",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Open the workspace section"
+      },
+      {
+        "type": "action",
+        "description": "Open the inspection results view"
+      },
+      {
+        "type": "action",
+        "description": "Select a month"
+      },
+      {
+        "type": "action",
+        "description": "Export the visible results to XLSX"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the export action completes"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the exported results confirmation is visible"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC035",
+    "title": "Adjust role permissions for a tab",
+    "description": "An admin can edit a role's tab permissions and see the permission change take effect in the UI.",
+    "category": "User Management",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_USER}} into the username field"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_PASSWORD}} into the password field"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Open the user management tab"
+      },
+      {
+        "type": "action",
+        "description": "Open the permission editor for a role"
+      },
+      {
+        "type": "action",
+        "description": "Change access for a tab or feature"
+      },
+      {
+        "type": "action",
+        "description": "Save the permission changes"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the permission matrix reflects the saved change"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the affected tab access state is updated"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC036",
+    "title": "Preview the app as a different role and return to admin view",
+    "description": "This verifies that an admin can switch role previews and the visible tabs update accordingly, then return to the admin view.",
+    "category": "Role Preview Switching",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_USER}} into the username field"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_PASSWORD}} into the password field"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Choose a different role preview from the admin toolbar"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the app remounts with the selected role's tabs and permissions"
+      },
+      {
+        "type": "action",
+        "description": "Return to the admin role preview"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the admin tabs and permissions are restored"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC037",
+    "title": "View the restricted replacement candidate set",
+    "description": "An admin can switch between recommended and all candidates and see the candidate list remain bounded to the supported size.",
+    "category": "Employee Workspace - Replacement Dialog",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Open the workspace section"
+      },
+      {
+        "type": "action",
+        "description": "Open the x-ray referrals view"
+      },
+      {
+        "type": "action",
+        "description": "Open the replacement workflow for an eligible row"
+      },
+      {
+        "type": "action",
+        "description": "Switch to the all candidates view"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the candidate list is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the candidate list remains bounded to a manageable set"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC038",
+    "title": "Update a label override and see it applied",
+    "description": "An admin can save a label override and immediately see the updated wording across the app shell.",
+    "category": "Settings (Label Overrides)",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_USER}} into the username field"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_PASSWORD}} into the password field"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Open the settings tab"
+      },
+      {
+        "type": "action",
+        "description": "Edit one label value in the form"
+      },
+      {
+        "type": "action",
+        "description": "Save the label changes"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the updated label text is visible in the settings area"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the same updated label text is reflected elsewhere in the app shell"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC039",
+    "title": "Display the Arabic reports and archive tabs for an authorized user",
+    "description": "This verifies that a supervisor or admin can reach the reporting and archive areas from the app shell after login.",
+    "category": "Reports",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_USER}} into the username field"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_PASSWORD}} into the password field"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the app shell is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the reports and archive tabs are available"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC040",
+    "title": "Reset a label override to its default value",
+    "description": "An admin can restore a customized label to its default wording and see the original text return.",
+    "category": "Settings (Label Overrides)",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_USER}} into the username field"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_PASSWORD}} into the password field"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Open the settings tab"
+      },
+      {
+        "type": "action",
+        "description": "Edit a label value away from its default"
+      },
+      {
+        "type": "action",
+        "description": "Reset the label to its default value"
+      },
+      {
+        "type": "action",
+        "description": "Save the label changes"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the original default label text is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the customized label text is no longer visible"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC041",
+    "title": "Prevent distribution with no employee selection",
+    "description": "This verifies that the distribution flow blocks saving when no employees are selected.",
+    "category": "Distribution / Assignment",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Log in as the bootstrap admin with valid credentials"
+      },
+      {
+        "type": "action",
+        "description": "Open the data management area"
+      },
+      {
+        "type": "action",
+        "description": "Open the distribution flow"
+      },
+      {
+        "type": "action",
+        "description": "Leave the employee selection empty"
+      },
+      {
+        "type": "action",
+        "description": "Attempt to start the assignment"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a validation error is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify no assignment summary is shown"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC042",
+    "title": "Reject an invalid workbook before import processing",
+    "description": "This verifies that the import flow surfaces a validation error when the uploaded workbook cannot be accepted.",
+    "category": "Monthly Inspection Pipeline",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Log in as the bootstrap admin with valid credentials"
+      },
+      {
+        "type": "action",
+        "description": "Open the data import area"
+      },
+      {
+        "type": "action",
+        "description": "Upload an invalid monthly workbook"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a validation error is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the workbook summary is not displayed"
+      }
+    ],
+    "priority": "Low"
+  },
+  {
+    "id": "TC043",
+    "title": "Reject an incorrect bootstrap admin passcode",
+    "description": "This verifies that an incorrect admin passcode is not accepted and the user stays at the login step.",
+    "category": "Bootstrap Admin Login",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Press the hidden keyboard shortcut to open the admin login modal"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the admin passcode field with an invalid passcode"
+      },
+      {
+        "type": "action",
+        "description": "Submit the admin login form"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify an authentication error is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the admin session is not active"
+      }
+    ],
+    "priority": "Low"
+  },
+  {
+    "id": "TC044",
+    "title": "Reject an invalid sampling configuration",
+    "description": "This verifies that an admin is prevented from drawing a sample when the sampling rules are invalid.",
+    "category": "Stratified Sample Drawing",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Log in as the bootstrap admin with valid credentials"
+      },
+      {
+        "type": "action",
+        "description": "Open the data management area"
+      },
+      {
+        "type": "action",
+        "description": "Open the stratified sample drawing flow"
+      },
+      {
+        "type": "action",
+        "description": "Adjust the sampling rules to an invalid configuration"
+      },
+      {
+        "type": "action",
+        "description": "Attempt to draw the sample"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a validation error is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the sample is not prepared for saving"
+      }
+    ],
+    "priority": "Low"
+  },
+  {
+    "id": "TC045",
+    "title": "Reject an invalid login attempt",
+    "description": "This verifies that the login form blocks access when incorrect credentials are entered and keeps the user on the sign-in screen.",
+    "category": "Reports",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Fill in an invalid username into the username field"
+      },
+      {
+        "type": "action",
+        "description": "Fill in an invalid password into the password field"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify an authentication error is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the app shell is not displayed"
+      }
+    ],
+    "priority": "Low"
+  },
+  {
+    "id": "TC046",
+    "title": "Return no results when searching assigned rows",
+    "description": "This verifies that the employee workspace shows an empty state when a search term matches no assigned rows.",
+    "category": "Employee Workspace - صور الأشعة المحالة",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Log in with managed user credentials"
+      },
+      {
+        "type": "action",
+        "description": "Open مساحة العمل"
+      },
+      {
+        "type": "action",
+        "description": "Open صور الأشعة المحالة"
+      },
+      {
+        "type": "action",
+        "description": "Select a month"
+      },
+      {
+        "type": "action",
+        "description": "Choose an inspection template"
+      },
+      {
+        "type": "action",
+        "description": "Search for a value that does not match any row"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify an empty state message is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify no assigned rows are displayed"
+      }
+    ],
+    "priority": "Low"
+  },
+  {
+    "id": "TC047",
+    "title": "Reject an incorrect managed user password",
+    "description": "This verifies that a managed user cannot sign in with an invalid password and remains blocked at the login form.",
+    "category": "Managed User Login",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the username field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with an invalid password"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a login error is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the app shell is not displayed"
+      }
+    ],
+    "priority": "Low"
+  }
+]

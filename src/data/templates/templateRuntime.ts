@@ -45,16 +45,21 @@ export function getVisibleTemplateFields(
 ): TemplateField[] {
   return getTemplatePhases(schema).flatMap((phase) =>
     getFieldsForPhase(schema, phase.phaseId).filter((field) =>
-      isFieldVisible(field, answers)
+      isFieldVisible(field, answers, schema.fields)
     )
   );
 }
 
 export function isFieldVisible(
   field: TemplateField,
-  answers: Record<string, TemplateAnswerValue>
+  answers: Record<string, TemplateAnswerValue>,
+  allFields?: TemplateField[]
 ): boolean {
   if (!field.condition?.sourceFieldId) return true;
+  if (allFields) {
+    const src = allFields.find((f) => f.fieldId === field.condition!.sourceFieldId);
+    if (src && !isFieldVisible(src, answers, allFields)) return false;
+  }
   return evaluateCondition(field.condition, answers[field.condition.sourceFieldId]);
 }
 

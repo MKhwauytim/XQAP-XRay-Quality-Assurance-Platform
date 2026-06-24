@@ -36,13 +36,7 @@ import {
   loadInspectionTemplateSelection,
   saveInspectionTemplateSelection,
 } from "../../../../../data/templates/templateSelectionStorage";
-import {
-  getFieldsForPhase,
-  getTemplatePhases,
-  getVisibleTemplateFields,
-  isFieldVisible,
-} from "../../../../../data/templates/templateRuntime";
-import type { TemplateField, TemplateSchema } from "../../../../../data/templates/templateTypes";
+import type { TemplateSchema } from "../../../../../data/templates/templateTypes";
 import type { DirectoryHandleLike } from "../../../../../data/storage/fileSystemAccess";
 import DataTable, {
   formatDate,
@@ -56,7 +50,10 @@ import DataTable, {
 import {
   loadUserBrowsePreset,
   saveUserBrowseDatasetPreset,
+  saveInspectionPanelPosition,
+  type InspectionPanelPosition,
 } from "../../../../../data/preferences/browsePresetStorage";
+import InspectionPanel from "../../../../../components/InspectionPanel";
 import {
   appendReferralRequest,
   appendReplacementRequest,
@@ -87,7 +84,6 @@ function buildXrayColumns(L: Labels): DataTableCol<DistributionEntry>[] {
     statusOptions: [
       { value: "all",       label: L.status_all },
       { value: "submitted", label: L.status_completed },
-      { value: "draft",     label: L.status_draft },
       { value: "pending",   label: L.status_pending },
       { value: "replaced",  label: L.status_replaced },
     ],
@@ -162,11 +158,24 @@ function getVisibleReferralColumns(
   );
 }
 
+function pct(n: number, d: number): number {
+  return d === 0 ? 0 : Math.round((n / d) * 100);
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 type Props = { directoryHandle: DirectoryHandleLike };
 type LoadState = "idle" | "loading" | "ready" | "error";
 type StatusMsg = { type: "ok" | "error"; text: string } | null;
+type PersonalStats = {
+  assigned: number;
+  submitted: number;
+  notStarted: number;
+  replaced: number;
+  active: number;
+  completionPct: number;
+};
+type PersonalQuota = { dailyQuota: number; daysRemaining: number; sampleCount: number } | null;
 type ReplacementDialogState = {
   entry: DistributionEntry;
   recommended: PreparedPopulationRow[];
@@ -182,11 +191,15 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   const session  = readSession();
   const username = session?.username ?? "";
   const role     = session?.role ?? "employee";
-  /** Supervisor + admin can see all employees' entries (oversight / audit). */
-  const canSeeAll = role === "admin" || role === "supervisor";
   /** Only admin can mutate distribution data (replacements, etc.). */
   const canEdit   = role === "admin";
   const userManagementState = readUserManagementState();
+  /** Oversight view is permission-driven; ordinary users only see their own samples. */
+  const canSeeAll = hasFeature(
+    userManagementState.featurePermissions,
+    role,
+    "view-all-entries"
+  );
   const canSetTemplate =
     canEdit ||
     getRolePermission(
@@ -198,6 +211,16 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     userManagementState.featurePermissions,
     role,
     "configure-referral-columns"
+  );
+  const canRequestReplacement = hasFeature(
+    userManagementState.featurePermissions,
+    role,
+    "request-replacement"
+  );
+  const canSubmitReferrals = hasFeature(
+    userManagementState.featurePermissions,
+    role,
+    "submit-referrals"
   );
   const L = useLabels();
   const baseColumns = useMemo(() => buildXrayColumns(L), [L]);
@@ -218,13 +241,14 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   const [populationRows, setPopulationRows] = useState<PreparedPopulationRow[]>([]);
   const [replacementDialog, setReplacementDialog] = useState<ReplacementDialogState>(null);
   const [replacementError, setReplacementError] = useState<string | null>(null);
-  // Supervisor/admin-only filter: "مسنداتي فقط" shows only rows assigned to the current user.
-  const [showMyOnly, setShowMyOnly] = useState(false);
+  // Permissioned oversight users can switch to "all", but the page opens on personal samples.
+  const [showMyOnly, setShowMyOnly] = useState(true);
   const [replacementBusy, setReplacementBusy] = useState(false);
   const [colPreset, setColPreset]     = useState<ColConfig | undefined>(undefined);
-  const [myQuota, setMyQuota]         = useState<{ dailyQuota: number; daysRemaining: number; sampleCount: number } | null>(null);
+  const [myQuota, setMyQuota]         = useState<PersonalQuota>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [referralModal, setReferralModal] = useState<ReferralModalState>(null);
+  const [panelPosition, setPanelPosition] = useState<InspectionPanelPosition>("right");
   useEffect(() => {
     void listMonthFolders(directoryHandle).then((ms) => {
       setMonths(ms);
@@ -245,6 +269,9 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           widths:  p.widths ?? {},
           dateFmt: (p.dateFmt ?? {}) as ColConfig["dateFmt"],
         });
+      }
+      if (file.inspectionPanelPosition) {
+        setPanelPosition(file.inspectionPanelPosition);
       }
     });
   }, [baseColumns, directoryHandle, username]);
@@ -274,7 +301,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       }
       return col;
     });
-    // Checkbox column only for employees — admin/supervisor have no referral actions.
+    // Checkbox column only for personal-scope users — oversight users have no referral actions.
     // The accessor returns a stable empty string; actual checked state is read from
     // selectedIds inside renderCell so this memo doesn't re-create on every checkbox tick.
     if (canSeeAll) return mapped;
@@ -298,11 +325,44 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     [columns, effectiveColConfig, canSeeAll]
   );
 
-  // Filtered view for supervisors/admins: "مسنداتي فقط" shows only their own assigned rows.
+  // Permissioned oversight view: "المحالة لي" shows only rows assigned to the current user.
   const displayEntries = useMemo(
     () => (canSeeAll && showMyOnly ? entries.filter((e) => e.assignedTo === username) : entries),
     [entries, canSeeAll, showMyOnly, username]
   );
+
+  // Auto-select first entry whenever the list changes and nothing is currently selected
+  useEffect(() => {
+    if (displayEntries.length === 0) return;
+    const valid = selEntryId != null && displayEntries.some((e) => e.xrayImageId === selEntryId);
+    if (!valid) setSelEntryId(displayEntries[0].xrayImageId);
+  }, [displayEntries, selEntryId]);
+
+  const selEntry = useMemo(
+    () => selEntryId ? (displayEntries.find((e) => e.xrayImageId === selEntryId) ?? null) : null,
+    [selEntryId, displayEntries]
+  );
+
+  const selAnswer = useMemo(
+    () => selEntry ? (answersMap.get(`${selEntry.xrayImageId}::${selEntry.assignedTo}`) ?? null) : null,
+    [selEntry, answersMap]
+  );
+
+  const personalStats = useMemo<PersonalStats>(() => {
+    const source = allEntries.length > 0 ? allEntries : entries;
+    const mine = source.filter((entry) => entry.assignedTo === username);
+    const submitted = mine.filter((entry) => isStudyCompleted(entry, answersMap)).length;
+    const replaced = mine.filter((entry) => entry.status === "replaced").length;
+    const notStarted = Math.max(0, mine.length - submitted - replaced);
+    return {
+      assigned: mine.length,
+      submitted,
+      notStarted,
+      replaced,
+      active: Math.max(0, mine.length - replaced),
+      completionPct: pct(submitted, mine.length),
+    };
+  }, [allEntries, entries, username, answersMap]);
 
   const loadData = useCallback(async () => {
     if (!selMonth) return;
@@ -336,8 +396,8 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       setEntries(visible);
       setSampleMaster(sample);
 
-      // Extract frozen daily quota for the current employee
-      if (!canSeeAll && dist?.quotas?.[username]) {
+      // Extract frozen daily quota for the current employee.
+      if (dist?.quotas?.[username]) {
         const q = dist.quotas[username];
         setMyQuota({ dailyQuota: q.dailyQuota, daysRemaining: q.daysRemainingAtAssignment, sampleCount: q.sampleCount });
       } else {
@@ -382,15 +442,15 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   }
 
   async function handleSave(
-    xrayImageId: string, ans: FieldAnswer[], submit: boolean, forUser: string
+    xrayImageId: string, ans: FieldAnswer[], _submit: boolean, forUser: string
   ): Promise<void> {
     if (!activeTpl) return;
     const now  = new Date().toISOString();
     const item: ItemAnswer = {
       xrayImageId, templateId: activeTpl.templateId, templateVersion: activeTpl.version,
       answers: ans, lastSavedAt: now,
-      submittedAt: submit ? now : null, answeredBy: forUser,
-      status: submit ? "submitted" : "draft",
+      submittedAt: now, answeredBy: forUser,
+      status: "submitted",
     };
     const result = await upsertItemAnswer(directoryHandle, selMonth, forUser, item);
     if (result.ok) {
@@ -398,7 +458,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         ...prev.filter((a) => !(a.xrayImageId === xrayImageId && a.answeredBy === forUser)),
         item,
       ]);
-      setStatusMsg({ type: "ok", text: submit ? "تم التقديم." : "تم حفظ المسودة." });
+      setStatusMsg({ type: "ok", text: "تم التقديم." });
     } else {
       setStatusMsg({ type: "error", text: result.error });
     }
@@ -588,8 +648,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     const answer = answersMap.get(`${entry.xrayImageId}::${entry.assignedTo}`);
     const s = answer?.status;
     if (v === "submitted") return s === "submitted";
-    if (v === "draft")     return s === "draft";
-    if (v === "pending")   return !s;
+    if (v === "pending")   return !s || s === "draft";
     return true;
   }
 
@@ -601,15 +660,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         eyebrow={L.page_xray_referrals_eyebrow}
         title={L.page_xray_referrals_title}
         subtitle={canSeeAll ? L.page_xray_referrals_subtitle_all : L.page_xray_referrals_subtitle_own}
-      >
-        {myQuota && (
-          <div className="ew-quota-badge" title={`إجمالي العينة: ${myQuota.sampleCount} | أيام متبقية عند التعيين: ${myQuota.daysRemaining}`}>
-            <span className="ew-quota-label">الحصة اليومية</span>
-            <span className="ew-quota-value">{myQuota.dailyQuota}</span>
-            <span className="ew-quota-sub">صورة / يوم</span>
-          </div>
-        )}
-      </PageHeader>
+      />
 
       {statusMsg && (
         <div className={statusMsg.type === "ok" ? "ew-msg-ok" : "ew-msg-error"} role="status">
@@ -625,145 +676,176 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       {loadState === "loading" && <p className="ew-empty">جاري التحميل...</p>}
       {loadState === "error"   && <p className="ew-empty">تعذر تحميل البيانات.</p>}
 
-      {(loadState === "ready" || loadState === "idle") && (
-        <DataTable<DistributionEntry>
-          columns={columns}
-          rows={displayEntries}
-          getRowKey={(e) => e.xrayImageId}
-          renderCell={renderCell}
-          storageKey={COL_KEY}
-          defaultVisible={DEFAULT_VISIBLE}
-          isAdmin={canSeeAll}
-          canConfigureColumns={canConfigureColumns}
-          initialColConfig={colPreset}
-          onColConfigChange={(cfg) => {
-            setColPreset(cfg);
-            void saveUserBrowseDatasetPreset(directoryHandle, username, REFERRALS_PRESET_KEY, {
-              columnOrder:    cfg.order,
-              visibleColumns: baseColumns.map((c) => c.id).filter((id) => !cfg.hidden.includes(id)),
-              widths:         cfg.widths,
-              dateFmt:        cfg.dateFmt,
-            });
-          }}
-          rowMatchesFilter={rowMatchesFilter}
-          exportFileName={`صور الأشعة المحالة - ${selMonth || "كل الأشهر"}.xlsx`}
-          expandedKey={selEntryId}
-          renderExpanded={(entry) => {
-            const answer = answersMap.get(`${entry.xrayImageId}::${entry.assignedTo}`) ?? null;
-            return (
-              <ItemFormCard
-                entry={entry}
-                template={activeTpl}
-                savedAnswer={answer}
-                stageLabel={formatStageLabel(entry.row.stage, stageMappings)}
-                onSave={handleSave}
-                onReplace={openReplacementDialog}
-                readonly={canSeeAll && entry.assignedTo !== username}
-              />
-            );
-          }}
-          onRowClick={(e) =>
-            setSelEntryId((cur) => (cur === e.xrayImageId ? null : e.xrayImageId))
-          }
-          toolbarEndExtra={
-            canSeeAll ? (
-              <div className="ew-view-switcher" role="group" aria-label="نطاق العرض">
-                <button
-                  type="button"
-                  className={`ew-view-seg${!showMyOnly ? " active" : ""}`}
-                  onClick={() => setShowMyOnly(false)}
-                >
-                  الكل
-                </button>
-                <button
-                  type="button"
-                  className={`ew-view-seg${showMyOnly ? " active" : ""}`}
-                  onClick={() => setShowMyOnly(true)}
-                >
-                  مسنداتي فقط
-                </button>
-              </div>
-            ) : undefined
-          }
-          toolbarStart={
-            <>
-              <label className="ew-label" htmlFor="ref-month">
-                {L.label_month}
-                <select
-                  id="ref-month"
-                  className="ew-select"
-                  value={selMonth}
-                  onChange={(e) => setSelMonth(e.target.value)}
-                >
-                  {months.map((m) => (
-                    <option key={m.folderName} value={m.folderName}>{m.folderName}</option>
-                  ))}
-                </select>
-              </label>
+      {(loadState === "ready" || loadState === "idle") && (() => {
+        const tableEl = (
+          <DataTable<DistributionEntry>
+            columns={columns}
+            rows={displayEntries}
+            getRowKey={(e) => e.xrayImageId}
+            renderCell={renderCell}
+            storageKey={COL_KEY}
+            defaultVisible={DEFAULT_VISIBLE}
+            isAdmin={canSeeAll}
+            canConfigureColumns={canConfigureColumns}
+            initialColConfig={colPreset}
+            onColConfigChange={(cfg) => {
+              setColPreset(cfg);
+              void saveUserBrowseDatasetPreset(directoryHandle, username, REFERRALS_PRESET_KEY, {
+                columnOrder:    cfg.order,
+                visibleColumns: baseColumns.map((c) => c.id).filter((id) => !cfg.hidden.includes(id)),
+                widths:         cfg.widths,
+                dateFmt:        cfg.dateFmt,
+              });
+            }}
+            rowMatchesFilter={rowMatchesFilter}
+            exportFileName={`صور الأشعة المحالة - ${selMonth || "كل الأشهر"}.xlsx`}
+            expandedKey={selEntryId}
+            onRowClick={(e) => setSelEntryId(e.xrayImageId)}
+            getRowClassName={(entry) =>
+              isStudyCompleted(entry, answersMap) ? "dt-tr--completed" : undefined
+            }
+            toolbarEndExtra={
+              canSeeAll ? (
+                <div className="ew-view-switcher" role="group" aria-label="نطاق العرض">
+                  <button
+                    type="button"
+                    className={`ew-view-seg${!showMyOnly ? " active" : ""}`}
+                    onClick={() => setShowMyOnly(false)}
+                  >
+                    الكل
+                  </button>
+                  <button
+                    type="button"
+                    className={`ew-view-seg${showMyOnly ? " active" : ""}`}
+                    onClick={() => setShowMyOnly(true)}
+                  >
+                    المحالة لي
+                  </button>
+                </div>
+              ) : undefined
+            }
+            toolbarStart={
+              <>
+                <label className="ew-label" htmlFor="ref-month">
+                  {L.label_month}
+                  <select
+                    id="ref-month"
+                    className="ew-select"
+                    value={selMonth}
+                    onChange={(e) => setSelMonth(e.target.value)}
+                  >
+                    {months.map((m) => (
+                      <option key={m.folderName} value={m.folderName}>{m.folderName}</option>
+                    ))}
+                  </select>
+                </label>
 
-              <label className="ew-label" htmlFor="ref-tpl">
-                {L.label_template}
-                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                  {canSetTemplate ? (
-                    <select
-                      id="ref-tpl"
-                      className="ew-select"
-                      value={selTplId}
-                      onChange={(e) => { void handleTplSelect(e.target.value); }}
+                <label className="ew-label" htmlFor="ref-tpl">
+                  {L.label_template}
+                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    {canSetTemplate ? (
+                      <select
+                        id="ref-tpl"
+                        className="ew-select"
+                        value={selTplId}
+                        onChange={(e) => { void handleTplSelect(e.target.value); }}
+                      >
+                        <option value="">اختر نموذجاً...</option>
+                        {tplIndex.map((t) => (
+                          <option key={t.templateId} value={t.templateId}>
+                            {t.templateName} (v{t.version})
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div className="ew-template-locked" id="ref-tpl">
+                        {activeTpl ? `${activeTpl.templateName} (v${activeTpl.version})` : "لم يتم تعيين نموذج"}
+                      </div>
+                    )}
+                    {selTplId && (
+                      <button
+                        type="button"
+                        className="ew-btn-secondary ew-btn-sm"
+                        title="إعادة تحميل النموذج من القرص"
+                        onClick={() => { void applyTemplate(selTplId, false); }}
+                      >↻</button>
+                    )}
+                  </div>
+                </label>
+
+                {/* Referral action buttons — only in personal scope. Oversight users approve elsewhere. */}
+                {!canSeeAll && canSubmitReferrals && entries.length > 0 && (
+                  <div className="ew-referral-actions">
+                    <button
+                      type="button"
+                      className="ew-btn-referral"
+                      disabled={selectedIds.size === 0}
+                      onClick={() =>
+                        setReferralModal({ xrayImageIds: [...selectedIds], source: "selected" })
+                      }
                     >
-                      <option value="">اختر نموذجاً...</option>
-                      {tplIndex.map((t) => (
-                        <option key={t.templateId} value={t.templateId}>
-                          {t.templateName} (v{t.version})
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <div className="ew-template-locked" id="ref-tpl">
-                      {activeTpl ? `${activeTpl.templateName} (v${activeTpl.version})` : "لم يتم تعيين نموذج"}
-                    </div>
-                  )}
-                  {selTplId && (
+                      {selectedIds.size > 0 ? `إحالة (${selectedIds.size})` : "إحالة"}
+                    </button>
                     <button
                       type="button"
                       className="ew-btn-secondary ew-btn-sm"
-                      title="إعادة تحميل النموذج من القرص"
-                      onClick={() => { void applyTemplate(selTplId, false); }}
-                    >↻</button>
-                  )}
-                </div>
-              </label>
+                      onClick={
+                        selectedIds.size > 0
+                          ? clearSelection
+                          : () => selectAll(entries.filter((e) => e.status !== "replaced").map((e) => e.xrayImageId))
+                      }
+                    >
+                      {selectedIds.size > 0 ? "إلغاء التحديد" : "تحديد الكل"}
+                    </button>
+                  </div>
+                )}
+              </>
+            }
+          />
+        );
 
-              {/* Referral action buttons — only for non-admin (employees request; admins/supervisors approve) */}
-              {!canSeeAll && entries.length > 0 && (
-                <div className="ew-referral-actions">
-                  <button
-                    type="button"
-                    className="ew-btn-referral"
-                    disabled={selectedIds.size === 0}
-                    onClick={() =>
-                      setReferralModal({ xrayImageIds: [...selectedIds], source: "selected" })
-                    }
-                  >
-                    {selectedIds.size > 0 ? `إحالة (${selectedIds.size})` : "إحالة"}
-                  </button>
-                  <button
-                    type="button"
-                    className="ew-btn-secondary ew-btn-sm"
-                    onClick={
-                      selectedIds.size > 0
-                        ? clearSelection
-                        : () => selectAll(entries.filter((e) => e.status !== "replaced").map((e) => e.xrayImageId))
-                    }
-                  >
-                    {selectedIds.size > 0 ? "إلغاء التحديد" : "تحديد الكل"}
-                  </button>
-                </div>
-              )}
-            </>
-          }
-        />
-      )}
+        return selEntry ? (
+          <>
+            <ReferralStatsStrip stats={personalStats} quota={myQuota} username={username} />
+            <div className={`ew-split ew-split--${panelPosition}`}>
+              {tableEl}
+              <InspectionPanel
+                key={selEntry.xrayImageId}
+                entry={selEntry}
+                template={activeTpl}
+                savedAnswer={selAnswer}
+                readonly={canSeeAll && selEntry.assignedTo !== username}
+                panelPosition={panelPosition}
+                onTogglePosition={() => {
+                  const next: InspectionPanelPosition =
+                    panelPosition === "right" ? "bottom" : "right";
+                  setPanelPosition(next);
+                  void saveInspectionPanelPosition(directoryHandle, username, next);
+                }}
+                onClose={() => setSelEntryId(null)}
+                onSave={(ans, submit) =>
+                  handleSave(selEntry.xrayImageId, ans, submit, selEntry.assignedTo)
+                }
+                onReplace={
+                  (canRequestReplacement || canSubmitReferrals) && selEntry.assignedTo === username && selEntry.status === "pending"
+                    ? openReplacementDialog
+                    : undefined
+                }
+                onReassign={
+                  canSubmitReferrals && selEntry.assignedTo === username && selEntry.status === "pending"
+                    ? (entry) => setReferralModal({ xrayImageIds: [entry.xrayImageId], source: "selected" })
+                    : undefined
+                }
+              />
+            </div>
+          </>
+        ) : (
+          <>
+            <ReferralStatsStrip stats={personalStats} quota={myQuota} username={username} />
+            {tableEl}
+          </>
+        );
+      })()}
 
       {replacementDialog ? (
         <ReplacementDialog
@@ -967,7 +1049,6 @@ function getReferralPreviewValue(
     if (entry.status === "replaced") return labels.status_replaced;
     const answer = answersMap.get(`${entry.xrayImageId}::${entry.assignedTo}`);
     if (answer?.status === "submitted") return labels.status_completed;
-    if (answer?.status === "draft") return labels.status_draft;
     return labels.status_pending;
   }
 
@@ -986,139 +1067,80 @@ function StatusBadge({ answer, entryStatus, labels }: { answer?: ItemAnswer; ent
     return <span className="ew-status-badge" style={{ background: "#f1f5f9", color: "#64748b" }}>{labels.status_replaced}</span>;
   if (answer?.status === "submitted")
     return <span className="ew-status-badge ew-badge-done">{labels.status_completed}</span>;
-  if (answer?.status === "draft")
-    return <span className="ew-status-badge" style={{ background: "#fef9c3", color: "#854d0e" }}>{labels.status_draft}</span>;
   return <span className="ew-status-badge ew-badge-pending">{labels.status_pending}</span>;
 }
 
-// ── ItemFormCard ──────────────────────────────────────────────────────────────
-
-type FormCardProps = {
-  entry: DistributionEntry;
-  template: TemplateSchema | null;
-  savedAnswer: ItemAnswer | null;
-  stageLabel: string;
-  onSave: (xrayImageId: string, ans: FieldAnswer[], submit: boolean, forUser: string) => void;
-  /** Omit to hide the replacement button (non-admin viewers). */
-  onReplace?: (entry: DistributionEntry) => void;
-  readonly: boolean;
-};
-
-function ItemFormCard({ entry, template, savedAnswer, stageLabel, onSave, onReplace, readonly }: FormCardProps) {
-  const [ans, setAns] = useState<Record<string, string | number | boolean>>(() => {
-    if (!savedAnswer) return {};
-    const m: Record<string, string | number | boolean> = {};
-    for (const a of savedAnswer.answers) { if (a.value !== null) m[a.fieldId] = a.value; }
-    return m;
-  });
-
-  const isSubmitted = savedAnswer?.status === "submitted";
-  const row = entry.row;
-
-  function collect(): FieldAnswer[] {
-    return template
-      ? getVisibleTemplateFields(template, ans).map((field) => ({
-          fieldId: field.fieldId,
-          value: field.type === "empty" ? null : ans[field.fieldId] ?? null,
-        }))
-      : [];
-  }
-
+function ReferralStatsStrip({
+  stats,
+  quota,
+  username,
+}: {
+  stats: PersonalStats;
+  quota: PersonalQuota;
+  username: string;
+}) {
   return (
-    <article className={`ew-item-card ${isSubmitted ? "ew-submitted" : ""}`}>
-      <div className="ew-item-header">
+    <section className="ew-ref-stats" aria-label="إحصائياتي">
+      <div className="ew-ref-stats-head">
         <div>
-          <h3 className="ew-item-id">{row.xrayImageId}</h3>
-          <p className="ew-item-meta">
-            {row.portName ?? "—"} · {row.certScanStatus} · {stageLabel || "—"}
-            {readonly && <span style={{ marginRight: 8, color: "#64748b", fontSize: 12 }}>(عرض فقط)</span>}
-          </p>
+          <span className="ew-ref-stats-eyebrow">إحصائياتي</span>
+          <h2>عيناتي وحالة الإنجاز</h2>
         </div>
-        <span className={`ew-status-badge ${isSubmitted ? "ew-badge-done" : "ew-badge-pending"}`}>
-          {isSubmitted ? "مقدم" : "قيد التحرير"}
-        </span>
+        <div className="ew-ref-stats-meta">
+          {quota ? <span>الأيام المتبقية: {quota.daysRemaining.toLocaleString("ar-SA-u-nu-latn")}</span> : null}
+          <span className="ew-ref-stats-user">{username}</span>
+        </div>
       </div>
 
-      {!template ? (
-        <p className="ew-no-template">اختر نموذجاً لعرض حقول الفحص.</p>
-      ) : isSubmitted || readonly ? (
-        <div className="ew-submitted-view">
-          {getTemplatePhases(template).map((phase) => {
-            const fields = getFieldsForPhase(template, phase.phaseId).filter((field) =>
-              isFieldVisible(field, ans)
-            );
-            if (fields.length === 0) return null;
-            return (
-              <section key={phase.phaseId} className="ew-form-phase">
-                <h4>{phase.title}</h4>
-                {phase.description ? <p>{phase.description}</p> : null}
-                {fields.map((field) => (
-                  <div key={field.fieldId} className="ew-answer-row">
-                    <span className="ew-answer-label">{field.label}</span>
-                    <span className="ew-answer-value">{formatAnswerValue(field, ans[field.fieldId])}</span>
-                  </div>
-                ))}
-              </section>
-            );
-          })}
+      <div className="ew-ref-stats-grid">
+        <MiniStat label="الحصة اليومية" value={quota ? quota.dailyQuota : "—"} tone="quota" sub={quota ? "صورة / يوم" : "غير محددة"} />
+        <MiniStat label="إجمالي عيناتي" value={stats.assigned} tone="total" sub={quota ? `الحصة: ${quota.sampleCount.toLocaleString("ar-SA-u-nu-latn")}` : undefined} />
+        <MiniStat label="عينات نشطة" value={stats.active} tone="active" />
+        <MiniStat label="مكتملة" value={stats.submitted} tone="done" sub={`${stats.completionPct}%`} />
+        <MiniStat label="لم تبدأ" value={stats.notStarted} tone="pending" />
+        <MiniStat label={"المستبدلة \\ المحالة"} value={stats.replaced} tone="replaced" />
+      </div>
+
+      <div className="ew-ref-progress">
+        <span>نسبة إنجاز عيناتي</span>
+        <div className="ew-ref-progress-track">
+          <div className="ew-ref-progress-fill" style={{ width: `${stats.completionPct}%` }} />
         </div>
-      ) : (
-        <>
-          <div className="ew-form-flow">
-            {getTemplatePhases(template).map((phase) => {
-              const fields = getFieldsForPhase(template, phase.phaseId).filter((field) =>
-                isFieldVisible(field, ans)
-              );
-              if (fields.length === 0) return null;
-              return (
-                <section key={phase.phaseId} className="ew-form-phase">
-                  <h4>{phase.title}</h4>
-                  {phase.description ? <p>{phase.description}</p> : null}
-                  <div className="ew-form-fields">
-                    {fields.map((field) => (
-                      <FormField
-                        key={field.fieldId}
-                        field={field}
-                        value={ans[field.fieldId] ?? ""}
-                        onChange={(value) => setAns((previous) => ({ ...previous, [field.fieldId]: value }))}
-                      />
-                    ))}
-                  </div>
-                </section>
-              );
-            })}
-          </div>
-          <div className="ew-form-actions">
-            {onReplace && (
-              <button
-                type="button"
-                className="ew-btn-warning"
-                onClick={() => onReplace(entry)}
-              >استبدال العينة</button>
-            )}
-            <button
-              type="button"
-              className="ew-btn-secondary"
-              onClick={() => onSave(row.xrayImageId, collect(), false, entry.assignedTo)}
-            >حفظ مسودة</button>
-            <button
-              type="button"
-              className="ew-btn-primary"
-              onClick={() => onSave(row.xrayImageId, collect(), true, entry.assignedTo)}
-            >تقديم</button>
-          </div>
-        </>
-      )}
-    </article>
+        <strong>{stats.completionPct}%</strong>
+      </div>
+    </section>
   );
 }
 
-function formatAnswerValue(field: TemplateField, value: string | number | boolean | undefined): string {
-  if (field.type === "empty") return "—";
-  if (value === undefined || value === "") return "—";
-  if (typeof value === "boolean") return value ? "نعم" : "لا";
-  return String(value);
+function MiniStat({
+  label,
+  value,
+  tone,
+  sub,
+}: {
+  label: string;
+  value: number | string;
+  tone: "quota" | "total" | "active" | "done" | "pending" | "replaced";
+  sub?: string;
+}) {
+  const displayValue = typeof value === "number" ? value.toLocaleString("ar-SA-u-nu-latn") : value;
+  return (
+    <div className={`ew-ref-stat-card ew-ref-stat-card--${tone}`}>
+      <span>{label}</span>
+      <strong>{displayValue}</strong>
+      {sub ? <small>{sub}</small> : null}
+    </div>
+  );
 }
+
+function isStudyCompleted(
+  entry: DistributionEntry,
+  answersMap: Map<string, ItemAnswer>
+): boolean {
+  if (entry.status === "completed") return true;
+  return answersMap.get(`${entry.xrayImageId}::${entry.assignedTo}`)?.status === "submitted";
+}
+
 
 function ReplacementDialog({
   state,
@@ -1239,41 +1261,3 @@ function ReplacementDialog({
   );
 }
 
-// ── FormField ─────────────────────────────────────────────────────────────────
-
-function FormField({
-  field, value, onChange,
-}: {
-  field: TemplateField;
-  value: string | number | boolean;
-  onChange: (v: string | number | boolean) => void;
-}) {
-  const id = `field-${field.fieldId}`;
-  if (field.type === "empty") {
-    return (
-      <div className="ew-form-field ew-form-note">
-        <span className="ew-field-label">{field.label}</span>
-      </div>
-    );
-  }
-
-  return (
-    <div className="ew-form-field">
-      <label className="ew-field-label" htmlFor={id}>
-        {field.label}
-        {field.required ? <span className="ew-required">*</span> : null}
-      </label>
-      {field.type === "text"     ? <input id={id} type="text"     className="ew-input"    placeholder={field.placeholder} value={String(value)}  onChange={(e) => onChange(e.target.value)} /> :
-       field.type === "textarea" ? <textarea id={id} className="ew-input ew-textarea" placeholder={field.placeholder} value={String(value)} onChange={(e) => onChange(e.target.value)} /> :
-       field.type === "number"   ? <input id={id} type="number"   className="ew-input"    placeholder={field.placeholder} value={String(value)}  onChange={(e) => onChange(e.target.value === "" ? "" : Number(e.target.value))} /> :
-       field.type === "date"     ? <input id={id} type="date"     className="ew-input"    value={String(value)}  onChange={(e) => onChange(e.target.value)} /> :
-       field.type === "checkbox" ? <input id={id} type="checkbox" className="ew-checkbox" checked={Boolean(value)} onChange={(e) => onChange(e.target.checked)} /> :
-       field.type === "dropdown" ? (
-         <select id={id} className="ew-select" value={String(value)} onChange={(e) => onChange(e.target.value)}>
-           <option value="">اختر...</option>
-           {field.options.map((o) => <option key={o} value={o}>{o}</option>)}
-         </select>
-       ) : null}
-    </div>
-  );
-}

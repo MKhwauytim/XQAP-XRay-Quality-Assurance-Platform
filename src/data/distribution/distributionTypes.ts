@@ -66,6 +66,6 @@ export type DistributionCurrentData = {
   totalReplaced: number;
   totalPending: number;
   entries: DistributionEntry[];
-  /** Frozen daily quotas per employee, computed at assignment time. */
+  /** Daily quotas per employee, derived from assignment date through the monthly deadline. */
   quotas?: Record<string, EmployeeQuota>;
 };

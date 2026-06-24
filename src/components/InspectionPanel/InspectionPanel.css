@@ -1,0 +1,451 @@
+/* ── InspectionPanel ────────────────────────────────────────────────────── */
+
+.ip-panel {
+  display: flex;
+  flex-direction: column;
+  background: var(--c-surface, #fff);
+  border: 1px solid var(--c-border, #D6E2EF);
+  border-radius: 14px;
+  overflow: hidden;
+  min-height: 0;
+  flex-shrink: 0;
+}
+
+/* Right panel — stretches to the full split container height via align-items: stretch */
+.ip-panel--right {
+  width: 480px;
+  max-width: 42%;
+  flex-shrink: 0;
+}
+
+/* Bottom panel — fixed lower portion of the split container */
+.ip-panel--bottom {
+  width: 100%;
+  flex: 0 0 42%;
+  height: auto;
+  min-height: 260px;
+  flex-shrink: 0;
+}
+
+/* ── Header ─────────────────────────────────────────────────────────────── */
+
+.ip-header {
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--c-border, #D6E2EF);
+  background: var(--c-bg, #F5F9FD);
+  flex-shrink: 0;
+}
+
+.ip-header-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.ip-header-id {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ip-xray-id {
+  font-family: monospace;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--c-ink-1, #17365D);
+  letter-spacing: 0.04em;
+  word-break: break-all;
+}
+
+.ip-header-controls {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.ip-ctrl-btn {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  border: 1px solid var(--c-border, #D6E2EF);
+  border-radius: 6px;
+  background: var(--c-surface, #fff);
+  color: var(--c-ink-2, #3D5A80);
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.ip-ctrl-btn:hover {
+  background: var(--c-bg-2, #EBF3FB);
+  border-color: var(--c-border-2, #BFD0E2);
+}
+
+/* ── Metadata chips ─────────────────────────────────────────────────────── */
+
+.ip-meta-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ip-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--c-surface, #fff);
+  border: 1px solid var(--c-border, #D6E2EF);
+  border-radius: 20px;
+  padding: 2px 10px 2px 8px;
+  font-size: 11.5px;
+  max-width: 220px;
+}
+
+.ip-chip-label {
+  color: var(--c-ink-3, #5E7A96);
+  white-space: nowrap;
+}
+
+.ip-chip-label::after {
+  content: ":";
+  margin-inline-start: 1px;
+}
+
+.ip-chip-value {
+  color: var(--c-ink-1, #17365D);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
+}
+
+/* ── Phase stepper ──────────────────────────────────────────────────────── */
+
+.ip-stepper {
+  display: flex;
+  flex-direction: row;
+  justify-content: flex-end; /* RTL: phases flow right to left */
+  gap: 0;
+  padding: 0;
+  border-bottom: 1px solid var(--c-border, #D6E2EF);
+  background: var(--c-bg, #F5F9FD);
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+
+.ip-step {
+  display: flex;
+  flex-direction: row-reverse; /* RTL: number on right of text */
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-bottom: 3px solid transparent;
+  transition: background 0.12s, border-color 0.12s;
+  text-align: right;
+  flex: 1;
+  min-width: 120px;
+  position: relative;
+}
+
+.ip-step + .ip-step::before {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: 20%;
+  height: 60%;
+  width: 1px;
+  background: var(--c-border, #D6E2EF);
+}
+
+.ip-step:hover {
+  background: var(--c-bg-2, #EBF3FB);
+}
+
+.ip-step--active {
+  border-bottom-color: var(--c-primary, #17365D);
+  background: var(--c-bg-2, #EBF3FB);
+}
+
+.ip-step--done {
+  border-bottom-color: var(--c-success, #10B981);
+}
+
+.ip-step--locked {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.ip-step--locked:hover {
+  background: transparent;
+}
+
+.ip-step-num {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  border-radius: 50%;
+  border: 2px solid var(--c-border-2, #BFD0E2);
+  background: var(--c-surface, #fff);
+  color: var(--c-ink-2, #3D5A80);
+  font-size: 12px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.ip-step--active .ip-step-num {
+  background: var(--c-primary, #17365D);
+  border-color: var(--c-primary, #17365D);
+  color: #fff;
+}
+
+.ip-step--done .ip-step-num {
+  background: var(--c-success, #10B981);
+  border-color: var(--c-success, #10B981);
+  color: #fff;
+}
+
+.ip-step-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  min-width: 0;
+}
+
+.ip-step-label {
+  font-size: 10px;
+  color: var(--c-ink-3, #5E7A96);
+  font-weight: 500;
+}
+
+.ip-step-title {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--c-ink-1, #17365D);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 160px;
+}
+
+.ip-step--active .ip-step-title { color: var(--c-primary, #17365D); }
+.ip-step--done .ip-step-title   { color: var(--c-success-dark, #059669); }
+
+/* ── Form body ──────────────────────────────────────────────────────────── */
+
+.ip-form-body {
+  flex: 1;
+  min-height: 0; /* allow flex item to shrink so footer stays visible */
+  overflow-y: auto;
+  padding: 18px 18px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.ip-no-template {
+  color: var(--c-ink-3, #5E7A96);
+  font-size: 13px;
+  text-align: center;
+  padding: 32px 0;
+}
+
+/* ── Single-column form fields ──────────────────────────────────────────── */
+
+.ip-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 18px;
+}
+
+.ip-field-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--c-ink-1, #17365D);
+}
+
+.ip-required { color: var(--c-error, #DC2626); margin-inline-start: 2px; }
+
+.ip-field--invalid .ip-input,
+.ip-field--invalid .ip-select {
+  border-color: var(--c-error, #DC2626);
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.08);
+}
+
+.ip-field-error,
+.ip-validation-msg {
+  color: var(--c-error, #DC2626);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.6;
+}
+
+.ip-input,
+.ip-select {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1.5px solid var(--c-border, #D6E2EF);
+  border-radius: 8px;
+  font-size: 14px;
+  font-family: inherit;
+  color: var(--c-ink-1, #17365D);
+  background: var(--c-surface, #fff);
+  transition: border-color 0.15s;
+  box-sizing: border-box;
+  direction: rtl;
+}
+
+.ip-input:focus,
+.ip-select:focus {
+  outline: none;
+  border-color: var(--c-primary, #17365D);
+}
+
+.ip-textarea {
+  min-height: 96px;
+  resize: vertical;
+  line-height: 1.6;
+}
+
+/* ── Submitted / read-only view ─────────────────────────────────────────── */
+
+.ip-readonly-view {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.ip-readonly-phase h4 {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--c-ink-2, #3D5A80);
+  margin: 0 0 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--c-border, #D6E2EF);
+}
+
+.ip-answer-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px dashed var(--c-border, #D6E2EF);
+  font-size: 13px;
+}
+
+.ip-answer-row:last-child { border-bottom: none; }
+
+.ip-answer-label {
+  color: var(--c-ink-3, #5E7A96);
+  flex-shrink: 0;
+  max-width: 45%;
+}
+
+.ip-answer-value {
+  color: var(--c-ink-1, #17365D);
+  font-weight: 600;
+  text-align: start;
+}
+
+/* ── Footer ─────────────────────────────────────────────────────────────── */
+
+.ip-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--c-border, #D6E2EF);
+  background: var(--c-bg, #F5F9FD);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  direction: ltr;
+}
+
+.ip-validation-msg {
+  flex: 1 0 100%;
+  margin: 0;
+}
+
+.ip-footer-primary,
+.ip-footer-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  direction: rtl;
+}
+
+.ip-footer-primary {
+  justify-content: flex-start;
+}
+
+.ip-footer-actions {
+  justify-content: flex-end;
+}
+
+.ip-btn {
+  padding: 8px 18px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  transition: background 0.15s, opacity 0.15s;
+  white-space: nowrap;
+}
+
+.ip-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.ip-btn--primary {
+  background: var(--c-primary, #17365D);
+  color: #fff;
+}
+.ip-btn--primary:hover:not(:disabled) { background: var(--c-primary-dark, #122A4A); }
+
+.ip-btn--secondary {
+  background: var(--c-surface, #fff);
+  color: var(--c-ink-1, #17365D);
+  border: 1.5px solid var(--c-border-2, #BFD0E2);
+}
+.ip-btn--secondary:hover:not(:disabled) { background: var(--c-bg-2, #EBF3FB); }
+
+.ip-btn--warning {
+  background: var(--c-warning-bg, #FFF7ED);
+  color: var(--c-warning, #C2410C);
+  border: 1.5px solid var(--c-warning-border, #FED7AA);
+}
+.ip-btn--warning:hover:not(:disabled) { background: #FEE2C8; }
+
+/* ── Status badge (reused in header) ───────────────────────────────────── */
+
+.ip-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 20px;
+  font-size: 11.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.ip-badge--done    { background: #D1FAE5; color: #065F46; }
+.ip-badge--pending { background: #EFF6FF; color: #1D4ED8; }
+.ip-badge--replaced { background: #F1F5F9; color: #64748B; }

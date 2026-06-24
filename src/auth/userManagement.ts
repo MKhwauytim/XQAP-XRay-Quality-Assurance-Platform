@@ -88,7 +88,6 @@ export type ManagedTab = {
 export const MANAGED_TABS: readonly ManagedTab[] = [
   { id: "population",              label: "إدارة بيانات الأشعة" },
   { id: "employee-workspace",      label: "مساحة العمل" },
-  { id: "ew/stats-dashboard",      label: "لوحة الإحصائيات",        parentId: "employee-workspace" },
   { id: "ew/xray-referrals",       label: "صور الأشعة المحالة",      parentId: "employee-workspace" },
   { id: "ew/xray-results",         label: "نتائج فحص الأشعة",       parentId: "employee-workspace" },
   { id: "ew/referral-approval",    label: "اعتماد الطلبات",          parentId: "employee-workspace" },
@@ -125,7 +124,7 @@ export const MANAGED_FEATURE_GROUPS: readonly FeatureGroup[] = [
       {
         id: "view-employee-stats",
         label: "إحصائيات تفصيلية لكل موظف",
-        description: "جدول تفصيلي لأداء كل موظف في لوحة الإحصائيات",
+        description: "عرض إحصائيات تفصيلية لأداء الموظفين عند توفرها",
       },
       {
         id: "submit-referrals",
@@ -254,7 +253,7 @@ const FEATURE_DEFAULTS: Record<string, Partial<Record<AuthRole, boolean>>> = {
   "view-all-entries":     { guest: false, employee: false, supervisor: true,  manager: true  },
   "view-employee-stats":  { guest: false, employee: false, supervisor: true,  manager: true  },
   "submit-referrals":     { guest: false, employee: true,  supervisor: true,  manager: false },
-  "request-replacement":  { guest: false, employee: true,  supervisor: false, manager: false },
+  "request-replacement":  { guest: false, employee: true,  supervisor: true,  manager: true  },
   "submit-answers":       { guest: false, employee: true,  supervisor: false, manager: false },
   "configure-referral-columns": { guest: false, employee: false, supervisor: true, manager: true },
   "upload-data":          { guest: false, employee: false, supervisor: false, manager: true  },
@@ -310,7 +309,6 @@ export function createDefaultPermissions(): RolePermission[] {
     // Admin (bootstrap) — always full, locked in normalizer
     { role: "admin",      tabId: "population",              access: "edit" },
     { role: "admin",      tabId: "employee-workspace",      access: "edit" },
-    { role: "admin",      tabId: "ew/stats-dashboard",      access: "edit" },
     { role: "admin",      tabId: "ew/xray-referrals",       access: "edit" },
     { role: "admin",      tabId: "ew/xray-results",         access: "edit" },
     { role: "admin",      tabId: "ew/referral-approval",    access: "edit" },
@@ -321,25 +319,21 @@ export function createDefaultPermissions(): RolePermission[] {
     { role: "admin",      tabId: "user-management",         access: "edit" },
     { role: "admin",      tabId: "settings",                access: "edit" },
     // Manager — full access to EW sub-tabs
-    { role: "manager",    tabId: "ew/stats-dashboard",      access: "edit" },
     { role: "manager",    tabId: "ew/xray-referrals",       access: "edit" },
     { role: "manager",    tabId: "ew/xray-results",         access: "edit" },
     { role: "manager",    tabId: "ew/referral-approval",    access: "edit" },
     { role: "manager",    tabId: "ew/inspection-form",      access: "edit" },
     // Supervisor — can see all EW sub-tabs
-    { role: "supervisor", tabId: "ew/stats-dashboard",      access: "view" },
     { role: "supervisor", tabId: "ew/xray-referrals",       access: "edit" },
     { role: "supervisor", tabId: "ew/xray-results",         access: "edit" },
     { role: "supervisor", tabId: "ew/referral-approval",    access: "edit" },
     { role: "supervisor", tabId: "ew/inspection-form",      access: "view" },
     // Employee — restricted EW sub-tabs
-    { role: "employee",   tabId: "ew/stats-dashboard",      access: "view" },
     { role: "employee",   tabId: "ew/xray-referrals",       access: "edit" },
     { role: "employee",   tabId: "ew/xray-results",         access: "view" },
     { role: "employee",   tabId: "ew/referral-approval",    access: "none" },
     { role: "employee",   tabId: "ew/inspection-form",      access: "edit" },
     // Guest — no EW sub-tab access
-    { role: "guest",      tabId: "ew/stats-dashboard",      access: "none" },
     { role: "guest",      tabId: "ew/xray-referrals",       access: "none" },
     { role: "guest",      tabId: "ew/xray-results",         access: "none" },
     { role: "guest",      tabId: "ew/referral-approval",    access: "none" },
@@ -508,9 +502,12 @@ export function normalizeUserManagementState(
 ): UserManagementState {
   // Fill any missing tab permissions from defaults
   const defaultPerms = createDefaultPermissions();
+  const knownTabIds = new Set(MANAGED_TABS.map((tab) => tab.id));
   // Start with all existing entries (preserves manually-set sub-tab permissions)
   const mergedMap = new Map<string, RolePermission>();
-  for (const p of state.permissions) mergedMap.set(`${p.role}:${p.tabId}`, p);
+  for (const p of state.permissions) {
+    if (knownTabIds.has(p.tabId)) mergedMap.set(`${p.role}:${p.tabId}`, p);
+  }
   // Apply defaults for anything not yet explicitly set
   for (const def of defaultPerms) {
     const key = `${def.role}:${def.tabId}`;

@@ -17,9 +17,12 @@ export type BrowseDatasetPreset = {
 
 export type BrowsePresetDatasetKind = BrowseDatasetKind | "xray-referrals";
 
+export type InspectionPanelPosition = "right" | "bottom";
+
 export type UserBrowsePresetFile = {
   username: string;
   browseData: Partial<Record<BrowsePresetDatasetKind, BrowseDatasetPreset>>;
+  inspectionPanelPosition?: InspectionPanelPosition;
 };
 
 function safeUserFileName(username: string): string {
@@ -79,6 +82,20 @@ export async function saveUserBrowseDatasetPreset(
     }
   };
 
+  const dir = await getPresetDir(directoryHandle, true);
+  await safeWriteJson(dir, safeUserFileName(username), nextFile);
+}
+
+export async function saveInspectionPanelPosition(
+  directoryHandle: DirectoryHandleLike,
+  username: string,
+  position: InspectionPanelPosition
+): Promise<void> {
+  const existing = await loadUserBrowsePreset(directoryHandle, username);
+  const nextFile: UserBrowsePresetFile = {
+    ...existing,
+    inspectionPanelPosition: position,
+  };
   const dir = await getPresetDir(directoryHandle, true);
   await safeWriteJson(dir, safeUserFileName(username), nextFile);
 }

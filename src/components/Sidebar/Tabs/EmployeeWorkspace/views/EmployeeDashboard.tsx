@@ -262,7 +262,7 @@ function ItemFormCard({ entry, template, savedAnswer, onSave }: ItemFormCardProp
         <div className="ew-submitted-view">
           {getTemplatePhases(template).map((phase) => {
             const fields = getFieldsForPhase(template, phase.phaseId).filter((field) =>
-              isFieldVisible(field, answers)
+              isFieldVisible(field, answers, template.fields)
             );
             if (fields.length === 0) return null;
             return (
@@ -284,7 +284,7 @@ function ItemFormCard({ entry, template, savedAnswer, onSave }: ItemFormCardProp
           <div className="ew-form-flow">
             {getTemplatePhases(template).map((phase) => {
               const fields = getFieldsForPhase(template, phase.phaseId).filter((field) =>
-                isFieldVisible(field, answers)
+                isFieldVisible(field, answers, template.fields)
               );
               if (fields.length === 0) return null;
               return (

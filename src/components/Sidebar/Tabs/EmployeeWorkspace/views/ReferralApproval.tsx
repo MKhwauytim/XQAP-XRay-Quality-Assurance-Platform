@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { readSession } from "../../../../../auth/authSession";
-import { readUserManagementState } from "../../../../../auth/userManagement";
+import { hasFeature, readUserManagementState } from "../../../../../auth/userManagement";
 import { PageHeader } from "../../../../../components/PageHeader/PageHeader";
 import {
   appendDistributionEvents,
@@ -38,7 +38,10 @@ export default function ReferralApproval({ directoryHandle }: Props) {
   const session  = readSession();
   const username = session?.username ?? "";
   const role     = session?.role ?? "employee";
-  const canReview = role === "admin" || role === "supervisor";
+  const userManagementState = readUserManagementState();
+  const canApproveReferrals = hasFeature(userManagementState.featurePermissions, role, "approve-referrals");
+  const canApproveReplacements = hasFeature(userManagementState.featurePermissions, role, "approve-replacements");
+  const canReview = canApproveReferrals || canApproveReplacements;
 
   const [months, setMonths]       = useState<Array<{ folderName: string }>>([]);
   const [selMonth, setSelMonth]   = useState("");
@@ -54,7 +57,7 @@ export default function ReferralApproval({ directoryHandle }: Props) {
 
   const userDisplayMap = (() => {
     const m: Record<string, string> = {};
-    for (const u of readUserManagementState().users) {
+    for (const u of userManagementState.users) {
       m[u.username] = u.displayName;
     }
     return m;
@@ -75,10 +78,10 @@ export default function ReferralApproval({ directoryHandle }: Props) {
         loadReferralLog(directoryHandle, selMonth),
         loadReplacementLog(directoryHandle, selMonth),
       ]);
-      const visibleReferrals = canReview
+      const visibleReferrals = canApproveReferrals
         ? refLog.requests
         : refLog.requests.filter((r) => r.fromEmployee === username);
-      const visibleReplacements = canReview
+      const visibleReplacements = canApproveReplacements
         ? repLog.requests
         : repLog.requests.filter((r) => r.employeeUsername === username);
       setReferrals(visibleReferrals);
@@ -87,7 +90,7 @@ export default function ReferralApproval({ directoryHandle }: Props) {
     } catch {
       setLoadState("error");
     }
-  }, [directoryHandle, selMonth, username, canReview]);
+  }, [directoryHandle, selMonth, username, canApproveReferrals, canApproveReplacements]);
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { void loadData(); }, [loadData]);
@@ -336,7 +339,7 @@ export default function ReferralApproval({ directoryHandle }: Props) {
                     userDisplayMap={userDisplayMap}
                     expanded={expandedId === req.requestId}
                     onToggleExpand={() => setExpandedId((cur) => (cur === req.requestId ? null : req.requestId))}
-                    canReview={canReview}
+                    canReview={canApproveReferrals}
                     onApprove={() => setReferralDialog({ request: req, action: "approve" })}
                     onDeny={() => setReferralDialog({ request: req, action: "deny" })}
                   />
@@ -350,7 +353,7 @@ export default function ReferralApproval({ directoryHandle }: Props) {
                     userDisplayMap={userDisplayMap}
                     expanded={expandedId === req.requestId}
                     onToggleExpand={() => setExpandedId((cur) => (cur === req.requestId ? null : req.requestId))}
-                    canReview={canReview}
+                    canReview={canApproveReplacements}
                     onApprove={() => setReplacementDialog({ request: req, action: "approve" })}
                     onDeny={() => setReplacementDialog({ request: req, action: "deny" })}
                   />

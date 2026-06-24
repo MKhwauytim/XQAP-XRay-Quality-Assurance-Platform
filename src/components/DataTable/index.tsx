@@ -83,6 +83,7 @@ export type DataTableProps<TRow = unknown> = {
   /** Render the expanded content below the row. */
   renderExpanded?: (row: TRow, colCount: number) => ReactNode;
   onRowClick?: (row: TRow) => void;
+  getRowClassName?: (row: TRow) => string | undefined;
   /** Extra controls to render on the right side of the toolbar (month selectors, etc.). */
   toolbarStart?: ReactNode;
   /** Extra controls injected between the search box and the export button (left side). */
@@ -260,6 +261,7 @@ export default function DataTable<TRow>({
   expandedKey,
   renderExpanded,
   onRowClick,
+  getRowClassName,
   toolbarStart,
   toolbarEndExtra,
   canConfigureColumns = true,
@@ -667,10 +669,11 @@ export default function DataTable<TRow>({
             {virtualRows.map((row) => {
               const key        = getRowKey(row);
               const isExpanded = expandedKey === key;
+              const rowClassName = getRowClassName?.(row);
               return (
                 <Fragment key={key}>
                   <tr
-                    className={`dt-tr${isExpanded ? " selected" : ""}`}
+                    className={`dt-tr${isExpanded ? " selected" : ""}${rowClassName ? ` ${rowClassName}` : ""}`}
                     onClick={() => onRowClick?.(row)}
                   >
                     {visibleCols.map((col) => {

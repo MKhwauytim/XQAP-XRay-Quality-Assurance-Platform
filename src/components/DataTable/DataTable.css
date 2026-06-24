@@ -234,6 +234,19 @@
 .dt-tr:nth-child(even) { background: var(--c-surface-2, #F4F7FB); }
 .dt-tr:nth-child(even):hover { background: var(--c-sky-light, #E1EFFE); }
 .dt-tr.selected:nth-child(even) { background: var(--c-navy-soft, #E5ECF7); }
+.dt-tr.dt-tr--completed,
+.dt-tr.dt-tr--completed:nth-child(even) {
+  background: #ECFDF3;
+}
+.dt-tr.dt-tr--completed:hover,
+.dt-tr.dt-tr--completed:nth-child(even):hover {
+  background: #DDF8E8;
+}
+.dt-tr.dt-tr--completed.selected,
+.dt-tr.dt-tr--completed.selected:nth-child(even) {
+  background: #D6F3E2;
+  box-shadow: inset 3px 0 0 #16A34A;
+}
 
 .dt-td {
   padding: 9px 12px;
