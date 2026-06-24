@@ -104,6 +104,8 @@ export type DataTableProps<TRow = unknown> = {
    * widths, or date formats. Use this to persist the config to a per-user file.
    */
   onColConfigChange?: (cfg: ColConfig) => void;
+  /** Reports the rows currently visible after global search and column filters. */
+  onFilteredRowsChange?: (rows: TRow[]) => void;
 };
 
 // ── Date utilities ────────────────────────────────────────────────────────────
@@ -268,6 +270,7 @@ export default function DataTable<TRow>({
   exportFileName,
   initialColConfig,
   onColConfigChange,
+  onFilteredRowsChange,
 }: DataTableProps<TRow>) {
   const L = useLabels();
 
@@ -375,32 +378,45 @@ export default function DataTable<TRow>({
   }, [columns, colCfg.order]);
 
   // Visible columns: normalized order, not hidden, respecting adminOnly.
-  const visibleCols = normalizedOrder
-    .map((id) => columns.find((c) => c.id === id))
-    .filter((c): c is DataTableCol<TRow> => !!c)
-    .filter((c) => !colCfg.hidden.includes(c.id) && (!c.adminOnly || isAdmin));
+  const visibleCols = useMemo(
+    () => normalizedOrder
+      .map((id) => columns.find((c) => c.id === id))
+      .filter((c): c is DataTableCol<TRow> => !!c)
+      .filter((c) => !colCfg.hidden.includes(c.id) && (!c.adminOnly || isAdmin)),
+    [normalizedOrder, columns, colCfg.hidden, isAdmin]
+  );
 
   // Global search — match any visible column's raw value (debounced to avoid per-keystroke scans)
   const searchTerm = debouncedSearch;
-  const searchFilteredRows = !searchTerm
-    ? rows
-    : rows.filter((row) =>
-        visibleCols.some((col) => {
-          const v = col.accessor(row);
-          return v ? v.toLowerCase().includes(searchTerm) : false;
-        })
-      );
+  const searchFilteredRows = useMemo(
+    () => !searchTerm
+      ? rows
+      : rows.filter((row) =>
+          visibleCols.some((col) => {
+            const v = col.accessor(row);
+            return v ? v.toLowerCase().includes(searchTerm) : false;
+          })
+        ),
+    [rows, searchTerm, visibleCols]
+  );
 
   // Column filters applied on top of search
-  const filteredRows = searchFilteredRows.filter((row) =>
-    visibleCols.every((col) => {
-      const f = filters[col.id];
-      if (!f || isFilterEmpty(f)) return true;
-      const custom = rowMatchesFilter?.(row, col.id, f);
-      if (custom !== null && custom !== undefined) return custom;
-      return defaultRowMatchesFilter(row, col, f, detectedDates);
-    })
+  const filteredRows = useMemo(
+    () => searchFilteredRows.filter((row) =>
+      visibleCols.every((col) => {
+        const f = filters[col.id];
+        if (!f || isFilterEmpty(f)) return true;
+        const custom = rowMatchesFilter?.(row, col.id, f);
+        if (custom !== null && custom !== undefined) return custom;
+        return defaultRowMatchesFilter(row, col, f, detectedDates);
+      })
+    ),
+    [searchFilteredRows, visibleCols, filters, rowMatchesFilter, detectedDates]
   );
+
+  useEffect(() => {
+    onFilteredRowsChange?.(filteredRows);
+  }, [filteredRows, onFilteredRowsChange]);
 
   // Virtual window — only render rows within (+ overscan beyond) the scroll viewport.
   // VROW_H ≈ 9px top-pad + ~20px content + 9px bottom-pad + 1px border (from DataTable.css .dt-td).
@@ -475,6 +491,31 @@ export default function DataTable<TRow>({
   const colWidthPct = (c: DataTableCol<TRow>) =>
     `${((getColFr(c) / totalFr) * 100).toFixed(2)}%`;
 
+  function estimateColumnFr(col: DataTableCol<TRow>): number {
+    const sample = filteredRows.slice(0, 300);
+    const maxChars = Math.max(
+      col.label.length,
+      ...sample.map((row) => String(col.accessor(row) ?? "").length)
+    );
+    const tableW = tableRef.current?.getBoundingClientRect().width ?? 800;
+    const total = visibleCols.reduce((s, c) => s + getColFr(c), 0);
+    const px = Math.min(Math.max(70, maxChars * 8 + 42), 420);
+    return (px / tableW) * total;
+  }
+
+  function handleAutoFitColumn(colIdx: number): void {
+    const col = visibleCols[colIdx];
+    if (!col) return;
+    const nextCfg = {
+      ...colCfg,
+      widths: {
+        ...(colCfg.widths ?? {}),
+        [col.id]: estimateColumnFr(col),
+      },
+    };
+    setColCfg(nextCfg);
+  }
+
   // Column resize via drag
   function handleResizeMouseDown(colIdx: number, e: React.MouseEvent<HTMLDivElement>): void {
     e.preventDefault();
@@ -519,7 +560,11 @@ export default function DataTable<TRow>({
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup",   onUp);
       // Persist on release
-      setColCfgState((prev) => { saveColConfig(storageKey, prev); return prev; });
+      setColCfgState((prev) => {
+        saveColConfig(storageKey, prev);
+        onColConfigChange?.(prev);
+        return prev;
+      });
     }
 
     document.addEventListener("mousemove", onMove);
@@ -617,12 +662,16 @@ export default function DataTable<TRow>({
                     onDrop={() => handleDrop(col.id)}
                   >
                     {/* Resize handle on physical-left border (RTL separator) */}
-                    {colIdx < visibleCols.length - 1 && (
-                      <div
-                        className="dt-resize-handle"
-                        onMouseDown={(e) => handleResizeMouseDown(colIdx, e)}
-                      />
-                    )}
+                    <div
+                      className="dt-resize-handle"
+                      onMouseDown={(e) => handleResizeMouseDown(colIdx, e)}
+                      onDoubleClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleAutoFitColumn(colIdx);
+                      }}
+                      title="اسحب لتغيير العرض، أو انقر مرتين للملاءمة التلقائية"
+                    />
                     <div className="dt-th-inner">
                       <span className="dt-th-grip" aria-hidden="true">⋮⋮</span>
                       <span className="dt-th-label">{col.label}</span>
@@ -756,6 +805,7 @@ function ColPickerPanel({
       order: columns.map((c) => c.id),
       hidden: columns.filter((c) => visSet ? !visSet.has(c.id) : false).map((c) => c.id),
       dateFmt: {},
+      widths: {},
     });
   }
 

@@ -4,6 +4,7 @@ import type { BrowseDatasetKind } from "../population/populationStorage";
 
 const SYSTEM_FOLDER = ".system";
 const USER_PRESETS_FOLDER = "user-presets";
+const ADMIN_SHARED_PRESET_FILE = "admin-shared.browse-preset.json";
 
 export type BrowseDatasetPreset = {
   columnOrder: string[];
@@ -23,6 +24,11 @@ export type UserBrowsePresetFile = {
   username: string;
   browseData: Partial<Record<BrowsePresetDatasetKind, BrowseDatasetPreset>>;
   inspectionPanelPosition?: InspectionPanelPosition;
+};
+
+export type SharedBrowsePresetFile = {
+  owner: "admin";
+  browseData: Partial<Record<BrowsePresetDatasetKind, BrowseDatasetPreset>>;
 };
 
 function safeUserFileName(username: string): string {
@@ -84,6 +90,66 @@ export async function saveUserBrowseDatasetPreset(
 
   const dir = await getPresetDir(directoryHandle, true);
   await safeWriteJson(dir, safeUserFileName(username), nextFile);
+}
+
+export async function loadAdminBrowsePreset(
+  directoryHandle: DirectoryHandleLike
+): Promise<SharedBrowsePresetFile> {
+  let presetDir: DirectoryHandleLike | null = null;
+  try {
+    presetDir = await getPresetDir(directoryHandle, false);
+    const result = await safeReadJson<SharedBrowsePresetFile>(
+      presetDir,
+      ADMIN_SHARED_PRESET_FILE
+    );
+    if (result.ok && result.value.owner === "admin") {
+      return result.value;
+    }
+  } catch {
+    // Missing shared preset is expected until an admin changes columns.
+  }
+
+  try {
+    const dir = presetDir ?? await getPresetDir(directoryHandle, false);
+    const legacyAdminPreset = await safeReadJson<UserBrowsePresetFile>(
+      dir,
+      safeUserFileName("admin")
+    );
+    if (legacyAdminPreset.ok) {
+      return {
+        owner: "admin",
+        browseData: legacyAdminPreset.value.browseData,
+      };
+    }
+  } catch {
+    // Missing legacy admin preset is also expected in new workspaces.
+  }
+
+  return {
+    owner: "admin",
+    browseData: {},
+  };
+}
+
+export async function saveAdminBrowseDatasetPreset(
+  directoryHandle: DirectoryHandleLike,
+  dataset: BrowsePresetDatasetKind,
+  preset: Omit<BrowseDatasetPreset, "updatedAt">
+): Promise<void> {
+  const existing = await loadAdminBrowsePreset(directoryHandle);
+  const nextFile: SharedBrowsePresetFile = {
+    owner: "admin",
+    browseData: {
+      ...existing.browseData,
+      [dataset]: {
+        ...preset,
+        updatedAt: new Date().toISOString(),
+      },
+    },
+  };
+
+  const dir = await getPresetDir(directoryHandle, true);
+  await safeWriteJson(dir, ADMIN_SHARED_PRESET_FILE, nextFile);
 }
 
 export async function saveInspectionPanelPosition(

@@ -62,7 +62,11 @@ export async function processBiWorkbook(
 
   const workbook = XLSX.read(arrayBuffer, {
     type: "array",
-    cellDates: false
+    cellDates: false,
+    cellNF: false,
+    cellStyles: false,
+    cellHTML: false,
+    WTF: false
   });
   onProgress?.("تحليل أوراق ذكاء الأعمال...", 30);
   await yieldToMain();
@@ -97,7 +101,7 @@ export async function processBiWorkbook(
     await yieldToMain();
 
     const normalizedRows: NormalizedBiRow[] = [];
-    const chunkSize = 2000;
+    const chunkSize = 10000;
     for (let r = 0; r < sourceRows.length; r += chunkSize) {
       const chunk = sourceRows.slice(r, r + chunkSize);
       const mappedChunk = chunk.map(({ row, sourceRowNumber }) =>

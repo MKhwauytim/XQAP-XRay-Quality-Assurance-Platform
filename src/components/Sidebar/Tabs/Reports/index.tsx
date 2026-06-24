@@ -32,6 +32,8 @@ export const tabConfig: SidebarTabModule["tabConfig"] = {
 };
 
 type ReportType = "sample" | "sample-xlsx" | "distribution" | "distribution-xlsx" | "executive" | "executive-xlsx";
+type ReportBaseType = "sample" | "distribution" | "executive";
+type ReportFormat = "html" | "xlsx";
 
 type MonthMeta = {
   folderName: string;
@@ -47,6 +49,11 @@ export default function ReportsTab() {
   const [selectedMonth, setSelectedMonth] = useState("");
   const [monthMeta, setMonthMeta] = useState<MonthMeta | null>(null);
   const [generating, setGenerating] = useState<ReportType | null>(null);
+  const [formats, setFormats] = useState<Record<ReportBaseType, ReportFormat>>({
+    executive: "html",
+    sample: "html",
+    distribution: "html",
+  });
   const [toast, setToast] = useState<{ type: "ok" | "error"; text: string } | null>(null);
 
   useEffect(() => {
@@ -154,6 +161,45 @@ export default function ReportsTab() {
     }
   }
 
+  function selectedReportType(baseType: ReportBaseType): ReportType {
+    return formats[baseType] === "xlsx" ? `${baseType}-xlsx` as ReportType : baseType;
+  }
+
+  function renderExportControls(baseType: ReportBaseType, toneClass: string): ReactNode {
+    const selectedType = selectedReportType(baseType);
+    const isBusy = generating === selectedType;
+    return (
+      <div className="rh-export-controls" role="group" aria-label="صيغة التصدير">
+        <div className="rh-format-toggle">
+          <button
+            type="button"
+            className={formats[baseType] === "html" ? "active" : ""}
+            title="عرض تقديمي"
+            onClick={() => setFormats((prev) => ({ ...prev, [baseType]: "html" }))}
+          >
+            ▣
+          </button>
+          <button
+            type="button"
+            className={formats[baseType] === "xlsx" ? "active" : ""}
+            title="Excel"
+            onClick={() => setFormats((prev) => ({ ...prev, [baseType]: "xlsx" }))}
+          >
+            ✕
+          </button>
+        </div>
+        <button
+          className={`rh-btn ${toneClass}`}
+          disabled={busy || !selectedMonth}
+          onClick={() => { void generate(selectedType); }}
+        >
+          {isBusy ? <span className="rh-spinner" /> : null}
+          {isBusy ? "جاري…" : "التصدير"}
+        </button>
+      </div>
+    );
+  }
+
   if (!directoryHandle) {
     return (
       <section className="rh-page" dir="rtl">
@@ -255,25 +301,7 @@ export default function ReportsTab() {
               <i className="rh-dot rh-dot-green" />
               يتطلب بيانات مجتمع معالجة
             </span>
-            <div style={{ display: "flex", gap: "8px" }}>
-              <button
-                className="rh-btn rh-btn-teal"
-                disabled={busy || !selectedMonth}
-                onClick={() => { void generate("executive"); }}
-              >
-                {generating === "executive" ? <span className="rh-spinner" /> : null}
-                {generating === "executive" ? "جاري…" : "HTML ›"}
-              </button>
-              <button
-                className="rh-btn rh-btn-ghost"
-                style={{ border: "1px solid #d8e3ef" }}
-                disabled={busy || !selectedMonth}
-                onClick={() => { void generate("executive-xlsx"); }}
-              >
-                {generating === "executive-xlsx" ? <span className="rh-spinner" /> : null}
-                {generating === "executive-xlsx" ? "جاري…" : "XLSX ↓"}
-              </button>
-            </div>
+            {renderExportControls("executive", "rh-btn-teal")}
           </div>
         </div>
 
@@ -301,25 +329,7 @@ export default function ReportsTab() {
               <i className="rh-dot rh-dot-green" />
               يتطلب عينة محفوظة
             </span>
-            <div style={{ display: "flex", gap: "8px" }}>
-              <button
-                className="rh-btn rh-btn-navy"
-                disabled={busy || !selectedMonth}
-                onClick={() => { void generate("sample"); }}
-              >
-                {generating === "sample" ? <span className="rh-spinner" /> : null}
-                {generating === "sample" ? "جاري…" : "HTML ›"}
-              </button>
-              <button
-                className="rh-btn rh-btn-ghost"
-                style={{ border: "1px solid #d8e3ef" }}
-                disabled={busy || !selectedMonth}
-                onClick={() => { void generate("sample-xlsx"); }}
-              >
-                {generating === "sample-xlsx" ? <span className="rh-spinner" /> : null}
-                {generating === "sample-xlsx" ? "جاري…" : "XLSX ↓"}
-              </button>
-            </div>
+            {renderExportControls("sample", "rh-btn-navy")}
           </div>
         </div>
 
@@ -346,25 +356,7 @@ export default function ReportsTab() {
               <i className="rh-dot rh-dot-green" />
               يتطلب توزيعاً محفوظاً
             </span>
-            <div style={{ display: "flex", gap: "8px" }}>
-              <button
-                className="rh-btn rh-btn-navy"
-                disabled={busy || !selectedMonth}
-                onClick={() => { void generate("distribution"); }}
-              >
-                {generating === "distribution" ? <span className="rh-spinner" /> : null}
-                {generating === "distribution" ? "جاري…" : "HTML ›"}
-              </button>
-              <button
-                className="rh-btn rh-btn-ghost"
-                style={{ border: "1px solid #d8e3ef" }}
-                disabled={busy || !selectedMonth}
-                onClick={() => { void generate("distribution-xlsx"); }}
-              >
-                {generating === "distribution-xlsx" ? <span className="rh-spinner" /> : null}
-                {generating === "distribution-xlsx" ? "جاري…" : "XLSX ↓"}
-              </button>
-            </div>
+            {renderExportControls("distribution", "rh-btn-navy")}
           </div>
         </div>
 

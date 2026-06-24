@@ -4,15 +4,17 @@
 
 /* ── Dark sidebar custom properties ───────────────────────── */
 .sidebar {
-  --sb-bg:         #0F2744;
-  --sb-bg-2:       #142D50;
+  --sb-bg:         var(--brand-deep-bg, #0E2444);
+  --sb-bg-2:       var(--brand-deep-surface, #102C57);
   --sb-text:       rgba(255, 255, 255, 0.88);
-  --sb-text-muted: rgba(255, 255, 255, 0.44);
-  --sb-border:     rgba(255, 255, 255, 0.08);
+  --sb-text-muted: rgba(249, 248, 244, 0.56);
+  --sb-border:     rgba(217, 190, 158, 0.14);
   --sb-hover-bg:   rgba(255, 255, 255, 0.07);
   --sb-active-bg:  rgba(255, 255, 255, 0.12);
-  --sb-accent:     #5EB8FF;
-  --sb-accent-sub: rgba(94, 184, 255, 0.18);
+  --sb-accent:     var(--brand-digital, #009ADE);
+  --sb-accent-2:   var(--brand-innovation, #10CFC9);
+  --sb-gold:       var(--brand-premium, #DAA328);
+  --sb-accent-sub: rgba(0, 154, 222, 0.18);
 }
 
 /* ── Shell ─────────────────────────────────────────────────── */
@@ -29,11 +31,13 @@
 
   direction: rtl;
 
-  background: var(--sb-bg);
+  background:
+    linear-gradient(180deg, rgba(16, 207, 201, 0.06), transparent 240px),
+    var(--sb-bg);
 
   box-shadow:
-    -1px 0 0 rgba(255, 255, 255, 0.04),
-    -20px 0 56px rgba(10, 25, 45, 0.22);
+    -1px 0 0 rgba(217, 190, 158, 0.08),
+    -18px 0 44px rgba(10, 25, 45, 0.2);
 
   transition:
     width var(--t-slow) var(--ease-spring),
@@ -56,7 +60,7 @@
 
   padding: 18px 16px;
 
-  background: var(--sb-bg-2);
+  background: linear-gradient(135deg, var(--sb-bg-2), #0E2B51);
   border-bottom: 1px solid var(--sb-border);
 }
 
@@ -98,7 +102,7 @@
   flex: 0 0 auto;
 
   border: 1px solid var(--sb-border);
-  border-radius: 10px;
+  border-radius: var(--r-sm, 8px);
 
   background: var(--sb-hover-bg);
   color: var(--sb-text);
@@ -156,7 +160,7 @@
   gap: 11px;
 
   border: 0;
-  border-radius: 12px;
+  border-radius: var(--r-sm, 8px);
 
   padding: 10px 13px;
 
@@ -190,7 +194,7 @@
   color: #FFFFFF;
   font-weight: 700;
   /* Left-side (inner edge toward content) accent indicator */
-  box-shadow: inset 3px 0 0 var(--sb-accent);
+  box-shadow: inset 3px 0 0 var(--sb-accent), inset 0 0 0 1px rgba(0, 154, 222, 0.08);
 }
 
 .sidebar-nav-icon {

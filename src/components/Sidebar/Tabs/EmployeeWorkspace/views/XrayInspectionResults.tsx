@@ -22,7 +22,7 @@ import {
   loadReplacementLog,
 } from "../../../../../data/referral/referralStorage";
 import type { ReferralRequest, ReplacementRequest } from "../../../../../data/referral/referralTypes";
-import { loadUserBrowsePreset } from "../../../../../data/preferences/browsePresetStorage";
+import { loadAdminBrowsePreset, loadUserBrowsePreset } from "../../../../../data/preferences/browsePresetStorage";
 import { listMonthFolders } from "../../../../../data/population/populationStorage";
 import { loadSampleMaster } from "../../../../../data/sampling/sampleStorage";
 import { loadTemplate } from "../../../../../data/templates/templateStorage";
@@ -153,8 +153,11 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
       }
     });
 
-    void loadUserBrowsePreset(directoryHandle, username).then((file) => {
-      const preset = file.browseData[REFERRALS_PRESET_KEY];
+    void Promise.all([
+      loadAdminBrowsePreset(directoryHandle),
+      loadUserBrowsePreset(directoryHandle, username),
+    ]).then(([adminFile, userFile]) => {
+      const preset = adminFile.browseData[REFERRALS_PRESET_KEY] ?? userFile.browseData[REFERRALS_PRESET_KEY];
       if (preset) {
         setReferralColConfig({
           order: preset.columnOrder,

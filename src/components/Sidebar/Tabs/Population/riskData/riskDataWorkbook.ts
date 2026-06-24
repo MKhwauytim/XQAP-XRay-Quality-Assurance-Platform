@@ -53,7 +53,11 @@ export async function processRiskWorkbook(
 
   const workbook = XLSX.read(arrayBuffer, {
     type: "array",
-    cellDates: false
+    cellDates: false,
+    cellNF: false,
+    cellStyles: false,
+    cellHTML: false,
+    WTF: false
   });
   onProgress?.("تحليل الأوراق...", 30);
   await yieldToMain();
@@ -88,7 +92,7 @@ export async function processRiskWorkbook(
     await yieldToMain();
 
     const normalizedRows: NormalizedRiskRow[] = [];
-    const chunkSize = 500;
+    const chunkSize = 5000;
     for (let r = 0; r < sourceRows.length; r += chunkSize) {
       const chunk = sourceRows.slice(r, r + chunkSize);
       const mappedChunk = chunk.map(({ row, sourceRowNumber }) =>

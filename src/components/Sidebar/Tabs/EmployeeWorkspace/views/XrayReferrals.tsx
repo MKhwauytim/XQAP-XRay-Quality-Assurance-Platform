@@ -48,8 +48,9 @@ import DataTable, {
   type DataTableCol,
 } from "../../../../../components/DataTable";
 import {
+  loadAdminBrowsePreset,
   loadUserBrowsePreset,
-  saveUserBrowseDatasetPreset,
+  saveAdminBrowseDatasetPreset,
   saveInspectionPanelPosition,
   type InspectionPanelPosition,
 } from "../../../../../data/preferences/browsePresetStorage";
@@ -247,6 +248,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   const [colPreset, setColPreset]     = useState<ColConfig | undefined>(undefined);
   const [myQuota, setMyQuota]         = useState<PersonalQuota>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [filteredTableEntries, setFilteredTableEntries] = useState<DistributionEntry[]>([]);
   const [referralModal, setReferralModal] = useState<ReferralModalState>(null);
   const [panelPosition, setPanelPosition] = useState<InspectionPanelPosition>("right");
   useEffect(() => {
@@ -259,8 +261,11 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       if (selection?.templateId) void applyTemplate(selection.templateId, false);
     });
     void loadPopulationConfig(directoryHandle).then((cfg) => setStageMappings(cfg.stageMappings));
-    void loadUserBrowsePreset(directoryHandle, username).then((file) => {
-      const p = file.browseData[REFERRALS_PRESET_KEY];
+    void Promise.all([
+      loadAdminBrowsePreset(directoryHandle),
+      loadUserBrowsePreset(directoryHandle, username),
+    ]).then(([adminFile, userFile]) => {
+      const p = adminFile.browseData[REFERRALS_PRESET_KEY] ?? userFile.browseData[REFERRALS_PRESET_KEY];
       if (p) {
         setColPreset({
           order:   p.columnOrder,
@@ -270,8 +275,8 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           dateFmt: (p.dateFmt ?? {}) as ColConfig["dateFmt"],
         });
       }
-      if (file.inspectionPanelPosition) {
-        setPanelPosition(file.inspectionPanelPosition);
+      if (userFile.inspectionPanelPosition) {
+        setPanelPosition(userFile.inspectionPanelPosition);
       }
     });
   }, [baseColumns, directoryHandle, username]);
@@ -690,14 +695,18 @@ export default function XrayReferrals({ directoryHandle }: Props) {
             initialColConfig={colPreset}
             onColConfigChange={(cfg) => {
               setColPreset(cfg);
-              void saveUserBrowseDatasetPreset(directoryHandle, username, REFERRALS_PRESET_KEY, {
+              const preset = {
                 columnOrder:    cfg.order,
                 visibleColumns: baseColumns.map((c) => c.id).filter((id) => !cfg.hidden.includes(id)),
                 widths:         cfg.widths,
                 dateFmt:        cfg.dateFmt,
-              });
+              };
+              if (role === "admin") {
+                void saveAdminBrowseDatasetPreset(directoryHandle, REFERRALS_PRESET_KEY, preset);
+              }
             }}
             rowMatchesFilter={rowMatchesFilter}
+            onFilteredRowsChange={setFilteredTableEntries}
             exportFileName={`صور الأشعة المحالة - ${selMonth || "كل الأشهر"}.xlsx`}
             expandedKey={selEntryId}
             onRowClick={(e) => setSelEntryId(e.xrayImageId)}
@@ -789,13 +798,31 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                     <button
                       type="button"
                       className="ew-btn-secondary ew-btn-sm"
-                      onClick={
-                        selectedIds.size > 0
-                          ? clearSelection
-                          : () => selectAll(entries.filter((e) => e.status !== "replaced").map((e) => e.xrayImageId))
+                      onClick={() =>
+                        selectAll(
+                          filteredTableEntries
+                            .filter((e) => e.status !== "replaced")
+                            .map((e) => e.xrayImageId)
+                        )
                       }
                     >
-                      {selectedIds.size > 0 ? "إلغاء التحديد" : "تحديد الكل"}
+                      تحديد الظاهر
+                    </button>
+                    {selectedIds.size > 0 && (
+                      <button
+                        type="button"
+                        className="ew-btn-secondary ew-btn-sm"
+                        onClick={clearSelection}
+                      >
+                        إلغاء التحديد
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="ew-btn-secondary ew-btn-sm"
+                      onClick={() => selectAll(entries.filter((e) => e.status !== "replaced").map((e) => e.xrayImageId))}
+                    >
+                      تحديد الكل
                     </button>
                   </div>
                 )}

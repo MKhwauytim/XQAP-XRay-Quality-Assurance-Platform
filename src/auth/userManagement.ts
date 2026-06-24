@@ -42,6 +42,13 @@ export type UserManagementState = {
   featurePermissions: FeaturePermission[];
 };
 
+const DEFAULT_USER_PASSWORD_HASH: PasswordHashRecord = {
+  algorithm: "argon2id",
+  encoded: "$argon2id$v=19$m=19456,t=2,p=1$eHJheS1kZWZhdWx0LTIwMjY$2ZptFPutF/hZRmAofMUHA8cUE3Tq/A743hoOJO74PWY"
+};
+
+export const DEFAULT_USER_TEMP_PASSWORD = "Xray@2026";
+
 // ── Storage key & event ───────────────────────────────────────────────────────
 
 const STORAGE_KEY = "xray_user_management_v1";
@@ -92,7 +99,6 @@ export const MANAGED_TABS: readonly ManagedTab[] = [
   { id: "ew/xray-results",         label: "نتائج فحص الأشعة",       parentId: "employee-workspace" },
   { id: "ew/referral-approval",    label: "اعتماد الطلبات",          parentId: "employee-workspace" },
   { id: "ew/inspection-form",      label: "نموذج الفحص (مساحة العمل)", parentId: "employee-workspace" },
-  { id: "template-builder",        label: "نموذج الفحص" },
   { id: "reports",                 label: "التقارير" },
   { id: "archive",                 label: "الأرشيف" },
   { id: "user-management",         label: "إدارة المستخدمين" },
@@ -234,7 +240,6 @@ export const TAB_FEATURE_MAP: Readonly<Record<string, readonly string[]>> = {
   "user-management":    ["manage-users", "reset-passwords", "edit-permissions"],
   "reports":            ["export-reports"],
   "archive":            ["export-archive"],
-  "template-builder":   [],
   "settings":           [],
 };
 
@@ -360,10 +365,37 @@ export function createDefaultFeaturePermissions(): FeaturePermission[] {
 
 export function createEmptyUserManagementState(): UserManagementState {
   return {
-    users: [],
+    users: createDefaultManagedUsers(),
     permissions: createDefaultPermissions(),
     featurePermissions: createDefaultFeaturePermissions(),
   };
+}
+
+function createDefaultManagedUsers(): ManagedLoginUser[] {
+  const createdAt = "2026-06-24T00:00:00.000Z";
+  const users: Array<{
+    id: string;
+    username: string;
+    displayName: string;
+    role: AuthRole;
+    hasCertScanLicense?: boolean;
+  }> = [
+    { id: "default-user-mohammed-otaibi", username: "mohammed.otaibi", displayName: "محمد العتيبي", role: "supervisor", hasCertScanLicense: true },
+    { id: "default-user-jamila-ghamdi", username: "jamila.ghamdi", displayName: "جميلة الغامدي", role: "employee" },
+    { id: "default-user-hatem-oraini", username: "hatem.oraini", displayName: "حاتم العريني", role: "employee" },
+    { id: "default-user-salman-hajji", username: "salman.hajji", displayName: "سلمان الحجي", role: "employee" },
+    { id: "default-user-abdulilah-moneim", username: "abdulilah.moneim", displayName: "عبدالاله المنعم", role: "manager", hasCertScanLicense: true },
+  ];
+
+  return users.map((user) => ({
+    ...user,
+    username: normalizeUsername(user.username),
+    passwordHash: { ...DEFAULT_USER_PASSWORD_HASH },
+    isActive: true,
+    hasCertScanLicense: user.hasCertScanLicense ?? false,
+    createdAt,
+    updatedAt: createdAt,
+  }));
 }
 
 // ── Permission helpers ────────────────────────────────────────────────────────
@@ -530,7 +562,8 @@ export function normalizeUserManagementState(
     return existing ?? def;
   });
 
-  return { users: state.users, permissions, featurePermissions };
+  const users = state.users.length > 0 ? state.users : createDefaultManagedUsers();
+  return { users, permissions, featurePermissions };
 }
 
 // ── User helpers ──────────────────────────────────────────────────────────────

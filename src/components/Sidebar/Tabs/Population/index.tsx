@@ -49,8 +49,9 @@ import type {
 import { drawSample } from "../../../../data/sampling/sampleAlgorithm";
 import { loadSampleMaster, saveSampleMaster } from "../../../../data/sampling/sampleStorage";
 import {
+  loadAdminBrowsePreset,
   loadUserBrowsePreset,
-  saveUserBrowseDatasetPreset,
+  saveAdminBrowseDatasetPreset,
   type UserBrowsePresetFile
 } from "../../../../data/preferences/browsePresetStorage";
 import { loadEmployeeAnswers } from "../../../../data/answers/answerStorage";
@@ -386,6 +387,16 @@ export default function PopulationTab() {
   const isPhaseOneComplete = useMemo(
     () => Boolean(uploads.riskAgencyData.file),
     [uploads.riskAgencyData.file]
+  );
+
+  const riskColumnHints = useMemo(
+    () => buildColumnHintsFromRows(riskWorkbookResult?.rows ?? [], config),
+    [riskWorkbookResult, config]
+  );
+
+  const biColumnHints = useMemo(
+    () => buildColumnHintsFromRows(biWorkbookResult?.rows ?? [], config),
+    [biWorkbookResult, config]
   );
 
   async function pickExcelFile(uploadKey: UploadKey): Promise<void> {
@@ -1318,12 +1329,66 @@ export default function PopulationTab() {
           riskRows: riskWorkbookResult?.rows.length ?? null,
           biRows: biWorkbookResult?.rows.length ?? null,
           certScanProvided: certScanPasteText.trim().length > 0,
-          finalRows: populationProcessingResult?.preparedRows.length ?? null
+          finalRows: populationProcessingResult?.preparedRows.length ?? null,
+          riskSheetNames: [
+            ...(riskWorkbookResult?.sheetSummaries.map((sheet) => sheet.sheetName) ?? []),
+            ...(riskWorkbookResult?.unknownSheetNames ?? [])
+          ],
+          biSheetNames: [
+            ...(biWorkbookResult?.sheetSummaries.map((sheet) => sheet.sheetName) ?? []),
+            ...(biWorkbookResult?.unknownSheetNames ?? [])
+          ],
+          riskColumnHints,
+          biColumnHints
         }}
       />
       </>)}
     </section>
   );
+}
+
+function normalizeHeaderToken(value: string): string {
+  return value
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/[أإآ]/g, "ا")
+    .replace(/ى/g, "ي")
+    .replace(/ة/g, "ه")
+    .replace(/[ـ]/g, "")
+    .toLowerCase();
+}
+
+function buildColumnHintsFromRows(
+  rows: Array<{ rawRow?: Record<string, unknown> }>,
+  config: PopulationConfig
+): Record<string, string[]> {
+  const headers = new Set<string>();
+  for (const row of rows.slice(0, 1500)) {
+    for (const header of Object.keys(row.rawRow ?? {})) {
+      if (header.trim()) headers.add(header.trim());
+    }
+  }
+
+  const normalizedHeaders = Array.from(headers).map((header) => ({
+    header,
+    normalized: normalizeHeaderToken(header),
+  }));
+  const template = config.mappingTemplates[0] ?? DEFAULT_MAPPING_TEMPLATE;
+  const hints: Record<string, string[]> = {};
+
+  for (const field of config.systemFields.filter((item) => item.isRequired)) {
+    const aliases = [
+      field.labelAr,
+      ...(template.columnMappings[field.key] ?? []),
+      ...(template.biColumnMappings?.[field.key] ?? []),
+    ].map(normalizeHeaderToken);
+    const matches = normalizedHeaders
+      .filter(({ normalized }) => aliases.some((alias) => normalized === alias || normalized.includes(alias) || alias.includes(normalized)))
+      .map(({ header }) => header);
+    hints[field.key] = Array.from(new Set(matches));
+  }
+
+  return hints;
 }
 
 // ── Browse sub-tab ────────────────────────────────────────────────────────────
@@ -1820,11 +1885,20 @@ function BrowseDataView({
     }
 
     setIsPresetLoaded(false);
-    void loadUserBrowsePreset(
-      directoryHandle as Parameters<typeof loadUserBrowsePreset>[0],
-      username
-    )
-      .then((preset) => setBrowsePreset(preset))
+    const workspaceHandle = directoryHandle as Parameters<typeof loadUserBrowsePreset>[0];
+    void Promise.all([
+      loadAdminBrowsePreset(workspaceHandle),
+      loadUserBrowsePreset(workspaceHandle, username)
+    ])
+      .then(([adminPreset, userPreset]) => {
+        setBrowsePreset({
+          username,
+          browseData: {
+            ...userPreset.browseData,
+            ...adminPreset.browseData
+          }
+        });
+      })
       .catch(() => setBrowsePreset({ username, browseData: {} }))
       .finally(() => setIsPresetLoaded(true));
   }, [directoryHandle, username]);
@@ -2059,12 +2133,13 @@ function BrowseDataView({
       }
     }));
 
-    void saveUserBrowseDatasetPreset(
-      directoryHandle as Parameters<typeof saveUserBrowseDatasetPreset>[0],
-      username,
-      dataset,
-      datasetPreset
-    );
+    if (readSession()?.role === "admin") {
+      void saveAdminBrowseDatasetPreset(
+        directoryHandle as Parameters<typeof saveAdminBrowseDatasetPreset>[0],
+        dataset,
+        datasetPreset
+      );
+    }
   }
 
   function handleColumnDrop(targetKey: string): void {

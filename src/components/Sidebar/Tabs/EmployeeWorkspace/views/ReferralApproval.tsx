@@ -24,6 +24,7 @@ import type { DirectoryHandleLike } from "../../../../../data/storage/fileSystem
 import type { PreparedPopulationRow } from "../../../../../data/population/populationTypes";
 import { loadMonthPopulationFinal } from "../../../../../data/population/populationStorage";
 import { loadSampleMaster } from "../../../../../data/sampling/sampleStorage";
+import type { DistributionEntry } from "../../../../../data/distribution/distributionTypes";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 type StatusMsg = { type: "ok" | "error"; text: string } | null;
@@ -54,6 +55,7 @@ export default function ReferralApproval({ directoryHandle }: Props) {
   const [referralDialog, setReferralDialog]       = useState<ReferralReviewDialog>(null);
   const [replacementDialog, setReplacementDialog] = useState<ReplacementReviewDialog>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [sampleDetails, setSampleDetails] = useState<Record<string, DistributionEntry | PreparedPopulationRow>>({});
 
   const userDisplayMap = (() => {
     const m: Record<string, string> = {};
@@ -70,6 +72,7 @@ export default function ReferralApproval({ directoryHandle }: Props) {
     });
   }, [directoryHandle]);
 
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const loadData = useCallback(async () => {
     if (!selMonth) return;
     setLoadState("loading");
@@ -78,6 +81,16 @@ export default function ReferralApproval({ directoryHandle }: Props) {
         loadReferralLog(directoryHandle, selMonth),
         loadReplacementLog(directoryHandle, selMonth),
       ]);
+      const sample = await loadSampleMaster(directoryHandle, selMonth);
+      if (sample) {
+        const distribution = await loadOrDeriveDistributionCurrent(directoryHandle, selMonth, sample.rows);
+        const detailMap: Record<string, DistributionEntry | PreparedPopulationRow> = {};
+        for (const row of sample.rows) detailMap[row.xrayImageId] = row;
+        for (const entry of distribution?.entries ?? []) detailMap[entry.xrayImageId] = entry;
+        setSampleDetails(detailMap);
+      } else {
+        setSampleDetails({});
+      }
       const visibleReferrals = canApproveReferrals
         ? refLog.requests
         : refLog.requests.filter((r) => r.fromEmployee === username);
@@ -121,6 +134,13 @@ export default function ReferralApproval({ directoryHandle }: Props) {
       reviewNotes: reviewNotes.trim() || undefined,
     });
     setReferralDialog(null);
+    if (updateResult.ok) {
+      setReferrals((prev) => prev.map((item) =>
+        item.requestId === request.requestId
+          ? { ...item, status: "approved", reviewedBy: username, reviewedAt: now, reviewNotes: reviewNotes.trim() || undefined }
+          : item
+      ));
+    }
     setStatusMsg(updateResult.ok
       ? { type: "ok", text: `تمت الموافقة — تم نقل ${request.xrayImageIds.length} عينة إلى ${userDisplayMap[request.toEmployee] ?? request.toEmployee}.` }
       : { type: "error", text: updateResult.error }
@@ -135,6 +155,13 @@ export default function ReferralApproval({ directoryHandle }: Props) {
       reviewNotes: reviewNotes.trim() || undefined,
     });
     setReferralDialog(null);
+    if (result.ok) {
+      setReferrals((prev) => prev.map((item) =>
+        item.requestId === request.requestId
+          ? { ...item, status: "denied", reviewedBy: username, reviewedAt: now, reviewNotes: reviewNotes.trim() || undefined }
+          : item
+      ));
+    }
     setStatusMsg(result.ok
       ? { type: "ok", text: "تم رفض طلب الإحالة — ستعود العينات إلى الموظف الأصلي." }
       : { type: "error", text: result.error }
@@ -209,6 +236,13 @@ export default function ReferralApproval({ directoryHandle }: Props) {
       reviewNotes: reviewNotes.trim() || undefined,
     });
     setReplacementDialog(null);
+    if (updateResult.ok) {
+      setReplacements((prev) => prev.map((item) =>
+        item.requestId === request.requestId
+          ? { ...item, status: "approved", reviewedBy: username, reviewedAt: now, reviewNotes: reviewNotes.trim() || undefined }
+          : item
+      ));
+    }
     setStatusMsg(updateResult.ok
       ? { type: "ok", text: `تمت الموافقة — تم استبدال ${request.originalXrayImageId} بـ ${request.replacementXrayImageId}.` }
       : { type: "error", text: updateResult.error }
@@ -223,6 +257,13 @@ export default function ReferralApproval({ directoryHandle }: Props) {
       reviewNotes: reviewNotes.trim() || undefined,
     });
     setReplacementDialog(null);
+    if (result.ok) {
+      setReplacements((prev) => prev.map((item) =>
+        item.requestId === request.requestId
+          ? { ...item, status: "denied", reviewedBy: username, reviewedAt: now, reviewNotes: reviewNotes.trim() || undefined }
+          : item
+      ));
+    }
     setStatusMsg(result.ok
       ? { type: "ok", text: "تم رفض طلب الاستبدال — تبقى العينة الأصلية مع الموظف." }
       : { type: "error", text: result.error }
@@ -337,6 +378,7 @@ export default function ReferralApproval({ directoryHandle }: Props) {
                     key={req.requestId}
                     request={req}
                     userDisplayMap={userDisplayMap}
+                    sampleDetails={sampleDetails}
                     expanded={expandedId === req.requestId}
                     onToggleExpand={() => setExpandedId((cur) => (cur === req.requestId ? null : req.requestId))}
                     canReview={canApproveReferrals}
@@ -351,6 +393,7 @@ export default function ReferralApproval({ directoryHandle }: Props) {
                     key={req.requestId}
                     request={req}
                     userDisplayMap={userDisplayMap}
+                    sampleDetails={sampleDetails}
                     expanded={expandedId === req.requestId}
                     onToggleExpand={() => setExpandedId((cur) => (cur === req.requestId ? null : req.requestId))}
                     canReview={canApproveReplacements}
@@ -404,10 +447,11 @@ export default function ReferralApproval({ directoryHandle }: Props) {
 // ── ReferralCard ──────────────────────────────────────────────────────────────
 
 function ReferralCard({
-  request, userDisplayMap, expanded, onToggleExpand, canReview, onApprove, onDeny,
+  request, userDisplayMap, sampleDetails, expanded, onToggleExpand, canReview, onApprove, onDeny,
 }: {
   request: ReferralRequest;
   userDisplayMap: Record<string, string>;
+  sampleDetails: Record<string, DistributionEntry | PreparedPopulationRow>;
   expanded: boolean;
   onToggleExpand: () => void;
   canReview: boolean;
@@ -456,7 +500,7 @@ function ReferralCard({
       {expanded && (
         <div className="ew-referral-ids-list">
           {request.xrayImageIds.map((id) => (
-            <span key={id} className="dt-mono ew-referral-id-chip">{id}</span>
+            <SampleDetailChip key={id} id={id} detail={sampleDetails[id]} />
           ))}
         </div>
       )}
@@ -467,10 +511,11 @@ function ReferralCard({
 // ── ReplacementCard ───────────────────────────────────────────────────────────
 
 function ReplacementCard({
-  request, userDisplayMap, expanded, onToggleExpand, canReview, onApprove, onDeny,
+  request, userDisplayMap, sampleDetails, expanded, onToggleExpand, canReview, onApprove, onDeny,
 }: {
   request: ReplacementRequest;
   userDisplayMap: Record<string, string>;
+  sampleDetails: Record<string, DistributionEntry | PreparedPopulationRow>;
   expanded: boolean;
   onToggleExpand: () => void;
   canReview: boolean;
@@ -481,7 +526,9 @@ function ReplacementCard({
   const statusClasses: Record<string, string> = { pending: "ew-ref-badge-pending", approved: "ew-ref-badge-approved", denied: "ew-ref-badge-denied" };
   const empName  = userDisplayMap[request.employeeUsername] ?? request.employeeUsername;
   const dateStr  = new Date(request.requestedAt).toLocaleDateString("ar-SA-u-nu-latn", { year: "numeric", month: "long", day: "numeric" });
-  const rep = request.replacementRowData as Record<string, string | undefined>;
+  const originalDetail = sampleDetails[request.originalXrayImageId];
+  const replacementDetail = sampleDetails[request.replacementXrayImageId] ?? request.replacementRowData as PreparedPopulationRow | undefined;
+  const replacementRow = getDetailRow(replacementDetail);
 
   return (
     <article className="ew-referral-card">
@@ -521,19 +568,46 @@ function ReplacementCard({
       {expanded && (
         <div className="ew-referral-ids-list" style={{ flexDirection: "column", gap: 6 }}>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <span className="ew-referral-id-chip" style={{ background: "#fee2e2", color: "#7f1d1d" }}>
-              أصلي: {request.originalXrayImageId}
-            </span>
-            <span className="ew-referral-id-chip" style={{ background: "#dcfce7", color: "#14532d" }}>
-              بديل: {request.replacementXrayImageId}
-            </span>
+            <SampleDetailChip id={request.originalXrayImageId} detail={originalDetail} prefix="أصلي" tone="danger" />
+            <SampleDetailChip id={request.replacementXrayImageId} detail={replacementDetail} prefix="بديل" tone="success" />
           </div>
-          {rep.portName && <span style={{ fontSize: 12, color: "#475569" }}>المنفذ: {rep.portName}</span>}
-          {rep.stage    && <span style={{ fontSize: 12, color: "#475569" }}>المستوى: {rep.stage}</span>}
-          {rep.plateOrContainerNumber && <span style={{ fontSize: 12, color: "#475569" }}>اللوحة/الحاوية: {rep.plateOrContainerNumber}</span>}
+          {replacementRow?.portName && <span style={{ fontSize: 12, color: "#475569" }}>منفذ البديل: {replacementRow.portName}</span>}
+          {replacementRow?.stage    && <span style={{ fontSize: 12, color: "#475569" }}>مستوى البديل: {replacementRow.stage}</span>}
+          {replacementRow?.plateOrContainerNumber && <span style={{ fontSize: 12, color: "#475569" }}>اللوحة/الحاوية: {replacementRow.plateOrContainerNumber}</span>}
         </div>
       )}
     </article>
+  );
+}
+
+function getDetailRow(detail: DistributionEntry | PreparedPopulationRow | undefined): PreparedPopulationRow | undefined {
+  if (!detail) return undefined;
+  return "row" in detail ? detail.row : detail;
+}
+
+function SampleDetailChip({
+  id,
+  detail,
+  prefix,
+  tone = "neutral",
+}: {
+  id: string;
+  detail: DistributionEntry | PreparedPopulationRow | undefined;
+  prefix?: string;
+  tone?: "neutral" | "danger" | "success";
+}) {
+  const row = getDetailRow(detail);
+  const bg = tone === "danger" ? "#fee2e2" : tone === "success" ? "#dcfce7" : "#f8fafc";
+  const color = tone === "danger" ? "#7f1d1d" : tone === "success" ? "#14532d" : "#334155";
+  return (
+    <span className="ew-referral-id-chip" style={{ background: bg, color, display: "inline-flex", flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
+      <span className="dt-mono">{prefix ? `${prefix}: ${id}` : id}</span>
+      {row && (
+        <span style={{ fontSize: 11, color }}>
+          {[row.portName, row.stage, row.plateOrContainerNumber].filter(Boolean).join(" · ")}
+        </span>
+      )}
+    </span>
   );
 }
 

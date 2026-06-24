@@ -37,7 +37,7 @@ export const tabConfig: SidebarTabModule["tabConfig"] = {
   id: "template-builder",
   label: "النماذج",
   order: 20,
-  allowedRoles: ["manager", "admin"],
+  allowedRoles: [],
   icon: <TemplateBuilderIcon />,
 };
 
