@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { CheckCircle2 } from "lucide-react";
 import * as XLSX from "xlsx";
 import type { NormalizedRiskRow } from "../riskData/riskDataTypes";
 import type { NormalizedBiRow } from "../biData/biDataTypes";
@@ -393,7 +394,8 @@ export default function DataAccuracyReport({
         {filtered.length === 0 ? (
           <div className="dar-empty">
             {result.mismatches.length === 0
-              ? "✅ لا توجد اختلافات — البيانات متطابقة بالكامل"
+              ? <><CheckCircle2 size={16} style={{ verticalAlign: "middle", marginInlineEnd: 4, color: "#16a34a" }} /> لا توجد اختلافات — البيانات متطابقة بالكامل</>
+
               : "لا توجد نتائج تطابق الفلتر المحدد"}
           </div>
         ) : (

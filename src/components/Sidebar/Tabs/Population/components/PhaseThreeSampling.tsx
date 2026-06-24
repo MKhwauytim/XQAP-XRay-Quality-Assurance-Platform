@@ -3,6 +3,7 @@ import type { PopulationConfig, StageSamplingRule } from "../../../../../data/po
 import { formatNumber, getStageKey } from "./helpers";
 import SummaryCard from "./SummaryCard";
 import { useState } from "react";
+import { AlertTriangle, Lock, Unlock } from "lucide-react";
 
 type SaveMessage = { type: "ok" | "error"; text: string } | null;
 
@@ -121,10 +122,10 @@ export default function PhaseThreeSampling({
                         }}
                       >
                         {isAdminUnlocked
-                          ? "🔓 مفتوح (Admin)"
+                          ? <><Unlock size={14} style={{ verticalAlign: "middle", marginInlineEnd: 4 }} /> مفتوح (Admin)</>
                           : isAutoLocked
-                          ? "⚠️ مقفل تلقائياً"
-                          : "🔒 مغلق"}
+                          ? <><AlertTriangle size={14} style={{ verticalAlign: "middle", marginInlineEnd: 4 }} /> مقفل تلقائياً</>
+                          : <><Lock size={14} style={{ verticalAlign: "middle", marginInlineEnd: 4 }} /> مغلق</>}
                       </button>
                     )}
                   </div>

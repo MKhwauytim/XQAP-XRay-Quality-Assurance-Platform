@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { AlertTriangle, Folder, FolderArchive, Wrench, XCircle } from "lucide-react";
 
 import type { AuthSession } from "../../auth/authTypes";
 import { useWorkspace } from "./useWorkspace";
@@ -29,7 +30,7 @@ export function WorkspacePicker({ children }: WorkspacePickerProps) {
     return (
       <div className="workspace-gate" dir="rtl">
         <div className="workspace-gate-card">
-          <div className="workspace-gate-icon">🗂️</div>
+          <div className="workspace-gate-icon"><FolderArchive size={40} /></div>
           <h2>متصفح غير مدعوم</h2>
           <p>
             هذا التطبيق يتطلب{" "}
@@ -60,7 +61,7 @@ export function WorkspacePicker({ children }: WorkspacePickerProps) {
     return (
       <div className="workspace-gate" dir="rtl">
         <div className="workspace-gate-card">
-          <div className="workspace-gate-icon">📁</div>
+          <div className="workspace-gate-icon"><Folder size={40} /></div>
           <h2>اختر مساحة العمل</h2>
           <p>
             {pendingReconnect
@@ -150,7 +151,7 @@ export function WorkspaceGate({ session, children }: WorkspaceGateProps) {
         <div className="workspace-gate-card">
           {isAdmin ? (
             <>
-              <div className="workspace-gate-icon">🔧</div>
+              <div className="workspace-gate-icon"><Wrench size={40} /></div>
               <h2>مساحة العمل غير مهيأة</h2>
               <p>
                 المجلد المحدد لا يحتوي على بنية النظام المطلوبة. يمكنك
@@ -174,7 +175,7 @@ export function WorkspaceGate({ session, children }: WorkspaceGateProps) {
             </>
           ) : (
             <>
-              <div className="workspace-gate-icon">⚠️</div>
+              <div className="workspace-gate-icon"><AlertTriangle size={40} /></div>
               <h2>عنوان خاطئ</h2>
               <p>
                 المجلد المحدد لا يحتوي على بنية نظام صالحة. تأكد من
@@ -203,14 +204,14 @@ export function WorkspaceGate({ session, children }: WorkspaceGateProps) {
     return (
       <div className="workspace-gate" dir="rtl">
         <div className="workspace-gate-card">
-          <div className="workspace-gate-icon">🔧</div>
+          <div className="workspace-gate-icon"><Wrench size={40} /></div>
           <h2>ملفات مساحة العمل تالفة أو غير متوافقة</h2>
           <p>
             تم العثور على المجلد لكن بعض ملفات النظام تالفة أو بإصدار غير متوافق.
             يمكنك إصلاح البنية الآن — لن تتأثر بيانات السكان والعينات في المجلدات المرقمة.
           </p>
-          <p style={{ color: "#92400e", background: "#fef3c7", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}>
-            ⚠ قد تحتاج إلى إعادة إضافة حسابات الموظفين بعد الإصلاح.
+          <p style={{ color: "#92400e", background: "#fef3c7", borderRadius: 6, padding: "6px 10px", fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
+            <AlertTriangle size={14} style={{ flexShrink: 0 }} /> قد تحتاج إلى إعادة إضافة حسابات الموظفين بعد الإصلاح.
           </p>
           {invalidItems.length > 0 && (
             <ul className="workspace-gate-missing">
@@ -245,7 +246,7 @@ export function WorkspaceGate({ session, children }: WorkspaceGateProps) {
   return (
     <div className="workspace-gate" dir="rtl">
       <div className="workspace-gate-card">
-        <div className="workspace-gate-icon">❌</div>
+        <div className="workspace-gate-icon"><XCircle size={40} /></div>
         <h2>تعذر فتح مساحة العمل</h2>
         <p>{message}</p>
         <button

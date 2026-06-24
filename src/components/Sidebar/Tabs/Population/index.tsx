@@ -10,6 +10,7 @@ import {
   type DragEvent
 } from "react";
 import * as XLSX from "xlsx";
+import { Settings2 } from "lucide-react";
 
 import type { SidebarTabModule } from "../tabTypes";
 
@@ -77,7 +78,6 @@ import PhaseTwoReportAndProcessing from "./components/PhaseTwoReportAndProcessin
 import PhaseThreeSampling from "./components/PhaseThreeSampling";
 import PhaseFourDistribution from "./components/PhaseFourDistribution";
 import MappingSettingsModal from "./components/MappingSettingsModal";
-import XrayReportsDashboard from "./components/XrayReportsDashboard";
 import {
   loadPopulationConfig,
   savePopulationConfig,
@@ -89,7 +89,6 @@ import {
 
 import "./Population.css";
 import { PageHeader } from "../../../../components/PageHeader/PageHeader";
-import "./components/XrayReportsDashboard.css";
 
 type UploadKey = "riskAgencyData" | "businessIntelligenceData";
 
@@ -144,7 +143,6 @@ export const tabConfig: SidebarTabModule["tabConfig"] = {
   subTabs: [
     { id: "process", label: "معالجة المجتمع" },
     { id: "browse",  label: "استعراض بيانات الأشعة" },
-    { id: "reports", label: "تقارير بيانات الأشعة" },
   ]
 };
 
@@ -157,7 +155,7 @@ function isSupportedExcelFile(file: File): boolean {
 
 type SaveMessage = { type: "ok" | "error"; text: string } | null;
 
-type SubTab = "process" | "browse" | "reports";
+type SubTab = "process" | "browse";
 
 export default function PopulationTab() {
   const { directoryHandle } = useWorkspace();
@@ -1016,18 +1014,6 @@ export default function PopulationTab() {
           <div className="placeholder-phase">
             <h2>غير مصرح</h2>
             <p>لا تملك صلاحية استعراض بيانات الأشعة.</p>
-          </div>
-        )
-      )}
-
-      {/* ── Reports sub-tab ── */}
-      {activeSubTab === "reports" && (
-        canExportReports ? (
-          <XrayReportsDashboard directoryHandle={directoryHandle} />
-        ) : (
-          <div className="placeholder-phase">
-            <h2>غير مصرح</h2>
-            <p>لا تملك صلاحية عرض تقارير بيانات الأشعة.</p>
           </div>
         )
       )}
@@ -2448,7 +2434,7 @@ function BrowseDataView({
                 className="bv-col-picker-btn"
                 onClick={() => setColPickerOpen((o) => !o)}
               >
-                ⚙ الأعمدة ({visibleCols.size})
+                <Settings2 size={14} style={{ verticalAlign: "middle", marginInlineEnd: 4 }} /> الأعمدة ({visibleCols.size})
               </button>
               {colPickerOpen && (
                 <div className="bv-col-picker-dropdown">

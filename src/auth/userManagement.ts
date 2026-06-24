@@ -282,7 +282,6 @@ export function createDefaultPermissions(): RolePermission[] {
     // Guest — read-only on population only
     { role: "guest",      tabId: "population",         access: "view" },
     { role: "guest",      tabId: "employee-workspace", access: "none" },
-    { role: "guest",      tabId: "template-builder",   access: "none" },
     { role: "guest",      tabId: "reports",            access: "none" },
     { role: "guest",      tabId: "archive",            access: "none" },
     { role: "guest",      tabId: "user-management",    access: "none" },
@@ -290,7 +289,6 @@ export function createDefaultPermissions(): RolePermission[] {
     // Employee
     { role: "employee",   tabId: "population",         access: "view" },
     { role: "employee",   tabId: "employee-workspace", access: "edit" },
-    { role: "employee",   tabId: "template-builder",   access: "none" },
     { role: "employee",   tabId: "reports",            access: "none" },
     { role: "employee",   tabId: "archive",            access: "none" },
     { role: "employee",   tabId: "user-management",    access: "none" },
@@ -298,7 +296,6 @@ export function createDefaultPermissions(): RolePermission[] {
     // Supervisor
     { role: "supervisor", tabId: "population",         access: "view" },
     { role: "supervisor", tabId: "employee-workspace", access: "edit" },
-    { role: "supervisor", tabId: "template-builder",   access: "none" },
     { role: "supervisor", tabId: "reports",            access: "view" },
     { role: "supervisor", tabId: "archive",            access: "view" },
     { role: "supervisor", tabId: "user-management",    access: "none" },
@@ -306,7 +303,6 @@ export function createDefaultPermissions(): RolePermission[] {
     // Manager — full access except user-management (admin-only by default)
     { role: "manager",    tabId: "population",         access: "edit" },
     { role: "manager",    tabId: "employee-workspace", access: "edit" },
-    { role: "manager",    tabId: "template-builder",   access: "edit" },
     { role: "manager",    tabId: "reports",            access: "edit" },
     { role: "manager",    tabId: "archive",            access: "edit" },
     { role: "manager",    tabId: "user-management",    access: "none" },
@@ -318,7 +314,6 @@ export function createDefaultPermissions(): RolePermission[] {
     { role: "admin",      tabId: "ew/xray-results",         access: "edit" },
     { role: "admin",      tabId: "ew/referral-approval",    access: "edit" },
     { role: "admin",      tabId: "ew/inspection-form",      access: "edit" },
-    { role: "admin",      tabId: "template-builder",        access: "edit" },
     { role: "admin",      tabId: "reports",                 access: "edit" },
     { role: "admin",      tabId: "archive",                 access: "edit" },
     { role: "admin",      tabId: "user-management",         access: "edit" },

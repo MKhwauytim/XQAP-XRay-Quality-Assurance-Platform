@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ChevronDown, PanelRightClose } from "lucide-react";
 import type { AuthRole } from "../../auth/authTypes";
 import type { SidebarTabDefinition } from "./Tabs/tabTypes";
 import { useLabels } from "../../data/labels/useLabels";
@@ -15,13 +16,11 @@ type SidebarProps = {
 
 function CollapseIcon({ isCollapsed }: { isCollapsed: boolean }) {
   return (
-    <svg
-      viewBox="0 0 24 24"
-      aria-hidden="true"
+    <PanelRightClose
+      aria-hidden
       className={`sidebar-collapse-icon ${isCollapsed ? "collapsed" : ""}`}
-    >
-      <path d="M15.7 5.3a1 1 0 0 1 0 1.4L10.4 12l5.3 5.3a1 1 0 1 1-1.4 1.4l-6-6a1 1 0 0 1 0-1.4l6-6a1 1 0 0 1 1.4 0Z" />
-    </svg>
+      strokeWidth={1.8}
+    />
   );
 }
 
@@ -106,15 +105,12 @@ export default function Sidebar({
                 <span className="sidebar-nav-icon">{tab.icon}</span>
                 <span className="sidebar-nav-label">{tab.label}</span>
                 {hasChildren && !isCollapsed && (
-                  <svg
+                  <ChevronDown
                     className={`sidebar-chevron${isActive ? " open" : ""}`}
-                    width="12" height="12" viewBox="0 0 24 24"
-                    fill="none" stroke="currentColor" strokeWidth="2.5"
-                    strokeLinecap="round" strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <polyline points="6 9 12 15 18 9" />
-                  </svg>
+                    size={14}
+                    strokeWidth={1.9}
+                    aria-hidden
+                  />
                 )}
               </button>
 

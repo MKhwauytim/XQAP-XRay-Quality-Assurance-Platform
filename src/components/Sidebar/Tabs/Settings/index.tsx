@@ -2,6 +2,16 @@
 import { useState, useCallback } from "react";
 import type { ReactNode } from "react";
 import {
+  AlertTriangle,
+  BarChart2,
+  ClipboardList,
+  Compass,
+  FolderArchive,
+  Search,
+  Tag,
+  TrendingUp,
+} from "lucide-react";
+import {
   DEFAULT_LABELS,
   getLabels,
   isCustomized,
@@ -35,14 +45,14 @@ export const tabConfig: SidebarTabModule["tabConfig"] = {
 // ── label groups ──────────────────────────────────────────────────────────────
 
 type LabelGroup = {
-  icon:  string;
+  icon:  ReactNode;
   title: string;
   keys:  { key: LabelKey; desc: string }[];
 };
 
 const LABEL_GROUPS: LabelGroup[] = [
   {
-    icon:  "🗂️",
+    icon:  <FolderArchive size={18} />,
     title: "القائمة الجانبية",
     keys: [
       { key: "sidebar_title",    desc: "عنوان القائمة الجانبية" },
@@ -50,7 +60,7 @@ const LABEL_GROUPS: LabelGroup[] = [
     ],
   },
   {
-    icon:  "🧭",
+    icon:  <Compass size={18} />,
     title: "عناوين الصفحات",
     keys: [
       { key: "page_settings_eyebrow",         desc: "النص العلوي لصفحة الإعدادات" },
@@ -138,7 +148,7 @@ const LABEL_GROUPS: LabelGroup[] = [
     ],
   },
   {
-    icon:  "📊",
+    icon:  <BarChart2 size={18} />,
     title: "مؤشرات الأداء (KPIs)",
     keys: [
       { key: "kpi_population",      desc: "إجمالي المجتمع" },
@@ -150,7 +160,7 @@ const LABEL_GROUPS: LabelGroup[] = [
     ],
   },
   {
-    icon:  "🏷️",
+    icon:  <Tag size={18} />,
     title: "أسماء المستويات",
     keys: [
       { key: "stage_first",   desc: "المستوى الأول" },
@@ -161,7 +171,7 @@ const LABEL_GROUPS: LabelGroup[] = [
     ],
   },
   {
-    icon:  "🔍",
+    icon:  <Search size={18} />,
     title: "نظام الأشعة (CertScan)",
     keys: [
       { key: "certscan_name",    desc: "اسم نظام الأشعة المركزية" },
@@ -169,7 +179,7 @@ const LABEL_GROUPS: LabelGroup[] = [
     ],
   },
   {
-    icon:  "📋",
+    icon:  <ClipboardList size={18} />,
     title: "رسوم التقرير التنفيذي",
     keys: [
       { key: "exec_report_title",        desc: "عنوان التقرير التنفيذي" },
@@ -180,7 +190,7 @@ const LABEL_GROUPS: LabelGroup[] = [
     ],
   },
   {
-    icon:  "📈",
+    icon:  <TrendingUp size={18} />,
     title: "رسوم النظرة العامة",
     keys: [
       { key: "ov_chart_trend",         desc: "رسم اتجاه المجتمع والعينة والإنجاز" },
@@ -294,7 +304,7 @@ function SettingsPage() {
               className="settings-reset-all-btn"
               onClick={handleResetAll}
             >
-              {confirmReset ? "⚠️ تأكيد الاستعادة؟" : `↺ استعادة الكل (${customCount} تعديل)`}
+              {confirmReset ? <><AlertTriangle size={14} style={{ verticalAlign: "middle", marginInlineEnd: 4 }} /> تأكيد الاستعادة؟</> : `↺ استعادة الكل (${customCount} تعديل)`}
             </button>
           )}
         </PageHeader>
@@ -302,7 +312,7 @@ function SettingsPage() {
 
       <div className="settings-category">
         <div className="settings-category-header">
-          <span className="settings-category-icon">🏷️</span>
+          <span className="settings-category-icon"><Tag size={20} /></span>
           <div>
             <h2 className="settings-category-title">التسميات والعناوين</h2>
             <p className="settings-category-desc">تعديل نصوص الواجهة وعناوين الصفحات والأعمدة والأزرار</p>

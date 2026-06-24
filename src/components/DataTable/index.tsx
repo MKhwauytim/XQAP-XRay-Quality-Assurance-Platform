@@ -800,7 +800,7 @@ function ColPickerPanel({
     <div ref={ref} className="dt-col-picker">
       <div className="dt-col-picker-header">
         <strong>{L.dt_columns_title}</strong>
-        <span style={{ fontSize: 12, color: "#667085" }}>
+        <span className="dt-col-picker-count">
           {cols.filter((c) => !cfg.hidden.includes(c.id)).length} / {cols.length}
         </span>
       </div>
@@ -870,12 +870,12 @@ function ColPickerPanel({
       <div className="dt-col-picker-footer">
         <button
           type="button"
-          style={{ padding: "4px 10px", fontSize: 11, background: "#f1f5f9", border: "1px solid #dce4ee", borderRadius: 6, cursor: "pointer" }}
+          className="dt-panel-btn dt-panel-btn-secondary"
           onClick={resetToDefault}
         >{L.dt_reset_default}</button>
         <button
           type="button"
-          style={{ padding: "4px 12px", fontSize: 11, background: "#17365d", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}
+          className="dt-panel-btn dt-panel-btn-primary"
           onClick={onClose}
         >{L.dt_done}</button>
       </div>
@@ -1025,20 +1025,12 @@ function TextFilterBody({ value, onSubmit }: { value: string; onSubmit: (v: stri
         value={v}
         onChange={(e) => setV(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter") onSubmit(v); }}
-        style={{
-          width: "100%", padding: "7px 10px", fontSize: 13,
-          border: "1px solid #dce4ee", borderRadius: 7, background: "#f8fafc",
-          color: "#172033", outline: "none",
-        }}
+        className="dt-filter-input"
       />
       <button
         type="button"
         onClick={() => onSubmit(v)}
-        style={{
-          marginTop: 8, width: "100%", padding: "7px 0", fontSize: 12,
-          background: "#17365d", color: "#fff", border: "none",
-          borderRadius: 7, cursor: "pointer", fontWeight: 600,
-        }}
+        className="dt-filter-apply-btn"
       >{L.dt_filter_apply}</button>
     </div>
   );
@@ -1077,7 +1069,7 @@ const DateFilterMenu = forwardRef(function DateFilterMenu(
             type="date"
             value={single}
             onChange={(e) => setSingle(e.target.value)}
-            style={{ width: "100%", padding: "7px 10px", border: "1px solid #dce4ee", borderRadius: 7, fontSize: 13 }}
+            className="dt-filter-input"
           />
         </div>
       ) : (
@@ -1085,23 +1077,19 @@ const DateFilterMenu = forwardRef(function DateFilterMenu(
           <label className="dt-date-label">
             {L.dt_filter_from}
             <input type="date" value={from} onChange={(e) => setFrom(e.target.value)}
-              style={{ padding: "7px 10px", border: "1px solid #dce4ee", borderRadius: 7, fontSize: 13 }} />
+              className="dt-filter-input" />
           </label>
           <label className="dt-date-label">
             {L.dt_filter_to}
             <input type="date" value={to} onChange={(e) => setTo(e.target.value)}
-              style={{ padding: "7px 10px", border: "1px solid #dce4ee", borderRadius: 7, fontSize: 13 }} />
+              className="dt-filter-input" />
           </label>
         </div>
       )}
       <button
         type="button"
         onClick={() => onSet({ kind: "date", mode, single, from, to })}
-        style={{
-          marginTop: 8, width: "100%", padding: "7px 0", fontSize: 12,
-          background: "#17365d", color: "#fff", border: "none",
-          borderRadius: 7, cursor: "pointer", fontWeight: 600,
-        }}
+        className="dt-filter-apply-btn"
       >{L.dt_filter_apply}</button>
     </div>
   );

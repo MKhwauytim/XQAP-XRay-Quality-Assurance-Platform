@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { AlertTriangle } from "lucide-react";
 import {
   clearErrors,
   getRecentErrors,
@@ -35,7 +36,7 @@ export function ErrorLogSection() {
         }}
         aria-expanded={isOpen}
       >
-        <span className="error-log-icon">⚠️</span>
+        <span className="error-log-icon"><AlertTriangle size={16} /></span>
         <span className="error-log-title">سجل الأخطاء الأخيرة</span>
         {errors.length > 0 && (
           <span className="error-log-badge">{errors.length}</span>

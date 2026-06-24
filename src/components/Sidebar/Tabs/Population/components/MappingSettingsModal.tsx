@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Settings2 } from "lucide-react";
 import type {
   CustomField,
   ExportColumnSetting,
@@ -480,7 +481,7 @@ export default function MappingSettingsModal({
         {/* Header */}
         <div style={{ padding: "20px", borderBottom: "1px solid var(--population-border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <h2 style={{ fontSize: "18px", fontWeight: "bold", margin: 0 }}>
-            {mode === "processing" ? "⚙️ إعدادات المعالجة" : "⚙️ إعدادات الربط والخرائط والتصدير"}
+            <Settings2 size={18} style={{ verticalAlign: "middle", marginInlineEnd: 6 }} />{mode === "processing" ? "إعدادات المعالجة" : "إعدادات الربط والخرائط والتصدير"}
           </h2>
           <button
             type="button"

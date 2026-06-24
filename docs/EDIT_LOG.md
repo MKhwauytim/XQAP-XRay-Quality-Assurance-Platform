@@ -4,6 +4,24 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v4.4 — 2026-06-24 — Replace all emoji characters with lucide-react SVG icons
+
+Install `lucide-react` and replace every emoji/pictographic character in the UI with a proper SVG icon component. Files changed: `WorkspaceGate.tsx`, `ErrorBoundary.tsx`, `App.tsx`, `ErrorLogSection.tsx`, `Settings/index.tsx`, `CertScanGrid.tsx`, `MappingSettingsModal.tsx`, `PhaseFourDistribution.tsx`, `PhaseThreeSampling.tsx`, `PhaseTwoReportAndProcessing.tsx`, `DataAccuracyReport.tsx`, `Reports/index.tsx`, `Population/index.tsx`, `labelsStore.ts`.
+
+**File:** `package.json`
+
+**Before:**
+```json
+"dependencies": { "hash-wasm": ..., "react": ..., "react-dom": ..., "recharts": ..., "xlsx": ... }
+```
+
+**After:**
+```json
+"dependencies": { "hash-wasm": ..., "lucide-react": "^0.x", "react": ..., ... }
+```
+
+---
+
 ## v5.16 — 2026-06-24 — Fix: remove lockout reset on username field change
 
 **File:** `src/auth/AuthGate.tsx`
