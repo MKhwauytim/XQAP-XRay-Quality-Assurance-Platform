@@ -504,7 +504,7 @@ export default function AuthGate({ children }: AuthGateProps) {
             </button>
 
             <div
-              className={`auth-message ${messageType === "ok" ? "ok" : ""}`}
+              className={`auth-message${messageType ? ` ${messageType}` : ""}`}
               aria-live="polite"
             >
               {message}
@@ -547,6 +547,7 @@ export default function AuthGate({ children }: AuthGateProps) {
             <input
               type="password"
               autoFocus
+              aria-label="رمز مسؤول النظام"
               value={adminPasscode}
               onChange={(event) => setAdminPasscode(event.target.value)}
               onKeyDown={handleAdminModalKeyDown}

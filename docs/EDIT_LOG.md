@@ -4,6 +4,93 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v5.2 — 2026-06-24 — Add aria-label to admin passcode input, fix auth-message bad-class binding
+
+**File:** `src/auth/AuthGate.tsx`
+
+**Before:**
+```tsx
+// Admin passcode input (line 547):
+<input
+  type="password"
+  autoFocus
+  value={adminPasscode}
+  onChange={(event) => setAdminPasscode(event.target.value)}
+  onKeyDown={handleAdminModalKeyDown}
+  placeholder="رمز مسؤول النظام"
+/>
+
+// Employee login message (line 506):
+<div
+  className={`auth-message ${messageType === "ok" ? "ok" : ""}`}
+  aria-live="polite"
+>
+  {message}
+</div>
+```
+
+**After:**
+```tsx
+// Admin passcode input with aria-label for screen readers:
+<input
+  type="password"
+  autoFocus
+  aria-label="رمز مسؤول النظام"
+  value={adminPasscode}
+  onChange={(event) => setAdminPasscode(event.target.value)}
+  onKeyDown={handleAdminModalKeyDown}
+  placeholder="رمز مسؤول النظام"
+/>
+
+// Message div now applies both "ok" and "bad" classes correctly:
+<div
+  className={`auth-message${messageType ? ` ${messageType}` : ""}`}
+  aria-live="polite"
+>
+  {message}
+</div>
+```
+
+**File:** `src/auth/AuthGate.css`
+
+**Before:**
+```css
+.auth-message {
+  min-height: 24px;
+  color: var(--auth-danger);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.6;
+  padding: 2px 0;
+}
+
+.auth-message.ok {
+  color: var(--auth-success);
+}
+```
+
+**After:**
+```css
+.auth-message {
+  min-height: 24px;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.6;
+  padding: 2px 0;
+}
+
+.auth-message.bad {
+  color: var(--auth-danger);
+}
+
+.auth-message.ok {
+  color: var(--auth-success);
+}
+```
+
+---
+
 ## v5.1 — 2026-06-24 — Remove dead SESSION_KEY constant
 
 **File:** `src/auth/authConfig.ts`

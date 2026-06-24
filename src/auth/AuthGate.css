@@ -331,11 +331,15 @@
 
 .auth-message {
   min-height: 24px;
-  color: var(--auth-danger);
+  color: inherit;
   font-size: 13px;
   font-weight: 600;
   line-height: 1.6;
   padding: 2px 0;
+}
+
+.auth-message.bad {
+  color: var(--auth-danger);
 }
 
 .auth-message.ok {
