@@ -35,7 +35,7 @@ function TemplateBuilderIcon(): ReactNode {
 
 export const tabConfig: SidebarTabModule["tabConfig"] = {
   id: "template-builder",
-  label: "النماذج",
+  label: "إدارة النماذج",
   order: 20,
   allowedRoles: [],
   icon: <TemplateBuilderIcon />,

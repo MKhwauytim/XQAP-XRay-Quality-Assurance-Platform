@@ -62,13 +62,20 @@ export function FeedbackWidget() {
     if (open) void refresh();
   }, [open, refresh]);
 
+  useEffect(() => {
+    function handler() {
+      setOpen((current) => !current);
+    }
+
+    window.addEventListener("feedback:toggle", handler);
+    return () => window.removeEventListener("feedback:toggle", handler);
+  }, []);
+
   // Close on outside click
   useEffect(() => {
     if (!open) return;
     function handler(e: MouseEvent) {
       if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
-        const trigger = document.querySelector(".fb-trigger");
-        if (trigger && trigger.contains(e.target as Node)) return;
         setOpen(false);
       }
     }
@@ -122,18 +129,6 @@ export function FeedbackWidget() {
 
   return (
     <>
-      {/* Floating trigger */}
-      <button
-        className="fb-trigger"
-        aria-label="فتح نافذة التواصل"
-        onClick={() => setOpen((v) => !v)}
-      >
-        {open ? "✕" : "?"}
-        {!open && isManager && openCount > 0 && (
-          <span className="fb-trigger-badge">{openCount > 99 ? "99+" : openCount}</span>
-        )}
-      </button>
-
       {/* Panel */}
       {open && (
         <div className="fb-panel" ref={panelRef}>

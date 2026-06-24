@@ -1,8 +1,8 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import type { BrowseDatasetKind } from "../population/populationStorage";
+import { getSystemRoot } from "../workspace/workspacePaths";
 
-const SYSTEM_FOLDER = ".system";
 const USER_PRESETS_FOLDER = "user-presets";
 const ADMIN_SHARED_PRESET_FILE = "admin-shared.browse-preset.json";
 
@@ -40,9 +40,7 @@ async function getPresetDir(
   directoryHandle: DirectoryHandleLike,
   create: boolean
 ): Promise<DirectoryHandleLike> {
-  const systemDir = await directoryHandle.getDirectoryHandle(SYSTEM_FOLDER, {
-    create
-  });
+  const systemDir = await getSystemRoot(directoryHandle, create);
   return systemDir.getDirectoryHandle(USER_PRESETS_FOLDER, { create });
 }
 

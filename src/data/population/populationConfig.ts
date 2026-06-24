@@ -1,5 +1,6 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { getPopulationRoot } from "../workspace/workspacePaths";
 
 export type SystemField = {
   key: string;
@@ -117,7 +118,6 @@ export const STAGE_SAMPLE_TARGETS: Record<"first" | "second" | "third" | "fourth
   fourth: 1875,
 };
 
-const POPULATION_FOLDER = "Population";
 const CONFIG_FILE = "config.json";
 
 export const DEFAULT_SYSTEM_FIELDS: SystemField[] = [
@@ -374,7 +374,7 @@ export async function loadPopulationConfig(
   }
 
   try {
-    const populationDir = await directoryHandle.getDirectoryHandle(POPULATION_FOLDER, { create: false });
+    const populationDir = await getPopulationRoot(directoryHandle, false);
     const result = await safeReadJson<PopulationConfig>(populationDir, CONFIG_FILE);
 
     if (result.ok && result.value) {
@@ -397,7 +397,7 @@ export async function loadPopulationConfig(
   } catch {
     // Fail silently, write default config
     try {
-      const populationDir = await directoryHandle.getDirectoryHandle(POPULATION_FOLDER, { create: true });
+      const populationDir = await getPopulationRoot(directoryHandle, true);
       await safeWriteJson(populationDir, CONFIG_FILE, DEFAULT_POPULATION_CONFIG);
     } catch {
       // directory write failed
@@ -412,7 +412,7 @@ export async function savePopulationConfig(
   config: PopulationConfig
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
-    const populationDir = await directoryHandle.getDirectoryHandle(POPULATION_FOLDER, { create: true });
+    const populationDir = await getPopulationRoot(directoryHandle, true);
     await safeWriteJson(populationDir, CONFIG_FILE, config);
     return { ok: true };
   } catch (err) {

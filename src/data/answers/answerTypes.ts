@@ -21,6 +21,8 @@ export type ItemAnswer = {
 export type EmployeeAnswerFile = {
   username: string;
   monthFolderName: string;
+  revision?: number;
+  _writeToken?: string;
   items: ItemAnswer[];
   /** Referral requests sent by this employee — sole owner, no shared-file conflicts. */
   referralRequests?: ReferralRequest[];

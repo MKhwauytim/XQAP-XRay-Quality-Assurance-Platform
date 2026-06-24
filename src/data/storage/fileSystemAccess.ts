@@ -2,19 +2,17 @@ import type { AuthRole } from "../../auth/authTypes";
 import { safeWriteJson } from "./safeWrite";
 
 import {
-  createDefaultProcessedData,
-  createDefaultRawData,
-  createDefaultSampleDistribution,
-  createDefaultSampleMaster,
   createDefaultUsersPermissions,
   createDefaultWorkspaceManifest,
-  OPTIONAL_WORKSPACE_FILES,
-  REQUIRED_WORKSPACE_FILES,
   REQUIRED_WORKSPACE_FOLDERS,
   SYSTEM_SUBFOLDERS,
   TOP_LEVEL_DATA_FOLDERS,
   WORKSPACE_FILE_NAMES
 } from "../workspace/workspaceDefaults";
+import {
+  getSystemRoot,
+  getUserDataRoot,
+} from "../workspace/workspacePaths";
 
 import {
   WORKSPACE_SCHEMA_VERSION,
@@ -187,49 +185,27 @@ export async function checkWorkspaceStructure(
     // The .system folder itself is already checked above.
   }
 
-  for (const fileName of REQUIRED_WORKSPACE_FILES) {
-    const result = await readJsonFile<JsonEnvelope<unknown>>(
-      directoryHandle,
-      fileName
-    );
+  const requiredFileLocations = [
+    { dir: await getSystemRoot(directoryHandle, false).catch(() => null), fileName: WORKSPACE_FILE_NAMES.manifest },
+    { dir: await getUserDataRoot(directoryHandle, false).catch(() => null), fileName: WORKSPACE_FILE_NAMES.usersPermissions },
+  ];
 
-    if (!result.ok) {
-      if (result.reason === "missing") {
-        missingItems.push(fileName);
-      } else {
-        invalidItems.push(fileName);
-      }
-
+  for (const item of requiredFileLocations) {
+    if (!item.dir) {
+      missingItems.push(item.fileName);
       continue;
     }
 
-    if (
-      !isJsonEnvelope(result.file) ||
-      result.file.metadata.schemaVersion !== WORKSPACE_SCHEMA_VERSION
-    ) {
-      invalidItems.push(fileName);
-    }
-  }
-
-  for (const fileName of OPTIONAL_WORKSPACE_FILES) {
-    const result = await readJsonFile<JsonEnvelope<unknown>>(
-      directoryHandle,
-      fileName
-    );
+    const result = await readJsonFile<JsonEnvelope<unknown>>(item.dir, item.fileName);
 
     if (!result.ok) {
-      if (result.reason !== "missing") {
-        invalidItems.push(fileName);
-      }
-
+      if (result.reason === "missing") missingItems.push(item.fileName);
+      else invalidItems.push(item.fileName);
       continue;
     }
 
-    if (
-      !isJsonEnvelope(result.file) ||
-      result.file.metadata.schemaVersion !== WORKSPACE_SCHEMA_VERSION
-    ) {
-      invalidItems.push(fileName);
+    if (!isJsonEnvelope(result.file) || result.file.metadata.schemaVersion !== WORKSPACE_SCHEMA_VERSION) {
+      invalidItems.push(item.fileName);
     }
   }
 
@@ -264,14 +240,17 @@ export async function checkWorkspaceStructure(
 export async function loadWorkspaceFiles(
   directoryHandle: DirectoryHandleLike
 ): Promise<WorkspaceLoadedFiles> {
+  const systemDir = await getSystemRoot(directoryHandle, false).catch(() => null);
+  const userDataDir = await getUserDataRoot(directoryHandle, false).catch(() => null);
+
   const manifest = await readJsonFile<WorkspaceLoadedFiles["manifest"]>(
-    directoryHandle,
+    systemDir ?? directoryHandle,
     WORKSPACE_FILE_NAMES.manifest
   );
 
   const usersPermissions = await readJsonFile<
     WorkspaceLoadedFiles["usersPermissions"]
-  >(directoryHandle, WORKSPACE_FILE_NAMES.usersPermissions);
+  >(userDataDir ?? directoryHandle, WORKSPACE_FILE_NAMES.usersPermissions);
 
   const sampleMaster = await readJsonFile<WorkspaceLoadedFiles["sampleMaster"]>(
     directoryHandle,
@@ -308,6 +287,10 @@ export async function createWorkspaceStructure(
     { create: true }
   );
 
+  await directoryHandle.getDirectoryHandle("1-Population", { create: true });
+  await directoryHandle.getDirectoryHandle("3-User Data", { create: true });
+  await directoryHandle.getDirectoryHandle("4-Reports", { create: true });
+
   const systemHandle = await directoryHandle.getDirectoryHandle(
     WORKSPACE_FILE_NAMES.systemFolder,
     { create: true }
@@ -330,43 +313,20 @@ export async function createWorkspaceStructure(
     { create: true }
   );
 
+  const userDataHandle = await directoryHandle.getDirectoryHandle("3-User Data", {
+    create: true
+  });
+
   await writeJsonFile(
-    directoryHandle,
+    systemHandle,
     WORKSPACE_FILE_NAMES.manifest,
     await prepareFileForWrite(createDefaultWorkspaceManifest(username), username)
   );
 
   await writeJsonFile(
-    directoryHandle,
+    userDataHandle,
     WORKSPACE_FILE_NAMES.usersPermissions,
     await prepareFileForWrite(createDefaultUsersPermissions(username), username)
-  );
-
-  await writeJsonFile(
-    directoryHandle,
-    WORKSPACE_FILE_NAMES.dataRaw,
-    await prepareFileForWrite(createDefaultRawData(username), username)
-  );
-
-  await writeJsonFile(
-    directoryHandle,
-    WORKSPACE_FILE_NAMES.dataProcessed,
-    await prepareFileForWrite(createDefaultProcessedData(username), username)
-  );
-
-  await writeJsonFile(
-    directoryHandle,
-    WORKSPACE_FILE_NAMES.sampleMaster,
-    await prepareFileForWrite(createDefaultSampleMaster(username), username)
-  );
-
-  await writeJsonFile(
-    directoryHandle,
-    WORKSPACE_FILE_NAMES.sampleDistribution,
-    await prepareFileForWrite(
-      createDefaultSampleDistribution(username),
-      username
-    )
   );
 }
 

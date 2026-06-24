@@ -5,7 +5,7 @@
 .app-shell {
   --sidebar-width:           280px;
   --sidebar-collapsed-width: 84px;
-  --topbar-height:           44px;
+  --topbar-height:           56px;
 
   width: 100%;
   min-width: 100%;

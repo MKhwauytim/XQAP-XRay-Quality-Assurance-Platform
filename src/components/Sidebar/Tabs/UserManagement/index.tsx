@@ -35,6 +35,7 @@ import { readJsonFile, writeJsonFile } from "../../../../data/storage/fileSystem
 import { WORKSPACE_FILE_NAMES } from "../../../../data/workspace/workspaceDefaults";
 import type { UsersPermissionsFile } from "../../../../data/workspace/workspaceTypes";
 import { WORKSPACE_SCHEMA_VERSION } from "../../../../data/workspace/workspaceTypes";
+import { getUserDataRoot } from "../../../../data/workspace/workspacePaths";
 import type { SidebarTabModule } from "../tabTypes";
 
 import "./UserManagement.css";
@@ -107,6 +108,7 @@ export default function UserManagementTab() {
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState<"ok" | "bad" | "">("");
   const [resetPasswords, setResetPasswords] = useState<Record<string, string>>({});
+  const [identityEdits, setIdentityEdits] = useState<Record<string, { username: string; displayName: string }>>({});
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [collapsedParents, setCollapsedParents] = useState<Set<string>>(new Set());
@@ -162,8 +164,9 @@ export default function UserManagementTab() {
     savingToDiskRef.current = true;
     try {
       const actor = readSession()?.username ?? "admin";
+      const userDataDir = await getUserDataRoot(directoryHandle, true);
       const existing = await readJsonFile<UsersPermissionsFile>(
-        directoryHandle,
+        userDataDir,
         WORKSPACE_FILE_NAMES.usersPermissions
       );
       const prevMeta = existing.ok ? existing.file.metadata : null;
@@ -213,9 +216,9 @@ export default function UserManagementTab() {
         },
       };
 
-      await writeJsonFile(directoryHandle, WORKSPACE_FILE_NAMES.usersPermissions, diskFile);
+      await writeJsonFile(userDataDir, WORKSPACE_FILE_NAMES.usersPermissions, diskFile);
     } catch {
-      // non-fatal — localStorage is the primary store
+      // non-fatal — runtime state remains updated; disk save can be retried.
     } finally {
       savingToDiskRef.current = false;
     }
@@ -294,6 +297,61 @@ export default function UserManagementTab() {
       ),
     });
     showMsg("تم تحديث المستخدم.", "ok");
+  }
+
+  function getIdentityDraft(user: ManagedLoginUser): { username: string; displayName: string } {
+    return identityEdits[user.id] ?? {
+      username: user.username,
+      displayName: user.displayName,
+    };
+  }
+
+  function updateIdentityDraft(
+    user: ManagedLoginUser,
+    field: "username" | "displayName",
+    value: string
+  ): void {
+    setIdentityEdits((current) => {
+      const draft = current[user.id] ?? {
+        username: user.username,
+        displayName: user.displayName,
+      };
+      return {
+        ...current,
+        [user.id]: { ...draft, [field]: value },
+      };
+    });
+  }
+
+  function resetIdentityDraft(userId: string): void {
+    setIdentityEdits((current) => {
+      const next = { ...current };
+      delete next[userId];
+      return next;
+    });
+  }
+
+  function handleSaveIdentity(user: ManagedLoginUser): void {
+    if (!canEdit) { showMsg("صلاحيتك للعرض فقط.", "bad"); return; }
+    const draft = getIdentityDraft(user);
+    const username = normalizeUsername(draft.username);
+    const displayName = draft.displayName.trim();
+
+    if (!username || !displayName) {
+      showMsg("أدخل اسم المستخدم والاسم الظاهر.", "bad");
+      return;
+    }
+    if (username === "admin") {
+      showMsg("اسم المستخدم «admin» محجوز للمسؤول الأساسي.", "bad");
+      return;
+    }
+    if (!isUsernameAvailable(state.users, username, user.id)) {
+      showMsg("اسم المستخدم موجود مسبقاً.", "bad");
+      return;
+    }
+
+    updateUser(user.id, (current) => ({ ...current, username, displayName }));
+    resetIdentityDraft(user.id);
   }
 
   async function handleResetPassword(userId: string): Promise<void> {
@@ -532,14 +590,58 @@ export default function UserManagementTab() {
             </div>
             {filteredUsers.map((user) => {
               const isConfirmingDelete = confirmDelete === user.id;
+              const identityDraft = getIdentityDraft(user);
+              const hasIdentityChanges =
+                normalizeUsername(identityDraft.username) !== user.username ||
+                identityDraft.displayName.trim() !== user.displayName;
               return (
                 <div key={user.id} className={`um-user-row ${!user.isActive ? "um-user-inactive" : ""}`}>
                   {/* Name + username */}
                   <div className="um-user-name">
                     <div className="um-user-status-dot" data-active={user.isActive} />
-                    <div>
-                      <strong>{user.displayName}</strong>
-                      <span dir="ltr">{user.username}</span>
+                    <div className="um-user-identity-edit">
+                      <input
+                        value={identityDraft.displayName}
+                        disabled={!canEdit || isSaving}
+                        onChange={(event) =>
+                          updateIdentityDraft(user, "displayName", event.target.value)
+                        }
+                        aria-label="الاسم الظاهر"
+                        placeholder="الاسم الظاهر"
+                      />
+                      <input
+                        value={identityDraft.username}
+                        disabled={!canEdit || isSaving}
+                        onChange={(event) =>
+                          updateIdentityDraft(user, "username", event.target.value)
+                        }
+                        aria-label="اسم المستخدم"
+                        placeholder="اسم المستخدم"
+                        autoComplete="off"
+                        dir="ltr"
+                      />
+                      {canEdit && (
+                        <div className="um-identity-actions">
+                          <button
+                            type="button"
+                            className="um-identity-save"
+                            disabled={!hasIdentityChanges || isSaving}
+                            onClick={() => handleSaveIdentity(user)}
+                          >
+                            حفظ
+                          </button>
+                          {hasIdentityChanges && (
+                            <button
+                              type="button"
+                              className="um-identity-reset"
+                              disabled={isSaving}
+                              onClick={() => resetIdentityDraft(user.id)}
+                            >
+                              تراجع
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
 

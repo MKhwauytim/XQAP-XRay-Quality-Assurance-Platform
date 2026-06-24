@@ -60,6 +60,7 @@ export default function Sidebar({
     >
       <div className="sidebar-header">
         <div className="sidebar-title-wrap">
+          <span className="sidebar-kicker">نظام جودة الأشعة</span>
           <h2 className="sidebar-title">{L.sidebar_title}</h2>
           <p className="sidebar-subtitle">{L.sidebar_subtitle}</p>
         </div>
@@ -76,6 +77,7 @@ export default function Sidebar({
       </div>
 
       <nav className="sidebar-nav" aria-label="تبويبات النظام">
+        {!isCollapsed && <div className="sidebar-nav-heading">إدارة النظام</div>}
         {tabs.map((tab) => {
           const isActive = activeTabId === tab.id;
           const visibleSubTabs = (tab.subTabs ?? []).filter(

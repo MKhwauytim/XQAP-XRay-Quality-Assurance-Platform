@@ -25,7 +25,7 @@ function SettingsIcon(): ReactNode {
 
 export const tabConfig: SidebarTabModule["tabConfig"] = {
   id:           "settings",
-  label:        "الإعدادات",
+  label:        "إدارة الإعدادات",
   order:        95,
   allowedRoles: ["guest", "admin"],
   icon:         <SettingsIcon />,

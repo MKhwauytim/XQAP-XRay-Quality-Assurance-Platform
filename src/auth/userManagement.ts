@@ -49,10 +49,10 @@ const DEFAULT_USER_PASSWORD_HASH: PasswordHashRecord = {
 
 export const DEFAULT_USER_TEMP_PASSWORD = "Xray@2026";
 
-// ── Storage key & event ───────────────────────────────────────────────────────
+// ── Runtime state & event ─────────────────────────────────────────────────────
 
-const STORAGE_KEY = "xray_user_management_v1";
 const CHANGE_EVENT_NAME = "xray-user-management-change";
+let runtimeUserManagementState: UserManagementState | null = null;
 
 // ── Role catalogue (excludes admin — bootstrap superuser managed separately) ──
 
@@ -94,15 +94,15 @@ export type ManagedTab = {
 
 export const MANAGED_TABS: readonly ManagedTab[] = [
   { id: "population",              label: "إدارة بيانات الأشعة" },
-  { id: "employee-workspace",      label: "مساحة العمل" },
+  { id: "employee-workspace",      label: "إدارة مساحة العمل" },
   { id: "ew/xray-referrals",       label: "صور الأشعة المحالة",      parentId: "employee-workspace" },
   { id: "ew/xray-results",         label: "نتائج فحص الأشعة",       parentId: "employee-workspace" },
   { id: "ew/referral-approval",    label: "اعتماد الطلبات",          parentId: "employee-workspace" },
   { id: "ew/inspection-form",      label: "نموذج الفحص (مساحة العمل)", parentId: "employee-workspace" },
-  { id: "reports",                 label: "التقارير" },
-  { id: "archive",                 label: "الأرشيف" },
+  { id: "reports",                 label: "إدارة التقارير" },
+  { id: "archive",                 label: "إدارة الأرشيف" },
   { id: "user-management",         label: "إدارة المستخدمين" },
-  { id: "settings",                label: "الإعدادات" },
+  { id: "settings",                label: "إدارة الإعدادات" },
 ];
 
 // ── Feature catalogue ─────────────────────────────────────────────────────────
@@ -110,7 +110,7 @@ export const MANAGED_TABS: readonly ManagedTab[] = [
 export const MANAGED_FEATURE_GROUPS: readonly FeatureGroup[] = [
   {
     groupId: "workspace",
-    label: "مساحة العمل",
+    label: "إدارة مساحة العمل",
     features: [
       {
         id: "approve-referrals",
@@ -371,7 +371,7 @@ export function createEmptyUserManagementState(): UserManagementState {
   };
 }
 
-function createDefaultManagedUsers(): ManagedLoginUser[] {
+export function createDefaultManagedUsers(): ManagedLoginUser[] {
   const createdAt = "2026-06-24T00:00:00.000Z";
   const users: Array<{
     id: string;
@@ -446,22 +446,14 @@ export function hasFeature(
 // ── Read / Write ──────────────────────────────────────────────────────────────
 
 export function readUserManagementState(): UserManagementState {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return createEmptyUserManagementState();
-    const parsed: unknown = JSON.parse(raw);
-    if (!isUserManagementState(parsed)) return createEmptyUserManagementState();
-    return normalizeUserManagementState(parsed);
-  } catch {
-    return createEmptyUserManagementState();
-  }
+  return runtimeUserManagementState ?? createEmptyUserManagementState();
 }
 
 export function writeUserManagementState(
   state: UserManagementState,
   notify = true
 ): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  runtimeUserManagementState = normalizeUserManagementState(state);
   if (notify) window.dispatchEvent(new Event(CHANGE_EVENT_NAME));
 }
 
@@ -469,10 +461,8 @@ export function subscribeToUserManagementChanges(
   callback: () => void
 ): () => void {
   window.addEventListener(CHANGE_EVENT_NAME, callback);
-  window.addEventListener("storage", callback);
   return () => {
     window.removeEventListener(CHANGE_EVENT_NAME, callback);
-    window.removeEventListener("storage", callback);
   };
 }
 
@@ -483,48 +473,14 @@ export function syncUsersFromDisk(
   diskPermissions?: RolePermission[],
   diskFeaturePermissions?: FeaturePermission[]
 ): void {
-  const current = readUserManagementState();
-
-  const mergedUsersMap = new Map<string, ManagedLoginUser>();
-  for (const u of current.users) mergedUsersMap.set(u.username, u);
-  for (const u of diskUsers) mergedUsersMap.set(u.username, u);
-
-  const mergedPermissions = diskPermissions
-    ? mergePermissions(current.permissions, diskPermissions)
-    : current.permissions;
-
-  const mergedFeaturePermissions = diskFeaturePermissions
-    ? mergeFeaturePermissions(current.featurePermissions, diskFeaturePermissions)
-    : current.featurePermissions;
-
   writeUserManagementState(
     {
-      users: Array.from(mergedUsersMap.values()),
-      permissions: mergedPermissions,
-      featurePermissions: mergedFeaturePermissions,
+      users: diskUsers,
+      permissions: diskPermissions ?? createDefaultPermissions(),
+      featurePermissions: diskFeaturePermissions ?? createDefaultFeaturePermissions(),
     },
     true
   );
-}
-
-function mergePermissions(
-  local: RolePermission[],
-  disk: RolePermission[]
-): RolePermission[] {
-  const map = new Map<string, RolePermission>();
-  for (const p of local) map.set(`${p.role}:${p.tabId}`, p);
-  for (const p of disk) map.set(`${p.role}:${p.tabId}`, p);
-  return Array.from(map.values());
-}
-
-function mergeFeaturePermissions(
-  local: FeaturePermission[],
-  disk: FeaturePermission[]
-): FeaturePermission[] {
-  const map = new Map<string, FeaturePermission>();
-  for (const f of local) map.set(`${f.role}:${f.featureId}`, f);
-  for (const f of disk) map.set(`${f.role}:${f.featureId}`, f);
-  return Array.from(map.values());
 }
 
 // ── Normalization ─────────────────────────────────────────────────────────────
@@ -644,13 +600,4 @@ export function getPublicManagedUsers(): Array<{
   return getManagedLoginUsers()
     .filter((u) => u.isActive)
     .map((u) => ({ username: u.username, displayName: u.displayName }));
-}
-
-// ── Type guard ────────────────────────────────────────────────────────────────
-
-function isUserManagementState(value: unknown): value is UserManagementState {
-  if (!value || typeof value !== "object") return false;
-  const s = value as Partial<UserManagementState>;
-  return Array.isArray(s.users) && Array.isArray(s.permissions);
-  // featurePermissions may be absent in old localStorage data — normalizer fills it
 }

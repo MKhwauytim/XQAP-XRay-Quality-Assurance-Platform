@@ -1,14 +1,14 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { getTemplatesRoot } from "../workspace/workspacePaths";
 import type { TemplateIndex, TemplateSchema } from "./templateTypes";
 
-const TEMPLATES_FOLDER = "templates";
 const INDEX_FILE = "templates.index.json";
 
 async function getTemplatesDir(
   directoryHandle: DirectoryHandleLike
 ): Promise<DirectoryHandleLike> {
-  return directoryHandle.getDirectoryHandle(TEMPLATES_FOLDER, { create: true });
+  return getTemplatesRoot(directoryHandle, true);
 }
 
 export async function saveTemplate(

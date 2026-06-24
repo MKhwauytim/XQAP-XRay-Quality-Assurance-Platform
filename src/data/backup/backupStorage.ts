@@ -8,11 +8,15 @@ import type { MonthManifestData, MonthRawData, PopulationFinalData } from "../po
 import type { SampleMasterData } from "../sampling/sampleTypes";
 import type { DirectoryHandleLike, FileHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import {
+  getPopulationMonthDir,
+  getSampleMainDir,
+  getSystemRoot,
+  getTemplatesRoot,
+  WORKSPACE_ROOTS,
+} from "../workspace/workspacePaths";
 
-const POPULATION_FOLDER = "Population";
-const SYSTEM_FOLDER = ".system";
-const BACKUPS_FOLDER = "backups";
-const TEMPLATES_FOLDER = "templates";
+const BACKUPS_FOLDER = "3-Backups";
 const AUTO_STATE_FILE = "auto-backup-state.json";
 const AUTO_SETTINGS_FILE = "auto-backup-settings.json";
 const EXCEL_MAX_ROWS = 1_048_576;
@@ -159,7 +163,7 @@ async function ensureDir(parent: DirectoryHandleLike, name: string): Promise<Dir
 }
 
 async function getBackupsDir(directoryHandle: DirectoryHandleLike): Promise<DirectoryHandleLike> {
-  const systemDir = await ensureDir(directoryHandle, SYSTEM_FOLDER);
+  const systemDir = await getSystemRoot(directoryHandle, true);
   return ensureDir(systemDir, BACKUPS_FOLDER);
 }
 
@@ -167,8 +171,7 @@ async function getMonthDir(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string
 ): Promise<DirectoryHandleLike> {
-  const populationDir = await directoryHandle.getDirectoryHandle(POPULATION_FOLDER, { create: false });
-  return populationDir.getDirectoryHandle(monthFolderName, { create: false });
+  return getPopulationMonthDir(directoryHandle, monthFolderName, false);
 }
 
 async function writeTextFile(dir: DirectoryHandleLike, fileName: string, content: string): Promise<void> {
@@ -264,7 +267,7 @@ async function copyJsonTree(params: {
 
   for await (const entry of iterable) {
     if (entry.kind === "directory") {
-      if (params.sourcePath === SYSTEM_FOLDER && entry.name === BACKUPS_FOLDER) {
+      if (params.sourcePath === WORKSPACE_ROOTS.system && entry.name === BACKUPS_FOLDER) {
         continue;
       }
       const sourceChild = await params.sourceDir.getDirectoryHandle(entry.name, { create: false });
@@ -351,11 +354,20 @@ async function loadMonthJson<T>(
   path: string[]
 ): Promise<T | null> {
   try {
-    let dir = await getMonthDir(directoryHandle, monthFolderName);
-    for (let index = 0; index < path.length - 1; index += 1) {
+    const fileName = path[path.length - 1]!;
+    const isSampleMainFile =
+      path[0] === "sample" ||
+      fileName === "distribution.current.json" ||
+      fileName === "distribution.log.json";
+
+    let dir = isSampleMainFile
+      ? await getSampleMainDir(directoryHandle, monthFolderName, false)
+      : await getMonthDir(directoryHandle, monthFolderName);
+    const pathStart = isSampleMainFile && path[0] === "sample" ? 1 : 0;
+    for (let index = pathStart; index < path.length - 1; index += 1) {
       dir = await dir.getDirectoryHandle(path[index]!, { create: false });
     }
-    const result = await safeReadJson<T>(dir, path[path.length - 1]!);
+    const result = await safeReadJson<T>(dir, fileName);
     return result.ok ? result.value : null;
   } catch {
     return null;
@@ -478,7 +490,7 @@ async function exportTemplatesXlsx(
   xlsxDir: DirectoryHandleLike
 ): Promise<BackupDatasetSummary[]> {
   try {
-    const templatesDir = await directoryHandle.getDirectoryHandle(TEMPLATES_FOLDER, { create: false });
+    const templatesDir = await getTemplatesRoot(directoryHandle, false);
     const iterable = getDirectoryEntries(templatesDir);
     if (!iterable) return [];
     const rows: Array<Record<string, unknown>> = [];

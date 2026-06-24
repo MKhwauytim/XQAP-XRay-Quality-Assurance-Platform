@@ -4,6 +4,91 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v5.0 — 2026-06-24 — Workspace path restructuring, runtime-only auth session, samples mirror module
+
+**Summary:** Major architectural refactor across 39 files covering:
+1. Numbered workspace folder layout (`1-Population`, `2-Samples`, `3-User Data`, `4-Reports`, `5-System`, `6-Templates`) with legacy-path migration fallback.
+2. Auth session and preview-role state moved from `localStorage`/`sessionStorage` to module-level runtime variables — no browser storage dependency for session.
+3. `handleStore.ts` deleted; workspace handle persistence removed from the storage layer.
+4. New `src/data/workspace/workspacePaths.ts` — centralised path helpers (`getPopulationRoot`, `getSampleMainDir`, `getSampleEmployeeDir`, `getUserDataRoot`, `safeWorkspaceFilePart`).
+5. New `src/data/samples/sampleMirrorStorage.ts` — syncs `main.samples.json` and per-employee `{username}.samples.json` mirror files into `2-Samples/` after each distribution update.
+6. `answerStorage.ts` — uses new path helpers; adds legacy-path fallback and CAS loop for concurrent write safety.
+7. `UserManagement` tab — adds in-place identity editing (username + displayName), routes `users-permissions.json` to `3-User Data/`.
+8. `WorkspaceProvider.tsx` refactored (~366 → ~284 lines): removes `handleStore` import, uses `createDefaultManagedUsers` for first-time workspace init.
+9. UI polish across AuthGate, DataTable, FeedbackWidget, Sidebar, Reports, EmployeeWorkspace (XrayInspectionResults, XrayReferrals).
+
+**File:** `src/data/workspace/workspacePaths.ts` *(new)*
+
+**Before:** *(file did not exist)*
+
+**After:**
+```ts
+export const WORKSPACE_ROOTS = {
+  population: "1-Population",
+  samples: "2-Samples",
+  userData: "3-User Data",
+  reports: "4-Reports",
+  system: "5-System",
+  templates: "6-Templates",
+} as const;
+// + path-helper functions with legacy fallback
+```
+
+---
+
+**File:** `src/data/samples/sampleMirrorStorage.ts` *(new)*
+
+**Before:** *(file did not exist)*
+
+**After:**
+```ts
+// syncSampleMirrors() writes main.samples.json + {username}.samples.json
+// into 2-Samples/{month}/ after each distribution event.
+```
+
+---
+
+**File:** `src/auth/authSession.ts`
+
+**Before:**
+```ts
+// Session stored in localStorage with SESSION_KEY.
+// Preview role stored in sessionStorage with PREVIEW_ROLE_KEY.
+export function readRealSession(): AuthSession | null {
+  const rawValue = localStorage.getItem(SESSION_KEY);
+  // ...
+}
+```
+
+**After:**
+```ts
+// Auth state is intentionally runtime-only.
+let runtimeSession: AuthSession | null = null;
+let runtimePreviewRole: AuthRole | null = null;
+export function readRealSession(): AuthSession | null {
+  if (!runtimeSession || !isValidSession(runtimeSession) || isExpired(runtimeSession)) {
+    runtimeSession = null;
+  }
+  return runtimeSession;
+}
+```
+
+---
+
+**File:** `src/data/storage/handleStore.ts` *(deleted)*
+
+**Before:**
+```ts
+// Persisted workspace directory handle in IndexedDB.
+export async function loadWorkspaceHandle(): Promise<...>
+export async function saveWorkspaceHandle(handle: ...): Promise<void>
+export async function clearWorkspaceHandle(): Promise<void>
+```
+
+**After:** *(file deleted — handle persistence removed)*
+
+---
+
 ## v4.11 — 2026-06-24 — InspectionPanel: fix toolbar position + full-height panel
 
 **Root cause:** `DataTable` renders a Fragment (`<>...</>`). When placed directly as a flex child of `.ew-split`, its toolbar and table body each become separate flex items in the RTL row — causing the toolbar to appear as a side column to the right of the rows instead of above them.

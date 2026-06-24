@@ -1,37 +1,21 @@
-import { SESSION_KEY } from "./authConfig";
 import type { AuthRole, AuthSession } from "./authTypes";
 
-// Sessions persist across browser/tab restarts for this long, measured from loginAt.
-// After expiry the user must sign in again. (Stored in localStorage, not sessionStorage.)
+// Auth state is intentionally runtime-only. Durable app data belongs in the
+// selected workspace folder, not in browser storage.
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 // Admin-only role impersonation for testing other roles' views/permissions.
-// Stored in sessionStorage so it never outlives the tab and can't permanently change
-// what a user sees. Only applied when the real role is admin.
-const PREVIEW_ROLE_KEY = "xray_preview_role_v1";
+// Runtime-only and never persisted.
 const VALID_ROLES: AuthRole[] = ["guest", "employee", "supervisor", "manager", "admin"];
+let runtimeSession: AuthSession | null = null;
+let runtimePreviewRole: AuthRole | null = null;
 
 export function readPreviewRole(): AuthRole | null {
-  try {
-    const value = sessionStorage.getItem(PREVIEW_ROLE_KEY);
-    return value && (VALID_ROLES as string[]).includes(value)
-      ? (value as AuthRole)
-      : null;
-  } catch {
-    return null;
-  }
+  return runtimePreviewRole;
 }
 
 export function setPreviewRole(role: AuthRole | null): void {
-  try {
-    if (role) {
-      sessionStorage.setItem(PREVIEW_ROLE_KEY, role);
-    } else {
-      sessionStorage.removeItem(PREVIEW_ROLE_KEY);
-    }
-  } catch {
-    /* sessionStorage unavailable — ignore */
-  }
+  runtimePreviewRole = role && VALID_ROLES.includes(role) ? role : null;
 }
 
 function isExpired(session: AuthSession): boolean {
@@ -69,25 +53,12 @@ function isValidSession(value: unknown): value is AuthSession {
 // The real authenticated session, ignoring any role-preview override. Use this for
 // identity/auth decisions (login validation, gating the impersonation control itself).
 export function readRealSession(): AuthSession | null {
-  try {
-    const rawValue = localStorage.getItem(SESSION_KEY);
-
-    if (!rawValue) {
-      return null;
-    }
-
-    const parsedValue: unknown = JSON.parse(rawValue);
-
-    if (!isValidSession(parsedValue) || isExpired(parsedValue)) {
-      localStorage.removeItem(SESSION_KEY);
-      return null;
-    }
-
-    return parsedValue;
-  } catch {
-    localStorage.removeItem(SESSION_KEY);
+  if (!runtimeSession || !isValidSession(runtimeSession) || isExpired(runtimeSession)) {
+    runtimeSession = null;
     return null;
   }
+
+  return runtimeSession;
 }
 
 // The effective session used throughout the app UI: the real identity, with the role
@@ -103,10 +74,10 @@ export function readSession(): AuthSession | null {
 }
 
 export function writeSession(session: AuthSession): void {
-  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  runtimeSession = session;
 }
 
 export function clearSession(): void {
-  localStorage.removeItem(SESSION_KEY);
+  runtimeSession = null;
   setPreviewRole(null);
 }

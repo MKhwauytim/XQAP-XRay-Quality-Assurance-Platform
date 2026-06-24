@@ -8,20 +8,25 @@ import type {
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
+import { syncSampleMirrors } from "../samples/sampleMirrorStorage";
+import { getPopulationMonthDir, getSampleMainDir } from "../workspace/workspacePaths";
 
-const POPULATION_FOLDER = "Population";
 const LOG_FILE = "distribution.log.json";
 const CURRENT_FILE = "distribution.current.json";
 
 async function getDistributionDir(
   directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  create = true
+): Promise<DirectoryHandleLike> {
+  return getSampleMainDir(directoryHandle, monthFolderName, create);
+}
+
+async function getLegacyDistributionDir(
+  directoryHandle: DirectoryHandleLike,
   monthFolderName: string
 ): Promise<DirectoryHandleLike> {
-  const population = await directoryHandle.getDirectoryHandle(
-    POPULATION_FOLDER,
-    { create: true }
-  );
-  return population.getDirectoryHandle(monthFolderName, { create: true });
+  return getPopulationMonthDir(directoryHandle, monthFolderName, false);
 }
 
 export async function loadDistributionLog(
@@ -29,7 +34,7 @@ export async function loadDistributionLog(
   monthFolderName: string
 ): Promise<DistributionLog> {
   try {
-    const dir = await getDistributionDir(directoryHandle, monthFolderName);
+    const dir = await getDistributionDir(directoryHandle, monthFolderName, false);
     const result = await safeReadJson<DistributionLog>(dir, LOG_FILE);
     if (result.ok) {
       // Backfill revision for legacy files that didn't have it
@@ -38,10 +43,21 @@ export async function loadDistributionLog(
         revision: result.value.revision ?? 0
       };
     }
-    return { monthFolderName, revision: 0, events: [] };
   } catch {
-    return { monthFolderName, revision: 0, events: [] };
+    // Fallback for workspaces created before the numbered samples layout.
   }
+
+  try {
+    const legacyDir = await getLegacyDistributionDir(directoryHandle, monthFolderName);
+    const result = await safeReadJson<DistributionLog>(legacyDir, LOG_FILE);
+    if (result.ok) {
+      return { ...result.value, revision: result.value.revision ?? 0 };
+    }
+  } catch {
+    // Missing legacy file is normal for new workspaces.
+  }
+
+  return { monthFolderName, revision: 0, events: [] };
 }
 
 export async function appendDistributionEvent(
@@ -87,6 +103,7 @@ export async function saveDistributionCurrent(
 ): Promise<void> {
   const dir = await getDistributionDir(directoryHandle, monthFolderName);
   await safeWriteJson(dir, CURRENT_FILE, current);
+  await syncSampleMirrors(directoryHandle, monthFolderName, current);
 }
 
 export async function loadDistributionCurrent(
@@ -94,11 +111,19 @@ export async function loadDistributionCurrent(
   monthFolderName: string
 ): Promise<DistributionCurrentData | null> {
   try {
-    const dir = await getDistributionDir(directoryHandle, monthFolderName);
+    const dir = await getDistributionDir(directoryHandle, monthFolderName, false);
     const result = await safeReadJson<DistributionCurrentData>(
       dir,
       CURRENT_FILE
     );
+    if (result.ok) return result.value;
+  } catch {
+    // Fallback below.
+  }
+
+  try {
+    const legacyDir = await getLegacyDistributionDir(directoryHandle, monthFolderName);
+    const result = await safeReadJson<DistributionCurrentData>(legacyDir, CURRENT_FILE);
     return result.ok ? result.value : null;
   } catch {
     return null;

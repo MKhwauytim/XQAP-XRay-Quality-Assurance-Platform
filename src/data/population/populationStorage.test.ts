@@ -29,7 +29,7 @@ test("saveMonthRun creates month folder and manifest", async () => {
   expect(result.monthFolderName).toBe("5-May-2026");
 
   // Verify folder structure
-  const population = await dir.getDirectoryHandle("Population", { create: false });
+  const population = await dir.getDirectoryHandle("1-Population", { create: false });
   const monthDir = await population.getDirectoryHandle("5-May-2026", { create: false });
   expect(monthDir.name).toBe("5-May-2026");
 });
@@ -38,7 +38,7 @@ test("saveMonthRun writes month.manifest.json with correct metadata", async () =
   const dir = createMemoryDirectory();
   await saveMonthRun({ directoryHandle: dir, ...baseParams });
 
-  const population = await dir.getDirectoryHandle("Population", { create: false });
+  const population = await dir.getDirectoryHandle("1-Population", { create: false });
   const monthDir = await population.getDirectoryHandle("5-May-2026", { create: false });
 
   const manifest = await safeReadJson<MonthManifestData>(monthDir, "month.manifest.json");
@@ -57,7 +57,7 @@ test("saveMonthRun writes risk.raw.json and population.final.json", async () => 
   const dir = createMemoryDirectory();
   await saveMonthRun({ directoryHandle: dir, ...baseParams });
 
-  const population = await dir.getDirectoryHandle("Population", { create: false });
+  const population = await dir.getDirectoryHandle("1-Population", { create: false });
   const monthDir = await population.getDirectoryHandle("5-May-2026", { create: false });
   const rawDir = await monthDir.getDirectoryHandle("raw", { create: false });
   const processedDir = await monthDir.getDirectoryHandle("processed", { create: false });
@@ -81,7 +81,7 @@ test("saveMonthRun does not write bi.raw.json when no BI rows", async () => {
   const dir = createMemoryDirectory();
   await saveMonthRun({ directoryHandle: dir, ...baseParams, biRawRows: [] });
 
-  const population = await dir.getDirectoryHandle("Population", { create: false });
+  const population = await dir.getDirectoryHandle("1-Population", { create: false });
   const monthDir = await population.getDirectoryHandle("5-May-2026", { create: false });
   const rawDir = await monthDir.getDirectoryHandle("raw", { create: false });
 

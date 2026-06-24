@@ -280,7 +280,7 @@
   border-top: 1px solid #edf3f8;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 10px;
 }
 .rh-req {
@@ -346,8 +346,10 @@
 .rh-export-controls {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  width: 100%;
 }
 
 .rh-format-toggle {
@@ -360,7 +362,7 @@
 }
 
 .rh-format-toggle button {
-  width: 32px;
+  width: 36px;
   height: 30px;
   border: 0;
   border-radius: 7px;
@@ -369,6 +371,14 @@
   cursor: pointer;
   font-size: 14px;
   font-weight: 900;
+}
+
+.rh-format-icon {
+  width: 18px;
+  height: 18px;
+  display: block;
+  margin: auto;
+  fill: currentColor;
 }
 
 .rh-format-toggle button.active {

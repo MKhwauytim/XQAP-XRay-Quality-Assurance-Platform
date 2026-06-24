@@ -1,7 +1,7 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { getTemplatesRoot } from "../workspace/workspacePaths";
 
-const TEMPLATES_FOLDER = "templates";
 const SELECTION_FILE = "active.inspection-template.json";
 
 export type InspectionTemplateSelection = {
@@ -13,7 +13,7 @@ export type InspectionTemplateSelection = {
 async function getTemplatesDir(
   directoryHandle: DirectoryHandleLike
 ): Promise<DirectoryHandleLike> {
-  return directoryHandle.getDirectoryHandle(TEMPLATES_FOLDER, { create: true });
+  return getTemplatesRoot(directoryHandle, true);
 }
 
 export async function loadInspectionTemplateSelection(

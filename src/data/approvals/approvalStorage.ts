@@ -1,9 +1,7 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import type { ReferralDecision, ReplacementDecision, SupervisorDecisionFile } from "./approvalTypes";
-
-const POPULATION_FOLDER = "Population";
-const APPROVALS_FOLDER = "approvals";
+import { getPopulationMonthDir, getSampleApprovalsDir, safeWorkspaceFilePart } from "../workspace/workspacePaths";
 
 type DirectoryEntryLike = { name: string; kind: string };
 
@@ -29,13 +27,19 @@ async function getApprovalsDir(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string
 ): Promise<DirectoryHandleLike> {
-  const pop = await directoryHandle.getDirectoryHandle(POPULATION_FOLDER, { create: true });
-  const monthDir = await pop.getDirectoryHandle(monthFolderName, { create: true });
-  return monthDir.getDirectoryHandle(APPROVALS_FOLDER, { create: true });
+  return getSampleApprovalsDir(directoryHandle, monthFolderName, true);
+}
+
+async function getLegacyApprovalsDir(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<DirectoryHandleLike> {
+  const monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, false);
+  return monthDir.getDirectoryHandle("approvals", { create: false });
 }
 
 function decisionFileName(supervisorUsername: string): string {
-  return `${supervisorUsername}.decisions.json`;
+  return `${safeWorkspaceFilePart(supervisorUsername)}.decisions.json`;
 }
 
 export async function loadSupervisorDecisions(
@@ -48,6 +52,11 @@ export async function loadSupervisorDecisions(
     const r = await safeReadJson<SupervisorDecisionFile>(appDir, decisionFileName(supervisorUsername));
     if (r.ok) return r.value;
   } catch { /* file may not exist yet */ }
+  try {
+    const legacyDir = await getLegacyApprovalsDir(directoryHandle, monthFolderName);
+    const r = await safeReadJson<SupervisorDecisionFile>(legacyDir, decisionFileName(supervisorUsername));
+    if (r.ok) return r.value;
+  } catch { /* legacy file may not exist */ }
   return {
     supervisorUsername,
     monthFolderName,
@@ -64,7 +73,12 @@ export async function upsertReferralDecision(
   decision: ReferralDecision
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
-    const appDir = await getApprovalsDir(directoryHandle, monthFolderName);
+    let appDir: DirectoryHandleLike;
+    try {
+      appDir = await getApprovalsDir(directoryHandle, monthFolderName);
+    } catch {
+      appDir = await getLegacyApprovalsDir(directoryHandle, monthFolderName);
+    }
     const current = await loadSupervisorDecisions(directoryHandle, monthFolderName, supervisorUsername);
     const others = current.referralDecisions.filter((d) => d.requestId !== decision.requestId);
     const updated: SupervisorDecisionFile = {

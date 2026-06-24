@@ -33,7 +33,6 @@ import type { DirectoryHandleLike } from "../../../../../data/storage/fileSystem
 import { useLabels, type Labels } from "../../../../../data/labels/useLabels";
 import { formatStageLabel } from "../../Population/components/helpers";
 
-const REFERRALS_COL_KEY = "xray_ref_cols_v4";
 const RESULTS_COL_KEY = "xray_inspection_results_cols_v1";
 const REFERRALS_PRESET_KEY = "xray-referrals";
 
@@ -543,20 +542,8 @@ function buildDefaultReferralColConfig(sampleColumns: DataTableCol<DistributionE
   };
 }
 
-function loadLocalReferralColConfig(sampleColumns: DataTableCol<DistributionEntry>[]): ColConfig | null {
-  try {
-    const raw = localStorage.getItem(REFERRALS_COL_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<ColConfig>;
-    return {
-      order: parsed.order ?? sampleColumns.map((column) => column.id),
-      hidden: parsed.hidden ?? [],
-      dateFmt: parsed.dateFmt ?? {},
-      widths: parsed.widths ?? {},
-    };
-  } catch {
-    return null;
-  }
+function loadLocalReferralColConfig(_sampleColumns: DataTableCol<DistributionEntry>[]): ColConfig | null {
+  return null;
 }
 
 function getVisibleSampleColumns(

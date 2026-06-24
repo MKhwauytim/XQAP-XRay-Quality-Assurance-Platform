@@ -94,9 +94,8 @@ export type DataTableProps<TRow = unknown> = {
   exportFileName?: string;
   /**
    * Seed the column config from an external source (e.g. a per-user file preset).
-   * Takes precedence over localStorage when provided. The component still writes
-   * to localStorage immediately on every change for in-session speed; call
-   * onColConfigChange to persist to a durable store (e.g. the workspace file).
+   * Takes precedence over defaults when provided. Call onColConfigChange to
+   * persist to a durable store such as the selected workspace file.
    */
   initialColConfig?: ColConfig;
   /**
@@ -141,7 +140,7 @@ function toIsoDate(raw: string): string {
   return raw.slice(0, 10);
 }
 
-// ── Column config (localStorage) ─────────────────────────────────────────────
+// ── Column config ────────────────────────────────────────────────────────────
 
 function buildDefault<TRow>(
   columns: DataTableCol<TRow>[],
@@ -159,27 +158,15 @@ function buildDefault<TRow>(
 }
 
 function loadColConfig<TRow>(
-  storageKey: string,
+  _storageKey: string,
   columns: DataTableCol<TRow>[],
   defaultVisible?: string[]
 ): ColConfig {
-  try {
-    const raw = localStorage.getItem(storageKey);
-    if (!raw) return buildDefault(columns, defaultVisible);
-    const p = JSON.parse(raw) as Partial<ColConfig>;
-    return {
-      order:   p.order   ?? columns.map((c) => c.id),
-      hidden:  p.hidden  ?? [],
-      dateFmt: p.dateFmt ?? {},
-      widths:  p.widths  ?? {},
-    };
-  } catch {
-    return buildDefault(columns, defaultVisible);
-  }
+  return buildDefault(columns, defaultVisible);
 }
 
-function saveColConfig(storageKey: string, cfg: ColConfig): void {
-  localStorage.setItem(storageKey, JSON.stringify(cfg));
+function saveColConfig(_storageKey: string, _cfg: ColConfig): void {
+  // Durable table preferences should be saved through onColConfigChange.
 }
 
 // ── Filter utilities ──────────────────────────────────────────────────────────

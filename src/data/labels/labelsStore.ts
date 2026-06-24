@@ -1,9 +1,7 @@
-const STORAGE_KEY = "xray-labels-v1";
-
 export const DEFAULT_LABELS = {
   // Sidebar
-  sidebar_title:   "القائمة",
-  sidebar_subtitle: "نظام الأشعة",
+  sidebar_title:   "لوحة الإدارة",
+  sidebar_subtitle: "مسارات العمل الرئيسية",
 
   // Settings page
   page_settings_eyebrow:  "System Settings",
@@ -125,17 +123,6 @@ type Subscriber = () => void;
 const subscribers = new Set<Subscriber>();
 let customLabels: Partial<Record<LabelKey, string>> = {};
 
-function load(): void {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) customLabels = JSON.parse(raw) as Partial<Record<LabelKey, string>>;
-  } catch {
-    customLabels = {};
-  }
-}
-
-load();
-
 export function getLabels(): Labels {
   return { ...DEFAULT_LABELS, ...customLabels } as Labels;
 }
@@ -151,19 +138,16 @@ export function setLabel(key: LabelKey, value: string): void {
   } else {
     customLabels[key] = trimmed;
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(customLabels));
   subscribers.forEach((fn) => fn());
 }
 
 export function resetLabel(key: LabelKey): void {
   delete customLabels[key];
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(customLabels));
   subscribers.forEach((fn) => fn());
 }
 
 export function resetAllLabels(): void {
   customLabels = {};
-  localStorage.removeItem(STORAGE_KEY);
   subscribers.forEach((fn) => fn());
 }
 
