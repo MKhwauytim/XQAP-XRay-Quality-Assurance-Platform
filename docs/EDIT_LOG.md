@@ -4,6 +4,44 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v5.3 — 2026-06-24 — Add 3-attempt login lockout with 30-second countdown
+
+**File:** `src/auth/AuthGate.tsx`
+
+**Before:**
+```tsx
+// No rate-limiting state or lockout logic existed.
+// Submit button:
+<button className="auth-submit" type="submit">
+  دخول
+</button>
+
+// loginAsEmployee: wrong-password error shown immediately with no throttle.
+showMessage("كلمة المرور غير صحيحة.", "bad");
+
+// logout callback: only cleared session/UI state.
+// setSelectedUsername onChange: only called setSelectedUsername.
+```
+
+**After:**
+```tsx
+// Added state:
+const [failedAttempts, setFailedAttempts] = useState(0);
+const [lockoutUntil, setLockoutUntil] = useState<number | null>(null);
+const [lockoutSecondsLeft, setLockoutSecondsLeft] = useState(0);
+const LOCKOUT_AFTER_ATTEMPTS = 3;
+const LOCKOUT_DURATION_MS = 30_000;
+
+// Added countdown effect (clears interval on unmount).
+// loginAsEmployee: early-returns during active lockout; increments failedAttempts;
+//   triggers lockout after LOCKOUT_AFTER_ATTEMPTS failures; resets on success.
+// Submit button: disabled during lockout; shows countdown label in Arabic.
+// setSelectedUsername onChange: also resets failedAttempts + lockoutUntil.
+// logout callback: also resets failedAttempts + lockoutUntil.
+```
+
+---
+
 ## v5.2 — 2026-06-24 — Add aria-label to admin passcode input, fix auth-message bad-class binding
 
 **File:** `src/auth/AuthGate.tsx`

@@ -144,6 +144,13 @@ export default function AuthGate({ children }: AuthGateProps) {
     readPreviewRole()
   );
 
+  const [failedAttempts, setFailedAttempts] = useState(0);
+  const [lockoutUntil, setLockoutUntil] = useState<number | null>(null);
+  const [lockoutSecondsLeft, setLockoutSecondsLeft] = useState(0);
+
+  const LOCKOUT_AFTER_ATTEMPTS = 3;
+  const LOCKOUT_DURATION_MS = 30_000;
+
   const altSequenceRef = useRef<string[]>([]);
   const altSequenceTimerRef = useRef<number | null>(null);
 
@@ -177,6 +184,22 @@ export default function AuthGate({ children }: AuthGateProps) {
     });
   }, []);
 
+  useEffect(() => {
+    if (lockoutUntil === null) return;
+    const tick = () => {
+      const remaining = Math.ceil((lockoutUntil - Date.now()) / 1000);
+      if (remaining <= 0) {
+        setLockoutUntil(null);
+        setLockoutSecondsLeft(0);
+      } else {
+        setLockoutSecondsLeft(remaining);
+      }
+    };
+    tick();
+    const id = window.setInterval(tick, 500);
+    return () => window.clearInterval(id);
+  }, [lockoutUntil]);
+
   const logout = useCallback((): void => {
     clearSession();
 
@@ -188,6 +211,8 @@ export default function AuthGate({ children }: AuthGateProps) {
     setIsAdminModalOpen(false);
     setMessage("");
     setMessageType("");
+    setFailedAttempts(0);
+    setLockoutUntil(null);
   }, []);
 
   // Switch the previewed role (admin only). Selecting "admin" exits preview mode.
@@ -275,6 +300,8 @@ export default function AuthGate({ children }: AuthGateProps) {
   ): Promise<void> {
     event.preventDefault();
 
+    if (lockoutUntil !== null && Date.now() < lockoutUntil) return;
+
     const normalizedInput = normalizeUsername(selectedUsername);
 
     const user = managedUsers.find(
@@ -282,6 +309,11 @@ export default function AuthGate({ children }: AuthGateProps) {
     );
 
     if (!user) {
+      const next = failedAttempts + 1;
+      setFailedAttempts(next);
+      if (next >= LOCKOUT_AFTER_ATTEMPTS) {
+        setLockoutUntil(Date.now() + LOCKOUT_DURATION_MS);
+      }
       showMessage("اسم المستخدم غير موجود أو كلمة المرور غير صحيحة.", "bad");
       return;
     }
@@ -297,7 +329,12 @@ export default function AuthGate({ children }: AuthGateProps) {
     );
 
     if (!isPasswordValid) {
-      showMessage("كلمة المرور غير صحيحة.", "bad");
+      const next = failedAttempts + 1;
+      setFailedAttempts(next);
+      if (next >= LOCKOUT_AFTER_ATTEMPTS) {
+        setLockoutUntil(Date.now() + LOCKOUT_DURATION_MS);
+      }
+      showMessage("اسم المستخدم غير موجود أو كلمة المرور غير صحيحة.", "bad");
       return;
     }
 
@@ -316,6 +353,8 @@ export default function AuthGate({ children }: AuthGateProps) {
     applySession(nextSession);
 
     setPassword("");
+    setFailedAttempts(0);
+    setLockoutUntil(null);
     showMessage("تم الدخول بنجاح.", "ok");
   }
 
@@ -472,7 +511,11 @@ export default function AuthGate({ children }: AuthGateProps) {
                 autoComplete="username"
                 placeholder="أدخل اسم المستخدم"
                 value={selectedUsername}
-                onChange={(event) => setSelectedUsername(event.target.value)}
+                onChange={(event) => {
+                  setSelectedUsername(event.target.value);
+                  setFailedAttempts(0);
+                  setLockoutUntil(null);
+                }}
               />
             </label>
 
@@ -499,8 +542,14 @@ export default function AuthGate({ children }: AuthGateProps) {
               </div>
             </label>
 
-            <button className="auth-submit" type="submit">
-              دخول
+            <button
+              className="auth-submit"
+              type="submit"
+              disabled={lockoutUntil !== null && Date.now() < lockoutUntil}
+            >
+              {lockoutUntil !== null && lockoutSecondsLeft > 0
+                ? `يُرجى الانتظار (${lockoutSecondsLeft}ث)`
+                : "دخول"}
             </button>
 
             <div
