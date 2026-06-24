@@ -10,6 +10,11 @@ import {
   type WorkspaceFileType,
   type WorkspaceManifestFile
 } from "./workspaceTypes";
+import {
+  MANAGED_ROLES,
+  createEmptyUserManagementState
+} from "../../auth/userManagement";
+import { WORKSPACE_ROOTS } from "./workspacePaths";
 
 export const WORKSPACE_FILE_NAMES = {
   manifest: "workspace.manifest.json",
@@ -18,19 +23,17 @@ export const WORKSPACE_FILE_NAMES = {
   dataProcessed: "data.processed.json",
   sampleMaster: "sample.master.json",
   sampleDistribution: "sample.distribution.json",
-  employeeAnswersFolder: "employee-answers",
-  systemFolder: ".system",
-  locksFolder: "locks",
-  auditFolder: "audit",
-  backupsFolder: "backups",
-  templatesFolder: "templates"
+  employeeAnswersFolder: WORKSPACE_ROOTS.samples,
+  systemFolder: WORKSPACE_ROOTS.system,
+  locksFolder: "1-Locks",
+  auditFolder: "2-Audit",
+  backupsFolder: "3-Backups",
+  templatesFolder: WORKSPACE_ROOTS.templates
 } as const;
 
 export const REQUIRED_WORKSPACE_FILES = [
   WORKSPACE_FILE_NAMES.manifest,
-  WORKSPACE_FILE_NAMES.usersPermissions,
-  WORKSPACE_FILE_NAMES.sampleMaster,
-  WORKSPACE_FILE_NAMES.sampleDistribution
+  WORKSPACE_FILE_NAMES.usersPermissions
 ] as const;
 
 export const OPTIONAL_WORKSPACE_FILES = [
@@ -39,8 +42,12 @@ export const OPTIONAL_WORKSPACE_FILES = [
 ] as const;
 
 export const REQUIRED_WORKSPACE_FOLDERS = [
-  WORKSPACE_FILE_NAMES.employeeAnswersFolder,
-  WORKSPACE_FILE_NAMES.systemFolder
+  WORKSPACE_ROOTS.population,
+  WORKSPACE_ROOTS.samples,
+  WORKSPACE_ROOTS.userData,
+  WORKSPACE_ROOTS.reports,
+  WORKSPACE_ROOTS.system,
+  WORKSPACE_ROOTS.templates
 ] as const;
 
 export const SYSTEM_SUBFOLDERS = [
@@ -49,9 +56,7 @@ export const SYSTEM_SUBFOLDERS = [
   WORKSPACE_FILE_NAMES.backupsFolder
 ] as const;
 
-export const TOP_LEVEL_DATA_FOLDERS = [
-  WORKSPACE_FILE_NAMES.templatesFolder
-] as const;
+export const TOP_LEVEL_DATA_FOLDERS = [] as const;
 
 export function createWorkspaceId(): string {
   return `xray-workspace-${Date.now()}-${Math.random()
@@ -110,7 +115,7 @@ export function createDefaultWorkspaceManifest(
         dataProcessed: WORKSPACE_FILE_NAMES.dataProcessed,
         sampleMaster: WORKSPACE_FILE_NAMES.sampleMaster,
         sampleDistribution: WORKSPACE_FILE_NAMES.sampleDistribution,
-        employeeAnswersFolder: WORKSPACE_FILE_NAMES.employeeAnswersFolder,
+        employeeAnswersFolder: `${WORKSPACE_ROOTS.samples}/{month}/2-Employees`,
         systemFolder: WORKSPACE_FILE_NAMES.systemFolder,
         locksFolder: WORKSPACE_FILE_NAMES.locksFolder,
         auditFolder: WORKSPACE_FILE_NAMES.auditFolder
@@ -123,29 +128,29 @@ export function createDefaultWorkspaceManifest(
 export function createDefaultUsersPermissions(
   username: string
 ): UsersPermissionsFile {
+  const defaults = createEmptyUserManagementState();
   return createEnvelope("users.permissions", username, {
-    users: [],
-    roles: [
-      {
-        id: "employee",
-        label: "موظف",
-        description: "صلاحيات تشغيلية محدودة حسب الصلاحيات الممنوحة.",
-        isSystemRole: true
-      },
-      {
-        id: "supervisor",
-        label: "مشرف",
-        description: "صلاحيات إشرافية لمراجعة ومتابعة العمل.",
-        isSystemRole: true
-      },
-      {
-        id: "manager",
-        label: "مدير",
-        description: "صلاحيات إدارية وتشغيلية كاملة.",
-        isSystemRole: true
-      }
-    ],
-    permissions: []
+    users: defaults.users.map((user) => ({
+      id: user.id,
+      username: user.username,
+      displayName: user.displayName,
+      passwordHash: user.passwordHash,
+      role: user.role,
+      isActive: user.isActive,
+      hasCertScanLicense: user.hasCertScanLicense,
+      createdAt: user.createdAt,
+      createdBy: username,
+      updatedAt: user.updatedAt,
+      updatedBy: username
+    })),
+    roles: MANAGED_ROLES.map((role) => ({
+      id: role.id,
+      label: role.label,
+      description: role.description,
+      isSystemRole: true
+    })),
+    permissions: defaults.permissions,
+    featurePermissions: defaults.featurePermissions
   });
 }
 

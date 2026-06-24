@@ -27,6 +27,7 @@ import {
 import {
   loadSampleMaster,
 } from "../../../../../data/sampling/sampleStorage";
+import { loadEmployeeSampleMirror } from "../../../../../data/samples/sampleMirrorStorage";
 import type { SampleMasterData } from "../../../../../data/sampling/sampleTypes";
 import {
   loadTemplate,
@@ -124,20 +125,8 @@ function buildDefaultColConfig(columns: DataTableCol<DistributionEntry>[]): ColC
   };
 }
 
-function loadLocalColConfig(columns: DataTableCol<DistributionEntry>[]): ColConfig | null {
-  try {
-    const raw = localStorage.getItem(COL_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<ColConfig>;
-    return {
-      order: parsed.order ?? columns.map((column) => column.id),
-      hidden: parsed.hidden ?? [],
-      dateFmt: parsed.dateFmt ?? {},
-      widths: parsed.widths ?? {},
-    };
-  } catch {
-    return null;
-  }
+function loadLocalColConfig(_columns: DataTableCol<DistributionEntry>[]): ColConfig | null {
+  return null;
 }
 
 function getVisibleReferralColumns(
@@ -384,14 +373,17 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       ]);
       const sampleRows = (sample?.rows ?? []) as PreparedPopulationRow[];
       const dist = await loadOrDeriveDistributionCurrent(directoryHandle, selMonth, sampleRows);
-      const all = dist?.entries ?? [];
+      const personalMirror = canSeeAll
+        ? null
+        : await loadEmployeeSampleMirror(directoryHandle, selMonth, username);
+      const all = dist?.entries ?? personalMirror?.entries ?? [];
 
       // Samples with a pending outgoing referral are hidden from the requesting employee
       const pendingIds = canSeeAll ? new Set<string>() : getPendingReferralIds(referralLog, username);
 
       const visible = canSeeAll
         ? all
-        : all.filter(
+        : (personalMirror?.entries ?? all).filter(
             (e) =>
               e.assignedTo === username &&
               e.status !== "replaced" &&

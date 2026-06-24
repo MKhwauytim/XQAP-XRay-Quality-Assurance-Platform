@@ -15,18 +15,25 @@ test("writeJsonFile produces a .bak snapshot on the second write", async () => {
   expect(bak.ok && bak.file.a).toBe(1);
 });
 
-test("createWorkspaceStructure creates .system/backups and templates folders", async () => {
+test("createWorkspaceStructure creates numbered workspace folders", async () => {
   const dir = createMemoryDirectory();
   // createWorkspaceStructure calls ensureDirectoryPermission which calls queryPermission.
   // The memory double always returns "granted" so the permission gate passes.
   await createWorkspaceStructure(dir, "test-user");
 
-  // Verify .system/backups exists
-  const system = await dir.getDirectoryHandle(".system", { create: false });
-  const backups = await system.getDirectoryHandle("backups", { create: false });
-  expect(backups.name).toBe("backups");
+  const population = await dir.getDirectoryHandle("1-Population", { create: false });
+  expect(population.name).toBe("1-Population");
 
-  // Verify top-level templates folder exists
-  const templates = await dir.getDirectoryHandle("templates", { create: false });
-  expect(templates.name).toBe("templates");
+  const samples = await dir.getDirectoryHandle("2-Samples", { create: false });
+  expect(samples.name).toBe("2-Samples");
+
+  const userData = await dir.getDirectoryHandle("3-User Data", { create: false });
+  expect(userData.name).toBe("3-User Data");
+
+  const system = await dir.getDirectoryHandle("5-System", { create: false });
+  const backups = await system.getDirectoryHandle("3-Backups", { create: false });
+  expect(backups.name).toBe("3-Backups");
+
+  const templates = await dir.getDirectoryHandle("6-Templates", { create: false });
+  expect(templates.name).toBe("6-Templates");
 });

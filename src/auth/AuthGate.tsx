@@ -118,6 +118,10 @@ function getRoleLabel(role: AuthRole): string {
   return "الموظف";
 }
 
+function toggleFeedbackPanel(): void {
+  window.dispatchEvent(new CustomEvent("feedback:toggle"));
+}
+
 export default function AuthGate({ children }: AuthGateProps) {
   const { selectWorkspace } = useWorkspace();
   const [session, setSession] = useState<AuthSession | null>(getInitialSession);
@@ -376,28 +380,48 @@ export default function AuthGate({ children }: AuthGateProps) {
           className={`auth-admin-toolbar${isImpersonating ? " auth-toolbar-preview" : ""}`}
           dir="rtl"
         >
-          <span>
-            وضع {getRoleLabel(effectiveRole)}
-            {isImpersonating && <strong className="auth-preview-flag"> (معاينة)</strong>}
-          </span>
+          <div className="auth-toolbar-status">
+            <span className="auth-toolbar-kicker">الوضع الحالي</span>
+            <strong>
+              وضع {getRoleLabel(effectiveRole)}
+              {isImpersonating && <span className="auth-preview-flag">معاينة</span>}
+            </strong>
+          </div>
 
-          <div className="auth-toolbar-end">
+          <div className="auth-toolbar-preview-panel">
             {isRealAdmin && (
-              <div className="auth-role-switcher" role="group" aria-label="معاينة الأدوار">
-                {PREVIEW_ROLE_IDS.map((roleId) => (
-                  <button
-                    key={roleId}
-                    type="button"
-                    className={`auth-role-seg${effectiveRole === roleId ? " active" : ""}`}
-                    onClick={() => changePreviewRole(roleId)}
-                    aria-pressed={effectiveRole === roleId}
-                  >
-                    {getRoleLabel(roleId)}
-                  </button>
-                ))}
-              </div>
+              <>
+                <span className="auth-role-switcher-label">معاينة الدور</span>
+                <div className="auth-role-switcher" role="group" aria-label="معاينة الأدوار">
+                  {PREVIEW_ROLE_IDS.map((roleId) => (
+                    <button
+                      key={roleId}
+                      type="button"
+                      className={`auth-role-seg${effectiveRole === roleId ? " active" : ""}`}
+                      onClick={() => changePreviewRole(roleId)}
+                      aria-pressed={effectiveRole === roleId}
+                    >
+                      {getRoleLabel(roleId)}
+                    </button>
+                  ))}
+                </div>
+              </>
             )}
-            <button type="button" onClick={logout}>
+          </div>
+
+          <div className="auth-toolbar-actions">
+            {isRealAdmin && (
+              <button
+                type="button"
+                className="auth-toolbar-help"
+                onClick={toggleFeedbackPanel}
+                aria-label="التواصل والاقتراحات"
+                title="التواصل والاقتراحات"
+              >
+                ?
+              </button>
+            )}
+            <button type="button" className="auth-toolbar-logout" onClick={logout}>
               تسجيل الخروج
             </button>
           </div>

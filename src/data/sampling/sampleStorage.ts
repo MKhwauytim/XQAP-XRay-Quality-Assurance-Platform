@@ -3,23 +3,25 @@ import { getStageKey } from "../population/stageHelpers";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
+import { getPopulationMonthDir, getSampleMainDir } from "../workspace/workspacePaths";
 import type { PortAllocation, SampleMasterData, StageAllocation } from "./sampleTypes";
 
-const POPULATION_FOLDER = "Population";
 const SAMPLE_FILE = "sample.master.json";
 
 async function getSampleDir(
   directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  create = true
+): Promise<DirectoryHandleLike> {
+  return getSampleMainDir(directoryHandle, monthFolderName, create);
+}
+
+async function getLegacySampleDir(
+  directoryHandle: DirectoryHandleLike,
   monthFolderName: string
 ): Promise<DirectoryHandleLike> {
-  const population = await directoryHandle.getDirectoryHandle(
-    POPULATION_FOLDER,
-    { create: true }
-  );
-  const monthDir = await population.getDirectoryHandle(monthFolderName, {
-    create: true
-  });
-  return monthDir.getDirectoryHandle("sample", { create: true });
+  const monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, false);
+  return monthDir.getDirectoryHandle("sample", { create: false });
 }
 
 export async function saveSampleMaster(
@@ -42,8 +44,16 @@ export async function loadSampleMaster(
   monthFolderName: string
 ): Promise<SampleMasterData | null> {
   try {
-    const sampleDir = await getSampleDir(directoryHandle, monthFolderName);
+    const sampleDir = await getSampleDir(directoryHandle, monthFolderName, false);
     const result = await safeReadJson<SampleMasterData>(sampleDir, SAMPLE_FILE);
+    if (result.ok) return result.value;
+  } catch {
+    // Fallback below.
+  }
+
+  try {
+    const legacyDir = await getLegacySampleDir(directoryHandle, monthFolderName);
+    const result = await safeReadJson<SampleMasterData>(legacyDir, SAMPLE_FILE);
     return result.ok ? result.value : null;
   } catch {
     return null;

@@ -1,9 +1,10 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { casLoop } from "../storage/casLoop";
 import type { EmployeeAnswerFile, ItemAnswer } from "./answerTypes";
 import type { ReferralRequest, ReplacementRequest } from "../referral/referralTypes";
+import { getPopulationMonthDir, getSampleEmployeeDir, safeWorkspaceFilePart } from "../workspace/workspacePaths";
 
-const POPULATION_FOLDER = "Population";
 const ANSWERS_FOLDER = "employee-answers";
 
 type DirectoryEntryLike = { name: string; kind: string };
@@ -30,22 +31,27 @@ async function getAnswersDir(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string
 ): Promise<DirectoryHandleLike> {
-  const population = await directoryHandle.getDirectoryHandle(
-    POPULATION_FOLDER,
-    { create: true }
-  );
-  const monthDir = await population.getDirectoryHandle(monthFolderName, {
-    create: true
-  });
-  return monthDir.getDirectoryHandle(ANSWERS_FOLDER, { create: true });
+  return getSampleEmployeeDir(directoryHandle, monthFolderName, true);
+}
+
+async function getLegacyAnswersDir(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<DirectoryHandleLike> {
+  const monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, false);
+  return monthDir.getDirectoryHandle(ANSWERS_FOLDER, { create: false });
 }
 
 function answerFileName(username: string): string {
   // Strip path-dangerous characters so a crafted username can't escape the
   // answers folder (path traversal / separators). Usernames are otherwise
   // admin-controlled and normalized lowercase.
-  const safe = username.replace(/[/\\:*?"<>|]/g, "_").replace(/\.+/g, ".");
+  const safe = safeWorkspaceFilePart(username);
   return `${safe}.answers.json`;
+}
+
+function emptyAnswerFile(username: string, monthFolderName: string): EmployeeAnswerFile {
+  return { username, monthFolderName, revision: 0, items: [] };
 }
 
 export async function loadEmployeeAnswers(
@@ -61,10 +67,49 @@ export async function loadEmployeeAnswers(
     );
     return result.ok
       ? result.value
-      : { username, monthFolderName, items: [] };
+      : emptyAnswerFile(username, monthFolderName);
   } catch {
-    return { username, monthFolderName, items: [] };
+    try {
+      const legacyDir = await getLegacyAnswersDir(directoryHandle, monthFolderName);
+      const result = await safeReadJson<EmployeeAnswerFile>(
+        legacyDir,
+        answerFileName(username)
+      );
+      return result.ok ? result.value : emptyAnswerFile(username, monthFolderName);
+    } catch {
+      return emptyAnswerFile(username, monthFolderName);
+    }
   }
+}
+
+async function updateEmployeeAnswerFile(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  username: string,
+  updater: (file: EmployeeAnswerFile) => EmployeeAnswerFile
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  return casLoop<{ ok: true } | { ok: false; error: string }>(
+    async (writeToken) => {
+      const dir = await getAnswersDir(directoryHandle, monthFolderName);
+      const existing = await loadEmployeeAnswers(directoryHandle, monthFolderName, username);
+      const nextRevision = (existing.revision ?? 0) + 1;
+      const updated: EmployeeAnswerFile = {
+        ...updater(existing),
+        username,
+        monthFolderName,
+        revision: nextRevision,
+        _writeToken: writeToken,
+        lastUpdatedAt: new Date().toISOString(),
+      };
+      await safeWriteJson(dir, answerFileName(username), updated);
+      const verify = await loadEmployeeAnswers(directoryHandle, monthFolderName, username);
+      if (verify.revision === nextRevision && verify._writeToken === writeToken) {
+        return { done: true, result: { ok: true as const } };
+      }
+      return { done: false };
+    },
+    { conflictError: "تعارض في الكتابة: لم يتمكن النظام من حفظ ملف الموظف بعد عدة محاولات." }
+  );
 }
 
 export async function saveEmployeeAnswers(
@@ -73,22 +118,10 @@ export async function saveEmployeeAnswers(
   username: string,
   items: ItemAnswer[]
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  try {
-    const dir = await getAnswersDir(directoryHandle, monthFolderName);
-    const existing = await loadEmployeeAnswers(directoryHandle, monthFolderName, username);
-    const file: EmployeeAnswerFile = {
-      ...existing,
-      username,
-      monthFolderName,
-      items,
-      lastUpdatedAt: new Date().toISOString(),
-    };
-    await safeWriteJson(dir, answerFileName(username), file);
-    return { ok: true };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "Unknown error";
-    return { ok: false, error: msg };
-  }
+  return updateEmployeeAnswerFile(directoryHandle, monthFolderName, username, (file) => ({
+    ...file,
+    items,
+  }));
 }
 
 export async function upsertItemAnswer(
@@ -97,16 +130,10 @@ export async function upsertItemAnswer(
   username: string,
   item: ItemAnswer
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const file = await loadEmployeeAnswers(
-    directoryHandle,
-    monthFolderName,
-    username
-  );
-  const others = file.items.filter((i) => i.xrayImageId !== item.xrayImageId);
-  return saveEmployeeAnswers(directoryHandle, monthFolderName, username, [
-    ...others,
-    item
-  ]);
+  return updateEmployeeAnswerFile(directoryHandle, monthFolderName, username, (file) => {
+    const others = file.items.filter((i) => i.xrayImageId !== item.xrayImageId);
+    return { ...file, items: [...others, item] };
+  });
 }
 
 /** Idempotently append a referral request to the originating employee's personal file. */
@@ -117,18 +144,12 @@ export async function appendReferralToEmployee(
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
     const username = request.fromEmployee;
-    const dir = await getAnswersDir(directoryHandle, monthFolderName);
-    const file = await loadEmployeeAnswers(directoryHandle, monthFolderName, username);
-    if (file.referralRequests?.some((r) => r.requestId === request.requestId)) {
-      return { ok: true };
-    }
-    const updated: EmployeeAnswerFile = {
-      ...file,
-      referralRequests: [...(file.referralRequests ?? []), request],
-      lastUpdatedAt: new Date().toISOString(),
-    };
-    await safeWriteJson(dir, answerFileName(username), updated);
-    return { ok: true };
+    return await updateEmployeeAnswerFile(directoryHandle, monthFolderName, username, (file) => {
+      if (file.referralRequests?.some((r) => r.requestId === request.requestId)) {
+        return file;
+      }
+      return { ...file, referralRequests: [...(file.referralRequests ?? []), request] };
+    });
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "خطأ غير معروف." };
   }
@@ -142,18 +163,12 @@ export async function appendReplacementToEmployee(
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
     const username = request.employeeUsername;
-    const dir = await getAnswersDir(directoryHandle, monthFolderName);
-    const file = await loadEmployeeAnswers(directoryHandle, monthFolderName, username);
-    if (file.replacementRequests?.some((r) => r.requestId === request.requestId)) {
-      return { ok: true };
-    }
-    const updated: EmployeeAnswerFile = {
-      ...file,
-      replacementRequests: [...(file.replacementRequests ?? []), request],
-      lastUpdatedAt: new Date().toISOString(),
-    };
-    await safeWriteJson(dir, answerFileName(username), updated);
-    return { ok: true };
+    return await updateEmployeeAnswerFile(directoryHandle, monthFolderName, username, (file) => {
+      if (file.replacementRequests?.some((r) => r.requestId === request.requestId)) {
+        return file;
+      }
+      return { ...file, replacementRequests: [...(file.replacementRequests ?? []), request] };
+    });
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "خطأ غير معروف." };
   }

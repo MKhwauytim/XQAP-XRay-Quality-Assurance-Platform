@@ -42,7 +42,7 @@ function WorkspaceIcon(): ReactNode {
 
 export const tabConfig: SidebarTabModule["tabConfig"] = {
   id: "employee-workspace",
-  label: "مساحة العمل",
+  label: "إدارة مساحة العمل",
   order: 15,
   allowedRoles: ["guest", "employee", "supervisor", "manager", "admin"],
   icon: <WorkspaceIcon />,

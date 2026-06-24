@@ -32,7 +32,7 @@ function ArchiveIcon(): ReactNode {
 
 export const tabConfig: SidebarTabModule["tabConfig"] = {
   id: "archive",
-  label: "الأرشيف",
+  label: "إدارة الأرشيف",
   order: 30,
   allowedRoles: ["guest", "supervisor", "manager", "admin"],
   icon: <ArchiveIcon />,

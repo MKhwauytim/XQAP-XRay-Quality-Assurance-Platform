@@ -23,9 +23,27 @@ function ReportsIcon(): ReactNode {
   );
 }
 
+function PresentationFormatIcon(): ReactNode {
+  return (
+    <svg viewBox="0 0 24 24" className="rh-format-icon" aria-hidden="true">
+      <path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v9a1.5 1.5 0 0 1-1.5 1.5H13v2h3a1 1 0 1 1 0 2H8a1 1 0 1 1 0-2h3v-2H5.5A1.5 1.5 0 0 1 4 14.5v-9Zm2 1V14h12V6.5H6Z" />
+      <path d="M8 12h2V9H8v3Zm3 0h2V8h-2v4Zm3 0h2v-2h-2v2Z" />
+    </svg>
+  );
+}
+
+function ExcelFormatIcon(): ReactNode {
+  return (
+    <svg viewBox="0 0 24 24" className="rh-format-icon" aria-hidden="true">
+      <path d="M5 4h11l3 3v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Zm10 1.8V8h2.2L15 5.8ZM7 9v8h10V9H7Z" />
+      <path d="M8.5 10.5h3v2h-3v-2Zm4 0h3v2h-3v-2Zm-4 3h3v2h-3v-2Zm4 0h3v2h-3v-2Z" />
+    </svg>
+  );
+}
+
 export const tabConfig: SidebarTabModule["tabConfig"] = {
   id: "reports",
-  label: "التقارير",
+  label: "إدارة التقارير",
   order: 25,
   allowedRoles: ["guest", "supervisor", "manager", "admin"],
   icon: <ReportsIcon />,
@@ -175,17 +193,19 @@ export default function ReportsTab() {
             type="button"
             className={formats[baseType] === "html" ? "active" : ""}
             title="عرض تقديمي"
+            aria-label="عرض تقديمي"
             onClick={() => setFormats((prev) => ({ ...prev, [baseType]: "html" }))}
           >
-            ▣
+            <PresentationFormatIcon />
           </button>
           <button
             type="button"
             className={formats[baseType] === "xlsx" ? "active" : ""}
             title="Excel"
+            aria-label="Excel"
             onClick={() => setFormats((prev) => ({ ...prev, [baseType]: "xlsx" }))}
           >
-            ✕
+            <ExcelFormatIcon />
           </button>
         </div>
         <button
@@ -297,10 +317,6 @@ export default function ReportsTab() {
             </div>
           </div>
           <div className="rh-card-footer">
-            <span className="rh-req">
-              <i className="rh-dot rh-dot-green" />
-              يتطلب بيانات مجتمع معالجة
-            </span>
             {renderExportControls("executive", "rh-btn-teal")}
           </div>
         </div>
@@ -325,10 +341,6 @@ export default function ReportsTab() {
             </div>
           </div>
           <div className="rh-card-footer">
-            <span className="rh-req">
-              <i className="rh-dot rh-dot-green" />
-              يتطلب عينة محفوظة
-            </span>
             {renderExportControls("sample", "rh-btn-navy")}
           </div>
         </div>
@@ -352,10 +364,6 @@ export default function ReportsTab() {
             </div>
           </div>
           <div className="rh-card-footer">
-            <span className="rh-req">
-              <i className="rh-dot rh-dot-green" />
-              يتطلب توزيعاً محفوظاً
-            </span>
             {renderExportControls("distribution", "rh-btn-navy")}
           </div>
         </div>
