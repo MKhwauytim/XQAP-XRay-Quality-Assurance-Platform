@@ -29,8 +29,8 @@
 }
 
 /* ═══════════════════════════════════════════════════════════
-   Civic Authority Design System  v2.0
-   Government X-Ray Quality Management System
+   X-Ray QC Product Tokens
+   Quiet RTL enterprise surface for daily operational work
    ═══════════════════════════════════════════════════════════ */
 
 :root {
@@ -87,19 +87,19 @@
   --c-info-border:    #93C5FD;
 
   /* ── Shadows ───────────────────────────────────────────────── */
-  --sh-xs: 0 1px 3px rgba(13, 31, 50, 0.06), 0 1px 2px rgba(13, 31, 50, 0.04);
-  --sh-sm: 0 4px 12px rgba(13, 31, 50, 0.07), 0 2px 4px rgba(13, 31, 50, 0.04);
-  --sh-md: 0 10px 28px rgba(13, 31, 50, 0.09), 0 4px 10px rgba(13, 31, 50, 0.05);
-  --sh-lg: 0 24px 52px rgba(13, 31, 50, 0.12), 0 8px 20px rgba(13, 31, 50, 0.07);
-  --sh-xl: 0 48px 96px rgba(13, 31, 50, 0.15), 0 16px 36px rgba(13, 31, 50, 0.09);
+  --sh-xs: 0 1px 2px rgba(13, 31, 50, 0.05);
+  --sh-sm: 0 6px 16px rgba(13, 31, 50, 0.07);
+  --sh-md: 0 14px 34px rgba(13, 31, 50, 0.10);
+  --sh-lg: 0 22px 48px rgba(13, 31, 50, 0.14);
+  --sh-xl: 0 30px 72px rgba(13, 31, 50, 0.16);
 
   /* ── Radii ─────────────────────────────────────────────────── */
-  --r-xs:  4px;
-  --r-sm:  8px;
-  --r-md:  10px;
-  --r-lg:  14px;
-  --r-xl:  18px;
-  --r-2xl: 24px;
+  --r-xs:  3px;
+  --r-sm:  6px;
+  --r-md:  8px;
+  --r-lg:  10px;
+  --r-xl:  12px;
+  --r-2xl: 16px;
 
   /* ── Motion ────────────────────────────────────────────────── */
   --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
@@ -131,7 +131,7 @@
   --app-primary-hover: var(--c-navy-2);
   --app-border:        var(--c-border);
   --app-focus:         rgba(0, 154, 222, 0.24);
-  --app-shadow:        var(--sh-md);
+  --app-shadow:        var(--sh-sm);
 
   font-family: var(--font-sans);
   font-weight: var(--fw-regular);
@@ -159,7 +159,7 @@ html {
   margin: 0;
   padding: 0;
   background: var(--app-bg);
-  scroll-behavior: smooth;
+  scroll-behavior: auto;
 }
 
 body {
@@ -188,6 +188,18 @@ button, input, textarea, select {
 
 button {
   touch-action: manipulation;
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+button:disabled,
+input:disabled,
+textarea:disabled,
+select:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
 }
 
 button, select, input, textarea {
@@ -225,6 +237,65 @@ textarea:focus-visible {
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0;
+}
+
+.ui-panel {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  box-shadow: var(--sh-xs);
+}
+
+.ui-button-primary,
+.ui-button-secondary,
+.ui-button-danger {
+  min-height: 36px;
+  border-radius: var(--r-sm);
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+  cursor: pointer;
+}
+
+.ui-button-primary {
+  border: 1px solid var(--c-sky);
+  background: var(--c-sky);
+  color: #FFFFFF;
+}
+
+.ui-button-primary:hover {
+  background: var(--c-sky-2);
+  border-color: var(--c-sky-2);
+}
+
+.ui-button-secondary {
+  border: 1px solid var(--c-border-2);
+  background: var(--c-surface);
+  color: var(--c-ink-2);
+}
+
+.ui-button-secondary:hover {
+  border-color: var(--c-sky);
+  color: var(--c-sky);
+  background: var(--c-sky-light);
+}
+
+.ui-button-danger {
+  border: 1px solid var(--c-danger-border);
+  background: var(--c-danger-bg);
+  color: var(--c-danger);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* ── Global scrollbar ───────────────────────────────────────── */
