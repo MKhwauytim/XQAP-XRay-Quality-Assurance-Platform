@@ -29,10 +29,11 @@ test("second write snapshots the previous content to .bak", async () => {
   await safeWriteJson(dir, "a.json", { v: 1 });
   await safeWriteJson(dir, "a.json", { v: 2 });
 
-  const bak = JSON.parse(await readRaw(dir, "a.json.bak")) as { v: number };
-  const live = JSON.parse(await readRaw(dir, "a.json")) as { v: number };
-  expect(bak.v).toBe(1);
-  expect(live.v).toBe(2);
+  // Files are written as JsonEnvelope<T> — raw bytes contain { metadata, data }
+  const bak = JSON.parse(await readRaw(dir, "a.json.bak")) as { data: { v: number } };
+  const live = JSON.parse(await readRaw(dir, "a.json")) as { data: { v: number } };
+  expect(bak.data.v).toBe(1);
+  expect(live.data.v).toBe(2);
 });
 
 test("safeReadJson recovers from .bak when the live file is corrupt", async () => {

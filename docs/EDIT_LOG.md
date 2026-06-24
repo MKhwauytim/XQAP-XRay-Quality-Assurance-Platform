@@ -4,6 +4,102 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v5.13 — 2026-06-24 — Add JsonEnvelope schema versioning to safeWriteJson / safeReadJson
+
+**File:** `src/data/storage/jsonEnvelope.ts` *(new file)*
+
+**Before:**
+```ts
+// (file did not exist)
+```
+
+**After:**
+```ts
+// New JsonEnvelope<T> type + wrap/unwrap/isEnvelope factory functions
+// wrap: adds { metadata: { schemaVersion, revision, contentHash, writtenAt }, data }
+// unwrap: returns data from envelope or value as-is for legacy bare files
+```
+
+---
+
+**File:** `src/data/storage/jsonEnvelope.test.ts` *(new file)*
+
+**Before:**
+```ts
+// (file did not exist)
+```
+
+**After:**
+```ts
+// 6 Vitest tests covering wrap, isEnvelope, unwrap (including legacy bare-data path)
+```
+
+---
+
+**File:** `src/data/storage/safeWrite.ts`
+
+**Before:**
+```ts
+const serialized = `${JSON.stringify(value, null, 2)}\n`;
+// ...
+value: JSON.parse(live as string) as T,
+// ...
+value: JSON.parse(bak as string) as T,
+```
+
+**After:**
+```ts
+// isEnvelope guard prevents double-wrapping when callers (e.g. saveWithRevision)
+// already build the envelope manually
+const serialized = `${JSON.stringify(isEnvelope(value) ? value : wrap(value), null, 2)}\n`;
+// ...
+value: unwrap<T>(JSON.parse(live as string)),
+// ...
+value: unwrap<T>(JSON.parse(bak as string)),
+```
+
+---
+
+**File:** `src/data/storage/safeWrite.test.ts`
+
+**Before:**
+```ts
+const bak = JSON.parse(await readRaw(dir, "a.json.bak")) as { v: number };
+const live = JSON.parse(await readRaw(dir, "a.json")) as { v: number };
+expect(bak.v).toBe(1);
+expect(live.v).toBe(2);
+```
+
+**After:**
+```ts
+const bak = JSON.parse(await readRaw(dir, "a.json.bak")) as { data: { v: number } };
+const live = JSON.parse(await readRaw(dir, "a.json")) as { data: { v: number } };
+expect(bak.data.v).toBe(1);
+expect(live.data.v).toBe(2);
+```
+
+---
+
+**File:** `src/data/storage/fileSystemAccess.test.ts`
+
+**Before:**
+```ts
+const live = await readJsonFile<{ a: number }>(dir, "x.json");
+const bak = await readJsonFile<{ a: number }>(dir, "x.json.bak");
+expect(live.ok && live.file.a).toBe(2);
+expect(bak.ok && bak.file.a).toBe(1);
+```
+
+**After:**
+```ts
+const live = await readJsonFile<{ data: { a: number } }>(dir, "x.json");
+const bak = await readJsonFile<{ data: { a: number } }>(dir, "x.json.bak");
+expect(live.ok && live.file.data.a).toBe(2);
+expect(bak.ok && bak.file.data.a).toBe(1);
+```
+
+---
+
 ## v5.12 — 2026-06-24 — Surface error log in Settings tab (admin only, collapsible)
 
 **File:** `src/components/Sidebar/Tabs/Settings/ErrorLogSection.tsx` *(new file)*
