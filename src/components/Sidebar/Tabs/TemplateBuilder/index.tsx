@@ -1,5 +1,4 @@
-/* eslint-disable react-refresh/only-export-components */
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { readSession } from "../../../../auth/authSession";
 import {
@@ -21,25 +20,8 @@ import type {
   TemplateSchema
 } from "../../../../data/templates/templateTypes";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
-import type { SidebarTabModule } from "../tabTypes";
 import "./TemplateBuilder.css";
 import { PageHeader } from "../../../../components/PageHeader/PageHeader";
-
-function TemplateBuilderIcon(): ReactNode {
-  return (
-    <svg viewBox="0 0 24 24" className="sidebar-icon" aria-hidden="true">
-      <path d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm2 4v3h10V7H7Zm0 5v2h4v-2H7Zm6 0v2h4v-2h-4Zm-6 4v2h4v-2H7Zm6 0v2h4v-2h-4Z" />
-    </svg>
-  );
-}
-
-export const tabConfig: SidebarTabModule["tabConfig"] = {
-  id: "template-builder",
-  label: "إدارة النماذج",
-  order: 20,
-  allowedRoles: [],
-  icon: <TemplateBuilderIcon />,
-};
 
 const FIELD_TYPE_LABELS: Record<TemplateFieldType, string> = {
   text: "نص",

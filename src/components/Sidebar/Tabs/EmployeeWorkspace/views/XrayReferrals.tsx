@@ -195,7 +195,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     getRolePermission(
       userManagementState.permissions,
       role,
-      "template-builder"
+      "ew/inspection-form"
     ) === "edit";
   const canConfigureColumns = hasFeature(
     userManagementState.featurePermissions,

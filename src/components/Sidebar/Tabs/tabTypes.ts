@@ -19,5 +19,5 @@ export type SidebarTabDefinition = {
 
 export type SidebarTabModule = {
   default: ComponentType;
-  tabConfig: Omit<SidebarTabDefinition, "TabComponent">;
+  tabConfig?: Omit<SidebarTabDefinition, "TabComponent">;
 };
