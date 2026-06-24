@@ -4,6 +4,46 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v5.16 — 2026-06-24 — Fix: remove lockout reset on username field change
+
+**File:** `src/auth/AuthGate.tsx`
+
+**Before:**
+```tsx
+<input
+  id="authUsername"
+  type="text"
+  required
+  autoComplete="username"
+  placeholder="أدخل اسم المستخدم"
+  value={selectedUsername}
+  onChange={(event) => {
+    setSelectedUsername(event.target.value);
+    setFailedAttempts(0);
+    setLockoutUntil(null);
+  }}
+/>
+```
+
+**After:**
+```tsx
+<input
+  id="authUsername"
+  type="text"
+  required
+  autoComplete="username"
+  placeholder="أدخل اسم المستخدم"
+  value={selectedUsername}
+  onChange={(event) => {
+    setSelectedUsername(event.target.value);
+  }}
+/>
+```
+
+**Reason:** Removed the `setFailedAttempts(0)` and `setLockoutUntil(null)` calls from the username field's `onChange` handler. These calls allowed a locked-out user to bypass the 30-second login throttle by simply typing in the username field, defeating the purpose of the rate-limit entirely. Lockout and attempt counter now only reset on successful login (which already happens in `loginAsEmployee`) or logout (which already happens in the `logout` callback). The password field's `onChange` correctly does not reset them.
+
+---
+
 ## v5.15 — 2026-06-24 — Update CLAUDE.md to reflect Tasks 1-13 changes
 
 **File:** `CLAUDE.md`

@@ -477,8 +477,6 @@ export default function AuthGate({ children }: AuthGateProps) {
                 value={selectedUsername}
                 onChange={(event) => {
                   setSelectedUsername(event.target.value);
-                  setFailedAttempts(0);
-                  setLockoutUntil(null);
                 }}
               />
             </label>
