@@ -14,6 +14,7 @@ import { useLabels } from "../../../../data/labels/useLabels";
 import type { SidebarTabModule } from "../tabTypes";
 import "./Settings.css";
 import { PageHeader } from "../../../../components/PageHeader/PageHeader";
+import { ErrorLogSection } from "./ErrorLogSection";
 
 function SettingsIcon(): ReactNode {
   return (
@@ -345,6 +346,8 @@ function SettingsPage() {
           })}
         </div>
       </div>
+
+      <ErrorLogSection />
     </div>
   );
 }

@@ -4,6 +4,53 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v5.12 — 2026-06-24 — Surface error log in Settings tab (admin only, collapsible)
+
+**File:** `src/components/Sidebar/Tabs/Settings/ErrorLogSection.tsx` *(new file)*
+
+**Before:**
+```ts
+// (file did not exist)
+```
+
+**After:**
+```tsx
+// New ErrorLogSection component — admin-only collapsible error log viewer
+// Uses getRecentErrors / clearErrors from errorLogger; role-gated via usePermissions
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/Settings/ErrorLogSection.css` *(new file)*
+
+**Before:**
+```css
+/* (file did not exist) */
+```
+
+**After:**
+```css
+/* Styles for ErrorLogSection component */
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/Settings/index.tsx`
+
+**Before:**
+```tsx
+// No import of ErrorLogSection
+// SettingsPage renders only label-customization sections
+```
+
+**After:**
+```tsx
+import { ErrorLogSection } from "./ErrorLogSection";
+// SettingsPage renders ErrorLogSection below label sections (admin-only, collapsible)
+```
+
+---
+
 ## v5.11 — 2026-06-24 — Parallelize listMonthSummaries with Promise.allSettled
 
 **File:** `src/data/population/populationStorage.ts`
