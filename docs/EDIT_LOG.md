@@ -4,6 +4,73 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v5.7 — 2026-06-24 — Extract AdminToolbar component from AuthGate
+
+**File:** `src/auth/AdminToolbar.tsx` (created)
+
+**Before:**
+```tsx
+// Did not exist
+```
+
+**After:**
+```tsx
+// New standalone component receiving session, previewRole, onPreviewRoleChange, onLogout, onFeedback props
+// Contains PREVIEW_ROLE_IDS, getRoleLabel, and all toolbar JSX
+export function AdminToolbar({ session, previewRole, onPreviewRoleChange, onLogout, onFeedback }: AdminToolbarProps) { ... }
+```
+
+---
+
+**File:** `src/auth/AdminToolbar.css` (created)
+
+**Before:**
+```css
+/* Did not exist */
+```
+
+**After:**
+```css
+/* Toolbar-specific CSS rules moved from AuthGate.css:
+   .auth-admin-toolbar, .auth-toolbar-*, .auth-role-*, .auth-preview-* */
+```
+
+---
+
+**File:** `src/auth/AuthGate.tsx`
+
+**Before:**
+```tsx
+const PREVIEW_ROLE_IDS: AuthRole[] = ["admin", "manager", "supervisor", "employee", "guest"];
+function getRoleLabel(role: AuthRole): string { ... }
+function toggleFeedbackPanel(): void { window.dispatchEvent(new CustomEvent("feedback:toggle")); }
+// ... toolbar JSX inline in authenticated branch (~55 lines)
+```
+
+**After:**
+```tsx
+import { AdminToolbar } from "./AdminToolbar";
+// PREVIEW_ROLE_IDS, getRoleLabel, toggleFeedbackPanel removed
+// Toolbar JSX replaced with:
+<AdminToolbar session={session} previewRole={previewRole} onPreviewRoleChange={changePreviewRole} onLogout={logout} onFeedback={() => window.dispatchEvent(new CustomEvent("feedback:toggle"))} />
+```
+
+---
+
+**File:** `src/auth/AuthGate.css`
+
+**Before:**
+```css
+/* ~170 lines of toolbar rules: .auth-admin-toolbar, .auth-toolbar-*, .auth-role-*, .auth-preview-* */
+```
+
+**After:**
+```css
+/* Toolbar rules removed — now live in AdminToolbar.css */
+```
+
+---
+
 ## v5.6 — 2026-06-24 — Extract resolveSampleDir helper, deduplicate dual-path fallback
 
 **File:** `src/data/population/populationStorage.ts`
