@@ -4,6 +4,23 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v5.10 — 2026-06-24 — Add distributionStorage integration tests
+
+**File:** `src/data/distribution/distributionStorage.test.ts`
+
+**Before:**
+```ts
+// (file did not exist)
+```
+
+**After:**
+```ts
+// New test file covering append-to-empty-log, single-event read-back,
+// and multiple sequential appends via appendDistributionEvent + loadDistributionLog
+```
+
+---
+
 ## v5.9 — 2026-06-24 — Add React component smoke tests for AuthGate login flow
 
 **File:** `vitest.config.ts`
