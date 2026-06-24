@@ -4,6 +4,37 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v5.9 — 2026-06-24 — Add React component smoke tests for AuthGate login flow
+
+**File:** `vitest.config.ts`
+
+**Before:**
+```ts
+include: ["src/**/*.test.ts"],
+```
+
+**After:**
+```ts
+include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+```
+
+---
+
+**File:** `src/auth/AuthGate.test.tsx` (created)
+
+**Before:**
+```ts
+// Did not exist
+```
+
+**After:**
+```tsx
+/* @vitest-environment jsdom */
+// Two smoke tests: login form renders, wrong password shows error
+```
+
+---
+
 ## v5.8 — 2026-06-24 — Add centralized error logger, wire up key silent catches in populationStorage
 
 **File:** `src/data/storage/errorLogger.ts` (created)
