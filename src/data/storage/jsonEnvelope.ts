@@ -12,7 +12,7 @@ export type JsonEnvelope<TData> = {
   data: TData;
 };
 
-function simpleHash(content: string): string {
+export function simpleHash(content: string): string {
   let h = 5381;
   for (let i = 0; i < content.length; i++) {
     h = ((h << 5) + h) ^ content.charCodeAt(i);
@@ -50,4 +50,32 @@ export function unwrap<T>(value: unknown): T {
     return (value as JsonEnvelope<T>).data;
   }
   return value as T;
+}
+
+export function validateEnvelope(value: unknown): boolean {
+  if (!isEnvelope(value)) {
+    return true;
+  }
+
+  const envelope = value as JsonEnvelope<unknown>;
+
+  // Workspace-management files use a richer metadata shape with a string
+  // schemaVersion and their own SHA-256 hashing. They are validated by
+  // fileSystemAccess.ts, so keep them readable here for compatibility.
+  if (typeof envelope.metadata.schemaVersion === "string") {
+    return true;
+  }
+
+  if (
+    envelope.metadata.schemaVersion !== ENVELOPE_SCHEMA_VERSION ||
+    typeof envelope.metadata.revision !== "number" ||
+    !Number.isInteger(envelope.metadata.revision) ||
+    envelope.metadata.revision < 1 ||
+    typeof envelope.metadata.contentHash !== "string" ||
+    typeof envelope.metadata.writtenAt !== "string"
+  ) {
+    return false;
+  }
+
+  return envelope.metadata.contentHash === simpleHash(JSON.stringify(envelope.data));
 }

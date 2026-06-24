@@ -1,6 +1,6 @@
 import type { DirectoryHandleLike } from "./fileSystemAccess";
 import { withResourceLock } from "./webLocks";
-import { isEnvelope, wrap, unwrap } from "./jsonEnvelope";
+import { isEnvelope, validateEnvelope, wrap, unwrap } from "./jsonEnvelope";
 
 export type SafeReadResult<T> =
   | { ok: true; value: T; recoveredFromBak: boolean; rawText: string }
@@ -55,15 +55,15 @@ async function removeQuietly(
   }
 }
 
-function parses(text: string | null): boolean {
+function parseValidJson(text: string | null): unknown | null {
   if (text === null) {
-    return false;
+    return null;
   }
   try {
-    JSON.parse(text);
-    return true;
+    const parsed = JSON.parse(text);
+    return validateEnvelope(parsed) ? parsed : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -76,15 +76,24 @@ export async function safeWriteJson<T>(
   fileName: string,
   value: T
 ): Promise<void> {
-  const serialized = `${JSON.stringify(isEnvelope(value) ? value : wrap(value), null, 2)}\n`;
-  const skipVerify = serialized.length > VERIFY_SIZE_LIMIT;
   const tmpName = `${fileName}.tmp`;
 
   // Lock per directory+file so same-named files in different folders don't contend.
   await withResourceLock(`${dir.name}/${fileName}`, async () => {
-    // 1. Snapshot the current good file to .bak (the rollback source).
     const current = await readText(dir, fileName);
-    if (parses(current)) {
+    const parsedCurrent = parseValidJson(current);
+    const previousRevision =
+      parsedCurrent &&
+      isEnvelope(parsedCurrent) &&
+      typeof parsedCurrent.metadata.schemaVersion === "number"
+        ? parsedCurrent.metadata.revision
+        : 0;
+    const nextValue = isEnvelope(value) ? value : wrap(value, previousRevision);
+    const serialized = `${JSON.stringify(nextValue, null, 2)}\n`;
+    const skipVerify = serialized.length > VERIFY_SIZE_LIMIT;
+
+    // 1. Snapshot the current good file to .bak (the rollback source).
+    if (parsedCurrent) {
       await writeText(dir, `${fileName}.bak`, current as string);
     }
 
@@ -92,7 +101,9 @@ export async function safeWriteJson<T>(
     //    BEFORE overwriting the live file.
     await writeText(dir, tmpName, serialized);
     const staged = await readText(dir, tmpName);
-    const stagedOk = skipVerify ? staged === serialized : parses(staged);
+    const stagedOk = skipVerify
+      ? staged === serialized
+      : parseValidJson(staged) !== null;
     if (!stagedOk) {
       await removeQuietly(dir, tmpName);
       throw new Error(`Safe-write staging failed for ${fileName}.`);
@@ -101,10 +112,12 @@ export async function safeWriteJson<T>(
     // 3. Commit the verified content to the live file, then re-verify.
     await writeText(dir, fileName, serialized);
     const verify = await readText(dir, fileName);
-    const verifyOk = skipVerify ? verify === serialized : parses(verify);
+    const verifyOk = skipVerify
+      ? verify === serialized
+      : parseValidJson(verify) !== null;
     if (!verifyOk) {
       const bak = await readText(dir, `${fileName}.bak`);
-      if (parses(bak)) {
+      if (parseValidJson(bak) !== null) {
         await writeText(dir, fileName, bak as string);
       }
       await removeQuietly(dir, tmpName);
@@ -116,22 +129,72 @@ export async function safeWriteJson<T>(
   });
 }
 
+export async function safeWriteJsonText(
+  dir: DirectoryHandleLike,
+  fileName: string,
+  jsonText: string
+): Promise<void> {
+  const parsed = parseValidJson(jsonText);
+  if (!parsed) {
+    throw new Error(`Cannot restore invalid JSON file ${fileName}.`);
+  }
+
+  const normalized = `${JSON.stringify(parsed, null, 2)}\n`;
+  const tmpName = `${fileName}.tmp`;
+  const skipVerify = normalized.length > VERIFY_SIZE_LIMIT;
+
+  await withResourceLock(`${dir.name}/${fileName}`, async () => {
+    const current = await readText(dir, fileName);
+    if (parseValidJson(current) !== null) {
+      await writeText(dir, `${fileName}.bak`, current as string);
+    }
+
+    await writeText(dir, tmpName, normalized);
+    const staged = await readText(dir, tmpName);
+    const stagedOk = skipVerify
+      ? staged === normalized
+      : parseValidJson(staged) !== null;
+    if (!stagedOk) {
+      await removeQuietly(dir, tmpName);
+      throw new Error(`Safe-write staging failed for ${fileName}.`);
+    }
+
+    await writeText(dir, fileName, normalized);
+    const verify = await readText(dir, fileName);
+    const verifyOk = skipVerify
+      ? verify === normalized
+      : parseValidJson(verify) !== null;
+    if (!verifyOk) {
+      const bak = await readText(dir, `${fileName}.bak`);
+      if (parseValidJson(bak) !== null) {
+        await writeText(dir, fileName, bak as string);
+      }
+      await removeQuietly(dir, tmpName);
+      throw new Error(`Safe-write validation failed for ${fileName}.`);
+    }
+
+    await removeQuietly(dir, tmpName);
+  });
+}
+
 export async function safeReadJson<T>(
   dir: DirectoryHandleLike,
   fileName: string
 ): Promise<SafeReadResult<T>> {
   const live = await readText(dir, fileName);
-  if (parses(live)) {
+  const parsedLive = parseValidJson(live);
+  if (parsedLive !== null) {
     return {
       ok: true,
-      value: unwrap<T>(JSON.parse(live as string)),
+      value: unwrap<T>(parsedLive),
       recoveredFromBak: false,
       rawText: live as string
     };
   }
 
   const bak = await readText(dir, `${fileName}.bak`);
-  if (parses(bak)) {
+  const parsedBak = parseValidJson(bak);
+  if (parsedBak !== null) {
     if (typeof window !== "undefined") {
       window.dispatchEvent(
         new CustomEvent("data:recovered-from-bak", { detail: { fileName } })
@@ -139,7 +202,7 @@ export async function safeReadJson<T>(
     }
     return {
       ok: true,
-      value: unwrap<T>(JSON.parse(bak as string)),
+      value: unwrap<T>(parsedBak),
       recoveredFromBak: true,
       rawText: bak as string
     };

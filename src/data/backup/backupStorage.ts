@@ -7,7 +7,7 @@ import type { MonthFolderInfo } from "../population/monthFolder";
 import type { MonthManifestData, MonthRawData, PopulationFinalData } from "../population/monthTypes";
 import type { SampleMasterData } from "../sampling/sampleTypes";
 import type { DirectoryHandleLike, FileHandleLike } from "../storage/fileSystemAccess";
-import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { safeReadJson, safeWriteJson, safeWriteJsonText } from "../storage/safeWrite";
 import {
   getPopulationMonthDir,
   getSampleMainDir,
@@ -343,7 +343,7 @@ async function restoreJsonTree(params: {
     if (entry.kind !== "file" || !entry.name.endsWith(".json")) continue;
     const text = await readTextFile(params.sourceDir, entry.name);
     if (text === null) continue;
-    await writeTextFile(params.targetDir, entry.name, text);
+    await safeWriteJsonText(params.targetDir, entry.name, text);
     params.restored.push(params.sourcePath ? `${params.sourcePath}/${entry.name}` : entry.name);
   }
 }

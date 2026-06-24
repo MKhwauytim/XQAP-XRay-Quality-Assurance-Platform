@@ -1,5 +1,6 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { withResourceLock } from "../storage/webLocks";
 import { getTemplatesRoot } from "../workspace/workspacePaths";
 import type { TemplateIndex, TemplateSchema } from "./templateTypes";
 
@@ -16,31 +17,36 @@ export async function saveTemplate(
   schema: TemplateSchema
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
+    if (!schema.templateId || !schema.templateName) {
+      return { ok: false, error: "بيانات القالب غير مكتملة، ولم يتم الحفظ." };
+    }
+
     const dir = await getTemplatesDir(directoryHandle);
-    const fileName = `${schema.templateId}.json`;
-    await safeWriteJson(dir, fileName, schema);
+    await withResourceLock(`${dir.name}/templates-index`, async () => {
+      const fileName = `${schema.templateId}.json`;
+      await safeWriteJson(dir, fileName, schema);
 
-    // Update index
-    const indexResult = await safeReadJson<TemplateIndex>(dir, INDEX_FILE);
-    const existing: TemplateIndex = indexResult.ok
-      ? indexResult.value
-      : { templates: [] };
+      const indexResult = await safeReadJson<TemplateIndex>(dir, INDEX_FILE);
+      const existing: TemplateIndex = indexResult.ok
+        ? indexResult.value
+        : { templates: [] };
 
-    const otherTemplates = existing.templates.filter(
-      (t) => t.templateId !== schema.templateId
-    );
-    const updated: TemplateIndex = {
-      templates: [
-        ...otherTemplates,
-        {
-          templateId: schema.templateId,
-          templateName: schema.templateName,
-          version: schema.version,
-          updatedAt: schema.updatedAt
-        }
-      ].sort((a, b) => a.templateName.localeCompare(b.templateName, "ar"))
-    };
-    await safeWriteJson(dir, INDEX_FILE, updated);
+      const otherTemplates = existing.templates.filter(
+        (t) => t.templateId !== schema.templateId
+      );
+      const updated: TemplateIndex = {
+        templates: [
+          ...otherTemplates,
+          {
+            templateId: schema.templateId,
+            templateName: schema.templateName,
+            version: schema.version,
+            updatedAt: schema.updatedAt
+          }
+        ].sort((a, b) => a.templateName.localeCompare(b.templateName, "ar"))
+      };
+      await safeWriteJson(dir, INDEX_FILE, updated);
+    });
 
     return { ok: true };
   } catch (err) {
@@ -85,27 +91,39 @@ export async function deleteTemplate(
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
     const dir = await getTemplatesDir(directoryHandle);
+    await withResourceLock(`${dir.name}/templates-index`, async () => {
+      const templateFileName = `${templateId}.json`;
+      const templateResult = await safeReadJson<TemplateSchema>(
+        dir,
+        templateFileName
+      );
+      if (templateResult.ok) {
+        await safeWriteJson(dir, `${templateId}.deleted.bak.json`, {
+          ...templateResult.value,
+          deletedAt: new Date().toISOString()
+        });
+      }
 
-    // Remove from index
-    const indexResult = await safeReadJson<TemplateIndex>(dir, INDEX_FILE);
-    if (indexResult.ok) {
-      const updated: TemplateIndex = {
-        templates: indexResult.value.templates.filter(
-          (t) => t.templateId !== templateId
-        )
-      };
-      await safeWriteJson(dir, INDEX_FILE, updated);
-    }
+      const indexResult = await safeReadJson<TemplateIndex>(dir, INDEX_FILE);
+      if (indexResult.ok) {
+        const updated: TemplateIndex = {
+          templates: indexResult.value.templates.filter(
+            (t) => t.templateId !== templateId
+          )
+        };
+        await safeWriteJson(dir, INDEX_FILE, updated);
+      }
 
-    if (dir.removeEntry) {
-      await dir.removeEntry(`${templateId}.json`);
-    } else {
-      await safeWriteJson(dir, `${templateId}.json`, {
-        deleted: true,
-        templateId,
-        deletedAt: new Date().toISOString()
-      });
-    }
+      if (dir.removeEntry) {
+        await dir.removeEntry(templateFileName);
+      } else {
+        await safeWriteJson(dir, templateFileName, {
+          deleted: true,
+          templateId,
+          deletedAt: new Date().toISOString()
+        });
+      }
+    });
 
     return { ok: true };
   } catch (err) {

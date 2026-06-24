@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isEnvelope, unwrap, wrap } from "./jsonEnvelope";
+import { isEnvelope, unwrap, validateEnvelope, wrap } from "./jsonEnvelope";
 
 describe("jsonEnvelope", () => {
   it("wrap produces an envelope with metadata", () => {
@@ -48,5 +48,15 @@ describe("jsonEnvelope", () => {
   it("isEnvelope returns false for object missing metadata.schemaVersion", () => {
     expect(isEnvelope({ metadata: { revision: 1 }, data: {} })).toBe(false);
     expect(isEnvelope({ metadata: {}, data: {} })).toBe(false);
+  });
+
+  it("validateEnvelope rejects mismatched content hashes", () => {
+    const env = wrap({ val: 1 });
+    expect(validateEnvelope(env)).toBe(true);
+    expect(validateEnvelope({ ...env, data: { val: 2 } })).toBe(false);
+  });
+
+  it("validateEnvelope preserves legacy bare JSON compatibility", () => {
+    expect(validateEnvelope({ val: 1 })).toBe(true);
   });
 });
