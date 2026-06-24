@@ -109,6 +109,14 @@ export type PopulationConfig = {
   employeeAllocations: EmployeeStageAllocation[];
 };
 
+export const MONTHLY_SAMPLE_TARGET = 6500;
+export const STAGE_SAMPLE_TARGETS: Record<"first" | "second" | "third" | "fourth", number | null> = {
+  first: null,
+  second: 2500,
+  third: 1875,
+  fourth: 1875,
+};
+
 const POPULATION_FOLDER = "Population";
 const CONFIG_FILE = "config.json";
 

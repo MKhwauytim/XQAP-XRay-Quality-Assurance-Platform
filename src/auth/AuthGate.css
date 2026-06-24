@@ -373,6 +373,21 @@
   text-decoration: underline;
 }
 
+.auth-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.auth-footer-change {
+  color: var(--auth-muted) !important;
+}
+
+.auth-footer-change::before {
+  content: "↗ ";
+  font-size: 11px;
+}
+
 /* ── Admin Modal ───────────────────────────────────────────── */
 
 .auth-modal-backdrop {

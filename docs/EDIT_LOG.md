@@ -418,3 +418,230 @@ function handleDrop(targetId) { const order = [...normalizedOrder]; if (sp<0||tp
 ```
 
 ---
+
+## v4.4 — 2026-06-23 — XLSX export for all report cards + auth footer workspace button
+
+**File:** `src/auth/AuthGate.tsx`
+
+Added "تغيير المجلد" button in the login card footer using `selectWorkspace()` from `useWorkspace`.
+
+**Before:**
+```tsx
+<footer className="auth-footer">
+  <span>Local Gate v{LOGIN_SYSTEM_VERSION}</span>
+  <button type="button" onClick={logout}>مسح الجلسة</button>
+</footer>
+```
+**After:**
+```tsx
+<footer className="auth-footer">
+  <span>Local Gate v{LOGIN_SYSTEM_VERSION}</span>
+  <div className="auth-footer-actions">
+    <button type="button" className="auth-footer-change" onClick={() => { void selectWorkspace(); }}>
+      تغيير المجلد
+    </button>
+    <button type="button" onClick={logout}>مسح الجلسة</button>
+  </div>
+</footer>
+```
+
+**File:** `src/auth/AuthGate.css`
+
+Added `.auth-footer-actions` flex group and `.auth-footer-change` style with `↗` prefix.
+
+**File:** `src/data/reporting/distributionReport.ts`
+
+Added `buildDistributionXlsx(data, monthFolderName)` — exports 3-sheet XLSX:
+ملخص / ملخص الموظفين / تفاصيل التوزيع (all rows with full `PreparedPopulationRow` fields).
+
+**File:** `src/data/reporting/executiveReport.ts`
+
+Added `buildExecutiveXlsx(input)` — exports 4-sheet XLSX:
+مؤشرات الأداء / تحليل المنافذ / المراحل / كل الصفوف (every image with all derived KPI fields).
+
+**File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
+
+- `ReportType` union extended with `"distribution-xlsx"` and `"executive-xlsx"`
+- Imported `buildDistributionXlsx` and `buildExecutiveXlsx`
+- Each of the three report cards (executive, sample, distribution) now has two buttons: HTML › and XLSX ↓
+- `generate()` branches handle all six report types
+
+---
+
+## v4.3 — 2026-06-23 — Sample report rewrite (rich HTML + XLSX) and executive report 5-slide restructure
+
+**File:** `src/data/reporting/executiveReport.ts`
+
+Rewrote from 8 slides to 5 compact slides. Removed الحالة column from the port table.
+Eliminated slide duplication (KPI cards appeared in slides 1 & 6; port analysis in slides 2 & 7;
+single-month trend chart on slide 7 was meaningless). Merged overlapping content:
+- Slide 1: Executive summary — 6 KPI cards + donut + port bar chart + rank list + insights strip
+- Slide 2: Port analysis — port table (no الحالة) + stacked bars + L1/L2 dual bars per port
+- Slide 3: Stage coverage + plan KPIs strip + quality metrics (absorbed slide 6's plan data)
+- Slide 4: Verification matrix + L1/L2 comparison (merged slides 4 & 5)
+- Slide 5: Priority ports + decisions list + executive callout (merged slides 7 & 8)
+
+**File:** `src/data/population/populationConfig.ts`
+
+Exported `MONTHLY_SAMPLE_TARGET` (6500) and `STAGE_SAMPLE_TARGETS` as named exports
+so they can be imported by other modules.
+
+**Before:**
+```ts
+// constants were only defined in Population/index.tsx, not exported
+const MONTHLY_SAMPLE_TARGET = 6500;
+```
+
+**After:**
+```ts
+export const MONTHLY_SAMPLE_TARGET = 6500;
+export const STAGE_SAMPLE_TARGETS: Record<"first" | "second" | "third" | "fourth", number | null> = {
+  first: null, second: 2500, third: 1875, fourth: 1875,
+};
+```
+
+**File:** `src/data/reporting/executiveReportTypes.ts`
+
+`DEFAULT_EXEC_CONFIG.monthlyTarget` now reads from `MONTHLY_SAMPLE_TARGET` (was hardcoded 0).
+
+**File:** `src/data/reporting/sampleReport.ts`
+
+Full rewrite. Old: 69-line basic HTML with port allocation table + 20-row preview.
+New: rich multi-section HTML (raw vs processed diff, per-port breakdown showing Risk+BI+CertScan,
+stage breakdown, 50-row sample preview) plus `buildSampleXlsx()` generating a 5-sheet XLSX
+(ملخص / تفصيل المنافذ / المراحل / العينة المسحوبة / كامل المجتمع). New signature takes
+`SampleReportInput` with `{ monthFolderName, manifest, populationRows, sample }`.
+
+**File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
+
+- Import `openSampleReport`, `buildSampleXlsx` (replacing old `buildSampleReport`)
+- Import `loadMonthForEditing` for richer data load
+- Added `"sample-xlsx"` to `ReportType` union
+- Sample card now has two buttons: HTML and XLSX
+- Updated card description to reflect new rich content
+
+---
+
+## v4.1 — 2026-06-23 — Reports Hub: card-grid page design
+
+**File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
+
+Replaced the dropdown-based reports form with a full card-grid hub (مركز التقارير).
+
+**Before:**
+```tsx
+// Single panel with two <select> dropdowns (month + report type) and one generate button
+<div className="rpt-panel">
+  <h2>إعدادات التقرير</h2>
+  <div className="rpt-controls">…</div>
+  <button>توليد التقرير</button>
+  <div className="rpt-info">…</div>
+</div>
+```
+
+**After:**
+```tsx
+// Page header + month bar with metadata chips + card grid (executive/sample/distribution/
+// department-soon/xlsx-note) + quick-actions strip. Each card has its own generate button.
+// Month bar auto-loads population count, sample count, and submitted-answer count as chips.
+<section className="rh-page">
+  <div className="rh-header">…</div>
+  <div className="rh-month-bar">…chips…</div>
+  <div className="rh-grid">…5 cards…</div>
+  <div className="rh-quick">…quick buttons…</div>
+</section>
+```
+
+Also fixed: `f.answers` → `f.items` (correct field on `EmployeeAnswerFile`).
+
+**File:** `src/components/Sidebar/Tabs/Reports/Reports.css`
+
+Complete CSS rewrite for the new hub layout — navy/teal design system, card grid,
+accent strips, badges, chips, spinner, toast notification, quick-actions strip.
+
+**File:** `src/data/reporting/executiveReport.ts`
+
+Removed unused parameters (`monthLabel` from slide5/slide6, `config` from slide7) and
+removed unused `l1l2Same` variable. Matched call sites accordingly.
+
+**File:** `src/data/reporting/executiveReportData.ts`
+
+Removed three unused `import type` lines (`PreparedPopulationRow`, `DistributionCurrentData`,
+`EmployeeAnswerFile`) — these flow through `ExecutiveReportInput` already.
+
+---
+
+## v4.0 — 2026-06-23 — Executive Report: 8-slide HTML presentation module
+
+**File:** `src/data/reporting/executiveReportTypes.ts` *(new)*
+
+Defines all TypeScript types for the executive report: `ExecutiveReportRow`, `PortProfile`, `StageProfile`, `ExecutiveKPIs`, `ExecutiveReportConfig`, `DEFAULT_EXEC_CONFIG`, `ExecutiveReportInput`, `VerificationCategory`.
+
+**Before:** *(file did not exist)*
+
+**After:** *(full type definitions as documented above)*
+
+---
+
+**File:** `src/data/reporting/executiveReportData.ts` *(new)*
+
+Data joining, KPI engine, and Arabic narrative generator.
+
+- `buildExecutiveReportRows()`: joins population + sample + distribution + submitted answers into `ExecutiveReportRow[]`
+- `calculateExecutiveKPIs()`: computes all KPIs including per-port and per-stage profiles; port status classification (excellent/stable/monitor/priority/insufficient)
+- `generateNarrativeFindings()`: produces up to 3 Arabic executive findings
+- `fmtNum()`, `fmtPct()`, `fmtK()`: display helpers
+
+**Before:** *(file did not exist)*
+
+**After:** *(full implementation)*
+
+---
+
+**File:** `src/data/reporting/executiveReport.ts` *(new)*
+
+Main 8-slide HTML builder.
+
+- Exports `buildExecutiveReport(input)` and `openExecutiveReport(input)`
+- Slide 1: executive summary — 5 KPI cards + bar chart + donut + rank list + insights strip
+- Slide 2: port performance table + stacked bars + executive callout
+- Slide 3: stage coverage cards + stage bar chart + monthly plan strip
+- Slide 4: verification matrix table + summary cards + rule explanations
+- Slide 5: L1 vs L2 comparison grid + dual-bar chart per port
+- Slide 6: management KPIs + plan tracking table + quality indicators
+- Slide 7: performance trend SVG (graceful single-month fallback) + priority port cards
+- Slide 8: decisions list + executive callout + success targets
+- CSS: navy/teal design system, Somar via `local()`, RTL, 13.333in×7.5in slides
+- Navigation: keyboard (ArrowLeft/Right/Home/End) + toolbar + print/PDF
+
+**Before:** *(file did not exist)*
+
+**After:** *(full implementation)*
+
+---
+
+**File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
+
+**Before:**
+```ts
+type ReportType = "sample" | "distribution";
+const REPORT_LABELS: Record<ReportType, string> = {
+  sample: "تقرير العينة",
+  distribution: "تقرير التوزيع"
+};
+// generate handler: sample | distribution branches only
+```
+
+**After:**
+```ts
+type ReportType = "sample" | "distribution" | "executive";
+const REPORT_LABELS: Record<ReportType, string> = {
+  sample: "تقرير العينة",
+  distribution: "تقرير التوزيع",
+  executive: "التقرير التنفيذي"
+};
+// generate handler: adds executive branch — loads population, sample,
+// distribution, and all employee answer files, then calls openExecutiveReport()
+```
+
+---
