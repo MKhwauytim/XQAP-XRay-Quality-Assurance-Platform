@@ -4,6 +4,53 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v5.14 — 2026-06-24 — Broaden isEnvelope guard to detect workspace-style string schemaVersion
+
+**File:** `src/data/storage/jsonEnvelope.ts`
+
+**Before:**
+```ts
+export function isEnvelope(value: unknown): value is JsonEnvelope<unknown> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "metadata" in value &&
+    "data" in value &&
+    typeof (value as JsonEnvelope<unknown>).metadata?.schemaVersion === "number"
+  );
+}
+```
+
+**After:**
+```ts
+export function isEnvelope(value: unknown): value is JsonEnvelope<unknown> {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  if (!("metadata" in v) || !("data" in v)) return false;
+  const m = v["metadata"];
+  if (!m || typeof m !== "object") return false;
+  return "schemaVersion" in (m as object);
+}
+```
+
+---
+
+**File:** `src/data/storage/jsonEnvelope.test.ts`
+
+**Before:**
+```ts
+// ended at: increments revision from previous test
+```
+
+**After:**
+```ts
+// added two new tests:
+// - isEnvelope returns true for workspace-style envelope (string schemaVersion)
+// - isEnvelope returns false for object missing metadata.schemaVersion
+```
+
+---
+
 ## v5.13 — 2026-06-24 — Add JsonEnvelope schema versioning to safeWriteJson / safeReadJson
 
 **File:** `src/data/storage/jsonEnvelope.ts` *(new file)*

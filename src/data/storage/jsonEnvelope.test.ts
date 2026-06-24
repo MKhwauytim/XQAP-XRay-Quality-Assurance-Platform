@@ -31,4 +31,22 @@ describe("jsonEnvelope", () => {
     const second = wrap({ x: 2 }, first.metadata.revision);
     expect(second.metadata.revision).toBe(2);
   });
+
+  it("isEnvelope returns true for workspace-style envelope (string schemaVersion)", () => {
+    const workspaceEnvelope = {
+      metadata: {
+        schemaVersion: "1.0.0",
+        revision: 3,
+        contentHash: "abc123",
+        writtenAt: new Date().toISOString(),
+      },
+      data: { someField: "value" },
+    };
+    expect(isEnvelope(workspaceEnvelope)).toBe(true);
+  });
+
+  it("isEnvelope returns false for object missing metadata.schemaVersion", () => {
+    expect(isEnvelope({ metadata: { revision: 1 }, data: {} })).toBe(false);
+    expect(isEnvelope({ metadata: {}, data: {} })).toBe(false);
+  });
 });

@@ -37,13 +37,12 @@ export function wrap<T>(
 }
 
 export function isEnvelope(value: unknown): value is JsonEnvelope<unknown> {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "metadata" in value &&
-    "data" in value &&
-    typeof (value as JsonEnvelope<unknown>).metadata?.schemaVersion === "number"
-  );
+  if (!value || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  if (!("metadata" in v) || !("data" in v)) return false;
+  const m = v["metadata"];
+  if (!m || typeof m !== "object") return false;
+  return "schemaVersion" in (m as object);
 }
 
 export function unwrap<T>(value: unknown): T {
