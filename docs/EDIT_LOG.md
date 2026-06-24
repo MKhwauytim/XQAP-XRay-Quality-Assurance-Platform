@@ -4,6 +4,20 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v5.1 — 2026-06-24 — Remove dead SESSION_KEY constant
+
+**File:** `src/auth/authConfig.ts`
+
+**Before:**
+```ts
+export const SESSION_KEY = "xray_local_login_session_v1";
+```
+
+**After:**
+*(line removed)*
+
+---
+
 ## v5.0 — 2026-06-24 — Workspace path restructuring, runtime-only auth session, samples mirror module
 
 **Summary:** Major architectural refactor across 39 files covering:

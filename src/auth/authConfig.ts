@@ -2,8 +2,6 @@ import type { PasswordHashRecord } from "./passwordCrypto";
 
 export const LOGIN_SYSTEM_VERSION = "1.3.0";
 
-export const SESSION_KEY = "xray_local_login_session_v1";
-
 export const ADMIN_SHORTCUT_KEYS = ["a", "t", "ش", "ف"] as const;
 
 export const BOOTSTRAP_ADMIN_USERNAME = "admin";
