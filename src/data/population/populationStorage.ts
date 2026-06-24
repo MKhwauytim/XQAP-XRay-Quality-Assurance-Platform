@@ -1,5 +1,6 @@
 import type { DirectoryHandleLike, FileHandleLike } from "../storage/fileSystemAccess";
 import { safeWriteJson, safeReadJson } from "../storage/safeWrite";
+import { logError } from "../storage/errorLogger";
 import { formatMonthFolderName, parseMonthFolderName, type MonthFolderInfo } from "./monthFolder";
 import type { MonthManifestData, MonthRawData, PopulationFinalData } from "./monthTypes";
 import type { SampleMasterData } from "../sampling/sampleTypes";
@@ -61,7 +62,9 @@ async function saveBinaryFile(
     // Native FileSystemWritableFileStream.write() accepts BufferSource — cast needed
     await (writable as unknown as { write: (d: unknown) => Promise<void> }).write(data);
     await writable.close();
-  } catch { /* skip if FS API unavailable */ }
+  } catch (error) {
+    logError("saveBinaryFile", error);
+  }
 }
 
 // ── CertScan global persistence ───────────────────────────────────────────────
@@ -277,7 +280,8 @@ export async function listMonthFolders(
       }
       return a.month - b.month;
     });
-  } catch {
+  } catch (error) {
+    logError("listMonthFolders", error);
     return [];
   }
 }
@@ -291,19 +295,34 @@ export type MonthSummary = {
   totalProcessedRows: number;
 };
 
+async function resolveSampleDir(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  monthDir: DirectoryHandleLike
+): Promise<DirectoryHandleLike | null> {
+  try {
+    return await getSampleMainDir(directoryHandle, monthFolderName, false);
+  } catch {
+    try {
+      return await monthDir.getDirectoryHandle("sample", { create: false });
+    } catch {
+      return null;
+    }
+  }
+}
+
 export async function listMonthSummaries(
   directoryHandle: DirectoryHandleLike
 ): Promise<MonthSummary[]> {
   const infos = await listMonthFolders(directoryHandle);
-  const results: MonthSummary[] = [];
 
   let populationDir: DirectoryHandleLike;
   try {
     populationDir = await getPopulationRoot(directoryHandle, false);
   } catch { return []; }
 
-  for (const info of infos) {
-    try {
+  const settled = await Promise.allSettled(
+    infos.map(async (info) => {
       const monthDir = await populationDir.getDirectoryHandle(
         info.folderName, { create: false }
       );
@@ -323,16 +342,12 @@ export async function listMonthSummaries(
       } catch { /* directory missing */ }
 
       let hasSample = false;
-      try {
-        const sampleDir = await getSampleMainDir(directoryHandle, info.folderName, false);
-        const sResult = await safeReadJson<SampleMasterData>(sampleDir, "sample.master.json");
-        hasSample = sResult.ok;
-      } catch {
-        try {
-          const sampleDir = await monthDir.getDirectoryHandle("sample", { create: false });
+      {
+        const sampleDir = await resolveSampleDir(directoryHandle, info.folderName, monthDir);
+        if (sampleDir) {
           const sResult = await safeReadJson<SampleMasterData>(sampleDir, "sample.master.json");
           hasSample = sResult.ok;
-        } catch { /* directory missing */ }
+        }
       }
 
       let hasDistribution = false;
@@ -347,11 +362,13 @@ export async function listMonthSummaries(
         } catch { /* file missing */ }
       }
 
-      results.push({ info, manifest, hasPopulation, hasSample, hasDistribution, totalProcessedRows });
-    } catch {
-      // skip inaccessible month folders
-    }
-  }
+      return { info, manifest, hasPopulation, hasSample, hasDistribution, totalProcessedRows };
+    })
+  );
+
+  const results: MonthSummary[] = settled
+    .filter((r): r is PromiseFulfilledResult<MonthSummary> => r.status === "fulfilled")
+    .map((r) => r.value);
 
   // newest first
   return results.reverse();
@@ -402,7 +419,9 @@ export async function loadAllPopulationRows(
         if (!id) continue;
         seen.set(id, appendMonthInfo(row, info));
       }
-    } catch { /* skip inaccessible */ }
+    } catch (error) {
+      logError("loadAllPopulationRows", error);
+    }
   }
 
   return [...seen.values()];
@@ -433,25 +452,16 @@ export async function loadAllSampleRows(
 
   for (const info of months) {
     try {
-      const sampleDir = await getSampleMainDir(directoryHandle, info.folderName, false);
+      const monthDir = await getMonthDir(directoryHandle, info.folderName);
+      const sampleDir = await resolveSampleDir(directoryHandle, info.folderName, monthDir);
+      if (!sampleDir) continue;
       const result = await safeReadJson<{ rows: Array<Record<string, unknown>> }>(
         sampleDir,
         "sample.master.json"
       );
       if (!result.ok) continue;
       rows.push(...(result.value.rows ?? []).map((row) => appendMonthInfo(row, info)));
-    } catch {
-      try {
-        const monthDir = await getMonthDir(directoryHandle, info.folderName);
-        const sampleDir = await monthDir.getDirectoryHandle("sample", { create: false });
-        const result = await safeReadJson<{ rows: Array<Record<string, unknown>> }>(
-          sampleDir,
-          "sample.master.json"
-        );
-        if (!result.ok) continue;
-        rows.push(...(result.value.rows ?? []).map((row) => appendMonthInfo(row, info)));
-      } catch { /* skip inaccessible */ }
-    }
+    } catch { /* skip inaccessible */ }
   }
 
   return rows;
@@ -540,12 +550,9 @@ export async function loadMonthForEditing(
           return { risk, bi };
         })
         .catch(() => null),
-      getSampleMainDir(directoryHandle, monthFolderName, false)
-        .then((dir) => safeReadJson<SampleMasterData>(dir, "sample.master.json"))
-        .catch(() =>
-          monthDir.getDirectoryHandle("sample", { create: false })
-            .then((dir) => safeReadJson<SampleMasterData>(dir, "sample.master.json"))
-            .catch(() => null)
+      resolveSampleDir(directoryHandle, monthFolderName, monthDir)
+        .then((dir) =>
+          dir ? safeReadJson<SampleMasterData>(dir, "sample.master.json") : null
         ),
     ]);
 

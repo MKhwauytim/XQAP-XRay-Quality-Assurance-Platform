@@ -8,11 +8,12 @@ test("writeJsonFile produces a .bak snapshot on the second write", async () => {
   await writeJsonFile(dir, "x.json", { a: 1 });
   await writeJsonFile(dir, "x.json", { a: 2 });
 
-  const live = await readJsonFile<{ a: number }>(dir, "x.json");
-  const bak = await readJsonFile<{ a: number }>(dir, "x.json.bak");
+  // Files are written as JsonEnvelope<T> — readJsonFile returns the raw envelope
+  const live = await readJsonFile<{ data: { a: number } }>(dir, "x.json");
+  const bak = await readJsonFile<{ data: { a: number } }>(dir, "x.json.bak");
 
-  expect(live.ok && live.file.a).toBe(2);
-  expect(bak.ok && bak.file.a).toBe(1);
+  expect(live.ok && live.file.data.a).toBe(2);
+  expect(bak.ok && bak.file.data.a).toBe(1);
 });
 
 test("createWorkspaceStructure creates numbered workspace folders", async () => {

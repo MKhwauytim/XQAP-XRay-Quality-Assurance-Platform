@@ -92,7 +92,7 @@ Month folder names follow the pattern `{month}-{MonthName-en}-{year}` (e.g. `5-M
 
 1. **Browser storage (auth & permissions)** — `src/auth/`
    - Login: new passwords hashed with **Argon2id** via `hash-wasm` (m=19 MiB, t=2, p=1 — OWASP 2026 baseline). Legacy PBKDF2-SHA256 hashes are still verified for backwards compatibility, and are **transparently upgraded to Argon2id on successful login** (`needsRehash` → `persistUserPasswordHash`). Bootstrap `admin` hash stored in `authConfig.ts`.
-   - Session → `localStorage` (`authSession.ts`), persisted across browser restarts with a **7-day TTL** measured from `loginAt`; expired/invalid sessions are cleared on read. Managed users + role→tab permission matrix → `localStorage` (`xray_user_management_v1`), changes broadcast via custom DOM event (`subscribeToUserManagementChanges`).
+   - Session → runtime-only module variable in `authSession.ts` (no `localStorage`). Sessions survive tab navigation but are lost on page refresh or tab close. The 7-day TTL constant remains but is only applied when a session is read back after it was previously written (e.g. after page reload if a future persistence layer is added). Managed users + role→tab permission matrix → `localStorage` (`xray_user_management_v1`), changes broadcast via custom DOM event (`subscribeToUserManagementChanges`).
    - Roles: `guest` / `employee` / `supervisor` / `manager` / `admin` (5 roles — see `AuthRole` in `authTypes.ts`). `admin` is the bootstrap superuser; `manager` is the top managed role. `App.tsx` filters tabs by role + permission matrix.
    - `MANAGED_TABS` in `userManagement.ts` must list every tab; `createDefaultPermissions()` must include all role×tab combinations.
 
@@ -100,7 +100,7 @@ Month folder names follow the pattern `{month}-{MonthName-en}-{year}` (e.g. `5-M
 
 2. **Workspace folder on disk (business data)** — `src/data/`
    - Safe write layer: `safeWriteJson` / `safeReadJson` in `src/data/storage/safeWrite.ts`. Each write: snapshot current → `{file}.bak`, stage serialized content in `{file}.tmp` and verify it, then commit to the live file and re-verify (rolling back from `.bak` on failure). The File System Access API has no atomic rename, so this is snapshot-and-verify, not a true atomic swap; `safeReadJson` recovers from `.bak` if the live file is corrupt.
-   - `JsonEnvelope<TData>` wraps every JSON file: `{ metadata: { schemaVersion, revision, contentHash, ... }, data }`.
+   - `JsonEnvelope<TData>` wraps every JSON file: `{ metadata: { schemaVersion, revision, contentHash, writtenAt }, data }`. Schema versioning via `wrap/unwrap/isEnvelope` in `src/data/storage/jsonEnvelope.ts`.
    - Web Locks API (with promise-chain fallback) prevents concurrent writes within a tab.
    - `WorkspaceProvider.tsx` / `useWorkspace.ts` — React context for directory handle.
 
@@ -113,13 +113,15 @@ Month folder names follow the pattern `{month}-{MonthName-en}-{year}` (e.g. `5-M
 | Distribution | `src/data/distribution/` | Append-only event log, `deriveCurrentDistribution` fold, bulk assignment, replacement |
 | Templates | `src/data/templates/` | Template schema CRUD + index + runtime evaluation |
 | Answers | `src/data/answers/` | Per-employee per-month answer files |
-| Reporting | `src/data/reporting/` | Self-contained Arabic HTML report builders (sample + distribution) |
+| Reporting | `src/data/reporting/` | Self-contained Arabic HTML report builders (sample + distribution + executive) |
 | Backup | `src/data/backup/` | Copy key files to `.system/backups/`, archive status check |
 | Approvals | `src/data/approvals/` | Referral approval records |
 | Referrals | `src/data/referral/` | Referral request storage |
 | Feedback | `src/data/feedback/` | User feedback records |
 | Labels | `src/data/labels/` | UI label overrides (`labelsStore.ts`) persisted to `localStorage`; `useLabels()` re-renders on change |
 | Preferences | `src/data/preferences/` | Browse preset storage |
+| Error logger | `src/data/storage/errorLogger.ts` | In-memory ring buffer (last 50 entries) for silent-catch observability; `logError`, `getRecentErrors`, `clearErrors` |
+| JsonEnvelope | `src/data/storage/jsonEnvelope.ts` | Schema versioning wrapper for all `safeWriteJson` writes; `wrap`, `isEnvelope`, `unwrap` factory functions |
 
 ### Shared UI components
 
@@ -130,6 +132,7 @@ Month folder names follow the pattern `{month}-{MonthName-en}-{year}` (e.g. `5-M
 | `FeedbackWidget` | `src/components/FeedbackWidget/` | Floating feedback collector |
 | `PermissionGuard` | `src/components/PermissionGuard.tsx` | Renders children only when the current user has a given permission |
 | `ErrorBoundary` | `src/components/ErrorBoundary.tsx` | Top-level React error boundary |
+| `AdminToolbar` | `src/auth/AdminToolbar.tsx` | Role-preview segmented switch, logout button, feedback toggle (admin-only) |
 
 ### Tab system
 

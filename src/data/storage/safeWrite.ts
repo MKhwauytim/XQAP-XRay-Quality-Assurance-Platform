@@ -1,5 +1,6 @@
 import type { DirectoryHandleLike } from "./fileSystemAccess";
 import { withResourceLock } from "./webLocks";
+import { isEnvelope, wrap, unwrap } from "./jsonEnvelope";
 
 export type SafeReadResult<T> =
   | { ok: true; value: T; recoveredFromBak: boolean; rawText: string }
@@ -75,7 +76,7 @@ export async function safeWriteJson<T>(
   fileName: string,
   value: T
 ): Promise<void> {
-  const serialized = `${JSON.stringify(value, null, 2)}\n`;
+  const serialized = `${JSON.stringify(isEnvelope(value) ? value : wrap(value), null, 2)}\n`;
   const skipVerify = serialized.length > VERIFY_SIZE_LIMIT;
   const tmpName = `${fileName}.tmp`;
 
@@ -123,7 +124,7 @@ export async function safeReadJson<T>(
   if (parses(live)) {
     return {
       ok: true,
-      value: JSON.parse(live as string) as T,
+      value: unwrap<T>(JSON.parse(live as string)),
       recoveredFromBak: false,
       rawText: live as string
     };
@@ -138,7 +139,7 @@ export async function safeReadJson<T>(
     }
     return {
       ok: true,
-      value: JSON.parse(bak as string) as T,
+      value: unwrap<T>(JSON.parse(bak as string)),
       recoveredFromBak: true,
       rawText: bak as string
     };

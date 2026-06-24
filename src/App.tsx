@@ -156,35 +156,11 @@ function AppContent({ session }: AppContentProps) {
       dir="rtl"
     >
       {bakWarning && (
-        <div
-          style={{
-            position: "fixed",
-            top: 0,
-            insetInline: 0,
-            zIndex: 9999,
-            background: "#fef3c7",
-            borderBottom: "1px solid #f59e0b",
-            padding: "10px 16px",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            fontSize: 13,
-            color: "#92400e",
-            direction: "rtl",
-          }}
-        >
+        <div className="app-bak-warning">
           <span>⚠️ {bakWarning}</span>
           <button
             onClick={() => setBakWarning(null)}
-            style={{
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              fontSize: 20,
-              color: "#92400e",
-              lineHeight: 1,
-              padding: "0 4px",
-            }}
+            className="app-bak-warning-close"
             aria-label="إغلاق"
           >
             ×
@@ -232,28 +208,11 @@ function AppContent({ session }: AppContentProps) {
 function NoAvailableTabs({ role }: { role: AuthSession["role"] }) {
   return (
     <div className="tab-blank" dir="rtl">
-      <div
-        style={{
-          minHeight: "calc(100vh - 44px)",
-          display: "grid",
-          placeItems: "center",
-          padding: "24px",
-          color: "#475467",
-          textAlign: "center"
-        }}
-      >
+      <div className="app-no-tabs">
         <div>
-          <h1
-            style={{
-              margin: "0 0 10px",
-              color: "#17365d",
-              fontSize: "24px"
-            }}
-          >
-            لا توجد تبويبات متاحة
-          </h1>
+          <h1>لا توجد تبويبات متاحة</h1>
 
-          <p style={{ margin: 0, lineHeight: 1.8 }}>
+          <p>
             لا توجد صفحات مفعلة لهذا الدور حالياً: <strong>{role}</strong>
           </p>
         </div>

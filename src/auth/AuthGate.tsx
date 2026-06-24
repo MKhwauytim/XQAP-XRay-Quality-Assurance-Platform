@@ -6,11 +6,13 @@ import {
   type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
+  type RefObject,
   type SyntheticEvent
 } from "react";
 
 import "./AuthGate.css";
 
+import { AdminToolbar } from "./AdminToolbar";
 import {
   ADMIN_SHORTCUT_KEYS,
   BOOTSTRAP_ADMIN_PASSWORD_HASH,
@@ -45,10 +47,6 @@ type AuthGateProps = {
 };
 
 const ADMIN_ROLE: AuthRole = "admin";
-
-// Roles offered in the admin role-preview switcher, in descending privilege order.
-// "admin" means "no impersonation" (back to the real admin view).
-const PREVIEW_ROLE_IDS: AuthRole[] = ["admin", "manager", "supervisor", "employee", "guest"];
 
 function createSession(role: AuthRole, username: string): AuthSession {
   return {
@@ -98,30 +96,6 @@ function isAdminShortcutSequence(sequence: string): boolean {
   return sequence === "at" || sequence === "شف";
 }
 
-function getRoleLabel(role: AuthRole): string {
-  if (role === "admin") {
-    return "الإدارة";
-  }
-
-  if (role === "manager") {
-    return "المدير";
-  }
-
-  if (role === "supervisor") {
-    return "المشرف";
-  }
-
-  if (role === "guest") {
-    return "ضيف";
-  }
-
-  return "الموظف";
-}
-
-function toggleFeedbackPanel(): void {
-  window.dispatchEvent(new CustomEvent("feedback:toggle"));
-}
-
 export default function AuthGate({ children }: AuthGateProps) {
   const { selectWorkspace } = useWorkspace();
   const [session, setSession] = useState<AuthSession | null>(getInitialSession);
@@ -144,8 +118,18 @@ export default function AuthGate({ children }: AuthGateProps) {
     readPreviewRole()
   );
 
+  const [failedAttempts, setFailedAttempts] = useState(0);
+  const [lockoutUntil, setLockoutUntil] = useState<number | null>(null);
+  const [lockoutSecondsLeft, setLockoutSecondsLeft] = useState(0);
+
+  const LOCKOUT_AFTER_ATTEMPTS = 3;
+  const LOCKOUT_DURATION_MS = 30_000;
+
   const altSequenceRef = useRef<string[]>([]);
   const altSequenceTimerRef = useRef<number | null>(null);
+
+  const adminModalRef = useRef<HTMLElement | null>(null);
+  const triggerRef = useRef<HTMLElement | null>(null);
 
   // Derive whether there are any active users (to decide which form to show)
   const hasConfiguredUsers = managedUsers.some((user) => user.isActive);
@@ -177,6 +161,50 @@ export default function AuthGate({ children }: AuthGateProps) {
     });
   }, []);
 
+  useEffect(() => {
+    if (lockoutUntil === null) return;
+    const tick = () => {
+      const remaining = Math.ceil((lockoutUntil - Date.now()) / 1000);
+      if (remaining <= 0) {
+        setLockoutUntil(null);
+        setLockoutSecondsLeft(0);
+      } else {
+        setLockoutSecondsLeft(remaining);
+      }
+    };
+    tick();
+    const id = window.setInterval(tick, 500);
+    return () => window.clearInterval(id);
+  }, [lockoutUntil]);
+
+  useEffect(() => {
+    if (!isAdminModalOpen || !adminModalRef.current) return;
+    const modal = adminModalRef.current;
+    const focusable = modal.querySelectorAll<HTMLElement>(
+      'input, button, [tabindex]:not([tabindex="-1"])'
+    );
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key !== "Tab") return;
+      if (e.shiftKey) {
+        if (document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else {
+        if (document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    }
+
+    modal.addEventListener("keydown", handleKeyDown);
+    return () => modal.removeEventListener("keydown", handleKeyDown);
+  }, [isAdminModalOpen]);
+
   const logout = useCallback((): void => {
     clearSession();
 
@@ -188,6 +216,8 @@ export default function AuthGate({ children }: AuthGateProps) {
     setIsAdminModalOpen(false);
     setMessage("");
     setMessageType("");
+    setFailedAttempts(0);
+    setLockoutUntil(null);
   }, []);
 
   // Switch the previewed role (admin only). Selecting "admin" exits preview mode.
@@ -234,6 +264,7 @@ export default function AuthGate({ children }: AuthGateProps) {
           window.clearTimeout(altSequenceTimerRef.current);
         }
 
+        triggerRef.current = document.activeElement as HTMLElement | null;
         setAdminPasscode("");
         setMessage("");
         setMessageType("");
@@ -275,6 +306,8 @@ export default function AuthGate({ children }: AuthGateProps) {
   ): Promise<void> {
     event.preventDefault();
 
+    if (lockoutUntil !== null && Date.now() < lockoutUntil) return;
+
     const normalizedInput = normalizeUsername(selectedUsername);
 
     const user = managedUsers.find(
@@ -282,6 +315,11 @@ export default function AuthGate({ children }: AuthGateProps) {
     );
 
     if (!user) {
+      const next = failedAttempts + 1;
+      setFailedAttempts(next);
+      if (next >= LOCKOUT_AFTER_ATTEMPTS) {
+        setLockoutUntil(Date.now() + LOCKOUT_DURATION_MS);
+      }
       showMessage("اسم المستخدم غير موجود أو كلمة المرور غير صحيحة.", "bad");
       return;
     }
@@ -297,7 +335,12 @@ export default function AuthGate({ children }: AuthGateProps) {
     );
 
     if (!isPasswordValid) {
-      showMessage("كلمة المرور غير صحيحة.", "bad");
+      const next = failedAttempts + 1;
+      setFailedAttempts(next);
+      if (next >= LOCKOUT_AFTER_ATTEMPTS) {
+        setLockoutUntil(Date.now() + LOCKOUT_DURATION_MS);
+      }
+      showMessage("اسم المستخدم غير موجود أو كلمة المرور غير صحيحة.", "bad");
       return;
     }
 
@@ -316,6 +359,8 @@ export default function AuthGate({ children }: AuthGateProps) {
     applySession(nextSession);
 
     setPassword("");
+    setFailedAttempts(0);
+    setLockoutUntil(null);
     showMessage("تم الدخول بنجاح.", "ok");
   }
 
@@ -354,6 +399,7 @@ export default function AuthGate({ children }: AuthGateProps) {
   function closeAdminModal(): void {
     setIsAdminModalOpen(false);
     setAdminPasscode("");
+    triggerRef.current?.focus();
   }
 
   function handleLogoError(event: SyntheticEvent<HTMLImageElement>): void {
@@ -376,56 +422,13 @@ export default function AuthGate({ children }: AuthGateProps) {
 
     return (
       <>
-        <div
-          className={`auth-admin-toolbar${isImpersonating ? " auth-toolbar-preview" : ""}`}
-          dir="rtl"
-        >
-          <div className="auth-toolbar-status">
-            <span className="auth-toolbar-kicker">الوضع الحالي</span>
-            <strong>
-              وضع {getRoleLabel(effectiveRole)}
-              {isImpersonating && <span className="auth-preview-flag">معاينة</span>}
-            </strong>
-          </div>
-
-          <div className="auth-toolbar-preview-panel">
-            {isRealAdmin && (
-              <>
-                <span className="auth-role-switcher-label">معاينة الدور</span>
-                <div className="auth-role-switcher" role="group" aria-label="معاينة الأدوار">
-                  {PREVIEW_ROLE_IDS.map((roleId) => (
-                    <button
-                      key={roleId}
-                      type="button"
-                      className={`auth-role-seg${effectiveRole === roleId ? " active" : ""}`}
-                      onClick={() => changePreviewRole(roleId)}
-                      aria-pressed={effectiveRole === roleId}
-                    >
-                      {getRoleLabel(roleId)}
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-
-          <div className="auth-toolbar-actions">
-            {isRealAdmin && (
-              <button
-                type="button"
-                className="auth-toolbar-help"
-                onClick={toggleFeedbackPanel}
-                aria-label="التواصل والاقتراحات"
-                title="التواصل والاقتراحات"
-              >
-                ?
-              </button>
-            )}
-            <button type="button" className="auth-toolbar-logout" onClick={logout}>
-              تسجيل الخروج
-            </button>
-          </div>
-        </div>
+        <AdminToolbar
+          session={session}
+          previewRole={previewRole}
+          onPreviewRoleChange={changePreviewRole}
+          onLogout={logout}
+          onFeedback={() => window.dispatchEvent(new CustomEvent("feedback:toggle"))}
+        />
 
         {renderAuthenticatedChildren(effectiveSession)}
       </>
@@ -472,7 +475,9 @@ export default function AuthGate({ children }: AuthGateProps) {
                 autoComplete="username"
                 placeholder="أدخل اسم المستخدم"
                 value={selectedUsername}
-                onChange={(event) => setSelectedUsername(event.target.value)}
+                onChange={(event) => {
+                  setSelectedUsername(event.target.value);
+                }}
               />
             </label>
 
@@ -499,12 +504,18 @@ export default function AuthGate({ children }: AuthGateProps) {
               </div>
             </label>
 
-            <button className="auth-submit" type="submit">
-              دخول
+            <button
+              className="auth-submit"
+              type="submit"
+              disabled={lockoutUntil !== null && Date.now() < lockoutUntil}
+            >
+              {lockoutUntil !== null && lockoutSecondsLeft > 0
+                ? `يُرجى الانتظار (${lockoutSecondsLeft}ث)`
+                : "دخول"}
             </button>
 
             <div
-              className={`auth-message ${messageType === "ok" ? "ok" : ""}`}
+              className={`auth-message${messageType ? ` ${messageType}` : ""}`}
               aria-live="polite"
             >
               {message}
@@ -539,6 +550,7 @@ export default function AuthGate({ children }: AuthGateProps) {
             role="dialog"
             aria-modal="true"
             aria-labelledby="adminPasscodeTitle"
+            ref={adminModalRef as RefObject<HTMLElement>}
           >
             <h2 id="adminPasscodeTitle">دخول مسؤول النظام</h2>
 
@@ -547,6 +559,7 @@ export default function AuthGate({ children }: AuthGateProps) {
             <input
               type="password"
               autoFocus
+              aria-label="رمز مسؤول النظام"
               value={adminPasscode}
               onChange={(event) => setAdminPasscode(event.target.value)}
               onKeyDown={handleAdminModalKeyDown}

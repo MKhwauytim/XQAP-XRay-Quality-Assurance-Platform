@@ -30,7 +30,6 @@
 
 .auth-root, .auth-root *, .auth-root *::before, .auth-root *::after,
 .auth-modal-backdrop, .auth-modal-backdrop *, .auth-modal-backdrop *::before, .auth-modal-backdrop *::after,
-.auth-admin-toolbar, .auth-admin-toolbar *, .auth-admin-toolbar *::before, .auth-admin-toolbar *::after,
 .employee-blank-page, .employee-blank-page *, .employee-blank-page *::before, .employee-blank-page *::after {
   box-sizing: border-box;
   font-family: var(--auth-font) !important;
@@ -331,11 +330,15 @@
 
 .auth-message {
   min-height: 24px;
-  color: var(--auth-danger);
+  color: inherit;
   font-size: 13px;
   font-weight: 600;
   line-height: 1.6;
   padding: 2px 0;
+}
+
+.auth-message.bad {
+  color: var(--auth-danger);
 }
 
 .auth-message.ok {
@@ -500,181 +503,6 @@
 
 .auth-admin-modal button:active { transform: translateY(0); }
 
-/* ── Admin Toolbar ─────────────────────────────────────────── */
-
-.auth-admin-toolbar {
-  position: sticky;
-  top: 0;
-  z-index: 1000;
-
-  display: grid;
-  grid-template-columns: minmax(190px, 1fr) auto minmax(190px, 1fr);
-  align-items: center;
-  gap: 16px;
-
-  padding: 7px 24px;
-  min-height: 56px;
-
-  direction: rtl;
-
-  background:
-    linear-gradient(90deg, rgba(0, 154, 222, 0.08), transparent 44%),
-    linear-gradient(90deg, #0F2744 0%, #142D50 100%);
-  color: #FFFFFF;
-
-  box-shadow: 0 2px 12px rgba(8, 15, 26, 0.22);
-}
-
-.auth-toolbar-status,
-.auth-toolbar-preview-panel,
-.auth-toolbar-actions {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-}
-
-.auth-toolbar-status {
-  justify-content: flex-start;
-  gap: 10px;
-}
-
-.auth-toolbar-status strong {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: #FFFFFF;
-  font-size: 14px;
-  font-weight: 800;
-  line-height: 1;
-  white-space: nowrap;
-}
-
-.auth-toolbar-kicker,
-.auth-role-switcher-label {
-  color: rgba(255, 255, 255, 0.62);
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 1;
-  white-space: nowrap;
-}
-
-.auth-toolbar-kicker {
-  padding-inline-start: 10px;
-  border-inline-start: 1px solid rgba(255, 255, 255, 0.18);
-}
-
-.auth-toolbar-preview-panel {
-  justify-content: center;
-  gap: 10px;
-}
-
-.auth-toolbar-actions {
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-.auth-admin-toolbar button {
-  border: 1px solid rgba(255, 255, 255, 0.20);
-  border-radius: 8px;
-  padding: 7px 14px;
-  background: rgba(255, 255, 255, 0.10);
-  color: #FFFFFF;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition:
-    background   140ms ease,
-    border-color 140ms ease;
-}
-
-.auth-admin-toolbar button:hover {
-  background: rgba(255, 255, 255, 0.18);
-  border-color: rgba(255, 255, 255, 0.36);
-}
-
-.auth-admin-toolbar .auth-toolbar-help {
-  width: 36px;
-  height: 36px;
-  padding: 0;
-  border-radius: 50%;
-  font-size: 18px;
-  font-weight: 800;
-  line-height: 1;
-}
-
-.auth-admin-toolbar .auth-toolbar-logout {
-  min-width: 118px;
-}
-
-/* ── Admin role-preview switcher ───────────────────────────── */
-
-/* Pill container — all segments connected into one switch */
-.auth-role-switcher {
-  display: flex;
-  align-items: center;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 999px;
-  padding: 2px;
-  gap: 0;
-}
-
-/* Individual segments — no gap, no individual borders */
-.auth-admin-toolbar button.auth-role-seg {
-  padding: 3px 11px;
-  height: 26px;
-  font-size: 12px;
-  font-weight: 600;
-  border: none;
-  border-radius: 999px;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.75);
-  cursor: pointer;
-  transition:
-    background   160ms cubic-bezier(0.4, 0, 0.2, 1),
-    color        160ms cubic-bezier(0.4, 0, 0.2, 1),
-    box-shadow   160ms cubic-bezier(0.4, 0, 0.2, 1);
-  white-space: nowrap;
-}
-
-.auth-admin-toolbar button.auth-role-seg:hover {
-  background: rgba(255, 255, 255, 0.12);
-  color: #FFFFFF;
-}
-
-/* Active segment — white pill that looks like the sliding thumb */
-.auth-admin-toolbar button.auth-role-seg.active {
-  background: #FFFFFF;
-  color: #0F2744;
-  font-weight: 700;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.20);
-}
-
-/* When impersonating — amber bar + update active segment colour */
-.auth-admin-toolbar.auth-toolbar-preview {
-  background: linear-gradient(90deg, #92400E 0%, #B45309 100%);
-}
-
-.auth-admin-toolbar.auth-toolbar-preview .auth-role-switcher {
-  border-color: rgba(255, 255, 255, 0.22);
-}
-
-.auth-admin-toolbar.auth-toolbar-preview button.auth-role-seg.active {
-  color: #92400E;
-}
-
-.auth-preview-flag {
-  display: inline-flex;
-  align-items: center;
-  min-height: 20px;
-  padding: 3px 8px;
-  border-radius: 999px;
-  background: rgba(253, 230, 138, 0.16);
-  color: #FDE68A;
-  font-weight: 800;
-  font-size: 11px;
-}
-
 /* ── Employee Blank Page ───────────────────────────────────── */
 
 .employee-blank-page {
@@ -688,8 +516,7 @@
 .auth-submit:focus-visible,
 .auth-password-wrap button:focus-visible,
 .auth-footer button:focus-visible,
-.auth-admin-modal button:focus-visible,
-.auth-admin-toolbar button:focus-visible {
+.auth-admin-modal button:focus-visible {
   outline: 3px solid rgba(15, 39, 68, 0.28);
   outline-offset: 3px;
 }
@@ -698,23 +525,6 @@
 
 @media (max-width: 640px) {
   .auth-root { padding: 16px; }
-
-  .auth-admin-toolbar {
-    grid-template-columns: 1fr;
-    gap: 8px;
-    padding: 10px 14px;
-  }
-
-  .auth-toolbar-status,
-  .auth-toolbar-preview-panel,
-  .auth-toolbar-actions {
-    width: 100%;
-    justify-content: space-between;
-  }
-
-  .auth-role-switcher {
-    overflow-x: auto;
-  }
 
   .auth-card {
     width: 100%;

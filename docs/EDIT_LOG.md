@@ -4,6 +4,1030 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v5.16 — 2026-06-24 — Fix: remove lockout reset on username field change
+
+**File:** `src/auth/AuthGate.tsx`
+
+**Before:**
+```tsx
+<input
+  id="authUsername"
+  type="text"
+  required
+  autoComplete="username"
+  placeholder="أدخل اسم المستخدم"
+  value={selectedUsername}
+  onChange={(event) => {
+    setSelectedUsername(event.target.value);
+    setFailedAttempts(0);
+    setLockoutUntil(null);
+  }}
+/>
+```
+
+**After:**
+```tsx
+<input
+  id="authUsername"
+  type="text"
+  required
+  autoComplete="username"
+  placeholder="أدخل اسم المستخدم"
+  value={selectedUsername}
+  onChange={(event) => {
+    setSelectedUsername(event.target.value);
+  }}
+/>
+```
+
+**Reason:** Removed the `setFailedAttempts(0)` and `setLockoutUntil(null)` calls from the username field's `onChange` handler. These calls allowed a locked-out user to bypass the 30-second login throttle by simply typing in the username field, defeating the purpose of the rate-limit entirely. Lockout and attempt counter now only reset on successful login (which already happens in `loginAsEmployee`) or logout (which already happens in the `logout` callback). The password field's `onChange` correctly does not reset them.
+
+---
+
+## v5.15 — 2026-06-24 — Update CLAUDE.md to reflect Tasks 1-13 changes
+
+**File:** `CLAUDE.md`
+
+**Before:**
+```markdown
+   - `JsonEnvelope<TData>` wraps every JSON file: `{ metadata: { schemaVersion, revision, contentHash, ... }, data }`.
+```
+
+**After:**
+```markdown
+   - `JsonEnvelope<TData>` wraps every JSON file: `{ metadata: { schemaVersion, revision, contentHash, writtenAt }, data }`. Schema versioning via `wrap/unwrap/isEnvelope` in `src/data/storage/jsonEnvelope.ts`.
+```
+
+**Changes:**
+- Updated JsonEnvelope description to list exact metadata fields (schemaVersion, revision, contentHash, writtenAt)
+- Added reference to the factory functions in jsonEnvelope.ts
+
+---
+
+**File:** `CLAUDE.md` — Data-layer modules table
+
+**Before:**
+```markdown
+| Preferences | `src/data/preferences/` | Browse preset storage |
+```
+
+**After:**
+```markdown
+| Preferences | `src/data/preferences/` | Browse preset storage |
+| Error logger | `src/data/storage/errorLogger.ts` | In-memory ring buffer (last 50 entries) for silent-catch observability; `logError`, `getRecentErrors`, `clearErrors` |
+| JsonEnvelope | `src/data/storage/jsonEnvelope.ts` | Schema versioning wrapper for all `safeWriteJson` writes; `wrap`, `isEnvelope`, `unwrap` factory functions |
+```
+
+**Changes:**
+- Added Error logger module row (50-entry ring buffer, accessible via getRecentErrors())
+- Added JsonEnvelope module row (schema versioning wrapper with factory functions)
+
+---
+
+**File:** `CLAUDE.md` — Shared UI components table
+
+**Before:**
+```markdown
+| `ErrorBoundary` | `src/components/ErrorBoundary.tsx` | Top-level React error boundary |
+```
+
+**After:**
+```markdown
+| `ErrorBoundary` | `src/components/ErrorBoundary.tsx` | Top-level React error boundary |
+| `AdminToolbar` | `src/auth/AdminToolbar.tsx` | Role-preview segmented switch, logout button, feedback toggle (admin-only) |
+```
+
+**Changes:**
+- Added AdminToolbar component row (extracted role-preview toolbar component)
+
+---
+
+**File:** `CLAUDE.md` — Reporting module description
+
+**Before:**
+```markdown
+| Reporting | `src/data/reporting/` | Self-contained Arabic HTML report builders (sample + distribution) |
+```
+
+**After:**
+```markdown
+| Reporting | `src/data/reporting/` | Self-contained Arabic HTML report builders (sample + distribution + executive) |
+```
+
+**Changes:**
+- Updated to include executive report (added in v4.0, now reflected in docs)
+
+---
+
+## v5.14 — 2026-06-24 — Broaden isEnvelope guard to detect workspace-style string schemaVersion
+
+**File:** `src/data/storage/jsonEnvelope.ts`
+
+**Before:**
+```ts
+export function isEnvelope(value: unknown): value is JsonEnvelope<unknown> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "metadata" in value &&
+    "data" in value &&
+    typeof (value as JsonEnvelope<unknown>).metadata?.schemaVersion === "number"
+  );
+}
+```
+
+**After:**
+```ts
+export function isEnvelope(value: unknown): value is JsonEnvelope<unknown> {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  if (!("metadata" in v) || !("data" in v)) return false;
+  const m = v["metadata"];
+  if (!m || typeof m !== "object") return false;
+  return "schemaVersion" in (m as object);
+}
+```
+
+---
+
+**File:** `src/data/storage/jsonEnvelope.test.ts`
+
+**Before:**
+```ts
+// ended at: increments revision from previous test
+```
+
+**After:**
+```ts
+// added two new tests:
+// - isEnvelope returns true for workspace-style envelope (string schemaVersion)
+// - isEnvelope returns false for object missing metadata.schemaVersion
+```
+
+---
+
+## v5.13 — 2026-06-24 — Add JsonEnvelope schema versioning to safeWriteJson / safeReadJson
+
+**File:** `src/data/storage/jsonEnvelope.ts` *(new file)*
+
+**Before:**
+```ts
+// (file did not exist)
+```
+
+**After:**
+```ts
+// New JsonEnvelope<T> type + wrap/unwrap/isEnvelope factory functions
+// wrap: adds { metadata: { schemaVersion, revision, contentHash, writtenAt }, data }
+// unwrap: returns data from envelope or value as-is for legacy bare files
+```
+
+---
+
+**File:** `src/data/storage/jsonEnvelope.test.ts` *(new file)*
+
+**Before:**
+```ts
+// (file did not exist)
+```
+
+**After:**
+```ts
+// 6 Vitest tests covering wrap, isEnvelope, unwrap (including legacy bare-data path)
+```
+
+---
+
+**File:** `src/data/storage/safeWrite.ts`
+
+**Before:**
+```ts
+const serialized = `${JSON.stringify(value, null, 2)}\n`;
+// ...
+value: JSON.parse(live as string) as T,
+// ...
+value: JSON.parse(bak as string) as T,
+```
+
+**After:**
+```ts
+// isEnvelope guard prevents double-wrapping when callers (e.g. saveWithRevision)
+// already build the envelope manually
+const serialized = `${JSON.stringify(isEnvelope(value) ? value : wrap(value), null, 2)}\n`;
+// ...
+value: unwrap<T>(JSON.parse(live as string)),
+// ...
+value: unwrap<T>(JSON.parse(bak as string)),
+```
+
+---
+
+**File:** `src/data/storage/safeWrite.test.ts`
+
+**Before:**
+```ts
+const bak = JSON.parse(await readRaw(dir, "a.json.bak")) as { v: number };
+const live = JSON.parse(await readRaw(dir, "a.json")) as { v: number };
+expect(bak.v).toBe(1);
+expect(live.v).toBe(2);
+```
+
+**After:**
+```ts
+const bak = JSON.parse(await readRaw(dir, "a.json.bak")) as { data: { v: number } };
+const live = JSON.parse(await readRaw(dir, "a.json")) as { data: { v: number } };
+expect(bak.data.v).toBe(1);
+expect(live.data.v).toBe(2);
+```
+
+---
+
+**File:** `src/data/storage/fileSystemAccess.test.ts`
+
+**Before:**
+```ts
+const live = await readJsonFile<{ a: number }>(dir, "x.json");
+const bak = await readJsonFile<{ a: number }>(dir, "x.json.bak");
+expect(live.ok && live.file.a).toBe(2);
+expect(bak.ok && bak.file.a).toBe(1);
+```
+
+**After:**
+```ts
+const live = await readJsonFile<{ data: { a: number } }>(dir, "x.json");
+const bak = await readJsonFile<{ data: { a: number } }>(dir, "x.json.bak");
+expect(live.ok && live.file.data.a).toBe(2);
+expect(bak.ok && bak.file.data.a).toBe(1);
+```
+
+---
+
+## v5.12 — 2026-06-24 — Surface error log in Settings tab (admin only, collapsible)
+
+**File:** `src/components/Sidebar/Tabs/Settings/ErrorLogSection.tsx` *(new file)*
+
+**Before:**
+```ts
+// (file did not exist)
+```
+
+**After:**
+```tsx
+// New ErrorLogSection component — admin-only collapsible error log viewer
+// Uses getRecentErrors / clearErrors from errorLogger; role-gated via usePermissions
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/Settings/ErrorLogSection.css` *(new file)*
+
+**Before:**
+```css
+/* (file did not exist) */
+```
+
+**After:**
+```css
+/* Styles for ErrorLogSection component */
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/Settings/index.tsx`
+
+**Before:**
+```tsx
+// No import of ErrorLogSection
+// SettingsPage renders only label-customization sections
+```
+
+**After:**
+```tsx
+import { ErrorLogSection } from "./ErrorLogSection";
+// SettingsPage renders ErrorLogSection below label sections (admin-only, collapsible)
+```
+
+---
+
+## v5.11 — 2026-06-24 — Parallelize listMonthSummaries with Promise.allSettled
+
+**File:** `src/data/population/populationStorage.ts`
+
+**Before:**
+```ts
+export async function listMonthSummaries(
+  directoryHandle: DirectoryHandleLike
+): Promise<MonthSummary[]> {
+  const infos = await listMonthFolders(directoryHandle);
+  const results: MonthSummary[] = [];
+
+  let populationDir: DirectoryHandleLike;
+  try {
+    populationDir = await getPopulationRoot(directoryHandle, false);
+  } catch { return []; }
+
+  for (const info of infos) {
+    try {
+      const monthDir = await populationDir.getDirectoryHandle(
+        info.folderName, { create: false }
+      );
+
+      const manifestResult = await safeReadJson<MonthManifestData>(
+        monthDir, "month.manifest.json"
+      );
+      const manifest = manifestResult.ok ? manifestResult.value : null;
+
+      let hasPopulation = false;
+      let totalProcessedRows = manifest?.totalProcessedRows ?? 0;
+      try {
+        const processedDir = await monthDir.getDirectoryHandle("processed", { create: false });
+        const popResult = await safeReadJson<PopulationFinalData>(processedDir, "population.final.json");
+        hasPopulation = popResult.ok;
+        if (popResult.ok) totalProcessedRows = popResult.value.totalRows;
+      } catch { /* directory missing */ }
+
+      let hasSample = false;
+      {
+        const sampleDir = await resolveSampleDir(directoryHandle, info.folderName, monthDir);
+        if (sampleDir) {
+          const sResult = await safeReadJson<SampleMasterData>(sampleDir, "sample.master.json");
+          hasSample = sResult.ok;
+        }
+      }
+
+      let hasDistribution = false;
+      try {
+        const sampleDir = await getSampleMainDir(directoryHandle, info.folderName, false);
+        const dResult = await safeReadJson<DistributionCurrentData>(sampleDir, "distribution.current.json");
+        hasDistribution = dResult.ok;
+      } catch {
+        try {
+          const dResult = await safeReadJson<DistributionCurrentData>(monthDir, "distribution.current.json");
+          hasDistribution = dResult.ok;
+        } catch { /* file missing */ }
+      }
+
+      results.push({ info, manifest, hasPopulation, hasSample, hasDistribution, totalProcessedRows });
+    } catch {
+      // skip inaccessible month folders
+    }
+  }
+
+  // newest first
+  return results.reverse();
+}
+```
+
+**After:**
+```ts
+export async function listMonthSummaries(
+  directoryHandle: DirectoryHandleLike
+): Promise<MonthSummary[]> {
+  const infos = await listMonthFolders(directoryHandle);
+
+  let populationDir: DirectoryHandleLike;
+  try {
+    populationDir = await getPopulationRoot(directoryHandle, false);
+  } catch { return []; }
+
+  const settled = await Promise.allSettled(
+    infos.map(async (info) => {
+      const monthDir = await populationDir.getDirectoryHandle(
+        info.folderName, { create: false }
+      );
+
+      const manifestResult = await safeReadJson<MonthManifestData>(
+        monthDir, "month.manifest.json"
+      );
+      const manifest = manifestResult.ok ? manifestResult.value : null;
+
+      let hasPopulation = false;
+      let totalProcessedRows = manifest?.totalProcessedRows ?? 0;
+      try {
+        const processedDir = await monthDir.getDirectoryHandle("processed", { create: false });
+        const popResult = await safeReadJson<PopulationFinalData>(processedDir, "population.final.json");
+        hasPopulation = popResult.ok;
+        if (popResult.ok) totalProcessedRows = popResult.value.totalRows;
+      } catch { /* directory missing */ }
+
+      let hasSample = false;
+      {
+        const sampleDir = await resolveSampleDir(directoryHandle, info.folderName, monthDir);
+        if (sampleDir) {
+          const sResult = await safeReadJson<SampleMasterData>(sampleDir, "sample.master.json");
+          hasSample = sResult.ok;
+        }
+      }
+
+      let hasDistribution = false;
+      try {
+        const sampleDir = await getSampleMainDir(directoryHandle, info.folderName, false);
+        const dResult = await safeReadJson<DistributionCurrentData>(sampleDir, "distribution.current.json");
+        hasDistribution = dResult.ok;
+      } catch {
+        try {
+          const dResult = await safeReadJson<DistributionCurrentData>(monthDir, "distribution.current.json");
+          hasDistribution = dResult.ok;
+        } catch { /* file missing */ }
+      }
+
+      return { info, manifest, hasPopulation, hasSample, hasDistribution, totalProcessedRows };
+    })
+  );
+
+  const results: MonthSummary[] = settled
+    .filter((r): r is PromiseFulfilledResult<MonthSummary> => r.status === "fulfilled")
+    .map((r) => r.value);
+
+  // newest first
+  return results.reverse();
+}
+```
+
+---
+
+## v5.10 — 2026-06-24 — Add distributionStorage integration tests
+
+**File:** `src/data/distribution/distributionStorage.test.ts`
+
+**Before:**
+```ts
+// (file did not exist)
+```
+
+**After:**
+```ts
+// New test file covering append-to-empty-log, single-event read-back,
+// and multiple sequential appends via appendDistributionEvent + loadDistributionLog
+```
+
+---
+
+## v5.9 — 2026-06-24 — Add React component smoke tests for AuthGate login flow
+
+**File:** `vitest.config.ts`
+
+**Before:**
+```ts
+include: ["src/**/*.test.ts"],
+```
+
+**After:**
+```ts
+include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+```
+
+---
+
+**File:** `src/auth/AuthGate.test.tsx` (created)
+
+**Before:**
+```ts
+// Did not exist
+```
+
+**After:**
+```tsx
+/* @vitest-environment jsdom */
+// Two smoke tests: login form renders, wrong password shows error
+```
+
+---
+
+## v5.8 — 2026-06-24 — Add centralized error logger, wire up key silent catches in populationStorage
+
+**File:** `src/data/storage/errorLogger.ts` (created)
+
+**Before:**
+```ts
+// Did not exist
+```
+
+**After:**
+```ts
+export type ErrorEntry = { context: string; message: string; timestamp: string; };
+const MAX_ENTRIES = 50;
+const entries: ErrorEntry[] = [];
+export function logError(context: string, error: unknown): void { ... }
+export function getRecentErrors(): ErrorEntry[] { return entries.slice(); }
+export function clearErrors(): void { entries.length = 0; }
+```
+
+---
+
+**File:** `src/data/storage/errorLogger.test.ts` (created)
+
+**Before:**
+```ts
+// Did not exist
+```
+
+**After:**
+```ts
+// Three Vitest tests: stores logged errors, caps at 50 entries, clearErrors empties the log
+```
+
+---
+
+**File:** `src/data/population/populationStorage.ts`
+
+**Before:**
+```ts
+import { safeWriteJson, safeReadJson } from "../storage/safeWrite";
+// ...
+  } catch { /* skip if FS API unavailable */ }
+// ...
+  } catch {
+    return [];
+  }
+// ...
+    } catch { /* skip inaccessible */ }
+```
+
+**After:**
+```ts
+import { safeWriteJson, safeReadJson } from "../storage/safeWrite";
+import { logError } from "../storage/errorLogger";
+// ...
+  } catch (error) {
+    logError("saveBinaryFile", error);
+  }
+// ...
+  } catch (error) {
+    logError("listMonthFolders", error);
+    return [];
+  }
+// ...
+    } catch (error) {
+      logError("loadAllPopulationRows", error);
+    }
+```
+
+---
+
+## v5.7 — 2026-06-24 — Extract AdminToolbar component from AuthGate
+
+**File:** `src/auth/AdminToolbar.tsx` (created)
+
+**Before:**
+```tsx
+// Did not exist
+```
+
+**After:**
+```tsx
+// New standalone component receiving session, previewRole, onPreviewRoleChange, onLogout, onFeedback props
+// Contains PREVIEW_ROLE_IDS, getRoleLabel, and all toolbar JSX
+export function AdminToolbar({ session, previewRole, onPreviewRoleChange, onLogout, onFeedback }: AdminToolbarProps) { ... }
+```
+
+---
+
+**File:** `src/auth/AdminToolbar.css` (created)
+
+**Before:**
+```css
+/* Did not exist */
+```
+
+**After:**
+```css
+/* Toolbar-specific CSS rules moved from AuthGate.css:
+   .auth-admin-toolbar, .auth-toolbar-*, .auth-role-*, .auth-preview-* */
+```
+
+---
+
+**File:** `src/auth/AuthGate.tsx`
+
+**Before:**
+```tsx
+const PREVIEW_ROLE_IDS: AuthRole[] = ["admin", "manager", "supervisor", "employee", "guest"];
+function getRoleLabel(role: AuthRole): string { ... }
+function toggleFeedbackPanel(): void { window.dispatchEvent(new CustomEvent("feedback:toggle")); }
+// ... toolbar JSX inline in authenticated branch (~55 lines)
+```
+
+**After:**
+```tsx
+import { AdminToolbar } from "./AdminToolbar";
+// PREVIEW_ROLE_IDS, getRoleLabel, toggleFeedbackPanel removed
+// Toolbar JSX replaced with:
+<AdminToolbar session={session} previewRole={previewRole} onPreviewRoleChange={changePreviewRole} onLogout={logout} onFeedback={() => window.dispatchEvent(new CustomEvent("feedback:toggle"))} />
+```
+
+---
+
+**File:** `src/auth/AuthGate.css`
+
+**Before:**
+```css
+/* ~170 lines of toolbar rules: .auth-admin-toolbar, .auth-toolbar-*, .auth-role-*, .auth-preview-* */
+```
+
+**After:**
+```css
+/* Toolbar rules removed — now live in AdminToolbar.css */
+```
+
+---
+
+## v5.6 — 2026-06-24 — Extract resolveSampleDir helper, deduplicate dual-path fallback
+
+**File:** `src/data/population/populationStorage.ts`
+
+**Before:**
+```ts
+// Three inline try/catch dual-path blocks like:
+try {
+  const sampleDir = await getSampleMainDir(directoryHandle, info.folderName, false);
+  // ... use sampleDir
+} catch {
+  try {
+    const sampleDir = await monthDir.getDirectoryHandle("sample", { create: false });
+    // ... use sampleDir
+  } catch { /* directory missing */ }
+}
+```
+
+**After:**
+```ts
+// Single private helper:
+async function resolveSampleDir(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  monthDir: DirectoryHandleLike
+): Promise<DirectoryHandleLike | null> {
+  try {
+    return await getSampleMainDir(directoryHandle, monthFolderName, false);
+  } catch {
+    try {
+      return await monthDir.getDirectoryHandle("sample", { create: false });
+    } catch {
+      return null;
+    }
+  }
+}
+// All three call-sites replaced with: const sampleDir = await resolveSampleDir(...); if (!sampleDir) ...
+```
+
+**File:** `src/data/population/populationStorage.test.ts`
+
+**Before:**
+```ts
+// No test for legacy sample path fallback
+```
+
+**After:**
+```ts
+// Added: "loadAllSampleRows falls back to legacy sample path when getSampleMainDir throws"
+```
+
+---
+
+## v5.5 — 2026-06-24 — Move App.tsx inline styles to CSS classes
+
+**File:** `src/App.css`
+
+**Before:**
+```css
+/* (no .app-bak-warning, .app-bak-warning-close, .app-no-tabs classes) */
+```
+
+**After:**
+```css
+.app-bak-warning {
+  position: fixed;
+  top: 0;
+  inset-inline: 0;
+  z-index: 9999;
+  background: #fef3c7;
+  border-bottom: 1px solid #f59e0b;
+  padding: 10px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  color: #92400e;
+  direction: rtl;
+}
+
+.app-bak-warning-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 20px;
+  color: #92400e;
+  line-height: 1;
+  padding: 0 4px;
+}
+
+.app-no-tabs {
+  min-height: calc(100vh - 44px);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  color: #475467;
+  text-align: center;
+}
+
+.app-no-tabs h1 {
+  margin: 0 0 10px;
+  color: #17365d;
+  font-size: 24px;
+}
+
+.app-no-tabs p {
+  margin: 0;
+  line-height: 1.8;
+}
+```
+
+**File:** `src/App.tsx`
+
+**Before:**
+```tsx
+{bakWarning && (
+  <div
+    style={{
+      position: "fixed",
+      top: 0,
+      insetInline: 0,
+      zIndex: 9999,
+      background: "#fef3c7",
+      borderBottom: "1px solid #f59e0b",
+      padding: "10px 16px",
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      fontSize: 13,
+      color: "#92400e",
+      direction: "rtl",
+    }}
+  >
+    <span>⚠️ {bakWarning}</span>
+    <button
+      onClick={() => setBakWarning(null)}
+      style={{
+        background: "none",
+        border: "none",
+        cursor: "pointer",
+        fontSize: 20,
+        color: "#92400e",
+        lineHeight: 1,
+        padding: "0 4px",
+      }}
+      aria-label="إغلاق"
+    >
+      ×
+    </button>
+  </div>
+)}
+
+// …
+
+function NoAvailableTabs({ role }: { role: AuthSession["role"] }) {
+  return (
+    <div className="tab-blank" dir="rtl">
+      <div
+        style={{
+          minHeight: "calc(100vh - 44px)",
+          display: "grid",
+          placeItems: "center",
+          padding: "24px",
+          color: "#475467",
+          textAlign: "center"
+        }}
+      >
+        <div>
+          <h1
+            style={{
+              margin: "0 0 10px",
+              color: "#17365d",
+              fontSize: "24px"
+            }}
+          >
+            لا توجد تبويبات متاحة
+          </h1>
+
+          <p style={{ margin: 0, lineHeight: 1.8 }}>
+            لا توجد صفحات مفعلة لهذا الدور حالياً: <strong>{role}</strong>
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+**After:**
+```tsx
+{bakWarning && (
+  <div className="app-bak-warning">
+    <span>⚠️ {bakWarning}</span>
+    <button
+      onClick={() => setBakWarning(null)}
+      className="app-bak-warning-close"
+      aria-label="إغلاق"
+    >
+      ×
+    </button>
+  </div>
+)}
+
+// …
+
+function NoAvailableTabs({ role }: { role: AuthSession["role"] }) {
+  return (
+    <div className="tab-blank" dir="rtl">
+      <div className="app-no-tabs">
+        <div>
+          <h1>لا توجد تبويبات متاحة</h1>
+          <p>لا توجد صفحات مفعلة لهذا الدور حالياً: <strong>{role}</strong></p>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## v5.4 — 2026-06-24 — Add keyboard focus trap to admin passcode modal
+
+**File:** `src/auth/AuthGate.tsx`
+
+**Before:**
+```tsx
+// No focus trap refs or effects existed.
+// closeAdminModal() did not restore focus.
+// setIsAdminModalOpen(true) call did not capture trigger element.
+// <section className="auth-admin-modal"> had no ref.
+
+function closeAdminModal(): void {
+  setIsAdminModalOpen(false);
+  setAdminPasscode("");
+}
+
+// In handleHiddenAdminShortcut:
+setIsAdminModalOpen(true);
+
+// <section className="auth-admin-modal" ...>
+```
+
+**After:**
+```tsx
+// Added refs:
+const adminModalRef = useRef<HTMLElement | null>(null);
+const triggerRef = useRef<HTMLElement | null>(null);
+
+// Added focus-trap useEffect (activates when isAdminModalOpen === true).
+// closeAdminModal() now restores focus via triggerRef.current?.focus().
+// handleHiddenAdminShortcut captures document.activeElement into triggerRef before opening.
+// <section className="auth-admin-modal" ref={adminModalRef as React.RefObject<HTMLElement>}>
+```
+
+---
+
+## v5.3 — 2026-06-24 — Add 3-attempt login lockout with 30-second countdown
+
+**File:** `src/auth/AuthGate.tsx`
+
+**Before:**
+```tsx
+// No rate-limiting state or lockout logic existed.
+// Submit button:
+<button className="auth-submit" type="submit">
+  دخول
+</button>
+
+// loginAsEmployee: wrong-password error shown immediately with no throttle.
+showMessage("كلمة المرور غير صحيحة.", "bad");
+
+// logout callback: only cleared session/UI state.
+// setSelectedUsername onChange: only called setSelectedUsername.
+```
+
+**After:**
+```tsx
+// Added state:
+const [failedAttempts, setFailedAttempts] = useState(0);
+const [lockoutUntil, setLockoutUntil] = useState<number | null>(null);
+const [lockoutSecondsLeft, setLockoutSecondsLeft] = useState(0);
+const LOCKOUT_AFTER_ATTEMPTS = 3;
+const LOCKOUT_DURATION_MS = 30_000;
+
+// Added countdown effect (clears interval on unmount).
+// loginAsEmployee: early-returns during active lockout; increments failedAttempts;
+//   triggers lockout after LOCKOUT_AFTER_ATTEMPTS failures; resets on success.
+// Submit button: disabled during lockout; shows countdown label in Arabic.
+// setSelectedUsername onChange: also resets failedAttempts + lockoutUntil.
+// logout callback: also resets failedAttempts + lockoutUntil.
+```
+
+---
+
+## v5.2 — 2026-06-24 — Add aria-label to admin passcode input, fix auth-message bad-class binding
+
+**File:** `src/auth/AuthGate.tsx`
+
+**Before:**
+```tsx
+// Admin passcode input (line 547):
+<input
+  type="password"
+  autoFocus
+  value={adminPasscode}
+  onChange={(event) => setAdminPasscode(event.target.value)}
+  onKeyDown={handleAdminModalKeyDown}
+  placeholder="رمز مسؤول النظام"
+/>
+
+// Employee login message (line 506):
+<div
+  className={`auth-message ${messageType === "ok" ? "ok" : ""}`}
+  aria-live="polite"
+>
+  {message}
+</div>
+```
+
+**After:**
+```tsx
+// Admin passcode input with aria-label for screen readers:
+<input
+  type="password"
+  autoFocus
+  aria-label="رمز مسؤول النظام"
+  value={adminPasscode}
+  onChange={(event) => setAdminPasscode(event.target.value)}
+  onKeyDown={handleAdminModalKeyDown}
+  placeholder="رمز مسؤول النظام"
+/>
+
+// Message div now applies both "ok" and "bad" classes correctly:
+<div
+  className={`auth-message${messageType ? ` ${messageType}` : ""}`}
+  aria-live="polite"
+>
+  {message}
+</div>
+```
+
+**File:** `src/auth/AuthGate.css`
+
+**Before:**
+```css
+.auth-message {
+  min-height: 24px;
+  color: var(--auth-danger);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.6;
+  padding: 2px 0;
+}
+
+.auth-message.ok {
+  color: var(--auth-success);
+}
+```
+
+**After:**
+```css
+.auth-message {
+  min-height: 24px;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.6;
+  padding: 2px 0;
+}
+
+.auth-message.bad {
+  color: var(--auth-danger);
+}
+
+.auth-message.ok {
+  color: var(--auth-success);
+}
+```
+
+---
+
+## v5.1 — 2026-06-24 — Remove dead SESSION_KEY constant
+
+**File:** `src/auth/authConfig.ts`
+
+**Before:**
+```ts
+export const SESSION_KEY = "xray_local_login_session_v1";
+```
+
+**After:**
+*(line removed)*
+
+---
+
 ## v5.0 — 2026-06-24 — Workspace path restructuring, runtime-only auth session, samples mirror module
 
 **Summary:** Major architectural refactor across 39 files covering:

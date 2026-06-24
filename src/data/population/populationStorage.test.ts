@@ -1,9 +1,10 @@
-import { expect, test } from "vitest";
+import { expect, it, test } from "vitest";
 
 import { createMemoryDirectory } from "../storage/memoryDirectory";
-import { safeReadJson } from "../storage/safeWrite";
-import { saveMonthRun } from "./populationStorage";
+import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { saveMonthRun, loadAllSampleRows } from "./populationStorage";
 import type { MonthManifestData, MonthRawData, PopulationFinalData } from "./monthTypes";
+import type { SampleMasterData } from "../sampling/sampleTypes";
 
 const baseParams = {
   month: 5,
@@ -88,4 +89,56 @@ test("saveMonthRun does not write bi.raw.json when no BI rows", async () => {
   const biRaw = await safeReadJson(rawDir, "bi.raw.json");
   expect(biRaw.ok).toBe(false);
   expect((biRaw as { reason: string }).reason).toBe("missing");
+});
+
+it("loadAllSampleRows falls back to legacy sample path when getSampleMainDir throws", async () => {
+  // Arrange: create legacy directory structure (1-Population/{month}/sample/sample.master.json)
+  // but no 2-Samples folder — so getSampleMainDir will throw
+  const root = createMemoryDirectory("root");
+
+  // Build: 1-Population/5-May-2026/month.manifest.json
+  const populationDir = await root.getDirectoryHandle("1-Population", { create: true });
+  const monthDir = await populationDir.getDirectoryHandle("5-May-2026", { create: true });
+
+  // Write a minimal manifest so listMonthFolders picks it up
+  await safeWriteJson(monthDir, "month.manifest.json", {
+    monthFolderName: "5-May-2026",
+    month: 5,
+    year: 2026,
+    runnedAt: new Date().toISOString(),
+    runnedBy: "test",
+    riskFileName: null,
+    biFileName: null,
+    certScanUsed: false,
+    templateVersion: null,
+    rngSeed: null,
+    totalRawRows: 0,
+    totalProcessedRows: 1,
+    status: "processed-saved",
+  });
+
+  // Write sample data in legacy location: 1-Population/5-May-2026/sample/sample.master.json
+  const sampleDir = await monthDir.getDirectoryHandle("sample", { create: true });
+  const sampleData: Partial<SampleMasterData> = {
+    rngSeed: "test-seed",
+    totalRequested: 1,
+    totalActual: 1,
+    certScanRequested: 0,
+    nonCertScanRequested: 1,
+    certScanActual: 0,
+    nonCertScanActual: 1,
+    portAllocations: [],
+    stageAllocations: [],
+    drawnAt: new Date().toISOString(),
+    drawnBy: "test",
+    rows: [{ xrayImageId: "LEGACY001" } as never],
+  };
+  await safeWriteJson(sampleDir, "sample.master.json", sampleData);
+
+  // Act: loadAllSampleRows should find rows via legacy path
+  const rows = await loadAllSampleRows(root as never);
+
+  // Assert
+  expect(rows.length).toBeGreaterThan(0);
+  expect(rows[0].xrayImageId).toBe("LEGACY001");
 });

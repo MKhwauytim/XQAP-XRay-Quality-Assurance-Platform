@@ -48,10 +48,11 @@ function makeDirectoryHandle(
   name: string,
   node: MemoryNode
 ): DirectoryHandleLike {
-  return {
-    kind: "directory",
+  // Build with extra `values` for in-memory iteration support, then cast
+  const handle = {
+    kind: "directory" as const,
     name,
-    getFileHandle: async (fileName, options) => {
+    getFileHandle: async (fileName: string, options?: { create?: boolean }) => {
       if (!node.files.has(fileName)) {
         if (!options?.create) {
           throw notFound(fileName);
@@ -60,7 +61,7 @@ function makeDirectoryHandle(
       }
       return makeFileHandle(fileName, node);
     },
-    getDirectoryHandle: async (dirName, options) => {
+    getDirectoryHandle: async (dirName: string, options?: { create?: boolean }) => {
       let child = node.dirs.get(dirName);
       if (!child) {
         if (!options?.create) {
@@ -71,9 +72,18 @@ function makeDirectoryHandle(
       }
       return makeDirectoryHandle(dirName, child);
     },
-    queryPermission: async () => "granted",
-    requestPermission: async () => "granted"
+    queryPermission: async () => "granted" as const,
+    requestPermission: async () => "granted" as const,
+    values: async function* () {
+      for (const [fileName] of node.files) {
+        yield { name: fileName, kind: "file" as const };
+      }
+      for (const [dirName] of node.dirs) {
+        yield { name: dirName, kind: "directory" as const };
+      }
+    }
   };
+  return handle as DirectoryHandleLike;
 }
 
 export function createMemoryDirectory(name = "root"): DirectoryHandleLike {
