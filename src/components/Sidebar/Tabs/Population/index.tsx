@@ -10,6 +10,7 @@ import {
   type DragEvent
 } from "react";
 import * as XLSX from "xlsx";
+import { Settings2 } from "lucide-react";
 
 import type { SidebarTabModule } from "../tabTypes";
 
@@ -2448,7 +2449,7 @@ function BrowseDataView({
                 className="bv-col-picker-btn"
                 onClick={() => setColPickerOpen((o) => !o)}
               >
-                ⚙ الأعمدة ({visibleCols.size})
+                <Settings2 size={14} style={{ verticalAlign: "middle", marginInlineEnd: 4 }} /> الأعمدة ({visibleCols.size})
               </button>
               {colPickerOpen && (
                 <div className="bv-col-picker-dropdown">

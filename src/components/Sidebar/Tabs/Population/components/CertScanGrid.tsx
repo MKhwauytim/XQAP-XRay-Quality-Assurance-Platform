@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { ClipboardList } from "lucide-react";
 
 type HighlightType = "port" | "sn" | null;
 
@@ -216,7 +217,7 @@ export default function CertScanGrid({ initialText, onDataChange }: CertScanGrid
             applyPaste(e.clipboardData.getData("text"));
           }}
         >
-          <div className="certscan-drop-icon">📋</div>
+          <div className="certscan-drop-icon"><ClipboardList size={32} /></div>
           <p className="certscan-drop-title">انقر هنا ثم الصق (Ctrl+V)</p>
           <p className="certscan-drop-sub">
             بيانات CertScan مباشرة من Excel — سيتم اكتشاف الأعمدة تلقائياً

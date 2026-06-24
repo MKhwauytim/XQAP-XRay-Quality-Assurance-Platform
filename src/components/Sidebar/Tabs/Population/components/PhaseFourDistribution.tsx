@@ -1,4 +1,5 @@
 import { getManagedLoginUsers } from "../../../../../auth/userManagement";
+import { AlertTriangle, CheckCircle2, Settings2, XCircle, FilePen } from "lucide-react";
 import type { SampleMasterData } from "../../../../../data/sampling/sampleTypes";
 import type { DistributionCurrentData } from "../../../../../data/distribution/distributionTypes";
 import type { PopulationConfig, EmployeeStageAllocation } from "../../../../../data/population/populationConfig";
@@ -215,7 +216,7 @@ export default function PhaseFourDistribution({
           aria-selected={activeTab === "bulk"}
           onClick={() => setActiveTab("bulk")}
         >
-          ⚙️ التوزيع الجماعي الذكي
+          <Settings2 size={15} style={{ verticalAlign: "middle", marginInlineEnd: 5 }} /> التوزيع الجماعي الذكي
         </button>
         <button
           role="tab"
@@ -224,7 +225,7 @@ export default function PhaseFourDistribution({
           aria-selected={activeTab === "manual"}
           onClick={() => setActiveTab("manual")}
         >
-          📝 المراجعة اليدوية
+          <FilePen size={15} style={{ verticalAlign: "middle", marginInlineEnd: 5 }} /> المراجعة اليدوية
         </button>
       </div>
 
@@ -315,9 +316,9 @@ export default function PhaseFourDistribution({
 
                     <span>
                       {emp.hasCertScanLicense ? (
-                        <span className="report-status ok">✅ مرخص</span>
+                        <span className="report-status ok"><CheckCircle2 size={13} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> مرخص</span>
                       ) : (
-                        <span className="report-status muted">❌ غير مرخص</span>
+                        <span className="report-status muted"><XCircle size={13} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> غير مرخص</span>
                       )}
                     </span>
                   </div>
@@ -353,7 +354,7 @@ export default function PhaseFourDistribution({
 
               {previewData.errors.length > 0 && (
                 <div className="dist-err-block" role="alert">
-                  ⚠️ {previewData.errors.join(" | ")}
+                  <AlertTriangle size={14} style={{ verticalAlign: "middle", marginInlineEnd: 5 }} /> {previewData.errors.join(" | ")}
                 </div>
               )}
             </div>

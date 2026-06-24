@@ -3,6 +3,7 @@ import type { BiWorkbookResult } from "../biData/biDataTypes";
 import type { PopulationProcessingResult } from "../processing/populationProcessingTypes";
 import DataAccuracyReport from "./DataAccuracyReport";
 import PopulationProcessingReport from "./PopulationProcessingReport";
+import { AlertTriangle, FolderOpen } from "lucide-react";
 import CertScanGrid from "./CertScanGrid";
 
 const ARABIC_MONTHS = [
@@ -121,13 +122,15 @@ export default function PhaseTwoReportAndProcessing({
         </div>
 
         {loadedFromDisk ? (
-          <div className="dar-disk-banner">
-            📂 تم تحميل هذا الشهر من القرص — البيانات الأصلية غير متاحة في الجلسة الحالية.
-            لعرض تقرير دقة البيانات، ارفع ملفَي وكالة المخاطر و BI من المرحلة الأولى.
+          <div className="dar-disk-banner" style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+            <FolderOpen size={16} style={{ flexShrink: 0, marginTop: 2 }} />
+            <span>تم تحميل هذا الشهر من القرص — البيانات الأصلية غير متاحة في الجلسة الحالية.
+            لعرض تقرير دقة البيانات، ارفع ملفَي وكالة المخاطر و BI من المرحلة الأولى.</span>
           </div>
         ) : !hasBi ? (
-          <div className="dar-no-bi">
-            ⚠️ لم يتم رفع ملف BI — مقارنة الدقة غير متاحة. رفع ملف BI في المرحلة الأولى يتيح تقرير الدقة الكامل.
+          <div className="dar-no-bi" style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+            <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 2 }} />
+            <span>لم يتم رفع ملف BI — مقارنة الدقة غير متاحة. رفع ملف BI في المرحلة الأولى يتيح تقرير الدقة الكامل.</span>
           </div>
         ) : (
           <DataAccuracyReport

@@ -1,5 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useEffect, useState, type ReactNode } from "react";
+import { AlertTriangle, BarChart2, Building2, ClipboardList, Download, FolderKanban, Settings2, User, Users } from "lucide-react";
 
 import type { SidebarTabModule } from "../tabTypes";
 import { loadOrDeriveDistributionCurrent } from "../../../../data/distribution/distributionStorage";
@@ -242,7 +243,7 @@ export default function ReportsTab() {
       {/* ── Toast ───────────────────────────────────── */}
       {toast && (
         <div className={`rh-toast rh-toast-${toast.type}`} role="status">
-          <span>{toast.type === "ok" ? "✓" : "⚠"}</span>
+          <span>{toast.type === "ok" ? "✓" : <AlertTriangle size={14} style={{ verticalAlign: "middle" }} />}</span>
           {toast.text}
           <button className="rh-toast-close" onClick={() => setToast(null)}>×</button>
         </div>
@@ -301,7 +302,7 @@ export default function ReportsTab() {
           <div className="rh-card-accent rh-acc-teal" />
           <div className="rh-card-body">
             <div className="rh-card-top">
-              <div className="rh-icon rh-icon-teal">📊</div>
+              <div className="rh-icon rh-icon-teal"><BarChart2 size={22} /></div>
               <span className="rh-badge rh-badge-main">الرئيسي</span>
             </div>
             <div className="rh-card-title">التقرير التنفيذي</div>
@@ -310,10 +311,10 @@ export default function ReportsTab() {
               مقارنة المستويين، والقرارات التنفيذية. مُصمَّم للمشاركة مع الإدارة.
             </p>
             <div className="rh-tags">
-              <span className="rh-tag">🗂 5 شرائح</span>
+              <span className="rh-tag"><FolderKanban size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> 5 شرائح</span>
               <span className="rh-tag">◈ كل المنافذ</span>
               <span className="rh-tag">🖨 PDF</span>
-              <span className="rh-tag">📥 XLSX</span>
+              <span className="rh-tag"><Download size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> XLSX</span>
             </div>
           </div>
           <div className="rh-card-footer">
@@ -336,8 +337,8 @@ export default function ReportsTab() {
             <div className="rh-tags">
               <span className="rh-tag">⊙ Risk + BI</span>
               <span className="rh-tag">◎ كل المنافذ</span>
-              <span className="rh-tag">📋 مراحل</span>
-              <span className="rh-tag">📥 XLSX</span>
+              <span className="rh-tag"><ClipboardList size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> مراحل</span>
+              <span className="rh-tag"><Download size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> XLSX</span>
             </div>
           </div>
           <div className="rh-card-footer">
@@ -350,7 +351,7 @@ export default function ReportsTab() {
           <div className="rh-card-accent rh-acc-navy" />
           <div className="rh-card-body">
             <div className="rh-card-top">
-              <div className="rh-icon rh-icon-navy">👥</div>
+              <div className="rh-icon rh-icon-navy"><Users size={22} /></div>
               <span className="rh-badge rh-badge-ready">جاهز</span>
             </div>
             <div className="rh-card-title">تقرير التوزيع</div>
@@ -358,9 +359,9 @@ export default function ReportsTab() {
               حالة التوزيع لكل موظف مع تفاصيل كل صف — قيد الانتظار، مكتمل، مستبدل. يُستخدم لمتابعة سير العمل اليومي.
             </p>
             <div className="rh-tags">
-              <span className="rh-tag">👤 حسب الموظف</span>
+              <span className="rh-tag"><User size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> حسب الموظف</span>
               <span className="rh-tag">⟳ أحداث اللوج</span>
-              <span className="rh-tag">📥 XLSX</span>
+              <span className="rh-tag"><Download size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> XLSX</span>
             </div>
           </div>
           <div className="rh-card-footer">
@@ -373,7 +374,7 @@ export default function ReportsTab() {
           <div className="rh-card-accent rh-acc-purple" />
           <div className="rh-card-body">
             <div className="rh-card-top">
-              <div className="rh-icon rh-icon-purple">🏢</div>
+              <div className="rh-icon rh-icon-purple"><Building2 size={22} /></div>
               <span className="rh-badge rh-badge-soon">قريباً</span>
             </div>
             <div className="rh-card-title">تقرير الإدارة</div>
@@ -381,8 +382,8 @@ export default function ReportsTab() {
               نظرة شاملة قابلة للتخصيص حسب الموظف — الإنجاز الفردي، الدقة، الاشتباه الفائت، والمقارنة بين الموظفين.
             </p>
             <div className="rh-tags">
-              <span className="rh-tag">⚙ قابل للتخصيص</span>
-              <span className="rh-tag">👤 فردي / كلي</span>
+              <span className="rh-tag"><Settings2 size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> قابل للتخصيص</span>
+              <span className="rh-tag"><User size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> فردي / كلي</span>
             </div>
           </div>
           <div className="rh-card-footer">
@@ -399,7 +400,7 @@ export default function ReportsTab() {
           <div className="rh-card-accent" style={{ background: "#e8eff8" }} />
           <div className="rh-card-body">
             <div className="rh-card-top">
-              <div className="rh-icon rh-icon-muted">📥</div>
+              <div className="rh-icon rh-icon-muted"><Download size={22} /></div>
               <span className="rh-badge rh-badge-muted">تصديرات</span>
             </div>
             <div className="rh-card-title" style={{ color: "#8390a2" }}>تصدير Excel / CSV</div>
@@ -426,7 +427,7 @@ export default function ReportsTab() {
             disabled={busy || !selectedMonth}
             onClick={() => { void generate("executive"); }}
           >
-            <span>📊</span> التقرير التنفيذي
+            <BarChart2 size={16} style={{ verticalAlign: "middle", marginInlineEnd: 5 }} /> التقرير التنفيذي
           </button>
           <button
             className="rh-quick-btn"
@@ -440,7 +441,7 @@ export default function ReportsTab() {
             disabled={busy || !selectedMonth}
             onClick={() => { void generate("distribution"); }}
           >
-            <span>👥</span> تقرير التوزيع
+            <Users size={16} style={{ verticalAlign: "middle", marginInlineEnd: 5 }} /> تقرير التوزيع
           </button>
         </div>
       </div>

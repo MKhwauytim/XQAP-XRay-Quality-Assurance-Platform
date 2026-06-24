@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { AlertTriangle } from "lucide-react";
 
 import AuthGate from "./auth/AuthGate";
 import type { AuthSession } from "./auth/authTypes";
@@ -157,7 +158,7 @@ function AppContent({ session }: AppContentProps) {
     >
       {bakWarning && (
         <div className="app-bak-warning">
-          <span>⚠️ {bakWarning}</span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><AlertTriangle size={16} /> {bakWarning}</span>
           <button
             onClick={() => setBakWarning(null)}
             className="app-bak-warning-close"

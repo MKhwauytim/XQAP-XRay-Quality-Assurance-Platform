@@ -21,7 +21,7 @@ export const DEFAULT_LABELS = {
   dt_search_placeholder:     "بحث في جميع الأعمدة...",
   dt_clear_filters:          "مسح التصفية",
   dt_export_xlsx:            "تصدير XLSX",
-  dt_columns_button:         "⚙ الأعمدة",
+  dt_columns_button:         "الأعمدة",
   dt_columns_title:          "الأعمدة",
   dt_columns_hint:           "اسحب للترتيب · انقر لإخفاء/إظهار",
   dt_reset_default:          "إعادة الافتراضي",
