@@ -4,6 +4,42 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v5.4 — 2026-06-24 — Add keyboard focus trap to admin passcode modal
+
+**File:** `src/auth/AuthGate.tsx`
+
+**Before:**
+```tsx
+// No focus trap refs or effects existed.
+// closeAdminModal() did not restore focus.
+// setIsAdminModalOpen(true) call did not capture trigger element.
+// <section className="auth-admin-modal"> had no ref.
+
+function closeAdminModal(): void {
+  setIsAdminModalOpen(false);
+  setAdminPasscode("");
+}
+
+// In handleHiddenAdminShortcut:
+setIsAdminModalOpen(true);
+
+// <section className="auth-admin-modal" ...>
+```
+
+**After:**
+```tsx
+// Added refs:
+const adminModalRef = useRef<HTMLElement | null>(null);
+const triggerRef = useRef<HTMLElement | null>(null);
+
+// Added focus-trap useEffect (activates when isAdminModalOpen === true).
+// closeAdminModal() now restores focus via triggerRef.current?.focus().
+// handleHiddenAdminShortcut captures document.activeElement into triggerRef before opening.
+// <section className="auth-admin-modal" ref={adminModalRef as React.RefObject<HTMLElement>}>
+```
+
+---
+
 ## v5.3 — 2026-06-24 — Add 3-attempt login lockout with 30-second countdown
 
 **File:** `src/auth/AuthGate.tsx`

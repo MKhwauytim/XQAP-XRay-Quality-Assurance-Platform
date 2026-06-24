@@ -6,6 +6,7 @@ import {
   type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
+  type RefObject,
   type SyntheticEvent
 } from "react";
 
@@ -154,6 +155,9 @@ export default function AuthGate({ children }: AuthGateProps) {
   const altSequenceRef = useRef<string[]>([]);
   const altSequenceTimerRef = useRef<number | null>(null);
 
+  const adminModalRef = useRef<HTMLElement | null>(null);
+  const triggerRef = useRef<HTMLElement | null>(null);
+
   // Derive whether there are any active users (to decide which form to show)
   const hasConfiguredUsers = managedUsers.some((user) => user.isActive);
 
@@ -199,6 +203,34 @@ export default function AuthGate({ children }: AuthGateProps) {
     const id = window.setInterval(tick, 500);
     return () => window.clearInterval(id);
   }, [lockoutUntil]);
+
+  useEffect(() => {
+    if (!isAdminModalOpen || !adminModalRef.current) return;
+    const modal = adminModalRef.current;
+    const focusable = modal.querySelectorAll<HTMLElement>(
+      'input, button, [tabindex]:not([tabindex="-1"])'
+    );
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key !== "Tab") return;
+      if (e.shiftKey) {
+        if (document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else {
+        if (document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    }
+
+    modal.addEventListener("keydown", handleKeyDown);
+    return () => modal.removeEventListener("keydown", handleKeyDown);
+  }, [isAdminModalOpen]);
 
   const logout = useCallback((): void => {
     clearSession();
@@ -259,6 +291,7 @@ export default function AuthGate({ children }: AuthGateProps) {
           window.clearTimeout(altSequenceTimerRef.current);
         }
 
+        triggerRef.current = document.activeElement as HTMLElement | null;
         setAdminPasscode("");
         setMessage("");
         setMessageType("");
@@ -393,6 +426,7 @@ export default function AuthGate({ children }: AuthGateProps) {
   function closeAdminModal(): void {
     setIsAdminModalOpen(false);
     setAdminPasscode("");
+    triggerRef.current?.focus();
   }
 
   function handleLogoError(event: SyntheticEvent<HTMLImageElement>): void {
@@ -588,6 +622,7 @@ export default function AuthGate({ children }: AuthGateProps) {
             role="dialog"
             aria-modal="true"
             aria-labelledby="adminPasscodeTitle"
+            ref={adminModalRef as RefObject<HTMLElement>}
           >
             <h2 id="adminPasscodeTitle">دخول مسؤول النظام</h2>
 
