@@ -315,15 +315,14 @@ export async function listMonthSummaries(
   directoryHandle: DirectoryHandleLike
 ): Promise<MonthSummary[]> {
   const infos = await listMonthFolders(directoryHandle);
-  const results: MonthSummary[] = [];
 
   let populationDir: DirectoryHandleLike;
   try {
     populationDir = await getPopulationRoot(directoryHandle, false);
   } catch { return []; }
 
-  for (const info of infos) {
-    try {
+  const settled = await Promise.allSettled(
+    infos.map(async (info) => {
       const monthDir = await populationDir.getDirectoryHandle(
         info.folderName, { create: false }
       );
@@ -363,11 +362,13 @@ export async function listMonthSummaries(
         } catch { /* file missing */ }
       }
 
-      results.push({ info, manifest, hasPopulation, hasSample, hasDistribution, totalProcessedRows });
-    } catch {
-      // skip inaccessible month folders
-    }
-  }
+      return { info, manifest, hasPopulation, hasSample, hasDistribution, totalProcessedRows };
+    })
+  );
+
+  const results: MonthSummary[] = settled
+    .filter((r): r is PromiseFulfilledResult<MonthSummary> => r.status === "fulfilled")
+    .map((r) => r.value);
 
   // newest first
   return results.reverse();

@@ -4,6 +4,143 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v5.11 — 2026-06-24 — Parallelize listMonthSummaries with Promise.allSettled
+
+**File:** `src/data/population/populationStorage.ts`
+
+**Before:**
+```ts
+export async function listMonthSummaries(
+  directoryHandle: DirectoryHandleLike
+): Promise<MonthSummary[]> {
+  const infos = await listMonthFolders(directoryHandle);
+  const results: MonthSummary[] = [];
+
+  let populationDir: DirectoryHandleLike;
+  try {
+    populationDir = await getPopulationRoot(directoryHandle, false);
+  } catch { return []; }
+
+  for (const info of infos) {
+    try {
+      const monthDir = await populationDir.getDirectoryHandle(
+        info.folderName, { create: false }
+      );
+
+      const manifestResult = await safeReadJson<MonthManifestData>(
+        monthDir, "month.manifest.json"
+      );
+      const manifest = manifestResult.ok ? manifestResult.value : null;
+
+      let hasPopulation = false;
+      let totalProcessedRows = manifest?.totalProcessedRows ?? 0;
+      try {
+        const processedDir = await monthDir.getDirectoryHandle("processed", { create: false });
+        const popResult = await safeReadJson<PopulationFinalData>(processedDir, "population.final.json");
+        hasPopulation = popResult.ok;
+        if (popResult.ok) totalProcessedRows = popResult.value.totalRows;
+      } catch { /* directory missing */ }
+
+      let hasSample = false;
+      {
+        const sampleDir = await resolveSampleDir(directoryHandle, info.folderName, monthDir);
+        if (sampleDir) {
+          const sResult = await safeReadJson<SampleMasterData>(sampleDir, "sample.master.json");
+          hasSample = sResult.ok;
+        }
+      }
+
+      let hasDistribution = false;
+      try {
+        const sampleDir = await getSampleMainDir(directoryHandle, info.folderName, false);
+        const dResult = await safeReadJson<DistributionCurrentData>(sampleDir, "distribution.current.json");
+        hasDistribution = dResult.ok;
+      } catch {
+        try {
+          const dResult = await safeReadJson<DistributionCurrentData>(monthDir, "distribution.current.json");
+          hasDistribution = dResult.ok;
+        } catch { /* file missing */ }
+      }
+
+      results.push({ info, manifest, hasPopulation, hasSample, hasDistribution, totalProcessedRows });
+    } catch {
+      // skip inaccessible month folders
+    }
+  }
+
+  // newest first
+  return results.reverse();
+}
+```
+
+**After:**
+```ts
+export async function listMonthSummaries(
+  directoryHandle: DirectoryHandleLike
+): Promise<MonthSummary[]> {
+  const infos = await listMonthFolders(directoryHandle);
+
+  let populationDir: DirectoryHandleLike;
+  try {
+    populationDir = await getPopulationRoot(directoryHandle, false);
+  } catch { return []; }
+
+  const settled = await Promise.allSettled(
+    infos.map(async (info) => {
+      const monthDir = await populationDir.getDirectoryHandle(
+        info.folderName, { create: false }
+      );
+
+      const manifestResult = await safeReadJson<MonthManifestData>(
+        monthDir, "month.manifest.json"
+      );
+      const manifest = manifestResult.ok ? manifestResult.value : null;
+
+      let hasPopulation = false;
+      let totalProcessedRows = manifest?.totalProcessedRows ?? 0;
+      try {
+        const processedDir = await monthDir.getDirectoryHandle("processed", { create: false });
+        const popResult = await safeReadJson<PopulationFinalData>(processedDir, "population.final.json");
+        hasPopulation = popResult.ok;
+        if (popResult.ok) totalProcessedRows = popResult.value.totalRows;
+      } catch { /* directory missing */ }
+
+      let hasSample = false;
+      {
+        const sampleDir = await resolveSampleDir(directoryHandle, info.folderName, monthDir);
+        if (sampleDir) {
+          const sResult = await safeReadJson<SampleMasterData>(sampleDir, "sample.master.json");
+          hasSample = sResult.ok;
+        }
+      }
+
+      let hasDistribution = false;
+      try {
+        const sampleDir = await getSampleMainDir(directoryHandle, info.folderName, false);
+        const dResult = await safeReadJson<DistributionCurrentData>(sampleDir, "distribution.current.json");
+        hasDistribution = dResult.ok;
+      } catch {
+        try {
+          const dResult = await safeReadJson<DistributionCurrentData>(monthDir, "distribution.current.json");
+          hasDistribution = dResult.ok;
+        } catch { /* file missing */ }
+      }
+
+      return { info, manifest, hasPopulation, hasSample, hasDistribution, totalProcessedRows };
+    })
+  );
+
+  const results: MonthSummary[] = settled
+    .filter((r): r is PromiseFulfilledResult<MonthSummary> => r.status === "fulfilled")
+    .map((r) => r.value);
+
+  // newest first
+  return results.reverse();
+}
+```
+
+---
+
 ## v5.10 — 2026-06-24 — Add distributionStorage integration tests
 
 **File:** `src/data/distribution/distributionStorage.test.ts`
