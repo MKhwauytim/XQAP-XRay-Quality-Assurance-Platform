@@ -91,6 +91,56 @@
   padding: 0 4px;
 }
 
+/* =========================================================
+   App-level UI Warnings & Empty States
+   ========================================================= */
+
+.app-bak-warning {
+  position: fixed;
+  top: 0;
+  inset-inline: 0;
+  z-index: 9999;
+  background: #fef3c7;
+  border-bottom: 1px solid #f59e0b;
+  padding: 10px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  color: #92400e;
+  direction: rtl;
+}
+
+.app-bak-warning-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 20px;
+  color: #92400e;
+  line-height: 1;
+  padding: 0 4px;
+}
+
+.app-no-tabs {
+  min-height: calc(100vh - 44px);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  color: #475467;
+  text-align: center;
+}
+
+.app-no-tabs h1 {
+  margin: 0 0 10px;
+  color: #17365d;
+  font-size: 24px;
+}
+
+.app-no-tabs p {
+  margin: 0;
+  line-height: 1.8;
+}
+
 @media (max-width: 760px) {
   .app-shell,
   .app-shell.sidebar-collapsed {

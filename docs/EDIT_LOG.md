@@ -4,6 +4,174 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v5.5 — 2026-06-24 — Move App.tsx inline styles to CSS classes
+
+**File:** `src/App.css`
+
+**Before:**
+```css
+/* (no .app-bak-warning, .app-bak-warning-close, .app-no-tabs classes) */
+```
+
+**After:**
+```css
+.app-bak-warning {
+  position: fixed;
+  top: 0;
+  inset-inline: 0;
+  z-index: 9999;
+  background: #fef3c7;
+  border-bottom: 1px solid #f59e0b;
+  padding: 10px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  color: #92400e;
+  direction: rtl;
+}
+
+.app-bak-warning-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 20px;
+  color: #92400e;
+  line-height: 1;
+  padding: 0 4px;
+}
+
+.app-no-tabs {
+  min-height: calc(100vh - 44px);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  color: #475467;
+  text-align: center;
+}
+
+.app-no-tabs h1 {
+  margin: 0 0 10px;
+  color: #17365d;
+  font-size: 24px;
+}
+
+.app-no-tabs p {
+  margin: 0;
+  line-height: 1.8;
+}
+```
+
+**File:** `src/App.tsx`
+
+**Before:**
+```tsx
+{bakWarning && (
+  <div
+    style={{
+      position: "fixed",
+      top: 0,
+      insetInline: 0,
+      zIndex: 9999,
+      background: "#fef3c7",
+      borderBottom: "1px solid #f59e0b",
+      padding: "10px 16px",
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      fontSize: 13,
+      color: "#92400e",
+      direction: "rtl",
+    }}
+  >
+    <span>⚠️ {bakWarning}</span>
+    <button
+      onClick={() => setBakWarning(null)}
+      style={{
+        background: "none",
+        border: "none",
+        cursor: "pointer",
+        fontSize: 20,
+        color: "#92400e",
+        lineHeight: 1,
+        padding: "0 4px",
+      }}
+      aria-label="إغلاق"
+    >
+      ×
+    </button>
+  </div>
+)}
+
+// …
+
+function NoAvailableTabs({ role }: { role: AuthSession["role"] }) {
+  return (
+    <div className="tab-blank" dir="rtl">
+      <div
+        style={{
+          minHeight: "calc(100vh - 44px)",
+          display: "grid",
+          placeItems: "center",
+          padding: "24px",
+          color: "#475467",
+          textAlign: "center"
+        }}
+      >
+        <div>
+          <h1
+            style={{
+              margin: "0 0 10px",
+              color: "#17365d",
+              fontSize: "24px"
+            }}
+          >
+            لا توجد تبويبات متاحة
+          </h1>
+
+          <p style={{ margin: 0, lineHeight: 1.8 }}>
+            لا توجد صفحات مفعلة لهذا الدور حالياً: <strong>{role}</strong>
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+**After:**
+```tsx
+{bakWarning && (
+  <div className="app-bak-warning">
+    <span>⚠️ {bakWarning}</span>
+    <button
+      onClick={() => setBakWarning(null)}
+      className="app-bak-warning-close"
+      aria-label="إغلاق"
+    >
+      ×
+    </button>
+  </div>
+)}
+
+// …
+
+function NoAvailableTabs({ role }: { role: AuthSession["role"] }) {
+  return (
+    <div className="tab-blank" dir="rtl">
+      <div className="app-no-tabs">
+        <div>
+          <h1>لا توجد تبويبات متاحة</h1>
+          <p>لا توجد صفحات مفعلة لهذا الدور حالياً: <strong>{role}</strong></p>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
 ## v5.4 — 2026-06-24 — Add keyboard focus trap to admin passcode modal
 
 **File:** `src/auth/AuthGate.tsx`
