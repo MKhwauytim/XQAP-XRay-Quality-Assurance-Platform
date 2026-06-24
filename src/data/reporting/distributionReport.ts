@@ -1,3 +1,5 @@
+import * as XLSX from "xlsx";
+
 import type { DistributionCurrentData } from "../distribution/distributionTypes";
 import { buildReportHtml, escHtml, formatDate, formatNum } from "./htmlReport";
 
@@ -107,4 +109,89 @@ export function buildDistributionReport(
 </table>`;
 
   return buildReportHtml(`تقرير التوزيع — ${monthFolderName}`, body);
+}
+
+export function buildDistributionXlsx(
+  data: DistributionCurrentData,
+  monthFolderName: string
+): void {
+  const statusLabel = (s: string): string => {
+    const m: Record<string, string> = {
+      pending: "قيد الانتظار",
+      completed: "مكتمل",
+      replaced: "مستبدل",
+      "replacement-requested": "طلب استبدال",
+    };
+    return m[s] ?? s;
+  };
+
+  // Sheet 1: Summary
+  const summaryData = [
+    ["التقرير", "تقرير التوزيع"],
+    ["الشهر", monthFolderName],
+    ["تاريخ التوليد", data.derivedAt],
+    [],
+    ["إجمالي المعينة", data.totalAssigned],
+    ["قيد الانتظار", data.totalPending],
+    ["مكتملة", data.totalCompleted],
+    ["مستبدلة", data.totalReplaced],
+    ["طلبات استبدال", data.entries.filter((e) => e.status === "replacement-requested").length],
+  ];
+
+  // Sheet 2: Employee summary
+  const byEmployee = new Map<string, { pending: number; completed: number; replaced: number; requested: number }>();
+  for (const entry of data.entries) {
+    const emp = entry.assignedTo;
+    if (!byEmployee.has(emp)) byEmployee.set(emp, { pending: 0, completed: 0, replaced: 0, requested: 0 });
+    const s = byEmployee.get(emp)!;
+    if (entry.status === "pending") s.pending++;
+    else if (entry.status === "completed") s.completed++;
+    else if (entry.status === "replaced") s.replaced++;
+    else if (entry.status === "replacement-requested") s.requested++;
+  }
+  const empSheet = [
+    ["الموظف", "الإجمالي", "قيد الانتظار", "مكتمل", "طلب استبدال", "مستبدل"],
+    ...[...byEmployee.entries()].map(([emp, s]) => [
+      emp,
+      s.pending + s.completed + s.replaced + s.requested,
+      s.pending,
+      s.completed,
+      s.requested,
+      s.replaced,
+    ]),
+  ];
+
+  // Sheet 3: All distribution rows — full data
+  const detailSheet = [
+    [
+      "رقم الأشعة", "الموظف", "الحالة", "آخر حدث",
+      "المنفذ", "المرحلة", "CertScan", "مصدر BI",
+      "م.أول", "م.ثاني", "رقم الإحالة",
+      "تاريخ الدخول", "رقم البيان", "نوع الحركة", "رسالة Risk",
+    ],
+    ...data.entries.map((e) => [
+      e.xrayImageId,
+      e.assignedTo,
+      statusLabel(e.status),
+      e.lastEventAt,
+      e.row.portName ?? "",
+      e.row.stage ?? "",
+      e.row.certScanStatus,
+      e.row.biEnrichmentStatus,
+      e.row.xrayLevelOneResult,
+      e.row.xrayLevelTwoResult,
+      e.replacedById ?? "",
+      e.row.xrayEntryDate ?? "",
+      e.row.declarationNumber ?? "",
+      e.row.movementType ?? "",
+      e.row.riskMessage ?? "",
+    ]),
+  ];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryData), "ملخص");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(empSheet), "ملخص الموظفين");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(detailSheet), "تفاصيل التوزيع");
+
+  XLSX.writeFile(wb, `تقرير_التوزيع_${monthFolderName}.xlsx`);
 }

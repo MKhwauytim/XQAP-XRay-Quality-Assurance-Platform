@@ -38,6 +38,7 @@ import {
   subscribeToUserManagementChanges,
   type ManagedLoginUser
 } from "./userManagement";
+import { useWorkspace } from "../data/workspace/useWorkspace";
 
 type AuthGateProps = {
   children: ReactNode | ((session: AuthSession) => ReactNode);
@@ -118,6 +119,7 @@ function getRoleLabel(role: AuthRole): string {
 }
 
 export default function AuthGate({ children }: AuthGateProps) {
+  const { selectWorkspace } = useWorkspace();
   const [session, setSession] = useState<AuthSession | null>(getInitialSession);
   const [managedUsers, setManagedUsers] = useState<ManagedLoginUser[]>(() =>
     getManagedLoginUsers()
@@ -495,9 +497,14 @@ export default function AuthGate({ children }: AuthGateProps) {
         <footer className="auth-footer">
           <span>Local Gate v{LOGIN_SYSTEM_VERSION}</span>
 
-          <button type="button" onClick={logout}>
-            مسح الجلسة
-          </button>
+          <div className="auth-footer-actions">
+            <button type="button" className="auth-footer-change" onClick={() => { void selectWorkspace(); }}>
+              تغيير المجلد
+            </button>
+            <button type="button" onClick={logout}>
+              مسح الجلسة
+            </button>
+          </div>
         </footer>
       </section>
 
