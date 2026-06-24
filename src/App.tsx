@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 
 import AuthGate from "./auth/AuthGate";
-import { TestPanel } from "./test-runner/TestPanel";
 import type { AuthSession } from "./auth/authTypes";
 import {
   hasRolePermission,
@@ -226,7 +225,6 @@ function AppContent({ session }: AppContentProps) {
       </section>
 
       <FeedbackWidget />
-      {import.meta.env.DEV && <TestPanel />}
     </main>
   );
 }

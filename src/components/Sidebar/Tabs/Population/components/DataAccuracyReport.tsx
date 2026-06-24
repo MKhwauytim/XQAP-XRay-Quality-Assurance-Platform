@@ -44,9 +44,60 @@ function norm(val: string | null | undefined): string {
   return s.toLowerCase().replace(/\s+/g, " ");
 }
 
-function display(val: string | null | undefined): string {
+
+// ── Result-value semantic normalization ───────────────────────────────────────
+// Result columns (level-1/2, manual, opposite, live-means) store their values
+// differently across the two source systems: the risk workbook may use numeric
+// codes (1, 2) while the BI workbook stores full Arabic phrases — or the same
+// concept is expressed with slightly different wording.  We map all known
+// variants to a canonical Arabic label so they compare equal and are displayed
+// with a readable explanation.
+
+const RESULT_COLUMN_KEYS = new Set([
+  "levelOneResult",
+  "levelTwoResult",
+  "manualInspectionResult",
+  "oppositeInspectionResult",
+  "liveMeansResult",
+]);
+
+function canonicalizeResult(normed: string): string {
+  // Numeric codes used by the risk workbook
+  if (normed === "1") return "سليمة";
+  if (normed === "2") return "اشتباه";
+  // Normalize Arabic letters for soft-matching (ة→ه, أإآ→ا, ى→ي)
+  const ar = normed
+    .replace(/[أإآ]/g, "ا")
+    .replace(/ى/g, "ي")
+    .replace(/[ةه]/g, "ه");
+  if (ar.startsWith("سليم") || ar.includes("يمكن فسحها") || ar.includes("مبدئ")) return "سليمة";
+  if (ar.startsWith("اشتباه") || ar.startsWith("مشتبه")) return "اشتباه";
+  return normed;
+}
+
+/** Comparison normalizer for result columns: apply base norm then canonicalize. */
+function normResult(val: string | null | undefined): string {
+  return canonicalizeResult(norm(val));
+}
+
+/** Picks the right normalizer based on whether the column is a result column. */
+function normForCol(val: string | null | undefined, colKey: string): string {
+  return RESULT_COLUMN_KEYS.has(colKey) ? normResult(val) : norm(val);
+}
+
+/**
+ * Display helper for result columns.
+ * When the raw value differs from its canonical label, shows "raw (canonical)"
+ * so the reviewer immediately understands what the code means.
+ */
+function displayForCol(val: string | null | undefined, colKey: string): string {
   if (val === null || val === undefined || val === "") return "—";
-  return val;
+  if (!RESULT_COLUMN_KEYS.has(colKey)) return val;
+  const canonical = canonicalizeResult(norm(val));
+  const raw = val.trim();
+  // Only annotate when the raw text doesn't already match the canonical label
+  if (canonical !== norm(raw) && canonical !== raw) return `${raw} (${canonical})`;
+  return raw;
 }
 
 function accColor(pct: number): string {
@@ -110,8 +161,8 @@ function compare(riskRows: NormalizedRiskRow[], biRows: NormalizedBiRow[]): Comp
 
     let rowHasMismatch = false;
     for (const col of COLUMN_MAPPINGS) {
-      const rv = norm(col.getRisk(r));
-      const bv = norm(col.getBi(b));
+      const rv = normForCol(col.getRisk(r), col.key);
+      const bv = normForCol(col.getBi(b), col.key);
       if (rv !== bv) {
         colCounters[col.key].mismatched++;
         mismatches.push({
@@ -358,10 +409,10 @@ export default function DataAccuracyReport({
                 <span className="dar-id">{m.xrayImageId}</span>
                 <span className="dar-col">{m.colLabel}</span>
                 <span className={`dar-risk-val${!m.riskValue ? " dar-null" : ""}`}>
-                  {display(m.riskValue)}
+                  {displayForCol(m.riskValue, m.colKey)}
                 </span>
                 <span className={`dar-bi-val${!m.biValue ? " dar-null" : ""}`}>
-                  {display(m.biValue)}
+                  {displayForCol(m.biValue, m.colKey)}
                 </span>
               </div>
             ))}

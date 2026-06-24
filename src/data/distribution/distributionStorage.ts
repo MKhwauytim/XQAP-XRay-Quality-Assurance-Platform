@@ -105,6 +105,20 @@ export async function loadDistributionCurrent(
   }
 }
 
+function hasQuotaForAssignedEmployees(
+  current: DistributionCurrentData,
+  log: DistributionLog
+): boolean {
+  const assignedEmployees = new Set(
+    log.events
+      .filter((event) => event.eventType === "assigned")
+      .map((event) => event.assignedTo)
+  );
+  if (assignedEmployees.size === 0) return true;
+  if (!current.quotas) return false;
+  return [...assignedEmployees].every((username) => current.quotas?.[username]);
+}
+
 /**
  * Load or derive the current distribution state.
  *
@@ -133,7 +147,7 @@ export async function loadOrDeriveDistributionCurrent(
     const cached = await loadDistributionCurrent(directoryHandle, monthFolderName);
 
     // Fast path: cache is still valid for this log revision
-    if (cached && cached.logRevision === log.revision) {
+    if (cached && cached.logRevision === log.revision && hasQuotaForAssignedEmployees(cached, log)) {
       return cached;
     }
 

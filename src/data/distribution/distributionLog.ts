@@ -7,6 +7,7 @@ import type {
   DistributionStatus,
   EmployeeQuota
 } from "./distributionTypes";
+import { parseMonthFolderName } from "../population/monthFolder";
 
 export function createEventId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -17,14 +18,14 @@ export function createEventId(): string {
 
 /**
  * Compute whole days remaining until the auditing deadline.
- * Deadline = 2 days before month-end, at 23:59:59 local time of that day.
- * e.g. June 2025 (monthEnd = 30) → deadline = 28th. The result is
+ * Deadline = 3 days before month-end, at 23:59:59 local time of that day.
+ * e.g. June 2025 (monthEnd = 30) → deadline = 27th. The result is
  * Math.ceil of the remaining time, so any part of "today" still counts as a
  * full remaining day, and the value is clamped to a minimum of 0 once past due.
  */
 export function computeDaysRemainingForDeadline(month: number, year: number, fromDate = new Date()): number {
   const lastDay = new Date(year, month, 0).getDate(); // last day of month
-  const deadlineDay = lastDay - 2;
+  const deadlineDay = lastDay - 3;
   const deadline = new Date(year, month - 1, deadlineDay, 23, 59, 59);
   const msRemaining = deadline.getTime() - fromDate.getTime();
   return Math.max(0, Math.ceil(msRemaining / (1000 * 60 * 60 * 24)));
@@ -184,10 +185,12 @@ export function deriveCurrentDistribution(
   const entries = Array.from(entryMap.values());
   const now = new Date().toISOString();
 
-  // Derive per-employee quotas from "assigned" events that carry dailyQuota
+  // Derive per-employee quotas from assignment events.
+  // Daily quota = employee sample count / days from first assignment until 3 days before month end.
   const quotaMap: Record<string, EmployeeQuota> = {};
   const assignCountPerEmployee: Record<string, number> = {};
   const firstAssignEventPerEmployee: Record<string, DistributionEvent> = {};
+  const latestQuotaEventPerEmployee: Record<string, DistributionEvent> = {};
 
   for (const evt of log.events) {
     if (evt.eventType === "assigned") {
@@ -197,16 +200,31 @@ export function deriveCurrentDistribution(
       assignCountPerEmployee[evt.assignedTo] = (assignCountPerEmployee[evt.assignedTo] ?? 0) + 1;
 
       if (evt.dailyQuota !== undefined && evt.daysRemainingAtAssignment !== undefined) {
-        // Use the latest "assigned" event that carries an explicit quota
-        quotaMap[evt.assignedTo] = {
-          username: evt.assignedTo,
-          sampleCount: assignCountPerEmployee[evt.assignedTo],
-          dailyQuota: evt.dailyQuota,
-          daysRemainingAtAssignment: evt.daysRemainingAtAssignment,
-          assignedAt: evt.eventAt,
-        };
+        latestQuotaEventPerEmployee[evt.assignedTo] = evt;
       }
     }
+  }
+
+  const monthInfo = parseMonthFolderName(log.monthFolderName);
+  for (const [username, firstAssignEvent] of Object.entries(firstAssignEventPerEmployee)) {
+    const sampleCount = assignCountPerEmployee[username] ?? 0;
+    if (sampleCount <= 0) continue;
+
+    const firstAssignedAt = new Date(firstAssignEvent.eventAt);
+    const storedQuotaEvent = latestQuotaEventPerEmployee[username];
+    const daysRemaining = monthInfo && !Number.isNaN(firstAssignedAt.getTime())
+      ? computeDaysRemainingForDeadline(monthInfo.month, monthInfo.year, firstAssignedAt)
+      : storedQuotaEvent?.daysRemainingAtAssignment;
+    if (daysRemaining === undefined) continue;
+
+    const daysForQuota = Math.max(1, daysRemaining);
+    quotaMap[username] = {
+      username,
+      sampleCount,
+      dailyQuota: Math.ceil(sampleCount / daysForQuota),
+      daysRemainingAtAssignment: daysRemaining,
+      assignedAt: firstAssignEvent.eventAt,
+    };
   }
 
   return {

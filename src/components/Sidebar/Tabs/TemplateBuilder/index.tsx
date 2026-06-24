@@ -37,7 +37,7 @@ export const tabConfig: SidebarTabModule["tabConfig"] = {
   id: "template-builder",
   label: "النماذج",
   order: 20,
-  allowedRoles: ["manager", "admin"],
+  allowedRoles: [],
   icon: <TemplateBuilderIcon />,
 };
 
@@ -60,6 +60,115 @@ const CONDITION_LABELS: Record<TemplateFieldConditionOperator, string> = {
 
 type EditorMode = "list" | "edit" | "create";
 type StatusMessage = { type: "ok" | "error"; text: string } | null;
+
+function buildDefaultInspectionTemplate(username: string): TemplateSchema {
+  const now = new Date().toISOString();
+  const phase1Id = createPhaseId();
+  const phase2Id = createPhaseId();
+
+  const fHasImage       = createFieldId();
+  const fNoImageReason  = createFieldId();
+  const fHasMarking     = createFieldId();
+  const fImageQuality   = createFieldId();
+  const fQualityReason  = createFieldId();
+  const fQualityOther   = createFieldId();
+  const fResultValidity = createFieldId();
+  const fSuspicionLevel = createFieldId();
+  const fSuspectedTypes = createFieldId();
+  const fSmuggleMethod  = createFieldId();
+  const fNotes          = createFieldId();
+
+  return {
+    templateId: createTemplateId(),
+    templateName: "نموذج ضمان جودة الأشعة",
+    version: 1,
+    createdAt: now,
+    createdBy: username,
+    updatedAt: now,
+    updatedBy: username,
+    phases: [
+      { phaseId: phase1Id, title: "ضمان جودة الصورة",  description: "", order: 1 },
+      { phaseId: phase2Id, title: "ضمان جودة النتيجة", description: "", order: 2 },
+    ],
+    fields: [
+      // ── Phase 1 ──────────────────────────────────────────────────────────────
+      {
+        fieldId: fHasImage, phaseId: phase1Id, label: "هل يوجد صورة",
+        type: "dropdown", required: true,
+        options: ["نعم", "لا"], placeholder: "", condition: null, order: 1,
+      },
+      {
+        fieldId: fNoImageReason, phaseId: phase1Id, label: "سبب عدم وجود الصورة",
+        type: "dropdown", required: false,
+        options: ["المعرف غير صحيح", "لا يوجد رقم لوحة", "لا يوجد مستند فحص الصورة", "مؤرشف لفترات سابقة"],
+        placeholder: "",
+        condition: { sourceFieldId: fHasImage, operator: "equals", value: "لا" },
+        order: 2,
+      },
+      {
+        fieldId: fHasMarking, phaseId: phase1Id, label: "هل يوجد تحديد",
+        type: "dropdown", required: true,
+        options: ["نعم", "لا"], placeholder: "",
+        condition: { sourceFieldId: fHasImage, operator: "equals", value: "نعم" }, order: 3,
+      },
+      {
+        fieldId: fImageQuality, phaseId: phase1Id, label: "مستوى جودة الصورة",
+        type: "dropdown", required: true,
+        options: ["عالي", "متوسط", "منخفض"], placeholder: "",
+        condition: { sourceFieldId: fHasImage, operator: "equals", value: "نعم" }, order: 4,
+      },
+      {
+        fieldId: fQualityReason, phaseId: phase1Id, label: "اسباب انخفاض جودة الصورة",
+        type: "dropdown", required: false,
+        options: ["الأرسالية غير كاملة", "جودة التقاط الصورة منخفضة", "يوجد تموجات في الصورة", "اخرى"],
+        placeholder: "",
+        condition: { sourceFieldId: fImageQuality, operator: "notEquals", value: "عالي" },
+        order: 5,
+      },
+      {
+        fieldId: fQualityOther, phaseId: phase1Id, label: "سبب انخفاض الجودة (أخرى)",
+        type: "textarea", required: false,
+        options: [], placeholder: "اذكر سبب انخفاض الجودة...",
+        condition: { sourceFieldId: fQualityReason, operator: "equals", value: "اخرى" },
+        order: 6,
+      },
+      // ── Phase 2 ──────────────────────────────────────────────────────────────
+      {
+        fieldId: fResultValidity, phaseId: phase2Id, label: "صحة النتيجة",
+        type: "dropdown", required: true,
+        options: ["سليمة", "اشتباه"], placeholder: "",
+        condition: { sourceFieldId: fHasImage, operator: "equals", value: "نعم" }, order: 1,
+      },
+      {
+        fieldId: fSuspicionLevel, phaseId: phase2Id, label: "تقييم الاشتباه",
+        type: "dropdown", required: false,
+        options: ["عالي", "متوسط", "منخفض"], placeholder: "",
+        condition: { sourceFieldId: fResultValidity, operator: "equals", value: "اشتباه" },
+        order: 2,
+      },
+      {
+        fieldId: fSuspectedTypes, phaseId: phase2Id, label: "الاصناف المشبوهة",
+        type: "textarea", required: false,
+        options: [], placeholder: "اذكر الاصناف المشبوهة...",
+        condition: { sourceFieldId: fResultValidity, operator: "equals", value: "اشتباه" },
+        order: 3,
+      },
+      {
+        fieldId: fSmuggleMethod, phaseId: phase2Id, label: "الية التهريب المحتملة",
+        type: "textarea", required: false,
+        options: [], placeholder: "اذكر الية التهريب المحتملة...",
+        condition: { sourceFieldId: fResultValidity, operator: "equals", value: "اشتباه" },
+        order: 4,
+      },
+      {
+        fieldId: fNotes, phaseId: phase2Id, label: "الملاحظات العامة",
+        type: "textarea", required: false,
+        options: [], placeholder: "أي ملاحظات إضافية...",
+        condition: { sourceFieldId: fHasImage, operator: "equals", value: "نعم" }, order: 5,
+      },
+    ],
+  };
+}
 
 export default function TemplateBuilderTab() {
   const { directoryHandle } = useWorkspace();
@@ -105,6 +214,12 @@ export default function TemplateBuilderTab() {
       fields: []
     };
     setActiveSchema(newSchema);
+    setMode("create");
+    setStatusMessage(null);
+  }
+
+  function handleCreateDefault(): void {
+    setActiveSchema(buildDefaultInspectionTemplate(username));
     setMode("create");
     setStatusMessage(null);
   }
@@ -198,13 +313,23 @@ export default function TemplateBuilderTab() {
         subtitle="يتم تجهيز قوالب الفحص من خلال هذه القائمة."
       >
         {mode === "list" ? (
-          <button
-            type="button"
-            className="tb-btn-primary"
-            onClick={() => { void handleCreate(); }}
-          >
-            + نموذج جديد
-          </button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              type="button"
+              className="tb-btn-secondary"
+              onClick={handleCreateDefault}
+              title="يُنشئ النموذج الافتراضي لضمان جودة الأشعة جاهزاً للتعديل"
+            >
+              النموذج الافتراضي
+            </button>
+            <button
+              type="button"
+              className="tb-btn-primary"
+              onClick={() => { void handleCreate(); }}
+            >
+              + نموذج جديد
+            </button>
+          </div>
         ) : (
           <button
             type="button"

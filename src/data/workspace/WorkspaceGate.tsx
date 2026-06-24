@@ -119,6 +119,7 @@ export function WorkspaceGate({ session, children }: WorkspaceGateProps) {
     status,
     message,
     missingItems,
+    invalidItems,
     selectWorkspace,
     createInitialStructure
   } = useWorkspace();
@@ -197,7 +198,50 @@ export function WorkspaceGate({ session, children }: WorkspaceGateProps) {
     );
   }
 
-  // invalid_structure, error, permission_denied
+  // invalid_structure + admin — offer targeted repair
+  if (status === "invalid_structure" && session.role === "admin") {
+    return (
+      <div className="workspace-gate" dir="rtl">
+        <div className="workspace-gate-card">
+          <div className="workspace-gate-icon">🔧</div>
+          <h2>ملفات مساحة العمل تالفة أو غير متوافقة</h2>
+          <p>
+            تم العثور على المجلد لكن بعض ملفات النظام تالفة أو بإصدار غير متوافق.
+            يمكنك إصلاح البنية الآن — لن تتأثر بيانات السكان والعينات في مجلد Population.
+          </p>
+          <p style={{ color: "#92400e", background: "#fef3c7", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}>
+            ⚠ قد تحتاج إلى إعادة إضافة حسابات الموظفين بعد الإصلاح.
+          </p>
+          {invalidItems.length > 0 && (
+            <ul className="workspace-gate-missing">
+              {invalidItems.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              void createInitialStructure(session.username);
+            }}
+          >
+            إصلاح بنية مساحة العمل
+          </button>
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => {
+              void selectWorkspace();
+            }}
+          >
+            اختيار مجلد آخر
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // error, permission_denied, invalid_structure (non-admin)
   return (
     <div className="workspace-gate" dir="rtl">
       <div className="workspace-gate-card">

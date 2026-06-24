@@ -279,7 +279,7 @@ export function buildSampleXlsx(input: SampleReportInput): void {
   ];
 
   // Sheet 2: Port allocation
-  const portAlloc = [
+  const portAlloc: (string | number)[][] = [
     ["المنفذ", "المجتمع", "Risk", "BI", "CertScan", "NonCertScan", "المخصص", "Cert مسحوب", "NonCert مسحوب", "الإجمالي", "التغطية%"],
   ];
   const portAllocMap = new Map(sample.portAllocations.map((p) => [p.portName, p]));

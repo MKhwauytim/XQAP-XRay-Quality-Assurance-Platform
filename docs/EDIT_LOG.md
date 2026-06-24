@@ -4,6 +4,275 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v4.11 — 2026-06-24 — InspectionPanel: fix toolbar position + full-height panel
+
+**Root cause:** `DataTable` renders a Fragment (`<>...</>`). When placed directly as a flex child of `.ew-split`, its toolbar and table body each become separate flex items in the RTL row — causing the toolbar to appear as a side column to the right of the rows instead of above them.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx`
+- Wrapped `tableEl` in `<div className="ew-split-table">` so the DataTable fragment resolves to a single flex child.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/EmployeeWorkspace.css`
+- Added `.ew-split-table { flex: 1; min-width: 0; overflow: hidden }` — replaces the now-unused `.ew-split--right > :first-child` rule.
+
+**File:** `src/components/InspectionPanel/InspectionPanel.css`
+- Changed `.ip-panel--right` from `max-height: calc(100vh - 32px)` to `height: 100vh; top: 0` so the panel always matches the full visible viewport height (same visual height as the table area).
+
+---
+
+## v4.10 — 2026-06-24 — InspectionPanel: fix footer, remove duplicate chips, always-on panel
+
+**File:** `src/components/InspectionPanel/InspectionPanel.css`
+- Added `min-height: 0` to `.ip-form-body` so the form body shrinks within the constrained panel height and the footer (حفظ مسودة / تقديم buttons) is always visible.
+
+**File:** `src/components/InspectionPanel/PanelHeader.tsx`
+- Removed `ip-meta-chips` section and the `visibleColumns` / `colConfig` props — the DataTable columns on the right already show the same data, so the chips were duplicate.
+
+**File:** `src/components/InspectionPanel/index.tsx`
+- Removed `visibleColumns` and `colConfig` from `Props` and the `PanelHeader` call.
+- Removed the `DataTableCol` / `ColConfig` import.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx`
+- Added `useEffect` that auto-selects the first entry whenever `displayEntries` changes and the current selection is invalid — panel is always visible when there is data.
+- Changed `onRowClick` from toggle (clicking same row closed panel) to always-select.
+- Removed `visibleColumns` and `colConfig` from the `InspectionPanel` call site.
+
+---
+
+## v4.9 — 2026-06-24 — InspectionPanel: sticky viewport layout + true split-screen bottom mode
+
+**File:** `src/components/InspectionPanel/InspectionPanel.css`
+
+**Before:**
+```css
+.ip-panel--right {
+  width: 480px;
+  min-height: 520px;
+}
+.ip-panel--bottom {
+  width: 100%;
+  max-height: 46vh;
+  min-height: 320px;
+}
+```
+
+**After:**
+```css
+.ip-panel--right {
+  width: 480px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 16px;
+  max-height: calc(100vh - 32px);
+  align-self: flex-start;
+}
+.ip-panel--bottom {
+  width: 100%;
+  height: 42vh;
+  min-height: 300px;
+  flex-shrink: 0;
+}
+```
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/EmployeeWorkspace.css`
+
+**Before:**
+```css
+.ew-split--bottom {
+  flex-direction: column;
+}
+```
+
+**After:**
+```css
+.ew-split--bottom {
+  flex-direction: column;
+  overflow: hidden;
+  max-height: calc(100vh - 220px);
+  min-height: 500px;
+}
+.ew-split--bottom > :first-child {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+```
+
+---
+
+## v4.8 — 2026-06-24 — InspectionPanel: side-panel layout for sample review
+
+Replaced the inline table-row expand form with a dedicated `InspectionPanel` component rendered alongside the DataTable. Employees can toggle the panel between right and bottom positions; the choice is saved to their browse preset JSON. The panel shows a visual phase stepper, a metadata header that mirrors the user's active column selection, a single-column form, and a sticky footer with save/submit actions.
+
+**Files:** `src/components/InspectionPanel/` (new), `src/data/preferences/browsePresetStorage.ts`, `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx`, `src/components/Sidebar/Tabs/EmployeeWorkspace/EmployeeWorkspace.css`
+
+---
+
+## v4.7 — 2026-06-24 — Cascade condition support + default template "no image" logic
+
+**Files:** `src/data/templates/templateRuntime.ts`, `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx`, `src/components/Sidebar/Tabs/EmployeeWorkspace/views/EmployeeDashboard.tsx`, `src/components/Sidebar/Tabs/TemplateBuilder/index.tsx`
+
+Added cascade condition evaluation to `isFieldVisible`: when a source field is itself hidden, all fields that depend on it are also hidden automatically (no need to duplicate conditions). Updated all call sites to pass `template.fields` for cascade resolution.
+
+Updated `buildDefaultInspectionTemplate`: When "هل يوجد صورة" = "لا", Phase 2 (ضمان جودة النتيجة) collapses entirely, and Phase 1 fields "هل يوجد تحديد", "مستوى جودة الصورة", and "الملاحظات العامة" also hide. "اسباب انخفاض جودة الصورة" and its sub-field hide automatically via cascade from "مستوى جودة الصورة".
+
+**Before (`templateRuntime.ts`):**
+```ts
+export function isFieldVisible(
+  field: TemplateField,
+  answers: Record<string, TemplateAnswerValue>
+): boolean {
+  if (!field.condition?.sourceFieldId) return true;
+  return evaluateCondition(field.condition, answers[field.condition.sourceFieldId]);
+}
+
+// getVisibleTemplateFields used isFieldVisible(field, answers)
+```
+
+**After (`templateRuntime.ts`):**
+```ts
+export function isFieldVisible(
+  field: TemplateField,
+  answers: Record<string, TemplateAnswerValue>,
+  allFields?: TemplateField[]
+): boolean {
+  if (!field.condition?.sourceFieldId) return true;
+  if (allFields) {
+    const src = allFields.find(f => f.fieldId === field.condition!.sourceFieldId);
+    if (src && !isFieldVisible(src, answers, allFields)) return false;
+  }
+  return evaluateCondition(field.condition, answers[field.condition.sourceFieldId]);
+}
+
+// getVisibleTemplateFields now passes schema.fields for cascade
+```
+
+---
+
+## v4.6 — 2026-06-24 — Workspace repair for invalid_structure on new PC
+
+**File:** `src/data/workspace/WorkspaceGate.tsx`
+
+When a workspace is copied to a new PC (USB, ZIP transfer, etc.) some root-level JSON files may be corrupted or truncated in transit, producing `invalid_structure` status. Previously the admin saw only "pick another folder" with no recovery path. This fix adds a repair flow for admins: shows which files are invalid, warns that repair will recreate system files (user accounts may need re-adding), and offers a "إصلاح بنية مساحة العمل" button that calls `createInitialStructure` — the same function used for `missing_structure`. Population data (`Population/` folder) is never touched.
+
+**Before:**
+```tsx
+// invalid_structure, error, permission_denied
+return (
+  <div className="workspace-gate" dir="rtl">
+    <div className="workspace-gate-card">
+      <div className="workspace-gate-icon">❌</div>
+      <h2>تعذر فتح مساحة العمل</h2>
+      <p>{message}</p>
+      <button
+        type="button"
+        onClick={() => {
+          void selectWorkspace();
+        }}
+      >
+        اختيار مجلد آخر
+      </button>
+    </div>
+  </div>
+);
+```
+
+**After:**
+```tsx
+// invalid_structure with admin — offer repair
+if (status === "invalid_structure") {
+  const isAdmin = session.role === "admin";
+  if (isAdmin) {
+    return (
+      <div className="workspace-gate" dir="rtl">
+        <div className="workspace-gate-card">
+          <div className="workspace-gate-icon">🔧</div>
+          <h2>ملفات مساحة العمل تالفة أو غير متوافقة</h2>
+          <p>
+            تم العثور على المجلد لكن بعض ملفات النظام تالفة أو بإصدار غير متوافق.
+            يمكنك إصلاح البنية الآن — لن تتأثر بيانات السكان والعينات.
+          </p>
+          <p className="workspace-gate-warn">
+            ⚠ قد تحتاج إلى إعادة إضافة حسابات الموظفين بعد الإصلاح.
+          </p>
+          {invalidItems.length > 0 && (
+            <ul className="workspace-gate-missing">
+              {invalidItems.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          )}
+          <button type="button" onClick={() => { void createInitialStructure(session.username); }}>
+            إصلاح بنية مساحة العمل
+          </button>
+          <button type="button" className="secondary" onClick={() => { void selectWorkspace(); }}>
+            اختيار مجلد آخر
+          </button>
+        </div>
+      </div>
+    );
+  }
+}
+
+// error, permission_denied, invalid_structure (non-admin)
+return (
+  <div className="workspace-gate" dir="rtl">
+    <div className="workspace-gate-card">
+      <div className="workspace-gate-icon">❌</div>
+      <h2>تعذر فتح مساحة العمل</h2>
+      <p>{message}</p>
+      <button type="button" onClick={() => { void selectWorkspace(); }}>
+        اختيار مجلد آخر
+      </button>
+    </div>
+  </div>
+);
+```
+
+---
+
+## v4.5 — 2026-06-24 — Smart result-value normalization in BI vs Risk comparison + default inspection template
+
+Two independent features:
+
+1. **DataAccuracyReport** (`DataAccuracyReport.tsx`): Added semantic normalization for result columns (نتيجة المستوى الأول / الثاني / التفتيش …). Numeric codes (`1` → سليمة, `2` → اشتباه) and textual variants (`سليمة -يمكن فسحها`, `نتيجة سليمة_مبدئية` → سليمة, etc.) are now canonicalized before comparison so they no longer count as mismatches. Display in the mismatch table shows `raw (canonical)` so the viewer knows what the code means.
+
+2. **TemplateBuilder** (`TemplateBuilder/index.tsx`): Added "النموذج الافتراضي" button that seeds the pre-built two-phase inspection template (ضمان جودة الصورة / ضمان جودة النتيجة) with all conditional fields already wired up. The template is editable and deletable like any other.
+
+**File:** `src/components/Sidebar/Tabs/Population/components/DataAccuracyReport.tsx`
+
+**Before:**
+```ts
+function norm(val: string | null | undefined): string {
+  if (val === null || val === undefined) return "";
+  const s = val.toString().trim();
+  // ...date normalization...
+  return s.toLowerCase().replace(/\s+/g, " ");
+}
+
+function display(val: string | null | undefined): string {
+  if (val === null || val === undefined || val === "") return "—";
+  return val;
+}
+```
+(comparison in compare() always used `norm()` for all columns; display() showed raw value only)
+
+**After:**
+Added `RESULT_COLUMN_KEYS`, `canonicalizeResult()`, `normForCol()`, and `displayForCol()`.
+Result columns are compared using canonical forms; display shows `raw (canonical)` when they differ.
+
+---
+
+**File:** `src/components/Sidebar/Tabs/TemplateBuilder/index.tsx`
+
+**Before:**
+`handleCreate()` created a blank two-phase template. No default template button.
+
+**After:**
+Added `buildDefaultInspectionTemplate()` factory and `handleCreateDefault()` handler.
+Added "النموذج الافتراضي" button in the list view next to "نموذج جديد".
+
+---
+
 ## v1.0 — 2026-06-23 — Initial full codebase commit
 
 First push of the complete XQAP v1 application to GitHub. Covers all phases:

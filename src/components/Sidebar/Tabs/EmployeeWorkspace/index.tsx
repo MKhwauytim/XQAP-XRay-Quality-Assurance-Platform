@@ -5,7 +5,6 @@ import { useWorkspace } from "../../../../data/workspace/useWorkspace";
 import { usePermissions } from "../../../../auth/usePermissions";
 import { AccessDenied } from "../../../PermissionGuard";
 import TemplateBuilderTab from "../TemplateBuilder";
-import StatsDashboard from "./views/StatsDashboard";
 import XrayReferrals from "./views/XrayReferrals";
 import XrayInspectionResults from "./views/XrayInspectionResults";
 import ReferralApproval from "./views/ReferralApproval";
@@ -13,21 +12,18 @@ import "./EmployeeWorkspace.css";
 
 // ── Sub-tab IDs ───────────────────────────────────────────────────────────────
 
-const SUB_TAB_STATS_DASHBOARD   = "stats-dashboard";
 const SUB_TAB_XRAY_REFERRALS    = "xray-referrals";
 const SUB_TAB_XRAY_RESULTS      = "xray-results";
 const SUB_TAB_REFERRAL_APPROVAL = "referral-approval";
 const SUB_TAB_INSPECTION_FORM   = "inspection-form";
 
 type WorkspaceSubTab =
-  | typeof SUB_TAB_STATS_DASHBOARD
   | typeof SUB_TAB_XRAY_REFERRALS
   | typeof SUB_TAB_XRAY_RESULTS
   | typeof SUB_TAB_REFERRAL_APPROVAL
   | typeof SUB_TAB_INSPECTION_FORM;
 
 const KNOWN_SUB_TABS = new Set<string>([
-  SUB_TAB_STATS_DASHBOARD,
   SUB_TAB_XRAY_REFERRALS,
   SUB_TAB_XRAY_RESULTS,
   SUB_TAB_REFERRAL_APPROVAL,
@@ -51,7 +47,6 @@ export const tabConfig: SidebarTabModule["tabConfig"] = {
   allowedRoles: ["guest", "employee", "supervisor", "manager", "admin"],
   icon: <WorkspaceIcon />,
   subTabs: [
-    { id: SUB_TAB_STATS_DASHBOARD,   label: "لوحة الإحصائيات" },
     { id: SUB_TAB_XRAY_REFERRALS,    label: "صور الأشعة المحالة" },
     { id: SUB_TAB_XRAY_RESULTS,      label: "نتائج فحص الأشعة" },
     { id: SUB_TAB_REFERRAL_APPROVAL, label: "اعتماد الطلبات" },
@@ -64,7 +59,7 @@ export const tabConfig: SidebarTabModule["tabConfig"] = {
 export default function EmployeeWorkspaceTab() {
   const { directoryHandle } = useWorkspace();
   const { can, canAccessTab } = usePermissions();
-  const [activeSubTab, setActiveSubTab] = useState<WorkspaceSubTab>(SUB_TAB_STATS_DASHBOARD);
+  const [activeSubTab, setActiveSubTab] = useState<WorkspaceSubTab>(SUB_TAB_XRAY_REFERRALS);
 
   // Keep sidebar in sync whenever the active subtab changes
   useEffect(() => {
@@ -92,7 +87,13 @@ export default function EmployeeWorkspaceTab() {
   }
 
   if (activeSubTab === SUB_TAB_XRAY_REFERRALS) {
-    if (!canAccessTab("ew/xray-referrals") || (!can("submit-referrals") && !can("view-all-entries"))) {
+    if (
+      !canAccessTab("ew/xray-referrals") ||
+      (!can("submit-answers") &&
+        !can("submit-referrals") &&
+        !can("request-replacement") &&
+        !can("view-all-entries"))
+    ) {
       return <AccessDenied />;
     }
     return <XrayReferrals directoryHandle={directoryHandle} />;
@@ -118,10 +119,5 @@ export default function EmployeeWorkspaceTab() {
     }
     return <TemplateBuilderTab />;
   }
-
-  // stats-dashboard
-  if (!canAccessTab("ew/stats-dashboard")) {
-    return <AccessDenied />;
-  }
-  return <StatsDashboard directoryHandle={directoryHandle} />;
+  return <XrayReferrals directoryHandle={directoryHandle} />;
 }

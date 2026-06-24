@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type {
   CustomField,
   ExportColumnSetting,
+  MappingTemplate,
   PopulationConfig,
   ProcessingWorkflowStep,
   ProcessingStepKind,
@@ -27,6 +28,10 @@ type MappingSettingsModalProps = {
     biRows: number | null;
     certScanProvided: boolean;
     finalRows: number | null;
+    riskSheetNames?: string[];
+    biSheetNames?: string[];
+    riskColumnHints?: Record<string, string[]>;
+    biColumnHints?: Record<string, string[]>;
   };
 };
 
@@ -113,6 +118,37 @@ export default function MappingSettingsModal({
       feeds: ["certscan-match"]
     }
   ];
+  const requiredFields = config.systemFields.filter((field) => field.isRequired);
+  const riskSheetNames = processingContext?.riskSheetNames ?? [];
+  const biSheetNames = processingContext?.biSheetNames ?? [];
+
+  const mergeAliases = (
+    current: Record<string, string[]> = {},
+    hints: Record<string, string[]> = {}
+  ) => {
+    const next = { ...current };
+    for (const [fieldKey, aliases] of Object.entries(hints)) {
+      const merged = new Set([...(next[fieldKey] ?? []), ...aliases]);
+      next[fieldKey] = Array.from(merged);
+    }
+    return next;
+  };
+
+  const handleApplyDetectedWorkbookSettings = () => {
+    const updatedTemplates = config.mappingTemplates.map((t: MappingTemplate) => {
+      if (t.templateId !== template.templateId) return t;
+      return {
+        ...t,
+        sheetPatterns: {
+          risk: riskSheetNames.length > 0 ? riskSheetNames : t.sheetPatterns.risk,
+          bi: biSheetNames.length > 0 ? biSheetNames : t.sheetPatterns.bi
+        },
+        columnMappings: mergeAliases(t.columnMappings, processingContext?.riskColumnHints),
+        biColumnMappings: mergeAliases(t.biColumnMappings ?? t.columnMappings, processingContext?.biColumnHints)
+      };
+    });
+    onConfigChange({ ...config, mappingTemplates: updatedTemplates });
+  };
 
   const handleMappingChange = (fieldKey: string, val: string) => {
     const aliases = val.split(",").map((s) => s.trim()).filter(Boolean);
@@ -1078,6 +1114,29 @@ export default function MappingSettingsModal({
                 قم بتكوين الكلمات المفتاحية لمطابقة أسماء أوراق العمل (Sheets) في الملفات المرفوعة.
               </p>
 
+              {(riskSheetNames.length > 0 || biSheetNames.length > 0) && (
+                <div style={{ border: "1px solid #dbeafe", borderRadius: "12px", background: "#eff6ff", padding: "12px", display: "grid", gap: "10px" }}>
+                  <strong style={{ color: "#17365d" }}>الأوراق والأعمدة المكتشفة من الملفات المرفوعة</strong>
+                  {riskSheetNames.length > 0 && (
+                    <p style={{ margin: 0, fontSize: 12, color: "#334155" }}>
+                      أوراق المخاطر: {riskSheetNames.join("، ")}
+                    </p>
+                  )}
+                  {biSheetNames.length > 0 && (
+                    <p style={{ margin: 0, fontSize: 12, color: "#334155" }}>
+                      أوراق BI: {biSheetNames.join("، ")}
+                    </p>
+                  )}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                    <ColumnHints title="أعمدة المخاطر المطلوبة" fields={requiredFields} hints={processingContext?.riskColumnHints ?? {}} />
+                    <ColumnHints title="أعمدة BI المطلوبة" fields={requiredFields} hints={processingContext?.biColumnHints ?? {}} />
+                  </div>
+                  <button type="button" className="secondary-action" style={{ justifySelf: "start" }} onClick={handleApplyDetectedWorkbookSettings}>
+                    تطبيق الأسماء والأعمدة المكتشفة
+                  </button>
+                </div>
+              )}
+
               <label className="save-disk-label">
                 أنماط أسماء أوراق المخاطر (Risk Sheet Patterns)
                 <input
@@ -1179,6 +1238,35 @@ export default function MappingSettingsModal({
             حفظ وإغلاق
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function ColumnHints({
+  title,
+  fields,
+  hints,
+}: {
+  title: string;
+  fields: Array<{ key: string; labelAr: string }>;
+  hints: Record<string, string[]>;
+}) {
+  return (
+    <div style={{ background: "#fff", border: "1px solid #dbeafe", borderRadius: "10px", padding: "10px" }}>
+      <strong style={{ display: "block", marginBottom: "8px", color: "#1e3a8a", fontSize: 12 }}>{title}</strong>
+      <div style={{ display: "grid", gap: "6px" }}>
+        {fields.map((field) => {
+          const matches = hints[field.key] ?? [];
+          return (
+            <div key={field.key} style={{ display: "grid", gap: "2px", fontSize: 11 }}>
+              <span style={{ color: "#334155", fontWeight: 800 }}>{field.labelAr}</span>
+              <span style={{ color: matches.length > 0 ? "#166534" : "#b45309" }}>
+                {matches.length > 0 ? matches.join("، ") : "لم يتم العثور على تطابق واضح"}
+              </span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

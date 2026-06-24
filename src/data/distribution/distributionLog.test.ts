@@ -7,6 +7,7 @@ import {
   buildReassignEvent,
   buildReplacedEvent,
   buildReplacementRequestedEvent,
+  computeDaysRemainingForDeadline,
   deriveCurrentDistribution
 } from "./distributionLog";
 import type { DistributionLog } from "./distributionTypes";
@@ -117,6 +118,28 @@ test("replacement-requested then replaced marks as replaced", () => {
   expect(result.totalReplaced).toBe(1);
 });
 
+test("replacement sample starts as pending while original sample is marked replaced", () => {
+  const rows = [makeRow("A1"), makeRow("B2")];
+  const log = makeLog([
+      buildAssignEvent({ xrayImageId: "A1", assignedTo: "emp1", eventBy: "admin" }),
+      buildAssignEvent({ xrayImageId: "B2", assignedTo: "emp1", eventBy: "admin" }),
+      buildReplacedEvent({
+        xrayImageId: "A1",
+        assignedTo: "emp1",
+        replacedById: "B2",
+        eventBy: "admin"
+      })
+  ]);
+  const result = deriveCurrentDistribution(log, rows);
+  const original = result.entries.find((entry) => entry.xrayImageId === "A1");
+  const replacement = result.entries.find((entry) => entry.xrayImageId === "B2");
+
+  expect(original?.status).toBe("replaced");
+  expect(original?.replacedById).toBe("B2");
+  expect(replacement?.status).toBe("pending");
+  expect(replacement?.replacedById).toBeNull();
+});
+
 test("multiple items tracked independently", () => {
   const rows = [makeRow("A1"), makeRow("A2"), makeRow("A3")];
   const log = makeLog([
@@ -138,4 +161,23 @@ test("events for unknown xrayImageId are ignored", () => {
   ]);
   const result = deriveCurrentDistribution(log, rows);
   expect(result.entries).toHaveLength(0);
+});
+
+test("daily quota is derived from assignment date through three days before month end", () => {
+  const rows = Array.from({ length: 1000 }, (_, index) => makeRow(`A${index + 1}`));
+  const log = makeLog(
+    rows.map((row, index) => ({
+      ...buildAssignEvent({ xrayImageId: row.xrayImageId, assignedTo: "emp1", eventBy: "admin" }),
+      eventId: `evt-${index + 1}`,
+      eventAt: "2026-06-01T00:00:00.000Z",
+    }))
+  );
+  log.monthFolderName = "6-June-2026";
+
+  expect(computeDaysRemainingForDeadline(6, 2026, new Date("2026-06-01T00:00:00.000Z"))).toBe(27);
+
+  const result = deriveCurrentDistribution(log, rows);
+  expect(result.quotas?.emp1?.sampleCount).toBe(1000);
+  expect(result.quotas?.emp1?.daysRemainingAtAssignment).toBe(27);
+  expect(result.quotas?.emp1?.dailyQuota).toBe(38);
 });
