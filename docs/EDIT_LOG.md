@@ -4,6 +4,81 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v5.15 — 2026-06-24 — Update CLAUDE.md to reflect Tasks 1-13 changes
+
+**File:** `CLAUDE.md`
+
+**Before:**
+```markdown
+   - `JsonEnvelope<TData>` wraps every JSON file: `{ metadata: { schemaVersion, revision, contentHash, ... }, data }`.
+```
+
+**After:**
+```markdown
+   - `JsonEnvelope<TData>` wraps every JSON file: `{ metadata: { schemaVersion, revision, contentHash, writtenAt }, data }`. Schema versioning via `wrap/unwrap/isEnvelope` in `src/data/storage/jsonEnvelope.ts`.
+```
+
+**Changes:**
+- Updated JsonEnvelope description to list exact metadata fields (schemaVersion, revision, contentHash, writtenAt)
+- Added reference to the factory functions in jsonEnvelope.ts
+
+---
+
+**File:** `CLAUDE.md` — Data-layer modules table
+
+**Before:**
+```markdown
+| Preferences | `src/data/preferences/` | Browse preset storage |
+```
+
+**After:**
+```markdown
+| Preferences | `src/data/preferences/` | Browse preset storage |
+| Error logger | `src/data/storage/errorLogger.ts` | In-memory ring buffer (last 50 entries) for silent-catch observability; `logError`, `getRecentErrors`, `clearErrors` |
+| JsonEnvelope | `src/data/storage/jsonEnvelope.ts` | Schema versioning wrapper for all `safeWriteJson` writes; `wrap`, `isEnvelope`, `unwrap` factory functions |
+```
+
+**Changes:**
+- Added Error logger module row (50-entry ring buffer, accessible via getRecentErrors())
+- Added JsonEnvelope module row (schema versioning wrapper with factory functions)
+
+---
+
+**File:** `CLAUDE.md` — Shared UI components table
+
+**Before:**
+```markdown
+| `ErrorBoundary` | `src/components/ErrorBoundary.tsx` | Top-level React error boundary |
+```
+
+**After:**
+```markdown
+| `ErrorBoundary` | `src/components/ErrorBoundary.tsx` | Top-level React error boundary |
+| `AdminToolbar` | `src/auth/AdminToolbar.tsx` | Role-preview segmented switch, logout button, feedback toggle (admin-only) |
+```
+
+**Changes:**
+- Added AdminToolbar component row (extracted role-preview toolbar component)
+
+---
+
+**File:** `CLAUDE.md` — Reporting module description
+
+**Before:**
+```markdown
+| Reporting | `src/data/reporting/` | Self-contained Arabic HTML report builders (sample + distribution) |
+```
+
+**After:**
+```markdown
+| Reporting | `src/data/reporting/` | Self-contained Arabic HTML report builders (sample + distribution + executive) |
+```
+
+**Changes:**
+- Updated to include executive report (added in v4.0, now reflected in docs)
+
+---
+
 ## v5.14 — 2026-06-24 — Broaden isEnvelope guard to detect workspace-style string schemaVersion
 
 **File:** `src/data/storage/jsonEnvelope.ts`
