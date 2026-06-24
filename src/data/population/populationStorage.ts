@@ -1,5 +1,6 @@
 import type { DirectoryHandleLike, FileHandleLike } from "../storage/fileSystemAccess";
 import { safeWriteJson, safeReadJson } from "../storage/safeWrite";
+import { logError } from "../storage/errorLogger";
 import { formatMonthFolderName, parseMonthFolderName, type MonthFolderInfo } from "./monthFolder";
 import type { MonthManifestData, MonthRawData, PopulationFinalData } from "./monthTypes";
 import type { SampleMasterData } from "../sampling/sampleTypes";
@@ -61,7 +62,9 @@ async function saveBinaryFile(
     // Native FileSystemWritableFileStream.write() accepts BufferSource — cast needed
     await (writable as unknown as { write: (d: unknown) => Promise<void> }).write(data);
     await writable.close();
-  } catch { /* skip if FS API unavailable */ }
+  } catch (error) {
+    logError("saveBinaryFile", error);
+  }
 }
 
 // ── CertScan global persistence ───────────────────────────────────────────────
@@ -277,7 +280,8 @@ export async function listMonthFolders(
       }
       return a.month - b.month;
     });
-  } catch {
+  } catch (error) {
+    logError("listMonthFolders", error);
     return [];
   }
 }
@@ -414,7 +418,9 @@ export async function loadAllPopulationRows(
         if (!id) continue;
         seen.set(id, appendMonthInfo(row, info));
       }
-    } catch { /* skip inaccessible */ }
+    } catch (error) {
+      logError("loadAllPopulationRows", error);
+    }
   }
 
   return [...seen.values()];

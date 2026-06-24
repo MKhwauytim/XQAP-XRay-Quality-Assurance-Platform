@@ -4,6 +4,77 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v5.8 — 2026-06-24 — Add centralized error logger, wire up key silent catches in populationStorage
+
+**File:** `src/data/storage/errorLogger.ts` (created)
+
+**Before:**
+```ts
+// Did not exist
+```
+
+**After:**
+```ts
+export type ErrorEntry = { context: string; message: string; timestamp: string; };
+const MAX_ENTRIES = 50;
+const entries: ErrorEntry[] = [];
+export function logError(context: string, error: unknown): void { ... }
+export function getRecentErrors(): ErrorEntry[] { return entries.slice(); }
+export function clearErrors(): void { entries.length = 0; }
+```
+
+---
+
+**File:** `src/data/storage/errorLogger.test.ts` (created)
+
+**Before:**
+```ts
+// Did not exist
+```
+
+**After:**
+```ts
+// Three Vitest tests: stores logged errors, caps at 50 entries, clearErrors empties the log
+```
+
+---
+
+**File:** `src/data/population/populationStorage.ts`
+
+**Before:**
+```ts
+import { safeWriteJson, safeReadJson } from "../storage/safeWrite";
+// ...
+  } catch { /* skip if FS API unavailable */ }
+// ...
+  } catch {
+    return [];
+  }
+// ...
+    } catch { /* skip inaccessible */ }
+```
+
+**After:**
+```ts
+import { safeWriteJson, safeReadJson } from "../storage/safeWrite";
+import { logError } from "../storage/errorLogger";
+// ...
+  } catch (error) {
+    logError("saveBinaryFile", error);
+  }
+// ...
+  } catch (error) {
+    logError("listMonthFolders", error);
+    return [];
+  }
+// ...
+    } catch (error) {
+      logError("loadAllPopulationRows", error);
+    }
+```
+
+---
+
 ## v5.7 — 2026-06-24 — Extract AdminToolbar component from AuthGate
 
 **File:** `src/auth/AdminToolbar.tsx` (created)
