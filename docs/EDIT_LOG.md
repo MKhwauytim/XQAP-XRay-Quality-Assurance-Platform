@@ -4,6 +4,59 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v5.6 — 2026-06-24 — Extract resolveSampleDir helper, deduplicate dual-path fallback
+
+**File:** `src/data/population/populationStorage.ts`
+
+**Before:**
+```ts
+// Three inline try/catch dual-path blocks like:
+try {
+  const sampleDir = await getSampleMainDir(directoryHandle, info.folderName, false);
+  // ... use sampleDir
+} catch {
+  try {
+    const sampleDir = await monthDir.getDirectoryHandle("sample", { create: false });
+    // ... use sampleDir
+  } catch { /* directory missing */ }
+}
+```
+
+**After:**
+```ts
+// Single private helper:
+async function resolveSampleDir(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  monthDir: DirectoryHandleLike
+): Promise<DirectoryHandleLike | null> {
+  try {
+    return await getSampleMainDir(directoryHandle, monthFolderName, false);
+  } catch {
+    try {
+      return await monthDir.getDirectoryHandle("sample", { create: false });
+    } catch {
+      return null;
+    }
+  }
+}
+// All three call-sites replaced with: const sampleDir = await resolveSampleDir(...); if (!sampleDir) ...
+```
+
+**File:** `src/data/population/populationStorage.test.ts`
+
+**Before:**
+```ts
+// No test for legacy sample path fallback
+```
+
+**After:**
+```ts
+// Added: "loadAllSampleRows falls back to legacy sample path when getSampleMainDir throws"
+```
+
+---
+
 ## v5.5 — 2026-06-24 — Move App.tsx inline styles to CSS classes
 
 **File:** `src/App.css`
