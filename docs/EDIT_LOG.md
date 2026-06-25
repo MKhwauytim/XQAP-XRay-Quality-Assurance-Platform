@@ -4,6 +4,23 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v5.17 — 2026-06-25 — Add enterprise readiness implementation plan
+
+**File:** `docs/superpowers/plans/2026-06-25-enterprise-readiness.md`
+
+**Before:**
+```
+(file did not exist)
+```
+
+**After:**
+```
+# Enterprise Readiness Implementation Plan
+[file created — 15-task plan covering ESLint error elimination, type safety, documentation, and v1.0.0 release]
+```
+
+---
+
 ## v4.5 — 2026-06-24 — Complete icon overhaul, semantic fixes, formatting utilities, type-safety hardening
 
 Full icon pass: replace all remaining Unicode symbol characters (×, ✕, ✓, ›, ↺, ⊟, ⊞, ⊙, ◈, ◎, ⟳) with lucide-react components across 14 files. Improve semantically wrong icon choices in Settings LABEL_GROUPS and Reports. Create `src/utils/formatting.ts` to consolidate 3 duplicate `formatNumber` and 2 `formatDate` implementations. Remove `as any` casts in `Population/index.tsx`. Add null guards for `riskWorkbookResult` and `biWorkbookResult` in `PhaseTwoReportAndProcessing.tsx`. Decision: XrayReportsDashboard NOT restored — Reports tab already handles reporting; keeping data in Population tab would violate separation of concerns.
