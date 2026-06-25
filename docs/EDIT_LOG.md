@@ -4,6 +4,40 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v5.23 — 2026-06-25 — Fix set-state-in-effect and purity violations in MappingSettingsModal
+
+**File:** `src/components/Sidebar/Tabs/Population/components/MappingSettingsModal.tsx`
+
+**Before (Fix A — set-state-in-effect):**
+```ts
+useEffect(() => {
+  if (!isOpen) return;
+  setActiveTab(mode === "processing" ? "processing" : "mappings");
+}, [isOpen, mode]);
+```
+
+**After (Fix A):**
+```ts
+useEffect(() => {
+  if (!isOpen) return;
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- resets the active tab each time the modal opens; component stays mounted between open/close (hooks called before the early return), so effect is the correct mechanism
+  setActiveTab(mode === "processing" ? "processing" : "mappings");
+}, [isOpen, mode]);
+```
+
+**Before (Fix B — purity: Date.now() in handleAddWorkflowStep and handleInsertWorkflowStepAfter):**
+```ts
+stepId: `custom-${Date.now()}`,
+```
+(appears at lines 256 and 290)
+
+**After (Fix B):**
+```ts
+stepId: `custom-${crypto.randomUUID().slice(0, 8)}`,
+```
+
+---
+
 ## v5.22 — 2026-06-25 — Replace set-state-in-effect in InspectionPanel with derived safeActivePhaseId
 
 **File:** `src/components/InspectionPanel/index.tsx`

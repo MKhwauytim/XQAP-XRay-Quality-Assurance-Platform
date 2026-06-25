@@ -53,6 +53,7 @@ export default function MappingSettingsModal({
 
   useEffect(() => {
     if (!isOpen) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- resets the active tab each time the modal opens; component stays mounted between open/close (hooks called before the early return), so effect is the correct mechanism
     setActiveTab(mode === "processing" ? "processing" : "mappings");
   }, [isOpen, mode]);
 
@@ -253,7 +254,7 @@ export default function MappingSettingsModal({
       return;
     }
     const nextStep: ProcessingWorkflowStep = {
-      stepId: `custom-${Date.now()}`,
+      stepId: `custom-${crypto.randomUUID().slice(0, 8)}`,
       kind: "custom",
       titleAr: title,
       descriptionAr: "خطوة مخصصة ضمن خريطة المعالجة.",
@@ -287,7 +288,7 @@ export default function MappingSettingsModal({
   const handleInsertWorkflowStepAfter = (afterStepId: string) => {
     const afterIndex = workflowSteps.findIndex((step) => step.stepId === afterStepId);
     const nextStep: ProcessingWorkflowStep = {
-      stepId: `custom-${Date.now()}`,
+      stepId: `custom-${crypto.randomUUID().slice(0, 8)}`,
       kind: "custom",
       titleAr: "خطوة مخصصة",
       descriptionAr: "خطوة مخصصة مرتبطة بهذا الموضع في خريطة المعالجة.",
