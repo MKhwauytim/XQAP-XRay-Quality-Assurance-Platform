@@ -33,7 +33,11 @@ function detectMovementType(sheetName: string, customPatterns?: string[]): strin
       return pattern;
     }
   }
-  return null;
+
+  // Process every worksheet even when its name is not configured. Using the
+  // sheet name as the movement type keeps the rows auditable and avoids forcing
+  // users to maintain an exhaustive sheet-name allowlist.
+  return sheetName;
 }
 
 const yieldToMain = () => new Promise((resolve) => setTimeout(resolve, 0));

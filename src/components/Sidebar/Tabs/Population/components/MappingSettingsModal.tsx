@@ -120,7 +120,6 @@ export default function MappingSettingsModal({
       feeds: ["certscan-match"]
     }
   ];
-  const requiredFields = config.systemFields.filter((field) => field.isRequired);
   const riskSheetNames = processingContext?.riskSheetNames ?? [];
   const biSheetNames = processingContext?.biSheetNames ?? [];
 
@@ -1113,7 +1112,7 @@ export default function MappingSettingsModal({
           {activeTab === "sheets" && (
             <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
               <p style={{ fontSize: "13px", color: "var(--population-muted)" }}>
-                قم بتكوين الكلمات المفتاحية لمطابقة أسماء أوراق العمل (Sheets) في الملفات المرفوعة.
+                تتم قراءة كل أوراق العمل في الملفات المرفوعة. استخدم هذه الأنماط فقط لتصنيف مصدر الورقة ونوع الحركة عند الحاجة.
               </p>
 
               {(riskSheetNames.length > 0 || biSheetNames.length > 0) && (
@@ -1130,8 +1129,16 @@ export default function MappingSettingsModal({
                     </p>
                   )}
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
-                    <ColumnHints title="أعمدة المخاطر المطلوبة" fields={requiredFields} hints={processingContext?.riskColumnHints ?? {}} />
-                    <ColumnHints title="أعمدة BI المطلوبة" fields={requiredFields} hints={processingContext?.biColumnHints ?? {}} />
+                    <ColumnHints
+                      title="أعمدة المخاطر المكتشفة"
+                      fields={fieldOptions.map((field) => ({ key: field.key, labelAr: field.label }))}
+                      hints={processingContext?.riskColumnHints ?? {}}
+                    />
+                    <ColumnHints
+                      title="أعمدة BI المكتشفة"
+                      fields={fieldOptions.map((field) => ({ key: field.key, labelAr: field.label }))}
+                      hints={processingContext?.biColumnHints ?? {}}
+                    />
                   </div>
                   <button type="button" className="secondary-action" style={{ justifySelf: "start" }} onClick={handleApplyDetectedWorkbookSettings}>
                     تطبيق الأسماء والأعمدة المكتشفة

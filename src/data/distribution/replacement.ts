@@ -52,7 +52,7 @@ function capRandom<T>(pool: T[], limit: number): T[] {
   return copy.slice(0, limit);
 }
 
-const REPLACEMENT_POOL_LIMIT = 1000;
+const REPLACEMENT_POOL_LIMIT = 100;
 
 export function getReplacementCandidates(
   entry: DistributionEntry,

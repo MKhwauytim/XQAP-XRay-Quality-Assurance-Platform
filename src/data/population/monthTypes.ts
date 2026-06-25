@@ -1,3 +1,5 @@
+import type { PopulationProcessingResult } from "./populationTypes";
+
 export type MonthManifestData = {
   monthFolderName: string;
   month: number;
@@ -12,6 +14,12 @@ export type MonthManifestData = {
   totalRawRows: number;
   totalProcessedRows: number;
   status: "raw-saved" | "processed-saved" | "sampled" | "distributed";
+  processingFingerprint?: string | null;
+  processingSummaryFile?: string | null;
+  sourceFiles?: {
+    risk?: SourceFileMetadata | null;
+    bi?: SourceFileMetadata | null;
+  };
 };
 
 export type PopulationFinalData = {
@@ -29,4 +37,14 @@ export type MonthRawData = {
   importedAt: string;
   importedBy: string;
   rows: Array<Record<string, unknown>>;
+};
+
+export type SourceFileMetadata = {
+  name: string;
+  size: number;
+  lastModified: number;
+};
+
+export type ProcessingSummaryData = Omit<PopulationProcessingResult, "preparedRows"> & {
+  savedAt: string;
 };

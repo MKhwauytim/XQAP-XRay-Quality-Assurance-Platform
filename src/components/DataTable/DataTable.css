@@ -50,7 +50,8 @@
 
 /* ── Buttons ───────────────────────────────────────────────── */
 
-.dt-export-btn {
+.dt-export-btn,
+.dt-autofit-btn {
   min-height: 36px;
   padding: 8px 15px;
   background: var(--c-sky, #009ADE);
@@ -61,6 +62,10 @@
   font-weight: 700;
   cursor: pointer;
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   box-shadow: none;
   transition:
     background  180ms cubic-bezier(0.4, 0, 0.2, 1),
@@ -68,13 +73,26 @@
     box-shadow  180ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.dt-export-btn:hover {
+.dt-export-btn:hover,
+.dt-autofit-btn:hover {
   background: var(--c-sky-2, #007FBA);
   border-color: var(--c-sky-2, #007FBA);
   box-shadow: none;
 }
 
-.dt-export-btn:active { transform: translateY(0); }
+.dt-export-btn:active,
+.dt-autofit-btn:active { transform: translateY(0); }
+
+.dt-autofit-btn {
+  background: var(--c-surface, #FFFFFF);
+  color: var(--c-ink-2, #2C4260);
+  border-color: var(--c-border, #DDE6EF);
+}
+
+.dt-autofit-btn:hover {
+  background: var(--c-sky-light, #E5F5FB);
+  color: var(--c-sky, #009ADE);
+}
 
 .dt-clear-filters-btn {
   min-height: 36px;
@@ -124,6 +142,10 @@
   box-shadow: none;
 }
 
+.dt-density-compact {
+  max-height: calc(100vh - 214px);
+}
+
 /* ── Table ─────────────────────────────────────────────────── */
 
 .dt-table {
@@ -135,6 +157,10 @@
   font-size: 12.5px;
   direction: rtl;
   font-variant-numeric: tabular-nums;
+}
+
+.dt-density-compact .dt-table {
+  font-size: 12px;
 }
 
 /* ── Header cells ──────────────────────────────────────────── */
@@ -151,6 +177,15 @@
   cursor: grab;
 }
 
+.dt-sticky-col {
+  position: sticky;
+}
+
+.dt-th.dt-sticky-col {
+  background: #F7F9FA;
+  box-shadow: -1px 0 0 var(--c-border, #DDE6EF);
+}
+
 .dt-th:first-child { border-left: none; }
 .dt-th:active      { cursor: grabbing; }
 
@@ -159,6 +194,10 @@
   align-items: flex-start;
   gap: 4px;
   padding: 10px 9px;
+}
+
+.dt-density-compact .dt-th-inner {
+  padding: 7px 7px;
 }
 
 .dt-th-grip {
@@ -276,6 +315,50 @@
   max-width: 340px;
 }
 
+.dt-density-compact .dt-td {
+  padding: 6px 8px;
+}
+
+.dt-td.dt-sticky-col {
+  background: var(--c-surface, #FFFFFF);
+  box-shadow: -1px 0 0 var(--c-surface-3, #EEF2F7);
+}
+
+.dt-tr:hover .dt-td.dt-sticky-col {
+  background: var(--c-sky-light, #E5F5FB);
+}
+
+.dt-tr.selected .dt-td.dt-sticky-col {
+  background: var(--c-navy-soft, #E5ECF7);
+}
+
+.dt-tr:nth-child(even) .dt-td.dt-sticky-col {
+  background: var(--c-surface, #FFFFFF);
+}
+
+.dt-tr:nth-child(even):hover .dt-td.dt-sticky-col {
+  background: var(--c-sky-light, #E5F5FB);
+}
+
+.dt-tr.selected:nth-child(even) .dt-td.dt-sticky-col {
+  background: var(--c-navy-soft, #E5ECF7);
+}
+
+.dt-tr.dt-tr--completed .dt-td.dt-sticky-col,
+.dt-tr.dt-tr--completed:nth-child(even) .dt-td.dt-sticky-col {
+  background: #ECFDF3;
+}
+
+.dt-tr.dt-tr--completed:hover .dt-td.dt-sticky-col,
+.dt-tr.dt-tr--completed:nth-child(even):hover .dt-td.dt-sticky-col {
+  background: #DDF8E8;
+}
+
+.dt-tr.dt-tr--completed.selected .dt-td.dt-sticky-col,
+.dt-tr.dt-tr--completed.selected:nth-child(even) .dt-td.dt-sticky-col {
+  background: #D6F3E2;
+}
+
 .dt-td:first-child { border-left: none; text-align: right; }
 
 .dt-mono {
@@ -298,6 +381,11 @@
 }
 
 .dt-muted { font-size: 13px; color: var(--c-ink-4, #9DB3C9); }
+
+.dt-density-compact .dt-cell,
+.dt-density-compact .dt-muted {
+  font-size: 12px;
+}
 
 .dt-expand-td {
   padding: 0;

@@ -1,4 +1,4 @@
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, Maximize2 } from "lucide-react";
 import {
   Fragment,
   forwardRef,
@@ -100,6 +100,10 @@ export type DataTableProps<TRow = unknown> = {
   onColConfigChange?: (cfg: ColConfig) => void;
   /** Reports the rows currently visible after global search and column filters. */
   onFilteredRowsChange?: (rows: TRow[]) => void;
+  /** Visual density for this table. Defaults to normal. */
+  density?: "normal" | "compact";
+  /** Column ids that should remain pinned to the RTL start edge while scrolling horizontally. */
+  stickyColumnIds?: string[];
 };
 
 // ── Column config ────────────────────────────────────────────────────────────
@@ -211,6 +215,8 @@ export default function DataTable<TRow>({
   initialColConfig,
   onColConfigChange,
   onFilteredRowsChange,
+  density = "normal",
+  stickyColumnIds = [],
 }: DataTableProps<TRow>) {
   const L = useLabels();
 
@@ -356,8 +362,8 @@ export default function DataTable<TRow>({
   }, [filteredRows, onFilteredRowsChange]);
 
   // Virtual window — only render rows within (+ overscan beyond) the scroll viewport.
-  // VROW_H ≈ 9px top-pad + ~20px content + 9px bottom-pad + 1px border (from DataTable.css .dt-td).
-  const VROW_H  = 40;
+  // Keep this aligned with DataTable.css padding; compact mode intentionally reduces row height.
+  const VROW_H  = density === "compact" ? 34 : 40;
   const OVERSCAN = 8;
 
   const vRawStart = Math.max(0, Math.floor(scrollTop / VROW_H) - OVERSCAN);
@@ -427,6 +433,28 @@ export default function DataTable<TRow>({
   const totalFr  = visibleCols.reduce((s, c) => s + getColFr(c), 0);
   const colWidthPct = (c: DataTableCol<TRow>) =>
     `${((getColFr(c) / totalFr) * 100).toFixed(2)}%`;
+  const stickyIdSet = useMemo(() => new Set(stickyColumnIds), [stickyColumnIds]);
+  const stickyMeta = useMemo(() => {
+    const meta = new Map<string, { rightPct: number; order: number }>();
+    let rightPct = 0;
+    let order = 0;
+    for (const col of visibleCols) {
+      if (!stickyIdSet.has(col.id)) continue;
+      meta.set(col.id, { rightPct, order });
+      rightPct += (((colCfg.widths ?? {})[col.id] ?? col.widthFr ?? 1) / totalFr) * 100;
+      order += 1;
+    }
+    return meta;
+  }, [visibleCols, stickyIdSet, totalFr, colCfg.widths]);
+
+  function getStickyStyle(col: DataTableCol<TRow>, header: boolean): CSSProperties | undefined {
+    const meta = stickyMeta.get(col.id);
+    if (!meta) return undefined;
+    return {
+      right: `${meta.rightPct.toFixed(2)}%`,
+      zIndex: header ? 8 + meta.order : 3 + meta.order,
+    };
+  }
 
   function estimateColumnFr(col: DataTableCol<TRow>): number {
     const sample = filteredRows.slice(0, 300);
@@ -451,6 +479,14 @@ export default function DataTable<TRow>({
       },
     };
     setColCfg(nextCfg);
+  }
+
+  function handleAutoFitVisibleColumns(): void {
+    const widths: Record<string, number> = { ...(colCfg.widths ?? {}) };
+    for (const col of visibleCols) {
+      widths[col.id] = estimateColumnFr(col);
+    }
+    setColCfg({ ...colCfg, widths });
   }
 
   // Column resize via drag
@@ -514,7 +550,7 @@ export default function DataTable<TRow>({
     <>
       {/* Toolbar */}
       <div className="dt-toolbar">
-        <div className="dt-toolbar-start">{toolbarStart}</div>
+        {toolbarStart ? <div className="dt-toolbar-start">{toolbarStart}</div> : null}
         <div className="dt-toolbar-end">
           <input
             type="text"
@@ -541,6 +577,15 @@ export default function DataTable<TRow>({
             </button>
           )}
           {toolbarEndExtra}
+          <button
+            type="button"
+            className="dt-autofit-btn"
+            onClick={handleAutoFitVisibleColumns}
+            title="ملاءمة عرض الأعمدة المرئية حسب المحتوى"
+          >
+            <Maximize2 size={14} />
+            ملاءمة الأعمدة
+          </button>
           {exportFileName && (
             <button type="button" className="dt-export-btn" onClick={handleExport}>
               {L.dt_export_xlsx}
@@ -579,7 +624,7 @@ export default function DataTable<TRow>({
       </p>
 
       {/* Table */}
-      <div className="dt-table-wrap" ref={tableWrapRef}>
+      <div className={`dt-table-wrap dt-density-${density}`} ref={tableWrapRef}>
         <table className="dt-table" ref={tableRef}>
           <colgroup>
             {visibleCols.map((col) => (
@@ -594,7 +639,8 @@ export default function DataTable<TRow>({
                 return (
                   <th
                     key={col.id}
-                    className="dt-th"
+                    className={`dt-th${stickyMeta.has(col.id) ? " dt-sticky-col dt-sticky-head" : ""}`}
+                    style={getStickyStyle(col, true)}
                     draggable
                     onDragStart={() => handleDragStart(col.id)}
                     onDragOver={(e) => e.preventDefault()}
@@ -667,7 +713,12 @@ export default function DataTable<TRow>({
                     {visibleCols.map((col) => {
                       const isDate = col.isDate || detectedDates.has(col.id);
                       return (
-                        <td key={col.id} className="dt-td">
+                        <td
+                          key={col.id}
+                          className={`dt-td${stickyMeta.has(col.id) ? " dt-sticky-col" : ""}`}
+                          style={getStickyStyle(col, false)}
+                          title={String(col.accessor(row) ?? "")}
+                        >
                           {renderCell(col, row, {
                             isDate,
                             dateFmt: colCfg.dateFmt[col.id] as DateFormatMode ?? "date",

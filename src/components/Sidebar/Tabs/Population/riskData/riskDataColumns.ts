@@ -1,11 +1,11 @@
 export const RISK_COLUMN_ALIASES = {
-  portCode: ["رمز المنفذ", "المنفذ"],
+  portCode: ["رمز المنفذ", "المنفذ", "رمز الجمرك", "PORT_CD"],
 
   portName: ["اسم المنفذ"],
 
   portType: ["نوع المنفذ"],
 
-  movementNumber: ["رقم الحركة"],
+  movementNumber: ["رقم الحركة", "قيد الحركة"],
 
   movementDate: ["تاريخ الحركة"],
 
@@ -50,6 +50,7 @@ export const RISK_COLUMN_ALIASES = {
     "نتيجة المستوى الأول",
     "نتيجة المستوى الأول للاشعة",
     "نتيجة المستوى الأول للأشعة",
+    "المستوى الأول",
     "المستوى الاول"
   ],
 
@@ -73,7 +74,8 @@ export const RISK_COLUMN_ALIASES = {
     "رقم صورة الاشعة",
     "رقم صورة الأشعة",
     "معرف الأشعة",
-    "معرف الاشعة"
+    "معرف الاشعة",
+    "XRAY_SCAN_ID"
   ],
 
   xrayEntryDate: [

@@ -117,6 +117,14 @@ export default function InspectionPanel({
   }, [missingRequiredFields, touchedRequiredIds]);
 
   const isSubmitted = entry.status === "completed" || savedAnswer?.status === "submitted";
+  const activePhaseIndex = phases.findIndex((phase) => phase.phaseId === safeActivePhaseId);
+  const isLastPhase = activePhaseIndex < 0 || activePhaseIndex === phases.length - 1;
+  const currentPhaseMissingRequiredFields = useMemo(() => {
+    if (!template || !safeActivePhaseId) return [];
+    return getVisibleRequiredFields(template, safeActivePhaseId, ans)
+      .filter((field) => !isAnswerFilled(field, ans[field.fieldId]));
+  }, [template, safeActivePhaseId, ans]);
+  const primaryActionLabel = isLastPhase ? "تقديم" : "المرحلة التالية";
 
   function collect(): FieldAnswer[] {
     if (!template) return [];
@@ -137,6 +145,29 @@ export default function InspectionPanel({
     }
     setValidationMsg(null);
     void onSave(collect(), true);
+  }
+
+  function goToNextPhase(): void {
+    if (!template) return;
+    if (currentPhaseMissingRequiredFields.length > 0) {
+      setTouchedRequiredIds(
+        new Set(currentPhaseMissingRequiredFields.map((field) => field.fieldId))
+      );
+      setValidationMsg("أكمل الحقول الإلزامية في هذه المرحلة قبل الانتقال.");
+      return;
+    }
+    const nextPhase = phases[activePhaseIndex + 1];
+    if (!nextPhase) return;
+    setValidationMsg(null);
+    setActivePhaseId(nextPhase.phaseId);
+  }
+
+  function handlePrimaryAction(): void {
+    if (isLastPhase) {
+      submitStudy();
+      return;
+    }
+    goToNextPhase();
   }
 
   return (
@@ -186,9 +217,9 @@ export default function InspectionPanel({
             <button
               type="button"
               className="ip-btn ip-btn--primary"
-              onClick={submitStudy}
+              onClick={handlePrimaryAction}
             >
-              تقديم
+              {primaryActionLabel}
             </button>
           </div>
           <div className="ip-footer-actions">

@@ -100,6 +100,37 @@ type UploadState = {
   source: "file-system-api" | "input-fallback" | null;
 };
 
+function sourceFileMetadata(file: File | null): { name: string; size: number; lastModified: number } | null {
+  if (!file) return null;
+  return {
+    name: file.name,
+    size: file.size,
+    lastModified: file.lastModified,
+  };
+}
+
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, entryValue]) => `${JSON.stringify(key)}:${stableStringify(entryValue)}`);
+    return `{${entries.join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function stableHash(value: unknown): string {
+  const text = stableStringify(value);
+  let hash = 5381;
+  for (let i = 0; i < text.length; i++) {
+    hash = ((hash << 5) + hash) ^ text.charCodeAt(i);
+  }
+  return (hash >>> 0).toString(36);
+}
+
 type PhaseDefinition = {
   id: number;
   title: string;
@@ -249,6 +280,8 @@ export default function PopulationTab() {
           totalExcludedMissingXrayIdCount: 0,
         };
         setRiskWorkbookResult(reconstructed);
+      } else {
+        setRiskWorkbookResult(null);
       }
 
       // Reconstruct BiWorkbookResult from saved raw rows
@@ -262,44 +295,49 @@ export default function PopulationTab() {
           totalExcludedMissingXrayIdCount: 0,
         };
         setBiWorkbookResult(reconstructed);
+      } else {
+        setBiWorkbookResult(null);
       }
 
       if (data.populationRows) {
+        const fallbackSummary: PopulationProcessingResult["summary"] = {
+          riskOriginalRows: data.populationRows.length,
+          validRiskIdRows: data.populationRows.length,
+          invalidRiskIdRows: 0,
+          duplicateRiskIdRows: 0,
+          rowsAfterDeduplication: data.populationRows.length,
+          removedInvalidResultRows: 0,
+          finalPreparedPopulationRows: data.populationRows.length,
+          certScanRows: data.certScanRows,
+          nonCertScanRows: data.nonCertScanRows,
+          certScanPercentage: data.populationRows.length > 0
+            ? Math.round((data.certScanRows / data.populationRows.length) * 100)
+            : 0,
+          nonCertScanPercentage: data.populationRows.length > 0
+            ? Math.round((data.nonCertScanRows / data.populationRows.length) * 100)
+            : 0,
+          biProvided: data.biRawRows.length > 0,
+          biMatchedRows: 0,
+          biUnmatchedRows: 0,
+          biMatchPercentage: 0,
+          totalBiFilledFields: 0,
+          biFieldFillSummary: []
+        };
         setPopulationProcessingResult({
           preparedRows: data.populationRows as unknown as PreparedPopulationRow[],
-          removedRows: [],
-          duplicateRows: [],
-          invalidResultRows: [],
-          summary: {
-            riskOriginalRows: data.populationRows.length,
-            validRiskIdRows: data.populationRows.length,
-            invalidRiskIdRows: 0,
-            duplicateRiskIdRows: 0,
-            rowsAfterDeduplication: data.populationRows.length,
-            removedInvalidResultRows: 0,
-            finalPreparedPopulationRows: data.populationRows.length,
-            certScanRows: data.certScanRows,
-            nonCertScanRows: data.nonCertScanRows,
-            certScanPercentage: data.populationRows.length > 0
-              ? Math.round((data.certScanRows / data.populationRows.length) * 100)
-              : 0,
-            nonCertScanPercentage: data.populationRows.length > 0
-              ? Math.round((data.nonCertScanRows / data.populationRows.length) * 100)
-              : 0,
-            biProvided: data.biRawRows.length > 0,
-            biMatchedRows: 0,
-            biUnmatchedRows: 0,
-            biMatchPercentage: 0,
-            totalBiFilledFields: 0,
-            biFieldFillSummary: []
-          }
+          removedRows: data.processingSummary?.removedRows ?? [],
+          duplicateRows: data.processingSummary?.duplicateRows ?? [],
+          invalidResultRows: data.processingSummary?.invalidResultRows ?? [],
+          summary: data.processingSummary?.summary ?? fallbackSummary
         });
         setSaveMonth(info.month);
         setSaveYear(info.year);
+      } else {
+        setPopulationProcessingResult(null);
       }
 
-      if (data.sampleData) setSampleDrawResult(data.sampleData);
-      if (data.distributionCurrent) setDistributionCurrent(data.distributionCurrent);
+      setSampleDrawResult(data.sampleData);
+      setDistributionCurrent(data.distributionCurrent);
 
       if (data.distributionCurrent || data.sampleData) {
         setCurrentPhase(4);
@@ -711,7 +749,25 @@ export default function PopulationTab() {
           ({ rawRow: _rawRow, ...rest }) => rest
         ) as Array<Record<string, unknown>>,
         certScanRows: processingResult.summary.certScanRows,
-        nonCertScanRows: processingResult.summary.nonCertScanRows
+        nonCertScanRows: processingResult.summary.nonCertScanRows,
+        processingSummary: {
+          removedRows: processingResult.removedRows,
+          duplicateRows: processingResult.duplicateRows,
+          invalidResultRows: processingResult.invalidResultRows,
+          summary: processingResult.summary,
+        },
+        processingFingerprint: stableHash({
+          risk: sourceFileMetadata(uploads.riskAgencyData.file),
+          bi: sourceFileMetadata(uploads.businessIntelligenceData.file),
+          certScan: stableHash(certScanPasteText.trim()),
+          mappingTemplate: config.mappingTemplates[0] ?? null,
+          stageMappings: config.stageMappings,
+          workflow: config.processingWorkflow,
+        }),
+        sourceFiles: {
+          risk: sourceFileMetadata(uploads.riskAgencyData.file),
+          bi: sourceFileMetadata(uploads.businessIntelligenceData.file),
+        }
       });
 
       if (result.ok) {
@@ -1383,7 +1439,7 @@ function buildColumnHintsFromRows(
   const template = config.mappingTemplates[0] ?? DEFAULT_MAPPING_TEMPLATE;
   const hints: Record<string, string[]> = {};
 
-  for (const field of config.systemFields.filter((item) => item.isRequired)) {
+  for (const field of config.systemFields) {
     const aliases = [
       field.labelAr,
       ...(template.columnMappings[field.key] ?? []),

@@ -84,6 +84,6 @@ export async function writeEmployeeXlsx(
   const fh = await dir.getFileHandle(xlsxFileName(username), { create: true });
   if (!fh.createWritable) return;
   const writable = await fh.createWritable();
-  await writable.write(buf);
+  await (writable as unknown as { write: (data: unknown) => Promise<void> }).write(buf);
   await writable.close();
 }

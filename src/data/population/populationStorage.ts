@@ -2,7 +2,13 @@ import type { DirectoryHandleLike, FileHandleLike } from "../storage/fileSystemA
 import { safeWriteJson, safeReadJson } from "../storage/safeWrite";
 import { logError } from "../storage/errorLogger";
 import { formatMonthFolderName, parseMonthFolderName, type MonthFolderInfo } from "./monthFolder";
-import type { MonthManifestData, MonthRawData, PopulationFinalData } from "./monthTypes";
+import type {
+  MonthManifestData,
+  MonthRawData,
+  PopulationFinalData,
+  ProcessingSummaryData,
+  SourceFileMetadata,
+} from "./monthTypes";
 import type { SampleMasterData } from "../sampling/sampleTypes";
 import type { DistributionCurrentData } from "../distribution/distributionTypes";
 import { loadOrDeriveDistributionCurrent } from "../distribution/distributionStorage";
@@ -130,6 +136,12 @@ export type SaveMonthRunParams = {
   processedRows: Array<Record<string, unknown>>;
   certScanRows: number;
   nonCertScanRows: number;
+  processingSummary?: Omit<ProcessingSummaryData, "savedAt">;
+  processingFingerprint?: string | null;
+  sourceFiles?: {
+    risk?: SourceFileMetadata | null;
+    bi?: SourceFileMetadata | null;
+  };
 };
 
 export type SaveMonthRunResult = {
@@ -225,6 +237,14 @@ export async function saveMonthRun(
     };
     await safeWriteJson(processedDir, "population.final.json", finalData);
 
+    if (params.processingSummary) {
+      const summaryData: ProcessingSummaryData = {
+        ...params.processingSummary,
+        savedAt: now,
+      };
+      await safeWriteJson(processedDir, "processing.summary.json", summaryData);
+    }
+
     // Save month manifest
     const manifest: MonthManifestData = {
       monthFolderName,
@@ -239,7 +259,10 @@ export async function saveMonthRun(
       rngSeed: null,
       totalRawRows: riskRawRows.length,
       totalProcessedRows: processedRows.length,
-      status: "processed-saved"
+      status: "processed-saved",
+      processingFingerprint: params.processingFingerprint ?? null,
+      processingSummaryFile: params.processingSummary ? "processed/processing.summary.json" : null,
+      sourceFiles: params.sourceFiles
     };
     await safeWriteJson(monthDir, "month.manifest.json", manifest);
 
@@ -513,6 +536,7 @@ export type MonthEditData = {
   nonCertScanRows: number;
   riskRawRows: Array<Record<string, unknown>>;
   biRawRows: Array<Record<string, unknown>>;
+  processingSummary: ProcessingSummaryData | null;
   sampleData: SampleMasterData | null;
   distributionCurrent: DistributionCurrentData | null;
   manifest: MonthManifestData | null;
@@ -528,6 +552,7 @@ export async function loadMonthForEditing(
     nonCertScanRows: 0,
     riskRawRows: [],
     biRawRows: [],
+    processingSummary: null,
     sampleData: null,
     distributionCurrent: null,
     manifest: null
@@ -536,10 +561,13 @@ export async function loadMonthForEditing(
   try {
     const monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, false);
 
-    const [manifestResult, popBundle, rawBundle, sampleBundle] = await Promise.all([
+    const [manifestResult, popBundle, summaryBundle, rawBundle, sampleBundle] = await Promise.all([
       safeReadJson<MonthManifestData>(monthDir, "month.manifest.json"),
       monthDir.getDirectoryHandle("processed", { create: false })
         .then((dir) => safeReadJson<PopulationFinalData>(dir, "population.final.json"))
+        .catch(() => null),
+      monthDir.getDirectoryHandle("processed", { create: false })
+        .then((dir) => safeReadJson<ProcessingSummaryData>(dir, "processing.summary.json"))
         .catch(() => null),
       monthDir.getDirectoryHandle("raw", { create: false })
         .then(async (dir) => {
@@ -572,6 +600,9 @@ export async function loadMonthForEditing(
     const biRawRows: Array<Record<string, unknown>> =
       rawBundle?.bi?.ok ? (rawBundle.bi.value.rows ?? []) : [];
 
+    const processingSummary: ProcessingSummaryData | null =
+      summaryBundle?.ok ? summaryBundle.value : null;
+
     const sampleData: SampleMasterData | null =
       sampleBundle?.ok ? sampleBundle.value : null;
 
@@ -583,7 +614,17 @@ export async function loadMonthForEditing(
         )
       : null;
 
-    return { populationRows, certScanRows, nonCertScanRows, riskRawRows, biRawRows, sampleData, distributionCurrent, manifest };
+    return {
+      populationRows,
+      certScanRows,
+      nonCertScanRows,
+      riskRawRows,
+      biRawRows,
+      processingSummary,
+      sampleData,
+      distributionCurrent,
+      manifest
+    };
   } catch {
     return empty;
   }

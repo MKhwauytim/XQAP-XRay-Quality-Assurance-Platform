@@ -112,8 +112,8 @@ function buildXrayColumns(L: Labels): DataTableCol<DistributionEntry>[] {
 }
 
 const DEFAULT_VISIBLE = [
-  "xrayImageId", "stage", "assignedTo", "portName",
-  "xrayEntryDate", "lastEventAt", "plateOrContainerNumber", "answerStatus", "submittedAt",
+  "xrayImageId", "answerStatus", "portName", "stage",
+  "xrayEntryDate", "lastEventAt", "plateOrContainerNumber",
 ];
 
 const COL_KEY = "xray_ref_cols_v4";
@@ -348,20 +348,21 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   );
 
   const personalStats = useMemo<PersonalStats>(() => {
-    const source = allEntries.length > 0 ? allEntries : entries;
-    const mine = source.filter((entry) => entry.assignedTo === username);
-    const submitted = mine.filter((entry) => isStudyCompleted(entry, answersMap)).length;
-    const replaced = mine.filter((entry) => entry.status === "replaced").length;
-    const notStarted = Math.max(0, mine.length - submitted - replaced);
+    const source = canSeeAll
+      ? displayEntries
+      : (allEntries.length > 0 ? allEntries : entries).filter((entry) => entry.assignedTo === username);
+    const submitted = source.filter((entry) => isStudyCompleted(entry, answersMap)).length;
+    const replaced = source.filter((entry) => entry.status === "replaced").length;
+    const notStarted = Math.max(0, source.length - submitted - replaced);
     return {
-      assigned: mine.length,
+      assigned: source.length,
       submitted,
       notStarted,
       replaced,
-      active: Math.max(0, mine.length - replaced),
-      completionPct: pct(submitted, mine.length),
+      active: Math.max(0, source.length - replaced),
+      completionPct: pct(submitted, source.length),
     };
-  }, [allEntries, entries, username, answersMap]);
+  }, [allEntries, entries, displayEntries, canSeeAll, username, answersMap]);
 
   const loadData = useCallback(async () => {
     if (!selMonth) return;
@@ -663,7 +664,20 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         eyebrow={L.page_xray_referrals_eyebrow}
         title={L.page_xray_referrals_title}
         subtitle={canSeeAll ? L.page_xray_referrals_subtitle_all : L.page_xray_referrals_subtitle_own}
-      />
+      >
+        <QueueToolbar
+          labels={L}
+          months={months}
+          selectedMonth={selMonth}
+          onMonthChange={setSelMonth}
+          templates={tplIndex}
+          selectedTemplateId={selTplId}
+          activeTemplate={activeTpl}
+          canSetTemplate={canSetTemplate}
+          onTemplateChange={(id) => { void handleTplSelect(id); }}
+          onReloadTemplate={() => { if (selTplId) void applyTemplate(selTplId, false); }}
+        />
+      </PageHeader>
 
       {statusMsg && (
         <div className={statusMsg.type === "ok" ? "ew-msg-ok" : "ew-msg-error"} role="status">
@@ -680,195 +694,125 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       {loadState === "error"   && <p className="ew-empty">تعذر تحميل البيانات.</p>}
 
       {(loadState === "ready" || loadState === "idle") && (() => {
+        const selectableVisibleIds = filteredTableEntries
+          .filter((e) => e.status !== "replaced")
+          .map((e) => e.xrayImageId);
+        const showSelectionBar =
+          !canSeeAll &&
+          canSubmitReferrals &&
+          entries.length > 0 &&
+          selectedIds.size > 0;
         const tableEl = (
-          <DataTable<DistributionEntry>
-            columns={columns}
-            rows={displayEntries}
-            getRowKey={(e) => e.xrayImageId}
-            renderCell={renderCell}
-            storageKey={COL_KEY}
-            defaultVisible={DEFAULT_VISIBLE}
-            isAdmin={canSeeAll}
-            canConfigureColumns={canConfigureColumns}
-            initialColConfig={colPreset}
-            onColConfigChange={(cfg) => {
-              setColPreset(cfg);
-              const preset = {
-                columnOrder:    cfg.order,
-                visibleColumns: baseColumns.map((c) => c.id).filter((id) => !cfg.hidden.includes(id)),
-                widths:         cfg.widths,
-                dateFmt:        cfg.dateFmt,
-              };
-              if (role === "admin") {
-                void saveAdminBrowseDatasetPreset(directoryHandle, REFERRALS_PRESET_KEY, preset);
+          <div className="ew-ref-queue">
+            {showSelectionBar && (
+              <SelectionActionBar
+                selectedCount={selectedIds.size}
+                visibleCount={selectableVisibleIds.length}
+                onReferSelected={() => {
+                  if (selectedIds.size === 0) return;
+                  setReferralModal({ xrayImageIds: [...selectedIds], source: "selected" });
+                }}
+                onSelectVisible={() => selectAll(selectableVisibleIds)}
+                onClear={clearSelection}
+              />
+            )}
+            <DataTable<DistributionEntry>
+              columns={columns}
+              rows={displayEntries}
+              getRowKey={(e) => e.xrayImageId}
+              renderCell={renderCell}
+              storageKey={COL_KEY}
+              defaultVisible={DEFAULT_VISIBLE}
+              density="compact"
+              stickyColumnIds={canSeeAll ? ["xrayImageId", "answerStatus"] : [SELECT_COL_ID, "xrayImageId", "answerStatus"]}
+              isAdmin={canSeeAll}
+              canConfigureColumns={canConfigureColumns}
+              initialColConfig={colPreset}
+              onColConfigChange={(cfg) => {
+                setColPreset(cfg);
+                const preset = {
+                  columnOrder:    cfg.order,
+                  visibleColumns: baseColumns.map((c) => c.id).filter((id) => !cfg.hidden.includes(id)),
+                  widths:         cfg.widths,
+                  dateFmt:        cfg.dateFmt,
+                };
+                if (role === "admin") {
+                  void saveAdminBrowseDatasetPreset(directoryHandle, REFERRALS_PRESET_KEY, preset);
+                }
+              }}
+              rowMatchesFilter={rowMatchesFilter}
+              onFilteredRowsChange={setFilteredTableEntries}
+              exportFileName={`صور الأشعة المحالة - ${selMonth || "كل الأشهر"}.xlsx`}
+              expandedKey={selEntryId}
+              onRowClick={(e) => setSelEntryId(e.xrayImageId)}
+              getRowClassName={(entry) =>
+                isStudyCompleted(entry, answersMap) ? "dt-tr--completed" : undefined
               }
-            }}
-            rowMatchesFilter={rowMatchesFilter}
-            onFilteredRowsChange={setFilteredTableEntries}
-            exportFileName={`صور الأشعة المحالة - ${selMonth || "كل الأشهر"}.xlsx`}
-            expandedKey={selEntryId}
-            onRowClick={(e) => setSelEntryId(e.xrayImageId)}
-            getRowClassName={(entry) =>
-              isStudyCompleted(entry, answersMap) ? "dt-tr--completed" : undefined
-            }
-            toolbarEndExtra={
-              canSeeAll ? (
-                <div className="ew-view-switcher" role="group" aria-label="نطاق العرض">
-                  <button
-                    type="button"
-                    className={`ew-view-seg${!showMyOnly ? " active" : ""}`}
-                    onClick={() => setShowMyOnly(false)}
-                  >
-                    الكل
-                  </button>
-                  <button
-                    type="button"
-                    className={`ew-view-seg${showMyOnly ? " active" : ""}`}
-                    onClick={() => setShowMyOnly(true)}
-                  >
-                    المحالة لي
-                  </button>
-                </div>
-              ) : undefined
-            }
-            toolbarStart={
-              <>
-                <label className="ew-label" htmlFor="ref-month">
-                  {L.label_month}
-                  <select
-                    id="ref-month"
-                    className="ew-select"
-                    value={selMonth}
-                    onChange={(e) => setSelMonth(e.target.value)}
-                  >
-                    {months.map((m) => (
-                      <option key={m.folderName} value={m.folderName}>{m.folderName}</option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className="ew-label" htmlFor="ref-tpl">
-                  {L.label_template}
-                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                    {canSetTemplate ? (
-                      <select
-                        id="ref-tpl"
-                        className="ew-select"
-                        value={selTplId}
-                        onChange={(e) => { void handleTplSelect(e.target.value); }}
-                      >
-                        <option value="">اختر نموذجاً...</option>
-                        {tplIndex.map((t) => (
-                          <option key={t.templateId} value={t.templateId}>
-                            {t.templateName} (v{t.version})
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <div className="ew-template-locked" id="ref-tpl">
-                        {activeTpl ? `${activeTpl.templateName} (v${activeTpl.version})` : "لم يتم تعيين نموذج"}
-                      </div>
-                    )}
-                    {selTplId && (
-                      <button
-                        type="button"
-                        className="ew-btn-secondary ew-btn-sm"
-                        title="إعادة تحميل النموذج من القرص"
-                        onClick={() => { void applyTemplate(selTplId, false); }}
-                      >↻</button>
-                    )}
-                  </div>
-                </label>
-
-                {/* Referral action buttons — only in personal scope. Oversight users approve elsewhere. */}
-                {!canSeeAll && canSubmitReferrals && entries.length > 0 && (
-                  <div className="ew-referral-actions">
+              toolbarEndExtra={
+                canSeeAll ? (
+                  <div className="ew-view-switcher" role="group" aria-label="نطاق العرض">
                     <button
                       type="button"
-                      className="ew-btn-referral"
-                      disabled={selectedIds.size === 0}
-                      onClick={() =>
-                        setReferralModal({ xrayImageIds: [...selectedIds], source: "selected" })
-                      }
+                      className={`ew-view-seg${!showMyOnly ? " active" : ""}`}
+                      onClick={() => setShowMyOnly(false)}
                     >
-                      {selectedIds.size > 0 ? `إحالة (${selectedIds.size})` : "إحالة"}
+                      الكل
                     </button>
                     <button
                       type="button"
-                      className="ew-btn-secondary ew-btn-sm"
-                      onClick={() =>
-                        selectAll(
-                          filteredTableEntries
-                            .filter((e) => e.status !== "replaced")
-                            .map((e) => e.xrayImageId)
-                        )
-                      }
+                      className={`ew-view-seg${showMyOnly ? " active" : ""}`}
+                      onClick={() => setShowMyOnly(true)}
                     >
-                      تحديد الظاهر
-                    </button>
-                    {selectedIds.size > 0 && (
-                      <button
-                        type="button"
-                        className="ew-btn-secondary ew-btn-sm"
-                        onClick={clearSelection}
-                      >
-                        إلغاء التحديد
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      className="ew-btn-secondary ew-btn-sm"
-                      onClick={() => selectAll(entries.filter((e) => e.status !== "replaced").map((e) => e.xrayImageId))}
-                    >
-                      تحديد الكل
+                      المحالة لي
                     </button>
                   </div>
-                )}
-              </>
-            }
-          />
+                ) : undefined
+              }
+            />
+          </div>
         );
 
-        return selEntry ? (
-          <>
+        return (
+          <div className="ew-ref-workspace">
             <ReferralStatsStrip stats={personalStats} quota={myQuota} username={username} />
-            <div className={`ew-split ew-split--${panelPosition}`}>
+            <div className={`ew-split ew-split--${selEntry ? panelPosition : "right"}${selEntry ? "" : " ew-split--empty"}`}>
               {tableEl}
-              <InspectionPanel
-                key={selEntry.xrayImageId}
-                entry={selEntry}
-                template={activeTpl}
-                savedAnswer={selAnswer}
-                readonly={canSeeAll && selEntry.assignedTo !== username}
-                panelPosition={panelPosition}
-                onTogglePosition={() => {
-                  const next: InspectionPanelPosition =
-                    panelPosition === "right" ? "bottom" : "right";
-                  setPanelPosition(next);
-                  void saveInspectionPanelPosition(directoryHandle, username, next);
-                }}
-                onClose={() => setSelEntryId(null)}
-                onSave={(ans, submit) =>
-                  handleSave(selEntry.xrayImageId, ans, submit, selEntry.assignedTo)
-                }
-                onReplace={
-                  (canRequestReplacement || canSubmitReferrals) && selEntry.assignedTo === username && selEntry.status === "pending"
-                    ? openReplacementDialog
-                    : undefined
-                }
-                onReassign={
-                  canSubmitReferrals && selEntry.assignedTo === username && selEntry.status === "pending"
-                    ? (entry) => setReferralModal({ xrayImageIds: [entry.xrayImageId], source: "selected" })
-                    : undefined
-                }
-              />
+              {selEntry ? (
+                <SampleDetailPanel
+                  entry={selEntry}
+                  template={activeTpl}
+                  savedAnswer={selAnswer}
+                  readonly={canSeeAll && selEntry.assignedTo !== username}
+                  panelPosition={panelPosition}
+                  onTogglePosition={() => {
+                    const next: InspectionPanelPosition =
+                      panelPosition === "right" ? "bottom" : "right";
+                    setPanelPosition(next);
+                    void saveInspectionPanelPosition(directoryHandle, username, next);
+                  }}
+                  onClose={() => setSelEntryId(null)}
+                  onSave={(ans, submit) =>
+                    handleSave(selEntry.xrayImageId, ans, submit, selEntry.assignedTo)
+                  }
+                  onReplace={
+                    (canRequestReplacement || canSubmitReferrals) && selEntry.assignedTo === username && selEntry.status === "pending"
+                      ? openReplacementDialog
+                      : undefined
+                  }
+                  onReassign={
+                    canSubmitReferrals && selEntry.assignedTo === username && selEntry.status === "pending"
+                      ? (entry) => setReferralModal({ xrayImageIds: [entry.xrayImageId], source: "selected" })
+                      : undefined
+                  }
+                />
+              ) : (
+                <div className="ew-ref-empty-panel">
+                  <strong>اختر عينة لعرض التفاصيل</strong>
+                  <span>اضغط على أي صف في القائمة لفتح نموذج الفحص والإجراءات.</span>
+                </div>
+              )}
             </div>
-          </>
-        ) : (
-          <>
-            <ReferralStatsStrip stats={personalStats} quota={myQuota} username={username} />
-            {tableEl}
-          </>
+          </div>
         );
       })()}
 
@@ -907,6 +851,161 @@ export default function XrayReferrals({ directoryHandle }: Props) {
 }
 
 // ── ReferralRequestModal ──────────────────────────────────────────────────────
+
+function QueueToolbar({
+  labels,
+  months,
+  selectedMonth,
+  onMonthChange,
+  templates,
+  selectedTemplateId,
+  activeTemplate,
+  canSetTemplate,
+  onTemplateChange,
+  onReloadTemplate,
+}: {
+  labels: Labels;
+  months: Array<{ month: number; year: number; folderName: string }>;
+  selectedMonth: string;
+  onMonthChange: (month: string) => void;
+  templates: Array<{ templateId: string; templateName: string; version: number }>;
+  selectedTemplateId: string;
+  activeTemplate: TemplateSchema | null;
+  canSetTemplate: boolean;
+  onTemplateChange: (id: string) => void;
+  onReloadTemplate: () => void;
+}) {
+  return (
+    <div className="ew-ref-queue-toolbar">
+      <label className="ew-label" htmlFor="ref-month">
+        {labels.label_month}
+        <select
+          id="ref-month"
+          className="ew-select"
+          value={selectedMonth}
+          onChange={(e) => onMonthChange(e.target.value)}
+        >
+          {months.map((m) => (
+            <option key={m.folderName} value={m.folderName}>{m.folderName}</option>
+          ))}
+        </select>
+      </label>
+
+      <label className="ew-label" htmlFor="ref-tpl">
+        {labels.label_template}
+        <div className="ew-ref-template-control">
+          {canSetTemplate ? (
+            <select
+              id="ref-tpl"
+              className="ew-select"
+              value={selectedTemplateId}
+              onChange={(e) => onTemplateChange(e.target.value)}
+            >
+              <option value="">اختر نموذجاً...</option>
+              {templates.map((t) => (
+                <option key={t.templateId} value={t.templateId}>
+                  {t.templateName} (v{t.version})
+                </option>
+              ))}
+            </select>
+          ) : (
+            <div className="ew-template-locked" id="ref-tpl">
+              {activeTemplate ? `${activeTemplate.templateName} (v${activeTemplate.version})` : "لم يتم تعيين نموذج"}
+            </div>
+          )}
+          {selectedTemplateId && (
+            <button
+              type="button"
+              className="ew-btn-secondary ew-btn-sm"
+              title="إعادة تحميل النموذج من القرص"
+              onClick={onReloadTemplate}
+            >↻</button>
+          )}
+        </div>
+      </label>
+    </div>
+  );
+}
+
+function SelectionActionBar({
+  selectedCount,
+  visibleCount,
+  onReferSelected,
+  onSelectVisible,
+  onClear,
+}: {
+  selectedCount: number;
+  visibleCount: number;
+  onReferSelected: () => void;
+  onSelectVisible: () => void;
+  onClear: () => void;
+}) {
+  const selectedLabel = selectedCount.toLocaleString("ar-SA-u-nu-latn");
+  const visibleLabel = visibleCount.toLocaleString("ar-SA-u-nu-latn");
+
+  return (
+    <div className="ew-selection-bar" role="region" aria-label="إجراءات العينات المحددة">
+      <strong>{selectedLabel} عينة محددة</strong>
+      <span>{visibleLabel} ظاهرة قابلة للتحديد</span>
+      <div className="ew-selection-actions">
+        <button
+          type="button"
+          className="ew-btn-referral"
+          disabled={selectedCount === 0}
+          onClick={onReferSelected}
+        >
+          إحالة المحدد
+        </button>
+        <button type="button" className="ew-btn-secondary ew-btn-sm" onClick={onSelectVisible}>
+          تحديد الظاهر
+        </button>
+        <button type="button" className="ew-btn-secondary ew-btn-sm" onClick={onClear}>
+          إلغاء التحديد
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SampleDetailPanel({
+  entry,
+  template,
+  savedAnswer,
+  readonly,
+  panelPosition,
+  onTogglePosition,
+  onClose,
+  onSave,
+  onReplace,
+  onReassign,
+}: {
+  entry: DistributionEntry;
+  template: TemplateSchema | null;
+  savedAnswer: ItemAnswer | null;
+  readonly: boolean;
+  panelPosition: InspectionPanelPosition;
+  onTogglePosition: () => void;
+  onClose: () => void;
+  onSave: (ans: FieldAnswer[], submit: boolean) => Promise<void>;
+  onReplace?: (entry: DistributionEntry) => void;
+  onReassign?: (entry: DistributionEntry) => void;
+}) {
+  return (
+    <InspectionPanel
+      key={entry.xrayImageId}
+      entry={entry}
+      template={template}
+      savedAnswer={savedAnswer}
+      readonly={readonly}
+      panelPosition={panelPosition}
+      onTogglePosition={onTogglePosition}
+      onClose={onClose}
+      onSave={onSave}
+      onReplace={onReplace}
+      onReassign={onReassign}
+    />
+  );
+}
 
 function ReferralRequestModal({
   xrayImageIds,
@@ -1104,57 +1203,42 @@ function ReferralStatsStrip({
   quota: PersonalQuota;
   username: string;
 }) {
+  const statsItems = [
+    { label: "حصة اليوم", value: quota ? quota.dailyQuota.toLocaleString("ar-SA-u-nu-latn") : "—", tone: "quota" },
+    { label: "الإجمالي", value: stats.assigned.toLocaleString("ar-SA-u-nu-latn"), tone: "total" },
+    { label: "مكتملة", value: stats.submitted.toLocaleString("ar-SA-u-nu-latn"), tone: "done" },
+    { label: "لم تبدأ", value: stats.notStarted.toLocaleString("ar-SA-u-nu-latn"), tone: "pending" },
+    { label: "المستبدلة \\ المحالة", value: stats.replaced.toLocaleString("ar-SA-u-nu-latn"), tone: "replaced" },
+    { label: "نسبة الإنجاز", value: `${stats.completionPct}%`, tone: "done" },
+  ];
+  const quotaTitle = quota
+    ? `الحصة اليومية: ${quota.dailyQuota.toLocaleString("ar-SA-u-nu-latn")} صورة / يوم · الحصة: ${quota.sampleCount.toLocaleString("ar-SA-u-nu-latn")} · الأيام المتبقية: ${quota.daysRemaining.toLocaleString("ar-SA-u-nu-latn")}`
+    : "لا توجد حصة محفوظة لهذا الشهر";
+
   return (
     <section className="ew-ref-stats" aria-label="إحصائياتي">
-      <div className="ew-ref-stats-head">
-        <div>
-          <span className="ew-ref-stats-eyebrow">إحصائياتي</span>
-          <h2>عيناتي وحالة الإنجاز</h2>
-        </div>
-        <div className="ew-ref-stats-meta">
-          {quota ? <span>الأيام المتبقية: {quota.daysRemaining.toLocaleString("ar-SA-u-nu-latn")}</span> : null}
-          <span className="ew-ref-stats-user">{username}</span>
-        </div>
+      <div className="ew-ref-stats-title" title={quotaTitle}>
+        <strong>متابعة العمل</strong>
       </div>
 
-      <div className="ew-ref-stats-grid">
-        <MiniStat label="الحصة اليومية" value={quota ? quota.dailyQuota : "—"} tone="quota" sub={quota ? "صورة / يوم" : "غير محددة"} />
-        <MiniStat label="إجمالي عيناتي" value={stats.assigned} tone="total" sub={quota ? `الحصة: ${quota.sampleCount.toLocaleString("ar-SA-u-nu-latn")}` : undefined} />
-        <MiniStat label="عينات نشطة" value={stats.active} tone="active" />
-        <MiniStat label="مكتملة" value={stats.submitted} tone="done" sub={`${stats.completionPct}%`} />
-        <MiniStat label="لم تبدأ" value={stats.notStarted} tone="pending" />
-        <MiniStat label={"المستبدلة \\ المحالة"} value={stats.replaced} tone="replaced" />
+      <div className="ew-ref-stats-inline">
+        {statsItems.map((item) => (
+          <span key={item.label} className={`ew-ref-stat-token ew-ref-stat-token--${item.tone}`}>
+            <em>{item.label}</em>
+            <strong>{item.value}</strong>
+          </span>
+        ))}
       </div>
 
-      <div className="ew-ref-progress">
-        <span>نسبة إنجاز عيناتي</span>
-        <div className="ew-ref-progress-track">
-          <div className="ew-ref-progress-fill" style={{ width: `${stats.completionPct}%` }} />
+      <div className="ew-ref-progress" title={`المستخدم: ${username}`}>
+        <div className="ew-ref-progress-track" aria-hidden="true">
+          <div
+            className="ew-ref-progress-fill"
+            style={{ width: `${stats.completionPct}%` }}
+          />
         </div>
-        <strong>{stats.completionPct}%</strong>
       </div>
     </section>
-  );
-}
-
-function MiniStat({
-  label,
-  value,
-  tone,
-  sub,
-}: {
-  label: string;
-  value: number | string;
-  tone: "quota" | "total" | "active" | "done" | "pending" | "replaced";
-  sub?: string;
-}) {
-  const displayValue = typeof value === "number" ? value.toLocaleString("ar-SA-u-nu-latn") : value;
-  return (
-    <div className={`ew-ref-stat-card ew-ref-stat-card--${tone}`}>
-      <span>{label}</span>
-      <strong>{displayValue}</strong>
-      {sub ? <small>{sub}</small> : null}
-    </div>
   );
 }
 
