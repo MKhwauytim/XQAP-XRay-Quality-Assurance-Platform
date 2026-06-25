@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { ClipboardList } from "lucide-react";
+import { Check, ClipboardList } from "lucide-react";
 
 type HighlightType = "port" | "sn" | null;
 
@@ -167,7 +167,7 @@ export default function CertScanGrid({ initialText, onDataChange }: CertScanGrid
             <span className="certscan-hl-dot port-dot" />
             Port Name
             {portCol !== null && (
-              <span className="certscan-hl-assigned">✓ عمود {portCol + 1}</span>
+              <span className="certscan-hl-assigned"><Check size={11} style={{ verticalAlign: "middle" }} /> عمود {portCol + 1}</span>
             )}
           </button>
 
@@ -179,7 +179,7 @@ export default function CertScanGrid({ initialText, onDataChange }: CertScanGrid
             <span className="certscan-hl-dot sn-dot" />
             System S/N
             {snCol !== null && (
-              <span className="certscan-hl-assigned">✓ عمود {snCol + 1}</span>
+              <span className="certscan-hl-assigned"><Check size={11} style={{ verticalAlign: "middle" }} /> عمود {snCol + 1}</span>
             )}
           </button>
         </div>
@@ -187,7 +187,7 @@ export default function CertScanGrid({ initialText, onDataChange }: CertScanGrid
         <div className="certscan-toolbar-right">
           {isReady && (
             <span className="certscan-ready-chip">
-              ✓ {dataRowCount.toLocaleString("ar-SA-u-nu-latn")} جهاز
+              <Check size={11} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> {dataRowCount.toLocaleString("ar-SA-u-nu-latn")} جهاز
             </span>
           )}
           {gridData.length > 1 && (

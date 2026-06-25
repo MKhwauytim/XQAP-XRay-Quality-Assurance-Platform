@@ -1,3 +1,4 @@
+import { Eye, EyeOff } from "lucide-react";
 import {
   Fragment,
   forwardRef,
@@ -860,8 +861,8 @@ function ColPickerPanel({
                 onClick={(e) => { e.stopPropagation(); toggle(col.id); }}
               >
                 {hidden
-                  ? <span className="dt-col-eye-off">○</span>
-                  : <span className="dt-col-eye-on">●</span>}
+                  ? <EyeOff size={14} className="dt-col-eye-off" />
+                  : <Eye size={14} className="dt-col-eye-on" />}
               </button>
             </div>
           );

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, ChevronRight } from "lucide-react";
 import {
   clearErrors,
   getRecentErrors,
@@ -41,7 +41,7 @@ export function ErrorLogSection() {
         {errors.length > 0 && (
           <span className="error-log-badge">{errors.length}</span>
         )}
-        <span className={`error-log-chevron${isOpen ? " open" : ""}`}>›</span>
+        <span className={`error-log-chevron${isOpen ? " open" : ""}`}><ChevronRight size={14} /></span>
       </button>
 
       {isOpen && (

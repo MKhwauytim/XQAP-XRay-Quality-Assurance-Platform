@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Check, X } from "lucide-react";
 import { readSession } from "../../auth/authSession";
 import type { AuthRole } from "../../auth/authTypes";
 import {
@@ -138,7 +139,7 @@ export function FeedbackWidget() {
               <h3>التواصل والاقتراحات</h3>
               <p>{isManager ? "إدارة الرسائل والردود" : "أرسل ملاحظاتك للإدارة"}</p>
             </div>
-            <button className="fb-close" onClick={() => setOpen(false)} aria-label="إغلاق">×</button>
+            <button className="fb-close" onClick={() => setOpen(false)} aria-label="إغلاق"><X size={16} /></button>
           </div>
 
           {/* Admin tabs */}
@@ -181,7 +182,7 @@ export function FeedbackWidget() {
               <>
                 {submitted ? (
                   <div className="fb-success">
-                    <div className="fb-success-icon">✓</div>
+                    <div className="fb-success-icon"><Check size={28} /></div>
                     <h4>تم الإرسال بنجاح</h4>
                     <p>سيتم مراجعة رسالتك من قبل الإدارة</p>
                     <button

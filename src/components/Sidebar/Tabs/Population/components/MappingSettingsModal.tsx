@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Settings2 } from "lucide-react";
+import { Settings2, X } from "lucide-react";
 import type {
   CustomField,
   ExportColumnSetting,
@@ -486,9 +486,9 @@ export default function MappingSettingsModal({
           <button
             type="button"
             onClick={onClose}
-            style={{ background: "none", border: "none", fontSize: "20px", cursor: "pointer", color: "var(--population-muted)" }}
+            style={{ background: "none", border: "none", cursor: "pointer", color: "var(--population-muted)" }}
           >
-            ✕
+            <X size={18} />
           </button>
         </div>
 
@@ -633,7 +633,7 @@ export default function MappingSettingsModal({
                       onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#fee2e2"; (e.currentTarget as HTMLButtonElement).style.color = "#b91c1c"; }}
                       onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#f8fafc"; (e.currentTarget as HTMLButtonElement).style.color = "var(--population-muted)"; }}
                     >
-                      ✕
+                      <X size={14} />
                     </button>
                   </div>
                 ))}
@@ -670,7 +670,7 @@ export default function MappingSettingsModal({
                         cursor: "pointer", height: "36px", width: "36px", fontSize: "14px"
                       }}
                     >
-                      ✕
+                      <X size={14} />
                     </button>
                   </div>
                 ))}

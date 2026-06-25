@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useEffect, useState, type ReactNode } from "react";
-import { AlertTriangle, BarChart2, Building2, ClipboardList, Download, FolderKanban, Settings2, User, Users } from "lucide-react";
+import { AlertTriangle, BarChart2, Building2, Check, ClipboardList, Database, Download, FileStack, Filter, FolderKanban, Globe, History, Printer, Settings2, User, Users, X } from "lucide-react";
 
 import type { SidebarTabModule } from "../tabTypes";
 import { loadOrDeriveDistributionCurrent } from "../../../../data/distribution/distributionStorage";
@@ -243,9 +243,9 @@ export default function ReportsTab() {
       {/* ── Toast ───────────────────────────────────── */}
       {toast && (
         <div className={`rh-toast rh-toast-${toast.type}`} role="status">
-          <span>{toast.type === "ok" ? "✓" : <AlertTriangle size={14} style={{ verticalAlign: "middle" }} />}</span>
+          <span>{toast.type === "ok" ? <Check size={14} style={{ verticalAlign: "middle" }} /> : <AlertTriangle size={14} style={{ verticalAlign: "middle" }} />}</span>
           {toast.text}
-          <button className="rh-toast-close" onClick={() => setToast(null)}>×</button>
+          <button className="rh-toast-close" onClick={() => setToast(null)}><X size={16} /></button>
         </div>
       )}
 
@@ -277,15 +277,15 @@ export default function ReportsTab() {
         <div className="rh-month-sep" />
         <div className="rh-month-chips">
           <span className="rh-chip rh-chip-pop">
-            <i>⊙</i>
+            <Database size={12} />
             {monthMeta ? `${fmtNum(monthMeta.populationCount)} صورة` : "—"}
           </span>
           <span className="rh-chip rh-chip-samp">
-            <i>◈</i>
+            <Filter size={12} />
             {monthMeta?.sampleCount != null ? `${fmtNum(monthMeta.sampleCount)} عينة` : "—"}
           </span>
           <span className="rh-chip rh-chip-ans">
-            <i>✓</i>
+            <Check size={12} />
             {monthMeta?.studiedCount != null ? `${fmtNum(monthMeta.studiedCount)} مدروسة` : "—"}
           </span>
         </div>
@@ -312,8 +312,8 @@ export default function ReportsTab() {
             </p>
             <div className="rh-tags">
               <span className="rh-tag"><FolderKanban size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> 5 شرائح</span>
-              <span className="rh-tag">◈ كل المنافذ</span>
-              <span className="rh-tag">🖨 PDF</span>
+              <span className="rh-tag"><Globe size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> كل المنافذ</span>
+              <span className="rh-tag"><Printer size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> PDF</span>
               <span className="rh-tag"><Download size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> XLSX</span>
             </div>
           </div>
@@ -327,7 +327,7 @@ export default function ReportsTab() {
           <div className="rh-card-accent rh-acc-navy" />
           <div className="rh-card-body">
             <div className="rh-card-top">
-              <div className="rh-icon rh-icon-navy">◈</div>
+              <div className="rh-icon rh-icon-navy"><Filter size={22} /></div>
               <span className="rh-badge rh-badge-ready">جاهز</span>
             </div>
             <div className="rh-card-title">تقرير العينة</div>
@@ -335,8 +335,8 @@ export default function ReportsTab() {
               تفصيل المنافذ والمراحل — بيانات Risk وBI، خام مقابل معالجة، CertScan/NonCertScan، والصفوف المسحوبة للدراسة.
             </p>
             <div className="rh-tags">
-              <span className="rh-tag">⊙ Risk + BI</span>
-              <span className="rh-tag">◎ كل المنافذ</span>
+              <span className="rh-tag"><Database size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> Risk + BI</span>
+              <span className="rh-tag"><Globe size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> كل المنافذ</span>
               <span className="rh-tag"><ClipboardList size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> مراحل</span>
               <span className="rh-tag"><Download size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> XLSX</span>
             </div>
@@ -360,7 +360,7 @@ export default function ReportsTab() {
             </p>
             <div className="rh-tags">
               <span className="rh-tag"><User size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> حسب الموظف</span>
-              <span className="rh-tag">⟳ أحداث اللوج</span>
+              <span className="rh-tag"><History size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> أحداث اللوج</span>
               <span className="rh-tag"><Download size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> XLSX</span>
             </div>
           </div>
@@ -434,7 +434,7 @@ export default function ReportsTab() {
             disabled={busy || !selectedMonth}
             onClick={() => { void generate("sample"); }}
           >
-            <span>◈</span> تقرير العينة
+            <FileStack size={16} style={{ verticalAlign: "middle" }} /> تقرير العينة
           </button>
           <button
             className="rh-quick-btn"

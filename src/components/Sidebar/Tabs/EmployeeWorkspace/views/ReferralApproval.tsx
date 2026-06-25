@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { X } from "lucide-react";
 import { readSession } from "../../../../../auth/authSession";
 import { hasFeature, readUserManagementState } from "../../../../../auth/userManagement";
 import { PageHeader } from "../../../../../components/PageHeader/PageHeader";
@@ -294,9 +295,9 @@ export default function ReferralApproval({ directoryHandle }: Props) {
           {statusMsg.text}
           <button
             type="button"
-            style={{ float: "left", background: "none", border: "none", cursor: "pointer", fontSize: 13 }}
+            style={{ float: "left", background: "none", border: "none", cursor: "pointer" }}
             onClick={() => setStatusMsg(null)}
-          >✕</button>
+          ><X size={14} /></button>
         </div>
       )}
 
@@ -631,7 +632,7 @@ function ReviewModal({
           <div>
             <h3>{title}</h3>
           </div>
-          <button type="button" className="ew-modal-close" onClick={onClose} aria-label="إغلاق">×</button>
+          <button type="button" className="ew-modal-close" onClick={onClose} aria-label="إغلاق"><X size={16} /></button>
         </div>
         <div className="ew-replace-reason">
           <p style={{ margin: 0, color: "#475569" }}>{description}</p>

@@ -4,10 +4,16 @@ import type { ReactNode } from "react";
 import {
   AlertTriangle,
   BarChart2,
-  ClipboardList,
-  Compass,
-  FolderArchive,
-  Search,
+  Check,
+  ChevronRight,
+  Columns,
+  FileText,
+  MessageSquare,
+  PanelLeft,
+  PieChart,
+  RotateCcw,
+  Scan,
+  Table,
   Tag,
   TrendingUp,
 } from "lucide-react";
@@ -52,7 +58,7 @@ type LabelGroup = {
 
 const LABEL_GROUPS: LabelGroup[] = [
   {
-    icon:  <FolderArchive size={18} />,
+    icon:  <PanelLeft size={18} />,
     title: "القائمة الجانبية",
     keys: [
       { key: "sidebar_title",    desc: "عنوان القائمة الجانبية" },
@@ -60,7 +66,7 @@ const LABEL_GROUPS: LabelGroup[] = [
     ],
   },
   {
-    icon:  <Compass size={18} />,
+    icon:  <FileText size={18} />,
     title: "عناوين الصفحات",
     keys: [
       { key: "page_settings_eyebrow",         desc: "النص العلوي لصفحة الإعدادات" },
@@ -76,7 +82,7 @@ const LABEL_GROUPS: LabelGroup[] = [
     ],
   },
   {
-    icon:  "▦",
+    icon:  <Table size={18} />,
     title: "أدوات الجداول",
     keys: [
       { key: "dt_search_placeholder",  desc: "نص البحث في الجداول" },
@@ -102,7 +108,7 @@ const LABEL_GROUPS: LabelGroup[] = [
     ],
   },
   {
-    icon:  "▤",
+    icon:  <Columns size={18} />,
     title: "أعمدة جداول الأشعة",
     keys: [
       { key: "col_xray_image_id",             desc: "عمود معرف الأشعة" },
@@ -129,7 +135,7 @@ const LABEL_GROUPS: LabelGroup[] = [
     ],
   },
   {
-    icon:  "●",
+    icon:  <MessageSquare size={18} />,
     title: "الحالات والرسائل",
     keys: [
       { key: "status_all",             desc: "خيار كل الحالات" },
@@ -171,7 +177,7 @@ const LABEL_GROUPS: LabelGroup[] = [
     ],
   },
   {
-    icon:  <Search size={18} />,
+    icon:  <Scan size={18} />,
     title: "نظام الأشعة (CertScan)",
     keys: [
       { key: "certscan_name",    desc: "اسم نظام الأشعة المركزية" },
@@ -179,7 +185,7 @@ const LABEL_GROUPS: LabelGroup[] = [
     ],
   },
   {
-    icon:  <ClipboardList size={18} />,
+    icon:  <PieChart size={18} />,
     title: "رسوم التقرير التنفيذي",
     keys: [
       { key: "exec_report_title",        desc: "عنوان التقرير التنفيذي" },
@@ -251,7 +257,7 @@ function LabelRow({ labelKey, desc }: { labelKey: LabelKey; desc: string }) {
           onKeyDown={handleKey}
           dir="rtl"
         />
-        {saved && <span className="settings-saved-badge">✓ تم</span>}
+        {saved && <span className="settings-saved-badge"><Check size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> تم</span>}
         <button
           type="button"
           className="settings-reset-btn"
@@ -259,7 +265,7 @@ function LabelRow({ labelKey, desc }: { labelKey: LabelKey; desc: string }) {
           disabled={!custom}
           title="استعادة القيمة الافتراضية"
         >
-          ↺
+          <RotateCcw size={13} />
         </button>
       </div>
     </div>
@@ -304,7 +310,7 @@ function SettingsPage() {
               className="settings-reset-all-btn"
               onClick={handleResetAll}
             >
-              {confirmReset ? <><AlertTriangle size={14} style={{ verticalAlign: "middle", marginInlineEnd: 4 }} /> تأكيد الاستعادة؟</> : `↺ استعادة الكل (${customCount} تعديل)`}
+              {confirmReset ? <><AlertTriangle size={14} style={{ verticalAlign: "middle", marginInlineEnd: 4 }} /> تأكيد الاستعادة؟</> : <><RotateCcw size={13} style={{ verticalAlign: "middle", marginInlineEnd: 4 }} /> استعادة الكل ({customCount} تعديل)</>}
             </button>
           )}
         </PageHeader>
@@ -342,7 +348,7 @@ function SettingsPage() {
                       <span className="settings-section-count">{groupCustomCount} معدّل</span>
                     )}
                   </span>
-                  <span className={`settings-section-chevron${isOpen ? " open" : ""}`}>›</span>
+                  <span className={`settings-section-chevron${isOpen ? " open" : ""}`}><ChevronRight size={14} /></span>
                 </button>
                 {isOpen && (
                   <div className="settings-section-body">

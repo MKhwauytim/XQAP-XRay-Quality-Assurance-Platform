@@ -3,7 +3,7 @@ import type { BiWorkbookResult } from "../biData/biDataTypes";
 import type { PopulationProcessingResult } from "../processing/populationProcessingTypes";
 import DataAccuracyReport from "./DataAccuracyReport";
 import PopulationProcessingReport from "./PopulationProcessingReport";
-import { AlertTriangle, FolderOpen } from "lucide-react";
+import { AlertTriangle, Check, FolderOpen, X } from "lucide-react";
 import CertScanGrid from "./CertScanGrid";
 
 const ARABIC_MONTHS = [
@@ -100,7 +100,9 @@ export default function PhaseTwoReportAndProcessing({
                 className={`phase2-save-msg ${saveToDiskMessage.type === "ok" ? "ok" : "err"}`}
                 role="status"
               >
-                {saveToDiskMessage.type === "ok" ? "✓ حُفظ تلقائياً" : `✕ ${saveToDiskMessage.text}`}
+                {saveToDiskMessage.type === "ok"
+                  ? <><Check size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> حُفظ تلقائياً</>
+                  : <><X size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> {saveToDiskMessage.text}</>}
               </span>
             )}
           </div>
@@ -132,12 +134,12 @@ export default function PhaseTwoReportAndProcessing({
             <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 2 }} />
             <span>لم يتم رفع ملف BI — مقارنة الدقة غير متاحة. رفع ملف BI في المرحلة الأولى يتيح تقرير الدقة الكامل.</span>
           </div>
-        ) : (
+        ) : riskWorkbookResult && biWorkbookResult ? (
           <DataAccuracyReport
-            riskRows={riskWorkbookResult!.rows}
-            biRows={biWorkbookResult!.rows}
+            riskRows={riskWorkbookResult.rows}
+            biRows={biWorkbookResult.rows}
           />
-        )}
+        ) : null}
       </div>
 
       {/* ── Step B: CertScan + Processing ── */}

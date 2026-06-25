@@ -1,5 +1,6 @@
 import type { RiskWorkbookResult } from "../riskData/riskDataTypes";
 import type { BiWorkbookResult } from "../biData/biDataTypes";
+export { formatNumber } from "../../../../../utils/formatting";
 
 // Domain stage helpers live in src/data; imported here for use in UI helpers
 // and re-exported so component consumers keep their import paths unchanged.
@@ -38,10 +39,6 @@ export type MiniReportData = {
   unknownSheetNames: string[];
   sheets: MiniReportSheet[];
 };
-
-export function formatNumber(value: number): string {
-  return value.toLocaleString("ar-SA-u-nu-latn");
-}
 
 export function formatPercentage(value: number): string {
   return `${value.toLocaleString("ar-SA-u-nu-latn", {

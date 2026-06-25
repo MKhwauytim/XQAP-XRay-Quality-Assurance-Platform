@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { X } from "lucide-react";
 
 import { readSession } from "../../../../auth/authSession";
 import {
@@ -570,7 +571,7 @@ function TemplateEditor({
                       onClick={() => removePhase(phase.phaseId)}
                       aria-label="حذف المرحلة"
                     >
-                      ×
+                      <X size={14} />
                     </button>
                   </div>
                 </div>
@@ -698,7 +699,7 @@ function FieldEditor({
             ↓
           </button>
           <button type="button" className="tb-btn-danger-sm" onClick={onRemove} aria-label="حذف الحقل">
-            ×
+            <X size={14} />
           </button>
         </div>
       </div>
@@ -766,7 +767,7 @@ function FieldEditor({
               <div key={`${option}-${optionIndex}`} className="tb-option-item">
                 <span>{option}</span>
                 <button type="button" className="tb-btn-danger-sm" onClick={() => removeOption(optionIndex)}>
-                  ×
+                  <X size={14} />
                 </button>
               </div>
             ))}

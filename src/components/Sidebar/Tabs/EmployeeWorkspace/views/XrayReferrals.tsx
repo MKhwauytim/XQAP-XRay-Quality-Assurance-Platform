@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { X } from "lucide-react";
 import { readSession } from "../../../../../auth/authSession";
 import { PageHeader } from "../../../../../components/PageHeader/PageHeader";
 import {
@@ -664,9 +665,9 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           {statusMsg.text}
           <button
             type="button"
-            style={{ float: "left", background: "none", border: "none", cursor: "pointer", fontSize: 13 }}
+            style={{ float: "left", background: "none", border: "none", cursor: "pointer" }}
             onClick={() => setStatusMsg(null)}
-          >✕</button>
+          ><X size={14} /></button>
         </div>
       )}
 
@@ -950,7 +951,7 @@ function ReferralRequestModal({
             <h3>إحالة العينات</h3>
             <p>{xrayImageIds.length} عينة محددة للإحالة</p>
           </div>
-          <button type="button" className="ew-modal-close" onClick={onClose} aria-label="إغلاق">×</button>
+          <button type="button" className="ew-modal-close" onClick={onClose} aria-label="إغلاق"><X size={16} /></button>
         </div>
 
         <div className="ew-replace-reason">
@@ -1197,7 +1198,7 @@ function ReplacementDialog({
             </p>
           </div>
           <button type="button" className="ew-modal-close" onClick={onClose} aria-label="إغلاق">
-            ×
+            <X size={16} />
           </button>
         </div>
 

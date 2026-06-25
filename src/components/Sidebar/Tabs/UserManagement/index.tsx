@@ -1,5 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 
+import { ChevronRight, Trash2 } from "lucide-react";
 import {
   Fragment,
   useCallback,
@@ -730,7 +731,7 @@ export default function UserManagementTab() {
                           onClick={() => setConfirmDelete(user.id)}
                           title="حذف المستخدم"
                         >
-                          ✕
+                          <Trash2 size={14} />
                         </button>
                       )
                     )}
@@ -833,7 +834,7 @@ export default function UserManagementTab() {
                             className="um-parent-chevron"
                             style={{ transform: isCollapsed ? "rotate(0deg)" : "rotate(90deg)" }}
                             aria-hidden="true"
-                          >›</span>
+                          ><ChevronRight size={14} /></span>
                         )}
                         <strong>{tab.label}</strong>
                         {hasSubTabs && (

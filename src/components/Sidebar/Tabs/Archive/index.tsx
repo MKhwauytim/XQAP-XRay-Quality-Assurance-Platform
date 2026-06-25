@@ -1,5 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { X } from "lucide-react";
 
 import { readSession } from "../../../../auth/authSession";
 import { PageHeader } from "../../../../components/PageHeader/PageHeader";
@@ -19,6 +20,7 @@ import {
 } from "../../../../data/backup/backupStorage";
 import { listMonthFolders } from "../../../../data/population/populationStorage";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
+import { formatDateTime, formatNumber } from "../../../../utils/formatting";
 import type { SidebarTabModule } from "../tabTypes";
 import "./Archive.css";
 
@@ -48,23 +50,6 @@ const STATUS_LABELS: Record<string, string> = {
 function statusLabel(status: string | null): string {
   if (!status) return "غير مكتمل";
   return STATUS_LABELS[status] ?? status;
-}
-
-function formatDateTime(value: string | null | undefined): string {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString("ar-SA-u-nu-latn", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function formatNumber(value: number): string {
-  return value.toLocaleString("ar-SA-u-nu-latn");
 }
 
 function modeLabel(mode: BackupHistoryItem["mode"]): string {
@@ -455,7 +440,7 @@ function RestoreDialog({
             <h2>استعادة نسخة احتياطية</h2>
           </div>
           <button type="button" className="arc-modal-close" onClick={onClose} aria-label="إغلاق">
-            ×
+            <X size={16} />
           </button>
         </div>
 

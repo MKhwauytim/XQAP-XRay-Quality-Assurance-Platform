@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { CheckCircle2 } from "lucide-react";
+import { CheckCircle2, ChevronRight } from "lucide-react";
 import * as XLSX from "xlsx";
 import type { NormalizedRiskRow } from "../riskData/riskDataTypes";
 import type { NormalizedBiRow } from "../biData/biDataTypes";
@@ -431,7 +431,7 @@ export default function DataAccuracyReport({
                       <button key={pg} className={`dar-page-btn${pg === page ? " active" : ""}`} onClick={() => setPage(pg)}>{pg}</button>
                     ) : null;
                   })}
-                  <button className="dar-page-btn" onClick={() => setPage(p => p + 1)} disabled={page === totalPages}>›</button>
+                  <button className="dar-page-btn" onClick={() => setPage(p => p + 1)} disabled={page === totalPages}><ChevronRight size={14} /></button>
                   <button className="dar-page-btn" onClick={() => setPage(totalPages)} disabled={page === totalPages}>»</button>
                 </div>
               </div>

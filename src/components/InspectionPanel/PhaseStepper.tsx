@@ -1,3 +1,4 @@
+import { Check } from "lucide-react";
 import type { TemplatePhase } from "../../data/templates/templateTypes";
 
 type Props = {
@@ -35,7 +36,7 @@ export function PhaseStepper({
             title={phase.title}
           >
             <span className="ip-step-num" aria-hidden="true">
-              {isDone ? "✓" : i + 1}
+              {isDone ? <Check size={13} /> : i + 1}
             </span>
             <span className="ip-step-text">
               <span className="ip-step-label">المرحلة {i + 1}</span>

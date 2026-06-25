@@ -10,7 +10,7 @@ import {
   type DragEvent
 } from "react";
 import * as XLSX from "xlsx";
-import { Settings2 } from "lucide-react";
+import { Check, Settings2 } from "lucide-react";
 
 import type { SidebarTabModule } from "../tabTypes";
 
@@ -59,15 +59,15 @@ import { loadEmployeeAnswers } from "../../../../data/answers/answerStorage";
 import { readUserManagementState } from "../../../../auth/userManagement";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
 
-import type { BiWorkbookResult } from "./biData/biDataTypes";
+import type { BiWorkbookResult, NormalizedBiRow } from "./biData/biDataTypes";
 
 import { exportPopulationProcessingResult } from "./processing/populationExporter";
 import { processPopulation } from "./processing/populationProcessor";
-import type { PopulationProcessingResult } from "./processing/populationProcessingTypes";
+import type { PopulationProcessingResult, PreparedPopulationRow } from "./processing/populationProcessingTypes";
 
 import { exportPopulationReport } from "./reporting/reportExporter";
 
-import type { RiskWorkbookResult } from "./riskData/riskDataTypes";
+import type { NormalizedRiskRow, RiskWorkbookResult } from "./riskData/riskDataTypes";
 
 import WorkbookWorker from "../../../../workers/workbookWorker?worker&inline";
 import type { WorkbookWorkerRequest, WorkbookWorkerResponse } from "../../../../workers/workbookWorkerTypes";
@@ -243,7 +243,7 @@ export default function PopulationTab() {
       // Reconstruct RiskWorkbookResult from saved raw rows
       if (data.riskRawRows.length > 0) {
         const reconstructed: RiskWorkbookResult = {
-          rows: data.riskRawRows as any[],
+          rows: data.riskRawRows as unknown as NormalizedRiskRow[],
           sheetSummaries: [],
           unknownSheetNames: [],
           totalOriginalRows: data.riskRawRows.length,
@@ -256,7 +256,7 @@ export default function PopulationTab() {
       // Reconstruct BiWorkbookResult from saved raw rows
       if (data.biRawRows.length > 0) {
         const reconstructed: BiWorkbookResult = {
-          rows: data.biRawRows as any[],
+          rows: data.biRawRows as unknown as NormalizedBiRow[],
           sheetSummaries: [],
           unknownSheetNames: [],
           totalOriginalRows: data.biRawRows.length,
@@ -268,7 +268,7 @@ export default function PopulationTab() {
 
       if (data.populationRows) {
         setPopulationProcessingResult({
-          preparedRows: data.populationRows as any[],
+          preparedRows: data.populationRows as unknown as PreparedPopulationRow[],
           removedRows: [],
           duplicateRows: [],
           invalidResultRows: [],
@@ -405,7 +405,7 @@ export default function PopulationTab() {
     setUploadError("");
     setProcessingMessage("");
 
-    const browserWindow = window as any;
+    const browserWindow = window as Window & { showOpenFilePicker?: (...args: unknown[]) => Promise<FileSystemFileHandle[]> };
 
     if (!browserWindow.showOpenFilePicker) {
       openFallbackInput(uploadKey);
@@ -1143,7 +1143,7 @@ export default function PopulationTab() {
             >
               <div className="stepper-node">
                 <div className="stepper-circle" aria-hidden="true">
-                  {status === "completed" ? "✓" : phase.id}
+                  {status === "completed" ? <Check size={13} /> : phase.id}
                 </div>
                 <div className="stepper-text">
                   <span className="stepper-num">المرحلة {phase.id}</span>
@@ -1274,7 +1274,7 @@ export default function PopulationTab() {
         <p className="phase-actions-hint">
           {currentPhase < PHASES.length
             ? <strong>{PHASE_HINTS[currentPhase]}</strong>
-            : <strong>اكتملت جميع المراحل ✓</strong>
+            : <strong>اكتملت جميع المراحل <Check size={14} style={{ verticalAlign: "middle" }} /></strong>
           }
         </p>
 

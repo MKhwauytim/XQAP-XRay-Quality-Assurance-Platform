@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, X } from "lucide-react";
 
 import AuthGate from "./auth/AuthGate";
 import type { AuthSession } from "./auth/authTypes";
@@ -164,7 +164,7 @@ function AppContent({ session }: AppContentProps) {
             className="app-bak-warning-close"
             aria-label="إغلاق"
           >
-            ×
+            <X size={16} />
           </button>
         </div>
       )}
@@ -173,7 +173,7 @@ function AppContent({ session }: AppContentProps) {
           <span>{autoBackupRunning ? "جاري إنشاء النسخة الاحتياطية التلقائية..." : autoBackupNotice}</span>
           {!autoBackupRunning && (
             <button type="button" onClick={() => setAutoBackupNotice(null)} aria-label="إغلاق">
-              ×
+              <X size={16} />
             </button>
           )}
         </div>

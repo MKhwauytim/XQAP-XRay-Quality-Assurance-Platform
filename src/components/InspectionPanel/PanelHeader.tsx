@@ -1,3 +1,4 @@
+import { PanelBottom, PanelRight, X } from "lucide-react";
 import type { DistributionEntry } from "../../data/distribution/distributionTypes";
 import type { ItemAnswer } from "../../data/answers/answerTypes";
 
@@ -44,7 +45,7 @@ export function PanelHeader({
             onClick={onTogglePosition}
             aria-label="تبديل موضع اللوحة"
           >
-            {panelPosition === "right" ? "⊟" : "⊞"}
+            {panelPosition === "right" ? <PanelBottom size={16} /> : <PanelRight size={16} />}
           </button>
           <button
             type="button"
@@ -53,7 +54,7 @@ export function PanelHeader({
             onClick={onClose}
             aria-label="إغلاق"
           >
-            ✕
+            <X size={16} />
           </button>
         </div>
       </div>
