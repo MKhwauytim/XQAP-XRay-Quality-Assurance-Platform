@@ -140,7 +140,7 @@ export default function PhaseThreeSampling({
                       value={rule.method}
                       disabled={isLockedState}
                       onChange={(e) =>
-                        handleRuleChange(rule.stageKey, "method", e.target.value)
+                        handleRuleChange(rule.stageKey, "method", e.target.value as StageSamplingRule[keyof StageSamplingRule])
                       }
                     >
                       <option value="percentage">نسبة مئوية (%)</option>
@@ -181,7 +181,7 @@ export default function PhaseThreeSampling({
                         className="save-disk-input"
                         value={rule.certScanMethod}
                         onChange={(e) =>
-                          handleRuleChange(rule.stageKey, "certScanMethod", e.target.value)
+                          handleRuleChange(rule.stageKey, "certScanMethod", e.target.value as StageSamplingRule[keyof StageSamplingRule])
                         }
                       >
                         <option value="percentage">نسبة مئوية (%)</option>
