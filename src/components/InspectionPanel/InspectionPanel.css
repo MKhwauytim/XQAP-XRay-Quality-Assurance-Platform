@@ -18,15 +18,6 @@
   flex-shrink: 0;
 }
 
-/* Bottom panel — fixed lower portion of the split container */
-.ip-panel--bottom {
-  width: 100%;
-  flex: 0 0 42%;
-  height: auto;
-  min-height: 260px;
-  flex-shrink: 0;
-}
-
 /* ── Header ─────────────────────────────────────────────────────────────── */
 
 .ip-header {

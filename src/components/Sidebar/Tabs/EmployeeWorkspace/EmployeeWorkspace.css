@@ -59,20 +59,7 @@
   max-width: none;
 }
 
-.ew-split--bottom {
-  grid-template-columns: 1fr;
-  height: min(760px, calc(100vh - 260px));
-  min-height: 520px;
-  overflow: visible;
-}
-
-.ew-split--bottom .dt-table-wrap {
-  min-height: 0;
-  max-height: none;
-}
-
-.ew-split--right .dt-table-wrap .dt-table,
-.ew-split--bottom .dt-table-wrap .dt-table {
+.ew-split--right .dt-table-wrap .dt-table {
   table-layout: fixed;
   min-width: 980px;
 }

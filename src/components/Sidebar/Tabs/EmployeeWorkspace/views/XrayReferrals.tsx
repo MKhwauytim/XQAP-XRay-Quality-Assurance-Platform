@@ -55,8 +55,6 @@ import {
   loadAdminBrowsePreset,
   loadUserBrowsePreset,
   saveAdminBrowseDatasetPreset,
-  saveInspectionPanelPosition,
-  type InspectionPanelPosition,
 } from "../../../../../data/preferences/browsePresetStorage";
 import InspectionPanel from "../../../../../components/InspectionPanel";
 import {
@@ -242,7 +240,6 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [filteredTableEntries, setFilteredTableEntries] = useState<DistributionEntry[]>([]);
   const [referralModal, setReferralModal] = useState<ReferralModalState>(null);
-  const [panelPosition, setPanelPosition] = useState<InspectionPanelPosition>("right");
   useEffect(() => {
     void listMonthFolders(directoryHandle).then((ms) => {
       setMonths(ms);
@@ -266,9 +263,6 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           widths:  p.widths ?? {},
           dateFmt: (p.dateFmt ?? {}) as ColConfig["dateFmt"],
         });
-      }
-      if (userFile.inspectionPanelPosition) {
-        setPanelPosition(userFile.inspectionPanelPosition);
       }
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps -- applyTemplate is intentionally excluded; it is recreated on every render and including it would trigger an infinite loop
@@ -775,7 +769,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         return (
           <div className="ew-ref-workspace">
             <ReferralStatsStrip stats={personalStats} quota={myQuota} username={username} />
-            <div className={`ew-split ew-split--${selEntry ? panelPosition : "right"}${selEntry ? "" : " ew-split--empty"}`}>
+            <div className={`ew-split ew-split--right${selEntry ? "" : " ew-split--empty"}`}>
               {tableEl}
               {selEntry ? (
                 <SampleDetailPanel
@@ -783,13 +777,6 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                   template={activeTpl}
                   savedAnswer={selAnswer}
                   readonly={canSeeAll && selEntry.assignedTo !== username}
-                  panelPosition={panelPosition}
-                  onTogglePosition={() => {
-                    const next: InspectionPanelPosition =
-                      panelPosition === "right" ? "bottom" : "right";
-                    setPanelPosition(next);
-                    void saveInspectionPanelPosition(directoryHandle, username, next);
-                  }}
                   onClose={() => setSelEntryId(null)}
                   onSave={(ans, submit) =>
                     handleSave(selEntry.xrayImageId, ans, submit, selEntry.assignedTo)
@@ -972,8 +959,6 @@ function SampleDetailPanel({
   template,
   savedAnswer,
   readonly,
-  panelPosition,
-  onTogglePosition,
   onClose,
   onSave,
   onReplace,
@@ -983,8 +968,6 @@ function SampleDetailPanel({
   template: TemplateSchema | null;
   savedAnswer: ItemAnswer | null;
   readonly: boolean;
-  panelPosition: InspectionPanelPosition;
-  onTogglePosition: () => void;
   onClose: () => void;
   onSave: (ans: FieldAnswer[], submit: boolean) => Promise<void>;
   onReplace?: (entry: DistributionEntry) => void;
@@ -997,8 +980,6 @@ function SampleDetailPanel({
       template={template}
       savedAnswer={savedAnswer}
       readonly={readonly}
-      panelPosition={panelPosition}
-      onTogglePosition={onTogglePosition}
       onClose={onClose}
       onSave={onSave}
       onReplace={onReplace}

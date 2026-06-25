@@ -18,12 +18,9 @@ export type BrowseDatasetPreset = {
 
 export type BrowsePresetDatasetKind = BrowseDatasetKind | "xray-referrals";
 
-export type InspectionPanelPosition = "right" | "bottom";
-
 export type UserBrowsePresetFile = {
   username: string;
   browseData: Partial<Record<BrowsePresetDatasetKind, BrowseDatasetPreset>>;
-  inspectionPanelPosition?: InspectionPanelPosition;
 };
 
 export type SharedBrowsePresetFile = {
@@ -150,16 +147,3 @@ export async function saveAdminBrowseDatasetPreset(
   await safeWriteJson(dir, ADMIN_SHARED_PRESET_FILE, nextFile);
 }
 
-export async function saveInspectionPanelPosition(
-  directoryHandle: DirectoryHandleLike,
-  username: string,
-  position: InspectionPanelPosition
-): Promise<void> {
-  const existing = await loadUserBrowsePreset(directoryHandle, username);
-  const nextFile: UserBrowsePresetFile = {
-    ...existing,
-    inspectionPanelPosition: position,
-  };
-  const dir = await getPresetDir(directoryHandle, true);
-  await safeWriteJson(dir, safeUserFileName(username), nextFile);
-}

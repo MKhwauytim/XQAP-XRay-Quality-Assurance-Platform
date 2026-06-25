@@ -228,6 +228,7 @@ export default function DataTable<TRow>({
   // Debounce timer ref for onColConfigChange
   const colChangeDebouncerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [colPickerOpen, setColPickerOpen]       = useState(false);
+  const [colPickerAnchorRect, setColPickerAnchorRect] = useState<DOMRect | null>(null);
   const [openFilterCol, setOpenFilterCol]       = useState<string | null>(null);
   const [filterAnchorRect, setFilterAnchorRect] = useState<DOMRect | null>(null);
   const [filters, setFilters]                   = useState<FiltersMap>({});
@@ -592,29 +593,34 @@ export default function DataTable<TRow>({
             </button>
           )}
           {canConfigureColumns && (
-            <div style={{ position: "relative" }}>
+            <div>
               <button
                 type="button"
                 className="dt-col-picker-btn"
-                onClick={() => { setColPickerOpen((o) => !o); setOpenFilterCol(null); }}
+                onClick={(event) => {
+                  setColPickerAnchorRect(event.currentTarget.getBoundingClientRect());
+                  setColPickerOpen((open) => !open);
+                  setOpenFilterCol(null);
+                }}
               >
                 {L.dt_columns_button} ({visibleCols.length})
               </button>
-              {colPickerOpen && (
-                <ColPickerPanel
-                  columns={columns as DataTableCol<unknown>[]}
-                  cfg={colCfg}
-                  isAdmin={isAdmin}
-                  detectedDates={detectedDates}
-                  defaultVisible={defaultVisible}
-                  onChange={setColCfg}
-                  onClose={() => setColPickerOpen(false)}
-                />
-              )}
             </div>
           )}
         </div>
       </div>
+      {colPickerOpen && colPickerAnchorRect && (
+        <ColPickerPanel
+          columns={columns as DataTableCol<unknown>[]}
+          cfg={colCfg}
+          isAdmin={isAdmin}
+          detectedDates={detectedDates}
+          defaultVisible={defaultVisible}
+          anchorRect={colPickerAnchorRect}
+          onChange={setColCfg}
+          onClose={() => setColPickerOpen(false)}
+        />
+      )}
 
       {/* Row count */}
       <p className="dt-row-count">
@@ -757,12 +763,13 @@ type ColPickerPanelProps = {
   isAdmin: boolean;
   detectedDates: Set<string>;
   defaultVisible?: string[];
+  anchorRect: DOMRect;
   onChange: (c: ColConfig) => void;
   onClose: () => void;
 };
 
 function ColPickerPanel({
-  columns, cfg, isAdmin, detectedDates, defaultVisible, onChange, onClose,
+  columns, cfg, isAdmin, detectedDates, defaultVisible, anchorRect, onChange, onClose,
 }: ColPickerPanelProps) {
   const L = useLabels();
   const ref = useRef<HTMLDivElement>(null);
@@ -776,6 +783,13 @@ function ColPickerPanel({
   }, [onClose]);
 
   const cols = columns.filter((c) => !c.adminOnly || isAdmin);
+  const pickerWidth = 300;
+  const style: CSSProperties = {
+    position: "fixed",
+    top: anchorRect.bottom + 6,
+    left: Math.max(8, Math.min(anchorRect.left, window.innerWidth - pickerWidth - 8)),
+    zIndex: 9999,
+  };
 
   function toggle(id: string): void {
     if (columns.find((c) => c.id === id)?.alwaysVisible) return;
@@ -800,7 +814,7 @@ function ColPickerPanel({
   }
 
   return (
-    <div ref={ref} className="dt-col-picker">
+    <div ref={ref} className="dt-col-picker" style={style}>
       <div className="dt-col-picker-header">
         <strong>{L.dt_columns_title}</strong>
         <span className="dt-col-picker-count">

@@ -12,15 +12,11 @@ import { PhaseStepper } from "./PhaseStepper";
 import { PanelHeader } from "./PanelHeader";
 import "./InspectionPanel.css";
 
-export type PanelPosition = "right" | "bottom";
-
 type Props = {
   entry: DistributionEntry;
   template: TemplateSchema | null;
   savedAnswer: ItemAnswer | null;
   readonly: boolean;
-  panelPosition: PanelPosition;
-  onTogglePosition: () => void;
   onClose: () => void;
   onSave: (ans: FieldAnswer[], submit: boolean) => Promise<void>;
   /** Omit when the current user cannot trigger replacements. */
@@ -34,8 +30,6 @@ export default function InspectionPanel({
   template,
   savedAnswer,
   readonly,
-  panelPosition,
-  onTogglePosition,
   onClose,
   onSave,
   onReplace,
@@ -171,12 +165,10 @@ export default function InspectionPanel({
   }
 
   return (
-    <aside className={`ip-panel ip-panel--${panelPosition}`} dir="rtl">
+    <aside className="ip-panel ip-panel--right" dir="rtl">
       <PanelHeader
         entry={entry}
         savedAnswer={savedAnswer}
-        panelPosition={panelPosition}
-        onTogglePosition={onTogglePosition}
         onClose={onClose}
       />
 

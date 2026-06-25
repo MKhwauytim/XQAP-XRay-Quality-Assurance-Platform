@@ -605,10 +605,6 @@
 /* ── Column picker panel ───────────────────────────────────── */
 
 .dt-col-picker {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  z-index: 400;
   width: 300px;
   background: var(--c-surface, #FFFFFF);
   border: 1px solid var(--c-border, #D6E2EF);

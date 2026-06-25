@@ -1,22 +1,16 @@
-import { PanelBottom, PanelRight, X } from "lucide-react";
+import { X } from "lucide-react";
 import type { DistributionEntry } from "../../data/distribution/distributionTypes";
 import type { ItemAnswer } from "../../data/answers/answerTypes";
-
-type PanelPosition = "right" | "bottom";
 
 type Props = {
   entry: DistributionEntry;
   savedAnswer: ItemAnswer | null;
-  panelPosition: PanelPosition;
-  onTogglePosition: () => void;
   onClose: () => void;
 };
 
 export function PanelHeader({
   entry,
   savedAnswer,
-  panelPosition,
-  onTogglePosition,
   onClose,
 }: Props) {
   const isSubmitted = entry.status === "completed" || savedAnswer?.status === "submitted";
@@ -38,15 +32,6 @@ export function PanelHeader({
           <span className={`ip-badge ${badgeClass}`}>{badgeText}</span>
         </div>
         <div className="ip-header-controls">
-          <button
-            type="button"
-            className="ip-ctrl-btn"
-            title={panelPosition === "right" ? "تبديل إلى اللوحة السفلية" : "تبديل إلى اللوحة الجانبية"}
-            onClick={onTogglePosition}
-            aria-label="تبديل موضع اللوحة"
-          >
-            {panelPosition === "right" ? <PanelBottom size={16} /> : <PanelRight size={16} />}
-          </button>
           <button
             type="button"
             className="ip-ctrl-btn"
