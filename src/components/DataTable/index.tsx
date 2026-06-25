@@ -13,17 +13,18 @@ import {
 import * as XLSX from "xlsx";
 import { useLabels } from "../../data/labels/useLabels";
 import "./DataTable.css";
+import {
+  type DateFormatMode,
+  DATE_FORMAT_LABELS,
+  looksLikeDate,
+  toIsoDate,
+  isFilterEmpty,
+  type DateFilter,
+  type AnyFilter,
+  type FiltersMap,
+} from "./utils";
 
 // ── Public types ──────────────────────────────────────────────────────────────
-
-export type DateFormatMode = "date" | "time" | "month" | "datetime";
-
-export const DATE_FORMAT_LABELS: Record<DateFormatMode, string> = {
-  date:     "التاريخ",
-  time:     "الوقت",
-  month:    "الشهر",
-  datetime: "التاريخ والوقت",
-};
 
 /** Column definition – generic over the row type */
 export type DataTableCol<TRow = unknown> = {
@@ -50,13 +51,6 @@ export type ColConfig = {
   /** Per-column width overrides in fr units (proportional). */
   widths?: Record<string, number>;
 };
-
-export type TextFilter        = { kind: "text";        value: string };
-export type DateFilter        = { kind: "date";        mode: "single" | "range"; single: string; from: string; to: string };
-export type StatusFilter      = { kind: "status";      value: string };
-export type MultiSelectFilter = { kind: "multiselect"; values: string[] };
-export type AnyFilter    = TextFilter | DateFilter | StatusFilter | MultiSelectFilter;
-export type FiltersMap   = Record<string, AnyFilter>;
 
 export type CellMeta = {
   /** True if this column is a date column (explicit or auto-detected). */
@@ -108,39 +102,6 @@ export type DataTableProps<TRow = unknown> = {
   onFilteredRowsChange?: (rows: TRow[]) => void;
 };
 
-// ── Date utilities ────────────────────────────────────────────────────────────
-
-const ISO_DATE_RE  = /^\d{4}-\d{2}-\d{2}(T|\s)\d{2}:\d{2}/;
-const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
-
-export function looksLikeDate(v: string): boolean {
-  return ISO_DATE_RE.test(v) || DATE_ONLY_RE.test(v);
-}
-
-export function formatDate(raw: string, mode: DateFormatMode): string {
-  try {
-    const d = new Date(raw);
-    if (isNaN(d.getTime())) return raw;
-    if (mode === "date")  return d.toLocaleDateString("ar-SA-u-nu-latn", { year: "numeric", month: "2-digit", day: "2-digit" });
-    if (mode === "time")  return d.toLocaleTimeString("ar-SA-u-nu-latn", { hour: "2-digit", minute: "2-digit" });
-    if (mode === "month") return d.toLocaleDateString("ar-SA-u-nu-latn", { year: "numeric", month: "long" });
-    if (mode === "datetime") {
-      const date = d.toLocaleDateString("ar-SA-u-nu-latn", { year: "numeric", month: "2-digit", day: "2-digit" });
-      const time = d.toLocaleTimeString("ar-SA-u-nu-latn", { hour: "2-digit", minute: "2-digit" });
-      return `${date} ${time}`;
-    }
-  } catch { /**/ }
-  return raw;
-}
-
-function toIsoDate(raw: string): string {
-  try {
-    const d = new Date(raw);
-    if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
-  } catch { /**/ }
-  return raw.slice(0, 10);
-}
-
 // ── Column config ────────────────────────────────────────────────────────────
 
 function buildDefault<TRow>(
@@ -171,14 +132,6 @@ function saveColConfig(_storageKey: string, _cfg: ColConfig): void {
 }
 
 // ── Filter utilities ──────────────────────────────────────────────────────────
-
-export function isFilterEmpty(f: AnyFilter): boolean {
-  if (f.kind === "text")        return !f.value;
-  if (f.kind === "status")      return f.value === "all" || !f.value;
-  if (f.kind === "date")        return f.mode === "single" ? !f.single : (!f.from && !f.to);
-  if (f.kind === "multiselect") return f.values.length === 0;
-  return true;
-}
 
 function defaultRowMatchesFilter<TRow>(
   row: TRow,

@@ -41,14 +41,16 @@ import {
 import type { TemplateSchema } from "../../../../../data/templates/templateTypes";
 import type { DirectoryHandleLike } from "../../../../../data/storage/fileSystemAccess";
 import DataTable, {
+  type CellMeta,
+  type ColConfig,
+  type DataTableCol,
+} from "../../../../../components/DataTable";
+import {
   formatDate,
   looksLikeDate,
   type AnyFilter,
-  type CellMeta,
-  type ColConfig,
   type DateFormatMode,
-  type DataTableCol,
-} from "../../../../../components/DataTable";
+} from "../../../../../components/DataTable/utils";
 import {
   loadAdminBrowsePreset,
   loadUserBrowsePreset,

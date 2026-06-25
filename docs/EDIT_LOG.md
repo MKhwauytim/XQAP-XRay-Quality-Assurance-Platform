@@ -4,6 +4,88 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v5.27 — 2026-06-25 — Extract DataTable non-component exports to utils.ts to fix fast-refresh boundary
+
+**File:** `src/components/DataTable/utils.ts` (new file)
+
+**Before:**
+```ts
+// (file did not exist)
+```
+
+**After:**
+```ts
+// Shared utilities extracted from DataTable/index.tsx to avoid fast-refresh boundary pollution.
+export type DateFormatMode = "date" | "time" | "month" | "datetime";
+export const DATE_FORMAT_LABELS: Record<DateFormatMode, string> = { ... };
+export function looksLikeDate(v: string): boolean { ... }
+export function formatDate(raw: string, mode: DateFormatMode): string { ... }
+export function toIsoDate(raw: string): string { ... }
+export function isFilterEmpty(f: AnyFilter): boolean { ... }
+```
+
+---
+
+**File:** `src/components/DataTable/index.tsx`
+
+**Before:**
+```ts
+export type DateFormatMode = "date" | "time" | "month" | "datetime";
+
+export const DATE_FORMAT_LABELS: Record<DateFormatMode, string> = {
+  date:     "التاريخ",
+  time:     "الوقت",
+  month:    "الشهر",
+  datetime: "التاريخ والوقت",
+};
+// ...
+const ISO_DATE_RE  = /^\d{4}-\d{2}-\d{2}(T|\s)\d{2}:\d{2}/;
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+export function looksLikeDate(v: string): boolean { ... }
+export function formatDate(raw: string, mode: DateFormatMode): string { ... }
+function toIsoDate(raw: string): string { ... }
+// ...
+export function isFilterEmpty(f: AnyFilter): boolean { ... }
+```
+
+**After:**
+```ts
+import { DateFormatMode, DATE_FORMAT_LABELS, looksLikeDate, formatDate, toIsoDate, isFilterEmpty } from "./utils";
+// (definitions removed from this file)
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx`
+
+**Before:**
+```ts
+} from "../../../../../components/DataTable";
+```
+
+**After:**
+```ts
+} from "../../../../../components/DataTable";
+// formatDate, looksLikeDate, DateFormatMode imported from utils
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayInspectionResults.tsx`
+
+**Before:**
+```ts
+} from "../../../../../components/DataTable";
+```
+
+**After:**
+```ts
+// formatDate, looksLikeDate, DateFormatMode re-pointed to utils
+```
+
+---
+
 ## v5.26 — 2026-06-25 — Suppress set-state-in-effect for async-load and cleanup effects across 3 files
 
 **File:** `src/components/FeedbackWidget/FeedbackWidget.tsx`

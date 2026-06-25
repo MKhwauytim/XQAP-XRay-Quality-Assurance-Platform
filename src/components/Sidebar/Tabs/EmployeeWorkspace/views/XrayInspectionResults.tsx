@@ -3,13 +3,15 @@ import { readSession } from "../../../../../auth/authSession";
 import { hasFeature, readUserManagementState } from "../../../../../auth/userManagement";
 import { PageHeader } from "../../../../../components/PageHeader/PageHeader";
 import DataTable, {
-  formatDate,
-  looksLikeDate,
   type CellMeta,
   type ColConfig,
   type DataTableCol,
-  type DateFormatMode,
 } from "../../../../../components/DataTable";
+import {
+  formatDate,
+  looksLikeDate,
+  type DateFormatMode,
+} from "../../../../../components/DataTable/utils";
 import { loadAllEmployeeFiles, loadEmployeeAnswers } from "../../../../../data/answers/answerStorage";
 import type { ItemAnswer } from "../../../../../data/answers/answerTypes";
 import {
