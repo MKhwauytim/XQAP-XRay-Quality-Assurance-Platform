@@ -4,6 +4,47 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v5.24 — 2026-06-25 — Replace initialization effect with lazy useState in CertScanGrid
+
+**File:** `src/components/Sidebar/Tabs/Population/components/CertScanGrid.tsx`
+
+**Before:**
+```ts
+const [gridData, setGridData] = useState<string[][]>([]);
+const [portCol, setPortCol] = useState<number | null>(null);
+const [snCol, setSnCol] = useState<number | null>(null);
+const [activeHL, setActiveHL] = useState<HighlightType>(null);
+const pasteRef = useRef<HTMLDivElement>(null);
+const initialised = useRef(false);
+
+// Load from initialText once
+useEffect(() => {
+  if (initialised.current) return;
+  if (!initialText) return;
+  const parsed = parseStoredText(initialText);
+  if (parsed) {
+    setGridData(parsed.data);
+    setPortCol(parsed.portCol);
+    setSnCol(parsed.snCol);
+    initialised.current = true;
+  }
+}, [initialText]);
+```
+
+**After:**
+```ts
+const parsed0 = parseStoredText(initialText ?? "");
+
+const [gridData, setGridData] = useState<string[][]>(() => parsed0?.data ?? []);
+const [portCol, setPortCol] = useState<number | null>(() => parsed0?.portCol ?? null);
+const [snCol, setSnCol] = useState<number | null>(() => parsed0?.snCol ?? null);
+const [activeHL, setActiveHL] = useState<HighlightType>(null);
+const pasteRef = useRef<HTMLDivElement>(null);
+// Removed: initialised ref and initialization useEffect
+```
+
+---
+
 ## v5.23 — 2026-06-25 — Fix set-state-in-effect and purity violations in MappingSettingsModal
 
 **File:** `src/components/Sidebar/Tabs/Population/components/MappingSettingsModal.tsx`

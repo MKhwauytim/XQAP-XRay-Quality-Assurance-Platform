@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import { Check, ClipboardList } from "lucide-react";
 
 type HighlightType = "port" | "sn" | null;
@@ -66,25 +66,13 @@ function mergeRows(
 }
 
 export default function CertScanGrid({ initialText, onDataChange }: CertScanGridProps) {
-  const [gridData, setGridData] = useState<string[][]>([]);
-  const [portCol, setPortCol] = useState<number | null>(null);
-  const [snCol, setSnCol] = useState<number | null>(null);
+  const parsed0 = parseStoredText(initialText ?? "");
+
+  const [gridData, setGridData] = useState<string[][]>(() => parsed0?.data ?? []);
+  const [portCol, setPortCol] = useState<number | null>(() => parsed0?.portCol ?? null);
+  const [snCol, setSnCol] = useState<number | null>(() => parsed0?.snCol ?? null);
   const [activeHL, setActiveHL] = useState<HighlightType>(null);
   const pasteRef = useRef<HTMLDivElement>(null);
-  const initialised = useRef(false);
-
-  // Load from initialText once
-  useEffect(() => {
-    if (initialised.current) return;
-    if (!initialText) return;
-    const parsed = parseStoredText(initialText);
-    if (parsed) {
-      setGridData(parsed.data);
-      setPortCol(parsed.portCol);
-      setSnCol(parsed.snCol);
-      initialised.current = true;
-    }
-  }, [initialText]);
 
   const maxCols = gridData.reduce((m, r) => Math.max(m, r.length), 0);
   const dataRowCount = Math.max(0, gridData.length - 1);
