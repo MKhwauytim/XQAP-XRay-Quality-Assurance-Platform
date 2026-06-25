@@ -128,7 +128,7 @@ function buildDefaultColConfig(columns: DataTableCol<DistributionEntry>[]): ColC
   };
 }
 
-function loadLocalColConfig(_columns: DataTableCol<DistributionEntry>[]): ColConfig | null {
+function loadLocalColConfig(): ColConfig | null {
   return null;
 }
 
@@ -314,7 +314,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   }, [baseColumns, stageMappings, canSeeAll, answersMap]);
 
   const effectiveColConfig = useMemo(
-    () => colPreset ?? loadLocalColConfig(columns) ?? buildDefaultColConfig(columns),
+    () => colPreset ?? loadLocalColConfig() ?? buildDefaultColConfig(columns),
     [columns, colPreset]
   );
 

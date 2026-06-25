@@ -173,7 +173,7 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
         });
         return;
       }
-      setReferralColConfig(loadLocalReferralColConfig(sampleColumns) ?? buildDefaultReferralColConfig(sampleColumns));
+      setReferralColConfig(loadLocalReferralColConfig() ?? buildDefaultReferralColConfig(sampleColumns));
     });
   }, [directoryHandle, sampleColumns, username]);
 
@@ -544,7 +544,7 @@ function buildDefaultReferralColConfig(sampleColumns: DataTableCol<DistributionE
   };
 }
 
-function loadLocalReferralColConfig(_sampleColumns: DataTableCol<DistributionEntry>[]): ColConfig | null {
+function loadLocalReferralColConfig(): ColConfig | null {
   return null;
 }
 

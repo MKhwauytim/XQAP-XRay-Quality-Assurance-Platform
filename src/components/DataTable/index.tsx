@@ -120,14 +120,13 @@ function buildDefault<TRow>(
 }
 
 function loadColConfig<TRow>(
-  _storageKey: string,
   columns: DataTableCol<TRow>[],
   defaultVisible?: string[]
 ): ColConfig {
   return buildDefault(columns, defaultVisible);
 }
 
-function saveColConfig(_storageKey: string, _cfg: ColConfig): void {
+function saveColConfig(): void {
   // Durable table preferences should be saved through onColConfigChange.
 }
 
@@ -217,7 +216,7 @@ export default function DataTable<TRow>({
 
   const [colCfg, setColCfgState] = useState<ColConfig>(() => {
     if (initialColConfig) return initialColConfig;
-    return loadColConfig(storageKey, columns, defaultVisible);
+    return loadColConfig(columns, defaultVisible);
   });
 
   // Debounce timer ref for onColConfigChange
@@ -257,7 +256,7 @@ export default function DataTable<TRow>({
 
   function setColCfg(c: ColConfig): void {
     setColCfgState(c);
-    saveColConfig(storageKey, c);
+    saveColConfig();
     if (onColConfigChange) {
       if (colChangeDebouncerRef.current) clearTimeout(colChangeDebouncerRef.current);
       colChangeDebouncerRef.current = setTimeout(() => { onColConfigChange(c); }, 800);
@@ -270,7 +269,7 @@ export default function DataTable<TRow>({
     if (initialColConfig && !initialSyncedRef.current) {
       initialSyncedRef.current = true;
       setColCfgState(initialColConfig);
-      saveColConfig(storageKey, initialColConfig);
+      saveColConfig();
     }
   }, [initialColConfig, storageKey]);
 
@@ -501,7 +500,7 @@ export default function DataTable<TRow>({
       document.removeEventListener("mouseup",   onUp);
       // Persist on release
       setColCfgState((prev) => {
-        saveColConfig(storageKey, prev);
+        saveColConfig();
         onColConfigChange?.(prev);
         return prev;
       });

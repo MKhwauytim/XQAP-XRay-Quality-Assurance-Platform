@@ -4,6 +4,117 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v5.28 — 2026-06-25 — Remove unused parameters from DataTable col-config helpers
+
+**File:** `src/components/DataTable/index.tsx`
+
+**Before:**
+```ts
+function loadColConfig<TRow>(
+  _storageKey: string,
+  columns: DataTableCol<TRow>[],
+  defaultVisible?: string[]
+): ColConfig {
+  return buildDefault(columns, defaultVisible);
+}
+
+function saveColConfig(_storageKey: string, _cfg: ColConfig): void {
+  // Durable table preferences should be saved through onColConfigChange.
+}
+```
+
+**After:**
+```ts
+function loadColConfig<TRow>(
+  columns: DataTableCol<TRow>[],
+  defaultVisible?: string[]
+): ColConfig {
+  return buildDefault(columns, defaultVisible);
+}
+
+function saveColConfig(): void {
+  // Durable table preferences should be saved through onColConfigChange.
+}
+```
+
+**Call site change (line ~220):**
+```ts
+// Before:
+return loadColConfig(storageKey, columns, defaultVisible);
+
+// After:
+return loadColConfig(columns, defaultVisible);
+```
+
+**Call site change (line ~260, ~273):**
+```ts
+// Before:
+saveColConfig(storageKey, c);
+// ...
+saveColConfig(storageKey, initialColConfig);
+
+// After:
+saveColConfig();
+// ...
+saveColConfig();
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx`
+
+**Before:**
+```ts
+function loadLocalColConfig(_columns: DataTableCol<DistributionEntry>[]): ColConfig | null {
+  return null;
+}
+```
+
+**After:**
+```ts
+function loadLocalColConfig(): ColConfig | null {
+  return null;
+}
+```
+
+**Call site change (line ~317):**
+```ts
+// Before:
+() => colPreset ?? loadLocalColConfig(columns) ?? buildDefaultColConfig(columns),
+
+// After:
+() => colPreset ?? loadLocalColConfig() ?? buildDefaultColConfig(columns),
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayInspectionResults.tsx`
+
+**Before:**
+```ts
+function loadLocalReferralColConfig(_sampleColumns: DataTableCol<DistributionEntry>[]): ColConfig | null {
+  return null;
+}
+```
+
+**After:**
+```ts
+function loadLocalReferralColConfig(): ColConfig | null {
+  return null;
+}
+```
+
+**Call site change (line ~176):**
+```ts
+// Before:
+setReferralColConfig(loadLocalReferralColConfig(sampleColumns) ?? buildDefaultReferralColConfig(sampleColumns));
+
+// After:
+setReferralColConfig(loadLocalReferralColConfig() ?? buildDefaultReferralColConfig(sampleColumns));
+```
+
+---
+
 ## v5.27 — 2026-06-25 — Extract DataTable non-component exports to utils.ts to fix fast-refresh boundary
 
 **File:** `src/components/DataTable/utils.ts` (new file)
