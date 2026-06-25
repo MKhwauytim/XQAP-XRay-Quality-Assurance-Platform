@@ -1,3 +1,4 @@
+import type { PreparedPopulationRow } from "../../../../../data/population/populationTypes";
 import type { SampleMasterData } from "../../../../../data/sampling/sampleTypes";
 import type { PopulationConfig, StageSamplingRule } from "../../../../../data/population/populationConfig";
 import { formatNumber, getStageKey } from "./helpers";
@@ -8,7 +9,7 @@ import { AlertTriangle, Lock, Unlock } from "lucide-react";
 type SaveMessage = { type: "ok" | "error"; text: string } | null;
 
 type PhaseThreeSamplingProps = {
-  populationRows: any[];
+  populationRows: PreparedPopulationRow[];
   sampleSeed: string;
   isDrawingSample: boolean;
   sampleDrawResult: SampleMasterData | null;
@@ -51,7 +52,7 @@ export default function PhaseThreeSampling({
   const handleRuleChange = (
     stageKey: "first" | "second" | "third" | "fourth",
     field: keyof StageSamplingRule,
-    value: any
+    value: StageSamplingRule[keyof StageSamplingRule]
   ) => {
     const updatedRules = config.samplingRules.map((rule) =>
       rule.stageKey === stageKey ? { ...rule, [field]: value } : rule
@@ -75,7 +76,7 @@ export default function PhaseThreeSampling({
         <div className="sampling-stage-rules">
           {config.samplingRules.map((rule) => {
             const size = stageCounts[rule.stageKey];
-            let calculatedCount =
+            const calculatedCount =
               rule.method === "percentage"
                 ? Math.round((rule.value / 100) * size)
                 : rule.value;

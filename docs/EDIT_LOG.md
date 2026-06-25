@@ -4,6 +4,59 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v5.20 — 2026-06-25 — Type PhaseThreeSampling props and fix prefer-const
+
+**File:** `src/components/Sidebar/Tabs/Population/components/PhaseThreeSampling.tsx`
+
+**Before:**
+```ts
+// Fix A — import line and prop type (line 1-2, 11)
+import type { SampleMasterData } from "../../../../../data/sampling/sampleTypes";
+import type { PopulationConfig, StageSamplingRule } from "../../../../../data/population/populationConfig";
+
+type PhaseThreeSamplingProps = {
+  populationRows: any[];
+
+// Fix B — handleRuleChange value parameter (line 54)
+  const handleRuleChange = (
+    stageKey: "first" | "second" | "third" | "fourth",
+    field: keyof StageSamplingRule,
+    value: any
+  ) => {
+
+// Fix C — calculatedCount variable (line 78)
+            let calculatedCount =
+              rule.method === "percentage"
+                ? Math.round((rule.value / 100) * size)
+                : rule.value;
+```
+
+**After:**
+```ts
+// Fix A — add import and type populationRows
+import type { PreparedPopulationRow } from "../../../../../data/population/populationTypes";
+import type { SampleMasterData } from "../../../../../data/sampling/sampleTypes";
+import type { PopulationConfig, StageSamplingRule } from "../../../../../data/population/populationConfig";
+
+type PhaseThreeSamplingProps = {
+  populationRows: PreparedPopulationRow[];
+
+// Fix B — type value parameter
+  const handleRuleChange = (
+    stageKey: "first" | "second" | "third" | "fourth",
+    field: keyof StageSamplingRule,
+    value: StageSamplingRule[keyof StageSamplingRule]
+  ) => {
+
+// Fix C — use const (not reassigned)
+            const calculatedCount =
+              rule.method === "percentage"
+                ? Math.round((rule.value / 100) * size)
+                : rule.value;
+```
+
+---
+
 ## v5.19 — 2026-06-25 — Remove explicit any and fix useMemo deps in PhaseFourDistribution
 
 **File:** `src/components/Sidebar/Tabs/Population/components/PhaseFourDistribution.tsx`
