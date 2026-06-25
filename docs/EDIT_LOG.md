@@ -4,6 +4,68 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v5.18 — 2026-06-25 — Remove explicit any annotations from MappingSettingsModal
+
+**File:** `src/components/Sidebar/Tabs/Population/components/MappingSettingsModal.tsx`
+
+**Before:**
+```ts
+// handleMappingChange
+const updatedTemplates = config.mappingTemplates.map((t: any) =>
+
+// handleBiMappingChange
+const updatedTemplates = config.mappingTemplates.map((t: any) =>
+
+// handleSheetPatternChange
+const updatedTemplates = config.mappingTemplates.map((t: any) => {
+
+// handleAddCustomField
+if (config.systemFields.some((f: any) => f.key === key) || config.customFields.some((f: any) => f.key === key)) {
+const updatedTemplates = config.mappingTemplates.map((t: any) => {
+const updatedExportTemplates = config.exportTemplates.map((exp: any) => ({
+
+// handleToggleSystemFieldRequired
+const updated = config.systemFields.map((f: any) =>
+
+// handleRemoveSystemField
+const updatedFields = config.systemFields.filter((f: any) => f.key !== key);
+const updatedTemplates = config.mappingTemplates.map((t: any) =>
+const updatedExportTemplates = config.exportTemplates.map((exp: any) => ({
+  ...exp,
+  columns: exp.columns.filter((c: any) => c.fieldKey !== key)
+
+// handleRemoveCustomField
+const updatedCustomFields = config.customFields.filter((f: any) => f.key !== key);
+const updatedTemplates = config.mappingTemplates.map((t: any) => {
+const updatedExportTemplates = config.exportTemplates.map((exp: any) => ({
+  ...exp,
+  columns: exp.columns.filter((c: any) => c.fieldKey !== key)
+
+// handleMoveColumn
+  .sort((a: any, b: any) => a.order - b.order);
+const idx = sorted.findIndex((c: any) => c.fieldKey === fieldKey);
+config.exportTemplates.map((exp: any) => ({ ...exp, columns: newSorted }))
+
+// handleExportColumnChange
+const handleExportColumnChange = (fieldKey: string, field: keyof ExportColumnSetting, val: any) => {
+  const updatedColumns = config.exportTemplates[0].columns.map((col: any) => {
+  const updatedExportTemplates = config.exportTemplates.map((exp: any) => ({
+
+// exports tab JSX
+.sort((a: any, b: any) => a.order - b.order)
+.map((col: any, idx: number, arr: any[]) => (
+```
+
+**After:**
+```ts
+// All `: any` removed — TypeScript infers from the typed arrays.
+// val: any → val: ExportColumnSetting[keyof ExportColumnSetting]
+// arr: any[] → arr: ExportColumnSetting[]
+// All other callbacks: parameter type annotations dropped (inferred from typed arrays)
+```
+
+---
+
 ## v5.17 — 2026-06-25 — Add enterprise readiness implementation plan
 
 **File:** `docs/superpowers/plans/2026-06-25-enterprise-readiness.md`

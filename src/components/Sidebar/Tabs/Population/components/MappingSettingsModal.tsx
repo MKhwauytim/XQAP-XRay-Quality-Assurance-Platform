@@ -154,7 +154,7 @@ export default function MappingSettingsModal({
   const handleMappingChange = (fieldKey: string, val: string) => {
     const aliases = val.split(",").map((s) => s.trim()).filter(Boolean);
     const updatedMappings = { ...template.columnMappings, [fieldKey]: aliases };
-    const updatedTemplates = config.mappingTemplates.map((t: any) =>
+    const updatedTemplates = config.mappingTemplates.map((t) =>
       t.templateId === template.templateId ? { ...t, columnMappings: updatedMappings } : t
     );
     onConfigChange({ ...config, mappingTemplates: updatedTemplates });
@@ -163,7 +163,7 @@ export default function MappingSettingsModal({
   const handleBiMappingChange = (fieldKey: string, val: string) => {
     const aliases = val.split(",").map((s) => s.trim()).filter(Boolean);
     const updatedBiMappings = { ...(template.biColumnMappings ?? {}), [fieldKey]: aliases };
-    const updatedTemplates = config.mappingTemplates.map((t: any) =>
+    const updatedTemplates = config.mappingTemplates.map((t) =>
       t.templateId === template.templateId ? { ...t, biColumnMappings: updatedBiMappings } : t
     );
     onConfigChange({ ...config, mappingTemplates: updatedTemplates });
@@ -171,7 +171,7 @@ export default function MappingSettingsModal({
 
   const handleSheetPatternChange = (type: "risk" | "bi", val: string) => {
     const patterns = val.split(",").map((s) => s.trim()).filter(Boolean);
-    const updatedTemplates = config.mappingTemplates.map((t: any) => {
+    const updatedTemplates = config.mappingTemplates.map((t) => {
       if (t.templateId === template.templateId) {
         return {
           ...t,
@@ -316,7 +316,7 @@ export default function MappingSettingsModal({
     const key = newFieldName.trim();
     const labelAr = newFieldLabel.trim();
 
-    if (config.systemFields.some((f: any) => f.key === key) || config.customFields.some((f: any) => f.key === key)) {
+    if (config.systemFields.some((f) => f.key === key) || config.customFields.some((f) => f.key === key)) {
       alert("اسم الكود هذا مستخدم بالفعل.");
       return;
     }
@@ -333,7 +333,7 @@ export default function MappingSettingsModal({
       ...template.columnMappings,
       [key]: [labelAr]
     };
-    const updatedTemplates = config.mappingTemplates.map((t: any) => {
+    const updatedTemplates = config.mappingTemplates.map((t) => {
       if (t.templateId === template.templateId) {
         return { ...t, columnMappings: updatedMappings };
       }
@@ -346,7 +346,7 @@ export default function MappingSettingsModal({
       isEnabled: true,
       order: config.exportTemplates[0]?.columns.length + 1 || 20
     };
-    const updatedExportTemplates = config.exportTemplates.map((exp: any) => ({
+    const updatedExportTemplates = config.exportTemplates.map((exp) => ({
       ...exp,
       columns: [...exp.columns, newExportCol]
     }));
@@ -363,7 +363,7 @@ export default function MappingSettingsModal({
   };
 
   const handleToggleSystemFieldRequired = (key: string) => {
-    const updated = config.systemFields.map((f: any) =>
+    const updated = config.systemFields.map((f) =>
       f.key === key ? { ...f, isRequired: !f.isRequired } : f
     );
     onConfigChange({ ...config, systemFields: updated });
@@ -371,15 +371,15 @@ export default function MappingSettingsModal({
 
   const handleRemoveSystemField = (key: string) => {
     if (!confirm(`هل أنت متأكد من حذف الحقل "${key}" من القائمة؟ يمكنك استعادته من الإعدادات الافتراضية.`)) return;
-    const updatedFields = config.systemFields.filter((f: any) => f.key !== key);
+    const updatedFields = config.systemFields.filter((f) => f.key !== key);
     const updatedMappings = { ...template.columnMappings };
     delete updatedMappings[key];
-    const updatedTemplates = config.mappingTemplates.map((t: any) =>
+    const updatedTemplates = config.mappingTemplates.map((t) =>
       t.templateId === template.templateId ? { ...t, columnMappings: updatedMappings } : t
     );
-    const updatedExportTemplates = config.exportTemplates.map((exp: any) => ({
+    const updatedExportTemplates = config.exportTemplates.map((exp) => ({
       ...exp,
-      columns: exp.columns.filter((c: any) => c.fieldKey !== key)
+      columns: exp.columns.filter((c) => c.fieldKey !== key)
     }));
     onConfigChange({
       ...config,
@@ -392,20 +392,20 @@ export default function MappingSettingsModal({
   const handleRemoveCustomField = (key: string) => {
     if (!confirm("هل أنت متأكد من حذف هذا الحقل المخصص؟")) return;
 
-    const updatedCustomFields = config.customFields.filter((f: any) => f.key !== key);
+    const updatedCustomFields = config.customFields.filter((f) => f.key !== key);
     const updatedMappings = { ...template.columnMappings };
     delete updatedMappings[key];
 
-    const updatedTemplates = config.mappingTemplates.map((t: any) => {
+    const updatedTemplates = config.mappingTemplates.map((t) => {
       if (t.templateId === template.templateId) {
         return { ...t, columnMappings: updatedMappings };
       }
       return t;
     });
 
-    const updatedExportTemplates = config.exportTemplates.map((exp: any) => ({
+    const updatedExportTemplates = config.exportTemplates.map((exp) => ({
       ...exp,
-      columns: exp.columns.filter((c: any) => c.fieldKey !== key)
+      columns: exp.columns.filter((c) => c.fieldKey !== key)
     }));
 
     onConfigChange({
@@ -418,9 +418,9 @@ export default function MappingSettingsModal({
 
   const handleMoveColumn = (fieldKey: string, direction: "up" | "down") => {
     const sorted = [...(config.exportTemplates[0]?.columns || [])].sort(
-      (a: any, b: any) => a.order - b.order
+      (a, b) => a.order - b.order
     );
-    const idx = sorted.findIndex((c: any) => c.fieldKey === fieldKey);
+    const idx = sorted.findIndex((c) => c.fieldKey === fieldKey);
     const swapIdx = direction === "up" ? idx - 1 : idx + 1;
     if (swapIdx < 0 || swapIdx >= sorted.length) return;
     const newSorted = [...sorted];
@@ -429,18 +429,18 @@ export default function MappingSettingsModal({
     newSorted[swapIdx] = { ...newSorted[swapIdx], order: tempOrder };
     onConfigChange({
       ...config,
-      exportTemplates: config.exportTemplates.map((exp: any) => ({ ...exp, columns: newSorted }))
+      exportTemplates: config.exportTemplates.map((exp) => ({ ...exp, columns: newSorted }))
     });
   };
 
-  const handleExportColumnChange = (fieldKey: string, field: keyof ExportColumnSetting, val: any) => {
-    const updatedColumns = config.exportTemplates[0].columns.map((col: any) => {
+  const handleExportColumnChange = (fieldKey: string, field: keyof ExportColumnSetting, val: ExportColumnSetting[keyof ExportColumnSetting]) => {
+    const updatedColumns = config.exportTemplates[0].columns.map((col) => {
       if (col.fieldKey === fieldKey) {
         return { ...col, [field]: val };
       }
       return col;
     });
-    const updatedExportTemplates = config.exportTemplates.map((exp: any) => ({
+    const updatedExportTemplates = config.exportTemplates.map((exp) => ({
       ...exp,
       columns: updatedColumns
     }));
@@ -1175,8 +1175,8 @@ export default function MappingSettingsModal({
                 </div>
 
                 {[...(config.exportTemplates[0]?.columns || [])]
-                  .sort((a: any, b: any) => a.order - b.order)
-                  .map((col: any, idx: number, arr: any[]) => (
+                  .sort((a, b) => a.order - b.order)
+                  .map((col, idx: number, arr: ExportColumnSetting[]) => (
                     <div key={col.fieldKey} className="report-sheet-row" role="row" style={{ gridTemplateColumns: "auto 2fr 2fr 1fr", alignItems: "center" }}>
                       <span style={{ display: "flex", flexDirection: "column", gap: "2px", alignItems: "center" }}>
                         <button
