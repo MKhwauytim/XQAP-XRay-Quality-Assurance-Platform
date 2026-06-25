@@ -1,7 +1,7 @@
 import { getManagedLoginUsers } from "../../../../../auth/userManagement";
 import { AlertTriangle, CheckCircle2, Settings2, XCircle, FilePen } from "lucide-react";
 import type { SampleMasterData } from "../../../../../data/sampling/sampleTypes";
-import type { DistributionCurrentData } from "../../../../../data/distribution/distributionTypes";
+import type { DistributionCurrentData, DistributionEvent } from "../../../../../data/distribution/distributionTypes";
 import type { PopulationConfig, EmployeeStageAllocation } from "../../../../../data/population/populationConfig";
 import SummaryCard from "./SummaryCard";
 import DistributionRow from "./DistributionRow";
@@ -25,7 +25,7 @@ type PhaseFourDistributionProps = {
   onReassign: (xrayImageId: string, reassignedTo: string) => Promise<void>;
   onMarkComplete: (xrayImageId: string) => Promise<void>;
   onRequestReplacement: (xrayImageId: string) => Promise<void>;
-  onApplyBulkAssignment: (events: any[]) => Promise<void>;
+  onApplyBulkAssignment: (events: DistributionEvent[]) => Promise<void>;
 };
 
 const STAGE_LABELS: Record<string, string> = {
@@ -58,8 +58,8 @@ export default function PhaseFourDistribution({
   const employees = useMemo(
     () =>
       getManagedLoginUsers()
-        .filter((u: any) => u.isActive)
-        .map((u: any) => ({
+        .filter((u) => u.isActive)
+        .map((u) => ({
           username: u.username,
           displayName: u.displayName,
           hasCertScanLicense: u.hasCertScanLicense
@@ -67,7 +67,7 @@ export default function PhaseFourDistribution({
     []
   );
 
-  const sampleRows = sampleDrawResult?.rows || [];
+  const sampleRows = useMemo(() => sampleDrawResult?.rows ?? [], [sampleDrawResult]);
 
   const stageSampleCounts = useMemo(
     () => ({
@@ -104,7 +104,7 @@ export default function PhaseFourDistribution({
     username: string,
     stageKey: "first" | "second" | "third" | "fourth",
     field: keyof EmployeeStageAllocation,
-    val: any
+    val: EmployeeStageAllocation[keyof EmployeeStageAllocation]
   ) => {
     const updated = activeAllocations.map((alloc) =>
       alloc.username === username && alloc.stageKey === stageKey
@@ -142,7 +142,7 @@ export default function PhaseFourDistribution({
     }
 
     return { summaryMap, errors };
-  }, [sampleDrawResult, sampleRows, activeAllocations, employees, operatorUsername, config.stageMappings]);
+  }, [sampleDrawResult, sampleRows, activeAllocations, employees, operatorUsername, config.stageMappings, saveMonth, saveYear]);
 
   if (!sampleDrawResult) {
     return (
@@ -154,7 +154,7 @@ export default function PhaseFourDistribution({
   }
 
   const entryMap = new Map(
-    (distributionCurrent?.entries ?? []).map((e: any) => [e.xrayImageId, e])
+    (distributionCurrent?.entries ?? []).map((e) => [e.xrayImageId, e])
   );
 
   const handleRunBulkAssignment = async () => {
@@ -389,7 +389,7 @@ export default function PhaseFourDistribution({
               <span>الإجراء</span>
             </div>
 
-            {sampleDrawResult.rows.map((row: any) => {
+            {sampleDrawResult.rows.map((row) => {
               const entry = entryMap.get(row.xrayImageId);
               return (
                 <DistributionRow

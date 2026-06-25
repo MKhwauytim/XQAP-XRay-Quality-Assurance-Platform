@@ -4,6 +4,68 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v5.19 — 2026-06-25 — Remove explicit any and fix useMemo deps in PhaseFourDistribution
+
+**File:** `src/components/Sidebar/Tabs/Population/components/PhaseFourDistribution.tsx`
+
+**Before:**
+```ts
+// Fix A — import line (line 4)
+import type { DistributionCurrentData } from "../../../../../data/distribution/distributionTypes";
+
+// Fix B — prop type (line 28)
+  onApplyBulkAssignment: (events: any[]) => Promise<void>;
+
+// Fix C — getManagedLoginUsers callbacks (lines 61-62)
+      .filter((u: any) => u.isActive)
+      .map((u: any) => ({
+
+// Fix D — handleAllocationChange val parameter (line 107)
+    val: any
+
+// Fix E — distribution entries map (line 157)
+    (distributionCurrent?.entries ?? []).map((e: any) => [e.xrayImageId, e])
+
+// Fix F — sampleDrawResult rows map (line 392)
+            {sampleDrawResult.rows.map((row: any) => {
+
+// Fix G — sampleRows plain assignment (line 70)
+  const sampleRows = sampleDrawResult?.rows || [];
+
+// Fix H — previewData useMemo missing deps (line 145)
+  }, [sampleDrawResult, sampleRows, activeAllocations, employees, operatorUsername, config.stageMappings]);
+```
+
+**After:**
+```ts
+// Fix A — add DistributionEvent to import
+import type { DistributionCurrentData, DistributionEvent } from "../../../../../data/distribution/distributionTypes";
+
+// Fix B — typed prop
+  onApplyBulkAssignment: (events: DistributionEvent[]) => Promise<void>;
+
+// Fix C — inferred from ManagedLoginUser[]
+      .filter((u) => u.isActive)
+      .map((u) => ({
+
+// Fix D — typed as union of EmployeeStageAllocation values
+    val: EmployeeStageAllocation[keyof EmployeeStageAllocation]
+
+// Fix E — inferred from DistributionEntry[]
+    (distributionCurrent?.entries ?? []).map((e) => [e.xrayImageId, e])
+
+// Fix F — inferred from SampleMasterData rows
+            {sampleDrawResult.rows.map((row) => {
+
+// Fix G — wrapped in useMemo
+  const sampleRows = useMemo(() => sampleDrawResult?.rows ?? [], [sampleDrawResult]);
+
+// Fix H — add saveMonth and saveYear to deps
+  }, [sampleDrawResult, sampleRows, activeAllocations, employees, operatorUsername, config.stageMappings, saveMonth, saveYear]);
+```
+
+---
+
 ## v5.18 — 2026-06-25 — Remove explicit any annotations from MappingSettingsModal
 
 **File:** `src/components/Sidebar/Tabs/Population/components/MappingSettingsModal.tsx`
