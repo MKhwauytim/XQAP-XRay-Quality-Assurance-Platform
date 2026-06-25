@@ -4,6 +4,22 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v5.30 — 2026-06-25 — bump version to 1.0.0
+
+**File:** `package.json`
+
+**Before:**
+```json
+"version": "0.0.0",
+```
+
+**After:**
+```json
+"version": "1.0.0",
+```
+
+---
+
 ## v5.29 — 2026-06-25 — Write complete README.md
 
 **File:** `README.md`
