@@ -222,8 +222,8 @@
   place-items: center;
   flex: 0 0 20px;
 
-  color: currentColor;
-  opacity: 0.8;
+  color: rgba(160, 210, 240, 0.95);
+  opacity: 1;
 }
 
 .sidebar-nav-item:hover .sidebar-nav-icon,
