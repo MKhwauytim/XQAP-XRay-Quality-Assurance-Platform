@@ -98,6 +98,8 @@ export async function processBiWorkbook(
       XLSX.utils,
       worksheet
     );
+    // Free raw worksheet cells — GC can collect them now that we have row arrays.
+    delete workbook.Sheets[sheetName];
     await yieldToMain();
 
     const normalizedRows: NormalizedBiRow[] = [];
@@ -113,7 +115,9 @@ export async function processBiWorkbook(
           columnMappings
         })
       );
-      normalizedRows.push(...mappedChunk);
+      // Use a loop instead of push(...mappedChunk) to avoid call-stack overflow
+      // when mappedChunk is very large (> ~65k items hits V8's argument limit).
+      for (const row of mappedChunk) normalizedRows.push(row);
       if (sourceRows.length > chunkSize) {
         onProgress?.(
           `معالجة ورقة ذكاء الأعمال "${sheetName}": تم تحويل ${Math.min(r + chunkSize, sourceRows.length)} / ${sourceRows.length} صف...`,
@@ -130,7 +134,7 @@ export async function processBiWorkbook(
     const excludedMissingXrayIdCount =
       normalizedRows.length - validRows.length;
 
-    allRows.push(...validRows);
+    for (const row of validRows) allRows.push(row);
 
     sheetSummaries.push({
       sheetName,

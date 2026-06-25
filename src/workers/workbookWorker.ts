@@ -33,9 +33,10 @@ ctx.onmessage = async (ev) => {
           biSheetPatterns,
           biColumnMappings ?? columnMappings
         );
-      } catch {
+      } catch (biErr) {
         // BI file is optional — soft failure, continue with null
-        warning = "تمت قراءة بيانات وكالة المخاطر، ولكن تعذر قراءة ملف ذكاء الأعمال. يمكنك المتابعة لأن ملف ذكاء الأعمال داعم وليس شرطاً.";
+        const detail = biErr instanceof Error ? ` (${biErr.message})` : "";
+        warning = `تمت قراءة بيانات وكالة المخاطر، ولكن تعذر قراءة ملف ذكاء الأعمال${detail}. يمكنك المتابعة لأن ملف ذكاء الأعمال داعم وليس شرطاً.`;
       }
     }
 

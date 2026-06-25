@@ -4,6 +4,90 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v5.36 — 2026-06-25 — Fix 300k-row BI parse failure (stack overflow + memory)
+
+Root cause: `allRows.push(...validRows)` spreads up to 300k arguments, exceeding
+V8's call-stack argument limit (`RangeError: Maximum call stack size exceeded`).
+The worker's soft-catch catches it silently, sets `biResult = null`, and Phase 2
+shows "not read correctly." Same latent bug in riskDataWorkbook.ts at the same
+call site. Secondary improvements: `for...in` in `preprocessLargeNumbers` avoids
+a 6M-element intermediate string array; worksheets freed after parsing to lower
+peak heap in the worker; BI warning now includes the actual error message.
+
+**File:** `src/components/Sidebar/Tabs/Population/biData/biDataWorkbook.ts`
+
+**Before:**
+```ts
+normalizedRows.push(...mappedChunk);
+// ...
+allRows.push(...validRows);
+```
+
+**After:**
+```ts
+for (const row of mappedChunk) normalizedRows.push(row);
+// ...
+// free worksheet immediately — GC can collect 6M cell objects
+delete workbook.Sheets[sheetName];
+// ...
+for (const row of validRows) allRows.push(row);
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/Population/riskData/riskDataWorkbook.ts`
+
+**Before:**
+```ts
+normalizedRows.push(...mappedChunk);
+// ...
+allRows.push(...validRows);
+```
+
+**After:**
+```ts
+for (const row of mappedChunk) normalizedRows.push(row);
+// ...
+delete workbook.Sheets[sheetName];
+// ...
+for (const row of validRows) allRows.push(row);
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/Population/workbook/worksheetRows.ts`
+
+**Before:**
+```ts
+for (const cellRef of Object.keys(worksheet)) {
+```
+
+**After:**
+```ts
+for (const cellRef in worksheet) {
+```
+
+---
+
+**File:** `src/workers/workbookWorker.ts`
+
+**Before:**
+```ts
+} catch {
+  warning = "تمت قراءة بيانات وكالة المخاطر، ولكن تعذر قراءة ملف ذكاء الأعمال...";
+}
+```
+
+**After:**
+```ts
+} catch (biErr) {
+  const detail = biErr instanceof Error ? ` (${biErr.message})` : "";
+  warning = `تمت قراءة بيانات وكالة المخاطر، ولكن تعذر قراءة ملف ذكاء الأعمال${detail}. يمكنك المتابعة لأن ملف ذكاء الأعمال داعم وليس شرطاً.`;
+}
+```
+
+---
+
 ## v5.35 — 2026-06-25 — Remove panel-position toggle; fix col-picker portal positioning; patch employeeXlsx write cast
 
 **File:** `src/data/answers/employeeXlsx.ts`

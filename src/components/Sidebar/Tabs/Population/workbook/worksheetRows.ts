@@ -58,7 +58,7 @@ function isBlankCell(value: RawCell): boolean {
  * otherwise fall back to the rounded integer stringification.
  */
 function preprocessLargeNumbers(worksheet: WorkSheet): void {
-  for (const cellRef of Object.keys(worksheet)) {
+  for (const cellRef in worksheet) {
     if (cellRef.startsWith("!")) {
       continue;
     }

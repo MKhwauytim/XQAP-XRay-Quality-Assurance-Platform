@@ -93,6 +93,8 @@ export async function processRiskWorkbook(
       XLSX.utils,
       worksheet
     );
+    // Free raw worksheet cells so GC can collect them while we normalize.
+    delete workbook.Sheets[sheetName];
     await yieldToMain();
 
     const normalizedRows: NormalizedRiskRow[] = [];
@@ -108,7 +110,7 @@ export async function processRiskWorkbook(
           columnMappings
         })
       );
-      normalizedRows.push(...mappedChunk);
+      for (const row of mappedChunk) normalizedRows.push(row);
       if (sourceRows.length > chunkSize) {
         onProgress?.(
           `معالجة الورقة "${sheetName}": تم تحويل ${Math.min(r + chunkSize, sourceRows.length)} / ${sourceRows.length} صف...`,
@@ -125,7 +127,7 @@ export async function processRiskWorkbook(
     const excludedMissingXrayIdCount =
       normalizedRows.length - validRows.length;
 
-    allRows.push(...validRows);
+    for (const row of validRows) allRows.push(row);
 
     sheetSummaries.push({
       sheetName,
