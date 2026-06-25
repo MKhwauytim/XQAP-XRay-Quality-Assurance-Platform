@@ -5,6 +5,7 @@ import {
   loadEmployeeAnswers,
   upsertItemAnswer
 } from "../../../../../data/answers/answerStorage";
+import { writeEmployeeXlsx } from "../../../../../data/answers/employeeXlsx";
 import type { FieldAnswer, ItemAnswer } from "../../../../../data/answers/answerTypes";
 import { loadOrDeriveDistributionCurrent } from "../../../../../data/distribution/distributionStorage";
 import type { DistributionEntry } from "../../../../../data/distribution/distributionTypes";
@@ -116,11 +117,22 @@ export default function EmployeeDashboard({ directoryHandle }: Props) {
     };
     const result = await upsertItemAnswer(directoryHandle, selectedMonth, username, item);
     if (result.ok) {
-      setSavedAnswers((prev) => {
-        const others = prev.filter((a) => a.xrayImageId !== xrayImageId);
-        return [...others, item];
-      });
+      const nextAnswers = [...savedAnswers.filter((a) => a.xrayImageId !== xrayImageId), item];
+      setSavedAnswers(nextAnswers);
       setStatusMessage({ type: "ok", text: submit ? "تم تقديم الإجابات." : "تم حفظ المسودة." });
+      // When the employee submits their last assigned sample, overwrite the XLSX with full answers.
+      if (submit) {
+        const allSubmitted =
+          myEntries.length > 0 &&
+          myEntries.every((e) =>
+            nextAnswers.find((a) => a.xrayImageId === e.xrayImageId)?.status === "submitted"
+          );
+        if (allSubmitted) {
+          void writeEmployeeXlsx(directoryHandle, selectedMonth, username, myEntries, nextAnswers).catch(
+            () => undefined
+          );
+        }
+      }
     } else {
       setStatusMessage({ type: "error", text: result.error });
     }

@@ -45,6 +45,7 @@ import {
 } from "../../../../data/distribution/distributionLog";
 import type {
   DistributionCurrentData,
+  DistributionEntry,
   DistributionEvent
 } from "../../../../data/distribution/distributionTypes";
 import { drawSample } from "../../../../data/sampling/sampleAlgorithm";
@@ -57,6 +58,7 @@ import {
   type UserBrowsePresetFile
 } from "../../../../data/preferences/browsePresetStorage";
 import { loadEmployeeAnswers } from "../../../../data/answers/answerStorage";
+import { writeEmployeeXlsx } from "../../../../data/answers/employeeXlsx";
 import { readUserManagementState } from "../../../../auth/userManagement";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
 
@@ -968,6 +970,28 @@ export default function PopulationTab() {
     );
     if (result.ok) {
       await refreshDistribution(monthFolderName);
+      // Build per-employee entry lists then write one XLSX per employee (fire-and-forget).
+      const rowMap = new Map(sampleDrawResult.rows.map((r) => [r.xrayImageId, r]));
+      const assignedMap = new Map<string, DistributionEntry[]>();
+      for (const ev of events) {
+        if (ev.eventType !== "assigned") continue;
+        const row = rowMap.get(ev.xrayImageId);
+        if (!row) continue;
+        const entry: DistributionEntry = {
+          xrayImageId: ev.xrayImageId,
+          assignedTo: ev.assignedTo,
+          status: "pending",
+          replacedById: null,
+          lastEventAt: ev.eventAt,
+          row,
+        };
+        const list = assignedMap.get(ev.assignedTo) ?? [];
+        list.push(entry);
+        assignedMap.set(ev.assignedTo, list);
+      }
+      for (const [emp, empEntries] of assignedMap) {
+        void writeEmployeeXlsx(directoryHandle, monthFolderName, emp, empEntries).catch(() => undefined);
+      }
       setDistributionMessage({ type: "ok", text: "تم تطبيق وحفظ التوزيع الجماعي بنجاح." });
     } else {
       setDistributionMessage({ type: "error", text: result.error });
