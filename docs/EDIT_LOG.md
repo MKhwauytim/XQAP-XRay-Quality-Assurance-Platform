@@ -4,6 +4,20 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v5.29 — 2026-06-25 — Write complete README.md
+
+**File:** `README.md`
+
+**Before:**
+```markdown
+# XQAP---XRay-Quality-Assurance-Platform
+```
+
+**After:** (see README.md for full content)
+Replaced with comprehensive project README covering: project title and description, browser requirements (Chromium-only), prerequisites, quick start, build instructions, available commands, architecture overview, user workflow (4 phases), workspace folder layout, authentication & roles, key features, development notes, and support documentation.
+
+---
+
 ## v5.28 — 2026-06-25 — Remove unused parameters from DataTable col-config helpers
 
 **File:** `src/components/DataTable/index.tsx`
