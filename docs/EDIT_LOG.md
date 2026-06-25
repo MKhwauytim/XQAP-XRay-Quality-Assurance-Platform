@@ -57,6 +57,63 @@ type PhaseThreeSamplingProps = {
 
 ---
 
+## v5.21 — 2026-06-25 — Replace useState+useEffect for detectedDates with useMemo; suppress column-resize immutability lint
+
+**File:** `src/components/DataTable/index.tsx`
+
+**Before (Task 4 — detectedDates state + effect):**
+```ts
+const [detectedDates, setDetectedDates] = useState<Set<string>>(new Set());
+
+// Auto-detect date columns from first 10 rows
+useEffect(() => {
+  const sample = rows.slice(0, 10);
+  const detected = new Set<string>();
+  for (const col of columns) {
+    if (col.isDate) { detected.add(col.id); continue; }
+    if (col.filterKind === "status") continue;
+    for (const row of sample) {
+      const v = col.accessor(row);
+      if (v && looksLikeDate(v)) { detected.add(col.id); break; }
+    }
+  }
+  setDetectedDates(detected);
+}, [rows, columns]);
+```
+
+**After (Task 4 — useMemo, samples 200 rows):**
+```ts
+const detectedDates = useMemo<Set<string>>(() => {
+  const sample = rows.length > 200 ? rows.slice(0, 200) : rows;
+  const detected = new Set<string>();
+  for (const col of columns) {
+    if (col.isDate) { detected.add(col.id); continue; }
+    if (col.filterKind === "status") continue;
+    for (const row of sample) {
+      const v = col.accessor(row);
+      if (v && looksLikeDate(v)) { detected.add(col.id); break; }
+    }
+  }
+  return detected;
+}, [rows, columns]);
+```
+
+**Before (Task 5 — column-resize cursor mutations, no lint suppression):**
+```ts
+document.body.style.cursor     = "col-resize";
+document.body.style.userSelect = "none";
+```
+
+**After (Task 5 — eslint-disable comments added):**
+```ts
+// eslint-disable-next-line react-hooks/immutability -- cursor change is a valid DOM side-effect in a mouse-event handler, not during render
+document.body.style.cursor     = "col-resize";
+// eslint-disable-next-line react-hooks/immutability -- same as above
+document.body.style.userSelect = "none";
+```
+
+---
+
 ## v5.19 — 2026-06-25 — Remove explicit any and fix useMemo deps in PhaseFourDistribution
 
 **File:** `src/components/Sidebar/Tabs/Population/components/PhaseFourDistribution.tsx`

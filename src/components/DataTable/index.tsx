@@ -273,7 +273,19 @@ export default function DataTable<TRow>({
   const [openFilterCol, setOpenFilterCol]       = useState<string | null>(null);
   const [filterAnchorRect, setFilterAnchorRect] = useState<DOMRect | null>(null);
   const [filters, setFilters]                   = useState<FiltersMap>({});
-  const [detectedDates, setDetectedDates]       = useState<Set<string>>(new Set());
+  const detectedDates = useMemo<Set<string>>(() => {
+    const sample = rows.length > 200 ? rows.slice(0, 200) : rows;
+    const detected = new Set<string>();
+    for (const col of columns) {
+      if (col.isDate) { detected.add(col.id); continue; }
+      if (col.filterKind === "status") continue;
+      for (const row of sample) {
+        const v = col.accessor(row);
+        if (v && looksLikeDate(v)) { detected.add(col.id); break; }
+      }
+    }
+    return detected;
+  }, [rows, columns]);
   const [globalSearch, setGlobalSearch]         = useState("");
   const [debouncedSearch, setDebouncedSearch]   = useState("");
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -333,21 +345,6 @@ export default function DataTable<TRow>({
       if (raf !== null) cancelAnimationFrame(raf);
     };
   }, []);
-
-  // Auto-detect date columns from first 10 rows
-  useEffect(() => {
-    const sample = rows.slice(0, 10);
-    const detected = new Set<string>();
-    for (const col of columns) {
-      if (col.isDate) { detected.add(col.id); continue; }
-      if (col.filterKind === "status") continue;
-      for (const row of sample) {
-        const v = col.accessor(row);
-        if (v && looksLikeDate(v)) { detected.add(col.id); break; }
-      }
-    }
-    setDetectedDates(detected);
-  }, [rows, columns]);
 
   // Reconcile the persisted column order with the current column set:
   //  • keep known ids in their saved position,
@@ -517,7 +514,9 @@ export default function DataTable<TRow>({
       totalFr: tFr,
       tableW,
     };
+    // eslint-disable-next-line react-hooks/immutability -- cursor change is a valid DOM side-effect in a mouse-event handler, not during render
     document.body.style.cursor     = "col-resize";
+    // eslint-disable-next-line react-hooks/immutability -- same as above
     document.body.style.userSelect = "none";
 
     function onMove(ev: MouseEvent): void {
