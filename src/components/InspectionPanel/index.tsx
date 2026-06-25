@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { DistributionEntry } from "../../data/distribution/distributionTypes";
 import type { FieldAnswer, ItemAnswer } from "../../data/answers/answerTypes";
 import type { TemplateField, TemplateSchema } from "../../data/templates/templateTypes";
@@ -56,16 +56,6 @@ export default function InspectionPanel({
 
   const [activePhaseId, setActivePhaseId] = useState<string>(() => phases[0]?.phaseId ?? "");
 
-  useEffect(() => {
-    if (phases.length === 0) {
-      setActivePhaseId("");
-      return;
-    }
-    if (!phases.some((phase) => phase.phaseId === activePhaseId)) {
-      setActivePhaseId(phases[0]!.phaseId);
-    }
-  }, [activePhaseId, phases]);
-
   const phaseValidation = useMemo(() => {
     const completed = new Set<string>();
     const enabled = new Set<string>();
@@ -90,10 +80,19 @@ export default function InspectionPanel({
   const completedPhaseIds = phaseValidation.completed;
   const enabledPhaseIds = phaseValidation.enabled;
 
-  useEffect(() => {
-    if (!template || !activePhaseId || enabledPhaseIds.has(activePhaseId)) return;
-    setActivePhaseId(phaseValidation.firstIncompletePhaseId ?? phases[0]?.phaseId ?? "");
-  }, [activePhaseId, enabledPhaseIds, phaseValidation.firstIncompletePhaseId, phases, template]);
+  // Derives the phase ID to actually render — auto-corrects when the stored selection is invalid.
+  // This avoids setState-in-effect while keeping user navigation (setActivePhaseId) working.
+  const safeActivePhaseId: string = (() => {
+    if (phases.length === 0) return "";
+    if (phases.some((p) => p.phaseId === activePhaseId)) {
+      // If the user's selection is disabled (gated by prior phase completion), redirect
+      if (template && !enabledPhaseIds.has(activePhaseId)) {
+        return phaseValidation.firstIncompletePhaseId ?? phases[0]!.phaseId;
+      }
+      return activePhaseId;
+    }
+    return phases[0]!.phaseId;
+  })();
 
   const missingRequiredFields = useMemo(() => {
     if (!template) return [];
@@ -153,7 +152,7 @@ export default function InspectionPanel({
       {template && phases.length > 1 && (
         <PhaseStepper
           phases={phases}
-          activePhaseId={activePhaseId}
+          activePhaseId={safeActivePhaseId}
           completedPhaseIds={completedPhaseIds}
           enabledPhaseIds={enabledPhaseIds}
           onSelect={setActivePhaseId}
@@ -169,7 +168,7 @@ export default function InspectionPanel({
           <EditView
             template={template}
             ans={ans}
-            activePhaseId={activePhaseId}
+            activePhaseId={safeActivePhaseId}
             phases={phases}
             invalidRequiredIds={invalidRequiredIds}
             onChange={(fieldId, value) => {

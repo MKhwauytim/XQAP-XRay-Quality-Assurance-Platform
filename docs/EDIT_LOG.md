@@ -4,6 +4,59 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v5.22 — 2026-06-25 — Replace set-state-in-effect in InspectionPanel with derived safeActivePhaseId
+
+**File:** `src/components/InspectionPanel/index.tsx`
+
+**Before:**
+```ts
+import { useEffect, useMemo, useState } from "react";
+
+// Effect 1 (lines 59-67): reset activePhaseId when phase no longer in phases array
+useEffect(() => {
+  if (phases.length === 0) {
+    setActivePhaseId("");
+    return;
+  }
+  if (!phases.some((phase) => phase.phaseId === activePhaseId)) {
+    setActivePhaseId(phases[0]!.phaseId);
+  }
+}, [activePhaseId, phases]);
+
+// Effect 2 (lines 93-96): jump to first incomplete phase when current is disabled
+useEffect(() => {
+  if (!template || !activePhaseId || enabledPhaseIds.has(activePhaseId)) return;
+  setActivePhaseId(phaseValidation.firstIncompletePhaseId ?? phases[0]?.phaseId ?? "");
+}, [activePhaseId, enabledPhaseIds, phaseValidation.firstIncompletePhaseId, phases, template]);
+
+// JSX uses activePhaseId directly
+<PhaseStepper activePhaseId={activePhaseId} ... />
+<EditView activePhaseId={activePhaseId} ... />
+```
+
+**After:**
+```ts
+import { useMemo, useState } from "react";
+
+// Derived constant replaces both effects
+const safeActivePhaseId: string = (() => {
+  if (phases.length === 0) return "";
+  if (phases.some((p) => p.phaseId === activePhaseId)) {
+    if (template && !enabledPhaseIds.has(activePhaseId)) {
+      return phaseValidation.firstIncompletePhaseId ?? phases[0]!.phaseId;
+    }
+    return activePhaseId;
+  }
+  return phases[0]!.phaseId;
+})();
+
+// JSX uses safeActivePhaseId for rendering
+<PhaseStepper activePhaseId={safeActivePhaseId} ... />
+<EditView activePhaseId={safeActivePhaseId} ... />
+```
+
+---
+
 ## v5.20 — 2026-06-25 — Type PhaseThreeSampling props and fix prefer-const
 
 **File:** `src/components/Sidebar/Tabs/Population/components/PhaseThreeSampling.tsx`
