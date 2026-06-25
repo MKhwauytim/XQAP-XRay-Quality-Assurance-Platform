@@ -132,6 +132,7 @@ function AppContent({ session }: AppContentProps) {
 
   useEffect(() => {
     if (activeTabId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- accumulates visited tabs; useMemo cannot grow a Set across renders, making this effect the correct pattern
       setMountedTabIds((prev) =>
         prev.has(activeTabId) ? prev : new Set([...prev, activeTabId])
       );
@@ -141,6 +142,7 @@ function AppContent({ session }: AppContentProps) {
   // Drop tabs that are no longer allowed (role change)
   useEffect(() => {
     const allowedIds = new Set(allowedTabs.map((t) => t.id));
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- prunes stale tab refs on role change; set updater ensures a single re-render
     setMountedTabIds((prev) => {
       const next = new Set([...prev].filter((id) => allowedIds.has(id)));
       return next.size !== prev.size ? next : prev;

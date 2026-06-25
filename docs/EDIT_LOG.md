@@ -4,6 +4,60 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v5.25 — 2026-06-25 — Suppress set-state-in-effect for tab accumulation effects in App.tsx
+
+**File:** `src/App.tsx`
+
+**Before (Effect 1):**
+```ts
+useEffect(() => {
+  if (activeTabId) {
+    setMountedTabIds((prev) =>
+      prev.has(activeTabId) ? prev : new Set([...prev, activeTabId])
+    );
+  }
+}, [activeTabId]);
+```
+
+**After (Effect 1):**
+```ts
+useEffect(() => {
+  if (activeTabId) {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- accumulates visited tabs; useMemo cannot grow a Set across renders, making this effect the correct pattern
+    setMountedTabIds((prev) =>
+      prev.has(activeTabId) ? prev : new Set([...prev, activeTabId])
+    );
+  }
+}, [activeTabId]);
+```
+
+**Before (Effect 2):**
+```ts
+// Drop tabs that are no longer allowed (role change)
+useEffect(() => {
+  const allowedIds = new Set(allowedTabs.map((t) => t.id));
+  setMountedTabIds((prev) => {
+    const next = new Set([...prev].filter((id) => allowedIds.has(id)));
+    return next.size !== prev.size ? next : prev;
+  });
+}, [allowedTabs]);
+```
+
+**After (Effect 2):**
+```ts
+// Drop tabs that are no longer allowed (role change)
+useEffect(() => {
+  const allowedIds = new Set(allowedTabs.map((t) => t.id));
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- prunes stale tab refs on role change; set updater ensures a single re-render
+  setMountedTabIds((prev) => {
+    const next = new Set([...prev].filter((id) => allowedIds.has(id)));
+    return next.size !== prev.size ? next : prev;
+  });
+}, [allowedTabs]);
+```
+
+---
+
 ## v5.24 — 2026-06-25 — Replace initialization effect with lazy useState in CertScanGrid
 
 **File:** `src/components/Sidebar/Tabs/Population/components/CertScanGrid.tsx`
