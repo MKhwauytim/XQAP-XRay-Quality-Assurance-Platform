@@ -178,6 +178,7 @@ export default function PopulationTab() {
     if (directoryHandle) {
       loadPopulationConfig(directoryHandle).then((c) => setConfig(c));
     } else {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync reset when workspace is disconnected; synchronizing with the FSA external system is the correct use of effects
       setConfig(DEFAULT_POPULATION_CONFIG);
     }
   }, [directoryHandle]);
@@ -190,6 +191,7 @@ export default function PopulationTab() {
 
   useEffect(() => {
     if (!directoryHandle) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync cleanup when workspace is removed; effect correctly synchronizes with File System Access API
       setExistingMonths([]);
       return;
     }
@@ -1865,6 +1867,7 @@ function BrowseDataView({
 
   useEffect(() => {
     if (!directoryHandle) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync cleanup when workspace is removed; effect correctly synchronizes with File System Access API
       setBrowsePreset(null);
       setIsPresetLoaded(true);
       return;
@@ -1891,6 +1894,7 @@ function BrowseDataView({
 
   useEffect(() => {
     if (!directoryHandle || !isPresetLoaded) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync loading indicator before async browse row load; necessary to show spinner while data fetches
     setLoading(true);
     loadBrowseRows(
       directoryHandle as Parameters<typeof loadBrowseRows>[0],

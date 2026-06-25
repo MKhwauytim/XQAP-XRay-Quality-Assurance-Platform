@@ -60,6 +60,7 @@ export function FeedbackWidget() {
   }, [directoryHandle]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async refresh; setState fires inside the async callback, not synchronously in the effect body
     if (open) void refresh();
   }, [open, refresh]);
 

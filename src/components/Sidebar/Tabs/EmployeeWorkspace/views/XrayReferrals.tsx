@@ -269,6 +269,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         setPanelPosition(userFile.inspectionPanelPosition);
       }
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- applyTemplate is intentionally excluded; it is recreated on every render and including it would trigger an infinite loop
   }, [baseColumns, directoryHandle, username]);
 
   // O(1) answer lookup keyed by `${xrayImageId}::${answeredBy}`.
@@ -330,6 +331,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   useEffect(() => {
     if (displayEntries.length === 0) return;
     const valid = selEntryId != null && displayEntries.some((e) => e.xrayImageId === selEntryId);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- auto-corrects selection when the display list changes; useMemo cannot accumulate user navigation state
     if (!valid) setSelEntryId(displayEntries[0].xrayImageId);
   }, [displayEntries, selEntryId]);
 
@@ -416,6 +418,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     }
   }, [directoryHandle, selMonth, username, canSeeAll]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- async data load; setState fires inside loadData's async callback, not synchronously in the effect body
   useEffect(() => { void loadData(); }, [loadData]);
 
   async function applyTemplate(id: string, shouldSave: boolean): Promise<void> {

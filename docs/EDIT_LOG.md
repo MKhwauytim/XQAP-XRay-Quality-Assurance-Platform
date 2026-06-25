@@ -4,6 +4,95 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v5.26 — 2026-06-25 — Suppress set-state-in-effect for async-load and cleanup effects across 3 files
+
+**File:** `src/components/FeedbackWidget/FeedbackWidget.tsx`
+
+**Before:**
+```ts
+useEffect(() => {
+  if (open) void refresh();
+}, [open, refresh]);
+```
+
+**After:**
+```ts
+useEffect(() => {
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- async refresh; setState fires inside the async callback, not synchronously in the effect body
+  if (open) void refresh();
+}, [open, refresh]);
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx`
+
+**Before (effect ~272 — initial data load):**
+```ts
+  }, [baseColumns, directoryHandle, username]);
+```
+*(eslint-disable-next-line for exhaustive-deps added above this line to suppress applyTemplate missing dep)*
+
+**Before (auto-select effect ~333):**
+```ts
+    if (!valid) setSelEntryId(displayEntries[0].xrayImageId);
+```
+
+**After (auto-select effect ~333):**
+```ts
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- auto-corrects selection when the display list changes; useMemo cannot accumulate user navigation state
+    if (!valid) setSelEntryId(displayEntries[0].xrayImageId);
+```
+
+**Before (async data load effect ~419):**
+```ts
+  useEffect(() => { void loadData(); }, [loadData]);
+```
+
+**After (async data load effect ~419):**
+```ts
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- async data load; setState fires inside loadData's async callback, not synchronously in the effect body
+  useEffect(() => { void loadData(); }, [loadData]);
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/Population/index.tsx`
+
+**Before (sync reset ~181):**
+```ts
+  } else {
+    setConfig(DEFAULT_POPULATION_CONFIG);
+  }
+```
+
+**After (sync reset ~181):**
+```ts
+  } else {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync reset when workspace is disconnected; synchronizing with the FSA external system is the correct use of effects
+    setConfig(DEFAULT_POPULATION_CONFIG);
+  }
+```
+
+**Before (sync cleanup ~193):**
+```ts
+  if (!directoryHandle) {
+    setExistingMonths([]);
+    return;
+  }
+```
+
+**After (sync cleanup ~193):**
+```ts
+  if (!directoryHandle) {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync cleanup when workspace is removed; effect correctly synchronizes with File System Access API
+    setExistingMonths([]);
+    return;
+  }
+```
+
+---
+
 ## v5.25 — 2026-06-25 — Suppress set-state-in-effect for tab accumulation effects in App.tsx
 
 **File:** `src/App.tsx`
