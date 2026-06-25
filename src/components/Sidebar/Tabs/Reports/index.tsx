@@ -85,6 +85,7 @@ export default function ReportsTab() {
 
   // Load lightweight meta for the month bar chips
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync null-clear when workspace or month is deselected; synchronizes with external workspace state
     if (!directoryHandle || !selectedMonth) { setMonthMeta(null); return; }
     setMonthMeta(null);
     void (async () => {

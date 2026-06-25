@@ -49,6 +49,7 @@ import type {
 } from "../../../../data/distribution/distributionTypes";
 import { drawSample } from "../../../../data/sampling/sampleAlgorithm";
 import { loadSampleMaster, saveSampleMaster } from "../../../../data/sampling/sampleStorage";
+import type { SampleMasterData } from "../../../../data/sampling/sampleTypes";
 import {
   loadAdminBrowsePreset,
   loadUserBrowsePreset,
@@ -350,7 +351,7 @@ export default function PopulationTab() {
   const [sampleSeed, setSampleSeed] = useState(() => Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10));
   const [isDrawingSample, setIsDrawingSample] = useState(false);
   const [sampleDrawResult, setSampleDrawResult] =
-    useState<any | null>(null); // SampleMasterData
+    useState<SampleMasterData | null>(null);
   const [sampleSaveMessage, setSampleSaveMessage] =
     useState<SaveMessage>(null);
 
@@ -623,7 +624,7 @@ export default function PopulationTab() {
       if (directoryHandle && riskWorkbookResult) {
         await performSaveToDisk(result, riskWorkbookResult);
       }
-    } catch (e) {
+    } catch {
       setPopulationProcessingResult(null);
       setProcessingMessage(
         "تعذر تنفيذ معالجة المجتمع. تحقق من بيانات CertScan أو من بنية البيانات المقروءة."
@@ -711,6 +712,7 @@ export default function PopulationTab() {
           : [],
         // Strip rawRow before persisting — raw data is already in risk.raw.json
         processedRows: processingResult.preparedRows.map(
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
           ({ rawRow: _rawRow, ...rest }) => rest
         ) as Array<Record<string, unknown>>,
         certScanRows: processingResult.summary.certScanRows,
@@ -1829,6 +1831,7 @@ function rowMatchesColumnFilters(
 }
 
 function safeExportFileName(value: string): string {
+  // eslint-disable-next-line no-control-regex -- intentionally strips ASCII control characters (U+0000-U+001F) from file names
   return value.replace(/[<>:"/\\|?*\u0000-\u001F]+/g, "-").replace(/\s+/g, "_");
 }
 

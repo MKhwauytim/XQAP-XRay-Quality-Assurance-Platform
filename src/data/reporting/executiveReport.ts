@@ -360,6 +360,7 @@ function slide3(kpis: ExecutiveKPIs, config: ExecutiveReportConfig, monthLabel: 
   </section>`;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- _monthLabel kept for call-site signature consistency; may be used in future slide revisions
 function slide4(kpis: ExecutiveKPIs, _monthLabel: string): string {
   const total = kpis.validStudied;
   const pctRow = (n: number) => total > 0 ? `${((n / total) * 100).toFixed(1)}%` : "—";
