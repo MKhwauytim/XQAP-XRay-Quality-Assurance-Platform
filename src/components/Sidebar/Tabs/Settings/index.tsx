@@ -13,6 +13,7 @@ import {
   PieChart,
   RotateCcw,
   Scan,
+  Settings,
   Table,
   Tag,
   TrendingUp,
@@ -32,20 +33,12 @@ import "./Settings.css";
 import { PageHeader } from "../../../../components/PageHeader/PageHeader";
 import { ErrorLogSection } from "./ErrorLogSection";
 
-function SettingsIcon(): ReactNode {
-  return (
-    <svg viewBox="0 0 24 24" className="sidebar-icon" aria-hidden="true">
-      <path d="M12 15.5A3.5 3.5 0 0 1 8.5 12 3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-3.5 3.5m7.43-2.92c.04-.34.07-.69.07-1.08s-.03-.74-.07-1.08l2.32-1.82c.21-.16.27-.46.14-.7l-2.2-3.81c-.13-.24-.42-.32-.66-.24l-2.74 1.1c-.57-.44-1.18-.8-1.84-1.07L14.17 2.9c-.05-.26-.29-.45-.56-.45h-4.4c-.27 0-.5.19-.55.45L8.2 6.09c-.66.27-1.27.63-1.84 1.07L3.62 6.06c-.24-.08-.53 0-.66.24L.76 10.11c-.13.24-.07.54.14.7l2.32 1.82c-.04.34-.07.69-.07 1.08s.03.74.07 1.08L.9 16.61c-.21.16-.27.46-.14.7l2.2 3.81c.13.24.42.32.66.24l2.74-1.1c.57.44 1.18.8 1.84 1.07l.46 3.18c.05.26.28.45.55.45h4.4c.27 0 .5-.19.55-.45l.46-3.18c.66-.27 1.27-.63 1.84-1.07l2.74 1.1c.24.08.53 0 .66-.24l2.2-3.81c.13-.24.07-.54-.14-.7l-2.32-1.8Z"/>
-    </svg>
-  );
-}
-
 export const tabConfig: SidebarTabModule["tabConfig"] = {
   id:           "settings",
   label:        "إدارة الإعدادات",
   order:        95,
   allowedRoles: ["guest", "admin"],
-  icon:         <SettingsIcon />,
+  icon:         <Settings size={20} strokeWidth={1.8} aria-hidden />,
 };
 
 // ── label groups ──────────────────────────────────────────────────────────────

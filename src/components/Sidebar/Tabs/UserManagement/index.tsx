@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 
-import { ChevronRight, Trash2 } from "lucide-react";
+import { ChevronRight, Trash2, UserCog } from "lucide-react";
 import {
   Fragment,
   useCallback,
@@ -44,20 +44,12 @@ import { PageHeader } from "../../../../components/PageHeader/PageHeader";
 
 // ── Tab config ────────────────────────────────────────────────────────────────
 
-function UserManagementIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="sidebar-icon" aria-hidden="true">
-      <path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm0 2c-3.3 0-6 2.2-6 5v1a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-1c0-2.8-2.7-5-6-5Zm8.5-3.5a2.5 2.5 0 0 0-1.5 4.5v1.3l-1 1a1 1 0 0 0 0 1.4l1.3 1.3a1 1 0 0 0 1.4 0l3.3-3.3a1 1 0 0 0 0-1.4L19.7 13A2.5 2.5 0 0 0 17.5 9.5Zm0 2a.5.5 0 1 1 0 1 .5.5 0 0 1 0-1Z" />
-    </svg>
-  );
-}
-
 export const tabConfig: SidebarTabModule["tabConfig"] = {
   id: "user-management",
   label: "إدارة المستخدمين",
   order: 40,
   allowedRoles: ["admin"],
-  icon: <UserManagementIcon />,
+  icon: <UserCog size={20} strokeWidth={1.8} aria-hidden />,
 };
 
 // ── Types ─────────────────────────────────────────────────────────────────────

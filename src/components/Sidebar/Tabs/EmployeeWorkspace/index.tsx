@@ -1,5 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
+import { LayoutDashboard } from "lucide-react";
 import type { SidebarTabModule } from "../tabTypes";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
 import { usePermissions } from "../../../../auth/usePermissions";
@@ -32,20 +33,12 @@ const KNOWN_SUB_TABS = new Set<string>([
 
 // ── Tab config (auto-registered by tabRegistry) ───────────────────────────────
 
-function WorkspaceIcon(): ReactNode {
-  return (
-    <svg viewBox="0 0 24 24" className="sidebar-icon" aria-hidden="true">
-      <path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z" />
-    </svg>
-  );
-}
-
 export const tabConfig: SidebarTabModule["tabConfig"] = {
   id: "employee-workspace",
   label: "إدارة مساحة العمل",
   order: 15,
   allowedRoles: ["guest", "employee", "supervisor", "manager", "admin"],
-  icon: <WorkspaceIcon />,
+  icon: <LayoutDashboard size={20} strokeWidth={1.8} aria-hidden />,
   subTabs: [
     { id: SUB_TAB_XRAY_REFERRALS,    label: "صور الأشعة المحالة" },
     { id: SUB_TAB_XRAY_RESULTS,      label: "نتائج فحص الأشعة" },

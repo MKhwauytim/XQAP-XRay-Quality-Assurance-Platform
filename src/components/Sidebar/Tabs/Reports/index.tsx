@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useEffect, useState, type ReactNode } from "react";
-import { AlertTriangle, BarChart2, Building2, Check, ClipboardList, Database, Download, FileStack, Filter, FolderKanban, Globe, History, Printer, Settings2, User, Users, X } from "lucide-react";
+import { AlertTriangle, BarChart2, BarChart3, Building2, Check, ClipboardList, Database, Download, FileStack, Filter, FolderKanban, Globe, History, Printer, Settings2, User, Users, X } from "lucide-react";
 
 import type { SidebarTabModule } from "../tabTypes";
 import { loadOrDeriveDistributionCurrent } from "../../../../data/distribution/distributionStorage";
@@ -16,13 +16,6 @@ import { loadAllEmployeeFiles } from "../../../../data/answers/answerStorage";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
 import "./Reports.css";
 
-function ReportsIcon(): ReactNode {
-  return (
-    <svg viewBox="0 0 24 24" className="sidebar-icon" aria-hidden="true">
-      <path d="M9 17H7v-7h2v7Zm4 0h-2V7h2v10Zm4 0h-2v-4h2v4ZM5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" />
-    </svg>
-  );
-}
 
 function PresentationFormatIcon(): ReactNode {
   return (
@@ -47,7 +40,7 @@ export const tabConfig: SidebarTabModule["tabConfig"] = {
   label: "إدارة التقارير",
   order: 25,
   allowedRoles: ["guest", "supervisor", "manager", "admin"],
-  icon: <ReportsIcon />,
+  icon: <BarChart3 size={20} strokeWidth={1.8} aria-hidden />,
 };
 
 type ReportType = "sample" | "sample-xlsx" | "distribution" | "distribution-xlsx" | "executive" | "executive-xlsx";

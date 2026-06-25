@@ -10,7 +10,7 @@ import {
   type DragEvent
 } from "react";
 import * as XLSX from "xlsx";
-import { Check, Settings2 } from "lucide-react";
+import { Check, ScanLine, Settings2 } from "lucide-react";
 
 import type { SidebarTabModule } from "../tabTypes";
 
@@ -129,20 +129,13 @@ const PHASES: PhaseDefinition[] = [
   }
 ];
 
-function PopulationIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="sidebar-icon" aria-hidden="true">
-      <path d="M8.5 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm7-1a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM8.5 13C5.5 13 3 15.1 3 17.7V19a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-1.3C14 15.1 11.5 13 8.5 13Zm7-1c-.7 0-1.4.1-2 .4 1.5 1.1 2.5 2.8 2.5 4.7V19a3 3 0 0 1-.2 1H20a1 1 0 0 0 1-1v-1.1c0-3.2-2.5-5.9-5.5-5.9Z" />
-    </svg>
-  );
-}
 
 export const tabConfig: SidebarTabModule["tabConfig"] = {
   id: "population",
   label: "إدارة بيانات الأشعة",
   order: 10,
   allowedRoles: ["guest", "employee", "supervisor", "manager", "admin"],
-  icon: <PopulationIcon />,
+  icon: <ScanLine size={20} strokeWidth={1.8} aria-hidden />,
   subTabs: [
     { id: "process", label: "معالجة المجتمع" },
     { id: "browse",  label: "استعراض بيانات الأشعة" },

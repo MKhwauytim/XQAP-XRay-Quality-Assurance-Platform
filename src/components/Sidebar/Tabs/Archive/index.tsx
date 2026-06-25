@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Archive, X } from "lucide-react";
 
 import { readSession } from "../../../../auth/authSession";
 import { PageHeader } from "../../../../components/PageHeader/PageHeader";
@@ -24,20 +24,12 @@ import { formatDateTime, formatNumber } from "../../../../utils/formatting";
 import type { SidebarTabModule } from "../tabTypes";
 import "./Archive.css";
 
-function ArchiveIcon(): ReactNode {
-  return (
-    <svg viewBox="0 0 24 24" className="sidebar-icon" aria-hidden="true">
-      <path d="M3 3h18a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Zm1 5h16v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V8Zm6 3v2h2v-2H10Z" />
-    </svg>
-  );
-}
-
 export const tabConfig: SidebarTabModule["tabConfig"] = {
   id: "archive",
   label: "إدارة الأرشيف",
   order: 30,
   allowedRoles: ["guest", "supervisor", "manager", "admin"],
-  icon: <ArchiveIcon />,
+  icon: <Archive size={20} strokeWidth={1.8} aria-hidden />,
 };
 
 const STATUS_LABELS: Record<string, string> = {
