@@ -1,7 +1,7 @@
 export const REPORT_SCHEMA_VERSION = 1;
 
 export type DocType = "print" | "slides" | "dashboard";
-export type PageSizePreset = "A4" | "Letter" | "16:9" | "4:3" | "custom";
+export type PageSizePreset = "A4" | "Letter" | "16:9" | "4:3" | "16:9-fhd" | "custom";
 export type Orientation = "portrait" | "landscape";
 
 export type Aggregation =
@@ -98,6 +98,43 @@ export const A4_PORTRAIT: PageSetup = {
   size: "A4", orientation: "portrait", width: 794, height: 1123,
   margins: { top: 38, right: 38, bottom: 38, left: 38 },
 };
+
+export const SLIDE_16_9: PageSetup = {
+  size: "16:9",
+  orientation: "landscape",
+  width: 1280,
+  height: 720,
+  margins: { top: 20, right: 20, bottom: 20, left: 20 },
+};
+
+export const SLIDE_4_3: PageSetup = {
+  size: "4:3",
+  orientation: "landscape",
+  width: 960,
+  height: 720,
+  margins: { top: 20, right: 20, bottom: 20, left: 20 },
+};
+
+export const SLIDE_FHD: PageSetup = {
+  size: "16:9-fhd",
+  orientation: "landscape",
+  width: 1920,
+  height: 1080,
+  margins: { top: 20, right: 20, bottom: 20, left: 20 },
+};
+
+export const SLIDE_PRESETS: Record<PageSizePreset, PageSetup> = {
+  "A4": A4_PORTRAIT,
+  "Letter": { size: "Letter", orientation: "portrait", width: 816, height: 1056, margins: { top: 38, right: 38, bottom: 38, left: 38 } },
+  "16:9": SLIDE_16_9,
+  "4:3": SLIDE_4_3,
+  "16:9-fhd": SLIDE_FHD,
+  "custom": A4_PORTRAIT,
+};
+
+export function getPageSetup(preset: PageSizePreset): PageSetup {
+  return SLIDE_PRESETS[preset] ?? A4_PORTRAIT;
+}
 
 export function createReportId(): string {
   return `rpt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;

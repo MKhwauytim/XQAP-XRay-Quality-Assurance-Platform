@@ -4,6 +4,147 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v9.0 — 2026-06-28 — feat(report-designer): add slide page-size presets (16:9, 4:3, FHD)
+
+**File:** `src/data/reportDesigner/reportTypes.ts`
+
+**Before:**
+```ts
+export type PageSizePreset = "A4" | "Letter" | "16:9" | "4:3" | "custom";
+// ...
+// A4 portrait at 96dpi = 794 x 1123 px.
+export const A4_PORTRAIT: PageSetup = {
+  size: "A4", orientation: "portrait", width: 794, height: 1123,
+  margins: { top: 38, right: 38, bottom: 38, left: 38 },
+};
+```
+
+**After:**
+```ts
+export type PageSizePreset = "A4" | "Letter" | "16:9" | "4:3" | "16:9-fhd" | "custom";
+
+// A4 portrait at 96dpi = 794 x 1123 px.
+export const A4_PORTRAIT: PageSetup = {
+  size: "A4", orientation: "portrait", width: 794, height: 1123,
+  margins: { top: 38, right: 38, bottom: 38, left: 38 },
+};
+
+export const SLIDE_16_9: PageSetup = {
+  size: "16:9",
+  orientation: "landscape",
+  width: 1280,
+  height: 720,
+  margins: { top: 20, right: 20, bottom: 20, left: 20 },
+};
+
+export const SLIDE_4_3: PageSetup = {
+  size: "4:3",
+  orientation: "landscape",
+  width: 960,
+  height: 720,
+  margins: { top: 20, right: 20, bottom: 20, left: 20 },
+};
+
+export const SLIDE_FHD: PageSetup = {
+  size: "16:9-fhd",
+  orientation: "landscape",
+  width: 1920,
+  height: 1080,
+  margins: { top: 20, right: 20, bottom: 20, left: 20 },
+};
+
+export const SLIDE_PRESETS: Record<PageSizePreset, PageSetup> = {
+  "A4": A4_PORTRAIT,
+  "Letter": { size: "Letter", orientation: "portrait", width: 816, height: 1056, margins: { top: 38, right: 38, bottom: 38, left: 38 } },
+  "16:9": SLIDE_16_9,
+  "4:3": SLIDE_4_3,
+  "16:9-fhd": SLIDE_FHD,
+  "custom": A4_PORTRAIT,
+};
+
+export function getPageSetup(preset: PageSizePreset): PageSetup {
+  return SLIDE_PRESETS[preset] ?? A4_PORTRAIT;
+}
+```
+
+**File:** `src/data/reportDesigner/reportTypes.test.ts`
+
+**Before:**
+```ts
+import { describe, it, expect } from "vitest";
+import { createEmptyDocument, REPORT_SCHEMA_VERSION } from "./reportTypes";
+
+describe("createEmptyDocument", () => {
+  it("creates a print A4 document with one empty page", () => {
+    const doc = createEmptyDocument("تقرير تجريبي", "admin");
+    expect(doc.reportName).toBe("تقرير تجريبي");
+    expect(doc.createdBy).toBe("admin");
+    expect(doc.docType).toBe("print");
+    expect(doc.pageSetup.size).toBe("A4");
+    expect(doc.pageSetup.orientation).toBe("portrait");
+    expect(doc.pages).toHaveLength(1);
+    expect(doc.pages[0].elements).toEqual([]);
+    expect(doc.reportId).toMatch(/^rpt-/);
+    expect(REPORT_SCHEMA_VERSION).toBe(1);
+  });
+});
+```
+
+**After:**
+```ts
+import { describe, it, expect } from "vitest";
+import { createEmptyDocument, REPORT_SCHEMA_VERSION, SLIDE_16_9, SLIDE_4_3, SLIDE_FHD, getPageSetup, SLIDE_PRESETS } from "./reportTypes";
+
+describe("createEmptyDocument", () => {
+  it("creates a print A4 document with one empty page", () => {
+    const doc = createEmptyDocument("تقرير تجريبي", "admin");
+    expect(doc.reportName).toBe("تقرير تجريبي");
+    expect(doc.createdBy).toBe("admin");
+    expect(doc.docType).toBe("print");
+    expect(doc.pageSetup.size).toBe("A4");
+    expect(doc.pageSetup.orientation).toBe("portrait");
+    expect(doc.pages).toHaveLength(1);
+    expect(doc.pages[0].elements).toEqual([]);
+    expect(doc.reportId).toMatch(/^rpt-/);
+    expect(REPORT_SCHEMA_VERSION).toBe(1);
+  });
+});
+
+describe("slide page-size presets", () => {
+  it("SLIDE_16_9 has correct dimensions", () => {
+    expect(SLIDE_16_9.width).toBe(1280);
+    expect(SLIDE_16_9.height).toBe(720);
+    expect(SLIDE_16_9.size).toBe("16:9");
+    expect(SLIDE_16_9.orientation).toBe("landscape");
+  });
+
+  it("SLIDE_4_3 has correct dimensions", () => {
+    expect(SLIDE_4_3.width).toBe(960);
+    expect(SLIDE_4_3.height).toBe(720);
+    expect(SLIDE_4_3.size).toBe("4:3");
+  });
+
+  it("SLIDE_FHD is 1920x1080", () => {
+    expect(SLIDE_FHD.width).toBe(1920);
+    expect(SLIDE_FHD.height).toBe(1080);
+    expect(SLIDE_FHD.size).toBe("16:9-fhd");
+  });
+
+  it("getPageSetup returns correct preset", () => {
+    expect(getPageSetup("16:9").width).toBe(1280);
+    expect(getPageSetup("4:3").width).toBe(960);
+    expect(getPageSetup("A4").width).toBe(794);
+    expect(getPageSetup("custom").width).toBe(794);
+  });
+
+  it("SLIDE_PRESETS has all six named presets", () => {
+    expect(Object.keys(SLIDE_PRESETS).sort()).toEqual(["16:9", "16:9-fhd", "4:3", "A4", "Letter", "custom"].sort());
+  });
+});
+```
+
+---
+
 ## v8.1 — 2026-06-28 — fix(report-designer): CSSProperties import, DesignIndex doc, admin permission row
 
 **File:** `src/components/Sidebar/Tabs/ReportDesigner/renderers/TextRenderer.tsx`
