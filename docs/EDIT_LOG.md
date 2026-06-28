@@ -4,6 +4,143 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v12.0 — 2026-06-28 — FieldsPanel component (searchable field catalog tree)
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/FieldsPanel.tsx`
+
+**Before:**
+```ts
+// File did not exist
+```
+
+**After:**
+```tsx
+import { useState } from "react";
+import { FACT_FIELDS } from "../../../../../data/reportDesigner/query/fieldCatalog";
+
+export default function FieldsPanel() {
+  const [search, setSearch] = useState("");
+  const [dimOpen, setDimOpen] = useState(true);
+  const [measOpen, setMeasOpen] = useState(true);
+
+  const q = search.trim().toLowerCase();
+  const dims = FACT_FIELDS.filter(
+    (f) => f.role === "dimension" && (!q || f.label.includes(q) || f.field.toLowerCase().includes(q))
+  );
+  const meas = FACT_FIELDS.filter(
+    (f) => f.role === "measure" && (!q || f.label.includes(q) || f.field.toLowerCase().includes(q))
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      <div className="rd-panel-header">
+        <span>الحقول</span>
+      </div>
+      <input
+        className="rd-fields-search"
+        type="search"
+        placeholder="بحث في الحقول..."
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        dir="rtl"
+        aria-label="بحث في الحقول"
+      />
+      <div style={{ flex: 1, overflowY: "auto" }}>
+        <div className="rd-fields-group">
+          <div
+            className="rd-fields-group-header"
+            onClick={() => setDimOpen((v) => !v)}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setDimOpen((v) => !v); }}
+            aria-expanded={dimOpen}
+          >
+            <span>{dimOpen ? "▾" : "▸"}</span>
+            <span>أبعاد ({dims.length})</span>
+          </div>
+          {dimOpen &&
+            dims.map((f) => (
+              <div key={f.field} className="rd-field-item" title={f.field}>
+                <span className="rd-field-icon">📐</span>
+                <span className="rd-field-label">{f.label}</span>
+              </div>
+            ))}
+        </div>
+        <div className="rd-fields-group">
+          <div
+            className="rd-fields-group-header"
+            onClick={() => setMeasOpen((v) => !v)}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setMeasOpen((v) => !v); }}
+            aria-expanded={measOpen}
+          >
+            <span>{measOpen ? "▾" : "▸"}</span>
+            <span>مقاييس ({meas.length})</span>
+          </div>
+          {measOpen &&
+            meas.map((f) => (
+              <div key={f.field} className="rd-field-item" title={f.field}>
+                <span className="rd-field-icon">🔢</span>
+                <span className="rd-field-label">{f.label}</span>
+              </div>
+            ))}
+        </div>
+        {dims.length === 0 && meas.length === 0 && (
+          <p style={{ padding: "12px", color: "var(--rd-text-secondary)", fontSize: "13px" }}>
+            لا توجد حقول مطابقة
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+```
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
+
+**Before:**
+```tsx
+import Canvas from "./editor/Canvas";
+import Inspector from "./editor/Inspector";
+import PagesBar from "./editor/PagesBar";
+import PrintView from "./PrintView";
+import "./ReportDesigner.css";
+```
+
+**After:**
+```tsx
+import Canvas from "./editor/Canvas";
+import Inspector from "./editor/Inspector";
+import PagesBar from "./editor/PagesBar";
+import FieldsPanel from "./editor/FieldsPanel";
+import PrintView from "./PrintView";
+import "./ReportDesigner.css";
+```
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx` (EditorHost function)
+
+**Before:**
+```tsx
+        {/* STUB: Fields panel (Task A.4 will replace this) */}
+        <div className="rd-fields-panel">
+          <div className="rd-panel-header"><span>الحقول</span></div>
+          <p style={{ padding: "12px", color: "var(--rd-text-secondary)", fontSize: "13px" }}>
+            لوحة الحقول — قريباً
+          </p>
+        </div>
+```
+
+**After:**
+```tsx
+        {/* Fields panel (Task A.4) */}
+        <div className="rd-fields-panel">
+          <FieldsPanel />
+        </div>
+```
+
+---
+
 ## v11.0 — 2026-06-28 — PagesBar component (bottom page tab bar)
 
 **File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/PagesBar.tsx`

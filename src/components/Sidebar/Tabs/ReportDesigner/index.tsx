@@ -24,6 +24,7 @@ import type { DirectoryHandleLike } from "../../../../data/storage/fileSystemAcc
 import Canvas from "./editor/Canvas";
 import Inspector from "./editor/Inspector";
 import PagesBar from "./editor/PagesBar";
+import FieldsPanel from "./editor/FieldsPanel";
 import PrintView from "./PrintView";
 import "./ReportDesigner.css";
 
@@ -295,12 +296,9 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: Editor
           </button>
         </div>
 
-        {/* STUB: Fields panel (Task A.4 will replace this) */}
+        {/* Fields panel (Task A.4) */}
         <div className="rd-fields-panel">
-          <div className="rd-panel-header"><span>الحقول</span></div>
-          <p style={{ padding: "12px", color: "var(--rd-text-secondary)", fontSize: "13px" }}>
-            لوحة الحقول — قريباً
-          </p>
+          <FieldsPanel />
         </div>
 
         {/* Canvas area */}
