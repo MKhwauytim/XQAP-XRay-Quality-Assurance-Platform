@@ -4,6 +4,24 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v7.4 — 2026-06-28 — Fix grouping key delimiter to prevent collisions (BUG)
+
+Grouping key was built by joining multiple `groupBy` dimension values with a space `" "`. This caused false key collisions when dimension values themselves contained spaces. For example, `{name: "John Smith", dept: "HR"}` and `{name: "John", dept: "Smith HR"}` both produced key `"John Smith HR"`. Changed the delimiter from `" "` to `"\x00"` (null byte, which cannot appear in normal string data) to prevent collisions.
+
+**File:** `src/data/reportDesigner/query/runQuery.ts`
+
+**Before:**
+```ts
+const key = spec.groupBy.map((g) => String(row[g] ?? "")).join(" ");
+```
+
+**After:**
+```ts
+const key = spec.groupBy.map((g) => String(row[g] ?? "")).join("\x00");
+```
+
+---
+
 ## v7.3 — 2026-06-28 — Report Designer: runQuery group-by engine (FEATURE)
 
 Phase 0, Task 0.4: Implement the core query engine that combines filtering, grouping, aggregation, sorting, and limiting. The runQuery function accepts filtered rows, groups them by dimension fields, computes aggregates, optionally sorts the results, and optionally applies a limit. Output measure keys use the `as` alias if provided, else `${agg}_${field}`. Group keys preserve the dimension field names. When groupBy is empty, returns a single aggregate row (grand total). Handles percentOfTotal aggregations by pre-computing grand totals.

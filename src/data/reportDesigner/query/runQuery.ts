@@ -29,7 +29,7 @@ export function runQuery(rows: Array<Record<string, unknown>>, spec: QuerySpec):
     groups.set("__all__", filtered);
   } else {
     for (const row of filtered) {
-      const key = spec.groupBy.map((g) => String(row[g] ?? "")).join(" ");
+      const key = spec.groupBy.map((g) => String(row[g] ?? "")).join("\x00");
       const bucket = groups.get(key);
       if (bucket) bucket.push(row);
       else groups.set(key, [row]);
