@@ -80,7 +80,7 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: Editor
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [_saveError, setSaveError] = useState<string | null>(null);
+  const [, setSaveError] = useState<string | null>(null);
   const [showPrint, setShowPrint] = useState(false);
   const [showFields, setShowFields] = useState(true);
   const [showFormat, setShowFormat] = useState(true);

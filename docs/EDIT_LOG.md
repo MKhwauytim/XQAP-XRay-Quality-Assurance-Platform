@@ -4,6 +4,22 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v14.1 — 2026-06-28 — Fix unused-var lint error in ReportDesigner EditorHost
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
+
+**Before:**
+```tsx
+const [_saveError, setSaveError] = useState<string | null>(null);
+```
+
+**After:**
+```tsx
+const [, setSaveError] = useState<string | null>(null);
+```
+
+---
+
 ## v14.0 — 2026-06-28 — Create-dialog size selector + pageSizeLabel helper
 
 **File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
