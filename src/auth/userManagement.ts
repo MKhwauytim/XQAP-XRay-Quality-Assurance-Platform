@@ -328,6 +328,7 @@ export function createDefaultPermissions(): RolePermission[] {
     { role: "admin",      tabId: "ew/referral-approval",    access: "edit" },
     { role: "admin",      tabId: "ew/inspection-form",      access: "edit" },
     { role: "admin",      tabId: "reports",                 access: "edit" },
+    { role: "admin",      tabId: "report-designer",         access: "edit" },
     { role: "admin",      tabId: "archive",                 access: "edit" },
     { role: "admin",      tabId: "user-management",         access: "edit" },
     { role: "admin",      tabId: "user-management/users",               access: "edit" },

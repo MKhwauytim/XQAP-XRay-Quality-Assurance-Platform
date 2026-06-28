@@ -17,7 +17,7 @@ describe("Report Designer tab registration", () => {
   it("has a default permission row for every role", () => {
     const rows = createDefaultPermissions().filter((p) => p.tabId === "report-designer");
     expect(rows.map((r) => r.role).sort()).toEqual(
-      ["employee", "guest", "manager", "supervisor"].sort()
+      ["admin", "employee", "guest", "manager", "supervisor"].sort()
     );
   });
 });

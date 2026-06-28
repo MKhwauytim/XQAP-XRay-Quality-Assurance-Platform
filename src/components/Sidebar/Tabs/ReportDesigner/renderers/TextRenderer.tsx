@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import type { Element, TextConfig } from "../../../../../data/reportDesigner/reportTypes";
 
 interface TextRendererProps {
@@ -8,7 +9,7 @@ export default function TextRenderer({ element }: TextRendererProps) {
   const config = element.config as TextConfig;
   const s = element.style;
 
-  const style: React.CSSProperties = {
+  const style: CSSProperties = {
     width: "100%",
     height: "100%",
     boxSizing: "border-box",

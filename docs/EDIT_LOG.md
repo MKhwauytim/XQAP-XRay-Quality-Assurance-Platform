@@ -4,6 +4,76 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v8.1 — 2026-06-28 — fix(report-designer): CSSProperties import, DesignIndex doc, admin permission row
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/renderers/TextRenderer.tsx`
+
+**Before:**
+```tsx
+import type { Element, TextConfig } from "../../../../../data/reportDesigner/reportTypes";
+// ...
+  const style: React.CSSProperties = {
+```
+
+**After:**
+```tsx
+import type { CSSProperties } from "react";
+import type { Element, TextConfig } from "../../../../../data/reportDesigner/reportTypes";
+// ...
+  const style: CSSProperties = {
+```
+
+---
+
+**File:** `docs/data-system-report.md`
+
+**Before:**
+```md
+| `designs.index.json` | `4-Reports/designs/` | Index of all saved report designs (`JsonEnvelope<DesignIndex>`). Lists each design's `reportId`, `reportName`, `docType`, `createdAt`, and `updatedAt`. |
+```
+
+**After:**
+```md
+| `designs.index.json` | `4-Reports/designs/` | Index of all saved report designs (`JsonEnvelope<DesignIndex>`). Lists each design's `reportId`, `reportName`, `version`, and `updatedAt`. |
+```
+
+---
+
+**File:** `src/auth/userManagement.ts`
+
+**Before:**
+```ts
+    { role: "admin",      tabId: "reports",                 access: "edit" },
+    { role: "admin",      tabId: "archive",                 access: "edit" },
+```
+
+**After:**
+```ts
+    { role: "admin",      tabId: "reports",                 access: "edit" },
+    { role: "admin",      tabId: "report-designer",         access: "edit" },
+    { role: "admin",      tabId: "archive",                 access: "edit" },
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/tabConfig.test.ts`
+
+**Before:**
+```ts
+    expect(rows.map((r) => r.role).sort()).toEqual(
+      ["employee", "guest", "manager", "supervisor"].sort()
+    );
+```
+
+**After:**
+```ts
+    expect(rows.map((r) => r.role).sort()).toEqual(
+      ["admin", "employee", "guest", "manager", "supervisor"].sort()
+    );
+```
+
+---
+
 ## v8.0 — 2026-06-28 — Phase-1 integration pass: test suite, typecheck, lint, build verification; docs update
 
 **File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
