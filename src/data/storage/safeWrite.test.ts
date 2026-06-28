@@ -1,8 +1,19 @@
-import { expect, test } from "vitest";
+import { afterEach, expect, test } from "vitest";
 
 import { createMemoryDirectory } from "./memoryDirectory";
-import { safeReadJson, safeWriteJson, safeWriteJsonText } from "./safeWrite";
+import { simpleHash } from "./jsonEnvelope";
+import {
+  __resetStreamingForcedSizeLimitForTests,
+  __setStreamingForcedSizeLimitForTests,
+  safeReadJson,
+  safeWriteJson,
+  safeWriteJsonText,
+} from "./safeWrite";
 import type { DirectoryHandleLike, FileHandleLike } from "./fileSystemAccess";
+
+afterEach(() => {
+  __resetStreamingForcedSizeLimitForTests();
+});
 
 async function readRaw(
   dir: ReturnType<typeof createMemoryDirectory>,
@@ -233,4 +244,109 @@ test("concurrent writes to different files do not block each other logically", a
   ]);
   expect(a.ok && a.value.v).toBe("a");
   expect(b.ok && b.value.v).toBe("b");
+});
+
+// The streamed write path removes V8's "Invalid string length" ceiling by never
+// materializing the whole serialized envelope. We can't allocate a >512 MB
+// string in a unit test, so we force the path with a tiny size override and
+// assert it produces the *same* envelope as the in-memory path.
+
+test("streamed writes produce the same envelope as the in-memory path", async () => {
+  const payload = {
+    sourceMonthFolder: "5-May-2026",
+    totalRows: 3,
+    rows: [
+      { id: 0, name: "row-0", flag: true, note: null },
+      { id: 1, name: "row-1", flag: false, score: 1.5 },
+      { id: 2, name: "row-2", tags: ["a", "b"], nested: { x: 1 } },
+    ],
+  };
+
+  // Reference: ordinary in-memory write (path unchanged).
+  const refDir = createMemoryDirectory();
+  await safeWriteJson(refDir, "ref.json", payload);
+  const refEnv = JSON.parse(await readRaw(refDir, "ref.json")) as {
+    metadata: { contentHash: string };
+  };
+
+  // Streamed write of the identical payload.
+  const streamDir = createMemoryDirectory();
+  __setStreamingForcedSizeLimitForTests(0);
+  await safeWriteJson(streamDir, "stream.json", payload);
+  const streamEnv = JSON.parse(await readRaw(streamDir, "stream.json")) as {
+    metadata: { contentHash: string; revision: number; schemaVersion: number };
+    data: unknown;
+  };
+
+  // Data serializes identically, and the streamed content hash equals the
+  // canonical simpleHash(JSON.stringify(data)) — so it validates on read.
+  expect(JSON.stringify(streamEnv.data)).toBe(JSON.stringify(payload));
+  expect(streamEnv.metadata.contentHash).toBe(
+    simpleHash(JSON.stringify(payload))
+  );
+  expect(streamEnv.metadata.contentHash).toBe(refEnv.metadata.contentHash);
+  expect(streamEnv.metadata.schemaVersion).toBe(1);
+  expect(streamEnv.metadata.revision).toBe(1);
+
+  // And it round-trips through safeReadJson without falling back to .bak.
+  const result = await safeReadJson<typeof payload>(streamDir, "stream.json");
+  expect(result.ok).toBe(true);
+  if (result.ok) {
+    expect(result.value.rows).toHaveLength(3);
+    expect(result.recoveredFromBak).toBe(false);
+  }
+});
+
+test("streamed writes snapshot the previous file to .bak and bump revision", async () => {
+  const dir = createMemoryDirectory();
+  __setStreamingForcedSizeLimitForTests(0);
+  await safeWriteJson(dir, "a.json", { rows: [{ v: 1 }] });
+  await safeWriteJson(dir, "a.json", { rows: [{ v: 2 }] });
+
+  const bak = JSON.parse(await readRaw(dir, "a.json.bak")) as {
+    data: { rows: { v: number }[] };
+  };
+  const live = JSON.parse(await readRaw(dir, "a.json")) as {
+    metadata: { revision: number };
+    data: { rows: { v: number }[] };
+  };
+  expect(bak.data.rows[0].v).toBe(1);
+  expect(live.data.rows[0].v).toBe(2);
+  expect(live.metadata.revision).toBe(2);
+});
+
+test("safeReadJson recovers a streamed write from .bak when the live file is corrupt", async () => {
+  const dir = createMemoryDirectory();
+  __setStreamingForcedSizeLimitForTests(0);
+  await safeWriteJson(dir, "a.json", { rows: [{ v: 1 }] });
+  await safeWriteJson(dir, "a.json", { rows: [{ v: 2 }] }); // a.json.bak now holds v:1
+  __resetStreamingForcedSizeLimitForTests();
+
+  const handle = await dir.getFileHandle("a.json", { create: true });
+  const writable = await handle.createWritable!();
+  await writable.write("{ not valid json");
+  await writable.close();
+
+  const result = await safeReadJson<{ rows: { v: number }[] }>(dir, "a.json");
+  expect(result.ok).toBe(true);
+  if (result.ok) {
+    expect(result.value.rows[0].v).toBe(1);
+    expect(result.recoveredFromBak).toBe(true);
+  }
+});
+
+test("safeWriteJsonText streams large restore payloads and round-trips", async () => {
+  const dir = createMemoryDirectory();
+  // Build a valid envelope file, then restore its text via the streamed path.
+  await safeWriteJson(dir, "a.json", { rows: [{ v: 1 }, { v: 2 }] });
+  const text = await readRaw(dir, "a.json");
+
+  __setStreamingForcedSizeLimitForTests(0);
+  await safeWriteJsonText(dir, "b.json", text);
+
+  const result = await safeReadJson<{ rows: { v: number }[] }>(dir, "b.json");
+  expect(result.ok).toBe(true);
+  if (result.ok) {
+    expect(result.value.rows.map((r) => r.v)).toEqual([1, 2]);
+  }
 });

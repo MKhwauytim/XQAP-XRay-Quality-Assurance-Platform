@@ -4,6 +4,177 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v6.1 — 2026-06-28 — Incremental content-hashing removes the read-side stringify ceiling (FEATURE)
+
+Completes the symmetry of v6.0. v6.0 removed the **write**-side ceiling, but the
+**read** path still recomputed `simpleHash(JSON.stringify(envelope.data))` in
+`validateEnvelope` on every read, and `wrap()` did the same full
+`JSON.stringify(data)` purely to hash on every non-streamed write. Both built a
+second full-size string on top of the source + parsed object graph, so a file
+big enough to need a streamed write could be *written* but not *validated on
+read*, and every normal read/write paid an extra payload-sized allocation.
+
+Fix: add `hashJsonValue(value)` — `simpleHash(JSON.stringify(value))` computed
+incrementally by feeding `streamJsonStringify(value)` chunks into
+`createSimpleHasher`. The digest is **identical** to the old expression (the
+streamed chunks concatenate to exactly `JSON.stringify(value)`), so on-disk
+content hashes are unchanged and existing files keep validating. `wrap()` and
+`validateEnvelope()` now both use it: no intermediate full-size string, no
+RangeError ceiling, and ~33% lower peak memory on every read (source + objects,
+no third hash string).
+
+Residual platform floor (documented, intentionally not engineered around): the
+File System Access API's `File.text()` still returns the whole file as one
+string, so a single file larger than V8's max string length (~512 M chars,
+~0.5–1 GB on disk) cannot be read without a streaming JSON parser. Building a
+hand-rolled streaming parser for critical population data — to support sizes
+this app's workloads (hundreds of thousands of rows, tens of MB) never reach —
+is higher risk than value, so it is left as an explicit non-goal. Every JSON
+tool faces the same string limit; this change makes the persistence layer hash
+without adding to it.
+
+**File:** `src/data/storage/jsonEnvelope.ts`
+
+**Before:**
+```ts
+export function wrap<T>(data: T, previousRevision = 0): JsonEnvelope<T> {
+  const serialized = JSON.stringify(data);
+  return { metadata: { /* ... */ contentHash: simpleHash(serialized) /* ... */ }, data };
+}
+// ...
+return envelope.metadata.contentHash === simpleHash(JSON.stringify(envelope.data));
+```
+
+**After:**
+```ts
+export function hashJsonValue(value: unknown): string {
+  const hasher = createSimpleHasher();
+  for (const chunk of streamJsonStringify(value)) hasher.update(chunk);
+  return hasher.digest();
+}
+
+export function wrap<T>(data: T, previousRevision = 0): JsonEnvelope<T> {
+  return { metadata: { /* ... */ contentHash: hashJsonValue(data) /* ... */ }, data };
+}
+// ...
+return envelope.metadata.contentHash === hashJsonValue(envelope.data);
+```
+
+**File:** `src/data/storage/jsonEnvelope.test.ts` — added coverage: `hashJsonValue`
+equals `simpleHash(JSON.stringify(value))` across mixed values, and
+`validateEnvelope` round-trips / rejects tampering on a large nested payload.
+
+---
+
+## v6.0 — 2026-06-28 — Streamed safe-writes remove the JSON.stringify string-length ceiling (FEATURE)
+
+Follow-up to v5.40 (which only halved the size by writing large payloads
+compact). A truly enormous payload (e.g. millions of rows) can still exceed
+V8's max string length (~512 M chars) even compact, because `safeWriteJson`
+built the entire serialized envelope as one in-memory string before writing,
+and `jsonEnvelope.wrap()` did a second full `JSON.stringify(data)` just to
+compute the content hash.
+
+Fix: add a **streamed write path**. When the whole-envelope `JSON.stringify`
+throws `RangeError: Invalid string length`, the write falls back to serializing
+the `JsonEnvelope` directly to the `FileSystemWritableFileStream` in small
+chunks — the `data` value is streamed element-by-element via a new generator
+`streamJsonStringify` (byte-identical to compact `JSON.stringify`), so no single
+giant string is ever materialized. The content hash is computed **incrementally**
+over the streamed `data` chunks (new `createSimpleHasher`), avoiding the extra
+full stringify. The file is written as `{"data":<streamed>,"metadata":{…}}` —
+data first so the hash is known before the metadata is emitted; key order is
+irrelevant to `isEnvelope`/`unwrap`/`validateEnvelope`. Snapshot-and-verify/`.bak`
+rollback is preserved: each streamed file is verified by re-reading it and
+comparing an exact whole-file content hash + length. The existing small-file
+path (pretty-print + re-parse verify) is unchanged; streaming triggers only at
+the real V8 ceiling (or, in tests, via an internal size override).
+
+Note: this removes the **write**-side ceiling. The read-side
+`validateEnvelope` still does a full `JSON.stringify(envelope.data)`, so a file
+larger than the ceiling cannot yet be read back; streamed reads/validation are a
+separate follow-up. Realistic payloads (hundreds of thousands of rows, tens of
+MB) are far under the ceiling and round-trip on both paths.
+
+**File:** `src/data/storage/jsonEnvelope.ts`
+
+**Before:**
+```ts
+export function simpleHash(content: string): string {
+  let h = 5381;
+  for (let i = 0; i < content.length; i++) {
+    h = ((h << 5) + h) ^ content.charCodeAt(i);
+  }
+  return (h >>> 0).toString(16);
+}
+```
+
+**After:**
+```ts
+export function createSimpleHasher(): {
+  update: (chunk: string) => void;
+  digest: () => string;
+} {
+  let h = 5381;
+  return {
+    update(chunk) {
+      for (let i = 0; i < chunk.length; i++) {
+        h = ((h << 5) + h) ^ chunk.charCodeAt(i);
+      }
+    },
+    digest() {
+      return (h >>> 0).toString(16);
+    },
+  };
+}
+
+export function simpleHash(content: string): string {
+  const hasher = createSimpleHasher();
+  hasher.update(content);
+  return hasher.digest();
+}
+
+// ...plus streamJsonStringify(value) generator that yields compact-JSON chunks
+// byte-identical to JSON.stringify(value), recursing into arrays/objects and
+// delegating leaves to JSON.stringify.
+```
+
+**File:** `src/data/storage/safeWrite.ts`
+
+**Before:**
+```ts
+const nextValue = isEnvelope(value) ? value : wrap(value, previousRevision);
+const compact = JSON.stringify(nextValue);
+const skipVerify = compact.length > VERIFY_SIZE_LIMIT;
+const serialized = skipVerify
+  ? `${compact}\n`
+  : `${JSON.stringify(nextValue, null, 2)}\n`;
+// ...single string written to tmp then live...
+```
+
+**After:**
+```ts
+// Try the whole-envelope string; if it exceeds V8's ceiling, stream instead.
+let compact: string | null = null;
+let nextValue: unknown = null;
+try {
+  nextValue = isEnvelope(value) ? value : wrap(value, previousRevision);
+  compact = JSON.stringify(nextValue);
+} catch (error) {
+  if (!isStringLengthError(error)) throw;
+}
+if (compact === null || compact.length > streamingForcedSizeLimit) {
+  // streamed path: streamEnvelopeToFile(...) to .tmp then live, each verified
+  // by exact whole-file content hash; .bak snapshot + rollback preserved.
+} else {
+  // unchanged small-file path using `compact` / pretty-print
+}
+```
+
+**File:** `src/data/storage/safeWrite.test.ts` — added coverage: streamed path round-trips and is byte-identical to the non-streamed envelope; streamed writes snapshot to `.bak` and increment revision; `streamJsonStringify` matches `JSON.stringify` across mixed values; `createSimpleHasher` chunked == `simpleHash` whole.
+
+---
+
 ## v5.40 — 2026-06-28 — Fix "Invalid string length" when saving large processed data (BUG)
 
 Root cause: saving a large processed population (e.g. ~300k rows) failed with

@@ -1,6 +1,16 @@
 import type { DirectoryHandleLike } from "./fileSystemAccess";
 import { withResourceLock } from "./webLocks";
-import { isEnvelope, validateEnvelope, wrap, unwrap } from "./jsonEnvelope";
+import {
+  ENVELOPE_SCHEMA_VERSION,
+  createSimpleHasher,
+  isEnvelope,
+  simpleHash,
+  streamJsonStringify,
+  validateEnvelope,
+  wrap,
+  unwrap,
+  type JsonMetadata,
+} from "./jsonEnvelope";
 
 export type SafeReadResult<T> =
   | { ok: true; value: T; recoveredFromBak: boolean; rawText: string }
@@ -71,6 +81,144 @@ function parseValidJson(text: string | null): unknown | null {
 // to avoid doubling parse cost for population.final.json-sized writes.
 const VERIFY_SIZE_LIMIT = 512 * 1024; // 512 KB
 
+// A RangeError thrown by JSON.stringify when its output would exceed V8's max
+// string length ("Invalid string length"). When this is hit, fall back to the
+// streamed write path, which never materializes the whole serialization.
+function isStringLengthError(error: unknown): boolean {
+  return (
+    error instanceof RangeError &&
+    /invalid string length/i.test(error.message)
+  );
+}
+
+// Test seam: force the streamed-write path for payloads below the real V8
+// ceiling so it can be exercised without allocating a ~512 MB string.
+// Production never lowers this; streaming otherwise triggers only when
+// JSON.stringify throws (see isStringLengthError).
+let streamingForcedSizeLimit = Number.POSITIVE_INFINITY;
+
+/** @internal — test-only. Lower the threshold that forces the streamed path. */
+export function __setStreamingForcedSizeLimitForTests(limit: number): void {
+  streamingForcedSizeLimit = limit;
+}
+
+/** @internal — test-only. Restore the production (effectively unbounded) limit. */
+export function __resetStreamingForcedSizeLimitForTests(): void {
+  streamingForcedSizeLimit = Number.POSITIVE_INFINITY;
+}
+
+type StreamedFileInfo = { fileHash: string; fileLength: number };
+
+// Flush accumulated chunks to disk every ~64 KB so the in-flight string stays
+// tiny regardless of total file size.
+const STREAM_FLUSH_AT = 64 * 1024;
+
+// Core streamed writer: hands `produce` an `emit` that hashes + buffers each
+// chunk and flushes to the writable stream past STREAM_FLUSH_AT, so no single
+// giant string is ever built. Returns an exact whole-file content hash + length
+// used to verify the bytes on read-back.
+async function streamToFile(
+  dir: DirectoryHandleLike,
+  fileName: string,
+  produce: (emit: (chunk: string) => Promise<void> | void) => Promise<void>
+): Promise<StreamedFileInfo> {
+  const handle = await dir.getFileHandle(fileName, { create: true });
+  if (!handle.createWritable) {
+    throw new Error(`Browser cannot write ${fileName}.`);
+  }
+  const writable = await handle.createWritable();
+
+  const fileHasher = createSimpleHasher();
+  let fileLength = 0;
+  let pending = "";
+
+  const emit = (chunk: string): Promise<void> | void => {
+    fileHasher.update(chunk);
+    fileLength += chunk.length;
+    pending += chunk;
+    if (pending.length >= STREAM_FLUSH_AT) {
+      const toWrite = pending;
+      pending = "";
+      return writable.write(toWrite);
+    }
+  };
+
+  try {
+    await produce(emit);
+    if (pending.length > 0) {
+      await writable.write(pending);
+    }
+    await writable.close();
+  } catch (error) {
+    try {
+      await writable.close();
+    } catch {
+      // Best-effort: don't mask the original failure with a close error.
+    }
+    throw error;
+  }
+
+  return { fileHash: fileHasher.digest(), fileLength };
+}
+
+// Streams a JsonEnvelope as `{"data":<streamed>,"metadata":{…}}`. `data` is
+// emitted first so its content hash is known before the metadata (which carries
+// it) is written; key order is irrelevant to isEnvelope/unwrap/validateEnvelope.
+function streamEnvelopeToFile(
+  dir: DirectoryHandleLike,
+  fileName: string,
+  data: unknown,
+  buildMetadata: (contentHash: string) => JsonMetadata
+): Promise<StreamedFileInfo> {
+  return streamToFile(dir, fileName, async (emit) => {
+    const dataHasher = createSimpleHasher();
+    {
+      const p = emit('{"data":');
+      if (p) await p;
+    }
+    for (const chunk of streamJsonStringify(data)) {
+      dataHasher.update(chunk);
+      const p = emit(chunk);
+      if (p) await p;
+    }
+    const metadata = buildMetadata(dataHasher.digest());
+    const p = emit(`,"metadata":${JSON.stringify(metadata)}}\n`);
+    if (p) await p;
+  });
+}
+
+// Streams a value verbatim (compact) + trailing newline — used to re-normalize a
+// restore payload without re-wrapping it (safeWriteJsonText).
+function streamValueToFile(
+  dir: DirectoryHandleLike,
+  fileName: string,
+  value: unknown
+): Promise<StreamedFileInfo> {
+  return streamToFile(dir, fileName, async (emit) => {
+    for (const chunk of streamJsonStringify(value)) {
+      const p = emit(chunk);
+      if (p) await p;
+    }
+    const p = emit("\n");
+    if (p) await p;
+  });
+}
+
+// Verifies a streamed file by re-reading it and confirming its bytes exactly
+// match what was written (length + whole-file content hash). simpleHash walks
+// the already-materialized read-back string without allocating a new one.
+async function verifyStreamedFile(
+  dir: DirectoryHandleLike,
+  fileName: string,
+  expected: StreamedFileInfo
+): Promise<boolean> {
+  const text = await readText(dir, fileName);
+  if (text === null || text.length !== expected.fileLength) {
+    return false;
+  }
+  return simpleHash(text) === expected.fileHash;
+}
+
 export async function safeWriteJson<T>(
   dir: DirectoryHandleLike,
   fileName: string,
@@ -88,12 +236,77 @@ export async function safeWriteJson<T>(
       typeof parsedCurrent.metadata.schemaVersion === "number"
         ? parsedCurrent.metadata.revision
         : 0;
-    const nextValue = isEnvelope(value) ? value : wrap(value, previousRevision);
-    // Pretty-print keeps small machine files human-readable, but indentation can
-    // push a large payload past V8's max string length (RangeError: Invalid
-    // string length). Serialize compactly first; only re-serialize with 2-space
-    // indentation when the result is small enough to stay well under the ceiling.
-    const compact = JSON.stringify(nextValue);
+    // Try to build the whole-envelope string. Pretty-printing inflates output,
+    // so serialize compactly first and only re-indent when small enough. If even
+    // the compact result would exceed V8's max string length, JSON.stringify
+    // throws RangeError and we fall back to the streamed path below.
+    let nextValue: unknown = null;
+    let compact: string | null = null;
+    try {
+      nextValue = isEnvelope(value) ? value : wrap(value, previousRevision);
+      compact = JSON.stringify(nextValue);
+    } catch (error) {
+      if (!isStringLengthError(error)) throw error;
+    }
+
+    // Streamed path: the serialized envelope is too large to hold as one string
+    // (or a test forced this path). Serialize + hash incrementally so nothing
+    // giant is ever materialized; snapshot-and-verify/.bak semantics preserved.
+    if (compact === null || compact.length > streamingForcedSizeLimit) {
+      const data = isEnvelope(value) ? value.data : value;
+      const writtenAt = new Date().toISOString();
+      const buildMetadata: (contentHash: string) => JsonMetadata = isEnvelope(
+        value
+      )
+        ? () => value.metadata
+        : (contentHash) => ({
+            schemaVersion: ENVELOPE_SCHEMA_VERSION,
+            revision: previousRevision + 1,
+            contentHash,
+            writtenAt,
+          });
+
+      // 1. Snapshot the current good file to .bak (the rollback source).
+      if (parsedCurrent) {
+        await writeText(dir, `${fileName}.bak`, current as string);
+      }
+
+      // 2. Stage the streamed content in a temp file and verify the exact bytes
+      //    landed BEFORE overwriting the live file.
+      const stagedInfo = await streamEnvelopeToFile(
+        dir,
+        tmpName,
+        data,
+        buildMetadata
+      );
+      if (!(await verifyStreamedFile(dir, tmpName, stagedInfo))) {
+        await removeQuietly(dir, tmpName);
+        throw new Error(`Safe-write staging failed for ${fileName}.`);
+      }
+
+      // 3. Commit to the live file (re-stream, no giant string), then re-verify.
+      const liveInfo = await streamEnvelopeToFile(
+        dir,
+        fileName,
+        data,
+        buildMetadata
+      );
+      if (!(await verifyStreamedFile(dir, fileName, liveInfo))) {
+        const bak = await readText(dir, `${fileName}.bak`);
+        if (parseValidJson(bak) !== null) {
+          await writeText(dir, fileName, bak as string);
+        }
+        await removeQuietly(dir, tmpName);
+        throw new Error(`Safe-write validation failed for ${fileName}.`);
+      }
+
+      // 4. Best-effort cleanup of the temp file.
+      await removeQuietly(dir, tmpName);
+      return;
+    }
+
+    // Small-file path (unchanged): pretty-print for readability when the compact
+    // result is small enough to stay well under the ceiling; otherwise compact.
     const skipVerify = compact.length > VERIFY_SIZE_LIMIT;
     const serialized = skipVerify
       ? `${compact}\n`
@@ -147,18 +360,51 @@ export async function safeWriteJsonText(
   }
 
   // Same large-payload guard as safeWriteJson: avoid pretty-printing huge files
-  // so restore of a large file can't trip V8's max string length.
-  const compact = JSON.stringify(parsed);
-  const skipVerify = compact.length > VERIFY_SIZE_LIMIT;
-  const normalized = skipVerify
-    ? `${compact}\n`
-    : `${JSON.stringify(parsed, null, 2)}\n`;
+  // so restore of a large file can't trip V8's max string length. If even the
+  // compact form is too large to hold as one string, stream the payload instead.
+  let compact: string | null = null;
+  try {
+    compact = JSON.stringify(parsed);
+  } catch (error) {
+    if (!isStringLengthError(error)) throw error;
+  }
+  let normalized: string | null = null;
+  let skipVerify = false;
+  if (compact !== null && compact.length <= streamingForcedSizeLimit) {
+    skipVerify = compact.length > VERIFY_SIZE_LIMIT;
+    normalized = skipVerify
+      ? `${compact}\n`
+      : `${JSON.stringify(parsed, null, 2)}\n`;
+  }
   const tmpName = `${fileName}.tmp`;
 
   await withResourceLock(`${dir.name}/${fileName}`, async () => {
     const current = await readText(dir, fileName);
     if (parseValidJson(current) !== null) {
       await writeText(dir, `${fileName}.bak`, current as string);
+    }
+
+    if (normalized === null) {
+      // Streamed path: re-normalize the restore payload verbatim (it is already
+      // a valid envelope or bare JSON) without ever building one giant string.
+      const stagedInfo = await streamValueToFile(dir, tmpName, parsed);
+      if (!(await verifyStreamedFile(dir, tmpName, stagedInfo))) {
+        await removeQuietly(dir, tmpName);
+        throw new Error(`Safe-write staging failed for ${fileName}.`);
+      }
+
+      const liveInfo = await streamValueToFile(dir, fileName, parsed);
+      if (!(await verifyStreamedFile(dir, fileName, liveInfo))) {
+        const bak = await readText(dir, `${fileName}.bak`);
+        if (parseValidJson(bak) !== null) {
+          await writeText(dir, fileName, bak as string);
+        }
+        await removeQuietly(dir, tmpName);
+        throw new Error(`Safe-write validation failed for ${fileName}.`);
+      }
+
+      await removeQuietly(dir, tmpName);
+      return;
     }
 
     await writeText(dir, tmpName, normalized);
