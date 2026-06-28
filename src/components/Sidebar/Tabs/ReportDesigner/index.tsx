@@ -215,16 +215,18 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: Editor
       filters: [],
       elements: [],
     };
-    setDoc((d) => ({ ...d, pages: [...d.pages, newPage] }));
-    setCurrentPageIndex(doc.pages.length);
+    setDoc((d) => {
+      const newPages = [...d.pages, newPage];
+      setCurrentPageIndex(newPages.length - 1);
+      return { ...d, pages: newPages };
+    });
     setSelectedId(null);
   }
 
   function deletePage() {
     if (doc.pages.length <= 1) return;
-    const nextPages = doc.pages.filter((_, i) => i !== currentPageIndex);
     const nextIndex = Math.max(0, currentPageIndex - 1);
-    setDoc((d) => ({ ...d, pages: nextPages }));
+    setDoc((d) => ({ ...d, pages: d.pages.filter((_, i) => i !== currentPageIndex) }));
     setCurrentPageIndex(nextIndex);
     setSelectedId(null);
   }

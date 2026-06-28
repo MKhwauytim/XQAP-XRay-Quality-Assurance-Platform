@@ -4,6 +4,70 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v7.13 — 2026-06-28 — Fix: page mutation stale closures in Report Designer
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
+
+**Before — addPage:**
+```ts
+function addPage() {
+  const newPage = {
+    pageId: createPageId(),
+    name: `صفحة ${doc.pages.length + 1}`,
+    order: doc.pages.length,
+    filters: [],
+    elements: [],
+  };
+  setDoc((d) => ({ ...d, pages: [...d.pages, newPage] }));
+  setCurrentPageIndex(doc.pages.length);  // stale closure: reads render-time length
+  setSelectedId(null);
+}
+```
+
+**After — addPage:**
+```ts
+function addPage() {
+  const newPage = {
+    pageId: createPageId(),
+    name: `صفحة ${doc.pages.length + 1}`,
+    order: doc.pages.length,
+    filters: [],
+    elements: [],
+  };
+  setDoc((d) => {
+    const newPages = [...d.pages, newPage];
+    setCurrentPageIndex(newPages.length - 1);  // guaranteed latest from updater
+    return { ...d, pages: newPages };
+  });
+  setSelectedId(null);
+}
+```
+
+**Before — deletePage:**
+```ts
+function deletePage() {
+  if (doc.pages.length <= 1) return;
+  const nextPages = doc.pages.filter((_, i) => i !== currentPageIndex);  // stale closure
+  const nextIndex = Math.max(0, currentPageIndex - 1);
+  setDoc((d) => ({ ...d, pages: nextPages }));
+  setCurrentPageIndex(nextIndex);
+  setSelectedId(null);
+}
+```
+
+**After — deletePage:**
+```ts
+function deletePage() {
+  if (doc.pages.length <= 1) return;
+  const nextIndex = Math.max(0, currentPageIndex - 1);
+  setDoc((d) => ({ ...d, pages: d.pages.filter((_, i) => i !== currentPageIndex) }));  // filter from updater state
+  setCurrentPageIndex(nextIndex);
+  setSelectedId(null);
+}
+```
+
+---
+
 ## v7.12 — 2026-06-28 — Report Designer: Toolbar, Inspector, autosave (Task 1.6)
 
 Phase 1, Task 1.6: wires the full editor — Toolbar (add elements/pages, page nav, save, print), Inspector (selected-element property editor), and debounced autosave (800 ms) with an explicit Save button.
