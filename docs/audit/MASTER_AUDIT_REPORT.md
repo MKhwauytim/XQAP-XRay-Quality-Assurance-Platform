@@ -101,7 +101,7 @@ Status: Not reviewed / **Confirmed** / Planned / In progress / Fixed / Validated
 - **Effort:** S (documentation) · **Acceptance:** Risk acceptance recorded; passcode strength verified.
 
 ### SEC-02 — Session persisted to localStorage with 7-day TTL (undocumented behavior change)
-- **Category:** Security · **Severity:** High · **Status:** Confirmed
+- **Category:** Security · **Severity:** High · **Status:** ✅ Fixed (commit `1f715aec`, EDIT_LOG v5.37) — switched to `sessionStorage`; code + docs aligned; auth tests green.
 - **Where:** `src/auth/authSession.ts:7-44, 88-122`
 - **Description:** `writeSession` persists `{role, username, loginAt}` to `localStorage` key `xray_auth_session_v1`; `readRealSession` rehydrates it and honors a 7-day TTL. CLAUDE.md and `docs/data-system-report.md:9` both state the session is **runtime-only** and lost on reload — directly contradicting the code.
 - **Root cause:** Behavior changed (persistence added) without updating docs or re-evaluating the security tradeoff.
@@ -111,7 +111,7 @@ Status: Not reviewed / **Confirmed** / Planned / In progress / Fixed / Validated
 - **Required tests:** session rehydration on reload, expiry past TTL, clear on logout.
 
 ### DOC-01 — Documentation drift (CLAUDE.md and docs vs. code)
-- **Category:** Documentation · **Severity:** Medium · **Status:** Confirmed
+- **Category:** Documentation · **Severity:** Medium · **Status:** ✅ Fixed (commit `e72a093c`, EDIT_LOG v5.38) — CLAUDE.md bundle size, disk layout, and session bullet corrected; cross-linked to data-system-report.md.
 - **Where:** `CLAUDE.md`, `docs/data-system-report.md`
 - **Description:** Three confirmed drifts: (1) session persistence (see SEC-02); (2) bundle size — docs say "~942 kB, 286 kB gzip", actual is **1.9 MB / 664 kB gzip**; (3) workspace disk layout — CLAUDE.md documents `Population/`, `.system/`, `templates/`, but the code uses numbered roots `1-Population/` … `6-Templates/` (with legacy fallbacks), as the newer `data-system-report.md` correctly describes.
 - **Impact:** Misleads any future maintainer; undermines trust in all docs.
@@ -128,7 +128,7 @@ Status: Not reviewed / **Confirmed** / Planned / In progress / Fixed / Validated
 - **Effort:** L (per file) · **Acceptance:** No behavior change (characterization tests green before+after); each extracted unit independently testable.
 
 ### ERR-01 — Floating promises in data loaders
-- **Category:** Error handling · **Severity:** Low-Medium · **Status:** Confirmed `[RECON]` (sampled)
+- **Category:** Error handling · **Severity:** Low-Medium · **Status:** ✅ Fixed (commit `934ffd7f`, EDIT_LOG v5.39) — 13 confirmed sites across 6 files now `.catch(logRejection(...))`. Loaders that already had a `.catch` were left unchanged. The original "~9" estimate was an overcount; the actual count is 13 genuinely uncaught sites (most other `.then` loaders already handled rejections).
 - **Where:** e.g. `Population/index.tsx:202,231`, `UserManagement/index.tsx:175`, others among ~27 `.then()` sites
 - **Description:** Several `.then()` loaders are not `void`-marked and lack `.catch()`; a rejected load surfaces only as an unhandled rejection, with no user-facing error and no `errorLogger` entry.
 - **Impact:** Silent failure of data loads (e.g. config, months list) → blank/stale UI with no explanation.
@@ -154,6 +154,14 @@ Status: Not reviewed / **Confirmed** / Planned / In progress / Fixed / Validated
 - **Description:** A large body of changes (new auth persistence, activity log, branding, tests, data-system doc) is uncommitted and unreviewed. The "baseline" is not a clean commit.
 - **Recommended fix:** Phase 0 — review, test, and commit (or revert) this work in coherent chunks before any new change.
 - **Effort:** M · **Acceptance:** Clean working tree on a tagged baseline; all gates green at that tag.
+
+### DATA-02 — `docs/EDIT_LOG.md` contains stray NUL bytes (file reads as binary)
+- **Category:** Data integrity (tooling) · **Severity:** Low · **Status:** Confirmed (discovered this session)
+- **Where:** `docs/EDIT_LOG.md`
+- **Description:** `file` reports the log as `data` (not text) and `grep` flags it "Binary file matches"; the header/footer are clean UTF-8/CRLF, so NUL bytes exist mid-file (likely a past editor/encoding mishap). New entries prepend cleanly, but the corrupt region impairs `grep`/diff/review of historical entries.
+- **Impact:** Degrades the audit trail's usefulness; risk of further corruption on re-save by some editors.
+- **Recommended fix:** Strip NULs (`tr -d '\000'`) into a clean copy, verify the history is intact, replace, and commit. Consider a `.gitattributes` `*.md text` rule.
+- **Effort:** S · **Acceptance:** `file docs/EDIT_LOG.md` reports text; history intact; gates unaffected.
 
 > **Findings to be expanded during execution:** data-integrity mapping correctness (import field mapping, sampling determinism under edge inputs), performance under 300k-row imports (a recent fix commit suggests this was a real pain point), accessibility/RTL focus management, and per-module dead-code detection are **not yet line-audited** and will be registered as they are confirmed in their respective phases. They are intentionally not invented here.
 
