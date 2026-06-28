@@ -1,4 +1,5 @@
 import type { PageSizePreset, ReportDocument } from "../../../../../data/reportDesigner/reportTypes";
+import { PAGE_SIZE_LABELS } from "../../../../../data/reportDesigner/reportTypes";
 
 interface RibbonProps {
   doc: ReportDocument;
@@ -12,15 +13,6 @@ interface RibbonProps {
   onPageSizeChange: (preset: PageSizePreset) => void;
   onBack: () => void;
 }
-
-const PAGE_SIZE_LABELS: Record<PageSizePreset, string> = {
-  "A4": "A4 طولي",
-  "Letter": "Letter طولي",
-  "16:9": "شاشة عريضة 16:9",
-  "4:3": "قياسي 4:3",
-  "16:9-fhd": "Full HD 16:9",
-  "custom": "مخصص",
-};
 
 export default function Ribbon({
   doc, saving, showFields, showFormat,

@@ -15,6 +15,7 @@ import {
   createElementId,
   createPageId,
   getPageSetup,
+  PAGE_SIZE_LABELS,
   type ReportDocument,
   type Element,
   type PageSizePreset,
@@ -55,15 +56,7 @@ function formatDate(iso: string): string {
 }
 
 function pageSizeLabel(p: PageSizePreset): string {
-  const labels: Record<PageSizePreset, string> = {
-    "A4": "A4 عمودي",
-    "Letter": "Letter عمودي",
-    "16:9": "16:9 شرائح",
-    "4:3": "4:3 شرائح",
-    "16:9-fhd": "16:9 FHD",
-    "custom": "مخصص",
-  };
-  return labels[p] ?? p;
+  return PAGE_SIZE_LABELS[p] ?? p;
 }
 
 // ── Editor host ────────────────────────────────────────────────────────────
@@ -258,9 +251,9 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: Editor
     setDoc((d) => {
       if (d.pages.length <= 1) return d;
       const pages = d.pages.filter((_, i) => i !== index);
+      setCurrentPageIndex((ci) => Math.min(ci, pages.length - 1));
       return { ...d, pages };
     });
-    setCurrentPageIndex((ci) => Math.min(ci, doc.pages.length - 2));
   }
 
   return (

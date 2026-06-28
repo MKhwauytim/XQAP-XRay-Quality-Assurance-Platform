@@ -580,26 +580,6 @@
   min-height: 0;
 }
 
-/* ── Editor body: canvas area + inspector panel ── */
-.rd-editor-body {
-  display: flex;
-  flex: 1;
-  gap: 12px;
-  min-height: 0;
-  overflow: hidden;
-}
-
-/* .rd-canvas-area is defined above in the 3-panel grid section */
-
-.rd-inspector-panel {
-  width: 240px;
-  flex-shrink: 0;
-  overflow-y: auto;
-  border: 1px solid #d0d7de;
-  border-radius: 8px;
-  background: #fff;
-}
-
 /* ── Inspector ── */
 .rd-inspector {
   padding: 8px 0;

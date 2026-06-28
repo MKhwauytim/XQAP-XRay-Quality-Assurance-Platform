@@ -132,6 +132,15 @@ export const SLIDE_PRESETS: Record<PageSizePreset, PageSetup> = {
   "custom": A4_PORTRAIT,
 };
 
+export const PAGE_SIZE_LABELS: Record<PageSizePreset, string> = {
+  "A4": "A4 طولي",
+  "Letter": "Letter طولي",
+  "16:9": "شاشة عريضة 16:9",
+  "4:3": "قياسي 4:3",
+  "16:9-fhd": "Full HD 16:9",
+  "custom": "مخصص",
+};
+
 export function getPageSetup(preset: PageSizePreset): PageSetup {
   return SLIDE_PRESETS[preset] ?? A4_PORTRAIT;
 }

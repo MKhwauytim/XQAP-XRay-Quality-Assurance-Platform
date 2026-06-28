@@ -25,13 +25,13 @@ export async function runPowerBiExport(
 ): Promise<ExportManifest> {
   const populationData = await loadMonthPopulationFinal(root, month);
   const sample = await loadSampleMaster(root, month);
-  const sampleRows = (sample?.rows ?? []) as unknown as PreparedPopulationRow[];
+  const sampleRows = sample?.rows ?? [];
   const distribution = await loadOrDeriveDistributionCurrent(root, month, sampleRows);
   const employeeFiles = await loadAllEmployeeFiles(root, month);
 
   const execRows = buildExecutiveReportRows({
     monthFolderName: month,
-    populationRows: (populationData?.rows ?? []) as unknown as PreparedPopulationRow[],
+    populationRows: (populationData?.rows ?? []) as PreparedPopulationRow[],
     sample: sample ?? null,
     distribution: distribution ?? null,
     employeeFiles,
@@ -39,7 +39,7 @@ export async function runPowerBiExport(
     config: DEFAULT_EXEC_CONFIG,
   });
 
-  const allRows = execRows as unknown as Record<string, unknown>[];
+  const allRows: Record<string, unknown>[] = execRows.map((r) => r as Record<string, unknown>);
   const sampleRowsOut = allRows.filter((r) => r["selectedInSample"] === true);
 
   return writeCsvExport(root, month, [

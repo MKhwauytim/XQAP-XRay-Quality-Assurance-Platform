@@ -4,6 +4,104 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v18.0 — 2026-06-28 — Fix stale closure in deletePage, type-safe export rows, unified page-size labels, remove dead CSS
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
+
+**Before:**
+```ts
+function handleDeletePage(index: number) {
+  setDoc((d) => {
+    if (d.pages.length <= 1) return d;
+    const pages = d.pages.filter((_, i) => i !== index);
+    return { ...d, pages };
+  });
+  setCurrentPageIndex((ci) => Math.min(ci, doc.pages.length - 2));  // stale closure
+}
+```
+
+**After:**
+```ts
+function handleDeletePage(index: number) {
+  setDoc((d) => {
+    if (d.pages.length <= 1) return d;
+    const pages = d.pages.filter((_, i) => i !== index);
+    setCurrentPageIndex((ci) => Math.min(ci, pages.length - 1));
+    return { ...d, pages };
+  });
+}
+```
+
+**File:** `src/data/powerbiExport/exportManager.ts`
+
+**Before:**
+```ts
+const sampleRows = (sample?.rows ?? []) as unknown as PreparedPopulationRow[];
+// ...
+populationRows: (populationData?.rows ?? []) as unknown as PreparedPopulationRow[],
+// ...
+const allRows = execRows as unknown as Record<string, unknown>[];
+```
+
+**After:**
+```ts
+const sampleRows = sample?.rows ?? [];
+// ...
+populationRows: (populationData?.rows ?? []) as PreparedPopulationRow[],
+// ...
+const allRows: Record<string, unknown>[] = execRows.map((r) => r as Record<string, unknown>);
+```
+
+**File:** `src/data/reportDesigner/reportTypes.ts`
+
+**Before:**
+```ts
+// PAGE_SIZE_LABELS did not exist; labels were duplicated locally in Ribbon.tsx and index.tsx with inconsistent values
+```
+
+**After:**
+```ts
+export const PAGE_SIZE_LABELS: Record<PageSizePreset, string> = {
+  "A4": "A4 طولي",
+  "Letter": "Letter طولي",
+  "16:9": "شاشة عريضة 16:9",
+  "4:3": "قياسي 4:3",
+  "16:9-fhd": "Full HD 16:9",
+  "custom": "مخصص",
+};
+```
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/Ribbon.tsx`
+
+**Before:**
+```ts
+const PAGE_SIZE_LABELS: Record<PageSizePreset, string> = {
+  "A4": "A4 طولي",
+  // ... local duplicate
+};
+```
+
+**After:**
+```ts
+import { PAGE_SIZE_LABELS } from "../../../../../data/reportDesigner/reportTypes";
+// local constant removed; uses shared export
+```
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/ReportDesigner.css`
+
+**Before:**
+```css
+.rd-editor-body { display: flex; flex: 1; gap: 12px; min-height: 0; overflow: hidden; }
+.rd-inspector-panel { width: 240px; flex-shrink: 0; overflow-y: auto; ... }
+```
+
+**After:**
+```css
+/* Both dead blocks removed — .rd-editor-body and .rd-inspector-panel are not rendered in any JSX */
+```
+
+---
+
 ## v17.0 — 2026-06-28 — Export manager + Power BI section in Reports tab
 
 **File:** `src/data/powerbiExport/exportManager.ts`
