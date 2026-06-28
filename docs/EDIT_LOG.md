@@ -4,6 +4,165 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v7.0 — 2026-06-28 — Report Designer: core document model types and factory (FEATURE)
+
+Phase 0, Task 0.1: Create the foundational document model types and factory function for the Report Designer feature. All subsequent Report Designer tasks depend on these types.
+
+Adds:
+- Complete type hierarchy: `ReportDocument`, `Page`, `Element`, `ElementConfig` (table/chart/kpi/text/shape/image)
+- Support types: `PageSetup`, `ElementStyle`, `Filter`, `FilterOp`, `Aggregation`, `ElementType`
+- Constants: `REPORT_SCHEMA_VERSION = 1`, `A4_PORTRAIT` preset
+- Factory functions: `createReportId()`, `createPageId()`, `createElementId()`, `createEmptyDocument(name, createdBy)`
+- Comprehensive test covering all properties and invariants
+
+**File:** `src/data/reportDesigner/reportTypes.ts` (new)
+
+**Before:**
+```ts
+(new file)
+```
+
+**After:**
+```ts
+export const REPORT_SCHEMA_VERSION = 1;
+
+export type DocType = "print" | "slides" | "dashboard";
+export type PageSizePreset = "A4" | "Letter" | "16:9" | "4:3" | "custom";
+export type Orientation = "portrait" | "landscape";
+
+export type Aggregation =
+  | "count" | "distinctCount" | "sum" | "avg" | "min" | "max" | "percentOfTotal";
+
+export type FilterOp =
+  | "equals" | "in" | "notEquals" | "between" | "contains" | "truthy" | "falsy" | "topN";
+
+export type Filter = { field: string; op: FilterOp; value: unknown };
+
+export type PageSetup = {
+  size: PageSizePreset;
+  orientation: Orientation;
+  width: number;
+  height: number;
+  margins: { top: number; right: number; bottom: number; left: number };
+};
+
+export type ElementType = "table" | "chart" | "kpi" | "text" | "shape" | "image";
+
+export type ElementStyle = {
+  fill?: string; borderColor?: string; borderWidth?: number; borderRadius?: number;
+  padding?: number; fontFamily?: string; fontSize?: number; fontWeight?: number;
+  color?: string; textAlign?: "right" | "center" | "left"; opacity?: number;
+};
+
+export type TableConfig = {
+  kind: "table";
+  dataSourceId: string;
+  columns: Array<{ field: string; agg?: Aggregation; sort?: "asc" | "desc"; format?: string; condFormat?: unknown }>;
+  groupBy: string[];
+  filters: Filter[];
+};
+
+export type ChartConfig = {
+  kind: "chart";
+  chartType: "bar" | "line" | "pie" | "donut" | "area" | "combo" | "scatter";
+  dataSourceId: string;
+  wells: { axis: string[]; legend?: string; values: Array<{ field: string; agg: Aggregation }> };
+  filters: Filter[];
+  options: Record<string, unknown>;
+};
+
+export type KpiConfig = {
+  kind: "kpi";
+  dataSourceId: string;
+  valueField: string;
+  agg: Aggregation;
+  target?: number;
+  comparison?: "higherBetter" | "lowerBetter";
+  format?: string;
+};
+
+export type TextConfig = { kind: "text"; text: string };
+export type ShapeConfig = { kind: "shape"; shape: "rect" | "line" | "ellipse" | "divider" };
+export type ImageConfig = { kind: "image"; dataUrl: string; alt?: string };
+
+export type ElementConfig =
+  | TableConfig | ChartConfig | KpiConfig | TextConfig | ShapeConfig | ImageConfig;
+
+export type Element = {
+  elementId: string;
+  type: ElementType;
+  name: string;
+  x: number; y: number; w: number; h: number; z: number;
+  rotation?: number; locked?: boolean;
+  style: ElementStyle;
+  config: ElementConfig;
+};
+
+export type Page = {
+  pageId: string;
+  name: string;
+  order: number;
+  background?: { color?: string; image?: string };
+  filters: Filter[];
+  elements: Element[];
+};
+
+export type DataSourceRef = { id: string; tableId: string; label: string };
+
+export type ReportDocument = {
+  reportId: string;
+  reportName: string;
+  version: number;
+  createdAt: string; createdBy: string; updatedAt: string; updatedBy: string;
+  docType: DocType;
+  pageSetup: PageSetup;
+  theme: { palette: string[]; fontFamily: string; defaults: Record<string, unknown> };
+  dataSources: DataSourceRef[];
+  pages: Page[];
+  reportFilters: Filter[];
+};
+
+export const A4_PORTRAIT: PageSetup = {
+  size: "A4", orientation: "portrait", width: 794, height: 1123,
+  margins: { top: 38, right: 38, bottom: 38, left: 38 },
+};
+
+export function createReportId(): string { ... }
+export function createPageId(): string { ... }
+export function createElementId(): string { ... }
+export function createEmptyDocument(name: string, createdBy: string): ReportDocument { ... }
+```
+
+**File:** `src/data/reportDesigner/reportTypes.test.ts` (new)
+
+**Before:**
+```ts
+(new file)
+```
+
+**After:**
+```ts
+import { describe, it, expect } from "vitest";
+import { createEmptyDocument, REPORT_SCHEMA_VERSION } from "./reportTypes";
+
+describe("createEmptyDocument", () => {
+  it("creates a print A4 document with one empty page", () => {
+    const doc = createEmptyDocument("تقرير تجريبي", "admin");
+    expect(doc.reportName).toBe("تقرير تجريبي");
+    expect(doc.createdBy).toBe("admin");
+    expect(doc.docType).toBe("print");
+    expect(doc.pageSetup.size).toBe("A4");
+    expect(doc.pageSetup.orientation).toBe("portrait");
+    expect(doc.pages).toHaveLength(1);
+    expect(doc.pages[0].elements).toEqual([]);
+    expect(doc.reportId).toMatch(/^rpt-/);
+    expect(REPORT_SCHEMA_VERSION).toBe(1);
+  });
+});
+```
+
+---
+
 ## v6.1 — 2026-06-28 — Incremental content-hashing removes the read-side stringify ceiling (FEATURE)
 
 Completes the symmetry of v6.0. v6.0 removed the **write**-side ceiling, but the
