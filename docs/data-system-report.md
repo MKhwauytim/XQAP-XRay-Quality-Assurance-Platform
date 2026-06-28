@@ -171,6 +171,17 @@ This phase checks whether the inspection result is correct and captures suspicio
 
 The inspection panel gates phases in order: the next phase is enabled after required visible fields in the current phase are completed.
 
+## 4-Reports/designs/
+
+Report Designer saves and loads user-created report designs under this sub-folder.
+
+| File or Pattern | Location | Purpose |
+| --- | --- | --- |
+| `designs.index.json` | `4-Reports/designs/` | Index of all saved report designs (`JsonEnvelope<DesignIndex>`). Lists each design's `reportId`, `reportName`, `docType`, `createdAt`, and `updatedAt`. |
+| `{reportId}.json` | `4-Reports/designs/` | Individual `ReportDocument` persisted as `JsonEnvelope<ReportDocument>`. Contains the full document: theme, pages, and all canvas elements (text, shape, image). |
+
+Both files use `safeWriteJson` / `safeReadJson` and the `JsonEnvelope` schema-versioning wrapper (current `schemaVersion: 1`). The index is re-derived from the design files on load; `designs.index.json` is the live index that the Report Designer list view reads.
+
 ## Templates, Preferences, Backups
 
 | File or Pattern | Location | Purpose |

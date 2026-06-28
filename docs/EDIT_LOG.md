@@ -4,6 +4,102 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v8.0 — 2026-06-28 — Phase-1 integration pass: test suite, typecheck, lint, build verification; docs update
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
+
+**Before:**
+```tsx
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPageIndex]);
+```
+and
+```tsx
+  useEffect(() => {
+    if (!directoryHandle) return;
+    let cancelled = false;
+    setLoadingIndex(true);
+    setIndexError(null);
+    loadDesignIndex(directoryHandle)
+      .then((idx) => {
+        if (!cancelled) {
+          setIndex(idx);
+          setLoadingIndex(false);
+        }
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setIndexError(
+            err instanceof Error ? err.message : "خطأ غير متوقع عند تحميل القائمة."
+          );
+          setLoadingIndex(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [directoryHandle]);
+```
+
+**After:**
+```tsx
+  }, [currentPageIndex]);
+```
+and
+```tsx
+  useEffect(() => {
+    if (!directoryHandle) return;
+    let cancelled = false;
+    async function fetchIndex() {
+      setLoadingIndex(true);
+      setIndexError(null);
+      try {
+        const idx = await loadDesignIndex(directoryHandle!);
+        if (!cancelled) {
+          setIndex(idx);
+          setLoadingIndex(false);
+        }
+      } catch (err: unknown) {
+        if (!cancelled) {
+          setIndexError(
+            err instanceof Error ? err.message : "خطأ غير متوقع عند تحميل القائمة."
+          );
+          setLoadingIndex(false);
+        }
+      }
+    }
+    void fetchIndex();
+    return () => {
+      cancelled = true;
+    };
+  }, [directoryHandle]);
+```
+_(Fixes: removed stale `eslint-disable` comment; refactored synchronous setState calls in useEffect into an async inner function to satisfy `react-hooks/set-state-in-effect` lint rule.)_
+
+**File:** `docs/data-system-report.md`
+
+**Before:** _(4-Reports section had no designs/ subsection — only the summary table row)_
+```markdown
+| `4-Reports/` | Generated/report artifacts when report flows write to the workspace. |
+```
+_(no `## 4-Reports/designs/` section existed)_
+
+**After:** _(new section added before `## Templates, Preferences, Backups`)_
+```markdown
+## 4-Reports/designs/
+
+Report Designer saves and loads user-created report designs under this sub-folder.
+
+| File or Pattern | Location | Purpose |
+| --- | --- | --- |
+| `designs.index.json` | `4-Reports/designs/` | Index of all saved report designs (`JsonEnvelope<DesignIndex>`). Lists each design's `reportId`, `reportName`, `docType`, `createdAt`, and `updatedAt`. |
+| `{reportId}.json` | `4-Reports/designs/` | Individual `ReportDocument` persisted as `JsonEnvelope<ReportDocument>`. Contains the full document: theme, pages, and all canvas elements (text, shape, image). |
+
+Both files use `safeWriteJson` / `safeReadJson` and the `JsonEnvelope` schema-versioning wrapper (current `schemaVersion: 1`). The index is re-derived from the design files on load; `designs.index.json` is the live index that the Report Designer list view reads.
+```
+
+---
+
 ## v7.14 — 2026-06-28 — Report Designer: print/PDF view (Task 1.7)
 
 **File:** `src/components/Sidebar/Tabs/ReportDesigner/PrintView.tsx` _(new file)_

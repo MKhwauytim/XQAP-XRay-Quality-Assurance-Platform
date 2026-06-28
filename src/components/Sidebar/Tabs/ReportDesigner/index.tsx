@@ -204,7 +204,6 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: Editor
           : p
       ),
     }));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPageIndex]);
 
   // ── Page mutations ──
@@ -332,23 +331,25 @@ export default function ReportDesigner() {
   useEffect(() => {
     if (!directoryHandle) return;
     let cancelled = false;
-    setLoadingIndex(true);
-    setIndexError(null);
-    loadDesignIndex(directoryHandle)
-      .then((idx) => {
+    async function fetchIndex() {
+      setLoadingIndex(true);
+      setIndexError(null);
+      try {
+        const idx = await loadDesignIndex(directoryHandle!);
         if (!cancelled) {
           setIndex(idx);
           setLoadingIndex(false);
         }
-      })
-      .catch((err: unknown) => {
+      } catch (err: unknown) {
         if (!cancelled) {
           setIndexError(
             err instanceof Error ? err.message : "خطأ غير متوقع عند تحميل القائمة."
           );
           setLoadingIndex(false);
         }
-      });
+      }
+    }
+    void fetchIndex();
     return () => {
       cancelled = true;
     };
