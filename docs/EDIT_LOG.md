@@ -2112,6 +2112,140 @@ Install `lucide-react` and replace every emoji/pictographic character in the UI 
 
 ---
 
+## v7.5 — 2026-06-28 — Report Designer: field catalog and data model (FEATURE)
+
+Phase 0, Task 0.5: Create the field catalog (Arabic-labeled metadata for all ExecutiveReportRow fields) and the data model builder that feeds tables to the query engine. The field catalog defines FieldRole, FieldType, and FieldMeta for 24 fact table columns with complete Arabic localization. The data model builder ingests fact rows, port profiles, and stage profiles, then exposes them as named tables with full metadata for rendering tables, charts, and KPIs in the Report Designer.
+
+**File:** `src/data/reportDesigner/query/fieldCatalog.ts` (new)
+
+**Before:**
+```ts
+(new file)
+```
+
+**After:**
+```ts
+export type FieldRole = "dimension" | "measure";
+export type FieldType = "string" | "number" | "boolean";
+export type FieldMeta = { field: string; label: string; role: FieldRole; type: FieldType };
+
+export const FACT_FIELDS: FieldMeta[] = [
+  { field: "xrayImageId", label: "رقم صورة الأشعة", role: "dimension", type: "string" },
+  { field: "portName", label: "الميناء", role: "dimension", type: "string" },
+  // ... 22 more fields, all with Arabic labels
+];
+
+const BY_FIELD = new Map(FACT_FIELDS.map((f) => [f.field, f]));
+export function getFieldMeta(field: string): FieldMeta | undefined {
+  return BY_FIELD.get(field);
+}
+```
+
+**File:** `src/data/reportDesigner/query/dataModel.ts` (new)
+
+**Before:**
+```ts
+(new file)
+```
+
+**After:**
+```ts
+import type { ExecutiveReportRow } from "../../reporting/executiveReportTypes";
+import { FACT_FIELDS, type FieldMeta } from "./fieldCatalog";
+
+export type TableId = "fact" | "portProfiles" | "stageProfiles";
+export type DataModelTable = {
+  label: string;
+  fields: FieldMeta[];
+  rows: Array<Record<string, unknown>>;
+};
+export type DataModel = { tables: Record<TableId, DataModelTable> };
+
+function inferFields(rows: Array<Record<string, unknown>>): FieldMeta[] {
+  const sample = rows[0] ?? {};
+  return Object.keys(sample).map((field) => {
+    const v = sample[field];
+    const type = typeof v === "number" ? "number" : typeof v === "boolean" ? "boolean" : "string";
+    return { field, label: field, role: type === "number" ? "measure" : "dimension", type };
+  });
+}
+
+export function buildDataModel(input: {
+  factRows: ExecutiveReportRow[];
+  portProfiles: Array<Record<string, unknown>>;
+  stageProfiles: Array<Record<string, unknown>>;
+}): DataModel {
+  return {
+    tables: {
+      fact: {
+        label: "بيانات الصور (تفصيلي)",
+        fields: FACT_FIELDS,
+        rows: input.factRows as unknown as Array<Record<string, unknown>>,
+      },
+      portProfiles: {
+        label: "ملخص الموانئ",
+        fields: inferFields(input.portProfiles),
+        rows: input.portProfiles,
+      },
+      stageProfiles: {
+        label: "ملخص المراحل",
+        fields: inferFields(input.stageProfiles),
+        rows: input.stageProfiles,
+      },
+    },
+  };
+}
+```
+
+**File:** `src/data/reportDesigner/query/dataModel.test.ts` (new)
+
+**Before:**
+```ts
+(new file)
+```
+
+**After:**
+```ts
+import { describe, it, expect } from "vitest";
+import { buildDataModel } from "./dataModel";
+import { getFieldMeta } from "./fieldCatalog";
+import { runQuery } from "./runQuery";
+
+describe("fieldCatalog", () => {
+  it("tags portName as a string dimension and exposes an Arabic label", () => {
+    const meta = getFieldMeta("portName");
+    expect(meta?.role).toBe("dimension");
+    expect(meta?.type).toBe("string");
+    expect(typeof meta?.label).toBe("string");
+    expect(meta!.label.length).toBeGreaterThan(0);
+  });
+});
+
+describe("buildDataModel", () => {
+  it("exposes the fact table and supports a grouped query over it", () => {
+    const factRows = [
+      { portName: "ميناء أ", imageResult: "اشتباه" },
+      { portName: "ميناء أ", imageResult: "سليمة" },
+      { portName: "ميناء ب", imageResult: "اشتباه" },
+    ];
+    const model = buildDataModel({ factRows: factRows as never, portProfiles: [], stageProfiles: [] });
+    expect(model.tables.fact.rows).toHaveLength(3);
+    expect(model.tables.fact.fields.some((f) => f.field === "portName")).toBe(true);
+    const out = runQuery(model.tables.fact.rows, {
+      groupBy: ["portName"],
+      values: [{ field: "portName", agg: "count" }],
+      filters: [],
+    });
+    expect(out).toEqual([
+      { portName: "ميناء أ", count_portName: 2 },
+      { portName: "ميناء ب", count_portName: 1 },
+    ]);
+  });
+});
+```
+
+---
+
 ## v5.16 — 2026-06-24 — Fix: remove lockout reset on username field change
 
 **File:** `src/auth/AuthGate.tsx`
