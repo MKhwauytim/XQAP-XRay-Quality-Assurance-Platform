@@ -1,14 +1,13 @@
 import * as XLSX from "xlsx";
 
 import { openOrDownload } from "./htmlReport";
-import type { ExecutiveKPIs, ExecutiveReportConfig, ExecutiveReportInput, PortProfile } from "./executiveReportTypes";
+import { ORGANIZATION_PATH_TEXT } from "../../branding/organization";
+import type { ExecutiveKPIs, ExecutiveReportInput } from "./executiveReportTypes";
 import {
   buildExecutiveReportRows,
   calculateExecutiveKPIs,
-  generateNarrativeFindings,
   fmtNum,
   fmtPct,
-  fmtK,
 } from "./executiveReportData";
 
 // ─── HTML-escape ─────────────────────────────────────────────────────────────
@@ -16,846 +15,604 @@ function esc(s: string | null | undefined): string {
   return (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-// ─── Chart helpers ────────────────────────────────────────────────────────────
+const ARABIC_MONTH_NAMES = [
+  "يناير",
+  "فبراير",
+  "مارس",
+  "أبريل",
+  "مايو",
+  "يونيو",
+  "يوليو",
+  "أغسطس",
+  "سبتمبر",
+  "أكتوبر",
+  "نوفمبر",
+  "ديسمبر",
+] as const;
 
-function portBarChart(portProfiles: PortProfile[], topN = 5): string {
-  const top = portProfiles.slice(0, topN);
-  if (!top.length) return `<div class="chart-empty">لا توجد بيانات منافذ</div>`;
-  const maxPop = Math.max(...top.map((p) => p.population), 1);
-  const maxSample = Math.max(...top.map((p) => p.sampleSize), 1);
-  return top.map((p) => {
-    const th = Math.round((p.population / maxPop) * 88);
-    const sh = Math.round((p.sampleSize / maxSample) * 44);
-    return `<div class="bar-group">
-      <div class="bar total" style="height:${th}%"><span class="bar-num">${fmtK(p.population)}</span></div>
-      <div class="bar sample" style="height:${sh}%"><span class="bar-num">${fmtK(p.sampleSize)}</span></div>
-      <span class="bar-label">${esc(p.portName)}</span>
-    </div>`;
-  }).join("");
+function formatReportMonthName(monthFolderName: string): string {
+  const match = /^(\d{1,2})-[A-Za-z]+-(\d{4})$/.exec(monthFolderName.trim());
+  if (!match) return monthFolderName;
+  const monthIndex = Number(match[1]) - 1;
+  const monthName = ARABIC_MONTH_NAMES[monthIndex];
+  return monthName ? `${monthName} ${match[2]}` : monthFolderName;
 }
 
-function donutChart(clean: number, suspicious: number): string {
-  const total = clean + suspicious;
-  if (!total) return `<div class="donut-wrap chart-empty">لا توجد بيانات</div>`;
-  const pct = (clean / total) * 100;
-  return `<div class="donut-wrap">
-    <div class="donut" style="background:conic-gradient(var(--teal-600) 0 ${pct.toFixed(2)}%,var(--navy-900) ${pct.toFixed(2)}% 100%)"></div>
-    <div class="donut-center"><b>${pct.toFixed(1)}%</b>سليمة</div>
-    <div class="donut-side right">سليمة<b style="color:var(--teal-700)">${fmtNum(clean)}</b></div>
-    <div class="donut-side left">اشتباه<b>${fmtNum(suspicious)}</b></div>
-  </div>`;
+function formatIssueDate(date = new Date()): string {
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${day} / ${month} / ${date.getFullYear()}`;
 }
 
-function portRankList(portProfiles: PortProfile[], topN = 5): string {
-  const ranked = portProfiles.filter((p) => p.accuracy !== null)
-    .sort((a, b) => (b.accuracy ?? 0) - (a.accuracy ?? 0)).slice(0, topN);
-  if (!ranked.length) return `<div class="chart-empty">لا توجد بيانات كافية</div>`;
-  return ranked.map((p, i) => `<div class="rank-row">
-    <div class="rank-no">${i + 1}</div>
-    <div class="rank-name">${esc(p.portName)}</div>
-    <div class="rank-track"><div class="rank-fill" style="width:${Math.round(p.accuracy ?? 0)}%"></div></div>
-    <div class="rank-value">${fmtPct(p.accuracy)}</div>
-  </div>`).join("");
-}
+type ReportGroupRow = {
+  portType: string;
+  portName: string;
+  population: number;
+  clean: number;
+  suspicious: number;
+  sampleSize: number;
+  studied: number;
+  resultAccuracy: number | null;
+  suspicionPrecision: number | null;
+  suspiciousDetectionRate: number | null;
+  missedSuspicionRate: number | null;
+  correctSuspicious: number;
+  missedSuspicious: number;
+  excessSuspicious: number;
+  availableImages: number;
+  highQuality: number;
+  mediumQuality: number;
+  lowQuality: number;
+};
 
-function stackedBars(portProfiles: PortProfile[], topN = 6): string {
-  return portProfiles.slice(0, topN).map((p) => {
-    const suspPct = p.population > 0 ? (p.suspicious / p.population) * 100 : 0;
-    return `<div class="port-row">
-      <div class="name">${esc(p.portName)}</div>
-      <div class="stack-track">
-        <div class="stack-clean" style="width:${(100 - suspPct).toFixed(1)}%"></div>
-        <div class="stack-susp" style="width:${suspPct.toFixed(1)}%"></div>
-      </div>
-      <div class="pct">${suspPct.toFixed(1)}%</div>
-    </div>`;
-  }).join("");
-}
+const STUDY_LEVEL_DEFINITIONS = [
+  {
+    title: "المستوى الأول",
+    subtitle: "حالات الضبط المؤكدة",
+    description: "الحالات التي تتضمن حوادث ضبط أمنية أو جودة قرارات التجاوز للأنظمة، ولم يتم الاشتباه بها من قبل كلا المستويين أو أحدهما.",
+    tone: "level-one",
+  },
+  {
+    title: "المستوى الثاني",
+    subtitle: "حالات الاشتباه المؤكدة",
+    description: "الحالات التي لم يتم الاشتباه بها من قبل كلا المستويين أو أحدهما، وتم الاشتباه بها من أحد الفرق الأمنية الأخرى مثل الوسائل الحية أو المعاينة أو التفتيش الآلي.",
+    tone: "level-two",
+  },
+  {
+    title: "المستوى الثالث",
+    subtitle: "حالات محرك المخاطر",
+    description: "الحالات التي تتضمن مدخلات مخاطر ولم يتم الاشتباه بها من المستوى الأول والثاني.",
+    tone: "level-three",
+  },
+  {
+    title: "المستوى الرابع",
+    subtitle: "اشتباه الأشعة غير المؤكد",
+    description: "الحالات التي تم الاشتباه بها من قبل المستوى الأول أو الثاني في صور الأشعة ولم يتم تأكيد الاشتباه من الفرق الأمنية الأخرى.",
+    tone: "level-four",
+  },
+];
 
-function stageCoverageCards(stageProfiles: ExecutiveKPIs["stageProfiles"]): string {
-  return stageProfiles.map((s) => {
-    const cov = Math.min(Math.round(s.coverage), 100);
-    return `<div class="stage-card">
-      <div class="stage-head"><strong>${esc(s.stageLabel)}</strong></div>
-      <div class="stage-metrics">
-        <div class="stage-metric"><span>المجتمع</span><b>${fmtNum(s.population)}</b></div>
-        <div class="stage-metric teal"><span>العينة</span><b>${fmtNum(s.sampleSize)}</b></div>
-        <div class="stage-metric teal"><span>التغطية</span><b>${fmtPct(s.coverage)}</b></div>
-        <div class="stage-metric"><span>المدروسة</span><b>${fmtNum(s.studied)}</b></div>
-        <div class="stage-metric"><span>الإنجاز</span><b>${fmtPct(s.completionRate)}</b></div>
-      </div>
-      <div class="progress"><i style="width:${cov}%"></i></div>
-    </div>`;
-  }).join("");
-}
-
-function dualBarsPerPort(portProfiles: PortProfile[], topN = 5): string {
-  const top = portProfiles.filter((p) => p.levelOneAccuracy !== null || p.levelTwoAccuracy !== null).slice(0, topN);
-  if (!top.length) return `<div class="chart-empty">لا توجد بيانات كافية</div>`;
-  return top.map((p) => {
-    const l1 = p.levelOneAccuracy ?? 0;
-    const l2 = p.levelTwoAccuracy ?? 0;
-    return `<div class="dual-row">
-      <div class="dual-label">${esc(p.portName)}</div>
-      <div class="dual-track">
-        <div class="a" style="width:${Math.round(l1 / 2)}%"></div>
-        <div class="b" style="width:${Math.round(l2 / 2)}%"></div>
-      </div>
-      <div class="dual-value">${fmtPct(l1, 0)} / ${fmtPct(l2, 0)}</div>
-    </div>`;
-  }).join("");
-}
-
-function portTableRows(portProfiles: PortProfile[]): string {
-  return portProfiles.slice(0, 8).map((p) => `<tr>
-    <td class="port-name">${esc(p.portName)}</td>
-    <td class="ltr">${fmtNum(p.population)}</td>
-    <td class="ltr">${fmtNum(p.clean)}</td>
-    <td class="ltr">${fmtNum(p.suspicious)}</td>
-    <td class="ltr">${fmtPct(p.suspicionRate)}</td>
-    <td class="ltr">${fmtNum(p.sampleSize)}</td>
-    <td class="ltr">${fmtPct(p.coverage)}</td>
-    <td class="ltr">${p.accuracy !== null ? fmtPct(p.accuracy) : "—"}</td>
-  </tr>`).join("");
-}
-
-function priorityPortCards(portProfiles: PortProfile[]): string {
-  const priority = portProfiles.filter((p) => p.status === "priority").slice(0, 2);
-  const monitor  = portProfiles.filter((p) => p.status === "monitor").slice(0, 2);
-  const excellent = portProfiles.filter((p) => p.status === "excellent").slice(0, 2);
-  const cards: string[] = [];
-
-  for (const p of priority)
-    cards.push(`<div class="priority-card red"><strong>${esc(p.portName)}</strong>
-      <span>دقة ${fmtPct(p.accuracy)} — اشتباه فائت ${fmtPct(p.missedSuspicionRate)}. يحتاج مراجعة عاجلة.</span></div>`);
-
-  for (const p of monitor)
-    cards.push(`<div class="priority-card amber"><strong>${esc(p.portName)}</strong>
-      <span>أداء دون المستهدف. يُوصى بزيادة المتابعة.</span></div>`);
-
-  for (const p of excellent) {
-    if (cards.length >= 4) break;
-    cards.push(`<div class="priority-card teal"><strong>${esc(p.portName)}</strong>
-      <span>أفضل أداء موثوق. دقة ${fmtPct(p.accuracy)}.</span></div>`);
+function groupForReport(rows: ReturnType<typeof buildExecutiveReportRows>): ReportGroupRow[] {
+  const grouped = new Map<string, typeof rows>();
+  for (const row of rows) {
+    const portType = row.portType ?? "غير محدد";
+    const portName = row.portName ?? "غير محدد";
+    const key = `${portType}\u0000${portName}`;
+    grouped.set(key, [...(grouped.get(key) ?? []), row]);
   }
-
-  if (!cards.length)
-    cards.push(`<div class="priority-card navy" style="grid-column:1/-1"><strong>لا توجد تصنيفات كافية</strong>
-      <span>تحتاج المنافذ إلى ${30} إجابة معتمدة على الأقل لاحتساب التصنيف.</span></div>`);
-
-  return cards.join("");
+  return [...grouped.values()].map((items) => {
+    const first = items[0]!;
+    const valid = items.filter((item) => item.verificationCategory !== null);
+    const correct = valid.filter((item) => item.imageResultAccurate === true).length;
+    const correctSuspicious = valid.filter((item) => item.verificationCategory === "correct-suspicious").length;
+    const missedSuspicious = valid.filter((item) => item.verificationCategory === "missed-suspicious").length;
+    const excessSuspicious = valid.filter((item) => item.verificationCategory === "excess-suspicious").length;
+    const originalSuspicious = correctSuspicious + excessSuspicious;
+    const expertSuspicious = correctSuspicious + missedSuspicious;
+    return {
+      portType: first.portType ?? "غير محدد",
+      portName: first.portName ?? "غير محدد",
+      population: items.length,
+      clean: items.filter((item) => item.imageResult === "سليمة").length,
+      suspicious: items.filter((item) => item.imageResult === "اشتباه").length,
+      sampleSize: items.filter((item) => item.selectedInSample).length,
+      studied: items.filter((item) => item.selectedInSample && item.answerStatus === "submitted").length,
+      resultAccuracy: valid.length > 0 ? (correct / valid.length) * 100 : null,
+      suspicionPrecision: originalSuspicious > 0 ? (correctSuspicious / originalSuspicious) * 100 : null,
+      suspiciousDetectionRate: expertSuspicious > 0 ? (correctSuspicious / expertSuspicious) * 100 : null,
+      missedSuspicionRate: expertSuspicious > 0 ? (missedSuspicious / expertSuspicious) * 100 : null,
+      correctSuspicious,
+      missedSuspicious,
+      excessSuspicious,
+      availableImages: items.filter((item) => item.answerStatus === "submitted" && item.imageAvailable === true).length,
+      highQuality: items.filter((item) => item.answerStatus === "submitted" && item.imageQuality === "عالي").length,
+      mediumQuality: items.filter((item) => item.answerStatus === "submitted" && item.imageQuality === "متوسط").length,
+      lowQuality: items.filter((item) => item.answerStatus === "submitted" && item.imageQuality === "منخفض").length,
+    };
+  }).sort((a, b) => a.portType.localeCompare(b.portType, "ar") || b.population - a.population);
 }
 
-// ─── Slides ───────────────────────────────────────────────────────────────────
+function compactPercent(value: number | null): string {
+  return value === null ? "غير متاح" : `${value.toFixed(1)}%`;
+}
 
-function slide1(kpis: ExecutiveKPIs, config: ExecutiveReportConfig, monthLabel: string): string {
-  const findings = generateNarrativeFindings(kpis, config);
-  const insightItems = findings.map((f, i) => `<div class="insight-item">
-    <div class="insight-num">${i + 1}</div>
-    <div><span>${esc(f)}</span></div>
-  </div>`).join("");
+function reportTable(headers: string[], rows: string[][]): string {
+  return `<table class="xr-table"><thead><tr>${headers.map((header) => `<th>${esc(header)}</th>`).join("")}</tr></thead><tbody>
+    ${rows.length ? rows.map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join("")}</tr>`).join("") : `<tr><td colspan="${headers.length}">لا توجد بيانات كافية</td></tr>`}
+  </tbody></table>`;
+}
 
-  const completionPct = Math.min(Math.round(kpis.completionRate), 100);
+function portTypeTone(portType: string): "land" | "sea" | "other" {
+  if (portType.includes("بري")) return "land";
+  if (portType.includes("بحري")) return "sea";
+  return "other";
+}
 
-  return `<section class="slide active" data-title="الملخص التنفيذي">
-    <div class="slide-header">
-      <div class="title-group">
-        <h1 class="report-title">التقرير التنفيذي</h1>
-        <h2 class="section-title">ملخص أداء المنافذ وجودة الفحص</h2>
-      </div>
-      <span class="period-chip">${esc(monthLabel)}</span>
-    </div>
+function portTypeBadge(portType: string): string {
+  return `<span class="port-type-badge ${portTypeTone(portType)}">${esc(portType)}</span>`;
+}
 
-    <div class="kpis-row">
-      <div class="kpi-card"><div>
-        <div class="label">إجمالي المجتمع</div>
-        <div class="value">${fmtNum(kpis.totalPopulation)}</div>
-        <div class="note">إجمالي صور الأشعة</div>
-      </div><div class="kpi-icon">◎</div></div>
+function qualityBars(kpis: ExecutiveKPIs): string {
+  const total = Math.max(kpis.imageQualityEvaluatedCount, 1);
+  const items = [
+    ["عالية", kpis.highQualityCount, "#007e73"],
+    ["متوسطة", kpis.mediumQualityCount, "#0a315f"],
+    ["منخفضة", kpis.lowQualityCount, "#c33232"],
+  ] as const;
+  return `<div class="quality-bars">${items.map(([label, count, color]) => {
+    const pct = (count / total) * 100;
+    return `<div class="quality-bar-row"><span>${label}</span><div><i style="width:${pct.toFixed(1)}%;background:${color}"></i></div><b>${fmtNum(count)}</b></div>`;
+  }).join("")}</div>`;
+}
 
-      <div class="kpi-card"><div>
-        <div class="label">إجمالي العينة</div>
-        <div class="value">${fmtNum(kpis.totalSample)}</div>
-        <div class="note">${fmtPct(kpis.sampleCoverage)} من المجتمع</div>
-      </div><div class="kpi-icon">◈</div></div>
+function reasonRows(reasons: ExecutiveKPIs["missingImageReasons"], fallback: string): string {
+  if (!reasons.length) return `<div class="empty-note">${esc(fallback)}</div>`;
+  return reasons.slice(0, 5).map((item) => `<div class="reason-line"><span>${esc(item.reason)}</span><b>${fmtNum(item.count)}</b><em>${compactPercent(item.percentage)}</em></div>`).join("");
+}
 
-      <div class="kpi-card teal"><div>
-        <div class="label">نسبة الاشتباه</div>
-        <div class="value">${fmtPct(kpis.suspicionRate)}</div>
-        <div class="note">${fmtNum(kpis.suspiciousCount)} صورة</div>
-      </div><div class="kpi-icon">⌕</div></div>
+function boundedPct(value: number | null): number {
+  if (value === null || !Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, value));
+}
 
-      <div class="kpi-card teal"><div>
-        <div class="label">دقة النتائج</div>
-        <div class="value">${kpis.overallAccuracy !== null ? fmtPct(kpis.overallAccuracy) : "—"}</div>
-        <div class="note">مقابل نتيجة الخبير</div>
-      </div><div class="kpi-icon">✓</div></div>
-
-      <div class="kpi-card"><div>
-        <div class="label">إنجاز العينة</div>
-        <div class="value">${fmtPct(kpis.completionRate)}</div>
-        <div class="note">${fmtNum(kpis.studiedImages)} من ${fmtNum(kpis.totalSample)}</div>
-      </div><div class="kpi-icon">↗</div></div>
-
-      <div class="kpi-card ${kpis.missedSuspicionRate !== null && kpis.missedSuspicionRate > config.maximumMissedSuspicionRate ? "" : "teal"}"><div>
-        <div class="label">اشتباه فائت</div>
-        <div class="value" style="${kpis.missedSuspicionRate !== null && kpis.missedSuspicionRate > config.maximumMissedSuspicionRate ? "color:var(--red)" : ""}">${fmtPct(kpis.missedSuspicionRate)}</div>
-        <div class="note">الحد الأقصى ${fmtPct(config.maximumMissedSuspicionRate)}</div>
-      </div><div class="kpi-icon">⚠</div></div>
-    </div>
-
-    <div class="progress-bar-row">
-      <span class="pb-label">إنجاز الخطة الشهرية</span>
-      <div class="pb-track"><div class="pb-fill" style="width:${completionPct}%"></div></div>
-      <span class="pb-value">${fmtPct(kpis.completionRate)} — ${fmtNum(kpis.studiedImages)} / ${config.monthlyTarget > 0 ? fmtNum(config.monthlyTarget) : fmtNum(kpis.totalSample)}</span>
-    </div>
-
-    <div class="grid-3col">
-      <div class="card">
-        <div class="card-title"><span>المجتمع مقابل العينة (أعلى 5 منافذ)</span>
-          <div class="legend">
-            <span><i style="background:var(--navy-900)"></i>مجتمع</span>
-            <span><i style="background:var(--teal-600)"></i>عينة</span>
-          </div>
-        </div>
-        <div class="bar-chart">${portBarChart(kpis.portProfiles)}</div>
-      </div>
-      <div class="card">
-        <div class="card-title"><span>توزيع نتيجة الصورة</span></div>
-        ${donutChart(kpis.cleanCount, kpis.suspiciousCount)}
-        <div class="note-box" style="text-align:center">نسبة الاشتباه الكلية <b style="color:var(--teal-700)">${fmtPct(kpis.suspicionRate)}</b></div>
-      </div>
-      <div class="card">
-        <div class="card-title"><span>دقة المنافذ — أعلى 5</span></div>
-        <div class="rank-list">${portRankList(kpis.portProfiles)}</div>
-        <div class="note-box" style="text-align:center">متوسط الدقة <b style="color:var(--teal-700)">${kpis.overallAccuracy !== null ? fmtPct(kpis.overallAccuracy) : "—"}</b></div>
-      </div>
-    </div>
-
-    <div class="insights-strip">
-      <div class="insight-head"><strong>رؤى وتوصيات</strong><span>أولويات تطوير الأداء</span></div>
-      ${insightItems}
-    </div>
-    <div class="footer"><span>التقرير التنفيذي — ضمان جودة الأشعة</span><span class="page">1 / 5</span></div>
+function slideFrame(pageNumber: string, title: string, subtitle: string, body: string, extraClass = ""): string {
+  return `<section class="xr-page ${extraClass}">
+    <header class="slide-head">
+      <span>${pageNumber}</span>
+      <div><h2>${esc(title)}</h2><p>${esc(subtitle)}</p></div>
+    </header>
+    ${body}
+    <div class="footer">صفحة ${Number(pageNumber)} | ${esc(title)}</div>
   </section>`;
 }
 
-function slide2(kpis: ExecutiveKPIs, monthLabel: string): string {
-  return `<section class="slide" data-title="تحليل المنافذ">
-    <div class="slide-header">
-      <div class="title-group"><h1 class="report-title">التقرير التنفيذي</h1><h2 class="section-title">تحليل أداء المنافذ</h2></div>
-      <span class="period-chip">${esc(monthLabel)}</span>
-    </div>
+function metricCard(label: string, value: string, tone = ""): string {
+  return `<div class="metric-card ${tone}"><span>${esc(label)}</span><b>${value}</b></div>`;
+}
 
-    <div class="grid-2-wide">
-      <div class="card">
-        <div class="card-title"><span>مقارنة المنافذ</span><span class="card-subtitle">المجتمع والعينة والاشتباه والدقة</span></div>
-        <table class="port-table">
-          <thead><tr>
-            <th>المنفذ</th><th>المجتمع</th><th>سليمة</th><th>اشتباه</th>
-            <th>نسبة الاشتباه</th><th>العينة</th><th>التغطية</th><th>الدقة</th>
-          </tr></thead>
-          <tbody>${portTableRows(kpis.portProfiles)}</tbody>
-        </table>
+function insightCard(label: string, value: string, text: string, tone = ""): string {
+  return `<article class="insight-card ${tone}"><span>${esc(label)}</span><b>${value}</b><p>${esc(text)}</p></article>`;
+}
+
+function topBy<T>(items: T[], score: (item: T) => number): T | null {
+  return items.reduce<{ item: T | null; score: number }>((best, item) => {
+    const value = score(item);
+    return value > best.score ? { item, score: value } : best;
+  }, { item: null, score: Number.NEGATIVE_INFINITY }).item;
+}
+
+function weightedResultAccuracy(rows: ReportGroupRow[]): { accuracy: number | null; studied: number } {
+  const totals = rows.reduce((acc, row) => {
+    if (row.resultAccuracy === null || row.studied <= 0) return acc;
+    acc.score += row.resultAccuracy * row.studied;
+    acc.studied += row.studied;
+    return acc;
+  }, { score: 0, studied: 0 });
+  return {
+    accuracy: totals.studied > 0 ? totals.score / totals.studied : null,
+    studied: totals.studied,
+  };
+}
+
+function accuracyCompareCard(label: string, summary: ReturnType<typeof weightedResultAccuracy>, tone = ""): string {
+  return `<article class="accuracy-card ${tone}">
+    <span>${esc(label)}</span>
+    <b>${compactPercent(summary.accuracy)}</b>
+    <small>المدروسة ${fmtNum(summary.studied)}</small>
+    <div><i style="width:${boundedPct(summary.accuracy).toFixed(1)}%"></i></div>
+  </article>`;
+}
+
+function portTypeRows(groupedRows: ReportGroupRow[]) {
+  return [...groupedRows.reduce((map, row) => {
+    const current = map.get(row.portType) ?? {
+      portType: row.portType,
+      population: 0,
+      clean: 0,
+      suspicious: 0,
+      sampleSize: 0,
+      studied: 0,
+      accuracyNumerator: 0,
+      accuracyDenominator: 0,
+    };
+    current.population += row.population;
+    current.clean += row.clean;
+    current.suspicious += row.suspicious;
+    current.sampleSize += row.sampleSize;
+    current.studied += row.studied;
+    if (row.resultAccuracy !== null) {
+      current.accuracyNumerator += row.resultAccuracy * row.studied;
+      current.accuracyDenominator += row.studied;
+    }
+    map.set(row.portType, current);
+    return map;
+  }, new Map<string, {
+    portType: string;
+    population: number;
+    clean: number;
+    suspicious: number;
+    sampleSize: number;
+    studied: number;
+    accuracyNumerator: number;
+    accuracyDenominator: number;
+  }>()).values()];
+}
+
+function portTypeStackedChart(rows: ReturnType<typeof portTypeRows>): string {
+  if (!rows.length) return `<div class="empty-note">لا توجد بيانات كافية للرسم.</div>`;
+  return `<div class="stacked-type-chart">${rows.map((row) => {
+    const cleanPct = row.population > 0 ? (row.clean / row.population) * 100 : 0;
+    const suspiciousPct = row.population > 0 ? (row.suspicious / row.population) * 100 : 0;
+    return `<div class="stacked-type-row">
+      ${portTypeBadge(row.portType)}
+      <div class="stack-track">
+        <i class="clean" style="width:${cleanPct.toFixed(1)}%"></i>
+        <i class="suspicious" style="width:${suspiciousPct.toFixed(1)}%"></i>
       </div>
+      <b>${fmtNum(row.population)}</b>
+    </div>`;
+  }).join("")}</div>`;
+}
 
-      <div style="display:grid;grid-template-rows:1fr 1fr;gap:.12in">
-        <div class="card">
-          <div class="card-title"><span>سليمة مقابل اشتباه بالمنافذ</span>
-            <div class="legend">
-              <span><i style="background:var(--teal-500)"></i>سليمة</span>
-              <span><i style="background:var(--navy-900)"></i>اشتباه</span>
-            </div>
-          </div>
-          <div class="port-visual">${stackedBars(kpis.portProfiles)}</div>
-        </div>
-        <div class="card">
-          <div class="card-title"><span>دقة المنافذ — المستوى الأول / الثاني</span>
-            <div class="legend">
-              <span><i style="background:var(--navy-900)"></i>م.أول</span>
-              <span><i style="background:var(--teal-500)"></i>م.ثاني</span>
-            </div>
-          </div>
-          <div class="dual-bars">${dualBarsPerPort(kpis.portProfiles)}</div>
-        </div>
+function inspectionBars(rows: ReportGroupRow[]): string {
+  const ranked = rows
+    .filter((row) => row.studied > 0)
+    .sort((a, b) => (b.suspicionPrecision ?? -1) - (a.suspicionPrecision ?? -1))
+    .slice(0, 8);
+  if (!ranked.length) return `<div class="empty-note">لا توجد إجابات معتمدة كافية لعرض الرسم.</div>`;
+  return `<div class="inspection-bars">${ranked.map((row) => `
+    <div class="inspection-bar-row">
+      <span>${esc(row.portName)}</span>
+      <div><i style="width:${boundedPct(row.suspicionPrecision).toFixed(1)}%"></i></div>
+      <b>${compactPercent(row.suspicionPrecision)}</b>
+    </div>`).join("")}</div>`;
+}
+
+function buildCoverPage(input: ExecutiveReportInput, kpis: ExecutiveKPIs): string {
+  const reportMonth = formatReportMonthName(input.monthFolderName);
+  const issueDate = formatIssueDate();
+  return `<section class="xr-page cover">
+    <div class="cover-top">
+      <div class="cover-badge">التقرير التنفيذي</div>
+      <div class="cover-org">${esc(ORGANIZATION_PATH_TEXT)}</div>
+    </div>
+    <div class="cover-main">
+      <div class="cover-mark">تقرير شهري</div>
+      <h1><span>التقرير التنفيذي</span><strong>لضمان جودة الأشعة</strong></h1>
+      <div class="cover-period">
+        <span>فترة التقرير</span><b>${esc(reportMonth)}</b>
+        <span>تاريخ الإصدار</span><b>${issueDate}</b>
       </div>
     </div>
-
-    <div class="footer"><span>تحليل المنافذ</span><span class="page">2 / 5</span></div>
+    <div class="cover-stats">
+      ${metricCard("إجمالي الصور", fmtNum(kpis.totalPopulation))}
+      ${metricCard("العينة المسحوبة", fmtNum(kpis.totalSample))}
+      ${metricCard("الصور المدروسة", fmtNum(kpis.studiedImages))}
+    </div>
+    <div class="footer">صفحة 1 | الغلاف</div>
   </section>`;
 }
 
-function slide3(kpis: ExecutiveKPIs, config: ExecutiveReportConfig, monthLabel: string): string {
-  const targetRows = [
-    {
-      label: "إنجاز العينة",
-      current: fmtPct(kpis.completionRate),
-      target: config.completionTarget > 0 ? `≥ ${fmtPct(config.completionTarget)}` : "—",
-      met: config.completionTarget > 0 && kpis.completionRate >= config.completionTarget,
-    },
-    {
-      label: "دقة النتائج",
-      current: kpis.overallAccuracy !== null ? fmtPct(kpis.overallAccuracy) : "—",
-      target: config.accuracyTarget > 0 ? `≥ ${fmtPct(config.accuracyTarget)}` : "—",
-      met: kpis.overallAccuracy !== null && kpis.overallAccuracy >= config.accuracyTarget,
-    },
-    {
-      label: "تغطية المجتمع",
-      current: fmtPct(kpis.sampleCoverage),
-      target: config.coverageTarget > 0 ? `≥ ${fmtPct(config.coverageTarget)}` : "—",
-      met: config.coverageTarget > 0 && kpis.sampleCoverage >= config.coverageTarget,
-    },
-    {
-      label: "اشتباه فائت",
-      current: fmtPct(kpis.missedSuspicionRate),
-      target: config.maximumMissedSuspicionRate > 0 ? `≤ ${fmtPct(config.maximumMissedSuspicionRate)}` : "—",
-      met: kpis.missedSuspicionRate !== null && config.maximumMissedSuspicionRate > 0 && kpis.missedSuspicionRate <= config.maximumMissedSuspicionRate,
-    },
-  ];
-
-  return `<section class="slide" data-title="التغطية والمستويات">
-    <div class="slide-header">
-      <div class="title-group"><h1 class="report-title">التقرير التنفيذي</h1><h2 class="section-title">تغطية العينة بالمستويات ومتابعة الخطة</h2></div>
-      <span class="period-chip">${esc(monthLabel)}</span>
-    </div>
-
-    <div class="grid-4">${stageCoverageCards(kpis.stageProfiles)}</div>
-
-    <div class="grid-2" style="margin-top:.14in">
-      <div class="card">
-        <div class="card-title"><span>متابعة الخطة الشهرية</span></div>
-        <div class="plan-kpis">
-          <div class="plan-kpi"><span>المستهدف</span><b>${config.monthlyTarget > 0 ? fmtNum(config.monthlyTarget) : "—"}</b></div>
-          <div class="plan-kpi teal"><span>العينة</span><b>${fmtNum(kpis.totalSample)}</b></div>
-          <div class="plan-kpi teal"><span>المدروسة</span><b>${fmtNum(kpis.studiedImages)}</b></div>
-          <div class="plan-kpi"><span>المتبقي</span><b>${fmtNum(kpis.remainingImages)}</b></div>
-        </div>
-        <table class="simple-table" style="margin-top:.1in">
-          <thead><tr><th>المؤشر</th><th>الحالي</th><th>المستهدف</th><th>الحالة</th></tr></thead>
-          <tbody>${targetRows.map((r) => `<tr>
-            <td>${r.label}</td>
-            <td class="ltr">${r.current}</td>
-            <td class="ltr">${r.target}</td>
-            <td><span class="status-pill ${r.target === "—" ? "muted" : r.met ? "good" : "bad"}">${r.target === "—" ? "غير محدد" : r.met ? "محقق" : "دون الهدف"}</span></td>
-          </tr>`).join("")}</tbody>
-        </table>
-      </div>
-
-      <div class="card">
-        <div class="card-title"><span>مؤشرات جودة التحقق</span></div>
-        <div class="quality-grid">
-          <div class="q-item teal"><b>${fmtPct(kpis.overallAccuracy)}</b><span>دقة نتيجة الصورة</span></div>
-          <div class="q-item teal"><b>${fmtPct(kpis.suspiciousDetectionRate)}</b><span>قوة اكتشاف الاشتباه</span></div>
-          <div class="q-item ${kpis.missedSuspicionRate !== null && kpis.missedSuspicionRate > config.maximumMissedSuspicionRate ? "red" : ""}">
-            <b>${fmtPct(kpis.missedSuspicionRate)}</b><span>نسبة الاشتباه الفائت</span></div>
-          <div class="q-item"><b>${fmtPct(kpis.suspicionPrecision)}</b><span>دقة الاشتباه (الخصوصية)</span></div>
-          <div class="q-item teal"><b>${fmtPct(kpis.levelOneAccuracy)}</b><span>دقة المستوى الأول</span></div>
-          <div class="q-item teal"><b>${fmtPct(kpis.levelTwoAccuracy)}</b><span>دقة المستوى الثاني</span></div>
-          <div class="q-item" style="grid-column:1/-1"><b style="font-size:.2in">${fmtPct(kpis.balancedQualityScore)}</b><span>مؤشر الجودة المتوازن</span></div>
-        </div>
-      </div>
-    </div>
-
-    <div class="footer"><span>التغطية والمستويات</span><span class="page">3 / 5</span></div>
-  </section>`;
+function stageStat(kpis: ExecutiveKPIs, index: number): { population: number; sampleSize: number; studied: number } {
+  const profile = kpis.stageProfiles[index];
+  return {
+    population: profile?.population ?? 0,
+    sampleSize: profile?.sampleSize ?? 0,
+    studied: profile?.studied ?? 0,
+  };
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- _monthLabel kept for call-site signature consistency; may be used in future slide revisions
-function slide4(kpis: ExecutiveKPIs, _monthLabel: string): string {
-  const total = kpis.validStudied;
-  const pctRow = (n: number) => total > 0 ? `${((n / total) * 100).toFixed(1)}%` : "—";
-
-  const bothCorrect = kpis.validStudied > 0 && kpis.levelOneAccuracy !== null && kpis.levelTwoAccuracy !== null
-    ? Math.round((Math.min(kpis.levelOneAccuracy, kpis.levelTwoAccuracy) / 100) * kpis.validStudied)
-    : 0;
-
-  return `<section class="slide" data-title="مصفوفة التحقق ومقارنة المستويين">
-    <div class="slide-header">
-      <div class="title-group"><h1 class="report-title">التقرير التنفيذي</h1><h2 class="section-title">مصفوفة التحقق ومقارنة دقة المستويين</h2></div>
-      <span class="period-chip">${fmtNum(kpis.validStudied)} صورة مدروسة</span>
-    </div>
-
-    <div class="grid-2">
-      <div>
-        <div class="card" style="margin-bottom:.12in">
-          <div class="card-title"><span>مصفوفة التحقق</span></div>
-          <table class="verify-table">
-            <thead><tr><th>م.الأول</th><th>م.الثاني</th><th>نتيجة الصورة</th><th>نتيجة الخبير</th><th>التصنيف</th><th>العدد</th><th>النسبة</th></tr></thead>
-            <tbody>
-              <tr><td>اشتباه</td><td>اشتباه</td><td>اشتباه</td><td>اشتباه</td>
-                <td><span class="status-pill good">اشتباه مكتشف</span></td>
-                <td class="ltr">${fmtNum(kpis.correctSuspicious)}</td><td class="ltr">${pctRow(kpis.correctSuspicious)}</td></tr>
-              <tr><td>سليمة</td><td>سليمة</td><td>سليمة</td><td>سليمة</td>
-                <td><span class="status-pill good">سليمة مؤكدة</span></td>
-                <td class="ltr">${fmtNum(kpis.correctClean)}</td><td class="ltr">${pctRow(kpis.correctClean)}</td></tr>
-              <tr><td colspan="2" style="text-align:center">أي منهما اشتباه</td><td>اشتباه</td><td>سليمة</td>
-                <td><span class="status-pill warn">اشتباه زائد</span></td>
-                <td class="ltr">${fmtNum(kpis.excessSuspicious)}</td><td class="ltr">${pctRow(kpis.excessSuspicious)}</td></tr>
-              <tr><td colspan="2" style="text-align:center">كلاهما سليمة</td><td>سليمة</td><td>اشتباه</td>
-                <td><span class="status-pill bad">اشتباه فائت ⚠</span></td>
-                <td class="ltr">${fmtNum(kpis.missedSuspicious)}</td><td class="ltr">${pctRow(kpis.missedSuspicious)}</td></tr>
-            </tbody>
-          </table>
+function buildStudyLevelsPage(kpis: ExecutiveKPIs): string {
+  const studiedStages = kpis.stageProfiles.filter((stage) => stage.sampleSize > 0).length;
+  const body = `<div class="level-summary-strip">
+    ${insightCard("مستويات ضمن العينة", fmtNum(studiedStages), "عدد المستويات التي تحتوي على صور ضمن عينة الشهر.")}
+    ${insightCard("مجتمع الشهر", fmtNum(kpis.totalPopulation), "إجمالي صور الأشعة ضمن فترة التقرير.")}
+    ${insightCard("الصور المدروسة", fmtNum(kpis.studiedImages), "الإجابات المعتمدة التي دخلت في مؤشرات الفحص.")}
+  </div>
+  <div class="levels-grid">
+    ${STUDY_LEVEL_DEFINITIONS.map((level, index) => {
+      const stats = stageStat(kpis, index);
+      return `<article class="level-card ${level.tone}">
+        <div class="level-title">
+          <h3>${esc(level.title)}</h3>
+          <span>${esc(level.subtitle)}</span>
         </div>
-
-        <div class="summary-3">
-          <div class="summary-item">
-            <div class="summary-icon">✓</div>
-            <div><div class="summary-label">حالات دقيقة</div>
-              <div class="summary-value">${fmtNum(kpis.correctSuspicious + kpis.correctClean)}</div>
-              <div class="summary-note">${kpis.overallAccuracy !== null ? fmtPct(kpis.overallAccuracy) + " دقة" : "—"}</div></div>
-          </div>
-          <div class="summary-item">
-            <div class="summary-icon bad">⚠</div>
-            <div><div class="summary-label">اشتباه فائت</div>
-              <div class="summary-value bad">${fmtNum(kpis.missedSuspicious)}</div>
-              <div class="summary-note">${fmtPct(kpis.missedSuspicionRate)} من حالات الخبير</div></div>
-          </div>
-          <div class="summary-item">
-            <div class="summary-icon">◇</div>
-            <div><div class="summary-label">قوة الاكتشاف</div>
-              <div class="summary-value">${fmtPct(kpis.suspiciousDetectionRate)}</div>
-              <div class="summary-note">اكتشاف الاشتباه الفعلي</div></div>
-          </div>
+        <p>${esc(level.description)}</p>
+        <div class="level-stats">
+          <div><span>مجتمع الشهر</span><b>${fmtNum(stats.population)}</b></div>
+          <div><span>المدروسة</span><b>${fmtNum(stats.studied)}</b></div>
         </div>
-      </div>
-
-      <div class="card">
-        <div class="card-title"><span>مقارنة المستوى الأول والثاني</span></div>
-        <div class="compare-cards">
-          <div class="compare-card good">
-            <b>${fmtNum(bothCorrect)}</b>
-            <span>كلا المستويين متطابقان مع الخبير</span>
-          </div>
-          <div class="compare-card warn">
-            <b>${fmtNum(kpis.validStudied > 0 ? Math.round(((kpis.levelTwoCorrectionRate ?? 0) / 100) * kpis.validStudied) : 0)}</b>
-            <span>المستوى الثاني صحّح خطأ الأول</span>
-          </div>
-          <div class="compare-card">
-            <b>${fmtNum(kpis.validStudied > 0 ? Math.round(((kpis.levelTwoRegressionRate ?? 0) / 100) * kpis.validStudied) : 0)}</b>
-            <span>الأول صحيح والثاني غير مطابق</span>
-          </div>
-          <div class="compare-card bad">
-            <b>${fmtNum(kpis.validStudied > 0 ? kpis.validStudied - bothCorrect - Math.round(((kpis.levelTwoCorrectionRate ?? 0) / 100) * kpis.validStudied) - Math.round(((kpis.levelTwoRegressionRate ?? 0) / 100) * kpis.validStudied) : 0)}</b>
-            <span>كلاهما غير مطابق للخبير</span>
-          </div>
-        </div>
-
-        <div style="margin-top:.14in">
-          <div class="card-title" style="margin-bottom:.08in"><span>الدقة حسب المنفذ — م.أول / م.ثاني</span></div>
-          <div class="dual-bars">${dualBarsPerPort(kpis.portProfiles)}</div>
-        </div>
-
-        <div class="grid-2" style="margin-top:.13in;gap:.08in">
-          <div class="q-item teal" style="border-radius:12px;padding:.09in"><b>${fmtPct(kpis.levelOneAccuracy)}</b><span>دقة المستوى الأول</span></div>
-          <div class="q-item teal" style="border-radius:12px;padding:.09in"><b>${fmtPct(kpis.levelTwoAccuracy)}</b><span>دقة المستوى الثاني</span></div>
-        </div>
-      </div>
-    </div>
-
-    <div class="footer"><span>مصفوفة التحقق ومقارنة المستويين</span><span class="page">4 / 5</span></div>
-  </section>`;
+      </article>`;
+    }).join("")}
+  </div>`;
+  return slideFrame("02", "مستويات الدراسة", "تعريف المستويات الأربعة ونطاق كل مستوى في عينة الفحص.", body);
 }
 
-function slide5(kpis: ExecutiveKPIs, config: ExecutiveReportConfig): string {
-  const findings = generateNarrativeFindings(kpis, config);
-
-  const decisions = [
-    ...kpis.portProfiles.filter((p) => p.status === "priority").slice(0, 2).map((p) => ({
-      action: `مراجعة مركزة لمنفذ ${p.portName}`,
-      reason: `دقة ${fmtPct(p.accuracy)} واشتباه فائت ${fmtPct(p.missedSuspicionRate)}.`,
-      owner: "ضمان الجودة",
-    })),
-    kpis.completionRate < config.completionTarget && config.completionTarget > 0 ? {
-      action: "تسريع استكمال دراسة العينة",
-      reason: `الإنجاز الحالي ${fmtPct(kpis.completionRate)} دون المستهدف ${fmtPct(config.completionTarget)}.`,
-      owner: "التوزيع",
-    } : null,
-    kpis.levelDisagreementRate !== null && kpis.levelDisagreementRate > 10 ? {
-      action: "مراجعة تناقض المستويين",
-      reason: `نسبة الاختلاف ${fmtPct(kpis.levelDisagreementRate)}.`,
-      owner: "الجودة التقنية",
-    } : null,
-    { action: "اعتماد توزيع العينة للشهر القادم", reason: "تحديث نسبة العينة بناءً على أداء المنافذ.", owner: "إدارة العينة" },
-    { action: "اعتماد التقرير وتوزيعه", reason: "إقرار النتائج قبل التوزيع على الجهات المعنية.", owner: "القيادة" },
-  ].filter(Boolean).slice(0, 5) as Array<{ action: string; reason: string; owner: string }>;
-
-  return `<section class="slide" data-title="أولويات التدخل والقرارات">
-    <div class="slide-header">
-      <div class="title-group"><h1 class="report-title">التقرير التنفيذي</h1><h2 class="section-title">أولويات التدخل والقرارات المقترحة</h2></div>
-      <span class="period-chip">دورة العمل القادمة</span>
+function buildPopulationPage(kpis: ExecutiveKPIs, groupedRows: ReportGroupRow[]): string {
+  const typeRows = portTypeRows(groupedRows);
+  const highestSuspicionPort = topBy(groupedRows, (row) => row.suspicious);
+  const tableRows = groupedRows.slice(0, 15).map((row) => [
+    portTypeBadge(row.portType),
+    esc(row.portName),
+    fmtNum(row.population),
+    fmtNum(row.clean),
+    fmtNum(row.suspicious),
+    fmtNum(row.studied),
+  ]);
+  const body = `<div class="metric-grid">
+      ${metricCard("إجمالي الصور", fmtNum(kpis.totalPopulation))}
+      ${metricCard("سليمة", fmtNum(kpis.cleanCount), "good")}
+      ${metricCard("اشتباه", fmtNum(kpis.suspiciousCount), "warn")}
+      ${metricCard("العينة", fmtNum(kpis.totalSample))}
     </div>
-
-    <div class="grid-2">
-      <div>
-        <div class="card" style="margin-bottom:.12in">
-          <div class="card-title"><span>تصنيف المنافذ حسب الأولوية</span></div>
-          <div class="priority-grid">${priorityPortCards(kpis.portProfiles)}</div>
-        </div>
-        <div class="card">
-          <div class="card-title"><span>مؤشرات نجاح الخطة</span></div>
-          <div class="quality-grid">
-            <div class="q-item"><b>${config.accuracyTarget > 0 ? `≥${fmtPct(config.accuracyTarget, 0)}` : "—"}</b><span>دقة المنافذ المستهدفة</span></div>
-            <div class="q-item red"><b>${config.maximumMissedSuspicionRate > 0 ? `≤${fmtPct(config.maximumMissedSuspicionRate, 0)}` : "—"}</b><span>حد الاشتباه الفائت</span></div>
-            <div class="q-item teal"><b>${config.completionTarget > 0 ? fmtPct(config.completionTarget, 0) : "—"}</b><span>إنجاز العينة المستهدف</span></div>
-            <div class="q-item"><b>${config.coverageTarget > 0 ? `≥${fmtPct(config.coverageTarget, 0)}` : "—"}</b><span>تغطية المجتمع</span></div>
-          </div>
-        </div>
-      </div>
-
-      <div>
-        <div class="card" style="margin-bottom:.12in">
-          <div class="card-title"><span>قرارات قابلة للتنفيذ</span></div>
-          <div class="decision-list">
-            ${decisions.map((d, i) => `<div class="decision">
-              <div class="decision-no">${i + 1}</div>
-              <div><strong>${esc(d.action)}</strong><span>${esc(d.reason)}</span></div>
-              <div class="owner">${esc(d.owner)}</div>
-            </div>`).join("")}
-          </div>
-        </div>
-        <div class="executive-callout">
-          <h3>الرسالة التنفيذية</h3>
-          <p>${esc(findings[findings.length - 1] ?? "استكمال دراسة العينة والمراجعة الدورية لمؤشرات الجودة.")}</p>
-          <div class="big">${fmtNum(kpis.portProfiles.filter((p) => p.status === "priority" || p.status === "monitor").length)}</div>
-          <div class="small">منفذ يحتاج متابعة أو تحسين</div>
-        </div>
-      </div>
+    <div class="insight-strip">
+      ${insightCard("نسبة الاشتباه", fmtPct(kpis.suspicionRate), "حصة الصور المصنفة اشتباه من إجمالي مجتمع الشهر.", "warn")}
+      ${insightCard("أعلى منفذ اشتباهاً", highestSuspicionPort ? esc(highestSuspicionPort.portName) : "غير متاح", highestSuspicionPort ? `${fmtNum(highestSuspicionPort.suspicious)} صورة اشتباه ضمن المجتمع.` : "لا توجد بيانات كافية.")}
+      ${insightCard("الصور المدروسة", fmtNum(kpis.studiedImages), "إجمالي الصور التي لديها إجابات فحص معتمدة.")}
     </div>
-
-    <div class="footer"><span>أولويات التدخل والقرارات</span><span class="page">5 / 5</span></div>
-  </section>`;
+    <div class="population-layout">
+      <div class="main-table-panel">
+        ${reportTable(["نوع المنفذ", "المنفذ", "إجمالي الصور", "سليمة", "اشتباه", "المدروسة"], tableRows)}
+      </div>
+      <aside class="side-chart-panel">
+        <h3>توزيع النتائج حسب نوع المنفذ</h3>
+        ${portTypeStackedChart(typeRows)}
+        <div class="legend-row"><span><i class="legend-clean"></i>سليمة</span><span><i class="legend-suspicious"></i>اشتباه</span></div>
+        ${reportTable(["نوع المنفذ", "إجمالي الصور", "سليمة", "اشتباه", "المدروسة"], typeRows.map((row) => [
+        portTypeBadge(row.portType),
+        fmtNum(row.population),
+        fmtNum(row.clean),
+        fmtNum(row.suspicious),
+        fmtNum(row.studied),
+      ]))}
+      </aside>
+    </div>`;
+  return slideFrame("03", "مجتمع الدراسة والعينة", "إجمالي الصور ونتائجها وحجم العينة حسب نوع المنفذ والمنفذ.", body);
 }
 
-// ─── CSS ──────────────────────────────────────────────────────────────────────
-const CSS = `
-@page{size:13.333in 7.5in;margin:0;}
-@font-face{font-family:"Somar Report";src:local("Somar Bold"),local("Somar Medium"),local("Somar"),local("Somar Light"),local("Noto Sans Arabic"),local("Segoe UI");font-weight:100 900;}
-:root{
-  --navy-950:#06244a;--navy-900:#0a315f;--navy-800:#123f74;--navy-700:#20578e;
-  --teal-700:#007e73;--teal-600:#00998a;--teal-500:#16aa9a;--teal-100:#daf5f0;
-  --green:#15805f;--green-soft:#e8f8f1;--red:#c33232;--red-soft:#fff0f0;
-  --amber:#a86b09;--amber-soft:#fff7df;--ink:#10233f;--muted:#637188;--muted-2:#8390a2;
-  --line:#d8e3ef;--line-dark:#c3d3e3;--surface:#ffffff;--canvas:#edf3f8;
-  --shadow:0 14px 38px rgba(9,42,80,.08);
+function buildInspectionResultsPage(kpis: ExecutiveKPIs, groupedRows: ReportGroupRow[]): string {
+  const rankedRows = groupedRows
+    .filter((row) => row.studied > 0)
+    .sort((a, b) => (a.suspicionPrecision ?? 101) - (b.suspicionPrecision ?? 101))
+    .slice(0, 9);
+  const generalAccuracy = { accuracy: kpis.overallAccuracy, studied: kpis.validStudied };
+  const landAccuracy = weightedResultAccuracy(groupedRows.filter((row) => portTypeTone(row.portType) === "land"));
+  const seaAccuracy = weightedResultAccuracy(groupedRows.filter((row) => portTypeTone(row.portType) === "sea"));
+  const body = `<div class="accuracy-comparison">
+      ${accuracyCompareCard("نسبة الدقة العامة", generalAccuracy)}
+      ${accuracyCompareCard("منفذ بري", landAccuracy, "land")}
+      ${accuracyCompareCard("منفذ بحري", seaAccuracy, "sea")}
+    </div>
+    <div class="results-layout">
+      <section class="chart-panel">
+        <h3>نسبة دقة الاشتباه حسب المنفذ</h3>
+        ${inspectionBars(groupedRows)}
+        <div class="panel-note">يعرض الرسم المنافذ التي لديها صور مدروسة، مرتبة حسب دقة الاشتباه المتاحة.</div>
+      </section>
+      <section class="result-table-panel">
+        ${reportTable(["نوع المنفذ", "المنفذ", "المدروسة", "دقة نتائج الأشعة", "دقة الاشتباه", "اشتباه فائت"], rankedRows.map((row) => [
+        portTypeBadge(row.portType),
+        esc(row.portName),
+        fmtNum(row.studied),
+        compactPercent(row.resultAccuracy),
+        compactPercent(row.suspicionPrecision),
+        compactPercent(row.missedSuspicionRate),
+      ]))}
+      </section>
+    </div>`;
+  return slideFrame("04", "نتائج الفحص", "دقة نتائج الأشعة ودقة الاشتباه حسب بيانات الفحص المعتمدة.", body);
 }
-*{box-sizing:border-box;}
-html{background:var(--canvas);}
-body{margin:0;color:var(--ink);background:var(--canvas);
-  font-family:"Somar Report","Somar","Noto Sans Arabic","Segoe UI",Tahoma,Arial,sans-serif;
-  font-weight:500;direction:rtl;}
-button{font:inherit;}
 
-/* Toolbar */
-.toolbar{position:sticky;top:0;z-index:100;display:flex;align-items:center;
-  justify-content:space-between;gap:14px;padding:10px 16px;
-  background:rgba(255,255,255,.96);border-bottom:1px solid var(--line);
-  box-shadow:0 8px 24px rgba(9,42,80,.08);backdrop-filter:blur(14px);}
-.toolbar-title strong{display:block;color:var(--navy-950);font-size:16px;font-weight:800;}
-.toolbar-title span{display:block;color:var(--muted);font-size:12px;margin-top:2px;}
-.toolbar-actions{display:flex;align-items:center;gap:8px;direction:ltr;}
-.toolbar button{border:1px solid var(--line-dark);background:#fff;color:var(--navy-900);
-  border-radius:12px;min-width:42px;height:38px;padding:0 13px;cursor:pointer;font-weight:800;}
-.toolbar button.primary{background:var(--navy-900);color:#fff;border-color:var(--navy-900);}
-.toolbar button:disabled{opacity:.35;cursor:not-allowed;}
-.page-indicator{min-width:64px;text-align:center;color:var(--muted);font-size:13px;font-weight:800;direction:ltr;}
-
-/* Deck & slide */
-.deck{padding:22px 0 44px;}
-.slide{position:relative;width:13.333in;height:7.5in;margin:0 auto 24px;
-  padding:.3in .4in .26in;overflow:hidden;
-  background:radial-gradient(circle at 4% 2%,rgba(20,169,153,.07),transparent 22%),
-    linear-gradient(180deg,#fff 0%,#f8fbfe 100%);
-  border:1px solid #d3e1ed;border-radius:24px;
-  box-shadow:0 22px 54px rgba(9,42,80,.12);page-break-after:always;}
-.slide::after{content:"";position:absolute;top:0;left:0;right:0;height:3px;
-  background:linear-gradient(90deg,var(--navy-900),var(--teal-500));}
-.slide:last-child{page-break-after:auto;}
-body.presentation .slide{display:none;}
-body.presentation .slide.active{display:block;}
-
-/* Header */
-.slide-header{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;margin-bottom:.14in;}
-.title-group{min-width:0;}
-.report-title{color:var(--navy-950);font-size:.42in;line-height:1.06;font-weight:900;letter-spacing:-.02em;margin:0;}
-.section-title{color:var(--navy-900);font-size:.21in;line-height:1.35;font-weight:800;margin:.04in 0 0;}
-.section-title::after{content:"";display:block;width:.44in;height:3px;background:var(--teal-600);border-radius:99px;margin-top:.05in;}
-.period-chip{flex:0 0 auto;display:inline-flex;align-items:center;gap:8px;color:var(--navy-900);
-  background:#f5f9fd;border:1px solid var(--line);padding:7px 12px;border-radius:999px;
-  font-size:.095in;font-weight:800;}
-.footer{position:absolute;left:.4in;right:.4in;bottom:.1in;display:flex;
-  justify-content:space-between;align-items:center;padding-top:.05in;
-  border-top:1px solid var(--line);color:var(--muted-2);font-size:.072in;}
-.footer .page{direction:ltr;font-variant-numeric:tabular-nums;}
-
-/* Cards */
-.card{background:var(--surface);border:1px solid var(--line);border-radius:16px;
-  box-shadow:var(--shadow);padding:.12in;overflow:hidden;}
-.card-title{display:flex;align-items:center;justify-content:space-between;gap:10px;
-  color:var(--navy-900);font-size:.13in;font-weight:850;margin-bottom:.07in;}
-.card-subtitle{color:var(--muted);font-size:.074in;font-weight:600;}
-
-/* KPI row */
-.kpis-row{display:grid;grid-template-columns:repeat(6,1fr);gap:.09in;margin-bottom:.1in;}
-.kpi-card{display:grid;grid-template-columns:1fr .42in;align-items:center;min-height:.82in;
-  background:#fff;border:1px solid var(--line);border-radius:15px;padding:.09in .11in;
-  box-shadow:0 8px 22px rgba(9,42,80,.05);}
-.kpi-card .label{color:var(--navy-900);font-size:.083in;font-weight:800;}
-.kpi-card .value{color:var(--navy-950);font-size:.22in;line-height:1.1;font-weight:900;margin-top:.02in;direction:ltr;text-align:right;font-variant-numeric:tabular-nums;}
-.kpi-card .note{color:var(--muted);font-size:.066in;margin-top:.022in;}
-.kpi-card.teal .value{color:var(--teal-700);}
-.kpi-icon{width:.38in;height:.38in;border-radius:50%;display:grid;place-items:center;
-  background:linear-gradient(145deg,#e6f7f4,#f5fbfa);color:var(--teal-700);font-size:.19in;font-weight:900;}
-
-/* Progress bar */
-.progress-bar-row{display:flex;align-items:center;gap:.1in;margin-bottom:.1in;background:#fff;
-  border:1px solid var(--line);border-radius:12px;padding:.07in .12in;}
-.pb-label{color:var(--navy-900);font-size:.078in;font-weight:800;white-space:nowrap;}
-.pb-track{flex:1;height:.1in;background:#e7eef5;border-radius:999px;overflow:hidden;}
-.pb-fill{height:100%;background:linear-gradient(90deg,var(--teal-500),var(--teal-700));border-radius:999px;}
-.pb-value{color:var(--muted);font-size:.072in;font-weight:700;white-space:nowrap;direction:ltr;}
-
-/* Grids */
-.grid-3col{display:grid;grid-template-columns:1.2fr .9fr 1fr;gap:.12in;margin-bottom:.08in;}
-.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:.13in;}
-.grid-2-wide{display:grid;grid-template-columns:1.35fr .65fr;gap:.13in;}
-.grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:.1in;margin-bottom:.1in;}
-
-/* Legend */
-.legend{display:flex;gap:.1in;align-items:center;flex-wrap:wrap;color:var(--muted);font-size:.068in;font-weight:700;}
-.legend span{display:inline-flex;align-items:center;gap:.032in;}
-.legend i{width:.08in;height:.08in;border-radius:3px;display:inline-block;}
-
-/* Bar chart */
-.bar-chart{height:1.9in;display:flex;align-items:flex-end;justify-content:space-evenly;
-  gap:.07in;padding:.07in .04in .2in;position:relative;border-bottom:1px solid var(--line);}
-.bar-group{height:100%;flex:1;display:flex;align-items:flex-end;justify-content:center;gap:.03in;position:relative;}
-.bar{width:.16in;min-height:3px;border-radius:5px 5px 0 0;position:relative;z-index:2;}
-.bar.total{background:linear-gradient(180deg,var(--navy-700),var(--navy-950));}
-.bar.sample{background:linear-gradient(180deg,var(--teal-500),var(--teal-700));}
-.bar-label{position:absolute;bottom:-.18in;left:50%;transform:translateX(-50%);width:1in;
-  text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--muted);font-size:.061in;font-weight:700;}
-.bar-num{position:absolute;top:-.13in;left:50%;transform:translateX(-50%);
-  font-size:.055in;color:var(--navy-800);font-weight:850;direction:ltr;white-space:nowrap;}
-
-/* Donut */
-.donut-wrap{height:1.9in;display:grid;place-items:center;position:relative;}
-.donut{width:1.52in;height:1.52in;border-radius:50%;position:relative;}
-.donut::after{content:"";position:absolute;inset:.26in;background:#fff;border-radius:50%;box-shadow:0 0 0 1px var(--line);}
-.donut-center{position:absolute;text-align:center;z-index:3;color:var(--navy-900);font-weight:850;font-size:.088in;line-height:1.4;}
-.donut-center b{display:block;font-size:.22in;color:var(--teal-700);direction:ltr;}
-.donut-side{position:absolute;top:50%;transform:translateY(-50%);font-size:.069in;color:var(--muted);font-weight:800;text-align:center;}
-.donut-side b{display:block;direction:ltr;font-size:.16in;color:var(--navy-900);}
-.donut-side.right{right:.01in;}.donut-side.left{left:.01in;}
-
-/* Rank list */
-.rank-list{display:grid;gap:.077in;padding-top:.02in;}
-.rank-row{display:grid;grid-template-columns:.22in .75in 1fr .44in;gap:.06in;align-items:center;}
-.rank-no{width:.2in;height:.2in;border-radius:50%;background:var(--teal-600);color:#fff;display:grid;place-items:center;font-size:.07in;font-weight:900;}
-.rank-name{color:var(--muted);font-size:.069in;font-weight:750;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.rank-track{height:.1in;background:#e8eff6;border-radius:999px;overflow:hidden;}
-.rank-fill{height:100%;border-radius:999px;background:linear-gradient(90deg,var(--navy-700),var(--navy-950));}
-.rank-value{color:var(--teal-700);direction:ltr;font-size:.072in;font-weight:900;text-align:left;}
-
-/* Insights */
-.insights-strip{margin-top:.09in;display:grid;grid-template-columns:.64fr 1fr 1fr 1fr;gap:0;
-  background:#fff;border:1px solid var(--line);border-radius:16px;overflow:hidden;box-shadow:var(--shadow);}
-.insight-head{padding:.09in .12in;min-height:.66in;display:flex;flex-direction:column;justify-content:center;}
-.insight-head strong{color:var(--navy-900);font-size:.13in;}
-.insight-head span{color:var(--muted);font-size:.068in;display:block;}
-.insight-item{padding:.09in .12in;border-right:1px solid var(--line);min-height:.66in;display:flex;align-items:center;gap:.07in;}
-.insight-num{flex:0 0 auto;width:.22in;height:.22in;border-radius:50%;background:var(--teal-600);color:#fff;display:grid;place-items:center;font-size:.07in;font-weight:900;}
-.insight-item span{color:var(--muted);font-size:.066in;line-height:1.55;display:block;}
-
-/* Tables */
-.port-table,.verify-table,.simple-table{width:100%;border-collapse:separate;border-spacing:0;overflow:hidden;border:1px solid var(--line);border-radius:12px;font-size:.07in;}
-.port-table th,.verify-table th,.simple-table th{background:var(--navy-900);color:#fff;font-weight:850;padding:.065in .045in;text-align:center;}
-.port-table td,.verify-table td,.simple-table td{padding:.055in .04in;border-bottom:1px solid var(--line);text-align:center;color:#2a3e59;font-weight:650;}
-.port-table tr:last-child td,.simple-table tr:last-child td,.verify-table tr:last-child td{border-bottom:0;}
-.port-table tbody tr:nth-child(even) td,.simple-table tbody tr:nth-child(even) td{background:#f9fbfd;}
-.port-table .port-name{color:var(--navy-900);font-weight:850;text-align:right;}
-.ltr{direction:ltr;font-variant-numeric:tabular-nums;}
-
-/* Status pills */
-.status-pill{display:inline-flex;align-items:center;justify-content:center;min-width:.6in;padding:.023in .065in;border-radius:999px;font-weight:850;font-size:.064in;}
-.status-pill.good{color:var(--green);background:var(--green-soft);}
-.status-pill.bad{color:var(--red);background:var(--red-soft);}
-.status-pill.warn{color:var(--amber);background:var(--amber-soft);}
-.status-pill.muted{color:var(--muted);background:#f1f5f9;}
-
-/* Stacked bars */
-.port-visual{display:grid;gap:.068in;}
-.port-row{display:grid;grid-template-columns:.85in 1fr .54in;gap:.065in;align-items:center;}
-.port-row .name{font-size:.069in;color:var(--navy-900);font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.stack-track{height:.125in;background:#e8eff6;border-radius:999px;overflow:hidden;display:flex;direction:rtl;}
-.stack-clean{background:var(--teal-500);}
-.stack-susp{background:var(--navy-900);}
-.port-row .pct{color:var(--muted);font-size:.065in;font-weight:800;direction:ltr;text-align:left;}
-
-/* Dual bars */
-.dual-bars{display:grid;gap:.1in;}
-.dual-row{display:grid;grid-template-columns:.88in 1fr .46in;gap:.065in;align-items:center;}
-.dual-label{color:var(--navy-900);font-size:.072in;font-weight:800;}
-.dual-track{height:.14in;background:#e8eff6;border-radius:999px;overflow:hidden;display:flex;}
-.dual-track .a{background:var(--navy-900);height:100%;}
-.dual-track .b{background:var(--teal-500);height:100%;}
-.dual-value{direction:ltr;color:var(--muted);font-size:.067in;font-weight:850;text-align:left;}
-
-/* Stage cards */
-.stage-card{background:#fff;border:1px solid var(--line);border-radius:15px;padding:.1in;box-shadow:0 8px 22px rgba(9,42,80,.05);}
-.stage-head{margin-bottom:.068in;}
-.stage-head strong{color:var(--navy-900);font-size:.11in;}
-.stage-metrics{display:grid;grid-template-columns:repeat(5,1fr);gap:.04in;}
-.stage-metric{border-right:1px solid var(--line);padding-right:.05in;}
-.stage-metric:last-child{border-right:0;}
-.stage-metric span{display:block;color:var(--muted);font-size:.056in;line-height:1.3;}
-.stage-metric b{display:block;color:var(--navy-950);font-size:.13in;direction:ltr;margin-top:.018in;}
-.stage-metric.teal b{color:var(--teal-700);}
-.progress{height:.055in;background:#e7eef5;border-radius:999px;overflow:hidden;margin-top:.07in;}
-.progress>i{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--teal-500),var(--teal-700));}
-
-/* Plan KPIs */
-.plan-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:.08in;margin-bottom:.09in;}
-.plan-kpi{text-align:center;padding:.08in .06in;background:#f7fafc;border-radius:12px;border:1px solid var(--line);}
-.plan-kpi span{display:block;color:var(--muted);font-size:.063in;font-weight:700;}
-.plan-kpi b{display:block;color:var(--navy-950);font-size:.18in;direction:ltr;line-height:1.1;margin-top:.02in;}
-.plan-kpi.teal b{color:var(--teal-700);}
-
-/* Quality grid */
-.quality-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:.08in;}
-.q-item{text-align:center;padding:.09in .06in;background:#f7fafc;border:1px solid var(--line);border-radius:12px;}
-.q-item b{display:block;color:var(--navy-950);font-size:.18in;font-weight:900;direction:ltr;}
-.q-item span{display:block;color:var(--muted);font-size:.063in;margin-top:.02in;}
-.q-item.teal b{color:var(--teal-700);}
-.q-item.red b{color:var(--red);}
-
-/* Verification matrix */
-.verify-table{font-size:.082in;border-radius:14px;}
-.verify-table th{padding:.08in .045in;font-size:.085in;}
-.verify-table td{padding:.068in .045in;font-size:.078in;}
-
-/* Summary strip */
-.summary-3{display:grid;grid-template-columns:repeat(3,1fr);gap:0;margin-top:.1in;background:#fff;border:1px solid var(--line);border-radius:15px;overflow:hidden;box-shadow:var(--shadow);}
-.summary-item{min-height:.78in;display:grid;grid-template-columns:.42in 1fr;align-items:center;gap:.07in;padding:.08in .14in;border-right:1px solid var(--line);}
-.summary-item:last-child{border-right:0;}
-.summary-icon{width:.38in;height:.38in;border-radius:50%;display:grid;place-items:center;background:#edf8f6;color:var(--teal-700);font-size:.18in;font-weight:900;}
-.summary-icon.bad{background:var(--red-soft);color:var(--red);}
-.summary-label{color:var(--navy-900);font-size:.08in;font-weight:850;}
-.summary-value{color:var(--teal-700);font-size:.22in;font-weight:900;direction:ltr;line-height:1.1;}
-.summary-value.bad{color:var(--red);}
-.summary-note{color:var(--muted);font-size:.061in;}
-
-/* Compare cards */
-.compare-cards{display:grid;grid-template-columns:1fr 1fr;gap:.085in;}
-.compare-card{border:1px solid var(--line);border-radius:13px;padding:.1in;background:#fff;}
-.compare-card b{color:var(--navy-950);font-size:.22in;direction:ltr;display:block;}
-.compare-card span{color:var(--muted);font-size:.069in;line-height:1.45;display:block;}
-.compare-card.good{background:var(--green-soft);border-color:#bde8d6;}
-.compare-card.warn{background:var(--amber-soft);border-color:#f1db9e;}
-.compare-card.bad{background:var(--red-soft);border-color:#f0c9c9;}
-
-/* Priority cards */
-.priority-grid{display:grid;grid-template-columns:1fr 1fr;gap:.076in;margin-bottom:.09in;}
-.priority-card{border:1px solid var(--line);border-radius:13px;padding:.09in;background:#fff;}
-.priority-card strong{display:block;font-size:.078in;color:var(--navy-900);}
-.priority-card span{display:block;color:var(--muted);font-size:.063in;line-height:1.55;margin-top:.018in;}
-.priority-card.red{border-right:4px solid var(--red);}
-.priority-card.amber{border-right:4px solid var(--amber);}
-.priority-card.teal{border-right:4px solid var(--teal-600);}
-.priority-card.navy{border-right:4px solid var(--navy-900);}
-
-/* Decisions */
-.decision-list{display:grid;gap:.075in;}
-.decision{display:grid;grid-template-columns:.26in 1fr .82in;gap:.07in;align-items:center;border:1px solid var(--line);border-radius:13px;padding:.09in .11in;background:#fff;}
-.decision-no{width:.24in;height:.24in;border-radius:50%;background:var(--navy-900);color:#fff;display:grid;place-items:center;font-weight:900;direction:ltr;font-size:.075in;}
-.decision strong{display:block;color:var(--navy-900);font-size:.08in;}
-.decision span{display:block;color:var(--muted);font-size:.064in;line-height:1.55;margin-top:.012in;}
-.decision .owner{text-align:center;color:var(--teal-700);font-size:.066in;font-weight:850;background:var(--teal-100);border-radius:999px;padding:.04in .065in;}
-
-/* Executive callout */
-.executive-callout{background:linear-gradient(145deg,var(--navy-950),var(--navy-800));color:#fff;border-radius:16px;padding:.14in;box-shadow:var(--shadow);position:relative;overflow:hidden;}
-.executive-callout::before{content:"";position:absolute;width:1.8in;height:1.8in;border-radius:50%;background:rgba(28,183,166,.14);left:-.5in;bottom:-.7in;}
-.executive-callout h3{color:#fff;font-size:.17in;margin:0 0 .07in;position:relative;}
-.executive-callout p{color:#dbe7f3;font-size:.079in;line-height:1.75;position:relative;}
-.executive-callout .big{color:#fff;font-size:.34in;font-weight:900;direction:ltr;margin:.13in 0 .018in;position:relative;}
-.executive-callout .small{color:#b7cce0;font-size:.069in;position:relative;}
-
-/* Note box */
-.note-box{margin-top:.08in;padding:.068in .09in;background:#f7fafc;border:1px dashed var(--line-dark);border-radius:11px;color:var(--muted);font-size:.063in;line-height:1.55;}
-
-/* Chart empty */
-.chart-empty{color:var(--muted);text-align:center;padding:.3in;font-size:.078in;}
-
-@media print{
-  body{background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
-  .toolbar{display:none!important;}
-  .deck{padding:0;}
-  body.presentation .slide,body.presentation .slide.active{display:block!important;}
-  .slide{margin:0;border:0;border-radius:0;box-shadow:none;}
-}`;
-
-const NAV_SCRIPT = `
-const slides=Array.from(document.querySelectorAll('.slide'));
-const indicator=document.getElementById('pageIndicator');
-const prevBtn=document.getElementById('prevBtn');
-const nextBtn=document.getElementById('nextBtn');
-let index=Math.min(Math.max((Number(new URLSearchParams(location.search).get('slide'))||1)-1,0),slides.length-1);
-function showSlide(n){
-  index=Math.min(Math.max(n,0),slides.length-1);
-  slides.forEach((s,i)=>s.classList.toggle('active',i===index));
-  indicator.textContent=\`\${index+1} / \${slides.length}\`;
-  prevBtn.disabled=index===0;nextBtn.disabled=index===slides.length-1;
-  document.title='التقرير التنفيذي — '+slides[index].dataset.title;
-  history.replaceState(null,'',location.pathname+'?slide='+(index+1));
+function buildImageQualityPage(kpis: ExecutiveKPIs): string {
+  const body = `<div class="quality-top-grid">
+      ${metricCard("توفر الصور", fmtPct(kpis.imageAvailabilityRate), "large good")}
+      ${metricCard("وجود التحديد", fmtPct(kpis.markingRate), "large")}
+      ${metricCard("الجودة المقبولة", fmtPct(kpis.acceptableQualityRate), "large good")}
+    </div>
+    <div class="insight-strip quality-insights">
+      ${insightCard("صور غير متاحة", fmtNum(kpis.imageMissingCount), "عدد الصور التي لم تتوفر للفحص حسب إجابات القالب.", kpis.imageMissingCount > 0 ? "risk" : "good")}
+      ${insightCard("جودة منخفضة", fmtNum(kpis.lowQualityCount), "صور تم تقييم مستوى جودة التقاطها كمنخفض.", kpis.lowQualityCount > 0 ? "warn" : "good")}
+      ${insightCard("صور مقيمة", fmtNum(kpis.imageQualityEvaluatedCount), "إجمالي الصور التي دخلت في توزيع مستوى الجودة.")}
+    </div>
+    <div class="quality-layout">
+      <div class="quality-card">
+          <h3>توزيع مستوى الجودة</h3>
+          ${qualityBars(kpis)}
+      </div>
+      <div class="quality-card"><h3>أسباب عدم وجود الصورة</h3>${reasonRows(kpis.missingImageReasons, "لا توجد أسباب مسجلة.")}</div>
+      <div class="quality-card"><h3>أسباب انخفاض الجودة</h3>${reasonRows(kpis.lowQualityReasons, "لا توجد أسباب مسجلة.")}</div>
+    </div>`;
+  return slideFrame("05", "جودة الصور الملتقطة", "مؤشرات توفر الصورة والتحديد ومستوى الجودة من إجابات قالب الفحص.", body);
 }
-prevBtn.addEventListener('click',()=>showSlide(index-1));
-nextBtn.addEventListener('click',()=>showSlide(index+1));
-document.addEventListener('keydown',(e)=>{
-  if(e.key==='ArrowLeft'||e.key==='PageDown')showSlide(index+1);
-  if(e.key==='ArrowRight'||e.key==='PageUp')showSlide(index-1);
-  if(e.key==='Home')showSlide(0);if(e.key==='End')showSlide(slides.length-1);
-});
-showSlide(index);`;
 
-// ─── Main builder ─────────────────────────────────────────────────────────────
-export function buildExecutiveReport(input: ExecutiveReportInput): string {
-  const execRows = buildExecutiveReportRows(input);
-  const kpis = calculateExecutiveKPIs(execRows, input.sample, input.config);
-  const monthLabel = input.monthFolderName;
-
-  const slides = [
-    slide1(kpis, input.config, monthLabel),
-    slide2(kpis, monthLabel),
-    slide3(kpis, input.config, monthLabel),
-    slide4(kpis, monthLabel),
-    slide5(kpis, input.config),
-  ].join("\n");
+function buildPrintableExecutiveReport(
+  input: ExecutiveReportInput,
+  kpis: ExecutiveKPIs,
+  groupedRows: ReportGroupRow[]
+): string {
+  const pages = [
+    buildCoverPage(input, kpis),
+    buildStudyLevelsPage(kpis),
+    buildPopulationPage(kpis, groupedRows),
+    buildInspectionResultsPage(kpis, groupedRows),
+    buildImageQualityPage(kpis),
+  ].join("");
+  const reportMonth = formatReportMonthName(input.monthFolderName);
 
   return `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>التقرير التنفيذي — ${esc(monthLabel)}</title>
-<style>${CSS}</style>
+<title>التقرير التنفيذي | ${esc(reportMonth)}</title>
+<style>${PRINT_REPORT_CSS}</style>
 </head>
-<body class="presentation">
-  <div class="toolbar">
-    <div class="toolbar-title">
-      <strong>التقرير التنفيذي — ضمان جودة الأشعة</strong>
-      <span>${esc(monthLabel)}</span>
+<body>
+  <div class="print-toolbar">
+    <div>
+      <strong>التقرير التنفيذي | ${esc(reportMonth)}</strong>
+      <span>للتصدير PDF: اختر Save to PDF، الاتجاه أفقي، الهوامش لا شيء، وأوقف الرؤوس والتذييلات.</span>
     </div>
-    <div class="toolbar-actions">
-      <button id="prevBtn" title="السابق">‹</button>
-      <span class="page-indicator" id="pageIndicator">1 / 5</span>
-      <button id="nextBtn" title="التالي">›</button>
-      <button class="primary" onclick="window.print()">طباعة / PDF</button>
-    </div>
-  </div>
-  <main class="deck">${slides}</main>
-  <script>${NAV_SCRIPT}</script>
+    <button onclick="window.print()">تصدير PDF</button>
+      </div>
+  <main>${pages}</main>
 </body>
 </html>`;
+}
+
+const PRINT_REPORT_CSS = `
+@page{size:13.333in 7.5in;margin:0;}
+*{box-sizing:border-box;}
+@font-face{font-family:"Somar";src:url("${import.meta.env.BASE_URL}fonts/SomarSans-Regular.woff") format("woff");font-weight:400;font-style:normal;font-display:swap;}
+@font-face{font-family:"Somar";src:url("${import.meta.env.BASE_URL}fonts/SomarSans-Light.woff") format("woff");font-weight:300;font-style:normal;font-display:swap;}
+@font-face{font-family:"Somar";src:url("${import.meta.env.BASE_URL}fonts/SomarSans-Medium.woff") format("woff");font-weight:500;font-style:normal;font-display:swap;}
+@font-face{font-family:"Somar";src:url("${import.meta.env.BASE_URL}fonts/SomarSans-Bold.woff") format("woff");font-weight:700;font-style:normal;font-display:swap;}
+:root{--navy:#082f55;--navy-2:#0c4a7b;--navy-light:#e9eff5;--teal:#17766f;--cyan:#00a4d6;--cyan-soft:#e9f7fc;--line:#d8e0e8;--ink:#17283a;--muted:#637286;--bg:#e7ebef;--surface:#f5f7f9;--green:#2f7550;--green-bg:#edf6f0;--blue-bg:#e9eff5;--amber:#9b6a19;--red:#a63b43;--red-bg:#faecee;}
+html{background:var(--bg);}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Somar","Segoe UI",Tahoma,Arial,sans-serif;font-variant-numeric:tabular-nums;direction:rtl;}
+.print-toolbar{position:sticky;top:0;z-index:10;display:flex;align-items:center;justify-content:space-between;gap:18px;padding:10px 18px;background:#fff;border-bottom:1px solid var(--line);}
+.print-toolbar div{display:grid;gap:2px;}
+.print-toolbar strong{font-size:15px;color:var(--navy);font-weight:700;}
+.print-toolbar span{font-size:11px;color:var(--muted);font-weight:600;}
+.print-toolbar button{border:0;border-radius:3px;background:var(--navy);color:#fff;font-weight:800;padding:9px 16px;cursor:pointer;}
+main{padding:18px 0 34px;}
+.xr-page{width:13.333in;height:7.5in;margin:0 auto 18px;padding:.42in .52in .36in;background:#fff;border:1px solid #ccd5de;border-radius:0;box-shadow:0 12px 30px rgba(21,39,57,.10);position:relative;page-break-after:always;overflow:hidden;isolation:isolate;}
+.xr-page::before{content:"";position:absolute;top:0;left:0;right:0;height:.08in;background:var(--navy);}
+.xr-page::after{display:none;}
+.slide-head{display:flex;align-items:flex-start;justify-content:space-between;gap:.16in;border-bottom:1px solid var(--line);padding:.02in 0 .13in;margin:.02in 0 .16in;}
+.slide-head>span{order:2;color:var(--navy);background:transparent;width:auto;height:auto;display:block;font-weight:800;direction:ltr;font-size:.18in;box-shadow:none;border-radius:0;}
+.slide-head>div{order:1;}
+h2{margin:0;color:var(--navy);font-size:.29in;line-height:1.18;font-weight:800;letter-spacing:0;}
+.slide-head p{margin:.035in 0 0;color:var(--muted);font-size:.105in;font-weight:700;}
+.footer{position:absolute;left:.52in;right:.52in;bottom:.15in;border-top:1px solid var(--line);padding-top:.055in;color:var(--muted);font-size:.082in;}
+
+.cover{display:block;background:#fff;isolation:isolate;padding:0;}
+.cover::before{display:none;}
+.cover-top{position:absolute;top:0;right:0;left:0;height:.9in;padding:.28in .72in 0;background:var(--navy);color:#fff;display:flex;align-items:flex-start;justify-content:space-between;gap:.35in;z-index:3;}
+.cover-badge{display:inline-flex;align-items:center;min-height:auto;border:1px solid rgba(255,255,255,.45);border-radius:0;background:transparent;color:#fff;font-size:.09in;font-weight:800;padding:.045in .12in;box-shadow:none;}
+.cover-org{max-width:7.4in;color:#fff;font-size:.095in;line-height:1.65;font-weight:700;text-align:left;}
+.cover-main{position:absolute;top:1.42in;right:.78in;left:.78in;z-index:3;}
+.cover-mark{font-size:.125in;font-weight:800;color:var(--teal);margin-bottom:.12in;}
+.cover h1{font-size:.52in;line-height:1.18;margin:0;color:var(--navy);font-weight:800;max-width:8.4in;}
+.cover h1 span,.cover h1 strong{display:block;}
+.cover h1 strong{font-weight:800;}
+.cover-period{display:grid;grid-template-columns:auto 1fr;gap:.07in .16in;width:4.15in;margin-top:.28in;border-right:4px solid var(--teal);background:var(--surface);border-radius:0;padding:.12in .17in;box-shadow:none;}
+.cover-period span{color:var(--muted);font-size:.09in;font-weight:700;}
+.cover-period b{color:var(--navy);font-size:.13in;font-weight:800;direction:ltr;text-align:right;}
+.cover-stats{position:absolute;right:.78in;left:.78in;bottom:.72in;display:grid;grid-template-columns:repeat(3,1fr);gap:.12in;z-index:4;}
+.cover .metric-card{background:#fff;border-color:var(--line);box-shadow:none;}
+.cover .metric-card span{color:#6d7482;}
+.cover .metric-card b{font-size:.3in;}
+.metric-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:.1in;margin-bottom:.15in;}
+.insight-strip,.level-summary-strip{display:grid;grid-template-columns:repeat(3,1fr);gap:.1in;margin-bottom:.13in;}
+.level-summary-strip{margin-top:.02in;}
+.insight-card{border:1px solid var(--line);border-radius:0;background:#fff;padding:.09in .12in;min-height:.62in;box-shadow:none;}
+.insight-card span{display:block;color:#6d7482;font-size:.083in;font-weight:700;margin-bottom:.03in;}
+.insight-card b{display:block;color:var(--navy);font-size:.15in;font-weight:800;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.insight-card p{margin:.045in 0 0;color:#5d6675;font-size:.078in;line-height:1.45;}
+.insight-card.warn{border-top:4px solid var(--cyan);}.insight-card.risk{border-top:4px solid var(--red);}.insight-card.good{border-top:4px solid var(--green);}
+.quality-top-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:.11in;margin-bottom:.15in;}
+.metric-card,.quality-card{border:1px solid var(--line);border-top:3px solid var(--navy);border-radius:0;background:#fff;padding:.115in .14in;box-shadow:none;}
+.metric-card span{display:block;color:#5d6675;font-weight:700;font-size:.095in;margin-bottom:.04in;}
+.metric-card b{display:block;color:var(--navy);font-weight:800;font-size:.24in;direction:ltr;text-align:right;line-height:1.1;}
+.metric-card.good{border-top-color:var(--green);}.metric-card.warn{border-top-color:var(--amber);}.metric-card.risk{border-top-color:var(--red);}
+.metric-card.good b{color:var(--green);}.metric-card.warn b{color:var(--amber);}.metric-card.risk b{color:var(--red);}.metric-card.large{min-height:.88in;display:flex;flex-direction:column;justify-content:center;}.metric-card.large b{font-size:.29in;}
+
+.levels-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:.1in;margin-top:.04in;}
+.level-card{height:4.32in;border:1px solid var(--line);border-radius:0;background:#fff;box-shadow:none;overflow:hidden;display:flex;flex-direction:column;}
+.level-title{padding:.12in .12in;text-align:center;color:#fff;background:var(--navy);}
+.level-card.level-two .level-title,.level-card.level-three .level-title,.level-card.level-four .level-title{background:var(--navy);}
+.level-title h3{font-size:.2in;line-height:1.15;margin:0 0 .055in;font-weight:800;}
+.level-title span{font-size:.087in;color:#d9f3ff;font-weight:700;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.level-card.level-four .level-title span{color:#d9f3ff;}
+.level-card p{margin:0;padding:.12in .13in;color:var(--ink);font-size:.092in;line-height:1.56;min-height:2.05in;border-bottom:1px solid var(--line);}
+.level-stats{display:grid;gap:.045in;padding:.1in .13in;margin-top:auto;}
+.level-stats div{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);padding-bottom:.04in;}
+.level-stats div:last-child{border-bottom:0;padding-bottom:0;}
+.level-stats span{color:var(--muted);font-size:.078in;font-weight:700;}.level-stats b{color:var(--navy);font-size:.125in;font-weight:800;direction:ltr;}
+
+.population-layout{display:grid;grid-template-columns:1.58fr .72fr;gap:.13in;align-items:start;}
+.main-table-panel,.side-chart-panel,.chart-panel,.result-table-panel{border:1px solid var(--line);border-radius:0;background:#fff;box-shadow:none;overflow:hidden;}
+.side-chart-panel,.chart-panel{padding:.13in;}
+.side-chart-panel h3,.chart-panel h3,.quality-card h3{margin:0 0 .1in;color:var(--navy);font-size:.16in;font-weight:800;text-align:center;}
+.xr-table{width:100%;border-collapse:collapse;border-spacing:0;font-size:.085in;}
+.xr-table th{background:var(--navy);color:#fff;padding:.07in .055in;text-align:center;font-weight:800;white-space:nowrap;}
+.xr-table td{padding:.058in .05in;border-bottom:1px solid var(--line);text-align:center;color:var(--ink);font-weight:700;line-height:1.3;}
+.xr-table tr:nth-child(even) td{background:#f5f7fa;}
+.xr-table tr:last-child td{border-bottom:0;}
+.port-type-badge{display:inline-flex;align-items:center;justify-content:center;min-width:.72in;padding:.025in .065in;border:1px solid var(--line);border-radius:0;font-size:.075in;font-weight:800;white-space:nowrap;}
+.port-type-badge.land{background:var(--green-bg);color:var(--green);border-color:var(--line);}
+.port-type-badge.sea{background:var(--navy-light);color:var(--navy);border-color:var(--line);}
+.port-type-badge.other{background:var(--surface);color:var(--muted);border:1px solid var(--line);}
+.stacked-type-chart{display:grid;gap:.09in;margin-bottom:.12in;}
+.stacked-type-row{display:grid;grid-template-columns:.82in 1fr .42in;gap:.07in;align-items:center;}
+.stack-track{height:.14in;background:#e8edf2;border-radius:0;overflow:hidden;display:flex;direction:rtl;}
+.stack-track i{height:100%;display:block;}.stack-track .clean{background:var(--green);}.stack-track .suspicious{background:var(--navy);}.stacked-type-row b{color:var(--navy);font-weight:800;direction:ltr;text-align:left;}
+.legend-row{display:flex;align-items:center;justify-content:center;gap:.18in;margin:.02in 0 .11in;color:var(--muted);font-size:.085in;font-weight:700;}
+.legend-row span{display:inline-flex;align-items:center;gap:.045in;}.legend-row i{display:inline-block;width:.11in;height:.11in;border-radius:2px;}.legend-clean{background:var(--green);}.legend-suspicious{background:var(--navy);}
+
+.accuracy-comparison{display:grid;grid-template-columns:repeat(3,1fr);gap:.12in;margin-bottom:.14in;}
+.accuracy-card{border:1px solid var(--line);border-top:3px solid var(--navy);border-radius:0;background:#fff;padding:.13in .15in;box-shadow:none;position:relative;overflow:hidden;min-height:.96in;}
+.accuracy-card::before{content:"";position:absolute;top:0;right:0;width:.065in;height:100%;background:var(--navy);}
+.accuracy-card.land::before{background:var(--green);}.accuracy-card.sea::before{background:var(--cyan);}
+.accuracy-card span{display:block;color:var(--muted);font-size:.095in;font-weight:700;margin-bottom:.035in;}
+.accuracy-card b{display:block;color:var(--navy);font-size:.3in;font-weight:800;line-height:1.05;direction:ltr;text-align:right;}
+.accuracy-card small{display:block;color:#52677f;font-size:.078in;font-weight:700;margin-top:.035in;}
+.accuracy-card div{height:.08in;background:#e8edf2;border-radius:0;overflow:hidden;margin-top:.09in;}
+.accuracy-card i{display:block;height:100%;border-radius:0;background:var(--navy);}
+.accuracy-card.land i{background:var(--green);}.accuracy-card.sea i{background:var(--cyan);}
+.results-layout{display:grid;grid-template-columns:1fr 1.22fr;gap:.13in;align-items:stretch;}
+.panel-note{margin-top:.12in;border-right:4px solid var(--navy);background:var(--surface);color:var(--muted);border-radius:0;padding:.1in .12in;font-size:.087in;font-weight:800;line-height:1.55;}
+.panel-summary{display:grid;grid-template-columns:1fr 1fr;gap:.08in;padding:.1in;border-bottom:1px solid var(--line);background:var(--cyan-soft);}
+.panel-summary .insight-card{min-height:.68in;padding:.08in .1in;box-shadow:none;background:#fff;}
+.inspection-bars{display:grid;gap:.087in;}
+.inspection-bar-row{display:grid;grid-template-columns:.9in 1fr .55in;gap:.07in;align-items:center;}
+.inspection-bar-row span{color:var(--ink);font-weight:700;font-size:.087in;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.inspection-bar-row div{height:.13in;background:#e8edf2;border-radius:0;overflow:hidden;}
+.inspection-bar-row i{display:block;height:100%;border-radius:0;background:var(--navy);}
+.inspection-bar-row b{color:var(--navy);font-weight:800;direction:ltr;text-align:left;font-size:.085in;}
+
+.quality-insights{margin-top:-.04in;}
+.quality-layout{display:grid;grid-template-columns:1fr 1fr 1fr;gap:.13in;align-items:start;}
+.quality-card h3{font-size:.16in;}
+.quality-bars{display:grid;gap:.13in;margin-top:.04in;}
+.quality-bar-row{display:grid;grid-template-columns:.78in 1fr .5in;gap:.09in;align-items:center;}
+.quality-bar-row span{color:var(--ink);font-weight:700;}
+.quality-bar-row div{height:.15in;background:#e8edf2;border-radius:0;overflow:hidden;}
+.quality-bar-row i{display:block;height:100%;border-radius:0;}
+.quality-bar-row b,.reason-line b,.reason-line em{direction:ltr;text-align:left;color:var(--navy);font-weight:800;}
+.reason-line{display:grid;grid-template-columns:1fr .5in .5in;gap:.08in;align-items:center;padding:.075in 0;border-bottom:1px solid var(--line);}
+.reason-line span{font-weight:700;color:var(--ink);font-size:.095in;}
+.reason-line em{font-style:normal;color:var(--muted);}
+.empty-note{color:var(--muted);background:#f8fafc;border:1px dashed var(--line);border-radius:4px;padding:.18in;text-align:center;font-weight:800;}
+@media print{@page{size:13.333in 7.5in;margin:0;}html,body{width:13.333in;height:7.5in;margin:0;background:#fff;overflow:visible;-webkit-print-color-adjust:exact;print-color-adjust:exact;}.print-toolbar{display:none}main{width:13.333in;margin:0;padding:0;}.xr-page{width:13.333in;height:7.5in;margin:0;padding:.42in .52in .36in;border:0;border-radius:0;box-shadow:none;page-break-after:always;break-after:page;}.xr-page:last-child{page-break-after:auto;break-after:auto;}}
+`;
+
+// ─── Main builder ─────────────────────────────────────────────────────────────
+export function buildExecutiveReport(input: ExecutiveReportInput): string {
+  const execRows = buildExecutiveReportRows(input);
+  const kpis = calculateExecutiveKPIs(execRows, input.sample, input.config);
+  return buildPrintableExecutiveReport(input, kpis, groupForReport(execRows));
 }
 
 export function openExecutiveReport(input: ExecutiveReportInput): void {
@@ -895,6 +652,15 @@ export function buildExecutiveXlsx(input: ExecutiveReportInput): void {
     ["اشتباه فائت (عدد)", kpis.missedSuspicious],
     ["اشتباه زائد", kpis.excessSuspicious],
     ["صور بتحقق صالح", kpis.validStudied],
+    [],
+    ["توفر الصور%", kpis.imageAvailabilityRate?.toFixed(2) ?? ""],
+    ["صور متاحة", kpis.imageAvailableCount],
+    ["صور غير متاحة", kpis.imageMissingCount],
+    ["وجود التحديد%", kpis.markingRate?.toFixed(2) ?? ""],
+    ["جودة عالية", kpis.highQualityCount],
+    ["جودة متوسطة", kpis.mediumQualityCount],
+    ["جودة منخفضة", kpis.lowQualityCount],
+    ["الجودة المقبولة%", kpis.acceptableQualityRate?.toFixed(2) ?? ""],
   ];
 
   // Sheet 2: Port profiles
@@ -934,11 +700,48 @@ export function buildExecutiveXlsx(input: ExecutiveReportInput): void {
     ]),
   ];
 
-  // Sheet 4: All individual image rows
+  // Sheet 4: Image quality
+  const imageQualitySheet = [
+    ["المؤشر", "القيمة"],
+    ["إجابات مكتملة", kpis.imagesWithSubmittedAnswers],
+    ["صور متاحة", kpis.imageAvailableCount],
+    ["صور غير متاحة", kpis.imageMissingCount],
+    ["توفر الصور%", kpis.imageAvailabilityRate?.toFixed(2) ?? ""],
+    ["يوجد تحديد", kpis.markingPresentCount],
+    ["لا يوجد تحديد", kpis.markingMissingCount],
+    ["نسبة التحديد%", kpis.markingRate?.toFixed(2) ?? ""],
+    ["جودة عالية", kpis.highQualityCount],
+    ["جودة متوسطة", kpis.mediumQualityCount],
+    ["جودة منخفضة", kpis.lowQualityCount],
+    ["الجودة المقبولة%", kpis.acceptableQualityRate?.toFixed(2) ?? ""],
+    [],
+    ["أسباب عدم وجود الصورة", "العدد", "النسبة%"],
+    ...kpis.missingImageReasons.map((item) => [item.reason, item.count, item.percentage.toFixed(2)]),
+    [],
+    ["أسباب انخفاض الجودة", "العدد", "النسبة%"],
+    ...kpis.lowQualityReasons.map((item) => [item.reason, item.count, item.percentage.toFixed(2)]),
+  ];
+
+  // Sheet 5: Result quality
+  const resultQualitySheet = [
+    ["المؤشر", "القيمة"],
+    ["دقة نتيجة الصورة%", kpis.overallAccuracy?.toFixed(2) ?? ""],
+    ["قوة اكتشاف الاشتباه%", kpis.suspiciousDetectionRate?.toFixed(2) ?? ""],
+    ["اشتباه فائت%", kpis.missedSuspicionRate?.toFixed(2) ?? ""],
+    ["دقة الاشتباه%", kpis.suspicionPrecision?.toFixed(2) ?? ""],
+    ["اشتباه مكتشف", kpis.correctSuspicious],
+    ["سليمة مؤكدة", kpis.correctClean],
+    ["اشتباه فائت", kpis.missedSuspicious],
+    ["اشتباه زائد", kpis.excessSuspicious],
+  ];
+
+  // Sheet 6: All individual image rows
   const rowSheet = [
     [
       "رقم الأشعة", "المنفذ", "المرحلة", "م.أول", "م.ثاني", "نتيجة الصورة",
       "في العينة", "الموظف", "حالة التوزيع", "نتيجة الخبير", "حالة الإجابة",
+      "هل يوجد صورة", "سبب عدم وجود الصورة", "هل يوجد تحديد", "مستوى جودة الصورة",
+      "سبب انخفاض الجودة", "تقييم الاشتباه", "الأصناف المشبوهة", "آلية التهريب المحتملة",
       "تاريخ التعيين", "تاريخ التسليم",
       "دقيق", "م.أول دقيق", "م.ثاني دقيق", "تصنيف التحقق",
     ],
@@ -954,6 +757,14 @@ export function buildExecutiveXlsx(input: ExecutiveReportInput): void {
       r.distributionStatus ?? "",
       r.expertResult ?? "",
       r.answerStatus ?? "",
+      r.imageAvailable === null ? "" : r.imageAvailable ? "نعم" : "لا",
+      r.noImageReason ?? "",
+      r.hasMarking === null ? "" : r.hasMarking ? "نعم" : "لا",
+      r.imageQuality ?? "",
+      r.lowQualityReason ?? "",
+      r.suspicionLevel ?? "",
+      r.suspectedTypes ?? "",
+      r.smuggleMethod ?? "",
       r.assignedAt ?? "",
       r.submittedAt ?? "",
       r.imageResultAccurate === null ? "" : r.imageResultAccurate ? "نعم" : "لا",
@@ -964,10 +775,13 @@ export function buildExecutiveXlsx(input: ExecutiveReportInput): void {
   ];
 
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(kpiSheet), "مؤشرات الأداء");
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(portSheet), "تحليل المنافذ");
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(stageSheet), "المراحل");
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rowSheet), "كل الصفوف");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(kpiSheet), "الملخص التنفيذي");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(portSheet), "المنافذ والعينة");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(stageSheet), "مستويات الدراسة");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(imageQualitySheet), "جودة الصور");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(resultQualitySheet), "نتائج الفحص");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rowSheet), "بيانات الصور");
 
   XLSX.writeFile(wb, `التقرير_التنفيذي_${input.monthFolderName}.xlsx`);
 }
+

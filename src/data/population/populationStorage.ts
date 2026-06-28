@@ -250,6 +250,8 @@ export async function saveMonthRun(
       monthFolderName,
       month,
       year,
+      processedAt: now,
+      processedBy: username,
       runnedAt: now,
       runnedBy: username,
       riskFileName,

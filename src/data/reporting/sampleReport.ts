@@ -136,7 +136,14 @@ export function buildSampleReport(input: SampleReportInput): string {
     .diff-item b{font-size:18px;color:#06244a;direction:ltr;display:block;}
     .diff-arrow{font-size:22px;color:#c3d3e3;}
     .footer{color:#8390a2;font-size:11px;margin-top:30px;text-align:center;}
-    @media print{body{background:#fff;padding:12px;}.no-print{display:none;}}
+    @page {
+      size: portrait;
+      margin: 0;
+    }
+    @media print {
+      body { background: #fff; padding: 15mm 20mm; }
+      .no-print { display: none !important; }
+    }
   `;
 
   return `<!DOCTYPE html>

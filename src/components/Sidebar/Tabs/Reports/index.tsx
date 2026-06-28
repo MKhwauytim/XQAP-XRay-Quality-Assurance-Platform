@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
-import { useEffect, useState, type ReactNode } from "react";
-import { AlertTriangle, BarChart2, BarChart3, Building2, Check, ClipboardList, Database, Download, FileStack, Filter, FolderKanban, Globe, History, Printer, Settings2, User, Users, X } from "lucide-react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { AlertTriangle, BarChart2, BarChart3, Building2, Check, ClipboardList, Database, Download, FileStack, FileText, Filter, FolderKanban, Globe, History, Printer, Settings2, User, Users, X } from "lucide-react";
 
 import type { SidebarTabModule } from "../tabTypes";
 import { loadOrDeriveDistributionCurrent } from "../../../../data/distribution/distributionStorage";
@@ -13,6 +13,10 @@ import { openExecutiveReport, buildExecutiveXlsx } from "../../../../data/report
 import { DEFAULT_EXEC_CONFIG } from "../../../../data/reporting/executiveReportTypes";
 import { loadSampleMaster } from "../../../../data/sampling/sampleStorage";
 import { loadAllEmployeeFiles } from "../../../../data/answers/answerStorage";
+import { loadPopulationConfig } from "../../../../data/population/populationConfig";
+import { getStageKey } from "../../../../data/population/stageHelpers";
+import { loadTemplate } from "../../../../data/templates/templateStorage";
+import { loadInspectionTemplateSelection } from "../../../../data/templates/templateSelectionStorage";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
 import "./Reports.css";
 
@@ -41,11 +45,18 @@ export const tabConfig: SidebarTabModule["tabConfig"] = {
   order: 25,
   allowedRoles: ["guest", "supervisor", "manager", "admin"],
   icon: <BarChart3 size={20} strokeWidth={1.8} aria-hidden />,
+  subTabs: [
+    { id: "reports", label: "التقارير" },
+    { id: "kpi", label: "مؤشرات الأداء" },
+  ],
 };
 
-type ReportType = "sample" | "sample-xlsx" | "distribution" | "distribution-xlsx" | "executive" | "executive-xlsx";
+type ReportType = "sample" | "sample-xlsx" | "sample-print" | "distribution" | "distribution-xlsx" | "distribution-print" | "executive" | "executive-xlsx" | "executive-print";
 type ReportBaseType = "sample" | "distribution" | "executive";
-type ReportFormat = "html" | "xlsx";
+type ReportFormat = "html" | "xlsx" | "print";
+type ReportsSection = "reports" | "kpi";
+
+const KNOWN_REPORT_SECTIONS = new Set<ReportsSection>(["reports", "kpi"]);
 
 type MonthMeta = {
   folderName: string;
@@ -54,12 +65,47 @@ type MonthMeta = {
   studiedCount: number | null;
 };
 
+type ReportKpi = {
+  totalAssigned: number;
+  totalCompleted: number;
+  totalTarget: number;
+  completionPct: number;
+  remaining: number;
+  status: "complete" | "over" | "short";
+  stageRows: Array<{
+    stageKey: "first" | "second" | "third" | "fourth";
+    label: string;
+    assigned: number;
+    completed: number;
+    target: number | null;
+    population: number;
+    remaining: number;
+    completionPct: number | null;
+  }>;
+};
+
+const STAGE_SAMPLE_TARGETS: Record<"first" | "second" | "third" | "fourth", number | null> = {
+  first: null,
+  second: 2500,
+  third: 1875,
+  fourth: 1875,
+};
+
+const STAGE_LABELS_AR: Record<"first" | "second" | "third" | "fourth", string> = {
+  first: "المستوى الأول",
+  second: "المستوى الثاني",
+  third: "المستوى الثالث",
+  fourth: "المستوى الرابع",
+};
+
 export default function ReportsTab() {
   const { directoryHandle } = useWorkspace();
 
   const [months, setMonths] = useState<Array<{ folderName: string }>>([]);
   const [selectedMonth, setSelectedMonth] = useState("");
   const [monthMeta, setMonthMeta] = useState<MonthMeta | null>(null);
+  const [monthKpi, setMonthKpi] = useState<ReportKpi | null>(null);
+  const [section, setSection] = useState<ReportsSection>("reports");
   const [generating, setGenerating] = useState<ReportType | null>(null);
   const [formats, setFormats] = useState<Record<ReportBaseType, ReportFormat>>({
     executive: "html",
@@ -76,31 +122,93 @@ export default function ReportsTab() {
     });
   }, [directoryHandle]);
 
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent("pop-subtab-changed", { detail: section }));
+  }, [section]);
+
+  useEffect(() => {
+    function handler(e: CustomEvent<{ subTabId: string }>) {
+      const { subTabId } = e.detail;
+      if (KNOWN_REPORT_SECTIONS.has(subTabId as ReportsSection)) {
+        setSection(subTabId as ReportsSection);
+      }
+    }
+    window.addEventListener("pop-set-subtab", handler as EventListener);
+    return () => window.removeEventListener("pop-set-subtab", handler as EventListener);
+  }, []);
+
   // Load lightweight meta for the month bar chips
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- sync null-clear when workspace or month is deselected; synchronizes with external workspace state
-    if (!directoryHandle || !selectedMonth) { setMonthMeta(null); return; }
+    if (!directoryHandle || !selectedMonth) { setMonthMeta(null); setMonthKpi(null); return; }
     setMonthMeta(null);
+    setMonthKpi(null);
     void (async () => {
       try {
-        const [pop, sample] = await Promise.all([
+        const [pop, sample, config] = await Promise.all([
           loadMonthPopulationFinal(directoryHandle, selectedMonth),
           loadSampleMaster(directoryHandle, selectedMonth),
+          loadPopulationConfig(directoryHandle),
         ]);
         const popRows = pop ? (pop.rows as unknown as PreparedPopulationRow[]) : [];
-        const answered = sample
-          ? await loadAllEmployeeFiles(directoryHandle, selectedMonth).then((files) =>
-              files.reduce((n, f) => n + f.items.filter((a) => a.status === "submitted").length, 0)
-            )
-          : 0;
+        const employeeFiles = sample ? await loadAllEmployeeFiles(directoryHandle, selectedMonth) : [];
+        const submittedIds = new Set(
+          employeeFiles.flatMap((file) =>
+            file.items
+              .filter((item) => item.status === "submitted")
+              .map((item) => item.xrayImageId)
+          )
+        );
+        const answered = submittedIds.size;
         setMonthMeta({
           folderName: selectedMonth,
           populationCount: popRows.length,
           sampleCount: sample ? sample.rows.length : null,
           studiedCount: answered > 0 ? answered : null,
         });
+        if (sample) {
+          const distribution = await loadOrDeriveDistributionCurrent(directoryHandle, selectedMonth, sample.rows);
+          const entries = distribution?.entries ?? [];
+          const totalAssigned = sample.rows.length;
+          const totalCompleted = answered;
+          const stageRows = (["first", "second", "third", "fourth"] as const).map((stageKey) => {
+            const assigned = sample.rows.filter(
+              (row) => getStageKey(String(row.stage ?? ""), config.stageMappings) === stageKey
+            ).length;
+            const completed = entries.filter(
+              (entry) =>
+                submittedIds.has(entry.xrayImageId) &&
+                getStageKey(String(entry.row.stage ?? ""), config.stageMappings) === stageKey
+            ).length;
+            const population = popRows.filter(
+              (row) => getStageKey(String(row.stage ?? ""), config.stageMappings) === stageKey
+            ).length;
+
+            return {
+              stageKey,
+              label: STAGE_LABELS_AR[stageKey],
+              assigned,
+              completed,
+              target: stageKey === "first" ? population : STAGE_SAMPLE_TARGETS[stageKey],
+              population,
+              remaining: Math.max(0, assigned - completed),
+              completionPct: assigned > 0 ? (completed / assigned) * 100 : null,
+            };
+          });
+
+          setMonthKpi({
+            totalAssigned,
+            totalCompleted,
+            totalTarget: DEFAULT_EXEC_CONFIG.monthlyTarget,
+            completionPct: totalAssigned > 0 ? (totalCompleted / totalAssigned) * 100 : 0,
+            remaining: Math.max(0, totalAssigned - totalCompleted),
+            status: totalAssigned > 0 && totalCompleted === totalAssigned ? "complete" : totalCompleted > totalAssigned ? "over" : "short",
+            stageRows,
+          });
+        }
       } catch {
         setMonthMeta({ folderName: selectedMonth, populationCount: null, sampleCount: null, studiedCount: null });
+        setMonthKpi(null);
       }
     })();
   }, [directoryHandle, selectedMonth]);
@@ -114,7 +222,7 @@ export default function ReportsTab() {
     if (!directoryHandle || !selectedMonth || generating) return;
     setGenerating(type);
     try {
-      if (type === "sample" || type === "sample-xlsx") {
+      if (type === "sample" || type === "sample-xlsx" || type === "sample-print") {
         const { populationRows, sampleData, manifest } = await loadMonthForEditing(directoryHandle, selectedMonth);
         if (!sampleData) { showToast("error", "لم يتم العثور على بيانات عينة لهذا الشهر."); return; }
         const sampleInput = {
@@ -128,9 +236,9 @@ export default function ReportsTab() {
           showToast("ok", "تم تنزيل ملف Excel.");
         } else {
           openSampleReport(sampleInput);
-          showToast("ok", "تم فتح تقرير العينة.");
+          showToast("ok", type === "sample-print" ? "تم فتح تقرير العينة للتصدير PDF." : "تم فتح تقرير العينة.");
         }
-      } else if (type === "distribution" || type === "distribution-xlsx") {
+      } else if (type === "distribution" || type === "distribution-xlsx" || type === "distribution-print") {
         const sample = await loadSampleMaster(directoryHandle, selectedMonth);
         const data = sample ? await loadOrDeriveDistributionCurrent(directoryHandle, selectedMonth, sample.rows) : null;
         if (!data) { showToast("error", "لم يتم العثور على بيانات توزيع لهذا الشهر."); return; }
@@ -139,15 +247,19 @@ export default function ReportsTab() {
           showToast("ok", "تم تنزيل ملف Excel.");
         } else {
           openOrDownload(buildDistributionReport(data, selectedMonth), `تقرير_التوزيع_${selectedMonth}.html`);
-          showToast("ok", "تم فتح تقرير التوزيع.");
+          showToast("ok", type === "distribution-print" ? "تم فتح تقرير التوزيع للتصدير PDF." : "تم فتح تقرير التوزيع.");
         }
-      } else if (type === "executive" || type === "executive-xlsx") {
-        const [populationFinal, sample, employeeFiles] = await Promise.all([
+      } else if (type === "executive" || type === "executive-xlsx" || type === "executive-print") {
+        const [populationFinal, sample, employeeFiles, templateSelection] = await Promise.all([
           loadMonthPopulationFinal(directoryHandle, selectedMonth),
           loadSampleMaster(directoryHandle, selectedMonth),
           loadAllEmployeeFiles(directoryHandle, selectedMonth),
+          loadInspectionTemplateSelection(directoryHandle),
         ]);
         if (!populationFinal) { showToast("error", "لم يتم العثور على بيانات المجتمع. يجب معالجة المجتمع أولاً."); return; }
+        const template = templateSelection?.templateId
+          ? await loadTemplate(directoryHandle, templateSelection.templateId)
+          : null;
         const distribution = sample
           ? await loadOrDeriveDistributionCurrent(directoryHandle, selectedMonth, sample.rows)
           : null;
@@ -157,6 +269,7 @@ export default function ReportsTab() {
           sample: sample ?? null,
           distribution: distribution ?? null,
           employeeFiles,
+          template,
           config: DEFAULT_EXEC_CONFIG,
         };
         if (type === "executive-xlsx") {
@@ -164,7 +277,7 @@ export default function ReportsTab() {
           showToast("ok", "تم تنزيل ملف Excel.");
         } else {
           openExecutiveReport(execInput);
-          showToast("ok", "تم فتح التقرير التنفيذي.");
+          showToast("ok", type === "executive-print" ? "تم فتح التقرير التنفيذي للتصدير PDF." : "تم فتح التقرير التنفيذي.");
         }
       }
     } catch {
@@ -175,35 +288,20 @@ export default function ReportsTab() {
   }
 
   function selectedReportType(baseType: ReportBaseType): ReportType {
-    return formats[baseType] === "xlsx" ? `${baseType}-xlsx` as ReportType : baseType;
+    const format = formats[baseType];
+    if (format === "print") return `${baseType}-print` as ReportType;
+    if (format === "xlsx") return `${baseType}-xlsx` as ReportType;
+    return baseType;
   }
 
   function renderExportControls(baseType: ReportBaseType, toneClass: string): ReactNode {
     const selectedType = selectedReportType(baseType);
     const isBusy = generating === selectedType;
+    const availableFormats: ReportFormat[] = ["html", "xlsx", "print"];
     return (
       <div className="rh-export-controls" role="group" aria-label="صيغة التصدير">
-        <div className="rh-format-toggle">
-          <button
-            type="button"
-            className={formats[baseType] === "html" ? "active" : ""}
-            title="عرض تقديمي"
-            aria-label="عرض تقديمي"
-            onClick={() => setFormats((prev) => ({ ...prev, [baseType]: "html" }))}
-          >
-            <PresentationFormatIcon />
-          </button>
-          <button
-            type="button"
-            className={formats[baseType] === "xlsx" ? "active" : ""}
-            title="Excel"
-            aria-label="Excel"
-            onClick={() => setFormats((prev) => ({ ...prev, [baseType]: "xlsx" }))}
-          >
-            <ExcelFormatIcon />
-          </button>
-        </div>
         <button
+          type="button"
           className={`rh-btn ${toneClass}`}
           disabled={busy || !selectedMonth}
           onClick={() => { void generate(selectedType); }}
@@ -211,6 +309,20 @@ export default function ReportsTab() {
           {isBusy ? <span className="rh-spinner" /> : null}
           {isBusy ? "جاري…" : "التصدير"}
         </button>
+        <div className="rh-format-toggle">
+          {availableFormats.map((format) => (
+            <button
+              key={format}
+              type="button"
+              className={formats[baseType] === format ? "active" : ""}
+              title={format === "html" ? "HTML" : format === "xlsx" ? "Excel" : "PDF من HTML"}
+              aria-label={format === "html" ? "HTML" : format === "xlsx" ? "Excel" : "PDF من HTML"}
+              onClick={() => setFormats((prev) => ({ ...prev, [baseType]: format }))}
+            >
+              {format === "html" ? <PresentationFormatIcon /> : format === "xlsx" ? <ExcelFormatIcon /> : <FileText size={17} strokeWidth={2.2} />}
+            </button>
+          ))}
+        </div>
       </div>
     );
   }
@@ -227,8 +339,8 @@ export default function ReportsTab() {
     );
   }
 
-  const fmtNum = (n: number | null) =>
-    n !== null ? n.toLocaleString("ar-SA") : "—";
+  const fmtNum = (n: number | null | undefined) =>
+    n != null ? n.toLocaleString("ar-SA") : "—";
 
   const busy = generating !== null;
 
@@ -245,9 +357,31 @@ export default function ReportsTab() {
 
       {/* ── Page header ─────────────────────────────── */}
       <div className="rh-header">
-        <div className="rh-eyebrow">Reports</div>
-        <h1 className="rh-title">مركز التقارير</h1>
-        <p className="rh-sub">اختر التقرير المناسب وولّده مباشرةً — تقارير HTML تفاعلية جاهزة للمشاركة والطباعة.</p>
+        <div className="rh-header-main">
+          <div className="rh-eyebrow">Reports</div>
+          <h1 className="rh-title">مركز التقارير</h1>
+          <p className="rh-sub">اختر التقرير المناسب وولّده مباشرةً — تقارير HTML تفاعلية جاهزة للمشاركة والطباعة.</p>
+        </div>
+        <div className="rh-nav" role="tablist" aria-label="أقسام إدارة التقارير">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={section === "reports"}
+            className={`rh-nav-btn${section === "reports" ? " active" : ""}`}
+            onClick={() => setSection("reports")}
+          >
+            التقارير
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={section === "kpi"}
+            className={`rh-nav-btn${section === "kpi" ? " active" : ""}`}
+            onClick={() => setSection("kpi")}
+          >
+            مؤشرات
+          </button>
+        </div>
       </div>
 
       {/* ── Month bar ───────────────────────────────── */}
@@ -285,11 +419,113 @@ export default function ReportsTab() {
         </div>
       </div>
 
-      {/* ── Section label ───────────────────────────── */}
-      <div className="rh-section-label">التقارير الرئيسية</div>
+      {section === "kpi" && monthKpi && (
+        <section className="rh-kpi-panel" aria-label="مؤشرات الشهر">
+          <div className={`rh-kpi-hero ${monthKpi.status}`}>
+            <div className="rh-kpi-hero-main">
+              <span className="rh-kpi-label">مؤشر الشهر الرئيسي</span>
+              <h2>العينة المدروسة لشهر {selectedMonth}</h2>
+              <p>
+                {monthKpi.status === "complete"
+                  ? "تمت دراسة كامل العينة المحالة لهذا الشهر."
+                  : `متبقي ${fmtNum(monthKpi.remaining)} من أصل ${fmtNum(monthKpi.totalAssigned)} صورة محالة.`}
+              </p>
+            </div>
+            <div className="rh-kpi-meter-wrap">
+              <div
+                className="rh-kpi-meter"
+                style={{ "--rh-kpi-progress": `${Math.min(100, monthKpi.completionPct)}%` } as CSSProperties}
+              >
+                <strong>{Math.min(100, monthKpi.completionPct).toFixed(1)}%</strong>
+                <span>مدروس</span>
+              </div>
+            </div>
+          </div>
 
-      {/* ── Cards grid ──────────────────────────────── */}
-      <div className="rh-grid">
+          <div className="rh-kpi-grid">
+            <div className="rh-stat-card">
+              <span className="rh-stat-label">الهدف الشهري</span>
+              <strong className="rh-stat-value">{fmtNum(monthKpi.totalTarget)}</strong>
+            </div>
+            <div className="rh-stat-card">
+              <span>المحالة للفحص</span>
+              <strong className="rh-stat-value">{fmtNum(monthKpi.totalAssigned)}</strong>
+            </div>
+            <div className="rh-stat-card">
+              <span>المدروسة</span>
+              <strong className="rh-stat-value">{fmtNum(monthKpi.totalCompleted)}</strong>
+            </div>
+            <div className="rh-stat-card">
+              <span>المتبقية</span>
+              <strong className="rh-stat-value">{fmtNum(monthKpi.remaining)}</strong>
+            </div>
+            <div className="rh-stat-card">
+              <span>الحالة</span>
+              <strong className="rh-stat-value">
+                {monthKpi.status === "complete"
+                  ? "مكتمل"
+                  : monthKpi.status === "over"
+                    ? "أعلى من الهدف"
+                    : "قيد الاستكمال"}
+              </strong>
+            </div>
+          </div>
+
+          <div className="rh-stage-grid">
+            {monthKpi.stageRows.map((stage) => (
+              <article className="rh-stage-card" key={stage.stageKey}>
+                <div className="rh-stage-head">
+                  <span className="rh-stage-label">{stage.label}</span>
+                  <span className="rh-stage-target">
+                    الهدف {stage.target == null ? "كامل المجتمع" : fmtNum(stage.target)}
+                  </span>
+                </div>
+                <div className="rh-stage-donut-row">
+                  <div
+                    className="rh-stage-donut"
+                    style={{ "--rh-stage-progress": `${Math.min(100, stage.completionPct ?? 0)}%` } as CSSProperties}
+                  >
+                    <strong>{Math.min(100, stage.completionPct ?? 0).toFixed(1)}%</strong>
+                  </div>
+                  <dl className="rh-stage-metrics">
+                    <div>
+                      <dt>المحالة للفحص</dt>
+                      <dd>{fmtNum(stage.assigned)}</dd>
+                    </div>
+                    <div>
+                      <dt>المدروسة</dt>
+                      <dd>{fmtNum(stage.completed)}</dd>
+                    </div>
+                    <div>
+                      <dt>المتبقي</dt>
+                      <dd>{fmtNum(stage.remaining)}</dd>
+                    </div>
+                    <div>
+                      <dt>مجتمع الشهر</dt>
+                      <dd>{fmtNum(stage.population)}</dd>
+                    </div>
+                  </dl>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {section === "kpi" && !monthKpi && (
+        <div className="rh-empty rh-kpi-empty">
+          <strong>لا توجد مؤشرات لهذا الشهر</strong>
+          <span>اختر شهراً يحتوي على عينة وإجابات مدروسة لعرض مؤشرات الأداء.</span>
+        </div>
+      )}
+
+      {section === "reports" && (
+        <>
+          {/* ── Section label ───────────────────────────── */}
+          <div className="rh-section-label">التقارير الرئيسية</div>
+
+          {/* ── Cards grid ──────────────────────────────── */}
+          <div className="rh-grid">
 
         {/* Executive — featured */}
         <div className="rh-card rh-card-featured">
@@ -410,35 +646,37 @@ export default function ReportsTab() {
             <button className="rh-btn rh-btn-ghost" disabled>من داخل الجداول</button>
           </div>
         </div>
-      </div>
+          </div>
 
-      {/* ── Quick actions ───────────────────────────── */}
-      <div className="rh-quick">
-        <span className="rh-quick-label">إجراءات سريعة</span>
-        <div className="rh-quick-actions">
-          <button
-            className="rh-quick-btn"
-            disabled={busy || !selectedMonth}
-            onClick={() => { void generate("executive"); }}
-          >
-            <BarChart2 size={16} style={{ verticalAlign: "middle", marginInlineEnd: 5 }} /> التقرير التنفيذي
-          </button>
-          <button
-            className="rh-quick-btn"
-            disabled={busy || !selectedMonth}
-            onClick={() => { void generate("sample"); }}
-          >
-            <FileStack size={16} style={{ verticalAlign: "middle" }} /> تقرير العينة
-          </button>
-          <button
-            className="rh-quick-btn"
-            disabled={busy || !selectedMonth}
-            onClick={() => { void generate("distribution"); }}
-          >
-            <Users size={16} style={{ verticalAlign: "middle", marginInlineEnd: 5 }} /> تقرير التوزيع
-          </button>
-        </div>
-      </div>
+          {/* ── Quick actions ───────────────────────────── */}
+          <div className="rh-quick">
+            <span className="rh-quick-label">إجراءات سريعة</span>
+            <div className="rh-quick-actions">
+              <button
+                className="rh-quick-btn"
+                disabled={busy || !selectedMonth}
+                onClick={() => { void generate("executive"); }}
+              >
+                <BarChart2 size={16} style={{ verticalAlign: "middle", marginInlineEnd: 5 }} /> التقرير التنفيذي
+              </button>
+              <button
+                className="rh-quick-btn"
+                disabled={busy || !selectedMonth}
+                onClick={() => { void generate("sample"); }}
+              >
+                <FileStack size={16} style={{ verticalAlign: "middle" }} /> تقرير العينة
+              </button>
+              <button
+                className="rh-quick-btn"
+                disabled={busy || !selectedMonth}
+                onClick={() => { void generate("distribution"); }}
+              >
+                <Users size={16} style={{ verticalAlign: "middle", marginInlineEnd: 5 }} /> تقرير التوزيع
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </section>
   );
 }

@@ -48,7 +48,7 @@ test("saveMonthRun writes month.manifest.json with correct metadata", async () =
 
   expect(manifest.value.month).toBe(5);
   expect(manifest.value.year).toBe(2026);
-  expect(manifest.value.runnedBy).toBe("test-admin");
+  expect(manifest.value.processedBy).toBe("test-admin");
   expect(manifest.value.status).toBe("processed-saved");
   expect(manifest.value.totalRawRows).toBe(1);
   expect(manifest.value.totalProcessedRows).toBe(1);
@@ -105,8 +105,8 @@ it("loadAllSampleRows falls back to legacy sample path when getSampleMainDir thr
     monthFolderName: "5-May-2026",
     month: 5,
     year: 2026,
-    runnedAt: new Date().toISOString(),
-    runnedBy: "test",
+    processedAt: new Date().toISOString(),
+    processedBy: "test",
     riskFileName: null,
     biFileName: null,
     certScanUsed: false,

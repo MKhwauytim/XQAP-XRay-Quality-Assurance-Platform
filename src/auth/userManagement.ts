@@ -94,14 +94,22 @@ export type ManagedTab = {
 
 export const MANAGED_TABS: readonly ManagedTab[] = [
   { id: "population",              label: "إدارة بيانات الأشعة" },
+  { id: "population/process",      label: "معالجة البيانات",        parentId: "population" },
+  { id: "population/browse",       label: "استعراض البيانات",       parentId: "population" },
   { id: "employee-workspace",      label: "إدارة مساحة العمل" },
   { id: "ew/xray-referrals",       label: "صور الأشعة المحالة",      parentId: "employee-workspace" },
   { id: "ew/xray-results",         label: "نتائج فحص الأشعة",       parentId: "employee-workspace" },
   { id: "ew/referral-approval",    label: "اعتماد الطلبات",          parentId: "employee-workspace" },
   { id: "ew/inspection-form",      label: "نموذج الفحص (مساحة العمل)", parentId: "employee-workspace" },
   { id: "reports",                 label: "إدارة التقارير" },
+  { id: "reports/reports",         label: "التقارير",              parentId: "reports" },
+  { id: "reports/kpi",             label: "مؤشرات الأداء",          parentId: "reports" },
   { id: "archive",                 label: "إدارة الأرشيف" },
   { id: "user-management",         label: "إدارة المستخدمين" },
+  { id: "user-management/users",               label: "المستخدمون",          parentId: "user-management" },
+  { id: "user-management/page-permissions",    label: "صلاحيات الصفحات",     parentId: "user-management" },
+  { id: "user-management/feature-permissions", label: "صلاحيات الميزات",     parentId: "user-management" },
+  { id: "user-management/activity",            label: "متابعة الأنشطة",      parentId: "user-management" },
   { id: "settings",                label: "إدارة الإعدادات" },
 ];
 
@@ -317,6 +325,10 @@ export function createDefaultPermissions(): RolePermission[] {
     { role: "admin",      tabId: "reports",                 access: "edit" },
     { role: "admin",      tabId: "archive",                 access: "edit" },
     { role: "admin",      tabId: "user-management",         access: "edit" },
+    { role: "admin",      tabId: "user-management/users",               access: "edit" },
+    { role: "admin",      tabId: "user-management/page-permissions",    access: "edit" },
+    { role: "admin",      tabId: "user-management/feature-permissions", access: "edit" },
+    { role: "admin",      tabId: "user-management/activity",            access: "edit" },
     { role: "admin",      tabId: "settings",                access: "edit" },
     // Manager — full access to EW sub-tabs
     { role: "manager",    tabId: "ew/xray-referrals",       access: "edit" },

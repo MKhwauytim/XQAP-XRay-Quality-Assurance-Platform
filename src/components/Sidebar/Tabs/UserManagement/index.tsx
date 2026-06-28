@@ -4,6 +4,7 @@ import { ChevronRight, Trash2, UserCog } from "lucide-react";
 import {
   Fragment,
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -12,6 +13,11 @@ import {
 
 import type { AuthRole } from "../../../../auth/authTypes";
 import { readSession } from "../../../../auth/authSession";
+import {
+  readAuthActivityLog,
+  type AuthActivityLogEntry,
+  type AuthActivityCloseReason,
+} from "../../../../auth/authActivityLog";
 import { createPasswordHash } from "../../../../auth/passwordCrypto";
 import {
   MANAGED_FEATURE_GROUPS,
@@ -50,12 +56,25 @@ export const tabConfig: SidebarTabModule["tabConfig"] = {
   order: 40,
   allowedRoles: ["admin"],
   icon: <UserCog size={20} strokeWidth={1.8} aria-hidden />,
+  subTabs: [
+    { id: "users", label: "المستخدمون" },
+    { id: "page-permissions", label: "صلاحيات الصفحات" },
+    { id: "feature-permissions", label: "صلاحيات الميزات" },
+    { id: "activity", label: "متابعة الأنشطة" },
+  ],
 };
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type PageSection = "users" | "page-permissions" | "feature-permissions";
+type PageSection = "users" | "page-permissions" | "feature-permissions" | "activity";
 type FeatureSubGroup = "workspace" | "population" | "admin";
+
+const KNOWN_USER_MANAGEMENT_SECTIONS = new Set<PageSection>([
+  "users",
+  "page-permissions",
+  "feature-permissions",
+  "activity",
+]);
 
 type UserFormState = {
   username: string;
@@ -105,6 +124,8 @@ export default function UserManagementTab() {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [collapsedParents, setCollapsedParents] = useState<Set<string>>(new Set());
+  const [activityEntries, setActivityEntries] = useState<AuthActivityLogEntry[]>([]);
+  const [isActivityLoading, setIsActivityLoading] = useState(false);
 
   const session = readSession();
   const { directoryHandle } = useWorkspace();
@@ -131,6 +152,36 @@ export default function UserManagementTab() {
       session &&
         hasFeature(state.featurePermissions, session.role, "reset-passwords")
     );
+
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent("pop-subtab-changed", { detail: section }));
+  }, [section]);
+
+  useEffect(() => {
+    function handler(e: CustomEvent<{ subTabId: string }>) {
+      const { subTabId } = e.detail;
+      if (KNOWN_USER_MANAGEMENT_SECTIONS.has(subTabId as PageSection)) {
+        setSection(subTabId as PageSection);
+      }
+    }
+    window.addEventListener("pop-set-subtab", handler as EventListener);
+    return () => window.removeEventListener("pop-set-subtab", handler as EventListener);
+  }, []);
+
+  useEffect(() => {
+    if (section !== "activity") return;
+    let cancelled = false;
+    void readAuthActivityLog()
+      .then((entries) => {
+        if (!cancelled) setActivityEntries(entries);
+      })
+      .finally(() => {
+        if (!cancelled) setIsActivityLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [section, directoryHandle]);
 
   // ── Derived lists ───────────────────────────────────────────────────────────
 
@@ -452,6 +503,49 @@ export default function UserManagementTab() {
   function RoleBadge({ role }: { role: AuthRole }) {
     const label = MANAGED_ROLES.find((r) => r.id === role)?.label ?? role;
     return <span className={`um-role-badge ${ROLE_BADGE_COLORS[role] ?? ""}`}>{label}</span>;
+  }
+
+  function formatDuration(ms: number): string {
+    const totalMinutes = Math.max(0, Math.round(ms / 60_000));
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return `${hours.toLocaleString("ar-SA-u-nu-latn")}س ${minutes.toLocaleString("ar-SA-u-nu-latn")}د`;
+  }
+
+  function formatDateTime(value: string | null): string {
+    if (!value) return "لم يسجل خروج";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleString("ar-SA-u-nu-latn", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
+
+  function getDateKey(value: string): string {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    return date.toISOString().slice(0, 10);
+  }
+
+  function getWeekStartKey(value: string): string {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    const day = date.getDay();
+    date.setDate(date.getDate() - day);
+    date.setHours(0, 0, 0, 0);
+    return date.toISOString().slice(0, 10);
+  }
+
+  function getCloseReasonLabel(reason: AuthActivityCloseReason | null): string {
+    if (reason === "logout") return "تسجيل خروج";
+    if (reason === "expired") return "انتهت الجلسة";
+    if (reason === "session-replaced") return "دخول جديد";
+    if (reason === "page-closed") return "إغلاق التطبيق/المتصفح";
+    return "نشط";
   }
 
   // ── Section: Users ───────────────────────────────────────────────────────────
@@ -951,6 +1045,127 @@ export default function UserManagementTab() {
     );
   }
 
+  function renderActivity() {
+    const todayKey = getDateKey(new Date().toISOString());
+    const weekKey = getWeekStartKey(new Date().toISOString());
+    const userMap = new Map(state.users.map((user) => [user.username, user]));
+
+    const summaries = state.users
+      .filter((user) => user.role === "employee" || user.role === "supervisor")
+      .map((user) => {
+        const entries = activityEntries.filter((entry) => entry.username === user.username);
+        const todayMs = entries
+          .filter((entry) => getDateKey(entry.signedInAt) === todayKey)
+          .reduce((sum, entry) => sum + entry.durationMs, 0);
+        const weekMs = entries
+          .filter((entry) => getWeekStartKey(entry.signedInAt) === weekKey)
+          .reduce((sum, entry) => sum + entry.durationMs, 0);
+        const latest = entries
+          .slice()
+          .sort((a, b) => Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt))[0] ?? null;
+        return { user, todayMs, weekMs, signIns: entries.length, latest };
+      })
+      .sort((a, b) => b.weekMs - a.weekMs || a.user.displayName.localeCompare(b.user.displayName, "ar"));
+
+    const latestEntries = activityEntries
+      .slice()
+      .sort((a, b) => Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt))
+      .slice(0, 100);
+
+    return (
+      <div className="um-section">
+        <div className="um-matrix-desc">
+          تعرض هذه الصفحة سجلات الدخول وساعات العمل المحفوظة داخل مساحة العمل في
+          <strong> 5-System/2-Audit/auth-activity.log.json</strong>.
+        </div>
+
+        <div className="um-activity-toolbar">
+          <button
+            type="button"
+            className="um-add-btn"
+            onClick={() => {
+              setIsActivityLoading(true);
+              void readAuthActivityLog()
+                .then(setActivityEntries)
+                .finally(() => setIsActivityLoading(false));
+            }}
+          >
+            تحديث السجل
+          </button>
+          <span>{isActivityLoading ? "جاري تحميل الأنشطة..." : `${activityEntries.length.toLocaleString("ar-SA-u-nu-latn")} سجل`}</span>
+        </div>
+
+        <div className="um-activity-summary-grid">
+          {summaries.map(({ user, todayMs, weekMs, signIns, latest }) => (
+            <article key={user.id} className="um-activity-card">
+              <div>
+                <strong>{user.displayName}</strong>
+                <span>{user.username}</span>
+              </div>
+              <dl>
+                <div>
+                  <dt>اليوم</dt>
+                  <dd>{formatDuration(todayMs)}</dd>
+                </div>
+                <div>
+                  <dt>هذا الأسبوع</dt>
+                  <dd>{formatDuration(weekMs)}</dd>
+                </div>
+                <div>
+                  <dt>مرات الدخول</dt>
+                  <dd>{signIns.toLocaleString("ar-SA-u-nu-latn")}</dd>
+                </div>
+                <div>
+                  <dt>آخر حالة</dt>
+                  <dd>{getCloseReasonLabel(latest?.closeReason ?? null)}</dd>
+                </div>
+              </dl>
+            </article>
+          ))}
+        </div>
+
+        {latestEntries.length === 0 ? (
+          <div className="um-empty">لا توجد سجلات نشاط محفوظة بعد.</div>
+        ) : (
+          <div className="um-activity-table-wrap">
+            <table className="um-activity-table">
+              <thead>
+                <tr>
+                  <th>المستخدم</th>
+                  <th>الدور</th>
+                  <th>دخول</th>
+                  <th>آخر ظهور</th>
+                  <th>خروج / إغلاق</th>
+                  <th>المدة</th>
+                  <th>السبب</th>
+                </tr>
+              </thead>
+              <tbody>
+                {latestEntries.map((entry) => {
+                  const user = userMap.get(entry.username);
+                  return (
+                    <tr key={entry.id}>
+                      <td>
+                        <strong>{user?.displayName ?? entry.username}</strong>
+                        <span>{entry.username}</span>
+                      </td>
+                      <td>{user ? <RoleBadge role={user.role} /> : entry.role}</td>
+                      <td>{formatDateTime(entry.signedInAt)}</td>
+                      <td>{formatDateTime(entry.lastSeenAt)}</td>
+                      <td>{formatDateTime(entry.signedOutAt)}</td>
+                      <td>{formatDuration(entry.durationMs)}</td>
+                      <td>{getCloseReasonLabel(entry.closeReason)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   // ── Render ───────────────────────────────────────────────────────────────────
 
   return (
@@ -995,29 +1210,11 @@ export default function UserManagementTab() {
         </div>
       )}
 
-      {/* Section navigation */}
-      <nav className="um-nav" aria-label="أقسام إدارة المستخدمين">
-        {(
-          [
-            { id: "users",               label: "المستخدمون" },
-            { id: "page-permissions",    label: "صلاحيات الصفحات" },
-            { id: "feature-permissions", label: "صلاحيات الميزات" },
-          ] as { id: PageSection; label: string }[]
-        ).map((s) => (
-          <button
-            key={s.id}
-            className={`um-nav-btn ${section === s.id ? "active" : ""}`}
-            onClick={() => setSection(s.id)}
-          >
-            {s.label}
-          </button>
-        ))}
-      </nav>
-
       {/* Section content */}
       {section === "users" && renderUsers()}
       {section === "page-permissions" && renderPagePermissions()}
       {section === "feature-permissions" && renderFeaturePermissions()}
+      {section === "activity" && renderActivity()}
     </section>
   );
 }

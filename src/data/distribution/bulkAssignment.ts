@@ -6,6 +6,10 @@ import { getStageKey } from "../population/stageHelpers";
 import { hamiltonApportionment } from "../sampling/apportionment";
 import { createEventId, computeDaysRemainingForDeadline } from "./distributionLog";
 
+function isAssignableSampleRole(user: ManagedLoginUser): boolean {
+  return user.role === "employee" || user.role === "supervisor";
+}
+
 /**
  * Smart CertScan-first distribution:
  *
@@ -31,6 +35,8 @@ export function calculateBulkAssignment(params: {
   const { rows, allocations, employees, operatorUsername, stageMappings, month, year } = params;
   const events: DistributionEvent[] = [];
   const errors: string[] = [];
+  const assignableEmployees = employees.filter(isAssignableSampleRole);
+  const assignableUsernames = new Set(assignableEmployees.map((employee) => employee.username));
 
   const stageKeys: Array<"first" | "second" | "third" | "fourth"> = [
     "first", "second", "third", "fourth"
@@ -40,7 +46,9 @@ export function calculateBulkAssignment(params: {
     const stageRows = rows.filter((r) => getStageKey(r.stage, stageMappings) === stageKey);
     if (stageRows.length === 0) continue;
 
-    const stageAllocs = allocations.filter((a) => a.stageKey === stageKey && a.isActive);
+    const stageAllocs = allocations.filter(
+      (a) => a.stageKey === stageKey && a.isActive && assignableUsernames.has(a.username)
+    );
     if (stageAllocs.length === 0) {
       errors.push(`لم يتم تحديد موظفين نشطين في المستوى ${stageKey}.`);
       continue;
@@ -58,7 +66,7 @@ export function calculateBulkAssignment(params: {
     };
 
     const empInfos: EmpInfo[] = stageAllocs.map((alloc) => {
-      const emp = employees.find((e) => e.username === alloc.username);
+      const emp = assignableEmployees.find((e) => e.username === alloc.username);
       const weight =
         alloc.method === "percentage"
           ? Math.round(alloc.value * 100)   // scale up for Hamilton accuracy

@@ -1063,6 +1063,140 @@
   pointer-events: none;
 }
 
+/* ── Activity tracking ─────────────────────────────────────────────────────── */
+
+.um-activity-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.um-activity-toolbar span {
+  color: var(--app-muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.um-activity-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.um-activity-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--app-border);
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.um-activity-card > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.um-activity-card strong {
+  color: var(--app-primary);
+  font-size: 14px;
+}
+
+.um-activity-card span {
+  color: var(--app-muted);
+  font-size: 12px;
+  direction: ltr;
+  text-align: right;
+}
+
+.um-activity-card dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.um-activity-card dl div {
+  padding: 8px;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.um-activity-card dt {
+  margin: 0 0 3px;
+  color: var(--app-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.um-activity-card dd {
+  margin: 0;
+  color: var(--app-text);
+  font-size: 13px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.um-activity-table-wrap {
+  overflow: auto;
+  max-height: min(620px, calc(100vh - 320px));
+  border: 1px solid var(--app-border);
+  border-radius: 14px;
+}
+
+.um-activity-table {
+  width: 100%;
+  min-width: 960px;
+  border-collapse: collapse;
+}
+
+.um-activity-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 10px 12px;
+  background: #eef3f8;
+  color: var(--app-primary);
+  font-size: 12px;
+  font-weight: 800;
+  text-align: right;
+  border-bottom: 2px solid var(--app-border);
+}
+
+.um-activity-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #eef2f7;
+  color: var(--app-text);
+  font-size: 12.5px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.um-activity-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.um-activity-table tbody tr:hover td {
+  background: #f7fafd;
+}
+
+.um-activity-table td:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.um-activity-table td:first-child strong {
+  color: var(--app-primary);
+}
+
+.um-activity-table td:first-child span {
+  color: var(--app-muted);
+  font-size: 11.5px;
+  direction: ltr;
+  text-align: right;
+}
+
 /* ── Responsive ─────────────────────────────────────────────────────────────── */
 
 @media (max-width: 1100px) {

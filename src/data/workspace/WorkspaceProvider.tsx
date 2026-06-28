@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useEffect,
   useMemo,
   useState,
   type ReactNode
@@ -31,6 +32,11 @@ import {
   type ManagedLoginUser
 } from "../../auth/userManagement";
 import type { RolePermission } from "../../auth/userManagement";
+import {
+  clearLastWorkspace,
+  loadLastWorkspace,
+  saveLastWorkspace
+} from "./workspacePersistence";
 
 type WorkspaceProviderProps = {
   children: ReactNode;
@@ -58,9 +64,96 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       : "المتصفح الحالي لا يدعم الوصول المباشر إلى ملفات النظام."
   );
 
-  const reconnectWorkspace = useCallback(async (): Promise<void> => {
-    setMessage("اختر مجلد مساحة العمل يدوياً للمتابعة.");
+  const applyWorkspaceHandle = useCallback(async (
+    handle: DirectoryHandleLike,
+    options?: { persist?: boolean; restored?: boolean }
+  ): Promise<void> => {
+    setDirectoryHandle(handle);
+    setSelectedDirectoryName(handle.name);
+
+    const result = await checkWorkspaceStructure(handle);
+
+    setStatus(result.status);
+    setMissingItems(result.missingItems);
+    setInvalidItems(result.invalidItems);
+    setMessage(
+      options?.restored && result.status === "ready"
+        ? "تمت استعادة آخر مساحة عمل بنجاح."
+        : result.message
+    );
+
+    if (result.status === "ready") {
+      const files = await loadWorkspaceFiles(handle);
+      setLoadedFiles(files);
+      applyDiskUsers(files);
+    } else {
+      setLoadedFiles(emptyLoadedFiles);
+    }
+
+    if (options?.persist !== false) {
+      await saveLastWorkspace(handle).catch(() => undefined);
+    }
   }, []);
+
+  useEffect(() => {
+    if (!isFileSystemAccessSupported()) return;
+
+    let cancelled = false;
+
+    void Promise.resolve()
+      .then(() => {
+        if (cancelled) return null;
+        setStatus("checking");
+        setMessage("جار البحث عن آخر مساحة عمل محفوظة.");
+        return loadLastWorkspace();
+      })
+      .then(async (persisted) => {
+        if (cancelled) return;
+
+        if (!persisted) {
+          setStatus("not_selected");
+          setMessage("لم يتم اختيار مساحة العمل بعد.");
+          return;
+        }
+
+        setMessage(`جار إعادة الاتصال بمساحة العمل: ${persisted.directoryName}.`);
+        await applyWorkspaceHandle(persisted.directoryHandle, {
+          persist: false,
+          restored: true
+        });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setStatus("not_selected");
+        setMessage("لم يتم اختيار مساحة العمل بعد.");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [applyWorkspaceHandle]);
+
+  const reconnectWorkspace = useCallback(async (): Promise<void> => {
+    const persisted = await loadLastWorkspace().catch(() => null);
+
+    if (!persisted) {
+      setMessage("اختر مجلد مساحة العمل يدوياً للمتابعة.");
+      return;
+    }
+
+    try {
+      setStatus("checking");
+      setMessage(`جار إعادة الاتصال بمساحة العمل: ${persisted.directoryName}.`);
+      await applyWorkspaceHandle(persisted.directoryHandle, {
+        persist: false,
+        restored: true
+      });
+    } catch {
+      setStatus("permission_denied");
+      setMessage("تعذر استعادة مساحة العمل المحفوظة. اختر المجلد يدوياً.");
+    }
+  }, [applyWorkspaceHandle]);
+
 
   const selectWorkspace = useCallback(async (): Promise<void> => {
     if (!isFileSystemAccessSupported()) {
@@ -74,24 +167,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       setMessage("جار اختيار وفحص مجلد مساحة العمل.");
 
       const handle = await selectWorkspaceDirectory("readwrite");
-
-      setDirectoryHandle(handle);
-      setSelectedDirectoryName(handle.name);
-
-      const result = await checkWorkspaceStructure(handle);
-
-      setStatus(result.status);
-      setMissingItems(result.missingItems);
-      setInvalidItems(result.invalidItems);
-      setMessage(result.message);
-
-      if (result.status === "ready") {
-        const files = await loadWorkspaceFiles(handle);
-        setLoadedFiles(files);
-        applyDiskUsers(files);
-      } else {
-        setLoadedFiles(emptyLoadedFiles);
-      }
+      await applyWorkspaceHandle(handle);
     } catch (error) {
       if (isAbortError(error)) {
         setStatus("not_selected");
@@ -102,7 +178,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       setStatus("error");
       setMessage("حدث خطأ أثناء اختيار أو فحص مجلد مساحة العمل.");
     }
-  }, []);
+  }, [applyWorkspaceHandle]);
 
   const reloadWorkspace = useCallback(async (): Promise<void> => {
     if (!directoryHandle) {
@@ -191,6 +267,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
         ? "لم يتم اختيار مساحة العمل بعد."
         : "المتصفح الحالي لا يدعم الوصول المباشر إلى ملفات النظام."
     );
+    void clearLastWorkspace();
   }, []);
 
   const value = useMemo<WorkspaceContextValue>(

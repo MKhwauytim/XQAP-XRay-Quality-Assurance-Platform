@@ -1,14 +1,47 @@
 import type { AuthRole, AuthSession } from "./authTypes";
+import {
+  endAuthActivitySession,
+  startAuthActivitySession,
+} from "./authActivityLog";
 
-// Auth state is intentionally runtime-only. Durable app data belongs in the
-// selected workspace folder, not in browser storage.
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const SESSION_STORAGE_KEY = "xray_auth_session_v1";
 
 // Admin-only role impersonation for testing other roles' views/permissions.
 // Runtime-only and never persisted.
 const VALID_ROLES: AuthRole[] = ["guest", "employee", "supervisor", "manager", "admin"];
 let runtimeSession: AuthSession | null = null;
 let runtimePreviewRole: AuthRole | null = null;
+
+function readStoredSession(): AuthSession | null {
+  try {
+    if (typeof localStorage === "undefined") return null;
+    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    return isValidSession(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredSession(session: AuthSession): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+  } catch {
+    // Runtime session still works even when browser storage is unavailable.
+  }
+}
+
+function clearStoredSession(): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
+}
 
 export function readPreviewRole(): AuthRole | null {
   return runtimePreviewRole;
@@ -53,8 +86,17 @@ function isValidSession(value: unknown): value is AuthSession {
 // The real authenticated session, ignoring any role-preview override. Use this for
 // identity/auth decisions (login validation, gating the impersonation control itself).
 export function readRealSession(): AuthSession | null {
+  if (!runtimeSession) {
+    runtimeSession = readStoredSession();
+    if (runtimeSession && !isExpired(runtimeSession)) {
+      startAuthActivitySession(runtimeSession);
+    }
+  }
+
   if (!runtimeSession || !isValidSession(runtimeSession) || isExpired(runtimeSession)) {
+    if (runtimeSession) endAuthActivitySession("expired");
     runtimeSession = null;
+    clearStoredSession();
     return null;
   }
 
@@ -75,9 +117,13 @@ export function readSession(): AuthSession | null {
 
 export function writeSession(session: AuthSession): void {
   runtimeSession = session;
+  writeStoredSession(session);
+  startAuthActivitySession(session);
 }
 
 export function clearSession(): void {
+  endAuthActivitySession("logout");
   runtimeSession = null;
+  clearStoredSession();
   setPreviewRole(null);
 }

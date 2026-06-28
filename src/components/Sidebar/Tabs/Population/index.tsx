@@ -5,7 +5,6 @@ import {
   useRef,
   useState,
   useEffect,
-  type CSSProperties,
   type ChangeEvent,
   type DragEvent
 } from "react";
@@ -32,7 +31,6 @@ import {
 import {
   appendDistributionEvent,
   appendDistributionEvents,
-  loadOrDeriveDistributionCurrent,
   loadDistributionLog,
   saveDistributionCurrent
 } from "../../../../data/distribution/distributionStorage";
@@ -49,7 +47,7 @@ import type {
   DistributionEvent
 } from "../../../../data/distribution/distributionTypes";
 import { drawSample } from "../../../../data/sampling/sampleAlgorithm";
-import { loadSampleMaster, saveSampleMaster } from "../../../../data/sampling/sampleStorage";
+import { saveSampleMaster } from "../../../../data/sampling/sampleStorage";
 import type { SampleMasterData } from "../../../../data/sampling/sampleTypes";
 import {
   loadAdminBrowsePreset,
@@ -57,9 +55,7 @@ import {
   saveAdminBrowseDatasetPreset,
   type UserBrowsePresetFile
 } from "../../../../data/preferences/browsePresetStorage";
-import { loadEmployeeAnswers } from "../../../../data/answers/answerStorage";
 import { writeEmployeeXlsx } from "../../../../data/answers/employeeXlsx";
-import { readUserManagementState } from "../../../../auth/userManagement";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
 
 import type { BiWorkbookResult, NormalizedBiRow } from "./biData/biDataTypes";
@@ -75,7 +71,7 @@ import type { NormalizedRiskRow, RiskWorkbookResult } from "./riskData/riskDataT
 import WorkbookWorker from "../../../../workers/workbookWorker?worker&inline";
 import type { WorkbookWorkerRequest, WorkbookWorkerResponse } from "../../../../workers/workbookWorkerTypes";
 
-import { formatStageLabel, getPhaseStatus, getStageKey } from "./components/helpers";
+import { formatStageLabel, getPhaseStatus } from "./components/helpers";
 import PhaseOneUpload from "./components/PhaseOneUpload";
 import PhaseTwoReportAndProcessing from "./components/PhaseTwoReportAndProcessing";
 import PhaseThreeSampling from "./components/PhaseThreeSampling";
@@ -168,8 +164,8 @@ export const tabConfig: SidebarTabModule["tabConfig"] = {
   allowedRoles: ["guest", "employee", "supervisor", "manager", "admin"],
   icon: <ScanLine size={20} strokeWidth={1.8} aria-hidden />,
   subTabs: [
-    { id: "process", label: "معالجة المجتمع" },
-    { id: "browse",  label: "استعراض بيانات الأشعة" },
+    { id: "process", label: "معالجة البيانات" },
+    { id: "browse",  label: "استعراض البيانات" },
   ]
 };
 
@@ -1090,7 +1086,7 @@ export default function PopulationTab() {
         ) : (
           <div className="placeholder-phase">
             <h2>غير مصرح</h2>
-            <p>لا تملك صلاحية استعراض بيانات الأشعة.</p>
+            <p>لا تملك صلاحية استعراض البيانات.</p>
           </div>
         )
       )}
@@ -1639,120 +1635,6 @@ function defaultVisibleColumns(
   return new Set([...rawKeys, "_monthFolder"]);
 }
 
-function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
-  return (
-    <div className="bv-stat-card">
-      <span className="bv-stat-label">{label}</span>
-      <strong className="bv-stat-value">{typeof value === "number" ? value.toLocaleString("ar-SA-u-nu-latn") : value}</strong>
-      {sub && <span className="bv-stat-sub">{sub}</span>}
-    </div>
-  );
-}
-
-type MonthlySampleKpi = {
-  monthFolder: string;
-  totalAssigned: number;
-  totalCompleted: number;
-  totalTarget: number;
-  completionPct: number;
-  remaining: number;
-  status: "complete" | "short" | "over";
-  stageRows: Array<{
-    stageKey: "first" | "second" | "third" | "fourth";
-    label: string;
-    assigned: number;
-    completed: number;
-    target: number | null;
-    population: number;
-    remaining: number;
-    completionPct: number | null;
-  }>;
-};
-
-type KpiDistributionEntry = {
-  monthFolder: string;
-  xrayImageId: string;
-  status: "pending" | "completed" | "replacement-requested" | "replaced";
-  stageKey: "first" | "second" | "third" | "fourth" | null;
-};
-
-function getRowStageKey(
-  stage: unknown,
-  stageMappings?: PopulationConfig["stageMappings"]
-): "first" | "second" | "third" | "fourth" | null {
-  const stageKey = getStageKey(String(stage ?? ""), stageMappings);
-  return stageKey === "unknown" ? null : stageKey;
-}
-
-function buildMonthlySampleKpis(
-  sampleRows: BrowseRow[],
-  populationRows: BrowseRow[],
-  distributionEntries: KpiDistributionEntry[],
-  stageMappings?: PopulationConfig["stageMappings"]
-): MonthlySampleKpi[] {
-  const monthKeys = new Set<string>();
-  for (const row of sampleRows) {
-    if (row._monthFolder) monthKeys.add(row._monthFolder);
-  }
-  for (const row of populationRows) {
-    if (row._monthFolder) monthKeys.add(row._monthFolder);
-  }
-  for (const entry of distributionEntries) {
-    monthKeys.add(entry.monthFolder);
-  }
-
-  return Array.from(monthKeys)
-    .map((monthFolder) => {
-      const monthSampleRows = sampleRows.filter((row) => row._monthFolder === monthFolder);
-      const monthPopulationRows = populationRows.filter((row) => row._monthFolder === monthFolder);
-      const monthDistributionEntries = distributionEntries.filter((entry) => entry.monthFolder === monthFolder);
-      const totalAssigned = monthSampleRows.length;
-      const totalCompleted = monthDistributionEntries.filter((entry) => entry.status === "completed").length;
-      const completionPct = totalAssigned > 0
-        ? (totalCompleted / totalAssigned) * 100
-        : 0;
-      const remaining = Math.max(0, totalAssigned - totalCompleted);
-      const status: MonthlySampleKpi["status"] =
-        totalAssigned > 0 && totalCompleted === totalAssigned
-          ? "complete"
-          : totalCompleted > totalAssigned
-            ? "over"
-            : "short";
-
-      const stageRows = (["first", "second", "third", "fourth"] as const).map((stageKey) => {
-        const assigned = monthSampleRows.filter((row) => getRowStageKey(row["stage"], stageMappings) === stageKey).length;
-        const completed = monthDistributionEntries.filter((entry) => entry.stageKey === stageKey && entry.status === "completed").length;
-        const population = monthPopulationRows.filter((row) => getRowStageKey(row["stage"], stageMappings) === stageKey).length;
-        const target = stageKey === "first"
-          ? population
-          : STAGE_SAMPLE_TARGETS[stageKey];
-
-        return {
-          stageKey,
-          label: STAGE_LABELS_AR[stageKey],
-          assigned,
-          completed,
-          target,
-          population,
-          remaining: Math.max(0, assigned - completed),
-          completionPct: assigned > 0 ? (completed / assigned) * 100 : null
-        };
-      });
-
-      return {
-        monthFolder,
-        totalAssigned,
-        totalCompleted,
-        totalTarget: MONTHLY_SAMPLE_TARGET,
-        completionPct,
-        remaining,
-        status,
-        stageRows
-      };
-    })
-    .sort((first, second) => second.monthFolder.localeCompare(first.monthFolder));
-}
-
 const BROWSE_DATASETS: Array<{
   id: BrowseDatasetKind;
   label: string;
@@ -1779,21 +1661,6 @@ const BROWSE_DATASETS: Array<{
     description: "صفوف ذكاء الأعمال كما قُرئت من Excel ومحفوظة للرجوع فقط."
   }
 ];
-
-const MONTHLY_SAMPLE_TARGET = 6500;
-const STAGE_SAMPLE_TARGETS: Record<"first" | "second" | "third" | "fourth", number | null> = {
-  first: null,
-  second: 2500,
-  third: 1875,
-  fourth: 1875
-};
-
-const STAGE_LABELS_AR: Record<"first" | "second" | "third" | "fourth", string> = {
-  first: "المستوى الأول",
-  second: "المستوى الثاني",
-  third: "المستوى الثالث",
-  fourth: "المستوى الرابع"
-};
 
 const STAGE_FILTER_ORDER: Record<string, number> = {
   "المستوى الأول": 1,
@@ -1920,14 +1787,10 @@ function BrowseDataView({
   config: PopulationConfig;
 }) {
   const [dataset, setDataset] = useState<BrowseDatasetKind>("population");
-  const [view, setView] = useState<"graphic" | "table">("graphic");
   const [rows, setRows] = useState<BrowseRow[]>([]);
-  const [kpiSampleRows, setKpiSampleRows] = useState<BrowseRow[]>([]);
-  const [kpiPopulationRows, setKpiPopulationRows] = useState<BrowseRow[]>([]);
-  const [kpiDistributionEntries, setKpiDistributionEntries] = useState<KpiDistributionEntry[]>([]);
   const [selectedMonthFilter, setSelectedMonthFilter] = useState("all");
   const [loading, setLoading] = useState(false);
-  const [browsePreset, setBrowsePreset] = useState<UserBrowsePresetFile | null>(null);
+  const browsePresetRef = useRef<UserBrowsePresetFile | null>(null);
   const [isPresetLoaded, setIsPresetLoaded] = useState(false);
   const [visibleCols, setVisibleCols] = useState<Set<string>>(
     () => new Set(BROWSE_COLUMNS.filter((c) => c.default).map((c) => c.key))
@@ -1943,29 +1806,33 @@ function BrowseDataView({
 
   useEffect(() => {
     if (!directoryHandle) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync cleanup when workspace is removed; effect correctly synchronizes with File System Access API
-      setBrowsePreset(null);
-      setIsPresetLoaded(true);
-      return;
+      browsePresetRef.current = null;
+      const id = setTimeout(() => setIsPresetLoaded(true), 0);
+      return () => clearTimeout(id);
     }
 
-    setIsPresetLoaded(false);
+    const loadingId = setTimeout(() => setIsPresetLoaded(false), 0);
     const workspaceHandle = directoryHandle as Parameters<typeof loadUserBrowsePreset>[0];
     void Promise.all([
       loadAdminBrowsePreset(workspaceHandle),
       loadUserBrowsePreset(workspaceHandle, username)
     ])
       .then(([adminPreset, userPreset]) => {
-        setBrowsePreset({
+        const nextPreset = {
           username,
           browseData: {
             ...userPreset.browseData,
             ...adminPreset.browseData
           }
-        });
+        };
+        browsePresetRef.current = nextPreset;
       })
-      .catch(() => setBrowsePreset({ username, browseData: {} }))
+      .catch(() => {
+        const emptyPreset = { username, browseData: {} };
+        browsePresetRef.current = emptyPreset;
+      })
       .finally(() => setIsPresetLoaded(true));
+    return () => clearTimeout(loadingId);
   }, [directoryHandle, username]);
 
   useEffect(() => {
@@ -1978,7 +1845,7 @@ function BrowseDataView({
     )
       .then((nextRows) => {
         const nextColumns = buildBrowseColumns(nextRows);
-        const datasetPreset = browsePreset?.browseData[dataset];
+        const datasetPreset = browsePresetRef.current?.browseData[dataset];
         const nextOrder = mergeColumnOrder(
           datasetPreset?.columnOrder,
           nextColumns.map((column) => column.key)
@@ -1995,101 +1862,12 @@ function BrowseDataView({
       })
       .catch(() => setRows([]))
       .finally(() => setLoading(false));
-  }, [browsePreset, dataset, directoryHandle, isPresetLoaded, refreshKey]);
-
-  useEffect(() => {
-    const workspaceHandle = directoryHandle as Parameters<typeof loadBrowseRows>[0] | null;
-
-    const promise = workspaceHandle
-      ? Promise.all([
-          loadBrowseRows(workspaceHandle, "sample"),
-          loadBrowseRows(workspaceHandle, "population"),
-          listMonthFolders(workspaceHandle)
-        ])
-      : Promise.resolve([[], [], []] as [BrowseRow[], BrowseRow[], MonthFolderInfo[]]);
-
-
-    void promise
-      .then(async ([sampleRows, populationRows, months]) => {
-        if (!workspaceHandle) {
-          setKpiSampleRows([]);
-          setKpiPopulationRows([]);
-          setKpiDistributionEntries([]);
-          return;
-        }
-        const [distributions, answersPerMonth] = await Promise.all([
-          Promise.all(
-            months.map(async (month) => {
-              const sample = await loadSampleMaster(workspaceHandle, month.folderName);
-              return {
-                monthFolder: month.folderName,
-                current: sample
-                  ? await loadOrDeriveDistributionCurrent(
-                      workspaceHandle,
-                      month.folderName,
-                      sample.rows
-                    )
-                  : null
-              };
-            })
-          ),
-          // Build a submitted-answer Set per month by loading all active employees' files
-          (async () => {
-            const usernames = readUserManagementState().users
-              .filter((u) => u.isActive)
-              .map((u) => u.username);
-            const byMonth = new Map<string, Set<string>>();
-            await Promise.all(
-              months.map(async (month) => {
-                const files = await Promise.all(
-                  usernames.map((u) =>
-                    loadEmployeeAnswers(workspaceHandle, month.folderName, u)
-                  )
-                );
-                const submitted = new Set<string>();
-                for (const file of files) {
-                  for (const item of file.items) {
-                    if (item.status === "submitted") submitted.add(item.xrayImageId);
-                  }
-                }
-                byMonth.set(month.folderName, submitted);
-              })
-            );
-            return byMonth;
-          })(),
-        ]);
-
-        setKpiSampleRows(sampleRows);
-        setKpiPopulationRows(populationRows);
-        setKpiDistributionEntries(
-          distributions.flatMap(({ monthFolder, current }) => {
-            const submittedIds = answersPerMonth.get(monthFolder) ?? new Set<string>();
-            return (current?.entries ?? []).map((entry) => ({
-              monthFolder,
-              xrayImageId: entry.xrayImageId,
-              // An entry is "completed" when the assigned employee has submitted answers for it
-              status: submittedIds.has(entry.xrayImageId) ? "completed" : entry.status,
-              stageKey: getRowStageKey(entry.row.stage, config.stageMappings)
-            }));
-          })
-        );
-      })
-      .catch(() => {
-        setKpiSampleRows([]);
-        setKpiPopulationRows([]);
-        setKpiDistributionEntries([]);
-      });
-  }, [directoryHandle, refreshKey, config.stageMappings]);
+  }, [dataset, directoryHandle, isPresetLoaded, refreshKey]);
 
   const monthOptions = useMemo(
     () =>
-      Array.from(
-        new Set([
-          ...collectMonthOptions([...rows, ...kpiSampleRows, ...kpiPopulationRows]),
-          ...kpiDistributionEntries.map((entry) => entry.monthFolder)
-        ])
-      ).sort((first, second) => second.localeCompare(first)),
-    [kpiDistributionEntries, kpiPopulationRows, kpiSampleRows, rows]
+      Array.from(new Set(collectMonthOptions(rows))).sort((first, second) => second.localeCompare(first)),
+    [rows]
   );
 
   const effectiveMonthFilter = useMemo(
@@ -2107,28 +1885,6 @@ function BrowseDataView({
         : rows.filter((row) => row._monthFolder === effectiveMonthFilter),
     [rows, effectiveMonthFilter]
   );
-  const monthFilteredSampleRows = useMemo(
-    () =>
-      effectiveMonthFilter === "all"
-        ? kpiSampleRows
-        : kpiSampleRows.filter((row) => row._monthFolder === effectiveMonthFilter),
-    [kpiSampleRows, effectiveMonthFilter]
-  );
-  const monthFilteredPopulationRows = useMemo(
-    () =>
-      effectiveMonthFilter === "all"
-        ? kpiPopulationRows
-        : kpiPopulationRows.filter((row) => row._monthFolder === effectiveMonthFilter),
-    [kpiPopulationRows, effectiveMonthFilter]
-  );
-  const monthFilteredDistributionEntries = useMemo(
-    () =>
-      effectiveMonthFilter === "all"
-        ? kpiDistributionEntries
-        : kpiDistributionEntries.filter((entry) => entry.monthFolder === effectiveMonthFilter),
-    [kpiDistributionEntries, effectiveMonthFilter]
-  );
-
   // LINT-01c: Instead of a setState-in-effect, reset column filters by
   // deriving the key from `dataset` and using it as a React key on the
   // filter container (see BrowseDataView render). Here we set state
@@ -2165,18 +1921,6 @@ function BrowseDataView({
     [columnFilters, searchFilteredRows, config.stageMappings]
   );
   const activeFilterCount = Object.values(columnFilters).filter((values) => values.length > 0).length;
-  const monthlyKpis = useMemo(
-    () =>
-      buildMonthlySampleKpis(
-        monthFilteredSampleRows,
-        monthFilteredPopulationRows,
-        monthFilteredDistributionEntries,
-        config.stageMappings
-      ),
-    [monthFilteredDistributionEntries, monthFilteredPopulationRows, monthFilteredSampleRows, config.stageMappings]
-  );
-  const latestKpi = monthlyKpis[0] ?? null;
-
   function saveCurrentPreset(nextOrder: string[], nextVisible: Set<string>): void {
     if (!directoryHandle) {
       return;
@@ -2188,16 +1932,16 @@ function BrowseDataView({
       visibleColumns
     };
 
-    setBrowsePreset((current) => ({
+    browsePresetRef.current = {
       username,
       browseData: {
-        ...(current?.browseData ?? {}),
+        ...(browsePresetRef.current?.browseData ?? {}),
         [dataset]: {
           ...datasetPreset,
           updatedAt: new Date().toISOString()
         }
       }
-    }));
+    };
 
     if (readSession()?.role === "admin") {
       void saveAdminBrowseDatasetPreset(
@@ -2289,7 +2033,7 @@ function BrowseDataView({
         ? "كل الأشهر"
         : formatArabicMonthFolder(selectedMonthFilter);
     const fileName = safeExportFileName(
-      `استعراض بيانات الأشعة - ${activeDataset.label} - ${monthName}.xlsx`
+      `البيانات - ${activeDataset.label} - ${monthName}.xlsx`
     );
 
     XLSX.writeFile(workbook, fileName);
@@ -2304,10 +2048,10 @@ function BrowseDataView({
   }
 
   return (
-    <section className="browse-data-view" aria-label="استعراض بيانات الأشعة">
+    <section className="browse-data-view" aria-label="البيانات">
       <PageHeader
         eyebrow="Browse Data"
-        title="استعراض بيانات الأشعة"
+        title="البيانات"
         subtitle={activeDataset.description}
       >
         <div className="bv-header-actions">
@@ -2326,44 +2070,23 @@ function BrowseDataView({
               ))}
             </select>
           </label>
-          <div className="bv-view-toggle" role="group" aria-label="طريقة العرض">
-            <button
-              type="button"
-              className={`bv-toggle-btn${view === "graphic" ? " active" : ""}`}
-              onClick={() => {
-                setDataset("population");
-                setView("graphic");
-              }}
-            >
-              مؤشرات
-            </button>
-            <button
-              type="button"
-              className={`bv-toggle-btn${view === "table" ? " active" : ""}`}
-              onClick={() => setView("table")}
-            >
-              البيانات
-            </button>
-          </div>
         </div>
       </PageHeader>
 
-      {view === "table" && (
-        <div className="bv-dataset-row">
-          <div className="bv-dataset-toggle" role="group" aria-label="مصدر البيانات">
-            {BROWSE_DATASETS.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={`bv-toggle-btn${dataset === item.id ? " active" : ""}`}
-                onClick={() => setDataset(item.id)}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
+      <div className="bv-dataset-row">
+        <div className="bv-dataset-toggle" role="group" aria-label="مصدر البيانات">
+          {BROWSE_DATASETS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={`bv-toggle-btn${dataset === item.id ? " active" : ""}`}
+              onClick={() => setDataset(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
         </div>
-      )}
+      </div>
 
       {loading && (
         <div className="bv-loading">جاري تحميل بيانات جميع الأشهر...</div>
@@ -2375,108 +2098,7 @@ function BrowseDataView({
         </div>
       )}
 
-      {!loading && total > 0 && view === "graphic" && (
-        <div className="bv-graphic">
-          {latestKpi && (
-            <div className="bv-kpi-dashboard" aria-label="متابعة عينة الشهر">
-              <section className={`bv-kpi-hero ${latestKpi.status}`}>
-                <div className="bv-kpi-hero-main">
-                  <span className="bv-kpi-label">مؤشر الشهر الرئيسي</span>
-                  <h2>العينة المدروسة لشهر {formatArabicMonthFolder(latestKpi.monthFolder)}</h2>
-                </div>
-                <div className="bv-kpi-meter-wrap">
-                  <div
-                    className="bv-kpi-meter"
-                    style={{ "--kpi-progress": `${Math.min(100, latestKpi.completionPct)}%` } as CSSProperties}
-                  >
-                    <strong>{Math.min(100, latestKpi.completionPct).toFixed(1)}%</strong>
-                    <span>مدروس</span>
-                  </div>
-                </div>
-              </section>
-
-              <div className="bv-kpi-summary-grid">
-                <StatCard label="الهدف الشهري" value={latestKpi.totalTarget} />
-                <StatCard label="المحالة للفحص" value={latestKpi.totalAssigned} />
-                <StatCard label="المدروسة" value={latestKpi.totalCompleted} />
-                <StatCard label="المتبقي" value={latestKpi.remaining} />
-                <StatCard
-                  label="الحالة"
-                  value={
-                    latestKpi.status === "complete"
-                      ? "مكتمل"
-                      : latestKpi.status === "over"
-                        ? "أعلى من الهدف"
-                        : "قيد الاستكمال"
-                  }
-                />
-              </div>
-
-              <div className="bv-stage-target-grid">
-                {latestKpi.stageRows.map((stage) => (
-                  <article key={stage.stageKey} className="bv-stage-target-card">
-                    <div className="bv-stage-card-head">
-                      <span className="bv-stage-label">{stage.label}</span>
-                      <span className="bv-stage-target">
-                        الهدف {stage.target?.toLocaleString("ar-SA-u-nu-latn") ?? "كامل المجتمع"}
-                      </span>
-                    </div>
-                    <div className="bv-stage-donut-row">
-                      <div
-                        className="bv-stage-donut"
-                        style={{ "--stage-progress": `${Math.min(100, stage.completionPct ?? 0)}%` } as CSSProperties}
-                      >
-                        <strong>{Math.min(100, stage.completionPct ?? 0).toFixed(1)}%</strong>
-                      </div>
-                      <dl className="bv-stage-metrics">
-                        <div>
-                          <dt>المحالة للفحص</dt>
-                          <dd>{stage.assigned.toLocaleString("ar-SA-u-nu-latn")}</dd>
-                        </div>
-                        <div>
-                          <dt>المدروسة</dt>
-                          <dd>{stage.completed.toLocaleString("ar-SA-u-nu-latn")}</dd>
-                        </div>
-                        <div>
-                          <dt>المتبقي</dt>
-                          <dd>{stage.remaining.toLocaleString("ar-SA-u-nu-latn")}</dd>
-                        </div>
-                        <div>
-                          <dt>مجتمع الشهر</dt>
-                          <dd>{stage.population.toLocaleString("ar-SA-u-nu-latn")}</dd>
-                        </div>
-                      </dl>
-                    </div>
-                  </article>
-                ))}
-              </div>
-
-              {monthlyKpis.length > 1 && (
-                <section className="bv-month-history">
-                  <h3>متابعة الأشهر</h3>
-                  {monthlyKpis.slice(0, 6).map((month) => (
-                    <div key={month.monthFolder} className="bv-month-history-row">
-                      <span>{formatArabicMonthFolder(month.monthFolder)}</span>
-                      <div className="bv-history-progress-track">
-                        <span
-                          className="bv-history-progress-fill"
-                          style={{ width: `${Math.min(100, month.completionPct)}%` }}
-                        />
-                      </div>
-                      <strong>
-                        {month.totalCompleted.toLocaleString("ar-SA-u-nu-latn")} / {month.totalAssigned.toLocaleString("ar-SA-u-nu-latn")}
-                      </strong>
-                    </div>
-                  ))}
-                </section>
-              )}
-            </div>
-          )}
-
-        </div>
-      )}
-
-      {!loading && total > 0 && view === "table" && (
+      {!loading && total > 0 && (
         <div className="bv-table-view">
           {/* Toolbar */}
           <div className="bv-table-toolbar">
@@ -2517,13 +2139,19 @@ function BrowseDataView({
                 <Settings2 size={14} style={{ verticalAlign: "middle", marginInlineEnd: 4 }} /> الأعمدة ({visibleCols.size})
               </button>
               {colPickerOpen && (
-                <div className="bv-col-picker-dropdown">
+                <div
+                  className="bv-col-picker-dropdown"
+                  onClick={(event) => event.stopPropagation()}
+                  onMouseDown={(event) => event.stopPropagation()}
+                >
                   {orderedColumns.map((c) => (
                     <label key={c.key} className="bv-col-option">
                       <input
                         type="checkbox"
                         checked={visibleCols.has(c.key)}
-                        onChange={() => {
+                        onClick={(event) => event.stopPropagation()}
+                        onChange={(event) => {
+                          event.stopPropagation();
                           setVisibleCols((prev) => {
                             const next = new Set(prev);
                             if (next.has(c.key)) { next.delete(c.key); } else { next.add(c.key); }
