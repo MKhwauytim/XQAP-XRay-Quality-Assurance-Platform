@@ -191,3 +191,39 @@
   font-weight: 500;
   background: #f6f8fa;
 }
+
+/* ── Canvas ── */
+.rd-canvas {
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.12);
+  border: 1px solid #d0d7de;
+  border-radius: 2px;
+}
+
+/* ── Canvas elements ── */
+.rd-element {
+  box-sizing: border-box;
+  user-select: none;
+}
+
+/* Selection outline (edit mode only) */
+.rd-element--selected {
+  outline: 2px solid #1f6feb;
+  outline-offset: 1px;
+  z-index: 9000;
+}
+
+/* Placeholder for unimplemented element types (table/chart/kpi) */
+.rd-element-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f6f8fa;
+  border: 1px dashed #d0d7de;
+  color: #57606a;
+  font-size: 12px;
+  box-sizing: border-box;
+  padding: 4px;
+  text-align: center;
+}

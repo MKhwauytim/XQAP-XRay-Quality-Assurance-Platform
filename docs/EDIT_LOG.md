@@ -4,6 +4,42 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v7.9 — 2026-06-28 — Report Designer: canvas surface + static renderers (Task 1.4)
+
+Phase 1, Task 1.4: Canvas component and pure element renderers for text, shape, and image. Canvas renders a page at exact `pageSetup.width × height` pixels (scaled by optional `zoom`), positions elements absolutely by (x,y,w,h), sorts by z-index, and dispatches to the correct renderer. In edit mode clicking elements calls `onSelect`; selected element receives `rd-element--selected` class for blue outline. Table/chart/kpi elements show a placeholder div. TextRenderer applies ElementStyle to displayed text. ShapeRenderer handles rect/ellipse/line/divider. ImageRenderer renders img with object-fit contain.
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/renderers/TextRenderer.tsx`
+
+**Before:** (file did not exist)
+
+**After:** (see file — pure text renderer applying ElementStyle)
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/renderers/ShapeRenderer.tsx`
+
+**Before:** (file did not exist)
+
+**After:** (see file — div-based rect/ellipse, hr-based line/divider)
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/renderers/ImageRenderer.tsx`
+
+**Before:** (file did not exist)
+
+**After:** (see file — img with object-fit contain filling container)
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/Canvas.tsx`
+
+**Before:** (file did not exist)
+
+**After:** (see file — absolute-positioned page container with element dispatch and selection chrome)
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/ReportDesigner.css`
+
+**Before:** (see previous entry — no canvas/renderer/selection styles)
+
+**After:** (see file — extended with .rd-canvas, .rd-element, .rd-element--selected, .rd-element-placeholder styles)
+
+---
+
 ## v7.8 — 2026-06-28 — Report Designer: design list create/open/delete (Task 1.3)
 
 Phase 1, Task 1.3: Wire the storage layer to the ReportDesigner UI. Replaces the skeleton body with a full list view (load index on mount, new-design inline input, open/delete per row) and an editor placeholder view. Uses `loadDesignIndex`, `saveDesign`, `deleteDesign`, `loadDesign` from `reportDesignStorage.ts` and `createEmptyDocument` from `reportTypes.ts`.
