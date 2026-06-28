@@ -57,6 +57,66 @@ interface CanvasProps {
 
 ---
 
+## v7.12 — 2026-06-28 — Fix: pointer capture + stable onElementChange ref in useCanvasInteractions
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/useCanvasInteractions.ts`
+
+**Before:**
+```ts
+// onElementChange closed over directly in handlePointerUp useCallback deps → stale closure risk.
+// window.addEventListener("pointermove", handlePointerMove) and
+// window.addEventListener("pointerup", handlePointerUp) added on drag start → redundant with
+// pointer capture, fires handlers twice, requires manual removeEventListener cleanup.
+// Return type: { onElementPointerDown, onHandlePointerDown }
+const handlePointerUp = useCallback(
+  (e: PointerEvent) => {
+    ...
+    onElementChange(state.elementId, snapped);
+    window.removeEventListener("pointermove", handlePointerMove);
+    window.removeEventListener("pointerup", handlePointerUp);
+  },
+  [grid, onElementChange, handlePointerMove]
+);
+// startDrag added window listeners:
+window.addEventListener("pointermove", handlePointerMove);
+window.addEventListener("pointerup", handlePointerUp);
+```
+
+**After:**
+```ts
+// onElementChange stored in useRef; read as onElementChangeRef.current at call time →
+// no stale closure, handlers never need recreating for this dep.
+// No window listeners — pointer capture already routes events to the capturing element;
+// onPointerMove/onPointerUp are React handlers on the canvas root div.
+// Return type: { onElementPointerDown, onHandlePointerDown, onPointerMove, onPointerUp }
+const onElementChangeRef = useRef(onElementChange);
+onElementChangeRef.current = onElementChange;
+
+const onPointerUp = useCallback((e: React.PointerEvent) => {
+  ...
+  onElementChangeRef.current(state.elementId, snapped);
+  dragRef.current = null;
+}, [grid]);
+```
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/Canvas.tsx`
+
+**Before:**
+```tsx
+const { onElementPointerDown, onHandlePointerDown } = useCanvasInteractions({ ... });
+// canvas root div had no onPointerMove/onPointerUp
+```
+
+**After:**
+```tsx
+const { onElementPointerDown, onHandlePointerDown, onPointerMove, onPointerUp } = useCanvasInteractions({ ... });
+// canvas root div:
+onPointerMove={mode === "edit" ? onPointerMove : undefined}
+onPointerUp={mode === "edit" ? onPointerUp : undefined}
+```
+
+---
+
 ## v7.10 — 2026-06-28 — Fix implicit React.CSSProperties imports in canvas components
 
 Small fix for type imports in Report Designer canvas components. The `React.CSSProperties` type was used implicitly without an explicit import. Changed to `import type { CSSProperties } from "react"` and replaced all instances of `React.CSSProperties` with the explicit `CSSProperties` type.

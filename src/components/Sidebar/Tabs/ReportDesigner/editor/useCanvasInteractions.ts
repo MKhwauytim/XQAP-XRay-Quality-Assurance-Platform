@@ -28,6 +28,10 @@ interface UseCanvasInteractionsResult {
     handle: ResizeHandle,
     currentRect: Rect
   ) => void;
+  /** Attach to the canvas root div (receives captured pointer events). */
+  onPointerMove: (e: React.PointerEvent) => void;
+  /** Attach to the canvas root div (receives captured pointer events). */
+  onPointerUp: (e: React.PointerEvent) => void;
 }
 
 export function useCanvasInteractions({
@@ -35,55 +39,52 @@ export function useCanvasInteractions({
   onElementChange,
 }: UseCanvasInteractionsOptions): UseCanvasInteractionsResult {
   const dragRef = useRef<DragState | null>(null);
+  // Store onElementChange in a ref so handlers always read the latest value
+  // without needing to be re-created on every render (eliminates stale closure).
+  const onElementChangeRef = useRef(onElementChange);
+  onElementChangeRef.current = onElementChange;
 
-  const handlePointerMove = useCallback(
-    (e: PointerEvent) => {
-      const state = dragRef.current;
-      if (!state) return;
+  const onPointerMove = useCallback((e: React.PointerEvent) => {
+    const state = dragRef.current;
+    if (!state) return;
 
-      const dx = e.clientX - state.startX;
-      const dy = e.clientY - state.startY;
+    const dx = e.clientX - state.startX;
+    const dy = e.clientY - state.startY;
 
-      // We don't call onElementChange during move — only on up.
-      // (For live preview during drag, a future pass could call a separate
-      //  onElementPreview callback without writing to the doc.)
-      void dx;
-      void dy;
-    },
-    []
-  );
+    // We don't call onElementChange during move — only on up.
+    // (For live preview during drag, a future pass could call a separate
+    //  onElementPreview callback without writing to the doc.)
+    void dx;
+    void dy;
+  }, []);
 
-  const handlePointerUp = useCallback(
-    (e: PointerEvent) => {
-      const state = dragRef.current;
-      if (!state) return;
+  const onPointerUp = useCallback((e: React.PointerEvent) => {
+    const state = dragRef.current;
+    if (!state) return;
 
-      const dx = e.clientX - state.startX;
-      const dy = e.clientY - state.startY;
+    const dx = e.clientX - state.startX;
+    const dy = e.clientY - state.startY;
 
-      let finalRect: Rect;
-      if (state.handle === null) {
-        // Drag: translate x/y
-        finalRect = {
-          x: state.originalRect.x + dx,
-          y: state.originalRect.y + dy,
-          w: state.originalRect.w,
-          h: state.originalRect.h,
-        };
-      } else {
-        // Resize via handle
-        finalRect = resize(state.originalRect, state.handle, dx, dy, 8, 8);
-      }
+    let finalRect: Rect;
+    if (state.handle === null) {
+      // Drag: translate x/y
+      finalRect = {
+        x: state.originalRect.x + dx,
+        y: state.originalRect.y + dy,
+        w: state.originalRect.w,
+        h: state.originalRect.h,
+      };
+    } else {
+      // Resize via handle
+      finalRect = resize(state.originalRect, state.handle, dx, dy, 8, 8);
+    }
 
-      const snapped = snapRect(finalRect, grid);
-      onElementChange(state.elementId, snapped);
+    const snapped = snapRect(finalRect, grid);
+    // Read from ref at call time — no stale closure.
+    onElementChangeRef.current(state.elementId, snapped);
 
-      dragRef.current = null;
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
-    },
-    [grid, onElementChange, handlePointerMove]
-  );
+    dragRef.current = null;
+  }, [grid]);
 
   const startDrag = useCallback(
     (
@@ -93,6 +94,10 @@ export function useCanvasInteractions({
       handle: ResizeHandle | null
     ) => {
       e.stopPropagation();
+      // Capture the pointer on the element so all subsequent pointermove/pointerup
+      // events are delivered to the capturing element. The canvas root div has
+      // onPointerMove/onPointerUp attached, which receives these captured events —
+      // no window.addEventListener needed.
       e.currentTarget.setPointerCapture(e.pointerId);
 
       dragRef.current = {
@@ -102,11 +107,8 @@ export function useCanvasInteractions({
         originalRect: { ...currentRect },
         handle,
       };
-
-      window.addEventListener("pointermove", handlePointerMove);
-      window.addEventListener("pointerup", handlePointerUp);
     },
-    [handlePointerMove, handlePointerUp]
+    []
   );
 
   const onElementPointerDown = useCallback(
@@ -128,5 +130,5 @@ export function useCanvasInteractions({
     [startDrag]
   );
 
-  return { onElementPointerDown, onHandlePointerDown };
+  return { onElementPointerDown, onHandlePointerDown, onPointerMove, onPointerUp };
 }

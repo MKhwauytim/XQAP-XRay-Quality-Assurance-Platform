@@ -44,7 +44,7 @@ export default function Canvas({
   const { width, height } = doc.pageSetup;
 
   const interactionGrid = 8;
-  const { onElementPointerDown, onHandlePointerDown } = useCanvasInteractions({
+  const { onElementPointerDown, onHandlePointerDown, onPointerMove, onPointerUp } = useCanvasInteractions({
     grid: interactionGrid,
     onElementChange: onElementChange ?? (() => undefined),
   });
@@ -92,6 +92,8 @@ export default function Canvas({
             }
           : undefined
       }
+      onPointerMove={mode === "edit" ? onPointerMove : undefined}
+      onPointerUp={mode === "edit" ? onPointerUp : undefined}
     >
       <div style={innerStyle}>
         {sortedElements.map((el) => {
