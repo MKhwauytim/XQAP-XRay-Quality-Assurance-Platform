@@ -1,5 +1,5 @@
 import { getManagedLoginUsers } from "../../../../../auth/userManagement";
-import { AlertTriangle, CheckCircle2, Settings2, XCircle, FilePen } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Settings2, XCircle, FilePen, Search } from "lucide-react";
 import type { SampleMasterData } from "../../../../../data/sampling/sampleTypes";
 import type { DistributionCurrentData, DistributionEvent } from "../../../../../data/distribution/distributionTypes";
 import type { PopulationConfig, EmployeeStageAllocation } from "../../../../../data/population/populationConfig";
@@ -35,6 +35,14 @@ const STAGE_LABELS: Record<string, string> = {
   fourth: "المستوى الرابع"
 };
 
+const STATUS_LABELS: Record<string, string> = {
+  unassigned: "غير معين",
+  pending: "قيد الانتظار",
+  completed: "مكتمل",
+  "replacement-requested": "طلب استبدال",
+  replaced: "مستبدل"
+};
+
 export default function PhaseFourDistribution({
   sampleDrawResult,
   distributionCurrent,
@@ -54,11 +62,15 @@ export default function PhaseFourDistribution({
   const [activeTab, setActiveTab] = useState<"bulk" | "manual">("bulk");
   const [selectedStageTab, setSelectedStageTab] = useState<"first" | "second" | "third" | "fourth">("first");
   const [bulkError, setBulkError] = useState("");
+  const [manualSearch, setManualSearch] = useState("");
+  const [manualStatusFilter, setManualStatusFilter] = useState("all");
+  const [manualCertFilter, setManualCertFilter] = useState("all");
+  const [manualEmployeeFilter, setManualEmployeeFilter] = useState("all");
 
   const employees = useMemo(
     () =>
       getManagedLoginUsers()
-        .filter((u) => u.isActive)
+        .filter((u) => u.isActive && (u.role === "employee" || u.role === "supervisor"))
         .map((u) => ({
           username: u.username,
           displayName: u.displayName,
@@ -144,6 +156,39 @@ export default function PhaseFourDistribution({
     return { summaryMap, errors };
   }, [sampleDrawResult, sampleRows, activeAllocations, employees, operatorUsername, config.stageMappings, saveMonth, saveYear]);
 
+  const entryMap = useMemo(
+    () => new Map((distributionCurrent?.entries ?? []).map((e) => [e.xrayImageId, e])),
+    [distributionCurrent]
+  );
+
+  const assignedEmployeeOptions = useMemo(() => {
+    const assigned = new Set(
+      (distributionCurrent?.entries ?? [])
+        .map((entry) => entry.assignedTo)
+        .filter(Boolean)
+    );
+    return employees.filter((employee) => assigned.has(employee.username));
+  }, [distributionCurrent, employees]);
+
+  const filteredManualRows = useMemo(() => {
+    const q = manualSearch.trim().toLowerCase();
+    return sampleRows.filter((row) => {
+      const entry = entryMap.get(row.xrayImageId);
+      const status = entry?.status ?? "unassigned";
+      const assignedTo = entry?.assignedTo ?? "";
+      if (q && !row.xrayImageId.toLowerCase().includes(q)) return false;
+      if (manualStatusFilter !== "all" && status !== manualStatusFilter) return false;
+      if (manualCertFilter !== "all" && row.certScanStatus !== manualCertFilter) return false;
+      if (manualEmployeeFilter === "unassigned" && assignedTo) return false;
+      if (
+        manualEmployeeFilter !== "all" &&
+        manualEmployeeFilter !== "unassigned" &&
+        assignedTo !== manualEmployeeFilter
+      ) return false;
+      return true;
+    });
+  }, [entryMap, manualCertFilter, manualEmployeeFilter, manualSearch, manualStatusFilter, sampleRows]);
+
   if (!sampleDrawResult) {
     return (
       <section className="placeholder-phase">
@@ -153,8 +198,23 @@ export default function PhaseFourDistribution({
     );
   }
 
-  const entryMap = new Map(
-    (distributionCurrent?.entries ?? []).map((e) => [e.xrayImageId, e])
+  const hasManualFilter =
+    manualSearch.trim() !== "" ||
+    manualStatusFilter !== "all" ||
+    manualCertFilter !== "all" ||
+    manualEmployeeFilter !== "all";
+
+  const clearManualFilters = () => {
+    setManualSearch("");
+    setManualStatusFilter("all");
+    setManualCertFilter("all");
+    setManualEmployeeFilter("all");
+  };
+
+  const manualResultSummary = `${formatNumber(filteredManualRows.length)} / ${formatNumber(sampleRows.length)}`;
+
+  const certScanOptions = Array.from(
+    new Set(sampleRows.map((row) => row.certScanStatus).filter(Boolean))
   );
 
   const handleRunBulkAssignment = async () => {
@@ -378,33 +438,105 @@ export default function PhaseFourDistribution({
           </div>
         </div>
       ) : (
-        <div className="distribution-table-wrapper">
-          <div className="distribution-table" role="table">
-            <div className="distribution-header" role="row">
-              <span>معرف الأشعة</span>
-              <span>المنفذ</span>
-              <span>CertScan</span>
-              <span>الحالة</span>
-              <span>خبير جودة الأشعة</span>
-              <span>الإجراء</span>
-            </div>
+        <div className="distribution-manual-panel">
+          <div className="distribution-manual-toolbar">
+            <label className="dist-search-box" htmlFor="manual-xray-search">
+              <Search size={15} aria-hidden="true" />
+              <input
+                id="manual-xray-search"
+                type="search"
+                value={manualSearch}
+                onChange={(e) => setManualSearch(e.target.value)}
+                placeholder="بحث بمعرف الأشعة..."
+              />
+            </label>
 
-            {sampleDrawResult.rows.map((row) => {
-              const entry = entryMap.get(row.xrayImageId);
-              return (
-                <DistributionRow
-                  key={row.xrayImageId}
-                  row={row}
-                  entry={entry ?? null}
-                  employees={employees}
-                  isDisabled={isDistributing}
-                  onAssign={onAssign}
-                  onReassign={onReassign}
-                  onMarkComplete={onMarkComplete}
-                  onRequestReplacement={onRequestReplacement}
-                />
-              );
-            })}
+            <label className="dist-filter-field" htmlFor="manual-status-filter">
+              الحالة
+              <select
+                id="manual-status-filter"
+                value={manualStatusFilter}
+                onChange={(e) => setManualStatusFilter(e.target.value)}
+              >
+                <option value="all">الكل</option>
+                {Object.entries(STATUS_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </label>
+
+            <label className="dist-filter-field" htmlFor="manual-cert-filter">
+              CertScan
+              <select
+                id="manual-cert-filter"
+                value={manualCertFilter}
+                onChange={(e) => setManualCertFilter(e.target.value)}
+              >
+                <option value="all">الكل</option>
+                {certScanOptions.map((value) => (
+                  <option key={value} value={value}>{value}</option>
+                ))}
+              </select>
+            </label>
+
+            <label className="dist-filter-field" htmlFor="manual-employee-filter">
+              الخبير
+              <select
+                id="manual-employee-filter"
+                value={manualEmployeeFilter}
+                onChange={(e) => setManualEmployeeFilter(e.target.value)}
+              >
+                <option value="all">الكل</option>
+                <option value="unassigned">غير معين</option>
+                {assignedEmployeeOptions.map((employee) => (
+                  <option key={employee.username} value={employee.username}>
+                    {employee.displayName}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <strong className="dist-filter-count">{manualResultSummary}</strong>
+
+            {hasManualFilter && (
+              <button type="button" className="dist-clear-filters-btn" onClick={clearManualFilters}>
+                مسح الفلاتر
+              </button>
+            )}
+          </div>
+
+          <div className="distribution-table-wrapper">
+            <div className="distribution-table" role="table">
+              <div className="distribution-header" role="row">
+                <span>معرف الأشعة</span>
+                <span>المنفذ</span>
+                <span>CertScan</span>
+                <span>الحالة</span>
+                <span>خبير جودة الأشعة</span>
+                <span>الإجراء</span>
+              </div>
+
+              {filteredManualRows.length === 0 ? (
+                <div className="distribution-empty-row" role="row">
+                  لا توجد نتائج مطابقة للفلاتر الحالية.
+                </div>
+              ) : filteredManualRows.map((row) => {
+                const entry = entryMap.get(row.xrayImageId);
+                return (
+                  <DistributionRow
+                    key={row.xrayImageId}
+                    row={row}
+                    entry={entry ?? null}
+                    employees={employees}
+                    isDisabled={isDistributing}
+                    onAssign={onAssign}
+                    onReassign={onReassign}
+                    onMarkComplete={onMarkComplete}
+                    onRequestReplacement={onRequestReplacement}
+                  />
+                );
+              })}
+            </div>
           </div>
         </div>
       )}

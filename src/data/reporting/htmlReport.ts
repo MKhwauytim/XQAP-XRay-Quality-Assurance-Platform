@@ -33,9 +33,13 @@ export function buildReportHtml(title: string, body: string): string {
   .stat-card { background: #fff; border: 1px solid #dce4ee; border-radius: 8px; padding: 14px 18px; min-width: 120px; }
   .stat-label { font-size: 11px; color: #667085; }
   .stat-value { font-size: 24px; font-weight: 700; color: #17365d; }
+  @page {
+    size: portrait;
+    margin: 0;
+  }
   @media print {
-    body { background: #fff; padding: 16px; }
-    .no-print { display: none; }
+    body { background: #fff; padding: 15mm 20mm; }
+    .no-print { display: none !important; }
   }
 </style>
 </head>
@@ -55,21 +59,14 @@ export function escHtml(str: string): string {
 }
 
 export function openOrDownload(html: string, filename: string): void {
-  const w = window.open("", "_blank");
-  if (w) {
-    try {
-      w.opener = null;
-      w.document.open();
-      w.document.write(html);
-      w.document.close();
-      return;
-    } catch {
-      try { w.close(); } catch { /* ignore */ }
-    }
-  }
-  // Fallback: download
   const blob = new Blob([html], { type: "text/html;charset=utf-8" });
   const url = URL.createObjectURL(blob);
+  const w = window.open(url, "_blank", "noopener,noreferrer");
+  if (w) {
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    return;
+  }
+  // Fallback: download
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;

@@ -1,4 +1,6 @@
 import type { SampleMasterData } from "../sampling/sampleTypes";
+import type { FieldAnswer } from "../answers/answerTypes";
+import type { TemplateSchema } from "../templates/templateTypes";
 import type {
   ExecutiveReportRow,
   ExecutiveKPIs,
@@ -8,8 +10,83 @@ import type {
   StageProfile,
 } from "./executiveReportTypes";
 
+type SubmittedAnswerInfo = {
+  answers: FieldAnswer[];
+  answerStatus: "draft" | "submitted";
+  submittedAt: string | null;
+};
+
+function normalizeLabel(value: string): string {
+  return value
+    .replace(/[أإآ]/g, "ا")
+    .replace(/ى/g, "ي")
+    .replace(/ة/g, "ه")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function createFieldResolver(template: TemplateSchema | null): Map<string, string> {
+  const byLabel = new Map<string, string>();
+  for (const field of template?.fields ?? []) {
+    byLabel.set(normalizeLabel(field.label), field.fieldId);
+  }
+  return byLabel;
+}
+
+function answerValue(
+  answers: FieldAnswer[],
+  fieldIdsByLabel: Map<string, string>,
+  label: string,
+  fallbackFieldId?: string
+): FieldAnswer["value"] | null {
+  const fieldId = fieldIdsByLabel.get(normalizeLabel(label)) ?? fallbackFieldId;
+  if (!fieldId) return null;
+  return answers.find((answer) => answer.fieldId === fieldId)?.value ?? null;
+}
+
+function asText(value: FieldAnswer["value"]): string | null {
+  if (value === null || value === undefined) return null;
+  const text = String(value).trim();
+  return text.length > 0 ? text : null;
+}
+
+function asYesNo(value: FieldAnswer["value"]): boolean | null {
+  const text = asText(value);
+  if (text === "نعم" || text === "yes" || text === "true") return true;
+  if (text === "لا" || text === "no" || text === "false") return false;
+  return null;
+}
+
+function asSuspicionResult(value: FieldAnswer["value"]): "سليمة" | "اشتباه" | null {
+  const text = asText(value);
+  return text === "سليمة" || text === "اشتباه" ? text : null;
+}
+
+function asQualityLevel(value: FieldAnswer["value"]): "عالي" | "متوسط" | "منخفض" | null {
+  const text = asText(value);
+  return text === "عالي" || text === "متوسط" || text === "منخفض" ? text : null;
+}
+
+function countReasons(values: Array<string | null>, denominator: number): ExecutiveKPIs["missingImageReasons"] {
+  const counts = new Map<string, number>();
+  for (const value of values) {
+    if (!value) continue;
+    counts.set(value, (counts.get(value) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([reason, count]) => ({
+      reason,
+      count,
+      percentage: denominator > 0 ? (count / denominator) * 100 : 0,
+    }))
+    .sort((a, b) => b.count - a.count || a.reason.localeCompare(b.reason, "ar"));
+}
+
 export function buildExecutiveReportRows(input: ExecutiveReportInput): ExecutiveReportRow[] {
   const { populationRows, sample, distribution, employeeFiles, config } = input;
+  const fieldIdsByLabel = createFieldResolver(input.template);
+  const fieldMap = config.fieldMappings;
 
   const sampleIds = new Set(sample?.rows.map((r) => r.xrayImageId) ?? []);
 
@@ -21,24 +98,20 @@ export function buildExecutiveReportRows(input: ExecutiveReportInput): Executive
   // Submitted answers take priority over drafts
   const answerMap = new Map<
     string,
-    { expertResult: "سليمة" | "اشتباه" | null; answerStatus: "draft" | "submitted"; submittedAt: string | null }
+    SubmittedAnswerInfo
   >();
 
   for (const file of employeeFiles) {
     for (const item of file.items) {
       if (item.status === "submitted") {
-        const fieldAnswer = item.answers.find((a) => a.fieldId === config.expertResultFieldId);
-        const rawValue = fieldAnswer?.value;
-        const expertResult: "سليمة" | "اشتباه" | null =
-          rawValue === "سليمة" || rawValue === "اشتباه" ? rawValue : null;
         answerMap.set(item.xrayImageId, {
-          expertResult,
+          answers: item.answers,
           answerStatus: "submitted",
           submittedAt: item.submittedAt,
         });
       } else if (!answerMap.has(item.xrayImageId)) {
         answerMap.set(item.xrayImageId, {
-          expertResult: null,
+          answers: item.answers,
           answerStatus: "draft",
           submittedAt: null,
         });
@@ -54,7 +127,21 @@ export function buildExecutiveReportRows(input: ExecutiveReportInput): Executive
 
     const dist = distMap.get(pop.xrayImageId);
     const answer = answerMap.get(pop.xrayImageId);
-    const expertResult = answer?.expertResult ?? null;
+    const answers = answer?.answers ?? [];
+    const expertResult = asSuspicionResult(answerValue(
+      answers,
+      fieldIdsByLabel,
+      fieldMap.resultValidityLabel,
+      config.expertResultFieldId
+    ));
+    const imageAvailable = asYesNo(answerValue(answers, fieldIdsByLabel, fieldMap.hasImageLabel));
+    const noImageReason = asText(answerValue(answers, fieldIdsByLabel, fieldMap.noImageReasonLabel));
+    const hasMarking = asYesNo(answerValue(answers, fieldIdsByLabel, fieldMap.hasMarkingLabel));
+    const imageQuality = asQualityLevel(answerValue(answers, fieldIdsByLabel, fieldMap.imageQualityLabel));
+    const lowQualityReason = asText(answerValue(answers, fieldIdsByLabel, fieldMap.lowQualityReasonLabel));
+    const suspicionLevel = asQualityLevel(answerValue(answers, fieldIdsByLabel, fieldMap.suspicionLevelLabel));
+    const suspectedTypes = asText(answerValue(answers, fieldIdsByLabel, fieldMap.suspectedTypesLabel));
+    const smuggleMethod = asText(answerValue(answers, fieldIdsByLabel, fieldMap.smuggleMethodLabel));
 
     let imageResultAccurate: boolean | null = null;
     let levelOneAccurate: boolean | null = null;
@@ -75,6 +162,7 @@ export function buildExecutiveReportRows(input: ExecutiveReportInput): Executive
     return {
       xrayImageId: pop.xrayImageId,
       portName: pop.portName,
+      portType: pop.portType,
       stage: pop.stage,
       levelOneResult,
       levelTwoResult,
@@ -83,6 +171,14 @@ export function buildExecutiveReportRows(input: ExecutiveReportInput): Executive
       assignedTo: dist?.assignedTo ?? null,
       distributionStatus: dist?.status ?? null,
       expertResult,
+      imageAvailable,
+      noImageReason,
+      hasMarking,
+      imageQuality,
+      lowQualityReason,
+      suspicionLevel,
+      suspectedTypes,
+      smuggleMethod,
       answerStatus: answer?.answerStatus ?? null,
       assignedAt: dist?.lastEventAt ?? null,
       submittedAt: answer?.submittedAt ?? null,
@@ -156,6 +252,34 @@ export function calculateExecutiveKPIs(
     l1Wrong.length > 0 ? (l1Wrong.filter((r) => r.levelTwoAccurate === true).length / l1Wrong.length) * 100 : null;
   const levelTwoRegressionRate =
     l1Right.length > 0 ? (l1Right.filter((r) => r.levelTwoAccurate === false).length / l1Right.length) * 100 : null;
+
+  const submittedRows = rows.filter((r) => r.answerStatus === "submitted");
+  const imagesWithSubmittedAnswers = submittedRows.length;
+  const imageAvailableCount = submittedRows.filter((r) => r.imageAvailable === true).length;
+  const imageMissingCount = submittedRows.filter((r) => r.imageAvailable === false).length;
+  const imageAvailabilityDenominator = imageAvailableCount + imageMissingCount;
+  const imageAvailabilityRate =
+    imageAvailabilityDenominator > 0 ? (imageAvailableCount / imageAvailabilityDenominator) * 100 : null;
+
+  const markingRows = submittedRows.filter((r) => r.hasMarking !== null);
+  const markingPresentCount = markingRows.filter((r) => r.hasMarking === true).length;
+  const markingMissingCount = markingRows.filter((r) => r.hasMarking === false).length;
+  const markingRate = markingRows.length > 0 ? (markingPresentCount / markingRows.length) * 100 : null;
+
+  const highQualityCount = submittedRows.filter((r) => r.imageQuality === "عالي").length;
+  const mediumQualityCount = submittedRows.filter((r) => r.imageQuality === "متوسط").length;
+  const lowQualityCount = submittedRows.filter((r) => r.imageQuality === "منخفض").length;
+  const imageQualityEvaluatedCount = highQualityCount + mediumQualityCount + lowQualityCount;
+  const acceptableQualityRate =
+    imageQualityEvaluatedCount > 0 ? ((highQualityCount + mediumQualityCount) / imageQualityEvaluatedCount) * 100 : null;
+  const missingImageReasons = countReasons(
+    submittedRows.filter((r) => r.imageAvailable === false).map((r) => r.noImageReason),
+    imageMissingCount
+  );
+  const lowQualityReasons = countReasons(
+    submittedRows.filter((r) => r.imageQuality === "منخفض" || r.imageQuality === "متوسط").map((r) => r.lowQualityReason),
+    Math.max(1, lowQualityCount + mediumQualityCount)
+  );
 
   // Port profiles
   const portMap = new Map<string, ExecutiveReportRow[]>();
@@ -305,6 +429,20 @@ export function calculateExecutiveKPIs(
     missedSuspicious,
     excessSuspicious,
     validStudied,
+    imagesWithSubmittedAnswers,
+    imageAvailableCount,
+    imageMissingCount,
+    imageAvailabilityRate,
+    markingPresentCount,
+    markingMissingCount,
+    markingRate,
+    highQualityCount,
+    mediumQualityCount,
+    lowQualityCount,
+    imageQualityEvaluatedCount,
+    acceptableQualityRate,
+    missingImageReasons,
+    lowQualityReasons,
     monthlyTarget: config.monthlyTarget,
     portProfiles,
     stageProfiles,

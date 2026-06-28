@@ -4,6 +4,202 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v5.40 — 2026-06-28 — Fix "Invalid string length" when saving large processed data (BUG)
+
+Root cause: saving a large processed population (e.g. ~300k rows) failed with
+the on-screen message `فشل الحفظ: Invalid string length`. `saveMonthRun`
+(`populationStorage.ts`) catches any error and returns `{ ok:false, error:
+error.message }`, which the Population tab renders verbatim. The error came from
+`safeWriteJson` → `JSON.stringify(nextValue, null, 2)` in `safeWrite.ts`:
+pretty-printing inflates the output and, for very large arrays, pushes it past
+V8's max string length (~512 MiB), throwing `RangeError: Invalid string length`.
+This is the write-side twin of the 300k-row parse bug fixed in v5.36.
+
+Fix: serialize compactly once; only re-serialize with 2-space indentation when
+the compact result is small enough (≤ `VERIFY_SIZE_LIMIT`, 512 KB) to stay well
+under the ceiling. Small machine files stay human-readable; large files are
+written compact (≈half the size), removing the proximate trigger. Note: a
+truly enormous population could still exceed the ceiling even compact — the full
+cure is streamed writes, tracked separately as a follow-up.
+
+**File:** `src/data/storage/safeWrite.ts` (both `safeWriteJson` and `safeWriteJsonText`)
+
+**Before:**
+```ts
+const serialized = `${JSON.stringify(nextValue, null, 2)}\n`;
+const skipVerify = serialized.length > VERIFY_SIZE_LIMIT;
+```
+
+**After:**
+```ts
+// Pretty-print keeps small machine files readable, but indentation can push a
+// large payload past V8's max string length (RangeError: Invalid string
+// length). Serialize compactly first; only indent when small enough.
+const compact = JSON.stringify(nextValue);
+const skipVerify = compact.length > VERIFY_SIZE_LIMIT;
+const serialized = skipVerify
+  ? `${compact}\n`
+  : `${JSON.stringify(nextValue, null, 2)}\n`;
+```
+
+**File:** `src/data/storage/safeWrite.test.ts` — added coverage: large payloads are written compact and round-trip; small payloads stay pretty-printed.
+
+---
+
+## v5.39 — 2026-06-28 — Handle floating-promise rejections in data loaders (ERR-01)
+
+Audit finding ERR-01: 13 fire-and-forget data loaders across 6 files used
+`void X.then(...)` (some with `.finally`) but no `.catch`. A rejected load
+(e.g. workspace read failure) became an **unhandled promise rejection** with no
+log entry and no recovery. Added a `logRejection(context)` helper to
+`errorLogger.ts` and a `.catch(logRejection(...))` to each site. On failure the
+state now stays at its safe initial value and the error is recorded in the
+in-memory ring buffer (visible via `getRecentErrors`). Sites already having a
+`.catch` (e.g. `listMonthFolders` in Population, browse-preset/browse-row loads)
+were left unchanged.
+
+**File:** `src/data/storage/errorLogger.ts`
+
+**Before:**
+```ts
+export function clearErrors(): void {
+  entries.length = 0;
+}
+```
+
+**After:**
+```ts
+export function clearErrors(): void {
+  entries.length = 0;
+}
+
+/**
+ * `.catch` handler for intentionally fire-and-forget promises: logs the
+ * rejection to the ring buffer instead of leaving it unhandled. State simply
+ * isn't updated on failure (safe degradation).
+ */
+export function logRejection(context: string): (error: unknown) => void {
+  return (error: unknown) => logError(context, error);
+}
+```
+
+**Files patched (added `.catch(logRejection("<context>"))`):**
+- `Population/index.tsx` — loadPopulationConfig, loadCertScanGlobal
+- `UserManagement/index.tsx` — readAuthActivityLog (effect + refresh button)
+- `EmployeeWorkspace/views/XrayReferrals.tsx` — listMonthFolders, loadTemplateIndex, loadInspectionTemplateSelection, loadPopulationConfig, Promise.all(browse presets)
+- `EmployeeWorkspace/views/EmployeeDashboard.tsx` — listMonthFolders, loadTemplateIndex
+- `Reports/index.tsx` — listMonthFolders
+- `TemplateBuilder/index.tsx` — loadTemplateIndex
+
+---
+
+## v5.38 — 2026-06-28 — Fix CLAUDE.md documentation drift (DOC-01)
+
+Audit finding DOC-01: three confirmed drifts in `CLAUDE.md`. (1) Bundle size
+said "~942 kB, 286 kB gzip"; actual `vite build` output is 1.9 MB / 664 kB gzip.
+(2) Disk-layout block documented the legacy `Population/`, `templates/`, `.system/`
+roots; the code now uses numbered roots `1-Population/`…`6-Templates/` with legacy
+fallbacks (correctly described in `docs/data-system-report.md`). (3) Session
+description said "runtime-only … no localStorage"; it is now `sessionStorage`
+(see v5.37 / SEC-02). Documentation-only change — no code touched.
+
+**File:** `CLAUDE.md` (build-size line, disk-layout section, session bullet)
+
+---
+
+## v5.37 — 2026-06-28 — Session storage moved from localStorage to sessionStorage (SEC-02)
+
+Audit finding SEC-02: `authSession.ts` persisted the auth session to
+`localStorage` (7-day TTL), but `CLAUDE.md` and `docs/data-system-report.md`
+both claimed the session was runtime-only and lost on reload — code and docs
+disagreed. On a shared radiology workstation a 7-day persisted admin session is
+a walk-up-takeover risk. Decision: persist to `sessionStorage` instead, so the
+session survives an accidental page reload but auto-clears on tab/browser close,
+shrinking the exposure window. The 7-day TTL remains as a secondary guard. This
+is a UX convenience, NOT a security control (the client-only trust model still
+applies — see SEC-01).
+
+**File:** `src/auth/authSession.ts`
+
+**Before:**
+```ts
+function readStoredSession(): AuthSession | null {
+  try {
+    if (typeof localStorage === "undefined") return null;
+    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    return isValidSession(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredSession(session: AuthSession): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+  } catch {
+    // Runtime session still works even when browser storage is unavailable.
+  }
+}
+
+function clearStoredSession(): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
+}
+```
+
+**After:**
+```ts
+// SEC-02: the session is persisted to sessionStorage (not localStorage) so it
+// survives a page reload but auto-clears when the tab/browser closes. This is a
+// UX convenience, not a security control — with the client-only trust model a
+// user can still forge this object (see SEC-01 / CLAUDE.md security note).
+function sessionStore(): Storage | null {
+  try {
+    return typeof sessionStorage === "undefined" ? null : sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
+function readStoredSession(): AuthSession | null {
+  try {
+    const store = sessionStore();
+    if (!store) return null;
+    const raw = store.getItem(SESSION_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    return isValidSession(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredSession(session: AuthSession): void {
+  try {
+    sessionStore()?.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+  } catch {
+    // Runtime session still works even when browser storage is unavailable.
+  }
+}
+
+function clearStoredSession(): void {
+  try {
+    sessionStore()?.removeItem(SESSION_STORAGE_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
+}
+```
+
+---
+
 ## v5.36 — 2026-06-25 — Fix 300k-row BI parse failure (stack overflow + memory)
 
 Root cause: `allRows.push(...validRows)` spreads up to 300k arguments, exceeding

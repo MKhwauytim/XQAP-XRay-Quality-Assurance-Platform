@@ -4,8 +4,12 @@ export type MonthManifestData = {
   monthFolderName: string;
   month: number;
   year: number;
-  runnedAt: string;
-  runnedBy: string;
+  processedAt: string;
+  processedBy: string;
+  /** @deprecated use processedAt */
+  runnedAt?: string;
+  /** @deprecated use processedBy */
+  runnedBy?: string;
   riskFileName: string | null;
   biFileName: string | null;
   certScanUsed: boolean;

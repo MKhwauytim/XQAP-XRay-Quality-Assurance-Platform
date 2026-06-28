@@ -16,8 +16,7 @@ import { AdminToolbar } from "./AdminToolbar";
 import {
   ADMIN_SHORTCUT_KEYS,
   BOOTSTRAP_ADMIN_PASSWORD_HASH,
-  BOOTSTRAP_ADMIN_USERNAME,
-  LOGIN_SYSTEM_VERSION
+  BOOTSTRAP_ADMIN_USERNAME
 } from "./authConfig";
 
 import {
@@ -27,6 +26,11 @@ import {
   setPreviewRole,
   writeSession
 } from "./authSession";
+import {
+  configureAuthActivityLogWorkspace,
+  endAuthActivitySession,
+  recordAuthActivityHeartbeat,
+} from "./authActivityLog";
 import type { AuthRole, AuthSession, MessageType } from "./authTypes";
 import {
   createPasswordHash,
@@ -34,12 +38,18 @@ import {
   verifyPasswordHash
 } from "./passwordCrypto";
 import {
+  clearLastLoginUsername,
+  readLastLoginUsername,
+  writeLastLoginUsername
+} from "./loginPersistence";
+import {
   getManagedLoginUsers,
   normalizeUsername,
   persistUserPasswordHash,
   subscribeToUserManagementChanges,
   type ManagedLoginUser
 } from "./userManagement";
+import { ORGANIZATION_PATH_TEXT } from "../branding/organization";
 import { useWorkspace } from "../data/workspace/useWorkspace";
 
 type AuthGateProps = {
@@ -97,13 +107,13 @@ function isAdminShortcutSequence(sequence: string): boolean {
 }
 
 export default function AuthGate({ children }: AuthGateProps) {
-  const { selectWorkspace } = useWorkspace();
+  const { directoryHandle, status: workspaceStatus, selectWorkspace } = useWorkspace();
   const [session, setSession] = useState<AuthSession | null>(getInitialSession);
   const [managedUsers, setManagedUsers] = useState<ManagedLoginUser[]>(() =>
     getManagedLoginUsers()
   );
 
-  const [selectedUsername, setSelectedUsername] = useState("");
+  const [selectedUsername, setSelectedUsername] = useState(readLastLoginUsername);
   const [password, setPassword] = useState("");
   const [isPasswordVisible, setIsPasswordVisible] = useState(false);
 
@@ -133,6 +143,12 @@ export default function AuthGate({ children }: AuthGateProps) {
 
   // Derive whether there are any active users (to decide which form to show)
   const hasConfiguredUsers = managedUsers.some((user) => user.isActive);
+
+  useEffect(() => {
+    configureAuthActivityLogWorkspace(
+      workspaceStatus === "ready" ? directoryHandle : null
+    );
+  }, [directoryHandle, workspaceStatus]);
 
   useEffect(() => {
     return subscribeToUserManagementChanges(() => {
@@ -178,6 +194,29 @@ export default function AuthGate({ children }: AuthGateProps) {
   }, [lockoutUntil]);
 
   useEffect(() => {
+    if (!session) return;
+
+    recordAuthActivityHeartbeat();
+    const heartbeatId = window.setInterval(recordAuthActivityHeartbeat, 60_000);
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") recordAuthActivityHeartbeat();
+    };
+    const handlePageHide = () => {
+      endAuthActivitySession("page-closed");
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("pagehide", handlePageHide);
+
+    return () => {
+      window.clearInterval(heartbeatId);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("pagehide", handlePageHide);
+    };
+  }, [session]);
+
+  useEffect(() => {
     if (!isAdminModalOpen || !adminModalRef.current) return;
     const modal = adminModalRef.current;
     const focusable = modal.querySelectorAll<HTMLElement>(
@@ -210,7 +249,7 @@ export default function AuthGate({ children }: AuthGateProps) {
 
     setSession(null);
     setPreviewRoleState(null);
-    setSelectedUsername("");
+    setSelectedUsername(readLastLoginUsername());
     setPassword("");
     setAdminPasscode("");
     setIsAdminModalOpen(false);
@@ -357,6 +396,7 @@ export default function AuthGate({ children }: AuthGateProps) {
 
     const nextSession = createSession(user.role, user.username);
     applySession(nextSession);
+    writeLastLoginUsername(user.username);
 
     setPassword("");
     setFailedAttempts(0);
@@ -377,6 +417,7 @@ export default function AuthGate({ children }: AuthGateProps) {
 
     const nextSession = createSession(ADMIN_ROLE, BOOTSTRAP_ADMIN_USERNAME);
     applySession(nextSession);
+    writeLastLoginUsername(BOOTSTRAP_ADMIN_USERNAME);
 
     setAdminPasscode("");
     setIsAdminModalOpen(false);
@@ -489,6 +530,7 @@ export default function AuthGate({ children }: AuthGateProps) {
                   id="authPassword"
                   type={isPasswordVisible ? "text" : "password"}
                   required
+                  autoComplete="current-password"
                   placeholder="أدخل كلمة المرور"
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
@@ -530,14 +572,22 @@ export default function AuthGate({ children }: AuthGateProps) {
         )}
 
         <footer className="auth-footer">
-          <span>Local Gate v{LOGIN_SYSTEM_VERSION}</span>
-
+          <div className="auth-org-path">{ORGANIZATION_PATH_TEXT}</div>
           <div className="auth-footer-actions">
             <button type="button" className="auth-footer-change" onClick={() => { void selectWorkspace(); }}>
               تغيير المجلد
             </button>
             <button type="button" onClick={logout}>
               مسح الجلسة
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                clearLastLoginUsername();
+                setSelectedUsername("");
+              }}
+            >
+              نسيان المستخدم
             </button>
           </div>
         </footer>

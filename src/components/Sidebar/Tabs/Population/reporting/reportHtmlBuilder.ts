@@ -693,7 +693,7 @@ function buildReadinessPage(data: PopulationReportData): string {
 function buildCss(): string {
   return `
     @page {
-      size: 13.333in 7.5in;
+      size: landscape;
       margin: 0;
     }
 
@@ -1111,6 +1111,18 @@ function buildCss(): string {
 
       .no-print {
         display: none !important;
+      }
+
+      .slide {
+        width: 100vw !important;
+        height: 100vh !important;
+        max-width: 100% !important;
+        max-height: 100% !important;
+        margin: 0 !important;
+        border: 0 !important;
+        border-radius: 0 !important;
+        box-shadow: none !important;
+        page-break-after: always !important;
       }
     }
   `;

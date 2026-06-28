@@ -121,7 +121,28 @@ export type Labels = Record<LabelKey, string>;
 
 type Subscriber = () => void;
 const subscribers = new Set<Subscriber>();
-let customLabels: Partial<Record<LabelKey, string>> = {};
+const LABELS_STORAGE_KEY = "xray_custom_labels_v1";
+
+let customLabels: Partial<Record<LabelKey, string>> = (() => {
+  try {
+    const raw = localStorage.getItem(LABELS_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as Partial<Record<LabelKey, string>>) : {};
+  } catch {
+    return {};
+  }
+})();
+
+function persistLabels(): void {
+  try {
+    if (Object.keys(customLabels).length === 0) {
+      localStorage.removeItem(LABELS_STORAGE_KEY);
+    } else {
+      localStorage.setItem(LABELS_STORAGE_KEY, JSON.stringify(customLabels));
+    }
+  } catch {
+    // non-fatal fallback
+  }
+}
 
 export function getLabels(): Labels {
   return { ...DEFAULT_LABELS, ...customLabels } as Labels;
@@ -138,16 +159,19 @@ export function setLabel(key: LabelKey, value: string): void {
   } else {
     customLabels[key] = trimmed;
   }
+  persistLabels();
   subscribers.forEach((fn) => fn());
 }
 
 export function resetLabel(key: LabelKey): void {
   delete customLabels[key];
+  persistLabels();
   subscribers.forEach((fn) => fn());
 }
 
 export function resetAllLabels(): void {
   customLabels = {};
+  persistLabels();
   subscribers.forEach((fn) => fn());
 }
 

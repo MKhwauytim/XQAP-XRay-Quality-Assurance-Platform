@@ -5,6 +5,24 @@ import type { ManagedLoginUser } from "../../auth/userManagement";
 import type { PasswordHashRecord } from "../../auth/passwordCrypto";
 import { calculateBulkAssignment } from "./bulkAssignment";
 
+function makeUser(
+  username: string,
+  role: ManagedLoginUser["role"] = "employee",
+  hasCertScanLicense = false
+): ManagedLoginUser {
+  return {
+    id: username,
+    username,
+    displayName: username,
+    role,
+    passwordHash: { algorithm: "PBKDF2-SHA256", saltBase64: "s", hashBase64: "h", iterations: 600000 } as PasswordHashRecord,
+    isActive: true,
+    hasCertScanLicense,
+    createdAt: "",
+    updatedAt: ""
+  };
+}
+
 function makeRow(id: string, stage: string, cert: "Certscan" | "NonCertscan"): PreparedPopulationRow {
   return {
     xrayImageId: id,
@@ -46,6 +64,39 @@ test("calculateBulkAssignment fails if no employees assigned in active stage", (
 
   expect(result.errors).toHaveLength(1);
   expect(result.events).toHaveLength(0);
+});
+
+test("calculateBulkAssignment ignores active allocations for non-employee and non-supervisor roles", () => {
+  const rows = [
+    makeRow("img-1", "SECOND_STAGE", "NonCertscan"),
+    makeRow("img-2", "SECOND_STAGE", "NonCertscan"),
+    makeRow("img-3", "SECOND_STAGE", "NonCertscan")
+  ];
+  const allocations: EmployeeStageAllocation[] = [
+    { username: "emp", stageKey: "second", method: "percentage", value: 100, isActive: true },
+    { username: "sup", stageKey: "second", method: "percentage", value: 100, isActive: true },
+    { username: "manager", stageKey: "second", method: "percentage", value: 100, isActive: true },
+    { username: "admin", stageKey: "second", method: "percentage", value: 100, isActive: true },
+    { username: "guest", stageKey: "second", method: "percentage", value: 100, isActive: true }
+  ];
+  const employees: ManagedLoginUser[] = [
+    makeUser("emp", "employee"),
+    makeUser("sup", "supervisor"),
+    makeUser("manager", "manager"),
+    makeUser("admin", "admin"),
+    makeUser("guest", "guest")
+  ];
+
+  const result = calculateBulkAssignment({
+    rows,
+    allocations,
+    employees,
+    operatorUsername: "test"
+  });
+
+  expect(result.errors).toHaveLength(0);
+  expect(result.events).toHaveLength(3);
+  expect(new Set(result.events.map((event) => event.assignedTo))).toEqual(new Set(["emp", "sup"]));
 });
 
 test("calculateBulkAssignment fails for CertScan rows if no employee has CertScan license", () => {

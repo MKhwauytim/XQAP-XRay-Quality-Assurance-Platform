@@ -21,3 +21,12 @@ export function getRecentErrors(): ErrorEntry[] {
 export function clearErrors(): void {
   entries.length = 0;
 }
+
+/**
+ * `.catch` handler for intentionally fire-and-forget promises: logs the
+ * rejection to the ring buffer instead of leaving it unhandled. State simply
+ * isn't updated on failure (safe degradation).
+ */
+export function logRejection(context: string): (error: unknown) => void {
+  return (error: unknown) => logError(context, error);
+}

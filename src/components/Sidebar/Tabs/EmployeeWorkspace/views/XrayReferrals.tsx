@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { X } from "lucide-react";
 import { readSession } from "../../../../../auth/authSession";
 import { PageHeader } from "../../../../../components/PageHeader/PageHeader";
+import { logRejection } from "../../../../../data/storage/errorLogger";
 import {
   getRolePermission,
   hasFeature,
@@ -241,19 +242,28 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   const [filteredTableEntries, setFilteredTableEntries] = useState<DistributionEntry[]>([]);
   const [referralModal, setReferralModal] = useState<ReferralModalState>(null);
   useEffect(() => {
-    void listMonthFolders(directoryHandle).then((ms) => {
-      setMonths(ms);
-      if (ms.length > 0) setSelMonth(ms[ms.length - 1]!.folderName);
-    });
-    void loadTemplateIndex(directoryHandle).then((idx) => setTplIndex(idx.templates));
-    void loadInspectionTemplateSelection(directoryHandle).then((selection) => {
-      if (selection?.templateId) void applyTemplate(selection.templateId, false);
-    });
-    void loadPopulationConfig(directoryHandle).then((cfg) => setStageMappings(cfg.stageMappings));
+    void listMonthFolders(directoryHandle)
+      .then((ms) => {
+        setMonths(ms);
+        if (ms.length > 0) setSelMonth(ms[ms.length - 1]!.folderName);
+      })
+      .catch(logRejection("xrayReferrals:listMonthFolders"));
+    void loadTemplateIndex(directoryHandle)
+      .then((idx) => setTplIndex(idx.templates))
+      .catch(logRejection("xrayReferrals:loadTemplateIndex"));
+    void loadInspectionTemplateSelection(directoryHandle)
+      .then((selection) => {
+        if (selection?.templateId) void applyTemplate(selection.templateId, false);
+      })
+      .catch(logRejection("xrayReferrals:loadInspectionTemplateSelection"));
+    void loadPopulationConfig(directoryHandle)
+      .then((cfg) => setStageMappings(cfg.stageMappings))
+      .catch(logRejection("xrayReferrals:loadPopulationConfig"));
     void Promise.all([
       loadAdminBrowsePreset(directoryHandle),
       loadUserBrowsePreset(directoryHandle, username),
-    ]).then(([adminFile, userFile]) => {
+    ])
+      .then(([adminFile, userFile]) => {
       const p = adminFile.browseData[REFERRALS_PRESET_KEY] ?? userFile.browseData[REFERRALS_PRESET_KEY];
       if (p) {
         setColPreset({
@@ -264,7 +274,8 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           dateFmt: (p.dateFmt ?? {}) as ColConfig["dateFmt"],
         });
       }
-    });
+      })
+      .catch(logRejection("xrayReferrals:loadBrowsePresets"));
   // eslint-disable-next-line react-hooks/exhaustive-deps -- applyTemplate is intentionally excluded; it is recreated on every render and including it would trigger an infinite loop
   }, [baseColumns, directoryHandle, username]);
 
