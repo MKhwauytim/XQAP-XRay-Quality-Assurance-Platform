@@ -4,6 +4,152 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v7.3 — 2026-06-28 — Report Designer: runQuery group-by engine (FEATURE)
+
+Phase 0, Task 0.4: Implement the core query engine that combines filtering, grouping, aggregation, sorting, and limiting. The runQuery function accepts filtered rows, groups them by dimension fields, computes aggregates, optionally sorts the results, and optionally applies a limit. Output measure keys use the `as` alias if provided, else `${agg}_${field}`. Group keys preserve the dimension field names. When groupBy is empty, returns a single aggregate row (grand total). Handles percentOfTotal aggregations by pre-computing grand totals.
+
+**File:** `src/data/reportDesigner/query/runQuery.ts` (new)
+
+**Before:**
+```ts
+(new file)
+```
+
+**After:**
+```ts
+import type { Aggregation, Filter } from "../reportTypes";
+import { aggregate } from "./aggregations";
+import { applyFilters } from "./filters";
+
+export type QuerySpec = {
+  groupBy: string[];
+  values: Array<{ field: string; agg: Aggregation; as?: string }>;
+  filters: Filter[];
+  sort?: { key: string; dir: "asc" | "desc" };
+  limit?: number;
+};
+export type ResultRow = Record<string, string | number | null>;
+
+function measureKey(v: { field: string; agg: Aggregation; as?: string }): string {
+  return v.as ?? `${v.agg}_${v.field}`;
+}
+
+export function runQuery(rows: Array<Record<string, unknown>>, spec: QuerySpec): ResultRow[] {
+  const filtered = applyFilters(rows, spec.filters);
+  const grandTotals = new Map<string, number>();
+  for (const v of spec.values) {
+    if (v.agg === "percentOfTotal") {
+      grandTotals.set(measureKey(v), aggregate("sum", filtered.map((r) => r[v.field])));
+    }
+  }
+
+  const groups = new Map<string, Array<Record<string, unknown>>>();
+  if (spec.groupBy.length === 0) {
+    groups.set("__all__", filtered);
+  } else {
+    for (const row of filtered) {
+      const key = spec.groupBy.map((g) => String(row[g] ?? "")).join(" ");
+      const bucket = groups.get(key);
+      if (bucket) bucket.push(row);
+      else groups.set(key, [row]);
+    }
+  }
+
+  let result: ResultRow[] = [...groups.values()].map((bucket) => {
+    const out: ResultRow = {};
+    for (const g of spec.groupBy) {
+      const raw = bucket[0]?.[g];
+      out[g] = raw === null || raw === undefined ? null : (raw as string | number);
+    }
+    for (const v of spec.values) {
+      const key = measureKey(v);
+      out[key] = aggregate(v.agg, bucket.map((r) => r[v.field]), grandTotals.get(key) ?? 0);
+    }
+    return out;
+  });
+
+  if (spec.sort) {
+    const { key, dir } = spec.sort;
+    result = [...result].sort((a, b) => {
+      const av = a[key];
+      const bv = b[key];
+      if (av === bv) return 0;
+      if (av === null || av === undefined) return 1;
+      if (bv === null || bv === undefined) return -1;
+      const cmp = av < bv ? -1 : 1;
+      return dir === "asc" ? cmp : -cmp;
+    });
+  }
+  if (typeof spec.limit === "number") result = result.slice(0, spec.limit);
+  return result;
+}
+```
+
+**File:** `src/data/reportDesigner/query/runQuery.test.ts` (new)
+
+**Before:**
+```ts
+(new file)
+```
+
+**After:**
+```ts
+import { describe, it, expect } from "vitest";
+import { runQuery } from "./runQuery";
+
+const rows = [
+  { port: "A", suspicious: true },
+  { port: "A", suspicious: false },
+  { port: "A", suspicious: true },
+  { port: "B", suspicious: false },
+];
+
+describe("runQuery", () => {
+  it("groups by a dimension and counts", () => {
+    const out = runQuery(rows, { groupBy: ["port"], values: [{ field: "port", agg: "count" }], filters: [] });
+    expect(out).toEqual([
+      { port: "A", count_port: 3 },
+      { port: "B", count_port: 1 },
+    ]);
+  });
+  it("sums a boolean measure per group and honours alias", () => {
+    const out = runQuery(rows, {
+      groupBy: ["port"],
+      values: [{ field: "suspicious", agg: "sum", as: "suspiciousCount" }],
+      filters: [],
+    });
+    expect(out).toEqual([
+      { port: "A", suspiciousCount: 2 },
+      { port: "B", suspiciousCount: 0 },
+    ]);
+  });
+  it("applies filters before grouping", () => {
+    const out = runQuery(rows, {
+      groupBy: ["port"],
+      values: [{ field: "port", agg: "count" }],
+      filters: [{ field: "suspicious", op: "truthy", value: null }],
+    });
+    expect(out).toEqual([{ port: "A", count_port: 2 }]);
+  });
+  it("sorts then limits (topN)", () => {
+    const out = runQuery(rows, {
+      groupBy: ["port"],
+      values: [{ field: "port", agg: "count" }],
+      filters: [],
+      sort: { key: "count_port", dir: "desc" },
+      limit: 1,
+    });
+    expect(out).toEqual([{ port: "A", count_port: 3 }]);
+  });
+  it("returns a single aggregate row when groupBy is empty", () => {
+    const out = runQuery(rows, { groupBy: [], values: [{ field: "port", agg: "count" }], filters: [] });
+    expect(out).toEqual([{ count_port: 4 }]);
+  });
+});
+```
+
+---
+
 ## v7.2 — 2026-06-28 — Report Designer: filter predicates for query engine (FEATURE)
 
 Phase 0, Task 0.3: Create pure filter predicate functions for the report query engine. Implements row filtering via a composable filter array with support for 8 filter operations: equals, notEquals, in, between, contains, truthy, falsy, topN. The topN operation is intentionally a no-op here; topN filtering is applied post-aggregation in the runQuery engine.
