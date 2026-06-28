@@ -89,8 +89,15 @@ export async function safeWriteJson<T>(
         ? parsedCurrent.metadata.revision
         : 0;
     const nextValue = isEnvelope(value) ? value : wrap(value, previousRevision);
-    const serialized = `${JSON.stringify(nextValue, null, 2)}\n`;
-    const skipVerify = serialized.length > VERIFY_SIZE_LIMIT;
+    // Pretty-print keeps small machine files human-readable, but indentation can
+    // push a large payload past V8's max string length (RangeError: Invalid
+    // string length). Serialize compactly first; only re-serialize with 2-space
+    // indentation when the result is small enough to stay well under the ceiling.
+    const compact = JSON.stringify(nextValue);
+    const skipVerify = compact.length > VERIFY_SIZE_LIMIT;
+    const serialized = skipVerify
+      ? `${compact}\n`
+      : `${JSON.stringify(nextValue, null, 2)}\n`;
 
     // 1. Snapshot the current good file to .bak (the rollback source).
     if (parsedCurrent) {
@@ -139,9 +146,14 @@ export async function safeWriteJsonText(
     throw new Error(`Cannot restore invalid JSON file ${fileName}.`);
   }
 
-  const normalized = `${JSON.stringify(parsed, null, 2)}\n`;
+  // Same large-payload guard as safeWriteJson: avoid pretty-printing huge files
+  // so restore of a large file can't trip V8's max string length.
+  const compact = JSON.stringify(parsed);
+  const skipVerify = compact.length > VERIFY_SIZE_LIMIT;
+  const normalized = skipVerify
+    ? `${compact}\n`
+    : `${JSON.stringify(parsed, null, 2)}\n`;
   const tmpName = `${fileName}.tmp`;
-  const skipVerify = normalized.length > VERIFY_SIZE_LIMIT;
 
   await withResourceLock(`${dir.name}/${fileName}`, async () => {
     const current = await readText(dir, fileName);

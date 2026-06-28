@@ -4,6 +4,48 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v5.40 — 2026-06-28 — Fix "Invalid string length" when saving large processed data (BUG)
+
+Root cause: saving a large processed population (e.g. ~300k rows) failed with
+the on-screen message `فشل الحفظ: Invalid string length`. `saveMonthRun`
+(`populationStorage.ts`) catches any error and returns `{ ok:false, error:
+error.message }`, which the Population tab renders verbatim. The error came from
+`safeWriteJson` → `JSON.stringify(nextValue, null, 2)` in `safeWrite.ts`:
+pretty-printing inflates the output and, for very large arrays, pushes it past
+V8's max string length (~512 MiB), throwing `RangeError: Invalid string length`.
+This is the write-side twin of the 300k-row parse bug fixed in v5.36.
+
+Fix: serialize compactly once; only re-serialize with 2-space indentation when
+the compact result is small enough (≤ `VERIFY_SIZE_LIMIT`, 512 KB) to stay well
+under the ceiling. Small machine files stay human-readable; large files are
+written compact (≈half the size), removing the proximate trigger. Note: a
+truly enormous population could still exceed the ceiling even compact — the full
+cure is streamed writes, tracked separately as a follow-up.
+
+**File:** `src/data/storage/safeWrite.ts` (both `safeWriteJson` and `safeWriteJsonText`)
+
+**Before:**
+```ts
+const serialized = `${JSON.stringify(nextValue, null, 2)}\n`;
+const skipVerify = serialized.length > VERIFY_SIZE_LIMIT;
+```
+
+**After:**
+```ts
+// Pretty-print keeps small machine files readable, but indentation can push a
+// large payload past V8's max string length (RangeError: Invalid string
+// length). Serialize compactly first; only indent when small enough.
+const compact = JSON.stringify(nextValue);
+const skipVerify = compact.length > VERIFY_SIZE_LIMIT;
+const serialized = skipVerify
+  ? `${compact}\n`
+  : `${JSON.stringify(nextValue, null, 2)}\n`;
+```
+
+**File:** `src/data/storage/safeWrite.test.ts` — added coverage: large payloads are written compact and round-trip; small payloads stay pretty-printed.
+
+---
+
 ## v5.39 — 2026-06-28 — Handle floating-promise rejections in data loaders (ERR-01)
 
 Audit finding ERR-01: 13 fire-and-forget data loaders across 6 files used

@@ -25,6 +25,39 @@ test("write then read round-trips an object", async () => {
   }
 });
 
+test("large payloads are written compact to avoid the JSON.stringify string-length ceiling", async () => {
+  // A pretty-printed (JSON.stringify(x, null, 2)) serialization of a very large
+  // array can exceed V8's max string length and throw "Invalid string length".
+  // We cannot build a 512 MB string cheaply in a unit test, so we assert the
+  // mechanism that prevents it: payloads over VERIFY_SIZE_LIMIT (512 KB) are
+  // serialized compactly (no indentation), which both halves the size and is the
+  // path that stays under the ceiling.
+  const dir = createMemoryDirectory();
+  const rows = Array.from({ length: 12000 }, (_, i) => ({
+    id: i,
+    name: `row-${i}`,
+    note: "padding-".repeat(6),
+  }));
+  await safeWriteJson(dir, "big.json", { rows });
+
+  const raw = await readRaw(dir, "big.json");
+  // Pretty-printing would insert "\n  " indentation; compact output has none.
+  expect(raw).not.toContain('\n  "');
+  // And the compact file still round-trips.
+  const result = await safeReadJson<{ rows: unknown[] }>(dir, "big.json");
+  expect(result.ok).toBe(true);
+  if (result.ok) {
+    expect(result.value.rows).toHaveLength(12000);
+  }
+});
+
+test("small payloads stay pretty-printed for readability", async () => {
+  const dir = createMemoryDirectory();
+  await safeWriteJson(dir, "small.json", { hello: "world" });
+  const raw = await readRaw(dir, "small.json");
+  expect(raw).toContain('\n  "');
+});
+
 test("second write snapshots the previous content to .bak", async () => {
   const dir = createMemoryDirectory();
   await safeWriteJson(dir, "a.json", { v: 1 });
