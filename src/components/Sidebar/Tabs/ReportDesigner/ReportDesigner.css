@@ -1,3 +1,193 @@
-.rd-root { padding: 24px; }
-.rd-title { font-size: 20px; font-weight: 700; margin: 0 0 12px; }
-.rd-empty { color: #57606a; }
+/* ── Report Designer tab ── */
+
+.rd-root {
+  padding: 24px;
+  min-height: 100%;
+  box-sizing: border-box;
+}
+
+/* ── Title ── */
+.rd-title {
+  font-size: 20px;
+  font-weight: 700;
+  margin: 0 0 12px;
+}
+.rd-title-inline {
+  margin: 0;
+}
+
+/* ── List header (title + new button on same row) ── */
+.rd-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.rd-list-header .rd-title {
+  margin: 0;
+}
+
+/* ── Status / informational text ── */
+.rd-empty {
+  color: #57606a;
+  margin: 0;
+}
+.rd-no-workspace {
+  color: #cf222e;
+  margin: 0;
+}
+.rd-loading {
+  color: #57606a;
+  margin: 0;
+}
+.rd-error {
+  color: #cf222e;
+  margin: 8px 0 0;
+  font-size: 13px;
+}
+
+/* ── Buttons ── */
+.rd-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+.rd-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.rd-btn-primary {
+  background: #1f6feb;
+  color: #fff;
+  border-color: #1f6feb;
+}
+.rd-btn-primary:not(:disabled):hover {
+  background: #1558c7;
+  border-color: #1558c7;
+}
+.rd-btn-secondary {
+  background: #f6f8fa;
+  color: #24292f;
+  border-color: #d0d7de;
+}
+.rd-btn-secondary:not(:disabled):hover {
+  background: #eaeef2;
+}
+.rd-btn-danger {
+  background: #fff0ef;
+  color: #cf222e;
+  border-color: #ffcecb;
+}
+.rd-btn-danger:not(:disabled):hover {
+  background: #ffd7d5;
+}
+.rd-btn-sm {
+  padding: 4px 10px;
+  font-size: 13px;
+}
+
+/* ── New-design inline form ── */
+.rd-new-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+  padding: 12px 16px;
+  background: #f6f8fa;
+  border: 1px solid #d0d7de;
+  border-radius: 8px;
+}
+.rd-new-input {
+  flex: 1;
+  min-width: 200px;
+  padding: 7px 10px;
+  font-size: 14px;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  outline: none;
+  background: #fff;
+  color: #24292f;
+  direction: rtl;
+}
+.rd-new-input:focus {
+  border-color: #1f6feb;
+  box-shadow: 0 0 0 2px rgba(31, 111, 235, 0.15);
+}
+
+/* ── Design list ── */
+.rd-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.rd-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border: 1px solid #d0d7de;
+  border-radius: 8px;
+  background: #fff;
+  transition: box-shadow 0.12s;
+}
+.rd-row:hover {
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.07);
+}
+.rd-row-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.rd-row-name {
+  font-weight: 600;
+  font-size: 14px;
+  color: #24292f;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rd-row-date {
+  font-size: 12px;
+  color: #57606a;
+}
+.rd-row-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* ── Editor placeholder ── */
+.rd-editor-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+.rd-editor-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 300px;
+  border: 2px dashed #d0d7de;
+  border-radius: 10px;
+  color: #57606a;
+  font-size: 16px;
+  font-weight: 500;
+  background: #f6f8fa;
+}

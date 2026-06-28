@@ -4,6 +4,9 @@ import { MANAGED_TABS, createDefaultPermissions } from "../../../../auth/userMan
 
 describe("Report Designer tab registration", () => {
   it("exposes a well-formed tabConfig", () => {
+    // tabConfig is typed as optional in SidebarTabModule; assert it exists first
+    expect(tabConfig).toBeDefined();
+    if (!tabConfig) return;
     expect(tabConfig.id).toBe("report-designer");
     expect(tabConfig.label).toBe("مصمم التقارير");
     expect(tabConfig.allowedRoles).toEqual(["supervisor", "manager", "admin"]);

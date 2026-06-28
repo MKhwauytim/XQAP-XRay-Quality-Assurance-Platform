@@ -4,6 +4,71 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v7.8 — 2026-06-28 — Report Designer: design list create/open/delete (Task 1.3)
+
+Phase 1, Task 1.3: Wire the storage layer to the ReportDesigner UI. Replaces the skeleton body with a full list view (load index on mount, new-design inline input, open/delete per row) and an editor placeholder view. Uses `loadDesignIndex`, `saveDesign`, `deleteDesign`, `loadDesign` from `reportDesignStorage.ts` and `createEmptyDocument` from `reportTypes.ts`.
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
+
+**Before:**
+```tsx
+/* eslint-disable react-refresh/only-export-components */
+import { LayoutDashboard } from "lucide-react";
+import type { SidebarTabModule } from "../tabTypes";
+import "./ReportDesigner.css";
+
+export const tabConfig: SidebarTabModule["tabConfig"] = {
+  id: "report-designer",
+  label: "مصمم التقارير",
+  order: 27,
+  allowedRoles: ["supervisor", "manager", "admin"],
+  icon: <LayoutDashboard size={20} strokeWidth={1.8} aria-hidden />,
+};
+
+export default function ReportDesigner() {
+  return (
+    <div className="rd-root" dir="rtl">
+      <h2 className="rd-title">مصمم التقارير</h2>
+      <p className="rd-empty">لا توجد تقارير محفوظة بعد.</p>
+    </div>
+  );
+}
+```
+
+**After:** (see file — full implementation with list + editor placeholder views)
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/ReportDesigner.css`
+
+**Before:**
+```css
+.rd-root { padding: 24px; }
+.rd-title { font-size: 20px; font-weight: 700; margin: 0 0 12px; }
+.rd-empty { color: #57606a; }
+```
+
+**After:** (see file — extended with list, row, button, new-design-form, and editor-placeholder styles)
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/tabConfig.test.ts`
+
+**Before:**
+```ts
+expect(tabConfig.id).toBe("report-designer");
+expect(tabConfig.label).toBe("مصمم التقارير");
+expect(tabConfig.allowedRoles).toEqual(["supervisor", "manager", "admin"]);
+```
+
+**After:**
+```ts
+// tabConfig is typed as optional in SidebarTabModule; assert it exists first
+expect(tabConfig).toBeDefined();
+if (!tabConfig) return;
+expect(tabConfig.id).toBe("report-designer");
+expect(tabConfig.label).toBe("مصمم التقارير");
+expect(tabConfig.allowedRoles).toEqual(["supervisor", "manager", "admin"]);
+```
+
+---
+
 ## v7.7 — 2026-06-28 — Report Designer: register tab skeleton (FEATURE)
 
 Phase 1, Task 1.2: Register the "مصمم التقارير" tab in the auto-discovery system. Creates the tab skeleton component + CSS, adds the tab to `MANAGED_TABS`, and adds four default-permission rows (guest/employee/supervisor/manager) to `createDefaultPermissions()` in `userManagement.ts`.
