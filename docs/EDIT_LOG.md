@@ -4,6 +4,93 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v7.7 — 2026-06-28 — Report Designer: register tab skeleton (FEATURE)
+
+Phase 1, Task 1.2: Register the "مصمم التقارير" tab in the auto-discovery system. Creates the tab skeleton component + CSS, adds the tab to `MANAGED_TABS`, and adds four default-permission rows (guest/employee/supervisor/manager) to `createDefaultPermissions()` in `userManagement.ts`.
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx` (new)
+
+**Before:**
+```
+(file did not exist)
+```
+
+**After:**
+```tsx
+/* eslint-disable react-refresh/only-export-components */
+import { LayoutDashboard } from "lucide-react";
+import type { SidebarTabModule } from "../tabTypes";
+import "./ReportDesigner.css";
+
+export const tabConfig: SidebarTabModule["tabConfig"] = {
+  id: "report-designer",
+  label: "مصمم التقارير",
+  order: 27,
+  allowedRoles: ["supervisor", "manager", "admin"],
+  icon: <LayoutDashboard size={20} strokeWidth={1.8} aria-hidden />,
+};
+
+export default function ReportDesigner() {
+  return (
+    <div className="rd-root" dir="rtl">
+      <h2 className="rd-title">مصمم التقارير</h2>
+      <p className="rd-empty">لا توجد تقارير محفوظة بعد.</p>
+    </div>
+  );
+}
+```
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/ReportDesigner.css` (new)
+
+**Before:**
+```
+(file did not exist)
+```
+
+**After:**
+```css
+.rd-root { padding: 24px; }
+.rd-title { font-size: 20px; font-weight: 700; margin: 0 0 12px; }
+.rd-empty { color: #57606a; }
+```
+
+**File:** `src/auth/userManagement.ts`
+
+**Before:**
+```ts
+  { id: "reports",                 label: "إدارة التقارير" },
+  { id: "reports/reports",         label: "التقارير",              parentId: "reports" },
+  { id: "reports/kpi",             label: "مؤشرات الأداء",          parentId: "reports" },
+  { id: "archive",                 label: "إدارة الأرشيف" },
+```
+
+**After:**
+```ts
+  { id: "reports",                 label: "إدارة التقارير" },
+  { id: "reports/reports",         label: "التقارير",              parentId: "reports" },
+  { id: "reports/kpi",             label: "مؤشرات الأداء",          parentId: "reports" },
+  { id: "report-designer",         label: "مصمم التقارير" },
+  { id: "archive",                 label: "إدارة الأرشيف" },
+```
+
+**File:** `src/auth/userManagement.ts` (createDefaultPermissions)
+
+**Before:**
+```ts
+    { role: "guest",      tabId: "reports",            access: "none" },
+    ...
+    { role: "employee",   tabId: "reports",            access: "none" },
+    ...
+    { role: "supervisor", tabId: "reports",            access: "view" },
+    ...
+    { role: "manager",    tabId: "reports",            access: "edit" },
+```
+(no report-designer rows)
+
+**After:** four new rows added (guest=none, employee=none, supervisor=view, manager=edit) for tabId "report-designer" after each role's "reports" row.
+
+---
+
 ## v7.6 — 2026-06-28 — Report Designer: canvas geometry helpers (FEATURE)
 
 Phase 1, Task 1.1: Implement pure canvas geometry helper functions for the Report Designer. These functions provide snap-to-grid, rectangle snapping, resize-from-handle, and hit-test capabilities used by drag/resize interactions. No UI — only TypeScript helpers with comprehensive test coverage.
