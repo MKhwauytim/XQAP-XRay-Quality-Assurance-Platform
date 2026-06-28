@@ -4,6 +4,101 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v7.1 — 2026-06-28 — Report Designer: aggregation functions for query engine (FEATURE)
+
+Phase 0, Task 0.2: Create pure aggregation functions for the report query engine. Implements the complete set of aggregation operations (count, distinctCount, sum, avg, min, max, percentOfTotal) with proper handling of nulls, booleans, and non-numeric values.
+
+**File:** `src/data/reportDesigner/query/aggregations.ts` (new)
+
+**Before:**
+```ts
+(new file)
+```
+
+**After:**
+```ts
+import type { Aggregation } from "../reportTypes";
+
+function toNumbers(values: unknown[]): number[] {
+  const out: number[] = [];
+  for (const v of values) {
+    if (typeof v === "number" && Number.isFinite(v)) out.push(v);
+    else if (typeof v === "boolean") out.push(v ? 1 : 0);
+  }
+  return out;
+}
+
+export function aggregate(agg: Aggregation, values: unknown[], grandTotal = 0): number {
+  switch (agg) {
+    case "count":
+      return values.length;
+    case "distinctCount":
+      return new Set(values.filter((v) => v !== null && v !== undefined)).size;
+    case "sum":
+      return toNumbers(values).reduce((a, b) => a + b, 0);
+    case "avg": {
+      const nums = toNumbers(values);
+      return nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0;
+    }
+    case "min": {
+      const nums = toNumbers(values);
+      return nums.length ? Math.min(...nums) : 0;
+    }
+    case "max": {
+      const nums = toNumbers(values);
+      return nums.length ? Math.max(...nums) : 0;
+    }
+    case "percentOfTotal": {
+      const sum = toNumbers(values).reduce((a, b) => a + b, 0);
+      return grandTotal === 0 ? 0 : (sum / grandTotal) * 100;
+    }
+    default:
+      return 0;
+  }
+}
+```
+
+**File:** `src/data/reportDesigner/query/aggregations.test.ts` (new)
+
+**Before:**
+```ts
+(new file)
+```
+
+**After:**
+```ts
+import { describe, it, expect } from "vitest";
+import { aggregate } from "./aggregations";
+
+describe("aggregate", () => {
+  it("counts rows including nulls", () => {
+    expect(aggregate("count", [1, null, "x"])).toBe(3);
+  });
+  it("counts distinct non-null values", () => {
+    expect(aggregate("distinctCount", ["a", "a", "b", null])).toBe(2);
+  });
+  it("sums numeric values, treating true as 1 and ignoring non-numerics", () => {
+    expect(aggregate("sum", [2, 3, true, "x", null])).toBe(6);
+  });
+  it("averages numeric values", () => {
+    expect(aggregate("avg", [2, 4, 6])).toBe(4);
+  });
+  it("returns min and max", () => {
+    expect(aggregate("min", [5, 2, 9])).toBe(2);
+    expect(aggregate("max", [5, 2, 9])).toBe(9);
+  });
+  it("computes percent of total from grand total", () => {
+    expect(aggregate("percentOfTotal", [25], 100)).toBe(25);
+  });
+  it("returns 0 for empty avg/sum", () => {
+    expect(aggregate("avg", [])).toBe(0);
+    expect(aggregate("sum", [])).toBe(0);
+  });
+});
+```
+
+---
+
 ## v7.0 — 2026-06-28 — Report Designer: core document model types and factory (FEATURE)
 
 Phase 0, Task 0.1: Create the foundational document model types and factory function for the Report Designer feature. All subsequent Report Designer tasks depend on these types.
