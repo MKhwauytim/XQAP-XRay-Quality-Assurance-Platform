@@ -23,6 +23,7 @@ import { useWorkspace } from "../../../../data/workspace/useWorkspace";
 import type { DirectoryHandleLike } from "../../../../data/storage/fileSystemAccess";
 import Canvas from "./editor/Canvas";
 import Inspector from "./editor/Inspector";
+import PagesBar from "./editor/PagesBar";
 import PrintView from "./PrintView";
 import "./ReportDesigner.css";
 
@@ -226,6 +227,15 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: Editor
     setSelectedId(null);
   }
 
+  function handleDeletePage(index: number) {
+    setDoc((d) => {
+      if (d.pages.length <= 1) return d;
+      const pages = d.pages.filter((_, i) => i !== index);
+      return { ...d, pages };
+    });
+    setCurrentPageIndex((ci) => Math.min(ci, doc.pages.length - 2));
+  }
+
   function deletePage() {
     if (doc.pages.length <= 1) return;
     const nextIndex = Math.max(0, currentPageIndex - 1);
@@ -321,19 +331,8 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: Editor
           />
         </div>
 
-        {/* STUB: Pages bar (Task A.3 will replace this) */}
-        <div className="rd-pages-bar">
-          {doc.pages.map((page, i) => (
-            <button
-              key={page.pageId}
-              className={`rd-page-tab${i === currentPageIndex ? " rd-page-tab--active" : ""}`}
-              onClick={() => setCurrentPageIndex(i)}
-            >
-              {page.name}
-            </button>
-          ))}
-          <button className="rd-page-tab-add" onClick={addPage}>+ صفحة</button>
-        </div>
+        {/* Pages bar (Task A.3) */}
+        <PagesBar doc={doc} currentPageIndex={currentPageIndex} onSelectPage={setCurrentPageIndex} onAddPage={addPage} onDeletePage={handleDeletePage} />
       </div>
       {showPrint && <PrintView doc={doc} onClose={() => setShowPrint(false)} />}
     </>

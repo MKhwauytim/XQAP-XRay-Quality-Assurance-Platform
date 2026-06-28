@@ -4,6 +4,175 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v11.0 — 2026-06-28 — PagesBar component (bottom page tab bar)
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/PagesBar.tsx`
+
+**Before:**
+```ts
+// File did not exist
+```
+
+**After:**
+```tsx
+import type { ReportDocument } from "../../../../../data/reportDesigner/reportTypes";
+
+interface PagesBarProps {
+  doc: ReportDocument;
+  currentPageIndex: number;
+  onSelectPage: (index: number) => void;
+  onAddPage: () => void;
+  onDeletePage: (index: number) => void;
+}
+
+export default function PagesBar({ doc, currentPageIndex, onSelectPage, onAddPage, onDeletePage }: PagesBarProps) {
+  return (
+    <div className="rd-pages-bar" dir="rtl">
+      {doc.pages.map((page, i) => (
+        <button
+          key={page.pageId}
+          className={`rd-page-tab${i === currentPageIndex ? " rd-page-tab--active" : ""}`}
+          onClick={() => onSelectPage(i)}
+          title={page.name}
+          type="button"
+        >
+          {page.name}
+          <span
+            className="rd-page-tab-del"
+            role="button"
+            aria-label={`حذف ${page.name}`}
+            onClick={(e) => { e.stopPropagation(); if (doc.pages.length > 1) onDeletePage(i); }}
+            title="حذف الصفحة"
+          >
+            ×
+          </span>
+        </button>
+      ))}
+      <button className="rd-page-tab-add" onClick={onAddPage} type="button" title="إضافة صفحة">
+        + صفحة
+      </button>
+    </div>
+  );
+}
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
+
+**Before:**
+```tsx
+import Canvas from "./editor/Canvas";
+import Inspector from "./editor/Inspector";
+import PrintView from "./PrintView";
+import "./ReportDesigner.css";
+```
+
+**After:**
+```tsx
+import Canvas from "./editor/Canvas";
+import Inspector from "./editor/Inspector";
+import PagesBar from "./editor/PagesBar";
+import PrintView from "./PrintView";
+import "./ReportDesigner.css";
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx` (EditorHost function)
+
+**Before:**
+```tsx
+  function addPage() {
+    const newPage = {
+      pageId: createPageId(),
+      name: `صفحة ${doc.pages.length + 1}`,
+      order: doc.pages.length,
+      filters: [],
+      elements: [],
+    };
+    setDoc((d) => {
+      const newPages = [...d.pages, newPage];
+      setCurrentPageIndex(newPages.length - 1);
+      return { ...d, pages: newPages };
+    });
+    setSelectedId(null);
+  }
+
+  function deletePage() {
+    if (doc.pages.length <= 1) return;
+    const nextIndex = Math.max(0, currentPageIndex - 1);
+    setDoc((d) => ({ ...d, pages: d.pages.filter((_, i) => i !== currentPageIndex) }));
+    setCurrentPageIndex(nextIndex);
+    setSelectedId(null);
+  }
+```
+
+**After:**
+```tsx
+  function addPage() {
+    const newPage = {
+      pageId: createPageId(),
+      name: `صفحة ${doc.pages.length + 1}`,
+      order: doc.pages.length,
+      filters: [],
+      elements: [],
+    };
+    setDoc((d) => {
+      const newPages = [...d.pages, newPage];
+      setCurrentPageIndex(newPages.length - 1);
+      return { ...d, pages: newPages };
+    });
+    setSelectedId(null);
+  }
+
+  function handleDeletePage(index: number) {
+    setDoc((d) => {
+      if (d.pages.length <= 1) return d;
+      const pages = d.pages.filter((_, i) => i !== index);
+      return { ...d, pages };
+    });
+    setCurrentPageIndex((ci) => Math.min(ci, doc.pages.length - 2));
+  }
+
+  function deletePage() {
+    if (doc.pages.length <= 1) return;
+    const nextIndex = Math.max(0, currentPageIndex - 1);
+    setDoc((d) => ({ ...d, pages: d.pages.filter((_, i) => i !== currentPageIndex) }));
+    setCurrentPageIndex(nextIndex);
+    setSelectedId(null);
+  }
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx` (JSX pages bar section)
+
+**Before:**
+```tsx
+        {/* STUB: Pages bar (Task A.3 will replace this) */}
+        <div className="rd-pages-bar">
+          {doc.pages.map((page, i) => (
+            <button
+              key={page.pageId}
+              className={`rd-page-tab${i === currentPageIndex ? " rd-page-tab--active" : ""}`}
+              onClick={() => setCurrentPageIndex(i)}
+            >
+              {page.name}
+            </button>
+          ))}
+          <button className="rd-page-tab-add" onClick={addPage}>+ صفحة</button>
+        </div>
+```
+
+**After:**
+```tsx
+        {/* Pages bar (Task A.3) */}
+        <PagesBar doc={doc} currentPageIndex={currentPageIndex} onSelectPage={setCurrentPageIndex} onAddPage={addPage} onDeletePage={handleDeletePage} />
+```
+
+---
+
 ## v10.0 — 2026-06-28 — Power BI 3-panel layout shell
 
 **File:** `src/data/reportDesigner/reportTypes.ts`
