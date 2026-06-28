@@ -192,6 +192,9 @@ Both files use `safeWriteJson` / `safeReadJson` and the `JsonEnvelope` schema-ve
 | `admin-shared.browse-preset.json` | `5-System/user-presets/` | Shared/admin table column preferences. |
 | `{username}.browse-preset.json` | `5-System/user-presets/` | User-specific table column preferences. |
 | `backup.manifest.json` and copied data files | `5-System/3-Backups/{timestamp}/` | Manual/automatic backup snapshots. |
+| `population.csv` | `5-System/powerbi-export/{month}/` | All `ExecutiveReportRow` records (UTF-8 BOM CSV, 26 columns). |
+| `sample.csv` | `5-System/powerbi-export/{month}/` | `selectedInSample=true` subset of `population.csv`. |
+| `LISEZMOI.txt` | `5-System/powerbi-export/{month}/` | Bilingual connection instructions (Arabic + English) for Power BI Desktop. |
 
 ## Data Protection Notes
 

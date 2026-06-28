@@ -4,6 +4,69 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v17.0 — 2026-06-28 — Export manager + Power BI section in Reports tab
+
+**File:** `src/data/powerbiExport/exportManager.ts`
+
+**Before:**
+```ts
+// File did not exist
+```
+
+**After:**
+```ts
+// Loads population, sample, distribution, employee files for a month,
+// builds ExecutiveReportRow array via buildExecutiveReportRows, then
+// writes population.csv + sample.csv via writeCsvExport.
+export async function runPowerBiExport(root, month): Promise<ExportManifest>
+```
+
+**File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
+
+**Before:**
+```tsx
+// No pbiMonth/pbiExporting/pbiResult/pbiError state, no handlePbiExport handler,
+// no Power BI export section in JSX, no exportManager/exportTypes imports.
+```
+
+**After:**
+```tsx
+// Added: runPowerBiExport import, ExportManifest import, pbi* state variables,
+// handlePbiExport async handler, and Power BI export section JSX at bottom of
+// the "reports" sub-tab (after quick actions strip).
+```
+
+**File:** `src/components/Sidebar/Tabs/Reports/Reports.css`
+
+**Before:**
+```css
+/* No .rh-pbi-* or .rh-section-divider classes */
+```
+
+**After:**
+```css
+/* Added: .rh-pbi-section, .rh-section-divider, .rh-pbi-title, .rh-pbi-desc,
+   .rh-pbi-row, .rh-pbi-select, .rh-pbi-result, .rh-pbi-success,
+   .rh-pbi-file-list, .rh-pbi-error */
+```
+
+**File:** `docs/data-system-report.md`
+
+**Before:**
+```
+| `backup.manifest.json` and copied data files | `5-System/3-Backups/{timestamp}/` | ... |
+```
+
+**After:**
+```
+| `backup.manifest.json` ...  |
+| `population.csv` | `5-System/powerbi-export/{month}/` | All ExecutiveReportRow records |
+| `sample.csv`     | `5-System/powerbi-export/{month}/` | selectedInSample=true subset    |
+| `LISEZMOI.txt`   | `5-System/powerbi-export/{month}/` | Bilingual connection instructions |
+```
+
+---
+
 ## v16.0 — 2026-06-28 — Export writer (workspace file I/O) for Power BI export
 
 **File:** `src/data/powerbiExport/exportWriter.ts`
