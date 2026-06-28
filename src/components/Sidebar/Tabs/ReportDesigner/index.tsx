@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { LayoutDashboard } from "lucide-react";
 import type { SidebarTabModule } from "../tabTypes";
 import { readSession } from "../../../../auth/authSession";
@@ -12,9 +12,17 @@ import {
 } from "../../../../data/reportDesigner/storage/reportDesignStorage";
 import {
   createEmptyDocument,
+  createElementId,
+  createPageId,
   type ReportDocument,
+  type Element,
 } from "../../../../data/reportDesigner/reportTypes";
+import type { Rect } from "../../../../data/reportDesigner/geometry";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
+import type { DirectoryHandleLike } from "../../../../data/storage/fileSystemAccess";
+import Canvas from "./editor/Canvas";
+import Toolbar from "./editor/Toolbar";
+import Inspector from "./editor/Inspector";
 import "./ReportDesigner.css";
 
 export const tabConfig: SidebarTabModule["tabConfig"] = {
@@ -40,6 +48,254 @@ function formatDate(iso: string): string {
     return iso;
   }
 }
+
+// ── Editor host ────────────────────────────────────────────────────────────
+
+interface EditorHostProps {
+  initialDoc: ReportDocument;
+  directoryHandle: DirectoryHandleLike;
+  currentUser: string;
+  onBack: () => void;
+}
+
+function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: EditorHostProps) {
+  const [doc, setDoc] = useState<ReportDocument>(initialDoc);
+  const [currentPageIndex, setCurrentPageIndex] = useState(0);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Debounce timer ref — stores the pending timeout id
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Pending-doc ref so the debounce callback always sees the latest doc
+  const pendingDocRef = useRef<ReportDocument>(doc);
+  pendingDocRef.current = doc;
+
+  // Schedule autosave whenever doc changes
+  useEffect(() => {
+    if (saveTimerRef.current !== null) {
+      clearTimeout(saveTimerRef.current);
+    }
+    saveTimerRef.current = setTimeout(() => {
+      saveTimerRef.current = null;
+      void performSave(pendingDocRef.current);
+    }, 800);
+    return () => {
+      if (saveTimerRef.current !== null) {
+        clearTimeout(saveTimerRef.current);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc]);
+
+  async function performSave(docToSave: ReportDocument) {
+    const now = new Date().toISOString();
+    const stamped: ReportDocument = {
+      ...docToSave,
+      updatedAt: now,
+      updatedBy: currentUser,
+    };
+    setSaving(true);
+    setSaveError(null);
+    const result = await saveDesign(directoryHandle, stamped);
+    setSaving(false);
+    if (!result.ok) {
+      setSaveError(result.error);
+    }
+  }
+
+  function handleExplicitSave() {
+    if (saveTimerRef.current !== null) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    void performSave(pendingDocRef.current);
+  }
+
+  // ── Element mutations ──
+
+  const currentPage = doc.pages[currentPageIndex];
+
+  function addElement(type: "text" | "shape") {
+    if (!currentPage) return;
+    const newEl: Element = {
+      elementId: createElementId(),
+      type,
+      name: "عنصر جديد",
+      x: 50,
+      y: 50,
+      w: 200,
+      h: 60,
+      z: currentPage.elements.length,
+      style: {},
+      config:
+        type === "text"
+          ? { kind: "text", text: "نص" }
+          : { kind: "shape", shape: "rect" },
+    };
+    setDoc((d) => ({
+      ...d,
+      pages: d.pages.map((p, i) =>
+        i === currentPageIndex
+          ? { ...p, elements: [...p.elements, newEl] }
+          : p
+      ),
+    }));
+    setSelectedId(newEl.elementId);
+  }
+
+  function addImageElement(dataUrl: string) {
+    if (!currentPage) return;
+    const newEl: Element = {
+      elementId: createElementId(),
+      type: "image",
+      name: "صورة",
+      x: 50,
+      y: 50,
+      w: 200,
+      h: 150,
+      z: currentPage.elements.length,
+      style: {},
+      config: { kind: "image", dataUrl },
+    };
+    setDoc((d) => ({
+      ...d,
+      pages: d.pages.map((p, i) =>
+        i === currentPageIndex
+          ? { ...p, elements: [...p.elements, newEl] }
+          : p
+      ),
+    }));
+    setSelectedId(newEl.elementId);
+  }
+
+  function updateElement(updated: Element) {
+    setDoc((d) => ({
+      ...d,
+      pages: d.pages.map((p, i) =>
+        i === currentPageIndex
+          ? {
+              ...p,
+              elements: p.elements.map((el) =>
+                el.elementId === updated.elementId ? updated : el
+              ),
+            }
+          : p
+      ),
+    }));
+  }
+
+  const handleElementChange = useCallback((elementId: string, rect: Rect) => {
+    setDoc((d) => ({
+      ...d,
+      pages: d.pages.map((p, i) =>
+        i === currentPageIndex
+          ? {
+              ...p,
+              elements: p.elements.map((el) =>
+                el.elementId === elementId
+                  ? { ...el, x: rect.x, y: rect.y, w: rect.w, h: rect.h }
+                  : el
+              ),
+            }
+          : p
+      ),
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPageIndex]);
+
+  // ── Page mutations ──
+
+  function addPage() {
+    const newPage = {
+      pageId: createPageId(),
+      name: `صفحة ${doc.pages.length + 1}`,
+      order: doc.pages.length,
+      filters: [],
+      elements: [],
+    };
+    setDoc((d) => ({ ...d, pages: [...d.pages, newPage] }));
+    setCurrentPageIndex(doc.pages.length);
+    setSelectedId(null);
+  }
+
+  function deletePage() {
+    if (doc.pages.length <= 1) return;
+    const nextPages = doc.pages.filter((_, i) => i !== currentPageIndex);
+    const nextIndex = Math.max(0, currentPageIndex - 1);
+    setDoc((d) => ({ ...d, pages: nextPages }));
+    setCurrentPageIndex(nextIndex);
+    setSelectedId(null);
+  }
+
+  function prevPage() {
+    setCurrentPageIndex((i) => Math.max(0, i - 1));
+    setSelectedId(null);
+  }
+
+  function nextPage() {
+    setCurrentPageIndex((i) => Math.min(doc.pages.length - 1, i + 1));
+    setSelectedId(null);
+  }
+
+  // Find selected element for inspector
+  const selectedElement =
+    selectedId != null
+      ? currentPage?.elements.find((el) => el.elementId === selectedId) ?? null
+      : null;
+
+  return (
+    <div className="rd-root rd-root--editor" dir="rtl">
+      {/* Back button + report name */}
+      <div className="rd-editor-header">
+        <button className="rd-btn rd-btn-secondary" onClick={onBack}>
+          رجوع
+        </button>
+        <h2 className="rd-title rd-title-inline">{doc.reportName}</h2>
+        {saveError && <span className="rd-save-error">{saveError}</span>}
+      </div>
+
+      {/* Toolbar */}
+      <Toolbar
+        doc={doc}
+        currentPageIndex={currentPageIndex}
+        onAddElement={addElement}
+        onImageSelected={addImageElement}
+        onAddPage={addPage}
+        onDeletePage={deletePage}
+        onPrevPage={prevPage}
+        onNextPage={nextPage}
+        onSave={handleExplicitSave}
+        onPrint={() => window.print()}
+        saving={saving}
+      />
+
+      {/* Editor body: canvas + inspector */}
+      <div className="rd-editor-body">
+        <div className="rd-canvas-area">
+          <Canvas
+            doc={doc}
+            pageIndex={currentPageIndex}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            mode="edit"
+            zoom={0.9}
+            onElementChange={handleElementChange}
+          />
+        </div>
+        <div className="rd-inspector-panel">
+          <Inspector element={selectedElement} onUpdate={updateElement} />
+          {!selectedElement && (
+            <p className="rd-inspector-empty">اختر عنصراً لتعديل خصائصه.</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Main tab component ──────────────────────────────────────────────────────
 
 export default function ReportDesigner() {
   const { directoryHandle } = useWorkspace();
@@ -110,27 +366,17 @@ export default function ReportDesigner() {
   }
 
   // --- Editor view ---
-  if (view === "editor") {
+  if (view === "editor" && openDoc) {
     return (
-      <div className="rd-root" dir="rtl">
-        <div className="rd-editor-header">
-          <button
-            className="rd-btn rd-btn-secondary"
-            onClick={() => {
-              setView("list");
-              setOpenDoc(null);
-            }}
-          >
-            رجوع
-          </button>
-          <h2 className="rd-title rd-title-inline">
-            {openDoc?.reportName ?? "تقرير جديد"}
-          </h2>
-        </div>
-        <div className="rd-editor-placeholder">
-          محرر التقارير — قيد التطوير
-        </div>
-      </div>
+      <EditorHost
+        initialDoc={openDoc}
+        directoryHandle={directoryHandle}
+        currentUser={currentUser}
+        onBack={() => {
+          setView("list");
+          setOpenDoc(null);
+        }}
+      />
     );
   }
 

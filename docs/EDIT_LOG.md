@@ -4,6 +4,62 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v7.12 — 2026-06-28 — Report Designer: Toolbar, Inspector, autosave (Task 1.6)
+
+Phase 1, Task 1.6: wires the full editor — Toolbar (add elements/pages, page nav, save, print), Inspector (selected-element property editor), and debounced autosave (800 ms) with an explicit Save button.
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/Toolbar.tsx`
+
+**Before:** (file did not exist)
+
+**After:** New component. Props: `{ doc, currentPageIndex, onAddElement, onImageSelected, onAddPage, onDeletePage, onPrevPage, onNextPage, onSave, onPrint, saving }`. Renders RTL Arabic toolbar with "إضافة نص", "إضافة شكل", "إضافة صورة" (hidden file-input), page navigation, "إضافة صفحة", "حذف الصفحة", "حفظ"/"جاري الحفظ…", "طباعة" buttons.
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/Inspector.tsx`
+
+**Before:** (file did not exist)
+
+**After:** New component. Props: `{ element: Element | null; onUpdate: (updated: Element) => void }`. Renders nothing when no element selected. When selected: name field, geometry inputs (x/y/w/h), style fields (fill, borderColor, fontSize, fontWeight, borderWidth, padding, opacity, textAlign, color), and type-specific content section (text textarea; shape select; image placeholder; table/chart/kpi placeholder).
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
+
+**Before:**
+```tsx
+  // --- Editor view ---
+  if (view === "editor") {
+    return (
+      <div className="rd-root" dir="rtl">
+        <div className="rd-editor-header">
+          <button
+            className="rd-btn rd-btn-secondary"
+            onClick={() => {
+              setView("list");
+              setOpenDoc(null);
+            }}
+          >
+            رجوع
+          </button>
+          <h2 className="rd-title rd-title-inline">
+            {openDoc?.reportName ?? "تقرير جديد"}
+          </h2>
+        </div>
+        <div className="rd-editor-placeholder">
+          محرر التقارير — قيد التطوير
+        </div>
+      </div>
+    );
+  }
+```
+
+**After:** Replaced placeholder with `<EditorHost>` component (defined inside index.tsx). `EditorHost` owns `doc`, `currentPageIndex`, `selectedId`, `saving`, `saveError` state. Implements debounced 800 ms autosave via `useRef`-held timer. Handles `onAddElement` (text/shape/image), `onUpdateElement`, `onElementChange` (geometry only), page CRUD. Renders `<Toolbar>` + `<Canvas>` + `<Inspector>` in a two-column layout (canvas left, inspector right in RTL = canvas right visually).
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/ReportDesigner.css`
+
+**Before:** (ends at `.rd-resize-handle--se` rule)
+
+**After:** Appended editor-layout rules: `.rd-editor-body`, `.rd-canvas-area`, `.rd-toolbar`, `.rd-inspector`, `.rd-inspector-section`, `.rd-inspector-field`, `.rd-inspector-input`, `.rd-inspector-textarea`, `.rd-inspector-select`, `.rd-save-status`.
+
+---
+
 ## v7.11 — 2026-06-28 — Report Designer: drag/resize/select interactions (Task 1.5)
 
 Phase 1, Task 1.5: pointer-event drag and resize interactions for canvas elements.
