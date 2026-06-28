@@ -4,6 +4,98 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v7.2 — 2026-06-28 — Report Designer: filter predicates for query engine (FEATURE)
+
+Phase 0, Task 0.3: Create pure filter predicate functions for the report query engine. Implements row filtering via a composable filter array with support for 8 filter operations: equals, notEquals, in, between, contains, truthy, falsy, topN. The topN operation is intentionally a no-op here; topN filtering is applied post-aggregation in the runQuery engine.
+
+**File:** `src/data/reportDesigner/query/filters.ts` (new)
+
+**Before:**
+```ts
+(new file)
+```
+
+**After:**
+```ts
+import type { Filter } from "../reportTypes";
+
+function matches(value: unknown, f: Filter): boolean {
+  switch (f.op) {
+    case "equals": return value === f.value;
+    case "notEquals": return value !== f.value;
+    case "in": return Array.isArray(f.value) && f.value.includes(value as never);
+    case "between": {
+      if (!Array.isArray(f.value) || typeof value !== "number") return false;
+      const [lo, hi] = f.value as [number, number];
+      return value >= lo && value <= hi;
+    }
+    case "contains":
+      return String(value ?? "").includes(String(f.value ?? ""));
+    case "truthy": return Boolean(value);
+    case "falsy": return !value;
+    case "topN": return true; // applied post-aggregation in runQuery
+    default: return true;
+  }
+}
+
+export function applyFilters<T extends Record<string, unknown>>(rows: T[], filters: Filter[]): T[] {
+  if (!filters.length) return rows;
+  return rows.filter((row) => filters.every((f) => matches(row[f.field], f)));
+}
+```
+
+**File:** `src/data/reportDesigner/query/filters.test.ts` (new)
+
+**Before:**
+```ts
+(new file)
+```
+
+**After:**
+```ts
+import { describe, it, expect } from "vitest";
+import { applyFilters } from "./filters";
+
+const rows = [
+  { port: "A", n: 1, ok: true,  note: "alpha" },
+  { port: "B", n: 5, ok: false, note: "beta" },
+  { port: "A", n: 9, ok: true,  note: "gamma" },
+];
+
+describe("applyFilters", () => {
+  it("equals", () => {
+    expect(applyFilters(rows, [{ field: "port", op: "equals", value: "A" }])).toHaveLength(2);
+  });
+  it("in", () => {
+    expect(applyFilters(rows, [{ field: "port", op: "in", value: ["B"] }])).toHaveLength(1);
+  });
+  it("notEquals", () => {
+    expect(applyFilters(rows, [{ field: "port", op: "notEquals", value: "A" }])).toHaveLength(1);
+  });
+  it("between (inclusive)", () => {
+    expect(applyFilters(rows, [{ field: "n", op: "between", value: [1, 5] }])).toHaveLength(2);
+  });
+  it("contains (substring)", () => {
+    expect(applyFilters(rows, [{ field: "note", op: "contains", value: "et" }])).toHaveLength(1);
+  });
+  it("truthy / falsy", () => {
+    expect(applyFilters(rows, [{ field: "ok", op: "truthy", value: null }])).toHaveLength(2);
+    expect(applyFilters(rows, [{ field: "ok", op: "falsy", value: null }])).toHaveLength(1);
+  });
+  it("AND-composes multiple filters", () => {
+    expect(applyFilters(rows, [
+      { field: "port", op: "equals", value: "A" },
+      { field: "ok", op: "truthy", value: null },
+    ])).toHaveLength(2);
+  });
+  it("ignores topN here", () => {
+    expect(applyFilters(rows, [{ field: "n", op: "topN", value: 1 }])).toHaveLength(3);
+  });
+});
+```
+
+---
+
 ## v7.1 — 2026-06-28 — Report Designer: aggregation functions for query engine (FEATURE)
 
 Phase 0, Task 0.2: Create pure aggregation functions for the report query engine. Implements the complete set of aggregation operations (count, distinctCount, sum, avg, min, max, percentOfTotal) with proper handling of nulls, booleans, and non-numeric values.
