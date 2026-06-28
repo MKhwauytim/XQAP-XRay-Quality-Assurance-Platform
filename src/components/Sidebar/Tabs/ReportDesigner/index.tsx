@@ -54,6 +54,18 @@ function formatDate(iso: string): string {
   }
 }
 
+function pageSizeLabel(p: PageSizePreset): string {
+  const labels: Record<PageSizePreset, string> = {
+    "A4": "A4 عمودي",
+    "Letter": "Letter عمودي",
+    "16:9": "16:9 شرائح",
+    "4:3": "4:3 شرائح",
+    "16:9-fhd": "16:9 FHD",
+    "custom": "مخصص",
+  };
+  return labels[p] ?? p;
+}
+
 // ── Editor host ────────────────────────────────────────────────────────────
 
 interface EditorHostProps {
@@ -497,12 +509,13 @@ export default function ReportDesigner() {
             value={newPreset}
             onChange={(e) => setNewPreset(e.target.value as PageSizePreset)}
             disabled={creating}
+            dir="rtl"
+            title="حجم الصفحة"
+            aria-label="حجم الصفحة"
           >
-            <option value="A4">A4 عمودي</option>
-            <option value="Letter">Letter عمودي</option>
-            <option value="16:9">16:9 شرائح</option>
-            <option value="4:3">4:3 شرائح</option>
-            <option value="16:9-fhd">16:9 FHD</option>
+            {(["A4", "Letter", "16:9", "4:3", "16:9-fhd"] as PageSizePreset[]).map((p) => (
+              <option key={p} value={p}>{pageSizeLabel(p)}</option>
+            ))}
           </select>
           <button
             className="rd-btn rd-btn-primary"

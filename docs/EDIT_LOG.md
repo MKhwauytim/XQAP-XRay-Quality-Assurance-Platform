@@ -4,6 +4,63 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v14.0 — 2026-06-28 — Create-dialog size selector + pageSizeLabel helper
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
+
+**Before:**
+```tsx
+// No pageSizeLabel helper function
+// Select element in create form had hardcoded Arabic labels:
+<select
+  className="rd-new-select"
+  value={newPreset}
+  onChange={(e) => setNewPreset(e.target.value as PageSizePreset)}
+  disabled={creating}
+>
+  <option value="A4">A4 عمودي</option>
+  <option value="Letter">Letter عمودي</option>
+  <option value="16:9">16:9 شرائح</option>
+  <option value="4:3">4:3 شرائح</option>
+  <option value="16:9-fhd">16:9 FHD</option>
+</select>
+```
+
+**After:**
+```tsx
+// Added pageSizeLabel(p: PageSizePreset): string helper function
+function pageSizeLabel(p: PageSizePreset): string {
+  const labels: Record<PageSizePreset, string> = {
+    "A4": "A4 عمودي",
+    "Letter": "Letter عمودي",
+    "16:9": "16:9 شرائح",
+    "4:3": "4:3 شرائح",
+    "16:9-fhd": "16:9 FHD",
+    "custom": "مخصص",
+  };
+  return labels[p] ?? p;
+}
+
+// Updated select element to use pageSizeLabel, added dir/title/aria-label
+<select
+  className="rd-new-select"
+  value={newPreset}
+  onChange={(e) => setNewPreset(e.target.value as PageSizePreset)}
+  disabled={creating}
+  dir="rtl"
+  title="حجم الصفحة"
+  aria-label="حجم الصفحة"
+>
+  {(["A4", "Letter", "16:9", "4:3", "16:9-fhd"] as PageSizePreset[]).map((p) => (
+    <option key={p} value={p}>{pageSizeLabel(p)}</option>
+  ))}
+</select>
+```
+
+**Note:** CSS vars `--rd-page-width` and `--rd-page-height` were already set on `.rd-canvas-area` by Task A.2 (v13.0). This task only refactors the create-dialog size selector to use the new pageSizeLabel helper for consistency.
+
+---
+
 ## v13.0 — 2026-06-28 — VizPanel element type grid + Ribbon toolbar redesign
 
 **File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/VizPanel.tsx`
