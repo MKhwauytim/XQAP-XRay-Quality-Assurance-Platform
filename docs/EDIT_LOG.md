@@ -4,6 +4,52 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v7.10 — 2026-06-28 — Fix implicit React.CSSProperties imports in canvas components
+
+Small fix for type imports in Report Designer canvas components. The `React.CSSProperties` type was used implicitly without an explicit import. Changed to `import type { CSSProperties } from "react"` and replaced all instances of `React.CSSProperties` with the explicit `CSSProperties` type.
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/Canvas.tsx`
+
+**Before:**
+```ts
+import type { ReportDocument, Element } from "../../../../../data/reportDesigner/reportTypes";
+// ... no explicit CSSProperties import
+const canvasStyle: React.CSSProperties = { ... };
+const innerStyle: React.CSSProperties = ...
+const wrapperStyle: React.CSSProperties = { ... };
+```
+
+**After:**
+```ts
+import type { CSSProperties } from "react";
+import type { ReportDocument, Element } from "../../../../../data/reportDesigner/reportTypes";
+// ...
+const canvasStyle: CSSProperties = { ... };
+const innerStyle: CSSProperties = ...
+const wrapperStyle: CSSProperties = { ... };
+```
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/renderers/ShapeRenderer.tsx`
+
+**Before:**
+```ts
+import type { Element, ShapeConfig } from "../../../../../data/reportDesigner/reportTypes";
+// ... no explicit CSSProperties import
+const hrStyle: React.CSSProperties = { ... };
+const divStyle: React.CSSProperties = { ... };
+```
+
+**After:**
+```ts
+import type { CSSProperties } from "react";
+import type { Element, ShapeConfig } from "../../../../../data/reportDesigner/reportTypes";
+// ...
+const hrStyle: CSSProperties = { ... };
+const divStyle: CSSProperties = { ... };
+```
+
+---
+
 ## v7.9 — 2026-06-28 — Report Designer: canvas surface + static renderers (Task 1.4)
 
 Phase 1, Task 1.4: Canvas component and pure element renderers for text, shape, and image. Canvas renders a page at exact `pageSetup.width × height` pixels (scaled by optional `zoom`), positions elements absolutely by (x,y,w,h), sorts by z-index, and dispatches to the correct renderer. In edit mode clicking elements calls `onSelect`; selected element receives `rd-element--selected` class for blue outline. Table/chart/kpi elements show a placeholder div. TextRenderer applies ElementStyle to displayed text. ShapeRenderer handles rect/ellipse/line/divider. ImageRenderer renders img with object-fit contain.

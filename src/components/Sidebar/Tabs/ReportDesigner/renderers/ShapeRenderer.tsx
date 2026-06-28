@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import type { Element, ShapeConfig } from "../../../../../data/reportDesigner/reportTypes";
 
 interface ShapeRendererProps {
@@ -9,7 +10,7 @@ export default function ShapeRenderer({ element }: ShapeRendererProps) {
   const s = element.style;
 
   if (config.shape === "line" || config.shape === "divider") {
-    const hrStyle: React.CSSProperties = {
+    const hrStyle: CSSProperties = {
       width: "100%",
       margin: 0,
       border: "none",
@@ -26,7 +27,7 @@ export default function ShapeRenderer({ element }: ShapeRendererProps) {
   }
 
   // rect or ellipse
-  const divStyle: React.CSSProperties = {
+  const divStyle: CSSProperties = {
     width: "100%",
     height: "100%",
     boxSizing: "border-box",

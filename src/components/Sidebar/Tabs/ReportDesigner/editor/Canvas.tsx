@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import type { ReportDocument, Element } from "../../../../../data/reportDesigner/reportTypes";
 import TextRenderer from "../renderers/TextRenderer";
 import ShapeRenderer from "../renderers/ShapeRenderer";
@@ -40,7 +41,7 @@ export default function Canvas({
 
   const sortedElements = [...page.elements].sort((a, b) => a.z - b.z);
 
-  const canvasStyle: React.CSSProperties = {
+  const canvasStyle: CSSProperties = {
     position: "relative",
     width: width * zoom,
     height: height * zoom,
@@ -51,7 +52,7 @@ export default function Canvas({
 
   // When zoom != 1 we scale the inner content rather than each element individually
   // so that element coordinates always match the doc's coordinate space.
-  const innerStyle: React.CSSProperties =
+  const innerStyle: CSSProperties =
     zoom !== 1
       ? {
           position: "absolute",
@@ -83,7 +84,7 @@ export default function Canvas({
       <div style={innerStyle}>
         {sortedElements.map((el) => {
           const isSelected = mode === "edit" && el.elementId === selectedId;
-          const wrapperStyle: React.CSSProperties = {
+          const wrapperStyle: CSSProperties = {
             position: "absolute",
             left: el.x,
             top: el.y,
