@@ -57,6 +57,32 @@ interface CanvasProps {
 
 ---
 
+## v7.12.1 — 2026-06-28 — Fix: update onElementChange ref in effect not during render
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/useCanvasInteractions.ts`
+
+**Before:**
+```ts
+import { useRef, useCallback } from "react";
+// ...
+const onElementChangeRef = useRef(onElementChange);
+onElementChangeRef.current = onElementChange;  // ← during render — invalid React pattern
+```
+
+**After:**
+```ts
+import { useRef, useCallback, useEffect } from "react";
+// ...
+const onElementChangeRef = useRef(onElementChange);
+useEffect(() => {
+  onElementChangeRef.current = onElementChange;
+}, [onElementChange]);
+```
+
+Updating `ref.current` during render is a React anti-pattern and can cause unexpected behavior. The fix wraps the ref update in a `useEffect` so it only happens after render completes.
+
+---
+
 ## v7.12 — 2026-06-28 — Fix: pointer capture + stable onElementChange ref in useCanvasInteractions
 
 **File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/useCanvasInteractions.ts`

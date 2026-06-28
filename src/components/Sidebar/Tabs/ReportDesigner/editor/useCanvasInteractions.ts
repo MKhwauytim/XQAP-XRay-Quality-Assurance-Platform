@@ -1,4 +1,4 @@
-import { useRef, useCallback } from "react";
+import { useRef, useCallback, useEffect } from "react";
 import type React from "react";
 import { snapRect, resize } from "../../../../../data/reportDesigner/geometry";
 import type { Rect, ResizeHandle } from "../../../../../data/reportDesigner/geometry";
@@ -42,7 +42,9 @@ export function useCanvasInteractions({
   // Store onElementChange in a ref so handlers always read the latest value
   // without needing to be re-created on every render (eliminates stale closure).
   const onElementChangeRef = useRef(onElementChange);
-  onElementChangeRef.current = onElementChange;
+  useEffect(() => {
+    onElementChangeRef.current = onElementChange;
+  }, [onElementChange]);
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     const state = dragRef.current;
