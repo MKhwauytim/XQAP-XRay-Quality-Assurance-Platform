@@ -23,6 +23,7 @@ import type { DirectoryHandleLike } from "../../../../data/storage/fileSystemAcc
 import Canvas from "./editor/Canvas";
 import Toolbar from "./editor/Toolbar";
 import Inspector from "./editor/Inspector";
+import PrintView from "./PrintView";
 import "./ReportDesigner.css";
 
 export const tabConfig: SidebarTabModule["tabConfig"] = {
@@ -64,6 +65,7 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: Editor
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [showPrint, setShowPrint] = useState(false);
 
   // Debounce timer ref — stores the pending timeout id
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -269,7 +271,7 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: Editor
         onPrevPage={prevPage}
         onNextPage={nextPage}
         onSave={handleExplicitSave}
-        onPrint={() => window.print()}
+        onPrint={() => setShowPrint(true)}
         saving={saving}
       />
 
@@ -293,6 +295,8 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: Editor
           )}
         </div>
       </div>
+
+      {showPrint && <PrintView doc={doc} onClose={() => setShowPrint(false)} />}
     </div>
   );
 }

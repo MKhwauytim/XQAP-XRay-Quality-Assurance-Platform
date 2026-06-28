@@ -466,3 +466,46 @@
 .rd-resize-handle--sw { bottom: -4px; right: -4px; cursor: sw-resize; }
 .rd-resize-handle--s  { bottom: -4px; left: 50%; transform: translateX(-50%); cursor: s-resize; }
 .rd-resize-handle--se { bottom: -4px; left: -4px; cursor: se-resize; }
+
+/* ── Print view ── */
+.rd-print-page {
+  width: var(--rd-page-width, 794px);
+  height: var(--rd-page-height, 1123px);
+  page-break-after: always;
+  break-after: page;
+  overflow: hidden;
+  position: relative;
+  margin: 0 auto 16px;
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.15);
+  background: white;
+}
+
+@media print {
+  .rd-no-print {
+    display: none !important;
+  }
+  body > *:not(.rd-print-overlay) {
+    display: none !important;
+  }
+  .rd-print-overlay {
+    position: static !important;
+    z-index: auto !important;
+  }
+  .rd-print-page {
+    box-shadow: none;
+    margin: 0;
+    page-break-after: always;
+    break-after: page;
+  }
+  .rd-print-page:last-child {
+    page-break-after: avoid;
+    break-after: avoid;
+  }
+}
+
+/* TODO: dynamically set @page size from doc.pageSetup when browsers support
+   setting @page rules from JS. For now fixed at A4 portrait (@96dpi = 794×1123px). */
+@page {
+  size: A4 portrait;
+  margin: 0;
+}

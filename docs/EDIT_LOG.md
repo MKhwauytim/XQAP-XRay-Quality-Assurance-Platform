@@ -4,6 +4,166 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v7.14 — 2026-06-28 — Report Designer: print/PDF view (Task 1.7)
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/PrintView.tsx` _(new file)_
+
+**Before:** _(file did not exist)_
+
+**After:**
+```tsx
+import type { ReportDocument } from "../../../../data/reportDesigner/reportTypes";
+import Canvas from "./editor/Canvas";
+
+interface PrintViewProps {
+  doc: ReportDocument;
+  onClose: () => void;
+}
+
+export default function PrintView({ doc, onClose }: PrintViewProps) {
+  return (
+    <div
+      className="rd-print-overlay"
+      dir="rtl"
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "white",
+        zIndex: 9999,
+        overflowY: "auto",
+        padding: "16px",
+        boxSizing: "border-box",
+      }}
+    >
+      <div className="rd-no-print" style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
+        <button className="rd-btn rd-btn-secondary" onClick={onClose}>رجوع</button>
+        <button className="rd-btn rd-btn-primary" onClick={() => window.print()}>طباعة</button>
+      </div>
+      {doc.pages.map((_page, i) => (
+        <div key={i} className="rd-print-page">
+          <Canvas
+            doc={doc}
+            pageIndex={i}
+            selectedId={null}
+            onSelect={() => {}}
+            mode="view"
+            zoom={1}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/ReportDesigner.css`
+
+**Before:** _(no print CSS existed)_
+
+**After:** _(appended at end of file)_
+```css
+/* ── Print view ── */
+.rd-print-page {
+  width: var(--rd-page-width, 794px);
+  height: var(--rd-page-height, 1123px);
+  page-break-after: always;
+  break-after: page;
+  overflow: hidden;
+  position: relative;
+  margin: 0 auto 16px;
+  box-shadow: 0 0 8px rgba(0,0,0,0.15);
+  background: white;
+}
+
+@media print {
+  .rd-no-print {
+    display: none !important;
+  }
+  body > *:not(.rd-print-overlay) {
+    display: none !important;
+  }
+  .rd-print-overlay {
+    position: static !important;
+    z-index: auto !important;
+  }
+  .rd-print-page {
+    box-shadow: none;
+    margin: 0;
+    page-break-after: always;
+    break-after: page;
+  }
+  .rd-print-page:last-child {
+    page-break-after: avoid;
+    break-after: avoid;
+  }
+}
+
+/* TODO: dynamically set @page size from doc.pageSetup when browsers support
+   setting @page rules from JS. For now fixed at A4 portrait (@96dpi = 794×1123px). */
+@page {
+  size: A4 portrait;
+  margin: 0;
+}
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
+
+**Before:**
+```tsx
+function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: EditorHostProps) {
+  const [doc, setDoc] = useState<ReportDocument>(initialDoc);
+  const [currentPageIndex, setCurrentPageIndex] = useState(0);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+```
+
+**After:**
+```tsx
+function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: EditorHostProps) {
+  const [doc, setDoc] = useState<ReportDocument>(initialDoc);
+  const [currentPageIndex, setCurrentPageIndex] = useState(0);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [showPrint, setShowPrint] = useState(false);
+```
+
+**Before (onPrint):**
+```tsx
+        onPrint={() => window.print()}
+```
+
+**After (onPrint):**
+```tsx
+        onPrint={() => setShowPrint(true)}
+```
+
+**Before (return statement end of EditorHost):**
+```tsx
+    </div>
+  );
+}
+
+// ── Main tab component ──────────────────────────────────────────────────────
+```
+
+**After (return statement end of EditorHost):**
+```tsx
+      {showPrint && <PrintView doc={doc} onClose={() => setShowPrint(false)} />}
+    </div>
+  );
+}
+
+// ── Main tab component ──────────────────────────────────────────────────────
+```
+
+---
+
 ## v7.13 — 2026-06-28 — Fix: page mutation stale closures in Report Designer
 
 **File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
