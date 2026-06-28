@@ -4,6 +4,7 @@ import { AlertTriangle, BarChart2, BarChart3, Building2, Check, ClipboardList, D
 
 import type { SidebarTabModule } from "../tabTypes";
 import { loadOrDeriveDistributionCurrent } from "../../../../data/distribution/distributionStorage";
+import { logRejection } from "../../../../data/storage/errorLogger";
 import { listMonthFolders, loadMonthPopulationFinal, loadMonthForEditing } from "../../../../data/population/populationStorage";
 import type { PreparedPopulationRow } from "../../../../data/population/populationTypes";
 import { buildDistributionReport, buildDistributionXlsx } from "../../../../data/reporting/distributionReport";
@@ -116,10 +117,12 @@ export default function ReportsTab() {
 
   useEffect(() => {
     if (!directoryHandle) return;
-    void listMonthFolders(directoryHandle).then((list) => {
-      setMonths(list);
-      if (list.length > 0) setSelectedMonth(list[list.length - 1]!.folderName);
-    });
+    void listMonthFolders(directoryHandle)
+      .then((list) => {
+        setMonths(list);
+        if (list.length > 0) setSelectedMonth(list[list.length - 1]!.folderName);
+      })
+      .catch(logRejection("reports:listMonthFolders"));
   }, [directoryHandle]);
 
   useEffect(() => {

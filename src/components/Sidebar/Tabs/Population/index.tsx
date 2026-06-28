@@ -15,6 +15,7 @@ import type { SidebarTabModule } from "../tabTypes";
 
 import { readSession } from "../../../../auth/authSession";
 import { usePermissions } from "../../../../auth/usePermissions";
+import { logRejection } from "../../../../data/storage/errorLogger";
 import { currentMonthFolderInfo, formatMonthFolderName, parseMonthFolderName } from "../../../../data/population/monthFolder";
 import type { MonthFolderInfo } from "../../../../data/population/monthFolder";
 import {
@@ -199,7 +200,9 @@ export default function PopulationTab() {
 
   useEffect(() => {
     if (directoryHandle) {
-      loadPopulationConfig(directoryHandle).then((c) => setConfig(c));
+      loadPopulationConfig(directoryHandle)
+        .then((c) => setConfig(c))
+        .catch(logRejection("population:loadPopulationConfig"));
     } else {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- sync reset when workspace is disconnected; synchronizing with the FSA external system is the correct use of effects
       setConfig(DEFAULT_POPULATION_CONFIG);
@@ -228,9 +231,11 @@ export default function PopulationTab() {
   // Load cumulative CertScan data from workspace on mount
   useEffect(() => {
     if (!directoryHandle) return;
-    loadCertScanGlobal(directoryHandle).then((text) => {
-      if (text) setCertScanPasteText(text);
-    });
+    loadCertScanGlobal(directoryHandle)
+      .then((text) => {
+        if (text) setCertScanPasteText(text);
+      })
+      .catch(logRejection("population:loadCertScanGlobal"));
   }, [directoryHandle]);
 
   // Listen for sub-tab changes dispatched from the Sidebar

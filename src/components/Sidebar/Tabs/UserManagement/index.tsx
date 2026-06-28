@@ -13,6 +13,7 @@ import {
 
 import type { AuthRole } from "../../../../auth/authTypes";
 import { readSession } from "../../../../auth/authSession";
+import { logRejection } from "../../../../data/storage/errorLogger";
 import {
   readAuthActivityLog,
   type AuthActivityLogEntry,
@@ -175,6 +176,7 @@ export default function UserManagementTab() {
       .then((entries) => {
         if (!cancelled) setActivityEntries(entries);
       })
+      .catch(logRejection("userManagement:readAuthActivityLog"))
       .finally(() => {
         if (!cancelled) setIsActivityLoading(false);
       });
@@ -1087,6 +1089,7 @@ export default function UserManagementTab() {
               setIsActivityLoading(true);
               void readAuthActivityLog()
                 .then(setActivityEntries)
+                .catch(logRejection("userManagement:refreshActivityLog"))
                 .finally(() => setIsActivityLoading(false));
             }}
           >

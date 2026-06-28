@@ -21,6 +21,7 @@ import type {
   TemplateSchema
 } from "../../../../data/templates/templateTypes";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
+import { logRejection } from "../../../../data/storage/errorLogger";
 import "./TemplateBuilder.css";
 import { PageHeader } from "../../../../components/PageHeader/PageHeader";
 
@@ -167,7 +168,9 @@ export default function TemplateBuilderTab() {
 
   useEffect(() => {
     if (!directoryHandle) return;
-    void loadTemplateIndex(directoryHandle).then(setIndex);
+    void loadTemplateIndex(directoryHandle)
+      .then(setIndex)
+      .catch(logRejection("templateBuilder:loadTemplateIndex"));
   }, [directoryHandle]);
 
   if (role !== "manager" && role !== "admin") {

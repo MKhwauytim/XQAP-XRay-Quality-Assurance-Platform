@@ -6,6 +6,7 @@ import {
   upsertItemAnswer
 } from "../../../../../data/answers/answerStorage";
 import { writeEmployeeXlsx } from "../../../../../data/answers/employeeXlsx";
+import { logRejection } from "../../../../../data/storage/errorLogger";
 import type { FieldAnswer, ItemAnswer } from "../../../../../data/answers/answerTypes";
 import { loadOrDeriveDistributionCurrent } from "../../../../../data/distribution/distributionStorage";
 import type { DistributionEntry } from "../../../../../data/distribution/distributionTypes";
@@ -56,13 +57,15 @@ export default function EmployeeDashboard({ directoryHandle }: Props) {
   const [statusMessage, setStatusMessage] = useState<StatusMessage>(null);
 
   useEffect(() => {
-    void listMonthFolders(directoryHandle).then((months) => {
-      setAvailableMonths(months);
-      if (months.length > 0) setSelectedMonth(months[months.length - 1]!.folderName);
-    });
-    void loadTemplateIndex(directoryHandle).then((idx) =>
-      setTemplateIndex(idx.templates)
-    );
+    void listMonthFolders(directoryHandle)
+      .then((months) => {
+        setAvailableMonths(months);
+        if (months.length > 0) setSelectedMonth(months[months.length - 1]!.folderName);
+      })
+      .catch(logRejection("employeeDashboard:listMonthFolders"));
+    void loadTemplateIndex(directoryHandle)
+      .then((idx) => setTemplateIndex(idx.templates))
+      .catch(logRejection("employeeDashboard:loadTemplateIndex"));
   }, [directoryHandle]);
 
   const loadMonthData = useCallback(async () => {

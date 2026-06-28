@@ -4,6 +4,53 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v5.39 — 2026-06-28 — Handle floating-promise rejections in data loaders (ERR-01)
+
+Audit finding ERR-01: 13 fire-and-forget data loaders across 6 files used
+`void X.then(...)` (some with `.finally`) but no `.catch`. A rejected load
+(e.g. workspace read failure) became an **unhandled promise rejection** with no
+log entry and no recovery. Added a `logRejection(context)` helper to
+`errorLogger.ts` and a `.catch(logRejection(...))` to each site. On failure the
+state now stays at its safe initial value and the error is recorded in the
+in-memory ring buffer (visible via `getRecentErrors`). Sites already having a
+`.catch` (e.g. `listMonthFolders` in Population, browse-preset/browse-row loads)
+were left unchanged.
+
+**File:** `src/data/storage/errorLogger.ts`
+
+**Before:**
+```ts
+export function clearErrors(): void {
+  entries.length = 0;
+}
+```
+
+**After:**
+```ts
+export function clearErrors(): void {
+  entries.length = 0;
+}
+
+/**
+ * `.catch` handler for intentionally fire-and-forget promises: logs the
+ * rejection to the ring buffer instead of leaving it unhandled. State simply
+ * isn't updated on failure (safe degradation).
+ */
+export function logRejection(context: string): (error: unknown) => void {
+  return (error: unknown) => logError(context, error);
+}
+```
+
+**Files patched (added `.catch(logRejection("<context>"))`):**
+- `Population/index.tsx` — loadPopulationConfig, loadCertScanGlobal
+- `UserManagement/index.tsx` — readAuthActivityLog (effect + refresh button)
+- `EmployeeWorkspace/views/XrayReferrals.tsx` — listMonthFolders, loadTemplateIndex, loadInspectionTemplateSelection, loadPopulationConfig, Promise.all(browse presets)
+- `EmployeeWorkspace/views/EmployeeDashboard.tsx` — listMonthFolders, loadTemplateIndex
+- `Reports/index.tsx` — listMonthFolders
+- `TemplateBuilder/index.tsx` — loadTemplateIndex
+
+---
+
 ## v5.38 — 2026-06-28 — Fix CLAUDE.md documentation drift (DOC-01)
 
 Audit finding DOC-01: three confirmed drifts in `CLAUDE.md`. (1) Bundle size
