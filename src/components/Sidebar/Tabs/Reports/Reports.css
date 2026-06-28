@@ -755,3 +755,41 @@
   opacity: 0.45;
   cursor: not-allowed;
 }
+
+/* ── Power BI Export section ── */
+.rh-pbi-section { margin-top: 24px; }
+.rh-section-divider { height: 1px; background: #e1dfdd; margin: 24px 0 20px; }
+.rh-pbi-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #201f1e;
+  margin: 0 0 8px;
+  display: flex;
+  align-items: center;
+}
+.rh-pbi-desc { font-size: 13px; color: #605e5c; margin: 0 0 14px; }
+.rh-pbi-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.rh-pbi-select {
+  padding: 7px 10px;
+  font-size: 14px;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  outline: none;
+  background: #fff;
+  color: #24292f;
+  direction: rtl;
+  cursor: pointer;
+  min-width: 180px;
+}
+.rh-pbi-select:focus { border-color: #0078d4; }
+.rh-pbi-select:disabled { opacity: 0.55; cursor: not-allowed; }
+.rh-pbi-result {
+  margin-top: 14px;
+  padding: 12px 16px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+}
+.rh-pbi-success { color: #16a34a; margin: 0 0 8px; font-size: 13px; }
+.rh-pbi-file-list { margin: 6px 0 0; padding: 0 18px; font-size: 13px; line-height: 1.7; list-style: disc; }
+.rh-pbi-error { color: #dc2626; font-size: 13px; margin-top: 10px; }

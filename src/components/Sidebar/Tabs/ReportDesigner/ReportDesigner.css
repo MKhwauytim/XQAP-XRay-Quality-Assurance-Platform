@@ -1,3 +1,314 @@
+/* ── Power BI theme tokens ── */
+:root {
+  --rd-ribbon-bg: #f3f2f1;
+  --rd-ribbon-border: #e1dfdd;
+  --rd-panel-bg: #ffffff;
+  --rd-panel-border: #e1dfdd;
+  --rd-canvas-bg: #f3f2f1;
+  --rd-accent: #0078d4;
+  --rd-accent-hover: #106ebe;
+  --rd-pages-bg: #edebe9;
+  --rd-pages-active: #ffffff;
+  --rd-text-primary: #201f1e;
+  --rd-text-secondary: #605e5c;
+  --rd-page-width: 794px;
+  --rd-page-height: 1123px;
+}
+
+/* ── 3-panel editor layout ── */
+.rd-pbi-layout {
+  display: grid;
+  grid-template-rows: 44px 1fr 40px;
+  grid-template-columns: 240px 1fr 280px;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--rd-canvas-bg);
+  direction: rtl;
+}
+
+/* In RTL: column 1 = rightmost (fields), column 3 = leftmost (viz+format) */
+.rd-ribbon {
+  grid-row: 1;
+  grid-column: 1 / -1;
+  background: var(--rd-ribbon-bg);
+  border-bottom: 1px solid var(--rd-ribbon-border);
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 0 8px;
+  direction: rtl;
+  overflow: hidden;
+}
+
+.rd-fields-panel {
+  grid-row: 2;
+  grid-column: 1;
+  background: var(--rd-panel-bg);
+  border-left: 1px solid var(--rd-panel-border);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  direction: rtl;
+}
+
+.rd-canvas-area {
+  grid-row: 2;
+  grid-column: 2;
+  overflow: auto;
+  background: var(--rd-canvas-bg);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 32px;
+  direction: ltr;
+}
+
+.rd-viz-panel {
+  grid-row: 2;
+  grid-column: 3;
+  background: var(--rd-panel-bg);
+  border-right: 1px solid var(--rd-panel-border);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  direction: rtl;
+}
+
+.rd-pages-bar {
+  grid-row: 3;
+  grid-column: 1 / -1;
+  background: var(--rd-pages-bg);
+  border-top: 1px solid var(--rd-panel-border);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 8px;
+  overflow-x: auto;
+  direction: rtl;
+}
+
+/* Panel collapsed states */
+.rd-pbi-layout.rd-fields-hidden {
+  grid-template-columns: 0 1fr 280px;
+}
+.rd-pbi-layout.rd-format-hidden {
+  grid-template-columns: 240px 1fr 0;
+}
+.rd-pbi-layout.rd-fields-hidden.rd-format-hidden {
+  grid-template-columns: 0 1fr 0;
+}
+.rd-fields-hidden .rd-fields-panel { display: none; }
+.rd-format-hidden .rd-viz-panel { display: none; }
+
+/* ── Ribbon button style ── */
+.rd-ribbon-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 4px 10px;
+  height: 44px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--rd-text-primary);
+  font-size: 11px;
+  border-radius: 4px;
+  min-width: 48px;
+  transition: background 0.1s;
+  white-space: nowrap;
+}
+.rd-ribbon-btn:hover { background: #e8e6e4; }
+.rd-ribbon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.rd-ribbon-btn--active { background: #e8e6e4; color: var(--rd-accent); }
+.rd-ribbon-btn-icon { font-size: 18px; line-height: 1; }
+.rd-ribbon-separator {
+  width: 1px;
+  height: 28px;
+  background: var(--rd-ribbon-border);
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+.rd-ribbon-group {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+.rd-ribbon-doc-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--rd-text-primary);
+  margin: 0 8px;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rd-saving-indicator {
+  font-size: 12px;
+  color: var(--rd-text-secondary);
+  margin: 0 8px;
+}
+
+/* ── Pages bar ── */
+.rd-page-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
+  cursor: pointer;
+  font-size: 13px;
+  background: transparent;
+  color: var(--rd-text-secondary);
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background 0.1s;
+}
+.rd-page-tab:hover { background: #e1dfdd; color: var(--rd-text-primary); }
+.rd-page-tab--active {
+  background: var(--rd-pages-active);
+  border-color: var(--rd-panel-border);
+  color: var(--rd-accent);
+  font-weight: 600;
+}
+.rd-page-tab-del {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--rd-text-secondary);
+  padding: 0 2px;
+  font-size: 14px;
+  line-height: 1;
+  border-radius: 3px;
+  display: none;
+}
+.rd-page-tab:hover .rd-page-tab-del { display: inline; }
+.rd-page-tab--active .rd-page-tab-del { display: inline; }
+.rd-page-tab-add {
+  padding: 4px 10px;
+  border: 1px dashed var(--rd-ribbon-border);
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  color: var(--rd-text-secondary);
+  font-size: 13px;
+  transition: background 0.1s;
+}
+.rd-page-tab-add:hover { background: #e1dfdd; }
+
+/* ── Panel headers ── */
+.rd-panel-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--rd-text-secondary);
+  padding: 10px 12px 6px;
+  border-bottom: 1px solid var(--rd-panel-border);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* ── Viz type icon grid ── */
+.rd-viz-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  padding: 8px 10px;
+}
+.rd-viz-icon-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 4px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: #f9f8f7;
+  cursor: pointer;
+  font-size: 10px;
+  color: var(--rd-text-secondary);
+  transition: background 0.1s, border-color 0.1s;
+  min-height: 56px;
+}
+.rd-viz-icon-btn:hover {
+  background: #edebe9;
+  border-color: var(--rd-panel-border);
+  color: var(--rd-text-primary);
+}
+.rd-viz-icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.rd-viz-icon-btn .rd-viz-icon { font-size: 22px; }
+
+/* ── Fields panel tree ── */
+.rd-fields-search {
+  padding: 6px 10px;
+  border: 1px solid var(--rd-panel-border);
+  border-radius: 4px;
+  font-size: 13px;
+  margin: 8px 10px;
+  width: calc(100% - 20px);
+  box-sizing: border-box;
+  outline: none;
+  direction: rtl;
+}
+.rd-fields-search:focus { border-color: var(--rd-accent); }
+.rd-fields-group { margin-bottom: 8px; }
+.rd-fields-group-header {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--rd-text-secondary);
+  padding: 4px 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  user-select: none;
+}
+.rd-fields-group-header:hover { color: var(--rd-text-primary); }
+.rd-field-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px 4px 24px;
+  font-size: 13px;
+  color: var(--rd-text-primary);
+  cursor: default;
+  border-radius: 3px;
+  transition: background 0.1s;
+}
+.rd-field-item:hover { background: #f3f2f1; }
+.rd-field-icon { font-size: 12px; opacity: 0.7; }
+.rd-field-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── Format / Inspector inside viz panel ── */
+.rd-format-section {
+  border-top: 1px solid var(--rd-panel-border);
+  flex: 1;
+  overflow-y: auto;
+}
+
+/* ── New design select (size picker) ── */
+.rd-new-select {
+  flex: 0 0 auto;
+  padding: 7px 10px;
+  font-size: 14px;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  outline: none;
+  background: #fff;
+  color: #24292f;
+  direction: rtl;
+  cursor: pointer;
+}
+.rd-new-select:focus { border-color: #1f6feb; box-shadow: 0 0 0 2px rgba(31,111,235,0.15); }
+
 /* ── Report Designer tab ── */
 
 .rd-root {
@@ -267,36 +578,6 @@
   padding: 16px;
   box-sizing: border-box;
   min-height: 0;
-}
-
-/* ── Editor body: canvas area + inspector panel ── */
-.rd-editor-body {
-  display: flex;
-  flex: 1;
-  gap: 12px;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.rd-canvas-area {
-  flex: 1;
-  overflow: auto;
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  padding: 12px;
-  background: #e8edf2;
-  border-radius: 8px;
-  min-width: 0;
-}
-
-.rd-inspector-panel {
-  width: 240px;
-  flex-shrink: 0;
-  overflow-y: auto;
-  border: 1px solid #d0d7de;
-  border-radius: 8px;
-  background: #fff;
 }
 
 /* ── Inspector ── */

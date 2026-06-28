@@ -14,15 +14,20 @@ import {
   createEmptyDocument,
   createElementId,
   createPageId,
+  getPageSetup,
+  PAGE_SIZE_LABELS,
   type ReportDocument,
   type Element,
+  type PageSizePreset,
 } from "../../../../data/reportDesigner/reportTypes";
 import type { Rect } from "../../../../data/reportDesigner/geometry";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
 import type { DirectoryHandleLike } from "../../../../data/storage/fileSystemAccess";
 import Canvas from "./editor/Canvas";
-import Toolbar from "./editor/Toolbar";
-import Inspector from "./editor/Inspector";
+import Ribbon from "./editor/Ribbon";
+import VizPanel from "./editor/VizPanel";
+import PagesBar from "./editor/PagesBar";
+import FieldsPanel from "./editor/FieldsPanel";
 import PrintView from "./PrintView";
 import "./ReportDesigner.css";
 
@@ -50,6 +55,10 @@ function formatDate(iso: string): string {
   }
 }
 
+function pageSizeLabel(p: PageSizePreset): string {
+  return PAGE_SIZE_LABELS[p] ?? p;
+}
+
 // ── Editor host ────────────────────────────────────────────────────────────
 
 interface EditorHostProps {
@@ -64,8 +73,10 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: Editor
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const [, setSaveError] = useState<string | null>(null);
   const [showPrint, setShowPrint] = useState(false);
+  const [showFields, setShowFields] = useState(true);
+  const [showFormat, setShowFormat] = useState(true);
 
   // Debounce timer ref — stores the pending timeout id
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -188,6 +199,18 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: Editor
     }));
   }
 
+  // Bridge for VizPanel onUpdate(id, patch) → updateElement
+  function handleElementUpdate(id: string, patch: Partial<Element>) {
+    const el = doc.pages[currentPageIndex]?.elements.find((e) => e.elementId === id);
+    if (!el) return;
+    updateElement({ ...el, ...patch });
+  }
+
+  function handlePageSizeChange(preset: PageSizePreset) {
+    const ps = getPageSetup(preset);
+    setDoc((d) => ({ ...d, pageSetup: ps }));
+  }
+
   const handleElementChange = useCallback((elementId: string, rect: Rect) => {
     setDoc((d) => ({
       ...d,
@@ -224,79 +247,72 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: Editor
     setSelectedId(null);
   }
 
-  function deletePage() {
-    if (doc.pages.length <= 1) return;
-    const nextIndex = Math.max(0, currentPageIndex - 1);
-    setDoc((d) => ({ ...d, pages: d.pages.filter((_, i) => i !== currentPageIndex) }));
-    setCurrentPageIndex(nextIndex);
-    setSelectedId(null);
+  function handleDeletePage(index: number) {
+    setDoc((d) => {
+      if (d.pages.length <= 1) return d;
+      const pages = d.pages.filter((_, i) => i !== index);
+      setCurrentPageIndex((ci) => Math.min(ci, pages.length - 1));
+      return { ...d, pages };
+    });
   }
-
-  function prevPage() {
-    setCurrentPageIndex((i) => Math.max(0, i - 1));
-    setSelectedId(null);
-  }
-
-  function nextPage() {
-    setCurrentPageIndex((i) => Math.min(doc.pages.length - 1, i + 1));
-    setSelectedId(null);
-  }
-
-  // Find selected element for inspector
-  const selectedElement =
-    selectedId != null
-      ? currentPage?.elements.find((el) => el.elementId === selectedId) ?? null
-      : null;
 
   return (
-    <div className="rd-root rd-root--editor" dir="rtl">
-      {/* Back button + report name */}
-      <div className="rd-editor-header">
-        <button className="rd-btn rd-btn-secondary" onClick={onBack}>
-          رجوع
-        </button>
-        <h2 className="rd-title rd-title-inline">{doc.reportName}</h2>
-        {saveError && <span className="rd-save-error">{saveError}</span>}
-      </div>
+    <>
+      <div
+        className={`rd-pbi-layout${!showFields ? " rd-fields-hidden" : ""}${!showFormat ? " rd-format-hidden" : ""}`}
+        style={{ height: "calc(100vh - 52px)" }}
+      >
+        <Ribbon
+          doc={doc}
+          saving={saving}
+          showFields={showFields}
+          showFormat={showFormat}
+          onToggleFields={() => setShowFields((v) => !v)}
+          onToggleFormat={() => setShowFormat((v) => !v)}
+          onSave={handleExplicitSave}
+          onPrint={() => setShowPrint(true)}
+          onPageSizeChange={handlePageSizeChange}
+          onBack={onBack}
+        />
 
-      {/* Toolbar */}
-      <Toolbar
-        doc={doc}
-        currentPageIndex={currentPageIndex}
-        onAddElement={addElement}
-        onImageSelected={addImageElement}
-        onAddPage={addPage}
-        onDeletePage={deletePage}
-        onPrevPage={prevPage}
-        onNextPage={nextPage}
-        onSave={handleExplicitSave}
-        onPrint={() => setShowPrint(true)}
-        saving={saving}
-      />
+        {/* Fields panel (Task A.4) */}
+        <div className="rd-fields-panel">
+          <FieldsPanel />
+        </div>
 
-      {/* Editor body: canvas + inspector */}
-      <div className="rd-editor-body">
-        <div className="rd-canvas-area">
+        {/* Canvas area */}
+        <div
+          className="rd-canvas-area"
+          style={{
+            "--rd-page-width": `${doc.pageSetup.width}px`,
+            "--rd-page-height": `${doc.pageSetup.height}px`,
+          } as React.CSSProperties}
+        >
           <Canvas
             doc={doc}
             pageIndex={currentPageIndex}
             selectedId={selectedId}
             onSelect={setSelectedId}
             mode="edit"
-            zoom={0.9}
+            zoom={1}
             onElementChange={handleElementChange}
           />
         </div>
-        <div className="rd-inspector-panel">
-          <Inspector element={selectedElement} onUpdate={updateElement} />
-          {!selectedElement && (
-            <p className="rd-inspector-empty">اختر عنصراً لتعديل خصائصه.</p>
-          )}
-        </div>
-      </div>
 
+        <div className="rd-viz-panel">
+          <VizPanel
+            selectedElement={selectedId ? (doc.pages[currentPageIndex]?.elements.find((e) => e.elementId === selectedId) ?? null) : null}
+            onAddElement={addElement}
+            onImageSelected={addImageElement}
+            onUpdate={handleElementUpdate}
+          />
+        </div>
+
+        {/* Pages bar (Task A.3) */}
+        <PagesBar doc={doc} currentPageIndex={currentPageIndex} onSelectPage={setCurrentPageIndex} onAddPage={addPage} onDeletePage={handleDeletePage} />
+      </div>
       {showPrint && <PrintView doc={doc} onClose={() => setShowPrint(false)} />}
-    </div>
+    </>
   );
 }
 
@@ -317,6 +333,7 @@ export default function ReportDesigner() {
   // New-design form state
   const [showNewForm, setShowNewForm] = useState(false);
   const [newName, setNewName] = useState("");
+  const [newPreset, setNewPreset] = useState<PageSizePreset>("A4");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const newNameInputRef = useRef<HTMLInputElement>(null);
@@ -398,7 +415,7 @@ export default function ReportDesigner() {
     if (!directoryHandle) return;
     setCreating(true);
     setCreateError(null);
-    const doc = createEmptyDocument(name, currentUser);
+    const doc = createEmptyDocument(name, currentUser, newPreset);
     const result = await saveDesign(directoryHandle, doc);
     if (!result.ok) {
       setCreateError(result.error);
@@ -480,6 +497,19 @@ export default function ReportDesigner() {
             }}
             disabled={creating}
           />
+          <select
+            className="rd-new-select"
+            value={newPreset}
+            onChange={(e) => setNewPreset(e.target.value as PageSizePreset)}
+            disabled={creating}
+            dir="rtl"
+            title="حجم الصفحة"
+            aria-label="حجم الصفحة"
+          >
+            {(["A4", "Letter", "16:9", "4:3", "16:9-fhd"] as PageSizePreset[]).map((p) => (
+              <option key={p} value={p}>{pageSizeLabel(p)}</option>
+            ))}
+          </select>
           <button
             className="rd-btn rd-btn-primary"
             onClick={() => void handleCreate()}

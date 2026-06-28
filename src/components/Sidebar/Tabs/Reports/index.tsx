@@ -19,6 +19,8 @@ import { getStageKey } from "../../../../data/population/stageHelpers";
 import { loadTemplate } from "../../../../data/templates/templateStorage";
 import { loadInspectionTemplateSelection } from "../../../../data/templates/templateSelectionStorage";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
+import { runPowerBiExport } from "../../../../data/powerbiExport/exportManager";
+import type { ExportManifest } from "../../../../data/powerbiExport/exportTypes";
 import "./Reports.css";
 
 
@@ -114,6 +116,10 @@ export default function ReportsTab() {
     distribution: "html",
   });
   const [toast, setToast] = useState<{ type: "ok" | "error"; text: string } | null>(null);
+  const [pbiMonth, setPbiMonth] = useState("");
+  const [pbiExporting, setPbiExporting] = useState(false);
+  const [pbiResult, setPbiResult] = useState<ExportManifest | null>(null);
+  const [pbiError, setPbiError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!directoryHandle) return;
@@ -219,6 +225,21 @@ export default function ReportsTab() {
   function showToast(type: "ok" | "error", text: string) {
     setToast({ type, text });
     setTimeout(() => setToast(null), 5000);
+  }
+
+  async function handlePbiExport() {
+    if (!directoryHandle || !pbiMonth) return;
+    setPbiExporting(true);
+    setPbiResult(null);
+    setPbiError(null);
+    try {
+      const manifest = await runPowerBiExport(directoryHandle, pbiMonth);
+      setPbiResult(manifest);
+    } catch (err) {
+      setPbiError(err instanceof Error ? err.message : "حدث خطأ أثناء التصدير");
+    } finally {
+      setPbiExporting(false);
+    }
   }
 
   async function generate(type: ReportType): Promise<void> {
@@ -677,6 +698,58 @@ export default function ReportsTab() {
                 <Users size={16} style={{ verticalAlign: "middle", marginInlineEnd: 5 }} /> تقرير التوزيع
               </button>
             </div>
+          </div>
+
+          {/* ── Power BI Export ── */}
+          <div className="rh-pbi-section">
+            <div className="rh-section-divider" />
+            <h3 className="rh-pbi-title">
+              <span style={{ fontSize: "20px", marginLeft: "8px" }}>📊</span>
+              تصدير البيانات لـ Power BI
+            </h3>
+            <p className="rh-pbi-desc">
+              يصدّر بيانات المجتمع والعينة للشهر المحدد كملفات CSV يمكن فتحها مباشرة في Power BI Desktop.
+            </p>
+            <div className="rh-pbi-row">
+              <select
+                className="rh-pbi-select"
+                value={pbiMonth}
+                onChange={(e) => setPbiMonth(e.target.value)}
+                dir="rtl"
+                disabled={months.length === 0 || !directoryHandle}
+                aria-label="اختر شهراً للتصدير"
+              >
+                <option value="">-- اختر شهراً --</option>
+                {months.map((m) => (
+                  <option key={m.folderName} value={m.folderName}>{m.folderName}</option>
+                ))}
+              </select>
+              <button
+                className="rh-btn rh-btn-teal"
+                onClick={() => void handlePbiExport()}
+                disabled={!pbiMonth || pbiExporting || !directoryHandle}
+                type="button"
+              >
+                {pbiExporting ? "جاري التصدير..." : "تصدير"}
+              </button>
+            </div>
+            {pbiResult && (
+              <div className="rh-pbi-result">
+                <p className="rh-pbi-success">
+                  ✓ تم التصدير بنجاح — الملفات في مجلد{" "}
+                  <code>5-System/powerbi-export/{pbiResult.month}/</code>
+                </p>
+                <ul className="rh-pbi-file-list">
+                  {pbiResult.files.map((f) => (
+                    <li key={f.fileName}>
+                      <code>{f.fileName}</code> — {f.rowCount.toLocaleString("ar")} سطر
+                    </li>
+                  ))}
+                  <li><code>LISEZMOI.txt</code> — تعليمات الاتصال</li>
+                </ul>
+              </div>
+            )}
+            {pbiError && <p className="rh-pbi-error">{pbiError}</p>}
           </div>
         </>
       )}

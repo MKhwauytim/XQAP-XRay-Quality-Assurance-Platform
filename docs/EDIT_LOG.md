@@ -4,6 +4,1071 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v18.0 — 2026-06-28 — Fix stale closure in deletePage, type-safe export rows, unified page-size labels, remove dead CSS
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
+
+**Before:**
+```ts
+function handleDeletePage(index: number) {
+  setDoc((d) => {
+    if (d.pages.length <= 1) return d;
+    const pages = d.pages.filter((_, i) => i !== index);
+    return { ...d, pages };
+  });
+  setCurrentPageIndex((ci) => Math.min(ci, doc.pages.length - 2));  // stale closure
+}
+```
+
+**After:**
+```ts
+function handleDeletePage(index: number) {
+  setDoc((d) => {
+    if (d.pages.length <= 1) return d;
+    const pages = d.pages.filter((_, i) => i !== index);
+    setCurrentPageIndex((ci) => Math.min(ci, pages.length - 1));
+    return { ...d, pages };
+  });
+}
+```
+
+**File:** `src/data/powerbiExport/exportManager.ts`
+
+**Before:**
+```ts
+const sampleRows = (sample?.rows ?? []) as unknown as PreparedPopulationRow[];
+// ...
+populationRows: (populationData?.rows ?? []) as unknown as PreparedPopulationRow[],
+// ...
+const allRows = execRows as unknown as Record<string, unknown>[];
+```
+
+**After:**
+```ts
+const sampleRows = sample?.rows ?? [];
+// ...
+populationRows: (populationData?.rows ?? []) as PreparedPopulationRow[],
+// ...
+const allRows: Record<string, unknown>[] = execRows.map((r) => r as Record<string, unknown>);
+```
+
+**File:** `src/data/reportDesigner/reportTypes.ts`
+
+**Before:**
+```ts
+// PAGE_SIZE_LABELS did not exist; labels were duplicated locally in Ribbon.tsx and index.tsx with inconsistent values
+```
+
+**After:**
+```ts
+export const PAGE_SIZE_LABELS: Record<PageSizePreset, string> = {
+  "A4": "A4 طولي",
+  "Letter": "Letter طولي",
+  "16:9": "شاشة عريضة 16:9",
+  "4:3": "قياسي 4:3",
+  "16:9-fhd": "Full HD 16:9",
+  "custom": "مخصص",
+};
+```
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/Ribbon.tsx`
+
+**Before:**
+```ts
+const PAGE_SIZE_LABELS: Record<PageSizePreset, string> = {
+  "A4": "A4 طولي",
+  // ... local duplicate
+};
+```
+
+**After:**
+```ts
+import { PAGE_SIZE_LABELS } from "../../../../../data/reportDesigner/reportTypes";
+// local constant removed; uses shared export
+```
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/ReportDesigner.css`
+
+**Before:**
+```css
+.rd-editor-body { display: flex; flex: 1; gap: 12px; min-height: 0; overflow: hidden; }
+.rd-inspector-panel { width: 240px; flex-shrink: 0; overflow-y: auto; ... }
+```
+
+**After:**
+```css
+/* Both dead blocks removed — .rd-editor-body and .rd-inspector-panel are not rendered in any JSX */
+```
+
+---
+
+## v17.0 — 2026-06-28 — Export manager + Power BI section in Reports tab
+
+**File:** `src/data/powerbiExport/exportManager.ts`
+
+**Before:**
+```ts
+// File did not exist
+```
+
+**After:**
+```ts
+// Loads population, sample, distribution, employee files for a month,
+// builds ExecutiveReportRow array via buildExecutiveReportRows, then
+// writes population.csv + sample.csv via writeCsvExport.
+export async function runPowerBiExport(root, month): Promise<ExportManifest>
+```
+
+**File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
+
+**Before:**
+```tsx
+// No pbiMonth/pbiExporting/pbiResult/pbiError state, no handlePbiExport handler,
+// no Power BI export section in JSX, no exportManager/exportTypes imports.
+```
+
+**After:**
+```tsx
+// Added: runPowerBiExport import, ExportManifest import, pbi* state variables,
+// handlePbiExport async handler, and Power BI export section JSX at bottom of
+// the "reports" sub-tab (after quick actions strip).
+```
+
+**File:** `src/components/Sidebar/Tabs/Reports/Reports.css`
+
+**Before:**
+```css
+/* No .rh-pbi-* or .rh-section-divider classes */
+```
+
+**After:**
+```css
+/* Added: .rh-pbi-section, .rh-section-divider, .rh-pbi-title, .rh-pbi-desc,
+   .rh-pbi-row, .rh-pbi-select, .rh-pbi-result, .rh-pbi-success,
+   .rh-pbi-file-list, .rh-pbi-error */
+```
+
+**File:** `docs/data-system-report.md`
+
+**Before:**
+```
+| `backup.manifest.json` and copied data files | `5-System/3-Backups/{timestamp}/` | ... |
+```
+
+**After:**
+```
+| `backup.manifest.json` ...  |
+| `population.csv` | `5-System/powerbi-export/{month}/` | All ExecutiveReportRow records |
+| `sample.csv`     | `5-System/powerbi-export/{month}/` | selectedInSample=true subset    |
+| `LISEZMOI.txt`   | `5-System/powerbi-export/{month}/` | Bilingual connection instructions |
+```
+
+---
+
+## v16.0 — 2026-06-28 — Export writer (workspace file I/O) for Power BI export
+
+**File:** `src/data/powerbiExport/exportWriter.ts`
+
+**Before:**
+```ts
+// File did not exist
+```
+
+**After:**
+```ts
+import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import { getSystemRoot } from "../workspace/workspacePaths";
+import { toCsvString } from "./csvSerializer";
+import type { ExportManifest, ExportFileResult } from "./exportTypes";
+
+async function getExportDir(root: DirectoryHandleLike, month: string): Promise<DirectoryHandleLike> {
+  const sys = await getSystemRoot(root, true);
+  const expRoot = await sys.getDirectoryHandle("powerbi-export", { create: true });
+  return expRoot.getDirectoryHandle(month, { create: true });
+}
+
+async function writeTextFile(dir: DirectoryHandleLike, fileName: string, content: string): Promise<void> {
+  const fh = await dir.getFileHandle(fileName, { create: true });
+  if (!fh.createWritable) throw new Error("createWritable not supported in this environment");
+  const writable = await fh.createWritable();
+  await writable.write(content);
+  await writable.close();
+}
+
+export async function writeCsvExport(
+  root: DirectoryHandleLike,
+  month: string,
+  exports: Array<{ fileName: string; headers: string[]; rows: Record<string, unknown>[] }>
+): Promise<ExportManifest> {
+  const dir = await getExportDir(root, month);
+  const files: ExportFileResult[] = [];
+
+  for (const exp of exports) {
+    const csv = toCsvString(exp.headers, exp.rows);
+    await writeTextFile(dir, exp.fileName, csv);
+    files.push({ fileName: exp.fileName, rowCount: exp.rows.length });
+  }
+
+  const instructions = [
+    "Power BI Data Export",
+    "====================",
+    "",
+    "Arabic:",
+    "لاستيراد هذه الملفات في Power BI Desktop:",
+    "1. افتح Power BI Desktop",
+    "2. الصفحة الرئيسية > الحصول على البيانات > نص/CSV",
+    `3. انتقل إلى مجلد '5-System/powerbi-export/${month}/'`,
+    "4. افتح كل ملف CSV واضغط 'تحميل'",
+    "5. في نموذج البيانات، يمكنك إنشاء علاقات بين الجداول باستخدام عمود xrayImageId",
+    "",
+    "English:",
+    "To import these files into Power BI Desktop:",
+    "1. Open Power BI Desktop",
+    "2. Home > Get Data > Text/CSV",
+    `3. Browse to '5-System/powerbi-export/${month}/'`,
+    "4. Open each CSV file and click 'Load'",
+    "5. In the Data Model, create relationships between tables using the xrayImageId column",
+    "",
+    "Files in this export:",
+    ...files.map((f) => `  - ${f.fileName} (${f.rowCount} rows)`),
+    "",
+    `Exported at: ${new Date().toISOString()}`,
+  ].join("\n");
+
+  await writeTextFile(dir, "LISEZMOI.txt", instructions);
+
+  return {
+    month,
+    exportedAt: new Date().toISOString(),
+    files,
+  };
+}
+```
+
+**File:** `src/data/powerbiExport/exportWriter.test.ts`
+
+**Before:**
+```ts
+// File did not exist
+```
+
+**After:**
+```ts
+import { describe, it, expect } from "vitest";
+import { createMemoryDirectory } from "../storage/memoryDirectory";
+import { writeCsvExport } from "./exportWriter";
+
+describe("writeCsvExport", () => {
+  it("writes CSV files and returns manifest", async () => {
+    const root = createMemoryDirectory("root");
+    const manifest = await writeCsvExport(root, "5-May-2026", [
+      { fileName: "population.csv", headers: ["id", "port"], rows: [{ id: "X1", port: "ميناء A" }] },
+    ]);
+    expect(manifest.month).toBe("5-May-2026");
+    expect(manifest.files).toHaveLength(1);
+    expect(manifest.files[0].fileName).toBe("population.csv");
+    expect(manifest.files[0].rowCount).toBe(1);
+  });
+
+  it("creates nested export directory and writes file", async () => {
+    const root = createMemoryDirectory("root");
+    await writeCsvExport(root, "5-May-2026", [
+      { fileName: "sample.csv", headers: ["id"], rows: [{ id: "A" }, { id: "B" }] },
+    ]);
+    // navigate into 5-System/powerbi-export/5-May-2026/
+    const sys = await root.getDirectoryHandle("5-System", { create: false });
+    const exp = await sys.getDirectoryHandle("powerbi-export", { create: false });
+    const month = await exp.getDirectoryHandle("5-May-2026", { create: false });
+    const fh = await month.getFileHandle("sample.csv", { create: false });
+    expect(fh).toBeTruthy();
+  });
+});
+```
+
+---
+
+## v15.0 — 2026-06-28 — CSV serializer + export types for Power BI export
+
+**File:** `src/data/powerbiExport/exportTypes.ts`
+
+**Before:**
+```ts
+// File did not exist
+```
+
+**After:**
+```ts
+export type ExportFileResult = {
+  fileName: string;
+  rowCount: number;
+};
+
+export type ExportManifest = {
+  month: string;
+  exportedAt: string;
+  files: ExportFileResult[];
+};
+```
+
+**File:** `src/data/powerbiExport/csvSerializer.ts`
+
+**Before:**
+```ts
+// File did not exist
+```
+
+**After:**
+```ts
+function escapeCell(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "boolean") return value ? "1" : "0";
+  const str = String(value);
+  if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+}
+
+export function toCsvString(
+  headers: string[],
+  rows: Record<string, unknown>[]
+): string {
+  const lines: string[] = [];
+  lines.push(headers.join(","));
+  for (const row of rows) {
+    lines.push(headers.map((h) => escapeCell(row[h])).join(","));
+  }
+  return "﻿" + lines.join("\n");
+}
+```
+
+**File:** `src/data/powerbiExport/csvSerializer.test.ts`
+
+**Before:**
+```ts
+// File did not exist
+```
+
+**After:**
+```ts
+import { describe, it, expect } from "vitest";
+import { toCsvString } from "./csvSerializer";
+
+describe("toCsvString", () => {
+  it("produces UTF-8 BOM header + comma-separated header row", () => {
+    const result = toCsvString(["a", "b"], []);
+    expect(result.startsWith("﻿")).toBe(true);
+    expect(result).toContain("a,b");
+  });
+
+  it("serializes a simple row", () => {
+    const result = toCsvString(["name", "count"], [{ name: "ميناء A", count: 42 }]);
+    expect(result).toContain("ميناء A,42");
+  });
+
+  it("wraps values containing commas in double quotes", () => {
+    const result = toCsvString(["v"], [{ v: "hello, world" }]);
+    expect(result).toContain('"hello, world"');
+  });
+
+  it("escapes double quotes by doubling them", () => {
+    const result = toCsvString(["v"], [{ v: 'say "hi"' }]);
+    expect(result).toContain('"say ""hi"""');
+  });
+
+  it("converts null to empty string", () => {
+    const result = toCsvString(["v"], [{ v: null }]);
+    const lines = result.split("\n");
+    expect(lines[1].trim()).toBe(",".repeat(0)); // single empty column
+  });
+
+  it("converts boolean to 1/0", () => {
+    const result = toCsvString(["a", "b"], [{ a: true, b: false }]);
+    expect(result).toContain("1,0");
+  });
+
+  it("handles missing key as empty", () => {
+    const result = toCsvString(["a", "b"], [{ a: "x" }]);
+    // b is undefined → empty
+    expect(result).toContain("x,");
+  });
+});
+```
+
+---
+
+## v14.1 — 2026-06-28 — Fix unused-var lint error in ReportDesigner EditorHost
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
+
+**Before:**
+```tsx
+const [_saveError, setSaveError] = useState<string | null>(null);
+```
+
+**After:**
+```tsx
+const [, setSaveError] = useState<string | null>(null);
+```
+
+---
+
+## v14.0 — 2026-06-28 — Create-dialog size selector + pageSizeLabel helper
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
+
+**Before:**
+```tsx
+// No pageSizeLabel helper function
+// Select element in create form had hardcoded Arabic labels:
+<select
+  className="rd-new-select"
+  value={newPreset}
+  onChange={(e) => setNewPreset(e.target.value as PageSizePreset)}
+  disabled={creating}
+>
+  <option value="A4">A4 عمودي</option>
+  <option value="Letter">Letter عمودي</option>
+  <option value="16:9">16:9 شرائح</option>
+  <option value="4:3">4:3 شرائح</option>
+  <option value="16:9-fhd">16:9 FHD</option>
+</select>
+```
+
+**After:**
+```tsx
+// Added pageSizeLabel(p: PageSizePreset): string helper function
+function pageSizeLabel(p: PageSizePreset): string {
+  const labels: Record<PageSizePreset, string> = {
+    "A4": "A4 عمودي",
+    "Letter": "Letter عمودي",
+    "16:9": "16:9 شرائح",
+    "4:3": "4:3 شرائح",
+    "16:9-fhd": "16:9 FHD",
+    "custom": "مخصص",
+  };
+  return labels[p] ?? p;
+}
+
+// Updated select element to use pageSizeLabel, added dir/title/aria-label
+<select
+  className="rd-new-select"
+  value={newPreset}
+  onChange={(e) => setNewPreset(e.target.value as PageSizePreset)}
+  disabled={creating}
+  dir="rtl"
+  title="حجم الصفحة"
+  aria-label="حجم الصفحة"
+>
+  {(["A4", "Letter", "16:9", "4:3", "16:9-fhd"] as PageSizePreset[]).map((p) => (
+    <option key={p} value={p}>{pageSizeLabel(p)}</option>
+  ))}
+</select>
+```
+
+**Note:** CSS vars `--rd-page-width` and `--rd-page-height` were already set on `.rd-canvas-area` by Task A.2 (v13.0). This task only refactors the create-dialog size selector to use the new pageSizeLabel helper for consistency.
+
+---
+
+## v13.0 — 2026-06-28 — VizPanel element type grid + Ribbon toolbar redesign
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/VizPanel.tsx`
+
+**Before:**
+```ts
+// File did not exist
+```
+
+**After:**
+```tsx
+// New component: 8-icon element type picker (text/shape/image/line enabled; table/chart/kpi/section disabled)
+// with embedded Inspector for format editing. Bridges VizPanel onUpdate(id, patch) to Inspector onUpdate(element).
+export default function VizPanel({ selectedElement, onAddElement, onImageSelected, onUpdate }: VizPanelProps) { ... }
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/Ribbon.tsx`
+
+**Before:**
+```ts
+// File did not exist
+```
+
+**After:**
+```tsx
+// New component: Power BI-style ribbon with Back button, page-size selector, Fields/Format panel toggles,
+// doc name display, autosave indicator, Save and Print buttons.
+export default function Ribbon({ doc, saving, showFields, showFormat, onToggleFields, onToggleFormat, onSave, onPrint, onPageSizeChange, onBack }: RibbonProps) { ... }
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
+
+**Before:**
+```tsx
+// Imports: Inspector, no Ribbon/VizPanel/getPageSetup
+// Stub ribbon: plain <div className="rd-ribbon"> with hardcoded buttons
+// Stub viz panel: <div className="rd-viz-panel"> with bare Inspector
+// Unused functions: deletePage, prevPage, nextPage; unused state: saveError
+```
+
+**After:**
+```tsx
+// Imports: Ribbon, VizPanel, getPageSetup (removed Inspector, added getPageSetup)
+// Real Ribbon component wired with all props including onPageSizeChange + handlePageSizeChange handler
+// Real VizPanel component with selectedElement, onAddElement=addElement, onImageSelected=addImageElement,
+//   onUpdate=handleElementUpdate (id+patch bridge → updateElement)
+// Dead code removed: deletePage, prevPage, nextPage; saveError renamed _saveError
+```
+
+---
+
+## v12.0 — 2026-06-28 — FieldsPanel component (searchable field catalog tree)
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/FieldsPanel.tsx`
+
+**Before:**
+```ts
+// File did not exist
+```
+
+**After:**
+```tsx
+import { useState } from "react";
+import { FACT_FIELDS } from "../../../../../data/reportDesigner/query/fieldCatalog";
+
+export default function FieldsPanel() {
+  const [search, setSearch] = useState("");
+  const [dimOpen, setDimOpen] = useState(true);
+  const [measOpen, setMeasOpen] = useState(true);
+
+  const q = search.trim().toLowerCase();
+  const dims = FACT_FIELDS.filter(
+    (f) => f.role === "dimension" && (!q || f.label.includes(q) || f.field.toLowerCase().includes(q))
+  );
+  const meas = FACT_FIELDS.filter(
+    (f) => f.role === "measure" && (!q || f.label.includes(q) || f.field.toLowerCase().includes(q))
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      <div className="rd-panel-header">
+        <span>الحقول</span>
+      </div>
+      <input
+        className="rd-fields-search"
+        type="search"
+        placeholder="بحث في الحقول..."
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        dir="rtl"
+        aria-label="بحث في الحقول"
+      />
+      <div style={{ flex: 1, overflowY: "auto" }}>
+        <div className="rd-fields-group">
+          <div
+            className="rd-fields-group-header"
+            onClick={() => setDimOpen((v) => !v)}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setDimOpen((v) => !v); }}
+            aria-expanded={dimOpen}
+          >
+            <span>{dimOpen ? "▾" : "▸"}</span>
+            <span>أبعاد ({dims.length})</span>
+          </div>
+          {dimOpen &&
+            dims.map((f) => (
+              <div key={f.field} className="rd-field-item" title={f.field}>
+                <span className="rd-field-icon">📐</span>
+                <span className="rd-field-label">{f.label}</span>
+              </div>
+            ))}
+        </div>
+        <div className="rd-fields-group">
+          <div
+            className="rd-fields-group-header"
+            onClick={() => setMeasOpen((v) => !v)}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setMeasOpen((v) => !v); }}
+            aria-expanded={measOpen}
+          >
+            <span>{measOpen ? "▾" : "▸"}</span>
+            <span>مقاييس ({meas.length})</span>
+          </div>
+          {measOpen &&
+            meas.map((f) => (
+              <div key={f.field} className="rd-field-item" title={f.field}>
+                <span className="rd-field-icon">🔢</span>
+                <span className="rd-field-label">{f.label}</span>
+              </div>
+            ))}
+        </div>
+        {dims.length === 0 && meas.length === 0 && (
+          <p style={{ padding: "12px", color: "var(--rd-text-secondary)", fontSize: "13px" }}>
+            لا توجد حقول مطابقة
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+```
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
+
+**Before:**
+```tsx
+import Canvas from "./editor/Canvas";
+import Inspector from "./editor/Inspector";
+import PagesBar from "./editor/PagesBar";
+import PrintView from "./PrintView";
+import "./ReportDesigner.css";
+```
+
+**After:**
+```tsx
+import Canvas from "./editor/Canvas";
+import Inspector from "./editor/Inspector";
+import PagesBar from "./editor/PagesBar";
+import FieldsPanel from "./editor/FieldsPanel";
+import PrintView from "./PrintView";
+import "./ReportDesigner.css";
+```
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx` (EditorHost function)
+
+**Before:**
+```tsx
+        {/* STUB: Fields panel (Task A.4 will replace this) */}
+        <div className="rd-fields-panel">
+          <div className="rd-panel-header"><span>الحقول</span></div>
+          <p style={{ padding: "12px", color: "var(--rd-text-secondary)", fontSize: "13px" }}>
+            لوحة الحقول — قريباً
+          </p>
+        </div>
+```
+
+**After:**
+```tsx
+        {/* Fields panel (Task A.4) */}
+        <div className="rd-fields-panel">
+          <FieldsPanel />
+        </div>
+```
+
+---
+
+## v11.0 — 2026-06-28 — PagesBar component (bottom page tab bar)
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/PagesBar.tsx`
+
+**Before:**
+```ts
+// File did not exist
+```
+
+**After:**
+```tsx
+import type { ReportDocument } from "../../../../../data/reportDesigner/reportTypes";
+
+interface PagesBarProps {
+  doc: ReportDocument;
+  currentPageIndex: number;
+  onSelectPage: (index: number) => void;
+  onAddPage: () => void;
+  onDeletePage: (index: number) => void;
+}
+
+export default function PagesBar({ doc, currentPageIndex, onSelectPage, onAddPage, onDeletePage }: PagesBarProps) {
+  return (
+    <div className="rd-pages-bar" dir="rtl">
+      {doc.pages.map((page, i) => (
+        <button
+          key={page.pageId}
+          className={`rd-page-tab${i === currentPageIndex ? " rd-page-tab--active" : ""}`}
+          onClick={() => onSelectPage(i)}
+          title={page.name}
+          type="button"
+        >
+          {page.name}
+          <span
+            className="rd-page-tab-del"
+            role="button"
+            aria-label={`حذف ${page.name}`}
+            onClick={(e) => { e.stopPropagation(); if (doc.pages.length > 1) onDeletePage(i); }}
+            title="حذف الصفحة"
+          >
+            ×
+          </span>
+        </button>
+      ))}
+      <button className="rd-page-tab-add" onClick={onAddPage} type="button" title="إضافة صفحة">
+        + صفحة
+      </button>
+    </div>
+  );
+}
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
+
+**Before:**
+```tsx
+import Canvas from "./editor/Canvas";
+import Inspector from "./editor/Inspector";
+import PrintView from "./PrintView";
+import "./ReportDesigner.css";
+```
+
+**After:**
+```tsx
+import Canvas from "./editor/Canvas";
+import Inspector from "./editor/Inspector";
+import PagesBar from "./editor/PagesBar";
+import PrintView from "./PrintView";
+import "./ReportDesigner.css";
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx` (EditorHost function)
+
+**Before:**
+```tsx
+  function addPage() {
+    const newPage = {
+      pageId: createPageId(),
+      name: `صفحة ${doc.pages.length + 1}`,
+      order: doc.pages.length,
+      filters: [],
+      elements: [],
+    };
+    setDoc((d) => {
+      const newPages = [...d.pages, newPage];
+      setCurrentPageIndex(newPages.length - 1);
+      return { ...d, pages: newPages };
+    });
+    setSelectedId(null);
+  }
+
+  function deletePage() {
+    if (doc.pages.length <= 1) return;
+    const nextIndex = Math.max(0, currentPageIndex - 1);
+    setDoc((d) => ({ ...d, pages: d.pages.filter((_, i) => i !== currentPageIndex) }));
+    setCurrentPageIndex(nextIndex);
+    setSelectedId(null);
+  }
+```
+
+**After:**
+```tsx
+  function addPage() {
+    const newPage = {
+      pageId: createPageId(),
+      name: `صفحة ${doc.pages.length + 1}`,
+      order: doc.pages.length,
+      filters: [],
+      elements: [],
+    };
+    setDoc((d) => {
+      const newPages = [...d.pages, newPage];
+      setCurrentPageIndex(newPages.length - 1);
+      return { ...d, pages: newPages };
+    });
+    setSelectedId(null);
+  }
+
+  function handleDeletePage(index: number) {
+    setDoc((d) => {
+      if (d.pages.length <= 1) return d;
+      const pages = d.pages.filter((_, i) => i !== index);
+      return { ...d, pages };
+    });
+    setCurrentPageIndex((ci) => Math.min(ci, doc.pages.length - 2));
+  }
+
+  function deletePage() {
+    if (doc.pages.length <= 1) return;
+    const nextIndex = Math.max(0, currentPageIndex - 1);
+    setDoc((d) => ({ ...d, pages: d.pages.filter((_, i) => i !== currentPageIndex) }));
+    setCurrentPageIndex(nextIndex);
+    setSelectedId(null);
+  }
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx` (JSX pages bar section)
+
+**Before:**
+```tsx
+        {/* STUB: Pages bar (Task A.3 will replace this) */}
+        <div className="rd-pages-bar">
+          {doc.pages.map((page, i) => (
+            <button
+              key={page.pageId}
+              className={`rd-page-tab${i === currentPageIndex ? " rd-page-tab--active" : ""}`}
+              onClick={() => setCurrentPageIndex(i)}
+            >
+              {page.name}
+            </button>
+          ))}
+          <button className="rd-page-tab-add" onClick={addPage}>+ صفحة</button>
+        </div>
+```
+
+**After:**
+```tsx
+        {/* Pages bar (Task A.3) */}
+        <PagesBar doc={doc} currentPageIndex={currentPageIndex} onSelectPage={setCurrentPageIndex} onAddPage={addPage} onDeletePage={handleDeletePage} />
+```
+
+---
+
+## v10.0 — 2026-06-28 — Power BI 3-panel layout shell
+
+**File:** `src/data/reportDesigner/reportTypes.ts`
+
+**Before:**
+```ts
+export function createEmptyDocument(name: string, createdBy: string): ReportDocument {
+  const now = new Date().toISOString();
+  return {
+    reportId: createReportId(),
+    reportName: name,
+    version: 1,
+    createdAt: now, createdBy, updatedAt: now, updatedBy: createdBy,
+    docType: "print",
+    pageSetup: { ...A4_PORTRAIT, margins: { ...A4_PORTRAIT.margins } },
+```
+
+**After:**
+```ts
+export function createEmptyDocument(name: string, createdBy: string, preset: PageSizePreset = "A4"): ReportDocument {
+  const now = new Date().toISOString();
+  const pageSetup = getPageSetup(preset);
+  return {
+    reportId: createReportId(),
+    reportName: name,
+    version: 1,
+    createdAt: now, createdBy, updatedAt: now, updatedBy: createdBy,
+    docType: "print",
+    pageSetup: { ...pageSetup, margins: { ...pageSetup.margins } },
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/ReportDesigner.css`
+
+**Before:**
+```css
+/* ── Report Designer tab ── */
+
+.rd-root {
+  padding: 24px;
+  ...
+```
+
+**After:**
+```css
+/* ── Power BI theme tokens ── */
+:root { --rd-ribbon-bg: #f3f2f1; ... }
+
+/* ── 3-panel editor layout ── */
+.rd-pbi-layout { display: grid; grid-template-rows: 44px 1fr 40px; ... }
+/* + all new PBI layout/ribbon/pages/panel classes */
+
+/* ── Report Designer tab ── */
+.rd-root { ... (unchanged) }
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
+
+**Before:**
+```tsx
+// EditorHost return:
+return (
+  <div className="rd-root rd-root--editor" dir="rtl">
+    <div className="rd-editor-header">...</div>
+    <Toolbar ... />
+    <div className="rd-editor-body">
+      <div className="rd-canvas-area"><Canvas ... zoom={0.9} /></div>
+      <div className="rd-inspector-panel"><Inspector ... /></div>
+    </div>
+    {showPrint && <PrintView ... />}
+  </div>
+);
+```
+
+**After:**
+```tsx
+// EditorHost return (3-panel PBI layout):
+// + showFields / showFormat state added
+return (
+  <>
+    <div className={`rd-pbi-layout${!showFields ? " rd-fields-hidden" : ""}...`}>
+      <div className="rd-ribbon">...</div>
+      <div className="rd-fields-panel">...</div>
+      <div className="rd-canvas-area"><Canvas ... zoom={1} /></div>
+      <div className="rd-viz-panel"><Inspector ... /></div>
+      <div className="rd-pages-bar">...</div>
+    </div>
+    {showPrint && <PrintView ... />}
+  </>
+);
+```
+
+---
+
+## v9.0 — 2026-06-28 — feat(report-designer): add slide page-size presets (16:9, 4:3, FHD)
+
+**File:** `src/data/reportDesigner/reportTypes.ts`
+
+**Before:**
+```ts
+export type PageSizePreset = "A4" | "Letter" | "16:9" | "4:3" | "custom";
+// ...
+// A4 portrait at 96dpi = 794 x 1123 px.
+export const A4_PORTRAIT: PageSetup = {
+  size: "A4", orientation: "portrait", width: 794, height: 1123,
+  margins: { top: 38, right: 38, bottom: 38, left: 38 },
+};
+```
+
+**After:**
+```ts
+export type PageSizePreset = "A4" | "Letter" | "16:9" | "4:3" | "16:9-fhd" | "custom";
+
+// A4 portrait at 96dpi = 794 x 1123 px.
+export const A4_PORTRAIT: PageSetup = {
+  size: "A4", orientation: "portrait", width: 794, height: 1123,
+  margins: { top: 38, right: 38, bottom: 38, left: 38 },
+};
+
+export const SLIDE_16_9: PageSetup = {
+  size: "16:9",
+  orientation: "landscape",
+  width: 1280,
+  height: 720,
+  margins: { top: 20, right: 20, bottom: 20, left: 20 },
+};
+
+export const SLIDE_4_3: PageSetup = {
+  size: "4:3",
+  orientation: "landscape",
+  width: 960,
+  height: 720,
+  margins: { top: 20, right: 20, bottom: 20, left: 20 },
+};
+
+export const SLIDE_FHD: PageSetup = {
+  size: "16:9-fhd",
+  orientation: "landscape",
+  width: 1920,
+  height: 1080,
+  margins: { top: 20, right: 20, bottom: 20, left: 20 },
+};
+
+export const SLIDE_PRESETS: Record<PageSizePreset, PageSetup> = {
+  "A4": A4_PORTRAIT,
+  "Letter": { size: "Letter", orientation: "portrait", width: 816, height: 1056, margins: { top: 38, right: 38, bottom: 38, left: 38 } },
+  "16:9": SLIDE_16_9,
+  "4:3": SLIDE_4_3,
+  "16:9-fhd": SLIDE_FHD,
+  "custom": A4_PORTRAIT,
+};
+
+export function getPageSetup(preset: PageSizePreset): PageSetup {
+  return SLIDE_PRESETS[preset] ?? A4_PORTRAIT;
+}
+```
+
+**File:** `src/data/reportDesigner/reportTypes.test.ts`
+
+**Before:**
+```ts
+import { describe, it, expect } from "vitest";
+import { createEmptyDocument, REPORT_SCHEMA_VERSION } from "./reportTypes";
+
+describe("createEmptyDocument", () => {
+  it("creates a print A4 document with one empty page", () => {
+    const doc = createEmptyDocument("تقرير تجريبي", "admin");
+    expect(doc.reportName).toBe("تقرير تجريبي");
+    expect(doc.createdBy).toBe("admin");
+    expect(doc.docType).toBe("print");
+    expect(doc.pageSetup.size).toBe("A4");
+    expect(doc.pageSetup.orientation).toBe("portrait");
+    expect(doc.pages).toHaveLength(1);
+    expect(doc.pages[0].elements).toEqual([]);
+    expect(doc.reportId).toMatch(/^rpt-/);
+    expect(REPORT_SCHEMA_VERSION).toBe(1);
+  });
+});
+```
+
+**After:**
+```ts
+import { describe, it, expect } from "vitest";
+import { createEmptyDocument, REPORT_SCHEMA_VERSION, SLIDE_16_9, SLIDE_4_3, SLIDE_FHD, getPageSetup, SLIDE_PRESETS } from "./reportTypes";
+
+describe("createEmptyDocument", () => {
+  it("creates a print A4 document with one empty page", () => {
+    const doc = createEmptyDocument("تقرير تجريبي", "admin");
+    expect(doc.reportName).toBe("تقرير تجريبي");
+    expect(doc.createdBy).toBe("admin");
+    expect(doc.docType).toBe("print");
+    expect(doc.pageSetup.size).toBe("A4");
+    expect(doc.pageSetup.orientation).toBe("portrait");
+    expect(doc.pages).toHaveLength(1);
+    expect(doc.pages[0].elements).toEqual([]);
+    expect(doc.reportId).toMatch(/^rpt-/);
+    expect(REPORT_SCHEMA_VERSION).toBe(1);
+  });
+});
+
+describe("slide page-size presets", () => {
+  it("SLIDE_16_9 has correct dimensions", () => {
+    expect(SLIDE_16_9.width).toBe(1280);
+    expect(SLIDE_16_9.height).toBe(720);
+    expect(SLIDE_16_9.size).toBe("16:9");
+    expect(SLIDE_16_9.orientation).toBe("landscape");
+  });
+
+  it("SLIDE_4_3 has correct dimensions", () => {
+    expect(SLIDE_4_3.width).toBe(960);
+    expect(SLIDE_4_3.height).toBe(720);
+    expect(SLIDE_4_3.size).toBe("4:3");
+  });
+
+  it("SLIDE_FHD is 1920x1080", () => {
+    expect(SLIDE_FHD.width).toBe(1920);
+    expect(SLIDE_FHD.height).toBe(1080);
+    expect(SLIDE_FHD.size).toBe("16:9-fhd");
+  });
+
+  it("getPageSetup returns correct preset", () => {
+    expect(getPageSetup("16:9").width).toBe(1280);
+    expect(getPageSetup("4:3").width).toBe(960);
+    expect(getPageSetup("A4").width).toBe(794);
+    expect(getPageSetup("custom").width).toBe(794);
+  });
+
+  it("SLIDE_PRESETS has all six named presets", () => {
+    expect(Object.keys(SLIDE_PRESETS).sort()).toEqual(["16:9", "16:9-fhd", "4:3", "A4", "Letter", "custom"].sort());
+  });
+});
+```
+
+---
+
 ## v8.1 — 2026-06-28 — fix(report-designer): CSSProperties import, DesignIndex doc, admin permission row
 
 **File:** `src/components/Sidebar/Tabs/ReportDesigner/renderers/TextRenderer.tsx`
