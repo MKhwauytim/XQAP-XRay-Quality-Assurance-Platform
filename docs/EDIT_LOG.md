@@ -4,6 +4,61 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v13.0 — 2026-06-28 — VizPanel element type grid + Ribbon toolbar redesign
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/VizPanel.tsx`
+
+**Before:**
+```ts
+// File did not exist
+```
+
+**After:**
+```tsx
+// New component: 8-icon element type picker (text/shape/image/line enabled; table/chart/kpi/section disabled)
+// with embedded Inspector for format editing. Bridges VizPanel onUpdate(id, patch) to Inspector onUpdate(element).
+export default function VizPanel({ selectedElement, onAddElement, onImageSelected, onUpdate }: VizPanelProps) { ... }
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/Ribbon.tsx`
+
+**Before:**
+```ts
+// File did not exist
+```
+
+**After:**
+```tsx
+// New component: Power BI-style ribbon with Back button, page-size selector, Fields/Format panel toggles,
+// doc name display, autosave indicator, Save and Print buttons.
+export default function Ribbon({ doc, saving, showFields, showFormat, onToggleFields, onToggleFormat, onSave, onPrint, onPageSizeChange, onBack }: RibbonProps) { ... }
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
+
+**Before:**
+```tsx
+// Imports: Inspector, no Ribbon/VizPanel/getPageSetup
+// Stub ribbon: plain <div className="rd-ribbon"> with hardcoded buttons
+// Stub viz panel: <div className="rd-viz-panel"> with bare Inspector
+// Unused functions: deletePage, prevPage, nextPage; unused state: saveError
+```
+
+**After:**
+```tsx
+// Imports: Ribbon, VizPanel, getPageSetup (removed Inspector, added getPageSetup)
+// Real Ribbon component wired with all props including onPageSizeChange + handlePageSizeChange handler
+// Real VizPanel component with selectedElement, onAddElement=addElement, onImageSelected=addImageElement,
+//   onUpdate=handleElementUpdate (id+patch bridge → updateElement)
+// Dead code removed: deletePage, prevPage, nextPage; saveError renamed _saveError
+```
+
+---
+
 ## v12.0 — 2026-06-28 — FieldsPanel component (searchable field catalog tree)
 
 **File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/FieldsPanel.tsx`
