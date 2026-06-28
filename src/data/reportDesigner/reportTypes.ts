@@ -146,15 +146,16 @@ export function createElementId(): string {
   return `el-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export function createEmptyDocument(name: string, createdBy: string): ReportDocument {
+export function createEmptyDocument(name: string, createdBy: string, preset: PageSizePreset = "A4"): ReportDocument {
   const now = new Date().toISOString();
+  const pageSetup = getPageSetup(preset);
   return {
     reportId: createReportId(),
     reportName: name,
     version: 1,
     createdAt: now, createdBy, updatedAt: now, updatedBy: createdBy,
     docType: "print",
-    pageSetup: { ...A4_PORTRAIT, margins: { ...A4_PORTRAIT.margins } },
+    pageSetup: { ...pageSetup, margins: { ...pageSetup.margins } },
     theme: { palette: ["#1f6feb", "#2da44e", "#bf8700", "#cf222e", "#8250df"], fontFamily: "inherit", defaults: {} },
     dataSources: [],
     pages: [{ pageId: createPageId(), name: "صفحة 1", order: 0, filters: [], elements: [] }],

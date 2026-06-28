@@ -16,12 +16,12 @@ import {
   createPageId,
   type ReportDocument,
   type Element,
+  type PageSizePreset,
 } from "../../../../data/reportDesigner/reportTypes";
 import type { Rect } from "../../../../data/reportDesigner/geometry";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
 import type { DirectoryHandleLike } from "../../../../data/storage/fileSystemAccess";
 import Canvas from "./editor/Canvas";
-import Toolbar from "./editor/Toolbar";
 import Inspector from "./editor/Inspector";
 import PrintView from "./PrintView";
 import "./ReportDesigner.css";
@@ -66,6 +66,8 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: Editor
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [showPrint, setShowPrint] = useState(false);
+  const [showFields, setShowFields] = useState(true);
+  const [showFormat, setShowFormat] = useState(true);
 
   // Debounce timer ref — stores the pending timeout id
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -249,54 +251,92 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: Editor
       : null;
 
   return (
-    <div className="rd-root rd-root--editor" dir="rtl">
-      {/* Back button + report name */}
-      <div className="rd-editor-header">
-        <button className="rd-btn rd-btn-secondary" onClick={onBack}>
-          رجوع
-        </button>
-        <h2 className="rd-title rd-title-inline">{doc.reportName}</h2>
-        {saveError && <span className="rd-save-error">{saveError}</span>}
-      </div>
+    <>
+      <div
+        className={`rd-pbi-layout${!showFields ? " rd-fields-hidden" : ""}${!showFormat ? " rd-format-hidden" : ""}`}
+        style={{ height: "calc(100vh - 52px)" }}
+      >
+        {/* STUB: Ribbon (Task A.5 will replace this) */}
+        <div className="rd-ribbon" dir="rtl">
+          <button className="rd-ribbon-btn" onClick={onBack}>
+            <span className="rd-ribbon-btn-icon">←</span>
+            <span>رجوع</span>
+          </button>
+          <div className="rd-ribbon-separator" />
+          <span className="rd-ribbon-doc-name">{doc.reportName}</span>
+          <div style={{ flex: 1 }} />
+          {saving && <span className="rd-saving-indicator">جاري الحفظ...</span>}
+          <button className="rd-ribbon-btn" onClick={handleExplicitSave} disabled={saving}>
+            <span className="rd-ribbon-btn-icon">💾</span>
+            <span>حفظ</span>
+          </button>
+          <button className="rd-ribbon-btn rd-no-print" onClick={() => setShowPrint(true)}>
+            <span className="rd-ribbon-btn-icon">🖨️</span>
+            <span>طباعة</span>
+          </button>
+          <div className="rd-ribbon-separator" />
+          <button className="rd-ribbon-btn" onClick={() => setShowFields((v) => !v)}>
+            <span className="rd-ribbon-btn-icon">📋</span>
+            <span>الحقول</span>
+          </button>
+          <button className="rd-ribbon-btn" onClick={() => setShowFormat((v) => !v)}>
+            <span className="rd-ribbon-btn-icon">🎨</span>
+            <span>التنسيق</span>
+          </button>
+        </div>
 
-      {/* Toolbar */}
-      <Toolbar
-        doc={doc}
-        currentPageIndex={currentPageIndex}
-        onAddElement={addElement}
-        onImageSelected={addImageElement}
-        onAddPage={addPage}
-        onDeletePage={deletePage}
-        onPrevPage={prevPage}
-        onNextPage={nextPage}
-        onSave={handleExplicitSave}
-        onPrint={() => setShowPrint(true)}
-        saving={saving}
-      />
+        {/* STUB: Fields panel (Task A.4 will replace this) */}
+        <div className="rd-fields-panel">
+          <div className="rd-panel-header"><span>الحقول</span></div>
+          <p style={{ padding: "12px", color: "var(--rd-text-secondary)", fontSize: "13px" }}>
+            لوحة الحقول — قريباً
+          </p>
+        </div>
 
-      {/* Editor body: canvas + inspector */}
-      <div className="rd-editor-body">
-        <div className="rd-canvas-area">
+        {/* Canvas area */}
+        <div
+          className="rd-canvas-area"
+          style={{
+            "--rd-page-width": `${doc.pageSetup.width}px`,
+            "--rd-page-height": `${doc.pageSetup.height}px`,
+          } as React.CSSProperties}
+        >
           <Canvas
             doc={doc}
             pageIndex={currentPageIndex}
             selectedId={selectedId}
             onSelect={setSelectedId}
             mode="edit"
-            zoom={0.9}
+            zoom={1}
             onElementChange={handleElementChange}
           />
         </div>
-        <div className="rd-inspector-panel">
-          <Inspector element={selectedElement} onUpdate={updateElement} />
-          {!selectedElement && (
-            <p className="rd-inspector-empty">اختر عنصراً لتعديل خصائصه.</p>
-          )}
+
+        {/* STUB: Viz+Format panel (Task A.5 will replace this) */}
+        <div className="rd-viz-panel">
+          <div className="rd-panel-header"><span>التنسيق</span></div>
+          <Inspector
+            element={selectedElement}
+            onUpdate={updateElement}
+          />
+        </div>
+
+        {/* STUB: Pages bar (Task A.3 will replace this) */}
+        <div className="rd-pages-bar">
+          {doc.pages.map((page, i) => (
+            <button
+              key={page.pageId}
+              className={`rd-page-tab${i === currentPageIndex ? " rd-page-tab--active" : ""}`}
+              onClick={() => setCurrentPageIndex(i)}
+            >
+              {page.name}
+            </button>
+          ))}
+          <button className="rd-page-tab-add" onClick={addPage}>+ صفحة</button>
         </div>
       </div>
-
       {showPrint && <PrintView doc={doc} onClose={() => setShowPrint(false)} />}
-    </div>
+    </>
   );
 }
 
@@ -317,6 +357,7 @@ export default function ReportDesigner() {
   // New-design form state
   const [showNewForm, setShowNewForm] = useState(false);
   const [newName, setNewName] = useState("");
+  const [newPreset, setNewPreset] = useState<PageSizePreset>("A4");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const newNameInputRef = useRef<HTMLInputElement>(null);
@@ -398,7 +439,7 @@ export default function ReportDesigner() {
     if (!directoryHandle) return;
     setCreating(true);
     setCreateError(null);
-    const doc = createEmptyDocument(name, currentUser);
+    const doc = createEmptyDocument(name, currentUser, newPreset);
     const result = await saveDesign(directoryHandle, doc);
     if (!result.ok) {
       setCreateError(result.error);
@@ -480,6 +521,18 @@ export default function ReportDesigner() {
             }}
             disabled={creating}
           />
+          <select
+            className="rd-new-select"
+            value={newPreset}
+            onChange={(e) => setNewPreset(e.target.value as PageSizePreset)}
+            disabled={creating}
+          >
+            <option value="A4">A4 عمودي</option>
+            <option value="Letter">Letter عمودي</option>
+            <option value="16:9">16:9 شرائح</option>
+            <option value="4:3">4:3 شرائح</option>
+            <option value="16:9-fhd">16:9 FHD</option>
+          </select>
           <button
             className="rd-btn rd-btn-primary"
             onClick={() => void handleCreate()}

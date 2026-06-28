@@ -4,6 +4,103 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v10.0 — 2026-06-28 — Power BI 3-panel layout shell
+
+**File:** `src/data/reportDesigner/reportTypes.ts`
+
+**Before:**
+```ts
+export function createEmptyDocument(name: string, createdBy: string): ReportDocument {
+  const now = new Date().toISOString();
+  return {
+    reportId: createReportId(),
+    reportName: name,
+    version: 1,
+    createdAt: now, createdBy, updatedAt: now, updatedBy: createdBy,
+    docType: "print",
+    pageSetup: { ...A4_PORTRAIT, margins: { ...A4_PORTRAIT.margins } },
+```
+
+**After:**
+```ts
+export function createEmptyDocument(name: string, createdBy: string, preset: PageSizePreset = "A4"): ReportDocument {
+  const now = new Date().toISOString();
+  const pageSetup = getPageSetup(preset);
+  return {
+    reportId: createReportId(),
+    reportName: name,
+    version: 1,
+    createdAt: now, createdBy, updatedAt: now, updatedBy: createdBy,
+    docType: "print",
+    pageSetup: { ...pageSetup, margins: { ...pageSetup.margins } },
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/ReportDesigner.css`
+
+**Before:**
+```css
+/* ── Report Designer tab ── */
+
+.rd-root {
+  padding: 24px;
+  ...
+```
+
+**After:**
+```css
+/* ── Power BI theme tokens ── */
+:root { --rd-ribbon-bg: #f3f2f1; ... }
+
+/* ── 3-panel editor layout ── */
+.rd-pbi-layout { display: grid; grid-template-rows: 44px 1fr 40px; ... }
+/* + all new PBI layout/ribbon/pages/panel classes */
+
+/* ── Report Designer tab ── */
+.rd-root { ... (unchanged) }
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
+
+**Before:**
+```tsx
+// EditorHost return:
+return (
+  <div className="rd-root rd-root--editor" dir="rtl">
+    <div className="rd-editor-header">...</div>
+    <Toolbar ... />
+    <div className="rd-editor-body">
+      <div className="rd-canvas-area"><Canvas ... zoom={0.9} /></div>
+      <div className="rd-inspector-panel"><Inspector ... /></div>
+    </div>
+    {showPrint && <PrintView ... />}
+  </div>
+);
+```
+
+**After:**
+```tsx
+// EditorHost return (3-panel PBI layout):
+// + showFields / showFormat state added
+return (
+  <>
+    <div className={`rd-pbi-layout${!showFields ? " rd-fields-hidden" : ""}...`}>
+      <div className="rd-ribbon">...</div>
+      <div className="rd-fields-panel">...</div>
+      <div className="rd-canvas-area"><Canvas ... zoom={1} /></div>
+      <div className="rd-viz-panel"><Inspector ... /></div>
+      <div className="rd-pages-bar">...</div>
+    </div>
+    {showPrint && <PrintView ... />}
+  </>
+);
+```
+
+---
+
 ## v9.0 — 2026-06-28 — feat(report-designer): add slide page-size presets (16:9, 4:3, FHD)
 
 **File:** `src/data/reportDesigner/reportTypes.ts`
