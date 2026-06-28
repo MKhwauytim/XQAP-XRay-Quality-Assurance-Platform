@@ -4,6 +4,20 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v5.38 — 2026-06-28 — Fix CLAUDE.md documentation drift (DOC-01)
+
+Audit finding DOC-01: three confirmed drifts in `CLAUDE.md`. (1) Bundle size
+said "~942 kB, 286 kB gzip"; actual `vite build` output is 1.9 MB / 664 kB gzip.
+(2) Disk-layout block documented the legacy `Population/`, `templates/`, `.system/`
+roots; the code now uses numbered roots `1-Population/`…`6-Templates/` with legacy
+fallbacks (correctly described in `docs/data-system-report.md`). (3) Session
+description said "runtime-only … no localStorage"; it is now `sessionStorage`
+(see v5.37 / SEC-02). Documentation-only change — no code touched.
+
+**File:** `CLAUDE.md` (build-size line, disk-layout section, session bullet)
+
+---
+
 ## v5.37 — 2026-06-28 — Session storage moved from localStorage to sessionStorage (SEC-02)
 
 Audit finding SEC-02: `authSession.ts` persisted the auth session to

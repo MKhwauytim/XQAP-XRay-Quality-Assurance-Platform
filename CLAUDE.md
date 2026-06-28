@@ -50,7 +50,7 @@ npx vitest run src/data/sampling/sampleAlgorithm.test.ts  # run a single test fi
 
 ## Build & dependency gotchas
 
-- `vite-plugin-singlefile` inlines everything (`assetsInlineLimit` maxed, `cssCodeSplit: false`): the build output is **one portable `dist/index.html`** (~942 kB, 286 kB gzip).
+- `vite-plugin-singlefile` inlines everything (`assetsInlineLimit` maxed, `cssCodeSplit: false`): the build output is **one portable `dist/index.html`** (~1.9 MB, ~664 kB gzip as of 2026-06-28 — size grows with features; re-check after large additions).
 - The `xlsx` dependency is installed from a **SheetJS CDN tarball** (`https://cdn.sheetjs.com/xlsx-0.20.3/...`), not the npm registry — `npm install` needs access to that URL; don't "upgrade" it to the stale npm package.
 - The workspace features require the **File System Access API** (`showDirectoryPicker`), so the app only fully works in Chromium browsers (Chrome/Edge). Other browsers get the `unsupported_browser` state.
 - TypeScript is in strict mode. `createWritable` on `FileHandleLike` is typed as optional — always guard with `if (!fh.createWritable) return/continue;` before calling it.
@@ -59,29 +59,25 @@ npx vitest run src/data/sampling/sampleAlgorithm.test.ts  # run a single test fi
 
 ## Disk layout (workspace folder)
 
-The user picks a root directory. Inside:
+The user picks a root directory. The current layout uses **numbered roots**; legacy
+unnumbered folders (`Population/`, `templates/`, `.system/`) are still read when present.
+**`docs/data-system-report.md` is the authoritative, detailed reference for every file
+and path** — keep it in sync. Summary:
 
 ```
-Population/
-  {MM-MonthName-YYYY}/         ← one folder per processed month
+1-Population/
+  {month}-{MonthName-en}-{year}/   ← e.g. 5-May-2026 (legacy: files flat in folder)
     month.manifest.json
-    risk.raw.json
-    population.final.json
-    bi.raw.json                 ← only if BI rows present
-    sample/
-      sample.master.json
-    distribution.log.json       ← append-only event log
-    distribution.current.json   ← derived snapshot
-    employee-answers/
-      {username}.answers.json
-templates/
-  {templateId}.json
-  templates.index.json
-.system/
-  backups/
-    {YYYY-MM-DDTHH-MM-SS}/     ← backup snapshots
-      backup.manifest.json
-      {month}/ …key files…
+    raw/        risk.raw.json, bi.raw.json (BI only if present)
+    processed/  population.final.json, processing.summary.json
+2-Samples/
+  {month}/1-Main/   sample.master.json, distribution.log.json (append-only),
+                    distribution.current.json (derived), main.samples.json
+  {month}/…        per-employee sample mirrors, answers, referral/replacement, approvals
+3-User Data/       workspace user/permission files (when initialized via workspace defaults)
+4-Reports/         generated report artifacts (when report flows write to disk)
+5-System/          backups/, browse & table presets, auto-backup settings/state, activity audit log
+6-Templates/       {templateId}.json, templates.index.json, template selection
 ```
 
 Month folder names follow the pattern `{month}-{MonthName-en}-{year}` (e.g. `5-May-2026`).
@@ -92,7 +88,7 @@ Month folder names follow the pattern `{month}-{MonthName-en}-{year}` (e.g. `5-M
 
 1. **Browser storage (auth & permissions)** — `src/auth/`
    - Login: new passwords hashed with **Argon2id** via `hash-wasm` (m=19 MiB, t=2, p=1 — OWASP 2026 baseline). Legacy PBKDF2-SHA256 hashes are still verified for backwards compatibility, and are **transparently upgraded to Argon2id on successful login** (`needsRehash` → `persistUserPasswordHash`). Bootstrap `admin` hash stored in `authConfig.ts`.
-   - Session → runtime-only module variable in `authSession.ts` (no `localStorage`). Sessions survive tab navigation but are lost on page refresh or tab close. The 7-day TTL constant remains but is only applied when a session is read back after it was previously written (e.g. after page reload if a future persistence layer is added). Managed users + role→tab permission matrix → `localStorage` (`xray_user_management_v1`), changes broadcast via custom DOM event (`subscribeToUserManagementChanges`).
+   - Session → runtime module variable in `authSession.ts`, persisted to **`sessionStorage`** (`xray_auth_session_v1`, SEC-02): it survives a page reload but auto-clears when the tab/browser closes. A 7-day TTL applies as a secondary guard on read-back. This is a UX convenience, **not** a security control (see the security-model note below). Managed users + role→tab permission matrix → `localStorage` (`xray_user_management_v1`), changes broadcast via custom DOM event (`subscribeToUserManagementChanges`).
    - Roles: `guest` / `employee` / `supervisor` / `manager` / `admin` (5 roles — see `AuthRole` in `authTypes.ts`). `admin` is the bootstrap superuser; `manager` is the top managed role. `App.tsx` filters tabs by role + permission matrix.
    - `MANAGED_TABS` in `userManagement.ts` must list every tab; `createDefaultPermissions()` must include all role×tab combinations.
 
