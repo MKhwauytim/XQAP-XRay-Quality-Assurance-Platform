@@ -4,6 +4,83 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v7.6 — 2026-06-28 — Report Designer: canvas geometry helpers (FEATURE)
+
+Phase 1, Task 1.1: Implement pure canvas geometry helper functions for the Report Designer. These functions provide snap-to-grid, rectangle snapping, resize-from-handle, and hit-test capabilities used by drag/resize interactions. No UI — only TypeScript helpers with comprehensive test coverage.
+
+**File:** `src/data/reportDesigner/geometry.ts` (new)
+
+**Before:**
+```
+(file did not exist)
+```
+
+**After:**
+```ts
+export type Rect = { x: number; y: number; w: number; h: number };
+export type ResizeHandle = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
+
+export function snap(value: number, grid: number): number {
+  if (grid <= 0) return value;
+  return Math.round(value / grid) * grid;
+}
+
+export function snapRect(rect: Rect, grid: number): Rect {
+  return { x: snap(rect.x, grid), y: snap(rect.y, grid), w: snap(rect.w, grid), h: snap(rect.h, grid) };
+}
+
+export function resize(rect: Rect, handle: ResizeHandle, dx: number, dy: number, minW = 8, minH = 8): Rect {
+  let { x, y, w, h } = rect;
+  if (handle.includes("e")) w = Math.max(minW, w + dx);
+  if (handle.includes("s")) h = Math.max(minH, h + dy);
+  if (handle.includes("w")) { const nw = Math.max(minW, w - dx); x += w - nw; w = nw; }
+  if (handle.includes("n")) { const nh = Math.max(minH, h - dy); y += h - nh; h = nh; }
+  return { x, y, w, h };
+}
+
+export function hitTest(rect: Rect, px: number, py: number): boolean {
+  return px >= rect.x && px <= rect.x + rect.w && py >= rect.y && py <= rect.y + rect.h;
+}
+```
+
+**File:** `src/data/reportDesigner/geometry.test.ts` (new)
+
+**Before:**
+```
+(file did not exist)
+```
+
+**After:**
+```ts
+import { describe, it, expect } from "vitest";
+import { snap, snapRect, resize, hitTest } from "./geometry";
+
+describe("geometry", () => {
+  it("snaps to nearest grid multiple", () => {
+    expect(snap(11, 8)).toBe(8);
+    expect(snap(13, 8)).toBe(16);
+  });
+  it("snaps a whole rect", () => {
+    expect(snapRect({ x: 11, y: 13, w: 31, h: 5 }, 8)).toEqual({ x: 8, y: 16, w: 32, h: 8 });
+  });
+  it("resizes from the SE handle by growing w/h", () => {
+    expect(resize({ x: 0, y: 0, w: 100, h: 100 }, "se", 20, 30)).toEqual({ x: 0, y: 0, w: 120, h: 130 });
+  });
+  it("resizes from the NW handle by moving origin and shrinking", () => {
+    expect(resize({ x: 10, y: 10, w: 100, h: 100 }, "nw", 20, 20)).toEqual({ x: 30, y: 30, w: 80, h: 80 });
+  });
+  it("enforces a minimum size", () => {
+    expect(resize({ x: 0, y: 0, w: 50, h: 50 }, "se", -100, -100, 10, 10)).toEqual({ x: 0, y: 0, w: 10, h: 10 });
+  });
+  it("hit-tests a point inside the rect", () => {
+    expect(hitTest({ x: 0, y: 0, w: 100, h: 100 }, 50, 50)).toBe(true);
+    expect(hitTest({ x: 0, y: 0, w: 100, h: 100 }, 150, 50)).toBe(false);
+  });
+});
+```
+
+---
+
 ## v7.5 — 2026-06-28 — Report Designer: design storage CRUD + index (FEATURE)
 
 Phase 0, Task 0.6: Implement disk storage for ReportDocument designs, mirroring templateStorage.ts. Files live in `4-Reports/designs/` (created on demand). Index file is `designs.index.json`. Exports `DesignIndex`, `saveDesign`, `loadDesign`, `loadDesignIndex`, `deleteDesign`.
