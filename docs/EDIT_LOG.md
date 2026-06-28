@@ -4,6 +4,37 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v7.5 — 2026-06-28 — Report Designer: design storage CRUD + index (FEATURE)
+
+Phase 0, Task 0.6: Implement disk storage for ReportDocument designs, mirroring templateStorage.ts. Files live in `4-Reports/designs/` (created on demand). Index file is `designs.index.json`. Exports `DesignIndex`, `saveDesign`, `loadDesign`, `loadDesignIndex`, `deleteDesign`.
+
+**File:** `src/data/reportDesigner/storage/reportDesignStorage.ts` (new)
+
+**Before:**
+```
+(file did not exist)
+```
+
+**After:**
+```ts
+// Full implementation in src/data/reportDesigner/storage/reportDesignStorage.ts
+// saveDesign / loadDesign / loadDesignIndex / deleteDesign
+```
+
+**File:** `src/data/reportDesigner/storage/reportDesignStorage.test.ts` (new)
+
+**Before:**
+```
+(file did not exist)
+```
+
+**After:**
+```ts
+// Two Vitest tests: round-trip save/load/index and delete removes from index
+```
+
+---
+
 ## v7.4 — 2026-06-28 — Fix grouping key delimiter to prevent collisions (BUG)
 
 Grouping key was built by joining multiple `groupBy` dimension values with a space `" "`. This caused false key collisions when dimension values themselves contained spaces. For example, `{name: "John Smith", dept: "HR"}` and `{name: "John", dept: "Smith HR"}` both produced key `"John Smith HR"`. Changed the delimiter from `" "` to `"\x00"` (null byte, which cannot appear in normal string data) to prevent collisions.
