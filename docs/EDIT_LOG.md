@@ -4,6 +4,1599 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v8.1 — 2026-06-28 — fix(report-designer): CSSProperties import, DesignIndex doc, admin permission row
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/renderers/TextRenderer.tsx`
+
+**Before:**
+```tsx
+import type { Element, TextConfig } from "../../../../../data/reportDesigner/reportTypes";
+// ...
+  const style: React.CSSProperties = {
+```
+
+**After:**
+```tsx
+import type { CSSProperties } from "react";
+import type { Element, TextConfig } from "../../../../../data/reportDesigner/reportTypes";
+// ...
+  const style: CSSProperties = {
+```
+
+---
+
+**File:** `docs/data-system-report.md`
+
+**Before:**
+```md
+| `designs.index.json` | `4-Reports/designs/` | Index of all saved report designs (`JsonEnvelope<DesignIndex>`). Lists each design's `reportId`, `reportName`, `docType`, `createdAt`, and `updatedAt`. |
+```
+
+**After:**
+```md
+| `designs.index.json` | `4-Reports/designs/` | Index of all saved report designs (`JsonEnvelope<DesignIndex>`). Lists each design's `reportId`, `reportName`, `version`, and `updatedAt`. |
+```
+
+---
+
+**File:** `src/auth/userManagement.ts`
+
+**Before:**
+```ts
+    { role: "admin",      tabId: "reports",                 access: "edit" },
+    { role: "admin",      tabId: "archive",                 access: "edit" },
+```
+
+**After:**
+```ts
+    { role: "admin",      tabId: "reports",                 access: "edit" },
+    { role: "admin",      tabId: "report-designer",         access: "edit" },
+    { role: "admin",      tabId: "archive",                 access: "edit" },
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/tabConfig.test.ts`
+
+**Before:**
+```ts
+    expect(rows.map((r) => r.role).sort()).toEqual(
+      ["employee", "guest", "manager", "supervisor"].sort()
+    );
+```
+
+**After:**
+```ts
+    expect(rows.map((r) => r.role).sort()).toEqual(
+      ["admin", "employee", "guest", "manager", "supervisor"].sort()
+    );
+```
+
+---
+
+## v8.0 — 2026-06-28 — Phase-1 integration pass: test suite, typecheck, lint, build verification; docs update
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
+
+**Before:**
+```tsx
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPageIndex]);
+```
+and
+```tsx
+  useEffect(() => {
+    if (!directoryHandle) return;
+    let cancelled = false;
+    setLoadingIndex(true);
+    setIndexError(null);
+    loadDesignIndex(directoryHandle)
+      .then((idx) => {
+        if (!cancelled) {
+          setIndex(idx);
+          setLoadingIndex(false);
+        }
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setIndexError(
+            err instanceof Error ? err.message : "خطأ غير متوقع عند تحميل القائمة."
+          );
+          setLoadingIndex(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [directoryHandle]);
+```
+
+**After:**
+```tsx
+  }, [currentPageIndex]);
+```
+and
+```tsx
+  useEffect(() => {
+    if (!directoryHandle) return;
+    let cancelled = false;
+    async function fetchIndex() {
+      setLoadingIndex(true);
+      setIndexError(null);
+      try {
+        const idx = await loadDesignIndex(directoryHandle!);
+        if (!cancelled) {
+          setIndex(idx);
+          setLoadingIndex(false);
+        }
+      } catch (err: unknown) {
+        if (!cancelled) {
+          setIndexError(
+            err instanceof Error ? err.message : "خطأ غير متوقع عند تحميل القائمة."
+          );
+          setLoadingIndex(false);
+        }
+      }
+    }
+    void fetchIndex();
+    return () => {
+      cancelled = true;
+    };
+  }, [directoryHandle]);
+```
+_(Fixes: removed stale `eslint-disable` comment; refactored synchronous setState calls in useEffect into an async inner function to satisfy `react-hooks/set-state-in-effect` lint rule.)_
+
+**File:** `docs/data-system-report.md`
+
+**Before:** _(4-Reports section had no designs/ subsection — only the summary table row)_
+```markdown
+| `4-Reports/` | Generated/report artifacts when report flows write to the workspace. |
+```
+_(no `## 4-Reports/designs/` section existed)_
+
+**After:** _(new section added before `## Templates, Preferences, Backups`)_
+```markdown
+## 4-Reports/designs/
+
+Report Designer saves and loads user-created report designs under this sub-folder.
+
+| File or Pattern | Location | Purpose |
+| --- | --- | --- |
+| `designs.index.json` | `4-Reports/designs/` | Index of all saved report designs (`JsonEnvelope<DesignIndex>`). Lists each design's `reportId`, `reportName`, `docType`, `createdAt`, and `updatedAt`. |
+| `{reportId}.json` | `4-Reports/designs/` | Individual `ReportDocument` persisted as `JsonEnvelope<ReportDocument>`. Contains the full document: theme, pages, and all canvas elements (text, shape, image). |
+
+Both files use `safeWriteJson` / `safeReadJson` and the `JsonEnvelope` schema-versioning wrapper (current `schemaVersion: 1`). The index is re-derived from the design files on load; `designs.index.json` is the live index that the Report Designer list view reads.
+```
+
+---
+
+## v7.14 — 2026-06-28 — Report Designer: print/PDF view (Task 1.7)
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/PrintView.tsx` _(new file)_
+
+**Before:** _(file did not exist)_
+
+**After:**
+```tsx
+import type { ReportDocument } from "../../../../data/reportDesigner/reportTypes";
+import Canvas from "./editor/Canvas";
+
+interface PrintViewProps {
+  doc: ReportDocument;
+  onClose: () => void;
+}
+
+export default function PrintView({ doc, onClose }: PrintViewProps) {
+  return (
+    <div
+      className="rd-print-overlay"
+      dir="rtl"
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "white",
+        zIndex: 9999,
+        overflowY: "auto",
+        padding: "16px",
+        boxSizing: "border-box",
+      }}
+    >
+      <div className="rd-no-print" style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
+        <button className="rd-btn rd-btn-secondary" onClick={onClose}>رجوع</button>
+        <button className="rd-btn rd-btn-primary" onClick={() => window.print()}>طباعة</button>
+      </div>
+      {doc.pages.map((_page, i) => (
+        <div key={i} className="rd-print-page">
+          <Canvas
+            doc={doc}
+            pageIndex={i}
+            selectedId={null}
+            onSelect={() => {}}
+            mode="view"
+            zoom={1}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/ReportDesigner.css`
+
+**Before:** _(no print CSS existed)_
+
+**After:** _(appended at end of file)_
+```css
+/* ── Print view ── */
+.rd-print-page {
+  width: var(--rd-page-width, 794px);
+  height: var(--rd-page-height, 1123px);
+  page-break-after: always;
+  break-after: page;
+  overflow: hidden;
+  position: relative;
+  margin: 0 auto 16px;
+  box-shadow: 0 0 8px rgba(0,0,0,0.15);
+  background: white;
+}
+
+@media print {
+  .rd-no-print {
+    display: none !important;
+  }
+  body > *:not(.rd-print-overlay) {
+    display: none !important;
+  }
+  .rd-print-overlay {
+    position: static !important;
+    z-index: auto !important;
+  }
+  .rd-print-page {
+    box-shadow: none;
+    margin: 0;
+    page-break-after: always;
+    break-after: page;
+  }
+  .rd-print-page:last-child {
+    page-break-after: avoid;
+    break-after: avoid;
+  }
+}
+
+/* TODO: dynamically set @page size from doc.pageSetup when browsers support
+   setting @page rules from JS. For now fixed at A4 portrait (@96dpi = 794×1123px). */
+@page {
+  size: A4 portrait;
+  margin: 0;
+}
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
+
+**Before:**
+```tsx
+function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: EditorHostProps) {
+  const [doc, setDoc] = useState<ReportDocument>(initialDoc);
+  const [currentPageIndex, setCurrentPageIndex] = useState(0);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+```
+
+**After:**
+```tsx
+function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: EditorHostProps) {
+  const [doc, setDoc] = useState<ReportDocument>(initialDoc);
+  const [currentPageIndex, setCurrentPageIndex] = useState(0);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [showPrint, setShowPrint] = useState(false);
+```
+
+**Before (onPrint):**
+```tsx
+        onPrint={() => window.print()}
+```
+
+**After (onPrint):**
+```tsx
+        onPrint={() => setShowPrint(true)}
+```
+
+**Before (return statement end of EditorHost):**
+```tsx
+    </div>
+  );
+}
+
+// ── Main tab component ──────────────────────────────────────────────────────
+```
+
+**After (return statement end of EditorHost):**
+```tsx
+      {showPrint && <PrintView doc={doc} onClose={() => setShowPrint(false)} />}
+    </div>
+  );
+}
+
+// ── Main tab component ──────────────────────────────────────────────────────
+```
+
+---
+
+## v7.13 — 2026-06-28 — Fix: page mutation stale closures in Report Designer
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
+
+**Before — addPage:**
+```ts
+function addPage() {
+  const newPage = {
+    pageId: createPageId(),
+    name: `صفحة ${doc.pages.length + 1}`,
+    order: doc.pages.length,
+    filters: [],
+    elements: [],
+  };
+  setDoc((d) => ({ ...d, pages: [...d.pages, newPage] }));
+  setCurrentPageIndex(doc.pages.length);  // stale closure: reads render-time length
+  setSelectedId(null);
+}
+```
+
+**After — addPage:**
+```ts
+function addPage() {
+  const newPage = {
+    pageId: createPageId(),
+    name: `صفحة ${doc.pages.length + 1}`,
+    order: doc.pages.length,
+    filters: [],
+    elements: [],
+  };
+  setDoc((d) => {
+    const newPages = [...d.pages, newPage];
+    setCurrentPageIndex(newPages.length - 1);  // guaranteed latest from updater
+    return { ...d, pages: newPages };
+  });
+  setSelectedId(null);
+}
+```
+
+**Before — deletePage:**
+```ts
+function deletePage() {
+  if (doc.pages.length <= 1) return;
+  const nextPages = doc.pages.filter((_, i) => i !== currentPageIndex);  // stale closure
+  const nextIndex = Math.max(0, currentPageIndex - 1);
+  setDoc((d) => ({ ...d, pages: nextPages }));
+  setCurrentPageIndex(nextIndex);
+  setSelectedId(null);
+}
+```
+
+**After — deletePage:**
+```ts
+function deletePage() {
+  if (doc.pages.length <= 1) return;
+  const nextIndex = Math.max(0, currentPageIndex - 1);
+  setDoc((d) => ({ ...d, pages: d.pages.filter((_, i) => i !== currentPageIndex) }));  // filter from updater state
+  setCurrentPageIndex(nextIndex);
+  setSelectedId(null);
+}
+```
+
+---
+
+## v7.12 — 2026-06-28 — Report Designer: Toolbar, Inspector, autosave (Task 1.6)
+
+Phase 1, Task 1.6: wires the full editor — Toolbar (add elements/pages, page nav, save, print), Inspector (selected-element property editor), and debounced autosave (800 ms) with an explicit Save button.
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/Toolbar.tsx`
+
+**Before:** (file did not exist)
+
+**After:** New component. Props: `{ doc, currentPageIndex, onAddElement, onImageSelected, onAddPage, onDeletePage, onPrevPage, onNextPage, onSave, onPrint, saving }`. Renders RTL Arabic toolbar with "إضافة نص", "إضافة شكل", "إضافة صورة" (hidden file-input), page navigation, "إضافة صفحة", "حذف الصفحة", "حفظ"/"جاري الحفظ…", "طباعة" buttons.
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/Inspector.tsx`
+
+**Before:** (file did not exist)
+
+**After:** New component. Props: `{ element: Element | null; onUpdate: (updated: Element) => void }`. Renders nothing when no element selected. When selected: name field, geometry inputs (x/y/w/h), style fields (fill, borderColor, fontSize, fontWeight, borderWidth, padding, opacity, textAlign, color), and type-specific content section (text textarea; shape select; image placeholder; table/chart/kpi placeholder).
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
+
+**Before:**
+```tsx
+  // --- Editor view ---
+  if (view === "editor") {
+    return (
+      <div className="rd-root" dir="rtl">
+        <div className="rd-editor-header">
+          <button
+            className="rd-btn rd-btn-secondary"
+            onClick={() => {
+              setView("list");
+              setOpenDoc(null);
+            }}
+          >
+            رجوع
+          </button>
+          <h2 className="rd-title rd-title-inline">
+            {openDoc?.reportName ?? "تقرير جديد"}
+          </h2>
+        </div>
+        <div className="rd-editor-placeholder">
+          محرر التقارير — قيد التطوير
+        </div>
+      </div>
+    );
+  }
+```
+
+**After:** Replaced placeholder with `<EditorHost>` component (defined inside index.tsx). `EditorHost` owns `doc`, `currentPageIndex`, `selectedId`, `saving`, `saveError` state. Implements debounced 800 ms autosave via `useRef`-held timer. Handles `onAddElement` (text/shape/image), `onUpdateElement`, `onElementChange` (geometry only), page CRUD. Renders `<Toolbar>` + `<Canvas>` + `<Inspector>` in a two-column layout (canvas left, inspector right in RTL = canvas right visually).
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/ReportDesigner.css`
+
+**Before:** (ends at `.rd-resize-handle--se` rule)
+
+**After:** Appended editor-layout rules: `.rd-editor-body`, `.rd-canvas-area`, `.rd-toolbar`, `.rd-inspector`, `.rd-inspector-section`, `.rd-inspector-field`, `.rd-inspector-input`, `.rd-inspector-textarea`, `.rd-inspector-select`, `.rd-save-status`.
+
+---
+
+## v7.11 — 2026-06-28 — Report Designer: drag/resize/select interactions (Task 1.5)
+
+Phase 1, Task 1.5: pointer-event drag and resize interactions for canvas elements.
+
+Created `useCanvasInteractions` hook that uses pointer capture (`setPointerCapture`) to track drag-move and resize-handle operations. Drag translates x/y; resize delegates to `geometry.resize()`. On pointer-up, `snapRect()` snaps the result to the grid, then calls `onElementChange`. All drag state lives in `useRef` (no re-renders mid-drag). Window-level `pointermove`/`pointerup` listeners are added on capture start and removed on release.
+
+Modified `Canvas.tsx` to accept `onElementChange` prop, wire `onPointerDown` on non-locked elements in edit mode, and render 8 resize handles around the selected element.
+
+Added CSS for `.rd-resize-handle` and its 8 directional modifier classes (RTL-aware positioning).
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/useCanvasInteractions.ts`
+
+**Before:** (file did not exist)
+
+**After:** (see file — pointer-capture drag/resize hook returning `onElementPointerDown` and `onHandlePointerDown`)
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/Canvas.tsx`
+
+**Before:**
+```tsx
+interface CanvasProps {
+  doc: ReportDocument;
+  pageIndex: number;
+  selectedId: string | null;
+  onSelect: (id: string | null) => void;
+  mode: "edit" | "view";
+  zoom?: number;
+}
+// elements rendered without drag/resize handlers; no resize handles
+```
+
+**After:**
+```tsx
+interface CanvasProps {
+  doc: ReportDocument;
+  pageIndex: number;
+  selectedId: string | null;
+  onSelect: (id: string | null) => void;
+  mode: "edit" | "view";
+  zoom?: number;
+  onElementChange?: (elementId: string, rect: Rect) => void;
+}
+// elements get onPointerDown for drag; selected element renders 8 resize handles
+```
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/ReportDesigner.css`
+
+**Before:** (no resize handle styles)
+
+**After:** (added `.rd-resize-handle` base + 8 directional modifier classes with RTL-aware positioning)
+
+---
+
+## v7.12.1 — 2026-06-28 — Fix: update onElementChange ref in effect not during render
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/useCanvasInteractions.ts`
+
+**Before:**
+```ts
+import { useRef, useCallback } from "react";
+// ...
+const onElementChangeRef = useRef(onElementChange);
+onElementChangeRef.current = onElementChange;  // ← during render — invalid React pattern
+```
+
+**After:**
+```ts
+import { useRef, useCallback, useEffect } from "react";
+// ...
+const onElementChangeRef = useRef(onElementChange);
+useEffect(() => {
+  onElementChangeRef.current = onElementChange;
+}, [onElementChange]);
+```
+
+Updating `ref.current` during render is a React anti-pattern and can cause unexpected behavior. The fix wraps the ref update in a `useEffect` so it only happens after render completes.
+
+---
+
+## v7.12 — 2026-06-28 — Fix: pointer capture + stable onElementChange ref in useCanvasInteractions
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/useCanvasInteractions.ts`
+
+**Before:**
+```ts
+// onElementChange closed over directly in handlePointerUp useCallback deps → stale closure risk.
+// window.addEventListener("pointermove", handlePointerMove) and
+// window.addEventListener("pointerup", handlePointerUp) added on drag start → redundant with
+// pointer capture, fires handlers twice, requires manual removeEventListener cleanup.
+// Return type: { onElementPointerDown, onHandlePointerDown }
+const handlePointerUp = useCallback(
+  (e: PointerEvent) => {
+    ...
+    onElementChange(state.elementId, snapped);
+    window.removeEventListener("pointermove", handlePointerMove);
+    window.removeEventListener("pointerup", handlePointerUp);
+  },
+  [grid, onElementChange, handlePointerMove]
+);
+// startDrag added window listeners:
+window.addEventListener("pointermove", handlePointerMove);
+window.addEventListener("pointerup", handlePointerUp);
+```
+
+**After:**
+```ts
+// onElementChange stored in useRef; read as onElementChangeRef.current at call time →
+// no stale closure, handlers never need recreating for this dep.
+// No window listeners — pointer capture already routes events to the capturing element;
+// onPointerMove/onPointerUp are React handlers on the canvas root div.
+// Return type: { onElementPointerDown, onHandlePointerDown, onPointerMove, onPointerUp }
+const onElementChangeRef = useRef(onElementChange);
+onElementChangeRef.current = onElementChange;
+
+const onPointerUp = useCallback((e: React.PointerEvent) => {
+  ...
+  onElementChangeRef.current(state.elementId, snapped);
+  dragRef.current = null;
+}, [grid]);
+```
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/Canvas.tsx`
+
+**Before:**
+```tsx
+const { onElementPointerDown, onHandlePointerDown } = useCanvasInteractions({ ... });
+// canvas root div had no onPointerMove/onPointerUp
+```
+
+**After:**
+```tsx
+const { onElementPointerDown, onHandlePointerDown, onPointerMove, onPointerUp } = useCanvasInteractions({ ... });
+// canvas root div:
+onPointerMove={mode === "edit" ? onPointerMove : undefined}
+onPointerUp={mode === "edit" ? onPointerUp : undefined}
+```
+
+---
+
+## v7.10 — 2026-06-28 — Fix implicit React.CSSProperties imports in canvas components
+
+Small fix for type imports in Report Designer canvas components. The `React.CSSProperties` type was used implicitly without an explicit import. Changed to `import type { CSSProperties } from "react"` and replaced all instances of `React.CSSProperties` with the explicit `CSSProperties` type.
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/Canvas.tsx`
+
+**Before:**
+```ts
+import type { ReportDocument, Element } from "../../../../../data/reportDesigner/reportTypes";
+// ... no explicit CSSProperties import
+const canvasStyle: React.CSSProperties = { ... };
+const innerStyle: React.CSSProperties = ...
+const wrapperStyle: React.CSSProperties = { ... };
+```
+
+**After:**
+```ts
+import type { CSSProperties } from "react";
+import type { ReportDocument, Element } from "../../../../../data/reportDesigner/reportTypes";
+// ...
+const canvasStyle: CSSProperties = { ... };
+const innerStyle: CSSProperties = ...
+const wrapperStyle: CSSProperties = { ... };
+```
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/renderers/ShapeRenderer.tsx`
+
+**Before:**
+```ts
+import type { Element, ShapeConfig } from "../../../../../data/reportDesigner/reportTypes";
+// ... no explicit CSSProperties import
+const hrStyle: React.CSSProperties = { ... };
+const divStyle: React.CSSProperties = { ... };
+```
+
+**After:**
+```ts
+import type { CSSProperties } from "react";
+import type { Element, ShapeConfig } from "../../../../../data/reportDesigner/reportTypes";
+// ...
+const hrStyle: CSSProperties = { ... };
+const divStyle: CSSProperties = { ... };
+```
+
+---
+
+## v7.9 — 2026-06-28 — Report Designer: canvas surface + static renderers (Task 1.4)
+
+Phase 1, Task 1.4: Canvas component and pure element renderers for text, shape, and image. Canvas renders a page at exact `pageSetup.width × height` pixels (scaled by optional `zoom`), positions elements absolutely by (x,y,w,h), sorts by z-index, and dispatches to the correct renderer. In edit mode clicking elements calls `onSelect`; selected element receives `rd-element--selected` class for blue outline. Table/chart/kpi elements show a placeholder div. TextRenderer applies ElementStyle to displayed text. ShapeRenderer handles rect/ellipse/line/divider. ImageRenderer renders img with object-fit contain.
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/renderers/TextRenderer.tsx`
+
+**Before:** (file did not exist)
+
+**After:** (see file — pure text renderer applying ElementStyle)
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/renderers/ShapeRenderer.tsx`
+
+**Before:** (file did not exist)
+
+**After:** (see file — div-based rect/ellipse, hr-based line/divider)
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/renderers/ImageRenderer.tsx`
+
+**Before:** (file did not exist)
+
+**After:** (see file — img with object-fit contain filling container)
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/Canvas.tsx`
+
+**Before:** (file did not exist)
+
+**After:** (see file — absolute-positioned page container with element dispatch and selection chrome)
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/ReportDesigner.css`
+
+**Before:** (see previous entry — no canvas/renderer/selection styles)
+
+**After:** (see file — extended with .rd-canvas, .rd-element, .rd-element--selected, .rd-element-placeholder styles)
+
+---
+
+## v7.8 — 2026-06-28 — Report Designer: design list create/open/delete (Task 1.3)
+
+Phase 1, Task 1.3: Wire the storage layer to the ReportDesigner UI. Replaces the skeleton body with a full list view (load index on mount, new-design inline input, open/delete per row) and an editor placeholder view. Uses `loadDesignIndex`, `saveDesign`, `deleteDesign`, `loadDesign` from `reportDesignStorage.ts` and `createEmptyDocument` from `reportTypes.ts`.
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
+
+**Before:**
+```tsx
+/* eslint-disable react-refresh/only-export-components */
+import { LayoutDashboard } from "lucide-react";
+import type { SidebarTabModule } from "../tabTypes";
+import "./ReportDesigner.css";
+
+export const tabConfig: SidebarTabModule["tabConfig"] = {
+  id: "report-designer",
+  label: "مصمم التقارير",
+  order: 27,
+  allowedRoles: ["supervisor", "manager", "admin"],
+  icon: <LayoutDashboard size={20} strokeWidth={1.8} aria-hidden />,
+};
+
+export default function ReportDesigner() {
+  return (
+    <div className="rd-root" dir="rtl">
+      <h2 className="rd-title">مصمم التقارير</h2>
+      <p className="rd-empty">لا توجد تقارير محفوظة بعد.</p>
+    </div>
+  );
+}
+```
+
+**After:** (see file — full implementation with list + editor placeholder views)
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/ReportDesigner.css`
+
+**Before:**
+```css
+.rd-root { padding: 24px; }
+.rd-title { font-size: 20px; font-weight: 700; margin: 0 0 12px; }
+.rd-empty { color: #57606a; }
+```
+
+**After:** (see file — extended with list, row, button, new-design-form, and editor-placeholder styles)
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/tabConfig.test.ts`
+
+**Before:**
+```ts
+expect(tabConfig.id).toBe("report-designer");
+expect(tabConfig.label).toBe("مصمم التقارير");
+expect(tabConfig.allowedRoles).toEqual(["supervisor", "manager", "admin"]);
+```
+
+**After:**
+```ts
+// tabConfig is typed as optional in SidebarTabModule; assert it exists first
+expect(tabConfig).toBeDefined();
+if (!tabConfig) return;
+expect(tabConfig.id).toBe("report-designer");
+expect(tabConfig.label).toBe("مصمم التقارير");
+expect(tabConfig.allowedRoles).toEqual(["supervisor", "manager", "admin"]);
+```
+
+---
+
+## v7.7 — 2026-06-28 — Report Designer: register tab skeleton (FEATURE)
+
+Phase 1, Task 1.2: Register the "مصمم التقارير" tab in the auto-discovery system. Creates the tab skeleton component + CSS, adds the tab to `MANAGED_TABS`, and adds four default-permission rows (guest/employee/supervisor/manager) to `createDefaultPermissions()` in `userManagement.ts`.
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx` (new)
+
+**Before:**
+```
+(file did not exist)
+```
+
+**After:**
+```tsx
+/* eslint-disable react-refresh/only-export-components */
+import { LayoutDashboard } from "lucide-react";
+import type { SidebarTabModule } from "../tabTypes";
+import "./ReportDesigner.css";
+
+export const tabConfig: SidebarTabModule["tabConfig"] = {
+  id: "report-designer",
+  label: "مصمم التقارير",
+  order: 27,
+  allowedRoles: ["supervisor", "manager", "admin"],
+  icon: <LayoutDashboard size={20} strokeWidth={1.8} aria-hidden />,
+};
+
+export default function ReportDesigner() {
+  return (
+    <div className="rd-root" dir="rtl">
+      <h2 className="rd-title">مصمم التقارير</h2>
+      <p className="rd-empty">لا توجد تقارير محفوظة بعد.</p>
+    </div>
+  );
+}
+```
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/ReportDesigner.css` (new)
+
+**Before:**
+```
+(file did not exist)
+```
+
+**After:**
+```css
+.rd-root { padding: 24px; }
+.rd-title { font-size: 20px; font-weight: 700; margin: 0 0 12px; }
+.rd-empty { color: #57606a; }
+```
+
+**File:** `src/auth/userManagement.ts`
+
+**Before:**
+```ts
+  { id: "reports",                 label: "إدارة التقارير" },
+  { id: "reports/reports",         label: "التقارير",              parentId: "reports" },
+  { id: "reports/kpi",             label: "مؤشرات الأداء",          parentId: "reports" },
+  { id: "archive",                 label: "إدارة الأرشيف" },
+```
+
+**After:**
+```ts
+  { id: "reports",                 label: "إدارة التقارير" },
+  { id: "reports/reports",         label: "التقارير",              parentId: "reports" },
+  { id: "reports/kpi",             label: "مؤشرات الأداء",          parentId: "reports" },
+  { id: "report-designer",         label: "مصمم التقارير" },
+  { id: "archive",                 label: "إدارة الأرشيف" },
+```
+
+**File:** `src/auth/userManagement.ts` (createDefaultPermissions)
+
+**Before:**
+```ts
+    { role: "guest",      tabId: "reports",            access: "none" },
+    ...
+    { role: "employee",   tabId: "reports",            access: "none" },
+    ...
+    { role: "supervisor", tabId: "reports",            access: "view" },
+    ...
+    { role: "manager",    tabId: "reports",            access: "edit" },
+```
+(no report-designer rows)
+
+**After:** four new rows added (guest=none, employee=none, supervisor=view, manager=edit) for tabId "report-designer" after each role's "reports" row.
+
+---
+
+## v7.6 — 2026-06-28 — Report Designer: canvas geometry helpers (FEATURE)
+
+Phase 1, Task 1.1: Implement pure canvas geometry helper functions for the Report Designer. These functions provide snap-to-grid, rectangle snapping, resize-from-handle, and hit-test capabilities used by drag/resize interactions. No UI — only TypeScript helpers with comprehensive test coverage.
+
+**File:** `src/data/reportDesigner/geometry.ts` (new)
+
+**Before:**
+```
+(file did not exist)
+```
+
+**After:**
+```ts
+export type Rect = { x: number; y: number; w: number; h: number };
+export type ResizeHandle = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
+
+export function snap(value: number, grid: number): number {
+  if (grid <= 0) return value;
+  return Math.round(value / grid) * grid;
+}
+
+export function snapRect(rect: Rect, grid: number): Rect {
+  return { x: snap(rect.x, grid), y: snap(rect.y, grid), w: snap(rect.w, grid), h: snap(rect.h, grid) };
+}
+
+export function resize(rect: Rect, handle: ResizeHandle, dx: number, dy: number, minW = 8, minH = 8): Rect {
+  let { x, y, w, h } = rect;
+  if (handle.includes("e")) w = Math.max(minW, w + dx);
+  if (handle.includes("s")) h = Math.max(minH, h + dy);
+  if (handle.includes("w")) { const nw = Math.max(minW, w - dx); x += w - nw; w = nw; }
+  if (handle.includes("n")) { const nh = Math.max(minH, h - dy); y += h - nh; h = nh; }
+  return { x, y, w, h };
+}
+
+export function hitTest(rect: Rect, px: number, py: number): boolean {
+  return px >= rect.x && px <= rect.x + rect.w && py >= rect.y && py <= rect.y + rect.h;
+}
+```
+
+**File:** `src/data/reportDesigner/geometry.test.ts` (new)
+
+**Before:**
+```
+(file did not exist)
+```
+
+**After:**
+```ts
+import { describe, it, expect } from "vitest";
+import { snap, snapRect, resize, hitTest } from "./geometry";
+
+describe("geometry", () => {
+  it("snaps to nearest grid multiple", () => {
+    expect(snap(11, 8)).toBe(8);
+    expect(snap(13, 8)).toBe(16);
+  });
+  it("snaps a whole rect", () => {
+    expect(snapRect({ x: 11, y: 13, w: 31, h: 5 }, 8)).toEqual({ x: 8, y: 16, w: 32, h: 8 });
+  });
+  it("resizes from the SE handle by growing w/h", () => {
+    expect(resize({ x: 0, y: 0, w: 100, h: 100 }, "se", 20, 30)).toEqual({ x: 0, y: 0, w: 120, h: 130 });
+  });
+  it("resizes from the NW handle by moving origin and shrinking", () => {
+    expect(resize({ x: 10, y: 10, w: 100, h: 100 }, "nw", 20, 20)).toEqual({ x: 30, y: 30, w: 80, h: 80 });
+  });
+  it("enforces a minimum size", () => {
+    expect(resize({ x: 0, y: 0, w: 50, h: 50 }, "se", -100, -100, 10, 10)).toEqual({ x: 0, y: 0, w: 10, h: 10 });
+  });
+  it("hit-tests a point inside the rect", () => {
+    expect(hitTest({ x: 0, y: 0, w: 100, h: 100 }, 50, 50)).toBe(true);
+    expect(hitTest({ x: 0, y: 0, w: 100, h: 100 }, 150, 50)).toBe(false);
+  });
+});
+```
+
+---
+
+## v7.5 — 2026-06-28 — Report Designer: design storage CRUD + index (FEATURE)
+
+Phase 0, Task 0.6: Implement disk storage for ReportDocument designs, mirroring templateStorage.ts. Files live in `4-Reports/designs/` (created on demand). Index file is `designs.index.json`. Exports `DesignIndex`, `saveDesign`, `loadDesign`, `loadDesignIndex`, `deleteDesign`.
+
+**File:** `src/data/reportDesigner/storage/reportDesignStorage.ts` (new)
+
+**Before:**
+```
+(file did not exist)
+```
+
+**After:**
+```ts
+import type { DirectoryHandleLike } from "../../storage/fileSystemAccess";
+import { safeReadJson, safeWriteJson } from "../../storage/safeWrite";
+import { withResourceLock } from "../../storage/webLocks";
+import { getReportsRoot } from "../../workspace/workspacePaths";
+import type { ReportDocument } from "../reportTypes";
+
+const INDEX_FILE = "designs.index.json";
+
+export type DesignIndex = {
+  designs: Array<{
+    reportId: string;
+    reportName: string;
+    version: number;
+    updatedAt: string;
+  }>;
+};
+
+async function getDesignsDir(
+  directoryHandle: DirectoryHandleLike
+): Promise<DirectoryHandleLike> {
+  const reports = await getReportsRoot(directoryHandle, true);
+  return reports.getDirectoryHandle("designs", { create: true });
+}
+
+export async function saveDesign(
+  directoryHandle: DirectoryHandleLike,
+  doc: ReportDocument
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    if (!doc.reportId || !doc.reportName) {
+      return { ok: false, error: "بيانات التقرير غير مكتملة، ولم يتم الحفظ." };
+    }
+
+    const dir = await getDesignsDir(directoryHandle);
+    await withResourceLock(`${dir.name}/designs-index`, async () => {
+      await safeWriteJson(dir, `${doc.reportId}.json`, doc);
+
+      const indexResult = await safeReadJson<DesignIndex>(dir, INDEX_FILE);
+      const existing: DesignIndex = indexResult.ok
+        ? indexResult.value
+        : { designs: [] };
+
+      const others = existing.designs.filter((d) => d.reportId !== doc.reportId);
+      const updated: DesignIndex = {
+        designs: [
+          ...others,
+          {
+            reportId: doc.reportId,
+            reportName: doc.reportName,
+            version: doc.version,
+            updatedAt: doc.updatedAt,
+          },
+        ].sort((a, b) => a.reportName.localeCompare(b.reportName, "ar")),
+      };
+      await safeWriteJson(dir, INDEX_FILE, updated);
+    });
+
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Unknown error";
+    return { ok: false, error: msg };
+  }
+}
+
+export async function loadDesign(
+  directoryHandle: DirectoryHandleLike,
+  reportId: string
+): Promise<ReportDocument | null> {
+  try {
+    const dir = await getDesignsDir(directoryHandle);
+    const result = await safeReadJson<ReportDocument>(dir, `${reportId}.json`);
+    return result.ok && typeof result.value.reportId === "string"
+      ? result.value
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function loadDesignIndex(
+  directoryHandle: DirectoryHandleLike
+): Promise<DesignIndex> {
+  try {
+    const dir = await getDesignsDir(directoryHandle);
+    const result = await safeReadJson<DesignIndex>(dir, INDEX_FILE);
+    return result.ok ? result.value : { designs: [] };
+  } catch {
+    return { designs: [] };
+  }
+}
+
+export async function deleteDesign(
+  directoryHandle: DirectoryHandleLike,
+  reportId: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const dir = await getDesignsDir(directoryHandle);
+    await withResourceLock(`${dir.name}/designs-index`, async () => {
+      const indexResult = await safeReadJson<DesignIndex>(dir, INDEX_FILE);
+      if (indexResult.ok) {
+        const updated: DesignIndex = {
+          designs: indexResult.value.designs.filter(
+            (d) => d.reportId !== reportId
+          ),
+        };
+        await safeWriteJson(dir, INDEX_FILE, updated);
+      }
+
+      if (dir.removeEntry) {
+        await dir.removeEntry(`${reportId}.json`);
+      } else {
+        await safeWriteJson(dir, `${reportId}.json`, {
+          deleted: true,
+          reportId,
+          deletedAt: new Date().toISOString(),
+        });
+      }
+    });
+
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Unknown error";
+    return { ok: false, error: msg };
+  }
+}
+```
+
+**File:** `src/data/reportDesigner/storage/reportDesignStorage.test.ts` (new)
+
+**Before:**
+```
+(file did not exist)
+```
+
+**After:**
+```ts
+import { describe, it, expect } from "vitest";
+import { createMemoryDirectory } from "../../storage/memoryDirectory";
+import { createEmptyDocument } from "../reportTypes";
+import {
+  saveDesign,
+  loadDesign,
+  loadDesignIndex,
+  deleteDesign,
+} from "./reportDesignStorage";
+
+describe("reportDesignStorage", () => {
+  it("round-trips a design and updates the index", async () => {
+    const dir = createMemoryDirectory("root");
+    const doc = createEmptyDocument("تقرير الأداء", "admin");
+    const saved = await saveDesign(dir, doc);
+    expect(saved.ok).toBe(true);
+
+    const loaded = await loadDesign(dir, doc.reportId);
+    expect(loaded?.reportName).toBe("تقرير الأداء");
+
+    const index = await loadDesignIndex(dir);
+    expect(index.designs.map((d) => d.reportId)).toContain(doc.reportId);
+  });
+
+  it("deletes a design and removes it from the index", async () => {
+    const dir = createMemoryDirectory("root");
+    const doc = createEmptyDocument("للحذف", "admin");
+    await saveDesign(dir, doc);
+    const del = await deleteDesign(dir, doc.reportId);
+    expect(del.ok).toBe(true);
+    const index = await loadDesignIndex(dir);
+    expect(index.designs.map((d) => d.reportId)).not.toContain(doc.reportId);
+  });
+});
+```
+
+---
+
+## v7.4 — 2026-06-28 — Fix grouping key delimiter to prevent collisions (BUG)
+
+Grouping key was built by joining multiple `groupBy` dimension values with a space `" "`. This caused false key collisions when dimension values themselves contained spaces. For example, `{name: "John Smith", dept: "HR"}` and `{name: "John", dept: "Smith HR"}` both produced key `"John Smith HR"`. Changed the delimiter from `" "` to `"\x00"` (null byte, which cannot appear in normal string data) to prevent collisions.
+
+**File:** `src/data/reportDesigner/query/runQuery.ts`
+
+**Before:**
+```ts
+const key = spec.groupBy.map((g) => String(row[g] ?? "")).join(" ");
+```
+
+**After:**
+```ts
+const key = spec.groupBy.map((g) => String(row[g] ?? "")).join("\x00");
+```
+
+---
+
+## v7.3 — 2026-06-28 — Report Designer: runQuery group-by engine (FEATURE)
+
+Phase 0, Task 0.4: Implement the core query engine that combines filtering, grouping, aggregation, sorting, and limiting. The runQuery function accepts filtered rows, groups them by dimension fields, computes aggregates, optionally sorts the results, and optionally applies a limit. Output measure keys use the `as` alias if provided, else `${agg}_${field}`. Group keys preserve the dimension field names. When groupBy is empty, returns a single aggregate row (grand total). Handles percentOfTotal aggregations by pre-computing grand totals.
+
+**File:** `src/data/reportDesigner/query/runQuery.ts` (new)
+
+**Before:**
+```ts
+(new file)
+```
+
+**After:**
+```ts
+import type { Aggregation, Filter } from "../reportTypes";
+import { aggregate } from "./aggregations";
+import { applyFilters } from "./filters";
+
+export type QuerySpec = {
+  groupBy: string[];
+  values: Array<{ field: string; agg: Aggregation; as?: string }>;
+  filters: Filter[];
+  sort?: { key: string; dir: "asc" | "desc" };
+  limit?: number;
+};
+export type ResultRow = Record<string, string | number | null>;
+
+function measureKey(v: { field: string; agg: Aggregation; as?: string }): string {
+  return v.as ?? `${v.agg}_${v.field}`;
+}
+
+export function runQuery(rows: Array<Record<string, unknown>>, spec: QuerySpec): ResultRow[] {
+  const filtered = applyFilters(rows, spec.filters);
+  const grandTotals = new Map<string, number>();
+  for (const v of spec.values) {
+    if (v.agg === "percentOfTotal") {
+      grandTotals.set(measureKey(v), aggregate("sum", filtered.map((r) => r[v.field])));
+    }
+  }
+
+  const groups = new Map<string, Array<Record<string, unknown>>>();
+  if (spec.groupBy.length === 0) {
+    groups.set("__all__", filtered);
+  } else {
+    for (const row of filtered) {
+      const key = spec.groupBy.map((g) => String(row[g] ?? "")).join(" ");
+      const bucket = groups.get(key);
+      if (bucket) bucket.push(row);
+      else groups.set(key, [row]);
+    }
+  }
+
+  let result: ResultRow[] = [...groups.values()].map((bucket) => {
+    const out: ResultRow = {};
+    for (const g of spec.groupBy) {
+      const raw = bucket[0]?.[g];
+      out[g] = raw === null || raw === undefined ? null : (raw as string | number);
+    }
+    for (const v of spec.values) {
+      const key = measureKey(v);
+      out[key] = aggregate(v.agg, bucket.map((r) => r[v.field]), grandTotals.get(key) ?? 0);
+    }
+    return out;
+  });
+
+  if (spec.sort) {
+    const { key, dir } = spec.sort;
+    result = [...result].sort((a, b) => {
+      const av = a[key];
+      const bv = b[key];
+      if (av === bv) return 0;
+      if (av === null || av === undefined) return 1;
+      if (bv === null || bv === undefined) return -1;
+      const cmp = av < bv ? -1 : 1;
+      return dir === "asc" ? cmp : -cmp;
+    });
+  }
+  if (typeof spec.limit === "number") result = result.slice(0, spec.limit);
+  return result;
+}
+```
+
+**File:** `src/data/reportDesigner/query/runQuery.test.ts` (new)
+
+**Before:**
+```ts
+(new file)
+```
+
+**After:**
+```ts
+import { describe, it, expect } from "vitest";
+import { runQuery } from "./runQuery";
+
+const rows = [
+  { port: "A", suspicious: true },
+  { port: "A", suspicious: false },
+  { port: "A", suspicious: true },
+  { port: "B", suspicious: false },
+];
+
+describe("runQuery", () => {
+  it("groups by a dimension and counts", () => {
+    const out = runQuery(rows, { groupBy: ["port"], values: [{ field: "port", agg: "count" }], filters: [] });
+    expect(out).toEqual([
+      { port: "A", count_port: 3 },
+      { port: "B", count_port: 1 },
+    ]);
+  });
+  it("sums a boolean measure per group and honours alias", () => {
+    const out = runQuery(rows, {
+      groupBy: ["port"],
+      values: [{ field: "suspicious", agg: "sum", as: "suspiciousCount" }],
+      filters: [],
+    });
+    expect(out).toEqual([
+      { port: "A", suspiciousCount: 2 },
+      { port: "B", suspiciousCount: 0 },
+    ]);
+  });
+  it("applies filters before grouping", () => {
+    const out = runQuery(rows, {
+      groupBy: ["port"],
+      values: [{ field: "port", agg: "count" }],
+      filters: [{ field: "suspicious", op: "truthy", value: null }],
+    });
+    expect(out).toEqual([{ port: "A", count_port: 2 }]);
+  });
+  it("sorts then limits (topN)", () => {
+    const out = runQuery(rows, {
+      groupBy: ["port"],
+      values: [{ field: "port", agg: "count" }],
+      filters: [],
+      sort: { key: "count_port", dir: "desc" },
+      limit: 1,
+    });
+    expect(out).toEqual([{ port: "A", count_port: 3 }]);
+  });
+  it("returns a single aggregate row when groupBy is empty", () => {
+    const out = runQuery(rows, { groupBy: [], values: [{ field: "port", agg: "count" }], filters: [] });
+    expect(out).toEqual([{ count_port: 4 }]);
+  });
+});
+```
+
+---
+
+## v7.2 — 2026-06-28 — Report Designer: filter predicates for query engine (FEATURE)
+
+Phase 0, Task 0.3: Create pure filter predicate functions for the report query engine. Implements row filtering via a composable filter array with support for 8 filter operations: equals, notEquals, in, between, contains, truthy, falsy, topN. The topN operation is intentionally a no-op here; topN filtering is applied post-aggregation in the runQuery engine.
+
+**File:** `src/data/reportDesigner/query/filters.ts` (new)
+
+**Before:**
+```ts
+(new file)
+```
+
+**After:**
+```ts
+import type { Filter } from "../reportTypes";
+
+function matches(value: unknown, f: Filter): boolean {
+  switch (f.op) {
+    case "equals": return value === f.value;
+    case "notEquals": return value !== f.value;
+    case "in": return Array.isArray(f.value) && f.value.includes(value as never);
+    case "between": {
+      if (!Array.isArray(f.value) || typeof value !== "number") return false;
+      const [lo, hi] = f.value as [number, number];
+      return value >= lo && value <= hi;
+    }
+    case "contains":
+      return String(value ?? "").includes(String(f.value ?? ""));
+    case "truthy": return Boolean(value);
+    case "falsy": return !value;
+    case "topN": return true; // applied post-aggregation in runQuery
+    default: return true;
+  }
+}
+
+export function applyFilters<T extends Record<string, unknown>>(rows: T[], filters: Filter[]): T[] {
+  if (!filters.length) return rows;
+  return rows.filter((row) => filters.every((f) => matches(row[f.field], f)));
+}
+```
+
+**File:** `src/data/reportDesigner/query/filters.test.ts` (new)
+
+**Before:**
+```ts
+(new file)
+```
+
+**After:**
+```ts
+import { describe, it, expect } from "vitest";
+import { applyFilters } from "./filters";
+
+const rows = [
+  { port: "A", n: 1, ok: true,  note: "alpha" },
+  { port: "B", n: 5, ok: false, note: "beta" },
+  { port: "A", n: 9, ok: true,  note: "gamma" },
+];
+
+describe("applyFilters", () => {
+  it("equals", () => {
+    expect(applyFilters(rows, [{ field: "port", op: "equals", value: "A" }])).toHaveLength(2);
+  });
+  it("in", () => {
+    expect(applyFilters(rows, [{ field: "port", op: "in", value: ["B"] }])).toHaveLength(1);
+  });
+  it("notEquals", () => {
+    expect(applyFilters(rows, [{ field: "port", op: "notEquals", value: "A" }])).toHaveLength(1);
+  });
+  it("between (inclusive)", () => {
+    expect(applyFilters(rows, [{ field: "n", op: "between", value: [1, 5] }])).toHaveLength(2);
+  });
+  it("contains (substring)", () => {
+    expect(applyFilters(rows, [{ field: "note", op: "contains", value: "et" }])).toHaveLength(1);
+  });
+  it("truthy / falsy", () => {
+    expect(applyFilters(rows, [{ field: "ok", op: "truthy", value: null }])).toHaveLength(2);
+    expect(applyFilters(rows, [{ field: "ok", op: "falsy", value: null }])).toHaveLength(1);
+  });
+  it("AND-composes multiple filters", () => {
+    expect(applyFilters(rows, [
+      { field: "port", op: "equals", value: "A" },
+      { field: "ok", op: "truthy", value: null },
+    ])).toHaveLength(2);
+  });
+  it("ignores topN here", () => {
+    expect(applyFilters(rows, [{ field: "n", op: "topN", value: 1 }])).toHaveLength(3);
+  });
+});
+```
+
+---
+
+## v7.1 — 2026-06-28 — Report Designer: aggregation functions for query engine (FEATURE)
+
+Phase 0, Task 0.2: Create pure aggregation functions for the report query engine. Implements the complete set of aggregation operations (count, distinctCount, sum, avg, min, max, percentOfTotal) with proper handling of nulls, booleans, and non-numeric values.
+
+**File:** `src/data/reportDesigner/query/aggregations.ts` (new)
+
+**Before:**
+```ts
+(new file)
+```
+
+**After:**
+```ts
+import type { Aggregation } from "../reportTypes";
+
+function toNumbers(values: unknown[]): number[] {
+  const out: number[] = [];
+  for (const v of values) {
+    if (typeof v === "number" && Number.isFinite(v)) out.push(v);
+    else if (typeof v === "boolean") out.push(v ? 1 : 0);
+  }
+  return out;
+}
+
+export function aggregate(agg: Aggregation, values: unknown[], grandTotal = 0): number {
+  switch (agg) {
+    case "count":
+      return values.length;
+    case "distinctCount":
+      return new Set(values.filter((v) => v !== null && v !== undefined)).size;
+    case "sum":
+      return toNumbers(values).reduce((a, b) => a + b, 0);
+    case "avg": {
+      const nums = toNumbers(values);
+      return nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0;
+    }
+    case "min": {
+      const nums = toNumbers(values);
+      return nums.length ? Math.min(...nums) : 0;
+    }
+    case "max": {
+      const nums = toNumbers(values);
+      return nums.length ? Math.max(...nums) : 0;
+    }
+    case "percentOfTotal": {
+      const sum = toNumbers(values).reduce((a, b) => a + b, 0);
+      return grandTotal === 0 ? 0 : (sum / grandTotal) * 100;
+    }
+    default:
+      return 0;
+  }
+}
+```
+
+**File:** `src/data/reportDesigner/query/aggregations.test.ts` (new)
+
+**Before:**
+```ts
+(new file)
+```
+
+**After:**
+```ts
+import { describe, it, expect } from "vitest";
+import { aggregate } from "./aggregations";
+
+describe("aggregate", () => {
+  it("counts rows including nulls", () => {
+    expect(aggregate("count", [1, null, "x"])).toBe(3);
+  });
+  it("counts distinct non-null values", () => {
+    expect(aggregate("distinctCount", ["a", "a", "b", null])).toBe(2);
+  });
+  it("sums numeric values, treating true as 1 and ignoring non-numerics", () => {
+    expect(aggregate("sum", [2, 3, true, "x", null])).toBe(6);
+  });
+  it("averages numeric values", () => {
+    expect(aggregate("avg", [2, 4, 6])).toBe(4);
+  });
+  it("returns min and max", () => {
+    expect(aggregate("min", [5, 2, 9])).toBe(2);
+    expect(aggregate("max", [5, 2, 9])).toBe(9);
+  });
+  it("computes percent of total from grand total", () => {
+    expect(aggregate("percentOfTotal", [25], 100)).toBe(25);
+  });
+  it("returns 0 for empty avg/sum", () => {
+    expect(aggregate("avg", [])).toBe(0);
+    expect(aggregate("sum", [])).toBe(0);
+  });
+});
+```
+
+---
+
+## v7.0 — 2026-06-28 — Report Designer: core document model types and factory (FEATURE)
+
+Phase 0, Task 0.1: Create the foundational document model types and factory function for the Report Designer feature. All subsequent Report Designer tasks depend on these types.
+
+Adds:
+- Complete type hierarchy: `ReportDocument`, `Page`, `Element`, `ElementConfig` (table/chart/kpi/text/shape/image)
+- Support types: `PageSetup`, `ElementStyle`, `Filter`, `FilterOp`, `Aggregation`, `ElementType`
+- Constants: `REPORT_SCHEMA_VERSION = 1`, `A4_PORTRAIT` preset
+- Factory functions: `createReportId()`, `createPageId()`, `createElementId()`, `createEmptyDocument(name, createdBy)`
+- Comprehensive test covering all properties and invariants
+
+**File:** `src/data/reportDesigner/reportTypes.ts` (new)
+
+**Before:**
+```ts
+(new file)
+```
+
+**After:**
+```ts
+export const REPORT_SCHEMA_VERSION = 1;
+
+export type DocType = "print" | "slides" | "dashboard";
+export type PageSizePreset = "A4" | "Letter" | "16:9" | "4:3" | "custom";
+export type Orientation = "portrait" | "landscape";
+
+export type Aggregation =
+  | "count" | "distinctCount" | "sum" | "avg" | "min" | "max" | "percentOfTotal";
+
+export type FilterOp =
+  | "equals" | "in" | "notEquals" | "between" | "contains" | "truthy" | "falsy" | "topN";
+
+export type Filter = { field: string; op: FilterOp; value: unknown };
+
+export type PageSetup = {
+  size: PageSizePreset;
+  orientation: Orientation;
+  width: number;
+  height: number;
+  margins: { top: number; right: number; bottom: number; left: number };
+};
+
+export type ElementType = "table" | "chart" | "kpi" | "text" | "shape" | "image";
+
+export type ElementStyle = {
+  fill?: string; borderColor?: string; borderWidth?: number; borderRadius?: number;
+  padding?: number; fontFamily?: string; fontSize?: number; fontWeight?: number;
+  color?: string; textAlign?: "right" | "center" | "left"; opacity?: number;
+};
+
+export type TableConfig = {
+  kind: "table";
+  dataSourceId: string;
+  columns: Array<{ field: string; agg?: Aggregation; sort?: "asc" | "desc"; format?: string; condFormat?: unknown }>;
+  groupBy: string[];
+  filters: Filter[];
+};
+
+export type ChartConfig = {
+  kind: "chart";
+  chartType: "bar" | "line" | "pie" | "donut" | "area" | "combo" | "scatter";
+  dataSourceId: string;
+  wells: { axis: string[]; legend?: string; values: Array<{ field: string; agg: Aggregation }> };
+  filters: Filter[];
+  options: Record<string, unknown>;
+};
+
+export type KpiConfig = {
+  kind: "kpi";
+  dataSourceId: string;
+  valueField: string;
+  agg: Aggregation;
+  target?: number;
+  comparison?: "higherBetter" | "lowerBetter";
+  format?: string;
+};
+
+export type TextConfig = { kind: "text"; text: string };
+export type ShapeConfig = { kind: "shape"; shape: "rect" | "line" | "ellipse" | "divider" };
+export type ImageConfig = { kind: "image"; dataUrl: string; alt?: string };
+
+export type ElementConfig =
+  | TableConfig | ChartConfig | KpiConfig | TextConfig | ShapeConfig | ImageConfig;
+
+export type Element = {
+  elementId: string;
+  type: ElementType;
+  name: string;
+  x: number; y: number; w: number; h: number; z: number;
+  rotation?: number; locked?: boolean;
+  style: ElementStyle;
+  config: ElementConfig;
+};
+
+export type Page = {
+  pageId: string;
+  name: string;
+  order: number;
+  background?: { color?: string; image?: string };
+  filters: Filter[];
+  elements: Element[];
+};
+
+export type DataSourceRef = { id: string; tableId: string; label: string };
+
+export type ReportDocument = {
+  reportId: string;
+  reportName: string;
+  version: number;
+  createdAt: string; createdBy: string; updatedAt: string; updatedBy: string;
+  docType: DocType;
+  pageSetup: PageSetup;
+  theme: { palette: string[]; fontFamily: string; defaults: Record<string, unknown> };
+  dataSources: DataSourceRef[];
+  pages: Page[];
+  reportFilters: Filter[];
+};
+
+export const A4_PORTRAIT: PageSetup = {
+  size: "A4", orientation: "portrait", width: 794, height: 1123,
+  margins: { top: 38, right: 38, bottom: 38, left: 38 },
+};
+
+export function createReportId(): string { ... }
+export function createPageId(): string { ... }
+export function createElementId(): string { ... }
+export function createEmptyDocument(name: string, createdBy: string): ReportDocument { ... }
+```
+
+**File:** `src/data/reportDesigner/reportTypes.test.ts` (new)
+
+**Before:**
+```ts
+(new file)
+```
+
+**After:**
+```ts
+import { describe, it, expect } from "vitest";
+import { createEmptyDocument, REPORT_SCHEMA_VERSION } from "./reportTypes";
+
+describe("createEmptyDocument", () => {
+  it("creates a print A4 document with one empty page", () => {
+    const doc = createEmptyDocument("تقرير تجريبي", "admin");
+    expect(doc.reportName).toBe("تقرير تجريبي");
+    expect(doc.createdBy).toBe("admin");
+    expect(doc.docType).toBe("print");
+    expect(doc.pageSetup.size).toBe("A4");
+    expect(doc.pageSetup.orientation).toBe("portrait");
+    expect(doc.pages).toHaveLength(1);
+    expect(doc.pages[0].elements).toEqual([]);
+    expect(doc.reportId).toMatch(/^rpt-/);
+    expect(REPORT_SCHEMA_VERSION).toBe(1);
+  });
+});
+```
+
+---
+
 ## v6.1 — 2026-06-28 — Incremental content-hashing removes the read-side stringify ceiling (FEATURE)
 
 Completes the symmetry of v6.0. v6.0 removed the **write**-side ceiling, but the
@@ -1598,6 +3191,140 @@ Install `lucide-react` and replace every emoji/pictographic character in the UI 
 **After:**
 ```json
 "dependencies": { "hash-wasm": ..., "lucide-react": "^0.x", "react": ..., ... }
+```
+
+---
+
+## v7.5 — 2026-06-28 — Report Designer: field catalog and data model (FEATURE)
+
+Phase 0, Task 0.5: Create the field catalog (Arabic-labeled metadata for all ExecutiveReportRow fields) and the data model builder that feeds tables to the query engine. The field catalog defines FieldRole, FieldType, and FieldMeta for 24 fact table columns with complete Arabic localization. The data model builder ingests fact rows, port profiles, and stage profiles, then exposes them as named tables with full metadata for rendering tables, charts, and KPIs in the Report Designer.
+
+**File:** `src/data/reportDesigner/query/fieldCatalog.ts` (new)
+
+**Before:**
+```ts
+(new file)
+```
+
+**After:**
+```ts
+export type FieldRole = "dimension" | "measure";
+export type FieldType = "string" | "number" | "boolean";
+export type FieldMeta = { field: string; label: string; role: FieldRole; type: FieldType };
+
+export const FACT_FIELDS: FieldMeta[] = [
+  { field: "xrayImageId", label: "رقم صورة الأشعة", role: "dimension", type: "string" },
+  { field: "portName", label: "الميناء", role: "dimension", type: "string" },
+  // ... 22 more fields, all with Arabic labels
+];
+
+const BY_FIELD = new Map(FACT_FIELDS.map((f) => [f.field, f]));
+export function getFieldMeta(field: string): FieldMeta | undefined {
+  return BY_FIELD.get(field);
+}
+```
+
+**File:** `src/data/reportDesigner/query/dataModel.ts` (new)
+
+**Before:**
+```ts
+(new file)
+```
+
+**After:**
+```ts
+import type { ExecutiveReportRow } from "../../reporting/executiveReportTypes";
+import { FACT_FIELDS, type FieldMeta } from "./fieldCatalog";
+
+export type TableId = "fact" | "portProfiles" | "stageProfiles";
+export type DataModelTable = {
+  label: string;
+  fields: FieldMeta[];
+  rows: Array<Record<string, unknown>>;
+};
+export type DataModel = { tables: Record<TableId, DataModelTable> };
+
+function inferFields(rows: Array<Record<string, unknown>>): FieldMeta[] {
+  const sample = rows[0] ?? {};
+  return Object.keys(sample).map((field) => {
+    const v = sample[field];
+    const type = typeof v === "number" ? "number" : typeof v === "boolean" ? "boolean" : "string";
+    return { field, label: field, role: type === "number" ? "measure" : "dimension", type };
+  });
+}
+
+export function buildDataModel(input: {
+  factRows: ExecutiveReportRow[];
+  portProfiles: Array<Record<string, unknown>>;
+  stageProfiles: Array<Record<string, unknown>>;
+}): DataModel {
+  return {
+    tables: {
+      fact: {
+        label: "بيانات الصور (تفصيلي)",
+        fields: FACT_FIELDS,
+        rows: input.factRows as unknown as Array<Record<string, unknown>>,
+      },
+      portProfiles: {
+        label: "ملخص الموانئ",
+        fields: inferFields(input.portProfiles),
+        rows: input.portProfiles,
+      },
+      stageProfiles: {
+        label: "ملخص المراحل",
+        fields: inferFields(input.stageProfiles),
+        rows: input.stageProfiles,
+      },
+    },
+  };
+}
+```
+
+**File:** `src/data/reportDesigner/query/dataModel.test.ts` (new)
+
+**Before:**
+```ts
+(new file)
+```
+
+**After:**
+```ts
+import { describe, it, expect } from "vitest";
+import { buildDataModel } from "./dataModel";
+import { getFieldMeta } from "./fieldCatalog";
+import { runQuery } from "./runQuery";
+
+describe("fieldCatalog", () => {
+  it("tags portName as a string dimension and exposes an Arabic label", () => {
+    const meta = getFieldMeta("portName");
+    expect(meta?.role).toBe("dimension");
+    expect(meta?.type).toBe("string");
+    expect(typeof meta?.label).toBe("string");
+    expect(meta!.label.length).toBeGreaterThan(0);
+  });
+});
+
+describe("buildDataModel", () => {
+  it("exposes the fact table and supports a grouped query over it", () => {
+    const factRows = [
+      { portName: "ميناء أ", imageResult: "اشتباه" },
+      { portName: "ميناء أ", imageResult: "سليمة" },
+      { portName: "ميناء ب", imageResult: "اشتباه" },
+    ];
+    const model = buildDataModel({ factRows: factRows as never, portProfiles: [], stageProfiles: [] });
+    expect(model.tables.fact.rows).toHaveLength(3);
+    expect(model.tables.fact.fields.some((f) => f.field === "portName")).toBe(true);
+    const out = runQuery(model.tables.fact.rows, {
+      groupBy: ["portName"],
+      values: [{ field: "portName", agg: "count" }],
+      filters: [],
+    });
+    expect(out).toEqual([
+      { portName: "ميناء أ", count_portName: 2 },
+      { portName: "ميناء ب", count_portName: 1 },
+    ]);
+  });
+});
 ```
 
 ---
