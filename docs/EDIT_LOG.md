@@ -4,6 +4,116 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v15.0 — 2026-06-28 — CSV serializer + export types for Power BI export
+
+**File:** `src/data/powerbiExport/exportTypes.ts`
+
+**Before:**
+```ts
+// File did not exist
+```
+
+**After:**
+```ts
+export type ExportFileResult = {
+  fileName: string;
+  rowCount: number;
+};
+
+export type ExportManifest = {
+  month: string;
+  exportedAt: string;
+  files: ExportFileResult[];
+};
+```
+
+**File:** `src/data/powerbiExport/csvSerializer.ts`
+
+**Before:**
+```ts
+// File did not exist
+```
+
+**After:**
+```ts
+function escapeCell(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "boolean") return value ? "1" : "0";
+  const str = String(value);
+  if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+}
+
+export function toCsvString(
+  headers: string[],
+  rows: Record<string, unknown>[]
+): string {
+  const lines: string[] = [];
+  lines.push(headers.join(","));
+  for (const row of rows) {
+    lines.push(headers.map((h) => escapeCell(row[h])).join(","));
+  }
+  return "﻿" + lines.join("\n");
+}
+```
+
+**File:** `src/data/powerbiExport/csvSerializer.test.ts`
+
+**Before:**
+```ts
+// File did not exist
+```
+
+**After:**
+```ts
+import { describe, it, expect } from "vitest";
+import { toCsvString } from "./csvSerializer";
+
+describe("toCsvString", () => {
+  it("produces UTF-8 BOM header + comma-separated header row", () => {
+    const result = toCsvString(["a", "b"], []);
+    expect(result.startsWith("﻿")).toBe(true);
+    expect(result).toContain("a,b");
+  });
+
+  it("serializes a simple row", () => {
+    const result = toCsvString(["name", "count"], [{ name: "ميناء A", count: 42 }]);
+    expect(result).toContain("ميناء A,42");
+  });
+
+  it("wraps values containing commas in double quotes", () => {
+    const result = toCsvString(["v"], [{ v: "hello, world" }]);
+    expect(result).toContain('"hello, world"');
+  });
+
+  it("escapes double quotes by doubling them", () => {
+    const result = toCsvString(["v"], [{ v: 'say "hi"' }]);
+    expect(result).toContain('"say ""hi"""');
+  });
+
+  it("converts null to empty string", () => {
+    const result = toCsvString(["v"], [{ v: null }]);
+    const lines = result.split("\n");
+    expect(lines[1].trim()).toBe(",".repeat(0)); // single empty column
+  });
+
+  it("converts boolean to 1/0", () => {
+    const result = toCsvString(["a", "b"], [{ a: true, b: false }]);
+    expect(result).toContain("1,0");
+  });
+
+  it("handles missing key as empty", () => {
+    const result = toCsvString(["a", "b"], [{ a: "x" }]);
+    // b is undefined → empty
+    expect(result).toContain("x,");
+  });
+});
+```
+
+---
+
 ## v14.1 — 2026-06-28 — Fix unused-var lint error in ReportDesigner EditorHost
 
 **File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
