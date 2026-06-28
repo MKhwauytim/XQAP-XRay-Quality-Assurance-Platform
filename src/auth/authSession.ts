@@ -13,10 +13,23 @@ const VALID_ROLES: AuthRole[] = ["guest", "employee", "supervisor", "manager", "
 let runtimeSession: AuthSession | null = null;
 let runtimePreviewRole: AuthRole | null = null;
 
+// SEC-02: the session is persisted to sessionStorage (not localStorage) so it
+// survives a page reload but auto-clears when the tab/browser closes. This is a
+// UX convenience, not a security control — with the client-only trust model a
+// user can still forge this object (see SEC-01 / CLAUDE.md security note).
+function sessionStore(): Storage | null {
+  try {
+    return typeof sessionStorage === "undefined" ? null : sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
 function readStoredSession(): AuthSession | null {
   try {
-    if (typeof localStorage === "undefined") return null;
-    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+    const store = sessionStore();
+    if (!store) return null;
+    const raw = store.getItem(SESSION_STORAGE_KEY);
     if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
     return isValidSession(parsed) ? parsed : null;
@@ -27,8 +40,7 @@ function readStoredSession(): AuthSession | null {
 
 function writeStoredSession(session: AuthSession): void {
   try {
-    if (typeof localStorage === "undefined") return;
-    localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+    sessionStore()?.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
   } catch {
     // Runtime session still works even when browser storage is unavailable.
   }
@@ -36,8 +48,7 @@ function writeStoredSession(session: AuthSession): void {
 
 function clearStoredSession(): void {
   try {
-    if (typeof localStorage === "undefined") return;
-    localStorage.removeItem(SESSION_STORAGE_KEY);
+    sessionStore()?.removeItem(SESSION_STORAGE_KEY);
   } catch {
     // Ignore storage failures.
   }

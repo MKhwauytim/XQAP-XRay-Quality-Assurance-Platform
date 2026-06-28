@@ -6,9 +6,10 @@ This app is a browser-only Arabic RTL SPA. It has no backend database. Data is s
 
 | Storage | Key | Data | Notes |
 | --- | --- | --- | --- |
-| Runtime memory | Auth session | Current signed-in identity | Not durable. It disappears when the page reloads or the tab closes. |
+| Runtime memory + `sessionStorage` | Auth session (`xray_auth_session_v1`) | Current signed-in identity (username, role, loginAt) | Survives a page reload but auto-clears when the tab/browser closes (SEC-02). 7-day TTL as a secondary guard. UX convenience, not a security control. |
 | `localStorage` | `xray_user_management_v1` | Managed users, password hashes, roles, tab permissions, feature permissions | Stores password hashes, not raw passwords. |
 | `localStorage` | `xray_custom_labels_v1` | Customized Arabic UI labels | Used by the settings/labels system. |
+| `localStorage` | `xray_last_login_username_v1` | Last username typed at login | Convenience prefill only (`loginPersistence.ts`). |
 
 ## Workspace Folder Data
 

@@ -4,6 +4,99 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v5.37 — 2026-06-28 — Session storage moved from localStorage to sessionStorage (SEC-02)
+
+Audit finding SEC-02: `authSession.ts` persisted the auth session to
+`localStorage` (7-day TTL), but `CLAUDE.md` and `docs/data-system-report.md`
+both claimed the session was runtime-only and lost on reload — code and docs
+disagreed. On a shared radiology workstation a 7-day persisted admin session is
+a walk-up-takeover risk. Decision: persist to `sessionStorage` instead, so the
+session survives an accidental page reload but auto-clears on tab/browser close,
+shrinking the exposure window. The 7-day TTL remains as a secondary guard. This
+is a UX convenience, NOT a security control (the client-only trust model still
+applies — see SEC-01).
+
+**File:** `src/auth/authSession.ts`
+
+**Before:**
+```ts
+function readStoredSession(): AuthSession | null {
+  try {
+    if (typeof localStorage === "undefined") return null;
+    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    return isValidSession(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredSession(session: AuthSession): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+  } catch {
+    // Runtime session still works even when browser storage is unavailable.
+  }
+}
+
+function clearStoredSession(): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
+}
+```
+
+**After:**
+```ts
+// SEC-02: the session is persisted to sessionStorage (not localStorage) so it
+// survives a page reload but auto-clears when the tab/browser closes. This is a
+// UX convenience, not a security control — with the client-only trust model a
+// user can still forge this object (see SEC-01 / CLAUDE.md security note).
+function sessionStore(): Storage | null {
+  try {
+    return typeof sessionStorage === "undefined" ? null : sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
+function readStoredSession(): AuthSession | null {
+  try {
+    const store = sessionStore();
+    if (!store) return null;
+    const raw = store.getItem(SESSION_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    return isValidSession(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredSession(session: AuthSession): void {
+  try {
+    sessionStore()?.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+  } catch {
+    // Runtime session still works even when browser storage is unavailable.
+  }
+}
+
+function clearStoredSession(): void {
+  try {
+    sessionStore()?.removeItem(SESSION_STORAGE_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
+}
+```
+
+---
+
 ## v5.36 — 2026-06-25 — Fix 300k-row BI parse failure (stack overflow + memory)
 
 Root cause: `allRows.push(...validRows)` spreads up to 300k arguments, exceeding
