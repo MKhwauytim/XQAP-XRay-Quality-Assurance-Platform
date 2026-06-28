@@ -1,8 +1,12 @@
 import type { CSSProperties } from "react";
 import type { ReportDocument, Element } from "../../../../../data/reportDesigner/reportTypes";
+import type { Rect, ResizeHandle } from "../../../../../data/reportDesigner/geometry";
+import { useCanvasInteractions } from "./useCanvasInteractions";
 import TextRenderer from "../renderers/TextRenderer";
 import ShapeRenderer from "../renderers/ShapeRenderer";
 import ImageRenderer from "../renderers/ImageRenderer";
+
+const RESIZE_HANDLES: ResizeHandle[] = ["nw", "n", "ne", "w", "e", "sw", "s", "se"];
 
 interface CanvasProps {
   doc: ReportDocument;
@@ -11,6 +15,7 @@ interface CanvasProps {
   onSelect: (id: string | null) => void;
   mode: "edit" | "view";
   zoom?: number;
+  onElementChange?: (elementId: string, rect: Rect) => void;
 }
 
 function ElementBody({ element }: { element: Element }) {
@@ -33,9 +38,16 @@ export default function Canvas({
   onSelect,
   mode,
   zoom = 1,
+  onElementChange,
 }: CanvasProps) {
   const page = doc.pages[pageIndex];
   const { width, height } = doc.pageSetup;
+
+  const interactionGrid = 8;
+  const { onElementPointerDown, onHandlePointerDown } = useCanvasInteractions({
+    grid: interactionGrid,
+    onElementChange: onElementChange ?? (() => undefined),
+  });
 
   if (!page) return null;
 
@@ -84,6 +96,9 @@ export default function Canvas({
       <div style={innerStyle}>
         {sortedElements.map((el) => {
           const isSelected = mode === "edit" && el.elementId === selectedId;
+          const isInteractive = mode === "edit" && !el.locked && onElementChange != null;
+          const currentRect: Rect = { x: el.x, y: el.y, w: el.w, h: el.h };
+
           const wrapperStyle: CSSProperties = {
             position: "absolute",
             left: el.x,
@@ -95,7 +110,7 @@ export default function Canvas({
               el.rotation != null && el.rotation !== 0
                 ? `rotate(${el.rotation}deg)`
                 : undefined,
-            cursor: mode === "edit" ? (el.locked ? "not-allowed" : "pointer") : undefined,
+            cursor: mode === "edit" ? (el.locked ? "not-allowed" : isInteractive ? "move" : "pointer") : undefined,
           };
 
           return (
@@ -111,8 +126,28 @@ export default function Canvas({
                     }
                   : undefined
               }
+              onPointerDown={
+                isInteractive
+                  ? (e) => {
+                      onSelect(el.elementId);
+                      onElementPointerDown(e, el.elementId, currentRect);
+                    }
+                  : undefined
+              }
             >
               <ElementBody element={el} />
+
+              {isSelected && !el.locked && onElementChange != null &&
+                RESIZE_HANDLES.map((handle) => (
+                  <div
+                    key={handle}
+                    className={`rd-resize-handle rd-resize-handle--${handle}`}
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      onHandlePointerDown(e, el.elementId, handle, currentRect);
+                    }}
+                  />
+                ))}
             </div>
           );
         })}

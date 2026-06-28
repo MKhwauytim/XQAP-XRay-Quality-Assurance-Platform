@@ -227,3 +227,26 @@
   padding: 4px;
   text-align: center;
 }
+
+/* ── Resize handles (edit mode, selected element) ── */
+.rd-resize-handle {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background: #fff;
+  border: 2px solid #1f6feb;
+  border-radius: 2px;
+  z-index: 1000;
+  box-sizing: border-box;
+}
+
+/* RTL canvas: "right" is the visual start side, "left" is the visual end side.
+   NW/NE/SW/SE corners are swapped horizontally vs LTR convention. */
+.rd-resize-handle--nw { top: -4px; right: -4px; cursor: nw-resize; }
+.rd-resize-handle--n  { top: -4px; left: 50%; transform: translateX(-50%); cursor: n-resize; }
+.rd-resize-handle--ne { top: -4px; left: -4px; cursor: ne-resize; }
+.rd-resize-handle--w  { top: 50%; right: -4px; transform: translateY(-50%); cursor: w-resize; }
+.rd-resize-handle--e  { top: 50%; left: -4px; transform: translateY(-50%); cursor: e-resize; }
+.rd-resize-handle--sw { bottom: -4px; right: -4px; cursor: sw-resize; }
+.rd-resize-handle--s  { bottom: -4px; left: 50%; transform: translateX(-50%); cursor: s-resize; }
+.rd-resize-handle--se { bottom: -4px; left: -4px; cursor: se-resize; }

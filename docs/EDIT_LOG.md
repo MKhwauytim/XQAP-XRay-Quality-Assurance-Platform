@@ -4,6 +4,59 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v7.11 — 2026-06-28 — Report Designer: drag/resize/select interactions (Task 1.5)
+
+Phase 1, Task 1.5: pointer-event drag and resize interactions for canvas elements.
+
+Created `useCanvasInteractions` hook that uses pointer capture (`setPointerCapture`) to track drag-move and resize-handle operations. Drag translates x/y; resize delegates to `geometry.resize()`. On pointer-up, `snapRect()` snaps the result to the grid, then calls `onElementChange`. All drag state lives in `useRef` (no re-renders mid-drag). Window-level `pointermove`/`pointerup` listeners are added on capture start and removed on release.
+
+Modified `Canvas.tsx` to accept `onElementChange` prop, wire `onPointerDown` on non-locked elements in edit mode, and render 8 resize handles around the selected element.
+
+Added CSS for `.rd-resize-handle` and its 8 directional modifier classes (RTL-aware positioning).
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/useCanvasInteractions.ts`
+
+**Before:** (file did not exist)
+
+**After:** (see file — pointer-capture drag/resize hook returning `onElementPointerDown` and `onHandlePointerDown`)
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/Canvas.tsx`
+
+**Before:**
+```tsx
+interface CanvasProps {
+  doc: ReportDocument;
+  pageIndex: number;
+  selectedId: string | null;
+  onSelect: (id: string | null) => void;
+  mode: "edit" | "view";
+  zoom?: number;
+}
+// elements rendered without drag/resize handlers; no resize handles
+```
+
+**After:**
+```tsx
+interface CanvasProps {
+  doc: ReportDocument;
+  pageIndex: number;
+  selectedId: string | null;
+  onSelect: (id: string | null) => void;
+  mode: "edit" | "view";
+  zoom?: number;
+  onElementChange?: (elementId: string, rect: Rect) => void;
+}
+// elements get onPointerDown for drag; selected element renders 8 resize handles
+```
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/ReportDesigner.css`
+
+**Before:** (no resize handle styles)
+
+**After:** (added `.rd-resize-handle` base + 8 directional modifier classes with RTL-aware positioning)
+
+---
+
 ## v7.10 — 2026-06-28 — Fix implicit React.CSSProperties imports in canvas components
 
 Small fix for type imports in Report Designer canvas components. The `React.CSSProperties` type was used implicitly without an explicit import. Changed to `import type { CSSProperties } from "react"` and replaced all instances of `React.CSSProperties` with the explicit `CSSProperties` type.
