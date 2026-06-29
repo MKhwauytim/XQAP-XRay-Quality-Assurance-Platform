@@ -4,6 +4,16 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v19.8 — 2026-06-29 — feat(executive-report): add render context
+
+**File:** `src/data/reporting/executive/context.ts`
+
+**Before:** (file did not exist)
+
+**After:** New file — shared render context factory for all executive report page builders. Exports: `ExecutiveRenderContext` type (input, kpis, monthLabel, issueDate, displayName function, anonymizeMap, rows) and `buildContext(input, kpis, employeeDisplayNames, rows)` factory. Month folder name `{digit}-{EnglishName}-{year}` converted to Arabic month name (e.g. `5-May-2026` → `مايو 2026`). Issue date formatted as `DD / MM / YYYY`. displayName() handles anonymization: when `config.showEmployeeNames === false`, assigns sequential codes (موظف ١, موظف ٢, etc.) lazily; otherwise uses employeeDisplayNames or username. rows parameter (ExecutiveReportRow[]) defaults to [] for Phase 4 analytics.
+
+---
+
 ## v19.7 — 2026-06-29 — fix(executive-report): add missing statPill helper to primitives
 
 **File:** `src/data/reporting/executive/primitives.ts`

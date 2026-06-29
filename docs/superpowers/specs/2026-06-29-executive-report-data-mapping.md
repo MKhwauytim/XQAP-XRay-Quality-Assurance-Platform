@@ -211,7 +211,7 @@ Group `ExecutiveReportRow[]` by **evaluator** = `answeredBy ?? assignedTo`, subm
 | `reliable` | studied ≥ `minimumReliableSampleSize` |
 | `riskScore` / `recommendedAction` | composite of low accuracy + high missed-suspicion + workload → priority list (p.23) |
 
-Aggregate builders: `buildEmployeePortMatrix`, `buildDecisionQuadrant`, `buildStabilityScatter`, `buildPriorityList`, `buildLevelAgreement` (L1-vs-L2 always; employee-pair agreement only when an image has ≥2 distinct `answeredBy` — otherwise that panel is hidden, never faked).
+Aggregate builders: `buildEmployeePortMatrix`, `buildDecisionQuadrant`, `buildStabilityScatter`, `buildPriorityList`, `buildLevelAgreement` (L1-vs-L2 always; employee-pair agreement only when an image has ≥2 distinct `answeredBy` — otherwise that panel is hidden, never faked), **`buildDistributionSummary`** (per-employee: assigned, completed, pending, completion% — grouped by port for p.16).
 
 Unreliable employees (studied < 30) are shown but their rate cells render "بيانات غير كافية".
 
@@ -229,26 +229,34 @@ The S6 map is built in `Reports/index.tsx` from `getPublicManagedUsers()` and in
 
 ## 7. Per-page data binding (every page → its inputs)
 
-| Page | Reads | Key derived values |
-|------|-------|--------------------|
-| 01 Cover | `monthFolderName`, org branding, `new Date()` | report month, issue date |
-| 02 TOC | static section list | live page numbers (assemble.ts) |
-| 03 Glossary | `STUDY_LEVEL_DEFINITIONS`, term list | — |
-| 05 Population by risk | KPIs, port profiles, `targetedByRiskEngine` | population, clean/suspicious, suspicionRate, land/sea split |
-| 06 Population by level | `stageProfiles`, port × level | population per level/port |
-| 07 Sample by level | `sample.portAllocations`, `stageAllocations`, CertScan split | sampleSize, coverage per port/level |
-| 09 Accuracy by port | `portProfiles` (reliable only) | accuracy, detection, missedSuspicion + status |
-| 10 Accuracy by level | level KPIs | L1/L2 accuracy, correction/regression → radar |
-| 14 Part-3 map | static index | page anchors |
-| 15 Employee overview | `EmployeeProfile[]` | ranked accuracy, studied, top-5 |
-| 16 By decision type | `buildDecisionQuadrant` | per-employee suspicious-vs-clean accuracy |
-| 17 Performance per port | profiles × port | per-port employee accuracy |
-| 18 Employee × port | `buildEmployeePortMatrix` | heatmap, best/worst |
-| 19 Stability & workload | `buildStabilityScatter`, `quotas` | workload×accuracy, stabilityIndex |
-| 20 Image quality & marking | `byImageQuality`, `byMarking` | accuracy by quality/marking |
-| 22 L1-vs-L2 + agreement | level KPIs + `buildLevelAgreement` | L1-vs-L2 bars; pair heatmap (conditional) |
-| 23 Priority & actions | `buildPriorityList` | riskScore ranking + recommendedAction |
-| 31 Appendix | `config` thresholds, methodology text | accuracyTarget, completionTarget, minimumReliableSampleSize, etc. |
+Page numbers are per the corrected 9-section structure (design spec v2).
+
+| Page | Module | Reads | Key derived values |
+|------|--------|-------|--------------------|
+| 01 | cover | `monthFolderName`, org branding, `new Date()` | report month, issue date, 4 level chips |
+| 02 | toc | static section list | live page numbers (assemble.ts anchors) |
+| 03 | execIntro **[NEW]** | `calculateExecutiveKPIs()` output | 6 KPI cards: population, sampleSize, coverage%, studiedImages, completionRate, overallAccuracy; per-section status chips |
+| 05 | glossary | `STUDY_LEVEL_DEFINITIONS`, term list | 4 level cards (L1 gold/L2 cyan/L3 blue/L4 coral) + term grid |
+| 07 | part1Divider | — | Part 1 divider |
+| 08 | populationByRisk | KPIs, port profiles, `targetedByRiskEngine` | population, clean/suspicious, suspicionRate, land/sea split tables |
+| 09 | populationByLevel | `stageProfiles`, port × level matrix | population per level/port |
+| 11 | part2Divider | — | Part 2 divider |
+| 12 | sampleByLevel | `sample.portAllocations`, `stageAllocations`, CertScan split | sampleSize, coverage per port/level, CertScan vs NonCertScan |
+| 15 | part3Divider **[NEW]** | — | Part 3 divider |
+| 16 | distributionOverview **[NEW]** | `DistributionCurrentData` (S3) + `EmployeeProfile[]` | total assigned/completed/pending, per-employee assignment table, top 3 loaded/least-loaded |
+| 19 | part4Divider **[NEW]** | — | Part 4 divider |
+| 20 | accuracyByPort | `portProfiles` (reliable: studied ≥ 30) | accuracy, suspiciousDetectionRate, missedSuspicionRate, status badge per port |
+| 21 | accuracyByLevel | level KPIs | L1/L2 accuracy, correction/regression rates → radar chart |
+| 22 | levelAgreement | level KPIs + `buildLevelAgreement` | L1-vs-L2 bars always; employee-pair heatmap only when ≥1 image has 2 distinct `answeredBy` |
+| 23 | part5Divider **[NEW]** | — | Part 5 divider |
+| 24 | empOverview | `EmployeeProfile[]` sorted by `overallAccuracy` desc | ranked table, top-5/bottom-5 bars, aggregate studied/workload |
+| 25 | empByDecision | `buildDecisionQuadrant` | per-employee (onSuspicious accuracy, onClean accuracy) → quadrant scatter + ranked lists |
+| 26 | empByPort | `buildEmployeePortMatrix` | employee × port accuracy heatmap, best/worst per port |
+| 27 | empImageQuality | `EmployeeProfile[].byImageQuality`, `.byMarking` | accuracy by image quality tier; accuracy with/without marking; top/bottom employees |
+| 28 | empStability | `buildStabilityScatter`, `quotas` | workload × accuracy scatter (bubble size = stabilityIndex); top stable/unstable lists |
+| 29 | part6Divider **[NEW]** | — | Part 6 divider |
+| 30 | empPriority | `buildPriorityList` | riskScore ranking, recommendedAction per employee, action-matrix table |
+| 31 | appendix | `config` thresholds, methodology text | accuracyTarget, completionTarget, coverageTarget, minimumReliableSampleSize, fieldMappings |
 
 ---
 
@@ -260,6 +268,7 @@ The S6 map is built in `Reports/index.tsx` from `getPublicManagedUsers()` and in
 | No sample | Sample/coverage pages show population only; accuracy pages show "لم تُسحب عينة" |
 | No submitted answers | Accuracy/employee pages show "بيانات غير كافية"; volume pages still render |
 | Port/employee studied < 30 | Rate cells → "بيانات غير كافية"; counts still shown |
+| No distribution data | Distribution overview (p.16) shows "لم يتم التوزيع بعد" |
 | No overlapping evaluations | Employee-pair-agreement panel (p.22 right) hidden |
 | User deleted from management | Falls back to raw username for that one employee |
 
