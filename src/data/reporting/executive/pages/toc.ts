@@ -46,7 +46,8 @@ export function buildToc(_ctx: ExecutiveRenderContext): string {
               <tr><td>الجزء الثاني: نتائج الفحص</td><td>08</td></tr>
               <tr><td>نتائج الدقة حسب المنفذ</td><td>09</td></tr>
               <tr><td>نتائج الدقة حسب المستويات</td><td>10</td></tr>
-              <tr><td>التوزيع والتكليف</td><td>11</td></tr>
+              <tr><td>نتائج جودة الصور</td><td>11</td></tr>
+              <tr><td>الأصناف المشبوهة</td><td>12</td></tr>
             </tbody>
           </table>
         </div>
@@ -72,11 +73,11 @@ export function buildToc(_ctx: ExecutiveRenderContext): string {
         <div class="table-wrap">
           <table>
             <tbody>
-              <tr><td>الجزء الثالث: التحاليل المتقدمة</td><td>12</td></tr>
-              <tr><td>النظرة العامة لأداء الموظفين</td><td>13</td></tr>
-              <tr><td>دقة الموظفين حسب القرار</td><td>14</td></tr>
-              <tr><td>الأولوية والإجراءات</td><td>15</td></tr>
-              <tr><td>الملاحق</td><td>16</td></tr>
+              <tr><td>غلاف الجزء الثالث</td><td>13</td></tr>
+              <tr><td>خريطة التحليلات المتقدمة</td><td>14</td></tr>
+              <tr><td>أداء الموظفين</td><td>15–20</td></tr>
+              <tr><td>تحليل الأخطاء والتوافق</td><td>21–22</td></tr>
+              <tr><td>الأولوية والإجراءات</td><td>23</td></tr>
             </tbody>
           </table>
         </div>

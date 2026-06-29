@@ -34,7 +34,7 @@ export function buildSampleByLevel(ctx: ExecutiveRenderContext): string {
       <div class="card"><h3>إجمالي المجتمع</h3><div class="metric gold">${fmtNum(kpis.totalPopulation)}</div></div>
       <div class="card"><h3>إجمالي العينة</h3><div class="metric blue">${fmtNum(kpis.totalSample)}</div></div>
       <div class="card"><h3>نسبة التغطية</h3><div class="metric green">${fmtPct(kpis.sampleCoverage)}</div></div>
-      <div class="card"><h3>CertScan</h3><div class="metric cyan">${certScan}</div></div>
+      <div class="card"><h3>نظام صور الأشعة المركزية</h3><div class="metric cyan">${certScan}</div></div>
     </div>
     <div class="info" style="margin:16px 0">${note}</div>
     <div class="grid grid-2">

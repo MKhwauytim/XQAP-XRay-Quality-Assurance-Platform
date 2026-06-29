@@ -23,7 +23,7 @@ export function buildGlossary(_ctx: ExecutiveRenderContext): string {
       <div class="card"><h3 style="color:var(--blue)">مجتمع الحالات</h3><p class="muted">جميع الحالات المشمولة بالتحليل.</p></div>
       <div class="card"><h3 style="color:var(--cyan)">العينة</h3><p class="muted">الجزء المختار للمراجعة والتحليل.</p></div>
       <div class="card"><h3 style="color:var(--purple)">التوزيع</h3><p class="muted">إسناد الحالات إلى الموظفين.</p></div>
-      <div class="card"><h3 style="color:var(--cyan)">CertScan</h3><p class="muted">نظام أو مصدر داعم للمراجعة اللاحقة.</p></div>
+      <div class="card"><h3 style="color:var(--cyan)">نظام صور الأشعة المركزية</h3><p class="muted">نظام أو مصدر داعم للمراجعة اللاحقة.</p></div>
       <div class="card"><h3 style="color:var(--gold)">مطابقة BI</h3><p class="muted">مطابقة بيانات الإرساليات بين الأنظمة.</p></div>
       <div class="card"><h3 style="color:var(--blue)">نتيجة المراجعة</h3><p class="muted">المرجع المستخدم لاحتساب مؤشرات الدقة.</p></div>
     </div>

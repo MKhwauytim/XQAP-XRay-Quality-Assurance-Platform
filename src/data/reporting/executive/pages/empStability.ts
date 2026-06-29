@@ -18,7 +18,7 @@ export function buildEmpStability(ctx: ExecutiveRenderContext): string {
     <h2 class="section-title">استقرار الأداء وعبء العمل</h2>
     <div class="section-subtitle">قياس تذبذب الدقة وعلاقته بعدد القرارات</div>
     <div class="card info" style="margin-top:24px">البيانات غير متاحة لهذه الدورة. سيُعرض التحليل عند توفر البيانات الكاملة.</div>
-    <div class="page-no">18</div>
+    <div class="page-no">19</div>
   </div>
 </section>`;
   }
@@ -78,7 +78,7 @@ export function buildEmpStability(ctx: ExecutiveRenderContext): string {
       </div>
     </div>
     <div class="info" style="margin-top:16px">قد يحافظ بعض الموظفين على دقة مرتفعة رغم ارتفاع عبء العمل، بينما يتأثر آخرون سلبًا مع زيادة عدد القرارات.</div>
-    <div class="page-no">18</div>
+    <div class="page-no">19</div>
   </div>
 </section>`;
 }

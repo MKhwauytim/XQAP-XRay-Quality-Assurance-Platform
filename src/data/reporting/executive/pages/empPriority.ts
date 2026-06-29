@@ -18,21 +18,21 @@ export function buildEmpPriority(ctx: ExecutiveRenderContext): string {
     <h2 class="section-title">الموظفون ذوو الأولوية والإجراءات المقترحة</h2>
     <div class="section-subtitle">تجميع الموظفين بحسب الأولوية الإشرافية والتدخل المطلوب</div>
     <div class="card info" style="margin-top:24px">لا يوجد موظفون يتطلبون تدخلاً عاجلاً في هذه الدورة.</div>
-    <div class="page-no">15</div>
+    <div class="page-no">23</div>
   </div>
 </section>`;
   }
 
-  // Count by urgency
-  const urgentCount   = priority.filter(p => p.riskScore >= 70).length;
-  const trainingCount = priority.filter(p => p.riskScore >= 50 && p.riskScore < 70).length;
-  const monitorCount  = priority.filter(p => p.riskScore >= 30 && p.riskScore < 50).length;
-  const goodCount     = profiles.filter(p => p.reliable && (p.overallAccuracy ?? 0) >= 90).length;
+  // Count by urgency — thresholds per data-mapping spec
+  const urgentCount   = priority.filter(p => p.riskScore >= 30).length;
+  const trainingCount = priority.filter(p => p.riskScore >= 15 && p.riskScore < 30).length;
+  const monitorCount  = priority.filter(p => p.riskScore > 0  && p.riskScore < 15).length;
+  const goodCount     = profiles.filter(p => p.reliable && p.riskScore === 0).length;
 
   function priorityChip(riskScore: number): string {
-    if (riskScore >= 70) return '<span class="chip red">حرج</span>';
-    if (riskScore >= 50) return '<span class="chip red">مرتفع</span>';
-    if (riskScore >= 30) return '<span class="chip orange">متوسط</span>';
+    if (riskScore >= 30) return '<span class="chip red">حرج</span>';
+    if (riskScore >= 15) return '<span class="chip orange">مرتفع</span>';
+    if (riskScore >   0) return '<span class="chip orange">متوسط</span>';
     return '<span class="chip green">منخفض</span>';
   }
 
@@ -84,7 +84,7 @@ export function buildEmpPriority(ctx: ExecutiveRenderContext): string {
       </div>
     </div>
     <div class="info" style="margin-top:16px">يرجى اعتماد خطط التدخل المقترحة للشروع في التنفيذ والمتابعة خلال الفترة القادمة.</div>
-    <div class="page-no">15</div>
+    <div class="page-no">23</div>
   </div>
 </section>`;
 }

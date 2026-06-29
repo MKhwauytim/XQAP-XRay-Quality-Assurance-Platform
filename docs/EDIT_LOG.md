@@ -4,6 +4,34 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v23.0 — 2026-06-29 — Implementer: write all 23 page builders with live data
+
+**File:** `src/data/reporting/executive/pages/*.ts` (all page files), `src/data/reporting/executive/index.ts`
+
+**Before:** old xr-* landscape slide format; many pages were stubs returning notices; index.ts wired 20 pages in wrong order (missing image quality p11, categories p12, analytics map p14, cross-port p18, error types p21)
+
+**After:** HTML mockup portrait pages (23 pages + appendix = 25 total sections) with live ctx/kpis data binding. Key changes:
+- `populationByRisk.ts` — derives land/sea split from `ctx.rows portType`, real clean/suspicious totals, 8-row truncation
+- `populationByLevel.ts` — builds stage×port breakdown from `ctx.rows`, real clean/suspicious counts per stage
+- `accuracyByLevel.ts` — computes per-stage accuracy from `ctx.rows` (StageProfile has no accuracy field)
+- `empImageQuality.ts` — now exports two functions: `buildEmpImageQuality` (page 11, global quality) and `buildEmpImageQualityImpact` (page 20, per-employee quality impact)
+- `suspectCategories.ts` (NEW) — page 12, builds freq maps from `suspectedTypes`/`smuggleMethod` fields, heatmap cross-tab
+- `analyticsMap.ts` (NEW) — page 14, static analytics roadmap
+- `empByDecision.ts` — uses `ctx.kpis` globals for KPI cards, per-employee counts from `ctx.rows`
+- `empByPort.ts` — now exports `buildEmpByPort` (page 17 drill-down) and `buildEmpCrossPort` (page 18 matrix with heatmap cells)
+- `errorTypes.ts` (NEW) — page 21, per-employee verificationCategory breakdown
+- `cover.ts` — ZATCA SVG logo, `فترة التقرير`, `تقرير داخلي` badge
+- `glossary.ts` — CertScan → نظام صور الأشعة المركزية
+- `sampleByLevel.ts` — CertScan label replaced
+- `toc.ts` — page numbers updated to match 23-page order
+- All page numbers corrected (emp pages: 15/16/17/18/19/20/21/22/23)
+- `empPriority.ts` — riskScore thresholds fixed to 30/15/0 per spec
+- `index.ts` — rewired to 25-section assembly in correct mockup order
+
+**Build:** clean (2,080 kB bundle, 695 kB gzip). Tests: 180/180 passed.
+
+---
+
 ## v22.0 — 2026-06-29 — Visual designer: adopt HTML mockup CSS + viewer shell
 
 **File:** `src/data/reporting/executive/theme.ts`

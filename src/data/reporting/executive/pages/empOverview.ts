@@ -26,7 +26,7 @@ export function buildEmpOverview(ctx: ExecutiveRenderContext): string {
     <h2 class="section-title">النظرة العامة لأداء الموظفين</h2>
     <div class="section-subtitle">مقارنة الأداء العام للموظفين بغض النظر عن المستوى</div>
     <div class="card info" style="margin-top:24px">لا توجد إجابات مقدَّمة لهذا الشهر. سيُعرض التحليل عند توفر البيانات.</div>
-    <div class="page-no">13</div>
+    <div class="page-no">15</div>
   </div>
 </section>`;
   }
@@ -95,7 +95,7 @@ export function buildEmpOverview(ctx: ExecutiveRenderContext): string {
         <p class="muted">التقييم مبني على القرار وجودته وليس على المستوى الوظيفي وحده.</p>
       </div>
     </div>
-    <div class="page-no">13</div>
+    <div class="page-no">15</div>
   </div>
 </section>`;
 }

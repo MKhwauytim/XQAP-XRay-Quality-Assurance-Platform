@@ -4,30 +4,69 @@ import { esc, fmtNum } from "../primitives";
 export function buildPopulationByLevel(ctx: ExecutiveRenderContext): string {
   const { kpis } = ctx;
 
-  const stageColors = ['gold', 'blue', 'slate', 'coral'];
-  const stageMetrics = kpis.stageProfiles.map((s, i) => `
-    <div class="card stage${i+1}">
-      <h3 style="color:var(--${stageColors[i] ?? 'gold'})">${esc(s.stageLabel)}</h3>
-      <div class="metric ${stageColors[i] ?? 'gold'}">${fmtNum(s.population)}</div>
-    </div>`).join('');
+  // Build stage × port breakdown from ctx.rows
+  const stagePortMap = new Map<string, Map<string, { clean: number; suspicious: number; total: number }>>();
+  for (const r of ctx.rows) {
+    const stageKey = r.stage ?? "unknown";
+    const port = r.portName ?? "غير محدد";
+    if (!stagePortMap.has(stageKey)) stagePortMap.set(stageKey, new Map());
+    const portMap = stagePortMap.get(stageKey)!;
+    const rec = portMap.get(port) ?? { clean: 0, suspicious: 0, total: 0 };
+    rec.total++;
+    if (r.imageResult === "سليمة") rec.clean++;
+    else rec.suspicious++;
+    portMap.set(port, rec);
+  }
 
-  const stageTableRows = kpis.stageProfiles.map((s, i) => `
-    <div class="card stage${i+1}">
+  const stageColors = ["gold", "blue", "slate", "coral"] as const;
+  const stageKeys   = ["stage1", "stage2", "stage3", "stage4"];
+
+  const stageMetrics = kpis.stageProfiles.map((s, i) => `
+    <div class="card stage${i + 1}">
+      <h3 style="color:var(--${stageColors[i] ?? "gold"})">${esc(s.stageLabel)}</h3>
+      <div class="metric ${stageColors[i] ?? "gold"}">${fmtNum(s.population)}</div>
+    </div>`).join("");
+
+  const stageTableBlocks = kpis.stageProfiles.map((s, i) => {
+    const key = stageKeys[i] ?? s.stageKey;
+    const portMap = stagePortMap.get(key) ?? stagePortMap.get(s.stageKey);
+    const entries = portMap
+      ? [...portMap.entries()].sort((a, b) => b[1].total - a[1].total).slice(0, 8)
+      : [];
+    const moreCount = portMap ? Math.max(0, portMap.size - 8) : 0;
+
+    const rows = entries.map(([portName, rec]) =>
+      `<tr>
+        <td title="${esc(portName)}">${esc(portName)}</td>
+        <td>${fmtNum(rec.clean)}</td>
+        <td>${fmtNum(rec.suspicious)}</td>
+        <td>${fmtNum(rec.total)}</td>
+      </tr>`
+    ).join("");
+
+    const moreRow = moreCount > 0
+      ? `<tr class="muted-row"><td colspan="4">... ${fmtNum(moreCount)} أخرى</td></tr>`
+      : "";
+
+    const totalRow = entries.length > 0
+      ? `<tr class="total-row">
+          <td>الإجمالي</td>
+          <td>${fmtNum(entries.reduce((s2, [, r]) => s2 + r.clean, 0))}</td>
+          <td>${fmtNum(entries.reduce((s2, [, r]) => s2 + r.suspicious, 0))}</td>
+          <td>${fmtNum(s.population)}</td>
+        </tr>`
+      : `<tr class="total-row"><td>الإجمالي</td><td>—</td><td>—</td><td>${fmtNum(s.population)}</td></tr>`;
+
+    return `<div class="card stage${i + 1}">
       <div class="panel-title">${esc(s.stageLabel)}</div>
       <div class="table-wrap"><table>
         <thead><tr><th>المنفذ</th><th>سليمة</th><th>اشتباه</th><th>الإجمالي</th></tr></thead>
-        <tbody>
-          ${kpis.portProfiles
-            .filter(p => p.population > 0)
-            .slice(0, 4)
-            .map(p => `<tr><td>${esc(p.portName)}</td><td>—</td><td>—</td><td>${fmtNum(Math.round(p.population * s.population / Math.max(1, kpis.totalPopulation)))}</td></tr>`)
-            .join('')}
-          <tr class="total-row"><td>الإجمالي</td><td>—</td><td>—</td><td>${fmtNum(s.population)}</td></tr>
-        </tbody>
+        <tbody>${rows}${moreRow}${totalRow}</tbody>
       </table></div>
-    </div>`).join('');
+    </div>`;
+  }).join("");
 
-  return `<section class="page compact" id="page-pop-level" data-title="المجتمع حسب المستويات">
+  return `<section class="page compact" id="page-pop-levels" data-title="المجتمع حسب المستويات">
   <div class="right-rail">
     <div class="rail-main">الجزء الأول <em>مجتمع الحالات</em></div>
     <div class="rail-tab active">المستويات</div>
@@ -42,7 +81,7 @@ export function buildPopulationByLevel(ctx: ExecutiveRenderContext): string {
       ${stageMetrics}
     </div>
     <div class="grid grid-2" style="margin-top:18px">
-      ${stageTableRows}
+      ${stageTableBlocks}
     </div>
     <div class="page-no">06</div>
   </div>
