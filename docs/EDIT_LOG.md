@@ -4,6 +4,34 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v22.0 — 2026-06-29 — Visual designer: adopt HTML mockup CSS + viewer shell
+
+**File:** `src/data/reporting/executive/theme.ts`
+
+**Before:** Portrait A4 CSS with `.xr-*` prefix, missing chart/overflow/utility rules, incomplete print CSS
+
+**After:** Full HTML mockup v4 dark-navy CSS, fixed table overflow (`overflow:hidden;width:100%`), `table-layout:fixed`, `td,th` base overflow rules, `.chart-container`, `.bubble-chart`, `.grid-auto`, `.notice-centered` utilities; updated print CSS with `background:transparent`, `.right-rail{display:none}`, and `.page-inner` full-width print override
+
+**File:** `src/data/reporting/executive/viewer.ts`
+
+**Before:** VIEWER_JS using modern arrow functions, no setTimeout for fitPages
+
+**After:** VIEWER_JS rewritten as IIFE using `function()` / `.slice.call()` for broadest compatibility; `fitPages` called via `setTimeout(fitPages,300)` in addition to load/resize events; sidebar structure preserved with single print button
+
+**File:** `src/data/reporting/executive/assemble.ts`
+
+**Before:** Already correct 2-arg `buildViewerHtml` form — no change needed
+
+**After:** No change (already correct)
+
+**File:** `docs/superpowers/specs/executive-report-page-skeletons.md` (new)
+
+**Before:** Did not exist
+
+**After:** Full page-skeleton reference for all 23 pages with `{{PLACEHOLDER}}` markers and data-source mapping table for the Implementer agent
+
+---
+
 ## v21.0 — 2026-06-29 — Redesign executive report to portrait A4 document format
 
 **Files:** All files in `src/data/reporting/executive/` (theme.ts, viewer.ts, assemble.ts, all pages/)
