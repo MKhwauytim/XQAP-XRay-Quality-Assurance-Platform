@@ -1,14 +1,17 @@
 import type { ExecutiveRenderContext } from "../context";
 import { esc } from "../primitives";
 
-const ZATCA_LOGO = `<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect x="8" y="8" width="48" height="48" rx="6" fill="#f4b400" opacity="0.15"/>
-  <rect x="8" y="8" width="48" height="48" rx="6" stroke="#f4b400" stroke-width="1.5" fill="none"/>
-  <polygon points="32,12 52,32 32,52 12,32" fill="none" stroke="#f4b400" stroke-width="1.5"/>
-  <line x1="18" y1="28" x2="46" y2="28" stroke="#f4b400" stroke-width="1.2" opacity="0.7"/>
-  <line x1="18" y1="32" x2="46" y2="32" stroke="#f4b400" stroke-width="1.2" opacity="0.7"/>
-  <line x1="18" y1="36" x2="46" y2="36" stroke="#f4b400" stroke-width="1.2" opacity="0.7"/>
-  <text x="32" y="35" text-anchor="middle" font-family="Somar,Arial" font-size="14" font-weight="700" fill="#f4b400">ز</text>
+const ZATCA_LOGO = `<svg class="zatca-logo" width="56" height="56" viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Shield base -->
+  <path d="M28 4 L50 14 L50 32 C50 44 28 52 28 52 C28 52 6 44 6 32 L6 14 Z" fill="rgba(244,180,0,0.12)" stroke="#f4b400" stroke-width="1.5"/>
+  <!-- Inner decoration -->
+  <path d="M28 10 L44 18 L44 32 C44 40 28 47 28 47 C28 47 12 40 12 32 L12 18 Z" fill="none" stroke="rgba(244,180,0,0.3)" stroke-width="1"/>
+  <!-- Horizontal stripes -->
+  <line x1="16" y1="26" x2="40" y2="26" stroke="rgba(244,180,0,0.5)" stroke-width="1.2"/>
+  <line x1="16" y1="30" x2="40" y2="30" stroke="rgba(244,180,0,0.5)" stroke-width="1.2"/>
+  <line x1="16" y1="34" x2="40" y2="34" stroke="rgba(244,180,0,0.5)" stroke-width="1.2"/>
+  <!-- Center emblem -->
+  <text x="28" y="22" text-anchor="middle" font-family="Somar,Arial" font-size="11" font-weight="700" fill="#f4b400">زكاة</text>
 </svg>`;
 
 export function buildCover(ctx: ExecutiveRenderContext): string {
@@ -19,6 +22,7 @@ export function buildCover(ctx: ExecutiveRenderContext): string {
     <div class="rail-tab">الفهرس</div>
     <div class="rail-tab">الأجزاء</div>
   </div>
+  <div class="cover-bg-art" aria-hidden="true"></div>
   <div class="page-inner">
     <div class="org">
       ${ZATCA_LOGO}

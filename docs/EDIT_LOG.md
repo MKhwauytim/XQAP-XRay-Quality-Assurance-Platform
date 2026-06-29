@@ -4,6 +4,117 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v24.0 — 2026-06-29 — UI design taste enhancement: polish CSS, cover art, anti-AI design
+
+**File:** `src/data/reporting/executive/theme.ts`
+
+**Before:** Generic card styling, uniform `.metric` sizes without text-shadow, plain `.section-title` with only font-size, generic chip borders, basic `.big-divider` centered grid, standard sidebar with padding-only layout, plain `.page-no` with gradient lines
+
+**After:** Cards gain a 3px right-accent border (gold default, green for land, blue for sea, stage colors per level). Metrics get `letter-spacing:-0.02em` + colored `text-shadow` glow. Section titles gain `::after` underline accent (40px gold bar). Chips redesigned as inline-flex badges with semantic color fills and tinted borders. Big-divider pages use `flex-direction:column; align-items:flex-end` with radial glow `::before`, right-aligned `h1` with `letter-spacing:-0.02em`, explicit `.rule` (48px gold bar), and `.icon` with `align-self:flex-end`. Sidebar restructured with `display:flex;flex-direction:column` and flex-shrink guards. Page number refined to `font-size:0.72rem;font-weight:600;letter-spacing:0.12em` with 20px gold dashes. `.cover-bg-art` class added for decorative background ellipse. `.notice-centered` gets `::before` content `◌` symbol. Table rows: even-row tint + hover gold tint + total-row top border.
+
+**File:** `src/data/reporting/executive/pages/cover.ts`
+
+**Before:** Square diamond-pattern SVG ZATCA logo (rect + polygon), `دورة التقرير` label, badge said `تقرير داخلي` (already correct), no decorative background element
+
+**After:** Shield-shaped ZATCA SVG logo with pentagon path, inner decoration ring, three horizontal gold stripes, and `زكاة` text at top of shield. `فترة التقرير` label confirmed. Added `<div class="cover-bg-art" aria-hidden="true">` decorative element before page-inner. `تقرير داخلي` badge confirmed correct.
+
+**File:** `src/data/reporting/executive/pages/glossary.ts`
+
+**Before:** Level cards using `class="card level-card stage1"` etc. — the colored bottom border was already applied via `.level-card::after` + `.stage*` CSS, but layout was flat/identical across cards
+
+**After:** Cards retain `stage1`–`stage4` classes. The enhanced CSS now suppresses `card::before` on `level-card` (via `level-card::before{display:none}`) so the 3px right accent doesn't conflict with the bottom stage border. The bottom accent strip is reduced from 7px to 4px for a more refined look.
+
+**File:** `src/data/reporting/executive/pages/partDivider.ts`
+
+**Before:** `<div class="page-inner big-divider"><div>…icon/kicker/h1/rule/lead…</div><div class="page-no">…</div></div>` — nested div wrapper caused centering via `place-items:center` grid
+
+**After:** Flat `big-divider` layout — icon, kicker, h1, rule, and lead are direct children of `.page-inner.big-divider`, page-no is also a direct child. The CSS flex column (`align-items:flex-end`) now positions all elements right-aligned matching the RTL document flow, with the radial glow `::before` as decorative background.
+
+---
+
+## v22.1 — 2026-06-29 — Wire L1/L2 employee IDs through population pipeline to ExecutiveReportRow
+
+**File:** `src/data/population/populationTypes.ts`
+
+**Change:** Add levelOneEmployee, levelTwoEmployee to PreparedPopulationRow
+
+**Before:**
+```ts
+  biEnrichmentStatus: BiEnrichmentStatus;
+```
+
+**After:**
+```ts
+  levelOneEmployee: string | null;
+  levelTwoEmployee: string | null;
+
+  biEnrichmentStatus: BiEnrichmentStatus;
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/Population/processing/populationProcessor.ts`
+
+**Change:** Initialize and populate levelOneEmployee/levelTwoEmployee from BI match
+
+**Before:**
+```ts
+// PreparedDraftRow type — no levelOneEmployee/levelTwoEmployee fields
+// toPreparedDraftRow — no initialization
+// enrichedRow — no BI population
+// preparedRows.push — no mapping
+```
+
+**After:**
+```ts
+// PreparedDraftRow: added levelOneEmployee/levelTwoEmployee fields
+// toPreparedDraftRow: levelOneEmployee: null, levelTwoEmployee: null
+// enrichedRow: levelOneEmployee: biMatch?.row?.levelOneEmployee ?? draftRow.levelOneEmployee ?? null
+// preparedRows.push: levelOneEmployee: enrichment.row.levelOneEmployee
+```
+
+---
+
+**File:** `src/data/reporting/executiveReportTypes.ts`
+
+**Change:** Add levelOneEmployeeId, levelTwoEmployeeId to ExecutiveReportRow
+
+**Before:**
+```ts
+  stage: string | null;
+  levelOneResult: "سليمة" | "اشتباه";
+```
+
+**After:**
+```ts
+  stage: string | null;
+  levelOneEmployeeId: string | null;
+  levelTwoEmployeeId: string | null;
+  levelOneResult: "سليمة" | "اشتباه";
+```
+
+---
+
+**File:** `src/data/reporting/executiveReportData.ts`
+
+**Change:** Map levelOneEmployee/levelTwoEmployee into buildExecutiveReportRows()
+
+**Before:**
+```ts
+      stage: pop.stage,
+      levelOneResult,
+```
+
+**After:**
+```ts
+      stage: pop.stage,
+      levelOneEmployeeId: pop.levelOneEmployee ?? null,
+      levelTwoEmployeeId: pop.levelTwoEmployee ?? null,
+      levelOneResult,
+```
+
+---
+
 ## v23.0 — 2026-06-29 — Implementer: write all 23 page builders with live data
 
 **File:** `src/data/reporting/executive/pages/*.ts` (all page files), `src/data/reporting/executive/index.ts`

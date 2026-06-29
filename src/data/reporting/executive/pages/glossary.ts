@@ -12,10 +12,22 @@ export function buildGlossary(_ctx: ExecutiveRenderContext): string {
     <h2 class="section-title">المعجم ودلالات المستويات</h2>
     <div class="section-subtitle">تعريف المستويات والمصطلحات الرئيسية</div>
     <div class="grid grid-4">
-      <div class="card level-card stage1"><h3>المستوى الأول</h3><p>حالات تتضمن محجرات مخاطر ولم يتم الاشتباه بها من قبل المستوى الأول والثاني.</p></div>
-      <div class="card level-card stage2"><h3>المستوى الثاني</h3><p>حالات لم يتم الاشتباه بها من قبل المستويين أو أحدهما، وتم الاشتباه بها من فريق أمني آخر.</p></div>
-      <div class="card level-card stage3"><h3>المستوى الثالث</h3><p>حالات تم الاشتباه بها في الأشعة دون مؤشرات من الفرق الأمنية الأخرى.</p></div>
-      <div class="card level-card stage4"><h3>المستوى الرابع</h3><p>حالات ضبط أمني أو اجتازت الأشعة دون اكتشاف الاشتباه من المسؤولين.</p></div>
+      <div class="card level-card stage1">
+        <h3>المستوى الأول</h3>
+        <p>حالات تتضمن محجرات مخاطر ولم يتم الاشتباه بها من قبل المستوى الأول والثاني.</p>
+      </div>
+      <div class="card level-card stage2">
+        <h3>المستوى الثاني</h3>
+        <p>حالات لم يتم الاشتباه بها من قبل المستويين أو أحدهما، وتم الاشتباه بها من فريق أمني آخر.</p>
+      </div>
+      <div class="card level-card stage3">
+        <h3>المستوى الثالث</h3>
+        <p>حالات تم الاشتباه بها في الأشعة دون مؤشرات من الفرق الأمنية الأخرى.</p>
+      </div>
+      <div class="card level-card stage4">
+        <h3>المستوى الرابع</h3>
+        <p>حالات ضبط أمني أو اجتازت الأشعة دون اكتشاف الاشتباه من المسؤولين.</p>
+      </div>
     </div>
     <div class="grid grid-4" style="margin-top:18px">
       <div class="card"><h3 style="color:var(--green)">سليمة</h3><p class="muted">حالة لا توجد بها مؤشرات اشتباه بعد المراجعة.</p></div>

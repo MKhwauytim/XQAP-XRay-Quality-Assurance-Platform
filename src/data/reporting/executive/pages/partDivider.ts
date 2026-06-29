@@ -11,13 +11,11 @@ export function buildPartDivider(
     ${railTabs.map((t, i) => `<div class="rail-tab${i === 0 ? ' active' : ''}">${esc(t)}</div>`).join('')}
   </div>
   <div class="page-inner big-divider">
-    <div>
-      <div class="icon">${icon}</div>
-      <div class="kicker">${esc(partLabel)}</div>
-      <h1>${esc(title)}</h1>
-      <div class="rule"></div>
-      <p class="lead">${esc(subtitle)}</p>
-    </div>
+    <div class="icon">${icon}</div>
+    <div class="kicker">${esc(partLabel)}</div>
+    <h1>${esc(title)}</h1>
+    <div class="rule"></div>
+    <p class="lead">${esc(subtitle)}</p>
     <div class="page-no">${esc(pageNum)}</div>
   </div>
 </section>`;
