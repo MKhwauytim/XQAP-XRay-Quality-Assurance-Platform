@@ -143,14 +143,14 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: Editor
 
   const currentPage = doc.pages[currentPageIndex];
 
-  function addElement(type: "text" | "shape") {
+  function addElement(type: "text" | "shape", x = 50, y = 50) {
     if (!currentPage) return;
     const newEl: Element = {
       elementId: createElementId(),
       type,
       name: "عنصر جديد",
-      x: 50,
-      y: 50,
+      x,
+      y,
       w: 200,
       h: 60,
       z: currentPage.elements.length,
@@ -335,16 +335,31 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: Editor
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => {
             e.preventDefault();
+            const canvasPage = canvasAreaRef.current?.querySelector(".rd-canvas") as HTMLElement | null;
+            const getDropCoords = (): { cx: number; cy: number } => {
+              if (!canvasPage) return { cx: 50, cy: 50 };
+              const pr = canvasPage.getBoundingClientRect();
+              return {
+                cx: Math.max(0, Math.round((e.clientX - pr.left) / 8) * 8),
+                cy: Math.max(0, Math.round((e.clientY - pr.top) / 8) * 8),
+              };
+            };
+
+            // Viz-type drag (from التصورات panel) → place element directly
+            const vizKey = e.dataTransfer.getData("application/x-rd-viz-type");
+            if (vizKey) {
+              const { cx, cy } = getDropCoords();
+              if (vizKey === "text" || vizKey === "shape" || vizKey === "line") {
+                addElement(vizKey === "line" ? "shape" : (vizKey as "text" | "shape"), cx, cy);
+              }
+              return;
+            }
+
+            // Field drag (from الحقول panel) → open aggregation dialog
             const raw = e.dataTransfer.getData("application/x-rd-field");
             if (!raw) return;
             const { field, label, role } = JSON.parse(raw) as { field: string; label: string; role: FieldRole };
-            const canvasPage = canvasAreaRef.current?.querySelector(".rd-canvas") as HTMLElement | null;
-            let cx = 50, cy = 50;
-            if (canvasPage) {
-              const pr = canvasPage.getBoundingClientRect();
-              cx = Math.max(0, Math.round((e.clientX - pr.left) / 8) * 8);
-              cy = Math.max(0, Math.round((e.clientY - pr.top) / 8) * 8);
-            }
+            const { cx, cy } = getDropCoords();
             setFieldDrop({ fieldLabel: label, fieldName: field, role, canvasX: cx, canvasY: cy, screenX: e.clientX, screenY: e.clientY });
           }}
         >

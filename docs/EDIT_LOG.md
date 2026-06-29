@@ -4,6 +4,58 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v18.4 — 2026-06-29 — VizPanel drag-and-drop + icon strokeWidth fix
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/VizPanel.tsx`
+
+**Before:**
+```tsx
+icon: <Type size={22} />   // no strokeWidth, no draggable
+```
+**After:**
+```tsx
+icon: <Type size={22} strokeWidth={1.8} />
+// non-disabled non-image buttons get draggable + onDragStart
+// sets dataTransfer "application/x-rd-viz-type" = key
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/FieldsPanel.tsx`
+
+**Before:**
+```tsx
+<Tag size={12} className="rd-field-icon" />
+```
+**After:**
+```tsx
+<Tag size={12} strokeWidth={1.8} className="rd-field-icon" />
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
+
+**Before:**
+```ts
+function addElement(type: "text" | "shape") { ... x: 50, y: 50 ... }
+// onDrop: only handles application/x-rd-field
+```
+**After:**
+```ts
+function addElement(type: "text" | "shape", x = 50, y = 50) { ... }
+// onDrop: checks application/x-rd-viz-type first → addElement(type, cx, cy)
+//         then application/x-rd-field → FieldDropDialog
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/ReportDesigner.css`
+
+Added `line-height: 0` to `.rd-viz-icon-btn .rd-viz-icon` so SVG icons are not pushed by font spacing.
+
+---
+
 ## v18.3 — 2026-06-29 — Field drop aggregation dialog
 
 **File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/FieldDropDialog.tsx` (new)

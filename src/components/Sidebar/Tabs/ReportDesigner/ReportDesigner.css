@@ -244,7 +244,7 @@
   color: var(--rd-text-primary);
 }
 .rd-viz-icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
-.rd-viz-icon-btn .rd-viz-icon { display: flex; align-items: center; justify-content: center; }
+.rd-viz-icon-btn .rd-viz-icon { display: flex; align-items: center; justify-content: center; line-height: 0; }
 
 /* ── Fields panel tree ── */
 .rd-fields-search {

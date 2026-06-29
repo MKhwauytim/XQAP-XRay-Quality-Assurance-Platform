@@ -57,7 +57,7 @@ export default function FieldsPanel() {
                   );
                 }}
               >
-                <Tag size={12} className="rd-field-icon" />
+                <Tag size={12} strokeWidth={1.8} className="rd-field-icon" />
                 <span className="rd-field-label">{f.label}</span>
               </div>
             ))}
@@ -89,7 +89,7 @@ export default function FieldsPanel() {
                   );
                 }}
               >
-                <Hash size={12} className="rd-field-icon" />
+                <Hash size={12} strokeWidth={1.8} className="rd-field-icon" />
                 <span className="rd-field-label">{f.label}</span>
               </div>
             ))}

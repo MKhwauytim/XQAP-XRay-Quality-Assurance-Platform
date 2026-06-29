@@ -19,20 +19,23 @@ interface VizPanelProps {
   onUpdate: (id: string, patch: Partial<Element>) => void;
 }
 
+const SW = 1.8;
+
 const VIZ_TYPES: Array<{
   label: string;
   icon: React.ReactNode;
   disabled: boolean;
+  draggable: boolean;
   key: "text" | "shape" | "image" | "table" | "chart" | "kpi" | "line" | "section";
 }> = [
-  { label: "نص",   icon: <Type size={22} />,           disabled: false, key: "text" },
-  { label: "شكل",  icon: <Square size={22} />,         disabled: false, key: "shape" },
-  { label: "صورة", icon: <Image size={22} />,          disabled: false, key: "image" },
-  { label: "جدول", icon: <Table2 size={22} />,         disabled: true,  key: "table" },
-  { label: "مخطط", icon: <BarChart2 size={22} />,      disabled: true,  key: "chart" },
-  { label: "KPI",  icon: <TrendingUp size={22} />,     disabled: true,  key: "kpi" },
-  { label: "خط",   icon: <Minus size={22} />,          disabled: false, key: "line" },
-  { label: "قسم",  icon: <LayoutTemplate size={22} />, disabled: true,  key: "section" },
+  { label: "نص",   icon: <Type           size={22} strokeWidth={SW} />, disabled: false, draggable: true,  key: "text" },
+  { label: "شكل",  icon: <Square         size={22} strokeWidth={SW} />, disabled: false, draggable: true,  key: "shape" },
+  { label: "صورة", icon: <Image          size={22} strokeWidth={SW} />, disabled: false, draggable: false, key: "image" },
+  { label: "جدول", icon: <Table2         size={22} strokeWidth={SW} />, disabled: true,  draggable: false, key: "table" },
+  { label: "مخطط", icon: <BarChart2      size={22} strokeWidth={SW} />, disabled: true,  draggable: false, key: "chart" },
+  { label: "KPI",  icon: <TrendingUp     size={22} strokeWidth={SW} />, disabled: true,  draggable: false, key: "kpi" },
+  { label: "خط",   icon: <Minus          size={22} strokeWidth={SW} />, disabled: false, draggable: true,  key: "line" },
+  { label: "قسم",  icon: <LayoutTemplate size={22} strokeWidth={SW} />, disabled: true,  draggable: false, key: "section" },
 ];
 
 export default function VizPanel({ selectedElement, onAddElement, onImageSelected, onUpdate }: VizPanelProps) {
@@ -71,6 +74,11 @@ export default function VizPanel({ selectedElement, onAddElement, onImageSelecte
             onClick={() => handleTypeClick(t.key)}
             type="button"
             aria-label={t.label}
+            draggable={t.draggable}
+            onDragStart={t.draggable ? (e) => {
+              e.dataTransfer.effectAllowed = "copy";
+              e.dataTransfer.setData("application/x-rd-viz-type", t.key);
+            } : undefined}
           >
             <span className="rd-viz-icon">{t.icon}</span>
             <span>{t.label}</span>
