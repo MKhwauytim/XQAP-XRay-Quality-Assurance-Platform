@@ -14,6 +14,8 @@ import {
   buildPart4Divider, buildPart5Divider, buildPart6Divider,
 } from "./pages/partDivider";
 import { buildPopulationByRisk } from "./pages/populationByRisk";
+import { buildPopulationByLevel } from "./pages/populationByLevel";
+import { buildSampleByLevel } from "./pages/sampleByLevel";
 import { buildAppendix } from "./pages/appendix";
 
 export function buildExecutiveReport(
@@ -31,9 +33,9 @@ export function buildExecutiveReport(
     buildGlossary,
     buildPart1Divider,
     buildPopulationByRisk,
-    // populationByLevel — Phase 2
+    buildPopulationByLevel,
     buildPart2Divider,
-    // sampleByLevel — Phase 2
+    buildSampleByLevel,
     buildPart3Divider,
     // distributionOverview — Phase 2
     buildPart4Divider,

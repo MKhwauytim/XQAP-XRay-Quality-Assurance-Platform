@@ -4,6 +4,180 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v20.4 — 2026-06-29 — feat(executive-report): add population-by-level and sample-by-level pages (Phase 2)
+
+**File:** `src/data/reporting/executive/pages/populationByLevel.ts`
+
+**Before:** (file did not exist)
+
+**After:**
+```ts
+import type { ExecutiveRenderContext } from "../context";
+import { dataTable, fmtNum, fmtPct, esc } from "../primitives";
+
+export function buildPopulationByLevel(ctx: ExecutiveRenderContext): string {
+  const { kpis } = ctx;
+  const rows = kpis.stageProfiles.map(s => [
+    esc(s.stageLabel),
+    fmtNum(s.population),
+    fmtNum(s.sampleSize),
+    fmtPct(s.coverage),
+    fmtNum(s.studied),
+    fmtPct(s.completionRate),
+  ]);
+  const table = dataTable({
+    headers: ["المستوى", "المجتمع", "العينة", "التغطية", "مدروسة", "الإنجاز"],
+    rows,
+    totalRow: ["الإجمالي", fmtNum(kpis.totalPopulation), fmtNum(kpis.totalSample), fmtPct(kpis.sampleCoverage), fmtNum(kpis.studiedImages), fmtPct(kpis.completionRate)],
+  });
+
+  const portRows = kpis.portProfiles.map(p => [
+    esc(p.portName),
+    fmtNum(p.population),
+    fmtNum(p.sampleSize),
+    fmtPct(p.coverage),
+    fmtNum(p.studied),
+    fmtPct(p.completionRate),
+  ]);
+  const portTable = dataTable({
+    headers: ["المنفذ", "المجتمع", "العينة", "التغطية", "مدروسة", "الإنجاز"],
+    rows: portRows,
+  });
+
+  return `<section class="xr-page" id="page-pop-level">
+    <div class="xr-page-inner">
+      <div class="xr-slide-head"><h2>مجتمع الحالات حسب المستويات والمنافذ</h2><span class="xr-pg">09</span></div>
+      <div class="xr-cols xr-cols-2">
+        <div>
+          <div class="xr-panel-title">توزيع المستويات</div>
+          ${table}
+        </div>
+        <div>
+          <div class="xr-panel-title">توزيع المنافذ</div>
+          ${portTable}
+        </div>
+      </div>
+      <div class="xr-footer"><span>التقرير التنفيذي — ${esc(ctx.monthLabel)}</span><span>09</span></div>
+    </div>
+  </section>`;
+}
+```
+
+**File:** `src/data/reporting/executive/pages/sampleByLevel.ts`
+
+**Before:** (file did not exist)
+
+**After:**
+```ts
+import type { ExecutiveRenderContext } from "../context";
+import { dataTable, kpiCard, fmtNum, fmtPct, esc } from "../primitives";
+
+export function buildSampleByLevel(ctx: ExecutiveRenderContext): string {
+  const { kpis, input } = ctx;
+  const s = input.sample;
+
+  const kpis4 = [
+    kpiCard({ label: "حجم العينة الكلي", value: fmtNum(kpis.totalSample), tone: "accent" }),
+    kpiCard({ label: "CertScan", value: s ? fmtNum(s.certScanActual) : "—" }),
+    kpiCard({ label: "نسبة التغطية", value: fmtPct(kpis.sampleCoverage), tone: "good" }),
+    kpiCard({ label: "المجتمع الكلي", value: fmtNum(kpis.totalPopulation) }),
+  ].join("");
+
+  const stageRows = kpis.stageProfiles.map(sp => [
+    esc(sp.stageLabel),
+    fmtNum(sp.population),
+    fmtNum(sp.sampleSize),
+    fmtPct(sp.coverage),
+    fmtNum(sp.studied),
+  ]);
+
+  const portRows = kpis.portProfiles.map(p => [
+    esc(p.portName),
+    fmtNum(p.population),
+    fmtNum(p.sampleSize),
+    fmtPct(p.coverage),
+    fmtNum(p.studied),
+    fmtPct(p.completionRate),
+  ]);
+
+  return `<section class="xr-page" id="page-sample">
+    <div class="xr-page-inner">
+      <div class="xr-slide-head"><h2>العينة حسب المستويات والمنافذ</h2><span class="xr-pg">12</span></div>
+      <div class="xr-kpi-grid xr-kpi-grid-4" style="margin-bottom:0.13in">${kpis4}</div>
+      <div class="xr-cols xr-cols-2">
+        <div>
+          <div class="xr-panel-title">العينة حسب المستوى</div>
+          ${dataTable({ headers: ["المستوى","المجتمع","العينة","التغطية","مدروسة"], rows: stageRows })}
+        </div>
+        <div>
+          <div class="xr-panel-title">العينة حسب المنفذ</div>
+          ${dataTable({ headers: ["المنفذ","المجتمع","العينة","التغطية","مدروسة","الإنجاز"], rows: portRows })}
+        </div>
+      </div>
+      <div class="xr-footer"><span>التقرير التنفيذي — ${esc(ctx.monthLabel)}</span><span>12</span></div>
+    </div>
+  </section>`;
+}
+```
+
+**File:** `src/data/reporting/executive/index.ts`
+
+**Before:**
+```ts
+import { buildPopulationByRisk } from "./pages/populationByRisk";
+import { buildAppendix } from "./pages/appendix";
+
+export function buildExecutiveReport(
+  input: ExecutiveReportInput,
+  employeeDisplayNames: Record<string, string> = {},
+): string {
+  const rows = buildExecutiveReportRows(input);
+  const kpis = calculateExecutiveKPIs(rows, input.sample, input.config);
+  const ctx = buildContext(input, kpis, employeeDisplayNames);
+
+  const pages = [
+    buildCover,
+    buildToc,
+    buildExecIntro,
+    buildGlossary,
+    buildPart1Divider,
+    buildPopulationByRisk,
+    // populationByLevel — Phase 2
+    buildPart2Divider,
+    // sampleByLevel — Phase 2
+    buildPart3Divider,
+```
+
+**After:**
+```ts
+import { buildPopulationByRisk } from "./pages/populationByRisk";
+import { buildPopulationByLevel } from "./pages/populationByLevel";
+import { buildSampleByLevel } from "./pages/sampleByLevel";
+import { buildAppendix } from "./pages/appendix";
+
+export function buildExecutiveReport(
+  input: ExecutiveReportInput,
+  employeeDisplayNames: Record<string, string> = {},
+): string {
+  const rows = buildExecutiveReportRows(input);
+  const kpis = calculateExecutiveKPIs(rows, input.sample, input.config);
+  const ctx = buildContext(input, kpis, employeeDisplayNames);
+
+  const pages = [
+    buildCover,
+    buildToc,
+    buildExecIntro,
+    buildGlossary,
+    buildPart1Divider,
+    buildPopulationByRisk,
+    buildPopulationByLevel,
+    buildPart2Divider,
+    buildSampleByLevel,
+    buildPart3Divider,
+```
+
+---
+
 ## v20.3 — 2026-06-29 — feat(executive-report): add executive intro KPI dashboard page (Phase 2)
 
 **File:** `src/data/reporting/executive/pages/execIntro.ts`
