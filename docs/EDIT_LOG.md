@@ -4,6 +4,33 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v20.8 — 2026-06-29 — feat(executive-report): add employee analytics data module with tests (Task 13)
+
+**File:** `src/data/reporting/executive/executiveEmployeeData.ts`
+
+**Before:** (file did not exist)
+
+**After:**
+```ts
+// buildEmployeeProfiles — groups submitted rows by evaluator, computes per-employee
+// accuracy, detection rates, byPort/byDecision/byImageQuality/byMarking breakdowns,
+// stabilityIndex, riskScore and recommendedAction. Returns profiles sorted by overallAccuracy desc.
+// buildPriorityList — filters to reliable profiles, sorts by riskScore desc.
+// (full 149-line implementation — see file)
+```
+
+**File:** `src/data/reporting/executive/executiveEmployeeData.test.ts`
+
+**Before:** (file did not exist)
+
+**After:**
+```ts
+// 5 Vitest tests covering: empty array for non-submitted rows, overallAccuracy calculation,
+// reliability threshold (below and at), and buildPriorityList riskScore ordering.
+```
+
+---
+
 ## v20.7 — 2026-06-29 — feat(executive-report): add accuracy-by-level and level-agreement pages (Phase 3)
 
 **File:** `src/data/reporting/executive/pages/accuracyByLevel.ts`
