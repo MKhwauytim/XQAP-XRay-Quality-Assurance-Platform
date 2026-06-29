@@ -4,6 +4,92 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v25.0 — 2026-06-29 — Task 1: CSS empty-space fixes (theme.ts)
+
+**File:** `src/data/reporting/executive/theme.ts`
+
+**A.1 — `.page-inner` flex column + `.page-fill` / `.page-no` utilities**
+
+**Before:**
+```css
+.page-inner{
+  position:relative;z-index:2;height:100%;
+  width:calc(100% - 44px);margin-right:44px;
+  padding:30px 28px 36px 28px;overflow:hidden;
+}
+```
+
+**After:**
+```css
+.page-inner{
+  position:relative;z-index:2;height:100%;
+  width:calc(100% - 44px);margin-right:44px;
+  padding:30px 28px 36px 28px;overflow:hidden;
+  display:flex;flex-direction:column;
+}
+.page-fill{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;}
+.page-fill > .table-wrap{flex:1 1 auto;min-height:0;}
+.page-fill .grid{flex:1 1 auto;align-content:start;}
+.page-inner > .page-no{margin-top:auto;}
+```
+
+**A.2 — `.big-divider` three-band redesign + ghost numeral (`--divider-num`)**
+
+**Before:**
+```css
+.big-divider{
+  display:flex;flex-direction:column;
+  justify-content:center;align-items:flex-end;
+  padding:60px 48px;position:relative;overflow:hidden;height:100%;
+}
+/* (single ::before blob, flat layout, no divider-top/center/toc) */
+```
+
+**After:**
+```css
+.big-divider{
+  display:flex;flex-direction:column;
+  justify-content:space-between;align-items:stretch;
+  padding:54px 48px 64px;position:relative;overflow:hidden;height:100%;
+}
+/* dual ::before gradient blobs, ::after ghost numeral via --divider-num,
+   .divider-top / .divider-center / .divider-toc three-band structure */
+```
+
+**A.3 — `.context-band` sparse-data filler (new additive block)**
+
+**Before:** *(rule did not exist)*
+
+**After:**
+```css
+.context-band{display:grid;grid-template-columns:1.4fr 1fr;gap:14px;margin-top:16px;flex:1 1 auto;align-items:stretch;}
+/* .method-list, .stat-stack, .stat-pill sub-rules also added */
+@media(max-width:980px){.context-band{grid-template-columns:1fr;}}
+```
+
+**A.4 — `.cover-bg-art::after` bottom-right secondary blob**
+
+**Before:**
+```css
+.cover-bg-art{
+  position:absolute;left:-5%;top:15%;width:55%;height:70%;
+  background:radial-gradient(ellipse at center,rgba(107,169,248,.06) 0%,transparent 60%);
+  border-radius:50%;pointer-events:none;z-index:1;
+}
+```
+
+**After:**
+```css
+/* same .cover-bg-art, plus: */
+.cover-bg-art::after{
+  content:"";position:absolute;right:-60%;bottom:-50%;width:120%;height:120%;
+  background:radial-gradient(ellipse at center,rgba(244,180,0,.05) 0%,transparent 62%);
+  border-radius:50%;
+}
+```
+
+---
+
 ## v25.1 — 2026-06-29 — Task 2: Part divider redesign (3-band layout)
 
 **File:** `src/data/reporting/executive/pages/partDivider.ts`
