@@ -42,6 +42,8 @@ function makeRow(id: string, stage: string, cert: "Certscan" | "NonCertscan"): P
     reportNumber: null,
     targetedByRiskEngine: null,
     riskMessage: null,
+    levelOneEmployee: null,
+    levelTwoEmployee: null,
     certScanSnippet: null,
     originalCertScanSnippet: null,
     biEnrichmentStatus: "BI Not Provided",

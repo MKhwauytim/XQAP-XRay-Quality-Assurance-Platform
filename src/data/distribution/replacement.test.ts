@@ -26,6 +26,8 @@ const makeRow = (id: string, stage: string, port: string, certScan: "Certscan" |
   reportNumber: null,
   targetedByRiskEngine: null,
   riskMessage: null,
+  levelOneEmployee: null,
+  levelTwoEmployee: null,
   certScanSnippet: null,
   originalCertScanSnippet: null,
   biEnrichmentStatus: "BI Not Provided",

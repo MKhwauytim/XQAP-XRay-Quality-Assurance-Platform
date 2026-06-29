@@ -16,6 +16,8 @@ export type ExecutiveReportRow = {
   portName: string | null;
   portType: string | null;
   stage: string | null;
+  levelOneEmployeeId: string | null;
+  levelTwoEmployeeId: string | null;
   levelOneResult: "سليمة" | "اشتباه";
   levelTwoResult: "سليمة" | "اشتباه";
   imageResult: "سليمة" | "اشتباه";

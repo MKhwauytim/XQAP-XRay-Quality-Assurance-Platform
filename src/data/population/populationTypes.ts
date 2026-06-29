@@ -39,6 +39,9 @@ export type PreparedPopulationRow = {
   certScanSnippet: string | null;
   originalCertScanSnippet: string | null;
 
+  levelOneEmployee: string | null;
+  levelTwoEmployee: string | null;
+
   biEnrichmentStatus: BiEnrichmentStatus;
   biMatched: boolean;
   biFilledFields: string[];

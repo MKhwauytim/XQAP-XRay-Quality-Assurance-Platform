@@ -8,6 +8,8 @@ function makeRow(overrides: Partial<ExecutiveReportRow>): ExecutiveReportRow {
     portName: "منفذ أ",
     portType: "land",
     stage: "المستوى الأول",
+    levelOneEmployeeId: null,
+    levelTwoEmployeeId: null,
     levelOneResult: "سليمة",
     levelTwoResult: "سليمة",
     imageResult: "سليمة",
