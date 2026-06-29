@@ -4,6 +4,205 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v25.3 — 2026-06-29 — Task 4: Per-port employee analysis section
+
+**File:** `src/data/reporting/executive/portEmployeeData.ts`
+
+**Before:**
+```ts
+// (new file)
+```
+
+**After:**
+```ts
+// Pure data-derivation module: buildPortEmployeeAnalyses(rows)
+// Produces one PortEmployeeAnalysis per non-empty port (land first, then sea).
+// Keyed on levelOneEmployeeId / levelTwoEmployeeId (original assessors, NOT QA reviewers).
+// accuracy = correct / verified * 100, null when verified === 0.
+```
+
+---
+
+**File:** `src/data/reporting/executive/pages/portEmployeeAnalysis.ts`
+
+**Before:**
+```ts
+// (new file)
+```
+
+**After:**
+```ts
+// buildPortEmployeeAnalysisPages(ctx) → Array<(ctx) => string>
+// Returns one page-builder closure per non-empty port.
+// Each page: grid-4 KPI cards + two level tables (stage1/stage2) in .port-split.page-fill.
+// Falls back to a single graceful empty-state page when no port employee data exists.
+```
+
+---
+
+**File:** `src/data/reporting/executive/index.ts`
+
+**Before:**
+```ts
+import { buildEmpByPort, buildEmpCrossPort } from "./pages/empByPort";
+// …
+  const pages = [
+    // …
+    buildEmpByDecision,
+    buildEmpByPort,
+    buildEmpCrossPort,
+    // …
+  ];
+```
+
+**After:**
+```ts
+import { buildEmpCrossPort } from "./pages/empByPort";
+import { buildPortEmployeeAnalysisPages } from "./pages/portEmployeeAnalysis";
+// …
+  const portEmpPages = buildPortEmployeeAnalysisPages(ctx); // one per port
+  const pages = [
+    // …
+    buildEmpByDecision,
+    ...portEmpPages,          // ← dynamic per-port pages (replaces buildEmpByPort)
+    buildEmpCrossPort,
+    // …
+  ];
+```
+
+---
+
+## v25.2 — 2026-06-29 — Task 3: Fix empty space on data pages
+
+**File:** `src/data/reporting/executive/pages/populationByRisk.ts`
+
+**Before:**
+```ts
+    <div class="port-split">
+      <div class="card land">
+        <div class="panel-title">المنافذ البرية</div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>المنفذ</th><th>الإجمالي</th><th>سليمة</th><th>اشتباه</th></tr></thead>
+          <tbody>
+            ${landRows.map(portRow).join("")}
+            ${landMore}
+            <tr class="total-row"><td>الإجمالي</td><td>${fmtNum(landTotal)}</td><td>${fmtNum(landCleanTotal)}</td><td>${fmtNum(landSuspTotal)}</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+      <div class="card sea">
+        <div class="panel-title">المنافذ البحرية</div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>المنفذ</th><th>الإجمالي</th><th>سليمة</th><th>اشتباه</th></tr></thead>
+          <tbody>
+            ${seaRows.map(portRow).join("")}
+            ${seaMore}
+            ${seaPorts.length > 0
+              ? `<tr class="total-row"><td>الإجمالي</td><td>${fmtNum(seaTotal)}</td><td>${fmtNum(seaCleanTotal)}</td><td>${fmtNum(seaSuspTotal)}</td></tr>`
+              : `<tr class="total-row"><td colspan="4"><span class="muted">لا توجد منافذ بحرية</span></td></tr>`}
+          </tbody>
+        </table></div>
+      </div>
+    </div>
+    <div class="page-no">05</div>
+  </div>
+</section>`;
+```
+
+**After:**
+```ts
+    <div class="page-fill">
+      <div class="port-split">
+        <!-- land/sea tables with empty guards -->
+      </div>
+      <div class="context-band">
+        <!-- methodology card + summary stat-stack -->
+      </div>
+    </div>
+    <div class="page-no">05</div>
+  </div>
+</section>`;
+```
+
+**File:** `src/data/reporting/executive/pages/populationByLevel.ts`
+
+**Before:**
+```ts
+    <div class="grid grid-2" style="margin-top:18px">
+      ${stageTableBlocks}
+    </div>
+    <div class="page-no">06</div>
+```
+
+**After:**
+```ts
+    <div class="page-fill">
+      <div class="grid grid-2" style="margin-top:18px">
+        ${stageTableBlocks}
+      </div>
+      ${stageProfiles empty? notice-centered : context-band methodology}
+    </div>
+    <div class="page-no">06</div>
+```
+
+**File:** `src/data/reporting/executive/pages/sampleByLevel.ts`
+
+**Before:**
+```ts
+    <div class="grid grid-2">
+      ${stageCards}
+    </div>
+    <div class="page-no">07</div>
+```
+
+**After:**
+```ts
+    <div class="page-fill">
+      <div class="grid grid-2">
+        ${stageCards}
+      </div>
+      <div class="context-band">
+        <!-- methodology + coverage stat-stack -->
+      </div>
+    </div>
+    <div class="page-no">07</div>
+```
+
+**File:** `src/data/reporting/executive/pages/accuracyByPort.ts`
+
+**Before:**
+```ts
+    <div class="table-wrap"><table>...</table></div>
+    <div class="page-no">09</div>
+```
+
+**After:**
+```ts
+    <div class="page-fill">
+      <!-- when no data: pending notice-centered; otherwise table + context-band -->
+    </div>
+    <div class="page-no">09</div>
+```
+
+**File:** `src/data/reporting/executive/pages/accuracyByLevel.ts`
+
+**Before:**
+```ts
+    <div class="table-wrap" style="margin-top:18px">...</div>
+    <div class="info" style="margin-top:18px">...</div>
+    <div class="page-no">10</div>
+```
+
+**After:**
+```ts
+    <div class="page-fill">
+      <!-- when no data: pending full-page state; otherwise table + info wrapped in page-fill -->
+    </div>
+    <div class="page-no">10</div>
+```
+
+---
+
 ## v25.0 — 2026-06-29 — Task 1: CSS empty-space fixes (theme.ts)
 
 **File:** `src/data/reporting/executive/theme.ts`

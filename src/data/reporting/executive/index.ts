@@ -24,7 +24,8 @@ import { buildDistributionOverview } from "./pages/distributionOverview";
 import { buildLevelAgreement }    from "./pages/levelAgreement";
 import { buildEmpOverview }       from "./pages/empOverview";
 import { buildEmpByDecision }     from "./pages/empByDecision";
-import { buildEmpByPort, buildEmpCrossPort } from "./pages/empByPort";
+import { buildEmpCrossPort } from "./pages/empByPort";
+import { buildPortEmployeeAnalysisPages } from "./pages/portEmployeeAnalysis";
 import { buildEmpStability }      from "./pages/empStability";
 import { buildErrorTypes }        from "./pages/errorTypes";
 import { buildEmpPriority }       from "./pages/empPriority";
@@ -42,7 +43,7 @@ export function buildExecutiveReport(
   const kpis = calculateExecutiveKPIs(rows, input.sample, input.config);
   const ctx  = buildContext(input, kpis, employeeDisplayNames, rows);
 
-  // 23-page order matching HTML mockup v4:
+  // 25+ page order (dynamic: N per-port employee pages expand slot 17):
   // 01 Cover
   // 02 TOC
   // 03 Glossary
@@ -59,14 +60,17 @@ export function buildExecutiveReport(
   // 14 Analytics Map
   // 15 Employee Overview
   // 16 Employee by Decision Type
-  // 17 Employee by Port (example port drill-down)
+  // 17a…17n Per-port employee analysis (one page per non-empty port, land first)
   // 18 Cross-Port Comparison (matrix)
   // 19 Performance Stability & Workload
   // 20 Image Quality Impact on Performance
   // 21 Error Type Analysis
   // 22 Level Agreement (L1 vs L2)
   // 23 Priority & Actions
-  // 24 Appendix / Distribution Overview
+  // 24 Distribution Overview
+  // 25 Appendix
+  const portEmpPages = buildPortEmployeeAnalysisPages(ctx); // one per port
+
   const pages = [
     buildCover,
     buildToc,
@@ -84,7 +88,7 @@ export function buildExecutiveReport(
     buildAnalyticsMap,
     buildEmpOverview,
     buildEmpByDecision,
-    buildEmpByPort,
+    ...portEmpPages,          // ← dynamic per-port pages (replaces buildEmpByPort)
     buildEmpCrossPort,
     buildEmpStability,
     buildEmpImageQualityImpact,
