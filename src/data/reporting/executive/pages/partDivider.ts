@@ -1,17 +1,32 @@
 import type { ExecutiveRenderContext } from "../context";
 import { esc } from "../primitives";
 
+const VTAB_LABELS = [
+  { label: "المستوى الأول", color: "var(--xr-l1)" },
+  { label: "المستوى الثاني", color: "var(--xr-l2)" },
+  { label: "المستوى الثالث", color: "var(--xr-l3)" },
+  { label: "المستوى الرابع", color: "var(--xr-l4)" },
+];
+
+function vtabs(): string {
+  return `<div class="xr-vtabs">
+    ${VTAB_LABELS.map(v => `<div class="xr-vtab" style="background:${v.color}">${esc(v.label)}</div>`).join("")}
+  </div>`;
+}
+
 export function buildPartDivider(
   partNum: string, title: string, sub: string, icon: string, pageId: string, pageNum: string,
 ): (_ctx: ExecutiveRenderContext) => string {
-  return (_ctx) => `<section class="xr-page xr-divider" id="${pageId}">
-    <div class="xr-divider-inner">
+  return (_ctx) => `<section class="xr-page xr-divider-page" id="${pageId}">
+    ${vtabs()}
+    <div class="xr-divider-body">
       <div class="xr-divider-icon">${icon}</div>
       <div class="xr-divider-eyebrow">${esc(partNum)}</div>
       <div class="xr-divider-title">${esc(title)}</div>
+      <div class="xr-divider-rule"></div>
       <div class="xr-divider-sub">${esc(sub)}</div>
     </div>
-    <div class="xr-footer"><span></span><span>${pageNum}</span></div>
+    <div class="xr-page-num">• ${esc(pageNum)} •</div>
   </section>`;
 }
 

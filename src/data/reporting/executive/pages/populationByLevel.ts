@@ -1,5 +1,11 @@
 import type { ExecutiveRenderContext } from "../context";
 import { dataTable, fmtNum, fmtPct, esc } from "../primitives";
+import { ORGANIZATION_PATH_TEXT } from "../../../../branding/organization";
+
+function orgHeader(): string {
+  const lines = ORGANIZATION_PATH_TEXT.split(" ← ").map(l => `<div>${esc(l)}</div>`).join("");
+  return `<div class="xr-org-header"><div class="xr-org-text">${lines}</div><div class="xr-org-logo">🛡</div></div>`;
+}
 
 export function buildPopulationByLevel(ctx: ExecutiveRenderContext): string {
   const { kpis } = ctx;
@@ -32,7 +38,8 @@ export function buildPopulationByLevel(ctx: ExecutiveRenderContext): string {
 
   return `<section class="xr-page" id="page-pop-level">
     <div class="xr-page-inner">
-      <div class="xr-slide-head"><h2>مجتمع الحالات حسب المستويات والمنافذ</h2><span class="xr-pg">09</span></div>
+      ${orgHeader()}
+      <h2 class="xr-page-title">مجتمع الحالات حسب المستويات والمنافذ</h2>
       <div class="xr-cols xr-cols-2">
         <div>
           <div class="xr-panel-title">توزيع المستويات</div>
@@ -43,7 +50,7 @@ export function buildPopulationByLevel(ctx: ExecutiveRenderContext): string {
           ${portTable}
         </div>
       </div>
-      <div class="xr-footer"><span>التقرير التنفيذي — ${esc(ctx.monthLabel)}</span><span>09</span></div>
+      <div class="xr-page-num">• 09 •</div>
     </div>
   </section>`;
 }

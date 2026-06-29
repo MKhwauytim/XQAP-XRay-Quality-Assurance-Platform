@@ -1,5 +1,11 @@
 import type { ExecutiveRenderContext } from "../context";
 import { kpiCard, radarSvg, fmtPct, esc } from "../primitives";
+import { ORGANIZATION_PATH_TEXT } from "../../../../branding/organization";
+
+function orgHeader(): string {
+  const lines = ORGANIZATION_PATH_TEXT.split(" ← ").map(l => `<div>${esc(l)}</div>`).join("");
+  return `<div class="xr-org-header"><div class="xr-org-text">${lines}</div><div class="xr-org-logo">🛡</div></div>`;
+}
 
 export function buildAccuracyByLevel(ctx: ExecutiveRenderContext): string {
   const { kpis } = ctx;
@@ -22,10 +28,11 @@ export function buildAccuracyByLevel(ctx: ExecutiveRenderContext): string {
 
   return `<section class="xr-page" id="page-acc-level">
     <div class="xr-page-inner">
-      <div class="xr-slide-head"><h2>نتائج الدقة حسب المستويات الأربعة</h2><span class="xr-pg">21</span></div>
-      <div class="xr-kpi-grid xr-kpi-grid-4" style="margin-bottom:0.13in">${kpisRow}</div>
+      ${orgHeader()}
+      <h2 class="xr-page-title">نتائج الدقة حسب المستويات الأربعة</h2>
+      <div class="xr-kpi-grid xr-kpi-grid-4">${kpisRow}</div>
       <div class="xr-cols xr-cols-2">
-        <div class="xr-panel" style="height:3.4in">${radarSvg(radarPoints)}</div>
+        <div class="xr-panel" style="height:280px">${radarSvg(radarPoints)}</div>
         <div>
           <div class="xr-panel-title">مؤشرات الدقة التفصيلية</div>
           <table class="xr-table"><tbody>
@@ -37,7 +44,7 @@ export function buildAccuracyByLevel(ctx: ExecutiveRenderContext): string {
           </tbody></table>
         </div>
       </div>
-      <div class="xr-footer"><span>التقرير التنفيذي — ${esc(ctx.monthLabel)}</span><span>21</span></div>
+      <div class="xr-page-num">• 21 •</div>
     </div>
   </section>`;
 }

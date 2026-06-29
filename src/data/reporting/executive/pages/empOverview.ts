@@ -1,6 +1,12 @@
 import type { ExecutiveRenderContext } from "../context";
 import { dataTable, barRow, fmtNum, fmtPct, esc } from "../primitives";
 import { buildEmployeeProfiles } from "../executiveEmployeeData";
+import { ORGANIZATION_PATH_TEXT } from "../../../../branding/organization";
+
+function orgHeader(): string {
+  const lines = ORGANIZATION_PATH_TEXT.split(" ← ").map(l => `<div>${esc(l)}</div>`).join("");
+  return `<div class="xr-org-header"><div class="xr-org-text">${lines}</div><div class="xr-org-logo">🛡</div></div>`;
+}
 
 export function buildEmpOverview(ctx: ExecutiveRenderContext): string {
   const profiles = buildEmployeeProfiles(ctx.rows, ctx.input.config.minimumReliableSampleSize);
@@ -8,9 +14,10 @@ export function buildEmpOverview(ctx: ExecutiveRenderContext): string {
   if (profiles.length === 0) {
     return `<section class="xr-page" id="page-emp-overview">
       <div class="xr-page-inner">
-        <div class="xr-slide-head"><h2>النظرة العامة لأداء الموظفين</h2><span class="xr-pg">24</span></div>
+        ${orgHeader()}
+        <h2 class="xr-page-title">النظرة العامة لأداء الموظفين</h2>
         <div class="xr-notice">بيانات غير كافية — لا توجد إجابات مقدَّمة لهذا الشهر.</div>
-        <div class="xr-footer"><span>التقرير التنفيذي — ${esc(ctx.monthLabel)}</span><span>24</span></div>
+        <div class="xr-page-num">• 24 •</div>
       </div>
     </section>`;
   }
@@ -28,7 +35,8 @@ export function buildEmpOverview(ctx: ExecutiveRenderContext): string {
 
   return `<section class="xr-page" id="page-emp-overview">
     <div class="xr-page-inner">
-      <div class="xr-slide-head"><h2>النظرة العامة لأداء الموظفين</h2><span class="xr-pg">24</span></div>
+      ${orgHeader()}
+      <h2 class="xr-page-title">النظرة العامة لأداء الموظفين</h2>
       <div class="xr-cols xr-cols-6-4">
         <div>${dataTable({ headers: ["الموظف","مدروسة","الدقة","اشتباه فائت","التوصية"], rows: tableRows })}</div>
         <div class="xr-panel">
@@ -36,7 +44,7 @@ export function buildEmpOverview(ctx: ExecutiveRenderContext): string {
           <div class="xr-bars">${bars}</div>
         </div>
       </div>
-      <div class="xr-footer"><span>التقرير التنفيذي — ${esc(ctx.monthLabel)}</span><span>24</span></div>
+      <div class="xr-page-num">• 24 •</div>
     </div>
   </section>`;
 }

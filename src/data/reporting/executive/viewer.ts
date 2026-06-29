@@ -1,7 +1,7 @@
 import { EXEC_CSS } from "./theme";
 import { esc } from "./primitives";
 
-export function buildViewerHtml(slides: string, sidebarLinks: string, monthLabel: string): string {
+export function buildViewerHtml(slides: string, monthLabel: string): string {
   return `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -11,17 +11,11 @@ export function buildViewerHtml(slides: string, sidebarLinks: string, monthLabel
 <style>${EXEC_CSS}</style>
 </head>
 <body>
-<div class="xr-viewer">
-  <main class="xr-slides">${slides}</main>
-  <nav class="xr-sidebar">
-    <div class="xr-brand">
-      <strong>التقرير التنفيذي</strong>
-      <span>ضمان جودة الأشعة</span>
-    </div>
-    <button class="xr-pdf-btn" onclick="window.print()">تصدير PDF</button>
-    <div class="xr-nav-title">الأقسام</div>
-    <div class="xr-nav">${sidebarLinks}</div>
-  </nav>
+<div class="xr-toolbar">
+  <button class="xr-pdf-btn" onclick="window.print()">🖨 تصدير PDF</button>
+</div>
+<div class="xr-document">
+${slides}
 </div>
 </body>
 </html>`;

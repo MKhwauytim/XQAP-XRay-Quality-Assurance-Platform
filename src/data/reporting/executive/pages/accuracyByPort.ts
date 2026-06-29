@@ -1,5 +1,11 @@
 import type { ExecutiveRenderContext } from "../context";
 import { dataTable, barRow, badgeHtml, kpiCard, fmtNum, fmtPct, esc } from "../primitives";
+import { ORGANIZATION_PATH_TEXT } from "../../../../branding/organization";
+
+function orgHeader(): string {
+  const lines = ORGANIZATION_PATH_TEXT.split(" ← ").map(l => `<div>${esc(l)}</div>`).join("");
+  return `<div class="xr-org-header"><div class="xr-org-text">${lines}</div><div class="xr-org-logo">🛡</div></div>`;
+}
 
 export function buildAccuracyByPort(ctx: ExecutiveRenderContext): string {
   const { kpis } = ctx;
@@ -27,8 +33,9 @@ export function buildAccuracyByPort(ctx: ExecutiveRenderContext): string {
 
   return `<section class="xr-page" id="page-acc-port">
     <div class="xr-page-inner">
-      <div class="xr-slide-head"><h2>نتائج الفحص والدقة حسب المنفذ</h2><span class="xr-pg">20</span></div>
-      <div class="xr-kpi-grid xr-kpi-grid-4" style="margin-bottom:0.13in">${kpisRow}</div>
+      ${orgHeader()}
+      <h2 class="xr-page-title">نتائج الفحص والدقة حسب المنفذ</h2>
+      <div class="xr-kpi-grid xr-kpi-grid-4">${kpisRow}</div>
       <div class="xr-cols xr-cols-6-4">
         <div>${dataTable({ headers: ["المنفذ","مدروسة","دقة%","اكتشاف اشتباه%","اشتباه فائت%","التصنيف"], rows: tableRows })}</div>
         <div class="xr-panel">
@@ -36,7 +43,7 @@ export function buildAccuracyByPort(ctx: ExecutiveRenderContext): string {
           <div class="xr-bars">${bars || '<div class="xr-notice">بيانات غير كافية</div>'}</div>
         </div>
       </div>
-      <div class="xr-footer"><span>التقرير التنفيذي — ${esc(ctx.monthLabel)}</span><span>20</span></div>
+      <div class="xr-page-num">• 20 •</div>
     </div>
   </section>`;
 }

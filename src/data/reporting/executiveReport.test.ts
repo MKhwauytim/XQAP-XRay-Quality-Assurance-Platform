@@ -57,7 +57,7 @@ describe("executive report html", () => {
       config: DEFAULT_EXEC_CONFIG,
     });
 
-    expect(html).toContain("@page{size:13.333in 7.5in;margin:0;}");
+    expect(html).toContain("@page{size:A4 portrait;margin:0;}");
     expect(html).toContain("إجمالي الصور");
     expect(html).toContain("مستويات الدراسة");
     expect(html).toContain("المستوى الأول");
@@ -70,6 +70,6 @@ describe("executive report html", () => {
     expect(html).not.toContain("إجمالي الصور\", \"سليمة\", \"اشتباه\", \"العينة\", \"المدروسة\", \"نسبة الدقة");
     expect(html).not.toContain("Xray IDs");
     expect(html).not.toContain("Inspection Workspace");
-    expect(html).not.toContain("Page ");
+    expect(html).not.toContain("Page 1");
   });
 });

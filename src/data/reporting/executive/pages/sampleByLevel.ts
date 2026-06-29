@@ -1,5 +1,11 @@
 import type { ExecutiveRenderContext } from "../context";
 import { dataTable, kpiCard, fmtNum, fmtPct, esc } from "../primitives";
+import { ORGANIZATION_PATH_TEXT } from "../../../../branding/organization";
+
+function orgHeader(): string {
+  const lines = ORGANIZATION_PATH_TEXT.split(" ← ").map(l => `<div>${esc(l)}</div>`).join("");
+  return `<div class="xr-org-header"><div class="xr-org-text">${lines}</div><div class="xr-org-logo">🛡</div></div>`;
+}
 
 export function buildSampleByLevel(ctx: ExecutiveRenderContext): string {
   const { kpis, input } = ctx;
@@ -31,8 +37,9 @@ export function buildSampleByLevel(ctx: ExecutiveRenderContext): string {
 
   return `<section class="xr-page" id="page-sample">
     <div class="xr-page-inner">
-      <div class="xr-slide-head"><h2>مستويات الدراسة والعينة حسب المنافذ</h2><span class="xr-pg">12</span></div>
-      <div class="xr-kpi-grid xr-kpi-grid-4" style="margin-bottom:0.13in">${kpis4}</div>
+      ${orgHeader()}
+      <h2 class="xr-page-title">مستويات الدراسة والعينة حسب المنافذ</h2>
+      <div class="xr-kpi-grid xr-kpi-grid-4">${kpis4}</div>
       <div class="xr-cols xr-cols-2">
         <div>
           <div class="xr-panel-title">العينة حسب المستوى</div>
@@ -43,7 +50,7 @@ export function buildSampleByLevel(ctx: ExecutiveRenderContext): string {
           ${dataTable({ headers: ["المنفذ","المجتمع","العينة","التغطية","مدروسة","الإنجاز"], rows: portRows })}
         </div>
       </div>
-      <div class="xr-footer"><span>التقرير التنفيذي — ${esc(ctx.monthLabel)}</span><span>12</span></div>
+      <div class="xr-page-num">• 12 •</div>
     </div>
   </section>`;
 }

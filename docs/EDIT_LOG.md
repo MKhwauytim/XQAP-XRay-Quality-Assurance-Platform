@@ -4,6 +4,106 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v21.0 — 2026-06-29 — Redesign executive report to portrait A4 document format
+
+**Files:** All files in `src/data/reporting/executive/` (theme.ts, viewer.ts, assemble.ts, all pages/)
+
+**Before:** Landscape widescreen slides (13.333in × 7.5in) with right sidebar viewer
+
+**After:** Portrait A4 document pages (8.27in × 11.69in) with fixed toolbar, scrollable document, org header on each page, vtab decorators on part dividers, dark teal table headers (#1a4040), px-unit font sizes
+
+**File:** `src/data/reporting/executive/theme.ts`
+
+**Before:**
+```ts
+// .xr-page{ width:13.333in;height:7.5in; ... }
+// .xr-viewer{display:grid;grid-template-columns:minmax(0,1fr) 280px;}
+// @media print{@page{size:13.333in 7.5in;margin:0;}}
+```
+
+**After:**
+```ts
+// .xr-page{ width:8.27in;min-height:11.69in; }
+// .xr-document{display:flex;flex-direction:column;...}
+// .xr-toolbar{position:fixed;...}
+// @media print{@page{size:A4 portrait;margin:0;}}
+```
+
+---
+
+**File:** `src/data/reporting/executive/viewer.ts`
+
+**Before:**
+```ts
+export function buildViewerHtml(slides: string, sidebarLinks: string, monthLabel: string): string {
+```
+
+**After:**
+```ts
+export function buildViewerHtml(slides: string, monthLabel: string): string {
+```
+
+---
+
+**File:** `src/data/reporting/executive/assemble.ts`
+
+**Before:**
+```ts
+const NAV_SECTIONS = [...];
+// ... builds sidebarLinks string ...
+return buildViewerHtml(slides, sidebarLinks, ctx.monthLabel);
+```
+
+**After:**
+```ts
+// NAV_SECTIONS removed
+return buildViewerHtml(slides, ctx.monthLabel);
+```
+
+---
+
+**File:** `src/data/reporting/executive/pages/cover.ts` — portrait cover redesign (full rewrite of HTML template)
+
+**File:** `src/data/reporting/executive/pages/toc.ts` — portrait layout, orgHeader, xr-page-num
+
+**File:** `src/data/reporting/executive/pages/execIntro.ts` — portrait layout, orgHeader, xr-page-num
+
+**File:** `src/data/reporting/executive/pages/glossary.ts` — 2×2 level card grid, glossary separator, orgHeader
+
+**File:** `src/data/reporting/executive/pages/partDivider.ts` — vtabs redesign (xr-vtabs, xr-vtab, xr-divider-body)
+
+**File:** `src/data/reporting/executive/pages/populationByRisk.ts` — orgHeader, xr-page-num, px font sizes
+
+**File:** `src/data/reporting/executive/pages/populationByLevel.ts` — orgHeader, xr-page-num
+
+**File:** `src/data/reporting/executive/pages/sampleByLevel.ts` — orgHeader, xr-page-num
+
+**File:** `src/data/reporting/executive/pages/distributionOverview.ts` — orgHeader, xr-page-num
+
+**File:** `src/data/reporting/executive/pages/accuracyByLevel.ts` — orgHeader, xr-page-num
+
+**File:** `src/data/reporting/executive/pages/accuracyByPort.ts` — orgHeader, xr-page-num
+
+**File:** `src/data/reporting/executive/pages/levelAgreement.ts` — orgHeader, xr-page-num
+
+**File:** `src/data/reporting/executive/pages/empOverview.ts` — orgHeader, xr-page-num
+
+**File:** `src/data/reporting/executive/pages/empByDecision.ts` — orgHeader, xr-page-num
+
+**File:** `src/data/reporting/executive/pages/empByPort.ts` — orgHeader, xr-page-num
+
+**File:** `src/data/reporting/executive/pages/empImageQuality.ts` — orgHeader, xr-page-num
+
+**File:** `src/data/reporting/executive/pages/empStability.ts` — orgHeader, xr-page-num
+
+**File:** `src/data/reporting/executive/pages/empPriority.ts` — orgHeader, xr-page-num
+
+**File:** `src/data/reporting/executive/pages/appendix.ts` — orgHeader, xr-page-num
+
+**File:** `src/data/reporting/executiveReport.test.ts` — update test assertions for new A4 portrait format
+
+---
+
 ## v20.9 — 2026-06-29 — feat(executive-report): add employee analytics pages Phase 4 (Task 14)
 
 **File:** `src/data/reporting/executive/pages/empOverview.ts`
