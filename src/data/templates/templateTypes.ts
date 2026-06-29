@@ -3,6 +3,7 @@ export type TemplateFieldType =
   | "textarea"
   | "number"
   | "dropdown"
+  | "combobox"
   | "checkbox"
   | "date"
   | "empty";

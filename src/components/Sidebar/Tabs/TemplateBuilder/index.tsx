@@ -30,6 +30,7 @@ const FIELD_TYPE_LABELS: Record<TemplateFieldType, string> = {
   textarea: "نص طويل",
   number: "رقم",
   dropdown: "قائمة منسدلة",
+  combobox: "نص مع اقتراحات",
   checkbox: "علامة صح",
   date: "تاريخ",
   empty: "خلية فارغة / ملاحظة"
@@ -56,11 +57,12 @@ function buildDefaultInspectionTemplate(username: string): TemplateSchema {
   const fImageQuality   = createFieldId();
   const fQualityReason  = createFieldId();
   const fQualityOther   = createFieldId();
-  const fResultValidity = createFieldId();
-  const fSuspicionLevel = createFieldId();
-  const fSuspectedTypes = createFieldId();
-  const fSmuggleMethod  = createFieldId();
-  const fNotes          = createFieldId();
+  const fResultValidity    = createFieldId();
+  const fSuspicionLevel    = createFieldId();
+  const fSuspicionLocation = createFieldId();
+  const fSuspectedTypes    = createFieldId();
+  const fSmuggleMethod     = createFieldId();
+  const fNotes             = createFieldId();
 
   return {
     templateId: createTemplateId(),
@@ -131,24 +133,32 @@ function buildDefaultInspectionTemplate(username: string): TemplateSchema {
         order: 2,
       },
       {
+        fieldId: fSuspicionLocation, phaseId: phase2Id, label: "موقع الاشتباه",
+        type: "combobox", required: false,
+        options: ["الكبينة", "الحمولة", "العجلات", "الإطارات", "الباب الخلفي", "السقف", "الأرضية", "الخزان", "الجانب الأيمن", "الجانب الأيسر"],
+        placeholder: "اكتب أو اختر موقع الاشتباه...",
+        condition: { sourceFieldId: fResultValidity, operator: "equals", value: "اشتباه" },
+        order: 3,
+      },
+      {
         fieldId: fSuspectedTypes, phaseId: phase2Id, label: "الاصناف المشبوهة",
         type: "textarea", required: false,
         options: [], placeholder: "اذكر الاصناف المشبوهة...",
         condition: { sourceFieldId: fResultValidity, operator: "equals", value: "اشتباه" },
-        order: 3,
+        order: 4,
       },
       {
         fieldId: fSmuggleMethod, phaseId: phase2Id, label: "الية التهريب المحتملة",
         type: "textarea", required: false,
         options: [], placeholder: "اذكر الية التهريب المحتملة...",
         condition: { sourceFieldId: fResultValidity, operator: "equals", value: "اشتباه" },
-        order: 4,
+        order: 5,
       },
       {
         fieldId: fNotes, phaseId: phase2Id, label: "الملاحظات العامة",
         type: "textarea", required: false,
         options: [], placeholder: "أي ملاحظات إضافية...",
-        condition: { sourceFieldId: fHasImage, operator: "equals", value: "نعم" }, order: 5,
+        condition: { sourceFieldId: fHasImage, operator: "equals", value: "نعم" }, order: 6,
       },
     ],
   };
@@ -727,7 +737,7 @@ function FieldEditor({
               onChange({
                 ...field,
                 type: event.target.value as TemplateFieldType,
-                options: event.target.value === "dropdown" ? field.options : []
+                options: (event.target.value === "dropdown" || event.target.value === "combobox") ? field.options : []
               })
             }
           >
@@ -762,9 +772,9 @@ function FieldEditor({
         </label>
       ) : null}
 
-      {field.type === "dropdown" ? (
+      {(field.type === "dropdown" || field.type === "combobox") ? (
         <div className="tb-options-section">
-          <p className="tb-options-heading">خيارات القائمة:</p>
+          <p className="tb-options-heading">{field.type === "combobox" ? "اقتراحات الإكمال التلقائي:" : "خيارات القائمة:"}</p>
           <div className="tb-options-list">
             {field.options.map((option, optionIndex) => (
               <div key={`${option}-${optionIndex}`} className="tb-option-item">

@@ -30,6 +30,8 @@ function row(
     reportNumber: null,
     targetedByRiskEngine: null,
     riskMessage: null,
+    levelOneEmployee: null,
+    levelTwoEmployee: null,
     certScanStatus: "NonCertscan",
     certScanSnippet: null,
     originalCertScanSnippet: null,

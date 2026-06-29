@@ -4,6 +4,1960 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v25.4 — 2026-06-29 — Task 5: Integration review
+
+**File:** `src/data/reporting/executive/pages/distributionOverview.ts`
+
+**Before:**
+```html
+<!-- both no-data path (line 19) and data path (line 69) -->
+<div class="page-no">11</div>
+```
+
+**After:**
+```html
+<div class="page-no">24</div>
+```
+
+**File:** `src/data/reporting/executive/pages/appendix.ts`
+
+**Before:**
+```html
+<div class="page-no">20</div>
+```
+
+**After:**
+```html
+<div class="page-no">25</div>
+```
+
+**File:** `src/data/reporting/executive/pages/sampleByLevel.ts`
+
+**Before:**
+```html
+<table>
+  <thead>…</thead>
+  <tbody>…</tbody>
+</table>
+```
+
+**After:**
+```html
+<div class="table-wrap"><table>
+  <thead>…</thead>
+  <tbody>…</tbody>
+</table></div>
+```
+
+**File:** `src/data/reporting/executive/pages/toc.ts`
+
+**Before:**
+```html
+<tr><td>أداء الموظفين</td><td>15–20</td></tr>
+<tr><td>تحليل الأخطاء والتوافق</td><td>21–22</td></tr>
+<tr><td>الأولوية والإجراءات</td><td>23</td></tr>
+```
+
+**After:**
+```html
+<tr><td>أداء الموظفين (متغير حسب المنافذ)</td><td>15+</td></tr>
+<tr><td>تحليل الأخطاء والتوافق</td><td>—</td></tr>
+<tr><td>الأولوية والإجراءات</td><td>—</td></tr>
+```
+
+**File:** `src/data/reporting/executive/pages/analyticsMap.ts`
+
+**Before:**
+```html
+<p>17 — أداء الموظفين حسب المنفذ</p>
+<p>18 — مقارنة الموظفين بين المنافذ</p>
+```
+
+**After:**
+```html
+<p>17+ — أداء الموظفين حسب المنفذ (صفحة لكل منفذ)</p>
+<p>— مقارنة الموظفين بين المنافذ</p>
+```
+
+---
+
+## v25.3 — 2026-06-29 — Task 4: Per-port employee analysis section
+
+**File:** `src/data/reporting/executive/portEmployeeData.ts`
+
+**Before:**
+```ts
+// (new file)
+```
+
+**After:**
+```ts
+// Pure data-derivation module: buildPortEmployeeAnalyses(rows)
+// Produces one PortEmployeeAnalysis per non-empty port (land first, then sea).
+// Keyed on levelOneEmployeeId / levelTwoEmployeeId (original assessors, NOT QA reviewers).
+// accuracy = correct / verified * 100, null when verified === 0.
+```
+
+---
+
+**File:** `src/data/reporting/executive/pages/portEmployeeAnalysis.ts`
+
+**Before:**
+```ts
+// (new file)
+```
+
+**After:**
+```ts
+// buildPortEmployeeAnalysisPages(ctx) → Array<(ctx) => string>
+// Returns one page-builder closure per non-empty port.
+// Each page: grid-4 KPI cards + two level tables (stage1/stage2) in .port-split.page-fill.
+// Falls back to a single graceful empty-state page when no port employee data exists.
+```
+
+---
+
+**File:** `src/data/reporting/executive/index.ts`
+
+**Before:**
+```ts
+import { buildEmpByPort, buildEmpCrossPort } from "./pages/empByPort";
+// …
+  const pages = [
+    // …
+    buildEmpByDecision,
+    buildEmpByPort,
+    buildEmpCrossPort,
+    // …
+  ];
+```
+
+**After:**
+```ts
+import { buildEmpCrossPort } from "./pages/empByPort";
+import { buildPortEmployeeAnalysisPages } from "./pages/portEmployeeAnalysis";
+// …
+  const portEmpPages = buildPortEmployeeAnalysisPages(ctx); // one per port
+  const pages = [
+    // …
+    buildEmpByDecision,
+    ...portEmpPages,          // ← dynamic per-port pages (replaces buildEmpByPort)
+    buildEmpCrossPort,
+    // …
+  ];
+```
+
+---
+
+## v25.2 — 2026-06-29 — Task 3: Fix empty space on data pages
+
+**File:** `src/data/reporting/executive/pages/populationByRisk.ts`
+
+**Before:**
+```ts
+    <div class="port-split">
+      <div class="card land">
+        <div class="panel-title">المنافذ البرية</div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>المنفذ</th><th>الإجمالي</th><th>سليمة</th><th>اشتباه</th></tr></thead>
+          <tbody>
+            ${landRows.map(portRow).join("")}
+            ${landMore}
+            <tr class="total-row"><td>الإجمالي</td><td>${fmtNum(landTotal)}</td><td>${fmtNum(landCleanTotal)}</td><td>${fmtNum(landSuspTotal)}</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+      <div class="card sea">
+        <div class="panel-title">المنافذ البحرية</div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>المنفذ</th><th>الإجمالي</th><th>سليمة</th><th>اشتباه</th></tr></thead>
+          <tbody>
+            ${seaRows.map(portRow).join("")}
+            ${seaMore}
+            ${seaPorts.length > 0
+              ? `<tr class="total-row"><td>الإجمالي</td><td>${fmtNum(seaTotal)}</td><td>${fmtNum(seaCleanTotal)}</td><td>${fmtNum(seaSuspTotal)}</td></tr>`
+              : `<tr class="total-row"><td colspan="4"><span class="muted">لا توجد منافذ بحرية</span></td></tr>`}
+          </tbody>
+        </table></div>
+      </div>
+    </div>
+    <div class="page-no">05</div>
+  </div>
+</section>`;
+```
+
+**After:**
+```ts
+    <div class="page-fill">
+      <div class="port-split">
+        <!-- land/sea tables with empty guards -->
+      </div>
+      <div class="context-band">
+        <!-- methodology card + summary stat-stack -->
+      </div>
+    </div>
+    <div class="page-no">05</div>
+  </div>
+</section>`;
+```
+
+**File:** `src/data/reporting/executive/pages/populationByLevel.ts`
+
+**Before:**
+```ts
+    <div class="grid grid-2" style="margin-top:18px">
+      ${stageTableBlocks}
+    </div>
+    <div class="page-no">06</div>
+```
+
+**After:**
+```ts
+    <div class="page-fill">
+      <div class="grid grid-2" style="margin-top:18px">
+        ${stageTableBlocks}
+      </div>
+      ${stageProfiles empty? notice-centered : context-band methodology}
+    </div>
+    <div class="page-no">06</div>
+```
+
+**File:** `src/data/reporting/executive/pages/sampleByLevel.ts`
+
+**Before:**
+```ts
+    <div class="grid grid-2">
+      ${stageCards}
+    </div>
+    <div class="page-no">07</div>
+```
+
+**After:**
+```ts
+    <div class="page-fill">
+      <div class="grid grid-2">
+        ${stageCards}
+      </div>
+      <div class="context-band">
+        <!-- methodology + coverage stat-stack -->
+      </div>
+    </div>
+    <div class="page-no">07</div>
+```
+
+**File:** `src/data/reporting/executive/pages/accuracyByPort.ts`
+
+**Before:**
+```ts
+    <div class="table-wrap"><table>...</table></div>
+    <div class="page-no">09</div>
+```
+
+**After:**
+```ts
+    <div class="page-fill">
+      <!-- when no data: pending notice-centered; otherwise table + context-band -->
+    </div>
+    <div class="page-no">09</div>
+```
+
+**File:** `src/data/reporting/executive/pages/accuracyByLevel.ts`
+
+**Before:**
+```ts
+    <div class="table-wrap" style="margin-top:18px">...</div>
+    <div class="info" style="margin-top:18px">...</div>
+    <div class="page-no">10</div>
+```
+
+**After:**
+```ts
+    <div class="page-fill">
+      <!-- when no data: pending full-page state; otherwise table + info wrapped in page-fill -->
+    </div>
+    <div class="page-no">10</div>
+```
+
+---
+
+## v25.0 — 2026-06-29 — Task 1: CSS empty-space fixes (theme.ts)
+
+**File:** `src/data/reporting/executive/theme.ts`
+
+**A.1 — `.page-inner` flex column + `.page-fill` / `.page-no` utilities**
+
+**Before:**
+```css
+.page-inner{
+  position:relative;z-index:2;height:100%;
+  width:calc(100% - 44px);margin-right:44px;
+  padding:30px 28px 36px 28px;overflow:hidden;
+}
+```
+
+**After:**
+```css
+.page-inner{
+  position:relative;z-index:2;height:100%;
+  width:calc(100% - 44px);margin-right:44px;
+  padding:30px 28px 36px 28px;overflow:hidden;
+  display:flex;flex-direction:column;
+}
+.page-fill{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;}
+.page-fill > .table-wrap{flex:1 1 auto;min-height:0;}
+.page-fill .grid{flex:1 1 auto;align-content:start;}
+.page-inner > .page-no{margin-top:auto;}
+```
+
+**A.2 — `.big-divider` three-band redesign + ghost numeral (`--divider-num`)**
+
+**Before:**
+```css
+.big-divider{
+  display:flex;flex-direction:column;
+  justify-content:center;align-items:flex-end;
+  padding:60px 48px;position:relative;overflow:hidden;height:100%;
+}
+/* (single ::before blob, flat layout, no divider-top/center/toc) */
+```
+
+**After:**
+```css
+.big-divider{
+  display:flex;flex-direction:column;
+  justify-content:space-between;align-items:stretch;
+  padding:54px 48px 64px;position:relative;overflow:hidden;height:100%;
+}
+/* dual ::before gradient blobs, ::after ghost numeral via --divider-num,
+   .divider-top / .divider-center / .divider-toc three-band structure */
+```
+
+**A.3 — `.context-band` sparse-data filler (new additive block)**
+
+**Before:** *(rule did not exist)*
+
+**After:**
+```css
+.context-band{display:grid;grid-template-columns:1.4fr 1fr;gap:14px;margin-top:16px;flex:1 1 auto;align-items:stretch;}
+/* .method-list, .stat-stack, .stat-pill sub-rules also added */
+@media(max-width:980px){.context-band{grid-template-columns:1fr;}}
+```
+
+**A.4 — `.cover-bg-art::after` bottom-right secondary blob**
+
+**Before:**
+```css
+.cover-bg-art{
+  position:absolute;left:-5%;top:15%;width:55%;height:70%;
+  background:radial-gradient(ellipse at center,rgba(107,169,248,.06) 0%,transparent 60%);
+  border-radius:50%;pointer-events:none;z-index:1;
+}
+```
+
+**After:**
+```css
+/* same .cover-bg-art, plus: */
+.cover-bg-art::after{
+  content:"";position:absolute;right:-60%;bottom:-50%;width:120%;height:120%;
+  background:radial-gradient(ellipse at center,rgba(244,180,0,.05) 0%,transparent 62%);
+  border-radius:50%;
+}
+```
+
+---
+
+## v25.1 — 2026-06-29 — Task 2: Part divider redesign (3-band layout)
+
+**File:** `src/data/reporting/executive/pages/partDivider.ts`
+
+**Before:**
+```ts
+export function buildPartDivider(
+  partLabel: string, title: string, subtitle: string, icon: string,
+  pageId: string, pageNum: string, railTabs: string[], dataTitle: string,
+): (_ctx: ExecutiveRenderContext) => string {
+  return (_ctx) => `<section class="page" id="${pageId}" data-title="${esc(dataTitle)}">
+  <div class="right-rail">
+    <div class="rail-main">التقرير التنفيذي <em>لضمان جودة الأشعة</em></div>
+    ${railTabs.map((t, i) => `<div class="rail-tab${i === 0 ? ' active' : ''}">${esc(t)}</div>`).join('')}
+  </div>
+  <div class="page-inner big-divider">
+    <div class="icon">${icon}</div>
+    <div class="kicker">${esc(partLabel)}</div>
+    <h1>${esc(title)}</h1>
+    <div class="rule"></div>
+    <p class="lead">${esc(subtitle)}</p>
+    <div class="page-no">${esc(pageNum)}</div>
+  </div>
+</section>`;
+}
+
+export const buildPart1Divider = buildPartDivider(
+  'الجزء الأول', 'مجتمع الحالات',
+  'استعراض حجم المجتمع محل الدراسة وتوزيعه حسب المنفذ والمستوى ونمط الحركة تمهيدًا لتحليل النتائج والفجوات.',
+  '◫', 'page-p1', '04', ['الجزء الأول', 'الجزء الثاني', 'الجزء الثالث'], 'غلاف الجزء الأول',
+);
+
+export const buildPart2Divider = buildPartDivider(
+  'الجزء الثاني', 'نتائج الفحص',
+  'تحليل نتائج المراجعة ونسب الدقة والفجوات على مستوى المنفذ والمستوى.',
+  '⌕', 'page-p2', '08', ['الجزء الأول', 'الجزء الثاني', 'الجزء الثالث'], 'غلاف الجزء الثاني',
+);
+
+export const buildPart3Divider = buildPartDivider(
+  'الجزء الثالث', 'التحاليل المتقدمة',
+  'تحليلات متقدمة للكشف عن الأنماط الخفية في الأداء، وتحديد الفجوات التشغيلية وفرص التحسين.',
+  '◈', 'page-p3', '12', ['الجزء الأول', 'الجزء الثاني', 'الجزء الثالث'], 'غلاف التحاليل المتقدمة',
+);
+
+// Alias stubs kept for index.ts compatibility
+export const buildPart4Divider = buildPart3Divider;
+export const buildPart5Divider = buildPart3Divider;
+export const buildPart6Divider = buildPart3Divider;
+```
+
+**After:**
+```ts
+type TocChip = { n: string; t: string };
+
+export function buildPartDivider(
+  partLabel: string, title: string, subtitle: string, icon: string,
+  pageId: string, pageNum: string, railTabs: string[], dataTitle: string,
+  dividerNum: string, toc: TocChip[],
+): (_ctx: ExecutiveRenderContext) => string {
+  const tocHtml = toc.map(c =>
+    `<div class="toc-chip"><span class="n">${esc(c.n)}</span><span class="t">${esc(c.t)}</span></div>`
+  ).join("");
+  return (_ctx) => `<section class="page" id="${pageId}" data-title="${esc(dataTitle)}">
+  <div class="right-rail">
+    <div class="rail-main">التقرير التنفيذي <em>لضمان جودة الأشعة</em></div>
+    ${railTabs.map((t, i) => `<div class="rail-tab${i === 0 ? ' active' : ''}">${esc(t)}</div>`).join('')}
+  </div>
+  <div class="page-inner big-divider" style="--divider-num:'${esc(dividerNum)}'">
+    <div class="divider-top">
+      <span class="shield" aria-hidden="true"></span>
+      <span>هيئة الزكاة والضريبة والجمارك — إدارة ضمان جودة الأشعة اللاحقة</span>
+    </div>
+    <div class="divider-center">
+      <div class="icon">${icon}</div>
+      <div class="kicker">${esc(partLabel)}</div>
+      <h1>${esc(title)}</h1>
+      <div class="rule"></div>
+      <p class="lead">${esc(subtitle)}</p>
+    </div>
+    <div class="divider-toc">${tocHtml}</div>
+    <div class="page-no">${esc(pageNum)}</div>
+  </div>
+</section>`;
+}
+
+export const buildPart1Divider = buildPartDivider(
+  'الجزء الأول', 'مجتمع الحالات',
+  'استعراض حجم المجتمع محل الدراسة وتوزيعه حسب المنفذ والمستوى ونمط الحركة تمهيدًا لتحليل النتائج والفجوات.',
+  '◫', 'page-p1', '04', ['الجزء الأول', 'الجزء الثاني', 'الجزء الثالث'], 'غلاف الجزء الأول',
+  '1', [
+    { n: '05', t: 'مجتمع حالات المخاطر' },
+    { n: '06', t: 'المجتمع حسب المستويات' },
+    { n: '07', t: 'العينة حسب المستويات' },
+  ],
+);
+
+export const buildPart2Divider = buildPartDivider(
+  'الجزء الثاني', 'نتائج الفحص',
+  'تحليل نتائج المراجعة ونسب الدقة والفجوات على مستوى المنفذ والمستوى.',
+  '⌕', 'page-p2', '08', ['الجزء الأول', 'الجزء الثاني', 'الجزء الثالث'], 'غلاف الجزء الثاني',
+  '2', [
+    { n: '09', t: 'نتائج الدقة حسب المنفذ' },
+    { n: '10', t: 'نتائج الدقة حسب المستويات' },
+    { n: '11', t: 'نتائج جودة الصور' },
+  ],
+);
+
+export const buildPart3Divider = buildPartDivider(
+  'الجزء الثالث', 'التحاليل المتقدمة',
+  'تحليلات متقدمة للكشف عن الأنماط الخفية في الأداء، وتحديد الفجوات التشغيلية وفرص التحسين.',
+  '◈', 'page-p3', '13', ['الجزء الأول', 'الجزء الثاني', 'الجزء الثالث'], 'غلاف التحاليل المتقدمة',
+  '3', [
+    { n: '15', t: 'النظرة العامة لأداء الموظفين' },
+    { n: '17', t: 'أداء الموظفين حسب المنفذ' },
+    { n: '23', t: 'الأولوية والإجراءات' },
+  ],
+);
+
+// Alias stubs kept for index.ts compatibility
+export const buildPart4Divider = buildPart3Divider;
+export const buildPart5Divider = buildPart3Divider;
+export const buildPart6Divider = buildPart3Divider;
+```
+
+---
+
+## v24.2 — 2026-06-29 — Replace الدورة with الفترة throughout report
+
+**Files:** `src/data/reporting/executive/pages/sampleByLevel.ts`, `src/data/reporting/executive/pages/empPriority.ts`, `src/data/reporting/executive/pages/empStability.ts`, `src/data/reporting/executive/pages/empByDecision.ts`, `src/data/reporting/executive/pages/errorTypes.ts`, `src/data/reporting/executive/pages/empByPort.ts`, `src/data/reporting/executive/pages/suspectCategories.ts`, `src/data/reporting/executive/pages/empImageQuality.ts`
+
+**Before:**
+```ts
+// Various occurrences of الدورة in no-data notices and info strings, e.g.:
+'تم سحب كامل المجتمع في هذه الدورة، لذلك بلغت نسبة التغطية 100%.'
+'لا توجد بيانات كافية لهذه الدورة'
+'البيانات غير متاحة لهذه الدورة.'
+'لا يوجد موظفون يتطلبون تدخلاً عاجلاً في هذه الدورة.'
+'لا توجد بيانات أصناف أو آليات تهريب لهذه الدورة'
+```
+
+**After:**
+```ts
+// All instances replaced with الفترة:
+'تم سحب كامل المجتمع في هذه الفترة، لذلك بلغت نسبة التغطية 100%.'
+'لا توجد بيانات كافية لهذه الفترة'
+'البيانات غير متاحة لهذه الفترة.'
+'لا يوجد موظفون يتطلبون تدخلاً عاجلاً في هذه الفترة.'
+'لا توجد بيانات أصناف أو آليات تهريب لهذه الفترة'
+```
+
+---
+
+## v24.1 — 2026-06-29 — Review fix: broken bar CSS in levelAgreement page
+
+**File:** `src/data/reporting/executive/pages/levelAgreement.ts`
+
+**Before:**
+```ts
+<p style="margin-top:8px">المستوى الثاني</p><div class="bar"><i style="width:${Math.round(l2Pct)};background:var(--blue)%"></i></div>
+```
+
+**After:**
+```ts
+<p style="margin-top:8px">المستوى الثاني</p><div class="bar"><i style="width:${Math.round(l2Pct)}%;background:var(--blue)"></i></div>
+```
+
+The `%` unit was transposed to the end of the `background` value instead of the `width` value, causing the Level 2 accuracy bar to render with no width and an invalid CSS background.
+
+---
+
+## v24.0 — 2026-06-29 — UI design taste enhancement: polish CSS, cover art, anti-AI design
+
+**File:** `src/data/reporting/executive/theme.ts`
+
+**Before:** Generic card styling, uniform `.metric` sizes without text-shadow, plain `.section-title` with only font-size, generic chip borders, basic `.big-divider` centered grid, standard sidebar with padding-only layout, plain `.page-no` with gradient lines
+
+**After:** Cards gain a 3px right-accent border (gold default, green for land, blue for sea, stage colors per level). Metrics get `letter-spacing:-0.02em` + colored `text-shadow` glow. Section titles gain `::after` underline accent (40px gold bar). Chips redesigned as inline-flex badges with semantic color fills and tinted borders. Big-divider pages use `flex-direction:column; align-items:flex-end` with radial glow `::before`, right-aligned `h1` with `letter-spacing:-0.02em`, explicit `.rule` (48px gold bar), and `.icon` with `align-self:flex-end`. Sidebar restructured with `display:flex;flex-direction:column` and flex-shrink guards. Page number refined to `font-size:0.72rem;font-weight:600;letter-spacing:0.12em` with 20px gold dashes. `.cover-bg-art` class added for decorative background ellipse. `.notice-centered` gets `::before` content `◌` symbol. Table rows: even-row tint + hover gold tint + total-row top border.
+
+**File:** `src/data/reporting/executive/pages/cover.ts`
+
+**Before:** Square diamond-pattern SVG ZATCA logo (rect + polygon), `دورة التقرير` label, badge said `تقرير داخلي` (already correct), no decorative background element
+
+**After:** Shield-shaped ZATCA SVG logo with pentagon path, inner decoration ring, three horizontal gold stripes, and `زكاة` text at top of shield. `فترة التقرير` label confirmed. Added `<div class="cover-bg-art" aria-hidden="true">` decorative element before page-inner. `تقرير داخلي` badge confirmed correct.
+
+**File:** `src/data/reporting/executive/pages/glossary.ts`
+
+**Before:** Level cards using `class="card level-card stage1"` etc. — the colored bottom border was already applied via `.level-card::after` + `.stage*` CSS, but layout was flat/identical across cards
+
+**After:** Cards retain `stage1`–`stage4` classes. The enhanced CSS now suppresses `card::before` on `level-card` (via `level-card::before{display:none}`) so the 3px right accent doesn't conflict with the bottom stage border. The bottom accent strip is reduced from 7px to 4px for a more refined look.
+
+**File:** `src/data/reporting/executive/pages/partDivider.ts`
+
+**Before:** `<div class="page-inner big-divider"><div>…icon/kicker/h1/rule/lead…</div><div class="page-no">…</div></div>` — nested div wrapper caused centering via `place-items:center` grid
+
+**After:** Flat `big-divider` layout — icon, kicker, h1, rule, and lead are direct children of `.page-inner.big-divider`, page-no is also a direct child. The CSS flex column (`align-items:flex-end`) now positions all elements right-aligned matching the RTL document flow, with the radial glow `::before` as decorative background.
+
+---
+
+## v22.1 — 2026-06-29 — Wire L1/L2 employee IDs through population pipeline to ExecutiveReportRow
+
+**File:** `src/data/population/populationTypes.ts`
+
+**Change:** Add levelOneEmployee, levelTwoEmployee to PreparedPopulationRow
+
+**Before:**
+```ts
+  biEnrichmentStatus: BiEnrichmentStatus;
+```
+
+**After:**
+```ts
+  levelOneEmployee: string | null;
+  levelTwoEmployee: string | null;
+
+  biEnrichmentStatus: BiEnrichmentStatus;
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/Population/processing/populationProcessor.ts`
+
+**Change:** Initialize and populate levelOneEmployee/levelTwoEmployee from BI match
+
+**Before:**
+```ts
+// PreparedDraftRow type — no levelOneEmployee/levelTwoEmployee fields
+// toPreparedDraftRow — no initialization
+// enrichedRow — no BI population
+// preparedRows.push — no mapping
+```
+
+**After:**
+```ts
+// PreparedDraftRow: added levelOneEmployee/levelTwoEmployee fields
+// toPreparedDraftRow: levelOneEmployee: null, levelTwoEmployee: null
+// enrichedRow: levelOneEmployee: biMatch?.row?.levelOneEmployee ?? draftRow.levelOneEmployee ?? null
+// preparedRows.push: levelOneEmployee: enrichment.row.levelOneEmployee
+```
+
+---
+
+**File:** `src/data/reporting/executiveReportTypes.ts`
+
+**Change:** Add levelOneEmployeeId, levelTwoEmployeeId to ExecutiveReportRow
+
+**Before:**
+```ts
+  stage: string | null;
+  levelOneResult: "سليمة" | "اشتباه";
+```
+
+**After:**
+```ts
+  stage: string | null;
+  levelOneEmployeeId: string | null;
+  levelTwoEmployeeId: string | null;
+  levelOneResult: "سليمة" | "اشتباه";
+```
+
+---
+
+**File:** `src/data/reporting/executiveReportData.ts`
+
+**Change:** Map levelOneEmployee/levelTwoEmployee into buildExecutiveReportRows()
+
+**Before:**
+```ts
+      stage: pop.stage,
+      levelOneResult,
+```
+
+**After:**
+```ts
+      stage: pop.stage,
+      levelOneEmployeeId: pop.levelOneEmployee ?? null,
+      levelTwoEmployeeId: pop.levelTwoEmployee ?? null,
+      levelOneResult,
+```
+
+---
+
+## v23.0 — 2026-06-29 — Implementer: write all 23 page builders with live data
+
+**File:** `src/data/reporting/executive/pages/*.ts` (all page files), `src/data/reporting/executive/index.ts`
+
+**Before:** old xr-* landscape slide format; many pages were stubs returning notices; index.ts wired 20 pages in wrong order (missing image quality p11, categories p12, analytics map p14, cross-port p18, error types p21)
+
+**After:** HTML mockup portrait pages (23 pages + appendix = 25 total sections) with live ctx/kpis data binding. Key changes:
+- `populationByRisk.ts` — derives land/sea split from `ctx.rows portType`, real clean/suspicious totals, 8-row truncation
+- `populationByLevel.ts` — builds stage×port breakdown from `ctx.rows`, real clean/suspicious counts per stage
+- `accuracyByLevel.ts` — computes per-stage accuracy from `ctx.rows` (StageProfile has no accuracy field)
+- `empImageQuality.ts` — now exports two functions: `buildEmpImageQuality` (page 11, global quality) and `buildEmpImageQualityImpact` (page 20, per-employee quality impact)
+- `suspectCategories.ts` (NEW) — page 12, builds freq maps from `suspectedTypes`/`smuggleMethod` fields, heatmap cross-tab
+- `analyticsMap.ts` (NEW) — page 14, static analytics roadmap
+- `empByDecision.ts` — uses `ctx.kpis` globals for KPI cards, per-employee counts from `ctx.rows`
+- `empByPort.ts` — now exports `buildEmpByPort` (page 17 drill-down) and `buildEmpCrossPort` (page 18 matrix with heatmap cells)
+- `errorTypes.ts` (NEW) — page 21, per-employee verificationCategory breakdown
+- `cover.ts` — ZATCA SVG logo, `فترة التقرير`, `تقرير داخلي` badge
+- `glossary.ts` — CertScan → نظام صور الأشعة المركزية
+- `sampleByLevel.ts` — CertScan label replaced
+- `toc.ts` — page numbers updated to match 23-page order
+- All page numbers corrected (emp pages: 15/16/17/18/19/20/21/22/23)
+- `empPriority.ts` — riskScore thresholds fixed to 30/15/0 per spec
+- `index.ts` — rewired to 25-section assembly in correct mockup order
+
+**Build:** clean (2,080 kB bundle, 695 kB gzip). Tests: 180/180 passed.
+
+---
+
+## v22.0 — 2026-06-29 — Visual designer: adopt HTML mockup CSS + viewer shell
+
+**File:** `src/data/reporting/executive/theme.ts`
+
+**Before:** Portrait A4 CSS with `.xr-*` prefix, missing chart/overflow/utility rules, incomplete print CSS
+
+**After:** Full HTML mockup v4 dark-navy CSS, fixed table overflow (`overflow:hidden;width:100%`), `table-layout:fixed`, `td,th` base overflow rules, `.chart-container`, `.bubble-chart`, `.grid-auto`, `.notice-centered` utilities; updated print CSS with `background:transparent`, `.right-rail{display:none}`, and `.page-inner` full-width print override
+
+**File:** `src/data/reporting/executive/viewer.ts`
+
+**Before:** VIEWER_JS using modern arrow functions, no setTimeout for fitPages
+
+**After:** VIEWER_JS rewritten as IIFE using `function()` / `.slice.call()` for broadest compatibility; `fitPages` called via `setTimeout(fitPages,300)` in addition to load/resize events; sidebar structure preserved with single print button
+
+**File:** `src/data/reporting/executive/assemble.ts`
+
+**Before:** Already correct 2-arg `buildViewerHtml` form — no change needed
+
+**After:** No change (already correct)
+
+**File:** `docs/superpowers/specs/executive-report-page-skeletons.md` (new)
+
+**Before:** Did not exist
+
+**After:** Full page-skeleton reference for all 23 pages with `{{PLACEHOLDER}}` markers and data-source mapping table for the Implementer agent
+
+---
+
+## v22.1 — 2026-06-29 — Rewrite all executive report pages to HTML mockup v4 design classes
+
+All page files migrated from `.xr-*` prefixed CSS classes to new HTML mockup v4 design system
+(`.page`, `.right-rail`, `.rail-main`, `.rail-tab`, `.page-inner`, `.card`, `.metric`, `.chip`,
+`.bar`, `.grid`, `.grid-2`, `.grid-4`, `.grid-5`, `.compact`, `.big-divider`, `.table-wrap`, etc.).
+`index.ts` page order updated to Cover→TOC→Glossary→Part1→PopRisk→PopLevel→Sample→Part2→AccPort→AccLevel→Dist→Part3→EmpOverview→EmpByDecision→EmpByPort→EmpImageQuality→EmpStability→LevelAgreement→EmpPriority→Appendix (20 pages, removing `buildExecIntro` from page list, keeping only Part1/2/3 dividers).
+
+**Files changed (before: `.xr-*` class HTML; after: new mockup v4 CSS class HTML):**
+
+- `src/data/reporting/executive/index.ts` — new page order, removed Part4/5/6 dividers, re-exported buildExecIntro for backward compat
+- `src/data/reporting/executive/pages/cover.ts` — new `.page.cover`, `.right-rail`, `.page-inner`, `.org`, `.title-block`, `.level-strip`, `.badges`
+- `src/data/reporting/executive/pages/toc.ts` — new `.toc-page`, `.toc-header`, `.toc-grid`, `.appendix-card`
+- `src/data/reporting/executive/pages/glossary.ts` — `.grid.grid-4`, `.card.level-card.stage1`–`.stage4`
+- `src/data/reporting/executive/pages/partDivider.ts` — `buildPartDivider()` factory; Part1/2/3 exports; Part4/5/6 alias stubs removed
+- `src/data/reporting/executive/pages/populationByRisk.ts` — heuristic `portName.includes('ميناء')` sea/land split (PortProfile has no portType); `.port-split`, `.card.land/sea`
+- `src/data/reporting/executive/pages/populationByLevel.ts` — `.grid.grid-5`, `.grid.grid-2`, stage table cards
+- `src/data/reporting/executive/pages/sampleByLevel.ts` — `.grid.grid-4`, `.info`, `.grid.grid-2`, stage cards
+- `src/data/reporting/executive/pages/accuracyByPort.ts` — `.compact`, `.grid.grid-4`, `.table-wrap`; removed unused `chipHtml`
+- `src/data/reporting/executive/pages/accuracyByLevel.ts` — fixed: removed `l1Tone/l2Tone` (unused); uses `kpis.levelOneAccuracy/levelTwoAccuracy` (StageProfile has no accuracy fields)
+- `src/data/reporting/executive/pages/distributionOverview.ts` — new mockup classes
+- `src/data/reporting/executive/pages/empOverview.ts` — 9-col employee table with `classifyEmp()` chip color helper
+- `src/data/reporting/executive/pages/empByDecision.ts` — `.quad` matrix
+- `src/data/reporting/executive/pages/empByPort.ts` — stub with `.card.info` notice
+- `src/data/reporting/executive/pages/empImageQuality.ts` — live data from `buildEmployeeProfiles`, aggregated quality metrics
+- `src/data/reporting/executive/pages/empStability.ts` — workload table replacing unreadable bubble chart
+- `src/data/reporting/executive/pages/levelAgreement.ts` — new mockup classes
+- `src/data/reporting/executive/pages/empPriority.ts` — riskScore-based counts, `.quad` matrix
+- `src/data/reporting/executive/pages/appendix.ts` — new mockup classes; removed unused `esc` import
+- `src/data/reporting/executive/pages/execIntro.ts` — new mockup classes (file kept; excluded from page list)
+- `src/data/reporting/executiveReport.test.ts` — updated assertions to match new design tokens (`--navy:#062846`, `--gold:#f4b400`) and new page content strings
+
+---
+
+## v21.0 — 2026-06-29 — Redesign executive report to portrait A4 document format
+
+**Files:** All files in `src/data/reporting/executive/` (theme.ts, viewer.ts, assemble.ts, all pages/)
+
+**Before:** Landscape widescreen slides (13.333in × 7.5in) with right sidebar viewer
+
+**After:** Portrait A4 document pages (8.27in × 11.69in) with fixed toolbar, scrollable document, org header on each page, vtab decorators on part dividers, dark teal table headers (#1a4040), px-unit font sizes
+
+**File:** `src/data/reporting/executive/theme.ts`
+
+**Before:**
+```ts
+// .xr-page{ width:13.333in;height:7.5in; ... }
+// .xr-viewer{display:grid;grid-template-columns:minmax(0,1fr) 280px;}
+// @media print{@page{size:13.333in 7.5in;margin:0;}}
+```
+
+**After:**
+```ts
+// .xr-page{ width:8.27in;min-height:11.69in; }
+// .xr-document{display:flex;flex-direction:column;...}
+// .xr-toolbar{position:fixed;...}
+// @media print{@page{size:A4 portrait;margin:0;}}
+```
+
+---
+
+**File:** `src/data/reporting/executive/viewer.ts`
+
+**Before:**
+```ts
+export function buildViewerHtml(slides: string, sidebarLinks: string, monthLabel: string): string {
+```
+
+**After:**
+```ts
+export function buildViewerHtml(slides: string, monthLabel: string): string {
+```
+
+---
+
+**File:** `src/data/reporting/executive/assemble.ts`
+
+**Before:**
+```ts
+const NAV_SECTIONS = [...];
+// ... builds sidebarLinks string ...
+return buildViewerHtml(slides, sidebarLinks, ctx.monthLabel);
+```
+
+**After:**
+```ts
+// NAV_SECTIONS removed
+return buildViewerHtml(slides, ctx.monthLabel);
+```
+
+---
+
+**File:** `src/data/reporting/executive/pages/cover.ts` — portrait cover redesign (full rewrite of HTML template)
+
+**File:** `src/data/reporting/executive/pages/toc.ts` — portrait layout, orgHeader, xr-page-num
+
+**File:** `src/data/reporting/executive/pages/execIntro.ts` — portrait layout, orgHeader, xr-page-num
+
+**File:** `src/data/reporting/executive/pages/glossary.ts` — 2×2 level card grid, glossary separator, orgHeader
+
+**File:** `src/data/reporting/executive/pages/partDivider.ts` — vtabs redesign (xr-vtabs, xr-vtab, xr-divider-body)
+
+**File:** `src/data/reporting/executive/pages/populationByRisk.ts` — orgHeader, xr-page-num, px font sizes
+
+**File:** `src/data/reporting/executive/pages/populationByLevel.ts` — orgHeader, xr-page-num
+
+**File:** `src/data/reporting/executive/pages/sampleByLevel.ts` — orgHeader, xr-page-num
+
+**File:** `src/data/reporting/executive/pages/distributionOverview.ts` — orgHeader, xr-page-num
+
+**File:** `src/data/reporting/executive/pages/accuracyByLevel.ts` — orgHeader, xr-page-num
+
+**File:** `src/data/reporting/executive/pages/accuracyByPort.ts` — orgHeader, xr-page-num
+
+**File:** `src/data/reporting/executive/pages/levelAgreement.ts` — orgHeader, xr-page-num
+
+**File:** `src/data/reporting/executive/pages/empOverview.ts` — orgHeader, xr-page-num
+
+**File:** `src/data/reporting/executive/pages/empByDecision.ts` — orgHeader, xr-page-num
+
+**File:** `src/data/reporting/executive/pages/empByPort.ts` — orgHeader, xr-page-num
+
+**File:** `src/data/reporting/executive/pages/empImageQuality.ts` — orgHeader, xr-page-num
+
+**File:** `src/data/reporting/executive/pages/empStability.ts` — orgHeader, xr-page-num
+
+**File:** `src/data/reporting/executive/pages/empPriority.ts` — orgHeader, xr-page-num
+
+**File:** `src/data/reporting/executive/pages/appendix.ts` — orgHeader, xr-page-num
+
+**File:** `src/data/reporting/executiveReport.test.ts` — update test assertions for new A4 portrait format
+
+---
+
+## v20.9 — 2026-06-29 — feat(executive-report): add employee analytics pages Phase 4 (Task 14)
+
+**File:** `src/data/reporting/executive/pages/empOverview.ts`
+
+**Before:** (file did not exist)
+
+**After:**
+```ts
+// buildEmpOverview — employee overview page (page 24); builds profiles from ctx.rows,
+// renders table + bar chart of top-5 employees by accuracy.
+```
+
+---
+
+**File:** `src/data/reporting/executive/pages/empPriority.ts`
+
+**Before:** (file did not exist)
+
+**After:**
+```ts
+// buildEmpPriority — priority employees page (page 30); builds profiles + priority list
+// from ctx.rows, renders 3-column card grid sorted by riskScore.
+```
+
+---
+
+**File:** `src/data/reporting/executive/pages/empByDecision.ts`
+
+**Before:** (file did not exist)
+
+**After:**
+```ts
+// buildEmpByDecision — stub page (page 25) with "قريباً — تحليل الدقة حسب نوع القرار" notice.
+```
+
+---
+
+**File:** `src/data/reporting/executive/pages/empByPort.ts`
+
+**Before:** (file did not exist)
+
+**After:**
+```ts
+// buildEmpByPort — stub page (page 26) with "قريباً — مقارنة الموظفين بين المنافذ" notice.
+```
+
+---
+
+**File:** `src/data/reporting/executive/pages/empImageQuality.ts`
+
+**Before:** (file did not exist)
+
+**After:**
+```ts
+// buildEmpImageQuality — stub page (page 27) with "قريباً — أثر جودة الصورة على الدقة" notice.
+```
+
+---
+
+**File:** `src/data/reporting/executive/pages/empStability.ts`
+
+**Before:** (file did not exist)
+
+**After:**
+```ts
+// buildEmpStability — stub page (page 28) with "قريباً — استقرار الأداء وعبء العمل" notice.
+```
+
+---
+
+**File:** `src/data/reporting/executive/index.ts`
+
+**Before:**
+```ts
+const ctx = buildContext(input, kpis, employeeDisplayNames);
+// pages array had Phase 4 commented-out placeholders
+```
+
+**After:**
+```ts
+const ctx = buildContext(input, kpis, employeeDisplayNames, rows);
+// pages array now includes all 6 employee pages in order after buildPart5Divider
+```
+
+---
+
+**File:** `src/data/reporting/executive/pages/execIntro.ts`
+
+**Before:**
+```ts
+kpiCard({ label: "إجمالي المجتمع", ... })
+```
+
+**After:**
+```ts
+kpiCard({ label: "إجمالي الصور", ... })
+// Renamed KPI label to match test expectation and better describe total images
+```
+
+---
+
+**File:** `src/data/reporting/executive/pages/sampleByLevel.ts`
+
+**Before:**
+```ts
+<h2>العينة حسب المستويات والمنافذ</h2>
+```
+
+**After:**
+```ts
+<h2>مستويات الدراسة والعينة حسب المنافذ</h2>
+// Updated heading to include "مستويات الدراسة" per test expectations
+```
+
+---
+
+**File:** `src/data/reporting/executive/pages/accuracyByPort.ts`
+
+**Before:**
+```ts
+kpiCard({ label: "الدقة الإجمالية", ... })
+kpiCard({ label: "قوة اكتشاف الاشتباه", ... })
+<h2>نتائج الدقة حسب المنفذ</h2>
+```
+
+**After:**
+```ts
+kpiCard({ label: "دقة نتائج الأشعة", ... })
+kpiCard({ label: "نسبة دقة الاشتباه", ... })
+<h2>نتائج الفحص والدقة حسب المنفذ</h2>
+// Updated KPI labels and heading to match test expectations
+```
+
+---
+
+**File:** `src/data/reporting/executive/theme.ts`
+
+**Before:**
+```css
+/* ── Page footer ── */
+```
+
+**After:**
+```css
+/* ── Slide footer ── */
+// Renamed CSS comment to remove English "Page " which violated test assertion
+```
+
+---
+
+## v20.8 — 2026-06-29 — feat(executive-report): add employee analytics data module with tests (Task 13)
+
+**File:** `src/data/reporting/executive/executiveEmployeeData.ts`
+
+**Before:** (file did not exist)
+
+**After:**
+```ts
+// buildEmployeeProfiles — groups submitted rows by evaluator, computes per-employee
+// accuracy, detection rates, byPort/byDecision/byImageQuality/byMarking breakdowns,
+// stabilityIndex, riskScore and recommendedAction. Returns profiles sorted by overallAccuracy desc.
+// buildPriorityList — filters to reliable profiles, sorts by riskScore desc.
+// (full 149-line implementation — see file)
+```
+
+**File:** `src/data/reporting/executive/executiveEmployeeData.test.ts`
+
+**Before:** (file did not exist)
+
+**After:**
+```ts
+// 5 Vitest tests covering: empty array for non-submitted rows, overallAccuracy calculation,
+// reliability threshold (below and at), and buildPriorityList riskScore ordering.
+```
+
+---
+
+## v20.7 — 2026-06-29 — feat(executive-report): add accuracy-by-level and level-agreement pages (Phase 3)
+
+**File:** `src/data/reporting/executive/pages/accuracyByLevel.ts`
+
+**Before:** (file did not exist)
+
+**After:**
+```ts
+import type { ExecutiveRenderContext } from "../context";
+import { kpiCard, radarSvg, fmtPct, esc } from "../primitives";
+
+export function buildAccuracyByLevel(ctx: ExecutiveRenderContext): string {
+  const { kpis } = ctx;
+
+  const kpisRow = [
+    kpiCard({ label: "دقة المستوى الأول", value: fmtPct(kpis.levelOneAccuracy), tone: kpis.levelOneAccuracy !== null && kpis.levelOneAccuracy >= ctx.input.config.accuracyTarget ? "good" : "risk" }),
+    kpiCard({ label: "دقة المستوى الثاني", value: fmtPct(kpis.levelTwoAccuracy), tone: kpis.levelTwoAccuracy !== null && kpis.levelTwoAccuracy >= ctx.input.config.accuracyTarget ? "good" : "risk" }),
+    kpiCard({ label: "معدل التصحيح م.ثاني", value: fmtPct(kpis.levelTwoCorrectionRate) }),
+    kpiCard({ label: "معدل التراجع م.ثاني", value: fmtPct(kpis.levelTwoRegressionRate), tone: "warn" }),
+  ].join("");
+
+  const radarPoints = [
+    { label: "دقة م.أول", value: kpis.levelOneAccuracy ?? 0 },
+    { label: "دقة م.ثاني", value: kpis.levelTwoAccuracy ?? 0 },
+    { label: "اكتشاف الاشتباه", value: kpis.suspiciousDetectionRate ?? 0 },
+    { label: "تأكيد السلامة", value: kpis.cleanConfirmationRate ?? 0 },
+    { label: "الدقة الإجمالية", value: kpis.overallAccuracy ?? 0 },
+    { label: "الجودة المتوازنة", value: kpis.balancedQualityScore ?? 0 },
+  ];
+
+  return `<section class="xr-page" id="page-acc-level">
+    <div class="xr-page-inner">
+      <div class="xr-slide-head"><h2>نتائج الدقة حسب المستويات الأربعة</h2><span class="xr-pg">21</span></div>
+      <div class="xr-kpi-grid xr-kpi-grid-4" style="margin-bottom:0.13in">${kpisRow}</div>
+      <div class="xr-cols xr-cols-2">
+        <div class="xr-panel" style="height:3.4in">${radarSvg(radarPoints)}</div>
+        <div>
+          <div class="xr-panel-title">مؤشرات الدقة التفصيلية</div>
+          <table class="xr-table"><tbody>
+            <tr><td>اشتباه مكتشف</td><td>${kpis.correctSuspicious}</td></tr>
+            <tr><td>سليمة مؤكدة</td><td>${kpis.correctClean}</td></tr>
+            <tr><td>اشتباه فائت</td><td style="color:var(--xr-coral)">${kpis.missedSuspicious}</td></tr>
+            <tr><td>اشتباه زائد</td><td style="color:var(--xr-gold)">${kpis.excessSuspicious}</td></tr>
+            <tr><td>صور بتحقق صالح</td><td>${kpis.validStudied}</td></tr>
+          </tbody></table>
+        </div>
+      </div>
+      <div class="xr-footer"><span>التقرير التنفيذي — ${esc(ctx.monthLabel)}</span><span>21</span></div>
+    </div>
+  </section>`;
+}
+```
+
+**File:** `src/data/reporting/executive/pages/levelAgreement.ts`
+
+**Before:** (file did not exist)
+
+**After:**
+```ts
+import type { ExecutiveRenderContext } from "../context";
+import { kpiCard, barRow, fmtPct, esc } from "../primitives";
+
+export function buildLevelAgreement(ctx: ExecutiveRenderContext): string {
+  const { kpis } = ctx;
+
+  const bars = [
+    barRow({ label: "دقة المستوى الأول", value: kpis.levelOneAccuracy, max: 100, tone: "good" }),
+    barRow({ label: "دقة المستوى الثاني", value: kpis.levelTwoAccuracy, max: 100, tone: "blue" }),
+    barRow({ label: "معدل الاختلاف م.أول/ثاني", value: kpis.levelDisagreementRate, max: 100, tone: "risk" }),
+    barRow({ label: "معدل تصحيح م.ثاني", value: kpis.levelTwoCorrectionRate, max: 100 }),
+    barRow({ label: "معدل تراجع م.ثاني", value: kpis.levelTwoRegressionRate, max: 100, tone: "risk" }),
+  ].join("");
+
+  return `<section class="xr-page" id="page-level-agree">
+    <div class="xr-page-inner">
+      <div class="xr-slide-head"><h2>مقارنة المستوى الأول والثاني وتوافق الموظفين</h2><span class="xr-pg">22</span></div>
+      <div class="xr-cols xr-cols-2">
+        <div class="xr-panel">
+          <div class="xr-panel-title">مقارنة المستويين</div>
+          <div class="xr-bars" style="margin-top:0.1in">${bars}</div>
+        </div>
+        <div class="xr-panel">
+          <div class="xr-panel-title">توافق أزواج الموظفين</div>
+          <div class="xr-notice" style="margin-top:0.1in">هذا الجزء يتطلب وجود حالات راجعها موظفان مختلفان — لم تُرصد حالات كهذه في هذا الشهر.</div>
+        </div>
+      </div>
+      <div class="xr-footer"><span>التقرير التنفيذي — ${esc(ctx.monthLabel)}</span><span>22</span></div>
+    </div>
+  </section>`;
+}
+```
+
+**File:** `src/data/reporting/executive/index.ts`
+
+**Before:**
+```ts
+import { buildPopulationByLevel } from "./pages/populationByLevel";
+import { buildSampleByLevel } from "./pages/sampleByLevel";
+import { buildDistributionOverview } from "./pages/distributionOverview";
+import { buildAccuracyByPort } from "./pages/accuracyByPort";
+import { buildAppendix } from "./pages/appendix";
+```
+
+**After:**
+```ts
+import { buildPopulationByLevel } from "./pages/populationByLevel";
+import { buildSampleByLevel } from "./pages/sampleByLevel";
+import { buildDistributionOverview } from "./pages/distributionOverview";
+import { buildAccuracyByPort } from "./pages/accuracyByPort";
+import { buildAccuracyByLevel } from "./pages/accuracyByLevel";
+import { buildLevelAgreement } from "./pages/levelAgreement";
+import { buildAppendix } from "./pages/appendix";
+```
+
+**And in the pages array:**
+
+**Before:**
+```ts
+    buildDistributionOverview,
+    buildPart4Divider,
+    buildAccuracyByPort,
+    // accuracyByLevel — Phase 3
+    // levelAgreement — Phase 3
+    buildPart5Divider,
+```
+
+**After:**
+```ts
+    buildDistributionOverview,
+    buildPart4Divider,
+    buildAccuracyByPort,
+    buildAccuracyByLevel,
+    buildLevelAgreement,
+    buildPart5Divider,
+```
+
+---
+
+## v20.6 — 2026-06-29 — feat(executive-report): add accuracy by port page (Phase 3)
+
+**File:** `src/data/reporting/executive/pages/accuracyByPort.ts`
+
+**Before:** (file did not exist)
+
+**After:**
+```ts
+import type { ExecutiveRenderContext } from "../context";
+import { dataTable, barRow, badgeHtml, kpiCard, fmtNum, fmtPct, esc } from "../primitives";
+
+export function buildAccuracyByPort(ctx: ExecutiveRenderContext): string {
+  const { kpis } = ctx;
+  const reliable = kpis.portProfiles.filter(p => p.accuracy !== null);
+
+  const kpisRow = [
+    kpiCard({ label: "الدقة الإجمالية", value: fmtPct(kpis.overallAccuracy), tone: kpis.overallAccuracy !== null && kpis.overallAccuracy >= ctx.input.config.accuracyTarget ? "good" : "risk" }),
+    kpiCard({ label: "قوة اكتشاف الاشتباه", value: fmtPct(kpis.suspiciousDetectionRate), tone: "good" }),
+    kpiCard({ label: "اشتباه فائت", value: fmtPct(kpis.missedSuspicionRate), tone: kpis.missedSuspicionRate !== null && kpis.missedSuspicionRate <= ctx.input.config.maximumMissedSuspicionRate ? "good" : "risk" }),
+    kpiCard({ label: "المنافذ ذات بيانات موثوقة", value: String(reliable.length) + " / " + String(kpis.portProfiles.length) }),
+  ].join("");
+
+  const tableRows = kpis.portProfiles.map(p => [
+    esc(p.portName),
+    fmtNum(p.studied),
+    p.accuracy !== null ? fmtPct(p.accuracy) : null,
+    p.suspiciousDetectionRate !== null ? fmtPct(p.suspiciousDetectionRate) : null,
+    p.missedSuspicionRate !== null ? fmtPct(p.missedSuspicionRate) : null,
+    badgeHtml(p.status),
+  ]);
+
+  const bars = reliable.map(p =>
+    barRow({ label: p.portName, value: p.accuracy, max: 100, tone: p.accuracy !== null && p.accuracy >= ctx.input.config.accuracyTarget ? "good" : "risk" })
+  ).join("");
+
+  return `<section class="xr-page" id="page-acc-port">
+    <div class="xr-page-inner">
+      <div class="xr-slide-head"><h2>نتائج الدقة حسب المنفذ</h2><span class="xr-pg">20</span></div>
+      <div class="xr-kpi-grid xr-kpi-grid-4" style="margin-bottom:0.13in">${kpisRow}</div>
+      <div class="xr-cols xr-cols-6-4">
+        <div>${dataTable({ headers: ["المنفذ","مدروسة","دقة%","اكتشاف اشتباه%","اشتباه فائت%","التصنيف"], rows: tableRows })}</div>
+        <div class="xr-panel">
+          <div class="xr-panel-title">الدقة حسب المنفذ</div>
+          <div class="xr-bars">${bars || '<div class="xr-notice">بيانات غير كافية</div>'}</div>
+        </div>
+      </div>
+      <div class="xr-footer"><span>التقرير التنفيذي — ${esc(ctx.monthLabel)}</span><span>20</span></div>
+    </div>
+  </section>`;
+}
+```
+
+**File:** `src/data/reporting/executive/index.ts`
+
+**Before:**
+```ts
+import { buildDistributionOverview } from "./pages/distributionOverview";
+import { buildAppendix } from "./pages/appendix";
+```
+
+**After:**
+```ts
+import { buildDistributionOverview } from "./pages/distributionOverview";
+import { buildAccuracyByPort } from "./pages/accuracyByPort";
+import { buildAppendix } from "./pages/appendix";
+```
+
+**And in the pages array:**
+
+**Before:**
+```ts
+    buildDistributionOverview,
+    buildPart4Divider,
+    // accuracyByPort — Phase 3
+    // accuracyByLevel — Phase 3
+```
+
+**After:**
+```ts
+    buildDistributionOverview,
+    buildPart4Divider,
+    buildAccuracyByPort,
+    // accuracyByLevel — Phase 3
+```
+
+---
+
+## v20.5 — 2026-06-29 — feat(executive-report): add distribution overview page (Phase 2)
+
+**File:** `src/data/reporting/executive/pages/distributionOverview.ts`
+
+**Before:** (file did not exist)
+
+**After:**
+```ts
+import type { ExecutiveRenderContext } from "../context";
+import { dataTable, kpiCard, fmtNum, fmtPct, esc } from "../primitives";
+
+export function buildDistributionOverview(ctx: ExecutiveRenderContext): string {
+  const dist = ctx.input.distribution;
+  if (!dist || dist.entries.length === 0) {
+    return `<section class="xr-page" id="page-dist">
+      <div class="xr-page-inner">
+        <div class="xr-slide-head"><h2>التوزيع والتكليف</h2><span class="xr-pg">16</span></div>
+        <div class="xr-notice">لم يتم التوزيع بعد لهذا الشهر.</div>
+        <div class="xr-footer"><span>التقرير التنفيذي — ${esc(ctx.monthLabel)}</span><span>16</span></div>
+      </div>
+    </section>`;
+  }
+
+  const byEmployee = new Map<string, { assigned: number; completed: number; pending: number }>();
+  for (const e of dist.entries) {
+    const emp = e.assignedTo ?? "غير محدد";
+    const rec = byEmployee.get(emp) ?? { assigned: 0, completed: 0, pending: 0 };
+    rec.assigned++;
+    if (e.status === "completed") rec.completed++;
+    else rec.pending++;
+    byEmployee.set(emp, rec);
+  }
+
+  const totalAssigned = dist.entries.length;
+  const totalCompleted = dist.entries.filter(e => e.status === "completed").length;
+  const totalPending = totalAssigned - totalCompleted;
+
+  const kpisRow = [
+    kpiCard({ label: "إجمالي المكلَّف به", value: fmtNum(totalAssigned), tone: "accent" }),
+    kpiCard({ label: "مكتملة", value: fmtNum(totalCompleted), tone: "good" }),
+    kpiCard({ label: "متبقية", value: fmtNum(totalPending), tone: totalPending > 0 ? "warn" : "" }),
+    kpiCard({ label: "نسبة الإنجاز", value: fmtPct(totalAssigned > 0 ? (totalCompleted / totalAssigned) * 100 : null) }),
+  ].join("");
+
+  const rows = [...byEmployee.entries()].map(([emp, r]) => [
+    esc(ctx.displayName(emp)),
+    fmtNum(r.assigned),
+    fmtNum(r.completed),
+    fmtNum(r.pending),
+    fmtPct(r.assigned > 0 ? (r.completed / r.assigned) * 100 : null),
+  ]);
+
+  return `<section class="xr-page" id="page-dist">
+    <div class="xr-page-inner">
+      <div class="xr-slide-head"><h2>التوزيع والتكليف</h2><span class="xr-pg">16</span></div>
+      <div class="xr-kpi-grid xr-kpi-grid-4" style="margin-bottom:0.13in">${kpisRow}</div>
+      <div class="xr-panel-title">أعباء العمل حسب الموظف</div>
+      ${dataTable({ headers: ["الموظف","المكلَّف به","مكتمل","متبقٍ","نسبة الإنجاز"], rows })}
+      <div class="xr-footer"><span>التقرير التنفيذي — ${esc(ctx.monthLabel)}</span><span>16</span></div>
+    </div>
+  </section>`;
+}
+```
+
+**File:** `src/data/reporting/executive/index.ts`
+
+**Before:**
+```ts
+import { buildCover } from "./pages/cover";
+import { buildToc } from "./pages/toc";
+import { buildExecIntro } from "./pages/execIntro";
+import { buildGlossary } from "./pages/glossary";
+import {
+  buildPart1Divider, buildPart2Divider, buildPart3Divider,
+  buildPart4Divider, buildPart5Divider, buildPart6Divider,
+} from "./pages/partDivider";
+import { buildPopulationByRisk } from "./pages/populationByRisk";
+import { buildPopulationByLevel } from "./pages/populationByLevel";
+import { buildSampleByLevel } from "./pages/sampleByLevel";
+import { buildAppendix } from "./pages/appendix";
+```
+
+**After:**
+```ts
+import { buildCover } from "./pages/cover";
+import { buildToc } from "./pages/toc";
+import { buildExecIntro } from "./pages/execIntro";
+import { buildGlossary } from "./pages/glossary";
+import {
+  buildPart1Divider, buildPart2Divider, buildPart3Divider,
+  buildPart4Divider, buildPart5Divider, buildPart6Divider,
+} from "./pages/partDivider";
+import { buildPopulationByRisk } from "./pages/populationByRisk";
+import { buildPopulationByLevel } from "./pages/populationByLevel";
+import { buildSampleByLevel } from "./pages/sampleByLevel";
+import { buildDistributionOverview } from "./pages/distributionOverview";
+import { buildAppendix } from "./pages/appendix";
+```
+
+**Before (pages array):**
+```ts
+  const pages = [
+    buildCover,
+    buildToc,
+    buildExecIntro,
+    buildGlossary,
+    buildPart1Divider,
+    buildPopulationByRisk,
+    buildPopulationByLevel,
+    buildPart2Divider,
+    buildSampleByLevel,
+    buildPart3Divider,
+    // distributionOverview — Phase 2
+    buildPart4Divider,
+```
+
+**After (pages array):**
+```ts
+  const pages = [
+    buildCover,
+    buildToc,
+    buildExecIntro,
+    buildGlossary,
+    buildPart1Divider,
+    buildPopulationByRisk,
+    buildPopulationByLevel,
+    buildPart2Divider,
+    buildSampleByLevel,
+    buildPart3Divider,
+    buildDistributionOverview,
+    buildPart4Divider,
+```
+
+---
+
+## v20.4 — 2026-06-29 — feat(executive-report): add population-by-level and sample-by-level pages (Phase 2)
+
+**File:** `src/data/reporting/executive/pages/populationByLevel.ts`
+
+**Before:** (file did not exist)
+
+**After:**
+```ts
+import type { ExecutiveRenderContext } from "../context";
+import { dataTable, fmtNum, fmtPct, esc } from "../primitives";
+
+export function buildPopulationByLevel(ctx: ExecutiveRenderContext): string {
+  const { kpis } = ctx;
+  const rows = kpis.stageProfiles.map(s => [
+    esc(s.stageLabel),
+    fmtNum(s.population),
+    fmtNum(s.sampleSize),
+    fmtPct(s.coverage),
+    fmtNum(s.studied),
+    fmtPct(s.completionRate),
+  ]);
+  const table = dataTable({
+    headers: ["المستوى", "المجتمع", "العينة", "التغطية", "مدروسة", "الإنجاز"],
+    rows,
+    totalRow: ["الإجمالي", fmtNum(kpis.totalPopulation), fmtNum(kpis.totalSample), fmtPct(kpis.sampleCoverage), fmtNum(kpis.studiedImages), fmtPct(kpis.completionRate)],
+  });
+
+  const portRows = kpis.portProfiles.map(p => [
+    esc(p.portName),
+    fmtNum(p.population),
+    fmtNum(p.sampleSize),
+    fmtPct(p.coverage),
+    fmtNum(p.studied),
+    fmtPct(p.completionRate),
+  ]);
+  const portTable = dataTable({
+    headers: ["المنفذ", "المجتمع", "العينة", "التغطية", "مدروسة", "الإنجاز"],
+    rows: portRows,
+  });
+
+  return `<section class="xr-page" id="page-pop-level">
+    <div class="xr-page-inner">
+      <div class="xr-slide-head"><h2>مجتمع الحالات حسب المستويات والمنافذ</h2><span class="xr-pg">09</span></div>
+      <div class="xr-cols xr-cols-2">
+        <div>
+          <div class="xr-panel-title">توزيع المستويات</div>
+          ${table}
+        </div>
+        <div>
+          <div class="xr-panel-title">توزيع المنافذ</div>
+          ${portTable}
+        </div>
+      </div>
+      <div class="xr-footer"><span>التقرير التنفيذي — ${esc(ctx.monthLabel)}</span><span>09</span></div>
+    </div>
+  </section>`;
+}
+```
+
+**File:** `src/data/reporting/executive/pages/sampleByLevel.ts`
+
+**Before:** (file did not exist)
+
+**After:**
+```ts
+import type { ExecutiveRenderContext } from "../context";
+import { dataTable, kpiCard, fmtNum, fmtPct, esc } from "../primitives";
+
+export function buildSampleByLevel(ctx: ExecutiveRenderContext): string {
+  const { kpis, input } = ctx;
+  const s = input.sample;
+
+  const kpis4 = [
+    kpiCard({ label: "حجم العينة الكلي", value: fmtNum(kpis.totalSample), tone: "accent" }),
+    kpiCard({ label: "CertScan", value: s ? fmtNum(s.certScanActual) : "—" }),
+    kpiCard({ label: "نسبة التغطية", value: fmtPct(kpis.sampleCoverage), tone: "good" }),
+    kpiCard({ label: "المجتمع الكلي", value: fmtNum(kpis.totalPopulation) }),
+  ].join("");
+
+  const stageRows = kpis.stageProfiles.map(sp => [
+    esc(sp.stageLabel),
+    fmtNum(sp.population),
+    fmtNum(sp.sampleSize),
+    fmtPct(sp.coverage),
+    fmtNum(sp.studied),
+  ]);
+
+  const portRows = kpis.portProfiles.map(p => [
+    esc(p.portName),
+    fmtNum(p.population),
+    fmtNum(p.sampleSize),
+    fmtPct(p.coverage),
+    fmtNum(p.studied),
+    fmtPct(p.completionRate),
+  ]);
+
+  return `<section class="xr-page" id="page-sample">
+    <div class="xr-page-inner">
+      <div class="xr-slide-head"><h2>العينة حسب المستويات والمنافذ</h2><span class="xr-pg">12</span></div>
+      <div class="xr-kpi-grid xr-kpi-grid-4" style="margin-bottom:0.13in">${kpis4}</div>
+      <div class="xr-cols xr-cols-2">
+        <div>
+          <div class="xr-panel-title">العينة حسب المستوى</div>
+          ${dataTable({ headers: ["المستوى","المجتمع","العينة","التغطية","مدروسة"], rows: stageRows })}
+        </div>
+        <div>
+          <div class="xr-panel-title">العينة حسب المنفذ</div>
+          ${dataTable({ headers: ["المنفذ","المجتمع","العينة","التغطية","مدروسة","الإنجاز"], rows: portRows })}
+        </div>
+      </div>
+      <div class="xr-footer"><span>التقرير التنفيذي — ${esc(ctx.monthLabel)}</span><span>12</span></div>
+    </div>
+  </section>`;
+}
+```
+
+**File:** `src/data/reporting/executive/index.ts`
+
+**Before:**
+```ts
+import { buildPopulationByRisk } from "./pages/populationByRisk";
+import { buildAppendix } from "./pages/appendix";
+
+export function buildExecutiveReport(
+  input: ExecutiveReportInput,
+  employeeDisplayNames: Record<string, string> = {},
+): string {
+  const rows = buildExecutiveReportRows(input);
+  const kpis = calculateExecutiveKPIs(rows, input.sample, input.config);
+  const ctx = buildContext(input, kpis, employeeDisplayNames);
+
+  const pages = [
+    buildCover,
+    buildToc,
+    buildExecIntro,
+    buildGlossary,
+    buildPart1Divider,
+    buildPopulationByRisk,
+    // populationByLevel — Phase 2
+    buildPart2Divider,
+    // sampleByLevel — Phase 2
+    buildPart3Divider,
+```
+
+**After:**
+```ts
+import { buildPopulationByRisk } from "./pages/populationByRisk";
+import { buildPopulationByLevel } from "./pages/populationByLevel";
+import { buildSampleByLevel } from "./pages/sampleByLevel";
+import { buildAppendix } from "./pages/appendix";
+
+export function buildExecutiveReport(
+  input: ExecutiveReportInput,
+  employeeDisplayNames: Record<string, string> = {},
+): string {
+  const rows = buildExecutiveReportRows(input);
+  const kpis = calculateExecutiveKPIs(rows, input.sample, input.config);
+  const ctx = buildContext(input, kpis, employeeDisplayNames);
+
+  const pages = [
+    buildCover,
+    buildToc,
+    buildExecIntro,
+    buildGlossary,
+    buildPart1Divider,
+    buildPopulationByRisk,
+    buildPopulationByLevel,
+    buildPart2Divider,
+    buildSampleByLevel,
+    buildPart3Divider,
+```
+
+---
+
+## v20.3 — 2026-06-29 — feat(executive-report): add executive intro KPI dashboard page (Phase 2)
+
+**File:** `src/data/reporting/executive/pages/execIntro.ts`
+
+**Before:** (file did not exist)
+
+**After:**
+```ts
+import type { ExecutiveRenderContext } from "../context";
+import { kpiCard, fmtNum, fmtPct, esc } from "../primitives";
+
+export function buildExecIntro(ctx: ExecutiveRenderContext): string {
+  const { kpis } = ctx;
+  const cards = [
+    kpiCard({ label: "إجمالي المجتمع", value: fmtNum(kpis.totalPopulation), tone: "accent" }),
+    kpiCard({ label: "حجم العينة", value: fmtNum(kpis.totalSample) }),
+    kpiCard({ label: "نسبة التغطية", value: fmtPct(kpis.sampleCoverage), tone: kpis.sampleCoverage !== null && kpis.sampleCoverage >= ctx.input.config.coverageTarget ? "good" : "warn" }),
+    kpiCard({ label: "الحالات المدروسة", value: fmtNum(kpis.studiedImages) }),
+    kpiCard({ label: "نسبة الإنجاز", value: fmtPct(kpis.completionRate), tone: kpis.completionRate !== null && kpis.completionRate >= ctx.input.config.completionTarget ? "good" : "warn" }),
+    kpiCard({ label: "الدقة الإجمالية", value: fmtPct(kpis.overallAccuracy), tone: kpis.overallAccuracy === null ? "" : kpis.overallAccuracy >= ctx.input.config.accuracyTarget ? "good" : "risk" }),
+  ].join("");
+
+  const sectionStatus = [
+    { label: "مجتمع الحالات", ok: kpis.totalPopulation > 0 },
+    { label: "العينة", ok: kpis.totalSample > 0 },
+    { label: "التوزيع", ok: kpis.studiedImages > 0 },
+    { label: "نتائج الدقة", ok: kpis.overallAccuracy !== null },
+    { label: "أداء الموظفين", ok: kpis.validStudied > 0 },
+  ].map(s => `<div class="xr-kpi" style="text-align:center">
+    <div style="font-size:0.22in">${s.ok ? "✅" : "⬜"}</div>
+    <div class="xr-kpi-label">${esc(s.label)}</div>
+  </div>`).join("");
+
+  return `<section class="xr-page" id="page-intro">
+    <div class="xr-page-inner">
+      <div class="xr-slide-head"><h2>مقدمة تنفيذية</h2><span class="xr-pg">03</span></div>
+      <div style="margin-bottom:0.07in;font-size:0.085in;color:var(--xr-muted);font-weight:600">
+        ملخص أداء شهر ${esc(ctx.monthLabel)} — بتاريخ ${esc(ctx.issueDate)}
+      </div>
+      <div class="xr-kpi-grid xr-kpi-grid-6" style="margin-bottom:0.16in">${cards}</div>
+      <div class="xr-section-title">حالة الأقسام</div>
+      <div class="xr-kpi-grid" style="grid-template-columns:repeat(5,1fr)">${sectionStatus}</div>
+      ${kpis.overallAccuracy !== null && kpis.overallAccuracy < ctx.input.config.accuracyTarget
+        ? `<div class="xr-notice" style="margin-top:0.12in">⚠️ الدقة الإجمالية (${fmtPct(kpis.overallAccuracy)}) أقل من الهدف المعتمد (${fmtPct(ctx.input.config.accuracyTarget)}). راجع الجزء الرابع والخامس لتفاصيل الفجوات.</div>`
+        : ""}
+      <div class="xr-footer"><span>التقرير التنفيذي — ${esc(ctx.monthLabel)}</span><span>03</span></div>
+    </div>
+  </section>`;
+}
+```
+
+**File:** `src/data/reporting/executive/index.ts`
+
+**Before:**
+```ts
+// Phase 1 pages
+import { buildCover } from "./pages/cover";
+import { buildToc } from "./pages/toc";
+import { buildGlossary } from "./pages/glossary";
+import {
+  buildPart1Divider, buildPart2Divider, buildPart3Divider,
+  buildPart4Divider, buildPart5Divider, buildPart6Divider,
+} from "./pages/partDivider";
+import { buildPopulationByRisk } from "./pages/populationByRisk";
+import { buildAppendix } from "./pages/appendix";
+
+// ...
+  const pages = [
+    buildCover,
+    buildToc,
+    // execIntro — Phase 2
+    buildGlossary,
+```
+
+**After:**
+```ts
+// Phase 1 pages
+import { buildCover } from "./pages/cover";
+import { buildToc } from "./pages/toc";
+import { buildExecIntro } from "./pages/execIntro";
+import { buildGlossary } from "./pages/glossary";
+import {
+  buildPart1Divider, buildPart2Divider, buildPart3Divider,
+  buildPart4Divider, buildPart5Divider, buildPart6Divider,
+} from "./pages/partDivider";
+import { buildPopulationByRisk } from "./pages/populationByRisk";
+import { buildAppendix } from "./pages/appendix";
+
+// ...
+  const pages = [
+    buildCover,
+    buildToc,
+    buildExecIntro,
+    buildGlossary,
+```
+
+---
+
+## v20.2 — 2026-06-29 — feat(executive-report): wire new dark-navy viewer as the active report (Phase 1)
+
+**File:** `src/data/reporting/executive/index.ts`
+
+**Before:** (file did not exist)
+
+**After:**
+```ts
+import { buildExecutiveReportRows, calculateExecutiveKPIs } from "../executiveReportData";
+import { buildContext } from "./context";
+import { assembleReport } from "./assemble";
+import { openOrDownload } from "../htmlReport";
+import type { ExecutiveReportInput } from "../executiveReportTypes";
+
+// Phase 1 pages
+import { buildCover } from "./pages/cover";
+import { buildToc } from "./pages/toc";
+import { buildGlossary } from "./pages/glossary";
+import {
+  buildPart1Divider, buildPart2Divider, buildPart3Divider,
+  buildPart4Divider, buildPart5Divider, buildPart6Divider,
+} from "./pages/partDivider";
+import { buildPopulationByRisk } from "./pages/populationByRisk";
+import { buildAppendix } from "./pages/appendix";
+
+export function buildExecutiveReport(
+  input: ExecutiveReportInput,
+  employeeDisplayNames: Record<string, string> = {},
+): string { ... }
+
+export function openExecutiveReport(
+  input: ExecutiveReportInput,
+  employeeDisplayNames: Record<string, string> = {},
+): void { ... }
+```
+
+**File:** `src/data/reporting/executiveReport.ts`
+
+**Before:**
+```ts
+import { openOrDownload } from "./htmlReport";
+import { ORGANIZATION_PATH_TEXT } from "../../branding/organization";
+import type { ExecutiveKPIs, ExecutiveReportInput } from "./executiveReportTypes";
+import {
+  buildExecutiveReportRows,
+  calculateExecutiveKPIs,
+  fmtNum,
+  fmtPct,
+} from "./executiveReportData";
+
+// ... ~560 lines of helper functions, type definitions, CSS constant ...
+
+// ─── Main builder ─────────────────────────────────────────────────────────────
+export function buildExecutiveReport(input: ExecutiveReportInput): string {
+  const execRows = buildExecutiveReportRows(input);
+  const kpis = calculateExecutiveKPIs(execRows, input.sample, input.config);
+  return buildPrintableExecutiveReport(input, kpis, groupForReport(execRows));
+}
+
+export function openExecutiveReport(input: ExecutiveReportInput): void {
+  openOrDownload(buildExecutiveReport(input), `التقرير_التنفيذي_${input.monthFolderName}.html`);
+}
+```
+
+**After:**
+```ts
+import * as XLSX from "xlsx";
+import type { ExecutiveReportInput } from "./executiveReportTypes";
+import {
+  buildExecutiveReportRows,
+  calculateExecutiveKPIs,
+} from "./executiveReportData";
+
+// ─── Main builder (re-exported from the new dark-navy viewer module) ──────────
+export { buildExecutiveReport, openExecutiveReport } from "./executive/index";
+
+export function buildExecutiveXlsx(input: ExecutiveReportInput): void { ... }
+```
+
+---
+
+## v20.1 — 2026-06-29 — feat(executive-report): add viewer shell and assembler
+
+**File:** `src/data/reporting/executive/viewer.ts`
+
+**Before:** (file did not exist)
+
+**After:**
+```ts
+import { EXEC_CSS } from "./theme";
+import { esc } from "./primitives";
+
+export function buildViewerHtml(slides: string, sidebarLinks: string, monthLabel: string): string {
+  return `<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>التقرير التنفيذي — ${esc(monthLabel)}</title>
+<style>${EXEC_CSS}</style>
+</head>
+<body>
+<div class="xr-viewer">
+  <main class="xr-slides">${slides}</main>
+  <nav class="xr-sidebar">
+    <div class="xr-brand">
+      <strong>التقرير التنفيذي</strong>
+      <span>ضمان جودة الأشعة</span>
+    </div>
+    <button class="xr-pdf-btn" onclick="window.print()">تصدير PDF</button>
+    <div class="xr-nav-title">الأقسام</div>
+    <div class="xr-nav">${sidebarLinks}</div>
+  </nav>
+</div>
+</body>
+</html>`;
+}
+```
+
+---
+
+**File:** `src/data/reporting/executive/assemble.ts`
+
+**Before:** (file did not exist)
+
+**After:**
+```ts
+import type { ExecutiveRenderContext } from "./context";
+import { buildViewerHtml } from "./viewer";
+import { esc } from "./primitives";
+
+const NAV_SECTIONS = [
+  { label: "الغلاف", id: "page-cover" },
+  { label: "الفهرس", id: "page-toc" },
+  { label: "مقدمة تنفيذية", id: "page-intro" },
+  { label: "المعجم", id: "page-glossary" },
+  { label: "الجزء الأول: المجتمع", id: "page-p1" },
+  { label: "الجزء الثاني: العينة", id: "page-p2" },
+  { label: "الجزء الثالث: التوزيع", id: "page-p3" },
+  { label: "الجزء الرابع: الدقة", id: "page-p4" },
+  { label: "الجزء الخامس: الفجوات", id: "page-p5" },
+  { label: "الجزء السادس: التوصيات", id: "page-p6" },
+  { label: "الملاحق", id: "page-appendix" },
+];
+
+export function assembleReport(
+  ctx: ExecutiveRenderContext,
+  pageBuilders: Array<(ctx: ExecutiveRenderContext) => string>,
+): string {
+  const slides = pageBuilders.map(fn => fn(ctx)).join("\n");
+  const sidebarLinks = NAV_SECTIONS.map(s =>
+    `<a href="#${s.id}">${esc(s.label)}</a>`
+  ).join("");
+  return buildViewerHtml(slides, sidebarLinks, ctx.monthLabel);
+}
+```
+
+---
+
+## v20.0 — 2026-06-29 — feat(executive-report): add population-by-risk and appendix pages
+
+**File:** `src/data/reporting/executive/pages/populationByRisk.ts`
+
+**Before:** (file did not exist)
+
+**After:** New file — exports `buildPopulationByRisk(ctx: ExecutiveRenderContext): string`. Renders page (`#page-pop-risk`, display page 08) with 4 KPI cards (إجمالي المجتمع/accent, الحالات السليمة/good, حالات الاشتباه/risk, نسبة الاشتباه) in `.xr-kpi-grid-4`. Two-column layout (`.xr-cols-6-4`): left=port table with headers [المنفذ, المجتمع, سليمة, اشتباه, نسبة الاشتباه] and total row, right=panel with bar chart showing `suspicionRate` as % per port. Footer with month label.
+
+---
+
+**File:** `src/data/reporting/executive/pages/appendix.ts`
+
+**Before:** (file did not exist)
+
+**After:** New file — exports `buildAppendix(ctx: ExecutiveRenderContext): string`. Renders page (`#page-appendix`, display page 31) with two-column layout (`.xr-cols-2`): left=config thresholds table from `ctx.input.config` (accuracyTarget, completionTarget, coverageTarget, maximumMissedSuspicionRate, minimumReliableSampleSize, monthlyTarget), right=static methodology paragraph in Arabic describing Hamilton stratified sampling and expert evaluation process.
+
+---
+
+## v19.9 — 2026-06-29 — feat(executive-report): add cover, toc, glossary, part-divider page builders
+
+**File:** `src/data/reporting/executive/pages/cover.ts`
+
+**Before:** (file did not exist)
+
+**After:** New file — exports `buildCover(ctx: ExecutiveRenderContext): string`. Renders the cover page (`#page-cover`) with org name from `ORGANIZATION_PATH_TEXT`, a 4-level chip legend (المستوى الأول–الرابع with CSS variable dot colors `--xr-l1` through `--xr-l4`), report title, issue date, and month label from context.
+
+---
+
+**File:** `src/data/reporting/executive/pages/toc.ts`
+
+**Before:** (file did not exist)
+
+**After:** New file — exports `buildToc(_ctx: ExecutiveRenderContext): string`. Renders the table of contents page (`#page-toc`) with 9 hard-coded entries (01 مقدمة تنفيذية … 09 الملاحق) as anchor links into the report sections.
+
+---
+
+**File:** `src/data/reporting/executive/pages/glossary.ts`
+
+**Before:** (file did not exist)
+
+**After:** New file — exports `buildGlossary(_ctx: ExecutiveRenderContext): string`. Renders the glossary page (`#page-glossary`) with 4 level-definition cards (`.xr-l1-card`–`.xr-l4-card`) and an 8-term glossary grid.
+
+---
+
+**File:** `src/data/reporting/executive/pages/partDivider.ts`
+
+**Before:** (file did not exist)
+
+**After:** New file — exports `buildPartDivider(partNum, title, sub, icon, pageId, pageNum)` factory and 6 pre-built named constants: `buildPart1Divider` through `buildPart6Divider`. Each constant is `(ctx: ExecutiveRenderContext) => string` and renders a full-page divider slide for its part (page IDs `page-p1`–`page-p6`, display page numbers 07/11/15/19/23/29).
+
+---
+
+## v19.8 — 2026-06-29 — feat(executive-report): add render context
+
+**File:** `src/data/reporting/executive/context.ts`
+
+**Before:** (file did not exist)
+
+**After:** New file — shared render context factory for all executive report page builders. Exports: `ExecutiveRenderContext` type (input, kpis, monthLabel, issueDate, displayName function, anonymizeMap, rows) and `buildContext(input, kpis, employeeDisplayNames, rows)` factory. Month folder name `{digit}-{EnglishName}-{year}` converted to Arabic month name (e.g. `5-May-2026` → `مايو 2026`). Issue date formatted as `DD / MM / YYYY`. displayName() handles anonymization: when `config.showEmployeeNames === false`, assigns sequential codes (موظف ١, موظف ٢, etc.) lazily; otherwise uses employeeDisplayNames or username. rows parameter (ExecutiveReportRow[]) defaults to [] for Phase 4 analytics.
+
+---
+
+## v19.7 — 2026-06-29 — fix(executive-report): add missing statPill helper to primitives
+
+**File:** `src/data/reporting/executive/primitives.ts`
+
+**Before:**
+```ts
+export function heatCell(pct: number | null): string {
+  if (pct === null) return `<span class="xr-heat-cell xr-heat-insuff">—</span>`;
+  const cls = pct >= 90 ? "xr-heat-high" : pct >= 75 ? "xr-heat-mid" : "xr-heat-low";
+  return `<span class="xr-heat-cell ${cls}">${fmtPct(pct)}</span>`;
+}
+// (statPill missing)
+```
+
+**After:**
+```ts
+export function heatCell(pct: number | null): string {
+  if (pct === null) return `<span class="xr-heat-cell xr-heat-insuff">—</span>`;
+  const cls = pct >= 90 ? "xr-heat-high" : pct >= 75 ? "xr-heat-mid" : "xr-heat-low";
+  return `<span class="xr-heat-cell ${cls}">${fmtPct(pct)}</span>`;
+}
+
+export function statPill({ label, value }: { label: string; value: string }): string {
+  return `<div class="xr-stat-pill"><span class="xr-stat-pill-label">${esc(label)}</span><b class="xr-stat-pill-value">${esc(value)}</b></div>`;
+}
+```
+
+---
+
+## v19.6 — 2026-06-29 — executive report rework: create primitives.ts
+
+**File:** `src/data/reporting/executive/primitives.ts`
+
+**Before:** (file did not exist)
+
+**After:** New file — pure HTML render helper functions for building executive report page content. Exports: `esc()`, `fmtNum()`, `fmtPct()`, `kpiCard()`, `barRow()`, `badgeHtml()`, `heatCell()`, `dataTable()`, `noticeBox()`, `pagePanel()`, `radarSvg()`. All functions return HTML strings with `.xr-` prefixed CSS classes; no React imports or side effects.
+
+---
+
+## v19.5 — 2026-06-29 — executive report rework: create theme.ts
+
+**File:** `src/data/reporting/executive/theme.ts`
+
+**Before:** (file did not exist)
+
+**After:** New file — EXEC_CSS string with dark-navy tokens, Somar @font-face (BASE_URL pattern), viewer layout, slide pages, all shared CSS classes.
+
+---
+
+## v19.4 — 2026-06-29 — Add "combobox" field type: free-text input with preset autocomplete suggestions; add موقع الاشتباه field to default template phase 2
+
+**File:** `src/data/templates/templateTypes.ts`
+
+**Before:**
+```ts
+export type TemplateFieldType =
+  | "text"
+  | "textarea"
+  | "number"
+  | "dropdown"
+  | "checkbox"
+  | "date"
+  | "empty";
+```
+
+**After:**
+```ts
+export type TemplateFieldType =
+  | "text"
+  | "textarea"
+  | "number"
+  | "dropdown"
+  | "combobox"
+  | "checkbox"
+  | "date"
+  | "empty";
+```
+
+**File:** `src/components/Sidebar/Tabs/TemplateBuilder/index.tsx`
+
+**Before:** `FIELD_TYPE_LABELS` had no `combobox` entry; `buildDefaultInspectionTemplate` phase 2 had no موقع الاشتباه field; `FieldEditor` showed options only for `dropdown`.
+
+**After:** Added `combobox: "نص مع اقتراحات"` label; added `fSuspicionLocation` combobox field in phase 2 with presets for transport vehicle locations; options section renders for both `dropdown` and `combobox`.
+
+**File:** `src/components/InspectionPanel/index.tsx`
+
+**Before:** Field renderer had no combobox branch.
+
+**After:** combobox renders as `<input type="text">` with a `<datalist>` of preset suggestions, allowing free text plus typeahead.
+
+---
+
 ## v19.3 — 2026-06-29 — Power BI export: use page-level month selector instead of duplicate dropdown
 
 **File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
@@ -6783,6 +8737,53 @@ const REPORT_LABELS: Record<ReportType, string> = {
 };
 // generate handler: adds executive branch — loads population, sample,
 // distribution, and all employee answer files, then calls openExecutiveReport()
+```
+
+---
+
+## v4.5 — 2026-06-29 — Fix: executive report badgeHtml CSS class injection, sidebar nav labels
+
+**File:** `src/data/reporting/executive/primitives.ts`
+
+**Before:**
+```ts
+export function badgeHtml(status: "excellent" | "stable" | "monitor" | "priority" | "insufficient" | string): string {
+  const labels: Record<string, string> = {
+    excellent: "ممتاز", stable: "مستقر", monitor: "متابعة", priority: "أولوية", insufficient: "بيانات غير كافية",
+  };
+  return `<span class="xr-badge ${esc(status)}">${esc(labels[status] ?? status)}</span>`;
+}
+```
+
+**After:**
+```ts
+export function badgeHtml(status: "excellent" | "stable" | "monitor" | "priority" | "insufficient" | string): string {
+  const labels: Record<string, string> = {
+    excellent: "ممتاز", stable: "مستقر", monitor: "متابعة", priority: "أولوية", insufficient: "بيانات غير كافية",
+  };
+  const CSS_CLASS: Record<string, string> = {
+    excellent: "excellent",
+    stable: "stable",
+    monitor: "monitor",
+    priority: "priority",
+    insufficient: "insufficient",
+  };
+  return `<span class="xr-badge ${CSS_CLASS[status] ?? "insufficient"}">${esc(labels[status] ?? status)}</span>`;
+}
+```
+
+**File:** `src/data/reporting/executive/assemble.ts`
+
+**Before:**
+```ts
+  { label: "الجزء الخامس: الفجوات", id: "page-p5" },
+  { label: "الجزء السادس: التوصيات", id: "page-p6" },
+```
+
+**After:**
+```ts
+  { label: "الجزء الخامس: أداء الموظفين", id: "page-p5" },
+  { label: "الجزء السادس: الأولويات", id: "page-p6" },
 ```
 
 ---

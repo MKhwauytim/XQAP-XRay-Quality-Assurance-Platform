@@ -25,6 +25,8 @@ function row(
     reportNumber: null,
     targetedByRiskEngine: null,
     riskMessage: null,
+    levelOneEmployee: null,
+    levelTwoEmployee: null,
     certScanStatus: "NonCertscan",
     certScanSnippet: null,
     originalCertScanSnippet: null,
@@ -57,19 +59,29 @@ describe("executive report html", () => {
       config: DEFAULT_EXEC_CONFIG,
     });
 
-    expect(html).toContain("@page{size:13.333in 7.5in;margin:0;}");
-    expect(html).toContain("إجمالي الصور");
-    expect(html).toContain("مستويات الدراسة");
+    // CSS theme tokens present
+    expect(html).toContain("@page{size:A4 portrait;margin:0;}");
+    expect(html).toContain("--navy:#062846");
+    expect(html).toContain("--gold:#f4b400");
+    // Cover page
+    expect(html).toContain("التقرير التنفيذي لضمان جودة الأشعة");
+    // Level definitions (glossary page)
     expect(html).toContain("المستوى الأول");
     expect(html).toContain("المستوى الثاني");
     expect(html).toContain("المستوى الثالث");
     expect(html).toContain("المستوى الرابع");
+    // Part 2 divider title
     expect(html).toContain("نتائج الفحص");
-    expect(html).toContain("دقة نتائج الأشعة");
-    expect(html).toContain("نسبة دقة الاشتباه");
-    expect(html).not.toContain("إجمالي الصور\", \"سليمة\", \"اشتباه\", \"العينة\", \"المدروسة\", \"نسبة الدقة");
+    // Accuracy page content
+    expect(html).toContain("نتائج الدقة حسب المنفذ");
+    expect(html).toContain("دقة الاشتباه الكلية");
+    // Population page
+    expect(html).toContain("إجمالي المجتمع");
+    // Sample page
+    expect(html).toContain("العينة حسب المستويات");
+    // No English debug strings
     expect(html).not.toContain("Xray IDs");
     expect(html).not.toContain("Inspection Workspace");
-    expect(html).not.toContain("Page ");
+    expect(html).not.toContain("Page 1");
   });
 });

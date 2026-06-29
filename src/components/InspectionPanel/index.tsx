@@ -411,6 +411,24 @@ function FormField({
             </option>
           ))}
         </select>
+      ) : field.type === "combobox" ? (
+        <>
+          <input
+            id={id}
+            type="text"
+            className="ip-input"
+            list={`${id}-list`}
+            placeholder={field.placeholder}
+            value={String(value)}
+            onChange={(e) => onChange(e.target.value)}
+            autoComplete="off"
+          />
+          <datalist id={`${id}-list`}>
+            {field.options.map((o) => (
+              <option key={o} value={o} />
+            ))}
+          </datalist>
+        </>
       ) : null}
       {invalid ? <span className="ip-field-error">هذا الحقل إلزامي.</span> : null}
     </div>

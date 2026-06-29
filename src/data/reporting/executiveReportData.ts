@@ -164,6 +164,8 @@ export function buildExecutiveReportRows(input: ExecutiveReportInput): Executive
       portName: pop.portName,
       portType: pop.portType,
       stage: pop.stage,
+      levelOneEmployeeId: pop.levelOneEmployee ?? null,
+      levelTwoEmployeeId: pop.levelTwoEmployee ?? null,
       levelOneResult,
       levelTwoResult,
       imageResult,

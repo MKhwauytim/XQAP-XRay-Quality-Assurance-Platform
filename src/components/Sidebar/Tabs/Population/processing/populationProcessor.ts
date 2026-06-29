@@ -40,6 +40,9 @@ type PreparedDraftRow = {
   targetedByRiskEngine: string | null;
   riskMessage: string | null;
 
+  levelOneEmployee: string | null;
+  levelTwoEmployee: string | null;
+
   rawRow: Record<string, unknown>;
   sourceSheetName: string;
   sourceRowNumber: number;
@@ -329,6 +332,9 @@ function toPreparedDraftRow(row: NormalizedRiskRow): PreparedDraftRow {
     targetedByRiskEngine: row.targetedByRiskEngine,
     riskMessage: row.riskMessage,
 
+    levelOneEmployee: null,
+    levelTwoEmployee: null,
+
     rawRow: row.rawRow ?? {},
     sourceSheetName: row.sourceSheetName,
     sourceRowNumber: row.sourceRowNumber
@@ -426,7 +432,9 @@ function enrichDraftRowFromBi(params: {
   }
   const enrichedRow: PreparedDraftRow = {
     ...draftRow,
-    rawRow: enrichedRawRow
+    rawRow: enrichedRawRow,
+    levelOneEmployee: biMatch?.row?.levelOneEmployee ?? draftRow.levelOneEmployee ?? null,
+    levelTwoEmployee: biMatch?.row?.levelTwoEmployee ?? draftRow.levelTwoEmployee ?? null,
   };
 
   const DATE_FIELDS: DraftFillableField[] = ["xrayEntryDate", "declarationDate"];
@@ -715,6 +723,9 @@ export async function processPopulation(
         certScanStatus: certScanMatch.certScanStatus,
         certScanSnippet: certScanMatch.certScanSnippet,
         originalCertScanSnippet: certScanMatch.originalCertScanSnippet,
+
+        levelOneEmployee: enrichment.row.levelOneEmployee,
+        levelTwoEmployee: enrichment.row.levelTwoEmployee,
 
         biEnrichmentStatus: enrichment.biEnrichmentStatus,
         biMatched: enrichment.biMatched,
