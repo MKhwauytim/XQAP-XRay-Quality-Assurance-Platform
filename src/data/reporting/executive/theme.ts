@@ -135,7 +135,16 @@ button,input,select{font:inherit}
   position:relative;z-index:2;height:100%;
   width:calc(100% - 44px);margin-right:44px;
   padding:30px 28px 36px 28px;overflow:hidden;
+  display:flex;flex-direction:column;
 }
+/* The last meaningful content band on a data page absorbs leftover height
+   so pages never end with a dead empty third. Builders add .page-fill
+   to the element that should stretch (usually a table-wrap or a panel grid). */
+.page-fill{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;}
+.page-fill > .table-wrap{flex:1 1 auto;min-height:0;}
+.page-fill .grid{flex:1 1 auto;align-content:start;}
+/* Push the page number to the bottom regardless of content height. */
+.page-inner > .page-no{margin-top:auto;}
 
 /* ── Right rail — reads cleanly ───────────────────────────────────────── */
 .right-rail{
@@ -314,40 +323,109 @@ tbody tr:hover{background:rgba(244,180,0,.04);}
 .land .panel-title{color:var(--green)} .sea .panel-title{color:var(--blue)}
 
 /* ── Part divider pages — grand, not a PowerPoint slide ──────────────── */
+/* Grand part divider — three vertical bands (top header / center title / bottom toc),
+   anchored by a giant ghost numeral painted across the whole page. */
 .big-divider{
   display:flex;flex-direction:column;
-  justify-content:center;align-items:flex-end;
-  padding:60px 48px;position:relative;overflow:hidden;height:100%;
+  justify-content:space-between;align-items:stretch;
+  padding:54px 48px 64px;position:relative;overflow:hidden;height:100%;
 }
 .big-divider::before{
-  content:"";position:absolute;
-  top:-20%;left:-10%;width:70%;height:140%;
-  background:radial-gradient(ellipse,rgba(244,180,0,.04) 0%,transparent 70%);
-  pointer-events:none;
+  content:"";position:absolute;inset:0;
+  background:
+    radial-gradient(ellipse 70% 60% at 15% 30%,rgba(244,180,0,.07) 0%,transparent 70%),
+    radial-gradient(ellipse 60% 50% at 90% 85%,rgba(107,169,248,.06) 0%,transparent 70%);
+  pointer-events:none;z-index:0;
 }
-.big-divider .kicker{
-  font-size:0.85rem;font-weight:600;letter-spacing:0.15em;
-  color:var(--gold);text-transform:uppercase;margin-bottom:12px;
+/* Giant ghost part-number behind everything. Builder sets --divider-num. */
+.big-divider::after{
+  content:var(--divider-num,"");
+  position:absolute;left:-2%;bottom:-14%;
+  font-size:30rem;font-weight:900;line-height:.8;
+  color:rgba(255,255,255,.035);
+  letter-spacing:-0.04em;pointer-events:none;z-index:0;
+  font-family:"Somar","Arial",sans-serif;
 }
-.big-divider h1{
-  font-size:3.2rem;font-weight:800;color:#fff;
-  line-height:1.05;margin:0 0 20px;letter-spacing:-0.02em;
-  text-align:right;
+.big-divider > *{position:relative;z-index:1;}
+/* Top band: subtle org strip */
+.big-divider .divider-top{
+  display:flex;align-items:center;gap:14px;
+  font-size:0.72rem;color:rgba(255,255,255,.45);
+  border-bottom:1px solid rgba(255,255,255,.08);padding-bottom:16px;
 }
-.big-divider .rule{
-  width:48px;height:3px;background:var(--gold);border-radius:2px;
-  margin:0 0 24px auto;
+.big-divider .divider-top .shield{
+  width:30px;height:34px;flex-shrink:0;
+  clip-path:polygon(50% 0,95% 18%,85% 72%,50% 100%,15% 72%,5% 18%);
+  background:repeating-linear-gradient(135deg,rgba(219,231,243,.6) 0 2px,transparent 2px 5px);
 }
-.big-divider .lead{
-  font-size:0.95rem;color:rgba(255,255,255,.6);
-  line-height:1.8;max-width:500px;text-align:right;
+/* Center band: the actual title, vertically dominant */
+.big-divider .divider-center{
+  flex:1 1 auto;display:flex;flex-direction:column;
+  justify-content:center;align-items:flex-end;text-align:right;
 }
 .big-divider .icon{
-  font-size:2.8rem;margin-bottom:16px;opacity:0.8;align-self:flex-end;
+  font-size:3.4rem;margin:0 0 18px;opacity:.85;align-self:flex-end;
+  color:var(--gold);
+}
+.big-divider .kicker{
+  font-size:1rem;font-weight:700;letter-spacing:0.22em;
+  color:var(--gold);margin-bottom:14px;
+}
+.big-divider h1{
+  font-size:4rem;font-weight:900;color:#fff;
+  line-height:1.02;margin:0 0 22px;letter-spacing:-0.02em;text-align:right;
+}
+.big-divider .rule{
+  width:64px;height:3px;background:var(--gold);border-radius:2px;
+  margin:0 0 26px auto;
+}
+.big-divider .lead{
+  font-size:1.05rem;color:rgba(255,255,255,.66);
+  line-height:1.85;max-width:560px;text-align:right;margin:0 0 0 auto;
+}
+/* Bottom band: mini table-of-contents for this part */
+.big-divider .divider-toc{
+  display:grid;grid-template-columns:repeat(3,1fr);gap:12px;
+  border-top:1px solid rgba(255,255,255,.08);padding-top:20px;
+}
+.big-divider .divider-toc .toc-chip{
+  border:1px solid rgba(244,180,0,.28);border-radius:12px;
+  padding:12px 14px;background:rgba(255,255,255,.025);
+  display:flex;flex-direction:column;gap:4px;text-align:right;
+}
+.big-divider .divider-toc .toc-chip .n{
+  font-size:0.7rem;color:var(--gold);font-weight:700;letter-spacing:0.08em;
+}
+.big-divider .divider-toc .toc-chip .t{
+  font-size:0.86rem;color:rgba(255,255,255,.82);font-weight:600;line-height:1.4;
 }
 .big-divider .page-no{
-  position:absolute;bottom:24px;left:50%;transform:translateX(-50%);
+  position:absolute;bottom:22px;left:50%;transform:translateX(-50%);z-index:2;
 }
+
+/* ── Sparse-data context band — fills the lower third of data pages ───── */
+.context-band{
+  display:grid;grid-template-columns:1.4fr 1fr;gap:14px;margin-top:16px;
+  flex:1 1 auto;align-items:stretch;
+}
+.context-band > .card{display:flex;flex-direction:column;}
+.context-band .method-list{margin:6px 0 0;padding:0;list-style:none;display:grid;gap:10px;}
+.context-band .method-list li{
+  position:relative;padding-right:18px;font-size:0.82rem;
+  color:rgba(255,255,255,.72);line-height:1.6;
+}
+.context-band .method-list li::before{
+  content:"›";position:absolute;right:0;top:0;color:var(--gold);font-weight:700;
+}
+.context-band .stat-stack{display:grid;gap:12px;margin-top:auto;}
+.context-band .stat-stack .stat-pill{
+  display:flex;align-items:baseline;justify-content:space-between;
+  border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:10px 12px;
+  background:rgba(255,255,255,.02);
+}
+.context-band .stat-stack .stat-pill b{font-size:1.2rem;font-weight:800;}
+.context-band .stat-stack .stat-pill span{font-size:0.78rem;color:var(--muted);}
+@media(max-width:980px){.context-band{grid-template-columns:1fr;}}
 
 /* ── Feature grid (part 3 cover) ─────────────────────────────────────── */
 .feature-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:20px}
@@ -406,6 +484,11 @@ tbody tr:hover{background:rgba(244,180,0,.04);}
   position:absolute;left:-5%;top:15%;width:55%;height:70%;
   background:radial-gradient(ellipse at center,rgba(107,169,248,.06) 0%,transparent 60%);
   border-radius:50%;pointer-events:none;z-index:1;
+}
+.cover-bg-art::after{
+  content:"";position:absolute;right:-60%;bottom:-50%;width:120%;height:120%;
+  background:radial-gradient(ellipse at center,rgba(244,180,0,.05) 0%,transparent 62%);
+  border-radius:50%;
 }
 
 /* ── Notice / empty state ─────────────────────────────────────────────── */
@@ -484,6 +567,7 @@ tbody tr:hover{background:rgba(244,180,0,.04);}
   .big-divider h1{font-size:2rem}
   .page.toc-page .toc-header{grid-template-columns:1fr}
   .page.toc-page .toc-grid{grid-template-columns:1fr;grid-template-rows:auto;height:auto;}
+  .big-divider .divider-toc{grid-template-columns:1fr;}
 }
 
 /* ── Print ────────────────────────────────────────────────────────────── */
