@@ -4,6 +4,59 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v19.5 — 2026-06-29 — executive report rework: create theme.ts
+
+**File:** `src/data/reporting/executive/theme.ts`
+
+**Before:** (file did not exist)
+
+**After:** New file — EXEC_CSS string with dark-navy tokens, Somar @font-face (BASE_URL pattern), viewer layout, slide pages, all shared CSS classes.
+
+---
+
+## v19.4 — 2026-06-29 — Add "combobox" field type: free-text input with preset autocomplete suggestions; add موقع الاشتباه field to default template phase 2
+
+**File:** `src/data/templates/templateTypes.ts`
+
+**Before:**
+```ts
+export type TemplateFieldType =
+  | "text"
+  | "textarea"
+  | "number"
+  | "dropdown"
+  | "checkbox"
+  | "date"
+  | "empty";
+```
+
+**After:**
+```ts
+export type TemplateFieldType =
+  | "text"
+  | "textarea"
+  | "number"
+  | "dropdown"
+  | "combobox"
+  | "checkbox"
+  | "date"
+  | "empty";
+```
+
+**File:** `src/components/Sidebar/Tabs/TemplateBuilder/index.tsx`
+
+**Before:** `FIELD_TYPE_LABELS` had no `combobox` entry; `buildDefaultInspectionTemplate` phase 2 had no موقع الاشتباه field; `FieldEditor` showed options only for `dropdown`.
+
+**After:** Added `combobox: "نص مع اقتراحات"` label; added `fSuspicionLocation` combobox field in phase 2 with presets for transport vehicle locations; options section renders for both `dropdown` and `combobox`.
+
+**File:** `src/components/InspectionPanel/index.tsx`
+
+**Before:** Field renderer had no combobox branch.
+
+**After:** combobox renders as `<input type="text">` with a `<datalist>` of preset suggestions, allowing free text plus typeahead.
+
+---
+
 ## v19.3 — 2026-06-29 — Power BI export: use page-level month selector instead of duplicate dropdown
 
 **File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
