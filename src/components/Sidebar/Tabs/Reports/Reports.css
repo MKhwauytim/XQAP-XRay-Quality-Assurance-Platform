@@ -790,6 +790,44 @@
   border: 1px solid #bbf7d0;
   border-radius: 8px;
 }
-.rh-pbi-success { color: #16a34a; margin: 0 0 8px; font-size: 13px; }
+.rh-pbi-success { color: #16a34a; margin: 0 0 10px; font-size: 14px; font-weight: 600; }
+.rh-pbi-path-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: #fff;
+  border: 1px solid #bbf7d0;
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+.rh-pbi-path-label { font-size: 11px; color: #57606a; }
+.rh-pbi-path-row { display: flex; align-items: center; gap: 8px; }
+.rh-pbi-path-code {
+  flex: 1;
+  font-size: 13px;
+  background: #f6f8fa;
+  border: 1px solid #d0d7de;
+  border-radius: 4px;
+  padding: 6px 10px;
+  color: #1f2328;
+  word-break: break-all;
+  direction: ltr;
+  text-align: left;
+  user-select: all;
+}
+.rh-pbi-copy-btn {
+  flex-shrink: 0;
+  padding: 5px 12px;
+  background: #0078d4;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.rh-pbi-copy-btn:hover { background: #106ebe; }
+.rh-pbi-path-hint { font-size: 11px; color: #57606a; }
 .rh-pbi-file-list { margin: 6px 0 0; padding: 0 18px; font-size: 13px; line-height: 1.7; list-style: disc; }
 .rh-pbi-error { color: #dc2626; font-size: 13px; margin-top: 10px; }

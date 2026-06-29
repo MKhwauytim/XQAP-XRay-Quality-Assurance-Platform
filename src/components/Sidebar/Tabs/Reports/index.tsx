@@ -736,22 +736,46 @@ function ReportsContent() {
                 {pbiExporting ? "جاري التصدير..." : "تصدير"}
               </button>
             </div>
-            {pbiResult && (
-              <div className="rh-pbi-result">
-                <p className="rh-pbi-success">
-                  ✓ تم التصدير بنجاح — الملفات في مجلد{" "}
-                  <code>5-System/powerbi-export/{pbiResult.month}/</code>
-                </p>
-                <ul className="rh-pbi-file-list">
-                  {pbiResult.files.map((f) => (
-                    <li key={f.fileName}>
-                      <code>{f.fileName}</code> — {f.rowCount.toLocaleString("ar")} سطر
-                    </li>
-                  ))}
-                  <li><code>LISEZMOI.txt</code> — تعليمات الاتصال</li>
-                </ul>
-              </div>
-            )}
+            {pbiResult && (() => {
+              const relPath = `5-System\\powerbi-export\\${pbiResult.month}`;
+              const fullHint = directoryHandle
+                ? `${directoryHandle.name}\\${relPath}`
+                : relPath;
+              return (
+                <div className="rh-pbi-result">
+                  <p className="rh-pbi-success">✓ تم التصدير بنجاح</p>
+                  {/* Path box */}
+                  <div className="rh-pbi-path-box">
+                    <span className="rh-pbi-path-label">المسار داخل مجلد العمل:</span>
+                    <div className="rh-pbi-path-row">
+                      <code className="rh-pbi-path-code">{fullHint}</code>
+                      <button
+                        type="button"
+                        className="rh-pbi-copy-btn"
+                        title="نسخ المسار"
+                        onClick={() => {
+                          void navigator.clipboard.writeText(fullHint);
+                        }}
+                      >
+                        نسخ
+                      </button>
+                    </div>
+                    <span className="rh-pbi-path-hint">
+                      افتح مجلد العمل على جهازك، ثم انتقل إلى المسار أعلاه.
+                    </span>
+                  </div>
+                  {/* File list */}
+                  <ul className="rh-pbi-file-list">
+                    {pbiResult.files.map((f) => (
+                      <li key={f.fileName}>
+                        <code>{f.fileName}</code> — {f.rowCount.toLocaleString("ar")} سطر
+                      </li>
+                    ))}
+                    <li><code>LISEZMOI.txt</code> — تعليمات الاتصال</li>
+                  </ul>
+                </div>
+              );
+            })()}
             {pbiError && <p className="rh-pbi-error">{pbiError}</p>}
           </div>
         </>
