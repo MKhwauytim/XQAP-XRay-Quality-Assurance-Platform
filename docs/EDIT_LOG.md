@@ -4,6 +4,16 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v19.3 — 2026-06-29 — Power BI export: use page-level month selector instead of duplicate dropdown
+
+**File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
+
+**Before:** Power BI export section had its own `pbiMonth` state and a separate `<select>` dropdown starting empty. User had to pick the month a second time.
+
+**After:** Removed `pbiMonth` / `setPbiMonth` state. `handlePbiExport` now uses `selectedMonth` (same value as the top month bar). The separate dropdown is removed; a read-only pill shows the current month. Replace `📊` emoji with lucide `BarChart2` icon.
+
+---
+
 ## v19.2 — 2026-06-29 — KPI breakdown, distinctCount unique values, deselect on empty click
 
 **File:** `src/data/reportDesigner/reportTypes.ts`

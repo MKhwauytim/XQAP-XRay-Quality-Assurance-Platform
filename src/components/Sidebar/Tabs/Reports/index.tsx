@@ -119,7 +119,6 @@ function ReportsContent() {
     distribution: "html",
   });
   const [toast, setToast] = useState<{ type: "ok" | "error"; text: string } | null>(null);
-  const [pbiMonth, setPbiMonth] = useState("");
   const [pbiExporting, setPbiExporting] = useState(false);
   const [pbiResult, setPbiResult] = useState<ExportManifest | null>(null);
   const [pbiError, setPbiError] = useState<string | null>(null);
@@ -231,12 +230,12 @@ function ReportsContent() {
   }
 
   async function handlePbiExport() {
-    if (!directoryHandle || !pbiMonth) return;
+    if (!directoryHandle || !selectedMonth) return;
     setPbiExporting(true);
     setPbiResult(null);
     setPbiError(null);
     try {
-      const manifest = await runPowerBiExport(directoryHandle, pbiMonth);
+      const manifest = await runPowerBiExport(directoryHandle, selectedMonth);
       setPbiResult(manifest);
     } catch (err) {
       setPbiError(err instanceof Error ? err.message : "حدث خطأ أثناء التصدير");
@@ -707,30 +706,25 @@ function ReportsContent() {
           <div className="rh-pbi-section">
             <div className="rh-section-divider" />
             <h3 className="rh-pbi-title">
-              <span style={{ fontSize: "20px", marginLeft: "8px" }}>📊</span>
+              <BarChart2 size={20} strokeWidth={1.8} style={{ verticalAlign: "middle", marginLeft: 8 }} />
               تصدير البيانات لـ Power BI
             </h3>
             <p className="rh-pbi-desc">
               يصدّر بيانات المجتمع والعينة للشهر المحدد كملفات CSV يمكن فتحها مباشرة في Power BI Desktop.
             </p>
             <div className="rh-pbi-row">
-              <select
-                className="rh-pbi-select"
-                value={pbiMonth}
-                onChange={(e) => setPbiMonth(e.target.value)}
-                dir="rtl"
-                disabled={months.length === 0 || !directoryHandle}
-                aria-label="اختر شهراً للتصدير"
-              >
-                <option value="">-- اختر شهراً --</option>
-                {months.map((m) => (
-                  <option key={m.folderName} value={m.folderName}>{m.folderName}</option>
-                ))}
-              </select>
+              {selectedMonth ? (
+                <span className="rh-pbi-month-pill">
+                  <Database size={13} strokeWidth={1.8} />
+                  {selectedMonth}
+                </span>
+              ) : (
+                <span className="rh-pbi-month-empty">اختر شهراً من القائمة أعلاه</span>
+              )}
               <button
                 className="rh-btn rh-btn-teal"
                 onClick={() => void handlePbiExport()}
-                disabled={!pbiMonth || pbiExporting || !directoryHandle}
+                disabled={!selectedMonth || pbiExporting || !directoryHandle}
                 type="button"
               >
                 {pbiExporting ? "جاري التصدير..." : "تصدير"}

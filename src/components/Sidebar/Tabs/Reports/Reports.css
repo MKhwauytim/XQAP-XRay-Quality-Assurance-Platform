@@ -783,6 +783,23 @@
 }
 .rh-pbi-select:focus { border-color: #0078d4; }
 .rh-pbi-select:disabled { opacity: 0.55; cursor: not-allowed; }
+.rh-pbi-month-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background: #e8f4fd;
+  border: 1px solid #bde0fa;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #0078d4;
+}
+.rh-pbi-month-empty {
+  font-size: 13px;
+  color: #a19f9d;
+  padding: 6px 0;
+}
 .rh-pbi-result {
   margin-top: 14px;
   padding: 12px 16px;
