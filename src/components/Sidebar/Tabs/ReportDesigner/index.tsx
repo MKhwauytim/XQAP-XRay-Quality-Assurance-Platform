@@ -196,26 +196,42 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: Editor
     setSelectedId(newEl.elementId);
   }
 
-  const AGG_DISPLAY: Record<string, string> = {
-    count: "عدد", distinctCount: "عدد مميز", sum: "مجموع",
-    avg: "متوسط", min: "أدنى", max: "أقصى", percentOfTotal: "نسبة",
-  };
-
-  function addFieldElement(label: string, x = 50, y = 50, agg: AggChoice = "none") {
+  function addFieldElement(label: string, fieldName: string, role: FieldRole, x = 50, y = 50, agg: AggChoice = "none") {
     if (!currentPage) return;
-    const text = agg === "none" ? `[${label}]` : `[${label}] • ${AGG_DISPLAY[agg] ?? agg}`;
-    const newEl: Element = {
-      elementId: createElementId(),
-      type: "text",
-      name: label,
-      x,
-      y,
-      w: 220,
-      h: 40,
-      z: currentPage.elements.length,
-      style: { fontSize: 14, color: "#201f1e" },
-      config: { kind: "text", text },
-    };
+    const isDim = role === "dimension";
+    const fill = isDim ? "#dce6f1" : "#dff6dd";
+    const borderColor = isDim ? "#0078d4" : "#107c10";
+
+    let newEl: Element;
+    if (agg === "none") {
+      // Dimension used as-is → styled text label, centered on drop
+      const w = 200, h = 50;
+      newEl = {
+        elementId: createElementId(),
+        type: "text",
+        name: label,
+        x: Math.max(0, x - w / 2),
+        y: Math.max(0, y - h / 2),
+        w, h,
+        z: currentPage.elements.length,
+        style: { fill, borderWidth: 1, borderColor, fontSize: 14, fontWeight: 600, color: "#201f1e", padding: 8 },
+        config: { kind: "text", text: label },
+      };
+    } else {
+      // With aggregation → KPI card, centered on drop
+      const w = 160, h = 100;
+      newEl = {
+        elementId: createElementId(),
+        type: "kpi",
+        name: label,           // Arabic display label shown in card
+        x: Math.max(0, x - w / 2),
+        y: Math.max(0, y - h / 2),
+        w, h,
+        z: currentPage.elements.length,
+        style: { fill, borderWidth: 1, borderColor },
+        config: { kind: "kpi", dataSourceId: "population", valueField: fieldName, agg },
+      };
+    }
     setDoc((d) => ({
       ...d,
       pages: d.pages.map((p, i) =>
@@ -345,12 +361,13 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: Editor
               };
             };
 
-            // Viz-type drag (from التصورات panel) → place element directly
+            // Viz-type drag (from التصورات panel) → place element centered on drop
             const vizKey = e.dataTransfer.getData("application/x-rd-viz-type");
             if (vizKey) {
               const { cx, cy } = getDropCoords();
               if (vizKey === "text" || vizKey === "shape" || vizKey === "line") {
-                addElement(vizKey === "line" ? "shape" : (vizKey as "text" | "shape"), cx, cy);
+                // addElement defaults are 200×60; center on cursor
+                addElement(vizKey === "line" ? "shape" : (vizKey as "text" | "shape"), Math.max(0, cx - 100), Math.max(0, cy - 30));
               }
               return;
             }
@@ -394,7 +411,7 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: Editor
           screenX={fieldDrop.screenX}
           screenY={fieldDrop.screenY}
           onConfirm={(agg) => {
-            addFieldElement(fieldDrop.fieldLabel, fieldDrop.canvasX, fieldDrop.canvasY, agg);
+            addFieldElement(fieldDrop.fieldLabel, fieldDrop.fieldName, fieldDrop.role, fieldDrop.canvasX, fieldDrop.canvasY, agg);
             setFieldDrop(null);
           }}
           onCancel={() => setFieldDrop(null)}

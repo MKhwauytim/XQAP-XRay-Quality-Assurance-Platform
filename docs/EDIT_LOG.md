@@ -4,6 +4,20 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v18.5 — 2026-06-29 — Field drop → KPI card + centered drop positions
+
+**File:** `src/.../renderers/KpiRenderer.tsx` (new) — KPI card: field name (top), "—" placeholder (center), agg badge (bottom)
+
+**File:** `src/.../editor/Canvas.tsx` — import + render KpiRenderer for kind="kpi" elements
+
+**File:** `src/.../index.tsx`
+- `addFieldElement(label, fieldName, role, x, y, agg)`: agg="none" → styled text label; agg≠"none" → KPI element. Both centered on drop point via `x - w/2`.
+- `addElement(type, x, y)`: now centers on drop point too.
+- viz-type onDrop: passes `cx - 100, cy - 30` to center 200×60 elements.
+- FieldDropDialog onConfirm: passes `fieldDrop.fieldName` and `fieldDrop.role`.
+
+---
+
 ## v18.4 — 2026-06-29 — VizPanel drag-and-drop + icon strokeWidth fix
 
 **File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/VizPanel.tsx`

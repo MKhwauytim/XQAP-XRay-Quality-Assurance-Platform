@@ -5,6 +5,7 @@ import { useCanvasInteractions } from "./useCanvasInteractions";
 import TextRenderer from "../renderers/TextRenderer";
 import ShapeRenderer from "../renderers/ShapeRenderer";
 import ImageRenderer from "../renderers/ImageRenderer";
+import KpiRenderer from "../renderers/KpiRenderer";
 
 const RESIZE_HANDLES: ResizeHandle[] = ["nw", "n", "ne", "w", "e", "sw", "s", "se"];
 
@@ -23,6 +24,7 @@ function ElementBody({ element }: { element: Element }) {
   if (kind === "text") return <TextRenderer element={element} />;
   if (kind === "shape") return <ShapeRenderer element={element} />;
   if (kind === "image") return <ImageRenderer element={element} />;
+  if (kind === "kpi") return <KpiRenderer element={element} />;
   // Placeholder for table / chart / kpi (not yet implemented)
   return (
     <div className="rd-element-placeholder">
