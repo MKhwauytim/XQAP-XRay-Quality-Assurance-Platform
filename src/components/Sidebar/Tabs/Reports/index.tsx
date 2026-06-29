@@ -651,25 +651,44 @@ function ReportsContent() {
           </div>
         </div>
 
-        {/* XLSX exports note */}
-        <div className="rh-card rh-card-disabled rh-card-dashed">
-          <div className="rh-card-accent" style={{ background: "#e8eff8" }} />
+        {/* Power BI / CSV export */}
+        <div className="rh-card">
+          <div className="rh-card-accent rh-acc-indigo" />
           <div className="rh-card-body">
             <div className="rh-card-top">
-              <div className="rh-icon rh-icon-muted"><Download size={22} /></div>
-              <span className="rh-badge rh-badge-muted">تصديرات</span>
+              <div className="rh-icon rh-icon-indigo"><BarChart2 size={22} /></div>
+              <span className="rh-badge rh-badge-ready">جاهز</span>
             </div>
-            <div className="rh-card-title" style={{ color: "#8390a2" }}>تصدير Excel / CSV</div>
+            <div className="rh-card-title">تصدير Power BI / CSV</div>
             <p className="rh-card-desc">
-              تصدير بيانات المجتمع، العينة، والإجابات مباشرةً إلى ملفات XLSX — متاح من داخل الجداول التفاعلية في كل تبويب.
+              يصدّر بيانات المجتمع والعينة للشهر المحدد كملفات CSV يمكن فتحها مباشرة في Power BI Desktop.
             </p>
+            <div className="rh-tags">
+              <span className="rh-tag"><Database size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> بيانات المجتمع</span>
+              <span className="rh-tag"><Filter size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> بيانات العينة</span>
+              <span className="rh-tag"><Download size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> CSV</span>
+            </div>
           </div>
           <div className="rh-card-footer">
-            <span className="rh-req">
-              <i className="rh-dot" style={{ background: "#d8e3ef" }} />
-              متاح داخل الجداول
-            </span>
-            <button className="rh-btn rh-btn-ghost" disabled>من داخل الجداول</button>
+            <div className="rh-export-controls" role="group">
+              {selectedMonth ? (
+                <span className="rh-pbi-month-pill">
+                  <Database size={12} strokeWidth={1.8} />
+                  {selectedMonth}
+                </span>
+              ) : (
+                <span className="rh-pbi-month-empty">اختر شهراً أعلاه</span>
+              )}
+              <button
+                className="rh-btn rh-btn-indigo"
+                onClick={() => void handlePbiExport()}
+                disabled={!selectedMonth || pbiExporting || !directoryHandle}
+                type="button"
+              >
+                {pbiExporting ? <span className="rh-spinner" /> : null}
+                {pbiExporting ? "جاري…" : "تصدير"}
+              </button>
+            </div>
           </div>
         </div>
           </div>
@@ -702,76 +721,44 @@ function ReportsContent() {
             </div>
           </div>
 
-          {/* ── Power BI Export ── */}
-          <div className="rh-pbi-section">
-            <div className="rh-section-divider" />
-            <h3 className="rh-pbi-title">
-              <BarChart2 size={20} strokeWidth={1.8} style={{ verticalAlign: "middle", marginLeft: 8 }} />
-              تصدير البيانات لـ Power BI
-            </h3>
-            <p className="rh-pbi-desc">
-              يصدّر بيانات المجتمع والعينة للشهر المحدد كملفات CSV يمكن فتحها مباشرة في Power BI Desktop.
-            </p>
-            <div className="rh-pbi-row">
-              {selectedMonth ? (
-                <span className="rh-pbi-month-pill">
-                  <Database size={13} strokeWidth={1.8} />
-                  {selectedMonth}
-                </span>
-              ) : (
-                <span className="rh-pbi-month-empty">اختر شهراً من القائمة أعلاه</span>
-              )}
-              <button
-                className="rh-btn rh-btn-teal"
-                onClick={() => void handlePbiExport()}
-                disabled={!selectedMonth || pbiExporting || !directoryHandle}
-                type="button"
-              >
-                {pbiExporting ? "جاري التصدير..." : "تصدير"}
-              </button>
-            </div>
-            {pbiResult && (() => {
-              const relPath = `5-System\\powerbi-export\\${pbiResult.month}`;
-              const fullHint = directoryHandle
-                ? `${directoryHandle.name}\\${relPath}`
-                : relPath;
-              return (
-                <div className="rh-pbi-result">
-                  <p className="rh-pbi-success">✓ تم التصدير بنجاح</p>
-                  {/* Path box */}
-                  <div className="rh-pbi-path-box">
-                    <span className="rh-pbi-path-label">المسار داخل مجلد العمل:</span>
-                    <div className="rh-pbi-path-row">
-                      <code className="rh-pbi-path-code">{fullHint}</code>
-                      <button
-                        type="button"
-                        className="rh-pbi-copy-btn"
-                        title="نسخ المسار"
-                        onClick={() => {
-                          void navigator.clipboard.writeText(fullHint);
-                        }}
-                      >
-                        نسخ
-                      </button>
-                    </div>
-                    <span className="rh-pbi-path-hint">
-                      افتح مجلد العمل على جهازك، ثم انتقل إلى المسار أعلاه.
-                    </span>
+          {/* ── Power BI export result (shown below grid after export) ── */}
+          {pbiResult && (() => {
+            const relPath = `5-System\\powerbi-export\\${pbiResult.month}`;
+            const fullHint = directoryHandle
+              ? `${directoryHandle.name}\\${relPath}`
+              : relPath;
+            return (
+              <div className="rh-pbi-result">
+                <p className="rh-pbi-success">✓ تم التصدير بنجاح</p>
+                <div className="rh-pbi-path-box">
+                  <span className="rh-pbi-path-label">المسار داخل مجلد العمل:</span>
+                  <div className="rh-pbi-path-row">
+                    <code className="rh-pbi-path-code">{fullHint}</code>
+                    <button
+                      type="button"
+                      className="rh-pbi-copy-btn"
+                      title="نسخ المسار"
+                      onClick={() => { void navigator.clipboard.writeText(fullHint); }}
+                    >
+                      نسخ
+                    </button>
                   </div>
-                  {/* File list */}
-                  <ul className="rh-pbi-file-list">
-                    {pbiResult.files.map((f) => (
-                      <li key={f.fileName}>
-                        <code>{f.fileName}</code> — {f.rowCount.toLocaleString("ar")} سطر
-                      </li>
-                    ))}
-                    <li><code>LISEZMOI.txt</code> — تعليمات الاتصال</li>
-                  </ul>
+                  <span className="rh-pbi-path-hint">
+                    افتح مجلد العمل على جهازك، ثم انتقل إلى المسار أعلاه.
+                  </span>
                 </div>
-              );
-            })()}
-            {pbiError && <p className="rh-pbi-error">{pbiError}</p>}
-          </div>
+                <ul className="rh-pbi-file-list">
+                  {pbiResult.files.map((f) => (
+                    <li key={f.fileName}>
+                      <code>{f.fileName}</code> — {f.rowCount.toLocaleString("ar")} سطر
+                    </li>
+                  ))}
+                  <li><code>LISEZMOI.txt</code> — تعليمات الاتصال</li>
+                </ul>
+              </div>
+            );
+          })()}
+          {pbiError && <p className="rh-pbi-error">{pbiError}</p>}
         </>
       )}
     </section>

@@ -484,6 +484,7 @@
 .rh-acc-teal   { background: var(--c-sky, #009ADE); }
 .rh-acc-purple { background: var(--brand-premium, #DAA328); }
 .rh-acc-amber  { background: var(--brand-premium, #DAA328); }
+.rh-acc-indigo { background: #6366f1; }
 
 /* Card body */
 .rh-card-body {
@@ -513,6 +514,7 @@
 .rh-icon-teal   { background: var(--c-sky-light, #E5F5FB); color: var(--c-sky, #009ADE); }
 .rh-icon-purple { background: var(--c-warning-bg, #FBF2DC); color: var(--c-warning, #775000); }
 .rh-icon-muted  { background: #f4f7fb; color: #8390a2; }
+.rh-icon-indigo { background: #eef2ff; color: #6366f1; }
 
 /* Badges */
 .rh-badge {
@@ -610,6 +612,16 @@
 }
 .rh-btn-teal:not(:disabled):hover {
   box-shadow: 0 5px 18px rgba(0, 153, 138, 0.35);
+  transform: translateY(-1px);
+}
+
+.rh-btn-indigo {
+  background: #6366f1;
+  color: #fff;
+  box-shadow: 0 3px 10px rgba(99, 102, 241, 0.25);
+}
+.rh-btn-indigo:not(:disabled):hover {
+  box-shadow: 0 5px 18px rgba(99, 102, 241, 0.38);
   transform: translateY(-1px);
 }
 
