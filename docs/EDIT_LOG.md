@@ -4,6 +4,16 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v19.6 — 2026-06-29 — executive report rework: create primitives.ts
+
+**File:** `src/data/reporting/executive/primitives.ts`
+
+**Before:** (file did not exist)
+
+**After:** New file — pure HTML render helper functions for building executive report page content. Exports: `esc()`, `fmtNum()`, `fmtPct()`, `kpiCard()`, `barRow()`, `badgeHtml()`, `heatCell()`, `dataTable()`, `noticeBox()`, `pagePanel()`, `radarSvg()`. All functions return HTML strings with `.xr-` prefixed CSS classes; no React imports or side effects.
+
+---
+
 ## v19.5 — 2026-06-29 — executive report rework: create theme.ts
 
 **File:** `src/data/reporting/executive/theme.ts`
