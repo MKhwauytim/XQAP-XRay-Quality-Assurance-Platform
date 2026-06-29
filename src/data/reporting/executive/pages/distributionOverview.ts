@@ -16,7 +16,7 @@ export function buildDistributionOverview(ctx: ExecutiveRenderContext): string {
     <h2 class="section-title">التوزيع والتكليف</h2>
     <div class="section-subtitle">توزيع حالات العينة على الموظفين</div>
     <div class="card info" style="margin-top:24px">لم يتم التوزيع بعد لهذا الشهر. سيُعرض التحليل عند اكتمال البيانات.</div>
-    <div class="page-no">11</div>
+    <div class="page-no">24</div>
   </div>
 </section>`;
   }
@@ -66,7 +66,7 @@ export function buildDistributionOverview(ctx: ExecutiveRenderContext): string {
       <thead><tr><th>الموظف</th><th>المكلَّف به</th><th>مكتمل</th><th>متبقٍ</th><th>نسبة الإنجاز</th></tr></thead>
       <tbody>${empRows}</tbody>
     </table></div>
-    <div class="page-no">11</div>
+    <div class="page-no">24</div>
   </div>
 </section>`;
 }

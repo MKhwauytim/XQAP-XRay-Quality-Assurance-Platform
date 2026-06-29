@@ -17,8 +17,8 @@ export function buildAnalyticsMap(_ctx: ExecutiveRenderContext): string {
         <div class="panel-title">أداء الموظفين</div>
         <p>15 — النظرة العامة لأداء الموظفين</p>
         <p>16 — دقة الموظفين حسب نوع القرار</p>
-        <p>17 — أداء الموظفين حسب المنفذ</p>
-        <p>18 — مقارنة الموظفين بين المنافذ</p>
+        <p>17+ — أداء الموظفين حسب المنفذ (صفحة لكل منفذ)</p>
+        <p>— مقارنة الموظفين بين المنافذ</p>
       </div>
       <div class="card">
         <div class="panel-title">تحليل العوامل المؤثرة</div>

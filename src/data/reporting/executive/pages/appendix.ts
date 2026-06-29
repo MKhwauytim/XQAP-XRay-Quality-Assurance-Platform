@@ -49,7 +49,7 @@ export function buildAppendix(ctx: ExecutiveRenderContext): string {
         <span style="display:block;color:#dce7f2;font-size:13px;position:relative;padding-right:14px"><span style="position:absolute;right:0;color:var(--gold)">•</span>التفاصيل الداعمة</span>
       </div>
     </div>
-    <div class="page-no">20</div>
+    <div class="page-no">25</div>
   </div>
 </section>`;
 }

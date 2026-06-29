@@ -75,9 +75,9 @@ export function buildToc(_ctx: ExecutiveRenderContext): string {
             <tbody>
               <tr><td>غلاف الجزء الثالث</td><td>13</td></tr>
               <tr><td>خريطة التحليلات المتقدمة</td><td>14</td></tr>
-              <tr><td>أداء الموظفين</td><td>15–20</td></tr>
-              <tr><td>تحليل الأخطاء والتوافق</td><td>21–22</td></tr>
-              <tr><td>الأولوية والإجراءات</td><td>23</td></tr>
+              <tr><td>أداء الموظفين (متغير حسب المنافذ)</td><td>15+</td></tr>
+              <tr><td>تحليل الأخطاء والتوافق</td><td>—</td></tr>
+              <tr><td>الأولوية والإجراءات</td><td>—</td></tr>
             </tbody>
           </table>
         </div>

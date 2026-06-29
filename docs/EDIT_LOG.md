@@ -4,6 +4,83 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v25.4 — 2026-06-29 — Task 5: Integration review
+
+**File:** `src/data/reporting/executive/pages/distributionOverview.ts`
+
+**Before:**
+```html
+<!-- both no-data path (line 19) and data path (line 69) -->
+<div class="page-no">11</div>
+```
+
+**After:**
+```html
+<div class="page-no">24</div>
+```
+
+**File:** `src/data/reporting/executive/pages/appendix.ts`
+
+**Before:**
+```html
+<div class="page-no">20</div>
+```
+
+**After:**
+```html
+<div class="page-no">25</div>
+```
+
+**File:** `src/data/reporting/executive/pages/sampleByLevel.ts`
+
+**Before:**
+```html
+<table>
+  <thead>…</thead>
+  <tbody>…</tbody>
+</table>
+```
+
+**After:**
+```html
+<div class="table-wrap"><table>
+  <thead>…</thead>
+  <tbody>…</tbody>
+</table></div>
+```
+
+**File:** `src/data/reporting/executive/pages/toc.ts`
+
+**Before:**
+```html
+<tr><td>أداء الموظفين</td><td>15–20</td></tr>
+<tr><td>تحليل الأخطاء والتوافق</td><td>21–22</td></tr>
+<tr><td>الأولوية والإجراءات</td><td>23</td></tr>
+```
+
+**After:**
+```html
+<tr><td>أداء الموظفين (متغير حسب المنافذ)</td><td>15+</td></tr>
+<tr><td>تحليل الأخطاء والتوافق</td><td>—</td></tr>
+<tr><td>الأولوية والإجراءات</td><td>—</td></tr>
+```
+
+**File:** `src/data/reporting/executive/pages/analyticsMap.ts`
+
+**Before:**
+```html
+<p>17 — أداء الموظفين حسب المنفذ</p>
+<p>18 — مقارنة الموظفين بين المنافذ</p>
+```
+
+**After:**
+```html
+<p>17+ — أداء الموظفين حسب المنفذ (صفحة لكل منفذ)</p>
+<p>— مقارنة الموظفين بين المنافذ</p>
+```
+
+---
+
 ## v25.3 — 2026-06-29 — Task 4: Per-port employee analysis section
 
 **File:** `src/data/reporting/executive/portEmployeeData.ts`

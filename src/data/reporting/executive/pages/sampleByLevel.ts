@@ -12,12 +12,12 @@ export function buildSampleByLevel(ctx: ExecutiveRenderContext): string {
   const stageCards = kpis.stageProfiles.map((sp, i) => `
     <div class="card stage${i+1}">
       <div class="panel-title">${esc(sp.stageLabel)} — ${fmtNum(sp.sampleSize)}/${fmtNum(sp.population)}</div>
-      <table>
+      <div class="table-wrap"><table>
         <thead><tr><th>البند</th><th>مجتمع المرحلة</th><th>العينة</th><th>التغطية</th></tr></thead>
         <tbody>
           <tr><td>جميع المنافذ</td><td>${fmtNum(sp.population)}</td><td>${fmtNum(sp.sampleSize)}</td><td>${fmtPct(sp.coverage)}</td></tr>
         </tbody>
-      </table>
+      </table></div>
     </div>`).join('');
 
   // Bar rows showing coverage per stage
