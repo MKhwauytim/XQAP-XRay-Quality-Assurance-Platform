@@ -16,6 +16,7 @@ import {
 import { buildPopulationByRisk } from "./pages/populationByRisk";
 import { buildPopulationByLevel } from "./pages/populationByLevel";
 import { buildSampleByLevel } from "./pages/sampleByLevel";
+import { buildDistributionOverview } from "./pages/distributionOverview";
 import { buildAppendix } from "./pages/appendix";
 
 export function buildExecutiveReport(
@@ -37,7 +38,7 @@ export function buildExecutiveReport(
     buildPart2Divider,
     buildSampleByLevel,
     buildPart3Divider,
-    // distributionOverview — Phase 2
+    buildDistributionOverview,
     buildPart4Divider,
     // accuracyByPort — Phase 3
     // accuracyByLevel — Phase 3

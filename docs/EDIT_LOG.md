@@ -4,6 +4,141 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v20.5 — 2026-06-29 — feat(executive-report): add distribution overview page (Phase 2)
+
+**File:** `src/data/reporting/executive/pages/distributionOverview.ts`
+
+**Before:** (file did not exist)
+
+**After:**
+```ts
+import type { ExecutiveRenderContext } from "../context";
+import { dataTable, kpiCard, fmtNum, fmtPct, esc } from "../primitives";
+
+export function buildDistributionOverview(ctx: ExecutiveRenderContext): string {
+  const dist = ctx.input.distribution;
+  if (!dist || dist.entries.length === 0) {
+    return `<section class="xr-page" id="page-dist">
+      <div class="xr-page-inner">
+        <div class="xr-slide-head"><h2>التوزيع والتكليف</h2><span class="xr-pg">16</span></div>
+        <div class="xr-notice">لم يتم التوزيع بعد لهذا الشهر.</div>
+        <div class="xr-footer"><span>التقرير التنفيذي — ${esc(ctx.monthLabel)}</span><span>16</span></div>
+      </div>
+    </section>`;
+  }
+
+  const byEmployee = new Map<string, { assigned: number; completed: number; pending: number }>();
+  for (const e of dist.entries) {
+    const emp = e.assignedTo ?? "غير محدد";
+    const rec = byEmployee.get(emp) ?? { assigned: 0, completed: 0, pending: 0 };
+    rec.assigned++;
+    if (e.status === "completed") rec.completed++;
+    else rec.pending++;
+    byEmployee.set(emp, rec);
+  }
+
+  const totalAssigned = dist.entries.length;
+  const totalCompleted = dist.entries.filter(e => e.status === "completed").length;
+  const totalPending = totalAssigned - totalCompleted;
+
+  const kpisRow = [
+    kpiCard({ label: "إجمالي المكلَّف به", value: fmtNum(totalAssigned), tone: "accent" }),
+    kpiCard({ label: "مكتملة", value: fmtNum(totalCompleted), tone: "good" }),
+    kpiCard({ label: "متبقية", value: fmtNum(totalPending), tone: totalPending > 0 ? "warn" : "" }),
+    kpiCard({ label: "نسبة الإنجاز", value: fmtPct(totalAssigned > 0 ? (totalCompleted / totalAssigned) * 100 : null) }),
+  ].join("");
+
+  const rows = [...byEmployee.entries()].map(([emp, r]) => [
+    esc(ctx.displayName(emp)),
+    fmtNum(r.assigned),
+    fmtNum(r.completed),
+    fmtNum(r.pending),
+    fmtPct(r.assigned > 0 ? (r.completed / r.assigned) * 100 : null),
+  ]);
+
+  return `<section class="xr-page" id="page-dist">
+    <div class="xr-page-inner">
+      <div class="xr-slide-head"><h2>التوزيع والتكليف</h2><span class="xr-pg">16</span></div>
+      <div class="xr-kpi-grid xr-kpi-grid-4" style="margin-bottom:0.13in">${kpisRow}</div>
+      <div class="xr-panel-title">أعباء العمل حسب الموظف</div>
+      ${dataTable({ headers: ["الموظف","المكلَّف به","مكتمل","متبقٍ","نسبة الإنجاز"], rows })}
+      <div class="xr-footer"><span>التقرير التنفيذي — ${esc(ctx.monthLabel)}</span><span>16</span></div>
+    </div>
+  </section>`;
+}
+```
+
+**File:** `src/data/reporting/executive/index.ts`
+
+**Before:**
+```ts
+import { buildCover } from "./pages/cover";
+import { buildToc } from "./pages/toc";
+import { buildExecIntro } from "./pages/execIntro";
+import { buildGlossary } from "./pages/glossary";
+import {
+  buildPart1Divider, buildPart2Divider, buildPart3Divider,
+  buildPart4Divider, buildPart5Divider, buildPart6Divider,
+} from "./pages/partDivider";
+import { buildPopulationByRisk } from "./pages/populationByRisk";
+import { buildPopulationByLevel } from "./pages/populationByLevel";
+import { buildSampleByLevel } from "./pages/sampleByLevel";
+import { buildAppendix } from "./pages/appendix";
+```
+
+**After:**
+```ts
+import { buildCover } from "./pages/cover";
+import { buildToc } from "./pages/toc";
+import { buildExecIntro } from "./pages/execIntro";
+import { buildGlossary } from "./pages/glossary";
+import {
+  buildPart1Divider, buildPart2Divider, buildPart3Divider,
+  buildPart4Divider, buildPart5Divider, buildPart6Divider,
+} from "./pages/partDivider";
+import { buildPopulationByRisk } from "./pages/populationByRisk";
+import { buildPopulationByLevel } from "./pages/populationByLevel";
+import { buildSampleByLevel } from "./pages/sampleByLevel";
+import { buildDistributionOverview } from "./pages/distributionOverview";
+import { buildAppendix } from "./pages/appendix";
+```
+
+**Before (pages array):**
+```ts
+  const pages = [
+    buildCover,
+    buildToc,
+    buildExecIntro,
+    buildGlossary,
+    buildPart1Divider,
+    buildPopulationByRisk,
+    buildPopulationByLevel,
+    buildPart2Divider,
+    buildSampleByLevel,
+    buildPart3Divider,
+    // distributionOverview — Phase 2
+    buildPart4Divider,
+```
+
+**After (pages array):**
+```ts
+  const pages = [
+    buildCover,
+    buildToc,
+    buildExecIntro,
+    buildGlossary,
+    buildPart1Divider,
+    buildPopulationByRisk,
+    buildPopulationByLevel,
+    buildPart2Divider,
+    buildSampleByLevel,
+    buildPart3Divider,
+    buildDistributionOverview,
+    buildPart4Divider,
+```
+
+---
+
 ## v20.4 — 2026-06-29 — feat(executive-report): add population-by-level and sample-by-level pages (Phase 2)
 
 **File:** `src/data/reporting/executive/pages/populationByLevel.ts`
