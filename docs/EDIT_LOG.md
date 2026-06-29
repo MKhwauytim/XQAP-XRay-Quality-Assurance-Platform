@@ -7908,3 +7908,50 @@ const REPORT_LABELS: Record<ReportType, string> = {
 ```
 
 ---
+
+## v4.5 — 2026-06-29 — Fix: executive report badgeHtml CSS class injection, sidebar nav labels
+
+**File:** `src/data/reporting/executive/primitives.ts`
+
+**Before:**
+```ts
+export function badgeHtml(status: "excellent" | "stable" | "monitor" | "priority" | "insufficient" | string): string {
+  const labels: Record<string, string> = {
+    excellent: "ممتاز", stable: "مستقر", monitor: "متابعة", priority: "أولوية", insufficient: "بيانات غير كافية",
+  };
+  return `<span class="xr-badge ${esc(status)}">${esc(labels[status] ?? status)}</span>`;
+}
+```
+
+**After:**
+```ts
+export function badgeHtml(status: "excellent" | "stable" | "monitor" | "priority" | "insufficient" | string): string {
+  const labels: Record<string, string> = {
+    excellent: "ممتاز", stable: "مستقر", monitor: "متابعة", priority: "أولوية", insufficient: "بيانات غير كافية",
+  };
+  const CSS_CLASS: Record<string, string> = {
+    excellent: "excellent",
+    stable: "stable",
+    monitor: "monitor",
+    priority: "priority",
+    insufficient: "insufficient",
+  };
+  return `<span class="xr-badge ${CSS_CLASS[status] ?? "insufficient"}">${esc(labels[status] ?? status)}</span>`;
+}
+```
+
+**File:** `src/data/reporting/executive/assemble.ts`
+
+**Before:**
+```ts
+  { label: "الجزء الخامس: الفجوات", id: "page-p5" },
+  { label: "الجزء السادس: التوصيات", id: "page-p6" },
+```
+
+**After:**
+```ts
+  { label: "الجزء الخامس: أداء الموظفين", id: "page-p5" },
+  { label: "الجزء السادس: الأولويات", id: "page-p6" },
+```
+
+---

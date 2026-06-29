@@ -38,7 +38,14 @@ export function badgeHtml(status: "excellent" | "stable" | "monitor" | "priority
   const labels: Record<string, string> = {
     excellent: "ممتاز", stable: "مستقر", monitor: "متابعة", priority: "أولوية", insufficient: "بيانات غير كافية",
   };
-  return `<span class="xr-badge ${esc(status)}">${esc(labels[status] ?? status)}</span>`;
+  const CSS_CLASS: Record<string, string> = {
+    excellent: "excellent",
+    stable: "stable",
+    monitor: "monitor",
+    priority: "priority",
+    insufficient: "insufficient",
+  };
+  return `<span class="xr-badge ${CSS_CLASS[status] ?? "insufficient"}">${esc(labels[status] ?? status)}</span>`;
 }
 
 export function heatCell(pct: number | null): string {

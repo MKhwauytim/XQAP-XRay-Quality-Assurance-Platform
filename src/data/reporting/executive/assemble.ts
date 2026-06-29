@@ -11,8 +11,8 @@ const NAV_SECTIONS = [
   { label: "الجزء الثاني: العينة", id: "page-p2" },
   { label: "الجزء الثالث: التوزيع", id: "page-p3" },
   { label: "الجزء الرابع: الدقة", id: "page-p4" },
-  { label: "الجزء الخامس: الفجوات", id: "page-p5" },
-  { label: "الجزء السادس: التوصيات", id: "page-p6" },
+  { label: "الجزء الخامس: أداء الموظفين", id: "page-p5" },
+  { label: "الجزء السادس: الأولويات", id: "page-p6" },
   { label: "الملاحق", id: "page-appendix" },
 ];
 
