@@ -38,7 +38,7 @@ export function buildLevelAgreement(ctx: ExecutiveRenderContext): string {
       <div class="card">
         <div class="panel-title">مقارنة دقة المستويين</div>
         <p>المستوى الأول</p><div class="bar"><i style="width:${Math.round(l1Pct)}%"></i></div>
-        <p style="margin-top:8px">المستوى الثاني</p><div class="bar"><i style="width:${Math.round(l2Pct)};background:var(--blue)%"></i></div>
+        <p style="margin-top:8px">المستوى الثاني</p><div class="bar"><i style="width:${Math.round(l2Pct)}%;background:var(--blue)"></i></div>
         <p style="margin-top:8px">الاختلاف</p><div class="bar"><i style="width:${Math.round(kpis.levelDisagreementRate ?? 0)}%;background:var(--coral)"></i></div>
       </div>
       <div class="card">

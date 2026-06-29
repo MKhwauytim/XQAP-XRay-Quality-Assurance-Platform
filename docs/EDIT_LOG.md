@@ -4,6 +4,24 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v24.1 — 2026-06-29 — Review fix: broken bar CSS in levelAgreement page
+
+**File:** `src/data/reporting/executive/pages/levelAgreement.ts`
+
+**Before:**
+```ts
+<p style="margin-top:8px">المستوى الثاني</p><div class="bar"><i style="width:${Math.round(l2Pct)};background:var(--blue)%"></i></div>
+```
+
+**After:**
+```ts
+<p style="margin-top:8px">المستوى الثاني</p><div class="bar"><i style="width:${Math.round(l2Pct)}%;background:var(--blue)"></i></div>
+```
+
+The `%` unit was transposed to the end of the `background` value instead of the `width` value, causing the Level 2 accuracy bar to render with no width and an invalid CSS background.
+
+---
+
 ## v24.0 — 2026-06-29 — UI design taste enhancement: polish CSS, cover art, anti-AI design
 
 **File:** `src/data/reporting/executive/theme.ts`
