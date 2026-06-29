@@ -28,7 +28,9 @@ import Ribbon from "./editor/Ribbon";
 import VizPanel from "./editor/VizPanel";
 import PagesBar from "./editor/PagesBar";
 import FieldsPanel from "./editor/FieldsPanel";
+import FieldDropDialog, { type AggChoice } from "./editor/FieldDropDialog";
 import PrintView from "./PrintView";
+import type { FieldRole } from "../../../../data/reportDesigner/query/fieldCatalog";
 import "./ReportDesigner.css";
 
 export const tabConfig: SidebarTabModule["tabConfig"] = {
@@ -79,6 +81,15 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: Editor
   const [showFormat, setShowFormat] = useState(true);
 
   const canvasAreaRef = useRef<HTMLDivElement>(null);
+  const [fieldDrop, setFieldDrop] = useState<{
+    fieldLabel: string;
+    fieldName: string;
+    role: FieldRole;
+    canvasX: number;
+    canvasY: number;
+    screenX: number;
+    screenY: number;
+  } | null>(null);
 
   // Debounce timer ref — stores the pending timeout id
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -185,8 +196,14 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: Editor
     setSelectedId(newEl.elementId);
   }
 
-  function addFieldElement(label: string, x = 50, y = 50) {
+  const AGG_DISPLAY: Record<string, string> = {
+    count: "عدد", distinctCount: "عدد مميز", sum: "مجموع",
+    avg: "متوسط", min: "أدنى", max: "أقصى", percentOfTotal: "نسبة",
+  };
+
+  function addFieldElement(label: string, x = 50, y = 50, agg: AggChoice = "none") {
     if (!currentPage) return;
+    const text = agg === "none" ? `[${label}]` : `[${label}] • ${AGG_DISPLAY[agg] ?? agg}`;
     const newEl: Element = {
       elementId: createElementId(),
       type: "text",
@@ -197,7 +214,7 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: Editor
       h: 40,
       z: currentPage.elements.length,
       style: { fontSize: 14, color: "#201f1e" },
-      config: { kind: "text", text: `[${label}]` },
+      config: { kind: "text", text },
     };
     setDoc((d) => ({
       ...d,
@@ -320,16 +337,15 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: Editor
             e.preventDefault();
             const raw = e.dataTransfer.getData("application/x-rd-field");
             if (!raw) return;
-            const { label } = JSON.parse(raw) as { field: string; label: string; role: string };
+            const { field, label, role } = JSON.parse(raw) as { field: string; label: string; role: FieldRole };
             const canvasPage = canvasAreaRef.current?.querySelector(".rd-canvas") as HTMLElement | null;
+            let cx = 50, cy = 50;
             if (canvasPage) {
               const pr = canvasPage.getBoundingClientRect();
-              const x = Math.max(0, Math.round((e.clientX - pr.left) / 8) * 8);
-              const y = Math.max(0, Math.round((e.clientY - pr.top) / 8) * 8);
-              addFieldElement(label, x, y);
-            } else {
-              addFieldElement(label);
+              cx = Math.max(0, Math.round((e.clientX - pr.left) / 8) * 8);
+              cy = Math.max(0, Math.round((e.clientY - pr.top) / 8) * 8);
             }
+            setFieldDrop({ fieldLabel: label, fieldName: field, role, canvasX: cx, canvasY: cy, screenX: e.clientX, screenY: e.clientY });
           }}
         >
           <Canvas
@@ -355,6 +371,20 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: Editor
         {/* Pages bar (Task A.3) */}
         <PagesBar doc={doc} currentPageIndex={currentPageIndex} onSelectPage={setCurrentPageIndex} onAddPage={addPage} onDeletePage={handleDeletePage} />
       </div>
+      {fieldDrop && (
+        <FieldDropDialog
+          fieldLabel={fieldDrop.fieldLabel}
+          fieldName={fieldDrop.fieldName}
+          role={fieldDrop.role}
+          screenX={fieldDrop.screenX}
+          screenY={fieldDrop.screenY}
+          onConfirm={(agg) => {
+            addFieldElement(fieldDrop.fieldLabel, fieldDrop.canvasX, fieldDrop.canvasY, agg);
+            setFieldDrop(null);
+          }}
+          onCancel={() => setFieldDrop(null)}
+        />
+      )}
       {showPrint && <PrintView doc={doc} onClose={() => setShowPrint(false)} />}
     </>
   );

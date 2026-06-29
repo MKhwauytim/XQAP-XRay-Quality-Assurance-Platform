@@ -4,6 +4,33 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v18.3 — 2026-06-29 — Field drop aggregation dialog
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/FieldDropDialog.tsx` (new)
+
+Popover that appears at the cursor when a field is dropped onto the canvas.
+Shows field name, category badge (بُعد / مقياس), and aggregation radio buttons.
+Dimensions: بدون تجميع / عدد / عدد مميز. Measures: مجموع / متوسط / عدد / أدنى / أقصى / نسبة.
+
+---
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
+
+**Before:**
+```ts
+// onDrop: directly calls addFieldElement(label, x, y)
+// addFieldElement(label, x, y): text = `[${label}]`
+```
+
+**After:**
+```ts
+// onDrop: sets fieldDrop state (label, field, role, canvasX/Y, screenX/Y)
+// addFieldElement(label, x, y, agg): text = `[label]` or `[label] • aggLabel`
+// renders <FieldDropDialog> when fieldDrop != null
+```
+
+---
+
 ## v18.2 — 2026-06-29 — Replace emojis in FieldsPanel and VizPanel with lucide-react icons
 
 **File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/FieldsPanel.tsx`
