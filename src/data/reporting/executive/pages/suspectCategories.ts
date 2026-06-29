@@ -78,7 +78,7 @@ export function buildSuspectCategories(ctx: ExecutiveRenderContext): string {
     <h2 class="section-title">الأصناف المشبوهة وآلية التهريب المحتملة</h2>
     <div class="section-subtitle">تحليل الأنماط النوعية المستخرجة من نتائج المراجعة</div>
     ${noData
-      ? `<div class="notice-centered"><div>لا توجد بيانات أصناف أو آليات تهريب لهذه الدورة</div></div>`
+      ? `<div class="notice-centered"><div>لا توجد بيانات أصناف أو آليات تهريب لهذه الفترة</div></div>`
       : `<div class="grid grid-4">
       <div class="card"><h3>حالات الاشتباه المؤكدة</h3><div class="metric gold">${fmtNum(kpis.correctSuspicious)}</div></div>
       <div class="card"><h3>الأصناف المصنفة</h3><div class="metric blue">${fmtNum(categoryCount)}</div></div>

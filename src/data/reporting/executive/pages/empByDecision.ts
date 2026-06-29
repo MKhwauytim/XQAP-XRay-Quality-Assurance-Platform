@@ -17,7 +17,7 @@ export function buildEmpByDecision(ctx: ExecutiveRenderContext): string {
   <div class="page-inner">
     <h2 class="section-title">دقة الموظفين حسب نوع القرار</h2>
     <div class="section-subtitle">الفصل بين الدقة الكلية واكتشاف الاشتباه والإنذارات الخاطئة</div>
-    <div class="notice-centered"><div>لا توجد بيانات كافية لهذه الدورة</div></div>
+    <div class="notice-centered"><div>لا توجد بيانات كافية لهذه الفترة</div></div>
     <div class="page-no">16</div>
   </div>
 </section>`;

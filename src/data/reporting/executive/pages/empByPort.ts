@@ -25,7 +25,7 @@ export function buildEmpByPort(ctx: ExecutiveRenderContext): string {
   <div class="page-inner">
     <h2 class="section-title">أداء الموظفين حسب المنفذ</h2>
     <div class="section-subtitle">مثال تطبيقي — أكبر منفذ</div>
-    <div class="notice-centered"><div>لا توجد بيانات كافية لهذه الدورة</div></div>
+    <div class="notice-centered"><div>لا توجد بيانات كافية لهذه الفترة</div></div>
     <div class="page-no">17</div>
   </div>
 </section>`;
@@ -167,7 +167,7 @@ export function buildEmpCrossPort(ctx: ExecutiveRenderContext): string {
     <h2 class="section-title">مقارنة الموظفين بين المنافذ</h2>
     <div class="section-subtitle">مصفوفة أداء الموظفين حسب المنفذ</div>
     ${noData
-      ? `<div class="notice-centered"><div>لا توجد بيانات كافية لهذه الدورة</div></div>`
+      ? `<div class="notice-centered"><div>لا توجد بيانات كافية لهذه الفترة</div></div>`
       : `<div class="grid grid-4">
       <div class="card"><h3>المنافذ المقارنة</h3><div class="metric blue">${fmtNum(portCount)}</div></div>
       <div class="card"><h3>أفضل منفذ</h3><div class="metric blue" style="font-size:20px" title="${esc(bestPort?.portName ?? "")}">${esc(bestPort?.portName ?? "—")}</div></div>

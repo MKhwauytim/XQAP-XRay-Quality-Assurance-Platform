@@ -6,7 +6,7 @@ export function buildSampleByLevel(ctx: ExecutiveRenderContext): string {
   const s = input.sample;
   const certScan = s ? fmtNum(s.certScanActual) : '—';
   const note = kpis.sampleCoverage !== null && kpis.sampleCoverage >= 99.9
-    ? 'تم سحب كامل المجتمع في هذه الدورة، لذلك بلغت نسبة التغطية 100%.'
+    ? 'تم سحب كامل المجتمع في هذه الفترة، لذلك بلغت نسبة التغطية 100%.'
     : 'تم سحب العينة باستخدام خوارزمية هاميلتون للتوزيع الطبقي حسب المنفذ والمستوى.';
 
   const stageCards = kpis.stageProfiles.map((sp, i) => `

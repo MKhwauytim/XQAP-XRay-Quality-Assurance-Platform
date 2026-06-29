@@ -81,7 +81,7 @@ export function buildEmpImageQuality(ctx: ExecutiveRenderContext): string {
     <h2 class="section-title">نتائج جودة الصور</h2>
     <div class="section-subtitle">تحليل جودة الصور ووجود التحديد وأثرهما على دقة الفحص</div>
     ${noData
-      ? `<div class="notice-centered"><div>لا توجد بيانات كافية لهذه الدورة</div></div>`
+      ? `<div class="notice-centered"><div>لا توجد بيانات كافية لهذه الفترة</div></div>`
       : `<div class="grid grid-4">
       <div class="card"><h3>الصور عالية الجودة</h3><div class="metric green">${fmtPct(highQualPct)}</div></div>
       <div class="card"><h3>وجود تحديد</h3><div class="metric blue">${fmtPct(kpis.markingRate)}</div></div>
@@ -172,7 +172,7 @@ export function buildEmpImageQualityImpact(ctx: ExecutiveRenderContext): string 
     <h2 class="section-title">أثر جودة الصورة والتحديد على الأداء</h2>
     <div class="section-subtitle">تحليل ما إذا كانت جودة الصورة ووجود التحديد يرتبطان بانخفاض أو ارتفاع الدقة</div>
     ${noData
-      ? `<div class="notice-centered"><div>لا توجد بيانات كافية لهذه الدورة</div></div>`
+      ? `<div class="notice-centered"><div>لا توجد بيانات كافية لهذه الفترة</div></div>`
       : `<div class="grid grid-4">
       <div class="card"><h3>جودة عالية</h3><div class="metric blue">${fmtPct(highQAcc)}</div></div>
       <div class="card"><h3>جودة منخفضة</h3><div class="metric coral">${fmtPct(lowQAcc)}</div></div>

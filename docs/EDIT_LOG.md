@@ -4,6 +4,32 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v24.2 — 2026-06-29 — Replace الدورة with الفترة throughout report
+
+**Files:** `src/data/reporting/executive/pages/sampleByLevel.ts`, `src/data/reporting/executive/pages/empPriority.ts`, `src/data/reporting/executive/pages/empStability.ts`, `src/data/reporting/executive/pages/empByDecision.ts`, `src/data/reporting/executive/pages/errorTypes.ts`, `src/data/reporting/executive/pages/empByPort.ts`, `src/data/reporting/executive/pages/suspectCategories.ts`, `src/data/reporting/executive/pages/empImageQuality.ts`
+
+**Before:**
+```ts
+// Various occurrences of الدورة in no-data notices and info strings, e.g.:
+'تم سحب كامل المجتمع في هذه الدورة، لذلك بلغت نسبة التغطية 100%.'
+'لا توجد بيانات كافية لهذه الدورة'
+'البيانات غير متاحة لهذه الدورة.'
+'لا يوجد موظفون يتطلبون تدخلاً عاجلاً في هذه الدورة.'
+'لا توجد بيانات أصناف أو آليات تهريب لهذه الدورة'
+```
+
+**After:**
+```ts
+// All instances replaced with الفترة:
+'تم سحب كامل المجتمع في هذه الفترة، لذلك بلغت نسبة التغطية 100%.'
+'لا توجد بيانات كافية لهذه الفترة'
+'البيانات غير متاحة لهذه الفترة.'
+'لا يوجد موظفون يتطلبون تدخلاً عاجلاً في هذه الفترة.'
+'لا توجد بيانات أصناف أو آليات تهريب لهذه الفترة'
+```
+
+---
+
 ## v24.1 — 2026-06-29 — Review fix: broken bar CSS in levelAgreement page
 
 **File:** `src/data/reporting/executive/pages/levelAgreement.ts`

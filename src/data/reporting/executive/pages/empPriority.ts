@@ -17,7 +17,7 @@ export function buildEmpPriority(ctx: ExecutiveRenderContext): string {
   <div class="page-inner">
     <h2 class="section-title">الموظفون ذوو الأولوية والإجراءات المقترحة</h2>
     <div class="section-subtitle">تجميع الموظفين بحسب الأولوية الإشرافية والتدخل المطلوب</div>
-    <div class="card info" style="margin-top:24px">لا يوجد موظفون يتطلبون تدخلاً عاجلاً في هذه الدورة.</div>
+    <div class="card info" style="margin-top:24px">لا يوجد موظفون يتطلبون تدخلاً عاجلاً في هذه الفترة.</div>
     <div class="page-no">23</div>
   </div>
 </section>`;

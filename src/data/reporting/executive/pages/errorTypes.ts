@@ -44,7 +44,7 @@ export function buildErrorTypes(ctx: ExecutiveRenderContext): string {
     <h2 class="section-title">تحليل أنواع الأخطاء</h2>
     <div class="section-subtitle">تصنيف القرارات بين اشتباه صحيح واشتباه فائت واشتباه خاطئ وسليمة صحيحة</div>
     ${noData
-      ? `<div class="notice-centered"><div>لا توجد بيانات كافية لهذه الدورة</div></div>`
+      ? `<div class="notice-centered"><div>لا توجد بيانات كافية لهذه الفترة</div></div>`
       : `<div class="grid grid-4">
       <div class="card"><h3>اشتباه صحيح</h3><div class="metric gold">${fmtPct(trueSuspPct)}</div></div>
       <div class="card"><h3>اشتباه فائت</h3><div class="metric blue">${fmtPct(missedPct)}</div></div>
