@@ -4,6 +4,35 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v19.7 — 2026-06-29 — fix(executive-report): add missing statPill helper to primitives
+
+**File:** `src/data/reporting/executive/primitives.ts`
+
+**Before:**
+```ts
+export function heatCell(pct: number | null): string {
+  if (pct === null) return `<span class="xr-heat-cell xr-heat-insuff">—</span>`;
+  const cls = pct >= 90 ? "xr-heat-high" : pct >= 75 ? "xr-heat-mid" : "xr-heat-low";
+  return `<span class="xr-heat-cell ${cls}">${fmtPct(pct)}</span>`;
+}
+// (statPill missing)
+```
+
+**After:**
+```ts
+export function heatCell(pct: number | null): string {
+  if (pct === null) return `<span class="xr-heat-cell xr-heat-insuff">—</span>`;
+  const cls = pct >= 90 ? "xr-heat-high" : pct >= 75 ? "xr-heat-mid" : "xr-heat-low";
+  return `<span class="xr-heat-cell ${cls}">${fmtPct(pct)}</span>`;
+}
+
+export function statPill({ label, value }: { label: string; value: string }): string {
+  return `<div class="xr-stat-pill"><span class="xr-stat-pill-label">${esc(label)}</span><b class="xr-stat-pill-value">${esc(value)}</b></div>`;
+}
+```
+
+---
+
 ## v19.6 — 2026-06-29 — executive report rework: create primitives.ts
 
 **File:** `src/data/reporting/executive/primitives.ts`

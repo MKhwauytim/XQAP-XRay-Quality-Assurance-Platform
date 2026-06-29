@@ -47,6 +47,10 @@ export function heatCell(pct: number | null): string {
   return `<span class="xr-heat-cell ${cls}">${fmtPct(pct)}</span>`;
 }
 
+export function statPill({ label, value }: { label: string; value: string }): string {
+  return `<div class="xr-stat-pill"><span class="xr-stat-pill-label">${esc(label)}</span><b class="xr-stat-pill-value">${esc(value)}</b></div>`;
+}
+
 type TableOpts = { headers: string[]; rows: (string | number | null)[][]; totalRow?: (string | number | null)[] };
 export function dataTable({ headers, rows, totalRow }: TableOpts): string {
   const th = headers.map(h => `<th>${esc(String(h))}</th>`).join("");
