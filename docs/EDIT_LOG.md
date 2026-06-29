@@ -4,6 +4,87 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v20.2 — 2026-06-29 — feat(executive-report): wire new dark-navy viewer as the active report (Phase 1)
+
+**File:** `src/data/reporting/executive/index.ts`
+
+**Before:** (file did not exist)
+
+**After:**
+```ts
+import { buildExecutiveReportRows, calculateExecutiveKPIs } from "../executiveReportData";
+import { buildContext } from "./context";
+import { assembleReport } from "./assemble";
+import { openOrDownload } from "../htmlReport";
+import type { ExecutiveReportInput } from "../executiveReportTypes";
+
+// Phase 1 pages
+import { buildCover } from "./pages/cover";
+import { buildToc } from "./pages/toc";
+import { buildGlossary } from "./pages/glossary";
+import {
+  buildPart1Divider, buildPart2Divider, buildPart3Divider,
+  buildPart4Divider, buildPart5Divider, buildPart6Divider,
+} from "./pages/partDivider";
+import { buildPopulationByRisk } from "./pages/populationByRisk";
+import { buildAppendix } from "./pages/appendix";
+
+export function buildExecutiveReport(
+  input: ExecutiveReportInput,
+  employeeDisplayNames: Record<string, string> = {},
+): string { ... }
+
+export function openExecutiveReport(
+  input: ExecutiveReportInput,
+  employeeDisplayNames: Record<string, string> = {},
+): void { ... }
+```
+
+**File:** `src/data/reporting/executiveReport.ts`
+
+**Before:**
+```ts
+import { openOrDownload } from "./htmlReport";
+import { ORGANIZATION_PATH_TEXT } from "../../branding/organization";
+import type { ExecutiveKPIs, ExecutiveReportInput } from "./executiveReportTypes";
+import {
+  buildExecutiveReportRows,
+  calculateExecutiveKPIs,
+  fmtNum,
+  fmtPct,
+} from "./executiveReportData";
+
+// ... ~560 lines of helper functions, type definitions, CSS constant ...
+
+// ─── Main builder ─────────────────────────────────────────────────────────────
+export function buildExecutiveReport(input: ExecutiveReportInput): string {
+  const execRows = buildExecutiveReportRows(input);
+  const kpis = calculateExecutiveKPIs(execRows, input.sample, input.config);
+  return buildPrintableExecutiveReport(input, kpis, groupForReport(execRows));
+}
+
+export function openExecutiveReport(input: ExecutiveReportInput): void {
+  openOrDownload(buildExecutiveReport(input), `التقرير_التنفيذي_${input.monthFolderName}.html`);
+}
+```
+
+**After:**
+```ts
+import * as XLSX from "xlsx";
+import type { ExecutiveReportInput } from "./executiveReportTypes";
+import {
+  buildExecutiveReportRows,
+  calculateExecutiveKPIs,
+} from "./executiveReportData";
+
+// ─── Main builder (re-exported from the new dark-navy viewer module) ──────────
+export { buildExecutiveReport, openExecutiveReport } from "./executive/index";
+
+export function buildExecutiveXlsx(input: ExecutiveReportInput): void { ... }
+```
+
+---
+
 ## v20.1 — 2026-06-29 — feat(executive-report): add viewer shell and assembler
 
 **File:** `src/data/reporting/executive/viewer.ts`
