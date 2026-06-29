@@ -104,7 +104,7 @@ export const MANAGED_TABS: readonly ManagedTab[] = [
   { id: "reports",                 label: "إدارة التقارير" },
   { id: "reports/reports",         label: "التقارير",              parentId: "reports" },
   { id: "reports/kpi",             label: "مؤشرات الأداء",          parentId: "reports" },
-  { id: "report-designer",         label: "مصمم التقارير" },
+  { id: "report-designer",         label: "مصمم التقارير",          parentId: "reports" },
   { id: "archive",                 label: "إدارة الأرشيف" },
   { id: "user-management",         label: "إدارة المستخدمين" },
   { id: "user-management/users",               label: "المستخدمون",          parentId: "user-management" },

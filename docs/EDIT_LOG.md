@@ -4,6 +4,50 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v19.0 — 2026-06-29 — Smooth drag/resize + thumbnail card list + tab nesting
+
+### Smooth drag/resize (useCanvasInteractions + Canvas)
+
+**File:** `editor/useCanvasInteractions.ts`
+
+**Before:** `onPointerMove` did nothing (voided dx/dy). Elements only moved/resized on pointerup → janky.
+
+**After:** Live DOM manipulation during drag:
+- Move: `el.style.transform = translate(${dx}px, ${dy}px)`
+- Resize: directly sets `el.style.left/top/width/height`
+- pointerup clears overrides; React re-render applies snapped rect
+
+Added `canvasRef` returned from hook and attached to canvas outer div; `data-rd-id` on each element wrapper for querySelector lookup.
+
+---
+
+### Thumbnail card list (ReportDesigner list view + CSS)
+
+**File:** `index.tsx` (ReportDesigner)
+
+**Before:** `<ul className="rd-list">` with text-only rows.
+
+**After:** `<ul className="rd-cards">` card grid; each card:
+- Shows first-page Canvas preview at `zoom = 240 / pageWidth` (loaded eagerly in background via `loadedDocs` state)
+- Clicking thumbnail or "فتح" opens the editor
+
+---
+
+### Move مصمم التقارير under إدارة التقارير
+
+**Files:** Reports/index.tsx, ReportDesigner/index.tsx, Sidebar.tsx, userManagement.ts
+
+**Before:** `report-designer` was a separate top-level tab (order 27).
+
+**After:**
+- `Sidebar.tsx`: dispatches `sidebar-subtab-changed` generic event in addition to legacy `pop-set-subtab`
+- `Reports/index.tsx`: adds "مصمم التقارير" sub-tab; `ReportsTab` wrapper listens for `sidebar-subtab-changed` and renders `<ReportDesignerTab />` when active
+- `ReportDesigner/index.tsx`: `tabConfig` removed; component is now embedded via Reports
+- `userManagement.ts`: `report-designer` entry gets `parentId: "reports"` for permission UI grouping
+- Deleted `tabConfig.test.ts`
+
+---
+
 ## v18.6 — 2026-06-29 — Replace Ribbon emojis with lucide-react icons
 
 **File:** `src/.../editor/Ribbon.tsx`

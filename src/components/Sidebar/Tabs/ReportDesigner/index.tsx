@@ -1,7 +1,4 @@
-/* eslint-disable react-refresh/only-export-components */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { LayoutDashboard } from "lucide-react";
-import type { SidebarTabModule } from "../tabTypes";
 import { readSession } from "../../../../auth/authSession";
 import {
   loadDesignIndex,
@@ -33,13 +30,7 @@ import PrintView from "./PrintView";
 import type { FieldRole } from "../../../../data/reportDesigner/query/fieldCatalog";
 import "./ReportDesigner.css";
 
-export const tabConfig: SidebarTabModule["tabConfig"] = {
-  id: "report-designer",
-  label: "مصمم التقارير",
-  order: 27,
-  allowedRoles: ["supervisor", "manager", "admin"],
-  icon: <LayoutDashboard size={20} strokeWidth={1.8} aria-hidden />,
-};
+// tabConfig intentionally removed — Report Designer is now a sub-tab under إدارة التقارير.
 
 type View = "list" | "editor";
 
@@ -450,6 +441,9 @@ export default function ReportDesigner() {
   const [openingId, setOpeningId] = useState<string | null>(null);
   const [openError, setOpenError] = useState<string | null>(null);
 
+  // Loaded docs for thumbnail previews
+  const [loadedDocs, setLoadedDocs] = useState<Record<string, ReportDocument>>({});
+
   // --- Load index on mount / when directoryHandle changes ---
   useEffect(() => {
     if (!directoryHandle) return;
@@ -477,6 +471,21 @@ export default function ReportDesigner() {
       cancelled = true;
     };
   }, [directoryHandle]);
+
+  // Load all documents in background to populate thumbnail previews
+  useEffect(() => {
+    if (!directoryHandle || index.designs.length === 0) return;
+    let cancelled = false;
+    void Promise.all(
+      index.designs.map(async (d) => {
+        const doc = await loadDesign(directoryHandle!, d.reportId);
+        if (doc && !cancelled) {
+          setLoadedDocs((prev) => ({ ...prev, [d.reportId]: doc }));
+        }
+      })
+    );
+    return () => { cancelled = true; };
+  }, [directoryHandle, index]);
 
   // Focus the input when the new-design form opens
   useEffect(() => {
@@ -647,31 +656,65 @@ export default function ReportDesigner() {
       ) : index.designs.length === 0 ? (
         <p className="rd-empty">لا توجد تقارير محفوظة بعد.</p>
       ) : (
-        <ul className="rd-list">
-          {index.designs.map((d) => (
-            <li key={d.reportId} className="rd-row">
-              <div className="rd-row-info">
-                <span className="rd-row-name">{d.reportName}</span>
-                <span className="rd-row-date">{formatDate(d.updatedAt)}</span>
-              </div>
-              <div className="rd-row-actions">
-                <button
-                  className="rd-btn rd-btn-secondary rd-btn-sm"
-                  onClick={() => void handleOpen(d.reportId)}
-                  disabled={openingId === d.reportId || deletingId === d.reportId}
+        <ul className="rd-cards">
+          {index.designs.map((d) => {
+            const thumbDoc = loadedDocs[d.reportId];
+            const isOpening = openingId === d.reportId;
+            const isDeleting = deletingId === d.reportId;
+            const busy = isOpening || isDeleting;
+            return (
+              <li key={d.reportId} className="rd-card">
+                {/* Thumbnail — click to open */}
+                <div
+                  className={`rd-card-thumb${busy ? " rd-card-thumb--loading" : ""}`}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`فتح ${d.reportName}`}
+                  onClick={() => { if (!busy) void handleOpen(d.reportId); }}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") void handleOpen(d.reportId); }}
                 >
-                  {openingId === d.reportId ? "جاري التحميل..." : "فتح"}
-                </button>
-                <button
-                  className="rd-btn rd-btn-danger rd-btn-sm"
-                  onClick={() => void handleDelete(d.reportId)}
-                  disabled={deletingId === d.reportId || openingId === d.reportId}
-                >
-                  {deletingId === d.reportId ? "جاري الحذف..." : "حذف"}
-                </button>
-              </div>
-            </li>
-          ))}
+                  {isOpening && <span className="rd-card-thumb-spinner">جاري التحميل…</span>}
+                  {!isOpening && thumbDoc ? (
+                    <div className="rd-card-thumb-inner" style={{ pointerEvents: "none" }}>
+                      <Canvas
+                        doc={thumbDoc}
+                        pageIndex={0}
+                        selectedId={null}
+                        onSelect={() => {}}
+                        mode="view"
+                        zoom={240 / thumbDoc.pageSetup.width}
+                      />
+                    </div>
+                  ) : (
+                    !isOpening && <span className="rd-card-thumb-placeholder">…</span>
+                  )}
+                </div>
+                {/* Card footer */}
+                <div className="rd-card-footer">
+                  <div className="rd-card-info">
+                    <span className="rd-card-name">{d.reportName}</span>
+                    <span className="rd-card-date">{formatDate(d.updatedAt)}</span>
+                  </div>
+                  <div className="rd-card-actions">
+                    <button
+                      className="rd-btn rd-btn-primary rd-btn-sm"
+                      onClick={() => void handleOpen(d.reportId)}
+                      disabled={busy}
+                    >
+                      {isOpening ? "…" : "فتح"}
+                    </button>
+                    <button
+                      className="rd-btn rd-btn-danger rd-btn-sm"
+                      onClick={() => void handleDelete(d.reportId)}
+                      disabled={busy}
+                    >
+                      {isDeleting ? "…" : "حذف"}
+                    </button>
+                  </div>
+                </div>
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>

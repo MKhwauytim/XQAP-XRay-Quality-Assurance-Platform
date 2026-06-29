@@ -46,7 +46,7 @@ export default function Canvas({
   const { width, height } = doc.pageSetup;
 
   const interactionGrid = 8;
-  const { onElementPointerDown, onHandlePointerDown, onPointerMove, onPointerUp } = useCanvasInteractions({
+  const { canvasRef, onElementPointerDown, onHandlePointerDown, onPointerMove, onPointerUp } = useCanvasInteractions({
     grid: interactionGrid,
     onElementChange: onElementChange ?? (() => undefined),
   });
@@ -82,6 +82,7 @@ export default function Canvas({
   return (
     <div
       className="rd-canvas"
+      ref={canvasRef}
       style={canvasStyle}
       dir="rtl"
       onClick={
@@ -120,6 +121,7 @@ export default function Canvas({
           return (
             <div
               key={el.elementId}
+              data-rd-id={el.elementId}
               className={`rd-element${isSelected ? " rd-element--selected" : ""}`}
               style={wrapperStyle}
               onClick={

@@ -1,5 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import ReportDesignerTab from "../ReportDesigner";
 import { AlertTriangle, BarChart2, BarChart3, Building2, Check, ClipboardList, Database, Download, FileStack, FileText, Filter, FolderKanban, Globe, History, Printer, Settings2, User, Users, X } from "lucide-react";
 
 import type { SidebarTabModule } from "../tabTypes";
@@ -51,6 +52,7 @@ export const tabConfig: SidebarTabModule["tabConfig"] = {
   subTabs: [
     { id: "reports", label: "التقارير" },
     { id: "kpi", label: "مؤشرات الأداء" },
+    { id: "report-designer", label: "مصمم التقارير", allowedRoles: ["supervisor", "manager", "admin"] },
   ],
 };
 
@@ -101,7 +103,8 @@ const STAGE_LABELS_AR: Record<"first" | "second" | "third" | "fourth", string> =
   fourth: "المستوى الرابع",
 };
 
-export default function ReportsTab() {
+// Inner component that holds all the existing Reports state and logic.
+function ReportsContent() {
   const { directoryHandle } = useWorkspace();
 
   const [months, setMonths] = useState<Array<{ folderName: string }>>([]);
@@ -755,4 +758,20 @@ export default function ReportsTab() {
       )}
     </section>
   );
+}
+
+// Wrapper that handles sub-tab routing for "مصمم التقارير" sub-tab.
+export default function ReportsTab() {
+  const [activeSubTab, setActiveSubTab] = useState("reports");
+  const handleSubTabEvent = useCallback((e: Event) => {
+    const { parentTabId, subTabId } = (e as CustomEvent<{ parentTabId: string; subTabId: string }>).detail;
+    if (parentTabId === "reports") setActiveSubTab(subTabId);
+  }, []);
+  useEffect(() => {
+    window.addEventListener("sidebar-subtab-changed", handleSubTabEvent);
+    return () => window.removeEventListener("sidebar-subtab-changed", handleSubTabEvent);
+  }, [handleSubTabEvent]);
+
+  if (activeSubTab === "report-designer") return <ReportDesignerTab />;
+  return <ReportsContent />;
 }

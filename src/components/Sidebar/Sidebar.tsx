@@ -47,9 +47,10 @@ export default function Sidebar({
   function handleSubTabClick(parentTabId: string, subTabId: string) {
     onTabSelect(parentTabId);
     setActiveSubTabId(subTabId);
-    window.dispatchEvent(
-      new CustomEvent("pop-set-subtab", { detail: { subTabId } })
-    );
+    // Legacy Population-specific event (keep for backward compat)
+    window.dispatchEvent(new CustomEvent("pop-set-subtab", { detail: { subTabId } }));
+    // Generic event — all tab components can listen for their own parent
+    window.dispatchEvent(new CustomEvent("sidebar-subtab-changed", { detail: { parentTabId, subTabId } }));
   }
 
   return (
