@@ -87,12 +87,7 @@ export default function Canvas({
       dir="rtl"
       onClick={
         mode === "edit"
-          ? (e) => {
-              // Clicked the canvas background (not a child element)
-              if (e.target === e.currentTarget) {
-                onSelect(null);
-              }
-            }
+          ? () => { onSelect(null); }
           : undefined
       }
       onPointerMove={mode === "edit" ? onPointerMove : undefined}

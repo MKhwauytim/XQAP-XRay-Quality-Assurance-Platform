@@ -4,6 +4,93 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v19.2 — 2026-06-29 — KPI breakdown, distinctCount unique values, deselect on empty click
+
+**File:** `src/data/reportDesigner/reportTypes.ts`
+
+**Before:**
+```ts
+export type KpiConfig = {
+  kind: "kpi";
+  dataSourceId: string;
+  valueField: string;
+  agg: Aggregation;
+  target?: number;
+  comparison?: "higherBetter" | "lowerBetter";
+  format?: string;
+};
+```
+
+**After:** Added `groupByField` + `groupByLabel` for Power BI-style breakdown:
+```ts
+export type KpiConfig = {
+  kind: "kpi";
+  dataSourceId: string;
+  valueField: string;
+  agg: Aggregation;
+  groupByField?: string;
+  groupByLabel?: string;
+  target?: number;
+  comparison?: "higherBetter" | "lowerBetter";
+  format?: string;
+};
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/renderers/KpiRenderer.tsx`
+
+**Before:** Always shows numeric aggregation result or "—".
+
+**After:**
+- `distinctCount` with ≤ 8 unique values: shows the actual values as pills instead of a number. Booleans translated to "نعم"/"لا".
+- When `groupByField` is set: shows grouped breakdown (count per unique value of the group-by dimension), sorted descending.
+- Otherwise: numeric aggregation as before.
+
+---
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/Canvas.tsx`
+
+**Before:** `onClick` on outer canvas used `if (e.target === e.currentTarget)` guard — inner div background clicks didn't deselect.
+
+**After:** Removed the guard. Elements still stopPropagation so only background clicks reach canvas onClick → `onSelect(null)`.
+
+---
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
+
+**Before:** Field drop always creates a new element (after showing aggregation dialog).
+
+**After:** If a dimension field is dropped onto an existing KPI element, sets that KPI's `groupByField` directly (no new element). Otherwise shows aggregation dialog as before.
+
+---
+
+## v19.1 — 2026-06-29 — KPI live data binding + export path copy button
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/renderers/KpiRenderer.tsx`
+
+**Before:** Showed "—" placeholder for all KPI cards.
+
+**After:** `useKpiValue` hook loads the most recent month's `population.final.json` via `listMonthFolders` + `loadMonthPopulationFinal`, then computes `count/distinctCount/sum/avg/min/max` on `config.valueField`. Displays result with `toLocaleString("ar-SA")`.
+
+---
+
+**File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
+
+**Before:** Export success showed only `5-System/powerbi-export/{month}/` as text.
+
+**After:** Shows full workspace-relative path `{directoryHandle.name}\5-System\...` in a copyable code box with a "نسخ" button using Clipboard API.
+
+---
+
+**File:** `src/components/Sidebar/Tabs/Reports/Reports.css`
+
+**Before:** `.rh-pbi-success` was `font-size: 13px`. No path box styles.
+
+**After:** Added `.rh-pbi-path-box`, `.rh-pbi-path-row`, `.rh-pbi-path-code`, `.rh-pbi-copy-btn`, `.rh-pbi-path-hint` styles.
+
+---
+
 ## v19.0 — 2026-06-29 — Smooth drag/resize + thumbnail card list + tab nesting
 
 ### Smooth drag/resize (useCanvasInteractions + Canvas)

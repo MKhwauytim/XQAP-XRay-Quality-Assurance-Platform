@@ -48,6 +48,8 @@ export type KpiConfig = {
   dataSourceId: string;
   valueField: string;
   agg: Aggregation;
+  groupByField?: string;
+  groupByLabel?: string;
   target?: number;
   comparison?: "higherBetter" | "lowerBetter";
   format?: string;

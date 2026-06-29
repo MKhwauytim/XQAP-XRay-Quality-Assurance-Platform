@@ -363,11 +363,46 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: Editor
               return;
             }
 
-            // Field drag (from الحقول panel) → open aggregation dialog
+            // Field drag (from الحقول panel)
             const raw = e.dataTransfer.getData("application/x-rd-field");
             if (!raw) return;
             const { field, label, role } = JSON.parse(raw) as { field: string; label: string; role: FieldRole };
             const { cx, cy } = getDropCoords();
+
+            // If dropping a dimension onto an existing KPI → set as groupBy breakdown
+            if (role === "dimension" && currentPage) {
+              const hitKpi = currentPage.elements.find(
+                (el) =>
+                  el.config.kind === "kpi" &&
+                  cx >= el.x && cx <= el.x + el.w &&
+                  cy >= el.y && cy <= el.y + el.h
+              );
+              if (hitKpi) {
+                const updatedConfig = {
+                  ...(hitKpi.config as import("../../../../data/reportDesigner/reportTypes").KpiConfig),
+                  groupByField: field,
+                  groupByLabel: label,
+                };
+                setDoc((d) => ({
+                  ...d,
+                  pages: d.pages.map((p, i) =>
+                    i === currentPageIndex
+                      ? {
+                          ...p,
+                          elements: p.elements.map((el) =>
+                            el.elementId === hitKpi.elementId
+                              ? { ...el, config: updatedConfig }
+                              : el
+                          ),
+                        }
+                      : p
+                  ),
+                }));
+                setSelectedId(hitKpi.elementId);
+                return;
+              }
+            }
+
             setFieldDrop({ fieldLabel: label, fieldName: field, role, canvasX: cx, canvasY: cy, screenX: e.clientX, screenY: e.clientY });
           }}
         >
