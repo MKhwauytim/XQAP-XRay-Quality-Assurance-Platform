@@ -1,4 +1,14 @@
 import { useRef } from "react";
+import {
+  BarChart2,
+  Image,
+  LayoutTemplate,
+  Minus,
+  Square,
+  Table2,
+  TrendingUp,
+  Type,
+} from "lucide-react";
 import type { Element } from "../../../../../data/reportDesigner/reportTypes";
 import Inspector from "./Inspector";
 
@@ -9,15 +19,20 @@ interface VizPanelProps {
   onUpdate: (id: string, patch: Partial<Element>) => void;
 }
 
-const VIZ_TYPES = [
-  { label: "نص", icon: "T", disabled: false, key: "text" as const },
-  { label: "شكل", icon: "◻", disabled: false, key: "shape" as const },
-  { label: "صورة", icon: "🖼️", disabled: false, key: "image" as const },
-  { label: "جدول", icon: "⊞", disabled: true, key: "table" as const },
-  { label: "مخطط", icon: "📊", disabled: true, key: "chart" as const },
-  { label: "KPI", icon: "🔷", disabled: true, key: "kpi" as const },
-  { label: "خط", icon: "―", disabled: false, key: "line" as const },
-  { label: "قسم", icon: "⬚", disabled: true, key: "section" as const },
+const VIZ_TYPES: Array<{
+  label: string;
+  icon: React.ReactNode;
+  disabled: boolean;
+  key: "text" | "shape" | "image" | "table" | "chart" | "kpi" | "line" | "section";
+}> = [
+  { label: "نص",   icon: <Type size={22} />,           disabled: false, key: "text" },
+  { label: "شكل",  icon: <Square size={22} />,         disabled: false, key: "shape" },
+  { label: "صورة", icon: <Image size={22} />,          disabled: false, key: "image" },
+  { label: "جدول", icon: <Table2 size={22} />,         disabled: true,  key: "table" },
+  { label: "مخطط", icon: <BarChart2 size={22} />,      disabled: true,  key: "chart" },
+  { label: "KPI",  icon: <TrendingUp size={22} />,     disabled: true,  key: "kpi" },
+  { label: "خط",   icon: <Minus size={22} />,          disabled: false, key: "line" },
+  { label: "قسم",  icon: <LayoutTemplate size={22} />, disabled: true,  key: "section" },
 ];
 
 export default function VizPanel({ selectedElement, onAddElement, onImageSelected, onUpdate }: VizPanelProps) {
@@ -37,7 +52,6 @@ export default function VizPanel({ selectedElement, onAddElement, onImageSelecte
     if (key === "text" || key === "shape" || key === "line") onAddElement(key === "line" ? "shape" : key);
   }
 
-  // Bridge: Inspector expects (updated: Element) → convert to (id, patch)
   function handleInspectorUpdate(updated: Element) {
     onUpdate(updated.elementId, updated);
   }

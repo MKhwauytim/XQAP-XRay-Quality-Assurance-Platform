@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Hash, Tag } from "lucide-react";
 import { FACT_FIELDS } from "../../../../../data/reportDesigner/query/fieldCatalog";
 
 export default function FieldsPanel() {
@@ -56,7 +57,7 @@ export default function FieldsPanel() {
                   );
                 }}
               >
-                <span className="rd-field-icon">📐</span>
+                <Tag size={12} className="rd-field-icon" />
                 <span className="rd-field-label">{f.label}</span>
               </div>
             ))}
@@ -88,7 +89,7 @@ export default function FieldsPanel() {
                   );
                 }}
               >
-                <span className="rd-field-icon">🔢</span>
+                <Hash size={12} className="rd-field-icon" />
                 <span className="rd-field-label">{f.label}</span>
               </div>
             ))}

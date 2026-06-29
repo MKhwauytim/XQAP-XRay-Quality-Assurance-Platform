@@ -4,6 +4,44 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v18.2 — 2026-06-29 — Replace emojis in FieldsPanel and VizPanel with lucide-react icons
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/FieldsPanel.tsx`
+
+**Before:**
+```tsx
+<span className="rd-field-icon">📐</span>  // dimensions
+<span className="rd-field-icon">🔢</span>  // measures
+```
+
+**After:**
+```tsx
+<Tag size={12} className="rd-field-icon" />   // dimensions
+<Hash size={12} className="rd-field-icon" />  // measures
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/VizPanel.tsx`
+
+**Before:**
+```ts
+const VIZ_TYPES = [
+  { label: "نص", icon: "T", ... },
+  { label: "شكل", icon: "◻", ... },
+  { label: "صورة", icon: "🖼️", ... },
+  { label: "جدول", icon: "⊞", ... },
+  { label: "مخطط", icon: "📊", ... },
+  { label: "KPI", icon: "🔷", ... },
+  { label: "خط", icon: "―", ... },
+  { label: "قسم", icon: "⬚", ... },
+];
+```
+
+**After:** uses `React.ReactNode` icons from lucide-react (`Type`, `Square`, `ImageIcon`, `Table2`, `BarChart2`, `TrendingUp`, `Minus`, `LayoutTemplate`)
+
+---
+
 ## v18.1 — 2026-06-29 — Fix shape default visibility + fields panel drag-and-drop
 
 **File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
