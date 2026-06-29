@@ -4,6 +4,40 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v19.9 — 2026-06-29 — feat(executive-report): add cover, toc, glossary, part-divider page builders
+
+**File:** `src/data/reporting/executive/pages/cover.ts`
+
+**Before:** (file did not exist)
+
+**After:** New file — exports `buildCover(ctx: ExecutiveRenderContext): string`. Renders the cover page (`#page-cover`) with org name from `ORGANIZATION_PATH_TEXT`, a 4-level chip legend (المستوى الأول–الرابع with CSS variable dot colors `--xr-l1` through `--xr-l4`), report title, issue date, and month label from context.
+
+---
+
+**File:** `src/data/reporting/executive/pages/toc.ts`
+
+**Before:** (file did not exist)
+
+**After:** New file — exports `buildToc(_ctx: ExecutiveRenderContext): string`. Renders the table of contents page (`#page-toc`) with 9 hard-coded entries (01 مقدمة تنفيذية … 09 الملاحق) as anchor links into the report sections.
+
+---
+
+**File:** `src/data/reporting/executive/pages/glossary.ts`
+
+**Before:** (file did not exist)
+
+**After:** New file — exports `buildGlossary(_ctx: ExecutiveRenderContext): string`. Renders the glossary page (`#page-glossary`) with 4 level-definition cards (`.xr-l1-card`–`.xr-l4-card`) and an 8-term glossary grid.
+
+---
+
+**File:** `src/data/reporting/executive/pages/partDivider.ts`
+
+**Before:** (file did not exist)
+
+**After:** New file — exports `buildPartDivider(partNum, title, sub, icon, pageId, pageNum)` factory and 6 pre-built named constants: `buildPart1Divider` through `buildPart6Divider`. Each constant is `(ctx: ExecutiveRenderContext) => string` and renders a full-page divider slide for its part (page IDs `page-p1`–`page-p6`, display page numbers 07/11/15/19/23/29).
+
+---
+
 ## v19.8 — 2026-06-29 — feat(executive-report): add render context
 
 **File:** `src/data/reporting/executive/context.ts`
