@@ -7,6 +7,7 @@ import type { ExecutiveReportInput } from "../executiveReportTypes";
 // Phase 1 pages
 import { buildCover } from "./pages/cover";
 import { buildToc } from "./pages/toc";
+import { buildExecIntro } from "./pages/execIntro";
 import { buildGlossary } from "./pages/glossary";
 import {
   buildPart1Divider, buildPart2Divider, buildPart3Divider,
@@ -26,7 +27,7 @@ export function buildExecutiveReport(
   const pages = [
     buildCover,
     buildToc,
-    // execIntro — Phase 2
+    buildExecIntro,
     buildGlossary,
     buildPart1Divider,
     buildPopulationByRisk,
