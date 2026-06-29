@@ -4,6 +4,24 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v20.0 — 2026-06-29 — feat(executive-report): add population-by-risk and appendix pages
+
+**File:** `src/data/reporting/executive/pages/populationByRisk.ts`
+
+**Before:** (file did not exist)
+
+**After:** New file — exports `buildPopulationByRisk(ctx: ExecutiveRenderContext): string`. Renders page (`#page-pop-risk`, display page 08) with 4 KPI cards (إجمالي المجتمع/accent, الحالات السليمة/good, حالات الاشتباه/risk, نسبة الاشتباه) in `.xr-kpi-grid-4`. Two-column layout (`.xr-cols-6-4`): left=port table with headers [المنفذ, المجتمع, سليمة, اشتباه, نسبة الاشتباه] and total row, right=panel with bar chart showing `suspicionRate` as % per port. Footer with month label.
+
+---
+
+**File:** `src/data/reporting/executive/pages/appendix.ts`
+
+**Before:** (file did not exist)
+
+**After:** New file — exports `buildAppendix(ctx: ExecutiveRenderContext): string`. Renders page (`#page-appendix`, display page 31) with two-column layout (`.xr-cols-2`): left=config thresholds table from `ctx.input.config` (accuracyTarget, completionTarget, coverageTarget, maximumMissedSuspicionRate, minimumReliableSampleSize, monthlyTarget), right=static methodology paragraph in Arabic describing Hamilton stratified sampling and expert evaluation process.
+
+---
+
 ## v19.9 — 2026-06-29 — feat(executive-report): add cover, toc, glossary, part-divider page builders
 
 **File:** `src/data/reporting/executive/pages/cover.ts`
