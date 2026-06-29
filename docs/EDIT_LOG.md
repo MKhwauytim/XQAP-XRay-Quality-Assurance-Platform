@@ -4,6 +4,91 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v26.1 — 2026-06-29 — fix: quota miscounting after reassignment; casLoop non-transient retry; dead _submit param; silent answer-file catch
+
+**File:** `src/data/distribution/distributionLog.ts` — quota `assignCountPerEmployee` now counts from final entryMap (post-reassignment) instead of raw assigned events. Replaced items excluded. Sample sizes are unaffected (quotas are display-only).
+
+**File:** `src/data/storage/casLoop.ts` — unexpected exceptions now fail immediately instead of retrying 10 times with backoff.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx` + `src/components/InspectionPanel/index.tsx` — removed dead `submit: boolean` param from `onSave` type and all call sites. All saves are final submissions; no draft path exists.
+
+**File:** `src/data/answers/answerStorage.ts` — `loadAllEmployeeFiles` now logs errors via `logError` before returning `[]` instead of swallowing them silently.
+
+---
+
+## v26 — 2026-06-29 — feat: premium split-panel login screen rework
+
+**File:** `src/auth/AuthGate.tsx`
+
+**Before:**
+```tsx
+<main className="auth-root" dir="rtl">
+  <section className="auth-card" role="dialog" aria-modal="true" aria-labelledby="authTitle">
+    <div className="auth-brand">
+      <div className="auth-logo" …><img … /></div>
+      <div><h1>نظام معالجة بيانات الأشعة</h1><p>بوابة دخول المستخدمين</p></div>
+    </div>
+    {hasConfiguredUsers ? <form className="auth-form" …> … </form> : …}
+    <footer className="auth-footer"> … </footer>
+  </section>
+  {isAdminModalOpen ? … : null}
+</main>
+```
+
+**After:**
+```tsx
+<main className="auth-root" dir="rtl">
+  <div className="auth-split">
+    <aside className="auth-panel-brand">…logo, h1, tagline, org-path…</aside>
+    <section className="auth-panel-form" role="dialog" aria-modal="true" aria-labelledby="authTitle">
+      <div className="auth-form-inner">
+        <div className="auth-form-header"><h2 id="authTitle">تسجيل الدخول</h2>…</div>
+        <form className="auth-form" …>
+          {/* inputs now use .auth-input-wrap with inline SVG icons; eye toggle is .auth-eye-toggle inside the input */}
+        </form>
+        <footer className="auth-footer">…</footer>
+      </div>
+    </section>
+  </div>
+  {isAdminModalOpen ? … : null}
+</main>
+```
+
+**File:** `src/auth/AuthGate.css`
+
+**Before:** Floating `.auth-card` layout with `.auth-brand`, `.auth-password-wrap` side-by-side button.
+
+**After:** Full split-panel layout — `.auth-split` grid, `.auth-panel-brand` (navy), `.auth-panel-form` (white), `.auth-input-wrap` with `.auth-input-icon` and `.auth-eye-toggle` inside inputs. Staggered entry animations per panel.
+
+---
+
+## v25.5 — 2026-06-29 — fix: restore lint gate — argsIgnorePattern + remove stale eslint-disable
+
+**File:** `eslint.config.js`
+
+**Before:**
+```js
+    languageOptions: {
+      globals: globals.browser,
+    },
+  },
+])
+```
+
+**After:**
+```js
+    languageOptions: {
+      globals: globals.browser,
+    },
+    rules: {
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+    },
+  },
+])
+```
+
+---
+
 ## v25.4 — 2026-06-29 — Task 5: Integration review
 
 **File:** `src/data/reporting/executive/pages/distributionOverview.ts`

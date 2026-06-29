@@ -478,120 +478,165 @@ export default function AuthGate({ children }: AuthGateProps) {
 
   return (
     <main className="auth-root" dir="rtl">
-      <section
-        className="auth-card"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="authTitle"
-      >
-        <div className="auth-brand">
-          <div className="auth-logo" aria-label="شعار النظام">
-            <img
-              src={`${import.meta.env.BASE_URL}logo.svg`}
-              alt=""
-              aria-hidden="true"
-              onError={handleLogoError}
-            />
-          </div>
+      <div className="auth-split">
 
-          <div>
-            <h1 id="authTitle">نظام معالجة بيانات الأشعة</h1>
-            <p>بوابة دخول المستخدمين</p>
-          </div>
-        </div>
-
-        {hasConfiguredUsers ? (
-          <form
-            className="auth-form"
-            autoComplete="off"
-            onSubmit={loginAsEmployee}
-          >
-            <label className="auth-field" htmlFor="authUsername">
-              <span>اسم المستخدم</span>
-
-              <input
-                id="authUsername"
-                type="text"
-                required
-                autoComplete="username"
-                placeholder="أدخل اسم المستخدم"
-                value={selectedUsername}
-                onChange={(event) => {
-                  setSelectedUsername(event.target.value);
-                }}
+        {/* ── Right panel: branding ─────────────────────────── */}
+        <aside className="auth-panel-brand">
+          <div className="auth-brand-ring" aria-hidden="true" />
+          <div className="auth-brand-inner">
+            <div className="auth-logo" aria-label="شعار النظام">
+              <img
+                src={`${import.meta.env.BASE_URL}logo.svg`}
+                alt=""
+                aria-hidden="true"
+                onError={handleLogoError}
               />
-            </label>
+            </div>
+            <h1>نظام معالجة بيانات الأشعة</h1>
+            <p>منصة فحص صور الأشعة</p>
+          </div>
+          <div className="auth-brand-footer">
+            <div className="auth-org-path">{ORGANIZATION_PATH_TEXT}</div>
+          </div>
+        </aside>
 
-            <label className="auth-field" htmlFor="authPassword">
-              <span>كلمة المرور</span>
+        {/* ── Left panel: form ──────────────────────────────── */}
+        <section
+          className="auth-panel-form"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="authTitle"
+        >
+          <div className="auth-form-inner">
+            <div className="auth-form-header">
+              <h2 id="authTitle">تسجيل الدخول</h2>
+              <p>أدخل بياناتك للمتابعة</p>
+            </div>
 
-              <div className="auth-password-wrap">
-                <input
-                  id="authPassword"
-                  type={isPasswordVisible ? "text" : "password"}
-                  required
-                  autoComplete="current-password"
-                  placeholder="أدخل كلمة المرور"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                />
+            {hasConfiguredUsers ? (
+              <form
+                className="auth-form"
+                autoComplete="off"
+                onSubmit={loginAsEmployee}
+              >
+                <label className="auth-field" htmlFor="authUsername">
+                  <span>اسم المستخدم</span>
+                  <div className="auth-input-wrap">
+                    <span className="auth-input-icon" aria-hidden="true">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="8" r="4" />
+                        <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" />
+                      </svg>
+                    </span>
+                    <input
+                      id="authUsername"
+                      type="text"
+                      required
+                      autoComplete="username"
+                      placeholder="أدخل اسم المستخدم"
+                      value={selectedUsername}
+                      onChange={(event) => {
+                        setSelectedUsername(event.target.value);
+                      }}
+                    />
+                  </div>
+                </label>
+
+                <label className="auth-field" htmlFor="authPassword">
+                  <span>كلمة المرور</span>
+                  <div className="auth-input-wrap">
+                    <span className="auth-input-icon" aria-hidden="true">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="11" width="18" height="11" rx="2" />
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                      </svg>
+                    </span>
+                    <input
+                      id="authPassword"
+                      type={isPasswordVisible ? "text" : "password"}
+                      required
+                      autoComplete="current-password"
+                      placeholder="أدخل كلمة المرور"
+                      value={password}
+                      onChange={(event) => setPassword(event.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="auth-eye-toggle"
+                      onClick={() => setIsPasswordVisible((current) => !current)}
+                      aria-label="إظهار أو إخفاء كلمة المرور"
+                    >
+                      {isPasswordVisible ? (
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+                          <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+                          <line x1="1" y1="1" x2="23" y2="23" />
+                        </svg>
+                      ) : (
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                          <circle cx="12" cy="12" r="3" />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
+                </label>
 
                 <button
-                  type="button"
-                  onClick={() => setIsPasswordVisible((current) => !current)}
-                  aria-label="إظهار أو إخفاء كلمة المرور"
+                  className="auth-submit"
+                  type="submit"
+                  disabled={lockoutUntil !== null && Date.now() < lockoutUntil}
                 >
-                  {isPasswordVisible ? "إخفاء" : "إظهار"}
+                  <span>
+                    {lockoutUntil !== null && lockoutSecondsLeft > 0
+                      ? `يُرجى الانتظار (${lockoutSecondsLeft}ث)`
+                      : "دخول"}
+                  </span>
+                  {!(lockoutUntil !== null && lockoutSecondsLeft > 0) && (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <polyline points="15 18 9 12 15 6" />
+                    </svg>
+                  )}
+                </button>
+
+                <div
+                  className={`auth-message${messageType ? ` ${messageType}` : ""}`}
+                  aria-live="polite"
+                >
+                  {message}
+                </div>
+              </form>
+            ) : (
+              <div className="auth-form" aria-live="polite">
+                <div className="auth-message bad">
+                  لا يوجد مستخدمون مفعلون حالياً.
+                </div>
+              </div>
+            )}
+
+            <footer className="auth-footer">
+              <div className="auth-footer-actions">
+                <button type="button" className="auth-footer-change" onClick={() => { void selectWorkspace(); }}>
+                  تغيير المجلد
+                </button>
+                <button type="button" onClick={logout}>
+                  مسح الجلسة
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    clearLastLoginUsername();
+                    setSelectedUsername("");
+                  }}
+                >
+                  نسيان المستخدم
                 </button>
               </div>
-            </label>
-
-            <button
-              className="auth-submit"
-              type="submit"
-              disabled={lockoutUntil !== null && Date.now() < lockoutUntil}
-            >
-              {lockoutUntil !== null && lockoutSecondsLeft > 0
-                ? `يُرجى الانتظار (${lockoutSecondsLeft}ث)`
-                : "دخول"}
-            </button>
-
-            <div
-              className={`auth-message${messageType ? ` ${messageType}` : ""}`}
-              aria-live="polite"
-            >
-              {message}
-            </div>
-          </form>
-        ) : (
-          <div className="auth-form" aria-live="polite">
-            <div className="auth-message bad">
-              لا يوجد مستخدمون مفعلون حالياً.
-            </div>
+            </footer>
           </div>
-        )}
+        </section>
 
-        <footer className="auth-footer">
-          <div className="auth-org-path">{ORGANIZATION_PATH_TEXT}</div>
-          <div className="auth-footer-actions">
-            <button type="button" className="auth-footer-change" onClick={() => { void selectWorkspace(); }}>
-              تغيير المجلد
-            </button>
-            <button type="button" onClick={logout}>
-              مسح الجلسة
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                clearLastLoginUsername();
-                setSelectedUsername("");
-              }}
-            >
-              نسيان المستخدم
-            </button>
-          </div>
-        </footer>
-      </section>
+      </div>
 
       {isAdminModalOpen ? (
         <div className="auth-modal-backdrop" role="presentation">
