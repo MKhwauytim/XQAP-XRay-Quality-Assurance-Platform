@@ -4,6 +4,144 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v20.7 — 2026-06-29 — feat(executive-report): add accuracy-by-level and level-agreement pages (Phase 3)
+
+**File:** `src/data/reporting/executive/pages/accuracyByLevel.ts`
+
+**Before:** (file did not exist)
+
+**After:**
+```ts
+import type { ExecutiveRenderContext } from "../context";
+import { kpiCard, radarSvg, fmtPct, esc } from "../primitives";
+
+export function buildAccuracyByLevel(ctx: ExecutiveRenderContext): string {
+  const { kpis } = ctx;
+
+  const kpisRow = [
+    kpiCard({ label: "دقة المستوى الأول", value: fmtPct(kpis.levelOneAccuracy), tone: kpis.levelOneAccuracy !== null && kpis.levelOneAccuracy >= ctx.input.config.accuracyTarget ? "good" : "risk" }),
+    kpiCard({ label: "دقة المستوى الثاني", value: fmtPct(kpis.levelTwoAccuracy), tone: kpis.levelTwoAccuracy !== null && kpis.levelTwoAccuracy >= ctx.input.config.accuracyTarget ? "good" : "risk" }),
+    kpiCard({ label: "معدل التصحيح م.ثاني", value: fmtPct(kpis.levelTwoCorrectionRate) }),
+    kpiCard({ label: "معدل التراجع م.ثاني", value: fmtPct(kpis.levelTwoRegressionRate), tone: "warn" }),
+  ].join("");
+
+  const radarPoints = [
+    { label: "دقة م.أول", value: kpis.levelOneAccuracy ?? 0 },
+    { label: "دقة م.ثاني", value: kpis.levelTwoAccuracy ?? 0 },
+    { label: "اكتشاف الاشتباه", value: kpis.suspiciousDetectionRate ?? 0 },
+    { label: "تأكيد السلامة", value: kpis.cleanConfirmationRate ?? 0 },
+    { label: "الدقة الإجمالية", value: kpis.overallAccuracy ?? 0 },
+    { label: "الجودة المتوازنة", value: kpis.balancedQualityScore ?? 0 },
+  ];
+
+  return `<section class="xr-page" id="page-acc-level">
+    <div class="xr-page-inner">
+      <div class="xr-slide-head"><h2>نتائج الدقة حسب المستويات الأربعة</h2><span class="xr-pg">21</span></div>
+      <div class="xr-kpi-grid xr-kpi-grid-4" style="margin-bottom:0.13in">${kpisRow}</div>
+      <div class="xr-cols xr-cols-2">
+        <div class="xr-panel" style="height:3.4in">${radarSvg(radarPoints)}</div>
+        <div>
+          <div class="xr-panel-title">مؤشرات الدقة التفصيلية</div>
+          <table class="xr-table"><tbody>
+            <tr><td>اشتباه مكتشف</td><td>${kpis.correctSuspicious}</td></tr>
+            <tr><td>سليمة مؤكدة</td><td>${kpis.correctClean}</td></tr>
+            <tr><td>اشتباه فائت</td><td style="color:var(--xr-coral)">${kpis.missedSuspicious}</td></tr>
+            <tr><td>اشتباه زائد</td><td style="color:var(--xr-gold)">${kpis.excessSuspicious}</td></tr>
+            <tr><td>صور بتحقق صالح</td><td>${kpis.validStudied}</td></tr>
+          </tbody></table>
+        </div>
+      </div>
+      <div class="xr-footer"><span>التقرير التنفيذي — ${esc(ctx.monthLabel)}</span><span>21</span></div>
+    </div>
+  </section>`;
+}
+```
+
+**File:** `src/data/reporting/executive/pages/levelAgreement.ts`
+
+**Before:** (file did not exist)
+
+**After:**
+```ts
+import type { ExecutiveRenderContext } from "../context";
+import { kpiCard, barRow, fmtPct, esc } from "../primitives";
+
+export function buildLevelAgreement(ctx: ExecutiveRenderContext): string {
+  const { kpis } = ctx;
+
+  const bars = [
+    barRow({ label: "دقة المستوى الأول", value: kpis.levelOneAccuracy, max: 100, tone: "good" }),
+    barRow({ label: "دقة المستوى الثاني", value: kpis.levelTwoAccuracy, max: 100, tone: "blue" }),
+    barRow({ label: "معدل الاختلاف م.أول/ثاني", value: kpis.levelDisagreementRate, max: 100, tone: "risk" }),
+    barRow({ label: "معدل تصحيح م.ثاني", value: kpis.levelTwoCorrectionRate, max: 100 }),
+    barRow({ label: "معدل تراجع م.ثاني", value: kpis.levelTwoRegressionRate, max: 100, tone: "risk" }),
+  ].join("");
+
+  return `<section class="xr-page" id="page-level-agree">
+    <div class="xr-page-inner">
+      <div class="xr-slide-head"><h2>مقارنة المستوى الأول والثاني وتوافق الموظفين</h2><span class="xr-pg">22</span></div>
+      <div class="xr-cols xr-cols-2">
+        <div class="xr-panel">
+          <div class="xr-panel-title">مقارنة المستويين</div>
+          <div class="xr-bars" style="margin-top:0.1in">${bars}</div>
+        </div>
+        <div class="xr-panel">
+          <div class="xr-panel-title">توافق أزواج الموظفين</div>
+          <div class="xr-notice" style="margin-top:0.1in">هذا الجزء يتطلب وجود حالات راجعها موظفان مختلفان — لم تُرصد حالات كهذه في هذا الشهر.</div>
+        </div>
+      </div>
+      <div class="xr-footer"><span>التقرير التنفيذي — ${esc(ctx.monthLabel)}</span><span>22</span></div>
+    </div>
+  </section>`;
+}
+```
+
+**File:** `src/data/reporting/executive/index.ts`
+
+**Before:**
+```ts
+import { buildPopulationByLevel } from "./pages/populationByLevel";
+import { buildSampleByLevel } from "./pages/sampleByLevel";
+import { buildDistributionOverview } from "./pages/distributionOverview";
+import { buildAccuracyByPort } from "./pages/accuracyByPort";
+import { buildAppendix } from "./pages/appendix";
+```
+
+**After:**
+```ts
+import { buildPopulationByLevel } from "./pages/populationByLevel";
+import { buildSampleByLevel } from "./pages/sampleByLevel";
+import { buildDistributionOverview } from "./pages/distributionOverview";
+import { buildAccuracyByPort } from "./pages/accuracyByPort";
+import { buildAccuracyByLevel } from "./pages/accuracyByLevel";
+import { buildLevelAgreement } from "./pages/levelAgreement";
+import { buildAppendix } from "./pages/appendix";
+```
+
+**And in the pages array:**
+
+**Before:**
+```ts
+    buildDistributionOverview,
+    buildPart4Divider,
+    buildAccuracyByPort,
+    // accuracyByLevel — Phase 3
+    // levelAgreement — Phase 3
+    buildPart5Divider,
+```
+
+**After:**
+```ts
+    buildDistributionOverview,
+    buildPart4Divider,
+    buildAccuracyByPort,
+    buildAccuracyByLevel,
+    buildLevelAgreement,
+    buildPart5Divider,
+```
+
+---
+
 ## v20.6 — 2026-06-29 — feat(executive-report): add accuracy by port page (Phase 3)
 
 **File:** `src/data/reporting/executive/pages/accuracyByPort.ts`

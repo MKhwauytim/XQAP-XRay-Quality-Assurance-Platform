@@ -18,6 +18,8 @@ import { buildPopulationByLevel } from "./pages/populationByLevel";
 import { buildSampleByLevel } from "./pages/sampleByLevel";
 import { buildDistributionOverview } from "./pages/distributionOverview";
 import { buildAccuracyByPort } from "./pages/accuracyByPort";
+import { buildAccuracyByLevel } from "./pages/accuracyByLevel";
+import { buildLevelAgreement } from "./pages/levelAgreement";
 import { buildAppendix } from "./pages/appendix";
 
 export function buildExecutiveReport(
@@ -42,8 +44,8 @@ export function buildExecutiveReport(
     buildDistributionOverview,
     buildPart4Divider,
     buildAccuracyByPort,
-    // accuracyByLevel — Phase 3
-    // levelAgreement — Phase 3
+    buildAccuracyByLevel,
+    buildLevelAgreement,
     buildPart5Divider,
     // empOverview … — Phase 4
     buildPart6Divider,
