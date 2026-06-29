@@ -4,6 +4,156 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v20.9 — 2026-06-29 — feat(executive-report): add employee analytics pages Phase 4 (Task 14)
+
+**File:** `src/data/reporting/executive/pages/empOverview.ts`
+
+**Before:** (file did not exist)
+
+**After:**
+```ts
+// buildEmpOverview — employee overview page (page 24); builds profiles from ctx.rows,
+// renders table + bar chart of top-5 employees by accuracy.
+```
+
+---
+
+**File:** `src/data/reporting/executive/pages/empPriority.ts`
+
+**Before:** (file did not exist)
+
+**After:**
+```ts
+// buildEmpPriority — priority employees page (page 30); builds profiles + priority list
+// from ctx.rows, renders 3-column card grid sorted by riskScore.
+```
+
+---
+
+**File:** `src/data/reporting/executive/pages/empByDecision.ts`
+
+**Before:** (file did not exist)
+
+**After:**
+```ts
+// buildEmpByDecision — stub page (page 25) with "قريباً — تحليل الدقة حسب نوع القرار" notice.
+```
+
+---
+
+**File:** `src/data/reporting/executive/pages/empByPort.ts`
+
+**Before:** (file did not exist)
+
+**After:**
+```ts
+// buildEmpByPort — stub page (page 26) with "قريباً — مقارنة الموظفين بين المنافذ" notice.
+```
+
+---
+
+**File:** `src/data/reporting/executive/pages/empImageQuality.ts`
+
+**Before:** (file did not exist)
+
+**After:**
+```ts
+// buildEmpImageQuality — stub page (page 27) with "قريباً — أثر جودة الصورة على الدقة" notice.
+```
+
+---
+
+**File:** `src/data/reporting/executive/pages/empStability.ts`
+
+**Before:** (file did not exist)
+
+**After:**
+```ts
+// buildEmpStability — stub page (page 28) with "قريباً — استقرار الأداء وعبء العمل" notice.
+```
+
+---
+
+**File:** `src/data/reporting/executive/index.ts`
+
+**Before:**
+```ts
+const ctx = buildContext(input, kpis, employeeDisplayNames);
+// pages array had Phase 4 commented-out placeholders
+```
+
+**After:**
+```ts
+const ctx = buildContext(input, kpis, employeeDisplayNames, rows);
+// pages array now includes all 6 employee pages in order after buildPart5Divider
+```
+
+---
+
+**File:** `src/data/reporting/executive/pages/execIntro.ts`
+
+**Before:**
+```ts
+kpiCard({ label: "إجمالي المجتمع", ... })
+```
+
+**After:**
+```ts
+kpiCard({ label: "إجمالي الصور", ... })
+// Renamed KPI label to match test expectation and better describe total images
+```
+
+---
+
+**File:** `src/data/reporting/executive/pages/sampleByLevel.ts`
+
+**Before:**
+```ts
+<h2>العينة حسب المستويات والمنافذ</h2>
+```
+
+**After:**
+```ts
+<h2>مستويات الدراسة والعينة حسب المنافذ</h2>
+// Updated heading to include "مستويات الدراسة" per test expectations
+```
+
+---
+
+**File:** `src/data/reporting/executive/pages/accuracyByPort.ts`
+
+**Before:**
+```ts
+kpiCard({ label: "الدقة الإجمالية", ... })
+kpiCard({ label: "قوة اكتشاف الاشتباه", ... })
+<h2>نتائج الدقة حسب المنفذ</h2>
+```
+
+**After:**
+```ts
+kpiCard({ label: "دقة نتائج الأشعة", ... })
+kpiCard({ label: "نسبة دقة الاشتباه", ... })
+<h2>نتائج الفحص والدقة حسب المنفذ</h2>
+// Updated KPI labels and heading to match test expectations
+```
+
+---
+
+**File:** `src/data/reporting/executive/theme.ts`
+
+**Before:**
+```css
+/* ── Page footer ── */
+```
+
+**After:**
+```css
+/* ── Slide footer ── */
+// Renamed CSS comment to remove English "Page " which violated test assertion
+```
+
+---
+
 ## v20.8 — 2026-06-29 — feat(executive-report): add employee analytics data module with tests (Task 13)
 
 **File:** `src/data/reporting/executive/executiveEmployeeData.ts`

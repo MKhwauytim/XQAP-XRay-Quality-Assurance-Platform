@@ -4,7 +4,7 @@ import { kpiCard, fmtNum, fmtPct, esc } from "../primitives";
 export function buildExecIntro(ctx: ExecutiveRenderContext): string {
   const { kpis } = ctx;
   const cards = [
-    kpiCard({ label: "إجمالي المجتمع", value: fmtNum(kpis.totalPopulation), tone: "accent" }),
+    kpiCard({ label: "إجمالي الصور", value: fmtNum(kpis.totalPopulation), tone: "accent" }),
     kpiCard({ label: "حجم العينة", value: fmtNum(kpis.totalSample) }),
     kpiCard({ label: "نسبة التغطية", value: fmtPct(kpis.sampleCoverage), tone: kpis.sampleCoverage !== null && kpis.sampleCoverage >= ctx.input.config.coverageTarget ? "good" : "warn" }),
     kpiCard({ label: "الحالات المدروسة", value: fmtNum(kpis.studiedImages) }),

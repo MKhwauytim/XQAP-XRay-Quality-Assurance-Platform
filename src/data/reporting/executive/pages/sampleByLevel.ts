@@ -31,7 +31,7 @@ export function buildSampleByLevel(ctx: ExecutiveRenderContext): string {
 
   return `<section class="xr-page" id="page-sample">
     <div class="xr-page-inner">
-      <div class="xr-slide-head"><h2>العينة حسب المستويات والمنافذ</h2><span class="xr-pg">12</span></div>
+      <div class="xr-slide-head"><h2>مستويات الدراسة والعينة حسب المنافذ</h2><span class="xr-pg">12</span></div>
       <div class="xr-kpi-grid xr-kpi-grid-4" style="margin-bottom:0.13in">${kpis4}</div>
       <div class="xr-cols xr-cols-2">
         <div>

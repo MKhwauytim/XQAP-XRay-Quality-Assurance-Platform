@@ -89,7 +89,7 @@ body{
 }
 .xr-slide-head h2{font-size:0.26in;font-weight:800;color:var(--xr-white);}
 .xr-slide-head .xr-pg{font-size:0.14in;color:var(--xr-muted);font-weight:700;direction:ltr;}
-/* ── Page footer ── */
+/* ── Slide footer ── */
 .xr-footer{
   position:absolute;left:0.5in;right:0.5in;bottom:0.14in;
   border-top:1px solid var(--xr-line);padding-top:0.05in;

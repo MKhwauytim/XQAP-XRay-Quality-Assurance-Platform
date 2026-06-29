@@ -21,6 +21,12 @@ import { buildAccuracyByPort } from "./pages/accuracyByPort";
 import { buildAccuracyByLevel } from "./pages/accuracyByLevel";
 import { buildLevelAgreement } from "./pages/levelAgreement";
 import { buildAppendix } from "./pages/appendix";
+import { buildEmpOverview } from "./pages/empOverview";
+import { buildEmpByDecision } from "./pages/empByDecision";
+import { buildEmpByPort } from "./pages/empByPort";
+import { buildEmpImageQuality } from "./pages/empImageQuality";
+import { buildEmpStability } from "./pages/empStability";
+import { buildEmpPriority } from "./pages/empPriority";
 
 export function buildExecutiveReport(
   input: ExecutiveReportInput,
@@ -28,7 +34,7 @@ export function buildExecutiveReport(
 ): string {
   const rows = buildExecutiveReportRows(input);
   const kpis = calculateExecutiveKPIs(rows, input.sample, input.config);
-  const ctx = buildContext(input, kpis, employeeDisplayNames);
+  const ctx = buildContext(input, kpis, employeeDisplayNames, rows);
 
   const pages = [
     buildCover,
@@ -47,9 +53,13 @@ export function buildExecutiveReport(
     buildAccuracyByLevel,
     buildLevelAgreement,
     buildPart5Divider,
-    // empOverview … — Phase 4
+    buildEmpOverview,
+    buildEmpByDecision,
+    buildEmpByPort,
+    buildEmpImageQuality,
+    buildEmpStability,
     buildPart6Divider,
-    // empPriority — Phase 4
+    buildEmpPriority,
     buildAppendix,
   ];
 
