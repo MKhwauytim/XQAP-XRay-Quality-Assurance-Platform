@@ -4,6 +4,84 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v20.1 — 2026-06-29 — feat(executive-report): add viewer shell and assembler
+
+**File:** `src/data/reporting/executive/viewer.ts`
+
+**Before:** (file did not exist)
+
+**After:**
+```ts
+import { EXEC_CSS } from "./theme";
+import { esc } from "./primitives";
+
+export function buildViewerHtml(slides: string, sidebarLinks: string, monthLabel: string): string {
+  return `<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>التقرير التنفيذي — ${esc(monthLabel)}</title>
+<style>${EXEC_CSS}</style>
+</head>
+<body>
+<div class="xr-viewer">
+  <main class="xr-slides">${slides}</main>
+  <nav class="xr-sidebar">
+    <div class="xr-brand">
+      <strong>التقرير التنفيذي</strong>
+      <span>ضمان جودة الأشعة</span>
+    </div>
+    <button class="xr-pdf-btn" onclick="window.print()">تصدير PDF</button>
+    <div class="xr-nav-title">الأقسام</div>
+    <div class="xr-nav">${sidebarLinks}</div>
+  </nav>
+</div>
+</body>
+</html>`;
+}
+```
+
+---
+
+**File:** `src/data/reporting/executive/assemble.ts`
+
+**Before:** (file did not exist)
+
+**After:**
+```ts
+import type { ExecutiveRenderContext } from "./context";
+import { buildViewerHtml } from "./viewer";
+import { esc } from "./primitives";
+
+const NAV_SECTIONS = [
+  { label: "الغلاف", id: "page-cover" },
+  { label: "الفهرس", id: "page-toc" },
+  { label: "مقدمة تنفيذية", id: "page-intro" },
+  { label: "المعجم", id: "page-glossary" },
+  { label: "الجزء الأول: المجتمع", id: "page-p1" },
+  { label: "الجزء الثاني: العينة", id: "page-p2" },
+  { label: "الجزء الثالث: التوزيع", id: "page-p3" },
+  { label: "الجزء الرابع: الدقة", id: "page-p4" },
+  { label: "الجزء الخامس: الفجوات", id: "page-p5" },
+  { label: "الجزء السادس: التوصيات", id: "page-p6" },
+  { label: "الملاحق", id: "page-appendix" },
+];
+
+export function assembleReport(
+  ctx: ExecutiveRenderContext,
+  pageBuilders: Array<(ctx: ExecutiveRenderContext) => string>,
+): string {
+  const slides = pageBuilders.map(fn => fn(ctx)).join("\n");
+  const sidebarLinks = NAV_SECTIONS.map(s =>
+    `<a href="#${s.id}">${esc(s.label)}</a>`
+  ).join("");
+  return buildViewerHtml(slides, sidebarLinks, ctx.monthLabel);
+}
+```
+
+---
+
 ## v20.0 — 2026-06-29 — feat(executive-report): add population-by-risk and appendix pages
 
 **File:** `src/data/reporting/executive/pages/populationByRisk.ts`
