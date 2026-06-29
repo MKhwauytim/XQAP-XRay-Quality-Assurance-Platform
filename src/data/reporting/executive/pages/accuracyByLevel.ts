@@ -63,6 +63,74 @@ export function buildAccuracyByLevel(ctx: ExecutiveRenderContext): string {
     </tr>`;
   }).join("");
 
+  const hasPendingData = kpis.validStudied === 0;
+
+  const pendingCards = kpis.stageProfiles.map((s, i) => {
+    const col = stageColors[i] ?? "gold";
+    return `<div class="card level-card stage${i + 1}">
+      <h3>${esc(s.stageLabel)}</h3>
+      <p>دقة الفحص</p>
+      <div class="metric ${col}">—</div>
+      <p>دقة الاشتباه: —</p>
+    </div>`;
+  }).join("");
+
+  const mainContent = hasPendingData
+    ? `<div class="grid grid-4">${pendingCards}</div>
+      <div class="notice-centered" style="flex:1;padding:24px"><div>لم تُقدَّم مراجعات خبير بعد — ستظهر نتائج الدقة لكل مستوى فور اكتمال عملية المراجعة.</div></div>
+      <div class="context-band">
+        <div class="card">
+          <div class="panel-title">ما الذي تقيسه هذه الصفحة؟</div>
+          <ul class="method-list">
+            <li>دقة الفحص لكل مستوى = نسبة الحالات التي تطابقت فيها نتيجة المستوى مع رأي الخبير.</li>
+            <li>دقة الاشتباه = قدرة المستوى على اكتشاف الحالات المشبوهة الحقيقية بشكل صحيح.</li>
+            <li>المقارنة بين المستويات تُبرز مدى اتساق الأداء وتحدد المستويات التي تحتاج إلى تدخل.</li>
+            <li>تُحسب القيم فقط على الحالات التي صدر بها رأي الخبير.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <div class="panel-title">المستويات المسجّلة</div>
+          <div class="stat-stack">
+            ${kpis.stageProfiles.map((s) =>
+              `<div class="stat-pill"><span>${esc(s.stageLabel)}</span><b>${fmtNum(s.population)} حالة</b></div>`
+            ).join("")}
+            ${kpis.stageProfiles.length === 0
+              ? '<div class="stat-pill"><span>لا توجد مستويات</span><b>—</b></div>'
+              : ''}
+          </div>
+        </div>
+      </div>`
+    : `<div class="grid grid-4">${cards}</div>
+      <div class="page-fill">
+        <div class="table-wrap" style="margin-top:18px"><table>
+          <thead><tr><th>المستوى</th><th>الحالات المفحوصة</th><th>حالات الاشتباه</th><th>دقة الاشتباه</th><th>دقة الفحص</th><th>أبرز ملاحظة</th></tr></thead>
+          <tbody>${tableRows}</tbody>
+        </table></div>
+        <div class="context-band">
+          <div class="card">
+            <div class="panel-title">تفسير النتائج</div>
+            <ul class="method-list">
+              <li>المستويات ذات دقة فحص أعلى من الهدف تُشير إلى أداء متميز يستحق التعزيز.</li>
+              <li>الفجوة الكبيرة بين دقة الفحص ودقة الاشتباه تستوجب مراجعة منهجية الاشتباه.</li>
+              <li>يُنصح بتركيز جهود التحسين على المستويات التي تقل دقتها عن المستهدف.</li>
+              <li>الغرض: إبراز المستويات الأقوى وتحديد المستويات التي تتطلب تدخلًا.</li>
+            </ul>
+          </div>
+          <div class="card">
+            <div class="panel-title">إجماليات المستويات</div>
+            <div class="stat-stack">
+              ${kpis.stageProfiles.map((s, i) => {
+                const key = stageKeys[i] ?? s.stageKey;
+                const acc = stageAccMap.get(key) ?? stageAccMap.get(s.stageKey);
+                const inspAcc = acc?.accuracy ?? null;
+                const col = stageColors[i] ?? "gold";
+                return `<div class="stat-pill"><span>${esc(s.stageLabel)}</span><b style="color:var(--${col})">${fmtPct(inspAcc)}</b></div>`;
+              }).join("")}
+            </div>
+          </div>
+        </div>
+      </div>`;
+
   return `<section class="page compact" id="page-acc-level" data-title="نتائج الدقة حسب المستويات">
   <div class="right-rail">
     <div class="rail-main">الجزء الثاني <em>نتائج الفحص</em></div>
@@ -73,14 +141,9 @@ export function buildAccuracyByLevel(ctx: ExecutiveRenderContext): string {
   <div class="page-inner">
     <h2 class="section-title">نتائج الدقة حسب المستويات</h2>
     <div class="section-subtitle">تحليل دقة الفحص ودقة الاشتباه عبر المستويات الأربعة</div>
-    <div class="grid grid-4">
-      ${cards}
+    <div class="page-fill">
+      ${mainContent}
     </div>
-    <div class="table-wrap" style="margin-top:18px"><table>
-      <thead><tr><th>المستوى</th><th>الحالات المفحوصة</th><th>حالات الاشتباه</th><th>دقة الاشتباه</th><th>دقة الفحص</th><th>أبرز ملاحظة</th></tr></thead>
-      <tbody>${tableRows}</tbody>
-    </table></div>
-    <div class="info" style="margin-top:18px">الغرض: إبراز المستويات الأقوى وتحديد المستويات التي تتطلب تدخلًا، وفهم الفروق بين دقة الاشتباه ودقة الفحص الإجمالية.</div>
     <div class="page-no">10</div>
   </div>
 </section>`;

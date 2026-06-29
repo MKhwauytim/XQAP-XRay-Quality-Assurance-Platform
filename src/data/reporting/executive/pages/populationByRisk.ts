@@ -49,6 +49,39 @@ export function buildPopulationByRisk(ctx: ExecutiveRenderContext): string {
   const landMore  = landPorts.length > 8 ? `<tr class="muted-row"><td colspan="4">... ${fmtNum(landPorts.length - 8)} أخرى</td></tr>` : "";
   const seaMore   = seaPorts.length  > 8 ? `<tr class="muted-row"><td colspan="4">... ${fmtNum(seaPorts.length - 8)} أخرى</td></tr>` : "";
 
+  const hasAnyPorts = kpis.portProfiles.length > 0;
+
+  const portSplitHtml = hasAnyPorts
+    ? `<div class="port-split">
+      <div class="card land">
+        <div class="panel-title">المنافذ البرية</div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>المنفذ</th><th>الإجمالي</th><th>سليمة</th><th>اشتباه</th></tr></thead>
+          <tbody>
+            ${landRows.map(portRow).join("")}
+            ${landMore}
+            ${landPorts.length > 0
+              ? `<tr class="total-row"><td>الإجمالي</td><td>${fmtNum(landTotal)}</td><td>${fmtNum(landCleanTotal)}</td><td>${fmtNum(landSuspTotal)}</td></tr>`
+              : `<tr class="total-row"><td colspan="4"><span class="muted">لا توجد منافذ برية</span></td></tr>`}
+          </tbody>
+        </table></div>
+      </div>
+      <div class="card sea">
+        <div class="panel-title">المنافذ البحرية</div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>المنفذ</th><th>الإجمالي</th><th>سليمة</th><th>اشتباه</th></tr></thead>
+          <tbody>
+            ${seaRows.map(portRow).join("")}
+            ${seaMore}
+            ${seaPorts.length > 0
+              ? `<tr class="total-row"><td>الإجمالي</td><td>${fmtNum(seaTotal)}</td><td>${fmtNum(seaCleanTotal)}</td><td>${fmtNum(seaSuspTotal)}</td></tr>`
+              : `<tr class="total-row"><td colspan="4"><span class="muted">لا توجد منافذ بحرية</span></td></tr>`}
+          </tbody>
+        </table></div>
+      </div>
+    </div>`
+    : `<div class="notice-centered"><div>لم يتم معالجة بيانات المجتمع بعد — يُرجى استيراد ملف بيانات المخاطر وإجراء المعالجة لعرض توزيع المنافذ.</div></div>`;
+
   return `<section class="page" id="page-pop-risk" data-title="مجتمع حالات المخاطر">
   <div class="right-rail">
     <div class="rail-main">الجزء الأول <em>مجتمع الحالات</em></div>
@@ -65,30 +98,27 @@ export function buildPopulationByRisk(ctx: ExecutiveRenderContext): string {
       <div class="card"><h3>المنافذ البحرية</h3><div class="metric blue">${fmtNum(seaTotal)}</div></div>
     </div>
     <div class="info" style="margin:16px 0">منهجية التصنيف: تُعد الحالة اشتباه إذا كانت نتيجة المستوى الأول أو المستوى الثاني = اشتباه، وفي غير ذلك تُصنف سليمة.</div>
-    <div class="port-split">
-      <div class="card land">
-        <div class="panel-title">المنافذ البرية</div>
-        <div class="table-wrap"><table>
-          <thead><tr><th>المنفذ</th><th>الإجمالي</th><th>سليمة</th><th>اشتباه</th></tr></thead>
-          <tbody>
-            ${landRows.map(portRow).join("")}
-            ${landMore}
-            <tr class="total-row"><td>الإجمالي</td><td>${fmtNum(landTotal)}</td><td>${fmtNum(landCleanTotal)}</td><td>${fmtNum(landSuspTotal)}</td></tr>
-          </tbody>
-        </table></div>
-      </div>
-      <div class="card sea">
-        <div class="panel-title">المنافذ البحرية</div>
-        <div class="table-wrap"><table>
-          <thead><tr><th>المنفذ</th><th>الإجمالي</th><th>سليمة</th><th>اشتباه</th></tr></thead>
-          <tbody>
-            ${seaRows.map(portRow).join("")}
-            ${seaMore}
-            ${seaPorts.length > 0
-              ? `<tr class="total-row"><td>الإجمالي</td><td>${fmtNum(seaTotal)}</td><td>${fmtNum(seaCleanTotal)}</td><td>${fmtNum(seaSuspTotal)}</td></tr>`
-              : `<tr class="total-row"><td colspan="4"><span class="muted">لا توجد منافذ بحرية</span></td></tr>`}
-          </tbody>
-        </table></div>
+    <div class="page-fill">
+      ${portSplitHtml}
+      <div class="context-band">
+        <div class="card">
+          <div class="panel-title">منهجية تصنيف المجتمع</div>
+          <ul class="method-list">
+            <li>تُصنّف الحالة "اشتباه" إذا كانت نتيجة المستوى الأول أو الثاني = اشتباه، وإلا فهي "سليمة".</li>
+            <li>يُقسّم المجتمع حسب نوع المنفذ (بري/بحري) ثم حسب المنفذ التابع له.</li>
+            <li>تُرتّب المنافذ تنازليًا بحسب حجم المجتمع، وتُختصر القوائم الطويلة مع بيان العدد المتبقي.</li>
+            <li>تُستخدم هذه الأرقام كأساس لحساب العينة ونِسب التغطية في الصفحات التالية.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <div class="panel-title">ملخّص المجتمع</div>
+          <div class="stat-stack">
+            <div class="stat-pill"><span>إجمالي المنافذ</span><b>${fmtNum(landPorts.length + seaPorts.length)}</b></div>
+            <div class="stat-pill"><span>منافذ برية</span><b>${fmtNum(landPorts.length)}</b></div>
+            <div class="stat-pill"><span>منافذ بحرية</span><b>${fmtNum(seaPorts.length)}</b></div>
+            <div class="stat-pill"><span>إجمالي المجتمع</span><b>${fmtNum(kpis.totalPopulation)}</b></div>
+          </div>
+        </div>
       </div>
     </div>
     <div class="page-no">05</div>

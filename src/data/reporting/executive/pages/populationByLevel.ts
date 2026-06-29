@@ -66,6 +66,31 @@ export function buildPopulationByLevel(ctx: ExecutiveRenderContext): string {
     </div>`;
   }).join("");
 
+  const hasStages = kpis.stageProfiles.length > 0;
+
+  const mainContent = hasStages
+    ? `<div class="grid grid-2" style="margin-top:18px">${stageTableBlocks}</div>
+      <div class="context-band">
+        <div class="card">
+          <div class="panel-title">وصف المستويات</div>
+          <ul class="method-list">
+            <li>المستوى الأول: تقييم فاحص الأشعة الابتدائي لكل حالة — هو الإجراء الأساسي الأول.</li>
+            <li>المستوى الثاني: مراجعة إشرافية تُجرى على حالات بعينها للتحقق من قرارات المستوى الأول.</li>
+            <li>المستوى الثالث والرابع (عند وجودهما): مراجعات إضافية متخصصة أو تصعيدية.</li>
+            <li>تُعرض حالات كل مستوى موزّعة على المنافذ لإبراز تركّز النشاط جغرافيًا.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <div class="panel-title">توزيع المستويات</div>
+          <div class="stat-stack">
+            ${kpis.stageProfiles.map((s, i) =>
+              `<div class="stat-pill"><span>${esc(s.stageLabel)}</span><b class="metric ${["gold","blue","slate","coral"][i] ?? "gold"}" style="font-size:1rem">${fmtNum(s.population)}</b></div>`
+            ).join("")}
+          </div>
+        </div>
+      </div>`
+    : `<div class="notice-centered page-fill"><div>لا توجد بيانات مستويات — يُرجى التأكد من استيراد بيانات المجتمع وإجراء المعالجة.</div></div>`;
+
   return `<section class="page compact" id="page-pop-levels" data-title="المجتمع حسب المستويات">
   <div class="right-rail">
     <div class="rail-main">الجزء الأول <em>مجتمع الحالات</em></div>
@@ -80,8 +105,8 @@ export function buildPopulationByLevel(ctx: ExecutiveRenderContext): string {
       <div class="card"><h3>إجمالي المجتمع</h3><div class="metric gold">${fmtNum(kpis.totalPopulation)}</div></div>
       ${stageMetrics}
     </div>
-    <div class="grid grid-2" style="margin-top:18px">
-      ${stageTableBlocks}
+    <div class="page-fill">
+      ${mainContent}
     </div>
     <div class="page-no">06</div>
   </div>
