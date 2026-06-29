@@ -1,62 +1,47 @@
 import type { ExecutiveRenderContext } from "../context";
 import { esc } from "../primitives";
 
-const VTAB_LABELS = [
-  { label: "المستوى الأول", color: "var(--xr-l1)" },
-  { label: "المستوى الثاني", color: "var(--xr-l2)" },
-  { label: "المستوى الثالث", color: "var(--xr-l3)" },
-  { label: "المستوى الرابع", color: "var(--xr-l4)" },
-];
-
-function vtabs(): string {
-  return `<div class="xr-vtabs">
-    ${VTAB_LABELS.map(v => `<div class="xr-vtab" style="background:${v.color}">${esc(v.label)}</div>`).join("")}
-  </div>`;
-}
-
 export function buildPartDivider(
-  partNum: string, title: string, sub: string, icon: string, pageId: string, pageNum: string,
+  partLabel: string, title: string, subtitle: string, icon: string,
+  pageId: string, pageNum: string, railTabs: string[], dataTitle: string,
 ): (_ctx: ExecutiveRenderContext) => string {
-  return (_ctx) => `<section class="xr-page xr-divider-page" id="${pageId}">
-    ${vtabs()}
-    <div class="xr-divider-body">
-      <div class="xr-divider-icon">${icon}</div>
-      <div class="xr-divider-eyebrow">${esc(partNum)}</div>
-      <div class="xr-divider-title">${esc(title)}</div>
-      <div class="xr-divider-rule"></div>
-      <div class="xr-divider-sub">${esc(sub)}</div>
+  return (_ctx) => `<section class="page" id="${pageId}" data-title="${esc(dataTitle)}">
+  <div class="right-rail">
+    <div class="rail-main">التقرير التنفيذي <em>لضمان جودة الأشعة</em></div>
+    ${railTabs.map((t, i) => `<div class="rail-tab${i === 0 ? ' active' : ''}">${esc(t)}</div>`).join('')}
+  </div>
+  <div class="page-inner big-divider">
+    <div>
+      <div class="icon">${icon}</div>
+      <div class="kicker">${esc(partLabel)}</div>
+      <h1>${esc(title)}</h1>
+      <div class="rule"></div>
+      <p class="lead">${esc(subtitle)}</p>
     </div>
-    <div class="xr-page-num">• ${esc(pageNum)} •</div>
-  </section>`;
+    <div class="page-no">${esc(pageNum)}</div>
+  </div>
+</section>`;
 }
 
 export const buildPart1Divider = buildPartDivider(
-  "الجزء الأول", "مجتمع الحالات",
-  "يستعرض هذا الجزء حجم المجتمع محل الدراسة وتوزيعه حسب نوع المنفذ والمستوى ونمط الحركة.",
-  "📦", "page-p1", "07"
+  'الجزء الأول', 'مجتمع الحالات',
+  'استعراض حجم المجتمع محل الدراسة وتوزيعه حسب المنفذ والمستوى ونمط الحركة تمهيدًا لتحليل النتائج والفجوات.',
+  '◫', 'page-p1', '04', ['الجزء الأول', 'الجزء الثاني', 'الجزء الثالث'], 'غلاف الجزء الأول',
 );
+
 export const buildPart2Divider = buildPartDivider(
-  "الجزء الثاني", "العينة",
-  "يستعرض هذا الجزء حجم العينة المسحوبة وتوزيعها على المنافذ والمستويات وبيانات CertScan.",
-  "🎯", "page-p2", "11"
+  'الجزء الثاني', 'نتائج الفحص',
+  'تحليل نتائج المراجعة ونسب الدقة والفجوات على مستوى المنفذ والمستوى.',
+  '⌕', 'page-p2', '08', ['الجزء الأول', 'الجزء الثاني', 'الجزء الثالث'], 'غلاف الجزء الثاني',
 );
+
 export const buildPart3Divider = buildPartDivider(
-  "الجزء الثالث", "التوزيع والتكليف",
-  "يستعرض هذا الجزء توزيع حالات العينة على الموظفين وأعباء العمل وحالة الإنجاز.",
-  "📋", "page-p3", "15"
+  'الجزء الثالث', 'التحاليل المتقدمة',
+  'تحليلات متقدمة للكشف عن الأنماط الخفية في الأداء، وتحديد الفجوات التشغيلية وفرص التحسين.',
+  '◈', 'page-p3', '12', ['الجزء الأول', 'الجزء الثاني', 'الجزء الثالث'], 'غلاف التحاليل المتقدمة',
 );
-export const buildPart4Divider = buildPartDivider(
-  "الجزء الرابع", "نتائج المراجعة ومؤشرات الدقة",
-  "يستعرض هذا الجزء نتائج مراجعة الدقة على مستوى المنافذ والمستويات ومقارنة الخبراء.",
-  "📊", "page-p4", "19"
-);
-export const buildPart5Divider = buildPartDivider(
-  "الجزء الخامس", "الفجوات والملاحظات الجوهرية",
-  "يستعرض هذا الجزء أداء الموظفين وتحليل أثر جودة الصورة والتحديد على نتائج الدقة.",
-  "🔍", "page-p5", "23"
-);
-export const buildPart6Divider = buildPartDivider(
-  "الجزء السادس", "التوصيات والقرارات المطلوبة",
-  "يستعرض هذا الجزء الموظفين ذوي الأولوية والإجراءات التصحيحية المقترحة.",
-  "🎖", "page-p6", "29"
-);
+
+// Alias stubs kept for index.ts compatibility
+export const buildPart4Divider = buildPart3Divider;
+export const buildPart5Divider = buildPart3Divider;
+export const buildPart6Divider = buildPart3Divider;

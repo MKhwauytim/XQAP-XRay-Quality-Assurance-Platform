@@ -1,50 +1,62 @@
 import type { ExecutiveRenderContext } from "../context";
-import { kpiCard, radarSvg, fmtPct, esc } from "../primitives";
-import { ORGANIZATION_PATH_TEXT } from "../../../../branding/organization";
-
-function orgHeader(): string {
-  const lines = ORGANIZATION_PATH_TEXT.split(" ← ").map(l => `<div>${esc(l)}</div>`).join("");
-  return `<div class="xr-org-header"><div class="xr-org-text">${lines}</div><div class="xr-org-logo">🛡</div></div>`;
-}
+import { fmtNum, fmtPct, esc } from "../primitives";
 
 export function buildAccuracyByLevel(ctx: ExecutiveRenderContext): string {
   const { kpis } = ctx;
+  const levelAccuracies = [kpis.levelOneAccuracy, kpis.levelTwoAccuracy, null, null];
 
-  const kpisRow = [
-    kpiCard({ label: "دقة المستوى الأول", value: fmtPct(kpis.levelOneAccuracy), tone: kpis.levelOneAccuracy !== null && kpis.levelOneAccuracy >= ctx.input.config.accuracyTarget ? "good" : "risk" }),
-    kpiCard({ label: "دقة المستوى الثاني", value: fmtPct(kpis.levelTwoAccuracy), tone: kpis.levelTwoAccuracy !== null && kpis.levelTwoAccuracy >= ctx.input.config.accuracyTarget ? "good" : "risk" }),
-    kpiCard({ label: "معدل التصحيح م.ثاني", value: fmtPct(kpis.levelTwoCorrectionRate) }),
-    kpiCard({ label: "معدل التراجع م.ثاني", value: fmtPct(kpis.levelTwoRegressionRate), tone: "warn" }),
-  ].join("");
+  const stageRows = kpis.stageProfiles.map((s, i) => {
+    const colors = ['gold', 'blue', 'slate', 'coral'];
+    const col = colors[i] ?? 'gold';
+    const acc = levelAccuracies[i];
+    return `<div class="card level-card stage${i+1}">
+      <h3>${esc(s.stageLabel)}</h3>
+      <p>دقة الفحص</p>
+      <div class="metric ${col}">${acc != null ? fmtPct(acc) : '—'}</div>
+    </div>`;
+  }).join('');
 
-  const radarPoints = [
-    { label: "دقة م.أول", value: kpis.levelOneAccuracy ?? 0 },
-    { label: "دقة م.ثاني", value: kpis.levelTwoAccuracy ?? 0 },
-    { label: "اكتشاف الاشتباه", value: kpis.suspiciousDetectionRate ?? 0 },
-    { label: "تأكيد السلامة", value: kpis.cleanConfirmationRate ?? 0 },
-    { label: "الدقة الإجمالية", value: kpis.overallAccuracy ?? 0 },
-    { label: "الجودة المتوازنة", value: kpis.balancedQualityScore ?? 0 },
-  ];
+  const tableRows = kpis.stageProfiles.map((s, i) => {
+    const acc = levelAccuracies[i];
+    return `<tr>
+      <td>${esc(s.stageLabel)}</td>
+      <td>${fmtNum(s.studied)}</td>
+      <td>—</td>
+      <td>—</td>
+      <td>${acc != null ? fmtPct(acc) : '—'}</td>
+      <td>—</td>
+    </tr>`;
+  }).join('');
 
-  return `<section class="xr-page" id="page-acc-level">
-    <div class="xr-page-inner">
-      ${orgHeader()}
-      <h2 class="xr-page-title">نتائج الدقة حسب المستويات الأربعة</h2>
-      <div class="xr-kpi-grid xr-kpi-grid-4">${kpisRow}</div>
-      <div class="xr-cols xr-cols-2">
-        <div class="xr-panel" style="height:280px">${radarSvg(radarPoints)}</div>
-        <div>
-          <div class="xr-panel-title">مؤشرات الدقة التفصيلية</div>
-          <table class="xr-table"><tbody>
-            <tr><td>اشتباه مكتشف</td><td>${kpis.correctSuspicious}</td></tr>
-            <tr><td>سليمة مؤكدة</td><td>${kpis.correctClean}</td></tr>
-            <tr><td>اشتباه فائت</td><td style="color:var(--xr-coral)">${kpis.missedSuspicious}</td></tr>
-            <tr><td>اشتباه زائد</td><td style="color:var(--xr-gold)">${kpis.excessSuspicious}</td></tr>
-            <tr><td>صور بتحقق صالح</td><td>${kpis.validStudied}</td></tr>
-          </tbody></table>
-        </div>
-      </div>
-      <div class="xr-page-num">• 21 •</div>
+  return `<section class="page compact" id="page-acc-level" data-title="نتائج الدقة حسب المستويات">
+  <div class="right-rail">
+    <div class="rail-main">الجزء الثاني <em>نتائج الفحص</em></div>
+    <div class="rail-tab">دقة المنفذ</div>
+    <div class="rail-tab active">دقة المستوى</div>
+    <div class="rail-tab">التوزيع</div>
+  </div>
+  <div class="page-inner">
+    <h2 class="section-title">نتائج الدقة حسب المستويات</h2>
+    <div class="section-subtitle">تحليل دقة الفحص ودقة الاشتباه عبر المستويات الأربعة</div>
+    <div class="grid grid-4">
+      ${stageRows || `
+        <div class="card level-card stage1"><h3>المستوى الأول</h3><p>دقة الفحص</p><div class="metric gold">${fmtPct(kpis.levelOneAccuracy)}</div></div>
+        <div class="card level-card stage2"><h3>المستوى الثاني</h3><p>دقة الفحص</p><div class="metric blue">${fmtPct(kpis.levelTwoAccuracy)}</div></div>
+        <div class="card level-card stage3"><h3>المستوى الثالث</h3><p>دقة الفحص</p><div class="metric slate">—</div></div>
+        <div class="card level-card stage4"><h3>المستوى الرابع</h3><p>دقة الفحص</p><div class="metric coral">—</div></div>`}
     </div>
-  </section>`;
+    <div class="table-wrap" style="margin-top:18px"><table>
+      <thead><tr><th>المستوى</th><th>الحالات المفحوصة</th><th>حالات الاشتباه</th><th>دقة الاشتباه</th><th>دقة الفحص</th><th>أبرز ملاحظة</th></tr></thead>
+      <tbody>
+        ${tableRows || `
+          <tr><td>المستوى الأول</td><td>—</td><td>—</td><td>—</td><td>${fmtPct(kpis.levelOneAccuracy)}</td><td>—</td></tr>
+          <tr><td>المستوى الثاني</td><td>—</td><td>—</td><td>—</td><td>${fmtPct(kpis.levelTwoAccuracy)}</td><td>—</td></tr>
+          <tr><td>المستوى الثالث</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+          <tr><td>المستوى الرابع</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>`}
+      </tbody>
+    </table></div>
+    <div class="info" style="margin-top:18px">الغرض: إبراز المستويات الأقوى وتحديد المستويات التي تتطلب تدخلًا، وفهم الفروق بين دقة الاشتباه ودقة الفحص الإجمالية.</div>
+    <div class="page-no">10</div>
+  </div>
+</section>`;
 }

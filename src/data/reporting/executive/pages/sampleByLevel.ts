@@ -1,56 +1,46 @@
 import type { ExecutiveRenderContext } from "../context";
-import { dataTable, kpiCard, fmtNum, fmtPct, esc } from "../primitives";
-import { ORGANIZATION_PATH_TEXT } from "../../../../branding/organization";
-
-function orgHeader(): string {
-  const lines = ORGANIZATION_PATH_TEXT.split(" ← ").map(l => `<div>${esc(l)}</div>`).join("");
-  return `<div class="xr-org-header"><div class="xr-org-text">${lines}</div><div class="xr-org-logo">🛡</div></div>`;
-}
+import { fmtNum, fmtPct, esc } from "../primitives";
 
 export function buildSampleByLevel(ctx: ExecutiveRenderContext): string {
   const { kpis, input } = ctx;
   const s = input.sample;
+  const certScan = s ? fmtNum(s.certScanActual) : '—';
+  const note = kpis.sampleCoverage !== null && kpis.sampleCoverage >= 99.9
+    ? 'تم سحب كامل المجتمع في هذه الدورة، لذلك بلغت نسبة التغطية 100%.'
+    : 'تم سحب العينة باستخدام خوارزمية هاميلتون للتوزيع الطبقي حسب المنفذ والمستوى.';
 
-  const kpis4 = [
-    kpiCard({ label: "حجم العينة الكلي", value: fmtNum(kpis.totalSample), tone: "accent" }),
-    kpiCard({ label: "CertScan", value: s ? fmtNum(s.certScanActual) : "—" }),
-    kpiCard({ label: "نسبة التغطية", value: fmtPct(kpis.sampleCoverage), tone: "good" }),
-    kpiCard({ label: "المجتمع الكلي", value: fmtNum(kpis.totalPopulation) }),
-  ].join("");
+  const stageCards = kpis.stageProfiles.map((sp, i) => `
+    <div class="card stage${i+1}">
+      <div class="panel-title">${esc(sp.stageLabel)} — ${fmtNum(sp.sampleSize)}/${fmtNum(sp.population)}</div>
+      <table>
+        <thead><tr><th>البند</th><th>مجتمع المرحلة</th><th>العينة</th><th>التغطية</th></tr></thead>
+        <tbody>
+          <tr><td>جميع المنافذ</td><td>${fmtNum(sp.population)}</td><td>${fmtNum(sp.sampleSize)}</td><td>${fmtPct(sp.coverage)}</td></tr>
+        </tbody>
+      </table>
+    </div>`).join('');
 
-  const stageRows = kpis.stageProfiles.map(sp => [
-    esc(sp.stageLabel),
-    fmtNum(sp.population),
-    fmtNum(sp.sampleSize),
-    fmtPct(sp.coverage),
-    fmtNum(sp.studied),
-  ]);
-
-  const portRows = kpis.portProfiles.map(p => [
-    esc(p.portName),
-    fmtNum(p.population),
-    fmtNum(p.sampleSize),
-    fmtPct(p.coverage),
-    fmtNum(p.studied),
-    fmtPct(p.completionRate),
-  ]);
-
-  return `<section class="xr-page" id="page-sample">
-    <div class="xr-page-inner">
-      ${orgHeader()}
-      <h2 class="xr-page-title">مستويات الدراسة والعينة حسب المنافذ</h2>
-      <div class="xr-kpi-grid xr-kpi-grid-4">${kpis4}</div>
-      <div class="xr-cols xr-cols-2">
-        <div>
-          <div class="xr-panel-title">العينة حسب المستوى</div>
-          ${dataTable({ headers: ["المستوى","المجتمع","العينة","التغطية","مدروسة"], rows: stageRows })}
-        </div>
-        <div>
-          <div class="xr-panel-title">العينة حسب المنفذ</div>
-          ${dataTable({ headers: ["المنفذ","المجتمع","العينة","التغطية","مدروسة","الإنجاز"], rows: portRows })}
-        </div>
-      </div>
-      <div class="xr-page-num">• 12 •</div>
+  return `<section class="page" id="page-sample" data-title="العينة">
+  <div class="right-rail">
+    <div class="rail-main">الجزء الأول <em>مجتمع الحالات</em></div>
+    <div class="rail-tab">المجتمع</div>
+    <div class="rail-tab active">العينة</div>
+    <div class="rail-tab">التوزيع</div>
+  </div>
+  <div class="page-inner">
+    <h2 class="section-title">العينة حسب المستويات والمنافذ</h2>
+    <div class="section-subtitle">العينة المستهدفة ونسبة التغطية داخل كل مستوى</div>
+    <div class="grid grid-4">
+      <div class="card"><h3>إجمالي المجتمع</h3><div class="metric gold">${fmtNum(kpis.totalPopulation)}</div></div>
+      <div class="card"><h3>إجمالي العينة</h3><div class="metric blue">${fmtNum(kpis.totalSample)}</div></div>
+      <div class="card"><h3>نسبة التغطية</h3><div class="metric green">${fmtPct(kpis.sampleCoverage)}</div></div>
+      <div class="card"><h3>CertScan</h3><div class="metric cyan">${certScan}</div></div>
     </div>
-  </section>`;
+    <div class="info" style="margin:16px 0">${note}</div>
+    <div class="grid grid-2">
+      ${stageCards}
+    </div>
+    <div class="page-no">07</div>
+  </div>
+</section>`;
 }

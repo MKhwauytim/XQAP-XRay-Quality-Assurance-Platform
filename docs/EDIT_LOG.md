@@ -32,6 +32,39 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v22.1 — 2026-06-29 — Rewrite all executive report pages to HTML mockup v4 design classes
+
+All page files migrated from `.xr-*` prefixed CSS classes to new HTML mockup v4 design system
+(`.page`, `.right-rail`, `.rail-main`, `.rail-tab`, `.page-inner`, `.card`, `.metric`, `.chip`,
+`.bar`, `.grid`, `.grid-2`, `.grid-4`, `.grid-5`, `.compact`, `.big-divider`, `.table-wrap`, etc.).
+`index.ts` page order updated to Cover→TOC→Glossary→Part1→PopRisk→PopLevel→Sample→Part2→AccPort→AccLevel→Dist→Part3→EmpOverview→EmpByDecision→EmpByPort→EmpImageQuality→EmpStability→LevelAgreement→EmpPriority→Appendix (20 pages, removing `buildExecIntro` from page list, keeping only Part1/2/3 dividers).
+
+**Files changed (before: `.xr-*` class HTML; after: new mockup v4 CSS class HTML):**
+
+- `src/data/reporting/executive/index.ts` — new page order, removed Part4/5/6 dividers, re-exported buildExecIntro for backward compat
+- `src/data/reporting/executive/pages/cover.ts` — new `.page.cover`, `.right-rail`, `.page-inner`, `.org`, `.title-block`, `.level-strip`, `.badges`
+- `src/data/reporting/executive/pages/toc.ts` — new `.toc-page`, `.toc-header`, `.toc-grid`, `.appendix-card`
+- `src/data/reporting/executive/pages/glossary.ts` — `.grid.grid-4`, `.card.level-card.stage1`–`.stage4`
+- `src/data/reporting/executive/pages/partDivider.ts` — `buildPartDivider()` factory; Part1/2/3 exports; Part4/5/6 alias stubs removed
+- `src/data/reporting/executive/pages/populationByRisk.ts` — heuristic `portName.includes('ميناء')` sea/land split (PortProfile has no portType); `.port-split`, `.card.land/sea`
+- `src/data/reporting/executive/pages/populationByLevel.ts` — `.grid.grid-5`, `.grid.grid-2`, stage table cards
+- `src/data/reporting/executive/pages/sampleByLevel.ts` — `.grid.grid-4`, `.info`, `.grid.grid-2`, stage cards
+- `src/data/reporting/executive/pages/accuracyByPort.ts` — `.compact`, `.grid.grid-4`, `.table-wrap`; removed unused `chipHtml`
+- `src/data/reporting/executive/pages/accuracyByLevel.ts` — fixed: removed `l1Tone/l2Tone` (unused); uses `kpis.levelOneAccuracy/levelTwoAccuracy` (StageProfile has no accuracy fields)
+- `src/data/reporting/executive/pages/distributionOverview.ts` — new mockup classes
+- `src/data/reporting/executive/pages/empOverview.ts` — 9-col employee table with `classifyEmp()` chip color helper
+- `src/data/reporting/executive/pages/empByDecision.ts` — `.quad` matrix
+- `src/data/reporting/executive/pages/empByPort.ts` — stub with `.card.info` notice
+- `src/data/reporting/executive/pages/empImageQuality.ts` — live data from `buildEmployeeProfiles`, aggregated quality metrics
+- `src/data/reporting/executive/pages/empStability.ts` — workload table replacing unreadable bubble chart
+- `src/data/reporting/executive/pages/levelAgreement.ts` — new mockup classes
+- `src/data/reporting/executive/pages/empPriority.ts` — riskScore-based counts, `.quad` matrix
+- `src/data/reporting/executive/pages/appendix.ts` — new mockup classes; removed unused `esc` import
+- `src/data/reporting/executive/pages/execIntro.ts` — new mockup classes (file kept; excluded from page list)
+- `src/data/reporting/executiveReport.test.ts` — updated assertions to match new design tokens (`--navy:#062846`, `--gold:#f4b400`) and new page content strings
+
+---
+
 ## v21.0 — 2026-06-29 — Redesign executive report to portrait A4 document format
 
 **Files:** All files in `src/data/reporting/executive/` (theme.ts, viewer.ts, assemble.ts, all pages/)

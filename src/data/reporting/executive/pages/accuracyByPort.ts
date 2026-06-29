@@ -1,49 +1,55 @@
 import type { ExecutiveRenderContext } from "../context";
-import { dataTable, barRow, badgeHtml, kpiCard, fmtNum, fmtPct, esc } from "../primitives";
-import { ORGANIZATION_PATH_TEXT } from "../../../../branding/organization";
-
-function orgHeader(): string {
-  const lines = ORGANIZATION_PATH_TEXT.split(" ← ").map(l => `<div>${esc(l)}</div>`).join("");
-  return `<div class="xr-org-header"><div class="xr-org-text">${lines}</div><div class="xr-org-logo">🛡</div></div>`;
-}
+import { fmtNum, fmtPct, esc } from "../primitives";
 
 export function buildAccuracyByPort(ctx: ExecutiveRenderContext): string {
   const { kpis } = ctx;
-  const reliable = kpis.portProfiles.filter(p => p.accuracy !== null);
+  const target = ctx.input.config.accuracyTarget;
 
-  const kpisRow = [
-    kpiCard({ label: "دقة نتائج الأشعة", value: fmtPct(kpis.overallAccuracy), tone: kpis.overallAccuracy !== null && kpis.overallAccuracy >= ctx.input.config.accuracyTarget ? "good" : "risk" }),
-    kpiCard({ label: "نسبة دقة الاشتباه", value: fmtPct(kpis.suspiciousDetectionRate), tone: "good" }),
-    kpiCard({ label: "اشتباه فائت", value: fmtPct(kpis.missedSuspicionRate), tone: kpis.missedSuspicionRate !== null && kpis.missedSuspicionRate <= ctx.input.config.maximumMissedSuspicionRate ? "good" : "risk" }),
-    kpiCard({ label: "المنافذ ذات بيانات موثوقة", value: String(reliable.length) + " / " + String(kpis.portProfiles.length) }),
-  ].join("");
+  const overallTone = kpis.overallAccuracy !== null && kpis.overallAccuracy >= target ? 'green' : 'coral';
+  const suspTone    = kpis.suspiciousDetectionRate !== null && kpis.suspiciousDetectionRate >= target ? 'green' : 'coral';
 
-  const tableRows = kpis.portProfiles.map(p => [
-    esc(p.portName),
-    fmtNum(p.studied),
-    p.accuracy !== null ? fmtPct(p.accuracy) : null,
-    p.suspiciousDetectionRate !== null ? fmtPct(p.suspiciousDetectionRate) : null,
-    p.missedSuspicionRate !== null ? fmtPct(p.missedSuspicionRate) : null,
-    badgeHtml(p.status),
-  ]);
+  const portRows = kpis.portProfiles.map(p =>
+    `<tr>
+      <td>${esc(p.portName)}</td>
+      <td>${fmtNum(p.studied ?? 0)}</td>
+      <td>${p.suspicious != null ? fmtNum(p.suspicious) : '—'}</td>
+      <td>${p.suspiciousDetectionRate != null ? fmtPct(p.suspiciousDetectionRate) : '—'}</td>
+      <td>${p.accuracy != null ? fmtPct(p.accuracy) : '—'}</td>
+      <td>${p.accuracy != null && p.suspiciousDetectionRate != null ? fmtPct(p.accuracy - p.suspiciousDetectionRate) : '—'}</td>
+    </tr>`
+  ).join('');
 
-  const bars = reliable.map(p =>
-    barRow({ label: p.portName, value: p.accuracy, max: 100, tone: p.accuracy !== null && p.accuracy >= ctx.input.config.accuracyTarget ? "good" : "risk" })
-  ).join("");
-
-  return `<section class="xr-page" id="page-acc-port">
-    <div class="xr-page-inner">
-      ${orgHeader()}
-      <h2 class="xr-page-title">نتائج الفحص والدقة حسب المنفذ</h2>
-      <div class="xr-kpi-grid xr-kpi-grid-4">${kpisRow}</div>
-      <div class="xr-cols xr-cols-6-4">
-        <div>${dataTable({ headers: ["المنفذ","مدروسة","دقة%","اكتشاف اشتباه%","اشتباه فائت%","التصنيف"], rows: tableRows })}</div>
-        <div class="xr-panel">
-          <div class="xr-panel-title">الدقة حسب المنفذ</div>
-          <div class="xr-bars">${bars || '<div class="xr-notice">بيانات غير كافية</div>'}</div>
-        </div>
+  return `<section class="page compact" id="page-acc-port" data-title="نتائج الدقة حسب المنفذ">
+  <div class="right-rail">
+    <div class="rail-main">الجزء الثاني <em>نتائج الفحص</em></div>
+    <div class="rail-tab active">دقة المنفذ</div>
+    <div class="rail-tab">دقة المستوى</div>
+    <div class="rail-tab">التوزيع</div>
+  </div>
+  <div class="page-inner">
+    <h2 class="section-title">نتائج الدقة حسب المنفذ</h2>
+    <div class="section-subtitle">مقارنة دقة الفحص ودقة الاشتباه بين المنافذ</div>
+    <div class="grid grid-4">
+      <div class="card"><h3>دقة الفحص الكلية</h3><div class="metric ${overallTone}">${fmtPct(kpis.overallAccuracy)}</div></div>
+      <div class="card"><h3>دقة الاشتباه الكلية</h3><div class="metric ${suspTone}">${fmtPct(kpis.suspiciousDetectionRate)}</div></div>
+      <div class="card"><h3>حالات الاشتباه المفحوصة</h3><div class="metric blue">${fmtNum(kpis.suspiciousCount ?? 0)}</div></div>
+      <div class="card"><h3>الفجوة</h3>
+        <div class="metric gold">${
+          kpis.overallAccuracy != null && kpis.suspiciousDetectionRate != null
+            ? fmtPct(Math.abs(kpis.overallAccuracy - kpis.suspiciousDetectionRate))
+            : '—'
+        }</div>
+        <span class="muted">نقطة</span>
       </div>
-      <div class="xr-page-num">• 20 •</div>
     </div>
-  </section>`;
+    <div class="info" style="margin:16px 0">نسبة دقة الفحص = تطابق نتيجة المراجع مع النتيجة الأصلية لجميع الحالات. نسبة دقة الاشتباه = التطابق ضمن حالات الاشتباه فقط.</div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>المنفذ</th><th>الحالات المفحوصة</th><th>حالات الاشتباه</th><th>دقة الاشتباه</th><th>دقة الفحص</th><th>الفجوة</th></tr></thead>
+      <tbody>
+        ${portRows || '<tr><td colspan="6" style="text-align:center;color:var(--muted)">لا توجد بيانات كافية</td></tr>'}
+      </tbody>
+    </table></div>
+    <div class="page-no">09</div>
+  </div>
+</section>`;
 }
