@@ -1,5 +1,8 @@
+import { ArrowLeft, Columns, Paintbrush, Printer, Save } from "lucide-react";
 import type { PageSizePreset, ReportDocument } from "../../../../../data/reportDesigner/reportTypes";
 import { PAGE_SIZE_LABELS } from "../../../../../data/reportDesigner/reportTypes";
+
+const SW = 1.8;
 
 interface RibbonProps {
   doc: ReportDocument;
@@ -22,7 +25,7 @@ export default function Ribbon({
   return (
     <div className="rd-ribbon" dir="rtl">
       <button className="rd-ribbon-btn" onClick={onBack} type="button" title="العودة للقائمة">
-        <span className="rd-ribbon-btn-icon">←</span>
+        <span className="rd-ribbon-btn-icon"><ArrowLeft size={18} strokeWidth={SW} /></span>
         <span>رجوع</span>
       </button>
       <div className="rd-ribbon-separator" />
@@ -59,7 +62,7 @@ export default function Ribbon({
         type="button"
         title="إظهار/إخفاء لوحة الحقول"
       >
-        <span className="rd-ribbon-btn-icon">📋</span>
+        <span className="rd-ribbon-btn-icon"><Columns size={18} strokeWidth={SW} /></span>
         <span>الحقول</span>
       </button>
       <button
@@ -68,7 +71,7 @@ export default function Ribbon({
         type="button"
         title="إظهار/إخفاء لوحة التنسيق"
       >
-        <span className="rd-ribbon-btn-icon">🎨</span>
+        <span className="rd-ribbon-btn-icon"><Paintbrush size={18} strokeWidth={SW} /></span>
         <span>التنسيق</span>
       </button>
       <div className="rd-ribbon-separator" />
@@ -78,11 +81,11 @@ export default function Ribbon({
 
       {saving && <span className="rd-saving-indicator">جاري الحفظ...</span>}
       <button className="rd-ribbon-btn" onClick={onSave} disabled={saving} type="button" title="حفظ">
-        <span className="rd-ribbon-btn-icon">💾</span>
+        <span className="rd-ribbon-btn-icon"><Save size={18} strokeWidth={SW} /></span>
         <span>حفظ</span>
       </button>
       <button className="rd-ribbon-btn rd-no-print" onClick={onPrint} type="button" title="طباعة">
-        <span className="rd-ribbon-btn-icon">🖨️</span>
+        <span className="rd-ribbon-btn-icon"><Printer size={18} strokeWidth={SW} /></span>
         <span>طباعة</span>
       </button>
     </div>

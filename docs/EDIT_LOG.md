@@ -4,6 +4,24 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v18.6 — 2026-06-29 — Replace Ribbon emojis with lucide-react icons
+
+**File:** `src/.../editor/Ribbon.tsx`
+
+**Before:**
+```tsx
+<span className="rd-ribbon-btn-icon">←</span>   // back
+<span className="rd-ribbon-btn-icon">📋</span>  // fields toggle
+<span className="rd-ribbon-btn-icon">🎨</span>  // format toggle
+<span className="rd-ribbon-btn-icon">💾</span>  // save
+<span className="rd-ribbon-btn-icon">🖨️</span> // print
+```
+**After:** `ArrowLeft / Columns / Paintbrush / Save / Printer` from lucide-react, `strokeWidth={1.8}`, `size={18}`
+
+**File:** `ReportDesigner.css` — `.rd-ribbon-btn-icon` changed from `font-size:18px` to flex centering for SVG
+
+---
+
 ## v18.5 — 2026-06-29 — Field drop → KPI card + centered drop positions
 
 **File:** `src/.../renderers/KpiRenderer.tsx` (new) — KPI card: field name (top), "—" placeholder (center), agg badge (bottom)
