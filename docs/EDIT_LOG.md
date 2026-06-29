@@ -4,6 +4,89 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v18.1 — 2026-06-29 — Fix shape default visibility + fields panel drag-and-drop
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
+
+**Before:**
+```ts
+// addElement: shape style
+style: {},
+// No canvasAreaRef, no addFieldElement, no drag handlers on canvas-area div
+```
+
+**After:**
+```ts
+// addElement: shape gets visible defaults
+style: type === "shape" ? { fill: "#dce6f1", borderWidth: 1, borderColor: "#0078d4" } : {},
+// + canvasAreaRef, addFieldElement(), onDragOver/onDrop on .rd-canvas-area
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/FieldsPanel.tsx`
+
+**Before:**
+```tsx
+<div key={f.field} className="rd-field-item" title={f.field}>
+```
+
+**After:**
+```tsx
+<div
+  key={f.field}
+  className="rd-field-item"
+  title={f.field}
+  draggable
+  onDragStart={(e) => {
+    e.dataTransfer.effectAllowed = "copy";
+    e.dataTransfer.setData("application/x-rd-field", JSON.stringify({ field: f.field, label: f.label, role: f.role }));
+  }}
+>
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/renderers/ShapeRenderer.tsx`
+
+**Before:**
+```ts
+border: s.borderWidth != null && s.borderWidth > 0
+  ? `${s.borderWidth}px solid ${s.borderColor ?? "transparent"}`
+  : undefined,
+```
+
+**After:**
+```ts
+border: s.borderWidth != null && s.borderWidth > 0
+  ? `${s.borderWidth}px solid ${s.borderColor ?? "#d0d7de"}`
+  : undefined,
+```
+
+---
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/ReportDesigner.css`
+
+**Before:**
+```css
+.rd-field-item {
+  ...
+  cursor: default;
+  ...
+}
+```
+
+**After:**
+```css
+.rd-field-item {
+  ...
+  cursor: grab;
+  ...
+}
+```
+
+---
+
 ## v18.0 — 2026-06-28 — Fix stale closure in deletePage, type-safe export rows, unified page-size labels, remove dead CSS
 
 **File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`

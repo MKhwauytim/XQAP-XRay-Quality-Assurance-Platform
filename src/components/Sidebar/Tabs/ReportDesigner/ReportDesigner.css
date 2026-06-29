@@ -279,7 +279,7 @@
   padding: 4px 12px 4px 24px;
   font-size: 13px;
   color: var(--rd-text-primary);
-  cursor: default;
+  cursor: grab;
   border-radius: 3px;
   transition: background 0.1s;
 }

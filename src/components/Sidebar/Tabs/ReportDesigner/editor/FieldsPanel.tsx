@@ -43,7 +43,19 @@ export default function FieldsPanel() {
           </div>
           {dimOpen &&
             dims.map((f) => (
-              <div key={f.field} className="rd-field-item" title={f.field}>
+              <div
+                key={f.field}
+                className="rd-field-item"
+                title={f.field}
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.effectAllowed = "copy";
+                  e.dataTransfer.setData(
+                    "application/x-rd-field",
+                    JSON.stringify({ field: f.field, label: f.label, role: f.role })
+                  );
+                }}
+              >
                 <span className="rd-field-icon">📐</span>
                 <span className="rd-field-label">{f.label}</span>
               </div>
@@ -63,7 +75,19 @@ export default function FieldsPanel() {
           </div>
           {measOpen &&
             meas.map((f) => (
-              <div key={f.field} className="rd-field-item" title={f.field}>
+              <div
+                key={f.field}
+                className="rd-field-item"
+                title={f.field}
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.effectAllowed = "copy";
+                  e.dataTransfer.setData(
+                    "application/x-rd-field",
+                    JSON.stringify({ field: f.field, label: f.label, role: f.role })
+                  );
+                }}
+              >
                 <span className="rd-field-icon">🔢</span>
                 <span className="rd-field-label">{f.label}</span>
               </div>

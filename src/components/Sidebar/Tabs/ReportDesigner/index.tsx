@@ -78,6 +78,8 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: Editor
   const [showFields, setShowFields] = useState(true);
   const [showFormat, setShowFormat] = useState(true);
 
+  const canvasAreaRef = useRef<HTMLDivElement>(null);
+
   // Debounce timer ref — stores the pending timeout id
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -141,7 +143,7 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: Editor
       w: 200,
       h: 60,
       z: currentPage.elements.length,
-      style: {},
+      style: type === "shape" ? { fill: "#dce6f1", borderWidth: 1, borderColor: "#0078d4" } : {},
       config:
         type === "text"
           ? { kind: "text", text: "نص" }
@@ -171,6 +173,31 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: Editor
       z: currentPage.elements.length,
       style: {},
       config: { kind: "image", dataUrl },
+    };
+    setDoc((d) => ({
+      ...d,
+      pages: d.pages.map((p, i) =>
+        i === currentPageIndex
+          ? { ...p, elements: [...p.elements, newEl] }
+          : p
+      ),
+    }));
+    setSelectedId(newEl.elementId);
+  }
+
+  function addFieldElement(label: string, x = 50, y = 50) {
+    if (!currentPage) return;
+    const newEl: Element = {
+      elementId: createElementId(),
+      type: "text",
+      name: label,
+      x,
+      y,
+      w: 220,
+      h: 40,
+      z: currentPage.elements.length,
+      style: { fontSize: 14, color: "#201f1e" },
+      config: { kind: "text", text: `[${label}]` },
     };
     setDoc((d) => ({
       ...d,
@@ -282,11 +309,28 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: Editor
 
         {/* Canvas area */}
         <div
+          ref={canvasAreaRef}
           className="rd-canvas-area"
           style={{
             "--rd-page-width": `${doc.pageSetup.width}px`,
             "--rd-page-height": `${doc.pageSetup.height}px`,
           } as React.CSSProperties}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            e.preventDefault();
+            const raw = e.dataTransfer.getData("application/x-rd-field");
+            if (!raw) return;
+            const { label } = JSON.parse(raw) as { field: string; label: string; role: string };
+            const canvasPage = canvasAreaRef.current?.querySelector(".rd-canvas") as HTMLElement | null;
+            if (canvasPage) {
+              const pr = canvasPage.getBoundingClientRect();
+              const x = Math.max(0, Math.round((e.clientX - pr.left) / 8) * 8);
+              const y = Math.max(0, Math.round((e.clientY - pr.top) / 8) * 8);
+              addFieldElement(label, x, y);
+            } else {
+              addFieldElement(label);
+            }
+          }}
         >
           <Canvas
             doc={doc}

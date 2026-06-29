@@ -34,7 +34,7 @@ export default function ShapeRenderer({ element }: ShapeRendererProps) {
     background: s.fill ?? "transparent",
     border:
       s.borderWidth != null && s.borderWidth > 0
-        ? `${s.borderWidth}px solid ${s.borderColor ?? "transparent"}`
+        ? `${s.borderWidth}px solid ${s.borderColor ?? "#d0d7de"}`
         : undefined,
     borderRadius:
       config.shape === "ellipse" ? "50%" : s.borderRadius != null ? s.borderRadius : undefined,
