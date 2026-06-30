@@ -42,7 +42,7 @@
 
 .dt-search:focus {
   border-color: var(--c-sky, #009ADE);
-  box-shadow: 0 0 0 3px rgba(0, 154, 222, 0.12);
+  box-shadow: var(--focus-ring);
   background: var(--c-surface, #FFFFFF);
 }
 
@@ -169,7 +169,7 @@
   position: sticky;
   top: 0;
   z-index: 2;
-  background: #F7F9FA;
+  background: var(--table-head-bg, #F7F9FA);
   border-bottom: 1px solid var(--c-border, #DDE6EF);
   border-left: 1px solid var(--c-border, #DDE6EF);
   padding: 0;
@@ -182,7 +182,7 @@
 }
 
 .dt-th.dt-sticky-col {
-  background: #F7F9FA;
+  background: var(--table-head-bg, #F7F9FA);
   box-shadow: -1px 0 0 var(--c-border, #DDE6EF);
 }
 
@@ -215,7 +215,7 @@
 .dt-th-label {
   flex: 1;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 500;
   color: var(--c-ink-2, #263C58);
   letter-spacing: 0;
   text-transform: none;
@@ -307,6 +307,7 @@
   border-left: 1px solid var(--c-surface-3, #EEF2F7);
   border-bottom: 1px solid var(--c-surface-3, #EEF2F7);
   text-align: center;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -583,7 +584,7 @@
   color: var(--c-ink-3, #5E7A96);
   cursor: pointer;
   font-weight: 500;
-  transition: all 140ms ease;
+  transition: background-color var(--t-fast, 120ms) var(--ease-smooth, cubic-bezier(0.4,0,0.2,1)), box-shadow var(--t-fast, 120ms) var(--ease-smooth, cubic-bezier(0.4,0,0.2,1)), transform var(--t-fast, 120ms) var(--ease-smooth, cubic-bezier(0.4,0,0.2,1));
 }
 
 .dt-date-mode-toggle button.active {

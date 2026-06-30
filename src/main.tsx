@@ -6,6 +6,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { WorkspaceProvider } from "./data/workspace/WorkspaceProvider";
 
 import "./index.css";
+import "./styles/primitives.css";
 
 const rootElement = document.getElementById("root");
 

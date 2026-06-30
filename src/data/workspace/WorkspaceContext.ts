@@ -21,6 +21,8 @@ export type WorkspaceContextValue = {
   reloadWorkspace: () => Promise<void>;
   createInitialStructure: (username: string) => Promise<void>;
   clearWorkspace: () => void;
+  /** Mount a read-only, in-memory demo workspace (the viewer account). */
+  enterDemoWorkspace: () => Promise<void>;
 };
 
 export const emptyLoadedFiles: WorkspaceLoadedFiles = {

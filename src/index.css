@@ -101,6 +101,25 @@
   --r-xl:  12px;
   --r-2xl: 16px;
 
+  /* ── Spacing scale (4px base) ──────────────────────────────── */
+  --sp-1:  4px;   --sp-2:  8px;   --sp-3:  12px;  --sp-4:  16px;
+  --sp-5:  20px;  --sp-6:  24px;  --sp-8:  32px;  --sp-10: 40px;  --sp-12: 48px;
+
+  /* ── Derived / signature tokens ────────────────────────────── */
+  --focus-ring:        0 0 0 3px rgba(0, 154, 222, 0.28);
+  --surface-raised:    #FFFFFF;
+  --accent-gradient:   linear-gradient(135deg, var(--c-navy-2), var(--c-navy));
+  --sky-gradient:      linear-gradient(135deg, var(--c-sky), var(--c-sky-2));
+  --premium-hairline:  linear-gradient(90deg, transparent, rgba(218, 163, 40, 0.45), transparent);
+
+  /* Premium depth helpers (additive — used by shared surfaces) */
+  --sh-sky:            0 6px 16px rgba(0, 122, 186, 0.22);
+  --sh-sky-hover:      0 10px 22px rgba(0, 122, 186, 0.30);
+  --app-canvas-tint:   radial-gradient(120% 70% at 100% 0%, rgba(0, 154, 222, 0.05), transparent 60%),
+                       linear-gradient(180deg, rgba(14, 36, 68, 0.05), transparent 320px);
+  --table-head-bg:     linear-gradient(180deg, #F4F8FB, #EAF1F7);
+  --gold-accent-bar:   linear-gradient(180deg, var(--brand-premium), #B6841C);
+
   /* ── Motion ────────────────────────────────────────────────── */
   --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
   --ease-out:    cubic-bezier(0.16, 1, 0.3, 1);
@@ -222,6 +241,22 @@ textarea:focus-visible {
 
 ::selection {
   background: rgba(0, 154, 222, 0.18);
+}
+
+/* ── Base native form controls — quiet default; component classes override ── */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+select,
+textarea {
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-sm);
+  background: var(--c-surface);
+  color: var(--c-ink);
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):hover:not(:disabled),
+select:hover:not(:disabled),
+textarea:hover:not(:disabled) {
+  border-color: var(--c-border-2);
 }
 
 .app-card,

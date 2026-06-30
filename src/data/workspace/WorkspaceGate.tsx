@@ -1,7 +1,8 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AlertTriangle, Folder, FolderArchive, Wrench, XCircle } from "lucide-react";
 
 import type { AuthSession } from "../../auth/authTypes";
+import { ADMIN_SHORTCUT_KEYS, VIEWER_PASSWORD } from "../../auth/authConfig";
 import { useWorkspace } from "./useWorkspace";
 
 import "./WorkspaceGate.css";
@@ -22,8 +23,68 @@ export function WorkspacePicker({ children }: WorkspacePickerProps) {
     message,
     pendingReconnect,
     selectWorkspace,
-    reconnectWorkspace
+    reconnectWorkspace,
+    enterDemoWorkspace
   } = useWorkspace();
+
+  // Hidden view-mode entry (mirrors the admin shortcut): on the address-picker
+  // screen, hold Alt and press A then T to open a passcode prompt; entering the
+  // view passcode mounts the read-only demo workspace, which then auto-enters
+  // view mode. Bound only while the picker is shown, so it can't collide with
+  // the admin shortcut on the login screen.
+  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+  const [viewPasscode, setViewPasscode] = useState("");
+  const [viewError, setViewError] = useState("");
+  const altSequenceRef = useRef<string[]>([]);
+  const altSequenceTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (status !== "not_selected") return;
+
+    function handleShortcut(event: KeyboardEvent) {
+      if (!event.altKey) return;
+      const key = String(event.key || "").trim().toLowerCase();
+      if (!(ADMIN_SHORTCUT_KEYS as readonly string[]).includes(key)) return;
+      event.preventDefault();
+
+      altSequenceRef.current = [...altSequenceRef.current, key].slice(-2);
+      if (altSequenceTimerRef.current) window.clearTimeout(altSequenceTimerRef.current);
+      altSequenceTimerRef.current = window.setTimeout(() => {
+        altSequenceRef.current = [];
+      }, 2000);
+
+      const sequence = altSequenceRef.current.join("");
+      if (sequence === "at" || sequence === "شف") {
+        altSequenceRef.current = [];
+        setViewPasscode("");
+        setViewError("");
+        setIsViewModalOpen(true);
+      }
+    }
+
+    document.addEventListener("keydown", handleShortcut, true);
+    return () => {
+      document.removeEventListener("keydown", handleShortcut, true);
+      if (altSequenceTimerRef.current) window.clearTimeout(altSequenceTimerRef.current);
+    };
+  }, [status]);
+
+  function submitViewPasscode(): void {
+    if (viewPasscode === VIEWER_PASSWORD) {
+      setIsViewModalOpen(false);
+      setViewPasscode("");
+      setViewError("");
+      void enterDemoWorkspace();
+    } else {
+      setViewError("رمز غير صحيح.");
+    }
+  }
+
+  function closeViewModal(): void {
+    setIsViewModalOpen(false);
+    setViewPasscode("");
+    setViewError("");
+  }
 
   // Browser does not support File System Access API
   if (!isSupported || status === "unsupported_browser") {
@@ -90,6 +151,45 @@ export function WorkspacePicker({ children }: WorkspacePickerProps) {
             اختيار مجلد
           </button>
         </div>
+
+        {isViewModalOpen && (
+          <div className="auth-modal-backdrop" role="presentation">
+            <section
+              className="auth-admin-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="viewPasscodeTitle"
+            >
+              <h2 id="viewPasscodeTitle">وضع العرض</h2>
+              <p>أدخل رمز الدخول لعرض النظام للقراءة فقط.</p>
+              <input
+                type="password"
+                autoFocus
+                aria-label="رمز وضع العرض"
+                value={viewPasscode}
+                onChange={(event) => setViewPasscode(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") submitViewPasscode();
+                  if (event.key === "Escape") closeViewModal();
+                }}
+                placeholder="رمز وضع العرض"
+              />
+              {viewError && (
+                <p style={{ color: "var(--c-danger)", fontSize: 13, margin: "8px 0 0" }}>
+                  {viewError}
+                </p>
+              )}
+              <div className="auth-modal-actions">
+                <button type="button" className="secondary" onClick={closeViewModal}>
+                  إلغاء
+                </button>
+                <button type="button" onClick={submitViewPasscode}>
+                  دخول
+                </button>
+              </div>
+            </section>
+          </div>
+        )}
       </div>
     );
   }

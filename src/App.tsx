@@ -87,7 +87,7 @@ function AppContent({ session }: AppContentProps) {
   }, []);
 
   useEffect(() => {
-    if (session.role !== "admin" || !directoryHandle || workspaceStatus !== "ready") return;
+    if (session.role !== "admin" || session.mode === "demo" || !directoryHandle || workspaceStatus !== "ready") return;
     let cancelled = false;
     const timer = window.setTimeout(() => {
       if (!cancelled) setAutoBackupRunning(true);
@@ -118,7 +118,7 @@ function AppContent({ session }: AppContentProps) {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [autoBackupAttemptKey, directoryHandle, session.role, session.username, workspaceStatus]);
+  }, [autoBackupAttemptKey, directoryHandle, session.mode, session.role, session.username, workspaceStatus]);
 
   const activeTab =
     allowedTabs.find((tab) => tab.id === selectedTabId) ?? allowedTabs[0];
@@ -158,6 +158,31 @@ function AppContent({ session }: AppContentProps) {
       className={`app-shell ${isSidebarCollapsed ? "sidebar-collapsed" : ""}`}
       dir="rtl"
     >
+      {session.mode === "demo" && (
+        <div
+          role="status"
+          dir="rtl"
+          style={{
+            position: "fixed",
+            insetInlineStart: 0,
+            insetInlineEnd: 0,
+            top: 0,
+            zIndex: 9999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 8,
+            padding: "7px 14px",
+            fontSize: 12.5,
+            fontWeight: 700,
+            color: "#fff",
+            background: "linear-gradient(90deg, var(--c-navy-2), var(--c-navy))",
+            borderBottom: "1px solid var(--brand-premium)"
+          }}
+        >
+          وضع العرض التجريبي — للقراءة فقط (التعديل والحفظ معطّلان، والتصدير متاح)
+        </div>
+      )}
       {bakWarning && (
         <div className="app-bak-warning">
           <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><AlertTriangle size={16} /> {bakWarning}</span>

@@ -29,7 +29,11 @@ export function AdminToolbar({
   onLogout,
   onFeedback,
 }: AdminToolbarProps) {
-  const isRealAdmin = session.role === "admin";
+  // Demo/view sessions carry the admin role only to unlock full tab visibility —
+  // they are NOT the admin. Present them as read-only "view mode": no role
+  // switcher, no admin tools, just a clear badge and logout.
+  const isDemo = session.mode === "demo";
+  const isRealAdmin = session.role === "admin" && !isDemo;
   const effectiveRole: AuthRole = isRealAdmin && previewRole ? previewRole : session.role;
   const isImpersonating = effectiveRole !== session.role;
 
@@ -41,7 +45,7 @@ export function AdminToolbar({
       <div className="auth-toolbar-status">
         <span className="auth-toolbar-kicker">الوضع الحالي</span>
         <strong>
-          وضع {getRoleLabel(effectiveRole)}
+          {isDemo ? "وضع العرض (قراءة فقط)" : `وضع ${getRoleLabel(effectiveRole)}`}
           {isImpersonating && <span className="auth-preview-flag">معاينة</span>}
         </strong>
       </div>

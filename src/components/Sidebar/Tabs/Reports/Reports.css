@@ -17,17 +17,18 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
-  padding: 64px 32px;
+  gap: var(--sp-3, 10px);
+  padding: var(--sp-12, 64px) var(--sp-8, 32px);
   text-align: center;
   background: var(--c-surface, #fff);
   border: 1.5px dashed var(--c-border, #d8e3ef);
-  border-radius: var(--r-sm, 8px);
-  margin-top: 24px;
+  border-radius: var(--r-lg, 8px);
+  box-shadow: var(--sh-xs);
+  margin-top: var(--sp-6, 24px);
 }
-.rh-empty-icon { font-size: 36px; margin-bottom: 4px; }
-.rh-empty strong { font-size: 16px; font-weight: 800; color: #06244a; }
-.rh-empty span { font-size: 13.5px; color: #637188; }
+.rh-empty-icon { font-size: 36px; margin-bottom: var(--sp-1, 4px); }
+.rh-empty strong { font-size: 16px; font-weight: 800; color: var(--c-navy, #06244a); }
+.rh-empty span { font-size: 13.5px; color: var(--c-ink-3, #637188); }
 
 /* ── Toast ──────────────────────────────────────────────── */
 .rh-toast {

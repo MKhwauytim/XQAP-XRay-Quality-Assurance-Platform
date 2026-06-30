@@ -3,17 +3,17 @@
    ========================================================= */
 
 :root {
-  --auth-primary:        #0F2744;
-  --auth-primary-hover:  #162F56;
+  --auth-primary:        var(--c-navy, #0E2444);
+  --auth-primary-hover:  var(--c-navy-2, #102C57);
   --auth-primary-active: #0B1E34;
-  --auth-accent:         #2D7DD2;
-  --auth-accent-light:   #5EB8FF;
+  --auth-accent:         var(--c-sky, #009ADE);
+  --auth-accent-light:   var(--c-sky-2, #007FBA);
 
   --auth-soft:   #F2F6FB;
   --auth-text:   #0D1F32;
   --auth-muted:  #6B86A0;
   --auth-border: #D4E1EF;
-  --auth-border-focus: #2D7DD2;
+  --auth-border-focus: var(--c-sky, #009ADE);
 
   --auth-danger:  #B91C1C;
   --auth-success: #065F46;
@@ -52,34 +52,17 @@
   direction: rtl;
   color: var(--auth-text);
 
-  background:
-    radial-gradient(ellipse 80% 60% at 15% 20%, rgba(45, 125, 210, 0.18) 0%, transparent 60%),
-    radial-gradient(ellipse 60% 50% at 85% 80%, rgba(15, 39, 68, 0.50) 0%, transparent 55%),
-    radial-gradient(ellipse 40% 40% at 70% 10%, rgba(94, 184, 255, 0.10) 0%, transparent 50%),
-    linear-gradient(150deg, #05101F 0%, #0C1E38 40%, #071528 100%);
+  background: linear-gradient(150deg, #071528 0%, #0C1E38 55%, #0E2444 100%);
 }
 
-/* Dot-grid overlay */
-.auth-root::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  background-image: radial-gradient(rgba(255,255,255,0.028) 1px, transparent 1px);
-  background-size: 28px 28px;
-  z-index: 0;
-}
-
-/* Large ambient glow blobs */
+/* Subtle top vignette — keeps edge depth without gimmicks */
 .auth-root::after {
   content: "";
   position: fixed;
   inset: 0;
   pointer-events: none;
   z-index: 0;
-  background:
-    radial-gradient(circle 600px at 10% 90%, rgba(45, 125, 210, 0.07) 0%, transparent 70%),
-    radial-gradient(circle 500px at 90% 10%, rgba(94, 184, 255, 0.06) 0%, transparent 70%);
+  background: radial-gradient(ellipse 100% 40% at 50% 0%, rgba(45, 125, 210, 0.08) 0%, transparent 100%);
 }
 
 /* ── Split container ─────────────────────────────────────── */
@@ -125,10 +108,7 @@
   padding: 56px 44px 40px;
   overflow: hidden;
 
-  background:
-    radial-gradient(ellipse 120% 60% at 50% -10%, rgba(45, 125, 210, 0.30) 0%, transparent 60%),
-    radial-gradient(ellipse 80% 80% at 110% 80%, rgba(94, 184, 255, 0.12) 0%, transparent 55%),
-    linear-gradient(165deg, #112C50 0%, #0A1D36 55%, #071428 100%);
+  background: linear-gradient(170deg, #112C50 0%, #0A1D36 60%, #071428 100%);
 }
 
 /* Glowing top edge */
@@ -146,38 +126,12 @@
   );
 }
 
-/* Large decorative ring */
-.auth-brand-ring {
-  position: absolute;
-  bottom: -120px;
-  left: -100px;
-  width: 420px;
-  height: 420px;
-  border-radius: 50%;
-  border: 1px solid rgba(94, 184, 255, 0.08);
-  pointer-events: none;
-}
-
-.auth-brand-ring::before {
-  content: "";
-  position: absolute;
-  inset: 48px;
-  border-radius: 50%;
-  border: 1px solid rgba(94, 184, 255, 0.05);
-}
-
-.auth-brand-ring::after {
-  content: "";
-  position: absolute;
-  inset: 96px;
-  border-radius: 50%;
-  border: 1px solid rgba(94, 184, 255, 0.04);
-}
 
 .auth-brand-inner {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
+  text-align: center;
   animation: auth-brand-in 1.0s cubic-bezier(0.16, 1, 0.3, 1) 0.12s both;
 }
 
@@ -188,20 +142,20 @@
 
 /* Logo wrapper with subtle glow */
 .auth-logo {
-  width: 80px;
-  height: 80px;
+  width: 260px;
+  height: 130px;
   margin-bottom: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  border-radius: 20px;
-  background: rgba(255,255,255,0.06);
+  border-radius: 18px;
+  background: #FFFFFF;
   border: 1px solid rgba(255,255,255,0.10);
   box-shadow:
-    0 0 0 8px rgba(45, 125, 210, 0.06),
-    0 8px 24px rgba(0,0,0,0.24);
-  padding: 14px;
+    0 0 0 8px rgba(45, 125, 210, 0.10),
+    0 12px 32px rgba(0,0,0,0.32);
+  padding: 22px 30px;
 }
 
 .auth-logo img {
@@ -466,25 +420,6 @@
     background  240ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Shimmer sweep on hover */
-.auth-submit::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    105deg,
-    transparent 30%,
-    rgba(255,255,255,0.10) 50%,
-    transparent 70%
-  );
-  transform: translateX(100%);
-  transition: transform 480ms cubic-bezier(0.4, 0, 0.2, 1);
-  pointer-events: none;
-}
-
-.auth-submit:hover::after {
-  transform: translateX(-100%);
-}
 
 .auth-submit:hover {
   background: linear-gradient(135deg, #152E52 0%, #1F4580 100%);

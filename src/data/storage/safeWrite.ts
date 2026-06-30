@@ -1,4 +1,5 @@
 import type { DirectoryHandleLike } from "./fileSystemAccess";
+import { isReadOnlyMode } from "./readOnlyMode";
 import { withResourceLock } from "./webLocks";
 import {
   ENVELOPE_SCHEMA_VERSION,
@@ -224,6 +225,9 @@ export async function safeWriteJson<T>(
   fileName: string,
   value: T
 ): Promise<void> {
+  // Demo/viewer mode is read-only: succeed silently without touching storage.
+  if (isReadOnlyMode()) return;
+
   const tmpName = `${fileName}.tmp`;
 
   // Lock per directory+file so same-named files in different folders don't contend.
@@ -354,6 +358,9 @@ export async function safeWriteJsonText(
   fileName: string,
   jsonText: string
 ): Promise<void> {
+  // Demo/viewer mode is read-only: succeed silently without touching storage.
+  if (isReadOnlyMode()) return;
+
   const parsed = parseValidJson(jsonText);
   if (!parsed) {
     throw new Error(`Cannot restore invalid JSON file ${fileName}.`);

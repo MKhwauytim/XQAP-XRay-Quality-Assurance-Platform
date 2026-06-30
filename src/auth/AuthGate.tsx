@@ -16,7 +16,8 @@ import { AdminToolbar } from "./AdminToolbar";
 import {
   ADMIN_SHORTCUT_KEYS,
   BOOTSTRAP_ADMIN_PASSWORD_HASH,
-  BOOTSTRAP_ADMIN_USERNAME
+  BOOTSTRAP_ADMIN_USERNAME,
+  VIEWER_USERNAME
 } from "./authConfig";
 
 import {
@@ -50,6 +51,7 @@ import {
   type ManagedLoginUser
 } from "./userManagement";
 import { ORGANIZATION_PATH_TEXT } from "../branding/organization";
+import { DEMO_WORKSPACE_NAME } from "../data/workspace/demoWorkspace";
 import { useWorkspace } from "../data/workspace/useWorkspace";
 
 type AuthGateProps = {
@@ -107,7 +109,12 @@ function isAdminShortcutSequence(sequence: string): boolean {
 }
 
 export default function AuthGate({ children }: AuthGateProps) {
-  const { directoryHandle, status: workspaceStatus, selectWorkspace } = useWorkspace();
+  const {
+    directoryHandle,
+    status: workspaceStatus,
+    selectWorkspace,
+    clearWorkspace
+  } = useWorkspace();
   const [session, setSession] = useState<AuthSession | null>(getInitialSession);
   const [managedUsers, setManagedUsers] = useState<ManagedLoginUser[]>(() =>
     getManagedLoginUsers()
@@ -140,6 +147,7 @@ export default function AuthGate({ children }: AuthGateProps) {
 
   const adminModalRef = useRef<HTMLElement | null>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
+  const isDemoSessionRef = useRef(false);
 
   // Derive whether there are any active users (to decide which form to show)
   const hasConfiguredUsers = managedUsers.some((user) => user.isActive);
@@ -149,6 +157,23 @@ export default function AuthGate({ children }: AuthGateProps) {
       workspaceStatus === "ready" ? directoryHandle : null
     );
   }, [directoryHandle, workspaceStatus]);
+
+  // Auto-login for the demo/viewer account: when the picker mounts the in-memory
+  // demo workspace, enter the read-only demo session directly — no login form.
+  // Keyed on the demo handle's name so it survives React StrictMode remounts;
+  // logout unmounts the workspace, so it can't re-fire after the user leaves.
+  useEffect(() => {
+    if (!session && directoryHandle?.name === DEMO_WORKSPACE_NAME) {
+      isDemoSessionRef.current = true;
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- derive the demo session from the mounted demo workspace; guarded by !session so it settles in one step
+      setSession({
+        role: ADMIN_ROLE,
+        username: VIEWER_USERNAME,
+        loginAt: new Date().toISOString(),
+        mode: "demo"
+      });
+    }
+  }, [directoryHandle, session]);
 
   useEffect(() => {
     return subscribeToUserManagementChanges(() => {
@@ -245,6 +270,10 @@ export default function AuthGate({ children }: AuthGateProps) {
   }, [isAdminModalOpen]);
 
   const logout = useCallback((): void => {
+    if (isDemoSessionRef.current) {
+      isDemoSessionRef.current = false;
+      clearWorkspace();
+    }
     clearSession();
 
     setSession(null);
@@ -257,7 +286,7 @@ export default function AuthGate({ children }: AuthGateProps) {
     setMessageType("");
     setFailedAttempts(0);
     setLockoutUntil(null);
-  }, []);
+  }, [clearWorkspace]);
 
   // Switch the previewed role (admin only). Selecting "admin" exits preview mode.
   const changePreviewRole = useCallback((role: AuthRole): void => {
@@ -486,7 +515,7 @@ export default function AuthGate({ children }: AuthGateProps) {
           <div className="auth-brand-inner">
             <div className="auth-logo" aria-label="شعار النظام">
               <img
-                src={`${import.meta.env.BASE_URL}logo.svg`}
+                src="https://zatca.gov.sa/_layouts/15/zatca/Design/images/ZATCA-logo.svg"
                 alt=""
                 aria-hidden="true"
                 onError={handleLogoError}

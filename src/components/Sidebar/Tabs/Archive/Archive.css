@@ -17,26 +17,26 @@
 
 .arc-summary-tile,
 .arc-panel {
-  background: #ffffff;
-  border: 1px solid #d6e2ef;
-  border-radius: 8px;
-  box-shadow: 0 1px 3px rgba(13, 31, 50, 0.05);
+  background: var(--c-surface, #ffffff);
+  border: 1px solid var(--c-border, #d6e2ef);
+  border-radius: var(--r-lg, 10px);
+  box-shadow: var(--sh-xs, 0 1px 3px rgba(13, 31, 50, 0.05));
 }
 
 .arc-summary-tile {
-  padding: 16px;
+  padding: var(--sp-4, 16px);
 }
 
 .arc-summary-tile span {
   display: block;
-  color: #5e7a96;
+  color: var(--c-ink-3, #5e7a96);
   font-size: 12px;
   font-weight: 700;
-  margin-bottom: 8px;
+  margin-bottom: var(--sp-2, 8px);
 }
 
 .arc-summary-tile strong {
-  color: #0f2744;
+  color: var(--c-navy, #0f2744);
   font-size: 22px;
   font-weight: 850;
   line-height: 1;

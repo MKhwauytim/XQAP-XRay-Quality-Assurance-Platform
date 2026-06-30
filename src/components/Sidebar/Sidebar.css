@@ -175,7 +175,7 @@
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 12px;
+  gap: var(--sp-3);
 
   border: 0;
   border-radius: var(--r-sm, 8px);
@@ -194,7 +194,7 @@
   transition:
     background-color var(--t-fast) var(--ease-smooth),
     color            var(--t-fast) var(--ease-smooth),
-    box-shadow       var(--t-fast) var(--ease-smooth);
+    box-shadow       var(--t-base) var(--ease-spring);
 }
 
 /* Remove old pseudo-element indicator — replaced by box-shadow */
@@ -208,10 +208,17 @@
 }
 
 .sidebar-nav-item.active {
-  background: rgba(0, 154, 222, 0.18);
+  background:
+    linear-gradient(90deg, rgba(0, 154, 222, 0.26), rgba(0, 154, 222, 0.10) 70%, transparent);
   color: #FFFFFF;
   font-weight: 700;
-  box-shadow: inset 3px 0 0 var(--sb-accent);
+  box-shadow:
+    inset 3px 0 0 var(--sb-accent),
+    0 4px 14px rgba(0, 154, 222, 0.20);
+}
+
+.sidebar-nav-item.active .sidebar-nav-icon {
+  filter: drop-shadow(0 0 6px rgba(0, 154, 222, 0.55));
 }
 
 .sidebar-nav-icon {

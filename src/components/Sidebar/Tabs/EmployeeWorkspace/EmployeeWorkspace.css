@@ -99,18 +99,18 @@
 .ew-quota-badge {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-1);
   padding: 6px 14px;
-  background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
-  border: 1.5px solid #6ee7b7;
-  border-radius: 10px;
+  background: var(--c-success-bg, #E3F3ED);
+  border: 1px solid var(--c-success-border, #8BBEAA);
+  border-radius: var(--r-lg, 10px);
   font-family: inherit;
 }
 
 .ew-quota-label {
   font-size: 11px;
   font-weight: 700;
-  color: #047857;
+  color: var(--c-success, #004030);
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
@@ -118,13 +118,14 @@
 .ew-quota-value {
   font-size: 22px;
   font-weight: 800;
-  color: #065f46;
+  color: var(--c-success, #004030);
   line-height: 1;
+  font-variant-numeric: tabular-nums;
 }
 
 .ew-quota-sub {
   font-size: 11px;
-  color: #059669;
+  color: var(--c-success, #004030);
   font-weight: 600;
 }
 
@@ -1321,7 +1322,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 120ms ease;
+  transition: background-color 120ms cubic-bezier(0.4,0,0.2,1), border-color 120ms cubic-bezier(0.4,0,0.2,1), color 120ms cubic-bezier(0.4,0,0.2,1);
 }
 
 .ref-filter-btn:hover  { border-color: var(--c-border, #D6E2EF); background: var(--c-surface, #FFFFFF); color: var(--c-navy, #0F2744); }
@@ -1420,7 +1421,7 @@
   color: var(--c-ink-3, #5E7A96);
   cursor: pointer;
   font-weight: 500;
-  transition: all 140ms ease;
+  transition: background-color 140ms cubic-bezier(0.4,0,0.2,1), border-color 140ms cubic-bezier(0.4,0,0.2,1), color 140ms cubic-bezier(0.4,0,0.2,1);
 }
 
 .ref-date-mode-toggle button.active { background: var(--c-navy, #0F2744); color: #FFFFFF; border-color: var(--c-navy, #0F2744); }

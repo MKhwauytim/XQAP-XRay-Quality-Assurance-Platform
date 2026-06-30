@@ -20,6 +20,8 @@ import {
   emptyLoadedFiles,
   type WorkspaceContextValue
 } from "./WorkspaceContext";
+import { createDemoWorkspace } from "./demoWorkspace";
+import { setReadOnlyMode } from "../storage/readOnlyMode";
 
 import type {
   WorkspaceLoadedFiles,
@@ -251,7 +253,17 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     [directoryHandle]
   );
 
+  const enterDemoWorkspace = useCallback(async (): Promise<void> => {
+    setReadOnlyMode(false);
+    setStatus("checking");
+    setMessage("جارٍ تحضير وضع العرض التجريبي...");
+    const handle = await createDemoWorkspace();
+    await applyWorkspaceHandle(handle, { persist: false });
+    setReadOnlyMode(true);
+  }, [applyWorkspaceHandle]);
+
   const clearWorkspace = useCallback((): void => {
+    setReadOnlyMode(false);
     setDirectoryHandle(null);
     setSelectedDirectoryName("");
     setLoadedFiles(emptyLoadedFiles);
@@ -285,7 +297,8 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       reconnectWorkspace,
       reloadWorkspace,
       createInitialStructure,
-      clearWorkspace
+      clearWorkspace,
+      enterDemoWorkspace
     }),
     [
       status,
@@ -299,7 +312,8 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       reconnectWorkspace,
       reloadWorkspace,
       createInitialStructure,
-      clearWorkspace
+      clearWorkspace,
+      enterDemoWorkspace
     ]
   );
 

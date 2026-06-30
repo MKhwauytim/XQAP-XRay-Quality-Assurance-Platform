@@ -516,14 +516,14 @@
 }
 
 .upload-card:hover {
-  border-color: #aebdcb;
+  border-color: var(--c-border-2, #C2CEDC);
   box-shadow: var(--p-shadow-md);
 }
 
 .upload-card.has-file {
   border-style: solid;
   border-color: var(--p-success-border);
-  background: #f7fcfa;
+  background: var(--c-success-bg, #E3F3ED);
 }
 
 .upload-card-header {
@@ -2105,7 +2105,7 @@ select.save-disk-input {
   background: var(--p-surface);
   color: var(--p-muted);
   cursor: not-allowed;
-  transition: all 150ms;
+  transition: background-color 150ms cubic-bezier(0.4,0,0.2,1), border-color 150ms cubic-bezier(0.4,0,0.2,1), color 150ms cubic-bezier(0.4,0,0.2,1), box-shadow 150ms cubic-bezier(0.4,0,0.2,1);
   text-align: center;
 }
 
@@ -2255,7 +2255,7 @@ select.save-disk-input {
   font-weight: var(--p-medium);
   border-radius: var(--p-radius-pill);
   cursor: pointer;
-  transition: all 130ms;
+  transition: background-color 130ms cubic-bezier(0.4,0,0.2,1), border-color 130ms cubic-bezier(0.4,0,0.2,1), color 130ms cubic-bezier(0.4,0,0.2,1);
   border: 2px solid transparent;
   white-space: nowrap;
 }
@@ -2720,7 +2720,7 @@ select.save-disk-input {
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: background-color 150ms cubic-bezier(0.4,0,0.2,1), border-color 150ms cubic-bezier(0.4,0,0.2,1), color 150ms cubic-bezier(0.4,0,0.2,1);
 }
 .bv-toggle-btn.active {
   background: var(--p-primary);

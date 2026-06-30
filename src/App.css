@@ -19,7 +19,7 @@
   padding: 0;
 
   background:
-    linear-gradient(180deg, rgba(14, 36, 68, 0.035), transparent 220px),
+    var(--app-canvas-tint),
     var(--app-bg);
   color: var(--c-ink);
   direction: ltr;
@@ -42,7 +42,7 @@
   direction: rtl;
   background: transparent;
   position: relative;
-  padding: 22px 24px 28px;
+  padding: var(--sp-5) var(--sp-6) var(--sp-8);
 }
 
 .app-workspace::before {
@@ -50,7 +50,7 @@
   position: fixed;
   inset: 0 var(--sidebar-width) auto 0;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(218, 163, 40, 0.32), transparent);
+  background: var(--premium-hairline);
   pointer-events: none;
   z-index: 0;
 }

@@ -4,6 +4,213 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v27.6 — 2026-06-30 — auth: point sign-in logo at external ZATCA SVG
+
+**File:** `src/auth/AuthGate.tsx`
+
+**Before:**
+```tsx
+<img
+  src={`${import.meta.env.BASE_URL}logo.svg`}
+  alt=""
+  aria-hidden="true"
+  onError={handleLogoError}
+/>
+```
+
+**After:**
+```tsx
+<img
+  src="https://zatca.gov.sa/_layouts/15/zatca/Design/images/ZATCA-logo.svg"
+  alt=""
+  aria-hidden="true"
+  onError={handleLogoError}
+/>
+```
+
+The login screen logo now loads the official ZATCA logo from zatca.gov.sa instead of the bundled `logo.svg`. Note: this makes the (otherwise self-contained) build fetch an external asset at runtime; if the host is offline or the URL changes, `handleLogoError` hides the image and applies the `auth-logo-empty` fallback.
+
+---
+
+## v27.7 — 2026-06-30 — auth: size & center the ZATCA logo on the brand panel
+
+**File:** `src/auth/AuthGate.css`
+
+**What changed:** The ZATCA logo is a wide landscape mark; the old 80×80 square box with a dark translucent background made it tiny and low-contrast. Reworked the logo container into a larger, centered light card and centered the whole brand block.
+
+**Before:**
+```css
+.auth-brand-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  animation: auth-brand-in 1.0s cubic-bezier(0.16, 1, 0.3, 1) 0.12s both;
+}
+...
+.auth-logo {
+  width: 80px;
+  height: 80px;
+  margin-bottom: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 20px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.10);
+  box-shadow:
+    0 0 0 8px rgba(45, 125, 210, 0.06),
+    0 8px 24px rgba(0,0,0,0.24);
+  padding: 14px;
+}
+```
+
+**After:**
+```css
+.auth-brand-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  animation: auth-brand-in 1.0s cubic-bezier(0.16, 1, 0.3, 1) 0.12s both;
+}
+...
+.auth-logo {
+  width: 240px;
+  height: 120px;
+  margin-bottom: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 18px;
+  background: #FFFFFF;
+  border: 1px solid rgba(255,255,255,0.10);
+  box-shadow:
+    0 0 0 8px rgba(45, 125, 210, 0.08),
+    0 12px 32px rgba(0,0,0,0.30);
+  padding: 20px 28px;
+}
+```
+
+Mobile override (`max-width` block) updated from a 46×46 square to a 132×52 landscape card to match.
+
+---
+
+## v27.5 — 2026-06-29 — design: shadow hierarchy — remove box-shadow from flat toolbar and card elements
+
+**Files:** `src/components/DataTable/DataTable.css`, `src/index.css` (audit — no changes required)
+
+**Before:** `box-shadow` on flat toolbar/filter/card elements alongside borders.
+
+**After:** Shadows removed from flat elements; border provides the separation. Elevation reserved for floating UI (modals, side panels).
+
+**Audit finding:** Shadow hierarchy is already correct as of this version. Specific findings:
+- `.dt-toolbar` → `box-shadow: none` ✓
+- `.dt-table-wrap` → `box-shadow: none` ✓
+- `.dt-export-btn`, `.dt-autofit-btn`, `.dt-col-picker-btn` → `box-shadow: none` ✓
+- `.app-card`, `.app-panel`, `.ui-panel` → `box-shadow: var(--sh-xs)` (0 1px 2px) — within the acceptable threshold per task spec
+- `.dt-filter-menu`, `.dt-col-picker` → `box-shadow: var(--sh-md)` ✓ correct (floating dropdowns)
+- `.app-backup-toast` → `box-shadow: var(--sh-sm)` ✓ correct (fixed-position floating toast)
+- Auth modals (`.auth-split`, `.auth-admin-modal`) → untouched ✓
+
+No code edits applied — the codebase already enforces the intended shadow hierarchy.
+
+---
+
+## v27.4 — 2026-06-29 — design: replace transition:all with specific properties across CSS
+
+**Files:** `src/components/DataTable/DataTable.css`, `src/components/Sidebar/Tabs/UserManagement/UserManagement.css`, `src/components/Sidebar/Tabs/Population/Population.css`, `src/components/Sidebar/Tabs/Settings/Settings.css`, `src/components/Sidebar/Tabs/EmployeeWorkspace/EmployeeWorkspace.css`
+
+**Before:** `transition: all <duration> <easing>` in 11 locations across 5 files.
+
+**After:** Each replaced with a targeted property list matching the element's actual animated properties (background-color, box-shadow, transform for buttons; border-color, color for nav/filter pills; border-color, box-shadow, background-color for inputs).
+
+---
+
+## v27.3 — 2026-06-29 — design: typography — tabular-nums on data cells, lighter table header weight
+
+**File:** `src/components/DataTable/DataTable.css`
+
+**Before:** `.dt-th-label` `font-weight: 700`; `.dt-td` missing explicit `font-variant-numeric`.
+
+**After:** `.dt-th-label` `font-weight: 500`; `.dt-td` gets `font-variant-numeric: tabular-nums` after `text-align`.
+
+Note: No `.stat-value`, `.kpi-value`, or `.metric` classes found in `src/index.css` — task 3 skipped.
+
+---
+
+## v27.2 — 2026-06-29 — design: sidebar active nav item — tighter background opacity + label tracking
+
+**File:** `src/components/Sidebar/Sidebar.css`
+
+**Before:** Active item background `rgba(0, 154, 222, 0.18)`; `--sb-accent-sub` custom property `rgba(0, 154, 222, 0.18)`; no letter-spacing on active label.
+
+**After:** Active item background `rgba(0, 154, 222, 0.13)`; `--sb-accent-sub` reduced to `rgba(0, 154, 222, 0.13)`; active label gets `letter-spacing: -0.01em`.
+
+---
+
+## v27.1 — 2026-06-29 — design: AuthGate brand panel + decorative rings + button shimmer cleanup
+
+**File:** `src/auth/AuthGate.css`
+
+**Before:** 3-layer ambient radial gradient brand panel background; `.auth-brand-ring` decorative concentric circles; shimmer pseudo-element sweep on submit button hover.
+
+**After:** Single clean directional linear gradient for brand panel; `.auth-brand-ring` block removed entirely; shimmer pseudo-element removed; button hover uses existing translateY + shadow only.
+
+## v27.0 — 2026-06-29 — design: remove AI-tell decorative noise from AuthGate login screen
+
+**File:** `src/auth/AuthGate.css`
+
+**Before:**
+```css
+/* auth-root background: 3 ambient radial blobs + linear gradient */
+background:
+  radial-gradient(ellipse 80% 60% at 15% 20%, rgba(45, 125, 210, 0.18) 0%, transparent 60%),
+  radial-gradient(ellipse 60% 50% at 85% 80%, rgba(15, 39, 68, 0.50) 0%, transparent 55%),
+  radial-gradient(ellipse 40% 40% at 70% 10%, rgba(94, 184, 255, 0.10) 0%, transparent 50%),
+  linear-gradient(150deg, #05101F 0%, #0C1E38 40%, #071528 100%);
+
+/* ::before — dot-grid overlay */
+.auth-root::before { background-image: radial-gradient(rgba(255,255,255,0.028) 1px, transparent 1px); background-size: 28px 28px; }
+
+/* ::after — large ambient glow blobs */
+.auth-root::after { background: radial-gradient(circle 600px at 10% 90%, ...) radial-gradient(circle 500px at 90% 10%, ...); }
+
+/* auth-panel-brand background: 2 ambient radial blobs + linear gradient */
+background:
+  radial-gradient(ellipse 120% 60% at 50% -10%, rgba(45, 125, 210, 0.30) 0%, transparent 60%),
+  radial-gradient(ellipse 80% 80% at 110% 80%, rgba(94, 184, 255, 0.12) 0%, transparent 55%),
+  linear-gradient(165deg, #112C50 0%, #0A1D36 55%, #071428 100%);
+
+/* .auth-brand-ring — 3 nested decorative concentric circles */
+.auth-brand-ring { border: 1px solid rgba(94, 184, 255, 0.08); }
+.auth-brand-ring::before { border: 1px solid rgba(94, 184, 255, 0.05); }
+.auth-brand-ring::after { border: 1px solid rgba(94, 184, 255, 0.04); }
+
+/* .auth-submit::after — shimmer sweep on hover */
+.auth-submit::after { background: linear-gradient(105deg, transparent 30%, rgba(255,255,255,0.10) 50%, transparent 70%); transform: translateX(100%); }
+.auth-submit:hover::after { transform: translateX(-100%); }
+```
+
+**After:**
+```css
+/* auth-root background: single clean directional gradient */
+background: linear-gradient(150deg, #071528 0%, #0C1E38 55%, #0E2444 100%);
+
+/* ::before — removed entirely (was dot-grid) */
+/* ::after — kept but simplified to a single subtle top glow */
+
+/* auth-panel-brand background: clean directional gradient */
+background: linear-gradient(170deg, #112C50 0%, #0A1D36 60%, #071428 100%);
+
+/* .auth-brand-ring — removed entirely */
+
+/* .auth-submit::after — removed shimmer; replaced with clean scale on active */
+```
+
+---
+
 ## v26.1 — 2026-06-29 — fix: quota miscounting after reassignment; casLoop non-transient retry; dead _submit param; silent answer-file catch
 
 **File:** `src/data/distribution/distributionLog.ts` — quota `assignCountPerEmployee` now counts from final entryMap (post-reassignment) instead of raw assigned events. Replaced items excluded. Sample sizes are unaffected (quotas are display-only).
@@ -8870,5 +9077,294 @@ export function badgeHtml(status: "excellent" | "stable" | "monitor" | "priority
   { label: "الجزء الخامس: أداء الموظفين", id: "page-p5" },
   { label: "الجزء السادس: الأولويات", id: "page-p6" },
 ```
+
+---
+
+## v28 — 2026-06-30 — design system: shared primitives layer + token extensions + gentle global form polish
+
+Foundation phase of the "Refined Cohesion" UI elevation (spec: `docs/superpowers/specs/2026-06-30-refined-cohesion-ui-design.md`). Adds a single source of truth for buttons/cards/stats/badges/fields so tabs stop re-rolling their own. Additive and low-risk: new tokens, a new opt-in `primitives.css`, two thin React wrappers, and a gentle base style for otherwise-unstyled native form controls (component classes still override).
+
+**File:** `src/index.css`
+
+**Before:**
+```css
+  --r-2xl: 16px;
+
+  /* ── Motion ────────────────────────────────────────────────── */
+```
+
+**After:**
+```css
+  --r-2xl: 16px;
+
+  /* ── Spacing scale (4px base) ──────────────────────────────── */
+  --sp-1:  4px;   --sp-2:  8px;   --sp-3:  12px;  --sp-4:  16px;
+  --sp-5:  20px;  --sp-6:  24px;  --sp-8:  32px;  --sp-10: 40px;  --sp-12: 48px;
+
+  /* ── Derived / signature tokens ────────────────────────────── */
+  --focus-ring:        0 0 0 3px rgba(0, 154, 222, 0.28);
+  --surface-raised:    #FFFFFF;
+  --accent-gradient:   linear-gradient(135deg, var(--c-navy-2), var(--c-navy));
+  --sky-gradient:      linear-gradient(135deg, var(--c-sky), var(--c-sky-2));
+  --premium-hairline:  linear-gradient(90deg, transparent, rgba(218, 163, 40, 0.45), transparent);
+
+  /* ── Motion ────────────────────────────────────────────────── */
+```
+
+**File:** `src/index.css`
+
+**Before:**
+```css
+::selection {
+  background: rgba(0, 154, 222, 0.18);
+}
+```
+
+**After:**
+```css
+::selection {
+  background: rgba(0, 154, 222, 0.18);
+}
+
+/* ── Base native form controls — quiet default; component classes override ── */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+select,
+textarea {
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-sm);
+  background: var(--c-surface);
+  color: var(--c-ink);
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):hover:not(:disabled),
+select:hover:not(:disabled),
+textarea:hover:not(:disabled) {
+  border-color: var(--c-border-2);
+}
+```
+
+**File:** `src/main.tsx`
+
+**Before:**
+```tsx
+import "./index.css";
+```
+
+**After:**
+```tsx
+import "./index.css";
+import "./styles/primitives.css";
+```
+
+**File:** `src/styles/primitives.css` (new) — canonical `.ui-btn`, `.ui-card`, `.ui-stat`, `.ui-badge`, `.ui-field`, `.ui-section`, `.ui-toolbar` built entirely from tokens.
+
+**File:** `src/components/ui/Button.tsx` (new) — thin presentational wrapper rendering `.ui-btn` variants/sizes.
+
+**File:** `src/components/ui/StatCard.tsx` (new) — thin presentational KPI card rendering `.ui-stat`.
+
+**File:** `docs/design-system.md` (new) — token + primitive usage reference.
+
+---
+
+## v28.1 — 2026-06-30 — design system: token migration + polish across component surfaces (parallel agent pass)
+
+Surface-by-surface refinement consuming the v28 foundation. Off-token hardcoded hex replaced with nearest tokens; ad-hoc paddings moved to the `--sp-*` scale; shadows unified to `--sh-*` tiers; `transition: all` replaced with explicit, token-driven property transitions; focus rings unified to `box-shadow: var(--focus-ring)`. Behavior and class names unchanged (TSX selectors preserved). Representative changes per file:
+
+**File:** `src/App.css`
+
+**Before:**
+```css
+  padding: 22px 24px 28px;
+  /* ... */
+  background: linear-gradient(90deg, transparent, rgba(218, 163, 40, 0.32), transparent);
+```
+
+**After:**
+```css
+  padding: var(--sp-5) var(--sp-6) var(--sp-8);
+  /* ... */
+  background: var(--premium-hairline);
+```
+
+**File:** `src/components/DataTable/DataTable.css`
+
+**Before:**
+```css
+.dt-search:focus { box-shadow: 0 0 0 3px rgba(0, 154, 222, 0.12); }
+.dt-th-label { font-weight: 700; }
+```
+
+**After:**
+```css
+.dt-search:focus { box-shadow: var(--focus-ring); }
+.dt-th-label { font-weight: 500; }   /* + font-variant-numeric: tabular-nums on .dt-td */
+```
+
+**File:** `src/auth/AuthGate.css` — snapped the login's drifted palette to tokens (`--auth-primary #0F2744 → var(--c-navy)`, `--auth-accent #2D7DD2 → var(--c-sky)`, `--auth-accent-light #5EB8FF → var(--c-sky-2)`, `--auth-border-focus → var(--c-sky)`) and simplified the layered decorative gradients/effects to a calmer, more professional treatment.
+
+**Before:**
+```css
+  --auth-primary:  #0F2744;
+  --auth-accent:   #2D7DD2;
+  --auth-accent-light: #5EB8FF;
+```
+
+**After:**
+```css
+  --auth-primary:  var(--c-navy, #0E2444);
+  --auth-accent:   var(--c-sky, #009ADE);
+  --auth-accent-light: var(--c-sky-2, #007FBA);
+```
+
+**File:** `src/components/Sidebar/Tabs/Archive/Archive.css` — raw hex → tokens, `border-radius` → `--r-lg`, `box-shadow` → `--sh-xs`, paddings → `--sp-*`.
+
+**File:** `src/components/Sidebar/Tabs/Reports/Reports.css` — empty-state colors → tokens (`#06244a → var(--c-navy)`, `#637188 → var(--c-ink-3)`), added resting `--sh-xs`, spacing → `--sp-*`.
+
+**File:** `src/components/Sidebar/Tabs/Settings/Settings.css` — danger reset button gains a filled hover (`background/border var(--c-danger); color #FFF`); `transition: all` → explicit token-driven transitions.
+
+**File:** `src/components/Sidebar/Tabs/Population/Population.css` — off-token hex → palette/semantic tokens; spacing → `--sp-*`.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/EmployeeWorkspace.css` — off-token hex → tokens; KPI/quota styling aligned; chart container surfaces on-token.
+
+**File:** `src/components/Sidebar/Tabs/UserManagement/UserManagement.css` — off-token hex → tokens; focus rings unified.
+
+---
+
+## v28.2 — 2026-06-30 — design system: shell-adjacent + misc surface touch-ups
+
+Final sweep. Most remaining component CSS (TemplateBuilder, PageHeader, AdminToolbar, WorkspaceGate, ErrorLogSection, FeedbackWidget, DataAccuracyReport) was already token-clean and left unchanged. Minor refinements only:
+
+**File:** `src/components/Sidebar/Sidebar.css` — active nav-item accent / focus refinement using motion + focus-ring tokens.
+
+**File:** `src/components/InspectionPanel/InspectionPanel.css` — off-token hex → palette tokens.
+
+---
+
+## v28.3 — 2026-06-30 — visible polish pass (every-screen surfaces)
+
+The v28.x token migration was visually a no-op (hex → tokens that resolve to identical pixels). This pass makes deliberately *visible* changes to the highest-frequency shared surfaces.
+
+**File:** `src/components/Sidebar/Sidebar.css`
+
+**Before:**
+```css
+.sidebar-nav-item.active {
+  background: rgba(0, 154, 222, 0.18);
+  color: #FFFFFF;
+  font-weight: 700;
+  box-shadow: inset 3px 0 0 var(--sb-accent);
+}
+```
+
+**After:**
+```css
+.sidebar-nav-item.active {
+  background:
+    linear-gradient(90deg, rgba(0, 154, 222, 0.26), rgba(0, 154, 222, 0.10) 70%, transparent);
+  color: #FFFFFF;
+  font-weight: 700;
+  box-shadow:
+    inset 3px 0 0 var(--sb-accent),
+    0 4px 14px rgba(0, 154, 222, 0.20);
+}
+.sidebar-nav-item.active .sidebar-nav-icon {
+  filter: drop-shadow(0 0 6px rgba(0, 154, 222, 0.55));
+}
+```
+
+**File:** `src/components/PageHeader/PageHeader.css` — added a premium-hairline accent over the divider (`.page-header::after`), a leading gold accent tick before the eyebrow (`.page-header-eyebrow::before`), and bumped eyebrow weight 600→700.
+
+**File:** `src/App.css`
+
+**Before:**
+```css
+  background:
+    linear-gradient(180deg, rgba(14, 36, 68, 0.035), transparent 220px),
+    var(--app-bg);
+```
+
+**After:**
+```css
+  background:
+    var(--app-canvas-tint),
+    var(--app-bg);
+```
+
+**File:** `src/styles/primitives.css` — `.ui-stat::before` accent bar widened 3px→4px and changed from flat `--c-sky` to `--sky-gradient`; `--premium` variant now uses `--gold-accent-bar`.
+
+## v29 — 2026-06-30 — viewer/demo mode (login bypass + read-only) + visible polish wiring
+
+Adds a built-in `viewer` / `view` account that mounts a read-only, in-memory demo
+workspace and skips the folder picker, so the app can be explored end-to-end (and
+visually verified) without a real workspace. Admin-level visibility; all disk
+writes are no-ops (exports still work). Also wires previously-defined premium
+tokens into visible surfaces.
+
+**File:** `src/data/storage/readOnlyMode.ts` (new) — `setReadOnlyMode` / `isReadOnlyMode` global guard.
+
+**File:** `src/data/storage/safeWrite.ts` — `safeWriteJson` and `safeWriteJsonText` early-return when `isReadOnlyMode()` is true.
+
+**File:** `src/auth/authConfig.ts` — added `VIEWER_USERNAME = "viewer"` / `VIEWER_PASSWORD = "view"` (delete this block to remove the demo account).
+
+**File:** `src/auth/authTypes.ts` — `AuthSession` gains optional `mode?: "demo"`.
+
+**File:** `src/data/workspace/demoWorkspace.ts` (new) — `createDemoWorkspace()` builds an in-memory directory and runs `createWorkspaceStructure` (seeds the 5 default managed users).
+
+**File:** `src/data/workspace/WorkspaceContext.ts` / `WorkspaceProvider.tsx` — new `enterDemoWorkspace()` mounts the demo workspace and enables read-only; `clearWorkspace()` disables read-only.
+
+**File:** `src/auth/AuthGate.tsx` — viewer-credential check in `loginAsEmployee` (mounts demo, sets a non-persisted demo session); `logout` tears the demo workspace down.
+
+**File:** `src/App.tsx` — gate reorder (AuthGate now outermost → login first), read-only demo banner, and the admin auto-backup effect skips demo sessions.
+
+**File:** `src/components/DataTable/DataTable.css` — `.dt-th` header now uses `var(--table-head-bg)`.
+
+**File:** `src/styles/primitives.css` — `.ui-btn--primary` uses `--sky-gradient` + `--sh-sky` for subtle premium depth.
+
+---
+
+## v29.1 — 2026-06-30 — fix: restore connect-first workflow; demo entry moved to the picker
+
+The v29 gate reorder (login-first) was wrong: the workspace folder holds the
+users/permissions file, so the app must connect to the address FIRST to load the
+user list before login can validate against it. Reverted to picker-first and moved
+the demo entry to the picker screen instead.
+
+**File:** `src/App.tsx` — reverted gate order back to `WorkspacePicker` → `AuthGate` → `WorkspaceGate` (connect first, then login).
+
+**File:** `src/data/workspace/WorkspaceGate.tsx` — the workspace-picker screen gains a "وضع العرض التجريبي (بدون مجلد)" button that calls `enterDemoWorkspace()` (mounts the in-memory demo, no folder required).
+
+**File:** `src/data/workspace/demoWorkspace.ts` — exported `DEMO_WORKSPACE_NAME` constant.
+
+**File:** `src/auth/AuthGate.tsx` — auto-login into the read-only demo session keyed on `directoryHandle?.name === DEMO_WORKSPACE_NAME` (StrictMode-safe; replaces the earlier consumable-flag approach that lost the session on StrictMode remount). The `viewer`/`view` typed-login path is retained as a secondary entry.
+
+**File:** `src/data/storage/readOnlyMode.ts` — removed the now-unused `setDemoLoginPending`/`takeDemoLoginPending` flag helpers.
+
+**Verified live:** picker shows first; the demo button enters the app in one click with the read-only banner, full admin nav, and a populated Population tab; build green; lint clean (only pre-existing `executive/pages` errors remain).
+
+---
+
+## v29.2 — 2026-06-30 — view mode: hidden Alt+A+T passcode entry (replaces visible button)
+
+Made the demo/view entry a hidden backdoor mirroring the admin shortcut, instead of
+a visible button on the address picker.
+
+**File:** `src/data/workspace/WorkspaceGate.tsx` — removed the visible "وضع العرض التجريبي" button. On the address-picker screen (`status === "not_selected"`), Alt then A then T now opens a "وضع العرض" passcode modal; entering the view passcode (`VIEWER_PASSWORD = "view"`) calls `enterDemoWorkspace()`, which auto-enters the read-only demo session. The key listener is bound only while the picker is shown, so it can't collide with the admin Alt+A+T shortcut on the login screen. Reuses the existing `.auth-modal-backdrop` / `.auth-admin-modal` styles.
+
+**File:** `src/auth/authConfig.ts` — `VIEWER_PASSWORD` is now the view-mode passcode (the `VIEWER_USERNAME` typed-login was removed).
+
+**File:** `src/auth/AuthGate.tsx` — removed the now-redundant `viewer`/`view` typed-login path and its unused `enterDemoWorkspace` / `VIEWER_PASSWORD` references. Demo auto-login (keyed on the demo workspace name) is retained.
+
+**Verified live:** picker shows no demo button; Alt+A+T opens the passcode modal; entering "view" enters read-only demo mode (banner, full admin nav, populated Population tab); build green; lint clean.
+
+---
+
+## v29.3 — 2026-06-30 — view mode presents as "وضع العرض", not admin
+
+The demo session carries `role: "admin"` only to unlock full tab visibility, which
+made the toolbar present it as the admin (admin badge + role-preview switcher).
+
+**File:** `src/auth/AdminToolbar.tsx` — when `session.mode === "demo"`, the toolbar now shows "وضع العرض (قراءة فقط)" instead of "وضع الإدارة", and treats the session as non-admin (`isRealAdmin = role === "admin" && !isDemo`), hiding the role-preview switcher and the admin feedback button. Only the logout button remains. Full tab visibility is preserved (the admin role still drives which tabs render); the session is simply no longer presented or operable as admin.
+
+**Verified:** build green.
 
 ---
