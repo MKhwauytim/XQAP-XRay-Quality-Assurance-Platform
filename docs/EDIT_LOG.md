@@ -4,6 +4,106 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v32.0 — 2026-06-30 — Executive report Phase 5: data Workbook (.xlsx) (FEATURE)
+
+New `executive/workbook/workbook.ts` (`buildExecutiveWorkbook`) emits one `.xlsx` with the
+full raw→processed→analytical chain (design §7): Raw-Risk, Raw-BI (unavailable note),
+Exclusions (note), Decision Fact Table, Result Comparison (six sources + agreement),
+KPI/ports/stages/image-quality/result-quality/all-rows (now sourced from `ReportModel`),
+Employee-by-Port, Error Analysis, Cross-team Agreement (N×N). One `buildReportModel` call;
+inspector IDs vs reviewer names; §3.7 missing/zero/N-A discipline. `buildExecutiveXlsx`
+now delegates to it (Reports-tab call unchanged). 10 workbook tests read sheets back via
+`XLSX.utils`.
+
+**File:** `src/data/reporting/executiveReport.ts`
+
+**Before:**
+```ts
+import * as XLSX from "xlsx";
+import type { ExecutiveReportInput } from "./executiveReportTypes";
+import { buildExecutiveReportRows, calculateExecutiveKPIs } from "./executiveReportData";
+export { buildExecutiveReport, openExecutiveReport } from "./executive/index";
+export function buildExecutiveXlsx(input: ExecutiveReportInput): void {
+  // …~160 lines building 6 sheets inline, then XLSX.writeFile(…)
+}
+```
+
+**After:**
+```ts
+import type { ExecutiveReportInput } from "./executiveReportTypes";
+import { buildExecutiveWorkbook } from "./executive/workbook/workbook";
+export { buildExecutiveReport, openExecutiveReport } from "./executive/index";
+export function buildExecutiveXlsx(
+  input: ExecutiveReportInput,
+  employeeDisplayNames?: Record<string, string>,
+): void {
+  buildExecutiveWorkbook(input, employeeDisplayNames);
+}
+```
+
+**Files (new):** `src/data/reporting/executive/workbook/workbook.ts`
+(`buildExecutiveWorkbook` + pure `buildExecutiveWorkbookObject` + `SHEET_NAMES`),
+`src/data/reporting/executive/workbook/workbook.test.ts` (10 cases).
+
+> Follow-up: Raw-BI and Exclusions sheets emit an "unavailable" note because
+> `ExecutiveReportInput` does not carry raw BI rows or the exclusions log; populating them
+> requires threading those into the input (tracked separately).
+
+---
+
+## v31.0 — 2026-06-30 — Executive report Phase 3: Document renderer rebuilt on ReportModel (FEATURE)
+
+Rebuilt the executive Document as an A4-portrait, model-driven renderer (design §5,
+blueprint §2). New `executive/document/` module assembles front matter + 5 parts (Scope &
+Method, Inspection Quality, Corroboration, Accountability, Risk & Actions) + appendix from
+a single `ReportModel`, with dynamic per-port pages keyed on inspector IDs. The
+`fitPages()` runtime `transform:scale` hack is removed (explicit `pagination.ts` instead),
+every emoji glyph is replaced by `ui/icons.ts` SVGs, and analytical pages use the
+layered headline+depth pattern with the 3-line executive close. The Employee Agreement
+Matrix is gone. Public API (`buildExecutiveReport`/`openExecutiveReport`) unchanged.
+
+**File:** `src/data/reporting/executive/index.ts`
+
+**Before:**
+```ts
+import { buildExecutiveReportRows, calculateExecutiveKPIs } from "../executiveReportData";
+import { buildContext } from "./context";
+import { assembleReport } from "./assemble";
+// …25+ individual page-builder imports…
+export function buildExecutiveReport(input, employeeDisplayNames = {}): string {
+  const rows = buildExecutiveReportRows(input);
+  const kpis = calculateExecutiveKPIs(rows, input.sample, input.config);
+  const ctx  = buildContext(input, kpis, employeeDisplayNames, rows);
+  const pages = [ buildCover, buildToc, /* …~25 builders… */ buildAppendix ];
+  return assembleReport(ctx, pages);
+}
+```
+
+**After:**
+```ts
+import { buildReportModel } from "./model/reportModel";
+import { buildDocumentSlides } from "./document/index";
+import { buildViewerHtml } from "./viewer";
+export function buildExecutiveReport(input, employeeDisplayNames = {}): string {
+  const model = buildReportModel(input, employeeDisplayNames);
+  const slides = buildDocumentSlides(model, formatIssueDate());
+  return buildViewerHtml(slides, formatMonthLabel(input.monthFolderName));
+}
+```
+
+**File:** `src/data/reporting/executive/viewer.ts` — removed the `fitPages()` auto-scale
+script; pages are fixed A4 boxes with explicit pagination.
+**File:** `src/data/reporting/executive/theme.ts` — layout/emoji refinements for the fixed
+A4 document.
+**Files (new):** `src/data/reporting/executive/document/{index,frontMatter,dividers,narrative,pagination,shared,partScope,partQuality,partCorroboration,partAccountability,partRisk}.ts`.
+
+**File:** `src/data/reporting/executiveReport.test.ts` — updated to the new A4 document
+structure: asserts A4-portrait sizing, theme tokens, cover + level definitions, the
+"الدقة حسب المنفذ" section, presence of inline `<svg>` icons, and **no emoji**
+(pictographic-range regex); dropped the stale "PowerPoint slide sizing" / old-title checks.
+
+---
+
 ## v30.0 — 2026-06-30 — Executive report Phase 1: analytical layer (ReportModel) (FEATURE)
 
 The single computed analytical layer for the rework (design spec §3): a decision-level

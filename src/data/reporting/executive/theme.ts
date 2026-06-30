@@ -415,7 +415,8 @@ tbody tr:hover{background:rgba(244,180,0,.04);}
   color:rgba(255,255,255,.72);line-height:1.6;
 }
 .context-band .method-list li::before{
-  content:"›";position:absolute;right:0;top:0;color:var(--gold);font-weight:700;
+  content:"";position:absolute;right:2px;top:8px;width:6px;height:6px;border-radius:50%;
+  background:var(--gold);
 }
 .context-band .stat-stack{display:grid;gap:12px;margin-top:auto;}
 .context-band .stat-stack .stat-pill{
@@ -498,8 +499,10 @@ tbody tr:hover{background:rgba(244,180,0,.04);}
   padding:40px 24px;color:var(--slate);font-size:0.875rem;
 }
 .notice-centered::before{
-  content:"◌";font-size:2rem;opacity:.3;display:block;margin-bottom:12px;
+  content:"";width:28px;height:28px;border:2px dashed var(--slate);border-radius:50%;
+  opacity:.4;display:block;margin:0 auto 12px;
 }
+.notice-centered.doc-empty::before{display:none;}
 .notice-centered div{line-height:1.6;max-width:280px;}
 
 /* ── Misc utilities ───────────────────────────────────────────────────── */
@@ -549,7 +552,7 @@ tbody tr:hover{background:rgba(244,180,0,.04);}
 .page.toc-page .appendix-card p{margin:0;line-height:1.8;font-size:14px;}
 .page.toc-page .appendix-list{display:grid;grid-template-columns:1fr 1fr;gap:6px 18px;margin-top:14px;}
 .page.toc-page .appendix-list span{display:block;color:#dce7f2;font-size:13px;position:relative;padding-right:14px;}
-.page.toc-page .appendix-list span::before{content:"•";position:absolute;right:0;color:var(--gold);}
+.page.toc-page .appendix-list span::before{content:"";position:absolute;right:0;top:7px;width:5px;height:5px;border-radius:50%;background:var(--gold);}
 
 /* ── Responsive ───────────────────────────────────────────────────────── */
 @media(max-width:980px){
@@ -582,4 +585,75 @@ tbody tr:hover{background:rgba(244,180,0,.04);}
   .right-rail{display:none;}
   .page-inner{margin-right:0;width:100%;padding:20mm 20mm 20mm 20mm;}
 }
+
+/* ── Document renderer (Phase 3) — fixed A4 budget, no runtime scaling ─────── */
+/* Eyebrow header (icon + label) above each section title. */
+.doc-eyebrow{display:flex;align-items:center;gap:8px;color:var(--gold);
+  font-size:0.72rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;}
+.doc-eyebrow-icon{display:inline-flex;color:var(--gold);}
+.doc-eyebrow-icon svg{display:block;}
+
+/* KPI strip — the 5-second headline numbers. */
+.doc-kpi-strip{margin-top:14px;}
+.doc-kpi{padding:12px 14px;}
+.doc-kpi-label{font-size:0.72rem;color:var(--muted);font-weight:600;}
+.doc-kpi .metric{font-size:1.7rem;margin:6px 0 2px;}
+.doc-kpi-sub{font-size:0.68rem;}
+.doc-kpi.green::before{background:var(--green);} .doc-kpi.blue::before{background:var(--blue);}
+.doc-kpi.coral::before{background:var(--coral);} .doc-kpi.slate::before{background:var(--slate);}
+.doc-kpi.purple::before{background:var(--purple);} .doc-kpi.cyan::before{background:var(--cyan);}
+
+/* Panels with an optional icon title. */
+.doc-panel{display:flex;flex-direction:column;min-height:0;}
+.doc-panel-title{display:flex;align-items:center;gap:7px;}
+.doc-panel-title svg{display:block;}
+.doc-panel > .table-wrap{flex:1 1 auto;min-height:0;}
+
+/* Figure box wrapping an SVG chart at a fixed height (no runtime scaling). */
+.doc-figure{display:flex;flex-direction:column;align-items:center;gap:6px;}
+.doc-figure-svg{width:100%;height:var(--fig-h,200px);display:flex;align-items:center;justify-content:center;}
+.doc-figure-svg svg{max-height:100%;width:auto;max-width:100%;}
+.doc-figure-cap{font-size:0.7rem;text-align:center;}
+
+/* The fixed 3-line executive close. */
+.doc-close{margin-top:14px;display:grid;gap:8px;border-top:1px solid var(--line);padding-top:12px;}
+.doc-close-line{display:flex;align-items:flex-start;gap:10px;}
+.doc-close-icon{display:inline-flex;flex-shrink:0;margin-top:2px;}
+.doc-close-icon svg{display:block;}
+.doc-close-line b{display:block;font-size:0.78rem;color:var(--gold);font-weight:700;margin-bottom:1px;}
+.doc-close-line span{font-size:0.78rem;color:rgba(255,255,255,.78);line-height:1.5;}
+
+/* Note / caveat box. */
+.doc-note{margin-top:12px;}
+.doc-note-icon{display:inline-flex;flex-shrink:0;color:var(--gold);}
+.doc-note-icon svg{display:block;}
+
+/* Empty-state for unmapped/insufficient data. */
+.doc-empty{gap:8px;}
+.doc-empty-icon{color:var(--gold);opacity:.7;}
+.doc-empty-icon svg{display:block;}
+.doc-empty b{font-size:0.95rem;color:#fff;}
+
+/* Bullet list. */
+.doc-list{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:8px;}
+.doc-list li{position:relative;padding-right:16px;font-size:0.8rem;color:rgba(255,255,255,.78);line-height:1.6;}
+.doc-list li::before{content:"";position:absolute;right:2px;top:8px;width:5px;height:5px;border-radius:50%;background:var(--gold);}
+
+/* Correction/regression flow cells. */
+.doc-flow{display:grid;gap:10px;margin-top:6px;}
+.doc-flow-cell{display:flex;align-items:center;justify-content:space-between;
+  border:1px solid var(--line);border-radius:10px;padding:10px 14px;background:rgba(255,255,255,.02);}
+.doc-flow-cell .metric{font-size:1.4rem;margin:0;}
+.doc-flow-cell.good{border-color:rgba(139,195,74,.35);} .doc-flow-cell.bad{border-color:rgba(255,118,95,.35);}
+
+/* Action / recommendation cards. */
+.doc-actions{display:grid;gap:8px;margin-top:4px;}
+.doc-action{display:flex;align-items:flex-start;gap:8px;padding:10px 12px;font-size:0.8rem;line-height:1.5;}
+.doc-action::before{background:var(--gold);}
+
+/* Legend (glossary outcome chips). */
+.doc-legend{display:grid;gap:8px;margin-top:4px;}
+.doc-legend-item{display:flex;align-items:flex-start;gap:9px;}
+.doc-legend-item b{display:block;font-size:0.8rem;color:#fff;}
+.doc-legend-item span{font-size:0.72rem;}
 `;

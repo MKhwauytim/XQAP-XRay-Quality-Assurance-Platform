@@ -46,7 +46,7 @@ function row(
 }
 
 describe("executive report html", () => {
-  it("uses Arabic report labels and PowerPoint slide sizing", () => {
+  it("renders the A4 executive document in Arabic with SVG icons, not emoji", () => {
     const html = buildExecutiveReport({
       monthFolderName: "6-June-2026",
       populationRows: [
@@ -65,8 +65,8 @@ describe("executive report html", () => {
       config: DEFAULT_EXEC_CONFIG,
     });
 
-    // CSS theme tokens present
-    expect(html).toContain("@page{size:A4 portrait;margin:0;}");
+    // A4-portrait print sizing + theme tokens present
+    expect(html).toContain("size:A4 portrait");
     expect(html).toContain("--navy:#062846");
     expect(html).toContain("--gold:#f4b400");
     // Cover page
@@ -76,15 +76,13 @@ describe("executive report html", () => {
     expect(html).toContain("المستوى الثاني");
     expect(html).toContain("المستوى الثالث");
     expect(html).toContain("المستوى الرابع");
-    // Part 2 divider title
-    expect(html).toContain("نتائج الفحص");
-    // Accuracy page content
-    expect(html).toContain("نتائج الدقة حسب المنفذ");
-    expect(html).toContain("دقة الاشتباه الكلية");
-    // Population page
-    expect(html).toContain("إجمالي المجتمع");
-    // Sample page
-    expect(html).toContain("العينة حسب المستويات");
+    // Part 2 — inspection-quality accuracy section
+    expect(html).toContain("الدقة حسب المنفذ");
+    // Uses inline SVG icons, never emoji (design spec §4.2)
+    expect(html).toContain("<svg");
+    expect(html).not.toMatch(
+      /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE00}-\u{FE0F}]/u
+    );
     // No English debug strings
     expect(html).not.toContain("Xray IDs");
     expect(html).not.toContain("Inspection Workspace");

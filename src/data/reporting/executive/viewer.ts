@@ -1,6 +1,12 @@
 import { EXEC_CSS } from "./theme";
 import { esc } from "./primitives";
+import { icon } from "./ui/icons";
 
+// Viewer JS: builds the sidebar TOC and highlights the active page via an
+// IntersectionObserver. The legacy `fitPages()` transform:scale() auto-shrink hack
+// has been REMOVED (design §4.1): pages are composed to a fixed A4 content budget
+// and long tables paginate explicitly (see document/pagination.ts), so nothing is
+// ever scaled down at runtime.
 const VIEWER_JS = `(function(){
   var pages=[].slice.call(document.querySelectorAll('.page'));
   var toc=document.getElementById('toc');
@@ -23,25 +29,6 @@ const VIEWER_JS = `(function(){
     });
   },{rootMargin:'-35% 0px -55% 0px',threshold:0});
   pages.forEach(function(p){obs.observe(p);});
-
-  function fitPages(){
-    [].slice.call(document.querySelectorAll('.page-inner')).forEach(function(inner){
-      inner.style.transform='';
-      var page=inner.parentElement;
-      if(!page) return;
-      var avail=page.clientHeight-2;
-      var needed=inner.scrollHeight;
-      if(needed>avail){
-        var scale=Math.max(0.82,avail/needed);
-        inner.style.transform='scale('+scale+')';
-        inner.style.transformOrigin='top right';
-        inner.style.height=(100/scale)+'%';
-      }
-    });
-  }
-  window.addEventListener('load',fitPages);
-  window.addEventListener('resize',fitPages);
-  setTimeout(fitPages,300);
 })();`;
 
 export function buildViewerHtml(slides: string, monthLabel: string): string {
@@ -57,7 +44,7 @@ export function buildViewerHtml(slides: string, monthLabel: string): string {
 <div class="viewer">
   <aside class="sidebar">
     <div class="brand-small">
-      <div class="brand-mark">⌁</div>
+      <div class="brand-mark">${icon("shield", 24)}</div>
       <div>
         <strong>التقرير التنفيذي</strong>
         <span>ضمان جودة الأشعة — ${esc(monthLabel)}</span>
