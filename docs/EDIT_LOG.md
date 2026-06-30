@@ -4,6 +4,100 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v30.0 — 2026-06-30 — Executive report Phase 1: analytical layer (ReportModel) (FEATURE)
+
+The single computed analytical layer for the rework (design spec §3): a decision-level
+fact table, the six-source image comparison + cross-team agreement views, data-sufficiency
+bands, and one `ReportModel` consumed by every renderer and the in-app dashboard. Reuses
+the existing KPI math; employee accuracy keys on inspector IDs (with an explicit
+`inspectorIdentityMapped=false` state for the current BI-unmapped period). 82 reporting
+tests; full suite 257 green.
+
+**File:** `src/data/reporting/executiveReportTypes.ts`
+
+**Before:**
+```ts
+export type ExecutiveReportRow = {
+  xrayImageId: string;
+  portName: string | null;
+  portType: string | null;
+  stage: string | null;
+  // …existing fields…
+  verificationCategory: VerificationCategory | null;
+};
+```
+
+**After:**
+```ts
+export type OtherTeamResult = { result: "سليمة" | "اشتباه" | null; employeeId: string | null };
+export type OtherResultsPanel = { manual: OtherTeamResult; opposite: OtherTeamResult; liveMeans: OtherTeamResult };
+
+export type ExecutiveReportRow = {
+  xrayImageId: string;
+  portCode: string | null;
+  portName: string | null;
+  portType: string | null;
+  movementType: string | null;
+  stage: string | null;
+  // …existing fields…
+  verificationCategory: VerificationCategory | null;
+  otherResults: OtherResultsPanel;
+  notes: string | null;
+};
+
+export type DataSufficiencyThresholds = { insufficient: number; limited: number; sufficient: number };
+export const DEFAULT_DATA_SUFFICIENCY_THRESHOLDS: DataSufficiencyThresholds = { insufficient: 1, limited: 10, sufficient: 20 };
+// ExecutiveReportConfig / DEFAULT_EXEC_CONFIG gain: dataSufficiencyThresholds
+```
+
+**File:** `src/data/reporting/executiveReportData.ts`
+
+**Before:**
+```ts
+    return {
+      xrayImageId: pop.xrayImageId,
+      portName: pop.portName,
+      portType: pop.portType,
+      stage: pop.stage,
+      // …
+      verificationCategory,
+    };
+```
+
+**After:**
+```ts
+    return {
+      xrayImageId: pop.xrayImageId,
+      portCode: pop.portCode,
+      portName: pop.portName,
+      portType: pop.portType,
+      movementType: pop.movementType,
+      stage: pop.stage,
+      // …
+      verificationCategory,
+      otherResults: {
+        manual: { result: pop.otherResults.manual.result, employeeId: pop.otherResults.manual.employeeId },
+        opposite: { result: pop.otherResults.opposite.result, employeeId: pop.otherResults.opposite.employeeId },
+        liveMeans: { result: pop.otherResults.liveMeans.result, employeeId: pop.otherResults.liveMeans.employeeId },
+      },
+      notes: pop.notes,
+    };
+```
+
+**Files (new):** `src/data/reporting/executive/model/decisionFactTable.ts`
+(`DecisionRecord`, `ImageResultComparison`, `classifyOutcome`, `buildDecisionRecords` —
+2 records/case, per-level §9 classification, evaluability rule; `buildImageComparisons` —
+six sources, `agreesWithReview` only when both present), `model/dataSufficiency.ts`
+(`band`, `isRankable`), `model/aggregates.ts` (`buildAggregates`: per-port/stage/movement,
+employee-by-port-and-level keyed on `inspectorId`, error-type, reviewer-agreement + N×N
+cross-team matrix), `model/reportModel.ts` (`ReportModel`, `buildReportModel`),
+`model/model.test.ts` (analytical-layer tests).
+
+**Files (test fixtures):** `src/data/reporting/executive/executiveEmployeeData.test.ts`,
+`.../portEmployeeData.test.ts` — added `portCode`, `movementType`, `otherResults`, `notes`.
+
+---
+
 ## v29.0 — 2026-06-30 — Executive report Phase 2: visual primitives (tokens, icons, charts) (FEATURE)
 
 Adds the static-SVG visual system for the executive-report rework (design spec §4):

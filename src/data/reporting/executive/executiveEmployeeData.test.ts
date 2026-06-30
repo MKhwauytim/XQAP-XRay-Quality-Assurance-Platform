@@ -5,8 +5,10 @@ import type { ExecutiveReportRow } from "../executiveReportTypes";
 function makeRow(overrides: Partial<ExecutiveReportRow>): ExecutiveReportRow {
   return {
     xrayImageId: "img1",
+    portCode: null,
     portName: "منفذ أ",
     portType: "land",
+    movementType: null,
     stage: "المستوى الأول",
     levelOneEmployeeId: null,
     levelTwoEmployeeId: null,
@@ -32,6 +34,12 @@ function makeRow(overrides: Partial<ExecutiveReportRow>): ExecutiveReportRow {
     levelOneAccurate: true,
     levelTwoAccurate: true,
     verificationCategory: "correct-clean",
+    otherResults: {
+      manual: { result: null, employeeId: null },
+      opposite: { result: null, employeeId: null },
+      liveMeans: { result: null, employeeId: null },
+    },
+    notes: null,
     ...overrides,
   };
 }

@@ -161,8 +161,10 @@ export function buildExecutiveReportRows(input: ExecutiveReportInput): Executive
 
     return {
       xrayImageId: pop.xrayImageId,
+      portCode: pop.portCode,
       portName: pop.portName,
       portType: pop.portType,
+      movementType: pop.movementType,
       stage: pop.stage,
       levelOneEmployeeId: pop.levelOneEmployee ?? null,
       levelTwoEmployeeId: pop.levelTwoEmployee ?? null,
@@ -188,6 +190,12 @@ export function buildExecutiveReportRows(input: ExecutiveReportInput): Executive
       levelOneAccurate,
       levelTwoAccurate,
       verificationCategory,
+      otherResults: {
+        manual: { result: pop.otherResults.manual.result, employeeId: pop.otherResults.manual.employeeId },
+        opposite: { result: pop.otherResults.opposite.result, employeeId: pop.otherResults.opposite.employeeId },
+        liveMeans: { result: pop.otherResults.liveMeans.result, employeeId: pop.otherResults.liveMeans.employeeId },
+      },
+      notes: pop.notes,
     };
   });
 }

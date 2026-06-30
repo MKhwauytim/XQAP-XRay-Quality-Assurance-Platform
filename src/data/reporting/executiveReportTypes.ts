@@ -11,10 +11,28 @@ export type VerificationCategory =
   | "missed-suspicious"
   | "excess-suspicious";
 
+/** A single non-L1/L2 result source ("team") carried onto the report row for
+ *  cross-team comparison. `result` is `null` when the team did not act on the
+ *  image (renders `—`, never `0%`). */
+export type OtherTeamResult = {
+  result: "سليمة" | "اشتباه" | null;
+  employeeId: string | null;
+};
+
+/** The three other-team result sources (manual / opposite / live-means) bridged
+ *  from `PreparedPopulationRow.otherResults` onto the executive report row. */
+export type OtherResultsPanel = {
+  manual: OtherTeamResult;
+  opposite: OtherTeamResult;
+  liveMeans: OtherTeamResult;
+};
+
 export type ExecutiveReportRow = {
   xrayImageId: string;
+  portCode: string | null;
   portName: string | null;
   portType: string | null;
+  movementType: string | null;
   stage: string | null;
   levelOneEmployeeId: string | null;
   levelTwoEmployeeId: string | null;
@@ -40,6 +58,10 @@ export type ExecutiveReportRow = {
   levelOneAccurate: boolean | null;
   levelTwoAccurate: boolean | null;
   verificationCategory: VerificationCategory | null;
+  /** Non-L1/L2 corroborating result sources, bridged from the population row. */
+  otherResults: OtherResultsPanel;
+  /** Level notes (ملاحظة المستويات) carried for traceability. */
+  notes: string | null;
 };
 
 export type PortProfile = {
@@ -134,6 +156,22 @@ export type ExecutiveReportFieldMappings = {
   smuggleMethodLabel: string;
 };
 
+/** Inclusive lower bounds (in evaluable-decision count) for the four data-sufficiency
+ *  bands (spec §3.2 / blueprint §1.4). `none` is implicitly 0 (below `insufficient`).
+ *  Defaults: insufficient 1–9, limited 10–19, sufficient 20+. Overridable; final
+ *  thresholds need management approval. */
+export type DataSufficiencyThresholds = {
+  insufficient: number;
+  limited: number;
+  sufficient: number;
+};
+
+export const DEFAULT_DATA_SUFFICIENCY_THRESHOLDS: DataSufficiencyThresholds = {
+  insufficient: 1,
+  limited: 10,
+  sufficient: 20,
+};
+
 export type ExecutiveReportConfig = {
   monthlyTarget: number;
   accuracyTarget: number;
@@ -141,6 +179,7 @@ export type ExecutiveReportConfig = {
   coverageTarget: number;
   maximumMissedSuspicionRate: number;
   minimumReliableSampleSize: number;
+  dataSufficiencyThresholds: DataSufficiencyThresholds;
   expertResultFieldId: string;
   fieldMappings: ExecutiveReportFieldMappings;
   showEmployeeNames: boolean;
@@ -165,6 +204,7 @@ export const DEFAULT_EXEC_CONFIG: ExecutiveReportConfig = {
   coverageTarget: 7.5,
   maximumMissedSuspicionRate: 5,
   minimumReliableSampleSize: 30,
+  dataSufficiencyThresholds: DEFAULT_DATA_SUFFICIENCY_THRESHOLDS,
   expertResultFieldId: "qualityImageResult",
   fieldMappings: DEFAULT_EXEC_FIELD_MAPPINGS,
   showEmployeeNames: false,
