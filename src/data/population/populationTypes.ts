@@ -11,6 +11,12 @@ export type BiEnrichmentStatus =
   | "BI Matched"
   | "BI Not Matched";
 
+export type TeamResult = {
+  result: "سليمة" | "اشتباه" | null;
+  code: string | null;
+  employeeId: string | null;
+};
+
 export type PreparedPopulationRow = {
   stage: string | null;
   xrayImageId: string;
@@ -41,6 +47,16 @@ export type PreparedPopulationRow = {
 
   levelOneEmployee: string | null;
   levelTwoEmployee: string | null;
+
+  // Other (non-L1/L2) teams — optional corroborating evidence. A blank result is
+  // `null` and never excludes the row (only L1/L2 gate population entry).
+  // `manual` has no BI employee field, so its `employeeId` stays `null`.
+  otherResults: {
+    manual: TeamResult;
+    opposite: TeamResult;
+    liveMeans: TeamResult;
+  };
+  notes: string | null;
 
   biEnrichmentStatus: BiEnrichmentStatus;
   biMatched: boolean;

@@ -43,6 +43,17 @@ type PreparedDraftRow = {
   levelOneEmployee: string | null;
   levelTwoEmployee: string | null;
 
+  // Other (non-L1/L2) team raw results — carried from risk, BI-enriched when blank.
+  manualResult: string | null;
+  manualResultCode: string | null;
+  oppositeResult: string | null;
+  oppositeResultCode: string | null;
+  oppositeEmployee: string | null;
+  liveMeansResult: string | null;
+  liveMeansResultCode: string | null;
+  liveMeansEmployee: string | null;
+  notes: string | null;
+
   rawRow: Record<string, unknown>;
   sourceSheetName: string;
   sourceRowNumber: number;
@@ -335,6 +346,16 @@ function toPreparedDraftRow(row: NormalizedRiskRow): PreparedDraftRow {
     levelOneEmployee: null,
     levelTwoEmployee: null,
 
+    manualResult: row.inspectorResult,
+    manualResultCode: null,
+    oppositeResult: row.oppositeInspectorResult,
+    oppositeResultCode: null,
+    oppositeEmployee: null,
+    liveMeansResult: row.liveMeansResult,
+    liveMeansResultCode: null,
+    liveMeansEmployee: null,
+    notes: null,
+
     rawRow: row.rawRow ?? {},
     sourceSheetName: row.sourceSheetName,
     sourceRowNumber: row.sourceRowNumber
@@ -430,11 +451,29 @@ function enrichDraftRowFromBi(params: {
       enrichedRawRow[key] = val;
     }
   }
+  const biRow = biMatch.row;
+  const fillFromBi = (
+    draftValue: string | null,
+    biValue: string | null
+  ): string | null => (isBlank(draftValue) && hasValue(biValue) ? biValue : draftValue);
+
   const enrichedRow: PreparedDraftRow = {
     ...draftRow,
     rawRow: enrichedRawRow,
-    levelOneEmployee: biMatch?.row?.levelOneEmployee ?? draftRow.levelOneEmployee ?? null,
-    levelTwoEmployee: biMatch?.row?.levelTwoEmployee ?? draftRow.levelTwoEmployee ?? null,
+    levelOneEmployee: biRow.levelOneEmployee ?? draftRow.levelOneEmployee ?? null,
+    levelTwoEmployee: biRow.levelTwoEmployee ?? draftRow.levelTwoEmployee ?? null,
+
+    // Other-team sources: fill result/code/employee from BI only when the risk
+    // value is blank (mirrors the L1/L2 BI-enrichment rule above).
+    manualResult: fillFromBi(draftRow.manualResult, biRow.manualInspectionResult),
+    manualResultCode: fillFromBi(draftRow.manualResultCode, biRow.manualInspectionResultCode),
+    oppositeResult: fillFromBi(draftRow.oppositeResult, biRow.oppositeInspectionResult),
+    oppositeResultCode: fillFromBi(draftRow.oppositeResultCode, biRow.oppositeInspectionResultCode),
+    oppositeEmployee: fillFromBi(draftRow.oppositeEmployee, biRow.oppositeInspectionEmployee),
+    liveMeansResult: fillFromBi(draftRow.liveMeansResult, biRow.liveMeansResult),
+    liveMeansResultCode: fillFromBi(draftRow.liveMeansResultCode, biRow.liveMeansResultCode),
+    liveMeansEmployee: fillFromBi(draftRow.liveMeansEmployee, biRow.liveMeansEmployee),
+    notes: fillFromBi(draftRow.notes, biRow.notes),
   };
 
   const DATE_FIELDS: DraftFillableField[] = ["xrayEntryDate", "declarationDate"];
@@ -726,6 +765,25 @@ export async function processPopulation(
 
         levelOneEmployee: enrichment.row.levelOneEmployee,
         levelTwoEmployee: enrichment.row.levelTwoEmployee,
+
+        otherResults: {
+          manual: {
+            result: normalizeResultValue(enrichment.row.manualResult),
+            code: enrichment.row.manualResultCode,
+            employeeId: null
+          },
+          opposite: {
+            result: normalizeResultValue(enrichment.row.oppositeResult),
+            code: enrichment.row.oppositeResultCode,
+            employeeId: enrichment.row.oppositeEmployee
+          },
+          liveMeans: {
+            result: normalizeResultValue(enrichment.row.liveMeansResult),
+            code: enrichment.row.liveMeansResultCode,
+            employeeId: enrichment.row.liveMeansEmployee
+          }
+        },
+        notes: enrichment.row.notes,
 
         biEnrichmentStatus: enrichment.biEnrichmentStatus,
         biMatched: enrichment.biMatched,

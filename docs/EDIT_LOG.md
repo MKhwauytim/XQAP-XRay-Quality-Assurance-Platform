@@ -4,6 +4,132 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v28.0 — 2026-06-30 — Executive report Phase 0: carry all five result sources through the population pipeline (FEATURE)
+
+The three previously-dropped result sources (manual / opposite / live-means) plus
+`notes` now flow through `PreparedPopulationRow` at the source, enabling the
+cross-team comparison in the executive-report rework (design spec §2.5). L1/L2 remain
+the only gate on population entry; other teams are optional corroborating evidence and
+never exclude a row. `population.final.json` needs no schema-version bump — it serializes
+the new fields via the existing `...rest` spread and reads old files back gracefully
+(missing fields default to the null shape).
+
+**File:** `src/data/population/populationTypes.ts`
+
+**Before:**
+```ts
+export type PreparedPopulationRow = {
+  // …
+  levelOneEmployee: string | null;
+  levelTwoEmployee: string | null;
+
+  biEnrichmentStatus: BiEnrichmentStatus;
+```
+
+**After:**
+```ts
+export type TeamResult = {
+  result: "سليمة" | "اشتباه" | null;
+  code: string | null;
+  employeeId: string | null;
+};
+
+export type PreparedPopulationRow = {
+  // …
+  levelOneEmployee: string | null;
+  levelTwoEmployee: string | null;
+
+  // Other (non-L1/L2) teams — optional corroborating evidence. A blank result is
+  // `null` and never excludes the row. `manual` has no BI employee → employeeId null.
+  otherResults: { manual: TeamResult; opposite: TeamResult; liveMeans: TeamResult; };
+  notes: string | null;
+
+  biEnrichmentStatus: BiEnrichmentStatus;
+```
+
+**File:** `src/components/Sidebar/Tabs/Population/processing/populationProcessor.ts`
+
+**Before:**
+```ts
+        levelOneEmployee: enrichment.row.levelOneEmployee,
+        levelTwoEmployee: enrichment.row.levelTwoEmployee,
+
+        biEnrichmentStatus: enrichment.biEnrichmentStatus,
+```
+
+**After:**
+```ts
+        levelOneEmployee: enrichment.row.levelOneEmployee,
+        levelTwoEmployee: enrichment.row.levelTwoEmployee,
+
+        otherResults: {
+          manual:    { result: normalizeResultValue(enrichment.row.manualResult),    code: enrichment.row.manualResultCode,    employeeId: null },
+          opposite:  { result: normalizeResultValue(enrichment.row.oppositeResult),  code: enrichment.row.oppositeResultCode,  employeeId: enrichment.row.oppositeEmployee },
+          liveMeans: { result: normalizeResultValue(enrichment.row.liveMeansResult), code: enrichment.row.liveMeansResultCode, employeeId: enrichment.row.liveMeansEmployee }
+        },
+        notes: enrichment.row.notes,
+
+        biEnrichmentStatus: enrichment.biEnrichmentStatus,
+```
+
+Also: `PreparedDraftRow` gained the raw other-team fields; `toPreparedDraftRow` carries
+`inspectorResult`→manual, `oppositeInspectorResult`→opposite, `liveMeansResult`→liveMeans;
+`enrichDraftRowFromBi` fills result/code/employee/notes from the BI match only when the
+risk value is blank (mirroring the L1/L2 rule).
+
+**File:** `src/components/Sidebar/Tabs/Population/processing/populationExporter.ts`
+
+**Before:**
+```ts
+      "نتيجة المستوى الثاني للأشعة": row.xrayLevelTwoResult,
+      "نوع الحركة": row.movementType,
+```
+
+**After:**
+```ts
+      "نتيجة المستوى الثاني للأشعة": row.xrayLevelTwoResult,
+      "نتيجة المعاين": row.otherResults.manual.result,
+      "رمز نتيجة المعاين": row.otherResults.manual.code,
+      "نتيجة المفتش المعاكس": row.otherResults.opposite.result,
+      "رمز نتيجة المفتش المعاكس": row.otherResults.opposite.code,
+      "موظف التفتيش المعاكس": row.otherResults.opposite.employeeId,
+      "نتيجة الوسائل الحية": row.otherResults.liveMeans.result,
+      "رمز نتيجة الوسائل الحية": row.otherResults.liveMeans.code,
+      "موظف الوسائل الحية": row.otherResults.liveMeans.employeeId,
+      "ملاحظة المستويات": row.notes,
+      "نوع الحركة": row.movementType,
+```
+
+**File:** `src/components/Sidebar/Tabs/Population/processing/populationProcessor.test.ts`
+Added 4 TDD cases: other-team results survive normalized; BI enrichment fills
+result/code/employee + notes when risk blank; all-blank other teams still included;
+missing L1/L2 still excluded.
+
+**Files (test fixtures — required for clean typecheck against the new required fields):**
+`src/data/sampling/sampleAlgorithm.test.ts`, `src/data/distribution/{bulkAssignment,distributionLog,replacement}.test.ts`,
+`src/data/reporting/{executiveReport,executiveReportData}.test.ts` — each inline
+`PreparedPopulationRow` literal gained an all-null `otherResults` + `notes` block.
+
+**Before:**
+```ts
+    levelOneEmployee: null,
+    levelTwoEmployee: null,
+```
+
+**After:**
+```ts
+    levelOneEmployee: null,
+    levelTwoEmployee: null,
+    otherResults: {
+      manual: { result: null, code: null, employeeId: null },
+      opposite: { result: null, code: null, employeeId: null },
+      liveMeans: { result: null, code: null, employeeId: null }
+    },
+    notes: null,
+```
+
+---
+
 ## v27.6 — 2026-06-30 — auth: point sign-in logo at external ZATCA SVG
 
 **File:** `src/auth/AuthGate.tsx`

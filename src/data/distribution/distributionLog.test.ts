@@ -33,6 +33,12 @@ function makeRow(id: string): PreparedPopulationRow {
     riskMessage: null,
     levelOneEmployee: null,
     levelTwoEmployee: null,
+    otherResults: {
+      manual: { result: null, code: null, employeeId: null },
+      opposite: { result: null, code: null, employeeId: null },
+      liveMeans: { result: null, code: null, employeeId: null }
+    },
+    notes: null,
     certScanSnippet: null,
     originalCertScanSnippet: null,
     biEnrichmentStatus: "BI Not Provided",
