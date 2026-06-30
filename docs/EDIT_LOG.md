@@ -4,6 +4,83 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v34.0 — 2026-06-30 — Executive report Phase 6: in-app Analytics dashboard + exports + managed permission (FEATURE)
+
+Upgraded the Reports tab's `مؤشرات الأداء` (`kpi`) sub-section into a live high-level
+analytics dashboard built from one `buildReportModel(execInput)` call (design §8): headline
+KPI cards (accuracy, detection, missed-suspicion flagged as المخاطرة الرئيسية, completion),
+gauges/donut/heatmap/ranked-bars via the shared `ui/charts.ts` SVGs, the reviewer-agreement
+view, port/stage/reviewer tables, data-sufficiency bands, the BI-unmapped inspector state,
+and an exports toolbar wiring the three actions (document/deck/xlsx). One analytical layer
+→ live dashboard + exports. New managed permission `reports/analytics` (matrix-editable),
+default manager=view / admin=edit, others none; section gated with `TabGuard`.
+
+**File:** `src/auth/userManagement.ts`
+
+**Before:**
+```ts
+  { id: "reports/kpi",             label: "مؤشرات الأداء",          parentId: "reports" },
+  { id: "report-designer",         label: "مصمم التقارير",          parentId: "reports" },
+```
+
+**After:**
+```ts
+  { id: "reports/kpi",             label: "مؤشرات الأداء",          parentId: "reports" },
+  { id: "reports/analytics",       label: "لوحة التحليلات التنفيذية", parentId: "reports" },
+  { id: "report-designer",         label: "مصمم التقارير",          parentId: "reports" },
+```
+
+`createDefaultPermissions()` gains `reports/analytics` for every role: guest/employee/
+supervisor = `none`, manager = `view`, admin = `edit`.
+
+**File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
+
+**Before:**
+```tsx
+// section === "kpi" rendered a basic completion panel (ReportKpi/monthKpi state,
+// stage-target constants, getStageKey/loadPopulationConfig stage computation).
+```
+
+**After:**
+```tsx
+import { openExecutiveDeck } from "../../../../data/reporting/executive/deck";
+import { buildReportModel } from "../../../../data/reporting/executive/model/reportModel";
+import { rankedBar, gauge, donut, heatmap } from "../../../../data/reporting/executive/ui/charts";
+import { TabGuard } from "../../../PermissionGuard";
+// section === "kpi" now renders <TabGuard tabId="reports/analytics">{renderDashboard()}</TabGuard>;
+// renderDashboard() builds the model once via a shared loadExecInput() and renders KPI cards,
+// charts (SVG via dangerouslySetInnerHTML), reviewer-agreement, port/stage/reviewer tables,
+// and an exports toolbar (openExecutiveReport / openExecutiveDeck / buildExecutiveXlsx).
+```
+
+**File:** `src/components/Sidebar/Tabs/Reports/Reports.css` — appended dashboard styles
+(toolbar, KPI cards, chart cards, tables, sufficiency-band pills) using existing tokens.
+**File:** `src/auth/userManagement.test.ts` — 4 tests for the new permission (registered in
+`MANAGED_TABS`; present for every role; manager+admin-only default).
+
+---
+
+## v33.0 — 2026-06-30 — Executive report Phase 4: the Presentation (deck) (FEATURE)
+
+New `src/data/reporting/executive/deck/` — ~14 curated 16:9 landscape slides built from the
+single `ReportModel` (blueprint §3), reusing `ui/charts.ts`, `ui/icons.ts` (no emoji), and
+the `theme.ts` palette via `EXEC_CSS`. Curated highlights (top-5 inspectors, security-risk
+verdict, cross-team corroboration, priority actions, decisions); each slide = one message +
+hero visual + "القرار المدعوم" footer. Honors data-sufficiency + missing/zero/N-A; print
+`@page { size: 297mm 167mm }`.
+
+**Files (new):** `deck/{deckTheme,shared,slides,viewer,index,deck.test}.ts`.
+
+**Entry points** (`deck/index.ts`):
+```ts
+export function buildExecutiveDeck(input: ExecutiveReportInput, employeeDisplayNames?: Record<string, string>): string;
+export function openExecutiveDeck(input: ExecutiveReportInput, employeeDisplayNames?: Record<string, string>): void;
+// openExecutiveDeck → openOrDownload(html, `العرض_التنفيذي_${input.monthFolderName}.html`)
+```
+8 deck tests (slide count/titles, landscape sizing, inline `<svg>`, no emoji, unmapped state).
+
+---
+
 ## v32.0 — 2026-06-30 — Executive report Phase 5: data Workbook (.xlsx) (FEATURE)
 
 New `executive/workbook/workbook.ts` (`buildExecutiveWorkbook`) emits one `.xlsx` with the
