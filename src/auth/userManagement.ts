@@ -104,6 +104,7 @@ export const MANAGED_TABS: readonly ManagedTab[] = [
   { id: "reports",                 label: "إدارة التقارير" },
   { id: "reports/reports",         label: "التقارير",              parentId: "reports" },
   { id: "reports/kpi",             label: "مؤشرات الأداء",          parentId: "reports" },
+  { id: "reports/analytics",       label: "لوحة التحليلات التنفيذية", parentId: "reports" },
   { id: "report-designer",         label: "مصمم التقارير",          parentId: "reports" },
   { id: "archive",                 label: "إدارة الأرشيف" },
   { id: "user-management",         label: "إدارة المستخدمين" },
@@ -356,6 +357,12 @@ export function createDefaultPermissions(): RolePermission[] {
     { role: "guest",      tabId: "ew/xray-results",         access: "none" },
     { role: "guest",      tabId: "ew/referral-approval",    access: "none" },
     { role: "guest",      tabId: "ew/inspection-form",      access: "none" },
+    // Analytics dashboard (reports/analytics) — defaults to manager + admin only
+    { role: "guest",      tabId: "reports/analytics",       access: "none" },
+    { role: "employee",   tabId: "reports/analytics",       access: "none" },
+    { role: "supervisor", tabId: "reports/analytics",       access: "none" },
+    { role: "manager",    tabId: "reports/analytics",       access: "view" },
+    { role: "admin",      tabId: "reports/analytics",       access: "edit" },
   ];
 }
 

@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import ReportDesignerTab from "../ReportDesigner";
 import { AlertTriangle, BarChart2, BarChart3, Building2, Check, ClipboardList, Database, Download, FileStack, FileText, Filter, FolderKanban, Globe, History, Printer, Settings2, User, Users, X } from "lucide-react";
 
@@ -12,11 +12,16 @@ import { buildDistributionReport, buildDistributionXlsx } from "../../../../data
 import { openOrDownload } from "../../../../data/reporting/htmlReport";
 import { buildSampleXlsx, openSampleReport } from "../../../../data/reporting/sampleReport";
 import { openExecutiveReport, buildExecutiveXlsx } from "../../../../data/reporting/executiveReport";
+import { openExecutiveDeck } from "../../../../data/reporting/executive/deck";
+import { buildReportModel } from "../../../../data/reporting/executive/model/reportModel";
+import type { ReportModel } from "../../../../data/reporting/executive/model/reportModel";
+import { rankedBar, gauge, donut, heatmap } from "../../../../data/reporting/executive/ui/charts";
 import { DEFAULT_EXEC_CONFIG } from "../../../../data/reporting/executiveReportTypes";
+import type { ExecutiveReportInput } from "../../../../data/reporting/executiveReportTypes";
+import { getManagedLoginUsers } from "../../../../auth/userManagement";
+import { TabGuard } from "../../../PermissionGuard";
 import { loadSampleMaster } from "../../../../data/sampling/sampleStorage";
 import { loadAllEmployeeFiles } from "../../../../data/answers/answerStorage";
-import { loadPopulationConfig } from "../../../../data/population/populationConfig";
-import { getStageKey } from "../../../../data/population/stageHelpers";
 import { loadTemplate } from "../../../../data/templates/templateStorage";
 import { loadInspectionTemplateSelection } from "../../../../data/templates/templateSelectionStorage";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
@@ -51,7 +56,7 @@ export const tabConfig: SidebarTabModule["tabConfig"] = {
   icon: <BarChart3 size={20} strokeWidth={1.8} aria-hidden />,
   subTabs: [
     { id: "reports", label: "التقارير" },
-    { id: "kpi", label: "مؤشرات الأداء" },
+    { id: "kpi", label: "مؤشرات الأداء", allowedRoles: ["manager", "admin"] },
     { id: "report-designer", label: "مصمم التقارير", allowedRoles: ["supervisor", "manager", "admin"] },
   ],
 };
@@ -70,38 +75,46 @@ type MonthMeta = {
   studiedCount: number | null;
 };
 
-type ReportKpi = {
-  totalAssigned: number;
-  totalCompleted: number;
-  totalTarget: number;
-  completionPct: number;
-  remaining: number;
-  status: "complete" | "over" | "short";
-  stageRows: Array<{
-    stageKey: "first" | "second" | "third" | "fourth";
-    label: string;
-    assigned: number;
-    completed: number;
-    target: number | null;
-    population: number;
-    remaining: number;
-    completionPct: number | null;
-  }>;
+// ── Analytics dashboard helpers ─────────────────────────────────────────────
+
+const RESULT_SOURCE_LABELS_AR: Record<string, string> = {
+  levelOne: "المستوى الأول",
+  levelTwo: "المستوى الثاني",
+  manual: "الفحص اليدوي",
+  opposite: "الطرف المقابل",
+  liveMeans: "الوسائل الحية",
+  review: "المراجعة (المرجع)",
 };
 
-const STAGE_SAMPLE_TARGETS: Record<"first" | "second" | "third" | "fourth", number | null> = {
-  first: null,
-  second: 2500,
-  third: 1875,
-  fourth: 1875,
+const BAND_LABELS_AR: Record<string, string> = {
+  none: "لا بيانات",
+  insufficient: "بيانات غير كافية",
+  limited: "بيانات محدودة",
+  sufficient: "بيانات كافية",
 };
 
-const STAGE_LABELS_AR: Record<"first" | "second" | "third" | "fourth", string> = {
-  first: "المستوى الأول",
-  second: "المستوى الثاني",
-  third: "المستوى الثالث",
-  fourth: "المستوى الرابع",
-};
+const INSUFFICIENT_NOTE = "بيانات غير كافية";
+
+/** Format a rate that may be null (empty denominator) — never shows 0% on no data. */
+function fmtPct(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  return `${Math.max(0, Math.min(100, value)).toFixed(1)}%`;
+}
+
+function fmtCount(value: number | null | undefined): string {
+  return value != null && Number.isFinite(value) ? value.toLocaleString("ar-SA") : "—";
+}
+
+/** username → display name map for reviewers, from managed users. */
+function buildDisplayNameMap(): Record<string, string> {
+  const map: Record<string, string> = {};
+  for (const u of getManagedLoginUsers()) map[u.username] = u.displayName || u.username;
+  return map;
+}
+
+function Chart({ svg }: { svg: string }) {
+  return <div className="rh-chart" dangerouslySetInnerHTML={{ __html: svg }} />;
+}
 
 // Inner component that holds all the existing Reports state and logic.
 function ReportsContent() {
@@ -110,7 +123,6 @@ function ReportsContent() {
   const [months, setMonths] = useState<Array<{ folderName: string }>>([]);
   const [selectedMonth, setSelectedMonth] = useState("");
   const [monthMeta, setMonthMeta] = useState<MonthMeta | null>(null);
-  const [monthKpi, setMonthKpi] = useState<ReportKpi | null>(null);
   const [section, setSection] = useState<ReportsSection>("reports");
   const [generating, setGenerating] = useState<ReportType | null>(null);
   const [formats, setFormats] = useState<Record<ReportBaseType, ReportFormat>>({
@@ -119,6 +131,9 @@ function ReportsContent() {
     distribution: "html",
   });
   const [toast, setToast] = useState<{ type: "ok" | "error"; text: string } | null>(null);
+  const [model, setModel] = useState<ReportModel | null>(null);
+  const [modelLoading, setModelLoading] = useState(false);
+  const [exporting, setExporting] = useState<"document" | "deck" | "xlsx" | null>(null);
   const [pbiExporting, setPbiExporting] = useState(false);
   const [pbiResult, setPbiResult] = useState<ExportManifest | null>(null);
   const [pbiError, setPbiError] = useState<string | null>(null);
@@ -151,15 +166,13 @@ function ReportsContent() {
   // Load lightweight meta for the month bar chips
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- sync null-clear when workspace or month is deselected; synchronizes with external workspace state
-    if (!directoryHandle || !selectedMonth) { setMonthMeta(null); setMonthKpi(null); return; }
+    if (!directoryHandle || !selectedMonth) { setMonthMeta(null); return; }
     setMonthMeta(null);
-    setMonthKpi(null);
     void (async () => {
       try {
-        const [pop, sample, config] = await Promise.all([
+        const [pop, sample] = await Promise.all([
           loadMonthPopulationFinal(directoryHandle, selectedMonth),
           loadSampleMaster(directoryHandle, selectedMonth),
-          loadPopulationConfig(directoryHandle),
         ]);
         const popRows = pop ? (pop.rows as unknown as PreparedPopulationRow[]) : [];
         const employeeFiles = sample ? await loadAllEmployeeFiles(directoryHandle, selectedMonth) : [];
@@ -177,56 +190,97 @@ function ReportsContent() {
           sampleCount: sample ? sample.rows.length : null,
           studiedCount: answered > 0 ? answered : null,
         });
-        if (sample) {
-          const distribution = await loadOrDeriveDistributionCurrent(directoryHandle, selectedMonth, sample.rows);
-          const entries = distribution?.entries ?? [];
-          const totalAssigned = sample.rows.length;
-          const totalCompleted = answered;
-          const stageRows = (["first", "second", "third", "fourth"] as const).map((stageKey) => {
-            const assigned = sample.rows.filter(
-              (row) => getStageKey(String(row.stage ?? ""), config.stageMappings) === stageKey
-            ).length;
-            const completed = entries.filter(
-              (entry) =>
-                submittedIds.has(entry.xrayImageId) &&
-                getStageKey(String(entry.row.stage ?? ""), config.stageMappings) === stageKey
-            ).length;
-            const population = popRows.filter(
-              (row) => getStageKey(String(row.stage ?? ""), config.stageMappings) === stageKey
-            ).length;
-
-            return {
-              stageKey,
-              label: STAGE_LABELS_AR[stageKey],
-              assigned,
-              completed,
-              target: stageKey === "first" ? population : STAGE_SAMPLE_TARGETS[stageKey],
-              population,
-              remaining: Math.max(0, assigned - completed),
-              completionPct: assigned > 0 ? (completed / assigned) * 100 : null,
-            };
-          });
-
-          setMonthKpi({
-            totalAssigned,
-            totalCompleted,
-            totalTarget: DEFAULT_EXEC_CONFIG.monthlyTarget,
-            completionPct: totalAssigned > 0 ? (totalCompleted / totalAssigned) * 100 : 0,
-            remaining: Math.max(0, totalAssigned - totalCompleted),
-            status: totalAssigned > 0 && totalCompleted === totalAssigned ? "complete" : totalCompleted > totalAssigned ? "over" : "short",
-            stageRows,
-          });
-        }
       } catch {
         setMonthMeta({ folderName: selectedMonth, populationCount: null, sampleCount: null, studiedCount: null });
-        setMonthKpi(null);
       }
     })();
   }, [directoryHandle, selectedMonth]);
 
+  // Assemble the executive-report input from disk — the SAME inputs that feed
+  // openExecutiveReport / openExecutiveDeck / buildExecutiveXlsx, so the live
+  // dashboard and the exported artifacts can never disagree.
+  const loadExecInput = useCallback(async (): Promise<ExecutiveReportInput | null> => {
+    if (!directoryHandle || !selectedMonth) return null;
+    const [populationFinal, sample, employeeFiles, templateSelection] = await Promise.all([
+      loadMonthPopulationFinal(directoryHandle, selectedMonth),
+      loadSampleMaster(directoryHandle, selectedMonth),
+      loadAllEmployeeFiles(directoryHandle, selectedMonth),
+      loadInspectionTemplateSelection(directoryHandle),
+    ]);
+    if (!populationFinal) return null;
+    const template = templateSelection?.templateId
+      ? await loadTemplate(directoryHandle, templateSelection.templateId)
+      : null;
+    const distribution = sample
+      ? await loadOrDeriveDistributionCurrent(directoryHandle, selectedMonth, sample.rows)
+      : null;
+    return {
+      monthFolderName: selectedMonth,
+      populationRows: populationFinal.rows as unknown as PreparedPopulationRow[],
+      sample: sample ?? null,
+      distribution: distribution ?? null,
+      employeeFiles,
+      template,
+      config: DEFAULT_EXEC_CONFIG,
+    };
+  }, [directoryHandle, selectedMonth]);
+
+  // Build the live analytics model ONCE per month while the dashboard is open.
+  useEffect(() => {
+    if (section !== "kpi" || !directoryHandle || !selectedMonth) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync-clear when dashboard closed / no month
+      setModel(null);
+      return;
+    }
+    let cancelled = false;
+    setModelLoading(true);
+    setModel(null);
+    void (async () => {
+      try {
+        const execInput = await loadExecInput();
+        if (cancelled) return;
+        if (!execInput) { setModel(null); return; }
+        setModel(buildReportModel(execInput, buildDisplayNameMap()));
+      } catch (err) {
+        if (!cancelled) {
+          setModel(null);
+          logRejection("reports:buildReportModel")(err);
+        }
+      } finally {
+        if (!cancelled) setModelLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [section, directoryHandle, selectedMonth, loadExecInput]);
+
   function showToast(type: "ok" | "error", text: string) {
     setToast({ type, text });
     setTimeout(() => setToast(null), 5000);
+  }
+
+  // Dashboard export actions — reuse the assembled exec input for all three.
+  async function handleExport(kind: "document" | "deck" | "xlsx"): Promise<void> {
+    if (!directoryHandle || !selectedMonth || exporting) return;
+    setExporting(kind);
+    try {
+      const execInput = await loadExecInput();
+      if (!execInput) { showToast("error", "لم يتم العثور على بيانات المجتمع. يجب معالجة المجتمع أولاً."); return; }
+      const names = buildDisplayNameMap();
+      if (kind === "document") {
+        openExecutiveReport(execInput, names);
+        showToast("ok", "تم فتح التقرير التفصيلي.");
+      } else if (kind === "deck") {
+        openExecutiveDeck(execInput, names);
+        showToast("ok", "تم فتح العرض التنفيذي.");
+      } else {
+        buildExecutiveXlsx(execInput, names);
+        showToast("ok", "تم تنزيل بيانات التقرير (Excel).");
+      }
+    } catch {
+      showToast("error", "حدث خطأ أثناء توليد التقرير.");
+    } finally {
+      setExporting(null);
+    }
   }
 
   async function handlePbiExport() {
@@ -276,33 +330,14 @@ function ReportsContent() {
           showToast("ok", type === "distribution-print" ? "تم فتح تقرير التوزيع للتصدير PDF." : "تم فتح تقرير التوزيع.");
         }
       } else if (type === "executive" || type === "executive-xlsx" || type === "executive-print") {
-        const [populationFinal, sample, employeeFiles, templateSelection] = await Promise.all([
-          loadMonthPopulationFinal(directoryHandle, selectedMonth),
-          loadSampleMaster(directoryHandle, selectedMonth),
-          loadAllEmployeeFiles(directoryHandle, selectedMonth),
-          loadInspectionTemplateSelection(directoryHandle),
-        ]);
-        if (!populationFinal) { showToast("error", "لم يتم العثور على بيانات المجتمع. يجب معالجة المجتمع أولاً."); return; }
-        const template = templateSelection?.templateId
-          ? await loadTemplate(directoryHandle, templateSelection.templateId)
-          : null;
-        const distribution = sample
-          ? await loadOrDeriveDistributionCurrent(directoryHandle, selectedMonth, sample.rows)
-          : null;
-        const execInput = {
-          monthFolderName: selectedMonth,
-          populationRows: populationFinal.rows as unknown as PreparedPopulationRow[],
-          sample: sample ?? null,
-          distribution: distribution ?? null,
-          employeeFiles,
-          template,
-          config: DEFAULT_EXEC_CONFIG,
-        };
+        const execInput = await loadExecInput();
+        if (!execInput) { showToast("error", "لم يتم العثور على بيانات المجتمع. يجب معالجة المجتمع أولاً."); return; }
+        const names = buildDisplayNameMap();
         if (type === "executive-xlsx") {
-          buildExecutiveXlsx(execInput);
+          buildExecutiveXlsx(execInput, names);
           showToast("ok", "تم تنزيل ملف Excel.");
         } else {
-          openExecutiveReport(execInput);
+          openExecutiveReport(execInput, names);
           showToast("ok", type === "executive-print" ? "تم فتح التقرير التنفيذي للتصدير PDF." : "تم فتح التقرير التنفيذي.");
         }
       }
@@ -369,6 +404,298 @@ function ReportsContent() {
     n != null ? n.toLocaleString("ar-SA") : "—";
 
   const busy = generating !== null;
+
+  // ── Analytics dashboard (the upgraded "مؤشرات الأداء" sub-section) ──────────
+  function renderDashboard(): ReactNode {
+    if (modelLoading) {
+      return (
+        <div className="rh-dash-loading">
+          <span className="rh-spinner" /> جارٍ تجهيز لوحة التحليلات…
+        </div>
+      );
+    }
+    if (!model) {
+      return (
+        <div className="rh-empty rh-kpi-empty">
+          <strong>لا توجد بيانات تحليلية لهذا الشهر</strong>
+          <span>اختر شهراً تمت معالجة مجتمعه وسحب عينته لعرض لوحة التحليلات.</span>
+        </div>
+      );
+    }
+
+    const s = model.summary;
+    const dq = model.dataQuality;
+    const headlineNote = (band: string) =>
+      band === "none" || band === "insufficient" ? INSUFFICIENT_NOTE : undefined;
+
+    // Reviewer-agreement ranked bar (cross-team view) — agreement rate per source.
+    const agreementBars = model.resultComparison.reviewerAgreement
+      .filter((r) => r.comparable > 0 && r.agreementRate != null)
+      .map((r) => ({ label: RESULT_SOURCE_LABELS_AR[r.source] ?? r.source, value: Math.round(r.agreementRate ?? 0) }));
+
+    // Port accuracy ranked bar.
+    const portBars = model.portAccuracy
+      .filter((p) => p.accuracy != null)
+      .sort((a, b) => (b.accuracy ?? 0) - (a.accuracy ?? 0))
+      .slice(0, 8)
+      .map((p) => ({ label: p.key, value: Math.round(p.accuracy ?? 0) }));
+
+    // Outcome donut (error-mix).
+    const t = model.errorAnalysis.totals;
+    const outcomeDonut = [
+      { label: "سليمة صحيحة", value: t.correctClean },
+      { label: "اشتباه صحيح", value: t.correctSuspicion },
+      { label: "اشتباه فائت", value: t.missedSuspicion },
+      { label: "اشتباه زائد", value: t.falseSuspicion },
+    ];
+
+    return (
+      <div className="rh-dash" aria-label="لوحة التحليلات التنفيذية">
+        {/* Exports toolbar */}
+        <div className="rh-dash-toolbar" role="group" aria-label="تصدير التقارير">
+          <span className="rh-dash-toolbar-label">تصدير</span>
+          <button
+            type="button"
+            className="rh-btn rh-btn-teal"
+            disabled={exporting !== null || !selectedMonth}
+            onClick={() => { void handleExport("document"); }}
+          >
+            {exporting === "document" ? <span className="rh-spinner" /> : <FileText size={15} strokeWidth={2} />}
+            التقرير التفصيلي (PDF)
+          </button>
+          <button
+            type="button"
+            className="rh-btn rh-btn-navy"
+            disabled={exporting !== null || !selectedMonth}
+            onClick={() => { void handleExport("deck"); }}
+          >
+            {exporting === "deck" ? <span className="rh-spinner" /> : <BarChart2 size={15} strokeWidth={2} />}
+            العرض التنفيذي (PDF)
+          </button>
+          <button
+            type="button"
+            className="rh-btn rh-btn-indigo"
+            disabled={exporting !== null || !selectedMonth}
+            onClick={() => { void handleExport("xlsx"); }}
+          >
+            {exporting === "xlsx" ? <span className="rh-spinner" /> : <Download size={15} strokeWidth={2} />}
+            بيانات التقرير (Excel)
+          </button>
+        </div>
+
+        {/* Data-quality banner */}
+        <div className={`rh-dash-band rh-band-${dq.overallBand}`}>
+          <span className="rh-dash-band-tag">{BAND_LABELS_AR[dq.overallBand]}</span>
+          <span>
+            {fmtCount(dq.evaluableDecisionRecords)} قرار قابل للتقييم من أصل {fmtCount(dq.totalDecisionRecords)}.
+            {!dq.biAvailable && " لا تتوفر بيانات BI لهذا الشهر."}
+          </span>
+        </div>
+
+        {/* Headline KPI cards */}
+        <div className="rh-dash-kpis">
+          <article className="rh-dash-kpi">
+            <span className="rh-dash-kpi-label">دقة الفحص الإجمالية</span>
+            <strong className="rh-dash-kpi-value">{fmtPct(s.overallAccuracy)}</strong>
+            {headlineNote(dq.overallBand) && <span className="rh-dash-kpi-note">{headlineNote(dq.overallBand)}</span>}
+          </article>
+          <article className="rh-dash-kpi">
+            <span className="rh-dash-kpi-label">معدل كشف الاشتباه</span>
+            <strong className="rh-dash-kpi-value">{fmtPct(s.detectionRate)}</strong>
+          </article>
+          <article className="rh-dash-kpi rh-dash-kpi-risk">
+            <span className="rh-dash-kpi-label">الاشتباه الفائت (المخاطرة الرئيسية)</span>
+            <strong className="rh-dash-kpi-value">{fmtPct(s.missedSuspicionRate)}</strong>
+          </article>
+          <article className="rh-dash-kpi">
+            <span className="rh-dash-kpi-label">نسبة الإنجاز</span>
+            <strong className="rh-dash-kpi-value">{fmtPct(s.completionRate)}</strong>
+          </article>
+        </div>
+
+        {/* Gauges + outcome donut */}
+        <div className="rh-dash-charts">
+          <div className="rh-dash-chart-card">
+            <h4>دقة الفحص الإجمالية</h4>
+            <Chart svg={gauge(s.overallAccuracy, { emptyNote: INSUFFICIENT_NOTE })} />
+          </div>
+          <div className="rh-dash-chart-card">
+            <h4>معدل كشف الاشتباه</h4>
+            <Chart svg={gauge(s.detectionRate, { emptyNote: INSUFFICIENT_NOTE })} />
+          </div>
+          <div className="rh-dash-chart-card">
+            <h4>توزيع نتائج القرارات</h4>
+            <Chart svg={donut(outcomeDonut, { emptyNote: INSUFFICIENT_NOTE })} />
+          </div>
+        </div>
+
+        {/* Reviewer-agreement (cross-team) */}
+        <section className="rh-dash-section">
+          <h3>اتفاق الفرق مع المراجعة (المرجع)</h3>
+          <div className="rh-dash-split">
+            <div className="rh-dash-chart-card rh-dash-grow">
+              <h4>معدل الاتفاق لكل مصدر</h4>
+              <Chart svg={rankedBar(agreementBars, { width: 380, emptyNote: INSUFFICIENT_NOTE })} />
+            </div>
+            <div className="rh-dash-table-wrap">
+              <table className="rh-dash-table">
+                <thead>
+                  <tr>
+                    <th>المصدر</th>
+                    <th>قابلة للمقارنة</th>
+                    <th>اتفاق</th>
+                    <th>اختلاف</th>
+                    <th>معدل الاتفاق</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {model.resultComparison.reviewerAgreement.map((r) => (
+                    <tr key={r.source}>
+                      <td>{RESULT_SOURCE_LABELS_AR[r.source] ?? r.source}</td>
+                      <td>{fmtCount(r.comparable)}</td>
+                      <td>{fmtCount(r.agree)}</td>
+                      <td>{fmtCount(r.disagree)}</td>
+                      <td>{r.comparable > 0 ? fmtPct(r.agreementRate) : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        {/* Port accuracy */}
+        <section className="rh-dash-section">
+          <h3>الدقة حسب المنفذ</h3>
+          <div className="rh-dash-split">
+            <div className="rh-dash-chart-card rh-dash-grow">
+              <Chart svg={rankedBar(portBars, { width: 380, emptyNote: INSUFFICIENT_NOTE })} />
+            </div>
+            <div className="rh-dash-table-wrap">
+              <table className="rh-dash-table">
+                <thead>
+                  <tr>
+                    <th>المنفذ</th>
+                    <th>قابلة للتقييم</th>
+                    <th>الدقة</th>
+                    <th>الاشتباه الفائت</th>
+                    <th>الكفاية</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {model.portAccuracy.map((p) => (
+                    <tr key={p.key}>
+                      <td>{p.key}</td>
+                      <td>{fmtCount(p.evaluable)}</td>
+                      <td>{fmtPct(p.accuracy)}</td>
+                      <td>{fmtPct(p.missedSuspicionRate)}</td>
+                      <td><span className={`rh-band-pill rh-band-${p.band}`}>{BAND_LABELS_AR[p.band]}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        {/* Stage coverage */}
+        <section className="rh-dash-section">
+          <h3>التغطية حسب المستوى</h3>
+          <div className="rh-dash-table-wrap">
+            <table className="rh-dash-table">
+              <thead>
+                <tr>
+                  <th>المستوى</th>
+                  <th>المجتمع</th>
+                  <th>حجم العينة</th>
+                  <th>التغطية</th>
+                  <th>المدروسة</th>
+                  <th>الإنجاز</th>
+                </tr>
+              </thead>
+              <tbody>
+                {model.population.byStage.map((st) => (
+                  <tr key={st.stageKey}>
+                    <td>{st.stageLabel}</td>
+                    <td>{fmtCount(st.population)}</td>
+                    <td>{fmtCount(st.sampleSize)}</td>
+                    <td>{fmtPct(st.coverage)}</td>
+                    <td>{fmtCount(st.studied)}</td>
+                    <td>{fmtPct(st.completionRate)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        {/* Employee / reviewer overview */}
+        <section className="rh-dash-section">
+          <h3>نظرة عامة على المراجعين</h3>
+          {!model.employeeOverview.inspectorIdentityMapped && (
+            <div className="rh-dash-band rh-band-insufficient">
+              <span className="rh-dash-band-tag">تنبيه</span>
+              <span>هوية المفتش غير مرتبطة (لم تتم مطابقة BI) — تُعرض أعباء عمل المراجعين فقط، لا دقة المفتشين.</span>
+            </div>
+          )}
+          <div className="rh-dash-table-wrap">
+            <table className="rh-dash-table">
+              <thead>
+                <tr>
+                  <th>المراجع</th>
+                  <th>المدروسة</th>
+                  <th>الدقة</th>
+                  <th>كشف الاشتباه</th>
+                  <th>الاشتباه الفائت</th>
+                  <th>الكفاية</th>
+                </tr>
+              </thead>
+              <tbody>
+                {model.employeeOverview.reviewerProfiles.length === 0 ? (
+                  <tr><td colSpan={6} className="rh-dash-empty-cell">{INSUFFICIENT_NOTE}</td></tr>
+                ) : (
+                  model.employeeOverview.reviewerProfiles.map((p) => (
+                    <tr key={p.username}>
+                      <td>{model.employeeOverview.reviewerDisplayNames[p.username] ?? p.username}</td>
+                      <td>{fmtCount(p.studied)}</td>
+                      <td>{fmtPct(p.overallAccuracy)}</td>
+                      <td>{fmtPct(p.suspiciousDetectionRate)}</td>
+                      <td>{fmtPct(p.missedSuspicionRate)}</td>
+                      <td><span className={`rh-band-pill ${p.reliable ? "rh-band-sufficient" : "rh-band-insufficient"}`}>{p.reliable ? "موثوق" : INSUFFICIENT_NOTE}</span></td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        {/* Error-type mix by port (heatmap) */}
+        {model.errorAnalysis.byPort.length > 0 && (
+          <section className="rh-dash-section">
+            <h3>أنواع الأخطاء حسب المنفذ</h3>
+            <div className="rh-dash-chart-card">
+              <Chart
+                svg={heatmap(
+                  {
+                    rows: model.errorAnalysis.byPort.map((p) => p.key),
+                    cols: ["سليمة صحيحة", "اشتباه صحيح", "اشتباه فائت", "اشتباه زائد"],
+                    values: model.errorAnalysis.byPort.map((p) => [
+                      p.correctClean,
+                      p.correctSuspicion,
+                      p.missedSuspicion,
+                      p.falseSuspicion,
+                    ]),
+                  },
+                  { emptyNote: INSUFFICIENT_NOTE }
+                )}
+              />
+            </div>
+          </section>
+        )}
+      </div>
+    );
+  }
 
   return (
     <section className="rh-page" dir="rtl">
@@ -445,105 +772,12 @@ function ReportsContent() {
         </div>
       </div>
 
-      {section === "kpi" && monthKpi && (
-        <section className="rh-kpi-panel" aria-label="مؤشرات الشهر">
-          <div className={`rh-kpi-hero ${monthKpi.status}`}>
-            <div className="rh-kpi-hero-main">
-              <span className="rh-kpi-label">مؤشر الشهر الرئيسي</span>
-              <h2>العينة المدروسة لشهر {selectedMonth}</h2>
-              <p>
-                {monthKpi.status === "complete"
-                  ? "تمت دراسة كامل العينة المحالة لهذا الشهر."
-                  : `متبقي ${fmtNum(monthKpi.remaining)} من أصل ${fmtNum(monthKpi.totalAssigned)} صورة محالة.`}
-              </p>
-            </div>
-            <div className="rh-kpi-meter-wrap">
-              <div
-                className="rh-kpi-meter"
-                style={{ "--rh-kpi-progress": `${Math.min(100, monthKpi.completionPct)}%` } as CSSProperties}
-              >
-                <strong>{Math.min(100, monthKpi.completionPct).toFixed(1)}%</strong>
-                <span>مدروس</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="rh-kpi-grid">
-            <div className="rh-stat-card">
-              <span className="rh-stat-label">الهدف الشهري</span>
-              <strong className="rh-stat-value">{fmtNum(monthKpi.totalTarget)}</strong>
-            </div>
-            <div className="rh-stat-card">
-              <span>المحالة للفحص</span>
-              <strong className="rh-stat-value">{fmtNum(monthKpi.totalAssigned)}</strong>
-            </div>
-            <div className="rh-stat-card">
-              <span>المدروسة</span>
-              <strong className="rh-stat-value">{fmtNum(monthKpi.totalCompleted)}</strong>
-            </div>
-            <div className="rh-stat-card">
-              <span>المتبقية</span>
-              <strong className="rh-stat-value">{fmtNum(monthKpi.remaining)}</strong>
-            </div>
-            <div className="rh-stat-card">
-              <span>الحالة</span>
-              <strong className="rh-stat-value">
-                {monthKpi.status === "complete"
-                  ? "مكتمل"
-                  : monthKpi.status === "over"
-                    ? "أعلى من الهدف"
-                    : "قيد الاستكمال"}
-              </strong>
-            </div>
-          </div>
-
-          <div className="rh-stage-grid">
-            {monthKpi.stageRows.map((stage) => (
-              <article className="rh-stage-card" key={stage.stageKey}>
-                <div className="rh-stage-head">
-                  <span className="rh-stage-label">{stage.label}</span>
-                  <span className="rh-stage-target">
-                    الهدف {stage.target == null ? "كامل المجتمع" : fmtNum(stage.target)}
-                  </span>
-                </div>
-                <div className="rh-stage-donut-row">
-                  <div
-                    className="rh-stage-donut"
-                    style={{ "--rh-stage-progress": `${Math.min(100, stage.completionPct ?? 0)}%` } as CSSProperties}
-                  >
-                    <strong>{Math.min(100, stage.completionPct ?? 0).toFixed(1)}%</strong>
-                  </div>
-                  <dl className="rh-stage-metrics">
-                    <div>
-                      <dt>المحالة للفحص</dt>
-                      <dd>{fmtNum(stage.assigned)}</dd>
-                    </div>
-                    <div>
-                      <dt>المدروسة</dt>
-                      <dd>{fmtNum(stage.completed)}</dd>
-                    </div>
-                    <div>
-                      <dt>المتبقي</dt>
-                      <dd>{fmtNum(stage.remaining)}</dd>
-                    </div>
-                    <div>
-                      <dt>مجتمع الشهر</dt>
-                      <dd>{fmtNum(stage.population)}</dd>
-                    </div>
-                  </dl>
-                </div>
-              </article>
-            ))}
-          </div>
-        </section>
+      {section === "kpi" && (
+        <TabGuard tabId="reports/analytics">
+          {renderDashboard()}
+        </TabGuard>
       )}
 
-      {section === "kpi" && !monthKpi && (
-        <div className="rh-empty rh-kpi-empty">
-          <strong>لا توجد مؤشرات لهذا الشهر</strong>
-          <span>اختر شهراً يحتوي على عينة وإجابات مدروسة لعرض مؤشرات الأداء.</span>
-        </div>
-      )}
 
       {section === "reports" && (
         <>
