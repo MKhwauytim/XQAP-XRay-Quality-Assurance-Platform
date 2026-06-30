@@ -81,7 +81,7 @@ describe("executive report html", () => {
     // Uses inline SVG icons, never emoji (design spec §4.2)
     expect(html).toContain("<svg");
     expect(html).not.toMatch(
-      /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE00}-\u{FE0F}]/u
+      /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}]/u
     );
     // No English debug strings
     expect(html).not.toContain("Xray IDs");

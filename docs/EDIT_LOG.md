@@ -4,6 +4,45 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v34.1 — 2026-06-30 — Executive report rework cleanup: remove superseded renderer + lint (CHORE)
+
+Phase 3 replaced the old per-page executive renderer with the `document/` module but left
+the previous files orphaned. Removed the now-dead code (confirmed no live imports; tsc +
+full suite still green): the entire `src/data/reporting/executive/pages/` folder,
+`executive/assemble.ts`, and `executive/context.ts` (`context` was used only by `assemble`,
+`assemble` by nothing). Also: dropped a useless trailing `n += 1` in `document/index.ts`,
+and simplified the no-emoji regex in `executiveReport.test.ts` to the pictographic ranges
+only (removed the `\u{FE00}-\u{FE0F}` variation-selector range that tripped
+`no-misleading-character-class`). `npm run lint` now clean; 278 tests pass; build green.
+
+**Removed:** `src/data/reporting/executive/pages/**`, `executive/assemble.ts`, `executive/context.ts`.
+
+**File:** `src/data/reporting/executive/document/index.ts`
+
+**Before:**
+```ts
+  pages.push(buildAppendix(model, pad(n))); n += 1;
+```
+
+**After:**
+```ts
+  pages.push(buildAppendix(model, pad(n)));
+```
+
+**File:** `src/data/reporting/executiveReport.test.ts`
+
+**Before:**
+```ts
+/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE00}-\u{FE0F}]/u
+```
+
+**After:**
+```ts
+/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}]/u
+```
+
+---
+
 ## v34.0 — 2026-06-30 — Executive report Phase 6: in-app Analytics dashboard + exports + managed permission (FEATURE)
 
 Upgraded the Reports tab's `مؤشرات الأداء` (`kpi`) sub-section into a live high-level

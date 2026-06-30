@@ -156,7 +156,7 @@ export function buildDocumentSlides(model: ReportModel, issueDate: string): stri
   pages.push(buildErrorAnalysis(model, pad(n))); n += 1;
   pages.push(buildPriorityActions(model, pad(n))); n += 1;
   pages.push(buildExclusions(model, pad(n))); n += 1;
-  pages.push(buildAppendix(model, pad(n))); n += 1;
+  pages.push(buildAppendix(model, pad(n)));
 
   return pages.join("\n");
 }
