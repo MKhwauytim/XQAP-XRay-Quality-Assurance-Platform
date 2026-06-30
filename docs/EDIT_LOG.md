@@ -4,6 +4,63 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v29.0 — 2026-06-30 — Executive report Phase 2: visual primitives (tokens, icons, charts) (FEATURE)
+
+Adds the static-SVG visual system for the executive-report rework (design spec §4):
+centralized design tokens, stroke-based line icons (no emoji), and pure-function
+inline-SVG chart primitives. All output is print-safe static SVG strings — no React,
+no runtime JS, no canvas, no npm dependencies. 34 unit tests added.
+
+**File:** `src/data/reporting/executive/ui/tokens.ts` (new)
+
+**Before:**
+```ts
+// (new file)
+```
+
+**After:**
+```ts
+// SPACE / TYPE / WEIGHT / RADIUS scales, COLOR_ROLE map + SERIES_ROLES referencing
+// theme.ts CSS var names, FONT_FAMILY; helpers colorVarName, cssVar→"var(--…)",
+// seriesColor, tokensCss, clamp, clampPct.
+```
+
+**File:** `src/data/reporting/executive/ui/icons.ts` (new)
+
+**Before:**
+```ts
+// (new file)
+```
+
+**After:**
+```ts
+// 12 stroke-based line icons (viewBox 0 0 24 24, stroke="currentColor", fill="none",
+// configurable size): shield, port, scan, gauge, flag, alert, check, layers, users,
+// document, chart, arrow. icon(name,size?) lookup + named exports + ICON_NAMES.
+// No emoji; neutral fallback for unknown names.
+```
+
+**File:** `src/data/reporting/executive/ui/charts.ts` (new)
+
+**Before:**
+```ts
+// (new file)
+```
+
+**After:**
+```ts
+// Pure (data, opts) => string SVG primitives, hand-rolled geometry, theme var(--…)
+// colors: rankedBar (RTL labels right), donut, gauge (0–100), groupedBars, stackedBars,
+// quadrantScatter, heatmap (null cells → "—"), sparkline. Empty/null/zero-denominator
+// data → neutral "—" empty state; never throws; percentages clamped 0–100.
+```
+
+**Files:** `src/data/reporting/executive/ui/icons.test.ts`, `charts.test.ts` (new)
+Vitest (node env): assert valid `<svg>`/viewBox, no emoji, graceful empty-data handling,
+no NaN/Infinity (no divide-by-zero), percentage clamping. 34 tests pass.
+
+---
+
 ## v28.0 — 2026-06-30 — Executive report Phase 0: carry all five result sources through the population pipeline (FEATURE)
 
 The three previously-dropped result sources (manual / opposite / live-means) plus
