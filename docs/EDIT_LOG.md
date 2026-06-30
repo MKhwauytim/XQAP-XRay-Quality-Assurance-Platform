@@ -4,6 +4,37 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v34.2 — 2026-06-30 — Deck verdict slide: gate on image-level accuracy, not inspector evaluability (BUG)
+
+Visual QA found the deck's flagship "حُكم الدقة" slide showing a false
+"لا توجد قرارات قابلة للتقييم" empty state while the Document's accuracy page (same
+`ReportModel`) correctly showed 84.7% accuracy / 74.2% detection. Cause: the deck gated the
+slide on `model.dataQuality.evaluableDecisionRecords` (decision-level, requires an inspector
+ID — 0 while BI is unmapped), whereas overall inspection accuracy is image-level (expert vs
+L1/L2 result) and does not need inspector identity. Gating now matches the Document and the
+deck's own executive-summary subhead.
+
+**File:** `src/data/reporting/executive/deck/slides.ts` (verdictSlide)
+
+**Before:**
+```ts
+  const s = model.summary;
+  const t = model.errorAnalysis.totals;
+  if (model.dataQuality.evaluableDecisionRecords === 0) {
+```
+
+**After:**
+```ts
+  const s = model.summary;
+  const t = model.errorAnalysis.totals;
+  // Gate on image-level inspection accuracy (expert vs L1/L2 result) — which does NOT
+  // require inspector identity — so the verdict matches the Document and stays populated
+  // when BI is unmapped. (Inspector-level evaluability gates the employee slides, not this.)
+  if (s.overallAccuracy === null) {
+```
+
+---
+
 ## v34.1 — 2026-06-30 — Executive report rework cleanup: remove superseded renderer + lint (CHORE)
 
 Phase 3 replaced the old per-page executive renderer with the `document/` module but left

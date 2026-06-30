@@ -159,7 +159,10 @@ export function scopeSlide(model: ReportModel, num: number, total: number): stri
 export function verdictSlide(model: ReportModel, num: number, total: number): string {
   const s = model.summary;
   const t = model.errorAnalysis.totals;
-  if (model.dataQuality.evaluableDecisionRecords === 0) {
+  // Gate on image-level inspection accuracy (expert vs L1/L2 result) — which does NOT
+  // require inspector identity — so the verdict matches the Document and stays populated
+  // when BI is unmapped. (Inspector-level evaluability gates the employee slides, not this.)
+  if (s.overallAccuracy === null) {
     return slide({
       id: "slide-verdict",
       title: "حُكم الدقة",
