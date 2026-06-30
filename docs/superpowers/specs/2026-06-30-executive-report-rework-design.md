@@ -45,6 +45,7 @@ The deliverable is **three artifacts driven from one analytical layer**:
 | Result sources | **Five result sources per image** (L1, L2, manual inspection, opposite inspection, live means) + the **study reviewer** (QA gold standard). All carried and compared per image; each team's agreement-vs-reviewer is computed. |
 | Audit depth | **Employee-level accountability is L1/L2 only** (our inspection). Other teams contribute their *answer* for comparison; we do **not** build per-employee pages/priority actions for them (they often lack employee identity and are out of audit scope). |
 | Data fix location | The 3 dropped result sources are recovered **at the source** — revise the population pipeline + `PreparedPopulationRow` + saved `population.final.json` (versioned schema migration), not via a report-only workaround. |
+| In-app analytics | The same `ReportModel` powers a **live high-level analytics dashboard inside the app** (upgrading the Reports tab's `مؤشرات الأداء` view), with the three exports as buttons on it. One analytical layer → live dashboard **and** exports. Default visibility **manager + admin**, registered as a **managed permission editable in the User Management matrix**. |
 
 ---
 
@@ -56,12 +57,17 @@ The deliverable is **three artifacts driven from one analytical layer**:
    (population,  │  decisionFactTable → aggregates → ReportModel│
     sample,      └─────────────────────────────────────────────┘
     distribution,                 │
-    answers,        ┌─────────────┼─────────────┐
-    template,       ▼             ▼             ▼
-    BI)        Document        Deck         Workbook
-            (A4 portrait)  (16:9 land.)    (.xlsx)
-              HTML→PDF       HTML→PDF      raw+processed
+    answers,    ┌──────────┬──────┴──────┬──────────────┐
+    template,   ▼          ▼             ▼              ▼
+    BI)   Analytics    Document        Deck         Workbook
+          dashboard  (A4 portrait) (16:9 land.)     (.xlsx)
+          (in-app,     HTML→PDF      HTML→PDF      raw+processed
+           live)   ◀── exports launched from the dashboard ──▶
 ```
+
+The **in-app Analytics dashboard** and the three exports are all consumers of the one
+`ReportModel` — the dashboard renders it live (reusing the `charts.ts` SVG primitives in
+React), and its toolbar launches the document/deck/workbook exports.
 
 **Governing principle (from the master description §22):** the report must never blur
 `cases`, `assignments`, `events`, `employee decisions`, `review responses`, and
@@ -362,12 +368,35 @@ Expand from 6 processed sheets to the full raw → processed → analytical chai
 Inspector columns show IDs; reviewer columns show display names; other-team columns show
 their result (+ code, + employee ID when present). Missing/zero/N-A per §3.7.
 
-## 8. Reports-tab integration
+## 8. In-app Analytics dashboard + exports (Reports tab)
 
-The Reports tab exposes **three explicit actions** — "تنزيل التقرير التفصيلي (PDF)",
-"تنزيل العرض التنفيذي (PDF)", "تنزيل بيانات التقرير (Excel)" — each building the shared
-`ReportModel` once then invoking the matching renderer. Existing single-HTML open flow is
-preserved for on-screen review of the document.
+The same `ReportModel` powers a **live high-level analytics dashboard** inside the app —
+"2 birds, 1 stone": the on-screen analytics and the exported reports share one computed
+model, so the numbers can never disagree.
+
+**Placement:** upgrade the Reports tab's existing `مؤشرات الأداء` sub-section
+(`src/components/Sidebar/Tabs/Reports/index.tsx`, the `kpi` section) from its current
+basic completion panel into the full dashboard. It reuses the tab's existing month-picker
+and data-loading (`loadMonthPopulationFinal`, `loadSampleMaster`, `loadAllEmployeeFiles`,
+`loadOrDeriveDistributionCurrent`, template selection) — the same inputs already assembled
+for `openExecutiveReport`.
+
+**Rendering:** the dashboard builds `buildReportModel(input)` once, then renders it live —
+KPI cards, the cross-team agreement views, port/stage/employee tables, and charts via the
+**shared `charts.ts` SVG primitives** (the SVG strings are injected into React;
+one chart implementation serves both the dashboard and the print reports). Honors the
+data-sufficiency bands and the missing/zero/N-A discipline on screen.
+
+**Exports toolbar:** three explicit actions on the dashboard —
+"تنزيل التقرير التفصيلي (PDF)" (document), "تنزيل العرض التنفيذي (PDF)" (deck),
+"تنزيل بيانات التقرير (Excel)" (workbook) — each reusing the already-built `ReportModel`.
+The existing single-HTML open flow is preserved for on-screen review of the document.
+
+**Permission:** the analytics dashboard is a **managed permission** — register it so it
+appears in the User Management role×permission matrix, **defaulting to `manager` + `admin`**
+but editable there (add to `MANAGED_TABS` and `createDefaultPermissions()` in
+`userManagement.ts`; gate the sub-section via `PermissionGuard`/sub-tab `allowedRoles`).
+The operational `sample`/`distribution`/Power BI exports stay where they are.
 
 ---
 
@@ -384,6 +413,10 @@ preserved for on-screen review of the document.
 3. **Document** (§5) — rebuild pages on the new layer (incl. cross-team comparison).
 4. **Presentation** (§6) — new curated deck.
 5. **Workbook** (§7) — raw + analytical + comparison sheets.
+6. **In-app Analytics dashboard** (§8) — upgrade the Reports `مؤشرات الأداء` view to render
+   the live `ReportModel` (reusing `charts.ts`), host the three exports, and register the
+   managed permission (default manager + admin, matrix-editable). Depends on Phase 1 + 2;
+   independent of the renderer phases (different files), so it can run alongside 3–5.
 
 ## 10. Testing & verification
 
