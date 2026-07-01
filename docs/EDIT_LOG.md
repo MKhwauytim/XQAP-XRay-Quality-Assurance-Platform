@@ -4,6 +4,41 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v37.15 — 2026-07-02 — CLAUDE.md sync: tab table, bundle size, audit cross-link (DOCS TEC-03)
+
+Fixes TEC-03 from `docs/audit/FULL_SYSTEM_AUDIT_2026-07-02.md`. The CLAUDE.md tab table was
+stale: `template-builder` is no longer a standalone tab (it renders as the نموذج الفحص
+sub-tab of employee-workspace), `report-designer` exists as a reports sub-tab, `change-log`
+(order 96, admin) was missing, and roles for reports/archive were out of date. Bundle-size
+note updated to the measured 2026-07-02 build (2,614 kB / 835 kB gzip — the `?raw` EDIT_LOG
+import in the ChangeLog tab is part of that growth). Added the 2026-07-02 audit to the docs
+cross-references.
+
+**File:** `CLAUDE.md`
+
+**Before:**
+```
+| `population` | `Tabs/Population/` | all | 10 |
+| `employee-workspace` | `Tabs/EmployeeWorkspace/` | all | 15 |
+| `template-builder` | `Tabs/TemplateBuilder/` | admin | 20 |
+| `reports` | `Tabs/Reports/` | supervisor, admin | 25 |
+| `archive` | `Tabs/Archive/` | supervisor, admin | 30 |
+| `user-management` | `Tabs/UserManagement/` | admin | 40 |
+| `settings` | `Tabs/Settings/` | guest, admin | 95 |
+```
+
+**After:**
+```
+| `population` | `Tabs/Population/` | all | 10 | `process`, `browse` |
+| `employee-workspace` | `Tabs/EmployeeWorkspace/` | all | 15 | `ew/xray-referrals`, `ew/xray-results`, `ew/referral-approval`, `ew/inspection-form` (renders `Tabs/TemplateBuilder/`) |
+| `reports` | `Tabs/Reports/` | guest, supervisor, manager, admin | 25 | `reports`, `kpi` (manager, admin), `report-designer` (supervisor, manager, admin → `Tabs/ReportDesigner/`) |
+| `archive` | `Tabs/Archive/` | guest, supervisor, manager, admin | 30 | — |
+| `user-management` | `Tabs/UserManagement/` | admin | 40 | `users`, `page-permissions`, `feature-permissions`, `activity` |
+| `settings` | `Tabs/Settings/` | guest, admin | 95 | — |
+| `change-log` | `Tabs/ChangeLog/` | admin | 96 | — |
+```
+(plus the bundle-size sentence update in "Build & dependency gotchas")
+
 ## v37.14 — 2026-07-02 — ZATCA logo bundled locally; no more zatca.gov.sa hot-link (BUGFIX VIS-05)
 
 Fixes VIS-05 from `docs/audit/FULL_SYSTEM_AUDIT_2026-07-02.md`: the brand logo was hot-linked
