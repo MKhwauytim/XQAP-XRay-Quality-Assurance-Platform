@@ -10221,3 +10221,78 @@ the demo entry to the picker screen instead.
 Made the demo/view entry a hidden backdoor mirroring the admin shortcut, instead of
 a visible button on the address picker.
 
+
+## v7.11 — 2026-07-01 — refactor(auth): move audit log to 5-system/audit/activity.log.json
+
+Implements Task 5 of the workspace naming standardization plan.
+Moves the auth activity audit log from 5-System/2-Audit/auth-activity.log.json to the
+normalized lowercase, kebab-case path 5-system/audit/activity.log.json using the
+centralized SYSTEM_FOLDER_NAMES constant from workspacePaths.ts.
+
+**File:** src/auth/authActivityLog.ts
+
+**Before:**
+```ts
+import { getSystemRoot } from "../data/workspace/workspacePaths";
+
+const ACTIVITY_AUDIT_FOLDER = "2-Audit";
+const ACTIVITY_LOG_FILE = "auth-activity.log.json";
+
+async function getActivityAuditDir(create: boolean): Promise<DirectoryHandleLike | null> {
+  if (!workspaceHandle) return null;
+  try {
+    const systemDir = await getSystemRoot(workspaceHandle, create);
+    return systemDir.getDirectoryHandle(ACTIVITY_AUDIT_FOLDER, { create });
+  } catch {
+    return null;
+  }
+}
+```
+
+**After:**
+```ts
+import { getSystemRoot, SYSTEM_FOLDER_NAMES } from "../data/workspace/workspacePaths";
+
+const ACTIVITY_LOG_FILE = "activity.log.json";
+
+async function getActivityAuditDir(create: boolean): Promise<DirectoryHandleLike | null> {
+  if (!workspaceHandle) return null;
+  try {
+    const systemDir = await getSystemRoot(workspaceHandle, create);
+    return systemDir.getDirectoryHandle(SYSTEM_FOLDER_NAMES.audit, { create });
+  } catch {
+    return null;
+  }
+}
+```
+
+**File:** src/auth/authActivityLog.test.ts
+
+**Before:**
+```ts
+    const systemDir = await getSystemRoot(root, false);
+    const auditDir = await systemDir.getDirectoryHandle("2-Audit", { create: false });
+    const result = await safeReadJson<AuthActivityLogFile>(auditDir, "auth-activity.log.json");
+```
+
+**After:**
+```ts
+    const systemDir = await getSystemRoot(root, false);
+    const auditDir = await systemDir.getDirectoryHandle("audit", { create: false });
+    const result = await safeReadJson<AuthActivityLogFile>(auditDir, "activity.log.json");
+```
+
+**File:** src/components/Sidebar/Tabs/UserManagement/index.tsx
+
+**Before:**
+```tsx
+          تعرض هذه الصفحة سجلات الدخول وساعات العمل المحفوظة داخل مساحة العمل في
+          <strong> 5-System/2-Audit/auth-activity.log.json</strong>.
+```
+
+**After:**
+```tsx
+          تعرض هذه الصفحة سجلات الدخول وساعات العمل المحفوظة داخل مساحة العمل في
+          <strong> 5-system/audit/activity.log.json</strong>.
+```
+

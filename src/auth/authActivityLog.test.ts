@@ -80,8 +80,8 @@ describe("authActivityLog", () => {
     await waitForAuthActivityLogFlush();
 
     const systemDir = await getSystemRoot(root, false);
-    const auditDir = await systemDir.getDirectoryHandle("2-Audit", { create: false });
-    const result = await safeReadJson<AuthActivityLogFile>(auditDir, "auth-activity.log.json");
+    const auditDir = await systemDir.getDirectoryHandle("audit", { create: false });
+    const result = await safeReadJson<AuthActivityLogFile>(auditDir, "activity.log.json");
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.entries).toHaveLength(1);
