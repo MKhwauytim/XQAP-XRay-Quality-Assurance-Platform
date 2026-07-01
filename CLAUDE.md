@@ -65,22 +65,22 @@ unnumbered folders (`Population/`, `templates/`, `.system/`) are still read when
 and path** — keep it in sync. Summary:
 
 ```
-1-Population/
-  {month}-{MonthName-en}-{year}/   ← e.g. 5-May-2026 (legacy: files flat in folder)
+1-population/
+  {month}-{monthname-en}-{year}/   ← e.g. 5-may-2026 (legacy: files flat in folder)
     month.manifest.json
-    raw/        risk.raw.json, bi.raw.json (BI only if present)
-    processed/  population.final.json, processing.summary.json
-2-Samples/
-  {month}/1-Main/   sample.master.json, distribution.log.json (append-only),
+    1-raw/       risk.raw.json, bi.raw.json (BI only if present)
+    2-processed/ population.final.json, processing.summary.json
+2-samples/
+  {month}/1-main/   sample.master.json, distribution.log.json (append-only),
                     distribution.current.json (derived), main.samples.json
   {month}/…        per-employee sample mirrors, answers, referral/replacement, approvals
-3-User Data/       workspace user/permission files (when initialized via workspace defaults)
-4-Reports/         generated report artifacts (when report flows write to disk)
-5-System/          backups/, browse & table presets, auto-backup settings/state, activity audit log
-6-Templates/       {templateId}.json, templates.index.json, template selection
+3-user-data/       workspace user/permission files (when initialized via workspace defaults)
+4-reports/         generated report artifacts (when report flows write to disk)
+5-system/          backups/, browse & table presets, auto-backup settings/state, activity audit log
+6-templates/       {templateId}.json, templates.index.json, template selection
 ```
 
-Month folder names follow the pattern `{month}-{MonthName-en}-{year}` (e.g. `5-May-2026`).
+Month folder names follow the pattern `{month}-{monthname-en}-{year}`, lowercase (e.g. `5-may-2026`).
 
 ## Architecture
 

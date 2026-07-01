@@ -4,6 +4,249 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v35.6 — 2026-07-01 — Docs updated for renamed workspace file structure
+
+Task 9 of the workspace file/folder naming convention refactor. Documentation-only change: brings `docs/data-system-report.md`, `CLAUDE.md`, and `README.md` in line with the numbered-lowercase-kebab-case workspace layout that Tasks 1–8 already implemented in code (see the `v35.0`–`v35.5` entries above for the actual code changes). No source files touched.
+
+**File:** `docs/data-system-report.md` (Workspace Folder Data table)
+
+**Before:**
+```md
+| `1-Population/` | Monthly population runs, source import data, final processed population, processing summaries, population config. |
+| `2-Samples/` | Sample master files, distribution log/current snapshot, main sample mirrors, per-employee sample mirrors, answers, referral/replacement requests, supervisor approval decisions. |
+| `3-User Data/` | Workspace user/permission files when initialized through workspace defaults. |
+| `4-Reports/` | Generated/report artifacts when report flows write to the workspace. |
+| `5-System/` | Backups, browse/table presets, automatic-backup settings/state, activity audit log, internal system files. |
+| `6-Templates/` | Inspection templates and template index/selection files. |
+```
+
+**After:**
+```md
+| `1-population/` | Monthly population runs, source import data, final processed population, processing summaries, population config. |
+| `2-samples/` | Sample master files, distribution log/current snapshot, main sample mirrors, per-employee sample mirrors, answers, referral/replacement requests, supervisor approval decisions. |
+| `3-user-data/` | Workspace user/permission files when initialized through workspace defaults. |
+| `4-reports/` | Generated/report artifacts when report flows write to the workspace. |
+| `5-system/` | Backups, browse/table presets, automatic-backup settings/state, activity audit log, internal system files. |
+| `6-templates/` | Inspection templates and template index/selection files. |
+```
+
+**File:** `docs/data-system-report.md` (Population And Sample Files table)
+
+**Before:**
+```md
+| `month.manifest.json` | `1-Population/{month}/` | Month metadata: month/year, processed counts, status, operator info. |
+| `risk.raw.json` | `1-Population/{month}/raw/` or legacy month folder | Imported risk rows. |
+| `bi.raw.json` | `1-Population/{month}/raw/` or legacy month folder | Imported BI rows when provided. |
+| `population.final.json` | `1-Population/{month}/processed/` or legacy month folder | Final processed population rows used for sampling and reporting. |
+| `processing.summary.json` | `1-Population/{month}/processed/` | Processing summary/validation data. |
+| `sample.master.json` | `2-Samples/{month}/1-Main/` | Drawn sample rows and sample configuration/result metadata. |
+| `distribution.log.json` | `2-Samples/{month}/1-Main/` | Append-only assignment event log. |
+| `distribution.current.json` | `2-Samples/{month}/1-Main/` | Derived current distribution snapshot. |
+| `main.samples.json` | `2-Samples/{month}/1-Main/` | Mirror of all assigned sample entries. |
+| `{username}.samples.json` | `2-Samples/{month}/2-Employees/` | Per-employee sample mirror. |
+| `{username}.answers.json` | `2-Samples/{month}/2-Employees/` | Employee answers plus referral/replacement requests for that employee. |
+| `{supervisor}.decisions.json` | `2-Samples/{month}/3-Approvals/` | Supervisor referral/replacement decisions. |
+| `auth-activity.log.json` | `5-System/2-Audit/` | Sign-in and working-hours audit log. |
+```
+
+**After:**
+```md
+| `month.manifest.json` | `1-population/{month}/` | Month metadata: month/year, processed counts, status, operator info. |
+| `risk.raw.json` | `1-population/{month}/1-raw/` or legacy month folder | Imported risk rows. |
+| `bi.raw.json` | `1-population/{month}/1-raw/` or legacy month folder | Imported BI rows when provided. |
+| `population.final.json` | `1-population/{month}/2-processed/` or legacy month folder | Final processed population rows used for sampling and reporting. |
+| `processing.summary.json` | `1-population/{month}/2-processed/` | Processing summary/validation data. |
+| `sample.master.json` | `2-samples/{month}/1-main/` | Drawn sample rows and sample configuration/result metadata. |
+| `distribution.log.json` | `2-samples/{month}/1-main/` | Append-only assignment event log. |
+| `distribution.current.json` | `2-samples/{month}/1-main/` | Derived current distribution snapshot. |
+| `main.samples.json` | `2-samples/{month}/1-main/` | Mirror of all assigned sample entries. |
+| `{username}.samples.json` | `2-samples/{month}/2-employees/` | Per-employee sample mirror. |
+| `{username}.answers.json` | `2-samples/{month}/2-employees/` | Employee answers plus referral/replacement requests for that employee. |
+| `{supervisor}.decisions.json` | `2-samples/{month}/3-approvals/` | Supervisor referral/replacement decisions. |
+| `activity.log.json` | `5-system/audit/` | Sign-in and working-hours audit log. |
+```
+
+**File:** `docs/data-system-report.md` (Distribution And Employee Data Dictionary table — same rename, missed in the plan's Step 1 text but caught by the grep sweep)
+
+**Before:**
+```md
+| `auth-activity.log.json` | `revision`, `updatedAt`, `entries[]`. |
+```
+
+**After:**
+```md
+| `activity.log.json` | `revision`, `updatedAt`, `entries[]`. |
+```
+
+**File:** `docs/data-system-report.md` (Default Inspection Template sentence)
+
+**Before:**
+```md
+The template is saved as a normal template file in `6-Templates/{templateId}.json`, listed in `templates.index.json`, and can be selected through `inspection-template-selection.json`.
+```
+
+**After:**
+```md
+The template is saved as a normal template file in `6-templates/{templateId}.json`, listed in `templates.index.json`, and can be selected through `template.selection.json`.
+```
+
+**File:** `docs/data-system-report.md` (`4-Reports/designs/` section header + table)
+
+**Before:**
+```md
+## 4-Reports/designs/
+
+| `designs.index.json` | `4-Reports/designs/` | Index of all saved report designs (`JsonEnvelope<DesignIndex>`)... |
+| `{reportId}.json` | `4-Reports/designs/` | Individual `ReportDocument` persisted as `JsonEnvelope<ReportDocument>`... |
+```
+
+**After:**
+```md
+## 4-reports/designs/
+
+| `designs.index.json` | `4-reports/designs/` | Index of all saved report designs (`JsonEnvelope<DesignIndex>`)... |
+| `{reportId}.json` | `4-reports/designs/` | Individual `ReportDocument` persisted as `JsonEnvelope<ReportDocument>`... |
+```
+
+**File:** `docs/data-system-report.md` (Templates, Preferences, Backups table)
+
+**Before:**
+```md
+| `templates.index.json` | `6-Templates/` | Template list and latest versions. |
+| `{templateId}.json` | `6-Templates/` | Inspection template schema and fields. |
+| `inspection-template-selection.json` | `6-Templates/` | Selected active inspection template. |
+| `admin-shared.browse-preset.json` | `5-System/user-presets/` | Shared/admin table column preferences. |
+| `{username}.browse-preset.json` | `5-System/user-presets/` | User-specific table column preferences. |
+| `backup.manifest.json` and copied data files | `5-System/3-Backups/{timestamp}/` | Manual/automatic backup snapshots. |
+| `population.csv` | `5-System/powerbi-export/{month}/` | All `ExecutiveReportRow` records (UTF-8 BOM CSV, 26 columns). |
+| `sample.csv` | `5-System/powerbi-export/{month}/` | `selectedInSample=true` subset of `population.csv`. |
+| `LISEZMOI.txt` | `5-System/powerbi-export/{month}/` | Bilingual connection instructions (Arabic + English) for Power BI Desktop. |
+```
+
+**After:**
+```md
+| `templates.index.json` | `6-templates/` | Template list and latest versions. |
+| `{templateId}.json` | `6-templates/` | Inspection template schema and fields. |
+| `template.selection.json` | `6-templates/` | Selected active inspection template. |
+| `admin-shared.browse-preset.json` | `5-system/user-presets/` | Shared/admin table column preferences. |
+| `{username}.browse-preset.json` | `5-system/user-presets/` | User-specific table column preferences. |
+| `backup.manifest.json` and copied data files | `5-system/backups/{timestamp}/` | Manual/automatic backup snapshots. |
+| `population.csv` | `5-system/powerbi-export/{month}/` | All `ExecutiveReportRow` records (UTF-8 BOM CSV, 26 columns). |
+| `sample.csv` | `5-system/powerbi-export/{month}/` | `selectedInSample=true` subset of `population.csv`. |
+| `README.txt` | `5-system/powerbi-export/{month}/` | Bilingual connection instructions (Arabic + English) for Power BI Desktop. |
+```
+
+The "Legacy folders still read when present: `Population/`, `.system/`, and `templates/`." line was left unchanged — it still correctly describes the pre-numbering legacy fallback.
+
+**File:** `CLAUDE.md` (Disk layout tree + month-folder pattern)
+
+**Before:**
+```md
+1-Population/
+  {month}-{MonthName-en}-{year}/   ← e.g. 5-May-2026 (legacy: files flat in folder)
+    month.manifest.json
+    raw/        risk.raw.json, bi.raw.json (BI only if present)
+    processed/  population.final.json, processing.summary.json
+2-Samples/
+  {month}/1-Main/   sample.master.json, distribution.log.json (append-only),
+                    distribution.current.json (derived), main.samples.json
+  {month}/…        per-employee sample mirrors, answers, referral/replacement, approvals
+3-User Data/       workspace user/permission files (when initialized via workspace defaults)
+4-Reports/         generated report artifacts (when report flows write to disk)
+5-System/          backups/, browse & table presets, auto-backup settings/state, activity audit log
+6-Templates/       {templateId}.json, templates.index.json, template selection
+```
+
+Month folder names follow the pattern `{month}-{MonthName-en}-{year}` (e.g. `5-May-2026`).
+
+**After:**
+```md
+1-population/
+  {month}-{monthname-en}-{year}/   ← e.g. 5-may-2026 (legacy: files flat in folder)
+    month.manifest.json
+    1-raw/       risk.raw.json, bi.raw.json (BI only if present)
+    2-processed/ population.final.json, processing.summary.json
+2-samples/
+  {month}/1-main/   sample.master.json, distribution.log.json (append-only),
+                    distribution.current.json (derived), main.samples.json
+  {month}/…        per-employee sample mirrors, answers, referral/replacement, approvals
+3-user-data/       workspace user/permission files (when initialized via workspace defaults)
+4-reports/         generated report artifacts (when report flows write to disk)
+5-system/          backups/, browse & table presets, auto-backup settings/state, activity audit log
+6-templates/       {templateId}.json, templates.index.json, template selection
+```
+
+Month folder names follow the pattern `{month}-{monthname-en}-{year}`, lowercase (e.g. `5-may-2026`).
+
+**File:** `README.md` (Workspace Folder Layout tree + month-folder pattern)
+
+**Before:**
+```md
+Root (user picks this folder)
+├── 1-Population/
+│   └── {MM-MonthName-YYYY}/          # One folder per processed month
+│       ├── month.manifest.json
+│       ├── risk.raw.json
+│       ├── population.final.json
+│       ├── bi.raw.json                # Optional, only if BI rows present
+│       ├── sample/
+│       │   └── sample.master.json
+│       ├── distribution.log.json      # Append-only event log
+│       ├── distribution.current.json  # Derived snapshot
+│       └── employee-answers/
+│           └── {username}.answers.json
+├── 2-Samples/
+│   └── {MM-MonthName-YYYY}/
+│       ├── main.samples.json
+│       └── {username}.samples.json
+├── 3-User Data/
+│   ├── users-permissions.json
+│   └── managed-users.json
+├── 6-Templates/
+│   ├── {templateId}.json
+│   └── templates.index.json
+└── 5-System/
+    └── backups/
+        └── {YYYY-MM-DDTHH-MM-SS}/    # Backup snapshots
+```
+
+Month folder names follow the pattern `{month}-{MonthName-en}-{year}` (e.g., `5-May-2026`).
+
+**After:**
+```md
+Root (user picks this folder)
+├── 1-population/
+│   └── {MM-monthname-YYYY}/          # One folder per processed month
+│       ├── month.manifest.json
+│       ├── 1-raw/
+│       │   ├── risk.raw.json
+│       │   └── bi.raw.json            # Optional, only if BI rows present
+│       ├── 2-processed/
+│       │   └── population.final.json
+│       ├── distribution.log.json      # Append-only event log
+│       └── distribution.current.json  # Derived snapshot
+├── 2-samples/
+│   └── {MM-monthname-YYYY}/
+│       ├── 1-main/
+│       │   ├── sample.master.json
+│       │   └── main.samples.json
+│       └── 2-employees/
+│           └── {username}.samples.json
+├── 3-user-data/
+│   ├── users-permissions.json
+│   └── managed-users.json
+├── 6-templates/
+│   ├── {templateId}.json
+│   └── templates.index.json
+└── 5-system/
+    └── backups/
+        └── {YYYY-MM-DDTHH-MM-SS}/    # Backup snapshots
+```
+
+Month folder names follow the pattern `{month}-{monthname-en}-{year}`, lowercase (e.g., `5-may-2026`).
+
+---
+
 ## v35.5 — 2026-07-01 — Backups folder centralize + template selection file rename
 
 Task 8 of the workspace file/folder naming convention refactor. Two changes: (1) `backupStorage.ts` now sources `BACKUPS_FOLDER` from `SYSTEM_FOLDER_NAMES.backups` (i.e., `"backups"`, lowercase, unnumbered) instead of a hardcoded `"3-Backups"` literal, centralizing folder-name references; (2) template selection file renamed from `active.inspection-template.json` to `template.selection.json` to match the `entity.qualifier.json` file-naming convention. Also fixed `templateStorage.test.ts`'s hardcoded `"6-Templates"` reference to match the lowercased root already set in Task 1.

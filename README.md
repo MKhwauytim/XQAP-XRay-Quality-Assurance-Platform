@@ -75,34 +75,35 @@ The app creates and maintains this structure in a user-selected directory:
 
 ```
 Root (user picks this folder)
-├── 1-Population/
-│   └── {MM-MonthName-YYYY}/          # One folder per processed month
+├── 1-population/
+│   └── {MM-monthname-YYYY}/          # One folder per processed month
 │       ├── month.manifest.json
-│       ├── risk.raw.json
-│       ├── population.final.json
-│       ├── bi.raw.json                # Optional, only if BI rows present
-│       ├── sample/
-│       │   └── sample.master.json
+│       ├── 1-raw/
+│       │   ├── risk.raw.json
+│       │   └── bi.raw.json            # Optional, only if BI rows present
+│       ├── 2-processed/
+│       │   └── population.final.json
 │       ├── distribution.log.json      # Append-only event log
-│       ├── distribution.current.json  # Derived snapshot
-│       └── employee-answers/
-│           └── {username}.answers.json
-├── 2-Samples/
-│   └── {MM-MonthName-YYYY}/
-│       ├── main.samples.json
-│       └── {username}.samples.json
-├── 3-User Data/
+│       └── distribution.current.json  # Derived snapshot
+├── 2-samples/
+│   └── {MM-monthname-YYYY}/
+│       ├── 1-main/
+│       │   ├── sample.master.json
+│       │   └── main.samples.json
+│       └── 2-employees/
+│           └── {username}.samples.json
+├── 3-user-data/
 │   ├── users-permissions.json
 │   └── managed-users.json
-├── 6-Templates/
+├── 6-templates/
 │   ├── {templateId}.json
 │   └── templates.index.json
-└── 5-System/
+└── 5-system/
     └── backups/
         └── {YYYY-MM-DDTHH-MM-SS}/    # Backup snapshots
 ```
 
-Month folder names follow the pattern `{month}-{MonthName-en}-{year}` (e.g., `5-May-2026`).
+Month folder names follow the pattern `{month}-{monthname-en}-{year}`, lowercase (e.g., `5-may-2026`).
 
 ## Authentication & Roles
 
