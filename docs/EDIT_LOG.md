@@ -4,6 +4,98 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v35.3 — 2026-07-01 — Use SYSTEM_FOLDER_NAMES.powerbiExport and rename LISEZMOI.txt to README.txt
+
+Task 6 of the workspace file/folder naming convention refactor. `exportWriter.ts` previously
+hardcoded the literal `"powerbi-export"` for the subdirectory under the system root. Swapped
+to import and use `SYSTEM_FOLDER_NAMES.powerbiExport` from `workspacePaths.ts` (added in Task 1),
+centralizing the folder-name constant. Also renamed the instructions file from `LISEZMOI.txt`
+(French name, inappropriate for Arabic/English content) to `README.txt` (standard cross-lingual
+naming convention). Updated embedded instruction strings: both Arabic and English path references
+changed from `'5-System/powerbi-export/'` to `'5-system/powerbi-export/'` to reflect the lowercase
+system folder. Updated the UI hint in `Reports/index.tsx` to display the correct casing
+`5-system\powerbi-export\` and the correct filename `README.txt` in the export-result panel.
+
+**File:** `src/data/powerbiExport/exportWriter.ts`
+
+**Before:**
+```ts
+import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import { getSystemRoot } from "../workspace/workspacePaths";
+import { toCsvString } from "./csvSerializer";
+import type { ExportManifest, ExportFileResult } from "./exportTypes";
+
+async function getExportDir(root: DirectoryHandleLike, month: string): Promise<DirectoryHandleLike> {
+  const sys = await getSystemRoot(root, true);
+  const expRoot = await sys.getDirectoryHandle("powerbi-export", { create: true });
+  return expRoot.getDirectoryHandle(month, { create: true });
+}
+// ...
+  const instructions = [
+    // ...
+    `3. انتقل إلى مجلد '5-System/powerbi-export/${month}/'`,
+    // ...
+    `3. Browse to '5-System/powerbi-export/${month}/'`,
+    // ...
+  ].join("\n");
+
+  await writeTextFile(dir, "LISEZMOI.txt", instructions);
+```
+
+**After:**
+```ts
+import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import { getSystemRoot, SYSTEM_FOLDER_NAMES } from "../workspace/workspacePaths";
+import { toCsvString } from "./csvSerializer";
+import type { ExportManifest, ExportFileResult } from "./exportTypes";
+
+async function getExportDir(root: DirectoryHandleLike, month: string): Promise<DirectoryHandleLike> {
+  const sys = await getSystemRoot(root, true);
+  const expRoot = await sys.getDirectoryHandle(SYSTEM_FOLDER_NAMES.powerbiExport, { create: true });
+  return expRoot.getDirectoryHandle(month, { create: true });
+}
+// ...
+  const instructions = [
+    // ...
+    `3. انتقل إلى مجلد '5-system/powerbi-export/${month}/'`,
+    // ...
+    `3. Browse to '5-system/powerbi-export/${month}/'`,
+    // ...
+  ].join("\n");
+
+  await writeTextFile(dir, "README.txt", instructions);
+```
+
+**File:** `src/data/powerbiExport/exportWriter.test.ts`
+
+**Before:**
+```ts
+    // navigate into 5-System/powerbi-export/5-May-2026/
+    const sys = await root.getDirectoryHandle("5-System", { create: false });
+```
+
+**After:**
+```ts
+    // navigate into 5-system/powerbi-export/5-May-2026/
+    const sys = await root.getDirectoryHandle("5-system", { create: false });
+```
+
+**File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
+
+**Before:**
+```tsx
+            const relPath = `5-System\\powerbi-export\\${pbiResult.month}`;
+```
+
+**After:**
+```tsx
+            const relPath = `5-system\\powerbi-export\\${pbiResult.month}`;
+```
+
+Also updated the instructions file reference in the export-result panel UI from `LISEZMOI.txt` to `README.txt`.
+
+---
+
 ## v35.2 — 2026-07-01 — Use POPULATION_SUBFOLDERS (1-raw/2-processed) instead of raw/processed literals
 
 Task 4 of the workspace file/folder naming convention refactor. `populationStorage.ts` previously

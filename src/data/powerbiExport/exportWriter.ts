@@ -1,11 +1,11 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
-import { getSystemRoot } from "../workspace/workspacePaths";
+import { getSystemRoot, SYSTEM_FOLDER_NAMES } from "../workspace/workspacePaths";
 import { toCsvString } from "./csvSerializer";
 import type { ExportManifest, ExportFileResult } from "./exportTypes";
 
 async function getExportDir(root: DirectoryHandleLike, month: string): Promise<DirectoryHandleLike> {
   const sys = await getSystemRoot(root, true);
-  const expRoot = await sys.getDirectoryHandle("powerbi-export", { create: true });
+  const expRoot = await sys.getDirectoryHandle(SYSTEM_FOLDER_NAMES.powerbiExport, { create: true });
   return expRoot.getDirectoryHandle(month, { create: true });
 }
 
@@ -39,7 +39,7 @@ export async function writeCsvExport(
     "لاستيراد هذه الملفات في Power BI Desktop:",
     "1. افتح Power BI Desktop",
     "2. الصفحة الرئيسية > الحصول على البيانات > نص/CSV",
-    `3. انتقل إلى مجلد '5-System/powerbi-export/${month}/'`,
+    `3. انتقل إلى مجلد '5-system/powerbi-export/${month}/'`,
     "4. افتح كل ملف CSV واضغط 'تحميل'",
     "5. في نموذج البيانات، يمكنك إنشاء علاقات بين الجداول باستخدام عمود xrayImageId",
     "",
@@ -47,7 +47,7 @@ export async function writeCsvExport(
     "To import these files into Power BI Desktop:",
     "1. Open Power BI Desktop",
     "2. Home > Get Data > Text/CSV",
-    `3. Browse to '5-System/powerbi-export/${month}/'`,
+    `3. Browse to '5-system/powerbi-export/${month}/'`,
     "4. Open each CSV file and click 'Load'",
     "5. In the Data Model, create relationships between tables using the xrayImageId column",
     "",
@@ -57,7 +57,7 @@ export async function writeCsvExport(
     `Exported at: ${new Date().toISOString()}`,
   ].join("\n");
 
-  await writeTextFile(dir, "LISEZMOI.txt", instructions);
+  await writeTextFile(dir, "README.txt", instructions);
 
   return {
     month,
