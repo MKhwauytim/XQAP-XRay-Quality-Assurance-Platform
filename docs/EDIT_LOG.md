@@ -4,6 +4,153 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v34.6 — 2026-07-01 — Deck: add الفهرس (agenda) slide as new slide 2 (FEATURE)
+
+New slide 2 — a roadmap/agenda slide inserted right after the title slide, before the
+executive summary (which shifts to slide 3). Deck grows 14 → 15 slides. Lists 4 sections
+in reading order — ملخص المؤشرات الرئيسية (→ slide 3), مجتمع وعينة الفحص (→ slide 4),
+نتائج دقة الأشعة (→ slides 5–9), الدراسات المتقدمة (→ slides 10–15) — each with a one-line
+"what this answers" blurb and a real slide-range chip, colored gold/blue/green/coral. Since
+the deck's slide order is fixed (unlike the Document's dynamic per-port pages), the ranges
+are stated directly rather than computed at build time.
+
+**File:** `src/data/reporting/executive/deck/slides.ts`
+
+**Before:**
+```ts
+// ── Slide 2 — Executive summary ────────────────────────────────────────────
+export function execSummarySlide(model: ReportModel, num: number, total: number): string {
+```
+
+**After:**
+```ts
+// ── Slide 2 — الفهرس (agenda / roadmap) ─────────────────────────────────────
+export function agendaSlide(num: number, total: number): string {
+  const items: { title: string; blurb: string; range: string }[] = [
+    { title: "ملخص المؤشرات الرئيسية", blurb: "الأرقام التي تحدد الحكم في نظرة واحدة.", range: "٠٣" },
+    { title: "مجتمع وعينة الفحص", blurb: "ماذا فحصنا، وبأي تغطية؟", range: "٠٤" },
+    { title: "نتائج دقة الأشعة", blurb: "هل قرارات المستويين دقيقة أمنيًا، وهل تتفق الفرق الأخرى؟", range: "٠٥–٠٩" },
+    { title: "الدراسات المتقدمة", blurb: "من الأدق بين المفتشين، وما الإجراء المطلوب؟", range: "١٠–١٥" },
+  ];
+  // … renders 4 .deck-agenda-item rows …
+}
+
+// ── Slide 3 — Executive summary ────────────────────────────────────────────
+export function execSummarySlide(model: ReportModel, num: number, total: number): string {
+```
+
+Also: all subsequent `// ── Slide N —` comments renumbered +1; `buildDeckSlides` special-cases
+`agendaSlide(2, total)` alongside `titleSlide` (it needs no `model`); `total = builders.length + 2`.
+
+**File:** `src/data/reporting/executive/deck/deckTheme.ts` — new `.deck-agenda`,
+`.deck-agenda-item`, `.deck-agenda-num`, `.deck-agenda-body`, `.deck-agenda-range` rules
+(colored left-accent bar + number badge per item: gold/blue/green/coral).
+
+**File:** `src/data/reporting/executive/deck/deck.test.ts` — `EXPECTED_TITLES` gains
+"الفهرس"; slide-count assertions updated 14 → 15.
+
+---
+
+## v36.3 — 2026-07-01 — Top header: polish the mode indicator + add workspace & user chips (FEATURE)
+
+Worked the post-login top header (`AdminToolbar`). The "الوضع الحالي / وضع الإدارة" block is
+the current role/mode indicator for the role-preview system; kept it but made it clearer,
+and added the operational context the header was missing.
+
+**File:** `src/auth/AdminToolbar.tsx` — mode value now leads with a per-role icon (admin→shield, manager→briefcase, supervisor→user-cog, employee→user, view→eye); the bare `?` help button is now a lucide `HelpCircle`; logout gains a `LogOut` icon. Added a **workspace chip** (connected folder name, from `useWorkspace()`) beside the mode block, and a **user chip** (logged-in display name, resolved via `getManagedLoginUsers()`, falling back to username) in the actions zone — both hidden in read-only demo mode.
+
+**File:** `src/auth/AdminToolbar.css` — restructured the mode block (small label stacked over the value with a trailing divider only when a chip follows); added `.auth-toolbar-chip` / `.auth-toolbar-user` pill styles; icon-aligned the help and logout buttons; responsive rules shed the workspace chip < 1200px and collapse the user chip to icon-only < 1024px, restoring both when the bar stacks < 640px.
+
+**Verified:** `npx tsc -b` zero errors in app sources; `npm run test:run` 280 pass.
+
+---
+
+## v36.2 — 2026-07-01 — Logs tab: sort by version number; de-duplicate logo to the sidebar only (DESIGN)
+
+Feedback fixes on the v36.0/v36.1 work.
+
+**File:** `src/components/Sidebar/Tabs/ChangeLog/index.tsx` — entries are now sorted by numeric version (segment-by-segment, newest first) via `compareVersionsDesc`/`versionKey`, instead of trusting the file's (inconsistent) physical order. Verified against the real log: clean descending v36.2 → v1.0 across 175 entries.
+
+**File:** `src/auth/AdminToolbar.tsx` / `AdminToolbar.css` — removed the ZATCA logo from the top header (it duplicated the sidebar mark directly below it). The logo now lives in one place: the sidebar navigation header.
+
+**File:** `src/components/Sidebar/Sidebar.css` — enlarged the sidebar logo (30px → 38px, max-width 168px → 190px, full opacity) for clearer visibility now that it stands alone.
+
+**Verified:** `npx tsc -b` zero errors in app sources; version-sort validated in Node.
+
+---
+
+## v36.1 — 2026-07-01 — Branding: ZATCA logo in the nav bar + top header, with recolor filters (DESIGN)
+
+Added the official ZATCA identity mark (same source as the sign-in screen) to the two
+persistent dark-navy surfaces — the sidebar navigation header and the post-login top
+toolbar — recolored white via CSS filter tokens (the same treatment the executive
+report uses). Graceful fallback: if the external SVG can't load, the mark is hidden and
+the text wordmark stands alone (never a broken-image icon).
+
+**File:** `src/branding/organization.ts` — new shared `ZATCA_LOGO_URL` constant (de-duplicates the URL previously inlined in AuthGate and the report).
+
+**File:** `src/index.css` — new `--logo-filter` (solid white) and `--logo-filter-muted` (soft grey-white) tokens for recoloring the dark/teal SVG per surface.
+
+**File:** `src/components/Sidebar/Sidebar.tsx` / `Sidebar.css` — logo added to the header; header regridded to a two-row layout (logo + collapse control on top, title block below); `filter: var(--logo-filter)`; hidden in the collapsed rail.
+
+**File:** `src/auth/AdminToolbar.tsx` / `AdminToolbar.css` — compact white logo anchored at the start of the status area in the top header.
+
+**Verified:** `npx tsc -b` reports zero errors in app sources (only the untracked throwaway `__qa_generate.test.ts` fails, on `node:fs`); `npm run test:run` 280 pass. Live layout pending human visual check (external logo + auth-gated surfaces can't be screenshotted headless).
+
+---
+
+## v36.0 — 2026-07-01 — Admin: version & edit-history tab (سجل الإصدارات) (FEATURE)
+
+New admin-only navigation item at the end of the sidebar that renders this edit log
+inside the app — all versions, each version's edits, dates and change type — with
+search and per-version expand/collapse. Requested for in-app visibility of the
+change history.
+
+**File:** `src/components/Sidebar/Tabs/ChangeLog/index.tsx` (new) — parses `docs/EDIT_LOG.md` (imported via Vite `?raw`) into `{version, date, title, tag, body}` entries and renders them newest-first. Includes a lightweight, library-free markdown renderer (code fences, inline code, bold) that emits safe React nodes only (no `dangerouslySetInnerHTML`). `tabConfig`: id `change-log`, order 96 (last), `allowedRoles: ["admin"]`, `History` icon.
+
+**File:** `src/components/Sidebar/Tabs/ChangeLog/ChangeLog.css` (new) — token-based styling; native `<details>`/`<summary>` for accessible expand/collapse; version pill, change-type badge, monospace code blocks.
+
+**File:** `src/vite-env.d.ts` (new) — `/// <reference types="vite/client" />` so `?raw` imports are typed as `string`.
+
+**File:** `src/auth/userManagement.ts` — registered `change-log` in `MANAGED_TABS` and added its role rows to `createDefaultPermissions()` (admin `edit`, all other roles `none`).
+
+**Verified:** `npm run lint` clean; `npm run build` green; `npm run test:run` all pass.
+
+---
+
+## v35.1 — 2026-07-01 — UI polish: workspace front-door badge + de-emoji sweep (DESIGN)
+
+**File:** `src/data/workspace/WorkspaceGate.css` — `.workspace-gate-icon` changed from a bare `font-size:40px` glyph slot to a 68px circular branded badge framing the lucide icon.
+
+**File:** `src/components/Sidebar/Tabs/Population/components/CertScanGrid.tsx` — replaced the `🔴`/`🔵` emoji in the highlighter hint with a token-coloured CSS dot.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx` — replaced a literal `⚠` with a lucide `AlertTriangle` (and re-pointed the box from hardcoded hex to the warning token palette); replaced the `↻` reload glyph with a lucide `RotateCw` (+ `aria-label`).
+
+**File:** `src/components/Sidebar/Tabs/Reports/index.tsx` — replaced the `✓` success glyph with a lucide `Check`.
+
+**File:** `src/components/Sidebar/Tabs/Population/components/MappingSettingsModal.tsx` — replaced the `▲`/`▼` reorder glyphs with lucide `ChevronUp`/`ChevronDown` (+ `aria-label`s).
+
+**Verified:** `npm run lint` clean; `npm run build` green; 279 tests pass.
+
+---
+
+## v35.0 — 2026-07-01 — UI polish Phase 1/2 foundation: state-view primitives + view-enter motion (FEATURE)
+
+Kicks off the leadership-approved UI polish effort (see `docs/UI_ENHANCEMENT_PLAN.md`).
+Identity unchanged (blue/white, Somar Sans, RTL); additive only.
+
+**File:** `src/styles/primitives.css` — appended `.ui-state` (+ `--bare`/`--error`/`__icon`/`__title`/`__body`/`__actions`), `.ui-spinner` (+ sizes, `@keyframes ui-spin`), and `.ui-skeleton` (+ variants, `@keyframes ui-shimmer`), with a `prefers-reduced-motion` guard.
+
+**File:** `src/components/StateViews/StateViews.tsx` (new) — reusable `EmptyState` / `LoadingState` / `ErrorState` / `Skeleton` components (Arabic RTL defaults, correct `role`/`aria-live`).
+
+**File:** `src/App.css` — added `@keyframes view-enter` and `.app-workspace > div` animation (one-time settle per tab; state preserved).
+
+**File:** `src/App.tsx` — adopted `EmptyState` for the "no tabs available" screen.
+
+**Verified:** `npm run lint` clean; `npm run build` green; 279 tests pass.
+
+---
+
 ## v34.5 — 2026-07-01 — Wire the executive-report card to its three real outputs: deck / Excel / document (BUG)
 
 The Reports-tab executive card's three format icons were wired to document(html) / Excel /

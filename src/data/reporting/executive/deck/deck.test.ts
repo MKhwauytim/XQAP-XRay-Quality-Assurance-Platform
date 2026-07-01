@@ -11,10 +11,11 @@ import { buildExecutiveDeck } from "./index";
 // eslint-disable-next-line no-misleading-character-class
 const EMOJI = /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE00}-\u{FE0F}]/u;
 
-// The exact slide titles, in order (data-title attributes). Title slide first,
-// then the 13 content slides (blueprint §3, curated to ~14).
+// The exact slide titles, in order (data-title attributes). Title slide, then the
+// agenda (الفهرس), then the 13 content slides (blueprint §3, curated to ~15).
 const EXPECTED_TITLES = [
   "الغلاف",
+  "الفهرس",
   "الملخص التنفيذي",
   "ما الذي فحصناه",
   "حُكم الدقة",
@@ -126,13 +127,13 @@ describe("buildExecutiveDeck — structure", () => {
     expect(html).toContain('dir="rtl"');
   });
 
-  it("renders all 14 slides with the expected titles in order", () => {
+  it("renders all 15 slides with the expected titles in order", () => {
     const html = buildExecutiveDeck(input([popRow(), popRow({ xrayImageId: "XR-2" })]));
     const titles = [...html.matchAll(/data-title="([^"]+)"/g)].map((m) => m[1]);
     expect(titles).toEqual(EXPECTED_TITLES);
-    // 14 <section class="slide ...">
+    // 15 <section class="slide ...">
     const slideCount = (html.match(/class="slide[ "]/g) ?? []).length;
-    expect(slideCount).toBe(14);
+    expect(slideCount).toBe(15);
   });
 
   it("contains landscape 16:9 print sizing", () => {
@@ -164,7 +165,7 @@ describe("buildExecutiveDeck — structure", () => {
 });
 
 describe("buildExecutiveDeck — populated data", () => {
-  it("builds all 14 slides with no emoji on a richer BI-mapped fixture", () => {
+  it("builds all 15 slides with no emoji on a richer BI-mapped fixture", () => {
     const html = buildExecutiveDeck(richInput());
     const titles = [...html.matchAll(/data-title="([^"]+)"/g)].map((m) => m[1]);
     expect(titles).toEqual(EXPECTED_TITLES);

@@ -154,6 +154,35 @@ ${EXEC_CSS}
 .deck-card h4{margin:0 0 6px;font-size:0.98rem;color:#fff;font-weight:800;}
 .deck-card p{margin:0;font-size:0.84rem;color:rgba(255,255,255,.78);line-height:1.6;}
 
+/* ── Agenda (الفهرس) — 4 roadmap items, colored by section ────────────── */
+.deck-agenda{display:flex;flex-direction:column;gap:13px;height:100%;justify-content:center;}
+.deck-agenda-item{
+  display:flex;align-items:center;gap:18px;
+  border:1px solid rgba(255,255,255,.12);border-radius:14px;
+  padding:15px 20px;background:rgba(255,255,255,.02);
+  position:relative;overflow:hidden;
+}
+.deck-agenda-item::before{content:"";position:absolute;top:0;right:0;width:3px;height:100%;background:var(--gold);}
+.deck-agenda-item:nth-child(2)::before{background:var(--blue);}
+.deck-agenda-item:nth-child(3)::before{background:var(--green);}
+.deck-agenda-item:nth-child(4)::before{background:var(--coral);}
+.deck-agenda-num{
+  flex-shrink:0;width:46px;height:46px;border-radius:12px;
+  display:grid;place-items:center;font-size:1.25rem;font-weight:900;
+  color:var(--navy);background:var(--gold);
+}
+.deck-agenda-item:nth-child(2) .deck-agenda-num{background:var(--blue);}
+.deck-agenda-item:nth-child(3) .deck-agenda-num{background:var(--green);}
+.deck-agenda-item:nth-child(4) .deck-agenda-num{background:var(--coral);}
+.deck-agenda-body{flex:1;min-width:0;}
+.deck-agenda-body h4{margin:0 0 3px;font-size:1.05rem;color:#fff;font-weight:800;}
+.deck-agenda-body p{margin:0;font-size:0.84rem;color:rgba(255,255,255,.72);line-height:1.5;}
+.deck-agenda-range{
+  flex-shrink:0;font-size:0.8rem;font-weight:800;color:var(--gold);
+  border:1px solid rgba(244,180,0,.35);border-radius:999px;padding:6px 16px;
+  background:rgba(244,180,0,.07);white-space:nowrap;font-variant-numeric:tabular-nums;
+}
+
 /* Ordered decision / action list. */
 .deck-list{list-style:none;margin:0;padding:0;display:grid;gap:12px;}
 .deck-list li{
@@ -200,11 +229,27 @@ ${EXEC_CSS}
 .slide-footer .foot-text{font-size:0.86rem;color:rgba(255,255,255,.82);line-height:1.45;}
 
 /* ── Title slide ──────────────────────────────────────────────────────── */
-.slide.title-slide .slide-inner{justify-content:center;align-items:center;text-align:center;}
+.slide.title-slide{position:relative;overflow:hidden;}
+.slide.title-slide .slide-art{
+  position:absolute;inset:0;pointer-events:none;z-index:0;
+  background:
+    radial-gradient(ellipse 60% 50% at 18% 18%,rgba(244,180,0,.07),transparent 60%),
+    radial-gradient(ellipse 55% 45% at 85% 85%,rgba(107,169,248,.07),transparent 60%),
+    repeating-linear-gradient(0deg,transparent 0 38px,rgba(255,255,255,.022) 39px),
+    repeating-linear-gradient(90deg,transparent 0 38px,rgba(255,255,255,.018) 39px);
+}
+.slide.title-slide .slide-art::before{
+  content:"";position:absolute;left:-4%;top:14%;width:300px;height:210px;
+  border:2px solid rgba(107,169,248,.16);border-radius:36px;transform:rotate(-5deg);
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.03);
+}
+.slide.title-slide .slide-art::after{
+  content:"";position:absolute;inset:0;
+  background:linear-gradient(115deg,transparent 0 52%,rgba(244,180,0,.10) 52.2%,transparent 52.6%);
+}
+.slide.title-slide .slide-inner{position:relative;z-index:1;justify-content:center;align-items:center;text-align:center;}
 .slide.title-slide .title-mark{
-  width:74px;height:74px;border:1px solid var(--gold);border-radius:20px;
-  display:grid;place-items:center;color:var(--gold);margin:0 auto 22px;
-  background:linear-gradient(145deg,rgba(255,255,255,.05),rgba(255,255,255,.01));
+  display:flex;justify-content:center;align-items:center;margin:0 auto 26px;min-height:84px;color:var(--gold);
 }
 .slide.title-slide .title-mark svg{display:block;}
 .slide.title-slide .title-kicker{color:var(--gold);font-weight:800;font-size:0.92rem;letter-spacing:0.2em;text-transform:uppercase;margin-bottom:14px;}

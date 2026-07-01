@@ -21,16 +21,12 @@ function formatMonthLabel(folderName: string): string {
   return name ? `${name} ${m[2]}` : folderName;
 }
 
-function formatIssueDate(d = new Date()): string {
-  return `${String(d.getDate()).padStart(2, "0")} / ${String(d.getMonth() + 1).padStart(2, "0")} / ${d.getFullYear()}`;
-}
-
 export function buildExecutiveDeck(
   input: ExecutiveReportInput,
   employeeDisplayNames: Record<string, string> = {},
 ): string {
   const model = buildReportModel(input, employeeDisplayNames);
-  const slides = buildDeckSlides(model, formatIssueDate());
+  const slides = buildDeckSlides(model);
   return buildDeckHtml(slides, formatMonthLabel(input.monthFolderName));
 }
 

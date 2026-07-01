@@ -1,4 +1,4 @@
-// The executive Presentation slides (design §6 / blueprint §3). ~14 curated 16:9
+// The executive Presentation slides (design §6 / blueprint §3). ~15 curated 16:9
 // landscape slides built from a single ReportModel — top-N highlights only, one
 // message + one hero visual + the decision each supports. No per-slide recompute,
 // no runtime scaling, no emoji. Honesty discipline (§3.7): insufficient-data slides
@@ -77,27 +77,54 @@ function accuracyOf(r: InspectorRollup): number | null {
 }
 
 // ── Slide 1 — Title ───────────────────────────────────────────────────────
-export function titleSlide(model: ReportModel, issueDate: string): string {
+export function titleSlide(model: ReportModel): string {
   const body = `
-    <div class="title-mark"><img src="https://zatca.gov.sa/_layouts/15/zatca/Design/images/ZATCA-logo.svg" alt="هيئة الزكاة والضريبة والجمارك" width="64" height="64" style="width:64px;height:64px;object-fit:contain;filter:brightness(0) invert(1)" onerror="this.style.display='none';this.nextElementSibling.style.display='inline-flex';"/><span style="display:none">${icon("shield", 38)}</span></div>
+    <div class="title-mark"><img src="https://zatca.gov.sa/_layouts/15/zatca/Design/images/ZATCA-logo.svg" alt="هيئة الزكاة والضريبة والجمارك" style="height:78px;width:auto;max-width:320px;object-fit:contain;filter:brightness(0) invert(1)" onerror="this.style.display='none';this.nextElementSibling.style.display='inline-flex';"/><span style="display:none">${icon("shield", 48)}</span></div>
     <div class="title-kicker">عرض تنفيذي</div>
     <h1>تقرير ضمان جودة فحص الأشعة</h1>
-    <div class="title-sub">المجتمع المدروس: ${model.summary.periodId}</div>
-    <div class="title-meta">تاريخ الإصدار: ${issueDate}</div>
+    <div class="title-sub">تقرير شهر: ${model.summary.periodId}</div>
     <div class="title-rule"></div>
-    <div class="title-classify"><span>${icon("shield", 14)}</span>داخلي — للاستخدام التنفيذي</div>
-    <div class="title-levels">
-      <div class="l1">المستوى الأول</div>
-      <div class="l2">المستوى الثاني</div>
-      <div class="l3">المراجعة (المعيار)</div>
-      <div class="l4">الفرق المساندة</div>
-    </div>`;
+    <div class="title-classify"><span>${icon("shield", 14)}</span>داخلي — للاستخدام التنفيذي</div>`;
   return `<section class="slide title-slide" id="slide-title" data-title="الغلاف">
+    <div class="slide-art" aria-hidden="true"></div>
     <div class="slide-inner">${body}</div>
   </section>`;
 }
 
-// ── Slide 2 — Executive summary ────────────────────────────────────────────
+// ── Slide 2 — الفهرس (agenda / roadmap) ─────────────────────────────────────
+export function agendaSlide(num: number, total: number): string {
+  // Static roadmap — the deck's slide order is fixed (unlike the Document, which has
+  // dynamic per-port pages), so these ranges are safe to state directly.
+  const items: { title: string; blurb: string; range: string }[] = [
+    { title: "ملخص المؤشرات الرئيسية", blurb: "الأرقام التي تحدد الحكم في نظرة واحدة.", range: "٠٣" },
+    { title: "مجتمع وعينة الفحص", blurb: "ماذا فحصنا، وبأي تغطية؟", range: "٠٤" },
+    { title: "نتائج دقة الأشعة", blurb: "هل قرارات المستويين دقيقة أمنيًا، وهل تتفق الفرق الأخرى؟", range: "٠٥–٠٩" },
+    { title: "الدراسات المتقدمة", blurb: "من الأدق بين المفتشين، وما الإجراء المطلوب؟", range: "١٠–١٥" },
+  ];
+  const body = `<div class="deck-agenda">${items
+    .map(
+      (it, i) => `<div class="deck-agenda-item">
+        <div class="deck-agenda-num">${String(i + 1).padStart(2, "0")}</div>
+        <div class="deck-agenda-body"><h4>${it.title}</h4><p>${it.blurb}</p></div>
+        <div class="deck-agenda-range">${it.range}</div>
+      </div>`,
+    )
+    .join("")}</div>`;
+  return slide({
+    id: "slide-agenda",
+    title: "الفهرس",
+    num,
+    total,
+    eyebrow: "الفهرس",
+    iconName: "layers",
+    headline: "ما الذي يغطيه هذا العرض",
+    subhead: "أربعة محاور من مجتمع الحالات إلى القرارات المطلوبة.",
+    body,
+    decision: "خارطة القراءة — أين تجد كل قرار داخل العرض.",
+  });
+}
+
+// ── Slide 3 — Executive summary ────────────────────────────────────────────
 export function execSummarySlide(model: ReportModel, num: number, total: number): string {
   const s = model.summary;
   const verdict =
@@ -125,7 +152,7 @@ export function execSummarySlide(model: ReportModel, num: number, total: number)
   });
 }
 
-// ── Slide 3 — What we examined ─────────────────────────────────────────────
+// ── Slide 4 — What we examined ─────────────────────────────────────────────
 export function scopeSlide(model: ReportModel, num: number, total: number): string {
   const p = model.population;
   // Population split by port type — land (بري) vs sea (بحري).
@@ -161,7 +188,7 @@ export function scopeSlide(model: ReportModel, num: number, total: number): stri
   });
 }
 
-// ── Slide 4 — The verdict: L1/L2 accuracy ──────────────────────────────────
+// ── Slide 5 — The verdict: L1/L2 accuracy ──────────────────────────────────
 export function verdictSlide(model: ReportModel, num: number, total: number): string {
   const s = model.summary;
   const t = model.errorAnalysis.totals;
@@ -208,7 +235,7 @@ export function verdictSlide(model: ReportModel, num: number, total: number): st
   });
 }
 
-// ── Slide 5 — Where we're strong / weak (ports) ────────────────────────────
+// ── Slide 6 — Where we're strong / weak (ports) ────────────────────────────
 export function portsSlide(model: ReportModel, num: number, total: number): string {
   const ports = [...model.portAccuracy].sort((a, b) => (b.accuracy ?? -1) - (a.accuracy ?? -1));
   const rankable = ports.filter((p) => isRankable(p.band) && p.accuracy !== null);
@@ -255,7 +282,7 @@ export function portsSlide(model: ReportModel, num: number, total: number): stri
   });
 }
 
-// ── Slide 6 — Does L2 review help ──────────────────────────────────────────
+// ── Slide 7 — Does L2 review help ──────────────────────────────────────────
 export function levelSlide(model: ReportModel, num: number, total: number): string {
   const k = model.kpis;
   const grouped = groupedBars(
@@ -286,7 +313,7 @@ export function levelSlide(model: ReportModel, num: number, total: number): stri
   });
 }
 
-// ── Slide 7 — Do others agree our calls (cross-team) ───────────────────────
+// ── Slide 8 — Do others agree our calls (cross-team) ───────────────────────
 export function corroborationSlide(model: ReportModel, num: number, total: number): string {
   const rows = model.resultComparison.reviewerAgreement.filter((r) => r.comparable > 0);
   if (rows.length === 0) {
@@ -329,7 +356,7 @@ export function corroborationSlide(model: ReportModel, num: number, total: numbe
   });
 }
 
-// ── Slide 8 — What drives quality (image quality & marking) ────────────────
+// ── Slide 9 — What drives quality (image quality & marking) ────────────────
 export function driversSlide(model: ReportModel, num: number, total: number): string {
   const q = model.imageQuality;
   const grouped = groupedBars(
@@ -362,7 +389,7 @@ export function driversSlide(model: ReportModel, num: number, total: number): st
   });
 }
 
-// ── Slide 9 — Top inspectors (by volume) ───────────────────────────────────
+// ── Slide 10 — Top inspectors (by volume) ───────────────────────────────────
 export function topInspectorsSlide(model: ReportModel, num: number, total: number): string {
   if (!model.employeeOverview.inspectorIdentityMapped) {
     return slide({
@@ -406,7 +433,7 @@ export function topInspectorsSlide(model: ReportModel, num: number, total: numbe
   });
 }
 
-// ── Slide 10 — Inspectors needing support ──────────────────────────────────
+// ── Slide 11 — Inspectors needing support ──────────────────────────────────
 export function supportSlide(model: ReportModel, num: number, total: number): string {
   if (!model.employeeOverview.inspectorIdentityMapped) {
     return slide({
@@ -470,7 +497,7 @@ export function supportSlide(model: ReportModel, num: number, total: number): st
   });
 }
 
-// ── Slide 11 — The biggest risk (missed-suspicion concentration) ───────────
+// ── Slide 12 — The biggest risk (missed-suspicion concentration) ───────────
 export function riskSlide(model: ReportModel, num: number, total: number): string {
   const byPort = model.errorAnalysis.byPort
     .filter((p) => p.missedSuspicion > 0)
@@ -517,7 +544,7 @@ export function riskSlide(model: ReportModel, num: number, total: number): strin
   });
 }
 
-// ── Slide 12 — Priority actions ────────────────────────────────────────────
+// ── Slide 13 — Priority actions ────────────────────────────────────────────
 export function actionsSlide(model: ReportModel, num: number, total: number): string {
   const actions = model.actions.slice(0, 4);
   const body =
@@ -544,7 +571,7 @@ export function actionsSlide(model: ReportModel, num: number, total: number): st
   });
 }
 
-// ── Slide 13 — Decisions required ──────────────────────────────────────────
+// ── Slide 14 — Decisions required ──────────────────────────────────────────
 export function decisionsSlide(model: ReportModel, num: number, total: number): string {
   const decisions: string[] = [
     "اعتماد عتبات كفاية البيانات النهائية (غير كافٍ / محدود / كافٍ).",
@@ -568,7 +595,7 @@ export function decisionsSlide(model: ReportModel, num: number, total: number): 
   });
 }
 
-// ── Slide 14 — Next period ─────────────────────────────────────────────────
+// ── Slide 15 — Next period ─────────────────────────────────────────────────
 export function nextPeriodSlide(model: ReportModel, num: number, total: number): string {
   void model;
   const steps = [
@@ -592,9 +619,9 @@ export function nextPeriodSlide(model: ReportModel, num: number, total: number):
 }
 
 /** Build every deck slide in order (blueprint §3). Returns the joined HTML. */
-export function buildDeckSlides(model: ReportModel, issueDate: string): string {
+export function buildDeckSlides(model: ReportModel): string {
   const builders: Array<(m: ReportModel, num: number, total: number) => string> = [
-    // slide 1 (title) is special — handled separately
+    // slide 1 (title) and slide 2 (agenda) are special — handled separately below
     execSummarySlide,
     scopeSlide,
     verdictSlide,
@@ -609,10 +636,10 @@ export function buildDeckSlides(model: ReportModel, issueDate: string): string {
     decisionsSlide,
     nextPeriodSlide,
   ];
-  const total = builders.length + 1; // +1 for the title slide
-  const slides: string[] = [titleSlide(model, issueDate)];
+  const total = builders.length + 2; // +1 title, +1 agenda
+  const slides: string[] = [titleSlide(model), agendaSlide(2, total)];
   builders.forEach((build, i) => {
-    slides.push(build(model, i + 2, total));
+    slides.push(build(model, i + 3, total));
   });
   return slides.join("\n");
 }
