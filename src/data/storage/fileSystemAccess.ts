@@ -12,6 +12,7 @@ import {
 import {
   getSystemRoot,
   getUserDataRoot,
+  WORKSPACE_ROOTS,
 } from "../workspace/workspacePaths";
 
 import {
@@ -287,9 +288,9 @@ export async function createWorkspaceStructure(
     { create: true }
   );
 
-  await directoryHandle.getDirectoryHandle("1-Population", { create: true });
-  await directoryHandle.getDirectoryHandle("3-User Data", { create: true });
-  await directoryHandle.getDirectoryHandle("4-Reports", { create: true });
+  await directoryHandle.getDirectoryHandle(WORKSPACE_ROOTS.population, { create: true });
+  await directoryHandle.getDirectoryHandle(WORKSPACE_ROOTS.userData, { create: true });
+  await directoryHandle.getDirectoryHandle(WORKSPACE_ROOTS.reports, { create: true });
 
   const systemHandle = await directoryHandle.getDirectoryHandle(
     WORKSPACE_FILE_NAMES.systemFolder,
@@ -313,7 +314,7 @@ export async function createWorkspaceStructure(
     { create: true }
   );
 
-  const userDataHandle = await directoryHandle.getDirectoryHandle("3-User Data", {
+  const userDataHandle = await directoryHandle.getDirectoryHandle(WORKSPACE_ROOTS.userData, {
     create: true
   });
 

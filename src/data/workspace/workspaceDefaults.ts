@@ -14,7 +14,7 @@ import {
   MANAGED_ROLES,
   createEmptyUserManagementState
 } from "../../auth/userManagement";
-import { WORKSPACE_ROOTS } from "./workspacePaths";
+import { SAMPLE_SUBFOLDERS, SYSTEM_FOLDER_NAMES, WORKSPACE_ROOTS } from "./workspacePaths";
 
 export const WORKSPACE_FILE_NAMES = {
   manifest: "workspace.manifest.json",
@@ -25,9 +25,9 @@ export const WORKSPACE_FILE_NAMES = {
   sampleDistribution: "sample.distribution.json",
   employeeAnswersFolder: WORKSPACE_ROOTS.samples,
   systemFolder: WORKSPACE_ROOTS.system,
-  locksFolder: "1-Locks",
-  auditFolder: "2-Audit",
-  backupsFolder: "3-Backups",
+  locksFolder: SYSTEM_FOLDER_NAMES.locks,
+  auditFolder: SYSTEM_FOLDER_NAMES.audit,
+  backupsFolder: SYSTEM_FOLDER_NAMES.backups,
   templatesFolder: WORKSPACE_ROOTS.templates
 } as const;
 
@@ -115,7 +115,7 @@ export function createDefaultWorkspaceManifest(
         dataProcessed: WORKSPACE_FILE_NAMES.dataProcessed,
         sampleMaster: WORKSPACE_FILE_NAMES.sampleMaster,
         sampleDistribution: WORKSPACE_FILE_NAMES.sampleDistribution,
-        employeeAnswersFolder: `${WORKSPACE_ROOTS.samples}/{month}/2-Employees`,
+        employeeAnswersFolder: `${WORKSPACE_ROOTS.samples}/{month}/${SAMPLE_SUBFOLDERS.employees}`,
         systemFolder: WORKSPACE_FILE_NAMES.systemFolder,
         locksFolder: WORKSPACE_FILE_NAMES.locksFolder,
         auditFolder: WORKSPACE_FILE_NAMES.auditFolder

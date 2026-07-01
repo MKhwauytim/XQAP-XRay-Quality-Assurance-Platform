@@ -4,6 +4,138 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v35.1 — 2026-07-01 — Wire workspace init path to central WORKSPACE_ROOTS/SYSTEM_FOLDER_NAMES constants
+
+Task 3 of the workspace file/folder naming convention refactor. `workspaceDefaults.ts` and
+`fileSystemAccess.ts` (the `createWorkspaceStructure()` init path) previously hardcoded their
+own old title-case folder-name literals (`"1-Locks"`, `"2-Audit"`, `"3-Backups"`,
+`"1-Population"`, `"3-User Data"`, `"4-Reports"`, `"2-Employees"`) instead of importing the
+lowercase kebab-case constants already added to `workspacePaths.ts` in Task 1. Straight rename,
+no backwards-compatibility fallback.
+
+**File:** `src/data/workspace/workspaceDefaults.ts`
+
+**Before:**
+```ts
+import { WORKSPACE_ROOTS } from "./workspacePaths";
+
+export const WORKSPACE_FILE_NAMES = {
+  manifest: "workspace.manifest.json",
+  usersPermissions: "users.permissions.json",
+  dataRaw: "data.raw.json",
+  dataProcessed: "data.processed.json",
+  sampleMaster: "sample.master.json",
+  sampleDistribution: "sample.distribution.json",
+  employeeAnswersFolder: WORKSPACE_ROOTS.samples,
+  systemFolder: WORKSPACE_ROOTS.system,
+  locksFolder: "1-Locks",
+  auditFolder: "2-Audit",
+  backupsFolder: "3-Backups",
+  templatesFolder: WORKSPACE_ROOTS.templates
+} as const;
+// ...
+        employeeAnswersFolder: `${WORKSPACE_ROOTS.samples}/{month}/2-Employees`,
+```
+
+**After:**
+```ts
+import { SAMPLE_SUBFOLDERS, SYSTEM_FOLDER_NAMES, WORKSPACE_ROOTS } from "./workspacePaths";
+
+export const WORKSPACE_FILE_NAMES = {
+  manifest: "workspace.manifest.json",
+  usersPermissions: "users.permissions.json",
+  dataRaw: "data.raw.json",
+  dataProcessed: "data.processed.json",
+  sampleMaster: "sample.master.json",
+  sampleDistribution: "sample.distribution.json",
+  employeeAnswersFolder: WORKSPACE_ROOTS.samples,
+  systemFolder: WORKSPACE_ROOTS.system,
+  locksFolder: SYSTEM_FOLDER_NAMES.locks,
+  auditFolder: SYSTEM_FOLDER_NAMES.audit,
+  backupsFolder: SYSTEM_FOLDER_NAMES.backups,
+  templatesFolder: WORKSPACE_ROOTS.templates
+} as const;
+// ...
+        employeeAnswersFolder: `${WORKSPACE_ROOTS.samples}/{month}/${SAMPLE_SUBFOLDERS.employees}`,
+```
+
+**File:** `src/data/storage/fileSystemAccess.ts`
+
+**Before:**
+```ts
+import {
+  getSystemRoot,
+  getUserDataRoot,
+} from "../workspace/workspacePaths";
+// ...
+  await directoryHandle.getDirectoryHandle("1-Population", { create: true });
+  await directoryHandle.getDirectoryHandle("3-User Data", { create: true });
+  await directoryHandle.getDirectoryHandle("4-Reports", { create: true });
+// ...
+  const userDataHandle = await directoryHandle.getDirectoryHandle("3-User Data", {
+    create: true
+  });
+```
+
+**After:**
+```ts
+import {
+  getSystemRoot,
+  getUserDataRoot,
+  WORKSPACE_ROOTS,
+} from "../workspace/workspacePaths";
+// ...
+  await directoryHandle.getDirectoryHandle(WORKSPACE_ROOTS.population, { create: true });
+  await directoryHandle.getDirectoryHandle(WORKSPACE_ROOTS.userData, { create: true });
+  await directoryHandle.getDirectoryHandle(WORKSPACE_ROOTS.reports, { create: true });
+// ...
+  const userDataHandle = await directoryHandle.getDirectoryHandle(WORKSPACE_ROOTS.userData, {
+    create: true
+  });
+```
+
+**File:** `src/data/storage/fileSystemAccess.test.ts`
+
+**Before:**
+```ts
+  const population = await dir.getDirectoryHandle("1-Population", { create: false });
+  expect(population.name).toBe("1-Population");
+
+  const samples = await dir.getDirectoryHandle("2-Samples", { create: false });
+  expect(samples.name).toBe("2-Samples");
+
+  const userData = await dir.getDirectoryHandle("3-User Data", { create: false });
+  expect(userData.name).toBe("3-User Data");
+
+  const system = await dir.getDirectoryHandle("5-System", { create: false });
+  const backups = await system.getDirectoryHandle("3-Backups", { create: false });
+  expect(backups.name).toBe("3-Backups");
+
+  const templates = await dir.getDirectoryHandle("6-Templates", { create: false });
+  expect(templates.name).toBe("6-Templates");
+```
+
+**After:**
+```ts
+  const population = await dir.getDirectoryHandle("1-population", { create: false });
+  expect(population.name).toBe("1-population");
+
+  const samples = await dir.getDirectoryHandle("2-samples", { create: false });
+  expect(samples.name).toBe("2-samples");
+
+  const userData = await dir.getDirectoryHandle("3-user-data", { create: false });
+  expect(userData.name).toBe("3-user-data");
+
+  const system = await dir.getDirectoryHandle("5-system", { create: false });
+  const backups = await system.getDirectoryHandle("backups", { create: false });
+  expect(backups.name).toBe("backups");
+
+  const templates = await dir.getDirectoryHandle("6-templates", { create: false });
+  expect(templates.name).toBe("6-templates");
+```
+
+---
+
 ## v35.0 — 2026-07-01 — Lowercase month folder names (kebab-case)
 
 **File:** `src/data/population/monthFolder.ts`
