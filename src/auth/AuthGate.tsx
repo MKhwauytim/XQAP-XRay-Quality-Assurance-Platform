@@ -165,13 +165,17 @@ export default function AuthGate({ children }: AuthGateProps) {
   useEffect(() => {
     if (!session && directoryHandle?.name === DEMO_WORKSPACE_NAME) {
       isDemoSessionRef.current = true;
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- derive the demo session from the mounted demo workspace; guarded by !session so it settles in one step
-      setSession({
+      const demoSession: AuthSession = {
         role: ADMIN_ROLE,
         username: VIEWER_USERNAME,
         loginAt: new Date().toISOString(),
         mode: "demo"
-      });
+      };
+      // LOG-01: register the session with the authSession module too, so
+      // permission checks (usePermissions → readSession) agree with the UI.
+      writeSession(demoSession);
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- derive the demo session from the mounted demo workspace; guarded by !session so it settles in one step
+      setSession(demoSession);
     }
   }, [directoryHandle, session]);
 

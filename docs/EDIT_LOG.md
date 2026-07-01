@@ -4,6 +4,210 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v37.12 — 2026-07-02 — Permission matrices: visible scrollbar + sticky label column (BUGFIX VIS-02)
+
+Fixes VIS-02 from `docs/audit/FULL_SYSTEM_AUDIT_2026-07-02.md`: on the صلاحيات الصفحات and
+صلاحيات الميزات matrices the leftmost role column (مدير) was clipped at laptop widths
+(entirely invisible at 1280×800). The wrapper *was* `overflow-x: auto`, but Windows overlay
+scrollbars gave zero affordance that more columns existed. Fix: always-visible thin scrollbar
+on both matrix wrappers + the page/feature label column is now `position: sticky` at the
+inline start, so the row labels stay put while the role columns scroll.
+
+**File:** `src/components/Sidebar/Tabs/UserManagement/UserManagement.css`
+
+**Before:**
+```css
+.um-perm-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--app-border);
+  border-radius: 14px;
+}
+```
+
+**After:**
+```css
+.um-perm-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--app-border);
+  border-radius: 14px;
+  /* VIS-02: overlay scrollbars hide the fact that role columns overflow —
+     force a visible thin scrollbar so the مدير column is discoverable. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--c-border-2) var(--c-surface-2);
+}
+
+.um-perm-table-wrap::-webkit-scrollbar,
+.um-feat-matrix-wrap::-webkit-scrollbar {
+  height: 10px;
+}
+
+.um-perm-table-wrap::-webkit-scrollbar-thumb,
+.um-feat-matrix-wrap::-webkit-scrollbar-thumb {
+  background: var(--c-border-2);
+  border-radius: 999px;
+}
+
+.um-perm-table-wrap::-webkit-scrollbar-track,
+.um-feat-matrix-wrap::-webkit-scrollbar-track {
+  background: var(--c-surface-2);
+}
+
+/* VIS-02: keep the label column pinned while role columns scroll. */
+.um-perm-tab-col,
+.um-perm-tab-name,
+.um-feat-label-col,
+.um-feat-name {
+  position: sticky;
+  inset-inline-start: 0;
+  z-index: 2;
+}
+```
+(plus the same `scrollbar-width`/`scrollbar-color` addition on `.um-feat-matrix-wrap`, and an
+explicit `background: #ffffff` on `.um-feat-name` / reliance on existing row backgrounds for
+`.um-perm-tab-name` so pinned cells don't turn transparent while scrolling)
+
+## v37.11 — 2026-07-02 — Demo banner moved in-flow; no longer covers the session toolbar (BUGFIX VIS-01)
+
+Fixes VIS-01 from `docs/audit/FULL_SYSTEM_AUDIT_2026-07-02.md`: the demo-mode banner was
+`position: fixed; top: 0; z-index: 9999`, sitting on top of the sticky `AdminToolbar`
+(z-index 1000). The toolbar — including the **logout button** — was visually clipped and
+completely unclickable in demo mode (verified via `elementFromPoint`). The banner is now a
+normal in-flow element rendered *after* the toolbar and *before* the app shell, so nothing
+overlaps; its inline styles moved to an `.app-demo-banner` class in `App.css`.
+
+**File:** `src/App.tsx`
+
+**Before:**
+```tsx
+  return (
+    <main className={`app-shell ${isSidebarCollapsed ? "sidebar-collapsed" : ""}`} dir="rtl">
+      {session.mode === "demo" && (
+        <div role="status" dir="rtl"
+          style={{ position: "fixed", insetInlineStart: 0, insetInlineEnd: 0, top: 0,
+            zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center",
+            gap: 8, padding: "7px 14px", fontSize: 12.5, fontWeight: 700, color: "#fff",
+            background: "linear-gradient(90deg, var(--c-navy-2), var(--c-navy))",
+            borderBottom: "1px solid var(--brand-premium)" }}>
+          وضع العرض التجريبي — للقراءة فقط (التعديل والحفظ معطّلان، والتصدير متاح)
+        </div>
+      )}
+      {bakWarning && (
+```
+
+**After:**
+```tsx
+  return (
+    <>
+      {session.mode === "demo" && (
+        <div role="status" dir="rtl" className="app-demo-banner">
+          وضع العرض التجريبي — للقراءة فقط (التعديل والحفظ معطّلان، والتصدير متاح)
+        </div>
+      )}
+      <main className={`app-shell ${isSidebarCollapsed ? "sidebar-collapsed" : ""}`} dir="rtl">
+        {bakWarning && (
+```
+(closing tag becomes `</main></>`; indentation of the main block otherwise unchanged)
+
+**File:** `src/App.css`
+
+**Before:**
+```css
+.app-backup-toast {
+```
+
+**After:**
+```css
+.app-demo-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 7px 14px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(90deg, var(--c-navy-2), var(--c-navy));
+  border-bottom: 1px solid var(--brand-premium);
+}
+
+.app-backup-toast {
+```
+
+## v37.10 — 2026-07-02 — Demo session registered with authSession module; demo never persisted (BUGFIX LOG-01/LOG-02)
+
+Fixes LOG-01 from `docs/audit/FULL_SYSTEM_AUDIT_2026-07-02.md`: the demo/viewer auto-login
+stored the session **only in AuthGate React state** and never called `writeSession()`, so
+`usePermissions()` → `readSession()` returned `null` → guest fallback → every `TabGuard`
+rendered "غير مصرح" while the sidebar (fed by the prop session) still showed all tabs. Demo
+mode now writes through `writeSession()` so both consumers see the same session (also closes
+LOG-02's observed disagreement). Safety: `writeSession` now keeps `mode: "demo"` sessions
+**runtime-only** — it clears rather than writes sessionStorage — so a read-only demo identity
+can never survive a reload and attach to a real workspace. Regression tests added.
+
+**File:** `src/auth/authSession.ts`
+
+**Before:**
+```ts
+export function writeSession(session: AuthSession): void {
+  runtimeSession = session;
+  writeStoredSession(session);
+  startAuthActivitySession(session);
+}
+```
+
+**After:**
+```ts
+export function writeSession(session: AuthSession): void {
+  runtimeSession = session;
+  // Demo sessions are runtime-only: never persisted, so a read-only demo
+  // identity can't survive a reload and attach to a real workspace (LOG-01).
+  if (session.mode === "demo") {
+    clearStoredSession();
+  } else {
+    writeStoredSession(session);
+  }
+  startAuthActivitySession(session);
+}
+```
+
+**File:** `src/auth/AuthGate.tsx`
+
+**Before:**
+```tsx
+    if (!session && directoryHandle?.name === DEMO_WORKSPACE_NAME) {
+      isDemoSessionRef.current = true;
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- derive the demo session from the mounted demo workspace; guarded by !session so it settles in one step
+      setSession({
+        role: ADMIN_ROLE,
+        username: VIEWER_USERNAME,
+        loginAt: new Date().toISOString(),
+        mode: "demo"
+      });
+    }
+```
+
+**After:**
+```tsx
+    if (!session && directoryHandle?.name === DEMO_WORKSPACE_NAME) {
+      isDemoSessionRef.current = true;
+      const demoSession: AuthSession = {
+        role: ADMIN_ROLE,
+        username: VIEWER_USERNAME,
+        loginAt: new Date().toISOString(),
+        mode: "demo"
+      };
+      // LOG-01: register the session with the authSession module too, so
+      // permission checks (usePermissions → readSession) agree with the UI.
+      writeSession(demoSession);
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- derive the demo session from the mounted demo workspace; guarded by !session so it settles in one step
+      setSession(demoSession);
+    }
+```
+
+**File:** `src/auth/authSession.test.ts` — added tests: demo session readable via
+`readSession`/`readRealSession` but absent from (fake) `sessionStorage`; normal session
+persisted; demo write clears a previously persisted session.
+
 ## v37.9 — 2026-07-02 — EDIT_LOG NUL-byte cleanup + .gitattributes text rules (TOOLING)
 
 Closes the remainder of DATA-02 from `docs/audit/MASTER_AUDIT_REPORT.md`: one stray NUL byte
