@@ -1,9 +1,8 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import type { BrowseDatasetKind } from "../population/populationStorage";
-import { getSystemRoot } from "../workspace/workspacePaths";
+import { getSystemRoot, SYSTEM_FOLDER_NAMES } from "../workspace/workspacePaths";
 
-const USER_PRESETS_FOLDER = "user-presets";
 const ADMIN_SHARED_PRESET_FILE = "admin-shared.browse-preset.json";
 
 export type BrowseDatasetPreset = {
@@ -38,7 +37,7 @@ async function getPresetDir(
   create: boolean
 ): Promise<DirectoryHandleLike> {
   const systemDir = await getSystemRoot(directoryHandle, create);
-  return systemDir.getDirectoryHandle(USER_PRESETS_FOLDER, { create });
+  return systemDir.getDirectoryHandle(SYSTEM_FOLDER_NAMES.userPresets, { create });
 }
 
 export async function loadUserBrowsePreset(

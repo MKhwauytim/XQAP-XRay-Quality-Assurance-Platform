@@ -1,7 +1,7 @@
 import type { DirectoryHandleLike } from "../../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../../storage/safeWrite";
 import { withResourceLock } from "../../storage/webLocks";
-import { getReportsRoot } from "../../workspace/workspacePaths";
+import { getReportsRoot, REPORTS_SUBFOLDERS } from "../../workspace/workspacePaths";
 import type { ReportDocument } from "../reportTypes";
 
 const INDEX_FILE = "designs.index.json";
@@ -19,7 +19,7 @@ async function getDesignsDir(
   directoryHandle: DirectoryHandleLike
 ): Promise<DirectoryHandleLike> {
   const reports = await getReportsRoot(directoryHandle, true);
-  return reports.getDirectoryHandle("designs", { create: true });
+  return reports.getDirectoryHandle(REPORTS_SUBFOLDERS.designs, { create: true });
 }
 
 export async function saveDesign(

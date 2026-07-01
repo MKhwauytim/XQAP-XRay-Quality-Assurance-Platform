@@ -4,6 +4,134 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v35.4 — 2026-07-01 — Centralize user-presets/feedback/designs folder names, no value change
+
+Task 7 of the workspace file/folder naming convention refactor. Three storage modules
+(`browsePresetStorage.ts`, `feedbackStorage.ts`, `reportDesignStorage.ts`) each had a local
+constant defining a folder name that already matched the target naming convention. This task
+removes the three duplicated local `const` definitions and makes each file import the equivalent
+value from `workspacePaths.ts` instead, centralizing to a single source of truth. No folder-name
+value changes — this is pure refactoring to prevent future drift.
+
+**File:** `src/data/preferences/browsePresetStorage.ts`
+
+**Before:**
+```ts
+import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import type { BrowseDatasetKind } from "../population/populationStorage";
+import { getSystemRoot } from "../workspace/workspacePaths";
+
+const USER_PRESETS_FOLDER = "user-presets";
+const ADMIN_SHARED_PRESET_FILE = "admin-shared.browse-preset.json";
+
+// ...
+
+async function getPresetDir(
+  directoryHandle: DirectoryHandleLike,
+  create: boolean
+): Promise<DirectoryHandleLike> {
+  const systemDir = await getSystemRoot(directoryHandle, create);
+  return systemDir.getDirectoryHandle(USER_PRESETS_FOLDER, { create });
+}
+```
+
+**After:**
+```ts
+import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import type { BrowseDatasetKind } from "../population/populationStorage";
+import { getSystemRoot, SYSTEM_FOLDER_NAMES } from "../workspace/workspacePaths";
+
+const ADMIN_SHARED_PRESET_FILE = "admin-shared.browse-preset.json";
+
+// ...
+
+async function getPresetDir(
+  directoryHandle: DirectoryHandleLike,
+  create: boolean
+): Promise<DirectoryHandleLike> {
+  const systemDir = await getSystemRoot(directoryHandle, create);
+  return systemDir.getDirectoryHandle(SYSTEM_FOLDER_NAMES.userPresets, { create });
+}
+```
+
+**File:** `src/data/feedback/feedbackStorage.ts`
+
+**Before:**
+```ts
+import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import { readJsonFile, writeJsonFile } from "../storage/fileSystemAccess";
+
+// ...
+
+const FEEDBACK_FOLDER = "feedback";
+const MESSAGES_FILE = "messages.json";
+
+async function getFeedbackDir(dir: DirectoryHandleLike): Promise<DirectoryHandleLike> {
+  return dir.getDirectoryHandle(FEEDBACK_FOLDER, { create: true });
+}
+```
+
+**After:**
+```ts
+import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import { readJsonFile, writeJsonFile } from "../storage/fileSystemAccess";
+import { SYSTEM_FOLDER_NAMES } from "../workspace/workspacePaths";
+
+// ...
+
+const MESSAGES_FILE = "messages.json";
+
+async function getFeedbackDir(dir: DirectoryHandleLike): Promise<DirectoryHandleLike> {
+  return dir.getDirectoryHandle(SYSTEM_FOLDER_NAMES.feedback, { create: true });
+}
+```
+
+**File:** `src/data/reportDesigner/storage/reportDesignStorage.ts`
+
+**Before:**
+```ts
+import type { DirectoryHandleLike } from "../../storage/fileSystemAccess";
+import { safeReadJson, safeWriteJson } from "../../storage/safeWrite";
+import { withResourceLock } from "../../storage/webLocks";
+import { getReportsRoot } from "../../workspace/workspacePaths";
+import type { ReportDocument } from "../reportTypes";
+
+const INDEX_FILE = "designs.index.json";
+
+// ...
+
+async function getDesignsDir(
+  directoryHandle: DirectoryHandleLike
+): Promise<DirectoryHandleLike> {
+  const reports = await getReportsRoot(directoryHandle, true);
+  return reports.getDirectoryHandle("designs", { create: true });
+}
+```
+
+**After:**
+```ts
+import type { DirectoryHandleLike } from "../../storage/fileSystemAccess";
+import { safeReadJson, safeWriteJson } from "../../storage/safeWrite";
+import { withResourceLock } from "../../storage/webLocks";
+import { getReportsRoot, REPORTS_SUBFOLDERS } from "../../workspace/workspacePaths";
+import type { ReportDocument } from "../reportTypes";
+
+const INDEX_FILE = "designs.index.json";
+
+// ...
+
+async function getDesignsDir(
+  directoryHandle: DirectoryHandleLike
+): Promise<DirectoryHandleLike> {
+  const reports = await getReportsRoot(directoryHandle, true);
+  return reports.getDirectoryHandle(REPORTS_SUBFOLDERS.designs, { create: true });
+}
+```
+
+---
+
 ## v35.3 — 2026-07-01 — Use SYSTEM_FOLDER_NAMES.powerbiExport and rename LISEZMOI.txt to README.txt
 
 Task 6 of the workspace file/folder naming convention refactor. `exportWriter.ts` previously
