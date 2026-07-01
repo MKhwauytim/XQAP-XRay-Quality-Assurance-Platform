@@ -50,7 +50,7 @@ import {
   subscribeToUserManagementChanges,
   type ManagedLoginUser
 } from "./userManagement";
-import { ORGANIZATION_PATH_TEXT } from "../branding/organization";
+import { ORGANIZATION_PATH_TEXT, ZATCA_LOGO_URL } from "../branding/organization";
 import { DEMO_WORKSPACE_NAME } from "../data/workspace/demoWorkspace";
 import { useWorkspace } from "../data/workspace/useWorkspace";
 
@@ -519,7 +519,7 @@ export default function AuthGate({ children }: AuthGateProps) {
           <div className="auth-brand-inner">
             <div className="auth-logo" aria-label="شعار النظام">
               <img
-                src="https://zatca.gov.sa/_layouts/15/zatca/Design/images/ZATCA-logo.svg"
+                src={ZATCA_LOGO_URL}
                 alt=""
                 aria-hidden="true"
                 onError={handleLogoError}

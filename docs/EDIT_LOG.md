@@ -4,6 +4,41 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v37.14 — 2026-07-02 — ZATCA logo bundled locally; no more zatca.gov.sa hot-link (BUGFIX VIS-05)
+
+Fixes VIS-05 from `docs/audit/FULL_SYSTEM_AUDIT_2026-07-02.md`: the brand logo was hot-linked
+from `https://zatca.gov.sa/...` in four places (sidebar, sign-in screen, executive-report
+cover, deck title slide). The product's core promise is a self-contained offline
+`dist/index.html` — and the generated reports are themselves standalone HTML files — so the
+logo silently broke without network (and made an external request from a government tool).
+The official SVG (36.9 kB, unmodified) now lives at `src/branding/zatca-logo.svg`, imported
+`?raw` and exposed as a `data:` URI so it works in dev, in the single-file build, and inside
+downloaded reports. `ZATCA_LOGO_URL` keeps its name so existing consumers are unchanged.
+
+**File:** `src/branding/zatca-logo.svg` (new — official mark, downloaded 2026-07-02)
+
+**File:** `src/branding/organization.ts`
+
+**Before:**
+```ts
+export const ZATCA_LOGO_URL =
+  "https://zatca.gov.sa/_layouts/15/zatca/Design/images/ZATCA-logo.svg";
+```
+
+**After:**
+```ts
+import zatcaLogoRaw from "./zatca-logo.svg?raw";
+
+/** Self-contained data URI: works offline in the app, the single-file build,
+ *  and inside generated standalone HTML reports (VIS-05). */
+export const ZATCA_LOGO_URL = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(zatcaLogoRaw)}`;
+```
+
+**File:** `src/auth/AuthGate.tsx` — sign-in logo `src` now `ZATCA_LOGO_URL` (was the literal URL).
+**File:** `src/data/reporting/executive/document/frontMatter.ts` — cover logo `src` now interpolates `ZATCA_LOGO_URL`.
+**File:** `src/data/reporting/executive/deck/slides.ts` — title-slide logo `src` now interpolates `ZATCA_LOGO_URL`.
+(all three keep their existing `onerror` fallbacks)
+
 ## v37.13 — 2026-07-02 — ChangeLog tab: bidi-correct English prose + Western digits (BUGFIX VIS-03/VIS-04)
 
 Fixes VIS-03/VIS-04 from `docs/audit/FULL_SYSTEM_AUDIT_2026-07-02.md`. Entry bodies and titles
