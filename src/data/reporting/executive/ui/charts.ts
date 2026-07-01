@@ -75,34 +75,26 @@ export type ChartOpts = {
 
 export function rankedBar(data: LabeledValue[], opts: ChartOpts = {}): string {
   if (!data || data.length === 0) return emptyState(opts.width, opts.height, opts.emptyNote);
-  const w = opts.width ?? 360;
-  const rowH = 26;
-  const gap = 8;
-  const h = opts.height ?? data.length * (rowH + gap) + gap;
-  const labelW = Math.min(120, Math.max(70, w * 0.32));
-  const valueW = 46;
-  const trackX = valueW;
-  const trackW = Math.max(10, w - labelW - valueW - 10);
+  // Rendered as HTML/CSS (not SVG): Arabic <text> inside SVG shapes unreliably across
+  // renderers, so labels + values live in HTML where RTL Arabic always shapes correctly.
+  // RTL row order (right → left): label · bar track (fills from right) · value.
   const max = Math.max(0, ...data.map((d) => (Number.isFinite(d.value) ? d.value : 0)));
-
-  const bars = data
+  const rows = data
     .map((d, i) => {
       const v = Number.isFinite(d.value) ? Math.max(0, d.value) : 0;
-      const frac = max > 0 ? v / max : 0; // guard divide-by-zero
-      const bw = clamp(frac, 0, 1) * trackW;
-      const y = gap + i * (rowH + gap);
-      const cy = y + rowH / 2;
+      const pct = max > 0 ? clamp((v / max) * 100, 0, 100) : 0;
+      const w = pct > 0 ? Math.max(3, pct) : 0;
       return (
-        `<rect x="${r(trackX)}" y="${r(y)}" width="${r(trackW)}" height="${r(rowH)}" rx="5" fill="${cssVar("line")}"/>` +
-        // RTL: bar grows from the right edge of the track leftward
-        `<rect x="${r(trackX + trackW - bw)}" y="${r(y)}" width="${r(bw)}" height="${r(rowH)}" rx="5" fill="${seriesColor(i)}"/>` +
-        `<text x="${r(w - 2)}" y="${r(cy)}" text-anchor="end" dominant-baseline="middle" font-size="${TYPE.caption}" fill="${cssVar("text")}">${escText(d.label)}</text>` +
-        `<text x="${r(2)}" y="${r(cy)}" text-anchor="start" dominant-baseline="middle" font-size="${TYPE.caption}" font-weight="700" fill="${cssVar("muted")}">${r(v)}</text>`
+        `<div style="display:flex;align-items:center;gap:12px;width:100%">` +
+        `<span style="flex:0 0 auto;min-width:96px;max-width:40%;text-align:right;font-weight:600;font-size:14px;color:${cssVar("text")};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escText(d.label)}</span>` +
+        `<span style="flex:1 1 auto;height:26px;border-radius:8px;background:${cssVar("line")};position:relative;overflow:hidden">` +
+        `<i style="position:absolute;inset-inline-end:0;top:0;height:100%;width:${r(w)}%;background:${seriesColor(i)};border-radius:8px"></i></span>` +
+        `<span style="flex:0 0 auto;min-width:38px;text-align:left;font-weight:800;font-size:14px;color:${cssVar("primary")}">${r(v)}</span>` +
+        `</div>`
       );
     })
     .join("");
-
-  return svgOpen(w, h) + bars + `</svg>`;
+  return `<div style="display:flex;flex-direction:column;justify-content:center;gap:12px;width:100%;height:100%">${rows}</div>`;
 }
 
 // ── donut ───────────────────────────────────────────────────────────────────

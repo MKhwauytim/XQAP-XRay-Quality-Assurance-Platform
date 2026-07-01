@@ -6,14 +6,19 @@ import { esc, fmtNum } from "../primitives";
 import { icon } from "../ui/icons";
 import { page, pageHeader } from "./shared";
 
-const ZATCA_LOGO = `<svg class="zatca-logo" width="56" height="56" viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <path d="M28 4 L50 14 L50 32 C50 44 28 52 28 52 C28 52 6 44 6 32 L6 14 Z" fill="rgba(244,180,0,0.12)" stroke="#f4b400" stroke-width="1.5"/>
-  <path d="M28 10 L44 18 L44 32 C44 40 28 47 28 47 C28 47 12 40 12 32 L12 18 Z" fill="none" stroke="rgba(244,180,0,0.3)" stroke-width="1"/>
-  <line x1="16" y1="26" x2="40" y2="26" stroke="rgba(244,180,0,0.5)" stroke-width="1.2"/>
-  <line x1="16" y1="30" x2="40" y2="30" stroke="rgba(244,180,0,0.5)" stroke-width="1.2"/>
-  <line x1="16" y1="34" x2="40" y2="34" stroke="rgba(244,180,0,0.5)" stroke-width="1.2"/>
-  <text x="28" y="22" text-anchor="middle" font-family="Somar,Arial" font-size="11" font-weight="700" fill="#f4b400">زكاة</text>
-</svg>`;
+// Official ZATCA logo (same source as the sign-in screen) with a graceful inline-SVG
+// fallback so the report still shows a mark when opened offline / printed without network.
+const ZATCA_LOGO = `<span class="zatca-logo" style="display:inline-flex;align-items:center;justify-content:center;width:64px;height:64px">
+  <img src="https://zatca.gov.sa/_layouts/15/zatca/Design/images/ZATCA-logo.svg" alt="هيئة الزكاة والضريبة والجمارك" width="64" height="64" style="width:64px;height:64px;object-fit:contain;filter:brightness(0) invert(1)" onerror="this.style.display='none';this.nextElementSibling.style.display='block';"/>
+  <svg width="56" height="56" viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:none">
+    <path d="M28 4 L50 14 L50 32 C50 44 28 52 28 52 C28 52 6 44 6 32 L6 14 Z" fill="rgba(244,180,0,0.12)" stroke="#f4b400" stroke-width="1.5"/>
+    <path d="M28 10 L44 18 L44 32 C44 40 28 47 28 47 C28 47 12 40 12 32 L12 18 Z" fill="none" stroke="rgba(244,180,0,0.3)" stroke-width="1"/>
+    <line x1="16" y1="26" x2="40" y2="26" stroke="rgba(244,180,0,0.5)" stroke-width="1.2"/>
+    <line x1="16" y1="30" x2="40" y2="30" stroke="rgba(244,180,0,0.5)" stroke-width="1.2"/>
+    <line x1="16" y1="34" x2="40" y2="34" stroke="rgba(244,180,0,0.5)" stroke-width="1.2"/>
+    <text x="28" y="22" text-anchor="middle" font-family="Somar,Arial" font-size="11" font-weight="700" fill="#f4b400">زكاة</text>
+  </svg>
+</span>`;
 
 export function buildCover(model: ReportModel, issueDate: string): string {
   return `<section class="page cover" id="page-cover" data-title="الغلاف">

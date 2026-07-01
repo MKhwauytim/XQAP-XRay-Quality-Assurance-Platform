@@ -4,6 +4,27 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v34.3 — 2026-07-01 — Report visual QA fixes: ranked-bar labels, logo, land/sea donut, headline (BUG)
+
+Visual-QA pass (rendered document + deck in a browser). Fixes:
+- **Ranked-bar labels** (`ui/charts.ts`): rebuilt `rankedBar` as HTML/CSS instead of SVG —
+  Arabic `<text>` inside SVG shaped unreliably (labels rendered as illegible marks). Labels
+  now sit legibly at the right, value at the left, proportional bar between. Affects every
+  ranked-bar (population-by-port, accuracy-by-port, deck ports/cross-team). Tests updated.
+- **Logo** (`document/frontMatter.ts` cover, `deck/slides.ts` title): use the sign-in
+  screen's official ZATCA logo (external URL) with an inline-SVG shield fallback via
+  `onerror`, so it renders online and offline/print.
+- **Scope-slide donut** (`deck/slides.ts`): now shows land (بري) vs sea (بحري) port split
+  with counts in the caption, instead of سليمة/اشتباه.
+- **Deck exec-summary headline**: "الحُكم في سطر واحد" → "الخلاصة التنفيذية".
+
+**File:** `src/data/reporting/executive/ui/charts.ts` — `rankedBar` returns HTML bars.
+**File:** `src/data/reporting/executive/ui/charts.test.ts` — ranked-bar asserts HTML.
+**File:** `src/data/reporting/executive/document/frontMatter.ts` — ZATCA logo img + fallback.
+**File:** `src/data/reporting/executive/deck/slides.ts` — title logo, land/sea donut, headline.
+
+---
+
 ## v34.2 — 2026-06-30 — Deck verdict slide: gate on image-level accuracy, not inspector evaluability (BUG)
 
 Visual QA found the deck's flagship "حُكم الدقة" slide showing a false

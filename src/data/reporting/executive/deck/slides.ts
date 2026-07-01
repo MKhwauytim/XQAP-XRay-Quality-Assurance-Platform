@@ -79,7 +79,7 @@ function accuracyOf(r: InspectorRollup): number | null {
 // ── Slide 1 — Title ───────────────────────────────────────────────────────
 export function titleSlide(model: ReportModel, issueDate: string): string {
   const body = `
-    <div class="title-mark">${icon("shield", 38)}</div>
+    <div class="title-mark"><img src="https://zatca.gov.sa/_layouts/15/zatca/Design/images/ZATCA-logo.svg" alt="هيئة الزكاة والضريبة والجمارك" width="64" height="64" style="width:64px;height:64px;object-fit:contain;filter:brightness(0) invert(1)" onerror="this.style.display='none';this.nextElementSibling.style.display='inline-flex';"/><span style="display:none">${icon("shield", 38)}</span></div>
     <div class="title-kicker">عرض تنفيذي</div>
     <h1>تقرير ضمان جودة فحص الأشعة</h1>
     <div class="title-sub">المجتمع المدروس: ${model.summary.periodId}</div>
@@ -118,7 +118,7 @@ export function execSummarySlide(model: ReportModel, num: number, total: number)
     total,
     eyebrow: "الملخص التنفيذي",
     iconName: "chart",
-    headline: "الحُكم في سطر واحد",
+    headline: "الخلاصة التنفيذية",
     subhead: verdict,
     body: band,
     decision: "يحدّد جدول أعمال الاجتماع والمؤشرات التي تستحق القرار.",
@@ -128,9 +128,15 @@ export function execSummarySlide(model: ReportModel, num: number, total: number)
 // ── Slide 3 — What we examined ─────────────────────────────────────────────
 export function scopeSlide(model: ReportModel, num: number, total: number): string {
   const p = model.population;
+  // Population split by port type — land (بري) vs sea (بحري).
+  const sea = model.rows.filter((r) => (r.portType ?? "").includes("بحري")).length;
+  const land = model.rows.filter((r) => {
+    const t = r.portType ?? "";
+    return t.includes("بري") && !t.includes("بحري");
+  }).length;
   const donutData = [
-    { label: "سليمة", value: p.clean },
-    { label: "اشتباه", value: p.suspicious },
+    { label: "منافذ برية", value: land },
+    { label: "منافذ بحرية", value: sea },
   ];
   const left = heroNumber({
     value: fmtNum(p.total),
@@ -139,7 +145,7 @@ export function scopeSlide(model: ReportModel, num: number, total: number): stri
     tone: "gold",
   });
   const right = heroChart(donut(donutData, { width: 240, height: 240 }), {
-    caption: "توزيع المجتمع: سليمة مقابل اشتباه",
+    caption: `توزيع المنافذ: ${fmtNum(land)} برية · ${fmtNum(sea)} بحرية`,
   });
   return slide({
     id: "slide-scope",

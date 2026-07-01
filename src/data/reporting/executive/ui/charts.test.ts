@@ -29,16 +29,19 @@ function assertSvg(svg: string): void {
 }
 
 describe("rankedBar", () => {
-  it("renders a valid svg with bars", () => {
-    const svg = rankedBar(
+  it("renders HTML bars with legible labels", () => {
+    // rankedBar renders HTML/CSS (not SVG) so RTL Arabic labels shape reliably.
+    const html = rankedBar(
       [
         { label: "ميناء أ", value: 95 },
         { label: "ميناء ب", value: 60 },
       ],
       {},
     );
-    assertSvg(svg);
-    expect(svg).toContain("ميناء أ");
+    expect(typeof html).toBe("string");
+    expect(html).toContain("<div");
+    expect(html).toContain("ميناء أ");
+    expect(html).not.toMatch(EMOJI_RE);
   });
 
   it("handles empty data with a neutral placeholder", () => {
@@ -48,10 +51,10 @@ describe("rankedBar", () => {
   });
 
   it("does not divide by zero when all values are zero", () => {
-    const svg = rankedBar([{ label: "x", value: 0 }], {});
-    assertSvg(svg);
-    expect(svg).not.toContain("NaN");
-    expect(svg).not.toContain("Infinity");
+    const html = rankedBar([{ label: "x", value: 0 }], {});
+    expect(html).toContain("<div");
+    expect(html).not.toContain("NaN");
+    expect(html).not.toContain("Infinity");
   });
 });
 
