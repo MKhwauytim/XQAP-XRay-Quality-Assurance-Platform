@@ -4,6 +4,45 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v34.4 — 2026-07-01 — Fix report crash on population.final.json written before the five-source pipeline (BUG)
+
+Generating the executive report from the app failed with "حدث خطأ أثناء توليد التقرير".
+Root cause: `population.final.json` saved before v28.0 has no `otherResults`/`notes`, but
+consumers read `pop.otherResults.manual.result` without guarding → throws on the missing
+field. (Tests passed because fixtures always include the field.) Guarded every direct read
+of `otherResults`/`notes` on a `PreparedPopulationRow` to default to the null shape, plus a
+regression test that builds the report from a legacy row.
+
+**File:** `src/data/reporting/executiveReportData.ts`
+
+**Before:**
+```ts
+      otherResults: {
+        manual: { result: pop.otherResults.manual.result, employeeId: pop.otherResults.manual.employeeId },
+        opposite: { result: pop.otherResults.opposite.result, employeeId: pop.otherResults.opposite.employeeId },
+        liveMeans: { result: pop.otherResults.liveMeans.result, employeeId: pop.otherResults.liveMeans.employeeId },
+      },
+      notes: pop.notes,
+```
+
+**After:**
+```ts
+      otherResults: {
+        manual: { result: pop.otherResults?.manual?.result ?? null, employeeId: pop.otherResults?.manual?.employeeId ?? null },
+        opposite: { result: pop.otherResults?.opposite?.result ?? null, employeeId: pop.otherResults?.opposite?.employeeId ?? null },
+        liveMeans: { result: pop.otherResults?.liveMeans?.result ?? null, employeeId: pop.otherResults?.liveMeans?.employeeId ?? null },
+      },
+      notes: pop.notes ?? null,
+```
+
+**File:** `src/components/Sidebar/Tabs/Population/processing/populationExporter.ts` — same
+optional-chaining guard on the `otherResults`/`notes` export columns.
+
+**File:** `src/data/reporting/executiveReport.test.ts` — regression test: `buildExecutiveReport`
+on a population row with `otherResults`/`notes` deleted must not throw.
+
+---
+
 ## v34.3 — 2026-07-01 — Report visual QA fixes: ranked-bar labels, logo, land/sea donut, headline (BUG)
 
 Visual-QA pass (rendered document + deck in a browser). Fixes:

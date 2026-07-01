@@ -88,4 +88,23 @@ describe("executive report html", () => {
     expect(html).not.toContain("Inspection Workspace");
     expect(html).not.toContain("Page 1");
   });
+
+  it("does not crash on legacy population rows missing otherResults/notes (v28.0 back-compat)", () => {
+    // population.final.json written before the five-source pipeline has no
+    // otherResults/notes; the report must default them, not throw.
+    const legacy = row("XR-LEGACY");
+    delete (legacy as Partial<PreparedPopulationRow>).otherResults;
+    delete (legacy as Partial<PreparedPopulationRow>).notes;
+    expect(() =>
+      buildExecutiveReport({
+        monthFolderName: "6-June-2026",
+        populationRows: [legacy],
+        sample: null,
+        distribution: null,
+        employeeFiles: [],
+        template: null,
+        config: DEFAULT_EXEC_CONFIG,
+      }),
+    ).not.toThrow();
+  });
 });

@@ -190,12 +190,14 @@ export function buildExecutiveReportRows(input: ExecutiveReportInput): Executive
       levelOneAccurate,
       levelTwoAccurate,
       verificationCategory,
+      // Guard for population.final.json written before the five-source pipeline
+      // (v28.0): older rows have no `otherResults`/`notes`, so default to the null shape.
       otherResults: {
-        manual: { result: pop.otherResults.manual.result, employeeId: pop.otherResults.manual.employeeId },
-        opposite: { result: pop.otherResults.opposite.result, employeeId: pop.otherResults.opposite.employeeId },
-        liveMeans: { result: pop.otherResults.liveMeans.result, employeeId: pop.otherResults.liveMeans.employeeId },
+        manual: { result: pop.otherResults?.manual?.result ?? null, employeeId: pop.otherResults?.manual?.employeeId ?? null },
+        opposite: { result: pop.otherResults?.opposite?.result ?? null, employeeId: pop.otherResults?.opposite?.employeeId ?? null },
+        liveMeans: { result: pop.otherResults?.liveMeans?.result ?? null, employeeId: pop.otherResults?.liveMeans?.employeeId ?? null },
       },
-      notes: pop.notes,
+      notes: pop.notes ?? null,
     };
   });
 }
