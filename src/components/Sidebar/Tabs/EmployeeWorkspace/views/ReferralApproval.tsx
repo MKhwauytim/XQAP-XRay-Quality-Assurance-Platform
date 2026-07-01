@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { X } from "lucide-react";
+import { CalendarOff, X } from "lucide-react";
 import { readSession } from "../../../../../auth/authSession";
 import { hasFeature, readUserManagementState } from "../../../../../auth/userManagement";
 import { PageHeader } from "../../../../../components/PageHeader/PageHeader";
+import { EmptyState, ErrorState, LoadingState } from "../../../../../components/StateViews/StateViews";
 import {
   appendDistributionEvents,
   loadOrDeriveDistributionCurrent,
@@ -67,10 +68,15 @@ export default function ReferralApproval({ directoryHandle }: Props) {
   })();
 
   useEffect(() => {
-    void listMonthFolders(directoryHandle).then((ms) => {
-      setMonths(ms);
-      if (ms.length > 0) setSelMonth(ms[ms.length - 1]!.folderName);
-    });
+    listMonthFolders(directoryHandle)
+      .then((ms) => {
+        setMonths(ms);
+        if (ms.length > 0) setSelMonth(ms[ms.length - 1]!.folderName);
+        // No processed months: nothing will ever load — settle the state so the
+        // no-months EmptyState renders instead of an eternal blank "idle".
+        else setLoadState("ready");
+      })
+      .catch(() => setLoadState("error"));
   }, [directoryHandle]);
 
   // eslint-disable-next-line react-hooks/preserve-manual-memoization
@@ -358,15 +364,24 @@ export default function ReferralApproval({ directoryHandle }: Props) {
         </div>
       </div>
 
-      {loadState === "loading" && <p className="ew-empty">جاري التحميل...</p>}
-      {loadState === "error"   && <p className="ew-empty">تعذر تحميل البيانات.</p>}
+      {loadState === "loading" && <LoadingState />}
+      {loadState === "error" && (
+        <ErrorState description="تعذر تحميل بيانات الطلبات. أعد المحاولة أو تحقق من مساحة العمل." />
+      )}
 
-      {loadState === "ready" && activeList.length === 0 && (
-        <div className="ew-referral-empty">
-          <p>لا توجد طلبات {section === "referral" ? "إحالة" : "استبدال"}{" "}
-            {statusFilter === "pending" ? "معلقة" : statusFilter === "approved" ? "مقبولة" : statusFilter === "denied" ? "مرفوضة" : ""} لهذا الشهر.
-          </p>
-        </div>
+      {loadState === "ready" && months.length === 0 && (
+        <EmptyState
+          icon={<CalendarOff />}
+          title="لا توجد أشهر معالجة بعد"
+          description="اعتماد الطلبات يعتمد على شهر معالج — ابدأ بمعالجة شهر من تبويب معالجة المجتمع."
+        />
+      )}
+
+      {loadState === "ready" && months.length > 0 && activeList.length === 0 && (
+        <EmptyState
+          title={`لا توجد طلبات ${section === "referral" ? "إحالة" : "استبدال"} ${statusFilter === "pending" ? "معلقة" : statusFilter === "approved" ? "مقبولة" : statusFilter === "denied" ? "مرفوضة" : ""} لهذا الشهر`}
+          description="ستظهر الطلبات هنا فور إرسالها من مساحة عمل الموظفين."
+        />
       )}
 
       {loadState === "ready" && activeList.length > 0 && (

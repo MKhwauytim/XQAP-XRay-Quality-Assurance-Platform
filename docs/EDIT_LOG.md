@@ -4,6 +4,74 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v38.2 — 2026-07-02 — StateViews rollout: consistent empty/loading states on data screens (DESIGN UIX-01)
+
+Fixes UIX-01 from `docs/audit/FULL_SYSTEM_AUDIT_2026-07-02.md`: the shared
+`EmptyState`/`LoadingState` library (added v36.4) was used only by `App.tsx`, so every tab had
+its own ad-hoc "nothing here" treatment — bare text on some screens, and on اعتماد الطلبات
+**nothing at all**: with zero processed months the loader early-returns, `loadState` stays
+`"idle"`, and no state branch matches → a blank void under the filters (the audit's worst
+empty-state finding, root-caused here). Rollout:
+
+- **ReferralApproval**: months resolving to empty now sets `loadState: "ready"`; a dedicated
+  no-months `EmptyState` explains the prerequisite (process a month first); the no-requests
+  case uses `EmptyState`; the months loader gained a `.catch` (no more floating rejection).
+- **XrayInspectionResults**: loading → `LoadingState`, error → `ErrorState`, no-months /
+  no-rows / no-history → `EmptyState` (same label strings, shared chrome).
+- **TemplateBuilder**: bare `tb-empty` div → `EmptyState` with guidance toward the
+  "+ نموذج جديد" action.
+- **Population browse**: bare `placeholder-phase` paragraph → `EmptyState` pointing to
+  تبويب معالجة المجتمع.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval.tsx`
+
+**Before:**
+```tsx
+  useEffect(() => {
+    void listMonthFolders(directoryHandle).then((ms) => {
+      setMonths(ms);
+      if (ms.length > 0) setSelMonth(ms[ms.length - 1]!.folderName);
+    });
+  }, [directoryHandle]);
+…
+      {loadState === "ready" && activeList.length === 0 && (
+        <div className="ew-referral-empty">
+          <p>لا توجد طلبات …</p>
+        </div>
+      )}
+```
+
+**After:**
+```tsx
+  useEffect(() => {
+    listMonthFolders(directoryHandle)
+      .then((ms) => {
+        setMonths(ms);
+        if (ms.length > 0) setSelMonth(ms[ms.length - 1]!.folderName);
+        // No processed months: nothing will ever load — settle the state so the
+        // no-months EmptyState renders instead of an eternal blank "idle".
+        else setLoadState("ready");
+      })
+      .catch(() => setLoadState("error"));
+  }, [directoryHandle]);
+…
+      {loadState === "ready" && months.length === 0 && (
+        <EmptyState
+          icon={<CalendarOff />}
+          title="لا توجد أشهر معالجة بعد"
+          description="اعتماد الطلبات يعتمد على شهر معالج — ابدأ بمعالجة شهر من تبويب معالجة المجتمع."
+        />
+      )}
+      {loadState === "ready" && months.length > 0 && activeList.length === 0 && (
+        <EmptyState … />
+      )}
+```
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayInspectionResults.tsx` — the
+four `<p className="ew-empty">…</p>` states → `LoadingState` / `ErrorState` / `EmptyState`.
+**File:** `src/components/Sidebar/Tabs/TemplateBuilder/index.tsx` — `tb-empty` div → `EmptyState`.
+**File:** `src/components/Sidebar/Tabs/Population/index.tsx` — browse empty paragraph → `EmptyState`.
+
 ## v38.1 — 2026-07-02 — Report Designer aligned to the design system (DESIGN UIX-03)
 
 Fixes UIX-03 from `docs/audit/FULL_SYSTEM_AUDIT_2026-07-02.md`: the Report Designer list
