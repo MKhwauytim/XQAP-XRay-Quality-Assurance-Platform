@@ -16,6 +16,7 @@ import {
   getPopulationMonthDir,
   getPopulationRoot,
   getSampleMainDir,
+  POPULATION_SUBFOLDERS,
 } from "../workspace/workspacePaths";
 
 const CERTSCAN_GLOBAL_FILE = "certscan.global.json";
@@ -186,8 +187,8 @@ export async function saveMonthRun(
 
     // Create month folder and subfolders
     const monthDir = await ensureFolder(populationDir, monthFolderName);
-    const rawDir = await ensureFolder(monthDir, "raw");
-    const processedDir = await ensureFolder(monthDir, "processed");
+    const rawDir = await ensureFolder(monthDir, POPULATION_SUBFOLDERS.raw);
+    const processedDir = await ensureFolder(monthDir, POPULATION_SUBFOLDERS.processed);
     await ensureFolder(monthDir, "sample");
     await ensureFolder(monthDir, "reports");
 
@@ -263,7 +264,9 @@ export async function saveMonthRun(
       totalProcessedRows: processedRows.length,
       status: "processed-saved",
       processingFingerprint: params.processingFingerprint ?? null,
-      processingSummaryFile: params.processingSummary ? "processed/processing.summary.json" : null,
+      processingSummaryFile: params.processingSummary
+        ? `${POPULATION_SUBFOLDERS.processed}/processing.summary.json`
+        : null,
       sourceFiles: params.sourceFiles
     };
     await safeWriteJson(monthDir, "month.manifest.json", manifest);
@@ -360,7 +363,7 @@ export async function listMonthSummaries(
       let hasPopulation = false;
       let totalProcessedRows = manifest?.totalProcessedRows ?? 0;
       try {
-        const processedDir = await monthDir.getDirectoryHandle("processed", { create: false });
+        const processedDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false });
         const popResult = await safeReadJson<PopulationFinalData>(processedDir, "population.final.json");
         hasPopulation = popResult.ok;
         if (popResult.ok) totalProcessedRows = popResult.value.totalRows;
@@ -436,7 +439,7 @@ export async function loadAllPopulationRows(
   for (const info of months) {
     try {
       const monthDir = await getMonthDir(directoryHandle, info.folderName);
-      const processedDir = await monthDir.getDirectoryHandle("processed", { create: false });
+      const processedDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false });
       const result = await safeReadJson<{ rows: Array<Record<string, unknown>> }>(processedDir, "population.final.json");
       if (!result.ok) continue;
       for (const row of result.value.rows ?? []) {
@@ -458,7 +461,7 @@ export async function loadMonthPopulationFinal(
 ): Promise<PopulationFinalData | null> {
   try {
     const monthDir = await getMonthDir(directoryHandle, monthFolderName);
-    const processedDir = await monthDir.getDirectoryHandle("processed", { create: false });
+    const processedDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false });
     const result = await safeReadJson<PopulationFinalData>(
       processedDir,
       "population.final.json"
@@ -503,7 +506,7 @@ export async function loadAllRawRows(
   for (const info of months) {
     try {
       const monthDir = await getMonthDir(directoryHandle, info.folderName);
-      const rawDir = await monthDir.getDirectoryHandle("raw", { create: false });
+      const rawDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.raw, { create: false });
       const result = await safeReadJson<{ rows: Array<Record<string, unknown>> }>(
         rawDir,
         fileName
@@ -565,13 +568,13 @@ export async function loadMonthForEditing(
 
     const [manifestResult, popBundle, summaryBundle, rawBundle, sampleBundle] = await Promise.all([
       safeReadJson<MonthManifestData>(monthDir, "month.manifest.json"),
-      monthDir.getDirectoryHandle("processed", { create: false })
+      monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false })
         .then((dir) => safeReadJson<PopulationFinalData>(dir, "population.final.json"))
         .catch(() => null),
-      monthDir.getDirectoryHandle("processed", { create: false })
+      monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false })
         .then((dir) => safeReadJson<ProcessingSummaryData>(dir, "processing.summary.json"))
         .catch(() => null),
-      monthDir.getDirectoryHandle("raw", { create: false })
+      monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.raw, { create: false })
         .then(async (dir) => {
           const [risk, bi] = await Promise.all([
             safeReadJson<MonthRawData>(dir, "risk.raw.json"),

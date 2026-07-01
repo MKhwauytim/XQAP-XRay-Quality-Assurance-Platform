@@ -4,6 +4,95 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v35.2 — 2026-07-01 — Use POPULATION_SUBFOLDERS (1-raw/2-processed) instead of raw/processed literals
+
+Task 4 of the workspace file/folder naming convention refactor. `populationStorage.ts` previously
+hardcoded the literals `"raw"` and `"processed"` for every `getDirectoryHandle` call under a
+population month folder. Swapped every call site to `POPULATION_SUBFOLDERS.raw` /
+`POPULATION_SUBFOLDERS.processed` (added to `workspacePaths.ts` in Task 1), so population month
+folders now contain `1-raw/` and `2-processed/` subfolders (numbering reflects the real two-step
+raw-import → processed-output pipeline). The `"sample"` and `"reports"` stray-folder creation
+calls in `saveMonthRun`, and the legacy-fallback `"sample"` literal in the test file's
+"loadAllSampleRows falls back to legacy sample path" test, are pre-existing, unrelated, and were
+left untouched (out of scope for this task).
+
+**File:** `src/data/population/populationStorage.ts`
+
+**Before:**
+```ts
+import {
+  getPopulationMonthDir,
+  getPopulationRoot,
+  getSampleMainDir,
+} from "../workspace/workspacePaths";
+// ...
+    const monthDir = await ensureFolder(populationDir, monthFolderName);
+    const rawDir = await ensureFolder(monthDir, "raw");
+    const processedDir = await ensureFolder(monthDir, "processed");
+    await ensureFolder(monthDir, "sample");
+    await ensureFolder(monthDir, "reports");
+// ...
+      processingSummaryFile: params.processingSummary ? "processed/processing.summary.json" : null,
+// ...
+        const processedDir = await monthDir.getDirectoryHandle("processed", { create: false }); // listMonthSummaries
+// ...
+      const processedDir = await monthDir.getDirectoryHandle("processed", { create: false }); // loadAllPopulationRows
+// ...
+    const processedDir = await monthDir.getDirectoryHandle("processed", { create: false }); // loadMonthPopulationFinal
+// ...
+      const rawDir = await monthDir.getDirectoryHandle("raw", { create: false }); // loadAllRawRows
+// ...
+      monthDir.getDirectoryHandle("processed", { create: false }) // loadMonthForEditing (population.final.json)
+      monthDir.getDirectoryHandle("processed", { create: false }) // loadMonthForEditing (processing.summary.json)
+      monthDir.getDirectoryHandle("raw", { create: false }) // loadMonthForEditing (risk/bi raw)
+```
+
+**After:**
+```ts
+import {
+  getPopulationMonthDir,
+  getPopulationRoot,
+  getSampleMainDir,
+  POPULATION_SUBFOLDERS,
+} from "../workspace/workspacePaths";
+// ...
+    const monthDir = await ensureFolder(populationDir, monthFolderName);
+    const rawDir = await ensureFolder(monthDir, POPULATION_SUBFOLDERS.raw);
+    const processedDir = await ensureFolder(monthDir, POPULATION_SUBFOLDERS.processed);
+    await ensureFolder(monthDir, "sample");
+    await ensureFolder(monthDir, "reports");
+// ...
+      processingSummaryFile: params.processingSummary
+        ? `${POPULATION_SUBFOLDERS.processed}/processing.summary.json`
+        : null,
+// ...
+        const processedDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false }); // listMonthSummaries
+// ...
+      const processedDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false }); // loadAllPopulationRows
+// ...
+    const processedDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false }); // loadMonthPopulationFinal
+// ...
+      const rawDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.raw, { create: false }); // loadAllRawRows
+// ...
+      monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false }) // loadMonthForEditing (population.final.json)
+      monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false }) // loadMonthForEditing (processing.summary.json)
+      monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.raw, { create: false }) // loadMonthForEditing (risk/bi raw)
+```
+
+**File:** `src/data/population/populationStorage.test.ts`
+
+**Before:** All occurrences of `"1-Population"` → root folder, `"5-May-2026"` → month folder,
+`monthDir.getDirectoryHandle("raw", { create: false })`, and
+`monthDir.getDirectoryHandle("processed", { create: false })` (matching Task 1/2's now-outdated
+title-case root and month-folder literals, and the pre-numbering subfolder literals).
+
+**After:** `"1-population"`, `"5-may-2026"`, `monthDir.getDirectoryHandle("1-raw", { create: false })`,
+`monthDir.getDirectoryHandle("2-processed", { create: false })`. The legacy-fallback
+`monthDir.getDirectoryHandle("sample", { create: true })` line in the
+"loadAllSampleRows falls back to legacy sample path" test was left unchanged.
+
+---
+
 ## v35.1 — 2026-07-01 — Wire workspace init path to central WORKSPACE_ROOTS/SYSTEM_FOLDER_NAMES constants
 
 Task 3 of the workspace file/folder naming convention refactor. `workspaceDefaults.ts` and
