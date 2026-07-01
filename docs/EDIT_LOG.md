@@ -4,6 +4,66 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v38.0 — 2026-07-02 — Shared ConfirmDialog component; native window.confirm eliminated (FEATURE UIX-02)
+
+Fixes UIX-02 from `docs/audit/FULL_SYSTEM_AUDIT_2026-07-02.md`: three destructive actions used
+native `window.confirm()` — an unstyled LTR browser dialog with English chrome buttons, jarring
+inside the Arabic RTL product and inconsistent with UserManagement's styled two-step confirm.
+New shared `ConfirmDialog` (`src/components/ConfirmDialog/`): RTL, token-styled, danger
+variant, focus is trapped and starts on "إلغاء" (safe default), Escape cancels, backdrop click
+cancels, `role="dialog"` + `aria-modal`. All three native `confirm()` sites replaced.
+
+**File:** `src/components/ConfirmDialog/ConfirmDialog.tsx` (new) — props:
+`{ open, title?, message, confirmLabel?, cancelLabel?, danger?, onConfirm, onCancel }`.
+**File:** `src/components/ConfirmDialog/ConfirmDialog.css` (new)
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
+
+**Before:**
+```tsx
+  async function handleDelete(reportId: string) {
+    if (!directoryHandle) return;
+    if (!window.confirm("هل أنت متأكد من حذف هذا التقرير؟")) return;
+    setDeletingId(reportId);
+```
+
+**After:**
+```tsx
+  // Deletion is a two-step flow: the trash button arms confirmDeleteId and the
+  // shared ConfirmDialog performs the actual delete (UIX-02).
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  async function handleDelete(reportId: string) {
+    if (!directoryHandle) return;
+    setDeletingId(reportId);
+```
+(delete button now calls `setConfirmDeleteId(id)`; a `<ConfirmDialog danger …>` at the root
+runs `handleDelete` on confirm)
+
+**File:** `src/components/Sidebar/Tabs/Population/components/MappingSettingsModal.tsx`
+
+**Before:**
+```tsx
+  const handleRemoveSystemField = (key: string) => {
+    if (!confirm(`هل أنت متأكد من حذف الحقل "${key}" من القائمة؟ يمكنك استعادته من الإعدادات الافتراضية.`)) return;
+…
+  const handleRemoveCustomField = (key: string) => {
+    if (!confirm("هل أنت متأكد من حذف هذا الحقل المخصص؟")) return;
+```
+
+**After:**
+```tsx
+  // UIX-02: field removal is armed into pendingRemoval and executed by the
+  // shared ConfirmDialog instead of native confirm().
+  const [pendingRemoval, setPendingRemoval] = useState<
+    { kind: "system" | "custom"; key: string } | null
+  >(null);
+…
+  const handleRemoveSystemField = (key: string) => {
+…(confirm call removed; body unchanged)
+```
+(a `<ConfirmDialog danger …>` in the modal executes the armed removal)
+
 ## v37.15 — 2026-07-02 — CLAUDE.md sync: tab table, bundle size, audit cross-link (DOCS TEC-03)
 
 Fixes TEC-03 from `docs/audit/FULL_SYSTEM_AUDIT_2026-07-02.md`. The CLAUDE.md tab table was

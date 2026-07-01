@@ -20,6 +20,7 @@ import {
 import type { Rect } from "../../../../data/reportDesigner/geometry";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
 import type { DirectoryHandleLike } from "../../../../data/storage/fileSystemAccess";
+import { ConfirmDialog } from "../../../ConfirmDialog/ConfirmDialog";
 import Canvas from "./editor/Canvas";
 import Ribbon from "./editor/Ribbon";
 import VizPanel from "./editor/VizPanel";
@@ -473,6 +474,8 @@ export default function ReportDesigner() {
   // Per-row action state
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  // UIX-02: deletion is armed here and executed by the shared ConfirmDialog.
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [openingId, setOpeningId] = useState<string | null>(null);
   const [openError, setOpenError] = useState<string | null>(null);
 
@@ -595,7 +598,6 @@ export default function ReportDesigner() {
 
   async function handleDelete(reportId: string) {
     if (!directoryHandle) return;
-    if (!window.confirm("هل أنت متأكد من حذف هذا التقرير؟")) return;
     setDeletingId(reportId);
     setDeleteError(null);
     const result = await deleteDesign(directoryHandle, reportId);
@@ -740,7 +742,7 @@ export default function ReportDesigner() {
                     </button>
                     <button
                       className="rd-btn rd-btn-danger rd-btn-sm"
-                      onClick={() => void handleDelete(d.reportId)}
+                      onClick={() => setConfirmDeleteId(d.reportId)}
                       disabled={busy}
                     >
                       {isDeleting ? "…" : "حذف"}
@@ -752,6 +754,20 @@ export default function ReportDesigner() {
           })}
         </ul>
       )}
+
+      <ConfirmDialog
+        open={confirmDeleteId !== null}
+        danger
+        title="حذف التقرير"
+        message="هل أنت متأكد من حذف هذا التقرير؟ لا يمكن التراجع عن هذا الإجراء."
+        confirmLabel="حذف"
+        onConfirm={() => {
+          const id = confirmDeleteId;
+          setConfirmDeleteId(null);
+          if (id) void handleDelete(id);
+        }}
+        onCancel={() => setConfirmDeleteId(null)}
+      />
     </div>
   );
 }
