@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, X } from "lucide-react";
+import { AlertTriangle, X, LayoutGrid } from "lucide-react";
+
+import { EmptyState } from "./components/StateViews/StateViews";
 
 import AuthGate from "./auth/AuthGate";
 import type { AuthSession } from "./auth/authTypes";
@@ -236,15 +238,15 @@ function AppContent({ session }: AppContentProps) {
 function NoAvailableTabs({ role }: { role: AuthSession["role"] }) {
   return (
     <div className="tab-blank" dir="rtl">
-      <div className="app-no-tabs">
-        <div>
-          <h1>لا توجد تبويبات متاحة</h1>
-
-          <p>
+      <EmptyState
+        icon={<LayoutGrid />}
+        title="لا توجد تبويبات متاحة"
+        description={
+          <>
             لا توجد صفحات مفعلة لهذا الدور حالياً: <strong>{role}</strong>
-          </p>
-        </div>
-      </div>
+          </>
+        }
+      />
     </div>
   );
 }

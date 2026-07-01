@@ -53,14 +53,30 @@ export function buildCover(model: ReportModel, issueDate: string): string {
 </section>`;
 }
 
-export function buildToc(parts: { n: string; title: string; pages: { n: string; t: string }[] }[]): string {
+export type TocPart = {
+  title: string;
+  /** One line: what this part answers — turns the list into a reading map. */
+  blurb: string;
+  pages: { n: string; t: string }[];
+};
+
+export function buildToc(parts: TocPart[]): string {
   const cards = parts
     .map(
       (part) => `<div class="card">
         <div class="panel-title">${esc(part.title)}</div>
-        <div class="table-wrap"><table><tbody>
-          ${part.pages.map((p) => `<tr><td>${esc(p.t)}</td><td>${esc(p.n)}</td></tr>`).join("")}
-        </tbody></table></div>
+        <div class="toc-part-blurb">${esc(part.blurb)}</div>
+        <div class="toc-rows">
+          ${part.pages
+            .map(
+              (p) => `<div class="toc-row">
+                <span class="toc-row-title">${esc(p.t)}</span>
+                <span class="toc-row-leader" aria-hidden="true"></span>
+                <span class="toc-row-num">${esc(p.n)}</span>
+              </div>`,
+            )
+            .join("")}
+        </div>
       </div>`,
     )
     .join("");

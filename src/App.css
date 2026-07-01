@@ -63,6 +63,19 @@
   background: transparent;
 }
 
+/* Subtle enter motion the first time a tab's content mounts. Tabs stay mounted
+   after first visit (state preservation), so this plays once per tab — a quiet
+   "settle" rather than a transition on every switch. Suppressed automatically
+   under prefers-reduced-motion by the global rule in index.css. */
+@keyframes view-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.app-workspace > div {
+  animation: view-enter var(--t-slow) var(--ease-out) both;
+}
+
 .app-backup-toast {
   position: fixed;
   inset-inline-start: 24px;

@@ -53,16 +53,37 @@
 
   display: grid;
   grid-template-columns: minmax(0, 1fr) 38px;
+  grid-template-rows: auto auto;
   align-items: center;
-  gap: 14px;
+  column-gap: 14px;
+  row-gap: 14px;
 
-  padding: 18px 16px;
+  padding: 16px 16px 18px;
 
   background: linear-gradient(135deg, var(--sb-bg-2), #0E2B51);
   border-bottom: 1px solid var(--sb-border);
 }
 
+/* ── ZATCA identity mark ───────────────────────────────────── */
+
+.sidebar-logo {
+  grid-column: 1;
+  grid-row: 1;
+  justify-self: start;
+
+  height: 38px;
+  width: auto;
+  max-width: 190px;
+  object-fit: contain;
+
+  /* recolor the dark/teal SVG to white for the navy nav (tweak the token) */
+  filter: var(--logo-filter);
+  opacity: 1;
+}
+
 .sidebar-title-wrap {
+  grid-column: 1 / -1;
+  grid-row: 2;
   min-width: 0;
   display: grid;
   gap: 5px;
@@ -101,6 +122,9 @@
 /* ── Collapse Button ───────────────────────────────────────── */
 
 .sidebar-collapse-button {
+  grid-column: 2;
+  grid-row: 1;
+
   width: 36px;
   height: 36px;
 
@@ -257,10 +281,18 @@
 /* ── Collapsed State ───────────────────────────────────────── */
 
 .sidebar.collapsed .sidebar-header {
-  justify-content: center;
+  justify-items: center;
   grid-template-columns: 1fr;
+  grid-template-rows: auto;
   min-height: 80px;
   padding: 18px 12px;
+}
+
+.sidebar.collapsed .sidebar-logo { display: none; }
+
+.sidebar.collapsed .sidebar-collapse-button {
+  grid-column: 1;
+  grid-row: 1;
 }
 
 .sidebar.collapsed .sidebar-title-wrap {

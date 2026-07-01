@@ -188,8 +188,18 @@ export default function CertScanGrid({ initialText, onDataChange }: CertScanGrid
 
       {/* ── Cursor hint when highlighter active ── */}
       {activeHL && (
-        <div className="certscan-cursor-hint" role="status">
-          {activeHL === "port" ? "🔴" : "🔵"} انقر على عنوان العمود لتحديده
+        <div className="certscan-cursor-hint" role="status" style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+          <span
+            aria-hidden="true"
+            style={{
+              width: 10,
+              height: 10,
+              borderRadius: "50%",
+              flexShrink: 0,
+              background: activeHL === "port" ? "var(--c-danger)" : "var(--c-sky)"
+            }}
+          />
+          انقر على عنوان العمود لتحديده
         </div>
       )}
 

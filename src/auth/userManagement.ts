@@ -113,6 +113,7 @@ export const MANAGED_TABS: readonly ManagedTab[] = [
   { id: "user-management/feature-permissions", label: "صلاحيات الميزات",     parentId: "user-management" },
   { id: "user-management/activity",            label: "متابعة الأنشطة",      parentId: "user-management" },
   { id: "settings",                label: "إدارة الإعدادات" },
+  { id: "change-log",              label: "سجل الإصدارات" },
 ];
 
 // ── Feature catalogue ─────────────────────────────────────────────────────────
@@ -363,6 +364,12 @@ export function createDefaultPermissions(): RolePermission[] {
     { role: "supervisor", tabId: "reports/analytics",       access: "none" },
     { role: "manager",    tabId: "reports/analytics",       access: "view" },
     { role: "admin",      tabId: "reports/analytics",       access: "edit" },
+    // Change log (version & edit history) — admin-only
+    { role: "guest",      tabId: "change-log",              access: "none" },
+    { role: "employee",   tabId: "change-log",              access: "none" },
+    { role: "supervisor", tabId: "change-log",              access: "none" },
+    { role: "manager",    tabId: "change-log",              access: "none" },
+    { role: "admin",      tabId: "change-log",              access: "edit" },
   ];
 }
 

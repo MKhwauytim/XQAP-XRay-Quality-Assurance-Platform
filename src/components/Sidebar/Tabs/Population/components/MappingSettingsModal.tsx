@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Settings2, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Settings2, X } from "lucide-react";
 import type {
   CustomField,
   ExportColumnSetting,
@@ -1194,11 +1194,13 @@ export default function MappingSettingsModal({
                           style={{
                             width: "26px", height: "22px", border: "1px solid var(--population-border)",
                             borderRadius: "4px", background: idx === 0 ? "#f8fafc" : "#fff",
-                            cursor: idx === 0 ? "default" : "pointer", fontSize: "11px",
-                            color: idx === 0 ? "#ccc" : "var(--population-primary)", lineHeight: 1
+                            cursor: idx === 0 ? "default" : "pointer",
+                            color: idx === 0 ? "#ccc" : "var(--population-primary)", lineHeight: 1,
+                            display: "inline-flex", alignItems: "center", justifyContent: "center"
                           }}
                           title="تحريك لأعلى"
-                        >▲</button>
+                          aria-label="تحريك لأعلى"
+                        ><ChevronUp size={14} /></button>
                         <button
                           type="button"
                           disabled={idx === arr.length - 1}
@@ -1206,11 +1208,13 @@ export default function MappingSettingsModal({
                           style={{
                             width: "26px", height: "22px", border: "1px solid var(--population-border)",
                             borderRadius: "4px", background: idx === arr.length - 1 ? "#f8fafc" : "#fff",
-                            cursor: idx === arr.length - 1 ? "default" : "pointer", fontSize: "11px",
-                            color: idx === arr.length - 1 ? "#ccc" : "var(--population-primary)", lineHeight: 1
+                            cursor: idx === arr.length - 1 ? "default" : "pointer",
+                            color: idx === arr.length - 1 ? "#ccc" : "var(--population-primary)", lineHeight: 1,
+                            display: "inline-flex", alignItems: "center", justifyContent: "center"
                           }}
                           title="تحريك لأسفل"
-                        >▼</button>
+                          aria-label="تحريك لأسفل"
+                        ><ChevronDown size={14} /></button>
                       </span>
 
                       <span style={{ fontSize: "12px", color: "var(--population-muted)", fontFamily: "monospace" }}>

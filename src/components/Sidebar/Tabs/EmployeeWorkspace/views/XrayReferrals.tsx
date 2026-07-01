@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { X } from "lucide-react";
+import { X, AlertTriangle, RotateCw } from "lucide-react";
 import { readSession } from "../../../../../auth/authSession";
 import { PageHeader } from "../../../../../components/PageHeader/PageHeader";
 import { logRejection } from "../../../../../data/storage/errorLogger";
@@ -916,8 +916,10 @@ function QueueToolbar({
               type="button"
               className="ew-btn-secondary ew-btn-sm"
               title="إعادة تحميل النموذج من القرص"
+              aria-label="إعادة تحميل النموذج من القرص"
               onClick={onReloadTemplate}
-            >↻</button>
+              style={{ display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+            ><RotateCw size={14} /></button>
           )}
         </div>
       </label>
@@ -1321,8 +1323,8 @@ function ReplacementDialog({
         </div>
 
         {!isRecommended && (
-          <div style={{ margin: "0 0 10px", padding: "8px 12px", background: "#fef9c3", border: "1px solid #fde68a", borderRadius: 8, fontSize: 12, color: "#78350f" }}>
-            ⚠ الاستبدال من هذه القائمة يحتاج موافقة المشرف — سيُرسل كطلب معلق في اعتماد الطلبات.
+          <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "0 0 10px", padding: "8px 12px", background: "var(--c-warning-bg)", border: "1px solid var(--c-warning-border)", borderRadius: 8, fontSize: 12, color: "var(--c-warning)" }}>
+            <AlertTriangle size={14} style={{ flexShrink: 0 }} /> الاستبدال من هذه القائمة يحتاج موافقة المشرف — سيُرسل كطلب معلق في اعتماد الطلبات.
           </div>
         )}
 

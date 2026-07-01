@@ -288,3 +288,122 @@
   gap: var(--sp-2);
   flex-wrap: wrap;
 }
+
+/* ── State views: empty / loading / error ──────────────────────
+   Shared surfaces for the "nothing here yet", "working…", and
+   "something went wrong" moments. Consumed by the StateView React
+   components so every screen renders these moments identically. */
+
+.ui-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: var(--sp-3);
+
+  min-height: 260px;
+  padding: var(--sp-10) var(--sp-6);
+
+  background: var(--surface-raised);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--sh-xs);
+}
+.ui-state--bare {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.ui-state__icon {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  margin-bottom: var(--sp-1);
+
+  border-radius: 50%;
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-border);
+  color: var(--c-ink-4);
+}
+.ui-state__icon svg { width: 26px; height: 26px; }
+.ui-state--error .ui-state__icon {
+  background: var(--c-danger-bg);
+  border-color: var(--c-danger-border);
+  color: var(--c-danger);
+}
+
+.ui-state__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: var(--fw-bold);
+  color: var(--c-ink);
+}
+.ui-state__body {
+  margin: 0;
+  max-width: 42ch;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--c-ink-3);
+}
+.ui-state__actions {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: var(--sp-2);
+}
+
+/* ── Spinner ───────────────────────────────────────────────── */
+
+.ui-spinner {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 3px solid var(--c-border);
+  border-top-color: var(--c-sky);
+  animation: ui-spin 720ms linear infinite;
+}
+.ui-spinner--sm { width: 18px; height: 18px; border-width: 2px; }
+.ui-spinner--lg { width: 46px; height: 46px; border-width: 4px; }
+
+@keyframes ui-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Skeleton placeholders (adopt for loading tables/cards) ──── */
+
+.ui-skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--c-surface-2);
+  border-radius: var(--r-sm);
+}
+.ui-skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.65),
+    transparent
+  );
+  animation: ui-shimmer 1.4s ease-in-out infinite;
+}
+.ui-skeleton--text { height: 12px; margin-block: 6px; }
+.ui-skeleton--line { height: 12px; }
+.ui-skeleton--title { height: 20px; width: 40%; }
+.ui-skeleton--block { height: 96px; }
+
+@keyframes ui-shimmer {
+  100% { transform: translateX(100%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-spinner { animation-duration: 1.6s; }
+  .ui-skeleton::after { animation: none; }
+}

@@ -4,6 +4,90 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v35.0 — 2026-07-01 — Change Log admin tab + shared EmptyState/LoadingState/ErrorState primitives (FEATURE)
+
+Phase 1/2 of `docs/UI_ENHANCEMENT_PLAN.md`: a new admin-only **Change Log** tab that parses
+and renders `docs/EDIT_LOG.md` itself (via a Vite `?raw` import) as a searchable, versioned
+timeline — no separate content to maintain, the log is always the source of truth. Also adds
+`src/components/StateViews/StateViews.tsx`, a shared `EmptyState`/`LoadingState`/`ErrorState`/
+`Skeleton` component library so the "nothing here yet" / "working…" / "something went wrong"
+moments render identically across every tab, replacing the ad hoc `NoAvailableTabs` markup in
+`App.tsx`. Registered the tab in `MANAGED_TABS` / `createDefaultPermissions()` (admin-only,
+`edit`) per the tab-registration convention in `CLAUDE.md`. Added `src/vite-env.d.ts` for the
+Vite client type reference the `?raw` import needs. Assorted spacing/primitive polish in
+`primitives.css`, `AdminToolbar`, `Sidebar`, and a few data screens toward the same plan.
+
+**File:** `src/components/Sidebar/Tabs/ChangeLog/index.tsx` (new)
+
+Parses `## v{version} — {date} — {title} (TAG)` headings from `EDIT_LOG.md`, sorts newest-first,
+renders each entry as a collapsible card with a lightweight inline markdown renderer (bold,
+inline code, fenced code blocks) and a client-side search box.
+
+**File:** `src/components/StateViews/StateViews.tsx` (new)
+
+Exports `EmptyState`, `LoadingState`, `ErrorState`, `Skeleton` — shared surfaces styled via
+`.ui-state` / `.ui-spinner` / `.ui-skeleton` in `primitives.css`.
+
+**File:** `src/App.tsx`
+
+**Before:**
+```tsx
+function NoAvailableTabs({ role }: { role: AuthSession["role"] }) {
+  return (
+    <div className="tab-blank" dir="rtl">
+      <div className="app-no-tabs">
+        <div>
+          <h1>لا توجد تبويبات متاحة</h1>
+
+          <p>
+            لا توجد صفحات مفعلة لهذا الدور حالياً: <strong>{role}</strong>
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+**After:**
+```tsx
+function NoAvailableTabs({ role }: { role: AuthSession["role"] }) {
+  return (
+    <div className="tab-blank" dir="rtl">
+      <EmptyState
+        icon={<LayoutGrid />}
+        title="لا توجد تبويبات متاحة"
+        description={
+          <>
+            لا توجد صفحات مفعلة لهذا الدور حالياً: <strong>{role}</strong>
+          </>
+        }
+      />
+    </div>
+  );
+}
+```
+
+**File:** `src/auth/userManagement.ts`
+
+**Before:**
+```ts
+  { id: "settings",                label: "إدارة الإعدادات" },
+];
+```
+
+**After:**
+```ts
+  { id: "settings",                label: "إدارة الإعدادات" },
+  { id: "change-log",              label: "سجل الإصدارات" },
+];
+```
+
+Added matching `change-log` rows to `createDefaultPermissions()` (admin: `edit`, all other
+roles: `none`).
+
+---
+
 ## v34.7 — 2026-07-01 — Deck: Western digits everywhere + fix RTL bidi reversal of number ranges (BUG)
 
 Two fixes, both must-rules for the report:

@@ -1,9 +1,16 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type SyntheticEvent } from "react";
 import { ChevronDown, PanelRightClose } from "lucide-react";
 import type { AuthRole } from "../../auth/authTypes";
 import type { SidebarTabDefinition } from "./Tabs/tabTypes";
 import { useLabels } from "../../data/labels/useLabels";
+import { ZATCA_LOGO_URL } from "../../branding/organization";
 import "./Sidebar.css";
+
+// If the external ZATCA SVG can't load (offline), hide the mark and let the
+// text wordmark stand on its own — never a broken-image icon.
+function hideBrokenLogo(event: SyntheticEvent<HTMLImageElement>): void {
+  event.currentTarget.style.display = "none";
+}
 
 type SidebarProps = {
   tabs: SidebarTabDefinition[];
@@ -59,6 +66,12 @@ export default function Sidebar({
       aria-label="القائمة الجانبية"
     >
       <div className="sidebar-header">
+        <img
+          className="sidebar-logo"
+          src={ZATCA_LOGO_URL}
+          alt="هيئة الزكاة والضريبة والجمارك"
+          onError={hideBrokenLogo}
+        />
         <div className="sidebar-title-wrap">
           <span className="sidebar-kicker">نظام جودة الأشعة</span>
           <h2 className="sidebar-title">{L.sidebar_title}</h2>

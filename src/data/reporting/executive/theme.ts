@@ -543,11 +543,21 @@ tbody tr:hover{background:rgba(244,180,0,.04);}
 .page.toc-page .toc-title{text-align:right;padding-top:2px;}
 .page.toc-page .toc-title h2{margin:0;font-size:34px;line-height:1.12;}
 .page.toc-page .toc-title .section-subtitle{margin:6px 0 0;font-size:15px;}
-.page.toc-page .toc-grid{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:230px 230px;gap:14px;height:calc(100% - 150px);}
-.page.toc-page .toc-grid .card{height:100%;padding:14px 16px;overflow:hidden;}
-.page.toc-page .toc-grid .panel-title{margin-bottom:10px;font-size:17px;}
-.page.toc-page .toc-grid table{min-width:0;width:100%;table-layout:auto;}
-.page.toc-page .toc-grid th,.page.toc-page .toc-grid td{padding:8px 10px;font-size:12px;}
+/* 5 parts, balanced: 3 cards on the top row, 2 wider cards on the bottom row. */
+.page.toc-page .toc-grid{display:grid;grid-template-columns:repeat(6,1fr);grid-template-rows:1fr 1fr;gap:14px;height:calc(100% - 150px);}
+.page.toc-page .toc-grid .card:nth-child(1){grid-column:1 / 3;}
+.page.toc-page .toc-grid .card:nth-child(2){grid-column:3 / 5;}
+.page.toc-page .toc-grid .card:nth-child(3){grid-column:5 / 7;}
+.page.toc-page .toc-grid .card:nth-child(4){grid-column:1 / 4;grid-row:2;}
+.page.toc-page .toc-grid .card:nth-child(5){grid-column:4 / 7;grid-row:2;}
+.page.toc-page .toc-grid .card{height:100%;padding:14px 16px;overflow:hidden;display:flex;flex-direction:column;}
+.page.toc-page .toc-grid .panel-title{margin-bottom:2px;font-size:17px;}
+.page.toc-page .toc-part-blurb{color:var(--gold);font-size:11.5px;font-weight:600;margin-bottom:10px;line-height:1.4;}
+.page.toc-page .toc-rows{display:flex;flex-direction:column;gap:7px;overflow:hidden;flex:1;}
+.page.toc-page .toc-row{display:flex;align-items:baseline;gap:6px;font-size:12.5px;color:rgba(255,255,255,.86);}
+.page.toc-page .toc-row-title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:1;}
+.page.toc-page .toc-row-leader{flex:1 1 auto;min-width:10px;border-bottom:1px dotted rgba(255,255,255,.24);margin-bottom:3px;}
+.page.toc-page .toc-row-num{color:var(--gold);font-weight:700;flex-shrink:0;font-variant-numeric:tabular-nums;}
 .page.toc-page .appendix-card{display:flex;flex-direction:column;justify-content:space-between;}
 .page.toc-page .appendix-card p{margin:0;line-height:1.8;font-size:14px;}
 .page.toc-page .appendix-list{display:grid;grid-template-columns:1fr 1fr;gap:6px 18px;margin-top:14px;}

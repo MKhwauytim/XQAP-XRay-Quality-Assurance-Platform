@@ -4,7 +4,7 @@
 
 import type { ReportModel } from "../model/reportModel";
 import { divider } from "./dividers";
-import { buildCover, buildGlossary, buildToc } from "./frontMatter";
+import { buildCover, buildGlossary, buildToc, type TocPart } from "./frontMatter";
 import {
   buildDataQualityExclusions,
   buildPopulationByPort,
@@ -36,39 +36,27 @@ function pad(n: number): string {
   return String(n).padStart(2, "0");
 }
 
-/** Build every Document page in order, returning the joined HTML slides. */
+/**
+ * Build every Document page in order, returning the joined HTML slides.
+ *
+ * The front-matter TOC (page 2) is rendered from the SAME page-numbering pass as the
+ * real content — never hand-typed literals — so it always matches reality, including
+ * the per-port page count, which is dynamic (one page per non-empty port).
+ */
 export function buildDocumentSlides(model: ReportModel, issueDate: string): string {
   const pages: string[] = [];
+  const toc: TocPart[] = [
+    { title: "الجزء الأول: النطاق والمنهجية", blurb: "ما حجم المجتمع، وكيف اخترنا العينة منه؟", pages: [] },
+    { title: "الجزء الثاني: جودة الفحص", blurb: "هل قرارات المستوى الأول والثاني دقيقة أمنيًا؟", pages: [] },
+    { title: "الجزء الثالث: التطابق", blurb: "هل تتفق الفرق الأخرى مع أحكام المستويين؟", pages: [] },
+    { title: "الجزء الرابع: المساءلة", blurb: "من الأدق بين المفتشين، ومن يحتاج دعمًا؟", pages: [] },
+    { title: "الجزء الخامس: المخاطر والإجراءات", blurb: "ما الأولويات، وما الإجراء المطلوب من الإدارة؟", pages: [] },
+  ];
+  const [tocPart1, tocPart2, tocPart3, tocPart4, tocPart5] = toc;
 
-  // ── Front matter (cover/TOC/glossary carry their own fixed numbers 01–03) ──
+  // ── Front matter — TOC content is filled in at the end once real numbers are known ──
   pages.push(buildCover(model, issueDate));
-  pages.push(
-    buildToc([
-      { n: "1", title: "الجزء الأول: النطاق والمنهجية", pages: [
-        { n: "05", t: "مجتمع الحالات في لمحة" },
-        { n: "06", t: "المجتمع حسب المنفذ" },
-        { n: "07", t: "المجتمع حسب المستوى" },
-        { n: "08", t: "العينة والإنجاز" },
-        { n: "09", t: "جودة البيانات والاستبعادات" },
-      ] },
-      { n: "2", title: "الجزء الثاني: جودة الفحص", pages: [
-        { n: "11", t: "الدقة والكشف" },
-        { n: "12", t: "الدقة حسب المنفذ" },
-        { n: "13", t: "المستوى الأول مقابل الثاني" },
-        { n: "14", t: "جودة الصورة والتحديد" },
-      ] },
-      { n: "3", title: "الجزء الثالث: التطابق", pages: [
-        { n: "16", t: "كل فريق مقابل المراجع" },
-        { n: "17", t: "مصفوفة التطابق الكاملة" },
-      ] },
-      { n: "4 و 5", title: "المساءلة والمخاطر", pages: [
-        { n: "19", t: "النظرة العامة للمفتشين" },
-        { n: "20", t: "الدقة حسب نوع القرار" },
-        { n: "+", t: "صفحة لكل منفذ" },
-        { n: "—", t: "المخاطر والأولويات والملاحق" },
-      ] },
-    ]),
-  );
+  const tocSlot = pages.push("") - 1;
   pages.push(buildGlossary(model));
 
   let n = 4;
@@ -85,11 +73,11 @@ export function buildDocumentSlides(model: ReportModel, issueDate: string): stri
     ],
   }));
   n += 1;
-  pages.push(buildPopulationGlance(model, pad(n))); n += 1;
-  pages.push(buildPopulationByPort(model, pad(n))); n += 1;
-  pages.push(buildPopulationByStage(model, pad(n))); n += 1;
-  pages.push(buildSampleCompletion(model, pad(n))); n += 1;
-  pages.push(buildDataQualityExclusions(model, pad(n))); n += 1;
+  pages.push(buildPopulationGlance(model, pad(n))); tocPart1!.pages.push({ n: pad(n), t: "مجتمع الحالات في لمحة" }); n += 1;
+  pages.push(buildPopulationByPort(model, pad(n))); tocPart1!.pages.push({ n: pad(n), t: "المجتمع حسب المنفذ" }); n += 1;
+  pages.push(buildPopulationByStage(model, pad(n))); tocPart1!.pages.push({ n: pad(n), t: "المجتمع حسب المستوى" }); n += 1;
+  pages.push(buildSampleCompletion(model, pad(n))); tocPart1!.pages.push({ n: pad(n), t: "العينة والإنجاز" }); n += 1;
+  pages.push(buildDataQualityExclusions(model, pad(n))); tocPart1!.pages.push({ n: pad(n), t: "جودة البيانات والاستبعادات" }); n += 1;
 
   // ── Part 2 — Inspection Quality ──
   pages.push(divider({
@@ -103,10 +91,10 @@ export function buildDocumentSlides(model: ReportModel, issueDate: string): stri
     ],
   }));
   n += 1;
-  pages.push(buildAccuracyHeadline(model, pad(n))); n += 1;
-  pages.push(buildAccuracyByPort(model, pad(n))); n += 1;
-  pages.push(buildLevelComparison(model, pad(n))); n += 1;
-  pages.push(buildQualityImpact(model, pad(n))); n += 1;
+  pages.push(buildAccuracyHeadline(model, pad(n))); tocPart2!.pages.push({ n: pad(n), t: "الدقة والكشف" }); n += 1;
+  pages.push(buildAccuracyByPort(model, pad(n))); tocPart2!.pages.push({ n: pad(n), t: "الدقة حسب المنفذ" }); n += 1;
+  pages.push(buildLevelComparison(model, pad(n))); tocPart2!.pages.push({ n: pad(n), t: "المستوى الأول مقابل الثاني" }); n += 1;
+  pages.push(buildQualityImpact(model, pad(n))); tocPart2!.pages.push({ n: pad(n), t: "جودة الصورة والتحديد" }); n += 1;
 
   // ── Part 3 — Corroboration ──
   pages.push(divider({
@@ -119,8 +107,8 @@ export function buildDocumentSlides(model: ReportModel, issueDate: string): stri
     ],
   }));
   n += 1;
-  pages.push(buildReviewerAgreement(model, pad(n))); n += 1;
-  pages.push(buildAgreementMatrix(model, pad(n))); n += 1;
+  pages.push(buildReviewerAgreement(model, pad(n))); tocPart3!.pages.push({ n: pad(n), t: "كل فريق مقابل المراجع" }); n += 1;
+  pages.push(buildAgreementMatrix(model, pad(n))); tocPart3!.pages.push({ n: pad(n), t: "مصفوفة التطابق الكاملة" }); n += 1;
 
   // ── Part 4 — Accountability ──
   pages.push(divider({
@@ -134,12 +122,18 @@ export function buildDocumentSlides(model: ReportModel, issueDate: string): stri
     ],
   }));
   n += 1;
-  pages.push(buildEmployeeOverview(model, pad(n))); n += 1;
-  pages.push(buildAccuracyByDecision(model, pad(n))); n += 1;
+  pages.push(buildEmployeeOverview(model, pad(n))); tocPart4!.pages.push({ n: pad(n), t: "النظرة العامة للمفتشين" }); n += 1;
+  pages.push(buildAccuracyByDecision(model, pad(n))); tocPart4!.pages.push({ n: pad(n), t: "الدقة حسب نوع القرار" }); n += 1;
+  const perPortStart = n;
   const perPort = buildPerPortPages(model, n);
   pages.push(...perPort.html);
   n = perPort.nextPageNo;
-  pages.push(buildPortComparison(model, pad(n))); n += 1;
+  const perPortEnd = n - 1;
+  if (perPort.html.length > 0) {
+    const range = perPortEnd > perPortStart ? `${pad(perPortStart)}–${pad(perPortEnd)}` : pad(perPortStart);
+    tocPart4!.pages.push({ n: range, t: `صفحة لكل منفذ (${perPort.html.length} منافذ)` });
+  }
+  pages.push(buildPortComparison(model, pad(n))); tocPart4!.pages.push({ n: pad(n), t: "مقارنة المنافذ" }); n += 1;
 
   // ── Part 5 — Risk, Priorities & Actions + Exclusions + Appendix ──
   pages.push(divider({
@@ -153,10 +147,12 @@ export function buildDocumentSlides(model: ReportModel, issueDate: string): stri
     ],
   }));
   n += 1;
-  pages.push(buildErrorAnalysis(model, pad(n))); n += 1;
-  pages.push(buildPriorityActions(model, pad(n))); n += 1;
-  pages.push(buildExclusions(model, pad(n))); n += 1;
-  pages.push(buildAppendix(model, pad(n)));
+  pages.push(buildErrorAnalysis(model, pad(n))); tocPart5!.pages.push({ n: pad(n), t: "تحليل أنواع الأخطاء" }); n += 1;
+  pages.push(buildPriorityActions(model, pad(n))); tocPart5!.pages.push({ n: pad(n), t: "الأولويات والإجراءات" }); n += 1;
+  pages.push(buildExclusions(model, pad(n))); tocPart5!.pages.push({ n: pad(n), t: "الاستبعادات" }); n += 1;
+  pages.push(buildAppendix(model, pad(n))); tocPart5!.pages.push({ n: pad(n), t: "المنهجية والملاحق" });
+
+  pages[tocSlot] = buildToc(toc);
 
   return pages.join("\n");
 }
