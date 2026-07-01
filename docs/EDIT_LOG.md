@@ -4,7 +4,13 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
-## v35.0 — 2026-07-01 — Change Log admin tab + shared EmptyState/LoadingState/ErrorState primitives (FEATURE)
+## v36.4 — 2026-07-01 — Change Log admin tab + shared EmptyState/LoadingState/ErrorState primitives (FEATURE)
+
+Renumbered from an initial `v35.0` to `v36.4` to avoid colliding with the `v35.0`–`v36.3`
+entries already logged further below — those documented this same feature area (state-view
+primitives, an admin "سجل الإصدارات" version/edit-history tab, logs-tab sorting) but had no
+matching code committed to `main`; this commit is the actual implementation catching up to
+that log, landing as its own entry rather than replacing the historical ones.
 
 Phase 1/2 of `docs/UI_ENHANCEMENT_PLAN.md`: a new admin-only **Change Log** tab that parses
 and renders `docs/EDIT_LOG.md` itself (via a Vite `?raw` import) as a searchable, versioned
