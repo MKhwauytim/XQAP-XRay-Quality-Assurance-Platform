@@ -4,6 +4,26 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v34.5 — 2026-07-01 — Wire the executive-report card to its three real outputs: deck / Excel / document (BUG)
+
+The Reports-tab executive card's three format icons were wired to document(html) / Excel /
+document(print) — the **deck was never exported from the card** (Phase 6 only wired it into
+the analytics dashboard), and the card description still said "8 slides". Now the three
+icons map to the three distinct deliverables:
+- presentation icon → `openExecutiveDeck` (16:9 slides)
+- Excel icon → `buildExecutiveXlsx` (workbook)
+- document icon → `openExecutiveReport` (A4 detailed report)
+
+**File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
+- `ReportType`: `executive-print` → `executive-deck`; `ReportFormat` gains `deck`/`document`.
+- default executive format = `document`; `selectedReportType` maps executive deck/xlsx/document.
+- `generate()` executive branch routes `executive-deck` → `openExecutiveDeck`.
+- `renderExportControls`: executive shows `[deck, xlsx, document]` (others keep html/xlsx/print),
+  with correct icons + Arabic titles.
+- Card description rewritten (three formats, not "8 slides"); unused icon imports removed.
+
+---
+
 ## v34.4 — 2026-07-01 — Fix report crash on population.final.json written before the five-source pipeline (BUG)
 
 Generating the executive report from the app failed with "حدث خطأ أثناء توليد التقرير".
@@ -9932,23 +9952,3 @@ the demo entry to the picker screen instead.
 Made the demo/view entry a hidden backdoor mirroring the admin shortcut, instead of
 a visible button on the address picker.
 
-**File:** `src/data/workspace/WorkspaceGate.tsx` — removed the visible "وضع العرض التجريبي" button. On the address-picker screen (`status === "not_selected"`), Alt then A then T now opens a "وضع العرض" passcode modal; entering the view passcode (`VIEWER_PASSWORD = "view"`) calls `enterDemoWorkspace()`, which auto-enters the read-only demo session. The key listener is bound only while the picker is shown, so it can't collide with the admin Alt+A+T shortcut on the login screen. Reuses the existing `.auth-modal-backdrop` / `.auth-admin-modal` styles.
-
-**File:** `src/auth/authConfig.ts` — `VIEWER_PASSWORD` is now the view-mode passcode (the `VIEWER_USERNAME` typed-login was removed).
-
-**File:** `src/auth/AuthGate.tsx` — removed the now-redundant `viewer`/`view` typed-login path and its unused `enterDemoWorkspace` / `VIEWER_PASSWORD` references. Demo auto-login (keyed on the demo workspace name) is retained.
-
-**Verified live:** picker shows no demo button; Alt+A+T opens the passcode modal; entering "view" enters read-only demo mode (banner, full admin nav, populated Population tab); build green; lint clean.
-
----
-
-## v29.3 — 2026-06-30 — view mode presents as "وضع العرض", not admin
-
-The demo session carries `role: "admin"` only to unlock full tab visibility, which
-made the toolbar present it as the admin (admin badge + role-preview switcher).
-
-**File:** `src/auth/AdminToolbar.tsx` — when `session.mode === "demo"`, the toolbar now shows "وضع العرض (قراءة فقط)" instead of "وضع الإدارة", and treats the session as non-admin (`isRealAdmin = role === "admin" && !isDemo`), hiding the role-preview switcher and the admin feedback button. Only the logout button remains. Full tab visibility is preserved (the admin role still drives which tabs render); the session is simply no longer presented or operable as admin.
-
-**Verified:** build green.
-
----

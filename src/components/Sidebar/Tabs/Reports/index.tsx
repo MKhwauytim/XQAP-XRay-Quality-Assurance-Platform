@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import ReportDesignerTab from "../ReportDesigner";
-import { AlertTriangle, BarChart2, BarChart3, Building2, Check, ClipboardList, Database, Download, FileStack, FileText, Filter, FolderKanban, Globe, History, Printer, Settings2, User, Users, X } from "lucide-react";
+import { AlertTriangle, BarChart2, BarChart3, Building2, Check, ClipboardList, Database, Download, FileStack, FileText, Filter, Globe, History, Presentation, Settings2, User, Users, X } from "lucide-react";
 
 import type { SidebarTabModule } from "../tabTypes";
 import { loadOrDeriveDistributionCurrent } from "../../../../data/distribution/distributionStorage";
@@ -61,9 +61,9 @@ export const tabConfig: SidebarTabModule["tabConfig"] = {
   ],
 };
 
-type ReportType = "sample" | "sample-xlsx" | "sample-print" | "distribution" | "distribution-xlsx" | "distribution-print" | "executive" | "executive-xlsx" | "executive-print";
+type ReportType = "sample" | "sample-xlsx" | "sample-print" | "distribution" | "distribution-xlsx" | "distribution-print" | "executive" | "executive-xlsx" | "executive-deck";
 type ReportBaseType = "sample" | "distribution" | "executive";
-type ReportFormat = "html" | "xlsx" | "print";
+type ReportFormat = "html" | "xlsx" | "print" | "deck" | "document";
 type ReportsSection = "reports" | "kpi";
 
 const KNOWN_REPORT_SECTIONS = new Set<ReportsSection>(["reports", "kpi"]);
@@ -126,7 +126,7 @@ function ReportsContent() {
   const [section, setSection] = useState<ReportsSection>("reports");
   const [generating, setGenerating] = useState<ReportType | null>(null);
   const [formats, setFormats] = useState<Record<ReportBaseType, ReportFormat>>({
-    executive: "html",
+    executive: "document",
     sample: "html",
     distribution: "html",
   });
@@ -329,16 +329,19 @@ function ReportsContent() {
           openOrDownload(buildDistributionReport(data, selectedMonth), `تقرير_التوزيع_${selectedMonth}.html`);
           showToast("ok", type === "distribution-print" ? "تم فتح تقرير التوزيع للتصدير PDF." : "تم فتح تقرير التوزيع.");
         }
-      } else if (type === "executive" || type === "executive-xlsx" || type === "executive-print") {
+      } else if (type === "executive" || type === "executive-xlsx" || type === "executive-deck") {
         const execInput = await loadExecInput();
         if (!execInput) { showToast("error", "لم يتم العثور على بيانات المجتمع. يجب معالجة المجتمع أولاً."); return; }
         const names = buildDisplayNameMap();
         if (type === "executive-xlsx") {
           buildExecutiveXlsx(execInput, names);
-          showToast("ok", "تم تنزيل ملف Excel.");
+          showToast("ok", "تم تنزيل ملف بيانات التقرير (Excel).");
+        } else if (type === "executive-deck") {
+          openExecutiveDeck(execInput, names);
+          showToast("ok", "تم فتح العرض التنفيذي (الشرائح) — استخدم طباعة/PDF.");
         } else {
           openExecutiveReport(execInput, names);
-          showToast("ok", type === "executive-print" ? "تم فتح التقرير التنفيذي للتصدير PDF." : "تم فتح التقرير التنفيذي.");
+          showToast("ok", "تم فتح التقرير التفصيلي — استخدم طباعة/PDF.");
         }
       }
     } catch {
@@ -350,6 +353,11 @@ function ReportsContent() {
 
   function selectedReportType(baseType: ReportBaseType): ReportType {
     const format = formats[baseType];
+    if (baseType === "executive") {
+      if (format === "deck") return "executive-deck";
+      if (format === "xlsx") return "executive-xlsx";
+      return "executive"; // document
+    }
     if (format === "print") return `${baseType}-print` as ReportType;
     if (format === "xlsx") return `${baseType}-xlsx` as ReportType;
     return baseType;
@@ -358,7 +366,14 @@ function ReportsContent() {
   function renderExportControls(baseType: ReportBaseType, toneClass: string): ReactNode {
     const selectedType = selectedReportType(baseType);
     const isBusy = generating === selectedType;
-    const availableFormats: ReportFormat[] = ["html", "xlsx", "print"];
+    const availableFormats: ReportFormat[] =
+      baseType === "executive" ? ["deck", "xlsx", "document"] : ["html", "xlsx", "print"];
+    const formatTitle = (f: ReportFormat): string =>
+      f === "xlsx" ? "بيانات (Excel)"
+      : f === "deck" ? "عرض تقديمي (شرائح PDF)"
+      : f === "document" ? "تقرير تفصيلي (PDF)"
+      : f === "html" ? "HTML"
+      : "PDF من HTML";
     return (
       <div className="rh-export-controls" role="group" aria-label="صيغة التصدير">
         <button
@@ -376,11 +391,11 @@ function ReportsContent() {
               key={format}
               type="button"
               className={formats[baseType] === format ? "active" : ""}
-              title={format === "html" ? "HTML" : format === "xlsx" ? "Excel" : "PDF من HTML"}
-              aria-label={format === "html" ? "HTML" : format === "xlsx" ? "Excel" : "PDF من HTML"}
+              title={formatTitle(format)}
+              aria-label={formatTitle(format)}
               onClick={() => setFormats((prev) => ({ ...prev, [baseType]: format }))}
             >
-              {format === "html" ? <PresentationFormatIcon /> : format === "xlsx" ? <ExcelFormatIcon /> : <FileText size={17} strokeWidth={2.2} />}
+              {format === "xlsx" ? <ExcelFormatIcon /> : (format === "deck" || format === "html") ? <PresentationFormatIcon /> : <FileText size={17} strokeWidth={2.2} />}
             </button>
           ))}
         </div>
@@ -797,14 +812,13 @@ function ReportsContent() {
             </div>
             <div className="rh-card-title">التقرير التنفيذي</div>
             <p className="rh-card-desc">
-              عرض تقديمي من 8 شرائح يغطي الأداء الكلي، تحليل المنافذ، مصفوفة التحقق،
-              مقارنة المستويين، والقرارات التنفيذية. مُصمَّم للمشاركة مع الإدارة.
+              ثلاث صيغ من نفس التحليل: عرض تنفيذي بالشرائح للاجتماعات، وتقرير تفصيلي كامل
+              للسجل، وملف Excel ببيانات التقرير الخام والمعالجة. اختر الصيغة من الأيقونات.
             </p>
             <div className="rh-tags">
-              <span className="rh-tag"><FolderKanban size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> 5 شرائح</span>
-              <span className="rh-tag"><Globe size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> كل المنافذ</span>
-              <span className="rh-tag"><Printer size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> PDF</span>
-              <span className="rh-tag"><Download size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> XLSX</span>
+              <span className="rh-tag"><Presentation size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> عرض تقديمي</span>
+              <span className="rh-tag"><FileText size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> تقرير تفصيلي</span>
+              <span className="rh-tag"><Download size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> Excel</span>
             </div>
           </div>
           <div className="rh-card-footer">
@@ -963,7 +977,7 @@ function ReportsContent() {
               : relPath;
             return (
               <div className="rh-pbi-result">
-                <p className="rh-pbi-success">✓ تم التصدير بنجاح</p>
+                <p className="rh-pbi-success" style={{ display: "flex", alignItems: "center", gap: 6 }}><Check size={15} style={{ flexShrink: 0 }} /> تم التصدير بنجاح</p>
                 <div className="rh-pbi-path-box">
                   <span className="rh-pbi-path-label">المسار داخل مجلد العمل:</span>
                   <div className="rh-pbi-path-row">
