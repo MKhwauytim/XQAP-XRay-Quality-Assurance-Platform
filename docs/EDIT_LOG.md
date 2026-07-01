@@ -4,6 +4,87 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v38.1 — 2026-07-02 — Report Designer aligned to the design system (DESIGN UIX-03)
+
+Fixes UIX-03 from `docs/audit/FULL_SYSTEM_AUDIT_2026-07-02.md`: the Report Designer list
+screen was visibly off-system — a bare `<h2>` instead of the `PageHeader` pattern every other
+screen uses, GitHub-blue primary buttons (`#1f6feb`) instead of the brand navy tokens, and
+plain-text empty/loading states. Now: `PageHeader` (eyebrow/title/subtitle + action slot),
+`.rd-btn-primary` on `var(--c-navy)`/`var(--c-navy-2)`, and the shared `EmptyState`/
+`LoadingState` views with a create-CTA in the empty state.
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
+
+**Before:**
+```tsx
+      <div className="rd-list-header">
+        <h2 className="rd-title">مصمم التقارير</h2>
+        {!showNewForm && (
+          <button className="rd-btn rd-btn-primary" onClick={…}>+ تقرير جديد</button>
+        )}
+      </div>
+…
+      {loadingIndex ? (
+        <p className="rd-loading">جاري التحميل…</p>
+      ) : index.designs.length === 0 ? (
+        <p className="rd-empty">لا توجد تقارير محفوظة بعد.</p>
+      ) : (
+```
+
+**After:**
+```tsx
+      <PageHeader
+        eyebrow="Report Designer"
+        title="مصمم التقارير"
+        subtitle="صمّم تقارير مخصصة — صفحات وعناصر ومخططات من بيانات الشهر المعالج."
+      >
+        {!showNewForm && (
+          <button className="rd-btn rd-btn-primary" onClick={…}>+ تقرير جديد</button>
+        )}
+      </PageHeader>
+…
+      {loadingIndex ? (
+        <LoadingState />
+      ) : index.designs.length === 0 ? (
+        <EmptyState
+          icon={<LayoutTemplate />}
+          title="لا توجد تقارير محفوظة بعد"
+          description="أنشئ أول تقرير مخصص لبدء تصميم صفحاته وعناصره."
+          actions={!showNewForm && (
+            <button className="rd-btn rd-btn-primary" onClick={…}>+ تقرير جديد</button>
+          )}
+        />
+      ) : (
+```
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/ReportDesigner.css`
+
+**Before:**
+```css
+.rd-btn-primary {
+  background: #1f6feb;
+  color: #fff;
+  border-color: #1f6feb;
+}
+.rd-btn-primary:not(:disabled):hover {
+  background: #1558c7;
+  border-color: #1558c7;
+}
+```
+
+**After:**
+```css
+.rd-btn-primary {
+  background: var(--c-navy);
+  color: #fff;
+  border-color: var(--c-navy);
+}
+.rd-btn-primary:not(:disabled):hover {
+  background: var(--c-navy-2);
+  border-color: var(--c-navy-2);
+}
+```
+
 ## v38.0 — 2026-07-02 — Shared ConfirmDialog component; native window.confirm eliminated (FEATURE UIX-02)
 
 Fixes UIX-02 from `docs/audit/FULL_SYSTEM_AUDIT_2026-07-02.md`: three destructive actions used

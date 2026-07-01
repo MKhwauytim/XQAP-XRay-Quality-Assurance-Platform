@@ -21,6 +21,9 @@ import type { Rect } from "../../../../data/reportDesigner/geometry";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
 import type { DirectoryHandleLike } from "../../../../data/storage/fileSystemAccess";
 import { ConfirmDialog } from "../../../ConfirmDialog/ConfirmDialog";
+import { PageHeader } from "../../../PageHeader/PageHeader";
+import { EmptyState, LoadingState } from "../../../StateViews/StateViews";
+import { LayoutTemplate } from "lucide-react";
 import Canvas from "./editor/Canvas";
 import Ribbon from "./editor/Ribbon";
 import VizPanel from "./editor/VizPanel";
@@ -615,8 +618,11 @@ export default function ReportDesigner() {
 
   return (
     <div className="rd-root" dir="rtl">
-      <div className="rd-list-header">
-        <h2 className="rd-title">مصمم التقارير</h2>
+      <PageHeader
+        eyebrow="Report Designer"
+        title="مصمم التقارير"
+        subtitle="صمّم تقارير مخصصة — صفحات وعناصر ومخططات من بيانات الشهر المعالج."
+      >
         {!showNewForm && (
           <button
             className="rd-btn rd-btn-primary"
@@ -628,7 +634,7 @@ export default function ReportDesigner() {
             + تقرير جديد
           </button>
         )}
-      </div>
+      </PageHeader>
 
       {showNewForm && (
         <div className="rd-new-form">
@@ -689,9 +695,26 @@ export default function ReportDesigner() {
       {deleteError && <p className="rd-error">{deleteError}</p>}
 
       {loadingIndex ? (
-        <p className="rd-loading">جاري التحميل…</p>
+        <LoadingState />
       ) : index.designs.length === 0 ? (
-        <p className="rd-empty">لا توجد تقارير محفوظة بعد.</p>
+        <EmptyState
+          icon={<LayoutTemplate />}
+          title="لا توجد تقارير محفوظة بعد"
+          description="أنشئ أول تقرير مخصص لبدء تصميم صفحاته وعناصره."
+          actions={
+            !showNewForm && (
+              <button
+                className="rd-btn rd-btn-primary"
+                onClick={() => {
+                  setShowNewForm(true);
+                  setCreateError(null);
+                }}
+              >
+                + تقرير جديد
+              </button>
+            )
+          }
+        />
       ) : (
         <ul className="rd-cards">
           {index.designs.map((d) => {

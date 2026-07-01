@@ -378,13 +378,13 @@
   cursor: not-allowed;
 }
 .rd-btn-primary {
-  background: #1f6feb;
+  background: var(--c-navy);
   color: #fff;
-  border-color: #1f6feb;
+  border-color: var(--c-navy);
 }
 .rd-btn-primary:not(:disabled):hover {
-  background: #1558c7;
-  border-color: #1558c7;
+  background: var(--c-navy-2);
+  border-color: var(--c-navy-2);
 }
 .rd-btn-secondary {
   background: #f6f8fa;
