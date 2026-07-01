@@ -2,7 +2,7 @@ import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { getTemplatesRoot } from "../workspace/workspacePaths";
 
-const SELECTION_FILE = "active.inspection-template.json";
+const SELECTION_FILE = "template.selection.json";
 
 export type InspectionTemplateSelection = {
   templateId: string;

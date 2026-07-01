@@ -4,6 +4,69 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v35.5 — 2026-07-01 — Backups folder centralize + template selection file rename
+
+Task 8 of the workspace file/folder naming convention refactor. Two changes: (1) `backupStorage.ts` now sources `BACKUPS_FOLDER` from `SYSTEM_FOLDER_NAMES.backups` (i.e., `"backups"`, lowercase, unnumbered) instead of a hardcoded `"3-Backups"` literal, centralizing folder-name references; (2) template selection file renamed from `active.inspection-template.json` to `template.selection.json` to match the `entity.qualifier.json` file-naming convention. Also fixed `templateStorage.test.ts`'s hardcoded `"6-Templates"` reference to match the lowercased root already set in Task 1.
+
+**File:** `src/data/backup/backupStorage.ts`
+
+**Before:**
+```ts
+import {
+  getPopulationMonthDir,
+  getSampleMainDir,
+  getSystemRoot,
+  getTemplatesRoot,
+  WORKSPACE_ROOTS,
+} from "../workspace/workspacePaths";
+
+const BACKUPS_FOLDER = "3-Backups";
+```
+
+**After:**
+```ts
+import {
+  getPopulationMonthDir,
+  getSampleMainDir,
+  getSystemRoot,
+  getTemplatesRoot,
+  SYSTEM_FOLDER_NAMES,
+  WORKSPACE_ROOTS,
+} from "../workspace/workspacePaths";
+
+const BACKUPS_FOLDER = SYSTEM_FOLDER_NAMES.backups;
+```
+
+**File:** `src/data/templates/templateStorage.test.ts`
+
+**Before:**
+```ts
+    const templatesDir = await root.getDirectoryHandle("6-Templates", {
+      create: false,
+    });
+```
+
+**After:**
+```ts
+    const templatesDir = await root.getDirectoryHandle("6-templates", {
+      create: false,
+    });
+```
+
+**File:** `src/data/templates/templateSelectionStorage.ts`
+
+**Before:**
+```ts
+const SELECTION_FILE = "active.inspection-template.json";
+```
+
+**After:**
+```ts
+const SELECTION_FILE = "template.selection.json";
+```
+
+---
+
 ## v35.4 — 2026-07-01 — Centralize user-presets/feedback/designs folder names, no value change
 
 Task 7 of the workspace file/folder naming convention refactor. Three storage modules
