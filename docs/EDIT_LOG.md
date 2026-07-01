@@ -4,6 +4,61 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v37.13 — 2026-07-02 — ChangeLog tab: bidi-correct English prose + Western digits (BUGFIX VIS-03/VIS-04)
+
+Fixes VIS-03/VIS-04 from `docs/audit/FULL_SYSTEM_AUDIT_2026-07-02.md`. Entry bodies and titles
+in سجل الإصدارات are mostly English commit prose but rendered inside the RTL container, so
+periods/punctuation landed on the wrong side (".Implements Task 5 …") and text was
+right-aligned. Prose paragraphs, per-line spans, and entry titles now carry `dir="auto"`
+(browser picks direction per block from its first strong character) with `text-align: start`.
+The total-versions counter used `toLocaleString("ar-SA")` (Arabic-Indic ١٨٨) against the
+app-wide Western-digit standard — now uses the shared `formatNumber` (`ar-SA-u-nu-latn`).
+
+**File:** `src/components/Sidebar/Tabs/ChangeLog/index.tsx`
+
+**Before:**
+```tsx
+          <span className="cl-summary-value">{entries.length.toLocaleString("ar-SA")}</span>
+…
+        <p key={`p-${key++}`} className="cl-prose">
+          {trimmed.split("\n").map((ln, i) => (
+            <span key={i} className="cl-prose-line">
+…
+                  <span className="cl-item-title">{entry.title}</span>
+```
+
+**After:**
+```tsx
+          <span className="cl-summary-value">{formatNumber(entries.length)}</span>
+…
+        <p key={`p-${key++}`} className="cl-prose" dir="auto">
+          {trimmed.split("\n").map((ln, i) => (
+            <span key={i} className="cl-prose-line" dir="auto">
+…
+                  <span className="cl-item-title" dir="auto">{entry.title}</span>
+```
+(plus `import { formatNumber } from "../../../../utils/formatting";`)
+
+**File:** `src/components/Sidebar/Tabs/ChangeLog/ChangeLog.css`
+
+**Before:**
+```css
+.cl-prose-line { display: block; }
+```
+
+**After:**
+```css
+.cl-prose-line { display: block; }
+
+/* VIS-03: dir="auto" picks the direction; align to that direction, not the
+   RTL container, so English lines read left-to-right with sane punctuation. */
+.cl-prose,
+.cl-prose-line,
+.cl-item-title {
+  text-align: start;
+}
+```
+
 ## v37.12 — 2026-07-02 — Permission matrices: visible scrollbar + sticky label column (BUGFIX VIS-02)
 
 Fixes VIS-02 from `docs/audit/FULL_SYSTEM_AUDIT_2026-07-02.md`: on the صلاحيات الصفحات and

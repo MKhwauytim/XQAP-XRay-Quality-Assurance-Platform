@@ -3,6 +3,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { History, Search } from "lucide-react";
 
 import { PageHeader } from "../../../../components/PageHeader/PageHeader";
+import { formatNumber } from "../../../../utils/formatting";
 import type { SidebarTabModule } from "../tabTypes";
 // Bundled at build time from the repo's authoritative edit log. Newest-first.
 import editLogRaw from "../../../../../docs/EDIT_LOG.md?raw";
@@ -141,10 +142,11 @@ function renderBody(body: string): ReactNode[] {
     for (const para of paragraphs) {
       const trimmed = para.trim();
       if (!trimmed) continue;
+      // VIS-03: dir="auto" so English commit prose reads LTR inside the RTL page
       blocks.push(
-        <p key={`p-${key++}`} className="cl-prose">
+        <p key={`p-${key++}`} className="cl-prose" dir="auto">
           {trimmed.split("\n").map((ln, i) => (
-            <span key={i} className="cl-prose-line">
+            <span key={i} className="cl-prose-line" dir="auto">
               {renderInline(ln, `l-${key}-${i}`)}
             </span>
           ))}
@@ -200,7 +202,7 @@ function ChangeLogTab() {
       <div className="cl-summary">
         <div className="cl-summary-stat">
           <span className="cl-summary-label">إجمالي الإصدارات</span>
-          <span className="cl-summary-value">{entries.length.toLocaleString("ar-SA")}</span>
+          <span className="cl-summary-value">{formatNumber(entries.length)}</span>
         </div>
         {latest && (
           <div className="cl-summary-stat">
@@ -236,7 +238,7 @@ function ChangeLogTab() {
               <details open={query === "" && index === 0}>
                 <summary className="cl-item-head">
                   <span className="cl-version">{entry.version}</span>
-                  <span className="cl-item-title">{entry.title}</span>
+                  <span className="cl-item-title" dir="auto">{entry.title}</span>
                   {entry.tag && (
                     <span className={`cl-tag ${tagClass(entry.tag)}`}>
                       {TAG_LABELS_AR[entry.tag] ?? entry.tag}
