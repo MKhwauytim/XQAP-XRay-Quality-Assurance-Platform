@@ -4,6 +4,99 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v34.7 — 2026-07-01 — Deck: Western digits everywhere + fix RTL bidi reversal of number ranges (BUG)
+
+Two fixes, both must-rules for the report:
+
+1. **All numbers in English (Western) digits, never Arabic-Indic.** The agenda slide's
+   range chips were hand-typed with Arabic-Indic digits (٠٣, ٠٤, ٠٥–٠٩, ١٠–١٥). Audited the
+   whole `executive/` tree with a Unicode-aware search — that was the only real violation
+   (existing `fmtNum`/date formatting already force `-u-nu-latn`, i.e. Western digits).
+
+2. **Ranges are now computed, never hand-typed.** `agendaSlide` previously stated its slide
+   ranges as static literals with a comment claiming "the deck's slide order is fixed... so
+   these ranges are safe to state directly" — the same anti-pattern already fixed in the
+   Document's TOC. `buildDeckSlides` now groups slide builders into named sections and
+   computes each section's real start/end slide number from the actual build sequence and
+   total slide count, so the agenda can never drift from reality if slides are
+   added/removed/reordered.
+
+3. **RTL bidi was visually reversing every number range/pair.** `"02 / 15"` and `"05–09"`
+   are correct in the DOM, but inside a `direction:rtl` container the browser's bidi
+   algorithm re-orders them for display (rendered as "15 / 02", "09–05"). Fixed by adding
+   `dir="ltr"` to both the slide-position badge and the agenda range chip, which isolates
+   the numeric run and forces correct left-to-right display regardless of RTL context.
+
+**File:** `src/data/reporting/executive/deck/slides.ts`
+
+**Before:**
+```ts
+export function agendaSlide(num: number, total: number): string {
+  // Static roadmap — the deck's slide order is fixed…
+  const items = [
+    { title: "…", blurb: "…", range: "٠٣" },
+    { title: "…", blurb: "…", range: "٠٤" },
+    { title: "…", blurb: "…", range: "٠٥–٠٩" },
+    { title: "…", blurb: "…", range: "١٠–١٥" },
+  ];
+  // … <div class="deck-agenda-range">${it.range}</div> …
+}
+
+export function buildDeckSlides(model: ReportModel): string {
+  const builders = [execSummarySlide, scopeSlide, verdictSlide, /* …flat list… */];
+  const total = builders.length + 2;
+  const slides = [titleSlide(model), agendaSlide(2, total)];
+  builders.forEach((build, i) => slides.push(build(model, i + 3, total)));
+  return slides.join("\n");
+}
+```
+
+**After:**
+```ts
+export type AgendaItem = { title: string; blurb: string; range: string };
+
+export function agendaSlide(items: AgendaItem[], num: number, total: number): string {
+  // items computed by buildDeckSlides from the real build sequence — never hand-typed.
+  // … <div class="deck-agenda-range" dir="ltr">${it.range}</div> …
+}
+
+type DeckSection = { title: string; blurb: string; builders: Array<(m, num, total) => string> };
+
+export function buildDeckSlides(model: ReportModel): string {
+  const sections: DeckSection[] = [
+    { title: "ملخص المؤشرات الرئيسية", blurb: "…", builders: [execSummarySlide] },
+    { title: "مجتمع وعينة الفحص", blurb: "…", builders: [scopeSlide] },
+    { title: "نتائج دقة الأشعة", blurb: "…", builders: [verdictSlide, portsSlide, levelSlide, corroborationSlide, driversSlide] },
+    { title: "الدراسات المتقدمة", blurb: "…", builders: [topInspectorsSlide, supportSlide, riskSlide, actionsSlide, decisionsSlide, nextPeriodSlide] },
+  ];
+  const total = sections.reduce((sum, s) => sum + s.builders.length, 0) + 2;
+  let cursor = 3;
+  const agendaItems: AgendaItem[] = sections.map((s) => {
+    const start = cursor, end = cursor + s.builders.length - 1;
+    cursor = end + 1;
+    return { title: s.title, blurb: s.blurb, range: end > start ? `${padNum(start)}–${padNum(end)}` : padNum(start) };
+  });
+  const slides = [titleSlide(model), agendaSlide(agendaItems, 2, total)];
+  let num = 3;
+  for (const section of sections) for (const build of section.builders) { slides.push(build(model, num, total)); num += 1; }
+  return slides.join("\n");
+}
+```
+
+**File:** `src/data/reporting/executive/deck/shared.ts`
+
+**Before:**
+```ts
+<span class="slide-num">${pad(opts.num)} / ${pad(opts.total)}</span>
+```
+
+**After:**
+```ts
+<span class="slide-num" dir="ltr">${pad(opts.num)} / ${pad(opts.total)}</span>
+```
+
+---
+
 ## v34.6 — 2026-07-01 — Deck: add الفهرس (agenda) slide as new slide 2 (FEATURE)
 
 New slide 2 — a roadmap/agenda slide inserted right after the title slide, before the

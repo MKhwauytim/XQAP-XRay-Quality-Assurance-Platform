@@ -91,22 +91,19 @@ export function titleSlide(model: ReportModel): string {
   </section>`;
 }
 
+export type AgendaItem = { title: string; blurb: string; range: string };
+
 // ── Slide 2 — الفهرس (agenda / roadmap) ─────────────────────────────────────
-export function agendaSlide(num: number, total: number): string {
-  // Static roadmap — the deck's slide order is fixed (unlike the Document, which has
-  // dynamic per-port pages), so these ranges are safe to state directly.
-  const items: { title: string; blurb: string; range: string }[] = [
-    { title: "ملخص المؤشرات الرئيسية", blurb: "الأرقام التي تحدد الحكم في نظرة واحدة.", range: "٠٣" },
-    { title: "مجتمع وعينة الفحص", blurb: "ماذا فحصنا، وبأي تغطية؟", range: "٠٤" },
-    { title: "نتائج دقة الأشعة", blurb: "هل قرارات المستويين دقيقة أمنيًا، وهل تتفق الفرق الأخرى؟", range: "٠٥–٠٩" },
-    { title: "الدراسات المتقدمة", blurb: "من الأدق بين المفتشين، وما الإجراء المطلوب؟", range: "١٠–١٥" },
-  ];
+// `items` (title/blurb/range) are computed by buildDeckSlides from the ACTUAL section
+// positions and total slide count — never hand-typed — so the roadmap can never drift
+// from reality even as slides are added/removed/reordered.
+export function agendaSlide(items: AgendaItem[], num: number, total: number): string {
   const body = `<div class="deck-agenda">${items
     .map(
       (it, i) => `<div class="deck-agenda-item">
         <div class="deck-agenda-num">${String(i + 1).padStart(2, "0")}</div>
         <div class="deck-agenda-body"><h4>${it.title}</h4><p>${it.blurb}</p></div>
-        <div class="deck-agenda-range">${it.range}</div>
+        <div class="deck-agenda-range" dir="ltr">${it.range}</div>
       </div>`,
     )
     .join("")}</div>`;
@@ -618,28 +615,71 @@ export function nextPeriodSlide(model: ReportModel, num: number, total: number):
   });
 }
 
-/** Build every deck slide in order (blueprint §3). Returns the joined HTML. */
+function padNum(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+type DeckSection = {
+  title: string;
+  blurb: string;
+  builders: Array<(m: ReportModel, num: number, total: number) => string>;
+};
+
+/**
+ * Build every deck slide in order (blueprint §3). Returns the joined HTML.
+ *
+ * Section ranges shown on the الفهرس (agenda) slide are computed HERE, from the real
+ * position of each section within the actual build sequence — never hand-typed — so
+ * the roadmap can never drift from reality if slides are added, removed, or reordered.
+ * All numbers are Western digits (no Arabic-Indic), matching the rest of the report.
+ */
 export function buildDeckSlides(model: ReportModel): string {
-  const builders: Array<(m: ReportModel, num: number, total: number) => string> = [
-    // slide 1 (title) and slide 2 (agenda) are special — handled separately below
-    execSummarySlide,
-    scopeSlide,
-    verdictSlide,
-    portsSlide,
-    levelSlide,
-    corroborationSlide,
-    driversSlide,
-    topInspectorsSlide,
-    supportSlide,
-    riskSlide,
-    actionsSlide,
-    decisionsSlide,
-    nextPeriodSlide,
+  const sections: DeckSection[] = [
+    {
+      title: "ملخص المؤشرات الرئيسية",
+      blurb: "الأرقام التي تحدد الحكم في نظرة واحدة.",
+      builders: [execSummarySlide],
+    },
+    {
+      title: "مجتمع وعينة الفحص",
+      blurb: "ماذا فحصنا، وبأي تغطية؟",
+      builders: [scopeSlide],
+    },
+    {
+      title: "نتائج دقة الأشعة",
+      blurb: "هل قرارات المستويين دقيقة أمنيًا، وهل تتفق الفرق الأخرى؟",
+      builders: [verdictSlide, portsSlide, levelSlide, corroborationSlide, driversSlide],
+    },
+    {
+      title: "الدراسات المتقدمة",
+      blurb: "من الأدق بين المفتشين، وما الإجراء المطلوب؟",
+      builders: [topInspectorsSlide, supportSlide, riskSlide, actionsSlide, decisionsSlide, nextPeriodSlide],
+    },
   ];
-  const total = builders.length + 2; // +1 title, +1 agenda
-  const slides: string[] = [titleSlide(model), agendaSlide(2, total)];
-  builders.forEach((build, i) => {
-    slides.push(build(model, i + 3, total));
+
+  const contentSlideCount = sections.reduce((sum, s) => sum + s.builders.length, 0);
+  const total = contentSlideCount + 2; // +1 title, +1 agenda
+
+  // Content slides start right after the title (1) and agenda (2) slides.
+  let cursor = 3;
+  const agendaItems: AgendaItem[] = sections.map((s) => {
+    const start = cursor;
+    const end = cursor + s.builders.length - 1;
+    cursor = end + 1;
+    return {
+      title: s.title,
+      blurb: s.blurb,
+      range: end > start ? `${padNum(start)}–${padNum(end)}` : padNum(start),
+    };
   });
+
+  const slides: string[] = [titleSlide(model), agendaSlide(agendaItems, 2, total)];
+  let num = 3;
+  for (const section of sections) {
+    for (const build of section.builders) {
+      slides.push(build(model, num, total));
+      num += 1;
+    }
+  }
   return slides.join("\n");
 }

@@ -45,7 +45,7 @@ export function slide(opts: SlideOpts): string {
     <div class="slide-eyebrow">
       <span class="slide-eyebrow-icon">${icon(opts.iconName, 16)}</span>
       <span>${esc(opts.eyebrow)}</span>
-      <span class="slide-num">${pad(opts.num)} / ${pad(opts.total)}</span>
+      <span class="slide-num" dir="ltr">${pad(opts.num)} / ${pad(opts.total)}</span>
     </div>
     <div class="slide-headline">${esc(opts.headline)}</div>
     ${opts.subhead ? `<div class="slide-subhead">${esc(opts.subhead)}</div>` : ""}
