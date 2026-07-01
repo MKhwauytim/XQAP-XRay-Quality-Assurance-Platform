@@ -1,12 +1,36 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 
 export const WORKSPACE_ROOTS = {
-  population: "1-Population",
-  samples: "2-Samples",
-  userData: "3-User Data",
-  reports: "4-Reports",
-  system: "5-System",
-  templates: "6-Templates",
+  population: "1-population",
+  samples: "2-samples",
+  userData: "3-user-data",
+  reports: "4-reports",
+  system: "5-system",
+  templates: "6-templates",
+} as const;
+
+export const POPULATION_SUBFOLDERS = {
+  raw: "1-raw",
+  processed: "2-processed",
+} as const;
+
+export const SAMPLE_SUBFOLDERS = {
+  main: "1-main",
+  employees: "2-employees",
+  approvals: "3-approvals",
+} as const;
+
+export const SYSTEM_FOLDER_NAMES = {
+  locks: "locks",
+  audit: "audit",
+  backups: "backups",
+  powerbiExport: "powerbi-export",
+  userPresets: "user-presets",
+  feedback: "feedback",
+} as const;
+
+export const REPORTS_SUBFOLDERS = {
+  designs: "designs",
 } as const;
 
 const LEGACY_ROOTS = {
@@ -71,7 +95,7 @@ export async function getSampleMainDir(
   create = true
 ): Promise<DirectoryHandleLike> {
   const monthDir = await getSampleMonthDir(directoryHandle, monthFolderName, create);
-  return monthDir.getDirectoryHandle("1-Main", { create });
+  return monthDir.getDirectoryHandle(SAMPLE_SUBFOLDERS.main, { create });
 }
 
 export async function getSampleEmployeeDir(
@@ -80,7 +104,7 @@ export async function getSampleEmployeeDir(
   create = true
 ): Promise<DirectoryHandleLike> {
   const monthDir = await getSampleMonthDir(directoryHandle, monthFolderName, create);
-  return monthDir.getDirectoryHandle("2-Employees", { create });
+  return monthDir.getDirectoryHandle(SAMPLE_SUBFOLDERS.employees, { create });
 }
 
 export async function getSampleApprovalsDir(
@@ -89,7 +113,7 @@ export async function getSampleApprovalsDir(
   create = true
 ): Promise<DirectoryHandleLike> {
   const monthDir = await getSampleMonthDir(directoryHandle, monthFolderName, create);
-  return monthDir.getDirectoryHandle("3-Approvals", { create });
+  return monthDir.getDirectoryHandle(SAMPLE_SUBFOLDERS.approvals, { create });
 }
 
 export async function getUserDataRoot(
