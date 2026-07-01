@@ -4,6 +4,60 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v37.9 — 2026-07-02 — EDIT_LOG NUL-byte cleanup + .gitattributes text rules (TOOLING)
+
+Closes the remainder of DATA-02 from `docs/audit/MASTER_AUDIT_REPORT.md`: one stray NUL byte
+was still embedded in this file (enough for `file`/`grep` to classify it as binary). Stripped
+byte-level (no textual content changed) and added a repo `.gitattributes` declaring `*.md`,
+`*.ts(x)`, `*.css`, `*.json` as text so future corruption is caught in diffs instead of
+silently degrading the audit trail.
+
+**File:** `docs/EDIT_LOG.md` — byte-level NUL strip, content unchanged.
+**File:** `.gitattributes` (new)
+
+**Before:**
+```
+(file did not exist)
+```
+
+**After:**
+```
+*.md text
+*.ts text
+*.tsx text
+*.css text
+*.json text
+```
+
+## v37.8 — 2026-07-02 — Full system audit (code + UI/UX + product) and prototype→final-product plan (DOCS)
+
+Documentation-only change. Adds `docs/audit/FULL_SYSTEM_AUDIT_2026-07-02.md`: a whole-product
+audit performed by driving the live app in Chromium (all tabs, two viewport sizes, DOM-level
+verification of suspected bugs) plus a code sweep, extending the 2026-06-28 master audit.
+
+Key new findings registered: LOG-01 (demo session never passes through `writeSession`, so
+`usePermissions` falls back to guest and demo mode renders "غير مصرح" on most tabs), VIS-01
+(fixed demo banner overlays the toolbar — logout unclickable), VIS-02 (page-permissions matrix
+clips the مدير column at ≤1440px with no horizontal scroll), VIS-03/04 (ChangeLog bidi and
+numeral inconsistencies), VIS-05 (ZATCA logo hot-linked from zatca.gov.sa — breaks offline),
+UIX-01 (StateViews library adopted only in App.tsx; empty states inconsistent), UIX-02 (three
+native `window.confirm()` sites vs the styled confirm pattern), TEC-01 (bundle grew to
+2,614 kB / 835 kB gzip; full EDIT_LOG ships in the bundle via `?raw`), TEC-04 (~1,400 raw hex
+colors bypass the token system). Consolidates all open items into Milestones A–E
+(bugs → consistency → completeness → hardening → sign-off).
+
+**File:** `docs/audit/FULL_SYSTEM_AUDIT_2026-07-02.md`
+
+**Before:**
+```
+(new file)
+```
+
+**After:**
+```
+Full audit findings register (LOG/VIS/UIX/TEC series) + 5-milestone roadmap; see file.
+```
+
 ## v36.4 — 2026-07-01 — Change Log admin tab + shared EmptyState/LoadingState/ErrorState primitives (FEATURE)
 
 Renumbered from an initial `v35.0` to `v36.4` to avoid colliding with the `v35.0`–`v36.3`
@@ -7873,7 +7927,7 @@ handleRuleChange(rule.stageKey, "certScanMethod", e.target.value as StageSamplin
 
 **Before (line 1832 — no-control-regex):**
 ```ts
-  return value.replace(/[<>:"/\\|?* -]+/g, "-").replace(/\s+/g, "_");
+  return value.replace(/[<>:"/\\|?*-]+/g, "-").replace(/\s+/g, "_");
 ```
 
 **After:**
