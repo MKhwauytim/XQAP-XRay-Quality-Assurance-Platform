@@ -1,10 +1,9 @@
 import type { AuthSession } from "./authTypes";
 import type { DirectoryHandleLike } from "../data/storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../data/storage/safeWrite";
-import { getSystemRoot } from "../data/workspace/workspacePaths";
+import { getSystemRoot, SYSTEM_FOLDER_NAMES } from "../data/workspace/workspacePaths";
 
-const ACTIVITY_AUDIT_FOLDER = "2-Audit";
-const ACTIVITY_LOG_FILE = "auth-activity.log.json";
+const ACTIVITY_LOG_FILE = "activity.log.json";
 const MAX_ACTIVITY_LOG_ENTRIES = 5000;
 
 export type AuthActivityCloseReason =
@@ -74,7 +73,7 @@ async function getActivityAuditDir(create: boolean): Promise<DirectoryHandleLike
   if (!workspaceHandle) return null;
   try {
     const systemDir = await getSystemRoot(workspaceHandle, create);
-    return systemDir.getDirectoryHandle(ACTIVITY_AUDIT_FOLDER, { create });
+    return systemDir.getDirectoryHandle(SYSTEM_FOLDER_NAMES.audit, { create });
   } catch {
     return null;
   }

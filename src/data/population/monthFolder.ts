@@ -3,7 +3,7 @@ const MONTH_NAMES_EN = [
   "July", "August", "September", "October", "November", "December"
 ] as const;
 
-// Matches "5-May-2026", "12-December-2025", etc.
+// Matches "5-may-2026", "12-december-2025", etc.
 const MONTH_FOLDER_PATTERN = /^(\d{1,2})-([A-Za-z]+)-(\d{4})$/;
 
 export type MonthFolderInfo = {
@@ -17,7 +17,7 @@ export function formatMonthFolderName(month: number, year: number): string {
     throw new RangeError(`Month must be 1–12, got ${month}`);
   }
   const monthName = MONTH_NAMES_EN[month - 1];
-  return `${month}-${monthName}-${year}`;
+  return `${month}-${monthName.toLowerCase()}-${year}`;
 }
 
 export function parseMonthFolderName(name: string): MonthFolderInfo | null {

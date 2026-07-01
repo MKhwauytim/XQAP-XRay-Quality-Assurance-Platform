@@ -84,7 +84,7 @@ describe("templateStorage", () => {
     const result = await deleteTemplate(root, "tmpl-a");
     expect(result.ok).toBe(true);
 
-    const templatesDir = await root.getDirectoryHandle("6-Templates", {
+    const templatesDir = await root.getDirectoryHandle("6-templates", {
       create: false,
     });
     const backup = await safeReadJson<TemplateSchema>(

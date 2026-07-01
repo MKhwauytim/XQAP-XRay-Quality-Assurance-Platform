@@ -13,10 +13,11 @@ import {
   getSampleMainDir,
   getSystemRoot,
   getTemplatesRoot,
+  SYSTEM_FOLDER_NAMES,
   WORKSPACE_ROOTS,
 } from "../workspace/workspacePaths";
 
-const BACKUPS_FOLDER = "3-Backups";
+const BACKUPS_FOLDER = SYSTEM_FOLDER_NAMES.backups;
 const AUTO_STATE_FILE = "auto-backup-state.json";
 const AUTO_SETTINGS_FILE = "auto-backup-settings.json";
 const EXCEL_MAX_ROWS = 1_048_576;

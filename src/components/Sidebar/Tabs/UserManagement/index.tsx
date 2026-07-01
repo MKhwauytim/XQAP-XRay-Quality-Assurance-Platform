@@ -1078,7 +1078,7 @@ export default function UserManagementTab() {
       <div className="um-section">
         <div className="um-matrix-desc">
           تعرض هذه الصفحة سجلات الدخول وساعات العمل المحفوظة داخل مساحة العمل في
-          <strong> 5-System/2-Audit/auth-activity.log.json</strong>.
+          <strong> 5-system/audit/activity.log.json</strong>.
         </div>
 
         <div className="um-activity-toolbar">

@@ -5,10 +5,10 @@ import {
   parseMonthFolderName
 } from "./monthFolder";
 
-test("formatMonthFolderName produces MM-MonthName-YYYY", () => {
-  expect(formatMonthFolderName(5, 2026)).toBe("5-May-2026");
-  expect(formatMonthFolderName(12, 2025)).toBe("12-December-2025");
-  expect(formatMonthFolderName(1, 2024)).toBe("1-January-2024");
+test("formatMonthFolderName produces MM-monthname-YYYY (lowercase)", () => {
+  expect(formatMonthFolderName(5, 2026)).toBe("5-may-2026");
+  expect(formatMonthFolderName(12, 2025)).toBe("12-december-2025");
+  expect(formatMonthFolderName(1, 2024)).toBe("1-january-2024");
 });
 
 test("formatMonthFolderName throws on invalid month", () => {

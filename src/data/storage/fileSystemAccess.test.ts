@@ -22,19 +22,19 @@ test("createWorkspaceStructure creates numbered workspace folders", async () => 
   // The memory double always returns "granted" so the permission gate passes.
   await createWorkspaceStructure(dir, "test-user");
 
-  const population = await dir.getDirectoryHandle("1-Population", { create: false });
-  expect(population.name).toBe("1-Population");
+  const population = await dir.getDirectoryHandle("1-population", { create: false });
+  expect(population.name).toBe("1-population");
 
-  const samples = await dir.getDirectoryHandle("2-Samples", { create: false });
-  expect(samples.name).toBe("2-Samples");
+  const samples = await dir.getDirectoryHandle("2-samples", { create: false });
+  expect(samples.name).toBe("2-samples");
 
-  const userData = await dir.getDirectoryHandle("3-User Data", { create: false });
-  expect(userData.name).toBe("3-User Data");
+  const userData = await dir.getDirectoryHandle("3-user-data", { create: false });
+  expect(userData.name).toBe("3-user-data");
 
-  const system = await dir.getDirectoryHandle("5-System", { create: false });
-  const backups = await system.getDirectoryHandle("3-Backups", { create: false });
-  expect(backups.name).toBe("3-Backups");
+  const system = await dir.getDirectoryHandle("5-system", { create: false });
+  const backups = await system.getDirectoryHandle("backups", { create: false });
+  expect(backups.name).toBe("backups");
 
-  const templates = await dir.getDirectoryHandle("6-Templates", { create: false });
-  expect(templates.name).toBe("6-Templates");
+  const templates = await dir.getDirectoryHandle("6-templates", { create: false });
+  expect(templates.name).toBe("6-templates");
 });

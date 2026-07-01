@@ -1,5 +1,6 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { readJsonFile, writeJsonFile } from "../storage/fileSystemAccess";
+import { SYSTEM_FOLDER_NAMES } from "../workspace/workspacePaths";
 
 export type FeedbackCategory = "suggestion" | "issue" | "inquiry";
 
@@ -21,11 +22,10 @@ export interface FeedbackMessage {
   replies: FeedbackReply[];
 }
 
-const FEEDBACK_FOLDER = "feedback";
 const MESSAGES_FILE = "messages.json";
 
 async function getFeedbackDir(dir: DirectoryHandleLike): Promise<DirectoryHandleLike> {
-  return dir.getDirectoryHandle(FEEDBACK_FOLDER, { create: true });
+  return dir.getDirectoryHandle(SYSTEM_FOLDER_NAMES.feedback, { create: true });
 }
 
 export async function loadFeedback(dir: DirectoryHandleLike): Promise<FeedbackMessage[]> {

@@ -17,12 +17,12 @@ The current workspace layout uses numbered roots, with legacy fallbacks still su
 
 | Folder | Data Stored |
 | --- | --- |
-| `1-Population/` | Monthly population runs, source import data, final processed population, processing summaries, population config. |
-| `2-Samples/` | Sample master files, distribution log/current snapshot, main sample mirrors, per-employee sample mirrors, answers, referral/replacement requests, supervisor approval decisions. |
-| `3-User Data/` | Workspace user/permission files when initialized through workspace defaults. |
-| `4-Reports/` | Generated/report artifacts when report flows write to the workspace. |
-| `5-System/` | Backups, browse/table presets, automatic-backup settings/state, activity audit log, internal system files. |
-| `6-Templates/` | Inspection templates and template index/selection files. |
+| `1-population/` | Monthly population runs, source import data, final processed population, processing summaries, population config. |
+| `2-samples/` | Sample master files, distribution log/current snapshot, main sample mirrors, per-employee sample mirrors, answers, referral/replacement requests, supervisor approval decisions. |
+| `3-user-data/` | Workspace user/permission files when initialized through workspace defaults. |
+| `4-reports/` | Generated/report artifacts when report flows write to the workspace. |
+| `5-system/` | Backups, browse/table presets, automatic-backup settings/state, activity audit log, internal system files. |
+| `6-templates/` | Inspection templates and template index/selection files. |
 
 Legacy folders still read when present: `Population/`, `.system/`, and `templates/`.
 
@@ -30,19 +30,19 @@ Legacy folders still read when present: `Population/`, `.system/`, and `template
 
 | File or Pattern | Typical Location | Purpose |
 | --- | --- | --- |
-| `month.manifest.json` | `1-Population/{month}/` | Month metadata: month/year, processed counts, status, operator info. |
-| `risk.raw.json` | `1-Population/{month}/raw/` or legacy month folder | Imported risk rows. |
-| `bi.raw.json` | `1-Population/{month}/raw/` or legacy month folder | Imported BI rows when provided. |
-| `population.final.json` | `1-Population/{month}/processed/` or legacy month folder | Final processed population rows used for sampling and reporting. |
-| `processing.summary.json` | `1-Population/{month}/processed/` | Processing summary/validation data. |
-| `sample.master.json` | `2-Samples/{month}/1-Main/` | Drawn sample rows and sample configuration/result metadata. |
-| `distribution.log.json` | `2-Samples/{month}/1-Main/` | Append-only assignment event log. |
-| `distribution.current.json` | `2-Samples/{month}/1-Main/` | Derived current distribution snapshot. |
-| `main.samples.json` | `2-Samples/{month}/1-Main/` | Mirror of all assigned sample entries. |
-| `{username}.samples.json` | `2-Samples/{month}/2-Employees/` | Per-employee sample mirror. |
-| `{username}.answers.json` | `2-Samples/{month}/2-Employees/` | Employee answers plus referral/replacement requests for that employee. |
-| `{supervisor}.decisions.json` | `2-Samples/{month}/3-Approvals/` | Supervisor referral/replacement decisions. |
-| `auth-activity.log.json` | `5-System/2-Audit/` | Sign-in and working-hours audit log. |
+| `month.manifest.json` | `1-population/{month}/` | Month metadata: month/year, processed counts, status, operator info. |
+| `risk.raw.json` | `1-population/{month}/1-raw/` or legacy month folder | Imported risk rows. |
+| `bi.raw.json` | `1-population/{month}/1-raw/` or legacy month folder | Imported BI rows when provided. |
+| `population.final.json` | `1-population/{month}/2-processed/` or legacy month folder | Final processed population rows used for sampling and reporting. |
+| `processing.summary.json` | `1-population/{month}/2-processed/` | Processing summary/validation data. |
+| `sample.master.json` | `2-samples/{month}/1-main/` | Drawn sample rows and sample configuration/result metadata. |
+| `distribution.log.json` | `2-samples/{month}/1-main/` | Append-only assignment event log. |
+| `distribution.current.json` | `2-samples/{month}/1-main/` | Derived current distribution snapshot. |
+| `main.samples.json` | `2-samples/{month}/1-main/` | Mirror of all assigned sample entries. |
+| `{username}.samples.json` | `2-samples/{month}/2-employees/` | Per-employee sample mirror. |
+| `{username}.answers.json` | `2-samples/{month}/2-employees/` | Employee answers plus referral/replacement requests for that employee. |
+| `{supervisor}.decisions.json` | `2-samples/{month}/3-approvals/` | Supervisor referral/replacement decisions. |
+| `activity.log.json` | `5-system/audit/` | Sign-in and working-hours audit log. |
 
 ## Population Row Data Dictionary
 
@@ -137,12 +137,12 @@ Each `population.final.json` row and each sampled `rows[]` item uses the process
 | `{username}.answers.json` | `username`, `monthFolderName`, `revision`, `_writeToken`, `lastUpdatedAt`, `items[]`, `referralRequests[]`, `replacementRequests[]`. |
 | `items[]` | `xrayImageId`, `templateId`, `templateVersion`, `answers`, `lastSavedAt`, `submittedAt`, `answeredBy`, `status`. |
 | `{supervisor}.decisions.json` | `supervisorUsername`, `monthFolderName`, `referralDecisions[]`, `replacementDecisions[]`, `lastUpdatedAt`. |
-| `auth-activity.log.json` | `revision`, `updatedAt`, `entries[]`. |
+| `activity.log.json` | `revision`, `updatedAt`, `entries[]`. |
 | activity `entries[]` | `id`, `username`, `role`, `signedInAt`, `lastSeenAt`, `signedOutAt`, `durationMs`, `closeReason`. |
 
 ## Default Inspection Template
 
-The default template created from the Template Builder is named `نموذج ضمان جودة الأشعة`, version `1`. It covers employee inspection answers for each assigned X-ray sample. The template is saved as a normal template file in `6-Templates/{templateId}.json`, listed in `templates.index.json`, and can be selected through `inspection-template-selection.json`.
+The default template created from the Template Builder is named `نموذج ضمان جودة الأشعة`, version `1`. It covers employee inspection answers for each assigned X-ray sample. The template is saved as a normal template file in `6-templates/{templateId}.json`, listed in `templates.index.json`, and can be selected through `template.selection.json`.
 
 ### Phase 1: ضمان جودة الصورة
 
@@ -171,14 +171,14 @@ This phase checks whether the inspection result is correct and captures suspicio
 
 The inspection panel gates phases in order: the next phase is enabled after required visible fields in the current phase are completed.
 
-## 4-Reports/designs/
+## 4-reports/designs/
 
 Report Designer saves and loads user-created report designs under this sub-folder.
 
 | File or Pattern | Location | Purpose |
 | --- | --- | --- |
-| `designs.index.json` | `4-Reports/designs/` | Index of all saved report designs (`JsonEnvelope<DesignIndex>`). Lists each design's `reportId`, `reportName`, `version`, and `updatedAt`. |
-| `{reportId}.json` | `4-Reports/designs/` | Individual `ReportDocument` persisted as `JsonEnvelope<ReportDocument>`. Contains the full document: theme, pages, and all canvas elements (text, shape, image). |
+| `designs.index.json` | `4-reports/designs/` | Index of all saved report designs (`JsonEnvelope<DesignIndex>`). Lists each design's `reportId`, `reportName`, `version`, and `updatedAt`. |
+| `{reportId}.json` | `4-reports/designs/` | Individual `ReportDocument` persisted as `JsonEnvelope<ReportDocument>`. Contains the full document: theme, pages, and all canvas elements (text, shape, image). |
 
 Both files use `safeWriteJson` / `safeReadJson` and the `JsonEnvelope` schema-versioning wrapper (current `schemaVersion: 1`). The index is re-derived from the design files on load; `designs.index.json` is the live index that the Report Designer list view reads.
 
@@ -186,15 +186,15 @@ Both files use `safeWriteJson` / `safeReadJson` and the `JsonEnvelope` schema-ve
 
 | File or Pattern | Location | Purpose |
 | --- | --- | --- |
-| `templates.index.json` | `6-Templates/` | Template list and latest versions. |
-| `{templateId}.json` | `6-Templates/` | Inspection template schema and fields. |
-| `inspection-template-selection.json` | `6-Templates/` | Selected active inspection template. |
-| `admin-shared.browse-preset.json` | `5-System/user-presets/` | Shared/admin table column preferences. |
-| `{username}.browse-preset.json` | `5-System/user-presets/` | User-specific table column preferences. |
-| `backup.manifest.json` and copied data files | `5-System/3-Backups/{timestamp}/` | Manual/automatic backup snapshots. |
-| `population.csv` | `5-System/powerbi-export/{month}/` | All `ExecutiveReportRow` records (UTF-8 BOM CSV, 26 columns). |
-| `sample.csv` | `5-System/powerbi-export/{month}/` | `selectedInSample=true` subset of `population.csv`. |
-| `LISEZMOI.txt` | `5-System/powerbi-export/{month}/` | Bilingual connection instructions (Arabic + English) for Power BI Desktop. |
+| `templates.index.json` | `6-templates/` | Template list and latest versions. |
+| `{templateId}.json` | `6-templates/` | Inspection template schema and fields. |
+| `template.selection.json` | `6-templates/` | Selected active inspection template. |
+| `admin-shared.browse-preset.json` | `5-system/user-presets/` | Shared/admin table column preferences. |
+| `{username}.browse-preset.json` | `5-system/user-presets/` | User-specific table column preferences. |
+| `backup.manifest.json` and copied data files | `5-system/backups/{timestamp}/` | Manual/automatic backup snapshots. |
+| `population.csv` | `5-system/powerbi-export/{month}/` | All `ExecutiveReportRow` records (UTF-8 BOM CSV, 26 columns). |
+| `sample.csv` | `5-system/powerbi-export/{month}/` | `selectedInSample=true` subset of `population.csv`. |
+| `README.txt` | `5-system/powerbi-export/{month}/` | Bilingual connection instructions (Arabic + English) for Power BI Desktop. |
 
 ## Data Protection Notes
 

@@ -19,8 +19,8 @@ describe("writeCsvExport", () => {
     await writeCsvExport(root, "5-May-2026", [
       { fileName: "sample.csv", headers: ["id"], rows: [{ id: "A" }, { id: "B" }] },
     ]);
-    // navigate into 5-System/powerbi-export/5-May-2026/
-    const sys = await root.getDirectoryHandle("5-System", { create: false });
+    // navigate into 5-system/powerbi-export/5-May-2026/
+    const sys = await root.getDirectoryHandle("5-system", { create: false });
     const exp = await sys.getDirectoryHandle("powerbi-export", { create: false });
     const month = await exp.getDirectoryHandle("5-May-2026", { create: false });
     const fh = await month.getFileHandle("sample.csv", { create: false });

@@ -16,7 +16,7 @@ function xlsxFileName(username: string): string {
 }
 
 /**
- * Write (or overwrite) a per-employee XLSX file in the 2-Employees workspace folder.
+ * Write (or overwrite) a per-employee XLSX file in the 2-employees workspace folder.
  *
  * Call without `answers` on initial distribution to create a blank-answers file.
  * Call with `answers` once the employee has submitted every assigned sample.

@@ -234,6 +234,879 @@ Also: all subsequent `// ── Slide N —` comments renumbered +1; `buildDeckS
 
 ---
 
+
+## v37.6 — 2026-07-01 — Docs updated for renamed workspace file structure
+
+Task 9 of the workspace file/folder naming convention refactor. Documentation-only change: brings `docs/data-system-report.md`, `CLAUDE.md`, and `README.md` in line with the numbered-lowercase-kebab-case workspace layout that Tasks 1–8 already implemented in code (see the `v37.0`–`v37.5` entries above for the actual code changes). No source files touched.
+
+**File:** `docs/data-system-report.md` (Workspace Folder Data table)
+
+**Before:**
+```md
+| `1-Population/` | Monthly population runs, source import data, final processed population, processing summaries, population config. |
+| `2-Samples/` | Sample master files, distribution log/current snapshot, main sample mirrors, per-employee sample mirrors, answers, referral/replacement requests, supervisor approval decisions. |
+| `3-User Data/` | Workspace user/permission files when initialized through workspace defaults. |
+| `4-Reports/` | Generated/report artifacts when report flows write to the workspace. |
+| `5-System/` | Backups, browse/table presets, automatic-backup settings/state, activity audit log, internal system files. |
+| `6-Templates/` | Inspection templates and template index/selection files. |
+```
+
+**After:**
+```md
+| `1-population/` | Monthly population runs, source import data, final processed population, processing summaries, population config. |
+| `2-samples/` | Sample master files, distribution log/current snapshot, main sample mirrors, per-employee sample mirrors, answers, referral/replacement requests, supervisor approval decisions. |
+| `3-user-data/` | Workspace user/permission files when initialized through workspace defaults. |
+| `4-reports/` | Generated/report artifacts when report flows write to the workspace. |
+| `5-system/` | Backups, browse/table presets, automatic-backup settings/state, activity audit log, internal system files. |
+| `6-templates/` | Inspection templates and template index/selection files. |
+```
+
+**File:** `docs/data-system-report.md` (Population And Sample Files table)
+
+**Before:**
+```md
+| `month.manifest.json` | `1-Population/{month}/` | Month metadata: month/year, processed counts, status, operator info. |
+| `risk.raw.json` | `1-Population/{month}/raw/` or legacy month folder | Imported risk rows. |
+| `bi.raw.json` | `1-Population/{month}/raw/` or legacy month folder | Imported BI rows when provided. |
+| `population.final.json` | `1-Population/{month}/processed/` or legacy month folder | Final processed population rows used for sampling and reporting. |
+| `processing.summary.json` | `1-Population/{month}/processed/` | Processing summary/validation data. |
+| `sample.master.json` | `2-Samples/{month}/1-Main/` | Drawn sample rows and sample configuration/result metadata. |
+| `distribution.log.json` | `2-Samples/{month}/1-Main/` | Append-only assignment event log. |
+| `distribution.current.json` | `2-Samples/{month}/1-Main/` | Derived current distribution snapshot. |
+| `main.samples.json` | `2-Samples/{month}/1-Main/` | Mirror of all assigned sample entries. |
+| `{username}.samples.json` | `2-Samples/{month}/2-Employees/` | Per-employee sample mirror. |
+| `{username}.answers.json` | `2-Samples/{month}/2-Employees/` | Employee answers plus referral/replacement requests for that employee. |
+| `{supervisor}.decisions.json` | `2-Samples/{month}/3-Approvals/` | Supervisor referral/replacement decisions. |
+| `auth-activity.log.json` | `5-System/2-Audit/` | Sign-in and working-hours audit log. |
+```
+
+**After:**
+```md
+| `month.manifest.json` | `1-population/{month}/` | Month metadata: month/year, processed counts, status, operator info. |
+| `risk.raw.json` | `1-population/{month}/1-raw/` or legacy month folder | Imported risk rows. |
+| `bi.raw.json` | `1-population/{month}/1-raw/` or legacy month folder | Imported BI rows when provided. |
+| `population.final.json` | `1-population/{month}/2-processed/` or legacy month folder | Final processed population rows used for sampling and reporting. |
+| `processing.summary.json` | `1-population/{month}/2-processed/` | Processing summary/validation data. |
+| `sample.master.json` | `2-samples/{month}/1-main/` | Drawn sample rows and sample configuration/result metadata. |
+| `distribution.log.json` | `2-samples/{month}/1-main/` | Append-only assignment event log. |
+| `distribution.current.json` | `2-samples/{month}/1-main/` | Derived current distribution snapshot. |
+| `main.samples.json` | `2-samples/{month}/1-main/` | Mirror of all assigned sample entries. |
+| `{username}.samples.json` | `2-samples/{month}/2-employees/` | Per-employee sample mirror. |
+| `{username}.answers.json` | `2-samples/{month}/2-employees/` | Employee answers plus referral/replacement requests for that employee. |
+| `{supervisor}.decisions.json` | `2-samples/{month}/3-approvals/` | Supervisor referral/replacement decisions. |
+| `activity.log.json` | `5-system/audit/` | Sign-in and working-hours audit log. |
+```
+
+**File:** `docs/data-system-report.md` (Distribution And Employee Data Dictionary table — same rename, missed in the plan's Step 1 text but caught by the grep sweep)
+
+**Before:**
+```md
+| `auth-activity.log.json` | `revision`, `updatedAt`, `entries[]`. |
+```
+
+**After:**
+```md
+| `activity.log.json` | `revision`, `updatedAt`, `entries[]`. |
+```
+
+**File:** `docs/data-system-report.md` (Default Inspection Template sentence)
+
+**Before:**
+```md
+The template is saved as a normal template file in `6-Templates/{templateId}.json`, listed in `templates.index.json`, and can be selected through `inspection-template-selection.json`.
+```
+
+**After:**
+```md
+The template is saved as a normal template file in `6-templates/{templateId}.json`, listed in `templates.index.json`, and can be selected through `template.selection.json`.
+```
+
+**File:** `docs/data-system-report.md` (`4-Reports/designs/` section header + table)
+
+**Before:**
+```md
+## 4-Reports/designs/
+
+| `designs.index.json` | `4-Reports/designs/` | Index of all saved report designs (`JsonEnvelope<DesignIndex>`)... |
+| `{reportId}.json` | `4-Reports/designs/` | Individual `ReportDocument` persisted as `JsonEnvelope<ReportDocument>`... |
+```
+
+**After:**
+```md
+## 4-reports/designs/
+
+| `designs.index.json` | `4-reports/designs/` | Index of all saved report designs (`JsonEnvelope<DesignIndex>`)... |
+| `{reportId}.json` | `4-reports/designs/` | Individual `ReportDocument` persisted as `JsonEnvelope<ReportDocument>`... |
+```
+
+**File:** `docs/data-system-report.md` (Templates, Preferences, Backups table)
+
+**Before:**
+```md
+| `templates.index.json` | `6-Templates/` | Template list and latest versions. |
+| `{templateId}.json` | `6-Templates/` | Inspection template schema and fields. |
+| `inspection-template-selection.json` | `6-Templates/` | Selected active inspection template. |
+| `admin-shared.browse-preset.json` | `5-System/user-presets/` | Shared/admin table column preferences. |
+| `{username}.browse-preset.json` | `5-System/user-presets/` | User-specific table column preferences. |
+| `backup.manifest.json` and copied data files | `5-System/3-Backups/{timestamp}/` | Manual/automatic backup snapshots. |
+| `population.csv` | `5-System/powerbi-export/{month}/` | All `ExecutiveReportRow` records (UTF-8 BOM CSV, 26 columns). |
+| `sample.csv` | `5-System/powerbi-export/{month}/` | `selectedInSample=true` subset of `population.csv`. |
+| `LISEZMOI.txt` | `5-System/powerbi-export/{month}/` | Bilingual connection instructions (Arabic + English) for Power BI Desktop. |
+```
+
+**After:**
+```md
+| `templates.index.json` | `6-templates/` | Template list and latest versions. |
+| `{templateId}.json` | `6-templates/` | Inspection template schema and fields. |
+| `template.selection.json` | `6-templates/` | Selected active inspection template. |
+| `admin-shared.browse-preset.json` | `5-system/user-presets/` | Shared/admin table column preferences. |
+| `{username}.browse-preset.json` | `5-system/user-presets/` | User-specific table column preferences. |
+| `backup.manifest.json` and copied data files | `5-system/backups/{timestamp}/` | Manual/automatic backup snapshots. |
+| `population.csv` | `5-system/powerbi-export/{month}/` | All `ExecutiveReportRow` records (UTF-8 BOM CSV, 26 columns). |
+| `sample.csv` | `5-system/powerbi-export/{month}/` | `selectedInSample=true` subset of `population.csv`. |
+| `README.txt` | `5-system/powerbi-export/{month}/` | Bilingual connection instructions (Arabic + English) for Power BI Desktop. |
+```
+
+The "Legacy folders still read when present: `Population/`, `.system/`, and `templates/`." line was left unchanged — it still correctly describes the pre-numbering legacy fallback.
+
+**File:** `CLAUDE.md` (Disk layout tree + month-folder pattern)
+
+**Before:**
+```md
+1-Population/
+  {month}-{MonthName-en}-{year}/   ← e.g. 5-May-2026 (legacy: files flat in folder)
+    month.manifest.json
+    raw/        risk.raw.json, bi.raw.json (BI only if present)
+    processed/  population.final.json, processing.summary.json
+2-Samples/
+  {month}/1-Main/   sample.master.json, distribution.log.json (append-only),
+                    distribution.current.json (derived), main.samples.json
+  {month}/…        per-employee sample mirrors, answers, referral/replacement, approvals
+3-User Data/       workspace user/permission files (when initialized via workspace defaults)
+4-Reports/         generated report artifacts (when report flows write to disk)
+5-System/          backups/, browse & table presets, auto-backup settings/state, activity audit log
+6-Templates/       {templateId}.json, templates.index.json, template selection
+```
+
+Month folder names follow the pattern `{month}-{MonthName-en}-{year}` (e.g. `5-May-2026`).
+
+**After:**
+```md
+1-population/
+  {month}-{monthname-en}-{year}/   ← e.g. 5-may-2026 (legacy: files flat in folder)
+    month.manifest.json
+    1-raw/       risk.raw.json, bi.raw.json (BI only if present)
+    2-processed/ population.final.json, processing.summary.json
+2-samples/
+  {month}/1-main/   sample.master.json, distribution.log.json (append-only),
+                    distribution.current.json (derived), main.samples.json
+  {month}/…        per-employee sample mirrors, answers, referral/replacement, approvals
+3-user-data/       workspace user/permission files (when initialized via workspace defaults)
+4-reports/         generated report artifacts (when report flows write to disk)
+5-system/          backups/, browse & table presets, auto-backup settings/state, activity audit log
+6-templates/       {templateId}.json, templates.index.json, template selection
+```
+
+Month folder names follow the pattern `{month}-{monthname-en}-{year}`, lowercase (e.g. `5-may-2026`).
+
+**File:** `README.md` (Workspace Folder Layout tree + month-folder pattern)
+
+**Before:**
+```md
+Root (user picks this folder)
+├── 1-Population/
+│   └── {MM-MonthName-YYYY}/          # One folder per processed month
+│       ├── month.manifest.json
+│       ├── risk.raw.json
+│       ├── population.final.json
+│       ├── bi.raw.json                # Optional, only if BI rows present
+│       ├── sample/
+│       │   └── sample.master.json
+│       ├── distribution.log.json      # Append-only event log
+│       ├── distribution.current.json  # Derived snapshot
+│       └── employee-answers/
+│           └── {username}.answers.json
+├── 2-Samples/
+│   └── {MM-MonthName-YYYY}/
+│       ├── main.samples.json
+│       └── {username}.samples.json
+├── 3-User Data/
+│   ├── users-permissions.json
+│   └── managed-users.json
+├── 6-Templates/
+│   ├── {templateId}.json
+│   └── templates.index.json
+└── 5-System/
+    └── backups/
+        └── {YYYY-MM-DDTHH-MM-SS}/    # Backup snapshots
+```
+
+Month folder names follow the pattern `{month}-{MonthName-en}-{year}` (e.g., `5-May-2026`).
+
+**After:**
+```md
+Root (user picks this folder)
+├── 1-population/
+│   └── {MM-monthname-YYYY}/          # One folder per processed month
+│       ├── month.manifest.json
+│       ├── 1-raw/
+│       │   ├── risk.raw.json
+│       │   └── bi.raw.json            # Optional, only if BI rows present
+│       ├── 2-processed/
+│       │   └── population.final.json
+│       ├── distribution.log.json      # Append-only event log
+│       └── distribution.current.json  # Derived snapshot
+├── 2-samples/
+│   └── {MM-monthname-YYYY}/
+│       ├── 1-main/
+│       │   ├── sample.master.json
+│       │   └── main.samples.json
+│       └── 2-employees/
+│           └── {username}.samples.json
+├── 3-user-data/
+│   ├── users-permissions.json
+│   └── managed-users.json
+├── 6-templates/
+│   ├── {templateId}.json
+│   └── templates.index.json
+└── 5-system/
+    └── backups/
+        └── {YYYY-MM-DDTHH-MM-SS}/    # Backup snapshots
+```
+
+Month folder names follow the pattern `{month}-{monthname-en}-{year}`, lowercase (e.g., `5-may-2026`).
+
+---
+
+## v37.5 — 2026-07-01 — Backups folder centralize + template selection file rename
+
+Task 8 of the workspace file/folder naming convention refactor. Two changes: (1) `backupStorage.ts` now sources `BACKUPS_FOLDER` from `SYSTEM_FOLDER_NAMES.backups` (i.e., `"backups"`, lowercase, unnumbered) instead of a hardcoded `"3-Backups"` literal, centralizing folder-name references; (2) template selection file renamed from `active.inspection-template.json` to `template.selection.json` to match the `entity.qualifier.json` file-naming convention. Also fixed `templateStorage.test.ts`'s hardcoded `"6-Templates"` reference to match the lowercased root already set in Task 1.
+
+**File:** `src/data/backup/backupStorage.ts`
+
+**Before:**
+```ts
+import {
+  getPopulationMonthDir,
+  getSampleMainDir,
+  getSystemRoot,
+  getTemplatesRoot,
+  WORKSPACE_ROOTS,
+} from "../workspace/workspacePaths";
+
+const BACKUPS_FOLDER = "3-Backups";
+```
+
+**After:**
+```ts
+import {
+  getPopulationMonthDir,
+  getSampleMainDir,
+  getSystemRoot,
+  getTemplatesRoot,
+  SYSTEM_FOLDER_NAMES,
+  WORKSPACE_ROOTS,
+} from "../workspace/workspacePaths";
+
+const BACKUPS_FOLDER = SYSTEM_FOLDER_NAMES.backups;
+```
+
+**File:** `src/data/templates/templateStorage.test.ts`
+
+**Before:**
+```ts
+    const templatesDir = await root.getDirectoryHandle("6-Templates", {
+      create: false,
+    });
+```
+
+**After:**
+```ts
+    const templatesDir = await root.getDirectoryHandle("6-templates", {
+      create: false,
+    });
+```
+
+**File:** `src/data/templates/templateSelectionStorage.ts`
+
+**Before:**
+```ts
+const SELECTION_FILE = "active.inspection-template.json";
+```
+
+**After:**
+```ts
+const SELECTION_FILE = "template.selection.json";
+```
+
+---
+
+## v37.4 — 2026-07-01 — Centralize user-presets/feedback/designs folder names, no value change
+
+Task 7 of the workspace file/folder naming convention refactor. Three storage modules
+(`browsePresetStorage.ts`, `feedbackStorage.ts`, `reportDesignStorage.ts`) each had a local
+constant defining a folder name that already matched the target naming convention. This task
+removes the three duplicated local `const` definitions and makes each file import the equivalent
+value from `workspacePaths.ts` instead, centralizing to a single source of truth. No folder-name
+value changes — this is pure refactoring to prevent future drift.
+
+**File:** `src/data/preferences/browsePresetStorage.ts`
+
+**Before:**
+```ts
+import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import type { BrowseDatasetKind } from "../population/populationStorage";
+import { getSystemRoot } from "../workspace/workspacePaths";
+
+const USER_PRESETS_FOLDER = "user-presets";
+const ADMIN_SHARED_PRESET_FILE = "admin-shared.browse-preset.json";
+
+// ...
+
+async function getPresetDir(
+  directoryHandle: DirectoryHandleLike,
+  create: boolean
+): Promise<DirectoryHandleLike> {
+  const systemDir = await getSystemRoot(directoryHandle, create);
+  return systemDir.getDirectoryHandle(USER_PRESETS_FOLDER, { create });
+}
+```
+
+**After:**
+```ts
+import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import type { BrowseDatasetKind } from "../population/populationStorage";
+import { getSystemRoot, SYSTEM_FOLDER_NAMES } from "../workspace/workspacePaths";
+
+const ADMIN_SHARED_PRESET_FILE = "admin-shared.browse-preset.json";
+
+// ...
+
+async function getPresetDir(
+  directoryHandle: DirectoryHandleLike,
+  create: boolean
+): Promise<DirectoryHandleLike> {
+  const systemDir = await getSystemRoot(directoryHandle, create);
+  return systemDir.getDirectoryHandle(SYSTEM_FOLDER_NAMES.userPresets, { create });
+}
+```
+
+**File:** `src/data/feedback/feedbackStorage.ts`
+
+**Before:**
+```ts
+import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import { readJsonFile, writeJsonFile } from "../storage/fileSystemAccess";
+
+// ...
+
+const FEEDBACK_FOLDER = "feedback";
+const MESSAGES_FILE = "messages.json";
+
+async function getFeedbackDir(dir: DirectoryHandleLike): Promise<DirectoryHandleLike> {
+  return dir.getDirectoryHandle(FEEDBACK_FOLDER, { create: true });
+}
+```
+
+**After:**
+```ts
+import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import { readJsonFile, writeJsonFile } from "../storage/fileSystemAccess";
+import { SYSTEM_FOLDER_NAMES } from "../workspace/workspacePaths";
+
+// ...
+
+const MESSAGES_FILE = "messages.json";
+
+async function getFeedbackDir(dir: DirectoryHandleLike): Promise<DirectoryHandleLike> {
+  return dir.getDirectoryHandle(SYSTEM_FOLDER_NAMES.feedback, { create: true });
+}
+```
+
+**File:** `src/data/reportDesigner/storage/reportDesignStorage.ts`
+
+**Before:**
+```ts
+import type { DirectoryHandleLike } from "../../storage/fileSystemAccess";
+import { safeReadJson, safeWriteJson } from "../../storage/safeWrite";
+import { withResourceLock } from "../../storage/webLocks";
+import { getReportsRoot } from "../../workspace/workspacePaths";
+import type { ReportDocument } from "../reportTypes";
+
+const INDEX_FILE = "designs.index.json";
+
+// ...
+
+async function getDesignsDir(
+  directoryHandle: DirectoryHandleLike
+): Promise<DirectoryHandleLike> {
+  const reports = await getReportsRoot(directoryHandle, true);
+  return reports.getDirectoryHandle("designs", { create: true });
+}
+```
+
+**After:**
+```ts
+import type { DirectoryHandleLike } from "../../storage/fileSystemAccess";
+import { safeReadJson, safeWriteJson } from "../../storage/safeWrite";
+import { withResourceLock } from "../../storage/webLocks";
+import { getReportsRoot, REPORTS_SUBFOLDERS } from "../../workspace/workspacePaths";
+import type { ReportDocument } from "../reportTypes";
+
+const INDEX_FILE = "designs.index.json";
+
+// ...
+
+async function getDesignsDir(
+  directoryHandle: DirectoryHandleLike
+): Promise<DirectoryHandleLike> {
+  const reports = await getReportsRoot(directoryHandle, true);
+  return reports.getDirectoryHandle(REPORTS_SUBFOLDERS.designs, { create: true });
+}
+```
+
+---
+
+## v37.3 — 2026-07-01 — Use SYSTEM_FOLDER_NAMES.powerbiExport and rename LISEZMOI.txt to README.txt
+
+Task 6 of the workspace file/folder naming convention refactor. `exportWriter.ts` previously
+hardcoded the literal `"powerbi-export"` for the subdirectory under the system root. Swapped
+to import and use `SYSTEM_FOLDER_NAMES.powerbiExport` from `workspacePaths.ts` (added in Task 1),
+centralizing the folder-name constant. Also renamed the instructions file from `LISEZMOI.txt`
+(French name, inappropriate for Arabic/English content) to `README.txt` (standard cross-lingual
+naming convention). Updated embedded instruction strings: both Arabic and English path references
+changed from `'5-System/powerbi-export/'` to `'5-system/powerbi-export/'` to reflect the lowercase
+system folder. Updated the UI hint in `Reports/index.tsx` to display the correct casing
+`5-system\powerbi-export\` and the correct filename `README.txt` in the export-result panel.
+
+**File:** `src/data/powerbiExport/exportWriter.ts`
+
+**Before:**
+```ts
+import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import { getSystemRoot } from "../workspace/workspacePaths";
+import { toCsvString } from "./csvSerializer";
+import type { ExportManifest, ExportFileResult } from "./exportTypes";
+
+async function getExportDir(root: DirectoryHandleLike, month: string): Promise<DirectoryHandleLike> {
+  const sys = await getSystemRoot(root, true);
+  const expRoot = await sys.getDirectoryHandle("powerbi-export", { create: true });
+  return expRoot.getDirectoryHandle(month, { create: true });
+}
+// ...
+  const instructions = [
+    // ...
+    `3. انتقل إلى مجلد '5-System/powerbi-export/${month}/'`,
+    // ...
+    `3. Browse to '5-System/powerbi-export/${month}/'`,
+    // ...
+  ].join("\n");
+
+  await writeTextFile(dir, "LISEZMOI.txt", instructions);
+```
+
+**After:**
+```ts
+import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import { getSystemRoot, SYSTEM_FOLDER_NAMES } from "../workspace/workspacePaths";
+import { toCsvString } from "./csvSerializer";
+import type { ExportManifest, ExportFileResult } from "./exportTypes";
+
+async function getExportDir(root: DirectoryHandleLike, month: string): Promise<DirectoryHandleLike> {
+  const sys = await getSystemRoot(root, true);
+  const expRoot = await sys.getDirectoryHandle(SYSTEM_FOLDER_NAMES.powerbiExport, { create: true });
+  return expRoot.getDirectoryHandle(month, { create: true });
+}
+// ...
+  const instructions = [
+    // ...
+    `3. انتقل إلى مجلد '5-system/powerbi-export/${month}/'`,
+    // ...
+    `3. Browse to '5-system/powerbi-export/${month}/'`,
+    // ...
+  ].join("\n");
+
+  await writeTextFile(dir, "README.txt", instructions);
+```
+
+**File:** `src/data/powerbiExport/exportWriter.test.ts`
+
+**Before:**
+```ts
+    // navigate into 5-System/powerbi-export/5-May-2026/
+    const sys = await root.getDirectoryHandle("5-System", { create: false });
+```
+
+**After:**
+```ts
+    // navigate into 5-system/powerbi-export/5-May-2026/
+    const sys = await root.getDirectoryHandle("5-system", { create: false });
+```
+
+**File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
+
+**Before:**
+```tsx
+            const relPath = `5-System\\powerbi-export\\${pbiResult.month}`;
+```
+
+**After:**
+```tsx
+            const relPath = `5-system\\powerbi-export\\${pbiResult.month}`;
+```
+
+Also updated the instructions file reference in the export-result panel UI from `LISEZMOI.txt` to `README.txt`.
+
+---
+
+## v37.2 — 2026-07-01 — Use POPULATION_SUBFOLDERS (1-raw/2-processed) instead of raw/processed literals
+
+Task 4 of the workspace file/folder naming convention refactor. `populationStorage.ts` previously
+hardcoded the literals `"raw"` and `"processed"` for every `getDirectoryHandle` call under a
+population month folder. Swapped every call site to `POPULATION_SUBFOLDERS.raw` /
+`POPULATION_SUBFOLDERS.processed` (added to `workspacePaths.ts` in Task 1), so population month
+folders now contain `1-raw/` and `2-processed/` subfolders (numbering reflects the real two-step
+raw-import → processed-output pipeline). The `"sample"` and `"reports"` stray-folder creation
+calls in `saveMonthRun`, and the legacy-fallback `"sample"` literal in the test file's
+"loadAllSampleRows falls back to legacy sample path" test, are pre-existing, unrelated, and were
+left untouched (out of scope for this task).
+
+**File:** `src/data/population/populationStorage.ts`
+
+**Before:**
+```ts
+import {
+  getPopulationMonthDir,
+  getPopulationRoot,
+  getSampleMainDir,
+} from "../workspace/workspacePaths";
+// ...
+    const monthDir = await ensureFolder(populationDir, monthFolderName);
+    const rawDir = await ensureFolder(monthDir, "raw");
+    const processedDir = await ensureFolder(monthDir, "processed");
+    await ensureFolder(monthDir, "sample");
+    await ensureFolder(monthDir, "reports");
+// ...
+      processingSummaryFile: params.processingSummary ? "processed/processing.summary.json" : null,
+// ...
+        const processedDir = await monthDir.getDirectoryHandle("processed", { create: false }); // listMonthSummaries
+// ...
+      const processedDir = await monthDir.getDirectoryHandle("processed", { create: false }); // loadAllPopulationRows
+// ...
+    const processedDir = await monthDir.getDirectoryHandle("processed", { create: false }); // loadMonthPopulationFinal
+// ...
+      const rawDir = await monthDir.getDirectoryHandle("raw", { create: false }); // loadAllRawRows
+// ...
+      monthDir.getDirectoryHandle("processed", { create: false }) // loadMonthForEditing (population.final.json)
+      monthDir.getDirectoryHandle("processed", { create: false }) // loadMonthForEditing (processing.summary.json)
+      monthDir.getDirectoryHandle("raw", { create: false }) // loadMonthForEditing (risk/bi raw)
+```
+
+**After:**
+```ts
+import {
+  getPopulationMonthDir,
+  getPopulationRoot,
+  getSampleMainDir,
+  POPULATION_SUBFOLDERS,
+} from "../workspace/workspacePaths";
+// ...
+    const monthDir = await ensureFolder(populationDir, monthFolderName);
+    const rawDir = await ensureFolder(monthDir, POPULATION_SUBFOLDERS.raw);
+    const processedDir = await ensureFolder(monthDir, POPULATION_SUBFOLDERS.processed);
+    await ensureFolder(monthDir, "sample");
+    await ensureFolder(monthDir, "reports");
+// ...
+      processingSummaryFile: params.processingSummary
+        ? `${POPULATION_SUBFOLDERS.processed}/processing.summary.json`
+        : null,
+// ...
+        const processedDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false }); // listMonthSummaries
+// ...
+      const processedDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false }); // loadAllPopulationRows
+// ...
+    const processedDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false }); // loadMonthPopulationFinal
+// ...
+      const rawDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.raw, { create: false }); // loadAllRawRows
+// ...
+      monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false }) // loadMonthForEditing (population.final.json)
+      monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false }) // loadMonthForEditing (processing.summary.json)
+      monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.raw, { create: false }) // loadMonthForEditing (risk/bi raw)
+```
+
+**File:** `src/data/population/populationStorage.test.ts`
+
+**Before:** All occurrences of `"1-Population"` → root folder, `"5-May-2026"` → month folder,
+`monthDir.getDirectoryHandle("raw", { create: false })`, and
+`monthDir.getDirectoryHandle("processed", { create: false })` (matching Task 1/2's now-outdated
+title-case root and month-folder literals, and the pre-numbering subfolder literals).
+
+**After:** `"1-population"`, `"5-may-2026"`, `monthDir.getDirectoryHandle("1-raw", { create: false })`,
+`monthDir.getDirectoryHandle("2-processed", { create: false })`. The legacy-fallback
+`monthDir.getDirectoryHandle("sample", { create: true })` line in the
+"loadAllSampleRows falls back to legacy sample path" test was left unchanged.
+
+---
+
+## v37.1 — 2026-07-01 — Wire workspace init path to central WORKSPACE_ROOTS/SYSTEM_FOLDER_NAMES constants
+
+Task 3 of the workspace file/folder naming convention refactor. `workspaceDefaults.ts` and
+`fileSystemAccess.ts` (the `createWorkspaceStructure()` init path) previously hardcoded their
+own old title-case folder-name literals (`"1-Locks"`, `"2-Audit"`, `"3-Backups"`,
+`"1-Population"`, `"3-User Data"`, `"4-Reports"`, `"2-Employees"`) instead of importing the
+lowercase kebab-case constants already added to `workspacePaths.ts` in Task 1. Straight rename,
+no backwards-compatibility fallback.
+
+**File:** `src/data/workspace/workspaceDefaults.ts`
+
+**Before:**
+```ts
+import { WORKSPACE_ROOTS } from "./workspacePaths";
+
+export const WORKSPACE_FILE_NAMES = {
+  manifest: "workspace.manifest.json",
+  usersPermissions: "users.permissions.json",
+  dataRaw: "data.raw.json",
+  dataProcessed: "data.processed.json",
+  sampleMaster: "sample.master.json",
+  sampleDistribution: "sample.distribution.json",
+  employeeAnswersFolder: WORKSPACE_ROOTS.samples,
+  systemFolder: WORKSPACE_ROOTS.system,
+  locksFolder: "1-Locks",
+  auditFolder: "2-Audit",
+  backupsFolder: "3-Backups",
+  templatesFolder: WORKSPACE_ROOTS.templates
+} as const;
+// ...
+        employeeAnswersFolder: `${WORKSPACE_ROOTS.samples}/{month}/2-Employees`,
+```
+
+**After:**
+```ts
+import { SAMPLE_SUBFOLDERS, SYSTEM_FOLDER_NAMES, WORKSPACE_ROOTS } from "./workspacePaths";
+
+export const WORKSPACE_FILE_NAMES = {
+  manifest: "workspace.manifest.json",
+  usersPermissions: "users.permissions.json",
+  dataRaw: "data.raw.json",
+  dataProcessed: "data.processed.json",
+  sampleMaster: "sample.master.json",
+  sampleDistribution: "sample.distribution.json",
+  employeeAnswersFolder: WORKSPACE_ROOTS.samples,
+  systemFolder: WORKSPACE_ROOTS.system,
+  locksFolder: SYSTEM_FOLDER_NAMES.locks,
+  auditFolder: SYSTEM_FOLDER_NAMES.audit,
+  backupsFolder: SYSTEM_FOLDER_NAMES.backups,
+  templatesFolder: WORKSPACE_ROOTS.templates
+} as const;
+// ...
+        employeeAnswersFolder: `${WORKSPACE_ROOTS.samples}/{month}/${SAMPLE_SUBFOLDERS.employees}`,
+```
+
+**File:** `src/data/storage/fileSystemAccess.ts`
+
+**Before:**
+```ts
+import {
+  getSystemRoot,
+  getUserDataRoot,
+} from "../workspace/workspacePaths";
+// ...
+  await directoryHandle.getDirectoryHandle("1-Population", { create: true });
+  await directoryHandle.getDirectoryHandle("3-User Data", { create: true });
+  await directoryHandle.getDirectoryHandle("4-Reports", { create: true });
+// ...
+  const userDataHandle = await directoryHandle.getDirectoryHandle("3-User Data", {
+    create: true
+  });
+```
+
+**After:**
+```ts
+import {
+  getSystemRoot,
+  getUserDataRoot,
+  WORKSPACE_ROOTS,
+} from "../workspace/workspacePaths";
+// ...
+  await directoryHandle.getDirectoryHandle(WORKSPACE_ROOTS.population, { create: true });
+  await directoryHandle.getDirectoryHandle(WORKSPACE_ROOTS.userData, { create: true });
+  await directoryHandle.getDirectoryHandle(WORKSPACE_ROOTS.reports, { create: true });
+// ...
+  const userDataHandle = await directoryHandle.getDirectoryHandle(WORKSPACE_ROOTS.userData, {
+    create: true
+  });
+```
+
+**File:** `src/data/storage/fileSystemAccess.test.ts`
+
+**Before:**
+```ts
+  const population = await dir.getDirectoryHandle("1-Population", { create: false });
+  expect(population.name).toBe("1-Population");
+
+  const samples = await dir.getDirectoryHandle("2-Samples", { create: false });
+  expect(samples.name).toBe("2-Samples");
+
+  const userData = await dir.getDirectoryHandle("3-User Data", { create: false });
+  expect(userData.name).toBe("3-User Data");
+
+  const system = await dir.getDirectoryHandle("5-System", { create: false });
+  const backups = await system.getDirectoryHandle("3-Backups", { create: false });
+  expect(backups.name).toBe("3-Backups");
+
+  const templates = await dir.getDirectoryHandle("6-Templates", { create: false });
+  expect(templates.name).toBe("6-Templates");
+```
+
+**After:**
+```ts
+  const population = await dir.getDirectoryHandle("1-population", { create: false });
+  expect(population.name).toBe("1-population");
+
+  const samples = await dir.getDirectoryHandle("2-samples", { create: false });
+  expect(samples.name).toBe("2-samples");
+
+  const userData = await dir.getDirectoryHandle("3-user-data", { create: false });
+  expect(userData.name).toBe("3-user-data");
+
+  const system = await dir.getDirectoryHandle("5-system", { create: false });
+  const backups = await system.getDirectoryHandle("backups", { create: false });
+  expect(backups.name).toBe("backups");
+
+  const templates = await dir.getDirectoryHandle("6-templates", { create: false });
+  expect(templates.name).toBe("6-templates");
+```
+
+---
+
+## v37.0 — 2026-07-01 — Lowercase month folder names (kebab-case)
+
+**File:** `src/data/population/monthFolder.ts`
+
+**Before:**
+```ts
+export function formatMonthFolderName(month: number, year: number): string {
+  if (month < 1 || month > 12) {
+    throw new RangeError(`Month must be 1–12, got ${month}`);
+  }
+  const monthName = MONTH_NAMES_EN[month - 1];
+  return `${month}-${monthName}-${year}`;
+}
+```
+
+**After:**
+```ts
+export function formatMonthFolderName(month: number, year: number): string {
+  if (month < 1 || month > 12) {
+    throw new RangeError(`Month must be 1–12, got ${month}`);
+  }
+  const monthName = MONTH_NAMES_EN[month - 1];
+  return `${month}-${monthName.toLowerCase()}-${year}`;
+}
+```
+
+**File:** `src/data/population/monthFolder.test.ts`
+
+**Before:**
+```ts
+test("formatMonthFolderName produces MM-MonthName-YYYY", () => {
+  expect(formatMonthFolderName(5, 2026)).toBe("5-May-2026");
+  expect(formatMonthFolderName(12, 2025)).toBe("12-December-2025");
+  expect(formatMonthFolderName(1, 2024)).toBe("1-January-2024");
+});
+```
+
+**After:**
+```ts
+test("formatMonthFolderName produces MM-monthname-YYYY (lowercase)", () => {
+  expect(formatMonthFolderName(5, 2026)).toBe("5-may-2026");
+  expect(formatMonthFolderName(12, 2025)).toBe("12-december-2025");
+  expect(formatMonthFolderName(1, 2024)).toBe("1-january-2024");
+});
+```
+
+---
+
+
+---
+
+## v37.7 — 2026-07-01 — refactor(auth): move audit log to 5-system/audit/activity.log.json
+
+Implements Task 5 of the workspace naming standardization plan.
+Moves the auth activity audit log from 5-System/2-Audit/auth-activity.log.json to the
+normalized lowercase, kebab-case path 5-system/audit/activity.log.json using the
+centralized SYSTEM_FOLDER_NAMES constant from workspacePaths.ts.
+
+**File:** src/auth/authActivityLog.ts
+
+**Before:**
+```ts
+import { getSystemRoot } from "../data/workspace/workspacePaths";
+
+const ACTIVITY_AUDIT_FOLDER = "2-Audit";
+const ACTIVITY_LOG_FILE = "auth-activity.log.json";
+
+async function getActivityAuditDir(create: boolean): Promise<DirectoryHandleLike | null> {
+  if (!workspaceHandle) return null;
+  try {
+    const systemDir = await getSystemRoot(workspaceHandle, create);
+    return systemDir.getDirectoryHandle(ACTIVITY_AUDIT_FOLDER, { create });
+  } catch {
+    return null;
+  }
+}
+```
+
+**After:**
+```ts
+import { getSystemRoot, SYSTEM_FOLDER_NAMES } from "../data/workspace/workspacePaths";
+
+const ACTIVITY_LOG_FILE = "activity.log.json";
+
+async function getActivityAuditDir(create: boolean): Promise<DirectoryHandleLike | null> {
+  if (!workspaceHandle) return null;
+  try {
+    const systemDir = await getSystemRoot(workspaceHandle, create);
+    return systemDir.getDirectoryHandle(SYSTEM_FOLDER_NAMES.audit, { create });
+  } catch {
+    return null;
+  }
+}
+```
+
+**File:** src/auth/authActivityLog.test.ts
+
+**Before:**
+```ts
+    const systemDir = await getSystemRoot(root, false);
+    const auditDir = await systemDir.getDirectoryHandle("2-Audit", { create: false });
+    const result = await safeReadJson<AuthActivityLogFile>(auditDir, "auth-activity.log.json");
+```
+
+**After:**
+```ts
+    const systemDir = await getSystemRoot(root, false);
+    const auditDir = await systemDir.getDirectoryHandle("audit", { create: false });
+    const result = await safeReadJson<AuthActivityLogFile>(auditDir, "activity.log.json");
+```
+
+**File:** src/components/Sidebar/Tabs/UserManagement/index.tsx
+
+**Before:**
+```tsx
+          تعرض هذه الصفحة سجلات الدخول وساعات العمل المحفوظة داخل مساحة العمل في
+          <strong> 5-System/2-Audit/auth-activity.log.json</strong>.
+```
+
+**After:**
+```tsx
+          تعرض هذه الصفحة سجلات الدخول وساعات العمل المحفوظة داخل مساحة العمل في
+          <strong> 5-system/audit/activity.log.json</strong>.
+```
+
 ## v36.3 — 2026-07-01 — Top header: polish the mode indicator + add workspace & user chips (FEATURE)
 
 Worked the post-login top header (`AdminToolbar`). The "الوضع الحالي / وضع الإدارة" block is

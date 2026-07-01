@@ -971,7 +971,7 @@ function ReportsContent() {
 
           {/* ── Power BI export result (shown below grid after export) ── */}
           {pbiResult && (() => {
-            const relPath = `5-System\\powerbi-export\\${pbiResult.month}`;
+            const relPath = `5-system\\powerbi-export\\${pbiResult.month}`;
             const fullHint = directoryHandle
               ? `${directoryHandle.name}\\${relPath}`
               : relPath;
@@ -1001,7 +1001,7 @@ function ReportsContent() {
                       <code>{f.fileName}</code> — {f.rowCount.toLocaleString("ar")} سطر
                     </li>
                   ))}
-                  <li><code>LISEZMOI.txt</code> — تعليمات الاتصال</li>
+                  <li><code>README.txt</code> — تعليمات الاتصال</li>
                 </ul>
               </div>
             );
