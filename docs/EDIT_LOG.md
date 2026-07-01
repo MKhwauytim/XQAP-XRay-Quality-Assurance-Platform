@@ -4,6 +4,72 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v38.3 — 2026-07-02 — DataTable render loop via onFilteredRowsChange (BUGFIX LOG-03)
+
+New finding surfaced during post-fix verification (registered as LOG-03 in
+`docs/audit/FULL_SYSTEM_AUDIT_2026-07-02.md`): opening صور الأشعة المحالة logged
+"Maximum update depth exceeded" ×7. Chain: `XrayReferrals` defines `rowMatchesFilter` as a
+plain function (new identity every render) → it is a dependency of DataTable's `filteredRows`
+memo → the memo recomputes to a **new array identity** every render → the
+`onFilteredRowsChange` effect re-fires → the consumer stores the array in state
+(`setFilteredTableEntries`) → re-render → loop until React clamps. Any DataTable consumer
+passing both an unstable `rowMatchesFilter` and `onFilteredRowsChange` loops the same way.
+
+Two-sided fix: DataTable now only emits when the filtered rows actually changed (length +
+element identity guard via a ref), making the shared component immune to unstable callback
+props; and `XrayReferrals.rowMatchesFilter` is memoized with `useCallback([answersMap])`.
+
+**File:** `src/components/DataTable/index.tsx`
+
+**Before:**
+```tsx
+  useEffect(() => {
+    onFilteredRowsChange?.(filteredRows);
+  }, [filteredRows, onFilteredRowsChange]);
+```
+
+**After:**
+```tsx
+  // LOG-03: only notify when the visible rows actually changed. filteredRows can
+  // get a fresh array identity on every render when a consumer passes an
+  // unstable rowMatchesFilter; emitting each time loops consumers that store
+  // the rows in state.
+  const lastEmittedRowsRef = useRef<TRow[] | null>(null);
+  useEffect(() => {
+    if (!onFilteredRowsChange) return;
+    const prev = lastEmittedRowsRef.current;
+    const unchanged =
+      prev !== null &&
+      prev.length === filteredRows.length &&
+      prev.every((row, i) => row === filteredRows[i]);
+    if (unchanged) return;
+    lastEmittedRowsRef.current = filteredRows;
+    onFilteredRowsChange(filteredRows);
+  }, [filteredRows, onFilteredRowsChange]);
+```
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx`
+
+**Before:**
+```tsx
+  function rowMatchesFilter(
+    entry: DistributionEntry,
+    colId: string,
+    filter: AnyFilter
+  ): boolean | null {
+```
+
+**After:**
+```tsx
+  const rowMatchesFilter = useCallback((
+    entry: DistributionEntry,
+    colId: string,
+    filter: AnyFilter
+  ): boolean | null => {
+…
+  }, [answersMap]);
+```
+
 ## v38.2 — 2026-07-02 — StateViews rollout: consistent empty/loading states on data screens (DESIGN UIX-01)
 
 Fixes UIX-01 from `docs/audit/FULL_SYSTEM_AUDIT_2026-07-02.md`: the shared

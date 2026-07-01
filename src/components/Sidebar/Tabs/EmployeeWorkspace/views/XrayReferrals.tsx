@@ -645,11 +645,13 @@ export default function XrayReferrals({ directoryHandle }: Props) {
 
   // ── Custom filter override for answerStatus ────────────────────────────────
 
-  function rowMatchesFilter(
+  // LOG-03: memoized — an unstable identity here makes DataTable's filteredRows
+  // memo recompute every render and re-emit onFilteredRowsChange.
+  const rowMatchesFilter = useCallback((
     entry: DistributionEntry,
     colId: string,
     filter: AnyFilter
-  ): boolean | null {
+  ): boolean | null => {
     if (colId !== "answerStatus" || filter.kind !== "status") return null;
     const v = filter.value;
     if (!v || v === "all") return true;
@@ -659,7 +661,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     if (v === "submitted") return s === "submitted";
     if (v === "pending")   return !s || s === "draft";
     return true;
-  }
+  }, [answersMap]);
 
   // ── Render ─────────────────────────────────────────────────────────────────
 

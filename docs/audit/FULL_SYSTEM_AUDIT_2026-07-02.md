@@ -42,6 +42,14 @@ Current rating (unchanged): **Internal testing ready.** Target of this plan: **C
 
 IDs continue the existing scheme. Severity: Critical / High / Medium / Low.
 
+> **Status update (2026-07-02, same day):** Milestone A and the first slice of Milestone B
+> were implemented and browser-verified on branch `audit-fixes-2026-07-02` (EDIT_LOG
+> v37.9–v38.2). Fixed: LOG-01, LOG-02 (via LOG-01), VIS-01, VIS-02, VIS-03, VIS-04, VIS-05,
+> UIX-01 (ReferralApproval blank void root-caused: no-months left `loadState` at `"idle"`;
+> plus XrayInspectionResults / TemplateBuilder / Population-browse on StateViews), UIX-02,
+> UIX-03, TEC-02, TEC-03. Still open: VIS-06, UIX-04/05/06, TEC-01/04/05, and the
+> carried-over items (see §3 Milestones B4–E).
+
 ### Logic bugs
 
 **LOG-01 — Demo session has two sources of truth; permissions collapse to "guest" (High, Confirmed)**
@@ -54,6 +62,11 @@ IDs continue the existing scheme. Severity: Critical / High / Medium / Low.
 - **Where:** `App.tsx` `allowedTabs` (session prop + matrix) vs per-tab `TabGuard`s (module session).
 - **What:** Beyond LOG-01, the two checks can disagree whenever their inputs differ (role-preview edge cases, future drift). Policy is also undecided: forbidden destinations should be **hidden** (current intent), never "visible but denied".
 - **Fix:** After LOG-01, derive sidebar visibility and content-guarding from the same `usePermissions` result. Add a test asserting: any tab visible in the sidebar renders without `AccessDenied` for that role.
+
+**LOG-03 — DataTable render loop through `onFilteredRowsChange` (Medium, Confirmed & fixed same day, EDIT_LOG v38.3)**
+- **Where:** `src/components/DataTable/index.tsx` (filtered-rows emission effect) + `XrayReferrals.tsx` (`rowMatchesFilter` defined unmemoized).
+- **What:** Found during post-fix verification: opening صور الأشعة المحالة logs "Maximum update depth exceeded" ×7. An unstable `rowMatchesFilter` prop makes the `filteredRows` memo produce a new array identity every render; the emission effect then re-fires into the consumer's `setState`, looping until React clamps. Latent for any consumer passing both props.
+- **Fix applied:** DataTable emits only when row length/identities actually change (ref guard); consumer callback memoized with `useCallback`.
 
 ### Visual / functional bugs (browser-verified)
 
