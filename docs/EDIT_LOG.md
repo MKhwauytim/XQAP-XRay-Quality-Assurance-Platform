@@ -4,6 +4,54 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v35.0 — 2026-07-01 — Lowercase month folder names (kebab-case)
+
+**File:** `src/data/population/monthFolder.ts`
+
+**Before:**
+```ts
+export function formatMonthFolderName(month: number, year: number): string {
+  if (month < 1 || month > 12) {
+    throw new RangeError(`Month must be 1–12, got ${month}`);
+  }
+  const monthName = MONTH_NAMES_EN[month - 1];
+  return `${month}-${monthName}-${year}`;
+}
+```
+
+**After:**
+```ts
+export function formatMonthFolderName(month: number, year: number): string {
+  if (month < 1 || month > 12) {
+    throw new RangeError(`Month must be 1–12, got ${month}`);
+  }
+  const monthName = MONTH_NAMES_EN[month - 1];
+  return `${month}-${monthName.toLowerCase()}-${year}`;
+}
+```
+
+**File:** `src/data/population/monthFolder.test.ts`
+
+**Before:**
+```ts
+test("formatMonthFolderName produces MM-MonthName-YYYY", () => {
+  expect(formatMonthFolderName(5, 2026)).toBe("5-May-2026");
+  expect(formatMonthFolderName(12, 2025)).toBe("12-December-2025");
+  expect(formatMonthFolderName(1, 2024)).toBe("1-January-2024");
+});
+```
+
+**After:**
+```ts
+test("formatMonthFolderName produces MM-monthname-YYYY (lowercase)", () => {
+  expect(formatMonthFolderName(5, 2026)).toBe("5-may-2026");
+  expect(formatMonthFolderName(12, 2025)).toBe("12-december-2025");
+  expect(formatMonthFolderName(1, 2024)).toBe("1-january-2024");
+});
+```
+
+---
+
 ## v34.5 — 2026-07-01 — Wire the executive-report card to its three real outputs: deck / Excel / document (BUG)
 
 The Reports-tab executive card's three format icons were wired to document(html) / Excel /
