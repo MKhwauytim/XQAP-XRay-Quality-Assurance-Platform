@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { CalendarOff } from "lucide-react";
 import { readSession } from "../../../../../auth/authSession";
 import { hasFeature, readUserManagementState } from "../../../../../auth/userManagement";
 import { PageHeader } from "../../../../../components/PageHeader/PageHeader";
+import { EmptyState, ErrorState, LoadingState } from "../../../../../components/StateViews/StateViews";
 import DataTable, {
   type CellMeta,
   type ColConfig,
@@ -301,16 +303,20 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
         subtitle={L.page_xray_results_subtitle}
       />
 
-      {loadState === "loading" && <p className="ew-empty">{L.xray_results_loading}</p>}
-      {loadState === "error" && <p className="ew-empty">{L.xray_results_error}</p>}
+      {loadState === "loading" && <LoadingState label={L.xray_results_loading} />}
+      {loadState === "error" && <ErrorState description={L.xray_results_error} />}
       {loadState === "ready" && months.length === 0 && (
-        <p className="ew-empty">{L.xray_results_no_months}</p>
+        <EmptyState
+          icon={<CalendarOff />}
+          title={L.xray_results_no_months}
+          description="ابدأ بمعالجة شهر وسحب عينته من تبويب معالجة المجتمع."
+        />
       )}
       {loadState === "ready" && months.length > 0 && viewMode === "active" && rows.length === 0 && (
-        <p className="ew-empty">{L.xray_results_no_rows}</p>
+        <EmptyState title={L.xray_results_no_rows} />
       )}
       {loadState === "ready" && months.length > 0 && viewMode !== "active" && auditRows.length === 0 && (
-        <p className="ew-empty">لا توجد سجلات تاريخية لهذا النوع في الشهر المحدد.</p>
+        <EmptyState title="لا توجد سجلات تاريخية لهذا النوع في الشهر المحدد" />
       )}
 
       {loadState === "ready" && months.length > 0 && viewMode === "active" && (

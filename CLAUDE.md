@@ -50,7 +50,8 @@ npx vitest run src/data/sampling/sampleAlgorithm.test.ts  # run a single test fi
 
 ## Build & dependency gotchas
 
-- `vite-plugin-singlefile` inlines everything (`assetsInlineLimit` maxed, `cssCodeSplit: false`): the build output is **one portable `dist/index.html`** (~1.9 MB, ~664 kB gzip as of 2026-06-28 — size grows with features; re-check after large additions).
+- `vite-plugin-singlefile` inlines everything (`assetsInlineLimit` maxed, `cssCodeSplit: false`): the build output is **one portable `dist/index.html`** (~2.6 MB, ~835 kB gzip as of 2026-07-02 — size grows with features; note the ChangeLog tab inlines the full `docs/EDIT_LOG.md` via a `?raw` import, so the log's size feeds the bundle. Re-check after large additions).
+- Whole-product audit + prototype→product roadmap: `docs/audit/FULL_SYSTEM_AUDIT_2026-07-02.md` (extends `docs/audit/MASTER_AUDIT_REPORT.md`).
 - The `xlsx` dependency is installed from a **SheetJS CDN tarball** (`https://cdn.sheetjs.com/xlsx-0.20.3/...`), not the npm registry — `npm install` needs access to that URL; don't "upgrade" it to the stale npm package.
 - The workspace features require the **File System Access API** (`showDirectoryPicker`), so the app only fully works in Chromium browsers (Chrome/Edge). Other browsers get the `unsupported_browser` state.
 - TypeScript is in strict mode. `createWritable` on `FileHandleLike` is typed as optional — always guard with `if (!fh.createWritable) return/continue;` before calling it.
@@ -134,17 +135,19 @@ Month folder names follow the pattern `{month}-{monthname-en}-{year}`, lowercase
 
 Tabs are auto-discovered: `tabRegistry.ts` uses `import.meta.glob("./*/index.tsx", { eager: true })` over `src/components/Sidebar/Tabs/`. Each tab folder exports a default component + a `tabConfig` (id, label, order, allowedRoles, icon). Also register in `MANAGED_TABS` and `createDefaultPermissions()` in `userManagement.ts`.
 
-**Current tabs:**
+**Current tabs (as of 2026-07-02):**
 
-| Tab id | File | Roles | Order |
-|--------|------|-------|-------|
-| `population` | `Tabs/Population/` | all | 10 |
-| `employee-workspace` | `Tabs/EmployeeWorkspace/` | all | 15 |
-| `template-builder` | `Tabs/TemplateBuilder/` | admin | 20 |
-| `reports` | `Tabs/Reports/` | supervisor, admin | 25 |
-| `archive` | `Tabs/Archive/` | supervisor, admin | 30 |
-| `user-management` | `Tabs/UserManagement/` | admin | 40 |
-| `settings` | `Tabs/Settings/` | guest, admin | 95 |
+| Tab id | File | Roles | Order | Sub-tabs |
+|--------|------|-------|-------|----------|
+| `population` | `Tabs/Population/` | all | 10 | `process`, `browse` |
+| `employee-workspace` | `Tabs/EmployeeWorkspace/` | all | 15 | `ew/xray-referrals`, `ew/xray-results`, `ew/referral-approval`, `ew/inspection-form` (renders `Tabs/TemplateBuilder/`) |
+| `reports` | `Tabs/Reports/` | guest, supervisor, manager, admin | 25 | `reports`, `kpi` (manager, admin), `report-designer` (supervisor, manager, admin → `Tabs/ReportDesigner/`) |
+| `archive` | `Tabs/Archive/` | guest, supervisor, manager, admin | 30 | — |
+| `user-management` | `Tabs/UserManagement/` | admin | 40 | `users`, `page-permissions`, `feature-permissions`, `activity` |
+| `settings` | `Tabs/Settings/` | guest, admin | 95 | — |
+| `change-log` | `Tabs/ChangeLog/` | admin | 96 | — |
+
+`TemplateBuilder` and `ReportDesigner` no longer register standalone tabs — they render inside the sub-tabs noted above.
 
 ### Population tab — core workflow
 

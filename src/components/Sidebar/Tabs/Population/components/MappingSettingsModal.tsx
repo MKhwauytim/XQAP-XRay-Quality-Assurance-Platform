@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { ChevronDown, ChevronUp, Settings2, X } from "lucide-react";
+import { ConfirmDialog } from "../../../../ConfirmDialog/ConfirmDialog";
 import type {
   CustomField,
   ExportColumnSetting,
@@ -50,6 +51,11 @@ export default function MappingSettingsModal({
   const [newStepTitle, setNewStepTitle] = useState("");
   const [selectedWorkflowStepId, setSelectedWorkflowStepId] = useState<string | null>(null);
   const [processingMapView, setProcessingMapView] = useState<"topDown" | "horizontal">("topDown");
+  // UIX-02: field removal is armed here and executed by the shared ConfirmDialog
+  // instead of native confirm().
+  const [pendingRemoval, setPendingRemoval] = useState<
+    { kind: "system" | "custom"; key: string } | null
+  >(null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -370,7 +376,6 @@ export default function MappingSettingsModal({
   };
 
   const handleRemoveSystemField = (key: string) => {
-    if (!confirm(`هل أنت متأكد من حذف الحقل "${key}" من القائمة؟ يمكنك استعادته من الإعدادات الافتراضية.`)) return;
     const updatedFields = config.systemFields.filter((f) => f.key !== key);
     const updatedMappings = { ...template.columnMappings };
     delete updatedMappings[key];
@@ -390,8 +395,6 @@ export default function MappingSettingsModal({
   };
 
   const handleRemoveCustomField = (key: string) => {
-    if (!confirm("هل أنت متأكد من حذف هذا الحقل المخصص؟")) return;
-
     const updatedCustomFields = config.customFields.filter((f) => f.key !== key);
     const updatedMappings = { ...template.columnMappings };
     delete updatedMappings[key];
@@ -622,7 +625,7 @@ export default function MappingSettingsModal({
                     />
                     <button
                       type="button"
-                      onClick={() => handleRemoveSystemField(field.key)}
+                      onClick={() => setPendingRemoval({ kind: "system", key: field.key })}
                       title="إزالة هذا الحقل من القائمة"
                       style={{
                         background: "#f8fafc", color: "var(--population-muted)",
@@ -663,7 +666,7 @@ export default function MappingSettingsModal({
                     />
                     <button
                       type="button"
-                      onClick={() => handleRemoveCustomField(field.key)}
+                      onClick={() => setPendingRemoval({ kind: "custom", key: field.key })}
                       style={{
                         background: "var(--population-error, #f44336)", color: "white",
                         border: "none", borderRadius: "8px", padding: "0",
@@ -1252,6 +1255,26 @@ export default function MappingSettingsModal({
           </button>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={pendingRemoval !== null}
+        danger
+        title="حذف الحقل"
+        message={
+          pendingRemoval?.kind === "system"
+            ? `هل أنت متأكد من حذف الحقل "${pendingRemoval.key}" من القائمة؟ يمكنك استعادته من الإعدادات الافتراضية.`
+            : "هل أنت متأكد من حذف هذا الحقل المخصص؟"
+        }
+        confirmLabel="حذف"
+        onConfirm={() => {
+          const removal = pendingRemoval;
+          setPendingRemoval(null);
+          if (!removal) return;
+          if (removal.kind === "system") handleRemoveSystemField(removal.key);
+          else handleRemoveCustomField(removal.key);
+        }}
+        onCancel={() => setPendingRemoval(null)}
+      />
     </div>
   );
 }

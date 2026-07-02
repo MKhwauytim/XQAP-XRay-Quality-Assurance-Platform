@@ -1,0 +1,7 @@
+# Keep documentation and source diffable as text; guard against binary-flagged
+# markdown (a past NUL-byte corruption made EDIT_LOG.md read as binary — DATA-02).
+*.md text
+*.ts text
+*.tsx text
+*.css text
+*.json text

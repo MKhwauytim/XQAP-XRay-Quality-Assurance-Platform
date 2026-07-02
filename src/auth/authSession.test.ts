@@ -71,6 +71,63 @@ describe("authSession", () => {
     expect(readRealSession()?.role).toBe("employee");
   });
 
+  describe("demo sessions (LOG-01)", () => {
+    // authSession runs in a node test env where sessionStorage is undefined;
+    // stub a minimal Storage so persistence behavior is observable.
+    const backing = new Map<string, string>();
+    const fakeStorage = {
+      getItem: (key: string) => backing.get(key) ?? null,
+      setItem: (key: string, value: string) => void backing.set(key, value),
+      removeItem: (key: string) => void backing.delete(key),
+    };
+
+    beforeEach(() => {
+      backing.clear();
+      vi.stubGlobal("sessionStorage", fakeStorage);
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it("is readable through the module but never persisted", () => {
+      const demo: AuthSession = {
+        username: "viewer",
+        role: "admin",
+        loginAt: new Date().toISOString(),
+        mode: "demo",
+      };
+
+      writeSession(demo);
+
+      // Permission consumers (usePermissions → readSession) must see it…
+      expect(readSession()).toEqual(demo);
+      expect(readRealSession()).toEqual(demo);
+      // …but nothing may reach sessionStorage.
+      expect(backing.size).toBe(0);
+    });
+
+    it("persists normal sessions and clears them when a demo session replaces one", () => {
+      const real: AuthSession = {
+        username: "john_doe",
+        role: "employee",
+        loginAt: new Date().toISOString(),
+      };
+      writeSession(real);
+      expect(backing.size).toBe(1);
+
+      const demo: AuthSession = {
+        username: "viewer",
+        role: "admin",
+        loginAt: new Date().toISOString(),
+        mode: "demo",
+      };
+      writeSession(demo);
+      expect(backing.size).toBe(0);
+      expect(readSession()).toEqual(demo);
+    });
+  });
+
   it("applies preview role override for admins", () => {
     const session: AuthSession = {
       username: "admin_user",

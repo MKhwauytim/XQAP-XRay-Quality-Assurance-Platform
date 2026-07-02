@@ -128,7 +128,13 @@ export function readSession(): AuthSession | null {
 
 export function writeSession(session: AuthSession): void {
   runtimeSession = session;
-  writeStoredSession(session);
+  // Demo sessions are runtime-only: never persisted, so a read-only demo
+  // identity can't survive a reload and attach to a real workspace (LOG-01).
+  if (session.mode === "demo") {
+    clearStoredSession();
+  } else {
+    writeStoredSession(session);
+  }
   startAuthActivitySession(session);
 }
 

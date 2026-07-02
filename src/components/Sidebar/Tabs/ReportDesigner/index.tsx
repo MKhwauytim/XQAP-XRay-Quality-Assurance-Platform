@@ -20,6 +20,10 @@ import {
 import type { Rect } from "../../../../data/reportDesigner/geometry";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
 import type { DirectoryHandleLike } from "../../../../data/storage/fileSystemAccess";
+import { ConfirmDialog } from "../../../ConfirmDialog/ConfirmDialog";
+import { PageHeader } from "../../../PageHeader/PageHeader";
+import { EmptyState, LoadingState } from "../../../StateViews/StateViews";
+import { LayoutTemplate } from "lucide-react";
 import Canvas from "./editor/Canvas";
 import Ribbon from "./editor/Ribbon";
 import VizPanel from "./editor/VizPanel";
@@ -473,6 +477,8 @@ export default function ReportDesigner() {
   // Per-row action state
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  // UIX-02: deletion is armed here and executed by the shared ConfirmDialog.
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [openingId, setOpeningId] = useState<string | null>(null);
   const [openError, setOpenError] = useState<string | null>(null);
 
@@ -595,7 +601,6 @@ export default function ReportDesigner() {
 
   async function handleDelete(reportId: string) {
     if (!directoryHandle) return;
-    if (!window.confirm("هل أنت متأكد من حذف هذا التقرير؟")) return;
     setDeletingId(reportId);
     setDeleteError(null);
     const result = await deleteDesign(directoryHandle, reportId);
@@ -613,8 +618,11 @@ export default function ReportDesigner() {
 
   return (
     <div className="rd-root" dir="rtl">
-      <div className="rd-list-header">
-        <h2 className="rd-title">مصمم التقارير</h2>
+      <PageHeader
+        eyebrow="Report Designer"
+        title="مصمم التقارير"
+        subtitle="صمّم تقارير مخصصة — صفحات وعناصر ومخططات من بيانات الشهر المعالج."
+      >
         {!showNewForm && (
           <button
             className="rd-btn rd-btn-primary"
@@ -626,7 +634,7 @@ export default function ReportDesigner() {
             + تقرير جديد
           </button>
         )}
-      </div>
+      </PageHeader>
 
       {showNewForm && (
         <div className="rd-new-form">
@@ -687,9 +695,26 @@ export default function ReportDesigner() {
       {deleteError && <p className="rd-error">{deleteError}</p>}
 
       {loadingIndex ? (
-        <p className="rd-loading">جاري التحميل…</p>
+        <LoadingState />
       ) : index.designs.length === 0 ? (
-        <p className="rd-empty">لا توجد تقارير محفوظة بعد.</p>
+        <EmptyState
+          icon={<LayoutTemplate />}
+          title="لا توجد تقارير محفوظة بعد"
+          description="أنشئ أول تقرير مخصص لبدء تصميم صفحاته وعناصره."
+          actions={
+            !showNewForm && (
+              <button
+                className="rd-btn rd-btn-primary"
+                onClick={() => {
+                  setShowNewForm(true);
+                  setCreateError(null);
+                }}
+              >
+                + تقرير جديد
+              </button>
+            )
+          }
+        />
       ) : (
         <ul className="rd-cards">
           {index.designs.map((d) => {
@@ -740,7 +765,7 @@ export default function ReportDesigner() {
                     </button>
                     <button
                       className="rd-btn rd-btn-danger rd-btn-sm"
-                      onClick={() => void handleDelete(d.reportId)}
+                      onClick={() => setConfirmDeleteId(d.reportId)}
                       disabled={busy}
                     >
                       {isDeleting ? "…" : "حذف"}
@@ -752,6 +777,20 @@ export default function ReportDesigner() {
           })}
         </ul>
       )}
+
+      <ConfirmDialog
+        open={confirmDeleteId !== null}
+        danger
+        title="حذف التقرير"
+        message="هل أنت متأكد من حذف هذا التقرير؟ لا يمكن التراجع عن هذا الإجراء."
+        confirmLabel="حذف"
+        onConfirm={() => {
+          const id = confirmDeleteId;
+          setConfirmDeleteId(null);
+          if (id) void handleDelete(id);
+        }}
+        onCancel={() => setConfirmDeleteId(null)}
+      />
     </div>
   );
 }

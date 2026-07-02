@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { X } from "lucide-react";
+import { ClipboardList, X } from "lucide-react";
 
 import { readSession } from "../../../../auth/authSession";
 import {
@@ -24,6 +24,7 @@ import { useWorkspace } from "../../../../data/workspace/useWorkspace";
 import { logRejection } from "../../../../data/storage/errorLogger";
 import "./TemplateBuilder.css";
 import { PageHeader } from "../../../../components/PageHeader/PageHeader";
+import { EmptyState } from "../../../../components/StateViews/StateViews";
 
 const FIELD_TYPE_LABELS: Record<TemplateFieldType, string> = {
   text: "نص",
@@ -373,7 +374,13 @@ function TemplateList({
   onDelete: (id: string) => void;
 }) {
   if (index.templates.length === 0) {
-    return <div className="tb-empty">لا توجد نماذج فحص بعد. أنشئ نموذجاً جديداً للبدء.</div>;
+    return (
+      <EmptyState
+        icon={<ClipboardList />}
+        title="لا توجد نماذج فحص بعد"
+        description="أنشئ نموذجاً جديداً من زر «+ نموذج جديد» أعلى الصفحة للبدء."
+      />
+    );
   }
 
   return (

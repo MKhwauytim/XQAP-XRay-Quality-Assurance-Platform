@@ -50,7 +50,7 @@ import {
   subscribeToUserManagementChanges,
   type ManagedLoginUser
 } from "./userManagement";
-import { ORGANIZATION_PATH_TEXT } from "../branding/organization";
+import { ORGANIZATION_PATH_TEXT, ZATCA_LOGO_URL } from "../branding/organization";
 import { DEMO_WORKSPACE_NAME } from "../data/workspace/demoWorkspace";
 import { useWorkspace } from "../data/workspace/useWorkspace";
 
@@ -165,13 +165,17 @@ export default function AuthGate({ children }: AuthGateProps) {
   useEffect(() => {
     if (!session && directoryHandle?.name === DEMO_WORKSPACE_NAME) {
       isDemoSessionRef.current = true;
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- derive the demo session from the mounted demo workspace; guarded by !session so it settles in one step
-      setSession({
+      const demoSession: AuthSession = {
         role: ADMIN_ROLE,
         username: VIEWER_USERNAME,
         loginAt: new Date().toISOString(),
         mode: "demo"
-      });
+      };
+      // LOG-01: register the session with the authSession module too, so
+      // permission checks (usePermissions → readSession) agree with the UI.
+      writeSession(demoSession);
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- derive the demo session from the mounted demo workspace; guarded by !session so it settles in one step
+      setSession(demoSession);
     }
   }, [directoryHandle, session]);
 
@@ -515,7 +519,7 @@ export default function AuthGate({ children }: AuthGateProps) {
           <div className="auth-brand-inner">
             <div className="auth-logo" aria-label="شعار النظام">
               <img
-                src="https://zatca.gov.sa/_layouts/15/zatca/Design/images/ZATCA-logo.svg"
+                src={ZATCA_LOGO_URL}
                 alt=""
                 aria-hidden="true"
                 onError={handleLogoError}

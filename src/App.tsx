@@ -156,35 +156,18 @@ function AppContent({ session }: AppContentProps) {
   }
 
   return (
-    <main
-      className={`app-shell ${isSidebarCollapsed ? "sidebar-collapsed" : ""}`}
-      dir="rtl"
-    >
+    <>
+      {/* VIS-01: rendered in flow after the sticky AdminToolbar (never fixed
+          over it) so the toolbar — including logout — stays clickable. */}
       {session.mode === "demo" && (
-        <div
-          role="status"
-          dir="rtl"
-          style={{
-            position: "fixed",
-            insetInlineStart: 0,
-            insetInlineEnd: 0,
-            top: 0,
-            zIndex: 9999,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 8,
-            padding: "7px 14px",
-            fontSize: 12.5,
-            fontWeight: 700,
-            color: "#fff",
-            background: "linear-gradient(90deg, var(--c-navy-2), var(--c-navy))",
-            borderBottom: "1px solid var(--brand-premium)"
-          }}
-        >
+        <div role="status" dir="rtl" className="app-demo-banner">
           وضع العرض التجريبي — للقراءة فقط (التعديل والحفظ معطّلان، والتصدير متاح)
         </div>
       )}
+      <main
+        className={`app-shell ${isSidebarCollapsed ? "sidebar-collapsed" : ""}`}
+        dir="rtl"
+      >
       {bakWarning && (
         <div className="app-bak-warning">
           <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><AlertTriangle size={16} /> {bakWarning}</span>
@@ -231,7 +214,8 @@ function AppContent({ session }: AppContentProps) {
       </section>
 
       <FeedbackWidget />
-    </main>
+      </main>
+    </>
   );
 }
 

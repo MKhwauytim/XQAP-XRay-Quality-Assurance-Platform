@@ -184,6 +184,14 @@ details[open] > .cl-item-head::before { transform: rotate(45deg); }
 }
 .cl-prose-line { display: block; }
 
+/* VIS-03: dir="auto" picks the direction; align to that direction, not the
+   RTL container, so English lines read left-to-right with sane punctuation. */
+.cl-prose,
+.cl-prose-line,
+.cl-item-title {
+  text-align: start;
+}
+
 .cl-inline-code {
   padding: 1px 6px;
   border-radius: var(--r-xs);

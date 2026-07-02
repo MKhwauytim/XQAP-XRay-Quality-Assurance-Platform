@@ -24,6 +24,7 @@ import {
   split,
   timeline,
 } from "./shared";
+import { ZATCA_LOGO_URL } from "../../../../branding/organization";
 
 /** Arabic labels for each cross-team result source. */
 const SOURCE_LABEL: Record<ResultSource, string> = {
@@ -79,7 +80,7 @@ function accuracyOf(r: InspectorRollup): number | null {
 // ── Slide 1 — Title ───────────────────────────────────────────────────────
 export function titleSlide(model: ReportModel): string {
   const body = `
-    <div class="title-mark"><img src="https://zatca.gov.sa/_layouts/15/zatca/Design/images/ZATCA-logo.svg" alt="هيئة الزكاة والضريبة والجمارك" style="height:78px;width:auto;max-width:320px;object-fit:contain;filter:brightness(0) invert(1)" onerror="this.style.display='none';this.nextElementSibling.style.display='inline-flex';"/><span style="display:none">${icon("shield", 48)}</span></div>
+    <div class="title-mark"><img src="${ZATCA_LOGO_URL}" alt="هيئة الزكاة والضريبة والجمارك" style="height:78px;width:auto;max-width:320px;object-fit:contain;filter:brightness(0) invert(1)" onerror="this.style.display='none';this.nextElementSibling.style.display='inline-flex';"/><span style="display:none">${icon("shield", 48)}</span></div>
     <div class="title-kicker">عرض تنفيذي</div>
     <h1>تقرير ضمان جودة فحص الأشعة</h1>
     <div class="title-sub">تقرير شهر: ${model.summary.periodId}</div>

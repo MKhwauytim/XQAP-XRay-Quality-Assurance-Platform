@@ -9,7 +9,7 @@ import {
   type DragEvent
 } from "react";
 import * as XLSX from "xlsx";
-import { Check, ScanLine, Settings2 } from "lucide-react";
+import { Check, Database, ScanLine, Settings2 } from "lucide-react";
 
 import type { SidebarTabModule } from "../tabTypes";
 
@@ -89,6 +89,7 @@ import {
 
 import "./Population.css";
 import { PageHeader } from "../../../../components/PageHeader/PageHeader";
+import { EmptyState, LoadingState } from "../../../../components/StateViews/StateViews";
 
 type UploadKey = "riskAgencyData" | "businessIntelligenceData";
 
@@ -2093,14 +2094,14 @@ function BrowseDataView({
         </div>
       </div>
 
-      {loading && (
-        <div className="bv-loading">جاري تحميل بيانات جميع الأشهر...</div>
-      )}
+      {loading && <LoadingState label="جاري تحميل بيانات جميع الأشهر..." />}
 
       {!loading && total === 0 && (
-        <div className="placeholder-phase">
-          <p>لا توجد بيانات محفوظة لهذا المصدر بعد. ابدأ بمعالجة شهر من تبويب معالجة المجتمع.</p>
-        </div>
+        <EmptyState
+          icon={<Database />}
+          title="لا توجد بيانات محفوظة لهذا المصدر بعد"
+          description="ابدأ بمعالجة شهر من تبويب معالجة المجتمع لتظهر بياناته هنا."
+        />
       )}
 
       {!loading && total > 0 && (

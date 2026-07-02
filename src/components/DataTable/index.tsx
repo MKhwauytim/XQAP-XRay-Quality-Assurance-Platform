@@ -358,8 +358,21 @@ export default function DataTable<TRow>({
     [searchFilteredRows, visibleCols, filters, rowMatchesFilter, detectedDates]
   );
 
+  // LOG-03: only notify when the visible rows actually changed. filteredRows can
+  // get a fresh array identity on every render when a consumer passes an
+  // unstable rowMatchesFilter; emitting each time loops consumers that store
+  // the rows in state.
+  const lastEmittedRowsRef = useRef<TRow[] | null>(null);
   useEffect(() => {
-    onFilteredRowsChange?.(filteredRows);
+    if (!onFilteredRowsChange) return;
+    const prev = lastEmittedRowsRef.current;
+    const unchanged =
+      prev !== null &&
+      prev.length === filteredRows.length &&
+      prev.every((row, i) => row === filteredRows[i]);
+    if (unchanged) return;
+    lastEmittedRowsRef.current = filteredRows;
+    onFilteredRowsChange(filteredRows);
   }, [filteredRows, onFilteredRowsChange]);
 
   // Virtual window — only render rows within (+ overscan beyond) the scroll viewport.
