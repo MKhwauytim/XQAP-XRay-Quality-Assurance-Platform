@@ -4,6 +4,61 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v41.3 — 2026-07-05 — Remove stage-port totals band; fix pre-existing grid overflow bug
+
+Removed the top `.v2-totals-band` from both new stage-port slides (population and sample, per
+user request) so the 2×2 card grid fills the freed vertical space. This exposed a real,
+pre-existing overflow bug: `.v2-stage-port-grid` had no `grid-template-rows`, so each row
+auto-sized to its card's own content height (256.8px) instead of splitting the available
+458.8px `.slide-body` height — two such rows plus the row gap overflowed the slide by
+46–127px, silently clipped by `.slide{overflow:hidden}`. Task 4's (v41.1) live-measurement
+check only verified the table fit within its own auto-sized card, never that the whole 2×2
+grid fit within the slide, so this was never caught — it existed even with the totals band
+present, just less visibly (the band's absence made the grid's own footprint the whole story).
+
+Fix: added `grid-template-rows:1fr 1fr` so rows actually split the available height evenly,
+shrunk the per-card table's padding/font (`12px`→`3px`/`6px`, `0.66rem`→`0.6rem`/`0.58rem`) so
+all 5 top-N rows fit within the true per-row budget (~162.8px, re-measured), and corrected
+`STAGE_CARD_TABLE_BUDGET_PX` (177 → 160 — the old value was already below the 5-row intrinsic
+height and had zero real effect on layout, the same root cause as the grid-row sizing issue).
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**Before:**
+```ts
+const totalsBand = `<div class="v2-totals-band">...</div>`;
+const body = `${totalsBand}<div class="v2-stage-port-grid">${cards}</div>`;
+```
+(in both `stagePortPopulationSlide` and `stagePortSampleSlide`)
+
+**After:**
+```ts
+const body = `<div class="v2-stage-port-grid">${cards}</div>`;
+```
+
+**File:** `src/data/reporting/executive/deck2/theme.ts`
+
+**Before:**
+```css
+.v2-stage-port-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;flex:1;min-height:0;}
+...
+.v2-stage-port-card .deck-table th,.v2-stage-port-card .deck-table td{padding:5px 8px;font-size:0.66rem;}
+```
+
+**After:**
+```css
+.v2-stage-port-grid{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:14px;flex:1;min-height:0;}
+...
+.v2-stage-port-card .deck-table th,.v2-stage-port-card .deck-table td{padding:3px 6px;font-size:0.6rem;}
+.v2-stage-port-card .deck-table th{font-size:0.58rem;}
+```
+
+Verified: no card overflow on either slide, in either theme, at the slide's max on-screen
+width (1120px, reached at any viewport ≥ ~1372px wide — a stable, reproducible reference since
+`.slide{width:min(1120px,100%)}` caps there). Full suite (300 tests) and `tsc -b` still pass.
+
+---
+
 ## v41 — 2026-07-05 — Add stage×port grid population and sample slides to deck2
 
 Task 3 of the deck2 stage×port grid plan: builds the two new slides on top of Task 1's
@@ -14899,3 +14954,1057 @@ the demo entry to the picker screen instead.
 Made the demo/view entry a hidden backdoor mirroring the admin shortcut, instead of
 a visible button on the address picker.
 
+---
+
+## v41.3 — 2026-07-05 — Archive tab audit: show dropped distribution total, surface refresh errors, don't misreport skipped file copies
+
+Audit of `src/components/Sidebar/Tabs/Archive/` and `src/data/backup/backupStorage.ts`.
+Three targeted fixes:
+
+1. `totals.distributionRows` was computed in the `useMemo` but never rendered — the
+   summary grid silently dropped the distribution-rows figure. Added a fifth summary
+   tile so the computed total is actually shown.
+2. `refresh()` had no error handling: a failed `Promise.all` (e.g. a raced or missing
+   workspace directory) left `isLoading` reset via `finally` but never told the user
+   anything went wrong, unlike every other handler in this file which sets `message`
+   on failure. Added a catch that surfaces an Arabic error via the same `message` state.
+3. `writeTextFile` in `backupStorage.ts` returns early (no-op) when `createWritable` is
+   unavailable on the `FileHandleLike`, per the CLAUDE.md convention of guarding optional
+   `createWritable`. But its two callers (`copyJsonTree`, `copyAllJsonFiles`) always
+   pushed the path into `copied` regardless of whether the write actually happened, so a
+   backup manifest could claim a file was copied when it silently wasn't. Changed
+   `writeTextFile` to return a boolean and made both callers only record the path when
+   the write succeeded. (`restoreJsonTree` was checked too: it uses `safeWriteJsonText`,
+   which returns `Promise<void>` and throws on failure rather than swallowing it, so no
+   change was needed there — a failed restore write already aborts the whole restore via
+   the existing try/catch in `restoreBackupSnapshot`.)
+
+**File:** `src/components/Sidebar/Tabs/Archive/index.tsx`
+
+**Before:**
+```tsx
+  const refresh = useCallback(async () => {
+    if (!directoryHandle) return;
+    setIsLoading(true);
+    try {
+      const months = await listMonthFolders(directoryHandle);
+      const [statusList, backupHistory, state, settings] = await Promise.all([
+        loadArchiveStatus(directoryHandle, months),
+        loadBackupHistory(directoryHandle),
+        loadAutoBackupState(directoryHandle),
+        loadAutoBackupSettings(directoryHandle),
+      ]);
+      setStatuses(statusList);
+      setHistory(backupHistory);
+      setAutoState(state);
+      setAutoSettings(settings);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [directoryHandle]);
+```
+and
+```tsx
+      <div className="arc-summary-grid">
+        <SummaryTile label="الأشهر" value={formatNumber(totals.months)} />
+        <SummaryTile label="صفوف المجتمع" value={formatNumber(totals.populationRows)} />
+        <SummaryTile label="العينات" value={formatNumber(totals.sampleRows)} />
+        <SummaryTile label="إجابات الفحص" value={formatNumber(totals.answerItems)} />
+      </div>
+```
+
+**After:**
+```tsx
+  const refresh = useCallback(async () => {
+    if (!directoryHandle) return;
+    setIsLoading(true);
+    try {
+      const months = await listMonthFolders(directoryHandle);
+      const [statusList, backupHistory, state, settings] = await Promise.all([
+        loadArchiveStatus(directoryHandle, months),
+        loadBackupHistory(directoryHandle),
+        loadAutoBackupState(directoryHandle),
+        loadAutoBackupSettings(directoryHandle),
+      ]);
+      setStatuses(statusList);
+      setHistory(backupHistory);
+      setAutoState(state);
+      setAutoSettings(settings);
+    } catch (error) {
+      setMessage({
+        type: "error",
+        text: `تعذر تحميل بيانات الأرشيف: ${error instanceof Error ? error.message : "خطأ غير معروف"}`,
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  }, [directoryHandle]);
+```
+and
+```tsx
+      <div className="arc-summary-grid">
+        <SummaryTile label="الأشهر" value={formatNumber(totals.months)} />
+        <SummaryTile label="صفوف المجتمع" value={formatNumber(totals.populationRows)} />
+        <SummaryTile label="العينات" value={formatNumber(totals.sampleRows)} />
+        <SummaryTile label="صفوف التوزيع" value={formatNumber(totals.distributionRows)} />
+        <SummaryTile label="إجابات الفحص" value={formatNumber(totals.answerItems)} />
+      </div>
+```
+
+**File:** `src/data/backup/backupStorage.ts`
+
+**Before:**
+```ts
+async function writeTextFile(dir: DirectoryHandleLike, fileName: string, content: string): Promise<void> {
+  const fh = await dir.getFileHandle(fileName, { create: true });
+  if (!fh.createWritable) return;
+  const writable = await fh.createWritable();
+  await writable.write(content);
+  await writable.close();
+}
+```
+and (in `copyJsonTree`)
+```ts
+    if (entry.kind !== "file" || !entry.name.endsWith(".json")) continue;
+    const text = await readTextFile(params.sourceDir, entry.name);
+    if (text === null) continue;
+    await writeTextFile(params.targetDir, entry.name, text);
+    params.copied.push(params.sourcePath ? `${params.sourcePath}/${entry.name}` : entry.name);
+```
+and (in `copyAllJsonFiles`)
+```ts
+    if (entry.kind !== "file" || !entry.name.endsWith(".json")) continue;
+    const text = await readTextFile(directoryHandle, entry.name);
+    if (text === null) continue;
+    await writeTextFile(jsonDir, entry.name, text);
+    copied.push(entry.name);
+```
+**After:**
+```ts
+async function writeTextFile(dir: DirectoryHandleLike, fileName: string, content: string): Promise<boolean> {
+  const fh = await dir.getFileHandle(fileName, { create: true });
+  if (!fh.createWritable) return false;
+  const writable = await fh.createWritable();
+  await writable.write(content);
+  await writable.close();
+  return true;
+}
+```
+and (in `copyJsonTree`)
+```ts
+    if (entry.kind !== "file" || !entry.name.endsWith(".json")) continue;
+    const text = await readTextFile(params.sourceDir, entry.name);
+    if (text === null) continue;
+    const wrote = await writeTextFile(params.targetDir, entry.name, text);
+    if (wrote) params.copied.push(params.sourcePath ? `${params.sourcePath}/${entry.name}` : entry.name);
+```
+and (in `copyAllJsonFiles`)
+```ts
+    if (entry.kind !== "file" || !entry.name.endsWith(".json")) continue;
+    const text = await readTextFile(directoryHandle, entry.name);
+    if (text === null) continue;
+    const wrote = await writeTextFile(jsonDir, entry.name, text);
+    if (wrote) copied.push(entry.name);
+```
+
+## v41.4 — 2026-07-05 — Settings/ChangeLog audit: add missing label group entry + fix stale LabelRow input
+
+Audit of `Settings`/`ChangeLog` tabs and `labelsStore`/`browsePresetStorage`. Found `col_expert_observation_date`
+(used as a real column header in `XrayReferrals.tsx` and `XrayInspectionResults.tsx`) was missing from
+`LABEL_GROUPS` in the Settings tab, so admins had no UI to override it. Also found `LabelRow`'s local `val`
+state was seeded once from `getLabels()` at mount and never resynced when labels changed externally (e.g.
+clicking "استعادة الكل" while a label group section stays open) — the reset/custom badge updated correctly
+but the visible input text stayed stale until the row remounted.
+
+**File:** `src/components/Sidebar/Tabs/Settings/index.tsx`
+
+**Before:**
+```ts
+{ key: "col_bi_enrichment_status",      desc: "عمود حالة BI" },
+{ key: "col_report_number",             desc: "عمود رقم التقرير" },
+```
+```ts
+function LabelRow({ labelKey, desc }: { labelKey: LabelKey; desc: string }) {
+  const current = getLabels()[labelKey];
+  const custom  = isCustomized(labelKey);
+  const [val, setVal] = useState<string>(current);
+```
+
+**After:**
+```ts
+{ key: "col_expert_observation_date",    desc: "عمود تاريخ رصد الخبير" },
+{ key: "col_bi_enrichment_status",      desc: "عمود حالة BI" },
+{ key: "col_report_number",             desc: "عمود رقم التقرير" },
+```
+```ts
+function LabelRow({ labelKey, desc }: { labelKey: LabelKey; desc: string }) {
+  const current = getLabels()[labelKey];
+  const custom  = isCustomized(labelKey);
+  const [val, setVal] = useState<string>(current);
+  useEffect(() => setVal(current), [current]);
+```
+
+## v41.4 — 2026-07-05 — Data-layer audit: fix read-modify-write races in feedback + browse presets
+
+Audit of `src/data/{population,sampling,distribution,answers,approvals,referral,feedback,storage,powerbiExport,preferences}`.
+Most of this layer is CAS-loop or event-log based (answers, approvals, distribution, sample append)
+and already race-safe. Found two modules that read a whole file, mutated an in-memory value, and
+wrote it back with **no lock around the read-modify-write sequence**: `feedbackStorage.ts`
+(`submitFeedback`/`replyToFeedback` on the shared `messages.json`) and `browsePresetStorage.ts`
+(`saveUserBrowseDatasetPreset`/`saveAdminBrowseDatasetPreset` on the shared preset files).
+`safeWriteJson` only locks around its own single write, not the caller's read-then-write — so two
+concurrent calls in the same tab (e.g. a user submits feedback while another feedback panel instance
+replies, or two `DataTable` column-preset saves race) can both read the same pre-mutation snapshot,
+and the second write silently drops the first mutation. Wrapped each read-modify-write in
+`withResourceLock` (already used by `safeWriteJson`/`casLoop` elsewhere in this layer) keyed per
+directory+file, matching the granularity `safeWriteJson` itself uses internally.
+
+Everything else reviewed clean: `safeWrite.ts` snapshot/`.bak`/`.tmp`/verify/rollback logic,
+`jsonEnvelope.ts` hash/schemaVersion validation, `webLocks.ts` native-lock + promise-chain fallback,
+Mulberry32 `rng.ts` determinism, Fisher-Yates in `shuffleInPlace`, Hamilton apportionment tie-breaking
+(`apportionment.ts`), `sampleAlgorithm.ts` CertScan/NonCertScan split + spillover (zero-capacity ports
+return early, no division-by-zero), `deriveCurrentDistribution`'s fold-in-log-order (last event per
+`xrayImageId` wins, replacement chain preserves `replacedById` correctly), and every `createWritable`
+call site in scope already guards with `if (!fh.createWritable) return/continue;` or throws explicitly.
+
+**File:** `src/data/feedback/feedbackStorage.ts`
+
+**Before:**
+```ts
+import { readJsonFile, writeJsonFile } from "../storage/fileSystemAccess";
+import { SYSTEM_FOLDER_NAMES } from "../workspace/workspacePaths";
+...
+export async function submitFeedback(
+  dir: DirectoryHandleLike,
+  payload: { from: string; role: string; category: FeedbackCategory; text: string }
+): Promise<void> {
+  const messages = await loadFeedback(dir);
+  messages.unshift({ ... });
+  await saveFeedback(dir, messages);
+}
+
+export async function replyToFeedback(
+  dir: DirectoryHandleLike,
+  messageId: string,
+  reply: FeedbackReply,
+  resolve: boolean
+): Promise<void> {
+  const messages = await loadFeedback(dir);
+  const msg = messages.find((m) => m.id === messageId);
+  if (!msg) return;
+  msg.replies.push(reply);
+  if (resolve) msg.status = "resolved";
+  await saveFeedback(dir, messages);
+}
+```
+
+**After:** both functions now run their read-modify-write under
+`withResourceLock(`feedback/${MESSAGES_FILE}`, async () => { ... })` so a concurrent submit/reply
+in the same tab can't read-before-the-other's-write and clobber it.
+
+**File:** `src/data/preferences/browsePresetStorage.ts`
+
+**Before:**
+```ts
+export async function saveUserBrowseDatasetPreset(
+  directoryHandle: DirectoryHandleLike,
+  username: string,
+  dataset: BrowsePresetDatasetKind,
+  preset: Omit<BrowseDatasetPreset, "updatedAt">
+): Promise<void> {
+  const existing = await loadUserBrowsePreset(directoryHandle, username);
+  const nextFile: UserBrowsePresetFile = { ... };
+  const dir = await getPresetDir(directoryHandle, true);
+  await safeWriteJson(dir, safeUserFileName(username), nextFile);
+}
+```
+(`saveAdminBrowseDatasetPreset` had the same shape.)
+
+**After:** both wrapped in `withResourceLock` keyed by the target preset file name, so two rapid
+column/width preset saves for the same user (or the shared admin preset) merge instead of racing.
+```
+
+## v41.5 — 2026-07-05 — UserManagement/auth audit: fix report-designer permission-key mismatch
+
+Audit of `src/components/Sidebar/Tabs/UserManagement/` and `src/auth/`. Found a real
+tab/permission-key mismatch: `App.tsx`'s `allowedTabs` memo builds each sub-tab's
+permission lookup key as `` `${tab.id}/${sub.id}` `` (e.g. `reports/report-designer` for
+the Reports tab's `report-designer` sub-tab), but `MANAGED_TABS` and
+`createDefaultPermissions()` in `userManagement.ts` registered the Report Designer entry
+under the bare id `report-designer` (with `parentId: "reports"`), never under
+`reports/report-designer`. `getRolePermission()`'s inheritance fallback only fires when
+`MANAGED_TABS.find(t => t.id === tabId)` finds the tab being looked up — since no tab had
+id `reports/report-designer`, the lookup always fell through to `"none"`. Net effect: the
+Report Designer sidebar sub-tab was **hidden for every role, including admin and manager**,
+even though `createDefaultPermissions()` intended `edit` for admin/manager and `view` for
+supervisor. Renamed the permission-matrix id to `reports/report-designer` throughout
+`userManagement.ts` so it matches the key `App.tsx` actually constructs and queries (the
+Reports tab's own `subTabs` entry and `activeSubTab === "report-designer"` render-branch
+in `Reports/index.tsx` are unaffected — those are UI-local ids, not permission keys).
+
+**File:** `src/auth/userManagement.ts`
+
+**Before:**
+```ts
+  { id: "report-designer",         label: "مصمم التقارير",          parentId: "reports" },
+```
+```ts
+    { role: "guest",      tabId: "report-designer",    access: "none" },
+```
+```ts
+    { role: "employee",   tabId: "report-designer",    access: "none" },
+```
+```ts
+    { role: "supervisor", tabId: "report-designer",    access: "view" },
+```
+```ts
+    { role: "manager",    tabId: "report-designer",    access: "edit" },
+```
+```ts
+    { role: "admin",      tabId: "report-designer",         access: "edit" },
+```
+
+**After:**
+```ts
+  { id: "reports/report-designer", label: "مصمم التقارير",          parentId: "reports" },
+```
+```ts
+    { role: "guest",      tabId: "reports/report-designer",    access: "none" },
+```
+```ts
+    { role: "employee",   tabId: "reports/report-designer",    access: "none" },
+```
+```ts
+    { role: "supervisor", tabId: "reports/report-designer",    access: "view" },
+```
+```ts
+    { role: "manager",    tabId: "reports/report-designer",    access: "edit" },
+```
+```ts
+    { role: "admin",      tabId: "reports/report-designer",         access: "edit" },
+```
+
+## v41.5 — 2026-07-05 — Population tab audit: remove dead mini-report code (stale stage mapping bug)
+
+Audit of `src/components/Sidebar/Tabs/Population/` and subfolders. `createRiskMiniReport` /
+`createBiMiniReport` / `buildRiskStageCountsBySheet` in `components/helpers.ts` and the whole
+`components/MiniWorkbookReport.tsx` component were dead code with zero call sites anywhere in
+`src/` other than their own definitions — superseded by `DataAccuracyReport` +
+`PopulationProcessingReport`, which are what `PhaseTwoReportAndProcessing.tsx` actually renders.
+Also confirmed a latent bug in the dead code that's moot now it's removed: `buildRiskStageCountsBySheet`
+called `getStageKey(row.stage)` without the second `stageMappings` argument, so it silently used
+`DEFAULT_STAGE_MAPPINGS` instead of the org's configured `config.stageMappings` — inconsistent with
+every live stage-counting call site in this tab (`PhaseThreeSampling.tsx`, `PhaseFourDistribution.tsx`,
+`index.tsx`'s `formatStageLabel` calls), all of which correctly thread `config.stageMappings` through.
+Removed rather than fixed since the code has no consumers. Rest of the tab (worker usage, sampling/
+apportionment calls, `safeWriteJson` usage, `createWritable` guards) checked clean — no other bugs found.
+
+**File:** `src/components/Sidebar/Tabs/Population/components/helpers.ts`
+
+**Before:**
+```ts
+import type { RiskWorkbookResult } from "../riskData/riskDataTypes";
+import type { BiWorkbookResult } from "../biData/biDataTypes";
+export { formatNumber } from "../../../../../utils/formatting";
+...
+export type MiniReportSheet = {
+  sheetName: string;
+  category: string | null;
+  stageCounts: StageCounts | null;
+  originalRowCount: number;
+  normalizedRowCount: number;
+  excludedMissingXrayIdCount: number;
+};
+
+export type MiniReportData = { ... };
+...
+export function buildRiskStageCountsBySheet(result: RiskWorkbookResult): Record<string, StageCounts> { ... }
+export function createRiskMiniReport(result: RiskWorkbookResult): MiniReportData { ... }
+export function createBiMiniReport(result: BiWorkbookResult | null): MiniReportData { ... }
+```
+
+**After:** removed the unused `RiskWorkbookResult`/`BiWorkbookResult` imports, `MiniReportSheet`/
+`MiniReportData` types, and the three dead functions (`buildRiskStageCountsBySheet`,
+`createRiskMiniReport`, `createBiMiniReport`). Kept `PhaseStatus`, `getPhaseStatus`, and the
+re-exported stage helpers, which are still used by `index.tsx` and the Phase components.
+
+**File:** `src/components/Sidebar/Tabs/Population/components/MiniWorkbookReport.tsx`
+
+**Before:** whole file — a `MiniWorkbookReport` component rendering `MiniReportData`, with no
+importers anywhere in `src/`.
+
+**After:** file deleted.
+
+---
+
+## v41.7 — 2026-07-05 — template system audit: fix condition-cycle stack overflow, orphaned selection on delete, dead role-check helper
+
+Audit of `src/data/templates/` and `TemplateBuilder`. Three bugs found and fixed:
+(1) `isFieldVisible` recursed into a field's condition source with no cycle guard —
+the Template Builder UI lets an admin wire field A's visibility condition to field B
+and B's to A (it only excludes the field itself from the "source" dropdown, not
+transitive dependents), and evaluating that template in `InspectionPanel` /
+`EmployeeDashboard` would stack-overflow the inspection form. (2) `deleteTemplate`
+removed the template file + index entry but left `template.selection.json`
+pointing at the now-deleted id if it had been selected as the active inspection
+template, so `XrayReferrals` / `XrayInspectionResults` / `Reports` would silently
+show "no template" with no indication why. (3) `templateBuilderHelpers.ts` exports
+`canUseTemplateBuilder(role) => role === "admin"`, but the actual gating logic
+lives inline in `TemplateBuilder/index.tsx` (`role !== "manager" && role !== "admin"`,
+i.e. manager+admin) and in the `EmployeeWorkspace` host via `canAccessTab`/permission
+matrix — the helper is dead code, never imported, and its logic contradicts the
+real check (comment in `index.tsx` falsely claims it was "moved" there).
+
+**File:** `src/data/templates/templateRuntime.ts`
+
+**Before:**
+```ts
+export function isFieldVisible(
+  field: TemplateField,
+  answers: Record<string, TemplateAnswerValue>,
+  allFields?: TemplateField[]
+): boolean {
+  if (!field.condition?.sourceFieldId) return true;
+  if (allFields) {
+    const src = allFields.find((f) => f.fieldId === field.condition!.sourceFieldId);
+    if (src && !isFieldVisible(src, answers, allFields)) return false;
+  }
+  return evaluateCondition(field.condition, answers[field.condition.sourceFieldId]);
+}
+```
+
+**After:**
+```ts
+export function isFieldVisible(
+  field: TemplateField,
+  answers: Record<string, TemplateAnswerValue>,
+  allFields?: TemplateField[],
+  visited: Set<string> = new Set()
+): boolean {
+  if (!field.condition?.sourceFieldId) return true;
+  if (allFields && !visited.has(field.fieldId)) {
+    visited.add(field.fieldId);
+    const src = allFields.find((f) => f.fieldId === field.condition!.sourceFieldId);
+    if (src && !isFieldVisible(src, answers, allFields, visited)) return false;
+  }
+  return evaluateCondition(field.condition, answers[field.condition.sourceFieldId]);
+}
+```
+
+**File:** `src/data/templates/templateStorage.ts`
+
+**Before:**
+```ts
+const INDEX_FILE = "templates.index.json";
+```
+```ts
+export async function deleteTemplate(
+  directoryHandle: DirectoryHandleLike,
+  templateId: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const dir = await getTemplatesDir(directoryHandle);
+    await withResourceLock(`${dir.name}/templates-index`, async () => {
+      const templateFileName = `${templateId}.json`;
+      const templateResult = await safeReadJson<TemplateSchema>(
+        dir,
+        templateFileName
+      );
+```
+
+**After:**
+```ts
+const INDEX_FILE = "templates.index.json";
+const SELECTION_FILE = "template.selection.json";
+```
+```ts
+export async function deleteTemplate(
+  directoryHandle: DirectoryHandleLike,
+  templateId: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const dir = await getTemplatesDir(directoryHandle);
+    await withResourceLock(`${dir.name}/templates-index`, async () => {
+      const templateFileName = `${templateId}.json`;
+      const templateResult = await safeReadJson<TemplateSchema>(
+        dir,
+        templateFileName
+      );
+
+      // Clear the active inspection-template selection if it points at the
+      // template being deleted, so consumers don't silently keep referencing
+      // a dead templateId with no indication of what happened.
+      const selectionResult = await safeReadJson<{ templateId: string; updatedAt: string; updatedBy: string }>(
+        dir,
+        SELECTION_FILE
+      );
+      if (selectionResult.ok && selectionResult.value.templateId === templateId) {
+        await safeWriteJson(dir, SELECTION_FILE, {
+          templateId: "",
+          updatedAt: new Date().toISOString(),
+          updatedBy: "system:deleteTemplate"
+        });
+      }
+```
+
+**File:** `src/components/Sidebar/Tabs/TemplateBuilder/templateBuilderHelpers.ts` — deleted (dead export,
+never imported, and its role logic contradicted the real gating in `TemplateBuilder/index.tsx` +
+`EmployeeWorkspace`'s `canAccessTab` permission check).
+
+**File:** `src/components/Sidebar/Tabs/TemplateBuilder/index.tsx`
+
+**Before:**
+```ts
+// canUseTemplateBuilder has been moved to ./templateBuilderHelpers.ts
+// to satisfy the react-refresh/only-export-components rule.
+```
+
+**After:** stale comment removed (no replacement — nothing references it anymore).
+
+## v41.6 — 2026-07-05 — Reports/ReportDesigner tab audit: fix silently-swallowed post-delete list refresh
+
+Audit of `src/components/Sidebar/Tabs/Reports/` and `src/components/Sidebar/Tabs/ReportDesigner/`
+(role gating for the KPI sub-tab and report-designer sub-tab checked and confirmed correctly
+enforced both in `Sidebar.tsx`'s subtab filter and via `TabGuard tabId="reports/analytics"` in
+the dashboard render — no fix needed there; the separate `reports/report-designer` permission-key
+mismatch was already found and fixed in v41.5 above, outside this task's file scope). Found one
+small concrete bug: in `ReportDesigner/index.tsx`'s `handleDelete`, the post-delete list-refresh
+call (`loadDesignIndex(...).then(setIndex).catch(() => {})`) was the only bare `.catch(() => {})`
+anywhere under `Tabs/ReportDesigner` or `Tabs/Reports` — every other fire-and-forget promise in
+these files (and elsewhere in the codebase, e.g. `reports:listMonthFolders`) routes through
+`logRejection(context)` so failures land in the in-memory error ring buffer
+(`src/data/storage/errorLogger.ts`) for observability. Here a refresh failure after a successful
+delete was silently discarded with no diagnostic trail, leaving the on-screen list stale with no
+way to tell why. Routed it through `logRejection` for consistency with the rest of the file.
+
+Reviewed for the other audit categories (RTL layout, recharts usage, chart data transforms,
+aggregation math in `executiveReportData.ts`/`portEmployeeData.ts`/`executiveEmployeeData.ts`,
+`any`-masked types, dead code, canvas drag/resize perf in `useCanvasInteractions.ts`) and found
+no other concrete bugs meeting the bar for a fix — `cleanConfirmationRate`'s
+`correctClean + excessSuspicious` denominator initially looked suspicious but is correct (both
+categories share `expertResult === "سليمة"`); `KpiRenderer`'s `usePopulationData` always reading
+only the latest month is a scope limitation, not a regression bug, and out of scope to redesign
+here.
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
+
+**Before:**
+```ts
+    setDeletingId(null);
+    // Refresh list
+    loadDesignIndex(directoryHandle)
+      .then(setIndex)
+      .catch(() => {});
+```
+
+**After:**
+```ts
+    setDeletingId(null);
+    // Refresh list
+    loadDesignIndex(directoryHandle)
+      .then(setIndex)
+      .catch(logRejection("reportDesigner:refreshIndexAfterDelete"));
+```
+
+## v41.8 — 2026-07-05 — Reports/ReportDesigner audit: fix missing permission guard on report-designer sub-tab
+
+Audit of `src/components/Sidebar/Tabs/Reports/` and `src/components/Sidebar/Tabs/ReportDesigner/`.
+Found a real access-control gap: the `kpi` sub-section in `ReportsContent` is wrapped in
+`<TabGuard tabId="reports/analytics">`, but the `report-designer` sub-tab in the outer
+`ReportsTab` wrapper switches to `<ReportDesignerTab />` purely from the
+`sidebar-subtab-changed` DOM event, with no permission check at all — inconsistent with the
+`kpi` branch in the same file, and relying entirely on the sidebar hiding the button (which a
+stray/replayed `sidebar-subtab-changed` event, or a future caller of that event, would bypass).
+Wrapped the report-designer branch in `TabGuard tabId="reports/report-designer"` (the
+permission id fixed to match `App.tsx`'s actual lookup key by the parallel
+UserManagement/auth audit in this same session).
+
+Also independently spotted `handleDelete` in `ReportDesigner/index.tsx` silently swallowing
+a failed post-delete list refresh (`.catch(() => {})`) — but a concurrent parallel-session
+edit had already replaced that with `logRejection("reportDesigner:refreshIndexAfterDelete")`
+by the time this edit landed, so no change was needed there; noting it as verified-fixed by
+the other pass rather than re-touching it.
+
+**File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
+
+**Before:**
+```tsx
+  if (activeSubTab === "report-designer") return <ReportDesignerTab />;
+  return <ReportsContent />;
+```
+
+**After:**
+```tsx
+  if (activeSubTab === "report-designer") {
+    return (
+      <TabGuard tabId="reports/report-designer">
+        <ReportDesignerTab />
+      </TabGuard>
+    );
+  }
+  return <ReportsContent />;
+```
+
+## v41.4 — 2026-07-05 — ReportDesigner: surface silent autosave failures
+
+Audit of `Reports`/`ReportDesigner` tabs (scope: `src/components/Sidebar/Tabs/Reports/`,
+`src/components/Sidebar/Tabs/ReportDesigner/`). `EditorHost.performSave` called
+`setSaveError(result.error)` on a failed `saveDesign` write, but the `saveError` state
+value was discarded at destructuring (`const [, setSaveError] = useState<string | null>(null);`)
+and never rendered anywhere — a failed autosave (debounced, fires on every doc change)
+was completely silent to the user, who would believe their report-designer edits were
+being persisted to disk when they were not.
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
+
+**Before:**
+```tsx
+  const [saving, setSaving] = useState(false);
+  const [, setSaveError] = useState<string | null>(null);
+```
+
+**After:**
+```tsx
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+```
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx` (Ribbon render + save error banner)
+
+**Before:**
+```tsx
+        <Ribbon
+          doc={doc}
+          saving={saving}
+          showFields={showFields}
+          showFormat={showFormat}
+          onToggleFields={() => setShowFields((v) => !v)}
+          onToggleFormat={() => setShowFormat((v) => !v)}
+          onSave={handleExplicitSave}
+          onPrint={() => setShowPrint(true)}
+          onPageSizeChange={handlePageSizeChange}
+          onBack={onBack}
+        />
+```
+
+**After:**
+```tsx
+        <Ribbon
+          doc={doc}
+          saving={saving}
+          saveError={saveError}
+          showFields={showFields}
+          showFormat={showFormat}
+          onToggleFields={() => setShowFields((v) => !v)}
+          onToggleFormat={() => setShowFormat((v) => !v)}
+          onSave={handleExplicitSave}
+          onPrint={() => setShowPrint(true)}
+          onPageSizeChange={handlePageSizeChange}
+          onBack={onBack}
+        />
+```
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/Ribbon.tsx`
+
+**Before:**
+```tsx
+interface RibbonProps {
+  doc: ReportDocument;
+  saving: boolean;
+  showFields: boolean;
+  showFormat: boolean;
+  onToggleFields: () => void;
+  onToggleFormat: () => void;
+  onSave: () => void;
+  onPrint: () => void;
+  onPageSizeChange: (preset: PageSizePreset) => void;
+  onBack: () => void;
+}
+
+export default function Ribbon({
+  doc, saving, showFields, showFormat,
+  onToggleFields, onToggleFormat,
+  onSave, onPrint, onPageSizeChange, onBack,
+}: RibbonProps) {
+```
+
+**After:**
+```tsx
+interface RibbonProps {
+  doc: ReportDocument;
+  saving: boolean;
+  saveError?: string | null;
+  showFields: boolean;
+  showFormat: boolean;
+  onToggleFields: () => void;
+  onToggleFormat: () => void;
+  onSave: () => void;
+  onPrint: () => void;
+  onPageSizeChange: (preset: PageSizePreset) => void;
+  onBack: () => void;
+}
+
+export default function Ribbon({
+  doc, saving, saveError, showFields, showFormat,
+  onToggleFields, onToggleFormat,
+  onSave, onPrint, onPageSizeChange, onBack,
+}: RibbonProps) {
+```
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/Ribbon.tsx` (error indicator)
+
+**Before:**
+```tsx
+      {saving && <span className="rd-saving-indicator">جاري الحفظ...</span>}
+```
+
+**After:**
+```tsx
+      {saving && <span className="rd-saving-indicator">جاري الحفظ...</span>}
+      {!saving && saveError && (
+        <span className="rd-saving-indicator rd-save-error" title={saveError}>
+          تعذّر الحفظ التلقائي
+        </span>
+      )}
+```
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/ReportDesigner.css` (error style)
+
+**Before:**
+```css
+.rd-saving-indicator {
+  font-size: 12px;
+  color: var(--rd-text-secondary);
+  margin: 0 8px;
+}
+```
+
+**After:**
+```css
+.rd-saving-indicator {
+  font-size: 12px;
+  color: var(--rd-text-secondary);
+  margin: 0 8px;
+}
+.rd-save-error {
+  color: var(--rd-danger, #c0392b);
+  font-weight: 600;
+  cursor: help;
+}
+```
+
+## v41.9 — 2026-07-05 — EmployeeWorkspace audit: fix stale permission reads on user-management change
+
+Audit of `src/components/Sidebar/Tabs/EmployeeWorkspace/` (views + index). Found `XrayReferrals.tsx`,
+`XrayInspectionResults.tsx`, and `ReferralApproval.tsx` all call `readUserManagementState()` /
+`hasFeature()` / `getRolePermission()` directly at render time, unlike `usePermissions()` (used by
+`EmployeeWorkspace/index.tsx`), which subscribes to `subscribeToUserManagementChanges` and force-updates
+on the `CHANGE_EVENT_NAME` DOM event. Because these three views never subscribed, a permission change
+made elsewhere while one of these tabs stayed mounted (e.g. an admin revoking `view-all-entries` or
+`approve-referrals` for the current role from the User Management tab in the same session) would not
+take effect until the component happened to remount for an unrelated reason — `canSeeAll`, `canEdit`,
+`canApproveReferrals`, etc. would keep evaluating against the stale snapshot captured at the last
+render. Added a one-line `useEffect` subscription in each file (mirroring `usePermissions()`'s own
+pattern) so a permission-matrix change forces a re-render and these views immediately re-evaluate
+their derived permission booleans.
+
+Also reviewed (no fix needed, noted for other agents): `EmployeeDashboard.tsx` in this same folder has
+zero importers — `EmployeeWorkspace/index.tsx` renders `XrayReferrals`/`XrayInspectionResults`/
+`ReferralApproval`/`TemplateBuilderTab` only, never `EmployeeDashboard` — it appears superseded by
+`XrayReferrals.tsx`'s personal-scope view and is dead code; left in place since deleting a whole view
+file felt out of scope for a permission-bug pass. `XrayReferrals.tsx`/`XrayInspectionResults.tsx` have
+extensive hard-coded Arabic strings (movement labels, audit status labels, button text) that are
+plausible candidates for label-key extraction per the labels-first convention in CLAUDE.md, but most
+predate this session's in-progress `XrayReferrals.tsx` diff and are stylistically consistent with the
+rest of the file, so left as-is rather than triggering a broad, unrelated refactor. `.ew-btn-warning`'s
+`margin-left: auto` in `EmployeeWorkspace.css` is inert dead CSS in its only current usage (the parent
+`.ew-replace-row` already uses `justify-content: space-between`, which positions it correctly under
+RTL) but would push the button to the physical-left (wrong) edge if ever reused in a plain flex row —
+flagged for the CSS owner, not changed here since it has no current visible effect. No changes to
+`src/data/templates/`, `tabRegistry.ts`, `App.tsx`, or `DataTable` (out of scope; `DataTable` misuse
+was checked and none found in this tab's usage).
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx`
+
+**Before:**
+```ts
+import {
+  getRolePermission,
+  hasFeature,
+  readUserManagementState,
+} from "../../../../../auth/userManagement";
+```
+```ts
+  /** Only admin can mutate distribution data (replacements, etc.). */
+  const canEdit   = role === "admin";
+  const userManagementState = readUserManagementState();
+```
+
+**After:**
+```ts
+import {
+  getRolePermission,
+  hasFeature,
+  readUserManagementState,
+  subscribeToUserManagementChanges,
+} from "../../../../../auth/userManagement";
+```
+```ts
+  /** Only admin can mutate distribution data (replacements, etc.). */
+  const canEdit   = role === "admin";
+  // Re-render when the permission matrix changes (e.g. admin edits User Management while
+  // this tab stays mounted) — otherwise canSeeAll/canEdit/etc. below stay frozen at the
+  // last unrelated render's snapshot.
+  const [, forcePermissionRefresh] = useState(0);
+  useEffect(() => subscribeToUserManagementChanges(() => forcePermissionRefresh((n) => n + 1)), []);
+  const userManagementState = readUserManagementState();
+```
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayInspectionResults.tsx`
+
+**Before:**
+```ts
+import { hasFeature, readUserManagementState } from "../../../../../auth/userManagement";
+```
+```ts
+  const session = readSession();
+  const username = session?.username ?? "";
+  const role = session?.role ?? "employee";
+  const userManagementState = readUserManagementState();
+```
+
+**After:**
+```ts
+import {
+  hasFeature,
+  readUserManagementState,
+  subscribeToUserManagementChanges,
+} from "../../../../../auth/userManagement";
+```
+```ts
+  const session = readSession();
+  const username = session?.username ?? "";
+  const role = session?.role ?? "employee";
+  // Re-render on permission-matrix changes so canSeeAll doesn't stay stale while mounted.
+  const [, forcePermissionRefresh] = useState(0);
+  useEffect(() => subscribeToUserManagementChanges(() => forcePermissionRefresh((n) => n + 1)), []);
+  const userManagementState = readUserManagementState();
+```
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval.tsx`
+
+**Before:**
+```ts
+import { hasFeature, readUserManagementState } from "../../../../../auth/userManagement";
+```
+```ts
+export default function ReferralApproval({ directoryHandle }: Props) {
+  const session  = readSession();
+  const username = session?.username ?? "";
+  const role     = session?.role ?? "employee";
+  const userManagementState = readUserManagementState();
+```
+
+**After:**
+```ts
+import {
+  hasFeature,
+  readUserManagementState,
+  subscribeToUserManagementChanges,
+} from "../../../../../auth/userManagement";
+```
+```ts
+export default function ReferralApproval({ directoryHandle }: Props) {
+  const session  = readSession();
+  const username = session?.username ?? "";
+  const role     = session?.role ?? "employee";
+  // Re-render on permission-matrix changes so canApproveReferrals/canApproveReplacements
+  // don't stay stale while this tab is mounted.
+  const [, forcePermissionRefresh] = useState(0);
+  useEffect(() => subscribeToUserManagementChanges(() => forcePermissionRefresh((n) => n + 1)), []);
+  const userManagementState = readUserManagementState();
+```
+
+## v41.5 — 2026-07-05 — ReportDesigner: log swallowed list-refresh failure after delete
+
+`handleDelete` in the ReportDesigner list view refreshed the design index after a
+successful delete with `loadDesignIndex(directoryHandle).then(setIndex).catch(() => {})`
+— any failure reloading the index (e.g. transient FS error) was completely swallowed
+with no observability, unlike the rest of the codebase's `logRejection` convention used
+in `Reports/index.tsx` for the same class of fire-and-forget promise.
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
+
+**Before:**
+```tsx
+    setDeletingId(null);
+    // Refresh list
+    loadDesignIndex(directoryHandle)
+      .then(setIndex)
+      .catch(() => {});
+```
+
+**After:**
+```tsx
+    setDeletingId(null);
+    // Refresh list
+    loadDesignIndex(directoryHandle)
+      .then(setIndex)
+      .catch(logRejection("reportDesigner:refreshIndexAfterDelete"));
+```
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx` (import)
+
+**Before:**
+```tsx
+import { readSession } from "../../../../auth/authSession";
+```
+
+**After:**
+```tsx
+import { readSession } from "../../../../auth/authSession";
+import { logRejection } from "../../../../data/storage/errorLogger";
+```
+
+## v41.6 — 2026-07-05 — Reports: handle clipboard-write rejection on Power BI path copy
+
+The "نسخ" (copy) button for the Power BI export path used
+`void navigator.clipboard.writeText(fullHint)` — `navigator.clipboard.writeText` returns
+a promise that rejects in non-secure contexts or when the Permissions API denies clipboard
+access, and the `void` operator discards that rejection silently, leaving the user with
+a button that appears to do nothing and no diagnostic trail. Routed through the existing
+`logRejection` fire-and-forget helper used elsewhere in this file.
+
+**File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
+
+**Before:**
+```tsx
+                      onClick={() => { void navigator.clipboard.writeText(fullHint); }}
+```
+
+**After:**
+```tsx
+                      onClick={() => {
+                        navigator.clipboard.writeText(fullHint).catch(logRejection("reports:copyPbiPath"));
+                      }}
+```
+
+## v41.10b — 2026-07-05 — Population tab audit: fix undefined-crash in export column handler + stale CertScan grid on async month load
+
+Second, independent pass over `src/components/Sidebar/Tabs/Population/` (biData/, riskData/,
+processing/, reporting/, components/), on top of the earlier v41.5 entry in this file that
+removed dead mini-report code from the same tab. Two real bugs fixed here; the Excel worker
+flow, sampling draw call, distribution event log, and `populationProcessor.ts`
+chunking/progress were reviewed and found sound. (Version suffixed `b` because concurrent
+agents were appending to this log at the same time and a plain `v41.10` may already exist.)
+
+**File:** `src/components/Sidebar/Tabs/Population/components/MappingSettingsModal.tsx`
+
+**Before:**
+```ts
+const handleExportColumnChange = (fieldKey: string, field: keyof ExportColumnSetting, val: ExportColumnSetting[keyof ExportColumnSetting]) => {
+    const updatedColumns = config.exportTemplates[0].columns.map((col) => {
+```
+
+**After:**
+```ts
+const handleExportColumnChange = (fieldKey: string, field: keyof ExportColumnSetting, val: ExportColumnSetting[keyof ExportColumnSetting]) => {
+    if (!config.exportTemplates[0]) return;
+    const updatedColumns = config.exportTemplates[0].columns.map((col) => {
+```
+`config.exportTemplates[0]` was read without a guard even though the line just above it
+(building `newExportCol.order`) already treats the same lookup as possibly-undefined via
+`config.exportTemplates[0]?.columns.length + 1 || 20`. `tsconfig.app.json` doesn't set
+`strict`/`noUncheckedIndexedAccess`, so plain array indexing types as non-optional and `tsc`
+never flagged the missing `?.`. If a saved/merged `PopulationConfig` ever loses its
+`exportTemplates` entry (partially-migrated or hand-edited workspace config JSON), toggling
+any "أعمدة التصدير" checkbox or editing an export header would throw
+`TypeError: Cannot read properties of undefined` and take down the whole settings modal.
+
+**File:** `src/components/Sidebar/Tabs/Population/components/CertScanGrid.tsx`
+
+**Before:**
+```ts
+import { useState, useRef } from "react";
+import { Check, ClipboardList } from "lucide-react";
+```
+```ts
+export default function CertScanGrid({ initialText, onDataChange }: CertScanGridProps) {
+  const parsed0 = parseStoredText(initialText ?? "");
+
+  const [gridData, setGridData] = useState<string[][]>(() => parsed0?.data ?? []);
+  const [portCol, setPortCol] = useState<number | null>(() => parsed0?.portCol ?? null);
+  const [snCol, setSnCol] = useState<number | null>(() => parsed0?.snCol ?? null);
+  const [activeHL, setActiveHL] = useState<HighlightType>(null);
+  const pasteRef = useRef<HTMLDivElement>(null);
+```
+
+**After:**
+```ts
+import { useState, useRef, useEffect } from "react";
+import { Check, ClipboardList } from "lucide-react";
+```
+```ts
+export default function CertScanGrid({ initialText, onDataChange }: CertScanGridProps) {
+  const parsed0 = parseStoredText(initialText ?? "");
+
+  const [gridData, setGridData] = useState<string[][]>(() => parsed0?.data ?? []);
+  const [portCol, setPortCol] = useState<number | null>(() => parsed0?.portCol ?? null);
+  const [snCol, setSnCol] = useState<number | null>(() => parsed0?.snCol ?? null);
+  const [activeHL, setActiveHL] = useState<HighlightType>(null);
+  const pasteRef = useRef<HTMLDivElement>(null);
+  const hasHydratedRef = useRef(Boolean(parsed0));
+
+  // `initialText` arrives asynchronously: PopulationTab (index.tsx) mounts this grid with
+  // certScanPasteText === "" and only calls setCertScanPasteText(text) once
+  // loadCertScanGlobal(directoryHandle) resolves inside a useEffect — after first render.
+  // gridData/portCol/snCol are seeded via lazy useState initializers (run once, on mount),
+  // so that later prop update was silently dropped: a month's accumulated CertScan paste
+  // looked "lost" in the grid UI on reload even though it was safely persisted to disk and
+  // still correctly used for processing (certScanPasteText itself, read directly in
+  // PopulationTab, was never affected — only this component's own display state was stale).
+  // Hydrate once when the real text shows up, without clobbering in-progress user edits.
+  useEffect(() => {
+    if (hasHydratedRef.current) return;
+    const parsed = parseStoredText(initialText ?? "");
+    if (!parsed) return;
+    hasHydratedRef.current = true;
+    setGridData(parsed.data);
+    setPortCol(parsed.portCol);
+    setSnCol(parsed.snCol);
+  }, [initialText]);
+```
+
+## v41.7 — 2026-07-05 — Reports: gate report-designer sub-tab inside the component, not just the registry
+
+`tabConfig.subTabs` restricts `report-designer` to `["supervisor", "manager", "admin"]`,
+matching the pattern already double-checked in-component for the `kpi`/analytics sub-tab
+(`<TabGuard tabId="reports/analytics">`). The `report-designer` sub-tab had no equivalent
+in-component check — `ReportsTab` rendered `<ReportDesignerTab />` unconditionally once
+`activeSubTab === "report-designer"`, relying solely on the sidebar/registry to prevent
+an unauthorized role (e.g. `employee`) from reaching it. Since sub-tab switching is driven
+by a DOM CustomEvent (`sidebar-subtab-changed`) rather than a prop passed down with an
+access check, this is exactly the double-gating gap called out for this audit: the
+registry can be bypassed if the event fires from anywhere. Added the same `TabGuard`
+pattern used for `reports/analytics`, keyed to the existing `reports/report-designer`
+permission id already defined in `userManagement.ts`.
+
+**File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
+
+**Before:**
+```tsx
+  if (activeSubTab === "report-designer") return <ReportDesignerTab />;
+  return <ReportsContent />;
+```
+
+**After:**
+```tsx
+  if (activeSubTab === "report-designer") {
+    return (
+      <TabGuard tabId="reports/report-designer">
+        <ReportDesignerTab />
+      </TabGuard>
+    );
+  }
+  return <ReportsContent />;
+```
