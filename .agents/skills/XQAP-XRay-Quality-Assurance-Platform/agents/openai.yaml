@@ -1,0 +1,6 @@
+interface:
+  display_name: "XQAP XRay Quality Assurance Platform"
+  short_description: "Repo-specific patterns and workflows for XQAP-XRay-Quality-Assurance-Platform"
+  default_prompt: "Use the XQAP-XRay-Quality-Assurance-Platform repo skill to follow existing architecture, testing, and workflow conventions."
+policy:
+  allow_implicit_invocation: true
