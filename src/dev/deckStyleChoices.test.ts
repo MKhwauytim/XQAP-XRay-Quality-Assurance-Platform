@@ -1,5 +1,5 @@
 import { describe, expect, it, afterEach } from "vitest";
-import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readChoices, writeChoice } from "./deckStyleChoices";
@@ -53,8 +53,7 @@ describe("deckStyleChoices", () => {
     const filePath = join(dir, "choices.json");
     writeChoice(filePath, "slide-cover", 1);
     // Corrupt the file.
-    const fs = require("node:fs") as typeof import("node:fs");
-    fs.writeFileSync(filePath, "{not json", "utf-8");
+    writeFileSync(filePath, "{not json", "utf-8");
     const envelope = readChoices(filePath);
     expect(envelope.data).toEqual({});
   });
