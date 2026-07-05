@@ -59,11 +59,32 @@ on `selectedInSample`), keyed by `(row.stage, row.portName)` instead of by land/
 within each stage sorted by `total` descending (same sort key `collectPortStats` uses), so
 "top port" means the same thing on both new pages.
 
-**Consistency check (must hold, and should be asserted/tested):** summing `total` across all
-ports for a given stage must equal `model.population.byStage[i].population` for the matching
-`stageLabel`; summing `sampleTotal` must equal `model.population.byStage[i].sampleSize`. Both
-are derived from the same `model.rows`, so this should hold by construction — worth a unit
-test given it's a correctness invariant, not just a style detail.
+**Consistency caveat (found during Task 1 review, corrected here):** the original version of
+this section claimed the collector's per-stage sums always equal
+`model.population.byStage[i].population`/`.sampleSize`, "since both are derived from the same
+`model.rows`." That is only true when `StageProfile` is built from `model.rows` directly —
+`calculateExecutiveKPIs`'s fallback branch (`executiveReportData.ts` ~line 393), used when
+there's no sample or no `stageAllocations`. In the **normal production case**
+(`sample.stageAllocations` present — the standard Phase-3 sampling output), `StageProfile.
+population`/`.sampleSize` instead come from a `StageAllocation` record **frozen at
+sample-draw time** (`executiveReportData.ts` ~line 377, sourced from `sampleAlgorithm.ts`),
+not from a fresh count of `model.rows`. `collectStagePortStats` always counts *current*
+`model.rows` fresh, so in the production case its sums are **not** guaranteed to equal
+`StageProfile`'s numbers — the two can legitimately diverge if population data changed after
+the sample was drawn.
+
+**Implication for §2.4/§2.5 (card layout):** to avoid an on-slide inconsistency (a card's
+الإجمالي row disagreeing with its own header, or with the "مجتمع الحالات بناءً على المخاطر"
+page which already displays `model.population.byStage[i].population`/`.sampleSize` directly),
+each card's totals row uses `stage.population`/`stage.sampleSize` (the canonical
+`StageProfile` figures — same source already used by `riskStagesSlide` and by this card's own
+header) for the **total** column, not a fresh sum over `collectStagePortStats`' ports. The
+per-port breakdown rows (top-5) and the total row's **سليمة/اشتباه** split (population page
+only — `StageProfile` has no clean/suspicious fields) have no alternative source and
+necessarily come from `collectStagePortStats`'s live row counts. This is a deliberate,
+documented seam, not an oversight: the total column matches the rest of the deck; the
+سليمة/اشتباه split is the best available breakdown and, in the rare case population changed
+post-sampling, may not sum to exactly the pinned total.
 
 ### 2.3 Per-card top-N
 
@@ -100,11 +121,10 @@ requirement; the الإجمالي row already accounts for everyone.
   matching the reference mockup — the existing land/sea `portTable` puts total right after
   the port name; this page's column order deliberately differs to match the reference):
   - Top-5 rows: `port.name`, `port.clean`, `port.suspicious`, `port.total`.
-  - `الإجمالي` row: sums of the same three columns across *all* ports in the stage (not just
-    top 5) — must equal `model.population.byStage[i].population`, `.clean`+`.suspicious`
-    aren't on `StageProfile` so these come from summing `collectStagePortStats`' own rows,
-    which is what feeds the top-band's global sums too (same computation, just scoped to one
-    stage instead of all rows).
+  - `الإجمالي` row: **الإجمالي column is pinned to `stage.population`** (the `StageProfile`
+    figure, not a fresh sum) — see the consistency caveat above for why. **سليمة/اشتباه
+    columns** are summed across *all* ports in the stage from `collectStagePortStats`' own
+    rows (no alternative source exists — `StageProfile` has no clean/suspicious fields).
 
 ### 2.5 Page 2 — عيّنة الفحص المسحوبة حسب المستوى والمنفذ (sample)
 
@@ -135,8 +155,13 @@ oversight.
   will do):
   - Top-5 rows: `port.name`, `port.total`, `port.sampleTotal`,
     `fmtPct(port.total > 0 ? port.sampleTotal / port.total * 100 : 0)`.
-  - `الإجمالي` row: same three stats summed across *all* ports in the stage (must equal the
-    stage header's own `{sampleSize} / {population}` figures).
+  - `الإجمالي` row: **مجتمع المرحلة and العيّنة المستهدفة columns are pinned to
+    `stage.population`/`stage.sampleSize`** (same figures as the card header, and the same
+    consistency reasoning as §2.4's totals row) rather than fresh sums over
+    `collectStagePortStats`' ports. **نسبة التغطية** is computed from those same two pinned
+    figures (`sampleSize / population * 100`), so all three totals-row cells and the header
+    figure are internally consistent by construction — none of them depend on a fresh
+    per-port sum.
 
 ## 3. Layout
 
