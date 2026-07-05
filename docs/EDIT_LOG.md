@@ -4,6 +4,164 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v40 — 2026-07-05 — 4-variant plumbing for every deck2 slide builder
+
+Architectural change enabling the dev-only style-variant switcher (Tasks 4-6 of the deck2-style-switcher workstream). Adds a `renderVariants(slideId, bodies, variantPreview)` helper that renders only `bodies[0]` when `variantPreview` is false (byte-identical to today's production output) or all 4 panels behind a cycle-switcher when true. `v2Slide()`'s `body: string` option becomes `bodyVariants: readonly [string,string,string,string]; variantPreview: boolean`. Every builder in the file is migrated to accept/thread `variantPreview` and pass `[body, body, body, body]` (literal duplicates for now — a later plan authors the real alternate designs): `coverSlide`, `tocSlide`, `glossarySlideBuilders`, `sectionSeparatorSlide` (Task 5), then `riskStagesSlide`, `portPopulationSlideBuilders`, `portSampleSlideBuilders`, `qualityPortSlideBuilders`, `accuracyPortSlideBuilders`, and the assembly function `buildDeckV2Slides` (Task 6), which now takes an optional `variantPreview = false` parameter and threads it into every builder call.
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**Before:**
+```ts
+function v2Slide(opts: {
+  id: string;
+  title: string;
+  eyebrow: string;
+  iconName: string;
+  headline: string;
+  subhead?: string;
+  body: string;
+  num: number;
+  total: number;
+  slideClass?: string;
+  section: NavSectionKey;
+}): string {
+  const cls = `slide v2${opts.slideClass ? " " + opts.slideClass : ""}`;
+  return `<section class="${cls}" id="${esc(opts.id)}" data-title="${esc(opts.title)}" data-section="${opts.section}" data-section-label="${esc(NAV_SECTIONS[opts.section])}">
+  ${printToggle()}
+  ${sideRail(opts.section)}
+  <div class="slide-inner">
+    <div class="slide-eyebrow">
+      <span class="slide-eyebrow-icon">${icon(opts.iconName, 16)}</span>
+      <span>${esc(opts.eyebrow)}</span>
+    </div>
+    <div class="slide-headline">${esc(opts.headline)}</div>
+    ${opts.subhead ? `<div class="slide-subhead">${esc(opts.subhead)}</div>` : ""}
+    <div class="slide-body">${opts.body}</div>
+  </div>
+  ${pageFoot(opts.num, opts.total)}
+</section>`;
+}
+
+// coverSlide, tocSlide, glossarySlideBuilders, sectionSeparatorSlide,
+// riskStagesSlide, portPopulationSlideBuilders, portSampleSlideBuilders,
+// qualityPortSlideBuilders, accuracyPortSlideBuilders all took no
+// `variantPreview` param and built a single `body: string` passed straight
+// into `v2Slide({ ..., body, ... })` (or, for the two hand-rolled builders
+// coverSlide/sectionSeparatorSlide, inlined directly into the returned HTML).
+
+export function buildDeckV2Slides(model: ReportModel, generatedAt = new Date()): string {
+  const glossaryBuilders = glossarySlideBuilders();
+  const sectionOne: SlideBuilder[] = [
+    (num, total) => sectionSeparatorSlide(1, "section1", "layers", "مجتمع الفحص", "…", num, total),
+    (num, total) => riskStagesSlide(model, num, total),
+    ...portPopulationSlideBuilders(model),
+    ...portSampleSlideBuilders(model),
+  ];
+  const sectionTwo: SlideBuilder[] = [
+    (num, total) => sectionSeparatorSlide(2, "section2", "gauge", "نتائج فحص الجودة", "…", num, total),
+    ...qualityPortSlideBuilders(model),
+    ...accuracyPortSlideBuilders(model),
+  ];
+  // ...
+  const slides: string[] = [coverSlide(model, generatedAt), tocSlide(tocItems, 2, total)];
+  // ...
+}
+```
+
+**After:**
+```ts
+function renderVariants(
+  slideId: string,
+  bodies: readonly [string, string, string, string],
+  variantPreview: boolean,
+): string {
+  if (!variantPreview) return bodies[0];
+  const panels = bodies
+    .map(
+      (html, i) =>
+        `<div class="v2-variant-panel${i === 0 ? " active" : ""}" data-variant-index="${i}">${html}</div>`,
+    )
+    .join("");
+  return `<div class="v2-variant-stack" data-slide-id="${esc(slideId)}" data-active-index="0">
+    <div class="v2-variant-switcher">
+      <button type="button" class="v2-variant-prev" aria-label="النمط السابق">‹</button>
+      <span class="v2-variant-label">1 / 4</span>
+      <button type="button" class="v2-variant-next" aria-label="النمط التالي">›</button>
+    </div>
+    ${panels}
+  </div>`;
+}
+
+function v2Slide(opts: {
+  id: string;
+  title: string;
+  eyebrow: string;
+  iconName: string;
+  headline: string;
+  subhead?: string;
+  bodyVariants: readonly [string, string, string, string];
+  variantPreview: boolean;
+  num: number;
+  total: number;
+  slideClass?: string;
+  section: NavSectionKey;
+}): string {
+  const cls = `slide v2${opts.slideClass ? " " + opts.slideClass : ""}`;
+  const body = renderVariants(opts.id, opts.bodyVariants, opts.variantPreview);
+  return `<section class="${cls}" id="${esc(opts.id)}" data-title="${esc(opts.title)}" data-section="${opts.section}" data-section-label="${esc(NAV_SECTIONS[opts.section])}">
+  ${printToggle()}
+  ${sideRail(opts.section)}
+  <div class="slide-inner">
+    <div class="slide-eyebrow">
+      <span class="slide-eyebrow-icon">${icon(opts.iconName, 16)}</span>
+      <span>${esc(opts.eyebrow)}</span>
+    </div>
+    <div class="slide-headline">${esc(opts.headline)}</div>
+    ${opts.subhead ? `<div class="slide-subhead">${esc(opts.subhead)}</div>` : ""}
+    <div class="slide-body">${body}</div>
+  </div>
+  ${pageFoot(opts.num, opts.total)}
+</section>`;
+}
+
+// coverSlide, tocSlide, glossarySlideBuilders, sectionSeparatorSlide,
+// riskStagesSlide, portPopulationSlideBuilders, portSampleSlideBuilders,
+// qualityPortSlideBuilders, accuracyPortSlideBuilders now all take/thread a
+// `variantPreview: boolean` param and pass `bodyVariants: [body, body, body,
+// body]` to `v2Slide` (or, for coverSlide/sectionSeparatorSlide, call
+// `renderVariants(id, [body,body,body,body], variantPreview)` directly since
+// those two builders don't go through the `v2Slide` shell).
+
+export function buildDeckV2Slides(
+  model: ReportModel,
+  generatedAt = new Date(),
+  variantPreview = false,
+): string {
+  const glossaryBuilders = glossarySlideBuilders(variantPreview);
+  const sectionOne: SlideBuilder[] = [
+    (num, total) =>
+      sectionSeparatorSlide(1, "section1", "layers", "مجتمع الفحص", "…", num, total, variantPreview),
+    (num, total) => riskStagesSlide(model, num, total, variantPreview),
+    ...portPopulationSlideBuilders(model, variantPreview),
+    ...portSampleSlideBuilders(model, variantPreview),
+  ];
+  const sectionTwo: SlideBuilder[] = [
+    (num, total) =>
+      sectionSeparatorSlide(2, "section2", "gauge", "نتائج فحص الجودة", "…", num, total, variantPreview),
+    ...qualityPortSlideBuilders(model, variantPreview),
+    ...accuracyPortSlideBuilders(model, variantPreview),
+  ];
+  // ...
+  const slides: string[] = [
+    coverSlide(model, generatedAt, variantPreview),
+    tocSlide(tocItems, 2, total, variantPreview),
+  ];
+  // ...
+}
+```
+
+---
+
 ## v39 — 2026-07-05 — Dev-only deck style-choices persistence helpers
 
 New dev-only modules for the deck-preview style-switcher (Task 1 of the deck2-style-switcher workstream). Provides Node.js-based persistence (not browser APIs) for tracking which style variant the user has selected for each slide in the executive-report deck preview. Used only by the Vite dev-server middleware in future tasks.

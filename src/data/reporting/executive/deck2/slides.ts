@@ -110,6 +110,37 @@ function pageFoot(num: number, total: number): string {
   return `<div class="v2-page-foot" dir="ltr">${pad(num)} / ${pad(total)}</div>`;
 }
 
+/**
+ * Wraps a slide's varying content into 1-of-4 selectable style variants.
+ * Production (`variantPreview=false`) renders ONLY `bodies[0]` — byte-identical
+ * to the single-variant output that existed before the switcher (a dev-preview
+ * feature; see docs/superpowers/specs/2026-07-05-deck2-style-switcher-design.md).
+ * Preview mode renders all 4, one visible via CSS (`.v2-variant-panel.active`),
+ * plus an arrow-cycle control; the inline script in deck2/index.ts
+ * (DECK_VARIANT_SCRIPT) does the cycling and persists the choice.
+ */
+function renderVariants(
+  slideId: string,
+  bodies: readonly [string, string, string, string],
+  variantPreview: boolean,
+): string {
+  if (!variantPreview) return bodies[0];
+  const panels = bodies
+    .map(
+      (html, i) =>
+        `<div class="v2-variant-panel${i === 0 ? " active" : ""}" data-variant-index="${i}">${html}</div>`,
+    )
+    .join("");
+  return `<div class="v2-variant-stack" data-slide-id="${esc(slideId)}" data-active-index="0">
+    <div class="v2-variant-switcher">
+      <button type="button" class="v2-variant-prev" aria-label="النمط السابق">‹</button>
+      <span class="v2-variant-label">1 / 4</span>
+      <button type="button" class="v2-variant-next" aria-label="النمط التالي">›</button>
+    </div>
+    ${panels}
+  </div>`;
+}
+
 // ── v2 slide shell — rail + eyebrow + headline + body + footer page num. ────
 // Unlike v1 there is no "decision footer"; the footer concept is gone in v2.
 function v2Slide(opts: {
@@ -119,13 +150,15 @@ function v2Slide(opts: {
   iconName: string;
   headline: string;
   subhead?: string;
-  body: string;
+  bodyVariants: readonly [string, string, string, string];
+  variantPreview: boolean;
   num: number;
   total: number;
   slideClass?: string;
   section: NavSectionKey;
 }): string {
   const cls = `slide v2${opts.slideClass ? " " + opts.slideClass : ""}`;
+  const body = renderVariants(opts.id, opts.bodyVariants, opts.variantPreview);
   return `<section class="${cls}" id="${esc(opts.id)}" data-title="${esc(opts.title)}" data-section="${opts.section}" data-section-label="${esc(NAV_SECTIONS[opts.section])}">
   ${printToggle()}
   ${sideRail(opts.section)}
@@ -136,14 +169,14 @@ function v2Slide(opts: {
     </div>
     <div class="slide-headline">${esc(opts.headline)}</div>
     ${opts.subhead ? `<div class="slide-subhead">${esc(opts.subhead)}</div>` : ""}
-    <div class="slide-body">${opts.body}</div>
+    <div class="slide-body">${body}</div>
   </div>
   ${pageFoot(opts.num, opts.total)}
 </section>`;
 }
 
 // ── Page 1 — الغلاف ─────────────────────────────────────────────────────────
-export function coverSlide(model: ReportModel, generatedAt: Date): string {
+export function coverSlide(model: ReportModel, generatedAt: Date, variantPreview: boolean): string {
   const [, department, section] = ORGANIZATION_PATH;
   const meta = [
     { label: "فترة الدراسة (عيّنة شهر)", value: model.summary.periodId, iconName: "layers" },
@@ -170,16 +203,18 @@ export function coverSlide(model: ReportModel, generatedAt: Date): string {
         ${ORGANIZATION_PATH.map((line) => `<span>${esc(line)}</span>`).join("")}
       </div>
     </div>`;
+  const coverBody = `<div class="title-kicker">عرض تنفيذي</div>
+      <h1>تقرير ضمان جودة فحص الأشعة</h1>
+      <div class="title-rule"></div>
+      <div class="v2-cover-meta">${meta}</div>
+      <div class="title-classify"><span>${icon("shield", 14)}</span>داخلي — للاستخدام التنفيذي</div>`;
+  const body = renderVariants("slide-cover", [coverBody, coverBody, coverBody, coverBody], variantPreview);
   return `<section class="slide v2 title-slide" id="slide-cover" data-title="الغلاف" data-section="cover" data-section-label="${esc(NAV_SECTIONS.cover)}">
     ${printToggle()}
     <div class="slide-art" aria-hidden="true"></div>
     ${orgBlock}
     <div class="slide-inner">
-      <div class="title-kicker">عرض تنفيذي</div>
-      <h1>تقرير ضمان جودة فحص الأشعة</h1>
-      <div class="title-rule"></div>
-      <div class="v2-cover-meta">${meta}</div>
-      <div class="title-classify"><span>${icon("shield", 14)}</span>داخلي — للاستخدام التنفيذي</div>
+      ${body}
     </div>
   </section>`;
 }
@@ -187,7 +222,7 @@ export function coverSlide(model: ReportModel, generatedAt: Date): string {
 // ── Page 2 — المحتويات ──────────────────────────────────────────────────────
 export type TocItem = { title: string; goal: string; range: string; iconName: string };
 
-export function tocSlide(items: TocItem[], num: number, total: number): string {
+export function tocSlide(items: TocItem[], num: number, total: number, variantPreview: boolean): string {
   const body = `<div class="deck-agenda">${items
     .map(
       (it, i) => `<div class="deck-agenda-item">
@@ -204,7 +239,8 @@ export function tocSlide(items: TocItem[], num: number, total: number): string {
     iconName: "layers",
     headline: "محتويات التقرير",
     subhead: "أقسام التقرير والهدف من كل قسم.",
-    body,
+    bodyVariants: [body, body, body, body],
+    variantPreview,
     num,
     total,
     section: "toc",
@@ -245,26 +281,28 @@ function termCard(g: (typeof GLOSSARY)[number]): string {
 const GLOSSARY_TERMS_PER_PAGE = 12;
 
 /** Build one or more المعجم slides (paginated card grid, per the reference design). */
-export function glossarySlideBuilders(): SlideBuilder[] {
+export function glossarySlideBuilders(variantPreview: boolean): SlideBuilder[] {
   const pages = Math.max(1, Math.ceil(GLOSSARY.length / GLOSSARY_TERMS_PER_PAGE));
   const builders: SlideBuilder[] = [];
   for (let page = 0; page < pages; page++) {
     const chunk = GLOSSARY.slice(page * GLOSSARY_TERMS_PER_PAGE, (page + 1) * GLOSSARY_TERMS_PER_PAGE);
     const cont = page > 0 ? " (تابع)" : "";
-    builders.push((num, total) =>
-      v2Slide({
+    builders.push((num, total) => {
+      const body = `<div class="v2-term-grid">${chunk.map(termCard).join("")}</div>`;
+      return v2Slide({
         id: `slide-glossary-${page + 1}`,
         title: `المعجم${cont}`,
         eyebrow: "المعجم",
         iconName: "document",
         headline: `المعجم — المصطلحات الرئيسية${cont}`,
         subhead: "توحيد المصطلحات قبل قراءة النتائج.",
-        body: `<div class="v2-term-grid">${chunk.map(termCard).join("")}</div>`,
+        bodyVariants: [body, body, body, body],
+        variantPreview,
         num,
         total,
         section: "glossary",
-      }),
-    );
+      });
+    });
   }
   return builders;
 }
@@ -278,7 +316,16 @@ export function sectionSeparatorSlide(
   blurb: string,
   num: number,
   total: number,
+  variantPreview: boolean,
 ): string {
+  const sepBody = `<div class="v2-sep">
+      <div class="v2-sep-icon">${badgeIcon(iconName, 30)}</div>
+      <div class="v2-sep-num">${pad(sectionNo)}</div>
+      <h2>${esc(title)}</h2>
+      <div class="v2-sep-rule"></div>
+      <p>${esc(blurb)}</p>
+    </div>`;
+  const body = renderVariants(`slide-sep-${sectionNo}`, [sepBody, sepBody, sepBody, sepBody], variantPreview);
   return `<section class="slide v2" id="slide-sep-${sectionNo}" data-title="${esc(title)}" data-section="${sectionKey}" data-section-label="${esc(NAV_SECTIONS[sectionKey])}">
   ${printToggle()}
   ${sideRail(sectionKey)}
@@ -288,13 +335,7 @@ export function sectionSeparatorSlide(
       <span class="slide-eyebrow-icon">${icon(iconName, 16)}</span>
       <span>القسم ${esc(String(sectionNo))}</span>
     </div>
-    <div class="v2-sep">
-      <div class="v2-sep-icon">${badgeIcon(iconName, 30)}</div>
-      <div class="v2-sep-num">${pad(sectionNo)}</div>
-      <h2>${esc(title)}</h2>
-      <div class="v2-sep-rule"></div>
-      <p>${esc(blurb)}</p>
-    </div>
+    ${body}
   </div>
   ${pageFoot(num, total)}
 </section>`;
@@ -313,7 +354,7 @@ const STAGE_SHORT_TAG: Record<string, string> = {
   "المستوى الرابع": "مستوى حرج",
 };
 
-export function riskStagesSlide(model: ReportModel, num: number, total: number): string {
+export function riskStagesSlide(model: ReportModel, num: number, total: number, variantPreview: boolean): string {
   const stages = model.population.byStage;
   const tiles = stages
     .map((s, i) => {
@@ -346,7 +387,8 @@ export function riskStagesSlide(model: ReportModel, num: number, total: number):
     iconName: "gauge",
     headline: "مجتمع الحالات بناءً على المخاطر",
     subhead: "توزيع المجتمع بعد المعالجة على مستويات المخاطر الأربعة، وحصة كل مستوى من العيّنة.",
-    body,
+    bodyVariants: [body, body, body, body],
+    variantPreview,
     num,
     total,
     section: "section1",
@@ -528,7 +570,7 @@ function planPortPages(landCount: number, seaCount: number, baseRowsPerPage: num
 }
 
 /** Build one or more port-population slides (paginated land/sea in parallel). */
-export function portPopulationSlideBuilders(model: ReportModel): SlideBuilder[] {
+export function portPopulationSlideBuilders(model: ReportModel, variantPreview: boolean): SlideBuilder[] {
   const { land, sea } = collectPortStats(model);
   const plan = planPortPages(land.length, sea.length, BASE_ROWS_PER_PAGE);
   const builders: SlideBuilder[] = [];
@@ -536,26 +578,28 @@ export function portPopulationSlideBuilders(model: ReportModel): SlideBuilder[] 
     const landChunk = land.slice(page * plan.rowsPerPage, (page + 1) * plan.rowsPerPage);
     const seaChunk = sea.slice(page * plan.rowsPerPage, (page + 1) * plan.rowsPerPage);
     const cont = page > 0 ? " (تابع)" : "";
-    builders.push((num, total) =>
-      v2Slide({
+    builders.push((num, total) => {
+      const body = `<div class="v2-port-split">${portTable("المنافذ البرية", landChunk, "population", "land", plan.compact)}${portTable("المنافذ البحرية", seaChunk, "population", "sea", plan.compact)}</div>`;
+      return v2Slide({
         id: `slide-port-population-${page + 1}`,
         title: `مجتمع حالات الفحص${cont}`,
         eyebrow: "القسم 1 — مجتمع الفحص",
         iconName: "port",
         headline: `مجتمع حالات الفحص لشهر ${model.summary.periodId}${cont}`,
         subhead: "منهجية التصنيف: تُصنَّف الحالة اشتباهًا إذا كانت نتيجة المستوى الأول أو الثاني اشتباهًا، وفي غير ذلك تُصنَّف سليمة.",
-        body: `<div class="v2-port-split">${portTable("المنافذ البرية", landChunk, "population", "land", plan.compact)}${portTable("المنافذ البحرية", seaChunk, "population", "sea", plan.compact)}</div>`,
+        bodyVariants: [body, body, body, body],
+        variantPreview,
         num,
         total,
         section: "section1",
-      }),
-    );
+      });
+    });
   }
   return builders;
 }
 
 /** Sample mirror of the population page: sample figures stacked over their population base + coverage. */
-export function portSampleSlideBuilders(model: ReportModel): SlideBuilder[] {
+export function portSampleSlideBuilders(model: ReportModel, variantPreview: boolean): SlideBuilder[] {
   const { land, sea } = collectPortStats(model);
   const plan = planPortPages(land.length, sea.length, BASE_ROWS_PER_PAGE);
   const builders: SlideBuilder[] = [];
@@ -563,20 +607,22 @@ export function portSampleSlideBuilders(model: ReportModel): SlideBuilder[] {
     const landChunk = land.slice(page * plan.rowsPerPage, (page + 1) * plan.rowsPerPage);
     const seaChunk = sea.slice(page * plan.rowsPerPage, (page + 1) * plan.rowsPerPage);
     const cont = page > 0 ? " (تابع)" : "";
-    builders.push((num, total) =>
-      v2Slide({
+    builders.push((num, total) => {
+      const body = `<div class="v2-port-split">${portTable("المنافذ البرية", landChunk, "sample", "land", plan.compact)}${portTable("المنافذ البحرية", seaChunk, "sample", "sea", plan.compact)}</div>`;
+      return v2Slide({
         id: `slide-port-sample-${page + 1}`,
         title: `عيّنة الفحص${cont}`,
         eyebrow: "القسم 1 — مجتمع الفحص",
         iconName: "port",
         headline: `عيّنة الفحص المسحوبة لشهر ${model.summary.periodId}${cont}`,
         subhead: "الصفحة نفسها بأرقام العيّنة: كل رقم عيّنة وتحته أساسه من المجتمع، مع نسبة التغطية.",
-        body: `<div class="v2-port-split">${portTable("المنافذ البرية", landChunk, "sample", "land", plan.compact)}${portTable("المنافذ البحرية", seaChunk, "sample", "sea", plan.compact)}</div>`,
+        bodyVariants: [body, body, body, body],
+        variantPreview,
         num,
         total,
         section: "section1",
-      }),
-    );
+      });
+    });
   }
   return builders;
 }
@@ -698,7 +744,7 @@ function qualityTable(title: string, rows: PortQualityRow[], variant: "land" | "
 }
 
 /** Build one or more image-quality slides (paginated land/sea in parallel). */
-export function qualityPortSlideBuilders(model: ReportModel): SlideBuilder[] {
+export function qualityPortSlideBuilders(model: ReportModel, variantPreview: boolean): SlideBuilder[] {
   const { land, sea } = collectPortQualityStats(model);
   const plan = planPortPages(land.length, sea.length, BASE_ROWS_PER_PAGE);
   const builders: SlideBuilder[] = [];
@@ -706,20 +752,22 @@ export function qualityPortSlideBuilders(model: ReportModel): SlideBuilder[] {
     const landChunk = land.slice(page * plan.rowsPerPage, (page + 1) * plan.rowsPerPage);
     const seaChunk = sea.slice(page * plan.rowsPerPage, (page + 1) * plan.rowsPerPage);
     const cont = page > 0 ? " (تابع)" : "";
-    builders.push((num, total) =>
-      v2Slide({
+    builders.push((num, total) => {
+      const body = `<div class="v2-port-split">${qualityTable("المنافذ البرية", landChunk, "land", plan.compact)}${qualityTable("المنافذ البحرية", seaChunk, "sea", plan.compact)}</div>`;
+      return v2Slide({
         id: `slide-quality-ports-${page + 1}`,
         title: `نتائج جودة الصور${cont}`,
         eyebrow: "القسم 2 — نتائج فحص الجودة",
         iconName: "scan",
         headline: `نتائج جودة الصور في المنافذ${cont}`,
         subhead: "توزيع مستويات جودة الصورة (عالي / متوسط / منخفض) ونسبة وجود التحديد في كل منفذ.",
-        body: `<div class="v2-port-split">${qualityTable("المنافذ البرية", landChunk, "land", plan.compact)}${qualityTable("المنافذ البحرية", seaChunk, "sea", plan.compact)}</div>`,
+        bodyVariants: [body, body, body, body],
+        variantPreview,
         num,
         total,
         section: "section2",
-      }),
-    );
+      });
+    });
   }
   return builders;
 }
@@ -814,7 +862,7 @@ function accuracyTable(title: string, rows: PortAccuracyRow[], variant: "land" |
 }
 
 /** Build one or more port-accuracy slides (paginated land/sea in parallel). */
-export function accuracyPortSlideBuilders(model: ReportModel): SlideBuilder[] {
+export function accuracyPortSlideBuilders(model: ReportModel, variantPreview: boolean): SlideBuilder[] {
   const { land, sea } = collectPortAccuracyRows(model);
   const plan = planPortPages(land.length, sea.length, BASE_ROWS_PER_PAGE);
   const builders: SlideBuilder[] = [];
@@ -822,20 +870,22 @@ export function accuracyPortSlideBuilders(model: ReportModel): SlideBuilder[] {
     const landChunk = land.slice(page * plan.rowsPerPage, (page + 1) * plan.rowsPerPage);
     const seaChunk = sea.slice(page * plan.rowsPerPage, (page + 1) * plan.rowsPerPage);
     const cont = page > 0 ? " (تابع)" : "";
-    builders.push((num, total) =>
-      v2Slide({
+    builders.push((num, total) => {
+      const body = `<div class="v2-port-split">${accuracyTable("المنافذ البرية", landChunk, "land", plan.compact)}${accuracyTable("المنافذ البحرية", seaChunk, "sea", plan.compact)}</div>`;
+      return v2Slide({
         id: `slide-quality-accuracy-${page + 1}`,
         title: `دقة نتائج المنافذ${cont}`,
         eyebrow: "القسم 2 — نتائج فحص الجودة",
         iconName: "gauge",
         headline: `نتائج دقة نتائج المنافذ (اشتباه / سليمة)${cont}`,
         subhead: "الدقة العامة، ودقة اكتشاف الاشتباه، ودقة تأكيد السليمة.",
-        body: `<div class="v2-port-split">${accuracyTable("المنافذ البرية", landChunk, "land", plan.compact)}${accuracyTable("المنافذ البحرية", seaChunk, "sea", plan.compact)}</div>`,
+        bodyVariants: [body, body, body, body],
+        variantPreview,
         num,
         total,
         section: "section2",
-      }),
-    );
+      });
+    });
   }
   return builders;
 }
@@ -846,8 +896,12 @@ export function accuracyPortSlideBuilders(model: ReportModel): SlideBuilder[] {
  * computed from the real build sequence (never hand-typed), so the TOC cannot
  * drift as pages are added, removed, or paginated differently month to month.
  */
-export function buildDeckV2Slides(model: ReportModel, generatedAt = new Date()): string {
-  const glossaryBuilders = glossarySlideBuilders(); // 1..N pages, paginated by term count
+export function buildDeckV2Slides(
+  model: ReportModel,
+  generatedAt = new Date(),
+  variantPreview = false,
+): string {
+  const glossaryBuilders = glossarySlideBuilders(variantPreview); // 1..N pages, paginated by term count
 
   // Section 1 — مجتمع الفحص: separator + risk stages + port tables (1..N pages).
   const sectionOne: SlideBuilder[] = [
@@ -860,10 +914,11 @@ export function buildDeckV2Slides(model: ReportModel, generatedAt = new Date()):
         "التعريف بمجتمع الحالات لهذا الشهر: حجمه، توزيعه على مستويات المخاطر، وتوزيعه على المنافذ البرية والبحرية — الأساس الذي سُحبت منه العيّنة.",
         num,
         total,
+        variantPreview,
       ),
-    (num, total) => riskStagesSlide(model, num, total),
-    ...portPopulationSlideBuilders(model),
-    ...portSampleSlideBuilders(model),
+    (num, total) => riskStagesSlide(model, num, total, variantPreview),
+    ...portPopulationSlideBuilders(model, variantPreview),
+    ...portSampleSlideBuilders(model, variantPreview),
   ];
 
   // Section 2 — نتائج فحص الجودة: separator + image-quality page(s) + accuracy page(s).
@@ -877,9 +932,10 @@ export function buildDeckV2Slides(model: ReportModel, generatedAt = new Date()):
         "جودة الصور المفحوصة في كل منفذ (التوفر والتحديد والجودة المقبولة)، ودقة قرارات الفحص بين الاشتباه والسليمة.",
         num,
         total,
+        variantPreview,
       ),
-    ...qualityPortSlideBuilders(model),
-    ...accuracyPortSlideBuilders(model),
+    ...qualityPortSlideBuilders(model, variantPreview),
+    ...accuracyPortSlideBuilders(model, variantPreview),
   ];
 
   const total = 2 + glossaryBuilders.length + sectionOne.length + sectionTwo.length; // cover + toc + glossary(N) + section 1 + section 2
@@ -910,7 +966,10 @@ export function buildDeckV2Slides(model: ReportModel, generatedAt = new Date()):
     },
   ];
 
-  const slides: string[] = [coverSlide(model, generatedAt), tocSlide(tocItems, 2, total)];
+  const slides: string[] = [
+    coverSlide(model, generatedAt, variantPreview),
+    tocSlide(tocItems, 2, total, variantPreview),
+  ];
   let num = glossaryStart;
   for (const build of glossaryBuilders) {
     slides.push(build(num, total));
