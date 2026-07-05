@@ -4,6 +4,132 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v39 — 2026-07-05 — Dev-only deck style-choices persistence helpers
+
+New dev-only modules for the deck-preview style-switcher (Task 1 of the deck2-style-switcher workstream). Provides Node.js-based persistence (not browser APIs) for tracking which style variant the user has selected for each slide in the executive-report deck preview. Used only by the Vite dev-server middleware in future tasks.
+
+**File:** `src/dev/deckStyleChoices.ts` (new)
+
+**Before:**
+```ts
+// did not exist
+```
+
+**After:**
+```ts
+// Dev-only persistence for the deck-preview style switcher. Plain Node `fs`
+// (not the browser safeWriteJson/File System Access flow the real app uses
+// for user workspaces) — this file is imported only from a Vite dev-server
+// middleware (deckStyleChoicesPlugin.ts), never from browser or app code.
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+import { wrap, isEnvelope, type JsonEnvelope } from "../data/storage/jsonEnvelope";
+
+export type DeckStyleChoices = Record<string, number>;
+
+const EMPTY_ENVELOPE: JsonEnvelope<DeckStyleChoices> = {
+  metadata: { schemaVersion: 1, revision: 0, contentHash: "", writtenAt: "" },
+  data: {},
+};
+
+/** Reads the choices envelope from `path`, recovering to an empty envelope
+ *  (revision 0) if the file is missing, unreadable, or not a valid envelope. */
+export function readChoices(path: string): JsonEnvelope<DeckStyleChoices> {
+  if (!existsSync(path)) return EMPTY_ENVELOPE;
+  try {
+    const raw: unknown = JSON.parse(readFileSync(path, "utf-8"));
+    if (isEnvelope(raw)) return raw as JsonEnvelope<DeckStyleChoices>;
+    return EMPTY_ENVELOPE;
+  } catch {
+    return EMPTY_ENVELOPE;
+  }
+}
+
+/** Merges `{ [slideId]: variantIndex }` into the choices at `path` and writes
+ *  the result back as a `JsonEnvelope`, creating parent directories as needed. */
+export function writeChoice(path: string, slideId: string, variantIndex: number): void {
+  const current = readChoices(path);
+  const next: DeckStyleChoices = { ...current.data, [slideId]: variantIndex };
+  const envelope = wrap(next, current.metadata.revision);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify(envelope, null, 2), "utf-8");
+}
+```
+
+**File:** `src/dev/deckStyleChoices.test.ts` (new)
+
+**Before:**
+```ts
+// did not exist
+```
+
+**After:**
+```ts
+import { describe, expect, it, afterEach } from "vitest";
+import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { readChoices, writeChoice } from "./deckStyleChoices";
+
+let dir: string;
+
+afterEach(() => {
+  if (dir) rmSync(dir, { recursive: true, force: true });
+});
+
+describe("deckStyleChoices", () => {
+  it("readChoices returns an empty envelope when the file doesn't exist", () => {
+    dir = mkdtempSync(join(tmpdir(), "deck-style-"));
+    const filePath = join(dir, "choices.json");
+    const envelope = readChoices(filePath);
+    expect(envelope.data).toEqual({});
+    expect(envelope.metadata.revision).toBe(0);
+  });
+
+  it("writeChoice creates the file and parent directories, and readChoices reads it back", () => {
+    dir = mkdtempSync(join(tmpdir(), "deck-style-"));
+    const filePath = join(dir, "6-templates", "choices.json");
+    writeChoice(filePath, "slide-cover", 2);
+    expect(existsSync(filePath)).toBe(true);
+    const envelope = readChoices(filePath);
+    expect(envelope.data).toEqual({ "slide-cover": 2 });
+    expect(envelope.metadata.revision).toBe(1);
+  });
+
+  it("writeChoice merges into existing choices and increments the revision", () => {
+    dir = mkdtempSync(join(tmpdir(), "deck-style-"));
+    const filePath = join(dir, "choices.json");
+    writeChoice(filePath, "slide-cover", 1);
+    writeChoice(filePath, "slide-toc", 3);
+    const envelope = readChoices(filePath);
+    expect(envelope.data).toEqual({ "slide-cover": 1, "slide-toc": 3 });
+    expect(envelope.metadata.revision).toBe(2);
+  });
+
+  it("writeChoice overwrites an existing slide's choice", () => {
+    dir = mkdtempSync(join(tmpdir(), "deck-style-"));
+    const filePath = join(dir, "choices.json");
+    writeChoice(filePath, "slide-cover", 1);
+    writeChoice(filePath, "slide-cover", 3);
+    const envelope = readChoices(filePath);
+    expect(envelope.data).toEqual({ "slide-cover": 3 });
+  });
+
+  it("readChoices recovers an empty envelope if the file contains invalid JSON", () => {
+    dir = mkdtempSync(join(tmpdir(), "deck-style-"));
+    const filePath = join(dir, "choices.json");
+    writeChoice(filePath, "slide-cover", 1);
+    // Corrupt the file.
+    const fs = require("node:fs") as typeof import("node:fs");
+    fs.writeFileSync(filePath, "{not json", "utf-8");
+    const envelope = readChoices(filePath);
+    expect(envelope.data).toEqual({});
+  });
+});
+```
+
+---
+
 ## v38.3 — 2026-07-02 — DataTable render loop via onFilteredRowsChange (BUGFIX LOG-03)
 
 New finding surfaced during post-fix verification (registered as LOG-03 in
