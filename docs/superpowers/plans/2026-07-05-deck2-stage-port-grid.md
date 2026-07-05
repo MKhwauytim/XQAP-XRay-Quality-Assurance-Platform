@@ -375,7 +375,20 @@ Insert this immediately after `collectStagePortStats` (the function added in Tas
 
 ```ts
 /** One stage's card on the population page: المنفذ | سليمة | اشتباه | الإجمالي,
- *  top STAGE_CARD_TOP_N ports by population, with a stage-wide totals row. */
+ *  top STAGE_CARD_TOP_N ports by population, with a stage-wide totals row.
+ *
+ *  IMPORTANT (found in Task 1 review, see design spec §2.2's "Consistency
+ *  caveat"): the totals row's الإجمالي column is pinned to `stage.population`
+ *  (the StageProfile figure — same source as riskStagesSlide and this card's
+ *  own data), NOT a fresh sum over `ports`. In the normal production case
+ *  (sample.stageAllocations present), StageProfile's population comes from a
+ *  frozen sample-draw-time snapshot, which is not guaranteed to equal a fresh
+ *  count of `ports` (built from *current* model.rows) — summing `ports` here
+ *  could visibly disagree with the number shown on the "مجتمع الحالات بناءً
+ *  على المخاطر" page for the same stage. سليمة/اشتباه have no equivalent on
+ *  StageProfile, so those two columns still sum from `ports` — the best
+ *  available breakdown, and in the rare case population changed after
+ *  sampling, not guaranteed to add up to exactly the pinned الإجمالي. */
 function stagePortPopulationCard(stage: StageProfile, i: number, ports: PortPopRow[]): string {
   const tone = STAGE_TONES[i % STAGE_TONES.length];
   const top = ports.slice(0, STAGE_CARD_TOP_N);
@@ -396,7 +409,7 @@ function stagePortPopulationCard(stage: StageProfile, i: number, ports: PortPopR
     fillerPx > 0 ? `<tr class="v2-blank" style="height:${fillerPx}px"><td colspan="4">&nbsp;</td></tr>` : "";
 
   const sum = (f: (p: PortPopRow) => number) => ports.reduce((s, p) => s + f(p), 0);
-  const totalsRow = `<tr><td>الإجمالي</td><td>${fmtNum(sum((p) => p.clean))}</td><td>${fmtNum(sum((p) => p.suspicious))}</td><td>${fmtNum(sum((p) => p.total))}</td></tr>`;
+  const totalsRow = `<tr><td>الإجمالي</td><td>${fmtNum(sum((p) => p.clean))}</td><td>${fmtNum(sum((p) => p.suspicious))}</td><td>${fmtNum(stage.population)}</td></tr>`;
 
   return `<div class="v2-stage-card ${tone} v2-stage-port-card">
     <div class="v2-stage-head">
@@ -413,7 +426,15 @@ function stagePortPopulationCard(stage: StageProfile, i: number, ports: PortPopR
 
 /** One stage's card on the sample page: المنفذ | مجتمع المرحلة | العيّنة المستهدفة |
  *  نسبة التغطية, as plain numbers (not the land/sea page's stacked "N من M"
- *  frac cell — the reference design uses two separate plain columns here). */
+ *  frac cell — the reference design uses two separate plain columns here).
+ *
+ *  IMPORTANT (same caveat as stagePortPopulationCard above): all three
+ *  totals-row cells are pinned to `stage.population`/`stage.sampleSize` (the
+ *  same StageProfile figures already shown in the card header), not fresh
+ *  sums over `ports` — this keeps the header figure and the totals row
+ *  internally consistent by construction and matching the rest of the deck,
+ *  regardless of whether a fresh row tally would agree with the frozen
+ *  sample-draw-time allocation. */
 function stagePortSampleCard(stage: StageProfile, i: number, ports: PortPopRow[]): string {
   const tone = STAGE_TONES[i % STAGE_TONES.length];
   const top = ports.slice(0, STAGE_CARD_TOP_N);
@@ -433,10 +454,7 @@ function stagePortSampleCard(stage: StageProfile, i: number, ports: PortPopRow[]
   const blankRow =
     fillerPx > 0 ? `<tr class="v2-blank" style="height:${fillerPx}px"><td colspan="4">&nbsp;</td></tr>` : "";
 
-  const sum = (f: (p: PortPopRow) => number) => ports.reduce((s, p) => s + f(p), 0);
-  const totalPop = sum((p) => p.total);
-  const totalSample = sum((p) => p.sampleTotal);
-  const totalsRow = `<tr><td>الإجمالي</td><td>${fmtNum(totalPop)}</td><td>${fmtNum(totalSample)}</td><td>${fmtPct(totalPop > 0 ? (totalSample / totalPop) * 100 : 0)}</td></tr>`;
+  const totalsRow = `<tr><td>الإجمالي</td><td>${fmtNum(stage.population)}</td><td>${fmtNum(stage.sampleSize)}</td><td>${fmtPct(stage.coverage)}</td></tr>`;
 
   return `<div class="v2-stage-card ${tone} v2-stage-port-card">
     <div class="v2-stage-head">
@@ -590,15 +608,21 @@ describe("stage×port grid slides", () => {
     expect(html).toContain('id="slide-stage-port-sample"');
   });
 
-  it("each stage card's totals row equals the sum of the ports shown when there are ≤5 ports", () => {
+  it("each stage card's totals row shows the pinned stage population alongside the summed سليمة/اشتباه", () => {
     const html = buildExecutiveDeckV2(
       input([
         popRow({ stage: "المستوى الأول", portName: "ميناء أ", xrayLevelOneResult: "سليمة", xrayLevelTwoResult: "سليمة" }),
         popRow({ xrayImageId: "XR-2", stage: "المستوى الأول", portName: "ميناء ب", xrayLevelOneResult: "اشتباه", xrayLevelTwoResult: "اشتباه" }),
       ]),
     );
-    // Both test rows are stage 1, one clean one suspicious — the الإجمالي row
-    // for stage 1's population card must show 1/1/2 (clean/suspicious/total).
+    // This fixture's input() always has sample: null, forcing
+    // calculateExecutiveKPIs's fallback branch (executiveReportData.ts
+    // ~line 393), where stage.population IS a fresh count of model.rows —
+    // so it equals 2 here. Don't read this as "totals always equal the port
+    // sum": stagePortPopulationCard pins الإجمالي to stage.population
+    // specifically because that does NOT hold in the production branch
+    // (sample.stageAllocations present) — see the design spec's consistency
+    // caveat and Task 1's stagePortStats.test.ts production-branch test.
     const stage1Card = html.split('id="slide-stage-port-population"')[1].split("</section>")[0];
     expect(stage1Card).toContain("<td>الإجمالي</td><td>1</td><td>1</td><td>2</td>");
   });
