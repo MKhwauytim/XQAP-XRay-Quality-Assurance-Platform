@@ -4,6 +4,37 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v40.5 — 2026-07-05 — Retroactive log entry: test-hygiene cleanup in deckStyleChoices.test.ts
+
+The final whole-branch review of the deck2-style-switcher workstream caught that commit
+`8155b0bd` (a Task 2 implementer's fix for a `tsc -b` failure left over from Task 1/v39)
+was applied without a corresponding EDIT_LOG entry. Logging it now for completeness: it
+removed an unused `readFileSync` import (causing a `TS6133` compile error) and replaced a
+mid-test `require("node:fs")` call with the already-imported `writeFileSync`, matching a
+minor style nit the v39 task reviewer had also flagged. No behavior change; same 5 tests
+pass before and after.
+
+**File:** `src/dev/deckStyleChoices.test.ts`
+
+**Before:**
+```ts
+import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
+// ...
+    // Corrupt the file.
+    const fs = require("node:fs") as typeof import("node:fs");
+    fs.writeFileSync(filePath, "{not json", "utf-8");
+```
+
+**After:**
+```ts
+import { mkdtempSync, rmSync, existsSync, writeFileSync } from "node:fs";
+// ...
+    // Corrupt the file.
+    writeFileSync(filePath, "{not json", "utf-8");
+```
+
+---
+
 ## v40.4 — 2026-07-05 — Fix the 2 failing assertions from v40.3's known finding
 
 Resolves v40.3's reported (not silently patched) test failure: the two production-path
