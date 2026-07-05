@@ -384,11 +384,14 @@ const STAGE_SHORT_TAG: Record<string, string> = {
 export const STAGE_CARD_TOP_N = 5;
 
 /** Vertical budget (px) for one stage-×-port card's thead+rows+tfoot, at
- *  METRICS_COMPACT row heights. STARTING ESTIMATE ONLY — Task 4 measures the
- *  actual rendered space live in the dev preview and corrects this constant
- *  (same process TABLE_BUDGET_PX below went through — see its own comment,
- *  "measured live in the browser... v39.9/v39.10, retuned v39.16"). */
-export let STAGE_CARD_TABLE_BUDGET_PX = 150;
+ *  METRICS_COMPACT row heights. Measured live in the dev preview (Task 4,
+ *  v41.1): a full 5-row card's `theadH + tfootH + 5*rowH` = 177px under
+ *  METRICS_COMPACT, and `.v2-stage-card` stretches to its CSS-grid row
+ *  regardless of this value, so 177 is set to the actual measured usedPx
+ *  (fillerPx clamps to 0) rather than a placeholder guess — same process
+ *  TABLE_BUDGET_PX below went through (see its own comment, "measured live
+ *  in the browser... v39.9/v39.10, retuned v39.16"). */
+export let STAGE_CARD_TABLE_BUDGET_PX = 177;
 
 export function riskStagesSlide(model: ReportModel, num: number, total: number, variantPreview: boolean): string {
   const stages = model.population.byStage;
