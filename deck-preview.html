@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>معاينة العرض التنفيذي — تحرير حي</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        font-family: system-ui, sans-serif;
+        background: #04182c;
+      }
+      #bar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 16px;
+        background: #021425;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+        color: #fff;
+      }
+      #bar strong {
+        font-size: 0.9rem;
+        margin-inline-end: 8px;
+      }
+      #bar button {
+        padding: 7px 16px;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        background: transparent;
+        color: #cfe0f0;
+        font: inherit;
+        font-size: 0.8rem;
+        cursor: pointer;
+      }
+      #bar button.active {
+        background: #f4b400;
+        border-color: #f4b400;
+        color: #04182c;
+        font-weight: 700;
+      }
+      #bar .hint {
+        margin-inline-start: auto;
+        color: #7d95ab;
+        font-size: 0.72rem;
+      }
+      #frame {
+        display: block;
+        width: 100%;
+        height: calc(100% - 53px);
+        border: 0;
+        background: #04182c;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="bar">
+      <strong>معاينة العرض التنفيذي</strong>
+      <button id="btn-v2" class="active">النسخة الجديدة (v2)</button>
+      <button id="btn-v1">النسخة القديمة (مرجع)</button>
+      <button id="btn-theme">فاتح / داكن</button>
+      <span class="hint">بيانات تجريبية — مايو 2026 · يُعاد التحميل تلقائيًا مع كل تعديل</span>
+    </div>
+    <iframe id="frame" title="معاينة العرض"></iframe>
+    <script type="module" src="/src/dev/deckPreview.ts"></script>
+  </body>
+</html>

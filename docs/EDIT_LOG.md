@@ -4,6 +4,938 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v40.5 — 2026-07-05 — Retroactive log entry: test-hygiene cleanup in deckStyleChoices.test.ts
+
+The final whole-branch review of the deck2-style-switcher workstream caught that commit
+`8155b0bd` (a Task 2 implementer's fix for a `tsc -b` failure left over from Task 1/v39)
+was applied without a corresponding EDIT_LOG entry. Logging it now for completeness: it
+removed an unused `readFileSync` import (causing a `TS6133` compile error) and replaced a
+mid-test `require("node:fs")` call with the already-imported `writeFileSync`, matching a
+minor style nit the v39 task reviewer had also flagged. No behavior change; same 5 tests
+pass before and after.
+
+**File:** `src/dev/deckStyleChoices.test.ts`
+
+**Before:**
+```ts
+import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
+// ...
+    // Corrupt the file.
+    const fs = require("node:fs") as typeof import("node:fs");
+    fs.writeFileSync(filePath, "{not json", "utf-8");
+```
+
+**After:**
+```ts
+import { mkdtempSync, rmSync, existsSync, writeFileSync } from "node:fs";
+// ...
+    // Corrupt the file.
+    writeFileSync(filePath, "{not json", "utf-8");
+```
+
+---
+
+## v40.4 — 2026-07-05 — Fix the 2 failing assertions from v40.3's known finding
+
+Resolves v40.3's reported (not silently patched) test failure: the two production-path
+assertions used a bare `not.toContain("v2-variant-stack")` check, which false-failed
+because Task 3's `DECK_V2_CSS` unconditionally contains that exact substring as static
+CSS selector text (`.v2-variant-stack{...}`), always present regardless of
+`variantPreview` — a CSS-text collision, not an actual DOM/markup leak. Switched both
+assertions to match the opening markup tag (`<div class="v2-variant-stack"`), which only
+appears in real DOM output, never in CSS selector text — the same technique the file's
+own preview-mode test already used correctly. Also added a check that the persistence
+endpoint string (`__deck-style-choices`) never appears in production output, closing a
+gap neither the original brief nor v40.3 tested for on the production side.
+
+**File:** `src/data/reporting/executive/deck2/deck2.test.ts`
+
+**Before:**
+```ts
+describe("buildExecutiveDeckV2 — production path (no opts)", () => {
+  it("never emits variant-switcher chrome when opts is omitted", () => {
+    const html = buildExecutiveDeckV2(input([popRow(), popRow({ xrayImageId: "XR-2" })]));
+    expect(html).not.toContain("v2-variant-stack");
+    expect(html).not.toContain("v2-variant-switcher");
+  });
+
+  it("never emits variant-switcher chrome when variantPreview is explicitly false", () => {
+    const html = buildExecutiveDeckV2(
+      input([popRow(), popRow({ xrayImageId: "XR-2" })]),
+      {},
+      { variantPreview: false },
+    );
+    expect(html).not.toContain("v2-variant-stack");
+  });
+```
+
+**After:**
+```ts
+describe("buildExecutiveDeckV2 — production path (no opts)", () => {
+  // Match the opening markup tag, not the bare class name — the CSS block
+  // (added in Task 3) legitimately contains the literal substring
+  // "v2-variant-stack"/"v2-variant-switcher" as selector text, always, in both
+  // production and preview mode (CSS is static and unconditional; only the
+  // switcher's DOM markup and client script are gated on variantPreview). A
+  // bare substring check would false-positive on that CSS text alone.
+  it("never emits variant-switcher DOM markup when opts is omitted", () => {
+    const html = buildExecutiveDeckV2(input([popRow(), popRow({ xrayImageId: "XR-2" })]));
+    expect(html).not.toContain('<div class="v2-variant-stack"');
+    expect(html).not.toContain('<div class="v2-variant-switcher"');
+    expect(html).not.toContain("__deck-style-choices");
+  });
+
+  it("never emits variant-switcher DOM markup when variantPreview is explicitly false", () => {
+    const html = buildExecutiveDeckV2(
+      input([popRow(), popRow({ xrayImageId: "XR-2" })]),
+      {},
+      { variantPreview: false },
+    );
+    expect(html).not.toContain('<div class="v2-variant-stack"');
+    expect(html).not.toContain("__deck-style-choices");
+  });
+```
+
+**Verified:** `npx vitest run src/data/reporting/executive/deck2/deck2.test.ts` → 4 passed (4); full suite `npm run test:run` → 293 passed (293), 0 regressions.
+
+---
+
+## v40.3 — 2026-07-05 — Production-path regression test for deck2 variant switcher
+
+Adds the regression test that locks in the single most important correctness property of the deck2-style-switcher workstream: `buildExecutiveDeckV2` called with no `opts` (or `variantPreview: false`) must produce byte-identical output to before Tasks 1-8, with no variant-switcher markup leaking into production output. Also verifies preview mode (`variantPreview: true`) emits exactly one `.v2-variant-stack` per slide with 4 panels each. Task 9 (final task) of the deck2-style-switcher workstream.
+
+**File:** `src/data/reporting/executive/deck2/deck2.test.ts` (new file — did not exist before)
+
+**Before:** (file did not exist)
+
+**After:**
+```ts
+// src/data/reporting/executive/deck2/deck2.test.ts
+import { describe, expect, it } from "vitest";
+import { DEFAULT_EXEC_CONFIG } from "../../executiveReportTypes";
+import type { ExecutiveReportInput } from "../../executiveReportTypes";
+import type { PreparedPopulationRow } from "../../../population/populationTypes";
+import { buildExecutiveDeckV2 } from "./index";
+
+// ...popRow()/input() fixtures...
+
+describe("buildExecutiveDeckV2 — production path (no opts)", () => {
+  it("never emits variant-switcher chrome when opts is omitted", () => {
+    const html = buildExecutiveDeckV2(input([popRow(), popRow({ xrayImageId: "XR-2" })]));
+    expect(html).not.toContain("v2-variant-stack");
+    expect(html).not.toContain("v2-variant-switcher");
+  });
+
+  it("never emits variant-switcher chrome when variantPreview is explicitly false", () => {
+    const html = buildExecutiveDeckV2(
+      input([popRow(), popRow({ xrayImageId: "XR-2" })]),
+      {},
+      { variantPreview: false },
+    );
+    expect(html).not.toContain("v2-variant-stack");
+  });
+
+  it("produces byte-identical output for the same input regardless of the opts param shape", () => {
+    const fixture = input([popRow(), popRow({ xrayImageId: "XR-2" })]);
+    const a = buildExecutiveDeckV2(fixture);
+    const b = buildExecutiveDeckV2(fixture, {}, { variantPreview: false });
+    expect(a).toBe(b);
+  });
+});
+
+describe("buildExecutiveDeckV2 — preview mode", () => {
+  it("emits exactly one variant-stack per slide with 4 panels each, and DECK_VARIANT_SCRIPT", () => {
+    // ...regex-based assertions on stack/panel/slide-section counts...
+  });
+});
+```
+
+**Known finding (not fixed by this task — reported, not silently patched):** two of the four tests fail as written in the task brief — `"never emits variant-switcher chrome when opts is omitted"` and `"...when variantPreview is explicitly false"`. Root cause: `DECK_V2_CSS` (`src/data/reporting/executive/deck2/theme.ts`, added in Task 3 / v39.2) is a single unconditional CSS string always concatenated into `<style>` by `buildDeckV2Html` regardless of `variantPreview`, and it contains the literal selector text `.v2-variant-stack{...}` / `.v2-variant-switcher{...}` as static CSS rules — so those substrings appear in every deck2 render, including production (`variantPreview: false`/omitted), even though the corresponding `<div>` markup is correctly gated and never emitted. This is CSS dead-weight in production output, not a functional leak: no switcher UI renders, and the byte-identical test (`buildExecutiveDeckV2(fixture)` === `buildExecutiveDeckV2(fixture, {}, { variantPreview: false })`) passes, confirming the two call shapes are equivalent. The task brief's own comment in the preview-mode test anticipated this exact CSS-substring collision but only worked around it there (via an opening-tag regex), not in the two production-path `not.toContain` assertions. Per instructions, the test was written and committed exactly as specified in the brief rather than weakened; the 2 failing assertions are left failing intentionally as a flag for a follow-up fix (e.g. splitting `DECK_V2_CSS` into an always-on part and a preview-only part gated the same way `DECK_VARIANT_SCRIPT` is).
+
+---
+
+## v40.2 — 2026-07-05 — Preview harness wiring + light/dark toggle
+
+Wires the dev-only preview harness (`deck-preview.html` + `src/dev/deckPreview.ts`) to always request variant-preview mode and adds a light/dark theme toggle button. The preview harness now passes `{ variantPreview: true }` to `buildExecutiveDeckV2`, enabling the style-variant cycling controls on every deck2 slide. The new theme toggle button applies/removes the `theme-light` class on the iframe body, persisting the choice until the user clicks the button again. Task 8 of the deck2-style-switcher workstream.
+
+**File:** `deck-preview.html`
+
+**Before:**
+```html
+    <div id="bar">
+      <strong>معاينة العرض التنفيذي</strong>
+      <button id="btn-v2" class="active">النسخة الجديدة (v2)</button>
+      <button id="btn-v1">النسخة القديمة (مرجع)</button>
+      <span class="hint">بيانات تجريبية — مايو 2026 · يُعاد التحميل تلقائيًا مع كل تعديل</span>
+    </div>
+```
+
+**After:**
+```html
+    <div id="bar">
+      <strong>معاينة العرض التنفيذي</strong>
+      <button id="btn-v2" class="active">النسخة الجديدة (v2)</button>
+      <button id="btn-v1">النسخة القديمة (مرجع)</button>
+      <button id="btn-theme">فاتح / داكن</button>
+      <span class="hint">بيانات تجريبية — مايو 2026 · يُعاد التحميل تلقائيًا مع كل تعديل</span>
+    </div>
+```
+
+**File:** `src/dev/deckPreview.ts`
+
+**Before:**
+```typescript
+const frame = document.getElementById("frame") as HTMLIFrameElement;
+const btnV2 = document.getElementById("btn-v2") as HTMLButtonElement;
+const btnV1 = document.getElementById("btn-v1") as HTMLButtonElement;
+
+const LOADING_HTML = `<!DOCTYPE html><html lang="ar" dir="rtl"><body style="margin:0;height:100vh;display:grid;place-items:center;background:#04182c;color:#cfe0f0;font-family:system-ui,sans-serif;font-size:0.95rem">جارٍ بناء العرض…</body></html>`;
+
+let input: ExecutiveReportInput | null = null;
+const cache: { v1?: string; v2?: string } = {};
+
+function deckHtml(which: "v2" | "v1"): string {
+  input ??= buildPreviewInput();
+  if (which === "v2") {
+    cache.v2 ??= buildExecutiveDeckV2(input);
+    return cache.v2;
+  }
+  cache.v1 ??= buildExecutiveDeck(input);
+  return cache.v1;
+}
+
+function show(which: "v2" | "v1"): void {
+  btnV2.classList.toggle("active", which === "v2");
+  btnV1.classList.toggle("active", which === "v1");
+  if (cache[which]) {
+    frame.srcdoc = cache[which] as string;
+    return;
+  }
+  frame.srcdoc = LOADING_HTML;
+  // Let the placeholder paint before the (synchronous) model + deck build.
+  setTimeout(() => {
+    const t0 = performance.now();
+    frame.srcdoc = deckHtml(which);
+    console.info(`[deck-preview] built ${which} in ${Math.round(performance.now() - t0)}ms`);
+  }, 30);
+}
+
+btnV2.addEventListener("click", () => show("v2"));
+btnV1.addEventListener("click", () => show("v1"));
+show("v2");
+```
+
+**After:**
+```typescript
+const frame = document.getElementById("frame") as HTMLIFrameElement;
+const btnV2 = document.getElementById("btn-v2") as HTMLButtonElement;
+const btnV1 = document.getElementById("btn-v1") as HTMLButtonElement;
+const btnTheme = document.getElementById("btn-theme") as HTMLButtonElement;
+
+const LOADING_HTML = `<!DOCTYPE html><html lang="ar" dir="rtl"><body style="margin:0;height:100vh;display:grid;place-items:center;background:#04182c;color:#cfe0f0;font-family:system-ui,sans-serif;font-size:0.95rem">جارٍ بناء العرض…</body></html>`;
+
+let input: ExecutiveReportInput | null = null;
+const cache: { v1?: string; v2?: string } = {};
+let lightTheme = false;
+
+function deckHtml(which: "v2" | "v1"): string {
+  input ??= buildPreviewInput();
+  if (which === "v2") {
+    // Always request variant-preview mode here: this dev tool's whole purpose
+    // is style-variant exploration (see deck2/index.ts's `variantPreview` opt).
+    // Production callers (once deck2 is wired into the real app) omit `opts`.
+    cache.v2 ??= buildExecutiveDeckV2(input, {}, { variantPreview: true });
+    return cache.v2;
+  }
+  cache.v1 ??= buildExecutiveDeck(input);
+  return cache.v1;
+}
+
+function show(which: "v2" | "v1"): void {
+  btnV2.classList.toggle("active", which === "v2");
+  btnV1.classList.toggle("active", which === "v1");
+  if (cache[which]) {
+    frame.srcdoc = cache[which] as string;
+    return;
+  }
+  frame.srcdoc = LOADING_HTML;
+  // Let the placeholder paint before the (synchronous) model + deck build.
+  setTimeout(() => {
+    const t0 = performance.now();
+    frame.srcdoc = deckHtml(which);
+    console.info(`[deck-preview] built ${which} in ${Math.round(performance.now() - t0)}ms`);
+  }, 30);
+}
+
+// Re-applies the light-theme class every time the iframe's document reloads
+// (srcdoc assignment tears down the previous document, so the class doesn't
+// survive a `show()` call on its own).
+frame.addEventListener("load", () => {
+  if (lightTheme) frame.contentDocument?.body.classList.add("theme-light");
+});
+
+btnTheme.addEventListener("click", () => {
+  lightTheme = !lightTheme;
+  btnTheme.classList.toggle("active", lightTheme);
+  frame.contentDocument?.body.classList.toggle("theme-light", lightTheme);
+});
+
+btnV2.addEventListener("click", () => show("v2"));
+btnV1.addEventListener("click", () => show("v1"));
+show("v2");
+```
+
+---
+
+## v40.1 — 2026-07-05 — Thread variantPreview through buildExecutiveDeckV2
+
+Wires the `variantPreview` parameter through the public API of the executive deck v2 builder. Adds the `DECK_VARIANT_SCRIPT` client-side controller (only injected when `variantPreview=true`) and updates `buildDeckV2Html` and `buildExecutiveDeckV2` signatures to accept and propagate the variant-preview flag. Task 7 of the deck2-style-switcher workstream.
+
+**File:** `src/data/reporting/executive/deck2/index.ts`
+
+**Before:**
+```ts
+export function buildDeckV2Html(slides: string, monthLabel: string): string {
+  return `<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>العرض التنفيذي — ${esc(monthLabel)}</title>
+<style>${DECK_CSS}${DECK_V2_CSS}</style>
+</head>
+<body>
+<nav class="deck-nav" id="deck-nav" aria-label="التنقّل بين أقسام العرض">
+  <div class="deck-nav-brand">
+    <span class="deck-nav-brand-icon">${icon("shield", 20)}</span>
+    <span>العرض التنفيذي</span>
+  </div>
+  <div class="deck-nav-progress">
+    <div class="deck-nav-progress-bar"><div class="deck-nav-progress-fill" id="deck-nav-fill"></div></div>
+    <div class="deck-nav-progress-text" id="deck-nav-progress-text">الصفحة 1</div>
+  </div>
+  <ol class="deck-nav-sections" id="deck-nav-sections"></ol>
+</nav>
+<div class="deck-viewer deck-viewer-v2">
+  <div class="deck-toolbar">
+    <div class="deck-brand">
+      <div class="brand-mark">${icon("shield", 22)}</div>
+      <div>
+        <strong>العرض التنفيذي</strong>
+        <span>ضمان جودة الأشعة — ${esc(monthLabel)}</span>
+      </div>
+    </div>
+    <button class="btn" onclick="window.print()">طباعة / PDF</button>
+  </div>
+${slides}
+</div>
+<script>${DECK_NAV_SCRIPT}</script>
+</body>
+</html>`;
+}
+
+export function buildExecutiveDeckV2(
+  input: ExecutiveReportInput,
+  employeeDisplayNames: Record<string, string> = {},
+): string {
+  const model = buildReportModel(input, employeeDisplayNames);
+  const slides = buildDeckV2Slides(model);
+  return buildDeckV2Html(slides, formatMonthLabel(input.monthFolderName));
+}
+
+export function openExecutiveDeckV2(
+  input: ExecutiveReportInput,
+  employeeDisplayNames: Record<string, string> = {},
+): void {
+  openOrDownload(
+    buildExecutiveDeckV2(input, employeeDisplayNames),
+    `العرض_التنفيذي_${input.monthFolderName}.html`,
+  );
+}
+```
+
+**After:**
+```ts
+/**
+ * Style-variant arrow-cycling + persistence, dev-preview only (only appended
+ * to the document when `variantPreview` is true — see buildDeckV2Html below).
+ * Cycles `.v2-variant-panel.active` within each `.v2-variant-stack` and POSTs
+ * the choice to the Vite dev middleware at /__deck-style-choices
+ * (deckStyleChoicesPlugin.ts), which persists it to
+ * dev-workspace/6-templates/deck-style-choices.json. On load, fetches the
+ * saved choices and applies them before the user interacts with anything.
+ */
+const DECK_VARIANT_SCRIPT = `(function(){
+  var stacks = Array.prototype.slice.call(document.querySelectorAll('.v2-variant-stack'));
+  if (!stacks.length) return;
+  function apply(stack, index){
+    var panels = Array.prototype.slice.call(stack.querySelectorAll('.v2-variant-panel'));
+    panels.forEach(function(p, i){ p.classList.toggle('active', i === index); });
+    stack.setAttribute('data-active-index', String(index));
+    var label = stack.querySelector('.v2-variant-label');
+    if (label) label.textContent = (index + 1) + ' / ' + panels.length;
+  }
+  function persist(slideId, index){
+    fetch('/__deck-style-choices', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slideId: slideId, variantIndex: index })
+    }).catch(function(){});
+  }
+  stacks.forEach(function(stack){
+    var slideId = stack.getAttribute('data-slide-id');
+    var panelCount = stack.querySelectorAll('.v2-variant-panel').length;
+    function step(delta){
+      var cur = Number(stack.getAttribute('data-active-index') || '0');
+      var next = (cur + delta + panelCount) % panelCount;
+      apply(stack, next);
+      persist(slideId, next);
+    }
+    stack.querySelector('.v2-variant-prev').addEventListener('click', function(){ step(-1); });
+    stack.querySelector('.v2-variant-next').addEventListener('click', function(){ step(1); });
+  });
+  fetch('/__deck-style-choices').then(function(r){ return r.json(); }).then(function(saved){
+    stacks.forEach(function(stack){
+      var slideId = stack.getAttribute('data-slide-id');
+      if (Object.prototype.hasOwnProperty.call(saved, slideId)) {
+        apply(stack, saved[slideId]);
+      }
+    });
+  }).catch(function(){});
+})();`;
+
+export function buildDeckV2Html(slides: string, monthLabel: string, variantPreview = false): string {
+  return `<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>العرض التنفيذي — ${esc(monthLabel)}</title>
+<style>${DECK_CSS}${DECK_V2_CSS}</style>
+</head>
+<body>
+<nav class="deck-nav" id="deck-nav" aria-label="التنقّل بين أقسام العرض">
+  <div class="deck-nav-brand">
+    <span class="deck-nav-brand-icon">${icon("shield", 20)}</span>
+    <span>العرض التنفيذي</span>
+  </div>
+  <div class="deck-nav-progress">
+    <div class="deck-nav-progress-bar"><div class="deck-nav-progress-fill" id="deck-nav-fill"></div></div>
+    <div class="deck-nav-progress-text" id="deck-nav-progress-text">الصفحة 1</div>
+  </div>
+  <ol class="deck-nav-sections" id="deck-nav-sections"></ol>
+</nav>
+<div class="deck-viewer deck-viewer-v2">
+  <div class="deck-toolbar">
+    <div class="deck-brand">
+      <div class="brand-mark">${icon("shield", 22)}</div>
+      <div>
+        <strong>العرض التنفيذي</strong>
+        <span>ضمان جودة الأشعة — ${esc(monthLabel)}</span>
+      </div>
+    </div>
+    <button class="btn" onclick="window.print()">طباعة / PDF</button>
+  </div>
+${slides}
+</div>
+<script>${DECK_NAV_SCRIPT}${variantPreview ? DECK_VARIANT_SCRIPT : ""}</script>
+</body>
+</html>`;
+}
+
+export function buildExecutiveDeckV2(
+  input: ExecutiveReportInput,
+  employeeDisplayNames: Record<string, string> = {},
+  opts?: { variantPreview?: boolean },
+): string {
+  const variantPreview = opts?.variantPreview ?? false;
+  const model = buildReportModel(input, employeeDisplayNames);
+  const slides = buildDeckV2Slides(model, new Date(), variantPreview);
+  return buildDeckV2Html(slides, formatMonthLabel(input.monthFolderName), variantPreview);
+}
+
+export function openExecutiveDeckV2(
+  input: ExecutiveReportInput,
+  employeeDisplayNames: Record<string, string> = {},
+): void {
+  openOrDownload(
+    buildExecutiveDeckV2(input, employeeDisplayNames),
+    `العرض_التنفيذي_${input.monthFolderName}.html`,
+  );
+}
+```
+
+---
+
+## v40 — 2026-07-05 — 4-variant plumbing for every deck2 slide builder
+
+Architectural change enabling the dev-only style-variant switcher (Tasks 4-6 of the deck2-style-switcher workstream). Adds a `renderVariants(slideId, bodies, variantPreview)` helper that renders only `bodies[0]` when `variantPreview` is false (byte-identical to today's production output) or all 4 panels behind a cycle-switcher when true. `v2Slide()`'s `body: string` option becomes `bodyVariants: readonly [string,string,string,string]; variantPreview: boolean`. Every builder in the file is migrated to accept/thread `variantPreview` and pass `[body, body, body, body]` (literal duplicates for now — a later plan authors the real alternate designs): `coverSlide`, `tocSlide`, `glossarySlideBuilders`, `sectionSeparatorSlide` (Task 5), then `riskStagesSlide`, `portPopulationSlideBuilders`, `portSampleSlideBuilders`, `qualityPortSlideBuilders`, `accuracyPortSlideBuilders`, and the assembly function `buildDeckV2Slides` (Task 6), which now takes an optional `variantPreview = false` parameter and threads it into every builder call.
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**Before:**
+```ts
+function v2Slide(opts: {
+  id: string;
+  title: string;
+  eyebrow: string;
+  iconName: string;
+  headline: string;
+  subhead?: string;
+  body: string;
+  num: number;
+  total: number;
+  slideClass?: string;
+  section: NavSectionKey;
+}): string {
+  const cls = `slide v2${opts.slideClass ? " " + opts.slideClass : ""}`;
+  return `<section class="${cls}" id="${esc(opts.id)}" data-title="${esc(opts.title)}" data-section="${opts.section}" data-section-label="${esc(NAV_SECTIONS[opts.section])}">
+  ${printToggle()}
+  ${sideRail(opts.section)}
+  <div class="slide-inner">
+    <div class="slide-eyebrow">
+      <span class="slide-eyebrow-icon">${icon(opts.iconName, 16)}</span>
+      <span>${esc(opts.eyebrow)}</span>
+    </div>
+    <div class="slide-headline">${esc(opts.headline)}</div>
+    ${opts.subhead ? `<div class="slide-subhead">${esc(opts.subhead)}</div>` : ""}
+    <div class="slide-body">${opts.body}</div>
+  </div>
+  ${pageFoot(opts.num, opts.total)}
+</section>`;
+}
+
+// coverSlide, tocSlide, glossarySlideBuilders, sectionSeparatorSlide,
+// riskStagesSlide, portPopulationSlideBuilders, portSampleSlideBuilders,
+// qualityPortSlideBuilders, accuracyPortSlideBuilders all took no
+// `variantPreview` param and built a single `body: string` passed straight
+// into `v2Slide({ ..., body, ... })` (or, for the two hand-rolled builders
+// coverSlide/sectionSeparatorSlide, inlined directly into the returned HTML).
+
+export function buildDeckV2Slides(model: ReportModel, generatedAt = new Date()): string {
+  const glossaryBuilders = glossarySlideBuilders();
+  const sectionOne: SlideBuilder[] = [
+    (num, total) => sectionSeparatorSlide(1, "section1", "layers", "مجتمع الفحص", "…", num, total),
+    (num, total) => riskStagesSlide(model, num, total),
+    ...portPopulationSlideBuilders(model),
+    ...portSampleSlideBuilders(model),
+  ];
+  const sectionTwo: SlideBuilder[] = [
+    (num, total) => sectionSeparatorSlide(2, "section2", "gauge", "نتائج فحص الجودة", "…", num, total),
+    ...qualityPortSlideBuilders(model),
+    ...accuracyPortSlideBuilders(model),
+  ];
+  // ...
+  const slides: string[] = [coverSlide(model, generatedAt), tocSlide(tocItems, 2, total)];
+  // ...
+}
+```
+
+**After:**
+```ts
+function renderVariants(
+  slideId: string,
+  bodies: readonly [string, string, string, string],
+  variantPreview: boolean,
+): string {
+  if (!variantPreview) return bodies[0];
+  const panels = bodies
+    .map(
+      (html, i) =>
+        `<div class="v2-variant-panel${i === 0 ? " active" : ""}" data-variant-index="${i}">${html}</div>`,
+    )
+    .join("");
+  return `<div class="v2-variant-stack" data-slide-id="${esc(slideId)}" data-active-index="0">
+    <div class="v2-variant-switcher">
+      <button type="button" class="v2-variant-prev" aria-label="النمط السابق">‹</button>
+      <span class="v2-variant-label">1 / 4</span>
+      <button type="button" class="v2-variant-next" aria-label="النمط التالي">›</button>
+    </div>
+    ${panels}
+  </div>`;
+}
+
+function v2Slide(opts: {
+  id: string;
+  title: string;
+  eyebrow: string;
+  iconName: string;
+  headline: string;
+  subhead?: string;
+  bodyVariants: readonly [string, string, string, string];
+  variantPreview: boolean;
+  num: number;
+  total: number;
+  slideClass?: string;
+  section: NavSectionKey;
+}): string {
+  const cls = `slide v2${opts.slideClass ? " " + opts.slideClass : ""}`;
+  const body = renderVariants(opts.id, opts.bodyVariants, opts.variantPreview);
+  return `<section class="${cls}" id="${esc(opts.id)}" data-title="${esc(opts.title)}" data-section="${opts.section}" data-section-label="${esc(NAV_SECTIONS[opts.section])}">
+  ${printToggle()}
+  ${sideRail(opts.section)}
+  <div class="slide-inner">
+    <div class="slide-eyebrow">
+      <span class="slide-eyebrow-icon">${icon(opts.iconName, 16)}</span>
+      <span>${esc(opts.eyebrow)}</span>
+    </div>
+    <div class="slide-headline">${esc(opts.headline)}</div>
+    ${opts.subhead ? `<div class="slide-subhead">${esc(opts.subhead)}</div>` : ""}
+    <div class="slide-body">${body}</div>
+  </div>
+  ${pageFoot(opts.num, opts.total)}
+</section>`;
+}
+
+// coverSlide, tocSlide, glossarySlideBuilders, sectionSeparatorSlide,
+// riskStagesSlide, portPopulationSlideBuilders, portSampleSlideBuilders,
+// qualityPortSlideBuilders, accuracyPortSlideBuilders now all take/thread a
+// `variantPreview: boolean` param and pass `bodyVariants: [body, body, body,
+// body]` to `v2Slide` (or, for coverSlide/sectionSeparatorSlide, call
+// `renderVariants(id, [body,body,body,body], variantPreview)` directly since
+// those two builders don't go through the `v2Slide` shell).
+
+export function buildDeckV2Slides(
+  model: ReportModel,
+  generatedAt = new Date(),
+  variantPreview = false,
+): string {
+  const glossaryBuilders = glossarySlideBuilders(variantPreview);
+  const sectionOne: SlideBuilder[] = [
+    (num, total) =>
+      sectionSeparatorSlide(1, "section1", "layers", "مجتمع الفحص", "…", num, total, variantPreview),
+    (num, total) => riskStagesSlide(model, num, total, variantPreview),
+    ...portPopulationSlideBuilders(model, variantPreview),
+    ...portSampleSlideBuilders(model, variantPreview),
+  ];
+  const sectionTwo: SlideBuilder[] = [
+    (num, total) =>
+      sectionSeparatorSlide(2, "section2", "gauge", "نتائج فحص الجودة", "…", num, total, variantPreview),
+    ...qualityPortSlideBuilders(model, variantPreview),
+    ...accuracyPortSlideBuilders(model, variantPreview),
+  ];
+  // ...
+  const slides: string[] = [
+    coverSlide(model, generatedAt, variantPreview),
+    tocSlide(tocItems, 2, total, variantPreview),
+  ];
+  // ...
+}
+```
+
+---
+
+## v39 — 2026-07-05 — Dev-only deck style-choices persistence helpers
+
+New dev-only modules for the deck-preview style-switcher (Task 1 of the deck2-style-switcher workstream). Provides Node.js-based persistence (not browser APIs) for tracking which style variant the user has selected for each slide in the executive-report deck preview. Used only by the Vite dev-server middleware in future tasks.
+
+**File:** `src/dev/deckStyleChoices.ts` (new)
+
+**Before:**
+```ts
+// did not exist
+```
+
+**After:**
+```ts
+// Dev-only persistence for the deck-preview style switcher. Plain Node `fs`
+// (not the browser safeWriteJson/File System Access flow the real app uses
+// for user workspaces) — this file is imported only from a Vite dev-server
+// middleware (deckStyleChoicesPlugin.ts), never from browser or app code.
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+import { wrap, isEnvelope, type JsonEnvelope } from "../data/storage/jsonEnvelope";
+
+export type DeckStyleChoices = Record<string, number>;
+
+const EMPTY_ENVELOPE: JsonEnvelope<DeckStyleChoices> = {
+  metadata: { schemaVersion: 1, revision: 0, contentHash: "", writtenAt: "" },
+  data: {},
+};
+
+/** Reads the choices envelope from `path`, recovering to an empty envelope
+ *  (revision 0) if the file is missing, unreadable, or not a valid envelope. */
+export function readChoices(path: string): JsonEnvelope<DeckStyleChoices> {
+  if (!existsSync(path)) return EMPTY_ENVELOPE;
+  try {
+    const raw: unknown = JSON.parse(readFileSync(path, "utf-8"));
+    if (isEnvelope(raw)) return raw as JsonEnvelope<DeckStyleChoices>;
+    return EMPTY_ENVELOPE;
+  } catch {
+    return EMPTY_ENVELOPE;
+  }
+}
+
+/** Merges `{ [slideId]: variantIndex }` into the choices at `path` and writes
+ *  the result back as a `JsonEnvelope`, creating parent directories as needed. */
+export function writeChoice(path: string, slideId: string, variantIndex: number): void {
+  const current = readChoices(path);
+  const next: DeckStyleChoices = { ...current.data, [slideId]: variantIndex };
+  const envelope = wrap(next, current.metadata.revision);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify(envelope, null, 2), "utf-8");
+}
+```
+
+**File:** `src/dev/deckStyleChoices.test.ts` (new)
+
+**Before:**
+```ts
+// did not exist
+```
+
+**After:**
+```ts
+import { describe, expect, it, afterEach } from "vitest";
+import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { readChoices, writeChoice } from "./deckStyleChoices";
+
+let dir: string;
+
+afterEach(() => {
+  if (dir) rmSync(dir, { recursive: true, force: true });
+});
+
+describe("deckStyleChoices", () => {
+  it("readChoices returns an empty envelope when the file doesn't exist", () => {
+    dir = mkdtempSync(join(tmpdir(), "deck-style-"));
+    const filePath = join(dir, "choices.json");
+    const envelope = readChoices(filePath);
+    expect(envelope.data).toEqual({});
+    expect(envelope.metadata.revision).toBe(0);
+  });
+
+  it("writeChoice creates the file and parent directories, and readChoices reads it back", () => {
+    dir = mkdtempSync(join(tmpdir(), "deck-style-"));
+    const filePath = join(dir, "6-templates", "choices.json");
+    writeChoice(filePath, "slide-cover", 2);
+    expect(existsSync(filePath)).toBe(true);
+    const envelope = readChoices(filePath);
+    expect(envelope.data).toEqual({ "slide-cover": 2 });
+    expect(envelope.metadata.revision).toBe(1);
+  });
+
+  it("writeChoice merges into existing choices and increments the revision", () => {
+    dir = mkdtempSync(join(tmpdir(), "deck-style-"));
+    const filePath = join(dir, "choices.json");
+    writeChoice(filePath, "slide-cover", 1);
+    writeChoice(filePath, "slide-toc", 3);
+    const envelope = readChoices(filePath);
+    expect(envelope.data).toEqual({ "slide-cover": 1, "slide-toc": 3 });
+    expect(envelope.metadata.revision).toBe(2);
+  });
+
+  it("writeChoice overwrites an existing slide's choice", () => {
+    dir = mkdtempSync(join(tmpdir(), "deck-style-"));
+    const filePath = join(dir, "choices.json");
+    writeChoice(filePath, "slide-cover", 1);
+    writeChoice(filePath, "slide-cover", 3);
+    const envelope = readChoices(filePath);
+    expect(envelope.data).toEqual({ "slide-cover": 3 });
+  });
+
+  it("readChoices recovers an empty envelope if the file contains invalid JSON", () => {
+    dir = mkdtempSync(join(tmpdir(), "deck-style-"));
+    const filePath = join(dir, "choices.json");
+    writeChoice(filePath, "slide-cover", 1);
+    // Corrupt the file.
+    const fs = require("node:fs") as typeof import("node:fs");
+    fs.writeFileSync(filePath, "{not json", "utf-8");
+    const envelope = readChoices(filePath);
+    expect(envelope.data).toEqual({});
+  });
+});
+```
+
+---
+
+## v39.1 — 2026-07-05 — Vite dev middleware for deck style-choice persistence
+
+Wraps Task 1's `readChoices`/`writeChoice` helpers in a Vite dev-server middleware plugin exposing `GET`/`POST /__deck-style-choices`, and registers it in `vite.config.ts`. Dev-only: the middleware is only wired into `configureServer`, so it never runs in the `npm run build` output. Also ignores the `dev-workspace/` scratch folder the middleware writes to.
+
+**File:** `src/dev/deckStyleChoicesPlugin.ts` (new)
+
+**Before:**
+```ts
+// did not exist
+```
+
+**After:**
+```ts
+// Vite dev-server middleware exposing the deck-preview style-switcher's
+// persistence endpoint. Dev-only: only registered by vite.config.ts's plugin
+// list, never runs in `npm run build` output.
+import type { Plugin } from "vite";
+import { readChoices, writeChoice } from "./deckStyleChoices";
+
+const ENDPOINT = "/__deck-style-choices";
+const CHOICES_PATH = "dev-workspace/6-templates/deck-style-choices.json";
+
+export function deckStyleChoicesPlugin(): Plugin {
+  return {
+    name: "deck-style-choices",
+    configureServer(server) {
+      server.middlewares.use(ENDPOINT, (req, res) => {
+        if (req.method === "GET") {
+          const envelope = readChoices(CHOICES_PATH);
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify(envelope.data));
+          return;
+        }
+        if (req.method === "POST") {
+          let body = "";
+          req.on("data", (chunk: Buffer) => {
+            body += chunk.toString();
+          });
+          req.on("end", () => {
+            try {
+              const parsed = JSON.parse(body) as { slideId?: unknown; variantIndex?: unknown };
+              if (typeof parsed.slideId !== "string" || typeof parsed.variantIndex !== "number") {
+                res.statusCode = 400;
+                res.end("bad request");
+                return;
+              }
+              writeChoice(CHOICES_PATH, parsed.slideId, parsed.variantIndex);
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ ok: true }));
+            } catch {
+              res.statusCode = 400;
+              res.end("bad request");
+            }
+          });
+          return;
+        }
+        res.statusCode = 405;
+        res.end("method not allowed");
+      });
+    },
+  };
+}
+```
+
+**File:** `vite.config.ts`
+
+**Before:**
+```ts
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import { viteSingleFile } from "vite-plugin-singlefile";
+
+export default defineConfig({
+  plugins: [react(), viteSingleFile()],
+```
+
+**After:**
+```ts
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import { viteSingleFile } from "vite-plugin-singlefile";
+import { deckStyleChoicesPlugin } from "./src/dev/deckStyleChoicesPlugin";
+
+export default defineConfig({
+  plugins: [react(), viteSingleFile(), deckStyleChoicesPlugin()],
+```
+
+**File:** `.gitignore`
+
+**Before:**
+```
+dist-ssr
+*.local
+.worktrees
+```
+
+**After:**
+```
+dist-ssr
+*.local
+.worktrees
+dev-workspace
+```
+
+---
+
+## v39.2 — 2026-07-05 — Variant-switcher CSS + light-theme re-skin (deck2)
+
+Adds CSS for the dev-preview style-variant switcher chrome (`.v2-variant-stack`, `.v2-variant-panel`, `.v2-variant-switcher`, `.v2-variant-prev`/`.v2-variant-next`, `.v2-variant-label`) and a `body.theme-light` light-theme re-skin for both deck2-only components (v2-term-card, v2-stage-card, v2-port-col, v2-rail) and shared v1 components (kpi-tile, deck-table). These classes are not wired to any markup yet; they will be used by Task 4's `renderVariants()` function and Task 7's theme-toggle button. This task is purely CSS, no logic or markup changes.
+
+**File:** `src/data/reporting/executive/deck2/theme.ts`
+
+**Before:**
+```ts
+@media(max-width:820px){
+  .v2-term-grid,.v2-port-split,.v2-cover-meta{grid-template-columns:1fr;}
+}
+`;
+```
+
+**After:**
+```ts
+@media(max-width:820px){
+  .v2-term-grid,.v2-port-split,.v2-cover-meta{grid-template-columns:1fr;}
+}
+
+/* ── Style-variant switcher (dev-preview only, never in production output) ── */
+/* .v2-variant-stack takes over the flex-sizing role of whatever container it
+   sits in (\`.slide-body\` or directly \`.slide-inner\`), so wrapping existing
+   content in it does not change any pixel-budget math (TABLE_BUDGET_PX etc.)
+   — only the ACTIVE panel is flex/visible, matching the original single-child
+   layout the budget math was measured against. */
+.v2-variant-stack{
+  flex:1 1 auto;min-height:0;display:flex;flex-direction:column;position:relative;
+}
+.v2-variant-panel{display:none;flex:1 1 auto;min-height:0;flex-direction:column;}
+.v2-variant-panel.active{display:flex;}
+.v2-variant-switcher{
+  position:absolute;top:6px;left:6px;z-index:5;
+  display:flex;align-items:center;gap:6px;
+  background:rgba(2,16,30,.72);border:1px solid rgba(255,255,255,.16);border-radius:999px;
+  padding:3px 8px;font-size:0.68rem;font-weight:700;color:rgba(255,255,255,.75);
+}
+.v2-variant-switcher button{
+  border:0;background:rgba(255,255,255,.08);color:#fff;border-radius:999px;
+  width:20px;height:20px;display:grid;place-items:center;cursor:pointer;font-size:0.85rem;line-height:1;
+  padding:0;
+}
+.v2-variant-switcher button:hover{background:var(--gold);color:var(--navy);}
+.v2-variant-label{min-width:32px;text-align:center;font-variant-numeric:tabular-nums;}
+@media print{.v2-variant-switcher{display:none!important;}}
+
+/* ── Light theme re-skin (dev-preview toggle) ────────────────────────────── */
+/* Mirrors the old deck's \`.page.light\` pattern (theme.ts / EXEC_CSS): swap
+   background/ink/border colors on top of whatever variant is currently
+   showing, no new markup. Applies to both slides.ts's v1-shared components
+   (kpi-tile, deck-table) and deck2-only components (v2-term-card, v2-stage-
+   card, v2-port-col). */
+body.theme-light{background:#eef2f6;}
+body.theme-light .slide{
+  background:linear-gradient(150deg,#ffffff,#f4f6f9 65%);
+  border-color:#dde4ea;color:#0a2d4a;
+}
+body.theme-light .slide-headline,body.theme-light h2{color:#0a2d4a;}
+body.theme-light .slide-subhead{color:#8a6d1f;}
+body.theme-light .muted,body.theme-light .v2-stage-row span{color:#607386;}
+body.theme-light .kpi-tile,body.theme-light .v2-term-card,body.theme-light .v2-stage-card{
+  background:#ffffff;border-color:#dde4ea;color:#0a2d4a;box-shadow:0 6px 16px rgba(10,45,74,.08);
+}
+body.theme-light .v2-port-col{
+  background:linear-gradient(180deg,#eef7ee,#e4f1e4);box-shadow:0 6px 16px rgba(10,45,74,.08);
+}
+body.theme-light .v2-port-col.sea{background:linear-gradient(180deg,#eaf2fb,#dfeaf8);}
+body.theme-light .deck-table{background:#ffffff;color:#0a2d4a;}
+body.theme-light .deck-table th{background:#0e3a5f;color:#fff;}
+body.theme-light .deck-table td{border-color:#e3e8ee;}
+body.theme-light .v2-rail{background:linear-gradient(180deg,#f4f6f9,#e7edf2);border-color:#dde4ea;}
+body.theme-light .v2-rail-title,body.theme-light .v2-rail-tab{color:#5b6b78;}
+body.theme-light .v2-variant-switcher{background:rgba(255,255,255,.85);border-color:#dde4ea;color:#3a4a58;}
+body.theme-light .v2-variant-switcher button{background:rgba(10,45,74,.08);color:#0a2d4a;}
+`;
+```
+
+---
+
 ## v38.3 — 2026-07-02 — DataTable render loop via onFilteredRowsChange (BUGFIX LOG-03)
 
 New finding surfaced during post-fix verification (registered as LOG-03 in
