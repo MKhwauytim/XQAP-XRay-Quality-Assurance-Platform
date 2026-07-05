@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_EXEC_CONFIG } from "../../executiveReportTypes";
 import type { ExecutiveReportInput } from "../../executiveReportTypes";
 import type { PreparedPopulationRow } from "../../../population/populationTypes";
+import type { SampleMasterData } from "../../../sampling/sampleTypes";
 import { buildReportModel } from "../model/reportModel";
 import { collectStagePortStats } from "./slides";
 
@@ -109,5 +110,68 @@ describe("collectStagePortStats", () => {
       expect(summedTotal).toBe(stageProfile.population);
       expect(summedSample).toBe(stageProfile.sampleSize);
     }
+  });
+
+  it("does NOT guarantee the invariant when StageProfile comes from a frozen StageAllocation snapshot (production branch)", () => {
+    // When sample.stageAllocations is present (the normal case after Phase 3 sampling),
+    // calculateExecutiveKPIs takes population/sampleSize straight from the frozen
+    // StageAllocation record captured at sample-draw time — it does NOT recompute them
+    // from model.rows. collectStagePortStats, on the other hand, always tallies the
+    // *current* model.rows fresh. So the two numbers are independent in this branch,
+    // and can legitimately diverge (e.g. if rows were reprocessed after the sample was
+    // drawn). This test proves the collector itself is still correct (real row count),
+    // while the frozen allocation reports something else entirely — that's expected,
+    // not a bug.
+    const rows: PreparedPopulationRow[] = [
+      popRow({ xrayImageId: "1", stage: "المستوى الأول", portName: "ميناء أ" }),
+      popRow({ xrayImageId: "2", stage: "المستوى الأول", portName: "ميناء أ" }),
+      popRow({ xrayImageId: "3", stage: "المستوى الأول", portName: "ميناء ب" }),
+    ];
+
+    const sample: SampleMasterData = {
+      rngSeed: "",
+      totalRequested: 0,
+      totalActual: 0,
+      certScanRequested: 0,
+      nonCertScanRequested: 0,
+      certScanActual: 0,
+      nonCertScanActual: 0,
+      portAllocations: [],
+      stageAllocations: [
+        {
+          stageKey: "first",
+          stageLabel: "المستوى الأول",
+          populationSize: 999, // deliberately different from the 3 real rows above
+          targetQuota: 0,
+          actualDrawn: 0,
+          certScanDrawn: 0,
+          nonCertScanDrawn: 0,
+        },
+      ],
+      drawnAt: "",
+      drawnBy: "",
+      rows,
+    };
+
+    const model = buildReportModel({
+      monthFolderName: "5-May-2026",
+      populationRows: rows,
+      sample,
+      distribution: null,
+      employeeFiles: [],
+      template: null,
+      config: DEFAULT_EXEC_CONFIG,
+    });
+
+    const stage1 = model.population.byStage.find((s) => s.stageLabel === "المستوى الأول");
+    expect(stage1).toBeDefined();
+    // The frozen allocation snapshot wins here — not a fresh count of model.rows.
+    expect(stage1!.population).toBe(999);
+
+    // But collectStagePortStats always tallies the real rows it's given, regardless
+    // of what the frozen allocation says.
+    const ports = collectStagePortStats(model).get("المستوى الأول") ?? [];
+    const summedTotal = ports.reduce((sum, p) => sum + p.total, 0);
+    expect(summedTotal).toBe(3);
   });
 });

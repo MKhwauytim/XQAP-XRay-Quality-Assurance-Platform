@@ -656,11 +656,26 @@ export function portSampleSlideBuilders(model: ReportModel, variantPreview: bool
  * each stage — the same sort key collectPortStats uses — so "top port" means
  * the same thing on the land/sea pages and these stage/port pages.
  *
- * Invariant (asserted in stagePortStats.test.ts): for every entry in
- * `model.population.byStage`, summing `total`/`sampleTotal` across all ports
- * returned for that stageLabel must equal that stage's `population`/
- * `sampleSize`. Both come from the same `model.rows`, so this holds by
- * construction — the test exists to catch a future refactor that breaks it.
+ * `collectStagePortStats` itself is always internally correct — it's a
+ * straightforward tally over the `model.rows` it's given, so `total`/
+ * `sampleTotal` always reflect the actual rows for that (stage, port) pair.
+ *
+ * The caveat is whether its per-stage sums match `model.population.byStage`'s
+ * `population`/`sampleSize` for the same stage, and that depends on how
+ * `StageProfile` was built in `calculateExecutiveKPIs`
+ * (`src/data/reporting/executiveReportData.ts`):
+ * - Fallback branch (no sample, or no `stageAllocations`): `population`/
+ *   `sampleSize` are computed by grouping `model.rows` by `row.stage` at
+ *   report-generation time — the same rows this collector tallies — so the
+ *   sums are guaranteed to match (asserted in stagePortStats.test.ts).
+ * - Production branch (`sample.stageAllocations` present — the normal case
+ *   after Phase 3 sampling): `population`/`sampleSize` come from a
+ *   `StageAllocation` record frozen at sample-draw time
+ *   (`src/data/sampling/sampleTypes.ts`). That snapshot is NOT recomputed
+ *   from `model.rows`, so it is not guaranteed to match a fresh tally if
+ *   data was reprocessed or a row's `stage` changed since the sample was
+ *   drawn (also asserted in stagePortStats.test.ts, to document the
+ *   divergence rather than hide it).
  */
 export function collectStagePortStats(model: ReportModel): Map<string, PortPopRow[]> {
   const byStage = new Map<string, Map<string, PortPopRow>>();
