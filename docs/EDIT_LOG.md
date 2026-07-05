@@ -4,6 +4,60 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v40.3 — 2026-07-05 — Production-path regression test for deck2 variant switcher
+
+Adds the regression test that locks in the single most important correctness property of the deck2-style-switcher workstream: `buildExecutiveDeckV2` called with no `opts` (or `variantPreview: false`) must produce byte-identical output to before Tasks 1-8, with no variant-switcher markup leaking into production output. Also verifies preview mode (`variantPreview: true`) emits exactly one `.v2-variant-stack` per slide with 4 panels each. Task 9 (final task) of the deck2-style-switcher workstream.
+
+**File:** `src/data/reporting/executive/deck2/deck2.test.ts` (new file — did not exist before)
+
+**Before:** (file did not exist)
+
+**After:**
+```ts
+// src/data/reporting/executive/deck2/deck2.test.ts
+import { describe, expect, it } from "vitest";
+import { DEFAULT_EXEC_CONFIG } from "../../executiveReportTypes";
+import type { ExecutiveReportInput } from "../../executiveReportTypes";
+import type { PreparedPopulationRow } from "../../../population/populationTypes";
+import { buildExecutiveDeckV2 } from "./index";
+
+// ...popRow()/input() fixtures...
+
+describe("buildExecutiveDeckV2 — production path (no opts)", () => {
+  it("never emits variant-switcher chrome when opts is omitted", () => {
+    const html = buildExecutiveDeckV2(input([popRow(), popRow({ xrayImageId: "XR-2" })]));
+    expect(html).not.toContain("v2-variant-stack");
+    expect(html).not.toContain("v2-variant-switcher");
+  });
+
+  it("never emits variant-switcher chrome when variantPreview is explicitly false", () => {
+    const html = buildExecutiveDeckV2(
+      input([popRow(), popRow({ xrayImageId: "XR-2" })]),
+      {},
+      { variantPreview: false },
+    );
+    expect(html).not.toContain("v2-variant-stack");
+  });
+
+  it("produces byte-identical output for the same input regardless of the opts param shape", () => {
+    const fixture = input([popRow(), popRow({ xrayImageId: "XR-2" })]);
+    const a = buildExecutiveDeckV2(fixture);
+    const b = buildExecutiveDeckV2(fixture, {}, { variantPreview: false });
+    expect(a).toBe(b);
+  });
+});
+
+describe("buildExecutiveDeckV2 — preview mode", () => {
+  it("emits exactly one variant-stack per slide with 4 panels each, and DECK_VARIANT_SCRIPT", () => {
+    // ...regex-based assertions on stack/panel/slide-section counts...
+  });
+});
+```
+
+**Known finding (not fixed by this task — reported, not silently patched):** two of the four tests fail as written in the task brief — `"never emits variant-switcher chrome when opts is omitted"` and `"...when variantPreview is explicitly false"`. Root cause: `DECK_V2_CSS` (`src/data/reporting/executive/deck2/theme.ts`, added in Task 3 / v39.2) is a single unconditional CSS string always concatenated into `<style>` by `buildDeckV2Html` regardless of `variantPreview`, and it contains the literal selector text `.v2-variant-stack{...}` / `.v2-variant-switcher{...}` as static CSS rules — so those substrings appear in every deck2 render, including production (`variantPreview: false`/omitted), even though the corresponding `<div>` markup is correctly gated and never emitted. This is CSS dead-weight in production output, not a functional leak: no switcher UI renders, and the byte-identical test (`buildExecutiveDeckV2(fixture)` === `buildExecutiveDeckV2(fixture, {}, { variantPreview: false })`) passes, confirming the two call shapes are equivalent. The task brief's own comment in the preview-mode test anticipated this exact CSS-substring collision but only worked around it there (via an opening-tag regex), not in the two production-path `not.toContain` assertions. Per instructions, the test was written and committed exactly as specified in the brief rather than weakened; the 2 failing assertions are left failing intentionally as a flag for a follow-up fix (e.g. splitting `DECK_V2_CSS` into an always-on part and a preview-only part gated the same way `DECK_VARIANT_SCRIPT` is).
+
+---
+
 ## v40.2 — 2026-07-05 — Preview harness wiring + light/dark toggle
 
 Wires the dev-only preview harness (`deck-preview.html` + `src/dev/deckPreview.ts`) to always request variant-preview mode and adds a light/dark theme toggle button. The preview harness now passes `{ variantPreview: true }` to `buildExecutiveDeckV2`, enabling the style-variant cycling controls on every deck2 slide. The new theme toggle button applies/removes the `theme-light` class on the iframe body, persisting the choice until the user clicks the button again. Task 8 of the deck2-style-switcher workstream.
