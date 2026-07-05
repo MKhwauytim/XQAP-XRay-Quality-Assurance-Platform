@@ -750,7 +750,14 @@
 
 /* ── Column resize handle ──────────────────────────────────── */
 
-.dt-th { position: relative; }
+/* .dt-th already declares `position: sticky` above, which is a valid
+   containing block for this absolutely-positioned handle. Redeclaring
+   `position: relative` here (as a prior version of this rule did) has the
+   same specificity as `.dt-th`'s sticky declaration and, being later in the
+   cascade, silently won — downgrading every header cell from sticky to
+   relative. That broke both the header's vertical stick-to-top behavior and
+   the horizontal pinned columns (their `right` offset was then read as a
+   relative-position shift instead of a sticky anchor distance). */
 
 .dt-resize-handle {
   position: absolute;

@@ -44,6 +44,18 @@ const PATHS: Record<string, string> = {
   // Arrow — leftward (RTL forward direction)
   arrow:
     '<path d="M19 12H5"/><path d="M11 6l-6 6 6 6"/>',
+  // Truck — land ports
+  truck:
+    '<path d="M2 16V8a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v8"/><path d="M14 11h4l3 3v2h-2.2"/><circle cx="7" cy="17.5" r="1.7"/><circle cx="16.8" cy="17.5" r="1.7"/><path d="M8.7 17.5h6.4"/><path d="M2 16h3.3"/>',
+  // Ship — sea ports
+  ship:
+    '<path d="M4 15l1.6 4.5h12.8L20 15l-8-2.6L4 15z"/><path d="M12 12.4V4"/><path d="M12 4l5.5 6.5H12"/>',
+  // Sun — dark/light toggle
+  sun:
+    '<circle cx="12" cy="12" r="4.2"/><path d="M12 3v2.2"/><path d="M12 18.8V21"/><path d="M4.2 12H6.4"/><path d="M17.6 12h2.2"/><path d="M6.3 6.3l1.5 1.5"/><path d="M16.2 16.2l1.5 1.5"/><path d="M17.7 6.3l-1.5 1.5"/><path d="M7.8 16.2l-1.5 1.5"/>',
+  // Moon (crescent) — dark/light toggle
+  moon:
+    '<path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z"/>',
 };
 
 /** All registered icon names. */
@@ -80,3 +92,7 @@ export const users = (size?: number): string => icon("users", size);
 export const document = (size?: number): string => icon("document", size);
 export const chart = (size?: number): string => icon("chart", size);
 export const arrow = (size?: number): string => icon("arrow", size);
+export const truck = (size?: number): string => icon("truck", size);
+export const ship = (size?: number): string => icon("ship", size);
+export const sun = (size?: number): string => icon("sun", size);
+export const moon = (size?: number): string => icon("moon", size);

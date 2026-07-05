@@ -111,16 +111,24 @@ function buildXrayColumns(L: Labels): DataTableCol<DistributionEntry>[] {
 }
 
 const DEFAULT_VISIBLE = [
-  "xrayImageId", "answerStatus", "portName", "stage",
-  "xrayEntryDate", "lastEventAt", "plateOrContainerNumber",
+  "xrayImageId", "stage", "portName", "xrayEntryDate",
+  "plateOrContainerNumber", "xrayLevelOneResult", "xrayLevelTwoResult",
 ];
 
 const COL_KEY = "xray_ref_cols_v4";
 
 function buildDefaultColConfig(columns: DataTableCol<DistributionEntry>[]): ColConfig {
   const visible = new Set(DEFAULT_VISIBLE);
+  // Order follows DEFAULT_VISIBLE's intended arrangement first (so the sticky
+  // answerStatus column lands right next to the sticky xrayImageId column
+  // instead of wherever it happens to sit in buildXrayColumns's definition
+  // order), then appends any remaining columns.
+  const known = new Set(columns.map((column) => column.id));
+  const orderedVisible = DEFAULT_VISIBLE.filter((id) => known.has(id));
+  const orderedVisibleSet = new Set(orderedVisible);
+  const rest = columns.map((column) => column.id).filter((id) => !orderedVisibleSet.has(id));
   return {
-    order: columns.map((column) => column.id),
+    order: [...orderedVisible, ...rest],
     hidden: columns.filter((column) => !visible.has(column.id)).map((column) => column.id),
     dateFmt: {},
     widths: {},

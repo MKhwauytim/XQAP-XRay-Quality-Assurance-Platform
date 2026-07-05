@@ -4,11 +4,18 @@
 //         card accents, weighted section titles, premium sidebar, grand part dividers,
 //         improved metrics, chips, bar rows, page numbers, and notice states.
 
+// Fonts are embedded as base64 data URIs so exported reports stay self-contained
+// even when the HTML file is moved away from the app folder.
+import somarRegular from "../../../assets/fonts/SomarSans-Regular.woff?inline";
+import somarBold from "../../../assets/fonts/SomarSans-Bold.woff?inline";
+import somarMedium from "../../../assets/fonts/SomarSans-Medium.woff?inline";
+import somarLight from "../../../assets/fonts/SomarSans-Light.woff?inline";
+
 export const EXEC_CSS = `
-@font-face{font-family:"Somar";src:url("${import.meta.env.BASE_URL}fonts/SomarSans-Regular.woff") format("woff");font-weight:400;font-style:normal;font-display:swap;}
-@font-face{font-family:"Somar";src:url("${import.meta.env.BASE_URL}fonts/SomarSans-Bold.woff") format("woff");font-weight:700;font-style:normal;font-display:swap;}
-@font-face{font-family:"Somar";src:url("${import.meta.env.BASE_URL}fonts/SomarSans-Medium.woff") format("woff");font-weight:500;font-style:normal;font-display:swap;}
-@font-face{font-family:"Somar";src:url("${import.meta.env.BASE_URL}fonts/SomarSans-Light.woff") format("woff");font-weight:300;font-style:normal;font-display:swap;}
+@font-face{font-family:"Somar";src:url("${somarRegular}") format("woff");font-weight:400;font-style:normal;font-display:swap;}
+@font-face{font-family:"Somar";src:url("${somarBold}") format("woff");font-weight:700;font-style:normal;font-display:swap;}
+@font-face{font-family:"Somar";src:url("${somarMedium}") format("woff");font-weight:500;font-style:normal;font-display:swap;}
+@font-face{font-family:"Somar";src:url("${somarLight}") format("woff");font-weight:300;font-style:normal;font-display:swap;}
 :root{
   --navy:#062846;
   --navy-2:#0a3456;

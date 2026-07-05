@@ -4,6 +4,201 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v41.4 — 2026-07-05 — Fix auto-backup NotFoundError race during concurrent saves
+
+**Symptom:** `تعذر إنشاء النسخة الاحتياطية التلقائية: A requested file or directory could not
+be found at the time an operation was processed.` shown by `App.tsx:107` while the user is
+saving data.
+
+**Root cause:** `createBackup` copies every `.json` file in the workspace via the recursive
+`copyAllJsonFiles`/`copyJsonTree` walk. That walk runs concurrently with normal saves. Each
+`safeWriteJson` creates and then *removes* a `{file}.json.tmp` file (`removeQuietly`), mutating
+the directory being enumerated. Chromium's File System Access directory async-iterator (and a
+follow-up `getDirectoryHandle(create:false)` on a since-vanished entry) then rejects with
+`NotFoundError`. Neither copy function caught it, so the whole backup aborted. Secondary bug:
+under the legacy `.system` layout the `backups` folder was not skipped (skip only matched the
+numbered `"5-system"` path), so the backup recursed into the folder it was writing.
+
+**Fix:** materialize each directory's entries up-front tolerating a mid-scan `NotFoundError`
+(`collectEntries`), guard the per-entry subdirectory fetch (`tryGetDirectory` returns null on
+NotFound instead of throwing), and broaden the backups-folder skip to match both the numbered
+and legacy system-root names.
+
+**File:** `src/data/backup/backupStorage.ts`
+
+**Before:**
+```ts
+async function copyJsonTree(params: {
+  sourceDir: DirectoryHandleLike;
+  targetDir: DirectoryHandleLike;
+  sourcePath: string;
+  copied: string[];
+}): Promise<void> {
+  const iterable = getDirectoryEntries(params.sourceDir);
+  if (!iterable) return;
+
+  for await (const entry of iterable) {
+    if (entry.kind === "directory") {
+      if (params.sourcePath === WORKSPACE_ROOTS.system && entry.name === BACKUPS_FOLDER) {
+        continue;
+      }
+      const sourceChild = await params.sourceDir.getDirectoryHandle(entry.name, { create: false });
+      const targetChild = await ensureDir(params.targetDir, entry.name);
+      await copyJsonTree({
+        sourceDir: sourceChild,
+        targetDir: targetChild,
+        sourcePath: params.sourcePath ? `${params.sourcePath}/${entry.name}` : entry.name,
+        copied: params.copied,
+      });
+      continue;
+    }
+
+    if (entry.kind !== "file" || !entry.name.endsWith(".json")) continue;
+    const text = await readTextFile(params.sourceDir, entry.name);
+    if (text === null) continue;
+    const wrote = await writeTextFile(params.targetDir, entry.name, text);
+    if (wrote) params.copied.push(params.sourcePath ? `${params.sourcePath}/${entry.name}` : entry.name);
+  }
+}
+
+async function copyAllJsonFiles(directoryHandle: DirectoryHandleLike, backupDir: DirectoryHandleLike): Promise<string[]> {
+  const jsonDir = await ensureDir(backupDir, "json");
+  const copied: string[] = [];
+  const iterable = getDirectoryEntries(directoryHandle);
+  if (!iterable) return copied;
+
+  for await (const entry of iterable) {
+    if (entry.kind === "directory") {
+      const sourceChild = await directoryHandle.getDirectoryHandle(entry.name, { create: false });
+      const targetChild = await ensureDir(jsonDir, entry.name);
+      await copyJsonTree({
+        sourceDir: sourceChild,
+        targetDir: targetChild,
+        sourcePath: entry.name,
+        copied,
+      });
+      continue;
+    }
+
+    if (entry.kind !== "file" || !entry.name.endsWith(".json")) continue;
+    const text = await readTextFile(directoryHandle, entry.name);
+    if (text === null) continue;
+    const wrote = await writeTextFile(jsonDir, entry.name, text);
+    if (wrote) copied.push(entry.name);
+  }
+
+  return copied;
+}
+```
+
+**After:**
+```ts
+// A backup walks the whole workspace while normal saves run: each safeWriteJson
+// creates and then removes a {file}.tmp, mutating a directory mid-enumeration.
+// Chromium then rejects the directory iterator / a follow-up getDirectoryHandle
+// with NotFoundError. Tolerate that instead of aborting the entire backup.
+function isNotFoundError(error: unknown): boolean {
+  return Boolean(
+    error && typeof error === "object" && (error as { name?: string }).name === "NotFoundError"
+  );
+}
+
+async function collectEntries(dir: DirectoryHandleLike): Promise<DirectoryEntryLike[]> {
+  const iterable = getDirectoryEntries(dir);
+  if (!iterable) return [];
+  const entries: DirectoryEntryLike[] = [];
+  try {
+    for await (const entry of iterable) {
+      entries.push({ name: entry.name, kind: entry.kind });
+    }
+  } catch (error) {
+    // Directory changed under us (a concurrent .tmp create/remove). Keep what we
+    // gathered rather than failing the backup.
+    if (!isNotFoundError(error)) throw error;
+  }
+  return entries;
+}
+
+async function tryGetDirectory(
+  dir: DirectoryHandleLike,
+  name: string
+): Promise<DirectoryHandleLike | null> {
+  try {
+    return await dir.getDirectoryHandle(name, { create: false });
+  } catch (error) {
+    if (isNotFoundError(error)) return null;
+    throw error;
+  }
+}
+
+async function copyJsonTree(params: {
+  sourceDir: DirectoryHandleLike;
+  targetDir: DirectoryHandleLike;
+  sourcePath: string;
+  copied: string[];
+}): Promise<void> {
+  for (const entry of await collectEntries(params.sourceDir)) {
+    if (entry.kind === "directory") {
+      if (
+        entry.name === BACKUPS_FOLDER &&
+        (params.sourcePath === WORKSPACE_ROOTS.system || params.sourcePath === LEGACY_SYSTEM_ROOT)
+      ) {
+        continue;
+      }
+      const sourceChild = await tryGetDirectory(params.sourceDir, entry.name);
+      if (!sourceChild) continue;
+      const targetChild = await ensureDir(params.targetDir, entry.name);
+      await copyJsonTree({
+        sourceDir: sourceChild,
+        targetDir: targetChild,
+        sourcePath: params.sourcePath ? `${params.sourcePath}/${entry.name}` : entry.name,
+        copied: params.copied,
+      });
+      continue;
+    }
+
+    if (entry.kind !== "file" || !entry.name.endsWith(".json")) continue;
+    const text = await readTextFile(params.sourceDir, entry.name);
+    if (text === null) continue;
+    const wrote = await writeTextFile(params.targetDir, entry.name, text);
+    if (wrote) params.copied.push(params.sourcePath ? `${params.sourcePath}/${entry.name}` : entry.name);
+  }
+}
+
+async function copyAllJsonFiles(directoryHandle: DirectoryHandleLike, backupDir: DirectoryHandleLike): Promise<string[]> {
+  const jsonDir = await ensureDir(backupDir, "json");
+  const copied: string[] = [];
+
+  for (const entry of await collectEntries(directoryHandle)) {
+    if (entry.kind === "directory") {
+      const sourceChild = await tryGetDirectory(directoryHandle, entry.name);
+      if (!sourceChild) continue;
+      const targetChild = await ensureDir(jsonDir, entry.name);
+      await copyJsonTree({
+        sourceDir: sourceChild,
+        targetDir: targetChild,
+        sourcePath: entry.name,
+        copied,
+      });
+      continue;
+    }
+
+    if (entry.kind !== "file" || !entry.name.endsWith(".json")) continue;
+    const text = await readTextFile(directoryHandle, entry.name);
+    if (text === null) continue;
+    const wrote = await writeTextFile(jsonDir, entry.name, text);
+    if (wrote) copied.push(entry.name);
+  }
+
+  return copied;
+}
+```
+
+Also added `const LEGACY_SYSTEM_ROOT = ".system";` near the top constants (matches
+`LEGACY_ROOTS.system` in `workspacePaths.ts`, which is not exported).
+
+---
+
 ## v41.3 — 2026-07-05 — Remove stage-port totals band; fix pre-existing grid overflow bug
 
 Removed the top `.v2-totals-band` from both new stage-port slides (population and sample, per
@@ -14956,7 +15151,7 @@ a visible button on the address picker.
 
 ---
 
-## v41.3 — 2026-07-05 — Archive tab audit: show dropped distribution total, surface refresh errors, don't misreport skipped file copies
+## v41.11 — 2026-07-05 — Archive tab audit: show dropped distribution total, surface refresh errors, don't misreport skipped file copies
 
 Audit of `src/components/Sidebar/Tabs/Archive/` and `src/data/backup/backupStorage.ts`.
 Three targeted fixes:
@@ -15107,7 +15302,7 @@ and (in `copyAllJsonFiles`)
     if (wrote) copied.push(entry.name);
 ```
 
-## v41.4 — 2026-07-05 — Settings/ChangeLog audit: add missing label group entry + fix stale LabelRow input
+## v41.12 — 2026-07-05 — Settings/ChangeLog audit: add missing label group entry + fix stale LabelRow input
 
 Audit of `Settings`/`ChangeLog` tabs and `labelsStore`/`browsePresetStorage`. Found `col_expert_observation_date`
 (used as a real column header in `XrayReferrals.tsx` and `XrayInspectionResults.tsx`) was missing from
@@ -15144,7 +15339,7 @@ function LabelRow({ labelKey, desc }: { labelKey: LabelKey; desc: string }) {
   useEffect(() => setVal(current), [current]);
 ```
 
-## v41.4 — 2026-07-05 — Data-layer audit: fix read-modify-write races in feedback + browse presets
+## v41.13 — 2026-07-05 — Data-layer audit: fix read-modify-write races in feedback + browse presets
 
 Audit of `src/data/{population,sampling,distribution,answers,approvals,referral,feedback,storage,powerbiExport,preferences}`.
 Most of this layer is CAS-loop or event-log based (answers, approvals, distribution, sample append)
@@ -15224,7 +15419,7 @@ export async function saveUserBrowseDatasetPreset(
 column/width preset saves for the same user (or the shared admin preset) merge instead of racing.
 ```
 
-## v41.5 — 2026-07-05 — UserManagement/auth audit: fix report-designer permission-key mismatch
+## v41.14 — 2026-07-05 — UserManagement/auth audit: fix report-designer permission-key mismatch
 
 Audit of `src/components/Sidebar/Tabs/UserManagement/` and `src/auth/`. Found a real
 tab/permission-key mismatch: `App.tsx`'s `allowedTabs` memo builds each sub-tab's
@@ -15284,7 +15479,7 @@ in `Reports/index.tsx` are unaffected — those are UI-local ids, not permission
     { role: "admin",      tabId: "reports/report-designer",         access: "edit" },
 ```
 
-## v41.5 — 2026-07-05 — Population tab audit: remove dead mini-report code (stale stage mapping bug)
+## v41.15 — 2026-07-05 — Population tab audit: remove dead mini-report code (stale stage mapping bug)
 
 Audit of `src/components/Sidebar/Tabs/Population/` and subfolders. `createRiskMiniReport` /
 `createBiMiniReport` / `buildRiskStageCountsBySheet` in `components/helpers.ts` and the whole
@@ -15337,7 +15532,7 @@ importers anywhere in `src/`.
 
 ---
 
-## v41.7 — 2026-07-05 — template system audit: fix condition-cycle stack overflow, orphaned selection on delete, dead role-check helper
+## v41.16 — 2026-07-05 — template system audit: fix condition-cycle stack overflow, orphaned selection on delete, dead role-check helper
 
 Audit of `src/data/templates/` and `TemplateBuilder`. Three bugs found and fixed:
 (1) `isFieldVisible` recursed into a field's condition source with no cycle guard —
@@ -15461,7 +15656,7 @@ never imported, and its role logic contradicted the real gating in `TemplateBuil
 
 **After:** stale comment removed (no replacement — nothing references it anymore).
 
-## v41.6 — 2026-07-05 — Reports/ReportDesigner tab audit: fix silently-swallowed post-delete list refresh
+## v41.17 — 2026-07-05 — Reports/ReportDesigner tab audit: fix silently-swallowed post-delete list refresh
 
 Audit of `src/components/Sidebar/Tabs/Reports/` and `src/components/Sidebar/Tabs/ReportDesigner/`
 (role gating for the KPI sub-tab and report-designer sub-tab checked and confirmed correctly
@@ -15506,7 +15701,7 @@ here.
       .catch(logRejection("reportDesigner:refreshIndexAfterDelete"));
 ```
 
-## v41.8 — 2026-07-05 — Reports/ReportDesigner audit: fix missing permission guard on report-designer sub-tab
+## v41.18 — 2026-07-05 — Reports/ReportDesigner audit: fix missing permission guard on report-designer sub-tab
 
 Audit of `src/components/Sidebar/Tabs/Reports/` and `src/components/Sidebar/Tabs/ReportDesigner/`.
 Found a real access-control gap: the `kpi` sub-section in `ReportsContent` is wrapped in
@@ -15545,7 +15740,7 @@ the other pass rather than re-touching it.
   return <ReportsContent />;
 ```
 
-## v41.4 — 2026-07-05 — ReportDesigner: surface silent autosave failures
+## v41.19 — 2026-07-05 — ReportDesigner: surface silent autosave failures
 
 Audit of `Reports`/`ReportDesigner` tabs (scope: `src/components/Sidebar/Tabs/Reports/`,
 `src/components/Sidebar/Tabs/ReportDesigner/`). `EditorHost.performSave` called
@@ -15693,7 +15888,7 @@ export default function Ribbon({
 }
 ```
 
-## v41.9 — 2026-07-05 — EmployeeWorkspace audit: fix stale permission reads on user-management change
+## v41.20 — 2026-07-05 — EmployeeWorkspace audit: fix stale permission reads on user-management change
 
 Audit of `src/components/Sidebar/Tabs/EmployeeWorkspace/` (views + index). Found `XrayReferrals.tsx`,
 `XrayInspectionResults.tsx`, and `ReferralApproval.tsx` all call `readUserManagementState()` /
@@ -15825,48 +16020,7 @@ export default function ReferralApproval({ directoryHandle }: Props) {
   const userManagementState = readUserManagementState();
 ```
 
-## v41.5 — 2026-07-05 — ReportDesigner: log swallowed list-refresh failure after delete
-
-`handleDelete` in the ReportDesigner list view refreshed the design index after a
-successful delete with `loadDesignIndex(directoryHandle).then(setIndex).catch(() => {})`
-— any failure reloading the index (e.g. transient FS error) was completely swallowed
-with no observability, unlike the rest of the codebase's `logRejection` convention used
-in `Reports/index.tsx` for the same class of fire-and-forget promise.
-
-**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
-
-**Before:**
-```tsx
-    setDeletingId(null);
-    // Refresh list
-    loadDesignIndex(directoryHandle)
-      .then(setIndex)
-      .catch(() => {});
-```
-
-**After:**
-```tsx
-    setDeletingId(null);
-    // Refresh list
-    loadDesignIndex(directoryHandle)
-      .then(setIndex)
-      .catch(logRejection("reportDesigner:refreshIndexAfterDelete"));
-```
-
-**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx` (import)
-
-**Before:**
-```tsx
-import { readSession } from "../../../../auth/authSession";
-```
-
-**After:**
-```tsx
-import { readSession } from "../../../../auth/authSession";
-import { logRejection } from "../../../../data/storage/errorLogger";
-```
-
-## v41.6 — 2026-07-05 — Reports: handle clipboard-write rejection on Power BI path copy
+## v41.21 — 2026-07-05 — Reports: handle clipboard-write rejection on Power BI path copy
 
 The "نسخ" (copy) button for the Power BI export path used
 `void navigator.clipboard.writeText(fullHint)` — `navigator.clipboard.writeText` returns
@@ -15889,7 +16043,7 @@ a button that appears to do nothing and no diagnostic trail. Routed through the 
                       }}
 ```
 
-## v41.10b — 2026-07-05 — Population tab audit: fix undefined-crash in export column handler + stale CertScan grid on async month load
+## v41.22 — 2026-07-05 — Population tab audit: fix undefined-crash in export column handler + stale CertScan grid on async month load
 
 Second, independent pass over `src/components/Sidebar/Tabs/Population/` (biData/, riskData/,
 processing/, reporting/, components/), on top of the earlier v41.5 entry in this file that
@@ -15975,36 +16129,196 @@ export default function CertScanGrid({ initialText, onDataChange }: CertScanGrid
   }, [initialText]);
 ```
 
-## v41.7 — 2026-07-05 — Reports: gate report-designer sub-tab inside the component, not just the registry
+## v41.23 — 2026-07-05 — Synthesis pass: fix lint errors introduced by parallel audit agents
 
-`tabConfig.subTabs` restricts `report-designer` to `["supervisor", "manager", "admin"]`,
-matching the pattern already double-checked in-component for the `kpi`/analytics sub-tab
-(`<TabGuard tabId="reports/analytics">`). The `report-designer` sub-tab had no equivalent
-in-component check — `ReportsTab` rendered `<ReportDesignerTab />` unconditionally once
-`activeSubTab === "report-designer"`, relying solely on the sidebar/registry to prevent
-an unauthorized role (e.g. `employee`) from reaching it. Since sub-tab switching is driven
-by a DOM CustomEvent (`sidebar-subtab-changed`) rather than a prop passed down with an
-access check, this is exactly the double-gating gap called out for this audit: the
-registry can be bypassed if the event fires from anywhere. Added the same `TabGuard`
-pattern used for `reports/analytics`, keyed to the existing `reports/report-designer`
-permission id already defined in `userManagement.ts`.
+After nine parallel audit agents (population, employee workspace, reports/report-designer,
+archive, user-management, settings/change-log, cross-page connections, data layer, templates)
+finished their fixes, a final `npm run lint` pass surfaced two real errors: one new regression
+from this session's own work, one pre-existing and unrelated.
 
-**File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
+**File:** `src/components/Sidebar/Tabs/Settings/index.tsx`
+
+The Settings/ChangeLog audit (v41.12) fixed a stale-input bug in `LabelRow` by adding
+`useEffect(() => setVal(current), [current])`, but that calls `setState` synchronously inside
+an effect body, which `react-hooks/set-state-in-effect` correctly flags as an avoidable extra
+render pass. Replaced it with React's "adjust state during render" pattern (track the previous
+`current` in a ref-like state value and call `setVal` conditionally during render instead of
+in an effect), which achieves the same resync without the extra render. Removed the now-unused
+`useEffect` import.
 
 **Before:**
 ```tsx
-  if (activeSubTab === "report-designer") return <ReportDesignerTab />;
-  return <ReportsContent />;
+  const current = getLabels()[labelKey];
+  const custom  = isCustomized(labelKey);
+  const [val, setVal] = useState<string>(current);
+  const [saved, setSaved] = useState(false);
+
+  // Resync the visible input when the label changes externally (e.g. "استعادة
+  // الكل" while this row's section stays open) — otherwise the input keeps
+  // showing stale text even though isCustomized()/DEFAULT_LABELS already updated.
+  useEffect(() => setVal(current), [current]);
 ```
 
 **After:**
 ```tsx
-  if (activeSubTab === "report-designer") {
-    return (
-      <TabGuard tabId="reports/report-designer">
-        <ReportDesignerTab />
-      </TabGuard>
-    );
+  const current = getLabels()[labelKey];
+  const custom  = isCustomized(labelKey);
+  const [val, setVal] = useState<string>(current);
+  const [saved, setSaved] = useState(false);
+
+  // Resync the visible input when the label changes externally (e.g. "استعادة
+  // الكل" while this row's section stays open) — otherwise the input keeps
+  // showing stale text even though isCustomized()/DEFAULT_LABELS already updated.
+  // Adjusted during render (not in an effect) per React's "you might not need
+  // an effect" pattern, so it can't trigger a second, avoidable render pass.
+  const [prevCurrent, setPrevCurrent] = useState(current);
+  if (prevCurrent !== current) {
+    setPrevCurrent(current);
+    setVal(current);
   }
-  return <ReportsContent />;
 ```
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+Pre-existing, unrelated to this session's audits: `STAGE_CARD_TABLE_BUDGET_PX` is exported but
+never reassigned anywhere in the codebase, tripping `prefer-const`.
+
+**Before:**
+```ts
+export let STAGE_CARD_TABLE_BUDGET_PX = 160;
+```
+
+**After:**
+```ts
+export const STAGE_CARD_TABLE_BUDGET_PX = 160;
+```
+
+## v41.24 — 2026-07-05 — Retroactive: DataTable sticky-column offset/order fixes, self-contained fonts + favicon
+
+Older uncommitted work found staged ahead of the audit-pass commits above. Logging it
+retroactively before committing. Two real `DataTable` bugs plus a build-portability change:
+
+1. `stickyMeta` in `src/components/DataTable/index.tsx` only accumulated width over sticky
+   columns, so a sticky column not adjacent to the previous sticky one got the wrong `right`
+   offset (LOG-04-style gap). Fixed to accumulate over every visible column and only record
+   `rightPct` for sticky ones. Covered by new `src/components/DataTable/stickyColumns.test.tsx`.
+2. `buildDefault` built `order` from raw `columns` definition order, ignoring `defaultVisible`'s
+   intended arrangement (e.g. `XrayReferrals.tsx`'s `DEFAULT_VISIBLE` wants `answerStatus` right
+   after `xrayImageId`, not wherever `buildXrayColumns` happens to define it). Fixed to order by
+   `defaultVisible` first, then append the rest. Also applied the equivalent local reordering
+   fix in `XrayReferrals.tsx`'s own `buildDefaultColConfig`, plus a `subscribeToUserManagementChanges`
+   re-render fix so `canEdit`/`canSeeAll` don't go stale while the tab stays mounted.
+3. `.dt-th` redeclared `position: relative` after its `position: sticky` rule — same selector
+   specificity, later in the cascade, silently downgrading every header from sticky to relative
+   and breaking both vertical sticky-header and horizontal pinned-column behavior. Removed
+   (kept as an explanatory comment only).
+4. Report fonts (`SomarSans-*.woff`) and the favicon were served from `public/`, requiring the
+   built `dist/index.html` to stay next to a `public/` copy on disk. Switched to importing the
+   already-tracked `src/assets/fonts/*.woff` via `?inline` (base64 data URIs) and inlining the
+   favicon as a `data:` URI in `index.html`, so exported/report HTML and the app shell stay
+   fully self-contained. Removed the now-unused `public/fonts/` and `public/logo.svg`.
+5. `vite.config.ts` dev server now reads `PORT` from the environment (defaults to 5173); a new
+   `*.woff?inline` module declaration was added to `src/vite-env.d.ts` for the font imports.
+
+**File:** `src/components/DataTable/index.tsx`
+
+**Before:**
+```tsx
+  return {
+    order: columns.map((c) => c.id),
+    hidden: columns
+      .filter((c) => visSet ? !visSet.has(c.id) : false)
+      .map((c) => c.id),
+```
+and
+```tsx
+    let rightPct = 0;
+    let order = 0;
+    for (const col of visibleCols) {
+      if (!stickyIdSet.has(col.id)) continue;
+      meta.set(col.id, { rightPct, order });
+      rightPct += (((colCfg.widths ?? {})[col.id] ?? col.widthFr ?? 1) / totalFr) * 100;
+      order += 1;
+    }
+```
+
+**After:**
+```tsx
+  const known = new Set(columns.map((c) => c.id));
+  const orderedVisible = defaultVisible ? defaultVisible.filter((id) => known.has(id)) : [];
+  const orderedVisibleSet = new Set(orderedVisible);
+  const rest = columns.map((c) => c.id).filter((id) => !orderedVisibleSet.has(id));
+  return {
+    order: [...orderedVisible, ...rest],
+    hidden: columns
+      .filter((c) => visSet ? !visSet.has(c.id) : false)
+      .map((c) => c.id),
+```
+and
+```tsx
+    let cumulativePct = 0;
+    let order = 0;
+    for (const col of visibleCols) {
+      const colPct = (((colCfg.widths ?? {})[col.id] ?? col.widthFr ?? 1) / totalFr) * 100;
+      if (stickyIdSet.has(col.id)) {
+        meta.set(col.id, { rightPct: cumulativePct, order });
+        order += 1;
+      }
+      cumulativePct += colPct;
+    }
+```
+
+**File:** `src/components/DataTable/DataTable.css`
+
+**Before:**
+```css
+.dt-th { position: relative; }
+```
+
+**After:**
+```css
+/* .dt-th already declares `position: sticky` above — see commit for full rationale. */
+```
+
+**File:** `src/data/reporting/executive/theme.ts`
+
+**Before:**
+```ts
+export const EXEC_CSS = `
+@font-face{font-family:"Somar";src:url("${import.meta.env.BASE_URL}fonts/SomarSans-Regular.woff") format("woff");font-weight:400;font-style:normal;font-display:swap;}
+...
+```
+
+**After:**
+```ts
+import somarRegular from "../../../assets/fonts/SomarSans-Regular.woff?inline";
+import somarBold from "../../../assets/fonts/SomarSans-Bold.woff?inline";
+import somarMedium from "../../../assets/fonts/SomarSans-Medium.woff?inline";
+import somarLight from "../../../assets/fonts/SomarSans-Light.woff?inline";
+
+export const EXEC_CSS = `
+@font-face{font-family:"Somar";src:url("${somarRegular}") format("woff");font-weight:400;font-style:normal;font-display:swap;}
+...
+```
+
+**File:** `index.html`
+
+**Before:**
+```html
+<link rel="icon" type="image/svg+xml" href="/logo.svg" />
+```
+
+**After:**
+```html
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,..." />
+```
+
+**File:** `vite.config.ts`, `src/vite-env.d.ts`, `.claude/launch.json` — dev server `PORT` env
+support, `*.woff?inline` module typing, `autoPort: true` for the launch config.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx` — column-order
+fix mirrored locally + `subscribeToUserManagementChanges` re-render fix (see summary above).
+
+**Deleted:** `public/fonts/SomarSans-{Bold,Light,Medium,Regular}.woff`, `public/logo.svg` (superseded
+by the inlined copies above).
+
