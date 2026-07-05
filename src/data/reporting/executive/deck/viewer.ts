@@ -26,7 +26,17 @@ export function buildDeckHtml(slides: string, monthLabel: string): string {
         <span>ضمان جودة الأشعة — ${esc(monthLabel)}</span>
       </div>
     </div>
-    <button class="btn" onclick="window.print()">طباعة / PDF</button>
+    <div class="deck-toolbar-actions">
+      <label class="theme-toggle" title="التبديل بين الوضع الفاتح والداكن" dir="ltr">
+        <input type="checkbox" onchange="document.body.classList.toggle('theme-light', this.checked)"/>
+        <span class="theme-toggle-track">
+          <span class="theme-toggle-icon moon">${icon("moon", 13)}</span>
+          <span class="theme-toggle-icon sun">${icon("sun", 13)}</span>
+          <span class="theme-toggle-thumb"></span>
+        </span>
+      </label>
+      <button class="btn" onclick="window.print()">طباعة / PDF</button>
+    </div>
   </div>
 ${slides}
 </div>

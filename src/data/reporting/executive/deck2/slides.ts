@@ -11,6 +11,7 @@
 // content reads clearly; the dedicated visual pass happens after content approval.
 
 import type { ReportModel } from "../model/reportModel";
+import type { StageProfile } from "../../executiveReportTypes";
 import { esc, fmtNum, fmtPct } from "../primitives";
 import { icon } from "../ui/icons";
 import { isRankable } from "../model/dataSufficiency";
@@ -55,17 +56,45 @@ function badgeIcon(name: string, size: number): string {
 }
 
 /**
- * Per-slide print-include switch, top-right corner, on-screen only. Pure CSS,
- * no script: unchecking it excludes the WHOLE slide from print/PDF output via
- * the `.slide:has(.slide-print-toggle input:not(:checked))` rule in
- * theme.ts — safe to rely on `:has()` since this app already targets
- * Chromium only (File System Access API). Defaults checked (included).
+ * Per-slide print-include switch, on-screen only. Pure CSS, no script:
+ * unchecking it excludes the WHOLE slide from print/PDF output via the
+ * `.slide:has(.slide-print-toggle input:not(:checked))` rule in theme.ts —
+ * safe to rely on `:has()` since this app already targets Chromium only
+ * (File System Access API). Defaults checked (included). Rendered inside
+ * `slideControls()`, which positions it (top-right corner).
  */
 function printToggle(): string {
   return `<label class="slide-print-toggle" title="تضمين هذه الصفحة عند الطباعة">
     <input type="checkbox" checked/>
     <span class="slide-print-toggle-track"><span class="slide-print-toggle-thumb"></span></span>
   </label>`;
+}
+
+/**
+ * Style-variant arrow-cycle control, dev-preview only. `data-for` points at
+ * the matching `.v2-variant-stack`'s `data-slide-id` (same slide, but the
+ * switcher itself lives in `slideControls()`'s top-right cluster, not nested
+ * inside the stack — see DECK_VARIANT_SCRIPT in index.ts for the lookup).
+ */
+function variantSwitcher(slideId: string): string {
+  return `<div class="v2-variant-switcher" data-for="${esc(slideId)}" dir="ltr">
+    <button type="button" class="v2-variant-prev" aria-label="النمط السابق">‹</button>
+    <span class="v2-variant-label">1 / 4</span>
+    <button type="button" class="v2-variant-next" aria-label="النمط التالي">›</button>
+  </div>`;
+}
+
+/**
+ * Top-right controls cluster for a slide: the print-include toggle, plus
+ * (dev-preview only) the style-variant switcher right next to it — grouped in
+ * one positioned wrapper (theme.ts's `.slide-controls`) instead of each being
+ * independently absolutely-positioned.
+ */
+function slideControls(slideId: string, variantPreview: boolean): string {
+  return `<div class="slide-controls">
+    ${printToggle()}
+    ${variantPreview ? variantSwitcher(slideId) : ""}
+  </div>`;
 }
 
 /** Section keys shared by the side nav (deck2/index.ts) and every slide builder
@@ -115,9 +144,11 @@ function pageFoot(num: number, total: number): string {
  * Production (`variantPreview=false`) renders ONLY `bodies[0]` — byte-identical
  * to the single-variant output that existed before the switcher (a dev-preview
  * feature; see docs/superpowers/specs/2026-07-05-deck2-style-switcher-design.md).
- * Preview mode renders all 4, one visible via CSS (`.v2-variant-panel.active`),
- * plus an arrow-cycle control; the inline script in deck2/index.ts
- * (DECK_VARIANT_SCRIPT) does the cycling and persists the choice.
+ * Preview mode renders all 4, one visible via CSS (`.v2-variant-panel.active`).
+ * The arrow-cycle control that drives this lives separately in
+ * `slideControls()`/`variantSwitcher()`; the inline script in deck2/index.ts
+ * (DECK_VARIANT_SCRIPT) wires the two together by matching `data-for` to
+ * `data-slide-id` and persists the choice.
  */
 function renderVariants(
   slideId: string,
@@ -131,14 +162,7 @@ function renderVariants(
         `<div class="v2-variant-panel${i === 0 ? " active" : ""}" data-variant-index="${i}">${html}</div>`,
     )
     .join("");
-  return `<div class="v2-variant-stack" data-slide-id="${esc(slideId)}" data-active-index="0">
-    <div class="v2-variant-switcher">
-      <button type="button" class="v2-variant-prev" aria-label="النمط السابق">‹</button>
-      <span class="v2-variant-label">1 / 4</span>
-      <button type="button" class="v2-variant-next" aria-label="النمط التالي">›</button>
-    </div>
-    ${panels}
-  </div>`;
+  return `<div class="v2-variant-stack" data-slide-id="${esc(slideId)}" data-active-index="0">${panels}</div>`;
 }
 
 // ── v2 slide shell — rail + eyebrow + headline + body + footer page num. ────
@@ -160,7 +184,7 @@ function v2Slide(opts: {
   const cls = `slide v2${opts.slideClass ? " " + opts.slideClass : ""}`;
   const body = renderVariants(opts.id, opts.bodyVariants, opts.variantPreview);
   return `<section class="${cls}" id="${esc(opts.id)}" data-title="${esc(opts.title)}" data-section="${opts.section}" data-section-label="${esc(NAV_SECTIONS[opts.section])}">
-  ${printToggle()}
+  ${slideControls(opts.id, opts.variantPreview)}
   ${sideRail(opts.section)}
   <div class="slide-inner">
     <div class="slide-eyebrow">
@@ -210,7 +234,7 @@ export function coverSlide(model: ReportModel, generatedAt: Date, variantPreview
       <div class="title-classify"><span>${icon("shield", 14)}</span>داخلي — للاستخدام التنفيذي</div>`;
   const body = renderVariants("slide-cover", [coverBody, coverBody, coverBody, coverBody], variantPreview);
   return `<section class="slide v2 title-slide" id="slide-cover" data-title="الغلاف" data-section="cover" data-section-label="${esc(NAV_SECTIONS.cover)}">
-    ${printToggle()}
+    ${slideControls("slide-cover", variantPreview)}
     <div class="slide-art" aria-hidden="true"></div>
     ${orgBlock}
     <div class="slide-inner">
@@ -353,6 +377,32 @@ const STAGE_SHORT_TAG: Record<string, string> = {
   "المستوى الثالث": "مستوى مرتفع",
   "المستوى الرابع": "مستوى حرج",
 };
+
+/** How many ports each stage-×-port card shows individually before folding the
+ *  rest into its الإجمالي row (design spec §2.3 — "curated top-N, never the
+ *  full table", same convention as portTable/qualityTable/accuracyTable). */
+export const STAGE_CARD_TOP_N = 5;
+
+/** Vertical budget (px) for one stage-×-port card's thead+rows+tfoot, at
+ *  METRICS_COMPACT row heights.
+ *
+ *  Task 4 (v41.1) originally set this to 177 — the full 5-row `usedPx` under
+ *  METRICS_COMPACT — reasoning that `.v2-stage-card` "stretches to its
+ *  CSS-grid row regardless of this value." That check only verified the
+ *  TABLE fits within its own CARD (which trivially holds once the card's
+ *  height is driven by the table itself) — it never checked whether the
+ *  2-row `.v2-stage-port-grid` as a whole fits within `.slide-body`'s fixed
+ *  458.8px, so it missed that 2×256.8px (the card height that 177px produces)
+ *  plus the row gap overflows the slide by ~46-127px, silently clipped by
+ *  `.slide{overflow:hidden}`. Re-measured (this pass): available height per
+ *  row = `(458.8 − 14px gap) / 2 ≈ 222.4px`; per-card non-table overhead
+ *  (padding 12+10px, border 0.8px×2, header 28px + 8px margin) ≈ 59.6px;
+ *  so the table budget is `222.4 − 59.6 ≈ 162.8px`. Set to 160 for a small
+ *  safety margin against sub-pixel rounding. Requires `.v2-stage-port-grid`
+ *  to have `grid-template-rows:1fr 1fr` (added alongside this fix) so both
+ *  rows actually split the available height evenly instead of each sizing to
+ *  its own content. */
+export let STAGE_CARD_TABLE_BUDGET_PX = 160;
 
 export function riskStagesSlide(model: ReportModel, num: number, total: number, variantPreview: boolean): string {
   const stages = model.population.byStage;
@@ -625,6 +675,216 @@ export function portSampleSlideBuilders(model: ReportModel, variantPreview: bool
     });
   }
   return builders;
+}
+
+/**
+ * Same tallying logic as collectPortStats (line 432), keyed by risk stage
+ * instead of land/sea. Returns ports sorted by population descending within
+ * each stage — the same sort key collectPortStats uses — so "top port" means
+ * the same thing on the land/sea pages and these stage/port pages.
+ *
+ * `collectStagePortStats` itself is always internally correct — it's a
+ * straightforward tally over the `model.rows` it's given, so `total`/
+ * `sampleTotal` always reflect the actual rows for that (stage, port) pair.
+ *
+ * The caveat is whether its per-stage sums match `model.population.byStage`'s
+ * `population`/`sampleSize` for the same stage, and that depends on how
+ * `StageProfile` was built in `calculateExecutiveKPIs`
+ * (`src/data/reporting/executiveReportData.ts`):
+ * - Fallback branch (no sample, or no `stageAllocations`): `population`/
+ *   `sampleSize` are computed by grouping `model.rows` by `row.stage` at
+ *   report-generation time — the same rows this collector tallies — so the
+ *   sums are guaranteed to match (asserted in stagePortStats.test.ts).
+ * - Production branch (`sample.stageAllocations` present — the normal case
+ *   after Phase 3 sampling): `population`/`sampleSize` come from a
+ *   `StageAllocation` record frozen at sample-draw time
+ *   (`src/data/sampling/sampleTypes.ts`). That snapshot is NOT recomputed
+ *   from `model.rows`, so it is not guaranteed to match a fresh tally if
+ *   data was reprocessed or a row's `stage` changed since the sample was
+ *   drawn (also asserted in stagePortStats.test.ts, to document the
+ *   divergence rather than hide it).
+ */
+export function collectStagePortStats(model: ReportModel): Map<string, PortPopRow[]> {
+  const byStage = new Map<string, Map<string, PortPopRow>>();
+  for (const r of model.rows) {
+    const stageKey = r.stage ?? "غير محدد";
+    const portName = r.portName ?? "غير محدد";
+    let portMap = byStage.get(stageKey);
+    if (!portMap) {
+      portMap = new Map<string, PortPopRow>();
+      byStage.set(stageKey, portMap);
+    }
+    let cur = portMap.get(portName);
+    if (!cur) {
+      cur = { name: portName, total: 0, clean: 0, suspicious: 0, sampleTotal: 0, sampleClean: 0, sampleSuspicious: 0 };
+      portMap.set(portName, cur);
+    }
+    cur.total += 1;
+    if (r.imageResult === "اشتباه") cur.suspicious += 1;
+    else cur.clean += 1;
+    if (r.selectedInSample) {
+      cur.sampleTotal += 1;
+      if (r.imageResult === "اشتباه") cur.sampleSuspicious += 1;
+      else cur.sampleClean += 1;
+    }
+  }
+  const result = new Map<string, PortPopRow[]>();
+  for (const [stageKey, portMap] of byStage) {
+    result.set(stageKey, [...portMap.values()].sort((a, b) => b.total - a.total));
+  }
+  return result;
+}
+
+/** One stage's card on the population page: المنفذ | سليمة | اشتباه | الإجمالي,
+ *  top STAGE_CARD_TOP_N ports by population, with a stage-wide totals row.
+ *
+ *  IMPORTANT (found in Task 1 review, see design spec §2.2's "Consistency
+ *  caveat"): the totals row's الإجمالي column is pinned to `stage.population`
+ *  (the StageProfile figure — same source as riskStagesSlide and this card's
+ *  own data), NOT a fresh sum over `ports`. In the normal production case
+ *  (sample.stageAllocations present), StageProfile's population comes from a
+ *  frozen sample-draw-time snapshot, which is not guaranteed to equal a fresh
+ *  count of `ports` (built from *current* model.rows) — summing `ports` here
+ *  could visibly disagree with the number shown on the "مجتمع الحالات بناءً
+ *  على المخاطر" page for the same stage. سليمة/اشتباه have no equivalent on
+ *  StageProfile, so those two columns still sum from `ports` — the best
+ *  available breakdown, and in the rare case population changed after
+ *  sampling, not guaranteed to add up to exactly the pinned الإجمالي. */
+function stagePortPopulationCard(stage: StageProfile, i: number, ports: PortPopRow[]): string {
+  const tone = STAGE_TONES[i % STAGE_TONES.length];
+  const top = ports.slice(0, STAGE_CARD_TOP_N);
+  const dataRowCount = top.length > 0 ? top.length : 1;
+  const trs =
+    top.length > 0
+      ? top
+          .map(
+            (p) =>
+              `<tr><td>${esc(p.name)}</td><td>${fmtNum(p.clean)}</td><td>${fmtNum(p.suspicious)}</td><td>${fmtNum(p.total)}</td></tr>`,
+          )
+          .join("")
+      : `<tr><td colspan="4"><span class="insuff">—</span></td></tr>`;
+
+  const usedPx = METRICS_COMPACT.theadH + METRICS_COMPACT.tfootH + dataRowCount * METRICS_COMPACT.rowH;
+  const fillerPx = Math.max(0, STAGE_CARD_TABLE_BUDGET_PX - usedPx);
+  const blankRow =
+    fillerPx > 0 ? `<tr class="v2-blank" style="height:${fillerPx}px"><td colspan="4">&nbsp;</td></tr>` : "";
+
+  const sum = (f: (p: PortPopRow) => number) => ports.reduce((s, p) => s + f(p), 0);
+  const totalsRow = `<tr><td>الإجمالي</td><td>${fmtNum(sum((p) => p.clean))}</td><td>${fmtNum(sum((p) => p.suspicious))}</td><td>${fmtNum(stage.population)}</td></tr>`;
+
+  return `<div class="v2-stage-card ${tone} v2-stage-port-card">
+    <div class="v2-stage-head">
+      <span class="v2-stage-num">${i + 1}</span>
+      <b>${esc(stage.stageLabel)}</b>
+    </div>
+    <table class="deck-table">
+      <thead><tr><th>المنفذ</th><th>سليمة</th><th>اشتباه</th><th>الإجمالي</th></tr></thead>
+      <tbody>${trs}${blankRow}</tbody>
+      <tfoot>${totalsRow}</tfoot>
+    </table>
+  </div>`;
+}
+
+/** One stage's card on the sample page: المنفذ | مجتمع المرحلة | العيّنة المستهدفة |
+ *  نسبة التغطية, as plain numbers (not the land/sea page's stacked "N من M"
+ *  frac cell — the reference design uses two separate plain columns here).
+ *
+ *  IMPORTANT (same caveat as stagePortPopulationCard above): all three
+ *  totals-row cells are pinned to `stage.population`/`stage.sampleSize` (the
+ *  same StageProfile figures already shown in the card header), not fresh
+ *  sums over `ports` — this keeps the header figure and the totals row
+ *  internally consistent by construction and matching the rest of the deck,
+ *  regardless of whether a fresh row tally would agree with the frozen
+ *  sample-draw-time allocation. */
+function stagePortSampleCard(stage: StageProfile, i: number, ports: PortPopRow[]): string {
+  const tone = STAGE_TONES[i % STAGE_TONES.length];
+  const top = ports.slice(0, STAGE_CARD_TOP_N);
+  const dataRowCount = top.length > 0 ? top.length : 1;
+  const trs =
+    top.length > 0
+      ? top
+          .map((p) => {
+            const coverage = p.total > 0 ? (p.sampleTotal / p.total) * 100 : 0;
+            return `<tr><td>${esc(p.name)}</td><td>${fmtNum(p.total)}</td><td>${fmtNum(p.sampleTotal)}</td><td>${fmtPct(coverage)}</td></tr>`;
+          })
+          .join("")
+      : `<tr><td colspan="4"><span class="insuff">—</span></td></tr>`;
+
+  const usedPx = METRICS_COMPACT.theadH + METRICS_COMPACT.tfootH + dataRowCount * METRICS_COMPACT.rowH;
+  const fillerPx = Math.max(0, STAGE_CARD_TABLE_BUDGET_PX - usedPx);
+  const blankRow =
+    fillerPx > 0 ? `<tr class="v2-blank" style="height:${fillerPx}px"><td colspan="4">&nbsp;</td></tr>` : "";
+
+  const totalsRow = `<tr><td>الإجمالي</td><td>${fmtNum(stage.population)}</td><td>${fmtNum(stage.sampleSize)}</td><td>${fmtPct(stage.coverage)}</td></tr>`;
+
+  return `<div class="v2-stage-card ${tone} v2-stage-port-card">
+    <div class="v2-stage-head">
+      <span class="v2-stage-num">${i + 1}</span>
+      <b>${esc(stage.stageLabel)}</b>
+      <span class="v2-stage-port-figure" dir="ltr">${fmtNum(stage.sampleSize)} / ${fmtNum(stage.population)}</span>
+    </div>
+    <table class="deck-table">
+      <thead><tr><th>المنفذ</th><th>مجتمع المرحلة</th><th>العيّنة المستهدفة</th><th>نسبة التغطية</th></tr></thead>
+      <tbody>${trs}${blankRow}</tbody>
+      <tfoot>${totalsRow}</tfoot>
+    </table>
+  </div>`;
+}
+
+/** Population page: مجتمع حالات الفحص حسب المستوى والمنفذ. Never paginated —
+ *  top-N is fixed, so row count doesn't grow with the port list the way the
+ *  land/sea tables' does. */
+export function stagePortPopulationSlide(
+  model: ReportModel,
+  num: number,
+  total: number,
+  variantPreview: boolean,
+): string {
+  const byStage = collectStagePortStats(model);
+  const cards = model.population.byStage
+    .map((s, i) => stagePortPopulationCard(s, i, byStage.get(s.stageLabel) ?? []))
+    .join("");
+  const body = `<div class="v2-stage-port-grid">${cards}</div>`;
+  return v2Slide({
+    id: "slide-stage-port-population",
+    title: "مجتمع حالات الفحص حسب المستوى والمنفذ",
+    eyebrow: "القسم 1 — مجتمع الفحص",
+    iconName: "layers",
+    headline: `مجتمع حالات الفحص حسب المستوى والمنفذ لشهر ${model.summary.periodId}`,
+    subhead: "أعلى 5 منافذ بالحجم لكل مستوى مخاطر، مع إجمالي شامل لجميع المنافذ.",
+    bodyVariants: [body, body, body, body],
+    variantPreview,
+    num,
+    total,
+    section: "section1",
+  });
+}
+
+/** Sample page: عيّنة الفحص المسحوبة حسب المستوى والمنفذ. Same non-paginated shape. */
+export function stagePortSampleSlide(
+  model: ReportModel,
+  num: number,
+  total: number,
+  variantPreview: boolean,
+): string {
+  const byStage = collectStagePortStats(model);
+  const cards = model.population.byStage
+    .map((s, i) => stagePortSampleCard(s, i, byStage.get(s.stageLabel) ?? []))
+    .join("");
+  const body = `<div class="v2-stage-port-grid">${cards}</div>`;
+  return v2Slide({
+    id: "slide-stage-port-sample",
+    title: "عيّنة الفحص المسحوبة حسب المستوى والمنفذ",
+    eyebrow: "القسم 1 — مجتمع الفحص",
+    iconName: "layers",
+    headline: `عيّنة الفحص المسحوبة حسب المستوى والمنفذ لشهر ${model.summary.periodId}`,
+    subhead: "أعلى 5 منافذ بالحجم لكل مستوى مخاطر، بأرقام العيّنة ونسبة التغطية، مع إجمالي شامل.",
+    bodyVariants: [body, body, body, body],
+    variantPreview,
+    num,
+    total,
+    section: "section1",
+  });
 }
 
 // ── Section 2, page A — نتائج جودة الصور في المنافذ ─────────────────────────
@@ -919,6 +1179,8 @@ export function buildDeckV2Slides(
     (num, total) => riskStagesSlide(model, num, total, variantPreview),
     ...portPopulationSlideBuilders(model, variantPreview),
     ...portSampleSlideBuilders(model, variantPreview),
+    (num, total) => stagePortPopulationSlide(model, num, total, variantPreview),
+    (num, total) => stagePortSampleSlide(model, num, total, variantPreview),
   ];
 
   // Section 2 — نتائج فحص الجودة: separator + image-quality page(s) + accuracy page(s).

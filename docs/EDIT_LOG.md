@@ -4,6 +4,584 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v41.3 — 2026-07-05 — Remove stage-port totals band; fix pre-existing grid overflow bug
+
+Removed the top `.v2-totals-band` from both new stage-port slides (population and sample, per
+user request) so the 2×2 card grid fills the freed vertical space. This exposed a real,
+pre-existing overflow bug: `.v2-stage-port-grid` had no `grid-template-rows`, so each row
+auto-sized to its card's own content height (256.8px) instead of splitting the available
+458.8px `.slide-body` height — two such rows plus the row gap overflowed the slide by
+46–127px, silently clipped by `.slide{overflow:hidden}`. Task 4's (v41.1) live-measurement
+check only verified the table fit within its own auto-sized card, never that the whole 2×2
+grid fit within the slide, so this was never caught — it existed even with the totals band
+present, just less visibly (the band's absence made the grid's own footprint the whole story).
+
+Fix: added `grid-template-rows:1fr 1fr` so rows actually split the available height evenly,
+shrunk the per-card table's padding/font (`12px`→`3px`/`6px`, `0.66rem`→`0.6rem`/`0.58rem`) so
+all 5 top-N rows fit within the true per-row budget (~162.8px, re-measured), and corrected
+`STAGE_CARD_TABLE_BUDGET_PX` (177 → 160 — the old value was already below the 5-row intrinsic
+height and had zero real effect on layout, the same root cause as the grid-row sizing issue).
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**Before:**
+```ts
+const totalsBand = `<div class="v2-totals-band">...</div>`;
+const body = `${totalsBand}<div class="v2-stage-port-grid">${cards}</div>`;
+```
+(in both `stagePortPopulationSlide` and `stagePortSampleSlide`)
+
+**After:**
+```ts
+const body = `<div class="v2-stage-port-grid">${cards}</div>`;
+```
+
+**File:** `src/data/reporting/executive/deck2/theme.ts`
+
+**Before:**
+```css
+.v2-stage-port-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;flex:1;min-height:0;}
+...
+.v2-stage-port-card .deck-table th,.v2-stage-port-card .deck-table td{padding:5px 8px;font-size:0.66rem;}
+```
+
+**After:**
+```css
+.v2-stage-port-grid{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:14px;flex:1;min-height:0;}
+...
+.v2-stage-port-card .deck-table th,.v2-stage-port-card .deck-table td{padding:3px 6px;font-size:0.6rem;}
+.v2-stage-port-card .deck-table th{font-size:0.58rem;}
+```
+
+Verified: no card overflow on either slide, in either theme, at the slide's max on-screen
+width (1120px, reached at any viewport ≥ ~1372px wide — a stable, reproducible reference since
+`.slide{width:min(1120px,100%)}` caps there). Full suite (300 tests) and `tsc -b` still pass.
+
+---
+
+## v41 — 2026-07-05 — Add stage×port grid population and sample slides to deck2
+
+Task 3 of the deck2 stage×port grid plan: builds the two new slides on top of Task 1's
+`collectStagePortStats` collector and Task 2's CSS/sizing constants, and wires them into
+`buildDeckV2Slides`'s `sectionOne` array. Each card's totals row is pinned to the
+`StageProfile` figures (`stage.population`/`sampleSize`/`coverage`) rather than a fresh sum
+over the port list, per the Task 1 review finding that the two can legitimately diverge once
+a sample has been drawn (frozen `StageAllocation` snapshot vs. current `model.rows`).
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**Before:** only `import type { ReportModel } from "../model/reportModel";` (no `StageProfile`
+import); `collectStagePortStats` had no consumers yet; `sectionOne` in `buildDeckV2Slides`
+ended after `...portSampleSlideBuilders(model, variantPreview)`.
+
+**After:** added `import type { StageProfile } from "../../executiveReportTypes";`; added
+`stagePortPopulationCard`, `stagePortSampleCard`, `stagePortPopulationSlide`,
+`stagePortSampleSlide` right after `collectStagePortStats`; appended
+`(num, total) => stagePortPopulationSlide(model, num, total, variantPreview)` and
+`(num, total) => stagePortSampleSlide(model, num, total, variantPreview)` to `sectionOne`.
+
+**File:** `src/data/reporting/executive/deck2/deck2.test.ts`
+
+**Before:** no coverage for the stage×port grid slides.
+
+**After:** added a `describe("stage×port grid slides", ...)` block with two tests: one
+asserting both new slide titles/ids appear in production output, one asserting the
+population card's totals row shows the pinned `stage.population` alongside the summed
+سليمة/اشتباه columns.
+
+## v41.1 — 2026-07-05 — Tune stage-card table budget against live-measured render (Task 4)
+
+Task 4 of the deck2 stage×port grid plan: live-measured `.v2-stage-port-card` table vs.
+card heights in the dev preview (`/deck-preview.html`) on both new slides
+(`slide-stage-port-population`, `slide-stage-port-sample`). At the Task 2 placeholder
+`STAGE_CARD_TABLE_BUDGET_PX = 150`, the 5-row `METRICS_COMPACT` budget math
+(`theadH 25 + tfootH 25 + 5×rowH 25.4 = 177px`) already exceeds 150, so `fillerPx` clamps
+to 0 and no blank filler row is ever emitted — the placeholder had zero effect on layout.
+`.v2-stage-card` has `height:100%` and stretches to its CSS-grid row, so the visible
+~10.8px of "slack" below every card's tfoot is the card's own `padding-bottom:10px` +
+`border-bottom:0.8px` (unavoidable, same order of magnitude as the land/sea cards'
+own chrome) — not excess table budget. No `overflow:true` was observed at 150, at 100,
+or at 300 (tested to confirm the card resizes with the table+filler rather than being a
+fixed height); all three values produced identical or larger slack, never overflow.
+Set the constant to 177 — the actual measured `usedPx` for a full 5-row card — so the
+value is a real measurement (matching `TABLE_BUDGET_PX`'s own precedent) rather than an
+arbitrary placeholder that happened to be low enough to be inert.
+
+Checked the review's flagged concern: `stagePortSampleCard` uses `METRICS_COMPACT` (not
+`METRICS_COMPACT_SAMPLE`) for its row-height math despite rendering sample-mode columns.
+Live measurement showed **no visible difference** between the population and sample
+slides' cards (both: cardHeight 256.8px, tableHeight 197.2px, slack ~10.8px, no overflow)
+because `usedPx` (177px under `METRICS_COMPACT`, or ~168px under `METRICS_COMPACT_SAMPLE`)
+exceeds the budget either way, so `fillerPx` clamps to 0 under both metric sets — the
+metrics choice is currently inert for this card. Not swapped in, since measurement showed
+no need; noting it as a latent risk if `STAGE_CARD_TOP_N` or the budget is later increased
+enough to make filler nonzero, at which point the ~9px gap between the two metric sets
+would start to matter.
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**Before:**
+```ts
+export let STAGE_CARD_TABLE_BUDGET_PX = 150;
+```
+
+**After:**
+```ts
+export let STAGE_CARD_TABLE_BUDGET_PX = 177;
+```
+
+## v41.2 — 2026-07-05 — deck2 stage×port grid: collector (Task 1) + CSS/constants (Task 2)
+
+Retroactive log entry for Tasks 1–2 of the deck2 stage×port grid plan (Tasks 3–4 are logged
+above as v41/v41.1; this entry fills the gap so all four tasks are documented). Adds two new
+slides — مجتمع حالات الفحص حسب المستوى والمنفذ and عيّنة الفحص المسحوبة حسب المستوى والمنفذ —
+cross-tabulating risk stage (1–4) × port in a 2×2 grid, alongside the existing land/sea
+port-split slides (not replacing them). Full design: `docs/superpowers/specs/2026-07-05-deck2-stage-port-grid-design.md`.
+
+**Task 1 — `collectStagePortStats` collector.** Groups `model.rows` by `(stage, portName)`
+instead of land/sea (mirrors the existing `collectPortStats`), ports sorted by population
+descending within each stage. A code review found the initial docstring wrongly claimed its
+per-stage sums always equal `model.population.byStage[i]`'s `population`/`sampleSize` — true
+only when `StageProfile` is built fresh from `model.rows` (no sample), not when
+`sample.stageAllocations` is present (the normal production case), where those figures come
+from a `StageAllocation` snapshot frozen at sample-draw time instead. Fixed the docstring and
+added a test exercising the production branch with a deliberately mismatched `populationSize`
+to prove the divergence is real, not a bug in the collector. This finding also changed Task 3's
+design: each card's totals row is pinned to `stage.population`/`.sampleSize`/`.coverage`
+directly (matching the card header and the existing "مجتمع الحالات بناءً على المخاطر" page)
+rather than a fresh per-port sum.
+
+**Task 2 — CSS + sizing constants.** Adds `.v2-stage-port-grid` (a plain 2-column CSS grid —
+no manual RTL reordering needed, since a plain grid in DOM order stage1→stage4 places stage1
+top-right, stage2 top-left, stage3 bottom-right, stage4 bottom-left in this RTL document),
+`.v2-stage-port-card`, and `.v2-stage-port-figure` (the sample page's "{sampleSize} /
+{population}" header figure, `dir="ltr"` to avoid the bidi-reversal bug fixed in v40.7). Adds
+`STAGE_CARD_TOP_N` (= 5, the curated top-N convention already used by `portTable`/
+`qualityTable`/`accuracyTable`) and `STAGE_CARD_TABLE_BUDGET_PX` (placeholder 150, tuned to 177
+in Task 4/v41.1 above).
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**Before:** no `collectStagePortStats`; no `STAGE_CARD_TOP_N`/`STAGE_CARD_TABLE_BUDGET_PX`.
+
+**After:**
+```ts
+export function collectStagePortStats(model: ReportModel): Map<string, PortPopRow[]> {
+  const byStage = new Map<string, Map<string, PortPopRow>>();
+  for (const r of model.rows) {
+    const stageKey = r.stage ?? "غير محدد";
+    const portName = r.portName ?? "غير محدد";
+    let portMap = byStage.get(stageKey);
+    if (!portMap) {
+      portMap = new Map<string, PortPopRow>();
+      byStage.set(stageKey, portMap);
+    }
+    let cur = portMap.get(portName);
+    if (!cur) {
+      cur = { name: portName, total: 0, clean: 0, suspicious: 0, sampleTotal: 0, sampleClean: 0, sampleSuspicious: 0 };
+      portMap.set(portName, cur);
+    }
+    cur.total += 1;
+    if (r.imageResult === "اشتباه") cur.suspicious += 1;
+    else cur.clean += 1;
+    if (r.selectedInSample) {
+      cur.sampleTotal += 1;
+      if (r.imageResult === "اشتباه") cur.sampleSuspicious += 1;
+      else cur.sampleClean += 1;
+    }
+  }
+  const result = new Map<string, PortPopRow[]>();
+  for (const [stageKey, portMap] of byStage) {
+    result.set(stageKey, [...portMap.values()].sort((a, b) => b.total - a.total));
+  }
+  return result;
+}
+
+export const STAGE_CARD_TOP_N = 5;
+export let STAGE_CARD_TABLE_BUDGET_PX = 150; // tuned to 177 in Task 4 — see v41.1 above
+```
+
+**File:** `src/data/reporting/executive/deck2/stagePortStats.test.ts`
+
+**Before:** file did not exist.
+
+**After:** three tests — basic grouping/sorting, the fallback-branch invariant (sums equal
+`StageProfile` when built fresh from `model.rows`), and the production-branch divergence test
+(frozen `StageAllocation.populationSize` deliberately mismatched from a fresh row tally).
+
+**File:** `src/data/reporting/executive/deck2/theme.ts`
+
+**Before:** no `.v2-stage-port-grid`/`.v2-stage-port-card`/`.v2-stage-port-figure` rules.
+
+**After:**
+```css
+.v2-stage-port-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;flex:1;min-height:0;}
+.v2-stage-port-card{padding:12px 12px 10px;}
+.v2-stage-port-card .v2-stage-head{margin-bottom:8px;}
+.v2-stage-port-card .deck-table{width:100%;}
+.v2-stage-port-card .deck-table th,.v2-stage-port-card .deck-table td{padding:5px 8px;font-size:0.66rem;}
+.v2-stage-port-figure{margin-inline-start:auto;font-size:0.85rem;font-weight:900;color:var(--gold);font-variant-numeric:tabular-nums;}
+.v2-stage-port-card.blue .v2-stage-port-figure{color:var(--blue);}
+.v2-stage-port-card.green .v2-stage-port-figure{color:var(--green);}
+.v2-stage-port-card.coral .v2-stage-port-figure{color:var(--coral);}
+```
+
+Verified: `npx tsc -b` clean; `npx vitest run src/data/reporting/executive/deck2/` passing
+throughout (3/3 in `stagePortStats.test.ts`, full suite green after Tasks 3–4 landed).
+
+## v40.9 — 2026-07-05 — Fix remaining light-mode table contrast; sun/moon slider replaces text toggle
+
+Two more reports against the light theme: (1) port-result tables (`.v2-port-col .deck-table
+th`) still had white header text — its light override changed only the background, not the
+text color that the dark-mode base rule (`.deck-table th{color:#fff}`) had already set, so
+headers stayed white-on-near-white; the `.v2-frac` "من X" subtext and `.insuff` placeholders
+had no light override at all and stayed at their dark-theme muted-blue color, low contrast
+on white. (2) The "فاتح / داكن" toggle was a plain text button; wanted a sun/moon slide
+switch instead.
+
+**File:** `src/data/reporting/executive/deck2/theme.ts`
+
+**Before:**
+```css
+body.theme-light .v2-port-col .deck-table th{background:rgba(10,45,74,.07);}
+body.theme-light .v2-port-col .deck-table tfoot td{color:#0a2d4a;background:rgba(10,45,74,.06);border-top-color:rgba(10,45,74,.18);}
+```
+(no light override for `.v2-frac span` or `.insuff`)
+
+**After:**
+```css
+body.theme-light .v2-port-col .deck-table th{background:rgba(10,45,74,.07);color:#0a2d4a;}
+body.theme-light .v2-port-col .deck-table tfoot td{color:#0a2d4a;background:rgba(10,45,74,.06);border-top-color:rgba(10,45,74,.18);}
+body.theme-light .v2-frac span{color:#607386;}
+body.theme-light .deck-table .insuff{color:#8a97a6;}
+```
+
+**File:** `src/data/reporting/executive/ui/icons.ts`
+
+**Before:** no `sun`/`moon` entries in the icon registry.
+
+**After:** added `sun` (circle + rays) and `moon` (crescent) path data plus named exports,
+following the existing icon-registry convention.
+
+**File:** `src/data/reporting/executive/deck/deckTheme.ts`
+
+**Before:**
+```css
+.deck-toolbar-actions{display:flex;align-items:center;gap:10px;}
+.deck-toolbar .btn{width:auto;padding:9px 18px;}
+.deck-toolbar .btn-theme{background:transparent;}
+```
+
+**After:** replaced `.btn-theme` with a `.theme-toggle`/`.theme-toggle-track`/
+`.theme-toggle-thumb`/`.theme-toggle-icon` slide-switch (moon fixed at one end, sun at the
+other, gold thumb slides between them via `:checked ~` sibling selector, `dir="ltr"` on the
+label to avoid the same bidi issue fixed in v40.7 for the variant switcher).
+
+**File:** `src/data/reporting/executive/deck/viewer.ts` and `src/data/reporting/executive/deck2/index.ts`
+
+**Before:**
+```html
+<button class="btn btn-theme" onclick="document.body.classList.toggle('theme-light')">فاتح / داكن</button>
+```
+
+**After:**
+```html
+<label class="theme-toggle" title="التبديل بين الوضع الفاتح والداكن" dir="ltr">
+  <input type="checkbox" onchange="document.body.classList.toggle('theme-light', this.checked)"/>
+  <span class="theme-toggle-track">
+    <span class="theme-toggle-icon moon">${icon("moon", 13)}</span>
+    <span class="theme-toggle-icon sun">${icon("sun", 13)}</span>
+    <span class="theme-toggle-thumb"></span>
+  </span>
+</label>
+```
+
+Verified: `npx tsc -b` passes; computed styles for `.v2-port-col .deck-table th`, `.v2-frac
+span`, `.deck-table td`, and `.v2-port-col-head b` all resolve to dark navy/slate text in
+light mode (no more white-on-white); the slider renders and toggles correctly in both
+decks. (One red herring during verification: the preview screenshot tool briefly rendered a
+stale dark background even after computed styles already showed the correct light values —
+confirmed via `getComputedStyle` and a forced resize/repaint that this was a screenshot
+capture artifact, not a real CSS bug.)
+
+---
+
+## v40.8 — 2026-07-05 — Fix cover-slide overlap; group variant switcher with print toggle
+
+Two dev-preview bugs on the deck2 cover slide, reported against a screenshot: (1) the
+centered title-slide content (headline, meta grid) overlapped the absolutely-positioned
+`.v2-org` letterhead block in the top-right corner once the content got tall enough — base
+CSS vertically centers `.title-slide .slide-inner`, with no reserved clearance for the org
+block; (2) the style-variant switcher ("1 / 4") rendered far from the print-include toggle
+because it lived absolutely-positioned *inside* the slide's padded content box
+(`.v2-variant-stack`), not anchored to the same corner as the toggle.
+
+**File:** `src/data/reporting/executive/deck2/theme.ts`
+
+**Before:**
+```css
+.slide.v2 .slide-inner{padding-inline-start:68px;}
+.slide.v2.title-slide .slide-inner{padding-inline-start:44px;}
+```
+
+**After:**
+```css
+.slide.v2 .slide-inner{padding-inline-start:68px;}
+.slide.v2.title-slide .slide-inner{padding-inline-start:44px;justify-content:flex-start;padding-top:112px;}
+```
+Anchors the cover's content to the top with fixed clearance below the org block instead of
+vertically centering, so overlap can't recur regardless of content height.
+
+Also restructured the print-toggle/variant-switcher CSS: merged their positioning into one
+`.slide-controls` wrapper (`position:absolute;top:12px;left:14px`) so both render as a single
+adjacent cluster; `.slide-print-toggle` and `.v2-variant-switcher` no longer position
+themselves independently.
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**Before:**
+```ts
+function renderVariants(slideId, bodies, variantPreview): string {
+  if (!variantPreview) return bodies[0];
+  const panels = bodies.map(...).join("");
+  return `<div class="v2-variant-stack" data-slide-id="${esc(slideId)}" data-active-index="0">
+    <div class="v2-variant-switcher" dir="ltr">
+      <button type="button" class="v2-variant-prev" aria-label="النمط السابق">‹</button>
+      <span class="v2-variant-label">1 / 4</span>
+      <button type="button" class="v2-variant-next" aria-label="النمط التالي">›</button>
+    </div>
+    ${panels}
+  </div>`;
+}
+// v2Slide()/coverSlide() each called printToggle() directly, separate from the stack.
+```
+
+**After:**
+```ts
+function variantSwitcher(slideId: string): string {
+  return `<div class="v2-variant-switcher" data-for="${esc(slideId)}" dir="ltr">...</div>`;
+}
+function slideControls(slideId: string, variantPreview: boolean): string {
+  return `<div class="slide-controls">${printToggle()}${variantPreview ? variantSwitcher(slideId) : ""}</div>`;
+}
+function renderVariants(slideId, bodies, variantPreview): string {
+  if (!variantPreview) return bodies[0];
+  const panels = bodies.map(...).join("");
+  return `<div class="v2-variant-stack" data-slide-id="${esc(slideId)}" data-active-index="0">${panels}</div>`;
+}
+// v2Slide()/coverSlide() now call slideControls(id, variantPreview) once, right where
+// printToggle() used to sit.
+```
+
+**File:** `src/data/reporting/executive/deck2/index.ts`
+
+**Before:**
+```ts
+const DECK_VARIANT_SCRIPT = `(function(){
+  var stacks = Array.prototype.slice.call(document.querySelectorAll('.v2-variant-stack'));
+  ...
+  stacks.forEach(function(stack){
+    ...
+    stack.querySelector('.v2-variant-prev').addEventListener('click', function(){ step(-1); });
+    stack.querySelector('.v2-variant-next').addEventListener('click', function(){ step(1); });
+  });
+  ...
+})();`;
+```
+
+**After:**
+```ts
+const DECK_VARIANT_SCRIPT = `(function(){
+  var switchers = Array.prototype.slice.call(document.querySelectorAll('.v2-variant-switcher'));
+  function stackFor(slideId){ return document.querySelector('.v2-variant-stack[data-slide-id="' + slideId + '"]'); }
+  ...
+  switchers.forEach(function(switcher){
+    var slideId = switcher.getAttribute('data-for');
+    var stack = stackFor(slideId);
+    ...
+    switcher.querySelector('.v2-variant-prev').addEventListener('click', function(){ step(-1); });
+    switcher.querySelector('.v2-variant-next').addEventListener('click', function(){ step(1); });
+  });
+  ...
+})();`;
+```
+The switcher now looks up its stack by `data-for`/`data-slide-id` match instead of relying on
+DOM nesting, since the two are no longer nested inside each other.
+
+Verified: `npx tsc -b` passes; cover slide no longer overlaps; switcher renders next to the
+print toggle and correctly cycles the active panel/label on click (checked via computed
+styles in the live preview). Note: while investigating, found that `.slide`'s
+`isolation:isolate` means the corner controls (both before and after this change) can
+briefly render underneath the sticky `.deck-toolbar` at certain scroll positions — a
+pre-existing limitation, not introduced here, left unfixed as out of scope (documented in
+theme.ts).
+
+---
+
+## v40.7 — 2026-07-05 — Fix bidi-reversed variant-switcher label ("4 / 1" instead of "1 / 4")
+
+The style-variant switcher's counter (top-left corner of each slide in variant-preview
+mode) read "1 / 4" in the DOM but rendered visually as "4 / 1", because the document is
+`dir="rtl"` and the switcher markup had no explicit `dir="ltr"` — the browser's bidi
+algorithm reorders separate LTR numeral runs within an RTL line. `pageFoot()` in the same
+file already guards against this exact issue with `dir="ltr"` on its counter; the variant
+switcher's counter was missing the same guard.
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**Before:**
+```ts
+  return `<div class="v2-variant-stack" data-slide-id="${esc(slideId)}" data-active-index="0">
+    <div class="v2-variant-switcher">
+      <button type="button" class="v2-variant-prev" aria-label="النمط السابق">‹</button>
+      <span class="v2-variant-label">1 / 4</span>
+      <button type="button" class="v2-variant-next" aria-label="النمط التالي">›</button>
+    </div>
+    ${panels}
+  </div>`;
+```
+
+**After:**
+```ts
+  return `<div class="v2-variant-stack" data-slide-id="${esc(slideId)}" data-active-index="0">
+    <div class="v2-variant-switcher" dir="ltr">
+      <button type="button" class="v2-variant-prev" aria-label="النمط السابق">‹</button>
+      <span class="v2-variant-label">1 / 4</span>
+      <button type="button" class="v2-variant-next" aria-label="النمط التالي">›</button>
+    </div>
+    ${panels}
+  </div>`;
+```
+
+---
+
+## v40.6 — 2026-07-05 — Move light/dark toggle into the deck toolbar; fix light-theme white-on-white text
+
+The dev-preview harness (`deck-preview.html`) drove the deck's light/dark toggle from a
+button in the outer chrome bar, above the iframe — not inside the deck's own toolbar next
+to "طباعة / PDF" as intended. Separately, several `body.theme-light` overrides in
+`deck2/theme.ts` had lower CSS specificity than the dark-theme rule they were meant to
+override (e.g. `.deck-table td{color:rgba(255,255,255,.88)}` beats a bare
+`.deck-table{color:#0a2d4a}`), so switching to light mode left white text on the new white
+background across table cells, port-column headers, stage cards, totals, and more. Moved
+the toggle into both decks' real toolbars (a client-side button, no dev-harness
+dependency) and rewrote the light-theme overrides with matching-or-higher specificity,
+plus added missing overrides for components that had none (deck-card, deck-agenda,
+deck-list, deck-timeline, deck-empty, deck-nav, v2-cover-meta, v2-org, v2-totals, etc.).
+
+**File:** `src/data/reporting/executive/deck/deckTheme.ts`
+
+**Before:**
+```css
+.deck-toolbar .btn{width:auto;padding:9px 18px;}
+```
+(and no `body.theme-light` rules at all in this file — they only existed in deck2/theme.ts)
+
+**After:**
+```css
+.deck-toolbar-actions{display:flex;align-items:center;gap:10px;}
+.deck-toolbar .btn{width:auto;padding:9px 18px;}
+.deck-toolbar .btn-theme{background:transparent;}
+```
+plus a new shared `body.theme-light` block covering `.slide`, `.deck-table`, `.kpi-tile`,
+`.deck-card`, `.deck-agenda-*`, `.deck-list`, `.deck-timeline`, `.deck-empty`,
+`.slide-footer`, and title-slide elements (see file for full block).
+
+**File:** `src/data/reporting/executive/deck/viewer.ts`
+
+**Before:**
+```html
+<button class="btn" onclick="window.print()">طباعة / PDF</button>
+```
+
+**After:**
+```html
+<div class="deck-toolbar-actions">
+  <button class="btn btn-theme" onclick="document.body.classList.toggle('theme-light')">فاتح / داكن</button>
+  <button class="btn" onclick="window.print()">طباعة / PDF</button>
+</div>
+```
+
+**File:** `src/data/reporting/executive/deck2/index.ts`
+
+**Before:**
+```html
+<button class="btn" onclick="window.print()">طباعة / PDF</button>
+```
+
+**After:**
+```html
+<div class="deck-toolbar-actions">
+  <button class="btn btn-theme" onclick="document.body.classList.toggle('theme-light')">فاتح / داكن</button>
+  <button class="btn" onclick="window.print()">طباعة / PDF</button>
+</div>
+```
+
+**File:** `src/data/reporting/executive/deck2/theme.ts`
+
+**Before:**
+```css
+body.theme-light .deck-table{background:#ffffff;color:#0a2d4a;}
+body.theme-light .deck-table th{background:#0e3a5f;color:#fff;}
+body.theme-light .deck-table td{border-color:#e3e8ee;}
+```
+(no override for `.deck-table td` text color, `.v2-org-lines b`, `.v2-cover-meta-value`,
+`.v2-term-card-head b`, `.v2-sep h2`, `.v2-stage-head b`, `.v2-stage-row b`,
+`.v2-totals-item b`, `.v2-port-col-head b`, `.v2-port-col .deck-table tfoot td`, or
+`.deck-nav*` — all still rendered white-on-white in light mode)
+
+**After:**
+```css
+body.theme-light .deck-table td{border-color:#e3e8ee;color:#0a2d4a;}
+body.theme-light .v2-port-col .deck-table tfoot td{color:#0a2d4a;background:rgba(10,45,74,.06);border-top-color:rgba(10,45,74,.18);}
+body.theme-light .deck-nav{background:rgba(255,255,255,.97);border-inline-end-color:#dde4ea;}
+```
+plus matching text-color overrides added for every previously-missed selector listed above
+(see file for the full block).
+
+**File:** `deck-preview.html`
+
+**Before:**
+```html
+<button id="btn-v1">النسخة القديمة (مرجع)</button>
+<button id="btn-theme">فاتح / داكن</button>
+<span class="hint">بيانات تجريبية — مايو 2026 · يُعاد التحميل تلقائيًا مع كل تعديل</span>
+```
+
+**After:**
+```html
+<button id="btn-v1">النسخة القديمة (مرجع)</button>
+<span class="hint">بيانات تجريبية — مايو 2026 · التبديل بين الفاتح/الداكن الآن داخل شريط العرض نفسه · يُعاد التحميل تلقائيًا مع كل تعديل</span>
+```
+
+**File:** `src/dev/deckPreview.ts`
+
+**Before:**
+```ts
+const btnTheme = document.getElementById("btn-theme") as HTMLButtonElement;
+...
+let lightTheme = false;
+...
+frame.addEventListener("load", () => {
+  if (lightTheme) frame.contentDocument?.body.classList.add("theme-light");
+});
+
+btnTheme.addEventListener("click", () => {
+  lightTheme = !lightTheme;
+  btnTheme.classList.toggle("active", lightTheme);
+  frame.contentDocument?.body.classList.toggle("theme-light", lightTheme);
+});
+```
+
+**After:**
+```ts
+// (btnTheme, lightTheme, and the load-listener/click-listener that drove the
+// theme class from outside the iframe were removed — the toggle now lives
+// inside each deck's own toolbar and manages its own body class.)
+```
+
+---
+
 ## v40.5 — 2026-07-05 — Retroactive log entry: test-hygiene cleanup in deckStyleChoices.test.ts
 
 The final whole-branch review of the deck2-style-switcher workstream caught that commit
@@ -936,6 +1514,1637 @@ body.theme-light .v2-variant-switcher button{background:rgba(10,45,74,.08);color
 
 ---
 
+# EDIT_LOG.md
+
+Version history for the XQAP codebase. Every code edit must be logged here before it is applied.
+
+---
+
+## v39.32 — 2026-07-05 — Change default visible columns on the X-ray referrals table
+
+Per user request (screenshot of desired column-picker state): default visible
+set now shows level 1/2 inspection results instead of the distribution date
+and answer-status columns.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx`
+
+**Before:**
+```ts
+const DEFAULT_VISIBLE = [
+  "xrayImageId", "answerStatus", "portName", "stage",
+  "xrayEntryDate", "lastEventAt", "plateOrContainerNumber",
+];
+```
+
+**After:**
+```ts
+const DEFAULT_VISIBLE = [
+  "xrayImageId", "stage", "portName", "xrayEntryDate",
+  "plateOrContainerNumber", "xrayLevelOneResult", "xrayLevelTwoResult",
+];
+```
+
+---
+
+## v39.31 — 2026-07-05 — Fix DataTable sticky-column and default-order bugs breaking the referrals table headers
+
+Root-caused visual bugs reported on the "صور الأشعة المحالة" (X-ray referrals)
+table, where headers/columns rendered torn apart with large gaps or
+overlapping cells. Three compounding bugs in the shared `DataTable` component:
+
+1. **CSS specificity collision downgraded sticky headers to relative.**
+   `.dt-th { position: sticky; }` (top-of-file, for vertical header stick)
+   was silently overridden by a later `.dt-th { position: relative; }` rule
+   (same specificity, later in cascade) added only to give `.dt-resize-handle`
+   a positioning context — which `position: sticky` already provides. This
+   broke both vertical header-stick-on-scroll and horizontal pinned columns
+   for every `DataTable` instance, not just referrals.
+2. **`stickyMeta` computed offsets only from other sticky columns' widths**,
+   skipping non-sticky columns in between. Any sticky column not adjacent to
+   the previous sticky column got a drastically understated `right` offset,
+   tearing it out of its table cell into an unrelated position.
+3. **Default column order ignored `defaultVisible`'s intended arrangement**,
+   using raw column-definition order instead — so `answerStatus` (meant to
+   sit 2nd, pinned next to `xrayImageId`) rendered last among visible columns.
+
+Added `src/components/DataTable/stickyColumns.test.tsx` (TDD: both failed
+before the fix, confirming root cause, before the DataTable/CSS changes).
+
+**File:** `src/components/DataTable/DataTable.css`
+
+**Before:**
+```css
+/* ── Column resize handle ──────────────────────────────────── */
+
+.dt-th { position: relative; }
+
+.dt-resize-handle {
+```
+
+**After:**
+```css
+/* ── Column resize handle ──────────────────────────────────── */
+
+/* .dt-th already declares `position: sticky` above, which is a valid
+   containing block for this absolutely-positioned handle. Redeclaring
+   `position: relative` here (as a prior version of this rule did) has the
+   same specificity as `.dt-th`'s sticky declaration and, being later in the
+   cascade, silently won — downgrading every header cell from sticky to
+   relative. That broke both the header's vertical stick-to-top behavior and
+   the horizontal pinned columns (their `right` offset was then read as a
+   relative-position shift instead of a sticky anchor distance). */
+
+.dt-resize-handle {
+```
+
+**File:** `src/components/DataTable/index.tsx`
+
+**Before:**
+```ts
+function buildDefault<TRow>(
+  columns: DataTableCol<TRow>[],
+  defaultVisible?: string[]
+): ColConfig {
+  const visSet = defaultVisible ? new Set(defaultVisible) : null;
+  return {
+    order: columns.map((c) => c.id),
+    hidden: columns
+      .filter((c) => visSet ? !visSet.has(c.id) : false)
+      .map((c) => c.id),
+    dateFmt: {},
+    widths: {},
+  };
+}
+```
+```ts
+  const stickyMeta = useMemo(() => {
+    const meta = new Map<string, { rightPct: number; order: number }>();
+    let rightPct = 0;
+    let order = 0;
+    for (const col of visibleCols) {
+      if (!stickyIdSet.has(col.id)) continue;
+      meta.set(col.id, { rightPct, order });
+      rightPct += (((colCfg.widths ?? {})[col.id] ?? col.widthFr ?? 1) / totalFr) * 100;
+      order += 1;
+    }
+    return meta;
+  }, [visibleCols, stickyIdSet, totalFr, colCfg.widths]);
+```
+
+**After:**
+```ts
+function buildDefault<TRow>(
+  columns: DataTableCol<TRow>[],
+  defaultVisible?: string[]
+): ColConfig {
+  const visSet = defaultVisible ? new Set(defaultVisible) : null;
+  const known = new Set(columns.map((c) => c.id));
+  const orderedVisible = defaultVisible ? defaultVisible.filter((id) => known.has(id)) : [];
+  const orderedVisibleSet = new Set(orderedVisible);
+  const rest = columns.map((c) => c.id).filter((id) => !orderedVisibleSet.has(id));
+  return {
+    order: [...orderedVisible, ...rest],
+    hidden: columns
+      .filter((c) => visSet ? !visSet.has(c.id) : false)
+      .map((c) => c.id),
+    dateFmt: {},
+    widths: {},
+  };
+}
+```
+```ts
+  const stickyMeta = useMemo(() => {
+    const meta = new Map<string, { rightPct: number; order: number }>();
+    let cumulativePct = 0;
+    let order = 0;
+    for (const col of visibleCols) {
+      const colPct = (((colCfg.widths ?? {})[col.id] ?? col.widthFr ?? 1) / totalFr) * 100;
+      if (stickyIdSet.has(col.id)) {
+        meta.set(col.id, { rightPct: cumulativePct, order });
+        order += 1;
+      }
+      cumulativePct += colPct;
+    }
+    return meta;
+  }, [visibleCols, stickyIdSet, totalFr, colCfg.widths]);
+```
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx`
+
+**Before:**
+```ts
+function buildDefaultColConfig(columns: DataTableCol<DistributionEntry>[]): ColConfig {
+  const visible = new Set(DEFAULT_VISIBLE);
+  return {
+    order: columns.map((column) => column.id),
+    hidden: columns.filter((column) => !visible.has(column.id)).map((column) => column.id),
+    dateFmt: {},
+    widths: {},
+  };
+}
+```
+
+**After:**
+```ts
+function buildDefaultColConfig(columns: DataTableCol<DistributionEntry>[]): ColConfig {
+  const visible = new Set(DEFAULT_VISIBLE);
+  const known = new Set(columns.map((column) => column.id));
+  const orderedVisible = DEFAULT_VISIBLE.filter((id) => known.has(id));
+  const orderedVisibleSet = new Set(orderedVisible);
+  const rest = columns.map((column) => column.id).filter((id) => !orderedVisibleSet.has(id));
+  return {
+    order: [...orderedVisible, ...rest],
+    hidden: columns.filter((column) => !visible.has(column.id)).map((column) => column.id),
+    dateFmt: {},
+    widths: {},
+  };
+}
+```
+
+**File:** `vite.config.ts`
+
+**Before:**
+```ts
+export default defineConfig({
+  plugins: [react(), viteSingleFile()],
+  base: "./",
+```
+
+**After:**
+```ts
+export default defineConfig({
+  plugins: [react(), viteSingleFile()],
+  base: "./",
+  server: {
+    port: Number(process.env.PORT) || 5173,
+  },
+```
+
+---
+
+## v39.30 — 2026-07-05 — Deck v2: risk-stage cards redesigned to reference layout; TOC badges decluttered
+
+Per the user's reference screenshot (numbered card layout: circle badge +
+title, a list of rows separated by thin divider lines, a short colored tag
+at the card's bottom, alternating panel tint):
+
+1. **Risk-stage cards** (مجتمع الحالات بناءً على المخاطر) rebuilt to match:
+   plain numbered circle (1-4, tone-colored) + level name header, a 3-row
+   list with divider lines (الحالات / العيّنة / التغطية values), and a short
+   severity tag at the bottom (`STAGE_SHORT_TAG`) instead of the previous
+   big-number-plus-long-paragraph layout. The full `STAGE_MEANINGS`
+   paragraphs are dropped from the card (too long for this denser, cleaner
+   layout) — kept in source as a comment in case a future page wants them.
+   Alternating card background tint added (nth-child even/odd), matching
+   the reference's light/white alternation adapted to the deck's dark
+   theme. Also fixed a real bug found while rewriting this function: an
+   invalid `<\div>` closing tag (should have been `</div>`) in the old
+   meaning-line markup.
+2. **TOC agenda badges decluttered**: the icon+number combo crammed into a
+   46px circle (added in v39.20) was visually cramped compared to the
+   reference's clean plain-number circles. Reverted `.deck-agenda-num` to a
+   plain number; the section icon moved beside the title text in
+   `.deck-agenda-body` instead of inside the circle.
+3. Since `badgeIcon`'s only two remaining call sites after this
+   (`kpi-tile-icon`, unrelated to risk stages after the rewrite) — re-check
+   below whether `STAGE_ICONS`/`kpi-tile-icon` CSS become unused and prune
+   if so.
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**Before:**
+```ts
+// riskStagesSlide: <div class="kpi-tile ${tone}"><div class="kpi-tile-icon">${badgeIcon(...)}</div>
+//   <div class="kpi-tile-value">{population}</div><div class="kpi-tile-sub">…</div>
+//   ${meaning ? `<div class="v2-stage-meaning">${esc(meaning)}<\div>` : ""}</div>   // ← invalid closing tag
+// tocSlide: <div class="deck-agenda-num"><span class="deck-agenda-num-icon">${icon(...)}</span>${pad(i+1)}</div>
+```
+
+**After:**
+```ts
+// riskStagesSlide: <div class="v2-stage-card ${tone}"><div class="v2-stage-head"><span class="v2-stage-num">{n}</span><b>{label}</b></div>
+//   <div class="v2-stage-list">{3 divider rows}</div><div class="v2-stage-tag">{short severity tag}</div></div>
+// tocSlide: <div class="deck-agenda-num">${pad(i+1)}</div>  +  icon moved into deck-agenda-body next to <h4>
+```
+
+**File:** `src/data/reporting/executive/deck2/theme.ts`
+
+**After (new/changed):** `.v2-stage-card`/`.v2-stage-head`/`.v2-stage-num`/`.v2-stage-list`/`.v2-stage-tag` (new); `.deck-agenda-num-icon` rule removed (no longer rendered inside the circle); old `.kpi-tile-icon`/`.v2-stage-meaning` rules pruned if unused after the rewrite.
+
+---
+
+## v39.29 — 2026-07-05 — Deck v2: fix totals gap, icon centering, drop rank page, trim wording
+
+Four fixes from user screenshots/feedback:
+
+1. **Totals row not flush (sample table only)**: investigated with precise
+   (unrounded) `getBoundingClientRect()` measurements rather than assuming —
+   population/quality/accuracy pages were fine (sub-1px residual, imperceptible),
+   but the sample table's frac-based **compact** tier had drifted to
+   `rowH≈23.925 / theadH=25 / tfootH≈23.525`, not the assumed uniform 25/25/25
+   (a side effect of the v39.27 rail/padding width change subtly shifting
+   text-metric rounding for the stacked frac cell specifically — plain cells
+   were unaffected). Root cause: one shared `METRICS_COMPACT` was used for
+   both plain and frac tables, but they're not actually identical at every
+   viewport. Fix: `METRICS_COMPACT_SAMPLE`, selected only for
+   `mode === "sample" && compact`, so the filler-row math uses each table
+   type's real measured metrics instead of assuming parity.
+2. **Icon-circle centering**: measured `getBBox()` for the full icon
+   registry inside their actual rendered circles. Most icons' glyphs already
+   sit within ~0.5 viewBox-units of true center (imperceptible) — three
+   don't: `gauge` (+2.6/24 low), `truck` (+1.1/24 low, -0.5/24 left), `flag`
+   (-1.5/24 left). Since these are fractions of the icon's own 24-unit
+   viewBox, a percentage `transform` corrects them at any render size.
+   `badgeIcon()` wraps `icon()` with the correction, used only where icons
+   sit inside a circular badge (port-col-icon, sep-icon, cover-meta-icon,
+   kpi-tile-icon, term-icon, note-icon) — the plain (non-badge) icon
+   renderer is untouched.
+3. **Removed the ranked-accuracy page** (`slide-accuracy-rank`) added last
+   turn, per direct request — function, its helpers, and the now-unused
+   `rankedBar` import all removed rather than just unlinked (no dead code).
+4. **Trimmed wording**: dropped "— للمنافذ ذات البيانات الكافية فقط." from
+   the accuracy page's subhead (the table itself already shows `—` for
+   under-threshold ports, so the caveat was redundant).
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**Before:**
+```ts
+const METRICS_COMPACT: ModeMetrics = { rowH: 25, theadH: 25, tfootH: 25 }; // shared by all modes
+// icon(...) called directly wherever a circle badge is rendered
+export function accuracyRankSlideBuilder(model): SlideBuilder { … } // now removed
+```
+
+**After:**
+```ts
+const METRICS_COMPACT: ModeMetrics = { rowH: 25.4, theadH: 25, tfootH: 25 };       // plain cells
+const METRICS_COMPACT_SAMPLE: ModeMetrics = { rowH: 23.925, theadH: 25, tfootH: 23.525 }; // frac cells
+const metrics = compact ? (mode === "sample" ? METRICS_COMPACT_SAMPLE : METRICS_COMPACT) : METRICS_NORMAL;
+const ICON_OPTICAL_NUDGE: Record<string, { x: number; y: number }> = { gauge: {x:0,y:-10.8}, truck: {x:2.1,y:-4.6}, flag: {x:6.3,y:0} };
+function badgeIcon(name, size): string { /* wraps icon() with transform: translate(x%, y%) if a nudge exists */ }
+```
+
+---
+
+## v39.28 — 2026-07-05 — Deck v2: methodology note box + ranked-accuracy chart page
+
+Continues applying methods from the reference mockups (not a literal asset
+clone — the corner "suitcase" illustration is deliberately deferred until
+the user supplies a licensed asset; faking it in raw SVG would look cheap,
+which is exactly what this pass is trying to avoid).
+
+1. **Methodology note box** (`.v2-note`): a bordered icon+text card matching
+   the references' info-boxes (تُصنَّف الحالة اشتباهًا إذا…, محاكاة بصرية…).
+   Population page's classification rule moves from a plain subhead sentence
+   into this boxed component, sitting above the land/sea tables.
+2. **New page — ترتيب المنافذ حسب الدقة العامة**: a ranked horizontal bar
+   chart of ports by overall accuracy, reusing `rankedBar()` from
+   `ui/charts.ts` (the SAME chart primitive the v1 deck's port-ranking slide
+   already uses) — directly implements the references' "ترتيب المستويات
+   حسب الأداء الكلي" bar-chart idea. Gated by `isRankable(band)`, same
+   honesty discipline as everywhere else; if nothing is rankable, shows the
+   deck's standard empty-state message rather than a misleading chart.
+   Appended to section 2 as its own slide (new content, not a change to the
+   already-verified table pages, so their row-height math is untouched).
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**After (new):**
+```ts
+function noteBox(iconName, text): string { /* .v2-note bordered icon+text card */ }
+// population page: subhead reverts to a plain one-liner; noteBox(...) inserted above the tables
+export function accuracyRankSlideBuilder(model): SlideBuilder { /* rankedBar chart of rankable ports by accuracy */ }
+```
+
+**File:** `src/data/reporting/executive/deck2/theme.ts`
+
+**After (new):** `.v2-note`/`.v2-note-icon` rules.
+
+---
+
+## v39.26 — 2026-07-05 — Deck v2: quality page shows per-level quality mix, drops availability
+
+Per user direction with reference mockups: نتائج جودة الصور في المنافذ now
+shows the percentage of EACH quality level (عالي / متوسط / منخفض) per port
+plus نسبة وجود التحديد — and drops the التوفر column entirely. Level
+percentages share one denominator (quality-evaluated images at that port),
+so the three columns sum to ~100% per row; marking keeps its own
+denominator (rows where hasMarking was answered), same predicates as the
+global KPI calculator. Collector unchanged (availability tallies still feed
+the volume sort); only the rendered columns changed.
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**Before:**
+```ts
+// qualityTable: ths = المنفذ | التوفر | التحديد | الجودة المقبولة (span 4)
+const avail = rateOf(p.imageAvailable, p.imageAvailable + p.imageMissing);
+const acceptable = rateOf(p.highQ + p.medQ, p.highQ + p.medQ + p.lowQ);
+```
+
+**After:**
+```ts
+// qualityTable: ths = المنفذ | عالي | متوسط | منخفض | التحديد (span 5)
+const evaluated = p.highQ + p.medQ + p.lowQ;
+const high = rateOf(p.highQ, evaluated); const med = rateOf(p.medQ, evaluated); const low = rateOf(p.lowQ, evaluated);
+const marking = rateOf(p.markingPresent, p.markingPresent + p.markingMissing);
+```
+
+---
+
+## v39.27 — 2026-07-05 — Deck v2: reference-mockup chrome — side tab rail, cover org block, footer page numbers
+
+Design pass driven by the user's professional reference mockups ("similar
+and even better", "make it feel human generated"). Three chrome elements
+lifted from the references, all print-visible (part of the slide, unlike the
+on-screen-only deck-nav):
+
+1. **Side section-tab rail** (`.v2-rail`) on every content slide's
+   inline-start edge: a vertical report-title strip + one rotated tab per
+   section (المعجم / القسم 1 / القسم 2), the active section highlighted
+   gold — exactly the tab rail running down the edge of every reference
+   page. Implemented with `writing-mode:vertical-rl` (Chromium renders
+   Arabic rotated 90°, matching the mockups). The cover keeps its art and
+   gets no rail. `.slide-inner` padding-inline-start widens 44→68px to
+   clear the rail — a WIDTH change only, so all measured row-height/budget
+   math (v39.9–v39.16) is untouched; widths verified via scrollWidth checks.
+2. **Cover org block** (`.v2-org`): logo + gold divider + the 4-line
+   organizational hierarchy (org name + ORGANIZATION_PATH), top-start like
+   every reference page header — replaces the big centered logo.
+3. **Footer page number** (`.v2-page-foot`): centered at the bottom of each
+   content slide with short gold rules either side (the references' "— 06 —"
+   device, drawn with CSS lines, no glyphs). Page number moves OUT of the
+   eyebrow row (which keeps icon + section label only). Absolute-positioned
+   inside the slide's existing bottom padding band — zero layout impact on
+   the measured body budget.
+4. The print toggle moves from the top inline-start corner to the opposite
+   corner (`left:14px` physical) so it never overlaps the new rail.
+5. Population page subhead becomes the classification-methodology note from
+   the reference ("تُصنَّف الحالة اشتباهًا إذا كانت نتيجة المستوى الأول أو
+   الثاني اشتباهًا…") — factually matches `imageResult` derivation in
+   `executiveReportData.ts`.
+
+**Files:** `src/data/reporting/executive/deck2/slides.ts` (sideRail() helper,
+v2Slide/sectionSeparatorSlide render rail + footer and drop eyebrow page num,
+coverSlide org block, population subhead), `src/data/reporting/executive/deck2/theme.ts`
+(.v2-rail*, .v2-org*, .v2-page-foot rules, slide-inner padding override,
+print-toggle corner swap).
+
+---
+
+## v39.25 — 2026-07-05 — Deck v2: overnight visual pass — full verification
+
+Closes out the overnight visual-enhancement pass (v39.19–v39.24: side nav,
+cover/TOC, section separators, risk stages, port table depth, quality/
+accuracy muted "—" cells). Final verification, done without the user present
+per their instruction to "just enhance and fix":
+
+- All 10 slides checked individually for overflow/clipping — zero.
+- Full repo test suite: 42 files / 284 tests passing (not just the executive
+  reporting subset — confirms nothing else in the app regressed).
+- `npm run lint` — clean.
+- `npm run build` — succeeds; `dist/index.html` is ~2.99 MB / ~1.06 MB gzip
+  (up from the ~2.6 MB / 835 kB baseline noted 2026-07-02 in CLAUDE.md — the
+  growth tracks this session's substantial deck2 additions across the whole
+  app bundle, not a per-file regression; flagging per CLAUDE.md's "re-check
+  after large additions" note, no action taken since it's expected).
+- Print-mode CSS spot-checked in the live preview: `.slide-print-toggle` and
+  `.deck-nav` both carry `@media print{display:none!important}`, and the
+  `.slide:has(.slide-print-toggle input:not(:checked))` exclusion rule is
+  present and functioning (verified via `.matches()` against a toggled-off
+  slide in v39.15/v39.16's original verification, unchanged since).
+
+No open issues from this pass. Content-wise the deck is unchanged from
+v39.18 — this was a visuals-only round, page by page as directed.
+
+---
+
+## v39.24 — 2026-07-05 — Deck v2: quality/accuracy pages — mute "—" cells like the rest of the deck
+
+Section 2's per-port rate cells (نتائج جودة الصور / دقة نتائج المنافذ) render
+"—" for zero-denominator or below-data-sufficiency values, but rendered it as
+plain white text — visually indistinguishable from an actual low number at a
+glance. Wrapped in the existing `.insuff` class (already used by the v1
+deck's own port tables) so it reads as muted/gray, consistent with every
+other "insufficient data" indicator in this report family.
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**Before:**
+```ts
+return `<tr><td>${esc(p.name)}</td><td>${fmtPct(avail)}</td>…`;                  // qualityTable
+const show = (v: number | null) => (p.rankable ? fmtPct(v) : "—");              // accuracyTable
+```
+
+**After:**
+```ts
+const cell = (v: number | null) => (v === null ? `<span class="insuff">—</span>` : fmtPct(v));
+return `<tr><td>${esc(p.name)}</td><td>${cell(avail)}</td>…`;                    // qualityTable
+const show = (v: number | null) => (p.rankable ? fmtPct(v) : `<span class="insuff">—</span>`); // accuracyTable
+```
+
+---
+
+## v39.23 — 2026-07-05 — Deck v2: port table card visual pass (depth + icon-circle header)
+
+Port table cards (population, sample, and — since they share the same
+`.v2-port-col`/`qualityTable`/`accuracyTable` markup — the section-2 quality
+and accuracy cards too) get a bit more depth: a soft outer box-shadow so the
+card lifts off the slide background, and the header icon moves from a bare
+glyph to an icon-circle badge matching the language already established by
+`.v2-term-card`/`.v2-cover-meta-icon`/`.v2-sep-icon` elsewhere in this deck.
+
+**File:** `src/data/reporting/executive/deck2/theme.ts`
+
+**Before:**
+```css
+.v2-port-col{ … border-radius:14px;overflow:hidden;background:…; }
+.v2-port-col-head .v2-port-col-icon{display:inline-flex;color:var(--green);}
+```
+
+**After:**
+```css
+.v2-port-col{ … border-radius:14px;overflow:hidden;background:…;box-shadow:0 10px 24px rgba(0,0,0,.22); }
+.v2-port-col-head .v2-port-col-icon{
+  display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;
+  width:36px;height:36px;border-radius:50%;color:var(--green);
+  border:1.5px solid rgba(139,195,74,.4);background:rgba(139,195,74,.1);
+}
+.v2-port-col.sea .v2-port-col-head .v2-port-col-icon{color:var(--blue);border-color:rgba(107,169,248,.4);background:rgba(107,169,248,.1);}
+```
+
+---
+
+## v39.22 — 2026-07-05 — Deck v2: مجتمع الحالات بناءً على المخاطر visual pass
+
+Risk-stage tiles got a severity-matched icon badge (المستوى الأول → check,
+… الرابع → shield, escalating with the level's real-world severity per
+`STAGE_MEANINGS`) and the totals banner at the bottom of the page now reads
+as a proper summary strip (icon + label/value pairs) instead of a plain
+inline sentence with bolded numbers.
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**Before:**
+```ts
+const STAGE_TONES = ["gold", "blue", "green", "coral"] as const;
+// tile: <div class="kpi-tile-label">…</div> (no icon)
+const totals = `<div class="v2-totals">إجمالي المجتمع: <b>…</b> حالة · إجمالي العيّنة: <b>…</b> · التغطية الكلية: <b>…</b></div>`;
+```
+
+**After:**
+```ts
+const STAGE_TONES = ["gold", "blue", "green", "coral"] as const;
+const STAGE_ICONS = ["check", "flag", "alert", "shield"] as const;
+// tile: <div class="kpi-tile-icon">{icon}</div> above the label
+const totals = `<div class="v2-totals-band"><div class="v2-totals-item">…</div>…</div>`; // 3 icon+value cards
+```
+
+**File:** `src/data/reporting/executive/deck2/theme.ts`
+
+**After (new):** `.kpi-tile-icon` (icon-circle badge inside a `.kpi-tile`, tone-colored to match the tile's existing accent bar) and `.v2-totals-band`/`.v2-totals-item` (replaces the old inline `.v2-totals` sentence with three icon-led summary cards). `.v2-totals` rule kept (still used for its border/background as the shared card look, not removed since nothing else references it).
+
+---
+
+## v39.21 — 2026-07-05 — Deck v2: section-separator visual pass (glossary already polished)
+
+Continuing the page-by-page visual pass. المعجم (glossary) already got a
+dedicated icon-card redesign in v39.11 and needs no further work right now.
+The section-separator slides (فاصل القسم) were still just a bare number +
+title + paragraph, with none of the decorative treatment the cover page or
+port-table cards have — brought them in line: a background glow (reusing the
+cover's `.slide-art` radial-gradient language, scoped to `.v2-sep-bg` so it
+doesn't leak into other `.slide.v2` pages), an icon badge above the section
+number, and a gold divider rule between the title and the blurb (matching
+the cover page's `.title-rule`).
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**Before:**
+```ts
+export function sectionSeparatorSlide(sectionNo, sectionKey, title, blurb, num, total): string {
+  // <div class="v2-sep"><div class="v2-sep-num">…</div><h2>…</h2><p>…</p></div>
+}
+// call sites: sectionSeparatorSlide(1, "section1", "مجتمع الفحص", …)
+```
+
+**After:**
+```ts
+export function sectionSeparatorSlide(sectionNo, sectionKey, iconName, title, blurb, num, total): string {
+  // adds <div class="v2-sep-bg"> + <div class="v2-sep-icon">{icon}</div> + <div class="v2-sep-rule">
+}
+// call sites pass "layers" (section 1) / "gauge" (section 2)
+```
+
+**File:** `src/data/reporting/executive/deck2/theme.ts`
+
+**After (new):** `.v2-sep-bg` (radial glow, absolutely positioned behind `.v2-sep`), `.v2-sep-icon` (icon-circle badge, gold border matching the established icon-circle language), `.v2-sep-rule` (gold divider bar).
+
+---
+
+## v39.20 — 2026-07-05 — Deck v2: cover + المحتويات visual pass
+
+Content-first visual pass, page by page per user direction ("work on the
+visuals per deck or page not all report at once"). This entry covers the
+cover (الغلاف) and المحتويات pages only.
+
+**Cover**: restores the classification badge ("داخلي — للاستخدام التنفيذي")
+that v1's deck has and v2 had dropped — same honest-security convention used
+throughout this report family. The 4-item meta grid (فترة الدراسة / تاريخ
+الإصدار / الإدارة / القسم) now gets an icon-circle badge per item (matching
+the `.v2-term-card`/`.v2-port-col-head` icon-circle language already
+established elsewhere in this deck, for visual consistency across pages),
+plus a subtle top accent bar per card.
+
+**المحتويات**: the existing `.deck-agenda` list (inherited from v1) gets a
+per-item icon reflecting what that section actually covers (المعجم →
+document, القسم 1 → layers, القسم 2 → gauge) instead of a plain number-only
+badge, and a touch more visual separation between items.
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**Before:**
+```ts
+// coverSlide: <div class="v2-cover-meta-item"><span class="v2-cover-meta-label">…
+// tocSlide: <div class="deck-agenda-num">${pad(i+1)}</div>
+```
+
+**After:**
+```ts
+// coverSlide: adds <div class="title-classify"> + a per-item icon name, .v2-cover-meta-item now
+// renders an icon-circle badge before the label/value stack.
+// tocSlide: TocItem gains an `icon` field; agenda item renders the icon inside the num badge.
+```
+
+**File:** `src/data/reporting/executive/deck2/theme.ts`
+
+**After (new/changed):** `.v2-cover-meta-item` restructured to a horizontal icon+text layout with an icon-circle badge and a top accent bar; `.deck-agenda-num` (v1, reused here) gets a v2-scoped icon variant.
+
+---
+
+## v39.19 — 2026-07-05 — Deck v2: side navigation bar (section + page progress)
+
+Adds a persistent on-screen left rail (hidden in print and below 1280px):
+lists every section (الغلاف / المحتويات / المعجم / القسم 1 / القسم 2),
+highlights the one currently in view, and shows "الصفحة X من Y — تبقّى N"
+with a progress bar. Every slide now carries `data-section`/
+`data-section-label` attributes (new `NAV_SECTIONS` registry + `NavSectionKey`
+type in slides.ts — one source of truth, threaded through `v2Slide`,
+`coverSlide`, and `sectionSeparatorSlide`); the nav's list and active-item
+tracking are built purely by reading those attributes from the DOM at
+runtime (`DECK_NAV_SCRIPT` in deck2/index.ts), so there is nothing to keep in
+sync by hand as pages are added, removed, or paginated differently. Pure
+vanilla JS (no framework) — this is on-screen review chrome, not slide-layout
+math, so it doesn't touch the deck's no-runtime-layout-recompute discipline.
+
+Caught and fixed one real bug while verifying: the initial implementation
+throttled the scroll handler through `requestAnimationFrame`, but rAF is
+throttled/paused entirely on a `document.hidden` page (confirmed via the
+embedded preview panel, which reports `document.hidden === true`) — that's
+a genuine browser behavior, not a preview-tool quirk, so a backgrounded
+report tab could have silently stopped updating the nav. Since `update()` is
+a cheap handful of `getBoundingClientRect()` reads over ~10 slides, there's
+no need for the throttle at all — the scroll listener now calls `update()`
+directly.
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**After (new):**
+```ts
+export const NAV_SECTIONS = { cover: "الغلاف", toc: "المحتويات", glossary: "المعجم", section1: "…", section2: "…" } as const;
+export type NavSectionKey = keyof typeof NAV_SECTIONS;
+// v2Slide(opts) gains `section: NavSectionKey`, renders data-section/data-section-label
+// sectionSeparatorSlide gains a `sectionKey: NavSectionKey` parameter
+// coverSlide's bespoke <section> tag gets the same two data attributes
+```
+
+**File:** `src/data/reporting/executive/deck2/index.ts`
+
+**After (new):** `DECK_NAV_SCRIPT` (vanilla JS: builds the nav list from `data-section`, tracks scroll position, updates active highlight + progress text/bar) and the `<nav class="deck-nav">…</nav>` markup, inserted before `.deck-viewer` (now also carrying a `deck-viewer-v2` class for the sidebar's padding offset).
+
+**File:** `src/data/reporting/executive/deck2/theme.ts`
+
+**After (new):** `.deck-nav`/`.deck-nav-*` rules (fixed left rail, progress bar, section list, active-state styling), `.deck-viewer-v2` padding offset at ≥1281px, and hide rules at ≤1280px and `@media print`.
+
+---
+
+## v39.18 — 2026-07-04 — Deck preview fixture: synthetic template + submitted answers
+
+The section-2 pages (image quality / accuracy per port) rendered nothing but
+"—" in the live preview because `buildPreviewInput()` passed
+`employeeFiles: [], template: null` — no submitted answers exist for
+`calculateExecutiveKPIs`/`model.portAccuracy` to compute from. Extends the
+dev-only fixture with a small synthetic `TemplateSchema` (4 fields matching
+the real app's field-mapping labels: هل يوجد صورة / هل يوجد تحديد / مستوى
+جودة الصورة / صحة النتيجة) and one `EmployeeAnswerFile` with a submitted
+answer for ~92% of sampled rows (image quality skewed toward عالي/متوسط,
+expert result agreeing with the L1/L2 call ~92% of the time to produce a
+realistic, non-100% accuracy). Dev-only — never touches production code or
+the real report builders.
+
+**File:** `src/dev/deckPreviewFixture.ts`
+
+**Before:**
+```ts
+return {
+  ...
+  employeeFiles: [],
+  template: null,
+  config: DEFAULT_EXEC_CONFIG,
+};
+```
+
+**After:**
+```ts
+function buildPreviewTemplate(): TemplateSchema { /* 4 fields, labels matching DEFAULT_EXEC_FIELD_MAPPINGS */ }
+function buildPreviewAnswers(sampleRows): EmployeeAnswerFile[] { /* submitted answers for ~92% of sample rows */ }
+// buildPreviewInput():
+return {
+  ...
+  employeeFiles: buildPreviewAnswers(sample.rows),
+  template: buildPreviewTemplate(),
+  config: DEFAULT_EXEC_CONFIG,
+};
+```
+
+---
+
+## v39.17 — 2026-07-04 — Deck v2: section 2 — نتائج فحص الجودة (image quality + accuracy per port)
+
+Adds the second content section, built on the app's real inspection template
+fields (`buildDefaultInspectionTemplate` in
+`src/components/Sidebar/Tabs/TemplateBuilder/index.tsx`) and existing
+model aggregates — no new business logic invented, only new visualizations
+of numbers the report model already computes:
+
+- **Section separator**: "نتائج فحص الجودة".
+- **Page A — نتائج جودة الصور في المنافذ**: per-port التوفر / التحديد /
+  الجودة المقبولة, computed fresh from `model.rows` using the EXACT same
+  predicates as the global KPI calculator (`calculateExecutiveKPIs` in
+  `executiveReportData.ts`: submitted answers only, `imageAvailable`,
+  `hasMarking`, `imageQuality` ∈ {عالي, متوسط, منخفض}) — no per-port version
+  of these existed yet, so `collectPortQualityStats()` is new.
+- **Page B — نتائج دقة نتائج المنافذ (اشتباه / سليمة)**: per-port الدقة
+  العامة / دقة الاشتباه / دقة السليمة. No new aggregation needed —
+  `model.portAccuracy` (`Aggregates["byPort"]`, the same data the OLD v1
+  deck's port-ranking slide already consumes) already has
+  `accuracy`/`detectionRate`/`correctClean`/`falseSuspicion` per port;
+  دقة السليمة is derived as `correctClean/(correctClean+falseSuspicion)`.
+  Ports below the data-sufficiency threshold (`isRankable(band)`, the same
+  `insufficient`/`none` gate used everywhere else in this report) show `—`
+  instead of a misleading rate, while still being listed.
+
+Both pages reuse the exact land/sea tinted-card table infrastructure from
+section 1 (`METRICS_NORMAL`/`METRICS_COMPACT`, `planPortPages`, the dynamic
+pixel-exact filler row, print toggle via `v2Slide`) — new render functions
+(`qualityTable`, `accuracyTable`) since the cell content differs (single
+percentage values, not stacked frac cells), but same card/pagination shell.
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**After (new):**
+```ts
+function collectPortQualityStats(model): { land: PortQualityRow[]; sea: PortQualityRow[] } { … }
+function qualityTable(title, rows, variant, compact): string { … }
+export function qualityPortSlideBuilders(model): SlideBuilder[] { … }
+
+function collectPortAccuracyRows(model): { land: PortAccuracyRow[]; sea: PortAccuracyRow[] } { … }
+function accuracyTable(title, rows, variant, compact): string { … }
+export function accuracyPortSlideBuilders(model): SlideBuilder[] { … }
+```
+
+`buildDeckV2Slides` gains a `sectionTwo` array (separator + quality page(s) +
+accuracy page(s)), and the التوّابع/TOC page-range math extends to a third
+entry the same way section 1's did.
+
+---
+
+## v39.16 — 2026-07-04 — Deck v2: fix frac-cell number overlap; correctly unify row height
+
+v39.14's row-height unification used `line-height:.6` on the sample table's
+stacked "N من M" cell — this looked fine by `getBoundingClientRect()` (line
+boxes touched, gap 0) but the ACTUAL GLYPH INK overflows a shrunk line box
+even with a "gap" of 0 at the box level: measured via
+`canvas.measureText().actualBoundingBoxAscent/Descent`, the big number's ink
+(~9-11px) exceeded its `0.6 line-height` box (~7.1px) by ~3px, so the two
+numbers visually overlapped — exactly what the user reported. Re-derived
+using real font-metric ink measurements this time (not just layout boxes):
+
+- Normal tier target: 41px (up from the unsafe 35px). Common padding
+  (thead everywhere + population's plain tbody/tfoot) is now 10px 10px;
+  sample's tbody/tfoot get their own 7.5px 10px + a safe frac tuning
+  (`line-height:1.05`, big 0.7rem, small 0.5rem) — both land on 41px, with
+  positive ink margins on both lines (verified via canvas metrics).
+- Compact tier target: 25px (up from 22px). Common compact padding is now
+  3.5px 6px; sample's compact tbody/tfoot get 0px 6px + `line-height:1.15`,
+  big 0.58rem, small 0.46rem — both land on 25px, ink-safe.
+- `BASE_ROWS_PER_PAGE` recomputed for the taller rows: 9 → 7
+  (`(388−41−41)/41 ≈ 7`).
+- thead now uses the COMMON padding in both modes (not a sample-specific
+  override), so it stays visually consistent with population's body rows
+  AND with sample's own thead — the earlier attempt applied one padding to
+  an entire table per mode, which fixed tbody parity but broke thead parity
+  within the sample table itself; this version scopes the override to
+  `tbody`/`tfoot` only, leaving `thead` on the shared rule everywhere.
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**Before:**
+```ts
+const METRICS_NORMAL: ModeMetrics = { rowH: 35, theadH: 35, tfootH: 35 };
+const METRICS_COMPACT: ModeMetrics = { rowH: 22, theadH: 22, tfootH: 22 };
+const BASE_ROWS_PER_PAGE = 9;
+// cls = `v2-port-col ${variant}${compact ? " compact" : ""}`
+```
+
+**After:**
+```ts
+const METRICS_NORMAL: ModeMetrics = { rowH: 41, theadH: 41, tfootH: 41 };
+const METRICS_COMPACT: ModeMetrics = { rowH: 25, theadH: 25, tfootH: 25 };
+const BASE_ROWS_PER_PAGE = 7;
+// cls = `v2-port-col ${variant}${mode === "sample" ? " sample-mode" : ""}${compact ? " compact" : ""}`
+```
+
+**File:** `src/data/reporting/executive/deck2/theme.ts`
+
+**Before:**
+```css
+.v2-port-col .deck-table th,.v2-port-col .deck-table td{padding:7px 10px;font-size:0.78rem;}
+.v2-port-col.compact .deck-table th,.v2-port-col.compact .deck-table td{padding:2px 6px;font-size:0.66rem;}
+.v2-frac{display:inline-flex;flex-direction:column;align-items:center;line-height:.6;}
+.v2-frac b{font-weight:800;font-size:0.74rem;}
+.v2-frac span{font-size:0.52rem;color:var(--muted);white-space:nowrap;}
+.v2-port-col.compact .v2-frac b{font-size:.62rem;}
+.v2-port-col.compact .v2-frac span{font-size:.42rem;}
+```
+
+**After:**
+```css
+.v2-port-col .deck-table th,.v2-port-col .deck-table td{padding:10px 10px;font-size:0.78rem;}
+.v2-port-col.compact .deck-table th,.v2-port-col.compact .deck-table td{padding:3.5px 6px;font-size:0.66rem;}
+/* Sample's stacked cells need their OWN (smaller) tbody/tfoot padding — the
+   common padding above is sized for plain single-line content (thead,
+   population); frac content is inherently taller at any given padding. */
+.v2-port-col.sample-mode .deck-table tbody td,
+.v2-port-col.sample-mode .deck-table tfoot td{padding:7.5px 10px;}
+.v2-port-col.sample-mode.compact .deck-table tbody td,
+.v2-port-col.sample-mode.compact .deck-table tfoot td{padding:0px 6px;}
+.v2-frac{display:inline-flex;flex-direction:column;align-items:center;line-height:1.05;}
+.v2-frac b{font-weight:800;font-size:0.7rem;}
+.v2-frac span{font-size:0.5rem;color:var(--muted);white-space:nowrap;}
+.v2-port-col.compact .v2-frac{line-height:1.15;}
+.v2-port-col.compact .v2-frac b{font-size:.58rem;}
+.v2-port-col.compact .v2-frac span{font-size:.46rem;}
+```
+
+---
+
+## v39.15 — 2026-07-04 — Deck v2: per-slide print-include toggle (top-right corner, no JS)
+
+Each slide now has a small checkbox switch in its literal top-right corner
+(on-screen only). Unchecking it excludes that slide from the printed/PDF
+output; the deck stays otherwise unchanged. Implemented with pure CSS (no
+inline `<script>`, keeping the exported HTML's interactivity minimal): a
+plain `<input type="checkbox" checked>` inside a `.slide-print-toggle` label,
+and a `@media print` rule using `:has()` — `.slide:has(.slide-print-toggle
+input:not(:checked)){display:none!important;}` — to hide the whole slide box
+when its checkbox is unchecked. `:has()` is safe here since this app already
+targets Chromium only (the File System Access API requirement, per
+CLAUDE.md). The toggle control itself is hidden under `@media print` so it
+never appears in the output. Numbering caveat: the "0X / 0Y" counters and
+المحتويات page ranges are computed at build time and do NOT renumber live
+when slides are toggled off — a printed subset may show non-contiguous
+numbers (e.g. 01, 02, 04). Flagged to the user; live renumbering would need
+a small inline script and can be added as a follow-up if wanted.
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**Before:** no print-toggle control; `v2Slide()`, `coverSlide()`, and `sectionSeparatorSlide()` opened directly with `<section class="slide …">`.
+
+**After:**
+```ts
+function printToggle(): string {
+  return `<label class="slide-print-toggle" title="تضمين هذه الصفحة عند الطباعة">
+    <input type="checkbox" checked/>
+    <span class="slide-print-toggle-track"><span class="slide-print-toggle-thumb"></span></span>
+  </label>`;
+}
+// inserted as the first child of every <section class="slide …"> across v2Slide/coverSlide/sectionSeparatorSlide
+```
+
+**File:** `src/data/reporting/executive/deck2/theme.ts`
+
+**After (new rules):**
+```css
+.slide-print-toggle{position:absolute;top:12px;right:14px;z-index:6;/* … switch styling … */}
+@media print{
+  .slide-print-toggle{display:none!important;}
+  .slide:has(.slide-print-toggle input:not(:checked)){display:none!important;}
+}
+```
+
+---
+
+## v39.14 — 2026-07-04 — Deck v2: unify row height between population and sample tables
+
+The two port-table modes rendered at different row heights (population 35px
+plain cells vs sample 46px stacked "N من M" frac cells), so the two pages
+didn't visually match — reported by the user ("the rows width and height is
+different for sample and population make it one"). Retuned `.v2-frac`'s
+internal type scale (line-height + big/small font sizes) so the two-line
+stacked cell now fits the EXACT same row height as a plain cell, at both
+tiers: 35px normal (`bigFont 0.74rem` / `line-height 0.6` / `smallFont
+0.52rem`), 22px compact (`bigFont 0.62rem` / `line-height 0.6` / `smallFont
+0.42rem`). Verified live: in both tiers the two stacked lines touch with zero
+gap but zero overlap (safe since digits have no descenders). With row height
+now identical, `portTable`'s per-mode `ModeMetrics` split collapses to one
+shared metrics pair (normal/compact) — the whole "population vs sample have
+different physics" branching from v39.9/v39.10/v39.13 is gone.
+
+**File:** `src/data/reporting/executive/deck2/theme.ts`
+
+**Before:**
+```css
+.v2-frac{display:inline-flex;flex-direction:column;align-items:center;line-height:1.2;}
+.v2-frac b{font-weight:800;}
+.v2-frac span{font-size:0.66rem;color:var(--muted);white-space:nowrap;}
+/* …and, in .compact: */
+.v2-port-col.compact .v2-frac{line-height:.95;}
+.v2-port-col.compact .v2-frac span{font-size:.5rem;}
+```
+
+**After:**
+```css
+.v2-frac{display:inline-flex;flex-direction:column;align-items:center;line-height:.6;}
+.v2-frac b{font-weight:800;font-size:0.74rem;}
+.v2-frac span{font-size:0.52rem;color:var(--muted);white-space:nowrap;}
+/* …and, in .compact: */
+.v2-port-col.compact .v2-frac{line-height:.6;}
+.v2-port-col.compact .v2-frac b{font-size:.62rem;}
+.v2-port-col.compact .v2-frac span{font-size:.42rem;}
+```
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**Before:**
+```ts
+const METRICS_POPULATION_NORMAL: ModeMetrics = { rowH: 35, theadH: 35, tfootH: 35 };
+const METRICS_POPULATION_COMPACT: ModeMetrics = { rowH: 22, theadH: 22, tfootH: 22 };
+const METRICS_SAMPLE_NORMAL: ModeMetrics = { rowH: 46, theadH: 35, tfootH: 45 };
+const METRICS_SAMPLE_COMPACT: ModeMetrics = { rowH: 27, theadH: 22, tfootH: 26 };
+```
+
+**After:**
+```ts
+const METRICS_NORMAL: ModeMetrics = { rowH: 35, theadH: 35, tfootH: 35 };
+const METRICS_COMPACT: ModeMetrics = { rowH: 22, theadH: 22, tfootH: 22 };
+// one shared pair — population and sample now render at identical row heights
+```
+
+---
+
+## v39.13 — 2026-07-04 — Deck v2: dynamic pixel-exact filler row — totals always flush to card bottom
+
+v39.8–v39.10 padded `tbody` with N discrete blank `<tr>` rows up to a fixed
+row-count target. That target was calibrated with deliberate safety slack
+(3px for population-normal, up to 97px for sample-compact when the real data
+didn't need the full compression headroom) — and that slack rendered as a
+visible gap before الإجمالي (population) or as dead space *below* الإجمالي
+(sample, whose compact rows are much shorter, so filling to a row-count
+target left the table far short of the card's actual height). Reported by
+the user with screenshots on both pages.
+
+Root fix: stop padding by row *count* and instead compute the *exact pixel*
+gap needed — `TABLE_BUDGET_PX (388, measured) − (thead + tfoot + realRows ×
+rowHeight)` using the measured per-mode/tier metrics already established in
+v39.9/v39.10 — and render it as ONE spacer `<tr>` with an inline
+`style="height:Npx"`. This maps the gap dynamically to whatever space is
+actually left in the card, for any row count, any tier, with zero slack —
+exactly "always at the bottom of the shape" per the user's request. Also
+removes the now-unneeded `targetRows` plumbing from `portTable` (pagination's
+`rowsPerPage` is still used for slicing land/sea into page chunks — only the
+blank-fill mechanism changed).
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**Before:**
+```ts
+function portTable(title, rows, mode, variant, targetRows: number, compact: boolean): string {
+  const blankRows = Array.from(
+    { length: Math.max(0, targetRows - dataRowCount) },
+    () => `<tr class="v2-blank"><td colspan="${span}">&nbsp;</td></tr>`,
+  ).join("");
+  // … tbody = trs + blankRows (N discrete rows, sized by the row/compact CSS)
+}
+```
+
+**After:**
+```ts
+type ModeMetrics = { rowH: number; theadH: number; tfootH: number };
+// measured live (v39.9/v39.10): population normal/compact, sample normal/compact
+const TABLE_BUDGET_PX = 388; // bodyH(459) − card head(71), measured
+
+function portTable(title, rows, mode, variant, compact: boolean): string {
+  const metrics = pickMetrics(mode, compact);
+  const used = metrics.theadH + metrics.tfootH + dataRowCount * metrics.rowH;
+  const fillerPx = Math.max(0, TABLE_BUDGET_PX - used);
+  const blankRow = fillerPx > 0 ? `<tr class="v2-blank" style="height:${fillerPx}px"><td colspan="${span}">&nbsp;</td></tr>` : "";
+  // … tbody = trs + blankRow (ONE row, exact remaining height)
+}
+```
+
+---
+
+## v39.12 — 2026-07-04 — Deck v2: blank filler rows no longer show a faint zebra-stripe tint
+
+The invisible spacer rows added in v39.8 (padding `tbody` up to a page's row
+budget so الإجمالي lands at a fixed position) only zeroed out the `<td>`
+background; the alternating-row zebra tint from the shared `deck-table`
+theme (`tbody tr:nth-child(even)`) is set on the `<tr>` itself, so every
+other blank row still showed a faint (~2.4% white) stripe bleeding through.
+Cosmetic only (no layout impact) but worth killing since these rows are
+meant to be fully invisible spacers.
+
+**File:** `src/data/reporting/executive/deck2/theme.ts`
+
+**Before:**
+```css
+.v2-port-col .deck-table tbody tr.v2-blank td{
+  border-bottom-color:transparent;color:transparent;background:transparent!important;
+}
+```
+
+**After:**
+```css
+.v2-port-col .deck-table tbody tr.v2-blank,
+.v2-port-col .deck-table tbody tr.v2-blank td{
+  border-bottom-color:transparent;color:transparent;background:transparent!important;
+}
+```
+
+---
+
+## v39.11 — 2026-07-04 — Deck v2: glossary redesigned as icon-card grid + risk-stage meanings
+
+Two content changes per user reference image:
+
+1. **المعجم (page 3)** rebuilt from a plain 2-column text list into an
+   icon-card grid matching the reference design: each term gets a tinted
+   icon-circle badge, a colored bottom-border accent, and its definition
+   below — 7 accent tones cycling across the 12 terms. Builder paginates
+   (like the port tables) if a future glossary grows past one page; with the
+   current 12 terms a 4-col × 3-row grid fits the full slide body with zero
+   overflow (measured live: 145px/card, no clipped text), so it renders as a
+   single page rather than the initially-tried 8+4 split (which left the
+   4-card second page stretched to awkward near-full-height cards).
+2. **مجتمع الحالات بناءً على المخاطر (page 5)**: each risk-level tile now
+   shows its meaning (a one-line definition of what qualifies a case for that
+   level) under the population/sample/coverage figures, sourced from the
+   reference image's four level descriptions (`STAGE_MEANINGS`, keyed by
+   stage label so it degrades gracefully if a stage label doesn't match).
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**Before:**
+```ts
+const GLOSSARY: Array<{ term: string; def: string }> = [ /* term, def only */ ];
+export function glossarySlide(num, total): string {
+  // plain 2-column .v2-term list, no icons, single page always
+}
+const STAGE_TONES = ["gold", "blue", "green", "coral"] as const;
+export function riskStagesSlide(model, num, total): string {
+  // tile: label + value + "العيّنة … · التغطية …" sub-line only, no meaning
+}
+```
+
+**After:**
+```ts
+const GLOSSARY: Array<{ term: string; def: string; icon: string; tone: Tone }> = [ /* + icon + tone */ ];
+export function glossarySlideBuilders(): SlideBuilder[] {
+  // paginated icon-card grid (same pattern as portPopulationSlideBuilders)
+}
+const STAGE_MEANINGS: Record<string, string> = { "المستوى الأول": "…", … };
+export function riskStagesSlide(model, num, total): string {
+  // tile now also renders <div class="v2-stage-meaning">{meaning}</div>
+}
+```
+
+**File:** `src/data/reporting/executive/deck2/theme.ts`
+
+**Before:** no `.v2-term-card` / `.v2-term-grid` / `.v2-stage-meaning` rules (glossary used the old `.v2-gloss`/`.v2-term` list styles).
+
+**After:** new `.v2-term-grid`/`.v2-term-card` (icon-circle badge + colored bottom border, tone variants) and `.v2-stage-meaning` (small muted paragraph under each stage tile) rules; sizes tuned against live measurement to avoid the `.v2-port-col`-style card-overflow bug hit earlier in this session.
+
+---
+
+## v39.10 — 2026-07-04 — Deck v2: per-mode row budget — sample table's frac cells are taller than plain cells
+
+v39.9's fix used one shared `BASE_ROWS_PER_PAGE` for both port-table modes, but
+live measurement showed the sample table's stacked "N من M" frac cells render
+at 46px/row + 45px tfoot (vs the population table's plain 35px/35px) — even at
+NORMAL (non-compact) size. Reusing the population-derived base (9) on the
+sample table overflowed its own `.v2-port-col` (which has its own
+`overflow:hidden`) by ~94px, clipping the totals row and the last data row —
+exactly the "no total, some cut off" bug reported, and the actual mechanism
+was the CARD's overflow, not the outer `.slide`'s (an easy thing to
+misdiagnose since `.slide` itself measured `scrollHeight === clientHeight`).
+
+Fixed by giving each mode its own measured base capacity and its own
+`planPortPages()` call: `BASE_ROWS_POPULATION = 9` (plain cells),
+`BASE_ROWS_SAMPLE = 6` (frac cells). Both were verified against the shared
+`compact` tier for their own BASE+3 target (12 and 9 rows respectively) with
+comfortable slack (80px and 97px) via live DOM measurement, not estimation.
+Population and sample slides may now paginate at different densities for the
+same month — expected, since one page-set uses much taller rows than the
+other; the التوابع/التوّابع "(تابع)" and TOC page-range logic are unaffected
+since they only count final slide totals, not internal row math.
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**Before:**
+```ts
+const BASE_ROWS_PER_PAGE = 9; // one shared base for both population and sample tables
+// portPopulationSlideBuilders: planPortPages(land.length, sea.length)
+// portSampleSlideBuilders:     planPortPages(land.length, sea.length)  // same base — wrong, sample rows are taller
+```
+
+**After:**
+```ts
+const BASE_ROWS_POPULATION = 9; // plain cells, measured (388 - 35 - 35) / 35
+const BASE_ROWS_SAMPLE = 6;     // frac cells are taller, measured (388 - 35 - 45) / 46
+function planPortPages(landCount, seaCount, baseRowsPerPage: number): PortPagePlan { … }
+// portPopulationSlideBuilders: planPortPages(land.length, sea.length, BASE_ROWS_POPULATION)
+// portSampleSlideBuilders:     planPortPages(land.length, sea.length, BASE_ROWS_SAMPLE)
+```
+
+---
+
+## v39.9 — 2026-07-04 — Deck v2: fix port-table overflow clipping — corrected row-height math
+
+v39.8's blank-row padding exposed a pre-existing math error: `BASE_ROWS_PER_PAGE`
+was estimated at 10 assuming ~26px rows, but the real rendered row height
+(padding 7px + 0.78rem line content) measured 35px in the live preview. Padding
+a table's tbody up to 10 real rows made it taller than the slide's available
+body (measured 459px, minus a 71px card head, 35px thead, 35px tfoot = 318px
+→ only 9 rows fit with margin), so `overflow:hidden` on `.slide` clipped the
+tfoot (and the last data row) right off — exactly what the user saw ("i dont
+see total plus some is out of the frame").
+
+Fixed by: (1) dropping `BASE_ROWS_PER_PAGE` to 9 (measured, not estimated),
+and (2) re-deriving the `compact` tier from real measurements instead of a
+guess — the previous compact CSS (padding 5px 8px / font 0.72rem) only shaved
+row height to 30px, nowhere near enough to fit 3 extra rows (12 total) in the
+318px row budget. The frac cells (sample table's stacked "N من M") are taller
+than plain cells at any given font, so the compact tier had to be sized to
+the frac case specifically (font 0.66rem, tighter frac line-height/sub-font)
+to reach 27px/row, which is what actually fits 12 rows. Verified in the live
+preview by cloning rows to simulate a 12-row table under the new compact CSS
+on both the population and sample slide — zero clipping (`slide.scrollHeight
+<= slide.clientHeight`) on both.
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**Before:**
+```ts
+/**
+ * Base row budget for one port table page. The 16:9 slide reserves roughly
+ * 380px for the table body under the headline/subhead; a card header (~54px)
+ * and table thead+tfoot (~68px) leave ~260px for data rows, and each row at
+ * normal size (padding 7px + line content) runs ~26px → 260/26 ≈ 10 rows.
+ */
+const BASE_ROWS_PER_PAGE = 10;
+```
+
+**After:**
+```ts
+/**
+ * Base row budget for one port table page — measured, not estimated (see
+ * v39.9): the 16:9 slide's `.slide-body` renders at 459px here, a port card's
+ * header is 71px, and thead/tfoot are 35px each, leaving 318px for data rows
+ * at the real per-row height of 35px (padding 7px + 0.78rem line content) →
+ * 318 / 35 ≈ 9 rows with a few px of margin. `overflow:hidden` on `.slide`
+ * means going over this clips the totals row silently, so keep this
+ * conservative rather than tight.
+ */
+const BASE_ROWS_PER_PAGE = 9;
+```
+
+**File:** `src/data/reporting/executive/deck2/theme.ts`
+
+**Before:**
+```css
+.v2-port-col.compact .deck-table th,.v2-port-col.compact .deck-table td{padding:5px 8px;font-size:0.72rem;}
+.v2-port-col.compact .v2-frac span{font-size:0.6rem;}
+```
+
+**After:**
+```css
+/* Sized to fit BASE_ROWS_PER_PAGE + COMPRESS_OVERFLOW_MAX (9+3=12) rows
+   inside the same 318px row budget — the frac cell (sample table's stacked
+   "N من M") is the tallest cell type, so the tier is tuned to it, not to the
+   simpler population-table cell. Measured, see v39.9. */
+.v2-port-col.compact .deck-table th,.v2-port-col.compact .deck-table td{padding:2px 6px;font-size:0.66rem;}
+.v2-port-col.compact .v2-frac{line-height:.95;}
+.v2-port-col.compact .v2-frac span{font-size:.5rem;}
+```
+
+---
+
+## v39.8 — 2026-07-04 — Deck v2: pin الإجمالي to a fixed bottom row + math-based pagination with overflow compression
+
+Two fixes to the port tables, per user direction:
+
+1. **الإجمالي pinned to a fixed bottom location.** Previously `tfoot` sat
+   directly under whatever row the data happened to end on, so shorter tables
+   (fewer ports) had the totals row floating mid-card while the watermark
+   filler pushed below it. Now `tbody` is padded with invisible blank `<tr>`
+   rows up to the page's row budget, so every table on a page has the same
+   total row count → the totals row lands at the exact same height across
+   land/sea and across pages. The old `.v2-port-fill` watermark div (which
+   didn't guarantee alignment) is dropped in favor of this row-count parity;
+   the now-unused `wheel` icon is removed from the registry (`truck`/`ship`
+   stay — still used in the card header).
+2. **Math-based pagination with small-overflow compression.** Replaces the
+   flat `PORT_ROWS_PER_PAGE = 10` constant with `planPortPages()`: a base
+   budget of 10 rows (derived from the 16:9 slide's table-area height budget —
+   see the comment in code), and a rule that if the port count overflows that
+   budget by only 1–3 rows, the table compresses (smaller padding/font, still
+   readable) to fit everyone on one page instead of spilling 1–3 rows onto a
+   near-empty continuation page. Beyond a 3-row overflow, it paginates
+   normally at the base row size.
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**Before:**
+```ts
+function portTable(title: string, rows: PortPopRow[], mode: "population" | "sample", variant: "land" | "sea"): string {
+  // … no blank-row padding, no compact mode …
+  const watermark = variant === "land" ? "truck" : "wheel";
+  return `<div class="v2-port-col ${variant}"> … <div class="v2-port-fill">${icon(watermark, 120)}</div></div>`;
+}
+
+const PORT_ROWS_PER_PAGE = 10;
+// portPopulationSlideBuilders / portSampleSlideBuilders each compute:
+const pages = Math.max(1, Math.ceil(land.length / PORT_ROWS_PER_PAGE), Math.ceil(sea.length / PORT_ROWS_PER_PAGE));
+```
+
+**After:**
+```ts
+const BASE_ROWS_PER_PAGE = 10; // derived from the slide's table-area height budget
+const COMPRESS_OVERFLOW_MAX = 3; // 1–3 rows over budget: compress instead of a new page
+
+function planPortPages(landCount: number, seaCount: number): { pages: number; rowsPerPage: number; compact: boolean } { … }
+
+function portTable(title, rows, mode, variant, targetRows, compact): string {
+  // tbody padded with blank <tr> rows up to targetRows so tfoot always lands
+  // at the same height; `compact` adds a small padding/font reduction.
+}
+```
+
+**File:** `src/data/reporting/executive/deck2/theme.ts`
+
+**Before:**
+```css
+.v2-port-fill{flex:1;display:flex;align-items:center;justify-content:center;min-height:0;padding:8px 0;color:#fff;opacity:.07;}
+.v2-port-fill svg{max-height:100%;}
+```
+
+**After:**
+```css
+.deck-table tbody tr.v2-blank td{border-bottom-color:transparent;color:transparent;background:transparent!important;}
+.v2-port-col.compact .deck-table th,.v2-port-col.compact .deck-table td{padding:5px 8px;font-size:0.72rem;}
+.v2-port-col.compact .v2-frac span{font-size:0.6rem;}
+```
+
+**File:** `src/data/reporting/executive/ui/icons.ts`
+
+**Before:** `wheel` icon path + named export present (used only by the removed watermark).
+
+**After:** `wheel` removed (dead code); `truck`/`ship` kept (still used in card headers).
+
+---
+
+## v39.7 — 2026-07-04 — Deck v2: normalize land/sea port tables (tinted cards, totals row, watermark filler)
+
+Sea ports are usually fewer than land ports, so the two tables ended at
+different heights and the sea column looked truncated. Following the user's
+reference design: each table is now a tinted card (green = بري with a truck
+icon, blue = بحري with a ship icon), both cards stretch to equal height, every
+table ends with an الإجمالي totals row, and the shorter table's empty space is
+filled with a large low-opacity watermark icon (ship wheel / truck) so it reads
+as intentional. Three new stroke icons (truck, ship, wheel) join the registry.
+
+**File:** `src/data/reporting/executive/ui/icons.ts`
+
+**Before:**
+```ts
+  // Arrow — leftward (RTL forward direction)
+  arrow:
+    '<path d="M19 12H5"/><path d="M11 6l-6 6 6 6"/>',
+};
+```
+
+**After:**
+```ts
+  // Arrow — leftward (RTL forward direction)
+  arrow:
+    '<path d="M19 12H5"/><path d="M11 6l-6 6 6 6"/>',
+  // Truck — land ports
+  truck: '<path d="M2 16V8a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v8"/><path d="M14 11h4l3 3v2h-2.2"/><circle cx="7" cy="17.5" r="1.7"/><circle cx="16.8" cy="17.5" r="1.7"/><path d="M8.7 17.5h6.4"/><path d="M2 16h3.3"/>',
+  // Ship — sea ports
+  ship: '<path d="M4 15l1.6 4.5h12.8L20 15l-8-2.6L4 15z"/><path d="M12 12.4V4"/><path d="M12 4l5.5 6.5H12"/>',
+  // Ship wheel — sea watermark
+  wheel: '<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.4"/><path d="M12 5V2"/><path d="M12 22v-3"/><path d="M5 12H2"/><path d="M22 12h-3"/><path d="M7.05 7.05 4.93 4.93"/><path d="M19.07 19.07l-2.12-2.12"/><path d="M16.95 7.05l2.12-2.12"/><path d="M4.93 19.07l2.12-2.12"/>',
+};
+```
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**Before:**
+```ts
+function portTable(title: string, rows: PortPopRow[], mode: "population" | "sample"): string {
+  // flat title line + table, no totals row, no card variant
+```
+
+**After:**
+```ts
+function portTable(title: string, rows: PortPopRow[], mode: "population" | "sample", variant: "land" | "sea"): string {
+  // tinted card (icon header + count sub-line) + table + tfoot الإجمالي + watermark filler
+```
+
+**File:** `src/data/reporting/executive/deck2/theme.ts`
+
+**Before:**
+```css
+.v2-port-split{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start;height:100%;}
+.v2-port-col{display:flex;flex-direction:column;gap:8px;min-width:0;}
+.v2-port-col-head{font-size:0.92rem;font-weight:800;color:#fff;}
+```
+
+**After:**
+```css
+.v2-port-split{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:stretch;height:100%;}
+/* tinted land/sea cards, icon header, tfoot totals, absolute-centered watermark in the
+   leftover space of the shorter table (full rules in theme.ts) */
+```
+
+---
+
+## v39.6 — 2026-07-04 — Deck v2: un-merge — pure population page + sample mirror page with stacked cells
+
+Reverts the v39.5 single-page merge per user direction. Two pages again:
+(1) pure population — المنفذ · الحالات · سليمة · اشتباه, plain numbers;
+(2) عيّنة الفحص — same table shape, but each numeric cell shows the SAMPLE
+number (big) stacked over `من {population}` (small), plus a التغطية column.
+`portTable` regains a mode parameter (`population` | `sample`);
+`portSampleSlideBuilders` returns.
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**Before (v39.5):**
+```ts
+function portTable(title: string, rows: PortPopRow[]): string { … } // merged 5-column table
+// buildDeckV2Slides: ...portPopulationSlideBuilders(model),
+```
+
+**After:**
+```ts
+function portTable(title: string, rows: PortPopRow[], mode: "population" | "sample"): string {
+  // population: plain الحالات/سليمة/اشتباه — sample: stacked <sample>/<من pop> cells + التغطية
+}
+export function portSampleSlideBuilders(model: ReportModel): SlideBuilder[] { … }
+// buildDeckV2Slides: ...portPopulationSlideBuilders(model), ...portSampleSlideBuilders(model),
+```
+
+---
+
+## v39.5 — 2026-07-04 — Deck v2: merge population + sample port pages into one coverage page
+
+Reading population and sample across two pages was unreadable. The two pages
+are now ONE page per chunk of ports: columns المنفذ · سليمة · اشتباه ·
+العيّنة · التغطية, where the العيّنة cell stacks the drawn sample (big) over
+`من {population}` (small) — the user's "sample / population in the same cell"
+idea — and التغطية gives the per-port percentage. Rows-per-page drops 11→10
+(taller rows). `portSampleSlideBuilders` is removed; `portTable` loses its
+mode parameter.
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**Before:**
+```ts
+function portTable(title: string, rows: PortPopRow[], mode: "population" | "sample"): string { … }
+const PORT_ROWS_PER_PAGE = 11;
+export function portPopulationSlideBuilders(model: ReportModel): SlideBuilder[] { … } // population columns
+export function portSampleSlideBuilders(model: ReportModel): SlideBuilder[] { … }     // sample columns
+// buildDeckV2Slides: ...portPopulationSlideBuilders(model), ...portSampleSlideBuilders(model),
+```
+
+**After:**
+```ts
+function portTable(title: string, rows: PortPopRow[]): string { … } // merged columns + stacked العيّنة cell
+const PORT_ROWS_PER_PAGE = 10;
+export function portPopulationSlideBuilders(model: ReportModel): SlideBuilder[] { … } // one merged page-set
+// buildDeckV2Slides: ...portPopulationSlideBuilders(model),
+```
+
+**File:** `src/data/reporting/executive/deck2/theme.ts`
+
+**Before:**
+```css
+.v2-port-col .deck-table th:not(:first-child),.v2-port-col .deck-table td:not(:first-child){width:1%;}
+```
+
+**After:**
+```css
+.v2-port-col .deck-table th:not(:first-child),.v2-port-col .deck-table td:not(:first-child){width:1%;}
+/* Stacked العيّنة cell: sample (big) over "من {population}" (small). */
+.v2-frac{display:inline-flex;flex-direction:column;align-items:center;line-height:1.2;}
+.v2-frac b{font-weight:800;}
+.v2-frac span{font-size:0.66rem;color:var(--muted);white-space:nowrap;}
+```
+
+---
+
+## v39.4 — 2026-07-04 — Deck preview: paint immediately, build decks lazily
+
+The dev preview built BOTH deck editions synchronously at module load (two
+`buildReportModel` passes over ~3,500 rows) before the first paint — after
+every save the tab showed a blank page while rebuilding. Now: the toolbar
+paints first, a loading placeholder shows in the iframe, the requested deck
+builds on the next tick and is cached; the v1 reference deck is only built
+when its toggle is first clicked.
+
+**File:** `src/dev/deckPreview.ts`
+
+**Before:**
+```ts
+const input = buildPreviewInput();
+const htmlV2 = buildExecutiveDeckV2(input);
+const htmlV1 = buildExecutiveDeck(input);
+// …
+function show(which: "v2" | "v1"): void {
+  frame.srcdoc = which === "v2" ? htmlV2 : htmlV1;
+```
+
+**After:**
+```ts
+let input: ExecutiveReportInput | null = null;
+const cache: { v1?: string; v2?: string } = {};
+function deckHtml(which: "v2" | "v1"): string { /* lazy build + cache */ }
+function show(which: "v2" | "v1"): void {
+  frame.srcdoc = LOADING_HTML;             // paint something immediately
+  setTimeout(() => { frame.srcdoc = deckHtml(which); }, 0);
+```
+
+---
+
+## v39.3 — 2026-07-04 — Deck v2: new page — عيّنة الفحص per port (same land/sea tables, sample numbers)
+
+Adds the sample-view twin of the port-population page: same two-column
+land/sea layout, but each port row shows the drawn sample and its
+سليمة/اشتباه split (rows where `selectedInSample`). `collectPortStats` now
+gathers population and sample tallies in one pass, and `portTable` takes a
+mode (`population` | `sample`) choosing columns. Paginated the same way;
+TOC ranges pick the new page up automatically.
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**Before:**
+```ts
+type PortPopRow = { name: string; total: number; clean: number; suspicious: number };
+function portTable(title: string, rows: PortPopRow[]): string { … }
+export function portPopulationSlideBuilders(model: ReportModel): SlideBuilder[] { … }
+```
+
+**After:**
+```ts
+type PortPopRow = {
+  name: string; total: number; clean: number; suspicious: number;
+  sampleTotal: number; sampleClean: number; sampleSuspicious: number;
+};
+function portTable(title: string, rows: PortPopRow[], mode: "population" | "sample"): string { … }
+export function portPopulationSlideBuilders(model: ReportModel): SlideBuilder[] { … }
+export function portSampleSlideBuilders(model: ReportModel): SlideBuilder[] { … } // new page(s)
+```
+
+---
+
+## v39.2 — 2026-07-04 — Deck v2: remove the العيّنة column from the port tables
+
+Also updates the slide subhead, which still promised the sample share
+(`وحصة كل منفذ من العيّنة` → `والاشتباه.`).
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**Before:**
+```ts
+type PortPopRow = { name: string; total: number; clean: number; suspicious: number; sample: number };
+// …
+      (p) => `<tr><td>${esc(p.name)}</td><td>${fmtNum(p.total)}</td><td>${fmtNum(p.clean)}</td><td>${fmtNum(p.suspicious)}</td><td>${fmtNum(p.sample)}</td></tr>`,
+// …
+      <thead><tr><th>المنفذ</th><th>الحالات</th><th>سليمة</th><th>اشتباه</th><th>العيّنة</th></tr></thead>
+      <tbody>${trs.length > 0 ? trs : `<tr><td colspan="5">…`}</tbody>
+```
+
+**After:**
+```ts
+type PortPopRow = { name: string; total: number; clean: number; suspicious: number };
+// …
+      (p) => `<tr><td>${esc(p.name)}</td><td>${fmtNum(p.total)}</td><td>${fmtNum(p.clean)}</td><td>${fmtNum(p.suspicious)}</td></tr>`,
+// …
+      <thead><tr><th>المنفذ</th><th>الحالات</th><th>سليمة</th><th>اشتباه</th></tr></thead>
+      <tbody>${trs.length > 0 ? trs : `<tr><td colspan="4">…`}</tbody>
+```
+
+---
+
+## v39.1 — 2026-07-04 — Deck v2: auto-fit the المنفذ column in the port tables
+
+Port names were squeezed/ellipsized by the equal column distribution. The name
+column now auto-fits its content; the four numeric columns shrink to content
+width (`width:1%` + nowrap trick).
+
+**File:** `src/data/reporting/executive/deck2/theme.ts`
+
+**Before:**
+```css
+.v2-port-col .deck-table th,.v2-port-col .deck-table td{padding:7px 10px;font-size:0.78rem;}
+```
+
+**After:**
+```css
+.v2-port-col .deck-table th,.v2-port-col .deck-table td{padding:7px 10px;font-size:0.78rem;}
+/* Auto-fit المنفذ: numeric columns shrink to content, the name column takes the rest. */
+.v2-port-col .deck-table{table-layout:auto;}
+.v2-port-col .deck-table th:first-child,.v2-port-col .deck-table td:first-child{
+  width:auto;overflow:visible;text-overflow:clip;
+}
+.v2-port-col .deck-table th:not(:first-child),.v2-port-col .deck-table td:not(:first-child){width:1%;}
+```
+
+---
+
+## v39 — 2026-07-04 — Executive deck v2 (content-first rework) + live dev preview page
+
+Started the ground-up rework of the executive presentation (deck) edition. A new
+`deck2/` module renders the new page structure (cover → contents → glossary →
+section separator → risk-stage population → land/sea port tables with pagination),
+reusing the v1 deck theme CSS for now — the visual/CSS pass comes after the content
+is approved. The old deck (`deck/`) is untouched and kept as reference. A dev-only
+preview entry (`deck-preview.html` + `src/dev/`) renders both editions from a
+synthetic demo month so the new deck can be edited live under `npm run dev`
+(not part of the production build — Vite only bundles `index.html`).
+
+**File:** `src/data/reporting/executive/deck2/slides.ts` *(new file)*
+
+**Before:**
+```ts
+// (file did not exist)
+```
+
+**After:**
+```ts
+// Executive deck v2 — content-first rebuild. Pages (user spec 2026-07-04):
+// 1 الغلاف · 2 المحتويات · 3 المعجم · 4 فاصل: مجتمع الفحص ·
+// 5 مجتمع الحالات بناءً على المخاطر · 6+ جداول منافذ برية/بحرية (مقسّمة صفحات)
+export function buildDeckV2Slides(model: ReportModel, generatedAt = new Date()): string { … }
+```
+
+**File:** `src/data/reporting/executive/deck2/index.ts` *(new file)*
+
+**Before:**
+```ts
+// (file did not exist)
+```
+
+**After:**
+```ts
+export function buildExecutiveDeckV2(input: ExecutiveReportInput, names = {}): string { … }
+```
+
+**File:** `src/data/reporting/executive/deck2/theme.ts` *(new file — minimal v2 CSS additions on top of DECK_CSS)*
+
+**File:** `src/dev/deckPreviewFixture.ts` *(new file — deterministic synthetic ExecutiveReportInput: 14 ports بري/بحري, 4 risk stages, ~7.5% sample)*
+
+**File:** `src/dev/deckPreview.ts` *(new file — renders v2/v1 into an iframe with a toggle)*
+
+**File:** `deck-preview.html` *(new file — dev-only Vite entry at /deck-preview.html)*
+
+**File:** `.claude/launch.json` *(new file — dev-server launch config for live preview)*
+
+## v38.4 — 2026-07-02 — Truly single-file build: inline fonts + favicon, drop public/ assets
+
+`npm run build` emitted `dist/fonts/` and `dist/logo.svg` alongside `dist/index.html` because
+`vite-plugin-singlefile` only inlines *bundled* assets — everything in `public/` is copied
+verbatim. The app fonts were already inlined via `src/index.css` → `src/assets/fonts/`; the
+`public/` copies existed only for (a) the executive-report `@font-face` URLs and (b) the
+favicon. Both are now inlined as data URIs, and `public/logo.svg` + `public/fonts/` are
+deleted, so the build output is exactly one file. Side benefit: exported executive reports
+previously referenced `./fonts/…` relative to wherever the HTML file sat, so fonts silently
+broke when a report was opened outside the app folder — with base64-embedded fonts the
+report is now genuinely self-contained (at ~+240 kB per report file).
+
+**File:** `src/data/reporting/executive/theme.ts`
+
+**Before:**
+```ts
+export const EXEC_CSS = `
+@font-face{font-family:"Somar";src:url("${import.meta.env.BASE_URL}fonts/SomarSans-Regular.woff") format("woff");font-weight:400;font-style:normal;font-display:swap;}
+@font-face{font-family:"Somar";src:url("${import.meta.env.BASE_URL}fonts/SomarSans-Bold.woff") format("woff");font-weight:700;font-style:normal;font-display:swap;}
+@font-face{font-family:"Somar";src:url("${import.meta.env.BASE_URL}fonts/SomarSans-Medium.woff") format("woff");font-weight:500;font-style:normal;font-display:swap;}
+@font-face{font-family:"Somar";src:url("${import.meta.env.BASE_URL}fonts/SomarSans-Light.woff") format("woff");font-weight:300;font-style:normal;font-display:swap;}
+```
+
+**After:**
+```ts
+import somarRegular from "../../../assets/fonts/SomarSans-Regular.woff?inline";
+import somarBold from "../../../assets/fonts/SomarSans-Bold.woff?inline";
+import somarMedium from "../../../assets/fonts/SomarSans-Medium.woff?inline";
+import somarLight from "../../../assets/fonts/SomarSans-Light.woff?inline";
+
+export const EXEC_CSS = `
+@font-face{font-family:"Somar";src:url("${somarRegular}") format("woff");font-weight:400;font-style:normal;font-display:swap;}
+@font-face{font-family:"Somar";src:url("${somarBold}") format("woff");font-weight:700;font-style:normal;font-display:swap;}
+@font-face{font-family:"Somar";src:url("${somarMedium}") format("woff");font-weight:500;font-style:normal;font-display:swap;}
+@font-face{font-family:"Somar";src:url("${somarLight}") format("woff");font-weight:300;font-style:normal;font-display:swap;}
+```
+
+**File:** `src/vite-env.d.ts`
+
+**Before:**
+```ts
+/// <reference types="vite/client" />
+```
+
+**After:**
+```ts
+/// <reference types="vite/client" />
+
+declare module "*.woff?inline" {
+  const src: string;
+  export default src;
+}
+```
+
+**File:** `index.html`
+
+**Before:**
+```html
+    <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+```
+
+**After:**
+```html
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA5NiA5NiIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJYLVJheSBRdWFsaXR5IEFwcCI+DQogIDxyZWN0IHdpZHRoPSI5NiIgaGVpZ2h0PSI5NiIgcng9IjE4IiBmaWxsPSIjMTczNjVkIi8+DQogIDxwYXRoIGQ9Ik0yNCAyNGg0OHY0OEgyNHoiIGZpbGw9IiNmZmZmZmYiIG9wYWNpdHk9Ii4xIi8+DQogIDxwYXRoIGQ9Ik0zMiAzMGgzMmM0LjQgMCA4IDMuNiA4IDh2MjBjMCA0LjQtMy42IDgtOCA4SDMyYy00LjQgMC04LTMuNi04LThWMzhjMC00LjQgMy42LTggOC04eiIgZmlsbD0iI2Y4ZmJmZiIvPg0KICA8cGF0aCBkPSJNMzYgMzhoMjRNMzYgNDhoMzJNMzYgNThoMjAiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzE3MzY1ZCIgc3Ryb2tlLXdpZHRoPSI1IiBzdHJva2UtbGluZWNhcD0icm91bmQiLz4NCiAgPGNpcmNsZSBjeD0iNjYiIGN5PSI2MCIgcj0iMTAiIGZpbGw9IiMwMGEzYTMiLz4NCiAgPHBhdGggZD0iTTYyIDYwbDMgMyA2LTciIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIzIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4NCjwvc3ZnPg0K" />
+```
+
+**File:** `public/logo.svg` (deleted — inlined into `index.html` favicon above)
+
+**File:** `public/fonts/SomarSans-{Light,Regular,Medium,Bold}.woff` (deleted — duplicates of
+`src/assets/fonts/`, which remain the single source; app CSS inlines them via `src/index.css`
+and the executive report inlines them via `theme.ts` `?inline` imports)
+
+---
 ## v38.3 — 2026-07-02 — DataTable render loop via onFilteredRowsChange (BUGFIX LOG-03)
 
 New finding surfaced during post-fix verification (registered as LOG-03 in
@@ -12745,3 +14954,1057 @@ the demo entry to the picker screen instead.
 Made the demo/view entry a hidden backdoor mirroring the admin shortcut, instead of
 a visible button on the address picker.
 
+---
+
+## v41.3 — 2026-07-05 — Archive tab audit: show dropped distribution total, surface refresh errors, don't misreport skipped file copies
+
+Audit of `src/components/Sidebar/Tabs/Archive/` and `src/data/backup/backupStorage.ts`.
+Three targeted fixes:
+
+1. `totals.distributionRows` was computed in the `useMemo` but never rendered — the
+   summary grid silently dropped the distribution-rows figure. Added a fifth summary
+   tile so the computed total is actually shown.
+2. `refresh()` had no error handling: a failed `Promise.all` (e.g. a raced or missing
+   workspace directory) left `isLoading` reset via `finally` but never told the user
+   anything went wrong, unlike every other handler in this file which sets `message`
+   on failure. Added a catch that surfaces an Arabic error via the same `message` state.
+3. `writeTextFile` in `backupStorage.ts` returns early (no-op) when `createWritable` is
+   unavailable on the `FileHandleLike`, per the CLAUDE.md convention of guarding optional
+   `createWritable`. But its two callers (`copyJsonTree`, `copyAllJsonFiles`) always
+   pushed the path into `copied` regardless of whether the write actually happened, so a
+   backup manifest could claim a file was copied when it silently wasn't. Changed
+   `writeTextFile` to return a boolean and made both callers only record the path when
+   the write succeeded. (`restoreJsonTree` was checked too: it uses `safeWriteJsonText`,
+   which returns `Promise<void>` and throws on failure rather than swallowing it, so no
+   change was needed there — a failed restore write already aborts the whole restore via
+   the existing try/catch in `restoreBackupSnapshot`.)
+
+**File:** `src/components/Sidebar/Tabs/Archive/index.tsx`
+
+**Before:**
+```tsx
+  const refresh = useCallback(async () => {
+    if (!directoryHandle) return;
+    setIsLoading(true);
+    try {
+      const months = await listMonthFolders(directoryHandle);
+      const [statusList, backupHistory, state, settings] = await Promise.all([
+        loadArchiveStatus(directoryHandle, months),
+        loadBackupHistory(directoryHandle),
+        loadAutoBackupState(directoryHandle),
+        loadAutoBackupSettings(directoryHandle),
+      ]);
+      setStatuses(statusList);
+      setHistory(backupHistory);
+      setAutoState(state);
+      setAutoSettings(settings);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [directoryHandle]);
+```
+and
+```tsx
+      <div className="arc-summary-grid">
+        <SummaryTile label="الأشهر" value={formatNumber(totals.months)} />
+        <SummaryTile label="صفوف المجتمع" value={formatNumber(totals.populationRows)} />
+        <SummaryTile label="العينات" value={formatNumber(totals.sampleRows)} />
+        <SummaryTile label="إجابات الفحص" value={formatNumber(totals.answerItems)} />
+      </div>
+```
+
+**After:**
+```tsx
+  const refresh = useCallback(async () => {
+    if (!directoryHandle) return;
+    setIsLoading(true);
+    try {
+      const months = await listMonthFolders(directoryHandle);
+      const [statusList, backupHistory, state, settings] = await Promise.all([
+        loadArchiveStatus(directoryHandle, months),
+        loadBackupHistory(directoryHandle),
+        loadAutoBackupState(directoryHandle),
+        loadAutoBackupSettings(directoryHandle),
+      ]);
+      setStatuses(statusList);
+      setHistory(backupHistory);
+      setAutoState(state);
+      setAutoSettings(settings);
+    } catch (error) {
+      setMessage({
+        type: "error",
+        text: `تعذر تحميل بيانات الأرشيف: ${error instanceof Error ? error.message : "خطأ غير معروف"}`,
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  }, [directoryHandle]);
+```
+and
+```tsx
+      <div className="arc-summary-grid">
+        <SummaryTile label="الأشهر" value={formatNumber(totals.months)} />
+        <SummaryTile label="صفوف المجتمع" value={formatNumber(totals.populationRows)} />
+        <SummaryTile label="العينات" value={formatNumber(totals.sampleRows)} />
+        <SummaryTile label="صفوف التوزيع" value={formatNumber(totals.distributionRows)} />
+        <SummaryTile label="إجابات الفحص" value={formatNumber(totals.answerItems)} />
+      </div>
+```
+
+**File:** `src/data/backup/backupStorage.ts`
+
+**Before:**
+```ts
+async function writeTextFile(dir: DirectoryHandleLike, fileName: string, content: string): Promise<void> {
+  const fh = await dir.getFileHandle(fileName, { create: true });
+  if (!fh.createWritable) return;
+  const writable = await fh.createWritable();
+  await writable.write(content);
+  await writable.close();
+}
+```
+and (in `copyJsonTree`)
+```ts
+    if (entry.kind !== "file" || !entry.name.endsWith(".json")) continue;
+    const text = await readTextFile(params.sourceDir, entry.name);
+    if (text === null) continue;
+    await writeTextFile(params.targetDir, entry.name, text);
+    params.copied.push(params.sourcePath ? `${params.sourcePath}/${entry.name}` : entry.name);
+```
+and (in `copyAllJsonFiles`)
+```ts
+    if (entry.kind !== "file" || !entry.name.endsWith(".json")) continue;
+    const text = await readTextFile(directoryHandle, entry.name);
+    if (text === null) continue;
+    await writeTextFile(jsonDir, entry.name, text);
+    copied.push(entry.name);
+```
+**After:**
+```ts
+async function writeTextFile(dir: DirectoryHandleLike, fileName: string, content: string): Promise<boolean> {
+  const fh = await dir.getFileHandle(fileName, { create: true });
+  if (!fh.createWritable) return false;
+  const writable = await fh.createWritable();
+  await writable.write(content);
+  await writable.close();
+  return true;
+}
+```
+and (in `copyJsonTree`)
+```ts
+    if (entry.kind !== "file" || !entry.name.endsWith(".json")) continue;
+    const text = await readTextFile(params.sourceDir, entry.name);
+    if (text === null) continue;
+    const wrote = await writeTextFile(params.targetDir, entry.name, text);
+    if (wrote) params.copied.push(params.sourcePath ? `${params.sourcePath}/${entry.name}` : entry.name);
+```
+and (in `copyAllJsonFiles`)
+```ts
+    if (entry.kind !== "file" || !entry.name.endsWith(".json")) continue;
+    const text = await readTextFile(directoryHandle, entry.name);
+    if (text === null) continue;
+    const wrote = await writeTextFile(jsonDir, entry.name, text);
+    if (wrote) copied.push(entry.name);
+```
+
+## v41.4 — 2026-07-05 — Settings/ChangeLog audit: add missing label group entry + fix stale LabelRow input
+
+Audit of `Settings`/`ChangeLog` tabs and `labelsStore`/`browsePresetStorage`. Found `col_expert_observation_date`
+(used as a real column header in `XrayReferrals.tsx` and `XrayInspectionResults.tsx`) was missing from
+`LABEL_GROUPS` in the Settings tab, so admins had no UI to override it. Also found `LabelRow`'s local `val`
+state was seeded once from `getLabels()` at mount and never resynced when labels changed externally (e.g.
+clicking "استعادة الكل" while a label group section stays open) — the reset/custom badge updated correctly
+but the visible input text stayed stale until the row remounted.
+
+**File:** `src/components/Sidebar/Tabs/Settings/index.tsx`
+
+**Before:**
+```ts
+{ key: "col_bi_enrichment_status",      desc: "عمود حالة BI" },
+{ key: "col_report_number",             desc: "عمود رقم التقرير" },
+```
+```ts
+function LabelRow({ labelKey, desc }: { labelKey: LabelKey; desc: string }) {
+  const current = getLabels()[labelKey];
+  const custom  = isCustomized(labelKey);
+  const [val, setVal] = useState<string>(current);
+```
+
+**After:**
+```ts
+{ key: "col_expert_observation_date",    desc: "عمود تاريخ رصد الخبير" },
+{ key: "col_bi_enrichment_status",      desc: "عمود حالة BI" },
+{ key: "col_report_number",             desc: "عمود رقم التقرير" },
+```
+```ts
+function LabelRow({ labelKey, desc }: { labelKey: LabelKey; desc: string }) {
+  const current = getLabels()[labelKey];
+  const custom  = isCustomized(labelKey);
+  const [val, setVal] = useState<string>(current);
+  useEffect(() => setVal(current), [current]);
+```
+
+## v41.4 — 2026-07-05 — Data-layer audit: fix read-modify-write races in feedback + browse presets
+
+Audit of `src/data/{population,sampling,distribution,answers,approvals,referral,feedback,storage,powerbiExport,preferences}`.
+Most of this layer is CAS-loop or event-log based (answers, approvals, distribution, sample append)
+and already race-safe. Found two modules that read a whole file, mutated an in-memory value, and
+wrote it back with **no lock around the read-modify-write sequence**: `feedbackStorage.ts`
+(`submitFeedback`/`replyToFeedback` on the shared `messages.json`) and `browsePresetStorage.ts`
+(`saveUserBrowseDatasetPreset`/`saveAdminBrowseDatasetPreset` on the shared preset files).
+`safeWriteJson` only locks around its own single write, not the caller's read-then-write — so two
+concurrent calls in the same tab (e.g. a user submits feedback while another feedback panel instance
+replies, or two `DataTable` column-preset saves race) can both read the same pre-mutation snapshot,
+and the second write silently drops the first mutation. Wrapped each read-modify-write in
+`withResourceLock` (already used by `safeWriteJson`/`casLoop` elsewhere in this layer) keyed per
+directory+file, matching the granularity `safeWriteJson` itself uses internally.
+
+Everything else reviewed clean: `safeWrite.ts` snapshot/`.bak`/`.tmp`/verify/rollback logic,
+`jsonEnvelope.ts` hash/schemaVersion validation, `webLocks.ts` native-lock + promise-chain fallback,
+Mulberry32 `rng.ts` determinism, Fisher-Yates in `shuffleInPlace`, Hamilton apportionment tie-breaking
+(`apportionment.ts`), `sampleAlgorithm.ts` CertScan/NonCertScan split + spillover (zero-capacity ports
+return early, no division-by-zero), `deriveCurrentDistribution`'s fold-in-log-order (last event per
+`xrayImageId` wins, replacement chain preserves `replacedById` correctly), and every `createWritable`
+call site in scope already guards with `if (!fh.createWritable) return/continue;` or throws explicitly.
+
+**File:** `src/data/feedback/feedbackStorage.ts`
+
+**Before:**
+```ts
+import { readJsonFile, writeJsonFile } from "../storage/fileSystemAccess";
+import { SYSTEM_FOLDER_NAMES } from "../workspace/workspacePaths";
+...
+export async function submitFeedback(
+  dir: DirectoryHandleLike,
+  payload: { from: string; role: string; category: FeedbackCategory; text: string }
+): Promise<void> {
+  const messages = await loadFeedback(dir);
+  messages.unshift({ ... });
+  await saveFeedback(dir, messages);
+}
+
+export async function replyToFeedback(
+  dir: DirectoryHandleLike,
+  messageId: string,
+  reply: FeedbackReply,
+  resolve: boolean
+): Promise<void> {
+  const messages = await loadFeedback(dir);
+  const msg = messages.find((m) => m.id === messageId);
+  if (!msg) return;
+  msg.replies.push(reply);
+  if (resolve) msg.status = "resolved";
+  await saveFeedback(dir, messages);
+}
+```
+
+**After:** both functions now run their read-modify-write under
+`withResourceLock(`feedback/${MESSAGES_FILE}`, async () => { ... })` so a concurrent submit/reply
+in the same tab can't read-before-the-other's-write and clobber it.
+
+**File:** `src/data/preferences/browsePresetStorage.ts`
+
+**Before:**
+```ts
+export async function saveUserBrowseDatasetPreset(
+  directoryHandle: DirectoryHandleLike,
+  username: string,
+  dataset: BrowsePresetDatasetKind,
+  preset: Omit<BrowseDatasetPreset, "updatedAt">
+): Promise<void> {
+  const existing = await loadUserBrowsePreset(directoryHandle, username);
+  const nextFile: UserBrowsePresetFile = { ... };
+  const dir = await getPresetDir(directoryHandle, true);
+  await safeWriteJson(dir, safeUserFileName(username), nextFile);
+}
+```
+(`saveAdminBrowseDatasetPreset` had the same shape.)
+
+**After:** both wrapped in `withResourceLock` keyed by the target preset file name, so two rapid
+column/width preset saves for the same user (or the shared admin preset) merge instead of racing.
+```
+
+## v41.5 — 2026-07-05 — UserManagement/auth audit: fix report-designer permission-key mismatch
+
+Audit of `src/components/Sidebar/Tabs/UserManagement/` and `src/auth/`. Found a real
+tab/permission-key mismatch: `App.tsx`'s `allowedTabs` memo builds each sub-tab's
+permission lookup key as `` `${tab.id}/${sub.id}` `` (e.g. `reports/report-designer` for
+the Reports tab's `report-designer` sub-tab), but `MANAGED_TABS` and
+`createDefaultPermissions()` in `userManagement.ts` registered the Report Designer entry
+under the bare id `report-designer` (with `parentId: "reports"`), never under
+`reports/report-designer`. `getRolePermission()`'s inheritance fallback only fires when
+`MANAGED_TABS.find(t => t.id === tabId)` finds the tab being looked up — since no tab had
+id `reports/report-designer`, the lookup always fell through to `"none"`. Net effect: the
+Report Designer sidebar sub-tab was **hidden for every role, including admin and manager**,
+even though `createDefaultPermissions()` intended `edit` for admin/manager and `view` for
+supervisor. Renamed the permission-matrix id to `reports/report-designer` throughout
+`userManagement.ts` so it matches the key `App.tsx` actually constructs and queries (the
+Reports tab's own `subTabs` entry and `activeSubTab === "report-designer"` render-branch
+in `Reports/index.tsx` are unaffected — those are UI-local ids, not permission keys).
+
+**File:** `src/auth/userManagement.ts`
+
+**Before:**
+```ts
+  { id: "report-designer",         label: "مصمم التقارير",          parentId: "reports" },
+```
+```ts
+    { role: "guest",      tabId: "report-designer",    access: "none" },
+```
+```ts
+    { role: "employee",   tabId: "report-designer",    access: "none" },
+```
+```ts
+    { role: "supervisor", tabId: "report-designer",    access: "view" },
+```
+```ts
+    { role: "manager",    tabId: "report-designer",    access: "edit" },
+```
+```ts
+    { role: "admin",      tabId: "report-designer",         access: "edit" },
+```
+
+**After:**
+```ts
+  { id: "reports/report-designer", label: "مصمم التقارير",          parentId: "reports" },
+```
+```ts
+    { role: "guest",      tabId: "reports/report-designer",    access: "none" },
+```
+```ts
+    { role: "employee",   tabId: "reports/report-designer",    access: "none" },
+```
+```ts
+    { role: "supervisor", tabId: "reports/report-designer",    access: "view" },
+```
+```ts
+    { role: "manager",    tabId: "reports/report-designer",    access: "edit" },
+```
+```ts
+    { role: "admin",      tabId: "reports/report-designer",         access: "edit" },
+```
+
+## v41.5 — 2026-07-05 — Population tab audit: remove dead mini-report code (stale stage mapping bug)
+
+Audit of `src/components/Sidebar/Tabs/Population/` and subfolders. `createRiskMiniReport` /
+`createBiMiniReport` / `buildRiskStageCountsBySheet` in `components/helpers.ts` and the whole
+`components/MiniWorkbookReport.tsx` component were dead code with zero call sites anywhere in
+`src/` other than their own definitions — superseded by `DataAccuracyReport` +
+`PopulationProcessingReport`, which are what `PhaseTwoReportAndProcessing.tsx` actually renders.
+Also confirmed a latent bug in the dead code that's moot now it's removed: `buildRiskStageCountsBySheet`
+called `getStageKey(row.stage)` without the second `stageMappings` argument, so it silently used
+`DEFAULT_STAGE_MAPPINGS` instead of the org's configured `config.stageMappings` — inconsistent with
+every live stage-counting call site in this tab (`PhaseThreeSampling.tsx`, `PhaseFourDistribution.tsx`,
+`index.tsx`'s `formatStageLabel` calls), all of which correctly thread `config.stageMappings` through.
+Removed rather than fixed since the code has no consumers. Rest of the tab (worker usage, sampling/
+apportionment calls, `safeWriteJson` usage, `createWritable` guards) checked clean — no other bugs found.
+
+**File:** `src/components/Sidebar/Tabs/Population/components/helpers.ts`
+
+**Before:**
+```ts
+import type { RiskWorkbookResult } from "../riskData/riskDataTypes";
+import type { BiWorkbookResult } from "../biData/biDataTypes";
+export { formatNumber } from "../../../../../utils/formatting";
+...
+export type MiniReportSheet = {
+  sheetName: string;
+  category: string | null;
+  stageCounts: StageCounts | null;
+  originalRowCount: number;
+  normalizedRowCount: number;
+  excludedMissingXrayIdCount: number;
+};
+
+export type MiniReportData = { ... };
+...
+export function buildRiskStageCountsBySheet(result: RiskWorkbookResult): Record<string, StageCounts> { ... }
+export function createRiskMiniReport(result: RiskWorkbookResult): MiniReportData { ... }
+export function createBiMiniReport(result: BiWorkbookResult | null): MiniReportData { ... }
+```
+
+**After:** removed the unused `RiskWorkbookResult`/`BiWorkbookResult` imports, `MiniReportSheet`/
+`MiniReportData` types, and the three dead functions (`buildRiskStageCountsBySheet`,
+`createRiskMiniReport`, `createBiMiniReport`). Kept `PhaseStatus`, `getPhaseStatus`, and the
+re-exported stage helpers, which are still used by `index.tsx` and the Phase components.
+
+**File:** `src/components/Sidebar/Tabs/Population/components/MiniWorkbookReport.tsx`
+
+**Before:** whole file — a `MiniWorkbookReport` component rendering `MiniReportData`, with no
+importers anywhere in `src/`.
+
+**After:** file deleted.
+
+---
+
+## v41.7 — 2026-07-05 — template system audit: fix condition-cycle stack overflow, orphaned selection on delete, dead role-check helper
+
+Audit of `src/data/templates/` and `TemplateBuilder`. Three bugs found and fixed:
+(1) `isFieldVisible` recursed into a field's condition source with no cycle guard —
+the Template Builder UI lets an admin wire field A's visibility condition to field B
+and B's to A (it only excludes the field itself from the "source" dropdown, not
+transitive dependents), and evaluating that template in `InspectionPanel` /
+`EmployeeDashboard` would stack-overflow the inspection form. (2) `deleteTemplate`
+removed the template file + index entry but left `template.selection.json`
+pointing at the now-deleted id if it had been selected as the active inspection
+template, so `XrayReferrals` / `XrayInspectionResults` / `Reports` would silently
+show "no template" with no indication why. (3) `templateBuilderHelpers.ts` exports
+`canUseTemplateBuilder(role) => role === "admin"`, but the actual gating logic
+lives inline in `TemplateBuilder/index.tsx` (`role !== "manager" && role !== "admin"`,
+i.e. manager+admin) and in the `EmployeeWorkspace` host via `canAccessTab`/permission
+matrix — the helper is dead code, never imported, and its logic contradicts the
+real check (comment in `index.tsx` falsely claims it was "moved" there).
+
+**File:** `src/data/templates/templateRuntime.ts`
+
+**Before:**
+```ts
+export function isFieldVisible(
+  field: TemplateField,
+  answers: Record<string, TemplateAnswerValue>,
+  allFields?: TemplateField[]
+): boolean {
+  if (!field.condition?.sourceFieldId) return true;
+  if (allFields) {
+    const src = allFields.find((f) => f.fieldId === field.condition!.sourceFieldId);
+    if (src && !isFieldVisible(src, answers, allFields)) return false;
+  }
+  return evaluateCondition(field.condition, answers[field.condition.sourceFieldId]);
+}
+```
+
+**After:**
+```ts
+export function isFieldVisible(
+  field: TemplateField,
+  answers: Record<string, TemplateAnswerValue>,
+  allFields?: TemplateField[],
+  visited: Set<string> = new Set()
+): boolean {
+  if (!field.condition?.sourceFieldId) return true;
+  if (allFields && !visited.has(field.fieldId)) {
+    visited.add(field.fieldId);
+    const src = allFields.find((f) => f.fieldId === field.condition!.sourceFieldId);
+    if (src && !isFieldVisible(src, answers, allFields, visited)) return false;
+  }
+  return evaluateCondition(field.condition, answers[field.condition.sourceFieldId]);
+}
+```
+
+**File:** `src/data/templates/templateStorage.ts`
+
+**Before:**
+```ts
+const INDEX_FILE = "templates.index.json";
+```
+```ts
+export async function deleteTemplate(
+  directoryHandle: DirectoryHandleLike,
+  templateId: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const dir = await getTemplatesDir(directoryHandle);
+    await withResourceLock(`${dir.name}/templates-index`, async () => {
+      const templateFileName = `${templateId}.json`;
+      const templateResult = await safeReadJson<TemplateSchema>(
+        dir,
+        templateFileName
+      );
+```
+
+**After:**
+```ts
+const INDEX_FILE = "templates.index.json";
+const SELECTION_FILE = "template.selection.json";
+```
+```ts
+export async function deleteTemplate(
+  directoryHandle: DirectoryHandleLike,
+  templateId: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const dir = await getTemplatesDir(directoryHandle);
+    await withResourceLock(`${dir.name}/templates-index`, async () => {
+      const templateFileName = `${templateId}.json`;
+      const templateResult = await safeReadJson<TemplateSchema>(
+        dir,
+        templateFileName
+      );
+
+      // Clear the active inspection-template selection if it points at the
+      // template being deleted, so consumers don't silently keep referencing
+      // a dead templateId with no indication of what happened.
+      const selectionResult = await safeReadJson<{ templateId: string; updatedAt: string; updatedBy: string }>(
+        dir,
+        SELECTION_FILE
+      );
+      if (selectionResult.ok && selectionResult.value.templateId === templateId) {
+        await safeWriteJson(dir, SELECTION_FILE, {
+          templateId: "",
+          updatedAt: new Date().toISOString(),
+          updatedBy: "system:deleteTemplate"
+        });
+      }
+```
+
+**File:** `src/components/Sidebar/Tabs/TemplateBuilder/templateBuilderHelpers.ts` — deleted (dead export,
+never imported, and its role logic contradicted the real gating in `TemplateBuilder/index.tsx` +
+`EmployeeWorkspace`'s `canAccessTab` permission check).
+
+**File:** `src/components/Sidebar/Tabs/TemplateBuilder/index.tsx`
+
+**Before:**
+```ts
+// canUseTemplateBuilder has been moved to ./templateBuilderHelpers.ts
+// to satisfy the react-refresh/only-export-components rule.
+```
+
+**After:** stale comment removed (no replacement — nothing references it anymore).
+
+## v41.6 — 2026-07-05 — Reports/ReportDesigner tab audit: fix silently-swallowed post-delete list refresh
+
+Audit of `src/components/Sidebar/Tabs/Reports/` and `src/components/Sidebar/Tabs/ReportDesigner/`
+(role gating for the KPI sub-tab and report-designer sub-tab checked and confirmed correctly
+enforced both in `Sidebar.tsx`'s subtab filter and via `TabGuard tabId="reports/analytics"` in
+the dashboard render — no fix needed there; the separate `reports/report-designer` permission-key
+mismatch was already found and fixed in v41.5 above, outside this task's file scope). Found one
+small concrete bug: in `ReportDesigner/index.tsx`'s `handleDelete`, the post-delete list-refresh
+call (`loadDesignIndex(...).then(setIndex).catch(() => {})`) was the only bare `.catch(() => {})`
+anywhere under `Tabs/ReportDesigner` or `Tabs/Reports` — every other fire-and-forget promise in
+these files (and elsewhere in the codebase, e.g. `reports:listMonthFolders`) routes through
+`logRejection(context)` so failures land in the in-memory error ring buffer
+(`src/data/storage/errorLogger.ts`) for observability. Here a refresh failure after a successful
+delete was silently discarded with no diagnostic trail, leaving the on-screen list stale with no
+way to tell why. Routed it through `logRejection` for consistency with the rest of the file.
+
+Reviewed for the other audit categories (RTL layout, recharts usage, chart data transforms,
+aggregation math in `executiveReportData.ts`/`portEmployeeData.ts`/`executiveEmployeeData.ts`,
+`any`-masked types, dead code, canvas drag/resize perf in `useCanvasInteractions.ts`) and found
+no other concrete bugs meeting the bar for a fix — `cleanConfirmationRate`'s
+`correctClean + excessSuspicious` denominator initially looked suspicious but is correct (both
+categories share `expertResult === "سليمة"`); `KpiRenderer`'s `usePopulationData` always reading
+only the latest month is a scope limitation, not a regression bug, and out of scope to redesign
+here.
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
+
+**Before:**
+```ts
+    setDeletingId(null);
+    // Refresh list
+    loadDesignIndex(directoryHandle)
+      .then(setIndex)
+      .catch(() => {});
+```
+
+**After:**
+```ts
+    setDeletingId(null);
+    // Refresh list
+    loadDesignIndex(directoryHandle)
+      .then(setIndex)
+      .catch(logRejection("reportDesigner:refreshIndexAfterDelete"));
+```
+
+## v41.8 — 2026-07-05 — Reports/ReportDesigner audit: fix missing permission guard on report-designer sub-tab
+
+Audit of `src/components/Sidebar/Tabs/Reports/` and `src/components/Sidebar/Tabs/ReportDesigner/`.
+Found a real access-control gap: the `kpi` sub-section in `ReportsContent` is wrapped in
+`<TabGuard tabId="reports/analytics">`, but the `report-designer` sub-tab in the outer
+`ReportsTab` wrapper switches to `<ReportDesignerTab />` purely from the
+`sidebar-subtab-changed` DOM event, with no permission check at all — inconsistent with the
+`kpi` branch in the same file, and relying entirely on the sidebar hiding the button (which a
+stray/replayed `sidebar-subtab-changed` event, or a future caller of that event, would bypass).
+Wrapped the report-designer branch in `TabGuard tabId="reports/report-designer"` (the
+permission id fixed to match `App.tsx`'s actual lookup key by the parallel
+UserManagement/auth audit in this same session).
+
+Also independently spotted `handleDelete` in `ReportDesigner/index.tsx` silently swallowing
+a failed post-delete list refresh (`.catch(() => {})`) — but a concurrent parallel-session
+edit had already replaced that with `logRejection("reportDesigner:refreshIndexAfterDelete")`
+by the time this edit landed, so no change was needed there; noting it as verified-fixed by
+the other pass rather than re-touching it.
+
+**File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
+
+**Before:**
+```tsx
+  if (activeSubTab === "report-designer") return <ReportDesignerTab />;
+  return <ReportsContent />;
+```
+
+**After:**
+```tsx
+  if (activeSubTab === "report-designer") {
+    return (
+      <TabGuard tabId="reports/report-designer">
+        <ReportDesignerTab />
+      </TabGuard>
+    );
+  }
+  return <ReportsContent />;
+```
+
+## v41.4 — 2026-07-05 — ReportDesigner: surface silent autosave failures
+
+Audit of `Reports`/`ReportDesigner` tabs (scope: `src/components/Sidebar/Tabs/Reports/`,
+`src/components/Sidebar/Tabs/ReportDesigner/`). `EditorHost.performSave` called
+`setSaveError(result.error)` on a failed `saveDesign` write, but the `saveError` state
+value was discarded at destructuring (`const [, setSaveError] = useState<string | null>(null);`)
+and never rendered anywhere — a failed autosave (debounced, fires on every doc change)
+was completely silent to the user, who would believe their report-designer edits were
+being persisted to disk when they were not.
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
+
+**Before:**
+```tsx
+  const [saving, setSaving] = useState(false);
+  const [, setSaveError] = useState<string | null>(null);
+```
+
+**After:**
+```tsx
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+```
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx` (Ribbon render + save error banner)
+
+**Before:**
+```tsx
+        <Ribbon
+          doc={doc}
+          saving={saving}
+          showFields={showFields}
+          showFormat={showFormat}
+          onToggleFields={() => setShowFields((v) => !v)}
+          onToggleFormat={() => setShowFormat((v) => !v)}
+          onSave={handleExplicitSave}
+          onPrint={() => setShowPrint(true)}
+          onPageSizeChange={handlePageSizeChange}
+          onBack={onBack}
+        />
+```
+
+**After:**
+```tsx
+        <Ribbon
+          doc={doc}
+          saving={saving}
+          saveError={saveError}
+          showFields={showFields}
+          showFormat={showFormat}
+          onToggleFields={() => setShowFields((v) => !v)}
+          onToggleFormat={() => setShowFormat((v) => !v)}
+          onSave={handleExplicitSave}
+          onPrint={() => setShowPrint(true)}
+          onPageSizeChange={handlePageSizeChange}
+          onBack={onBack}
+        />
+```
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/Ribbon.tsx`
+
+**Before:**
+```tsx
+interface RibbonProps {
+  doc: ReportDocument;
+  saving: boolean;
+  showFields: boolean;
+  showFormat: boolean;
+  onToggleFields: () => void;
+  onToggleFormat: () => void;
+  onSave: () => void;
+  onPrint: () => void;
+  onPageSizeChange: (preset: PageSizePreset) => void;
+  onBack: () => void;
+}
+
+export default function Ribbon({
+  doc, saving, showFields, showFormat,
+  onToggleFields, onToggleFormat,
+  onSave, onPrint, onPageSizeChange, onBack,
+}: RibbonProps) {
+```
+
+**After:**
+```tsx
+interface RibbonProps {
+  doc: ReportDocument;
+  saving: boolean;
+  saveError?: string | null;
+  showFields: boolean;
+  showFormat: boolean;
+  onToggleFields: () => void;
+  onToggleFormat: () => void;
+  onSave: () => void;
+  onPrint: () => void;
+  onPageSizeChange: (preset: PageSizePreset) => void;
+  onBack: () => void;
+}
+
+export default function Ribbon({
+  doc, saving, saveError, showFields, showFormat,
+  onToggleFields, onToggleFormat,
+  onSave, onPrint, onPageSizeChange, onBack,
+}: RibbonProps) {
+```
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/Ribbon.tsx` (error indicator)
+
+**Before:**
+```tsx
+      {saving && <span className="rd-saving-indicator">جاري الحفظ...</span>}
+```
+
+**After:**
+```tsx
+      {saving && <span className="rd-saving-indicator">جاري الحفظ...</span>}
+      {!saving && saveError && (
+        <span className="rd-saving-indicator rd-save-error" title={saveError}>
+          تعذّر الحفظ التلقائي
+        </span>
+      )}
+```
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/ReportDesigner.css` (error style)
+
+**Before:**
+```css
+.rd-saving-indicator {
+  font-size: 12px;
+  color: var(--rd-text-secondary);
+  margin: 0 8px;
+}
+```
+
+**After:**
+```css
+.rd-saving-indicator {
+  font-size: 12px;
+  color: var(--rd-text-secondary);
+  margin: 0 8px;
+}
+.rd-save-error {
+  color: var(--rd-danger, #c0392b);
+  font-weight: 600;
+  cursor: help;
+}
+```
+
+## v41.9 — 2026-07-05 — EmployeeWorkspace audit: fix stale permission reads on user-management change
+
+Audit of `src/components/Sidebar/Tabs/EmployeeWorkspace/` (views + index). Found `XrayReferrals.tsx`,
+`XrayInspectionResults.tsx`, and `ReferralApproval.tsx` all call `readUserManagementState()` /
+`hasFeature()` / `getRolePermission()` directly at render time, unlike `usePermissions()` (used by
+`EmployeeWorkspace/index.tsx`), which subscribes to `subscribeToUserManagementChanges` and force-updates
+on the `CHANGE_EVENT_NAME` DOM event. Because these three views never subscribed, a permission change
+made elsewhere while one of these tabs stayed mounted (e.g. an admin revoking `view-all-entries` or
+`approve-referrals` for the current role from the User Management tab in the same session) would not
+take effect until the component happened to remount for an unrelated reason — `canSeeAll`, `canEdit`,
+`canApproveReferrals`, etc. would keep evaluating against the stale snapshot captured at the last
+render. Added a one-line `useEffect` subscription in each file (mirroring `usePermissions()`'s own
+pattern) so a permission-matrix change forces a re-render and these views immediately re-evaluate
+their derived permission booleans.
+
+Also reviewed (no fix needed, noted for other agents): `EmployeeDashboard.tsx` in this same folder has
+zero importers — `EmployeeWorkspace/index.tsx` renders `XrayReferrals`/`XrayInspectionResults`/
+`ReferralApproval`/`TemplateBuilderTab` only, never `EmployeeDashboard` — it appears superseded by
+`XrayReferrals.tsx`'s personal-scope view and is dead code; left in place since deleting a whole view
+file felt out of scope for a permission-bug pass. `XrayReferrals.tsx`/`XrayInspectionResults.tsx` have
+extensive hard-coded Arabic strings (movement labels, audit status labels, button text) that are
+plausible candidates for label-key extraction per the labels-first convention in CLAUDE.md, but most
+predate this session's in-progress `XrayReferrals.tsx` diff and are stylistically consistent with the
+rest of the file, so left as-is rather than triggering a broad, unrelated refactor. `.ew-btn-warning`'s
+`margin-left: auto` in `EmployeeWorkspace.css` is inert dead CSS in its only current usage (the parent
+`.ew-replace-row` already uses `justify-content: space-between`, which positions it correctly under
+RTL) but would push the button to the physical-left (wrong) edge if ever reused in a plain flex row —
+flagged for the CSS owner, not changed here since it has no current visible effect. No changes to
+`src/data/templates/`, `tabRegistry.ts`, `App.tsx`, or `DataTable` (out of scope; `DataTable` misuse
+was checked and none found in this tab's usage).
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx`
+
+**Before:**
+```ts
+import {
+  getRolePermission,
+  hasFeature,
+  readUserManagementState,
+} from "../../../../../auth/userManagement";
+```
+```ts
+  /** Only admin can mutate distribution data (replacements, etc.). */
+  const canEdit   = role === "admin";
+  const userManagementState = readUserManagementState();
+```
+
+**After:**
+```ts
+import {
+  getRolePermission,
+  hasFeature,
+  readUserManagementState,
+  subscribeToUserManagementChanges,
+} from "../../../../../auth/userManagement";
+```
+```ts
+  /** Only admin can mutate distribution data (replacements, etc.). */
+  const canEdit   = role === "admin";
+  // Re-render when the permission matrix changes (e.g. admin edits User Management while
+  // this tab stays mounted) — otherwise canSeeAll/canEdit/etc. below stay frozen at the
+  // last unrelated render's snapshot.
+  const [, forcePermissionRefresh] = useState(0);
+  useEffect(() => subscribeToUserManagementChanges(() => forcePermissionRefresh((n) => n + 1)), []);
+  const userManagementState = readUserManagementState();
+```
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayInspectionResults.tsx`
+
+**Before:**
+```ts
+import { hasFeature, readUserManagementState } from "../../../../../auth/userManagement";
+```
+```ts
+  const session = readSession();
+  const username = session?.username ?? "";
+  const role = session?.role ?? "employee";
+  const userManagementState = readUserManagementState();
+```
+
+**After:**
+```ts
+import {
+  hasFeature,
+  readUserManagementState,
+  subscribeToUserManagementChanges,
+} from "../../../../../auth/userManagement";
+```
+```ts
+  const session = readSession();
+  const username = session?.username ?? "";
+  const role = session?.role ?? "employee";
+  // Re-render on permission-matrix changes so canSeeAll doesn't stay stale while mounted.
+  const [, forcePermissionRefresh] = useState(0);
+  useEffect(() => subscribeToUserManagementChanges(() => forcePermissionRefresh((n) => n + 1)), []);
+  const userManagementState = readUserManagementState();
+```
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval.tsx`
+
+**Before:**
+```ts
+import { hasFeature, readUserManagementState } from "../../../../../auth/userManagement";
+```
+```ts
+export default function ReferralApproval({ directoryHandle }: Props) {
+  const session  = readSession();
+  const username = session?.username ?? "";
+  const role     = session?.role ?? "employee";
+  const userManagementState = readUserManagementState();
+```
+
+**After:**
+```ts
+import {
+  hasFeature,
+  readUserManagementState,
+  subscribeToUserManagementChanges,
+} from "../../../../../auth/userManagement";
+```
+```ts
+export default function ReferralApproval({ directoryHandle }: Props) {
+  const session  = readSession();
+  const username = session?.username ?? "";
+  const role     = session?.role ?? "employee";
+  // Re-render on permission-matrix changes so canApproveReferrals/canApproveReplacements
+  // don't stay stale while this tab is mounted.
+  const [, forcePermissionRefresh] = useState(0);
+  useEffect(() => subscribeToUserManagementChanges(() => forcePermissionRefresh((n) => n + 1)), []);
+  const userManagementState = readUserManagementState();
+```
+
+## v41.5 — 2026-07-05 — ReportDesigner: log swallowed list-refresh failure after delete
+
+`handleDelete` in the ReportDesigner list view refreshed the design index after a
+successful delete with `loadDesignIndex(directoryHandle).then(setIndex).catch(() => {})`
+— any failure reloading the index (e.g. transient FS error) was completely swallowed
+with no observability, unlike the rest of the codebase's `logRejection` convention used
+in `Reports/index.tsx` for the same class of fire-and-forget promise.
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
+
+**Before:**
+```tsx
+    setDeletingId(null);
+    // Refresh list
+    loadDesignIndex(directoryHandle)
+      .then(setIndex)
+      .catch(() => {});
+```
+
+**After:**
+```tsx
+    setDeletingId(null);
+    // Refresh list
+    loadDesignIndex(directoryHandle)
+      .then(setIndex)
+      .catch(logRejection("reportDesigner:refreshIndexAfterDelete"));
+```
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx` (import)
+
+**Before:**
+```tsx
+import { readSession } from "../../../../auth/authSession";
+```
+
+**After:**
+```tsx
+import { readSession } from "../../../../auth/authSession";
+import { logRejection } from "../../../../data/storage/errorLogger";
+```
+
+## v41.6 — 2026-07-05 — Reports: handle clipboard-write rejection on Power BI path copy
+
+The "نسخ" (copy) button for the Power BI export path used
+`void navigator.clipboard.writeText(fullHint)` — `navigator.clipboard.writeText` returns
+a promise that rejects in non-secure contexts or when the Permissions API denies clipboard
+access, and the `void` operator discards that rejection silently, leaving the user with
+a button that appears to do nothing and no diagnostic trail. Routed through the existing
+`logRejection` fire-and-forget helper used elsewhere in this file.
+
+**File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
+
+**Before:**
+```tsx
+                      onClick={() => { void navigator.clipboard.writeText(fullHint); }}
+```
+
+**After:**
+```tsx
+                      onClick={() => {
+                        navigator.clipboard.writeText(fullHint).catch(logRejection("reports:copyPbiPath"));
+                      }}
+```
+
+## v41.10b — 2026-07-05 — Population tab audit: fix undefined-crash in export column handler + stale CertScan grid on async month load
+
+Second, independent pass over `src/components/Sidebar/Tabs/Population/` (biData/, riskData/,
+processing/, reporting/, components/), on top of the earlier v41.5 entry in this file that
+removed dead mini-report code from the same tab. Two real bugs fixed here; the Excel worker
+flow, sampling draw call, distribution event log, and `populationProcessor.ts`
+chunking/progress were reviewed and found sound. (Version suffixed `b` because concurrent
+agents were appending to this log at the same time and a plain `v41.10` may already exist.)
+
+**File:** `src/components/Sidebar/Tabs/Population/components/MappingSettingsModal.tsx`
+
+**Before:**
+```ts
+const handleExportColumnChange = (fieldKey: string, field: keyof ExportColumnSetting, val: ExportColumnSetting[keyof ExportColumnSetting]) => {
+    const updatedColumns = config.exportTemplates[0].columns.map((col) => {
+```
+
+**After:**
+```ts
+const handleExportColumnChange = (fieldKey: string, field: keyof ExportColumnSetting, val: ExportColumnSetting[keyof ExportColumnSetting]) => {
+    if (!config.exportTemplates[0]) return;
+    const updatedColumns = config.exportTemplates[0].columns.map((col) => {
+```
+`config.exportTemplates[0]` was read without a guard even though the line just above it
+(building `newExportCol.order`) already treats the same lookup as possibly-undefined via
+`config.exportTemplates[0]?.columns.length + 1 || 20`. `tsconfig.app.json` doesn't set
+`strict`/`noUncheckedIndexedAccess`, so plain array indexing types as non-optional and `tsc`
+never flagged the missing `?.`. If a saved/merged `PopulationConfig` ever loses its
+`exportTemplates` entry (partially-migrated or hand-edited workspace config JSON), toggling
+any "أعمدة التصدير" checkbox or editing an export header would throw
+`TypeError: Cannot read properties of undefined` and take down the whole settings modal.
+
+**File:** `src/components/Sidebar/Tabs/Population/components/CertScanGrid.tsx`
+
+**Before:**
+```ts
+import { useState, useRef } from "react";
+import { Check, ClipboardList } from "lucide-react";
+```
+```ts
+export default function CertScanGrid({ initialText, onDataChange }: CertScanGridProps) {
+  const parsed0 = parseStoredText(initialText ?? "");
+
+  const [gridData, setGridData] = useState<string[][]>(() => parsed0?.data ?? []);
+  const [portCol, setPortCol] = useState<number | null>(() => parsed0?.portCol ?? null);
+  const [snCol, setSnCol] = useState<number | null>(() => parsed0?.snCol ?? null);
+  const [activeHL, setActiveHL] = useState<HighlightType>(null);
+  const pasteRef = useRef<HTMLDivElement>(null);
+```
+
+**After:**
+```ts
+import { useState, useRef, useEffect } from "react";
+import { Check, ClipboardList } from "lucide-react";
+```
+```ts
+export default function CertScanGrid({ initialText, onDataChange }: CertScanGridProps) {
+  const parsed0 = parseStoredText(initialText ?? "");
+
+  const [gridData, setGridData] = useState<string[][]>(() => parsed0?.data ?? []);
+  const [portCol, setPortCol] = useState<number | null>(() => parsed0?.portCol ?? null);
+  const [snCol, setSnCol] = useState<number | null>(() => parsed0?.snCol ?? null);
+  const [activeHL, setActiveHL] = useState<HighlightType>(null);
+  const pasteRef = useRef<HTMLDivElement>(null);
+  const hasHydratedRef = useRef(Boolean(parsed0));
+
+  // `initialText` arrives asynchronously: PopulationTab (index.tsx) mounts this grid with
+  // certScanPasteText === "" and only calls setCertScanPasteText(text) once
+  // loadCertScanGlobal(directoryHandle) resolves inside a useEffect — after first render.
+  // gridData/portCol/snCol are seeded via lazy useState initializers (run once, on mount),
+  // so that later prop update was silently dropped: a month's accumulated CertScan paste
+  // looked "lost" in the grid UI on reload even though it was safely persisted to disk and
+  // still correctly used for processing (certScanPasteText itself, read directly in
+  // PopulationTab, was never affected — only this component's own display state was stale).
+  // Hydrate once when the real text shows up, without clobbering in-progress user edits.
+  useEffect(() => {
+    if (hasHydratedRef.current) return;
+    const parsed = parseStoredText(initialText ?? "");
+    if (!parsed) return;
+    hasHydratedRef.current = true;
+    setGridData(parsed.data);
+    setPortCol(parsed.portCol);
+    setSnCol(parsed.snCol);
+  }, [initialText]);
+```
+
+## v41.7 — 2026-07-05 — Reports: gate report-designer sub-tab inside the component, not just the registry
+
+`tabConfig.subTabs` restricts `report-designer` to `["supervisor", "manager", "admin"]`,
+matching the pattern already double-checked in-component for the `kpi`/analytics sub-tab
+(`<TabGuard tabId="reports/analytics">`). The `report-designer` sub-tab had no equivalent
+in-component check — `ReportsTab` rendered `<ReportDesignerTab />` unconditionally once
+`activeSubTab === "report-designer"`, relying solely on the sidebar/registry to prevent
+an unauthorized role (e.g. `employee`) from reaching it. Since sub-tab switching is driven
+by a DOM CustomEvent (`sidebar-subtab-changed`) rather than a prop passed down with an
+access check, this is exactly the double-gating gap called out for this audit: the
+registry can be bypassed if the event fires from anywhere. Added the same `TabGuard`
+pattern used for `reports/analytics`, keyed to the existing `reports/report-designer`
+permission id already defined in `userManagement.ts`.
+
+**File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
+
+**Before:**
+```tsx
+  if (activeSubTab === "report-designer") return <ReportDesignerTab />;
+  return <ReportsContent />;
+```
+
+**After:**
+```tsx
+  if (activeSubTab === "report-designer") {
+    return (
+      <TabGuard tabId="reports/report-designer">
+        <ReportDesignerTab />
+      </TabGuard>
+    );
+  }
+  return <ReportsContent />;
+```

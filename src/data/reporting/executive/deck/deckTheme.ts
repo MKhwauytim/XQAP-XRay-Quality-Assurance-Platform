@@ -30,7 +30,33 @@ ${EXEC_CSS}
 .deck-toolbar .brand-mark{width:42px;height:42px;font-size:18px;}
 .deck-toolbar .deck-brand strong{display:block;font-size:0.92rem;font-weight:800;color:#fff;}
 .deck-toolbar .deck-brand span{display:block;color:var(--slate);font-size:0.72rem;margin-top:2px;}
+.deck-toolbar-actions{display:flex;align-items:center;gap:14px;}
 .deck-toolbar .btn{width:auto;padding:9px 18px;}
+
+/* Sun/moon slide toggle for the light/dark switch (replaces a plain text
+   button — sun and moon sit at fixed ends of the track, a thumb slides
+   between them). \`dir="ltr"\` on the label pins sun-start/moon-end regardless
+   of the surrounding RTL document, matching the \`.v2-variant-switcher\` fix
+   for the same bidi issue. */
+.theme-toggle{display:flex;align-items:center;cursor:pointer;}
+.theme-toggle input{position:absolute;opacity:0;width:1px;height:1px;}
+.theme-toggle-track{
+  position:relative;display:flex;align-items:center;justify-content:space-between;
+  width:52px;height:26px;border-radius:999px;padding:3px;box-sizing:border-box;
+  background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);
+  transition:background .15s ease,border-color .15s ease;
+}
+.theme-toggle-icon{
+  position:relative;z-index:1;width:14px;height:14px;
+  display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,.55);
+}
+.theme-toggle-icon.sun{color:var(--gold);}
+.theme-toggle-thumb{
+  position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;
+  background:#fff;box-shadow:0 2px 5px rgba(0,0,0,.35);transition:transform .18s ease;
+}
+.theme-toggle input:checked ~ .theme-toggle-track .theme-toggle-thumb{transform:translateX(26px);}
+@media print{.theme-toggle{display:none!important;}}
 
 /* A 16:9 landscape slide. 297mm × 167mm ≈ 1.778 aspect. */
 .slide{
@@ -298,4 +324,43 @@ ${EXEC_CSS}
   .slide.title-slide h1{font-size:2rem;}
   .hero-number{font-size:3.4rem;}
 }
+
+/* ── Light theme re-skin (toolbar toggle) — components shared by both the
+   v1 reference deck and the v2 deck. Selectors here match or exceed the
+   specificity of the dark-theme rule they override (e.g. \`.deck-table td\`
+   beats a bare \`.deck-table\`), otherwise the light override silently loses
+   the cascade and text stays white-on-white. deck2/theme.ts layers v2-only
+   component overrides on top of this. ─────────────────────────────────── */
+body.theme-light{background:#eef2f6;}
+body.theme-light .slide{
+  background:linear-gradient(150deg,#ffffff,#f4f6f9 65%);
+  border-color:#dde4ea;color:#0a2d4a;
+}
+body.theme-light .slide::before{background:none;}
+body.theme-light .slide-headline,body.theme-light h2,body.theme-light .slide.title-slide h1{color:#0a2d4a;}
+body.theme-light .slide-subhead,body.theme-light .title-sub{color:#8a6d1f;}
+body.theme-light .muted,body.theme-light .hero-sub,body.theme-light .title-meta{color:#607386;}
+body.theme-light .hero-caption{color:#3a4a58;}
+body.theme-light .kpi-tile{background:#ffffff;border-color:#dde4ea;color:#0a2d4a;box-shadow:0 6px 16px rgba(10,45,74,.08);}
+body.theme-light .kpi-tile .kpi-tile-label,body.theme-light .kpi-tile .kpi-tile-sub{color:#607386;}
+body.theme-light .deck-table{background:#ffffff;}
+body.theme-light .deck-table th{background:#0e3a5f;color:#fff;}
+body.theme-light .deck-table td{border-color:#e3e8ee;color:#0a2d4a;}
+body.theme-light .deck-table tbody tr:nth-child(even){background:rgba(10,45,74,.03);}
+body.theme-light .deck-card{background:#ffffff;border-color:#dde4ea;box-shadow:0 6px 16px rgba(10,45,74,.08);}
+body.theme-light .deck-card h4{color:#0a2d4a;}
+body.theme-light .deck-card p{color:#3a4a58;}
+body.theme-light .deck-agenda-item{background:#ffffff;border-color:#dde4ea;box-shadow:0 6px 16px rgba(10,45,74,.06);}
+body.theme-light .deck-agenda-body h4{color:#0a2d4a;}
+body.theme-light .deck-agenda-body p{color:#3a4a58;}
+body.theme-light .deck-list li{background:#ffffff;border-color:#dde4ea;color:#0a2d4a;}
+body.theme-light .deck-timeline .tl-step{background:#ffffff;border-color:#dde4ea;}
+body.theme-light .deck-timeline .tl-step .tl-what{color:#3a4a58;}
+body.theme-light .deck-empty b{color:#0a2d4a;}
+body.theme-light .deck-empty span{color:#607386;}
+body.theme-light .slide-footer{background:rgba(10,45,74,.04);border-top-color:#dde4ea;}
+body.theme-light .slide-footer .foot-text{color:#3a4a58;}
+body.theme-light .slide.title-slide .title-levels > div{background:#ffffff;border-color:#dde4ea;color:#3a4a58;}
+body.theme-light .slide.title-slide .title-classify{background:rgba(244,180,0,.12);}
+@media print{.btn-theme{display:none!important;}}
 `;
