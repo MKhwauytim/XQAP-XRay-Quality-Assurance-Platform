@@ -650,6 +650,49 @@ export function portSampleSlideBuilders(model: ReportModel, variantPreview: bool
   return builders;
 }
 
+/**
+ * Same tallying logic as collectPortStats (line 432), keyed by risk stage
+ * instead of land/sea. Returns ports sorted by population descending within
+ * each stage — the same sort key collectPortStats uses — so "top port" means
+ * the same thing on the land/sea pages and these stage/port pages.
+ *
+ * Invariant (asserted in stagePortStats.test.ts): for every entry in
+ * `model.population.byStage`, summing `total`/`sampleTotal` across all ports
+ * returned for that stageLabel must equal that stage's `population`/
+ * `sampleSize`. Both come from the same `model.rows`, so this holds by
+ * construction — the test exists to catch a future refactor that breaks it.
+ */
+export function collectStagePortStats(model: ReportModel): Map<string, PortPopRow[]> {
+  const byStage = new Map<string, Map<string, PortPopRow>>();
+  for (const r of model.rows) {
+    const stageKey = r.stage ?? "غير محدد";
+    const portName = r.portName ?? "غير محدد";
+    let portMap = byStage.get(stageKey);
+    if (!portMap) {
+      portMap = new Map<string, PortPopRow>();
+      byStage.set(stageKey, portMap);
+    }
+    let cur = portMap.get(portName);
+    if (!cur) {
+      cur = { name: portName, total: 0, clean: 0, suspicious: 0, sampleTotal: 0, sampleClean: 0, sampleSuspicious: 0 };
+      portMap.set(portName, cur);
+    }
+    cur.total += 1;
+    if (r.imageResult === "اشتباه") cur.suspicious += 1;
+    else cur.clean += 1;
+    if (r.selectedInSample) {
+      cur.sampleTotal += 1;
+      if (r.imageResult === "اشتباه") cur.sampleSuspicious += 1;
+      else cur.sampleClean += 1;
+    }
+  }
+  const result = new Map<string, PortPopRow[]>();
+  for (const [stageKey, portMap] of byStage) {
+    result.set(stageKey, [...portMap.values()].sort((a, b) => b.total - a.total));
+  }
+  return result;
+}
+
 // ── Section 2, page A — نتائج جودة الصور في المنافذ ─────────────────────────
 type PortQualityRow = {
   name: string;
