@@ -236,6 +236,85 @@ dev-workspace
 
 ---
 
+## v39.2 — 2026-07-05 — Variant-switcher CSS + light-theme re-skin (deck2)
+
+Adds CSS for the dev-preview style-variant switcher chrome (`.v2-variant-stack`, `.v2-variant-panel`, `.v2-variant-switcher`, `.v2-variant-prev`/`.v2-variant-next`, `.v2-variant-label`) and a `body.theme-light` light-theme re-skin for both deck2-only components (v2-term-card, v2-stage-card, v2-port-col, v2-rail) and shared v1 components (kpi-tile, deck-table). These classes are not wired to any markup yet; they will be used by Task 4's `renderVariants()` function and Task 7's theme-toggle button. This task is purely CSS, no logic or markup changes.
+
+**File:** `src/data/reporting/executive/deck2/theme.ts`
+
+**Before:**
+```ts
+@media(max-width:820px){
+  .v2-term-grid,.v2-port-split,.v2-cover-meta{grid-template-columns:1fr;}
+}
+`;
+```
+
+**After:**
+```ts
+@media(max-width:820px){
+  .v2-term-grid,.v2-port-split,.v2-cover-meta{grid-template-columns:1fr;}
+}
+
+/* ── Style-variant switcher (dev-preview only, never in production output) ── */
+/* .v2-variant-stack takes over the flex-sizing role of whatever container it
+   sits in (\`.slide-body\` or directly \`.slide-inner\`), so wrapping existing
+   content in it does not change any pixel-budget math (TABLE_BUDGET_PX etc.)
+   — only the ACTIVE panel is flex/visible, matching the original single-child
+   layout the budget math was measured against. */
+.v2-variant-stack{
+  flex:1 1 auto;min-height:0;display:flex;flex-direction:column;position:relative;
+}
+.v2-variant-panel{display:none;flex:1 1 auto;min-height:0;flex-direction:column;}
+.v2-variant-panel.active{display:flex;}
+.v2-variant-switcher{
+  position:absolute;top:6px;left:6px;z-index:5;
+  display:flex;align-items:center;gap:6px;
+  background:rgba(2,16,30,.72);border:1px solid rgba(255,255,255,.16);border-radius:999px;
+  padding:3px 8px;font-size:0.68rem;font-weight:700;color:rgba(255,255,255,.75);
+}
+.v2-variant-switcher button{
+  border:0;background:rgba(255,255,255,.08);color:#fff;border-radius:999px;
+  width:20px;height:20px;display:grid;place-items:center;cursor:pointer;font-size:0.85rem;line-height:1;
+  padding:0;
+}
+.v2-variant-switcher button:hover{background:var(--gold);color:var(--navy);}
+.v2-variant-label{min-width:32px;text-align:center;font-variant-numeric:tabular-nums;}
+@media print{.v2-variant-switcher{display:none!important;}}
+
+/* ── Light theme re-skin (dev-preview toggle) ────────────────────────────── */
+/* Mirrors the old deck's \`.page.light\` pattern (theme.ts / EXEC_CSS): swap
+   background/ink/border colors on top of whatever variant is currently
+   showing, no new markup. Applies to both slides.ts's v1-shared components
+   (kpi-tile, deck-table) and deck2-only components (v2-term-card, v2-stage-
+   card, v2-port-col). */
+body.theme-light{background:#eef2f6;}
+body.theme-light .slide{
+  background:linear-gradient(150deg,#ffffff,#f4f6f9 65%);
+  border-color:#dde4ea;color:#0a2d4a;
+}
+body.theme-light .slide-headline,body.theme-light h2{color:#0a2d4a;}
+body.theme-light .slide-subhead{color:#8a6d1f;}
+body.theme-light .muted,body.theme-light .v2-stage-row span{color:#607386;}
+body.theme-light .kpi-tile,body.theme-light .v2-term-card,body.theme-light .v2-stage-card{
+  background:#ffffff;border-color:#dde4ea;color:#0a2d4a;box-shadow:0 6px 16px rgba(10,45,74,.08);
+}
+body.theme-light .v2-port-col{
+  background:linear-gradient(180deg,#eef7ee,#e4f1e4);box-shadow:0 6px 16px rgba(10,45,74,.08);
+}
+body.theme-light .v2-port-col.sea{background:linear-gradient(180deg,#eaf2fb,#dfeaf8);}
+body.theme-light .deck-table{background:#ffffff;color:#0a2d4a;}
+body.theme-light .deck-table th{background:#0e3a5f;color:#fff;}
+body.theme-light .deck-table td{border-color:#e3e8ee;}
+body.theme-light .v2-rail{background:linear-gradient(180deg,#f4f6f9,#e7edf2);border-color:#dde4ea;}
+body.theme-light .v2-rail-title,body.theme-light .v2-rail-tab{color:#5b6b78;}
+body.theme-light .v2-variant-switcher{background:rgba(255,255,255,.85);border-color:#dde4ea;color:#3a4a58;}
+body.theme-light .v2-variant-switcher button{background:rgba(10,45,74,.08);color:#0a2d4a;}
+`;
+```
+
+---
+
 ## v38.3 — 2026-07-02 — DataTable render loop via onFilteredRowsChange (BUGFIX LOG-03)
 
 New finding surfaced during post-fix verification (registered as LOG-03 in
