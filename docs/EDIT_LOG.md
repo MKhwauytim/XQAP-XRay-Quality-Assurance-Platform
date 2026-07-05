@@ -4,6 +4,139 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v40.2 — 2026-07-05 — Preview harness wiring + light/dark toggle
+
+Wires the dev-only preview harness (`deck-preview.html` + `src/dev/deckPreview.ts`) to always request variant-preview mode and adds a light/dark theme toggle button. The preview harness now passes `{ variantPreview: true }` to `buildExecutiveDeckV2`, enabling the style-variant cycling controls on every deck2 slide. The new theme toggle button applies/removes the `theme-light` class on the iframe body, persisting the choice until the user clicks the button again. Task 8 of the deck2-style-switcher workstream.
+
+**File:** `deck-preview.html`
+
+**Before:**
+```html
+    <div id="bar">
+      <strong>معاينة العرض التنفيذي</strong>
+      <button id="btn-v2" class="active">النسخة الجديدة (v2)</button>
+      <button id="btn-v1">النسخة القديمة (مرجع)</button>
+      <span class="hint">بيانات تجريبية — مايو 2026 · يُعاد التحميل تلقائيًا مع كل تعديل</span>
+    </div>
+```
+
+**After:**
+```html
+    <div id="bar">
+      <strong>معاينة العرض التنفيذي</strong>
+      <button id="btn-v2" class="active">النسخة الجديدة (v2)</button>
+      <button id="btn-v1">النسخة القديمة (مرجع)</button>
+      <button id="btn-theme">فاتح / داكن</button>
+      <span class="hint">بيانات تجريبية — مايو 2026 · يُعاد التحميل تلقائيًا مع كل تعديل</span>
+    </div>
+```
+
+**File:** `src/dev/deckPreview.ts`
+
+**Before:**
+```typescript
+const frame = document.getElementById("frame") as HTMLIFrameElement;
+const btnV2 = document.getElementById("btn-v2") as HTMLButtonElement;
+const btnV1 = document.getElementById("btn-v1") as HTMLButtonElement;
+
+const LOADING_HTML = `<!DOCTYPE html><html lang="ar" dir="rtl"><body style="margin:0;height:100vh;display:grid;place-items:center;background:#04182c;color:#cfe0f0;font-family:system-ui,sans-serif;font-size:0.95rem">جارٍ بناء العرض…</body></html>`;
+
+let input: ExecutiveReportInput | null = null;
+const cache: { v1?: string; v2?: string } = {};
+
+function deckHtml(which: "v2" | "v1"): string {
+  input ??= buildPreviewInput();
+  if (which === "v2") {
+    cache.v2 ??= buildExecutiveDeckV2(input);
+    return cache.v2;
+  }
+  cache.v1 ??= buildExecutiveDeck(input);
+  return cache.v1;
+}
+
+function show(which: "v2" | "v1"): void {
+  btnV2.classList.toggle("active", which === "v2");
+  btnV1.classList.toggle("active", which === "v1");
+  if (cache[which]) {
+    frame.srcdoc = cache[which] as string;
+    return;
+  }
+  frame.srcdoc = LOADING_HTML;
+  // Let the placeholder paint before the (synchronous) model + deck build.
+  setTimeout(() => {
+    const t0 = performance.now();
+    frame.srcdoc = deckHtml(which);
+    console.info(`[deck-preview] built ${which} in ${Math.round(performance.now() - t0)}ms`);
+  }, 30);
+}
+
+btnV2.addEventListener("click", () => show("v2"));
+btnV1.addEventListener("click", () => show("v1"));
+show("v2");
+```
+
+**After:**
+```typescript
+const frame = document.getElementById("frame") as HTMLIFrameElement;
+const btnV2 = document.getElementById("btn-v2") as HTMLButtonElement;
+const btnV1 = document.getElementById("btn-v1") as HTMLButtonElement;
+const btnTheme = document.getElementById("btn-theme") as HTMLButtonElement;
+
+const LOADING_HTML = `<!DOCTYPE html><html lang="ar" dir="rtl"><body style="margin:0;height:100vh;display:grid;place-items:center;background:#04182c;color:#cfe0f0;font-family:system-ui,sans-serif;font-size:0.95rem">جارٍ بناء العرض…</body></html>`;
+
+let input: ExecutiveReportInput | null = null;
+const cache: { v1?: string; v2?: string } = {};
+let lightTheme = false;
+
+function deckHtml(which: "v2" | "v1"): string {
+  input ??= buildPreviewInput();
+  if (which === "v2") {
+    // Always request variant-preview mode here: this dev tool's whole purpose
+    // is style-variant exploration (see deck2/index.ts's `variantPreview` opt).
+    // Production callers (once deck2 is wired into the real app) omit `opts`.
+    cache.v2 ??= buildExecutiveDeckV2(input, {}, { variantPreview: true });
+    return cache.v2;
+  }
+  cache.v1 ??= buildExecutiveDeck(input);
+  return cache.v1;
+}
+
+function show(which: "v2" | "v1"): void {
+  btnV2.classList.toggle("active", which === "v2");
+  btnV1.classList.toggle("active", which === "v1");
+  if (cache[which]) {
+    frame.srcdoc = cache[which] as string;
+    return;
+  }
+  frame.srcdoc = LOADING_HTML;
+  // Let the placeholder paint before the (synchronous) model + deck build.
+  setTimeout(() => {
+    const t0 = performance.now();
+    frame.srcdoc = deckHtml(which);
+    console.info(`[deck-preview] built ${which} in ${Math.round(performance.now() - t0)}ms`);
+  }, 30);
+}
+
+// Re-applies the light-theme class every time the iframe's document reloads
+// (srcdoc assignment tears down the previous document, so the class doesn't
+// survive a `show()` call on its own).
+frame.addEventListener("load", () => {
+  if (lightTheme) frame.contentDocument?.body.classList.add("theme-light");
+});
+
+btnTheme.addEventListener("click", () => {
+  lightTheme = !lightTheme;
+  btnTheme.classList.toggle("active", lightTheme);
+  frame.contentDocument?.body.classList.toggle("theme-light", lightTheme);
+});
+
+btnV2.addEventListener("click", () => show("v2"));
+btnV1.addEventListener("click", () => show("v1"));
+show("v2");
+```
+
+---
+
 ## v40.1 — 2026-07-05 — Thread variantPreview through buildExecutiveDeckV2
 
 Wires the `variantPreview` parameter through the public API of the executive deck v2 builder. Adds the `DECK_VARIANT_SCRIPT` client-side controller (only injected when `variantPreview=true`) and updates `buildDeckV2Html` and `buildExecutiveDeckV2` signatures to accept and propagate the variant-preview flag. Task 7 of the deck2-style-switcher workstream.
