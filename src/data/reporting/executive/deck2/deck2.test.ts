@@ -56,19 +56,27 @@ function input(populationRows: PreparedPopulationRow[]): ExecutiveReportInput {
 }
 
 describe("buildExecutiveDeckV2 — production path (no opts)", () => {
-  it("never emits variant-switcher chrome when opts is omitted", () => {
+  // Match the opening markup tag, not the bare class name — the CSS block
+  // (added in Task 3) legitimately contains the literal substring
+  // "v2-variant-stack"/"v2-variant-switcher" as selector text, always, in both
+  // production and preview mode (CSS is static and unconditional; only the
+  // switcher's DOM markup and client script are gated on variantPreview). A
+  // bare substring check would false-positive on that CSS text alone.
+  it("never emits variant-switcher DOM markup when opts is omitted", () => {
     const html = buildExecutiveDeckV2(input([popRow(), popRow({ xrayImageId: "XR-2" })]));
-    expect(html).not.toContain("v2-variant-stack");
-    expect(html).not.toContain("v2-variant-switcher");
+    expect(html).not.toContain('<div class="v2-variant-stack"');
+    expect(html).not.toContain('<div class="v2-variant-switcher"');
+    expect(html).not.toContain("__deck-style-choices");
   });
 
-  it("never emits variant-switcher chrome when variantPreview is explicitly false", () => {
+  it("never emits variant-switcher DOM markup when variantPreview is explicitly false", () => {
     const html = buildExecutiveDeckV2(
       input([popRow(), popRow({ xrayImageId: "XR-2" })]),
       {},
       { variantPreview: false },
     );
-    expect(html).not.toContain("v2-variant-stack");
+    expect(html).not.toContain('<div class="v2-variant-stack"');
+    expect(html).not.toContain("__deck-style-choices");
   });
 
   it("produces byte-identical output for the same input regardless of the opts param shape", () => {
