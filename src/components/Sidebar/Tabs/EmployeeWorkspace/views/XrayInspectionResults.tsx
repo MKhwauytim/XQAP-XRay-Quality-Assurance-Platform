@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CalendarOff } from "lucide-react";
 import { readSession } from "../../../../../auth/authSession";
-import { hasFeature, readUserManagementState } from "../../../../../auth/userManagement";
+import {
+  hasFeature,
+  readUserManagementState,
+  subscribeToUserManagementChanges,
+} from "../../../../../auth/userManagement";
 import { PageHeader } from "../../../../../components/PageHeader/PageHeader";
 import { EmptyState, ErrorState, LoadingState } from "../../../../../components/StateViews/StateViews";
 import DataTable, {
@@ -128,6 +132,9 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
   const session = readSession();
   const username = session?.username ?? "";
   const role = session?.role ?? "employee";
+  // Re-render on permission-matrix changes so canSeeAll doesn't stay stale while mounted.
+  const [, forcePermissionRefresh] = useState(0);
+  useEffect(() => subscribeToUserManagementChanges(() => forcePermissionRefresh((n) => n + 1)), []);
   const userManagementState = readUserManagementState();
   const canSeeAll = hasFeature(
     userManagementState.featurePermissions,

@@ -7,6 +7,7 @@ import {
   getRolePermission,
   hasFeature,
   readUserManagementState,
+  subscribeToUserManagementChanges,
 } from "../../../../../auth/userManagement";
 import {
   loadEmployeeAnswers,
@@ -193,6 +194,11 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   const role     = session?.role ?? "employee";
   /** Only admin can mutate distribution data (replacements, etc.). */
   const canEdit   = role === "admin";
+  // Re-render when the permission matrix changes (e.g. admin edits User Management while
+  // this tab stays mounted) — otherwise canSeeAll/canEdit/etc. below stay frozen at the
+  // last unrelated render's snapshot.
+  const [, forcePermissionRefresh] = useState(0);
+  useEffect(() => subscribeToUserManagementChanges(() => forcePermissionRefresh((n) => n + 1)), []);
   const userManagementState = readUserManagementState();
   /** Oversight view is permission-driven; ordinary users only see their own samples. */
   const canSeeAll = hasFeature(

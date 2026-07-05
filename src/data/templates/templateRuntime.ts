@@ -53,12 +53,18 @@ export function getVisibleTemplateFields(
 export function isFieldVisible(
   field: TemplateField,
   answers: Record<string, TemplateAnswerValue>,
-  allFields?: TemplateField[]
+  allFields?: TemplateField[],
+  visited: Set<string> = new Set()
 ): boolean {
   if (!field.condition?.sourceFieldId) return true;
-  if (allFields) {
+  // Guard against cyclical conditions (e.g. field A's visibility depends on
+  // field B, and B's depends on A). The Template Builder UI only prevents a
+  // field from depending on itself directly, not on a transitive cycle, so
+  // this recursion must be defensive rather than assume a DAG.
+  if (allFields && !visited.has(field.fieldId)) {
+    visited.add(field.fieldId);
     const src = allFields.find((f) => f.fieldId === field.condition!.sourceFieldId);
-    if (src && !isFieldVisible(src, answers, allFields)) return false;
+    if (src && !isFieldVisible(src, answers, allFields, visited)) return false;
   }
   return evaluateCondition(field.condition, answers[field.condition.sourceFieldId]);
 }

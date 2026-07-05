@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { CalendarOff, X } from "lucide-react";
 import { readSession } from "../../../../../auth/authSession";
-import { hasFeature, readUserManagementState } from "../../../../../auth/userManagement";
+import {
+  hasFeature,
+  readUserManagementState,
+  subscribeToUserManagementChanges,
+} from "../../../../../auth/userManagement";
 import { PageHeader } from "../../../../../components/PageHeader/PageHeader";
 import { EmptyState, ErrorState, LoadingState } from "../../../../../components/StateViews/StateViews";
 import {
@@ -41,6 +45,10 @@ export default function ReferralApproval({ directoryHandle }: Props) {
   const session  = readSession();
   const username = session?.username ?? "";
   const role     = session?.role ?? "employee";
+  // Re-render on permission-matrix changes so canApproveReferrals/canApproveReplacements
+  // don't stay stale while this tab is mounted.
+  const [, forcePermissionRefresh] = useState(0);
+  useEffect(() => subscribeToUserManagementChanges(() => forcePermissionRefresh((n) => n + 1)), []);
   const userManagementState = readUserManagementState();
   const canApproveReferrals = hasFeature(userManagementState.featurePermissions, role, "approve-referrals");
   const canApproveReplacements = hasFeature(userManagementState.featurePermissions, role, "approve-replacements");

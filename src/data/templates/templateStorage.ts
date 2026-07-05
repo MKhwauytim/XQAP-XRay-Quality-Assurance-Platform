@@ -5,6 +5,7 @@ import { getTemplatesRoot } from "../workspace/workspacePaths";
 import type { TemplateIndex, TemplateSchema } from "./templateTypes";
 
 const INDEX_FILE = "templates.index.json";
+const SELECTION_FILE = "template.selection.json";
 
 async function getTemplatesDir(
   directoryHandle: DirectoryHandleLike
@@ -101,6 +102,22 @@ export async function deleteTemplate(
         await safeWriteJson(dir, `${templateId}.deleted.bak.json`, {
           ...templateResult.value,
           deletedAt: new Date().toISOString()
+        });
+      }
+
+      // Clear the active inspection-template selection if it points at the
+      // template being deleted, so consumers (XrayReferrals, XrayInspectionResults,
+      // Reports) don't keep silently referencing a dead templateId.
+      const selectionResult = await safeReadJson<{
+        templateId: string;
+        updatedAt: string;
+        updatedBy: string;
+      }>(dir, SELECTION_FILE);
+      if (selectionResult.ok && selectionResult.value.templateId === templateId) {
+        await safeWriteJson(dir, SELECTION_FILE, {
+          templateId: "",
+          updatedAt: new Date().toISOString(),
+          updatedBy: "system:deleteTemplate"
         });
       }
 

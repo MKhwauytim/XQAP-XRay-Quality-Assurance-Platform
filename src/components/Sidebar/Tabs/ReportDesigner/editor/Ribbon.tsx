@@ -7,6 +7,7 @@ const SW = 1.8;
 interface RibbonProps {
   doc: ReportDocument;
   saving: boolean;
+  saveError?: string | null;
   showFields: boolean;
   showFormat: boolean;
   onToggleFields: () => void;
@@ -18,7 +19,7 @@ interface RibbonProps {
 }
 
 export default function Ribbon({
-  doc, saving, showFields, showFormat,
+  doc, saving, saveError, showFields, showFormat,
   onToggleFields, onToggleFormat,
   onSave, onPrint, onPageSizeChange, onBack,
 }: RibbonProps) {
@@ -80,6 +81,11 @@ export default function Ribbon({
       <div style={{ flex: 1 }} />
 
       {saving && <span className="rd-saving-indicator">جاري الحفظ...</span>}
+      {!saving && saveError && (
+        <span className="rd-saving-indicator rd-save-error" title={saveError}>
+          تعذّر الحفظ التلقائي
+        </span>
+      )}
       <button className="rd-ribbon-btn" onClick={onSave} disabled={saving} type="button" title="حفظ">
         <span className="rd-ribbon-btn-icon"><Save size={18} strokeWidth={SW} /></span>
         <span>حفظ</span>

@@ -18,6 +18,10 @@ import {
 } from "../workspace/workspacePaths";
 
 const BACKUPS_FOLDER = SYSTEM_FOLDER_NAMES.backups;
+// Legacy unnumbered system-root name (mirrors LEGACY_ROOTS.system in
+// workspacePaths.ts, which is not exported) — used to skip the backups folder
+// when walking a legacy-layout workspace during a backup.
+const LEGACY_SYSTEM_ROOT = ".system";
 const AUTO_STATE_FILE = "auto-backup-state.json";
 const AUTO_SETTINGS_FILE = "auto-backup-settings.json";
 const EXCEL_MAX_ROWS = 1_048_576;
@@ -175,12 +179,13 @@ async function getMonthDir(
   return getPopulationMonthDir(directoryHandle, monthFolderName, false);
 }
 
-async function writeTextFile(dir: DirectoryHandleLike, fileName: string, content: string): Promise<void> {
+async function writeTextFile(dir: DirectoryHandleLike, fileName: string, content: string): Promise<boolean> {
   const fh = await dir.getFileHandle(fileName, { create: true });
-  if (!fh.createWritable) return;
+  if (!fh.createWritable) return false;
   const writable = await fh.createWritable();
   await writable.write(content);
   await writable.close();
+  return true;
 }
 
 async function writeBinaryFile(dir: DirectoryHandleLike, fileName: string, content: ArrayBuffer): Promise<void> {
@@ -257,21 +262,60 @@ async function writeRowsAsChunkedXlsx(params: {
   return files;
 }
 
+// A backup walks the whole workspace while normal saves run: each safeWriteJson
+// creates and then removes a {file}.tmp, mutating a directory mid-enumeration.
+// Chromium then rejects the directory iterator / a follow-up getDirectoryHandle
+// with NotFoundError. Tolerate that instead of aborting the entire backup.
+function isNotFoundError(error: unknown): boolean {
+  return Boolean(
+    error && typeof error === "object" && (error as { name?: string }).name === "NotFoundError"
+  );
+}
+
+async function collectEntries(dir: DirectoryHandleLike): Promise<DirectoryEntryLike[]> {
+  const iterable = getDirectoryEntries(dir);
+  if (!iterable) return [];
+  const entries: DirectoryEntryLike[] = [];
+  try {
+    for await (const entry of iterable) {
+      entries.push({ name: entry.name, kind: entry.kind });
+    }
+  } catch (error) {
+    // Directory changed under us (a concurrent .tmp create/remove). Keep what we
+    // gathered rather than failing the backup.
+    if (!isNotFoundError(error)) throw error;
+  }
+  return entries;
+}
+
+async function tryGetDirectory(
+  dir: DirectoryHandleLike,
+  name: string
+): Promise<DirectoryHandleLike | null> {
+  try {
+    return await dir.getDirectoryHandle(name, { create: false });
+  } catch (error) {
+    if (isNotFoundError(error)) return null;
+    throw error;
+  }
+}
+
 async function copyJsonTree(params: {
   sourceDir: DirectoryHandleLike;
   targetDir: DirectoryHandleLike;
   sourcePath: string;
   copied: string[];
 }): Promise<void> {
-  const iterable = getDirectoryEntries(params.sourceDir);
-  if (!iterable) return;
-
-  for await (const entry of iterable) {
+  for (const entry of await collectEntries(params.sourceDir)) {
     if (entry.kind === "directory") {
-      if (params.sourcePath === WORKSPACE_ROOTS.system && entry.name === BACKUPS_FOLDER) {
+      if (
+        entry.name === BACKUPS_FOLDER &&
+        (params.sourcePath === WORKSPACE_ROOTS.system || params.sourcePath === LEGACY_SYSTEM_ROOT)
+      ) {
         continue;
       }
-      const sourceChild = await params.sourceDir.getDirectoryHandle(entry.name, { create: false });
+      const sourceChild = await tryGetDirectory(params.sourceDir, entry.name);
+      if (!sourceChild) continue;
       const targetChild = await ensureDir(params.targetDir, entry.name);
       await copyJsonTree({
         sourceDir: sourceChild,
@@ -285,20 +329,19 @@ async function copyJsonTree(params: {
     if (entry.kind !== "file" || !entry.name.endsWith(".json")) continue;
     const text = await readTextFile(params.sourceDir, entry.name);
     if (text === null) continue;
-    await writeTextFile(params.targetDir, entry.name, text);
-    params.copied.push(params.sourcePath ? `${params.sourcePath}/${entry.name}` : entry.name);
+    const wrote = await writeTextFile(params.targetDir, entry.name, text);
+    if (wrote) params.copied.push(params.sourcePath ? `${params.sourcePath}/${entry.name}` : entry.name);
   }
 }
 
 async function copyAllJsonFiles(directoryHandle: DirectoryHandleLike, backupDir: DirectoryHandleLike): Promise<string[]> {
   const jsonDir = await ensureDir(backupDir, "json");
   const copied: string[] = [];
-  const iterable = getDirectoryEntries(directoryHandle);
-  if (!iterable) return copied;
 
-  for await (const entry of iterable) {
+  for (const entry of await collectEntries(directoryHandle)) {
     if (entry.kind === "directory") {
-      const sourceChild = await directoryHandle.getDirectoryHandle(entry.name, { create: false });
+      const sourceChild = await tryGetDirectory(directoryHandle, entry.name);
+      if (!sourceChild) continue;
       const targetChild = await ensureDir(jsonDir, entry.name);
       await copyJsonTree({
         sourceDir: sourceChild,
@@ -312,8 +355,8 @@ async function copyAllJsonFiles(directoryHandle: DirectoryHandleLike, backupDir:
     if (entry.kind !== "file" || !entry.name.endsWith(".json")) continue;
     const text = await readTextFile(directoryHandle, entry.name);
     if (text === null) continue;
-    await writeTextFile(jsonDir, entry.name, text);
-    copied.push(entry.name);
+    const wrote = await writeTextFile(jsonDir, entry.name, text);
+    if (wrote) copied.push(entry.name);
   }
 
   return copied;

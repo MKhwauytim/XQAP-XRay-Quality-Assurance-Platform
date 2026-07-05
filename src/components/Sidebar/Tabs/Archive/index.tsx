@@ -81,6 +81,11 @@ export default function ArchiveTab() {
       setHistory(backupHistory);
       setAutoState(state);
       setAutoSettings(settings);
+    } catch (error) {
+      setMessage({
+        type: "error",
+        text: `تعذر تحميل بيانات الأرشيف: ${error instanceof Error ? error.message : "خطأ غير معروف"}`,
+      });
     } finally {
       setIsLoading(false);
     }
@@ -208,6 +213,7 @@ export default function ArchiveTab() {
         <SummaryTile label="الأشهر" value={formatNumber(totals.months)} />
         <SummaryTile label="صفوف المجتمع" value={formatNumber(totals.populationRows)} />
         <SummaryTile label="العينات" value={formatNumber(totals.sampleRows)} />
+        <SummaryTile label="صفوف التوزيع" value={formatNumber(totals.distributionRows)} />
         <SummaryTile label="إجابات الفحص" value={formatNumber(totals.answerItems)} />
       </div>
 

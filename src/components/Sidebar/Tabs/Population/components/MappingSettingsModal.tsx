@@ -437,6 +437,7 @@ export default function MappingSettingsModal({
   };
 
   const handleExportColumnChange = (fieldKey: string, field: keyof ExportColumnSetting, val: ExportColumnSetting[keyof ExportColumnSetting]) => {
+    if (!config.exportTemplates[0]) return;
     const updatedColumns = config.exportTemplates[0].columns.map((col) => {
       if (col.fieldKey === fieldKey) {
         return { ...col, [field]: val };

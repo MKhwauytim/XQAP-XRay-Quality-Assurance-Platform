@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { readSession } from "../../../../auth/authSession";
+import { logRejection } from "../../../../data/storage/errorLogger";
 import {
   loadDesignIndex,
   saveDesign,
@@ -70,7 +71,7 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: Editor
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [, setSaveError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [showPrint, setShowPrint] = useState(false);
   const [showFields, setShowFields] = useState(true);
   const [showFormat, setShowFormat] = useState(true);
@@ -320,6 +321,7 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: Editor
         <Ribbon
           doc={doc}
           saving={saving}
+          saveError={saveError}
           showFields={showFields}
           showFormat={showFormat}
           onToggleFields={() => setShowFields((v) => !v)}
@@ -613,7 +615,7 @@ export default function ReportDesigner() {
     // Refresh list
     loadDesignIndex(directoryHandle)
       .then(setIndex)
-      .catch(() => {});
+      .catch(logRejection("reportDesigner:refreshIndexAfterDelete"));
   }
 
   return (

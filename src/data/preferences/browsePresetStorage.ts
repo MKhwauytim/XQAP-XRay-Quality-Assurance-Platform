@@ -1,5 +1,6 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { withResourceLock } from "../storage/webLocks";
 import type { BrowseDatasetKind } from "../population/populationStorage";
 import { getSystemRoot, SYSTEM_FOLDER_NAMES } from "../workspace/workspacePaths";
 
@@ -70,20 +71,25 @@ export async function saveUserBrowseDatasetPreset(
   dataset: BrowsePresetDatasetKind,
   preset: Omit<BrowseDatasetPreset, "updatedAt">
 ): Promise<void> {
-  const existing = await loadUserBrowsePreset(directoryHandle, username);
-  const nextFile: UserBrowsePresetFile = {
-    username,
-    browseData: {
-      ...existing.browseData,
-      [dataset]: {
-        ...preset,
-        updatedAt: new Date().toISOString()
+  const fileName = safeUserFileName(username);
+  // Lock the read-modify-write: two rapid preset saves for the same user
+  // (e.g. column order then width) must not race and drop one dataset's update.
+  await withResourceLock(`${SYSTEM_FOLDER_NAMES.userPresets}/${fileName}`, async () => {
+    const existing = await loadUserBrowsePreset(directoryHandle, username);
+    const nextFile: UserBrowsePresetFile = {
+      username,
+      browseData: {
+        ...existing.browseData,
+        [dataset]: {
+          ...preset,
+          updatedAt: new Date().toISOString()
+        }
       }
-    }
-  };
+    };
 
-  const dir = await getPresetDir(directoryHandle, true);
-  await safeWriteJson(dir, safeUserFileName(username), nextFile);
+    const dir = await getPresetDir(directoryHandle, true);
+    await safeWriteJson(dir, fileName, nextFile);
+  });
 }
 
 export async function loadAdminBrowsePreset(
@@ -130,19 +136,21 @@ export async function saveAdminBrowseDatasetPreset(
   dataset: BrowsePresetDatasetKind,
   preset: Omit<BrowseDatasetPreset, "updatedAt">
 ): Promise<void> {
-  const existing = await loadAdminBrowsePreset(directoryHandle);
-  const nextFile: SharedBrowsePresetFile = {
-    owner: "admin",
-    browseData: {
-      ...existing.browseData,
-      [dataset]: {
-        ...preset,
-        updatedAt: new Date().toISOString(),
+  await withResourceLock(`${SYSTEM_FOLDER_NAMES.userPresets}/${ADMIN_SHARED_PRESET_FILE}`, async () => {
+    const existing = await loadAdminBrowsePreset(directoryHandle);
+    const nextFile: SharedBrowsePresetFile = {
+      owner: "admin",
+      browseData: {
+        ...existing.browseData,
+        [dataset]: {
+          ...preset,
+          updatedAt: new Date().toISOString(),
+        },
       },
-    },
-  };
+    };
 
-  const dir = await getPresetDir(directoryHandle, true);
-  await safeWriteJson(dir, ADMIN_SHARED_PRESET_FILE, nextFile);
+    const dir = await getPresetDir(directoryHandle, true);
+    await safeWriteJson(dir, ADMIN_SHARED_PRESET_FILE, nextFile);
+  });
 }
 

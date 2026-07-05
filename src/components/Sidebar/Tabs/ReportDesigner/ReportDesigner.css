@@ -151,6 +151,11 @@
   color: var(--rd-text-secondary);
   margin: 0 8px;
 }
+.rd-save-error {
+  color: var(--rd-danger, #c0392b);
+  font-weight: 600;
+  cursor: help;
+}
 
 /* ── Pages bar ── */
 .rd-page-tab {

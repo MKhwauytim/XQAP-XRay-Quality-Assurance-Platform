@@ -402,7 +402,7 @@ export const STAGE_CARD_TOP_N = 5;
  *  to have `grid-template-rows:1fr 1fr` (added alongside this fix) so both
  *  rows actually split the available height evenly instead of each sizing to
  *  its own content. */
-export let STAGE_CARD_TABLE_BUDGET_PX = 160;
+export const STAGE_CARD_TABLE_BUDGET_PX = 160;
 
 export function riskStagesSlide(model: ReportModel, num: number, total: number, variantPreview: boolean): string {
   const stages = model.population.byStage;

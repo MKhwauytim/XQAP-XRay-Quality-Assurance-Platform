@@ -986,7 +986,9 @@ function ReportsContent() {
                       type="button"
                       className="rh-pbi-copy-btn"
                       title="نسخ المسار"
-                      onClick={() => { void navigator.clipboard.writeText(fullHint); }}
+                      onClick={() => {
+                        navigator.clipboard.writeText(fullHint).catch(logRejection("reports:copyPbiPath"));
+                      }}
                     >
                       نسخ
                     </button>
@@ -1025,6 +1027,12 @@ export default function ReportsTab() {
     return () => window.removeEventListener("sidebar-subtab-changed", handleSubTabEvent);
   }, [handleSubTabEvent]);
 
-  if (activeSubTab === "report-designer") return <ReportDesignerTab />;
+  if (activeSubTab === "report-designer") {
+    return (
+      <TabGuard tabId="reports/report-designer">
+        <ReportDesignerTab />
+      </TabGuard>
+    );
+  }
   return <ReportsContent />;
 }
