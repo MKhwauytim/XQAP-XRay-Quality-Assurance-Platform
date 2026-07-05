@@ -234,6 +234,28 @@ export const DECK_V2_CSS = `
 .v2-totals-item b{display:block;font-size:1.15rem;font-weight:900;color:#fff;line-height:1.2;}
 .v2-totals-item small{display:block;font-size:0.7rem;color:var(--slate);margin-top:2px;}
 
+/* ── Stage×port grid (2 cards per row, one per risk stage 1–4) ────────────── */
+/* Reuses .v2-stage-card's border/background/tone classes (gold/blue/green/coral,
+   already defined above) as the outer card — only the internal content differs
+   (a compact table instead of the stat-row list riskStagesSlide uses). No
+   manual RTL reordering needed: in this RTL document, a plain 2-column grid
+   with cards in DOM order stage1→stage4 places stage1 top-right, stage2
+   top-left, stage3 bottom-right, stage4 bottom-left — the exact arrangement
+   in the reference mockups (2026-07-05 stage-port-grid design spec §3). */
+.v2-stage-port-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;flex:1;min-height:0;}
+.v2-stage-port-card{padding:12px 12px 10px;}
+.v2-stage-port-card .v2-stage-head{margin-bottom:8px;}
+.v2-stage-port-card .deck-table{width:100%;}
+.v2-stage-port-card .deck-table th,.v2-stage-port-card .deck-table td{padding:5px 8px;font-size:0.66rem;}
+/* The sample page's "{sampleSize} / {population}" figure in the card header —
+   dir="ltr" on this span (set in slides.ts) prevents the same bidi-reversal
+   bug the variant-switcher counter had (EDIT_LOG v40.7: "1 / 4" rendered as
+   "4 / 1" without it). */
+.v2-stage-port-figure{margin-inline-start:auto;font-size:0.85rem;font-weight:900;color:var(--gold);font-variant-numeric:tabular-nums;}
+.v2-stage-port-card.blue .v2-stage-port-figure{color:var(--blue);}
+.v2-stage-port-card.green .v2-stage-port-figure{color:var(--green);}
+.v2-stage-port-card.coral .v2-stage-port-figure{color:var(--coral);}
+
 /* ── Port population tables (land / sea, side by side) ────────────────────── */
 /* Tinted cards per the reference design: green = بري, blue = بحري. Both cards
    stretch to equal height; every table ends with an الإجمالي totals row. A

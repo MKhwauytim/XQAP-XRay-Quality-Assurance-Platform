@@ -377,6 +377,18 @@ const STAGE_SHORT_TAG: Record<string, string> = {
   "المستوى الرابع": "مستوى حرج",
 };
 
+/** How many ports each stage-×-port card shows individually before folding the
+ *  rest into its الإجمالي row (design spec §2.3 — "curated top-N, never the
+ *  full table", same convention as portTable/qualityTable/accuracyTable). */
+export const STAGE_CARD_TOP_N = 5;
+
+/** Vertical budget (px) for one stage-×-port card's thead+rows+tfoot, at
+ *  METRICS_COMPACT row heights. STARTING ESTIMATE ONLY — Task 4 measures the
+ *  actual rendered space live in the dev preview and corrects this constant
+ *  (same process TABLE_BUDGET_PX below went through — see its own comment,
+ *  "measured live in the browser... v39.9/v39.10, retuned v39.16"). */
+export let STAGE_CARD_TABLE_BUDGET_PX = 150;
+
 export function riskStagesSlide(model: ReportModel, num: number, total: number, variantPreview: boolean): string {
   const stages = model.population.byStage;
   const tiles = stages
