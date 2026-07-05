@@ -242,11 +242,12 @@ export const DECK_V2_CSS = `
    with cards in DOM order stage1→stage4 places stage1 top-right, stage2
    top-left, stage3 bottom-right, stage4 bottom-left — the exact arrangement
    in the reference mockups (2026-07-05 stage-port-grid design spec §3). */
-.v2-stage-port-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;flex:1;min-height:0;}
+.v2-stage-port-grid{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:14px;flex:1;min-height:0;}
 .v2-stage-port-card{padding:12px 12px 10px;}
 .v2-stage-port-card .v2-stage-head{margin-bottom:8px;}
 .v2-stage-port-card .deck-table{width:100%;}
-.v2-stage-port-card .deck-table th,.v2-stage-port-card .deck-table td{padding:5px 8px;font-size:0.66rem;}
+.v2-stage-port-card .deck-table th,.v2-stage-port-card .deck-table td{padding:3px 6px;font-size:0.6rem;}
+.v2-stage-port-card .deck-table th{font-size:0.58rem;}
 /* The sample page's "{sampleSize} / {population}" figure in the card header —
    dir="ltr" on this span (set in slides.ts) prevents the same bidi-reversal
    bug the variant-switcher counter had (EDIT_LOG v40.7: "1 / 4" rendered as

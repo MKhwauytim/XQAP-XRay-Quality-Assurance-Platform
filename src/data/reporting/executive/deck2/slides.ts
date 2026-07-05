@@ -384,14 +384,25 @@ const STAGE_SHORT_TAG: Record<string, string> = {
 export const STAGE_CARD_TOP_N = 5;
 
 /** Vertical budget (px) for one stage-×-port card's thead+rows+tfoot, at
- *  METRICS_COMPACT row heights. Measured live in the dev preview (Task 4,
- *  v41.1): a full 5-row card's `theadH + tfootH + 5*rowH` = 177px under
- *  METRICS_COMPACT, and `.v2-stage-card` stretches to its CSS-grid row
- *  regardless of this value, so 177 is set to the actual measured usedPx
- *  (fillerPx clamps to 0) rather than a placeholder guess — same process
- *  TABLE_BUDGET_PX below went through (see its own comment, "measured live
- *  in the browser... v39.9/v39.10, retuned v39.16"). */
-export let STAGE_CARD_TABLE_BUDGET_PX = 177;
+ *  METRICS_COMPACT row heights.
+ *
+ *  Task 4 (v41.1) originally set this to 177 — the full 5-row `usedPx` under
+ *  METRICS_COMPACT — reasoning that `.v2-stage-card` "stretches to its
+ *  CSS-grid row regardless of this value." That check only verified the
+ *  TABLE fits within its own CARD (which trivially holds once the card's
+ *  height is driven by the table itself) — it never checked whether the
+ *  2-row `.v2-stage-port-grid` as a whole fits within `.slide-body`'s fixed
+ *  458.8px, so it missed that 2×256.8px (the card height that 177px produces)
+ *  plus the row gap overflows the slide by ~46-127px, silently clipped by
+ *  `.slide{overflow:hidden}`. Re-measured (this pass): available height per
+ *  row = `(458.8 − 14px gap) / 2 ≈ 222.4px`; per-card non-table overhead
+ *  (padding 12+10px, border 0.8px×2, header 28px + 8px margin) ≈ 59.6px;
+ *  so the table budget is `222.4 − 59.6 ≈ 162.8px`. Set to 160 for a small
+ *  safety margin against sub-pixel rounding. Requires `.v2-stage-port-grid`
+ *  to have `grid-template-rows:1fr 1fr` (added alongside this fix) so both
+ *  rows actually split the available height evenly instead of each sizing to
+ *  its own content. */
+export let STAGE_CARD_TABLE_BUDGET_PX = 160;
 
 export function riskStagesSlide(model: ReportModel, num: number, total: number, variantPreview: boolean): string {
   const stages = model.population.byStage;
@@ -833,12 +844,7 @@ export function stagePortPopulationSlide(
   const cards = model.population.byStage
     .map((s, i) => stagePortPopulationCard(s, i, byStage.get(s.stageLabel) ?? []))
     .join("");
-  const totalsBand = `<div class="v2-totals-band">
-    <div class="v2-totals-item"><span class="v2-totals-icon">${icon("layers", 18)}</span><span><b>${fmtNum(model.population.total)}</b><small>إجمالي المجتمع</small></span></div>
-    <div class="v2-totals-item"><span class="v2-totals-icon">${icon("check", 18)}</span><span><b>${fmtNum(model.population.clean)}</b><small>إجمالي سليمة</small></span></div>
-    <div class="v2-totals-item"><span class="v2-totals-icon">${icon("alert", 18)}</span><span><b>${fmtNum(model.population.suspicious)}</b><small>إجمالي اشتباه</small></span></div>
-  </div>`;
-  const body = `${totalsBand}<div class="v2-stage-port-grid">${cards}</div>`;
+  const body = `<div class="v2-stage-port-grid">${cards}</div>`;
   return v2Slide({
     id: "slide-stage-port-population",
     title: "مجتمع حالات الفحص حسب المستوى والمنفذ",
@@ -865,12 +871,7 @@ export function stagePortSampleSlide(
   const cards = model.population.byStage
     .map((s, i) => stagePortSampleCard(s, i, byStage.get(s.stageLabel) ?? []))
     .join("");
-  const totalsBand = `<div class="v2-totals-band">
-    <div class="v2-totals-item"><span class="v2-totals-icon">${icon("layers", 18)}</span><span><b>${fmtNum(model.population.total)}</b><small>إجمالي المجتمع</small></span></div>
-    <div class="v2-totals-item"><span class="v2-totals-icon">${icon("scan", 18)}</span><span><b>${fmtNum(model.sample.total)}</b><small>إجمالي العيّنة</small></span></div>
-    <div class="v2-totals-item"><span class="v2-totals-icon">${icon("gauge", 18)}</span><span><b>${fmtPct(model.sample.coverage)}</b><small>نسبة التغطية</small></span></div>
-  </div>`;
-  const body = `${totalsBand}<div class="v2-stage-port-grid">${cards}</div>`;
+  const body = `<div class="v2-stage-port-grid">${cards}</div>`;
   return v2Slide({
     id: "slide-stage-port-sample",
     title: "عيّنة الفحص المسحوبة حسب المستوى والمنفذ",
