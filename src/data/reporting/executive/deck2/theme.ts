@@ -65,7 +65,13 @@ export const DECK_V2_CSS = `
 /* Content clears the rail (width-only change; row-height budgets untouched).
    The cover has no rail, so it keeps the default padding. */
 .slide.v2 .slide-inner{padding-inline-start:68px;}
-.slide.v2.title-slide .slide-inner{padding-inline-start:44px;}
+/* The cover's centered content (base CSS vertically centers .title-slide
+   .slide-inner) used to overlap the absolutely-positioned .v2-org block in
+   the top-inline-end corner once the headline + meta grid got tall enough.
+   Anchoring to the top with a fixed clearance (org block's own height, ~98px,
+   plus a small gap) instead of centering guarantees no overlap regardless of
+   content height, at the cost of not being perfectly vertically centered. */
+.slide.v2.title-slide .slide-inner{padding-inline-start:44px;justify-content:flex-start;padding-top:112px;}
 
 /* ── Cover org block: logo + gold divider + org hierarchy lines ───────────── */
 .v2-org{
@@ -309,16 +315,31 @@ export const DECK_V2_CSS = `
 .v2-port-col.compact .v2-frac b{font-size:.58rem;}
 .v2-port-col.compact .v2-frac span{font-size:.46rem;}
 
-/* ── Per-slide print-include toggle (top-right corner, on-screen only) ────── */
+/* ── Slide-level controls cluster (top-right corner, on-screen only) ──────── */
+/* Groups the print-include toggle and (dev-preview only) style-variant
+   switcher in one positioned wrapper so they sit next to each other. Sits in
+   the top inline-END corner (physical left in RTL) so it never overlaps the
+   printed side rail at the inline-start edge (v39.27). Previously the
+   switcher was absolutely positioned INSIDE the slide's padded content box
+   (\`.v2-variant-stack\`), which put it nowhere near the print toggle and
+   sometimes over the slide's own headline — see slides.ts's
+   \`slideControls()\`/\`variantSwitcher()\`.
+   Known pre-existing limitation (not introduced by this change): \`.slide\`
+   has \`isolation:isolate\` (its own stacking context), so no z-index here can
+   ever win against the sticky \`.deck-toolbar\` outside it — whenever a
+   slide's top-12px corner scrolls into the toolbar's 74px band, these
+   controls are briefly covered. True fix needs restructuring the stacking
+   context, out of scope for this pass. */
+.slide-controls{
+  position:absolute;top:12px;left:14px;z-index:6;
+  display:flex;align-items:center;gap:8px;
+}
+@media print{.slide-controls{display:none!important;}}
+
 /* Pure CSS, no script: unchecking a slide's switch excludes THAT slide from
    print/PDF via the :has() rule below. Safe to rely on :has() — this app
    already targets Chromium only (File System Access API requirement). */
-/* Sits in the top inline-END corner (physical left in RTL) so it never
-   overlaps the printed side rail at the inline-start edge (v39.27). */
-.slide-print-toggle{
-  position:absolute;top:12px;left:14px;z-index:6;
-  display:flex;align-items:center;cursor:pointer;
-}
+.slide-print-toggle{display:flex;align-items:center;cursor:pointer;}
 .slide-print-toggle input{position:absolute;opacity:0;width:1px;height:1px;}
 .slide-print-toggle-track{
   display:block;width:34px;height:18px;border-radius:999px;
@@ -333,7 +354,6 @@ export const DECK_V2_CSS = `
 .slide-print-toggle input:checked + .slide-print-toggle-track .slide-print-toggle-thumb{transform:translateX(16px);}
 .slide-print-toggle input:focus-visible + .slide-print-toggle-track{outline:2px solid var(--gold);outline-offset:2px;}
 @media print{
-  .slide-print-toggle{display:none!important;}
   .slide:has(.slide-print-toggle input:not(:checked)){display:none!important;}
 }
 
@@ -346,14 +366,15 @@ export const DECK_V2_CSS = `
    sits in (\`.slide-body\` or directly \`.slide-inner\`), so wrapping existing
    content in it does not change any pixel-budget math (TABLE_BUDGET_PX etc.)
    — only the ACTIVE panel is flex/visible, matching the original single-child
-   layout the budget math was measured against. */
+   layout the budget math was measured against. The switcher UI itself now
+   lives in \`.slide-controls\` (next to the print toggle), not inside the
+   stack — this is just the panel-swapping container. */
 .v2-variant-stack{
-  flex:1 1 auto;min-height:0;display:flex;flex-direction:column;position:relative;
+  flex:1 1 auto;min-height:0;display:flex;flex-direction:column;
 }
 .v2-variant-panel{display:none;flex:1 1 auto;min-height:0;flex-direction:column;}
 .v2-variant-panel.active{display:flex;}
 .v2-variant-switcher{
-  position:absolute;top:6px;left:6px;z-index:5;
   display:flex;align-items:center;gap:6px;
   background:rgba(2,16,30,.72);border:1px solid rgba(255,255,255,.16);border-radius:999px;
   padding:3px 8px;font-size:0.68rem;font-weight:700;color:rgba(255,255,255,.75);
@@ -365,14 +386,17 @@ export const DECK_V2_CSS = `
 }
 .v2-variant-switcher button:hover{background:var(--gold);color:var(--navy);}
 .v2-variant-label{min-width:32px;text-align:center;font-variant-numeric:tabular-nums;}
-@media print{.v2-variant-switcher{display:none!important;}}
 
-/* ── Light theme re-skin (dev-preview toggle) ────────────────────────────── */
+/* ── Light theme re-skin (toolbar toggle) ─────────────────────────────────── */
 /* Mirrors the old deck's \`.page.light\` pattern (theme.ts / EXEC_CSS): swap
    background/ink/border colors on top of whatever variant is currently
-   showing, no new markup. Applies to both slides.ts's v1-shared components
-   (kpi-tile, deck-table) and deck2-only components (v2-term-card, v2-stage-
-   card, v2-port-col). */
+   showing, no new markup. deckTheme.ts covers components shared with v1
+   (kpi-tile, deck-table, deck-card, ...); this block is deck2-only
+   components (v2-term-card, v2-stage-card, v2-port-col, v2-rail, deck-nav).
+   Every selector here matches or beats the specificity of the dark-theme
+   rule it overrides (e.g. \`.v2-stage-head b\`, not just \`.v2-stage-head\`) —
+   a lower-specificity override silently loses the cascade and leaves white
+   text on the new white background. */
 body.theme-light{background:#eef2f6;}
 body.theme-light .slide{
   background:linear-gradient(150deg,#ffffff,#f4f6f9 65%);
@@ -384,13 +408,39 @@ body.theme-light .muted,body.theme-light .v2-stage-row span{color:#607386;}
 body.theme-light .kpi-tile,body.theme-light .v2-term-card,body.theme-light .v2-stage-card{
   background:#ffffff;border-color:#dde4ea;color:#0a2d4a;box-shadow:0 6px 16px rgba(10,45,74,.08);
 }
+body.theme-light .v2-term-card-head b,body.theme-light .v2-term-card p{color:#0a2d4a;}
+body.theme-light .v2-stage-head b,body.theme-light .v2-stage-row b{color:#0a2d4a;}
+body.theme-light .v2-totals-item{background:#ffffff;border-color:#dde4ea;}
+body.theme-light .v2-totals-item b{color:#0a2d4a;}
+body.theme-light .v2-totals-item small{color:#607386;}
+body.theme-light .v2-sep h2{color:#0a2d4a;}
+body.theme-light .v2-sep p{color:#607386;}
+body.theme-light .v2-org-lines b{color:#0a2d4a;}
+body.theme-light .v2-org-lines span{color:#607386;}
+body.theme-light .v2-org-logo{filter:none;}
+body.theme-light .v2-cover-meta-item{background:#ffffff;border-color:#dde4ea;}
+body.theme-light .v2-cover-meta-value{color:#0a2d4a;}
+body.theme-light .v2-cover-meta-label{color:#607386;}
 body.theme-light .v2-port-col{
   background:linear-gradient(180deg,#eef7ee,#e4f1e4);box-shadow:0 6px 16px rgba(10,45,74,.08);
 }
 body.theme-light .v2-port-col.sea{background:linear-gradient(180deg,#eaf2fb,#dfeaf8);}
+body.theme-light .v2-port-col-head{background:rgba(10,45,74,.04);border-bottom-color:#dde4ea;}
+body.theme-light .v2-port-col-head b{color:#0a2d4a;}
+body.theme-light .v2-port-col-head span{color:#607386;}
 body.theme-light .deck-table{background:#ffffff;color:#0a2d4a;}
 body.theme-light .deck-table th{background:#0e3a5f;color:#fff;}
-body.theme-light .deck-table td{border-color:#e3e8ee;}
+body.theme-light .deck-table td{border-color:#e3e8ee;color:#0a2d4a;}
+body.theme-light .v2-port-col .deck-table th{background:rgba(10,45,74,.07);color:#0a2d4a;}
+body.theme-light .v2-port-col .deck-table tfoot td{color:#0a2d4a;background:rgba(10,45,74,.06);border-top-color:rgba(10,45,74,.18);}
+body.theme-light .v2-frac span{color:#607386;}
+body.theme-light .deck-table .insuff{color:#8a97a6;}
+body.theme-light .deck-nav{background:rgba(255,255,255,.97);border-inline-end-color:#dde4ea;}
+body.theme-light .deck-nav-brand{color:#0a2d4a;}
+body.theme-light .deck-nav-progress-bar{background:rgba(10,45,74,.08);}
+body.theme-light .deck-nav-item a{color:rgba(10,45,74,.62);}
+body.theme-light .deck-nav-item a:hover{background:rgba(10,45,74,.06);color:#0a2d4a;}
+body.theme-light .deck-nav-item.active a{background:rgba(244,180,0,.13);color:#8a6d1f;}
 body.theme-light .v2-rail{background:linear-gradient(180deg,#f4f6f9,#e7edf2);border-color:#dde4ea;}
 body.theme-light .v2-rail-title,body.theme-light .v2-rail-tab{color:#5b6b78;}
 body.theme-light .v2-variant-switcher{background:rgba(255,255,255,.85);border-color:#dde4ea;color:#3a4a58;}
