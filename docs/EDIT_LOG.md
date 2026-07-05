@@ -4,6 +4,71 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v40.4 — 2026-07-05 — Fix the 2 failing assertions from v40.3's known finding
+
+Resolves v40.3's reported (not silently patched) test failure: the two production-path
+assertions used a bare `not.toContain("v2-variant-stack")` check, which false-failed
+because Task 3's `DECK_V2_CSS` unconditionally contains that exact substring as static
+CSS selector text (`.v2-variant-stack{...}`), always present regardless of
+`variantPreview` — a CSS-text collision, not an actual DOM/markup leak. Switched both
+assertions to match the opening markup tag (`<div class="v2-variant-stack"`), which only
+appears in real DOM output, never in CSS selector text — the same technique the file's
+own preview-mode test already used correctly. Also added a check that the persistence
+endpoint string (`__deck-style-choices`) never appears in production output, closing a
+gap neither the original brief nor v40.3 tested for on the production side.
+
+**File:** `src/data/reporting/executive/deck2/deck2.test.ts`
+
+**Before:**
+```ts
+describe("buildExecutiveDeckV2 — production path (no opts)", () => {
+  it("never emits variant-switcher chrome when opts is omitted", () => {
+    const html = buildExecutiveDeckV2(input([popRow(), popRow({ xrayImageId: "XR-2" })]));
+    expect(html).not.toContain("v2-variant-stack");
+    expect(html).not.toContain("v2-variant-switcher");
+  });
+
+  it("never emits variant-switcher chrome when variantPreview is explicitly false", () => {
+    const html = buildExecutiveDeckV2(
+      input([popRow(), popRow({ xrayImageId: "XR-2" })]),
+      {},
+      { variantPreview: false },
+    );
+    expect(html).not.toContain("v2-variant-stack");
+  });
+```
+
+**After:**
+```ts
+describe("buildExecutiveDeckV2 — production path (no opts)", () => {
+  // Match the opening markup tag, not the bare class name — the CSS block
+  // (added in Task 3) legitimately contains the literal substring
+  // "v2-variant-stack"/"v2-variant-switcher" as selector text, always, in both
+  // production and preview mode (CSS is static and unconditional; only the
+  // switcher's DOM markup and client script are gated on variantPreview). A
+  // bare substring check would false-positive on that CSS text alone.
+  it("never emits variant-switcher DOM markup when opts is omitted", () => {
+    const html = buildExecutiveDeckV2(input([popRow(), popRow({ xrayImageId: "XR-2" })]));
+    expect(html).not.toContain('<div class="v2-variant-stack"');
+    expect(html).not.toContain('<div class="v2-variant-switcher"');
+    expect(html).not.toContain("__deck-style-choices");
+  });
+
+  it("never emits variant-switcher DOM markup when variantPreview is explicitly false", () => {
+    const html = buildExecutiveDeckV2(
+      input([popRow(), popRow({ xrayImageId: "XR-2" })]),
+      {},
+      { variantPreview: false },
+    );
+    expect(html).not.toContain('<div class="v2-variant-stack"');
+    expect(html).not.toContain("__deck-style-choices");
+  });
+```
+
+**Verified:** `npx vitest run src/data/reporting/executive/deck2/deck2.test.ts` → 4 passed (4); full suite `npm run test:run` → 293 passed (293), 0 regressions.
+
+---
+
 ## v40.3 — 2026-07-05 — Production-path regression test for deck2 variant switcher
 
 Adds the regression test that locks in the single most important correctness property of the deck2-style-switcher workstream: `buildExecutiveDeckV2` called with no `opts` (or `variantPreview: false`) must produce byte-identical output to before Tasks 1-8, with no variant-switcher markup leaking into production output. Also verifies preview mode (`variantPreview: true`) emits exactly one `.v2-variant-stack` per slide with 4 panels each. Task 9 (final task) of the deck2-style-switcher workstream.
