@@ -106,3 +106,37 @@ describe("buildExecutiveDeckV2 — preview mode", () => {
     expect(html).toContain("__deck-style-choices");
   });
 });
+
+describe("stage×port grid slides", () => {
+  it("renders both new slide titles and the الإجمالي totals row in production output", () => {
+    const html = buildExecutiveDeckV2(
+      input([
+        popRow({ stage: "المستوى الأول", portName: "ميناء أ" }),
+        popRow({ xrayImageId: "XR-2", stage: "المستوى الأول", portName: "ميناء ب", xrayLevelOneResult: "اشتباه", xrayLevelTwoResult: "اشتباه" }),
+      ]),
+    );
+    expect(html).toContain("مجتمع حالات الفحص حسب المستوى والمنفذ");
+    expect(html).toContain("عيّنة الفحص المسحوبة حسب المستوى والمنفذ");
+    expect(html).toContain('id="slide-stage-port-population"');
+    expect(html).toContain('id="slide-stage-port-sample"');
+  });
+
+  it("each stage card's totals row shows the pinned stage population alongside the summed سليمة/اشتباه", () => {
+    const html = buildExecutiveDeckV2(
+      input([
+        popRow({ stage: "المستوى الأول", portName: "ميناء أ", xrayLevelOneResult: "سليمة", xrayLevelTwoResult: "سليمة" }),
+        popRow({ xrayImageId: "XR-2", stage: "المستوى الأول", portName: "ميناء ب", xrayLevelOneResult: "اشتباه", xrayLevelTwoResult: "اشتباه" }),
+      ]),
+    );
+    // This fixture's input() always has sample: null, forcing
+    // calculateExecutiveKPIs's fallback branch (executiveReportData.ts
+    // ~line 393), where stage.population IS a fresh count of model.rows —
+    // so it equals 2 here. Don't read this as "totals always equal the port
+    // sum": stagePortPopulationCard pins الإجمالي to stage.population
+    // specifically because that does NOT hold in the production branch
+    // (sample.stageAllocations present) — see the design spec's consistency
+    // caveat and Task 1's stagePortStats.test.ts production-branch test.
+    const stage1Card = html.split('id="slide-stage-port-population"')[1].split("</section>")[0];
+    expect(stage1Card).toContain("<td>الإجمالي</td><td>1</td><td>1</td><td>2</td>");
+  });
+});

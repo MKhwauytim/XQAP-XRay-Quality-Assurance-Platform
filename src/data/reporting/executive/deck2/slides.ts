@@ -11,6 +11,7 @@
 // content reads clearly; the dedicated visual pass happens after content approval.
 
 import type { ReportModel } from "../model/reportModel";
+import type { StageProfile } from "../../executiveReportTypes";
 import { esc, fmtNum, fmtPct } from "../primitives";
 import { icon } from "../ui/icons";
 import { isRankable } from "../model/dataSufficiency";
@@ -720,6 +721,168 @@ export function collectStagePortStats(model: ReportModel): Map<string, PortPopRo
   return result;
 }
 
+/** One stage's card on the population page: المنفذ | سليمة | اشتباه | الإجمالي,
+ *  top STAGE_CARD_TOP_N ports by population, with a stage-wide totals row.
+ *
+ *  IMPORTANT (found in Task 1 review, see design spec §2.2's "Consistency
+ *  caveat"): the totals row's الإجمالي column is pinned to `stage.population`
+ *  (the StageProfile figure — same source as riskStagesSlide and this card's
+ *  own data), NOT a fresh sum over `ports`. In the normal production case
+ *  (sample.stageAllocations present), StageProfile's population comes from a
+ *  frozen sample-draw-time snapshot, which is not guaranteed to equal a fresh
+ *  count of `ports` (built from *current* model.rows) — summing `ports` here
+ *  could visibly disagree with the number shown on the "مجتمع الحالات بناءً
+ *  على المخاطر" page for the same stage. سليمة/اشتباه have no equivalent on
+ *  StageProfile, so those two columns still sum from `ports` — the best
+ *  available breakdown, and in the rare case population changed after
+ *  sampling, not guaranteed to add up to exactly the pinned الإجمالي. */
+function stagePortPopulationCard(stage: StageProfile, i: number, ports: PortPopRow[]): string {
+  const tone = STAGE_TONES[i % STAGE_TONES.length];
+  const top = ports.slice(0, STAGE_CARD_TOP_N);
+  const dataRowCount = top.length > 0 ? top.length : 1;
+  const trs =
+    top.length > 0
+      ? top
+          .map(
+            (p) =>
+              `<tr><td>${esc(p.name)}</td><td>${fmtNum(p.clean)}</td><td>${fmtNum(p.suspicious)}</td><td>${fmtNum(p.total)}</td></tr>`,
+          )
+          .join("")
+      : `<tr><td colspan="4"><span class="insuff">—</span></td></tr>`;
+
+  const usedPx = METRICS_COMPACT.theadH + METRICS_COMPACT.tfootH + dataRowCount * METRICS_COMPACT.rowH;
+  const fillerPx = Math.max(0, STAGE_CARD_TABLE_BUDGET_PX - usedPx);
+  const blankRow =
+    fillerPx > 0 ? `<tr class="v2-blank" style="height:${fillerPx}px"><td colspan="4">&nbsp;</td></tr>` : "";
+
+  const sum = (f: (p: PortPopRow) => number) => ports.reduce((s, p) => s + f(p), 0);
+  const totalsRow = `<tr><td>الإجمالي</td><td>${fmtNum(sum((p) => p.clean))}</td><td>${fmtNum(sum((p) => p.suspicious))}</td><td>${fmtNum(stage.population)}</td></tr>`;
+
+  return `<div class="v2-stage-card ${tone} v2-stage-port-card">
+    <div class="v2-stage-head">
+      <span class="v2-stage-num">${i + 1}</span>
+      <b>${esc(stage.stageLabel)}</b>
+    </div>
+    <table class="deck-table">
+      <thead><tr><th>المنفذ</th><th>سليمة</th><th>اشتباه</th><th>الإجمالي</th></tr></thead>
+      <tbody>${trs}${blankRow}</tbody>
+      <tfoot>${totalsRow}</tfoot>
+    </table>
+  </div>`;
+}
+
+/** One stage's card on the sample page: المنفذ | مجتمع المرحلة | العيّنة المستهدفة |
+ *  نسبة التغطية, as plain numbers (not the land/sea page's stacked "N من M"
+ *  frac cell — the reference design uses two separate plain columns here).
+ *
+ *  IMPORTANT (same caveat as stagePortPopulationCard above): all three
+ *  totals-row cells are pinned to `stage.population`/`stage.sampleSize` (the
+ *  same StageProfile figures already shown in the card header), not fresh
+ *  sums over `ports` — this keeps the header figure and the totals row
+ *  internally consistent by construction and matching the rest of the deck,
+ *  regardless of whether a fresh row tally would agree with the frozen
+ *  sample-draw-time allocation. */
+function stagePortSampleCard(stage: StageProfile, i: number, ports: PortPopRow[]): string {
+  const tone = STAGE_TONES[i % STAGE_TONES.length];
+  const top = ports.slice(0, STAGE_CARD_TOP_N);
+  const dataRowCount = top.length > 0 ? top.length : 1;
+  const trs =
+    top.length > 0
+      ? top
+          .map((p) => {
+            const coverage = p.total > 0 ? (p.sampleTotal / p.total) * 100 : 0;
+            return `<tr><td>${esc(p.name)}</td><td>${fmtNum(p.total)}</td><td>${fmtNum(p.sampleTotal)}</td><td>${fmtPct(coverage)}</td></tr>`;
+          })
+          .join("")
+      : `<tr><td colspan="4"><span class="insuff">—</span></td></tr>`;
+
+  const usedPx = METRICS_COMPACT.theadH + METRICS_COMPACT.tfootH + dataRowCount * METRICS_COMPACT.rowH;
+  const fillerPx = Math.max(0, STAGE_CARD_TABLE_BUDGET_PX - usedPx);
+  const blankRow =
+    fillerPx > 0 ? `<tr class="v2-blank" style="height:${fillerPx}px"><td colspan="4">&nbsp;</td></tr>` : "";
+
+  const totalsRow = `<tr><td>الإجمالي</td><td>${fmtNum(stage.population)}</td><td>${fmtNum(stage.sampleSize)}</td><td>${fmtPct(stage.coverage)}</td></tr>`;
+
+  return `<div class="v2-stage-card ${tone} v2-stage-port-card">
+    <div class="v2-stage-head">
+      <span class="v2-stage-num">${i + 1}</span>
+      <b>${esc(stage.stageLabel)}</b>
+      <span class="v2-stage-port-figure" dir="ltr">${fmtNum(stage.sampleSize)} / ${fmtNum(stage.population)}</span>
+    </div>
+    <table class="deck-table">
+      <thead><tr><th>المنفذ</th><th>مجتمع المرحلة</th><th>العيّنة المستهدفة</th><th>نسبة التغطية</th></tr></thead>
+      <tbody>${trs}${blankRow}</tbody>
+      <tfoot>${totalsRow}</tfoot>
+    </table>
+  </div>`;
+}
+
+/** Population page: مجتمع حالات الفحص حسب المستوى والمنفذ. Never paginated —
+ *  top-N is fixed, so row count doesn't grow with the port list the way the
+ *  land/sea tables' does. */
+export function stagePortPopulationSlide(
+  model: ReportModel,
+  num: number,
+  total: number,
+  variantPreview: boolean,
+): string {
+  const byStage = collectStagePortStats(model);
+  const cards = model.population.byStage
+    .map((s, i) => stagePortPopulationCard(s, i, byStage.get(s.stageLabel) ?? []))
+    .join("");
+  const totalsBand = `<div class="v2-totals-band">
+    <div class="v2-totals-item"><span class="v2-totals-icon">${icon("layers", 18)}</span><span><b>${fmtNum(model.population.total)}</b><small>إجمالي المجتمع</small></span></div>
+    <div class="v2-totals-item"><span class="v2-totals-icon">${icon("check", 18)}</span><span><b>${fmtNum(model.population.clean)}</b><small>إجمالي سليمة</small></span></div>
+    <div class="v2-totals-item"><span class="v2-totals-icon">${icon("alert", 18)}</span><span><b>${fmtNum(model.population.suspicious)}</b><small>إجمالي اشتباه</small></span></div>
+  </div>`;
+  const body = `${totalsBand}<div class="v2-stage-port-grid">${cards}</div>`;
+  return v2Slide({
+    id: "slide-stage-port-population",
+    title: "مجتمع حالات الفحص حسب المستوى والمنفذ",
+    eyebrow: "القسم 1 — مجتمع الفحص",
+    iconName: "layers",
+    headline: `مجتمع حالات الفحص حسب المستوى والمنفذ لشهر ${model.summary.periodId}`,
+    subhead: "أعلى 5 منافذ بالحجم لكل مستوى مخاطر، مع إجمالي شامل لجميع المنافذ.",
+    bodyVariants: [body, body, body, body],
+    variantPreview,
+    num,
+    total,
+    section: "section1",
+  });
+}
+
+/** Sample page: عيّنة الفحص المسحوبة حسب المستوى والمنفذ. Same non-paginated shape. */
+export function stagePortSampleSlide(
+  model: ReportModel,
+  num: number,
+  total: number,
+  variantPreview: boolean,
+): string {
+  const byStage = collectStagePortStats(model);
+  const cards = model.population.byStage
+    .map((s, i) => stagePortSampleCard(s, i, byStage.get(s.stageLabel) ?? []))
+    .join("");
+  const totalsBand = `<div class="v2-totals-band">
+    <div class="v2-totals-item"><span class="v2-totals-icon">${icon("layers", 18)}</span><span><b>${fmtNum(model.population.total)}</b><small>إجمالي المجتمع</small></span></div>
+    <div class="v2-totals-item"><span class="v2-totals-icon">${icon("scan", 18)}</span><span><b>${fmtNum(model.sample.total)}</b><small>إجمالي العيّنة</small></span></div>
+    <div class="v2-totals-item"><span class="v2-totals-icon">${icon("gauge", 18)}</span><span><b>${fmtPct(model.sample.coverage)}</b><small>نسبة التغطية</small></span></div>
+  </div>`;
+  const body = `${totalsBand}<div class="v2-stage-port-grid">${cards}</div>`;
+  return v2Slide({
+    id: "slide-stage-port-sample",
+    title: "عيّنة الفحص المسحوبة حسب المستوى والمنفذ",
+    eyebrow: "القسم 1 — مجتمع الفحص",
+    iconName: "layers",
+    headline: `عيّنة الفحص المسحوبة حسب المستوى والمنفذ لشهر ${model.summary.periodId}`,
+    subhead: "أعلى 5 منافذ بالحجم لكل مستوى مخاطر، بأرقام العيّنة ونسبة التغطية، مع إجمالي شامل.",
+    bodyVariants: [body, body, body, body],
+    variantPreview,
+    num,
+    total,
+    section: "section1",
+  });
+}
+
 // ── Section 2, page A — نتائج جودة الصور في المنافذ ─────────────────────────
 type PortQualityRow = {
   name: string;
@@ -1012,6 +1175,8 @@ export function buildDeckV2Slides(
     (num, total) => riskStagesSlide(model, num, total, variantPreview),
     ...portPopulationSlideBuilders(model, variantPreview),
     ...portSampleSlideBuilders(model, variantPreview),
+    (num, total) => stagePortPopulationSlide(model, num, total, variantPreview),
+    (num, total) => stagePortSampleSlide(model, num, total, variantPreview),
   ];
 
   // Section 2 — نتائج فحص الجودة: separator + image-quality page(s) + accuracy page(s).
