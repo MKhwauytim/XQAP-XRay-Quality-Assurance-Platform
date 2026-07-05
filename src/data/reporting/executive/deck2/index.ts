@@ -71,7 +71,55 @@ const DECK_NAV_SCRIPT = `(function(){
   update();
 })();`;
 
-export function buildDeckV2Html(slides: string, monthLabel: string): string {
+/**
+ * Style-variant arrow-cycling + persistence, dev-preview only (only appended
+ * to the document when `variantPreview` is true — see buildDeckV2Html below).
+ * Cycles `.v2-variant-panel.active` within each `.v2-variant-stack` and POSTs
+ * the choice to the Vite dev middleware at /__deck-style-choices
+ * (deckStyleChoicesPlugin.ts), which persists it to
+ * dev-workspace/6-templates/deck-style-choices.json. On load, fetches the
+ * saved choices and applies them before the user interacts with anything.
+ */
+const DECK_VARIANT_SCRIPT = `(function(){
+  var stacks = Array.prototype.slice.call(document.querySelectorAll('.v2-variant-stack'));
+  if (!stacks.length) return;
+  function apply(stack, index){
+    var panels = Array.prototype.slice.call(stack.querySelectorAll('.v2-variant-panel'));
+    panels.forEach(function(p, i){ p.classList.toggle('active', i === index); });
+    stack.setAttribute('data-active-index', String(index));
+    var label = stack.querySelector('.v2-variant-label');
+    if (label) label.textContent = (index + 1) + ' / ' + panels.length;
+  }
+  function persist(slideId, index){
+    fetch('/__deck-style-choices', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slideId: slideId, variantIndex: index })
+    }).catch(function(){});
+  }
+  stacks.forEach(function(stack){
+    var slideId = stack.getAttribute('data-slide-id');
+    var panelCount = stack.querySelectorAll('.v2-variant-panel').length;
+    function step(delta){
+      var cur = Number(stack.getAttribute('data-active-index') || '0');
+      var next = (cur + delta + panelCount) % panelCount;
+      apply(stack, next);
+      persist(slideId, next);
+    }
+    stack.querySelector('.v2-variant-prev').addEventListener('click', function(){ step(-1); });
+    stack.querySelector('.v2-variant-next').addEventListener('click', function(){ step(1); });
+  });
+  fetch('/__deck-style-choices').then(function(r){ return r.json(); }).then(function(saved){
+    stacks.forEach(function(stack){
+      var slideId = stack.getAttribute('data-slide-id');
+      if (Object.prototype.hasOwnProperty.call(saved, slideId)) {
+        apply(stack, saved[slideId]);
+      }
+    });
+  }).catch(function(){});
+})();`;
+
+export function buildDeckV2Html(slides: string, monthLabel: string, variantPreview = false): string {
   return `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -105,7 +153,7 @@ export function buildDeckV2Html(slides: string, monthLabel: string): string {
   </div>
 ${slides}
 </div>
-<script>${DECK_NAV_SCRIPT}</script>
+<script>${DECK_NAV_SCRIPT}${variantPreview ? DECK_VARIANT_SCRIPT : ""}</script>
 </body>
 </html>`;
 }
@@ -113,10 +161,12 @@ ${slides}
 export function buildExecutiveDeckV2(
   input: ExecutiveReportInput,
   employeeDisplayNames: Record<string, string> = {},
+  opts?: { variantPreview?: boolean },
 ): string {
+  const variantPreview = opts?.variantPreview ?? false;
   const model = buildReportModel(input, employeeDisplayNames);
-  const slides = buildDeckV2Slides(model);
-  return buildDeckV2Html(slides, formatMonthLabel(input.monthFolderName));
+  const slides = buildDeckV2Slides(model, new Date(), variantPreview);
+  return buildDeckV2Html(slides, formatMonthLabel(input.monthFolderName), variantPreview);
 }
 
 export function openExecutiveDeckV2(

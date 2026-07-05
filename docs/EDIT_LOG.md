@@ -4,6 +4,186 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v40.1 — 2026-07-05 — Thread variantPreview through buildExecutiveDeckV2
+
+Wires the `variantPreview` parameter through the public API of the executive deck v2 builder. Adds the `DECK_VARIANT_SCRIPT` client-side controller (only injected when `variantPreview=true`) and updates `buildDeckV2Html` and `buildExecutiveDeckV2` signatures to accept and propagate the variant-preview flag. Task 7 of the deck2-style-switcher workstream.
+
+**File:** `src/data/reporting/executive/deck2/index.ts`
+
+**Before:**
+```ts
+export function buildDeckV2Html(slides: string, monthLabel: string): string {
+  return `<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>العرض التنفيذي — ${esc(monthLabel)}</title>
+<style>${DECK_CSS}${DECK_V2_CSS}</style>
+</head>
+<body>
+<nav class="deck-nav" id="deck-nav" aria-label="التنقّل بين أقسام العرض">
+  <div class="deck-nav-brand">
+    <span class="deck-nav-brand-icon">${icon("shield", 20)}</span>
+    <span>العرض التنفيذي</span>
+  </div>
+  <div class="deck-nav-progress">
+    <div class="deck-nav-progress-bar"><div class="deck-nav-progress-fill" id="deck-nav-fill"></div></div>
+    <div class="deck-nav-progress-text" id="deck-nav-progress-text">الصفحة 1</div>
+  </div>
+  <ol class="deck-nav-sections" id="deck-nav-sections"></ol>
+</nav>
+<div class="deck-viewer deck-viewer-v2">
+  <div class="deck-toolbar">
+    <div class="deck-brand">
+      <div class="brand-mark">${icon("shield", 22)}</div>
+      <div>
+        <strong>العرض التنفيذي</strong>
+        <span>ضمان جودة الأشعة — ${esc(monthLabel)}</span>
+      </div>
+    </div>
+    <button class="btn" onclick="window.print()">طباعة / PDF</button>
+  </div>
+${slides}
+</div>
+<script>${DECK_NAV_SCRIPT}</script>
+</body>
+</html>`;
+}
+
+export function buildExecutiveDeckV2(
+  input: ExecutiveReportInput,
+  employeeDisplayNames: Record<string, string> = {},
+): string {
+  const model = buildReportModel(input, employeeDisplayNames);
+  const slides = buildDeckV2Slides(model);
+  return buildDeckV2Html(slides, formatMonthLabel(input.monthFolderName));
+}
+
+export function openExecutiveDeckV2(
+  input: ExecutiveReportInput,
+  employeeDisplayNames: Record<string, string> = {},
+): void {
+  openOrDownload(
+    buildExecutiveDeckV2(input, employeeDisplayNames),
+    `العرض_التنفيذي_${input.monthFolderName}.html`,
+  );
+}
+```
+
+**After:**
+```ts
+/**
+ * Style-variant arrow-cycling + persistence, dev-preview only (only appended
+ * to the document when `variantPreview` is true — see buildDeckV2Html below).
+ * Cycles `.v2-variant-panel.active` within each `.v2-variant-stack` and POSTs
+ * the choice to the Vite dev middleware at /__deck-style-choices
+ * (deckStyleChoicesPlugin.ts), which persists it to
+ * dev-workspace/6-templates/deck-style-choices.json. On load, fetches the
+ * saved choices and applies them before the user interacts with anything.
+ */
+const DECK_VARIANT_SCRIPT = `(function(){
+  var stacks = Array.prototype.slice.call(document.querySelectorAll('.v2-variant-stack'));
+  if (!stacks.length) return;
+  function apply(stack, index){
+    var panels = Array.prototype.slice.call(stack.querySelectorAll('.v2-variant-panel'));
+    panels.forEach(function(p, i){ p.classList.toggle('active', i === index); });
+    stack.setAttribute('data-active-index', String(index));
+    var label = stack.querySelector('.v2-variant-label');
+    if (label) label.textContent = (index + 1) + ' / ' + panels.length;
+  }
+  function persist(slideId, index){
+    fetch('/__deck-style-choices', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slideId: slideId, variantIndex: index })
+    }).catch(function(){});
+  }
+  stacks.forEach(function(stack){
+    var slideId = stack.getAttribute('data-slide-id');
+    var panelCount = stack.querySelectorAll('.v2-variant-panel').length;
+    function step(delta){
+      var cur = Number(stack.getAttribute('data-active-index') || '0');
+      var next = (cur + delta + panelCount) % panelCount;
+      apply(stack, next);
+      persist(slideId, next);
+    }
+    stack.querySelector('.v2-variant-prev').addEventListener('click', function(){ step(-1); });
+    stack.querySelector('.v2-variant-next').addEventListener('click', function(){ step(1); });
+  });
+  fetch('/__deck-style-choices').then(function(r){ return r.json(); }).then(function(saved){
+    stacks.forEach(function(stack){
+      var slideId = stack.getAttribute('data-slide-id');
+      if (Object.prototype.hasOwnProperty.call(saved, slideId)) {
+        apply(stack, saved[slideId]);
+      }
+    });
+  }).catch(function(){});
+})();`;
+
+export function buildDeckV2Html(slides: string, monthLabel: string, variantPreview = false): string {
+  return `<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>العرض التنفيذي — ${esc(monthLabel)}</title>
+<style>${DECK_CSS}${DECK_V2_CSS}</style>
+</head>
+<body>
+<nav class="deck-nav" id="deck-nav" aria-label="التنقّل بين أقسام العرض">
+  <div class="deck-nav-brand">
+    <span class="deck-nav-brand-icon">${icon("shield", 20)}</span>
+    <span>العرض التنفيذي</span>
+  </div>
+  <div class="deck-nav-progress">
+    <div class="deck-nav-progress-bar"><div class="deck-nav-progress-fill" id="deck-nav-fill"></div></div>
+    <div class="deck-nav-progress-text" id="deck-nav-progress-text">الصفحة 1</div>
+  </div>
+  <ol class="deck-nav-sections" id="deck-nav-sections"></ol>
+</nav>
+<div class="deck-viewer deck-viewer-v2">
+  <div class="deck-toolbar">
+    <div class="deck-brand">
+      <div class="brand-mark">${icon("shield", 22)}</div>
+      <div>
+        <strong>العرض التنفيذي</strong>
+        <span>ضمان جودة الأشعة — ${esc(monthLabel)}</span>
+      </div>
+    </div>
+    <button class="btn" onclick="window.print()">طباعة / PDF</button>
+  </div>
+${slides}
+</div>
+<script>${DECK_NAV_SCRIPT}${variantPreview ? DECK_VARIANT_SCRIPT : ""}</script>
+</body>
+</html>`;
+}
+
+export function buildExecutiveDeckV2(
+  input: ExecutiveReportInput,
+  employeeDisplayNames: Record<string, string> = {},
+  opts?: { variantPreview?: boolean },
+): string {
+  const variantPreview = opts?.variantPreview ?? false;
+  const model = buildReportModel(input, employeeDisplayNames);
+  const slides = buildDeckV2Slides(model, new Date(), variantPreview);
+  return buildDeckV2Html(slides, formatMonthLabel(input.monthFolderName), variantPreview);
+}
+
+export function openExecutiveDeckV2(
+  input: ExecutiveReportInput,
+  employeeDisplayNames: Record<string, string> = {},
+): void {
+  openOrDownload(
+    buildExecutiveDeckV2(input, employeeDisplayNames),
+    `العرض_التنفيذي_${input.monthFolderName}.html`,
+  );
+}
+```
+
+---
+
 ## v40 — 2026-07-05 — 4-variant plumbing for every deck2 slide builder
 
 Architectural change enabling the dev-only style-variant switcher (Tasks 4-6 of the deck2-style-switcher workstream). Adds a `renderVariants(slideId, bodies, variantPreview)` helper that renders only `bodies[0]` when `variantPreview` is false (byte-identical to today's production output) or all 4 panels behind a cycle-switcher when true. `v2Slide()`'s `body: string` option becomes `bodyVariants: readonly [string,string,string,string]; variantPreview: boolean`. Every builder in the file is migrated to accept/thread `variantPreview` and pass `[body, body, body, body]` (literal duplicates for now — a later plan authors the real alternate designs): `coverSlide`, `tocSlide`, `glossarySlideBuilders`, `sectionSeparatorSlide` (Task 5), then `riskStagesSlide`, `portPopulationSlideBuilders`, `portSampleSlideBuilders`, `qualityPortSlideBuilders`, `accuracyPortSlideBuilders`, and the assembly function `buildDeckV2Slides` (Task 6), which now takes an optional `variantPreview = false` parameter and threads it into every builder call.
