@@ -55,17 +55,45 @@ function badgeIcon(name: string, size: number): string {
 }
 
 /**
- * Per-slide print-include switch, top-right corner, on-screen only. Pure CSS,
- * no script: unchecking it excludes the WHOLE slide from print/PDF output via
- * the `.slide:has(.slide-print-toggle input:not(:checked))` rule in
- * theme.ts — safe to rely on `:has()` since this app already targets
- * Chromium only (File System Access API). Defaults checked (included).
+ * Per-slide print-include switch, on-screen only. Pure CSS, no script:
+ * unchecking it excludes the WHOLE slide from print/PDF output via the
+ * `.slide:has(.slide-print-toggle input:not(:checked))` rule in theme.ts —
+ * safe to rely on `:has()` since this app already targets Chromium only
+ * (File System Access API). Defaults checked (included). Rendered inside
+ * `slideControls()`, which positions it (top-right corner).
  */
 function printToggle(): string {
   return `<label class="slide-print-toggle" title="تضمين هذه الصفحة عند الطباعة">
     <input type="checkbox" checked/>
     <span class="slide-print-toggle-track"><span class="slide-print-toggle-thumb"></span></span>
   </label>`;
+}
+
+/**
+ * Style-variant arrow-cycle control, dev-preview only. `data-for` points at
+ * the matching `.v2-variant-stack`'s `data-slide-id` (same slide, but the
+ * switcher itself lives in `slideControls()`'s top-right cluster, not nested
+ * inside the stack — see DECK_VARIANT_SCRIPT in index.ts for the lookup).
+ */
+function variantSwitcher(slideId: string): string {
+  return `<div class="v2-variant-switcher" data-for="${esc(slideId)}" dir="ltr">
+    <button type="button" class="v2-variant-prev" aria-label="النمط السابق">‹</button>
+    <span class="v2-variant-label">1 / 4</span>
+    <button type="button" class="v2-variant-next" aria-label="النمط التالي">›</button>
+  </div>`;
+}
+
+/**
+ * Top-right controls cluster for a slide: the print-include toggle, plus
+ * (dev-preview only) the style-variant switcher right next to it — grouped in
+ * one positioned wrapper (theme.ts's `.slide-controls`) instead of each being
+ * independently absolutely-positioned.
+ */
+function slideControls(slideId: string, variantPreview: boolean): string {
+  return `<div class="slide-controls">
+    ${printToggle()}
+    ${variantPreview ? variantSwitcher(slideId) : ""}
+  </div>`;
 }
 
 /** Section keys shared by the side nav (deck2/index.ts) and every slide builder
@@ -115,9 +143,11 @@ function pageFoot(num: number, total: number): string {
  * Production (`variantPreview=false`) renders ONLY `bodies[0]` — byte-identical
  * to the single-variant output that existed before the switcher (a dev-preview
  * feature; see docs/superpowers/specs/2026-07-05-deck2-style-switcher-design.md).
- * Preview mode renders all 4, one visible via CSS (`.v2-variant-panel.active`),
- * plus an arrow-cycle control; the inline script in deck2/index.ts
- * (DECK_VARIANT_SCRIPT) does the cycling and persists the choice.
+ * Preview mode renders all 4, one visible via CSS (`.v2-variant-panel.active`).
+ * The arrow-cycle control that drives this lives separately in
+ * `slideControls()`/`variantSwitcher()`; the inline script in deck2/index.ts
+ * (DECK_VARIANT_SCRIPT) wires the two together by matching `data-for` to
+ * `data-slide-id` and persists the choice.
  */
 function renderVariants(
   slideId: string,
@@ -131,14 +161,7 @@ function renderVariants(
         `<div class="v2-variant-panel${i === 0 ? " active" : ""}" data-variant-index="${i}">${html}</div>`,
     )
     .join("");
-  return `<div class="v2-variant-stack" data-slide-id="${esc(slideId)}" data-active-index="0">
-    <div class="v2-variant-switcher">
-      <button type="button" class="v2-variant-prev" aria-label="النمط السابق">‹</button>
-      <span class="v2-variant-label">1 / 4</span>
-      <button type="button" class="v2-variant-next" aria-label="النمط التالي">›</button>
-    </div>
-    ${panels}
-  </div>`;
+  return `<div class="v2-variant-stack" data-slide-id="${esc(slideId)}" data-active-index="0">${panels}</div>`;
 }
 
 // ── v2 slide shell — rail + eyebrow + headline + body + footer page num. ────
@@ -160,7 +183,7 @@ function v2Slide(opts: {
   const cls = `slide v2${opts.slideClass ? " " + opts.slideClass : ""}`;
   const body = renderVariants(opts.id, opts.bodyVariants, opts.variantPreview);
   return `<section class="${cls}" id="${esc(opts.id)}" data-title="${esc(opts.title)}" data-section="${opts.section}" data-section-label="${esc(NAV_SECTIONS[opts.section])}">
-  ${printToggle()}
+  ${slideControls(opts.id, opts.variantPreview)}
   ${sideRail(opts.section)}
   <div class="slide-inner">
     <div class="slide-eyebrow">
@@ -210,7 +233,7 @@ export function coverSlide(model: ReportModel, generatedAt: Date, variantPreview
       <div class="title-classify"><span>${icon("shield", 14)}</span>داخلي — للاستخدام التنفيذي</div>`;
   const body = renderVariants("slide-cover", [coverBody, coverBody, coverBody, coverBody], variantPreview);
   return `<section class="slide v2 title-slide" id="slide-cover" data-title="الغلاف" data-section="cover" data-section-label="${esc(NAV_SECTIONS.cover)}">
-    ${printToggle()}
+    ${slideControls("slide-cover", variantPreview)}
     <div class="slide-art" aria-hidden="true"></div>
     ${orgBlock}
     <div class="slide-inner">
