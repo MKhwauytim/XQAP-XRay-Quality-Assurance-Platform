@@ -81,14 +81,19 @@ const DECK_NAV_SCRIPT = `(function(){
  * saved choices and applies them before the user interacts with anything.
  */
 const DECK_VARIANT_SCRIPT = `(function(){
-  var stacks = Array.prototype.slice.call(document.querySelectorAll('.v2-variant-stack'));
-  if (!stacks.length) return;
+  var switchers = Array.prototype.slice.call(document.querySelectorAll('.v2-variant-switcher'));
+  if (!switchers.length) return;
+  function stackFor(slideId){
+    return document.querySelector('.v2-variant-stack[data-slide-id="' + slideId + '"]');
+  }
   function apply(stack, index){
     var panels = Array.prototype.slice.call(stack.querySelectorAll('.v2-variant-panel'));
     panels.forEach(function(p, i){ p.classList.toggle('active', i === index); });
     stack.setAttribute('data-active-index', String(index));
-    var label = stack.querySelector('.v2-variant-label');
-    if (label) label.textContent = (index + 1) + ' / ' + panels.length;
+  }
+  function setLabel(switcher, index, total){
+    var label = switcher.querySelector('.v2-variant-label');
+    if (label) label.textContent = (index + 1) + ' / ' + total;
   }
   function persist(slideId, index){
     fetch('/__deck-style-choices', {
@@ -97,24 +102,30 @@ const DECK_VARIANT_SCRIPT = `(function(){
       body: JSON.stringify({ slideId: slideId, variantIndex: index })
     }).catch(function(){});
   }
-  stacks.forEach(function(stack){
-    var slideId = stack.getAttribute('data-slide-id');
+  switchers.forEach(function(switcher){
+    var slideId = switcher.getAttribute('data-for');
+    var stack = stackFor(slideId);
+    if (!stack) return;
     var panelCount = stack.querySelectorAll('.v2-variant-panel').length;
     function step(delta){
       var cur = Number(stack.getAttribute('data-active-index') || '0');
       var next = (cur + delta + panelCount) % panelCount;
       apply(stack, next);
+      setLabel(switcher, next, panelCount);
       persist(slideId, next);
     }
-    stack.querySelector('.v2-variant-prev').addEventListener('click', function(){ step(-1); });
-    stack.querySelector('.v2-variant-next').addEventListener('click', function(){ step(1); });
+    switcher.querySelector('.v2-variant-prev').addEventListener('click', function(){ step(-1); });
+    switcher.querySelector('.v2-variant-next').addEventListener('click', function(){ step(1); });
   });
   fetch('/__deck-style-choices').then(function(r){ return r.json(); }).then(function(saved){
-    stacks.forEach(function(stack){
-      var slideId = stack.getAttribute('data-slide-id');
-      if (Object.prototype.hasOwnProperty.call(saved, slideId)) {
-        apply(stack, saved[slideId]);
-      }
+    switchers.forEach(function(switcher){
+      var slideId = switcher.getAttribute('data-for');
+      if (!Object.prototype.hasOwnProperty.call(saved, slideId)) return;
+      var stack = stackFor(slideId);
+      if (!stack) return;
+      var idx = saved[slideId];
+      apply(stack, idx);
+      setLabel(switcher, idx, stack.querySelectorAll('.v2-variant-panel').length);
     });
   }).catch(function(){});
 })();`;
@@ -149,7 +160,17 @@ export function buildDeckV2Html(slides: string, monthLabel: string, variantPrevi
         <span>ضمان جودة الأشعة — ${esc(monthLabel)}</span>
       </div>
     </div>
-    <button class="btn" onclick="window.print()">طباعة / PDF</button>
+    <div class="deck-toolbar-actions">
+      <label class="theme-toggle" title="التبديل بين الوضع الفاتح والداكن" dir="ltr">
+        <input type="checkbox" onchange="document.body.classList.toggle('theme-light', this.checked)"/>
+        <span class="theme-toggle-track">
+          <span class="theme-toggle-icon moon">${icon("moon", 13)}</span>
+          <span class="theme-toggle-icon sun">${icon("sun", 13)}</span>
+          <span class="theme-toggle-thumb"></span>
+        </span>
+      </label>
+      <button class="btn" onclick="window.print()">طباعة / PDF</button>
+    </div>
   </div>
 ${slides}
 </div>
