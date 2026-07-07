@@ -4,6 +4,22 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.0 — 2026-07-07 — Referral approval rework (1/11): append-only decision-event log
+
+**File:** `src/data/approvals/approvalTypes.ts`
+
+**Before:** `SupervisorDecisionFile` had only latest-wins `referralDecisions`/`replacementDecisions` arrays — no way to see a request's full review history.
+
+**After:** added `DecisionEvent`/`DecisionEventKind` and an optional `decisionEvents?: DecisionEvent[]` field, additive and backwards compatible.
+
+**File:** `src/data/approvals/approvalStorage.ts`
+
+**Before:** no way to append a decision without overwriting the prior one.
+
+**After:** added `appendDecisionEvent`, `mergeDecisionHistory`, `effectiveDecision`.
+
+---
+
 ## v40.5 — 2026-07-05 — Retroactive log entry: test-hygiene cleanup in deckStyleChoices.test.ts
 
 The final whole-branch review of the deck2-style-switcher workstream caught that commit
