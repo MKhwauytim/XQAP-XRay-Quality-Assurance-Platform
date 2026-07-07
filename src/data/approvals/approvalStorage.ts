@@ -1,6 +1,6 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
-import type { DecisionEvent, DecisionEventKind, ReferralDecision, ReplacementDecision, SupervisorDecisionFile } from "./approvalTypes";
+import type { DecisionEvent, DecisionEventKind, SupervisorDecisionFile } from "./approvalTypes";
 import { getPopulationMonthDir, getSampleApprovalsDir, safeWorkspaceFilePart } from "../workspace/workspacePaths";
 
 type DirectoryEntryLike = { name: string; kind: string };
@@ -64,55 +64,6 @@ export async function loadSupervisorDecisions(
     replacementDecisions: [],
     lastUpdatedAt: new Date().toISOString(),
   };
-}
-
-export async function upsertReferralDecision(
-  directoryHandle: DirectoryHandleLike,
-  monthFolderName: string,
-  supervisorUsername: string,
-  decision: ReferralDecision
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  try {
-    let appDir: DirectoryHandleLike;
-    try {
-      appDir = await getApprovalsDir(directoryHandle, monthFolderName);
-    } catch {
-      appDir = await getLegacyApprovalsDir(directoryHandle, monthFolderName);
-    }
-    const current = await loadSupervisorDecisions(directoryHandle, monthFolderName, supervisorUsername);
-    const others = current.referralDecisions.filter((d) => d.requestId !== decision.requestId);
-    const updated: SupervisorDecisionFile = {
-      ...current,
-      referralDecisions: [...others, decision],
-      lastUpdatedAt: new Date().toISOString(),
-    };
-    await safeWriteJson(appDir, decisionFileName(supervisorUsername), updated);
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "خطأ غير معروف." };
-  }
-}
-
-export async function upsertReplacementDecision(
-  directoryHandle: DirectoryHandleLike,
-  monthFolderName: string,
-  supervisorUsername: string,
-  decision: ReplacementDecision
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  try {
-    const appDir = await getApprovalsDir(directoryHandle, monthFolderName);
-    const current = await loadSupervisorDecisions(directoryHandle, monthFolderName, supervisorUsername);
-    const others = current.replacementDecisions.filter((d) => d.requestId !== decision.requestId);
-    const updated: SupervisorDecisionFile = {
-      ...current,
-      replacementDecisions: [...others, decision],
-      lastUpdatedAt: new Date().toISOString(),
-    };
-    await safeWriteJson(appDir, decisionFileName(supervisorUsername), updated);
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "خطأ غير معروف." };
-  }
 }
 
 /** Read all supervisor decision files for the month (for admin/supervisor aggregation). */

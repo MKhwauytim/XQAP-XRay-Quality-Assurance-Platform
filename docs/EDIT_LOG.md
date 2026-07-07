@@ -4,6 +4,28 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.2 — 2026-07-07 — Referral approval rework (3/11): wire decision history into referralStorage
+
+**File:** `src/data/referral/referralTypes.ts`
+
+**Before:** `ReferralRequest`/`ReplacementRequest` had no history field.
+
+**After:** both gain `history?: DecisionEvent[]`, populated at load time.
+
+**File:** `src/data/referral/referralStorage.ts`
+
+**Before:** `updateReferralStatus`/`updateReplacementStatus` called `upsertReferralDecision`/`upsertReplacementDecision` (latest-wins, history lost on re-review).
+
+**After:** both call `appendDecisionEvent`; `loadReferralLog`/`loadReplacementLog` derive `status` from `effectiveDecision(mergeDecisionHistory(...))` and attach the full `history`.
+
+**File:** `src/data/approvals/approvalStorage.ts`
+
+**Before:** `upsertReferralDecision`/`upsertReplacementDecision` exported.
+
+**After:** removed — no longer called anywhere.
+
+---
+
 ## v42.1 — 2026-07-07 — Referral approval rework (2/11): idempotency + ownership guards
 
 **File:** `src/data/approvals/approvalGuards.ts`
