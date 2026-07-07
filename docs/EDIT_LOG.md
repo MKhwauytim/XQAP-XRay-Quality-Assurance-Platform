@@ -4,6 +4,16 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.1 — 2026-07-07 — Referral approval rework (2/11): idempotency + ownership guards
+
+**File:** `src/data/approvals/approvalGuards.ts`
+
+**Before:** file did not exist — nothing verified a request was still pending, or that referred samples were still owned by the requester, before mutating.
+
+**After:** added `assertRequestPending` and `assertSamplesOwnedBy`, pure functions consumed by the approval hook (Task 4) before every approve/deny.
+
+---
+
 ## v42.0 — 2026-07-07 — Referral approval rework (1/11): append-only decision-event log
 
 **File:** `src/data/approvals/approvalTypes.ts`
