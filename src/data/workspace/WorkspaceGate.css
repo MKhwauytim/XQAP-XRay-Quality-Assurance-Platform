@@ -138,3 +138,217 @@
 @keyframes wg-spin {
   to { transform: rotate(360deg); }
 }
+
+/* =========================================================
+   First-run admin checklist (C3) — floating onboarding card
+   ========================================================= */
+
+.firstrun-checklist {
+  position: fixed;
+  inset-inline-end: 24px;
+  bottom: 96px; /* stacked above the feedback widget (bottom: ~24px) */
+  z-index: 1100;
+  width: min(374px, calc(100vw - 48px));
+  background: var(--c-surface, #FFFFFF);
+  border: 1px solid var(--c-border, #D6E2EF);
+  border-radius: var(--r-lg, 16px);
+  box-shadow: var(--sh-lg, 0 16px 40px rgba(13, 31, 50, 0.18));
+  overflow: hidden;
+  font-family: inherit;
+}
+
+.firstrun-checklist::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  inset-inline: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--c-navy, #0F2744) 0%, var(--c-sky, #1E6FBA) 60%, #5EB8FF 100%);
+}
+
+.firstrun-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 16px 18px 10px;
+}
+
+.firstrun-head-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.firstrun-head-icon {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  background: var(--c-navy-soft, #E8EEF6);
+  color: var(--c-navy, #0F2744);
+}
+
+.firstrun-head strong {
+  display: block;
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--c-navy, #0F2744);
+}
+
+.firstrun-subtitle {
+  display: block;
+  font-size: 12.5px;
+  color: var(--c-ink-3, #5E7A96);
+  margin-top: 2px;
+  line-height: 1.5;
+}
+
+.firstrun-close {
+  flex-shrink: 0;
+  background: transparent;
+  border: 0;
+  color: var(--c-ink-4, #9DB3C9);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  line-height: 0;
+}
+
+.firstrun-close:hover {
+  background: var(--c-surface-2, #F4F7FB);
+  color: var(--c-ink, #0D1F32);
+}
+
+.firstrun-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 18px 12px;
+}
+
+.firstrun-progress-track {
+  flex: 1;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--c-surface-3, #EEF2F7);
+  overflow: hidden;
+}
+
+.firstrun-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--c-navy, #0F2744), var(--c-sky, #1E6FBA));
+  transition: width 320ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.firstrun-progress-text {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--c-ink-3, #5E7A96);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.firstrun-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0 12px 4px;
+}
+
+.firstrun-step {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 8px;
+  border-top: 1px solid var(--c-surface-3, #EEF2F7);
+}
+
+.firstrun-step:first-child {
+  border-top: 0;
+}
+
+.firstrun-step-mark {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 800;
+  background: var(--c-surface-3, #EEF2F7);
+  color: var(--c-ink-3, #5E7A96);
+  border: 1px solid var(--c-border, #D6E2EF);
+}
+
+.firstrun-step.done .firstrun-step-mark {
+  background: var(--c-success, #16A34A);
+  color: #FFFFFF;
+  border-color: transparent;
+}
+
+.firstrun-step-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.firstrun-step-body strong {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--c-ink, #0D1F32);
+}
+
+.firstrun-step.done .firstrun-step-body strong {
+  color: var(--c-ink-3, #5E7A96);
+  text-decoration: line-through;
+}
+
+.firstrun-step-body span {
+  display: block;
+  margin-top: 1px;
+  font-size: 12px;
+  color: var(--c-ink-3, #5E7A96);
+  line-height: 1.5;
+}
+
+.firstrun-step-action {
+  flex-shrink: 0;
+  background: var(--c-navy, #0F2744);
+  color: #FFFFFF;
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+  transition: background 180ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.firstrun-step-action:hover {
+  background: #162F56;
+}
+
+.firstrun-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px 18px 16px;
+  border-top: 1px solid var(--c-surface-3, #EEF2F7);
+  background: var(--c-surface-2, #F4F7FB);
+  font-size: 11.5px;
+  color: var(--c-ink-3, #5E7A96);
+  line-height: 1.55;
+}
+
+.firstrun-hint-icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--c-ink-4, #9DB3C9);
+  line-height: 0;
+}

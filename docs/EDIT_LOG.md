@@ -4,6 +4,92 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.30 — 2026-07-08 — C3 (Batch 2): first-run checklist styles
+
+**File:** `src/data/workspace/WorkspaceGate.css`
+
+Appended `.firstrun-*` styles for the onboarding checklist overlay: a fixed bottom-inline-end
+card (stacked above the feedback widget), progress bar, step rows with done/step-number marks,
+deep-link action buttons, and the demo-shortcut hint. Uses the existing app CSS variables with
+hex fallbacks, mirroring the rest of this file.
+
+**Before:**
+```css
+@keyframes wg-spin {
+  to { transform: rotate(360deg); }
+}
+```
+
+**After:**
+```css
+@keyframes wg-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── First-run admin checklist (C3) ── */
+.firstrun-checklist { position: fixed; inset-inline-end: 24px; bottom: 96px; /* …see file… */ }
+```
+
+## v42.29 — 2026-07-08 — C3 (Batch 2): first-run admin checklist in WorkspaceGate
+
+**File:** `src/data/workspace/WorkspaceGate.tsx`
+
+Added a role-gated `FirstRunChecklist` component (admin-only) rendered alongside the app in the
+`status === "ready"` branch. It derives real completion state (structure created, ≥1 non-default
+user, permissions differ from defaults, ≥1 population month), deep-links each step to the relevant
+tab via the `app-navigate` event, surfaces the hidden Alt+A/Alt+T demo-mode shortcut, persists
+manual dismissal per workspace in `localStorage` (`xray_firstrun_dismissed_v1:{workspace}`), and
+auto-hides once ≥1 month exists (regardless of dismissal). Non-admins render `null`. Also added the
+supporting imports (`Check`/`Keyboard`/`Rocket`/`X` icons, `useLabels`, `listMonthFolders`, and the
+`userManagement` helpers).
+
+**Before:**
+```tsx
+  // Workspace is ready — render the full app
+  if (status === "ready") {
+    return <>{children}</>;
+  }
+```
+
+**After:**
+```tsx
+  // Workspace is ready — render the full app + (admin-only) first-run checklist
+  if (status === "ready") {
+    return (
+      <>
+        {children}
+        <FirstRunChecklist session={session} />
+      </>
+    );
+  }
+```
+
+Plus a new `FirstRunChecklist` component + module helpers (`readDismissed`, `navigateToTab`,
+`hasNonDefaultUser`, `permissionsAreCustomized`) appended to the file.
+
+## v42.28 — 2026-07-08 — C3 (Batch 2): add first-run admin-checklist label keys
+
+**File:** `src/data/labels/labelsStore.ts`
+
+Added `firstrun_*` keys to `DEFAULT_LABELS` for the new admin onboarding checklist so every
+user-facing string routes through an admin-overridable label key.
+
+**Before:**
+```ts
+  mgmt_card_toast_no_population: "لم يتم العثور على بيانات المجتمع. يجب معالجة المجتمع أولاً.",
+} as const;
+```
+
+**After:**
+```ts
+  mgmt_card_toast_no_population: "لم يتم العثور على بيانات المجتمع. يجب معالجة المجتمع أولاً.",
+
+  // First-run admin checklist — C3 (Batch 2)
+  firstrun_title:                  "خطوات البدء السريع",
+  // …(full firstrun_* block — see file)…
+} as const;
+```
+
 ## v42.27 — 2026-07-08 — C2 (Batch 2): wire the تقرير الإدارة Reports card live (remove "قريباً")
 
 **File:** `src/components/Sidebar/Tabs/Reports/index.tsx`

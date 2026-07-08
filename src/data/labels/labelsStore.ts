@@ -213,6 +213,24 @@ export const DEFAULT_LABELS = {
   mgmt_card_generating:         "جاري…",
   mgmt_card_toast_opened:       "تم فتح تقرير الإدارة — استخدم طباعة/PDF.",
   mgmt_card_toast_no_population: "لم يتم العثور على بيانات المجتمع. يجب معالجة المجتمع أولاً.",
+
+  // ── First-run admin checklist — C3 (Batch 2) ──
+  firstrun_title:                    "خطوات البدء السريع",
+  firstrun_subtitle:                 "أكمل الخطوات التالية لتجهيز النظام",
+  firstrun_dismiss:                  "إخفاء",
+  firstrun_progress_of:              "من",
+  firstrun_step_structure_title:     "إنشاء بنية مساحة العمل",
+  firstrun_step_structure_desc:      "تم إنشاء مجلدات النظام الأساسية.",
+  firstrun_step_users_title:         "إضافة المستخدمين",
+  firstrun_step_users_desc:          "أنشئ حسابات الموظفين والمشرفين والمدراء.",
+  firstrun_step_users_action:        "إدارة المستخدمين",
+  firstrun_step_permissions_title:   "ضبط الصلاحيات",
+  firstrun_step_permissions_desc:    "خصّص صلاحيات الأدوار حسب احتياج فريقك.",
+  firstrun_step_permissions_action:  "الصلاحيات",
+  firstrun_step_month_title:         "استيراد أول شهر",
+  firstrun_step_month_desc:          "استورد بيانات المخاطر/BI وعالِج أول مجتمع.",
+  firstrun_step_month_action:        "معالجة البيانات",
+  firstrun_demo_hint:                "لمعاينة النظام في وضع العرض التجريبي (قراءة فقط): من شاشة اختيار مساحة العمل، اضغط Alt+A ثم Alt+T.",
 } as const;
 
 export type LabelKey = keyof typeof DEFAULT_LABELS;
