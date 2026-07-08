@@ -4,6 +4,87 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.21 — 2026-07-08 — B4 (Batch 1), file 3/4: hex-literal token sweep of DataTable.css
+
+**File:** `src/components/DataTable/DataTable.css`
+
+Same mechanical sweep, applied to `DataTable.css` (133 raw hex literals). 130 replaced with
+`var(--token)` (including the 4 "Extended accents" tokens added in v42.18 for this file's
+sticky-header fallback and completed-row tint ramp: `--c-table-head-fallback`,
+`--c-success-tint`, `--c-success-tint-hover`, `--c-success-tint-selected`). 117 redundant
+`var(--X, var(--X))` self-fallbacks collapsed to `var(--X)`. 3 literals left as
+`/* no-token: one-off */`.
+
+**Before:**
+```css
+.dt-th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--table-head-bg, #F7F9FA);
+  border-bottom: 1px solid var(--c-border, #DDE6EF);
+  ...
+}
+.dt-tr.dt-tr--completed,
+.dt-tr.dt-tr--completed:nth-child(even) {
+  background: #ECFDF3;
+}
+.dt-tr.dt-tr--completed:hover,
+.dt-tr.dt-tr--completed:nth-child(even):hover {
+  background: #DDF8E8;
+}
+.dt-tr.dt-tr--completed.selected,
+.dt-tr.dt-tr--completed.selected:nth-child(even) {
+  background: #D6F3E2;
+  box-shadow: inset 3px 0 0 #16A34A;
+}
+```
+
+**After:**
+```css
+.dt-th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--table-head-bg, var(--c-table-head-fallback));
+  border-bottom: 1px solid var(--c-border);
+  ...
+}
+.dt-tr.dt-tr--completed,
+.dt-tr.dt-tr--completed:nth-child(even) {
+  background: var(--c-success-tint);
+}
+.dt-tr.dt-tr--completed:hover,
+.dt-tr.dt-tr--completed:nth-child(even):hover {
+  background: var(--c-success-tint-hover);
+}
+.dt-tr.dt-tr--completed.selected,
+.dt-tr.dt-tr--completed.selected:nth-child(even) {
+  background: var(--c-success-tint-selected);
+  box-shadow: inset 3px 0 0 #16A34A /* no-token: one-off */;
+}
+```
+
+Note: `var(--table-head-bg, #F7F9FA)` was a *pre-existing mismatch* — `--table-head-bg` itself
+resolves to a gradient (`linear-gradient(180deg, #F4F8FB, #EAF1F7)` in `index.css`), not
+`#F7F9FA`; the fallback was already unreachable dead code (the gradient var is always defined) and
+its value was never actually rendered. Preserved as-is (now `var(--c-table-head-fallback)`) rather
+than "fixed", since correcting a pre-existing mismatch was out of scope for a token-mapping sweep.
+
+Full hex → token mapping applied: `#009ADE`→`--c-sky`, `#FFFFFF`→`--c-surface`,
+`#DDE6EF`→`--c-border`, `#263C58`→`--c-ink-2`, `#F9F8F4`→`--c-surface-3`,
+`#E5F5FB`→`--c-sky-light`, `#8395AC`→`--c-ink-4`, `#007FBA`→`--c-sky-2`,
+`#F6F8FA`→`--c-surface-2`, `#0B1F33`→`--c-ink`, `#E8EEF6`→`--c-navy-soft`,
+`#50536F`→`--c-ink-3`, `#FBF2DC`→`--c-warning-bg`, `#F7F9FA`→`--c-table-head-fallback`,
+`#ECFDF3`→`--c-success-tint`, `#DDF8E8`→`--c-success-tint-hover`,
+`#D6F3E2`→`--c-success-tint-selected`, `#C2CEDC`→`--c-border-2`, `#775000`→`--c-warning`,
+`#0E2444`→`--c-navy`, `#E5B46E`→`--c-warning-border`. Left as `no-token: one-off`: `#FDE68A`,
+`#F3F8FB`, `#16A34A`. `npm run lint` and `npm run test:run` green (364/364); verified via preview
+`getComputedStyle` that `--c-table-head-fallback`, `--c-success-tint`, `--c-success-tint-hover`,
+`--c-success-tint-selected`, `--c-sky-2` resolve to their pre-sweep hex values.
+
+---
+
 ## v42.20 — 2026-07-08 — B4 (Batch 1), file 2/4: hex-literal token sweep of Reports.css
 
 **File:** `src/components/Sidebar/Tabs/Reports/Reports.css`
