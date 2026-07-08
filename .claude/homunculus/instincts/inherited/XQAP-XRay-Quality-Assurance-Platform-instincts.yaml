@@ -1,0 +1,625 @@
+# Instincts generated from https://github.com/MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+# Generated: 2026-07-08T05:47:10.973Z
+# Version: 2.0
+# NOTE: This file supplements (does not replace) any existing curated instincts.
+# High-confidence manually curated instincts should be preserved alongside these.
+
+---
+id: XQAP-XRay-Quality-Assurance-Platform-commit-conventional
+trigger: "when writing a commit message"
+confidence: 0.85
+domain: git
+source: repo-analysis
+source_repo: https://github.com/MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# XQAP XRay Quality Assurance Platform Commit Conventional
+
+## Action
+
+Use conventional commit format with prefixes: feat, fix, docs, refactor, merge
+
+## Evidence
+
+- 21 commits analyzed
+- Detected conventional commit pattern
+- Examples: fix(datatable): correct sticky-column offsets and default column order; inline fonts/favicon for portability, docs(spec): referral-approval rework design (queue UI, append-only decision history, bulk actions)
+
+---
+id: XQAP-XRay-Quality-Assurance-Platform-commit-length
+trigger: "when writing a commit message"
+confidence: 0.6
+domain: git
+source: repo-analysis
+source_repo: https://github.com/MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# XQAP XRay Quality Assurance Platform Commit Length
+
+## Action
+
+Write moderate-length commit messages (~77 characters)
+
+## Evidence
+
+- Average commit message length: 77 chars
+- Based on 21 commits
+
+---
+id: XQAP-XRay-Quality-Assurance-Platform-naming-files
+trigger: "when creating a new file"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# XQAP XRay Quality Assurance Platform Naming Files
+
+## Action
+
+Use camelCase naming convention
+
+## Evidence
+
+- Analyzed file naming patterns in repository
+- Dominant pattern: camelCase
+
+---
+id: XQAP-XRay-Quality-Assurance-Platform-import-relative
+trigger: "when importing modules"
+confidence: 0.75
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# XQAP XRay Quality Assurance Platform Import Relative
+
+## Action
+
+Use relative imports for project files
+
+## Evidence
+
+- Import analysis shows relative import pattern
+- Example: import { x } from '../lib/x'
+
+---
+id: XQAP-XRay-Quality-Assurance-Platform-export-style
+trigger: "when exporting from a module"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# XQAP XRay Quality Assurance Platform Export Style
+
+## Action
+
+Prefer mixed exports
+
+## Evidence
+
+- Export pattern analysis
+- Dominant style: mixed
+
+---
+id: XQAP-XRay-Quality-Assurance-Platform-arch-type-based
+trigger: "when adding new code"
+confidence: 0.8
+domain: architecture
+source: repo-analysis
+source_repo: https://github.com/MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# XQAP XRay Quality Assurance Platform Arch Type Based
+
+## Action
+
+Place code in the appropriate type folder (components/, services/, utils/, etc.)
+
+## Evidence
+
+- Type-based module organization detected
+- Folders: auth, components, data, styles
+
+---
+id: XQAP-XRay-Quality-Assurance-Platform-test-colocate
+trigger: "when writing tests"
+confidence: 0.85
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# XQAP XRay Quality Assurance Platform Test Colocate
+
+## Action
+
+Place test file next to the source file (e.g., Button.test.tsx next to Button.tsx)
+
+## Evidence
+
+- Colocated test pattern detected
+- Tests live alongside source files
+
+---
+id: XQAP-XRay-Quality-Assurance-Platform-test-framework
+trigger: "when writing tests"
+confidence: 0.9
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# XQAP XRay Quality Assurance Platform Test Framework
+
+## Action
+
+Use vitest as the test framework
+
+## Evidence
+
+- Test framework detected: vitest
+- File pattern: *.test.ts
+
+---
+id: XQAP-XRay-Quality-Assurance-Platform-test-naming
+trigger: "when creating a test file"
+confidence: 0.85
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# XQAP XRay Quality Assurance Platform Test Naming
+
+## Action
+
+Name test files using the pattern: *.test.ts
+
+## Evidence
+
+- File pattern: *.test.ts
+- Consistent across test files
+
+---
+id: XQAP-XRay-Quality-Assurance-Platform-workflow-feature-development
+trigger: "when implementing a new feature"
+confidence: 0.9
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# XQAP XRay Quality Assurance Platform Workflow Feature Development
+
+## Action
+
+Follow the feature-development workflow:
+1. Add feature implementation
+2. Add tests for feature
+3. Update documentation
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~14x per month
+- Files: src/data/approvals/*, src/data/referral/*, src/components/sidebar/tabs/employeeworkspace/views/referralapproval/*
+
+---
+id: XQAP-XRay-Quality-Assurance-Platform-workflow-feature-development-with-edit-log-and-tests
+trigger: "when doing feature development with edit log and tests"
+confidence: 0.7
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# XQAP XRay Quality Assurance Platform Workflow Feature Development With Edit Log And Tests
+
+## Action
+
+Follow the feature-development-with-edit-log-and-tests workflow:
+1. Implement or refactor logic in one or more source files (often under src/data/ or src/components/).
+2. Add or update corresponding test files (usually .test.ts or .test.tsx in the same directory).
+3. Update docs/EDIT_LOG.md to log the change.
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~4x per month
+- Files: src/data/*/*.ts, src/data/*/*.test.ts, src/components/**/*.{ts,tsx}
+
+---
+id: XQAP-XRay-Quality-Assurance-Platform-workflow-component-development-in-sidebar-employeeworkspace-referralapproval
+trigger: "when doing component development in sidebar employeeworkspace referralapproval"
+confidence: 0.7
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# XQAP XRay Quality Assurance Platform Workflow Component Development In Sidebar Employeeworkspace Referralapproval
+
+## Action
+
+Follow the component-development-in-sidebar-employeeworkspace-referralapproval workflow:
+1. Create a new component file under src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/ (e.g., RequestCard.tsx, RequestList.tsx, ReviewModal.tsx).
+2. Update docs/EDIT_LOG.md to log the addition.
+3. Optionally, add or update test files for the new component.
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~4x per month
+- Files: src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/*.tsx, docs/EDIT_LOG.md
+
+---
+id: XQAP-XRay-Quality-Assurance-Platform-workflow-documentation-spec-and-plan-drafting
+trigger: "when doing documentation spec and plan drafting"
+confidence: 0.6
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# XQAP XRay Quality Assurance Platform Workflow Documentation Spec And Plan Drafting
+
+## Action
+
+Follow the documentation-spec-and-plan-drafting workflow:
+1. Create a new markdown file under docs/superpowers/specs/ or docs/superpowers/plans/.
+2. Optionally, update or create related files (e.g., EDIT_LOG, other docs/).
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~2x per month
+- Files: docs/superpowers/specs/*.md, docs/superpowers/plans/*.md
+
+---
+id: XQAP-XRay-Quality-Assurance-Platform-workflow-lint-suppression-or-lint-fix
+trigger: "when doing lint suppression or lint fix"
+confidence: 0.6
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# XQAP XRay Quality Assurance Platform Workflow Lint Suppression Or Lint Fix
+
+## Action
+
+Follow the lint-suppression-or-lint-fix workflow:
+1. Add eslint-disable-next-line comments to affected files.
+2. Update docs/EDIT_LOG.md to log the lint suppression or fix.
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~2x per month
+- Files: src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/*.tsx, docs/EDIT_LOG.md
+
+---
+id: XQAP-XRay-Quality-Assurance-Platform-workflow-merge-feature-branch-with-edit-log-reconciliation
+trigger: "when doing merge feature branch with edit log reconciliation"
+confidence: 0.6
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# XQAP XRay Quality Assurance Platform Workflow Merge Feature Branch With Edit Log Reconciliation
+
+## Action
+
+Follow the merge-feature-branch-with-edit-log-reconciliation workflow:
+1. Merge the feature branch.
+2. Resolve conflicts, especially in docs/EDIT_LOG.md and large component files.
+3. Remove or consolidate superseded files.
+4. Ensure all related files from both branches are present and reconciled.
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~2x per month
+- Files: docs/EDIT_LOG.md, src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/*.tsx, src/data/approvals/*
+
+---
+id: xqap-xray-quality-assurance-platform-camelcase-files
+trigger: "When creating or renaming a file in the codebase"
+confidence: 0.85
+domain: code-style
+source: repo-analysis
+source_repo: MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# Xqap Xray Quality Assurance Platform Camelcase Files
+
+## Action
+
+Name the file using camelCase (e.g., approvalStorage.ts)
+
+## Evidence
+
+- Pattern in namingConventions.files
+- Seen in src/data/approvals/approvalStorage.ts
+
+---
+id: xqap-xray-quality-assurance-platform-camelcase-functions
+trigger: "When defining a function"
+confidence: 0.85
+domain: code-style
+source: repo-analysis
+source_repo: MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# Xqap Xray Quality Assurance Platform Camelcase Functions
+
+## Action
+
+Name the function using camelCase (e.g., getDecisionHistory)
+
+## Evidence
+
+- Pattern in namingConventions.functions
+
+---
+id: xqap-xray-quality-assurance-platform-pascalcase-classes
+trigger: "When defining a class"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# Xqap Xray Quality Assurance Platform Pascalcase Classes
+
+## Action
+
+Name the class using PascalCase (e.g., ReferralApprovalManager)
+
+## Evidence
+
+- Pattern in namingConventions.classes
+
+---
+id: xqap-xray-quality-assurance-platform-screaming-snake-constants
+trigger: "When defining a constant"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# Xqap Xray Quality Assurance Platform Screaming Snake Constants
+
+## Action
+
+Name the constant using SCREAMING_SNAKE_CASE (e.g., MAX_APPROVALS)
+
+## Evidence
+
+- Pattern in namingConventions.constants
+
+---
+id: xqap-xray-quality-assurance-platform-relative-imports
+trigger: "When importing modules within the codebase"
+confidence: 0.85
+domain: code-style
+source: repo-analysis
+source_repo: MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# Xqap Xray Quality Assurance Platform Relative Imports
+
+## Action
+
+Use relative import paths (e.g., ../data/approvalTypes)
+
+## Evidence
+
+- Pattern in importStyle
+- Seen in src/data/approvals/approvalStorage.ts
+
+---
+id: xqap-xray-quality-assurance-platform-mixed-exports
+trigger: "When exporting modules or functions"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# Xqap Xray Quality Assurance Platform Mixed Exports
+
+## Action
+
+Use either named or default exports as appropriate
+
+## Evidence
+
+- Pattern in exportStyle
+
+---
+id: xqap-xray-quality-assurance-platform-vitest-unit-tests
+trigger: "When writing tests"
+confidence: 0.9
+domain: testing
+source: repo-analysis
+source_repo: MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# Xqap Xray Quality Assurance Platform Vitest Unit Tests
+
+## Action
+
+Write unit tests using Vitest and place them in files ending with .test.ts
+
+## Evidence
+
+- Pattern in testing.framework and filePattern
+- Seen in src/data/approvals/approvalStorage.test.ts
+
+---
+id: xqap-xray-quality-assurance-platform-colocated-tests
+trigger: "When adding or updating tests for a module"
+confidence: 0.9
+domain: testing
+source: repo-analysis
+source_repo: MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# Xqap Xray Quality Assurance Platform Colocated Tests
+
+## Action
+
+Place the test file in the same directory as the module (colocated)
+
+## Evidence
+
+- Pattern in architecture.folderStructure.testLocation
+- Seen in src/data/approvals/approvalStorage.test.ts
+
+---
+id: xqap-xray-quality-assurance-platform-conventional-commits
+trigger: "When writing a commit message"
+confidence: 0.95
+domain: git
+source: repo-analysis
+source_repo: MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# Xqap Xray Quality Assurance Platform Conventional Commits
+
+## Action
+
+Use conventional commit prefixes (feat, fix, docs, refactor, merge) followed by a scope and description
+
+## Evidence
+
+- Pattern in commits.prefixes
+- Seen in commit 'fix(datatable): correct sticky-column offsets and default column order; inline fonts/favicon for portability'
+
+---
+id: xqap-xray-quality-assurance-platform-commit-length
+trigger: "When composing a commit message"
+confidence: 0.7
+domain: git
+source: repo-analysis
+source_repo: MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# Xqap Xray Quality Assurance Platform Commit Length
+
+## Action
+
+Write a descriptive commit message averaging around 77 characters
+
+## Evidence
+
+- Pattern in commits.averageLength
+
+---
+id: xqap-xray-quality-assurance-platform-feature-dev-edit-log-tests
+trigger: "When adding a new feature or major refactor"
+confidence: 0.95
+domain: workflow
+source: repo-analysis
+source_repo: MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# Xqap Xray Quality Assurance Platform Feature Dev Edit Log Tests
+
+## Action
+
+Implement or refactor logic, add/update corresponding tests, and update docs/EDIT_LOG.md
+
+## Evidence
+
+- Workflow 'feature-development-with-edit-log-and-tests'
+- Seen in commits and files under src/data/, src/components/, docs/EDIT_LOG.md
+
+---
+id: xqap-xray-quality-assurance-platform-new-referralapproval-component
+trigger: "When adding or modularizing UI for referral approval in EmployeeWorkspace"
+confidence: 0.92
+domain: workflow
+source: repo-analysis
+source_repo: MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# Xqap Xray Quality Assurance Platform New Referralapproval Component
+
+## Action
+
+Create a new component file under src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/, update docs/EDIT_LOG.md, and optionally add/update tests
+
+## Evidence
+
+- Workflow 'component-development-in-sidebar-employeeworkspace-referralapproval'
+- Seen in commits creating new component files and updating docs/EDIT_LOG.md
+
+---
+id: xqap-xray-quality-assurance-platform-documentation-spec-plan
+trigger: "When documenting a new feature or major rework before implementation"
+confidence: 0.88
+domain: workflow
+source: repo-analysis
+source_repo: MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# Xqap Xray Quality Assurance Platform Documentation Spec Plan
+
+## Action
+
+Create a new markdown file under docs/superpowers/specs/ or docs/superpowers/plans/
+
+## Evidence
+
+- Workflow 'documentation-spec-and-plan-drafting'
+- Seen in commits creating files in docs/superpowers/specs/ and docs/superpowers/plans/
+
+---
+id: xqap-xray-quality-assurance-platform-lint-fix
+trigger: "When addressing known-safe lint rule violations"
+confidence: 0.85
+domain: workflow
+source: repo-analysis
+source_repo: MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# Xqap Xray Quality Assurance Platform Lint Fix
+
+## Action
+
+Add eslint-disable-next-line comments to affected files and update docs/EDIT_LOG.md
+
+## Evidence
+
+- Workflow 'lint-suppression-or-lint-fix'
+- Seen in commits adding eslint-disable-next-line and updating docs/EDIT_LOG.md
+
+---
+id: xqap-xray-quality-assurance-platform-merge-feature-branch
+trigger: "When merging a long-lived feature branch into main"
+confidence: 0.9
+domain: workflow
+source: repo-analysis
+source_repo: MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# Xqap Xray Quality Assurance Platform Merge Feature Branch
+
+## Action
+
+Merge the branch, resolve conflicts (especially in docs/EDIT_LOG.md and large component files), remove/consolidate superseded files, and reconcile all related files
+
+## Evidence
+
+- Workflow 'merge-feature-branch-with-edit-log-reconciliation'
+- Seen in merge commits and conflict resolutions involving docs/EDIT_LOG.md and component/data files
+
