@@ -4,6 +4,22 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.10 — 2026-07-07 — Referral approval rework (11/11): orchestration + CSS, retire monolithic file
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval.tsx`
+
+**Before:** 688-line single file: data loading, mutations, both cards, both dialogs, and the review modal all inline. Status filter tabs and section tabs shared one CSS class; no bulk actions; no cross-month history; decisions overwrote each other; idempotency/ownership/month-key bugs (see bug-fix map in the plan).
+
+**After:** replaced by `views/ReferralApproval/` — `index.tsx` orchestrates `useApprovalData`, `SummaryBar`, `RequestList`, `ReviewModal`, `HistoryView`; each is independently readable and (where it carries real logic risk) tested.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/EmployeeWorkspace.css`
+
+**Before:** no styles for view tabs, summary chips, timeline, or bulk selection.
+
+**After:** added `.ew-approval-view-tab*`, `.ew-summary-*`, `.ew-timeline*`, `.ew-bulk-bar*`, `.ew-request-checkbox`, `.ew-referral-card--selected`.
+
+---
+
 ## v42.9 — 2026-07-07 — Referral approval rework (10/11): cross-month HistoryView
 
 **File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/HistoryView.tsx`
