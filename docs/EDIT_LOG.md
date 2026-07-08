@@ -4,6 +4,249 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.24 — 2026-07-08 — B5 (Batch 1): DataTable header truncation fix, numeric-column alignment, filter-row consistency
+
+**File:** `src/components/DataTable/utils.ts`
+
+Added `looksLikeNumber()`, a narrow numeric-string detector (plain positive/negative
+integers/decimals, optional thousands separators, optional trailing `%`) mirroring the existing
+`looksLikeDate()`. Deliberately narrow so IDs/phone numbers/codes that merely start with a digit
+are never misclassified as numeric.
+
+**Before:**
+```ts
+export function looksLikeDate(v: string): boolean {
+  return ISO_DATE_RE.test(v) || DATE_ONLY_RE.test(v);
+}
+```
+
+**After:**
+```ts
+export function looksLikeDate(v: string): boolean {
+  return ISO_DATE_RE.test(v) || DATE_ONLY_RE.test(v);
+}
+
+// ── Numeric utilities ─────────────────────────────────────────────────────────
+const NUMERIC_RE = /^-?\d{1,3}(,\d{3})*(\.\d+)?%?$|^-?\d+(\.\d+)?%?$/;
+
+export function looksLikeNumber(v: string): boolean {
+  return NUMERIC_RE.test(v.trim());
+}
+```
+
+**File:** `src/components/DataTable/index.tsx`
+
+Three changes: (1) `DataTableCol.isNumeric` opt-in flag + `detectedNumeric` auto-detection
+(mirrors `detectedDates`: samples up to 200 rows, skips date/status/multiselect columns, marks a
+column numeric only if every non-empty sampled value matches `looksLikeNumber`); `CellMeta` gains
+an `isNumeric` field passed through to `renderCell`. (2) `headerMinWidth(col)` — a per-column
+floor keyed off label length (`min(180, max(88, label.length * 9 + 28))` px) applied to the `<col>`
+and `<th>` so a narrow `widthFr` share can no longer squeeze a header below its readable width —
+this is the direct fix for VIS-06 ("تاريخ" clipping to "تار"). (3) `dt-th--numeric`/`dt-td--numeric`
+classes applied when a column is numeric.
+
+**Before:**
+```tsx
+export type DataTableCol<TRow = unknown> = {
+  id: string;
+  label: string;
+  widthFr?: number;
+  alwaysVisible?: boolean;
+  adminOnly?: boolean;
+  isDate?: boolean;
+  filterKind?: "text" | "date" | "status" | "multiselect";
+  ...
+};
+
+export type CellMeta = {
+  isDate: boolean;
+  dateFmt: DateFormatMode;
+};
+...
+          <colgroup>
+            {visibleCols.map((col) => (
+              <col key={col.id} style={{ width: colWidthPct(col) }} />
+            ))}
+          </colgroup>
+          <thead>
+            <tr>
+              {visibleCols.map((col, colIdx) => {
+                const isDate    = col.isDate || detectedDates.has(col.id);
+                ...
+                  <th
+                    key={col.id}
+                    className={`dt-th${stickyMeta.has(col.id) ? " dt-sticky-col dt-sticky-head" : ""}`}
+                    style={getStickyStyle(col, true)}
+                    ...
+...
+                    {visibleCols.map((col) => {
+                      const isDate = col.isDate || detectedDates.has(col.id);
+                      return (
+                        <td
+                          key={col.id}
+                          className={`dt-td${stickyMeta.has(col.id) ? " dt-sticky-col" : ""}`}
+                          style={getStickyStyle(col, false)}
+                          title={String(col.accessor(row) ?? "")}
+                        >
+                          {renderCell(col, row, {
+                            isDate,
+                            dateFmt: colCfg.dateFmt[col.id] as DateFormatMode ?? "date",
+                          })}
+```
+
+**After:**
+```tsx
+export type DataTableCol<TRow = unknown> = {
+  id: string;
+  label: string;
+  widthFr?: number;
+  alwaysVisible?: boolean;
+  adminOnly?: boolean;
+  isDate?: boolean;
+  isNumeric?: boolean;
+  filterKind?: "text" | "date" | "status" | "multiselect";
+  ...
+};
+
+export type CellMeta = {
+  isDate: boolean;
+  dateFmt: DateFormatMode;
+  isNumeric: boolean;
+};
+...
+  function headerMinWidth(col: DataTableCol<TRow>): number {
+    return Math.min(180, Math.max(88, col.label.length * 9 + 28));
+  }
+...
+          <colgroup>
+            {visibleCols.map((col) => (
+              <col key={col.id} style={{ width: colWidthPct(col), minWidth: headerMinWidth(col) }} />
+            ))}
+          </colgroup>
+          <thead>
+            <tr>
+              {visibleCols.map((col, colIdx) => {
+                const isDate    = col.isDate || detectedDates.has(col.id);
+                const isNumeric = col.isNumeric || detectedNumeric.has(col.id);
+                ...
+                  <th
+                    key={col.id}
+                    className={`dt-th${stickyMeta.has(col.id) ? " dt-sticky-col dt-sticky-head" : ""}${isNumeric ? " dt-th--numeric" : ""}`}
+                    style={{ minWidth: headerMinWidth(col), ...getStickyStyle(col, true) }}
+                    ...
+...
+                    {visibleCols.map((col) => {
+                      const isDate    = col.isDate || detectedDates.has(col.id);
+                      const isNumeric = col.isNumeric || detectedNumeric.has(col.id);
+                      return (
+                        <td
+                          key={col.id}
+                          className={`dt-td${stickyMeta.has(col.id) ? " dt-sticky-col" : ""}${isNumeric ? " dt-td--numeric" : ""}`}
+                          style={getStickyStyle(col, false)}
+                          title={String(col.accessor(row) ?? "")}
+                        >
+                          {renderCell(col, row, {
+                            isDate,
+                            dateFmt: colCfg.dateFmt[col.id] as DateFormatMode ?? "date",
+                            isNumeric,
+                          })}
+```
+
+**File:** `src/components/DataTable/DataTable.css`
+
+**Before:**
+```css
+.dt-th-label {
+  ...
+  min-width: 0;
+  white-space: nowrap;
+  line-height: 1.35;
+}
+...
+.dt-td:first-child { border-inline-end: none; text-align: right; }
+...
+.dt-filter-done-btn {
+  width: 100%;
+  padding: 8px 0;
+  border: 0;
+  border-radius: var(--r-sm, 8px);
+  background: var(--c-sky);
+  color: var(--c-surface);
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 160ms ease, transform 140ms ease;
+}
+
+.dt-filter-done-btn:hover {
+  background: var(--c-sky-2);
+}
+```
+
+**After:**
+```css
+.dt-th-label {
+  ...
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: normal;
+  line-height: 1.35;
+}
+
+.dt-th--numeric .dt-th-label {
+  text-align: end;
+}
+...
+.dt-td:first-child { border-inline-end: none; text-align: right; }
+
+td.dt-td.dt-td--numeric {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+...
+.dt-filter-done-btn {
+  width: 100%;
+  padding: 8px 0;
+  border: 1px solid var(--c-sky);
+  border-radius: var(--r-sm, 8px);
+  background: var(--c-sky);
+  color: var(--c-surface);
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 160ms ease, transform 140ms ease;
+}
+
+.dt-filter-done-btn:hover {
+  background: var(--c-sky-2);
+  border-color: var(--c-sky-2);
+}
+```
+
+**RTL numerals check:** all digit rendering in this app already goes through `toLocaleString`/
+`toLocaleDateString`/`toLocaleTimeString` with the `ar-SA-u-nu-latn` locale (`-u-nu-latn` forces
+the Latin numbering system), confirmed via `utils.ts formatDate()` and the `dt-row-count` renderer
+in `index.tsx` — no Arabic-Indic digits (٠١٢٣) appear anywhere in the live UI (grepped `src/`,
+only test fixtures use them), so `font-variant-numeric: tabular-nums` applies cleanly with no
+digit-shaping edge case.
+
+**Verification:** the demo workspace (read-only, entered via the view passcode) has zero data rows
+in every table (Batch 2's C1 seed-data item is not yet implemented), so live numeric-cell
+rendering couldn't be screenshotted with real data. Verified instead via (a) `tsc --noEmit`, lint,
+and the full test suite green; (b) live header inspection on the EmployeeWorkspace referrals table
+at 1280×800 confirmed `headerMinWidth()` computing the expected floor per label (e.g. "معرف الأشعة"
+-> 127px, "تاريخ دخول صورة الأشعة" -> 180px, matching `label.length * 9 + 28` capped at 180) and
+`white-space: normal` applied; (c) synthetic DOM nodes carrying the new classes injected via the
+preview tool and removed after, confirming computed styles: `.dt-td--numeric` -> `text-align: end`
++ `font-variant-numeric: tabular-nums`; a plain `.dt-td` (no numeric class) still `text-align:
+center` (unchanged default, no regression); `.dt-th--numeric .dt-th-label` -> `text-align: end`;
+`td.dt-td.dt-td--numeric` beats `.dt-td:first-child` when both apply (specificity check, since a
+numeric column could be first); `.dt-filter-done-btn` and `.dt-filter-apply-btn` now render at
+identical height (38.4px) with matching border. `npm run build` green (2,565.82 kB / 951.31 kB
+gzip, in line with the existing baseline).
+
+---
+
 ## v42.23 — 2026-07-08 — B4 (Batch 1) regression guard: scripts/check-hex-literals.mjs
 
 **File:** `scripts/check-hex-literals.mjs` (new)

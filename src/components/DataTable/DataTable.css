@@ -223,8 +223,20 @@
   flex-direction: column;
   gap: 2px;
   min-width: 0;
-  white-space: nowrap;
+  /* B5 (VIS-06): allow wrap at word boundaries instead of `nowrap`, which let
+     long Arabic headers clip mid-word (e.g. "تاريخ" -> "تار") once the
+     column's flex-shrunk width fell below the label's natural content width.
+     Paired with headerMinWidth() in index.tsx so short headers stay compact
+     and long ones wrap onto a second line instead of clipping. */
+  white-space: normal;
+  overflow-wrap: normal;
   line-height: 1.35;
+}
+
+/* B5: numeric columns (explicit `isNumeric` or auto-detected) end-align their
+   header label to match the end-aligned data cells below (.dt-td--numeric). */
+.dt-th--numeric .dt-th-label {
+  text-align: end;
 }
 
 .dt-th-fmt {
@@ -361,6 +373,18 @@
 }
 
 .dt-td:first-child { border-inline-end: none; text-align: right; }
+
+/* B5: numeric columns (explicit `isNumeric` or auto-detected from sampled
+   values) end-align their figures — logical "end" (not hard-coded "right":
+   this app is RTL, so "end" resolves to the left, the conventional side for
+   comparing magnitudes) — with tabular figures so digits don't jitter width
+   row to row. Specificity bumped with the element selector so this always
+   wins over `.dt-td:first-child`'s `text-align: right` when a numeric column
+   happens to be first. */
+td.dt-td.dt-td--numeric {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
 
 .dt-mono {
   font-family: var(--font-mono, "JetBrains Mono", monospace);
@@ -534,7 +558,11 @@
 .dt-filter-done-btn {
   width: 100%;
   padding: 8px 0;
-  border: 0;
+  /* B5: was `border: 0` — the text/date "apply" button (.dt-filter-apply-btn
+     below) has a 1px border, which (both being box-sizing: border-box) made
+     this button render 2px shorter. Matching the border keeps the filter
+     row's action button the same height/padding/border across column types. */
+  border: 1px solid var(--c-sky);
   border-radius: var(--r-sm, 8px);
   background: var(--c-sky);
   color: var(--c-surface);
@@ -546,6 +574,7 @@
 
 .dt-filter-done-btn:hover {
   background: var(--c-sky-2);
+  border-color: var(--c-sky-2);
 }
 
 .dt-filter-apply-btn {
