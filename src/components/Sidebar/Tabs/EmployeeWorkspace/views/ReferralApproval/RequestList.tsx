@@ -30,6 +30,7 @@ export default function RequestList({ requests, bulkEnabled, userDisplayMap, sam
 
   // Bug #4: selection only makes sense on the pending queue — drop it whenever
   // the view switches to a decided (non-bulk) filter.
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- selection only makes sense on the pending queue; sync reset when the view switches to a decided (non-bulk) filter
   useEffect(() => { setSelected(new Set()); }, [bulkEnabled]);
 
   const sorted = requests.slice().sort((a, b) =>

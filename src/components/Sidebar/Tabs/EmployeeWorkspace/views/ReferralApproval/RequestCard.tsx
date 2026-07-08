@@ -6,6 +6,7 @@ import type { PreparedPopulationRow } from "../../../../../../data/population/po
 type CardRequest = ReferralRequest | ReplacementRequest;
 type SampleDetail = DistributionEntry | PreparedPopulationRow;
 
+// eslint-disable-next-line react-refresh/only-export-components -- type-guard export, not a component; imported elsewhere to discriminate referral vs. replacement requests
 export function isReferral(request: CardRequest): request is ReferralRequest {
   return "toEmployee" in request;
 }

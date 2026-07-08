@@ -105,6 +105,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
     }
   }, [directoryHandle, selMonth, username, canApproveReferrals, canApproveReplacements]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- async data load; setState fires inside loadData's async callback, not synchronously in the effect body
   useEffect(() => { void loadData(); }, [loadData]);
 
   // Bug #1 + #3: every mutation re-checks the request's current status against
