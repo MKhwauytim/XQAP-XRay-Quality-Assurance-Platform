@@ -4,6 +4,389 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.17 — 2026-07-08 — D7 (Batch 4): version stamp (single source of truth via Vite `define`) + docs/RELEASE_CHECKLIST.md
+
+**File:** `package.json`
+
+**Before:**
+```json
+  "version": "1.0.0",
+```
+
+**After:**
+```json
+  "version": "42.17.0",
+```
+
+Adopted mapping: `package.json` major.minor tracks the EDIT_LOG `vMAJOR.MINOR` scheme directly
+(42.17 ↔ v42.17), with `.0` as the semver-required patch component (EDIT_LOG doesn't have a third
+segment, so patch stays `0` and all granularity lives in the minor number, matching how the log
+already works). Bumped to `42.17.0` to match *this very entry*, since it's the top of the log
+once this change lands.
+
+**File:** `src/vite-env.d.ts`
+
+**Before:**
+```ts
+/// <reference types="vite/client" />
+
+declare module "*.woff?inline" {
+  const src: string;
+  export default src;
+}
+```
+
+**After:**
+```ts
+/// <reference types="vite/client" />
+
+declare module "*.woff?inline" {
+  const src: string;
+  export default src;
+}
+
+/** App version string, injected at build time from `package.json` via Vite's `define`
+ *  (see `vite.config.ts` / `vitest.config.ts`) — single source of truth, no hand-maintained
+ *  version.ts to drift out of sync. */
+declare const __APP_VERSION__: string;
+```
+
+**File:** `vite.config.ts`
+
+**Before:**
+```ts
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import { viteSingleFile } from "vite-plugin-singlefile";
+import { deckStyleChoicesPlugin } from "./src/dev/deckStyleChoicesPlugin";
+import { editLogTruncatePlugin } from "./src/build/editLogTruncatePlugin";
+
+export default defineConfig({
+  plugins: [react(), viteSingleFile(), deckStyleChoicesPlugin(), editLogTruncatePlugin()],
+  base: "./",
+```
+
+**After:**
+```ts
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import { viteSingleFile } from "vite-plugin-singlefile";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { deckStyleChoicesPlugin } from "./src/dev/deckStyleChoicesPlugin";
+import { editLogTruncatePlugin } from "./src/build/editLogTruncatePlugin";
+
+// Single source of truth for the app version: read it straight from package.json rather than
+// hand-maintaining a separate version.ts that can drift out of sync (D7).
+const pkg = JSON.parse(
+  readFileSync(fileURLToPath(new URL("./package.json", import.meta.url)), "utf8")
+) as { version: string };
+
+export default defineConfig({
+  plugins: [react(), viteSingleFile(), deckStyleChoicesPlugin(), editLogTruncatePlugin()],
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
+  base: "./",
+```
+
+**File:** `vitest.config.ts`
+
+**Before:**
+```ts
+import { defineConfig } from "vitest/config";
+
+export default defineConfig({
+  test: {
+    environment: "node",
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+    globals: false,
+    setupFiles: ["src/test-setup.ts"],
+  }
+});
+```
+
+**After:**
+```ts
+import { defineConfig } from "vitest/config";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+// Same package.json-sourced version define as vite.config.ts, so components that read
+// __APP_VERSION__ (e.g. Settings' AboutSection) can render under Testing Library too.
+const pkg = JSON.parse(
+  readFileSync(fileURLToPath(new URL("./package.json", import.meta.url)), "utf8")
+) as { version: string };
+
+export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
+  test: {
+    environment: "node",
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+    globals: false,
+    setupFiles: ["src/test-setup.ts"],
+  }
+});
+```
+
+**File:** `src/components/Sidebar/Tabs/Settings/AboutSection.tsx` (new)
+
+**Before:** (file did not exist)
+
+**After:** Small "حول النظام" (About) card, styled with the existing `.settings-category*`
+classes (no new visual system introduced — that's Batch 1's job), rendering the injected
+`__APP_VERSION__` next to a static line pointing at the ChangeLog tab for full history.
+
+**File:** `src/components/Sidebar/Tabs/Settings/Settings.css`
+
+Added one small rule, `.settings-about-version`, for the version-value emphasis text (monospace,
+tabular figures) — additive only, no changes to existing rules.
+
+**File:** `src/components/Sidebar/Tabs/Settings/index.tsx`
+
+**Before:**
+```tsx
+import { PageHeader } from "../../../../components/PageHeader/PageHeader";
+import { ErrorLogSection } from "./ErrorLogSection";
+```
+```tsx
+      <ErrorLogSection />
+    </div>
+  );
+}
+```
+
+**After:**
+```tsx
+import { PageHeader } from "../../../../components/PageHeader/PageHeader";
+import { ErrorLogSection } from "./ErrorLogSection";
+import { AboutSection } from "./AboutSection";
+```
+```tsx
+      <ErrorLogSection />
+      <AboutSection />
+    </div>
+  );
+}
+```
+
+**File:** `docs/RELEASE_CHECKLIST.md` (new)
+
+**Before:** (file did not exist)
+
+**After:** New checklist doc: bump `package.json` version to match the next EDIT_LOG entry,
+cut a CHANGELOG summary from the EDIT_LOG majors since the last release, record the built
+`dist/index.html` size (before/after, gzip), run the docs-sync check (CLAUDE.md tab table +
+bundle-size note still accurate), confirm `npm run lint`/`test:run`/`build` are green, tag the
+commit.
+
+**Verification (grep for a second hardcoded version string):** confirmed no other literal
+`"1.0.0"`-style app-release version exists in `src/` or config files — `WORKSPACE_SCHEMA_VERSION`
+(`src/data/workspace/workspaceTypes.ts`) and the `schemaVersion` fields in JSON envelopes are a
+*different* concept (on-disk data schema versioning, unrelated to the app release version) and
+are left untouched; `LOGIN_SYSTEM_VERSION` in `src/auth/authConfig.ts` is similarly a distinct,
+pre-existing constant for the auth subsystem's own internal versioning, not the app release
+version — noted here to avoid confusion, not renamed (out of scope, no plan instruction to
+consolidate it).
+
+## v42.16 — 2026-07-08 — D6 (Batch 4): add docs/SECURITY_MODEL.md — the one-page risk-acceptance doc (restored item, dropped by the earlier draft)
+
+**File:** `docs/SECURITY_MODEL.md` (new)
+
+**Before:** (file did not exist — CLAUDE.md carried the summary paragraph, but no dedicated
+risk-acceptance doc existed)
+
+**After:** New one-page doc consolidating (not duplicating) the security posture: (1) trust
+boundary statement — no backend, all role/permission checks are client-side, business data is
+plain JSON on disk, so the auth layer is a UX/role-routing guard, not a security boundary; (2)
+bundled bootstrap-admin hash exposure (`BOOTSTRAP_ADMIN_PASSWORD_HASH` in `src/auth/authConfig.ts`
+ships in the client bundle, is offline-crackable) + passcode-strength policy (must be treated as
+the sole real defense; rotation procedure referenced); (3) demo/viewer static passcode
+acceptance (TEC-06 — `VIEWER_USERNAME`/`VIEWER_PASSWORD` = `viewer`/`view`, hardcoded and
+undocumented-as-secret by design, read-only in-memory workspace only); (4) localStorage/JSON
+tamperability (managed users + permission matrix in `localStorage`, business data as plain JSON
+files in the workspace folder — both directly editable by anyone with local access or devtools);
+closes with an explicit "Accepted by / date" line for audit-trail purposes.
+
+**File:** `CLAUDE.md`
+
+**Before:**
+```md
+   > **Security model — advisory only.** With no backend, all role/permission checks run in the browser and all business data is plain JSON on disk. A determined user can edit `localStorage` or the JSON files directly to self-elevate or tamper. The auth layer is a UX/role-routing guard, **not** a trust boundary. The bootstrap admin hash ships in the client bundle, so the passcode must be strong (it is offline-crackable). Do not treat this app as a defense against malicious insiders.
+```
+
+**After:**
+```md
+   > **Security model — advisory only.** With no backend, all role/permission checks run in the browser and all business data is plain JSON on disk. A determined user can edit `localStorage` or the JSON files directly to self-elevate or tamper. The auth layer is a UX/role-routing guard, **not** a trust boundary. The bootstrap admin hash ships in the client bundle, so the passcode must be strong (it is offline-crackable). Do not treat this app as a defense against malicious insiders. Full risk-acceptance detail (trust boundary, passcode policy, viewer-passcode note, localStorage/JSON tamperability, sign-off): `docs/SECURITY_MODEL.md`.
+```
+
+No production code changes — doc-only item, per the plan's acceptance criteria.
+
+## v42.15 — 2026-07-08 — D4 (Batch 4): add a CI workflow gating push/PR on typecheck + lint + test + build
+
+**File:** `.github/workflows/ci.yml` (new)
+
+**Before:** (file did not exist — only `.github/workflows/sbom.yml` existed, which is SBOM-only
+and not a merge gate)
+
+**After:** New GitHub Actions workflow, `runs-on: ubuntu-latest`, triggered on push to `main`,
+every pull request, and manual `workflow_dispatch`. Steps run in sequence, any failure blocks the
+job: `actions/checkout@v4` → `actions/setup-node@v4` (`node-version: "22"`, `cache: npm` — caches
+the npm cache directory, not `node_modules`, per the plan's explicit warning against caching
+`node_modules` across lockfile changes) → `npm ci` (now safe offline for the `xlsx` dependency
+since D5 vendored it) → `npm run typecheck` (`tsc --noEmit`) → `npm run lint:ci`
+(`eslint src --max-warnings 0` — the stricter of the two lint scripts, appropriate for a gate) →
+`npm run test:run` (Vitest) → `npm run build` (`tsc -b && vite build`). No hex-literal guard step
+yet — that script (`scripts/check-hex-literals.mjs`) is part of Batch 1 (B4), not yet implemented
+at the time of this batch; the plan says to add it "if it exists by then."
+
+**Note on sequencing:** landed after D5 (xlsx vendoring) so `npm ci` doesn't depend on the
+SheetJS CDN being reachable from GitHub's runners, and after C5 (EDIT_LOG truncation) so the
+`npm run build` step in this workflow exercises the truncation path, per the plan's hard
+sequencing (D5 before D4; C5 before/with D4).
+
+## v42.14 — 2026-07-08 — C5 (Batch 4): truncate EDIT_LOG.md at build time so the ChangeLog tab stops inflating the bundle by the full ~700 kB log
+
+**File:** `src/build/editLogTruncatePlugin.ts` (new)
+
+**Before:** (file did not exist)
+
+**After:** New Vite plugin, `apply: "build"` only (dev server keeps serving the full log
+unmodified — useful when authoring EDIT_LOG entries). Intercepts the `?raw` import of
+`docs/EDIT_LOG.md` via a `load` hook with `enforce: "pre"` (runs before Vite's built-in raw-query
+handler, and returning a non-null result from `load` short-circuits it). Exports a pure
+`truncateEditLog(content, keep = 20)` helper (kept separate from the plugin wiring so it's unit
+testable): splits on `## v<version> ` heading boundaries (never mid-entry), keeps the first N
+headings from the top of the file (the log is prepend-ordered — newest entries land at the top),
+and appends a synthetic `## v0.0 — <today> — سجل مختصر (...)` entry whose Arabic body explains the
+truncation and points at the full `docs/EDIT_LOG.md` in the repo. `v0.0` sorts last under the
+ChangeLog tab's existing `compareVersionsDesc`, so it always renders at the bottom without
+disturbing real entries. Repo `docs/EDIT_LOG.md` itself is never written to — only the in-memory
+module content served to the bundle is shortened. Chose **last 20 versions** (of the two options
+the plan offered) — empirically this drops the inlined content from ~690 KB to ~33 KB, and 20
+entries is enough recent history to be useful in-app.
+
+**File:** `src/build/editLogTruncatePlugin.test.ts` (new)
+
+**Before:** (file did not exist)
+
+**After:** Unit tests for `truncateEditLog`: (1) no-op when entry count ≤ `keep`; (2) result
+contains exactly `keep + 1` headings (`keep` originals + the synthetic notice) when the source
+has more than `keep` entries; (3) the cut never lands mid-entry — every kept entry's full body is
+intact up to the next heading; (4) the synthetic notice entry parses as `v0.0` and sorts last
+under the ChangeLog tab's own `compareVersionsDesc`-equivalent ordering rule; (5) the notice
+mentions the omitted count and points at `docs/EDIT_LOG.md`.
+
+**File:** `vite.config.ts`
+
+**Before:**
+```ts
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import { viteSingleFile } from "vite-plugin-singlefile";
+import { deckStyleChoicesPlugin } from "./src/dev/deckStyleChoicesPlugin";
+
+export default defineConfig({
+  plugins: [react(), viteSingleFile(), deckStyleChoicesPlugin()],
+```
+
+**After:**
+```ts
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import { viteSingleFile } from "vite-plugin-singlefile";
+import { deckStyleChoicesPlugin } from "./src/dev/deckStyleChoicesPlugin";
+import { editLogTruncatePlugin } from "./src/build/editLogTruncatePlugin";
+
+export default defineConfig({
+  plugins: [react(), viteSingleFile(), deckStyleChoicesPlugin(), editLogTruncatePlugin()],
+```
+
+**File:** `src/components/Sidebar/Tabs/ChangeLog/index.tsx`
+
+No import-site change needed — the `?raw` import of `docs/EDIT_LOG.md` is unchanged; the
+plugin transparently substitutes truncated content for that same import only during
+`npm run build`. Verified the tab's "إجمالي الإصدارات" / "أحدث إصدار" / "آخر تحديث" stats and the
+search/filter logic all operate on `entries[0]` (newest-first after `compareVersionsDesc`), which
+is unaffected by truncation since the newest entries are exactly what's kept.
+
+**Measured result:** `dist/index.html` dropped from **3,242.13 kB** (before this change, with D5
+already applied) to **2,554.83 kB** (after) — a ~687 kB / ~21% reduction. Verified in the built
+output that exactly 21 real headings survive (20 kept entries + the synthetic `v0.0` notice,
+confirmed with a proper start-of-line-anchored scan of the bundle, not a naive substring search)
+and that the cut lands cleanly on an entry boundary with no partial trailing entry.
+
+**File:** `docs/audit/hardening-2026-07-08/03-approved-plan.md` context note (TEC-02 NUL byte,
+`.gitattributes` text rule)
+
+Verified both already resolved prior to this batch: `docs/EDIT_LOG.md` contains no NUL byte
+(checked via a byte scan) and `.gitattributes` already has `*.md text` (plus `*.ts`/`*.tsx`/
+`*.css`/`*.json`). No changes needed for either sub-item.
+
+## v42.13 — 2026-07-08 — D5 (Batch 4): vendor the SheetJS xlsx tarball instead of fetching it from the CDN at install time
+
+**File:** `vendor/xlsx-0.20.3.tgz` (new)
+
+Downloaded the exact `xlsx-0.20.3` tarball from `https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz`
+(sha256 `8dc73fc3b00203e72d176e85b50938627c7b086e607c682e8d3c22c02bb99fe8`) and committed it to
+`vendor/`. This removes the CI-time dependency on the SheetJS CDN being reachable — a
+prerequisite for D4 (CI workflow), since `npm ci` must succeed without network access to a
+third-party CDN.
+
+**File:** `vendor/README.md` (new)
+
+**Before:** (file did not exist)
+
+**After:**
+```md
+# vendor/
+
+Third-party packages vendored directly into the repo because they are not published to the
+default npm registry.
+
+## xlsx-0.20.3.tgz
+
+- Source: https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz
+- License: Apache-2.0 (SheetJS permits redistribution under this license)
+- Why vendored: the `xlsx` npm registry package is stale; the current SheetJS releases are
+  distributed via their own CDN, not npm. Vendoring removes the runtime dependency on that CDN
+  being reachable during `npm install`/`npm ci` (see CI workflow, D4).
+- Do not "upgrade" this to the npm-registry `xlsx` package — it lags far behind SheetJS's own
+  releases. To upgrade, download the new version's tarball from `cdn.sheetjs.com`, replace the
+  file here, and update the `package.json` dependency version/path together.
+```
+
+**File:** `package.json`
+
+**Before:**
+```json
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+```
+
+**After:**
+```json
+    "xlsx": "file:vendor/xlsx-0.20.3.tgz"
+```
+
+**File:** `package-lock.json`
+
+Regenerated via `npm install` so the `xlsx` resolution now points at the vendored file path
+instead of the CDN URL. Lockfile committed.
+
+**File:** `CLAUDE.md`
+
+**Before:**
+```md
+- The `xlsx` dependency is installed from a **SheetJS CDN tarball** (`https://cdn.sheetjs.com/xlsx-0.20.3/...`), not the npm registry — `npm install` needs access to that URL; don't "upgrade" it to the stale npm package.
+```
+
+**After:**
+```md
+- The `xlsx` dependency is **vendored** at `vendor/xlsx-0.20.3.tgz` (`package.json` points at `file:vendor/xlsx-0.20.3.tgz`) — originally sourced from the SheetJS CDN tarball (`https://cdn.sheetjs.com/xlsx-0.20.3/...`), not the npm registry. Vendoring means `npm ci` no longer needs network access to that CDN (required for CI, see `.github/workflows/ci.yml`). Don't "upgrade" it to the stale npm-registry `xlsx` package; see `vendor/README.md` for the upgrade procedure.
+```
+
 ## v42.12 — 2026-07-08 — Referral approval rework: fix duplicate bulk-result banner, friendly labels in bulk confirm modal
 
 **File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/index.tsx`

@@ -1,0 +1,48 @@
+name: CI
+
+# Gate on push + PR: install (offline-safe now that `xlsx` is vendored, see D5) → typecheck →
+# lint → unit tests → production build. Any failing step blocks the job (and, once branch
+# protection requires this check, blocks the PR).
+#
+# Node version pinned to match local dev (see `node --version` in the dev environment as of
+# this workflow's authoring). Caches the npm cache directory only (`cache: npm`), never
+# `node_modules` itself — caching `node_modules` across lockfile changes is a classic source of
+# false-green CI runs.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: Typecheck, lint, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies (npm ci)
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint:ci
+
+      - name: Test
+        run: npm run test:run
+
+      - name: Build
+        run: npm run build
