@@ -330,6 +330,47 @@ that `--sp-1`/`--sp-2`/`--sp-4`/`--sp-5` resolve to `4px`/`8px`/`16px`/`20px` as
 
 ---
 
+## v42.26 — 2026-07-08 — B6 (Batch 1) consumption, file 2/4: Reports.css
+
+**File:** `src/components/Sidebar/Tabs/Reports/Reports.css`
+
+Same spacing sweep as v42.25, applied to `Reports.css`. Result: 75 declarations fully converted
+to `--sp-*` tokens (97 individual px values replaced), 2 declarations left with raw px +
+`/* no-scale */` (`padding: 28px 28px 48px` and `margin-bottom: 28px` — both >2px off every step).
+
+**Sweep-script fix (mid-pass):** the first run over this file flagged 21 lines as `no-scale`, but
+19 of them were already-compliant `var(--sp-N, <fallback>px)` references (this file pre-dates the
+sweep with some hand-written `--sp-*` usage) — the script's "don't parse inside function calls"
+rule was correctly leaving the `var()` call untouched, but wrongly flagging the line as an
+exception because it saw a bare `px` substring inside the fallback. Fixed the sweep script to
+recognize `var(--sp-N, ...)` as already-compliant (skip, no annotation) before re-running, and
+added a second, independent verifier script (tokenizes the same way but only reports, never
+writes) to confirm compliance rather than trusting a naive `grep px`, which can't tell a raw
+literal from a token's fallback text.
+
+**Before:**
+```css
+.rh-header-actions-btn {
+  gap: var(--sp-3, 10px);
+  padding: var(--sp-12, 64px) var(--sp-8, 32px);
+  margin-top: var(--sp-6, 24px);
+}
+```
+
+**After (unchanged — already compliant, no longer mislabeled):**
+```css
+.rh-header-actions-btn {
+  gap: var(--sp-3, 10px);
+  padding: var(--sp-12, 64px) var(--sp-8, 32px);
+  margin-top: var(--sp-6, 24px);
+}
+```
+
+Verified with the dedicated verifier (`node checkSpacing.mjs Reports.css` → `OK (0 unannotated raw
+px in padding/margin/gap)`). `npm run lint` and `npm run test:run` green (364/364).
+
+---
+
 ## v42.23 — 2026-07-08 — B4 (Batch 1) regression guard: scripts/check-hex-literals.mjs
 
 **File:** `scripts/check-hex-literals.mjs` (new)
