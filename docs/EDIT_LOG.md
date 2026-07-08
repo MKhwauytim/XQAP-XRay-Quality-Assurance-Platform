@@ -4,6 +4,77 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.12 — 2026-07-08 — Referral approval rework: fix duplicate bulk-result banner, friendly labels in bulk confirm modal
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/index.tsx`
+
+**Before:**
+```tsx
+  async function handleBulk(requests: CardRequest[], action: "approve" | "deny", notes: string) {
+    const outcomes = section === "referral"
+      ? await bulkReferralDecision(requests as ReferralRequest[], action, notes)
+      : await bulkReplacementDecision(requests as ReplacementRequest[], action, notes);
+    const failed = outcomes.filter((o) => !o.ok).length;
+    setStatusMsg(failed === 0
+      ? { type: "ok", text: `تمت معالجة ${outcomes.length} طلب بنجاح.` }
+      : { type: "error", text: `نجح ${outcomes.length - failed} من ${outcomes.length}. فشل ${failed}.` });
+    return outcomes;
+  }
+```
+
+**After:**
+```tsx
+  async function handleBulk(requests: CardRequest[], action: "approve" | "deny", notes: string) {
+    const outcomes = section === "referral"
+      ? await bulkReferralDecision(requests as ReferralRequest[], action, notes)
+      : await bulkReplacementDecision(requests as ReplacementRequest[], action, notes);
+    return outcomes;
+  }
+```
+
+Bulk approve/deny was rendering two different result banners simultaneously: this page-level `statusMsg` banner and `RequestList`'s own richer `bulkResult` banner (with per-failure detail). `RequestList`'s banner is now the single source of truth for bulk outcomes; `statusMsg` is untouched for single approve/deny (`handleApprove`/`handleDeny`).
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/RequestList.tsx`
+
+**Before:**
+```tsx
+import RequestCard from "./RequestCard";
+...
+  function toggleSelect(id: string): void {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+...
+                {selectedRequests.map((r) => <li key={r.requestId}>{r.requestId}</li>)}
+```
+
+**After:**
+```tsx
+import RequestCard, { isReferral } from "./RequestCard";
+...
+  function toggleSelect(id: string): void {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  function describeSelected(request: CardRequest): string {
+    if (isReferral(request)) {
+      return `${userDisplayMap[request.fromEmployee] ?? request.fromEmployee} ← ${userDisplayMap[request.toEmployee] ?? request.toEmployee}`;
+    }
+    return `${request.originalXrayImageId} → ${request.replacementXrayImageId}`;
+  }
+...
+                {selectedRequests.map((r) => <li key={r.requestId}>{describeSelected(r)}</li>)}
+```
+
+The bulk confirm modal previously showed raw request IDs (e.g. `req-a1b2c3`), not useful to a reviewer deciding whether to confirm. `describeSelected` mirrors the exact label format `useApprovalData.ts`'s `bulkReferralDecision`/`bulkReplacementDecision` compute for `BulkOutcome.label`, so the pre-confirm list and post-action result banner are visually consistent.
+
 ## v42.11 — 2026-07-07 — Referral approval rework: suppress known-safe lint rules
 
 **File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/RequestCard.tsx`
