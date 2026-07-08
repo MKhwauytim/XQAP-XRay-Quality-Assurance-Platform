@@ -223,7 +223,11 @@ export function buildReportModel(
     },
     distribution: {
       assigned: dist?.totalAssigned ?? 0,
-      completed: dist?.totalCompleted ?? 0,
+      // Completion derives from submitted answers (kpis.studiedImages — the
+      // same source as the fact table and sample.studied) so every completion
+      // figure in the report agrees. assigned/pending/replaced stay
+      // event-derived: they describe distribution state, not study progress.
+      completed: kpis.studiedImages,
       pending: dist?.totalPending ?? 0,
       replaced: dist?.totalReplaced ?? 0,
     },

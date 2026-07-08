@@ -1,0 +1,48 @@
+name: SBOM
+
+# Generates a Software Bill of Materials (dependency inventory) for the repo.
+# Value for this project: the `xlsx` dependency is installed from a SheetJS CDN
+# tarball (https://cdn.sheetjs.com/...) rather than the npm registry, so it sits
+# outside npm's normal provenance trail — the SBOM records exactly which version
+# and source is shipping, as audit evidence.
+#
+# Syft reads package-lock.json directly (npm cataloger), so no `npm ci` / CDN
+# access is required just to produce the SBOM. Output is uploaded as a build
+# artifact and, on a published release, attached to the release.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sbom:
+    name: Generate SBOM (CycloneDX)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate CycloneDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: sbom.cyclonedx.json
+          artifact-name: sbom.cyclonedx.json
+          upload-artifact: true
+
+      - name: Generate SPDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: spdx-json
+          output-file: sbom.spdx.json
+          artifact-name: sbom.spdx.json
+          upload-artifact: true

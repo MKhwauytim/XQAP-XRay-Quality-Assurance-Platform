@@ -163,6 +163,11 @@ export const MANAGED_FEATURE_GROUPS: readonly FeatureGroup[] = [
         label: "تخصيص أعمدة صور الأشعة المحالة",
         description: "إظهار زر الأعمدة وتغيير الأعمدة الظاهرة في جدول صور الأشعة المحالة",
       },
+      {
+        id: "ew.reopenAnswer",
+        label: "إعادة فتح الإجابات المقدمة",
+        description: "إرجاع إجابة مقدمة إلى مسودة ليتمكن الموظف من تصحيحها",
+      },
     ],
   },
   {
@@ -235,6 +240,11 @@ export const MANAGED_FEATURE_GROUPS: readonly FeatureGroup[] = [
         label: "تصدير من الأرشيف",
         description: "تنزيل البيانات المؤرشفة",
       },
+      {
+        id: "archive.closeMonth",
+        label: "إقفال الأشهر وإعادة فتحها",
+        description: "إقفال شهر لمنع أي تعديل على بياناته أو إعادة فتحه للتعديل",
+      },
     ],
   },
 ] as const;
@@ -247,10 +257,10 @@ const ALL_FEATURE_IDS = MANAGED_FEATURE_GROUPS.flatMap((g) =>
 /** Maps each tab to the feature IDs that belong to it. */
 export const TAB_FEATURE_MAP: Readonly<Record<string, readonly string[]>> = {
   "population":         ["upload-data", "process-population", "configure-sample", "draw-sample", "distribute-samples", "bulk-assign", "view-browse"],
-  "employee-workspace": ["approve-referrals", "approve-replacements", "view-all-entries", "view-employee-stats", "submit-referrals", "request-replacement", "submit-answers", "configure-referral-columns"],
+  "employee-workspace": ["approve-referrals", "approve-replacements", "view-all-entries", "view-employee-stats", "submit-referrals", "request-replacement", "submit-answers", "configure-referral-columns", "ew.reopenAnswer"],
   "user-management":    ["manage-users", "reset-passwords", "edit-permissions"],
   "reports":            ["export-reports"],
-  "archive":            ["export-archive"],
+  "archive":            ["export-archive", "archive.closeMonth"],
   "settings":           [],
 };
 
@@ -272,6 +282,7 @@ const FEATURE_DEFAULTS: Record<string, Partial<Record<AuthRole, boolean>>> = {
   "request-replacement":  { guest: false, employee: true,  supervisor: true,  manager: true  },
   "submit-answers":       { guest: false, employee: true,  supervisor: false, manager: false },
   "configure-referral-columns": { guest: false, employee: false, supervisor: true, manager: true },
+  "ew.reopenAnswer":      { guest: false, employee: false, supervisor: true,  manager: true  },
   "upload-data":          { guest: false, employee: false, supervisor: false, manager: true  },
   "process-population":   { guest: false, employee: false, supervisor: false, manager: true  },
   "configure-sample":     { guest: false, employee: false, supervisor: false, manager: true  },
@@ -284,6 +295,7 @@ const FEATURE_DEFAULTS: Record<string, Partial<Record<AuthRole, boolean>>> = {
   "edit-permissions":     { guest: false, employee: false, supervisor: false, manager: false },
   "export-reports":       { guest: false, employee: false, supervisor: true,  manager: true  },
   "export-archive":       { guest: false, employee: false, supervisor: false, manager: true  },
+  "archive.closeMonth":   { guest: false, employee: false, supervisor: false, manager: false },
 };
 
 // ── Default creators ──────────────────────────────────────────────────────────

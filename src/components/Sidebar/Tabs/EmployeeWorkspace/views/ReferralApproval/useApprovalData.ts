@@ -5,28 +5,25 @@ import {
   readUserManagementState,
   subscribeToUserManagementChanges,
 } from "../../../../../../auth/userManagement";
-import {
-  assertRequestPending,
-  assertSamplesOwnedBy,
-} from "../../../../../../data/approvals/approvalGuards";
-import {
-  appendDistributionEvents,
-  loadOrDeriveDistributionCurrent,
-} from "../../../../../../data/distribution/distributionStorage";
-import { buildReassignEvent } from "../../../../../../data/distribution/distributionLog";
+import { appendWorkspaceAction } from "../../../../../../data/audit/actionLog";
+import { getLabels } from "../../../../../../data/labels/labelsStore";
+import { loadOrDeriveDistributionCurrent } from "../../../../../../data/distribution/distributionStorage";
 import type { DistributionEntry } from "../../../../../../data/distribution/distributionTypes";
-import { executeReplacement } from "../../../../../../data/distribution/replacement";
+import { MonthClosedError } from "../../../../../../data/population/monthLock";
 import type { MonthFolderInfo } from "../../../../../../data/population/monthFolder";
-import {
-  listMonthFolders,
-  loadMonthPopulationFinal,
-} from "../../../../../../data/population/populationStorage";
+import { listMonthFolders } from "../../../../../../data/population/populationStorage";
 import type { PreparedPopulationRow } from "../../../../../../data/population/populationTypes";
+import {
+  approveReferral as approveReferralDomain,
+  approveReplacement as approveReplacementDomain,
+  denyReferral as denyReferralDomain,
+  denyReplacement as denyReplacementDomain,
+  type ApprovalResult,
+  type DenyResult,
+} from "../../../../../../data/referral/approveReferral";
 import {
   loadReferralLog,
   loadReplacementLog,
-  updateReferralStatus,
-  updateReplacementStatus,
 } from "../../../../../../data/referral/referralStorage";
 import type { ReferralRequest, ReplacementRequest } from "../../../../../../data/referral/referralTypes";
 import { loadSampleMaster } from "../../../../../../data/sampling/sampleStorage";
@@ -35,6 +32,32 @@ import type { DirectoryHandleLike } from "../../../../../../data/storage/fileSys
 export type LoadState = "idle" | "loading" | "ready" | "error";
 export type OpResult = { ok: true } | { ok: false; error: string };
 export type BulkOutcome = { requestId: string; label: string; ok: boolean; error?: string };
+
+function approvalErrorMsg(result: Exclude<ApprovalResult, { ok: true }>): string {
+  const L = getLabels();
+  switch (result.code) {
+    case "already-reviewed":
+      return L.msg_request_already_reviewed;
+    case "stale-ownership":
+      return L.msg_referral_stale_ownership.replace("{ids}", result.staleIds.join("، "));
+    case "decision-failed":
+      return L.msg_referral_decision_retry;
+    case "dist-failed":
+    case "invalid-request":
+      return result.error;
+  }
+}
+
+function denyErrorMsg(result: Exclude<DenyResult, { ok: true }>): string {
+  return result.code === "already-reviewed"
+    ? getLabels().msg_request_already_reviewed
+    : result.error;
+}
+
+function unexpectedErrorMsg(error: unknown): string {
+  if (error instanceof MonthClosedError) return getLabels().msg_month_closed_write_blocked;
+  return error instanceof Error ? error.message : "خطأ غير معروف";
+}
 
 export function useApprovalData(directoryHandle: DirectoryHandleLike) {
   const session = readSession();
@@ -108,122 +131,116 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
   // eslint-disable-next-line react-hooks/set-state-in-effect -- async data load; setState fires inside loadData's async callback, not synchronously in the effect body
   useEffect(() => { void loadData(); }, [loadData]);
 
-  // Bug #1 + #3: every mutation re-checks the request's current status against
-  // a fresh load, and always keys writes off request.monthFolderName — never
-  // the UI's selected month, which may point at a different month entirely.
+  // Approve/deny delegate to the domain module in data/referral/approveReferral.ts,
+  // which owns the idempotency re-check (bug #1), the ownership re-check (bug #2),
+  // and a replay guard (retrying after a decision-write failure never re-emits the
+  // already-applied distribution events). Every call here is keyed off
+  // request.monthFolderName, never the UI's selected month (bug #3).
 
   async function approveReferral(request: ReferralRequest, notes: string): Promise<OpResult> {
-    const now = new Date().toISOString();
-    const freshLog = await loadReferralLog(directoryHandle, request.monthFolderName);
-    const fresh = freshLog.requests.find((r) => r.requestId === request.requestId);
-    const pendingCheck = assertRequestPending(fresh?.status ?? request.status);
-    if (!pendingCheck.ok) return pendingCheck;
-
-    // Bug #2: verify every referred sample is still owned by the requester
-    // before reassigning — it may have moved via a second referral/replacement.
-    const sample = await loadSampleMaster(directoryHandle, request.monthFolderName);
-    const distribution = sample
-      ? await loadOrDeriveDistributionCurrent(directoryHandle, request.monthFolderName, sample.rows)
-      : null;
-    const ownershipCheck = assertSamplesOwnedBy(distribution, request.xrayImageIds, request.fromEmployee);
-    if (!ownershipCheck.ok) return ownershipCheck;
-
-    const events = request.xrayImageIds.map((id) =>
-      buildReassignEvent({
-        xrayImageId: id,
-        assignedTo: request.fromEmployee,
-        reassignedTo: request.toEmployee,
-        eventBy: username,
-        notes: `إحالة من ${request.fromEmployee} — ${request.reason}`,
-      })
-    );
-    const distResult = await appendDistributionEvents(directoryHandle, request.monthFolderName, events);
-    if (!distResult.ok) return { ok: false, error: distResult.error };
-
-    if (sample) await loadOrDeriveDistributionCurrent(directoryHandle, request.monthFolderName, sample.rows);
-
-    const updateResult = await updateReferralStatus(directoryHandle, request.monthFolderName, request.requestId, {
-      status: "approved", reviewedBy: username, reviewedAt: now, reviewNotes: notes.trim() || undefined,
-    });
-    if (updateResult.ok) await loadData();
-    return updateResult;
+    try {
+      const result = await approveReferralDomain({
+        directoryHandle,
+        monthFolderName: request.monthFolderName,
+        requestId: request.requestId,
+        reviewedBy: username,
+        reviewNotes: notes,
+      });
+      if (result.ok) {
+        void appendWorkspaceAction(directoryHandle, {
+          actor: username,
+          actorRole: role,
+          action: "referral-approved",
+          monthFolderName: request.monthFolderName,
+          target: request.requestId,
+          details: { samples: request.xrayImageIds.length, toEmployee: request.toEmployee },
+        });
+        await loadData();
+        return { ok: true };
+      }
+      return { ok: false, error: approvalErrorMsg(result) };
+    } catch (error) {
+      return { ok: false, error: unexpectedErrorMsg(error) };
+    }
   }
 
   async function denyReferral(request: ReferralRequest, notes: string): Promise<OpResult> {
-    const freshLog = await loadReferralLog(directoryHandle, request.monthFolderName);
-    const fresh = freshLog.requests.find((r) => r.requestId === request.requestId);
-    const pendingCheck = assertRequestPending(fresh?.status ?? request.status);
-    if (!pendingCheck.ok) return pendingCheck;
-
-    const result = await updateReferralStatus(directoryHandle, request.monthFolderName, request.requestId, {
-      status: "denied", reviewedBy: username, reviewedAt: new Date().toISOString(), reviewNotes: notes.trim() || undefined,
-    });
-    if (result.ok) await loadData();
-    return result;
+    try {
+      const result = await denyReferralDomain({
+        directoryHandle,
+        monthFolderName: request.monthFolderName,
+        requestId: request.requestId,
+        reviewedBy: username,
+        reviewNotes: notes,
+      });
+      if (result.ok) {
+        void appendWorkspaceAction(directoryHandle, {
+          actor: username,
+          actorRole: role,
+          action: "referral-denied",
+          monthFolderName: request.monthFolderName,
+          target: request.requestId,
+        });
+        await loadData();
+        return { ok: true };
+      }
+      return { ok: false, error: denyErrorMsg(result) };
+    } catch (error) {
+      return { ok: false, error: unexpectedErrorMsg(error) };
+    }
   }
 
   async function approveReplacement(request: ReplacementRequest, notes: string): Promise<OpResult> {
-    const now = new Date().toISOString();
-    const freshLog = await loadReplacementLog(directoryHandle, request.monthFolderName);
-    const fresh = freshLog.requests.find((r) => r.requestId === request.requestId);
-    const pendingCheck = assertRequestPending(fresh?.status ?? request.status);
-    if (!pendingCheck.ok) return pendingCheck;
-
-    let replacementRow: PreparedPopulationRow | null = null;
     try {
-      const population = await loadMonthPopulationFinal(directoryHandle, request.monthFolderName);
-      replacementRow = (population?.rows ?? []).find(
-        (r) => (r as PreparedPopulationRow).xrayImageId === request.replacementXrayImageId
-      ) as PreparedPopulationRow ?? null;
-    } catch { /* fall through to legacy path */ }
-
-    if (!replacementRow) {
-      if (request.replacementRowData) {
-        replacementRow = request.replacementRowData as unknown as PreparedPopulationRow;
-      } else {
-        return { ok: false, error: "تعذر إيجاد بيانات سطر البديل في مجتمع الشهر." };
+      const result = await approveReplacementDomain({
+        directoryHandle,
+        monthFolderName: request.monthFolderName,
+        requestId: request.requestId,
+        reviewedBy: username,
+        reviewNotes: notes,
+      });
+      if (result.ok) {
+        void appendWorkspaceAction(directoryHandle, {
+          actor: username,
+          actorRole: role,
+          action: "replacement-approved",
+          monthFolderName: request.monthFolderName,
+          target: request.requestId,
+          details: { original: request.originalXrayImageId, replacement: request.replacementXrayImageId },
+        });
+        await loadData();
+        return { ok: true };
       }
+      return { ok: false, error: approvalErrorMsg(result) };
+    } catch (error) {
+      return { ok: false, error: unexpectedErrorMsg(error) };
     }
-
-    const sample = await loadSampleMaster(directoryHandle, request.monthFolderName);
-    if (!sample) return { ok: false, error: "تعذر تحميل ملف العينة للتحقق من الاستبدال." };
-
-    const distribution = await loadOrDeriveDistributionCurrent(directoryHandle, request.monthFolderName, sample.rows);
-    const deadEntry = distribution?.entries.find(
-      (entry) => entry.xrayImageId === request.originalXrayImageId && entry.assignedTo === request.employeeUsername
-    );
-    if (!deadEntry) return { ok: false, error: "تعذر إيجاد العينة الأصلية في التوزيع الحالي." };
-
-    const result = await executeReplacement({
-      directoryHandle,
-      monthFolderName: request.monthFolderName,
-      deadEntry,
-      replacementRow,
-      reason: `استبدال معتمد — ${request.reason}`,
-      eventBy: username,
-    });
-    if (!result.ok) return { ok: false, error: result.error };
-
-    await loadOrDeriveDistributionCurrent(directoryHandle, request.monthFolderName, result.updatedSample.rows);
-
-    const updateResult = await updateReplacementStatus(directoryHandle, request.monthFolderName, request.requestId, {
-      status: "approved", reviewedBy: username, reviewedAt: now, reviewNotes: notes.trim() || undefined,
-    });
-    if (updateResult.ok) await loadData();
-    return updateResult;
   }
 
   async function denyReplacement(request: ReplacementRequest, notes: string): Promise<OpResult> {
-    const freshLog = await loadReplacementLog(directoryHandle, request.monthFolderName);
-    const fresh = freshLog.requests.find((r) => r.requestId === request.requestId);
-    const pendingCheck = assertRequestPending(fresh?.status ?? request.status);
-    if (!pendingCheck.ok) return pendingCheck;
-
-    const result = await updateReplacementStatus(directoryHandle, request.monthFolderName, request.requestId, {
-      status: "denied", reviewedBy: username, reviewedAt: new Date().toISOString(), reviewNotes: notes.trim() || undefined,
-    });
-    if (result.ok) await loadData();
-    return result;
+    try {
+      const result = await denyReplacementDomain({
+        directoryHandle,
+        monthFolderName: request.monthFolderName,
+        requestId: request.requestId,
+        reviewedBy: username,
+        reviewNotes: notes,
+      });
+      if (result.ok) {
+        void appendWorkspaceAction(directoryHandle, {
+          actor: username,
+          actorRole: role,
+          action: "replacement-denied",
+          monthFolderName: request.monthFolderName,
+          target: request.requestId,
+        });
+        await loadData();
+        return { ok: true };
+      }
+      return { ok: false, error: denyErrorMsg(result) };
+    } catch (error) {
+      return { ok: false, error: unexpectedErrorMsg(error) };
+    }
   }
 
   async function bulkReferralDecision(

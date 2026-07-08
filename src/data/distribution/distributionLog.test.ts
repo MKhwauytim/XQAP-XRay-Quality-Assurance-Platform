@@ -1,10 +1,12 @@
 import { expect, test } from "vitest";
 
+import { clearErrors, getRecentErrors } from "../storage/errorLogger";
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import {
   buildAssignEvent,
   buildCompletedEvent,
   buildReassignEvent,
+  buildReopenedEvent,
   buildReplacedEvent,
   buildReplacementRequestedEvent,
   computeDaysRemainingForDeadline,
@@ -146,6 +148,78 @@ test("replacement sample starts as pending while original sample is marked repla
   expect(original?.replacedById).toBe("B2");
   expect(replacement?.status).toBe("pending");
   expect(replacement?.replacedById).toBeNull();
+
+  // Replaced rows are dead: they no longer count toward totalAssigned.
+  expect(result.totalAssigned).toBe(1);
+  expect(result.totalReplaced).toBe(1);
+  expect(result.totalPending).toBe(1);
+});
+
+test("a stray late event cannot resurrect a replaced row", () => {
+  const rows = [makeRow("A1"), makeRow("B2")];
+  const log = makeLog([
+      buildAssignEvent({ xrayImageId: "A1", assignedTo: "emp1", eventBy: "admin" }),
+      buildAssignEvent({ xrayImageId: "B2", assignedTo: "emp1", eventBy: "admin" }),
+      buildReplacedEvent({
+        xrayImageId: "A1",
+        assignedTo: "emp1",
+        replacedById: "B2",
+        eventBy: "admin"
+      }),
+      // Stray late events: both must be dropped — "replaced" is terminal.
+      buildAssignEvent({ xrayImageId: "A1", assignedTo: "emp2", eventBy: "admin" }),
+      buildCompletedEvent({ xrayImageId: "A1", assignedTo: "emp2", eventBy: "emp2" })
+  ]);
+  clearErrors();
+  const result = deriveCurrentDistribution(log, rows);
+  const original = result.entries.find((entry) => entry.xrayImageId === "A1");
+
+  expect(original?.status).toBe("replaced");
+  expect(original?.replacedById).toBe("B2");
+  // Only the replacement (B2) is live: no double count.
+  expect(result.totalAssigned).toBe(1);
+  expect(result.totalReplaced).toBe(1);
+  expect(result.totalCompleted).toBe(0);
+
+  // Quota pass must skip the dropped assignment: emp2 was never legally
+  // assigned anything, and emp1's count is unaffected by the stray events.
+  expect(result.quotas?.emp2).toBeUndefined();
+  expect(result.quotas?.emp1?.sampleCount).toBe(2);
+
+  // Illegal-event logging is aggregated: two dropped events, one ring-buffer entry.
+  const deriveErrors = getRecentErrors().filter((e) => e.context === "distribution:derive");
+  expect(deriveErrors).toHaveLength(1);
+  expect(deriveErrors[0]!.message).toContain("2");
+  expect(deriveErrors[0]!.message).toContain("A1");
+});
+
+test("reopened returns a completed item to pending with the same assignee", () => {
+  const rows = [makeRow("A1")];
+  const log = makeLog([
+      buildAssignEvent({ xrayImageId: "A1", assignedTo: "emp1", eventBy: "admin" }),
+      buildCompletedEvent({ xrayImageId: "A1", assignedTo: "emp1", eventBy: "emp1" }),
+      buildReopenedEvent({ xrayImageId: "A1", assignedTo: "emp1", eventBy: "sup1", notes: "تصحيح" })
+  ]);
+  const result = deriveCurrentDistribution(log, rows);
+  expect(result.entries[0]!.status).toBe("pending");
+  expect(result.entries[0]!.assignedTo).toBe("emp1");
+  expect(result.totalCompleted).toBe(0);
+  expect(result.totalPending).toBe(1);
+});
+
+test("reopened after replaced is dropped by the terminal-state guard", () => {
+  const rows = [makeRow("A1"), makeRow("B2")];
+  const log = makeLog([
+      buildAssignEvent({ xrayImageId: "A1", assignedTo: "emp1", eventBy: "admin" }),
+      buildAssignEvent({ xrayImageId: "B2", assignedTo: "emp1", eventBy: "admin" }),
+      buildReplacedEvent({ xrayImageId: "A1", assignedTo: "emp1", replacedById: "B2", eventBy: "admin" }),
+      buildReopenedEvent({ xrayImageId: "A1", assignedTo: "emp1", eventBy: "sup1" })
+  ]);
+  clearErrors();
+  const result = deriveCurrentDistribution(log, rows);
+  const original = result.entries.find((entry) => entry.xrayImageId === "A1");
+  expect(original?.status).toBe("replaced");
+  expect(result.totalAssigned).toBe(1); // only B2 lives
 });
 
 test("multiple items tracked independently", () => {

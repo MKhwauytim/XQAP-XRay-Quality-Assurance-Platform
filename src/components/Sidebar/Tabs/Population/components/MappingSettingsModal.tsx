@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronDown, ChevronUp, Settings2, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Plus, Settings2, X } from "lucide-react";
 import { ConfirmDialog } from "../../../../ConfirmDialog/ConfirmDialog";
 import type {
   CustomField,
@@ -682,7 +682,7 @@ export default function MappingSettingsModal({
 
               {/* Add Custom Field Form */}
               <div style={{ borderTop: "1px dashed var(--population-border)", paddingTop: "16px", marginTop: "16px" }}>
-                <h4 style={{ fontSize: "14px", fontWeight: "bold", marginBottom: "8px" }}>➕ إضافة حقل مخصص جديد</h4>
+                <h4 style={{ fontSize: "14px", fontWeight: "bold", marginBottom: "8px", display: "flex", alignItems: "center", gap: "6px" }}><Plus size={14} strokeWidth={2.5} aria-hidden /> إضافة حقل مخصص جديد</h4>
                 <div style={{ display: "flex", gap: "10px" }}>
                   <label className="save-disk-label" style={{ flex: 1 }}>
                     اسم الكود (لاتيني - e.g. inspectionLocation)

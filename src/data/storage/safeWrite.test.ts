@@ -335,6 +335,171 @@ test("safeReadJson recovers a streamed write from .bak when the live file is cor
   }
 });
 
+// ── W1: .tmp promotion when the live commit fails without a usable .bak ──────
+
+/**
+ * Wraps a memory directory so writes to `targetFile` (and only it) produce
+ * corrupted content for the first `times` createWritable calls. Reads and
+ * writes to other names (.bak, .tmp) pass through untouched.
+ */
+function corruptLiveWrites(
+  base: DirectoryHandleLike,
+  targetFile: string,
+  times: number
+): DirectoryHandleLike {
+  let remaining = times;
+  return {
+    ...base,
+    getFileHandle: async (name, options) => {
+      const handle = await base.getFileHandle(name, options);
+      if (name !== targetFile || remaining <= 0) {
+        return handle;
+      }
+      return {
+        ...handle,
+        createWritable: async () => {
+          remaining -= 1;
+          const writable = await handle.createWritable!();
+          return {
+            write: async () => {
+              // Drop the real bytes.
+            },
+            close: async () => {
+              await writable.write("{ corrupted");
+              await writable.close();
+            },
+          };
+        },
+      } satisfies FileHandleLike;
+    },
+  };
+}
+
+async function writeRaw(
+  dir: DirectoryHandleLike,
+  name: string,
+  content: string
+): Promise<void> {
+  const handle = await dir.getFileHandle(name, { create: true });
+  const writable = await handle.createWritable!();
+  await writable.write(content);
+  await writable.close();
+}
+
+test("first write recovers via .tmp promotion when the live commit corrupts once", async () => {
+  const base = createMemoryDirectory();
+  const dir = corruptLiveWrites(base, "a.json", 1);
+
+  // Must NOT throw: the verified .tmp is promoted to the live file.
+  await safeWriteJson(dir, "a.json", { v: 42 });
+
+  const result = await safeReadJson<{ v: number }>(base, "a.json");
+  expect(result.ok).toBe(true);
+  if (result.ok) {
+    expect(result.value.v).toBe(42);
+    expect(result.recoveredFromBak).toBe(false);
+  }
+  // First write: no .bak was ever created.
+  await expect(readRaw(base, "a.json.bak")).rejects.toThrow();
+});
+
+test("overwrite with a valid .bak still rolls back and throws (behavior preserved)", async () => {
+  const base = createMemoryDirectory();
+  await safeWriteJson(base, "a.json", { v: 1 });
+
+  const dir = corruptLiveWrites(base, "a.json", 1);
+  await expect(safeWriteJson(dir, "a.json", { v: 2 })).rejects.toThrow(
+    "rolled back to previous version"
+  );
+
+  const result = await safeReadJson<{ v: number }>(base, "a.json");
+  expect(result.ok).toBe(true);
+  if (result.ok) {
+    expect(result.value.v).toBe(1);
+  }
+});
+
+test("write over corrupt live + corrupt .bak recovers via .tmp promotion", async () => {
+  const base = createMemoryDirectory();
+  await writeRaw(base, "a.json", "{ corrupt-live");
+  await writeRaw(base, "a.json.bak", "{ corrupt-bak");
+
+  const dir = corruptLiveWrites(base, "a.json", 1);
+  await safeWriteJson(dir, "a.json", { v: 3 }); // must NOT throw
+
+  const result = await safeReadJson<{ v: number }>(base, "a.json");
+  expect(result.ok).toBe(true);
+  if (result.ok) {
+    expect(result.value.v).toBe(3);
+  }
+});
+
+test("total commit failure keeps the verified .tmp and safeReadJson recovers it", async () => {
+  const base = createMemoryDirectory();
+  const dir = corruptLiveWrites(base, "a.json", Number.POSITIVE_INFINITY);
+
+  await expect(safeWriteJson(dir, "a.json", { v: 7 })).rejects.toThrow(
+    "staged copy kept as"
+  );
+
+  // The staged copy survives with the written value…
+  const tmpRaw = await readRaw(base, "a.json.tmp");
+  expect((JSON.parse(tmpRaw) as { data: { v: number } }).data.v).toBe(7);
+
+  // …and the hardened read recovers it (live corrupt, no .bak).
+  const result = await safeReadJson<{ v: number }>(base, "a.json");
+  expect(result.ok).toBe(true);
+  if (result.ok) {
+    expect(result.value.v).toBe(7);
+    expect(result.recoveredFromBak).toBe(true);
+  }
+});
+
+test("streamed first write recovers via .tmp promotion", async () => {
+  __setStreamingForcedSizeLimitForTests(0);
+  const base = createMemoryDirectory();
+  const dir = corruptLiveWrites(base, "s.json", 1);
+
+  await safeWriteJson(dir, "s.json", { rows: [{ v: 1 }] }); // must NOT throw
+
+  const result = await safeReadJson<{ rows: { v: number }[] }>(base, "s.json");
+  expect(result.ok).toBe(true);
+  if (result.ok) {
+    expect(result.value.rows[0].v).toBe(1);
+  }
+});
+
+test("streamed total failure keeps the .tmp and safeReadJson recovers it", async () => {
+  __setStreamingForcedSizeLimitForTests(0);
+  const base = createMemoryDirectory();
+  const dir = corruptLiveWrites(base, "s.json", Number.POSITIVE_INFINITY);
+
+  await expect(safeWriteJson(dir, "s.json", { rows: [{ v: 9 }] })).rejects.toThrow(
+    "staged copy kept as"
+  );
+
+  const result = await safeReadJson<{ rows: { v: number }[] }>(base, "s.json");
+  expect(result.ok).toBe(true);
+  if (result.ok) {
+    expect(result.value.rows[0].v).toBe(9);
+    expect(result.recoveredFromBak).toBe(true);
+  }
+});
+
+test("successful writes still clean up the staged .tmp", async () => {
+  const base = createMemoryDirectory();
+  const removed: string[] = [];
+  const dir: DirectoryHandleLike = {
+    ...base,
+    removeEntry: async (name: string) => {
+      removed.push(name);
+    },
+  };
+
+  await safeWriteJson(dir, "a.json", { v: 1 });
+  expect(removed).toContain("a.json.tmp");
+});
+
 test("safeWriteJsonText streams large restore payloads and round-trips", async () => {
   const dir = createMemoryDirectory();
   // Build a valid envelope file, then restore its text via the streamed path.

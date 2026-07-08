@@ -15,7 +15,7 @@ import type { SidebarTabModule } from "../tabTypes";
 
 import { readSession } from "../../../../auth/authSession";
 import { usePermissions } from "../../../../auth/usePermissions";
-import { logRejection } from "../../../../data/storage/errorLogger";
+import { logError, logRejection } from "../../../../data/storage/errorLogger";
 import { currentMonthFolderInfo, formatMonthFolderName, parseMonthFolderName } from "../../../../data/population/monthFolder";
 import type { MonthFolderInfo } from "../../../../data/population/monthFolder";
 import {
@@ -25,6 +25,7 @@ import {
   loadCertScanGlobal,
   saveCertScanGlobal,
   saveSamplingProof,
+  updateMonthStatus,
   loadBrowseRows,
   type BrowseDatasetKind,
   type BrowseRow,
@@ -48,7 +49,7 @@ import type {
   DistributionEvent
 } from "../../../../data/distribution/distributionTypes";
 import { drawSample } from "../../../../data/sampling/sampleAlgorithm";
-import { saveSampleMaster } from "../../../../data/sampling/sampleStorage";
+import { loadSampleMaster, saveSampleMaster } from "../../../../data/sampling/sampleStorage";
 import type { SampleMasterData } from "../../../../data/sampling/sampleTypes";
 import {
   loadAdminBrowsePreset,
@@ -87,7 +88,12 @@ import {
   DEFAULT_SYSTEM_FIELDS
 } from "../../../../data/population/populationConfig";
 
+import { getLabels } from "../../../../data/labels/labelsStore";
+import { MonthClosedError, isMonthClosed } from "../../../../data/population/monthLock";
+import { appendWorkspaceAction } from "../../../../data/audit/actionLog";
+
 import "./Population.css";
+import { ConfirmDialog } from "../../../../components/ConfirmDialog/ConfirmDialog";
 import { PageHeader } from "../../../../components/PageHeader/PageHeader";
 import { EmptyState, LoadingState } from "../../../../components/StateViews/StateViews";
 
@@ -187,12 +193,15 @@ export default function PopulationTab() {
   const { can } = usePermissions();
   const sessionRef = useRef(readSession());
   const [activeSubTab, setActiveSubTab] = useState<SubTab>("process");
+  // Month close-out (Tier-1 Item A): a closed month is view-only — draw and
+  // distribution capabilities are withdrawn regardless of role permissions.
+  const [selectedMonthClosed, setSelectedMonthClosed] = useState(false);
   const canUploadData = can("upload-data");
   const canProcessPopulation = can("process-population");
   const canConfigureSample = can("configure-sample");
-  const canDrawSample = can("draw-sample");
-  const canDistributeSamples = can("distribute-samples");
-  const canBulkAssign = can("bulk-assign");
+  const canDrawSample = can("draw-sample") && !selectedMonthClosed;
+  const canDistributeSamples = can("distribute-samples") && !selectedMonthClosed;
+  const canBulkAssign = can("bulk-assign") && !selectedMonthClosed;
   const canViewBrowse = can("view-browse");
   const canExportReports = can("export-reports");
 
@@ -379,8 +388,26 @@ export default function PopulationTab() {
   const initialMonth = currentMonthFolderInfo();
   const [saveMonth, setSaveMonth] = useState(initialMonth.month);
   const [saveYear, setSaveYear] = useState(initialMonth.year);
+
+  // Track the month-lock state of the selected month (Tier-1 Item A).
+  useEffect(() => {
+    if (!directoryHandle) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync reset when workspace is disconnected
+      setSelectedMonthClosed(false);
+      return;
+    }
+    const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
+    isMonthClosed(directoryHandle, monthFolderName)
+      .then(setSelectedMonthClosed)
+      .catch(() => setSelectedMonthClosed(false));
+  }, [directoryHandle, saveMonth, saveYear, monthRefreshKey]);
   const [isSavingToDisk, setIsSavingToDisk] = useState(false);
   const [saveToDiskMessage, setSaveToDiskMessage] = useState<SaveMessage>(null);
+  // Pending re-process save awaiting user confirmation (month already has a drawn sample).
+  const [pendingReprocessSave, setPendingReprocessSave] = useState<{
+    processingResult: PopulationProcessingResult;
+    riskResult: RiskWorkbookResult;
+  } | null>(null);
 
   // Phase 3 — sampling
   const [sampleSeed, setSampleSeed] = useState(() => Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10));
@@ -726,6 +753,24 @@ export default function PopulationTab() {
   ): Promise<void> {
     if (!directoryHandle) return;
 
+    // Guard: re-processing a month that already has a drawn sample would make
+    // that sample no longer match the new population — confirm before overwriting.
+    const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
+    const existingSample = await loadSampleMaster(directoryHandle, monthFolderName);
+    if (existingSample) {
+      setPendingReprocessSave({ processingResult, riskResult });
+      return;
+    }
+
+    await commitSaveToDisk(processingResult, riskResult);
+  }
+
+  async function commitSaveToDisk(
+    processingResult: PopulationProcessingResult,
+    riskResult: RiskWorkbookResult
+  ): Promise<void> {
+    if (!directoryHandle) return;
+
     const username = sessionRef.current?.username ?? "unknown";
     setIsSavingToDisk(true);
     setSaveToDiskMessage(null);
@@ -781,8 +826,13 @@ export default function PopulationTab() {
       } else {
         setSaveToDiskMessage({ type: "error", text: `فشل الحفظ: ${result.error}` });
       }
-    } catch {
-      setSaveToDiskMessage({ type: "error", text: "حدث خطأ غير متوقع أثناء الحفظ." });
+    } catch (error) {
+      setSaveToDiskMessage({
+        type: "error",
+        text: error instanceof MonthClosedError
+          ? getLabels().msg_month_closed_write_blocked
+          : "حدث خطأ غير متوقع أثناء الحفظ.",
+      });
     } finally {
       setIsSavingToDisk(false);
     }
@@ -809,9 +859,21 @@ export default function PopulationTab() {
 
     setIsDrawingSample(true);
     setSampleSaveMessage(null);
-    setSampleDrawResult(null);
 
     try {
+      // Hard block: re-drawing after distribution would orphan every existing
+      // assignment and answer (deriveCurrentDistribution drops events whose id
+      // is not in the new sample rows). No cascade in this phase — abort.
+      if (directoryHandle) {
+        const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
+        const existingLog = await loadDistributionLog(directoryHandle, monthFolderName);
+        if (existingLog.events.length > 0) {
+          setSampleSaveMessage({ type: "error", text: getLabels().sample_redraw_blocked });
+          return;
+        }
+      }
+
+      setSampleDrawResult(null);
       const username = sessionRef.current?.username ?? "unknown";
       const drawResult = drawSample(
         populationProcessingResult.preparedRows,
@@ -834,6 +896,14 @@ export default function PopulationTab() {
           drawResult.data
         );
         if (saveResult.ok) {
+          await updateMonthStatus(directoryHandle, monthFolderName, "sampled");
+          void appendWorkspaceAction(directoryHandle, {
+            actor: username,
+            actorRole: sessionRef.current?.role ?? "unknown",
+            action: "sample-drawn",
+            monthFolderName,
+            details: { seed: sampleSeed, totalActual: drawResult.data.totalActual },
+          });
           setSampleSaveMessage({
             type: "ok",
             text: `تم حفظ العينة في ${monthFolderName}/sample/sample.master.json`
@@ -862,16 +932,50 @@ export default function PopulationTab() {
           nonCertScanActual: drawResult.data.nonCertScanActual,
         });
       }
+    } catch (error) {
+      if (error instanceof MonthClosedError) {
+        setSampleSaveMessage({ type: "error", text: getLabels().msg_month_closed_write_blocked });
+      } else {
+        logError("population:draw-sample", error);
+        setSampleSaveMessage({ type: "error", text: "حدث خطأ غير متوقع أثناء سحب العينة." });
+      }
     } finally {
       setIsDrawingSample(false);
     }
   }
 
+  // Shared error text for distribution handlers (MonthClosedError-aware).
+  function distributionErrorText(error: unknown): string {
+    if (error instanceof MonthClosedError) return getLabels().msg_month_closed_write_blocked;
+    return error instanceof Error ? error.message : "خطأ غير معروف";
+  }
+
   async function refreshDistribution(monthFolderName: string): Promise<void> {
     if (!directoryHandle) return;
-    const sampleRows = sampleDrawResult?.rows ?? [];
+    let sampleRows = sampleDrawResult?.rows ?? [];
     const log = await loadDistributionLog(directoryHandle, monthFolderName);
-    const current = deriveCurrentDistribution(log, sampleRows);
+
+    // Guard: never derive against an empty row set while events exist — a
+    // zeroed derive would PERSIST an empty snapshot + zeroed employee mirrors
+    // (visible data loss). Fall back to the on-disk sample master.
+    if (sampleRows.length === 0 && log.events.length > 0) {
+      const master = await loadSampleMaster(directoryHandle, monthFolderName);
+      sampleRows = master?.rows ?? [];
+      if (sampleRows.length === 0) {
+        logError(
+          "population:refresh-distribution",
+          new Error(`Refusing to persist zeroed distribution.current for ${monthFolderName}`)
+        );
+        setDistributionMessage({ type: "error", text: getLabels().msg_distribution_refresh_no_sample });
+        return; // keep the existing on-disk snapshot untouched
+      }
+    }
+
+    // Stamp logRevision so the next loadOrDeriveDistributionCurrent takes the fast path.
+    const current: DistributionCurrentData = {
+      ...deriveCurrentDistribution(log, sampleRows),
+      logRevision: log.revision,
+    };
     setDistributionCurrent(current);
     await saveDistributionCurrent(directoryHandle, monthFolderName, current);
     setMonthRefreshKey((k) => k + 1);
@@ -891,18 +995,24 @@ export default function PopulationTab() {
     const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
     const username = sessionRef.current?.username ?? "unknown";
     const event = buildAssignEvent({ xrayImageId, assignedTo, eventBy: username });
-    const result = await appendDistributionEvent(
-      directoryHandle,
-      monthFolderName,
-      event
-    );
-    if (result.ok) {
-      await refreshDistribution(monthFolderName);
-      setDistributionMessage({ type: "ok", text: "تم التعيين." });
-    } else {
-      setDistributionMessage({ type: "error", text: result.error });
+    try {
+      const result = await appendDistributionEvent(
+        directoryHandle,
+        monthFolderName,
+        event
+      );
+      if (result.ok) {
+        await updateMonthStatus(directoryHandle, monthFolderName, "distributed");
+        await refreshDistribution(monthFolderName);
+        setDistributionMessage({ type: "ok", text: "تم التعيين." });
+      } else {
+        setDistributionMessage({ type: "error", text: result.error });
+      }
+    } catch (error) {
+      setDistributionMessage({ type: "error", text: distributionErrorText(error) });
+    } finally {
+      setIsDistributing(false);
     }
-    setIsDistributing(false);
   }
 
   async function handleReassign(
@@ -927,18 +1037,23 @@ export default function PopulationTab() {
       reassignedTo,
       eventBy: username
     });
-    const result = await appendDistributionEvent(
-      directoryHandle,
-      monthFolderName,
-      event
-    );
-    if (result.ok) {
-      await refreshDistribution(monthFolderName);
-      setDistributionMessage({ type: "ok", text: "تم إعادة التعيين." });
-    } else {
-      setDistributionMessage({ type: "error", text: result.error });
+    try {
+      const result = await appendDistributionEvent(
+        directoryHandle,
+        monthFolderName,
+        event
+      );
+      if (result.ok) {
+        await refreshDistribution(monthFolderName);
+        setDistributionMessage({ type: "ok", text: "تم إعادة التعيين." });
+      } else {
+        setDistributionMessage({ type: "error", text: result.error });
+      }
+    } catch (error) {
+      setDistributionMessage({ type: "error", text: distributionErrorText(error) });
+    } finally {
+      setIsDistributing(false);
     }
-    setIsDistributing(false);
   }
 
   async function handleMarkComplete(xrayImageId: string): Promise<void> {
@@ -959,18 +1074,23 @@ export default function PopulationTab() {
       assignedTo: existing?.assignedTo ?? username,
       eventBy: username
     });
-    const result = await appendDistributionEvent(
-      directoryHandle,
-      monthFolderName,
-      event
-    );
-    if (result.ok) {
-      await refreshDistribution(monthFolderName);
-      setDistributionMessage({ type: "ok", text: "تم تعليم الصف كمكتمل." });
-    } else {
-      setDistributionMessage({ type: "error", text: result.error });
+    try {
+      const result = await appendDistributionEvent(
+        directoryHandle,
+        monthFolderName,
+        event
+      );
+      if (result.ok) {
+        await refreshDistribution(monthFolderName);
+        setDistributionMessage({ type: "ok", text: "تم تعليم الصف كمكتمل." });
+      } else {
+        setDistributionMessage({ type: "error", text: result.error });
+      }
+    } catch (error) {
+      setDistributionMessage({ type: "error", text: distributionErrorText(error) });
+    } finally {
+      setIsDistributing(false);
     }
-    setIsDistributing(false);
   }
 
   async function handleRequestReplacement(xrayImageId: string): Promise<void> {
@@ -991,18 +1111,23 @@ export default function PopulationTab() {
       assignedTo: existing?.assignedTo ?? username,
       eventBy: username
     });
-    const result = await appendDistributionEvent(
-      directoryHandle,
-      monthFolderName,
-      event
-    );
-    if (result.ok) {
-      await refreshDistribution(monthFolderName);
-      setDistributionMessage({ type: "ok", text: "تم تسجيل طلب الاستبدال." });
-    } else {
-      setDistributionMessage({ type: "error", text: result.error });
+    try {
+      const result = await appendDistributionEvent(
+        directoryHandle,
+        monthFolderName,
+        event
+      );
+      if (result.ok) {
+        await refreshDistribution(monthFolderName);
+        setDistributionMessage({ type: "ok", text: "تم تسجيل طلب الاستبدال." });
+      } else {
+        setDistributionMessage({ type: "error", text: result.error });
+      }
+    } catch (error) {
+      setDistributionMessage({ type: "error", text: distributionErrorText(error) });
+    } finally {
+      setIsDistributing(false);
     }
-    setIsDistributing(false);
   }
 
   async function handleApplyBulkAssignment(events: DistributionEvent[]): Promise<void> {
@@ -1014,40 +1139,53 @@ export default function PopulationTab() {
     setIsDistributing(true);
     setDistributionMessage(null);
     const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
-    const result = await appendDistributionEvents(
-      directoryHandle,
-      monthFolderName,
-      events
-    );
-    if (result.ok) {
-      await refreshDistribution(monthFolderName);
-      // Build per-employee entry lists then write one XLSX per employee (fire-and-forget).
-      const rowMap = new Map(sampleDrawResult.rows.map((r) => [r.xrayImageId, r]));
-      const assignedMap = new Map<string, DistributionEntry[]>();
-      for (const ev of events) {
-        if (ev.eventType !== "assigned") continue;
-        const row = rowMap.get(ev.xrayImageId);
-        if (!row) continue;
-        const entry: DistributionEntry = {
-          xrayImageId: ev.xrayImageId,
-          assignedTo: ev.assignedTo,
-          status: "pending",
-          replacedById: null,
-          lastEventAt: ev.eventAt,
-          row,
-        };
-        const list = assignedMap.get(ev.assignedTo) ?? [];
-        list.push(entry);
-        assignedMap.set(ev.assignedTo, list);
+    try {
+      const result = await appendDistributionEvents(
+        directoryHandle,
+        monthFolderName,
+        events
+      );
+      if (result.ok) {
+        await updateMonthStatus(directoryHandle, monthFolderName, "distributed");
+        void appendWorkspaceAction(directoryHandle, {
+          actor: sessionRef.current?.username ?? "unknown",
+          actorRole: sessionRef.current?.role ?? "unknown",
+          action: "distribution-bulk-assigned",
+          monthFolderName,
+          details: { events: events.length },
+        });
+        await refreshDistribution(monthFolderName);
+        // Build per-employee entry lists then write one XLSX per employee (fire-and-forget).
+        const rowMap = new Map(sampleDrawResult.rows.map((r) => [r.xrayImageId, r]));
+        const assignedMap = new Map<string, DistributionEntry[]>();
+        for (const ev of events) {
+          if (ev.eventType !== "assigned") continue;
+          const row = rowMap.get(ev.xrayImageId);
+          if (!row) continue;
+          const entry: DistributionEntry = {
+            xrayImageId: ev.xrayImageId,
+            assignedTo: ev.assignedTo,
+            status: "pending",
+            replacedById: null,
+            lastEventAt: ev.eventAt,
+            row,
+          };
+          const list = assignedMap.get(ev.assignedTo) ?? [];
+          list.push(entry);
+          assignedMap.set(ev.assignedTo, list);
+        }
+        for (const [emp, empEntries] of assignedMap) {
+          void writeEmployeeXlsx(directoryHandle, monthFolderName, emp, empEntries).catch(() => undefined);
+        }
+        setDistributionMessage({ type: "ok", text: "تم تطبيق وحفظ التوزيع الجماعي بنجاح." });
+      } else {
+        setDistributionMessage({ type: "error", text: result.error });
       }
-      for (const [emp, empEntries] of assignedMap) {
-        void writeEmployeeXlsx(directoryHandle, monthFolderName, emp, empEntries).catch(() => undefined);
-      }
-      setDistributionMessage({ type: "ok", text: "تم تطبيق وحفظ التوزيع الجماعي بنجاح." });
-    } else {
-      setDistributionMessage({ type: "error", text: result.error });
+    } catch (error) {
+      setDistributionMessage({ type: "error", text: distributionErrorText(error) });
+    } finally {
+      setIsDistributing(false);
     }
-    setIsDistributing(false);
   }
 
   async function moveToNextPhase(): Promise<void> {
@@ -1199,6 +1337,13 @@ export default function PopulationTab() {
           </span>
         </div>
       </div>
+
+      {/* ── Closed-month banner (Tier-1 Item A) ── */}
+      {selectedMonthClosed ? (
+        <div className="upload-warning" role="status">
+          {getLabels().msg_month_closed_banner}
+        </div>
+      ) : null}
 
       {/* ── Horizontal Stepper ── */}
       <nav className="phase-stepper" aria-label="مراحل معالجة المجتمع">
@@ -1405,6 +1550,24 @@ export default function PopulationTab() {
           ],
           riskColumnHints,
           biColumnHints
+        }}
+      />
+
+      <ConfirmDialog
+        open={pendingReprocessSave !== null}
+        danger
+        title={getLabels().population_reprocess_confirm_title}
+        message={getLabels().population_reprocess_confirm_message}
+        onConfirm={() => {
+          const pending = pendingReprocessSave;
+          setPendingReprocessSave(null);
+          if (pending) {
+            void commitSaveToDisk(pending.processingResult, pending.riskResult);
+          }
+        }}
+        onCancel={() => {
+          setPendingReprocessSave(null);
+          setSaveToDiskMessage({ type: "error", text: getLabels().population_reprocess_cancelled });
         }}
       />
       </>)}

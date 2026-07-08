@@ -2,7 +2,7 @@
 .fb-panel {
   position: fixed;
   top: 68px;
-  left: 24px;
+  inset-inline-end: 24px;
   z-index: 1200;
   width: 380px;
   max-height: 560px;

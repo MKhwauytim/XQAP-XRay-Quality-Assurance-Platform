@@ -1,5 +1,6 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { ensureMonthWritable } from "../population/monthLock";
 import type { DecisionEvent, DecisionEventKind, SupervisorDecisionFile } from "./approvalTypes";
 import { getPopulationMonthDir, getSampleApprovalsDir, safeWorkspaceFilePart } from "../workspace/workspacePaths";
 
@@ -93,6 +94,9 @@ export async function appendDecisionEvent(
   supervisorUsername: string,
   event: DecisionEvent
 ): Promise<{ ok: true } | { ok: false; error: string }> {
+  // Month lock gate — throws MonthClosedError when the month is closed; callers
+  // that need a user-facing message should catch it explicitly.
+  await ensureMonthWritable(directoryHandle, monthFolderName);
   try {
     const appDir = await getApprovalsDir(directoryHandle, monthFolderName);
     const current = await loadSupervisorDecisions(directoryHandle, monthFolderName, supervisorUsername);

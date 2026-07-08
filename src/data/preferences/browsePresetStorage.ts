@@ -74,7 +74,10 @@ export async function saveUserBrowseDatasetPreset(
   const fileName = safeUserFileName(username);
   // Lock the read-modify-write: two rapid preset saves for the same user
   // (e.g. column order then width) must not race and drop one dataset's update.
-  await withResourceLock(`${SYSTEM_FOLDER_NAMES.userPresets}/${fileName}`, async () => {
+  // NB: the `:rmw` suffix keeps this key distinct from safeWriteJson's own internal
+  // `${dir.name}/${fileName}` lock ("user-presets/<file>") — withResourceLock is not
+  // reentrant, so a colliding key would self-deadlock the nested write.
+  await withResourceLock(`${SYSTEM_FOLDER_NAMES.userPresets}/${fileName}:rmw`, async () => {
     const existing = await loadUserBrowsePreset(directoryHandle, username);
     const nextFile: UserBrowsePresetFile = {
       username,
@@ -136,7 +139,9 @@ export async function saveAdminBrowseDatasetPreset(
   dataset: BrowsePresetDatasetKind,
   preset: Omit<BrowseDatasetPreset, "updatedAt">
 ): Promise<void> {
-  await withResourceLock(`${SYSTEM_FOLDER_NAMES.userPresets}/${ADMIN_SHARED_PRESET_FILE}`, async () => {
+  // `:rmw` suffix — see saveUserBrowseDatasetPreset: keeps this outer lock distinct
+  // from safeWriteJson's internal non-reentrant lock to avoid a self-deadlock.
+  await withResourceLock(`${SYSTEM_FOLDER_NAMES.userPresets}/${ADMIN_SHARED_PRESET_FILE}:rmw`, async () => {
     const existing = await loadAdminBrowsePreset(directoryHandle);
     const nextFile: SharedBrowsePresetFile = {
       owner: "admin",

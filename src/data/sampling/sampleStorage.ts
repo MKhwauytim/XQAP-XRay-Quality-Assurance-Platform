@@ -3,6 +3,7 @@ import { getStageKey } from "../population/stageHelpers";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
+import { ensureMonthWritable } from "../population/monthLock";
 import { getPopulationMonthDir, getSampleMainDir } from "../workspace/workspacePaths";
 import type { PortAllocation, SampleMasterData, StageAllocation } from "./sampleTypes";
 
@@ -29,6 +30,8 @@ export async function saveSampleMaster(
   monthFolderName: string,
   data: SampleMasterData
 ): Promise<{ ok: true } | { ok: false; error: string }> {
+  // Month lock gate — rejects with MonthClosedError when the month is closed.
+  await ensureMonthWritable(directoryHandle, monthFolderName);
   try {
     const sampleDir = await getSampleDir(directoryHandle, monthFolderName);
     await safeWriteJson(sampleDir, SAMPLE_FILE, data);
@@ -148,6 +151,8 @@ export async function appendSampleRow(
   monthFolderName: string,
   newRow: PreparedPopulationRow
 ): Promise<{ ok: true; data: SampleMasterData } | { ok: false; error: string }> {
+  // Month lock gate — before the CAS loop so a closed month rejects loudly.
+  await ensureMonthWritable(directoryHandle, monthFolderName);
   return casLoop<{ ok: true; data: SampleMasterData } | { ok: false; error: string }>(
     async (writeToken) => {
       const current = await loadSampleMaster(directoryHandle, monthFolderName);

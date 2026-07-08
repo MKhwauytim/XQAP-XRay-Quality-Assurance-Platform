@@ -8,6 +8,7 @@ import type { MonthManifestData, MonthRawData, PopulationFinalData } from "../po
 import type { SampleMasterData } from "../sampling/sampleTypes";
 import type { DirectoryHandleLike, FileHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson, safeWriteJsonText } from "../storage/safeWrite";
+import { exportLabelsSnapshot } from "../workspace/labelsSnapshot";
 import {
   getPopulationMonthDir,
   getSampleMainDir,
@@ -571,6 +572,10 @@ export async function createBackup(
     const backupsDir = await getBackupsDir(directoryHandle);
     const backupDir = await ensureDir(backupsDir, folderName);
     const xlsxDir = await ensureDir(backupDir, "xlsx");
+
+    // Best-effort: capture a fresh labels-override snapshot before walking
+    // the tree, so it is included by copyAllJsonFiles below (Tier-1 Item F).
+    await exportLabelsSnapshot(directoryHandle);
 
     const jsonFilesBackedUp = await copyAllJsonFiles(directoryHandle, backupDir);
     const datasets: BackupDatasetSummary[] = [];

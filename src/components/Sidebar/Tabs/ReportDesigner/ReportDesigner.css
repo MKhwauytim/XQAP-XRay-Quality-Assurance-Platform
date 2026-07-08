@@ -6,6 +6,7 @@
   --rd-panel-border: #e1dfdd;
   --rd-canvas-bg: #f3f2f1;
   --rd-accent: #0078d4;
+  --rd-danger: #c0392b;
   --rd-accent-hover: #106ebe;
   --rd-pages-bg: #edebe9;
   --rd-pages-active: #ffffff;
@@ -45,7 +46,7 @@
   grid-row: 2;
   grid-column: 1;
   background: var(--rd-panel-bg);
-  border-left: 1px solid var(--rd-panel-border);
+  border-inline-end: 1px solid var(--rd-panel-border);
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -68,7 +69,7 @@
   grid-row: 2;
   grid-column: 3;
   background: var(--rd-panel-bg);
-  border-right: 1px solid var(--rd-panel-border);
+  border-inline-start: 1px solid var(--rd-panel-border);
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -392,7 +393,7 @@
   border-color: var(--c-navy-2);
 }
 .rd-btn-secondary {
-  background: #f6f8fa;
+  background: var(--c-surface-2, #F6F8FA);
   color: #24292f;
   border-color: #d0d7de;
 }
@@ -420,7 +421,7 @@
   flex-wrap: wrap;
   margin-bottom: 20px;
   padding: 12px 16px;
-  background: #f6f8fa;
+  background: var(--c-surface-2, #F6F8FA);
   border: 1px solid #d0d7de;
   border-radius: 8px;
 }
@@ -477,8 +478,7 @@
 .rd-card-thumb-inner {
   position: absolute;
   top: 0;
-  right: 0;
-  left: 0;
+  inset-inline: 0;
   transform-origin: top right;
 }
 .rd-card-thumb--loading { opacity: 0.5; pointer-events: none; }
@@ -584,7 +584,7 @@
   color: #57606a;
   font-size: 16px;
   font-weight: 500;
-  background: #f6f8fa;
+  background: var(--c-surface-2, #F6F8FA);
 }
 
 /* ── Canvas ── */
@@ -614,7 +614,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #f6f8fa;
+  background: var(--c-surface-2, #F6F8FA);
   border: 1px dashed #d0d7de;
   color: #57606a;
   font-size: 12px;
@@ -630,7 +630,7 @@
   gap: 8px;
   flex-wrap: wrap;
   padding: 8px 12px;
-  background: #f6f8fa;
+  background: var(--c-surface-2, #F6F8FA);
   border: 1px solid #d0d7de;
   border-radius: 8px;
   margin-bottom: 12px;
@@ -642,10 +642,10 @@
   flex-wrap: wrap;
 }
 .rd-toolbar-group--page {
-  margin-right: auto; /* RTL: pushes page nav toward center */
+  margin-inline-start: auto; /* RTL: pushes page nav toward center */
 }
 .rd-toolbar-group--end {
-  margin-right: auto;
+  margin-inline-start: auto;
 }
 .rd-page-indicator {
   font-size: 13px;
@@ -806,7 +806,7 @@
 .rd-save-error {
   font-size: 13px;
   color: #cf222e;
-  margin-right: auto;
+  margin-inline-start: auto;
 }
 
 /* ── Resize handles (edit mode, selected element) ── */

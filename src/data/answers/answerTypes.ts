@@ -7,6 +7,15 @@ export type FieldAnswer = {
 
 export type ItemAnswerStatus = "draft" | "submitted";
 
+/** Audit trace of supervisor corrections on a submitted answer. */
+export type ItemAnswerHistoryEntry = {
+  action: "reopened";
+  at: string;
+  by: string;
+  reason: string;
+  previousSubmittedAt: string | null;
+};
+
 export type ItemAnswer = {
   xrayImageId: string;
   templateId: string;
@@ -16,6 +25,8 @@ export type ItemAnswer = {
   submittedAt: string | null;
   answeredBy: string;
   status: ItemAnswerStatus;
+  /** Reopen-for-correction trail (Tier-1 Item D). */
+  history?: ItemAnswerHistoryEntry[];
 };
 
 export type EmployeeAnswerFile = {

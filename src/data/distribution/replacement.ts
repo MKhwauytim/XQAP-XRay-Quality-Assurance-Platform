@@ -19,6 +19,7 @@ import type { SampleMasterData } from "../sampling/sampleTypes";
 import { getStageKey } from "../population/stageHelpers";
 import type { StageAliasMappings } from "../population/populationConfig";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import { createRng, drawWithoutReplacement, hashSeedString, type Rng } from "../sampling/rng";
 import { appendSampleRow } from "../sampling/sampleStorage";
 import {
   appendDistributionEvents,
@@ -42,14 +43,11 @@ export type ReplacementCandidates = {
  * @param allEntries      All distribution entries (owned rows are excluded).
  * @param stageMappings   Optional stage alias overrides.
  */
-function capRandom<T>(pool: T[], limit: number): T[] {
+// Deterministic cap: draws `limit` rows with the caller's seeded RNG so the
+// same inputs always produce the same candidate list (audit reproducibility).
+function capSeeded<T>(pool: T[], limit: number, rng: Rng): T[] {
   if (pool.length <= limit) return pool;
-  const copy = pool.slice();
-  for (let i = copy.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [copy[i], copy[j]] = [copy[j]!, copy[i]!];
-  }
-  return copy.slice(0, limit);
+  return drawWithoutReplacement(pool, limit, rng);
 }
 
 const REPLACEMENT_POOL_LIMIT = 100;
@@ -61,6 +59,10 @@ export function getReplacementCandidates(
   allEntries: DistributionEntry[],
   stageMappings?: Partial<StageAliasMappings>
 ): ReplacementCandidates {
+  // Seeded per dead-row RNG: same draw seed + same dead row => same candidate
+  // list on every call, so replacement pools are reproducible for audits.
+  const rng = createRng(hashSeedString(`${sampleMaster.rngSeed}:${entry.xrayImageId}`));
+
   // Build exclusion sets.
   const sampleIds = new Set(sampleMaster.rows.map((r) => r.xrayImageId));
   const ownedIds  = new Set(allEntries.map((e) => e.xrayImageId));
@@ -89,8 +91,8 @@ export function getReplacementCandidates(
 
   if (sameStage.length > 0) {
     return {
-      recommended: capRandom(recommended, REPLACEMENT_POOL_LIMIT),
-      all: capRandom(sameStage, REPLACEMENT_POOL_LIMIT),
+      recommended: capSeeded(recommended, REPLACEMENT_POOL_LIMIT, rng),
+      all: capSeeded(sameStage, REPLACEMENT_POOL_LIMIT, rng),
     };
   }
 
@@ -107,7 +109,7 @@ export function getReplacementCandidates(
       rowsB.length - rowsA.length || stageA.localeCompare(stageB)
   )[0];
 
-  return { recommended: [], all: capRandom(fallbackStage?.[1] ?? [], REPLACEMENT_POOL_LIMIT) };
+  return { recommended: [], all: capSeeded(fallbackStage?.[1] ?? [], REPLACEMENT_POOL_LIMIT, rng) };
 }
 
 export type ExecuteReplacementResult =
@@ -134,8 +136,10 @@ export async function executeReplacement(params: {
   replacementRow: PreparedPopulationRow;
   reason: string;
   eventBy: string;
+  /** Idempotency key stamped onto both emitted events (replay detection). */
+  sourceRequestId?: string;
 }): Promise<ExecuteReplacementResult> {
-  const { directoryHandle, monthFolderName, deadEntry, replacementRow, reason, eventBy } = params;
+  const { directoryHandle, monthFolderName, deadEntry, replacementRow, reason, eventBy, sourceRequestId } = params;
 
   // Guard: dead row must not already be replaced or completed.
   if (deadEntry.status === "replaced" || deadEntry.status === "completed") {
@@ -153,19 +157,25 @@ export async function executeReplacement(params: {
 
   // Step 2: write the distribution events (source of truth).
   const events = [
-    buildAssignEvent({
-      xrayImageId: replacementRow.xrayImageId,
-      assignedTo: deadEntry.assignedTo,
-      eventBy,
-      notes: `استبدال للمعرف ${deadEntry.xrayImageId} — ${reason}`,
-    }),
-    buildReplacedEvent({
-      xrayImageId: deadEntry.xrayImageId,
-      assignedTo: deadEntry.assignedTo,
-      replacedById: replacementRow.xrayImageId,
-      eventBy,
-      notes: reason,
-    }),
+    {
+      ...buildAssignEvent({
+        xrayImageId: replacementRow.xrayImageId,
+        assignedTo: deadEntry.assignedTo,
+        eventBy,
+        notes: `استبدال للمعرف ${deadEntry.xrayImageId} — ${reason}`,
+      }),
+      sourceRequestId,
+    },
+    {
+      ...buildReplacedEvent({
+        xrayImageId: deadEntry.xrayImageId,
+        assignedTo: deadEntry.assignedTo,
+        replacedById: replacementRow.xrayImageId,
+        eventBy,
+        notes: reason,
+      }),
+      sourceRequestId,
+    },
   ];
 
   const eventsResult = await appendDistributionEvents(directoryHandle, monthFolderName, events);

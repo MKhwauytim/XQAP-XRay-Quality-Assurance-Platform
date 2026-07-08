@@ -1,6 +1,7 @@
 import type { DirectoryHandleLike, FileHandleLike } from "../storage/fileSystemAccess";
 import { safeWriteJson, safeReadJson } from "../storage/safeWrite";
 import { logError } from "../storage/errorLogger";
+import { ensureMonthWritable } from "./monthLock";
 import { formatMonthFolderName, parseMonthFolderName, type MonthFolderInfo } from "./monthFolder";
 import type {
   MonthManifestData,
@@ -116,6 +117,7 @@ export async function saveSamplingProof(
   monthFolderName: string,
   proof: SamplingProof
 ): Promise<void> {
+  await ensureMonthWritable(directoryHandle, monthFolderName);
   try {
     const sampleDir = await getSampleMainDir(directoryHandle, monthFolderName, true);
     await safeWriteJson(sampleDir, "sampling-proof.json", proof);
@@ -163,6 +165,11 @@ async function ensureFolder(
 export async function saveMonthRun(
   params: SaveMonthRunParams
 ): Promise<SaveMonthRunResult> {
+  // Month lock gate — rejects with MonthClosedError when the month is closed.
+  await ensureMonthWritable(
+    params.directoryHandle,
+    formatMonthFolderName(params.month, params.year)
+  );
   try {
     const {
       directoryHandle,
@@ -276,6 +283,39 @@ export async function saveMonthRun(
     const message =
       error instanceof Error ? error.message : "Unknown error during save";
     return { ok: false, error: message };
+  }
+}
+
+const STATUS_RANK: Record<MonthManifestData["status"], number> = {
+  "raw-saved": 0,
+  "processed-saved": 1,
+  sampled: 2,
+  distributed: 3,
+  closed: 4,
+};
+
+/**
+ * Advance the month manifest status (monotonic — never downgrades).
+ * Best-effort: failures are logged to the error ring buffer, never thrown.
+ */
+export async function updateMonthStatus(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  status: MonthManifestData["status"]
+): Promise<void> {
+  try {
+    const monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, false);
+    const manifestResult = await safeReadJson<MonthManifestData>(monthDir, "month.manifest.json");
+    if (!manifestResult.ok) return;
+    const manifest = manifestResult.value;
+    // A closed month is frozen: status advancement must never overwrite it
+    // ("closed" is deliberately NOT in STATUS_RANK — see monthLock.ts).
+    if (manifest.status === "closed") return;
+    const currentRank = STATUS_RANK[manifest.status] ?? -1;
+    if (currentRank >= STATUS_RANK[status]) return;
+    await safeWriteJson(monthDir, "month.manifest.json", { ...manifest, status });
+  } catch (error) {
+    logError("population:update-month-status", error);
   }
 }
 

@@ -19,6 +19,15 @@ import {
   type MonthArchiveStatus,
 } from "../../../../data/backup/backupStorage";
 import { listMonthFolders } from "../../../../data/population/populationStorage";
+import { closeMonth, reopenMonth } from "../../../../data/population/monthLock";
+import { appendWorkspaceAction } from "../../../../data/audit/actionLog";
+import { hasFeature, readUserManagementState, syncUsersFromDisk } from "../../../../auth/userManagement";
+import { getLabels } from "../../../../data/labels/labelsStore";
+import { importLabelsSnapshot } from "../../../../data/workspace/labelsSnapshot";
+import { readJsonFile } from "../../../../data/storage/fileSystemAccess";
+import { WORKSPACE_FILE_NAMES } from "../../../../data/workspace/workspaceDefaults";
+import { getUserDataRoot } from "../../../../data/workspace/workspacePaths";
+import type { UsersPermissionsFile } from "../../../../data/workspace/workspaceTypes";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
 import { formatDateTime, formatNumber } from "../../../../utils/formatting";
 import type { SidebarTabModule } from "../tabTypes";
@@ -41,6 +50,7 @@ const STATUS_LABELS: Record<string, string> = {
 
 function statusLabel(status: string | null): string {
   if (!status) return "غير مكتمل";
+  if (status === "closed") return getLabels().archive_month_closed_badge;
   return STATUS_LABELS[status] ?? status;
 }
 
@@ -64,7 +74,19 @@ export default function ArchiveTab() {
   const [isBackingUp, setIsBackingUp] = useState(false);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [restoreTarget, setRestoreTarget] = useState<BackupHistoryItem | null>(null);
+  // Set right after a successful restore — offers the opt-in Item F import step.
+  const [justRestored, setJustRestored] = useState(false);
+  const [isImportingUsersLabels, setIsImportingUsersLabels] = useState(false);
   const [message, setMessage] = useState<{ type: "ok" | "error"; text: string } | null>(null);
+  const [lockTarget, setLockTarget] = useState<{ folderName: string; mode: "close" | "reopen" } | null>(null);
+  const [isLocking, setIsLocking] = useState(false);
+
+  // Month close-out is admin-only, additionally gated by the archive.closeMonth feature.
+  const role = session?.role ?? "guest";
+  const canCloseMonth = useMemo(
+    () => isAdmin && hasFeature(readUserManagementState().featurePermissions, role, "archive.closeMonth"),
+    [isAdmin, role]
+  );
 
   const refresh = useCallback(async () => {
     if (!directoryHandle) return;
@@ -136,6 +158,40 @@ export default function ArchiveTab() {
     }
   }
 
+  async function handleMonthLockConfirm(note: string): Promise<void> {
+    if (!directoryHandle || !canCloseMonth || !lockTarget) return;
+    setIsLocking(true);
+    setMessage(null);
+    try {
+      const { folderName, mode } = lockTarget;
+      const result =
+        mode === "close"
+          ? await closeMonth(directoryHandle, folderName, username, note.trim() || undefined)
+          : await reopenMonth(directoryHandle, folderName, username);
+      if (result.ok) {
+        void appendWorkspaceAction(directoryHandle, {
+          actor: username,
+          actorRole: session?.role ?? "unknown",
+          action: mode === "close" ? "month-closed" : "month-reopened",
+          monthFolderName: folderName,
+          details: note.trim() ? { note: note.trim() } : undefined,
+        });
+        setLockTarget(null);
+        setMessage({
+          type: "ok",
+          text: mode === "close"
+            ? `تم إقفال الشهر ${folderName}.`
+            : `تمت إعادة فتح الشهر ${folderName}.`,
+        });
+        await refresh();
+      } else {
+        setMessage({ type: "error", text: result.error });
+      }
+    } finally {
+      setIsLocking(false);
+    }
+  }
+
   async function handleRestore(folderName: string): Promise<void> {
     if (!directoryHandle || !isAdmin) return;
     setIsBackingUp(true);
@@ -150,6 +206,7 @@ export default function ArchiveTab() {
       });
       if (result.ok) {
         setRestoreTarget(null);
+        setJustRestored(true);
         setMessage({
           type: "ok",
           text: `تمت الاستعادة من ${folderName}. تم إنشاء نسخة رجوع قبل الاستعادة: ${result.rollbackFolderName}`,
@@ -160,6 +217,39 @@ export default function ArchiveTab() {
       }
     } finally {
       setIsBackingUp(false);
+    }
+  }
+
+  async function handleImportUsersLabels(): Promise<void> {
+    if (!directoryHandle || !isAdmin) return;
+    setIsImportingUsersLabels(true);
+    try {
+      const result = await readJsonFile<UsersPermissionsFile>(
+        await getUserDataRoot(directoryHandle, false),
+        WORKSPACE_FILE_NAMES.usersPermissions
+      );
+      if (result.ok) {
+        syncUsersFromDisk(
+          result.file.data.users.map((u) => ({
+            id: u.id,
+            username: u.username,
+            displayName: u.displayName,
+            passwordHash: u.passwordHash,
+            role: u.role,
+            isActive: u.isActive,
+            hasCertScanLicense: u.hasCertScanLicense,
+            createdAt: u.createdAt,
+            updatedAt: u.updatedAt,
+          })),
+          result.file.data.permissions,
+          result.file.data.featurePermissions
+        );
+      }
+      await importLabelsSnapshot(directoryHandle);
+      setJustRestored(false);
+      setMessage({ type: "ok", text: getLabels().backup_import_users_labels_done });
+    } finally {
+      setIsImportingUsersLabels(false);
     }
   }
 
@@ -206,6 +296,19 @@ export default function ArchiveTab() {
       {message ? (
         <div className={message.type === "ok" ? "arc-msg-ok" : "arc-msg-error"} role="status">
           {message.text}
+        </div>
+      ) : null}
+
+      {justRestored && isAdmin ? (
+        <div className="arc-msg-ok" role="status">
+          <button
+            type="button"
+            className="arc-btn-secondary"
+            disabled={isImportingUsersLabels}
+            onClick={() => { void handleImportUsersLabels(); }}
+          >
+            {isImportingUsersLabels ? "جاري الاستيراد..." : getLabels().backup_import_users_labels_btn}
+          </button>
         </div>
       ) : null}
 
@@ -312,6 +415,7 @@ export default function ArchiveTab() {
                   <th>العينة</th>
                   <th>التوزيع</th>
                   <th>الإجابات</th>
+                  {canCloseMonth ? <th>الإجراءات</th> : null}
                 </tr>
               </thead>
               <tbody>
@@ -344,6 +448,31 @@ export default function ArchiveTab() {
                         <span className="arc-miss">—</span>
                       )}
                     </td>
+                    {canCloseMonth ? (
+                      <td>
+                        {item.manifestStatus === "closed" ? (
+                          <button
+                            type="button"
+                            className="arc-btn-secondary"
+                            disabled={isLocking}
+                            onClick={() => setLockTarget({ folderName: item.folderName, mode: "reopen" })}
+                          >
+                            {getLabels().archive_reopen_month_btn}
+                          </button>
+                        ) : item.hasManifest ? (
+                          <button
+                            type="button"
+                            className="arc-btn-secondary"
+                            disabled={isLocking}
+                            onClick={() => setLockTarget({ folderName: item.folderName, mode: "close" })}
+                          >
+                            {getLabels().archive_close_month_btn}
+                          </button>
+                        ) : (
+                          <span className="arc-miss">—</span>
+                        )}
+                      </td>
+                    ) : null}
                   </tr>
                 ))}
               </tbody>
@@ -399,7 +528,83 @@ export default function ArchiveTab() {
           onConfirm={() => { void handleRestore(restoreTarget.folderName); }}
         />
       ) : null}
+
+      {lockTarget ? (
+        <MonthLockDialog
+          folderName={lockTarget.folderName}
+          mode={lockTarget.mode}
+          busy={isLocking}
+          onClose={() => setLockTarget(null)}
+          onConfirm={(note) => { void handleMonthLockConfirm(note); }}
+        />
+      ) : null}
     </section>
+  );
+}
+
+function MonthLockDialog({
+  folderName,
+  mode,
+  busy,
+  onClose,
+  onConfirm,
+}: {
+  folderName: string;
+  mode: "close" | "reopen";
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: (note: string) => void;
+}) {
+  const [note, setNote] = useState("");
+  const L = getLabels();
+  const isClose = mode === "close";
+  // Close note is optional; reopen reason is mandatory.
+  const canConfirm = !busy && (isClose || note.trim().length > 0);
+
+  return (
+    <div className="arc-modal-backdrop" role="dialog" aria-modal="true">
+      <div className="arc-restore-modal">
+        <div className="arc-restore-header">
+          <div>
+            <span className="arc-panel-kicker">{isClose ? "Close Month" : "Reopen Month"}</span>
+            <h2>{isClose ? L.archive_close_month_btn : L.archive_reopen_month_btn}</h2>
+          </div>
+          <button type="button" className="arc-modal-close" onClick={onClose} aria-label="إغلاق">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className={`arc-restore-warning${isClose ? " is-danger" : ""}`}>
+          <strong>{folderName}</strong>
+          <p>{isClose ? L.archive_close_month_confirm : L.archive_reopen_month_confirm}</p>
+        </div>
+
+        <input
+          className="arc-restore-input"
+          value={note}
+          onChange={(event) => setNote(event.target.value)}
+          placeholder={isClose ? L.archive_close_note_placeholder : L.archive_reopen_reason_placeholder}
+        />
+
+        <div className="arc-restore-actions">
+          <button type="button" className="arc-btn-secondary" onClick={onClose} disabled={busy}>
+            إلغاء
+          </button>
+          <button
+            type="button"
+            className={`arc-btn-primary${isClose ? " arc-btn-danger" : ""}`}
+            disabled={!canConfirm}
+            onClick={() => onConfirm(note)}
+          >
+            {busy
+              ? "جاري التنفيذ..."
+              : isClose
+                ? L.archive_close_month_btn
+                : L.archive_reopen_month_btn}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -450,6 +655,7 @@ function RestoreDialog({
                 سيتم إنشاء نسخة رجوع من النظام الحالي أولاً، ثم استعادة ملفات JSON من النسخة المحددة.
                 يمكنك الرجوع لاحقاً من نسخة الرجوع التي ستظهر في السجل باسم قبل الاستعادة.
               </p>
+              <p>{getLabels().backup_restore_merge_notice}</p>
             </div>
             <label className="arc-restore-check">
               <input

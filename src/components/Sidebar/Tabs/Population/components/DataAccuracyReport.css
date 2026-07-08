@@ -70,7 +70,7 @@
   content: "";
   position: absolute;
   inset-block: 0;
-  right: 0;
+  inset-inline-start: 0;
   width: 3px;
   background: linear-gradient(180deg, var(--c-navy, #0F2744) 0%, var(--c-sky, #1E6FBA) 100%);
 }

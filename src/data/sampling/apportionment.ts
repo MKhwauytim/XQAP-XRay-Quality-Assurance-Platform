@@ -48,11 +48,14 @@ export function hamiltonApportionment(
 
   const remaining = totalSeats - initial.reduce((s, r) => s + r.floor, 0);
 
-  // Sort by remainder descending, breaking ties by key (stable)
+  // Sort by remainder descending, breaking ties by key. Uses a locale-independent
+  // UTF-16 code-unit comparison (NOT localeCompare) so an exact-remainder tie
+  // resolves identically on every machine/runtime — required for the sample draw
+  // to be reproducible for audits (port keys are Arabic).
   const sorted = initial.slice().sort((a, b) =>
     b.remainder !== a.remainder
       ? b.remainder - a.remainder
-      : a.key.localeCompare(b.key)
+      : a.key < b.key ? -1 : a.key > b.key ? 1 : 0
   );
 
   // Build a set of keys that get an extra seat

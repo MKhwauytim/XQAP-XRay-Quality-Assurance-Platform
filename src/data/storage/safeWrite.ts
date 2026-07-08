@@ -299,9 +299,33 @@ export async function safeWriteJson<T>(
         const bak = await readText(dir, `${fileName}.bak`);
         if (parseValidJson(bak) !== null) {
           await writeText(dir, fileName, bak as string);
+          await removeQuietly(dir, tmpName);
+          throw new Error(
+            `Safe-write validation failed for ${fileName}; rolled back to previous version.`
+          );
         }
-        await removeQuietly(dir, tmpName);
-        throw new Error(`Safe-write validation failed for ${fileName}.`);
+        // No usable .bak (first write, or .bak corrupt): the staged .tmp WAS
+        // verified before commit — promote it instead of losing the data.
+        try {
+          if (await verifyStreamedFile(dir, tmpName, stagedInfo)) {
+            const stagedText = await readText(dir, tmpName);
+            if (stagedText !== null) {
+              await writeText(dir, fileName, stagedText);
+              if (await verifyStreamedFile(dir, fileName, stagedInfo)) {
+                await removeQuietly(dir, tmpName);
+                return; // recovered — the write succeeded via promotion
+              }
+            }
+          }
+        } catch (error) {
+          // A payload near V8's max string length can make the promotion
+          // read-back throw RangeError — fall through and keep the .tmp.
+          if (!isStringLengthError(error)) throw error;
+        }
+        // Promotion failed too: keep .tmp on disk as the survivor for recovery.
+        throw new Error(
+          `Safe-write validation failed for ${fileName}; staged copy kept as ${tmpName}.`
+        );
       }
 
       // 4. Best-effort cleanup of the temp file.
@@ -343,9 +367,32 @@ export async function safeWriteJson<T>(
       const bak = await readText(dir, `${fileName}.bak`);
       if (parseValidJson(bak) !== null) {
         await writeText(dir, fileName, bak as string);
+        await removeQuietly(dir, tmpName);
+        throw new Error(
+          `Safe-write validation failed for ${fileName}; rolled back to previous version.`
+        );
       }
-      await removeQuietly(dir, tmpName);
-      throw new Error(`Safe-write validation failed for ${fileName}.`);
+      // No usable .bak (first write, or .bak corrupt): the staged .tmp WAS
+      // verified before commit — promote it instead of losing the data.
+      const staged2 = await readText(dir, tmpName);
+      const staged2Ok = skipVerify
+        ? staged2 === serialized
+        : parseValidJson(staged2) !== null;
+      if (staged2Ok) {
+        await writeText(dir, fileName, staged2 as string);
+        const check = await readText(dir, fileName);
+        const checkOk = skipVerify
+          ? check === serialized
+          : parseValidJson(check) !== null;
+        if (checkOk) {
+          await removeQuietly(dir, tmpName);
+          return; // recovered — the write succeeded via promotion
+        }
+      }
+      // Promotion failed too: keep .tmp on disk as the survivor for recovery.
+      throw new Error(
+        `Safe-write validation failed for ${fileName}; staged copy kept as ${tmpName}.`
+      );
     }
 
     // 4. Best-effort cleanup of the temp file.
@@ -473,7 +520,26 @@ export async function safeReadJson<T>(
     };
   }
 
-  if (live === null && bak === null) {
+  // Last-resort fallback: a verified .tmp left behind by a failed commit (the
+  // promotion path in safeWriteJson keeps it on total failure) — recover it
+  // rather than losing the only good copy of the write.
+  const tmp = await readText(dir, `${fileName}.tmp`);
+  const parsedTmp = parseValidJson(tmp);
+  if (parsedTmp !== null) {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("data:recovered-from-bak", { detail: { fileName } })
+      );
+    }
+    return {
+      ok: true,
+      value: unwrap<T>(parsedTmp),
+      recoveredFromBak: true,
+      rawText: tmp as string
+    };
+  }
+
+  if (live === null && bak === null && tmp === null) {
     return { ok: false, reason: "missing" };
   }
   return { ok: false, reason: "corrupt" };
