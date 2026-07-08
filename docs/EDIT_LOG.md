@@ -4,6 +4,16 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.4 — 2026-07-07 — Referral approval rework (5/11): RequestTimeline component
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/RequestTimeline.tsx`
+
+**Before:** file did not exist — a request's review notes were a single static paragraph with no history.
+
+**After:** renders the full chronological chain (submission + every decision event with reviewer/time/notes), consumed by RequestCard and HistoryView.
+
+---
+
 ## v42.3 — 2026-07-07 — Referral approval rework (4/11): useApprovalData hook
 
 **File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/useApprovalData.ts`
