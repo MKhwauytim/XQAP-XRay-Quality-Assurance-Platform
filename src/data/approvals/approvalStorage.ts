@@ -1,6 +1,6 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
-import type { ReferralDecision, ReplacementDecision, SupervisorDecisionFile } from "./approvalTypes";
+import type { DecisionEvent, DecisionEventKind, SupervisorDecisionFile } from "./approvalTypes";
 import { getPopulationMonthDir, getSampleApprovalsDir, safeWorkspaceFilePart } from "../workspace/workspacePaths";
 
 type DirectoryEntryLike = { name: string; kind: string };
@@ -66,55 +66,6 @@ export async function loadSupervisorDecisions(
   };
 }
 
-export async function upsertReferralDecision(
-  directoryHandle: DirectoryHandleLike,
-  monthFolderName: string,
-  supervisorUsername: string,
-  decision: ReferralDecision
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  try {
-    let appDir: DirectoryHandleLike;
-    try {
-      appDir = await getApprovalsDir(directoryHandle, monthFolderName);
-    } catch {
-      appDir = await getLegacyApprovalsDir(directoryHandle, monthFolderName);
-    }
-    const current = await loadSupervisorDecisions(directoryHandle, monthFolderName, supervisorUsername);
-    const others = current.referralDecisions.filter((d) => d.requestId !== decision.requestId);
-    const updated: SupervisorDecisionFile = {
-      ...current,
-      referralDecisions: [...others, decision],
-      lastUpdatedAt: new Date().toISOString(),
-    };
-    await safeWriteJson(appDir, decisionFileName(supervisorUsername), updated);
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "خطأ غير معروف." };
-  }
-}
-
-export async function upsertReplacementDecision(
-  directoryHandle: DirectoryHandleLike,
-  monthFolderName: string,
-  supervisorUsername: string,
-  decision: ReplacementDecision
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  try {
-    const appDir = await getApprovalsDir(directoryHandle, monthFolderName);
-    const current = await loadSupervisorDecisions(directoryHandle, monthFolderName, supervisorUsername);
-    const others = current.replacementDecisions.filter((d) => d.requestId !== decision.requestId);
-    const updated: SupervisorDecisionFile = {
-      ...current,
-      replacementDecisions: [...others, decision],
-      lastUpdatedAt: new Date().toISOString(),
-    };
-    await safeWriteJson(appDir, decisionFileName(supervisorUsername), updated);
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "خطأ غير معروف." };
-  }
-}
-
 /** Read all supervisor decision files for the month (for admin/supervisor aggregation). */
 export async function loadAllSupervisorDecisions(
   directoryHandle: DirectoryHandleLike,
@@ -134,4 +85,59 @@ export async function loadAllSupervisorDecisions(
   } catch {
     return [];
   }
+}
+
+export async function appendDecisionEvent(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  supervisorUsername: string,
+  event: DecisionEvent
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const appDir = await getApprovalsDir(directoryHandle, monthFolderName);
+    const current = await loadSupervisorDecisions(directoryHandle, monthFolderName, supervisorUsername);
+    const updated: SupervisorDecisionFile = {
+      ...current,
+      decisionEvents: [...(current.decisionEvents ?? []), event],
+      lastUpdatedAt: new Date().toISOString(),
+    };
+    await safeWriteJson(appDir, decisionFileName(supervisorUsername), updated);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "خطأ غير معروف." };
+  }
+}
+
+/** Combine decision events for one request from every supervisor's file, including
+ *  legacy (pre-history) decisions read as single-event history. Sorted oldest → newest. */
+export function mergeDecisionHistory(
+  files: SupervisorDecisionFile[],
+  kind: DecisionEventKind,
+  requestId: string
+): DecisionEvent[] {
+  const events: DecisionEvent[] = [];
+  for (const file of files) {
+    for (const event of file.decisionEvents ?? []) {
+      if (event.kind === kind && event.requestId === requestId) events.push(event);
+    }
+    const legacy = kind === "referral" ? file.referralDecisions : file.replacementDecisions;
+    for (const decision of legacy) {
+      if (decision.requestId !== requestId) continue;
+      events.push({
+        requestId: decision.requestId,
+        kind,
+        status: decision.status,
+        reviewedBy: decision.reviewedBy,
+        reviewedAt: decision.reviewedAt,
+        reviewNotes: decision.reviewNotes,
+      });
+    }
+  }
+  return events.sort((a, b) => a.reviewedAt.localeCompare(b.reviewedAt));
+}
+
+/** The request's current effective decision — the most recent event, or undefined
+ *  if nobody has reviewed it yet. */
+export function effectiveDecision(history: DecisionEvent[]): DecisionEvent | undefined {
+  return history.length > 0 ? history[history.length - 1] : undefined;
 }

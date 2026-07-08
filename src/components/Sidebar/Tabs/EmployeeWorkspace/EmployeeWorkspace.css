@@ -1768,3 +1768,88 @@
 }
 
 .ew-btn-referral-inline:hover { background: var(--c-sky-light, #E1EFFE); border-color: var(--c-sky, #1E6FBA); }
+
+/* ── Approval view tabs (المراجعة / السجل) ────────────────── */
+
+.ew-approval-view-tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 2px solid var(--c-border, #DDE6EF); }
+
+.ew-approval-view-tab {
+  padding: 10px 18px;
+  border: none;
+  background: none;
+  color: var(--c-ink-3, #50536F);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: color 140ms ease, border-color 140ms ease;
+}
+
+.ew-approval-view-tab:hover { color: var(--c-navy, #0E2444); }
+.ew-approval-view-tab.active { color: var(--c-navy, #0E2444); border-color: var(--c-sky, #009ADE); }
+
+/* ── Summary bar (status-count chips) ─────────────────────── */
+
+.ew-summary-bar { display: flex; gap: 6px; }
+
+.ew-summary-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 13px;
+  border-radius: 999px;
+  border: 1.5px solid var(--c-border, #DDE6EF);
+  background: var(--c-surface-2, #F6F8FA);
+  color: var(--c-ink-2, #263C58);
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.ew-summary-chip:hover { border-color: var(--c-border-2, #C2CEDC); }
+.ew-summary-chip.active { background: var(--c-navy, #0E2444); color: #FFFFFF; border-color: var(--c-navy, #0E2444); }
+.ew-summary-chip.active .ew-status-count { background: rgba(255,255,255,0.22); color: #FFFFFF; }
+.ew-summary-chip.has-pending { border-color: var(--c-warning-border, #E5B46E); }
+
+/* ── Request timeline ──────────────────────────────────────── */
+
+.ew-timeline { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.ew-timeline-item { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; }
+
+.ew-timeline-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--c-ink-4, #8395AC);
+  margin-top: 4px; flex-shrink: 0;
+}
+
+.ew-timeline-item--approved .ew-timeline-dot { background: var(--c-success, #004030); }
+.ew-timeline-item--denied .ew-timeline-dot { background: var(--c-danger, #9F1624); }
+
+.ew-timeline-body { flex: 1; }
+.ew-timeline-meta { color: var(--c-ink-3, #50536F); font-weight: 500; }
+.ew-timeline-note { margin: 2px 0 0; color: var(--c-ink-2, #263C58); font-style: italic; }
+
+/* ── Bulk selection ────────────────────────────────────────── */
+
+.ew-request-checkbox { width: 18px; height: 18px; margin-top: 4px; cursor: pointer; flex-shrink: 0; }
+
+.ew-bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: var(--c-navy-soft, #E8EEF6);
+  border: 1px solid var(--c-border-2, #C2CEDC);
+  border-radius: var(--r-sm, 8px);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.ew-bulk-bar-count { font-size: 13px; font-weight: 700; color: var(--c-navy, #0E2444); margin-inline-end: auto; }
+
+.ew-referral-card--selected { border-color: var(--c-sky, #009ADE); box-shadow: 0 0 0 2px rgba(0, 154, 222, 0.15); }

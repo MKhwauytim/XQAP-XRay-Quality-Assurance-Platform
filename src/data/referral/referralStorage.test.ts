@@ -88,6 +88,27 @@ describe("referralStorage", () => {
     expect(pendingIds.has("img-req-1-2")).toBe(true);
     expect(pendingIds.has("img-req-2-1")).toBe(false); // approved
   });
+
+  it("keeps a full decision history and exposes it on the loaded request", async () => {
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    const req1 = mockReferral("req-1", "alice", "bob");
+    await appendReferralRequest(root, "5-May-2026", req1);
+
+    await updateReferralStatus(root, "5-May-2026", "req-1", {
+      status: "denied", reviewedBy: "supervisor-1",
+      reviewedAt: "2026-07-01T10:00:00.000Z", reviewNotes: "not enough detail",
+    });
+    await updateReferralStatus(root, "5-May-2026", "req-1", {
+      status: "approved", reviewedBy: "supervisor-1",
+      reviewedAt: "2026-07-02T10:00:00.000Z", reviewNotes: "resolved",
+    });
+
+    const log = await loadReferralLog(root, "5-May-2026");
+    expect(log.requests[0].status).toBe("approved");
+    expect(log.requests[0].history).toHaveLength(2);
+    expect(log.requests[0].history?.[0].status).toBe("denied");
+    expect(log.requests[0].history?.[1].status).toBe("approved");
+  });
 });
 
 describe("replacement requests in referralStorage", () => {
@@ -133,5 +154,22 @@ describe("replacement requests in referralStorage", () => {
     expect(logAfter.requests).toHaveLength(1);
     expect(logAfter.requests[0].status).toBe("approved");
     expect(logAfter.requests[0].reviewedBy).toBe("supervisor-1");
+  });
+
+  it("keeps a full decision history for replacement requests", async () => {
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    const req = mockReplacement("rep-1", "alice");
+    await appendReplacementRequest(root, "5-May-2026", req);
+
+    await updateReplacementStatus(root, "5-May-2026", "rep-1", {
+      status: "denied", reviewedBy: "supervisor-1", reviewedAt: "2026-07-01T10:00:00.000Z",
+    });
+    await updateReplacementStatus(root, "5-May-2026", "rep-1", {
+      status: "approved", reviewedBy: "supervisor-1", reviewedAt: "2026-07-02T10:00:00.000Z",
+    });
+
+    const log = await loadReplacementLog(root, "5-May-2026");
+    expect(log.requests[0].status).toBe("approved");
+    expect(log.requests[0].history).toHaveLength(2);
   });
 });

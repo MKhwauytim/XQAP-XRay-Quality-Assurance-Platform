@@ -4,6 +4,229 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.12 — 2026-07-08 — Referral approval rework: fix duplicate bulk-result banner, friendly labels in bulk confirm modal
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/index.tsx`
+
+**Before:**
+```tsx
+  async function handleBulk(requests: CardRequest[], action: "approve" | "deny", notes: string) {
+    const outcomes = section === "referral"
+      ? await bulkReferralDecision(requests as ReferralRequest[], action, notes)
+      : await bulkReplacementDecision(requests as ReplacementRequest[], action, notes);
+    const failed = outcomes.filter((o) => !o.ok).length;
+    setStatusMsg(failed === 0
+      ? { type: "ok", text: `تمت معالجة ${outcomes.length} طلب بنجاح.` }
+      : { type: "error", text: `نجح ${outcomes.length - failed} من ${outcomes.length}. فشل ${failed}.` });
+    return outcomes;
+  }
+```
+
+**After:**
+```tsx
+  async function handleBulk(requests: CardRequest[], action: "approve" | "deny", notes: string) {
+    const outcomes = section === "referral"
+      ? await bulkReferralDecision(requests as ReferralRequest[], action, notes)
+      : await bulkReplacementDecision(requests as ReplacementRequest[], action, notes);
+    return outcomes;
+  }
+```
+
+Bulk approve/deny was rendering two different result banners simultaneously: this page-level `statusMsg` banner and `RequestList`'s own richer `bulkResult` banner (with per-failure detail). `RequestList`'s banner is now the single source of truth for bulk outcomes; `statusMsg` is untouched for single approve/deny (`handleApprove`/`handleDeny`).
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/RequestList.tsx`
+
+**Before:**
+```tsx
+import RequestCard from "./RequestCard";
+...
+  function toggleSelect(id: string): void {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+...
+                {selectedRequests.map((r) => <li key={r.requestId}>{r.requestId}</li>)}
+```
+
+**After:**
+```tsx
+import RequestCard, { isReferral } from "./RequestCard";
+...
+  function toggleSelect(id: string): void {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  function describeSelected(request: CardRequest): string {
+    if (isReferral(request)) {
+      return `${userDisplayMap[request.fromEmployee] ?? request.fromEmployee} ← ${userDisplayMap[request.toEmployee] ?? request.toEmployee}`;
+    }
+    return `${request.originalXrayImageId} → ${request.replacementXrayImageId}`;
+  }
+...
+                {selectedRequests.map((r) => <li key={r.requestId}>{describeSelected(r)}</li>)}
+```
+
+The bulk confirm modal previously showed raw request IDs (e.g. `req-a1b2c3`), not useful to a reviewer deciding whether to confirm. `describeSelected` mirrors the exact label format `useApprovalData.ts`'s `bulkReferralDecision`/`bulkReplacementDecision` compute for `BulkOutcome.label`, so the pre-confirm list and post-action result banner are visually consistent.
+
+## v42.11 — 2026-07-07 — Referral approval rework: suppress known-safe lint rules
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/RequestCard.tsx`
+
+**Before:** `export function isReferral(...)` had no lint suppression; `react-refresh/only-export-components` flagged the file for exporting a non-component alongside the default `RequestCard` export.
+
+**After:** added `// eslint-disable-next-line react-refresh/only-export-components` above the export — `isReferral` is a deliberate, load-bearing type guard consumed by later tasks, not an oversight.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/RequestList.tsx`
+
+**Before:** `useEffect(() => { setSelected(new Set()); }, [bulkEnabled]);` had no lint suppression; `react-hooks/set-state-in-effect` flagged the intentional selection reset.
+
+**After:** added `// eslint-disable-next-line react-hooks/set-state-in-effect` above the effect, matching the same suppression already used elsewhere in this codebase for the identical pattern.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/useApprovalData.ts`
+
+**Before:** `useEffect(() => { void loadData(); }, [loadData]);` had no lint suppression; same rule flagged the standard load-on-mount pattern.
+
+**After:** added the same `// eslint-disable-next-line react-hooks/set-state-in-effect` suppression, mirroring the deleted monolithic file's original comment for this exact line.
+
+## v42.10 — 2026-07-07 — Referral approval rework (11/11): orchestration + CSS, retire monolithic file
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval.tsx`
+
+**Before:** 688-line single file: data loading, mutations, both cards, both dialogs, and the review modal all inline. Status filter tabs and section tabs shared one CSS class; no bulk actions; no cross-month history; decisions overwrote each other; idempotency/ownership/month-key bugs (see bug-fix map in the plan).
+
+**After:** replaced by `views/ReferralApproval/` — `index.tsx` orchestrates `useApprovalData`, `SummaryBar`, `RequestList`, `ReviewModal`, `HistoryView`; each is independently readable and (where it carries real logic risk) tested.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/EmployeeWorkspace.css`
+
+**Before:** no styles for view tabs, summary chips, timeline, or bulk selection.
+
+**After:** added `.ew-approval-view-tab*`, `.ew-summary-*`, `.ew-timeline*`, `.ew-bulk-bar*`, `.ew-request-checkbox`, `.ew-referral-card--selected`.
+
+---
+
+## v42.9 — 2026-07-07 — Referral approval rework (10/11): cross-month HistoryView
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/HistoryView.tsx`
+
+**Before:** file did not exist — no way to see decided/all requests across months; the page only ever showed one month at a time.
+
+**After:** aggregates referral + replacement requests across every processed month into a `DataTable` (search/filter/sort/XLSX export for free), row click expands the full `RequestTimeline`. Same visibility rule as the review queue (reviewers see all, employees see their own).
+
+---
+
+## v42.8 — 2026-07-07 — Referral approval rework (9/11): extract ReviewModal
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/ReviewModal.tsx`
+
+**Before:** file did not exist — `ReviewModal` was defined inline at the bottom of the monolithic `ReferralApproval.tsx`.
+
+**After:** moved to its own file, `description` widened from `string` to `ReactNode`. Behavior unchanged.
+
+---
+
+## v42.7 — 2026-07-07 — Referral approval rework (8/11): RequestList with bulk actions
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/RequestList.tsx`
+
+**Before:** file did not exist — no bulk approve/deny; individual `.map(...)` blocks inline in the monolithic component.
+
+**After:** one list component sorts oldest-first with a sticky bulk bar + confirm modal when viewing pending, newest-first with no bulk controls otherwise; each bulk action re-validates every selected request individually (via the hook) and reports partial success/failure.
+
+---
+
+## v42.6 — 2026-07-07 — Referral approval rework (7/11): SummaryBar component
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/SummaryBar.tsx`
+
+**Before:** file did not exist — status filters reused the exact same `.ew-referral-status-tab` class as the referral/replacement section tabs, making the two controls visually indistinguishable.
+
+**After:** `SummaryBar` renders status counts as `.ew-summary-chip` pills with their own style (Task 11 adds the CSS).
+
+---
+
+## v42.5 — 2026-07-07 — Referral approval rework (6/11): unified RequestCard
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/RequestCard.tsx`
+
+**Before:** file did not exist — the old `ReferralCard`/`ReplacementCard` were separate near-duplicate components inside the monolithic file.
+
+**After:** one `RequestCard` discriminates via the exported `isReferral` type guard, adds a bulk-selection checkbox slot, and embeds `RequestTimeline` instead of a single static review-notes line.
+
+---
+
+## v42.4 — 2026-07-07 — Referral approval rework (5/11): RequestTimeline component
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/RequestTimeline.tsx`
+
+**Before:** file did not exist — a request's review notes were a single static paragraph with no history.
+
+**After:** renders the full chronological chain (submission + every decision event with reviewer/time/notes), consumed by RequestCard and HistoryView.
+
+---
+
+## v42.3 — 2026-07-07 — Referral approval rework (4/11): useApprovalData hook
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/useApprovalData.ts`
+
+**Before:** file did not exist — this logic lived inline in the 688-line `ReferralApproval.tsx`, with no idempotency check, no ownership re-verification, decisions written against `selMonth` instead of the request's own month, and no stale-load guard across month switches.
+
+**After:** extracted into a hook; every mutation re-checks fresh status (`assertRequestPending`), referrals re-check sample ownership (`assertSamplesOwnedBy`), all writes key off `request.monthFolderName`, and a `loadTokenRef` discards results from a superseded month selection.
+
+---
+
+## v42.2 — 2026-07-07 — Referral approval rework (3/11): wire decision history into referralStorage
+
+**File:** `src/data/referral/referralTypes.ts`
+
+**Before:** `ReferralRequest`/`ReplacementRequest` had no history field.
+
+**After:** both gain `history?: DecisionEvent[]`, populated at load time.
+
+**File:** `src/data/referral/referralStorage.ts`
+
+**Before:** `updateReferralStatus`/`updateReplacementStatus` called `upsertReferralDecision`/`upsertReplacementDecision` (latest-wins, history lost on re-review).
+
+**After:** both call `appendDecisionEvent`; `loadReferralLog`/`loadReplacementLog` derive `status` from `effectiveDecision(mergeDecisionHistory(...))` and attach the full `history`.
+
+**File:** `src/data/approvals/approvalStorage.ts`
+
+**Before:** `upsertReferralDecision`/`upsertReplacementDecision` exported.
+
+**After:** removed — no longer called anywhere.
+
+---
+
+## v42.1 — 2026-07-07 — Referral approval rework (2/11): idempotency + ownership guards
+
+**File:** `src/data/approvals/approvalGuards.ts`
+
+**Before:** file did not exist — nothing verified a request was still pending, or that referred samples were still owned by the requester, before mutating.
+
+**After:** added `assertRequestPending` and `assertSamplesOwnedBy`, pure functions consumed by the approval hook (Task 4) before every approve/deny.
+
+---
+
+## v42.0 — 2026-07-07 — Referral approval rework (1/11): append-only decision-event log
+
+**File:** `src/data/approvals/approvalTypes.ts`
+
+**Before:** `SupervisorDecisionFile` had only latest-wins `referralDecisions`/`replacementDecisions` arrays — no way to see a request's full review history.
+
+**After:** added `DecisionEvent`/`DecisionEventKind` and an optional `decisionEvents?: DecisionEvent[]` field, additive and backwards compatible.
+
+**File:** `src/data/approvals/approvalStorage.ts`
+
+**Before:** no way to append a decision without overwriting the prior one.
+
+**After:** added `appendDecisionEvent`, `mergeDecisionHistory`, `effectiveDecision`.
+
 ## v41.4 — 2026-07-05 — Fix auto-backup NotFoundError race during concurrent saves
 
 **Symptom:** `تعذر إنشاء النسخة الاحتياطية التلقائية: A requested file or directory could not
