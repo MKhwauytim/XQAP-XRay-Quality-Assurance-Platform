@@ -4,6 +4,72 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.20 — 2026-07-08 — B4 (Batch 1), file 2/4: hex-literal token sweep of Reports.css
+
+**File:** `src/components/Sidebar/Tabs/Reports/Reports.css`
+
+Same mechanical sweep as v42.19, applied to `Reports.css` (197 raw hex literals, 40+ distinct
+values including case-duplicates like `#fff`/`#FFFFFF`). 174 replaced with `var(--token)`
+(byte-identical match against `index.css`, including the 9 "Extended accents" tokens added in
+v42.18 for this file's dashboard mini-palette: `--c-coral`, `--c-indigo`, `--c-teal-deep`,
+`--c-amber-deep`, `--c-azure`, `--c-rose-tint`, `--c-slate-border`, `--c-mint-tint`,
+`--c-slate-muted`). 126 redundant `var(--X, var(--X))` self-fallbacks collapsed to `var(--X)`. 23
+literals left as `/* no-token: one-off */` (single in-file occurrence, no repeat, no exact match).
+
+**Before:**
+```css
+.rh-dash {
+  --gold: #b7791f;
+  --gold-2: #8f5e14;
+  --blue: var(--c-sky, #009ade);
+  --green: #00695c;
+  --coral: #c0392b;
+  --slate: #64748b;
+  --cyan: #0e7490;
+  --purple: #6366f1;
+  --navy: var(--c-navy, #0e2444);
+  --navy-2: #1b3a66;
+  --panel: var(--c-surface-2, #F6F8FA);
+  ...
+}
+```
+
+**After:**
+```css
+.rh-dash {
+  --gold: var(--c-amber-deep);
+  --gold-2: #8f5e14 /* no-token: one-off */;
+  --blue: var(--c-sky);
+  --green: var(--c-teal-deep);
+  --coral: var(--c-coral);
+  --slate: #64748b /* no-token: one-off */;
+  --cyan: #0e7490 /* no-token: one-off */;
+  --purple: var(--c-indigo);
+  --navy: var(--c-navy);
+  --navy-2: #1b3a66 /* no-token: one-off */;
+  --panel: var(--c-surface-2);
+  ...
+}
+```
+
+Full hex → token mapping applied in this file: `#0E2444`/`#0e2444`→`--c-navy`, `#fff`/`#FFFFFF`→
+`--c-surface`, `#DDE6EF`/`#dde6ef`→`--c-border`, `#50536F`/`#50536f`→`--c-ink-3`,
+`#F6F8FA`/`#f6f8fa`→`--c-surface-2`, `#009ADE`/`#009ade`→`--c-sky`, `#c0392b`→`--c-coral`,
+`#E5F5FB`→`--c-sky-light`, `#FBF2DC`→`--c-warning-bg`, `#6366f1`→`--c-indigo`,
+`#00695c`→`--c-teal-deep`, `#b7791f`→`--c-amber-deep`, `#E8EEF6`→`--c-navy-soft`,
+`#E3F3ED`→`--c-success-bg`, `#775000`/`#004030`→`--c-warning`/`--c-success`,
+`#0078d4`→`--c-azure`, `#f3cccc`→`--c-rose-tint`, `#d0d7de`→`--c-slate-border`,
+`#bbf7d0`→`--c-mint-tint`, `#DAA328`→`--brand-premium`, `#8395AC`→`--c-ink-4`,
+`#57606a`→`--c-slate-muted`, `#0B1F33`/`#0b1f33`→`--c-ink`. Left as `no-token: one-off`:
+`#fdf8ec`, `#fdf1f1`, `#fbe3e1`, `#fbbf24`, `#f3e2b3`, `#f0fdf4`, `#eef2ff`, `#e1dfdd`, `#dc2626`,
+`#bde0fa`, `#b6e3cf`, `#a19f9d`, `#8f5e14`, `#64748b`, `#605e5c`, `#34d399`, `#24292f`, `#201f1e`,
+`#1f2328`, `#1b3a66`, `#16a34a`, `#106ebe`, `#0e7490`. `npm run lint` and `npm run test:run` green
+(364/364); verified via preview `getComputedStyle` that `--c-coral`, `--c-indigo`, `--c-teal-deep`,
+`--c-amber-deep`, `--c-azure`, `--c-mint-tint`, `--c-slate-border`, `--c-slate-muted`,
+`--c-rose-tint` all resolve to their pre-sweep hex values.
+
+---
+
 ## v42.19 — 2026-07-08 — B4 (Batch 1), file 1/4: hex-literal token sweep of EmployeeWorkspace.css
 
 **File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/EmployeeWorkspace.css`
