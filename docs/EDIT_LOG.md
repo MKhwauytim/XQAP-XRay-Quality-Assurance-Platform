@@ -4,6 +4,26 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.11 — 2026-07-07 — Referral approval rework: suppress known-safe lint rules
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/RequestCard.tsx`
+
+**Before:** `export function isReferral(...)` had no lint suppression; `react-refresh/only-export-components` flagged the file for exporting a non-component alongside the default `RequestCard` export.
+
+**After:** added `// eslint-disable-next-line react-refresh/only-export-components` above the export — `isReferral` is a deliberate, load-bearing type guard consumed by later tasks, not an oversight.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/RequestList.tsx`
+
+**Before:** `useEffect(() => { setSelected(new Set()); }, [bulkEnabled]);` had no lint suppression; `react-hooks/set-state-in-effect` flagged the intentional selection reset.
+
+**After:** added `// eslint-disable-next-line react-hooks/set-state-in-effect` above the effect, matching the same suppression already used elsewhere in this codebase for the identical pattern.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/useApprovalData.ts`
+
+**Before:** `useEffect(() => { void loadData(); }, [loadData]);` had no lint suppression; same rule flagged the standard load-on-mount pattern.
+
+**After:** added the same `// eslint-disable-next-line react-hooks/set-state-in-effect` suppression, mirroring the deleted monolithic file's original comment for this exact line.
+
 ## v42.10 — 2026-07-07 — Referral approval rework (11/11): orchestration + CSS, retire monolithic file
 
 **File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval.tsx`
