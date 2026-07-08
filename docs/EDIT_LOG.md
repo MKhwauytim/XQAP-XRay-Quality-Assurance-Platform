@@ -4,6 +4,16 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.7 — 2026-07-07 — Referral approval rework (8/11): RequestList with bulk actions
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/RequestList.tsx`
+
+**Before:** file did not exist — no bulk approve/deny; individual `.map(...)` blocks inline in the monolithic component.
+
+**After:** one list component sorts oldest-first with a sticky bulk bar + confirm modal when viewing pending, newest-first with no bulk controls otherwise; each bulk action re-validates every selected request individually (via the hook) and reports partial success/failure.
+
+---
+
 ## v42.6 — 2026-07-07 — Referral approval rework (7/11): SummaryBar component
 
 **File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/SummaryBar.tsx`
