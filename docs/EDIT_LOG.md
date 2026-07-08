@@ -4,6 +4,16 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.6 — 2026-07-07 — Referral approval rework (7/11): SummaryBar component
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/SummaryBar.tsx`
+
+**Before:** file did not exist — status filters reused the exact same `.ew-referral-status-tab` class as the referral/replacement section tabs, making the two controls visually indistinguishable.
+
+**After:** `SummaryBar` renders status counts as `.ew-summary-chip` pills with their own style (Task 11 adds the CSS).
+
+---
+
 ## v42.5 — 2026-07-07 — Referral approval rework (6/11): unified RequestCard
 
 **File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/RequestCard.tsx`
