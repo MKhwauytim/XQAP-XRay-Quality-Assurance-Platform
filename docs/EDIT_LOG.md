@@ -408,6 +408,40 @@ raw px in padding/margin/gap)`). `npm run lint` and `npm run test:run` green (36
 
 ---
 
+## v42.28 — 2026-07-08 — B6 (Batch 1) consumption, file 4/4: UserManagement.css
+
+**File:** `src/components/Sidebar/Tabs/UserManagement/UserManagement.css`
+
+Same spacing sweep, run over `UserManagement.css` (the last of the four B6 target files). Result:
+77 declarations fully converted to `--sp-*` tokens (98 individual px values replaced), 4
+declarations left with raw px + `/* no-scale */` (three off-scale values, one `!important`
+declaration whose value is off-scale — the tokenizer correctly preserves the `!important` flag
+as a separate, untouched token).
+
+**Before:**
+```css
+.um-page {
+  padding: 28px;
+}
+...
+.um-badge-sm { padding-inline-start: 28px !important; }
+```
+
+**After:**
+```css
+.um-page {
+  padding: 28px /* no-scale */;
+}
+...
+.um-badge-sm { padding-inline-start: 28px !important /* no-scale */; }
+```
+
+Verified with the dedicated verifier (`node checkSpacing.mjs UserManagement.css` → `OK (0
+unannotated raw px in padding/margin/gap)`). `npm run lint` and `npm run test:run` green
+(364/364). This completes B6 consumption across all four target files.
+
+---
+
 ## v42.23 — 2026-07-08 — B4 (Batch 1) regression guard: scripts/check-hex-literals.mjs
 
 **File:** `scripts/check-hex-literals.mjs` (new)
