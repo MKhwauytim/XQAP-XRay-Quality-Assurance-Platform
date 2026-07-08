@@ -68,10 +68,6 @@ export default function ReferralApproval({ directoryHandle }: Props) {
     const outcomes = section === "referral"
       ? await bulkReferralDecision(requests as ReferralRequest[], action, notes)
       : await bulkReplacementDecision(requests as ReplacementRequest[], action, notes);
-    const failed = outcomes.filter((o) => !o.ok).length;
-    setStatusMsg(failed === 0
-      ? { type: "ok", text: `تمت معالجة ${outcomes.length} طلب بنجاح.` }
-      : { type: "error", text: `نجح ${outcomes.length - failed} من ${outcomes.length}. فشل ${failed}.` });
     return outcomes;
   }
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
-import RequestCard from "./RequestCard";
+import RequestCard, { isReferral } from "./RequestCard";
 import type { ReferralRequest, ReplacementRequest } from "../../../../../../data/referral/referralTypes";
 import type { DistributionEntry } from "../../../../../../data/distribution/distributionTypes";
 import type { PreparedPopulationRow } from "../../../../../../data/population/populationTypes";
@@ -44,6 +44,13 @@ export default function RequestList({ requests, bulkEnabled, userDisplayMap, sam
       if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
+  }
+
+  function describeSelected(request: CardRequest): string {
+    if (isReferral(request)) {
+      return `${userDisplayMap[request.fromEmployee] ?? request.fromEmployee} ← ${userDisplayMap[request.toEmployee] ?? request.toEmployee}`;
+    }
+    return `${request.originalXrayImageId} → ${request.replacementXrayImageId}`;
   }
 
   async function confirmBulk(): Promise<void> {
@@ -104,7 +111,7 @@ export default function RequestList({ requests, bulkEnabled, userDisplayMap, sam
             </div>
             <div className="ew-replace-reason">
               <ul style={{ margin: "0 0 8px", paddingInlineStart: 18 }}>
-                {selectedRequests.map((r) => <li key={r.requestId}>{r.requestId}</li>)}
+                {selectedRequests.map((r) => <li key={r.requestId}>{describeSelected(r)}</li>)}
               </ul>
               <label className="ew-field-label" htmlFor="bulk-notes">ملاحظة (اختياري، تُطبَّق على الكل)</label>
               <textarea id="bulk-notes" className="ew-input ew-textarea" rows={2} value={bulkNotes} onChange={(e) => setBulkNotes(e.target.value)} />
