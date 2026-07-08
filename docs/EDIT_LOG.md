@@ -4,6 +4,16 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.5 — 2026-07-07 — Referral approval rework (6/11): unified RequestCard
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/RequestCard.tsx`
+
+**Before:** file did not exist — the old `ReferralCard`/`ReplacementCard` were separate near-duplicate components inside the monolithic file.
+
+**After:** one `RequestCard` discriminates via the exported `isReferral` type guard, adds a bulk-selection checkbox slot, and embeds `RequestTimeline` instead of a single static review-notes line.
+
+---
+
 ## v42.4 — 2026-07-07 — Referral approval rework (5/11): RequestTimeline component
 
 **File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/RequestTimeline.tsx`
