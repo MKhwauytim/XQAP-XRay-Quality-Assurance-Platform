@@ -4,6 +4,16 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.3 — 2026-07-07 — Referral approval rework (4/11): useApprovalData hook
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/useApprovalData.ts`
+
+**Before:** file did not exist — this logic lived inline in the 688-line `ReferralApproval.tsx`, with no idempotency check, no ownership re-verification, decisions written against `selMonth` instead of the request's own month, and no stale-load guard across month switches.
+
+**After:** extracted into a hook; every mutation re-checks fresh status (`assertRequestPending`), referrals re-check sample ownership (`assertSamplesOwnedBy`), all writes key off `request.monthFolderName`, and a `loadTokenRef` discards results from a superseded month selection.
+
+---
+
 ## v42.2 — 2026-07-07 — Referral approval rework (3/11): wire decision history into referralStorage
 
 **File:** `src/data/referral/referralTypes.ts`
