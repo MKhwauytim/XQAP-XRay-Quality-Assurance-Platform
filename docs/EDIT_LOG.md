@@ -4,6 +4,16 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.9 — 2026-07-07 — Referral approval rework (10/11): cross-month HistoryView
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/HistoryView.tsx`
+
+**Before:** file did not exist — no way to see decided/all requests across months; the page only ever showed one month at a time.
+
+**After:** aggregates referral + replacement requests across every processed month into a `DataTable` (search/filter/sort/XLSX export for free), row click expands the full `RequestTimeline`. Same visibility rule as the review queue (reviewers see all, employees see their own).
+
+---
+
 ## v42.8 — 2026-07-07 — Referral approval rework (9/11): extract ReviewModal
 
 **File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/ReviewModal.tsx`
