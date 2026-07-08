@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import ReportDesignerTab from "../ReportDesigner";
-import { AlertTriangle, BarChart2, BarChart3, Building2, Check, ClipboardList, Database, Download, FileStack, FileText, Filter, FolderOpen, Globe, History, Presentation, Settings2, User, Users, X } from "lucide-react";
+import { AlertTriangle, BarChart2, BarChart3, Building2, Check, ClipboardList, Database, Download, FileStack, FileText, Filter, FolderOpen, Globe, History, Presentation, User, Users, X } from "lucide-react";
 
 import type { SidebarTabModule } from "../tabTypes";
 import { loadOrDeriveDistributionCurrent } from "../../../../data/distribution/distributionStorage";
@@ -13,6 +13,8 @@ import { openOrDownload } from "../../../../data/reporting/htmlReport";
 import { buildSampleXlsx, openSampleReport } from "../../../../data/reporting/sampleReport";
 import { openExecutiveReport, buildExecutiveXlsx } from "../../../../data/reporting/executiveReport";
 import { openExecutiveDeck } from "../../../../data/reporting/executive/deck";
+import { openManagementReport } from "../../../../data/reporting/management/managementReport";
+import { useLabels } from "../../../../data/labels/useLabels";
 import { buildReportModel } from "../../../../data/reporting/executive/model/reportModel";
 import type { ReportModel } from "../../../../data/reporting/executive/model/reportModel";
 import { rankedBar, gauge, donut, heatmap } from "../../../../data/reporting/executive/ui/charts";
@@ -61,7 +63,7 @@ export const tabConfig: SidebarTabModule["tabConfig"] = {
   ],
 };
 
-type ReportType = "sample" | "sample-xlsx" | "sample-print" | "distribution" | "distribution-xlsx" | "distribution-print" | "executive" | "executive-xlsx" | "executive-deck";
+type ReportType = "sample" | "sample-xlsx" | "sample-print" | "distribution" | "distribution-xlsx" | "distribution-print" | "executive" | "executive-xlsx" | "executive-deck" | "management";
 type ReportBaseType = "sample" | "distribution" | "executive";
 type ReportFormat = "html" | "xlsx" | "print" | "deck" | "document";
 type ReportsSection = "reports" | "kpi";
@@ -119,6 +121,7 @@ function Chart({ svg }: { svg: string }) {
 // Inner component that holds all the existing Reports state and logic.
 function ReportsContent() {
   const { directoryHandle } = useWorkspace();
+  const labels = useLabels();
 
   const [months, setMonths] = useState<Array<{ folderName: string }>>([]);
   const [selectedMonth, setSelectedMonth] = useState("");
@@ -346,6 +349,11 @@ function ReportsContent() {
           openExecutiveReport(execInput, names);
           showToast("ok", "تم فتح التقرير التفصيلي — استخدم طباعة/PDF.");
         }
+      } else if (type === "management") {
+        const execInput = await loadExecInput();
+        if (!execInput) { showToast("error", labels.mgmt_card_toast_no_population); return; }
+        openManagementReport(execInput, buildDisplayNameMap());
+        showToast("ok", labels.mgmt_card_toast_opened);
       }
     } catch {
       showToast("error", "حدث خطأ أثناء توليد التقرير.");
@@ -890,29 +898,33 @@ function ReportsContent() {
           </div>
         </div>
 
-        {/* Department — coming soon */}
-        <div className="rh-card rh-card-disabled">
+        {/* Management report — live (C2) */}
+        <div className="rh-card">
           <div className="rh-card-accent rh-acc-purple" />
           <div className="rh-card-body">
             <div className="rh-card-top">
               <div className="rh-icon rh-icon-purple"><Building2 size={22} /></div>
-              <span className="rh-badge rh-badge-soon">قريباً</span>
+              <span className="rh-badge rh-badge-ready">{labels.mgmt_card_badge_ready}</span>
             </div>
-            <div className="rh-card-title">تقرير الإدارة</div>
-            <p className="rh-card-desc">
-              نظرة شاملة قابلة للتخصيص حسب الموظف — الإنجاز الفردي، الدقة، الاشتباه الفائت، والمقارنة بين الموظفين.
-            </p>
+            <div className="rh-card-title">{labels.mgmt_report_title}</div>
+            <p className="rh-card-desc">{labels.mgmt_card_desc}</p>
             <div className="rh-tags">
-              <span className="rh-tag"><Settings2 size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> قابل للتخصيص</span>
-              <span className="rh-tag"><User size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> فردي / كلي</span>
+              <span className="rh-tag"><FileText size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> {labels.mgmt_card_tag_summary}</span>
+              <span className="rh-tag"><Users size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> {labels.mgmt_card_tag_compare}</span>
             </div>
           </div>
           <div className="rh-card-footer">
-            <span className="rh-req">
-              <i className="rh-dot rh-dot-amber" />
-              قيد التطوير
-            </span>
-            <button className="rh-btn rh-btn-ghost" disabled>قريباً</button>
+            <div className="rh-export-controls" role="group">
+              <button
+                type="button"
+                className="rh-btn rh-btn-indigo"
+                disabled={busy || !selectedMonth}
+                onClick={() => { void generate("management"); }}
+              >
+                {generating === "management" ? <span className="rh-spinner" /> : null}
+                {generating === "management" ? labels.mgmt_card_generating : labels.mgmt_card_button}
+              </button>
+            </div>
           </div>
         </div>
 

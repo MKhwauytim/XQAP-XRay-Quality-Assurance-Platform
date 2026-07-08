@@ -4,6 +4,126 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.27 — 2026-07-08 — C2 (Batch 2): wire the تقرير الإدارة Reports card live (remove "قريباً")
+
+**File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
+
+Enabled the previously-disabled management-report card: added `openManagementReport` +
+`useLabels` imports, extended `ReportType` with `"management"`, added a `management` branch to
+`generate()`, and replaced the disabled `rh-card-disabled` / `rh-badge-soon` card (with its
+"قيد التطوير" footer + disabled "قريباً" button) with a live card whose button calls
+`generate("management")`. All card/toast text now reads from the new `mgmt_*` label keys.
+
+**Before:**
+```tsx
+        {/* Department — coming soon */}
+        <div className="rh-card rh-card-disabled">
+          <div className="rh-card-accent rh-acc-purple" />
+          <div className="rh-card-body">
+            <div className="rh-card-top">
+              <div className="rh-icon rh-icon-purple"><Building2 size={22} /></div>
+              <span className="rh-badge rh-badge-soon">قريباً</span>
+            </div>
+            <div className="rh-card-title">تقرير الإدارة</div>
+            <p className="rh-card-desc">
+              نظرة شاملة قابلة للتخصيص حسب الموظف — الإنجاز الفردي، الدقة، الاشتباه الفائت، والمقارنة بين الموظفين.
+            </p>
+            <div className="rh-tags">
+              <span className="rh-tag"><Settings2 .../> قابل للتخصيص</span>
+              <span className="rh-tag"><User .../> فردي / كلي</span>
+            </div>
+          </div>
+          <div className="rh-card-footer">
+            <span className="rh-req"><i className="rh-dot rh-dot-amber" /> قيد التطوير</span>
+            <button className="rh-btn rh-btn-ghost" disabled>قريباً</button>
+          </div>
+        </div>
+```
+
+**After:**
+```tsx
+        {/* Management report — live (C2) */}
+        <div className="rh-card">
+          <div className="rh-card-accent rh-acc-purple" />
+          <div className="rh-card-body">
+            <div className="rh-card-top">
+              <div className="rh-icon rh-icon-purple"><Building2 size={22} /></div>
+              <span className="rh-badge rh-badge-ready">{labels.mgmt_card_badge_ready}</span>
+            </div>
+            <div className="rh-card-title">{labels.mgmt_report_title}</div>
+            <p className="rh-card-desc">{labels.mgmt_card_desc}</p>
+            <div className="rh-tags">
+              <span className="rh-tag"><FileText .../> {labels.mgmt_card_tag_summary}</span>
+              <span className="rh-tag"><Users .../> {labels.mgmt_card_tag_compare}</span>
+            </div>
+          </div>
+          <div className="rh-card-footer">
+            <div className="rh-export-controls" role="group">
+              <button className="rh-btn rh-btn-indigo" disabled={busy || !selectedMonth}
+                onClick={() => { void generate("management"); }}>
+                {generating === "management" ? <span className="rh-spinner" /> : null}
+                {generating === "management" ? labels.mgmt_card_generating : labels.mgmt_card_button}
+              </button>
+            </div>
+          </div>
+        </div>
+```
+
+Plus: `import { openManagementReport } from ".../management/managementReport"`, `import { useLabels }`,
+`const labels = useLabels()`, `type ReportType = … | "management"`, and a `management` branch in
+`generate()` calling `openManagementReport(execInput, buildDisplayNameMap())`. Also dropped the
+now-unused `Settings2` icon from the `lucide-react` import (the card's old tag used it).
+
+---
+
+## v42.26 — 2026-07-08 — C2 (Batch 2): new management-report builder module
+
+**File:** `src/data/reporting/management/managementReport.ts` (new file)
+
+New builder producing the self-contained Arabic RTL HTML management report — a concise
+"summary cut" of the same `ReportModel` (via `buildReportModel`), reusing the executive
+`esc()`/`fmtNum()`/`fmtPct()` primitives and `openOrDownload`. All interpolated model/user data
+(port names, reviewer display names, recommended-action strings, findings) is routed through
+`esc()`. Includes print CSS (`@media print` + `@page`). Exposes `buildManagementReport(input, names)`
+and `openManagementReport(input, names)`. Content: header + data-sufficiency chip, headline KPI
+strip, scope/coverage strip, reviewer-comparison table (BI-unmapped empty state handled), port
+accuracy table, priority actions list, data-quality footer.
+
+**Before:**
+```ts
+// (new file)
+```
+
+**After:**
+```ts
+// See src/data/reporting/management/managementReport.ts — buildManagementReport / openManagementReport
+```
+
+## v42.25 — 2026-07-08 — C2 (Batch 2): add management-report (تقرير الإدارة) label keys
+
+**File:** `src/data/labels/labelsStore.ts`
+
+Added `mgmt_report_*` (report output) and `mgmt_card_*` (Reports-tab card + toasts) keys to
+`DEFAULT_LABELS` so every user-facing string in the new management report and its card routes
+through an admin-overridable label key (CLAUDE.md convention), not a hard-coded literal.
+
+**Before:**
+```ts
+  ov_chart_month_summary: "ملخص كل شهر",
+} as const;
+```
+
+**After:**
+```ts
+  ov_chart_month_summary: "ملخص كل شهر",
+
+  // Management report (تقرير الإدارة) — C2 (Batch 2)
+  mgmt_report_title:            "تقرير الإدارة",
+  mgmt_report_subtitle:         "ملخّص إداري موجز لأداء ضمان جودة الأشعة",
+  // …(full mgmt_report_* / mgmt_card_* block — see file)…
+} as const;
+```
+
 ## v42.24 — 2026-07-08 — B5 (Batch 1): DataTable header truncation fix, numeric-column alignment, filter-row consistency
 
 **File:** `src/components/DataTable/utils.ts`
