@@ -4,6 +4,65 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.38 — 2026-07-08 — C1 (Batch 2): seed realistic demo data (month + sample + distribution + answers)
+
+**File:** `src/data/workspace/demoWorkspace.ts`
+
+`createDemoWorkspace()` previously only seeded the default managed users via
+`createWorkspaceStructure(handle, "viewer")` — Population browse, sampling, and reports were all
+empty in demo mode. Added `seedDemoMonth()`, called (best-effort, wrapped in try/catch → `logError`)
+right after the structure is created, which builds one month (`5-may-2026`, ~200 rows across 3
+ports) and writes it through the **existing domain writers only** — never hand-rolling
+`population.final.json` / `sample.master.json` shapes:
+- `saveMonthRun()` (`src/data/population/populationStorage.ts`) persists ~200 synthetic but
+  correctly-typed `PreparedPopulationRow[]` (all stage "المستوى الأول", NonCertScan, ~12.5%
+  "اشتباه") plus a plausible raw-risk mirror and a matching `processingSummary`.
+- `drawSample()` (`src/data/sampling/sampleAlgorithm.ts`), stage-based config with a **fixed
+  RNG seed string** (`xray-demo-fixed-seed-v1`) and a demo-scaled sampling rule (30% of stage
+  "first"), draws 60 rows deterministically; saved via `saveSampleMaster()`.
+- `calculateBulkAssignment()` (`src/data/distribution/bulkAssignment.ts`) — a pure function, no
+  RNG — assigns the 60 sample rows across the four default managed employees by weighted
+  percentage; events appended via `appendDistributionEvents()`.
+- Per employee, ~40% of assigned rows get a `status: "submitted"` answer (via
+  `saveEmployeeAnswers()`, `src/data/answers/answerStorage.ts`) plus a matching `buildCompletedEvent()`
+  distribution event, ~20% get `status: "draft"`, the rest stay pending — deterministic
+  `index % 5` buckets, no RNG.
+- `updateMonthStatus()` advances the manifest to `"sampled"` then `"distributed"` to match a real
+  run.
+
+Because population generation, the RNG seed, and the assignment/bucket math are all deterministic
+(no `Math.random`, no unseeded RNG), two consecutive demo entries draw the identical rows, the
+identical per-employee splits, and the identical submitted/draft/pending sets — only incidental
+wall-clock timestamp fields (`processedAt`, `drawnAt`, `eventAt`, …) differ, matching how every
+underlying writer already stamps `new Date()` internally. Nothing is written to the user's disk —
+the handle is `createMemoryDirectory()`, and read-only mode is off only during this in-memory build
+(`WorkspaceProvider.enterDemoWorkspace` flips it back on afterward, unchanged by this edit).
+
+**Before:**
+```ts
+export async function createDemoWorkspace(): Promise<DirectoryHandleLike> {
+  const handle = createMemoryDirectory(DEMO_WORKSPACE_NAME);
+  await createWorkspaceStructure(handle, "viewer");
+  return handle;
+}
+```
+
+**After:**
+```ts
+export async function createDemoWorkspace(): Promise<DirectoryHandleLike> {
+  const handle = createMemoryDirectory(DEMO_WORKSPACE_NAME);
+  await createWorkspaceStructure(handle, "viewer");
+  try {
+    await seedDemoMonth(handle);
+  } catch (error) {
+    logError("demoWorkspace:seed", error);
+  }
+  return handle;
+}
+// … seedDemoMonth() + buildDemoPopulationRow() + DEMO_PORTS/DEMO_SAMPLING_RULES/DEMO_ALLOCATIONS
+// constants added above — see file for the full seeding pipeline.
+```
+
 ## v42.37 — 2026-07-08 — C6 (Batch 2): label-coverage audit, WorkspaceGate.tsx
 
 **File:** `src/data/labels/labelsStore.ts`
