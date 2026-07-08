@@ -4,6 +4,61 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.18 — 2026-07-08 — B4 (Batch 1) prep: add "Extended accents" tokens to index.css for the hex-literal sweep
+
+**File:** `src/index.css`
+
+Adds 21 new custom properties to the `:root` token set, one per color literal that (a) appears
+≥2× in one of the four CSS files targeted by the B4 hex-to-token sweep (`EmployeeWorkspace.css`,
+`Reports.css`, `DataTable.css`, `Population.css`) and (b) has no byte-identical match among the
+existing 104 `--brand-*`/`--c-*` tokens. Values copied verbatim from the swept files — this commit
+only adds the tokens; the sweep commits that follow reference them via `var(--token-name)`.
+
+**Before:**
+```css
+  --c-info:           #1E40AF;
+  --c-info-bg:        #DBEAFE;
+  --c-info-border:    #93C5FD;
+
+  /* ── Shadows ───────────────────────────────────────────────── */
+```
+
+**After:**
+```css
+  --c-info:           #1E40AF;
+  --c-info-bg:        #DBEAFE;
+  --c-info-border:    #93C5FD;
+
+  /* ── Extended accents (added by the B4 hex-token sweep — colors that
+     repeat ≥2× in a swept component file but had no exact-match token
+     above; kept here as the single source of truth per color) ──────── */
+  --c-emerald:              #059669;
+  --c-coral:                #c0392b;
+  --c-indigo:               #6366f1;
+  --c-teal-deep:            #00695c;
+  --c-amber-deep:           #b7791f;
+  --c-azure:                #0078d4;
+  --c-rose-tint:            #f3cccc;
+  --c-slate-border:         #d0d7de;
+  --c-mint-tint:            #bbf7d0;
+  --c-slate-muted:          #57606a;
+  --c-table-head-fallback:  #F7F9FA;
+  --c-success-tint:         #ECFDF3;
+  --c-success-tint-hover:   #DDF8E8;
+  --c-success-tint-selected:#D6F3E2;
+  --c-gray-muted:           #98a2b3;
+  --c-danger-strong:        #b91c1c;
+  --c-danger-border-light:  #f87171;
+  --c-info-strong:          #1d4ed8;
+  --c-info-border-light:    #60a5fa;
+  --c-success-strong:       #027a48;
+  --c-gray-800:             #333333;
+
+  /* ── Shadows ───────────────────────────────────────────────── */
+```
+
+---
+
 ## v42.17 — 2026-07-08 — D7 (Batch 4): version stamp (single source of truth via Vite `define`) + docs/RELEASE_CHECKLIST.md
 
 **File:** `package.json`
