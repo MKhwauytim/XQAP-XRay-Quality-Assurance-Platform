@@ -371,6 +371,43 @@ px in padding/margin/gap)`). `npm run lint` and `npm run test:run` green (364/36
 
 ---
 
+## v42.27 — 2026-07-08 — B6 (Batch 1) consumption, file 3/4: Population.css
+
+**File:** `src/components/Sidebar/Tabs/Population/Population.css`
+
+Same spacing sweep as v42.25/v42.26 (with the `var(--sp-N, ...)` false-positive fix already
+applied), run over `Population.css` (the largest of the four B6 target files). Result: 246
+declarations fully converted to `--sp-*` tokens (311 individual px values replaced), 7
+declarations left with raw px + `/* no-scale */` — all genuine exceptions: a value >2px off every
+step paired with another that IS on-scale (e.g. `padding: 40px 28px` — `40px` is an exact
+`--sp-10` match but `28px` is 4px from both `--sp-6` (24px) and `--sp-8` (32px), so the *whole*
+declaration is left as-is rather than partially converting, per the "never mix tokens and raw px
+under one undocumented line" rule), one negative margin, and one 1px value nowhere near the 4px
+floor step.
+
+**Before:**
+```css
+.population-page {
+  ...
+  padding: 28px;
+  ...
+}
+```
+
+**After:**
+```css
+.population-page {
+  ...
+  padding: 28px /* no-scale */;
+  ...
+}
+```
+
+Verified with the dedicated verifier (`node checkSpacing.mjs Population.css` → `OK (0 unannotated
+raw px in padding/margin/gap)`). `npm run lint` and `npm run test:run` green (364/364).
+
+---
+
 ## v42.23 — 2026-07-08 — B4 (Batch 1) regression guard: scripts/check-hex-literals.mjs
 
 **File:** `scripts/check-hex-literals.mjs` (new)
