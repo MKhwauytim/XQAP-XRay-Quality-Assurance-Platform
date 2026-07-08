@@ -4,6 +4,16 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.8 — 2026-07-07 — Referral approval rework (9/11): extract ReviewModal
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/ReviewModal.tsx`
+
+**Before:** file did not exist — `ReviewModal` was defined inline at the bottom of the monolithic `ReferralApproval.tsx`.
+
+**After:** moved to its own file, `description` widened from `string` to `ReactNode`. Behavior unchanged.
+
+---
+
 ## v42.7 — 2026-07-07 — Referral approval rework (8/11): RequestList with bulk actions
 
 **File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/RequestList.tsx`
