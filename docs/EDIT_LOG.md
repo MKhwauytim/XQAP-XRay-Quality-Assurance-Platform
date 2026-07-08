@@ -4,6 +4,93 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.19 — 2026-07-08 — B4 (Batch 1), file 1/4: hex-literal token sweep of EmployeeWorkspace.css
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/EmployeeWorkspace.css`
+
+Mechanical sweep via a one-off scratch script (not committed — a permanent regression-guard
+script, `scripts/check-hex-literals.mjs`, lands separately once all four B4 files are swept): every
+raw `#hex` literal in the file (310 total, 39 distinct values) is mapped to the existing or newly
+added `--c-*`/`--brand-*` token in `src/index.css` whose resolved value is byte-identical, then the
+literal is replaced with `var(--token)`. Where the literal already lived inside a defensive
+`var(--X, #hex)` fallback and the fallback hex resolved to the *same* token already being
+referenced, the redundant `var(--X, var(--X))` this produces is collapsed back to `var(--X)`
+(behavior-identical — `--X` is always defined at `:root`). The 10 literals with no exact-match
+token and fewer than 2 in-file repeats are left as-is with a trailing `/* no-token: one-off */`
+comment. Net result: 300 replaced, 10 one-off, 0 unannotated raw hex remaining.
+
+**Before:**
+```css
+.ew-view-seg.active {
+  background: #FFFFFF;
+  color: var(--c-navy, #0E2444);
+  font-weight: 700;
+  box-shadow: 0 1px 4px rgba(15, 39, 68, 0.14);
+}
+...
+.ew-ref-stat-token--total { --stat-color: #0F2744; }
+.ew-ref-stat-token--quota { --stat-color: #1D4ED8; }
+.ew-ref-stat-token--done { --stat-color: #059669; }
+.ew-ref-stat-token--pending { --stat-color: #DC2626; }
+.ew-ref-stat-token--replaced { --stat-color: #64748B; }
+...
+.ew-ref-progress-track {
+  height: 5px;
+  background: var(--c-surface-3, #F9F8F4);
+  ...
+}
+.ew-ref-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: #059669;
+  transition: width 180ms ease;
+}
+```
+
+**After:**
+```css
+.ew-view-seg.active {
+  background: var(--c-surface);
+  color: var(--c-navy);
+  font-weight: 700;
+  box-shadow: 0 1px 4px rgba(15, 39, 68, 0.14);
+}
+...
+.ew-ref-stat-token--total { --stat-color: #0F2744 /* no-token: one-off */; }
+.ew-ref-stat-token--quota { --stat-color: var(--c-info-strong); }
+.ew-ref-stat-token--done { --stat-color: var(--c-emerald); }
+.ew-ref-stat-token--pending { --stat-color: #DC2626 /* no-token: one-off */; }
+.ew-ref-stat-token--replaced { --stat-color: #64748B /* no-token: one-off */; }
+...
+.ew-ref-progress-track {
+  height: 5px;
+  background: var(--c-surface-3);
+  ...
+}
+.ew-ref-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--c-emerald);
+  transition: width 180ms ease;
+}
+```
+
+Full hex → token mapping applied in this file: `#0E2444`→`--c-navy`, `#DDE6EF`→`--c-border`,
+`#FFFFFF`→`--c-surface`, `#50536F`→`--c-ink-3`, `#F6F8FA`→`--c-surface-2`, `#263C58`→`--c-ink-2`,
+`#F9F8F4`→`--c-surface-3`, `#C2CEDC`→`--c-border-2`, `#0B1F33`→`--c-ink`, `#009ADE`→`--c-sky`,
+`#E8EEF6`→`--c-navy-soft`, `#9F1624`→`--c-danger`, `#8395AC`→`--c-ink-4`, `#004030`→`--c-success`,
+`#FDE8EA`→`--c-danger-bg`, `#F4A4AC`→`--c-danger-border`, `#E5F5FB`→`--c-sky-light`,
+`#E3F3ED`→`--c-success-bg`, `#FBF2DC`→`--c-warning-bg`, `#E5B46E`→`--c-warning-border`,
+`#8BBEAA`→`--c-success-border`, `#775000`→`--c-warning`, `#DBEAFE`→`--c-info-bg`,
+`#1E40AF`→`--c-info`, `#102C57`→`--c-navy-2`, `#059669`→`--c-emerald`, `#93C5FD`→`--c-info-border`,
+`#1D4ED8`→`--c-info-strong`. Left as `no-token: one-off` (single in-file occurrence, no exact
+match): `#eff6ff`, `#bfdbfe`, `#FECACA`, `#FDE68A`, `#F0FDF4`, `#E1EFFE`, `#DC2626`, `#64748B`,
+`#1E6FBA`, `#0F2744`. `npm run lint` and `npm run test:run` green after the change (364/364 tests
+passing); verified via preview `getComputedStyle` that `--c-navy`, `--c-emerald`, `--c-info-strong`,
+`--c-surface-3`, `--c-border`, `--c-danger` resolve to their pre-sweep hex values.
+
+---
+
 ## v42.18 — 2026-07-08 — B4 (Batch 1) prep: add "Extended accents" tokens to index.css for the hex-literal sweep
 
 **File:** `src/index.css`
