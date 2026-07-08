@@ -4,6 +4,65 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.36 — 2026-07-08 — C6 (Batch 2): label-coverage audit, App.tsx
+
+**File:** `src/data/labels/labelsStore.ts`
+
+Added an `app_*` label group (10 keys) to `DEFAULT_LABELS` for the hard-coded Arabic strings in
+`src/App.tsx`: the demo-mode banner, the `.bak`-recovery warning (with a `{fileName}` placeholder),
+the shared "إغلاق" close-button aria-label, the auto-backup running/done/failed messages (`{folderName}`/
+`{error}` placeholders) plus a generic unknown-error fallback, the workspace `<section>` aria-label,
+and the "no tabs available" empty-state title + description prefix.
+
+**Before:**
+```ts
+  firstrun_demo_hint:                "لمعاينة النظام في وضع العرض التجريبي (قراءة فقط): من شاشة اختيار مساحة العمل، اضغط Alt+A ثم Alt+T.",
+} as const;
+```
+
+**After:**
+```ts
+  firstrun_demo_hint:                "لمعاينة النظام في وضع العرض التجريبي (قراءة فقط): من شاشة اختيار مساحة العمل، اضغط Alt+A ثم Alt+T.",
+
+  // ── App shell — C6 (Batch 2) label coverage audit ──
+  app_demo_banner:           "وضع العرض التجريبي — للقراءة فقط (التعديل والحفظ معطّلان، والتصدير متاح)",
+  app_bak_recovered_warning: "تم استرداد الملف \"{fileName}\" من النسخة الاحتياطية — قد تكون البيانات غير مكتملة، يُرجى المراجعة.",
+  app_close_aria:            "إغلاق",
+  app_auto_backup_running:   "جاري إنشاء النسخة الاحتياطية التلقائية...",
+  app_auto_backup_done:      "تم إنشاء النسخة الاحتياطية التلقائية: {folderName}",
+  app_auto_backup_failed:    "تعذر إنشاء النسخة الاحتياطية التلقائية: {error}",
+  app_unknown_error:         "خطأ غير معروف",
+  app_workspace_aria:        "مساحة العمل",
+  app_no_tabs_title:         "لا توجد تبويبات متاحة",
+  app_no_tabs_desc_prefix:   "لا توجد صفحات مفعلة لهذا الدور حالياً:",
+} as const;
+```
+
+**File:** `src/App.tsx`
+
+Replaced the ~10 hard-coded Arabic literals with `getLabels()`/`useLabels()` reads (component-level
+`labels` via `useLabels()` for JSX so overrides re-render; `getLabels()` called fresh inside the
+`useEffect` handlers so those imperative callbacks never read a stale closure). `NoAvailableTabs` is
+a separate component, so it calls its own `useLabels()`. No visible text change — same strings, same
+`{" "}`/inline-space JSX structure around the `Google Chrome` / `Microsoft Edge`-style content.
+
+**Before:**
+```tsx
+setBakWarning(
+  `تم استرداد الملف "${e.detail.fileName}" من النسخة الاحتياطية — قد تكون البيانات غير مكتملة، يُرجى المراجعة.`
+);
+// … demo banner literal, "إغلاق" aria-labels ×2, auto-backup running/done/failed template
+// literals, aria-label="مساحة العمل", NoAvailableTabs title/description literals …
+```
+
+**After:**
+```tsx
+setBakWarning(
+  getLabels().app_bak_recovered_warning.replace("{fileName}", e.detail.fileName)
+);
+// … all of the above now read from getLabels()/useLabels() — see file for each call site.
+```
+
 ## v42.35 — 2026-07-08 — C3 (Batch 2): guard the first-run card against short viewports
 
 **File:** `src/data/workspace/WorkspaceGate.css`

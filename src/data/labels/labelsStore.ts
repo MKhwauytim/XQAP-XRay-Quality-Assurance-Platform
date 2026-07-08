@@ -231,6 +231,18 @@ export const DEFAULT_LABELS = {
   firstrun_step_month_desc:          "استورد بيانات المخاطر/BI وعالِج أول مجتمع.",
   firstrun_step_month_action:        "معالجة البيانات",
   firstrun_demo_hint:                "لمعاينة النظام في وضع العرض التجريبي (قراءة فقط): من شاشة اختيار مساحة العمل، اضغط Alt+A ثم Alt+T.",
+
+  // ── App shell — C6 (Batch 2) label coverage audit ──
+  app_demo_banner:           "وضع العرض التجريبي — للقراءة فقط (التعديل والحفظ معطّلان، والتصدير متاح)",
+  app_bak_recovered_warning: "تم استرداد الملف \"{fileName}\" من النسخة الاحتياطية — قد تكون البيانات غير مكتملة، يُرجى المراجعة.",
+  app_close_aria:            "إغلاق",
+  app_auto_backup_running:   "جاري إنشاء النسخة الاحتياطية التلقائية...",
+  app_auto_backup_done:      "تم إنشاء النسخة الاحتياطية التلقائية: {folderName}",
+  app_auto_backup_failed:    "تعذر إنشاء النسخة الاحتياطية التلقائية: {error}",
+  app_unknown_error:         "خطأ غير معروف",
+  app_workspace_aria:        "مساحة العمل",
+  app_no_tabs_title:         "لا توجد تبويبات متاحة",
+  app_no_tabs_desc_prefix:   "لا توجد صفحات مفعلة لهذا الدور حالياً:",
 } as const;
 
 export type LabelKey = keyof typeof DEFAULT_LABELS;

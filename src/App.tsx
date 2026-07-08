@@ -18,6 +18,8 @@ import {
   createDailyAdminBackupIfDue,
 } from "./data/backup/backupStorage";
 import { listMonthFolders } from "./data/population/populationStorage";
+import { getLabels } from "./data/labels/labelsStore";
+import { useLabels } from "./data/labels/useLabels";
 import { useWorkspace } from "./data/workspace/useWorkspace";
 import {
   WorkspaceGate,
@@ -32,6 +34,7 @@ type AppContentProps = {
 
 function AppContent({ session }: AppContentProps) {
   const { directoryHandle, status: workspaceStatus } = useWorkspace();
+  const labels = useLabels();
   const [selectedTabId, setSelectedTabId] = useState("");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [permissions, setPermissions] = useState<RolePermission[]>(
@@ -81,7 +84,7 @@ function AppContent({ session }: AppContentProps) {
   useEffect(() => {
     const handler = (e: CustomEvent<{ fileName: string }>) => {
       setBakWarning(
-        `تم استرداد الملف "${e.detail.fileName}" من النسخة الاحتياطية — قد تكون البيانات غير مكتملة، يُرجى المراجعة.`
+        getLabels().app_bak_recovered_warning.replace("{fileName}", e.detail.fileName)
       );
     };
     window.addEventListener("data:recovered-from-bak", handler as EventListener);
@@ -102,14 +105,17 @@ function AppContent({ session }: AppContentProps) {
         if (result.ok && "skipped" in result) {
           setAutoBackupNotice(null);
         } else if (result.ok) {
-          setAutoBackupNotice(`تم إنشاء النسخة الاحتياطية التلقائية: ${result.folderName}`);
+          setAutoBackupNotice(getLabels().app_auto_backup_done.replace("{folderName}", result.folderName));
         } else {
-          setAutoBackupNotice(`تعذر إنشاء النسخة الاحتياطية التلقائية: ${result.error}`);
+          setAutoBackupNotice(getLabels().app_auto_backup_failed.replace("{error}", result.error));
         }
       } catch (error) {
         if (!cancelled) {
           setAutoBackupNotice(
-            `تعذر إنشاء النسخة الاحتياطية التلقائية: ${error instanceof Error ? error.message : "خطأ غير معروف"}`
+            getLabels().app_auto_backup_failed.replace(
+              "{error}",
+              error instanceof Error ? error.message : getLabels().app_unknown_error
+            )
           );
         }
       } finally {
@@ -161,7 +167,7 @@ function AppContent({ session }: AppContentProps) {
           over it) so the toolbar — including logout — stays clickable. */}
       {session.mode === "demo" && (
         <div role="status" dir="rtl" className="app-demo-banner">
-          وضع العرض التجريبي — للقراءة فقط (التعديل والحفظ معطّلان، والتصدير متاح)
+          {labels.app_demo_banner}
         </div>
       )}
       <main
@@ -174,7 +180,7 @@ function AppContent({ session }: AppContentProps) {
           <button
             onClick={() => setBakWarning(null)}
             className="app-bak-warning-close"
-            aria-label="إغلاق"
+            aria-label={labels.app_close_aria}
           >
             <X size={16} />
           </button>
@@ -182,9 +188,9 @@ function AppContent({ session }: AppContentProps) {
       )}
       {(autoBackupNotice || autoBackupRunning) && (
         <div className="app-backup-toast" role="status" dir="rtl">
-          <span>{autoBackupRunning ? "جاري إنشاء النسخة الاحتياطية التلقائية..." : autoBackupNotice}</span>
+          <span>{autoBackupRunning ? labels.app_auto_backup_running : autoBackupNotice}</span>
           {!autoBackupRunning && (
-            <button type="button" onClick={() => setAutoBackupNotice(null)} aria-label="إغلاق">
+            <button type="button" onClick={() => setAutoBackupNotice(null)} aria-label={labels.app_close_aria}>
               <X size={16} />
             </button>
           )}
@@ -199,7 +205,7 @@ function AppContent({ session }: AppContentProps) {
         onToggleCollapse={toggleSidebar}
       />
 
-      <section className="app-workspace" aria-label="مساحة العمل">
+      <section className="app-workspace" aria-label={labels.app_workspace_aria}>
         {allowedTabs.length === 0 && <NoAvailableTabs role={session.role} />}
         {allowedTabs.map((tab) =>
           mountedTabIds.has(tab.id) ? (
@@ -220,14 +226,15 @@ function AppContent({ session }: AppContentProps) {
 }
 
 function NoAvailableTabs({ role }: { role: AuthSession["role"] }) {
+  const labels = useLabels();
   return (
     <div className="tab-blank" dir="rtl">
       <EmptyState
         icon={<LayoutGrid />}
-        title="لا توجد تبويبات متاحة"
+        title={labels.app_no_tabs_title}
         description={
           <>
-            لا توجد صفحات مفعلة لهذا الدور حالياً: <strong>{role}</strong>
+            {labels.app_no_tabs_desc_prefix} <strong>{role}</strong>
           </>
         }
       />
