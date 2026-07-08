@@ -10,6 +10,7 @@ import {
   subscribeToUserManagementChanges,
 } from "../../auth/userManagement";
 import { listMonthFolders } from "../population/populationStorage";
+import { getLabels } from "../labels/labelsStore";
 import { useLabels } from "../labels/useLabels";
 import { useWorkspace } from "./useWorkspace";
 
@@ -34,6 +35,7 @@ export function WorkspacePicker({ children }: WorkspacePickerProps) {
     reconnectWorkspace,
     enterDemoWorkspace
   } = useWorkspace();
+  const labels = useLabels();
 
   // Hidden view-mode entry (mirrors the admin shortcut): on the address-picker
   // screen, hold Alt and press A then T to open a passcode prompt; entering the
@@ -84,7 +86,7 @@ export function WorkspacePicker({ children }: WorkspacePickerProps) {
       setViewError("");
       void enterDemoWorkspace();
     } else {
-      setViewError("رمز غير صحيح.");
+      setViewError(getLabels().wsgate_view_passcode_error);
     }
   }
 
@@ -100,14 +102,13 @@ export function WorkspacePicker({ children }: WorkspacePickerProps) {
       <div className="workspace-gate" dir="rtl">
         <div className="workspace-gate-card">
           <div className="workspace-gate-icon"><FolderArchive size={40} /></div>
-          <h2>متصفح غير مدعوم</h2>
+          <h2>{labels.wsgate_unsupported_title}</h2>
           <p>
-            هذا التطبيق يتطلب{" "}
-            <strong>Google Chrome</strong> أو{" "}
-            <strong>Microsoft Edge</strong> على سطح المكتب
-            للوصول المباشر إلى الملفات.
+            {labels.wsgate_unsupported_prefix}{" "}
+            <strong>Google Chrome</strong> {labels.wsgate_unsupported_or}{" "}
+            <strong>Microsoft Edge</strong> {labels.wsgate_unsupported_suffix}
           </p>
-          <p>يُرجى فتح التطبيق في متصفح مدعوم والمحاولة مجدداً.</p>
+          <p>{labels.wsgate_unsupported_retry}</p>
         </div>
       </div>
     );
@@ -131,11 +132,11 @@ export function WorkspacePicker({ children }: WorkspacePickerProps) {
       <div className="workspace-gate" dir="rtl">
         <div className="workspace-gate-card">
           <div className="workspace-gate-icon"><Folder size={40} /></div>
-          <h2>اختر مساحة العمل</h2>
+          <h2>{labels.wsgate_picker_title}</h2>
           <p>
             {pendingReconnect
-              ? "تم العثور على مساحة عمل سابقة. انقر على «إعادة الاتصال» للمتابعة، أو اختر مجلداً جديداً."
-              : "حدد مجلد مساحة العمل. سيطلب المتصفح إذن القراءة والكتابة مرة واحدة فقط."}
+              ? labels.wsgate_picker_reconnect_msg
+              : labels.wsgate_picker_select_msg}
           </p>
 
           {pendingReconnect && (
@@ -145,7 +146,7 @@ export function WorkspacePicker({ children }: WorkspacePickerProps) {
                 void reconnectWorkspace();
               }}
             >
-              إعادة الاتصال بمساحة العمل
+              {labels.wsgate_reconnect_btn}
             </button>
           )}
 
@@ -156,7 +157,7 @@ export function WorkspacePicker({ children }: WorkspacePickerProps) {
               void selectWorkspace();
             }}
           >
-            اختيار مجلد
+            {labels.wsgate_pick_folder_btn}
           </button>
         </div>
 
@@ -168,19 +169,19 @@ export function WorkspacePicker({ children }: WorkspacePickerProps) {
               aria-modal="true"
               aria-labelledby="viewPasscodeTitle"
             >
-              <h2 id="viewPasscodeTitle">وضع العرض</h2>
-              <p>أدخل رمز الدخول لعرض النظام للقراءة فقط.</p>
+              <h2 id="viewPasscodeTitle">{labels.wsgate_view_modal_title}</h2>
+              <p>{labels.wsgate_view_modal_desc}</p>
               <input
                 type="password"
                 autoFocus
-                aria-label="رمز وضع العرض"
+                aria-label={labels.wsgate_view_passcode_label}
                 value={viewPasscode}
                 onChange={(event) => setViewPasscode(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter") submitViewPasscode();
                   if (event.key === "Escape") closeViewModal();
                 }}
-                placeholder="رمز وضع العرض"
+                placeholder={labels.wsgate_view_passcode_label}
               />
               {viewError && (
                 <p style={{ color: "var(--c-danger)", fontSize: 13, margin: "8px 0 0" }}>
@@ -189,10 +190,10 @@ export function WorkspacePicker({ children }: WorkspacePickerProps) {
               )}
               <div className="auth-modal-actions">
                 <button type="button" className="secondary" onClick={closeViewModal}>
-                  إلغاء
+                  {labels.wsgate_cancel_btn}
                 </button>
                 <button type="button" onClick={submitViewPasscode}>
-                  دخول
+                  {labels.wsgate_enter_btn}
                 </button>
               </div>
             </section>
@@ -232,6 +233,7 @@ export function WorkspaceGate({ session, children }: WorkspaceGateProps) {
     selectWorkspace,
     createInitialStructure
   } = useWorkspace();
+  const labels = useLabels();
 
   // Structure creation in progress
   if (status === "checking") {
@@ -265,11 +267,8 @@ export function WorkspaceGate({ session, children }: WorkspaceGateProps) {
           {isAdmin ? (
             <>
               <div className="workspace-gate-icon"><Wrench size={40} /></div>
-              <h2>مساحة العمل غير مهيأة</h2>
-              <p>
-                المجلد المحدد لا يحتوي على بنية النظام المطلوبة. يمكنك
-                إنشاؤها الآن.
-              </p>
+              <h2>{labels.wsgate_missing_title}</h2>
+              <p>{labels.wsgate_missing_desc}</p>
               {missingItems.length > 0 && (
                 <ul className="workspace-gate-missing">
                   {missingItems.map((item) => (
@@ -283,18 +282,14 @@ export function WorkspaceGate({ session, children }: WorkspaceGateProps) {
                   void createInitialStructure(session.username);
                 }}
               >
-                إنشاء بنية مساحة العمل
+                {labels.wsgate_create_structure_btn}
               </button>
             </>
           ) : (
             <>
               <div className="workspace-gate-icon"><AlertTriangle size={40} /></div>
-              <h2>عنوان خاطئ</h2>
-              <p>
-                المجلد المحدد لا يحتوي على بنية نظام صالحة. تأكد من
-                اختيار المجلد الصحيح، أو تواصل مع مسؤول النظام لإعداد
-                مساحة العمل.
-              </p>
+              <h2>{labels.wsgate_wrong_address_title}</h2>
+              <p>{labels.wsgate_wrong_address_desc}</p>
             </>
           )}
 
@@ -305,7 +300,7 @@ export function WorkspaceGate({ session, children }: WorkspaceGateProps) {
               void selectWorkspace();
             }}
           >
-            اختيار مجلد آخر
+            {labels.wsgate_pick_another_btn}
           </button>
         </div>
       </div>
@@ -318,13 +313,10 @@ export function WorkspaceGate({ session, children }: WorkspaceGateProps) {
       <div className="workspace-gate" dir="rtl">
         <div className="workspace-gate-card">
           <div className="workspace-gate-icon"><Wrench size={40} /></div>
-          <h2>ملفات مساحة العمل تالفة أو غير متوافقة</h2>
-          <p>
-            تم العثور على المجلد لكن بعض ملفات النظام تالفة أو بإصدار غير متوافق.
-            يمكنك إصلاح البنية الآن — لن تتأثر بيانات السكان والعينات في المجلدات المرقمة.
-          </p>
+          <h2>{labels.wsgate_invalid_title}</h2>
+          <p>{labels.wsgate_invalid_desc}</p>
           <p style={{ color: "#92400e", background: "#fef3c7", borderRadius: 6, padding: "6px 10px", fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
-            <AlertTriangle size={14} style={{ flexShrink: 0 }} /> قد تحتاج إلى إعادة إضافة حسابات الموظفين بعد الإصلاح.
+            <AlertTriangle size={14} style={{ flexShrink: 0 }} /> {labels.wsgate_invalid_warning}
           </p>
           {invalidItems.length > 0 && (
             <ul className="workspace-gate-missing">
@@ -339,7 +331,7 @@ export function WorkspaceGate({ session, children }: WorkspaceGateProps) {
               void createInitialStructure(session.username);
             }}
           >
-            إصلاح بنية مساحة العمل
+            {labels.wsgate_repair_btn}
           </button>
           <button
             type="button"
@@ -348,7 +340,7 @@ export function WorkspaceGate({ session, children }: WorkspaceGateProps) {
               void selectWorkspace();
             }}
           >
-            اختيار مجلد آخر
+            {labels.wsgate_pick_another_btn}
           </button>
         </div>
       </div>
@@ -360,7 +352,7 @@ export function WorkspaceGate({ session, children }: WorkspaceGateProps) {
     <div className="workspace-gate" dir="rtl">
       <div className="workspace-gate-card">
         <div className="workspace-gate-icon"><XCircle size={40} /></div>
-        <h2>تعذر فتح مساحة العمل</h2>
+        <h2>{labels.wsgate_error_title}</h2>
         <p>{message}</p>
         <button
           type="button"
@@ -368,7 +360,7 @@ export function WorkspaceGate({ session, children }: WorkspaceGateProps) {
             void selectWorkspace();
           }}
         >
-          اختيار مجلد آخر
+          {labels.wsgate_pick_another_btn}
         </button>
       </div>
     </div>

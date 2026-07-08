@@ -4,6 +4,59 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.37 — 2026-07-08 — C6 (Batch 2): label-coverage audit, WorkspaceGate.tsx
+
+**File:** `src/data/labels/labelsStore.ts`
+
+Added a `wsgate_*` label group (17 keys covering the ~30 hard-coded strings, several reused across
+multiple call sites — e.g. the "اختيار مجلد آخر" button appears 3×, the view-passcode label backs
+both an aria-label and a placeholder) for every PRE-EXISTING hard-coded string in
+`WorkspaceGate.tsx` (the `WorkspacePicker` and `WorkspaceGate` components). Does not touch the
+`firstrun_*` keys C3 already added for `FirstRunChecklist` in the same file.
+
+**Before:**
+```ts
+  app_no_tabs_desc_prefix:   "لا توجد صفحات مفعلة لهذا الدور حالياً:",
+} as const;
+```
+
+**After:**
+```ts
+  app_no_tabs_desc_prefix:   "لا توجد صفحات مفعلة لهذا الدور حالياً:",
+
+  // ── WorkspaceGate — C6 (Batch 2) label coverage audit ──
+  wsgate_view_passcode_error: "رمز غير صحيح.",
+  wsgate_unsupported_title:   "متصفح غير مدعوم",
+  // …(full wsgate_* block, 17 keys — see file)…
+} as const;
+```
+
+**File:** `src/data/workspace/WorkspaceGate.tsx`
+
+Replaced every pre-existing hard-coded Arabic literal in `WorkspacePicker` and `WorkspaceGate`
+(unsupported-browser card, picker card + view-passcode modal, missing/invalid/error structure
+cards) with `labels.wsgate_*` reads via a new `const labels = useLabels();` in each component.
+`FirstRunChecklist`'s own `useLabels()` call and `firstrun_*` keys (added by C3) are untouched. The
+`Google Chrome` / `Microsoft Edge` sentence keeps its exact original `{" "}`/inline-space JSX
+structure around the new label lookups so the rendered text is byte-identical. Labels are read from
+a plain `localStorage`-backed module (`labelsStore.ts`), independent of workspace/auth state, so
+this is safe in every gate state including `unsupported_browser`.
+
+**Before:**
+```tsx
+export function WorkspacePicker({ children }: WorkspacePickerProps) {
+  const { isSupported, status, message, pendingReconnect, selectWorkspace, reconnectWorkspace, enterDemoWorkspace } = useWorkspace();
+  // … "متصفح غير مدعوم", "اختر مساحة العمل", "رمز غير صحيح.", etc. hard-coded …
+```
+
+**After:**
+```tsx
+export function WorkspacePicker({ children }: WorkspacePickerProps) {
+  const { isSupported, status, message, pendingReconnect, selectWorkspace, reconnectWorkspace, enterDemoWorkspace } = useWorkspace();
+  const labels = useLabels();
+  // … all replaced with labels.wsgate_* — see file for each call site …
+```
+
 ## v42.36 — 2026-07-08 — C6 (Batch 2): label-coverage audit, App.tsx
 
 **File:** `src/data/labels/labelsStore.ts`
