@@ -4,6 +4,29 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.31 — 2026-07-08 — C3 (Batch 2): guard the first-run card against short viewports
+
+**File:** `src/data/workspace/WorkspaceGate.css`
+
+Added a `max-height` + internal scroll to `.firstrun-checklist` so the fixed card never clips its
+header off the top of very short windows (observed on a ~360px-tall preview); on normal desktop
+heights it is unchanged.
+
+**Before:**
+```css
+  overflow: hidden;
+  font-family: inherit;
+}
+```
+
+**After:**
+```css
+  overflow: hidden auto;
+  max-height: calc(100vh - 120px);
+  font-family: inherit;
+}
+```
+
 ## v42.30 — 2026-07-08 — C3 (Batch 2): first-run checklist styles
 
 **File:** `src/data/workspace/WorkspaceGate.css`
