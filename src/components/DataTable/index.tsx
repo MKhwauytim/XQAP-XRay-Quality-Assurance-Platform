@@ -113,8 +113,15 @@ function buildDefault<TRow>(
   defaultVisible?: string[]
 ): ColConfig {
   const visSet = defaultVisible ? new Set(defaultVisible) : null;
+  // Column order must follow defaultVisible's intended arrangement first (so
+  // e.g. a status column meant to sit next to the id column actually does),
+  // then append any remaining columns in their definition order.
+  const known = new Set(columns.map((c) => c.id));
+  const orderedVisible = defaultVisible ? defaultVisible.filter((id) => known.has(id)) : [];
+  const orderedVisibleSet = new Set(orderedVisible);
+  const rest = columns.map((c) => c.id).filter((id) => !orderedVisibleSet.has(id));
   return {
-    order: columns.map((c) => c.id),
+    order: [...orderedVisible, ...rest],
     hidden: columns
       .filter((c) => visSet ? !visSet.has(c.id) : false)
       .map((c) => c.id),
@@ -450,13 +457,20 @@ export default function DataTable<TRow>({
   const stickyIdSet = useMemo(() => new Set(stickyColumnIds), [stickyColumnIds]);
   const stickyMeta = useMemo(() => {
     const meta = new Map<string, { rightPct: number; order: number }>();
-    let rightPct = 0;
+    // Accumulate over EVERY visible column (sticky or not) so a sticky column's
+    // offset reflects its true position from the RTL start edge. Skipping
+    // non-sticky columns here would understate the offset for any sticky
+    // column that isn't adjacent to the previous one, tearing it out of its
+    // table cell and leaving a gap in its place (LOG-04-style visual bug).
+    let cumulativePct = 0;
     let order = 0;
     for (const col of visibleCols) {
-      if (!stickyIdSet.has(col.id)) continue;
-      meta.set(col.id, { rightPct, order });
-      rightPct += (((colCfg.widths ?? {})[col.id] ?? col.widthFr ?? 1) / totalFr) * 100;
-      order += 1;
+      const colPct = (((colCfg.widths ?? {})[col.id] ?? col.widthFr ?? 1) / totalFr) * 100;
+      if (stickyIdSet.has(col.id)) {
+        meta.set(col.id, { rightPct: cumulativePct, order });
+        order += 1;
+      }
+      cumulativePct += colPct;
     }
     return meta;
   }, [visibleCols, stickyIdSet, totalFr, colCfg.widths]);

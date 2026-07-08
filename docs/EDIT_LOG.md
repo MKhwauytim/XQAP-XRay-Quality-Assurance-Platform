@@ -4,6 +4,523 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.12 — 2026-07-08 — Referral approval rework: fix duplicate bulk-result banner, friendly labels in bulk confirm modal
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/index.tsx`
+
+**Before:**
+```tsx
+  async function handleBulk(requests: CardRequest[], action: "approve" | "deny", notes: string) {
+    const outcomes = section === "referral"
+      ? await bulkReferralDecision(requests as ReferralRequest[], action, notes)
+      : await bulkReplacementDecision(requests as ReplacementRequest[], action, notes);
+    const failed = outcomes.filter((o) => !o.ok).length;
+    setStatusMsg(failed === 0
+      ? { type: "ok", text: `تمت معالجة ${outcomes.length} طلب بنجاح.` }
+      : { type: "error", text: `نجح ${outcomes.length - failed} من ${outcomes.length}. فشل ${failed}.` });
+    return outcomes;
+  }
+```
+
+**After:**
+```tsx
+  async function handleBulk(requests: CardRequest[], action: "approve" | "deny", notes: string) {
+    const outcomes = section === "referral"
+      ? await bulkReferralDecision(requests as ReferralRequest[], action, notes)
+      : await bulkReplacementDecision(requests as ReplacementRequest[], action, notes);
+    return outcomes;
+  }
+```
+
+Bulk approve/deny was rendering two different result banners simultaneously: this page-level `statusMsg` banner and `RequestList`'s own richer `bulkResult` banner (with per-failure detail). `RequestList`'s banner is now the single source of truth for bulk outcomes; `statusMsg` is untouched for single approve/deny (`handleApprove`/`handleDeny`).
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/RequestList.tsx`
+
+**Before:**
+```tsx
+import RequestCard from "./RequestCard";
+...
+  function toggleSelect(id: string): void {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+...
+                {selectedRequests.map((r) => <li key={r.requestId}>{r.requestId}</li>)}
+```
+
+**After:**
+```tsx
+import RequestCard, { isReferral } from "./RequestCard";
+...
+  function toggleSelect(id: string): void {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  function describeSelected(request: CardRequest): string {
+    if (isReferral(request)) {
+      return `${userDisplayMap[request.fromEmployee] ?? request.fromEmployee} ← ${userDisplayMap[request.toEmployee] ?? request.toEmployee}`;
+    }
+    return `${request.originalXrayImageId} → ${request.replacementXrayImageId}`;
+  }
+...
+                {selectedRequests.map((r) => <li key={r.requestId}>{describeSelected(r)}</li>)}
+```
+
+The bulk confirm modal previously showed raw request IDs (e.g. `req-a1b2c3`), not useful to a reviewer deciding whether to confirm. `describeSelected` mirrors the exact label format `useApprovalData.ts`'s `bulkReferralDecision`/`bulkReplacementDecision` compute for `BulkOutcome.label`, so the pre-confirm list and post-action result banner are visually consistent.
+
+## v42.11 — 2026-07-07 — Referral approval rework: suppress known-safe lint rules
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/RequestCard.tsx`
+
+**Before:** `export function isReferral(...)` had no lint suppression; `react-refresh/only-export-components` flagged the file for exporting a non-component alongside the default `RequestCard` export.
+
+**After:** added `// eslint-disable-next-line react-refresh/only-export-components` above the export — `isReferral` is a deliberate, load-bearing type guard consumed by later tasks, not an oversight.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/RequestList.tsx`
+
+**Before:** `useEffect(() => { setSelected(new Set()); }, [bulkEnabled]);` had no lint suppression; `react-hooks/set-state-in-effect` flagged the intentional selection reset.
+
+**After:** added `// eslint-disable-next-line react-hooks/set-state-in-effect` above the effect, matching the same suppression already used elsewhere in this codebase for the identical pattern.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/useApprovalData.ts`
+
+**Before:** `useEffect(() => { void loadData(); }, [loadData]);` had no lint suppression; same rule flagged the standard load-on-mount pattern.
+
+**After:** added the same `// eslint-disable-next-line react-hooks/set-state-in-effect` suppression, mirroring the deleted monolithic file's original comment for this exact line.
+
+## v42.10 — 2026-07-07 — Referral approval rework (11/11): orchestration + CSS, retire monolithic file
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval.tsx`
+
+**Before:** 688-line single file: data loading, mutations, both cards, both dialogs, and the review modal all inline. Status filter tabs and section tabs shared one CSS class; no bulk actions; no cross-month history; decisions overwrote each other; idempotency/ownership/month-key bugs (see bug-fix map in the plan).
+
+**After:** replaced by `views/ReferralApproval/` — `index.tsx` orchestrates `useApprovalData`, `SummaryBar`, `RequestList`, `ReviewModal`, `HistoryView`; each is independently readable and (where it carries real logic risk) tested.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/EmployeeWorkspace.css`
+
+**Before:** no styles for view tabs, summary chips, timeline, or bulk selection.
+
+**After:** added `.ew-approval-view-tab*`, `.ew-summary-*`, `.ew-timeline*`, `.ew-bulk-bar*`, `.ew-request-checkbox`, `.ew-referral-card--selected`.
+
+---
+
+## v42.9 — 2026-07-07 — Referral approval rework (10/11): cross-month HistoryView
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/HistoryView.tsx`
+
+**Before:** file did not exist — no way to see decided/all requests across months; the page only ever showed one month at a time.
+
+**After:** aggregates referral + replacement requests across every processed month into a `DataTable` (search/filter/sort/XLSX export for free), row click expands the full `RequestTimeline`. Same visibility rule as the review queue (reviewers see all, employees see their own).
+
+---
+
+## v42.8 — 2026-07-07 — Referral approval rework (9/11): extract ReviewModal
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/ReviewModal.tsx`
+
+**Before:** file did not exist — `ReviewModal` was defined inline at the bottom of the monolithic `ReferralApproval.tsx`.
+
+**After:** moved to its own file, `description` widened from `string` to `ReactNode`. Behavior unchanged.
+
+---
+
+## v42.7 — 2026-07-07 — Referral approval rework (8/11): RequestList with bulk actions
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/RequestList.tsx`
+
+**Before:** file did not exist — no bulk approve/deny; individual `.map(...)` blocks inline in the monolithic component.
+
+**After:** one list component sorts oldest-first with a sticky bulk bar + confirm modal when viewing pending, newest-first with no bulk controls otherwise; each bulk action re-validates every selected request individually (via the hook) and reports partial success/failure.
+
+---
+
+## v42.6 — 2026-07-07 — Referral approval rework (7/11): SummaryBar component
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/SummaryBar.tsx`
+
+**Before:** file did not exist — status filters reused the exact same `.ew-referral-status-tab` class as the referral/replacement section tabs, making the two controls visually indistinguishable.
+
+**After:** `SummaryBar` renders status counts as `.ew-summary-chip` pills with their own style (Task 11 adds the CSS).
+
+---
+
+## v42.5 — 2026-07-07 — Referral approval rework (6/11): unified RequestCard
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/RequestCard.tsx`
+
+**Before:** file did not exist — the old `ReferralCard`/`ReplacementCard` were separate near-duplicate components inside the monolithic file.
+
+**After:** one `RequestCard` discriminates via the exported `isReferral` type guard, adds a bulk-selection checkbox slot, and embeds `RequestTimeline` instead of a single static review-notes line.
+
+---
+
+## v42.4 — 2026-07-07 — Referral approval rework (5/11): RequestTimeline component
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/RequestTimeline.tsx`
+
+**Before:** file did not exist — a request's review notes were a single static paragraph with no history.
+
+**After:** renders the full chronological chain (submission + every decision event with reviewer/time/notes), consumed by RequestCard and HistoryView.
+
+---
+
+## v42.3 — 2026-07-07 — Referral approval rework (4/11): useApprovalData hook
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/useApprovalData.ts`
+
+**Before:** file did not exist — this logic lived inline in the 688-line `ReferralApproval.tsx`, with no idempotency check, no ownership re-verification, decisions written against `selMonth` instead of the request's own month, and no stale-load guard across month switches.
+
+**After:** extracted into a hook; every mutation re-checks fresh status (`assertRequestPending`), referrals re-check sample ownership (`assertSamplesOwnedBy`), all writes key off `request.monthFolderName`, and a `loadTokenRef` discards results from a superseded month selection.
+
+---
+
+## v42.2 — 2026-07-07 — Referral approval rework (3/11): wire decision history into referralStorage
+
+**File:** `src/data/referral/referralTypes.ts`
+
+**Before:** `ReferralRequest`/`ReplacementRequest` had no history field.
+
+**After:** both gain `history?: DecisionEvent[]`, populated at load time.
+
+**File:** `src/data/referral/referralStorage.ts`
+
+**Before:** `updateReferralStatus`/`updateReplacementStatus` called `upsertReferralDecision`/`upsertReplacementDecision` (latest-wins, history lost on re-review).
+
+**After:** both call `appendDecisionEvent`; `loadReferralLog`/`loadReplacementLog` derive `status` from `effectiveDecision(mergeDecisionHistory(...))` and attach the full `history`.
+
+**File:** `src/data/approvals/approvalStorage.ts`
+
+**Before:** `upsertReferralDecision`/`upsertReplacementDecision` exported.
+
+**After:** removed — no longer called anywhere.
+
+---
+
+## v42.1 — 2026-07-07 — Referral approval rework (2/11): idempotency + ownership guards
+
+**File:** `src/data/approvals/approvalGuards.ts`
+
+**Before:** file did not exist — nothing verified a request was still pending, or that referred samples were still owned by the requester, before mutating.
+
+**After:** added `assertRequestPending` and `assertSamplesOwnedBy`, pure functions consumed by the approval hook (Task 4) before every approve/deny.
+
+---
+
+## v42.0 — 2026-07-07 — Referral approval rework (1/11): append-only decision-event log
+
+**File:** `src/data/approvals/approvalTypes.ts`
+
+**Before:** `SupervisorDecisionFile` had only latest-wins `referralDecisions`/`replacementDecisions` arrays — no way to see a request's full review history.
+
+**After:** added `DecisionEvent`/`DecisionEventKind` and an optional `decisionEvents?: DecisionEvent[]` field, additive and backwards compatible.
+
+**File:** `src/data/approvals/approvalStorage.ts`
+
+**Before:** no way to append a decision without overwriting the prior one.
+
+**After:** added `appendDecisionEvent`, `mergeDecisionHistory`, `effectiveDecision`.
+
+## v41.4 — 2026-07-05 — Fix auto-backup NotFoundError race during concurrent saves
+
+**Symptom:** `تعذر إنشاء النسخة الاحتياطية التلقائية: A requested file or directory could not
+be found at the time an operation was processed.` shown by `App.tsx:107` while the user is
+saving data.
+
+**Root cause:** `createBackup` copies every `.json` file in the workspace via the recursive
+`copyAllJsonFiles`/`copyJsonTree` walk. That walk runs concurrently with normal saves. Each
+`safeWriteJson` creates and then *removes* a `{file}.json.tmp` file (`removeQuietly`), mutating
+the directory being enumerated. Chromium's File System Access directory async-iterator (and a
+follow-up `getDirectoryHandle(create:false)` on a since-vanished entry) then rejects with
+`NotFoundError`. Neither copy function caught it, so the whole backup aborted. Secondary bug:
+under the legacy `.system` layout the `backups` folder was not skipped (skip only matched the
+numbered `"5-system"` path), so the backup recursed into the folder it was writing.
+
+**Fix:** materialize each directory's entries up-front tolerating a mid-scan `NotFoundError`
+(`collectEntries`), guard the per-entry subdirectory fetch (`tryGetDirectory` returns null on
+NotFound instead of throwing), and broaden the backups-folder skip to match both the numbered
+and legacy system-root names.
+
+**File:** `src/data/backup/backupStorage.ts`
+
+**Before:**
+```ts
+async function copyJsonTree(params: {
+  sourceDir: DirectoryHandleLike;
+  targetDir: DirectoryHandleLike;
+  sourcePath: string;
+  copied: string[];
+}): Promise<void> {
+  const iterable = getDirectoryEntries(params.sourceDir);
+  if (!iterable) return;
+
+  for await (const entry of iterable) {
+    if (entry.kind === "directory") {
+      if (params.sourcePath === WORKSPACE_ROOTS.system && entry.name === BACKUPS_FOLDER) {
+        continue;
+      }
+      const sourceChild = await params.sourceDir.getDirectoryHandle(entry.name, { create: false });
+      const targetChild = await ensureDir(params.targetDir, entry.name);
+      await copyJsonTree({
+        sourceDir: sourceChild,
+        targetDir: targetChild,
+        sourcePath: params.sourcePath ? `${params.sourcePath}/${entry.name}` : entry.name,
+        copied: params.copied,
+      });
+      continue;
+    }
+
+    if (entry.kind !== "file" || !entry.name.endsWith(".json")) continue;
+    const text = await readTextFile(params.sourceDir, entry.name);
+    if (text === null) continue;
+    const wrote = await writeTextFile(params.targetDir, entry.name, text);
+    if (wrote) params.copied.push(params.sourcePath ? `${params.sourcePath}/${entry.name}` : entry.name);
+  }
+}
+
+async function copyAllJsonFiles(directoryHandle: DirectoryHandleLike, backupDir: DirectoryHandleLike): Promise<string[]> {
+  const jsonDir = await ensureDir(backupDir, "json");
+  const copied: string[] = [];
+  const iterable = getDirectoryEntries(directoryHandle);
+  if (!iterable) return copied;
+
+  for await (const entry of iterable) {
+    if (entry.kind === "directory") {
+      const sourceChild = await directoryHandle.getDirectoryHandle(entry.name, { create: false });
+      const targetChild = await ensureDir(jsonDir, entry.name);
+      await copyJsonTree({
+        sourceDir: sourceChild,
+        targetDir: targetChild,
+        sourcePath: entry.name,
+        copied,
+      });
+      continue;
+    }
+
+    if (entry.kind !== "file" || !entry.name.endsWith(".json")) continue;
+    const text = await readTextFile(directoryHandle, entry.name);
+    if (text === null) continue;
+    const wrote = await writeTextFile(jsonDir, entry.name, text);
+    if (wrote) copied.push(entry.name);
+  }
+
+  return copied;
+}
+```
+
+**After:**
+```ts
+// A backup walks the whole workspace while normal saves run: each safeWriteJson
+// creates and then removes a {file}.tmp, mutating a directory mid-enumeration.
+// Chromium then rejects the directory iterator / a follow-up getDirectoryHandle
+// with NotFoundError. Tolerate that instead of aborting the entire backup.
+function isNotFoundError(error: unknown): boolean {
+  return Boolean(
+    error && typeof error === "object" && (error as { name?: string }).name === "NotFoundError"
+  );
+}
+
+async function collectEntries(dir: DirectoryHandleLike): Promise<DirectoryEntryLike[]> {
+  const iterable = getDirectoryEntries(dir);
+  if (!iterable) return [];
+  const entries: DirectoryEntryLike[] = [];
+  try {
+    for await (const entry of iterable) {
+      entries.push({ name: entry.name, kind: entry.kind });
+    }
+  } catch (error) {
+    // Directory changed under us (a concurrent .tmp create/remove). Keep what we
+    // gathered rather than failing the backup.
+    if (!isNotFoundError(error)) throw error;
+  }
+  return entries;
+}
+
+async function tryGetDirectory(
+  dir: DirectoryHandleLike,
+  name: string
+): Promise<DirectoryHandleLike | null> {
+  try {
+    return await dir.getDirectoryHandle(name, { create: false });
+  } catch (error) {
+    if (isNotFoundError(error)) return null;
+    throw error;
+  }
+}
+
+async function copyJsonTree(params: {
+  sourceDir: DirectoryHandleLike;
+  targetDir: DirectoryHandleLike;
+  sourcePath: string;
+  copied: string[];
+}): Promise<void> {
+  for (const entry of await collectEntries(params.sourceDir)) {
+    if (entry.kind === "directory") {
+      if (
+        entry.name === BACKUPS_FOLDER &&
+        (params.sourcePath === WORKSPACE_ROOTS.system || params.sourcePath === LEGACY_SYSTEM_ROOT)
+      ) {
+        continue;
+      }
+      const sourceChild = await tryGetDirectory(params.sourceDir, entry.name);
+      if (!sourceChild) continue;
+      const targetChild = await ensureDir(params.targetDir, entry.name);
+      await copyJsonTree({
+        sourceDir: sourceChild,
+        targetDir: targetChild,
+        sourcePath: params.sourcePath ? `${params.sourcePath}/${entry.name}` : entry.name,
+        copied: params.copied,
+      });
+      continue;
+    }
+
+    if (entry.kind !== "file" || !entry.name.endsWith(".json")) continue;
+    const text = await readTextFile(params.sourceDir, entry.name);
+    if (text === null) continue;
+    const wrote = await writeTextFile(params.targetDir, entry.name, text);
+    if (wrote) params.copied.push(params.sourcePath ? `${params.sourcePath}/${entry.name}` : entry.name);
+  }
+}
+
+async function copyAllJsonFiles(directoryHandle: DirectoryHandleLike, backupDir: DirectoryHandleLike): Promise<string[]> {
+  const jsonDir = await ensureDir(backupDir, "json");
+  const copied: string[] = [];
+
+  for (const entry of await collectEntries(directoryHandle)) {
+    if (entry.kind === "directory") {
+      const sourceChild = await tryGetDirectory(directoryHandle, entry.name);
+      if (!sourceChild) continue;
+      const targetChild = await ensureDir(jsonDir, entry.name);
+      await copyJsonTree({
+        sourceDir: sourceChild,
+        targetDir: targetChild,
+        sourcePath: entry.name,
+        copied,
+      });
+      continue;
+    }
+
+    if (entry.kind !== "file" || !entry.name.endsWith(".json")) continue;
+    const text = await readTextFile(directoryHandle, entry.name);
+    if (text === null) continue;
+    const wrote = await writeTextFile(jsonDir, entry.name, text);
+    if (wrote) copied.push(entry.name);
+  }
+
+  return copied;
+}
+```
+
+Also added `const LEGACY_SYSTEM_ROOT = ".system";` near the top constants (matches
+`LEGACY_ROOTS.system` in `workspacePaths.ts`, which is not exported).
+
+---
+
+## v41.37 — 2026-07-05 — Make Hamilton tie-break locale-independent (sample reproducibility)
+
+> Renumbered from v41.27 (duplicate identifier) — see v41.38.
+
+**Symptom / risk:** The stratified sample draw must be reproducible across machines for
+audit purposes. `hamiltonApportionment` broke equal-remainder ties with
+`a.key.localeCompare(b.key)` and no locale argument. Port keys are Arabic strings, and
+`localeCompare` uses the host's default locale collation — so an exact remainder tie could be
+resolved differently on different machines/runtimes, changing which port receives the extra
+seat and therefore which rows are drawn. Latent cross-environment determinism gap.
+
+**Fix:** replace `localeCompare` with a locale-independent UTF-16 code-unit comparison, which
+is stable everywhere.
+
+**File:** `src/data/sampling/apportionment.ts`
+
+**Before:**
+```ts
+  // Sort by remainder descending, breaking ties by key (stable)
+  const sorted = initial.slice().sort((a, b) =>
+    b.remainder !== a.remainder
+      ? b.remainder - a.remainder
+      : a.key.localeCompare(b.key)
+  );
+```
+
+**After:**
+```ts
+  // Sort by remainder descending, breaking ties by key. Uses a locale-independent
+  // UTF-16 code-unit comparison (NOT localeCompare) so an exact-remainder tie
+  // resolves identically on every machine/runtime — required for the sample draw
+  // to be reproducible for audits (port keys are Arabic).
+  const sorted = initial.slice().sort((a, b) =>
+    b.remainder !== a.remainder
+      ? b.remainder - a.remainder
+      : a.key < b.key ? -1 : a.key > b.key ? 1 : 0
+  );
+```
+
+**Reproducibility epoch:** this fix starts a new reproducibility epoch. Draws whose Hamilton
+apportionment hit an exact-remainder tie may not re-verify byte-identically against draws made
+before this fix (the old `localeCompare` tie-break depended on the host locale, so pre-fix
+cross-machine reproducibility was unreliable anyway — which is why the fix is correct).
+Re-verification of historical draws should use the code version that produced them.
+
+---
+
+## v41.36 — 2026-07-05 — Fix browse-preset save self-deadlock (lock-key collision with safeWriteJson)
+
+> Renumbered from v41.26 (duplicate identifier) — see v41.38.
+
+**Symptom:** Saving a browse preset (reordering/resizing a column in the Browse view, or an
+admin saving the shared preset) hangs forever and never writes; every subsequent write to that
+preset file for the tab's lifetime also hangs.
+
+**Root cause:** v41.13 added an outer read-modify-write lock around `safeWriteJson` to stop two
+rapid preset saves from dropping one dataset's update. But the outer lock key was byte-identical
+to `safeWriteJson`'s own internal lock key, and `withResourceLock` is **not reentrant** (both the
+native `navigator.locks` path and the promise-chain fallback). Outer key
+`` `${SYSTEM_FOLDER_NAMES.userPresets}/${fileName}` `` → `user-presets/<file>`;
+`safeWriteJson` locks on `` `${dir.name}/${fileName}` `` where `dir.name === "user-presets"` →
+also `user-presets/<file>`. The outer lock is held, then awaits `safeWriteJson`, which queues
+behind the still-held outer lock → the promise never settles. (The sibling v41.13 fix in
+`feedbackStorage.ts` is fine — it wraps `writeJsonFile`, which does not lock internally.)
+
+**Fix:** give the outer RMW lock a distinct key (`:rmw` suffix) so it no longer collides with
+the inner `safeWriteJson` lock. Applied to both the per-user and admin-shared save functions.
+
+**File:** `src/data/preferences/browsePresetStorage.ts`
+
+**Before:**
+```ts
+  await withResourceLock(`${SYSTEM_FOLDER_NAMES.userPresets}/${fileName}`, async () => {
+```
+(and, in `saveAdminBrowseDatasetPreset`:)
+```ts
+  await withResourceLock(`${SYSTEM_FOLDER_NAMES.userPresets}/${ADMIN_SHARED_PRESET_FILE}`, async () => {
+```
+
+**After:**
+```ts
+  // NB: `:rmw` suffix keeps this outer read-modify-write lock distinct from
+  // safeWriteJson's own internal `${dir.name}/${fileName}` lock ("user-presets/<file>")
+  // — withResourceLock is not reentrant, so a colliding key self-deadlocks.
+  await withResourceLock(`${SYSTEM_FOLDER_NAMES.userPresets}/${fileName}:rmw`, async () => {
+```
+(and, in `saveAdminBrowseDatasetPreset`:)
+```ts
+  await withResourceLock(`${SYSTEM_FOLDER_NAMES.userPresets}/${ADMIN_SHARED_PRESET_FILE}:rmw`, async () => {
+```
+
+**File:** `src/data/preferences/browsePresetStorage.test.ts` (new)
+
+Added a regression test that drives both save functions through the real `withResourceLock`
+against an in-memory directory and asserts the call resolves (would hang/deadlock before the
+fix) and that concurrent saves of different datasets both persist without dropping updates.
+
+---
+
 ## v41.3 — 2026-07-05 — Remove stage-port totals band; fix pre-existing grid overflow bug
 
 Removed the top `.v2-totals-band` from both new stage-port slides (population and sample, per
@@ -14956,7 +15473,7 @@ a visible button on the address picker.
 
 ---
 
-## v41.3 — 2026-07-05 — Archive tab audit: show dropped distribution total, surface refresh errors, don't misreport skipped file copies
+## v41.11 — 2026-07-05 — Archive tab audit: show dropped distribution total, surface refresh errors, don't misreport skipped file copies
 
 Audit of `src/components/Sidebar/Tabs/Archive/` and `src/data/backup/backupStorage.ts`.
 Three targeted fixes:
@@ -15107,7 +15624,7 @@ and (in `copyAllJsonFiles`)
     if (wrote) copied.push(entry.name);
 ```
 
-## v41.4 — 2026-07-05 — Settings/ChangeLog audit: add missing label group entry + fix stale LabelRow input
+## v41.12 — 2026-07-05 — Settings/ChangeLog audit: add missing label group entry + fix stale LabelRow input
 
 Audit of `Settings`/`ChangeLog` tabs and `labelsStore`/`browsePresetStorage`. Found `col_expert_observation_date`
 (used as a real column header in `XrayReferrals.tsx` and `XrayInspectionResults.tsx`) was missing from
@@ -15144,7 +15661,7 @@ function LabelRow({ labelKey, desc }: { labelKey: LabelKey; desc: string }) {
   useEffect(() => setVal(current), [current]);
 ```
 
-## v41.4 — 2026-07-05 — Data-layer audit: fix read-modify-write races in feedback + browse presets
+## v41.13 — 2026-07-05 — Data-layer audit: fix read-modify-write races in feedback + browse presets
 
 Audit of `src/data/{population,sampling,distribution,answers,approvals,referral,feedback,storage,powerbiExport,preferences}`.
 Most of this layer is CAS-loop or event-log based (answers, approvals, distribution, sample append)
@@ -15224,7 +15741,7 @@ export async function saveUserBrowseDatasetPreset(
 column/width preset saves for the same user (or the shared admin preset) merge instead of racing.
 ```
 
-## v41.5 — 2026-07-05 — UserManagement/auth audit: fix report-designer permission-key mismatch
+## v41.14 — 2026-07-05 — UserManagement/auth audit: fix report-designer permission-key mismatch
 
 Audit of `src/components/Sidebar/Tabs/UserManagement/` and `src/auth/`. Found a real
 tab/permission-key mismatch: `App.tsx`'s `allowedTabs` memo builds each sub-tab's
@@ -15284,7 +15801,7 @@ in `Reports/index.tsx` are unaffected — those are UI-local ids, not permission
     { role: "admin",      tabId: "reports/report-designer",         access: "edit" },
 ```
 
-## v41.5 — 2026-07-05 — Population tab audit: remove dead mini-report code (stale stage mapping bug)
+## v41.15 — 2026-07-05 — Population tab audit: remove dead mini-report code (stale stage mapping bug)
 
 Audit of `src/components/Sidebar/Tabs/Population/` and subfolders. `createRiskMiniReport` /
 `createBiMiniReport` / `buildRiskStageCountsBySheet` in `components/helpers.ts` and the whole
@@ -15337,7 +15854,7 @@ importers anywhere in `src/`.
 
 ---
 
-## v41.7 — 2026-07-05 — template system audit: fix condition-cycle stack overflow, orphaned selection on delete, dead role-check helper
+## v41.16 — 2026-07-05 — template system audit: fix condition-cycle stack overflow, orphaned selection on delete, dead role-check helper
 
 Audit of `src/data/templates/` and `TemplateBuilder`. Three bugs found and fixed:
 (1) `isFieldVisible` recursed into a field's condition source with no cycle guard —
@@ -15461,7 +15978,7 @@ never imported, and its role logic contradicted the real gating in `TemplateBuil
 
 **After:** stale comment removed (no replacement — nothing references it anymore).
 
-## v41.6 — 2026-07-05 — Reports/ReportDesigner tab audit: fix silently-swallowed post-delete list refresh
+## v41.17 — 2026-07-05 — Reports/ReportDesigner tab audit: fix silently-swallowed post-delete list refresh
 
 Audit of `src/components/Sidebar/Tabs/Reports/` and `src/components/Sidebar/Tabs/ReportDesigner/`
 (role gating for the KPI sub-tab and report-designer sub-tab checked and confirmed correctly
@@ -15506,7 +16023,7 @@ here.
       .catch(logRejection("reportDesigner:refreshIndexAfterDelete"));
 ```
 
-## v41.8 — 2026-07-05 — Reports/ReportDesigner audit: fix missing permission guard on report-designer sub-tab
+## v41.18 — 2026-07-05 — Reports/ReportDesigner audit: fix missing permission guard on report-designer sub-tab
 
 Audit of `src/components/Sidebar/Tabs/Reports/` and `src/components/Sidebar/Tabs/ReportDesigner/`.
 Found a real access-control gap: the `kpi` sub-section in `ReportsContent` is wrapped in
@@ -15545,7 +16062,7 @@ the other pass rather than re-touching it.
   return <ReportsContent />;
 ```
 
-## v41.4 — 2026-07-05 — ReportDesigner: surface silent autosave failures
+## v41.19 — 2026-07-05 — ReportDesigner: surface silent autosave failures
 
 Audit of `Reports`/`ReportDesigner` tabs (scope: `src/components/Sidebar/Tabs/Reports/`,
 `src/components/Sidebar/Tabs/ReportDesigner/`). `EditorHost.performSave` called
@@ -15693,7 +16210,7 @@ export default function Ribbon({
 }
 ```
 
-## v41.9 — 2026-07-05 — EmployeeWorkspace audit: fix stale permission reads on user-management change
+## v41.20 — 2026-07-05 — EmployeeWorkspace audit: fix stale permission reads on user-management change
 
 Audit of `src/components/Sidebar/Tabs/EmployeeWorkspace/` (views + index). Found `XrayReferrals.tsx`,
 `XrayInspectionResults.tsx`, and `ReferralApproval.tsx` all call `readUserManagementState()` /
@@ -15825,48 +16342,7 @@ export default function ReferralApproval({ directoryHandle }: Props) {
   const userManagementState = readUserManagementState();
 ```
 
-## v41.5 — 2026-07-05 — ReportDesigner: log swallowed list-refresh failure after delete
-
-`handleDelete` in the ReportDesigner list view refreshed the design index after a
-successful delete with `loadDesignIndex(directoryHandle).then(setIndex).catch(() => {})`
-— any failure reloading the index (e.g. transient FS error) was completely swallowed
-with no observability, unlike the rest of the codebase's `logRejection` convention used
-in `Reports/index.tsx` for the same class of fire-and-forget promise.
-
-**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
-
-**Before:**
-```tsx
-    setDeletingId(null);
-    // Refresh list
-    loadDesignIndex(directoryHandle)
-      .then(setIndex)
-      .catch(() => {});
-```
-
-**After:**
-```tsx
-    setDeletingId(null);
-    // Refresh list
-    loadDesignIndex(directoryHandle)
-      .then(setIndex)
-      .catch(logRejection("reportDesigner:refreshIndexAfterDelete"));
-```
-
-**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx` (import)
-
-**Before:**
-```tsx
-import { readSession } from "../../../../auth/authSession";
-```
-
-**After:**
-```tsx
-import { readSession } from "../../../../auth/authSession";
-import { logRejection } from "../../../../data/storage/errorLogger";
-```
-
-## v41.6 — 2026-07-05 — Reports: handle clipboard-write rejection on Power BI path copy
+## v41.21 — 2026-07-05 — Reports: handle clipboard-write rejection on Power BI path copy
 
 The "نسخ" (copy) button for the Power BI export path used
 `void navigator.clipboard.writeText(fullHint)` — `navigator.clipboard.writeText` returns
@@ -15889,7 +16365,7 @@ a button that appears to do nothing and no diagnostic trail. Routed through the 
                       }}
 ```
 
-## v41.10b — 2026-07-05 — Population tab audit: fix undefined-crash in export column handler + stale CertScan grid on async month load
+## v41.22 — 2026-07-05 — Population tab audit: fix undefined-crash in export column handler + stale CertScan grid on async month load
 
 Second, independent pass over `src/components/Sidebar/Tabs/Population/` (biData/, riskData/,
 processing/, reporting/, components/), on top of the earlier v41.5 entry in this file that
@@ -15975,36 +16451,1688 @@ export default function CertScanGrid({ initialText, onDataChange }: CertScanGrid
   }, [initialText]);
 ```
 
-## v41.7 — 2026-07-05 — Reports: gate report-designer sub-tab inside the component, not just the registry
+## v41.23 — 2026-07-05 — Synthesis pass: fix lint errors introduced by parallel audit agents
 
-`tabConfig.subTabs` restricts `report-designer` to `["supervisor", "manager", "admin"]`,
-matching the pattern already double-checked in-component for the `kpi`/analytics sub-tab
-(`<TabGuard tabId="reports/analytics">`). The `report-designer` sub-tab had no equivalent
-in-component check — `ReportsTab` rendered `<ReportDesignerTab />` unconditionally once
-`activeSubTab === "report-designer"`, relying solely on the sidebar/registry to prevent
-an unauthorized role (e.g. `employee`) from reaching it. Since sub-tab switching is driven
-by a DOM CustomEvent (`sidebar-subtab-changed`) rather than a prop passed down with an
-access check, this is exactly the double-gating gap called out for this audit: the
-registry can be bypassed if the event fires from anywhere. Added the same `TabGuard`
-pattern used for `reports/analytics`, keyed to the existing `reports/report-designer`
-permission id already defined in `userManagement.ts`.
+After nine parallel audit agents (population, employee workspace, reports/report-designer,
+archive, user-management, settings/change-log, cross-page connections, data layer, templates)
+finished their fixes, a final `npm run lint` pass surfaced two real errors: one new regression
+from this session's own work, one pre-existing and unrelated.
+
+**File:** `src/components/Sidebar/Tabs/Settings/index.tsx`
+
+The Settings/ChangeLog audit (v41.12) fixed a stale-input bug in `LabelRow` by adding
+`useEffect(() => setVal(current), [current])`, but that calls `setState` synchronously inside
+an effect body, which `react-hooks/set-state-in-effect` correctly flags as an avoidable extra
+render pass. Replaced it with React's "adjust state during render" pattern (track the previous
+`current` in a ref-like state value and call `setVal` conditionally during render instead of
+in an effect), which achieves the same resync without the extra render. Removed the now-unused
+`useEffect` import.
+
+**Before:**
+```tsx
+  const current = getLabels()[labelKey];
+  const custom  = isCustomized(labelKey);
+  const [val, setVal] = useState<string>(current);
+  const [saved, setSaved] = useState(false);
+
+  // Resync the visible input when the label changes externally (e.g. "استعادة
+  // الكل" while this row's section stays open) — otherwise the input keeps
+  // showing stale text even though isCustomized()/DEFAULT_LABELS already updated.
+  useEffect(() => setVal(current), [current]);
+```
+
+**After:**
+```tsx
+  const current = getLabels()[labelKey];
+  const custom  = isCustomized(labelKey);
+  const [val, setVal] = useState<string>(current);
+  const [saved, setSaved] = useState(false);
+
+  // Resync the visible input when the label changes externally (e.g. "استعادة
+  // الكل" while this row's section stays open) — otherwise the input keeps
+  // showing stale text even though isCustomized()/DEFAULT_LABELS already updated.
+  // Adjusted during render (not in an effect) per React's "you might not need
+  // an effect" pattern, so it can't trigger a second, avoidable render pass.
+  const [prevCurrent, setPrevCurrent] = useState(current);
+  if (prevCurrent !== current) {
+    setPrevCurrent(current);
+    setVal(current);
+  }
+```
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+Pre-existing, unrelated to this session's audits: `STAGE_CARD_TABLE_BUDGET_PX` is exported but
+never reassigned anywhere in the codebase, tripping `prefer-const`.
+
+**Before:**
+```ts
+export let STAGE_CARD_TABLE_BUDGET_PX = 160;
+```
+
+**After:**
+```ts
+export const STAGE_CARD_TABLE_BUDGET_PX = 160;
+```
+
+## v41.24 — 2026-07-05 — Retroactive: DataTable sticky-column offset/order fixes, self-contained fonts + favicon
+
+Older uncommitted work found staged ahead of the audit-pass commits above. Logging it
+retroactively before committing. Two real `DataTable` bugs plus a build-portability change:
+
+1. `stickyMeta` in `src/components/DataTable/index.tsx` only accumulated width over sticky
+   columns, so a sticky column not adjacent to the previous sticky one got the wrong `right`
+   offset (LOG-04-style gap). Fixed to accumulate over every visible column and only record
+   `rightPct` for sticky ones. Covered by new `src/components/DataTable/stickyColumns.test.tsx`.
+2. `buildDefault` built `order` from raw `columns` definition order, ignoring `defaultVisible`'s
+   intended arrangement (e.g. `XrayReferrals.tsx`'s `DEFAULT_VISIBLE` wants `answerStatus` right
+   after `xrayImageId`, not wherever `buildXrayColumns` happens to define it). Fixed to order by
+   `defaultVisible` first, then append the rest. Also applied the equivalent local reordering
+   fix in `XrayReferrals.tsx`'s own `buildDefaultColConfig`, plus a `subscribeToUserManagementChanges`
+   re-render fix so `canEdit`/`canSeeAll` don't go stale while the tab stays mounted.
+3. `.dt-th` redeclared `position: relative` after its `position: sticky` rule — same selector
+   specificity, later in the cascade, silently downgrading every header from sticky to relative
+   and breaking both vertical sticky-header and horizontal pinned-column behavior. Removed
+   (kept as an explanatory comment only).
+4. Report fonts (`SomarSans-*.woff`) and the favicon were served from `public/`, requiring the
+   built `dist/index.html` to stay next to a `public/` copy on disk. Switched to importing the
+   already-tracked `src/assets/fonts/*.woff` via `?inline` (base64 data URIs) and inlining the
+   favicon as a `data:` URI in `index.html`, so exported/report HTML and the app shell stay
+   fully self-contained. Removed the now-unused `public/fonts/` and `public/logo.svg`.
+5. `vite.config.ts` dev server now reads `PORT` from the environment (defaults to 5173); a new
+   `*.woff?inline` module declaration was added to `src/vite-env.d.ts` for the font imports.
+
+**File:** `src/components/DataTable/index.tsx`
+
+**Before:**
+```tsx
+  return {
+    order: columns.map((c) => c.id),
+    hidden: columns
+      .filter((c) => visSet ? !visSet.has(c.id) : false)
+      .map((c) => c.id),
+```
+and
+```tsx
+    let rightPct = 0;
+    let order = 0;
+    for (const col of visibleCols) {
+      if (!stickyIdSet.has(col.id)) continue;
+      meta.set(col.id, { rightPct, order });
+      rightPct += (((colCfg.widths ?? {})[col.id] ?? col.widthFr ?? 1) / totalFr) * 100;
+      order += 1;
+    }
+```
+
+**After:**
+```tsx
+  const known = new Set(columns.map((c) => c.id));
+  const orderedVisible = defaultVisible ? defaultVisible.filter((id) => known.has(id)) : [];
+  const orderedVisibleSet = new Set(orderedVisible);
+  const rest = columns.map((c) => c.id).filter((id) => !orderedVisibleSet.has(id));
+  return {
+    order: [...orderedVisible, ...rest],
+    hidden: columns
+      .filter((c) => visSet ? !visSet.has(c.id) : false)
+      .map((c) => c.id),
+```
+and
+```tsx
+    let cumulativePct = 0;
+    let order = 0;
+    for (const col of visibleCols) {
+      const colPct = (((colCfg.widths ?? {})[col.id] ?? col.widthFr ?? 1) / totalFr) * 100;
+      if (stickyIdSet.has(col.id)) {
+        meta.set(col.id, { rightPct: cumulativePct, order });
+        order += 1;
+      }
+      cumulativePct += colPct;
+    }
+```
+
+**File:** `src/components/DataTable/DataTable.css`
+
+**Before:**
+```css
+.dt-th { position: relative; }
+```
+
+**After:**
+```css
+/* .dt-th already declares `position: sticky` above — see commit for full rationale. */
+```
+
+**File:** `src/data/reporting/executive/theme.ts`
+
+**Before:**
+```ts
+export const EXEC_CSS = `
+@font-face{font-family:"Somar";src:url("${import.meta.env.BASE_URL}fonts/SomarSans-Regular.woff") format("woff");font-weight:400;font-style:normal;font-display:swap;}
+...
+```
+
+**After:**
+```ts
+import somarRegular from "../../../assets/fonts/SomarSans-Regular.woff?inline";
+import somarBold from "../../../assets/fonts/SomarSans-Bold.woff?inline";
+import somarMedium from "../../../assets/fonts/SomarSans-Medium.woff?inline";
+import somarLight from "../../../assets/fonts/SomarSans-Light.woff?inline";
+
+export const EXEC_CSS = `
+@font-face{font-family:"Somar";src:url("${somarRegular}") format("woff");font-weight:400;font-style:normal;font-display:swap;}
+...
+```
+
+**File:** `index.html`
+
+**Before:**
+```html
+<link rel="icon" type="image/svg+xml" href="/logo.svg" />
+```
+
+**After:**
+```html
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,..." />
+```
+
+**File:** `vite.config.ts`, `src/vite-env.d.ts`, `.claude/launch.json` — dev server `PORT` env
+support, `*.woff?inline` module typing, `autoPort: true` for the launch config.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx` — column-order
+fix mirrored locally + `subscribeToUserManagementChanges` re-render fix (see summary above).
+
+**Deleted:** `public/fonts/SomarSans-{Bold,Light,Medium,Regular}.woff`, `public/logo.svg` (superseded
+by the inlined copies above).
+
+
+## v41.25 — 2026-07-05 — Distribution: totalAssigned counts live entries only (excludes replaced)
+
+**File:** `src/data/distribution/distributionLog.ts`
+
+**Before:**
+```ts
+  return {
+    monthFolderName: log.monthFolderName,
+    derivedAt: now,
+    totalAssigned: entries.length,
+    totalCompleted: entries.filter((e) => e.status === "completed").length,
+```
+
+**After:**
+```ts
+  return {
+    monthFolderName: log.monthFolderName,
+    derivedAt: now,
+    // Live (non-replaced) entries only. Invariant:
+    // totalPending + totalCompleted + count(status === "replacement-requested") === totalAssigned.
+    totalAssigned: entries.filter((e) => e.status !== "replaced").length,
+    totalCompleted: entries.filter((e) => e.status === "completed").length,
+```
+
+**File:** `src/data/distribution/distributionLog.test.ts`
+
+**Before:**
+```ts
+  expect(original?.status).toBe("replaced");
+  expect(original?.replacedById).toBe("B2");
+  expect(replacement?.status).toBe("pending");
+  expect(replacement?.replacedById).toBeNull();
+});
+```
+
+**After:**
+```ts
+  expect(original?.status).toBe("replaced");
+  expect(original?.replacedById).toBe("B2");
+  expect(replacement?.status).toBe("pending");
+  expect(replacement?.replacedById).toBeNull();
+
+  // Replaced rows are dead: they no longer count toward totalAssigned.
+  expect(result.totalAssigned).toBe(1);
+  expect(result.totalReplaced).toBe(1);
+  expect(result.totalPending).toBe(1);
+});
+```
+
+## v41.26 — 2026-07-05 — Replacement: deterministic seeded candidate capping (audit reproducibility)
+
+**File:** `src/data/distribution/replacement.ts`
+
+**Before:**
+```ts
+function capRandom<T>(pool: T[], limit: number): T[] {
+  if (pool.length <= limit) return pool;
+  const copy = pool.slice();
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j]!, copy[i]!];
+  }
+  return copy.slice(0, limit);
+}
+```
+
+**After:**
+```ts
+function capSeeded<T>(pool: T[], limit: number, rng: Rng): T[] {
+  if (pool.length <= limit) return pool;
+  return drawWithoutReplacement(pool, limit, rng);
+}
+```
+Plus: import `createRng`, `drawWithoutReplacement`, `hashSeedString`, `type Rng` from `../sampling/rng`; in `getReplacementCandidates`, seed a per-call RNG with `hashSeedString(`${sampleMaster.rngSeed}:${entry.xrayImageId}`)` and pass it to every `capSeeded` call (was `capRandom` / `Math.random()`), so the same inputs always produce the same candidate list.
+
+**File:** `src/data/distribution/replacement.test.ts`
+
+**Before:** (no determinism test)
+
+**After:** new test "caps oversized pools deterministically from the sample seed and dead row id" — builds 150 same-stage candidates, calls `getReplacementCandidates` twice, asserts both calls return identical 100-item lists.
+
+## v41.27 — 2026-07-05 — Sampling: reconcile per-port actuals after spillover in legacy totalSampleSize branch
+
+**File:** `src/data/sampling/sampleAlgorithm.ts`
+
+**Before:**
+```ts
+    if (underfill > 0) {
+      const spillResult = applySpillover(
+        portGroups,
+        portAllocations,
+        allDrawnRows,
+        underfill,
+        rng
+      );
+      allDrawnRows.push(...spillResult.extraRows);
+      totalCertScanActual += spillResult.extraCert;
+      totalNonCertScanActual += spillResult.extraNonCert;
+    }
+```
+
+**After:**
+```ts
+    if (underfill > 0) {
+      const spillResult = applySpillover(
+        portGroups,
+        portAllocations,
+        allDrawnRows,
+        underfill,
+        rng
+      );
+      allDrawnRows.push(...spillResult.extraRows);
+      totalCertScanActual += spillResult.extraCert;
+      totalNonCertScanActual += spillResult.extraNonCert;
+
+      // Reconcile per-port actuals with the spillover extras so that
+      // sum(portAllocations actuals) === totalActual (mirrors the stage path).
+      const allocByPort = new Map(portAllocations.map((a) => [a.portName, a]));
+      for (const row of spillResult.extraRows) {
+        const portName = row.portName ?? "غير محدد";
+        const alloc = allocByPort.get(portName);
+        if (alloc) {
+          alloc.actualTotalDrawn += 1;
+          if (row.certScanStatus === "Certscan") {
+            alloc.actualCertScanDrawn += 1;
+          } else {
+            alloc.actualNonCertScanDrawn += 1;
+          }
+        }
+      }
+    }
+```
+
+**File:** `src/data/sampling/sampleAlgorithm.test.ts`
+
+**Before:**
+```ts
+  // portAllocations excludes spillover extra draws, so may differ.
+  // But total rows in data.rows should match totalActual.
+  expect(result.data.rows.length).toBe(result.data.totalActual);
+```
+
+**After:**
+```ts
+  // portAllocations actuals are reconciled after spillover, so they must sum to totalActual.
+  const portSum = result.data.portAllocations.reduce((s, a) => s + a.actualTotalDrawn, 0);
+  expect(portSum).toBe(result.data.totalActual);
+  expect(result.data.rows.length).toBe(result.data.totalActual);
+```
+Plus: new test "legacy branch reconciles per-port actuals when spillover fires" — a port whose rows include out-of-union certScanStatus values (runtime data drift) forces underfill + spillover; asserts per-port actuals sum to the grand total.
+
+## v41.28 — 2026-07-05 — Distribution fold: replaced is terminal — drop illegal resurrecting events
+
+**File:** `src/data/distribution/distributionLog.ts`
+
+**Before:**
+```ts
+    const existing = entryMap.get(evt.xrayImageId);
+    if (existing) {
+      replacedById = existing.replacedById;
+    }
+
+    switch (evt.eventType) {
+```
+
+**After:**
+```ts
+    const existing = entryMap.get(evt.xrayImageId);
+    if (existing) {
+      replacedById = existing.replacedById;
+    }
+
+    // Terminal-state guard: a replaced row is dead. Any later event other than
+    // another "replaced" is an illegal transition (it would resurrect the row
+    // and double-count it next to its replacement) — drop it and log.
+    if (existing?.status === "replaced" && evt.eventType !== "replaced") {
+      logError(
+        "distribution:derive",
+        new Error(
+          `Dropped illegal event ${evt.eventType} (${evt.eventId}) for replaced row ${evt.xrayImageId}.`
+        )
+      );
+      continue;
+    }
+
+    switch (evt.eventType) {
+```
+Plus: import `logError` from `../storage/errorLogger`.
+
+**File:** `src/data/distribution/distributionLog.test.ts`
+
+**Before:** (no resurrection test)
+
+**After:** new test "a stray late event cannot resurrect a replaced row" — assign A1 and B2, replace A1 with B2, then append a late "assigned"/"completed" for A1; asserts A1 stays replaced, replacedById preserved, and totalAssigned still counts only B2.
+
+## v41.29 — 2026-07-05 — Distribution storage: log swallowed cache-write and derive failures
+
+**File:** `src/data/distribution/distributionStorage.ts`
+
+**Before:**
+```ts
+    // Best-effort cache write — don't block on errors
+    void saveDistributionCurrent(directoryHandle, monthFolderName, withRevision).catch(
+      () => undefined
+    );
+
+    return withRevision;
+  } catch {
+    return null;
+  }
+}
+```
+
+**After:**
+```ts
+    // Best-effort cache write — don't block on errors, but log for observability.
+    void saveDistributionCurrent(directoryHandle, monthFolderName, withRevision).catch(
+      logRejection("distribution:cache-write")
+    );
+
+    return withRevision;
+  } catch (error) {
+    // Unexpected failure (corrupt log, permission loss, …) — expected
+    // missing-file cases are handled quietly inside the loaders above.
+    logError("distribution:load-or-derive", error);
+    return null;
+  }
+}
+```
+Plus: import `logError`, `logRejection` from `../storage/errorLogger`.
+
+## v41.30 — 2026-07-05 — Population: hard-block sample re-draw once distribution events exist
+
+**File:** `src/data/labels/labelsStore.ts`
+
+**Before:**
+```ts
+  // KPIs
+  kpi_population:      "إجمالي المجتمع",
+```
+
+**After:**
+```ts
+  // Population — sampling & processing guards
+  sample_redraw_blocked: "لا يمكن إعادة سحب العينة بعد بدء التوزيع: يوجد سجل توزيع فعّال لهذا الشهر، وإعادة السحب ستؤدي إلى فقدان التعيينات والإجابات المسجلة.",
+
+  // KPIs
+  kpi_population:      "إجمالي المجتمع",
+```
+
+**File:** `src/components/Sidebar/Tabs/Population/index.tsx`
+
+**Before:**
+```ts
+    setIsDrawingSample(true);
+    setSampleSaveMessage(null);
+    setSampleDrawResult(null);
+
+    try {
+      const username = sessionRef.current?.username ?? "unknown";
+```
+
+**After:**
+```ts
+    setIsDrawingSample(true);
+    setSampleSaveMessage(null);
+
+    try {
+      // Hard block: re-drawing after distribution would orphan every existing
+      // assignment and answer (deriveCurrentDistribution drops events whose id
+      // is not in the new sample rows). No cascade in this phase — abort.
+      if (directoryHandle) {
+        const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
+        const existingLog = await loadDistributionLog(directoryHandle, monthFolderName);
+        if (existingLog.events.length > 0) {
+          setSampleSaveMessage({ type: "error", text: getLabels().sample_redraw_blocked });
+          return;
+        }
+      }
+
+      setSampleDrawResult(null);
+      const username = sessionRef.current?.username ?? "unknown";
+```
+Plus: import `getLabels` from `../../../../data/labels/labelsStore`.
+
+## v41.31 — 2026-07-05 — Population: confirm before saving a re-processed month that already has a drawn sample
+
+**File:** `src/data/labels/labelsStore.ts`
+
+**Before:**
+```ts
+  // Population — sampling & processing guards
+  sample_redraw_blocked: "لا يمكن إعادة سحب العينة بعد بدء التوزيع: يوجد سجل توزيع فعّال لهذا الشهر، وإعادة السحب ستؤدي إلى فقدان التعيينات والإجابات المسجلة.",
+```
+
+**After:**
+```ts
+  // Population — sampling & processing guards
+  sample_redraw_blocked: "لا يمكن إعادة سحب العينة بعد بدء التوزيع: يوجد سجل توزيع فعّال لهذا الشهر، وإعادة السحب ستؤدي إلى فقدان التعيينات والإجابات المسجلة.",
+  population_reprocess_confirm_title: "إعادة معالجة شهر يحتوي عينة",
+  population_reprocess_confirm_message: "توجد عينة مسحوبة لهذا الشهر بالفعل. حفظ نتائج المعالجة الجديدة سيجعل العينة الحالية غير متطابقة مع المجتمع الجديد. هل تريد المتابعة والحفظ؟",
+  population_reprocess_cancelled: "تم إلغاء الحفظ — بقيت بيانات الشهر السابقة دون تغيير.",
+```
+
+**File:** `src/components/Sidebar/Tabs/Population/index.tsx`
+
+**Before:**
+```ts
+  async function performSaveToDisk(
+    processingResult: PopulationProcessingResult,
+    riskResult: RiskWorkbookResult
+  ): Promise<void> {
+    if (!directoryHandle) return;
+
+    const username = sessionRef.current?.username ?? "unknown";
+```
+
+**After:**
+```ts
+  async function performSaveToDisk(
+    processingResult: PopulationProcessingResult,
+    riskResult: RiskWorkbookResult
+  ): Promise<void> {
+    if (!directoryHandle) return;
+
+    // Guard: re-processing a month that already has a drawn sample would make
+    // that sample no longer match the new population — confirm before overwriting.
+    const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
+    const existingSample = await loadSampleMaster(directoryHandle, monthFolderName);
+    if (existingSample) {
+      setPendingReprocessSave({ processingResult, riskResult });
+      return;
+    }
+
+    await commitSaveToDisk(processingResult, riskResult);
+  }
+
+  async function commitSaveToDisk(
+    processingResult: PopulationProcessingResult,
+    riskResult: RiskWorkbookResult
+  ): Promise<void> {
+    if (!directoryHandle) return;
+
+    const username = sessionRef.current?.username ?? "unknown";
+```
+Plus: new state `pendingReprocessSave`, `<ConfirmDialog>` rendered next to `MappingSettingsModal` (confirm → `commitSaveToDisk`, cancel → cancellation message), imports of `ConfirmDialog` and `loadSampleMaster`.
+
+## v41.32 — 2026-07-05 — Month manifest: wire dead "sampled"/"distributed" statuses
+
+**File:** `src/data/population/populationStorage.ts`
+
+**Before:** (no status-update helper existed; `status` was only ever written as "processed-saved" by `saveMonthRun`)
+
+**After:**
+```ts
+const STATUS_RANK: Record<MonthManifestData["status"], number> = {
+  "raw-saved": 0,
+  "processed-saved": 1,
+  sampled: 2,
+  distributed: 3,
+};
+
+/**
+ * Advance the month manifest status (monotonic — never downgrades).
+ * Best-effort: failures are logged to the error ring buffer, never thrown.
+ */
+export async function updateMonthStatus(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  status: MonthManifestData["status"]
+): Promise<void> {
+  try {
+    const monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, false);
+    const manifestResult = await safeReadJson<MonthManifestData>(monthDir, "month.manifest.json");
+    if (!manifestResult.ok) return;
+    const manifest = manifestResult.value;
+    const currentRank = STATUS_RANK[manifest.status] ?? -1;
+    if (currentRank >= STATUS_RANK[status]) return;
+    await safeWriteJson(monthDir, "month.manifest.json", { ...manifest, status });
+  } catch (error) {
+    logError("population:update-month-status", error);
+  }
+}
+```
+
+**File:** `src/components/Sidebar/Tabs/Population/index.tsx`
+
+**Before:**
+```ts
+        if (saveResult.ok) {
+          setSampleSaveMessage({
+            type: "ok",
+            text: `تم حفظ العينة في ${monthFolderName}/sample/sample.master.json`
+          });
+          setMonthRefreshKey((k) => k + 1);
+        }
+```
+
+**After:**
+```ts
+        if (saveResult.ok) {
+          await updateMonthStatus(directoryHandle, monthFolderName, "sampled");
+          setSampleSaveMessage({
+            type: "ok",
+            text: `تم حفظ العينة في ${monthFolderName}/sample/sample.master.json`
+          });
+          setMonthRefreshKey((k) => k + 1);
+        }
+```
+Plus: after a successful single assignment (`handleAssign`) and a successful bulk batch (`handleApplyBulkAssignment`), call `updateMonthStatus(directoryHandle, monthFolderName, "distributed")` (monotonic helper makes repeat calls no-ops); `updateMonthStatus` added to the populationStorage import list.
+
+## v41.33 — 2026-07-05 — Executive report: completion in the model derives from submitted answers, not distribution events
+
+**File:** `src/data/reporting/executive/model/reportModel.ts`
+
+**Before:**
+```ts
+    distribution: {
+      assigned: dist?.totalAssigned ?? 0,
+      completed: dist?.totalCompleted ?? 0,
+      pending: dist?.totalPending ?? 0,
+      replaced: dist?.totalReplaced ?? 0,
+    },
+```
+
+**After:**
+```ts
+    distribution: {
+      assigned: dist?.totalAssigned ?? 0,
+      // Completion derives from submitted answers (kpis.studiedImages — the
+      // same source as the fact table and sample.studied) so every completion
+      // figure in the report agrees. assigned/pending/replaced stay
+      // event-derived: they describe distribution state, not study progress.
+      completed: kpis.studiedImages,
+      pending: dist?.totalPending ?? 0,
+      replaced: dist?.totalReplaced ?? 0,
+    },
+```
+
+## v41.34 — 2026-07-05 — Remove emoji glyphs: lucide icons instead
 
 **File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
 
 **Before:**
 ```tsx
-  if (activeSubTab === "report-designer") return <ReportDesignerTab />;
-  return <ReportsContent />;
+import { AlertTriangle, BarChart2, BarChart3, Building2, Check, ClipboardList, Database, Download, FileStack, FileText, Filter, Globe, History, Presentation, Settings2, User, Users, X } from "lucide-react";
+…
+          <span className="rh-empty-icon">🗂</span>
 ```
 
 **After:**
 ```tsx
-  if (activeSubTab === "report-designer") {
-    return (
-      <TabGuard tabId="reports/report-designer">
-        <ReportDesignerTab />
-      </TabGuard>
+import { AlertTriangle, BarChart2, BarChart3, Building2, Check, ClipboardList, Database, Download, FileStack, FileText, Filter, FolderOpen, Globe, History, Presentation, Settings2, User, Users, X } from "lucide-react";
+…
+          <span className="rh-empty-icon"><FolderOpen size={28} strokeWidth={1.75} aria-hidden /></span>
+```
+
+**File:** `src/components/Sidebar/Tabs/Population/components/MappingSettingsModal.tsx`
+
+**Before:**
+```tsx
+import { ChevronDown, ChevronUp, Settings2, X } from "lucide-react";
+…
+                <h4 style={{ fontSize: "14px", fontWeight: "bold", marginBottom: "8px" }}>➕ إضافة حقل مخصص جديد</h4>
+```
+
+**After:**
+```tsx
+import { ChevronDown, ChevronUp, Plus, Settings2, X } from "lucide-react";
+…
+                <h4 style={{ fontSize: "14px", fontWeight: "bold", marginBottom: "8px", display: "flex", alignItems: "center", gap: "6px" }}><Plus size={14} strokeWidth={2.5} aria-hidden /> إضافة حقل مخصص جديد</h4>
+```
+
+## v41.38 — 2026-07-05 — Docs integrity: resolve duplicate EDIT_LOG version identifiers
+
+**File:** `docs/EDIT_LOG.md`
+
+v41.25, v41.26 and v41.27 were each used twice (parallel audit agents): top-of-file entries
+(auto-backup NotFoundError race / browse-preset self-deadlock / Hamilton tie-break) collided
+with the Tier-0 entries appended at the bottom (totalAssigned / seeded replacement capping /
+spillover reconciliation). Renumbered the three pre-existing top entries to unused numbers —
+they are referenced nowhere else except one test comment (updated below):
+
+- top `v41.25` (auto-backup race)        → `v41.35`
+- top `v41.26` (browse-preset deadlock)  → `v41.36`
+- top `v41.27` (Hamilton tie-break)      → `v41.37`
+
+Also appended a reproducibility-epoch note to the Hamilton tie-break entry (now v41.37).
+
+**File:** `src/data/preferences/browsePresetStorage.test.ts`
+
+**Before:**
+```ts
+// until the whole suite times out. Before the v41.26 fix the outer read-modify-write
+```
+
+**After:**
+```ts
+// until the whole suite times out. Before the v41.36 fix the outer read-modify-write
+```
+
+## v41.39 — 2026-07-05 — Distribution: version-stamp derived snapshots so pre-fix caches are re-derived
+
+**File:** `src/data/distribution/distributionLog.ts`
+
+**Before:** (no derive-version constant; snapshot carried only `logRevision`)
+
+**After:**
+```ts
+/**
+ * Version of the derivation algorithm in deriveCurrentDistribution. Bump when
+ * fold semantics change (v2: totalAssigned excludes replaced rows; "replaced"
+ * is terminal). loadOrDeriveDistributionCurrent treats cached snapshots with a
+ * missing or older deriveVersion as stale and re-derives them.
+ */
+export const DERIVE_VERSION = 2;
+```
+And `deriveCurrentDistribution` now stamps `deriveVersion: DERIVE_VERSION` into the returned `DistributionCurrentData`.
+
+**File:** `src/data/distribution/distributionTypes.ts`
+
+**Before:**
+```ts
+  /** Revision of the DistributionLog this snapshot was derived from. Used to detect stale cache. */
+  logRevision?: number;
+```
+
+**After:**
+```ts
+  /** Revision of the DistributionLog this snapshot was derived from. Used to detect stale cache. */
+  logRevision?: number;
+  /** Version of deriveCurrentDistribution that produced this snapshot; missing or older than DERIVE_VERSION means stale. */
+  deriveVersion?: number;
+```
+
+**File:** `src/data/distribution/distributionStorage.ts`
+
+**Before:**
+```ts
+    // Fast path: cache is still valid for this log revision
+    if (cached && cached.logRevision === log.revision && hasQuotaForAssignedEmployees(cached, log)) {
+      return cached;
+    }
+```
+
+**After:**
+```ts
+    // Fast path: cache is valid only if it was produced by the current
+    // derivation algorithm (deriveVersion) for this exact log revision.
+    // Pre-DERIVE_VERSION caches (inflated totalAssigned / resurrected rows)
+    // are treated as stale and re-derived below.
+    if (
+      cached &&
+      cached.deriveVersion === DERIVE_VERSION &&
+      cached.logRevision === log.revision &&
+      hasQuotaForAssignedEmployees(cached, log)
+    ) {
+      return cached;
+    }
+```
+Plus: import `DERIVE_VERSION` from `./distributionLog`.
+
+**File:** `src/data/distribution/distributionStorage.test.ts`
+
+New test "ignores a cached snapshot without deriveVersion and re-derives": seeds a log with one assignment, writes a stale pre-fix cache (matching `logRevision`, valid quotas, absurd totals, no `deriveVersion`), and asserts `loadOrDeriveDistributionCurrent` returns re-derived data stamped with `DERIVE_VERSION`.
+
+## v41.40 — 2026-07-05 — Distribution fold: quota pass skips events dropped by the terminal-state guard
+
+**File:** `src/data/distribution/distributionLog.ts`
+
+**Before:**
+```ts
+  for (const evt of log.events) {
+    if (evt.eventType === "assigned") {
+      if (!firstAssignEventPerEmployee[evt.assignedTo]) {
+```
+
+**After:**
+```ts
+  for (const evt of log.events) {
+    // Skip events the fold guard dropped (illegal assigned-after-replaced):
+    // counting them would inflate that employee's sampleCount / dailyQuota.
+    if (evt.eventType === "assigned" && !droppedEventIds.has(evt.eventId)) {
+      if (!firstAssignEventPerEmployee[evt.assignedTo]) {
+```
+Dropped event ids are collected into a `droppedEventIds` set inside the fold's terminal-state guard (shared with v41.41's aggregated logging).
+
+**File:** `src/data/distribution/distributionLog.test.ts`
+
+Extended "a stray late event cannot resurrect a replaced row": stray events now target a second employee (emp2); asserts `quotas.emp2` is undefined (dropped assignment does not create a quota) and `quotas.emp1.sampleCount` stays 2.
+
+## v41.41 — 2026-07-05 — Distribution fold: aggregate illegal-event logging to one entry per derivation
+
+**File:** `src/data/distribution/distributionLog.ts`
+
+**Before:**
+```ts
+    if (existing?.status === "replaced" && evt.eventType !== "replaced") {
+      logError(
+        "distribution:derive",
+        new Error(
+          `Dropped illegal event ${evt.eventType} (${evt.eventId}) for replaced row ${evt.xrayImageId}.`
+        )
+      );
+      continue;
+    }
+```
+
+**After:**
+```ts
+    if (existing?.status === "replaced" && evt.eventType !== "replaced") {
+      droppedEventIds.add(evt.eventId);
+      droppedImageIds.add(evt.xrayImageId);
+      continue;
+    }
+```
+With a single aggregated `logError("distribution:derive", …)` after the fold summarizing the dropped-event count and affected xrayImageIds — a log permanently containing illegal events would otherwise re-log per event on every slow-path derivation and crowd the 50-entry error ring buffer.
+
+**File:** `src/data/distribution/distributionLog.test.ts`
+
+Resurrection test additionally clears the error ring buffer before deriving and asserts exactly one aggregated `distribution:derive` entry is logged for two dropped events.
+
+## v41.42 — 2026-07-05 — W1 (Tier-1 Item I): safeWrite promotes the verified .tmp when live commit fails and no usable .bak exists
+
+Behavioral changes: (1) promotion converts a previously-thrown failure into a SUCCESS when the
+staged .tmp is intact and can be committed; (2) on total failure the .tmp is now KEPT on disk
+as the survivor for recovery (previously deleted, losing the only good copy on a first write);
+(3) safeReadJson gains a third fallback that recovers a valid leftover .tmp when both the live
+file and .bak are unreadable (reuses the recoveredFromBak flag and recovery event).
+
+**File:** `src/data/storage/safeWrite.ts`
+
+**Before (small-file commit path):**
+```ts
+    if (!verifyOk) {
+      const bak = await readText(dir, `${fileName}.bak`);
+      if (parseValidJson(bak) !== null) {
+        await writeText(dir, fileName, bak as string);
+      }
+      await removeQuietly(dir, tmpName);
+      throw new Error(`Safe-write validation failed for ${fileName}.`);
+    }
+```
+
+**After (small-file commit path):**
+```ts
+    if (!verifyOk) {
+      const bak = await readText(dir, `${fileName}.bak`);
+      if (parseValidJson(bak) !== null) {
+        await writeText(dir, fileName, bak as string);
+        await removeQuietly(dir, tmpName);
+        throw new Error(`Safe-write validation failed for ${fileName}; rolled back to previous version.`);
+      }
+      // No usable .bak (first write, or .bak corrupt): the staged .tmp WAS
+      // verified before commit — promote it instead of losing the data.
+      const staged2 = await readText(dir, tmpName);
+      const staged2Ok = skipVerify ? staged2 === serialized : parseValidJson(staged2) !== null;
+      if (staged2Ok) {
+        await writeText(dir, fileName, staged2 as string);
+        const check = await readText(dir, fileName);
+        const checkOk = skipVerify ? check === serialized : parseValidJson(check) !== null;
+        if (checkOk) {
+          await removeQuietly(dir, tmpName);
+          return; // recovered — the write succeeded via promotion
+        }
+      }
+      // Promotion failed too: keep .tmp on disk as the survivor for recovery.
+      throw new Error(`Safe-write validation failed for ${fileName}; staged copy kept as ${tmpName}.`);
+    }
+```
+
+**Before (streamed commit path):**
+```ts
+      if (!(await verifyStreamedFile(dir, fileName, liveInfo))) {
+        const bak = await readText(dir, `${fileName}.bak`);
+        if (parseValidJson(bak) !== null) {
+          await writeText(dir, fileName, bak as string);
+        }
+        await removeQuietly(dir, tmpName);
+        throw new Error(`Safe-write validation failed for ${fileName}.`);
+      }
+```
+
+**After (streamed commit path):** identical structure to the small-file path — rollback+cleanup+throw when a valid `.bak` exists; otherwise re-verify the staged `.tmp` with `verifyStreamedFile(dir, tmpName, stagedInfo)`, promote its text to the live file and re-verify (`verifyStreamedFile(dir, fileName, stagedInfo)`); RangeError ("Invalid string length") during promotion read-back is caught and falls through to the keep-tmp throw; on total failure `.tmp` is kept.
+
+**Also:** `safeReadJson` now tries `{file}.tmp` after `.bak` (recovering a verified staged copy left by a failed commit); the "missing" result now requires live, `.bak` AND `.tmp` all absent.
+
+**File:** `src/data/storage/safeWrite.test.ts`
+
+New failure-injection tests (corrupting wrapper around createMemoryDirectory targeting only live-file writes): first-write promotion succeeds with no .bak; valid-.bak rollback behavior preserved; corrupt-.bak promotion succeeds; total-failure keeps .tmp and safeReadJson recovers it; streamed variants via `__setStreamingForcedSizeLimitForTests(0)`; success-path regression asserting `.tmp` cleanup via a removeEntry recorder.
+
+## v41.43 — 2026-07-05 — W2 (Tier-1 Item E): workspace action audit log module
+
+**File:** `src/data/audit/actionLog.ts` (new)
+
+New append-only audit trail for governance actions, stored at `5-system/audit/actions.log.json`
+(sibling of `activity.log.json`; session-shaped activity log schema intentionally not reused).
+`appendWorkspaceAction(directoryHandle | null, entry)`:
+- casLoop append (revision + `_writeToken`, pattern of `appendDistributionEvents`), capped at
+  10,000 entries (oldest dropped); the whole read-modify-write additionally runs inside
+  `withResourceLock("audit/actions.log.json:rmw")` (v41.36 precedent — distinct key, no collision
+  with safeWriteJson's internal lock) so two same-tab concurrent appends cannot clobber each other;
+- best-effort: null handle → silent skip; any failure → `logError("audit:append", …)`, NEVER throws;
+- intentionally NOT gated by the month lock (it must be able to record `month-closed` itself).
+`readWorkspaceActions(directoryHandle)` returns the entry list (empty on any failure).
+Action types per spec: user-deleted/user-created, permission-changed, feature-permission-changed,
+sample-drawn, distribution-bulk-assigned, referral-approved/denied, replacement-approved/denied,
+answer-reopened, month-closed/month-reopened, backup-restored.
+
+**File:** `src/data/audit/actionLog.test.ts` (new)
+
+Tests: append+read round-trip (id/at stamped); 10,000-entry cap enforcement (oldest dropped);
+failure tolerance (throwing handle resolves without throwing and lands in the error ring buffer);
+two concurrent appends both survive.
+
+## v41.49 — 2026-07-07 — KPI dashboard (مؤشرات الأداء): charts rendered invisible in-app — define chart palette variables in Reports.css
+
+> Renumbered from v41.44 (duplicate identifier) — see v41.53.
+
+The in-app analytics dashboard reuses the executive-report chart primitives
+(`src/data/reporting/executive/ui/charts.ts`), which emit colors as
+`var(--gold)`, `var(--blue)`, `var(--line)`, `var(--white)`, `var(--muted)`, …
+Those variables are only defined by the *exported report's* `theme.ts` (dark
+navy deck theme) — no app stylesheet defined them. In the app, every gauge and
+donut arc computed to `stroke: none` and ranked-bar fills to `rgba(0,0,0,0)`,
+so the KPI page showed empty white chart cards (verified via computed styles in
+the browser). Fix: define the full chart color-role palette on `.rh-dash`,
+remapped to app light-theme tokens (note `--white` — the charts' "text" role —
+maps to dark ink on the light surface).
+
+**File:** `src/components/Sidebar/Tabs/Reports/Reports.css`
+
+**Before:**
+```css
+/* =========================================================
+   Analytics dashboard (upgraded "مؤشرات الأداء" sub-section)
+   ========================================================= */
+.rh-dash {
+```
+
+**After:**
+```css
+/* =========================================================
+   Analytics dashboard (upgraded "مؤشرات الأداء" sub-section)
+   ========================================================= */
+/* Chart palette — the dashboard reuses the executive-report chart primitives
+   (executive/ui/charts.ts), which color via var(--gold), var(--line), … Those
+   variables normally come from the exported report's dark theme (theme.ts);
+   here they are remapped to app light-theme values. NB: the charts' "text"
+   role is --white (white on the dark deck) → dark ink on this light surface. */
+.rh-dash {
+  --gold: #b7791f;
+  --gold-2: #8f5e14;
+  --blue: var(--c-sky, #009ade);
+  --green: #00695c;
+  --coral: #c0392b;
+  --slate: #64748b;
+  --cyan: #0e7490;
+  --purple: #6366f1;
+  --navy: var(--c-navy, #0e2444);
+  --navy-2: #1b3a66;
+  --panel: var(--c-surface-2, #f6f8fa);
+  --white: var(--c-ink, #0b1f33);
+  --muted: var(--c-ink-3, #50536f);
+  --line: var(--c-border, #dde6ef);
+}
+.rh-dash {
+```
+
+**File:** `src/components/Sidebar/Tabs/Reports/dashboardChartTheme.test.ts` (new)
+
+Regression test: reads `Reports.css` and asserts every chart color-role
+variable from `COLOR_ROLE` (executive/ui/tokens.ts) is defined, so the
+dashboard palette can't silently disappear again.
+
+## v41.44 — 2026-07-05 — W3 (Tier-1 Item A): month close-out/lock — schema, lock module, write gates, Archive UI
+
+Shared-file batching note: this entry also contains the Item-D parts of `answerTypes.ts` /
+`answerStorage.ts` (`reopenItemAnswer` + history) and BOTH new feature ids in
+`userManagement.ts`, plus ALL new Tier-1 label keys in `labelsStore.ts`, so each shared file
+is edited exactly once across the batch (W6/W7 entries reference back here).
+
+**File:** `src/data/population/monthTypes.ts`
+
+**Before:**
+```ts
+  status: "raw-saved" | "processed-saved" | "sampled" | "distributed";
+```
+
+**After:**
+```ts
+  status: "raw-saved" | "processed-saved" | "sampled" | "distributed" | "closed";
+  /** Set when status === "closed". */
+  closedAt?: string | null;
+  closedBy?: string | null;
+  closeNote?: string | null;
+  /** Status held before closing — restored on reopen. */
+  statusBeforeClose?: "raw-saved" | "processed-saved" | "sampled" | "distributed" | null;
+  /** Last reopen, if any (history goes to the action log). */
+  reopenedAt?: string | null;
+  reopenedBy?: string | null;
+```
+
+**File:** `src/data/population/monthLock.ts` (new)
+
+`MonthClosedError`; TTL-cached (30 s; test seam `__setMonthLockTtlForTests`) `isMonthClosed`
+(fail-open on missing/unreadable manifest — governance, not security); `ensureMonthWritable`
+(no-op in demo read-only mode, throws `MonthClosedError` when closed);
+`closeMonth`/`reopenMonth` (idempotent; write the manifest directly, NOT via the monotonic
+`updateMonthStatus`; stamp closedAt/closedBy/closeNote/statusBeforeClose and
+reopenedAt/reopenedBy; invalidate cache); `invalidateMonthLockCache`.
+
+**File:** `src/data/population/populationStorage.ts`
+
+Write gates: `await ensureMonthWritable(...)` at the top of `saveMonthRun` (outside its
+try/catch so it rejects loudly) and `saveSamplingProof`; `updateMonthStatus` gains
+`if (manifest.status === "closed") return;` so Tier-0 status advancement never overwrites a
+closed state (best-effort no-throw guard).
+
+**File:** `src/data/sampling/sampleStorage.ts`
+
+Gates at the top of `saveSampleMaster` (outside try/catch) and `appendSampleRow` (before the
+casLoop).
+
+**File:** `src/data/distribution/distributionStorage.ts`
+
+Gates at the top of `appendDistributionEvents` (before the casLoop; covers
+`appendDistributionEvent`) and `saveDistributionCurrent` (also covers `syncSampleMirrors`,
+called only from there). `loadOrDeriveDistributionCurrent`'s best-effort cache write already
+`.catch`es — a closed month keeps its last cache, which is correct because the log cannot
+change either.
+
+**File:** `src/data/answers/answerTypes.ts`
+
+Added `ItemAnswerHistoryEntry` (`action: "reopened"`, at/by/reason/previousSubmittedAt) and
+`history?: ItemAnswerHistoryEntry[]` on `ItemAnswer` (Item D shape, batched here).
+
+**File:** `src/data/answers/answerStorage.ts`
+
+Gate at the top of `updateEmployeeAnswerFile` (single choke point — covers
+`saveEmployeeAnswers`, `upsertItemAnswer`, `appendReferralToEmployee`,
+`appendReplacementToEmployee`, and the new `reopenItemAnswer`). New `reopenItemAnswer(...)`:
+via `updateEmployeeAnswerFile`; if the item is not "submitted" it is an idempotent no-op;
+otherwise flips status to "draft", nulls `submittedAt`, pushes a history entry carrying
+`previousSubmittedAt` (previous answers preserved — the employee corrects, not restarts).
+
+**File:** `src/data/approvals/approvalStorage.ts`
+
+Gates at the top of `upsertReferralDecision` and `upsertReplacementDecision` (outside their
+try/catch blocks). `referralStorage.ts` needs no own gates — every write it performs goes
+through these two choke points or `updateEmployeeAnswerFile` (verified by re-grep of
+`safeWriteJson(` under `src/data/`; workspace-scoped writers — browse presets, feedback,
+templates, report designs, backups, audit log, certscan.global, population config — are
+intentionally NOT month-locked; backup restore intentionally bypasses the lock).
+
+**File:** `src/auth/userManagement.ts`
+
+New feature ids (one edit for both items): `archive.closeMonth` (Archive group addition to
+MANAGED_FEATURE_GROUPS admin group; defaults: all managed roles false — effectively
+admin-only) and `ew.reopenAnswer` (workspace group; defaults: supervisor+manager true).
+`TAB_FEATURE_MAP`: "archive" += archive.closeMonth; "employee-workspace" += ew.reopenAnswer.
+`createDefaultFeaturePermissions()` covers them automatically via ALL_FEATURE_IDS.
+
+**File:** `src/data/labels/labelsStore.ts`
+
+ALL Tier-1 label keys added in one edit (spec cross-cutting note 1): archive_close_month_btn,
+archive_reopen_month_btn, archive_month_closed_badge, archive_close_month_confirm,
+archive_reopen_month_confirm, archive_close_note_placeholder,
+archive_reopen_reason_placeholder, msg_month_closed_write_blocked, msg_month_closed_banner,
+um_delete_checking, um_delete_blocked_assignments, um_delete_blocked_month_line,
+um_delete_orphan_answers_warn, um_delete_no_workspace_warn, msg_request_already_reviewed,
+msg_referral_stale_ownership, msg_referral_decision_retry, ip_reopen_btn,
+ip_reopen_reason_placeholder, ip_reopen_confirm, msg_reopen_done, feature_ew_reopen_answer,
+backup_import_users_labels_btn, backup_import_users_labels_done, backup_restore_merge_notice,
+msg_distribution_refresh_no_sample (Arabic texts per spec tables).
+
+**File:** `src/components/Sidebar/Tabs/Archive/index.tsx`
+
+Closed badge in the month table (STATUS_LABELS gains `closed`); admin-only (role +
+`archive.closeMonth` feature) close/reopen actions per month with a two-step styled dialog
+(existing arc-modal classes; close note optional, reopen reason mandatory); on success
+`void appendWorkspaceAction("month-closed"/"month-reopened")` + list refresh.
+
+**File:** `src/data/population/monthLock.test.ts` (new)
+
+Tests per spec A.7: close→isMonthClosed→manifest fields; reopen restores statusBeforeClose;
+double-close/double-reopen idempotent; ensureMonthWritable throws/resolves/missing-manifest;
+guarded writers reject with MonthClosedError after close and succeed after reopen
+(saveSampleMaster, appendDistributionEvents, upsertItemAnswer, upsertReferralDecision);
+updateMonthStatus no-op on closed; TTL cache behavior via invalidate + test TTL seam; demo
+read-only mode never throws.
+
+## v41.50 — 2026-07-07 — KPI dashboard: distinguish "population not processed" from "analysis failed" in the empty state
+
+> Renumbered from v41.45 (duplicate identifier) — see v41.53.
+
+The dashboard collapsed every failure into one generic empty state
+(لا توجد بيانات تحليلية لهذا الشهر), hiding whether population.final.json
+failed to load or buildReportModel threw (the error only went to the
+in-memory ring buffer). Track the failure reason and render a distinct,
+actionable message for each case.
+
+**File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
+
+**Before:**
+```tsx
+  const [model, setModel] = useState<ReportModel | null>(null);
+  const [modelLoading, setModelLoading] = useState(false);
+```
+```tsx
+    let cancelled = false;
+    setModelLoading(true);
+    setModel(null);
+    void (async () => {
+      try {
+        const execInput = await loadExecInput();
+        if (cancelled) return;
+        if (!execInput) { setModel(null); return; }
+        setModel(buildReportModel(execInput, buildDisplayNameMap()));
+      } catch (err) {
+        if (!cancelled) {
+          setModel(null);
+          logRejection("reports:buildReportModel")(err);
+        }
+      } finally {
+```
+```tsx
+    if (!model) {
+      return (
+        <div className="rh-empty rh-kpi-empty">
+          <strong>لا توجد بيانات تحليلية لهذا الشهر</strong>
+          <span>اختر شهراً تمت معالجة مجتمعه وسحب عينته لعرض لوحة التحليلات.</span>
+        </div>
+      );
+    }
+```
+
+**After:**
+```tsx
+  const [model, setModel] = useState<ReportModel | null>(null);
+  const [modelError, setModelError] = useState<"no-population" | "build-error" | null>(null);
+  const [modelLoading, setModelLoading] = useState(false);
+```
+```tsx
+    let cancelled = false;
+    setModelLoading(true);
+    setModel(null);
+    setModelError(null);
+    void (async () => {
+      try {
+        const execInput = await loadExecInput();
+        if (cancelled) return;
+        if (!execInput) { setModel(null); setModelError("no-population"); return; }
+        setModel(buildReportModel(execInput, buildDisplayNameMap()));
+      } catch (err) {
+        if (!cancelled) {
+          setModel(null);
+          setModelError("build-error");
+          logRejection("reports:buildReportModel")(err);
+        }
+      } finally {
+```
+```tsx
+    if (!model) {
+      if (modelError === "build-error") {
+        return (
+          <div className="rh-empty rh-kpi-empty">
+            <strong>تعذّر بناء لوحة التحليلات لهذا الشهر</strong>
+            <span>
+              حدث خطأ غير متوقع أثناء تحليل بيانات الشهر — البيانات موجودة لكن معالجتها فشلت.
+              افتح وحدة تحكم المتصفح (F12 ثم Console) وأرسل نص الخطأ الظاهر للدعم.
+            </span>
+          </div>
+        );
+      }
+      return (
+        <div className="rh-empty rh-kpi-empty">
+          <strong>لا يوجد مجتمع معالج لهذا الشهر</strong>
+          <span>
+            لم يتم العثور على ملف المجتمع المعالج (population.final.json) داخل مجلد الشهر.
+            عالج مجتمع هذا الشهر من تبويب «المجتمع» أولاً، ثم عد إلى هذه الصفحة.
+          </span>
+        </div>
+      );
+    }
+```
+
+## v41.51 — 2026-07-07 — populationStorage: STATUS_RANK missing "closed" — type error broke the build
+
+> Renumbered from v41.46 (duplicate identifier) — see v41.53.
+
+`MonthManifestData["status"]` includes "closed", but the STATUS_RANK map added
+with updateMonthStatus (v41.x audit pass, uncommitted) omitted it — `tsc -b`
+failed with TS2741, breaking `npm run build`. "closed" ranks above
+"distributed" so the monotonic guard never downgrades a closed month.
+
+**File:** `src/data/population/populationStorage.ts`
+
+**Before:**
+```ts
+const STATUS_RANK: Record<MonthManifestData["status"], number> = {
+  "raw-saved": 0,
+  "processed-saved": 1,
+  sampled: 2,
+  distributed: 3,
+};
+```
+
+**After:**
+```ts
+const STATUS_RANK: Record<MonthManifestData["status"], number> = {
+  "raw-saved": 0,
+  "processed-saved": 1,
+  sampled: 2,
+  distributed: 3,
+  closed: 4,
+};
+```
+
+## v41.45 — 2026-07-05 — W4 (Tier-1 Item H) + batched Population edits: zeroed-snapshot guard, closed-month UI, audit hooks
+
+Shared-file batching: `Population/index.tsx` is edited once for Items H (guard), A
+(closed-month disable + banner + MonthClosedError handling) and E (sample-drawn /
+distribution-bulk-assigned audit hooks) per the spec batching table.
+
+**File:** `src/components/Sidebar/Tabs/Population/index.tsx`
+
+**Before (refreshDistribution):**
+```ts
+  async function refreshDistribution(monthFolderName: string): Promise<void> {
+    if (!directoryHandle) return;
+    const sampleRows = sampleDrawResult?.rows ?? [];
+    const log = await loadDistributionLog(directoryHandle, monthFolderName);
+    const current = deriveCurrentDistribution(log, sampleRows);
+    setDistributionCurrent(current);
+    await saveDistributionCurrent(directoryHandle, monthFolderName, current);
+    setMonthRefreshKey((k) => k + 1);
+  }
+```
+
+**After (refreshDistribution):**
+```ts
+  async function refreshDistribution(monthFolderName: string): Promise<void> {
+    if (!directoryHandle) return;
+    let sampleRows = sampleDrawResult?.rows ?? [];
+    const log = await loadDistributionLog(directoryHandle, monthFolderName);
+
+    // Guard: never derive against an empty row set while events exist — a
+    // zeroed derive would PERSIST an empty snapshot + zeroed employee mirrors
+    // (visible data loss). Fall back to the on-disk sample master.
+    if (sampleRows.length === 0 && log.events.length > 0) {
+      const master = await loadSampleMaster(directoryHandle, monthFolderName);
+      sampleRows = master?.rows ?? [];
+      if (sampleRows.length === 0) {
+        logError(
+          "population:refresh-distribution",
+          new Error(`Refusing to persist zeroed distribution.current for ${monthFolderName}`)
+        );
+        setDistributionMessage({ type: "error", text: getLabels().msg_distribution_refresh_no_sample });
+        return; // keep the existing on-disk snapshot untouched
+      }
+    }
+
+    const current: DistributionCurrentData = {
+      ...deriveCurrentDistribution(log, sampleRows),
+      logRevision: log.revision,
+    };
+    setDistributionCurrent(current);
+    await saveDistributionCurrent(directoryHandle, monthFolderName, current);
+    setMonthRefreshKey((k) => k + 1);
+  }
+```
+(also stamps `logRevision` so the next load takes the fast path — previously always slow-path.)
+
+**Also in the same file edit:**
+- Item A UI: new `selectedMonthClosed` state + effect (checks `isMonthClosed` on month change /
+  refresh); `canDrawSample`/`canDistributeSamples`/`canBulkAssign` now AND-ed with
+  `!selectedMonthClosed`; `msg_month_closed_banner` banner rendered in the process sub-tab when
+  closed; `MonthClosedError` caught with `msg_month_closed_write_blocked` in
+  `commitSaveToDisk`, `handleDrawSample`, and all distribution handlers (assign / reassign /
+  complete / replacement-request / bulk).
+- Item E hooks: after successful `saveSampleMaster` → `void appendWorkspaceAction("sample-drawn",
+  details: seed + totalActual)`; after successful bulk-assign batch →
+  `void appendWorkspaceAction("distribution-bulk-assigned", details: event count)`. Per-row
+  `handleAssign` intentionally NOT audited (log spam; the distribution log is the row-level record).
+- Imports: `logError`, `isMonthClosed`/`MonthClosedError`, `appendWorkspaceAction`,
+  `DistributionCurrentData` type usage for the stamped snapshot.
+
+**File:** `src/data/distribution/distributionStorage.test.ts`
+
+New regression test documenting that `deriveCurrentDistribution(logWithEvents, [])` yields zero
+entries (the data-layer behavior the UI guard protects against), with a comment pointing at the
+guard in `Population/index.tsx`.
+
+## v41.46 — 2026-07-05 — W5 (Tier-1 Item C): referral/replacement approval idempotency + audit hooks
+
+Shared-file batching: `distributionTypes.ts` and `distributionLog.ts` are edited once here
+carrying BOTH the Item-C additions (sourceRequestId) and the Item-D event model ("reopened"
+type, `buildReopenedEvent`, fold case) — W6 references back to this entry.
+
+**Spec deviation (documented):** the spec's literal ordering (ownership check at step 2,
+replay guard at step 3) breaks its own retry promise — after the events apply, ownership has
+moved to the target employee, so a retry after a decision-write failure would abort at the
+ownership check and never record the decision. Implemented order: pending-guard →
+alreadyApplied (sourceRequestId replay guard) → ownership check ONLY when events are about to
+be emitted → append → decision write. Retry therefore skips re-emission AND skips the
+now-stale ownership check, completing the decision idempotently.
+
+**File:** `src/data/distribution/distributionTypes.ts`
+
+**Before:**
+```ts
+export type DistributionEventType =
+  | "assigned"
+  | "completed"
+  | "replacement-requested"
+  | "replaced"
+  | "reassigned";
+```
+
+**After:**
+```ts
+export type DistributionEventType =
+  | "assigned"
+  | "completed"
+  | "replacement-requested"
+  | "replaced"
+  | "reassigned"
+  | "reopened";
+```
+Plus on `DistributionEvent`:
+```ts
+  /** Idempotency key: the referral/replacement/reopen request that produced this event. */
+  sourceRequestId?: string;
+```
+
+**File:** `src/data/distribution/distributionLog.ts`
+
+`buildReassignEvent` gains optional `sourceRequestId`; new `buildReopenedEvent({ xrayImageId,
+assignedTo, eventBy, notes?, sourceRequestId? })`; fold gains:
+```ts
+      case "reopened":
+        // Returns a completed item to the employee's queue for correction.
+        // Illegal after "replaced" — the terminal-state guard above drops it.
+        status = "pending";
+        assignedTo = existing?.assignedTo ?? evt.assignedTo;
+        break;
+```
+(The Tier-0 replaced-terminal guard is preserved unchanged and already covers
+reopened-after-replaced.)
+
+**File:** `src/data/distribution/replacement.ts`
+
+`executeReplacement` accepts optional `sourceRequestId`, stamped onto BOTH emitted events
+(assign of the replacement + replaced of the original) for idempotent replay detection.
+
+**File:** `src/data/referral/approveReferral.ts` (new)
+
+Extracted approval domain logic (React handlers become thin wrappers):
+`approveReferral`, `denyReferral`, `approveReplacement`, `denyReplacement` — each re-loads
+fresh request state (never trusts the rendered list; non-pending → `already-reviewed`),
+verifies live ownership before emitting (stale → `stale-ownership` + ids, atomic abort, no
+auto-deny), stamps `sourceRequestId` on every emitted event, and treats a decision-write
+failure as retriable (`decision-failed`; the replay guard prevents re-emission).
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval.tsx`
+
+Handlers rewired to the new module; result codes mapped to labels
+(`msg_request_already_reviewed`, `msg_referral_stale_ownership`, `msg_referral_decision_retry`);
+`MonthClosedError` caught → `msg_month_closed_write_blocked`; Item-E audit hooks:
+`void appendWorkspaceAction` with `referral-approved`/`referral-denied`/
+`replacement-approved`/`replacement-denied` on success.
+
+**File:** `src/data/referral/approveReferral.test.ts` (new)
+
+Tests per spec C.4: happy path (events carry sourceRequestId, decision recorded, fold shows
+reassignment); replay after simulated decision-write failure (pre-applied events + pending
+request → zero new events, decision recorded); non-pending → no events/decision change;
+ownership drift → abort with no events; closed month → rejects with MonthClosedError.
+
+## v41.52 — 2026-07-07 — Sample draw: reject population where no row matches any configured stage (was silently "succeeding" with a zeroed sample)
+
+> Renumbered from v41.47 (duplicate identifier) — see v41.53.
+
+Root cause of a reported bug: the sample-draw results screen showed
+المستهدف الكلي / المسحوب الكلي فعلياً / CertScan / عادية all at 0, with a real
+seed and timestamp, i.e. `drawSample` reported `ok: true` and the empty sample
+was saved to disk. Traced (systematic-debugging): the stage-by-stage draw
+computes each stage's target from `rows.filter(row => getStageKey(row.stage,
+stageMappings) === stageKey)`. When every row's `stage` text fails to match any
+of the four alias lists in `DEFAULT_STAGE_MAPPINGS` (e.g. the source data uses
+"Level 1" wording instead of "STAGE 1" / "المستوى الأول"), every row is
+classified `"unknown"`, every stage's available count is 0, every target is 0,
+and the function still returns a "successful" `SampleMasterData` with all
+zeros — indistinguishable on disk from a legitimate empty draw. Confirmed with
+a new test (`drawSample rejects a population whose stage values match none of
+the four configured stages`) that failed before this fix (`result.ok` was
+`true`). Fix: after computing per-stage available counts, if the sum across
+all four stages is 0 while the input population is non-empty, fail loudly with
+an actionable message instead of silently drawing zero rows.
+
+**File:** `src/data/sampling/sampleAlgorithm.ts`
+
+**Before:**
+```ts
+    target = Math.min(target, available);
+    effectiveTargets.set(sk, target);
+    configuredValues.set(sk, r.value);
+  }
+
+  // Compute total shortfall for non-first stages
+```
+
+**After:**
+```ts
+    target = Math.min(target, available);
+    effectiveTargets.set(sk, target);
+    configuredValues.set(sk, r.value);
+  }
+
+  // Guard: if none of the population rows matched ANY of the four configured
+  // stages, every row's `stage` text failed to match the stage-mapping aliases
+  // (e.g. the source data uses "Level 1" wording instead of "STAGE 1" /
+  // "المستوى الأول"). Silently "succeeding" with a zeroed draw here is
+  // indistinguishable from a real empty result once saved to disk — fail
+  // loudly instead so the operator fixes stage mapping before proceeding.
+  const totalMappedRows = stageKeys.reduce((sum, sk) => sum + (stageAvailableCounts.get(sk) ?? 0), 0);
+  if (totalMappedRows === 0) {
+    return {
+      ok: false,
+      reason: "لم يتم العثور على أي صف مطابق لأحد المستويات الأربعة المُهيأة. تحقق من إعداد \"تعيين المستويات\" (Stage Mapping) في الإعدادات ومطابقته لقيم عمود المستوى الفعلية في بيانات المجتمع."
+    };
+  }
+
+  // Compute total shortfall for non-first stages
+```
+
+**File:** `src/data/sampling/sampleAlgorithm.test.ts`
+
+Added test: `drawSample rejects a population whose stage values match none of
+the four configured stages` — 100 rows all stamped `stage: "Level 1"` (not in
+`DEFAULT_STAGE_MAPPINGS`), asserts `result.ok === false`.
+
+## v41.47 — 2026-07-05 — W6 (Tier-1 Item D): reopen-for-correction of submitted answers
+
+Batched prerequisites landed earlier: answer history schema + `reopenItemAnswer` (v41.44,
+answerTypes/answerStorage), `"reopened"` event type + `buildReopenedEvent` + fold case
+(v41.46, distributionTypes/distributionLog), `ew.reopenAnswer` feature id + all labels
+(v41.44, userManagement/labelsStore).
+
+**File:** `src/data/answers/reopenAnswer.ts` (new)
+
+`reopenSubmittedAnswer(params)` orchestrator:
+1) `ensureMonthWritable` (closed month blocks reopen — reopen the month first);
+2) `reopenItemAnswer` (idempotent status flip + history entry);
+3) if the distribution entry is `"completed"`, append ONE `buildReopenedEvent` with
+   idempotency key `sourceRequestId = "reopen-{xrayImageId}-{previousSubmittedAt}"`
+   (previousSubmittedAt taken from the live item or, on retry, its last history entry) —
+   replay-guarded against the distribution log, so retries cannot double-apply;
+   entries that were "submitted answer + pending entry" (XrayReferrals.handleSave never
+   emits `completed`) simply skip step 3;
+4) fire-and-forget `appendWorkspaceAction("answer-reopened", …)`.
+
+**File:** `src/components/InspectionPanel/index.tsx`
+
+New optional prop `onReopen?: (reason: string) => void`. When `isSubmitted && onReopen`, a
+footer renders in the read-only branch with the `ip_reopen_btn` action; clicking it swaps to
+an inline confirm block (`ip_reopen_confirm` text + mandatory-reason textarea
+`ip_reopen_reason_placeholder` + cancel) using existing `ip-*` classes only. The panel unlocks
+naturally after the host reloads answers (savedAnswer becomes "draft").
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx`
+
+`canReopenAnswer = hasFeature(…, "ew.reopenAnswer")`; `SampleDetailPanel` forwards a new
+`onReopen` prop; host passes it only when the feature is granted; the handler calls
+`reopenSubmittedAnswer`, shows `msg_reopen_done` / `MonthClosedError` →
+`msg_month_closed_write_blocked`, and reloads data. Verified at implementation time:
+`XrayInspectionResults.tsx` does NOT render `InspectionPanel` (grep) — nothing to wire there.
+
+**File:** `src/data/answers/reopenAnswer.test.ts` (new)
+
+Tests per spec D.6: submitted→draft flip with history + second call no-op; full orchestrated
+flow on memoryDirectory (fold returns entry to pending, audit entry recorded); retry after the
+answer flipped but the event failed → exactly one `reopened` event total; closed month →
+rejects with MonthClosedError.
+
+**File:** `src/data/distribution/distributionLog.test.ts`
+
+Fold tests: `assigned → completed → reopened` → status "pending", same assignee;
+`replaced → reopened` → dropped by the terminal-state guard (entry stays replaced).
+
+## v41.48 — 2026-07-05 — Fix a real TDZ/hoisting hazard in XrayReferrals.tsx found while chasing the W6 lint gate
+
+**Context:** the W6 lint gate failed with 12 "React Compiler" errors. Investigation (diffing
+against `git show HEAD:...XrayReferrals.tsx`, which lints 0-clean) showed none of the 12 are on
+lines touched by the Tier-1 diff. One of the 12 was a genuine bug, not just a compiler
+inference warning: `applyTemplate` was called from the mount effect (line ~278) but declared
+~175 lines later in source (line ~454) as `async function applyTemplate(...)`. Function
+declarations ARE hoisted, so this specific case did not crash at runtime, but it is exactly the
+shape of hazard that breaks the moment anyone changes `applyTemplate` to a `const`/arrow
+function (temporal-dead-zone `ReferenceError`) — and it is what the React Compiler was
+correctly refusing to optimize around. The other 11 errors are pre-existing "Compilation
+Skipped" cascades scattered across unrelated `useMemo`/`useCallback` hooks in this ~1400-line
+component, present in the working tree before this Tier-1 batch started and out of scope for
+this batch (see report note below) — fixing the hoisting hazard did not resolve them, which
+confirms they are a separate, pre-existing, whole-component issue.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx`
+
+**Before:** (function declared far below its use, mount effect excludes it from deps via
+`eslint-disable-next-line react-hooks/exhaustive-deps`)
+```ts
+  const [referralModal, setReferralModal] = useState<ReferralModalState>(null);
+  useEffect(() => {
+    ...
+        if (selection?.templateId) void applyTemplate(selection.templateId, false);
+    ...
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- applyTemplate is intentionally excluded; it is recreated on every render and including it would trigger an infinite loop
+  }, [baseColumns, directoryHandle, username]);
+  ...
+  // ~175 lines later:
+  async function applyTemplate(id: string, shouldSave: boolean): Promise<void> {
+    setSelTplId(id);
+    if (!id) { setActiveTpl(null); return; }
+    setActiveTpl(await loadTemplate(directoryHandle, id));
+    if (!shouldSave) return;
+    const result = await saveInspectionTemplateSelection(directoryHandle, {
+      templateId: id,
+      updatedAt: new Date().toISOString(),
+      updatedBy: username,
+    });
+    setStatusMsg(
+      result.ok
+        ? { type: "ok", text: "تم تعيين نموذج الفحص." }
+        : { type: "error", text: result.error }
     );
   }
-  return <ReportsContent />;
 ```
+
+**After:** the function declaration was moved to directly above the mount effect that uses it
+(right after the `referralModal` state declaration); it stays a plain `async function`
+(deliberately NOT converted to `useCallback`/`const`, since it is recreated every render and
+the mount effect's existing exhaustive-deps exclusion is correct and preserved verbatim). Only
+the function's position moved — its body, the mount effect's body, and every call site
+(`handleTplSelect`, the "reload template" button) are byte-identical to before. This removed
+the "Cannot access variable before it is declared" error project-wide (confirmed via
+`npm run lint`), leaving the 11 pre-existing cascade errors untouched and unresolved.
+
+**Report note (scope boundary):** the remaining 11 "Compilation Skipped" errors in this file
+are flagged to the coordinator as out-of-scope pre-existing lint debt, not fixed further here —
+resolving them would mean auditing every memo/callback in a 1400-line component the Tier-1
+spec never asked me to touch, which the spec's "no refactor beyond scope" rule forbids. They do
+not block `tsc -b` or `npm run test:run`; they are React Compiler optimization-skip warnings,
+not correctness bugs.
+
+## v41.53 — 2026-07-05 — Docs integrity: resolve a second batch of duplicate EDIT_LOG version identifiers
+
+**File:** `docs/EDIT_LOG.md`
+
+While resuming the Tier-1 batch, four version numbers were found double-used: a concurrent
+agent (dated 2026-07-07 — KPI dashboard chart palette in Reports.css, KPI empty-state fix,
+a `populationStorage.ts` STATUS_RANK build-fix, and a sample-draw zero-stage-match guard) had
+landed work under v41.44, v41.45, v41.46, and v41.47 — the same numbers already used by this
+session's W3/W4/W5/W6 entries. No code comments reference the concurrent agent's version
+numbers (re-grepped `v41\.4[4-7]` across `src/`), so — consistent with the v41.38 precedent —
+the concurrent agent's four entries are renumbered to unused numbers and left otherwise
+untouched; this session's W3/W4/W5/W6 entries keep their original numbers.
+
+- 2026-07-07 "KPI dashboard … Reports.css chart palette"          `v41.44` → `v41.49`
+- 2026-07-07 "KPI dashboard … distinguish not-processed/failed"   `v41.45` → `v41.50`
+- 2026-07-07 "populationStorage: STATUS_RANK missing closed"      `v41.46` → `v41.51`
+- 2026-07-07 "Sample draw: reject population … zeroed sample"     `v41.47` → `v41.52`
+
+**Interaction note (STATUS_RANK):** the renumbered v41.51 entry added `closed: 4` to
+`STATUS_RANK` in `src/data/population/populationStorage.ts`, motivated by a `tsc` build error
+on an earlier, incomplete version of this session's `updateMonthStatus` map. The current
+`updateMonthStatus` (this session, W3/v41.44) already returns early with
+`if (manifest.status === "closed") return;` BEFORE consulting `STATUS_RANK` (per the Tier-1
+spec, which explicitly says not to add `closed` to the rank map, since the guard is meant to be
+the monotonic downgrade protection). The `closed: 4` entry added by the concurrent fix is
+therefore redundant but harmless — the early return fires first — and satisfies `Record<MonthManifestData["status"], number>`'s exhaustiveness requirement (every status needs a
+rank entry), so it is left in place rather than removed, avoiding a second edit of a file this
+session already owns for other reasons.
+
+## v41.54 — 2026-07-05 — W7 (Tier-1 Item B): user deletion guard — footprint check, block-not-force-reassign
+
+**File:** `src/data/samples/sampleMirrorStorage.ts`
+
+New `getUserWorkspaceFootprint(directoryHandle, username)`: enumerates `listMonthFolders`,
+skips months where `isMonthClosed` (closed months are frozen history — deletion cannot affect
+them), reads each month's per-employee mirror via `loadEmployeeSampleMirror` (small, derived
+file — cheaper than loading full `distribution.current.json`) and counts entries with status
+`"pending"` or `"replacement-requested"` into `activeAssignments: Array<{ monthFolderName,
+pendingCount }>`; separately probes `{username}.answers.json` via `loadEmployeeAnswers` (a
+month counts toward `answerFileMonths` when it has any items or a non-empty
+referral/replacement request array) into `answerFileMonths: string[]`. Documented mirror
+staleness caveat in the docblock (mirrors sync on `saveDistributionCurrent`; may miss a
+just-made assignment — acceptable, per spec B.4).
+
+**File:** `src/data/labels/labelsStore.ts`
+
+(No new keys — all five `um_delete_*` keys were already added in the W3 batch edit, v41.44.)
+
+**File:** `src/components/Sidebar/Tabs/UserManagement/index.tsx`
+
+`handleDeleteUser` converted to async. New flow: two-step confirm unchanged; on confirm, set
+`isCheckingDeletion` (renders `um_delete_checking`); if no `directoryHandle`, warn
+(`um_delete_no_workspace_warn`) and proceed straight to deletion (nothing to check against);
+else call `getUserWorkspaceFootprint`. If `activeAssignments.length > 0`, ABORT with
+`um_delete_blocked_assignments` plus a per-month breakdown using
+`um_delete_blocked_month_line` (`{month}`/`{count}` placeholders) — no deletion, no
+force-reassign (v1 decision per spec, force-reassign deferred as a follow-up). Else if
+`answerFileMonths.length > 0`, proceed with deletion but show the persistent
+`um_delete_orphan_answers_warn` (answer files are history — never deleted; reports read them by
+`answeredBy`). On successful deletion, `void appendWorkspaceAction({ action: "user-deleted",
+target: username, details: { answerFileMonths } })` (Item E hook, batched here since it shares
+the same handler).
+
+**File:** `src/data/samples/sampleMirrorStorage.test.ts` (new)
+
+Tests per spec B.3: pending mirror entries in month A vs. completed-only in month B → lists
+only A with the correct pending count; closed month with pending entries → excluded from
+`activeAssignments`; answers file but no mirror → `answerFileMonths` populated,
+`activeAssignments` empty; no files anywhere → both arrays empty.
+
+## v41.55 — 2026-07-05 — W8+W9 (Tier-1 Items F/G): backup coverage of browser storage + restore-semantics label
+
+**Verification (spec F.1, Task 1):** confirmed already satisfied, no code change needed.
+`UsersPermissionsData.featurePermissions?: FeaturePermission[]` already exists
+(`src/data/workspace/workspaceTypes.ts:122`); the disk write site
+(`UserManagement/index.tsx` `saveUsersToDisk`) already serializes `featurePermissions` into
+`users.permissions.json`; `syncUsersFromDisk` (`userManagement.ts:510`) already accepts and
+applies `diskFeaturePermissions`. `3-user-data/` is already covered by the backup walker
+(`copyAllJsonFiles`).
+
+**File:** `src/data/labels/labelsStore.ts`
+
+New `getCustomLabelOverrides(): Partial<Record<LabelKey, string>>` — a read-only copy of the
+internal `customLabels` map, needed by the new snapshot module without duplicating the
+localStorage/subscriber logic here (labelsStore stays browser-storage-pure; no workspace
+imports added to this file).
+
+**File:** `src/data/workspace/labelsSnapshot.ts` (new)
+
+`exportLabelsSnapshot(directoryHandle)`: writes `3-user-data/labels.snapshot.json` via
+`safeWriteJson` from `getCustomLabelOverrides()`; best-effort (try/wrapped, `logError` on
+failure, never throws to callers — a labels snapshot must not block a Settings save or a
+backup). `importLabelsSnapshot(directoryHandle)`: reads the snapshot and applies each key via
+`setLabel` (skips unknown/stale keys gracefully); returns the count imported.
+
+**File:** `src/data/workspace/userSync.ts` (new)
+
+`syncUserManagementToDisk(directoryHandle, state, actor)` — the disk-write logic previously
+inline in `UserManagement/index.tsx`'s `saveUsersToDisk` (envelope/revision bookkeeping,
+`users`/`roles`/`permissions`/`featurePermissions` serialization) extracted verbatim into a
+plain data-layer function, so `backupStorage.ts` can call it without importing a React
+component. `UserManagement/index.tsx`'s `saveUsersToDisk` becomes a thin wrapper that calls it.
+
+**File:** `src/data/backup/backupStorage.ts`
+
+`createBackup` now calls `exportLabelsSnapshot(directoryHandle)` (try-wrapped, before
+`copyAllJsonFiles`) so a fresh labels snapshot is always captured going into every backup —
+`syncUserManagementToDisk` is NOT called from here (spec's actual requirement is that the
+*existing* on-disk `users.permissions.json`, already kept current by
+`UserManagement.saveUsersToDisk` on every state change, is included by `copyAllJsonFiles`;
+forcing a resync from the in-memory `userManagement` module inside `createBackup` would need a
+`UserManagementState` snapshot threaded through the whole backup call chain for no gain, since
+the file is already current).
+
+**File:** `src/components/Sidebar/Tabs/Archive/index.tsx`
+
+Restore dialog step 1 gains a permanent info paragraph (label `backup_restore_merge_notice`,
+already added to labelsStore in the W3 batch, v41.44) documenting the merge-not-prune restore
+semantics (Item G — no pruning restore in v1; documented, not built). After a successful
+restore, a new opt-in second step offers `backup_import_users_labels_btn`; clicking it calls
+`syncUsersFromDisk(...)` (reading `3-user-data/users.permissions.json` back via
+`readJsonFile`) + `importLabelsSnapshot(...)`, then shows `backup_import_users_labels_done`.
+Not automatic — the restore itself only touches JSON files already covered by
+`copyAllJsonFiles`/`safeWriteJsonText`; browser-storage (`localStorage` users/permissions/
+labels) is only touched on this explicit second click.
+
+**File:** `docs/data-system-report.md`
+
+Appended the same restore-merge-semantics fact to the file's restore notes section (spec G,
+"append the same fact to docs/data-system-report.md restore notes").
+
+**File:** `src/data/labels/labelsSnapshot.test.ts` (new) / `src/data/backup/backupStorage.test.ts`
+
+Tests per spec F.5: `createBackup` with seeded `3-user-data/` files → both counted in
+`jsonFilesBackedUp`; `exportLabelsSnapshot`/`importLabelsSnapshot` round-trip; `featurePermissions`
+survives a disk round-trip through `syncUsersFromDisk`.

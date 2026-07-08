@@ -1,7 +1,8 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
-import type { EmployeeAnswerFile, ItemAnswer } from "./answerTypes";
+import { ensureMonthWritable } from "../population/monthLock";
+import type { EmployeeAnswerFile, ItemAnswer, ItemAnswerHistoryEntry } from "./answerTypes";
 import type { ReferralRequest, ReplacementRequest } from "../referral/referralTypes";
 import { getPopulationMonthDir, getSampleEmployeeDir, safeWorkspaceFilePart } from "../workspace/workspacePaths";
 
@@ -88,6 +89,9 @@ async function updateEmployeeAnswerFile(
   username: string,
   updater: (file: EmployeeAnswerFile) => EmployeeAnswerFile
 ): Promise<{ ok: true } | { ok: false; error: string }> {
+  // Month lock gate — single choke point for every employee-file write
+  // (answers, referral/replacement requests, reopen). Rejects loudly.
+  await ensureMonthWritable(directoryHandle, monthFolderName);
   return casLoop<{ ok: true } | { ok: false; error: string }>(
     async (writeToken) => {
       const dir = await getAnswersDir(directoryHandle, monthFolderName);
@@ -133,6 +137,45 @@ export async function upsertItemAnswer(
   return updateEmployeeAnswerFile(directoryHandle, monthFolderName, username, (file) => {
     const others = file.items.filter((i) => i.xrayImageId !== item.xrayImageId);
     return { ...file, items: [...others, item] };
+  });
+}
+
+/**
+ * Reopen a submitted answer for correction (Tier-1 Item D).
+ * Idempotent: if the item is missing or not "submitted", this is a no-op.
+ * The previous answers are preserved — only the status flips to "draft" and a
+ * history entry records who reopened it, when, why, and the prior submittedAt.
+ */
+export async function reopenItemAnswer(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  username: string,
+  xrayImageId: string,
+  reopenedBy: string,
+  reason: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  return updateEmployeeAnswerFile(directoryHandle, monthFolderName, username, (file) => {
+    const item = file.items.find((i) => i.xrayImageId === xrayImageId);
+    if (!item || item.status !== "submitted") {
+      return file; // idempotent no-op
+    }
+    const historyEntry: ItemAnswerHistoryEntry = {
+      action: "reopened",
+      at: new Date().toISOString(),
+      by: reopenedBy,
+      reason,
+      previousSubmittedAt: item.submittedAt,
+    };
+    const reopened: ItemAnswer = {
+      ...item,
+      status: "draft",
+      submittedAt: null,
+      history: [...(item.history ?? []), historyEntry],
+    };
+    return {
+      ...file,
+      items: file.items.map((i) => (i.xrayImageId === xrayImageId ? reopened : i)),
+    };
   });
 }
 

@@ -10,6 +10,7 @@ import {
 } from "../../data/templates/templateRuntime";
 import { PhaseStepper } from "./PhaseStepper";
 import { PanelHeader } from "./PanelHeader";
+import { getLabels } from "../../data/labels/labelsStore";
 import "./InspectionPanel.css";
 
 type Props = {
@@ -23,6 +24,8 @@ type Props = {
   onReplace?: (entry: DistributionEntry) => void;
   /** Omit when the current user cannot transfer this sample to another user. */
   onReassign?: (entry: DistributionEntry) => void;
+  /** Omit when the current user cannot reopen submitted answers (Tier-1 Item D). */
+  onReopen?: (reason: string) => void;
 };
 
 export default function InspectionPanel({
@@ -34,6 +37,7 @@ export default function InspectionPanel({
   onSave,
   onReplace,
   onReassign,
+  onReopen,
 }: Props) {
   const [ans, setAns] = useState<Record<string, string | number | boolean>>(() => {
     if (!savedAnswer) return {};
@@ -45,6 +49,9 @@ export default function InspectionPanel({
   });
   const [validationMsg, setValidationMsg] = useState<string | null>(null);
   const [touchedRequiredIds, setTouchedRequiredIds] = useState<Set<string>>(new Set());
+  // Reopen-for-correction confirm block (Tier-1 Item D).
+  const [reopenMode, setReopenMode] = useState(false);
+  const [reopenReason, setReopenReason] = useState("");
 
   const phases = useMemo(() => (template ? getTemplatePhases(template) : []), [template]);
 
@@ -201,6 +208,53 @@ export default function InspectionPanel({
           />
         )}
       </div>
+
+      {isSubmitted && onReopen && (
+        <div className="ip-footer">
+          {!reopenMode ? (
+            <div className="ip-footer-actions">
+              <button
+                type="button"
+                className="ip-btn ip-btn--warning"
+                onClick={() => setReopenMode(true)}
+              >
+                {getLabels().ip_reopen_btn}
+              </button>
+            </div>
+          ) : (
+            <>
+              <p className="ip-validation-msg">{getLabels().ip_reopen_confirm}</p>
+              <textarea
+                className="ip-input ip-textarea"
+                rows={2}
+                placeholder={getLabels().ip_reopen_reason_placeholder}
+                value={reopenReason}
+                onChange={(e) => setReopenReason(e.target.value)}
+              />
+              <div className="ip-footer-actions">
+                <button
+                  type="button"
+                  className="ip-btn ip-btn--secondary"
+                  onClick={() => {
+                    setReopenMode(false);
+                    setReopenReason("");
+                  }}
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="button"
+                  className="ip-btn ip-btn--warning"
+                  disabled={reopenReason.trim().length === 0}
+                  onClick={() => onReopen(reopenReason.trim())}
+                >
+                  {getLabels().ip_reopen_btn}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {!isSubmitted && !readonly && (
         <div className="ip-footer">

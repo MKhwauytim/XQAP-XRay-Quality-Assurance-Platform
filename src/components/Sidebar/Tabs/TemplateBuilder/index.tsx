@@ -1000,6 +1000,3 @@ function normalizeFieldConditions(fields: TemplateField[]): TemplateField[] {
     return field;
   });
 }
-
-// canUseTemplateBuilder has been moved to ./templateBuilderHelpers.ts
-// to satisfy the react-refresh/only-export-components rule.

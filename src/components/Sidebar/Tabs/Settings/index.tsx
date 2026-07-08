@@ -28,6 +28,8 @@ import {
   type LabelKey,
 } from "../../../../data/labels/labelsStore";
 import { useLabels } from "../../../../data/labels/useLabels";
+import { useWorkspace } from "../../../../data/workspace/useWorkspace";
+import { exportLabelsSnapshot } from "../../../../data/workspace/labelsSnapshot";
 import type { SidebarTabModule } from "../tabTypes";
 import "./Settings.css";
 import { PageHeader } from "../../../../components/PageHeader/PageHeader";
@@ -111,6 +113,7 @@ const LABEL_GROUPS: LabelGroup[] = [
       { key: "col_xray_entry_date",           desc: "عمود تاريخ دخول صورة الأشعة" },
       { key: "col_distribution_date",         desc: "عمود تاريخ التوزيع" },
       { key: "col_plate_or_container_number", desc: "عمود لوحة / حاوية" },
+      { key: "col_expert_observation_date",   desc: "عمود تاريخ رصد الخبير" },
       { key: "col_answer_status",             desc: "عمود الحالة" },
       { key: "col_xray_l1_result",            desc: "عمود نتيجة L1" },
       { key: "col_xray_l2_result",            desc: "عمود نتيجة L2" },
@@ -210,17 +213,31 @@ function LabelRow({ labelKey, desc }: { labelKey: LabelKey; desc: string }) {
   const custom  = isCustomized(labelKey);
   const [val, setVal] = useState<string>(current);
   const [saved, setSaved] = useState(false);
+  const { directoryHandle } = useWorkspace();
+
+  // Resync the visible input when the label changes externally (e.g. "استعادة
+  // الكل" while this row's section stays open) — otherwise the input keeps
+  // showing stale text even though isCustomized()/DEFAULT_LABELS already updated.
+  // Adjusted during render (not in an effect) per React's "you might not need
+  // an effect" pattern, so it can't trigger a second, avoidable render pass.
+  const [prevCurrent, setPrevCurrent] = useState(current);
+  if (prevCurrent !== current) {
+    setPrevCurrent(current);
+    setVal(current);
+  }
 
   const save = useCallback(() => {
     setLabel(labelKey, val);
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
-  }, [labelKey, val]);
+    if (directoryHandle) void exportLabelsSnapshot(directoryHandle);
+  }, [labelKey, val, directoryHandle]);
 
   const reset = useCallback(() => {
     resetLabel(labelKey);
     setVal(DEFAULT_LABELS[labelKey]);
-  }, [labelKey]);
+    if (directoryHandle) void exportLabelsSnapshot(directoryHandle);
+  }, [labelKey, directoryHandle]);
 
   const handleKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") save();
@@ -271,11 +288,13 @@ function SettingsPage() {
   useLabels(); // re-render when any label changes
   const [confirmReset, setConfirmReset] = useState(false);
   const [openSections, setOpenSections] = useState<Set<string>>(() => new Set());
+  const { directoryHandle } = useWorkspace();
 
   function handleResetAll() {
     if (!confirmReset) { setConfirmReset(true); return; }
     resetAllLabels();
     setConfirmReset(false);
+    if (directoryHandle) void exportLabelsSnapshot(directoryHandle);
   }
 
   function toggleSection(title: string) {

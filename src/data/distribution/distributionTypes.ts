@@ -5,7 +5,8 @@ export type DistributionEventType =
   | "completed"
   | "replacement-requested"
   | "replaced"
-  | "reassigned";
+  | "reassigned"
+  | "reopened";
 
 export type DistributionEvent = {
   eventId: string;
@@ -21,6 +22,8 @@ export type DistributionEvent = {
   dailyQuota?: number;
   /** Days remaining until deadline at assignment time. */
   daysRemainingAtAssignment?: number;
+  /** Idempotency key: the referral/replacement/reopen request that produced this event. */
+  sourceRequestId?: string;
 };
 
 /** Per-employee quota derived from the distribution log. */
@@ -60,6 +63,8 @@ export type DistributionCurrentData = {
   monthFolderName: string;
   /** Revision of the DistributionLog this snapshot was derived from. Used to detect stale cache. */
   logRevision?: number;
+  /** Version of deriveCurrentDistribution that produced this snapshot; missing or older than DERIVE_VERSION means stale. */
+  deriveVersion?: number;
   derivedAt: string;
   totalAssigned: number;
   totalCompleted: number;

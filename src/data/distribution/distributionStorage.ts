@@ -1,5 +1,5 @@
 import type { PreparedPopulationRow } from "../population/populationTypes";
-import { deriveCurrentDistribution } from "./distributionLog";
+import { DERIVE_VERSION, deriveCurrentDistribution } from "./distributionLog";
 import type {
   DistributionCurrentData,
   DistributionEvent,
@@ -7,7 +7,9 @@ import type {
 } from "./distributionTypes";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { logError, logRejection } from "../storage/errorLogger";
 import { casLoop } from "../storage/casLoop";
+import { ensureMonthWritable } from "../population/monthLock";
 import { syncSampleMirrors } from "../samples/sampleMirrorStorage";
 import { getPopulationMonthDir, getSampleMainDir } from "../workspace/workspacePaths";
 
@@ -74,6 +76,8 @@ export async function appendDistributionEvents(
   monthFolderName: string,
   events: DistributionEvent[]
 ): Promise<{ ok: true } | { ok: false; error: string }> {
+  // Month lock gate — before the CAS loop so a closed month rejects loudly.
+  await ensureMonthWritable(directoryHandle, monthFolderName);
   return casLoop<{ ok: true } | { ok: false; error: string }>(
     async (writeToken) => {
       const dir = await getDistributionDir(directoryHandle, monthFolderName);
@@ -101,6 +105,8 @@ export async function saveDistributionCurrent(
   monthFolderName: string,
   current: DistributionCurrentData
 ): Promise<void> {
+  // Month lock gate — also covers syncSampleMirrors (only called from here).
+  await ensureMonthWritable(directoryHandle, monthFolderName);
   const dir = await getDistributionDir(directoryHandle, monthFolderName);
   await safeWriteJson(dir, CURRENT_FILE, current);
   await syncSampleMirrors(directoryHandle, monthFolderName, current);
@@ -171,8 +177,16 @@ export async function loadOrDeriveDistributionCurrent(
 
     const cached = await loadDistributionCurrent(directoryHandle, monthFolderName);
 
-    // Fast path: cache is still valid for this log revision
-    if (cached && cached.logRevision === log.revision && hasQuotaForAssignedEmployees(cached, log)) {
+    // Fast path: cache is valid only if it was produced by the current
+    // derivation algorithm (deriveVersion) for this exact log revision.
+    // Pre-DERIVE_VERSION caches (inflated totalAssigned / resurrected rows)
+    // are treated as stale and re-derived below.
+    if (
+      cached &&
+      cached.deriveVersion === DERIVE_VERSION &&
+      cached.logRevision === log.revision &&
+      hasQuotaForAssignedEmployees(cached, log)
+    ) {
       return cached;
     }
 
@@ -183,13 +197,16 @@ export async function loadOrDeriveDistributionCurrent(
       logRevision: log.revision
     };
 
-    // Best-effort cache write — don't block on errors
+    // Best-effort cache write — don't block on errors, but log for observability.
     void saveDistributionCurrent(directoryHandle, monthFolderName, withRevision).catch(
-      () => undefined
+      logRejection("distribution:cache-write")
     );
 
     return withRevision;
-  } catch {
+  } catch (error) {
+    // Unexpected failure (corrupt log, permission loss, …) — expected
+    // missing-file cases are handled quietly inside the loaders above.
+    logError("distribution:load-or-derive", error);
     return null;
   }
 }

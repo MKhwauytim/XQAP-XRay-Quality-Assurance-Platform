@@ -1,3 +1,5 @@
+import type { DecisionEvent } from "../approvals/approvalTypes";
+
 export type ReferralStatus = "pending" | "approved" | "denied";
 
 export type ReferralRequest = {
@@ -13,6 +15,8 @@ export type ReferralRequest = {
   reviewedBy?: string;
   reviewedAt?: string;
   reviewNotes?: string;
+  /** Full append-only decision history, newest last. Populated by loadReferralLog. */
+  history?: DecisionEvent[];
 };
 
 export type ReferralLog = {
@@ -45,6 +49,8 @@ export type ReplacementRequest = {
   reviewedBy?: string;
   reviewedAt?: string;
   reviewNotes?: string;
+  /** Full append-only decision history, newest last. Populated by loadReplacementLog. */
+  history?: DecisionEvent[];
 };
 
 export type ReplacementLog = {

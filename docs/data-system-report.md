@@ -201,3 +201,11 @@ Both files use `safeWriteJson` / `safeReadJson` and the `JsonEnvelope` schema-ve
 - JSON writes use the safe write layer where available: temporary write, commit, backup `.bak`, and content-hash validation.
 - Concurrent writes use Web Locks or compare-and-swap loops in high-conflict areas such as distribution and answer files.
 - The activity log is best-effort workspace audit data. It records app-observed time, including heartbeat and close events when the browser delivers them; it is not a centralized attendance system.
+- **Restore semantics (merge, not prune):** restoring a backup re-writes files that exist in the
+  backup snapshot only — it does not delete files created after the backup was taken. Newer
+  on-disk data than the backup is left untouched. A rollback snapshot is created automatically
+  before every restore (visible in the backup history as "قبل الاستعادة"). A pruning restore was
+  deliberately not implemented in v1: it would need to delete files across the whole tree, and a
+  single bug in that path could destroy data the backup never had. Restoring browser-storage data
+  (users, permissions, custom labels) is a separate, explicit opt-in step offered after a
+  successful restore — it is never applied automatically.

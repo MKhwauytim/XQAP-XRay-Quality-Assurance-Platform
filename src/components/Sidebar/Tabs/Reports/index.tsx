@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import ReportDesignerTab from "../ReportDesigner";
-import { AlertTriangle, BarChart2, BarChart3, Building2, Check, ClipboardList, Database, Download, FileStack, FileText, Filter, Globe, History, Presentation, Settings2, User, Users, X } from "lucide-react";
+import { AlertTriangle, BarChart2, BarChart3, Building2, Check, ClipboardList, Database, Download, FileStack, FileText, Filter, FolderOpen, Globe, History, Presentation, Settings2, User, Users, X } from "lucide-react";
 
 import type { SidebarTabModule } from "../tabTypes";
 import { loadOrDeriveDistributionCurrent } from "../../../../data/distribution/distributionStorage";
@@ -132,6 +132,7 @@ function ReportsContent() {
   });
   const [toast, setToast] = useState<{ type: "ok" | "error"; text: string } | null>(null);
   const [model, setModel] = useState<ReportModel | null>(null);
+  const [modelError, setModelError] = useState<"no-population" | "build-error" | null>(null);
   const [modelLoading, setModelLoading] = useState(false);
   const [exporting, setExporting] = useState<"document" | "deck" | "xlsx" | null>(null);
   const [pbiExporting, setPbiExporting] = useState(false);
@@ -235,15 +236,17 @@ function ReportsContent() {
     let cancelled = false;
     setModelLoading(true);
     setModel(null);
+    setModelError(null);
     void (async () => {
       try {
         const execInput = await loadExecInput();
         if (cancelled) return;
-        if (!execInput) { setModel(null); return; }
+        if (!execInput) { setModel(null); setModelError("no-population"); return; }
         setModel(buildReportModel(execInput, buildDisplayNameMap()));
       } catch (err) {
         if (!cancelled) {
           setModel(null);
+          setModelError("build-error");
           logRejection("reports:buildReportModel")(err);
         }
       } finally {
@@ -407,7 +410,7 @@ function ReportsContent() {
     return (
       <section className="rh-page" dir="rtl">
         <div className="rh-empty">
-          <span className="rh-empty-icon">🗂</span>
+          <span className="rh-empty-icon"><FolderOpen size={28} strokeWidth={1.75} aria-hidden /></span>
           <strong>لم يتم تحديد مساحة عمل</strong>
           <span>اختر مجلد العمل من الشريط الجانبي للمتابعة.</span>
         </div>
@@ -430,10 +433,24 @@ function ReportsContent() {
       );
     }
     if (!model) {
+      if (modelError === "build-error") {
+        return (
+          <div className="rh-empty rh-kpi-empty">
+            <strong>تعذّر بناء لوحة التحليلات لهذا الشهر</strong>
+            <span>
+              حدث خطأ غير متوقع أثناء تحليل بيانات الشهر — البيانات موجودة لكن معالجتها فشلت.
+              افتح وحدة تحكم المتصفح (F12 ثم Console) وأرسل نص الخطأ الظاهر للدعم.
+            </span>
+          </div>
+        );
+      }
       return (
         <div className="rh-empty rh-kpi-empty">
-          <strong>لا توجد بيانات تحليلية لهذا الشهر</strong>
-          <span>اختر شهراً تمت معالجة مجتمعه وسحب عينته لعرض لوحة التحليلات.</span>
+          <strong>لا يوجد مجتمع معالج لهذا الشهر</strong>
+          <span>
+            لم يتم العثور على ملف المجتمع المعالج (population.final.json) داخل مجلد الشهر.
+            عالج مجتمع هذا الشهر من تبويب «المجتمع» أولاً، ثم عد إلى هذه الصفحة.
+          </span>
         </div>
       );
     }
@@ -986,7 +1003,9 @@ function ReportsContent() {
                       type="button"
                       className="rh-pbi-copy-btn"
                       title="نسخ المسار"
-                      onClick={() => { void navigator.clipboard.writeText(fullHint); }}
+                      onClick={() => {
+                        navigator.clipboard.writeText(fullHint).catch(logRejection("reports:copyPbiPath"));
+                      }}
                     >
                       نسخ
                     </button>
@@ -1025,6 +1044,12 @@ export default function ReportsTab() {
     return () => window.removeEventListener("sidebar-subtab-changed", handleSubTabEvent);
   }, [handleSubTabEvent]);
 
-  if (activeSubTab === "report-designer") return <ReportDesignerTab />;
+  if (activeSubTab === "report-designer") {
+    return (
+      <TabGuard tabId="reports/report-designer">
+        <ReportDesignerTab />
+      </TabGuard>
+    );
+  }
   return <ReportsContent />;
 }

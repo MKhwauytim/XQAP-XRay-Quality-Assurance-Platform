@@ -39,11 +39,10 @@ import {
   type UserManagementState,
 } from "../../../../auth/userManagement";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
-import { readJsonFile, writeJsonFile } from "../../../../data/storage/fileSystemAccess";
-import { WORKSPACE_FILE_NAMES } from "../../../../data/workspace/workspaceDefaults";
-import type { UsersPermissionsFile } from "../../../../data/workspace/workspaceTypes";
-import { WORKSPACE_SCHEMA_VERSION } from "../../../../data/workspace/workspaceTypes";
-import { getUserDataRoot } from "../../../../data/workspace/workspacePaths";
+import { getUserWorkspaceFootprint } from "../../../../data/samples/sampleMirrorStorage";
+import { appendWorkspaceAction } from "../../../../data/audit/actionLog";
+import { getLabels } from "../../../../data/labels/labelsStore";
+import { syncUserManagementToDisk } from "../../../../data/workspace/userSync";
 import type { SidebarTabModule } from "../tabTypes";
 
 import "./UserManagement.css";
@@ -124,6 +123,8 @@ export default function UserManagementTab() {
   const [identityEdits, setIdentityEdits] = useState<Record<string, { username: string; displayName: string }>>({});
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isCheckingDeletion, setIsCheckingDeletion] = useState(false);
+  const [deleteBlockedInfo, setDeleteBlockedInfo] = useState<{ userId: string; lines: string[] } | null>(null);
   const [collapsedParents, setCollapsedParents] = useState<Set<string>>(new Set());
   const [activityEntries, setActivityEntries] = useState<AuthActivityLogEntry[]>([]);
   const [isActivityLoading, setIsActivityLoading] = useState(false);
@@ -210,59 +211,7 @@ export default function UserManagementTab() {
     savingToDiskRef.current = true;
     try {
       const actor = readSession()?.username ?? "admin";
-      const userDataDir = await getUserDataRoot(directoryHandle, true);
-      const existing = await readJsonFile<UsersPermissionsFile>(
-        userDataDir,
-        WORKSPACE_FILE_NAMES.usersPermissions
-      );
-      const prevMeta = existing.ok ? existing.file.metadata : null;
-      const now = new Date().toISOString();
-
-      const diskFile: UsersPermissionsFile = {
-        metadata: {
-          schemaVersion: WORKSPACE_SCHEMA_VERSION,
-          fileType: "users.permissions",
-          revision: prevMeta ? prevMeta.revision + 1 : 1,
-          createdAt: prevMeta?.createdAt ?? now,
-          createdBy: prevMeta?.createdBy ?? actor,
-          updatedAt: now,
-          updatedBy: actor,
-          contentHash: "",
-        },
-        data: {
-          users: next.users.map((u) => ({
-            id: u.id,
-            username: u.username,
-            displayName: u.displayName,
-            passwordHash: u.passwordHash,
-            role: u.role,
-            isActive: u.isActive,
-            hasCertScanLicense: u.hasCertScanLicense ?? false,
-            createdAt: u.createdAt,
-            createdBy: actor,
-            updatedAt: u.updatedAt,
-            updatedBy: actor,
-          })),
-          roles: [
-            { id: "guest",      label: "ضيف",  description: "وصول قراءة فقط.",          isSystemRole: true },
-            { id: "employee",   label: "موظف",  description: "صلاحيات تشغيلية.",          isSystemRole: true },
-            { id: "supervisor", label: "مشرف",  description: "صلاحيات إشرافية.",           isSystemRole: true },
-            { id: "manager",    label: "مدير",  description: "صلاحيات إدارية وتشغيلية.", isSystemRole: true },
-          ],
-          permissions: next.permissions.map((p) => ({
-            role: p.role,
-            tabId: p.tabId,
-            access: p.access,
-          })),
-          featurePermissions: next.featurePermissions.map((f) => ({
-            role: f.role,
-            featureId: f.featureId,
-            enabled: f.enabled,
-          })),
-        },
-      };
-
-      await writeJsonFile(userDataDir, WORKSPACE_FILE_NAMES.usersPermissions, diskFile);
+      await syncUserManagementToDisk(directoryHandle, next, actor);
     } catch {
       // non-fatal — runtime state remains updated; disk save can be retried.
     } finally {
@@ -417,15 +366,55 @@ export default function UserManagementTab() {
     }
   }
 
-  function handleDeleteUser(userId: string): void {
+  async function handleDeleteUser(userId: string): Promise<void> {
     if (!canEdit) { showMsg("صلاحيتك للعرض فقط.", "bad"); return; }
-    if (session?.username && state.users.find((u) => u.id === userId)?.username === session.username) {
+    const targetUser = state.users.find((u) => u.id === userId);
+    if (session?.username && targetUser?.username === session.username) {
       showMsg("لا يمكنك حذف حسابك الخاص.", "bad");
       return;
     }
-    persistState({ ...state, users: state.users.filter((u) => u.id !== userId) });
-    setConfirmDelete(null);
-    showMsg("تم حذف المستخدم.", "ok");
+    if (!targetUser) return;
+
+    const L = getLabels();
+    setDeleteBlockedInfo(null);
+    setIsCheckingDeletion(true);
+    try {
+      let answerFileMonths: string[] = [];
+      if (!directoryHandle) {
+        // No workspace connected — cannot check assignments; warn and proceed.
+        showMsg(L.um_delete_no_workspace_warn, "bad");
+      } else {
+        const footprint = await getUserWorkspaceFootprint(directoryHandle, targetUser.username);
+        if (footprint.activeAssignments.length > 0) {
+          const lines = footprint.activeAssignments.map((a) =>
+            L.um_delete_blocked_month_line
+              .replace("{month}", a.monthFolderName)
+              .replace("{count}", String(a.pendingCount))
+          );
+          setDeleteBlockedInfo({ userId, lines });
+          showMsg(L.um_delete_blocked_assignments, "bad");
+          return; // Block — no deletion, no force-reassign (v1 decision).
+        }
+        answerFileMonths = footprint.answerFileMonths;
+      }
+
+      persistState({ ...state, users: state.users.filter((u) => u.id !== userId) });
+      setConfirmDelete(null);
+      void appendWorkspaceAction(directoryHandle, {
+        actor: session?.username ?? "unknown",
+        actorRole: session?.role ?? "unknown",
+        action: "user-deleted",
+        target: targetUser.username,
+        details: { answerFileMonths: answerFileMonths.join(",") },
+      });
+      if (answerFileMonths.length > 0) {
+        showMsg(L.um_delete_orphan_answers_warn, "ok");
+      } else {
+        showMsg("تم حذف المستخدم.", "ok");
+      }
+    } finally {
+      setIsCheckingDeletion(false);
+    }
   }
 
   // ── Permission updaters ──────────────────────────────────────────────────────
@@ -801,13 +790,15 @@ export default function UserManagementTab() {
                       <>
                         <button
                           className="um-delete-confirm"
-                          onClick={() => handleDeleteUser(user.id)}
+                          disabled={isCheckingDeletion}
+                          onClick={() => { void handleDeleteUser(user.id); }}
                         >
-                          تأكيد الحذف
+                          {isCheckingDeletion ? getLabels().um_delete_checking : "تأكيد الحذف"}
                         </button>
                         <button
                           className="um-delete-cancel"
-                          onClick={() => setConfirmDelete(null)}
+                          disabled={isCheckingDeletion}
+                          onClick={() => { setConfirmDelete(null); setDeleteBlockedInfo(null); }}
                         >
                           إلغاء
                         </button>
@@ -824,6 +815,15 @@ export default function UserManagementTab() {
                       )
                     )}
                   </div>
+                  {deleteBlockedInfo?.userId === user.id && (
+                    <div className="um-user-actions" style={{ gridColumn: "1 / -1" }}>
+                      <ul>
+                        {deleteBlockedInfo.lines.map((line) => (
+                          <li key={line}>{line}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </div>
               );
             })}

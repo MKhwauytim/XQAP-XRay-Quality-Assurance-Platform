@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Check, ClipboardList } from "lucide-react";
 
 type HighlightType = "port" | "sn" | null;
@@ -73,6 +73,31 @@ export default function CertScanGrid({ initialText, onDataChange }: CertScanGrid
   const [snCol, setSnCol] = useState<number | null>(() => parsed0?.snCol ?? null);
   const [activeHL, setActiveHL] = useState<HighlightType>(null);
   const pasteRef = useRef<HTMLDivElement>(null);
+  const hasHydratedRef = useRef(Boolean(parsed0));
+
+  // `initialText` arrives asynchronously: PopulationTab (index.tsx) mounts this grid with
+  // certScanPasteText === "" and only calls setCertScanPasteText(text) once
+  // loadCertScanGlobal(directoryHandle) resolves inside a useEffect — after first render.
+  // gridData/portCol/snCol are seeded via lazy useState initializers (run once, on mount),
+  // so that later prop update was silently dropped: a month's accumulated CertScan paste
+  // looked "lost" in the grid UI on reload even though it was safely persisted to disk and
+  // still correctly used for processing (certScanPasteText itself, read directly in
+  // PopulationTab, was never affected — only this component's own display state was stale).
+  // Hydrate once when the real text shows up, without clobbering in-progress user edits.
+  useEffect(() => {
+    if (hasHydratedRef.current) return;
+    const parsed = parseStoredText(initialText ?? "");
+    if (!parsed) return;
+    hasHydratedRef.current = true;
+    // One-time hydration from an external system (workspace disk read resolving after
+    // mount), not derived UI state; guarded by hasHydratedRef so it can only run once
+    // and never cascades further renders.
+    /* eslint-disable react-hooks/set-state-in-effect */
+    setGridData(parsed.data);
+    setPortCol(parsed.portCol);
+    setSnCol(parsed.snCol);
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [initialText]);
 
   const maxCols = gridData.reduce((m, r) => Math.max(m, r.length), 0);
   const dataRowCount = Math.max(0, gridData.length - 1);

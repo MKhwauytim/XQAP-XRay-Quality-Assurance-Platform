@@ -7,11 +7,15 @@ import {
   getRolePermission,
   hasFeature,
   readUserManagementState,
+  subscribeToUserManagementChanges,
 } from "../../../../../auth/userManagement";
 import {
   loadEmployeeAnswers,
   upsertItemAnswer,
 } from "../../../../../data/answers/answerStorage";
+import { reopenSubmittedAnswer } from "../../../../../data/answers/reopenAnswer";
+import { MonthClosedError } from "../../../../../data/population/monthLock";
+import { getLabels } from "../../../../../data/labels/labelsStore";
 import type { FieldAnswer, ItemAnswer } from "../../../../../data/answers/answerTypes";
 import {
   loadOrDeriveDistributionCurrent,
@@ -111,16 +115,24 @@ function buildXrayColumns(L: Labels): DataTableCol<DistributionEntry>[] {
 }
 
 const DEFAULT_VISIBLE = [
-  "xrayImageId", "answerStatus", "portName", "stage",
-  "xrayEntryDate", "lastEventAt", "plateOrContainerNumber",
+  "xrayImageId", "stage", "portName", "xrayEntryDate",
+  "plateOrContainerNumber", "xrayLevelOneResult", "xrayLevelTwoResult",
 ];
 
 const COL_KEY = "xray_ref_cols_v4";
 
 function buildDefaultColConfig(columns: DataTableCol<DistributionEntry>[]): ColConfig {
   const visible = new Set(DEFAULT_VISIBLE);
+  // Order follows DEFAULT_VISIBLE's intended arrangement first (so the sticky
+  // answerStatus column lands right next to the sticky xrayImageId column
+  // instead of wherever it happens to sit in buildXrayColumns's definition
+  // order), then appends any remaining columns.
+  const known = new Set(columns.map((column) => column.id));
+  const orderedVisible = DEFAULT_VISIBLE.filter((id) => known.has(id));
+  const orderedVisibleSet = new Set(orderedVisible);
+  const rest = columns.map((column) => column.id).filter((id) => !orderedVisibleSet.has(id));
   return {
-    order: columns.map((column) => column.id),
+    order: [...orderedVisible, ...rest],
     hidden: columns.filter((column) => !visible.has(column.id)).map((column) => column.id),
     dateFmt: {},
     widths: {},
@@ -185,6 +197,11 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   const role     = session?.role ?? "employee";
   /** Only admin can mutate distribution data (replacements, etc.). */
   const canEdit   = role === "admin";
+  // Re-render when the permission matrix changes (e.g. admin edits User Management while
+  // this tab stays mounted) — otherwise canSeeAll/canEdit/etc. below stay frozen at the
+  // last unrelated render's snapshot.
+  const [, forcePermissionRefresh] = useState(0);
+  useEffect(() => subscribeToUserManagementChanges(() => forcePermissionRefresh((n) => n + 1)), []);
   const userManagementState = readUserManagementState();
   /** Oversight view is permission-driven; ordinary users only see their own samples. */
   const canSeeAll = hasFeature(
@@ -214,6 +231,11 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     role,
     "submit-referrals"
   );
+  const canReopenAnswer = hasFeature(
+    userManagementState.featurePermissions,
+    role,
+    "ew.reopenAnswer"
+  );
   const L = useLabels();
   const baseColumns = useMemo(() => buildXrayColumns(L), [L]);
 
@@ -241,6 +263,27 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [filteredTableEntries, setFilteredTableEntries] = useState<DistributionEntry[]>([]);
   const [referralModal, setReferralModal] = useState<ReferralModalState>(null);
+
+  // Function declaration (hoisted) — safe to reference from the mount effect
+  // below even though it appears earlier in source, with no TDZ/identity
+  // concerns for the React Compiler.
+  async function applyTemplate(id: string, shouldSave: boolean): Promise<void> {
+    setSelTplId(id);
+    if (!id) { setActiveTpl(null); return; }
+    setActiveTpl(await loadTemplate(directoryHandle, id));
+    if (!shouldSave) return;
+    const result = await saveInspectionTemplateSelection(directoryHandle, {
+      templateId: id,
+      updatedAt: new Date().toISOString(),
+      updatedBy: username,
+    });
+    setStatusMsg(
+      result.ok
+        ? { type: "ok", text: "تم تعيين نموذج الفحص." }
+        : { type: "error", text: result.error }
+    );
+  }
+
   useEffect(() => {
     void listMonthFolders(directoryHandle)
       .then((ms) => {
@@ -288,6 +331,10 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     return m;
   }, [answers]);
 
+  /* eslint-disable react-hooks/preserve-manual-memoization -- React Compiler can't prove
+     stageMappings/canSeeAll/answersMap/username are stable across renders (they come from
+     useState/session/derived useMemo values that are safe in practice); these hooks keep
+     their manual dependency arrays and behave correctly, just without compiler auto-memoization. */
   const columns = useMemo<DataTableCol<DistributionEntry>[]>(() => {
     const mapped = baseColumns.map((col) => {
       if (col.id === "stage") {
@@ -425,26 +472,10 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       setLoadState("error");
     }
   }, [directoryHandle, selMonth, username, canSeeAll]);
+  /* eslint-enable react-hooks/preserve-manual-memoization */
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- async data load; setState fires inside loadData's async callback, not synchronously in the effect body
   useEffect(() => { void loadData(); }, [loadData]);
-
-  async function applyTemplate(id: string, shouldSave: boolean): Promise<void> {
-    setSelTplId(id);
-    if (!id) { setActiveTpl(null); return; }
-    setActiveTpl(await loadTemplate(directoryHandle, id));
-    if (!shouldSave) return;
-    const result = await saveInspectionTemplateSelection(directoryHandle, {
-      templateId: id,
-      updatedAt: new Date().toISOString(),
-      updatedBy: username,
-    });
-    setStatusMsg(
-      result.ok
-        ? { type: "ok", text: "تم تعيين نموذج الفحص." }
-        : { type: "error", text: result.error }
-    );
-  }
 
   async function handleTplSelect(id: string): Promise<void> {
     await applyTemplate(id, canSetTemplate);
@@ -461,15 +492,51 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       submittedAt: now, answeredBy: forUser,
       status: "submitted",
     };
-    const result = await upsertItemAnswer(directoryHandle, selMonth, forUser, item);
-    if (result.ok) {
-      setAnswers((prev) => [
-        ...prev.filter((a) => !(a.xrayImageId === xrayImageId && a.answeredBy === forUser)),
-        item,
-      ]);
-      setStatusMsg({ type: "ok", text: "تم التقديم." });
-    } else {
-      setStatusMsg({ type: "error", text: result.error });
+    try {
+      const result = await upsertItemAnswer(directoryHandle, selMonth, forUser, item);
+      if (result.ok) {
+        setAnswers((prev) => [
+          ...prev.filter((a) => !(a.xrayImageId === xrayImageId && a.answeredBy === forUser)),
+          item,
+        ]);
+        setStatusMsg({ type: "ok", text: "تم التقديم." });
+      } else {
+        setStatusMsg({ type: "error", text: result.error });
+      }
+    } catch (error) {
+      setStatusMsg({
+        type: "error",
+        text: error instanceof MonthClosedError
+          ? getLabels().msg_month_closed_write_blocked
+          : error instanceof Error ? error.message : "خطأ غير معروف",
+      });
+    }
+  }
+
+  async function handleReopenAnswer(entry: DistributionEntry, reason: string): Promise<void> {
+    try {
+      const result = await reopenSubmittedAnswer({
+        directoryHandle,
+        monthFolderName: selMonth,
+        employeeUsername: entry.assignedTo,
+        xrayImageId: entry.xrayImageId,
+        reopenedBy: username,
+        reopenedByRole: role,
+        reason,
+      });
+      if (result.ok) {
+        setStatusMsg({ type: "ok", text: getLabels().msg_reopen_done });
+        await loadData();
+      } else {
+        setStatusMsg({ type: "error", text: result.error });
+      }
+    } catch (error) {
+      setStatusMsg({
+        type: "error",
+        text: error instanceof MonthClosedError
+          ? getLabels().msg_month_closed_write_blocked
+          : error instanceof Error ? error.message : "خطأ غير معروف",
+      });
     }
   }
 
@@ -804,6 +871,11 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                       ? (entry) => setReferralModal({ xrayImageIds: [entry.xrayImageId], source: "selected" })
                       : undefined
                   }
+                  onReopen={
+                    canReopenAnswer
+                      ? (reason) => { void handleReopenAnswer(selEntry, reason); }
+                      : undefined
+                  }
                 />
               ) : (
                 <div className="ew-ref-empty-panel">
@@ -978,6 +1050,7 @@ function SampleDetailPanel({
   onSave,
   onReplace,
   onReassign,
+  onReopen,
 }: {
   entry: DistributionEntry;
   template: TemplateSchema | null;
@@ -987,6 +1060,7 @@ function SampleDetailPanel({
   onSave: (ans: FieldAnswer[], submit: boolean) => Promise<void>;
   onReplace?: (entry: DistributionEntry) => void;
   onReassign?: (entry: DistributionEntry) => void;
+  onReopen?: (reason: string) => void;
 }) {
   return (
     <InspectionPanel
@@ -999,6 +1073,7 @@ function SampleDetailPanel({
       onSave={onSave}
       onReplace={onReplace}
       onReassign={onReassign}
+      onReopen={onReopen}
     />
   );
 }

@@ -145,9 +145,37 @@ test("drawSample portAllocations total matches totalActual", () => {
   const result = drawSample(rows, { totalSampleSize: 60, rngSeed: "ports" }, "user");
   expect(result.ok).toBe(true);
   if (!result.ok) return;
-  // portAllocations excludes spillover extra draws, so may differ.
-  // But total rows in data.rows should match totalActual.
+  // portAllocations actuals are reconciled after spillover, so they must sum to totalActual.
+  const portSum = result.data.portAllocations.reduce((s, a) => s + a.actualTotalDrawn, 0);
+  expect(portSum).toBe(result.data.totalActual);
   expect(result.data.rows.length).toBe(result.data.totalActual);
+});
+
+test("legacy branch reconciles per-port actuals when spillover fires", () => {
+  // Simulate runtime data drift: two rows carry a certScanStatus outside the
+  // strict union (possible via legacy files loaded through unchecked casts).
+  // The cert/noncert split then under-fills the port and spillover draws the
+  // odd-status rows — per-port actuals must still sum to the grand total.
+  const oddStatus = "Unknown" as PreparedPopulationRow["certScanStatus"];
+  const rows = [
+    ...makeRows("A", 4, 4),
+    { ...makeRow("A-X0", "A", "Certscan"), certScanStatus: oddStatus },
+    { ...makeRow("A-X1", "A", "Certscan"), certScanStatus: oddStatus }
+  ];
+
+  const result = drawSample(rows, { totalSampleSize: 10, rngSeed: "reconcile" }, "user");
+  expect(result.ok).toBe(true);
+  if (!result.ok) return;
+
+  expect(result.data.totalActual).toBe(10);
+  const portSum = result.data.portAllocations.reduce((s, a) => s + a.actualTotalDrawn, 0);
+  expect(portSum).toBe(result.data.totalActual);
+
+  const portA = result.data.portAllocations.find((a) => a.portName === "A");
+  expect(portA?.actualTotalDrawn).toBe(10);
+  expect(
+    (portA?.actualCertScanDrawn ?? 0) + (portA?.actualNonCertScanDrawn ?? 0)
+  ).toBe(10);
 });
 
 test("drawSample with stage-specific rules draws correct counts", () => {
@@ -191,5 +219,33 @@ test("drawSample with stage-specific rules draws correct counts", () => {
   const secondStageDrawn = result.data.rows.filter(r => getStageKey(r.stage) === "second");
   expect(firstStageDrawn).toHaveLength(10);
   expect(secondStageDrawn).toHaveLength(5);
+});
+
+test("drawSample rejects a population whose stage values match none of the four configured stages", () => {
+  // Population exists (100 rows) but every row's `stage` text is not one of the
+  // DEFAULT_STAGE_MAPPINGS aliases (e.g. the Excel source uses "Level 1" wording
+  // instead of "STAGE 1" / "المستوى الأول") — every row falls into "unknown".
+  const rows = makeRows("بري", 50, 50).map((r) => ({ ...r, stage: "Level 1" }));
+
+  const samplingRules: StageSamplingRule[] = [
+    {
+      stageKey: "first",
+      method: "percentage",
+      value: 100,
+      isLocked: true,
+      minRequiredCount: 0,
+      certScanPercentage: 0,
+      certScanExactCount: 0,
+      certScanMethod: "percentage",
+      certScanStrategy: "preferred"
+    }
+  ];
+
+  const result = drawSample(rows, { rngSeed: "unmapped-stage-test", samplingRules }, "user");
+
+  // Must fail loudly instead of silently "succeeding" with a zeroed sample —
+  // a zero-row sample saved to disk looks identical to a real empty draw and
+  // gives the operator no signal that stage mapping is misconfigured.
+  expect(result.ok).toBe(false);
 });
 

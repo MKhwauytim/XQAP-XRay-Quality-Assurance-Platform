@@ -139,6 +139,50 @@ describe("replacement candidates", () => {
     expect(result.recommended).toEqual([]);
     expect(result.all.map(r => r.xrayImageId).sort()).toEqual(["img-3", "img-4"]);
   });
+
+  it("caps oversized pools deterministically from the sample seed and dead row id", () => {
+    const deadRow = makeRow("img-dead", "المستوى الأول", "PortA");
+    const entry: DistributionEntry = {
+      xrayImageId: "img-dead",
+      assignedTo: "expert1",
+      status: "pending",
+      replacedById: null,
+      row: deadRow,
+      lastEventAt: new Date().toISOString(),
+    };
+
+    // 150 same-stage / same-port / same-tier candidates — well past the pool limit (100).
+    const popRows = [
+      deadRow,
+      ...Array.from({ length: 150 }, (_, i) => makeRow(`img-${i + 1}`, "المستوى الأول", "PortA")),
+    ];
+
+    const sampleMaster: SampleMasterData = {
+      rngSeed: "seed-xyz",
+      totalRequested: 1,
+      totalActual: 1,
+      certScanRequested: 0,
+      nonCertScanRequested: 0,
+      certScanActual: 0,
+      nonCertScanActual: 0,
+      portAllocations: [],
+      stageAllocations: [],
+      drawnAt: new Date().toISOString(),
+      drawnBy: "admin",
+      rows: [deadRow],
+    };
+
+    const allEntries: DistributionEntry[] = [entry];
+
+    const first = getReplacementCandidates(entry, popRows, sampleMaster, allEntries);
+    const second = getReplacementCandidates(entry, popRows, sampleMaster, allEntries);
+
+    // Capped to the pool limit, and byte-identical across calls (seeded, not Math.random).
+    expect(first.all).toHaveLength(100);
+    expect(first.recommended).toHaveLength(100);
+    expect(second.all.map(r => r.xrayImageId)).toEqual(first.all.map(r => r.xrayImageId));
+    expect(second.recommended.map(r => r.xrayImageId)).toEqual(first.recommended.map(r => r.xrayImageId));
+  });
 });
 
 describe("executeReplacement", () => {

@@ -100,10 +100,12 @@
   --r-lg:  10px;
   --r-xl:  12px;
   --r-2xl: 16px;
+  --r-3xl: 18px;
 
   /* ── Spacing scale (4px base) ──────────────────────────────── */
   --sp-1:  4px;   --sp-2:  8px;   --sp-3:  12px;  --sp-4:  16px;
   --sp-5:  20px;  --sp-6:  24px;  --sp-8:  32px;  --sp-10: 40px;  --sp-12: 48px;
+  --sp-14: 56px;
 
   /* ── Derived / signature tokens ────────────────────────────── */
   --focus-ring:        0 0 0 3px rgba(0, 154, 222, 0.28);
@@ -143,6 +145,21 @@
   --fw-semibold: 600;
   --fw-bold:     700;
   --fw-black:    800;
+
+  /* ── Type scale (role-named; adopt incrementally when touching rules) ── */
+  --fs-2xs:  11px;  /* micro-labels, table meta */
+  --fs-xs:   12px;  /* badges, captions, dense table cells */
+  --fs-sm:   13px;  /* body-dense: default table/UI text */
+  --fs-base: 14px;  /* body: forms, paragraph text */
+  --fs-md:   16px;  /* card titles, sub-headers */
+  --fs-lg:   18px;  /* section titles (small) */
+  --fs-xl:   22px;  /* section titles (large) */
+  --fs-2xl:  28px;  /* stat / KPI values */
+  --fs-3xl:  34px;  /* page-level H1 */
+
+  --lh-tight:  1.2;   /* headings, KPI numbers */
+  --lh-normal: 1.5;   /* body text */
+  --lh-loose:  1.7;   /* Arabic paragraph copy */
 
   /* ── Legacy aliases — backward compat with all existing components ── */
   --app-bg:            #F3F5F2;

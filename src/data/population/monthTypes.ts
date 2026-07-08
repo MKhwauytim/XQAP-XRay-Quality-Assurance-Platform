@@ -17,7 +17,16 @@ export type MonthManifestData = {
   rngSeed: string | null;
   totalRawRows: number;
   totalProcessedRows: number;
-  status: "raw-saved" | "processed-saved" | "sampled" | "distributed";
+  status: "raw-saved" | "processed-saved" | "sampled" | "distributed" | "closed";
+  /** Set when status === "closed". */
+  closedAt?: string | null;
+  closedBy?: string | null;
+  closeNote?: string | null;
+  /** Status held before closing — restored on reopen. */
+  statusBeforeClose?: "raw-saved" | "processed-saved" | "sampled" | "distributed" | null;
+  /** Last reopen, if any (history goes to the action log). */
+  reopenedAt?: string | null;
+  reopenedBy?: string | null;
   processingFingerprint?: string | null;
   processingSummaryFile?: string | null;
   sourceFiles?: {

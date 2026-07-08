@@ -105,7 +105,7 @@ export const MANAGED_TABS: readonly ManagedTab[] = [
   { id: "reports/reports",         label: "التقارير",              parentId: "reports" },
   { id: "reports/kpi",             label: "مؤشرات الأداء",          parentId: "reports" },
   { id: "reports/analytics",       label: "لوحة التحليلات التنفيذية", parentId: "reports" },
-  { id: "report-designer",         label: "مصمم التقارير",          parentId: "reports" },
+  { id: "reports/report-designer", label: "مصمم التقارير",          parentId: "reports" },
   { id: "archive",                 label: "إدارة الأرشيف" },
   { id: "user-management",         label: "إدارة المستخدمين" },
   { id: "user-management/users",               label: "المستخدمون",          parentId: "user-management" },
@@ -162,6 +162,11 @@ export const MANAGED_FEATURE_GROUPS: readonly FeatureGroup[] = [
         id: "configure-referral-columns",
         label: "تخصيص أعمدة صور الأشعة المحالة",
         description: "إظهار زر الأعمدة وتغيير الأعمدة الظاهرة في جدول صور الأشعة المحالة",
+      },
+      {
+        id: "ew.reopenAnswer",
+        label: "إعادة فتح الإجابات المقدمة",
+        description: "إرجاع إجابة مقدمة إلى مسودة ليتمكن الموظف من تصحيحها",
       },
     ],
   },
@@ -235,6 +240,11 @@ export const MANAGED_FEATURE_GROUPS: readonly FeatureGroup[] = [
         label: "تصدير من الأرشيف",
         description: "تنزيل البيانات المؤرشفة",
       },
+      {
+        id: "archive.closeMonth",
+        label: "إقفال الأشهر وإعادة فتحها",
+        description: "إقفال شهر لمنع أي تعديل على بياناته أو إعادة فتحه للتعديل",
+      },
     ],
   },
 ] as const;
@@ -247,10 +257,10 @@ const ALL_FEATURE_IDS = MANAGED_FEATURE_GROUPS.flatMap((g) =>
 /** Maps each tab to the feature IDs that belong to it. */
 export const TAB_FEATURE_MAP: Readonly<Record<string, readonly string[]>> = {
   "population":         ["upload-data", "process-population", "configure-sample", "draw-sample", "distribute-samples", "bulk-assign", "view-browse"],
-  "employee-workspace": ["approve-referrals", "approve-replacements", "view-all-entries", "view-employee-stats", "submit-referrals", "request-replacement", "submit-answers", "configure-referral-columns"],
+  "employee-workspace": ["approve-referrals", "approve-replacements", "view-all-entries", "view-employee-stats", "submit-referrals", "request-replacement", "submit-answers", "configure-referral-columns", "ew.reopenAnswer"],
   "user-management":    ["manage-users", "reset-passwords", "edit-permissions"],
   "reports":            ["export-reports"],
-  "archive":            ["export-archive"],
+  "archive":            ["export-archive", "archive.closeMonth"],
   "settings":           [],
 };
 
@@ -272,6 +282,7 @@ const FEATURE_DEFAULTS: Record<string, Partial<Record<AuthRole, boolean>>> = {
   "request-replacement":  { guest: false, employee: true,  supervisor: true,  manager: true  },
   "submit-answers":       { guest: false, employee: true,  supervisor: false, manager: false },
   "configure-referral-columns": { guest: false, employee: false, supervisor: true, manager: true },
+  "ew.reopenAnswer":      { guest: false, employee: false, supervisor: true,  manager: true  },
   "upload-data":          { guest: false, employee: false, supervisor: false, manager: true  },
   "process-population":   { guest: false, employee: false, supervisor: false, manager: true  },
   "configure-sample":     { guest: false, employee: false, supervisor: false, manager: true  },
@@ -284,6 +295,7 @@ const FEATURE_DEFAULTS: Record<string, Partial<Record<AuthRole, boolean>>> = {
   "edit-permissions":     { guest: false, employee: false, supervisor: false, manager: false },
   "export-reports":       { guest: false, employee: false, supervisor: true,  manager: true  },
   "export-archive":       { guest: false, employee: false, supervisor: false, manager: true  },
+  "archive.closeMonth":   { guest: false, employee: false, supervisor: false, manager: false },
 };
 
 // ── Default creators ──────────────────────────────────────────────────────────
@@ -294,7 +306,7 @@ export function createDefaultPermissions(): RolePermission[] {
     { role: "guest",      tabId: "population",         access: "view" },
     { role: "guest",      tabId: "employee-workspace", access: "none" },
     { role: "guest",      tabId: "reports",            access: "none" },
-    { role: "guest",      tabId: "report-designer",    access: "none" },
+    { role: "guest",      tabId: "reports/report-designer", access: "none" },
     { role: "guest",      tabId: "archive",            access: "none" },
     { role: "guest",      tabId: "user-management",    access: "none" },
     { role: "guest",      tabId: "settings",           access: "none" },
@@ -302,7 +314,7 @@ export function createDefaultPermissions(): RolePermission[] {
     { role: "employee",   tabId: "population",         access: "view" },
     { role: "employee",   tabId: "employee-workspace", access: "edit" },
     { role: "employee",   tabId: "reports",            access: "none" },
-    { role: "employee",   tabId: "report-designer",    access: "none" },
+    { role: "employee",   tabId: "reports/report-designer", access: "none" },
     { role: "employee",   tabId: "archive",            access: "none" },
     { role: "employee",   tabId: "user-management",    access: "none" },
     { role: "employee",   tabId: "settings",           access: "none" },
@@ -310,7 +322,7 @@ export function createDefaultPermissions(): RolePermission[] {
     { role: "supervisor", tabId: "population",         access: "view" },
     { role: "supervisor", tabId: "employee-workspace", access: "edit" },
     { role: "supervisor", tabId: "reports",            access: "view" },
-    { role: "supervisor", tabId: "report-designer",    access: "view" },
+    { role: "supervisor", tabId: "reports/report-designer", access: "view" },
     { role: "supervisor", tabId: "archive",            access: "view" },
     { role: "supervisor", tabId: "user-management",    access: "none" },
     { role: "supervisor", tabId: "settings",           access: "none" },
@@ -318,7 +330,7 @@ export function createDefaultPermissions(): RolePermission[] {
     { role: "manager",    tabId: "population",         access: "edit" },
     { role: "manager",    tabId: "employee-workspace", access: "edit" },
     { role: "manager",    tabId: "reports",            access: "edit" },
-    { role: "manager",    tabId: "report-designer",    access: "edit" },
+    { role: "manager",    tabId: "reports/report-designer", access: "edit" },
     { role: "manager",    tabId: "archive",            access: "edit" },
     { role: "manager",    tabId: "user-management",    access: "none" },
     { role: "manager",    tabId: "settings",           access: "edit" },
@@ -330,7 +342,7 @@ export function createDefaultPermissions(): RolePermission[] {
     { role: "admin",      tabId: "ew/referral-approval",    access: "edit" },
     { role: "admin",      tabId: "ew/inspection-form",      access: "edit" },
     { role: "admin",      tabId: "reports",                 access: "edit" },
-    { role: "admin",      tabId: "report-designer",         access: "edit" },
+    { role: "admin",      tabId: "reports/report-designer", access: "edit" },
     { role: "admin",      tabId: "archive",                 access: "edit" },
     { role: "admin",      tabId: "user-management",         access: "edit" },
     { role: "admin",      tabId: "user-management/users",               access: "edit" },

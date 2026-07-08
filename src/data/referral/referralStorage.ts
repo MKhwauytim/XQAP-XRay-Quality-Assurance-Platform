@@ -5,9 +5,10 @@ import {
   loadAllEmployeeFiles,
 } from "../answers/answerStorage";
 import {
+  appendDecisionEvent,
+  effectiveDecision,
   loadAllSupervisorDecisions,
-  upsertReferralDecision,
-  upsertReplacementDecision,
+  mergeDecisionHistory,
 } from "../approvals/approvalStorage";
 import type {
   ReferralLog,
@@ -42,17 +43,13 @@ export async function loadReferralLog(
   ]);
 
   const allRequests = empFiles.flatMap((f) => f.referralRequests ?? []);
-  const decisionMap = new Map(
-    allDecisions.flatMap((d) =>
-      d.referralDecisions.map((dec) => [dec.requestId, dec])
-    )
-  );
 
   const requests = allRequests.map((r) => {
-    const dec = decisionMap.get(r.requestId);
-    return dec
-      ? { ...r, status: dec.status, reviewedBy: dec.reviewedBy, reviewedAt: dec.reviewedAt, reviewNotes: dec.reviewNotes }
-      : r;
+    const history = mergeDecisionHistory(allDecisions, "referral", r.requestId);
+    const latest = effectiveDecision(history);
+    return latest
+      ? { ...r, status: latest.status, reviewedBy: latest.reviewedBy, reviewedAt: latest.reviewedAt, reviewNotes: latest.reviewNotes, history }
+      : { ...r, history };
   });
 
   return { monthFolderName, revision: 0, requests };
@@ -65,8 +62,9 @@ export async function updateReferralStatus(
   requestId: string,
   updates: { status: ReferralStatus; reviewedBy: string; reviewedAt: string; reviewNotes?: string }
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  return upsertReferralDecision(directoryHandle, monthFolderName, updates.reviewedBy, {
+  return appendDecisionEvent(directoryHandle, monthFolderName, updates.reviewedBy, {
     requestId,
+    kind: "referral",
     status: updates.status as "approved" | "denied",
     reviewedBy: updates.reviewedBy,
     reviewedAt: updates.reviewedAt,
@@ -110,17 +108,13 @@ export async function loadReplacementLog(
   ]);
 
   const allRequests = empFiles.flatMap((f) => f.replacementRequests ?? []);
-  const decisionMap = new Map(
-    allDecisions.flatMap((d) =>
-      d.replacementDecisions.map((dec) => [dec.requestId, dec])
-    )
-  );
 
   const requests = allRequests.map((r) => {
-    const dec = decisionMap.get(r.requestId);
-    return dec
-      ? { ...r, status: dec.status, reviewedBy: dec.reviewedBy, reviewedAt: dec.reviewedAt, reviewNotes: dec.reviewNotes }
-      : r;
+    const history = mergeDecisionHistory(allDecisions, "replacement", r.requestId);
+    const latest = effectiveDecision(history);
+    return latest
+      ? { ...r, status: latest.status, reviewedBy: latest.reviewedBy, reviewedAt: latest.reviewedAt, reviewNotes: latest.reviewNotes, history }
+      : { ...r, history };
   });
 
   return { monthFolderName, revision: 0, requests };
@@ -133,8 +127,9 @@ export async function updateReplacementStatus(
   requestId: string,
   updates: { status: ReferralStatus; reviewedBy: string; reviewedAt: string; reviewNotes?: string }
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  return upsertReplacementDecision(directoryHandle, monthFolderName, updates.reviewedBy, {
+  return appendDecisionEvent(directoryHandle, monthFolderName, updates.reviewedBy, {
     requestId,
+    kind: "replacement",
     status: updates.status as "approved" | "denied",
     reviewedBy: updates.reviewedBy,
     reviewedAt: updates.reviewedAt,

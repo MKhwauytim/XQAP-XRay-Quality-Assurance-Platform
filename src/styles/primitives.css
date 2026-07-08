@@ -38,6 +38,15 @@
 .ui-btn:disabled { cursor: not-allowed; opacity: 0.6; }
 .ui-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
+/* Shared focus ring for custom interactive elements (non-native buttons,
+   focusable rows/cells). Matches the .ui-btn focus treatment so keyboard
+   focus is visible on every interactive surface, not just native controls. */
+[role="button"]:focus-visible,
+[tabindex]:not([tabindex="-1"]):focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 .ui-btn--sm { min-height: 30px; padding: 6px 11px; font-size: 12px; }
 .ui-btn--lg { min-height: 44px; padding: 11px 22px; font-size: 14px; }
 

@@ -6,6 +6,9 @@ import { deckStyleChoicesPlugin } from "./src/dev/deckStyleChoicesPlugin";
 export default defineConfig({
   plugins: [react(), viteSingleFile(), deckStyleChoicesPlugin()],
   base: "./",
+  server: {
+    port: Number(process.env.PORT) || 5173,
+  },
   build: {
     outDir: "dist",
     emptyOutDir: true,

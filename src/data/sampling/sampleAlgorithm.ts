@@ -147,6 +147,22 @@ export function drawSample(
       allDrawnRows.push(...spillResult.extraRows);
       totalCertScanActual += spillResult.extraCert;
       totalNonCertScanActual += spillResult.extraNonCert;
+
+      // Reconcile per-port actuals with the spillover extras so that
+      // sum(portAllocations actuals) === totalActual (mirrors the stage path).
+      const allocByPort = new Map(portAllocations.map((a) => [a.portName, a]));
+      for (const row of spillResult.extraRows) {
+        const portName = row.portName ?? "غير محدد";
+        const alloc = allocByPort.get(portName);
+        if (alloc) {
+          alloc.actualTotalDrawn += 1;
+          if (row.certScanStatus === "Certscan") {
+            alloc.actualCertScanDrawn += 1;
+          } else {
+            alloc.actualNonCertScanDrawn += 1;
+          }
+        }
+      }
     }
 
     const data: SampleMasterData = {
@@ -219,6 +235,20 @@ export function drawSample(
     target = Math.min(target, available);
     effectiveTargets.set(sk, target);
     configuredValues.set(sk, r.value);
+  }
+
+  // Guard: if none of the population rows matched ANY of the four configured
+  // stages, every row's `stage` text failed to match the stage-mapping aliases
+  // (e.g. the source data uses "Level 1" wording instead of "STAGE 1" /
+  // "المستوى الأول"). Silently "succeeding" with a zeroed draw here is
+  // indistinguishable from a real empty result once saved to disk — fail
+  // loudly instead so the operator fixes stage mapping before proceeding.
+  const totalMappedRows = stageKeys.reduce((sum, sk) => sum + (stageAvailableCounts.get(sk) ?? 0), 0);
+  if (totalMappedRows === 0) {
+    return {
+      ok: false,
+      reason: "لم يتم العثور على أي صف مطابق لأحد المستويات الأربعة المُهيأة. تحقق من إعداد \"تعيين المستويات\" (Stage Mapping) في الإعدادات ومطابقته لقيم عمود المستوى الفعلية في بيانات المجتمع."
+    };
   }
 
   // Compute total shortfall for non-first stages

@@ -8,6 +8,15 @@ import type {
   EmployeeQuota
 } from "./distributionTypes";
 import { parseMonthFolderName } from "../population/monthFolder";
+import { logError } from "../storage/errorLogger";
+
+/**
+ * Version of the derivation algorithm in deriveCurrentDistribution. Bump when
+ * fold semantics change (v2: totalAssigned excludes replaced rows; "replaced"
+ * is terminal). loadOrDeriveDistributionCurrent treats cached snapshots with a
+ * missing or older deriveVersion as stale and re-derives them.
+ */
+export const DERIVE_VERSION = 2;
 
 export function createEventId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -58,6 +67,7 @@ export function buildReassignEvent(params: {
   reassignedTo: string;
   eventBy: string;
   notes?: string;
+  sourceRequestId?: string;
 }): DistributionEvent {
   return {
     eventId: createEventId(),
@@ -67,7 +77,27 @@ export function buildReassignEvent(params: {
     reassignedTo: params.reassignedTo,
     eventAt: new Date().toISOString(),
     eventBy: params.eventBy,
-    notes: params.notes
+    notes: params.notes,
+    sourceRequestId: params.sourceRequestId
+  };
+}
+
+export function buildReopenedEvent(params: {
+  xrayImageId: string;
+  assignedTo: string;
+  eventBy: string;
+  notes?: string;
+  sourceRequestId?: string;
+}): DistributionEvent {
+  return {
+    eventId: createEventId(),
+    eventType: "reopened",
+    xrayImageId: params.xrayImageId,
+    assignedTo: params.assignedTo,
+    eventAt: new Date().toISOString(),
+    eventBy: params.eventBy,
+    notes: params.notes,
+    sourceRequestId: params.sourceRequestId
   };
 }
 
@@ -135,6 +165,12 @@ export function deriveCurrentDistribution(
   // Process events in order; latest event for each xrayImageId wins.
   const entryMap = new Map<string, DistributionEntry>();
 
+  // Events dropped by the terminal-state guard: excluded from the quota pass
+  // (they would inflate sampleCount/dailyQuota) and reported once, aggregated,
+  // after the fold (instead of one ring-buffer entry per event per derivation).
+  const droppedEventIds = new Set<string>();
+  const droppedImageIds = new Set<string>();
+
   for (const evt of log.events) {
     const row = rowMap.get(evt.xrayImageId);
     if (!row) continue;
@@ -146,6 +182,15 @@ export function deriveCurrentDistribution(
     const existing = entryMap.get(evt.xrayImageId);
     if (existing) {
       replacedById = existing.replacedById;
+    }
+
+    // Terminal-state guard: a replaced row is dead. Any later event other than
+    // another "replaced" is an illegal transition (it would resurrect the row
+    // and double-count it next to its replacement) — drop it and log.
+    if (existing?.status === "replaced" && evt.eventType !== "replaced") {
+      droppedEventIds.add(evt.eventId);
+      droppedImageIds.add(evt.xrayImageId);
+      continue;
     }
 
     switch (evt.eventType) {
@@ -170,6 +215,12 @@ export function deriveCurrentDistribution(
         replacedById = evt.replacedById ?? null;
         assignedTo = existing?.assignedTo ?? evt.assignedTo;
         break;
+      case "reopened":
+        // Returns a completed item to the employee's queue for correction.
+        // Illegal after "replaced" — the terminal-state guard above drops it.
+        status = "pending";
+        assignedTo = existing?.assignedTo ?? evt.assignedTo;
+        break;
     }
 
     entryMap.set(evt.xrayImageId, {
@@ -185,6 +236,18 @@ export function deriveCurrentDistribution(
   const entries = Array.from(entryMap.values());
   const now = new Date().toISOString();
 
+  // One aggregated report per derivation (not per event): a log permanently
+  // containing illegal events would otherwise crowd the error ring buffer on
+  // every slow-path derive.
+  if (droppedEventIds.size > 0) {
+    logError(
+      "distribution:derive",
+      new Error(
+        `Dropped ${droppedEventIds.size} illegal event(s) targeting replaced row(s): ${[...droppedImageIds].join(", ")}.`
+      )
+    );
+  }
+
   // Derive per-employee quotas from assignment events.
   // Daily quota = employee sample count / days from first assignment until 3 days before month end.
   const quotaMap: Record<string, EmployeeQuota> = {};
@@ -193,7 +256,9 @@ export function deriveCurrentDistribution(
   const latestQuotaEventPerEmployee: Record<string, DistributionEvent> = {};
 
   for (const evt of log.events) {
-    if (evt.eventType === "assigned") {
+    // Skip events the fold guard dropped (illegal assigned-after-replaced):
+    // counting them would inflate that employee's sampleCount / dailyQuota.
+    if (evt.eventType === "assigned" && !droppedEventIds.has(evt.eventId)) {
       if (!firstAssignEventPerEmployee[evt.assignedTo]) {
         firstAssignEventPerEmployee[evt.assignedTo] = evt;
       }
@@ -229,8 +294,11 @@ export function deriveCurrentDistribution(
 
   return {
     monthFolderName: log.monthFolderName,
+    deriveVersion: DERIVE_VERSION,
     derivedAt: now,
-    totalAssigned: entries.length,
+    // Live (non-replaced) entries only. Invariant:
+    // totalPending + totalCompleted + count(status === "replacement-requested") === totalAssigned.
+    totalAssigned: entries.filter((e) => e.status !== "replaced").length,
     totalCompleted: entries.filter((e) => e.status === "completed").length,
     totalReplaced: entries.filter((e) => e.status === "replaced").length,
     totalPending: entries.filter((e) => e.status === "pending").length,

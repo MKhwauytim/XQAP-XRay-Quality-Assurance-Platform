@@ -91,6 +91,50 @@ export const DEFAULT_LABELS = {
   xray_results_no_months: "لا توجد أشهر معالجة لعرض نتائج فحص الأشعة.",
   xray_results_no_rows:   "لا توجد نتائج فحص محفوظة للشهر المحدد.",
 
+  // Population — sampling & processing guards
+  sample_redraw_blocked: "لا يمكن إعادة سحب العينة بعد بدء التوزيع: يوجد سجل توزيع فعّال لهذا الشهر، وإعادة السحب ستؤدي إلى فقدان التعيينات والإجابات المسجلة.",
+  population_reprocess_confirm_title: "إعادة معالجة شهر يحتوي عينة",
+  population_reprocess_confirm_message: "توجد عينة مسحوبة لهذا الشهر بالفعل. حفظ نتائج المعالجة الجديدة سيجعل العينة الحالية غير متطابقة مع المجتمع الجديد. هل تريد المتابعة والحفظ؟",
+  population_reprocess_cancelled: "تم إلغاء الحفظ — بقيت بيانات الشهر السابقة دون تغيير.",
+
+  // Month close-out / lock (Tier-1 Item A)
+  archive_close_month_btn:          "إقفال الشهر",
+  archive_reopen_month_btn:         "إعادة فتح الشهر",
+  archive_month_closed_badge:       "مُقفل",
+  archive_close_month_confirm:      "سيتم إقفال الشهر ومنع أي تعديل على بياناته (العينات، التوزيع، الإجابات، الإحالات). هل أنت متأكد؟",
+  archive_reopen_month_confirm:     "سيتم إعادة فتح الشهر والسماح بالتعديل مجدداً. يتطلب ذكر السبب.",
+  archive_close_note_placeholder:   "ملاحظة الإقفال (اختياري)",
+  archive_reopen_reason_placeholder: "سبب إعادة الفتح (إلزامي)",
+  msg_month_closed_write_blocked:   "هذا الشهر مُقفل — لا يمكن حفظ أي تعديل. تواصل مع مدير النظام لإعادة فتحه.",
+  msg_month_closed_banner:          "هذا الشهر مُقفل. البيانات للعرض فقط.",
+
+  // User deletion guard (Tier-1 Item B)
+  um_delete_checking:            "جاري التحقق من تعيينات المستخدم...",
+  um_delete_blocked_assignments: "لا يمكن حذف المستخدم — لديه عينات نشطة معيّنة له. أعد توزيع عيناته أولاً من تبويب المجتمع والعينات.",
+  um_delete_blocked_month_line:  "{month}: {count} عينة نشطة",
+  um_delete_orphan_answers_warn: "تنبيه: توجد ملفات إجابات محفوظة لهذا المستخدم في أشهر سابقة. ستبقى محفوظة للتقارير ولن تُحذف.",
+  um_delete_no_workspace_warn:   "لا يوجد مجلد عمل متصل — تعذر التحقق من تعيينات المستخدم قبل الحذف.",
+
+  // Referral approval idempotency (Tier-1 Item C)
+  msg_request_already_reviewed: "تمت مراجعة هذا الطلب مسبقاً — تم تحديث القائمة.",
+  msg_referral_stale_ownership: "تعذر الاعتماد — بعض العينات لم تعد معيّنة للموظف الطالب: {ids}. حدّث الصفحة وراجع الطلب.",
+  msg_referral_decision_retry:  "تم نقل العينات لكن تعذر حفظ قرار الاعتماد — اضغط اعتماد مرة أخرى لإكمال التسجيل (لن يتكرر النقل).",
+
+  // Reopen-for-correction (Tier-1 Item D)
+  ip_reopen_btn:                "إعادة فتح للتصحيح",
+  ip_reopen_reason_placeholder: "سبب إعادة الفتح (إلزامي)",
+  ip_reopen_confirm:            "سيتم إرجاع هذه الإجابة إلى مسودة ليتمكن الموظف من تصحيحها. يُسجل هذا الإجراء في سجل النظام.",
+  msg_reopen_done:              "تمت إعادة فتح الإجابة للتصحيح.",
+  feature_ew_reopen_answer:     "إعادة فتح الإجابات المقدمة",
+
+  // Backup coverage + restore semantics (Tier-1 Items F/G)
+  backup_import_users_labels_btn:  "استيراد المستخدمين والتسميات من النسخة",
+  backup_import_users_labels_done: "تم استيراد المستخدمين والصلاحيات والتسميات من النسخة الاحتياطية.",
+  backup_restore_merge_notice:     "ملاحظة: الاستعادة تُعيد كتابة الملفات الموجودة في النسخة فقط، ولا تحذف الملفات التي أُنشئت بعدها. البيانات الأحدث من النسخة ستبقى كما هي. تُنشأ نسخة رجوع تلقائية قبل الاستعادة.",
+
+  // refreshDistribution guard (Tier-1 Item H)
+  msg_distribution_refresh_no_sample: "تعذر تحديث حالة التوزيع — لم يتم العثور على عينة محفوظة لهذا الشهر.",
+
   // KPIs
   kpi_population:      "إجمالي المجتمع",
   kpi_sample:          "إجمالي العينة",
@@ -146,6 +190,11 @@ function persistLabels(): void {
 
 export function getLabels(): Labels {
   return { ...DEFAULT_LABELS, ...customLabels } as Labels;
+}
+
+/** Read-only copy of the current custom-label overrides (Tier-1 Item F: backup snapshot). */
+export function getCustomLabelOverrides(): Partial<Record<LabelKey, string>> {
+  return { ...customLabels };
 }
 
 export function isCustomized(key: LabelKey): boolean {
