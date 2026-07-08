@@ -4,7 +4,7 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
-## v42.31 — 2026-07-08 — C3 (Batch 2): guard the first-run card against short viewports
+## v42.35 — 2026-07-08 — C3 (Batch 2): guard the first-run card against short viewports
 
 **File:** `src/data/workspace/WorkspaceGate.css`
 
@@ -27,7 +27,7 @@ heights it is unchanged.
 }
 ```
 
-## v42.30 — 2026-07-08 — C3 (Batch 2): first-run checklist styles
+## v42.34 — 2026-07-08 — C3 (Batch 2): first-run checklist styles
 
 **File:** `src/data/workspace/WorkspaceGate.css`
 
@@ -53,7 +53,7 @@ hex fallbacks, mirroring the rest of this file.
 .firstrun-checklist { position: fixed; inset-inline-end: 24px; bottom: 96px; /* …see file… */ }
 ```
 
-## v42.29 — 2026-07-08 — C3 (Batch 2): first-run admin checklist in WorkspaceGate
+## v42.33 — 2026-07-08 — C3 (Batch 2): first-run admin checklist in WorkspaceGate
 
 **File:** `src/data/workspace/WorkspaceGate.tsx`
 
@@ -90,7 +90,7 @@ supporting imports (`Check`/`Keyboard`/`Rocket`/`X` icons, `useLabels`, `listMon
 Plus a new `FirstRunChecklist` component + module helpers (`readDismissed`, `navigateToTab`,
 `hasNonDefaultUser`, `permissionsAreCustomized`) appended to the file.
 
-## v42.28 — 2026-07-08 — C3 (Batch 2): add first-run admin-checklist label keys
+## v42.32 — 2026-07-08 — C3 (Batch 2): add first-run admin-checklist label keys
 
 **File:** `src/data/labels/labelsStore.ts`
 
@@ -113,7 +113,7 @@ user-facing string routes through an admin-overridable label key.
 } as const;
 ```
 
-## v42.27 — 2026-07-08 — C2 (Batch 2): wire the تقرير الإدارة Reports card live (remove "قريباً")
+## v42.31 — 2026-07-08 — C2 (Batch 2): wire the تقرير الإدارة Reports card live (remove "قريباً")
 
 **File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
 
@@ -185,7 +185,7 @@ now-unused `Settings2` icon from the `lucide-react` import (the card's old tag u
 
 ---
 
-## v42.26 — 2026-07-08 — C2 (Batch 2): new management-report builder module
+## v42.30 — 2026-07-08 — C2 (Batch 2): new management-report builder module
 
 **File:** `src/data/reporting/management/managementReport.ts` (new file)
 
@@ -208,7 +208,7 @@ accuracy table, priority actions list, data-quality footer.
 // See src/data/reporting/management/managementReport.ts — buildManagementReport / openManagementReport
 ```
 
-## v42.25 — 2026-07-08 — C2 (Batch 2): add management-report (تقرير الإدارة) label keys
+## v42.29 — 2026-07-08 — C2 (Batch 2): add management-report (تقرير الإدارة) label keys
 
 **File:** `src/data/labels/labelsStore.ts`
 
