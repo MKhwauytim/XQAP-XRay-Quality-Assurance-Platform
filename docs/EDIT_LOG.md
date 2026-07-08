@@ -4,6 +4,64 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.23 — 2026-07-08 — B4 (Batch 1) regression guard: scripts/check-hex-literals.mjs
+
+**File:** `scripts/check-hex-literals.mjs` (new)
+
+Adds the guard script called for by the approved plan's B4 acceptance criteria: without it the
+sweep decays over time (the original audit found the counts had *grown* since a prior sweep —
+287→310, 183→197 — because nothing stopped new raw hex from being reintroduced). Counts
+`#[0-9a-fA-F]{3,8}` occurrences in the four B4-swept files and fails (exit 1) if any file's count
+exceeds its committed post-sweep baseline (`EmployeeWorkspace.css`: 10, `Reports.css`: 23,
+`DataTable.css`: 3, `Population.css`: 16 — all pre-existing, documented `/* no-token: one-off */`
+literals plus one plain `#16A34A` box-shadow accent in `DataTable.css`). `--report` flag prints
+counts without failing.
+
+**File:** `package.json`
+
+**Before:**
+```json
+    "test": "vitest",
+    "test:run": "vitest run"
+```
+
+**After:**
+```json
+    "test": "vitest",
+    "test:run": "vitest run",
+    "check:hex-literals": "node scripts/check-hex-literals.mjs"
+```
+
+**File:** `.github/workflows/ci.yml`
+
+**Before:**
+```yaml
+      - name: Lint
+        run: npm run lint:ci
+
+      - name: Test
+        run: npm run test:run
+```
+
+**After:**
+```yaml
+      - name: Lint
+        run: npm run lint:ci
+
+      - name: Hex-literal regression guard (B4)
+        run: npm run check:hex-literals
+
+      - name: Test
+        run: npm run test:run
+```
+
+Verified the script fails correctly: appended a throwaway `color: #123456;` rule to
+`DataTable.css`, ran the script (exit 1, `REGRESSION` reported for that file), then reverted the
+throwaway change. `npm run lint`, `npm run check:hex-literals`, and `npm run test:run` all green
+(364/364) on the real (non-regressed) tree.
+
+---
+
 ## v42.22 — 2026-07-08 — B4 (Batch 1), file 4/4: hex-literal token sweep of Population.css
 
 **File:** `src/components/Sidebar/Tabs/Population/Population.css`

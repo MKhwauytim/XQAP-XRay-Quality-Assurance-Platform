@@ -1,8 +1,8 @@
 name: CI
 
 # Gate on push + PR: install (offline-safe now that `xlsx` is vendored, see D5) → typecheck →
-# lint → unit tests → production build. Any failing step blocks the job (and, once branch
-# protection requires this check, blocks the PR).
+# lint → hex-literal regression guard (B4) → unit tests → production build. Any failing step
+# blocks the job (and, once branch protection requires this check, blocks the PR).
 #
 # Node version pinned to match local dev (see `node --version` in the dev environment as of
 # this workflow's authoring). Caches the npm cache directory only (`cache: npm`), never
@@ -40,6 +40,9 @@ jobs:
 
       - name: Lint
         run: npm run lint:ci
+
+      - name: Hex-literal regression guard (B4)
+        run: npm run check:hex-literals
 
       - name: Test
         run: npm run test:run

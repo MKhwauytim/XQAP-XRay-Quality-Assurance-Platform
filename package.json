@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
     "test": "vitest",
-    "test:run": "vitest run"
+    "test:run": "vitest run",
+    "check:hex-literals": "node scripts/check-hex-literals.mjs"
   },
   "dependencies": {
     "hash-wasm": "^4.12.0",
