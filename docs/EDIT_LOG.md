@@ -4,6 +4,83 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.22 — 2026-07-08 — B4 (Batch 1), file 4/4: hex-literal token sweep of Population.css
+
+**File:** `src/components/Sidebar/Tabs/Population/Population.css`
+
+Same mechanical sweep, applied to `Population.css` (127 raw hex literals across the 3,358-line
+file — sweep only, no file split per plan scope). 111 replaced with `var(--token)` (including 7
+"Extended accents" tokens added in v42.18: `--c-gray-muted`, `--c-danger-strong`,
+`--c-danger-border-light`, `--c-info-strong`, `--c-info-border-light`, `--c-success-strong`,
+`--c-gray-800`; `--c-teal-deep` reused from the v42.20 Reports.css addition). 62 redundant
+`var(--X, var(--X))` self-fallbacks collapsed to `var(--X)`. 16 literals left as
+`/* no-token: one-off */`.
+
+**Before:**
+```css
+.population-page {
+  --population-primary:       var(--c-navy, #0E2444);
+  --population-primary-hover: var(--c-navy-2, #102C57);
+  --population-muted:         var(--c-ink-3, #50536F);
+  --population-border:        var(--c-border, #DDE6EF);
+  --population-success:       var(--c-success, #004030);
+  --population-warning:       var(--c-warning, #775000);
+  --population-error:         var(--c-danger, #9F1624);
+  --population-bg-card:       #ffffff;
+  --population-bg-light:      var(--c-surface-2, #F6F8FA);
+  --font-somar: "Somar Sans", "Segoe UI", Tahoma, Arial, sans-serif;
+}
+...
+.certscan-hl-btn.port {
+  background: #fff5f5;
+  color: #b91c1c;
+  border-color: #fecaca;
+}
+```
+
+**After:**
+```css
+.population-page {
+  --population-primary:       var(--c-navy);
+  --population-primary-hover: var(--c-navy-2);
+  --population-muted:         var(--c-ink-3);
+  --population-border:        var(--c-border);
+  --population-success:       var(--c-success);
+  --population-warning:       var(--c-warning);
+  --population-error:         var(--c-danger);
+  --population-bg-card:       var(--c-surface);
+  --population-bg-light:      var(--c-surface-2);
+  --font-somar: "Somar Sans", "Segoe UI", Tahoma, Arial, sans-serif;
+}
+...
+.certscan-hl-btn.port {
+  background: #fff5f5 /* no-token: one-off */;
+  color: var(--c-danger-strong);
+  border-color: #fecaca /* no-token: one-off */;
+}
+```
+
+Full hex → token mapping applied: `#fff`/`#ffffff`→`--c-surface`, `#F6F8FA`→`--c-surface-2`,
+`#FDE8EA`→`--c-danger-bg`, `#DDE6EF`→`--c-border`, `#E3F3ED`→`--c-success-bg`,
+`#DBEAFE`→`--c-info-bg`, `#f87171`→`--c-danger-border-light`, `#E8EEF6`→`--c-navy-soft`,
+`#9F1624`→`--c-danger`, `#98a2b3`→`--c-gray-muted`, `#60a5fa`→`--c-info-border-light`,
+`#b91c1c`→`--c-danger-strong`, `#FBF2DC`→`--c-warning-bg`, `#F4A4AC`→`--c-danger-border`,
+`#E5F5FB`→`--c-sky-light`, `#C2CEDC`→`--c-border-2`, `#775000`→`--c-warning`,
+`#333`→`--c-gray-800`, `#1d4ed8`→`--c-info-strong`, `#1E40AF`→`--c-info`,
+`#102C57`→`--c-navy-2`, `#0E2444`→`--c-navy`, `#027a48`→`--c-success-strong`,
+`#009ADE`→`--c-sky`, `#00695c`→`--c-teal-deep`, `#004030`→`--c-success`,
+`#E5B46E`→`--c-warning-border`, `#93C5FD`→`--c-info-border`, `#8BBEAA`→`--c-success-border`,
+`#8395AC`→`--c-ink-4`, `#263C58`→`--c-ink-2`, `#0B1F33`→`--c-ink`. Left as `no-token: one-off`:
+`#fff5f5`, `#fecaca`, `#fcd0cd`, `#f5f7fa`, `#f0fdf4`, `#eff6ff`, `#ef4444`, `#d97706`, `#bfdbfe`,
+`#b7d8cc`, `#7f1d1d`, `#64748b`, `#444`, `#3b82f6`, `#1e3a8a`, `#16a34a`. `npm run lint` and
+`npm run test:run` green (364/364); verified via preview `getComputedStyle` that
+`--c-danger-strong`, `--c-danger-border-light`, `--c-info-strong`, `--c-info-border-light`,
+`--c-gray-muted`, `--c-success-strong`, `--c-gray-800` resolve to their pre-sweep hex values, and
+confirmed the Population tab renders identically (`.population-page` computed `color` still
+`rgb(11, 31, 51)` = `#0B1F33`).
+
+---
+
 ## v42.21 — 2026-07-08 — B4 (Batch 1), file 3/4: hex-literal token sweep of DataTable.css
 
 **File:** `src/components/DataTable/DataTable.css`
