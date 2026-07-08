@@ -247,6 +247,89 @@ gzip, in line with the existing baseline).
 
 ---
 
+## v42.25 — 2026-07-08 — B6 (Batch 1) scaffold decision + consumption, file 1/4: EmployeeWorkspace.css
+
+**Plan deviation (documented per B6 sequencing: "token scaffold" step, done after B5 per the
+mandated B4 -> B6-scaffold -> B5 -> B6-consumption order):** the approved plan says to add a
+`--space-*` scale to `index.css` because "none exists today; all 104 tokens are color/brand". That
+is no longer accurate — `index.css` already declares a 4px-base spacing scale (`--sp-1: 4px` …
+`--sp-14: 56px`, lines ~105-108) that is *already consumed* by `App.css`, `Sidebar.css`,
+`Archive.css`, `ChangeLog.css`, `Settings.css`, `src/styles/primitives.css`, and partially by
+`EmployeeWorkspace.css`/`Reports.css` (60 existing `var(--sp-*)` usages found via grep before this
+pass). Adding a second, parallel `--space-*` scale would fragment the system instead of unifying
+it. **No new tokens added** — the B6 "scaffold" requirement is satisfied by the pre-existing
+`--sp-*` scale; this entry and the three that follow cover only the *consumption* pass.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/EmployeeWorkspace.css`
+
+Mechanical sweep via a scratch script: tokenizes each `padding`/`margin`/`gap` declaration's
+values (respecting parens, so `clamp()`/`calc()`/`var()` arguments are never touched), snaps any
+plain positive px value within ±2px of an `--sp-*` step to `var(--sp-N)`, and leaves the *entire
+original declaration* untouched with a trailing `/* no-scale */` comment when any value in it
+can't be snapped (negative values, values >2px from every step, or a value hidden inside an
+unparsed function call like `clamp(14px, 2.2vw, 32px)`) — never mixing tokens and raw px under one
+undocumented line. Result: 134 declarations fully converted to scale tokens (192 individual px
+values replaced), 8 declarations left with raw px + `/* no-scale */`.
+
+**Before:**
+```css
+.ew-split {
+  display: grid;
+  gap: 14px;
+  align-items: stretch;
+  min-height: 0;
+}
+...
+.ew-view-seg {
+  padding: 4px 14px;
+  height: 28px;
+  ...
+}
+.ew-empty {
+  padding: 56px 36px;
+  text-align: center;
+  ...
+}
+/* header padding: */
+  padding: clamp(14px, 2.2vw, 32px) clamp(12px, 2vw, 28px);
+...
+  margin-bottom: -2px;
+```
+
+**After:**
+```css
+.ew-split {
+  display: grid;
+  gap: var(--sp-4);
+  align-items: stretch;
+  min-height: 0;
+}
+...
+.ew-view-seg {
+  padding: var(--sp-1) var(--sp-4);
+  height: 28px;
+  ...
+}
+.ew-empty {
+  padding: 56px 36px /* no-scale */;
+  text-align: center;
+  ...
+}
+/* header padding: */
+  padding: clamp(14px, 2.2vw, 32px) clamp(12px, 2vw, 28px) /* no-scale */;
+...
+  margin-bottom: -2px /* no-scale */;
+```
+
+Note: some snaps move the rendered value by up to 2px (e.g. `6px`→`var(--sp-2)` = `8px`,
+`14px`→`var(--sp-4)` = `16px`) — this is the plan's explicitly accepted tolerance for B6 (unlike
+B4's zero-drift requirement), not a bug. Verified zero raw px remains outside `/* no-scale */`
+lines via `grep -E '^\s*(padding|margin|gap)[a-z-]*:\s*[^;]*px' EmployeeWorkspace.css | grep -v
+no-scale` → 0 matches. `npm run lint` and `npm run test:run` green (364/364); verified via preview
+that `--sp-1`/`--sp-2`/`--sp-4`/`--sp-5` resolve to `4px`/`8px`/`16px`/`20px` as expected.
+
+---
+
 ## v42.23 — 2026-07-08 — B4 (Batch 1) regression guard: scripts/check-hex-literals.mjs
 
 **File:** `scripts/check-hex-literals.mjs` (new)
