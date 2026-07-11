@@ -135,7 +135,9 @@ export const DEFAULT_SYSTEM_FIELDS: SystemField[] = [
   { key: "movementType", labelAr: "نوع الحركة", isRequired: false, dataType: "string" },
   { key: "reportNumber", labelAr: "رقم المحضر", isRequired: false, dataType: "string" },
   { key: "targetedByRiskEngine", labelAr: "مستهدف محرك المخاطر", isRequired: false, dataType: "string" },
-  { key: "riskMessage", labelAr: "رسالة المخاطر", isRequired: false, dataType: "string" }
+  { key: "riskMessage", labelAr: "رسالة المخاطر", isRequired: false, dataType: "string" },
+  { key: "levelOneEmployee", labelAr: "موظف المستوى الأول", isRequired: false, dataType: "string" },
+  { key: "levelTwoEmployee", labelAr: "موظف المستوى الثاني", isRequired: false, dataType: "string" }
 ];
 
 export const DEFAULT_MAPPING_TEMPLATE: MappingTemplate = {

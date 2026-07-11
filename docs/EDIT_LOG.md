@@ -4,6 +4,34 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.49 — 2026-07-12 — A1 (feature-batch): expose levelOneEmployee/levelTwoEmployee as mappable system fields
+
+**File:** `src/data/population/populationConfig.ts`
+
+`levelOneEmployee`/`levelTwoEmployee` already exist as real data fields on `PreparedPopulationRow`
+(`src/data/population/populationTypes.ts`) — populated from BI enrichment
+(`src/components/Sidebar/Tabs/Population/biData/`) — but were never exposed as target fields in the
+column-mapping UI (`MappingSettingsModal`'s "mappings" tab iterates `config.systemFields`). Added two
+new optional `SystemField` entries so an admin can configure risk/BI column aliases for them like any
+other field. Left unmapped by default per plan (`docs/audit/feature-batch-2026-07-08/plan.md`, Batch
+A item 1): no entries added to `DEFAULT_MAPPING_TEMPLATE.columnMappings` or `biColumnMappings`.
+
+**Before:**
+```ts
+  { key: "targetedByRiskEngine", labelAr: "مستهدف محرك المخاطر", isRequired: false, dataType: "string" },
+  { key: "riskMessage", labelAr: "رسالة المخاطر", isRequired: false, dataType: "string" }
+];
+```
+
+**After:**
+```ts
+  { key: "targetedByRiskEngine", labelAr: "مستهدف محرك المخاطر", isRequired: false, dataType: "string" },
+  { key: "riskMessage", labelAr: "رسالة المخاطر", isRequired: false, dataType: "string" },
+  { key: "levelOneEmployee", labelAr: "موظف المستوى الأول", isRequired: false, dataType: "string" },
+  { key: "levelTwoEmployee", labelAr: "موظف المستوى الثاني", isRequired: false, dataType: "string" }
+];
+```
+
 ## v42.48 — 2026-07-12 — fix(demo): seed `qualityImageResult` so demo KPIs render non-zero (QA hardening-2026-07-08, Rework Item 1)
 
 **File:** `src/data/workspace/demoWorkspace.ts`
