@@ -4,6 +4,178 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.40 — 2026-07-11 — D2 (Batch 3): XSS regression tests for all report builders + shared payload fixture
+
+Adds a shared payload corpus and one XSS test file per report builder, asserting injected markup
+(via port names, employee display names, and answer/label fields) is escaped in the output and never
+renders as a live `<script>`/event-handler/attribute break. All test files import the SAME corpus so
+new builders adopt it by import, not copy-paste.
+
+**File:** `src/data/reporting/xssPayloads.ts` (new)
+
+Pure data + framework-agnostic detector (NO test-framework imports, so it is safe under `src/`
+next to production code and type-checks under `tsc -b`):
+
+```ts
+export const XSS_MARKER = "XSSPROBE";
+
+export const XSS_PAYLOADS = {
+  scriptTag: `<script>alert('XSSPROBE')</script>`,
+  imgOnerror: `"><img src=x onerror="alert('XSSPROBE')">`,
+  svgOnload: `<svg onload="alert('XSSPROBE')">`,
+  attrBreak: `"><b onmouseover="alert('XSSPROBE')">XSSPROBE</b>`,
+  structureBreak: `</td></table><marquee>XSSPROBE</marquee>`,
+} as const;
+
+export const XSS_PAYLOAD_LIST: readonly string[] = Object.values(XSS_PAYLOADS);
+export const XSS_COMBINED: string = XSS_PAYLOAD_LIST.join(" ");
+
+// Raw live-markup fragments distinct from the builders' own chrome (deck nav <script>
+// IIFEs, onclick="window.print()", the ZATCA logo's onerror) — a match is a real injection.
+const LIVE_FRAGMENTS: readonly string[] = [
+  "<script>alert",
+  "<img src=x onerror",
+  "<svg onload",
+  "<b onmouseover",
+  "<marquee>",
+];
+
+export function findLiveInjection(html: string): string | null {
+  for (const frag of LIVE_FRAGMENTS) {
+    if (html.includes(frag)) return frag;
+  }
+  return null;
+}
+```
+
+**File:** `src/components/Sidebar/Tabs/Population/reporting/reportHtmlBuilder.xss.test.ts` (new)
+
+Injects the corpus via `PopulationReportData` fields (`title`, port names / xray-ids in the
+BI↔Risk comparison rows, status message, sheet names, BI-fill field names) into
+`buildPopulationReportHtml`; asserts `findLiveInjection` is null, the marker is present (field
+rendered), `&lt;script&gt;` is present (the `escapeHtml` path fired), and no attribute break-out.
+
+**File:** `src/data/reporting/executiveBuilders.xss.test.ts` (new)
+
+One file covering all four `ExecutiveReportInput`-based builders (they share the identical input
+type, so a single shared `makeMaliciousExecInput()` avoids quadruplicating ~70 lines of scaffolding),
+one `describe` block per builder:
+- `buildExecutiveReport` (executive document path).
+- `buildExecutiveDeck` (v1 deck) — regression for the v42.39 `periodId` fix: a malicious
+  `monthFolderName` drives `periodId` into the raw-HTML `titleSlide`.
+- `buildExecutiveDeckV2` (deck2) — also asserts the deck's OWN legitimate `<script>` nav chrome is
+  not mistaken for an injection.
+- `buildManagementReport` (C2 management report).
+
+The shared input injects the corpus via port names (`populationRows[].portName`, guaranteed to
+render), reviewer display names (`employeeDisplayNames` map, wired through a submitted answer +
+distribution entry so a reviewer profile renders), and answer/label fields (`notes` on the rows).
+Every block asserts `findLiveInjection` is null and the escaped marker is present.
+
+## v42.39 — 2026-07-11 — D2 (Batch 3): close two report-builder escaping gaps found in the XSS audit
+
+D2 production audit swept `src/data/reporting/executive/**`, the deck2 builder, and the
+management report builder for template-literal interpolations of *model/user* data that bypass
+`esc()`/`escText()`. Confirmed escaped/safe: all port names (`esc(p.name)`), stage labels, slide
+headlines/eyebrows/subheads (routed through `slideShell`/`slide()`→`esc()`), chart labels
+(`escText()` in `ui/charts.ts`), the executive document shell (`viewer.ts` uses `esc(monthLabel)`),
+and every value in the management report. The v1-deck agenda (`deck/slides.ts:106-107`, flagged in
+the approved plan for confirmation) is **provably static** — its `title`/`blurb` come from a
+hard-coded `DeckSection[]` registry and `range` from numeric `padNum`. Two real gaps were found
+and closed:
+
+**File:** `src/data/reporting/executive/document/partScope.ts`
+
+`model.exclusions.note` was interpolated raw into the data-quality list, while the sibling
+`partRisk.ts:110` escapes the identical value via its local `escapeText`. The value is a static
+model string today, but the inconsistency is a latent gap — routed through `esc()` (re-exported
+from `./shared`) for consistency and defense-in-depth.
+
+**Before:**
+```ts
+import {
+  executiveClose,
+  figure,
+  kpi,
+  kpiStrip,
+  noteBox,
+  page,
+  pageHeader,
+  panel,
+} from "./shared";
+```
+```ts
+          <li>${model.exclusions.note}</li>
+```
+
+**After:**
+```ts
+import {
+  esc,
+  executiveClose,
+  figure,
+  kpi,
+  kpiStrip,
+  noteBox,
+  page,
+  pageHeader,
+  panel,
+} from "./shared";
+```
+```ts
+          <li>${esc(model.exclusions.note)}</li>
+```
+
+**File:** `src/data/reporting/executive/deck/slides.ts`
+
+The v1 executive deck is the edition wired to the live "العرض التنفيذي" button
+(`Reports/index.tsx` imports `openExecutiveDeck` from `executive/deck`; deck2 is dev/preview only).
+Its `titleSlide` builds raw HTML directly (it does not go through the escaping `slide()` helper) and
+interpolated `model.summary.periodId` unescaped. `periodId` derives from the on-disk month-folder
+name — `periodIdFromFolder` returns the raw folder name when the `N-Month-YYYY` regex does not match
+— so a maliciously named month folder could inject live HTML into the deck. Routed through `esc()`.
+
+**Before:**
+```ts
+import {
+  cards,
+  emptyHero,
+  heroChart,
+  heroNumber,
+  kpiBand,
+  kpiTile,
+  miniTable,
+  numberedList,
+  slide,
+  split,
+  timeline,
+} from "./shared";
+```
+```ts
+    <div class="title-sub">تقرير شهر: ${model.summary.periodId}</div>
+```
+
+**After:**
+```ts
+import {
+  cards,
+  emptyHero,
+  esc,
+  heroChart,
+  heroNumber,
+  kpiBand,
+  kpiTile,
+  miniTable,
+  numberedList,
+  slide,
+  split,
+  timeline,
+} from "./shared";
+```
+```ts
+    <div class="title-sub">تقرير شهر: ${esc(model.summary.periodId)}</div>
+```
+
 ## v42.38 — 2026-07-08 — C1 (Batch 2): seed realistic demo data (month + sample + distribution + answers)
 
 **File:** `src/data/workspace/demoWorkspace.ts`

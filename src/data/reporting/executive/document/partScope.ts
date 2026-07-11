@@ -5,6 +5,7 @@ import type { ReportModel } from "../model/reportModel";
 import { donut, gauge, rankedBar, stackedBars } from "../ui/charts";
 import { fmtNum, fmtPct } from "../primitives";
 import {
+  esc,
   executiveClose,
   figure,
   kpi,
@@ -166,7 +167,7 @@ export function buildDataQualityExclusions(model: ReportModel, pageNo: string): 
       ${panel("نظرة على المعالجة", figure(stacked, { height: 210 }), { iconName: "chart" })}
       ${panel("ملاحظات جودة البيانات", `
         <ul class="doc-list">
-          <li>${model.exclusions.note}</li>
+          <li>${esc(model.exclusions.note)}</li>
           <li>${model.dataQuality.inspectorIdentityMapped ? "هوية المفتش مرتبطة عبر BI." : "هوية المفتش غير مرتبطة (لم تتم مطابقة BI) — تُعرض الدقة الفردية كحالة فارغة."}</li>
           <li>القيم الناقصة تُعرض "—" ولا تُحتسب كـ "0%".</li>
         </ul>`)}
