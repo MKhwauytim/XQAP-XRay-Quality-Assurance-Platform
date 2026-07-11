@@ -4,6 +4,52 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.52 — 2026-07-12 — A4 (feature-batch): restrict the referral-recipient picker to employee/supervisor
+
+**File:** `src/data/distribution/bulkAssignment.ts`
+
+`isAssignableSampleRole` already encodes the "who can receive assigned samples" rule (employee +
+supervisor only, excludes manager/guest/admin) for bulk auto-assignment, but was module-private.
+Exported it so `XrayReferrals.tsx`'s manual referral-recipient picker can reuse the exact same rule
+instead of duplicating the role list inline, per the plan's explicit decision (`plan.md` line 9:
+"just match the existing `isAssignableSampleRole` rule ... no new level-based hierarchy").
+
+**Before:**
+```ts
+function isAssignableSampleRole(user: ManagedLoginUser): boolean {
+  return user.role === "employee" || user.role === "supervisor";
+}
+```
+
+**After:**
+```ts
+export function isAssignableSampleRole(user: ManagedLoginUser): boolean {
+  return user.role === "employee" || user.role === "supervisor";
+}
+```
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx`
+
+`ReferralRequestModal`'s recipient `<select>` (id `ref-to-emp`) built its option list from every
+active user except the current one — including managers/admins/guests, who cannot legally receive an
+assigned sample (`isAssignableSampleRole` in the auto-assignment path already excludes them). Added
+the same filter so a referral can no longer be sent to a role that could never appear in a
+sample-assignment context.
+
+**Before:**
+```ts
+  const employees = readUserManagementState()
+    .users.filter((u) => u.isActive && u.username !== currentUser)
+    .sort((a, b) => a.displayName.localeCompare(b.displayName, "ar"));
+```
+
+**After:**
+```ts
+  const employees = readUserManagementState()
+    .users.filter((u) => u.isActive && u.username !== currentUser && isAssignableSampleRole(u))
+    .sort((a, b) => a.displayName.localeCompare(b.displayName, "ar"));
+```
+
 ## v42.51 — 2026-07-12 — A3 (feature-batch): short Latin month labels across every month-filter select
 
 Audited every month-related filter/selector in the app (grep for `listMonthFolders`/`MonthFolderInfo`/

@@ -6,7 +6,7 @@ import { getStageKey } from "../population/stageHelpers";
 import { hamiltonApportionment } from "../sampling/apportionment";
 import { createEventId, computeDaysRemainingForDeadline } from "./distributionLog";
 
-function isAssignableSampleRole(user: ManagedLoginUser): boolean {
+export function isAssignableSampleRole(user: ManagedLoginUser): boolean {
   return user.role === "employee" || user.role === "supervisor";
 }
 

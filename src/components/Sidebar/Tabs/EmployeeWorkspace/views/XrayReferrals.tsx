@@ -26,6 +26,7 @@ import {
   getReplacementCandidates,
   executeReplacement,
 } from "../../../../../data/distribution/replacement";
+import { isAssignableSampleRole } from "../../../../../data/distribution/bulkAssignment";
 import { loadPopulationConfig, type StageAliasMappings } from "../../../../../data/population/populationConfig";
 import { formatMonthFolderShortLabel } from "../../../../../data/population/monthFolder";
 import {
@@ -1111,7 +1112,7 @@ function ReferralRequestModal({
   );
 
   const employees = readUserManagementState()
-    .users.filter((u) => u.isActive && u.username !== currentUser)
+    .users.filter((u) => u.isActive && u.username !== currentUser && isAssignableSampleRole(u))
     .sort((a, b) => a.displayName.localeCompare(b.displayName, "ar"));
 
   const canSubmit = toEmployee.trim() !== "" && reason.trim() !== "" && !submitting;
