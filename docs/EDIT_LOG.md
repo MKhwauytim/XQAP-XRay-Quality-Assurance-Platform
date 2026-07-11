@@ -4,6 +4,169 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.50 — 2026-07-12 — A2 (feature-batch): curated browse-view defaults for risk-raw/bi-raw/population
+
+**File:** `src/components/Sidebar/Tabs/Population/index.tsx`
+
+Ground truth from the user's real workspace screenshot (`docs/audit/feature-batch-2026-07-08/plan.md`):
+the "تحليل المخاطر" (risk-raw) browse view had no curated default — it fell back to a generic "first 12
+non-base columns" heuristic that actively *excluded* useful fields like `stage`/`xrayImageId` because
+they happened to already be in the population-oriented `BROWSE_COLUMNS` base list. Added two curated
+8/7-column default key lists (`RISK_RAW_DEFAULT_COLUMN_KEYS`, `BI_RAW_DEFAULT_COLUMN_KEYS`, the BI one
+omitting `stage` per the plan since `NormalizedBiRow` has no stage field) and wired them into
+`defaultVisibleColumns()` (visibility) and a new `defaultColumnOrderKeys()` helper (left-to-right
+order, consumed by the `loadBrowseRows` effect in place of the raw insertion-order fallback) — both
+gracefully fall back to the old generic behavior if a dataset has zero rows so the curated keys never
+appear as available columns. Mirrored the same 8-column set/order into `BROWSE_COLUMNS` itself for the
+"المجتمع النهائي" (population) view's default (added a new `portType` base entry; flipped
+`certScanStatus`/`_monthFolder` to non-default, `xrayLevelTwoResult`/`plateOrContainerNumber` to
+default, matching "exactly these 8 columns" per the ground truth). Added `RAW_COLUMN_LABELS` entries
+for `entryDate` (risk-only field — its own alias list literally is `["تاريخ الدخول"]`, distinct from
+`xrayEntryDate`'s "تاريخ دخول الأشعة") and BI-only `levelOneResult`/`levelTwoResult`, so the new dynamic
+columns render an Arabic header instead of falling back to the raw English key.
+
+**Before:**
+```ts
+const BROWSE_COLUMNS: { key: string; label: string; default: boolean }[] = [
+  { key: "xrayImageId",           label: "معرف الأشعة",          default: true  },
+  { key: "portName",              label: "المنفذ",               default: true  },
+  { key: "stage",                 label: "المستوى",              default: true  },
+  { key: "certScanStatus",        label: "CertScan",             default: true  },
+  { key: "xrayLevelOneResult",    label: "نتيجة المستوى 1",      default: true  },
+  { key: "xrayLevelTwoResult",    label: "نتيجة المستوى 2",      default: false },
+  { key: "xrayEntryDate",         label: "تاريخ الدخول",         default: false },
+  { key: "declarationNumber",     label: "رقم البيان",           default: false },
+  { key: "plateOrContainerNumber",label: "رقم اللوحة/الحاوية",   default: false },
+  { key: "movementType",          label: "نوع الحركة",           default: false },
+  { key: "biEnrichmentStatus",    label: "حالة BI",              default: false },
+  { key: "_monthFolder",          label: "الشهر المصدر",         default: true  },
+];
+```
+```ts
+  levelOneEmployee: "موظف المستوى الأول",
+  movementType: "نوع الحركة",
+```
+```ts
+function defaultVisibleColumns(
+  dataset: BrowseDatasetKind,
+  columns: BrowseColumn[]
+): Set<string> {
+  if (dataset === "population" || dataset === "sample") {
+    return new Set(columns.filter((column) => column.default).map((column) => column.key));
+  }
+
+  const rawKeys = columns
+    .filter((column) => !column.key.startsWith("_") && !BROWSE_COLUMNS.some((base) => base.key === column.key))
+    .slice(0, 12)
+    .map((column) => column.key);
+
+  return new Set([...rawKeys, "_monthFolder"]);
+}
+```
+```ts
+        const nextColumns = buildBrowseColumns(nextRows);
+        const datasetPreset = browsePresetRef.current?.browseData[dataset];
+        const nextOrder = mergeColumnOrder(
+          datasetPreset?.columnOrder,
+          nextColumns.map((column) => column.key)
+        );
+```
+
+**After:**
+```ts
+const BROWSE_COLUMNS: { key: string; label: string; default: boolean }[] = [
+  { key: "stage",                 label: "المستوى",              default: true  },
+  { key: "xrayImageId",           label: "معرف الأشعة",          default: true  },
+  { key: "xrayEntryDate",         label: "تاريخ الدخول",         default: true  },
+  { key: "portType",              label: "نوع المنفذ",           default: true  },
+  { key: "portName",              label: "المنفذ",               default: true  },
+  { key: "xrayLevelOneResult",    label: "نتيجة المستوى 1",      default: true  },
+  { key: "xrayLevelTwoResult",    label: "نتيجة المستوى 2",      default: true  },
+  { key: "plateOrContainerNumber",label: "رقم اللوحة/الحاوية",   default: true  },
+  { key: "certScanStatus",        label: "CertScan",             default: false },
+  { key: "declarationNumber",     label: "رقم البيان",           default: false },
+  { key: "movementType",          label: "نوع الحركة",           default: false },
+  { key: "biEnrichmentStatus",    label: "حالة BI",              default: false },
+  { key: "_monthFolder",          label: "الشهر المصدر",         default: false },
+];
+
+// Curated defaults (Batch A / A2) — ground truth from the user's real workspace screenshot.
+// risk-raw's own field is `entryDate` ("تاريخ الدخول") — distinct from population/BI's
+// `xrayEntryDate` ("تاريخ دخول الأشعة"). BI has no `stage` field, so its set drops that column.
+const RISK_RAW_DEFAULT_COLUMN_KEYS: string[] = [
+  "stage", "xrayImageId", "entryDate", "portType", "portName",
+  "xrayLevelOneResult", "xrayLevelTwoResult", "plateOrContainerNumber"
+];
+const BI_RAW_DEFAULT_COLUMN_KEYS: string[] = [
+  "xrayImageId", "xrayEntryDate", "portType", "portName",
+  "levelOneResult", "levelTwoResult", "plateOrContainerNumber"
+];
+```
+```ts
+  levelOneEmployee: "موظف المستوى الأول",
+  entryDate: "تاريخ الدخول",
+  levelOneResult: "نتيجة المستوى 1",
+  levelTwoResult: "نتيجة المستوى 2",
+  movementType: "نوع الحركة",
+```
+```ts
+function curatedDefaultKeys(dataset: BrowseDatasetKind): string[] {
+  if (dataset === "risk-raw") return RISK_RAW_DEFAULT_COLUMN_KEYS;
+  if (dataset === "bi-raw") return BI_RAW_DEFAULT_COLUMN_KEYS;
+  return [];
+}
+
+function defaultVisibleColumns(
+  dataset: BrowseDatasetKind,
+  columns: BrowseColumn[]
+): Set<string> {
+  if (dataset === "population" || dataset === "sample") {
+    return new Set(columns.filter((column) => column.default).map((column) => column.key));
+  }
+
+  const curated = curatedDefaultKeys(dataset);
+  if (curated.length > 0) {
+    const availableKeys = new Set(columns.map((column) => column.key));
+    const matchedCurated = curated.filter((key) => availableKeys.has(key));
+    if (matchedCurated.length > 0) {
+      return new Set(matchedCurated);
+    }
+  }
+
+  const rawKeys = columns
+    .filter((column) => !column.key.startsWith("_") && !BROWSE_COLUMNS.some((base) => base.key === column.key))
+    .slice(0, 12)
+    .map((column) => column.key);
+
+  return new Set([...rawKeys, "_monthFolder"]);
+}
+
+// Places curated keys first (in curated order), then appends whatever else is available — only
+// takes effect when no per-dataset order has been saved to a preset yet (see mergeColumnOrder).
+function defaultColumnOrderKeys(
+  dataset: BrowseDatasetKind,
+  columns: BrowseColumn[]
+): string[] {
+  const curated = curatedDefaultKeys(dataset);
+  const availableKeys = columns.map((column) => column.key);
+  if (curated.length === 0) {
+    return availableKeys;
+  }
+
+  const curatedPresent = curated.filter((key) => availableKeys.includes(key));
+  const remaining = availableKeys.filter((key) => !curatedPresent.includes(key));
+  return [...curatedPresent, ...remaining];
+}
+```
+```ts
+        const nextColumns = buildBrowseColumns(nextRows);
+        const datasetPreset = browsePresetRef.current?.browseData[dataset];
+        const nextOrder = mergeColumnOrder(
+          datasetPreset?.columnOrder,
+          defaultColumnOrderKeys(dataset, nextColumns)
+        );
+```
+
 ## v42.49 — 2026-07-12 — A1 (feature-batch): expose levelOneEmployee/levelTwoEmployee as mappable system fields
 
 **File:** `src/data/population/populationConfig.ts`
