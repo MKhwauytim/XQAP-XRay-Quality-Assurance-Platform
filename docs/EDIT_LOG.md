@@ -123,6 +123,49 @@ button's `disabled` prop. Fixed by deriving `disabled` from the already-ticking
 // After:  disabled={lockoutUntil !== null && lockoutSecondsLeft > 0}
 ```
 
+## v42.45 — 2026-07-11 — E1 (Batch 5): adopt useFocusTrap in EmployeeWorkspace dialogs + icon-button aria-labels
+
+Adopts the shared hook in the four EmployeeWorkspace modal dialogs and adds accessible names to
+two icon-only dismiss buttons that had none.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/ReviewModal.tsx`
+
+Whole-component modal (mounts only when open). Added
+`const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onClose });` and `ref={dialogRef}`
+on the `role="dialog"` backdrop. Previously no trap and no Escape handling.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/RequestList.tsx`
+
+The bulk-confirm modal is rendered inline inside the always-mounted list, so the trap is gated:
+`const bulkDialogRef = useFocusTrap<HTMLDivElement>({ onEscape: () => setBulkAction(null), enabled: bulkAction !== null });`
+with `ref={bulkDialogRef}` on the `role="dialog"` backdrop. Also added `aria-label="إغلاق"` to the
+icon-only `<X>` dismiss button on the bulk-result banner (previously had no accessible name).
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx`
+
+Two whole-component modals — `ReferralRequestModal` and `ReplacementDialog` — each gained
+`const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onClose });` and `ref={dialogRef}` on
+their `role="dialog"` backdrops. Also added `aria-label="إغلاق"` to the icon-only `<X>` dismiss
+button on the status-message banner (previously had no accessible name). The template-reload
+button in `QueueToolbar` already had both `title` and `aria-label`; unchanged.
+
+**Before (representative — each dialog):**
+```tsx
+return (
+  <div className="ew-modal-backdrop" role="dialog" aria-modal="true">
+    ...
+    <button ... onClick={() => setStatusMsg(null)}><X size={14} /></button>
+```
+
+**After:**
+```tsx
+const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onClose });
+return (
+  <div ref={dialogRef} className="ew-modal-backdrop" role="dialog" aria-modal="true">
+    ...
+    <button ... aria-label="إغلاق" onClick={() => setStatusMsg(null)}><X size={14} /></button>
+```
+
 ## v42.42 — 2026-07-11 — D3 (Batch 3): import-mapping edge-case tests (column-hint resolution)
 
 D3's target is `buildColumnHintsFromRows` — the function that resolves a workbook's actual Excel

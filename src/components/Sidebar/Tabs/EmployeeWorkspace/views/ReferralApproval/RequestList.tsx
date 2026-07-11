@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
+import { useFocusTrap } from "../../../../../../hooks/useFocusTrap";
 import RequestCard, { isReferral } from "./RequestCard";
 import type { ReferralRequest, ReplacementRequest } from "../../../../../../data/referral/referralTypes";
 import type { DistributionEntry } from "../../../../../../data/distribution/distributionTypes";
@@ -27,6 +28,12 @@ export default function RequestList({ requests, bulkEnabled, userDisplayMap, sam
   const [bulkNotes, setBulkNotes] = useState("");
   const [bulkResult, setBulkResult] = useState<BulkOutcome[] | null>(null);
   const [bulkRunning, setBulkRunning] = useState(false);
+
+  // Focus-trap for the inline bulk-confirm modal (gated on bulkAction).
+  const bulkDialogRef = useFocusTrap<HTMLDivElement>({
+    onEscape: () => setBulkAction(null),
+    enabled: bulkAction !== null,
+  });
 
   // Bug #4: selection only makes sense on the pending queue — drop it whenever
   // the view switches to a decided (non-bulk) filter.
@@ -79,7 +86,7 @@ export default function RequestList({ requests, bulkEnabled, userDisplayMap, sam
         <div className={bulkResult.every((o) => o.ok) ? "ew-msg-ok" : "ew-msg-error"} role="status">
           {bulkResult.filter((o) => o.ok).length} نجحت، {bulkResult.filter((o) => !o.ok).length} فشلت
           {bulkResult.some((o) => !o.ok) && `: ${bulkResult.filter((o) => !o.ok).map((o) => o.error).join(" — ")}`}
-          <button type="button" style={{ float: "left", background: "none", border: "none", cursor: "pointer" }} onClick={() => setBulkResult(null)}>
+          <button type="button" aria-label="إغلاق" style={{ float: "left", background: "none", border: "none", cursor: "pointer" }} onClick={() => setBulkResult(null)}>
             <X size={14} />
           </button>
         </div>
@@ -103,7 +110,7 @@ export default function RequestList({ requests, bulkEnabled, userDisplayMap, sam
       ))}
 
       {bulkAction && (
-        <div className="ew-modal-backdrop" role="dialog" aria-modal="true">
+        <div ref={bulkDialogRef} className="ew-modal-backdrop" role="dialog" aria-modal="true">
           <div className="ew-replace-modal">
             <div className="ew-replace-header">
               <h3>{bulkAction === "approve" ? `تأكيد الموافقة على ${selectedRequests.length} طلب` : `تأكيد رفض ${selectedRequests.length} طلب`}</h3>

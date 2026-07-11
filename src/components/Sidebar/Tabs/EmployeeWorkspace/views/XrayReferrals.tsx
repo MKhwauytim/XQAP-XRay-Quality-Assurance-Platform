@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { X, AlertTriangle, RotateCw } from "lucide-react";
+import { useFocusTrap } from "../../../../../hooks/useFocusTrap";
 import { readSession } from "../../../../../auth/authSession";
 import { PageHeader } from "../../../../../components/PageHeader/PageHeader";
 import { logRejection } from "../../../../../data/storage/errorLogger";
@@ -758,6 +759,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           {statusMsg.text}
           <button
             type="button"
+            aria-label="إغلاق"
             style={{ float: "left", background: "none", border: "none", cursor: "pointer" }}
             onClick={() => setStatusMsg(null)}
           ><X size={14} /></button>
@@ -1101,6 +1103,7 @@ function ReferralRequestModal({
   const [reason, setReason]         = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onClose });
   const entriesById = useMemo(
     () => new Map(entries.map((entry) => [entry.xrayImageId, entry])),
     [entries]
@@ -1119,7 +1122,7 @@ function ReferralRequestModal({
   }
 
   return (
-    <div className="ew-modal-backdrop" role="dialog" aria-modal="true">
+    <div ref={dialogRef} className="ew-modal-backdrop" role="dialog" aria-modal="true">
       <div className="ew-replace-modal">
         <div className="ew-replace-header">
           <div>
@@ -1341,6 +1344,7 @@ function ReplacementDialog({
     state.recommended.length > 0 ? "recommended" : "all"
   );
   const [reason, setReason] = useState("");
+  const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onClose });
   const rows = tab === "recommended" ? state.recommended : state.all;
   const stageLabel = formatStageLabel(state.entry.row.stage, stageMappings);
   const reasonTrimmed = reason.trim();
@@ -1348,7 +1352,7 @@ function ReplacementDialog({
   const isRecommended = tab === "recommended";
 
   return (
-    <div className="ew-modal-backdrop" role="dialog" aria-modal="true">
+    <div ref={dialogRef} className="ew-modal-backdrop" role="dialog" aria-modal="true">
       <div className="ew-replace-modal">
         <div className="ew-replace-header">
           <div>
