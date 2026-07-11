@@ -4,6 +4,117 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.42 — 2026-07-11 — D3 (Batch 3): import-mapping edge-case tests (column-hint resolution)
+
+D3's target is `buildColumnHintsFromRows` — the function that resolves a workbook's actual Excel
+column headers against `PopulationConfig.systemFields` + `mappingTemplates[0].columnMappings` /
+`.biColumnMappings`, and whose output (`riskColumnHints` / `biColumnHints` in `index.tsx`) is
+passed as `MappingSettingsModal`'s `processingContext` props and rendered as the "sheets" tab's
+per-field detected-column hints (`ColumnHints`, "لم يتم العثور على تطابق واضح" when unmatched). It
+was a private, unexported function embedded in the 2437-line `Population/index.tsx` component
+file. Rather than render the modal/wizard to exercise it (which would drag in `xlsx`, the Excel
+Web Worker, and React), it is extracted — unchanged — into its own module so it is directly
+unit-testable as a pure `(rows, config) -> Record<fieldKey, string[]>` function. No behavior
+change; `index.tsx` now imports it from the new module instead of defining it locally.
+
+**File:** `src/components/Sidebar/Tabs/Population/components/columnMappingHints.ts` (new)
+
+`normalizeHeaderToken` + `buildColumnHintsFromRows`, moved verbatim out of `index.tsx` and
+exported.
+
+**File:** `src/components/Sidebar/Tabs/Population/index.tsx`
+
+Removed the two function definitions (now imported from `./components/columnMappingHints`); the
+two `useMemo` call sites (`riskColumnHints`, `biColumnHints`) are unchanged.
+
+**Before:**
+```tsx
+import MappingSettingsModal from "./components/MappingSettingsModal";
+```
+```tsx
+function normalizeHeaderToken(value: string): string {
+  return value
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/[أإآ]/g, "ا")
+    .replace(/ى/g, "ي")
+    .replace(/ة/g, "ه")
+    .replace(/[ـ]/g, "")
+    .toLowerCase();
+}
+
+function buildColumnHintsFromRows(
+  rows: Array<{ rawRow?: Record<string, unknown> }>,
+  config: PopulationConfig
+): Record<string, string[]> {
+  const headers = new Set<string>();
+  for (const row of rows.slice(0, 1500)) {
+    for (const header of Object.keys(row.rawRow ?? {})) {
+      if (header.trim()) headers.add(header.trim());
+    }
+  }
+
+  const normalizedHeaders = Array.from(headers).map((header) => ({
+    header,
+    normalized: normalizeHeaderToken(header),
+  }));
+  const template = config.mappingTemplates[0] ?? DEFAULT_MAPPING_TEMPLATE;
+  const hints: Record<string, string[]> = {};
+
+  for (const field of config.systemFields) {
+    const aliases = [
+      field.labelAr,
+      ...(template.columnMappings[field.key] ?? []),
+      ...(template.biColumnMappings?.[field.key] ?? []),
+    ].map(normalizeHeaderToken);
+    const matches = normalizedHeaders
+      .filter(({ normalized }) => aliases.some((alias) => normalized === alias || normalized.includes(alias) || alias.includes(normalized)))
+      .map(({ header }) => header);
+    hints[field.key] = Array.from(new Set(matches));
+  }
+
+  return hints;
+}
+
+// ── Browse sub-tab ────────────────────────────────────────────────────────────
+```
+
+**After:**
+```tsx
+import MappingSettingsModal from "./components/MappingSettingsModal";
+import { buildColumnHintsFromRows } from "./components/columnMappingHints";
+```
+```tsx
+// ── Browse sub-tab ────────────────────────────────────────────────────────────
+```
+
+**File:** `src/components/Sidebar/Tabs/Population/components/columnMappingHints.test.ts` (new)
+
+Unit tests for `buildColumnHintsFromRows` covering the D3 spec:
+- **Extra columns**: a header matching no field/alias never appears in any field's hint list, and
+  never injects a new key into the result (the output key-set is always exactly
+  `config.systemFields`'s keys).
+- **Missing required columns**: an unmatched field keeps its key in the result mapped to `[]`
+  (not omitted) — the exact signal `ColumnHints` renders as a visible warning — and a required
+  field's miss is distinguishable from an optional field's miss via `field.isRequired`, which the
+  test derives explicitly (`config.systemFields.filter(f => f.isRequired && hints[f.key].length
+  === 0)`).
+- **Renamed/aliased columns**: a header matching only a configured `columnMappings` alias (not the
+  canonical `labelAr`) resolves correctly; a header matching only a `biColumnMappings` alias also
+  resolves (the alias pool is not filtered by data source); an Arabic hamza/taa-marbuta spelling
+  variant of the canonical label resolves via `normalizeHeaderToken`'s text folding; an unmatched
+  header on an optional field is plain "unmapped", not an error.
+- **Scope characterization**: `config.customFields` are not auto-detected (only `systemFields`
+  are) — pinned explicitly since custom fields must be mapped manually in
+  `MappingSettingsModal`'s "mappings" tab.
+- **Real-default-config characterization**: against the actual `DEFAULT_POPULATION_CONFIG` /
+  `DEFAULT_MAPPING_TEMPLATE`, a header can satisfy more than one field's alias pool via the
+  matcher's substring fuzzy-matching (e.g. `"اسم المنفذ"` matches both `portName`, exactly, and
+  `portCode`, because `portCode`'s alias `"المنفذ"` is a substring of it) — documented as existing
+  behavior, not changed by this test-only batch.
+
+---
+
 ## v42.41 — 2026-07-11 — D1 (Batch 3): component + end-to-end workflow tests
 
 Adds workflow tests (one happy + one failure per stage) across the full pipeline plus

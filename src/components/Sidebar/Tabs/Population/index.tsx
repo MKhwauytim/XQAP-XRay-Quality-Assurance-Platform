@@ -79,6 +79,7 @@ import PhaseTwoReportAndProcessing from "./components/PhaseTwoReportAndProcessin
 import PhaseThreeSampling from "./components/PhaseThreeSampling";
 import PhaseFourDistribution from "./components/PhaseFourDistribution";
 import MappingSettingsModal from "./components/MappingSettingsModal";
+import { buildColumnHintsFromRows } from "./components/columnMappingHints";
 import {
   loadPopulationConfig,
   savePopulationConfig,
@@ -1573,50 +1574,6 @@ export default function PopulationTab() {
       </>)}
     </section>
   );
-}
-
-function normalizeHeaderToken(value: string): string {
-  return value
-    .trim()
-    .replace(/\s+/g, " ")
-    .replace(/[أإآ]/g, "ا")
-    .replace(/ى/g, "ي")
-    .replace(/ة/g, "ه")
-    .replace(/[ـ]/g, "")
-    .toLowerCase();
-}
-
-function buildColumnHintsFromRows(
-  rows: Array<{ rawRow?: Record<string, unknown> }>,
-  config: PopulationConfig
-): Record<string, string[]> {
-  const headers = new Set<string>();
-  for (const row of rows.slice(0, 1500)) {
-    for (const header of Object.keys(row.rawRow ?? {})) {
-      if (header.trim()) headers.add(header.trim());
-    }
-  }
-
-  const normalizedHeaders = Array.from(headers).map((header) => ({
-    header,
-    normalized: normalizeHeaderToken(header),
-  }));
-  const template = config.mappingTemplates[0] ?? DEFAULT_MAPPING_TEMPLATE;
-  const hints: Record<string, string[]> = {};
-
-  for (const field of config.systemFields) {
-    const aliases = [
-      field.labelAr,
-      ...(template.columnMappings[field.key] ?? []),
-      ...(template.biColumnMappings?.[field.key] ?? []),
-    ].map(normalizeHeaderToken);
-    const matches = normalizedHeaders
-      .filter(({ normalized }) => aliases.some((alias) => normalized === alias || normalized.includes(alias) || alias.includes(normalized)))
-      .map(({ header }) => header);
-    hints[field.key] = Array.from(new Set(matches));
-  }
-
-  return hints;
 }
 
 // ── Browse sub-tab ────────────────────────────────────────────────────────────
