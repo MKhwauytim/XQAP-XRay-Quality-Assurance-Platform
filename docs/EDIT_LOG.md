@@ -4,6 +4,47 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.41 — 2026-07-11 — D1 (Batch 3): component + end-to-end workflow tests
+
+Adds workflow tests (one happy + one failure per stage) across the full pipeline plus
+characterization tests for the two named UI surfaces. All file I/O uses the in-memory
+`createMemoryDirectory`; UI tests use Testing Library under a per-file `jsdom` environment.
+
+**File:** `src/data/workspace/pipeline.workflow.test.ts` (new)
+
+End-to-end workflow: import → process → sample → distribute → answer → report, driven through the
+real domain functions (`processRiskWorkbook`, `processPopulation`, `saveMonthRun`, `drawSample`,
+`calculateBulkAssignment`, `appendDistributionEvents`, `saveEmployeeAnswers`, `buildExecutiveReport`,
+`buildManagementReport`) and an in-memory workspace. The happy pipeline runs once in `beforeAll`;
+each stage asserts on the shared artifacts, and a failure block per stage exercises the error path
+(rows missing xray id excluded; duplicate ids surfaced; empty-population draw rejected; no-allocation
+assignment yields no events; unknown-employee answer read returns an empty file; empty-population
+report renders without throwing). The import stage builds a REAL `.xlsx` in memory and parses it via
+`processRiskWorkbook` — the worker's delegate. WORKER BOUNDARY stated in the file header: Vitest's
+node env cannot run the DedicatedWorker wrapper, so only the delegate parse/mapping function is
+covered, not the postMessage plumbing.
+
+**File:** `src/components/DataTable/index.test.tsx` (new)
+
+Full RTL render characterization of `DataTable`: renders rows/headers; global-search filter narrows
+rows (debounced); per-column multiselect filter narrows to a checked value; column-visibility toggle
+hides a column; XLSX export path invokes `XLSX.writeFile` with the file name (spied); truncation
+tooltip (`td[title]` = full cell value). Header note records that `DataTable` has NO row-sort UI —
+its interactive surface is search + per-column filters + column visibility/order + export — so the
+plan's "sort" item is covered as filtering. Polyfills `ResizeObserver` (absent in jsdom).
+
+**File:** `src/components/Sidebar/Tabs/Population/Population.wizard.test.tsx` (new)
+
+Characterization of the Population wizard's four-phase progression (import → process → sample →
+distribute). Rendered (jsdom) with the Vite worker + `useWorkspace` + `usePermissions` mocked: the
+happy block pins the initial state (four-phase stepper renders, phase 1 "رفع البيانات" active), and
+the failure/gating block asserts downstream phases are locked (not rendered as buttons) and clicking
+the locked "اختيار العينة" step does NOT advance the wizard — a bad/absent import cannot skip ahead.
+A separate pure `getPhaseStatus` block pins the ordered unlock matrix through all four phases.
+WORKER BOUNDARY noted in the header: advancing via a real import needs the Excel Web Worker, which
+the node/jsdom env cannot run, so real progression is characterized through the pure phase-status
+function rather than by driving an upload.
+
 ## v42.40 — 2026-07-11 — D2 (Batch 3): XSS regression tests for all report builders + shared payload fixture
 
 Adds a shared payload corpus and one XSS test file per report builder, asserting injected markup
