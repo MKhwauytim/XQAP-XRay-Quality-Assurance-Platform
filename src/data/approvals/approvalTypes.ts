@@ -30,6 +30,10 @@ export type DecisionEvent = {
 export type SupervisorDecisionFile = {
   supervisorUsername: string;
   monthFolderName: string;
+  /** Monotonically increasing counter for CAS conflict detection. */
+  revision?: number;
+  /** Per-write UUID embedded by casLoop for cross-machine race detection. */
+  _writeToken?: string;
   referralDecisions: ReferralDecision[];
   replacementDecisions: ReplacementDecision[];
   /** Append-only decision history. Legacy files predate this field. */

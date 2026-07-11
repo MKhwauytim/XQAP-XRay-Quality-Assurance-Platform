@@ -40,6 +40,31 @@ describe("approvalStorage decision events", () => {
     expect(file.decisionEvents).toHaveLength(2);
   });
 
+  it("survives two concurrent decision appends without losing either (cross-machine CAS)", async () => {
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    // Two decisions on two different requests, appended near-simultaneously by
+    // the same reviewer (e.g. the reviewer's session open on two PCs). Neither
+    // append may clobber the other's event — the withResourceLock + casLoop
+    // read-back/retry loop must serialize them to one consistent file.
+    const [r1, r2] = await Promise.all([
+      appendDecisionEvent(root, "5-may-2026", "sup-1", {
+        requestId: "req-A", kind: "referral", status: "approved",
+        reviewedBy: "sup-1", reviewedAt: "2026-07-01T10:00:00.000Z",
+      }),
+      appendDecisionEvent(root, "5-may-2026", "sup-1", {
+        requestId: "req-B", kind: "replacement", status: "denied",
+        reviewedBy: "sup-1", reviewedAt: "2026-07-01T10:00:01.000Z",
+      }),
+    ]);
+    expect(r1.ok).toBe(true);
+    expect(r2.ok).toBe(true);
+
+    const file = await loadSupervisorDecisions(root, "5-may-2026", "sup-1");
+    expect(file.decisionEvents).toHaveLength(2);
+    const ids = (file.decisionEvents ?? []).map((e) => e.requestId).sort();
+    expect(ids).toEqual(["req-A", "req-B"]);
+  });
+
   it("merges events across supervisor files and legacy decision arrays, sorted by time", () => {
     const files = [
       {

@@ -4,6 +4,138 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.53 — 2026-07-12 — D (feature-batch): CAS-protect supervisor decision appends (approvals + referral)
+
+Batch D (cross-machine write safety). `appendDecisionEvent` is the shared write path behind
+`referralStorage.updateReferralStatus`/`updateReplacementStatus` — every referral/replacement
+approval or denial appends to the reviewer's `{supervisor}.decisions.json`. A plain
+read-modify-write here loses updates when the same reviewer acts from two PCs (or fires two
+decisions near-simultaneously): the second write overwrites the first's appended event. Routed it
+through the same `withResourceLock` + `casLoop` pattern already used by `answerStorage`,
+`distributionStorage`, and `audit/actionLog` — stamp a fresh `_writeToken` + bumped `revision` per
+attempt, verify both on read-back, retry with jitter on mismatch. `referralStorage.ts` itself needs
+**no** change: all its writes delegate to `appendReferralToEmployee`/`appendReplacementToEmployee`
+(already CAS-safe in `answerStorage`) and to `appendDecisionEvent` (now CAS-safe here), so its write
+paths are transitively protected. The month-lock gate stays outside the loop so a closed month
+rejects loudly instead of being retried.
+
+**File:** `src/data/approvals/approvalTypes.ts`
+
+**Before:**
+```ts
+export type SupervisorDecisionFile = {
+  supervisorUsername: string;
+  monthFolderName: string;
+  referralDecisions: ReferralDecision[];
+  replacementDecisions: ReplacementDecision[];
+  /** Append-only decision history. Legacy files predate this field. */
+  decisionEvents?: DecisionEvent[];
+  lastUpdatedAt: string;
+};
+```
+
+**After:**
+```ts
+export type SupervisorDecisionFile = {
+  supervisorUsername: string;
+  monthFolderName: string;
+  /** Monotonically increasing counter for CAS conflict detection. */
+  revision?: number;
+  /** Per-write UUID embedded by casLoop for cross-machine race detection. */
+  _writeToken?: string;
+  referralDecisions: ReferralDecision[];
+  replacementDecisions: ReplacementDecision[];
+  /** Append-only decision history. Legacy files predate this field. */
+  decisionEvents?: DecisionEvent[];
+  lastUpdatedAt: string;
+};
+```
+
+**File:** `src/data/approvals/approvalStorage.ts`
+
+**Before:**
+```ts
+import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { ensureMonthWritable } from "../population/monthLock";
+```
+```ts
+export async function appendDecisionEvent(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  supervisorUsername: string,
+  event: DecisionEvent
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  // Month lock gate — throws MonthClosedError when the month is closed; callers
+  // that need a user-facing message should catch it explicitly.
+  await ensureMonthWritable(directoryHandle, monthFolderName);
+  try {
+    const appDir = await getApprovalsDir(directoryHandle, monthFolderName);
+    const current = await loadSupervisorDecisions(directoryHandle, monthFolderName, supervisorUsername);
+    const updated: SupervisorDecisionFile = {
+      ...current,
+      decisionEvents: [...(current.decisionEvents ?? []), event],
+      lastUpdatedAt: new Date().toISOString(),
+    };
+    await safeWriteJson(appDir, decisionFileName(supervisorUsername), updated);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "خطأ غير معروف." };
+  }
+}
+```
+
+**After:**
+```ts
+import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { casLoop } from "../storage/casLoop";
+import { withResourceLock } from "../storage/webLocks";
+import { ensureMonthWritable } from "../population/monthLock";
+```
+```ts
+export async function appendDecisionEvent(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  supervisorUsername: string,
+  event: DecisionEvent
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  // Month lock gate — throws MonthClosedError when the month is closed; callers
+  // that need a user-facing message should catch it explicitly. Kept outside the
+  // CAS loop so a closed month rejects loudly instead of being retried.
+  await ensureMonthWritable(directoryHandle, monthFolderName);
+
+  const fileName = decisionFileName(supervisorUsername);
+  // `:rmw` suffix keeps this outer read-modify-write lock distinct from
+  // safeWriteJson's internal `${dir.name}/${fileName}` lock (withResourceLock is
+  // not reentrant — a colliding key self-deadlocks). The outer lock serializes
+  // same-tab appends; the casLoop token guards cross-machine races on a shared folder.
+  return withResourceLock(`approvals/${fileName}:rmw`, () =>
+    casLoop<{ ok: true }>(
+      async (writeToken) => {
+        const appDir = await getApprovalsDir(directoryHandle, monthFolderName);
+        const current = await loadSupervisorDecisions(directoryHandle, monthFolderName, supervisorUsername);
+        const nextRevision = (current.revision ?? 0) + 1;
+        const updated: SupervisorDecisionFile = {
+          ...current,
+          revision: nextRevision,
+          _writeToken: writeToken,
+          decisionEvents: [...(current.decisionEvents ?? []), event],
+          lastUpdatedAt: new Date().toISOString(),
+        };
+        await safeWriteJson(appDir, fileName, updated);
+        const verify = await loadSupervisorDecisions(directoryHandle, monthFolderName, supervisorUsername);
+        if (verify.revision === nextRevision && verify._writeToken === writeToken) {
+          return { done: true, result: { ok: true as const } };
+        }
+        return { done: false };
+      },
+      { conflictError: "تعارض في الكتابة: لم يتمكن النظام من حفظ قرار الاعتماد بعد عدة محاولات." }
+    )
+  );
+}
+```
+
 ## v42.52 — 2026-07-12 — A4 (feature-batch): restrict the referral-recipient picker to employee/supervisor
 
 **File:** `src/data/distribution/bulkAssignment.ts`
