@@ -166,6 +166,50 @@ return (
     <button ... aria-label="إغلاق" onClick={() => setStatusMsg(null)}><X size={14} /></button>
 ```
 
+## v42.46 — 2026-07-11 — E1 (Batch 5): adopt useFocusTrap in Archive, WorkspaceGate + FieldDropDialog
+
+Completes E1 hook adoption across the remaining four `role="dialog"` instances (the 8th file,
+`WorkspaceGate.tsx`, also carries the non-modal `FirstRunChecklist` `role="complementary"`
+onboarding aside, which is intentionally NOT trapped — it is persistent chrome, not a modal).
+
+**File:** `src/components/Sidebar/Tabs/Archive/index.tsx`
+
+Both whole-component modals — `MonthLockDialog` and `RestoreDialog` — gained
+`const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onClose });` and `ref={dialogRef}` on
+their `arc-modal-backdrop` `role="dialog"` elements. `RestoreDialog`'s step-2 `autoFocus` input is
+kept: it is a whole-component modal so the trigger is captured at mount (step 1, before that
+input exists), and the `autoFocus` correctly moves focus to the confirm input when the user
+advances to step 2. The two `<X>` close buttons already had `aria-label="إغلاق"`.
+
+**File:** `src/data/workspace/WorkspaceGate.tsx`
+
+The view-passcode modal is rendered inline in `WorkspacePicker`, so the trap is gated:
+`const viewDialogRef = useFocusTrap<HTMLDivElement>({ onEscape: closeViewModal, enabled: isViewModalOpen });`
+with `ref={viewDialogRef}` on the `role="dialog"` section. Removed the input's `autoFocus`: for an
+inline modal, `autoFocus` fires before the trap effect and would corrupt the recorded trigger; the
+hook focuses the first focusable (that same input) instead. Escape was already handled by the
+input's `onKeyDown` (Enter/Escape); the hook adds document-level Escape too (redundant, harmless).
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/FieldDropDialog.tsx`
+
+Whole-component popover dialog. Added `const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onCancel });`
+and `ref={dialogRef}` on the inner `role="dialog"` element (not the click-outside backdrop). This
+adds Tab-trapping and Escape-to-cancel, which the popover previously lacked (it only closed on
+outside `mousedown`).
+
+**Before (representative):**
+```tsx
+return (
+  <div className="arc-modal-backdrop" role="dialog" aria-modal="true">
+```
+
+**After:**
+```tsx
+const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onClose });
+return (
+  <div ref={dialogRef} className="arc-modal-backdrop" role="dialog" aria-modal="true">
+```
+
 ## v42.42 — 2026-07-11 — D3 (Batch 3): import-mapping edge-case tests (column-hint resolution)
 
 D3's target is `buildColumnHintsFromRows` — the function that resolves a workbook's actual Excel

@@ -12,6 +12,7 @@ import {
 import { listMonthFolders } from "../population/populationStorage";
 import { getLabels } from "../labels/labelsStore";
 import { useLabels } from "../labels/useLabels";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
 import { useWorkspace } from "./useWorkspace";
 
 import "./WorkspaceGate.css";
@@ -47,6 +48,11 @@ export function WorkspacePicker({ children }: WorkspacePickerProps) {
   const [viewError, setViewError] = useState("");
   const altSequenceRef = useRef<string[]>([]);
   const altSequenceTimerRef = useRef<number | null>(null);
+  // Focus-trap for the inline view-passcode modal (gated on isViewModalOpen).
+  const viewDialogRef = useFocusTrap<HTMLElement>({
+    onEscape: closeViewModal,
+    enabled: isViewModalOpen,
+  });
 
   useEffect(() => {
     if (status !== "not_selected") return;
@@ -164,6 +170,7 @@ export function WorkspacePicker({ children }: WorkspacePickerProps) {
         {isViewModalOpen && (
           <div className="auth-modal-backdrop" role="presentation">
             <section
+              ref={viewDialogRef}
               className="auth-admin-modal"
               role="dialog"
               aria-modal="true"
@@ -173,7 +180,6 @@ export function WorkspacePicker({ children }: WorkspacePickerProps) {
               <p>{labels.wsgate_view_modal_desc}</p>
               <input
                 type="password"
-                autoFocus
                 aria-label={labels.wsgate_view_passcode_label}
                 value={viewPasscode}
                 onChange={(event) => setViewPasscode(event.target.value)}

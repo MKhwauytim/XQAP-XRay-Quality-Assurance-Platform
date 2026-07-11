@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Archive, X } from "lucide-react";
 
 import { readSession } from "../../../../auth/authSession";
+import { useFocusTrap } from "../../../../hooks/useFocusTrap";
 import { PageHeader } from "../../../../components/PageHeader/PageHeader";
 import {
   createBackup,
@@ -560,9 +561,10 @@ function MonthLockDialog({
   const isClose = mode === "close";
   // Close note is optional; reopen reason is mandatory.
   const canConfirm = !busy && (isClose || note.trim().length > 0);
+  const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onClose });
 
   return (
-    <div className="arc-modal-backdrop" role="dialog" aria-modal="true">
+    <div ref={dialogRef} className="arc-modal-backdrop" role="dialog" aria-modal="true">
       <div className="arc-restore-modal">
         <div className="arc-restore-header">
           <div>
@@ -633,9 +635,10 @@ function RestoreDialog({
   const [checked, setChecked] = useState(false);
   const canContinue = checked;
   const canRestore = typedName.trim() === target.folderName && !busy;
+  const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onClose });
 
   return (
-    <div className="arc-modal-backdrop" role="dialog" aria-modal="true">
+    <div ref={dialogRef} className="arc-modal-backdrop" role="dialog" aria-modal="true">
       <div className="arc-restore-modal">
         <div className="arc-restore-header">
           <div>
