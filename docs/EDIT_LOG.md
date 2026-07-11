@@ -4,6 +4,38 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.43 — 2026-07-11 — E1 (Batch 5): shared `useFocusTrap` hook + Testing Library unit test
+
+Accessibility pass groundwork. The 8 `role="dialog"` components had ad-hoc or missing focus
+management: `ConfirmDialog` and `AuthGate`'s admin modal each hand-rolled a slightly different
+Tab trap; the other six had no trap at all, so keyboard users could Tab out of an open modal
+into the background. This entry adds ONE shared hook (adopted by every dialog in the following
+entries) plus a unit test that pins its contract, so all adoption sites are protected by one test
+file.
+
+The hook: `useFocusTrap<T>({ onEscape?, enabled?, restoreFocus? })` returns a ref to attach to
+the dialog container. On activation it (1) records the currently-focused element, (2) focuses the
+first focusable descendant. While active, a capture-phase `keydown` listener traps Tab inside the
+container (Shift+Tab from the first focusable wraps to the last; Tab from the last wraps to the
+first; focus that escaped the container is pulled back) and calls `onEscape` on Escape. On
+deactivation/unmount it restores focus to the recorded trigger element. `enabled` (default true)
+lets parents that render a modal inline gate the trap on their open flag; whole-component modals
+that only mount when open can omit it.
+
+**File:** `src/hooks/useFocusTrap.ts` (new)
+
+New hook module (see contract above). Uses a `FOCUSABLE_SELECTOR` covering links, non-disabled
+form controls/buttons, and `[tabindex]:not([tabindex="-1"])`. Keeps the latest `onEscape` in a
+ref so the effect never re-subscribes on every render. No visibility (`offsetParent`) filtering,
+so it behaves identically under jsdom (Vitest) and Chromium.
+
+**File:** `src/hooks/useFocusTrap.test.tsx` (new)
+
+`@vitest-environment jsdom` Testing Library test covering the four contract points: Tab from the
+last focusable wraps to the first, Shift+Tab from the first wraps to the last, Escape invokes the
+`onEscape` callback, and unmounting restores focus to the trigger element that was focused before
+the trap activated. Also asserts initial focus lands on the first focusable on open.
+
 ## v42.42 — 2026-07-11 — D3 (Batch 3): import-mapping edge-case tests (column-hint resolution)
 
 D3's target is `buildColumnHintsFromRows` — the function that resolves a workbook's actual Excel
