@@ -260,6 +260,17 @@ async function seedDemoMonth(handle: DirectoryHandleLike): Promise<void> {
     assignedByEmployee.set(evt.assignedTo, list);
   }
 
+  // xrayImageId → its own population row, so each seeded answer can carry a
+  // "qualityImageResult" value derived from that row's real level-one result
+  // (the reporting pipeline's ground-truth field — see executiveReportTypes.ts
+  // `expertResultFieldId`). Without this, expertResult resolves to null for
+  // every row and overallAccuracy/suspiciousDetectionRate/missedSuspicionRate
+  // all render as "—" instead of real numbers.
+  const rowsById = new Map<string, PreparedPopulationRow>();
+  for (const row of preparedRows) {
+    rowsById.set(row.xrayImageId, row);
+  }
+
   const now = new Date().toISOString();
   const completedEvents: DistributionEvent[] = [];
 
@@ -267,6 +278,16 @@ async function seedDemoMonth(handle: DirectoryHandleLike): Promise<void> {
     const items: ItemAnswer[] = [];
     assigned.forEach((evt, i) => {
       const bucket = i % 5;
+      const row = rowsById.get(evt.xrayImageId);
+      // Quality reviewer's call: agrees with the front-line decision on most
+      // rows, but deterministically disagrees on ~1 in 15 (modulo on the row's
+      // own sequence number, never Math.random — this file stays reproducible
+      // by design) so missedSuspicionRate/falseSuspicionRate also get a
+      // non-zero denominator instead of just overallAccuracy.
+      const baseResult: "سليمة" | "اشتباه" = row?.xrayLevelOneResult ?? "سليمة";
+      const seq = row ? row.sourceRowNumber - 1 : 0;
+      const qualityResult: "سليمة" | "اشتباه" =
+        seq % 15 === 0 ? (baseResult === "سليمة" ? "اشتباه" : "سليمة") : baseResult;
       if (bucket < 2) {
         items.push({
           xrayImageId: evt.xrayImageId,
@@ -275,6 +296,7 @@ async function seedDemoMonth(handle: DirectoryHandleLike): Promise<void> {
           answers: [
             { fieldId: "result", value: "سليمة" },
             { fieldId: "notes", value: "لا ملاحظات" },
+            { fieldId: "qualityImageResult", value: qualityResult },
           ],
           lastSavedAt: now,
           submittedAt: now,
@@ -289,7 +311,10 @@ async function seedDemoMonth(handle: DirectoryHandleLike): Promise<void> {
           xrayImageId: evt.xrayImageId,
           templateId: DEMO_TEMPLATE_ID,
           templateVersion: 1,
-          answers: [{ fieldId: "result", value: "سليمة" }],
+          answers: [
+            { fieldId: "result", value: "سليمة" },
+            { fieldId: "qualityImageResult", value: qualityResult },
+          ],
           lastSavedAt: now,
           submittedAt: null,
           answeredBy: empUsername,

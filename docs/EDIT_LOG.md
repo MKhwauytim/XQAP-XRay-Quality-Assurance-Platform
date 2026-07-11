@@ -4,6 +4,150 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.48 — 2026-07-12 — fix(demo): seed `qualityImageResult` so demo KPIs render non-zero (QA hardening-2026-07-08, Rework Item 1)
+
+**File:** `src/data/workspace/demoWorkspace.ts`
+
+QA review (`docs/audit/hardening-2026-07-08/qa-review-1.md`, "Rework Item 1") found that
+`seedDemoMonth`'s per-employee answer seeding only ever wrote `fieldId: "result"` and
+`fieldId: "notes"`. The reporting pipeline resolves its ground-truth field via
+`ExecutiveReportConfig.expertResultFieldId` (`src/data/reporting/executiveReportTypes.ts`),
+which defaults to `"qualityImageResult"` — and since the demo workspace seeds no
+`TemplateSchema`/`templates.index.json` selection, the label-based fallback lookup is
+always empty too. Net effect: `expertResult` resolved to `null` for every seeded row, so
+`overallAccuracy`, `suspiciousDetectionRate`, and `missedSuspicionRate` all rendered as
+"—" instead of real numbers — violating this branch's own C1 acceptance criterion ("KPIs
+non-zero").
+
+Fix: build a `xrayImageId → PreparedPopulationRow` lookup (`rowsById`) from `preparedRows`
+before the per-employee seeding loop, then add a third answer entry keyed
+`"qualityImageResult"` in both the `bucket < 2` (submitted) and `bucket === 2` (draft)
+branches. The seeded value equals the row's own `xrayLevelOneResult` on most rows (~87-90%
+agreement, consistent with `DEFAULT_EXEC_CONFIG.accuracyTarget: 90`) but is deterministically
+flipped (`سليمة`↔`اشتباه`) on every 15th row via `seq % 15 === 0` (`seq` derived from the
+row's own `sourceRowNumber - 1`, never `Math.random` — this file stays reproducible by
+design) so `missedSuspicionRate`/`falseSuspicionRate` also get a non-zero denominator, not
+just `overallAccuracy`. The deeper `imageAvailable`/`decisionEvaluable` gap the same review
+flags (point 6) requires seeding an actual `TemplateSchema` + `templates.index.json`
+selection — out of scope here, left as a separate follow-up per the review.
+
+**Before:**
+```ts
+  const now = new Date().toISOString();
+  const completedEvents: DistributionEvent[] = [];
+
+  for (const [empUsername, assigned] of assignedByEmployee) {
+    const items: ItemAnswer[] = [];
+    assigned.forEach((evt, i) => {
+      const bucket = i % 5;
+      if (bucket < 2) {
+        items.push({
+          xrayImageId: evt.xrayImageId,
+          templateId: DEMO_TEMPLATE_ID,
+          templateVersion: 1,
+          answers: [
+            { fieldId: "result", value: "سليمة" },
+            { fieldId: "notes", value: "لا ملاحظات" },
+          ],
+          lastSavedAt: now,
+          submittedAt: now,
+          answeredBy: empUsername,
+          status: "submitted",
+        });
+        completedEvents.push(
+          buildCompletedEvent({ xrayImageId: evt.xrayImageId, assignedTo: empUsername, eventBy: empUsername })
+        );
+      } else if (bucket === 2) {
+        items.push({
+          xrayImageId: evt.xrayImageId,
+          templateId: DEMO_TEMPLATE_ID,
+          templateVersion: 1,
+          answers: [{ fieldId: "result", value: "سليمة" }],
+          lastSavedAt: now,
+          submittedAt: null,
+          answeredBy: empUsername,
+          status: "draft",
+        });
+      }
+      // bucket 3, 4: left pending — no answer record at all.
+    });
+    if (items.length > 0) {
+      await saveEmployeeAnswers(handle, monthFolderName, empUsername, items);
+    }
+  }
+```
+
+**After:**
+```ts
+  // xrayImageId → its own population row, so each seeded answer can carry a
+  // "qualityImageResult" value derived from that row's real level-one result
+  // (the reporting pipeline's ground-truth field — see executiveReportTypes.ts
+  // `expertResultFieldId`). Without this, expertResult resolves to null for
+  // every row and overallAccuracy/suspiciousDetectionRate/missedSuspicionRate
+  // all render as "—" instead of real numbers.
+  const rowsById = new Map<string, PreparedPopulationRow>();
+  for (const row of preparedRows) {
+    rowsById.set(row.xrayImageId, row);
+  }
+
+  const now = new Date().toISOString();
+  const completedEvents: DistributionEvent[] = [];
+
+  for (const [empUsername, assigned] of assignedByEmployee) {
+    const items: ItemAnswer[] = [];
+    assigned.forEach((evt, i) => {
+      const bucket = i % 5;
+      const row = rowsById.get(evt.xrayImageId);
+      // Quality reviewer's call: agrees with the front-line decision on most
+      // rows, but deterministically disagrees on ~1 in 15 (modulo on the row's
+      // own sequence number, never Math.random — this file stays reproducible
+      // by design) so missedSuspicionRate/falseSuspicionRate also get a
+      // non-zero denominator instead of just overallAccuracy.
+      const baseResult: "سليمة" | "اشتباه" = row?.xrayLevelOneResult ?? "سليمة";
+      const seq = row ? row.sourceRowNumber - 1 : 0;
+      const qualityResult: "سليمة" | "اشتباه" =
+        seq % 15 === 0 ? (baseResult === "سليمة" ? "اشتباه" : "سليمة") : baseResult;
+      if (bucket < 2) {
+        items.push({
+          xrayImageId: evt.xrayImageId,
+          templateId: DEMO_TEMPLATE_ID,
+          templateVersion: 1,
+          answers: [
+            { fieldId: "result", value: "سليمة" },
+            { fieldId: "notes", value: "لا ملاحظات" },
+            { fieldId: "qualityImageResult", value: qualityResult },
+          ],
+          lastSavedAt: now,
+          submittedAt: now,
+          answeredBy: empUsername,
+          status: "submitted",
+        });
+        completedEvents.push(
+          buildCompletedEvent({ xrayImageId: evt.xrayImageId, assignedTo: empUsername, eventBy: empUsername })
+        );
+      } else if (bucket === 2) {
+        items.push({
+          xrayImageId: evt.xrayImageId,
+          templateId: DEMO_TEMPLATE_ID,
+          templateVersion: 1,
+          answers: [
+            { fieldId: "result", value: "سليمة" },
+            { fieldId: "qualityImageResult", value: qualityResult },
+          ],
+          lastSavedAt: now,
+          submittedAt: null,
+          answeredBy: empUsername,
+          status: "draft",
+        });
+      }
+      // bucket 3, 4: left pending — no answer record at all.
+    });
+    if (items.length > 0) {
+      await saveEmployeeAnswers(handle, monthFolderName, empUsername, items);
+    }
+  }
+```
+
 ## v42.47 — 2026-07-11 — E2 (Batch 5): chart axis labels + legends in the executive report chart primitives
 
 Closes the E2 gap identified in the hardening audit: `charts.ts` had 10 `<text>` elements
