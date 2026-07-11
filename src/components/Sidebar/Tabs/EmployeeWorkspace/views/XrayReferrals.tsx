@@ -814,7 +814,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                   widths:         cfg.widths,
                   dateFmt:        cfg.dateFmt,
                 };
-                if (role === "admin") {
+                if (canConfigureColumns) {
                   void saveAdminBrowseDatasetPreset(directoryHandle, REFERRALS_PRESET_KEY, preset);
                 }
               }}

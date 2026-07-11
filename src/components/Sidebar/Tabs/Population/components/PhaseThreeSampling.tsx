@@ -5,6 +5,8 @@ import { formatNumber, getStageKey } from "./helpers";
 import SummaryCard from "./SummaryCard";
 import { useState } from "react";
 import { AlertTriangle, Lock, Unlock } from "lucide-react";
+import { hasFeature, readUserManagementState } from "../../../../../auth/userManagement";
+import type { AuthRole } from "../../../../../auth/authTypes";
 
 type SaveMessage = { type: "ok" | "error"; text: string } | null;
 
@@ -95,7 +97,11 @@ export default function PhaseThreeSampling({
 
             const isAutoLocked = rule.stageKey === "first" || (rule.minRequiredCount > 0 && size < rule.minRequiredCount);
             const isLockedState = (rule.isLocked || isAutoLocked) && !isAdminUnlocked;
-            const canUnlock = userRole === "admin";
+            const canUnlock = hasFeature(
+              readUserManagementState().featurePermissions,
+              userRole as AuthRole,
+              "unlock-sampling-stage"
+            );
 
             return (
               <div
@@ -113,17 +119,17 @@ export default function PhaseThreeSampling({
                       <button
                         type="button"
                         className={`lock-toggle-btn${isAutoLocked ? " auto" : ""}`}
-                        title={isAutoLocked ? "مقفل تلقائياً — يتطلب صلاحية Admin للفتح" : ""}
+                        title={isAutoLocked ? "مقفل تلقائياً — يتطلب صلاحية إلغاء القفل" : ""}
                         onClick={() => {
                           if (canUnlock) {
                             setIsAdminUnlocked(!isAdminUnlocked);
                           } else {
-                            alert("يجب أن تكون مدير نظام (Admin) لإلغاء القفل.");
+                            alert("لا تملك صلاحية إلغاء قفل مراحل العينة.");
                           }
                         }}
                       >
                         {isAdminUnlocked
-                          ? <><Unlock size={14} style={{ verticalAlign: "middle", marginInlineEnd: 4 }} /> مفتوح (Admin)</>
+                          ? <><Unlock size={14} style={{ verticalAlign: "middle", marginInlineEnd: 4 }} /> مفتوح</>
                           : isAutoLocked
                           ? <><AlertTriangle size={14} style={{ verticalAlign: "middle", marginInlineEnd: 4 }} /> مقفل تلقائياً</>
                           : <><Lock size={14} style={{ verticalAlign: "middle", marginInlineEnd: 4 }} /> مغلق</>}

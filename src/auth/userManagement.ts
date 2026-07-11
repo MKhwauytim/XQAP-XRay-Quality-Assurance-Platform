@@ -168,6 +168,11 @@ export const MANAGED_FEATURE_GROUPS: readonly FeatureGroup[] = [
         label: "إعادة فتح الإجابات المقدمة",
         description: "إرجاع إجابة مقدمة إلى مسودة ليتمكن الموظف من تصحيحها",
       },
+      {
+        id: "manage-inspection-template",
+        label: "إدارة نموذج الفحص",
+        description: "إنشاء وتعديل قوالب نموذج الفحص في مساحة العمل",
+      },
     ],
   },
   {
@@ -209,6 +214,11 @@ export const MANAGED_FEATURE_GROUPS: readonly FeatureGroup[] = [
         label: "تصفح بيانات المجتمع",
         description: "استعراض جدول بيانات المجتمع والإحصائيات",
       },
+      {
+        id: "unlock-sampling-stage",
+        label: "إلغاء قفل مراحل العينة",
+        description: "فتح المراحل المقفلة (تلقائياً أو يدوياً) في إعداد سحب العينة",
+      },
     ],
   },
   {
@@ -245,6 +255,11 @@ export const MANAGED_FEATURE_GROUPS: readonly FeatureGroup[] = [
         label: "إقفال الأشهر وإعادة فتحها",
         description: "إقفال شهر لمنع أي تعديل على بياناته أو إعادة فتحه للتعديل",
       },
+      {
+        id: "view-error-log",
+        label: "عرض سجل الأخطاء",
+        description: "إظهار سجل الأخطاء الأخيرة داخل صفحة الإعدادات",
+      },
     ],
   },
 ] as const;
@@ -256,12 +271,12 @@ const ALL_FEATURE_IDS = MANAGED_FEATURE_GROUPS.flatMap((g) =>
 
 /** Maps each tab to the feature IDs that belong to it. */
 export const TAB_FEATURE_MAP: Readonly<Record<string, readonly string[]>> = {
-  "population":         ["upload-data", "process-population", "configure-sample", "draw-sample", "distribute-samples", "bulk-assign", "view-browse"],
-  "employee-workspace": ["approve-referrals", "approve-replacements", "view-all-entries", "view-employee-stats", "submit-referrals", "request-replacement", "submit-answers", "configure-referral-columns", "ew.reopenAnswer"],
+  "population":         ["upload-data", "process-population", "configure-sample", "draw-sample", "distribute-samples", "bulk-assign", "view-browse", "unlock-sampling-stage"],
+  "employee-workspace": ["approve-referrals", "approve-replacements", "view-all-entries", "view-employee-stats", "submit-referrals", "request-replacement", "submit-answers", "configure-referral-columns", "ew.reopenAnswer", "manage-inspection-template"],
   "user-management":    ["manage-users", "reset-passwords", "edit-permissions"],
   "reports":            ["export-reports"],
   "archive":            ["export-archive", "archive.closeMonth"],
-  "settings":           [],
+  "settings":           ["view-error-log"],
 };
 
 /** Reverse lookup: feature ID → parent tab ID. */
@@ -290,12 +305,15 @@ const FEATURE_DEFAULTS: Record<string, Partial<Record<AuthRole, boolean>>> = {
   "distribute-samples":   { guest: false, employee: false, supervisor: false, manager: true  },
   "bulk-assign":          { guest: false, employee: false, supervisor: true,  manager: true  },
   "view-browse":          { guest: true,  employee: true,  supervisor: true,  manager: true  },
+  "unlock-sampling-stage": { guest: false, employee: false, supervisor: false, manager: false },
+  "manage-inspection-template": { guest: false, employee: false, supervisor: false, manager: true },
   "manage-users":         { guest: false, employee: false, supervisor: false, manager: false },
   "reset-passwords":      { guest: false, employee: false, supervisor: false, manager: false },
   "edit-permissions":     { guest: false, employee: false, supervisor: false, manager: false },
   "export-reports":       { guest: false, employee: false, supervisor: true,  manager: true  },
   "export-archive":       { guest: false, employee: false, supervisor: false, manager: true  },
   "archive.closeMonth":   { guest: false, employee: false, supervisor: false, manager: false },
+  "view-error-log":       { guest: false, employee: false, supervisor: false, manager: false },
 };
 
 // ── Default creators ──────────────────────────────────────────────────────────

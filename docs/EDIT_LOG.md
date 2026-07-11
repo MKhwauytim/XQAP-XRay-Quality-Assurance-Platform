@@ -4,6 +4,300 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.63 — 2026-07-12 — C3.5 (feature-batch): gate shared referral browse-preset push on configure-referral-columns
+
+Batch C item 3, gap 5. In `XrayReferrals.tsx` the push of the shared admin browse-preset was
+hardcoded to `role === "admin"`. Replaced with the existing `configure-referral-columns` feature
+check (`canConfigureColumns`, already computed at the top of the component from the feature matrix)
+— no duplicate feature created. Behavior change (intended per plan): any role the admin enables
+`configure-referral-columns` for (supervisor + manager by default) can now push the shared preset,
+not just admin. The DataTable's column-config UI was already gated on `canConfigureColumns`, so
+this aligns "can edit columns" with "can publish the shared preset".
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx`
+
+**Before:**
+```tsx
+                if (role === "admin") {
+                  void saveAdminBrowseDatasetPreset(directoryHandle, REFERRALS_PRESET_KEY, preset);
+                }
+```
+
+**After:**
+```tsx
+                if (canConfigureColumns) {
+                  void saveAdminBrowseDatasetPreset(directoryHandle, REFERRALS_PRESET_KEY, preset);
+                }
+```
+
+## v42.62 — 2026-07-12 — C3.4 (feature-batch): gate ErrorLogSection on new view-error-log feature
+
+Batch C item 3, gap 4. `Settings/ErrorLogSection.tsx` hid the error log with a hardcoded
+`role !== "admin"`. Added a new featureId `view-error-log` (group "admin"/الإدارة والتقارير,
+mapped to the `settings` tab), default admin-only (matches current behavior), and switched the
+guard to `usePermissions().can("view-error-log")`.
+
+**File:** `src/auth/userManagement.ts`
+
+**Before:** (admin feature group tail + TAB_FEATURE_MAP settings + FEATURE_DEFAULTS)
+```ts
+      {
+        id: "archive.closeMonth",
+        label: "إقفال الأشهر وإعادة فتحها",
+        description: "إقفال شهر لمنع أي تعديل على بياناته أو إعادة فتحه للتعديل",
+      },
+    ],
+  },
+] as const;
+```
+```ts
+  "settings":           [],
+```
+```ts
+  "archive.closeMonth":   { guest: false, employee: false, supervisor: false, manager: false },
+};
+```
+
+**After:**
+```ts
+      {
+        id: "archive.closeMonth",
+        label: "إقفال الأشهر وإعادة فتحها",
+        description: "إقفال شهر لمنع أي تعديل على بياناته أو إعادة فتحه للتعديل",
+      },
+      {
+        id: "view-error-log",
+        label: "عرض سجل الأخطاء",
+        description: "إظهار سجل الأخطاء الأخيرة داخل صفحة الإعدادات",
+      },
+    ],
+  },
+] as const;
+```
+```ts
+  "settings":           ["view-error-log"],
+```
+```ts
+  "archive.closeMonth":   { guest: false, employee: false, supervisor: false, manager: false },
+  "view-error-log":       { guest: false, employee: false, supervisor: false, manager: false },
+};
+```
+
+**File:** `src/components/Sidebar/Tabs/Settings/ErrorLogSection.tsx`
+
+**Before:**
+```tsx
+  const { role } = usePermissions();
+  const [isOpen, setIsOpen] = useState(false);
+  const [errors, setErrors] = useState<ErrorEntry[]>(() => getRecentErrors());
+
+  if (role !== "admin") return null;
+```
+
+**After:**
+```tsx
+  const { can } = usePermissions();
+  const [isOpen, setIsOpen] = useState(false);
+  const [errors, setErrors] = useState<ErrorEntry[]>(() => getRecentErrors());
+
+  if (!can("view-error-log")) return null;
+```
+
+## v42.61 — 2026-07-12 — C3.3 (feature-batch): gate TemplateBuilder on new manage-inspection-template feature
+
+Batch C item 3, gap 3. `TemplateBuilder/index.tsx` blocked the page with a hardcoded
+`role !== "manager" && role !== "admin"`. Added a new featureId `manage-inspection-template`
+(group "workspace"/إدارة مساحة العمل, mapped to the `employee-workspace` tab), default
+manager+admin only (matches current behavior), and replaced the hardcode with a `hasFeature` check.
+
+**File:** `src/auth/userManagement.ts`
+
+**Before:** (workspace group tail + TAB_FEATURE_MAP employee-workspace + FEATURE_DEFAULTS)
+```ts
+      {
+        id: "ew.reopenAnswer",
+        label: "إعادة فتح الإجابات المقدمة",
+        description: "إرجاع إجابة مقدمة إلى مسودة ليتمكن الموظف من تصحيحها",
+      },
+    ],
+  },
+  {
+    groupId: "population",
+```
+```ts
+  "employee-workspace": ["approve-referrals", "approve-replacements", "view-all-entries", "view-employee-stats", "submit-referrals", "request-replacement", "submit-answers", "configure-referral-columns", "ew.reopenAnswer"],
+```
+```ts
+  "ew.reopenAnswer":      { guest: false, employee: false, supervisor: true,  manager: true  },
+```
+
+**After:**
+```ts
+      {
+        id: "ew.reopenAnswer",
+        label: "إعادة فتح الإجابات المقدمة",
+        description: "إرجاع إجابة مقدمة إلى مسودة ليتمكن الموظف من تصحيحها",
+      },
+      {
+        id: "manage-inspection-template",
+        label: "إدارة نموذج الفحص",
+        description: "إنشاء وتعديل قوالب نموذج الفحص في مساحة العمل",
+      },
+    ],
+  },
+  {
+    groupId: "population",
+```
+```ts
+  "employee-workspace": ["approve-referrals", "approve-replacements", "view-all-entries", "view-employee-stats", "submit-referrals", "request-replacement", "submit-answers", "configure-referral-columns", "ew.reopenAnswer", "manage-inspection-template"],
+```
+```ts
+  "ew.reopenAnswer":      { guest: false, employee: false, supervisor: true,  manager: true  },
+  "manage-inspection-template": { guest: false, employee: false, supervisor: false, manager: true },
+```
+
+**File:** `src/components/Sidebar/Tabs/TemplateBuilder/index.tsx`
+
+**Before:**
+```tsx
+import { readSession } from "../../../../auth/authSession";
+```
+```tsx
+  if (role !== "manager" && role !== "admin") {
+    return (
+      <section className="tb-page" dir="rtl">
+        <div className="tb-empty">إدارة نموذج الفحص متاحة للمدير والإدارة فقط.</div>
+      </section>
+    );
+  }
+```
+
+**After:**
+```tsx
+import { readSession } from "../../../../auth/authSession";
+import { hasFeature, readUserManagementState } from "../../../../auth/userManagement";
+```
+```tsx
+  const canManageTemplates = hasFeature(
+    readUserManagementState().featurePermissions,
+    role,
+    "manage-inspection-template"
+  );
+  if (!canManageTemplates) {
+    return (
+      <section className="tb-page" dir="rtl">
+        <div className="tb-empty">إدارة نموذج الفحص متاحة حسب الصلاحية الممنوحة فقط.</div>
+      </section>
+    );
+  }
+```
+
+## v42.60 — 2026-07-12 — C3.2 (feature-batch): fix non-functional archive.closeMonth toggle (remove isAdmin hardcode)
+
+Batch C item 3, gap 2. `Archive/index.tsx` computed `canCloseMonth` as
+`isAdmin && hasFeature(..., "archive.closeMonth")` — the leading `isAdmin &&` made the existing
+`archive.closeMonth` feature toggle non-functional for every non-admin role (the admin could never
+grant it). Removed the hardcode; the feature toggle alone now decides. Behavior change (intended
+per plan): any role the admin enables `archive.closeMonth` for can close/reopen a month. Default
+stays admin-only, so no change out of the box.
+
+**File:** `src/components/Sidebar/Tabs/Archive/index.tsx`
+
+**Before:**
+```tsx
+  // Month close-out is admin-only, additionally gated by the archive.closeMonth feature.
+  const role = session?.role ?? "guest";
+  const canCloseMonth = useMemo(
+    () => isAdmin && hasFeature(readUserManagementState().featurePermissions, role, "archive.closeMonth"),
+    [isAdmin, role]
+  );
+```
+
+**After:**
+```tsx
+  // Month close-out is gated solely by the archive.closeMonth feature toggle (admin-only by
+  // default; admins can extend it to other roles from the feature-permission matrix).
+  const role = session?.role ?? "guest";
+  const canCloseMonth = useMemo(
+    () => hasFeature(readUserManagementState().featurePermissions, role, "archive.closeMonth"),
+    [role]
+  );
+```
+
+## v42.59 — 2026-07-12 — C3.1 (feature-batch): gate sampling-stage unlock on new unlock-sampling-stage feature
+
+Batch C item 3, gap 1. `PhaseThreeSampling.tsx` computed `canUnlock = userRole === "admin"`.
+Added a new featureId `unlock-sampling-stage` (group "population"/معالجة المجتمع, mapped to the
+`population` tab), default admin-only (matches current behavior — all managed roles disabled, admin
+always-on via `hasFeature`), and replaced the hardcode with a `hasFeature` check on the passed
+`userRole`. Unlock alert/title strings reworded from "Admin-only" to permission-generic.
+
+**File:** `src/auth/userManagement.ts`
+
+**Before:** (population group tail + TAB_FEATURE_MAP population + FEATURE_DEFAULTS)
+```ts
+      {
+        id: "view-browse",
+        label: "تصفح بيانات المجتمع",
+        description: "استعراض جدول بيانات المجتمع والإحصائيات",
+      },
+    ],
+  },
+```
+```ts
+  "population":         ["upload-data", "process-population", "configure-sample", "draw-sample", "distribute-samples", "bulk-assign", "view-browse"],
+```
+```ts
+  "view-browse":          { guest: true,  employee: true,  supervisor: true,  manager: true  },
+```
+
+**After:**
+```ts
+      {
+        id: "view-browse",
+        label: "تصفح بيانات المجتمع",
+        description: "استعراض جدول بيانات المجتمع والإحصائيات",
+      },
+      {
+        id: "unlock-sampling-stage",
+        label: "إلغاء قفل مراحل العينة",
+        description: "فتح المراحل المقفلة (تلقائياً أو يدوياً) في إعداد سحب العينة",
+      },
+    ],
+  },
+```
+```ts
+  "population":         ["upload-data", "process-population", "configure-sample", "draw-sample", "distribute-samples", "bulk-assign", "view-browse", "unlock-sampling-stage"],
+```
+```ts
+  "view-browse":          { guest: true,  employee: true,  supervisor: true,  manager: true  },
+  "unlock-sampling-stage": { guest: false, employee: false, supervisor: false, manager: false },
+```
+
+**File:** `src/components/Sidebar/Tabs/Population/components/PhaseThreeSampling.tsx`
+
+**Before:**
+```tsx
+import { AlertTriangle, Lock, Unlock } from "lucide-react";
+```
+```tsx
+            const canUnlock = userRole === "admin";
+```
+
+**After:**
+```tsx
+import { AlertTriangle, Lock, Unlock } from "lucide-react";
+import { hasFeature, readUserManagementState } from "../../../../../auth/userManagement";
+import type { AuthRole } from "../../../../../auth/authTypes";
+```
+```tsx
+            const canUnlock = hasFeature(
+              readUserManagementState().featurePermissions,
+              userRole as AuthRole,
+              "unlock-sampling-stage"
+            );
+```
+
 ## v42.58 — 2026-07-12 — C2 (feature-batch): verify shipped defaults == Test6 export (no-op, documentation)
 
 Batch C item 2. Re-read the user's real workspace export

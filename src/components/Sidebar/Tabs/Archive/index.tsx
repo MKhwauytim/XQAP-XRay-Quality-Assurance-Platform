@@ -82,11 +82,12 @@ export default function ArchiveTab() {
   const [lockTarget, setLockTarget] = useState<{ folderName: string; mode: "close" | "reopen" } | null>(null);
   const [isLocking, setIsLocking] = useState(false);
 
-  // Month close-out is admin-only, additionally gated by the archive.closeMonth feature.
+  // Month close-out is gated solely by the archive.closeMonth feature toggle (admin-only by
+  // default; admins can extend it to other roles from the feature-permission matrix).
   const role = session?.role ?? "guest";
   const canCloseMonth = useMemo(
-    () => isAdmin && hasFeature(readUserManagementState().featurePermissions, role, "archive.closeMonth"),
-    [isAdmin, role]
+    () => hasFeature(readUserManagementState().featurePermissions, role, "archive.closeMonth"),
+    [role]
   );
 
   const refresh = useCallback(async () => {
