@@ -1,5 +1,6 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { casLoop } from "../storage/casLoop";
 import { withResourceLock } from "../storage/webLocks";
 import type { BrowseDatasetKind } from "../population/populationStorage";
 import { getSystemRoot, SYSTEM_FOLDER_NAMES } from "../workspace/workspacePaths";
@@ -25,6 +26,10 @@ export type UserBrowsePresetFile = {
 
 export type SharedBrowsePresetFile = {
   owner: "admin";
+  /** Monotonically increasing counter for CAS conflict detection. */
+  revision?: number;
+  /** Per-write UUID embedded by casLoop for cross-machine race detection. */
+  _writeToken?: string;
   browseData: Partial<Record<BrowsePresetDatasetKind, BrowseDatasetPreset>>;
 };
 
@@ -138,24 +143,38 @@ export async function saveAdminBrowseDatasetPreset(
   directoryHandle: DirectoryHandleLike,
   dataset: BrowsePresetDatasetKind,
   preset: Omit<BrowseDatasetPreset, "updatedAt">
-): Promise<void> {
-  // `:rmw` suffix — see saveUserBrowseDatasetPreset: keeps this outer lock distinct
-  // from safeWriteJson's internal non-reentrant lock to avoid a self-deadlock.
-  await withResourceLock(`${SYSTEM_FOLDER_NAMES.userPresets}/${ADMIN_SHARED_PRESET_FILE}:rmw`, async () => {
-    const existing = await loadAdminBrowsePreset(directoryHandle);
-    const nextFile: SharedBrowsePresetFile = {
-      owner: "admin",
-      browseData: {
-        ...existing.browseData,
-        [dataset]: {
-          ...preset,
-          updatedAt: new Date().toISOString(),
-        },
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  // Shared, multi-writer file (any admin on any PC). `:rmw` suffix — see
+  // saveUserBrowseDatasetPreset: keeps this outer lock distinct from safeWriteJson's
+  // internal non-reentrant lock to avoid a self-deadlock. The outer lock serializes
+  // same-tab saves; casLoop's revision + _writeToken read-back guards cross-machine races.
+  return withResourceLock(`${SYSTEM_FOLDER_NAMES.userPresets}/${ADMIN_SHARED_PRESET_FILE}:rmw`, () =>
+    casLoop<{ ok: true }>(
+      async (writeToken) => {
+        const existing = await loadAdminBrowsePreset(directoryHandle);
+        const nextRevision = (existing.revision ?? 0) + 1;
+        const nextFile: SharedBrowsePresetFile = {
+          owner: "admin",
+          revision: nextRevision,
+          _writeToken: writeToken,
+          browseData: {
+            ...existing.browseData,
+            [dataset]: {
+              ...preset,
+              updatedAt: new Date().toISOString(),
+            },
+          },
+        };
+        const dir = await getPresetDir(directoryHandle, true);
+        await safeWriteJson(dir, ADMIN_SHARED_PRESET_FILE, nextFile);
+        const verify = await loadAdminBrowsePreset(directoryHandle);
+        if (verify.revision === nextRevision && verify._writeToken === writeToken) {
+          return { done: true, result: { ok: true as const } };
+        }
+        return { done: false };
       },
-    };
-
-    const dir = await getPresetDir(directoryHandle, true);
-    await safeWriteJson(dir, ADMIN_SHARED_PRESET_FILE, nextFile);
-  });
+      { conflictError: "تعارض في الكتابة: لم يتمكن النظام من حفظ إعدادات الأعمدة بعد عدة محاولات." }
+    )
+  );
 }
 

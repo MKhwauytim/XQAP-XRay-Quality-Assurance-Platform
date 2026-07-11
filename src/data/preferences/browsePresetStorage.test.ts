@@ -49,6 +49,31 @@ describe("browsePresetStorage — save does not self-deadlock", () => {
     expect(loaded.browseData["xray-referrals"]?.visibleColumns).toEqual(["x"]);
   });
 
+  it("serializes concurrent admin shared-preset saves without dropping a dataset (cross-machine CAS)", async () => {
+    const root = makeRoot();
+    // Two admins on different PCs change different browse views at the same time.
+    // The shared preset merges one dataset key into browseData; without CAS one
+    // save would clobber the other's dataset. Both must survive, both return ok.
+    const [r1, r2] = await withTimeout(
+      Promise.all([
+        saveAdminBrowseDatasetPreset(root, "population", {
+          columnOrder: ["a"],
+          visibleColumns: ["a"],
+        }),
+        saveAdminBrowseDatasetPreset(root, "sample", {
+          columnOrder: ["s"],
+          visibleColumns: ["s"],
+        }),
+      ])
+    );
+    expect(r1.ok).toBe(true);
+    expect(r2.ok).toBe(true);
+
+    const loaded = await loadAdminBrowsePreset(root);
+    expect(loaded.browseData["population"]).toBeTruthy();
+    expect(loaded.browseData["sample"]).toBeTruthy();
+  });
+
   it("serializes concurrent same-user saves without dropping a dataset", async () => {
     const root = makeRoot();
     await withTimeout(

@@ -4,6 +4,120 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.54 — 2026-07-12 — D (feature-batch): CAS-protect the admin shared browse preset
+
+Batch D. `saveAdminBrowseDatasetPreset` writes `admin-shared.browse-preset.json` — a **shared,
+multi-writer** file: any admin on any PC can change browse-view column order/visibility. It is a
+read-modify-write that merges one dataset key into the existing `browseData` map, so two admins
+saving different views near-simultaneously could clobber each other's dataset (a lost update).
+Routed it through the same `withResourceLock` + `casLoop` pattern (revision + `_writeToken`,
+verified on read-back, retry with jitter). The existing outer `:rmw` lock is kept; casLoop now runs
+inside it. Return type widened from `Promise<void>` to the standard `{ ok: true } | { ok: false;
+error }` result so a persistent write conflict is surfaced rather than silently lost; both call
+sites already invoke it fire-and-forget with `void`, so nothing breaks.
+
+`saveUserBrowseDatasetPreset` is **deliberately left as plain safeWriteJson** (with its existing
+`:rmw` lock): `{username}.browse-preset.json` is a per-user file only ever written by that one user,
+so it is single-writer by design — the exact carve-out Batch D allows. Cross-machine last-writer-wins
+on one person's own column preferences is acceptable and needs no CAS.
+
+**File:** `src/data/preferences/browsePresetStorage.ts`
+
+**Before:**
+```ts
+import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { withResourceLock } from "../storage/webLocks";
+```
+```ts
+export type SharedBrowsePresetFile = {
+  owner: "admin";
+  browseData: Partial<Record<BrowsePresetDatasetKind, BrowseDatasetPreset>>;
+};
+```
+```ts
+export async function saveAdminBrowseDatasetPreset(
+  directoryHandle: DirectoryHandleLike,
+  dataset: BrowsePresetDatasetKind,
+  preset: Omit<BrowseDatasetPreset, "updatedAt">
+): Promise<void> {
+  // `:rmw` suffix — see saveUserBrowseDatasetPreset: keeps this outer lock distinct
+  // from safeWriteJson's internal non-reentrant lock to avoid a self-deadlock.
+  await withResourceLock(`${SYSTEM_FOLDER_NAMES.userPresets}/${ADMIN_SHARED_PRESET_FILE}:rmw`, async () => {
+    const existing = await loadAdminBrowsePreset(directoryHandle);
+    const nextFile: SharedBrowsePresetFile = {
+      owner: "admin",
+      browseData: {
+        ...existing.browseData,
+        [dataset]: {
+          ...preset,
+          updatedAt: new Date().toISOString(),
+        },
+      },
+    };
+
+    const dir = await getPresetDir(directoryHandle, true);
+    await safeWriteJson(dir, ADMIN_SHARED_PRESET_FILE, nextFile);
+  });
+}
+```
+
+**After:**
+```ts
+import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { casLoop } from "../storage/casLoop";
+import { withResourceLock } from "../storage/webLocks";
+```
+```ts
+export type SharedBrowsePresetFile = {
+  owner: "admin";
+  /** Monotonically increasing counter for CAS conflict detection. */
+  revision?: number;
+  /** Per-write UUID embedded by casLoop for cross-machine race detection. */
+  _writeToken?: string;
+  browseData: Partial<Record<BrowsePresetDatasetKind, BrowseDatasetPreset>>;
+};
+```
+```ts
+export async function saveAdminBrowseDatasetPreset(
+  directoryHandle: DirectoryHandleLike,
+  dataset: BrowsePresetDatasetKind,
+  preset: Omit<BrowseDatasetPreset, "updatedAt">
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  // Shared, multi-writer file (any admin on any PC). `:rmw` suffix — see
+  // saveUserBrowseDatasetPreset: keeps this outer lock distinct from safeWriteJson's
+  // internal non-reentrant lock to avoid a self-deadlock. The outer lock serializes
+  // same-tab saves; casLoop's revision + _writeToken read-back guards cross-machine races.
+  return withResourceLock(`${SYSTEM_FOLDER_NAMES.userPresets}/${ADMIN_SHARED_PRESET_FILE}:rmw`, () =>
+    casLoop<{ ok: true }>(
+      async (writeToken) => {
+        const existing = await loadAdminBrowsePreset(directoryHandle);
+        const nextRevision = (existing.revision ?? 0) + 1;
+        const nextFile: SharedBrowsePresetFile = {
+          owner: "admin",
+          revision: nextRevision,
+          _writeToken: writeToken,
+          browseData: {
+            ...existing.browseData,
+            [dataset]: {
+              ...preset,
+              updatedAt: new Date().toISOString(),
+            },
+          },
+        };
+        const dir = await getPresetDir(directoryHandle, true);
+        await safeWriteJson(dir, ADMIN_SHARED_PRESET_FILE, nextFile);
+        const verify = await loadAdminBrowsePreset(directoryHandle);
+        if (verify.revision === nextRevision && verify._writeToken === writeToken) {
+          return { done: true, result: { ok: true as const } };
+        }
+        return { done: false };
+      },
+      { conflictError: "تعارض في الكتابة: لم يتمكن النظام من حفظ إعدادات الأعمدة بعد عدة محاولات." }
+    )
+  );
+}
+```
+
 ## v42.53 — 2026-07-12 — D (feature-batch): CAS-protect supervisor decision appends (approvals + referral)
 
 Batch D (cross-machine write safety). `appendDecisionEvent` is the shared write path behind
