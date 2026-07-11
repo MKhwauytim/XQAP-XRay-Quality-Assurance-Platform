@@ -4,6 +4,714 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.47 — 2026-07-11 — E2 (Batch 5): chart axis labels + legends in the executive report chart primitives
+
+Closes the E2 gap identified in the hardening audit: `charts.ts` had 10 `<text>` elements
+(group/column/row labels, center/percentage readouts) but no dedicated axis-reference or legend
+primitives — `rankedBar`, `gauge`, `donut`, `groupedBars`, `stackedBars`, and `heatmap` gave no
+way to read the underlying scale or, for multi-series charts, tell which color meant which
+series. All additions reuse the pattern already established in this file: reserve a small strip
+of the *existing* viewBox height (never grow past what `opts.height` already promises callers)
+and shrink the main visual to fit; every label routes through the file's existing `escText()`
+helper; RTL placement matches the file's established convention (marker/primary content on the
+RIGHT, growing left — the same order `rankedBar`'s label/track/value row already uses). Two
+small shared helpers (`legendHeight`, `legendRows`) back the vertical swatch-and-label legend
+used by `donut`/`groupedBars`/`stackedBars` so the layout math and RTL positioning is written
+once, not three times. No runtime JS, no new npm dependency, no change to any caller's contract
+(`opts.width`/`opts.height` keep their existing meaning) — pure additions inside `ui/charts.ts`.
+
+**File:** `src/data/reporting/executive/ui/charts.ts`
+
+Docblock discipline list — documents the new legend/axis convention:
+
+**Before:**
+```ts
+// Discipline (master §16 / design §4.3):
+//   • empty / null / zero-denominator data → small neutral "—" empty state, never throw
+//   • percentages clamped to 0–100
+//   • RTL: ranked-bar labels sit on the RIGHT
+//   • text kept minimal; all labels passed in as params (Arabic-ready)
+```
+
+**After:**
+```ts
+// Discipline (master §16 / design §4.3):
+//   • empty / null / zero-denominator data → small neutral "—" empty state, never throw
+//   • percentages clamped to 0–100
+//   • RTL: ranked-bar labels sit on the RIGHT
+//   • text kept minimal; all labels passed in as params (Arabic-ready)
+//   • legends/axis ticks: vertical swatch+label rows, RTL (marker right, label growing
+//     left); reserved inside the existing viewBox height, never grows past opts.height
+//   • every legend/axis label routes through escText() — no new unescaped interpolation
+```
+
+New shared helpers, inserted right after `emptyState()` and before the `// ── types` section:
+
+**Before:** *(nothing — new code)*
+
+**After:**
+```ts
+/** Row height (px) for one vertical legend entry (swatch + label) — derived from the
+ *  micro type size so legends stay visually consistent with the smallest chart text
+ *  already in use (column/group/row labels all use TYPE.micro). */
+const LEGEND_ROW_H = TYPE.micro + 7;
+
+/** Vertical space (px) a legend of `n` entries needs, including top padding. A single
+ *  entry needs no legend — there is nothing to distinguish — so this returns 0 for
+ *  n <= 1, letting callers skip the legend and keep the full chart area. */
+function legendHeight(n: number): number {
+  return n > 1 ? n * LEGEND_ROW_H + 6 : 0;
+}
+
+/**
+ * Vertical legend: one "swatch + label" row per entry, colored by `seriesColor`. RTL —
+ * the swatch sits flush to the right edge with the label growing leftward from it
+ * (`text-anchor="end"`), mirroring the marker/label order used elsewhere in this file
+ * (e.g. rankedBar's label-on-the-right row). `top` is the y-coordinate of the first
+ * row's top edge. Returns raw <rect>/<text> markup to splice into an already-open
+ * <svg>; every label is escText()-escaped (labels/series names are caller-supplied).
+ */
+function legendRows(items: { label: string; colorIndex: number }[], w: number, top: number): string {
+  return items
+    .map((it, i) => {
+      const cy = top + i * LEGEND_ROW_H + LEGEND_ROW_H / 2;
+      const swatchX = w - 12;
+      return (
+        `<rect x="${r(swatchX - 8)}" y="${r(cy - 4)}" width="8" height="8" rx="2" fill="${seriesColor(it.colorIndex)}"/>` +
+        `<text x="${r(swatchX - 12)}" y="${r(cy)}" text-anchor="end" dominant-baseline="middle" font-size="${TYPE.micro}" fill="${cssVar("text")}">${escText(it.label)}</text>`
+      );
+    })
+    .join("");
+}
+```
+
+`rankedBar` — axis reference row (0 → max) framing the shared bar-track scale:
+
+**Before:**
+```ts
+export function rankedBar(data: LabeledValue[], opts: ChartOpts = {}): string {
+  if (!data || data.length === 0) return emptyState(opts.width, opts.height, opts.emptyNote);
+  // Rendered as HTML/CSS (not SVG): Arabic <text> inside SVG shapes unreliably across
+  // renderers, so labels + values live in HTML where RTL Arabic always shapes correctly.
+  // RTL row order (right → left): label · bar track (fills from right) · value.
+  const max = Math.max(0, ...data.map((d) => (Number.isFinite(d.value) ? d.value : 0)));
+  const rows = data
+    .map((d, i) => {
+      const v = Number.isFinite(d.value) ? Math.max(0, d.value) : 0;
+      const pct = max > 0 ? clamp((v / max) * 100, 0, 100) : 0;
+      const w = pct > 0 ? Math.max(3, pct) : 0;
+      return (
+        `<div style="display:flex;align-items:center;gap:12px;width:100%">` +
+        `<span style="flex:0 0 auto;min-width:96px;max-width:40%;text-align:right;font-weight:600;font-size:14px;color:${cssVar("text")};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escText(d.label)}</span>` +
+        `<span style="flex:1 1 auto;height:26px;border-radius:8px;background:${cssVar("line")};position:relative;overflow:hidden">` +
+        `<i style="position:absolute;inset-inline-end:0;top:0;height:100%;width:${r(w)}%;background:${seriesColor(i)};border-radius:8px"></i></span>` +
+        `<span style="flex:0 0 auto;min-width:38px;text-align:left;font-weight:800;font-size:14px;color:${cssVar("primary")}">${r(v)}</span>` +
+        `</div>`
+      );
+    })
+    .join("");
+  return `<div style="display:flex;flex-direction:column;justify-content:center;gap:12px;width:100%;height:100%">${rows}</div>`;
+}
+```
+
+**After:**
+```ts
+export function rankedBar(data: LabeledValue[], opts: ChartOpts = {}): string {
+  if (!data || data.length === 0) return emptyState(opts.width, opts.height, opts.emptyNote);
+  // Rendered as HTML/CSS (not SVG): Arabic <text> inside SVG shapes unreliably across
+  // renderers, so labels + values live in HTML where RTL Arabic always shapes correctly.
+  // RTL row order (right → left): label · bar track (fills from right) · value.
+  const max = Math.max(0, ...data.map((d) => (Number.isFinite(d.value) ? d.value : 0)));
+  const rows = data
+    .map((d, i) => {
+      const v = Number.isFinite(d.value) ? Math.max(0, d.value) : 0;
+      const pct = max > 0 ? clamp((v / max) * 100, 0, 100) : 0;
+      const w = pct > 0 ? Math.max(3, pct) : 0;
+      return (
+        `<div style="display:flex;align-items:center;gap:12px;width:100%">` +
+        `<span style="flex:0 0 auto;min-width:96px;max-width:40%;text-align:right;font-weight:600;font-size:14px;color:${cssVar("text")};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escText(d.label)}</span>` +
+        `<span style="flex:1 1 auto;height:26px;border-radius:8px;background:${cssVar("line")};position:relative;overflow:hidden">` +
+        `<i style="position:absolute;inset-inline-end:0;top:0;height:100%;width:${r(w)}%;background:${seriesColor(i)};border-radius:8px"></i></span>` +
+        `<span style="flex:0 0 auto;min-width:38px;text-align:left;font-weight:800;font-size:14px;color:${cssVar("primary")}">${r(v)}</span>` +
+        `</div>`
+      );
+    })
+    .join("");
+  // Axis reference row: frames the shared 0→max scale every bar is drawn against (bars
+  // are proportional to the same `max`, so the scale is meaningful even though each row
+  // also prints its own value). Reuses the exact label/track/value column widths so the
+  // "0" / max ticks line up under the track they describe. RTL: "0" (baseline) sits by
+  // the label column on the right, the ceiling value by the value column on the left —
+  // same right→left order as the rows above.
+  const axis =
+    max > 0
+      ? `<div style="display:flex;align-items:center;gap:12px;width:100%;margin-top:-2px">` +
+        `<span style="flex:0 0 auto;min-width:96px;max-width:40%"></span>` +
+        `<span style="flex:1 1 auto;display:flex;justify-content:space-between;font-size:${TYPE.micro}px;color:${cssVar("muted")}">` +
+        `<span>0</span><span>${r(max)}</span></span>` +
+        `<span style="flex:0 0 auto;min-width:38px"></span>` +
+        `</div>`
+      : "";
+  return `<div style="display:flex;flex-direction:column;justify-content:center;gap:12px;width:100%;height:100%">${rows}${axis}</div>`;
+}
+```
+
+`donut` — category legend (swatch + label + share %); the ring shrinks to make room:
+
+**Before:**
+```ts
+export function donut(data: LabeledValue[], opts: ChartOpts = {}): string {
+  const positive = (data ?? []).filter((d) => Number.isFinite(d.value) && d.value > 0);
+  const total = positive.reduce((s, d) => s + d.value, 0);
+  if (positive.length === 0 || total <= 0) {
+    return emptyState(opts.width, opts.height, opts.emptyNote);
+  }
+  const w = opts.width ?? 220;
+  const h = opts.height ?? 220;
+  const cx = w / 2;
+  const cy = h / 2;
+  const rad = Math.min(w, h) / 2 - 14;
+  const stroke = Math.max(10, rad * 0.34);
+
+  let acc = -Math.PI / 2;
+  const segs = positive
+    .map((d, i) => {
+      const frac = d.value / total; // total > 0 guaranteed
+      const a0 = acc;
+      const a1 = acc + frac * Math.PI * 2;
+      acc = a1;
+      // full-circle single segment: draw a ring instead of a 0-length arc
+      if (frac >= 0.9999) {
+        return `<circle cx="${r(cx)}" cy="${r(cy)}" r="${r(rad)}" fill="none" stroke="${seriesColor(i)}" stroke-width="${r(stroke)}"/>`;
+      }
+      return `<path d="${arcPath(cx, cy, rad, a0, a1)}" fill="none" stroke="${seriesColor(i)}" stroke-width="${r(stroke)}" stroke-linecap="butt"/>`;
+    })
+    .join("");
+
+  const centerLabel = `${Math.round((positive[0].value / total) * 100)}%`;
+  return (
+    svgOpen(w, h) +
+    `<circle cx="${r(cx)}" cy="${r(cy)}" r="${r(rad)}" fill="none" stroke="${cssVar("line")}" stroke-width="${r(stroke)}"/>` +
+    segs +
+    `<text x="${r(cx)}" y="${r(cy)}" text-anchor="middle" dominant-baseline="middle" font-size="${TYPE.subtitle}" font-weight="800" fill="${cssVar("text")}">${escText(centerLabel)}</text>` +
+    `</svg>`
+  );
+}
+```
+
+**After:**
+```ts
+export function donut(data: LabeledValue[], opts: ChartOpts = {}): string {
+  const positive = (data ?? []).filter((d) => Number.isFinite(d.value) && d.value > 0);
+  const total = positive.reduce((s, d) => s + d.value, 0);
+  if (positive.length === 0 || total <= 0) {
+    return emptyState(opts.width, opts.height, opts.emptyNote);
+  }
+  const w = opts.width ?? 220;
+  const h = opts.height ?? 220;
+  // Category legend reserves a bottom strip inside the SAME viewBox height (opts.height
+  // keeps its external meaning) — the ring shrinks to make room, same pattern used by
+  // the other chart primitives. Capped so a long category list can't collapse the ring.
+  const legendH = Math.min(h * 0.5, legendHeight(positive.length));
+  const ringAreaH = Math.max(60, h - legendH);
+  const cx = w / 2;
+  const cy = ringAreaH / 2;
+  const rad = Math.min(w, ringAreaH) / 2 - 14;
+  const stroke = Math.max(10, rad * 0.34);
+
+  let acc = -Math.PI / 2;
+  const segs = positive
+    .map((d, i) => {
+      const frac = d.value / total; // total > 0 guaranteed
+      const a0 = acc;
+      const a1 = acc + frac * Math.PI * 2;
+      acc = a1;
+      // full-circle single segment: draw a ring instead of a 0-length arc
+      if (frac >= 0.9999) {
+        return `<circle cx="${r(cx)}" cy="${r(cy)}" r="${r(rad)}" fill="none" stroke="${seriesColor(i)}" stroke-width="${r(stroke)}"/>`;
+      }
+      return `<path d="${arcPath(cx, cy, rad, a0, a1)}" fill="none" stroke="${seriesColor(i)}" stroke-width="${r(stroke)}" stroke-linecap="butt"/>`;
+    })
+    .join("");
+
+  const centerLabel = `${Math.round((positive[0].value / total) * 100)}%`;
+  // Category legend — one row per segment, RTL (swatch on the right, label growing
+  // left from it). Skipped for a single-category donut: nothing to distinguish.
+  const legend =
+    positive.length > 1
+      ? legendRows(
+          positive.map((d, i) => ({
+            label: `${d.label} · ${Math.round((d.value / total) * 100)}%`,
+            colorIndex: i,
+          })),
+          w,
+          h - legendH + 4,
+        )
+      : "";
+
+  return (
+    svgOpen(w, h) +
+    `<circle cx="${r(cx)}" cy="${r(cy)}" r="${r(rad)}" fill="none" stroke="${cssVar("line")}" stroke-width="${r(stroke)}"/>` +
+    segs +
+    `<text x="${r(cx)}" y="${r(cy)}" text-anchor="middle" dominant-baseline="middle" font-size="${TYPE.subtitle}" font-weight="800" fill="${cssVar("text")}">${escText(centerLabel)}</text>` +
+    legend +
+    `</svg>`
+  );
+}
+```
+
+`gauge` — 0%/100% axis-reference ticks at the two ends of the dial:
+
+**Before:**
+```ts
+export function gauge(value: number | null, opts: ChartOpts = {}): string {
+  const pct = clampPct(value);
+  if (pct === null) return emptyState(opts.width, opts.height ?? 150, opts.emptyNote);
+  const w = opts.width ?? 240;
+  const h = opts.height ?? 150;
+  const cx = w / 2;
+  const cy = h - 18;
+  const rad = Math.min(w / 2, h - 24) - 8;
+  const stroke = Math.max(10, rad * 0.22);
+  // semicircle from 180° (left) to 0° (right)
+  const a0 = Math.PI;
+  const a1 = Math.PI + (pct / 100) * Math.PI;
+  const role =
+    pct >= 90 ? "success" : pct >= 75 ? "primary" : pct >= 50 ? "info" : "danger";
+
+  return (
+    svgOpen(w, h) +
+    `<path d="${arcPath(cx, cy, rad, a0, 2 * Math.PI)}" fill="none" stroke="${cssVar("line")}" stroke-width="${r(stroke)}" stroke-linecap="round"/>` +
+    `<path d="${arcPath(cx, cy, rad, a0, a1)}" fill="none" stroke="${cssVar(role)}" stroke-width="${r(stroke)}" stroke-linecap="round"/>` +
+    `<text x="${r(cx)}" y="${r(cy - 6)}" text-anchor="middle" font-size="${TYPE.title}" font-weight="800" fill="${cssVar("text")}">${r(Math.round(pct))}%</text>` +
+    `</svg>`
+  );
+}
+```
+
+**After:**
+```ts
+export function gauge(value: number | null, opts: ChartOpts = {}): string {
+  const pct = clampPct(value);
+  if (pct === null) return emptyState(opts.width, opts.height ?? 150, opts.emptyNote);
+  const w = opts.width ?? 240;
+  const h = opts.height ?? 150;
+  // Reserve a thin strip under the dial for 0%/100% axis-reference ticks, inside the
+  // SAME viewBox height (opts.height keeps meaning what callers expect) — the dial
+  // shrinks slightly to make room, same pattern used by the other chart primitives.
+  const tickAreaH = TYPE.micro + 8;
+  const dialH = h - tickAreaH;
+  const cx = w / 2;
+  const cy = dialH - 18;
+  const rad = Math.min(w / 2, dialH - 24) - 8;
+  const stroke = Math.max(10, rad * 0.22);
+  // semicircle from 180° (left) to 0° (right)
+  const a0 = Math.PI;
+  const a1 = Math.PI + (pct / 100) * Math.PI;
+  const role =
+    pct >= 90 ? "success" : pct >= 75 ? "primary" : pct >= 50 ? "info" : "danger";
+  // Axis reference labels at the two ends of the dial's scale. The dial itself stays
+  // geometric (a semicircle always reads low→high left→right, like a physical gauge) —
+  // only the tick text-anchors are RTL-tuned so neither label runs past the viewBox.
+  const tickY = h - 4;
+  const axis =
+    `<text x="${r(cx - rad)}" y="${r(tickY)}" text-anchor="start" font-size="${TYPE.micro}" fill="${cssVar("muted")}">0%</text>` +
+    `<text x="${r(cx + rad)}" y="${r(tickY)}" text-anchor="end" font-size="${TYPE.micro}" fill="${cssVar("muted")}">100%</text>`;
+
+  return (
+    svgOpen(w, h) +
+    `<path d="${arcPath(cx, cy, rad, a0, 2 * Math.PI)}" fill="none" stroke="${cssVar("line")}" stroke-width="${r(stroke)}" stroke-linecap="round"/>` +
+    `<path d="${arcPath(cx, cy, rad, a0, a1)}" fill="none" stroke="${cssVar(role)}" stroke-width="${r(stroke)}" stroke-linecap="round"/>` +
+    `<text x="${r(cx)}" y="${r(cy - 6)}" text-anchor="middle" font-size="${TYPE.title}" font-weight="800" fill="${cssVar("text")}">${r(Math.round(pct))}%</text>` +
+    axis +
+    `</svg>`
+  );
+}
+```
+
+`groupedBars` — series legend (swatch + label), skipped for a single series:
+
+**Before:**
+```ts
+export function groupedBars(data: SeriesGroup, opts: ChartOpts = {}): string {
+  if (!data || data.groups.length === 0 || data.series.length === 0) {
+    return emptyState(opts.width, opts.height, opts.emptyNote);
+  }
+  const w = opts.width ?? 360;
+  const h = opts.height ?? 200;
+  const padBottom = 24;
+  const padTop = 10;
+  const plotH = h - padBottom - padTop;
+  const max = seriesMax(data);
+  const groupW = w / data.groups.length;
+  const sCount = data.series.length;
+  const barW = Math.max(4, (groupW * 0.7) / sCount);
+
+  let bars = "";
+  data.groups.forEach((g, gi) => {
+    const gx = gi * groupW + groupW * 0.15;
+    data.series.forEach((ser, si) => {
+      const v = Number.isFinite(ser.values[gi]) ? Math.max(0, ser.values[gi]) : 0;
+      const frac = max > 0 ? v / max : 0; // divide-by-zero guard
+      const bh = clamp(frac, 0, 1) * plotH;
+      const x = gx + si * barW;
+      const y = padTop + (plotH - bh);
+      bars += `<rect x="${r(x)}" y="${r(y)}" width="${r(barW - 1)}" height="${r(bh)}" rx="2" fill="${seriesColor(si)}"/>`;
+    });
+    bars += `<text x="${r(gi * groupW + groupW / 2)}" y="${r(h - 8)}" text-anchor="middle" font-size="${TYPE.micro}" fill="${cssVar("muted")}">${escText(g)}</text>`;
+  });
+
+  return (
+    svgOpen(w, h) +
+    `<line x1="0" y1="${r(padTop + plotH)}" x2="${r(w)}" y2="${r(padTop + plotH)}" stroke="${cssVar("line")}" stroke-width="1"/>` +
+    bars +
+    `</svg>`
+  );
+}
+```
+
+**After:**
+```ts
+export function groupedBars(data: SeriesGroup, opts: ChartOpts = {}): string {
+  if (!data || data.groups.length === 0 || data.series.length === 0) {
+    return emptyState(opts.width, opts.height, opts.emptyNote);
+  }
+  const w = opts.width ?? 360;
+  const h = opts.height ?? 200;
+  const padBottom = 24;
+  const padTop = 10;
+  // Series legend reserves a bottom strip inside the SAME viewBox height — the plot
+  // shrinks to make room, same pattern used by the other chart primitives. Skipped for
+  // a single series (legendHeight returns 0): nothing to distinguish, so behavior is
+  // identical to before this change.
+  const legendH = legendHeight(data.series.length);
+  const plotH = Math.max(20, h - padBottom - padTop - legendH);
+  const max = seriesMax(data);
+  const groupW = w / data.groups.length;
+  const sCount = data.series.length;
+  const barW = Math.max(4, (groupW * 0.7) / sCount);
+
+  let bars = "";
+  data.groups.forEach((g, gi) => {
+    const gx = gi * groupW + groupW * 0.15;
+    data.series.forEach((ser, si) => {
+      const v = Number.isFinite(ser.values[gi]) ? Math.max(0, ser.values[gi]) : 0;
+      const frac = max > 0 ? v / max : 0; // divide-by-zero guard
+      const bh = clamp(frac, 0, 1) * plotH;
+      const x = gx + si * barW;
+      const y = padTop + (plotH - bh);
+      bars += `<rect x="${r(x)}" y="${r(y)}" width="${r(barW - 1)}" height="${r(bh)}" rx="2" fill="${seriesColor(si)}"/>`;
+    });
+    bars += `<text x="${r(gi * groupW + groupW / 2)}" y="${r(padTop + plotH + 16)}" text-anchor="middle" font-size="${TYPE.micro}" fill="${cssVar("muted")}">${escText(g)}</text>`;
+  });
+
+  const legend =
+    data.series.length > 1
+      ? legendRows(
+          data.series.map((s, i) => ({ label: s.label, colorIndex: i })),
+          w,
+          h - legendH + 4,
+        )
+      : "";
+
+  return (
+    svgOpen(w, h) +
+    `<line x1="0" y1="${r(padTop + plotH)}" x2="${r(w)}" y2="${r(padTop + plotH)}" stroke="${cssVar("line")}" stroke-width="1"/>` +
+    bars +
+    legend +
+    `</svg>`
+  );
+}
+```
+
+`stackedBars` — same series-legend treatment as `groupedBars`:
+
+**Before:**
+```ts
+export function stackedBars(data: SeriesGroup, opts: ChartOpts = {}): string {
+  if (!data || data.groups.length === 0 || data.series.length === 0) {
+    return emptyState(opts.width, opts.height, opts.emptyNote);
+  }
+  const w = opts.width ?? 360;
+  const h = opts.height ?? 200;
+  const padBottom = 24;
+  const padTop = 10;
+  const plotH = h - padBottom - padTop;
+  // tallest stack total across groups
+  let max = 0;
+  data.groups.forEach((_, gi) => {
+    let sum = 0;
+    for (const ser of data.series) {
+      const v = ser.values[gi];
+      if (Number.isFinite(v) && v > 0) sum += v;
+    }
+    if (sum > max) max = sum;
+  });
+  const groupW = w / data.groups.length;
+  const barW = Math.max(6, groupW * 0.55);
+
+  let bars = "";
+  data.groups.forEach((g, gi) => {
+    const x = gi * groupW + (groupW - barW) / 2;
+    let yCursor = padTop + plotH;
+    data.series.forEach((ser, si) => {
+      const v = Number.isFinite(ser.values[gi]) ? Math.max(0, ser.values[gi]) : 0;
+      const frac = max > 0 ? v / max : 0; // divide-by-zero guard
+      const bh = clamp(frac, 0, 1) * plotH;
+      yCursor -= bh;
+      if (bh > 0) {
+        bars += `<rect x="${r(x)}" y="${r(yCursor)}" width="${r(barW)}" height="${r(bh)}" fill="${seriesColor(si)}"/>`;
+      }
+    });
+    bars += `<text x="${r(gi * groupW + groupW / 2)}" y="${r(h - 8)}" text-anchor="middle" font-size="${TYPE.micro}" fill="${cssVar("muted")}">${escText(g)}</text>`;
+  });
+
+  return (
+    svgOpen(w, h) +
+    `<line x1="0" y1="${r(padTop + plotH)}" x2="${r(w)}" y2="${r(padTop + plotH)}" stroke="${cssVar("line")}" stroke-width="1"/>` +
+    bars +
+    `</svg>`
+  );
+}
+```
+
+**After:**
+```ts
+export function stackedBars(data: SeriesGroup, opts: ChartOpts = {}): string {
+  if (!data || data.groups.length === 0 || data.series.length === 0) {
+    return emptyState(opts.width, opts.height, opts.emptyNote);
+  }
+  const w = opts.width ?? 360;
+  const h = opts.height ?? 200;
+  const padBottom = 24;
+  const padTop = 10;
+  // Series legend reserves a bottom strip inside the SAME viewBox height — see
+  // groupedBars for the identical pattern (kept consistent between the two).
+  const legendH = legendHeight(data.series.length);
+  const plotH = Math.max(20, h - padBottom - padTop - legendH);
+  // tallest stack total across groups
+  let max = 0;
+  data.groups.forEach((_, gi) => {
+    let sum = 0;
+    for (const ser of data.series) {
+      const v = ser.values[gi];
+      if (Number.isFinite(v) && v > 0) sum += v;
+    }
+    if (sum > max) max = sum;
+  });
+  const groupW = w / data.groups.length;
+  const barW = Math.max(6, groupW * 0.55);
+
+  let bars = "";
+  data.groups.forEach((g, gi) => {
+    const x = gi * groupW + (groupW - barW) / 2;
+    let yCursor = padTop + plotH;
+    data.series.forEach((ser, si) => {
+      const v = Number.isFinite(ser.values[gi]) ? Math.max(0, ser.values[gi]) : 0;
+      const frac = max > 0 ? v / max : 0; // divide-by-zero guard
+      const bh = clamp(frac, 0, 1) * plotH;
+      yCursor -= bh;
+      if (bh > 0) {
+        bars += `<rect x="${r(x)}" y="${r(yCursor)}" width="${r(barW)}" height="${r(bh)}" fill="${seriesColor(si)}"/>`;
+      }
+    });
+    bars += `<text x="${r(gi * groupW + groupW / 2)}" y="${r(padTop + plotH + 16)}" text-anchor="middle" font-size="${TYPE.micro}" fill="${cssVar("muted")}">${escText(g)}</text>`;
+  });
+
+  const legend =
+    data.series.length > 1
+      ? legendRows(
+          data.series.map((s, i) => ({ label: s.label, colorIndex: i })),
+          w,
+          h - legendH + 4,
+        )
+      : "";
+
+  return (
+    svgOpen(w, h) +
+    `<line x1="0" y1="${r(padTop + plotH)}" x2="${r(w)}" y2="${r(padTop + plotH)}" stroke="${cssVar("line")}" stroke-width="1"/>` +
+    bars +
+    legend +
+    `</svg>`
+  );
+}
+```
+
+`heatmap` — intensity-scale legend (4-step opacity ramp with أعلى/أقل end labels):
+
+**Before:**
+```ts
+export function heatmap(data: Matrix, opts: ChartOpts = {}): string {
+  if (!data || data.rows.length === 0 || data.cols.length === 0) {
+    return emptyState(opts.width, opts.height, opts.emptyNote);
+  }
+  const rowLabelW = 96;
+  const colLabelH = 20;
+  const cell = 34;
+  const w = opts.width ?? rowLabelW + data.cols.length * cell + 4;
+  const h = opts.height ?? colLabelH + data.rows.length * cell + 4;
+  const gridW = w - rowLabelW - 2;
+  const gridH = h - colLabelH - 2;
+  const cw = gridW / data.cols.length;
+  const ch = gridH / data.rows.length;
+
+  // max for intensity normalization (ignore null/non-finite)
+  let max = 0;
+  for (const row of data.values) {
+    for (const v of row ?? []) {
+      if (v !== null && Number.isFinite(v) && (v as number) > max) max = v as number;
+    }
+  }
+
+  let cells = "";
+  data.rows.forEach((rowLabel, ri) => {
+    const y = colLabelH + ri * ch;
+    cells += `<text x="${r(w - 2)}" y="${r(y + ch / 2)}" text-anchor="end" dominant-baseline="middle" font-size="${TYPE.micro}" fill="${cssVar("muted")}">${escText(rowLabel)}</text>`;
+    data.cols.forEach((_, ci) => {
+      const x = ci * cw;
+      const raw = data.values?.[ri]?.[ci];
+      const isNull = raw === null || raw === undefined || !Number.isFinite(raw as number);
+      const v = isNull ? 0 : (raw as number);
+      const intensity = max > 0 ? clamp(v / max, 0, 1) : 0; // divide-by-zero guard
+      const fillOpacity = isNull ? 0 : 0.12 + intensity * 0.78;
+      const cellFill = isNull ? "none" : cssVar("info");
+      cells +=
+        `<rect x="${r(x + 1)}" y="${r(y + 1)}" width="${r(cw - 2)}" height="${r(ch - 2)}" rx="3" fill="${cellFill}" fill-opacity="${r(fillOpacity)}" stroke="${cssVar("line")}" stroke-width="0.5"/>` +
+        `<text x="${r(x + cw / 2)}" y="${r(y + ch / 2)}" text-anchor="middle" dominant-baseline="middle" font-size="${TYPE.micro}" fill="${cssVar("text")}">${isNull ? "—" : r(v)}</text>`;
+    });
+  });
+
+  // column labels along the top
+  let colLabels = "";
+  data.cols.forEach((c, ci) => {
+    colLabels += `<text x="${r(ci * cw + cw / 2)}" y="${r(colLabelH - 6)}" text-anchor="middle" font-size="${TYPE.micro}" fill="${cssVar("muted")}">${escText(c)}</text>`;
+  });
+
+  return svgOpen(w, h) + colLabels + cells + `</svg>`;
+}
+```
+
+**After:**
+```ts
+export function heatmap(data: Matrix, opts: ChartOpts = {}): string {
+  if (!data || data.rows.length === 0 || data.cols.length === 0) {
+    return emptyState(opts.width, opts.height, opts.emptyNote);
+  }
+  const rowLabelW = 96;
+  const colLabelH = 20;
+  const legendH = TYPE.micro + 14; // intensity-scale strip reserved at the bottom
+  const cell = 34;
+  const w = opts.width ?? rowLabelW + data.cols.length * cell + 4;
+  const h = opts.height ?? colLabelH + data.rows.length * cell + legendH + 4;
+  const gridW = w - rowLabelW - 2;
+  const gridH = h - colLabelH - legendH - 2;
+  const cw = gridW / data.cols.length;
+  const ch = gridH / data.rows.length;
+
+  // max for intensity normalization (ignore null/non-finite)
+  let max = 0;
+  for (const row of data.values) {
+    for (const v of row ?? []) {
+      if (v !== null && Number.isFinite(v) && (v as number) > max) max = v as number;
+    }
+  }
+
+  let cells = "";
+  data.rows.forEach((rowLabel, ri) => {
+    const y = colLabelH + ri * ch;
+    cells += `<text x="${r(w - 2)}" y="${r(y + ch / 2)}" text-anchor="end" dominant-baseline="middle" font-size="${TYPE.micro}" fill="${cssVar("muted")}">${escText(rowLabel)}</text>`;
+    data.cols.forEach((_, ci) => {
+      const x = ci * cw;
+      const raw = data.values?.[ri]?.[ci];
+      const isNull = raw === null || raw === undefined || !Number.isFinite(raw as number);
+      const v = isNull ? 0 : (raw as number);
+      const intensity = max > 0 ? clamp(v / max, 0, 1) : 0; // divide-by-zero guard
+      const fillOpacity = isNull ? 0 : 0.12 + intensity * 0.78;
+      const cellFill = isNull ? "none" : cssVar("info");
+      cells +=
+        `<rect x="${r(x + 1)}" y="${r(y + 1)}" width="${r(cw - 2)}" height="${r(ch - 2)}" rx="3" fill="${cellFill}" fill-opacity="${r(fillOpacity)}" stroke="${cssVar("line")}" stroke-width="0.5"/>` +
+        `<text x="${r(x + cw / 2)}" y="${r(y + ch / 2)}" text-anchor="middle" dominant-baseline="middle" font-size="${TYPE.micro}" fill="${cssVar("text")}">${isNull ? "—" : r(v)}</text>`;
+    });
+  });
+
+  // column labels along the top
+  let colLabels = "";
+  data.cols.forEach((c, ci) => {
+    colLabels += `<text x="${r(ci * cw + cw / 2)}" y="${r(colLabelH - 6)}" text-anchor="middle" font-size="${TYPE.micro}" fill="${cssVar("muted")}">${escText(c)}</text>`;
+  });
+
+  // Intensity legend — a short 4-step opacity ramp explaining the cell color-coding.
+  // RTL: "الأعلى" (highest) sits on the left next to the darkest swatch, "أقل" (lowest)
+  // on the right next to the lightest — mirrors the right=baseline/left=ceiling
+  // convention used by rankedBar's axis row above.
+  const steps = 4;
+  const swW = 16;
+  const swGap = 2;
+  const legendW = steps * swW + (steps - 1) * swGap;
+  const legendX0 = w / 2 - legendW / 2;
+  const legendY = h - legendH + 6;
+  let legendSwatches = "";
+  for (let i = 0; i < steps; i++) {
+    const op = 0.12 + ((steps - 1 - i) / (steps - 1)) * 0.78;
+    const x = legendX0 + i * (swW + swGap);
+    legendSwatches += `<rect x="${r(x)}" y="${r(legendY)}" width="${r(swW)}" height="8" rx="2" fill="${cssVar("info")}" fill-opacity="${r(op)}"/>`;
+  }
+  const legend =
+    max > 0
+      ? `<text x="${r(legendX0 - 6)}" y="${r(legendY + 7)}" text-anchor="end" font-size="${TYPE.micro}" fill="${cssVar("muted")}">الأعلى (${r(max)})</text>` +
+        legendSwatches +
+        `<text x="${r(legendX0 + legendW + 6)}" y="${r(legendY + 7)}" text-anchor="start" font-size="${TYPE.micro}" fill="${cssVar("muted")}">أقل</text>`
+      : "";
+
+  return svgOpen(w, h) + colLabels + cells + legend + `</svg>`;
+}
+```
+
+**File:** `src/data/reporting/executive/ui/charts.test.ts`
+
+Adds an import of the shared D2 XSS fixture and new `it()` blocks proving: (1) the new legend/
+axis markup renders for the cases each chart's discipline comment calls out (multi-category
+donut, multi-series grouped/stacked bars, rankedBar's shared scale, gauge's dial ends, heatmap's
+intensity ramp), (2) each is correctly skipped/absent for the single-item case (nothing to
+legend), and (3) `donut`/`groupedBars` labels routed through the new `legendRows()` helper are
+escaped — the existing builder-level XSS tests only ever pass these two functions static Arabic
+labels, so they never previously exercised this interpolation point.
+
+**Before:**
+```ts
+import { describe, it, expect } from "vitest";
+import {
+  rankedBar,
+  donut,
+  gauge,
+  groupedBars,
+  stackedBars,
+  quadrantScatter,
+  heatmap,
+  sparkline,
+} from "./charts";
+```
+
+**After:**
+```ts
+import { describe, it, expect } from "vitest";
+import {
+  rankedBar,
+  donut,
+  gauge,
+  groupedBars,
+  stackedBars,
+  quadrantScatter,
+  heatmap,
+  sparkline,
+} from "./charts";
+import { XSS_PAYLOADS, XSS_MARKER, findLiveInjection } from "../../xssPayloads";
+```
+
+Plus one `it()` per chart type (added at the end of each existing `describe()` block) covering
+the legend/axis-ticks addition, the single-item skip case, and (for `donut`/`groupedBars`) the
+escaping check — see the file for the exact assertions.
+
 ## v42.43 — 2026-07-11 — E1 (Batch 5): shared `useFocusTrap` hook + Testing Library unit test
 
 Accessibility pass groundwork. The 8 `role="dialog"` components had ad-hoc or missing focus
