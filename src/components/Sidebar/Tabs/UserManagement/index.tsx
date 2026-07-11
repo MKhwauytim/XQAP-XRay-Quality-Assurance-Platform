@@ -455,14 +455,9 @@ export default function UserManagementTab() {
 
   function getTabAccess(role: AuthRole, tabId: string): PermissionLevel {
     if (role === "admin") return "edit";
+    // Every role×tab pair now has an explicit row (or resolves to "none"); no inheritance.
     const explicit = state.permissions.find((p) => p.role === role && p.tabId === tabId);
-    if (explicit) return explicit.access;
-    // Sub-tab inherits from parent when no explicit rule is set
-    const tab = MANAGED_TABS.find((t) => t.id === tabId);
-    if (tab?.parentId) {
-      return state.permissions.find((p) => p.role === role && p.tabId === tab.parentId)?.access ?? "none";
-    }
-    return "none";
+    return explicit ? explicit.access : "none";
   }
 
   function toggleParent(tabId: string) {
@@ -835,18 +830,12 @@ export default function UserManagementTab() {
 
   // ── Section: Page permissions (Matrix A) ─────────────────────────────────────
 
-  function renderPermCell(role: { id: AuthRole; label: string }, tabId: string, locked: boolean, inheritedFrom?: string) {
+  function renderPermCell(role: { id: AuthRole; label: string }, tabId: string, locked: boolean) {
     const isAdminRole = role.id === "admin";
     const current = getTabAccess(role.id, tabId);
-    // Admin always has edit everywhere — no "inherited" badge, always locked
-    const hasExplicit = isAdminRole || state.permissions.some((p) => p.role === role.id && p.tabId === tabId);
-    const isInherited = !hasExplicit && Boolean(inheritedFrom);
     const isLocked = locked || isAdminRole || !canEditPermissions;
     return (
       <div className="um-matrix-cell">
-        {isInherited && (
-          <div className="um-inherit-badge" title={`موروث من ${inheritedFrom}`}>موروث</div>
-        )}
         <div className="um-seg-group">
           {(["none", "view", "edit"] as PermissionLevel[]).map((lvl) => (
             <button
@@ -878,7 +867,7 @@ export default function UserManagementTab() {
           حدد ما إذا كان كل دور يستطيع <strong>رؤية</strong> التبويب،
           أو <strong>تعديله</strong> بشكل كامل، أو لا يملك وصولاً إليه.
           تعطيل الوصول لصفحة يعطّل تلقائياً جميع ميزاتها.
-          التبويبات الفرعية ترث صلاحية أبيها ما لم تُحدَّد بشكل صريح.
+          لكل تبويب فرعي إعداد صريح مستقل عن تبويبه الأب.
         </div>
 
         <div className="um-permission-legend" aria-label="شرح مستويات صلاحيات الصفحات">
@@ -943,7 +932,7 @@ export default function UserManagementTab() {
                         </td>
                         {MANAGED_ROLES.map((role) => (
                           <td key={role.id} className="um-perm-cell">
-                            {renderPermCell(role, sub.id, false, tab.label)}
+                            {renderPermCell(role, sub.id, false)}
                           </td>
                         ))}
                       </tr>

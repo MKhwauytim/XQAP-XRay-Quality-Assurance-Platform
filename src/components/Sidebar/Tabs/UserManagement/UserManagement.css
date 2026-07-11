@@ -914,15 +914,7 @@
   vertical-align: middle;
 }
 
-.um-inherit-badge {
-  font-size: 10px;
-  color: #64748b;
-  background: var(--c-surface-2, #F6F8FA);
-  border-radius: 4px;
-  padding: 1px 5px /* no-scale */;
-  margin-bottom: var(--sp-1);
-  display: inline-block;
-}
+/* (.um-inherit-badge removed — sub-tab inheritance/موروث retired in C1) */
 
 /* ── Matrix B: Feature permissions ──────────────────────────────────────────── */
 

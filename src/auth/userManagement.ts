@@ -382,6 +382,29 @@ export function createDefaultPermissions(): RolePermission[] {
     { role: "supervisor", tabId: "change-log",              access: "none" },
     { role: "manager",    tabId: "change-log",              access: "none" },
     { role: "admin",      tabId: "change-log",              access: "edit" },
+    // Sub-tabs that formerly relied on parent-tab inheritance (موروث) — now explicit.
+    // Values baked from the pre-removal effective access (parent population / reports rows),
+    // so the inheritance fallback can be deleted with zero functional change (see C1 test).
+    { role: "guest",      tabId: "population/process",       access: "view" },
+    { role: "employee",   tabId: "population/process",       access: "view" },
+    { role: "supervisor", tabId: "population/process",       access: "view" },
+    { role: "manager",    tabId: "population/process",       access: "edit" },
+    { role: "admin",      tabId: "population/process",       access: "edit" },
+    { role: "guest",      tabId: "population/browse",        access: "view" },
+    { role: "employee",   tabId: "population/browse",        access: "view" },
+    { role: "supervisor", tabId: "population/browse",        access: "view" },
+    { role: "manager",    tabId: "population/browse",        access: "edit" },
+    { role: "admin",      tabId: "population/browse",        access: "edit" },
+    { role: "guest",      tabId: "reports/reports",          access: "none" },
+    { role: "employee",   tabId: "reports/reports",          access: "none" },
+    { role: "supervisor", tabId: "reports/reports",          access: "view" },
+    { role: "manager",    tabId: "reports/reports",          access: "edit" },
+    { role: "admin",      tabId: "reports/reports",          access: "edit" },
+    { role: "guest",      tabId: "reports/kpi",              access: "none" },
+    { role: "employee",   tabId: "reports/kpi",              access: "none" },
+    { role: "supervisor", tabId: "reports/kpi",              access: "view" },
+    { role: "manager",    tabId: "reports/kpi",              access: "edit" },
+    { role: "admin",      tabId: "reports/kpi",              access: "edit" },
   ];
 }
 
@@ -447,16 +470,9 @@ export function getRolePermission(
   // Admin always has full access regardless of stored permissions
   if (role === "admin") return "edit";
 
+  // Every role×tab pair resolves via an explicit row (or "none"); no parent inheritance.
   const explicit = permissions.find((p) => p.role === role && p.tabId === tabId);
-  if (explicit) return explicit.access;
-
-  // Inherit from parent tab when no explicit entry exists
-  const tab = MANAGED_TABS.find((t) => t.id === tabId);
-  if (tab?.parentId) {
-    return permissions.find((p) => p.role === role && p.tabId === tab.parentId)?.access ?? "none";
-  }
-
-  return "none";
+  return explicit ? explicit.access : "none";
 }
 
 export function hasRolePermission(

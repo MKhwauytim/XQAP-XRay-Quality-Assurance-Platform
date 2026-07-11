@@ -4,7 +4,9 @@ import type { AuthRole } from "./authTypes";
 import {
   createDefaultPermissions,
   createManagedUser,
+  getRolePermission,
   MANAGED_TABS,
+  type PermissionLevel,
 } from "./userManagement";
 
 const baseParams = {
@@ -40,6 +42,25 @@ test("createDefaultPermissions defines reports/analytics for every role", () => 
   for (const role of ALL_ROLES) {
     const entry = perms.find((p) => p.role === role && p.tabId === ANALYTICS_TAB_ID);
     expect(entry, `missing reports/analytics permission for role ${role}`).toBeDefined();
+  }
+});
+
+test("C1 regression: 4 formerly-inherited sub-tabs keep their effective access for all roles", () => {
+  // These 4 sub-tabs previously had NO explicit rows and resolved via parent-tab
+  // inheritance (population / reports). C1 removed that fallback and baked the
+  // effective values into explicit rows. EXPECTED = the pre-change effective access;
+  // getRolePermission (no fallback) must still return exactly these — 20 assertions.
+  const perms = createDefaultPermissions();
+  const EXPECTED: Record<string, Record<AuthRole, PermissionLevel>> = {
+    "population/process": { guest: "view", employee: "view", supervisor: "view", manager: "edit", admin: "edit" },
+    "population/browse":  { guest: "view", employee: "view", supervisor: "view", manager: "edit", admin: "edit" },
+    "reports/reports":    { guest: "none", employee: "none", supervisor: "view", manager: "edit", admin: "edit" },
+    "reports/kpi":        { guest: "none", employee: "none", supervisor: "view", manager: "edit", admin: "edit" },
+  };
+  for (const [tabId, roleMap] of Object.entries(EXPECTED)) {
+    for (const role of ALL_ROLES) {
+      expect(getRolePermission(perms, role, tabId), `${role}:${tabId}`).toBe(roleMap[role]);
+    }
   }
 });
 
