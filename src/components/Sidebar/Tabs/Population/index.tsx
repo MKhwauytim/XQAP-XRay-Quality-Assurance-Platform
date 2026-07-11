@@ -16,7 +16,7 @@ import type { SidebarTabModule } from "../tabTypes";
 import { readSession } from "../../../../auth/authSession";
 import { usePermissions } from "../../../../auth/usePermissions";
 import { logError, logRejection } from "../../../../data/storage/errorLogger";
-import { currentMonthFolderInfo, formatMonthFolderName, parseMonthFolderName } from "../../../../data/population/monthFolder";
+import { currentMonthFolderInfo, formatMonthFolderName, formatMonthFolderShortLabel } from "../../../../data/population/monthFolder";
 import type { MonthFolderInfo } from "../../../../data/population/monthFolder";
 import {
   saveMonthRun,
@@ -1852,28 +1852,8 @@ function compareBrowseFilterOptions(first: string, second: string): number {
   return first.localeCompare(second, "ar");
 }
 
-const MONTH_NAMES_AR = [
-  "يناير",
-  "فبراير",
-  "مارس",
-  "أبريل",
-  "مايو",
-  "يونيو",
-  "يوليو",
-  "أغسطس",
-  "سبتمبر",
-  "أكتوبر",
-  "نوفمبر",
-  "ديسمبر"
-] as const;
-
-function formatArabicMonthFolder(monthFolder: string): string {
-  const info = parseMonthFolderName(monthFolder);
-  if (!info) {
-    return monthFolder;
-  }
-
-  return `${MONTH_NAMES_AR[info.month - 1]} ${info.year}`;
+function formatMonthFolderLabel(monthFolder: string): string {
+  return formatMonthFolderShortLabel(monthFolder);
 }
 
 function collectMonthOptions(rows: BrowseRow[]): string[] {
@@ -1908,7 +1888,7 @@ function getBrowseDisplayValue(
   }
 
   if (key === "_monthFolder") {
-    return formatArabicMonthFolder(String(row[key] ?? ""));
+    return formatMonthFolderLabel(String(row[key] ?? ""));
   }
 
   return formatBrowseCellValue(row[key]);
@@ -2205,7 +2185,7 @@ function BrowseDataView({
     const monthName =
       selectedMonthFilter === "all"
         ? "كل الأشهر"
-        : formatArabicMonthFolder(selectedMonthFilter);
+        : formatMonthFolderLabel(selectedMonthFilter);
     const fileName = safeExportFileName(
       `البيانات - ${activeDataset.label} - ${monthName}.xlsx`
     );
@@ -2236,10 +2216,10 @@ function BrowseDataView({
               value={selectedMonthFilter}
               onChange={(event) => setSelectedMonthFilter(event.target.value)}
             >
-              <option value="all">كل الأشهر</option>
+              <option value="all">الكل</option>
               {monthOptions.map((monthFolder) => (
                 <option key={monthFolder} value={monthFolder}>
-                  {formatArabicMonthFolder(monthFolder)}
+                  {formatMonthFolderLabel(monthFolder)}
                 </option>
               ))}
             </select>

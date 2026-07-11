@@ -11,6 +11,7 @@ import type { FieldAnswer, ItemAnswer } from "../../../../../data/answers/answer
 import { loadOrDeriveDistributionCurrent } from "../../../../../data/distribution/distributionStorage";
 import type { DistributionEntry } from "../../../../../data/distribution/distributionTypes";
 import { listMonthFolders } from "../../../../../data/population/populationStorage";
+import { formatMonthFolderShortLabel } from "../../../../../data/population/monthFolder";
 import { loadSampleMaster } from "../../../../../data/sampling/sampleStorage";
 import {
   loadTemplate,
@@ -168,7 +169,7 @@ export default function EmployeeDashboard({ directoryHandle }: Props) {
             onChange={(e) => setSelectedMonth(e.target.value)}
           >
             {availableMonths.map((m) => (
-              <option key={m.folderName} value={m.folderName}>{m.folderName}</option>
+              <option key={m.folderName} value={m.folderName}>{formatMonthFolderShortLabel(m.folderName)}</option>
             ))}
           </select>
         </label>

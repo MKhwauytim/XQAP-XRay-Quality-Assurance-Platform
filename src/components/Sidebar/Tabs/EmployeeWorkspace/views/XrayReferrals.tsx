@@ -27,6 +27,7 @@ import {
   executeReplacement,
 } from "../../../../../data/distribution/replacement";
 import { loadPopulationConfig, type StageAliasMappings } from "../../../../../data/population/populationConfig";
+import { formatMonthFolderShortLabel } from "../../../../../data/population/monthFolder";
 import {
   listMonthFolders,
   loadMonthPopulationFinal,
@@ -960,7 +961,7 @@ function QueueToolbar({
           onChange={(e) => onMonthChange(e.target.value)}
         >
           {months.map((m) => (
-            <option key={m.folderName} value={m.folderName}>{m.folderName}</option>
+            <option key={m.folderName} value={m.folderName}>{formatMonthFolderShortLabel(m.folderName)}</option>
           ))}
         </select>
       </label>

@@ -4,6 +4,7 @@ import { PageHeader } from "../../../../../../components/PageHeader/PageHeader";
 import { EmptyState, ErrorState, LoadingState } from "../../../../../../components/StateViews/StateViews";
 import type { DirectoryHandleLike } from "../../../../../../data/storage/fileSystemAccess";
 import type { ReferralRequest, ReplacementRequest } from "../../../../../../data/referral/referralTypes";
+import { formatMonthFolderShortLabel } from "../../../../../../data/population/monthFolder";
 import { isReferral } from "./RequestCard";
 import RequestList from "./RequestList";
 import ReviewModal from "./ReviewModal";
@@ -119,7 +120,7 @@ export default function ReferralApproval({ directoryHandle }: Props) {
             <label className="ew-label" htmlFor="ra-month">
               الشهر
               <select id="ra-month" className="ew-select" value={selMonth} onChange={(e) => setSelMonth(e.target.value)}>
-                {months.map((m) => <option key={m.folderName} value={m.folderName}>{m.folderName}</option>)}
+                {months.map((m) => <option key={m.folderName} value={m.folderName}>{formatMonthFolderShortLabel(m.folderName)}</option>)}
               </select>
             </label>
 

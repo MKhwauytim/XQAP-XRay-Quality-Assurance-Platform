@@ -4,6 +4,213 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.51 — 2026-07-12 — A3 (feature-batch): short Latin month labels across every month-filter select
+
+Audited every month-related filter/selector in the app (grep for `listMonthFolders`/`MonthFolderInfo`/
+`selectedMonth` across Population browse, Archive, Reports, KPI, ReferralApproval, XrayReferrals,
+XrayInspectionResults, EmployeeDashboard, ReportDesigner, Settings, UserManagement). Two real UI
+patterns exist:
+
+1. **Population browse's month filter** — aggregates rows across *all* months, already has a
+   value-`"all"` option (`كل الأشهر`), and formatted each option via a local Arabic-month-name
+   formatter (`formatArabicMonthFolder`/`MONTH_NAMES_AR`, e.g. "مايو 2026").
+2. **Seven other single-month selects** (Reports/KPI's report-generation target month, XrayReferrals'
+   case-assignment queue month, ReferralApproval's pending-review month, XrayInspectionResults' two
+   result/audit-table months, EmployeeDashboard's month — the last is dead code, not imported/mounted
+   anywhere) — each loads exactly one month's sample/distribution/answer/referral data by design (no
+   aggregation path exists), and rendered the raw folder-name slug verbatim (e.g. "5-may-2026") with
+   no "all" option.
+
+Applied both parts of the requested change where it is a true display-only fix: added
+`formatMonthShortLabel`/`formatMonthFolderShortLabel` to `monthFolder.ts` (3-letter English month
+abbreviation + Latin-numeral year, e.g. "May 2026" — matches the app's existing forced Latin-numeral
+convention, `ar-SA-u-nu-latn`, used everywhere else) and wired it into all 8 select sites (folder-name
+*values* are untouched — display text only). Population browse's option label was also standardized
+from "كل الأشهر" to "الكل" to match the app's existing generic "all" convention (see
+`PhaseFourDistribution.tsx`, `SummaryBar.tsx`, `DataTable`'s default status-filter label) — no test
+asserted the old string.
+
+**Not done — "add an all-months option" for the 7 single-month selects.** Each of those genuinely
+requires exactly one month to load its data (report generation, one sample's assignment quota, one
+month's referral/replacement log, etc.) — there is no code path that aggregates multiple months for
+any of them today (the closest precedent, `HistoryView.tsx`'s already-existing all-months request
+history, is a *separate* view/tab, not a fallback state of these single-month selects). Bolting on a
+non-functional `"all"` value would either silently no-op or require genuinely aggregating N months of
+distribution/answer/referral data per site — a real feature change, not the "quick mechanical fix"
+this batch scopes to. Flagged in the final report per the task's own "acceptance criteria not fully
+met, with reasons" instruction rather than silently skipped or half-implemented.
+
+**File:** `src/data/population/monthFolder.ts`
+
+**Before:**
+```ts
+export function currentMonthFolderInfo(): MonthFolderInfo {
+```
+
+**After:**
+```ts
+const MONTH_ABBR_EN = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+] as const;
+
+/**
+ * Short display label for a month/year pair, e.g. "May 2026" — 3-letter English abbreviation +
+ * Latin-numeral year. Display-only: never use this to derive/compare a folder name.
+ */
+export function formatMonthShortLabel(month: number, year: number): string {
+  const abbr = MONTH_ABBR_EN[month - 1];
+  return abbr ? `${abbr} ${year}` : `${month}/${year}`;
+}
+
+/** Same as `formatMonthShortLabel`, but takes a folder name directly (e.g. "5-may-2026" → "May 2026").
+ * Falls back to the raw folder name if it cannot be parsed. */
+export function formatMonthFolderShortLabel(folderName: string): string {
+  const info = parseMonthFolderName(folderName);
+  return info ? formatMonthShortLabel(info.month, info.year) : folderName;
+}
+
+export function currentMonthFolderInfo(): MonthFolderInfo {
+```
+
+**File:** `src/components/Sidebar/Tabs/Population/index.tsx`
+
+Renamed the local `formatArabicMonthFolder` → `formatMonthFolderLabel` (no longer produces Arabic
+month names, so the old name was misleading) and pointed its body at the new shared helper; removed
+the now-dead `MONTH_NAMES_AR` array; relabeled the "all months" option from "كل الأشهر" to "الكل".
+
+**Before:**
+```ts
+const MONTH_NAMES_AR = [
+  "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
+  "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"
+] as const;
+
+function formatArabicMonthFolder(monthFolder: string): string {
+  const info = parseMonthFolderName(monthFolder);
+  if (!info) {
+    return monthFolder;
+  }
+
+  return `${MONTH_NAMES_AR[info.month - 1]} ${info.year}`;
+}
+```
+```ts
+              <option value="all">كل الأشهر</option>
+              {monthOptions.map((monthFolder) => (
+                <option key={monthFolder} value={monthFolder}>
+                  {formatArabicMonthFolder(monthFolder)}
+                </option>
+              ))}
+```
+
+**After:**
+```ts
+function formatMonthFolderLabel(monthFolder: string): string {
+  return formatMonthFolderShortLabel(monthFolder);
+}
+```
+```ts
+              <option value="all">الكل</option>
+              {monthOptions.map((monthFolder) => (
+                <option key={monthFolder} value={monthFolder}>
+                  {formatMonthFolderLabel(monthFolder)}
+                </option>
+              ))}
+```
+(The cell-display and export-filename call sites were updated from `formatArabicMonthFolder(...)` to
+`formatMonthFolderLabel(...)` — same rename, no behavior change beyond the short-format output.)
+
+**File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
+
+**Before:**
+```tsx
+            months.map((m) => (
+              <option key={m.folderName} value={m.folderName}>
+                {m.folderName}
+              </option>
+            ))
+```
+
+**After:**
+```tsx
+            months.map((m) => (
+              <option key={m.folderName} value={m.folderName}>
+                {formatMonthFolderShortLabel(m.folderName)}
+              </option>
+            ))
+```
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx`
+
+**Before:**
+```tsx
+          {months.map((m) => (
+            <option key={m.folderName} value={m.folderName}>{m.folderName}</option>
+          ))}
+```
+
+**After:**
+```tsx
+          {months.map((m) => (
+            <option key={m.folderName} value={m.folderName}>{formatMonthFolderShortLabel(m.folderName)}</option>
+          ))}
+```
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/index.tsx`
+
+**Before:**
+```tsx
+              <select id="ra-month" className="ew-select" value={selMonth} onChange={(e) => setSelMonth(e.target.value)}>
+                {months.map((m) => <option key={m.folderName} value={m.folderName}>{m.folderName}</option>)}
+              </select>
+```
+
+**After:**
+```tsx
+              <select id="ra-month" className="ew-select" value={selMonth} onChange={(e) => setSelMonth(e.target.value)}>
+                {months.map((m) => <option key={m.folderName} value={m.folderName}>{formatMonthFolderShortLabel(m.folderName)}</option>)}
+              </select>
+```
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayInspectionResults.tsx`
+
+Same rename applied at both of this file's month selects (results table + audit table — they share
+one `selectedMonth`/`months` state, just two render sites).
+
+**Before:**
+```tsx
+                {months.map((month) => (
+                  <option key={month.folderName} value={month.folderName}>{month.folderName}</option>
+                ))}
+```
+
+**After:**
+```tsx
+                {months.map((month) => (
+                  <option key={month.folderName} value={month.folderName}>{formatMonthFolderShortLabel(month.folderName)}</option>
+                ))}
+```
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/EmployeeDashboard.tsx`
+
+Unreachable component (not imported/mounted by any tab) — fixed anyway for source-tree consistency;
+not verifiable via the running app.
+
+**Before:**
+```tsx
+            {availableMonths.map((m) => (
+              <option key={m.folderName} value={m.folderName}>{m.folderName}</option>
+            ))}
+```
+
+**After:**
+```tsx
+            {availableMonths.map((m) => (
+              <option key={m.folderName} value={m.folderName}>{formatMonthFolderShortLabel(m.folderName)}</option>
+            ))}
+```
+
 ## v42.50 — 2026-07-12 — A2 (feature-batch): curated browse-view defaults for risk-raw/bi-raw/population
 
 **File:** `src/components/Sidebar/Tabs/Population/index.tsx`

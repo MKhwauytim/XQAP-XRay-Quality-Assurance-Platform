@@ -7,6 +7,7 @@ import type { SidebarTabModule } from "../tabTypes";
 import { loadOrDeriveDistributionCurrent } from "../../../../data/distribution/distributionStorage";
 import { logRejection } from "../../../../data/storage/errorLogger";
 import { listMonthFolders, loadMonthPopulationFinal, loadMonthForEditing } from "../../../../data/population/populationStorage";
+import { formatMonthFolderShortLabel } from "../../../../data/population/monthFolder";
 import type { PreparedPopulationRow } from "../../../../data/population/populationTypes";
 import { buildDistributionReport, buildDistributionXlsx } from "../../../../data/reporting/distributionReport";
 import { openOrDownload } from "../../../../data/reporting/htmlReport";
@@ -790,7 +791,7 @@ function ReportsContent() {
           ) : (
             months.map((m) => (
               <option key={m.folderName} value={m.folderName}>
-                {m.folderName}
+                {formatMonthFolderShortLabel(m.folderName)}
               </option>
             ))
           )}

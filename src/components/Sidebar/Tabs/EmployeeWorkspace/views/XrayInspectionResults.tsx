@@ -32,6 +32,7 @@ import {
 import type { ReferralRequest, ReplacementRequest } from "../../../../../data/referral/referralTypes";
 import { loadAdminBrowsePreset, loadUserBrowsePreset } from "../../../../../data/preferences/browsePresetStorage";
 import { listMonthFolders } from "../../../../../data/population/populationStorage";
+import { formatMonthFolderShortLabel } from "../../../../../data/population/monthFolder";
 import { loadSampleMaster } from "../../../../../data/sampling/sampleStorage";
 import { loadTemplate } from "../../../../../data/templates/templateStorage";
 import { loadInspectionTemplateSelection } from "../../../../../data/templates/templateSelectionStorage";
@@ -348,7 +349,7 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
                 onChange={(event) => setSelectedMonth(event.target.value)}
               >
                 {months.map((month) => (
-                  <option key={month.folderName} value={month.folderName}>{month.folderName}</option>
+                  <option key={month.folderName} value={month.folderName}>{formatMonthFolderShortLabel(month.folderName)}</option>
                 ))}
               </select>
             </label>
@@ -377,7 +378,7 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
                 onChange={(event) => setSelectedMonth(event.target.value)}
               >
                 {months.map((month) => (
-                  <option key={month.folderName} value={month.folderName}>{month.folderName}</option>
+                  <option key={month.folderName} value={month.folderName}>{formatMonthFolderShortLabel(month.folderName)}</option>
                 ))}
               </select>
             </label>
