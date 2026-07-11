@@ -4,6 +4,23 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.58 — 2026-07-12 — C2 (feature-batch): verify shipped defaults == Test6 export (no-op, documentation)
+
+Batch C item 2. Re-read the user's real workspace export
+`C:\Users\WorkNStudy\Downloads\Test6\3-user-data\users.permissions.json` fresh and compared its
+`data.permissions` (69 rows, 17 tabIds) and `data.featurePermissions` (110 rows, 22 featureIds)
+against the values produced by `createDefaultPermissions()` and `createDefaultFeaturePermissions()`
+(`src/auth/userManagement.ts`, the latter derived from `FEATURE_DEFAULTS`). A programmatic
+row-by-row comparison (temp Vitest, since removed) found **zero diffs**: every `role+tabId` access
+and every `role+featureId` enabled flag in the Test6 file already matches the shipped default
+exactly. No tabId or featureId in Test6 was renamed/missing relative to this codebase, so **no
+mapping was required and no code change was needed** — the Test6 export was itself produced from a
+workspace seeded with these very defaults (identical users/roles too). The only rows now present in
+`createDefaultPermissions()` but absent from Test6 are the 20 sub-tab rows added in C1
+(`population/process`, `population/browse`, `reports/reports`, `reports/kpi`); per the C2 rule
+("leave existing defaults for anything not in Test6") those stay as-is. This entry records the
+verification; there is no accompanying source diff.
+
 ## v42.57 — 2026-07-12 — C1 (feature-batch): bake موروث sub-tab access into explicit rows, remove inheritance fallback
 
 Batch C item 1. The 4 sub-tabs `population/process`, `population/browse`, `reports/reports`,
