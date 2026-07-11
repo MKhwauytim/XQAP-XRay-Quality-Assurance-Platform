@@ -4,6 +4,228 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.56 — 2026-07-12 — D (feature-batch): CAS-protect savePopulationConfig (population config)
+
+Batch D. `config.json` (system/custom fields, mapping templates, sampling rules, employee
+allocations) is a shared, multi-writer file — any admin on any PC can edit it. Routed
+`savePopulationConfig` through `withResourceLock` + `casLoop` with a monotonic `revision` +
+`_writeToken` stamped into the persisted JSON and verified on read-back. `loadPopulationConfig`
+rebuilds the config from its known fields only, so the two bookkeeping keys are ignored by readers
+and never leak into the returned `PopulationConfig` — hence no `PopulationConfig` type change is
+needed. **Scope note:** `config.json` is a whole-object replace (the caller hands over a complete
+config built from UI state), so CAS here guarantees an atomic, verified, revision-stamped write with
+concurrent-write detection/retry (never a torn file, deterministic last-writer-wins) — it does NOT
+field-merge two admins' simultaneous edits. True field-level merge would require surfacing an
+optimistic-concurrency conflict to the user (reload-and-merge UX), which is out of Batch D's scope.
+Return type is unchanged (`{ ok: true } | { ok: false; error }`), so all callers are untouched.
+
+**File:** `src/data/population/populationConfig.ts`
+
+**Before:**
+```ts
+import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { getPopulationRoot } from "../workspace/workspacePaths";
+```
+```ts
+export async function savePopulationConfig(
+  directoryHandle: DirectoryHandleLike,
+  config: PopulationConfig
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const populationDir = await getPopulationRoot(directoryHandle, true);
+    await safeWriteJson(populationDir, CONFIG_FILE, config);
+    return { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Unknown error while saving config"
+    };
+  }
+}
+```
+
+**After:**
+```ts
+import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { casLoop } from "../storage/casLoop";
+import { withResourceLock } from "../storage/webLocks";
+import { getPopulationRoot } from "../workspace/workspacePaths";
+```
+```ts
+export async function savePopulationConfig(
+  directoryHandle: DirectoryHandleLike,
+  config: PopulationConfig
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  // Shared, multi-writer file (any admin on any PC edits the population config).
+  // The `:rmw` outer lock serializes same-tab saves; casLoop stamps a monotonic
+  // revision + _writeToken and verifies them on read-back, so a save is never
+  // silently interleaved with a concurrent write from another machine. NOTE:
+  // config.json is a whole-object replace, so field-level merge is out of scope —
+  // CAS here guarantees an atomic, verified, last-writer-wins-cleanly write with a
+  // detectable revision, not a three-way merge of two admins' edits.
+  return withResourceLock(`population-config:rmw`, () =>
+    casLoop<{ ok: true }>(
+      async (writeToken) => {
+        const populationDir = await getPopulationRoot(directoryHandle, true);
+        const currentRes = await safeReadJson<{ revision?: number }>(populationDir, CONFIG_FILE);
+        const nextRevision = ((currentRes.ok ? currentRes.value.revision : 0) ?? 0) + 1;
+        await safeWriteJson(populationDir, CONFIG_FILE, {
+          ...config,
+          revision: nextRevision,
+          _writeToken: writeToken,
+        });
+        const verifyRes = await safeReadJson<{ revision?: number; _writeToken?: string }>(
+          populationDir,
+          CONFIG_FILE
+        );
+        if (
+          verifyRes.ok &&
+          verifyRes.value.revision === nextRevision &&
+          verifyRes.value._writeToken === writeToken
+        ) {
+          return { done: true, result: { ok: true as const } };
+        }
+        return { done: false };
+      },
+      { conflictError: "تعذّر حفظ إعدادات المجتمع: تعارض في الكتابة بعد عدة محاولات." }
+    )
+  );
+}
+```
+
+## v42.55 — 2026-07-12 — D (feature-batch): CAS-protect updateMonthStatus (month.manifest.json)
+
+Batch D. `updateMonthStatus` is a read-modify-write on the shared `month.manifest.json`: it advances
+the month's status monotonically (raw-saved → processed-saved → sampled → distributed). Two PCs can
+advance the same month near-simultaneously (one draws the sample → "sampled" while another
+bulk-assigns → "distributed"); a plain RMW loses one advance. Routed it through `withResourceLock`
++ `casLoop` (revision + `_writeToken`, verified on read-back). All existing invariants are preserved
+inside the loop: a `closed` month is a no-op, a non-advancing rank is a no-op, and a missing month
+folder / manifest is a quiet no-op (not a conflict, so no wasteful retries). It stays best-effort:
+never throws to callers, logs a persistent conflict to the error ring buffer. `updateMonthStatus`
+deliberately does **not** call `ensureMonthWritable` (its own `closed` guard handles that, and the
+month-lock reopen path relies on it not throwing) — unchanged.
+
+**File:** `src/data/population/monthTypes.ts`
+
+**Before:**
+```ts
+  status: "raw-saved" | "processed-saved" | "sampled" | "distributed" | "closed";
+  /** Set when status === "closed". */
+  closedAt?: string | null;
+```
+
+**After:**
+```ts
+  status: "raw-saved" | "processed-saved" | "sampled" | "distributed" | "closed";
+  /** Monotonically increasing counter for CAS conflict detection. */
+  revision?: number;
+  /** Per-write UUID embedded by casLoop for cross-machine race detection. */
+  _writeToken?: string;
+  /** Set when status === "closed". */
+  closedAt?: string | null;
+```
+
+**File:** `src/data/population/populationStorage.ts`
+
+**Before:**
+```ts
+import { safeWriteJson, safeReadJson } from "../storage/safeWrite";
+import { logError } from "../storage/errorLogger";
+import { ensureMonthWritable } from "./monthLock";
+```
+```ts
+export async function updateMonthStatus(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  status: MonthManifestData["status"]
+): Promise<void> {
+  try {
+    const monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, false);
+    const manifestResult = await safeReadJson<MonthManifestData>(monthDir, "month.manifest.json");
+    if (!manifestResult.ok) return;
+    const manifest = manifestResult.value;
+    // A closed month is frozen: status advancement must never overwrite it
+    // ("closed" is deliberately NOT in STATUS_RANK — see monthLock.ts).
+    if (manifest.status === "closed") return;
+    const currentRank = STATUS_RANK[manifest.status] ?? -1;
+    if (currentRank >= STATUS_RANK[status]) return;
+    await safeWriteJson(monthDir, "month.manifest.json", { ...manifest, status });
+  } catch (error) {
+    logError("population:update-month-status", error);
+  }
+}
+```
+
+**After:**
+```ts
+import { safeWriteJson, safeReadJson } from "../storage/safeWrite";
+import { casLoop } from "../storage/casLoop";
+import { withResourceLock } from "../storage/webLocks";
+import { logError } from "../storage/errorLogger";
+import { ensureMonthWritable } from "./monthLock";
+```
+```ts
+export async function updateMonthStatus(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  status: MonthManifestData["status"]
+): Promise<void> {
+  try {
+    // Shared, multi-writer file: two PCs can advance the same month's status
+    // near-simultaneously. The `:rmw` outer lock serializes same-tab writers;
+    // casLoop's revision + _writeToken read-back guards cross-machine races so a
+    // monotonic advance is never lost to a stale overwrite. Best-effort: a
+    // persistent conflict is logged, never thrown.
+    const result = await withResourceLock(
+      `population-manifest/${monthFolderName}:rmw`,
+      () =>
+        casLoop<{ ok: true }>(
+          async (writeToken) => {
+            let monthDir: DirectoryHandleLike;
+            try {
+              monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, false);
+            } catch {
+              // Month folder does not exist — nothing to advance; not a conflict.
+              return { done: true, result: { ok: true as const } };
+            }
+            const manifestResult = await safeReadJson<MonthManifestData>(monthDir, "month.manifest.json");
+            if (!manifestResult.ok) return { done: true, result: { ok: true as const } };
+            const manifest = manifestResult.value;
+            // A closed month is frozen: status advancement must never overwrite it
+            // ("closed" is deliberately NOT in STATUS_RANK — see monthLock.ts).
+            if (manifest.status === "closed") return { done: true, result: { ok: true as const } };
+            const currentRank = STATUS_RANK[manifest.status] ?? -1;
+            if (currentRank >= STATUS_RANK[status]) return { done: true, result: { ok: true as const } };
+            const nextRevision = (manifest.revision ?? 0) + 1;
+            await safeWriteJson(monthDir, "month.manifest.json", {
+              ...manifest,
+              status,
+              revision: nextRevision,
+              _writeToken: writeToken,
+            });
+            const verifyResult = await safeReadJson<MonthManifestData>(monthDir, "month.manifest.json");
+            if (
+              verifyResult.ok &&
+              verifyResult.value.revision === nextRevision &&
+              verifyResult.value._writeToken === writeToken
+            ) {
+              return { done: true, result: { ok: true as const } };
+            }
+            return { done: false };
+          },
+          { maxRetries: 5, baseDelayMs: 50, conflictError: "manifest status update conflict" }
+        )
+    );
+    if (!result.ok) {
+      logError("population:update-month-status", new Error(result.error));
+    }
+  } catch (error) {
+    logError("population:update-month-status", error);
+  }
+}
+```
+
 ## v42.54 — 2026-07-12 — D (feature-batch): CAS-protect the admin shared browse preset
 
 Batch D. `saveAdminBrowseDatasetPreset` writes `admin-shared.browse-preset.json` — a **shared,

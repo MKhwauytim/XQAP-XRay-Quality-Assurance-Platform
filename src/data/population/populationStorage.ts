@@ -1,5 +1,7 @@
 import type { DirectoryHandleLike, FileHandleLike } from "../storage/fileSystemAccess";
 import { safeWriteJson, safeReadJson } from "../storage/safeWrite";
+import { casLoop } from "../storage/casLoop";
+import { withResourceLock } from "../storage/webLocks";
 import { logError } from "../storage/errorLogger";
 import { ensureMonthWritable } from "./monthLock";
 import { formatMonthFolderName, parseMonthFolderName, type MonthFolderInfo } from "./monthFolder";
@@ -304,16 +306,54 @@ export async function updateMonthStatus(
   status: MonthManifestData["status"]
 ): Promise<void> {
   try {
-    const monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, false);
-    const manifestResult = await safeReadJson<MonthManifestData>(monthDir, "month.manifest.json");
-    if (!manifestResult.ok) return;
-    const manifest = manifestResult.value;
-    // A closed month is frozen: status advancement must never overwrite it
-    // ("closed" is deliberately NOT in STATUS_RANK — see monthLock.ts).
-    if (manifest.status === "closed") return;
-    const currentRank = STATUS_RANK[manifest.status] ?? -1;
-    if (currentRank >= STATUS_RANK[status]) return;
-    await safeWriteJson(monthDir, "month.manifest.json", { ...manifest, status });
+    // Shared, multi-writer file: two PCs can advance the same month's status
+    // near-simultaneously. The `:rmw` outer lock serializes same-tab writers;
+    // casLoop's revision + _writeToken read-back guards cross-machine races so a
+    // monotonic advance is never lost to a stale overwrite. Best-effort: a
+    // persistent conflict is logged, never thrown.
+    const result = await withResourceLock(
+      `population-manifest/${monthFolderName}:rmw`,
+      () =>
+        casLoop<{ ok: true }>(
+          async (writeToken) => {
+            let monthDir: DirectoryHandleLike;
+            try {
+              monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, false);
+            } catch {
+              // Month folder does not exist — nothing to advance; not a conflict.
+              return { done: true, result: { ok: true as const } };
+            }
+            const manifestResult = await safeReadJson<MonthManifestData>(monthDir, "month.manifest.json");
+            if (!manifestResult.ok) return { done: true, result: { ok: true as const } };
+            const manifest = manifestResult.value;
+            // A closed month is frozen: status advancement must never overwrite it
+            // ("closed" is deliberately NOT in STATUS_RANK — see monthLock.ts).
+            if (manifest.status === "closed") return { done: true, result: { ok: true as const } };
+            const currentRank = STATUS_RANK[manifest.status] ?? -1;
+            if (currentRank >= STATUS_RANK[status]) return { done: true, result: { ok: true as const } };
+            const nextRevision = (manifest.revision ?? 0) + 1;
+            await safeWriteJson(monthDir, "month.manifest.json", {
+              ...manifest,
+              status,
+              revision: nextRevision,
+              _writeToken: writeToken,
+            });
+            const verifyResult = await safeReadJson<MonthManifestData>(monthDir, "month.manifest.json");
+            if (
+              verifyResult.ok &&
+              verifyResult.value.revision === nextRevision &&
+              verifyResult.value._writeToken === writeToken
+            ) {
+              return { done: true, result: { ok: true as const } };
+            }
+            return { done: false };
+          },
+          { maxRetries: 5, baseDelayMs: 50, conflictError: "manifest status update conflict" }
+        )
+    );
+    if (!result.ok) {
+      logError("population:update-month-status", new Error(result.error));
+    }
   } catch (error) {
     logError("population:update-month-status", error);
   }
