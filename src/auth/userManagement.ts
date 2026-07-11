@@ -173,6 +173,11 @@ export const MANAGED_FEATURE_GROUPS: readonly FeatureGroup[] = [
         label: "إدارة نموذج الفحص",
         description: "إنشاء وتعديل قوالب نموذج الفحص في مساحة العمل",
       },
+      {
+        id: "employee-reopen-instant",
+        label: "إعادة فتح الحالة فوراً (بدون اعتماد)",
+        description: "عند التفعيل يُطبَّق طلب الموظف لإعادة فتح الحالة فوراً؛ وعند التعطيل يُحوَّل الطلب للمشرف للاعتماد",
+      },
     ],
   },
   {
@@ -272,7 +277,7 @@ const ALL_FEATURE_IDS = MANAGED_FEATURE_GROUPS.flatMap((g) =>
 /** Maps each tab to the feature IDs that belong to it. */
 export const TAB_FEATURE_MAP: Readonly<Record<string, readonly string[]>> = {
   "population":         ["upload-data", "process-population", "configure-sample", "draw-sample", "distribute-samples", "bulk-assign", "view-browse", "unlock-sampling-stage"],
-  "employee-workspace": ["approve-referrals", "approve-replacements", "view-all-entries", "view-employee-stats", "submit-referrals", "request-replacement", "submit-answers", "configure-referral-columns", "ew.reopenAnswer", "manage-inspection-template"],
+  "employee-workspace": ["approve-referrals", "approve-replacements", "view-all-entries", "view-employee-stats", "submit-referrals", "request-replacement", "submit-answers", "configure-referral-columns", "ew.reopenAnswer", "manage-inspection-template", "employee-reopen-instant"],
   "user-management":    ["manage-users", "reset-passwords", "edit-permissions"],
   "reports":            ["export-reports"],
   "archive":            ["export-archive", "archive.closeMonth"],
@@ -307,6 +312,7 @@ const FEATURE_DEFAULTS: Record<string, Partial<Record<AuthRole, boolean>>> = {
   "view-browse":          { guest: true,  employee: true,  supervisor: true,  manager: true  },
   "unlock-sampling-stage": { guest: false, employee: false, supervisor: false, manager: false },
   "manage-inspection-template": { guest: false, employee: false, supervisor: false, manager: true },
+  "employee-reopen-instant": { guest: false, employee: false, supervisor: false, manager: false },
   "manage-users":         { guest: false, employee: false, supervisor: false, manager: false },
   "reset-passwords":      { guest: false, employee: false, supervisor: false, manager: false },
   "edit-permissions":     { guest: false, employee: false, supervisor: false, manager: false },

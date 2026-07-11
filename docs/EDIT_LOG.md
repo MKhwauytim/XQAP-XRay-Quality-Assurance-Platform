@@ -4,6 +4,65 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.64 — 2026-07-12 — C4 (feature-batch): scaffold employee-reopen-instant per-role setting
+
+Batch C item 4. Added a new per-role feature toggle `employee-reopen-instant` (group
+"workspace"/إدارة مساحة العمل, mapped to the `employee-workspace` tab) as the schema + admin-UI
+scaffold for the reopen-case mode that Batch B will consume. Semantics: **enabled** for a role →
+that role's self-service "طلب إعادة فتح الحالة" is applied instantly; **disabled** → the request is
+routed to a supervisor for approval. Default **disabled** for all managed roles (requires approval —
+the conservative default mirroring the referral/replacement approval pattern); admin is always-on
+via `hasFeature`. This is ONLY the scaffold — it appears as a toggle in Feature Permissions and has
+a default value, but no code reads it yet; Batch B wires the actual reopen-request behavior to it.
+This is distinct from the existing `ew.reopenAnswer` (supervisor/manager/admin directly reopening
+ANY submitted answer), which is untouched.
+
+**File:** `src/auth/userManagement.ts`
+
+**Before:** (workspace group tail + TAB_FEATURE_MAP employee-workspace + FEATURE_DEFAULTS)
+```ts
+      {
+        id: "manage-inspection-template",
+        label: "إدارة نموذج الفحص",
+        description: "إنشاء وتعديل قوالب نموذج الفحص في مساحة العمل",
+      },
+    ],
+  },
+  {
+    groupId: "population",
+```
+```ts
+  "employee-workspace": [..., "ew.reopenAnswer", "manage-inspection-template"],
+```
+```ts
+  "manage-inspection-template": { guest: false, employee: false, supervisor: false, manager: true },
+```
+
+**After:**
+```ts
+      {
+        id: "manage-inspection-template",
+        label: "إدارة نموذج الفحص",
+        description: "إنشاء وتعديل قوالب نموذج الفحص في مساحة العمل",
+      },
+      {
+        id: "employee-reopen-instant",
+        label: "إعادة فتح الحالة فوراً (بدون اعتماد)",
+        description: "عند التفعيل يُطبَّق طلب الموظف لإعادة فتح الحالة فوراً؛ وعند التعطيل يُحوَّل الطلب للمشرف للاعتماد",
+      },
+    ],
+  },
+  {
+    groupId: "population",
+```
+```ts
+  "employee-workspace": [..., "ew.reopenAnswer", "manage-inspection-template", "employee-reopen-instant"],
+```
+```ts
+  "manage-inspection-template": { guest: false, employee: false, supervisor: false, manager: true },
+  "employee-reopen-instant": { guest: false, employee: false, supervisor: false, manager: false },
+```
+
 ## v42.63 — 2026-07-12 — C3.5 (feature-batch): gate shared referral browse-preset push on configure-referral-columns
 
 Batch C item 3, gap 5. In `XrayReferrals.tsx` the push of the shared admin browse-preset was
