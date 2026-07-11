@@ -6,12 +6,12 @@ import {
   type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
-  type RefObject,
   type SyntheticEvent
 } from "react";
 
 import "./AuthGate.css";
 
+import { useFocusTrap } from "../hooks/useFocusTrap";
 import { AdminToolbar } from "./AdminToolbar";
 import {
   ADMIN_SHORTCUT_KEYS,
@@ -145,8 +145,13 @@ export default function AuthGate({ children }: AuthGateProps) {
   const altSequenceRef = useRef<string[]>([]);
   const altSequenceTimerRef = useRef<number | null>(null);
 
-  const adminModalRef = useRef<HTMLElement | null>(null);
-  const triggerRef = useRef<HTMLElement | null>(null);
+  // Focus-trap for the bootstrap-admin passcode modal: traps Tab, focuses the
+  // passcode input on open, closes on Escape, and restores focus to the trigger
+  // (the element focused when the Alt+A/Alt+T shortcut fired) on close.
+  const adminModalRef = useFocusTrap<HTMLElement>({
+    onEscape: closeAdminModal,
+    enabled: isAdminModalOpen
+  });
   const isDemoSessionRef = useRef(false);
 
   // Derive whether there are any active users (to decide which form to show)
@@ -245,34 +250,6 @@ export default function AuthGate({ children }: AuthGateProps) {
     };
   }, [session]);
 
-  useEffect(() => {
-    if (!isAdminModalOpen || !adminModalRef.current) return;
-    const modal = adminModalRef.current;
-    const focusable = modal.querySelectorAll<HTMLElement>(
-      'input, button, [tabindex]:not([tabindex="-1"])'
-    );
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key !== "Tab") return;
-      if (e.shiftKey) {
-        if (document.activeElement === first) {
-          e.preventDefault();
-          last.focus();
-        }
-      } else {
-        if (document.activeElement === last) {
-          e.preventDefault();
-          first.focus();
-        }
-      }
-    }
-
-    modal.addEventListener("keydown", handleKeyDown);
-    return () => modal.removeEventListener("keydown", handleKeyDown);
-  }, [isAdminModalOpen]);
-
   const logout = useCallback((): void => {
     if (isDemoSessionRef.current) {
       isDemoSessionRef.current = false;
@@ -336,7 +313,6 @@ export default function AuthGate({ children }: AuthGateProps) {
           window.clearTimeout(altSequenceTimerRef.current);
         }
 
-        triggerRef.current = document.activeElement as HTMLElement | null;
         setAdminPasscode("");
         setMessage("");
         setMessageType("");
@@ -473,7 +449,7 @@ export default function AuthGate({ children }: AuthGateProps) {
   function closeAdminModal(): void {
     setIsAdminModalOpen(false);
     setAdminPasscode("");
-    triggerRef.current?.focus();
+    // Focus is restored to the trigger by the useFocusTrap hook on unmount.
   }
 
   function handleLogoError(event: SyntheticEvent<HTMLImageElement>): void {
@@ -618,7 +594,7 @@ export default function AuthGate({ children }: AuthGateProps) {
                 <button
                   className="auth-submit"
                   type="submit"
-                  disabled={lockoutUntil !== null && Date.now() < lockoutUntil}
+                  disabled={lockoutUntil !== null && lockoutSecondsLeft > 0}
                 >
                   <span>
                     {lockoutUntil !== null && lockoutSecondsLeft > 0
@@ -678,7 +654,7 @@ export default function AuthGate({ children }: AuthGateProps) {
             role="dialog"
             aria-modal="true"
             aria-labelledby="adminPasscodeTitle"
-            ref={adminModalRef as RefObject<HTMLElement>}
+            ref={adminModalRef}
           >
             <h2 id="adminPasscodeTitle">دخول مسؤول النظام</h2>
 
@@ -686,7 +662,6 @@ export default function AuthGate({ children }: AuthGateProps) {
 
             <input
               type="password"
-              autoFocus
               aria-label="رمز مسؤول النظام"
               value={adminPasscode}
               onChange={(event) => setAdminPasscode(event.target.value)}

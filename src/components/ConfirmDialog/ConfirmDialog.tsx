@@ -1,13 +1,15 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { AlertTriangle } from "lucide-react";
 
+import { useFocusTrap } from "../../hooks/useFocusTrap";
 import "./ConfirmDialog.css";
 
 /**
  * Shared confirmation dialog for destructive / irreversible actions (UIX-02).
  * Replaces native `window.confirm()` (LTR, browser-chrome buttons) with an
- * RTL, token-styled modal. Focus starts on the cancel button (safe default),
- * Tab is trapped inside the dialog, Escape and backdrop click cancel.
+ * RTL, token-styled modal. Focus management (first-focus = cancel button,
+ * Tab-trap, Escape-to-cancel, focus-restore) is handled by the shared
+ * `useFocusTrap` hook; backdrop click also cancels.
  */
 type ConfirmDialogProps = {
   open: boolean;
@@ -33,41 +35,7 @@ export function ConfirmDialog({
   onConfirm,
   onCancel
 }: ConfirmDialogProps) {
-  const dialogRef = useRef<HTMLElement | null>(null);
-  const cancelRef = useRef<HTMLButtonElement | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-
-    cancelRef.current?.focus();
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        event.stopPropagation();
-        onCancel();
-        return;
-      }
-      if (event.key !== "Tab" || !dialogRef.current) return;
-
-      const focusable = dialogRef.current.querySelectorAll<HTMLElement>(
-        'button, [tabindex]:not([tabindex="-1"])'
-      );
-      if (focusable.length === 0) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    }
-
-    document.addEventListener("keydown", handleKeyDown, true);
-    return () => document.removeEventListener("keydown", handleKeyDown, true);
-  }, [open, onCancel]);
+  const dialogRef = useFocusTrap<HTMLElement>({ onEscape: onCancel, enabled: open });
 
   if (!open) return null;
 
@@ -98,7 +66,6 @@ export function ConfirmDialog({
         <div className="confirm-dialog__message">{message}</div>
         <div className="confirm-dialog__actions">
           <button
-            ref={cancelRef}
             type="button"
             className="confirm-dialog__btn confirm-dialog__btn--cancel"
             onClick={onCancel}

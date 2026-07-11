@@ -36,6 +36,93 @@ last focusable wraps to the first, Shift+Tab from the first wraps to the last, E
 `onEscape` callback, and unmounting restores focus to the trigger element that was focused before
 the trap activated. Also asserts initial focus lands on the first focusable on open.
 
+## v42.44 — 2026-07-11 — E1 (Batch 5): adopt useFocusTrap in ConfirmDialog + AuthGate admin modal
+
+Replaces the two hand-rolled focus traps with the shared `useFocusTrap` hook. Both had a
+partial trap (`ConfirmDialog` also handled Escape + focus-restore; `AuthGate`'s admin modal
+trapped Tab only, with no Escape-in-hook and no first-focus-on-open). The hook unifies both.
+
+**File:** `src/components/ConfirmDialog/ConfirmDialog.tsx`
+
+**Before:**
+```tsx
+import { useEffect, useRef, type ReactNode } from "react";
+...
+  const dialogRef = useRef<HTMLElement | null>(null);
+  const cancelRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    cancelRef.current?.focus();
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") { event.stopPropagation(); onCancel(); return; }
+      if (event.key !== "Tab" || !dialogRef.current) return;
+      const focusable = dialogRef.current.querySelectorAll<HTMLElement>('button, [tabindex]:not([tabindex="-1"])');
+      ...manual wrap...
+    }
+    document.addEventListener("keydown", handleKeyDown, true);
+    return () => document.removeEventListener("keydown", handleKeyDown, true);
+  }, [open, onCancel]);
+```
+
+**After:**
+```tsx
+import { type ReactNode } from "react";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
+...
+  // Focus-trap, Escape and focus-restore handled by the shared hook.
+  const dialogRef = useFocusTrap<HTMLElement>({ onEscape: onCancel, enabled: open });
+```
+
+The `cancelRef` is dropped; the hook focuses the first focusable, which is the cancel button
+(rendered first in the actions row) — the same safe default as before.
+
+**File:** `src/auth/AuthGate.tsx`
+
+**Before:**
+```tsx
+  const adminModalRef = useRef<HTMLElement | null>(null);
+  const triggerRef = useRef<HTMLElement | null>(null);
+  ...
+  useEffect(() => {
+    if (!isAdminModalOpen || !adminModalRef.current) return;
+    const modal = adminModalRef.current;
+    const focusable = modal.querySelectorAll<HTMLElement>('input, button, [tabindex]:not([tabindex="-1"])');
+    ...manual Tab-only wrap on modal.addEventListener...
+  }, [isAdminModalOpen]);
+  ...
+  // shortcut handler: triggerRef.current = document.activeElement ...
+  // closeAdminModal: setIsAdminModalOpen(false); setAdminPasscode(""); triggerRef.current?.focus();
+  // <input ... autoFocus ... />
+  // <section ... ref={adminModalRef as RefObject<HTMLElement>}>
+```
+
+**After:**
+```tsx
+  const adminModalRef = useFocusTrap<HTMLElement>({ onEscape: closeAdminModal, enabled: isAdminModalOpen });
+  ...
+  // shortcut handler no longer records a trigger ref (hook restores focus)
+  // closeAdminModal: setIsAdminModalOpen(false); setAdminPasscode(""); (focus restore via hook)
+  // <input ... /> (autoFocus removed — hook focuses the first focusable, i.e. this input)
+  // <section ... ref={adminModalRef}>
+```
+
+Dropped the now-unused `triggerRef` and the `RefObject` type import; `useEffect`/`useRef` stay
+(other effects/refs remain). The full-screen login panel (also `role="dialog"`) is intentionally
+NOT trapped — it is the entire page, not an open/close modal with a trigger to restore to.
+
+Removing the imperative trap effect made the component analyzable by the React Compiler lint
+rules, which then surfaced a pre-existing impure `Date.now()` call in render on the submit
+button's `disabled` prop. Fixed by deriving `disabled` from the already-ticking
+`lockoutSecondsLeft` state (matching the sibling label expression 3 lines below) instead of
+`Date.now()`. Behavior is unchanged where it matters: the actual lockout is enforced in the
+`loginAsEmployee` submit handler's `Date.now()` guard, not the button's disabled state.
+
+```tsx
+// Before: disabled={lockoutUntil !== null && Date.now() < lockoutUntil}
+// After:  disabled={lockoutUntil !== null && lockoutSecondsLeft > 0}
+```
+
 ## v42.42 — 2026-07-11 — D3 (Batch 3): import-mapping edge-case tests (column-hint resolution)
 
 D3's target is `buildColumnHintsFromRows` — the function that resolves a workbook's actual Excel
