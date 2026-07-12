@@ -4,6 +4,16 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.74 — 2026-07-12 — E (feature-batch): permission-default tests (defense-in-depth: only admin/manager post)
+
+Batch E item 7 (tests). Strengthens the acceptance criterion "employees/supervisors cannot post" with a
+matrix-level regression guard, mirroring the existing `reports/analytics` default tests.
+
+**File:** `src/auth/userManagement.test.ts` — add tests that `ew/notifications` is a sub-tab of
+employee-workspace, that its default access is admin/manager `edit` and guest/employee/supervisor `none`,
+and that the `post-notification` feature defaults enabled for admin/manager only (via
+`createDefaultFeaturePermissions` + `hasFeature`).
+
 ## v42.73 — 2026-07-12 — E (feature-batch): document notifications file in data-system-report
 
 Batch E item 6 (docs). CLAUDE.md requires `docs/data-system-report.md` to stay the authoritative
