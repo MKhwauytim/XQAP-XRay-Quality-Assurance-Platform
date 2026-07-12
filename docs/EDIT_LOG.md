@@ -4,6 +4,53 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.82 — 2026-07-12 — dead code (hardening-2026-07-08): delete 3 confirmed-dead files
+
+Full-sweep audit, Area 1 "Dead files" bucket. Three files with zero importers anywhere in `src/`,
+verified individually with `grep -r` before deletion (each search matched only the file's own
+definition line):
+
+- `EmployeeWorkspace/index.tsx` imports the other four views (XrayReferrals, XrayInspectionResults,
+  ReferralApproval, NotificationManager) but never `EmployeeDashboard` — confirmed by reading
+  `EmployeeWorkspace/index.tsx` directly. Superseded by those four views.
+- `ReportDesigner/editor/Toolbar.tsx` — the editor renders `Ribbon.tsx` instead; no import of
+  `editor/Toolbar` anywhere. The only other "Toolbar" hits in the codebase are the unrelated
+  `AdminToolbar`, a local `QueueToolbar`, and a CSS section-comment in `ReportDesigner.css`.
+- `src/components/ui/Button.tsx` and `src/components/ui/StatCard.tsx` — never imported. Every
+  `../ui/*` / `./ui/*` import in the codebase resolves to the different, actively-used
+  `src/data/reporting/executive/ui/` directory (icons/charts), not this one. The entire
+  `src/components/ui/` directory is dead, so it's removed in full.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/EmployeeDashboard.tsx`
+
+**Before:** whole file (407 lines) — a standalone employee dashboard view (`EmployeeDashboard`
+component + `ItemFormCard`/`FormField` helpers) with no importers anywhere in `src/`.
+
+**After:** file deleted.
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/Toolbar.tsx`
+
+**Before:** whole file (141 lines) — a `Toolbar` component (element-add / page-nav / save-print
+buttons) with no importers anywhere in `src/`.
+
+**After:** file deleted.
+
+**File:** `src/components/ui/Button.tsx`
+
+**Before:** whole file (42 lines) — a `Button` presentational wrapper over `.ui-btn`, with no
+importers anywhere in `src/`.
+
+**After:** file deleted (directory `src/components/ui/` removed in full).
+
+**File:** `src/components/ui/StatCard.tsx`
+
+**Before:** whole file (51 lines) — a `StatCard` presentational KPI-card wrapper over `.ui-stat`,
+with no importers anywhere in `src/`.
+
+**After:** file deleted (directory `src/components/ui/` removed in full).
+
+---
+
 ## v42.81 — 2026-07-12 — S4 (hardening-2026-07-08): catch the uncaught month/preset load rejections in inspection-results view
 
 Full-sweep finding S4. `XrayInspectionResults.tsx`'s mount effect fires two promise chains with no
