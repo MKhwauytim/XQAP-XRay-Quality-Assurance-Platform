@@ -9,6 +9,7 @@ import TemplateBuilderTab from "../TemplateBuilder";
 import XrayReferrals from "./views/XrayReferrals";
 import XrayInspectionResults from "./views/XrayInspectionResults";
 import ReferralApproval from "./views/ReferralApproval";
+import NotificationManager from "./views/NotificationManager";
 import "./EmployeeWorkspace.css";
 
 // ── Sub-tab IDs ───────────────────────────────────────────────────────────────
@@ -17,18 +18,21 @@ const SUB_TAB_XRAY_REFERRALS    = "xray-referrals";
 const SUB_TAB_XRAY_RESULTS      = "xray-results";
 const SUB_TAB_REFERRAL_APPROVAL = "referral-approval";
 const SUB_TAB_INSPECTION_FORM   = "inspection-form";
+const SUB_TAB_NOTIFICATIONS     = "notifications";
 
 type WorkspaceSubTab =
   | typeof SUB_TAB_XRAY_REFERRALS
   | typeof SUB_TAB_XRAY_RESULTS
   | typeof SUB_TAB_REFERRAL_APPROVAL
-  | typeof SUB_TAB_INSPECTION_FORM;
+  | typeof SUB_TAB_INSPECTION_FORM
+  | typeof SUB_TAB_NOTIFICATIONS;
 
 const KNOWN_SUB_TABS = new Set<string>([
   SUB_TAB_XRAY_REFERRALS,
   SUB_TAB_XRAY_RESULTS,
   SUB_TAB_REFERRAL_APPROVAL,
   SUB_TAB_INSPECTION_FORM,
+  SUB_TAB_NOTIFICATIONS,
 ]);
 
 // ── Tab config (auto-registered by tabRegistry) ───────────────────────────────
@@ -44,6 +48,7 @@ export const tabConfig: SidebarTabModule["tabConfig"] = {
     { id: SUB_TAB_XRAY_RESULTS,      label: "نتائج فحص الأشعة" },
     { id: SUB_TAB_REFERRAL_APPROVAL, label: "اعتماد الطلبات" },
     { id: SUB_TAB_INSPECTION_FORM,   label: "نموذج الفحص" },
+    { id: SUB_TAB_NOTIFICATIONS,     label: "مركز الإشعارات" },
   ],
 };
 
@@ -111,6 +116,13 @@ export default function EmployeeWorkspaceTab() {
       return <AccessDenied />;
     }
     return <TemplateBuilderTab />;
+  }
+
+  if (activeSubTab === SUB_TAB_NOTIFICATIONS) {
+    if (!canAccessTab("ew/notifications")) {
+      return <AccessDenied />;
+    }
+    return <NotificationManager directoryHandle={directoryHandle} />;
   }
   return <XrayReferrals directoryHandle={directoryHandle} />;
 }

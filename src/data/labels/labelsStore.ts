@@ -277,6 +277,26 @@ export const DEFAULT_LABELS = {
   wsgate_invalid_warning:      "قد تحتاج إلى إعادة إضافة حسابات الموظفين بعد الإصلاح.",
   wsgate_repair_btn:           "إصلاح بنية مساحة العمل",
   wsgate_error_title:          "تعذر فتح مساحة العمل",
+
+  // ── Notification center — E (feature-batch) ──
+  notif_accept_btn:            "قبول",
+  notif_banner_more:           "و{count} إشعار آخر بانتظار الاطّلاع",
+  notif_banner_aria:           "إشعار مثبّت",
+  notif_mgr_eyebrow:           "مساحة العمل",
+  notif_mgr_title:             "مركز الإشعارات",
+  notif_mgr_subtitle:          "انشر إشعاراً لجميع الموظفين والمشرفين وتابع من اطّلع عليه",
+  notif_mgr_post_label:        "نص الإشعار الجديد",
+  notif_mgr_post_placeholder:  "اكتب نص الإشعار هنا...",
+  notif_mgr_post_btn:          "نشر الإشعار",
+  notif_mgr_posting:           "جاري النشر...",
+  notif_mgr_post_success:      "تم نشر الإشعار.",
+  notif_mgr_empty_title:       "لا توجد إشعارات",
+  notif_mgr_empty_desc:        "لم يتم نشر أي إشعار بعد.",
+  notif_mgr_posted_by:         "بواسطة {user}",
+  notif_mgr_accepted_summary:  "{accepted} من {total} اطّلعوا",
+  notif_mgr_accepted:          "اطّلع",
+  notif_mgr_pending:           "لم يطّلع بعد",
+  notif_mgr_audience_none:     "لا يوجد موظفون أو مشرفون نشطون في قائمة الاستهداف.",
 } as const;
 
 export type LabelKey = keyof typeof DEFAULT_LABELS;

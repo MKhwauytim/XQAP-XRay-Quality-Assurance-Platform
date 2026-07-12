@@ -4,6 +4,58 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.71 — 2026-07-12 — E (feature-batch): notification-manager view + EW sub-tab
+
+Batch E item 4 (admin-facing UI). New `NotificationManager` view where admin/manager post a
+notification and see, per notification, which audience users have accepted vs. are still pending.
+
+Placement decision: registered as the `ew/notifications` sub-tab under **employee-workspace**, NOT
+under Settings or User Management. Rationale: the manager view must be reachable by BOTH admin and
+manager, but Settings' `allowedRoles` is `["guest","admin"]` and User Management's is admin-only — a
+manager can reach neither. employee-workspace's `allowedRoles` already includes manager+admin, and its
+sub-tabs are gated individually by the permission matrix, so `ew/notifications` (admin/manager = access,
+others = none per v42.69) shows the view to exactly the right roles without inventing a new top-level tab.
+
+- NEW `NotificationManager.tsx`: post form (gated by `can("post-notification")`) + per-notification
+  acceptance roster. The audience roster is the active employee+supervisor managed users
+  (`getManagedLoginUsers()` filtered by `isNotificationAudienceRole`); each shows accepted (check) or
+  pending (clock). Newest notification first. All strings via the `notif_*` label keys.
+- NEW `NotificationManager.css`.
+- `EmployeeWorkspace/index.tsx`: register `SUB_TAB_NOTIFICATIONS = "notifications"` (union, KNOWN_SUB_TABS,
+  tabConfig.subTabs), and route it to `<NotificationManager>` behind `canAccessTab("ew/notifications")`.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/NotificationManager.tsx` — NEW.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/NotificationManager.css` — NEW.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/index.tsx`
+
+**Before (sub-tab id consts + KNOWN_SUB_TABS + subTabs):**
+```tsx
+const SUB_TAB_INSPECTION_FORM   = "inspection-form";
+```
+
+**After:**
+```tsx
+const SUB_TAB_INSPECTION_FORM   = "inspection-form";
+const SUB_TAB_NOTIFICATIONS     = "notifications";
+```
+(plus matching additions to the `WorkspaceSubTab` union, `KNOWN_SUB_TABS`, `tabConfig.subTabs`, and a new
+routing arm `if (activeSubTab === SUB_TAB_NOTIFICATIONS) { if (!canAccessTab("ew/notifications")) return
+<AccessDenied />; return <NotificationManager directoryHandle={directoryHandle} />; }`.)
+
+## v42.70 — 2026-07-12 — E (feature-batch): notification-center label keys
+
+Batch E item 3 (labels). Adds a `notif_*` label group to `DEFAULT_LABELS` so the banner + manager UI
+strings are admin-customizable (CLAUDE.md: prefer label keys over hard-coded Arabic). Covers the accept
+button, the "+N more" banner suffix, and the manager view's header/form/empty-state/acceptance strings.
+
+**File:** `src/data/labels/labelsStore.ts` — append `notif_accept_btn`, `notif_banner_more`,
+`notif_banner_aria`, `notif_mgr_eyebrow`, `notif_mgr_title`, `notif_mgr_subtitle`, `notif_mgr_post_label`,
+`notif_mgr_post_placeholder`, `notif_mgr_post_btn`, `notif_mgr_posting`, `notif_mgr_post_success`,
+`notif_mgr_empty_title`, `notif_mgr_empty_desc`, `notif_mgr_posted_by`, `notif_mgr_accepted_summary`,
+`notif_mgr_accepted`, `notif_mgr_pending`, `notif_mgr_audience_none` to the `DEFAULT_LABELS` object.
+
 ## v42.69 — 2026-07-12 — E (feature-batch): notification permissions wiring (featureId + sub-tab)
 
 Batch E item 2 (permission matrix). Follows Batch C's exact shape for wiring a new capability into

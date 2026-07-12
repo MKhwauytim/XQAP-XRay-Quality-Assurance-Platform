@@ -1,0 +1,226 @@
+.ntf-page {
+  padding: 20px 24px 40px;
+  max-width: 900px;
+  margin-inline: auto;
+}
+
+/* ── Post card ─────────────────────────────────────────────── */
+
+.ntf-post-card {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-surface);
+  box-shadow: var(--sh-sm);
+}
+
+.ntf-post-label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--c-navy);
+}
+
+.ntf-post-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-sm);
+  background: var(--c-surface-2);
+  font: inherit;
+  font-size: 14px;
+  color: var(--c-navy);
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.ntf-post-input:focus {
+  outline: none;
+  border-color: var(--c-navy-3);
+  box-shadow: 0 0 0 3px var(--c-navy-soft);
+}
+
+.ntf-post-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.ntf-post-status {
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.ntf-post-status--ok {
+  color: var(--c-success-strong);
+}
+
+.ntf-post-status--error {
+  color: #B42318;
+}
+
+.ntf-post-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 18px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: var(--c-navy);
+  color: #fff;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.ntf-post-btn:hover:not(:disabled) {
+  background: var(--c-navy-2);
+}
+
+.ntf-post-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* ── Notification list ─────────────────────────────────────── */
+
+.ntf-list {
+  list-style: none;
+  margin: 20px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ntf-card {
+  padding: 16px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-surface);
+  box-shadow: var(--sh-sm);
+}
+
+.ntf-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.ntf-card-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #FDE7D3;
+  color: #C2410C;
+}
+
+.ntf-card-message {
+  margin: 2px 0 0;
+  font-size: 14.5px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--c-navy);
+  white-space: pre-wrap;
+}
+
+.ntf-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  margin: 10px 0 0;
+  padding: 8px 0 0;
+  border-top: 1px dashed var(--c-border);
+  font-size: 12px;
+  color: #667085;
+}
+
+.ntf-card-summary {
+  margin-inline-start: auto;
+  font-weight: 700;
+  color: var(--c-navy);
+}
+
+/* ── Acceptance roster ─────────────────────────────────────── */
+
+.ntf-audience {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.ntf-audience-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-sm);
+  font-size: 12.5px;
+}
+
+.ntf-audience-item.is-accepted {
+  background: var(--c-success-tint);
+  border-color: var(--c-success-border);
+}
+
+.ntf-audience-item.is-pending {
+  background: var(--c-surface-2);
+}
+
+.ntf-audience-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+}
+
+.is-accepted .ntf-audience-status {
+  background: var(--c-success-tint-selected);
+  color: var(--c-success-strong);
+}
+
+.is-pending .ntf-audience-status {
+  background: #F2F4F7;
+  color: #98A2B3;
+}
+
+.ntf-audience-name {
+  font-weight: 600;
+  color: var(--c-navy);
+}
+
+.ntf-audience-tag {
+  margin-inline-start: auto;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.is-accepted .ntf-audience-tag {
+  color: var(--c-success-strong);
+}
+
+.is-pending .ntf-audience-tag {
+  color: #98A2B3;
+}
+
+.ntf-audience-empty {
+  margin: 12px 0 0;
+  font-size: 12.5px;
+  color: #667085;
+}
