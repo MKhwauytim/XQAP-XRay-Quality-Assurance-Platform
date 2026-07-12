@@ -3,9 +3,8 @@ import { CalendarOff, X } from "lucide-react";
 import { PageHeader } from "../../../../../../components/PageHeader/PageHeader";
 import { EmptyState, ErrorState, LoadingState } from "../../../../../../components/StateViews/StateViews";
 import type { DirectoryHandleLike } from "../../../../../../data/storage/fileSystemAccess";
-import type { ReferralRequest, ReplacementRequest } from "../../../../../../data/referral/referralTypes";
 import { formatMonthFolderShortLabel } from "../../../../../../data/population/monthFolder";
-import { isReferral } from "./RequestCard";
+import { isReferral, isReplacement, type CardRequest } from "./requestKind";
 import RequestList from "./RequestList";
 import ReviewModal from "./ReviewModal";
 import HistoryView from "./HistoryView";
@@ -13,63 +12,49 @@ import SummaryBar from "./SummaryBar";
 import { useApprovalData } from "./useApprovalData";
 
 type StatusMsg = { type: "ok" | "error"; text: string } | null;
-type RequestSection = "referral" | "replacement";
 type ViewTab = "review" | "history";
 type StatusFilter = "all" | "pending" | "approved" | "denied";
-type CardRequest = ReferralRequest | ReplacementRequest;
 type ReviewDialog = { request: CardRequest; action: "approve" | "deny" } | null;
 
 type Props = { directoryHandle: DirectoryHandleLike };
 
 export default function ReferralApproval({ directoryHandle }: Props) {
   const {
-    username, canApproveReferrals, canApproveReplacements,
+    username, canApproveReferrals, canApproveReplacements, canApproveReopens,
     userDisplayMap, months, selMonth, setSelMonth,
-    referrals, replacements, sampleDetails, loadState, reload,
-    approveReferral, denyReferral, approveReplacement, denyReplacement,
-    bulkReferralDecision, bulkReplacementDecision,
+    requests, sampleDetails, loadState, reload,
+    approve, deny, canReviewRequest, bulkDecision,
   } = useApprovalData(directoryHandle);
 
-  const canReview = canApproveReferrals || canApproveReplacements;
+  const canReview = canApproveReferrals || canApproveReplacements || canApproveReopens;
 
   const [view, setView] = useState<ViewTab>("review");
-  const [section, setSection] = useState<RequestSection>("referral");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("pending");
   const [statusMsg, setStatusMsg] = useState<StatusMsg>(null);
   const [dialog, setDialog] = useState<ReviewDialog>(null);
 
-  function switchSection(next: RequestSection): void {
-    setSection(next);
-    setStatusFilter("pending");
-    setStatusMsg(null);
-  }
-
-  const requestsForSection = section === "referral" ? referrals : replacements;
   const counts: Record<StatusFilter, number> = {
-    all: requestsForSection.length,
-    pending: requestsForSection.filter((r) => r.status === "pending").length,
-    approved: requestsForSection.filter((r) => r.status === "approved").length,
-    denied: requestsForSection.filter((r) => r.status === "denied").length,
+    all: requests.length,
+    pending: requests.filter((r) => r.status === "pending").length,
+    approved: requests.filter((r) => r.status === "approved").length,
+    denied: requests.filter((r) => r.status === "denied").length,
   };
-  const filtered = requestsForSection.filter((r) => statusFilter === "all" || r.status === statusFilter);
+  const filtered = requests.filter((r) => statusFilter === "all" || r.status === statusFilter);
 
   async function handleApprove(request: CardRequest, notes: string): Promise<void> {
-    const result = isReferral(request) ? await approveReferral(request, notes) : await approveReplacement(request, notes);
+    const result = await approve(request, notes);
     setDialog(null);
     setStatusMsg(result.ok ? { type: "ok", text: "تمت الموافقة على الطلب." } : { type: "error", text: result.error });
   }
 
   async function handleDeny(request: CardRequest, notes: string): Promise<void> {
-    const result = isReferral(request) ? await denyReferral(request, notes) : await denyReplacement(request, notes);
+    const result = await deny(request, notes);
     setDialog(null);
     setStatusMsg(result.ok ? { type: "ok", text: "تم رفض الطلب." } : { type: "error", text: result.error });
   }
 
-  async function handleBulk(requests: CardRequest[], action: "approve" | "deny", notes: string) {
-    const outcomes = section === "referral"
-      ? await bulkReferralDecision(requests as ReferralRequest[], action, notes)
-      : await bulkReplacementDecision(requests as ReplacementRequest[], action, notes);
-    return outcomes;
+  async function handleBulk(selected: CardRequest[], action: "approve" | "deny", notes: string) {
+    return bulkDecision(selected, action, notes);
   }
 
   function describeDialog(request: CardRequest, action: "approve" | "deny"): string {
@@ -79,9 +64,14 @@ export default function ReferralApproval({ directoryHandle }: Props) {
         ? `ستتم إحالة ${request.xrayImageIds.length} عينة من ${name(request.fromEmployee)} إلى ${name(request.toEmployee)} بشكل دائم.`
         : `سيتم رفض الطلب وستبقى العينات مع ${name(request.fromEmployee)}.`;
     }
+    if (isReplacement(request)) {
+      return action === "approve"
+        ? `سيتم استبدال ${request.originalXrayImageId} بـ ${request.replacementXrayImageId} للموظف ${name(request.employeeUsername)}.`
+        : `سيتم رفض الطلب وتبقى العينة الأصلية ${request.originalXrayImageId} مع الموظف.`;
+    }
     return action === "approve"
-      ? `سيتم استبدال ${request.originalXrayImageId} بـ ${request.replacementXrayImageId} للموظف ${name(request.employeeUsername)}.`
-      : `سيتم رفض الطلب وتبقى العينة الأصلية ${request.originalXrayImageId} مع الموظف.`;
+      ? `ستتم إعادة فتح الحالة ${request.xrayImageId} للموظف ${name(request.employeeUsername)} ليتمكن من تصحيح إجابته.`
+      : `سيتم رفض طلب إعادة فتح الحالة ${request.xrayImageId} وتبقى الإجابة مقدمة كما هي.`;
   }
 
   return (
@@ -89,7 +79,7 @@ export default function ReferralApproval({ directoryHandle }: Props) {
       <PageHeader
         eyebrow="Request Approval"
         title="اعتماد الطلبات"
-        subtitle={canReview ? "مراجعة طلبات الإحالة والاستبدال." : "الطلبات التي أرسلتها."}
+        subtitle={canReview ? "مراجعة طلبات الإحالة والاستبدال وإعادة فتح الحالة." : "الطلبات التي أرسلتها."}
       />
 
       <div className="ew-approval-view-tabs">
@@ -112,6 +102,7 @@ export default function ReferralApproval({ directoryHandle }: Props) {
           username={username}
           canApproveReferrals={canApproveReferrals}
           canApproveReplacements={canApproveReplacements}
+          canApproveReopens={canApproveReopens}
           userDisplayMap={userDisplayMap}
         />
       ) : (
@@ -123,15 +114,6 @@ export default function ReferralApproval({ directoryHandle }: Props) {
                 {months.map((m) => <option key={m.folderName} value={m.folderName}>{formatMonthFolderShortLabel(m.folderName)}</option>)}
               </select>
             </label>
-
-            <div className="ew-referral-status-tabs" style={{ gap: 4 }}>
-              <button type="button" className={`ew-referral-status-tab${section === "referral" ? " active" : ""}`} onClick={() => switchSection("referral")}>
-                الإحالة{referrals.length > 0 && <span className="ew-status-count">{referrals.length}</span>}
-              </button>
-              <button type="button" className={`ew-referral-status-tab${section === "replacement" ? " active" : ""}`} onClick={() => switchSection("replacement")}>
-                الاستبدال{replacements.length > 0 && <span className="ew-status-count">{replacements.length}</span>}
-              </button>
-            </div>
 
             <SummaryBar counts={counts} active={statusFilter} onSelect={setStatusFilter} />
           </div>
@@ -150,8 +132,8 @@ export default function ReferralApproval({ directoryHandle }: Props) {
           )}
 
           {loadState === "ready" && months.length > 0 && filtered.length === 0 && (
-            <EmptyState title={`لا توجد طلبات ${section === "referral" ? "إحالة" : "استبدال"} لهذا التصنيف`}
-              description="ستظهر الطلبات هنا فور إرسالها من مساحة عمل الموظفين." />
+            <EmptyState title="لا توجد طلبات لهذا التصنيف"
+              description="ستظهر طلبات الإحالة والاستبدال وإعادة فتح الحالة هنا فور إرسالها من مساحة عمل الموظفين." />
           )}
 
           {loadState === "ready" && filtered.length > 0 && (
@@ -160,7 +142,7 @@ export default function ReferralApproval({ directoryHandle }: Props) {
               bulkEnabled={statusFilter === "pending"}
               userDisplayMap={userDisplayMap}
               sampleDetails={sampleDetails}
-              canReview={section === "referral" ? canApproveReferrals : canApproveReplacements}
+              canReview={canReviewRequest}
               onApprove={(request) => setDialog({ request, action: "approve" })}
               onDeny={(request) => setDialog({ request, action: "deny" })}
               onBulk={handleBulk}

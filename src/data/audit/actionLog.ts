@@ -34,6 +34,8 @@ export type WorkspaceActionType =
   | "referral-denied"
   | "replacement-approved"
   | "replacement-denied"
+  | "reopen-approved"
+  | "reopen-denied"
   | "answer-reopened"
   | "month-closed"
   | "month-reopened"

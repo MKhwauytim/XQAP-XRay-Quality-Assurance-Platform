@@ -1,15 +1,9 @@
 import RequestTimeline from "./RequestTimeline";
-import type { ReferralRequest, ReplacementRequest } from "../../../../../../data/referral/referralTypes";
 import type { DistributionEntry } from "../../../../../../data/distribution/distributionTypes";
 import type { PreparedPopulationRow } from "../../../../../../data/population/populationTypes";
+import { KIND_LABELS, isReferral, isReopen, isReplacement, requestKind, type CardRequest } from "./requestKind";
 
-type CardRequest = ReferralRequest | ReplacementRequest;
 type SampleDetail = DistributionEntry | PreparedPopulationRow;
-
-// eslint-disable-next-line react-refresh/only-export-components -- type-guard export, not a component; imported elsewhere to discriminate referral vs. replacement requests
-export function isReferral(request: CardRequest): request is ReferralRequest {
-  return "toEmployee" in request;
-}
 
 type Props = {
   request: CardRequest;
@@ -58,7 +52,8 @@ function formatDate(iso: string): string {
 export default function RequestCard(props: Props) {
   const { request, userDisplayMap, sampleDetails, expanded, onToggleExpand, canReview, onApprove, onDeny, selectable, selected, onToggleSelect } = props;
   const showActions = canReview && request.status === "pending";
-  const referral = isReferral(request);
+  const kind = requestKind(request);
+  const name = (u: string) => userDisplayMap[u] ?? u;
 
   return (
     <article className={`ew-referral-card${selected ? " ew-referral-card--selected" : ""}`}>
@@ -73,12 +68,12 @@ export default function RequestCard(props: Props) {
           />
         )}
         <div className="ew-referral-card-meta">
-          {referral ? (
+          {isReferral(request) ? (
             <>
               <div className="ew-referral-route">
-                <span className="ew-referral-emp">{userDisplayMap[request.fromEmployee] ?? request.fromEmployee}</span>
+                <span className="ew-referral-emp">{name(request.fromEmployee)}</span>
                 <span className="ew-referral-arrow">←</span>
-                <span className="ew-referral-emp">{userDisplayMap[request.toEmployee] ?? request.toEmployee}</span>
+                <span className="ew-referral-emp">{name(request.toEmployee)}</span>
               </div>
               <div className="ew-referral-card-sub">
                 <span>{request.xrayImageIds.length} عينة</span>
@@ -86,7 +81,7 @@ export default function RequestCard(props: Props) {
                 <span>{formatDate(request.requestedAt)}</span>
               </div>
             </>
-          ) : (
+          ) : isReplacement(request) ? (
             <>
               <div className="ew-referral-route">
                 <span className="ew-referral-emp" style={{ fontSize: 12, color: "#64748b" }}>أصلي</span>
@@ -96,7 +91,19 @@ export default function RequestCard(props: Props) {
                 <span className="dt-mono" style={{ fontSize: 13 }}>{request.replacementXrayImageId}</span>
               </div>
               <div className="ew-referral-card-sub">
-                <span>موظف: {userDisplayMap[request.employeeUsername] ?? request.employeeUsername}</span>
+                <span>موظف: {name(request.employeeUsername)}</span>
+                <span>·</span>
+                <span>{formatDate(request.requestedAt)}</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="ew-referral-route">
+                <span className="ew-referral-emp">{name(request.employeeUsername)}</span>
+                <span className="dt-mono" style={{ fontSize: 13 }}>{request.xrayImageId}</span>
+              </div>
+              <div className="ew-referral-card-sub">
+                <span>إعادة فتح الحالة للتصحيح</span>
                 <span>·</span>
                 <span>{formatDate(request.requestedAt)}</span>
               </div>
@@ -106,6 +113,7 @@ export default function RequestCard(props: Props) {
           <RequestTimeline requestedAt={request.requestedAt} requestedBy={request.requestedBy} history={request.history} userDisplayMap={userDisplayMap} />
         </div>
         <div className="ew-referral-card-actions">
+          <span className={`ew-req-kind-badge ew-req-kind-${kind}`}>{KIND_LABELS[kind]}</span>
           <span className={`ew-ref-badge ${STATUS_CLASSES[request.status] ?? ""}`}>{STATUS_LABELS[request.status] ?? request.status}</span>
           {showActions && (
             <>
@@ -118,14 +126,14 @@ export default function RequestCard(props: Props) {
           </button>
         </div>
       </div>
-      {expanded && referral && (
+      {expanded && isReferral(request) && (
         <div className="ew-referral-ids-list">
           {request.xrayImageIds.map((id) => (
             <SampleDetailChip key={id} id={id} detail={sampleDetails[id]} />
           ))}
         </div>
       )}
-      {expanded && !referral && (
+      {expanded && isReplacement(request) && (
         <div className="ew-referral-ids-list" style={{ flexDirection: "column", gap: 6 }}>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <SampleDetailChip id={request.originalXrayImageId} detail={sampleDetails[request.originalXrayImageId]} prefix="أصلي" tone="danger" />
@@ -135,6 +143,11 @@ export default function RequestCard(props: Props) {
               prefix="بديل" tone="success"
             />
           </div>
+        </div>
+      )}
+      {expanded && isReopen(request) && (
+        <div className="ew-referral-ids-list">
+          <SampleDetailChip id={request.xrayImageId} detail={sampleDetails[request.xrayImageId]} />
         </div>
       )}
     </article>

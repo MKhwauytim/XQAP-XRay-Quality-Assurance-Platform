@@ -1,13 +1,12 @@
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { useFocusTrap } from "../../../../../../hooks/useFocusTrap";
-import RequestCard, { isReferral } from "./RequestCard";
-import type { ReferralRequest, ReplacementRequest } from "../../../../../../data/referral/referralTypes";
+import RequestCard from "./RequestCard";
+import { isReferral, isReplacement, type CardRequest } from "./requestKind";
 import type { DistributionEntry } from "../../../../../../data/distribution/distributionTypes";
 import type { PreparedPopulationRow } from "../../../../../../data/population/populationTypes";
 import type { BulkOutcome } from "./useApprovalData";
 
-type CardRequest = ReferralRequest | ReplacementRequest;
 type SampleDetail = DistributionEntry | PreparedPopulationRow;
 
 type Props = {
@@ -15,7 +14,8 @@ type Props = {
   bulkEnabled: boolean;
   userDisplayMap: Record<string, string>;
   sampleDetails: Record<string, SampleDetail>;
-  canReview: boolean;
+  /** Per-row reviewability — capability differs by request kind. */
+  canReview: (request: CardRequest) => boolean;
   onApprove: (request: CardRequest) => void;
   onDeny: (request: CardRequest) => void;
   onBulk: (requests: CardRequest[], action: "approve" | "deny", notes: string) => Promise<BulkOutcome[]>;
@@ -57,7 +57,10 @@ export default function RequestList({ requests, bulkEnabled, userDisplayMap, sam
     if (isReferral(request)) {
       return `${userDisplayMap[request.fromEmployee] ?? request.fromEmployee} ← ${userDisplayMap[request.toEmployee] ?? request.toEmployee}`;
     }
-    return `${request.originalXrayImageId} → ${request.replacementXrayImageId}`;
+    if (isReplacement(request)) {
+      return `${request.originalXrayImageId} → ${request.replacementXrayImageId}`;
+    }
+    return `إعادة فتح ${request.xrayImageId}`;
   }
 
   async function confirmBulk(): Promise<void> {
@@ -73,7 +76,7 @@ export default function RequestList({ requests, bulkEnabled, userDisplayMap, sam
 
   return (
     <div className="ew-referral-list">
-      {bulkEnabled && canReview && selected.size > 0 && (
+      {bulkEnabled && selected.size > 0 && (
         <div className="ew-bulk-bar">
           <span className="ew-bulk-bar-count">تم تحديد {selected.size} طلب</span>
           <button type="button" className="ew-btn-primary ew-btn-sm" onClick={() => setBulkAction("approve")}>موافقة على المحدد</button>
@@ -100,10 +103,10 @@ export default function RequestList({ requests, bulkEnabled, userDisplayMap, sam
           sampleDetails={sampleDetails}
           expanded={expandedId === request.requestId}
           onToggleExpand={() => setExpandedId((cur) => (cur === request.requestId ? null : request.requestId))}
-          canReview={canReview}
+          canReview={canReview(request)}
           onApprove={() => onApprove(request)}
           onDeny={() => onDeny(request)}
-          selectable={bulkEnabled && canReview && request.status === "pending"}
+          selectable={bulkEnabled && canReview(request) && request.status === "pending"}
           selected={selected.has(request.requestId)}
           onToggleSelect={() => toggleSelect(request.requestId)}
         />

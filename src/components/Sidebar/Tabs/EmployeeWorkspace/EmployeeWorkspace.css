@@ -1735,6 +1735,21 @@
 .ew-ref-badge-approved { background: var(--c-success-bg); color: var(--c-success); }
 .ew-ref-badge-denied   { background: var(--c-danger-bg);  color: var(--c-danger); }
 
+/* ── Request-kind badge (unified approval list: إحالة / استبدال / إعادة فتح) ── */
+
+.ew-req-kind-badge {
+  padding: 4px 11px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+  border: 1px solid transparent;
+}
+.ew-req-kind-referral    { background: var(--c-navy-soft); color: var(--c-navy); border-color: var(--c-border-2); }
+.ew-req-kind-replacement { background: #fef3c7; color: #92400e; border-color: #fde68a; }
+.ew-req-kind-reopen      { background: #ede9fe; color: #5b21b6; border-color: #ddd6fe; }
+
 /* ── Deny button ───────────────────────────────────────────── */
 
 .ew-btn-deny {

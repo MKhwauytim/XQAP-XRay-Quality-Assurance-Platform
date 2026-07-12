@@ -4,6 +4,61 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.67 — 2026-07-12 — B2 (feature-batch): unified اعتماد الطلبات page (referral + replacement + reopen)
+
+Batch B item 2. Merges referral, replacement, AND reopen requests into ONE chronological, filterable
+approval list, replacing the old referral/replacement `section` tab switch.
+
+- NEW `requestKind.ts`: `CardRequest = ReferralRequest | ReplacementRequest | ReopenRequest`, a
+  `requestKind()` discriminator and `isReferral`/`isReplacement`/`isReopen` guards (the existing
+  `isReferral` moves here from RequestCard; RequestCard/RequestList/index import from it).
+- `useApprovalData`: loads reopen requests too, adds `canApproveReopens` (gated on the existing
+  `ew.reopenAnswer` feature — no new matrix entry, it is the natural supervisor-authority-over-reopens
+  gate), exposes a merged `requests` array, a per-row `canReviewRequest()` predicate, single `approve`/
+  `deny` and a mixed-kind `bulkDecision` that dispatch by kind, plus `approveReopen`/`denyReopen`. The
+  existing per-kind functions + `referrals`/`replacements` stay for back-compat.
+- `RequestCard`: renders a per-row kind badge (إحالة / استبدال / إعادة فتح) and reopen-specific meta.
+- `RequestList`: `canReview` is now a `(request) => boolean` predicate (mixed-kind selection), bulk
+  confirm/labels handle all three kinds.
+- `index.tsx`: drops `section`/`switchSection`; one merged, status-filtered, chronological list; the
+  المراجعة/السجل view toggle and status filter now span all three kinds; the month filter keeps Batch A3's
+  short label (single-month review by design — no all-months, matching A3's landed decision).
+- `HistoryView`: includes reopen requests.
+- `actionLog`: `WorkspaceActionType` gains `reopen-approved` / `reopen-denied`.
+- CSS: `.ew-req-kind-badge` variants for the three kinds.
+
+**File:** `src/data/audit/actionLog.ts`
+
+**Before:**
+```ts
+  | "replacement-approved"
+  | "replacement-denied"
+  | "answer-reopened"
+```
+
+**After:**
+```ts
+  | "replacement-approved"
+  | "replacement-denied"
+  | "reopen-approved"
+  | "reopen-denied"
+  | "answer-reopened"
+```
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/requestKind.ts` — NEW (type + guards).
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/RequestCard.tsx` — union type incl. ReopenRequest; kind badge; reopen meta; `isReferral` re-homed to requestKind.ts.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/RequestList.tsx` — `canReview` predicate; mixed-kind bulk + describeSelected.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/useApprovalData.ts` — reopen load/visibility, merged `requests`, unified approve/deny/bulkDecision, canApproveReopens, canReviewRequest.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/index.tsx` — remove section tabs; single merged list; per-kind dialog copy.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/HistoryView.tsx` — include reopen rows.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/EmployeeWorkspace.css` — `.ew-req-kind-badge` styles.
+
 ## v42.66 — 2026-07-12 — B1 (feature-batch): employee "طلب إعادة فتح الحالة" button + wiring
 
 Batch B item 1 (employee UI). Adds the self-service reopen button to a submitted answer in the
