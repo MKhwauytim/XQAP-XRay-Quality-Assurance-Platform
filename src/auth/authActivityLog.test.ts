@@ -8,12 +8,13 @@ import {
   resetAuthActivityLogForTests,
   startAuthActivitySession,
   waitForAuthActivityLogFlush,
+  type AuthActivityLogEntry,
   type AuthActivityLogFile,
 } from "./authActivityLog";
 import type { AuthSession } from "./authTypes";
 import { createMemoryDirectory } from "../data/storage/memoryDirectory";
 import { createWorkspaceStructure } from "../data/storage/fileSystemAccess";
-import { safeReadJson } from "../data/storage/safeWrite";
+import { safeReadJson, safeWriteJson } from "../data/storage/safeWrite";
 import { getSystemRoot } from "../data/workspace/workspacePaths";
 
 function makeSession(username: string, loginAt: string): AuthSession {
@@ -88,5 +89,48 @@ describe("authActivityLog", () => {
     expect(result.value.entries[0]?.username).toBe("user1");
     expect(result.value.entries[0]?.closeReason).toBe("page-closed");
     expect(result.value.entries[0]?.durationMs).toBe(45 * 60 * 1000);
+  });
+
+  it("a flush merges a concurrent machine's audit entry instead of clobbering it (cross-machine CAS)", async () => {
+    const root = createMemoryDirectory("root");
+    await createWorkspaceStructure(root, "admin");
+    configureAuthActivityLogWorkspace(root);
+
+    // This machine records user1 and flushes it to disk.
+    startAuthActivitySession(makeSession("user1", "2026-06-28T08:00:00.000Z"));
+    await waitForAuthActivityLogFlush();
+
+    // Another machine, unaware of user1, wrote its own session directly to the
+    // same activity.log.json at a much higher revision.
+    const systemDir = await getSystemRoot(root, false);
+    const auditDir = await systemDir.getDirectoryHandle("audit", { create: false });
+    const externalEntry: AuthActivityLogEntry = {
+      id: "auth-user2-otherpc",
+      username: "user2",
+      role: "employee",
+      signedInAt: "2026-06-28T07:00:00.000Z",
+      lastSeenAt: "2026-06-28T07:30:00.000Z",
+      signedOutAt: "2026-06-28T07:30:00.000Z",
+      durationMs: 30 * 60 * 1000,
+      closeReason: "logout",
+    };
+    await safeWriteJson<AuthActivityLogFile>(auditDir, "activity.log.json", {
+      revision: 10,
+      updatedAt: "2026-06-28T07:30:00.000Z",
+      entries: [externalEntry],
+    });
+
+    // This machine flushes again. It must re-read the other machine's write and
+    // MERGE (not clobber) — both sessions survive, and the revision advances past
+    // the external write, proving a fresh re-read rather than a stale overwrite.
+    vi.setSystemTime(new Date("2026-06-28T09:00:00.000Z"));
+    recordAuthActivityHeartbeat();
+    await waitForAuthActivityLogFlush();
+
+    const result = await safeReadJson<AuthActivityLogFile>(auditDir, "activity.log.json");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.entries.map((e) => e.username).sort()).toEqual(["user1", "user2"]);
+    expect(result.value.revision).toBeGreaterThan(10);
   });
 });

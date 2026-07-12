@@ -1,6 +1,7 @@
 import type { AuthSession } from "./authTypes";
 import type { DirectoryHandleLike } from "../data/storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../data/storage/safeWrite";
+import { casLoop } from "../data/storage/casLoop";
 import { getSystemRoot, SYSTEM_FOLDER_NAMES } from "../data/workspace/workspacePaths";
 
 const ACTIVITY_LOG_FILE = "activity.log.json";
@@ -25,6 +26,8 @@ export type AuthActivityLogEntry = {
 
 export type AuthActivityLogFile = {
   revision: number;
+  /** Per-write UUID embedded by casLoop for cross-machine race detection. */
+  _writeToken?: string;
   updatedAt: string;
   entries: AuthActivityLogEntry[];
 };
@@ -88,6 +91,7 @@ async function readDiskLog(): Promise<AuthActivityLogFile> {
 
   return {
     revision: result.value.revision ?? 0,
+    _writeToken: result.value._writeToken,
     updatedAt: result.value.updatedAt ?? nowIso(),
     entries: Array.isArray(result.value.entries) ? result.value.entries.filter(isValidEntry) : [],
   };
@@ -112,14 +116,34 @@ async function flushMemoryToWorkspace(): Promise<void> {
   const dir = await getActivityAuditDir(true);
   if (!dir) return;
 
-  const existing = await readDiskLog();
-  const entries = mergeEntries(existing.entries, memoryEntries);
-  await safeWriteJson<AuthActivityLogFile>(dir, ACTIVITY_LOG_FILE, {
-    revision: existing.revision + 1,
-    updatedAt: nowIso(),
-    entries,
-  });
-  memoryEntries = entries;
+  // Shared, multi-writer audit file (every machine's login/logout/heartbeat).
+  // The in-module writeChain serializes same-tab flushes; casLoop re-reads disk
+  // fresh each attempt, merges by session id, bumps revision + stamps _writeToken,
+  // and verifies both on read-back so a concurrent machine's entries are never
+  // silently dropped by this flush. `memoryEntries` advances only on a verified
+  // write, so a losing writer retries with fresh state on the next flush.
+  await casLoop<{ ok: true }>(
+    async (writeToken) => {
+      const existing = await readDiskLog();
+      const entries = mergeEntries(existing.entries, memoryEntries);
+      const nextRevision = existing.revision + 1;
+      await safeWriteJson<AuthActivityLogFile>(dir, ACTIVITY_LOG_FILE, {
+        revision: nextRevision,
+        _writeToken: writeToken,
+        updatedAt: nowIso(),
+        entries,
+      });
+      const verify = await readDiskLog();
+      if (verify.revision === nextRevision && verify._writeToken === writeToken) {
+        memoryEntries = entries;
+        return { done: true, result: { ok: true as const } };
+      }
+      return { done: false };
+    },
+    { conflictError: "تعذّر حفظ سجل نشاط الجلسات: تعارض في الكتابة بعد عدة محاولات." }
+  );
+  // Best-effort: queueFlush already swallows failures. A persistent conflict just
+  // leaves memoryEntries intact to retry on the next flush (no silent drop).
 }
 
 function queueFlush(): void {

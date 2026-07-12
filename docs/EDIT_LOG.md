@@ -4,6 +4,90 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.80 — 2026-07-12 — S6 (hardening-2026-07-08): make the auth-session activity-log flush CAS-safe
+
+Full-sweep finding S6. `5-system/…/activity.log.json` is written by every machine's login/logout/heartbeat.
+`flushMemoryToWorkspace` was serialized only by an in-module `writeChain` (same-tab); `mergeEntries` unions by
+session id, which softens but does not eliminate a lost update — two machines reading rev K, each writing
+{…,its-own-entry}, and the last writer dropping the other's entry from the persisted audit. Lower stakes
+(audit completeness, not business data) but the same class of gap. Wrapped the write in `casLoop` (the
+existing `mergeEntries`-by-session-id logic is kept): re-read disk fresh each attempt, merge, bump `revision`,
+stamp `_writeToken`, verify both on read-back, retry-with-jitter on mismatch. `memoryEntries` is now advanced
+only on a verified successful write, so a losing writer retries with fresh state instead of dropping entries.
+No `withResourceLock` added — the `writeChain` already serializes same-tab flushes; casLoop supplies the
+cross-machine token check.
+
+**File:** `src/auth/authActivityLog.ts`
+
+**Before:**
+```ts
+export type AuthActivityLogFile = {
+  revision: number;
+  updatedAt: string;
+  entries: AuthActivityLogEntry[];
+};
+
+async function readDiskLog(): Promise<AuthActivityLogFile> {
+  // …
+  return { revision: result.value.revision ?? 0, updatedAt: result.value.updatedAt ?? nowIso(), entries: … };
+}
+
+async function flushMemoryToWorkspace(): Promise<void> {
+  const dir = await getActivityAuditDir(true);
+  if (!dir) return;
+  const existing = await readDiskLog();
+  const entries = mergeEntries(existing.entries, memoryEntries);
+  await safeWriteJson<AuthActivityLogFile>(dir, ACTIVITY_LOG_FILE, {
+    revision: existing.revision + 1,
+    updatedAt: nowIso(),
+    entries,
+  });
+  memoryEntries = entries;
+}
+```
+
+**After:**
+```ts
+export type AuthActivityLogFile = {
+  revision: number;
+  /** Per-write UUID embedded by casLoop for cross-machine race detection. */
+  _writeToken?: string;
+  updatedAt: string;
+  entries: AuthActivityLogEntry[];
+};
+
+async function readDiskLog(): Promise<AuthActivityLogFile> {
+  // …
+  return { revision: result.value.revision ?? 0, _writeToken: result.value._writeToken, updatedAt: …, entries: … };
+}
+
+async function flushMemoryToWorkspace(): Promise<void> {
+  const dir = await getActivityAuditDir(true);
+  if (!dir) return;
+  await casLoop<{ ok: true }>(async (writeToken) => {
+    const existing = await readDiskLog();
+    const entries = mergeEntries(existing.entries, memoryEntries);
+    const nextRevision = existing.revision + 1;
+    await safeWriteJson<AuthActivityLogFile>(dir, ACTIVITY_LOG_FILE, {
+      revision: nextRevision, _writeToken: writeToken, updatedAt: nowIso(), entries,
+    });
+    const verify = await readDiskLog();
+    if (verify.revision === nextRevision && verify._writeToken === writeToken) {
+      memoryEntries = entries; // advance only on a verified write
+      return { done: true, result: { ok: true as const } };
+    }
+    return { done: false };
+  }, { conflictError: "تعذّر حفظ سجل نشاط الجلسات: تعارض في الكتابة بعد عدة محاولات." });
+  // Best-effort: queueFlush already swallows failures; a persistent conflict just
+  // leaves memoryEntries intact to retry on the next flush (no silent drop).
+}
+```
+
+**File:** `src/auth/authActivityLog.test.ts` — added a test that a flush merges a concurrent machine's audit
+entry (written directly to `activity.log.json`) instead of clobbering it: after this machine flushes, both
+sessions are persisted and the revision advanced past the external write (proving a fresh re-read, not a
+blind rev-2 overwrite).
+
 ## v42.79 — 2026-07-12 — S5 (hardening-2026-07-08): CAS-guard the template & report-design index files
 
 Full-sweep finding S5. `templates.index.json` and `designs.index.json` are shared multi-writer index files
