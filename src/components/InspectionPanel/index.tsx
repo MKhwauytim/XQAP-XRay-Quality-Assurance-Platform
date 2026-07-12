@@ -26,6 +26,10 @@ type Props = {
   onReassign?: (entry: DistributionEntry) => void;
   /** Omit when the current user cannot reopen submitted answers (Tier-1 Item D). */
   onReopen?: (reason: string) => void;
+  /** Employee self-service reopen-case request (Batch B). Distinct from onReopen:
+   *  this creates a request (or applies instantly, per the caller) rather than a
+   *  supervisor directly reopening any answer. */
+  onRequestReopen?: (reason: string) => void;
 };
 
 export default function InspectionPanel({
@@ -38,6 +42,7 @@ export default function InspectionPanel({
   onReplace,
   onReassign,
   onReopen,
+  onRequestReopen,
 }: Props) {
   const [ans, setAns] = useState<Record<string, string | number | boolean>>(() => {
     if (!savedAnswer) return {};
@@ -49,8 +54,10 @@ export default function InspectionPanel({
   });
   const [validationMsg, setValidationMsg] = useState<string | null>(null);
   const [touchedRequiredIds, setTouchedRequiredIds] = useState<Set<string>>(new Set());
-  // Reopen-for-correction confirm block (Tier-1 Item D).
-  const [reopenMode, setReopenMode] = useState(false);
+  // Reopen confirm block. Tracks WHICH reopen action's reason field is open:
+  // "direct" = supervisor direct reopen (Tier-1 Item D, onReopen);
+  // "request" = employee self-service reopen request (Batch B, onRequestReopen).
+  const [reopenAction, setReopenAction] = useState<null | "direct" | "request">(null);
   const [reopenReason, setReopenReason] = useState("");
 
   const phases = useMemo(() => (template ? getTemplatePhases(template) : []), [template]);
@@ -209,21 +216,34 @@ export default function InspectionPanel({
         )}
       </div>
 
-      {isSubmitted && onReopen && (
+      {isSubmitted && (onReopen || onRequestReopen) && (
         <div className="ip-footer">
-          {!reopenMode ? (
+          {reopenAction === null ? (
             <div className="ip-footer-actions">
-              <button
-                type="button"
-                className="ip-btn ip-btn--warning"
-                onClick={() => setReopenMode(true)}
-              >
-                {getLabels().ip_reopen_btn}
-              </button>
+              {onReopen && (
+                <button
+                  type="button"
+                  className="ip-btn ip-btn--warning"
+                  onClick={() => setReopenAction("direct")}
+                >
+                  {getLabels().ip_reopen_btn}
+                </button>
+              )}
+              {onRequestReopen && (
+                <button
+                  type="button"
+                  className="ip-btn ip-btn--warning"
+                  onClick={() => setReopenAction("request")}
+                >
+                  {getLabels().ew_reopen_request_btn}
+                </button>
+              )}
             </div>
           ) : (
             <>
-              <p className="ip-validation-msg">{getLabels().ip_reopen_confirm}</p>
+              <p className="ip-validation-msg">
+                {reopenAction === "direct" ? getLabels().ip_reopen_confirm : getLabels().ew_reopen_request_confirm}
+              </p>
               <textarea
                 className="ip-input ip-textarea"
                 rows={2}
@@ -236,7 +256,7 @@ export default function InspectionPanel({
                   type="button"
                   className="ip-btn ip-btn--secondary"
                   onClick={() => {
-                    setReopenMode(false);
+                    setReopenAction(null);
                     setReopenReason("");
                   }}
                 >
@@ -246,9 +266,13 @@ export default function InspectionPanel({
                   type="button"
                   className="ip-btn ip-btn--warning"
                   disabled={reopenReason.trim().length === 0}
-                  onClick={() => onReopen(reopenReason.trim())}
+                  onClick={() => {
+                    const reason = reopenReason.trim();
+                    if (reopenAction === "direct") onReopen?.(reason);
+                    else onRequestReopen?.(reason);
+                  }}
                 >
-                  {getLabels().ip_reopen_btn}
+                  {reopenAction === "direct" ? getLabels().ip_reopen_btn : getLabels().ew_reopen_request_btn}
                 </button>
               </div>
             </>

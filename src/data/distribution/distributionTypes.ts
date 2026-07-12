@@ -6,6 +6,7 @@ export type DistributionEventType =
   | "replacement-requested"
   | "replaced"
   | "reassigned"
+  | "reopen-requested"
   | "reopened";
 
 export type DistributionEvent = {

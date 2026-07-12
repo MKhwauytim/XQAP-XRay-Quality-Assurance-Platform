@@ -127,6 +127,11 @@ export const DEFAULT_LABELS = {
   msg_reopen_done:              "تمت إعادة فتح الإجابة للتصحيح.",
   feature_ew_reopen_answer:     "إعادة فتح الإجابات المقدمة",
 
+  // Employee self-service reopen-case request (Batch B)
+  ew_reopen_request_btn:        "طلب إعادة فتح الحالة",
+  ew_reopen_request_confirm:    "سيتم إرسال طلب لإعادة فتح هذه الحالة. إذا كانت صلاحيتك تسمح بالفتح الفوري فسيُطبَّق مباشرة، وإلا فسيُحوَّل للمشرف للاعتماد.",
+  msg_reopen_request_sent:      "تم إرسال طلب إعادة فتح الحالة — بانتظار موافقة المشرف.",
+
   // Backup coverage + restore semantics (Tier-1 Items F/G)
   backup_import_users_labels_btn:  "استيراد المستخدمين والتسميات من النسخة",
   backup_import_users_labels_done: "تم استيراد المستخدمين والصلاحيات والتسميات من النسخة الاحتياطية.",

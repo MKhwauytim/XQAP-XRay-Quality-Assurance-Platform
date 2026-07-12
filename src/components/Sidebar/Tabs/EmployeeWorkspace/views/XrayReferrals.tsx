@@ -71,6 +71,7 @@ import {
   getPendingReferralIds,
   loadReferralLog,
 } from "../../../../../data/referral/referralStorage";
+import { submitReopenRequest } from "../../../../../data/referral/requestReopen";
 import type { ReferralRequest, ReplacementRequest } from "../../../../../data/referral/referralTypes";
 import { useLabels, type Labels } from "../../../../../data/labels/useLabels";
 import { formatStageLabel } from "../../Population/components/helpers";
@@ -238,6 +239,13 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     userManagementState.featurePermissions,
     role,
     "ew.reopenAnswer"
+  );
+  // Batch B: when enabled for this role, the employee's self-service reopen request
+  // is applied instantly; when disabled it is routed to a supervisor for approval.
+  const canReopenInstant = hasFeature(
+    userManagementState.featurePermissions,
+    role,
+    "employee-reopen-instant"
   );
   const L = useLabels();
   const baseColumns = useMemo(() => buildXrayColumns(L), [L]);
@@ -529,6 +537,41 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       });
       if (result.ok) {
         setStatusMsg({ type: "ok", text: getLabels().msg_reopen_done });
+        await loadData();
+      } else {
+        setStatusMsg({ type: "error", text: result.error });
+      }
+    } catch (error) {
+      setStatusMsg({
+        type: "error",
+        text: error instanceof MonthClosedError
+          ? getLabels().msg_month_closed_write_blocked
+          : error instanceof Error ? error.message : "خطأ غير معروف",
+      });
+    }
+  }
+
+  // Batch B: employee self-service reopen. Branches on canReopenInstant — either
+  // applies immediately or files a pending request routed to a supervisor.
+  async function handleRequestReopen(entry: DistributionEntry, reason: string): Promise<void> {
+    try {
+      const result = await submitReopenRequest({
+        directoryHandle,
+        monthFolderName: selMonth,
+        employeeUsername: entry.assignedTo,
+        xrayImageId: entry.xrayImageId,
+        assignedTo: entry.assignedTo,
+        requestedBy: username,
+        requestedByRole: role,
+        reason,
+        instant: canReopenInstant,
+      });
+      if (result.ok) {
+        setSelEntryId(null);
+        setStatusMsg({
+          type: "ok",
+          text: result.mode === "instant" ? getLabels().msg_reopen_done : getLabels().msg_reopen_request_sent,
+        });
         await loadData();
       } else {
         setStatusMsg({ type: "error", text: result.error });
@@ -880,6 +923,11 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                       ? (reason) => { void handleReopenAnswer(selEntry, reason); }
                       : undefined
                   }
+                  onRequestReopen={
+                    selEntry.assignedTo === username
+                      ? (reason) => { void handleRequestReopen(selEntry, reason); }
+                      : undefined
+                  }
                 />
               ) : (
                 <div className="ew-ref-empty-panel">
@@ -1055,6 +1103,7 @@ function SampleDetailPanel({
   onReplace,
   onReassign,
   onReopen,
+  onRequestReopen,
 }: {
   entry: DistributionEntry;
   template: TemplateSchema | null;
@@ -1065,6 +1114,7 @@ function SampleDetailPanel({
   onReplace?: (entry: DistributionEntry) => void;
   onReassign?: (entry: DistributionEntry) => void;
   onReopen?: (reason: string) => void;
+  onRequestReopen?: (reason: string) => void;
 }) {
   return (
     <InspectionPanel
@@ -1078,6 +1128,7 @@ function SampleDetailPanel({
       onReplace={onReplace}
       onReassign={onReassign}
       onReopen={onReopen}
+      onRequestReopen={onRequestReopen}
     />
   );
 }

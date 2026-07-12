@@ -4,6 +4,275 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.66 — 2026-07-12 — B1 (feature-batch): employee "طلب إعادة فتح الحالة" button + wiring
+
+Batch B item 1 (employee UI). Adds the self-service reopen button to a submitted answer in the
+inspection panel and wires it through XrayReferrals to the `submitReopenRequest` orchestrator (v42.65).
+
+- `InspectionPanel`: new optional `onRequestReopen?(reason)` prop (distinct from the existing
+  supervisor-facing `onReopen`). The footer's reopen block now tracks WHICH action is pending via a
+  `reopenAction: "direct" | "request" | null` state and renders both buttons when both are available
+  (supervisor direct-reopen "إعادة فتح للتصحيح" vs. employee request "طلب إعادة فتح الحالة"), sharing
+  the same reason-field confirm flow. Purely additive — the existing `onReopen` path is unchanged.
+- `XrayReferrals`: reads the requesting role's `employee-reopen-instant` feature into `canReopenInstant`,
+  adds `handleRequestReopen` (calls `submitReopenRequest` with `instant: canReopenInstant`, then toasts
+  instant-applied vs. request-sent and reloads), and passes `onRequestReopen` to the detail panel only
+  for the current user's OWN sample (`selEntry.assignedTo === username`).
+
+**File:** `src/components/InspectionPanel/index.tsx`
+
+**Before:**
+```tsx
+  /** Omit when the current user cannot reopen submitted answers (Tier-1 Item D). */
+  onReopen?: (reason: string) => void;
+};
+```
+```tsx
+  const [reopenMode, setReopenMode] = useState(false);
+  const [reopenReason, setReopenReason] = useState("");
+```
+```tsx
+      {isSubmitted && onReopen && (
+        <div className="ip-footer">
+          {!reopenMode ? ( ... single "إعادة فتح للتصحيح" button ... ) : ( ... reason field, confirm calls onReopen ... )}
+        </div>
+      )}
+```
+
+**After:**
+```tsx
+  /** Omit when the current user cannot reopen submitted answers (Tier-1 Item D). */
+  onReopen?: (reason: string) => void;
+  /** Employee self-service reopen-case request (Batch B). Distinct from onReopen. */
+  onRequestReopen?: (reason: string) => void;
+};
+```
+```tsx
+  // Which reopen action's reason field is open: supervisor direct vs employee request.
+  const [reopenAction, setReopenAction] = useState<null | "direct" | "request">(null);
+  const [reopenReason, setReopenReason] = useState("");
+```
+```tsx
+      {isSubmitted && (onReopen || onRequestReopen) && (
+        <div className="ip-footer">
+          {reopenAction === null ? (
+            <div className="ip-footer-actions">
+              {onReopen && <button ... onClick={() => setReopenAction("direct")}>{ip_reopen_btn}</button>}
+              {onRequestReopen && <button ... onClick={() => setReopenAction("request")}>{ew_reopen_request_btn}</button>}
+            </div>
+          ) : ( ... shared reason field; confirm dispatches to onReopen or onRequestReopen ... )}
+        </div>
+      )}
+```
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx`
+
+**Before:** (import block, feature checks, and SampleDetailPanel wiring — see file; adds
+`submitReopenRequest` import, `canReopenInstant`, `handleRequestReopen`, `onRequestReopen` prop,
+and the `SampleDetailPanel` passthrough of `onRequestReopen`.)
+
+## v42.65 — 2026-07-12 — B1 (feature-batch): reopen-request data model, fold arm, storage + orchestrator
+
+Batch B item 1 (data layer only — UI in v42.66). New employee self-service "reopen case" request
+flow modeled on the existing referral/replacement request pattern (now CAS-safe per Batch D). This
+is a NEW, separate path from the existing `ew.reopenAnswer` (supervisor/manager/admin direct reopen),
+which is untouched. Pieces:
+
+1. `ReopenRequest`/`ReopenLog` types (mirroring `ReplacementRequest`), stored inside each employee's
+   `EmployeeAnswerFile.reopenRequests` (sole owner, no shared-file conflicts).
+2. New distribution event type `reopen-requested` (the pending precursor) + `buildReopenRequestedEvent`
+   + a fold arm in `deriveCurrentDistribution()`. The terminal `reopened` event (applied state) already
+   existed. The `reopen-requested` fold arm is a non-mutating marker: it keeps the row in its prior
+   status (a submitted/`completed` row stays completed) — only the terminal `reopened` returns it to
+   pending. Preserves the totals invariant (no new `DistributionStatus`).
+3. `DecisionEventKind` extended with `"reopen"`; `mergeDecisionHistory` guarded so `"reopen"` reads only
+   `decisionEvents` (no legacy per-kind array exists for it).
+4. Storage: `appendReopenToEmployee` (answerStorage) + `appendReopenRequest`/`loadReopenLog`/
+   `updateReopenStatus` (referralStorage), same shape as the referral/replacement helpers.
+5. Approval domain: `approveReopen`/`denyReopen` in `approveReferral.ts` — approve reuses the existing
+   idempotent `reopenSubmittedAnswer` path, deny just records the decision.
+6. Orchestrator `submitReopenRequest` (`referral/requestReopen.ts`): branches on the caller-supplied
+   `instant` flag (from the Batch-C `employee-reopen-instant` feature) — instant applies the reopen
+   immediately (reuses `reopenSubmittedAnswer`), otherwise creates a pending `ReopenRequest` (CAS-safe)
+   and emits a best-effort `reopen-requested` audit event.
+7. Labels for the employee request button/confirm and result toasts.
+
+**File:** `src/data/referral/referralTypes.ts`
+
+**Before:**
+```ts
+export type ReplacementLog = {
+  monthFolderName: string;
+  revision: number;
+  /** Per-write UUID embedded by casLoop for cross-machine race detection. */
+  _writeToken?: string;
+  requests: ReplacementRequest[];
+};
+```
+
+**After:**
+```ts
+export type ReplacementLog = {
+  monthFolderName: string;
+  revision: number;
+  /** Per-write UUID embedded by casLoop for cross-machine race detection. */
+  _writeToken?: string;
+  requests: ReplacementRequest[];
+};
+
+/** A pending request from an employee to reopen their own submitted answer for
+ *  correction. Created when the employee's role is NOT granted instant reopen
+ *  (`employee-reopen-instant`); requires supervisor approval before the answer is
+ *  returned to draft. Mirrors ReplacementRequest's shape. */
+export type ReopenRequest = {
+  requestId: string;
+  monthFolderName: string;
+  /** The employee whose submitted answer is to be reopened (== requestedBy for self-service). */
+  employeeUsername: string;
+  /** The specific case/answer being reopened. */
+  xrayImageId: string;
+  reason: string;
+  requestedAt: string;
+  requestedBy: string;
+  status: ReferralStatus;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  reviewNotes?: string;
+  /** Full append-only decision history, newest last. Populated by loadReopenLog. */
+  history?: DecisionEvent[];
+};
+
+export type ReopenLog = {
+  monthFolderName: string;
+  revision: number;
+  /** Per-write UUID embedded by casLoop for cross-machine race detection. */
+  _writeToken?: string;
+  requests: ReopenRequest[];
+};
+```
+
+**File:** `src/data/answers/answerTypes.ts`
+
+**Before:**
+```ts
+  /** Replacement requests submitted by this employee — sole owner, no shared-file conflicts. */
+  replacementRequests?: ReplacementRequest[];
+  lastUpdatedAt?: string;
+```
+
+**After:**
+```ts
+  /** Replacement requests submitted by this employee — sole owner, no shared-file conflicts. */
+  replacementRequests?: ReplacementRequest[];
+  /** Reopen-case requests submitted by this employee — sole owner, no shared-file conflicts. */
+  reopenRequests?: ReopenRequest[];
+  lastUpdatedAt?: string;
+```
+
+**File:** `src/data/approvals/approvalTypes.ts`
+
+**Before:**
+```ts
+export type DecisionEventKind = "referral" | "replacement";
+```
+
+**After:**
+```ts
+export type DecisionEventKind = "referral" | "replacement" | "reopen";
+```
+
+**File:** `src/data/approvals/approvalStorage.ts` (mergeDecisionHistory legacy guard)
+
+**Before:**
+```ts
+    const legacy = kind === "referral" ? file.referralDecisions : file.replacementDecisions;
+```
+
+**After:**
+```ts
+    // "reopen" is a newer kind with no legacy per-kind array — only decisionEvents.
+    const legacy =
+      kind === "referral" ? file.referralDecisions : kind === "replacement" ? file.replacementDecisions : [];
+```
+
+**File:** `src/data/distribution/distributionTypes.ts`
+
+**Before:**
+```ts
+export type DistributionEventType =
+  | "assigned"
+  | "completed"
+  | "replacement-requested"
+  | "replaced"
+  | "reassigned"
+  | "reopened";
+```
+
+**After:**
+```ts
+export type DistributionEventType =
+  | "assigned"
+  | "completed"
+  | "replacement-requested"
+  | "replaced"
+  | "reassigned"
+  | "reopen-requested"
+  | "reopened";
+```
+
+**File:** `src/data/distribution/distributionLog.ts` (add builder + fold arm)
+
+**Before:**
+```ts
+export function buildCompletedEvent(params: {
+```
+
+**After:**
+```ts
+export function buildReopenRequestedEvent(params: {
+  xrayImageId: string;
+  assignedTo: string;
+  eventBy: string;
+  notes?: string;
+  sourceRequestId?: string;
+}): DistributionEvent {
+  return {
+    eventId: createEventId(),
+    eventType: "reopen-requested",
+    xrayImageId: params.xrayImageId,
+    assignedTo: params.assignedTo,
+    eventAt: new Date().toISOString(),
+    eventBy: params.eventBy,
+    notes: params.notes,
+    sourceRequestId: params.sourceRequestId
+  };
+}
+
+export function buildCompletedEvent(params: {
+```
+
+Fold arm (added in the switch, before `case "reopened"`):
+```ts
+      case "reopen-requested":
+        // Pending self-service reopen request (approval-gated). A non-mutating
+        // marker: the row keeps its prior status (a submitted/completed row stays
+        // completed) — only the terminal "reopened" event returns it to pending.
+        status = existing?.status ?? "pending";
+        assignedTo = existing?.assignedTo ?? evt.assignedTo;
+        replacedById = existing?.replacedById ?? null;
+        break;
+```
+
+**File:** `src/data/answers/answerStorage.ts` — new `appendReopenToEmployee` (mirrors appendReplacementToEmployee).
+
+**File:** `src/data/referral/referralStorage.ts` — new `appendReopenRequest` / `loadReopenLog` / `updateReopenStatus` (mirror the referral/replacement helpers; join with `mergeDecisionHistory(..., "reopen", ...)`).
+
+**File:** `src/data/referral/approveReferral.ts` — new `approveReopen` / `denyReopen` (approve reuses `reopenSubmittedAnswer`; deny records the decision).
+
+**File:** `src/data/referral/requestReopen.ts` — NEW. `submitReopenRequest({..., instant})`: instant → `reopenSubmittedAnswer`; otherwise → `appendReopenRequest` + best-effort `reopen-requested` event.
+
+**File:** `src/data/labels/labelsStore.ts` — new keys `ew_reopen_request_btn`, `ew_reopen_request_confirm`, `msg_reopen_request_sent`.
+
 ## v42.64 — 2026-07-12 — C4 (feature-batch): scaffold employee-reopen-instant per-role setting
 
 Batch C item 4. Added a new per-role feature toggle `employee-reopen-instant` (group

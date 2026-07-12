@@ -1,4 +1,4 @@
-import type { ReferralRequest, ReplacementRequest } from "../referral/referralTypes";
+import type { ReferralRequest, ReopenRequest, ReplacementRequest } from "../referral/referralTypes";
 
 export type FieldAnswer = {
   fieldId: string;
@@ -39,5 +39,7 @@ export type EmployeeAnswerFile = {
   referralRequests?: ReferralRequest[];
   /** Replacement requests submitted by this employee — sole owner, no shared-file conflicts. */
   replacementRequests?: ReplacementRequest[];
+  /** Reopen-case requests submitted by this employee — sole owner, no shared-file conflicts. */
+  reopenRequests?: ReopenRequest[];
   lastUpdatedAt?: string;
 };

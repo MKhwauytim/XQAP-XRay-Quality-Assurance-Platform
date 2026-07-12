@@ -14,7 +14,7 @@ export type ReplacementDecision = {
   reviewNotes?: string;
 };
 
-export type DecisionEventKind = "referral" | "replacement";
+export type DecisionEventKind = "referral" | "replacement" | "reopen";
 
 /** One reviewer decision on one request. Appended, never overwritten — the full
  *  sequence for a request is its audit history; the last event is its effective status. */

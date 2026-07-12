@@ -143,7 +143,9 @@ export function mergeDecisionHistory(
     for (const event of file.decisionEvents ?? []) {
       if (event.kind === kind && event.requestId === requestId) events.push(event);
     }
-    const legacy = kind === "referral" ? file.referralDecisions : file.replacementDecisions;
+    // "reopen" is a newer kind with no legacy per-kind array — only decisionEvents.
+    const legacy =
+      kind === "referral" ? file.referralDecisions : kind === "replacement" ? file.replacementDecisions : [];
     for (const decision of legacy) {
       if (decision.requestId !== requestId) continue;
       events.push({
