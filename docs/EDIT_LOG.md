@@ -4,6 +4,114 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.84 — 2026-07-12 — dead code (hardening-2026-07-08): remove 2 dead exports
+
+Full-sweep audit, Area 1 "Dead exports" bucket. Both verified individually to have zero
+call sites anywhere in `src/` (including their own file) beyond the definition line
+before removal:
+
+- `listMonthSummaries` (`populationStorage.ts`) — its private helper `resolveSampleDir`
+  is still used by two other functions in the same file, so it was kept; only
+  `listMonthSummaries` itself is removed. The `MonthSummary` exported type it returned is
+  left in place (still `export type`, so an unused export doesn't trip `noUnusedLocals`/
+  lint, and it was outside the audit's named scope).
+- `loadMainSampleMirror` (`sampleMirrorStorage.ts`) — the sibling `loadEmployeeSampleMirror`
+  is the one actually used (by `getUserWorkspaceFootprint` in the same file); the "main"
+  variant had no callers.
+
+**File:** `src/data/population/populationStorage.ts`
+
+**Before:**
+```ts
+export async function listMonthSummaries(
+  directoryHandle: DirectoryHandleLike
+): Promise<MonthSummary[]> {
+  const infos = await listMonthFolders(directoryHandle);
+
+  let populationDir: DirectoryHandleLike;
+  try {
+    populationDir = await getPopulationRoot(directoryHandle, false);
+  } catch { return []; }
+
+  const settled = await Promise.allSettled(
+    infos.map(async (info) => {
+      const monthDir = await populationDir.getDirectoryHandle(
+        info.folderName, { create: false }
+      );
+
+      const manifestResult = await safeReadJson<MonthManifestData>(
+        monthDir, "month.manifest.json"
+      );
+      const manifest = manifestResult.ok ? manifestResult.value : null;
+
+      let hasPopulation = false;
+      let totalProcessedRows = manifest?.totalProcessedRows ?? 0;
+      try {
+        const processedDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false });
+        const popResult = await safeReadJson<PopulationFinalData>(processedDir, "population.final.json");
+        hasPopulation = popResult.ok;
+        if (popResult.ok) totalProcessedRows = popResult.value.totalRows;
+      } catch { /* directory missing */ }
+
+      let hasSample = false;
+      {
+        const sampleDir = await resolveSampleDir(directoryHandle, info.folderName, monthDir);
+        if (sampleDir) {
+          const sResult = await safeReadJson<SampleMasterData>(sampleDir, "sample.master.json");
+          hasSample = sResult.ok;
+        }
+      }
+
+      let hasDistribution = false;
+      try {
+        const sampleDir = await getSampleMainDir(directoryHandle, info.folderName, false);
+        const dResult = await safeReadJson<DistributionCurrentData>(sampleDir, "distribution.current.json");
+        hasDistribution = dResult.ok;
+      } catch {
+        try {
+          const dResult = await safeReadJson<DistributionCurrentData>(monthDir, "distribution.current.json");
+          hasDistribution = dResult.ok;
+        } catch { /* file missing */ }
+      }
+
+      return { info, manifest, hasPopulation, hasSample, hasDistribution, totalProcessedRows };
+    })
+  );
+
+  const results: MonthSummary[] = settled
+    .filter((r): r is PromiseFulfilledResult<MonthSummary> => r.status === "fulfilled")
+    .map((r) => r.value);
+
+  // newest first
+  return results.reverse();
+}
+```
+
+**After:** function deleted. `resolveSampleDir` (used by two other functions) and the
+`MonthSummary` type (still exported) are unchanged.
+
+**File:** `src/data/samples/sampleMirrorStorage.ts`
+
+**Before:**
+```ts
+export async function loadMainSampleMirror(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<MainSamplesFile | null> {
+  try {
+    const dir = await getSampleMainDir(directoryHandle, monthFolderName, false);
+    const result = await safeReadJson<MainSamplesFile>(dir, MAIN_SAMPLES_FILE);
+    return result.ok ? result.value : null;
+  } catch {
+    return null;
+  }
+}
+```
+
+**After:** function deleted.
+
+---
+
 ## v42.83 — 2026-07-12 — dead code (hardening-2026-07-08): remove the dead edit-lock trio (superseded by webLocks + casLoop)
 
 Full-sweep audit, Area 1 "Dead subsystem" bucket. `acquireEditLock`/`releaseEditLock`/
