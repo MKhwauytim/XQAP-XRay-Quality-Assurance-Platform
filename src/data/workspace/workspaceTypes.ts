@@ -236,28 +236,3 @@ export type WorkspaceLoadedFiles = {
   sampleMaster: SampleMasterFile | null;
   sampleDistribution: SampleDistributionFile | null;
 };
-
-export type SaveWithRevisionResult<TFile> =
-  | {
-      ok: true;
-      savedFile: TFile;
-      newHash: string;
-    }
-  | {
-      ok: false;
-      reason: "conflict" | "permission_denied" | "write_failed" | "invalid_file";
-      message: string;
-      latestHash?: string;
-    };
-
-export type AcquireLockResult =
-  | {
-      ok: true;
-      lock: WorkspaceLockFile;
-    }
-  | {
-      ok: false;
-      reason: "locked_by_other_user" | "permission_denied" | "write_failed";
-      message: string;
-      existingLock?: WorkspaceLockFile;
-    };

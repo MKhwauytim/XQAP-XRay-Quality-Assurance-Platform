@@ -1,4 +1,3 @@
-import type { AuthRole } from "../../auth/authTypes";
 import { safeWriteJson } from "./safeWrite";
 
 import {
@@ -17,11 +16,8 @@ import {
 
 import {
   WORKSPACE_SCHEMA_VERSION,
-  type AcquireLockResult,
   type JsonEnvelope,
-  type SaveWithRevisionResult,
   type WorkspaceLoadedFiles,
-  type WorkspaceLockFile,
   type WorkspaceStatus,
   type WorkspaceStructureCheckResult
 } from "../workspace/workspaceTypes";
@@ -392,269 +388,10 @@ export async function writeJsonFile<TFile>(
   await safeWriteJson(directoryHandle, fileName, value);
 }
 
-export async function acquireEditLock(params: {
-  directoryHandle: DirectoryHandleLike;
-  resourceName: string;
-  username: string;
-  role: AuthRole;
-  baseRevision: number;
-  baseHash: string;
-  expiresInMinutes?: number;
-}): Promise<AcquireLockResult> {
-  const {
-    directoryHandle,
-    resourceName,
-    username,
-    role,
-    baseRevision,
-    baseHash,
-    expiresInMinutes = 15
-  } = params;
-
-  const hasWritePermission = await ensureDirectoryPermission(
-    directoryHandle,
-    "readwrite"
-  );
-
-  if (!hasWritePermission) {
-    return {
-      ok: false,
-      reason: "permission_denied",
-      message: "لم يتم منح صلاحية الكتابة لإنشاء قفل التحرير."
-    };
-  }
-
-  const locksHandle = await getLocksDirectoryHandle(directoryHandle, true);
-  const lockFileName = getLockFileName(resourceName);
-
-  const existingLock = await readJsonFile<WorkspaceLockFile>(
-    locksHandle,
-    lockFileName
-  );
-
-  if (existingLock.ok && !isExpired(existingLock.file.data.expiresAt)) {
-    if (existingLock.file.data.lockedByUsername !== username) {
-      return {
-        ok: false,
-        reason: "locked_by_other_user",
-        message: `هذا الملف قيد التحرير بواسطة ${existingLock.file.data.lockedByUsername}.`,
-        existingLock: existingLock.file
-      };
-    }
-  }
-
-  const now = new Date();
-  const expiresAt = new Date(
-    now.getTime() + expiresInMinutes * 60 * 1000
-  ).toISOString();
-
-  const lock: WorkspaceLockFile = {
-    metadata: {
-      schemaVersion: WORKSPACE_SCHEMA_VERSION,
-      fileType: "workspace.lock",
-      revision: 1,
-      createdAt: now.toISOString(),
-      createdBy: username,
-      updatedAt: now.toISOString(),
-      updatedBy: username,
-      contentHash: ""
-    },
-    data: {
-      resourceName,
-      lockedByUsername: username,
-      lockedByRole: role,
-      lockId: createId("lock"),
-      createdAt: now.toISOString(),
-      expiresAt,
-      baseRevision,
-      baseHash
-    }
-  };
-
-  const preparedLock = await prepareFileForWrite(lock, username);
-
-  try {
-    await writeJsonFile(locksHandle, lockFileName, preparedLock);
-
-    return {
-      ok: true,
-      lock: preparedLock
-    };
-  } catch {
-    return {
-      ok: false,
-      reason: "write_failed",
-      message: "تعذر إنشاء قفل التحرير."
-    };
-  }
-}
-
-export async function releaseEditLock(params: {
-  directoryHandle: DirectoryHandleLike;
-  resourceName: string;
-  username: string;
-  lockId?: string;
-}): Promise<void> {
-  const { directoryHandle, resourceName, username, lockId } = params;
-
-  const locksHandle = await getLocksDirectoryHandle(directoryHandle, true);
-  const lockFileName = getLockFileName(resourceName);
-
-  const existingLock = await readJsonFile<WorkspaceLockFile>(
-    locksHandle,
-    lockFileName
-  );
-
-  if (!existingLock.ok) {
-    return;
-  }
-
-  const isSameUser = existingLock.file.data.lockedByUsername === username;
-  const isSameLock = !lockId || existingLock.file.data.lockId === lockId;
-
-  if (!isSameUser || !isSameLock) {
-    return;
-  }
-
-  const expiredLock: WorkspaceLockFile = {
-    ...existingLock.file,
-    metadata: {
-      ...existingLock.file.metadata,
-      updatedAt: new Date().toISOString(),
-      updatedBy: username
-    },
-    data: {
-      ...existingLock.file.data,
-      expiresAt: new Date(0).toISOString()
-    }
-  };
-
-  await writeJsonFile(
-    locksHandle,
-    lockFileName,
-    await prepareFileForWrite(expiredLock, username)
-  );
-}
-
-export async function saveJsonWithRevisionCheck<
-  TFile extends JsonEnvelope<TData>,
-  TData
->(params: {
-  directoryHandle: DirectoryHandleLike;
-  fileName: string;
-  draftFile: TFile;
-  baseHash: string;
-  username: string;
-  lockId?: string;
-}): Promise<SaveWithRevisionResult<TFile>> {
-  const { directoryHandle, fileName, draftFile, baseHash, username, lockId } =
-    params;
-
-  const hasWritePermission = await ensureDirectoryPermission(
-    directoryHandle,
-    "readwrite"
-  );
-
-  if (!hasWritePermission) {
-    return {
-      ok: false,
-      reason: "permission_denied",
-      message: "لم يتم منح صلاحية الكتابة لحفظ الملف."
-    };
-  }
-
-  const latest = await readJsonFile<TFile>(directoryHandle, fileName);
-
-  if (!latest.ok) {
-    return {
-      ok: false,
-      reason: "invalid_file",
-      message: "تعذر قراءة آخر نسخة من الملف قبل الحفظ."
-    };
-  }
-
-  if (latest.hash !== baseHash) {
-    return {
-      ok: false,
-      reason: "conflict",
-      message:
-        "تم تعديل الملف بواسطة مستخدم آخر بعد بدء التحرير. لم يتم الحفظ لتجنب الكتابة فوق التعديلات.",
-      latestHash: latest.hash
-    };
-  }
-
-  const now = new Date().toISOString();
-
-  const nextFile: TFile = {
-    ...draftFile,
-    metadata: {
-      ...draftFile.metadata,
-      revision: latest.file.metadata.revision + 1,
-      updatedAt: now,
-      updatedBy: username,
-      contentHash: ""
-    }
-  };
-
-  const preparedFile = await prepareFileForWrite(nextFile, username);
-
-  try {
-    await writeJsonFile(directoryHandle, fileName, preparedFile);
-
-    if (lockId) {
-      await releaseEditLock({
-        directoryHandle,
-        resourceName: fileName,
-        username,
-        lockId
-      });
-    }
-
-    return {
-      ok: true,
-      savedFile: preparedFile,
-      // Must match readJsonFile's hash of the raw file text, which includes the
-      // trailing newline that safeWriteJson appends — otherwise reusing this as the
-      // next baseHash would spuriously report a conflict.
-      newHash: await hashText(`${JSON.stringify(preparedFile, null, 2)}\n`)
-    };
-  } catch {
-    return {
-      ok: false,
-      reason: "write_failed",
-      message: "تعذر حفظ الملف."
-    };
-  }
-}
-
 export function getStatusFromStructureResult(
   result: WorkspaceStructureCheckResult
 ): WorkspaceStatus {
   return result.status;
-}
-
-async function getLocksDirectoryHandle(
-  directoryHandle: DirectoryHandleLike,
-  create: boolean
-): Promise<DirectoryHandleLike> {
-  const systemHandle = await directoryHandle.getDirectoryHandle(
-    WORKSPACE_FILE_NAMES.systemFolder,
-    { create }
-  );
-
-  return systemHandle.getDirectoryHandle(WORKSPACE_FILE_NAMES.locksFolder, {
-    create
-  });
-}
-
-function getLockFileName(resourceName: string): string {
-  const safeName = resourceName.replace(/[^a-zA-Z0-9._-]/g, "_");
-
-  return `${safeName}.lock.json`;
-}
-
-function isExpired(isoDate: string): boolean {
-  return Date.parse(isoDate) <= Date.now();
 }
 
 function isNotFoundError(error: unknown): boolean {
@@ -675,13 +412,6 @@ function isPermissionError(error: unknown): boolean {
   const value = error as { name?: string };
 
   return value.name === "NotAllowedError" || value.name === "SecurityError";
-}
-
-function createId(prefix: string): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return `${prefix}-${crypto.randomUUID()}`;
-  }
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function isJsonEnvelope(value: unknown): value is JsonEnvelope<unknown> {

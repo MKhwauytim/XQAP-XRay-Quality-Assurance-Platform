@@ -4,6 +4,84 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.83 — 2026-07-12 — dead code (hardening-2026-07-08): remove the dead edit-lock trio (superseded by webLocks + casLoop)
+
+Full-sweep audit, Area 1 "Dead subsystem" bucket. `acquireEditLock`/`releaseEditLock`/
+`saveJsonWithRevisionCheck` in `fileSystemAccess.ts` were a legacy optimistic-lock-file +
+base-hash-revision-check API, fully superseded by the Web Locks API (`webLocks.ts`) +
+`casLoop` protocol used by every live writer. Verified zero call sites individually
+(not just trusting the audit): `acquireEditLock` and `saveJsonWithRevisionCheck` had none
+anywhere in `src/`; `releaseEditLock` was called only from `saveJsonWithRevisionCheck`
+itself (line 605), confirming both are dead together. No test file references any of the
+three (`fileSystemAccess.test.ts` only exercises `writeJsonFile`/`readJsonFile`/
+`createWorkspaceStructure`).
+
+Removing the trio also orphaned four private helpers that existed only to serve it —
+verified each had zero remaining call sites after the trio's removal before deleting:
+`getLocksDirectoryHandle`, `getLockFileName`, `isExpired` (the lock-file read/expire
+helpers named by the audit), and `createId` (an id-generator only ever invoked for
+`lockId: createId("lock")` inside `acquireEditLock`). `isNotFoundError`/`isPermissionError`
+(used by the still-live `readJsonFile`) and `prepareFileForWrite`/`hashText`/
+`fallbackHash`/`stableStringify`/`ensureDirectoryPermission` (used by still-live
+`createWorkspaceStructure`/`readJsonFile`/`checkWorkspaceStructure`) were kept — confirmed
+each still has a live caller outside the trio.
+
+Also removed the now-dead `AcquireLockResult`/`SaveWithRevisionResult` result types from
+`workspaceTypes.ts` (only ever imported by the trio) and the now-unused `AuthRole` import
+in `fileSystemAccess.ts` (only referenced by `acquireEditLock`'s `role` param). Left
+`WorkspaceLockFile`/`WorkspaceLockData` in `workspaceTypes.ts` untouched — out of the
+audit's named scope, and since they remain `export type`, an unused one is not flagged by
+`noUnusedLocals`/lint, so removing them isn't required to keep the gates green. ~230 lines
+removed.
+
+**File:** `src/data/storage/fileSystemAccess.ts`
+
+**Before:** (imports) `import type { AuthRole } from "../../auth/authTypes";` at the top, and
+`type AcquireLockResult, type SaveWithRevisionResult, type WorkspaceLockFile` in the
+`../workspace/workspaceTypes` import block. (body) `acquireEditLock`, `releaseEditLock`,
+`saveJsonWithRevisionCheck`, `getLocksDirectoryHandle`, `getLockFileName`, `isExpired`,
+`createId` — full definitions, ~230 lines total.
+
+**After:** `AuthRole` import removed; `AcquireLockResult`/`SaveWithRevisionResult`/
+`WorkspaceLockFile` removed from the workspaceTypes import; all seven functions deleted.
+Every remaining export (`writeJsonFile`, `readJsonFile`, `ensureDirectoryPermission`,
+`checkWorkspaceStructure`, `loadWorkspaceFiles`, `createWorkspaceStructure`,
+`getStatusFromStructureResult`) and their shared private helpers are unchanged.
+
+**File:** `src/data/workspace/workspaceTypes.ts`
+
+**Before:**
+```ts
+export type SaveWithRevisionResult<TFile> =
+  | {
+      ok: true;
+      savedFile: TFile;
+      newHash: string;
+    }
+  | {
+      ok: false;
+      reason: "conflict" | "permission_denied" | "write_failed" | "invalid_file";
+      message: string;
+      latestHash?: string;
+    };
+
+export type AcquireLockResult =
+  | {
+      ok: true;
+      lock: WorkspaceLockFile;
+    }
+  | {
+      ok: false;
+      reason: "locked_by_other_user" | "permission_denied" | "write_failed";
+      message: string;
+      existingLock?: WorkspaceLockFile;
+    };
+```
+
+**After:** both types deleted (file now ends at `WorkspaceLoadedFiles`).
+
+---
+
 ## v42.82 — 2026-07-12 — dead code (hardening-2026-07-08): delete 3 confirmed-dead files
 
 Full-sweep audit, Area 1 "Dead files" bucket. Three files with zero importers anywhere in `src/`,
