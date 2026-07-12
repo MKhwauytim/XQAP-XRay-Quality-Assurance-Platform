@@ -101,6 +101,7 @@ export const MANAGED_TABS: readonly ManagedTab[] = [
   { id: "ew/xray-results",         label: "نتائج فحص الأشعة",       parentId: "employee-workspace" },
   { id: "ew/referral-approval",    label: "اعتماد الطلبات",          parentId: "employee-workspace" },
   { id: "ew/inspection-form",      label: "نموذج الفحص (مساحة العمل)", parentId: "employee-workspace" },
+  { id: "ew/notifications",        label: "مركز الإشعارات",           parentId: "employee-workspace" },
   { id: "reports",                 label: "إدارة التقارير" },
   { id: "reports/reports",         label: "التقارير",              parentId: "reports" },
   { id: "reports/kpi",             label: "مؤشرات الأداء",          parentId: "reports" },
@@ -177,6 +178,11 @@ export const MANAGED_FEATURE_GROUPS: readonly FeatureGroup[] = [
         id: "employee-reopen-instant",
         label: "إعادة فتح الحالة فوراً (بدون اعتماد)",
         description: "عند التفعيل يُطبَّق طلب الموظف لإعادة فتح الحالة فوراً؛ وعند التعطيل يُحوَّل الطلب للمشرف للاعتماد",
+      },
+      {
+        id: "post-notification",
+        label: "نشر إشعار جديد",
+        description: "نشر إشعار لجميع الموظفين والمشرفين في مركز الإشعارات ومتابعة من اطّلع عليه",
       },
     ],
   },
@@ -277,7 +283,7 @@ const ALL_FEATURE_IDS = MANAGED_FEATURE_GROUPS.flatMap((g) =>
 /** Maps each tab to the feature IDs that belong to it. */
 export const TAB_FEATURE_MAP: Readonly<Record<string, readonly string[]>> = {
   "population":         ["upload-data", "process-population", "configure-sample", "draw-sample", "distribute-samples", "bulk-assign", "view-browse", "unlock-sampling-stage"],
-  "employee-workspace": ["approve-referrals", "approve-replacements", "view-all-entries", "view-employee-stats", "submit-referrals", "request-replacement", "submit-answers", "configure-referral-columns", "ew.reopenAnswer", "manage-inspection-template", "employee-reopen-instant"],
+  "employee-workspace": ["approve-referrals", "approve-replacements", "view-all-entries", "view-employee-stats", "submit-referrals", "request-replacement", "submit-answers", "configure-referral-columns", "ew.reopenAnswer", "manage-inspection-template", "employee-reopen-instant", "post-notification"],
   "user-management":    ["manage-users", "reset-passwords", "edit-permissions"],
   "reports":            ["export-reports"],
   "archive":            ["export-archive", "archive.closeMonth"],
@@ -313,6 +319,7 @@ const FEATURE_DEFAULTS: Record<string, Partial<Record<AuthRole, boolean>>> = {
   "unlock-sampling-stage": { guest: false, employee: false, supervisor: false, manager: false },
   "manage-inspection-template": { guest: false, employee: false, supervisor: false, manager: true },
   "employee-reopen-instant": { guest: false, employee: false, supervisor: false, manager: false },
+  "post-notification":    { guest: false, employee: false, supervisor: false, manager: true  },
   "manage-users":         { guest: false, employee: false, supervisor: false, manager: false },
   "reset-passwords":      { guest: false, employee: false, supervisor: false, manager: false },
   "edit-permissions":     { guest: false, employee: false, supervisor: false, manager: false },
@@ -394,6 +401,13 @@ export function createDefaultPermissions(): RolePermission[] {
     { role: "guest",      tabId: "ew/xray-results",         access: "none" },
     { role: "guest",      tabId: "ew/referral-approval",    access: "none" },
     { role: "guest",      tabId: "ew/inspection-form",      access: "none" },
+    // Notification center (ew/notifications) — admin + manager post/monitor only;
+    // audience roles (employee/supervisor) get the banner, not the manager view.
+    { role: "guest",      tabId: "ew/notifications",        access: "none" },
+    { role: "employee",   tabId: "ew/notifications",        access: "none" },
+    { role: "supervisor", tabId: "ew/notifications",        access: "none" },
+    { role: "manager",    tabId: "ew/notifications",        access: "edit" },
+    { role: "admin",      tabId: "ew/notifications",        access: "edit" },
     // Analytics dashboard (reports/analytics) — defaults to manager + admin only
     { role: "guest",      tabId: "reports/analytics",       access: "none" },
     { role: "employee",   tabId: "reports/analytics",       access: "none" },

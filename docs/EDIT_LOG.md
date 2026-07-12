@@ -4,6 +4,65 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.69 — 2026-07-12 — E (feature-batch): notification permissions wiring (featureId + sub-tab)
+
+Batch E item 2 (permission matrix). Follows Batch C's exact shape for wiring a new capability into
+`userManagement.ts`.
+
+- NEW featureId `post-notification` ("نشر إشعار جديد") in the `workspace` feature group — the manager
+  UI lives under employee-workspace, so it belongs to that group's UI grouping.
+- `FEATURE_DEFAULTS["post-notification"]`: `{ guest:false, employee:false, supervisor:false, manager:true }`
+  (admin always true via `hasFeature`) — matches the spec "Post: admin + manager only".
+- `TAB_FEATURE_MAP["employee-workspace"]` gains `post-notification` so the feature-cascade check
+  (`can()` in usePermissions) requires employee-workspace page access — admin/manager have it.
+- NEW sub-tab `ew/notifications` ("مركز الإشعارات") added to `MANAGED_TABS` (parent employee-workspace)
+  and to `createDefaultPermissions()` — admin `edit`, manager `edit`, supervisor/employee/guest `none`.
+  Gated independently of the parent so only admin/manager see the manager view, even though the
+  employee-workspace parent tab is visible to all roles.
+
+**File:** `src/auth/userManagement.ts`
+
+**Before (MANAGED_TABS, employee-workspace block):**
+```ts
+  { id: "ew/inspection-form",      label: "نموذج الفحص (مساحة العمل)", parentId: "employee-workspace" },
+```
+
+**After:**
+```ts
+  { id: "ew/inspection-form",      label: "نموذج الفحص (مساحة العمل)", parentId: "employee-workspace" },
+  { id: "ew/notifications",        label: "مركز الإشعارات",           parentId: "employee-workspace" },
+```
+
+**Before (workspace feature group, after manage-inspection-template / employee-reopen-instant):**
+```ts
+      {
+        id: "employee-reopen-instant",
+        label: "إعادة فتح الحالة فوراً (بدون اعتماد)",
+        description: "...",
+      },
+    ],
+  },
+```
+
+**After:**
+```ts
+      {
+        id: "employee-reopen-instant",
+        label: "إعادة فتح الحالة فوراً (بدون اعتماد)",
+        description: "...",
+      },
+      {
+        id: "post-notification",
+        label: "نشر إشعار جديد",
+        description: "نشر إشعار لجميع الموظفين والمشرفين في مركز الإشعارات",
+      },
+    ],
+  },
+```
+
+Plus: `post-notification` added to `TAB_FEATURE_MAP["employee-workspace"]`, `FEATURE_DEFAULTS`, and five
+`ew/notifications` rows in `createDefaultPermissions()`.
+
 ## v42.68 — 2026-07-12 — E (feature-batch): notification-center data module + 5-system folder
 
 Batch E item 1 (data layer). New workspace subsystem for admin/manager broadcast notifications
