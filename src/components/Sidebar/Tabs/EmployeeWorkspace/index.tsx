@@ -98,7 +98,10 @@ export default function EmployeeWorkspaceTab() {
   }
 
   if (activeSubTab === SUB_TAB_REFERRAL_APPROVAL) {
-    if (!canAccessTab("ew/referral-approval") || (!can("approve-referrals") && !can("approve-replacements"))) {
+    if (
+      !canAccessTab("ew/referral-approval") ||
+      (!can("approve-referrals") && !can("approve-replacements") && !can("ew.reopenAnswer"))
+    ) {
       return <AccessDenied />;
     }
     return <ReferralApproval directoryHandle={directoryHandle} />;

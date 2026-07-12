@@ -4,6 +4,51 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.75 — 2026-07-12 — QA advisory 1: admit reopen-only approvers to the unified approval sub-tab
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/index.tsx`
+
+The final feature-batch QA pass (`docs/audit/feature-batch-2026-07-08/qa-review.md`, advisory 1)
+found that a role granted only `ew.reopenAnswer` (with `approve-referrals`/`approve-replacements`
+both off — a non-default admin configuration) could not reach the unified اعتماد الطلبات page at
+all, so it could never approve a pending reopen request through that page even though it is the
+correct approval authority for reopens (Batch B's design: "whoever may directly reopen answers
+may approve employee reopen requests"). Unreachable under shipped defaults (supervisor/manager
+have all three features on), but a real gap for a customized deployment.
+
+**Before:**
+```tsx
+if (!canAccessTab("ew/referral-approval") || (!can("approve-referrals") && !can("approve-replacements"))) {
+  return <AccessDenied />;
+}
+```
+
+**After:**
+```tsx
+if (
+  !canAccessTab("ew/referral-approval") ||
+  (!can("approve-referrals") && !can("approve-replacements") && !can("ew.reopenAnswer"))
+) {
+  return <AccessDenied />;
+}
+```
+
+**File:** `CLAUDE.md`
+
+QA advisory 8: the bundle-size note was stale (dated 2026-07-02, pre-dating the whole hardening +
+feature-batch pipeline) and the ChangeLog/`?raw` description no longer matched reality after the
+hardening pipeline's C5 item added build-time EDIT_LOG truncation.
+
+**Before:**
+```md
+- `vite-plugin-singlefile` inlines everything (`assetsInlineLimit` maxed, `cssCodeSplit: false`): the build output is **one portable `dist/index.html`** (~2.6 MB, ~835 kB gzip as of 2026-07-02 — size grows with features; note the ChangeLog tab inlines the full `docs/EDIT_LOG.md` via a `?raw` import, so the log's size feeds the bundle. Re-check after large additions).
+```
+
+**After:**
+```md
+- `vite-plugin-singlefile` inlines everything (`assetsInlineLimit` maxed, `cssCodeSplit: false`): the build output is **one portable `dist/index.html`** (~2.64 MB, ~968 kB gzip as of 2026-07-12 — size grows with features. The ChangeLog tab's `?raw` import of `docs/EDIT_LOG.md` is truncated to the most recent versions at build time by `src/build/editLogTruncatePlugin.ts`, so the full git history no longer inflates the bundle — only the truncated tail does. Re-check after large additions).
+```
+
 ## v42.74 — 2026-07-12 — E (feature-batch): permission-default tests (defense-in-depth: only admin/manager post)
 
 Batch E item 7 (tests). Strengthens the acceptance criterion "employees/supervisors cannot post" with a
