@@ -1177,6 +1177,15 @@ approval list, replacing the old referral/replacement `section` tab switch.
 
 **File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/EmployeeWorkspace.css` — `.ew-req-kind-badge` styles.
 
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/unifiedList.test.tsx` (new)
+
+**Before:** *(no test file existed for the unified list)*
+
+**After:** new jsdom rendering test suite: renders one kind badge per row with the correct label for
+each of the three kinds; sorts the merged list chronologically (newest first outside bulk mode);
+sorts oldest-first in bulk/pending mode; shows kind-specific meta so rows are easy to tell apart;
+renders approve/deny actions only for pending rows the current reviewer is allowed to review.
+
 ## v42.66 — 2026-07-12 — B1 (feature-batch): employee "طلب إعادة فتح الحالة" button + wiring
 
 Batch B item 1 (employee UI). Adds the self-service reopen button to a submitted answer in the
@@ -1445,6 +1454,16 @@ Fold arm (added in the switch, before `case "reopened"`):
 **File:** `src/data/referral/requestReopen.ts` — NEW. `submitReopenRequest({..., instant})`: instant → `reopenSubmittedAnswer`; otherwise → `appendReopenRequest` + best-effort `reopen-requested` event.
 
 **File:** `src/data/labels/labelsStore.ts` — new keys `ew_reopen_request_btn`, `ew_reopen_request_confirm`, `msg_reopen_request_sent`.
+
+**File:** `src/data/referral/requestReopen.test.ts` (new)
+
+**Before:** *(no test file existed for this module)*
+
+**After:** new test suite for `submitReopenRequest`/`approveReopen`/`denyReopen`: instant mode flips
+the submitted answer to draft with no request created; approval-required mode creates a pending
+request, leaves the answer submitted, and logs a `reopen-requested` event; approve flips the answer
+to draft and records an approved decision; deny leaves the answer submitted and records a denied
+decision; and re-approving an already-reviewed request is rejected (idempotency).
 
 ## v42.64 — 2026-07-12 — C4 (feature-batch): scaffold employee-reopen-instant per-role setting
 
@@ -2075,6 +2094,16 @@ export async function savePopulationConfig(
 }
 ```
 
+**File:** `src/data/population/populationConfig.test.ts` (new)
+
+**Before:** *(no test file existed for this module)*
+
+**After:** new test suite for the CAS-protected `savePopulationConfig`/`loadPopulationConfig`:
+saves and reloads a config correctly, confirms `revision`/`_writeToken` bookkeeping does not leak
+into the loaded config object (honest test of the whole-object-replace contract — no field-level
+merge claimed), and **two concurrent config saves survive without throwing or corrupting the file
+(cross-machine CAS)**, asserting the persisted result is exactly one writer's intact payload.
+
 ## v42.55 — 2026-07-12 — D (feature-batch): CAS-protect updateMonthStatus (month.manifest.json)
 
 Batch D. `updateMonthStatus` is a read-modify-write on the shared `month.manifest.json`: it advances
@@ -2453,6 +2482,27 @@ export async function appendDecisionEvent(
   );
 }
 ```
+
+**File:** `src/data/approvals/approvalStorage.test.ts` (new)
+
+**Before:** *(no test file existed for this module)*
+
+**After:** new test suite covering `appendDecisionEvent`/`loadSupervisorDecisions`: persists and
+reloads a decision event, keeps every event across repeated decisions on the same request, **two
+concurrent decision appends survive without losing either (cross-machine CAS)**, events merge
+across supervisor files and legacy decision arrays sorted by time, and a no-history request
+returns `undefined`.
+
+**File:** `src/data/referral/referralStorage.test.ts` (new)
+
+**Before:** *(no test file existed for this module)*
+
+**After:** new test suite covering referral and replacement request storage: empty-log load with no
+files, save+aggregate a request in the log, supervisor-decision overlay on pending requests,
+pending-ID resolution, full decision-history exposure, and **two concurrent referral decisions on
+different requests both persist (cross-machine CAS)** — the referral-side proof that
+`appendDecisionEvent`'s CAS protection is transitively sufficient (referralStorage itself needed no
+code change, per the entry above).
 
 ## v42.52 — 2026-07-12 — A4 (feature-batch): restrict the referral-recipient picker to employee/supervisor
 
