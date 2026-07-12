@@ -4,6 +4,14 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.73 — 2026-07-12 — E (feature-batch): document notifications file in data-system-report
+
+Batch E item 6 (docs). CLAUDE.md requires `docs/data-system-report.md` to stay the authoritative
+reference for every workspace file/path — add the new notification-center file.
+
+**File:** `docs/data-system-report.md` — add `notifications.json` (`5-system/notifications/`) to the
+system-files table and mention "notification center" in the `5-system/` root-folder description.
+
 ## v42.72 — 2026-07-12 — E (feature-batch): app-shell acknowledgement banner
 
 Batch E item 5 (banner). Persistent orange banner mounted at the app shell, shown whenever the current

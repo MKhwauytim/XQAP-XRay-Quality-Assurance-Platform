@@ -21,7 +21,7 @@ The current workspace layout uses numbered roots, with legacy fallbacks still su
 | `2-samples/` | Sample master files, distribution log/current snapshot, main sample mirrors, per-employee sample mirrors, answers, referral/replacement requests, supervisor approval decisions. |
 | `3-user-data/` | Workspace user/permission files when initialized through workspace defaults. |
 | `4-reports/` | Generated/report artifacts when report flows write to the workspace. |
-| `5-system/` | Backups, browse/table presets, automatic-backup settings/state, activity audit log, internal system files. |
+| `5-system/` | Backups, browse/table presets, automatic-backup settings/state, activity audit log, notification center, internal system files. |
 | `6-templates/` | Inspection templates and template index/selection files. |
 
 Legacy folders still read when present: `Population/`, `.system/`, and `templates/`.
@@ -43,6 +43,7 @@ Legacy folders still read when present: `Population/`, `.system/`, and `template
 | `{username}.answers.json` | `2-samples/{month}/2-employees/` | Employee answers plus referral/replacement requests for that employee. |
 | `{supervisor}.decisions.json` | `2-samples/{month}/3-approvals/` | Supervisor referral/replacement decisions. |
 | `activity.log.json` | `5-system/audit/` | Sign-in and working-hours audit log. |
+| `notifications.json` | `5-system/notifications/` | Workspace-wide broadcast notifications: admin/manager posts plus each recipient's acceptance (id, message, postedBy, postedAt, acceptances[]). CAS-protected. |
 
 ## Population Row Data Dictionary
 
