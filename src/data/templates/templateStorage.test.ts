@@ -37,7 +37,9 @@ describe("templateStorage", () => {
     await expect(loadTemplate(root, "tmpl-a")).resolves.toMatchObject({
       templateId: "tmpl-a",
     });
-    await expect(loadTemplateIndex(root)).resolves.toEqual({
+    // toMatchObject (not toEqual): the index now also carries CAS bookkeeping
+    // (revision + _writeToken) alongside the entry rows.
+    await expect(loadTemplateIndex(root)).resolves.toMatchObject({
       templates: [
         {
           templateId: "tmpl-a",
@@ -63,8 +65,11 @@ describe("templateStorage", () => {
     });
   });
 
-  it("serializes concurrent template saves and preserves both index entries", async () => {
+  it("serializes concurrent template saves and preserves both index entries (cross-machine CAS)", async () => {
     const root = createMemoryDirectory();
+    // Two authors on two PCs save different templates at the same instant. The
+    // withResourceLock + casLoop index RMW must land BOTH index entries — neither
+    // author's entry may be dropped by the other's stale write.
     await Promise.all([
       saveTemplate(root, makeTemplate("tmpl-a", "قالب أ")),
       saveTemplate(root, makeTemplate("tmpl-b", "قالب ب")),
@@ -75,6 +80,8 @@ describe("templateStorage", () => {
       "tmpl-a",
       "tmpl-b",
     ]);
+    // Both writes participated in the CAS protocol → revision advanced past both.
+    expect(index.revision).toBe(2);
   });
 
   it("creates a recoverable template backup before delete/tombstone", async () => {
@@ -95,6 +102,6 @@ describe("templateStorage", () => {
     if (backup.ok) {
       expect(backup.value.templateId).toBe("tmpl-a");
     }
-    await expect(loadTemplateIndex(root)).resolves.toEqual({ templates: [] });
+    await expect(loadTemplateIndex(root)).resolves.toMatchObject({ templates: [] });
   });
 });

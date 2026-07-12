@@ -4,6 +4,70 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.79 — 2026-07-12 — S5 (hardening-2026-07-08): CAS-guard the template & report-design index files
+
+Full-sweep finding S5. `templates.index.json` and `designs.index.json` are shared multi-writer index files
+edited by every supervisor/manager/admin on every machine, but their read-modify-write was guarded only by
+`withResourceLock` (same-tab). Two authors saving at once each read the index, each appended their own entry,
+and the last writer's index dropped the other's entry — the orphaned doc file survived on disk but was
+invisible in the picker until re-saved. Applied casLoop (same shape as S2) to just the index RMW; the per-id
+doc/backup/selection/tombstone writes are single-writer-by-id and stay as-is.
+
+Both index types gained optional `revision`/`_writeToken` for the CAS handshake (the persisted index now
+carries them; the entry rows are unchanged).
+
+**File:** `src/data/templates/templateTypes.ts` — `TemplateIndex` gained `revision?: number` and
+`_writeToken?: string`.
+
+**File:** `src/data/reportDesigner/storage/reportDesignStorage.ts` — `DesignIndex` gained the same two
+optional fields; `saveDesign`/`deleteDesign` now wrap the index read-modify-write in `casLoop` (fresh re-read,
+revision bump, `_writeToken` stamp, read-back verify, retry-with-jitter). Example (`saveDesign` index write):
+
+**Before:**
+```ts
+await withResourceLock(`${dir.name}/designs-index`, async () => {
+  await safeWriteJson(dir, `${doc.reportId}.json`, doc);
+  const indexResult = await safeReadJson<DesignIndex>(dir, INDEX_FILE);
+  const existing: DesignIndex = indexResult.ok ? indexResult.value : { designs: [] };
+  const others = existing.designs.filter((d) => d.reportId !== doc.reportId);
+  const updated: DesignIndex = { designs: [...others, { … }].sort(…) };
+  await safeWriteJson(dir, INDEX_FILE, updated);
+});
+```
+
+**After:**
+```ts
+await withResourceLock(`${dir.name}/designs-index`, async () => {
+  await safeWriteJson(dir, `${doc.reportId}.json`, doc); // per-id doc — single writer
+  const outcome = await casLoop<{ ok: true }>(async (writeToken) => {
+    const indexResult = await safeReadJson<DesignIndex>(dir, INDEX_FILE);
+    const existing: DesignIndex = indexResult.ok ? indexResult.value : { designs: [] };
+    const others = existing.designs.filter((d) => d.reportId !== doc.reportId);
+    const updated: DesignIndex = {
+      revision: (existing.revision ?? 0) + 1, _writeToken: writeToken,
+      designs: [...others, { … }].sort(…),
+    };
+    await safeWriteJson(dir, INDEX_FILE, updated);
+    const verify = await safeReadJson<DesignIndex>(dir, INDEX_FILE);
+    if (verify.ok && verify.value.revision === updated.revision && verify.value._writeToken === writeToken) {
+      return { done: true, result: { ok: true as const } };
+    }
+    return { done: false };
+  }, { conflictError: "تعذّر تحديث فهرس التقارير: تعارض في الكتابة بعد عدة محاولات." });
+  if (!outcome.ok) throw new Error(outcome.error);
+});
+```
+
+**File:** `src/data/templates/templateStorage.ts` — `saveTemplate`/`deleteTemplate` index writes wrapped in
+`casLoop` the same way.
+
+**File:** `src/data/templates/templateStorage.test.ts` — the two `loadTemplateIndex` `.toEqual({...})`
+assertions became `.toMatchObject({...})` (the index now also carries `revision`/`_writeToken`), plus a
+concurrent two-author save test asserting both index entries survive and the revision advanced past both.
+
+**File:** `src/data/reportDesigner/storage/reportDesignStorage.test.ts` — added a concurrent two-author save
+test asserting both index entries survive.
+
 ## v42.78 — 2026-07-12 — S3 (hardening-2026-07-08): bring closeMonth/reopenMonth into the manifest casLoop protocol
 
 Full-sweep finding S3. `closeMonth`/`reopenMonth` wrote `month.manifest.json` with a plain `safeWriteJson`
