@@ -4,6 +4,72 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.85 — 2026-07-12 — dead code (hardening-2026-07-08): de-export 4 internal-only helpers; leave a 5th (now fully dead, not just internal) alone
+
+Full-sweep audit, Area 1 "Over-exported" bucket — functions used only inside their own
+file, where `export` is unnecessary. Verified each of the five named items individually
+against the current branch (this series has touched several of these files since the
+audit ran) before touching anything:
+
+- `buildSampleReport` (`reporting/sampleReport.ts`) — called by `openSampleReport` in the
+  same file. `export` removed.
+- `loadDistributionCurrent` (`distribution/distributionStorage.ts`) — called by
+  `loadOrDeriveDistributionCurrent` in the same file. `export` removed.
+- `createReportId` (`reportDesigner/reportTypes.ts`) — called by `createEmptyDocument` in
+  the same file. `export` removed.
+- `formatMonthShortLabel` (`population/monthFolder.ts`) — called by
+  `formatMonthFolderShortLabel` in the same file (the latter stays exported and widely
+  used elsewhere). `export` removed.
+- `saveFeedback` (`feedback/feedbackStorage.ts`) — **left unchanged.** The audit's premise
+  ("only submit/replyToFeedback call it") no longer holds: the S2 CAS-hardening pass
+  (v42.77, this same branch) refactored `submitFeedback`/`replyToFeedback` to call the new
+  `mutateFeedback` helper directly, so `saveFeedback` now has **zero** call sites anywhere
+  in `src/` — not "internal-only" but fully dead. Confirmed empirically: removing `export`
+  produces a real `@typescript-eslint/no-unused-vars` build-gate failure (`'saveFeedback'
+  is defined but never used`), not a false alarm. Per the task's revert-on-break rule, the
+  change was reverted rather than forced through. Full deletion wasn't authorized for this
+  item (only `listMonthSummaries`/`loadMainSampleMirror` were approved for outright
+  deletion this pass), so `saveFeedback` is left exported and flagged here for a follow-up
+  dead-code pass rather than unilaterally expanding scope.
+
+**File:** `src/data/reporting/sampleReport.ts`
+
+**Before:** `export function buildSampleReport(input: SampleReportInput): string {`
+
+**After:** `function buildSampleReport(input: SampleReportInput): string {`
+
+**File:** `src/data/distribution/distributionStorage.ts`
+
+**Before:**
+```ts
+export async function loadDistributionCurrent(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<DistributionCurrentData | null> {
+```
+
+**After:**
+```ts
+async function loadDistributionCurrent(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<DistributionCurrentData | null> {
+```
+
+**File:** `src/data/reportDesigner/reportTypes.ts`
+
+**Before:** `export function createReportId(): string {`
+
+**After:** `function createReportId(): string {`
+
+**File:** `src/data/population/monthFolder.ts`
+
+**Before:** `export function formatMonthShortLabel(month: number, year: number): string {`
+
+**After:** `function formatMonthShortLabel(month: number, year: number): string {`
+
+---
+
 ## v42.84 — 2026-07-12 — dead code (hardening-2026-07-08): remove 2 dead exports
 
 Full-sweep audit, Area 1 "Dead exports" bucket. Both verified individually to have zero

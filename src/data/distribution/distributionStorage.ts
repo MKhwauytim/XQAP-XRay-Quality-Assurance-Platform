@@ -112,7 +112,7 @@ export async function saveDistributionCurrent(
   await syncSampleMirrors(directoryHandle, monthFolderName, current);
 }
 
-export async function loadDistributionCurrent(
+async function loadDistributionCurrent(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string
 ): Promise<DistributionCurrentData | null> {

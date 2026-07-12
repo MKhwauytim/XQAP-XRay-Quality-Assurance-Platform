@@ -44,7 +44,7 @@ const MONTH_ABBR_EN = [
  * Short display label for a month/year pair, e.g. "May 2026" — 3-letter English abbreviation +
  * Latin-numeral year. Display-only: never use this to derive/compare a folder name.
  */
-export function formatMonthShortLabel(month: number, year: number): string {
+function formatMonthShortLabel(month: number, year: number): string {
   const abbr = MONTH_ABBR_EN[month - 1];
   return abbr ? `${abbr} ${year}` : `${month}/${year}`;
 }

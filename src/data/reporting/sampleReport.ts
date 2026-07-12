@@ -24,7 +24,7 @@ function stageLabel(key: string): string {
 }
 
 // ─── HTML report builder ──────────────────────────────────────────────────────
-export function buildSampleReport(input: SampleReportInput): string {
+function buildSampleReport(input: SampleReportInput): string {
   const { monthFolderName, manifest, populationRows, sample } = input;
 
   // Index population rows by id for quick lookup
