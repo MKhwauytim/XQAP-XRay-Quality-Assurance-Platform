@@ -3,7 +3,7 @@ import { safeWriteJson, safeReadJson } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
 import { withResourceLock } from "../storage/webLocks";
 import { logError } from "../storage/errorLogger";
-import { ensureMonthWritable } from "./monthLock";
+import { ensureMonthWritable, manifestLockKey } from "./monthLock";
 import { formatMonthFolderName, parseMonthFolderName, type MonthFolderInfo } from "./monthFolder";
 import type {
   MonthManifestData,
@@ -309,10 +309,12 @@ export async function updateMonthStatus(
     // Shared, multi-writer file: two PCs can advance the same month's status
     // near-simultaneously. The `:rmw` outer lock serializes same-tab writers;
     // casLoop's revision + _writeToken read-back guards cross-machine races so a
-    // monotonic advance is never lost to a stale overwrite. Best-effort: a
-    // persistent conflict is logged, never thrown.
+    // monotonic advance is never lost to a stale overwrite. `manifestLockKey` is
+    // shared with monthLock.closeMonth/reopenMonth so all three writers to this
+    // manifest run in one protocol (finding S3). Best-effort: a persistent
+    // conflict is logged, never thrown.
     const result = await withResourceLock(
-      `population-manifest/${monthFolderName}:rmw`,
+      manifestLockKey(monthFolderName),
       () =>
         casLoop<{ ok: true }>(
           async (writeToken) => {

@@ -4,6 +4,77 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.78 — 2026-07-12 — S3 (hardening-2026-07-08): bring closeMonth/reopenMonth into the manifest casLoop protocol
+
+Full-sweep finding S3. `closeMonth`/`reopenMonth` wrote `month.manifest.json` with a plain `safeWriteJson`
+that spread the read manifest forward — no `revision` bump, no `_writeToken` stamp — while
+`populationStorage.updateMonthStatus` writes the SAME file inside a casLoop that verifies only its own
+token/revision. A non-participating writer is invisible to casLoop's conflict detection, so a narrow TOCTOU
+window let an automated status-advance silently un-close a frozen month (see finding for the exact
+interleaving). `updateMonthStatus`'s monotonic-rank guard refuses both the "closed" state and the reopen
+downgrade, so `closeMonth`/`reopenMonth` cannot route through it — instead they now run their OWN casLoop
+using the exact same lock key (`population-manifest/${month}:rmw`) and revision/`_writeToken` shape, so all
+three writers participate in one protocol and detect each other's writes.
+
+**File:** `src/data/population/monthLock.ts`
+
+**Before (closeMonth core; reopenMonth is analogous):**
+```ts
+const monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, false);
+const now = new Date().toISOString();
+const updated: MonthManifestData = {
+  ...manifest,
+  status: "closed",
+  statusBeforeClose: manifest.status,
+  closedAt: now,
+  closedBy,
+  closeNote: note ?? null,
+};
+await safeWriteJson(monthDir, MANIFEST_FILE, updated);
+invalidateMonthLockCache(monthFolderName);
+return { ok: true };
+```
+
+**After (closeMonth core; reopenMonth is analogous):**
+```ts
+const outcome = await withResourceLock(`population-manifest/${monthFolderName}:rmw`, () =>
+  casLoop<{ ok: true } | { ok: false; error: string }>(async (writeToken) => {
+    let monthDir: DirectoryHandleLike;
+    try {
+      monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, false);
+    } catch {
+      return { done: true, result: { ok: false, error: `لا يوجد ملف بيان للشهر ${monthFolderName}.` } };
+    }
+    const manifestResult = await safeReadJson<MonthManifestData>(monthDir, MANIFEST_FILE);
+    if (!manifestResult.ok) return { done: true, result: { ok: false, error: `لا يوجد ملف بيان للشهر ${monthFolderName}.` } };
+    const manifest = manifestResult.value;
+    if (manifest.status === "closed") return { done: true, result: { ok: true as const } }; // idempotent
+    const now = new Date().toISOString();
+    const nextRevision = (manifest.revision ?? 0) + 1;
+    const updated: MonthManifestData = {
+      ...manifest, status: "closed", statusBeforeClose: manifest.status, closedAt: now, closedBy,
+      closeNote: note ?? null, revision: nextRevision, _writeToken: writeToken,
+    };
+    await safeWriteJson(monthDir, MANIFEST_FILE, updated);
+    const verify = await safeReadJson<MonthManifestData>(monthDir, MANIFEST_FILE);
+    if (verify.ok && verify.value.revision === nextRevision && verify.value._writeToken === writeToken) {
+      return { done: true, result: { ok: true as const } };
+    }
+    return { done: false };
+  }, { conflictError: "تعذّر إقفال الشهر: تعارض في الكتابة بعد عدة محاولات." })
+);
+invalidateMonthLockCache(monthFolderName);
+if (!outcome.ok) return { ok: false, error: outcome.error };
+return { ok: true };
+```
+
+The top-of-file doc comment was also updated: `closeMonth`/`reopenMonth` still bypass `updateMonthStatus`
+(whose rank guard would refuse them) but now participate in the same casLoop protocol on the manifest.
+
+**File:** `src/data/population/monthLock.test.ts` — added a concurrency test: a racing `closeMonth` and
+`updateMonthStatus(..., "distributed")` on the same month can never leave the month un-closed (the close wins
+or the advance is rejected as a stale write — never a silent un-close).
+
 ## v42.77 — 2026-07-12 — S2 (hardening-2026-07-08): CAS-guard the shared feedback log
 
 Full-sweep finding S2. `5-system/feedback/messages.json` is appended to by any user on any machine, but
