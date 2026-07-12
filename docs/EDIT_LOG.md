@@ -4,6 +4,83 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.77 — 2026-07-12 — S2 (hardening-2026-07-08): CAS-guard the shared feedback log
+
+Full-sweep finding S2. `5-system/feedback/messages.json` is appended to by any user on any machine, but
+`submitFeedback`/`replyToFeedback`/`saveFeedback` were read-modify-write guarded only by `withResourceLock`
+(same-tab only) — two machines submitting at once each read N messages and wrote N+1, so the last writer
+silently dropped the other's message/reply/resolve. Applied casLoop the way Batch D applied it to
+`approvalStorage.appendDecisionEvent` (its closest structural match — an RMW-append to a shared list): a
+single `mutateFeedback` helper wraps `withResourceLock` → `casLoop`, re-reading fresh state each attempt,
+bumping `revision`, stamping `_writeToken`, verifying both on read-back, retrying-with-jitter on mismatch.
+
+The persisted payload changes from a bare `FeedbackMessage[]` to `{ revision, _writeToken, messages }` so the
+list can carry the CAS token; `loadFeedback` stays backward-compatible with the legacy bare-array shape and
+still returns `FeedbackMessage[]` (unchanged public API). Switched from `readJsonFile`/`writeJsonFile` to
+`safeReadJson`/`safeWriteJson` to match the other casLoop consumers (envelope + `.bak` recovery).
+
+**File:** `src/data/feedback/feedbackStorage.ts`
+
+**Before:**
+```ts
+export async function saveFeedback(dir: DirectoryHandleLike, messages: FeedbackMessage[]): Promise<void> {
+  const feedbackDir = await getFeedbackDir(dir);
+  await writeJsonFile(feedbackDir, MESSAGES_FILE, messages);
+}
+
+export async function submitFeedback(dir, payload): Promise<void> {
+  await withResourceLock(`${dir.name}/${SYSTEM_FOLDER_NAMES.feedback}/${MESSAGES_FILE}`, async () => {
+    const messages = await loadFeedback(dir);
+    messages.unshift({ /* new message */ });
+    await saveFeedback(dir, messages);
+  });
+}
+
+export async function replyToFeedback(dir, messageId, reply, resolve): Promise<void> {
+  await withResourceLock(`${dir.name}/${SYSTEM_FOLDER_NAMES.feedback}/${MESSAGES_FILE}`, async () => {
+    const messages = await loadFeedback(dir);
+    const msg = messages.find((m) => m.id === messageId);
+    if (!msg) return;
+    msg.replies.push(reply);
+    if (resolve) msg.status = "resolved";
+    await saveFeedback(dir, messages);
+  });
+}
+```
+
+**After:**
+```ts
+type FeedbackFile = { revision?: number; _writeToken?: string; messages: FeedbackMessage[] };
+
+// withResourceLock (same-tab) → casLoop (cross-machine): re-read fresh, apply the
+// mutation, bump revision, stamp _writeToken, verify both on read-back, retry on
+// mismatch. Same RMW-append contract as approvalStorage.appendDecisionEvent.
+async function mutateFeedback(dir, mutate: (messages: FeedbackMessage[]) => FeedbackMessage[]): Promise<void> {
+  const feedbackDir = await getFeedbackDir(dir);
+  const outcome = await withResourceLock(`${feedbackDir.name}/${MESSAGES_FILE}:rmw`, () =>
+    casLoop<{ ok: true }>(async (writeToken) => {
+      const current = await loadFeedbackFile(dir);
+      const nextRevision = (current.revision ?? 0) + 1;
+      const messages = mutate([...current.messages]);
+      await safeWriteJson<FeedbackFile>(feedbackDir, MESSAGES_FILE, { revision: nextRevision, _writeToken: writeToken, messages });
+      const verify = await loadFeedbackFile(dir);
+      if (verify.revision === nextRevision && verify._writeToken === writeToken) return { done: true, result: { ok: true as const } };
+      return { done: false };
+    }, { conflictError: "تعذّر حفظ الملاحظات: تعارض في الكتابة بعد عدة محاولات." })
+  );
+  if (!outcome.ok) throw new Error(outcome.error);
+}
+
+export async function saveFeedback(dir, messages): Promise<void> { await mutateFeedback(dir, () => messages); }
+export async function submitFeedback(dir, payload): Promise<void> { await mutateFeedback(dir, (m) => { m.unshift({ /* new message */ }); return m; }); }
+export async function replyToFeedback(dir, messageId, reply, resolve): Promise<void> {
+  await mutateFeedback(dir, (m) => { const msg = m.find((x) => x.id === messageId); if (msg) { msg.replies.push(reply); if (resolve) msg.status = "resolved"; } return m; });
+}
+```
+
+**File:** `src/data/feedback/feedbackStorage.test.ts` (new) — round-trip + legacy bare-array read + a
+two-racing-submits concurrency test asserting both messages survive (no silent lost update).
+
 ## v42.76 — 2026-07-12 — S1 (hardening-2026-07-08): CAS-guard users.permissions.json write (password hashes)
 
 Full-sweep finding S1 (`docs/audit/hardening-2026-07-08/full-sweep-findings.md`). `syncUserManagementToDisk`
