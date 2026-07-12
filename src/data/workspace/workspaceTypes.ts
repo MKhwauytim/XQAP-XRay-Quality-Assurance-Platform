@@ -57,6 +57,8 @@ export type JsonFileMetadata = {
   updatedAt: string;
   updatedBy: string;
   contentHash: string;
+  /** Per-write UUID embedded by casLoop for cross-machine race detection (SEC-01 file). */
+  _writeToken?: string;
 };
 
 export type JsonEnvelope<TData> = {

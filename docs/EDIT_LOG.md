@@ -4,6 +4,149 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.76 — 2026-07-12 — S1 (hardening-2026-07-08): CAS-guard users.permissions.json write (password hashes)
+
+Full-sweep finding S1 (`docs/audit/hardening-2026-07-08/full-sweep-findings.md`). `syncUserManagementToDisk`
+wrote the whole users/permissions/password-hash file as a full-state replace with no lock, no casLoop, and
+no read-back verify — so a concurrent admin's change on another machine (a password reset, a new user) could
+be silently overwritten by a second machine's stale full-state write. Brought it under the same
+`withResourceLock` + `casLoop` protocol `savePopulationConfig` uses (its closest reference, also a full-object
+replace): re-read fresh state inside the retry, bump `metadata.revision`, stamp `metadata._writeToken`, verify
+BOTH on read-back, retry-with-jitter on mismatch. Same last-writer-wins-cleanly (not field-level merge)
+contract as populationConfig — documented in a code comment, not overclaimed.
+
+**File:** `src/data/workspace/workspaceTypes.ts`
+
+Added an optional `_writeToken` to the shared envelope metadata so casLoop can stamp + verify a per-write token
+on this envelope-shaped file (same role `_writeToken` already plays in `MonthManifestData`). Optional →
+backwards-compatible with every existing writer/reader.
+
+**Before:**
+```ts
+export type JsonFileMetadata = {
+  schemaVersion: typeof WORKSPACE_SCHEMA_VERSION;
+  fileType: WorkspaceFileType;
+  revision: number;
+  createdAt: string;
+  createdBy: string;
+  updatedAt: string;
+  updatedBy: string;
+  contentHash: string;
+};
+```
+
+**After:**
+```ts
+export type JsonFileMetadata = {
+  schemaVersion: typeof WORKSPACE_SCHEMA_VERSION;
+  fileType: WorkspaceFileType;
+  revision: number;
+  createdAt: string;
+  createdBy: string;
+  updatedAt: string;
+  updatedBy: string;
+  contentHash: string;
+  /** Per-write UUID embedded by casLoop for cross-machine race detection (SEC-01 file). */
+  _writeToken?: string;
+};
+```
+
+**File:** `src/data/workspace/userSync.ts`
+
+**Before:**
+```ts
+export async function syncUserManagementToDisk(
+  directoryHandle: DirectoryHandleLike,
+  next: UserManagementState,
+  actor: string
+): Promise<void> {
+  const userDataDir = await getUserDataRoot(directoryHandle, true);
+  const existing = await readJsonFile<UsersPermissionsFile>(
+    userDataDir,
+    WORKSPACE_FILE_NAMES.usersPermissions
+  );
+  const prevMeta = existing.ok ? existing.file.metadata : null;
+  const now = new Date().toISOString();
+
+  const diskFile: UsersPermissionsFile = {
+    metadata: {
+      schemaVersion: WORKSPACE_SCHEMA_VERSION,
+      fileType: "users.permissions",
+      revision: prevMeta ? prevMeta.revision + 1 : 1,
+      createdAt: prevMeta?.createdAt ?? now,
+      createdBy: prevMeta?.createdBy ?? actor,
+      updatedAt: now,
+      updatedBy: actor,
+      contentHash: "",
+    },
+    data: { /* users/roles/permissions/featurePermissions */ },
+  };
+
+  await writeJsonFile(userDataDir, WORKSPACE_FILE_NAMES.usersPermissions, diskFile);
+}
+```
+
+**After:**
+```ts
+export async function syncUserManagementToDisk(
+  directoryHandle: DirectoryHandleLike,
+  next: UserManagementState,
+  actor: string
+): Promise<void> {
+  const userDataDir = await getUserDataRoot(directoryHandle, true);
+
+  // Shared, multi-writer, SEC-01 file (any admin on any PC edits users / roles /
+  // permissions / password hashes). The `:rmw` outer lock serializes same-tab
+  // writers; casLoop re-reads fresh state each attempt, bumps metadata.revision +
+  // stamps metadata._writeToken, and verifies BOTH on read-back so a concurrent
+  // admin's change on another machine is never silently overwritten. NOTE: this is
+  // a whole-object replace — last-writer-wins-cleanly with a detectable revision,
+  // NOT a field-level three-way merge of two admins' edits (same tradeoff
+  // savePopulationConfig documents for config.json).
+  const outcome = await withResourceLock(`users-permissions:rmw`, () =>
+    casLoop<{ ok: true }>(
+      async (writeToken) => {
+        const existing = await readJsonFile<UsersPermissionsFile>(
+          userDataDir,
+          WORKSPACE_FILE_NAMES.usersPermissions
+        );
+        const prevMeta = existing.ok ? existing.file.metadata : null;
+        const now = new Date().toISOString();
+        const nextRevision = prevMeta ? prevMeta.revision + 1 : 1;
+
+        const diskFile: UsersPermissionsFile = {
+          metadata: { /* …, revision: nextRevision, _writeToken: writeToken */ },
+          data: { /* users/roles/permissions/featurePermissions */ },
+        };
+
+        await writeJsonFile(userDataDir, WORKSPACE_FILE_NAMES.usersPermissions, diskFile);
+
+        const verify = await readJsonFile<UsersPermissionsFile>(
+          userDataDir,
+          WORKSPACE_FILE_NAMES.usersPermissions
+        );
+        if (
+          verify.ok &&
+          verify.file.metadata.revision === nextRevision &&
+          verify.file.metadata._writeToken === writeToken
+        ) {
+          return { done: true, result: { ok: true as const } };
+        }
+        return { done: false };
+      },
+      { conflictError: "تعذّر حفظ المستخدمين والصلاحيات: تعارض في الكتابة بعد عدة محاولات." }
+    )
+  );
+  // Surface CAS exhaustion so the caller (UserManagement.saveUsersToDisk) can retry;
+  // runtime state stays authoritative meanwhile.
+  if (!outcome.ok) throw new Error(outcome.error);
+}
+```
+
+**File:** `src/data/workspace/userSync.test.ts` — added a concurrent-writer test (two racing
+`syncUserManagementToDisk` calls against the same in-memory directory) asserting the second write is not lost:
+the persisted revision advances past both and the last writer's user set is intact.
+
 ## v42.75 — 2026-07-12 — QA advisory 1: admit reopen-only approvers to the unified approval sub-tab
 
 **File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/index.tsx`
