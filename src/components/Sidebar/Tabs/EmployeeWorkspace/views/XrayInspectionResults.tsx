@@ -7,6 +7,7 @@ import {
   subscribeToUserManagementChanges,
 } from "../../../../../auth/userManagement";
 import { PageHeader } from "../../../../../components/PageHeader/PageHeader";
+import { logRejection } from "../../../../../data/storage/errorLogger";
 import { EmptyState, ErrorState, LoadingState } from "../../../../../components/StateViews/StateViews";
 import DataTable, {
   type CellMeta,
@@ -153,38 +154,45 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
   const [referralColConfig, setReferralColConfig] = useState<ColConfig | null>(null);
 
   useEffect(() => {
-    void listMonthFolders(directoryHandle).then((monthFolders) => {
-      setMonths(monthFolders);
-      if (monthFolders.length > 0) {
-        setSelectedMonth(monthFolders[monthFolders.length - 1]!.folderName);
-      } else {
-        setRows([]);
-        setTemplate(null);
-        setLoadState("ready");
-      }
-    });
+    void listMonthFolders(directoryHandle)
+      .then((monthFolders) => {
+        setMonths(monthFolders);
+        if (monthFolders.length > 0) {
+          setSelectedMonth(monthFolders[monthFolders.length - 1]!.folderName);
+        } else {
+          setRows([]);
+          setTemplate(null);
+          setLoadState("ready");
+        }
+      })
+      .catch((error) => {
+        setLoadState("error");
+        logRejection("xrayInspectionResults:listMonthFolders")(error);
+      });
 
     void Promise.all([
       loadAdminBrowsePreset(directoryHandle),
       loadUserBrowsePreset(directoryHandle, username),
-    ]).then(([adminFile, userFile]) => {
-      const preset = adminFile.browseData[REFERRALS_PRESET_KEY] ?? userFile.browseData[REFERRALS_PRESET_KEY];
-      if (preset) {
-        setReferralColConfig({
-          order: preset.columnOrder,
-          // Only hide columns the preset actually knew about. Columns added in a newer
-          // version (e.g. "تاريخ رصد الخبير") aren't in the old columnOrder and must
-          // default to visible rather than being auto-hidden.
-          hidden: sampleColumns
-            .map((column) => column.id)
-            .filter((id) => !preset.visibleColumns.includes(id) && preset.columnOrder.includes(id)),
-          widths: preset.widths ?? {},
-          dateFmt: (preset.dateFmt ?? {}) as Record<string, DateFormatMode>,
-        });
-        return;
-      }
-      setReferralColConfig(loadLocalReferralColConfig() ?? buildDefaultReferralColConfig(sampleColumns));
-    });
+    ])
+      .then(([adminFile, userFile]) => {
+        const preset = adminFile.browseData[REFERRALS_PRESET_KEY] ?? userFile.browseData[REFERRALS_PRESET_KEY];
+        if (preset) {
+          setReferralColConfig({
+            order: preset.columnOrder,
+            // Only hide columns the preset actually knew about. Columns added in a newer
+            // version (e.g. "تاريخ رصد الخبير") aren't in the old columnOrder and must
+            // default to visible rather than being auto-hidden.
+            hidden: sampleColumns
+              .map((column) => column.id)
+              .filter((id) => !preset.visibleColumns.includes(id) && preset.columnOrder.includes(id)),
+            widths: preset.widths ?? {},
+            dateFmt: (preset.dateFmt ?? {}) as Record<string, DateFormatMode>,
+          });
+          return;
+        }
+        setReferralColConfig(loadLocalReferralColConfig() ?? buildDefaultReferralColConfig(sampleColumns));
+      })
+      .catch(logRejection("xrayInspectionResults:loadBrowsePresets"));
   }, [directoryHandle, sampleColumns, username]);
 
   const loadData = useCallback(async () => {

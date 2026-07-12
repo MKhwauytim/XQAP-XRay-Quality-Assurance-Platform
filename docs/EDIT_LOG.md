@@ -4,6 +4,120 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.81 — 2026-07-12 — S4 (hardening-2026-07-08): catch the uncaught month/preset load rejections in inspection-results view
+
+Full-sweep finding S4. `XrayInspectionResults.tsx`'s mount effect fires two promise chains with no
+`.catch`, unlike every sibling loader (`XrayReferrals.tsx`, `EmployeeDashboard.tsx`, `Reports/index.tsx`
+all wrap their `listMonthFolders(...).then(...)` in `.catch(logRejection(...))`). `loadState` initializes
+to `"loading"`; if `listMonthFolders` rejects (stale directory handle, transient FS error), the `.then`
+never runs, `setLoadState("ready")` never fires, and — because `selectedMonth` stays `""` — `loadData`'s
+own try/catch never even gets a chance to run (it early-returns on empty `selectedMonth`). The view is
+pinned on the loading spinner forever with no error surfaced and no `logError` entry, plus an unhandled
+promise rejection. Applied the same `.catch(logRejection(context))` pattern used by the sibling views to
+both call sites. For the `listMonthFolders` chain specifically (the one gating `loadState`), the catch
+also calls `setLoadState("error")` — matching the `logRejection(...)( err )` + state-transition idiom
+already used in `Reports/index.tsx`'s `buildReportModel` catch block — so the UI renders the existing
+`ErrorState` instead of spinning forever. The second chain (admin/user browse-preset load, feeds
+`referralColConfig`) doesn't gate `loadState` — a rejection there already degrades gracefully via
+`buildDefaultReferralColConfig` fallback in `getVisibleSampleColumns` — so it only gets the `.catch(logRejection(...))`
+logging, no state transition needed.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayInspectionResults.tsx`
+
+**Before:**
+```tsx
+import { PageHeader } from "../../../../../components/PageHeader/PageHeader";
+import { EmptyState, ErrorState, LoadingState } from "../../../../../components/StateViews/StateViews";
+```
+```tsx
+  useEffect(() => {
+    void listMonthFolders(directoryHandle).then((monthFolders) => {
+      setMonths(monthFolders);
+      if (monthFolders.length > 0) {
+        setSelectedMonth(monthFolders[monthFolders.length - 1]!.folderName);
+      } else {
+        setRows([]);
+        setTemplate(null);
+        setLoadState("ready");
+      }
+    });
+
+    void Promise.all([
+      loadAdminBrowsePreset(directoryHandle),
+      loadUserBrowsePreset(directoryHandle, username),
+    ]).then(([adminFile, userFile]) => {
+      const preset = adminFile.browseData[REFERRALS_PRESET_KEY] ?? userFile.browseData[REFERRALS_PRESET_KEY];
+      if (preset) {
+        setReferralColConfig({
+          order: preset.columnOrder,
+          // Only hide columns the preset actually knew about. Columns added in a newer
+          // version (e.g. "تاريخ رصد الخبير") aren't in the old columnOrder and must
+          // default to visible rather than being auto-hidden.
+          hidden: sampleColumns
+            .map((column) => column.id)
+            .filter((id) => !preset.visibleColumns.includes(id) && preset.columnOrder.includes(id)),
+          widths: preset.widths ?? {},
+          dateFmt: (preset.dateFmt ?? {}) as Record<string, DateFormatMode>,
+        });
+        return;
+      }
+      setReferralColConfig(loadLocalReferralColConfig() ?? buildDefaultReferralColConfig(sampleColumns));
+    });
+  }, [directoryHandle, sampleColumns, username]);
+```
+
+**After:**
+```tsx
+import { PageHeader } from "../../../../../components/PageHeader/PageHeader";
+import { logRejection } from "../../../../../data/storage/errorLogger";
+import { EmptyState, ErrorState, LoadingState } from "../../../../../components/StateViews/StateViews";
+```
+```tsx
+  useEffect(() => {
+    void listMonthFolders(directoryHandle)
+      .then((monthFolders) => {
+        setMonths(monthFolders);
+        if (monthFolders.length > 0) {
+          setSelectedMonth(monthFolders[monthFolders.length - 1]!.folderName);
+        } else {
+          setRows([]);
+          setTemplate(null);
+          setLoadState("ready");
+        }
+      })
+      .catch((error) => {
+        setLoadState("error");
+        logRejection("xrayInspectionResults:listMonthFolders")(error);
+      });
+
+    void Promise.all([
+      loadAdminBrowsePreset(directoryHandle),
+      loadUserBrowsePreset(directoryHandle, username),
+    ])
+      .then(([adminFile, userFile]) => {
+        const preset = adminFile.browseData[REFERRALS_PRESET_KEY] ?? userFile.browseData[REFERRALS_PRESET_KEY];
+        if (preset) {
+          setReferralColConfig({
+            order: preset.columnOrder,
+            // Only hide columns the preset actually knew about. Columns added in a newer
+            // version (e.g. "تاريخ رصد الخبير") aren't in the old columnOrder and must
+            // default to visible rather than being auto-hidden.
+            hidden: sampleColumns
+              .map((column) => column.id)
+              .filter((id) => !preset.visibleColumns.includes(id) && preset.columnOrder.includes(id)),
+            widths: preset.widths ?? {},
+            dateFmt: (preset.dateFmt ?? {}) as Record<string, DateFormatMode>,
+          });
+          return;
+        }
+        setReferralColConfig(loadLocalReferralColConfig() ?? buildDefaultReferralColConfig(sampleColumns));
+      })
+      .catch(logRejection("xrayInspectionResults:loadBrowsePresets"));
+  }, [directoryHandle, sampleColumns, username]);
+```
+
+---
+
 ## v42.80 — 2026-07-12 — S6 (hardening-2026-07-08): make the auth-session activity-log flush CAS-safe
 
 Full-sweep finding S6. `5-system/…/activity.log.json` is written by every machine's login/logout/heartbeat.
