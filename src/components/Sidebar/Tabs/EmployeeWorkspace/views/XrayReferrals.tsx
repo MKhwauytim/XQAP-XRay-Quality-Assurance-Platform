@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { X, AlertTriangle, RotateCw } from "lucide-react";
+import { useFocusTrap } from "../../../../../hooks/useFocusTrap";
 import { readSession } from "../../../../../auth/authSession";
 import { PageHeader } from "../../../../../components/PageHeader/PageHeader";
 import { logRejection } from "../../../../../data/storage/errorLogger";
@@ -25,7 +26,9 @@ import {
   getReplacementCandidates,
   executeReplacement,
 } from "../../../../../data/distribution/replacement";
+import { isAssignableSampleRole } from "../../../../../data/distribution/bulkAssignment";
 import { loadPopulationConfig, type StageAliasMappings } from "../../../../../data/population/populationConfig";
+import { formatMonthFolderShortLabel } from "../../../../../data/population/monthFolder";
 import {
   listMonthFolders,
   loadMonthPopulationFinal,
@@ -68,6 +71,7 @@ import {
   getPendingReferralIds,
   loadReferralLog,
 } from "../../../../../data/referral/referralStorage";
+import { submitReopenRequest } from "../../../../../data/referral/requestReopen";
 import type { ReferralRequest, ReplacementRequest } from "../../../../../data/referral/referralTypes";
 import { useLabels, type Labels } from "../../../../../data/labels/useLabels";
 import { formatStageLabel } from "../../Population/components/helpers";
@@ -235,6 +239,13 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     userManagementState.featurePermissions,
     role,
     "ew.reopenAnswer"
+  );
+  // Batch B: when enabled for this role, the employee's self-service reopen request
+  // is applied instantly; when disabled it is routed to a supervisor for approval.
+  const canReopenInstant = hasFeature(
+    userManagementState.featurePermissions,
+    role,
+    "employee-reopen-instant"
   );
   const L = useLabels();
   const baseColumns = useMemo(() => buildXrayColumns(L), [L]);
@@ -540,6 +551,41 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     }
   }
 
+  // Batch B: employee self-service reopen. Branches on canReopenInstant — either
+  // applies immediately or files a pending request routed to a supervisor.
+  async function handleRequestReopen(entry: DistributionEntry, reason: string): Promise<void> {
+    try {
+      const result = await submitReopenRequest({
+        directoryHandle,
+        monthFolderName: selMonth,
+        employeeUsername: entry.assignedTo,
+        xrayImageId: entry.xrayImageId,
+        assignedTo: entry.assignedTo,
+        requestedBy: username,
+        requestedByRole: role,
+        reason,
+        instant: canReopenInstant,
+      });
+      if (result.ok) {
+        setSelEntryId(null);
+        setStatusMsg({
+          type: "ok",
+          text: result.mode === "instant" ? getLabels().msg_reopen_done : getLabels().msg_reopen_request_sent,
+        });
+        await loadData();
+      } else {
+        setStatusMsg({ type: "error", text: result.error });
+      }
+    } catch (error) {
+      setStatusMsg({
+        type: "error",
+        text: error instanceof MonthClosedError
+          ? getLabels().msg_month_closed_write_blocked
+          : error instanceof Error ? error.message : "خطأ غير معروف",
+      });
+    }
+  }
+
   async function openReplacementDialog(entry: DistributionEntry): Promise<void> {
     if (!sampleMaster) return;
     // Load full population lazily — only when the replacement dialog is opened.
@@ -758,6 +804,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           {statusMsg.text}
           <button
             type="button"
+            aria-label="إغلاق"
             style={{ float: "left", background: "none", border: "none", cursor: "pointer" }}
             onClick={() => setStatusMsg(null)}
           ><X size={14} /></button>
@@ -810,7 +857,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                   widths:         cfg.widths,
                   dateFmt:        cfg.dateFmt,
                 };
-                if (role === "admin") {
+                if (canConfigureColumns) {
                   void saveAdminBrowseDatasetPreset(directoryHandle, REFERRALS_PRESET_KEY, preset);
                 }
               }}
@@ -874,6 +921,11 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                   onReopen={
                     canReopenAnswer
                       ? (reason) => { void handleReopenAnswer(selEntry, reason); }
+                      : undefined
+                  }
+                  onRequestReopen={
+                    selEntry.assignedTo === username
+                      ? (reason) => { void handleRequestReopen(selEntry, reason); }
                       : undefined
                   }
                 />
@@ -958,7 +1010,7 @@ function QueueToolbar({
           onChange={(e) => onMonthChange(e.target.value)}
         >
           {months.map((m) => (
-            <option key={m.folderName} value={m.folderName}>{m.folderName}</option>
+            <option key={m.folderName} value={m.folderName}>{formatMonthFolderShortLabel(m.folderName)}</option>
           ))}
         </select>
       </label>
@@ -1051,6 +1103,7 @@ function SampleDetailPanel({
   onReplace,
   onReassign,
   onReopen,
+  onRequestReopen,
 }: {
   entry: DistributionEntry;
   template: TemplateSchema | null;
@@ -1061,6 +1114,7 @@ function SampleDetailPanel({
   onReplace?: (entry: DistributionEntry) => void;
   onReassign?: (entry: DistributionEntry) => void;
   onReopen?: (reason: string) => void;
+  onRequestReopen?: (reason: string) => void;
 }) {
   return (
     <InspectionPanel
@@ -1074,6 +1128,7 @@ function SampleDetailPanel({
       onReplace={onReplace}
       onReassign={onReassign}
       onReopen={onReopen}
+      onRequestReopen={onRequestReopen}
     />
   );
 }
@@ -1101,13 +1156,14 @@ function ReferralRequestModal({
   const [reason, setReason]         = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onClose });
   const entriesById = useMemo(
     () => new Map(entries.map((entry) => [entry.xrayImageId, entry])),
     [entries]
   );
 
   const employees = readUserManagementState()
-    .users.filter((u) => u.isActive && u.username !== currentUser)
+    .users.filter((u) => u.isActive && u.username !== currentUser && isAssignableSampleRole(u))
     .sort((a, b) => a.displayName.localeCompare(b.displayName, "ar"));
 
   const canSubmit = toEmployee.trim() !== "" && reason.trim() !== "" && !submitting;
@@ -1119,7 +1175,7 @@ function ReferralRequestModal({
   }
 
   return (
-    <div className="ew-modal-backdrop" role="dialog" aria-modal="true">
+    <div ref={dialogRef} className="ew-modal-backdrop" role="dialog" aria-modal="true">
       <div className="ew-replace-modal">
         <div className="ew-replace-header">
           <div>
@@ -1341,6 +1397,7 @@ function ReplacementDialog({
     state.recommended.length > 0 ? "recommended" : "all"
   );
   const [reason, setReason] = useState("");
+  const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onClose });
   const rows = tab === "recommended" ? state.recommended : state.all;
   const stageLabel = formatStageLabel(state.entry.row.stage, stageMappings);
   const reasonTrimmed = reason.trim();
@@ -1348,7 +1405,7 @@ function ReplacementDialog({
   const isRecommended = tab === "recommended";
 
   return (
-    <div className="ew-modal-backdrop" role="dialog" aria-modal="true">
+    <div ref={dialogRef} className="ew-modal-backdrop" role="dialog" aria-modal="true">
       <div className="ew-replace-modal">
         <div className="ew-replace-header">
           <div>

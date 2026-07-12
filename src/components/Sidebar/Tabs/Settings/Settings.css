@@ -142,6 +142,27 @@
   border-radius: var(--r-sm, 8px);
 }
 
+/* ── About card (D7 version stamp) ────────────────────────────────────────── */
+
+.settings-about-row {
+  margin: 0;
+  padding: 4px 10px;
+  font-size: 13px;
+  color: var(--c-ink-2, #33475b);
+}
+
+.settings-about-version {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--c-navy, #0F2744);
+}
+
+.settings-about-note {
+  color: var(--c-ink-3, #5E7A96);
+  font-size: 12px;
+}
+
 /* ── Accordion section header ─────────────────────────────────────────────── */
 
 .settings-section-header {

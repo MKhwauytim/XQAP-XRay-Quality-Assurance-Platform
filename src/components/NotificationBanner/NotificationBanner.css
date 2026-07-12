@@ -1,0 +1,60 @@
+/* App-shell acknowledgement banner. Mirrors the in-flow `.app-demo-banner`
+   placement (never a fixed overlay) but colored orange to stand apart from the
+   navy demo banner. White text on a solid orange bar reads in both themes. */
+.app-notification-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(90deg, #E8590C, #F97316);
+  border-bottom: 1px solid #C2410C;
+}
+
+.app-notification-banner-icon {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.app-notification-banner-text {
+  max-width: min(70ch, 100%);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-notification-banner-count {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0.9;
+}
+
+.app-notification-banner-accept {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  margin-inline-start: 6px;
+  padding: 4px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: var(--r-sm, 6px);
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font-weight: 700;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.app-notification-banner-accept:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.app-notification-banner-accept:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

@@ -109,6 +109,32 @@ describe("referralStorage", () => {
     expect(log.requests[0].history?.[0].status).toBe("denied");
     expect(log.requests[0].history?.[1].status).toBe("approved");
   });
+
+  it("two concurrent referral decisions on different requests both persist (cross-machine CAS)", async () => {
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    await appendReferralRequest(root, "5-May-2026", mockReferral("req-1", "alice", "bob"));
+    await appendReferralRequest(root, "5-May-2026", mockReferral("req-2", "alice", "charlie"));
+
+    // The same reviewer decides both requests near-simultaneously from two PCs.
+    // updateReferralStatus routes through appendDecisionEvent, whose shared
+    // decisions file is a read-modify-write append — without CAS the second
+    // write would clobber the first decision. Both decisions must survive.
+    const [d1, d2] = await Promise.all([
+      updateReferralStatus(root, "5-May-2026", "req-1", {
+        status: "approved", reviewedBy: "supervisor-1", reviewedAt: "2026-07-01T10:00:00.000Z",
+      }),
+      updateReferralStatus(root, "5-May-2026", "req-2", {
+        status: "denied", reviewedBy: "supervisor-1", reviewedAt: "2026-07-01T10:00:01.000Z",
+      }),
+    ]);
+    expect(d1.ok).toBe(true);
+    expect(d2.ok).toBe(true);
+
+    const log = await loadReferralLog(root, "5-May-2026");
+    const byId = new Map(log.requests.map((r) => [r.requestId, r.status]));
+    expect(byId.get("req-1")).toBe("approved");
+    expect(byId.get("req-2")).toBe("denied");
+  });
 });
 
 describe("replacement requests in referralStorage", () => {

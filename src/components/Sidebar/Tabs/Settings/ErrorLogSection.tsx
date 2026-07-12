@@ -9,11 +9,11 @@ import { usePermissions } from "../../../../auth/usePermissions";
 import "./ErrorLogSection.css";
 
 export function ErrorLogSection() {
-  const { role } = usePermissions();
+  const { can } = usePermissions();
   const [isOpen, setIsOpen] = useState(false);
   const [errors, setErrors] = useState<ErrorEntry[]>(() => getRecentErrors());
 
-  if (role !== "admin") return null;
+  if (!can("view-error-log")) return null;
   if (errors.length === 0 && !isOpen) return null;
 
   function handleRefresh() {

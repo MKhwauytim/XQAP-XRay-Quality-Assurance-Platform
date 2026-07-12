@@ -7,6 +7,7 @@ import {
   subscribeToUserManagementChanges,
 } from "../../../../../auth/userManagement";
 import { PageHeader } from "../../../../../components/PageHeader/PageHeader";
+import { logRejection } from "../../../../../data/storage/errorLogger";
 import { EmptyState, ErrorState, LoadingState } from "../../../../../components/StateViews/StateViews";
 import DataTable, {
   type CellMeta,
@@ -32,6 +33,7 @@ import {
 import type { ReferralRequest, ReplacementRequest } from "../../../../../data/referral/referralTypes";
 import { loadAdminBrowsePreset, loadUserBrowsePreset } from "../../../../../data/preferences/browsePresetStorage";
 import { listMonthFolders } from "../../../../../data/population/populationStorage";
+import { formatMonthFolderShortLabel } from "../../../../../data/population/monthFolder";
 import { loadSampleMaster } from "../../../../../data/sampling/sampleStorage";
 import { loadTemplate } from "../../../../../data/templates/templateStorage";
 import { loadInspectionTemplateSelection } from "../../../../../data/templates/templateSelectionStorage";
@@ -152,38 +154,45 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
   const [referralColConfig, setReferralColConfig] = useState<ColConfig | null>(null);
 
   useEffect(() => {
-    void listMonthFolders(directoryHandle).then((monthFolders) => {
-      setMonths(monthFolders);
-      if (monthFolders.length > 0) {
-        setSelectedMonth(monthFolders[monthFolders.length - 1]!.folderName);
-      } else {
-        setRows([]);
-        setTemplate(null);
-        setLoadState("ready");
-      }
-    });
+    void listMonthFolders(directoryHandle)
+      .then((monthFolders) => {
+        setMonths(monthFolders);
+        if (monthFolders.length > 0) {
+          setSelectedMonth(monthFolders[monthFolders.length - 1]!.folderName);
+        } else {
+          setRows([]);
+          setTemplate(null);
+          setLoadState("ready");
+        }
+      })
+      .catch((error) => {
+        setLoadState("error");
+        logRejection("xrayInspectionResults:listMonthFolders")(error);
+      });
 
     void Promise.all([
       loadAdminBrowsePreset(directoryHandle),
       loadUserBrowsePreset(directoryHandle, username),
-    ]).then(([adminFile, userFile]) => {
-      const preset = adminFile.browseData[REFERRALS_PRESET_KEY] ?? userFile.browseData[REFERRALS_PRESET_KEY];
-      if (preset) {
-        setReferralColConfig({
-          order: preset.columnOrder,
-          // Only hide columns the preset actually knew about. Columns added in a newer
-          // version (e.g. "تاريخ رصد الخبير") aren't in the old columnOrder and must
-          // default to visible rather than being auto-hidden.
-          hidden: sampleColumns
-            .map((column) => column.id)
-            .filter((id) => !preset.visibleColumns.includes(id) && preset.columnOrder.includes(id)),
-          widths: preset.widths ?? {},
-          dateFmt: (preset.dateFmt ?? {}) as Record<string, DateFormatMode>,
-        });
-        return;
-      }
-      setReferralColConfig(loadLocalReferralColConfig() ?? buildDefaultReferralColConfig(sampleColumns));
-    });
+    ])
+      .then(([adminFile, userFile]) => {
+        const preset = adminFile.browseData[REFERRALS_PRESET_KEY] ?? userFile.browseData[REFERRALS_PRESET_KEY];
+        if (preset) {
+          setReferralColConfig({
+            order: preset.columnOrder,
+            // Only hide columns the preset actually knew about. Columns added in a newer
+            // version (e.g. "تاريخ رصد الخبير") aren't in the old columnOrder and must
+            // default to visible rather than being auto-hidden.
+            hidden: sampleColumns
+              .map((column) => column.id)
+              .filter((id) => !preset.visibleColumns.includes(id) && preset.columnOrder.includes(id)),
+            widths: preset.widths ?? {},
+            dateFmt: (preset.dateFmt ?? {}) as Record<string, DateFormatMode>,
+          });
+          return;
+        }
+        setReferralColConfig(loadLocalReferralColConfig() ?? buildDefaultReferralColConfig(sampleColumns));
+      })
+      .catch(logRejection("xrayInspectionResults:loadBrowsePresets"));
   }, [directoryHandle, sampleColumns, username]);
 
   const loadData = useCallback(async () => {
@@ -348,7 +357,7 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
                 onChange={(event) => setSelectedMonth(event.target.value)}
               >
                 {months.map((month) => (
-                  <option key={month.folderName} value={month.folderName}>{month.folderName}</option>
+                  <option key={month.folderName} value={month.folderName}>{formatMonthFolderShortLabel(month.folderName)}</option>
                 ))}
               </select>
             </label>
@@ -377,7 +386,7 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
                 onChange={(event) => setSelectedMonth(event.target.value)}
               >
                 {months.map((month) => (
-                  <option key={month.folderName} value={month.folderName}>{month.folderName}</option>
+                  <option key={month.folderName} value={month.folderName}>{formatMonthFolderShortLabel(month.folderName)}</option>
                 ))}
               </select>
             </label>

@@ -4,6 +4,5977 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.85 — 2026-07-12 — dead code (hardening-2026-07-08): de-export 4 internal-only helpers; leave a 5th (now fully dead, not just internal) alone
+
+Full-sweep audit, Area 1 "Over-exported" bucket — functions used only inside their own
+file, where `export` is unnecessary. Verified each of the five named items individually
+against the current branch (this series has touched several of these files since the
+audit ran) before touching anything:
+
+- `buildSampleReport` (`reporting/sampleReport.ts`) — called by `openSampleReport` in the
+  same file. `export` removed.
+- `loadDistributionCurrent` (`distribution/distributionStorage.ts`) — called by
+  `loadOrDeriveDistributionCurrent` in the same file. `export` removed.
+- `createReportId` (`reportDesigner/reportTypes.ts`) — called by `createEmptyDocument` in
+  the same file. `export` removed.
+- `formatMonthShortLabel` (`population/monthFolder.ts`) — called by
+  `formatMonthFolderShortLabel` in the same file (the latter stays exported and widely
+  used elsewhere). `export` removed.
+- `saveFeedback` (`feedback/feedbackStorage.ts`) — **left unchanged.** The audit's premise
+  ("only submit/replyToFeedback call it") no longer holds: the S2 CAS-hardening pass
+  (v42.77, this same branch) refactored `submitFeedback`/`replyToFeedback` to call the new
+  `mutateFeedback` helper directly, so `saveFeedback` now has **zero** call sites anywhere
+  in `src/` — not "internal-only" but fully dead. Confirmed empirically: removing `export`
+  produces a real `@typescript-eslint/no-unused-vars` build-gate failure (`'saveFeedback'
+  is defined but never used`), not a false alarm. Per the task's revert-on-break rule, the
+  change was reverted rather than forced through. Full deletion wasn't authorized for this
+  item (only `listMonthSummaries`/`loadMainSampleMirror` were approved for outright
+  deletion this pass), so `saveFeedback` is left exported and flagged here for a follow-up
+  dead-code pass rather than unilaterally expanding scope.
+
+**File:** `src/data/reporting/sampleReport.ts`
+
+**Before:** `export function buildSampleReport(input: SampleReportInput): string {`
+
+**After:** `function buildSampleReport(input: SampleReportInput): string {`
+
+**File:** `src/data/distribution/distributionStorage.ts`
+
+**Before:**
+```ts
+export async function loadDistributionCurrent(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<DistributionCurrentData | null> {
+```
+
+**After:**
+```ts
+async function loadDistributionCurrent(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<DistributionCurrentData | null> {
+```
+
+**File:** `src/data/reportDesigner/reportTypes.ts`
+
+**Before:** `export function createReportId(): string {`
+
+**After:** `function createReportId(): string {`
+
+**File:** `src/data/population/monthFolder.ts`
+
+**Before:** `export function formatMonthShortLabel(month: number, year: number): string {`
+
+**After:** `function formatMonthShortLabel(month: number, year: number): string {`
+
+---
+
+## v42.84 — 2026-07-12 — dead code (hardening-2026-07-08): remove 2 dead exports
+
+Full-sweep audit, Area 1 "Dead exports" bucket. Both verified individually to have zero
+call sites anywhere in `src/` (including their own file) beyond the definition line
+before removal:
+
+- `listMonthSummaries` (`populationStorage.ts`) — its private helper `resolveSampleDir`
+  is still used by two other functions in the same file, so it was kept; only
+  `listMonthSummaries` itself is removed. The `MonthSummary` exported type it returned is
+  left in place (still `export type`, so an unused export doesn't trip `noUnusedLocals`/
+  lint, and it was outside the audit's named scope).
+- `loadMainSampleMirror` (`sampleMirrorStorage.ts`) — the sibling `loadEmployeeSampleMirror`
+  is the one actually used (by `getUserWorkspaceFootprint` in the same file); the "main"
+  variant had no callers.
+
+**File:** `src/data/population/populationStorage.ts`
+
+**Before:**
+```ts
+export async function listMonthSummaries(
+  directoryHandle: DirectoryHandleLike
+): Promise<MonthSummary[]> {
+  const infos = await listMonthFolders(directoryHandle);
+
+  let populationDir: DirectoryHandleLike;
+  try {
+    populationDir = await getPopulationRoot(directoryHandle, false);
+  } catch { return []; }
+
+  const settled = await Promise.allSettled(
+    infos.map(async (info) => {
+      const monthDir = await populationDir.getDirectoryHandle(
+        info.folderName, { create: false }
+      );
+
+      const manifestResult = await safeReadJson<MonthManifestData>(
+        monthDir, "month.manifest.json"
+      );
+      const manifest = manifestResult.ok ? manifestResult.value : null;
+
+      let hasPopulation = false;
+      let totalProcessedRows = manifest?.totalProcessedRows ?? 0;
+      try {
+        const processedDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false });
+        const popResult = await safeReadJson<PopulationFinalData>(processedDir, "population.final.json");
+        hasPopulation = popResult.ok;
+        if (popResult.ok) totalProcessedRows = popResult.value.totalRows;
+      } catch { /* directory missing */ }
+
+      let hasSample = false;
+      {
+        const sampleDir = await resolveSampleDir(directoryHandle, info.folderName, monthDir);
+        if (sampleDir) {
+          const sResult = await safeReadJson<SampleMasterData>(sampleDir, "sample.master.json");
+          hasSample = sResult.ok;
+        }
+      }
+
+      let hasDistribution = false;
+      try {
+        const sampleDir = await getSampleMainDir(directoryHandle, info.folderName, false);
+        const dResult = await safeReadJson<DistributionCurrentData>(sampleDir, "distribution.current.json");
+        hasDistribution = dResult.ok;
+      } catch {
+        try {
+          const dResult = await safeReadJson<DistributionCurrentData>(monthDir, "distribution.current.json");
+          hasDistribution = dResult.ok;
+        } catch { /* file missing */ }
+      }
+
+      return { info, manifest, hasPopulation, hasSample, hasDistribution, totalProcessedRows };
+    })
+  );
+
+  const results: MonthSummary[] = settled
+    .filter((r): r is PromiseFulfilledResult<MonthSummary> => r.status === "fulfilled")
+    .map((r) => r.value);
+
+  // newest first
+  return results.reverse();
+}
+```
+
+**After:** function deleted. `resolveSampleDir` (used by two other functions) and the
+`MonthSummary` type (still exported) are unchanged.
+
+**File:** `src/data/samples/sampleMirrorStorage.ts`
+
+**Before:**
+```ts
+export async function loadMainSampleMirror(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<MainSamplesFile | null> {
+  try {
+    const dir = await getSampleMainDir(directoryHandle, monthFolderName, false);
+    const result = await safeReadJson<MainSamplesFile>(dir, MAIN_SAMPLES_FILE);
+    return result.ok ? result.value : null;
+  } catch {
+    return null;
+  }
+}
+```
+
+**After:** function deleted.
+
+---
+
+## v42.83 — 2026-07-12 — dead code (hardening-2026-07-08): remove the dead edit-lock trio (superseded by webLocks + casLoop)
+
+Full-sweep audit, Area 1 "Dead subsystem" bucket. `acquireEditLock`/`releaseEditLock`/
+`saveJsonWithRevisionCheck` in `fileSystemAccess.ts` were a legacy optimistic-lock-file +
+base-hash-revision-check API, fully superseded by the Web Locks API (`webLocks.ts`) +
+`casLoop` protocol used by every live writer. Verified zero call sites individually
+(not just trusting the audit): `acquireEditLock` and `saveJsonWithRevisionCheck` had none
+anywhere in `src/`; `releaseEditLock` was called only from `saveJsonWithRevisionCheck`
+itself (line 605), confirming both are dead together. No test file references any of the
+three (`fileSystemAccess.test.ts` only exercises `writeJsonFile`/`readJsonFile`/
+`createWorkspaceStructure`).
+
+Removing the trio also orphaned four private helpers that existed only to serve it —
+verified each had zero remaining call sites after the trio's removal before deleting:
+`getLocksDirectoryHandle`, `getLockFileName`, `isExpired` (the lock-file read/expire
+helpers named by the audit), and `createId` (an id-generator only ever invoked for
+`lockId: createId("lock")` inside `acquireEditLock`). `isNotFoundError`/`isPermissionError`
+(used by the still-live `readJsonFile`) and `prepareFileForWrite`/`hashText`/
+`fallbackHash`/`stableStringify`/`ensureDirectoryPermission` (used by still-live
+`createWorkspaceStructure`/`readJsonFile`/`checkWorkspaceStructure`) were kept — confirmed
+each still has a live caller outside the trio.
+
+Also removed the now-dead `AcquireLockResult`/`SaveWithRevisionResult` result types from
+`workspaceTypes.ts` (only ever imported by the trio) and the now-unused `AuthRole` import
+in `fileSystemAccess.ts` (only referenced by `acquireEditLock`'s `role` param). Left
+`WorkspaceLockFile`/`WorkspaceLockData` in `workspaceTypes.ts` untouched — out of the
+audit's named scope, and since they remain `export type`, an unused one is not flagged by
+`noUnusedLocals`/lint, so removing them isn't required to keep the gates green. ~230 lines
+removed.
+
+**File:** `src/data/storage/fileSystemAccess.ts`
+
+**Before:** (imports) `import type { AuthRole } from "../../auth/authTypes";` at the top, and
+`type AcquireLockResult, type SaveWithRevisionResult, type WorkspaceLockFile` in the
+`../workspace/workspaceTypes` import block. (body) `acquireEditLock`, `releaseEditLock`,
+`saveJsonWithRevisionCheck`, `getLocksDirectoryHandle`, `getLockFileName`, `isExpired`,
+`createId` — full definitions, ~230 lines total.
+
+**After:** `AuthRole` import removed; `AcquireLockResult`/`SaveWithRevisionResult`/
+`WorkspaceLockFile` removed from the workspaceTypes import; all seven functions deleted.
+Every remaining export (`writeJsonFile`, `readJsonFile`, `ensureDirectoryPermission`,
+`checkWorkspaceStructure`, `loadWorkspaceFiles`, `createWorkspaceStructure`,
+`getStatusFromStructureResult`) and their shared private helpers are unchanged.
+
+**File:** `src/data/workspace/workspaceTypes.ts`
+
+**Before:**
+```ts
+export type SaveWithRevisionResult<TFile> =
+  | {
+      ok: true;
+      savedFile: TFile;
+      newHash: string;
+    }
+  | {
+      ok: false;
+      reason: "conflict" | "permission_denied" | "write_failed" | "invalid_file";
+      message: string;
+      latestHash?: string;
+    };
+
+export type AcquireLockResult =
+  | {
+      ok: true;
+      lock: WorkspaceLockFile;
+    }
+  | {
+      ok: false;
+      reason: "locked_by_other_user" | "permission_denied" | "write_failed";
+      message: string;
+      existingLock?: WorkspaceLockFile;
+    };
+```
+
+**After:** both types deleted (file now ends at `WorkspaceLoadedFiles`).
+
+---
+
+## v42.82 — 2026-07-12 — dead code (hardening-2026-07-08): delete 3 confirmed-dead files
+
+Full-sweep audit, Area 1 "Dead files" bucket. Three files with zero importers anywhere in `src/`,
+verified individually with `grep -r` before deletion (each search matched only the file's own
+definition line):
+
+- `EmployeeWorkspace/index.tsx` imports the other four views (XrayReferrals, XrayInspectionResults,
+  ReferralApproval, NotificationManager) but never `EmployeeDashboard` — confirmed by reading
+  `EmployeeWorkspace/index.tsx` directly. Superseded by those four views.
+- `ReportDesigner/editor/Toolbar.tsx` — the editor renders `Ribbon.tsx` instead; no import of
+  `editor/Toolbar` anywhere. The only other "Toolbar" hits in the codebase are the unrelated
+  `AdminToolbar`, a local `QueueToolbar`, and a CSS section-comment in `ReportDesigner.css`.
+- `src/components/ui/Button.tsx` and `src/components/ui/StatCard.tsx` — never imported. Every
+  `../ui/*` / `./ui/*` import in the codebase resolves to the different, actively-used
+  `src/data/reporting/executive/ui/` directory (icons/charts), not this one. The entire
+  `src/components/ui/` directory is dead, so it's removed in full.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/EmployeeDashboard.tsx`
+
+**Before:** whole file (407 lines) — a standalone employee dashboard view (`EmployeeDashboard`
+component + `ItemFormCard`/`FormField` helpers) with no importers anywhere in `src/`.
+
+**After:** file deleted.
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/Toolbar.tsx`
+
+**Before:** whole file (141 lines) — a `Toolbar` component (element-add / page-nav / save-print
+buttons) with no importers anywhere in `src/`.
+
+**After:** file deleted.
+
+**File:** `src/components/ui/Button.tsx`
+
+**Before:** whole file (42 lines) — a `Button` presentational wrapper over `.ui-btn`, with no
+importers anywhere in `src/`.
+
+**After:** file deleted (directory `src/components/ui/` removed in full).
+
+**File:** `src/components/ui/StatCard.tsx`
+
+**Before:** whole file (51 lines) — a `StatCard` presentational KPI-card wrapper over `.ui-stat`,
+with no importers anywhere in `src/`.
+
+**After:** file deleted (directory `src/components/ui/` removed in full).
+
+---
+
+## v42.81 — 2026-07-12 — S4 (hardening-2026-07-08): catch the uncaught month/preset load rejections in inspection-results view
+
+Full-sweep finding S4. `XrayInspectionResults.tsx`'s mount effect fires two promise chains with no
+`.catch`, unlike every sibling loader (`XrayReferrals.tsx`, `EmployeeDashboard.tsx`, `Reports/index.tsx`
+all wrap their `listMonthFolders(...).then(...)` in `.catch(logRejection(...))`). `loadState` initializes
+to `"loading"`; if `listMonthFolders` rejects (stale directory handle, transient FS error), the `.then`
+never runs, `setLoadState("ready")` never fires, and — because `selectedMonth` stays `""` — `loadData`'s
+own try/catch never even gets a chance to run (it early-returns on empty `selectedMonth`). The view is
+pinned on the loading spinner forever with no error surfaced and no `logError` entry, plus an unhandled
+promise rejection. Applied the same `.catch(logRejection(context))` pattern used by the sibling views to
+both call sites. For the `listMonthFolders` chain specifically (the one gating `loadState`), the catch
+also calls `setLoadState("error")` — matching the `logRejection(...)( err )` + state-transition idiom
+already used in `Reports/index.tsx`'s `buildReportModel` catch block — so the UI renders the existing
+`ErrorState` instead of spinning forever. The second chain (admin/user browse-preset load, feeds
+`referralColConfig`) doesn't gate `loadState` — a rejection there already degrades gracefully via
+`buildDefaultReferralColConfig` fallback in `getVisibleSampleColumns` — so it only gets the `.catch(logRejection(...))`
+logging, no state transition needed.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayInspectionResults.tsx`
+
+**Before:**
+```tsx
+import { PageHeader } from "../../../../../components/PageHeader/PageHeader";
+import { EmptyState, ErrorState, LoadingState } from "../../../../../components/StateViews/StateViews";
+```
+```tsx
+  useEffect(() => {
+    void listMonthFolders(directoryHandle).then((monthFolders) => {
+      setMonths(monthFolders);
+      if (monthFolders.length > 0) {
+        setSelectedMonth(monthFolders[monthFolders.length - 1]!.folderName);
+      } else {
+        setRows([]);
+        setTemplate(null);
+        setLoadState("ready");
+      }
+    });
+
+    void Promise.all([
+      loadAdminBrowsePreset(directoryHandle),
+      loadUserBrowsePreset(directoryHandle, username),
+    ]).then(([adminFile, userFile]) => {
+      const preset = adminFile.browseData[REFERRALS_PRESET_KEY] ?? userFile.browseData[REFERRALS_PRESET_KEY];
+      if (preset) {
+        setReferralColConfig({
+          order: preset.columnOrder,
+          // Only hide columns the preset actually knew about. Columns added in a newer
+          // version (e.g. "تاريخ رصد الخبير") aren't in the old columnOrder and must
+          // default to visible rather than being auto-hidden.
+          hidden: sampleColumns
+            .map((column) => column.id)
+            .filter((id) => !preset.visibleColumns.includes(id) && preset.columnOrder.includes(id)),
+          widths: preset.widths ?? {},
+          dateFmt: (preset.dateFmt ?? {}) as Record<string, DateFormatMode>,
+        });
+        return;
+      }
+      setReferralColConfig(loadLocalReferralColConfig() ?? buildDefaultReferralColConfig(sampleColumns));
+    });
+  }, [directoryHandle, sampleColumns, username]);
+```
+
+**After:**
+```tsx
+import { PageHeader } from "../../../../../components/PageHeader/PageHeader";
+import { logRejection } from "../../../../../data/storage/errorLogger";
+import { EmptyState, ErrorState, LoadingState } from "../../../../../components/StateViews/StateViews";
+```
+```tsx
+  useEffect(() => {
+    void listMonthFolders(directoryHandle)
+      .then((monthFolders) => {
+        setMonths(monthFolders);
+        if (monthFolders.length > 0) {
+          setSelectedMonth(monthFolders[monthFolders.length - 1]!.folderName);
+        } else {
+          setRows([]);
+          setTemplate(null);
+          setLoadState("ready");
+        }
+      })
+      .catch((error) => {
+        setLoadState("error");
+        logRejection("xrayInspectionResults:listMonthFolders")(error);
+      });
+
+    void Promise.all([
+      loadAdminBrowsePreset(directoryHandle),
+      loadUserBrowsePreset(directoryHandle, username),
+    ])
+      .then(([adminFile, userFile]) => {
+        const preset = adminFile.browseData[REFERRALS_PRESET_KEY] ?? userFile.browseData[REFERRALS_PRESET_KEY];
+        if (preset) {
+          setReferralColConfig({
+            order: preset.columnOrder,
+            // Only hide columns the preset actually knew about. Columns added in a newer
+            // version (e.g. "تاريخ رصد الخبير") aren't in the old columnOrder and must
+            // default to visible rather than being auto-hidden.
+            hidden: sampleColumns
+              .map((column) => column.id)
+              .filter((id) => !preset.visibleColumns.includes(id) && preset.columnOrder.includes(id)),
+            widths: preset.widths ?? {},
+            dateFmt: (preset.dateFmt ?? {}) as Record<string, DateFormatMode>,
+          });
+          return;
+        }
+        setReferralColConfig(loadLocalReferralColConfig() ?? buildDefaultReferralColConfig(sampleColumns));
+      })
+      .catch(logRejection("xrayInspectionResults:loadBrowsePresets"));
+  }, [directoryHandle, sampleColumns, username]);
+```
+
+---
+
+## v42.80 — 2026-07-12 — S6 (hardening-2026-07-08): make the auth-session activity-log flush CAS-safe
+
+Full-sweep finding S6. `5-system/…/activity.log.json` is written by every machine's login/logout/heartbeat.
+`flushMemoryToWorkspace` was serialized only by an in-module `writeChain` (same-tab); `mergeEntries` unions by
+session id, which softens but does not eliminate a lost update — two machines reading rev K, each writing
+{…,its-own-entry}, and the last writer dropping the other's entry from the persisted audit. Lower stakes
+(audit completeness, not business data) but the same class of gap. Wrapped the write in `casLoop` (the
+existing `mergeEntries`-by-session-id logic is kept): re-read disk fresh each attempt, merge, bump `revision`,
+stamp `_writeToken`, verify both on read-back, retry-with-jitter on mismatch. `memoryEntries` is now advanced
+only on a verified successful write, so a losing writer retries with fresh state instead of dropping entries.
+No `withResourceLock` added — the `writeChain` already serializes same-tab flushes; casLoop supplies the
+cross-machine token check.
+
+**File:** `src/auth/authActivityLog.ts`
+
+**Before:**
+```ts
+export type AuthActivityLogFile = {
+  revision: number;
+  updatedAt: string;
+  entries: AuthActivityLogEntry[];
+};
+
+async function readDiskLog(): Promise<AuthActivityLogFile> {
+  // …
+  return { revision: result.value.revision ?? 0, updatedAt: result.value.updatedAt ?? nowIso(), entries: … };
+}
+
+async function flushMemoryToWorkspace(): Promise<void> {
+  const dir = await getActivityAuditDir(true);
+  if (!dir) return;
+  const existing = await readDiskLog();
+  const entries = mergeEntries(existing.entries, memoryEntries);
+  await safeWriteJson<AuthActivityLogFile>(dir, ACTIVITY_LOG_FILE, {
+    revision: existing.revision + 1,
+    updatedAt: nowIso(),
+    entries,
+  });
+  memoryEntries = entries;
+}
+```
+
+**After:**
+```ts
+export type AuthActivityLogFile = {
+  revision: number;
+  /** Per-write UUID embedded by casLoop for cross-machine race detection. */
+  _writeToken?: string;
+  updatedAt: string;
+  entries: AuthActivityLogEntry[];
+};
+
+async function readDiskLog(): Promise<AuthActivityLogFile> {
+  // …
+  return { revision: result.value.revision ?? 0, _writeToken: result.value._writeToken, updatedAt: …, entries: … };
+}
+
+async function flushMemoryToWorkspace(): Promise<void> {
+  const dir = await getActivityAuditDir(true);
+  if (!dir) return;
+  await casLoop<{ ok: true }>(async (writeToken) => {
+    const existing = await readDiskLog();
+    const entries = mergeEntries(existing.entries, memoryEntries);
+    const nextRevision = existing.revision + 1;
+    await safeWriteJson<AuthActivityLogFile>(dir, ACTIVITY_LOG_FILE, {
+      revision: nextRevision, _writeToken: writeToken, updatedAt: nowIso(), entries,
+    });
+    const verify = await readDiskLog();
+    if (verify.revision === nextRevision && verify._writeToken === writeToken) {
+      memoryEntries = entries; // advance only on a verified write
+      return { done: true, result: { ok: true as const } };
+    }
+    return { done: false };
+  }, { conflictError: "تعذّر حفظ سجل نشاط الجلسات: تعارض في الكتابة بعد عدة محاولات." });
+  // Best-effort: queueFlush already swallows failures; a persistent conflict just
+  // leaves memoryEntries intact to retry on the next flush (no silent drop).
+}
+```
+
+**File:** `src/auth/authActivityLog.test.ts` — added a test that a flush merges a concurrent machine's audit
+entry (written directly to `activity.log.json`) instead of clobbering it: after this machine flushes, both
+sessions are persisted and the revision advanced past the external write (proving a fresh re-read, not a
+blind rev-2 overwrite).
+
+## v42.79 — 2026-07-12 — S5 (hardening-2026-07-08): CAS-guard the template & report-design index files
+
+Full-sweep finding S5. `templates.index.json` and `designs.index.json` are shared multi-writer index files
+edited by every supervisor/manager/admin on every machine, but their read-modify-write was guarded only by
+`withResourceLock` (same-tab). Two authors saving at once each read the index, each appended their own entry,
+and the last writer's index dropped the other's entry — the orphaned doc file survived on disk but was
+invisible in the picker until re-saved. Applied casLoop (same shape as S2) to just the index RMW; the per-id
+doc/backup/selection/tombstone writes are single-writer-by-id and stay as-is.
+
+Both index types gained optional `revision`/`_writeToken` for the CAS handshake (the persisted index now
+carries them; the entry rows are unchanged).
+
+**File:** `src/data/templates/templateTypes.ts` — `TemplateIndex` gained `revision?: number` and
+`_writeToken?: string`.
+
+**File:** `src/data/reportDesigner/storage/reportDesignStorage.ts` — `DesignIndex` gained the same two
+optional fields; `saveDesign`/`deleteDesign` now wrap the index read-modify-write in `casLoop` (fresh re-read,
+revision bump, `_writeToken` stamp, read-back verify, retry-with-jitter). Example (`saveDesign` index write):
+
+**Before:**
+```ts
+await withResourceLock(`${dir.name}/designs-index`, async () => {
+  await safeWriteJson(dir, `${doc.reportId}.json`, doc);
+  const indexResult = await safeReadJson<DesignIndex>(dir, INDEX_FILE);
+  const existing: DesignIndex = indexResult.ok ? indexResult.value : { designs: [] };
+  const others = existing.designs.filter((d) => d.reportId !== doc.reportId);
+  const updated: DesignIndex = { designs: [...others, { … }].sort(…) };
+  await safeWriteJson(dir, INDEX_FILE, updated);
+});
+```
+
+**After:**
+```ts
+await withResourceLock(`${dir.name}/designs-index`, async () => {
+  await safeWriteJson(dir, `${doc.reportId}.json`, doc); // per-id doc — single writer
+  const outcome = await casLoop<{ ok: true }>(async (writeToken) => {
+    const indexResult = await safeReadJson<DesignIndex>(dir, INDEX_FILE);
+    const existing: DesignIndex = indexResult.ok ? indexResult.value : { designs: [] };
+    const others = existing.designs.filter((d) => d.reportId !== doc.reportId);
+    const updated: DesignIndex = {
+      revision: (existing.revision ?? 0) + 1, _writeToken: writeToken,
+      designs: [...others, { … }].sort(…),
+    };
+    await safeWriteJson(dir, INDEX_FILE, updated);
+    const verify = await safeReadJson<DesignIndex>(dir, INDEX_FILE);
+    if (verify.ok && verify.value.revision === updated.revision && verify.value._writeToken === writeToken) {
+      return { done: true, result: { ok: true as const } };
+    }
+    return { done: false };
+  }, { conflictError: "تعذّر تحديث فهرس التقارير: تعارض في الكتابة بعد عدة محاولات." });
+  if (!outcome.ok) throw new Error(outcome.error);
+});
+```
+
+**File:** `src/data/templates/templateStorage.ts` — `saveTemplate`/`deleteTemplate` index writes wrapped in
+`casLoop` the same way.
+
+**File:** `src/data/templates/templateStorage.test.ts` — the two `loadTemplateIndex` `.toEqual({...})`
+assertions became `.toMatchObject({...})` (the index now also carries `revision`/`_writeToken`), plus a
+concurrent two-author save test asserting both index entries survive and the revision advanced past both.
+
+**File:** `src/data/reportDesigner/storage/reportDesignStorage.test.ts` — added a concurrent two-author save
+test asserting both index entries survive.
+
+## v42.78 — 2026-07-12 — S3 (hardening-2026-07-08): bring closeMonth/reopenMonth into the manifest casLoop protocol
+
+Full-sweep finding S3. `closeMonth`/`reopenMonth` wrote `month.manifest.json` with a plain `safeWriteJson`
+that spread the read manifest forward — no `revision` bump, no `_writeToken` stamp — while
+`populationStorage.updateMonthStatus` writes the SAME file inside a casLoop that verifies only its own
+token/revision. A non-participating writer is invisible to casLoop's conflict detection, so a narrow TOCTOU
+window let an automated status-advance silently un-close a frozen month (see finding for the exact
+interleaving). `updateMonthStatus`'s monotonic-rank guard refuses both the "closed" state and the reopen
+downgrade, so `closeMonth`/`reopenMonth` cannot route through it — instead they now run their OWN casLoop
+using the exact same lock key (`population-manifest/${month}:rmw`) and revision/`_writeToken` shape, so all
+three writers participate in one protocol and detect each other's writes.
+
+**File:** `src/data/population/monthLock.ts`
+
+**Before (closeMonth core; reopenMonth is analogous):**
+```ts
+const monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, false);
+const now = new Date().toISOString();
+const updated: MonthManifestData = {
+  ...manifest,
+  status: "closed",
+  statusBeforeClose: manifest.status,
+  closedAt: now,
+  closedBy,
+  closeNote: note ?? null,
+};
+await safeWriteJson(monthDir, MANIFEST_FILE, updated);
+invalidateMonthLockCache(monthFolderName);
+return { ok: true };
+```
+
+**After (closeMonth core; reopenMonth is analogous):**
+```ts
+const outcome = await withResourceLock(`population-manifest/${monthFolderName}:rmw`, () =>
+  casLoop<{ ok: true } | { ok: false; error: string }>(async (writeToken) => {
+    let monthDir: DirectoryHandleLike;
+    try {
+      monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, false);
+    } catch {
+      return { done: true, result: { ok: false, error: `لا يوجد ملف بيان للشهر ${monthFolderName}.` } };
+    }
+    const manifestResult = await safeReadJson<MonthManifestData>(monthDir, MANIFEST_FILE);
+    if (!manifestResult.ok) return { done: true, result: { ok: false, error: `لا يوجد ملف بيان للشهر ${monthFolderName}.` } };
+    const manifest = manifestResult.value;
+    if (manifest.status === "closed") return { done: true, result: { ok: true as const } }; // idempotent
+    const now = new Date().toISOString();
+    const nextRevision = (manifest.revision ?? 0) + 1;
+    const updated: MonthManifestData = {
+      ...manifest, status: "closed", statusBeforeClose: manifest.status, closedAt: now, closedBy,
+      closeNote: note ?? null, revision: nextRevision, _writeToken: writeToken,
+    };
+    await safeWriteJson(monthDir, MANIFEST_FILE, updated);
+    const verify = await safeReadJson<MonthManifestData>(monthDir, MANIFEST_FILE);
+    if (verify.ok && verify.value.revision === nextRevision && verify.value._writeToken === writeToken) {
+      return { done: true, result: { ok: true as const } };
+    }
+    return { done: false };
+  }, { conflictError: "تعذّر إقفال الشهر: تعارض في الكتابة بعد عدة محاولات." })
+);
+invalidateMonthLockCache(monthFolderName);
+if (!outcome.ok) return { ok: false, error: outcome.error };
+return { ok: true };
+```
+
+The top-of-file doc comment was also updated: `closeMonth`/`reopenMonth` still bypass `updateMonthStatus`
+(whose rank guard would refuse them) but now participate in the same casLoop protocol on the manifest.
+
+**File:** `src/data/population/monthLock.test.ts` — added a concurrency test: a racing `closeMonth` and
+`updateMonthStatus(..., "distributed")` on the same month can never leave the month un-closed (the close wins
+or the advance is rejected as a stale write — never a silent un-close).
+
+## v42.77 — 2026-07-12 — S2 (hardening-2026-07-08): CAS-guard the shared feedback log
+
+Full-sweep finding S2. `5-system/feedback/messages.json` is appended to by any user on any machine, but
+`submitFeedback`/`replyToFeedback`/`saveFeedback` were read-modify-write guarded only by `withResourceLock`
+(same-tab only) — two machines submitting at once each read N messages and wrote N+1, so the last writer
+silently dropped the other's message/reply/resolve. Applied casLoop the way Batch D applied it to
+`approvalStorage.appendDecisionEvent` (its closest structural match — an RMW-append to a shared list): a
+single `mutateFeedback` helper wraps `withResourceLock` → `casLoop`, re-reading fresh state each attempt,
+bumping `revision`, stamping `_writeToken`, verifying both on read-back, retrying-with-jitter on mismatch.
+
+The persisted payload changes from a bare `FeedbackMessage[]` to `{ revision, _writeToken, messages }` so the
+list can carry the CAS token; `loadFeedback` stays backward-compatible with the legacy bare-array shape and
+still returns `FeedbackMessage[]` (unchanged public API). Switched from `readJsonFile`/`writeJsonFile` to
+`safeReadJson`/`safeWriteJson` to match the other casLoop consumers (envelope + `.bak` recovery).
+
+**File:** `src/data/feedback/feedbackStorage.ts`
+
+**Before:**
+```ts
+export async function saveFeedback(dir: DirectoryHandleLike, messages: FeedbackMessage[]): Promise<void> {
+  const feedbackDir = await getFeedbackDir(dir);
+  await writeJsonFile(feedbackDir, MESSAGES_FILE, messages);
+}
+
+export async function submitFeedback(dir, payload): Promise<void> {
+  await withResourceLock(`${dir.name}/${SYSTEM_FOLDER_NAMES.feedback}/${MESSAGES_FILE}`, async () => {
+    const messages = await loadFeedback(dir);
+    messages.unshift({ /* new message */ });
+    await saveFeedback(dir, messages);
+  });
+}
+
+export async function replyToFeedback(dir, messageId, reply, resolve): Promise<void> {
+  await withResourceLock(`${dir.name}/${SYSTEM_FOLDER_NAMES.feedback}/${MESSAGES_FILE}`, async () => {
+    const messages = await loadFeedback(dir);
+    const msg = messages.find((m) => m.id === messageId);
+    if (!msg) return;
+    msg.replies.push(reply);
+    if (resolve) msg.status = "resolved";
+    await saveFeedback(dir, messages);
+  });
+}
+```
+
+**After:**
+```ts
+type FeedbackFile = { revision?: number; _writeToken?: string; messages: FeedbackMessage[] };
+
+// withResourceLock (same-tab) → casLoop (cross-machine): re-read fresh, apply the
+// mutation, bump revision, stamp _writeToken, verify both on read-back, retry on
+// mismatch. Same RMW-append contract as approvalStorage.appendDecisionEvent.
+async function mutateFeedback(dir, mutate: (messages: FeedbackMessage[]) => FeedbackMessage[]): Promise<void> {
+  const feedbackDir = await getFeedbackDir(dir);
+  const outcome = await withResourceLock(`${feedbackDir.name}/${MESSAGES_FILE}:rmw`, () =>
+    casLoop<{ ok: true }>(async (writeToken) => {
+      const current = await loadFeedbackFile(dir);
+      const nextRevision = (current.revision ?? 0) + 1;
+      const messages = mutate([...current.messages]);
+      await safeWriteJson<FeedbackFile>(feedbackDir, MESSAGES_FILE, { revision: nextRevision, _writeToken: writeToken, messages });
+      const verify = await loadFeedbackFile(dir);
+      if (verify.revision === nextRevision && verify._writeToken === writeToken) return { done: true, result: { ok: true as const } };
+      return { done: false };
+    }, { conflictError: "تعذّر حفظ الملاحظات: تعارض في الكتابة بعد عدة محاولات." })
+  );
+  if (!outcome.ok) throw new Error(outcome.error);
+}
+
+export async function saveFeedback(dir, messages): Promise<void> { await mutateFeedback(dir, () => messages); }
+export async function submitFeedback(dir, payload): Promise<void> { await mutateFeedback(dir, (m) => { m.unshift({ /* new message */ }); return m; }); }
+export async function replyToFeedback(dir, messageId, reply, resolve): Promise<void> {
+  await mutateFeedback(dir, (m) => { const msg = m.find((x) => x.id === messageId); if (msg) { msg.replies.push(reply); if (resolve) msg.status = "resolved"; } return m; });
+}
+```
+
+**File:** `src/data/feedback/feedbackStorage.test.ts` (new) — round-trip + legacy bare-array read + a
+two-racing-submits concurrency test asserting both messages survive (no silent lost update).
+
+## v42.76 — 2026-07-12 — S1 (hardening-2026-07-08): CAS-guard users.permissions.json write (password hashes)
+
+Full-sweep finding S1 (`docs/audit/hardening-2026-07-08/full-sweep-findings.md`). `syncUserManagementToDisk`
+wrote the whole users/permissions/password-hash file as a full-state replace with no lock, no casLoop, and
+no read-back verify — so a concurrent admin's change on another machine (a password reset, a new user) could
+be silently overwritten by a second machine's stale full-state write. Brought it under the same
+`withResourceLock` + `casLoop` protocol `savePopulationConfig` uses (its closest reference, also a full-object
+replace): re-read fresh state inside the retry, bump `metadata.revision`, stamp `metadata._writeToken`, verify
+BOTH on read-back, retry-with-jitter on mismatch. Same last-writer-wins-cleanly (not field-level merge)
+contract as populationConfig — documented in a code comment, not overclaimed.
+
+**File:** `src/data/workspace/workspaceTypes.ts`
+
+Added an optional `_writeToken` to the shared envelope metadata so casLoop can stamp + verify a per-write token
+on this envelope-shaped file (same role `_writeToken` already plays in `MonthManifestData`). Optional →
+backwards-compatible with every existing writer/reader.
+
+**Before:**
+```ts
+export type JsonFileMetadata = {
+  schemaVersion: typeof WORKSPACE_SCHEMA_VERSION;
+  fileType: WorkspaceFileType;
+  revision: number;
+  createdAt: string;
+  createdBy: string;
+  updatedAt: string;
+  updatedBy: string;
+  contentHash: string;
+};
+```
+
+**After:**
+```ts
+export type JsonFileMetadata = {
+  schemaVersion: typeof WORKSPACE_SCHEMA_VERSION;
+  fileType: WorkspaceFileType;
+  revision: number;
+  createdAt: string;
+  createdBy: string;
+  updatedAt: string;
+  updatedBy: string;
+  contentHash: string;
+  /** Per-write UUID embedded by casLoop for cross-machine race detection (SEC-01 file). */
+  _writeToken?: string;
+};
+```
+
+**File:** `src/data/workspace/userSync.ts`
+
+**Before:**
+```ts
+export async function syncUserManagementToDisk(
+  directoryHandle: DirectoryHandleLike,
+  next: UserManagementState,
+  actor: string
+): Promise<void> {
+  const userDataDir = await getUserDataRoot(directoryHandle, true);
+  const existing = await readJsonFile<UsersPermissionsFile>(
+    userDataDir,
+    WORKSPACE_FILE_NAMES.usersPermissions
+  );
+  const prevMeta = existing.ok ? existing.file.metadata : null;
+  const now = new Date().toISOString();
+
+  const diskFile: UsersPermissionsFile = {
+    metadata: {
+      schemaVersion: WORKSPACE_SCHEMA_VERSION,
+      fileType: "users.permissions",
+      revision: prevMeta ? prevMeta.revision + 1 : 1,
+      createdAt: prevMeta?.createdAt ?? now,
+      createdBy: prevMeta?.createdBy ?? actor,
+      updatedAt: now,
+      updatedBy: actor,
+      contentHash: "",
+    },
+    data: { /* users/roles/permissions/featurePermissions */ },
+  };
+
+  await writeJsonFile(userDataDir, WORKSPACE_FILE_NAMES.usersPermissions, diskFile);
+}
+```
+
+**After:**
+```ts
+export async function syncUserManagementToDisk(
+  directoryHandle: DirectoryHandleLike,
+  next: UserManagementState,
+  actor: string
+): Promise<void> {
+  const userDataDir = await getUserDataRoot(directoryHandle, true);
+
+  // Shared, multi-writer, SEC-01 file (any admin on any PC edits users / roles /
+  // permissions / password hashes). The `:rmw` outer lock serializes same-tab
+  // writers; casLoop re-reads fresh state each attempt, bumps metadata.revision +
+  // stamps metadata._writeToken, and verifies BOTH on read-back so a concurrent
+  // admin's change on another machine is never silently overwritten. NOTE: this is
+  // a whole-object replace — last-writer-wins-cleanly with a detectable revision,
+  // NOT a field-level three-way merge of two admins' edits (same tradeoff
+  // savePopulationConfig documents for config.json).
+  const outcome = await withResourceLock(`users-permissions:rmw`, () =>
+    casLoop<{ ok: true }>(
+      async (writeToken) => {
+        const existing = await readJsonFile<UsersPermissionsFile>(
+          userDataDir,
+          WORKSPACE_FILE_NAMES.usersPermissions
+        );
+        const prevMeta = existing.ok ? existing.file.metadata : null;
+        const now = new Date().toISOString();
+        const nextRevision = prevMeta ? prevMeta.revision + 1 : 1;
+
+        const diskFile: UsersPermissionsFile = {
+          metadata: { /* …, revision: nextRevision, _writeToken: writeToken */ },
+          data: { /* users/roles/permissions/featurePermissions */ },
+        };
+
+        await writeJsonFile(userDataDir, WORKSPACE_FILE_NAMES.usersPermissions, diskFile);
+
+        const verify = await readJsonFile<UsersPermissionsFile>(
+          userDataDir,
+          WORKSPACE_FILE_NAMES.usersPermissions
+        );
+        if (
+          verify.ok &&
+          verify.file.metadata.revision === nextRevision &&
+          verify.file.metadata._writeToken === writeToken
+        ) {
+          return { done: true, result: { ok: true as const } };
+        }
+        return { done: false };
+      },
+      { conflictError: "تعذّر حفظ المستخدمين والصلاحيات: تعارض في الكتابة بعد عدة محاولات." }
+    )
+  );
+  // Surface CAS exhaustion so the caller (UserManagement.saveUsersToDisk) can retry;
+  // runtime state stays authoritative meanwhile.
+  if (!outcome.ok) throw new Error(outcome.error);
+}
+```
+
+**File:** `src/data/workspace/userSync.test.ts` — added a concurrent-writer test (two racing
+`syncUserManagementToDisk` calls against the same in-memory directory) asserting the second write is not lost:
+the persisted revision advances past both and the last writer's user set is intact.
+
+## v42.75 — 2026-07-12 — QA advisory 1: admit reopen-only approvers to the unified approval sub-tab
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/index.tsx`
+
+The final feature-batch QA pass (`docs/audit/feature-batch-2026-07-08/qa-review.md`, advisory 1)
+found that a role granted only `ew.reopenAnswer` (with `approve-referrals`/`approve-replacements`
+both off — a non-default admin configuration) could not reach the unified اعتماد الطلبات page at
+all, so it could never approve a pending reopen request through that page even though it is the
+correct approval authority for reopens (Batch B's design: "whoever may directly reopen answers
+may approve employee reopen requests"). Unreachable under shipped defaults (supervisor/manager
+have all three features on), but a real gap for a customized deployment.
+
+**Before:**
+```tsx
+if (!canAccessTab("ew/referral-approval") || (!can("approve-referrals") && !can("approve-replacements"))) {
+  return <AccessDenied />;
+}
+```
+
+**After:**
+```tsx
+if (
+  !canAccessTab("ew/referral-approval") ||
+  (!can("approve-referrals") && !can("approve-replacements") && !can("ew.reopenAnswer"))
+) {
+  return <AccessDenied />;
+}
+```
+
+**File:** `CLAUDE.md`
+
+QA advisory 8: the bundle-size note was stale (dated 2026-07-02, pre-dating the whole hardening +
+feature-batch pipeline) and the ChangeLog/`?raw` description no longer matched reality after the
+hardening pipeline's C5 item added build-time EDIT_LOG truncation.
+
+**Before:**
+```md
+- `vite-plugin-singlefile` inlines everything (`assetsInlineLimit` maxed, `cssCodeSplit: false`): the build output is **one portable `dist/index.html`** (~2.6 MB, ~835 kB gzip as of 2026-07-02 — size grows with features; note the ChangeLog tab inlines the full `docs/EDIT_LOG.md` via a `?raw` import, so the log's size feeds the bundle. Re-check after large additions).
+```
+
+**After:**
+```md
+- `vite-plugin-singlefile` inlines everything (`assetsInlineLimit` maxed, `cssCodeSplit: false`): the build output is **one portable `dist/index.html`** (~2.64 MB, ~968 kB gzip as of 2026-07-12 — size grows with features. The ChangeLog tab's `?raw` import of `docs/EDIT_LOG.md` is truncated to the most recent versions at build time by `src/build/editLogTruncatePlugin.ts`, so the full git history no longer inflates the bundle — only the truncated tail does. Re-check after large additions).
+```
+
+## v42.74 — 2026-07-12 — E (feature-batch): permission-default tests (defense-in-depth: only admin/manager post)
+
+Batch E item 7 (tests). Strengthens the acceptance criterion "employees/supervisors cannot post" with a
+matrix-level regression guard, mirroring the existing `reports/analytics` default tests.
+
+**File:** `src/auth/userManagement.test.ts` — add tests that `ew/notifications` is a sub-tab of
+employee-workspace, that its default access is admin/manager `edit` and guest/employee/supervisor `none`,
+and that the `post-notification` feature defaults enabled for admin/manager only (via
+`createDefaultFeaturePermissions` + `hasFeature`).
+
+## v42.73 — 2026-07-12 — E (feature-batch): document notifications file in data-system-report
+
+Batch E item 6 (docs). CLAUDE.md requires `docs/data-system-report.md` to stay the authoritative
+reference for every workspace file/path — add the new notification-center file.
+
+**File:** `docs/data-system-report.md` — add `notifications.json` (`5-system/notifications/`) to the
+system-files table and mention "notification center" in the `5-system/` root-folder description.
+
+## v42.72 — 2026-07-12 — E (feature-batch): app-shell acknowledgement banner
+
+Batch E item 5 (banner). Persistent orange banner mounted at the app shell, shown whenever the current
+user is in the must-accept audience (employee/supervisor) and has ≥1 unaccepted notification.
+
+- NEW `NotificationBanner.tsx`: reads notifications from the workspace on mount, on window focus, and on a
+  60s interval (poll/refresh per the plan's accepted no-backend model). Renders in normal document flow
+  right after the demo banner (matches the `.app-demo-banner` in-flow precedent — NOT a fixed overlay),
+  with a lucide `Pin` icon + the oldest unaccepted message + a "قبول" button. Multiple unaccepted are
+  shown oldest-first, one at a time, with a "+N more" suffix; accepting the current one advances to the
+  next. "قبول" records acceptance for THIS user only (via `acceptNotification`) — it never hides the
+  notification for anyone else. Self-hides (returns null) for non-audience roles, when the workspace is
+  absent, or once nothing is unaccepted.
+- NEW `NotificationBanner.css` (orange gradient bar + inline accept button).
+- `App.tsx`: mount `<NotificationBanner session={session} directoryHandle={directoryHandle} />` in the
+  shell fragment, immediately after the demo-mode banner.
+
+**File:** `src/components/NotificationBanner/NotificationBanner.tsx` — NEW.
+
+**File:** `src/components/NotificationBanner/NotificationBanner.css` — NEW.
+
+**File:** `src/App.tsx`
+
+**Before:**
+```tsx
+      {session.mode === "demo" && (
+        <div role="status" dir="rtl" className="app-demo-banner">
+          {labels.app_demo_banner}
+        </div>
+      )}
+      <main
+```
+
+**After:**
+```tsx
+      {session.mode === "demo" && (
+        <div role="status" dir="rtl" className="app-demo-banner">
+          {labels.app_demo_banner}
+        </div>
+      )}
+      <NotificationBanner session={session} directoryHandle={directoryHandle} />
+      <main
+```
+
+## v42.71 — 2026-07-12 — E (feature-batch): notification-manager view + EW sub-tab
+
+Batch E item 4 (admin-facing UI). New `NotificationManager` view where admin/manager post a
+notification and see, per notification, which audience users have accepted vs. are still pending.
+
+Placement decision: registered as the `ew/notifications` sub-tab under **employee-workspace**, NOT
+under Settings or User Management. Rationale: the manager view must be reachable by BOTH admin and
+manager, but Settings' `allowedRoles` is `["guest","admin"]` and User Management's is admin-only — a
+manager can reach neither. employee-workspace's `allowedRoles` already includes manager+admin, and its
+sub-tabs are gated individually by the permission matrix, so `ew/notifications` (admin/manager = access,
+others = none per v42.69) shows the view to exactly the right roles without inventing a new top-level tab.
+
+- NEW `NotificationManager.tsx`: post form (gated by `can("post-notification")`) + per-notification
+  acceptance roster. The audience roster is the active employee+supervisor managed users
+  (`getManagedLoginUsers()` filtered by `isNotificationAudienceRole`); each shows accepted (check) or
+  pending (clock). Newest notification first. All strings via the `notif_*` label keys.
+- NEW `NotificationManager.css`.
+- `EmployeeWorkspace/index.tsx`: register `SUB_TAB_NOTIFICATIONS = "notifications"` (union, KNOWN_SUB_TABS,
+  tabConfig.subTabs), and route it to `<NotificationManager>` behind `canAccessTab("ew/notifications")`.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/NotificationManager.tsx` — NEW.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/NotificationManager.css` — NEW.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/index.tsx`
+
+**Before (sub-tab id consts + KNOWN_SUB_TABS + subTabs):**
+```tsx
+const SUB_TAB_INSPECTION_FORM   = "inspection-form";
+```
+
+**After:**
+```tsx
+const SUB_TAB_INSPECTION_FORM   = "inspection-form";
+const SUB_TAB_NOTIFICATIONS     = "notifications";
+```
+(plus matching additions to the `WorkspaceSubTab` union, `KNOWN_SUB_TABS`, `tabConfig.subTabs`, and a new
+routing arm `if (activeSubTab === SUB_TAB_NOTIFICATIONS) { if (!canAccessTab("ew/notifications")) return
+<AccessDenied />; return <NotificationManager directoryHandle={directoryHandle} />; }`.)
+
+## v42.70 — 2026-07-12 — E (feature-batch): notification-center label keys
+
+Batch E item 3 (labels). Adds a `notif_*` label group to `DEFAULT_LABELS` so the banner + manager UI
+strings are admin-customizable (CLAUDE.md: prefer label keys over hard-coded Arabic). Covers the accept
+button, the "+N more" banner suffix, and the manager view's header/form/empty-state/acceptance strings.
+
+**File:** `src/data/labels/labelsStore.ts` — append `notif_accept_btn`, `notif_banner_more`,
+`notif_banner_aria`, `notif_mgr_eyebrow`, `notif_mgr_title`, `notif_mgr_subtitle`, `notif_mgr_post_label`,
+`notif_mgr_post_placeholder`, `notif_mgr_post_btn`, `notif_mgr_posting`, `notif_mgr_post_success`,
+`notif_mgr_empty_title`, `notif_mgr_empty_desc`, `notif_mgr_posted_by`, `notif_mgr_accepted_summary`,
+`notif_mgr_accepted`, `notif_mgr_pending`, `notif_mgr_audience_none` to the `DEFAULT_LABELS` object.
+
+## v42.69 — 2026-07-12 — E (feature-batch): notification permissions wiring (featureId + sub-tab)
+
+Batch E item 2 (permission matrix). Follows Batch C's exact shape for wiring a new capability into
+`userManagement.ts`.
+
+- NEW featureId `post-notification` ("نشر إشعار جديد") in the `workspace` feature group — the manager
+  UI lives under employee-workspace, so it belongs to that group's UI grouping.
+- `FEATURE_DEFAULTS["post-notification"]`: `{ guest:false, employee:false, supervisor:false, manager:true }`
+  (admin always true via `hasFeature`) — matches the spec "Post: admin + manager only".
+- `TAB_FEATURE_MAP["employee-workspace"]` gains `post-notification` so the feature-cascade check
+  (`can()` in usePermissions) requires employee-workspace page access — admin/manager have it.
+- NEW sub-tab `ew/notifications` ("مركز الإشعارات") added to `MANAGED_TABS` (parent employee-workspace)
+  and to `createDefaultPermissions()` — admin `edit`, manager `edit`, supervisor/employee/guest `none`.
+  Gated independently of the parent so only admin/manager see the manager view, even though the
+  employee-workspace parent tab is visible to all roles.
+
+**File:** `src/auth/userManagement.ts`
+
+**Before (MANAGED_TABS, employee-workspace block):**
+```ts
+  { id: "ew/inspection-form",      label: "نموذج الفحص (مساحة العمل)", parentId: "employee-workspace" },
+```
+
+**After:**
+```ts
+  { id: "ew/inspection-form",      label: "نموذج الفحص (مساحة العمل)", parentId: "employee-workspace" },
+  { id: "ew/notifications",        label: "مركز الإشعارات",           parentId: "employee-workspace" },
+```
+
+**Before (workspace feature group, after manage-inspection-template / employee-reopen-instant):**
+```ts
+      {
+        id: "employee-reopen-instant",
+        label: "إعادة فتح الحالة فوراً (بدون اعتماد)",
+        description: "...",
+      },
+    ],
+  },
+```
+
+**After:**
+```ts
+      {
+        id: "employee-reopen-instant",
+        label: "إعادة فتح الحالة فوراً (بدون اعتماد)",
+        description: "...",
+      },
+      {
+        id: "post-notification",
+        label: "نشر إشعار جديد",
+        description: "نشر إشعار لجميع الموظفين والمشرفين في مركز الإشعارات",
+      },
+    ],
+  },
+```
+
+Plus: `post-notification` added to `TAB_FEATURE_MAP["employee-workspace"]`, `FEATURE_DEFAULTS`, and five
+`ew/notifications` rows in `createDefaultPermissions()`.
+
+## v42.68 — 2026-07-12 — E (feature-batch): notification-center data module + 5-system folder
+
+Batch E item 1 (data layer). New workspace subsystem for admin/manager broadcast notifications
+that employee/supervisor users must acknowledge ("قبول").
+
+Storage location decision: `5-system/notifications/notifications.json` — a single workspace-wide,
+non-month-scoped JSON file, mirroring the audit action-log precedent (`5-system/audit/actions.log.json`).
+The `5-system/` root is where CLAUDE.md's disk-layout table places system-wide state (backups, presets,
+audit log), so notifications belong there rather than under a month folder. New `SYSTEM_FOLDER_NAMES.notifications`
+folder name added to workspacePaths.
+
+- NEW `notificationTypes.ts`: `AppNotification` (id/message/postedBy/postedAt/acceptances[]),
+  `NotificationAcceptance` (username/acceptedAt), `NotificationsFile` (revision/_writeToken/updatedAt/
+  notifications). Named `AppNotification` (not `Notification`) to avoid shadowing the DOM global. Pure
+  helpers: `isNotificationAudienceRole` (employee|supervisor), `hasAccepted`, `getUnacceptedFor` (oldest
+  first), `shouldShowBanner`.
+- NEW `notificationStorage.ts`: `loadNotifications`, `postNotification({message, postedBy})`,
+  `acceptNotification(id, username)` — all CAS-protected exactly like `audit/actionLog.ts`
+  (`withResourceLock(...:rmw)` + `casLoop` with `revision`+`_writeToken` verification via safeReadJson/
+  safeWriteJson). `acceptNotification` is idempotent per user and re-reads the latest file inside the CAS
+  loop so two users accepting the same notification near-simultaneously each preserve the other's
+  acceptance. Capped at 500 notifications (oldest dropped).
+
+**File:** `src/data/workspace/workspacePaths.ts`
+
+**Before:**
+```ts
+  userPresets: "user-presets",
+  feedback: "feedback",
+} as const;
+```
+
+**After:**
+```ts
+  userPresets: "user-presets",
+  feedback: "feedback",
+  notifications: "notifications",
+} as const;
+```
+
+**File:** `src/data/notifications/notificationTypes.ts` — NEW (types + pure audience/acceptance helpers).
+
+**File:** `src/data/notifications/notificationStorage.ts` — NEW (CAS-protected post/accept/load over `5-system/notifications/notifications.json`).
+
+**File:** `src/data/notifications/notificationStorage.test.ts` — NEW (post, per-user accept isolation, banner-visibility logic, who-accepted view, concurrent-accept survival).
+
+**File:** `src/data/workspace/workspacePaths.test.ts` — extend the `SYSTEM_FOLDER_NAMES` equality snapshot with `notifications: "notifications"`.
+
+## v42.67 — 2026-07-12 — B2 (feature-batch): unified اعتماد الطلبات page (referral + replacement + reopen)
+
+Batch B item 2. Merges referral, replacement, AND reopen requests into ONE chronological, filterable
+approval list, replacing the old referral/replacement `section` tab switch.
+
+- NEW `requestKind.ts`: `CardRequest = ReferralRequest | ReplacementRequest | ReopenRequest`, a
+  `requestKind()` discriminator and `isReferral`/`isReplacement`/`isReopen` guards (the existing
+  `isReferral` moves here from RequestCard; RequestCard/RequestList/index import from it).
+- `useApprovalData`: loads reopen requests too, adds `canApproveReopens` (gated on the existing
+  `ew.reopenAnswer` feature — no new matrix entry, it is the natural supervisor-authority-over-reopens
+  gate), exposes a merged `requests` array, a per-row `canReviewRequest()` predicate, single `approve`/
+  `deny` and a mixed-kind `bulkDecision` that dispatch by kind, plus `approveReopen`/`denyReopen`. The
+  existing per-kind functions + `referrals`/`replacements` stay for back-compat.
+- `RequestCard`: renders a per-row kind badge (إحالة / استبدال / إعادة فتح) and reopen-specific meta.
+- `RequestList`: `canReview` is now a `(request) => boolean` predicate (mixed-kind selection), bulk
+  confirm/labels handle all three kinds.
+- `index.tsx`: drops `section`/`switchSection`; one merged, status-filtered, chronological list; the
+  المراجعة/السجل view toggle and status filter now span all three kinds; the month filter keeps Batch A3's
+  short label (single-month review by design — no all-months, matching A3's landed decision).
+- `HistoryView`: includes reopen requests.
+- `actionLog`: `WorkspaceActionType` gains `reopen-approved` / `reopen-denied`.
+- CSS: `.ew-req-kind-badge` variants for the three kinds.
+
+**File:** `src/data/audit/actionLog.ts`
+
+**Before:**
+```ts
+  | "replacement-approved"
+  | "replacement-denied"
+  | "answer-reopened"
+```
+
+**After:**
+```ts
+  | "replacement-approved"
+  | "replacement-denied"
+  | "reopen-approved"
+  | "reopen-denied"
+  | "answer-reopened"
+```
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/requestKind.ts` — NEW (type + guards).
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/RequestCard.tsx` — union type incl. ReopenRequest; kind badge; reopen meta; `isReferral` re-homed to requestKind.ts.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/RequestList.tsx` — `canReview` predicate; mixed-kind bulk + describeSelected.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/useApprovalData.ts` — reopen load/visibility, merged `requests`, unified approve/deny/bulkDecision, canApproveReopens, canReviewRequest.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/index.tsx` — remove section tabs; single merged list; per-kind dialog copy.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/HistoryView.tsx` — include reopen rows.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/EmployeeWorkspace.css` — `.ew-req-kind-badge` styles.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/unifiedList.test.tsx` (new)
+
+**Before:** *(no test file existed for the unified list)*
+
+**After:** new jsdom rendering test suite: renders one kind badge per row with the correct label for
+each of the three kinds; sorts the merged list chronologically (newest first outside bulk mode);
+sorts oldest-first in bulk/pending mode; shows kind-specific meta so rows are easy to tell apart;
+renders approve/deny actions only for pending rows the current reviewer is allowed to review.
+
+## v42.66 — 2026-07-12 — B1 (feature-batch): employee "طلب إعادة فتح الحالة" button + wiring
+
+Batch B item 1 (employee UI). Adds the self-service reopen button to a submitted answer in the
+inspection panel and wires it through XrayReferrals to the `submitReopenRequest` orchestrator (v42.65).
+
+- `InspectionPanel`: new optional `onRequestReopen?(reason)` prop (distinct from the existing
+  supervisor-facing `onReopen`). The footer's reopen block now tracks WHICH action is pending via a
+  `reopenAction: "direct" | "request" | null` state and renders both buttons when both are available
+  (supervisor direct-reopen "إعادة فتح للتصحيح" vs. employee request "طلب إعادة فتح الحالة"), sharing
+  the same reason-field confirm flow. Purely additive — the existing `onReopen` path is unchanged.
+- `XrayReferrals`: reads the requesting role's `employee-reopen-instant` feature into `canReopenInstant`,
+  adds `handleRequestReopen` (calls `submitReopenRequest` with `instant: canReopenInstant`, then toasts
+  instant-applied vs. request-sent and reloads), and passes `onRequestReopen` to the detail panel only
+  for the current user's OWN sample (`selEntry.assignedTo === username`).
+
+**File:** `src/components/InspectionPanel/index.tsx`
+
+**Before:**
+```tsx
+  /** Omit when the current user cannot reopen submitted answers (Tier-1 Item D). */
+  onReopen?: (reason: string) => void;
+};
+```
+```tsx
+  const [reopenMode, setReopenMode] = useState(false);
+  const [reopenReason, setReopenReason] = useState("");
+```
+```tsx
+      {isSubmitted && onReopen && (
+        <div className="ip-footer">
+          {!reopenMode ? ( ... single "إعادة فتح للتصحيح" button ... ) : ( ... reason field, confirm calls onReopen ... )}
+        </div>
+      )}
+```
+
+**After:**
+```tsx
+  /** Omit when the current user cannot reopen submitted answers (Tier-1 Item D). */
+  onReopen?: (reason: string) => void;
+  /** Employee self-service reopen-case request (Batch B). Distinct from onReopen. */
+  onRequestReopen?: (reason: string) => void;
+};
+```
+```tsx
+  // Which reopen action's reason field is open: supervisor direct vs employee request.
+  const [reopenAction, setReopenAction] = useState<null | "direct" | "request">(null);
+  const [reopenReason, setReopenReason] = useState("");
+```
+```tsx
+      {isSubmitted && (onReopen || onRequestReopen) && (
+        <div className="ip-footer">
+          {reopenAction === null ? (
+            <div className="ip-footer-actions">
+              {onReopen && <button ... onClick={() => setReopenAction("direct")}>{ip_reopen_btn}</button>}
+              {onRequestReopen && <button ... onClick={() => setReopenAction("request")}>{ew_reopen_request_btn}</button>}
+            </div>
+          ) : ( ... shared reason field; confirm dispatches to onReopen or onRequestReopen ... )}
+        </div>
+      )}
+```
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx`
+
+**Before:** (import block, feature checks, and SampleDetailPanel wiring — see file; adds
+`submitReopenRequest` import, `canReopenInstant`, `handleRequestReopen`, `onRequestReopen` prop,
+and the `SampleDetailPanel` passthrough of `onRequestReopen`.)
+
+## v42.65 — 2026-07-12 — B1 (feature-batch): reopen-request data model, fold arm, storage + orchestrator
+
+Batch B item 1 (data layer only — UI in v42.66). New employee self-service "reopen case" request
+flow modeled on the existing referral/replacement request pattern (now CAS-safe per Batch D). This
+is a NEW, separate path from the existing `ew.reopenAnswer` (supervisor/manager/admin direct reopen),
+which is untouched. Pieces:
+
+1. `ReopenRequest`/`ReopenLog` types (mirroring `ReplacementRequest`), stored inside each employee's
+   `EmployeeAnswerFile.reopenRequests` (sole owner, no shared-file conflicts).
+2. New distribution event type `reopen-requested` (the pending precursor) + `buildReopenRequestedEvent`
+   + a fold arm in `deriveCurrentDistribution()`. The terminal `reopened` event (applied state) already
+   existed. The `reopen-requested` fold arm is a non-mutating marker: it keeps the row in its prior
+   status (a submitted/`completed` row stays completed) — only the terminal `reopened` returns it to
+   pending. Preserves the totals invariant (no new `DistributionStatus`).
+3. `DecisionEventKind` extended with `"reopen"`; `mergeDecisionHistory` guarded so `"reopen"` reads only
+   `decisionEvents` (no legacy per-kind array exists for it).
+4. Storage: `appendReopenToEmployee` (answerStorage) + `appendReopenRequest`/`loadReopenLog`/
+   `updateReopenStatus` (referralStorage), same shape as the referral/replacement helpers.
+5. Approval domain: `approveReopen`/`denyReopen` in `approveReferral.ts` — approve reuses the existing
+   idempotent `reopenSubmittedAnswer` path, deny just records the decision.
+6. Orchestrator `submitReopenRequest` (`referral/requestReopen.ts`): branches on the caller-supplied
+   `instant` flag (from the Batch-C `employee-reopen-instant` feature) — instant applies the reopen
+   immediately (reuses `reopenSubmittedAnswer`), otherwise creates a pending `ReopenRequest` (CAS-safe)
+   and emits a best-effort `reopen-requested` audit event.
+7. Labels for the employee request button/confirm and result toasts.
+
+**File:** `src/data/referral/referralTypes.ts`
+
+**Before:**
+```ts
+export type ReplacementLog = {
+  monthFolderName: string;
+  revision: number;
+  /** Per-write UUID embedded by casLoop for cross-machine race detection. */
+  _writeToken?: string;
+  requests: ReplacementRequest[];
+};
+```
+
+**After:**
+```ts
+export type ReplacementLog = {
+  monthFolderName: string;
+  revision: number;
+  /** Per-write UUID embedded by casLoop for cross-machine race detection. */
+  _writeToken?: string;
+  requests: ReplacementRequest[];
+};
+
+/** A pending request from an employee to reopen their own submitted answer for
+ *  correction. Created when the employee's role is NOT granted instant reopen
+ *  (`employee-reopen-instant`); requires supervisor approval before the answer is
+ *  returned to draft. Mirrors ReplacementRequest's shape. */
+export type ReopenRequest = {
+  requestId: string;
+  monthFolderName: string;
+  /** The employee whose submitted answer is to be reopened (== requestedBy for self-service). */
+  employeeUsername: string;
+  /** The specific case/answer being reopened. */
+  xrayImageId: string;
+  reason: string;
+  requestedAt: string;
+  requestedBy: string;
+  status: ReferralStatus;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  reviewNotes?: string;
+  /** Full append-only decision history, newest last. Populated by loadReopenLog. */
+  history?: DecisionEvent[];
+};
+
+export type ReopenLog = {
+  monthFolderName: string;
+  revision: number;
+  /** Per-write UUID embedded by casLoop for cross-machine race detection. */
+  _writeToken?: string;
+  requests: ReopenRequest[];
+};
+```
+
+**File:** `src/data/answers/answerTypes.ts`
+
+**Before:**
+```ts
+  /** Replacement requests submitted by this employee — sole owner, no shared-file conflicts. */
+  replacementRequests?: ReplacementRequest[];
+  lastUpdatedAt?: string;
+```
+
+**After:**
+```ts
+  /** Replacement requests submitted by this employee — sole owner, no shared-file conflicts. */
+  replacementRequests?: ReplacementRequest[];
+  /** Reopen-case requests submitted by this employee — sole owner, no shared-file conflicts. */
+  reopenRequests?: ReopenRequest[];
+  lastUpdatedAt?: string;
+```
+
+**File:** `src/data/approvals/approvalTypes.ts`
+
+**Before:**
+```ts
+export type DecisionEventKind = "referral" | "replacement";
+```
+
+**After:**
+```ts
+export type DecisionEventKind = "referral" | "replacement" | "reopen";
+```
+
+**File:** `src/data/approvals/approvalStorage.ts` (mergeDecisionHistory legacy guard)
+
+**Before:**
+```ts
+    const legacy = kind === "referral" ? file.referralDecisions : file.replacementDecisions;
+```
+
+**After:**
+```ts
+    // "reopen" is a newer kind with no legacy per-kind array — only decisionEvents.
+    const legacy =
+      kind === "referral" ? file.referralDecisions : kind === "replacement" ? file.replacementDecisions : [];
+```
+
+**File:** `src/data/distribution/distributionTypes.ts`
+
+**Before:**
+```ts
+export type DistributionEventType =
+  | "assigned"
+  | "completed"
+  | "replacement-requested"
+  | "replaced"
+  | "reassigned"
+  | "reopened";
+```
+
+**After:**
+```ts
+export type DistributionEventType =
+  | "assigned"
+  | "completed"
+  | "replacement-requested"
+  | "replaced"
+  | "reassigned"
+  | "reopen-requested"
+  | "reopened";
+```
+
+**File:** `src/data/distribution/distributionLog.ts` (add builder + fold arm)
+
+**Before:**
+```ts
+export function buildCompletedEvent(params: {
+```
+
+**After:**
+```ts
+export function buildReopenRequestedEvent(params: {
+  xrayImageId: string;
+  assignedTo: string;
+  eventBy: string;
+  notes?: string;
+  sourceRequestId?: string;
+}): DistributionEvent {
+  return {
+    eventId: createEventId(),
+    eventType: "reopen-requested",
+    xrayImageId: params.xrayImageId,
+    assignedTo: params.assignedTo,
+    eventAt: new Date().toISOString(),
+    eventBy: params.eventBy,
+    notes: params.notes,
+    sourceRequestId: params.sourceRequestId
+  };
+}
+
+export function buildCompletedEvent(params: {
+```
+
+Fold arm (added in the switch, before `case "reopened"`):
+```ts
+      case "reopen-requested":
+        // Pending self-service reopen request (approval-gated). A non-mutating
+        // marker: the row keeps its prior status (a submitted/completed row stays
+        // completed) — only the terminal "reopened" event returns it to pending.
+        status = existing?.status ?? "pending";
+        assignedTo = existing?.assignedTo ?? evt.assignedTo;
+        replacedById = existing?.replacedById ?? null;
+        break;
+```
+
+**File:** `src/data/answers/answerStorage.ts` — new `appendReopenToEmployee` (mirrors appendReplacementToEmployee).
+
+**File:** `src/data/referral/referralStorage.ts` — new `appendReopenRequest` / `loadReopenLog` / `updateReopenStatus` (mirror the referral/replacement helpers; join with `mergeDecisionHistory(..., "reopen", ...)`).
+
+**File:** `src/data/referral/approveReferral.ts` — new `approveReopen` / `denyReopen` (approve reuses `reopenSubmittedAnswer`; deny records the decision).
+
+**File:** `src/data/referral/requestReopen.ts` — NEW. `submitReopenRequest({..., instant})`: instant → `reopenSubmittedAnswer`; otherwise → `appendReopenRequest` + best-effort `reopen-requested` event.
+
+**File:** `src/data/labels/labelsStore.ts` — new keys `ew_reopen_request_btn`, `ew_reopen_request_confirm`, `msg_reopen_request_sent`.
+
+**File:** `src/data/referral/requestReopen.test.ts` (new)
+
+**Before:** *(no test file existed for this module)*
+
+**After:** new test suite for `submitReopenRequest`/`approveReopen`/`denyReopen`: instant mode flips
+the submitted answer to draft with no request created; approval-required mode creates a pending
+request, leaves the answer submitted, and logs a `reopen-requested` event; approve flips the answer
+to draft and records an approved decision; deny leaves the answer submitted and records a denied
+decision; and re-approving an already-reviewed request is rejected (idempotency).
+
+## v42.64 — 2026-07-12 — C4 (feature-batch): scaffold employee-reopen-instant per-role setting
+
+Batch C item 4. Added a new per-role feature toggle `employee-reopen-instant` (group
+"workspace"/إدارة مساحة العمل, mapped to the `employee-workspace` tab) as the schema + admin-UI
+scaffold for the reopen-case mode that Batch B will consume. Semantics: **enabled** for a role →
+that role's self-service "طلب إعادة فتح الحالة" is applied instantly; **disabled** → the request is
+routed to a supervisor for approval. Default **disabled** for all managed roles (requires approval —
+the conservative default mirroring the referral/replacement approval pattern); admin is always-on
+via `hasFeature`. This is ONLY the scaffold — it appears as a toggle in Feature Permissions and has
+a default value, but no code reads it yet; Batch B wires the actual reopen-request behavior to it.
+This is distinct from the existing `ew.reopenAnswer` (supervisor/manager/admin directly reopening
+ANY submitted answer), which is untouched.
+
+**File:** `src/auth/userManagement.ts`
+
+**Before:** (workspace group tail + TAB_FEATURE_MAP employee-workspace + FEATURE_DEFAULTS)
+```ts
+      {
+        id: "manage-inspection-template",
+        label: "إدارة نموذج الفحص",
+        description: "إنشاء وتعديل قوالب نموذج الفحص في مساحة العمل",
+      },
+    ],
+  },
+  {
+    groupId: "population",
+```
+```ts
+  "employee-workspace": [..., "ew.reopenAnswer", "manage-inspection-template"],
+```
+```ts
+  "manage-inspection-template": { guest: false, employee: false, supervisor: false, manager: true },
+```
+
+**After:**
+```ts
+      {
+        id: "manage-inspection-template",
+        label: "إدارة نموذج الفحص",
+        description: "إنشاء وتعديل قوالب نموذج الفحص في مساحة العمل",
+      },
+      {
+        id: "employee-reopen-instant",
+        label: "إعادة فتح الحالة فوراً (بدون اعتماد)",
+        description: "عند التفعيل يُطبَّق طلب الموظف لإعادة فتح الحالة فوراً؛ وعند التعطيل يُحوَّل الطلب للمشرف للاعتماد",
+      },
+    ],
+  },
+  {
+    groupId: "population",
+```
+```ts
+  "employee-workspace": [..., "ew.reopenAnswer", "manage-inspection-template", "employee-reopen-instant"],
+```
+```ts
+  "manage-inspection-template": { guest: false, employee: false, supervisor: false, manager: true },
+  "employee-reopen-instant": { guest: false, employee: false, supervisor: false, manager: false },
+```
+
+## v42.63 — 2026-07-12 — C3.5 (feature-batch): gate shared referral browse-preset push on configure-referral-columns
+
+Batch C item 3, gap 5. In `XrayReferrals.tsx` the push of the shared admin browse-preset was
+hardcoded to `role === "admin"`. Replaced with the existing `configure-referral-columns` feature
+check (`canConfigureColumns`, already computed at the top of the component from the feature matrix)
+— no duplicate feature created. Behavior change (intended per plan): any role the admin enables
+`configure-referral-columns` for (supervisor + manager by default) can now push the shared preset,
+not just admin. The DataTable's column-config UI was already gated on `canConfigureColumns`, so
+this aligns "can edit columns" with "can publish the shared preset".
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx`
+
+**Before:**
+```tsx
+                if (role === "admin") {
+                  void saveAdminBrowseDatasetPreset(directoryHandle, REFERRALS_PRESET_KEY, preset);
+                }
+```
+
+**After:**
+```tsx
+                if (canConfigureColumns) {
+                  void saveAdminBrowseDatasetPreset(directoryHandle, REFERRALS_PRESET_KEY, preset);
+                }
+```
+
+## v42.62 — 2026-07-12 — C3.4 (feature-batch): gate ErrorLogSection on new view-error-log feature
+
+Batch C item 3, gap 4. `Settings/ErrorLogSection.tsx` hid the error log with a hardcoded
+`role !== "admin"`. Added a new featureId `view-error-log` (group "admin"/الإدارة والتقارير,
+mapped to the `settings` tab), default admin-only (matches current behavior), and switched the
+guard to `usePermissions().can("view-error-log")`.
+
+**File:** `src/auth/userManagement.ts`
+
+**Before:** (admin feature group tail + TAB_FEATURE_MAP settings + FEATURE_DEFAULTS)
+```ts
+      {
+        id: "archive.closeMonth",
+        label: "إقفال الأشهر وإعادة فتحها",
+        description: "إقفال شهر لمنع أي تعديل على بياناته أو إعادة فتحه للتعديل",
+      },
+    ],
+  },
+] as const;
+```
+```ts
+  "settings":           [],
+```
+```ts
+  "archive.closeMonth":   { guest: false, employee: false, supervisor: false, manager: false },
+};
+```
+
+**After:**
+```ts
+      {
+        id: "archive.closeMonth",
+        label: "إقفال الأشهر وإعادة فتحها",
+        description: "إقفال شهر لمنع أي تعديل على بياناته أو إعادة فتحه للتعديل",
+      },
+      {
+        id: "view-error-log",
+        label: "عرض سجل الأخطاء",
+        description: "إظهار سجل الأخطاء الأخيرة داخل صفحة الإعدادات",
+      },
+    ],
+  },
+] as const;
+```
+```ts
+  "settings":           ["view-error-log"],
+```
+```ts
+  "archive.closeMonth":   { guest: false, employee: false, supervisor: false, manager: false },
+  "view-error-log":       { guest: false, employee: false, supervisor: false, manager: false },
+};
+```
+
+**File:** `src/components/Sidebar/Tabs/Settings/ErrorLogSection.tsx`
+
+**Before:**
+```tsx
+  const { role } = usePermissions();
+  const [isOpen, setIsOpen] = useState(false);
+  const [errors, setErrors] = useState<ErrorEntry[]>(() => getRecentErrors());
+
+  if (role !== "admin") return null;
+```
+
+**After:**
+```tsx
+  const { can } = usePermissions();
+  const [isOpen, setIsOpen] = useState(false);
+  const [errors, setErrors] = useState<ErrorEntry[]>(() => getRecentErrors());
+
+  if (!can("view-error-log")) return null;
+```
+
+## v42.61 — 2026-07-12 — C3.3 (feature-batch): gate TemplateBuilder on new manage-inspection-template feature
+
+Batch C item 3, gap 3. `TemplateBuilder/index.tsx` blocked the page with a hardcoded
+`role !== "manager" && role !== "admin"`. Added a new featureId `manage-inspection-template`
+(group "workspace"/إدارة مساحة العمل, mapped to the `employee-workspace` tab), default
+manager+admin only (matches current behavior), and replaced the hardcode with a `hasFeature` check.
+
+**File:** `src/auth/userManagement.ts`
+
+**Before:** (workspace group tail + TAB_FEATURE_MAP employee-workspace + FEATURE_DEFAULTS)
+```ts
+      {
+        id: "ew.reopenAnswer",
+        label: "إعادة فتح الإجابات المقدمة",
+        description: "إرجاع إجابة مقدمة إلى مسودة ليتمكن الموظف من تصحيحها",
+      },
+    ],
+  },
+  {
+    groupId: "population",
+```
+```ts
+  "employee-workspace": ["approve-referrals", "approve-replacements", "view-all-entries", "view-employee-stats", "submit-referrals", "request-replacement", "submit-answers", "configure-referral-columns", "ew.reopenAnswer"],
+```
+```ts
+  "ew.reopenAnswer":      { guest: false, employee: false, supervisor: true,  manager: true  },
+```
+
+**After:**
+```ts
+      {
+        id: "ew.reopenAnswer",
+        label: "إعادة فتح الإجابات المقدمة",
+        description: "إرجاع إجابة مقدمة إلى مسودة ليتمكن الموظف من تصحيحها",
+      },
+      {
+        id: "manage-inspection-template",
+        label: "إدارة نموذج الفحص",
+        description: "إنشاء وتعديل قوالب نموذج الفحص في مساحة العمل",
+      },
+    ],
+  },
+  {
+    groupId: "population",
+```
+```ts
+  "employee-workspace": ["approve-referrals", "approve-replacements", "view-all-entries", "view-employee-stats", "submit-referrals", "request-replacement", "submit-answers", "configure-referral-columns", "ew.reopenAnswer", "manage-inspection-template"],
+```
+```ts
+  "ew.reopenAnswer":      { guest: false, employee: false, supervisor: true,  manager: true  },
+  "manage-inspection-template": { guest: false, employee: false, supervisor: false, manager: true },
+```
+
+**File:** `src/components/Sidebar/Tabs/TemplateBuilder/index.tsx`
+
+**Before:**
+```tsx
+import { readSession } from "../../../../auth/authSession";
+```
+```tsx
+  if (role !== "manager" && role !== "admin") {
+    return (
+      <section className="tb-page" dir="rtl">
+        <div className="tb-empty">إدارة نموذج الفحص متاحة للمدير والإدارة فقط.</div>
+      </section>
+    );
+  }
+```
+
+**After:**
+```tsx
+import { readSession } from "../../../../auth/authSession";
+import { hasFeature, readUserManagementState } from "../../../../auth/userManagement";
+```
+```tsx
+  const canManageTemplates = hasFeature(
+    readUserManagementState().featurePermissions,
+    role,
+    "manage-inspection-template"
+  );
+  if (!canManageTemplates) {
+    return (
+      <section className="tb-page" dir="rtl">
+        <div className="tb-empty">إدارة نموذج الفحص متاحة حسب الصلاحية الممنوحة فقط.</div>
+      </section>
+    );
+  }
+```
+
+## v42.60 — 2026-07-12 — C3.2 (feature-batch): fix non-functional archive.closeMonth toggle (remove isAdmin hardcode)
+
+Batch C item 3, gap 2. `Archive/index.tsx` computed `canCloseMonth` as
+`isAdmin && hasFeature(..., "archive.closeMonth")` — the leading `isAdmin &&` made the existing
+`archive.closeMonth` feature toggle non-functional for every non-admin role (the admin could never
+grant it). Removed the hardcode; the feature toggle alone now decides. Behavior change (intended
+per plan): any role the admin enables `archive.closeMonth` for can close/reopen a month. Default
+stays admin-only, so no change out of the box.
+
+**File:** `src/components/Sidebar/Tabs/Archive/index.tsx`
+
+**Before:**
+```tsx
+  // Month close-out is admin-only, additionally gated by the archive.closeMonth feature.
+  const role = session?.role ?? "guest";
+  const canCloseMonth = useMemo(
+    () => isAdmin && hasFeature(readUserManagementState().featurePermissions, role, "archive.closeMonth"),
+    [isAdmin, role]
+  );
+```
+
+**After:**
+```tsx
+  // Month close-out is gated solely by the archive.closeMonth feature toggle (admin-only by
+  // default; admins can extend it to other roles from the feature-permission matrix).
+  const role = session?.role ?? "guest";
+  const canCloseMonth = useMemo(
+    () => hasFeature(readUserManagementState().featurePermissions, role, "archive.closeMonth"),
+    [role]
+  );
+```
+
+## v42.59 — 2026-07-12 — C3.1 (feature-batch): gate sampling-stage unlock on new unlock-sampling-stage feature
+
+Batch C item 3, gap 1. `PhaseThreeSampling.tsx` computed `canUnlock = userRole === "admin"`.
+Added a new featureId `unlock-sampling-stage` (group "population"/معالجة المجتمع, mapped to the
+`population` tab), default admin-only (matches current behavior — all managed roles disabled, admin
+always-on via `hasFeature`), and replaced the hardcode with a `hasFeature` check on the passed
+`userRole`. Unlock alert/title strings reworded from "Admin-only" to permission-generic.
+
+**File:** `src/auth/userManagement.ts`
+
+**Before:** (population group tail + TAB_FEATURE_MAP population + FEATURE_DEFAULTS)
+```ts
+      {
+        id: "view-browse",
+        label: "تصفح بيانات المجتمع",
+        description: "استعراض جدول بيانات المجتمع والإحصائيات",
+      },
+    ],
+  },
+```
+```ts
+  "population":         ["upload-data", "process-population", "configure-sample", "draw-sample", "distribute-samples", "bulk-assign", "view-browse"],
+```
+```ts
+  "view-browse":          { guest: true,  employee: true,  supervisor: true,  manager: true  },
+```
+
+**After:**
+```ts
+      {
+        id: "view-browse",
+        label: "تصفح بيانات المجتمع",
+        description: "استعراض جدول بيانات المجتمع والإحصائيات",
+      },
+      {
+        id: "unlock-sampling-stage",
+        label: "إلغاء قفل مراحل العينة",
+        description: "فتح المراحل المقفلة (تلقائياً أو يدوياً) في إعداد سحب العينة",
+      },
+    ],
+  },
+```
+```ts
+  "population":         ["upload-data", "process-population", "configure-sample", "draw-sample", "distribute-samples", "bulk-assign", "view-browse", "unlock-sampling-stage"],
+```
+```ts
+  "view-browse":          { guest: true,  employee: true,  supervisor: true,  manager: true  },
+  "unlock-sampling-stage": { guest: false, employee: false, supervisor: false, manager: false },
+```
+
+**File:** `src/components/Sidebar/Tabs/Population/components/PhaseThreeSampling.tsx`
+
+**Before:**
+```tsx
+import { AlertTriangle, Lock, Unlock } from "lucide-react";
+```
+```tsx
+            const canUnlock = userRole === "admin";
+```
+
+**After:**
+```tsx
+import { AlertTriangle, Lock, Unlock } from "lucide-react";
+import { hasFeature, readUserManagementState } from "../../../../../auth/userManagement";
+import type { AuthRole } from "../../../../../auth/authTypes";
+```
+```tsx
+            const canUnlock = hasFeature(
+              readUserManagementState().featurePermissions,
+              userRole as AuthRole,
+              "unlock-sampling-stage"
+            );
+```
+
+## v42.58 — 2026-07-12 — C2 (feature-batch): verify shipped defaults == Test6 export (no-op, documentation)
+
+Batch C item 2. Re-read the user's real workspace export
+`C:\Users\WorkNStudy\Downloads\Test6\3-user-data\users.permissions.json` fresh and compared its
+`data.permissions` (69 rows, 17 tabIds) and `data.featurePermissions` (110 rows, 22 featureIds)
+against the values produced by `createDefaultPermissions()` and `createDefaultFeaturePermissions()`
+(`src/auth/userManagement.ts`, the latter derived from `FEATURE_DEFAULTS`). A programmatic
+row-by-row comparison (temp Vitest, since removed) found **zero diffs**: every `role+tabId` access
+and every `role+featureId` enabled flag in the Test6 file already matches the shipped default
+exactly. No tabId or featureId in Test6 was renamed/missing relative to this codebase, so **no
+mapping was required and no code change was needed** — the Test6 export was itself produced from a
+workspace seeded with these very defaults (identical users/roles too). The only rows now present in
+`createDefaultPermissions()` but absent from Test6 are the 20 sub-tab rows added in C1
+(`population/process`, `population/browse`, `reports/reports`, `reports/kpi`); per the C2 rule
+("leave existing defaults for anything not in Test6") those stay as-is. This entry records the
+verification; there is no accompanying source diff.
+
+## v42.57 — 2026-07-12 — C1 (feature-batch): bake موروث sub-tab access into explicit rows, remove inheritance fallback
+
+Batch C item 1. The 4 sub-tabs `population/process`, `population/browse`, `reports/reports`,
+`reports/kpi` previously had NO explicit rows in `createDefaultPermissions()` and resolved their
+access by falling back to the parent tab's row (via `MANAGED_TABS` `parentId`) in both
+`getRolePermission()` (`userManagement.ts`) and the UI-local `getTabAccess()`
+(`UserManagement/index.tsx`). Removed that parent-fallback entirely from both functions and added
+the current *effective* (inherited) value as an explicit per-role row for each of the 4 sub-tabs,
+so every role×tab pair now resolves via an explicit row or a simple `"none"` default — never a
+parent lookup. Zero functional access change (guarded by a new 20-assertion regression test in
+`userManagement.test.ts`). Also removed the "موروث" badge + `.um-inherit-badge` CSS and the
+"sub-tabs inherit their parent" matrix description sentence. `parentId` itself stays on
+`MANAGED_TABS` — it is still used purely for the parent/child *tree layout* of the page-permission
+matrix, not for access resolution.
+
+Derived pre-change effective values (parent `population` = view/view/view/edit/edit; parent
+`reports` = none/none/view/edit/edit for guest/employee/supervisor/manager/admin):
+- `population/process` + `population/browse`: guest view, employee view, supervisor view, manager edit, admin edit
+- `reports/reports` + `reports/kpi`: guest none, employee none, supervisor view, manager edit, admin edit
+
+**File:** `src/auth/userManagement.ts`
+
+**Before:**
+```ts
+    { role: "admin",      tabId: "change-log",              access: "edit" },
+  ];
+}
+```
+```ts
+  const explicit = permissions.find((p) => p.role === role && p.tabId === tabId);
+  if (explicit) return explicit.access;
+
+  // Inherit from parent tab when no explicit entry exists
+  const tab = MANAGED_TABS.find((t) => t.id === tabId);
+  if (tab?.parentId) {
+    return permissions.find((p) => p.role === role && p.tabId === tab.parentId)?.access ?? "none";
+  }
+
+  return "none";
+}
+```
+
+**After:**
+```ts
+    { role: "admin",      tabId: "change-log",              access: "edit" },
+    // Sub-tabs that formerly relied on parent-tab inheritance (موروث) — now explicit.
+    // Values baked from the pre-removal effective access (parent population / reports rows).
+    { role: "guest",      tabId: "population/process",       access: "view" },
+    { role: "employee",   tabId: "population/process",       access: "view" },
+    { role: "supervisor", tabId: "population/process",       access: "view" },
+    { role: "manager",    tabId: "population/process",       access: "edit" },
+    { role: "admin",      tabId: "population/process",       access: "edit" },
+    { role: "guest",      tabId: "population/browse",        access: "view" },
+    { role: "employee",   tabId: "population/browse",        access: "view" },
+    { role: "supervisor", tabId: "population/browse",        access: "view" },
+    { role: "manager",    tabId: "population/browse",        access: "edit" },
+    { role: "admin",      tabId: "population/browse",        access: "edit" },
+    { role: "guest",      tabId: "reports/reports",          access: "none" },
+    { role: "employee",   tabId: "reports/reports",          access: "none" },
+    { role: "supervisor", tabId: "reports/reports",          access: "view" },
+    { role: "manager",    tabId: "reports/reports",          access: "edit" },
+    { role: "admin",      tabId: "reports/reports",          access: "edit" },
+    { role: "guest",      tabId: "reports/kpi",              access: "none" },
+    { role: "employee",   tabId: "reports/kpi",              access: "none" },
+    { role: "supervisor", tabId: "reports/kpi",              access: "view" },
+    { role: "manager",    tabId: "reports/kpi",              access: "edit" },
+    { role: "admin",      tabId: "reports/kpi",              access: "edit" },
+  ];
+}
+```
+```ts
+  const explicit = permissions.find((p) => p.role === role && p.tabId === tabId);
+  return explicit ? explicit.access : "none";
+}
+```
+
+**File:** `src/components/Sidebar/Tabs/UserManagement/index.tsx`
+
+**Before:**
+```tsx
+  function getTabAccess(role: AuthRole, tabId: string): PermissionLevel {
+    if (role === "admin") return "edit";
+    const explicit = state.permissions.find((p) => p.role === role && p.tabId === tabId);
+    if (explicit) return explicit.access;
+    // Sub-tab inherits from parent when no explicit rule is set
+    const tab = MANAGED_TABS.find((t) => t.id === tabId);
+    if (tab?.parentId) {
+      return state.permissions.find((p) => p.role === role && p.tabId === tab.parentId)?.access ?? "none";
+    }
+    return "none";
+  }
+```
+```tsx
+  function renderPermCell(role: { id: AuthRole; label: string }, tabId: string, locked: boolean, inheritedFrom?: string) {
+    const isAdminRole = role.id === "admin";
+    const current = getTabAccess(role.id, tabId);
+    // Admin always has edit everywhere — no "inherited" badge, always locked
+    const hasExplicit = isAdminRole || state.permissions.some((p) => p.role === role.id && p.tabId === tabId);
+    const isInherited = !hasExplicit && Boolean(inheritedFrom);
+    const isLocked = locked || isAdminRole || !canEditPermissions;
+    return (
+      <div className="um-matrix-cell">
+        {isInherited && (
+          <div className="um-inherit-badge" title={`موروث من ${inheritedFrom}`}>موروث</div>
+        )}
+        <div className="um-seg-group">
+```
+
+**After:**
+```tsx
+  function getTabAccess(role: AuthRole, tabId: string): PermissionLevel {
+    if (role === "admin") return "edit";
+    const explicit = state.permissions.find((p) => p.role === role && p.tabId === tabId);
+    return explicit ? explicit.access : "none";
+  }
+```
+```tsx
+  function renderPermCell(role: { id: AuthRole; label: string }, tabId: string, locked: boolean) {
+    const isAdminRole = role.id === "admin";
+    const current = getTabAccess(role.id, tabId);
+    const isLocked = locked || isAdminRole || !canEditPermissions;
+    return (
+      <div className="um-matrix-cell">
+        <div className="um-seg-group">
+```
+
+The sub-tab caller `renderPermCell(role, sub.id, false, tab.label)` drops its 4th arg →
+`renderPermCell(role, sub.id, false)`; the matrix description sentence "التبويبات الفرعية ترث
+صلاحية أبيها ما لم تُحدَّد بشكل صريح." is removed.
+
+**File:** `src/components/Sidebar/Tabs/UserManagement/UserManagement.css`
+
+**Before:**
+```css
+.um-inherit-badge {
+  font-size: 10px;
+  color: #64748b;
+  background: var(--c-surface-2, #F6F8FA);
+  border-radius: 4px;
+  padding: 1px 5px /* no-scale */;
+  margin-bottom: var(--sp-1);
+  display: inline-block;
+}
+```
+
+**After:**
+```css
+/* (.um-inherit-badge removed — sub-tab inheritance/موروث retired in C1) */
+```
+
+**File:** `src/auth/userManagement.test.ts`
+
+**After:** (new regression test — 20 assertions)
+```ts
+test("C1 regression: 4 formerly-inherited sub-tabs keep their effective access for all roles", () => {
+  const perms = createDefaultPermissions();
+  const EXPECTED: Record<string, Record<AuthRole, PermissionLevel>> = {
+    "population/process": { guest: "view", employee: "view", supervisor: "view", manager: "edit", admin: "edit" },
+    "population/browse":  { guest: "view", employee: "view", supervisor: "view", manager: "edit", admin: "edit" },
+    "reports/reports":    { guest: "none", employee: "none", supervisor: "view", manager: "edit", admin: "edit" },
+    "reports/kpi":        { guest: "none", employee: "none", supervisor: "view", manager: "edit", admin: "edit" },
+  };
+  for (const [tabId, roleMap] of Object.entries(EXPECTED)) {
+    for (const role of ALL_ROLES) {
+      expect(getRolePermission(perms, role, tabId), `${role}:${tabId}`).toBe(roleMap[role]);
+    }
+  }
+});
+```
+
+## v42.56 — 2026-07-12 — D (feature-batch): CAS-protect savePopulationConfig (population config)
+
+Batch D. `config.json` (system/custom fields, mapping templates, sampling rules, employee
+allocations) is a shared, multi-writer file — any admin on any PC can edit it. Routed
+`savePopulationConfig` through `withResourceLock` + `casLoop` with a monotonic `revision` +
+`_writeToken` stamped into the persisted JSON and verified on read-back. `loadPopulationConfig`
+rebuilds the config from its known fields only, so the two bookkeeping keys are ignored by readers
+and never leak into the returned `PopulationConfig` — hence no `PopulationConfig` type change is
+needed. **Scope note:** `config.json` is a whole-object replace (the caller hands over a complete
+config built from UI state), so CAS here guarantees an atomic, verified, revision-stamped write with
+concurrent-write detection/retry (never a torn file, deterministic last-writer-wins) — it does NOT
+field-merge two admins' simultaneous edits. True field-level merge would require surfacing an
+optimistic-concurrency conflict to the user (reload-and-merge UX), which is out of Batch D's scope.
+Return type is unchanged (`{ ok: true } | { ok: false; error }`), so all callers are untouched.
+
+**File:** `src/data/population/populationConfig.ts`
+
+**Before:**
+```ts
+import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { getPopulationRoot } from "../workspace/workspacePaths";
+```
+```ts
+export async function savePopulationConfig(
+  directoryHandle: DirectoryHandleLike,
+  config: PopulationConfig
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const populationDir = await getPopulationRoot(directoryHandle, true);
+    await safeWriteJson(populationDir, CONFIG_FILE, config);
+    return { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Unknown error while saving config"
+    };
+  }
+}
+```
+
+**After:**
+```ts
+import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { casLoop } from "../storage/casLoop";
+import { withResourceLock } from "../storage/webLocks";
+import { getPopulationRoot } from "../workspace/workspacePaths";
+```
+```ts
+export async function savePopulationConfig(
+  directoryHandle: DirectoryHandleLike,
+  config: PopulationConfig
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  // Shared, multi-writer file (any admin on any PC edits the population config).
+  // The `:rmw` outer lock serializes same-tab saves; casLoop stamps a monotonic
+  // revision + _writeToken and verifies them on read-back, so a save is never
+  // silently interleaved with a concurrent write from another machine. NOTE:
+  // config.json is a whole-object replace, so field-level merge is out of scope —
+  // CAS here guarantees an atomic, verified, last-writer-wins-cleanly write with a
+  // detectable revision, not a three-way merge of two admins' edits.
+  return withResourceLock(`population-config:rmw`, () =>
+    casLoop<{ ok: true }>(
+      async (writeToken) => {
+        const populationDir = await getPopulationRoot(directoryHandle, true);
+        const currentRes = await safeReadJson<{ revision?: number }>(populationDir, CONFIG_FILE);
+        const nextRevision = ((currentRes.ok ? currentRes.value.revision : 0) ?? 0) + 1;
+        await safeWriteJson(populationDir, CONFIG_FILE, {
+          ...config,
+          revision: nextRevision,
+          _writeToken: writeToken,
+        });
+        const verifyRes = await safeReadJson<{ revision?: number; _writeToken?: string }>(
+          populationDir,
+          CONFIG_FILE
+        );
+        if (
+          verifyRes.ok &&
+          verifyRes.value.revision === nextRevision &&
+          verifyRes.value._writeToken === writeToken
+        ) {
+          return { done: true, result: { ok: true as const } };
+        }
+        return { done: false };
+      },
+      { conflictError: "تعذّر حفظ إعدادات المجتمع: تعارض في الكتابة بعد عدة محاولات." }
+    )
+  );
+}
+```
+
+**File:** `src/data/population/populationConfig.test.ts` (new)
+
+**Before:** *(no test file existed for this module)*
+
+**After:** new test suite for the CAS-protected `savePopulationConfig`/`loadPopulationConfig`:
+saves and reloads a config correctly, confirms `revision`/`_writeToken` bookkeeping does not leak
+into the loaded config object (honest test of the whole-object-replace contract — no field-level
+merge claimed), and **two concurrent config saves survive without throwing or corrupting the file
+(cross-machine CAS)**, asserting the persisted result is exactly one writer's intact payload.
+
+## v42.55 — 2026-07-12 — D (feature-batch): CAS-protect updateMonthStatus (month.manifest.json)
+
+Batch D. `updateMonthStatus` is a read-modify-write on the shared `month.manifest.json`: it advances
+the month's status monotonically (raw-saved → processed-saved → sampled → distributed). Two PCs can
+advance the same month near-simultaneously (one draws the sample → "sampled" while another
+bulk-assigns → "distributed"); a plain RMW loses one advance. Routed it through `withResourceLock`
++ `casLoop` (revision + `_writeToken`, verified on read-back). All existing invariants are preserved
+inside the loop: a `closed` month is a no-op, a non-advancing rank is a no-op, and a missing month
+folder / manifest is a quiet no-op (not a conflict, so no wasteful retries). It stays best-effort:
+never throws to callers, logs a persistent conflict to the error ring buffer. `updateMonthStatus`
+deliberately does **not** call `ensureMonthWritable` (its own `closed` guard handles that, and the
+month-lock reopen path relies on it not throwing) — unchanged.
+
+**File:** `src/data/population/monthTypes.ts`
+
+**Before:**
+```ts
+  status: "raw-saved" | "processed-saved" | "sampled" | "distributed" | "closed";
+  /** Set when status === "closed". */
+  closedAt?: string | null;
+```
+
+**After:**
+```ts
+  status: "raw-saved" | "processed-saved" | "sampled" | "distributed" | "closed";
+  /** Monotonically increasing counter for CAS conflict detection. */
+  revision?: number;
+  /** Per-write UUID embedded by casLoop for cross-machine race detection. */
+  _writeToken?: string;
+  /** Set when status === "closed". */
+  closedAt?: string | null;
+```
+
+**File:** `src/data/population/populationStorage.ts`
+
+**Before:**
+```ts
+import { safeWriteJson, safeReadJson } from "../storage/safeWrite";
+import { logError } from "../storage/errorLogger";
+import { ensureMonthWritable } from "./monthLock";
+```
+```ts
+export async function updateMonthStatus(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  status: MonthManifestData["status"]
+): Promise<void> {
+  try {
+    const monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, false);
+    const manifestResult = await safeReadJson<MonthManifestData>(monthDir, "month.manifest.json");
+    if (!manifestResult.ok) return;
+    const manifest = manifestResult.value;
+    // A closed month is frozen: status advancement must never overwrite it
+    // ("closed" is deliberately NOT in STATUS_RANK — see monthLock.ts).
+    if (manifest.status === "closed") return;
+    const currentRank = STATUS_RANK[manifest.status] ?? -1;
+    if (currentRank >= STATUS_RANK[status]) return;
+    await safeWriteJson(monthDir, "month.manifest.json", { ...manifest, status });
+  } catch (error) {
+    logError("population:update-month-status", error);
+  }
+}
+```
+
+**After:**
+```ts
+import { safeWriteJson, safeReadJson } from "../storage/safeWrite";
+import { casLoop } from "../storage/casLoop";
+import { withResourceLock } from "../storage/webLocks";
+import { logError } from "../storage/errorLogger";
+import { ensureMonthWritable } from "./monthLock";
+```
+```ts
+export async function updateMonthStatus(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  status: MonthManifestData["status"]
+): Promise<void> {
+  try {
+    // Shared, multi-writer file: two PCs can advance the same month's status
+    // near-simultaneously. The `:rmw` outer lock serializes same-tab writers;
+    // casLoop's revision + _writeToken read-back guards cross-machine races so a
+    // monotonic advance is never lost to a stale overwrite. Best-effort: a
+    // persistent conflict is logged, never thrown.
+    const result = await withResourceLock(
+      `population-manifest/${monthFolderName}:rmw`,
+      () =>
+        casLoop<{ ok: true }>(
+          async (writeToken) => {
+            let monthDir: DirectoryHandleLike;
+            try {
+              monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, false);
+            } catch {
+              // Month folder does not exist — nothing to advance; not a conflict.
+              return { done: true, result: { ok: true as const } };
+            }
+            const manifestResult = await safeReadJson<MonthManifestData>(monthDir, "month.manifest.json");
+            if (!manifestResult.ok) return { done: true, result: { ok: true as const } };
+            const manifest = manifestResult.value;
+            // A closed month is frozen: status advancement must never overwrite it
+            // ("closed" is deliberately NOT in STATUS_RANK — see monthLock.ts).
+            if (manifest.status === "closed") return { done: true, result: { ok: true as const } };
+            const currentRank = STATUS_RANK[manifest.status] ?? -1;
+            if (currentRank >= STATUS_RANK[status]) return { done: true, result: { ok: true as const } };
+            const nextRevision = (manifest.revision ?? 0) + 1;
+            await safeWriteJson(monthDir, "month.manifest.json", {
+              ...manifest,
+              status,
+              revision: nextRevision,
+              _writeToken: writeToken,
+            });
+            const verifyResult = await safeReadJson<MonthManifestData>(monthDir, "month.manifest.json");
+            if (
+              verifyResult.ok &&
+              verifyResult.value.revision === nextRevision &&
+              verifyResult.value._writeToken === writeToken
+            ) {
+              return { done: true, result: { ok: true as const } };
+            }
+            return { done: false };
+          },
+          { maxRetries: 5, baseDelayMs: 50, conflictError: "manifest status update conflict" }
+        )
+    );
+    if (!result.ok) {
+      logError("population:update-month-status", new Error(result.error));
+    }
+  } catch (error) {
+    logError("population:update-month-status", error);
+  }
+}
+```
+
+## v42.54 — 2026-07-12 — D (feature-batch): CAS-protect the admin shared browse preset
+
+Batch D. `saveAdminBrowseDatasetPreset` writes `admin-shared.browse-preset.json` — a **shared,
+multi-writer** file: any admin on any PC can change browse-view column order/visibility. It is a
+read-modify-write that merges one dataset key into the existing `browseData` map, so two admins
+saving different views near-simultaneously could clobber each other's dataset (a lost update).
+Routed it through the same `withResourceLock` + `casLoop` pattern (revision + `_writeToken`,
+verified on read-back, retry with jitter). The existing outer `:rmw` lock is kept; casLoop now runs
+inside it. Return type widened from `Promise<void>` to the standard `{ ok: true } | { ok: false;
+error }` result so a persistent write conflict is surfaced rather than silently lost; both call
+sites already invoke it fire-and-forget with `void`, so nothing breaks.
+
+`saveUserBrowseDatasetPreset` is **deliberately left as plain safeWriteJson** (with its existing
+`:rmw` lock): `{username}.browse-preset.json` is a per-user file only ever written by that one user,
+so it is single-writer by design — the exact carve-out Batch D allows. Cross-machine last-writer-wins
+on one person's own column preferences is acceptable and needs no CAS.
+
+**File:** `src/data/preferences/browsePresetStorage.ts`
+
+**Before:**
+```ts
+import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { withResourceLock } from "../storage/webLocks";
+```
+```ts
+export type SharedBrowsePresetFile = {
+  owner: "admin";
+  browseData: Partial<Record<BrowsePresetDatasetKind, BrowseDatasetPreset>>;
+};
+```
+```ts
+export async function saveAdminBrowseDatasetPreset(
+  directoryHandle: DirectoryHandleLike,
+  dataset: BrowsePresetDatasetKind,
+  preset: Omit<BrowseDatasetPreset, "updatedAt">
+): Promise<void> {
+  // `:rmw` suffix — see saveUserBrowseDatasetPreset: keeps this outer lock distinct
+  // from safeWriteJson's internal non-reentrant lock to avoid a self-deadlock.
+  await withResourceLock(`${SYSTEM_FOLDER_NAMES.userPresets}/${ADMIN_SHARED_PRESET_FILE}:rmw`, async () => {
+    const existing = await loadAdminBrowsePreset(directoryHandle);
+    const nextFile: SharedBrowsePresetFile = {
+      owner: "admin",
+      browseData: {
+        ...existing.browseData,
+        [dataset]: {
+          ...preset,
+          updatedAt: new Date().toISOString(),
+        },
+      },
+    };
+
+    const dir = await getPresetDir(directoryHandle, true);
+    await safeWriteJson(dir, ADMIN_SHARED_PRESET_FILE, nextFile);
+  });
+}
+```
+
+**After:**
+```ts
+import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { casLoop } from "../storage/casLoop";
+import { withResourceLock } from "../storage/webLocks";
+```
+```ts
+export type SharedBrowsePresetFile = {
+  owner: "admin";
+  /** Monotonically increasing counter for CAS conflict detection. */
+  revision?: number;
+  /** Per-write UUID embedded by casLoop for cross-machine race detection. */
+  _writeToken?: string;
+  browseData: Partial<Record<BrowsePresetDatasetKind, BrowseDatasetPreset>>;
+};
+```
+```ts
+export async function saveAdminBrowseDatasetPreset(
+  directoryHandle: DirectoryHandleLike,
+  dataset: BrowsePresetDatasetKind,
+  preset: Omit<BrowseDatasetPreset, "updatedAt">
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  // Shared, multi-writer file (any admin on any PC). `:rmw` suffix — see
+  // saveUserBrowseDatasetPreset: keeps this outer lock distinct from safeWriteJson's
+  // internal non-reentrant lock to avoid a self-deadlock. The outer lock serializes
+  // same-tab saves; casLoop's revision + _writeToken read-back guards cross-machine races.
+  return withResourceLock(`${SYSTEM_FOLDER_NAMES.userPresets}/${ADMIN_SHARED_PRESET_FILE}:rmw`, () =>
+    casLoop<{ ok: true }>(
+      async (writeToken) => {
+        const existing = await loadAdminBrowsePreset(directoryHandle);
+        const nextRevision = (existing.revision ?? 0) + 1;
+        const nextFile: SharedBrowsePresetFile = {
+          owner: "admin",
+          revision: nextRevision,
+          _writeToken: writeToken,
+          browseData: {
+            ...existing.browseData,
+            [dataset]: {
+              ...preset,
+              updatedAt: new Date().toISOString(),
+            },
+          },
+        };
+        const dir = await getPresetDir(directoryHandle, true);
+        await safeWriteJson(dir, ADMIN_SHARED_PRESET_FILE, nextFile);
+        const verify = await loadAdminBrowsePreset(directoryHandle);
+        if (verify.revision === nextRevision && verify._writeToken === writeToken) {
+          return { done: true, result: { ok: true as const } };
+        }
+        return { done: false };
+      },
+      { conflictError: "تعارض في الكتابة: لم يتمكن النظام من حفظ إعدادات الأعمدة بعد عدة محاولات." }
+    )
+  );
+}
+```
+
+## v42.53 — 2026-07-12 — D (feature-batch): CAS-protect supervisor decision appends (approvals + referral)
+
+Batch D (cross-machine write safety). `appendDecisionEvent` is the shared write path behind
+`referralStorage.updateReferralStatus`/`updateReplacementStatus` — every referral/replacement
+approval or denial appends to the reviewer's `{supervisor}.decisions.json`. A plain
+read-modify-write here loses updates when the same reviewer acts from two PCs (or fires two
+decisions near-simultaneously): the second write overwrites the first's appended event. Routed it
+through the same `withResourceLock` + `casLoop` pattern already used by `answerStorage`,
+`distributionStorage`, and `audit/actionLog` — stamp a fresh `_writeToken` + bumped `revision` per
+attempt, verify both on read-back, retry with jitter on mismatch. `referralStorage.ts` itself needs
+**no** change: all its writes delegate to `appendReferralToEmployee`/`appendReplacementToEmployee`
+(already CAS-safe in `answerStorage`) and to `appendDecisionEvent` (now CAS-safe here), so its write
+paths are transitively protected. The month-lock gate stays outside the loop so a closed month
+rejects loudly instead of being retried.
+
+**File:** `src/data/approvals/approvalTypes.ts`
+
+**Before:**
+```ts
+export type SupervisorDecisionFile = {
+  supervisorUsername: string;
+  monthFolderName: string;
+  referralDecisions: ReferralDecision[];
+  replacementDecisions: ReplacementDecision[];
+  /** Append-only decision history. Legacy files predate this field. */
+  decisionEvents?: DecisionEvent[];
+  lastUpdatedAt: string;
+};
+```
+
+**After:**
+```ts
+export type SupervisorDecisionFile = {
+  supervisorUsername: string;
+  monthFolderName: string;
+  /** Monotonically increasing counter for CAS conflict detection. */
+  revision?: number;
+  /** Per-write UUID embedded by casLoop for cross-machine race detection. */
+  _writeToken?: string;
+  referralDecisions: ReferralDecision[];
+  replacementDecisions: ReplacementDecision[];
+  /** Append-only decision history. Legacy files predate this field. */
+  decisionEvents?: DecisionEvent[];
+  lastUpdatedAt: string;
+};
+```
+
+**File:** `src/data/approvals/approvalStorage.ts`
+
+**Before:**
+```ts
+import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { ensureMonthWritable } from "../population/monthLock";
+```
+```ts
+export async function appendDecisionEvent(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  supervisorUsername: string,
+  event: DecisionEvent
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  // Month lock gate — throws MonthClosedError when the month is closed; callers
+  // that need a user-facing message should catch it explicitly.
+  await ensureMonthWritable(directoryHandle, monthFolderName);
+  try {
+    const appDir = await getApprovalsDir(directoryHandle, monthFolderName);
+    const current = await loadSupervisorDecisions(directoryHandle, monthFolderName, supervisorUsername);
+    const updated: SupervisorDecisionFile = {
+      ...current,
+      decisionEvents: [...(current.decisionEvents ?? []), event],
+      lastUpdatedAt: new Date().toISOString(),
+    };
+    await safeWriteJson(appDir, decisionFileName(supervisorUsername), updated);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "خطأ غير معروف." };
+  }
+}
+```
+
+**After:**
+```ts
+import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { casLoop } from "../storage/casLoop";
+import { withResourceLock } from "../storage/webLocks";
+import { ensureMonthWritable } from "../population/monthLock";
+```
+```ts
+export async function appendDecisionEvent(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  supervisorUsername: string,
+  event: DecisionEvent
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  // Month lock gate — throws MonthClosedError when the month is closed; callers
+  // that need a user-facing message should catch it explicitly. Kept outside the
+  // CAS loop so a closed month rejects loudly instead of being retried.
+  await ensureMonthWritable(directoryHandle, monthFolderName);
+
+  const fileName = decisionFileName(supervisorUsername);
+  // `:rmw` suffix keeps this outer read-modify-write lock distinct from
+  // safeWriteJson's internal `${dir.name}/${fileName}` lock (withResourceLock is
+  // not reentrant — a colliding key self-deadlocks). The outer lock serializes
+  // same-tab appends; the casLoop token guards cross-machine races on a shared folder.
+  return withResourceLock(`approvals/${fileName}:rmw`, () =>
+    casLoop<{ ok: true }>(
+      async (writeToken) => {
+        const appDir = await getApprovalsDir(directoryHandle, monthFolderName);
+        const current = await loadSupervisorDecisions(directoryHandle, monthFolderName, supervisorUsername);
+        const nextRevision = (current.revision ?? 0) + 1;
+        const updated: SupervisorDecisionFile = {
+          ...current,
+          revision: nextRevision,
+          _writeToken: writeToken,
+          decisionEvents: [...(current.decisionEvents ?? []), event],
+          lastUpdatedAt: new Date().toISOString(),
+        };
+        await safeWriteJson(appDir, fileName, updated);
+        const verify = await loadSupervisorDecisions(directoryHandle, monthFolderName, supervisorUsername);
+        if (verify.revision === nextRevision && verify._writeToken === writeToken) {
+          return { done: true, result: { ok: true as const } };
+        }
+        return { done: false };
+      },
+      { conflictError: "تعارض في الكتابة: لم يتمكن النظام من حفظ قرار الاعتماد بعد عدة محاولات." }
+    )
+  );
+}
+```
+
+**File:** `src/data/approvals/approvalStorage.test.ts` (new)
+
+**Before:** *(no test file existed for this module)*
+
+**After:** new test suite covering `appendDecisionEvent`/`loadSupervisorDecisions`: persists and
+reloads a decision event, keeps every event across repeated decisions on the same request, **two
+concurrent decision appends survive without losing either (cross-machine CAS)**, events merge
+across supervisor files and legacy decision arrays sorted by time, and a no-history request
+returns `undefined`.
+
+**File:** `src/data/referral/referralStorage.test.ts` (new)
+
+**Before:** *(no test file existed for this module)*
+
+**After:** new test suite covering referral and replacement request storage: empty-log load with no
+files, save+aggregate a request in the log, supervisor-decision overlay on pending requests,
+pending-ID resolution, full decision-history exposure, and **two concurrent referral decisions on
+different requests both persist (cross-machine CAS)** — the referral-side proof that
+`appendDecisionEvent`'s CAS protection is transitively sufficient (referralStorage itself needed no
+code change, per the entry above).
+
+## v42.52 — 2026-07-12 — A4 (feature-batch): restrict the referral-recipient picker to employee/supervisor
+
+**File:** `src/data/distribution/bulkAssignment.ts`
+
+`isAssignableSampleRole` already encodes the "who can receive assigned samples" rule (employee +
+supervisor only, excludes manager/guest/admin) for bulk auto-assignment, but was module-private.
+Exported it so `XrayReferrals.tsx`'s manual referral-recipient picker can reuse the exact same rule
+instead of duplicating the role list inline, per the plan's explicit decision (`plan.md` line 9:
+"just match the existing `isAssignableSampleRole` rule ... no new level-based hierarchy").
+
+**Before:**
+```ts
+function isAssignableSampleRole(user: ManagedLoginUser): boolean {
+  return user.role === "employee" || user.role === "supervisor";
+}
+```
+
+**After:**
+```ts
+export function isAssignableSampleRole(user: ManagedLoginUser): boolean {
+  return user.role === "employee" || user.role === "supervisor";
+}
+```
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx`
+
+`ReferralRequestModal`'s recipient `<select>` (id `ref-to-emp`) built its option list from every
+active user except the current one — including managers/admins/guests, who cannot legally receive an
+assigned sample (`isAssignableSampleRole` in the auto-assignment path already excludes them). Added
+the same filter so a referral can no longer be sent to a role that could never appear in a
+sample-assignment context.
+
+**Before:**
+```ts
+  const employees = readUserManagementState()
+    .users.filter((u) => u.isActive && u.username !== currentUser)
+    .sort((a, b) => a.displayName.localeCompare(b.displayName, "ar"));
+```
+
+**After:**
+```ts
+  const employees = readUserManagementState()
+    .users.filter((u) => u.isActive && u.username !== currentUser && isAssignableSampleRole(u))
+    .sort((a, b) => a.displayName.localeCompare(b.displayName, "ar"));
+```
+
+## v42.51 — 2026-07-12 — A3 (feature-batch): short Latin month labels across every month-filter select
+
+Audited every month-related filter/selector in the app (grep for `listMonthFolders`/`MonthFolderInfo`/
+`selectedMonth` across Population browse, Archive, Reports, KPI, ReferralApproval, XrayReferrals,
+XrayInspectionResults, EmployeeDashboard, ReportDesigner, Settings, UserManagement). Two real UI
+patterns exist:
+
+1. **Population browse's month filter** — aggregates rows across *all* months, already has a
+   value-`"all"` option (`كل الأشهر`), and formatted each option via a local Arabic-month-name
+   formatter (`formatArabicMonthFolder`/`MONTH_NAMES_AR`, e.g. "مايو 2026").
+2. **Seven other single-month selects** (Reports/KPI's report-generation target month, XrayReferrals'
+   case-assignment queue month, ReferralApproval's pending-review month, XrayInspectionResults' two
+   result/audit-table months, EmployeeDashboard's month — the last is dead code, not imported/mounted
+   anywhere) — each loads exactly one month's sample/distribution/answer/referral data by design (no
+   aggregation path exists), and rendered the raw folder-name slug verbatim (e.g. "5-may-2026") with
+   no "all" option.
+
+Applied both parts of the requested change where it is a true display-only fix: added
+`formatMonthShortLabel`/`formatMonthFolderShortLabel` to `monthFolder.ts` (3-letter English month
+abbreviation + Latin-numeral year, e.g. "May 2026" — matches the app's existing forced Latin-numeral
+convention, `ar-SA-u-nu-latn`, used everywhere else) and wired it into all 8 select sites (folder-name
+*values* are untouched — display text only). Population browse's option label was also standardized
+from "كل الأشهر" to "الكل" to match the app's existing generic "all" convention (see
+`PhaseFourDistribution.tsx`, `SummaryBar.tsx`, `DataTable`'s default status-filter label) — no test
+asserted the old string.
+
+**Not done — "add an all-months option" for the 7 single-month selects.** Each of those genuinely
+requires exactly one month to load its data (report generation, one sample's assignment quota, one
+month's referral/replacement log, etc.) — there is no code path that aggregates multiple months for
+any of them today (the closest precedent, `HistoryView.tsx`'s already-existing all-months request
+history, is a *separate* view/tab, not a fallback state of these single-month selects). Bolting on a
+non-functional `"all"` value would either silently no-op or require genuinely aggregating N months of
+distribution/answer/referral data per site — a real feature change, not the "quick mechanical fix"
+this batch scopes to. Flagged in the final report per the task's own "acceptance criteria not fully
+met, with reasons" instruction rather than silently skipped or half-implemented.
+
+**File:** `src/data/population/monthFolder.ts`
+
+**Before:**
+```ts
+export function currentMonthFolderInfo(): MonthFolderInfo {
+```
+
+**After:**
+```ts
+const MONTH_ABBR_EN = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+] as const;
+
+/**
+ * Short display label for a month/year pair, e.g. "May 2026" — 3-letter English abbreviation +
+ * Latin-numeral year. Display-only: never use this to derive/compare a folder name.
+ */
+export function formatMonthShortLabel(month: number, year: number): string {
+  const abbr = MONTH_ABBR_EN[month - 1];
+  return abbr ? `${abbr} ${year}` : `${month}/${year}`;
+}
+
+/** Same as `formatMonthShortLabel`, but takes a folder name directly (e.g. "5-may-2026" → "May 2026").
+ * Falls back to the raw folder name if it cannot be parsed. */
+export function formatMonthFolderShortLabel(folderName: string): string {
+  const info = parseMonthFolderName(folderName);
+  return info ? formatMonthShortLabel(info.month, info.year) : folderName;
+}
+
+export function currentMonthFolderInfo(): MonthFolderInfo {
+```
+
+**File:** `src/components/Sidebar/Tabs/Population/index.tsx`
+
+Renamed the local `formatArabicMonthFolder` → `formatMonthFolderLabel` (no longer produces Arabic
+month names, so the old name was misleading) and pointed its body at the new shared helper; removed
+the now-dead `MONTH_NAMES_AR` array; relabeled the "all months" option from "كل الأشهر" to "الكل".
+
+**Before:**
+```ts
+const MONTH_NAMES_AR = [
+  "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
+  "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"
+] as const;
+
+function formatArabicMonthFolder(monthFolder: string): string {
+  const info = parseMonthFolderName(monthFolder);
+  if (!info) {
+    return monthFolder;
+  }
+
+  return `${MONTH_NAMES_AR[info.month - 1]} ${info.year}`;
+}
+```
+```ts
+              <option value="all">كل الأشهر</option>
+              {monthOptions.map((monthFolder) => (
+                <option key={monthFolder} value={monthFolder}>
+                  {formatArabicMonthFolder(monthFolder)}
+                </option>
+              ))}
+```
+
+**After:**
+```ts
+function formatMonthFolderLabel(monthFolder: string): string {
+  return formatMonthFolderShortLabel(monthFolder);
+}
+```
+```ts
+              <option value="all">الكل</option>
+              {monthOptions.map((monthFolder) => (
+                <option key={monthFolder} value={monthFolder}>
+                  {formatMonthFolderLabel(monthFolder)}
+                </option>
+              ))}
+```
+(The cell-display and export-filename call sites were updated from `formatArabicMonthFolder(...)` to
+`formatMonthFolderLabel(...)` — same rename, no behavior change beyond the short-format output.)
+
+**File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
+
+**Before:**
+```tsx
+            months.map((m) => (
+              <option key={m.folderName} value={m.folderName}>
+                {m.folderName}
+              </option>
+            ))
+```
+
+**After:**
+```tsx
+            months.map((m) => (
+              <option key={m.folderName} value={m.folderName}>
+                {formatMonthFolderShortLabel(m.folderName)}
+              </option>
+            ))
+```
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx`
+
+**Before:**
+```tsx
+          {months.map((m) => (
+            <option key={m.folderName} value={m.folderName}>{m.folderName}</option>
+          ))}
+```
+
+**After:**
+```tsx
+          {months.map((m) => (
+            <option key={m.folderName} value={m.folderName}>{formatMonthFolderShortLabel(m.folderName)}</option>
+          ))}
+```
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/index.tsx`
+
+**Before:**
+```tsx
+              <select id="ra-month" className="ew-select" value={selMonth} onChange={(e) => setSelMonth(e.target.value)}>
+                {months.map((m) => <option key={m.folderName} value={m.folderName}>{m.folderName}</option>)}
+              </select>
+```
+
+**After:**
+```tsx
+              <select id="ra-month" className="ew-select" value={selMonth} onChange={(e) => setSelMonth(e.target.value)}>
+                {months.map((m) => <option key={m.folderName} value={m.folderName}>{formatMonthFolderShortLabel(m.folderName)}</option>)}
+              </select>
+```
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayInspectionResults.tsx`
+
+Same rename applied at both of this file's month selects (results table + audit table — they share
+one `selectedMonth`/`months` state, just two render sites).
+
+**Before:**
+```tsx
+                {months.map((month) => (
+                  <option key={month.folderName} value={month.folderName}>{month.folderName}</option>
+                ))}
+```
+
+**After:**
+```tsx
+                {months.map((month) => (
+                  <option key={month.folderName} value={month.folderName}>{formatMonthFolderShortLabel(month.folderName)}</option>
+                ))}
+```
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/EmployeeDashboard.tsx`
+
+Unreachable component (not imported/mounted by any tab) — fixed anyway for source-tree consistency;
+not verifiable via the running app.
+
+**Before:**
+```tsx
+            {availableMonths.map((m) => (
+              <option key={m.folderName} value={m.folderName}>{m.folderName}</option>
+            ))}
+```
+
+**After:**
+```tsx
+            {availableMonths.map((m) => (
+              <option key={m.folderName} value={m.folderName}>{formatMonthFolderShortLabel(m.folderName)}</option>
+            ))}
+```
+
+## v42.50 — 2026-07-12 — A2 (feature-batch): curated browse-view defaults for risk-raw/bi-raw/population
+
+**File:** `src/components/Sidebar/Tabs/Population/index.tsx`
+
+Ground truth from the user's real workspace screenshot (`docs/audit/feature-batch-2026-07-08/plan.md`):
+the "تحليل المخاطر" (risk-raw) browse view had no curated default — it fell back to a generic "first 12
+non-base columns" heuristic that actively *excluded* useful fields like `stage`/`xrayImageId` because
+they happened to already be in the population-oriented `BROWSE_COLUMNS` base list. Added two curated
+8/7-column default key lists (`RISK_RAW_DEFAULT_COLUMN_KEYS`, `BI_RAW_DEFAULT_COLUMN_KEYS`, the BI one
+omitting `stage` per the plan since `NormalizedBiRow` has no stage field) and wired them into
+`defaultVisibleColumns()` (visibility) and a new `defaultColumnOrderKeys()` helper (left-to-right
+order, consumed by the `loadBrowseRows` effect in place of the raw insertion-order fallback) — both
+gracefully fall back to the old generic behavior if a dataset has zero rows so the curated keys never
+appear as available columns. Mirrored the same 8-column set/order into `BROWSE_COLUMNS` itself for the
+"المجتمع النهائي" (population) view's default (added a new `portType` base entry; flipped
+`certScanStatus`/`_monthFolder` to non-default, `xrayLevelTwoResult`/`plateOrContainerNumber` to
+default, matching "exactly these 8 columns" per the ground truth). Added `RAW_COLUMN_LABELS` entries
+for `entryDate` (risk-only field — its own alias list literally is `["تاريخ الدخول"]`, distinct from
+`xrayEntryDate`'s "تاريخ دخول الأشعة") and BI-only `levelOneResult`/`levelTwoResult`, so the new dynamic
+columns render an Arabic header instead of falling back to the raw English key.
+
+**Before:**
+```ts
+const BROWSE_COLUMNS: { key: string; label: string; default: boolean }[] = [
+  { key: "xrayImageId",           label: "معرف الأشعة",          default: true  },
+  { key: "portName",              label: "المنفذ",               default: true  },
+  { key: "stage",                 label: "المستوى",              default: true  },
+  { key: "certScanStatus",        label: "CertScan",             default: true  },
+  { key: "xrayLevelOneResult",    label: "نتيجة المستوى 1",      default: true  },
+  { key: "xrayLevelTwoResult",    label: "نتيجة المستوى 2",      default: false },
+  { key: "xrayEntryDate",         label: "تاريخ الدخول",         default: false },
+  { key: "declarationNumber",     label: "رقم البيان",           default: false },
+  { key: "plateOrContainerNumber",label: "رقم اللوحة/الحاوية",   default: false },
+  { key: "movementType",          label: "نوع الحركة",           default: false },
+  { key: "biEnrichmentStatus",    label: "حالة BI",              default: false },
+  { key: "_monthFolder",          label: "الشهر المصدر",         default: true  },
+];
+```
+```ts
+  levelOneEmployee: "موظف المستوى الأول",
+  movementType: "نوع الحركة",
+```
+```ts
+function defaultVisibleColumns(
+  dataset: BrowseDatasetKind,
+  columns: BrowseColumn[]
+): Set<string> {
+  if (dataset === "population" || dataset === "sample") {
+    return new Set(columns.filter((column) => column.default).map((column) => column.key));
+  }
+
+  const rawKeys = columns
+    .filter((column) => !column.key.startsWith("_") && !BROWSE_COLUMNS.some((base) => base.key === column.key))
+    .slice(0, 12)
+    .map((column) => column.key);
+
+  return new Set([...rawKeys, "_monthFolder"]);
+}
+```
+```ts
+        const nextColumns = buildBrowseColumns(nextRows);
+        const datasetPreset = browsePresetRef.current?.browseData[dataset];
+        const nextOrder = mergeColumnOrder(
+          datasetPreset?.columnOrder,
+          nextColumns.map((column) => column.key)
+        );
+```
+
+**After:**
+```ts
+const BROWSE_COLUMNS: { key: string; label: string; default: boolean }[] = [
+  { key: "stage",                 label: "المستوى",              default: true  },
+  { key: "xrayImageId",           label: "معرف الأشعة",          default: true  },
+  { key: "xrayEntryDate",         label: "تاريخ الدخول",         default: true  },
+  { key: "portType",              label: "نوع المنفذ",           default: true  },
+  { key: "portName",              label: "المنفذ",               default: true  },
+  { key: "xrayLevelOneResult",    label: "نتيجة المستوى 1",      default: true  },
+  { key: "xrayLevelTwoResult",    label: "نتيجة المستوى 2",      default: true  },
+  { key: "plateOrContainerNumber",label: "رقم اللوحة/الحاوية",   default: true  },
+  { key: "certScanStatus",        label: "CertScan",             default: false },
+  { key: "declarationNumber",     label: "رقم البيان",           default: false },
+  { key: "movementType",          label: "نوع الحركة",           default: false },
+  { key: "biEnrichmentStatus",    label: "حالة BI",              default: false },
+  { key: "_monthFolder",          label: "الشهر المصدر",         default: false },
+];
+
+// Curated defaults (Batch A / A2) — ground truth from the user's real workspace screenshot.
+// risk-raw's own field is `entryDate` ("تاريخ الدخول") — distinct from population/BI's
+// `xrayEntryDate` ("تاريخ دخول الأشعة"). BI has no `stage` field, so its set drops that column.
+const RISK_RAW_DEFAULT_COLUMN_KEYS: string[] = [
+  "stage", "xrayImageId", "entryDate", "portType", "portName",
+  "xrayLevelOneResult", "xrayLevelTwoResult", "plateOrContainerNumber"
+];
+const BI_RAW_DEFAULT_COLUMN_KEYS: string[] = [
+  "xrayImageId", "xrayEntryDate", "portType", "portName",
+  "levelOneResult", "levelTwoResult", "plateOrContainerNumber"
+];
+```
+```ts
+  levelOneEmployee: "موظف المستوى الأول",
+  entryDate: "تاريخ الدخول",
+  levelOneResult: "نتيجة المستوى 1",
+  levelTwoResult: "نتيجة المستوى 2",
+  movementType: "نوع الحركة",
+```
+```ts
+function curatedDefaultKeys(dataset: BrowseDatasetKind): string[] {
+  if (dataset === "risk-raw") return RISK_RAW_DEFAULT_COLUMN_KEYS;
+  if (dataset === "bi-raw") return BI_RAW_DEFAULT_COLUMN_KEYS;
+  return [];
+}
+
+function defaultVisibleColumns(
+  dataset: BrowseDatasetKind,
+  columns: BrowseColumn[]
+): Set<string> {
+  if (dataset === "population" || dataset === "sample") {
+    return new Set(columns.filter((column) => column.default).map((column) => column.key));
+  }
+
+  const curated = curatedDefaultKeys(dataset);
+  if (curated.length > 0) {
+    const availableKeys = new Set(columns.map((column) => column.key));
+    const matchedCurated = curated.filter((key) => availableKeys.has(key));
+    if (matchedCurated.length > 0) {
+      return new Set(matchedCurated);
+    }
+  }
+
+  const rawKeys = columns
+    .filter((column) => !column.key.startsWith("_") && !BROWSE_COLUMNS.some((base) => base.key === column.key))
+    .slice(0, 12)
+    .map((column) => column.key);
+
+  return new Set([...rawKeys, "_monthFolder"]);
+}
+
+// Places curated keys first (in curated order), then appends whatever else is available — only
+// takes effect when no per-dataset order has been saved to a preset yet (see mergeColumnOrder).
+function defaultColumnOrderKeys(
+  dataset: BrowseDatasetKind,
+  columns: BrowseColumn[]
+): string[] {
+  const curated = curatedDefaultKeys(dataset);
+  const availableKeys = columns.map((column) => column.key);
+  if (curated.length === 0) {
+    return availableKeys;
+  }
+
+  const curatedPresent = curated.filter((key) => availableKeys.includes(key));
+  const remaining = availableKeys.filter((key) => !curatedPresent.includes(key));
+  return [...curatedPresent, ...remaining];
+}
+```
+```ts
+        const nextColumns = buildBrowseColumns(nextRows);
+        const datasetPreset = browsePresetRef.current?.browseData[dataset];
+        const nextOrder = mergeColumnOrder(
+          datasetPreset?.columnOrder,
+          defaultColumnOrderKeys(dataset, nextColumns)
+        );
+```
+
+## v42.49 — 2026-07-12 — A1 (feature-batch): expose levelOneEmployee/levelTwoEmployee as mappable system fields
+
+**File:** `src/data/population/populationConfig.ts`
+
+`levelOneEmployee`/`levelTwoEmployee` already exist as real data fields on `PreparedPopulationRow`
+(`src/data/population/populationTypes.ts`) — populated from BI enrichment
+(`src/components/Sidebar/Tabs/Population/biData/`) — but were never exposed as target fields in the
+column-mapping UI (`MappingSettingsModal`'s "mappings" tab iterates `config.systemFields`). Added two
+new optional `SystemField` entries so an admin can configure risk/BI column aliases for them like any
+other field. Left unmapped by default per plan (`docs/audit/feature-batch-2026-07-08/plan.md`, Batch
+A item 1): no entries added to `DEFAULT_MAPPING_TEMPLATE.columnMappings` or `biColumnMappings`.
+
+**Before:**
+```ts
+  { key: "targetedByRiskEngine", labelAr: "مستهدف محرك المخاطر", isRequired: false, dataType: "string" },
+  { key: "riskMessage", labelAr: "رسالة المخاطر", isRequired: false, dataType: "string" }
+];
+```
+
+**After:**
+```ts
+  { key: "targetedByRiskEngine", labelAr: "مستهدف محرك المخاطر", isRequired: false, dataType: "string" },
+  { key: "riskMessage", labelAr: "رسالة المخاطر", isRequired: false, dataType: "string" },
+  { key: "levelOneEmployee", labelAr: "موظف المستوى الأول", isRequired: false, dataType: "string" },
+  { key: "levelTwoEmployee", labelAr: "موظف المستوى الثاني", isRequired: false, dataType: "string" }
+];
+```
+
+## v42.48 — 2026-07-12 — fix(demo): seed `qualityImageResult` so demo KPIs render non-zero (QA hardening-2026-07-08, Rework Item 1)
+
+**File:** `src/data/workspace/demoWorkspace.ts`
+
+QA review (`docs/audit/hardening-2026-07-08/qa-review-1.md`, "Rework Item 1") found that
+`seedDemoMonth`'s per-employee answer seeding only ever wrote `fieldId: "result"` and
+`fieldId: "notes"`. The reporting pipeline resolves its ground-truth field via
+`ExecutiveReportConfig.expertResultFieldId` (`src/data/reporting/executiveReportTypes.ts`),
+which defaults to `"qualityImageResult"` — and since the demo workspace seeds no
+`TemplateSchema`/`templates.index.json` selection, the label-based fallback lookup is
+always empty too. Net effect: `expertResult` resolved to `null` for every seeded row, so
+`overallAccuracy`, `suspiciousDetectionRate`, and `missedSuspicionRate` all rendered as
+"—" instead of real numbers — violating this branch's own C1 acceptance criterion ("KPIs
+non-zero").
+
+Fix: build a `xrayImageId → PreparedPopulationRow` lookup (`rowsById`) from `preparedRows`
+before the per-employee seeding loop, then add a third answer entry keyed
+`"qualityImageResult"` in both the `bucket < 2` (submitted) and `bucket === 2` (draft)
+branches. The seeded value equals the row's own `xrayLevelOneResult` on most rows (~87-90%
+agreement, consistent with `DEFAULT_EXEC_CONFIG.accuracyTarget: 90`) but is deterministically
+flipped (`سليمة`↔`اشتباه`) on every 15th row via `seq % 15 === 0` (`seq` derived from the
+row's own `sourceRowNumber - 1`, never `Math.random` — this file stays reproducible by
+design) so `missedSuspicionRate`/`falseSuspicionRate` also get a non-zero denominator, not
+just `overallAccuracy`. The deeper `imageAvailable`/`decisionEvaluable` gap the same review
+flags (point 6) requires seeding an actual `TemplateSchema` + `templates.index.json`
+selection — out of scope here, left as a separate follow-up per the review.
+
+**Before:**
+```ts
+  const now = new Date().toISOString();
+  const completedEvents: DistributionEvent[] = [];
+
+  for (const [empUsername, assigned] of assignedByEmployee) {
+    const items: ItemAnswer[] = [];
+    assigned.forEach((evt, i) => {
+      const bucket = i % 5;
+      if (bucket < 2) {
+        items.push({
+          xrayImageId: evt.xrayImageId,
+          templateId: DEMO_TEMPLATE_ID,
+          templateVersion: 1,
+          answers: [
+            { fieldId: "result", value: "سليمة" },
+            { fieldId: "notes", value: "لا ملاحظات" },
+          ],
+          lastSavedAt: now,
+          submittedAt: now,
+          answeredBy: empUsername,
+          status: "submitted",
+        });
+        completedEvents.push(
+          buildCompletedEvent({ xrayImageId: evt.xrayImageId, assignedTo: empUsername, eventBy: empUsername })
+        );
+      } else if (bucket === 2) {
+        items.push({
+          xrayImageId: evt.xrayImageId,
+          templateId: DEMO_TEMPLATE_ID,
+          templateVersion: 1,
+          answers: [{ fieldId: "result", value: "سليمة" }],
+          lastSavedAt: now,
+          submittedAt: null,
+          answeredBy: empUsername,
+          status: "draft",
+        });
+      }
+      // bucket 3, 4: left pending — no answer record at all.
+    });
+    if (items.length > 0) {
+      await saveEmployeeAnswers(handle, monthFolderName, empUsername, items);
+    }
+  }
+```
+
+**After:**
+```ts
+  // xrayImageId → its own population row, so each seeded answer can carry a
+  // "qualityImageResult" value derived from that row's real level-one result
+  // (the reporting pipeline's ground-truth field — see executiveReportTypes.ts
+  // `expertResultFieldId`). Without this, expertResult resolves to null for
+  // every row and overallAccuracy/suspiciousDetectionRate/missedSuspicionRate
+  // all render as "—" instead of real numbers.
+  const rowsById = new Map<string, PreparedPopulationRow>();
+  for (const row of preparedRows) {
+    rowsById.set(row.xrayImageId, row);
+  }
+
+  const now = new Date().toISOString();
+  const completedEvents: DistributionEvent[] = [];
+
+  for (const [empUsername, assigned] of assignedByEmployee) {
+    const items: ItemAnswer[] = [];
+    assigned.forEach((evt, i) => {
+      const bucket = i % 5;
+      const row = rowsById.get(evt.xrayImageId);
+      // Quality reviewer's call: agrees with the front-line decision on most
+      // rows, but deterministically disagrees on ~1 in 15 (modulo on the row's
+      // own sequence number, never Math.random — this file stays reproducible
+      // by design) so missedSuspicionRate/falseSuspicionRate also get a
+      // non-zero denominator instead of just overallAccuracy.
+      const baseResult: "سليمة" | "اشتباه" = row?.xrayLevelOneResult ?? "سليمة";
+      const seq = row ? row.sourceRowNumber - 1 : 0;
+      const qualityResult: "سليمة" | "اشتباه" =
+        seq % 15 === 0 ? (baseResult === "سليمة" ? "اشتباه" : "سليمة") : baseResult;
+      if (bucket < 2) {
+        items.push({
+          xrayImageId: evt.xrayImageId,
+          templateId: DEMO_TEMPLATE_ID,
+          templateVersion: 1,
+          answers: [
+            { fieldId: "result", value: "سليمة" },
+            { fieldId: "notes", value: "لا ملاحظات" },
+            { fieldId: "qualityImageResult", value: qualityResult },
+          ],
+          lastSavedAt: now,
+          submittedAt: now,
+          answeredBy: empUsername,
+          status: "submitted",
+        });
+        completedEvents.push(
+          buildCompletedEvent({ xrayImageId: evt.xrayImageId, assignedTo: empUsername, eventBy: empUsername })
+        );
+      } else if (bucket === 2) {
+        items.push({
+          xrayImageId: evt.xrayImageId,
+          templateId: DEMO_TEMPLATE_ID,
+          templateVersion: 1,
+          answers: [
+            { fieldId: "result", value: "سليمة" },
+            { fieldId: "qualityImageResult", value: qualityResult },
+          ],
+          lastSavedAt: now,
+          submittedAt: null,
+          answeredBy: empUsername,
+          status: "draft",
+        });
+      }
+      // bucket 3, 4: left pending — no answer record at all.
+    });
+    if (items.length > 0) {
+      await saveEmployeeAnswers(handle, monthFolderName, empUsername, items);
+    }
+  }
+```
+
+## v42.47 — 2026-07-11 — E2 (Batch 5): chart axis labels + legends in the executive report chart primitives
+
+Closes the E2 gap identified in the hardening audit: `charts.ts` had 10 `<text>` elements
+(group/column/row labels, center/percentage readouts) but no dedicated axis-reference or legend
+primitives — `rankedBar`, `gauge`, `donut`, `groupedBars`, `stackedBars`, and `heatmap` gave no
+way to read the underlying scale or, for multi-series charts, tell which color meant which
+series. All additions reuse the pattern already established in this file: reserve a small strip
+of the *existing* viewBox height (never grow past what `opts.height` already promises callers)
+and shrink the main visual to fit; every label routes through the file's existing `escText()`
+helper; RTL placement matches the file's established convention (marker/primary content on the
+RIGHT, growing left — the same order `rankedBar`'s label/track/value row already uses). Two
+small shared helpers (`legendHeight`, `legendRows`) back the vertical swatch-and-label legend
+used by `donut`/`groupedBars`/`stackedBars` so the layout math and RTL positioning is written
+once, not three times. No runtime JS, no new npm dependency, no change to any caller's contract
+(`opts.width`/`opts.height` keep their existing meaning) — pure additions inside `ui/charts.ts`.
+
+**File:** `src/data/reporting/executive/ui/charts.ts`
+
+Docblock discipline list — documents the new legend/axis convention:
+
+**Before:**
+```ts
+// Discipline (master §16 / design §4.3):
+//   • empty / null / zero-denominator data → small neutral "—" empty state, never throw
+//   • percentages clamped to 0–100
+//   • RTL: ranked-bar labels sit on the RIGHT
+//   • text kept minimal; all labels passed in as params (Arabic-ready)
+```
+
+**After:**
+```ts
+// Discipline (master §16 / design §4.3):
+//   • empty / null / zero-denominator data → small neutral "—" empty state, never throw
+//   • percentages clamped to 0–100
+//   • RTL: ranked-bar labels sit on the RIGHT
+//   • text kept minimal; all labels passed in as params (Arabic-ready)
+//   • legends/axis ticks: vertical swatch+label rows, RTL (marker right, label growing
+//     left); reserved inside the existing viewBox height, never grows past opts.height
+//   • every legend/axis label routes through escText() — no new unescaped interpolation
+```
+
+New shared helpers, inserted right after `emptyState()` and before the `// ── types` section:
+
+**Before:** *(nothing — new code)*
+
+**After:**
+```ts
+/** Row height (px) for one vertical legend entry (swatch + label) — derived from the
+ *  micro type size so legends stay visually consistent with the smallest chart text
+ *  already in use (column/group/row labels all use TYPE.micro). */
+const LEGEND_ROW_H = TYPE.micro + 7;
+
+/** Vertical space (px) a legend of `n` entries needs, including top padding. A single
+ *  entry needs no legend — there is nothing to distinguish — so this returns 0 for
+ *  n <= 1, letting callers skip the legend and keep the full chart area. */
+function legendHeight(n: number): number {
+  return n > 1 ? n * LEGEND_ROW_H + 6 : 0;
+}
+
+/**
+ * Vertical legend: one "swatch + label" row per entry, colored by `seriesColor`. RTL —
+ * the swatch sits flush to the right edge with the label growing leftward from it
+ * (`text-anchor="end"`), mirroring the marker/label order used elsewhere in this file
+ * (e.g. rankedBar's label-on-the-right row). `top` is the y-coordinate of the first
+ * row's top edge. Returns raw <rect>/<text> markup to splice into an already-open
+ * <svg>; every label is escText()-escaped (labels/series names are caller-supplied).
+ */
+function legendRows(items: { label: string; colorIndex: number }[], w: number, top: number): string {
+  return items
+    .map((it, i) => {
+      const cy = top + i * LEGEND_ROW_H + LEGEND_ROW_H / 2;
+      const swatchX = w - 12;
+      return (
+        `<rect x="${r(swatchX - 8)}" y="${r(cy - 4)}" width="8" height="8" rx="2" fill="${seriesColor(it.colorIndex)}"/>` +
+        `<text x="${r(swatchX - 12)}" y="${r(cy)}" text-anchor="end" dominant-baseline="middle" font-size="${TYPE.micro}" fill="${cssVar("text")}">${escText(it.label)}</text>`
+      );
+    })
+    .join("");
+}
+```
+
+`rankedBar` — axis reference row (0 → max) framing the shared bar-track scale:
+
+**Before:**
+```ts
+export function rankedBar(data: LabeledValue[], opts: ChartOpts = {}): string {
+  if (!data || data.length === 0) return emptyState(opts.width, opts.height, opts.emptyNote);
+  // Rendered as HTML/CSS (not SVG): Arabic <text> inside SVG shapes unreliably across
+  // renderers, so labels + values live in HTML where RTL Arabic always shapes correctly.
+  // RTL row order (right → left): label · bar track (fills from right) · value.
+  const max = Math.max(0, ...data.map((d) => (Number.isFinite(d.value) ? d.value : 0)));
+  const rows = data
+    .map((d, i) => {
+      const v = Number.isFinite(d.value) ? Math.max(0, d.value) : 0;
+      const pct = max > 0 ? clamp((v / max) * 100, 0, 100) : 0;
+      const w = pct > 0 ? Math.max(3, pct) : 0;
+      return (
+        `<div style="display:flex;align-items:center;gap:12px;width:100%">` +
+        `<span style="flex:0 0 auto;min-width:96px;max-width:40%;text-align:right;font-weight:600;font-size:14px;color:${cssVar("text")};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escText(d.label)}</span>` +
+        `<span style="flex:1 1 auto;height:26px;border-radius:8px;background:${cssVar("line")};position:relative;overflow:hidden">` +
+        `<i style="position:absolute;inset-inline-end:0;top:0;height:100%;width:${r(w)}%;background:${seriesColor(i)};border-radius:8px"></i></span>` +
+        `<span style="flex:0 0 auto;min-width:38px;text-align:left;font-weight:800;font-size:14px;color:${cssVar("primary")}">${r(v)}</span>` +
+        `</div>`
+      );
+    })
+    .join("");
+  return `<div style="display:flex;flex-direction:column;justify-content:center;gap:12px;width:100%;height:100%">${rows}</div>`;
+}
+```
+
+**After:**
+```ts
+export function rankedBar(data: LabeledValue[], opts: ChartOpts = {}): string {
+  if (!data || data.length === 0) return emptyState(opts.width, opts.height, opts.emptyNote);
+  // Rendered as HTML/CSS (not SVG): Arabic <text> inside SVG shapes unreliably across
+  // renderers, so labels + values live in HTML where RTL Arabic always shapes correctly.
+  // RTL row order (right → left): label · bar track (fills from right) · value.
+  const max = Math.max(0, ...data.map((d) => (Number.isFinite(d.value) ? d.value : 0)));
+  const rows = data
+    .map((d, i) => {
+      const v = Number.isFinite(d.value) ? Math.max(0, d.value) : 0;
+      const pct = max > 0 ? clamp((v / max) * 100, 0, 100) : 0;
+      const w = pct > 0 ? Math.max(3, pct) : 0;
+      return (
+        `<div style="display:flex;align-items:center;gap:12px;width:100%">` +
+        `<span style="flex:0 0 auto;min-width:96px;max-width:40%;text-align:right;font-weight:600;font-size:14px;color:${cssVar("text")};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escText(d.label)}</span>` +
+        `<span style="flex:1 1 auto;height:26px;border-radius:8px;background:${cssVar("line")};position:relative;overflow:hidden">` +
+        `<i style="position:absolute;inset-inline-end:0;top:0;height:100%;width:${r(w)}%;background:${seriesColor(i)};border-radius:8px"></i></span>` +
+        `<span style="flex:0 0 auto;min-width:38px;text-align:left;font-weight:800;font-size:14px;color:${cssVar("primary")}">${r(v)}</span>` +
+        `</div>`
+      );
+    })
+    .join("");
+  // Axis reference row: frames the shared 0→max scale every bar is drawn against (bars
+  // are proportional to the same `max`, so the scale is meaningful even though each row
+  // also prints its own value). Reuses the exact label/track/value column widths so the
+  // "0" / max ticks line up under the track they describe. RTL: "0" (baseline) sits by
+  // the label column on the right, the ceiling value by the value column on the left —
+  // same right→left order as the rows above.
+  const axis =
+    max > 0
+      ? `<div style="display:flex;align-items:center;gap:12px;width:100%;margin-top:-2px">` +
+        `<span style="flex:0 0 auto;min-width:96px;max-width:40%"></span>` +
+        `<span style="flex:1 1 auto;display:flex;justify-content:space-between;font-size:${TYPE.micro}px;color:${cssVar("muted")}">` +
+        `<span>0</span><span>${r(max)}</span></span>` +
+        `<span style="flex:0 0 auto;min-width:38px"></span>` +
+        `</div>`
+      : "";
+  return `<div style="display:flex;flex-direction:column;justify-content:center;gap:12px;width:100%;height:100%">${rows}${axis}</div>`;
+}
+```
+
+`donut` — category legend (swatch + label + share %); the ring shrinks to make room:
+
+**Before:**
+```ts
+export function donut(data: LabeledValue[], opts: ChartOpts = {}): string {
+  const positive = (data ?? []).filter((d) => Number.isFinite(d.value) && d.value > 0);
+  const total = positive.reduce((s, d) => s + d.value, 0);
+  if (positive.length === 0 || total <= 0) {
+    return emptyState(opts.width, opts.height, opts.emptyNote);
+  }
+  const w = opts.width ?? 220;
+  const h = opts.height ?? 220;
+  const cx = w / 2;
+  const cy = h / 2;
+  const rad = Math.min(w, h) / 2 - 14;
+  const stroke = Math.max(10, rad * 0.34);
+
+  let acc = -Math.PI / 2;
+  const segs = positive
+    .map((d, i) => {
+      const frac = d.value / total; // total > 0 guaranteed
+      const a0 = acc;
+      const a1 = acc + frac * Math.PI * 2;
+      acc = a1;
+      // full-circle single segment: draw a ring instead of a 0-length arc
+      if (frac >= 0.9999) {
+        return `<circle cx="${r(cx)}" cy="${r(cy)}" r="${r(rad)}" fill="none" stroke="${seriesColor(i)}" stroke-width="${r(stroke)}"/>`;
+      }
+      return `<path d="${arcPath(cx, cy, rad, a0, a1)}" fill="none" stroke="${seriesColor(i)}" stroke-width="${r(stroke)}" stroke-linecap="butt"/>`;
+    })
+    .join("");
+
+  const centerLabel = `${Math.round((positive[0].value / total) * 100)}%`;
+  return (
+    svgOpen(w, h) +
+    `<circle cx="${r(cx)}" cy="${r(cy)}" r="${r(rad)}" fill="none" stroke="${cssVar("line")}" stroke-width="${r(stroke)}"/>` +
+    segs +
+    `<text x="${r(cx)}" y="${r(cy)}" text-anchor="middle" dominant-baseline="middle" font-size="${TYPE.subtitle}" font-weight="800" fill="${cssVar("text")}">${escText(centerLabel)}</text>` +
+    `</svg>`
+  );
+}
+```
+
+**After:**
+```ts
+export function donut(data: LabeledValue[], opts: ChartOpts = {}): string {
+  const positive = (data ?? []).filter((d) => Number.isFinite(d.value) && d.value > 0);
+  const total = positive.reduce((s, d) => s + d.value, 0);
+  if (positive.length === 0 || total <= 0) {
+    return emptyState(opts.width, opts.height, opts.emptyNote);
+  }
+  const w = opts.width ?? 220;
+  const h = opts.height ?? 220;
+  // Category legend reserves a bottom strip inside the SAME viewBox height (opts.height
+  // keeps its external meaning) — the ring shrinks to make room, same pattern used by
+  // the other chart primitives. Capped so a long category list can't collapse the ring.
+  const legendH = Math.min(h * 0.5, legendHeight(positive.length));
+  const ringAreaH = Math.max(60, h - legendH);
+  const cx = w / 2;
+  const cy = ringAreaH / 2;
+  const rad = Math.min(w, ringAreaH) / 2 - 14;
+  const stroke = Math.max(10, rad * 0.34);
+
+  let acc = -Math.PI / 2;
+  const segs = positive
+    .map((d, i) => {
+      const frac = d.value / total; // total > 0 guaranteed
+      const a0 = acc;
+      const a1 = acc + frac * Math.PI * 2;
+      acc = a1;
+      // full-circle single segment: draw a ring instead of a 0-length arc
+      if (frac >= 0.9999) {
+        return `<circle cx="${r(cx)}" cy="${r(cy)}" r="${r(rad)}" fill="none" stroke="${seriesColor(i)}" stroke-width="${r(stroke)}"/>`;
+      }
+      return `<path d="${arcPath(cx, cy, rad, a0, a1)}" fill="none" stroke="${seriesColor(i)}" stroke-width="${r(stroke)}" stroke-linecap="butt"/>`;
+    })
+    .join("");
+
+  const centerLabel = `${Math.round((positive[0].value / total) * 100)}%`;
+  // Category legend — one row per segment, RTL (swatch on the right, label growing
+  // left from it). Skipped for a single-category donut: nothing to distinguish.
+  const legend =
+    positive.length > 1
+      ? legendRows(
+          positive.map((d, i) => ({
+            label: `${d.label} · ${Math.round((d.value / total) * 100)}%`,
+            colorIndex: i,
+          })),
+          w,
+          h - legendH + 4,
+        )
+      : "";
+
+  return (
+    svgOpen(w, h) +
+    `<circle cx="${r(cx)}" cy="${r(cy)}" r="${r(rad)}" fill="none" stroke="${cssVar("line")}" stroke-width="${r(stroke)}"/>` +
+    segs +
+    `<text x="${r(cx)}" y="${r(cy)}" text-anchor="middle" dominant-baseline="middle" font-size="${TYPE.subtitle}" font-weight="800" fill="${cssVar("text")}">${escText(centerLabel)}</text>` +
+    legend +
+    `</svg>`
+  );
+}
+```
+
+`gauge` — 0%/100% axis-reference ticks at the two ends of the dial:
+
+**Before:**
+```ts
+export function gauge(value: number | null, opts: ChartOpts = {}): string {
+  const pct = clampPct(value);
+  if (pct === null) return emptyState(opts.width, opts.height ?? 150, opts.emptyNote);
+  const w = opts.width ?? 240;
+  const h = opts.height ?? 150;
+  const cx = w / 2;
+  const cy = h - 18;
+  const rad = Math.min(w / 2, h - 24) - 8;
+  const stroke = Math.max(10, rad * 0.22);
+  // semicircle from 180° (left) to 0° (right)
+  const a0 = Math.PI;
+  const a1 = Math.PI + (pct / 100) * Math.PI;
+  const role =
+    pct >= 90 ? "success" : pct >= 75 ? "primary" : pct >= 50 ? "info" : "danger";
+
+  return (
+    svgOpen(w, h) +
+    `<path d="${arcPath(cx, cy, rad, a0, 2 * Math.PI)}" fill="none" stroke="${cssVar("line")}" stroke-width="${r(stroke)}" stroke-linecap="round"/>` +
+    `<path d="${arcPath(cx, cy, rad, a0, a1)}" fill="none" stroke="${cssVar(role)}" stroke-width="${r(stroke)}" stroke-linecap="round"/>` +
+    `<text x="${r(cx)}" y="${r(cy - 6)}" text-anchor="middle" font-size="${TYPE.title}" font-weight="800" fill="${cssVar("text")}">${r(Math.round(pct))}%</text>` +
+    `</svg>`
+  );
+}
+```
+
+**After:**
+```ts
+export function gauge(value: number | null, opts: ChartOpts = {}): string {
+  const pct = clampPct(value);
+  if (pct === null) return emptyState(opts.width, opts.height ?? 150, opts.emptyNote);
+  const w = opts.width ?? 240;
+  const h = opts.height ?? 150;
+  // Reserve a thin strip under the dial for 0%/100% axis-reference ticks, inside the
+  // SAME viewBox height (opts.height keeps meaning what callers expect) — the dial
+  // shrinks slightly to make room, same pattern used by the other chart primitives.
+  const tickAreaH = TYPE.micro + 8;
+  const dialH = h - tickAreaH;
+  const cx = w / 2;
+  const cy = dialH - 18;
+  const rad = Math.min(w / 2, dialH - 24) - 8;
+  const stroke = Math.max(10, rad * 0.22);
+  // semicircle from 180° (left) to 0° (right)
+  const a0 = Math.PI;
+  const a1 = Math.PI + (pct / 100) * Math.PI;
+  const role =
+    pct >= 90 ? "success" : pct >= 75 ? "primary" : pct >= 50 ? "info" : "danger";
+  // Axis reference labels at the two ends of the dial's scale. The dial itself stays
+  // geometric (a semicircle always reads low→high left→right, like a physical gauge) —
+  // only the tick text-anchors are RTL-tuned so neither label runs past the viewBox.
+  const tickY = h - 4;
+  const axis =
+    `<text x="${r(cx - rad)}" y="${r(tickY)}" text-anchor="start" font-size="${TYPE.micro}" fill="${cssVar("muted")}">0%</text>` +
+    `<text x="${r(cx + rad)}" y="${r(tickY)}" text-anchor="end" font-size="${TYPE.micro}" fill="${cssVar("muted")}">100%</text>`;
+
+  return (
+    svgOpen(w, h) +
+    `<path d="${arcPath(cx, cy, rad, a0, 2 * Math.PI)}" fill="none" stroke="${cssVar("line")}" stroke-width="${r(stroke)}" stroke-linecap="round"/>` +
+    `<path d="${arcPath(cx, cy, rad, a0, a1)}" fill="none" stroke="${cssVar(role)}" stroke-width="${r(stroke)}" stroke-linecap="round"/>` +
+    `<text x="${r(cx)}" y="${r(cy - 6)}" text-anchor="middle" font-size="${TYPE.title}" font-weight="800" fill="${cssVar("text")}">${r(Math.round(pct))}%</text>` +
+    axis +
+    `</svg>`
+  );
+}
+```
+
+`groupedBars` — series legend (swatch + label), skipped for a single series:
+
+**Before:**
+```ts
+export function groupedBars(data: SeriesGroup, opts: ChartOpts = {}): string {
+  if (!data || data.groups.length === 0 || data.series.length === 0) {
+    return emptyState(opts.width, opts.height, opts.emptyNote);
+  }
+  const w = opts.width ?? 360;
+  const h = opts.height ?? 200;
+  const padBottom = 24;
+  const padTop = 10;
+  const plotH = h - padBottom - padTop;
+  const max = seriesMax(data);
+  const groupW = w / data.groups.length;
+  const sCount = data.series.length;
+  const barW = Math.max(4, (groupW * 0.7) / sCount);
+
+  let bars = "";
+  data.groups.forEach((g, gi) => {
+    const gx = gi * groupW + groupW * 0.15;
+    data.series.forEach((ser, si) => {
+      const v = Number.isFinite(ser.values[gi]) ? Math.max(0, ser.values[gi]) : 0;
+      const frac = max > 0 ? v / max : 0; // divide-by-zero guard
+      const bh = clamp(frac, 0, 1) * plotH;
+      const x = gx + si * barW;
+      const y = padTop + (plotH - bh);
+      bars += `<rect x="${r(x)}" y="${r(y)}" width="${r(barW - 1)}" height="${r(bh)}" rx="2" fill="${seriesColor(si)}"/>`;
+    });
+    bars += `<text x="${r(gi * groupW + groupW / 2)}" y="${r(h - 8)}" text-anchor="middle" font-size="${TYPE.micro}" fill="${cssVar("muted")}">${escText(g)}</text>`;
+  });
+
+  return (
+    svgOpen(w, h) +
+    `<line x1="0" y1="${r(padTop + plotH)}" x2="${r(w)}" y2="${r(padTop + plotH)}" stroke="${cssVar("line")}" stroke-width="1"/>` +
+    bars +
+    `</svg>`
+  );
+}
+```
+
+**After:**
+```ts
+export function groupedBars(data: SeriesGroup, opts: ChartOpts = {}): string {
+  if (!data || data.groups.length === 0 || data.series.length === 0) {
+    return emptyState(opts.width, opts.height, opts.emptyNote);
+  }
+  const w = opts.width ?? 360;
+  const h = opts.height ?? 200;
+  const padBottom = 24;
+  const padTop = 10;
+  // Series legend reserves a bottom strip inside the SAME viewBox height — the plot
+  // shrinks to make room, same pattern used by the other chart primitives. Skipped for
+  // a single series (legendHeight returns 0): nothing to distinguish, so behavior is
+  // identical to before this change.
+  const legendH = legendHeight(data.series.length);
+  const plotH = Math.max(20, h - padBottom - padTop - legendH);
+  const max = seriesMax(data);
+  const groupW = w / data.groups.length;
+  const sCount = data.series.length;
+  const barW = Math.max(4, (groupW * 0.7) / sCount);
+
+  let bars = "";
+  data.groups.forEach((g, gi) => {
+    const gx = gi * groupW + groupW * 0.15;
+    data.series.forEach((ser, si) => {
+      const v = Number.isFinite(ser.values[gi]) ? Math.max(0, ser.values[gi]) : 0;
+      const frac = max > 0 ? v / max : 0; // divide-by-zero guard
+      const bh = clamp(frac, 0, 1) * plotH;
+      const x = gx + si * barW;
+      const y = padTop + (plotH - bh);
+      bars += `<rect x="${r(x)}" y="${r(y)}" width="${r(barW - 1)}" height="${r(bh)}" rx="2" fill="${seriesColor(si)}"/>`;
+    });
+    bars += `<text x="${r(gi * groupW + groupW / 2)}" y="${r(padTop + plotH + 16)}" text-anchor="middle" font-size="${TYPE.micro}" fill="${cssVar("muted")}">${escText(g)}</text>`;
+  });
+
+  const legend =
+    data.series.length > 1
+      ? legendRows(
+          data.series.map((s, i) => ({ label: s.label, colorIndex: i })),
+          w,
+          h - legendH + 4,
+        )
+      : "";
+
+  return (
+    svgOpen(w, h) +
+    `<line x1="0" y1="${r(padTop + plotH)}" x2="${r(w)}" y2="${r(padTop + plotH)}" stroke="${cssVar("line")}" stroke-width="1"/>` +
+    bars +
+    legend +
+    `</svg>`
+  );
+}
+```
+
+`stackedBars` — same series-legend treatment as `groupedBars`:
+
+**Before:**
+```ts
+export function stackedBars(data: SeriesGroup, opts: ChartOpts = {}): string {
+  if (!data || data.groups.length === 0 || data.series.length === 0) {
+    return emptyState(opts.width, opts.height, opts.emptyNote);
+  }
+  const w = opts.width ?? 360;
+  const h = opts.height ?? 200;
+  const padBottom = 24;
+  const padTop = 10;
+  const plotH = h - padBottom - padTop;
+  // tallest stack total across groups
+  let max = 0;
+  data.groups.forEach((_, gi) => {
+    let sum = 0;
+    for (const ser of data.series) {
+      const v = ser.values[gi];
+      if (Number.isFinite(v) && v > 0) sum += v;
+    }
+    if (sum > max) max = sum;
+  });
+  const groupW = w / data.groups.length;
+  const barW = Math.max(6, groupW * 0.55);
+
+  let bars = "";
+  data.groups.forEach((g, gi) => {
+    const x = gi * groupW + (groupW - barW) / 2;
+    let yCursor = padTop + plotH;
+    data.series.forEach((ser, si) => {
+      const v = Number.isFinite(ser.values[gi]) ? Math.max(0, ser.values[gi]) : 0;
+      const frac = max > 0 ? v / max : 0; // divide-by-zero guard
+      const bh = clamp(frac, 0, 1) * plotH;
+      yCursor -= bh;
+      if (bh > 0) {
+        bars += `<rect x="${r(x)}" y="${r(yCursor)}" width="${r(barW)}" height="${r(bh)}" fill="${seriesColor(si)}"/>`;
+      }
+    });
+    bars += `<text x="${r(gi * groupW + groupW / 2)}" y="${r(h - 8)}" text-anchor="middle" font-size="${TYPE.micro}" fill="${cssVar("muted")}">${escText(g)}</text>`;
+  });
+
+  return (
+    svgOpen(w, h) +
+    `<line x1="0" y1="${r(padTop + plotH)}" x2="${r(w)}" y2="${r(padTop + plotH)}" stroke="${cssVar("line")}" stroke-width="1"/>` +
+    bars +
+    `</svg>`
+  );
+}
+```
+
+**After:**
+```ts
+export function stackedBars(data: SeriesGroup, opts: ChartOpts = {}): string {
+  if (!data || data.groups.length === 0 || data.series.length === 0) {
+    return emptyState(opts.width, opts.height, opts.emptyNote);
+  }
+  const w = opts.width ?? 360;
+  const h = opts.height ?? 200;
+  const padBottom = 24;
+  const padTop = 10;
+  // Series legend reserves a bottom strip inside the SAME viewBox height — see
+  // groupedBars for the identical pattern (kept consistent between the two).
+  const legendH = legendHeight(data.series.length);
+  const plotH = Math.max(20, h - padBottom - padTop - legendH);
+  // tallest stack total across groups
+  let max = 0;
+  data.groups.forEach((_, gi) => {
+    let sum = 0;
+    for (const ser of data.series) {
+      const v = ser.values[gi];
+      if (Number.isFinite(v) && v > 0) sum += v;
+    }
+    if (sum > max) max = sum;
+  });
+  const groupW = w / data.groups.length;
+  const barW = Math.max(6, groupW * 0.55);
+
+  let bars = "";
+  data.groups.forEach((g, gi) => {
+    const x = gi * groupW + (groupW - barW) / 2;
+    let yCursor = padTop + plotH;
+    data.series.forEach((ser, si) => {
+      const v = Number.isFinite(ser.values[gi]) ? Math.max(0, ser.values[gi]) : 0;
+      const frac = max > 0 ? v / max : 0; // divide-by-zero guard
+      const bh = clamp(frac, 0, 1) * plotH;
+      yCursor -= bh;
+      if (bh > 0) {
+        bars += `<rect x="${r(x)}" y="${r(yCursor)}" width="${r(barW)}" height="${r(bh)}" fill="${seriesColor(si)}"/>`;
+      }
+    });
+    bars += `<text x="${r(gi * groupW + groupW / 2)}" y="${r(padTop + plotH + 16)}" text-anchor="middle" font-size="${TYPE.micro}" fill="${cssVar("muted")}">${escText(g)}</text>`;
+  });
+
+  const legend =
+    data.series.length > 1
+      ? legendRows(
+          data.series.map((s, i) => ({ label: s.label, colorIndex: i })),
+          w,
+          h - legendH + 4,
+        )
+      : "";
+
+  return (
+    svgOpen(w, h) +
+    `<line x1="0" y1="${r(padTop + plotH)}" x2="${r(w)}" y2="${r(padTop + plotH)}" stroke="${cssVar("line")}" stroke-width="1"/>` +
+    bars +
+    legend +
+    `</svg>`
+  );
+}
+```
+
+`heatmap` — intensity-scale legend (4-step opacity ramp with أعلى/أقل end labels):
+
+**Before:**
+```ts
+export function heatmap(data: Matrix, opts: ChartOpts = {}): string {
+  if (!data || data.rows.length === 0 || data.cols.length === 0) {
+    return emptyState(opts.width, opts.height, opts.emptyNote);
+  }
+  const rowLabelW = 96;
+  const colLabelH = 20;
+  const cell = 34;
+  const w = opts.width ?? rowLabelW + data.cols.length * cell + 4;
+  const h = opts.height ?? colLabelH + data.rows.length * cell + 4;
+  const gridW = w - rowLabelW - 2;
+  const gridH = h - colLabelH - 2;
+  const cw = gridW / data.cols.length;
+  const ch = gridH / data.rows.length;
+
+  // max for intensity normalization (ignore null/non-finite)
+  let max = 0;
+  for (const row of data.values) {
+    for (const v of row ?? []) {
+      if (v !== null && Number.isFinite(v) && (v as number) > max) max = v as number;
+    }
+  }
+
+  let cells = "";
+  data.rows.forEach((rowLabel, ri) => {
+    const y = colLabelH + ri * ch;
+    cells += `<text x="${r(w - 2)}" y="${r(y + ch / 2)}" text-anchor="end" dominant-baseline="middle" font-size="${TYPE.micro}" fill="${cssVar("muted")}">${escText(rowLabel)}</text>`;
+    data.cols.forEach((_, ci) => {
+      const x = ci * cw;
+      const raw = data.values?.[ri]?.[ci];
+      const isNull = raw === null || raw === undefined || !Number.isFinite(raw as number);
+      const v = isNull ? 0 : (raw as number);
+      const intensity = max > 0 ? clamp(v / max, 0, 1) : 0; // divide-by-zero guard
+      const fillOpacity = isNull ? 0 : 0.12 + intensity * 0.78;
+      const cellFill = isNull ? "none" : cssVar("info");
+      cells +=
+        `<rect x="${r(x + 1)}" y="${r(y + 1)}" width="${r(cw - 2)}" height="${r(ch - 2)}" rx="3" fill="${cellFill}" fill-opacity="${r(fillOpacity)}" stroke="${cssVar("line")}" stroke-width="0.5"/>` +
+        `<text x="${r(x + cw / 2)}" y="${r(y + ch / 2)}" text-anchor="middle" dominant-baseline="middle" font-size="${TYPE.micro}" fill="${cssVar("text")}">${isNull ? "—" : r(v)}</text>`;
+    });
+  });
+
+  // column labels along the top
+  let colLabels = "";
+  data.cols.forEach((c, ci) => {
+    colLabels += `<text x="${r(ci * cw + cw / 2)}" y="${r(colLabelH - 6)}" text-anchor="middle" font-size="${TYPE.micro}" fill="${cssVar("muted")}">${escText(c)}</text>`;
+  });
+
+  return svgOpen(w, h) + colLabels + cells + `</svg>`;
+}
+```
+
+**After:**
+```ts
+export function heatmap(data: Matrix, opts: ChartOpts = {}): string {
+  if (!data || data.rows.length === 0 || data.cols.length === 0) {
+    return emptyState(opts.width, opts.height, opts.emptyNote);
+  }
+  const rowLabelW = 96;
+  const colLabelH = 20;
+  const legendH = TYPE.micro + 14; // intensity-scale strip reserved at the bottom
+  const cell = 34;
+  const w = opts.width ?? rowLabelW + data.cols.length * cell + 4;
+  const h = opts.height ?? colLabelH + data.rows.length * cell + legendH + 4;
+  const gridW = w - rowLabelW - 2;
+  const gridH = h - colLabelH - legendH - 2;
+  const cw = gridW / data.cols.length;
+  const ch = gridH / data.rows.length;
+
+  // max for intensity normalization (ignore null/non-finite)
+  let max = 0;
+  for (const row of data.values) {
+    for (const v of row ?? []) {
+      if (v !== null && Number.isFinite(v) && (v as number) > max) max = v as number;
+    }
+  }
+
+  let cells = "";
+  data.rows.forEach((rowLabel, ri) => {
+    const y = colLabelH + ri * ch;
+    cells += `<text x="${r(w - 2)}" y="${r(y + ch / 2)}" text-anchor="end" dominant-baseline="middle" font-size="${TYPE.micro}" fill="${cssVar("muted")}">${escText(rowLabel)}</text>`;
+    data.cols.forEach((_, ci) => {
+      const x = ci * cw;
+      const raw = data.values?.[ri]?.[ci];
+      const isNull = raw === null || raw === undefined || !Number.isFinite(raw as number);
+      const v = isNull ? 0 : (raw as number);
+      const intensity = max > 0 ? clamp(v / max, 0, 1) : 0; // divide-by-zero guard
+      const fillOpacity = isNull ? 0 : 0.12 + intensity * 0.78;
+      const cellFill = isNull ? "none" : cssVar("info");
+      cells +=
+        `<rect x="${r(x + 1)}" y="${r(y + 1)}" width="${r(cw - 2)}" height="${r(ch - 2)}" rx="3" fill="${cellFill}" fill-opacity="${r(fillOpacity)}" stroke="${cssVar("line")}" stroke-width="0.5"/>` +
+        `<text x="${r(x + cw / 2)}" y="${r(y + ch / 2)}" text-anchor="middle" dominant-baseline="middle" font-size="${TYPE.micro}" fill="${cssVar("text")}">${isNull ? "—" : r(v)}</text>`;
+    });
+  });
+
+  // column labels along the top
+  let colLabels = "";
+  data.cols.forEach((c, ci) => {
+    colLabels += `<text x="${r(ci * cw + cw / 2)}" y="${r(colLabelH - 6)}" text-anchor="middle" font-size="${TYPE.micro}" fill="${cssVar("muted")}">${escText(c)}</text>`;
+  });
+
+  // Intensity legend — a short 4-step opacity ramp explaining the cell color-coding.
+  // RTL: "الأعلى" (highest) sits on the left next to the darkest swatch, "أقل" (lowest)
+  // on the right next to the lightest — mirrors the right=baseline/left=ceiling
+  // convention used by rankedBar's axis row above.
+  const steps = 4;
+  const swW = 16;
+  const swGap = 2;
+  const legendW = steps * swW + (steps - 1) * swGap;
+  const legendX0 = w / 2 - legendW / 2;
+  const legendY = h - legendH + 6;
+  let legendSwatches = "";
+  for (let i = 0; i < steps; i++) {
+    const op = 0.12 + ((steps - 1 - i) / (steps - 1)) * 0.78;
+    const x = legendX0 + i * (swW + swGap);
+    legendSwatches += `<rect x="${r(x)}" y="${r(legendY)}" width="${r(swW)}" height="8" rx="2" fill="${cssVar("info")}" fill-opacity="${r(op)}"/>`;
+  }
+  const legend =
+    max > 0
+      ? `<text x="${r(legendX0 - 6)}" y="${r(legendY + 7)}" text-anchor="end" font-size="${TYPE.micro}" fill="${cssVar("muted")}">الأعلى (${r(max)})</text>` +
+        legendSwatches +
+        `<text x="${r(legendX0 + legendW + 6)}" y="${r(legendY + 7)}" text-anchor="start" font-size="${TYPE.micro}" fill="${cssVar("muted")}">أقل</text>`
+      : "";
+
+  return svgOpen(w, h) + colLabels + cells + legend + `</svg>`;
+}
+```
+
+**File:** `src/data/reporting/executive/ui/charts.test.ts`
+
+Adds an import of the shared D2 XSS fixture and new `it()` blocks proving: (1) the new legend/
+axis markup renders for the cases each chart's discipline comment calls out (multi-category
+donut, multi-series grouped/stacked bars, rankedBar's shared scale, gauge's dial ends, heatmap's
+intensity ramp), (2) each is correctly skipped/absent for the single-item case (nothing to
+legend), and (3) `donut`/`groupedBars` labels routed through the new `legendRows()` helper are
+escaped — the existing builder-level XSS tests only ever pass these two functions static Arabic
+labels, so they never previously exercised this interpolation point.
+
+**Before:**
+```ts
+import { describe, it, expect } from "vitest";
+import {
+  rankedBar,
+  donut,
+  gauge,
+  groupedBars,
+  stackedBars,
+  quadrantScatter,
+  heatmap,
+  sparkline,
+} from "./charts";
+```
+
+**After:**
+```ts
+import { describe, it, expect } from "vitest";
+import {
+  rankedBar,
+  donut,
+  gauge,
+  groupedBars,
+  stackedBars,
+  quadrantScatter,
+  heatmap,
+  sparkline,
+} from "./charts";
+import { XSS_PAYLOADS, XSS_MARKER, findLiveInjection } from "../../xssPayloads";
+```
+
+Plus one `it()` per chart type (added at the end of each existing `describe()` block) covering
+the legend/axis-ticks addition, the single-item skip case, and (for `donut`/`groupedBars`) the
+escaping check — see the file for the exact assertions.
+
+## v42.43 — 2026-07-11 — E1 (Batch 5): shared `useFocusTrap` hook + Testing Library unit test
+
+Accessibility pass groundwork. The 8 `role="dialog"` components had ad-hoc or missing focus
+management: `ConfirmDialog` and `AuthGate`'s admin modal each hand-rolled a slightly different
+Tab trap; the other six had no trap at all, so keyboard users could Tab out of an open modal
+into the background. This entry adds ONE shared hook (adopted by every dialog in the following
+entries) plus a unit test that pins its contract, so all adoption sites are protected by one test
+file.
+
+The hook: `useFocusTrap<T>({ onEscape?, enabled?, restoreFocus? })` returns a ref to attach to
+the dialog container. On activation it (1) records the currently-focused element, (2) focuses the
+first focusable descendant. While active, a capture-phase `keydown` listener traps Tab inside the
+container (Shift+Tab from the first focusable wraps to the last; Tab from the last wraps to the
+first; focus that escaped the container is pulled back) and calls `onEscape` on Escape. On
+deactivation/unmount it restores focus to the recorded trigger element. `enabled` (default true)
+lets parents that render a modal inline gate the trap on their open flag; whole-component modals
+that only mount when open can omit it.
+
+**File:** `src/hooks/useFocusTrap.ts` (new)
+
+New hook module (see contract above). Uses a `FOCUSABLE_SELECTOR` covering links, non-disabled
+form controls/buttons, and `[tabindex]:not([tabindex="-1"])`. Keeps the latest `onEscape` in a
+ref so the effect never re-subscribes on every render. No visibility (`offsetParent`) filtering,
+so it behaves identically under jsdom (Vitest) and Chromium.
+
+**File:** `src/hooks/useFocusTrap.test.tsx` (new)
+
+`@vitest-environment jsdom` Testing Library test covering the four contract points: Tab from the
+last focusable wraps to the first, Shift+Tab from the first wraps to the last, Escape invokes the
+`onEscape` callback, and unmounting restores focus to the trigger element that was focused before
+the trap activated. Also asserts initial focus lands on the first focusable on open.
+
+## v42.44 — 2026-07-11 — E1 (Batch 5): adopt useFocusTrap in ConfirmDialog + AuthGate admin modal
+
+Replaces the two hand-rolled focus traps with the shared `useFocusTrap` hook. Both had a
+partial trap (`ConfirmDialog` also handled Escape + focus-restore; `AuthGate`'s admin modal
+trapped Tab only, with no Escape-in-hook and no first-focus-on-open). The hook unifies both.
+
+**File:** `src/components/ConfirmDialog/ConfirmDialog.tsx`
+
+**Before:**
+```tsx
+import { useEffect, useRef, type ReactNode } from "react";
+...
+  const dialogRef = useRef<HTMLElement | null>(null);
+  const cancelRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    cancelRef.current?.focus();
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") { event.stopPropagation(); onCancel(); return; }
+      if (event.key !== "Tab" || !dialogRef.current) return;
+      const focusable = dialogRef.current.querySelectorAll<HTMLElement>('button, [tabindex]:not([tabindex="-1"])');
+      ...manual wrap...
+    }
+    document.addEventListener("keydown", handleKeyDown, true);
+    return () => document.removeEventListener("keydown", handleKeyDown, true);
+  }, [open, onCancel]);
+```
+
+**After:**
+```tsx
+import { type ReactNode } from "react";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
+...
+  // Focus-trap, Escape and focus-restore handled by the shared hook.
+  const dialogRef = useFocusTrap<HTMLElement>({ onEscape: onCancel, enabled: open });
+```
+
+The `cancelRef` is dropped; the hook focuses the first focusable, which is the cancel button
+(rendered first in the actions row) — the same safe default as before.
+
+**File:** `src/auth/AuthGate.tsx`
+
+**Before:**
+```tsx
+  const adminModalRef = useRef<HTMLElement | null>(null);
+  const triggerRef = useRef<HTMLElement | null>(null);
+  ...
+  useEffect(() => {
+    if (!isAdminModalOpen || !adminModalRef.current) return;
+    const modal = adminModalRef.current;
+    const focusable = modal.querySelectorAll<HTMLElement>('input, button, [tabindex]:not([tabindex="-1"])');
+    ...manual Tab-only wrap on modal.addEventListener...
+  }, [isAdminModalOpen]);
+  ...
+  // shortcut handler: triggerRef.current = document.activeElement ...
+  // closeAdminModal: setIsAdminModalOpen(false); setAdminPasscode(""); triggerRef.current?.focus();
+  // <input ... autoFocus ... />
+  // <section ... ref={adminModalRef as RefObject<HTMLElement>}>
+```
+
+**After:**
+```tsx
+  const adminModalRef = useFocusTrap<HTMLElement>({ onEscape: closeAdminModal, enabled: isAdminModalOpen });
+  ...
+  // shortcut handler no longer records a trigger ref (hook restores focus)
+  // closeAdminModal: setIsAdminModalOpen(false); setAdminPasscode(""); (focus restore via hook)
+  // <input ... /> (autoFocus removed — hook focuses the first focusable, i.e. this input)
+  // <section ... ref={adminModalRef}>
+```
+
+Dropped the now-unused `triggerRef` and the `RefObject` type import; `useEffect`/`useRef` stay
+(other effects/refs remain). The full-screen login panel (also `role="dialog"`) is intentionally
+NOT trapped — it is the entire page, not an open/close modal with a trigger to restore to.
+
+Removing the imperative trap effect made the component analyzable by the React Compiler lint
+rules, which then surfaced a pre-existing impure `Date.now()` call in render on the submit
+button's `disabled` prop. Fixed by deriving `disabled` from the already-ticking
+`lockoutSecondsLeft` state (matching the sibling label expression 3 lines below) instead of
+`Date.now()`. Behavior is unchanged where it matters: the actual lockout is enforced in the
+`loginAsEmployee` submit handler's `Date.now()` guard, not the button's disabled state.
+
+```tsx
+// Before: disabled={lockoutUntil !== null && Date.now() < lockoutUntil}
+// After:  disabled={lockoutUntil !== null && lockoutSecondsLeft > 0}
+```
+
+## v42.45 — 2026-07-11 — E1 (Batch 5): adopt useFocusTrap in EmployeeWorkspace dialogs + icon-button aria-labels
+
+Adopts the shared hook in the four EmployeeWorkspace modal dialogs and adds accessible names to
+two icon-only dismiss buttons that had none.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/ReviewModal.tsx`
+
+Whole-component modal (mounts only when open). Added
+`const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onClose });` and `ref={dialogRef}`
+on the `role="dialog"` backdrop. Previously no trap and no Escape handling.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/RequestList.tsx`
+
+The bulk-confirm modal is rendered inline inside the always-mounted list, so the trap is gated:
+`const bulkDialogRef = useFocusTrap<HTMLDivElement>({ onEscape: () => setBulkAction(null), enabled: bulkAction !== null });`
+with `ref={bulkDialogRef}` on the `role="dialog"` backdrop. Also added `aria-label="إغلاق"` to the
+icon-only `<X>` dismiss button on the bulk-result banner (previously had no accessible name).
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx`
+
+Two whole-component modals — `ReferralRequestModal` and `ReplacementDialog` — each gained
+`const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onClose });` and `ref={dialogRef}` on
+their `role="dialog"` backdrops. Also added `aria-label="إغلاق"` to the icon-only `<X>` dismiss
+button on the status-message banner (previously had no accessible name). The template-reload
+button in `QueueToolbar` already had both `title` and `aria-label`; unchanged.
+
+**Before (representative — each dialog):**
+```tsx
+return (
+  <div className="ew-modal-backdrop" role="dialog" aria-modal="true">
+    ...
+    <button ... onClick={() => setStatusMsg(null)}><X size={14} /></button>
+```
+
+**After:**
+```tsx
+const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onClose });
+return (
+  <div ref={dialogRef} className="ew-modal-backdrop" role="dialog" aria-modal="true">
+    ...
+    <button ... aria-label="إغلاق" onClick={() => setStatusMsg(null)}><X size={14} /></button>
+```
+
+## v42.46 — 2026-07-11 — E1 (Batch 5): adopt useFocusTrap in Archive, WorkspaceGate + FieldDropDialog
+
+Completes E1 hook adoption across the remaining four `role="dialog"` instances (the 8th file,
+`WorkspaceGate.tsx`, also carries the non-modal `FirstRunChecklist` `role="complementary"`
+onboarding aside, which is intentionally NOT trapped — it is persistent chrome, not a modal).
+
+**File:** `src/components/Sidebar/Tabs/Archive/index.tsx`
+
+Both whole-component modals — `MonthLockDialog` and `RestoreDialog` — gained
+`const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onClose });` and `ref={dialogRef}` on
+their `arc-modal-backdrop` `role="dialog"` elements. `RestoreDialog`'s step-2 `autoFocus` input is
+kept: it is a whole-component modal so the trigger is captured at mount (step 1, before that
+input exists), and the `autoFocus` correctly moves focus to the confirm input when the user
+advances to step 2. The two `<X>` close buttons already had `aria-label="إغلاق"`.
+
+**File:** `src/data/workspace/WorkspaceGate.tsx`
+
+The view-passcode modal is rendered inline in `WorkspacePicker`, so the trap is gated:
+`const viewDialogRef = useFocusTrap<HTMLDivElement>({ onEscape: closeViewModal, enabled: isViewModalOpen });`
+with `ref={viewDialogRef}` on the `role="dialog"` section. Removed the input's `autoFocus`: for an
+inline modal, `autoFocus` fires before the trap effect and would corrupt the recorded trigger; the
+hook focuses the first focusable (that same input) instead. Escape was already handled by the
+input's `onKeyDown` (Enter/Escape); the hook adds document-level Escape too (redundant, harmless).
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/FieldDropDialog.tsx`
+
+Whole-component popover dialog. Added `const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onCancel });`
+and `ref={dialogRef}` on the inner `role="dialog"` element (not the click-outside backdrop). This
+adds Tab-trapping and Escape-to-cancel, which the popover previously lacked (it only closed on
+outside `mousedown`).
+
+**Before (representative):**
+```tsx
+return (
+  <div className="arc-modal-backdrop" role="dialog" aria-modal="true">
+```
+
+**After:**
+```tsx
+const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onClose });
+return (
+  <div ref={dialogRef} className="arc-modal-backdrop" role="dialog" aria-modal="true">
+```
+
+## v42.42 — 2026-07-11 — D3 (Batch 3): import-mapping edge-case tests (column-hint resolution)
+
+D3's target is `buildColumnHintsFromRows` — the function that resolves a workbook's actual Excel
+column headers against `PopulationConfig.systemFields` + `mappingTemplates[0].columnMappings` /
+`.biColumnMappings`, and whose output (`riskColumnHints` / `biColumnHints` in `index.tsx`) is
+passed as `MappingSettingsModal`'s `processingContext` props and rendered as the "sheets" tab's
+per-field detected-column hints (`ColumnHints`, "لم يتم العثور على تطابق واضح" when unmatched). It
+was a private, unexported function embedded in the 2437-line `Population/index.tsx` component
+file. Rather than render the modal/wizard to exercise it (which would drag in `xlsx`, the Excel
+Web Worker, and React), it is extracted — unchanged — into its own module so it is directly
+unit-testable as a pure `(rows, config) -> Record<fieldKey, string[]>` function. No behavior
+change; `index.tsx` now imports it from the new module instead of defining it locally.
+
+**File:** `src/components/Sidebar/Tabs/Population/components/columnMappingHints.ts` (new)
+
+`normalizeHeaderToken` + `buildColumnHintsFromRows`, moved verbatim out of `index.tsx` and
+exported.
+
+**File:** `src/components/Sidebar/Tabs/Population/index.tsx`
+
+Removed the two function definitions (now imported from `./components/columnMappingHints`); the
+two `useMemo` call sites (`riskColumnHints`, `biColumnHints`) are unchanged.
+
+**Before:**
+```tsx
+import MappingSettingsModal from "./components/MappingSettingsModal";
+```
+```tsx
+function normalizeHeaderToken(value: string): string {
+  return value
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/[أإآ]/g, "ا")
+    .replace(/ى/g, "ي")
+    .replace(/ة/g, "ه")
+    .replace(/[ـ]/g, "")
+    .toLowerCase();
+}
+
+function buildColumnHintsFromRows(
+  rows: Array<{ rawRow?: Record<string, unknown> }>,
+  config: PopulationConfig
+): Record<string, string[]> {
+  const headers = new Set<string>();
+  for (const row of rows.slice(0, 1500)) {
+    for (const header of Object.keys(row.rawRow ?? {})) {
+      if (header.trim()) headers.add(header.trim());
+    }
+  }
+
+  const normalizedHeaders = Array.from(headers).map((header) => ({
+    header,
+    normalized: normalizeHeaderToken(header),
+  }));
+  const template = config.mappingTemplates[0] ?? DEFAULT_MAPPING_TEMPLATE;
+  const hints: Record<string, string[]> = {};
+
+  for (const field of config.systemFields) {
+    const aliases = [
+      field.labelAr,
+      ...(template.columnMappings[field.key] ?? []),
+      ...(template.biColumnMappings?.[field.key] ?? []),
+    ].map(normalizeHeaderToken);
+    const matches = normalizedHeaders
+      .filter(({ normalized }) => aliases.some((alias) => normalized === alias || normalized.includes(alias) || alias.includes(normalized)))
+      .map(({ header }) => header);
+    hints[field.key] = Array.from(new Set(matches));
+  }
+
+  return hints;
+}
+
+// ── Browse sub-tab ────────────────────────────────────────────────────────────
+```
+
+**After:**
+```tsx
+import MappingSettingsModal from "./components/MappingSettingsModal";
+import { buildColumnHintsFromRows } from "./components/columnMappingHints";
+```
+```tsx
+// ── Browse sub-tab ────────────────────────────────────────────────────────────
+```
+
+**File:** `src/components/Sidebar/Tabs/Population/components/columnMappingHints.test.ts` (new)
+
+Unit tests for `buildColumnHintsFromRows` covering the D3 spec:
+- **Extra columns**: a header matching no field/alias never appears in any field's hint list, and
+  never injects a new key into the result (the output key-set is always exactly
+  `config.systemFields`'s keys).
+- **Missing required columns**: an unmatched field keeps its key in the result mapped to `[]`
+  (not omitted) — the exact signal `ColumnHints` renders as a visible warning — and a required
+  field's miss is distinguishable from an optional field's miss via `field.isRequired`, which the
+  test derives explicitly (`config.systemFields.filter(f => f.isRequired && hints[f.key].length
+  === 0)`).
+- **Renamed/aliased columns**: a header matching only a configured `columnMappings` alias (not the
+  canonical `labelAr`) resolves correctly; a header matching only a `biColumnMappings` alias also
+  resolves (the alias pool is not filtered by data source); an Arabic hamza/taa-marbuta spelling
+  variant of the canonical label resolves via `normalizeHeaderToken`'s text folding; an unmatched
+  header on an optional field is plain "unmapped", not an error.
+- **Scope characterization**: `config.customFields` are not auto-detected (only `systemFields`
+  are) — pinned explicitly since custom fields must be mapped manually in
+  `MappingSettingsModal`'s "mappings" tab.
+- **Real-default-config characterization**: against the actual `DEFAULT_POPULATION_CONFIG` /
+  `DEFAULT_MAPPING_TEMPLATE`, a header can satisfy more than one field's alias pool via the
+  matcher's substring fuzzy-matching (e.g. `"اسم المنفذ"` matches both `portName`, exactly, and
+  `portCode`, because `portCode`'s alias `"المنفذ"` is a substring of it) — documented as existing
+  behavior, not changed by this test-only batch.
+
+---
+
+## v42.41 — 2026-07-11 — D1 (Batch 3): component + end-to-end workflow tests
+
+Adds workflow tests (one happy + one failure per stage) across the full pipeline plus
+characterization tests for the two named UI surfaces. All file I/O uses the in-memory
+`createMemoryDirectory`; UI tests use Testing Library under a per-file `jsdom` environment.
+
+**File:** `src/data/workspace/pipeline.workflow.test.ts` (new)
+
+End-to-end workflow: import → process → sample → distribute → answer → report, driven through the
+real domain functions (`processRiskWorkbook`, `processPopulation`, `saveMonthRun`, `drawSample`,
+`calculateBulkAssignment`, `appendDistributionEvents`, `saveEmployeeAnswers`, `buildExecutiveReport`,
+`buildManagementReport`) and an in-memory workspace. The happy pipeline runs once in `beforeAll`;
+each stage asserts on the shared artifacts, and a failure block per stage exercises the error path
+(rows missing xray id excluded; duplicate ids surfaced; empty-population draw rejected; no-allocation
+assignment yields no events; unknown-employee answer read returns an empty file; empty-population
+report renders without throwing). The import stage builds a REAL `.xlsx` in memory and parses it via
+`processRiskWorkbook` — the worker's delegate. WORKER BOUNDARY stated in the file header: Vitest's
+node env cannot run the DedicatedWorker wrapper, so only the delegate parse/mapping function is
+covered, not the postMessage plumbing.
+
+**File:** `src/components/DataTable/index.test.tsx` (new)
+
+Full RTL render characterization of `DataTable`: renders rows/headers; global-search filter narrows
+rows (debounced); per-column multiselect filter narrows to a checked value; column-visibility toggle
+hides a column; XLSX export path invokes `XLSX.writeFile` with the file name (spied); truncation
+tooltip (`td[title]` = full cell value). Header note records that `DataTable` has NO row-sort UI —
+its interactive surface is search + per-column filters + column visibility/order + export — so the
+plan's "sort" item is covered as filtering. Polyfills `ResizeObserver` (absent in jsdom).
+
+**File:** `src/components/Sidebar/Tabs/Population/Population.wizard.test.tsx` (new)
+
+Characterization of the Population wizard's four-phase progression (import → process → sample →
+distribute). Rendered (jsdom) with the Vite worker + `useWorkspace` + `usePermissions` mocked: the
+happy block pins the initial state (four-phase stepper renders, phase 1 "رفع البيانات" active), and
+the failure/gating block asserts downstream phases are locked (not rendered as buttons) and clicking
+the locked "اختيار العينة" step does NOT advance the wizard — a bad/absent import cannot skip ahead.
+A separate pure `getPhaseStatus` block pins the ordered unlock matrix through all four phases.
+WORKER BOUNDARY noted in the header: advancing via a real import needs the Excel Web Worker, which
+the node/jsdom env cannot run, so real progression is characterized through the pure phase-status
+function rather than by driving an upload.
+
+## v42.40 — 2026-07-11 — D2 (Batch 3): XSS regression tests for all report builders + shared payload fixture
+
+Adds a shared payload corpus and one XSS test file per report builder, asserting injected markup
+(via port names, employee display names, and answer/label fields) is escaped in the output and never
+renders as a live `<script>`/event-handler/attribute break. All test files import the SAME corpus so
+new builders adopt it by import, not copy-paste.
+
+**File:** `src/data/reporting/xssPayloads.ts` (new)
+
+Pure data + framework-agnostic detector (NO test-framework imports, so it is safe under `src/`
+next to production code and type-checks under `tsc -b`):
+
+```ts
+export const XSS_MARKER = "XSSPROBE";
+
+export const XSS_PAYLOADS = {
+  scriptTag: `<script>alert('XSSPROBE')</script>`,
+  imgOnerror: `"><img src=x onerror="alert('XSSPROBE')">`,
+  svgOnload: `<svg onload="alert('XSSPROBE')">`,
+  attrBreak: `"><b onmouseover="alert('XSSPROBE')">XSSPROBE</b>`,
+  structureBreak: `</td></table><marquee>XSSPROBE</marquee>`,
+} as const;
+
+export const XSS_PAYLOAD_LIST: readonly string[] = Object.values(XSS_PAYLOADS);
+export const XSS_COMBINED: string = XSS_PAYLOAD_LIST.join(" ");
+
+// Raw live-markup fragments distinct from the builders' own chrome (deck nav <script>
+// IIFEs, onclick="window.print()", the ZATCA logo's onerror) — a match is a real injection.
+const LIVE_FRAGMENTS: readonly string[] = [
+  "<script>alert",
+  "<img src=x onerror",
+  "<svg onload",
+  "<b onmouseover",
+  "<marquee>",
+];
+
+export function findLiveInjection(html: string): string | null {
+  for (const frag of LIVE_FRAGMENTS) {
+    if (html.includes(frag)) return frag;
+  }
+  return null;
+}
+```
+
+**File:** `src/components/Sidebar/Tabs/Population/reporting/reportHtmlBuilder.xss.test.ts` (new)
+
+Injects the corpus via `PopulationReportData` fields (`title`, port names / xray-ids in the
+BI↔Risk comparison rows, status message, sheet names, BI-fill field names) into
+`buildPopulationReportHtml`; asserts `findLiveInjection` is null, the marker is present (field
+rendered), `&lt;script&gt;` is present (the `escapeHtml` path fired), and no attribute break-out.
+
+**File:** `src/data/reporting/executiveBuilders.xss.test.ts` (new)
+
+One file covering all four `ExecutiveReportInput`-based builders (they share the identical input
+type, so a single shared `makeMaliciousExecInput()` avoids quadruplicating ~70 lines of scaffolding),
+one `describe` block per builder:
+- `buildExecutiveReport` (executive document path).
+- `buildExecutiveDeck` (v1 deck) — regression for the v42.39 `periodId` fix: a malicious
+  `monthFolderName` drives `periodId` into the raw-HTML `titleSlide`.
+- `buildExecutiveDeckV2` (deck2) — also asserts the deck's OWN legitimate `<script>` nav chrome is
+  not mistaken for an injection.
+- `buildManagementReport` (C2 management report).
+
+The shared input injects the corpus via port names (`populationRows[].portName`, guaranteed to
+render), reviewer display names (`employeeDisplayNames` map, wired through a submitted answer +
+distribution entry so a reviewer profile renders), and answer/label fields (`notes` on the rows).
+Every block asserts `findLiveInjection` is null and the escaped marker is present.
+
+## v42.39 — 2026-07-11 — D2 (Batch 3): close two report-builder escaping gaps found in the XSS audit
+
+D2 production audit swept `src/data/reporting/executive/**`, the deck2 builder, and the
+management report builder for template-literal interpolations of *model/user* data that bypass
+`esc()`/`escText()`. Confirmed escaped/safe: all port names (`esc(p.name)`), stage labels, slide
+headlines/eyebrows/subheads (routed through `slideShell`/`slide()`→`esc()`), chart labels
+(`escText()` in `ui/charts.ts`), the executive document shell (`viewer.ts` uses `esc(monthLabel)`),
+and every value in the management report. The v1-deck agenda (`deck/slides.ts:106-107`, flagged in
+the approved plan for confirmation) is **provably static** — its `title`/`blurb` come from a
+hard-coded `DeckSection[]` registry and `range` from numeric `padNum`. Two real gaps were found
+and closed:
+
+**File:** `src/data/reporting/executive/document/partScope.ts`
+
+`model.exclusions.note` was interpolated raw into the data-quality list, while the sibling
+`partRisk.ts:110` escapes the identical value via its local `escapeText`. The value is a static
+model string today, but the inconsistency is a latent gap — routed through `esc()` (re-exported
+from `./shared`) for consistency and defense-in-depth.
+
+**Before:**
+```ts
+import {
+  executiveClose,
+  figure,
+  kpi,
+  kpiStrip,
+  noteBox,
+  page,
+  pageHeader,
+  panel,
+} from "./shared";
+```
+```ts
+          <li>${model.exclusions.note}</li>
+```
+
+**After:**
+```ts
+import {
+  esc,
+  executiveClose,
+  figure,
+  kpi,
+  kpiStrip,
+  noteBox,
+  page,
+  pageHeader,
+  panel,
+} from "./shared";
+```
+```ts
+          <li>${esc(model.exclusions.note)}</li>
+```
+
+**File:** `src/data/reporting/executive/deck/slides.ts`
+
+The v1 executive deck is the edition wired to the live "العرض التنفيذي" button
+(`Reports/index.tsx` imports `openExecutiveDeck` from `executive/deck`; deck2 is dev/preview only).
+Its `titleSlide` builds raw HTML directly (it does not go through the escaping `slide()` helper) and
+interpolated `model.summary.periodId` unescaped. `periodId` derives from the on-disk month-folder
+name — `periodIdFromFolder` returns the raw folder name when the `N-Month-YYYY` regex does not match
+— so a maliciously named month folder could inject live HTML into the deck. Routed through `esc()`.
+
+**Before:**
+```ts
+import {
+  cards,
+  emptyHero,
+  heroChart,
+  heroNumber,
+  kpiBand,
+  kpiTile,
+  miniTable,
+  numberedList,
+  slide,
+  split,
+  timeline,
+} from "./shared";
+```
+```ts
+    <div class="title-sub">تقرير شهر: ${model.summary.periodId}</div>
+```
+
+**After:**
+```ts
+import {
+  cards,
+  emptyHero,
+  esc,
+  heroChart,
+  heroNumber,
+  kpiBand,
+  kpiTile,
+  miniTable,
+  numberedList,
+  slide,
+  split,
+  timeline,
+} from "./shared";
+```
+```ts
+    <div class="title-sub">تقرير شهر: ${esc(model.summary.periodId)}</div>
+```
+
+## v42.38 — 2026-07-08 — C1 (Batch 2): seed realistic demo data (month + sample + distribution + answers)
+
+**File:** `src/data/workspace/demoWorkspace.ts`
+
+`createDemoWorkspace()` previously only seeded the default managed users via
+`createWorkspaceStructure(handle, "viewer")` — Population browse, sampling, and reports were all
+empty in demo mode. Added `seedDemoMonth()`, called (best-effort, wrapped in try/catch → `logError`)
+right after the structure is created, which builds one month (`5-may-2026`, ~200 rows across 3
+ports) and writes it through the **existing domain writers only** — never hand-rolling
+`population.final.json` / `sample.master.json` shapes:
+- `saveMonthRun()` (`src/data/population/populationStorage.ts`) persists ~200 synthetic but
+  correctly-typed `PreparedPopulationRow[]` (all stage "المستوى الأول", NonCertScan, ~12.5%
+  "اشتباه") plus a plausible raw-risk mirror and a matching `processingSummary`.
+- `drawSample()` (`src/data/sampling/sampleAlgorithm.ts`), stage-based config with a **fixed
+  RNG seed string** (`xray-demo-fixed-seed-v1`) and a demo-scaled sampling rule (30% of stage
+  "first"), draws 60 rows deterministically; saved via `saveSampleMaster()`.
+- `calculateBulkAssignment()` (`src/data/distribution/bulkAssignment.ts`) — a pure function, no
+  RNG — assigns the 60 sample rows across the four default managed employees by weighted
+  percentage; events appended via `appendDistributionEvents()`.
+- Per employee, ~40% of assigned rows get a `status: "submitted"` answer (via
+  `saveEmployeeAnswers()`, `src/data/answers/answerStorage.ts`) plus a matching `buildCompletedEvent()`
+  distribution event, ~20% get `status: "draft"`, the rest stay pending — deterministic
+  `index % 5` buckets, no RNG.
+- `updateMonthStatus()` advances the manifest to `"sampled"` then `"distributed"` to match a real
+  run.
+
+Because population generation, the RNG seed, and the assignment/bucket math are all deterministic
+(no `Math.random`, no unseeded RNG), two consecutive demo entries draw the identical rows, the
+identical per-employee splits, and the identical submitted/draft/pending sets — only incidental
+wall-clock timestamp fields (`processedAt`, `drawnAt`, `eventAt`, …) differ, matching how every
+underlying writer already stamps `new Date()` internally. Nothing is written to the user's disk —
+the handle is `createMemoryDirectory()`, and read-only mode is off only during this in-memory build
+(`WorkspaceProvider.enterDemoWorkspace` flips it back on afterward, unchanged by this edit).
+
+**Before:**
+```ts
+export async function createDemoWorkspace(): Promise<DirectoryHandleLike> {
+  const handle = createMemoryDirectory(DEMO_WORKSPACE_NAME);
+  await createWorkspaceStructure(handle, "viewer");
+  return handle;
+}
+```
+
+**After:**
+```ts
+export async function createDemoWorkspace(): Promise<DirectoryHandleLike> {
+  const handle = createMemoryDirectory(DEMO_WORKSPACE_NAME);
+  await createWorkspaceStructure(handle, "viewer");
+  try {
+    await seedDemoMonth(handle);
+  } catch (error) {
+    logError("demoWorkspace:seed", error);
+  }
+  return handle;
+}
+// … seedDemoMonth() + buildDemoPopulationRow() + DEMO_PORTS/DEMO_SAMPLING_RULES/DEMO_ALLOCATIONS
+// constants added above — see file for the full seeding pipeline.
+```
+
+## v42.37 — 2026-07-08 — C6 (Batch 2): label-coverage audit, WorkspaceGate.tsx
+
+**File:** `src/data/labels/labelsStore.ts`
+
+Added a `wsgate_*` label group (17 keys covering the ~30 hard-coded strings, several reused across
+multiple call sites — e.g. the "اختيار مجلد آخر" button appears 3×, the view-passcode label backs
+both an aria-label and a placeholder) for every PRE-EXISTING hard-coded string in
+`WorkspaceGate.tsx` (the `WorkspacePicker` and `WorkspaceGate` components). Does not touch the
+`firstrun_*` keys C3 already added for `FirstRunChecklist` in the same file.
+
+**Before:**
+```ts
+  app_no_tabs_desc_prefix:   "لا توجد صفحات مفعلة لهذا الدور حالياً:",
+} as const;
+```
+
+**After:**
+```ts
+  app_no_tabs_desc_prefix:   "لا توجد صفحات مفعلة لهذا الدور حالياً:",
+
+  // ── WorkspaceGate — C6 (Batch 2) label coverage audit ──
+  wsgate_view_passcode_error: "رمز غير صحيح.",
+  wsgate_unsupported_title:   "متصفح غير مدعوم",
+  // …(full wsgate_* block, 17 keys — see file)…
+} as const;
+```
+
+**File:** `src/data/workspace/WorkspaceGate.tsx`
+
+Replaced every pre-existing hard-coded Arabic literal in `WorkspacePicker` and `WorkspaceGate`
+(unsupported-browser card, picker card + view-passcode modal, missing/invalid/error structure
+cards) with `labels.wsgate_*` reads via a new `const labels = useLabels();` in each component.
+`FirstRunChecklist`'s own `useLabels()` call and `firstrun_*` keys (added by C3) are untouched. The
+`Google Chrome` / `Microsoft Edge` sentence keeps its exact original `{" "}`/inline-space JSX
+structure around the new label lookups so the rendered text is byte-identical. Labels are read from
+a plain `localStorage`-backed module (`labelsStore.ts`), independent of workspace/auth state, so
+this is safe in every gate state including `unsupported_browser`.
+
+**Before:**
+```tsx
+export function WorkspacePicker({ children }: WorkspacePickerProps) {
+  const { isSupported, status, message, pendingReconnect, selectWorkspace, reconnectWorkspace, enterDemoWorkspace } = useWorkspace();
+  // … "متصفح غير مدعوم", "اختر مساحة العمل", "رمز غير صحيح.", etc. hard-coded …
+```
+
+**After:**
+```tsx
+export function WorkspacePicker({ children }: WorkspacePickerProps) {
+  const { isSupported, status, message, pendingReconnect, selectWorkspace, reconnectWorkspace, enterDemoWorkspace } = useWorkspace();
+  const labels = useLabels();
+  // … all replaced with labels.wsgate_* — see file for each call site …
+```
+
+## v42.36 — 2026-07-08 — C6 (Batch 2): label-coverage audit, App.tsx
+
+**File:** `src/data/labels/labelsStore.ts`
+
+Added an `app_*` label group (10 keys) to `DEFAULT_LABELS` for the hard-coded Arabic strings in
+`src/App.tsx`: the demo-mode banner, the `.bak`-recovery warning (with a `{fileName}` placeholder),
+the shared "إغلاق" close-button aria-label, the auto-backup running/done/failed messages (`{folderName}`/
+`{error}` placeholders) plus a generic unknown-error fallback, the workspace `<section>` aria-label,
+and the "no tabs available" empty-state title + description prefix.
+
+**Before:**
+```ts
+  firstrun_demo_hint:                "لمعاينة النظام في وضع العرض التجريبي (قراءة فقط): من شاشة اختيار مساحة العمل، اضغط Alt+A ثم Alt+T.",
+} as const;
+```
+
+**After:**
+```ts
+  firstrun_demo_hint:                "لمعاينة النظام في وضع العرض التجريبي (قراءة فقط): من شاشة اختيار مساحة العمل، اضغط Alt+A ثم Alt+T.",
+
+  // ── App shell — C6 (Batch 2) label coverage audit ──
+  app_demo_banner:           "وضع العرض التجريبي — للقراءة فقط (التعديل والحفظ معطّلان، والتصدير متاح)",
+  app_bak_recovered_warning: "تم استرداد الملف \"{fileName}\" من النسخة الاحتياطية — قد تكون البيانات غير مكتملة، يُرجى المراجعة.",
+  app_close_aria:            "إغلاق",
+  app_auto_backup_running:   "جاري إنشاء النسخة الاحتياطية التلقائية...",
+  app_auto_backup_done:      "تم إنشاء النسخة الاحتياطية التلقائية: {folderName}",
+  app_auto_backup_failed:    "تعذر إنشاء النسخة الاحتياطية التلقائية: {error}",
+  app_unknown_error:         "خطأ غير معروف",
+  app_workspace_aria:        "مساحة العمل",
+  app_no_tabs_title:         "لا توجد تبويبات متاحة",
+  app_no_tabs_desc_prefix:   "لا توجد صفحات مفعلة لهذا الدور حالياً:",
+} as const;
+```
+
+**File:** `src/App.tsx`
+
+Replaced the ~10 hard-coded Arabic literals with `getLabels()`/`useLabels()` reads (component-level
+`labels` via `useLabels()` for JSX so overrides re-render; `getLabels()` called fresh inside the
+`useEffect` handlers so those imperative callbacks never read a stale closure). `NoAvailableTabs` is
+a separate component, so it calls its own `useLabels()`. No visible text change — same strings, same
+`{" "}`/inline-space JSX structure around the `Google Chrome` / `Microsoft Edge`-style content.
+
+**Before:**
+```tsx
+setBakWarning(
+  `تم استرداد الملف "${e.detail.fileName}" من النسخة الاحتياطية — قد تكون البيانات غير مكتملة، يُرجى المراجعة.`
+);
+// … demo banner literal, "إغلاق" aria-labels ×2, auto-backup running/done/failed template
+// literals, aria-label="مساحة العمل", NoAvailableTabs title/description literals …
+```
+
+**After:**
+```tsx
+setBakWarning(
+  getLabels().app_bak_recovered_warning.replace("{fileName}", e.detail.fileName)
+);
+// … all of the above now read from getLabels()/useLabels() — see file for each call site.
+```
+
+## v42.35 — 2026-07-08 — C3 (Batch 2): guard the first-run card against short viewports
+
+**File:** `src/data/workspace/WorkspaceGate.css`
+
+Added a `max-height` + internal scroll to `.firstrun-checklist` so the fixed card never clips its
+header off the top of very short windows (observed on a ~360px-tall preview); on normal desktop
+heights it is unchanged.
+
+**Before:**
+```css
+  overflow: hidden;
+  font-family: inherit;
+}
+```
+
+**After:**
+```css
+  overflow: hidden auto;
+  max-height: calc(100vh - 120px);
+  font-family: inherit;
+}
+```
+
+## v42.34 — 2026-07-08 — C3 (Batch 2): first-run checklist styles
+
+**File:** `src/data/workspace/WorkspaceGate.css`
+
+Appended `.firstrun-*` styles for the onboarding checklist overlay: a fixed bottom-inline-end
+card (stacked above the feedback widget), progress bar, step rows with done/step-number marks,
+deep-link action buttons, and the demo-shortcut hint. Uses the existing app CSS variables with
+hex fallbacks, mirroring the rest of this file.
+
+**Before:**
+```css
+@keyframes wg-spin {
+  to { transform: rotate(360deg); }
+}
+```
+
+**After:**
+```css
+@keyframes wg-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── First-run admin checklist (C3) ── */
+.firstrun-checklist { position: fixed; inset-inline-end: 24px; bottom: 96px; /* …see file… */ }
+```
+
+## v42.33 — 2026-07-08 — C3 (Batch 2): first-run admin checklist in WorkspaceGate
+
+**File:** `src/data/workspace/WorkspaceGate.tsx`
+
+Added a role-gated `FirstRunChecklist` component (admin-only) rendered alongside the app in the
+`status === "ready"` branch. It derives real completion state (structure created, ≥1 non-default
+user, permissions differ from defaults, ≥1 population month), deep-links each step to the relevant
+tab via the `app-navigate` event, surfaces the hidden Alt+A/Alt+T demo-mode shortcut, persists
+manual dismissal per workspace in `localStorage` (`xray_firstrun_dismissed_v1:{workspace}`), and
+auto-hides once ≥1 month exists (regardless of dismissal). Non-admins render `null`. Also added the
+supporting imports (`Check`/`Keyboard`/`Rocket`/`X` icons, `useLabels`, `listMonthFolders`, and the
+`userManagement` helpers).
+
+**Before:**
+```tsx
+  // Workspace is ready — render the full app
+  if (status === "ready") {
+    return <>{children}</>;
+  }
+```
+
+**After:**
+```tsx
+  // Workspace is ready — render the full app + (admin-only) first-run checklist
+  if (status === "ready") {
+    return (
+      <>
+        {children}
+        <FirstRunChecklist session={session} />
+      </>
+    );
+  }
+```
+
+Plus a new `FirstRunChecklist` component + module helpers (`readDismissed`, `navigateToTab`,
+`hasNonDefaultUser`, `permissionsAreCustomized`) appended to the file.
+
+## v42.32 — 2026-07-08 — C3 (Batch 2): add first-run admin-checklist label keys
+
+**File:** `src/data/labels/labelsStore.ts`
+
+Added `firstrun_*` keys to `DEFAULT_LABELS` for the new admin onboarding checklist so every
+user-facing string routes through an admin-overridable label key.
+
+**Before:**
+```ts
+  mgmt_card_toast_no_population: "لم يتم العثور على بيانات المجتمع. يجب معالجة المجتمع أولاً.",
+} as const;
+```
+
+**After:**
+```ts
+  mgmt_card_toast_no_population: "لم يتم العثور على بيانات المجتمع. يجب معالجة المجتمع أولاً.",
+
+  // First-run admin checklist — C3 (Batch 2)
+  firstrun_title:                  "خطوات البدء السريع",
+  // …(full firstrun_* block — see file)…
+} as const;
+```
+
+## v42.31 — 2026-07-08 — C2 (Batch 2): wire the تقرير الإدارة Reports card live (remove "قريباً")
+
+**File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
+
+Enabled the previously-disabled management-report card: added `openManagementReport` +
+`useLabels` imports, extended `ReportType` with `"management"`, added a `management` branch to
+`generate()`, and replaced the disabled `rh-card-disabled` / `rh-badge-soon` card (with its
+"قيد التطوير" footer + disabled "قريباً" button) with a live card whose button calls
+`generate("management")`. All card/toast text now reads from the new `mgmt_*` label keys.
+
+**Before:**
+```tsx
+        {/* Department — coming soon */}
+        <div className="rh-card rh-card-disabled">
+          <div className="rh-card-accent rh-acc-purple" />
+          <div className="rh-card-body">
+            <div className="rh-card-top">
+              <div className="rh-icon rh-icon-purple"><Building2 size={22} /></div>
+              <span className="rh-badge rh-badge-soon">قريباً</span>
+            </div>
+            <div className="rh-card-title">تقرير الإدارة</div>
+            <p className="rh-card-desc">
+              نظرة شاملة قابلة للتخصيص حسب الموظف — الإنجاز الفردي، الدقة، الاشتباه الفائت، والمقارنة بين الموظفين.
+            </p>
+            <div className="rh-tags">
+              <span className="rh-tag"><Settings2 .../> قابل للتخصيص</span>
+              <span className="rh-tag"><User .../> فردي / كلي</span>
+            </div>
+          </div>
+          <div className="rh-card-footer">
+            <span className="rh-req"><i className="rh-dot rh-dot-amber" /> قيد التطوير</span>
+            <button className="rh-btn rh-btn-ghost" disabled>قريباً</button>
+          </div>
+        </div>
+```
+
+**After:**
+```tsx
+        {/* Management report — live (C2) */}
+        <div className="rh-card">
+          <div className="rh-card-accent rh-acc-purple" />
+          <div className="rh-card-body">
+            <div className="rh-card-top">
+              <div className="rh-icon rh-icon-purple"><Building2 size={22} /></div>
+              <span className="rh-badge rh-badge-ready">{labels.mgmt_card_badge_ready}</span>
+            </div>
+            <div className="rh-card-title">{labels.mgmt_report_title}</div>
+            <p className="rh-card-desc">{labels.mgmt_card_desc}</p>
+            <div className="rh-tags">
+              <span className="rh-tag"><FileText .../> {labels.mgmt_card_tag_summary}</span>
+              <span className="rh-tag"><Users .../> {labels.mgmt_card_tag_compare}</span>
+            </div>
+          </div>
+          <div className="rh-card-footer">
+            <div className="rh-export-controls" role="group">
+              <button className="rh-btn rh-btn-indigo" disabled={busy || !selectedMonth}
+                onClick={() => { void generate("management"); }}>
+                {generating === "management" ? <span className="rh-spinner" /> : null}
+                {generating === "management" ? labels.mgmt_card_generating : labels.mgmt_card_button}
+              </button>
+            </div>
+          </div>
+        </div>
+```
+
+Plus: `import { openManagementReport } from ".../management/managementReport"`, `import { useLabels }`,
+`const labels = useLabels()`, `type ReportType = … | "management"`, and a `management` branch in
+`generate()` calling `openManagementReport(execInput, buildDisplayNameMap())`. Also dropped the
+now-unused `Settings2` icon from the `lucide-react` import (the card's old tag used it).
+
+---
+
+## v42.30 — 2026-07-08 — C2 (Batch 2): new management-report builder module
+
+**File:** `src/data/reporting/management/managementReport.ts` (new file)
+
+New builder producing the self-contained Arabic RTL HTML management report — a concise
+"summary cut" of the same `ReportModel` (via `buildReportModel`), reusing the executive
+`esc()`/`fmtNum()`/`fmtPct()` primitives and `openOrDownload`. All interpolated model/user data
+(port names, reviewer display names, recommended-action strings, findings) is routed through
+`esc()`. Includes print CSS (`@media print` + `@page`). Exposes `buildManagementReport(input, names)`
+and `openManagementReport(input, names)`. Content: header + data-sufficiency chip, headline KPI
+strip, scope/coverage strip, reviewer-comparison table (BI-unmapped empty state handled), port
+accuracy table, priority actions list, data-quality footer.
+
+**Before:**
+```ts
+// (new file)
+```
+
+**After:**
+```ts
+// See src/data/reporting/management/managementReport.ts — buildManagementReport / openManagementReport
+```
+
+## v42.29 — 2026-07-08 — C2 (Batch 2): add management-report (تقرير الإدارة) label keys
+
+**File:** `src/data/labels/labelsStore.ts`
+
+Added `mgmt_report_*` (report output) and `mgmt_card_*` (Reports-tab card + toasts) keys to
+`DEFAULT_LABELS` so every user-facing string in the new management report and its card routes
+through an admin-overridable label key (CLAUDE.md convention), not a hard-coded literal.
+
+**Before:**
+```ts
+  ov_chart_month_summary: "ملخص كل شهر",
+} as const;
+```
+
+**After:**
+```ts
+  ov_chart_month_summary: "ملخص كل شهر",
+
+  // Management report (تقرير الإدارة) — C2 (Batch 2)
+  mgmt_report_title:            "تقرير الإدارة",
+  mgmt_report_subtitle:         "ملخّص إداري موجز لأداء ضمان جودة الأشعة",
+  // …(full mgmt_report_* / mgmt_card_* block — see file)…
+} as const;
+```
+
+## v42.24 — 2026-07-08 — B5 (Batch 1): DataTable header truncation fix, numeric-column alignment, filter-row consistency
+
+**File:** `src/components/DataTable/utils.ts`
+
+Added `looksLikeNumber()`, a narrow numeric-string detector (plain positive/negative
+integers/decimals, optional thousands separators, optional trailing `%`) mirroring the existing
+`looksLikeDate()`. Deliberately narrow so IDs/phone numbers/codes that merely start with a digit
+are never misclassified as numeric.
+
+**Before:**
+```ts
+export function looksLikeDate(v: string): boolean {
+  return ISO_DATE_RE.test(v) || DATE_ONLY_RE.test(v);
+}
+```
+
+**After:**
+```ts
+export function looksLikeDate(v: string): boolean {
+  return ISO_DATE_RE.test(v) || DATE_ONLY_RE.test(v);
+}
+
+// ── Numeric utilities ─────────────────────────────────────────────────────────
+const NUMERIC_RE = /^-?\d{1,3}(,\d{3})*(\.\d+)?%?$|^-?\d+(\.\d+)?%?$/;
+
+export function looksLikeNumber(v: string): boolean {
+  return NUMERIC_RE.test(v.trim());
+}
+```
+
+**File:** `src/components/DataTable/index.tsx`
+
+Three changes: (1) `DataTableCol.isNumeric` opt-in flag + `detectedNumeric` auto-detection
+(mirrors `detectedDates`: samples up to 200 rows, skips date/status/multiselect columns, marks a
+column numeric only if every non-empty sampled value matches `looksLikeNumber`); `CellMeta` gains
+an `isNumeric` field passed through to `renderCell`. (2) `headerMinWidth(col)` — a per-column
+floor keyed off label length (`min(180, max(88, label.length * 9 + 28))` px) applied to the `<col>`
+and `<th>` so a narrow `widthFr` share can no longer squeeze a header below its readable width —
+this is the direct fix for VIS-06 ("تاريخ" clipping to "تار"). (3) `dt-th--numeric`/`dt-td--numeric`
+classes applied when a column is numeric.
+
+**Before:**
+```tsx
+export type DataTableCol<TRow = unknown> = {
+  id: string;
+  label: string;
+  widthFr?: number;
+  alwaysVisible?: boolean;
+  adminOnly?: boolean;
+  isDate?: boolean;
+  filterKind?: "text" | "date" | "status" | "multiselect";
+  ...
+};
+
+export type CellMeta = {
+  isDate: boolean;
+  dateFmt: DateFormatMode;
+};
+...
+          <colgroup>
+            {visibleCols.map((col) => (
+              <col key={col.id} style={{ width: colWidthPct(col) }} />
+            ))}
+          </colgroup>
+          <thead>
+            <tr>
+              {visibleCols.map((col, colIdx) => {
+                const isDate    = col.isDate || detectedDates.has(col.id);
+                ...
+                  <th
+                    key={col.id}
+                    className={`dt-th${stickyMeta.has(col.id) ? " dt-sticky-col dt-sticky-head" : ""}`}
+                    style={getStickyStyle(col, true)}
+                    ...
+...
+                    {visibleCols.map((col) => {
+                      const isDate = col.isDate || detectedDates.has(col.id);
+                      return (
+                        <td
+                          key={col.id}
+                          className={`dt-td${stickyMeta.has(col.id) ? " dt-sticky-col" : ""}`}
+                          style={getStickyStyle(col, false)}
+                          title={String(col.accessor(row) ?? "")}
+                        >
+                          {renderCell(col, row, {
+                            isDate,
+                            dateFmt: colCfg.dateFmt[col.id] as DateFormatMode ?? "date",
+                          })}
+```
+
+**After:**
+```tsx
+export type DataTableCol<TRow = unknown> = {
+  id: string;
+  label: string;
+  widthFr?: number;
+  alwaysVisible?: boolean;
+  adminOnly?: boolean;
+  isDate?: boolean;
+  isNumeric?: boolean;
+  filterKind?: "text" | "date" | "status" | "multiselect";
+  ...
+};
+
+export type CellMeta = {
+  isDate: boolean;
+  dateFmt: DateFormatMode;
+  isNumeric: boolean;
+};
+...
+  function headerMinWidth(col: DataTableCol<TRow>): number {
+    return Math.min(180, Math.max(88, col.label.length * 9 + 28));
+  }
+...
+          <colgroup>
+            {visibleCols.map((col) => (
+              <col key={col.id} style={{ width: colWidthPct(col), minWidth: headerMinWidth(col) }} />
+            ))}
+          </colgroup>
+          <thead>
+            <tr>
+              {visibleCols.map((col, colIdx) => {
+                const isDate    = col.isDate || detectedDates.has(col.id);
+                const isNumeric = col.isNumeric || detectedNumeric.has(col.id);
+                ...
+                  <th
+                    key={col.id}
+                    className={`dt-th${stickyMeta.has(col.id) ? " dt-sticky-col dt-sticky-head" : ""}${isNumeric ? " dt-th--numeric" : ""}`}
+                    style={{ minWidth: headerMinWidth(col), ...getStickyStyle(col, true) }}
+                    ...
+...
+                    {visibleCols.map((col) => {
+                      const isDate    = col.isDate || detectedDates.has(col.id);
+                      const isNumeric = col.isNumeric || detectedNumeric.has(col.id);
+                      return (
+                        <td
+                          key={col.id}
+                          className={`dt-td${stickyMeta.has(col.id) ? " dt-sticky-col" : ""}${isNumeric ? " dt-td--numeric" : ""}`}
+                          style={getStickyStyle(col, false)}
+                          title={String(col.accessor(row) ?? "")}
+                        >
+                          {renderCell(col, row, {
+                            isDate,
+                            dateFmt: colCfg.dateFmt[col.id] as DateFormatMode ?? "date",
+                            isNumeric,
+                          })}
+```
+
+**File:** `src/components/DataTable/DataTable.css`
+
+**Before:**
+```css
+.dt-th-label {
+  ...
+  min-width: 0;
+  white-space: nowrap;
+  line-height: 1.35;
+}
+...
+.dt-td:first-child { border-inline-end: none; text-align: right; }
+...
+.dt-filter-done-btn {
+  width: 100%;
+  padding: 8px 0;
+  border: 0;
+  border-radius: var(--r-sm, 8px);
+  background: var(--c-sky);
+  color: var(--c-surface);
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 160ms ease, transform 140ms ease;
+}
+
+.dt-filter-done-btn:hover {
+  background: var(--c-sky-2);
+}
+```
+
+**After:**
+```css
+.dt-th-label {
+  ...
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: normal;
+  line-height: 1.35;
+}
+
+.dt-th--numeric .dt-th-label {
+  text-align: end;
+}
+...
+.dt-td:first-child { border-inline-end: none; text-align: right; }
+
+td.dt-td.dt-td--numeric {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+...
+.dt-filter-done-btn {
+  width: 100%;
+  padding: 8px 0;
+  border: 1px solid var(--c-sky);
+  border-radius: var(--r-sm, 8px);
+  background: var(--c-sky);
+  color: var(--c-surface);
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 160ms ease, transform 140ms ease;
+}
+
+.dt-filter-done-btn:hover {
+  background: var(--c-sky-2);
+  border-color: var(--c-sky-2);
+}
+```
+
+**RTL numerals check:** all digit rendering in this app already goes through `toLocaleString`/
+`toLocaleDateString`/`toLocaleTimeString` with the `ar-SA-u-nu-latn` locale (`-u-nu-latn` forces
+the Latin numbering system), confirmed via `utils.ts formatDate()` and the `dt-row-count` renderer
+in `index.tsx` — no Arabic-Indic digits (٠١٢٣) appear anywhere in the live UI (grepped `src/`,
+only test fixtures use them), so `font-variant-numeric: tabular-nums` applies cleanly with no
+digit-shaping edge case.
+
+**Verification:** the demo workspace (read-only, entered via the view passcode) has zero data rows
+in every table (Batch 2's C1 seed-data item is not yet implemented), so live numeric-cell
+rendering couldn't be screenshotted with real data. Verified instead via (a) `tsc --noEmit`, lint,
+and the full test suite green; (b) live header inspection on the EmployeeWorkspace referrals table
+at 1280×800 confirmed `headerMinWidth()` computing the expected floor per label (e.g. "معرف الأشعة"
+-> 127px, "تاريخ دخول صورة الأشعة" -> 180px, matching `label.length * 9 + 28` capped at 180) and
+`white-space: normal` applied; (c) synthetic DOM nodes carrying the new classes injected via the
+preview tool and removed after, confirming computed styles: `.dt-td--numeric` -> `text-align: end`
++ `font-variant-numeric: tabular-nums`; a plain `.dt-td` (no numeric class) still `text-align:
+center` (unchanged default, no regression); `.dt-th--numeric .dt-th-label` -> `text-align: end`;
+`td.dt-td.dt-td--numeric` beats `.dt-td:first-child` when both apply (specificity check, since a
+numeric column could be first); `.dt-filter-done-btn` and `.dt-filter-apply-btn` now render at
+identical height (38.4px) with matching border. `npm run build` green (2,565.82 kB / 951.31 kB
+gzip, in line with the existing baseline).
+
+---
+
+## v42.25 — 2026-07-08 — B6 (Batch 1) scaffold decision + consumption, file 1/4: EmployeeWorkspace.css
+
+**Plan deviation (documented per B6 sequencing: "token scaffold" step, done after B5 per the
+mandated B4 -> B6-scaffold -> B5 -> B6-consumption order):** the approved plan says to add a
+`--space-*` scale to `index.css` because "none exists today; all 104 tokens are color/brand". That
+is no longer accurate — `index.css` already declares a 4px-base spacing scale (`--sp-1: 4px` …
+`--sp-14: 56px`, lines ~105-108) that is *already consumed* by `App.css`, `Sidebar.css`,
+`Archive.css`, `ChangeLog.css`, `Settings.css`, `src/styles/primitives.css`, and partially by
+`EmployeeWorkspace.css`/`Reports.css` (60 existing `var(--sp-*)` usages found via grep before this
+pass). Adding a second, parallel `--space-*` scale would fragment the system instead of unifying
+it. **No new tokens added** — the B6 "scaffold" requirement is satisfied by the pre-existing
+`--sp-*` scale; this entry and the three that follow cover only the *consumption* pass.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/EmployeeWorkspace.css`
+
+Mechanical sweep via a scratch script: tokenizes each `padding`/`margin`/`gap` declaration's
+values (respecting parens, so `clamp()`/`calc()`/`var()` arguments are never touched), snaps any
+plain positive px value within ±2px of an `--sp-*` step to `var(--sp-N)`, and leaves the *entire
+original declaration* untouched with a trailing `/* no-scale */` comment when any value in it
+can't be snapped (negative values, values >2px from every step, or a value hidden inside an
+unparsed function call like `clamp(14px, 2.2vw, 32px)`) — never mixing tokens and raw px under one
+undocumented line. Result: 134 declarations fully converted to scale tokens (192 individual px
+values replaced), 8 declarations left with raw px + `/* no-scale */`.
+
+**Before:**
+```css
+.ew-split {
+  display: grid;
+  gap: 14px;
+  align-items: stretch;
+  min-height: 0;
+}
+...
+.ew-view-seg {
+  padding: 4px 14px;
+  height: 28px;
+  ...
+}
+.ew-empty {
+  padding: 56px 36px;
+  text-align: center;
+  ...
+}
+/* header padding: */
+  padding: clamp(14px, 2.2vw, 32px) clamp(12px, 2vw, 28px);
+...
+  margin-bottom: -2px;
+```
+
+**After:**
+```css
+.ew-split {
+  display: grid;
+  gap: var(--sp-4);
+  align-items: stretch;
+  min-height: 0;
+}
+...
+.ew-view-seg {
+  padding: var(--sp-1) var(--sp-4);
+  height: 28px;
+  ...
+}
+.ew-empty {
+  padding: 56px 36px /* no-scale */;
+  text-align: center;
+  ...
+}
+/* header padding: */
+  padding: clamp(14px, 2.2vw, 32px) clamp(12px, 2vw, 28px) /* no-scale */;
+...
+  margin-bottom: -2px /* no-scale */;
+```
+
+Note: some snaps move the rendered value by up to 2px (e.g. `6px`→`var(--sp-2)` = `8px`,
+`14px`→`var(--sp-4)` = `16px`) — this is the plan's explicitly accepted tolerance for B6 (unlike
+B4's zero-drift requirement), not a bug. Verified zero raw px remains outside `/* no-scale */`
+lines via `grep -E '^\s*(padding|margin|gap)[a-z-]*:\s*[^;]*px' EmployeeWorkspace.css | grep -v
+no-scale` → 0 matches. `npm run lint` and `npm run test:run` green (364/364); verified via preview
+that `--sp-1`/`--sp-2`/`--sp-4`/`--sp-5` resolve to `4px`/`8px`/`16px`/`20px` as expected.
+
+---
+
+## v42.26 — 2026-07-08 — B6 (Batch 1) consumption, file 2/4: Reports.css
+
+**File:** `src/components/Sidebar/Tabs/Reports/Reports.css`
+
+Same spacing sweep as v42.25, applied to `Reports.css`. Result: 75 declarations fully converted
+to `--sp-*` tokens (97 individual px values replaced), 2 declarations left with raw px +
+`/* no-scale */` (`padding: 28px 28px 48px` and `margin-bottom: 28px` — both >2px off every step).
+
+**Sweep-script fix (mid-pass):** the first run over this file flagged 21 lines as `no-scale`, but
+19 of them were already-compliant `var(--sp-N, <fallback>px)` references (this file pre-dates the
+sweep with some hand-written `--sp-*` usage) — the script's "don't parse inside function calls"
+rule was correctly leaving the `var()` call untouched, but wrongly flagging the line as an
+exception because it saw a bare `px` substring inside the fallback. Fixed the sweep script to
+recognize `var(--sp-N, ...)` as already-compliant (skip, no annotation) before re-running, and
+added a second, independent verifier script (tokenizes the same way but only reports, never
+writes) to confirm compliance rather than trusting a naive `grep px`, which can't tell a raw
+literal from a token's fallback text.
+
+**Before:**
+```css
+.rh-header-actions-btn {
+  gap: var(--sp-3, 10px);
+  padding: var(--sp-12, 64px) var(--sp-8, 32px);
+  margin-top: var(--sp-6, 24px);
+}
+```
+
+**After (unchanged — already compliant, no longer mislabeled):**
+```css
+.rh-header-actions-btn {
+  gap: var(--sp-3, 10px);
+  padding: var(--sp-12, 64px) var(--sp-8, 32px);
+  margin-top: var(--sp-6, 24px);
+}
+```
+
+Verified with the dedicated verifier (`node checkSpacing.mjs Reports.css` → `OK (0 unannotated raw
+px in padding/margin/gap)`). `npm run lint` and `npm run test:run` green (364/364).
+
+---
+
+## v42.27 — 2026-07-08 — B6 (Batch 1) consumption, file 3/4: Population.css
+
+**File:** `src/components/Sidebar/Tabs/Population/Population.css`
+
+Same spacing sweep as v42.25/v42.26 (with the `var(--sp-N, ...)` false-positive fix already
+applied), run over `Population.css` (the largest of the four B6 target files). Result: 246
+declarations fully converted to `--sp-*` tokens (311 individual px values replaced), 7
+declarations left with raw px + `/* no-scale */` — all genuine exceptions: a value >2px off every
+step paired with another that IS on-scale (e.g. `padding: 40px 28px` — `40px` is an exact
+`--sp-10` match but `28px` is 4px from both `--sp-6` (24px) and `--sp-8` (32px), so the *whole*
+declaration is left as-is rather than partially converting, per the "never mix tokens and raw px
+under one undocumented line" rule), one negative margin, and one 1px value nowhere near the 4px
+floor step.
+
+**Before:**
+```css
+.population-page {
+  ...
+  padding: 28px;
+  ...
+}
+```
+
+**After:**
+```css
+.population-page {
+  ...
+  padding: 28px /* no-scale */;
+  ...
+}
+```
+
+Verified with the dedicated verifier (`node checkSpacing.mjs Population.css` → `OK (0 unannotated
+raw px in padding/margin/gap)`). `npm run lint` and `npm run test:run` green (364/364).
+
+---
+
+## v42.28 — 2026-07-08 — B6 (Batch 1) consumption, file 4/4: UserManagement.css
+
+**File:** `src/components/Sidebar/Tabs/UserManagement/UserManagement.css`
+
+Same spacing sweep, run over `UserManagement.css` (the last of the four B6 target files). Result:
+77 declarations fully converted to `--sp-*` tokens (98 individual px values replaced), 4
+declarations left with raw px + `/* no-scale */` (three off-scale values, one `!important`
+declaration whose value is off-scale — the tokenizer correctly preserves the `!important` flag
+as a separate, untouched token).
+
+**Before:**
+```css
+.um-page {
+  padding: 28px;
+}
+...
+.um-badge-sm { padding-inline-start: 28px !important; }
+```
+
+**After:**
+```css
+.um-page {
+  padding: 28px /* no-scale */;
+}
+...
+.um-badge-sm { padding-inline-start: 28px !important /* no-scale */; }
+```
+
+Verified with the dedicated verifier (`node checkSpacing.mjs UserManagement.css` → `OK (0
+unannotated raw px in padding/margin/gap)`). `npm run lint` and `npm run test:run` green
+(364/364). This completes B6 consumption across all four target files.
+
+---
+
+## v42.23 — 2026-07-08 — B4 (Batch 1) regression guard: scripts/check-hex-literals.mjs
+
+**File:** `scripts/check-hex-literals.mjs` (new)
+
+Adds the guard script called for by the approved plan's B4 acceptance criteria: without it the
+sweep decays over time (the original audit found the counts had *grown* since a prior sweep —
+287→310, 183→197 — because nothing stopped new raw hex from being reintroduced). Counts
+`#[0-9a-fA-F]{3,8}` occurrences in the four B4-swept files and fails (exit 1) if any file's count
+exceeds its committed post-sweep baseline (`EmployeeWorkspace.css`: 10, `Reports.css`: 23,
+`DataTable.css`: 3, `Population.css`: 16 — all pre-existing, documented `/* no-token: one-off */`
+literals plus one plain `#16A34A` box-shadow accent in `DataTable.css`). `--report` flag prints
+counts without failing.
+
+**File:** `package.json`
+
+**Before:**
+```json
+    "test": "vitest",
+    "test:run": "vitest run"
+```
+
+**After:**
+```json
+    "test": "vitest",
+    "test:run": "vitest run",
+    "check:hex-literals": "node scripts/check-hex-literals.mjs"
+```
+
+**File:** `.github/workflows/ci.yml`
+
+**Before:**
+```yaml
+      - name: Lint
+        run: npm run lint:ci
+
+      - name: Test
+        run: npm run test:run
+```
+
+**After:**
+```yaml
+      - name: Lint
+        run: npm run lint:ci
+
+      - name: Hex-literal regression guard (B4)
+        run: npm run check:hex-literals
+
+      - name: Test
+        run: npm run test:run
+```
+
+Verified the script fails correctly: appended a throwaway `color: #123456;` rule to
+`DataTable.css`, ran the script (exit 1, `REGRESSION` reported for that file), then reverted the
+throwaway change. `npm run lint`, `npm run check:hex-literals`, and `npm run test:run` all green
+(364/364) on the real (non-regressed) tree.
+
+---
+
+## v42.22 — 2026-07-08 — B4 (Batch 1), file 4/4: hex-literal token sweep of Population.css
+
+**File:** `src/components/Sidebar/Tabs/Population/Population.css`
+
+Same mechanical sweep, applied to `Population.css` (127 raw hex literals across the 3,358-line
+file — sweep only, no file split per plan scope). 111 replaced with `var(--token)` (including 7
+"Extended accents" tokens added in v42.18: `--c-gray-muted`, `--c-danger-strong`,
+`--c-danger-border-light`, `--c-info-strong`, `--c-info-border-light`, `--c-success-strong`,
+`--c-gray-800`; `--c-teal-deep` reused from the v42.20 Reports.css addition). 62 redundant
+`var(--X, var(--X))` self-fallbacks collapsed to `var(--X)`. 16 literals left as
+`/* no-token: one-off */`.
+
+**Before:**
+```css
+.population-page {
+  --population-primary:       var(--c-navy, #0E2444);
+  --population-primary-hover: var(--c-navy-2, #102C57);
+  --population-muted:         var(--c-ink-3, #50536F);
+  --population-border:        var(--c-border, #DDE6EF);
+  --population-success:       var(--c-success, #004030);
+  --population-warning:       var(--c-warning, #775000);
+  --population-error:         var(--c-danger, #9F1624);
+  --population-bg-card:       #ffffff;
+  --population-bg-light:      var(--c-surface-2, #F6F8FA);
+  --font-somar: "Somar Sans", "Segoe UI", Tahoma, Arial, sans-serif;
+}
+...
+.certscan-hl-btn.port {
+  background: #fff5f5;
+  color: #b91c1c;
+  border-color: #fecaca;
+}
+```
+
+**After:**
+```css
+.population-page {
+  --population-primary:       var(--c-navy);
+  --population-primary-hover: var(--c-navy-2);
+  --population-muted:         var(--c-ink-3);
+  --population-border:        var(--c-border);
+  --population-success:       var(--c-success);
+  --population-warning:       var(--c-warning);
+  --population-error:         var(--c-danger);
+  --population-bg-card:       var(--c-surface);
+  --population-bg-light:      var(--c-surface-2);
+  --font-somar: "Somar Sans", "Segoe UI", Tahoma, Arial, sans-serif;
+}
+...
+.certscan-hl-btn.port {
+  background: #fff5f5 /* no-token: one-off */;
+  color: var(--c-danger-strong);
+  border-color: #fecaca /* no-token: one-off */;
+}
+```
+
+Full hex → token mapping applied: `#fff`/`#ffffff`→`--c-surface`, `#F6F8FA`→`--c-surface-2`,
+`#FDE8EA`→`--c-danger-bg`, `#DDE6EF`→`--c-border`, `#E3F3ED`→`--c-success-bg`,
+`#DBEAFE`→`--c-info-bg`, `#f87171`→`--c-danger-border-light`, `#E8EEF6`→`--c-navy-soft`,
+`#9F1624`→`--c-danger`, `#98a2b3`→`--c-gray-muted`, `#60a5fa`→`--c-info-border-light`,
+`#b91c1c`→`--c-danger-strong`, `#FBF2DC`→`--c-warning-bg`, `#F4A4AC`→`--c-danger-border`,
+`#E5F5FB`→`--c-sky-light`, `#C2CEDC`→`--c-border-2`, `#775000`→`--c-warning`,
+`#333`→`--c-gray-800`, `#1d4ed8`→`--c-info-strong`, `#1E40AF`→`--c-info`,
+`#102C57`→`--c-navy-2`, `#0E2444`→`--c-navy`, `#027a48`→`--c-success-strong`,
+`#009ADE`→`--c-sky`, `#00695c`→`--c-teal-deep`, `#004030`→`--c-success`,
+`#E5B46E`→`--c-warning-border`, `#93C5FD`→`--c-info-border`, `#8BBEAA`→`--c-success-border`,
+`#8395AC`→`--c-ink-4`, `#263C58`→`--c-ink-2`, `#0B1F33`→`--c-ink`. Left as `no-token: one-off`:
+`#fff5f5`, `#fecaca`, `#fcd0cd`, `#f5f7fa`, `#f0fdf4`, `#eff6ff`, `#ef4444`, `#d97706`, `#bfdbfe`,
+`#b7d8cc`, `#7f1d1d`, `#64748b`, `#444`, `#3b82f6`, `#1e3a8a`, `#16a34a`. `npm run lint` and
+`npm run test:run` green (364/364); verified via preview `getComputedStyle` that
+`--c-danger-strong`, `--c-danger-border-light`, `--c-info-strong`, `--c-info-border-light`,
+`--c-gray-muted`, `--c-success-strong`, `--c-gray-800` resolve to their pre-sweep hex values, and
+confirmed the Population tab renders identically (`.population-page` computed `color` still
+`rgb(11, 31, 51)` = `#0B1F33`).
+
+---
+
+## v42.21 — 2026-07-08 — B4 (Batch 1), file 3/4: hex-literal token sweep of DataTable.css
+
+**File:** `src/components/DataTable/DataTable.css`
+
+Same mechanical sweep, applied to `DataTable.css` (133 raw hex literals). 130 replaced with
+`var(--token)` (including the 4 "Extended accents" tokens added in v42.18 for this file's
+sticky-header fallback and completed-row tint ramp: `--c-table-head-fallback`,
+`--c-success-tint`, `--c-success-tint-hover`, `--c-success-tint-selected`). 117 redundant
+`var(--X, var(--X))` self-fallbacks collapsed to `var(--X)`. 3 literals left as
+`/* no-token: one-off */`.
+
+**Before:**
+```css
+.dt-th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--table-head-bg, #F7F9FA);
+  border-bottom: 1px solid var(--c-border, #DDE6EF);
+  ...
+}
+.dt-tr.dt-tr--completed,
+.dt-tr.dt-tr--completed:nth-child(even) {
+  background: #ECFDF3;
+}
+.dt-tr.dt-tr--completed:hover,
+.dt-tr.dt-tr--completed:nth-child(even):hover {
+  background: #DDF8E8;
+}
+.dt-tr.dt-tr--completed.selected,
+.dt-tr.dt-tr--completed.selected:nth-child(even) {
+  background: #D6F3E2;
+  box-shadow: inset 3px 0 0 #16A34A;
+}
+```
+
+**After:**
+```css
+.dt-th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--table-head-bg, var(--c-table-head-fallback));
+  border-bottom: 1px solid var(--c-border);
+  ...
+}
+.dt-tr.dt-tr--completed,
+.dt-tr.dt-tr--completed:nth-child(even) {
+  background: var(--c-success-tint);
+}
+.dt-tr.dt-tr--completed:hover,
+.dt-tr.dt-tr--completed:nth-child(even):hover {
+  background: var(--c-success-tint-hover);
+}
+.dt-tr.dt-tr--completed.selected,
+.dt-tr.dt-tr--completed.selected:nth-child(even) {
+  background: var(--c-success-tint-selected);
+  box-shadow: inset 3px 0 0 #16A34A /* no-token: one-off */;
+}
+```
+
+Note: `var(--table-head-bg, #F7F9FA)` was a *pre-existing mismatch* — `--table-head-bg` itself
+resolves to a gradient (`linear-gradient(180deg, #F4F8FB, #EAF1F7)` in `index.css`), not
+`#F7F9FA`; the fallback was already unreachable dead code (the gradient var is always defined) and
+its value was never actually rendered. Preserved as-is (now `var(--c-table-head-fallback)`) rather
+than "fixed", since correcting a pre-existing mismatch was out of scope for a token-mapping sweep.
+
+Full hex → token mapping applied: `#009ADE`→`--c-sky`, `#FFFFFF`→`--c-surface`,
+`#DDE6EF`→`--c-border`, `#263C58`→`--c-ink-2`, `#F9F8F4`→`--c-surface-3`,
+`#E5F5FB`→`--c-sky-light`, `#8395AC`→`--c-ink-4`, `#007FBA`→`--c-sky-2`,
+`#F6F8FA`→`--c-surface-2`, `#0B1F33`→`--c-ink`, `#E8EEF6`→`--c-navy-soft`,
+`#50536F`→`--c-ink-3`, `#FBF2DC`→`--c-warning-bg`, `#F7F9FA`→`--c-table-head-fallback`,
+`#ECFDF3`→`--c-success-tint`, `#DDF8E8`→`--c-success-tint-hover`,
+`#D6F3E2`→`--c-success-tint-selected`, `#C2CEDC`→`--c-border-2`, `#775000`→`--c-warning`,
+`#0E2444`→`--c-navy`, `#E5B46E`→`--c-warning-border`. Left as `no-token: one-off`: `#FDE68A`,
+`#F3F8FB`, `#16A34A`. `npm run lint` and `npm run test:run` green (364/364); verified via preview
+`getComputedStyle` that `--c-table-head-fallback`, `--c-success-tint`, `--c-success-tint-hover`,
+`--c-success-tint-selected`, `--c-sky-2` resolve to their pre-sweep hex values.
+
+---
+
+## v42.20 — 2026-07-08 — B4 (Batch 1), file 2/4: hex-literal token sweep of Reports.css
+
+**File:** `src/components/Sidebar/Tabs/Reports/Reports.css`
+
+Same mechanical sweep as v42.19, applied to `Reports.css` (197 raw hex literals, 40+ distinct
+values including case-duplicates like `#fff`/`#FFFFFF`). 174 replaced with `var(--token)`
+(byte-identical match against `index.css`, including the 9 "Extended accents" tokens added in
+v42.18 for this file's dashboard mini-palette: `--c-coral`, `--c-indigo`, `--c-teal-deep`,
+`--c-amber-deep`, `--c-azure`, `--c-rose-tint`, `--c-slate-border`, `--c-mint-tint`,
+`--c-slate-muted`). 126 redundant `var(--X, var(--X))` self-fallbacks collapsed to `var(--X)`. 23
+literals left as `/* no-token: one-off */` (single in-file occurrence, no repeat, no exact match).
+
+**Before:**
+```css
+.rh-dash {
+  --gold: #b7791f;
+  --gold-2: #8f5e14;
+  --blue: var(--c-sky, #009ade);
+  --green: #00695c;
+  --coral: #c0392b;
+  --slate: #64748b;
+  --cyan: #0e7490;
+  --purple: #6366f1;
+  --navy: var(--c-navy, #0e2444);
+  --navy-2: #1b3a66;
+  --panel: var(--c-surface-2, #F6F8FA);
+  ...
+}
+```
+
+**After:**
+```css
+.rh-dash {
+  --gold: var(--c-amber-deep);
+  --gold-2: #8f5e14 /* no-token: one-off */;
+  --blue: var(--c-sky);
+  --green: var(--c-teal-deep);
+  --coral: var(--c-coral);
+  --slate: #64748b /* no-token: one-off */;
+  --cyan: #0e7490 /* no-token: one-off */;
+  --purple: var(--c-indigo);
+  --navy: var(--c-navy);
+  --navy-2: #1b3a66 /* no-token: one-off */;
+  --panel: var(--c-surface-2);
+  ...
+}
+```
+
+Full hex → token mapping applied in this file: `#0E2444`/`#0e2444`→`--c-navy`, `#fff`/`#FFFFFF`→
+`--c-surface`, `#DDE6EF`/`#dde6ef`→`--c-border`, `#50536F`/`#50536f`→`--c-ink-3`,
+`#F6F8FA`/`#f6f8fa`→`--c-surface-2`, `#009ADE`/`#009ade`→`--c-sky`, `#c0392b`→`--c-coral`,
+`#E5F5FB`→`--c-sky-light`, `#FBF2DC`→`--c-warning-bg`, `#6366f1`→`--c-indigo`,
+`#00695c`→`--c-teal-deep`, `#b7791f`→`--c-amber-deep`, `#E8EEF6`→`--c-navy-soft`,
+`#E3F3ED`→`--c-success-bg`, `#775000`/`#004030`→`--c-warning`/`--c-success`,
+`#0078d4`→`--c-azure`, `#f3cccc`→`--c-rose-tint`, `#d0d7de`→`--c-slate-border`,
+`#bbf7d0`→`--c-mint-tint`, `#DAA328`→`--brand-premium`, `#8395AC`→`--c-ink-4`,
+`#57606a`→`--c-slate-muted`, `#0B1F33`/`#0b1f33`→`--c-ink`. Left as `no-token: one-off`:
+`#fdf8ec`, `#fdf1f1`, `#fbe3e1`, `#fbbf24`, `#f3e2b3`, `#f0fdf4`, `#eef2ff`, `#e1dfdd`, `#dc2626`,
+`#bde0fa`, `#b6e3cf`, `#a19f9d`, `#8f5e14`, `#64748b`, `#605e5c`, `#34d399`, `#24292f`, `#201f1e`,
+`#1f2328`, `#1b3a66`, `#16a34a`, `#106ebe`, `#0e7490`. `npm run lint` and `npm run test:run` green
+(364/364); verified via preview `getComputedStyle` that `--c-coral`, `--c-indigo`, `--c-teal-deep`,
+`--c-amber-deep`, `--c-azure`, `--c-mint-tint`, `--c-slate-border`, `--c-slate-muted`,
+`--c-rose-tint` all resolve to their pre-sweep hex values.
+
+---
+
+## v42.19 — 2026-07-08 — B4 (Batch 1), file 1/4: hex-literal token sweep of EmployeeWorkspace.css
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/EmployeeWorkspace.css`
+
+Mechanical sweep via a one-off scratch script (not committed — a permanent regression-guard
+script, `scripts/check-hex-literals.mjs`, lands separately once all four B4 files are swept): every
+raw `#hex` literal in the file (310 total, 39 distinct values) is mapped to the existing or newly
+added `--c-*`/`--brand-*` token in `src/index.css` whose resolved value is byte-identical, then the
+literal is replaced with `var(--token)`. Where the literal already lived inside a defensive
+`var(--X, #hex)` fallback and the fallback hex resolved to the *same* token already being
+referenced, the redundant `var(--X, var(--X))` this produces is collapsed back to `var(--X)`
+(behavior-identical — `--X` is always defined at `:root`). The 10 literals with no exact-match
+token and fewer than 2 in-file repeats are left as-is with a trailing `/* no-token: one-off */`
+comment. Net result: 300 replaced, 10 one-off, 0 unannotated raw hex remaining.
+
+**Before:**
+```css
+.ew-view-seg.active {
+  background: #FFFFFF;
+  color: var(--c-navy, #0E2444);
+  font-weight: 700;
+  box-shadow: 0 1px 4px rgba(15, 39, 68, 0.14);
+}
+...
+.ew-ref-stat-token--total { --stat-color: #0F2744; }
+.ew-ref-stat-token--quota { --stat-color: #1D4ED8; }
+.ew-ref-stat-token--done { --stat-color: #059669; }
+.ew-ref-stat-token--pending { --stat-color: #DC2626; }
+.ew-ref-stat-token--replaced { --stat-color: #64748B; }
+...
+.ew-ref-progress-track {
+  height: 5px;
+  background: var(--c-surface-3, #F9F8F4);
+  ...
+}
+.ew-ref-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: #059669;
+  transition: width 180ms ease;
+}
+```
+
+**After:**
+```css
+.ew-view-seg.active {
+  background: var(--c-surface);
+  color: var(--c-navy);
+  font-weight: 700;
+  box-shadow: 0 1px 4px rgba(15, 39, 68, 0.14);
+}
+...
+.ew-ref-stat-token--total { --stat-color: #0F2744 /* no-token: one-off */; }
+.ew-ref-stat-token--quota { --stat-color: var(--c-info-strong); }
+.ew-ref-stat-token--done { --stat-color: var(--c-emerald); }
+.ew-ref-stat-token--pending { --stat-color: #DC2626 /* no-token: one-off */; }
+.ew-ref-stat-token--replaced { --stat-color: #64748B /* no-token: one-off */; }
+...
+.ew-ref-progress-track {
+  height: 5px;
+  background: var(--c-surface-3);
+  ...
+}
+.ew-ref-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--c-emerald);
+  transition: width 180ms ease;
+}
+```
+
+Full hex → token mapping applied in this file: `#0E2444`→`--c-navy`, `#DDE6EF`→`--c-border`,
+`#FFFFFF`→`--c-surface`, `#50536F`→`--c-ink-3`, `#F6F8FA`→`--c-surface-2`, `#263C58`→`--c-ink-2`,
+`#F9F8F4`→`--c-surface-3`, `#C2CEDC`→`--c-border-2`, `#0B1F33`→`--c-ink`, `#009ADE`→`--c-sky`,
+`#E8EEF6`→`--c-navy-soft`, `#9F1624`→`--c-danger`, `#8395AC`→`--c-ink-4`, `#004030`→`--c-success`,
+`#FDE8EA`→`--c-danger-bg`, `#F4A4AC`→`--c-danger-border`, `#E5F5FB`→`--c-sky-light`,
+`#E3F3ED`→`--c-success-bg`, `#FBF2DC`→`--c-warning-bg`, `#E5B46E`→`--c-warning-border`,
+`#8BBEAA`→`--c-success-border`, `#775000`→`--c-warning`, `#DBEAFE`→`--c-info-bg`,
+`#1E40AF`→`--c-info`, `#102C57`→`--c-navy-2`, `#059669`→`--c-emerald`, `#93C5FD`→`--c-info-border`,
+`#1D4ED8`→`--c-info-strong`. Left as `no-token: one-off` (single in-file occurrence, no exact
+match): `#eff6ff`, `#bfdbfe`, `#FECACA`, `#FDE68A`, `#F0FDF4`, `#E1EFFE`, `#DC2626`, `#64748B`,
+`#1E6FBA`, `#0F2744`. `npm run lint` and `npm run test:run` green after the change (364/364 tests
+passing); verified via preview `getComputedStyle` that `--c-navy`, `--c-emerald`, `--c-info-strong`,
+`--c-surface-3`, `--c-border`, `--c-danger` resolve to their pre-sweep hex values.
+
+---
+
+## v42.18 — 2026-07-08 — B4 (Batch 1) prep: add "Extended accents" tokens to index.css for the hex-literal sweep
+
+**File:** `src/index.css`
+
+Adds 21 new custom properties to the `:root` token set, one per color literal that (a) appears
+≥2× in one of the four CSS files targeted by the B4 hex-to-token sweep (`EmployeeWorkspace.css`,
+`Reports.css`, `DataTable.css`, `Population.css`) and (b) has no byte-identical match among the
+existing 104 `--brand-*`/`--c-*` tokens. Values copied verbatim from the swept files — this commit
+only adds the tokens; the sweep commits that follow reference them via `var(--token-name)`.
+
+**Before:**
+```css
+  --c-info:           #1E40AF;
+  --c-info-bg:        #DBEAFE;
+  --c-info-border:    #93C5FD;
+
+  /* ── Shadows ───────────────────────────────────────────────── */
+```
+
+**After:**
+```css
+  --c-info:           #1E40AF;
+  --c-info-bg:        #DBEAFE;
+  --c-info-border:    #93C5FD;
+
+  /* ── Extended accents (added by the B4 hex-token sweep — colors that
+     repeat ≥2× in a swept component file but had no exact-match token
+     above; kept here as the single source of truth per color) ──────── */
+  --c-emerald:              #059669;
+  --c-coral:                #c0392b;
+  --c-indigo:               #6366f1;
+  --c-teal-deep:            #00695c;
+  --c-amber-deep:           #b7791f;
+  --c-azure:                #0078d4;
+  --c-rose-tint:            #f3cccc;
+  --c-slate-border:         #d0d7de;
+  --c-mint-tint:            #bbf7d0;
+  --c-slate-muted:          #57606a;
+  --c-table-head-fallback:  #F7F9FA;
+  --c-success-tint:         #ECFDF3;
+  --c-success-tint-hover:   #DDF8E8;
+  --c-success-tint-selected:#D6F3E2;
+  --c-gray-muted:           #98a2b3;
+  --c-danger-strong:        #b91c1c;
+  --c-danger-border-light:  #f87171;
+  --c-info-strong:          #1d4ed8;
+  --c-info-border-light:    #60a5fa;
+  --c-success-strong:       #027a48;
+  --c-gray-800:             #333333;
+
+  /* ── Shadows ───────────────────────────────────────────────── */
+```
+
+---
+
+## v42.17 — 2026-07-08 — D7 (Batch 4): version stamp (single source of truth via Vite `define`) + docs/RELEASE_CHECKLIST.md
+
+**File:** `package.json`
+
+**Before:**
+```json
+  "version": "1.0.0",
+```
+
+**After:**
+```json
+  "version": "42.17.0",
+```
+
+Adopted mapping: `package.json` major.minor tracks the EDIT_LOG `vMAJOR.MINOR` scheme directly
+(42.17 ↔ v42.17), with `.0` as the semver-required patch component (EDIT_LOG doesn't have a third
+segment, so patch stays `0` and all granularity lives in the minor number, matching how the log
+already works). Bumped to `42.17.0` to match *this very entry*, since it's the top of the log
+once this change lands.
+
+**File:** `src/vite-env.d.ts`
+
+**Before:**
+```ts
+/// <reference types="vite/client" />
+
+declare module "*.woff?inline" {
+  const src: string;
+  export default src;
+}
+```
+
+**After:**
+```ts
+/// <reference types="vite/client" />
+
+declare module "*.woff?inline" {
+  const src: string;
+  export default src;
+}
+
+/** App version string, injected at build time from `package.json` via Vite's `define`
+ *  (see `vite.config.ts` / `vitest.config.ts`) — single source of truth, no hand-maintained
+ *  version.ts to drift out of sync. */
+declare const __APP_VERSION__: string;
+```
+
+**File:** `vite.config.ts`
+
+**Before:**
+```ts
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import { viteSingleFile } from "vite-plugin-singlefile";
+import { deckStyleChoicesPlugin } from "./src/dev/deckStyleChoicesPlugin";
+import { editLogTruncatePlugin } from "./src/build/editLogTruncatePlugin";
+
+export default defineConfig({
+  plugins: [react(), viteSingleFile(), deckStyleChoicesPlugin(), editLogTruncatePlugin()],
+  base: "./",
+```
+
+**After:**
+```ts
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import { viteSingleFile } from "vite-plugin-singlefile";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { deckStyleChoicesPlugin } from "./src/dev/deckStyleChoicesPlugin";
+import { editLogTruncatePlugin } from "./src/build/editLogTruncatePlugin";
+
+// Single source of truth for the app version: read it straight from package.json rather than
+// hand-maintaining a separate version.ts that can drift out of sync (D7).
+const pkg = JSON.parse(
+  readFileSync(fileURLToPath(new URL("./package.json", import.meta.url)), "utf8")
+) as { version: string };
+
+export default defineConfig({
+  plugins: [react(), viteSingleFile(), deckStyleChoicesPlugin(), editLogTruncatePlugin()],
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
+  base: "./",
+```
+
+**File:** `vitest.config.ts`
+
+**Before:**
+```ts
+import { defineConfig } from "vitest/config";
+
+export default defineConfig({
+  test: {
+    environment: "node",
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+    globals: false,
+    setupFiles: ["src/test-setup.ts"],
+  }
+});
+```
+
+**After:**
+```ts
+import { defineConfig } from "vitest/config";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+// Same package.json-sourced version define as vite.config.ts, so components that read
+// __APP_VERSION__ (e.g. Settings' AboutSection) can render under Testing Library too.
+const pkg = JSON.parse(
+  readFileSync(fileURLToPath(new URL("./package.json", import.meta.url)), "utf8")
+) as { version: string };
+
+export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
+  test: {
+    environment: "node",
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+    globals: false,
+    setupFiles: ["src/test-setup.ts"],
+  }
+});
+```
+
+**File:** `src/components/Sidebar/Tabs/Settings/AboutSection.tsx` (new)
+
+**Before:** (file did not exist)
+
+**After:** Small "حول النظام" (About) card, styled with the existing `.settings-category*`
+classes (no new visual system introduced — that's Batch 1's job), rendering the injected
+`__APP_VERSION__` next to a static line pointing at the ChangeLog tab for full history.
+
+**File:** `src/components/Sidebar/Tabs/Settings/Settings.css`
+
+Added one small rule, `.settings-about-version`, for the version-value emphasis text (monospace,
+tabular figures) — additive only, no changes to existing rules.
+
+**File:** `src/components/Sidebar/Tabs/Settings/index.tsx`
+
+**Before:**
+```tsx
+import { PageHeader } from "../../../../components/PageHeader/PageHeader";
+import { ErrorLogSection } from "./ErrorLogSection";
+```
+```tsx
+      <ErrorLogSection />
+    </div>
+  );
+}
+```
+
+**After:**
+```tsx
+import { PageHeader } from "../../../../components/PageHeader/PageHeader";
+import { ErrorLogSection } from "./ErrorLogSection";
+import { AboutSection } from "./AboutSection";
+```
+```tsx
+      <ErrorLogSection />
+      <AboutSection />
+    </div>
+  );
+}
+```
+
+**File:** `docs/RELEASE_CHECKLIST.md` (new)
+
+**Before:** (file did not exist)
+
+**After:** New checklist doc: bump `package.json` version to match the next EDIT_LOG entry,
+cut a CHANGELOG summary from the EDIT_LOG majors since the last release, record the built
+`dist/index.html` size (before/after, gzip), run the docs-sync check (CLAUDE.md tab table +
+bundle-size note still accurate), confirm `npm run lint`/`test:run`/`build` are green, tag the
+commit.
+
+**Verification (grep for a second hardcoded version string):** confirmed no other literal
+`"1.0.0"`-style app-release version exists in `src/` or config files — `WORKSPACE_SCHEMA_VERSION`
+(`src/data/workspace/workspaceTypes.ts`) and the `schemaVersion` fields in JSON envelopes are a
+*different* concept (on-disk data schema versioning, unrelated to the app release version) and
+are left untouched; `LOGIN_SYSTEM_VERSION` in `src/auth/authConfig.ts` is similarly a distinct,
+pre-existing constant for the auth subsystem's own internal versioning, not the app release
+version — noted here to avoid confusion, not renamed (out of scope, no plan instruction to
+consolidate it).
+
+## v42.16 — 2026-07-08 — D6 (Batch 4): add docs/SECURITY_MODEL.md — the one-page risk-acceptance doc (restored item, dropped by the earlier draft)
+
+**File:** `docs/SECURITY_MODEL.md` (new)
+
+**Before:** (file did not exist — CLAUDE.md carried the summary paragraph, but no dedicated
+risk-acceptance doc existed)
+
+**After:** New one-page doc consolidating (not duplicating) the security posture: (1) trust
+boundary statement — no backend, all role/permission checks are client-side, business data is
+plain JSON on disk, so the auth layer is a UX/role-routing guard, not a security boundary; (2)
+bundled bootstrap-admin hash exposure (`BOOTSTRAP_ADMIN_PASSWORD_HASH` in `src/auth/authConfig.ts`
+ships in the client bundle, is offline-crackable) + passcode-strength policy (must be treated as
+the sole real defense; rotation procedure referenced); (3) demo/viewer static passcode
+acceptance (TEC-06 — `VIEWER_USERNAME`/`VIEWER_PASSWORD` = `viewer`/`view`, hardcoded and
+undocumented-as-secret by design, read-only in-memory workspace only); (4) localStorage/JSON
+tamperability (managed users + permission matrix in `localStorage`, business data as plain JSON
+files in the workspace folder — both directly editable by anyone with local access or devtools);
+closes with an explicit "Accepted by / date" line for audit-trail purposes.
+
+**File:** `CLAUDE.md`
+
+**Before:**
+```md
+   > **Security model — advisory only.** With no backend, all role/permission checks run in the browser and all business data is plain JSON on disk. A determined user can edit `localStorage` or the JSON files directly to self-elevate or tamper. The auth layer is a UX/role-routing guard, **not** a trust boundary. The bootstrap admin hash ships in the client bundle, so the passcode must be strong (it is offline-crackable). Do not treat this app as a defense against malicious insiders.
+```
+
+**After:**
+```md
+   > **Security model — advisory only.** With no backend, all role/permission checks run in the browser and all business data is plain JSON on disk. A determined user can edit `localStorage` or the JSON files directly to self-elevate or tamper. The auth layer is a UX/role-routing guard, **not** a trust boundary. The bootstrap admin hash ships in the client bundle, so the passcode must be strong (it is offline-crackable). Do not treat this app as a defense against malicious insiders. Full risk-acceptance detail (trust boundary, passcode policy, viewer-passcode note, localStorage/JSON tamperability, sign-off): `docs/SECURITY_MODEL.md`.
+```
+
+No production code changes — doc-only item, per the plan's acceptance criteria.
+
+## v42.15 — 2026-07-08 — D4 (Batch 4): add a CI workflow gating push/PR on typecheck + lint + test + build
+
+**File:** `.github/workflows/ci.yml` (new)
+
+**Before:** (file did not exist — only `.github/workflows/sbom.yml` existed, which is SBOM-only
+and not a merge gate)
+
+**After:** New GitHub Actions workflow, `runs-on: ubuntu-latest`, triggered on push to `main`,
+every pull request, and manual `workflow_dispatch`. Steps run in sequence, any failure blocks the
+job: `actions/checkout@v4` → `actions/setup-node@v4` (`node-version: "22"`, `cache: npm` — caches
+the npm cache directory, not `node_modules`, per the plan's explicit warning against caching
+`node_modules` across lockfile changes) → `npm ci` (now safe offline for the `xlsx` dependency
+since D5 vendored it) → `npm run typecheck` (`tsc --noEmit`) → `npm run lint:ci`
+(`eslint src --max-warnings 0` — the stricter of the two lint scripts, appropriate for a gate) →
+`npm run test:run` (Vitest) → `npm run build` (`tsc -b && vite build`). No hex-literal guard step
+yet — that script (`scripts/check-hex-literals.mjs`) is part of Batch 1 (B4), not yet implemented
+at the time of this batch; the plan says to add it "if it exists by then."
+
+**Note on sequencing:** landed after D5 (xlsx vendoring) so `npm ci` doesn't depend on the
+SheetJS CDN being reachable from GitHub's runners, and after C5 (EDIT_LOG truncation) so the
+`npm run build` step in this workflow exercises the truncation path, per the plan's hard
+sequencing (D5 before D4; C5 before/with D4).
+
+## v42.14 — 2026-07-08 — C5 (Batch 4): truncate EDIT_LOG.md at build time so the ChangeLog tab stops inflating the bundle by the full ~700 kB log
+
+**File:** `src/build/editLogTruncatePlugin.ts` (new)
+
+**Before:** (file did not exist)
+
+**After:** New Vite plugin, `apply: "build"` only (dev server keeps serving the full log
+unmodified — useful when authoring EDIT_LOG entries). Intercepts the `?raw` import of
+`docs/EDIT_LOG.md` via a `load` hook with `enforce: "pre"` (runs before Vite's built-in raw-query
+handler, and returning a non-null result from `load` short-circuits it). Exports a pure
+`truncateEditLog(content, keep = 20)` helper (kept separate from the plugin wiring so it's unit
+testable): splits on `## v<version> ` heading boundaries (never mid-entry), keeps the first N
+headings from the top of the file (the log is prepend-ordered — newest entries land at the top),
+and appends a synthetic `## v0.0 — <today> — سجل مختصر (...)` entry whose Arabic body explains the
+truncation and points at the full `docs/EDIT_LOG.md` in the repo. `v0.0` sorts last under the
+ChangeLog tab's existing `compareVersionsDesc`, so it always renders at the bottom without
+disturbing real entries. Repo `docs/EDIT_LOG.md` itself is never written to — only the in-memory
+module content served to the bundle is shortened. Chose **last 20 versions** (of the two options
+the plan offered) — empirically this drops the inlined content from ~690 KB to ~33 KB, and 20
+entries is enough recent history to be useful in-app.
+
+**File:** `src/build/editLogTruncatePlugin.test.ts` (new)
+
+**Before:** (file did not exist)
+
+**After:** Unit tests for `truncateEditLog`: (1) no-op when entry count ≤ `keep`; (2) result
+contains exactly `keep + 1` headings (`keep` originals + the synthetic notice) when the source
+has more than `keep` entries; (3) the cut never lands mid-entry — every kept entry's full body is
+intact up to the next heading; (4) the synthetic notice entry parses as `v0.0` and sorts last
+under the ChangeLog tab's own `compareVersionsDesc`-equivalent ordering rule; (5) the notice
+mentions the omitted count and points at `docs/EDIT_LOG.md`.
+
+**File:** `vite.config.ts`
+
+**Before:**
+```ts
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import { viteSingleFile } from "vite-plugin-singlefile";
+import { deckStyleChoicesPlugin } from "./src/dev/deckStyleChoicesPlugin";
+
+export default defineConfig({
+  plugins: [react(), viteSingleFile(), deckStyleChoicesPlugin()],
+```
+
+**After:**
+```ts
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import { viteSingleFile } from "vite-plugin-singlefile";
+import { deckStyleChoicesPlugin } from "./src/dev/deckStyleChoicesPlugin";
+import { editLogTruncatePlugin } from "./src/build/editLogTruncatePlugin";
+
+export default defineConfig({
+  plugins: [react(), viteSingleFile(), deckStyleChoicesPlugin(), editLogTruncatePlugin()],
+```
+
+**File:** `src/components/Sidebar/Tabs/ChangeLog/index.tsx`
+
+No import-site change needed — the `?raw` import of `docs/EDIT_LOG.md` is unchanged; the
+plugin transparently substitutes truncated content for that same import only during
+`npm run build`. Verified the tab's "إجمالي الإصدارات" / "أحدث إصدار" / "آخر تحديث" stats and the
+search/filter logic all operate on `entries[0]` (newest-first after `compareVersionsDesc`), which
+is unaffected by truncation since the newest entries are exactly what's kept.
+
+**Measured result:** `dist/index.html` dropped from **3,242.13 kB** (before this change, with D5
+already applied) to **2,554.83 kB** (after) — a ~687 kB / ~21% reduction. Verified in the built
+output that exactly 21 real headings survive (20 kept entries + the synthetic `v0.0` notice,
+confirmed with a proper start-of-line-anchored scan of the bundle, not a naive substring search)
+and that the cut lands cleanly on an entry boundary with no partial trailing entry.
+
+**File:** `docs/audit/hardening-2026-07-08/03-approved-plan.md` context note (TEC-02 NUL byte,
+`.gitattributes` text rule)
+
+Verified both already resolved prior to this batch: `docs/EDIT_LOG.md` contains no NUL byte
+(checked via a byte scan) and `.gitattributes` already has `*.md text` (plus `*.ts`/`*.tsx`/
+`*.css`/`*.json`). No changes needed for either sub-item.
+
+## v42.13 — 2026-07-08 — D5 (Batch 4): vendor the SheetJS xlsx tarball instead of fetching it from the CDN at install time
+
+**File:** `vendor/xlsx-0.20.3.tgz` (new)
+
+Downloaded the exact `xlsx-0.20.3` tarball from `https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz`
+(sha256 `8dc73fc3b00203e72d176e85b50938627c7b086e607c682e8d3c22c02bb99fe8`) and committed it to
+`vendor/`. This removes the CI-time dependency on the SheetJS CDN being reachable — a
+prerequisite for D4 (CI workflow), since `npm ci` must succeed without network access to a
+third-party CDN.
+
+**File:** `vendor/README.md` (new)
+
+**Before:** (file did not exist)
+
+**After:**
+```md
+# vendor/
+
+Third-party packages vendored directly into the repo because they are not published to the
+default npm registry.
+
+## xlsx-0.20.3.tgz
+
+- Source: https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz
+- License: Apache-2.0 (SheetJS permits redistribution under this license)
+- Why vendored: the `xlsx` npm registry package is stale; the current SheetJS releases are
+  distributed via their own CDN, not npm. Vendoring removes the runtime dependency on that CDN
+  being reachable during `npm install`/`npm ci` (see CI workflow, D4).
+- Do not "upgrade" this to the npm-registry `xlsx` package — it lags far behind SheetJS's own
+  releases. To upgrade, download the new version's tarball from `cdn.sheetjs.com`, replace the
+  file here, and update the `package.json` dependency version/path together.
+```
+
+**File:** `package.json`
+
+**Before:**
+```json
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+```
+
+**After:**
+```json
+    "xlsx": "file:vendor/xlsx-0.20.3.tgz"
+```
+
+**File:** `package-lock.json`
+
+Regenerated via `npm install` so the `xlsx` resolution now points at the vendored file path
+instead of the CDN URL. Lockfile committed.
+
+**File:** `CLAUDE.md`
+
+**Before:**
+```md
+- The `xlsx` dependency is installed from a **SheetJS CDN tarball** (`https://cdn.sheetjs.com/xlsx-0.20.3/...`), not the npm registry — `npm install` needs access to that URL; don't "upgrade" it to the stale npm package.
+```
+
+**After:**
+```md
+- The `xlsx` dependency is **vendored** at `vendor/xlsx-0.20.3.tgz` (`package.json` points at `file:vendor/xlsx-0.20.3.tgz`) — originally sourced from the SheetJS CDN tarball (`https://cdn.sheetjs.com/xlsx-0.20.3/...`), not the npm registry. Vendoring means `npm ci` no longer needs network access to that CDN (required for CI, see `.github/workflows/ci.yml`). Don't "upgrade" it to the stale npm-registry `xlsx` package; see `vendor/README.md` for the upgrade procedure.
+```
+
 ## v42.12 — 2026-07-08 — Referral approval rework: fix duplicate bulk-result banner, friendly labels in bulk confirm modal
 
 **File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/index.tsx`

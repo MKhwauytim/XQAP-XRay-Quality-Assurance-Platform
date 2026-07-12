@@ -18,6 +18,10 @@ export type MonthManifestData = {
   totalRawRows: number;
   totalProcessedRows: number;
   status: "raw-saved" | "processed-saved" | "sampled" | "distributed" | "closed";
+  /** Monotonically increasing counter for CAS conflict detection. */
+  revision?: number;
+  /** Per-write UUID embedded by casLoop for cross-machine race detection. */
+  _writeToken?: string;
   /** Set when status === "closed". */
   closedAt?: string | null;
   closedBy?: string | null;

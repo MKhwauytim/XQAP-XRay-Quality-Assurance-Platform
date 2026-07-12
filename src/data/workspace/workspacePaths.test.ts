@@ -37,6 +37,7 @@ test("POPULATION_SUBFOLDERS, SAMPLE_SUBFOLDERS, SYSTEM_FOLDER_NAMES, REPORTS_SUB
     powerbiExport: "powerbi-export",
     userPresets: "user-presets",
     feedback: "feedback",
+    notifications: "notifications",
   });
   expect(REPORTS_SUBFOLDERS).toEqual({ designs: "designs" });
 });

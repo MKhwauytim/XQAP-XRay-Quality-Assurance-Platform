@@ -1,5 +1,7 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { casLoop } from "../storage/casLoop";
+import { withResourceLock } from "../storage/webLocks";
 import { ensureMonthWritable } from "../population/monthLock";
 import type { DecisionEvent, DecisionEventKind, SupervisorDecisionFile } from "./approvalTypes";
 import { getPopulationMonthDir, getSampleApprovalsDir, safeWorkspaceFilePart } from "../workspace/workspacePaths";
@@ -95,21 +97,38 @@ export async function appendDecisionEvent(
   event: DecisionEvent
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   // Month lock gate — throws MonthClosedError when the month is closed; callers
-  // that need a user-facing message should catch it explicitly.
+  // that need a user-facing message should catch it explicitly. Kept outside the
+  // CAS loop so a closed month rejects loudly instead of being retried.
   await ensureMonthWritable(directoryHandle, monthFolderName);
-  try {
-    const appDir = await getApprovalsDir(directoryHandle, monthFolderName);
-    const current = await loadSupervisorDecisions(directoryHandle, monthFolderName, supervisorUsername);
-    const updated: SupervisorDecisionFile = {
-      ...current,
-      decisionEvents: [...(current.decisionEvents ?? []), event],
-      lastUpdatedAt: new Date().toISOString(),
-    };
-    await safeWriteJson(appDir, decisionFileName(supervisorUsername), updated);
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "خطأ غير معروف." };
-  }
+
+  const fileName = decisionFileName(supervisorUsername);
+  // `:rmw` suffix keeps this outer read-modify-write lock distinct from
+  // safeWriteJson's internal `${dir.name}/${fileName}` lock (withResourceLock is
+  // not reentrant — a colliding key self-deadlocks). The outer lock serializes
+  // same-tab appends; the casLoop token guards cross-machine races on a shared folder.
+  return withResourceLock(`approvals/${fileName}:rmw`, () =>
+    casLoop<{ ok: true }>(
+      async (writeToken) => {
+        const appDir = await getApprovalsDir(directoryHandle, monthFolderName);
+        const current = await loadSupervisorDecisions(directoryHandle, monthFolderName, supervisorUsername);
+        const nextRevision = (current.revision ?? 0) + 1;
+        const updated: SupervisorDecisionFile = {
+          ...current,
+          revision: nextRevision,
+          _writeToken: writeToken,
+          decisionEvents: [...(current.decisionEvents ?? []), event],
+          lastUpdatedAt: new Date().toISOString(),
+        };
+        await safeWriteJson(appDir, fileName, updated);
+        const verify = await loadSupervisorDecisions(directoryHandle, monthFolderName, supervisorUsername);
+        if (verify.revision === nextRevision && verify._writeToken === writeToken) {
+          return { done: true, result: { ok: true as const } };
+        }
+        return { done: false };
+      },
+      { conflictError: "تعارض في الكتابة: لم يتمكن النظام من حفظ قرار الاعتماد بعد عدة محاولات." }
+    )
+  );
 }
 
 /** Combine decision events for one request from every supervisor's file, including
@@ -124,7 +143,9 @@ export function mergeDecisionHistory(
     for (const event of file.decisionEvents ?? []) {
       if (event.kind === kind && event.requestId === requestId) events.push(event);
     }
-    const legacy = kind === "referral" ? file.referralDecisions : file.replacementDecisions;
+    // "reopen" is a newer kind with no legacy per-kind array — only decisionEvents.
+    const legacy =
+      kind === "referral" ? file.referralDecisions : kind === "replacement" ? file.replacementDecisions : [];
     for (const decision of legacy) {
       if (decision.requestId !== requestId) continue;
       events.push({

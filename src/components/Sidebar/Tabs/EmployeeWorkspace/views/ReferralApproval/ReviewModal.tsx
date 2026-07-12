@@ -1,6 +1,8 @@
 import { useState, type ReactNode } from "react";
 import { X } from "lucide-react";
 
+import { useFocusTrap } from "../../../../../../hooks/useFocusTrap";
+
 type Props = {
   title: string;
   description: ReactNode;
@@ -11,9 +13,10 @@ type Props = {
 
 export default function ReviewModal({ title, description, isApprove, onClose, onConfirm }: Props) {
   const [notes, setNotes] = useState("");
+  const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onClose });
 
   return (
-    <div className="ew-modal-backdrop" role="dialog" aria-modal="true">
+    <div ref={dialogRef} className="ew-modal-backdrop" role="dialog" aria-modal="true">
       <div className="ew-replace-modal">
         <div className="ew-replace-header">
           <div>

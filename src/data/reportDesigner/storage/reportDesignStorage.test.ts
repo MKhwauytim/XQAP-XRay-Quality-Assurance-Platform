@@ -31,4 +31,20 @@ describe("reportDesignStorage", () => {
     const index = await loadDesignIndex(dir);
     expect(index.designs.map((d) => d.reportId)).not.toContain(doc.reportId);
   });
+
+  it("preserves both index entries on concurrent saves (cross-machine CAS)", async () => {
+    const dir = createMemoryDirectory("root");
+    // Two authors on two PCs save different designs at the same instant. The
+    // withResourceLock + casLoop index RMW must land BOTH index entries.
+    const docA = createEmptyDocument("تصميم أ", "admin");
+    const docB = createEmptyDocument("تصميم ب", "admin");
+    await Promise.all([saveDesign(dir, docA), saveDesign(dir, docB)]);
+
+    const index = await loadDesignIndex(dir);
+    expect(index.designs.map((d) => d.reportId).sort()).toEqual(
+      [docA.reportId, docB.reportId].sort()
+    );
+    // Both writes participated in the CAS protocol → revision advanced past both.
+    expect(index.revision).toBe(2);
+  });
 });

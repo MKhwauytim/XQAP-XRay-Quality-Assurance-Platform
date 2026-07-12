@@ -9,6 +9,7 @@ import {
   heatmap,
   sparkline,
 } from "./charts";
+import { XSS_PAYLOADS, XSS_MARKER, findLiveInjection } from "../../xssPayloads";
 
 // See icons.test.ts — combining/ZWJ/keycap joiners kept out of the character
 // class to satisfy no-misleading-character-class.
@@ -56,6 +57,23 @@ describe("rankedBar", () => {
     expect(html).not.toContain("NaN");
     expect(html).not.toContain("Infinity");
   });
+
+  it("renders an axis reference row for the shared 0→max scale", () => {
+    const html = rankedBar(
+      [
+        { label: "ميناء أ", value: 95 },
+        { label: "ميناء ب", value: 60 },
+      ],
+      {},
+    );
+    expect(html).toContain("justify-content:space-between");
+    expect(html).toContain(">95<"); // ceiling tick = the shared max
+  });
+
+  it("omits the axis row when every value is zero (nothing to scale)", () => {
+    const html = rankedBar([{ label: "x", value: 0 }], {});
+    expect(html).not.toContain("justify-content:space-between");
+  });
 });
 
 describe("donut", () => {
@@ -75,6 +93,38 @@ describe("donut", () => {
     assertSvg(svg);
     expect(svg).toContain("—");
     expect(svg).not.toContain("NaN");
+  });
+
+  it("renders a category legend for multi-segment data", () => {
+    const svg = donut(
+      [
+        { label: "سليمة", value: 70 },
+        { label: "اشتباه", value: 30 },
+      ],
+      {},
+    );
+    expect(svg).toContain("سليمة");
+    expect(svg).toContain("اشتباه");
+    expect(svg).toContain("70%");
+  });
+
+  it("omits the legend for a single-category donut", () => {
+    const svg = donut([{ label: "الكل", value: 10 }], {});
+    assertSvg(svg);
+    expect(svg).not.toContain("الكل");
+  });
+
+  it("escapes injected markup in a category label", () => {
+    const svg = donut(
+      [
+        { label: XSS_PAYLOADS.scriptTag, value: 70 },
+        { label: "طبيعي", value: 30 },
+      ],
+      {},
+    );
+    expect(findLiveInjection(svg)).toBeNull();
+    expect(svg).toContain(XSS_MARKER);
+    expect(svg).toContain("&lt;script&gt;");
   });
 });
 
@@ -104,6 +154,12 @@ describe("gauge", () => {
     const svg = gauge(null, {});
     assertSvg(svg);
     expect(svg).toContain("—");
+  });
+
+  it("renders 0%/100% axis-reference ticks at the ends of the dial", () => {
+    const svg = gauge(60, {});
+    expect(svg).toContain(">0%<");
+    expect(svg).toContain(">100%<");
   });
 });
 
@@ -136,6 +192,44 @@ describe("groupedBars", () => {
     assertSvg(svg);
     expect(svg).not.toContain("NaN");
   });
+
+  it("renders a series legend distinguishing L1/L2", () => {
+    const svg = groupedBars(
+      {
+        groups: ["ميناء أ", "ميناء ب"],
+        series: [
+          { label: "L1", values: [80, 60] },
+          { label: "L2", values: [70, 90] },
+        ],
+      },
+      {},
+    );
+    expect(svg).toContain(">L1<");
+    expect(svg).toContain(">L2<");
+  });
+
+  it("omits the legend for a single series", () => {
+    const svg = groupedBars(
+      { groups: ["a"], series: [{ label: "فقط", values: [10] }] },
+      {},
+    );
+    expect(svg).not.toContain("فقط");
+  });
+
+  it("escapes injected markup in a series label", () => {
+    const svg = groupedBars(
+      {
+        groups: ["g"],
+        series: [
+          { label: XSS_PAYLOADS.scriptTag, values: [10] },
+          { label: "عادي", values: [20] },
+        ],
+      },
+      {},
+    );
+    expect(findLiveInjection(svg)).toBeNull();
+    expect(svg).toContain(XSS_MARKER);
+  });
 });
 
 describe("stackedBars", () => {
@@ -166,6 +260,21 @@ describe("stackedBars", () => {
     );
     assertSvg(svg);
     expect(svg).not.toContain("NaN");
+  });
+
+  it("renders a series legend distinguishing stacked segments", () => {
+    const svg = stackedBars(
+      {
+        groups: ["ميناء أ"],
+        series: [
+          { label: "نظيف", values: [40] },
+          { label: "مشتبه", values: [10] },
+        ],
+      },
+      {},
+    );
+    expect(svg).toContain("نظيف");
+    expect(svg).toContain("مشتبه");
   });
 });
 
@@ -232,6 +341,19 @@ describe("heatmap", () => {
     );
     assertSvg(svg);
     expect(svg).not.toContain("NaN");
+  });
+
+  it("renders an intensity legend when values vary", () => {
+    const svg = heatmap(
+      {
+        rows: ["ميناء أ"],
+        cols: ["نوع 1", "نوع 2"],
+        values: [[10, 4]],
+      },
+      {},
+    );
+    expect(svg).toContain("الأعلى");
+    expect(svg).toContain("أقل");
   });
 });
 

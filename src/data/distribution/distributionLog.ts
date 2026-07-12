@@ -101,6 +101,25 @@ export function buildReopenedEvent(params: {
   };
 }
 
+export function buildReopenRequestedEvent(params: {
+  xrayImageId: string;
+  assignedTo: string;
+  eventBy: string;
+  notes?: string;
+  sourceRequestId?: string;
+}): DistributionEvent {
+  return {
+    eventId: createEventId(),
+    eventType: "reopen-requested",
+    xrayImageId: params.xrayImageId,
+    assignedTo: params.assignedTo,
+    eventAt: new Date().toISOString(),
+    eventBy: params.eventBy,
+    notes: params.notes,
+    sourceRequestId: params.sourceRequestId
+  };
+}
+
 export function buildCompletedEvent(params: {
   xrayImageId: string;
   assignedTo: string;
@@ -214,6 +233,15 @@ export function deriveCurrentDistribution(
         status = "replaced";
         replacedById = evt.replacedById ?? null;
         assignedTo = existing?.assignedTo ?? evt.assignedTo;
+        break;
+      case "reopen-requested":
+        // Pending self-service reopen request (approval-gated). A non-mutating
+        // marker: the row keeps its prior status (a submitted/completed row stays
+        // completed) — only the terminal "reopened" event returns it to pending.
+        // Illegal after "replaced" — the terminal-state guard above drops it.
+        status = existing?.status ?? "pending";
+        assignedTo = existing?.assignedTo ?? evt.assignedTo;
+        replacedById = existing?.replacedById ?? null;
         break;
       case "reopened":
         // Returns a completed item to the employee's queue for correction.

@@ -12,16 +12,29 @@
  *   within 30 s; every write path re-checks at write time. Acceptable for
  *   governance semantics.
  * - Demo/viewer read-only mode never throws (writes are no-ops anyway).
- * - `closeMonth`/`reopenMonth` write the manifest DIRECTLY — not through
- *   `updateMonthStatus`, whose monotonic rank guard would refuse the reopen
- *   downgrade.
+ * - `closeMonth`/`reopenMonth` bypass `updateMonthStatus` (whose monotonic rank
+ *   guard would refuse the "closed" state and the reopen downgrade), but they
+ *   still write the manifest inside the SAME casLoop protocol `updateMonthStatus`
+ *   uses — identical lock key (`population-manifest/${month}:rmw`), revision bump
+ *   and `_writeToken` stamp — so all three writers participate in one protocol and
+ *   detect each other's concurrent writes (finding S3). A plain, non-participating
+ *   write here would be invisible to `updateMonthStatus`'s conflict check and could
+ *   let an automated status-advance silently un-close a frozen month.
  */
 
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { casLoop } from "../storage/casLoop";
+import { withResourceLock } from "../storage/webLocks";
 import { isReadOnlyMode } from "../storage/readOnlyMode";
 import { getPopulationMonthDir } from "../workspace/workspacePaths";
 import type { MonthManifestData } from "./monthTypes";
+
+/** Lock key shared with populationStorage.updateMonthStatus so same-tab writers to
+ *  month.manifest.json serialize and cross-machine writers share one casLoop protocol. */
+export function manifestLockKey(monthFolderName: string): string {
+  return `population-manifest/${monthFolderName}:rmw`;
+}
 
 const MANIFEST_FILE = "month.manifest.json";
 const DEFAULT_CACHE_TTL_MS = 30_000;
@@ -108,25 +121,63 @@ export async function closeMonth(
   note?: string
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
-    const manifest = await readManifest(directoryHandle, monthFolderName);
-    if (!manifest) {
-      return { ok: false, error: `لا يوجد ملف بيان للشهر ${monthFolderName}.` };
-    }
-    if (manifest.status === "closed") {
-      return { ok: true }; // idempotent
-    }
-    const monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, false);
-    const now = new Date().toISOString();
-    const updated: MonthManifestData = {
-      ...manifest,
-      status: "closed",
-      statusBeforeClose: manifest.status,
-      closedAt: now,
-      closedBy,
-      closeNote: note ?? null,
-    };
-    await safeWriteJson(monthDir, MANIFEST_FILE, updated);
+    // Same casLoop protocol (lock key + revision + _writeToken) as
+    // updateMonthStatus so a concurrent automated status-advance on the same
+    // manifest is detected instead of silently un-closing the month (finding S3).
+    const outcome = await withResourceLock(manifestLockKey(monthFolderName), () =>
+      casLoop<{ ok: true } | { ok: false; error: string }>(
+        async (writeToken) => {
+          let monthDir: DirectoryHandleLike;
+          try {
+            monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, false);
+          } catch {
+            // Missing month folder — terminal (not a write conflict), don't retry.
+            return {
+              done: true,
+              result: { ok: false, error: `لا يوجد ملف بيان للشهر ${monthFolderName}.` },
+            };
+          }
+          const manifestResult = await safeReadJson<MonthManifestData>(monthDir, MANIFEST_FILE);
+          if (!manifestResult.ok) {
+            return {
+              done: true,
+              result: { ok: false, error: `لا يوجد ملف بيان للشهر ${monthFolderName}.` },
+            };
+          }
+          const manifest = manifestResult.value;
+          if (manifest.status === "closed") {
+            return { done: true, result: { ok: true as const } }; // idempotent
+          }
+          const now = new Date().toISOString();
+          const nextRevision = (manifest.revision ?? 0) + 1;
+          const updated: MonthManifestData = {
+            ...manifest,
+            status: "closed",
+            statusBeforeClose: manifest.status,
+            closedAt: now,
+            closedBy,
+            closeNote: note ?? null,
+            revision: nextRevision,
+            _writeToken: writeToken,
+          };
+          await safeWriteJson(monthDir, MANIFEST_FILE, updated);
+          const verify = await safeReadJson<MonthManifestData>(monthDir, MANIFEST_FILE);
+          if (
+            verify.ok &&
+            verify.value.revision === nextRevision &&
+            verify.value._writeToken === writeToken
+          ) {
+            return { done: true, result: { ok: true as const } };
+          }
+          return { done: false };
+        },
+        { conflictError: "تعذّر إقفال الشهر: تعارض في الكتابة بعد عدة محاولات." }
+      )
+    );
     invalidateMonthLockCache(monthFolderName);
+    if (!outcome.ok) {
+      return { ok: false, error: outcome.error };
+    }
     return { ok: true };
   } catch (error) {
     return {
@@ -142,23 +193,58 @@ export async function reopenMonth(
   reopenedBy: string
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
-    const manifest = await readManifest(directoryHandle, monthFolderName);
-    if (!manifest) {
-      return { ok: false, error: `لا يوجد ملف بيان للشهر ${monthFolderName}.` };
-    }
-    if (manifest.status !== "closed") {
-      return { ok: true }; // idempotent
-    }
-    const monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, false);
-    const now = new Date().toISOString();
-    const updated: MonthManifestData = {
-      ...manifest,
-      status: manifest.statusBeforeClose ?? "distributed",
-      reopenedAt: now,
-      reopenedBy,
-    };
-    await safeWriteJson(monthDir, MANIFEST_FILE, updated);
+    // Same casLoop protocol as closeMonth / updateMonthStatus (finding S3).
+    const outcome = await withResourceLock(manifestLockKey(monthFolderName), () =>
+      casLoop<{ ok: true } | { ok: false; error: string }>(
+        async (writeToken) => {
+          let monthDir: DirectoryHandleLike;
+          try {
+            monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, false);
+          } catch {
+            return {
+              done: true,
+              result: { ok: false, error: `لا يوجد ملف بيان للشهر ${monthFolderName}.` },
+            };
+          }
+          const manifestResult = await safeReadJson<MonthManifestData>(monthDir, MANIFEST_FILE);
+          if (!manifestResult.ok) {
+            return {
+              done: true,
+              result: { ok: false, error: `لا يوجد ملف بيان للشهر ${monthFolderName}.` },
+            };
+          }
+          const manifest = manifestResult.value;
+          if (manifest.status !== "closed") {
+            return { done: true, result: { ok: true as const } }; // idempotent
+          }
+          const now = new Date().toISOString();
+          const nextRevision = (manifest.revision ?? 0) + 1;
+          const updated: MonthManifestData = {
+            ...manifest,
+            status: manifest.statusBeforeClose ?? "distributed",
+            reopenedAt: now,
+            reopenedBy,
+            revision: nextRevision,
+            _writeToken: writeToken,
+          };
+          await safeWriteJson(monthDir, MANIFEST_FILE, updated);
+          const verify = await safeReadJson<MonthManifestData>(monthDir, MANIFEST_FILE);
+          if (
+            verify.ok &&
+            verify.value.revision === nextRevision &&
+            verify.value._writeToken === writeToken
+          ) {
+            return { done: true, result: { ok: true as const } };
+          }
+          return { done: false };
+        },
+        { conflictError: "تعذّر إعادة فتح الشهر: تعارض في الكتابة بعد عدة محاولات." }
+      )
+    );
     invalidateMonthLockCache(monthFolderName);
+    if (!outcome.ok) {
+      return { ok: false, error: outcome.error };
+    }
     return { ok: true };
   } catch (error) {
     return {

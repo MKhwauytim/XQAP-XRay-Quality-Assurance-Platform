@@ -17,6 +17,7 @@ import {
   type DateFormatMode,
   DATE_FORMAT_LABELS,
   looksLikeDate,
+  looksLikeNumber,
   toIsoDate,
   isFilterEmpty,
   type DateFilter,
@@ -36,6 +37,12 @@ export type DataTableCol<TRow = unknown> = {
   adminOnly?: boolean;
   /** Hard-codes this column as a date column (skips auto-detection). */
   isDate?: boolean;
+  /**
+   * Hard-codes this column as numeric (skips auto-detection). Numeric columns
+   * are end-aligned (not hard-coded "right" — this app is RTL, so "end" is
+   * the correct logical direction for digits) with tabular figures.
+   */
+  isNumeric?: boolean;
   /** Which filter UI to show. Auto-detected if omitted (defaults to "multiselect"). */
   filterKind?: "text" | "date" | "status" | "multiselect";
   /** Options for status filter. Required when filterKind === "status". */
@@ -57,6 +64,8 @@ export type CellMeta = {
   isDate: boolean;
   /** Active date display format for this column. */
   dateFmt: DateFormatMode;
+  /** True if this column is numeric (explicit or auto-detected). */
+  isNumeric: boolean;
 };
 
 export type DataTableProps<TRow = unknown> = {
@@ -252,6 +261,29 @@ export default function DataTable<TRow>({
     }
     return detected;
   }, [rows, columns]);
+  // Numeric-column auto-detection (B5): mirrors detectedDates above, so a
+  // column that isn't explicitly typed still gets end-aligned tabular figures
+  // when every sampled value looks like a plain number. Dates and explicitly
+  // categorical columns (status/multiselect) are never candidates.
+  const detectedNumeric = useMemo<Set<string>>(() => {
+    const sample = rows.length > 200 ? rows.slice(0, 200) : rows;
+    const detected = new Set<string>();
+    for (const col of columns) {
+      if (col.isNumeric) { detected.add(col.id); continue; }
+      if (col.isDate || detectedDates.has(col.id)) continue;
+      if (col.filterKind === "status" || col.filterKind === "multiselect") continue;
+      let sawValue = false;
+      let allNumeric = true;
+      for (const row of sample) {
+        const v = col.accessor(row);
+        if (!v) continue;
+        sawValue = true;
+        if (!looksLikeNumber(v)) { allNumeric = false; break; }
+      }
+      if (sawValue && allNumeric) detected.add(col.id);
+    }
+    return detected;
+  }, [rows, columns, detectedDates]);
   const [globalSearch, setGlobalSearch]         = useState("");
   const [debouncedSearch, setDebouncedSearch]   = useState("");
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -484,6 +516,15 @@ export default function DataTable<TRow>({
     };
   }
 
+  // B5: sensible per-column default min-width, floored off header label
+  // length, so a narrow % share (widthFr) never squeezes an Arabic header
+  // below the point where it clips mid-word (VIS-06, e.g. "تاريخ" -> "تار").
+  // Below this floor the header wraps onto a second line instead (see the
+  // .dt-th-label white-space rule in DataTable.css) rather than clipping.
+  function headerMinWidth(col: DataTableCol<TRow>): number {
+    return Math.min(180, Math.max(88, col.label.length * 9 + 28));
+  }
+
   function estimateColumnFr(col: DataTableCol<TRow>): number {
     const sample = filteredRows.slice(0, 300);
     const maxChars = Math.max(
@@ -661,19 +702,20 @@ export default function DataTable<TRow>({
         <table className="dt-table" ref={tableRef}>
           <colgroup>
             {visibleCols.map((col) => (
-              <col key={col.id} style={{ width: colWidthPct(col) }} />
+              <col key={col.id} style={{ width: colWidthPct(col), minWidth: headerMinWidth(col) }} />
             ))}
           </colgroup>
           <thead>
             <tr>
               {visibleCols.map((col, colIdx) => {
                 const isDate    = col.isDate || detectedDates.has(col.id);
+                const isNumeric = col.isNumeric || detectedNumeric.has(col.id);
                 const hasFilter = !!filters[col.id] && !isFilterEmpty(filters[col.id]!);
                 return (
                   <th
                     key={col.id}
-                    className={`dt-th${stickyMeta.has(col.id) ? " dt-sticky-col dt-sticky-head" : ""}`}
-                    style={getStickyStyle(col, true)}
+                    className={`dt-th${stickyMeta.has(col.id) ? " dt-sticky-col dt-sticky-head" : ""}${isNumeric ? " dt-th--numeric" : ""}`}
+                    style={{ minWidth: headerMinWidth(col), ...getStickyStyle(col, true) }}
                     draggable
                     onDragStart={() => handleDragStart(col.id)}
                     onDragOver={(e) => e.preventDefault()}
@@ -744,17 +786,19 @@ export default function DataTable<TRow>({
                     onClick={() => onRowClick?.(row)}
                   >
                     {visibleCols.map((col) => {
-                      const isDate = col.isDate || detectedDates.has(col.id);
+                      const isDate    = col.isDate || detectedDates.has(col.id);
+                      const isNumeric = col.isNumeric || detectedNumeric.has(col.id);
                       return (
                         <td
                           key={col.id}
-                          className={`dt-td${stickyMeta.has(col.id) ? " dt-sticky-col" : ""}`}
+                          className={`dt-td${stickyMeta.has(col.id) ? " dt-sticky-col" : ""}${isNumeric ? " dt-td--numeric" : ""}`}
                           style={getStickyStyle(col, false)}
                           title={String(col.accessor(row) ?? "")}
                         >
                           {renderCell(col, row, {
                             isDate,
                             dateFmt: colCfg.dateFmt[col.id] as DateFormatMode ?? "date",
+                            isNumeric,
                           })}
                         </td>
                       );

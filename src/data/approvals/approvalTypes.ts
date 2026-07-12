@@ -14,7 +14,7 @@ export type ReplacementDecision = {
   reviewNotes?: string;
 };
 
-export type DecisionEventKind = "referral" | "replacement";
+export type DecisionEventKind = "referral" | "replacement" | "reopen";
 
 /** One reviewer decision on one request. Appended, never overwritten — the full
  *  sequence for a request is its audit history; the last event is its effective status. */
@@ -30,6 +30,10 @@ export type DecisionEvent = {
 export type SupervisorDecisionFile = {
   supervisorUsername: string;
   monthFolderName: string;
+  /** Monotonically increasing counter for CAS conflict detection. */
+  revision?: number;
+  /** Per-write UUID embedded by casLoop for cross-machine race detection. */
+  _writeToken?: string;
   referralDecisions: ReferralDecision[];
   replacementDecisions: ReplacementDecision[];
   /** Append-only decision history. Legacy files predate this field. */

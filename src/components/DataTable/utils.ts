@@ -28,6 +28,18 @@ export function looksLikeDate(v: string): boolean {
   return ISO_DATE_RE.test(v) || DATE_ONLY_RE.test(v);
 }
 
+// ── Numeric utilities ─────────────────────────────────────────────────────────
+
+// Plain integers/decimals, optionally negative, optionally thousand-separated,
+// optionally a trailing "%". Deliberately narrow — IDs, phone numbers, and
+// codes that merely start with a digit must NOT match, or they'd be wrongly
+// end-aligned and shown with tabular-nums as if they were a magnitude.
+const NUMERIC_RE = /^-?\d{1,3}(,\d{3})*(\.\d+)?%?$|^-?\d+(\.\d+)?%?$/;
+
+export function looksLikeNumber(v: string): boolean {
+  return NUMERIC_RE.test(v.trim());
+}
+
 export function formatDate(raw: string, mode: DateFormatMode): string {
   try {
     const d = new Date(raw);

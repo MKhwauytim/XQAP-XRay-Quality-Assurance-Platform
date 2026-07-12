@@ -1,8 +1,48 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { casLoop } from "../storage/casLoop";
 import { withResourceLock } from "../storage/webLocks";
 import { getTemplatesRoot } from "../workspace/workspacePaths";
 import type { TemplateIndex, TemplateSchema } from "./templateTypes";
+
+/**
+ * CAS read-modify-write of the shared `templates.index.json`. It is edited by
+ * every supervisor/manager/admin on every machine; the outer `withResourceLock`
+ * (held by the caller) serializes same-tab writers, while casLoop re-reads fresh,
+ * bumps `revision`, stamps `_writeToken`, and verifies both on read-back so a
+ * concurrent author's index entry on another machine is never silently dropped.
+ */
+async function updateTemplateIndex(
+  dir: DirectoryHandleLike,
+  apply: (templates: TemplateIndex["templates"]) => TemplateIndex["templates"]
+): Promise<void> {
+  const outcome = await casLoop<{ ok: true }>(
+    async (writeToken) => {
+      const indexResult = await safeReadJson<TemplateIndex>(dir, INDEX_FILE);
+      const existing: TemplateIndex = indexResult.ok ? indexResult.value : { templates: [] };
+      const nextRevision = (existing.revision ?? 0) + 1;
+      const updated: TemplateIndex = {
+        revision: nextRevision,
+        _writeToken: writeToken,
+        templates: apply(existing.templates),
+      };
+      await safeWriteJson(dir, INDEX_FILE, updated);
+      const verify = await safeReadJson<TemplateIndex>(dir, INDEX_FILE);
+      if (
+        verify.ok &&
+        verify.value.revision === nextRevision &&
+        verify.value._writeToken === writeToken
+      ) {
+        return { done: true, result: { ok: true as const } };
+      }
+      return { done: false };
+    },
+    { conflictError: "تعذّر تحديث فهرس القوالب: تعارض في الكتابة بعد عدة محاولات." }
+  );
+  if (!outcome.ok) {
+    throw new Error(outcome.error);
+  }
+}
 
 const INDEX_FILE = "templates.index.json";
 const SELECTION_FILE = "template.selection.json";
@@ -25,19 +65,12 @@ export async function saveTemplate(
     const dir = await getTemplatesDir(directoryHandle);
     await withResourceLock(`${dir.name}/templates-index`, async () => {
       const fileName = `${schema.templateId}.json`;
+      // Per-id doc — single writer by id, safe to write once outside the CAS loop.
       await safeWriteJson(dir, fileName, schema);
 
-      const indexResult = await safeReadJson<TemplateIndex>(dir, INDEX_FILE);
-      const existing: TemplateIndex = indexResult.ok
-        ? indexResult.value
-        : { templates: [] };
-
-      const otherTemplates = existing.templates.filter(
-        (t) => t.templateId !== schema.templateId
-      );
-      const updated: TemplateIndex = {
-        templates: [
-          ...otherTemplates,
+      await updateTemplateIndex(dir, (templates) =>
+        [
+          ...templates.filter((t) => t.templateId !== schema.templateId),
           {
             templateId: schema.templateId,
             templateName: schema.templateName,
@@ -45,8 +78,7 @@ export async function saveTemplate(
             updatedAt: schema.updatedAt
           }
         ].sort((a, b) => a.templateName.localeCompare(b.templateName, "ar"))
-      };
-      await safeWriteJson(dir, INDEX_FILE, updated);
+      );
     });
 
     return { ok: true };
@@ -121,15 +153,9 @@ export async function deleteTemplate(
         });
       }
 
-      const indexResult = await safeReadJson<TemplateIndex>(dir, INDEX_FILE);
-      if (indexResult.ok) {
-        const updated: TemplateIndex = {
-          templates: indexResult.value.templates.filter(
-            (t) => t.templateId !== templateId
-          )
-        };
-        await safeWriteJson(dir, INDEX_FILE, updated);
-      }
+      await updateTemplateIndex(dir, (templates) =>
+        templates.filter((t) => t.templateId !== templateId)
+      );
 
       if (dir.removeEntry) {
         await dir.removeEntry(templateFileName);

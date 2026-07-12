@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Archive, X } from "lucide-react";
 
 import { readSession } from "../../../../auth/authSession";
+import { useFocusTrap } from "../../../../hooks/useFocusTrap";
 import { PageHeader } from "../../../../components/PageHeader/PageHeader";
 import {
   createBackup,
@@ -81,11 +82,12 @@ export default function ArchiveTab() {
   const [lockTarget, setLockTarget] = useState<{ folderName: string; mode: "close" | "reopen" } | null>(null);
   const [isLocking, setIsLocking] = useState(false);
 
-  // Month close-out is admin-only, additionally gated by the archive.closeMonth feature.
+  // Month close-out is gated solely by the archive.closeMonth feature toggle (admin-only by
+  // default; admins can extend it to other roles from the feature-permission matrix).
   const role = session?.role ?? "guest";
   const canCloseMonth = useMemo(
-    () => isAdmin && hasFeature(readUserManagementState().featurePermissions, role, "archive.closeMonth"),
-    [isAdmin, role]
+    () => hasFeature(readUserManagementState().featurePermissions, role, "archive.closeMonth"),
+    [role]
   );
 
   const refresh = useCallback(async () => {
@@ -560,9 +562,10 @@ function MonthLockDialog({
   const isClose = mode === "close";
   // Close note is optional; reopen reason is mandatory.
   const canConfirm = !busy && (isClose || note.trim().length > 0);
+  const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onClose });
 
   return (
-    <div className="arc-modal-backdrop" role="dialog" aria-modal="true">
+    <div ref={dialogRef} className="arc-modal-backdrop" role="dialog" aria-modal="true">
       <div className="arc-restore-modal">
         <div className="arc-restore-header">
           <div>
@@ -633,9 +636,10 @@ function RestoreDialog({
   const [checked, setChecked] = useState(false);
   const canContinue = checked;
   const canRestore = typedName.trim() === target.folderName && !busy;
+  const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onClose });
 
   return (
-    <div className="arc-modal-backdrop" role="dialog" aria-modal="true">
+    <div ref={dialogRef} className="arc-modal-backdrop" role="dialog" aria-modal="true">
       <div className="arc-restore-modal">
         <div className="arc-restore-header">
           <div>

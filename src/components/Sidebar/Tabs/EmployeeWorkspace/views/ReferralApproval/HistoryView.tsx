@@ -2,14 +2,14 @@ import { useEffect, useState } from "react";
 import DataTable, { type DataTableCol } from "../../../../../../components/DataTable";
 import { EmptyState, ErrorState, LoadingState } from "../../../../../../components/StateViews/StateViews";
 import { listMonthFolders } from "../../../../../../data/population/populationStorage";
-import { loadReferralLog, loadReplacementLog } from "../../../../../../data/referral/referralStorage";
+import { loadReferralLog, loadReopenLog, loadReplacementLog } from "../../../../../../data/referral/referralStorage";
 import type { ReferralRequest } from "../../../../../../data/referral/referralTypes";
 import type { DirectoryHandleLike } from "../../../../../../data/storage/fileSystemAccess";
 import RequestTimeline from "./RequestTimeline";
 
 type HistoryRow = {
   key: string;
-  kind: "referral" | "replacement";
+  kind: "referral" | "replacement" | "reopen";
   monthFolderName: string;
   requester: string;
   details: string;
@@ -27,8 +27,11 @@ type Props = {
   username: string;
   canApproveReferrals: boolean;
   canApproveReplacements: boolean;
+  canApproveReopens: boolean;
   userDisplayMap: Record<string, string>;
 };
+
+const KIND_LABEL: Record<HistoryRow["kind"], string> = { referral: "إحالة", replacement: "استبدال", reopen: "إعادة فتح" };
 
 const STATUS_OPTIONS = [
   { value: "pending", label: "معلق" },
@@ -39,7 +42,7 @@ const STATUS_OPTIONS = [
 const STATUS_BADGE_LABEL: Record<HistoryRow["status"], string> = { pending: "معلق", approved: "مقبول", denied: "مرفوض" };
 const STATUS_BADGE_CLASS: Record<HistoryRow["status"], string> = { pending: "ew-ref-badge-pending", approved: "ew-ref-badge-approved", denied: "ew-ref-badge-denied" };
 
-export default function HistoryView({ directoryHandle, username, canApproveReferrals, canApproveReplacements, userDisplayMap }: Props) {
+export default function HistoryView({ directoryHandle, username, canApproveReferrals, canApproveReplacements, canApproveReopens, userDisplayMap }: Props) {
   const [rows, setRows] = useState<HistoryRow[]>([]);
   const [skippedMonths, setSkippedMonths] = useState<string[]>([]);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
@@ -57,9 +60,10 @@ export default function HistoryView({ directoryHandle, username, canApproveRefer
           // Each month is loaded independently — one unreadable month must not
           // blank out every other month's history.
           try {
-            const [refLog, repLog] = await Promise.all([
+            const [refLog, repLog, reoLog] = await Promise.all([
               loadReferralLog(directoryHandle, month.folderName),
               loadReplacementLog(directoryHandle, month.folderName),
+              loadReopenLog(directoryHandle, month.folderName),
             ]);
             for (const r of refLog.requests) {
               if (!canApproveReferrals && r.fromEmployee !== username) continue;
@@ -81,6 +85,16 @@ export default function HistoryView({ directoryHandle, username, canApproveRefer
                 reviewedBy: r.reviewedBy, reviewedAt: r.reviewedAt, history: r.history,
               });
             }
+            for (const r of reoLog.requests) {
+              if (!canApproveReopens && r.employeeUsername !== username && r.requestedBy !== username) continue;
+              collected.push({
+                key: `reopen-${r.requestId}`, kind: "reopen", monthFolderName: month.folderName,
+                requester: userDisplayMap[r.employeeUsername] ?? r.employeeUsername,
+                details: `إعادة فتح: ${r.xrayImageId}`,
+                reason: r.reason, status: r.status, requestedAt: r.requestedAt, requestedBy: r.requestedBy,
+                reviewedBy: r.reviewedBy, reviewedAt: r.reviewedAt, history: r.history,
+              });
+            }
           } catch {
             skipped.push(month.folderName);
           }
@@ -92,11 +106,11 @@ export default function HistoryView({ directoryHandle, username, canApproveRefer
     }
     void run();
     return () => { cancelled = true; };
-  }, [directoryHandle, username, canApproveReferrals, canApproveReplacements, userDisplayMap]);
+  }, [directoryHandle, username, canApproveReferrals, canApproveReplacements, canApproveReopens, userDisplayMap]);
 
   const columns: DataTableCol<HistoryRow>[] = [
     { id: "monthFolderName", label: "الشهر", widthFr: 1.2, accessor: (r) => r.monthFolderName },
-    { id: "kind", label: "النوع", widthFr: 1, accessor: (r) => (r.kind === "referral" ? "إحالة" : "استبدال") },
+    { id: "kind", label: "النوع", widthFr: 1, accessor: (r) => KIND_LABEL[r.kind] },
     { id: "requester", label: "مقدّم الطلب", widthFr: 1.4, accessor: (r) => r.requester },
     { id: "details", label: "التفاصيل", widthFr: 2, accessor: (r) => r.details },
     { id: "status", label: "الحالة", widthFr: 1, filterKind: "status", statusOptions: STATUS_OPTIONS, accessor: (r) => r.status },

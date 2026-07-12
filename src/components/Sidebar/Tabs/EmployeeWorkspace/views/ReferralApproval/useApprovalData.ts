@@ -15,19 +15,23 @@ import { listMonthFolders } from "../../../../../../data/population/populationSt
 import type { PreparedPopulationRow } from "../../../../../../data/population/populationTypes";
 import {
   approveReferral as approveReferralDomain,
+  approveReopen as approveReopenDomain,
   approveReplacement as approveReplacementDomain,
   denyReferral as denyReferralDomain,
+  denyReopen as denyReopenDomain,
   denyReplacement as denyReplacementDomain,
   type ApprovalResult,
   type DenyResult,
 } from "../../../../../../data/referral/approveReferral";
 import {
   loadReferralLog,
+  loadReopenLog,
   loadReplacementLog,
 } from "../../../../../../data/referral/referralStorage";
-import type { ReferralRequest, ReplacementRequest } from "../../../../../../data/referral/referralTypes";
+import type { ReferralRequest, ReopenRequest, ReplacementRequest } from "../../../../../../data/referral/referralTypes";
 import { loadSampleMaster } from "../../../../../../data/sampling/sampleStorage";
 import type { DirectoryHandleLike } from "../../../../../../data/storage/fileSystemAccess";
+import { isReferral, isReplacement, requestKind, type CardRequest } from "./requestKind";
 
 export type LoadState = "idle" | "loading" | "ready" | "error";
 export type OpResult = { ok: true } | { ok: false; error: string };
@@ -69,6 +73,9 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
   const userManagementState = readUserManagementState();
   const canApproveReferrals = hasFeature(userManagementState.featurePermissions, role, "approve-referrals");
   const canApproveReplacements = hasFeature(userManagementState.featurePermissions, role, "approve-replacements");
+  // Reopen requests are gated on the existing supervisor reopen-authority feature —
+  // whoever may directly reopen answers may approve employee reopen requests.
+  const canApproveReopens = hasFeature(userManagementState.featurePermissions, role, "ew.reopenAnswer");
 
   const userDisplayMap: Record<string, string> = {};
   for (const u of userManagementState.users) userDisplayMap[u.username] = u.displayName;
@@ -77,6 +84,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
   const [selMonth, setSelMonth] = useState("");
   const [referrals, setReferrals] = useState<ReferralRequest[]>([]);
   const [replacements, setReplacements] = useState<ReplacementRequest[]>([]);
+  const [reopens, setReopens] = useState<ReopenRequest[]>([]);
   const [sampleDetails, setSampleDetails] = useState<Record<string, DistributionEntry | PreparedPopulationRow>>({});
   const [loadState, setLoadState] = useState<LoadState>("idle");
 
@@ -99,9 +107,10 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
     const token = ++loadTokenRef.current;
     setLoadState("loading");
     try {
-      const [refLog, repLog] = await Promise.all([
+      const [refLog, repLog, reoLog] = await Promise.all([
         loadReferralLog(directoryHandle, selMonth),
         loadReplacementLog(directoryHandle, selMonth),
+        loadReopenLog(directoryHandle, selMonth),
       ]);
       const sample = await loadSampleMaster(directoryHandle, selMonth);
       const detailMap: Record<string, DistributionEntry | PreparedPopulationRow> = {};
@@ -118,15 +127,19 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
       const visibleReplacements = canApproveReplacements
         ? repLog.requests
         : repLog.requests.filter((r) => r.employeeUsername === username);
+      const visibleReopens = canApproveReopens
+        ? reoLog.requests
+        : reoLog.requests.filter((r) => r.employeeUsername === username || r.requestedBy === username);
 
       setSampleDetails(detailMap);
       setReferrals(visibleReferrals);
       setReplacements(visibleReplacements);
+      setReopens(visibleReopens);
       setLoadState("ready");
     } catch {
       if (token === loadTokenRef.current) setLoadState("error");
     }
-  }, [directoryHandle, selMonth, username, canApproveReferrals, canApproveReplacements]);
+  }, [directoryHandle, selMonth, username, canApproveReferrals, canApproveReplacements, canApproveReopens]);
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- async data load; setState fires inside loadData's async callback, not synchronously in the effect body
   useEffect(() => { void loadData(); }, [loadData]);
@@ -243,6 +256,110 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
     }
   }
 
+  async function approveReopen(request: ReopenRequest, notes: string): Promise<OpResult> {
+    try {
+      const result = await approveReopenDomain({
+        directoryHandle,
+        monthFolderName: request.monthFolderName,
+        requestId: request.requestId,
+        reviewedBy: username,
+        reviewedByRole: role,
+        reviewNotes: notes,
+      });
+      if (result.ok) {
+        void appendWorkspaceAction(directoryHandle, {
+          actor: username,
+          actorRole: role,
+          action: "reopen-approved",
+          monthFolderName: request.monthFolderName,
+          target: request.requestId,
+          details: { xrayImageId: request.xrayImageId, employee: request.employeeUsername },
+        });
+        await loadData();
+        return { ok: true };
+      }
+      return { ok: false, error: approvalErrorMsg(result) };
+    } catch (error) {
+      return { ok: false, error: unexpectedErrorMsg(error) };
+    }
+  }
+
+  async function denyReopen(request: ReopenRequest, notes: string): Promise<OpResult> {
+    try {
+      const result = await denyReopenDomain({
+        directoryHandle,
+        monthFolderName: request.monthFolderName,
+        requestId: request.requestId,
+        reviewedBy: username,
+        reviewNotes: notes,
+      });
+      if (result.ok) {
+        void appendWorkspaceAction(directoryHandle, {
+          actor: username,
+          actorRole: role,
+          action: "reopen-denied",
+          monthFolderName: request.monthFolderName,
+          target: request.requestId,
+        });
+        await loadData();
+        return { ok: true };
+      }
+      return { ok: false, error: denyErrorMsg(result) };
+    } catch (error) {
+      return { ok: false, error: unexpectedErrorMsg(error) };
+    }
+  }
+
+  // ── Unified per-kind dispatch (used by the merged approval list) ────────────
+
+  const requests: CardRequest[] = [...referrals, ...replacements, ...reopens];
+
+  function canReviewRequest(request: CardRequest): boolean {
+    const kind = requestKind(request);
+    if (kind === "referral") return canApproveReferrals;
+    if (kind === "replacement") return canApproveReplacements;
+    return canApproveReopens;
+  }
+
+  async function approve(request: CardRequest, notes: string): Promise<OpResult> {
+    if (isReferral(request)) return approveReferral(request, notes);
+    if (isReplacement(request)) return approveReplacement(request, notes);
+    return approveReopen(request, notes);
+  }
+
+  async function deny(request: CardRequest, notes: string): Promise<OpResult> {
+    if (isReferral(request)) return denyReferral(request, notes);
+    if (isReplacement(request)) return denyReplacement(request, notes);
+    return denyReopen(request, notes);
+  }
+
+  function describeRequestShort(request: CardRequest): string {
+    if (isReferral(request)) {
+      return `${userDisplayMap[request.fromEmployee] ?? request.fromEmployee} ← ${userDisplayMap[request.toEmployee] ?? request.toEmployee}`;
+    }
+    if (isReplacement(request)) {
+      return `${request.originalXrayImageId} → ${request.replacementXrayImageId}`;
+    }
+    return `إعادة فتح ${request.xrayImageId}`;
+  }
+
+  /** Bulk decision over a mixed-kind selection — each row routed to its kind. */
+  async function bulkDecision(
+    selected: CardRequest[], action: "approve" | "deny", notes: string
+  ): Promise<BulkOutcome[]> {
+    const outcomes: BulkOutcome[] = [];
+    for (const request of selected) {
+      const result = action === "approve" ? await approve(request, notes) : await deny(request, notes);
+      outcomes.push({
+        requestId: request.requestId,
+        label: describeRequestShort(request),
+        ok: result.ok,
+        error: result.ok ? undefined : result.error,
+      });
+    }
+    return outcomes;
+  }
+
   async function bulkReferralDecision(
     requests: ReferralRequest[], action: "approve" | "deny", notes: string
   ): Promise<BulkOutcome[]> {
@@ -276,10 +393,11 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
   }
 
   return {
-    username, role, canApproveReferrals, canApproveReplacements,
+    username, role, canApproveReferrals, canApproveReplacements, canApproveReopens,
     userDisplayMap, months, selMonth, setSelMonth,
-    referrals, replacements, sampleDetails, loadState, reload: loadData,
-    approveReferral, denyReferral, approveReplacement, denyReplacement,
+    referrals, replacements, reopens, requests, sampleDetails, loadState, reload: loadData,
+    approveReferral, denyReferral, approveReplacement, denyReplacement, approveReopen, denyReopen,
+    approve, deny, canReviewRequest, bulkDecision,
     bulkReferralDecision, bulkReplacementDecision,
   };
 }

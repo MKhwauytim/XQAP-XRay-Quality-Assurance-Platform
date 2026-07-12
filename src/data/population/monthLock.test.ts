@@ -196,6 +196,31 @@ describe("monthLock", () => {
     ).toBe(true);
   });
 
+  it("a close racing an automated status-advance never leaves the month un-closed (S3 CAS)", async () => {
+    // closeMonth and updateMonthStatus write the SAME manifest. Both now use the
+    // shared casLoop protocol (manifestLockKey + revision + _writeToken), so the
+    // TOCTOU that could silently un-close a frozen month is gone: whichever runs
+    // first, the other observes it (close wins, or the advance is rejected/no-op
+    // because the month is already closed). The month must end up closed.
+    for (const order of ["close-first", "advance-first"] as const) {
+      const root = makeRoot();
+      await seedManifest(root, "sampled");
+      invalidateMonthLockCache();
+
+      const close = () => closeMonth(root, MONTH, "admin");
+      const advance = () => updateMonthStatus(root, MONTH, "distributed");
+
+      await Promise.all(
+        order === "close-first" ? [close(), advance()] : [advance(), close()]
+      );
+
+      invalidateMonthLockCache();
+      const manifest = await readManifest(root);
+      expect(manifest.status).toBe("closed");
+      expect(await isMonthClosed(root, MONTH)).toBe(true);
+    }
+  });
+
   it("updateMonthStatus is a no-op on a closed month", async () => {
     const root = makeRoot();
     await seedManifest(root, "sampled");

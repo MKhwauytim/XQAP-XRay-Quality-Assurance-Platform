@@ -147,7 +147,7 @@ export function getPageSetup(preset: PageSizePreset): PageSetup {
   return SLIDE_PRESETS[preset] ?? A4_PORTRAIT;
 }
 
-export function createReportId(): string {
+function createReportId(): string {
   return `rpt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 export function createPageId(): string {

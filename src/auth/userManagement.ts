@@ -101,6 +101,7 @@ export const MANAGED_TABS: readonly ManagedTab[] = [
   { id: "ew/xray-results",         label: "نتائج فحص الأشعة",       parentId: "employee-workspace" },
   { id: "ew/referral-approval",    label: "اعتماد الطلبات",          parentId: "employee-workspace" },
   { id: "ew/inspection-form",      label: "نموذج الفحص (مساحة العمل)", parentId: "employee-workspace" },
+  { id: "ew/notifications",        label: "مركز الإشعارات",           parentId: "employee-workspace" },
   { id: "reports",                 label: "إدارة التقارير" },
   { id: "reports/reports",         label: "التقارير",              parentId: "reports" },
   { id: "reports/kpi",             label: "مؤشرات الأداء",          parentId: "reports" },
@@ -168,6 +169,21 @@ export const MANAGED_FEATURE_GROUPS: readonly FeatureGroup[] = [
         label: "إعادة فتح الإجابات المقدمة",
         description: "إرجاع إجابة مقدمة إلى مسودة ليتمكن الموظف من تصحيحها",
       },
+      {
+        id: "manage-inspection-template",
+        label: "إدارة نموذج الفحص",
+        description: "إنشاء وتعديل قوالب نموذج الفحص في مساحة العمل",
+      },
+      {
+        id: "employee-reopen-instant",
+        label: "إعادة فتح الحالة فوراً (بدون اعتماد)",
+        description: "عند التفعيل يُطبَّق طلب الموظف لإعادة فتح الحالة فوراً؛ وعند التعطيل يُحوَّل الطلب للمشرف للاعتماد",
+      },
+      {
+        id: "post-notification",
+        label: "نشر إشعار جديد",
+        description: "نشر إشعار لجميع الموظفين والمشرفين في مركز الإشعارات ومتابعة من اطّلع عليه",
+      },
     ],
   },
   {
@@ -209,6 +225,11 @@ export const MANAGED_FEATURE_GROUPS: readonly FeatureGroup[] = [
         label: "تصفح بيانات المجتمع",
         description: "استعراض جدول بيانات المجتمع والإحصائيات",
       },
+      {
+        id: "unlock-sampling-stage",
+        label: "إلغاء قفل مراحل العينة",
+        description: "فتح المراحل المقفلة (تلقائياً أو يدوياً) في إعداد سحب العينة",
+      },
     ],
   },
   {
@@ -245,6 +266,11 @@ export const MANAGED_FEATURE_GROUPS: readonly FeatureGroup[] = [
         label: "إقفال الأشهر وإعادة فتحها",
         description: "إقفال شهر لمنع أي تعديل على بياناته أو إعادة فتحه للتعديل",
       },
+      {
+        id: "view-error-log",
+        label: "عرض سجل الأخطاء",
+        description: "إظهار سجل الأخطاء الأخيرة داخل صفحة الإعدادات",
+      },
     ],
   },
 ] as const;
@@ -256,12 +282,12 @@ const ALL_FEATURE_IDS = MANAGED_FEATURE_GROUPS.flatMap((g) =>
 
 /** Maps each tab to the feature IDs that belong to it. */
 export const TAB_FEATURE_MAP: Readonly<Record<string, readonly string[]>> = {
-  "population":         ["upload-data", "process-population", "configure-sample", "draw-sample", "distribute-samples", "bulk-assign", "view-browse"],
-  "employee-workspace": ["approve-referrals", "approve-replacements", "view-all-entries", "view-employee-stats", "submit-referrals", "request-replacement", "submit-answers", "configure-referral-columns", "ew.reopenAnswer"],
+  "population":         ["upload-data", "process-population", "configure-sample", "draw-sample", "distribute-samples", "bulk-assign", "view-browse", "unlock-sampling-stage"],
+  "employee-workspace": ["approve-referrals", "approve-replacements", "view-all-entries", "view-employee-stats", "submit-referrals", "request-replacement", "submit-answers", "configure-referral-columns", "ew.reopenAnswer", "manage-inspection-template", "employee-reopen-instant", "post-notification"],
   "user-management":    ["manage-users", "reset-passwords", "edit-permissions"],
   "reports":            ["export-reports"],
   "archive":            ["export-archive", "archive.closeMonth"],
-  "settings":           [],
+  "settings":           ["view-error-log"],
 };
 
 /** Reverse lookup: feature ID → parent tab ID. */
@@ -290,12 +316,17 @@ const FEATURE_DEFAULTS: Record<string, Partial<Record<AuthRole, boolean>>> = {
   "distribute-samples":   { guest: false, employee: false, supervisor: false, manager: true  },
   "bulk-assign":          { guest: false, employee: false, supervisor: true,  manager: true  },
   "view-browse":          { guest: true,  employee: true,  supervisor: true,  manager: true  },
+  "unlock-sampling-stage": { guest: false, employee: false, supervisor: false, manager: false },
+  "manage-inspection-template": { guest: false, employee: false, supervisor: false, manager: true },
+  "employee-reopen-instant": { guest: false, employee: false, supervisor: false, manager: false },
+  "post-notification":    { guest: false, employee: false, supervisor: false, manager: true  },
   "manage-users":         { guest: false, employee: false, supervisor: false, manager: false },
   "reset-passwords":      { guest: false, employee: false, supervisor: false, manager: false },
   "edit-permissions":     { guest: false, employee: false, supervisor: false, manager: false },
   "export-reports":       { guest: false, employee: false, supervisor: true,  manager: true  },
   "export-archive":       { guest: false, employee: false, supervisor: false, manager: true  },
   "archive.closeMonth":   { guest: false, employee: false, supervisor: false, manager: false },
+  "view-error-log":       { guest: false, employee: false, supervisor: false, manager: false },
 };
 
 // ── Default creators ──────────────────────────────────────────────────────────
@@ -370,6 +401,13 @@ export function createDefaultPermissions(): RolePermission[] {
     { role: "guest",      tabId: "ew/xray-results",         access: "none" },
     { role: "guest",      tabId: "ew/referral-approval",    access: "none" },
     { role: "guest",      tabId: "ew/inspection-form",      access: "none" },
+    // Notification center (ew/notifications) — admin + manager post/monitor only;
+    // audience roles (employee/supervisor) get the banner, not the manager view.
+    { role: "guest",      tabId: "ew/notifications",        access: "none" },
+    { role: "employee",   tabId: "ew/notifications",        access: "none" },
+    { role: "supervisor", tabId: "ew/notifications",        access: "none" },
+    { role: "manager",    tabId: "ew/notifications",        access: "edit" },
+    { role: "admin",      tabId: "ew/notifications",        access: "edit" },
     // Analytics dashboard (reports/analytics) — defaults to manager + admin only
     { role: "guest",      tabId: "reports/analytics",       access: "none" },
     { role: "employee",   tabId: "reports/analytics",       access: "none" },
@@ -382,6 +420,29 @@ export function createDefaultPermissions(): RolePermission[] {
     { role: "supervisor", tabId: "change-log",              access: "none" },
     { role: "manager",    tabId: "change-log",              access: "none" },
     { role: "admin",      tabId: "change-log",              access: "edit" },
+    // Sub-tabs that formerly relied on parent-tab inheritance (موروث) — now explicit.
+    // Values baked from the pre-removal effective access (parent population / reports rows),
+    // so the inheritance fallback can be deleted with zero functional change (see C1 test).
+    { role: "guest",      tabId: "population/process",       access: "view" },
+    { role: "employee",   tabId: "population/process",       access: "view" },
+    { role: "supervisor", tabId: "population/process",       access: "view" },
+    { role: "manager",    tabId: "population/process",       access: "edit" },
+    { role: "admin",      tabId: "population/process",       access: "edit" },
+    { role: "guest",      tabId: "population/browse",        access: "view" },
+    { role: "employee",   tabId: "population/browse",        access: "view" },
+    { role: "supervisor", tabId: "population/browse",        access: "view" },
+    { role: "manager",    tabId: "population/browse",        access: "edit" },
+    { role: "admin",      tabId: "population/browse",        access: "edit" },
+    { role: "guest",      tabId: "reports/reports",          access: "none" },
+    { role: "employee",   tabId: "reports/reports",          access: "none" },
+    { role: "supervisor", tabId: "reports/reports",          access: "view" },
+    { role: "manager",    tabId: "reports/reports",          access: "edit" },
+    { role: "admin",      tabId: "reports/reports",          access: "edit" },
+    { role: "guest",      tabId: "reports/kpi",              access: "none" },
+    { role: "employee",   tabId: "reports/kpi",              access: "none" },
+    { role: "supervisor", tabId: "reports/kpi",              access: "view" },
+    { role: "manager",    tabId: "reports/kpi",              access: "edit" },
+    { role: "admin",      tabId: "reports/kpi",              access: "edit" },
   ];
 }
 
@@ -447,16 +508,9 @@ export function getRolePermission(
   // Admin always has full access regardless of stored permissions
   if (role === "admin") return "edit";
 
+  // Every role×tab pair resolves via an explicit row (or "none"); no parent inheritance.
   const explicit = permissions.find((p) => p.role === role && p.tabId === tabId);
-  if (explicit) return explicit.access;
-
-  // Inherit from parent tab when no explicit entry exists
-  const tab = MANAGED_TABS.find((t) => t.id === tabId);
-  if (tab?.parentId) {
-    return permissions.find((p) => p.role === role && p.tabId === tab.parentId)?.access ?? "none";
-  }
-
-  return "none";
+  return explicit ? explicit.access : "none";
 }
 
 export function hasRolePermission(

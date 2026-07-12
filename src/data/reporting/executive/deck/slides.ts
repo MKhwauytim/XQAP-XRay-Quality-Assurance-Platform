@@ -14,6 +14,7 @@ import { fmtNum, fmtPct } from "../primitives";
 import {
   cards,
   emptyHero,
+  esc,
   heroChart,
   heroNumber,
   kpiBand,
@@ -83,7 +84,7 @@ export function titleSlide(model: ReportModel): string {
     <div class="title-mark"><img src="${ZATCA_LOGO_URL}" alt="هيئة الزكاة والضريبة والجمارك" style="height:78px;width:auto;max-width:320px;object-fit:contain;filter:brightness(0) invert(1)" onerror="this.style.display='none';this.nextElementSibling.style.display='inline-flex';"/><span style="display:none">${icon("shield", 48)}</span></div>
     <div class="title-kicker">عرض تنفيذي</div>
     <h1>تقرير ضمان جودة فحص الأشعة</h1>
-    <div class="title-sub">تقرير شهر: ${model.summary.periodId}</div>
+    <div class="title-sub">تقرير شهر: ${esc(model.summary.periodId)}</div>
     <div class="title-rule"></div>
     <div class="title-classify"><span>${icon("shield", 14)}</span>داخلي — للاستخدام التنفيذي</div>`;
   return `<section class="slide title-slide" id="slide-title" data-title="الغلاف">

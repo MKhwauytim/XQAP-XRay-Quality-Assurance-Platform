@@ -3,7 +3,7 @@ import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
 import { ensureMonthWritable } from "../population/monthLock";
 import type { EmployeeAnswerFile, ItemAnswer, ItemAnswerHistoryEntry } from "./answerTypes";
-import type { ReferralRequest, ReplacementRequest } from "../referral/referralTypes";
+import type { ReferralRequest, ReopenRequest, ReplacementRequest } from "../referral/referralTypes";
 import { getPopulationMonthDir, getSampleEmployeeDir, safeWorkspaceFilePart } from "../workspace/workspacePaths";
 
 const ANSWERS_FOLDER = "employee-answers";
@@ -211,6 +211,25 @@ export async function appendReplacementToEmployee(
         return file;
       }
       return { ...file, replacementRequests: [...(file.replacementRequests ?? []), request] };
+    });
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "خطأ غير معروف." };
+  }
+}
+
+/** Idempotently append a reopen-case request to the requesting employee's personal file. */
+export async function appendReopenToEmployee(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  request: ReopenRequest
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const username = request.employeeUsername;
+    return await updateEmployeeAnswerFile(directoryHandle, monthFolderName, username, (file) => {
+      if (file.reopenRequests?.some((r) => r.requestId === request.requestId)) {
+        return file;
+      }
+      return { ...file, reopenRequests: [...(file.reopenRequests ?? []), request] };
     });
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "خطأ غير معروف." };

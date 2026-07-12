@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ClipboardList, X } from "lucide-react";
 
 import { readSession } from "../../../../auth/authSession";
+import { hasFeature, readUserManagementState } from "../../../../auth/userManagement";
 import {
   createFieldId,
   createPhaseId,
@@ -184,10 +185,15 @@ export default function TemplateBuilderTab() {
       .catch(logRejection("templateBuilder:loadTemplateIndex"));
   }, [directoryHandle]);
 
-  if (role !== "manager" && role !== "admin") {
+  const canManageTemplates = hasFeature(
+    readUserManagementState().featurePermissions,
+    role,
+    "manage-inspection-template"
+  );
+  if (!canManageTemplates) {
     return (
       <section className="tb-page" dir="rtl">
-        <div className="tb-empty">إدارة نموذج الفحص متاحة للمدير والإدارة فقط.</div>
+        <div className="tb-empty">إدارة نموذج الفحص متاحة حسب الصلاحية الممنوحة فقط.</div>
       </section>
     );
   }

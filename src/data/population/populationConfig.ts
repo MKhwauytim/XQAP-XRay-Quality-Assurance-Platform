@@ -1,5 +1,7 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { casLoop } from "../storage/casLoop";
+import { withResourceLock } from "../storage/webLocks";
 import { getPopulationRoot } from "../workspace/workspacePaths";
 
 export type SystemField = {
@@ -135,7 +137,9 @@ export const DEFAULT_SYSTEM_FIELDS: SystemField[] = [
   { key: "movementType", labelAr: "نوع الحركة", isRequired: false, dataType: "string" },
   { key: "reportNumber", labelAr: "رقم المحضر", isRequired: false, dataType: "string" },
   { key: "targetedByRiskEngine", labelAr: "مستهدف محرك المخاطر", isRequired: false, dataType: "string" },
-  { key: "riskMessage", labelAr: "رسالة المخاطر", isRequired: false, dataType: "string" }
+  { key: "riskMessage", labelAr: "رسالة المخاطر", isRequired: false, dataType: "string" },
+  { key: "levelOneEmployee", labelAr: "موظف المستوى الأول", isRequired: false, dataType: "string" },
+  { key: "levelTwoEmployee", labelAr: "موظف المستوى الثاني", isRequired: false, dataType: "string" }
 ];
 
 export const DEFAULT_MAPPING_TEMPLATE: MappingTemplate = {
@@ -411,14 +415,38 @@ export async function savePopulationConfig(
   directoryHandle: DirectoryHandleLike,
   config: PopulationConfig
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  try {
-    const populationDir = await getPopulationRoot(directoryHandle, true);
-    await safeWriteJson(populationDir, CONFIG_FILE, config);
-    return { ok: true };
-  } catch (err) {
-    return {
-      ok: false,
-      error: err instanceof Error ? err.message : "Unknown error while saving config"
-    };
-  }
+  // Shared, multi-writer file (any admin on any PC edits the population config).
+  // The `:rmw` outer lock serializes same-tab saves; casLoop stamps a monotonic
+  // revision + _writeToken and verifies them on read-back, so a save is never
+  // silently interleaved with a concurrent write from another machine. NOTE:
+  // config.json is a whole-object replace, so field-level merge is out of scope —
+  // CAS here guarantees an atomic, verified, last-writer-wins-cleanly write with a
+  // detectable revision, not a three-way merge of two admins' edits.
+  return withResourceLock(`population-config:rmw`, () =>
+    casLoop<{ ok: true }>(
+      async (writeToken) => {
+        const populationDir = await getPopulationRoot(directoryHandle, true);
+        const currentRes = await safeReadJson<{ revision?: number }>(populationDir, CONFIG_FILE);
+        const nextRevision = ((currentRes.ok ? currentRes.value.revision : 0) ?? 0) + 1;
+        await safeWriteJson(populationDir, CONFIG_FILE, {
+          ...config,
+          revision: nextRevision,
+          _writeToken: writeToken,
+        });
+        const verifyRes = await safeReadJson<{ revision?: number; _writeToken?: string }>(
+          populationDir,
+          CONFIG_FILE
+        );
+        if (
+          verifyRes.ok &&
+          verifyRes.value.revision === nextRevision &&
+          verifyRes.value._writeToken === writeToken
+        ) {
+          return { done: true, result: { ok: true as const } };
+        }
+        return { done: false };
+      },
+      { conflictError: "تعذّر حفظ إعدادات المجتمع: تعارض في الكتابة بعد عدة محاولات." }
+    )
+  );
 }

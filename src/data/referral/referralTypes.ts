@@ -60,3 +60,34 @@ export type ReplacementLog = {
   _writeToken?: string;
   requests: ReplacementRequest[];
 };
+
+/** A pending request from an employee to reopen their own submitted answer for
+ *  correction. Created when the employee's role is NOT granted instant reopen
+ *  (`employee-reopen-instant`); requires supervisor approval before the answer is
+ *  returned to draft. Mirrors ReplacementRequest's shape. This is a SEPARATE path
+ *  from the supervisor-facing `ew.reopenAnswer` direct reopen. */
+export type ReopenRequest = {
+  requestId: string;
+  monthFolderName: string;
+  /** The employee whose submitted answer is to be reopened (== requestedBy for self-service). */
+  employeeUsername: string;
+  /** The specific case/answer being reopened. */
+  xrayImageId: string;
+  reason: string;
+  requestedAt: string;
+  requestedBy: string;
+  status: ReferralStatus;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  reviewNotes?: string;
+  /** Full append-only decision history, newest last. Populated by loadReopenLog. */
+  history?: DecisionEvent[];
+};
+
+export type ReopenLog = {
+  monthFolderName: string;
+  revision: number;
+  /** Per-write UUID embedded by casLoop for cross-machine race detection. */
+  _writeToken?: string;
+  requests: ReopenRequest[];
+};

@@ -52,6 +52,10 @@ export type TemplateSchema = {
 };
 
 export type TemplateIndex = {
+  /** Monotonic CAS revision for the shared multi-writer index (see templateStorage). */
+  revision?: number;
+  /** Per-write UUID embedded by casLoop for cross-machine race detection. */
+  _writeToken?: string;
   templates: Array<{
     templateId: string;
     templateName: string;

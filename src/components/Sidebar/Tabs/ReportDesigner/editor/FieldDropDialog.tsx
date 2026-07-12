@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useFocusTrap } from "../../../../../hooks/useFocusTrap";
 import type { FieldRole } from "../../../../../data/reportDesigner/query/fieldCatalog";
 import type { Aggregation } from "../../../../../data/reportDesigner/reportTypes";
 
@@ -45,6 +46,7 @@ export default function FieldDropDialog({
   const options = isDimension ? DIMENSION_OPTIONS : MEASURE_OPTIONS;
   const defaultAgg: AggChoice = isDimension ? "none" : "sum";
   const [selected, setSelected] = useState<AggChoice>(defaultAgg);
+  const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onCancel });
 
   // Keep dialog fully inside the viewport
   const left = Math.min(screenX + 12, window.innerWidth  - DIALOG_W - 12);
@@ -57,6 +59,7 @@ export default function FieldDropDialog({
       onMouseDown={onCancel}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={`إعدادات الحقل: ${fieldLabel}`}

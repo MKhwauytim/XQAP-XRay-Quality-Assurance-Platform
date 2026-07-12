@@ -2,7 +2,7 @@ import { expect, it, test } from "vitest";
 
 import { createMemoryDirectory } from "../storage/memoryDirectory";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
-import { saveMonthRun, loadAllSampleRows } from "./populationStorage";
+import { saveMonthRun, loadAllSampleRows, updateMonthStatus } from "./populationStorage";
 import type { MonthManifestData, MonthRawData, PopulationFinalData } from "./monthTypes";
 import type { SampleMasterData } from "../sampling/sampleTypes";
 
@@ -89,6 +89,27 @@ test("saveMonthRun does not write bi.raw.json when no BI rows", async () => {
   const biRaw = await safeReadJson(rawDir, "bi.raw.json");
   expect(biRaw.ok).toBe(false);
   expect((biRaw as { reason: string }).reason).toBe("missing");
+});
+
+test("updateMonthStatus survives concurrent advances without losing the higher status (cross-machine CAS)", async () => {
+  const dir = createMemoryDirectory();
+  await saveMonthRun({ directoryHandle: dir, ...baseParams });
+
+  // Two PCs advance the same month at once: one to "sampled", one to
+  // "distributed". The monotonic CAS read-modify-write must converge on the
+  // higher rank ("distributed") with neither write throwing or corrupting the
+  // manifest — no lost advance regardless of which runs first.
+  await Promise.all([
+    updateMonthStatus(dir, "5-may-2026", "sampled"),
+    updateMonthStatus(dir, "5-may-2026", "distributed"),
+  ]);
+
+  const population = await dir.getDirectoryHandle("1-population", { create: false });
+  const monthDir = await population.getDirectoryHandle("5-may-2026", { create: false });
+  const manifest = await safeReadJson<MonthManifestData>(monthDir, "month.manifest.json");
+  expect(manifest.ok).toBe(true);
+  if (!manifest.ok) return;
+  expect(manifest.value.status).toBe("distributed");
 });
 
 it("loadAllSampleRows falls back to legacy sample path when getSampleMainDir throws", async () => {

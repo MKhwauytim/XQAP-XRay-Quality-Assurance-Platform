@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
-import RequestCard, { isReferral } from "./RequestCard";
-import type { ReferralRequest, ReplacementRequest } from "../../../../../../data/referral/referralTypes";
+import { useFocusTrap } from "../../../../../../hooks/useFocusTrap";
+import RequestCard from "./RequestCard";
+import { isReferral, isReplacement, type CardRequest } from "./requestKind";
 import type { DistributionEntry } from "../../../../../../data/distribution/distributionTypes";
 import type { PreparedPopulationRow } from "../../../../../../data/population/populationTypes";
 import type { BulkOutcome } from "./useApprovalData";
 
-type CardRequest = ReferralRequest | ReplacementRequest;
 type SampleDetail = DistributionEntry | PreparedPopulationRow;
 
 type Props = {
@@ -14,7 +14,8 @@ type Props = {
   bulkEnabled: boolean;
   userDisplayMap: Record<string, string>;
   sampleDetails: Record<string, SampleDetail>;
-  canReview: boolean;
+  /** Per-row reviewability — capability differs by request kind. */
+  canReview: (request: CardRequest) => boolean;
   onApprove: (request: CardRequest) => void;
   onDeny: (request: CardRequest) => void;
   onBulk: (requests: CardRequest[], action: "approve" | "deny", notes: string) => Promise<BulkOutcome[]>;
@@ -27,6 +28,12 @@ export default function RequestList({ requests, bulkEnabled, userDisplayMap, sam
   const [bulkNotes, setBulkNotes] = useState("");
   const [bulkResult, setBulkResult] = useState<BulkOutcome[] | null>(null);
   const [bulkRunning, setBulkRunning] = useState(false);
+
+  // Focus-trap for the inline bulk-confirm modal (gated on bulkAction).
+  const bulkDialogRef = useFocusTrap<HTMLDivElement>({
+    onEscape: () => setBulkAction(null),
+    enabled: bulkAction !== null,
+  });
 
   // Bug #4: selection only makes sense on the pending queue — drop it whenever
   // the view switches to a decided (non-bulk) filter.
@@ -50,7 +57,10 @@ export default function RequestList({ requests, bulkEnabled, userDisplayMap, sam
     if (isReferral(request)) {
       return `${userDisplayMap[request.fromEmployee] ?? request.fromEmployee} ← ${userDisplayMap[request.toEmployee] ?? request.toEmployee}`;
     }
-    return `${request.originalXrayImageId} → ${request.replacementXrayImageId}`;
+    if (isReplacement(request)) {
+      return `${request.originalXrayImageId} → ${request.replacementXrayImageId}`;
+    }
+    return `إعادة فتح ${request.xrayImageId}`;
   }
 
   async function confirmBulk(): Promise<void> {
@@ -66,7 +76,7 @@ export default function RequestList({ requests, bulkEnabled, userDisplayMap, sam
 
   return (
     <div className="ew-referral-list">
-      {bulkEnabled && canReview && selected.size > 0 && (
+      {bulkEnabled && selected.size > 0 && (
         <div className="ew-bulk-bar">
           <span className="ew-bulk-bar-count">تم تحديد {selected.size} طلب</span>
           <button type="button" className="ew-btn-primary ew-btn-sm" onClick={() => setBulkAction("approve")}>موافقة على المحدد</button>
@@ -79,7 +89,7 @@ export default function RequestList({ requests, bulkEnabled, userDisplayMap, sam
         <div className={bulkResult.every((o) => o.ok) ? "ew-msg-ok" : "ew-msg-error"} role="status">
           {bulkResult.filter((o) => o.ok).length} نجحت، {bulkResult.filter((o) => !o.ok).length} فشلت
           {bulkResult.some((o) => !o.ok) && `: ${bulkResult.filter((o) => !o.ok).map((o) => o.error).join(" — ")}`}
-          <button type="button" style={{ float: "left", background: "none", border: "none", cursor: "pointer" }} onClick={() => setBulkResult(null)}>
+          <button type="button" aria-label="إغلاق" style={{ float: "left", background: "none", border: "none", cursor: "pointer" }} onClick={() => setBulkResult(null)}>
             <X size={14} />
           </button>
         </div>
@@ -93,17 +103,17 @@ export default function RequestList({ requests, bulkEnabled, userDisplayMap, sam
           sampleDetails={sampleDetails}
           expanded={expandedId === request.requestId}
           onToggleExpand={() => setExpandedId((cur) => (cur === request.requestId ? null : request.requestId))}
-          canReview={canReview}
+          canReview={canReview(request)}
           onApprove={() => onApprove(request)}
           onDeny={() => onDeny(request)}
-          selectable={bulkEnabled && canReview && request.status === "pending"}
+          selectable={bulkEnabled && canReview(request) && request.status === "pending"}
           selected={selected.has(request.requestId)}
           onToggleSelect={() => toggleSelect(request.requestId)}
         />
       ))}
 
       {bulkAction && (
-        <div className="ew-modal-backdrop" role="dialog" aria-modal="true">
+        <div ref={bulkDialogRef} className="ew-modal-backdrop" role="dialog" aria-modal="true">
           <div className="ew-replace-modal">
             <div className="ew-replace-header">
               <h3>{bulkAction === "approve" ? `تأكيد الموافقة على ${selectedRequests.length} طلب` : `تأكيد رفض ${selectedRequests.length} طلب`}</h3>

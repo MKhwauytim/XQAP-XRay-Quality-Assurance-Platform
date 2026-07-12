@@ -34,6 +34,7 @@ import type { SidebarTabModule } from "../tabTypes";
 import "./Settings.css";
 import { PageHeader } from "../../../../components/PageHeader/PageHeader";
 import { ErrorLogSection } from "./ErrorLogSection";
+import { AboutSection } from "./AboutSection";
 
 export const tabConfig: SidebarTabModule["tabConfig"] = {
   id:           "settings",
@@ -376,6 +377,7 @@ function SettingsPage() {
       </div>
 
       <ErrorLogSection />
+      <AboutSection />
     </div>
   );
 }

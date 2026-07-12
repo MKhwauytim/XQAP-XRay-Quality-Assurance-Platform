@@ -7,6 +7,7 @@ import {
   buildCompletedEvent,
   buildReassignEvent,
   buildReopenedEvent,
+  buildReopenRequestedEvent,
   buildReplacedEvent,
   buildReplacementRequestedEvent,
   computeDaysRemainingForDeadline,
@@ -205,6 +206,51 @@ test("reopened returns a completed item to pending with the same assignee", () =
   expect(result.entries[0]!.assignedTo).toBe("emp1");
   expect(result.totalCompleted).toBe(0);
   expect(result.totalPending).toBe(1);
+});
+
+test("reopen-requested is a non-mutating marker: a completed row stays completed (approval pending)", () => {
+  const rows = [makeRow("A1")];
+  const log = makeLog([
+      buildAssignEvent({ xrayImageId: "A1", assignedTo: "emp1", eventBy: "admin" }),
+      buildCompletedEvent({ xrayImageId: "A1", assignedTo: "emp1", eventBy: "emp1" }),
+      buildReopenRequestedEvent({ xrayImageId: "A1", assignedTo: "emp1", eventBy: "emp1", notes: "خطأ إدخال" })
+  ]);
+  const result = deriveCurrentDistribution(log, rows);
+  // reopen-requested -> (rejected / not yet approved): the row is unchanged.
+  expect(result.entries[0]!.status).toBe("completed");
+  expect(result.entries[0]!.assignedTo).toBe("emp1");
+  expect(result.totalCompleted).toBe(1);
+  expect(result.totalPending).toBe(0);
+});
+
+test("reopen-requested then reopened (approved) returns the row to pending", () => {
+  const rows = [makeRow("A1")];
+  const log = makeLog([
+      buildAssignEvent({ xrayImageId: "A1", assignedTo: "emp1", eventBy: "admin" }),
+      buildCompletedEvent({ xrayImageId: "A1", assignedTo: "emp1", eventBy: "emp1" }),
+      buildReopenRequestedEvent({ xrayImageId: "A1", assignedTo: "emp1", eventBy: "emp1" }),
+      buildReopenedEvent({ xrayImageId: "A1", assignedTo: "emp1", eventBy: "sup1", notes: "معتمد" })
+  ]);
+  const result = deriveCurrentDistribution(log, rows);
+  expect(result.entries[0]!.status).toBe("pending");
+  expect(result.entries[0]!.assignedTo).toBe("emp1");
+  expect(result.totalCompleted).toBe(0);
+  expect(result.totalPending).toBe(1);
+});
+
+test("reopen-requested after replaced is dropped by the terminal-state guard", () => {
+  const rows = [makeRow("A1"), makeRow("B2")];
+  const log = makeLog([
+      buildAssignEvent({ xrayImageId: "A1", assignedTo: "emp1", eventBy: "admin" }),
+      buildAssignEvent({ xrayImageId: "B2", assignedTo: "emp1", eventBy: "admin" }),
+      buildReplacedEvent({ xrayImageId: "A1", assignedTo: "emp1", replacedById: "B2", eventBy: "admin" }),
+      buildReopenRequestedEvent({ xrayImageId: "A1", assignedTo: "emp1", eventBy: "emp1" })
+  ]);
+  clearErrors();
+  const result = deriveCurrentDistribution(log, rows);
+  const original = result.entries.find((entry) => entry.xrayImageId === "A1");
+  expect(original?.status).toBe("replaced");
+  expect(result.totalAssigned).toBe(1); // only B2 lives
 });
 
 test("reopened after replaced is dropped by the terminal-state guard", () => {

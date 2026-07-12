@@ -33,10 +33,13 @@ import { buildReassignEvent } from "../distribution/distributionLog";
 import { executeReplacement } from "../distribution/replacement";
 import { loadMonthPopulationFinal } from "../population/populationStorage";
 import { loadSampleMaster } from "../sampling/sampleStorage";
+import { reopenSubmittedAnswer } from "../answers/reopenAnswer";
 import {
   loadReferralLog,
+  loadReopenLog,
   loadReplacementLog,
   updateReferralStatus,
+  updateReopenStatus,
   updateReplacementStatus,
 } from "./referralStorage";
 
@@ -254,6 +257,77 @@ export async function denyReplacement(params: {
   }
 
   const result = await updateReplacementStatus(directoryHandle, monthFolderName, requestId, {
+    status: "denied",
+    reviewedBy,
+    reviewedAt: new Date().toISOString(),
+    reviewNotes: reviewNotes?.trim() || undefined,
+  });
+  return result.ok ? { ok: true } : { ok: false, code: "decision-failed", error: result.error };
+}
+
+export async function approveReopen(params: {
+  directoryHandle: DirectoryHandleLike;
+  monthFolderName: string;
+  requestId: string;
+  reviewedBy: string;
+  reviewedByRole: string;
+  reviewNotes?: string;
+}): Promise<ApprovalResult> {
+  const { directoryHandle, monthFolderName, requestId, reviewedBy, reviewedByRole, reviewNotes } = params;
+
+  // 1. Fresh state — never trust the rendered list.
+  const freshLog = await loadReopenLog(directoryHandle, monthFolderName);
+  const fresh = freshLog.requests.find((r) => r.requestId === requestId);
+  if (!fresh || fresh.status !== "pending") {
+    return { ok: false, code: "already-reviewed" };
+  }
+
+  // 2. Apply the reopen. reopenSubmittedAnswer is idempotent (answer flip no-ops
+  //    once draft) and replay-guards its own "reopened" distribution event, so a
+  //    retry after a decision-write failure never double-applies.
+  const applied = await reopenSubmittedAnswer({
+    directoryHandle,
+    monthFolderName: fresh.monthFolderName,
+    employeeUsername: fresh.employeeUsername,
+    xrayImageId: fresh.xrayImageId,
+    reopenedBy: reviewedBy,
+    reopenedByRole: reviewedByRole,
+    reason: fresh.reason,
+  });
+  if (!applied.ok) {
+    return { ok: false, code: "dist-failed", error: applied.error };
+  }
+
+  // 3. Record the decision. On failure the caller retries; step 2 is idempotent.
+  const updateResult = await updateReopenStatus(directoryHandle, monthFolderName, requestId, {
+    status: "approved",
+    reviewedBy,
+    reviewedAt: new Date().toISOString(),
+    reviewNotes: reviewNotes?.trim() || undefined,
+  });
+  if (!updateResult.ok) {
+    return { ok: false, code: "decision-failed", error: updateResult.error };
+  }
+
+  return { ok: true, alreadyApplied: false };
+}
+
+export async function denyReopen(params: {
+  directoryHandle: DirectoryHandleLike;
+  monthFolderName: string;
+  requestId: string;
+  reviewedBy: string;
+  reviewNotes?: string;
+}): Promise<DenyResult> {
+  const { directoryHandle, monthFolderName, requestId, reviewedBy, reviewNotes } = params;
+
+  const freshLog = await loadReopenLog(directoryHandle, monthFolderName);
+  const fresh = freshLog.requests.find((r) => r.requestId === requestId);
+  if (!fresh || fresh.status !== "pending") {
+    return { ok: false, code: "already-reviewed" };
+  }
+
+  const result = await updateReopenStatus(directoryHandle, monthFolderName, requestId, {
     status: "denied",
     reviewedBy,
     reviewedAt: new Date().toISOString(),

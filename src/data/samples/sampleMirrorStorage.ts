@@ -70,19 +70,6 @@ export async function syncSampleMirrors(
   );
 }
 
-export async function loadMainSampleMirror(
-  directoryHandle: DirectoryHandleLike,
-  monthFolderName: string
-): Promise<MainSamplesFile | null> {
-  try {
-    const dir = await getSampleMainDir(directoryHandle, monthFolderName, false);
-    const result = await safeReadJson<MainSamplesFile>(dir, MAIN_SAMPLES_FILE);
-    return result.ok ? result.value : null;
-  } catch {
-    return null;
-  }
-}
-
 export async function loadEmployeeSampleMirror(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
