@@ -4,6 +4,50 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.72 — 2026-07-12 — E (feature-batch): app-shell acknowledgement banner
+
+Batch E item 5 (banner). Persistent orange banner mounted at the app shell, shown whenever the current
+user is in the must-accept audience (employee/supervisor) and has ≥1 unaccepted notification.
+
+- NEW `NotificationBanner.tsx`: reads notifications from the workspace on mount, on window focus, and on a
+  60s interval (poll/refresh per the plan's accepted no-backend model). Renders in normal document flow
+  right after the demo banner (matches the `.app-demo-banner` in-flow precedent — NOT a fixed overlay),
+  with a lucide `Pin` icon + the oldest unaccepted message + a "قبول" button. Multiple unaccepted are
+  shown oldest-first, one at a time, with a "+N more" suffix; accepting the current one advances to the
+  next. "قبول" records acceptance for THIS user only (via `acceptNotification`) — it never hides the
+  notification for anyone else. Self-hides (returns null) for non-audience roles, when the workspace is
+  absent, or once nothing is unaccepted.
+- NEW `NotificationBanner.css` (orange gradient bar + inline accept button).
+- `App.tsx`: mount `<NotificationBanner session={session} directoryHandle={directoryHandle} />` in the
+  shell fragment, immediately after the demo-mode banner.
+
+**File:** `src/components/NotificationBanner/NotificationBanner.tsx` — NEW.
+
+**File:** `src/components/NotificationBanner/NotificationBanner.css` — NEW.
+
+**File:** `src/App.tsx`
+
+**Before:**
+```tsx
+      {session.mode === "demo" && (
+        <div role="status" dir="rtl" className="app-demo-banner">
+          {labels.app_demo_banner}
+        </div>
+      )}
+      <main
+```
+
+**After:**
+```tsx
+      {session.mode === "demo" && (
+        <div role="status" dir="rtl" className="app-demo-banner">
+          {labels.app_demo_banner}
+        </div>
+      )}
+      <NotificationBanner session={session} directoryHandle={directoryHandle} />
+      <main
+```
+
 ## v42.71 — 2026-07-12 — E (feature-batch): notification-manager view + EW sub-tab
 
 Batch E item 4 (admin-facing UI). New `NotificationManager` view where admin/manager post a

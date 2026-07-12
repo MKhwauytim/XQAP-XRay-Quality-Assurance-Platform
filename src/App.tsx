@@ -14,6 +14,7 @@ import {
 import Sidebar from "./components/Sidebar/Sidebar";
 import { SIDEBAR_TABS } from "./components/Sidebar/Tabs/tabRegistry";
 import { FeedbackWidget } from "./components/FeedbackWidget/FeedbackWidget";
+import { NotificationBanner } from "./components/NotificationBanner/NotificationBanner";
 import {
   createDailyAdminBackupIfDue,
 } from "./data/backup/backupStorage";
@@ -170,6 +171,7 @@ function AppContent({ session }: AppContentProps) {
           {labels.app_demo_banner}
         </div>
       )}
+      <NotificationBanner session={session} directoryHandle={directoryHandle} />
       <main
         className={`app-shell ${isSidebarCollapsed ? "sidebar-collapsed" : ""}`}
         dir="rtl"
