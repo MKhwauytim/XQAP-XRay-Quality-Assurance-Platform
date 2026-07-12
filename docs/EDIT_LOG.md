@@ -4,6 +4,54 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v42.68 — 2026-07-12 — E (feature-batch): notification-center data module + 5-system folder
+
+Batch E item 1 (data layer). New workspace subsystem for admin/manager broadcast notifications
+that employee/supervisor users must acknowledge ("قبول").
+
+Storage location decision: `5-system/notifications/notifications.json` — a single workspace-wide,
+non-month-scoped JSON file, mirroring the audit action-log precedent (`5-system/audit/actions.log.json`).
+The `5-system/` root is where CLAUDE.md's disk-layout table places system-wide state (backups, presets,
+audit log), so notifications belong there rather than under a month folder. New `SYSTEM_FOLDER_NAMES.notifications`
+folder name added to workspacePaths.
+
+- NEW `notificationTypes.ts`: `AppNotification` (id/message/postedBy/postedAt/acceptances[]),
+  `NotificationAcceptance` (username/acceptedAt), `NotificationsFile` (revision/_writeToken/updatedAt/
+  notifications). Named `AppNotification` (not `Notification`) to avoid shadowing the DOM global. Pure
+  helpers: `isNotificationAudienceRole` (employee|supervisor), `hasAccepted`, `getUnacceptedFor` (oldest
+  first), `shouldShowBanner`.
+- NEW `notificationStorage.ts`: `loadNotifications`, `postNotification({message, postedBy})`,
+  `acceptNotification(id, username)` — all CAS-protected exactly like `audit/actionLog.ts`
+  (`withResourceLock(...:rmw)` + `casLoop` with `revision`+`_writeToken` verification via safeReadJson/
+  safeWriteJson). `acceptNotification` is idempotent per user and re-reads the latest file inside the CAS
+  loop so two users accepting the same notification near-simultaneously each preserve the other's
+  acceptance. Capped at 500 notifications (oldest dropped).
+
+**File:** `src/data/workspace/workspacePaths.ts`
+
+**Before:**
+```ts
+  userPresets: "user-presets",
+  feedback: "feedback",
+} as const;
+```
+
+**After:**
+```ts
+  userPresets: "user-presets",
+  feedback: "feedback",
+  notifications: "notifications",
+} as const;
+```
+
+**File:** `src/data/notifications/notificationTypes.ts` — NEW (types + pure audience/acceptance helpers).
+
+**File:** `src/data/notifications/notificationStorage.ts` — NEW (CAS-protected post/accept/load over `5-system/notifications/notifications.json`).
+
+**File:** `src/data/notifications/notificationStorage.test.ts` — NEW (post, per-user accept isolation, banner-visibility logic, who-accepted view, concurrent-accept survival).
+
+**File:** `src/data/workspace/workspacePaths.test.ts` — extend the `SYSTEM_FOLDER_NAMES` equality snapshot with `notifications: "notifications"`.
+
 ## v42.67 — 2026-07-12 — B2 (feature-batch): unified اعتماد الطلبات page (referral + replacement + reopen)
 
 Batch B item 2. Merges referral, replacement, AND reopen requests into ONE chronological, filterable

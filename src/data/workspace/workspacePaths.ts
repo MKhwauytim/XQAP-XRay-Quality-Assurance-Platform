@@ -27,6 +27,7 @@ export const SYSTEM_FOLDER_NAMES = {
   powerbiExport: "powerbi-export",
   userPresets: "user-presets",
   feedback: "feedback",
+  notifications: "notifications",
 } as const;
 
 export const REPORTS_SUBFOLDERS = {
