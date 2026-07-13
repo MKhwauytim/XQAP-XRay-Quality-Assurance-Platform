@@ -25,6 +25,7 @@ import {
   MANAGED_ROLES,
   MANAGED_TABS,
   TAB_FEATURE_MAP,
+  TAB_ROLE_CEILINGS,
   createManagedUser,
   hasFeature,
   hasRolePermission,
@@ -75,6 +76,17 @@ const KNOWN_USER_MANAGEMENT_SECTIONS = new Set<PageSection>([
   "feature-permissions",
   "activity",
 ]);
+
+/**
+ * A role×tab cell is code-locked when the role falls outside the tab's hardcoded
+ * `tabConfig.allowedRoles` ceiling (TAB_ROLE_CEILINGS). Such a cell can never take
+ * effect at runtime, so the matrix disables it. `topLevelTabId` is the parent tab
+ * id (sub-tabs inherit their parent's ceiling).
+ */
+function isCeilingLocked(role: AuthRole, topLevelTabId: string): boolean {
+  const ceiling = TAB_ROLE_CEILINGS[topLevelTabId];
+  return ceiling ? !ceiling.includes(role) : false;
+}
 
 type UserFormState = {
   username: string;
@@ -845,7 +857,7 @@ export default function UserManagementTab() {
               onClick={() => updateTabPermission(role.id, tabId, lvl)}
               title={
                 isAdminRole ? "مسؤول النظام يملك صلاحيات كاملة دائماً"
-                : locked ? "إدارة المستخدمين مقصورة على مسؤول النظام"
+                : locked ? "هذه الصفحة مقيدة بالكود لهذه الأدوار"
                 : PERMISSION_HELP[lvl]
               }
               aria-label={`${role.label}: ${tabId} - ${PERMISSION_LABELS[lvl]}`}
@@ -895,7 +907,6 @@ export default function UserManagementTab() {
             <tbody>
               {topLevelTabs.map((tab) => {
                 const subTabs = MANAGED_TABS.filter((t) => t.parentId === tab.id);
-                const locked = false;
                 const hasSubTabs = subTabs.length > 0;
                 const isCollapsed = collapsedParents.has(tab.id);
                 return (
@@ -920,11 +931,12 @@ export default function UserManagementTab() {
                       </td>
                       {MANAGED_ROLES.map((role) => (
                         <td key={role.id} className="um-perm-cell">
-                          {renderPermCell(role, tab.id, locked)}
+                          {renderPermCell(role, tab.id, isCeilingLocked(role.id, tab.id))}
                         </td>
                       ))}
                     </tr>
-                    {/* Sub-tab rows — hidden when parent is collapsed */}
+                    {/* Sub-tab rows — hidden when parent is collapsed. Sub-tabs
+                        inherit the parent tab's code-level role ceiling. */}
                     {!isCollapsed && subTabs.map((sub) => (
                       <tr key={sub.id} className="um-perm-row-child">
                         <td className="um-perm-tab-name um-perm-subtab">
@@ -932,7 +944,7 @@ export default function UserManagementTab() {
                         </td>
                         {MANAGED_ROLES.map((role) => (
                           <td key={role.id} className="um-perm-cell">
-                            {renderPermCell(role, sub.id, false)}
+                            {renderPermCell(role, sub.id, isCeilingLocked(role.id, tab.id))}
                           </td>
                         ))}
                       </tr>

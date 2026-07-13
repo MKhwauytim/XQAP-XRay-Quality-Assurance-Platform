@@ -1,9 +1,50 @@
+// Sample report (تقرير العينة) — Wave 3 rework to the consistent 3-output model
+// (Document / Deck / Excel), built on the executive infrastructure (theme,
+// document + deck primitives, charts, hardened `esc`) so it shares one visual
+// identity with the executive editions.
+//
+// Story: the complete data journey of the sample —
+//   received (raw rows) → processed / mapped → stratified (Hamilton by port,
+//   CertScan/NonCertScan split, RNG seed, spillover) → the drawn sample.
+//
+// SECURITY: every interpolated value (port names, ids, results, seed, drawnBy)
+// routes through the hardened `esc` primitive (via the shared render helpers).
+// This builder is part of the Wave 3 XSS test set — keep it that way.
+
 import * as XLSX from "xlsx";
 
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import type { SampleMasterData } from "../sampling/sampleTypes";
 import type { MonthManifestData } from "../population/monthTypes";
-import { escHtml, formatNum, formatDate, openOrDownload } from "./htmlReport";
+import { openOrDownload } from "./htmlReport";
+import { fmtNum, fmtPct } from "./executive/primitives";
+import {
+  page,
+  pageHeader,
+  kpi,
+  kpiStrip,
+  panel,
+} from "./executive/document/shared";
+import { dataTable, paginateRows } from "./executive/document/pagination";
+import {
+  slide,
+  split,
+  heroNumber,
+  heroChart,
+  kpiTile,
+  kpiBand,
+  miniTable,
+  numberedList,
+  esc as deckEsc,
+} from "./executive/deck/shared";
+import { donut, rankedBar } from "./executive/ui/charts";
+import { icon } from "./executive/ui/icons";
+import {
+  buildDocViewer,
+  buildDeckViewer,
+  formatMonthLabel,
+  formatIssueDate,
+} from "./shared/reportChrome";
 
 export type SampleReportInput = {
   monthFolderName: string;
@@ -12,371 +53,486 @@ export type SampleReportInput = {
   sample: SampleMasterData;
 };
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-function pct(n: number, d: number): string {
-  if (!d) return "—";
-  return ((n / d) * 100).toFixed(1) + "%";
-}
+// ─── Lineage model (pure) ─────────────────────────────────────────────────────
+
+const STAGE_LABELS: Record<string, string> = {
+  first: "المرحلة الأولى",
+  second: "المرحلة الثانية",
+  third: "المرحلة الثالثة",
+  fourth: "المرحلة الرابعة",
+};
 
 function stageLabel(key: string): string {
-  const m: Record<string, string> = { first: "المرحلة الأولى", second: "المرحلة الثانية", third: "المرحلة الثالثة", fourth: "المرحلة الرابعة" };
-  return m[key] ?? key;
+  return STAGE_LABELS[key] ?? key;
 }
 
-// ─── HTML report builder ──────────────────────────────────────────────────────
-function buildSampleReport(input: SampleReportInput): string {
-  const { monthFolderName, manifest, populationRows, sample } = input;
+/** Percentage of n over d, or null when the denominator is empty (renders "—"). */
+function ratePct(n: number, d: number): number | null {
+  return d > 0 ? (n / d) * 100 : null;
+}
 
-  // Index population rows by id for quick lookup
+type SamplePortStat = {
+  portName: string;
+  population: number;
+  riskRows: number;
+  biRows: number;
+  certScan: number;
+  nonCertScan: number;
+  allocatedQuota: number | null;
+  actualCertScanDrawn: number | null;
+  actualNonCertScanDrawn: number | null;
+  sample: number;
+  coverage: number | null;
+};
+
+export type SampleLineage = {
+  monthFolderName: string;
+  monthLabel: string;
+  rngSeed: string;
+  drawnAt: string;
+  drawnBy: string;
+  rawRows: number;
+  processedRows: number;
+  removed: number;
+  riskCount: number;
+  biCount: number;
+  certCount: number;
+  nonCertCount: number;
+  totalRequested: number;
+  totalActual: number;
+  certScanActual: number;
+  nonCertScanActual: number;
+  coverage: number | null;
+  fulfillment: number | null;
+  ports: SamplePortStat[];
+  stages: SampleMasterData["stageAllocations"];
+};
+
+/** Fold the raw inputs into the lineage model consumed by all three renderers. */
+export function computeSampleLineage(input: SampleReportInput): SampleLineage {
+  const { monthFolderName, manifest, populationRows, sample } = input;
   const sampledIds = new Set(sample.rows.map((r) => r.xrayImageId));
 
-  // Per-port stats from full population
-  type PortStat = {
-    population: number;
-    raw: number;
-    biRows: number;
-    riskRows: number;
-    certScan: number;
-    nonCertScan: number;
-    sample: number;
-  };
-  const portMap = new Map<string, PortStat>();
+  type Acc = { population: number; risk: number; bi: number; cert: number; nonCert: number; sample: number };
+  const portMap = new Map<string, Acc>();
   for (const r of populationRows) {
     const port = r.portName ?? "غير محدد";
-    let s = portMap.get(port);
-    if (!s) { s = { population: 0, raw: 0, biRows: 0, riskRows: 0, certScan: 0, nonCertScan: 0, sample: 0 }; portMap.set(port, s); }
-    s.population++;
-    if (r.biEnrichmentStatus === "BI Matched") s.biRows++;
-    else s.riskRows++;
-    if (r.certScanStatus === "Certscan") s.certScan++;
-    else s.nonCertScan++;
-    if (sampledIds.has(r.xrayImageId)) s.sample++;
+    let a = portMap.get(port);
+    if (!a) { a = { population: 0, risk: 0, bi: 0, cert: 0, nonCert: 0, sample: 0 }; portMap.set(port, a); }
+    a.population++;
+    if (r.biEnrichmentStatus === "BI Matched") a.bi++; else a.risk++;
+    if (r.certScanStatus === "Certscan") a.cert++; else a.nonCert++;
+    if (sampledIds.has(r.xrayImageId)) a.sample++;
   }
 
-  // Port allocations from sample master (authoritative)
-  const portAllocMap = new Map(sample.portAllocations.map((p) => [p.portName, p]));
-
-  // Sorted port list (by population desc)
-  const portNames = [...portMap.entries()].sort((a, b) => b[1].population - a[1].population).map(([n]) => n);
-
-  const portRows = portNames.map((port) => {
-    const ps = portMap.get(port)!;
-    const alloc = portAllocMap.get(port);
-    return `<tr>
-      <td class="bold">${escHtml(port)}</td>
-      <td class="num">${formatNum(ps.population)}</td>
-      <td class="num">${formatNum(ps.riskRows)}</td>
-      <td class="num">${formatNum(ps.biRows)}</td>
-      <td class="num">${formatNum(ps.certScan)}</td>
-      <td class="num">${formatNum(ps.nonCertScan)}</td>
-      <td class="num">${alloc ? formatNum(alloc.allocatedQuota) : "—"}</td>
-      <td class="num">${alloc ? formatNum(alloc.actualCertScanDrawn) : "—"}</td>
-      <td class="num">${alloc ? formatNum(alloc.actualNonCertScanDrawn) : "—"}</td>
-      <td class="num bold">${formatNum(ps.sample)}</td>
-      <td class="num">${pct(ps.sample, ps.population)}</td>
-    </tr>`;
-  }).join("");
-
-  const stageRows = sample.stageAllocations.map((s) => `<tr>
-    <td class="bold">${escHtml(stageLabel(s.stageKey))}</td>
-    <td class="num">${formatNum(s.populationSize)}</td>
-    <td class="num">${s.targetQuota > 0 ? formatNum(s.targetQuota) : "—"}</td>
-    <td class="num bold">${formatNum(s.actualDrawn)}</td>
-    <td class="num">${formatNum(s.certScanDrawn)}</td>
-    <td class="num">${formatNum(s.nonCertScanDrawn)}</td>
-    <td class="num">${pct(s.actualDrawn, s.populationSize)}</td>
-  </tr>`).join("");
+  const allocMap = new Map(sample.portAllocations.map((p) => [p.portName, p]));
+  const ports: SamplePortStat[] = [...portMap.entries()]
+    .sort((a, b) => b[1].population - a[1].population)
+    .map(([portName, a]) => {
+      const alloc = allocMap.get(portName);
+      return {
+        portName,
+        population: a.population,
+        riskRows: a.risk,
+        biRows: a.bi,
+        certScan: a.cert,
+        nonCertScan: a.nonCert,
+        allocatedQuota: alloc ? alloc.allocatedQuota : null,
+        actualCertScanDrawn: alloc ? alloc.actualCertScanDrawn : null,
+        actualNonCertScanDrawn: alloc ? alloc.actualNonCertScanDrawn : null,
+        sample: a.sample,
+        coverage: ratePct(a.sample, a.population),
+      };
+    });
 
   const rawRows = manifest?.totalRawRows ?? populationRows.length;
   const processedRows = manifest?.totalProcessedRows ?? populationRows.length;
   const biCount = populationRows.filter((r) => r.biEnrichmentStatus === "BI Matched").length;
-  const riskCount = populationRows.filter((r) => r.biEnrichmentStatus !== "BI Matched").length;
   const certCount = populationRows.filter((r) => r.certScanStatus === "Certscan").length;
-  const nonCertCount = populationRows.filter((r) => r.certScanStatus !== "Certscan").length;
 
-  const samplePreview = sample.rows.slice(0, 50).map((r) => `<tr>
-    <td>${escHtml(r.xrayImageId)}</td>
-    <td>${escHtml(r.portName ?? "—")}</td>
-    <td>${escHtml(r.stage ?? "—")}</td>
-    <td>${escHtml(r.certScanStatus)}</td>
-    <td>${escHtml(r.biEnrichmentStatus)}</td>
-    <td>${escHtml(r.xrayLevelOneResult)}</td>
-    <td>${escHtml(r.xrayLevelTwoResult)}</td>
-  </tr>`).join("");
-
-  const css = `
-    *{box-sizing:border-box;margin:0;padding:0;}
-    body{font-family:"Segoe UI",Tahoma,Arial,sans-serif;direction:rtl;color:#1a2333;background:#f0f4f8;padding:28px;}
-    .page{max-width:1200px;margin:0 auto;}
-    h1{font-size:24px;color:#06244a;margin-bottom:6px;font-weight:800;}
-    h2{font-size:15px;color:#06244a;margin:28px 0 10px;padding-bottom:6px;border-bottom:2px solid #c8d9ed;display:flex;align-items:center;gap:8px;}
-    h2 .num{font-size:11px;background:#06244a;color:#fff;border-radius:99px;padding:2px 10px;font-weight:700;}
-    .meta{color:#637188;font-size:12px;margin-bottom:20px;}
-    .stat-row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px;}
-    .stat{background:#fff;border:1px solid #d8e3ef;border-radius:10px;padding:14px 18px;min-width:130px;box-shadow:0 6px 18px rgba(9,42,80,.06);}
-    .stat-label{font-size:11px;color:#637188;font-weight:600;}
-    .stat-value{font-size:22px;font-weight:800;color:#06244a;direction:ltr;}
-    .stat.teal .stat-value{color:#007e73;}
-    .note{font-size:11px;color:#8390a2;margin-top:2px;}
-    .section{background:#fff;border:1px solid #d8e3ef;border-radius:14px;overflow:hidden;margin-bottom:20px;box-shadow:0 8px 22px rgba(9,42,80,.07);}
-    .section-inner{padding:16px 18px;}
-    table{width:100%;border-collapse:collapse;font-size:12.5px;}
-    th{background:#06244a;color:#fff;padding:8px 10px;text-align:right;font-weight:700;white-space:nowrap;}
-    td{padding:7px 10px;border-bottom:1px solid #e8eff8;color:#2a3e59;}
-    tr:nth-child(even) td{background:#f7fafc;}
-    tr:last-child td{border-bottom:0;}
-    .total-row td{background:#eef2f8!important;font-weight:800;color:#06244a;}
-    .num{direction:ltr;text-align:left;font-variant-numeric:tabular-nums;}
-    .bold{font-weight:700;color:#06244a;}
-    .pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;}
-    .pill-blue{background:#e7f0fb;color:#1a3f7a;}
-    .pill-teal{background:#e3f7f4;color:#007e73;}
-    .diff-row{background:#fff;border:1px solid #d8e3ef;border-radius:12px;padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:18px;flex-wrap:wrap;}
-    .diff-item span{display:block;font-size:11px;color:#8390a2;}
-    .diff-item b{font-size:18px;color:#06244a;direction:ltr;display:block;}
-    .diff-arrow{font-size:22px;color:#c3d3e3;}
-    .footer{color:#8390a2;font-size:11px;margin-top:30px;text-align:center;}
-    @page {
-      size: portrait;
-      margin: 0;
-    }
-    @media print {
-      body { background: #fff; padding: 15mm 20mm; }
-      .no-print { display: none !important; }
-    }
-  `;
-
-  return `<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>تقرير العينة — ${escHtml(monthFolderName)}</title>
-<style>${css}</style>
-</head>
-<body>
-<div class="page">
-  <h1>تقرير العينة — ${escHtml(monthFolderName)}</h1>
-  <p class="meta">تاريخ السحب: ${formatDate(sample.drawnAt)} — بواسطة: ${escHtml(sample.drawnBy)} — بذرة: ${escHtml(sample.rngSeed)}</p>
-
-  <!-- Summary stats -->
-  <div class="stat-row">
-    <div class="stat"><div class="stat-label">البيانات الخام</div><div class="stat-value">${formatNum(rawRows)}</div><div class="note">قبل المعالجة</div></div>
-    <div class="stat"><div class="stat-label">بعد المعالجة</div><div class="stat-value">${formatNum(processedRows)}</div><div class="note">${rawRows > processedRows ? formatNum(rawRows - processedRows) + " محذوف" : "بدون حذف"}</div></div>
-    <div class="stat"><div class="stat-label">مصدر Risk</div><div class="stat-value">${formatNum(riskCount)}</div></div>
-    <div class="stat"><div class="stat-label">مصدر BI</div><div class="stat-value">${formatNum(biCount)}</div></div>
-    <div class="stat"><div class="stat-label">CertScan</div><div class="stat-value">${formatNum(certCount)}</div></div>
-    <div class="stat"><div class="stat-label">NonCertScan</div><div class="stat-value">${formatNum(nonCertCount)}</div></div>
-    <div class="stat teal"><div class="stat-label">العينة المسحوبة</div><div class="stat-value">${formatNum(sample.totalActual)}</div><div class="note">${pct(sample.totalActual, processedRows)} تغطية</div></div>
-    <div class="stat teal"><div class="stat-label">نسبة الإنجاز</div><div class="stat-value">${pct(sample.totalActual, sample.totalRequested)}</div><div class="note">${formatNum(sample.totalRequested)} مطلوب</div></div>
-  </div>
-
-  <!-- Raw vs processed -->
-  <h2>البيانات الخام مقابل بعد المعالجة <span class="num">مقارنة</span></h2>
-  <div class="diff-row">
-    <div class="diff-item"><span>البيانات الخام</span><b>${formatNum(rawRows)}</b></div>
-    <div class="diff-arrow">←</div>
-    <div class="diff-item"><span>بعد التصفية والمعالجة</span><b>${formatNum(processedRows)}</b></div>
-    <div class="diff-arrow">←</div>
-    <div class="diff-item"><span>المحذوف</span><b style="color:#c33232">${formatNum(rawRows - processedRows)}</b></div>
-    <div style="margin-right:auto;display:flex;gap:10px;flex-wrap:wrap">
-      <span class="pill pill-blue">Risk: ${formatNum(riskCount)}</span>
-      <span class="pill pill-teal">BI مطابق: ${formatNum(biCount)}</span>
-    </div>
-  </div>
-
-  <!-- Port breakdown -->
-  <h2>تفصيل المنافذ <span class="num">${portNames.length} منفذ</span></h2>
-  <div class="section">
-    <table>
-      <thead><tr>
-        <th>المنفذ</th><th>المجتمع</th><th>Risk</th><th>BI</th>
-        <th>CertScan</th><th>NonCertScan</th>
-        <th>المخصص</th><th>Cert مسحوب</th><th>NonCert مسحوب</th>
-        <th>إجمالي العينة</th><th>التغطية</th>
-      </tr></thead>
-      <tbody>
-        ${portRows}
-        <tr class="total-row">
-          <td>المجموع</td>
-          <td class="num">${formatNum(processedRows)}</td>
-          <td class="num">${formatNum(riskCount)}</td>
-          <td class="num">${formatNum(biCount)}</td>
-          <td class="num">${formatNum(certCount)}</td>
-          <td class="num">${formatNum(nonCertCount)}</td>
-          <td class="num">${formatNum(sample.totalRequested)}</td>
-          <td class="num">${formatNum(sample.certScanActual)}</td>
-          <td class="num">${formatNum(sample.nonCertScanActual)}</td>
-          <td class="num">${formatNum(sample.totalActual)}</td>
-          <td class="num">${pct(sample.totalActual, processedRows)}</td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
-
-  <!-- Stage breakdown -->
-  <h2>توزيع العينة على المراحل <span class="num">${sample.stageAllocations.length} مراحل</span></h2>
-  <div class="section">
-    <table>
-      <thead><tr>
-        <th>المرحلة</th><th>المجتمع</th><th>المستهدف</th><th>المسحوب</th>
-        <th>CertScan</th><th>NonCertScan</th><th>التغطية</th>
-      </tr></thead>
-      <tbody>
-        ${stageRows}
-        <tr class="total-row">
-          <td>المجموع</td>
-          <td class="num">${formatNum(sample.stageAllocations.reduce((s, r) => s + r.populationSize, 0))}</td>
-          <td class="num">${formatNum(sample.totalRequested)}</td>
-          <td class="num">${formatNum(sample.totalActual)}</td>
-          <td class="num">${formatNum(sample.certScanActual)}</td>
-          <td class="num">${formatNum(sample.nonCertScanActual)}</td>
-          <td class="num">${pct(sample.totalActual, processedRows)}</td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
-
-  <!-- Sample drawn preview -->
-  <h2>الصفوف المسحوبة للدراسة <span class="num">عرض أول 50 من ${formatNum(sample.rows.length)}</span></h2>
-  <div class="section">
-    <table>
-      <thead><tr>
-        <th>رقم الأشعة</th><th>المنفذ</th><th>المرحلة</th><th>CertScan</th>
-        <th>مصدر BI</th><th>م.أول</th><th>م.ثاني</th>
-      </tr></thead>
-      <tbody>${samplePreview}</tbody>
-    </table>
-  </div>
-
-  <p class="footer">تقرير العينة — ${escHtml(monthFolderName)} — توليد آلي بواسطة منصة ضمان جودة الأشعة</p>
-</div>
-</body>
-</html>`;
+  return {
+    monthFolderName,
+    monthLabel: formatMonthLabel(monthFolderName),
+    rngSeed: sample.rngSeed,
+    drawnAt: sample.drawnAt,
+    drawnBy: sample.drawnBy,
+    rawRows,
+    processedRows,
+    removed: Math.max(0, rawRows - processedRows),
+    riskCount: populationRows.length - biCount,
+    biCount,
+    certCount,
+    nonCertCount: populationRows.length - certCount,
+    totalRequested: sample.totalRequested,
+    totalActual: sample.totalActual,
+    certScanActual: sample.certScanActual,
+    nonCertScanActual: sample.nonCertScanActual,
+    coverage: ratePct(sample.totalActual, processedRows),
+    fulfillment: ratePct(sample.totalActual, sample.totalRequested),
+    ports,
+    stages: sample.stageAllocations,
+  };
 }
 
-// ─── XLSX export ──────────────────────────────────────────────────────────────
-export function buildSampleXlsx(input: SampleReportInput): void {
-  const { monthFolderName, manifest, populationRows, sample } = input;
+// ─── Document (A4 portrait) ───────────────────────────────────────────────────
 
-  const rawRows = manifest?.totalRawRows ?? populationRows.length;
-  const processedRows = manifest?.totalProcessedRows ?? populationRows.length;
+const SAMPLE_RAILS = ["الاستلام", "المعالجة", "الطبقات", "العينة"];
+
+function sampleDocPages(m: SampleLineage, issueDate: string, previewRows: (string | number | null)[][]): string {
+  const pages: string[] = [];
+
+  // Page 1 — lineage overview.
+  pages.push(page({
+    id: "s-overview", title: "لمحة المسار", pageNo: "01", railTabs: SAMPLE_RAILS,
+    body: `${pageHeader({ iconName: "layers", eyebrow: "تقرير العينة", title: `المسار الكامل للعينة — ${m.monthLabel}`, subtitle: `البذرة: ${m.rngSeed} — سُحبت بواسطة: ${m.drawnBy} — تاريخ الإصدار: ${issueDate}` })}
+      ${kpiStrip([
+        kpi({ label: "البيانات الخام", value: fmtNum(m.rawRows), sub: "قبل المعالجة", tone: "slate" }),
+        kpi({ label: "بعد المعالجة", value: fmtNum(m.processedRows), sub: m.removed > 0 ? `${fmtNum(m.removed)} محذوف` : "بدون حذف", tone: "blue" }),
+        kpi({ label: "العينة المسحوبة", value: fmtNum(m.totalActual), sub: `${fmtPct(m.coverage)} تغطية`, tone: "gold" }),
+        kpi({ label: "نسبة الإنجاز", value: fmtPct(m.fulfillment), sub: `${fmtNum(m.totalRequested)} مطلوب`, tone: "green" }),
+      ])}
+      ${panel("مراحل المسار", dataTable({
+        headers: ["المرحلة", "الوصف", "العدد"],
+        rows: [
+          ["1 · الاستلام", "الصفوف الخام كما وردت من ملفات Risk/BI", fmtNum(m.rawRows)],
+          ["2 · المعالجة", "بعد التصفية والمطابقة والتخطيط", fmtNum(m.processedRows)],
+          ["3 · التصنيف", "مصدر Risk / BI مطابق", `${fmtNum(m.riskCount)} / ${fmtNum(m.biCount)}`],
+          ["4 · CertScan", "CertScan / NonCertScan", `${fmtNum(m.certCount)} / ${fmtNum(m.nonCertCount)}`],
+          ["5 · السحب", "العينة النهائية المسحوبة للدراسة", fmtNum(m.totalActual)],
+        ],
+      }), { iconName: "arrow" })}`,
+  }));
+
+  // Page 2 — received vs processed.
+  pages.push(page({
+    id: "s-processing", title: "الاستلام والمعالجة", pageNo: "02", railTabs: rotate(SAMPLE_RAILS, 1),
+    body: `${pageHeader({ iconName: "scan", eyebrow: "المرحلة 1–2", title: "من الخام إلى المعالج", subtitle: "ما الذي استُلم، وكيف تمت معالجته وتصنيف مصدره." })}
+      ${kpiStrip([
+        kpi({ label: "خام", value: fmtNum(m.rawRows), tone: "slate" }),
+        kpi({ label: "معالج", value: fmtNum(m.processedRows), tone: "blue" }),
+        kpi({ label: "محذوف", value: fmtNum(m.removed), tone: "coral" }),
+      ])}
+      ${panel("التصنيف حسب المصدر ونوع الفحص", dataTable({
+        headers: ["التصنيف", "الفئة", "العدد", "النسبة"],
+        rows: [
+          ["المصدر", "Risk", fmtNum(m.riskCount), fmtPct(ratePct(m.riskCount, m.processedRows))],
+          ["المصدر", "BI مطابق", fmtNum(m.biCount), fmtPct(ratePct(m.biCount, m.processedRows))],
+          ["نوع الفحص", "CertScan", fmtNum(m.certCount), fmtPct(ratePct(m.certCount, m.processedRows))],
+          ["نوع الفحص", "NonCertScan", fmtNum(m.nonCertCount), fmtPct(ratePct(m.nonCertCount, m.processedRows))],
+        ],
+      }))}`,
+  }));
+
+  // Page 3+ — stratification by port (paginated).
+  const portHeaders = ["المنفذ", "المجتمع", "Risk", "BI", "Cert", "NonCert", "المخصص", "Cert مسحوب", "NonCert مسحوب", "العينة", "التغطية"];
+  const portRows = m.ports.map((p) => [
+    p.portName, fmtNum(p.population), fmtNum(p.riskRows), fmtNum(p.biRows),
+    fmtNum(p.certScan), fmtNum(p.nonCertScan),
+    p.allocatedQuota === null ? null : fmtNum(p.allocatedQuota),
+    p.actualCertScanDrawn === null ? null : fmtNum(p.actualCertScanDrawn),
+    p.actualNonCertScanDrawn === null ? null : fmtNum(p.actualNonCertScanDrawn),
+    fmtNum(p.sample), fmtPct(p.coverage),
+  ]);
+  const portTotal = [
+    "المجموع", fmtNum(m.processedRows), fmtNum(m.riskCount), fmtNum(m.biCount),
+    fmtNum(m.certCount), fmtNum(m.nonCertCount), fmtNum(m.totalRequested),
+    fmtNum(m.certScanActual), fmtNum(m.nonCertScanActual), fmtNum(m.totalActual), fmtPct(m.coverage),
+  ];
+  const portChunks = paginateRows({ headers: portHeaders, rows: portRows, rowsPerPage: 18, totalRow: portTotal });
+  let pageNo = 3;
+  portChunks.forEach((chunk, i) => {
+    pages.push(page({
+      id: `s-ports-${i}`, title: i === 0 ? "التصنيف حسب المنفذ" : `التصنيف حسب المنفذ (${i + 1})`,
+      pageNo: pad(pageNo++), railTabs: rotate(SAMPLE_RAILS, 2),
+      body: `${pageHeader({ iconName: "port", eyebrow: "المرحلة 3", title: "التصنيف الطبقي حسب المنفذ", subtitle: "توزيع Hamilton بالحصص، وتقسيم CertScan/NonCertScan، والصفوف المسحوبة فعلياً لكل منفذ." })}
+        ${panel(`المنافذ (${fmtNum(m.ports.length)} منفذ)`, chunk, { iconName: "port" })}`,
+    }));
+  });
+
+  // Stage allocation page.
+  pages.push(page({
+    id: "s-stages", title: "التوزيع على المستويات", pageNo: pad(pageNo++), railTabs: rotate(SAMPLE_RAILS, 2),
+    body: `${pageHeader({ iconName: "layers", eyebrow: "المرحلة 3", title: "توزيع العينة على المستويات", subtitle: "حصة كل مستوى من المجتمع والمسحوب فعلياً." })}
+      ${panel("المستويات", dataTable({
+        headers: ["المستوى", "المجتمع", "المستهدف", "المسحوب", "Cert", "NonCert", "التغطية"],
+        rows: m.stages.map((s) => [
+          stageLabel(s.stageKey), fmtNum(s.populationSize),
+          s.targetQuota > 0 ? fmtNum(s.targetQuota) : null,
+          fmtNum(s.actualDrawn), fmtNum(s.certScanDrawn), fmtNum(s.nonCertScanDrawn),
+          fmtPct(ratePct(s.actualDrawn, s.populationSize)),
+        ]),
+        totalRow: [
+          "المجموع", fmtNum(m.stages.reduce((s, r) => s + r.populationSize, 0)),
+          fmtNum(m.totalRequested), fmtNum(m.totalActual),
+          fmtNum(m.certScanActual), fmtNum(m.nonCertScanActual), fmtPct(m.coverage),
+        ],
+      }))}`,
+  }));
+
+  // Drawn sample preview (paginated).
+  const sampleHeaders = ["رقم الأشعة", "المنفذ", "المستوى", "CertScan", "مصدر BI", "م.أول", "م.ثاني"];
+  const sampleChunks = paginateRows({ headers: sampleHeaders, rows: previewRows, rowsPerPage: 20 });
+  sampleChunks.forEach((chunk, i) => {
+    pages.push(page({
+      id: `s-drawn-${i}`, title: i === 0 ? "الصفوف المسحوبة" : `الصفوف المسحوبة (${i + 1})`,
+      pageNo: pad(pageNo++), railTabs: rotate(SAMPLE_RAILS, 3),
+      body: `${pageHeader({ iconName: "check", eyebrow: "المرحلة 4", title: "الصفوف المسحوبة للدراسة", subtitle: `عرض ${fmtNum(previewRows.length)} صف من العينة النهائية.` })}
+        ${panel("العينة النهائية", chunk, { iconName: "check" })}`,
+    }));
+  });
+
+  return pages.join("\n");
+}
+
+function pad(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+/** Rotate the rail labels so the "active" (first) tab tracks the current section. */
+function rotate<T>(arr: T[], by: number): T[] {
+  const n = arr.length;
+  const k = ((by % n) + n) % n;
+  return [...arr.slice(k), ...arr.slice(0, k)];
+}
+
+// ─── Deck (16:9 landscape) ────────────────────────────────────────────────────
+
+function titleSlide(m: SampleLineage): string {
+  return `<section class="slide title-slide" id="s-deck-title" data-title="الغلاف">
+  <div class="slide-art"></div>
+  <div class="slide-inner">
+    <div class="title-mark">${icon("layers", 64)}</div>
+    <div class="title-kicker">تقرير العينة</div>
+    <h1>المسار الكامل للعينة</h1>
+    <div class="title-sub">${deckEsc(m.monthLabel)}</div>
+    <div class="title-rule"></div>
+    <div class="title-meta">البذرة ${deckEsc(m.rngSeed)} — سُحبت بواسطة ${deckEsc(m.drawnBy)}</div>
+  </div>
+</section>`;
+}
+
+function sampleDeckSlides(m: SampleLineage): string {
+  const slides: string[] = [];
+  const total = 5;
+
+  slides.push(titleSlide(m));
+
+  // 1 — lineage overview.
+  slides.push(slide({
+    id: "s-deck-overview", title: "لمحة المسار", num: 1, total,
+    eyebrow: "من الاستلام إلى السحب", iconName: "arrow",
+    headline: "أربع مراحل من البيانات الخام إلى العينة",
+    body: kpiBand([
+      kpiTile({ label: "مُستلم", value: fmtNum(m.rawRows), sub: "صفوف خام", tone: "slate" }),
+      kpiTile({ label: "مُعالج", value: fmtNum(m.processedRows), sub: `${fmtNum(m.removed)} محذوف`, tone: "blue" }),
+      kpiTile({ label: "مسحوب", value: fmtNum(m.totalActual), sub: `${fmtPct(m.coverage)} تغطية`, tone: "gold" }),
+      kpiTile({ label: "الإنجاز", value: fmtPct(m.fulfillment), sub: `${fmtNum(m.totalRequested)} مطلوب`, tone: "green" }),
+    ]),
+    decision: "يؤكد اكتمال سلسلة العينة من المصدر حتى السحب النهائي.",
+  }));
+
+  // 2 — received vs processed + source donut.
+  slides.push(slide({
+    id: "s-deck-proc", title: "الاستلام والمعالجة", num: 2, total,
+    eyebrow: "المرحلة 1–2", iconName: "scan",
+    headline: "التصفية والتصنيف حسب المصدر",
+    body: split(
+      heroNumber({ value: fmtNum(m.processedRows), caption: "صف بعد المعالجة", sub: `${fmtNum(m.removed)} صف محذوف أثناء التصفية والمطابقة`, tone: "blue" }),
+      heroChart(donut([
+        { label: "Risk", value: m.riskCount },
+        { label: "BI مطابق", value: m.biCount },
+      ], { height: 300, emptyNote: "لا توجد بيانات" }), { height: 300, caption: "المصدر: Risk مقابل BI" }),
+    ),
+    decision: "يوضح جاهزية البيانات ونسبة الإثراء من BI قبل السحب.",
+  }));
+
+  // 3 — stratification by port.
+  const topPorts = m.ports.slice(0, 8);
+  slides.push(slide({
+    id: "s-deck-ports", title: "التصنيف حسب المنفذ", num: 3, total,
+    eyebrow: "المرحلة 3", iconName: "port",
+    headline: "التوزيع الطبقي حسب المنفذ (Hamilton)",
+    body: topPorts.length === 0
+      ? emptyBody()
+      : split(
+          miniTable({
+            headers: ["المنفذ", "المجتمع", "المخصص", "العينة", "التغطية"],
+            rows: topPorts.map((p) => [p.portName, fmtNum(p.population), p.allocatedQuota === null ? null : fmtNum(p.allocatedQuota), fmtNum(p.sample), fmtPct(p.coverage)]),
+          }),
+          heroChart(rankedBar(topPorts.map((p) => ({ label: p.portName, value: Math.round(p.coverage ?? 0) })), { height: 300, emptyNote: "لا توجد بيانات" }), { height: 300, caption: "التغطية٪ لكل منفذ (الأعلى)" }),
+          "wide-left",
+        ),
+    decision: "يبرز المنافذ الأعلى تغطيةً وتلك التي تحتاج مراجعة الحصص.",
+  }));
+
+  // 4 — stages.
+  slides.push(slide({
+    id: "s-deck-stages", title: "المستويات", num: 4, total,
+    eyebrow: "المرحلة 3", iconName: "layers",
+    headline: "توزيع العينة على المستويات",
+    body: miniTable({
+      headers: ["المستوى", "المجتمع", "المستهدف", "المسحوب", "التغطية"],
+      rows: m.stages.map((s) => [stageLabel(s.stageKey), fmtNum(s.populationSize), s.targetQuota > 0 ? fmtNum(s.targetQuota) : null, fmtNum(s.actualDrawn), fmtPct(ratePct(s.actualDrawn, s.populationSize))]),
+    }),
+    decision: "يضمن تمثيل كل مستوى وفق حصته المستهدفة.",
+  }));
+
+  // 5 — drawn result.
+  slides.push(slide({
+    id: "s-deck-drawn", title: "العينة المسحوبة", num: 5, total,
+    eyebrow: "المرحلة 4", iconName: "check",
+    headline: "العينة النهائية المختارة للدراسة",
+    body: kpiBand([
+      kpiTile({ label: "الإجمالي", value: fmtNum(m.totalActual), tone: "gold" }),
+      kpiTile({ label: "CertScan", value: fmtNum(m.certScanActual), tone: "blue" }),
+      kpiTile({ label: "NonCertScan", value: fmtNum(m.nonCertScanActual), tone: "cyan" }),
+      kpiTile({ label: "التغطية", value: fmtPct(m.coverage), tone: "green" }),
+    ]) + numberedList([
+      `سُحبت ${fmtNum(m.totalActual)} صورة من مجتمع ${fmtNum(m.processedRows)} بتغطية ${fmtPct(m.coverage)}.`,
+      `نسبة إنجاز الحصة المطلوبة ${fmtPct(m.fulfillment)} (${fmtNum(m.totalRequested)} مطلوب).`,
+      `البذرة العشوائية المستخدمة للسحب: ${m.rngSeed}.`,
+    ]),
+    decision: "يعتمد العينة النهائية أساساً للتوزيع والدراسة.",
+  }));
+
+  return slides.join("\n");
+}
+
+function emptyBody(): string {
+  return `<div class="deck-empty"><span class="deck-empty-icon">${icon("alert", 36)}</span><b>لا توجد بيانات منافذ</b><span>لم تُسجَّل مخصصات منافذ لهذه العينة.</span></div>`;
+}
+
+// ─── Public string builders ───────────────────────────────────────────────────
+
+export function buildSampleDocument(input: SampleReportInput): string {
+  const m = computeSampleLineage(input);
+  const preview: (string | number | null)[][] = input.sample.rows.slice(0, 60).map((r) => [
+    r.xrayImageId, r.portName ?? "—", r.stage ?? "—", r.certScanStatus,
+    r.biEnrichmentStatus, r.xrayLevelOneResult, r.xrayLevelTwoResult,
+  ]);
+  return buildDocViewer({
+    slides: sampleDocPages(m, formatIssueDate(), preview),
+    docTitle: `تقرير العينة — ${m.monthLabel}`,
+    brandTitle: "تقرير العينة",
+    brandSub: `ضمان جودة الأشعة — ${m.monthLabel}`,
+    iconName: "layers",
+  });
+}
+
+export function buildSampleDeck(input: SampleReportInput): string {
+  const m = computeSampleLineage(input);
+  return buildDeckViewer({
+    slides: sampleDeckSlides(m),
+    docTitle: `عرض العينة — ${m.monthLabel}`,
+    brandTitle: "عرض العينة",
+    brandSub: `ضمان جودة الأشعة — ${m.monthLabel}`,
+    iconName: "layers",
+  });
+}
+
+export function buildSampleXlsx(input: SampleReportInput): void {
+  const m = computeSampleLineage(input);
+  const { populationRows, sample } = input;
   const sampledIds = new Set(sample.rows.map((r) => r.xrayImageId));
 
-  // Sheet 1: Summary
-  const summaryData = [
-    ["التقرير", "تقرير العينة"],
-    ["الشهر", monthFolderName],
-    ["تاريخ السحب", sample.drawnAt],
-    ["بواسطة", sample.drawnBy],
-    ["البذرة", sample.rngSeed],
+  // Sheet 1 — Lineage summary (received → processed → strata → drawn).
+  const summary: (string | number)[][] = [
+    ["التقرير", "تقرير العينة — المسار الكامل"],
+    ["الشهر", m.monthLabel],
+    ["تاريخ السحب", m.drawnAt],
+    ["بواسطة", m.drawnBy],
+    ["البذرة العشوائية", m.rngSeed],
     [],
-    ["البيانات الخام", rawRows],
-    ["بعد المعالجة", processedRows],
-    ["محذوف", rawRows - processedRows],
-    ["مصدر Risk", populationRows.filter((r) => r.biEnrichmentStatus !== "BI Matched").length],
-    ["مصدر BI", populationRows.filter((r) => r.biEnrichmentStatus === "BI Matched").length],
-    ["CertScan", populationRows.filter((r) => r.certScanStatus === "Certscan").length],
-    ["NonCertScan", populationRows.filter((r) => r.certScanStatus !== "Certscan").length],
-    [],
-    ["إجمالي العينة المطلوبة", sample.totalRequested],
-    ["إجمالي العينة المسحوبة", sample.totalActual],
-    ["CertScan المسحوب", sample.certScanActual],
-    ["NonCertScan المسحوب", sample.nonCertScanActual],
+    ["— 1 · الاستلام —", ""],
+    ["البيانات الخام", m.rawRows],
+    ["— 2 · المعالجة —", ""],
+    ["بعد المعالجة", m.processedRows],
+    ["محذوف", m.removed],
+    ["مصدر Risk", m.riskCount],
+    ["مصدر BI مطابق", m.biCount],
+    ["CertScan", m.certCount],
+    ["NonCertScan", m.nonCertCount],
+    ["— 3 · التصنيف الطبقي —", ""],
+    ["عدد المنافذ", m.ports.length],
+    ["إجمالي المطلوب (الحصص)", m.totalRequested],
+    ["— 4 · السحب —", ""],
+    ["إجمالي العينة المسحوبة", m.totalActual],
+    ["CertScan المسحوب", m.certScanActual],
+    ["NonCertScan المسحوب", m.nonCertScanActual],
+    ["التغطية٪", m.coverage === null ? "" : +m.coverage.toFixed(2)],
+    ["الإنجاز٪", m.fulfillment === null ? "" : +m.fulfillment.toFixed(2)],
   ];
 
-  // Sheet 2: Port allocation
-  const portAlloc: (string | number)[][] = [
-    ["المنفذ", "المجتمع", "Risk", "BI", "CertScan", "NonCertScan", "المخصص", "Cert مسحوب", "NonCert مسحوب", "الإجمالي", "التغطية%"],
-  ];
-  const portAllocMap = new Map(sample.portAllocations.map((p) => [p.portName, p]));
-  type PortStat = { population: number; bi: number; certScan: number };
-  const portStatMap = new Map<string, PortStat>();
-  for (const r of populationRows) {
-    const port = r.portName ?? "غير محدد";
-    let s = portStatMap.get(port);
-    if (!s) { s = { population: 0, bi: 0, certScan: 0 }; portStatMap.set(port, s); }
-    s.population++;
-    if (r.biEnrichmentStatus === "BI Matched") s.bi++;
-    if (r.certScanStatus === "Certscan") s.certScan++;
-  }
-  for (const [port, ps] of [...portStatMap.entries()].sort((a, b) => b[1].population - a[1].population)) {
-    const alloc = portAllocMap.get(port);
-    const sampleCount = sample.rows.filter((r) => r.portName === port).length;
-    portAlloc.push([
-      port,
-      ps.population,
-      ps.population - ps.bi,
-      ps.bi,
-      ps.certScan,
-      ps.population - ps.certScan,
-      alloc?.allocatedQuota ?? 0,
-      alloc?.actualCertScanDrawn ?? 0,
-      alloc?.actualNonCertScanDrawn ?? 0,
-      sampleCount,
-      processedRows > 0 ? +((sampleCount / processedRows) * 100).toFixed(2) : 0,
-    ]);
-  }
-
-  // Sheet 3: Stage breakdown
-  const stageData = [
-    ["المرحلة", "المجتمع", "المستهدف", "المسحوب", "CertScan", "NonCertScan", "التغطية%"],
-    ...sample.stageAllocations.map((s) => [
-      stageLabel(s.stageKey),
-      s.populationSize,
-      s.targetQuota,
-      s.actualDrawn,
-      s.certScanDrawn,
-      s.nonCertScanDrawn,
-      processedRows > 0 ? +((s.actualDrawn / processedRows) * 100).toFixed(2) : 0,
-    ]),
-  ];
-
-  // Sheet 4: Full sample rows
-  const sampleSheet = [
-    ["رقم الأشعة", "المنفذ", "المرحلة", "CertScan", "مصدر BI", "م.أول", "م.ثاني", "تاريخ الدخول", "رقم البيان", "نوع الحركة", "رسالة Risk"],
-    ...sample.rows.map((r) => [
-      r.xrayImageId,
-      r.portName ?? "",
-      r.stage ?? "",
-      r.certScanStatus,
-      r.biEnrichmentStatus,
-      r.xrayLevelOneResult,
-      r.xrayLevelTwoResult,
-      r.xrayEntryDate ?? "",
-      r.declarationNumber ?? "",
-      r.movementType ?? "",
-      r.riskMessage ?? "",
-    ]),
-  ];
-
-  // Sheet 5: Full population (shows Risk + BI origins)
-  const popSheet = [
-    ["رقم الأشعة", "المنفذ", "المرحلة", "CertScan", "مصدر BI", "م.أول", "م.ثاني", "في العينة", "تاريخ الدخول", "رقم البيان"],
+  // Sheet 2 — Received (full population as ingested markers).
+  const received: (string | number)[][] = [
+    ["رقم الأشعة", "المنفذ", "المستوى", "CertScan", "مصدر BI", "م.أول", "م.ثاني", "في العينة", "تاريخ الدخول", "رقم البيان"],
     ...populationRows.map((r) => [
-      r.xrayImageId,
-      r.portName ?? "",
-      r.stage ?? "",
-      r.certScanStatus,
-      r.biEnrichmentStatus,
-      r.xrayLevelOneResult,
-      r.xrayLevelTwoResult,
-      sampledIds.has(r.xrayImageId) ? "نعم" : "لا",
-      r.xrayEntryDate ?? "",
-      r.declarationNumber ?? "",
+      r.xrayImageId, r.portName ?? "", r.stage ?? "", r.certScanStatus, r.biEnrichmentStatus,
+      r.xrayLevelOneResult, r.xrayLevelTwoResult, sampledIds.has(r.xrayImageId) ? "نعم" : "لا",
+      r.xrayEntryDate ?? "", r.declarationNumber ?? "",
+    ]),
+  ];
+
+  // Sheet 3 — Processed classification.
+  const processed: (string | number)[][] = [
+    ["التصنيف", "الفئة", "العدد", "النسبة٪"],
+    ["المصدر", "Risk", m.riskCount, pctCell(ratePct(m.riskCount, m.processedRows))],
+    ["المصدر", "BI مطابق", m.biCount, pctCell(ratePct(m.biCount, m.processedRows))],
+    ["نوع الفحص", "CertScan", m.certCount, pctCell(ratePct(m.certCount, m.processedRows))],
+    ["نوع الفحص", "NonCertScan", m.nonCertCount, pctCell(ratePct(m.nonCertCount, m.processedRows))],
+  ];
+
+  // Sheet 4 — Strata / quotas by port.
+  const strata: (string | number)[][] = [
+    ["المنفذ", "المجتمع", "Risk", "BI", "CertScan", "NonCertScan", "المخصص", "Cert مسحوب", "NonCert مسحوب", "العينة", "التغطية٪"],
+    ...m.ports.map((p) => [
+      p.portName, p.population, p.riskRows, p.biRows, p.certScan, p.nonCertScan,
+      p.allocatedQuota ?? 0, p.actualCertScanDrawn ?? 0, p.actualNonCertScanDrawn ?? 0,
+      p.sample, pctCell(p.coverage),
+    ]),
+  ];
+
+  // Sheet 5 — Stage allocation.
+  const stages: (string | number)[][] = [
+    ["المستوى", "المجتمع", "المستهدف", "المسحوب", "CertScan", "NonCertScan", "التغطية٪"],
+    ...m.stages.map((s) => [
+      stageLabel(s.stageKey), s.populationSize, s.targetQuota, s.actualDrawn,
+      s.certScanDrawn, s.nonCertScanDrawn, pctCell(ratePct(s.actualDrawn, s.populationSize)),
+    ]),
+  ];
+
+  // Sheet 6 — Drawn sample (the final chosen rows, full detail).
+  const drawn: (string | number)[][] = [
+    ["رقم الأشعة", "المنفذ", "المستوى", "CertScan", "مصدر BI", "م.أول", "م.ثاني", "تاريخ الدخول", "رقم البيان", "نوع الحركة", "رسالة Risk"],
+    ...sample.rows.map((r) => [
+      r.xrayImageId, r.portName ?? "", r.stage ?? "", r.certScanStatus, r.biEnrichmentStatus,
+      r.xrayLevelOneResult, r.xrayLevelTwoResult, r.xrayEntryDate ?? "", r.declarationNumber ?? "",
+      r.movementType ?? "", r.riskMessage ?? "",
     ]),
   ];
 
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryData), "ملخص");
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(portAlloc), "تفصيل المنافذ");
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(stageData), "المراحل");
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sampleSheet), "العينة المسحوبة");
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(popSheet), "كامل المجتمع");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summary), "المسار — ملخص");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(received), "1 · الاستلام");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(processed), "2 · المعالجة");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(strata), "3 · الطبقات");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(stages), "3 · المستويات");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(drawn), "4 · العينة المسحوبة");
 
-  XLSX.writeFile(wb, `تقرير_العينة_${monthFolderName}.xlsx`);
+  XLSX.writeFile(wb, `تقرير_العينة_${input.monthFolderName}.xlsx`);
 }
 
+/** Percentage cell for the workbook: blank on empty denominator, never `0%`. */
+function pctCell(value: number | null): string | number {
+  return value === null ? "" : +value.toFixed(2);
+}
+
+// ─── Open / download helpers ──────────────────────────────────────────────────
+
 export function openSampleReport(input: SampleReportInput): void {
-  openOrDownload(buildSampleReport(input), `تقرير_العينة_${input.monthFolderName}.html`);
+  openOrDownload(buildSampleDocument(input), `تقرير_العينة_${input.monthFolderName}.html`);
+}
+
+export function openSampleDeck(input: SampleReportInput): void {
+  openOrDownload(buildSampleDeck(input), `عرض_العينة_${input.monthFolderName}.html`);
 }

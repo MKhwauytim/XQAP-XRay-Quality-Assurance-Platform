@@ -15,6 +15,7 @@ import type {
 import type { SampleMasterData } from "../sampling/sampleTypes";
 import type { DistributionCurrentData } from "../distribution/distributionTypes";
 import { loadOrDeriveDistributionCurrent } from "../distribution/distributionStorage";
+import { loadSampleMaster } from "../sampling/sampleStorage";
 import {
   getPopulationMonthDir,
   getPopulationRoot,
@@ -147,6 +148,13 @@ export type SaveMonthRunParams = {
     risk?: SourceFileMetadata | null;
     bi?: SourceFileMetadata | null;
   };
+  /**
+   * When false/undefined, saveMonthRun re-checks (under the manifest lock) that
+   * no sample was drawn for this month before overwriting the population; if one
+   * appeared it aborts with `sampleExists: true` so the caller can prompt for
+   * confirmation. Pass true once the user has explicitly confirmed the overwrite.
+   */
+  confirmedOverwrite?: boolean;
 };
 
 export type SaveMonthRunResult = {
@@ -155,6 +163,8 @@ export type SaveMonthRunResult = {
 } | {
   ok: false;
   error: string;
+  /** Set when the abort was caused by a sample that appeared since the pre-check (TOCTOU). */
+  sampleExists?: true;
 };
 
 async function ensureFolder(
@@ -167,11 +177,23 @@ async function ensureFolder(
 export async function saveMonthRun(
   params: SaveMonthRunParams
 ): Promise<SaveMonthRunResult> {
+  const monthFolderName = formatMonthFolderName(params.month, params.year);
   // Month lock gate — rejects with MonthClosedError when the month is closed.
-  await ensureMonthWritable(
-    params.directoryHandle,
-    formatMonthFolderName(params.month, params.year)
+  await ensureMonthWritable(params.directoryHandle, monthFolderName);
+
+  // Serialize the 5-file write against updateMonthStatus / closeMonth / reopenMonth
+  // and any concurrent same-browser save (shared `manifestLockKey`). The final
+  // manifest write inside safeWriteJson uses its own file-scoped key, distinct
+  // from this `:rmw` lock, so there is no self-deadlock.
+  return withResourceLock(manifestLockKey(monthFolderName), () =>
+    saveMonthRunLocked(params, monthFolderName)
   );
+}
+
+async function saveMonthRunLocked(
+  params: SaveMonthRunParams,
+  monthFolderName: string
+): Promise<SaveMonthRunResult> {
   try {
     const {
       directoryHandle,
@@ -185,10 +207,24 @@ export async function saveMonthRun(
       biRawRows,
       processedRows,
       certScanRows,
-      nonCertScanRows
+      nonCertScanRows,
+      confirmedOverwrite,
     } = params;
 
-    const monthFolderName = formatMonthFolderName(month, year);
+    // TOCTOU guard: re-check under the lock that no sample was drawn since the
+    // caller's pre-check. Overwriting the population while a sample exists would
+    // orphan that sample — abort and let the caller confirm.
+    if (!confirmedOverwrite) {
+      const existingSample = await loadSampleMaster(directoryHandle, monthFolderName);
+      if (existingSample) {
+        return {
+          ok: false,
+          error: `يوجد سحب عينة لهذا الشهر (${monthFolderName}) — تأكيد الاستبدال مطلوب قبل إعادة الحفظ.`,
+          sampleExists: true,
+        };
+      }
+    }
+
     const now = new Date().toISOString();
 
     // Ensure numbered population folder exists

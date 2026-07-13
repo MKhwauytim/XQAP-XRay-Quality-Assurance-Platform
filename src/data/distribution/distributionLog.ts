@@ -194,9 +194,11 @@ export function deriveCurrentDistribution(
     const row = rowMap.get(evt.xrayImageId);
     if (!row) continue;
 
-    let status: DistributionStatus = "pending";
+    // status/assignedTo are definitely assigned by every switch arm below
+    // (the default arm `continue`s when there is nothing to preserve).
+    let status: DistributionStatus;
+    let assignedTo: string;
     let replacedById: string | null = null;
-    let assignedTo = evt.assignedTo;
 
     const existing = entryMap.get(evt.xrayImageId);
     if (existing) {
@@ -207,6 +209,21 @@ export function deriveCurrentDistribution(
     // another "replaced" is an illegal transition (it would resurrect the row
     // and double-count it next to its replacement) — drop it and log.
     if (existing?.status === "replaced" && evt.eventType !== "replaced") {
+      droppedEventIds.add(evt.eventId);
+      droppedImageIds.add(evt.xrayImageId);
+      continue;
+    }
+
+    // Terminal-state guard (completed): a bare "assigned"/"reassigned" after
+    // completion would silently flip the row back to pending and discard the
+    // employee's submitted answer. Only an explicit "reopened" may return a
+    // completed row to pending; every other legal transition
+    // (completed/replacement-requested/replaced/reopen-requested/reopened) is
+    // still handled by the switch below. Drop the illegal event and report it.
+    if (
+      existing?.status === "completed" &&
+      (evt.eventType === "assigned" || evt.eventType === "reassigned")
+    ) {
       droppedEventIds.add(evt.eventId);
       droppedImageIds.add(evt.xrayImageId);
       continue;
@@ -249,6 +266,21 @@ export function deriveCurrentDistribution(
         status = "pending";
         assignedTo = existing?.assignedTo ?? evt.assignedTo;
         break;
+      default: {
+        // Unknown/newer event type or corrupt data. Never downgrade a live
+        // entry to "pending": preserve the existing row's
+        // status/assignment/replacedById and record the event as dropped, so a
+        // newer client's event types (or garbage) can't silently un-complete
+        // rows on an older client. With no existing entry there is nothing to
+        // preserve — skip creating one from an event we can't interpret.
+        droppedEventIds.add(evt.eventId);
+        droppedImageIds.add(evt.xrayImageId);
+        if (!existing) continue;
+        status = existing.status;
+        assignedTo = existing.assignedTo;
+        replacedById = existing.replacedById;
+        break;
+      }
     }
 
     entryMap.set(evt.xrayImageId, {
@@ -271,7 +303,7 @@ export function deriveCurrentDistribution(
     logError(
       "distribution:derive",
       new Error(
-        `Dropped ${droppedEventIds.size} illegal event(s) targeting replaced row(s): ${[...droppedImageIds].join(", ")}.`
+        `Dropped ${droppedEventIds.size} illegal/unknown event(s) targeting terminal (replaced/completed) or uninterpretable row(s): ${[...droppedImageIds].join(", ")}.`
       )
     );
   }
@@ -322,6 +354,10 @@ export function deriveCurrentDistribution(
 
   return {
     monthFolderName: log.monthFolderName,
+    // Stamped here (not by callers) so every derived snapshot carries the
+    // revision it came from — the mirror monotonic guard in syncSampleMirrors
+    // treats a missing revision as 0 and would freeze mirrors otherwise.
+    logRevision: log.revision,
     deriveVersion: DERIVE_VERSION,
     derivedAt: now,
     // Live (non-replaced) entries only. Invariant:

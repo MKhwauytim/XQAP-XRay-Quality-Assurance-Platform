@@ -118,7 +118,11 @@ function backupFolderName(now: Date, mode: BackupMode): string {
   const h = String(now.getHours()).padStart(2, "0");
   const m = String(now.getMinutes()).padStart(2, "0");
   const s = String(now.getSeconds()).padStart(2, "0");
-  return `${y}-${mo}-${d}T${h}-${m}-${s}-${mode}`;
+  // Two machines backing up within the same second would otherwise collide on
+  // an identical folder name (one silently overwriting the other's snapshot).
+  // A short random base36 suffix keeps concurrent backups distinct.
+  const suffix = Math.random().toString(36).slice(2, 6).padStart(4, "0");
+  return `${y}-${mo}-${d}T${h}-${m}-${s}-${mode}-${suffix}`;
 }
 
 function todayKey(date = new Date()): string {

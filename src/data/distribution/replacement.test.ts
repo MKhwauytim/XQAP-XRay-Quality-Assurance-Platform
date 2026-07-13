@@ -273,4 +273,33 @@ describe("executeReplacement", () => {
       expect((result as { error: string }).error).toContain("لا يمكن استبدال هذه العينة");
     }
   });
+
+  it("fails when the dead entry is already replaced (terminal state)", async () => {
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    const deadRow = makeRow("img-1", "المستوى الأول", "PortA");
+    const replacementRow = makeRow("img-2", "المستوى الأول", "PortA");
+
+    const deadEntry: DistributionEntry = {
+      xrayImageId: "img-1",
+      assignedTo: "expert1",
+      status: "replaced",
+      replacedById: "img-9",
+      row: deadRow,
+      lastEventAt: new Date().toISOString(),
+    };
+
+    const result = await executeReplacement({
+      directoryHandle: root,
+      monthFolderName: "5-May-2026",
+      deadEntry,
+      replacementRow,
+      reason: "retry",
+      eventBy: "supervisor1",
+    });
+
+    expect(result.ok).toBe(false);
+    // No distribution events must be written for a terminal dead row.
+    const log = await loadDistributionLog(root, "5-May-2026");
+    expect(log.events).toHaveLength(0);
+  });
 });

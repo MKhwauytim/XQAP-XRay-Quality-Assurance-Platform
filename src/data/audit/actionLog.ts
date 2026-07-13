@@ -136,7 +136,14 @@ export async function appendWorkspaceAction(
         await safeWriteJson(dir, ACTIONS_LOG_FILE, updated);
         const verify = await readLogFile(directoryHandle);
         if (verify.revision === nextRevision && verify._writeToken === writeToken) {
-          return { done: true, result: { ok: true as const } };
+          return {
+            done: true,
+            result: { ok: true as const },
+            verify: async () => {
+              const recheck = await readLogFile(directoryHandle);
+              return recheck.revision === nextRevision && recheck._writeToken === writeToken;
+            },
+          };
         }
         return { done: false };
       },

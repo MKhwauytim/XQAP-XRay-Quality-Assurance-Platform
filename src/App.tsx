@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, X, LayoutGrid } from "lucide-react";
 
 import { EmptyState } from "./components/StateViews/StateViews";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 
 import AuthGate from "./auth/AuthGate";
 import type { AuthSession } from "./auth/authTypes";
@@ -201,7 +202,6 @@ function AppContent({ session }: AppContentProps) {
       <Sidebar
         tabs={allowedTabs}
         activeTabId={activeTabId}
-        role={session.role}
         isCollapsed={isSidebarCollapsed}
         onTabSelect={setSelectedTabId}
         onToggleCollapse={toggleSidebar}
@@ -215,7 +215,12 @@ function AppContent({ session }: AppContentProps) {
               key={tab.id}
               style={tab.id !== activeTabId ? { display: "none" } : undefined}
             >
-              <tab.TabComponent />
+              {/* Per-tab boundary: a crash in one tab shows its own recovery UI
+                  without unmounting the shell or the other mounted tabs. The root
+                  boundary in main.tsx remains as the last-resort catch-all. */}
+              <ErrorBoundary>
+                <tab.TabComponent />
+              </ErrorBoundary>
             </div>
           ) : null
         )}

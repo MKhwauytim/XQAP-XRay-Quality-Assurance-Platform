@@ -1,5 +1,7 @@
 // Shared utility for building self-contained Arabic RTL HTML reports
 
+import { esc } from "./executive/primitives";
+
 export function buildReportHtml(title: string, body: string): string {
   return `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -50,12 +52,15 @@ ${body}
 </html>`;
 }
 
+/**
+ * Backwards-compatible alias for the single hardened escaping primitive
+ * (`esc`, audit C-08). Previously this had its own weaker implementation that
+ * did not encode `'`; it now delegates so every report builder escapes at the
+ * same strictness. `str` is typed `string` for callers, but `esc` also tolerates
+ * null/undefined.
+ */
 export function escHtml(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+  return esc(str);
 }
 
 export function openOrDownload(html: string, filename: string): void {

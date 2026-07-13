@@ -1,7 +1,7 @@
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import type { EmployeeStageAllocation, StageAliasMappings } from "../population/populationConfig";
 import type { ManagedLoginUser } from "../../auth/userManagement";
-import type { DistributionEvent } from "./distributionTypes";
+import type { DistributionEntry, DistributionEvent } from "./distributionTypes";
 import { getStageKey } from "../population/stageHelpers";
 import { hamiltonApportionment } from "../sampling/apportionment";
 import { createEventId, computeDaysRemainingForDeadline } from "./distributionLog";
@@ -31,10 +31,28 @@ export function calculateBulkAssignment(params: {
   month?: number;
   /** Full year (e.g., 2025) of the sample month. */
   year?: number;
-}): { events: DistributionEvent[]; errors: string[] } {
-  const { rows, allocations, employees, operatorUsername, stageMappings, month, year } = params;
+  /**
+   * Live distribution entries already present for this month. Any row that
+   * already has an entry is skipped so re-running bulk assignment is idempotent
+   * (never emits a second `assigned` event for an already-owned/completed row).
+   */
+  existingEntries?: DistributionEntry[];
+}): { events: DistributionEvent[]; errors: string[]; skipped: number } {
+  const { rows, allocations, employees, operatorUsername, stageMappings, month, year, existingEntries } = params;
   const events: DistributionEvent[] = [];
   const errors: string[] = [];
+
+  // Idempotency guard: exclude rows that already have a live distribution entry
+  // (assigned/pending, completed, replacement-requested, replaced). The
+  // assignable set is rows with no entry at all — re-running only distributes
+  // the still-unassigned remainder instead of duplicating every assignment.
+  const ownedIds = new Set((existingEntries ?? []).map((e) => e.xrayImageId));
+  const rowsBeforeFilter = rows.length;
+  const assignableRows = ownedIds.size > 0
+    ? rows.filter((r) => !ownedIds.has(r.xrayImageId))
+    : rows;
+  const skipped = rowsBeforeFilter - assignableRows.length;
+
   const assignableEmployees = employees.filter(isAssignableSampleRole);
   const assignableUsernames = new Set(assignableEmployees.map((employee) => employee.username));
 
@@ -43,7 +61,7 @@ export function calculateBulkAssignment(params: {
   ];
 
   for (const stageKey of stageKeys) {
-    const stageRows = rows.filter((r) => getStageKey(r.stage, stageMappings) === stageKey);
+    const stageRows = assignableRows.filter((r) => getStageKey(r.stage, stageMappings) === stageKey);
     if (stageRows.length === 0) continue;
 
     const stageAllocs = allocations.filter(
@@ -205,5 +223,5 @@ export function calculateBulkAssignment(params: {
     }
   }
 
-  return { events, errors };
+  return { events, errors, skipped };
 }

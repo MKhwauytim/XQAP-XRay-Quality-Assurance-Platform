@@ -1,6 +1,5 @@
 import { useEffect, useState, type SyntheticEvent } from "react";
 import { ChevronDown, PanelRightClose } from "lucide-react";
-import type { AuthRole } from "../../auth/authTypes";
 import type { SidebarTabDefinition } from "./Tabs/tabTypes";
 import { useLabels } from "../../data/labels/useLabels";
 import { ZATCA_LOGO_URL } from "../../branding/organization";
@@ -15,7 +14,6 @@ function hideBrokenLogo(event: SyntheticEvent<HTMLImageElement>): void {
 type SidebarProps = {
   tabs: SidebarTabDefinition[];
   activeTabId: string;
-  role: AuthRole;
   isCollapsed: boolean;
   onTabSelect: (tabId: string) => void;
   onToggleCollapse: () => void;
@@ -34,7 +32,6 @@ function CollapseIcon({ isCollapsed }: { isCollapsed: boolean }) {
 export default function Sidebar({
   tabs,
   activeTabId,
-  role,
   isCollapsed,
   onTabSelect,
   onToggleCollapse
@@ -93,9 +90,10 @@ export default function Sidebar({
         {!isCollapsed && <div className="sidebar-nav-heading">إدارة النظام</div>}
         {tabs.map((tab) => {
           const isActive = activeTabId === tab.id;
-          const visibleSubTabs = (tab.subTabs ?? []).filter(
-            (sub) => !sub.allowedRoles || sub.allowedRoles.includes(role)
-          );
+          // Sub-tab visibility is decided solely by the permission matrix, applied
+          // upstream in App.tsx (`allowedSubTabs`). No second hardcoded role filter
+          // here — that produced dead matrix cells (P1).
+          const visibleSubTabs = tab.subTabs ?? [];
           const hasChildren = visibleSubTabs.length > 0;
 
           return (

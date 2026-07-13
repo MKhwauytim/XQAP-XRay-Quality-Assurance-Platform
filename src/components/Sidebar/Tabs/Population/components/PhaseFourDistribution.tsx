@@ -128,7 +128,7 @@ export default function PhaseFourDistribution({
 
   const previewData = useMemo(() => {
     if (!sampleDrawResult) return null;
-    const { events, errors } = calculateBulkAssignment({
+    const { events, errors, skipped } = calculateBulkAssignment({
       rows: sampleRows,
       allocations: activeAllocations,
       employees: getManagedLoginUsers(),
@@ -136,6 +136,7 @@ export default function PhaseFourDistribution({
       stageMappings: config.stageMappings,
       month: saveMonth,
       year: saveYear,
+      existingEntries: distributionCurrent?.entries,
     });
 
     const summaryMap: Record<string, { cert: number; normal: number; total: number }> = {};
@@ -153,8 +154,8 @@ export default function PhaseFourDistribution({
       }
     }
 
-    return { summaryMap, errors };
-  }, [sampleDrawResult, sampleRows, activeAllocations, employees, operatorUsername, config.stageMappings, saveMonth, saveYear]);
+    return { summaryMap, errors, skipped };
+  }, [sampleDrawResult, sampleRows, activeAllocations, employees, operatorUsername, config.stageMappings, saveMonth, saveYear, distributionCurrent]);
 
   const entryMap = useMemo(
     () => new Map((distributionCurrent?.entries ?? []).map((e) => [e.xrayImageId, e])),
@@ -219,7 +220,7 @@ export default function PhaseFourDistribution({
 
   const handleRunBulkAssignment = async () => {
     setBulkError("");
-    const { events, errors } = calculateBulkAssignment({
+    const { events, errors, skipped } = calculateBulkAssignment({
       rows: sampleRows,
       allocations: activeAllocations,
       employees: getManagedLoginUsers(),
@@ -227,10 +228,25 @@ export default function PhaseFourDistribution({
       stageMappings: config.stageMappings,
       month: saveMonth,
       year: saveYear,
+      existingEntries: distributionCurrent?.entries,
     });
 
+    const messages: string[] = [];
     if (errors.length > 0) {
-      setBulkError(`تحذير: ${errors.join(" | ")} — الصفوف المتأثرة ستبقى غير معينة ويمكن تعيينها يدوياً.`);
+      messages.push(`تحذير: ${errors.join(" | ")} — الصفوف المتأثرة ستبقى غير معينة ويمكن تعيينها يدوياً.`);
+    }
+    if (skipped > 0) {
+      messages.push(`تم تخطي ${formatNumber(skipped)} صفاً معيناً مسبقاً (لن يُعاد تعيينها).`);
+    }
+    if (messages.length > 0) {
+      setBulkError(messages.join(" "));
+    }
+
+    if (events.length === 0) {
+      if (skipped > 0 && errors.length === 0) {
+        setBulkError(`جميع الصفوف (${formatNumber(skipped)}) معينة مسبقاً — لا يوجد ما يُوزّع.`);
+      }
+      return;
     }
 
     await onApplyBulkAssignment(events);
@@ -411,6 +427,12 @@ export default function PhaseFourDistribution({
                   );
                 })}
               </div>
+
+              {previewData.skipped > 0 && (
+                <div className="dist-skip-note" role="status" style={{ marginTop: 8 }}>
+                  سيتم تخطي {formatNumber(previewData.skipped)} صفاً معيناً مسبقاً — التوزيع يشمل الصفوف غير المعينة فقط.
+                </div>
+              )}
 
               {previewData.errors.length > 0 && (
                 <div className="dist-err-block" role="alert">

@@ -13,15 +13,14 @@
 //   • every legend/axis label routes through escText() — no new unescaped interpolation
 
 import { FONT_FAMILY, TYPE, clamp, clampPct, cssVar, seriesColor } from "./tokens";
+import { esc } from "../primitives";
 
 // ── shared helpers ──────────────────────────────────────────────────────────
 
+/** Delegates to the single hardened escaping primitive (audit C-08). Kept as a
+ *  local name so the chart call sites read unchanged. */
 function escText(s: string | null | undefined): string {
-  return (s ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+  return esc(s);
 }
 
 /** Round to 2dp and strip trailing zeros — keeps path strings compact. */

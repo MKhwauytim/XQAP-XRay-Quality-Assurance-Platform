@@ -122,7 +122,18 @@ export async function appendDecisionEvent(
         await safeWriteJson(appDir, fileName, updated);
         const verify = await loadSupervisorDecisions(directoryHandle, monthFolderName, supervisorUsername);
         if (verify.revision === nextRevision && verify._writeToken === writeToken) {
-          return { done: true, result: { ok: true as const } };
+          return {
+            done: true,
+            result: { ok: true as const },
+            verify: async () => {
+              const recheck = await loadSupervisorDecisions(
+                directoryHandle,
+                monthFolderName,
+                supervisorUsername
+              );
+              return recheck.revision === nextRevision && recheck._writeToken === writeToken;
+            },
+          };
         }
         return { done: false };
       },
@@ -161,8 +172,13 @@ export function mergeDecisionHistory(
   return events.sort((a, b) => a.reviewedAt.localeCompare(b.reviewedAt));
 }
 
-/** The request's current effective decision — the most recent event, or undefined
- *  if nobody has reviewed it yet. */
+/** The request's effective decision — FIRST-wins: the EARLIEST decision (by
+ *  reviewedAt) is authoritative, or undefined if nobody has reviewed it yet.
+ *  Decisions live in per-supervisor files, so two reviewers can each write a
+ *  decision before seeing the other's. Latest-wins would make the outcome depend
+ *  on clock skew / write ordering; first-wins is deterministic — whoever decided
+ *  first owns the request, and a later reviewer's write is surfaced as a conflict
+ *  (see approveReferral). `history` is pre-sorted oldest→newest by mergeDecisionHistory. */
 export function effectiveDecision(history: DecisionEvent[]): DecisionEvent | undefined {
-  return history.length > 0 ? history[history.length - 1] : undefined;
+  return history.length > 0 ? history[0] : undefined;
 }

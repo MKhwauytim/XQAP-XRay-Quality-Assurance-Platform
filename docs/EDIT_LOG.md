@@ -4,6 +4,2120 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v46.3 — 2026-07-14 — C-12 (safeWrite lock-key collision) accepted, not fixed
+
+`safeWriteJson`/`restoreJson` lock on `` `${dir.name}/${fileName}` `` (`src/data/storage/safeWrite.ts`). `dir.name` is the leaf folder name, so e.g. two months' `1-main/sample.master.json` share one lock key. Web Locks are advisory and origin-scoped: a collision only falsely serializes unrelated writes — it cannot corrupt data. Fixing it requires threading full workspace paths through every storage caller; deferred as not worth the churn. Documented here so the audit trail shows a decision, not an omission.
+
+
+
+## v46.2 — 2026-07-13 — Enable TypeScript strict mode (B-09)
+
+CLAUDE.md documents strict mode but neither tsconfig set it. A dry-run with `strict: true` produced **zero** errors in both projects (the code was already written to strict discipline), so enforcement is now on.
+
+**File:** `tsconfig.app.json`
+
+**Before:**
+```json
+    "types": ["vite/client"],
+    "skipLibCheck": true,
+```
+
+**After:**
+```json
+    "types": ["vite/client"],
+    "skipLibCheck": true,
+    "strict": true,
+```
+
+**File:** `tsconfig.node.json`
+
+**Before:**
+```json
+    "types": ["node"],
+    "skipLibCheck": true,
+```
+
+**After:**
+```json
+    "types": ["node"],
+    "skipLibCheck": true,
+    "strict": true,
+```
+
+
+
+## v46.1 — 2026-07-14 — Lint: remove useless initializers in the distribution fold
+
+`no-useless-assignment` at the fold's loop head — `status`/`assignedTo` initializers were overwritten on every reachable path (the default arm `continue`s when nothing exists to preserve).
+
+**File:** `src/data/distribution/distributionLog.ts`
+
+**Before:**
+```ts
+    let status: DistributionStatus = "pending";
+    let replacedById: string | null = null;
+    let assignedTo = evt.assignedTo;
+```
+
+**After:**
+```ts
+    // status/assignedTo are definitely assigned by every switch arm below
+    // (the default arm `continue`s when there is nothing to preserve).
+    let status: DistributionStatus;
+    let assignedTo: string;
+    let replacedById: string | null = null;
+```
+
+
+## v46 — 2026-07-13 — deriveCurrentDistribution stamps logRevision itself (P1 fixup)
+
+The Wave 1 mirror monotonic guard (`syncSampleMirrors`) reads `current.logRevision ?? 0`. Callers that passed a directly-derived snapshot (without the manual `logRevision: log.revision` stamp) synced mirrors at revision 0, and the guard (`existing >= incoming` → skip) then froze the mirror after the first write. Stamp the revision inside the derive so every snapshot carries it.
+
+**File:** `src/data/distribution/distributionLog.ts`
+
+**Before:**
+```ts
+  return {
+    monthFolderName: log.monthFolderName,
+    deriveVersion: DERIVE_VERSION,
+    derivedAt: now,
+```
+
+**After:**
+```ts
+  return {
+    monthFolderName: log.monthFolderName,
+    // Stamped here (not by callers) so every derived snapshot carries the
+    // revision it came from — the mirror monotonic guard in syncSampleMirrors
+    // treats a missing revision as 0 and would freeze mirrors otherwise.
+    logRevision: log.revision,
+    deriveVersion: DERIVE_VERSION,
+    derivedAt: now,
+```
+
+## v45.8 — 2026-07-13 — Wave 3 overview: report system rework (3-output model)
+
+Reworks the SAMPLE, DISTRIBUTION and MANAGEMENT reports to the same 3-output model
+as the reference EXECUTIVE report (Document / Deck / Excel), built on the executive
+infrastructure (theme, document + deck primitives, charts, workbook AOA pattern).
+Also lands audit findings C-07 (XSS tests for new builders), C-08 (single hardened
+escaping primitive) and C-10 (locale digit fix). The executive report is unchanged
+functionally.
+
+---
+
+
+## v45.7 — 2026-07-13 — C-08: single hardened HTML-escaping primitive (encode & < > " ')
+
+**File:** `src/data/reporting/executive/primitives.ts`
+
+**Before:**
+```ts
+export function esc(s: string | null | undefined): string {
+  return (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+```
+
+**After:**
+```ts
+export function esc(s: string | null | undefined): string {
+  return (s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+```
+
+**File:** `src/data/reporting/htmlReport.ts`
+
+**Before:**
+```ts
+export function escHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+```
+
+**After:**
+```ts
+import { esc } from "./executive/primitives";
+// …
+export function escHtml(str: string): string {
+  return esc(str);
+}
+```
+
+**File:** `src/data/reporting/executive/ui/charts.ts`
+
+**Before:**
+```ts
+function escText(s: string | null | undefined): string {
+  return (s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+```
+
+**After:**
+```ts
+import { esc } from "../primitives";
+// …
+function escText(s: string | null | undefined): string {
+  return esc(s);
+}
+```
+
+---
+
+
+## v45.6 — 2026-07-13 — C-10: Reports dashboard uses app-standard Latin digits
+
+**File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
+
+**Before:**
+```tsx
+function fmtCount(value: number | null | undefined): string {
+  return value != null && Number.isFinite(value) ? value.toLocaleString("ar-SA") : "—";
+}
+// …
+  const fmtNum = (n: number | null | undefined) =>
+    n != null ? n.toLocaleString("ar-SA") : "—";
+```
+
+**After:**
+```tsx
+function fmtCount(value: number | null | undefined): string {
+  return value != null && Number.isFinite(value) ? value.toLocaleString("ar-SA-u-nu-latn") : "—";
+}
+// …
+  const fmtNum = (n: number | null | undefined) =>
+    n != null ? n.toLocaleString("ar-SA-u-nu-latn") : "—";
+```
+
+---
+
+
+## v45.5 — 2026-07-13 — Shared report chrome (parameterised doc/deck viewers)
+
+**File:** `src/data/reporting/shared/reportChrome.ts`
+
+**Before:**
+```
+(new file)
+```
+
+**After:**
+```ts
+import { EXEC_CSS } from "../executive/theme";
+import { DECK_CSS } from "../executive/deck/deckTheme";
+import { esc } from "../executive/primitives";
+import { icon } from "../executive/ui/icons";
+
+export type ChromeOpts = { slides: string; docTitle: string; brandTitle: string; brandSub: string; iconName?: string };
+
+/** A4-portrait document viewer: sidebar TOC + print button + content column. */
+export function buildDocViewer(opts: ChromeOpts): string { /* reuses EXEC_CSS + VIEWER_JS */ }
+/** 16:9 landscape deck viewer: sticky toolbar (theme toggle + print) + slides. */
+export function buildDeckViewer(opts: ChromeOpts): string { /* reuses DECK_CSS */ }
+export function formatMonthLabel(folderName: string): string { /* "5-may-2026" → "مايو 2026" */ }
+export function formatIssueDate(d = new Date()): string { /* "DD / MM / YYYY" */ }
+```
+
+---
+
+
+## v45.4 — 2026-07-13 — SAMPLE report → 3-output lineage model (Document / Deck / Excel)
+
+Replaces the legacy flat HTML (`buildSampleReport`) + flat xlsx with a lineage model
+(`computeSampleLineage`) and three renderers telling the received → processed →
+stratified → drawn story. Excel is now 6 lineage sheets.
+
+**File:** `src/data/reporting/sampleReport.ts`
+
+**Before:**
+```ts
+import { escHtml, formatNum, formatDate, openOrDownload } from "./htmlReport";
+// …
+function buildSampleReport(input: SampleReportInput): string { /* single flat HTML string + inline CSS */ }
+export function buildSampleXlsx(input: SampleReportInput): void { /* 5 flat sheets */ }
+export function openSampleReport(input: SampleReportInput): void {
+  openOrDownload(buildSampleReport(input), `تقرير_العينة_${input.monthFolderName}.html`);
+}
+```
+
+**After:**
+```ts
+export function computeSampleLineage(input: SampleReportInput): SampleLineage { /* received→processed→strata→drawn */ }
+export function buildSampleDocument(input: SampleReportInput): string { /* A4 pages via document primitives + buildDocViewer */ }
+export function buildSampleDeck(input: SampleReportInput): string { /* 16:9 slides via deck primitives + buildDeckViewer */ }
+export function buildSampleXlsx(input: SampleReportInput): void { /* 6 sheets: summary → received → processed → strata → stages → drawn */ }
+export function openSampleReport(input: SampleReportInput): void { openOrDownload(buildSampleDocument(input), …); }
+export function openSampleDeck(input: SampleReportInput): void { openOrDownload(buildSampleDeck(input), …); }
+```
+
+---
+
+
+## v45.3 — 2026-07-13 — DISTRIBUTION report → 3-output model (Document / Deck / Excel)
+
+Replaces the legacy flat HTML (`buildDistributionReport`) + flat xlsx with
+`computeDistributionModel` and three renderers: drawn sample → assignments →
+per-employee (daily quota) → status → replacement highlights. Excel is 4 sheets.
+
+**File:** `src/data/reporting/distributionReport.ts`
+
+**Before:**
+```ts
+import { buildReportHtml, escHtml, formatDate, formatNum } from "./htmlReport";
+export function buildDistributionReport(data, monthFolderName): string { /* flat body via buildReportHtml */ }
+export function buildDistributionXlsx(data, monthFolderName): void { /* 3 flat sheets */ }
+```
+
+**After:**
+```ts
+export function computeDistributionModel(data, monthFolderName, employeeDisplayNames = {}): DistributionModel { … }
+export function buildDistributionDocument(data, monthFolderName, employeeDisplayNames = {}): string { /* A4 doc */ }
+export function buildDistributionDeck(data, monthFolderName, employeeDisplayNames = {}): string { /* deck */ }
+export function buildDistributionXlsx(data, monthFolderName, employeeDisplayNames = {}): void { /* baseline → assignments → per-employee → status/events */ }
+export function openDistributionDocument(…): void { … }
+export function openDistributionDeck(…): void { … }
+```
+
+---
+
+
+## v45.2 — 2026-07-13 — MANAGEMENT report: add Deck + Excel outputs
+
+Keeps the existing management Document (`openManagementReport`) unchanged; adds the
+two missing outputs, both driven by the same `ReportModel`.
+
+**File:** `src/data/reporting/management/managementDeck.ts`
+
+**Before:**
+```
+(new file)
+```
+
+**After:**
+```ts
+export function buildManagementDeck(input: ExecutiveReportInput, employeeDisplayNames = {}): string {
+  const model = buildReportModel(input, employeeDisplayNames);
+  return buildDeckViewer({ slides: managementDeckSlides(model), … }); // 5 slides: KPIs, funnel, ports, reviewers, actions
+}
+export function openManagementDeck(input, employeeDisplayNames = {}): void { … }
+```
+
+**File:** `src/data/reporting/management/managementWorkbook.ts`
+
+**Before:**
+```
+(new file)
+```
+
+**After:**
+```ts
+export function buildManagementWorkbookObject(input: ExecutiveReportInput, employeeDisplayNames = {}): XLSX.WorkBook {
+  const model = buildReportModel(input, employeeDisplayNames);
+  // 5 sheets: summary → population/sample/studied funnel → per-port → per-reviewer → status/actions
+}
+export function buildManagementWorkbook(input, employeeDisplayNames = {}): void { XLSX.writeFile(…); }
+```
+
+---
+
+
+## v45.1 — 2026-07-13 — Reports tab: all four cards offer Document / Deck / Excel
+
+**File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
+
+**Before:**
+```tsx
+type ReportType = "sample" | "sample-xlsx" | "sample-print" | "distribution" | "distribution-xlsx" | "distribution-print" | "executive" | "executive-xlsx" | "executive-deck" | "management";
+type ReportBaseType = "sample" | "distribution" | "executive";
+type ReportFormat = "html" | "xlsx" | "print" | "deck" | "document";
+// … formats default: { executive: "document", sample: "html", distribution: "html" }
+// … distribution used openOrDownload(buildDistributionReport(...)); management card had a single bespoke button
+```
+
+**After:**
+```tsx
+type ReportType =
+  | "sample" | "sample-xlsx" | "sample-deck"
+  | "distribution" | "distribution-xlsx" | "distribution-deck"
+  | "executive" | "executive-xlsx" | "executive-deck"
+  | "management" | "management-xlsx" | "management-deck";
+type ReportBaseType = "sample" | "distribution" | "executive" | "management";
+type ReportFormat = "xlsx" | "deck" | "document";
+// formats default all "document"; selectedReportType uniform (document→base, deck→`${base}-deck`, xlsx→`${base}-xlsx`)
+// renderExportControls availableFormats = ["deck","xlsx","document"] for every card; management card now uses renderExportControls
+// generate() switch extended for sample-deck / distribution-deck / management-(xlsx|deck); distribution + management pass display names
+```
+
+---
+
+
+## v45 — 2026-07-13 — C-07 + data-correctness tests for the new builders
+
+**File:** `src/data/reporting/reportTestFixtures.ts` — **(new file)** — `makeRow` / `makeManifest` / `makeSampleMaster` / `makeDistribution` factories (pure data, no test-framework imports).
+
+**File:** `src/data/reporting/sampleReport.test.ts` — **(new file)** — `computeSampleLineage` counts/sorting/coverage + renderer smoke (7 assertions across 6 tests).
+
+**File:** `src/data/reporting/distributionReport.test.ts` — **(new file)** — `computeDistributionModel` per-employee/status/highlights + renderer smoke (5 tests).
+
+**File:** `src/data/reporting/management/managementWorkbook.test.ts` — **(new file)** — `buildManagementWorkbookObject` sheet set + funnel/summary cells (3 tests).
+
+**File:** `src/data/reporting/reportBuilders.xss.test.ts` — **(new file)** — XSS regression for sample (doc+deck), distribution (doc+deck), management deck, using `xssPayloads` corpus + `findLiveInjection` (5 tests).
+
+**After (representative — reportBuilders.xss.test.ts):**
+```ts
+function assertSafe(html: string): void {
+  expect(findLiveInjection(html)).toBeNull();
+  expect(html).toContain(XSS_MARKER);
+  expect(html).toContain("&lt;script&gt;");
+}
+describe("sample builders — XSS escaping", () => {
+  it("document escapes injected port names, ids, seed and drawnBy", () => { assertSafe(buildSampleDocument(maliciousSampleInput())); });
+  it("deck escapes injected port names and the raw-HTML title slide (seed)", () => { assertSafe(buildSampleDeck(maliciousSampleInput())); });
+});
+```
+
+## v44.7 — 2026-07-13 — Permission matrix single-authority + dead-cell locking (P1)
+
+**File:** `src/components/Sidebar/Sidebar.tsx`
+
+**Before:**
+```tsx
+const visibleSubTabs = (tab.subTabs ?? []).filter(
+  (sub) => !sub.allowedRoles || sub.allowedRoles.includes(role)
+);
+```
+
+**After:**
+```tsx
+// Sub-tab visibility is decided solely by the permission matrix, applied
+// upstream in App.tsx (`allowedSubTabs`). No second hardcoded role filter
+// here — that produced dead matrix cells (P1).
+const visibleSubTabs = tab.subTabs ?? [];
+```
+(Also removed the now-unused `role` prop from `SidebarProps` / the component signature and the `AuthRole` import; updated the `<Sidebar>` call in `App.tsx` to drop `role={session.role}`.)
+
+**File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
+
+**Before:**
+```tsx
+<TabGuard tabId="reports/analytics">
+```
+
+**After:**
+```tsx
+<TabGuard tabId="reports/kpi">
+```
+
+**File:** `src/auth/userManagement.ts`
+
+**Before:**
+```ts
+{ id: "reports/analytics",       label: "لوحة التحليلات التنفيذية", parentId: "reports" },
+...
+{ role: "manager",    tabId: "settings",           access: "edit" },
+...
+// Analytics dashboard (reports/analytics) — defaults to manager + admin only
+{ role: "guest",      tabId: "reports/analytics",       access: "none" },
+{ role: "employee",   tabId: "reports/analytics",       access: "none" },
+{ role: "supervisor", tabId: "reports/analytics",       access: "none" },
+{ role: "manager",    tabId: "reports/analytics",       access: "view" },
+{ role: "admin",      tabId: "reports/analytics",       access: "edit" },
+```
+
+**After:**
+```ts
+// (reports/analytics MANAGED_TABS row removed — merged into reports/kpi)
+// New TAB_ROLE_CEILINGS export added next to MANAGED_TABS (see file).
+{ role: "manager",    tabId: "settings",           access: "none" },
+// (reports/analytics default block removed entirely)
+```
+
+**File:** `src/components/Sidebar/Tabs/UserManagement/index.tsx`
+
+**Before:**
+```tsx
+const locked = false;
+...
+{renderPermCell(role, tab.id, locked)}
+...
+{renderPermCell(role, sub.id, false)}
+...
+: locked ? "إدارة المستخدمين مقصورة على مسؤول النظام"
+```
+
+**After:**
+```tsx
+// module-level helper isCeilingLocked(role, topLevelTabId) using TAB_ROLE_CEILINGS
+{renderPermCell(role, tab.id, isCeilingLocked(role.id, tab.id))}
+...
+{renderPermCell(role, sub.id, isCeilingLocked(role.id, tab.id))}
+...
+: locked ? "هذه الصفحة مقيدة بالكود لهذه الأدوار"
+```
+
+---
+
+
+## v44.6 — 2026-07-13 — KPI renderer uses executive rows, shared aggregate (P0)
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/renderers/KpiRenderer.tsx`
+
+**Before:**
+```tsx
+function usePopulationData() {
+  ...
+  const pop = await loadMonthPopulationFinal(directoryHandle!, latest.folderName);
+  if (!cancelled) setRows(pop ? pop.rows : null);
+}
+// computeResult had private switch cases for count/sum/avg/min/max
+```
+
+**After:**
+```tsx
+function useExecutiveRows() {
+  ...
+  const execRows = buildExecutiveReportRows({ monthFolderName, populationRows, sample, distribution, employeeFiles, template: null, config: DEFAULT_EXEC_CONFIG });
+  setRows(execRows.map((r) => r as Record<string, unknown>));
+}
+// computeResult now delegates to aggregate(config.agg, vals) (keeps breakdown + distinctCount-tags behavior)
+```
+
+---
+
+
+## v44.5 — 2026-07-13 — Data Accuracy Report key matches real processing (P1)
+
+**File:** `src/components/Sidebar/Tabs/Population/processing/populationProcessor.ts`
+
+**Before:**
+```ts
+function normalizeXrayId(...) {...}
+function makeBiMatchKey(...) {...}
+```
+
+**After:**
+```ts
+export function normalizeXrayId(...) {...}
+export function makeBiMatchKey(...) {...}
+```
+
+**File:** `src/components/Sidebar/Tabs/Population/components/DataAccuracyReport.tsx`
+
+**Before:**
+```ts
+if (b.xrayImageId) biMap.set(b.xrayImageId.trim(), b);
+...
+const b = biMap.get(r.xrayImageId.trim());
+...
+const riskIds = new Set(riskRows.map(r => r.xrayImageId?.trim()).filter(Boolean));
+if (b.xrayImageId && !riskIds.has(b.xrayImageId.trim())) onlyInBi++;
+```
+
+**After:**
+```ts
+if (b.xrayImageId) biMap.set(makeBiMatchKey(b.xrayImageId, b.portName), b);
+...
+const b = biMap.get(makeBiMatchKey(r.xrayImageId, r.portName));
+...
+const riskKeys = new Set(riskRows.filter(r => r.xrayImageId).map(r => makeBiMatchKey(r.xrayImageId, r.portName)));
+if (b.xrayImageId && !riskKeys.has(makeBiMatchKey(b.xrayImageId, b.portName))) onlyInBi++;
+```
+
+---
+
+
+## v44.4 — 2026-07-13 — CSV formula-injection mitigation (P2)
+
+**File:** `src/data/powerbiExport/csvSerializer.ts`
+
+**Before:**
+```ts
+const str = String(value);
+if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+```
+
+**After:**
+```ts
+if (typeof value === "number") return String(value);
+let str = String(value);
+if (FORMULA_INJECTION_START.test(str)) { str = `'${str}`; } // /^[=+\-@\t\r]/
+if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+```
+(Extended `csvSerializer.test.ts` with injection payload cases.)
+
+---
+
+
+## v44.3 — 2026-07-13 — Argon2id rehash persisted to disk (P2)
+
+**File:** `src/auth/AuthGate.tsx`
+
+**Before:**
+```tsx
+const upgraded = await createPasswordHash(password);
+persistUserPasswordHash(user.id, upgraded);
+```
+
+**After:**
+```tsx
+const upgraded = await createPasswordHash(password);
+persistUserPasswordHash(user.id, upgraded);
+if (directoryHandle) {
+  void syncUserManagementToDisk(directoryHandle, readUserManagementState(), user.username)
+    .catch(logRejection("authGate.persistRehash"));
+}
+```
+
+---
+
+
+## v44.2 — 2026-07-13 — Per-tab error boundaries (P2)
+
+**File:** `src/App.tsx`
+
+**Before:**
+```tsx
+<div key={tab.id} style={...}>
+  <tab.TabComponent />
+</div>
+```
+
+**After:**
+```tsx
+<div key={tab.id} style={...}>
+  <ErrorBoundary>
+    <tab.TabComponent />
+  </ErrorBoundary>
+</div>
+```
+
+---
+
+
+## v44.1 — 2026-07-13 — Session expiry + forced-logout messaging (P2)
+
+**File:** `src/auth/AuthGate.tsx`
+
+**Before:**
+```tsx
+const heartbeatId = window.setInterval(recordAuthActivityHeartbeat, 60_000);
+// forced logout on role change: clearSession(); return null; (no notice)
+```
+
+**After:**
+```tsx
+const [logoutNotice, setLogoutNotice] = useState("");
+const heartbeatId = window.setInterval(() => {
+  recordAuthActivityHeartbeat();
+  if (readRealSession() === null) { setSession(null); setLogoutNotice("انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً"); }
+}, 60_000);
+// forced logout: queueMicrotask(() => setLogoutNotice("تم تحديث صلاحياتك، يرجى تسجيل الدخول مجدداً"));
+// Banner rendered on the login form; cleared in applySession() and logout().
+```
+
+---
+
+
+## v44 — 2026-07-13 — Feedback trigger for non-admin roles (P2)
+
+**File:** `src/components/FeedbackWidget/FeedbackWidget.tsx`
+
+**Before:**
+```tsx
+return (
+  <>
+    {/* Panel */}
+    {open && ( ... )}
+```
+
+**After:**
+```tsx
+const showFloatingTrigger = Boolean(session) && session?.role !== "admin";
+return (
+  <>
+    {showFloatingTrigger && !open && (
+      <button className="fb-fab" aria-label="التواصل والاقتراحات"
+        onClick={() => window.dispatchEvent(new CustomEvent("feedback:toggle"))}>
+        <MessageCircle size={22} aria-hidden />
+      </button>
+    )}
+    {open && ( ... )}
+```
+(Added `.fb-fab` styles to `FeedbackWidget.css`.)
+
+## v43.16 — 2026-07-13 — Wave 1 overview: data-safety batch (reconstructed log)
+
+The v43.x entries below reconstruct edit-log entries for the "Wave 1 — data safety" batch
+(`docs/audit/MASTER_AUDIT_2026-07-13.md`) that were applied without being
+recorded at edit time. Reconstructed 2026-07-14 directly from `git diff` (unstaged, vs HEAD)
+on the files listed in the audit's Wave 1 scope. Each v43.x section corresponds to one
+audit finding ID.
+
+---
+
+
+## v43.15 — 2026-07-13 — A-01: casLoop compare-before-write hardening (core + terminal-error classification)
+
+The CAS loop only detected a conflict if a competing write landed *between* its
+own write and its in-attempt read-back. A slightly-later competing write (A
+reads rev5 → B reads rev5 → A writes+verifies OK → B writes+verifies OK)
+silently clobbered the earlier writer with no error. `casLoop` now accepts an
+optional `verify` callback per attempt: after a successful in-attempt
+verification it sleeps a jittered 80–180ms delay and re-reads, retrying the
+whole attempt if a later write won the race. Separately, terminal folder-access
+errors (`NotAllowedError`/`SecurityError`/`NoModificationAllowedError` or a
+permission-flavoured message) are now detected and surfaced immediately as a
+distinct Arabic message instead of being retried and reported as a generic
+write conflict (B-10).
+
+**File:** `src/data/storage/casLoop.ts`
+
+**Before:**
+```ts
+export async function casLoop<T>(
+  fn: (writeToken: string) => Promise<{ done: true; result: T } | { done: false }>,
+  options?: {
+    maxRetries?: number;
+    baseDelayMs?: number;
+    conflictError?: string;
+  }
+): Promise<T | { ok: false; error: string }> {
+  const max = options?.maxRetries ?? DEFAULT_MAX_RETRIES;
+  const baseDelay = options?.baseDelayMs ?? DEFAULT_BASE_DELAY_MS;
+  let lastError: string =
+    options?.conflictError ?? "تعارض في الكتابة: فشلت جميع المحاولات.";
+
+  for (let attempt = 0; attempt < max; attempt++) {
+    const writeToken = crypto.randomUUID();
+    try {
+      const r = await fn(writeToken);
+      if (r.done) return r.result;
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : "Unknown error";
+    }
+    if (attempt < max - 1) {
+      await sleep(withJitter(baseDelay * (attempt + 1)));
+    }
+  }
+
+  return { ok: false, error: lastError };
+}
+```
+
+**After:**
+```ts
+const VERIFY_MIN_DELAY_MS = 80;
+const VERIFY_MAX_DELAY_MS = 180;
+const PERMISSION_LOST_ERROR =
+  "فقد الوصول إلى مجلد العمل — أعد الاتصال بمساحة العمل.";
+
+function verifyDelayMs(): number {
+  return VERIFY_MIN_DELAY_MS + Math.random() * (VERIFY_MAX_DELAY_MS - VERIFY_MIN_DELAY_MS);
+}
+
+function isPermissionLostError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const name = (error as { name?: string }).name;
+  if (name === "NotAllowedError" || name === "SecurityError" || name === "NoModificationAllowedError") {
+    return true;
+  }
+  const message = (error as { message?: string }).message;
+  return typeof message === "string" && /permission|not allowed|no modification allowed/i.test(message);
+}
+
+export type CasAttemptResult<T> =
+  | { done: true; result: T; verify?: () => Promise<boolean> }
+  | { done: false };
+
+export async function casLoop<T>(
+  fn: (writeToken: string) => Promise<CasAttemptResult<T>>,
+  options?: { maxRetries?: number; baseDelayMs?: number; conflictError?: string }
+): Promise<T | { ok: false; error: string }> {
+  // ...
+  for (let attempt = 0; attempt < max; attempt++) {
+    const writeToken = crypto.randomUUID();
+    try {
+      const r = await fn(writeToken);
+      if (r.done) {
+        if (!r.verify) return r.result;
+        await sleep(verifyDelayMs());
+        const stillMine = await r.verify();
+        if (stillMine) return r.result;
+        // Lost update detected — fall through to retry the whole attempt.
+      }
+    } catch (err) {
+      if (isPermissionLostError(err)) {
+        return { ok: false, error: PERMISSION_LOST_ERROR };
+      }
+      lastError = err instanceof Error ? err.message : "Unknown error";
+    }
+    if (attempt < max - 1) await sleep(withJitter(baseDelay * (attempt + 1)));
+  }
+  return { ok: false, error: lastError };
+}
+```
+
+**File:** `src/data/storage/casLoop.test.ts`
+
+**Before:** `(new file)`
+
+New Vitest suite (158 lines) covering both hardenings: a delayed-verify test
+using a fake competing write plus a `createMemoryDirectory()`-backed test that
+simulates a real lost-update interleaving and confirms the retry re-wins; a
+regression test confirming legacy callers that don't supply `verify` are
+unaffected; and four tests for terminal permission-error classification
+(`NotAllowedError`, `NoModificationAllowedError`, message-based detection, and
+confirming generic conflicts still exhaust retries and return the conflict
+error).
+
+---
+
+
+## v43.14 — 2026-07-13 — A-01: thread the `verify` callback through every casLoop call site
+
+Eight `casLoop` call sites across the shared-file writers were updated to pass
+the new `verify` callback (a delayed re-read of the same revision/write-token
+check already used for the in-attempt verification), so each of these files
+now participates in the lost-update detection added to `casLoop` above.
+(same pattern applied at all 6 sites below; `distributionStorage.ts` shown as
+the representative site.)
+
+**File:** `src/data/distribution/distributionStorage.ts`
+
+**Before:**
+```ts
+await safeWriteJson(dir, LOG_FILE, updated);
+const verify = await loadDistributionLog(directoryHandle, monthFolderName);
+if (verify.revision === nextRevision && verify._writeToken === writeToken) {
+  return { done: true, result: { ok: true as const } };
+}
+return { done: false };
+```
+
+**After:**
+```ts
+await safeWriteJson(dir, LOG_FILE, updated);
+const verify = await loadDistributionLog(directoryHandle, monthFolderName);
+if (verify.revision === nextRevision && verify._writeToken === writeToken) {
+  return {
+    done: true,
+    result: { ok: true as const },
+    verify: async () => {
+      const recheck = await loadDistributionLog(directoryHandle, monthFolderName);
+      return recheck.revision === nextRevision && recheck._writeToken === writeToken;
+    },
+  };
+}
+return { done: false };
+```
+
+**File:** `src/data/sampling/sampleStorage.ts` — same pattern applied to `appendSampleRow`'s `loadSampleMaster` read-back.
+
+**File:** `src/data/answers/answerStorage.ts` — same pattern applied to `updateEmployeeAnswerFile`'s `loadEmployeeAnswers` read-back.
+
+**File:** `src/data/approvals/approvalStorage.ts` — same pattern applied to `appendDecisionEvent`'s `loadSupervisorDecisions` read-back (this file also carries the unrelated B-06 `effectiveDecision` change documented below).
+
+**File:** `src/data/audit/actionLog.ts` — same pattern applied to `appendWorkspaceAction`'s `readLogFile` read-back.
+
+**File:** `src/data/workspace/userSync.ts` — same pattern applied to `syncUserManagementToDisk`'s `readJsonFile` read-back (this one re-checks `verify.ok && verify.file.metadata.revision/_writeToken` since it reads an envelope-wrapped file).
+
+---
+
+
+## v43.13 — 2026-07-13 — B-01: bulk assignment idempotency (skip already-owned/completed rows) + distribution-log terminal guard for `completed`
+
+Re-running bulk assignment emitted a fresh `assigned` event for every row,
+including rows already `completed` or already `pending` under someone else —
+the fold's terminal guard only protected `replaced`, so a bare `assigned` or
+`reassigned` after `completed` silently flipped a submitted inspection back to
+`pending`. Two fixes: (1) `calculateBulkAssignment` now accepts
+`existingEntries` and excludes any row that already has a live distribution
+entry, returning a `skipped` count; (2) `deriveCurrentDistribution` now drops a
+bare `assigned`/`reassigned` event targeting an already-`completed` row (only
+an explicit `reopened` event may return it to `pending`).
+
+**File:** `src/data/distribution/bulkAssignment.ts`
+
+**Before:**
+```ts
+}): { events: DistributionEvent[]; errors: string[] } {
+  const { rows, allocations, employees, operatorUsername, stageMappings, month, year } = params;
+  const events: DistributionEvent[] = [];
+  const errors: string[] = [];
+  const assignableEmployees = employees.filter(isAssignableSampleRole);
+  ...
+  for (const stageKey of stageKeys) {
+    const stageRows = rows.filter((r) => getStageKey(r.stage, stageMappings) === stageKey);
+    ...
+  }
+  ...
+  return { events, errors };
+}
+```
+
+**After:**
+```ts
+  /** Live distribution entries already present for this month; any row that
+   * already has an entry is skipped so re-running bulk assignment is idempotent. */
+  existingEntries?: DistributionEntry[];
+}): { events: DistributionEvent[]; errors: string[]; skipped: number } {
+  const { rows, allocations, employees, operatorUsername, stageMappings, month, year, existingEntries } = params;
+  const events: DistributionEvent[] = [];
+  const errors: string[] = [];
+
+  const ownedIds = new Set((existingEntries ?? []).map((e) => e.xrayImageId));
+  const rowsBeforeFilter = rows.length;
+  const assignableRows = ownedIds.size > 0 ? rows.filter((r) => !ownedIds.has(r.xrayImageId)) : rows;
+  const skipped = rowsBeforeFilter - assignableRows.length;
+
+  const assignableEmployees = employees.filter(isAssignableSampleRole);
+  ...
+  for (const stageKey of stageKeys) {
+    const stageRows = assignableRows.filter((r) => getStageKey(r.stage, stageMappings) === stageKey);
+    ...
+  }
+  ...
+  return { events, errors, skipped };
+}
+```
+
+**File:** `src/data/distribution/bulkAssignment.test.ts`
+
+**Before:** `(no such tests)`
+
+Two new tests added: "re-running bulk assignment emits zero duplicate events
+for already-owned/completed rows" (mixed completed/pending/unassigned rows —
+only the unassigned row gets an event, `skipped === 2`) and "... with all rows
+already owned emits nothing" (`events` empty, `skipped === 1`).
+
+**File:** `src/data/distribution/distributionLog.ts`
+
+**Before:**
+```ts
+    switch (evt.eventType) {
+      case "assigned":
+        status = "pending";
+        ...
+```
+(no guard existed before the `switch` for a `completed` entry receiving a bare `assigned`/`reassigned` event)
+
+**After:**
+```ts
+    // Terminal-state guard (completed): a bare "assigned"/"reassigned" after
+    // completion would silently flip the row back to pending and discard the
+    // employee's submitted answer. Only an explicit "reopened" may return a
+    // completed row to pending.
+    if (
+      existing?.status === "completed" &&
+      (evt.eventType === "assigned" || evt.eventType === "reassigned")
+    ) {
+      droppedEventIds.add(evt.eventId);
+      droppedImageIds.add(evt.xrayImageId);
+      continue;
+    }
+
+    switch (evt.eventType) {
+      case "assigned":
+        status = "pending";
+        ...
+```
+
+Also widened the existing `logError` message from "Dropped N illegal event(s)
+targeting replaced row(s)" to "...targeting terminal (replaced/completed) or
+uninterpretable row(s)" to cover both this guard and the C-01 unknown-eventType
+guard below.
+
+**File:** `src/data/distribution/distributionLog.test.ts`
+
+**Before:** `(no such tests)`
+
+Two new tests: "a bare assigned after completed is dropped (completed is
+terminal for reassignment)" and "a reassigned after completed is dropped; only
+reopened returns it to pending" — both assert the row stays `completed` /
+`assignedTo` unchanged and that `reopened` is still the only path back to
+`pending`.
+
+**File:** `src/components/Sidebar/Tabs/Population/components/PhaseFourDistribution.tsx`
+
+Wires the new `existingEntries`/`skipped` outputs into the Phase 4 UI: passes
+`distributionCurrent?.entries` into both `calculateBulkAssignment` calls
+(preview memo and `handleRunBulkAssignment`), surfaces a "تم تخطي N صفاً معيناً
+مسبقاً" note in the preview panel, and shows a dedicated message (and skips the
+`onApplyBulkAssignment` call) when every row was already owned
+(`events.length === 0 && skipped > 0`).
+
+**Before:**
+```ts
+    const { events, errors } = calculateBulkAssignment({
+      rows: sampleRows,
+      allocations: activeAllocations,
+      employees: getManagedLoginUsers(),
+      operatorUsername,
+      stageMappings: config.stageMappings,
+      month: saveMonth,
+      year: saveYear,
+    });
+    ...
+    if (errors.length > 0) {
+      setBulkError(`تحذير: ${errors.join(" | ")} — الصفوف المتأثرة ستبقى غير معينة ويمكن تعيينها يدوياً.`);
+    }
+
+    await onApplyBulkAssignment(events);
+```
+
+**After:**
+```ts
+    const { events, errors, skipped } = calculateBulkAssignment({
+      rows: sampleRows,
+      allocations: activeAllocations,
+      employees: getManagedLoginUsers(),
+      operatorUsername,
+      stageMappings: config.stageMappings,
+      month: saveMonth,
+      year: saveYear,
+      existingEntries: distributionCurrent?.entries,
+    });
+
+    const messages: string[] = [];
+    if (errors.length > 0) {
+      messages.push(`تحذير: ${errors.join(" | ")} — الصفوف المتأثرة ستبقى غير معينة ويمكن تعيينها يدوياً.`);
+    }
+    if (skipped > 0) {
+      messages.push(`تم تخطي ${formatNumber(skipped)} صفاً معيناً مسبقاً (لن يُعاد تعيينها).`);
+    }
+    if (messages.length > 0) setBulkError(messages.join(" "));
+
+    if (events.length === 0) {
+      if (skipped > 0 && errors.length === 0) {
+        setBulkError(`جميع الصفوف (${formatNumber(skipped)}) معينة مسبقاً — لا يوجد ما يُوزّع.`);
+      }
+      return;
+    }
+
+    await onApplyBulkAssignment(events);
+```
+
+(same `existingEntries` wiring also applied to the `previewData` memo, plus a
+new `previewData.skipped > 0` note rendered in the preview block.)
+
+---
+
+
+## v43.12 — 2026-07-13 — C-01: unknown/newer distribution eventType preserves existing state instead of resetting to pending
+
+`deriveCurrentDistribution`'s `switch (evt.eventType)` had no `default` case,
+so TypeScript's control flow let `status`/`assignedTo`/`replacedById` fall
+through uninitialized for any event type not in the switch (a newer client's
+event type, or corrupt data) — in practice this reset a live entry to the
+`pending` initialization. A `default` branch now preserves the existing row's
+full state, records the event as dropped, and skips entirely when there is no
+prior entry to preserve.
+
+**File:** `src/data/distribution/distributionLog.ts`
+
+**Before:**
+```ts
+      case "reassigned":
+        status = "pending";
+        assignedTo = existing?.assignedTo ?? evt.assignedTo;
+        break;
+    }
+```
+
+**After:**
+```ts
+      case "reassigned":
+        status = "pending";
+        assignedTo = existing?.assignedTo ?? evt.assignedTo;
+        break;
+      default: {
+        // Unknown/newer event type or corrupt data. Never downgrade a live
+        // entry to the initialized "pending": preserve the existing row's
+        // status/assignment/replacedById and record the event as dropped.
+        droppedEventIds.add(evt.eventId);
+        droppedImageIds.add(evt.xrayImageId);
+        if (!existing) continue;
+        status = existing.status;
+        assignedTo = existing.assignedTo;
+        replacedById = existing.replacedById;
+        break;
+      }
+    }
+```
+
+**File:** `src/data/distribution/distributionLog.test.ts`
+
+**Before:** `(no such tests)`
+
+Two new tests: "an unknown/newer eventType preserves the existing completed
+status (never downgrades)" and "an unknown eventType with no prior entry
+creates nothing" (asserts `entries` stays empty rather than materializing a
+`pending` row from an uninterpretable event).
+
+> Note: the same file also has an unrelated one-line addition,
+> `logRevision: log.revision` on `deriveCurrentDistribution`'s return value —
+> that hunk is documented under a different fix (already covered elsewhere per
+> the task brief) and is intentionally omitted here.
+
+---
+
+
+## v43.11 — 2026-07-13 — B-02/B-03: XrayReferrals stale-entry replacement guard + mirror-vs-derived preference
+
+Two related staleness bugs in the employee referrals view: (1) the instant
+"recommended replacement" path used the in-memory entry captured when the
+dialog opened, with no freshness re-check before calling `executeReplacement`
+— a concurrent action (approval, another replacement) between dialog-open and
+confirm could double-replace or silently reassign a row that changed state in
+the meantime. (2) the employee's own queue preferred the (possibly stale)
+on-disk personal mirror over the freshly-derived distribution state computed
+in the same function, so a fresh derivation was discarded in favor of a stale
+snapshot.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx`
+
+**Before (B-03 — mirror preferred over fresh derivation):**
+```ts
+      const visible = canSeeAll
+        ? all
+        : (personalMirror?.entries ?? all).filter(
+            (e) =>
+              e.assignedTo === username &&
+              e.status !== "replaced" &&
+              ...
+```
+
+**After:**
+```ts
+      // Filter over `all` (fresh derived dist first; the personal mirror is only
+      // the fallback baked into `all` when dist is null). Preferring the mirror
+      // here would show a stale snapshot even when a fresh derivation exists.
+      const visible = canSeeAll
+        ? all
+        : all.filter(
+            (e) =>
+              e.assignedTo === username &&
+              e.status !== "replaced" &&
+              ...
+```
+
+**Before (B-02 — no freshness re-check on the instant-replace path):**
+```ts
+    try {
+      if (fromRecommended) {
+        // Immediate replacement — no approval needed.
+        const result = await executeReplacement({
+          directoryHandle,
+          ...
+```
+
+**After:**
+```ts
+    try {
+      if (fromRecommended) {
+        // Freshness re-check (mirror approveReferral): reload the live state and
+        // confirm (a) the dead row is still owned by the same employee and still
+        // replacement-eligible, and (b) the chosen replacement is not already
+        // sampled/owned — otherwise a concurrent action already used one side.
+        const freshSample = await loadSampleMaster(directoryHandle, selMonth);
+        const freshRows = (freshSample?.rows ?? []) as PreparedPopulationRow[];
+        const freshDist = await loadOrDeriveDistributionCurrent(directoryHandle, selMonth, freshRows);
+        const STALE_MSG = "البيانات تغيّرت، حدّث الصفحة";
+
+        const freshDead = freshDist?.entries.find((e) => e.xrayImageId === entry.xrayImageId);
+        const deadStillEligible =
+          !!freshDead &&
+          freshDead.assignedTo === entry.assignedTo &&
+          (freshDead.status === "pending" || freshDead.status === "replacement-requested");
+
+        const replacementTaken =
+          freshRows.some((r) => r.xrayImageId === replacement.xrayImageId) ||
+          (freshDist?.entries.some((e) => e.xrayImageId === replacement.xrayImageId) ?? false);
+
+        if (!deadStillEligible || replacementTaken) {
+          setReplacementError(STALE_MSG);
+          setStatusMsg({ type: "error", text: STALE_MSG });
+          await loadData();
+          return;
+        }
+
+        // Immediate replacement — no approval needed.
+        const result = await executeReplacement({
+          directoryHandle,
+          ...
+```
+
+**File:** `src/data/distribution/replacement.test.ts`
+
+**Before:** `(no such test)`
+
+New regression test "fails when the dead entry is already replaced (terminal
+state)" — confirms `executeReplacement` rejects a dead entry whose status is
+already `"replaced"` and that no distribution events are written. (`replacement.ts`
+itself has no diff — this test documents/locks in existing guard behavior that
+the B-02 freshness re-check above now also protects at the UI layer.)
+
+---
+
+
+## v43.10 — 2026-07-13 — C-04: per-employee browse-column presets no longer dead-wired to the shared admin file
+
+Column presets for the referrals/results browse views always saved to the
+shared admin file and, on load, preferred the admin file over the user's own
+saved preset — so per-employee customization was silently overwritten by
+whatever the admin last saved. Both views now load the user's personal preset
+first (falling back to the admin default only when the user has none), and
+`XrayReferrals` additionally persists every user's layout to their own file
+(`saveUserBrowseDatasetPreset`) in addition to the shared admin file when the
+user has permission to configure it.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx`
+
+**Before:**
+```ts
+import {
+  loadAdminBrowsePreset,
+  loadUserBrowsePreset,
+  saveAdminBrowseDatasetPreset,
+} from "../../../../../data/preferences/browsePresetStorage";
+...
+      const p = adminFile.browseData[REFERRALS_PRESET_KEY] ?? userFile.browseData[REFERRALS_PRESET_KEY];
+...
+                if (canConfigureColumns) {
+                  void saveAdminBrowseDatasetPreset(directoryHandle, REFERRALS_PRESET_KEY, preset);
+                }
+```
+
+**After:**
+```ts
+import {
+  loadAdminBrowsePreset,
+  loadUserBrowsePreset,
+  saveAdminBrowseDatasetPreset,
+  saveUserBrowseDatasetPreset,
+} from "../../../../../data/preferences/browsePresetStorage";
+...
+      // Personal-over-admin: a user's own saved column layout wins; the admin
+      // shared preset is only the default for users who never customized.
+      const p = userFile.browseData[REFERRALS_PRESET_KEY] ?? adminFile.browseData[REFERRALS_PRESET_KEY];
+...
+                // Every user persists their own personal layout (isolated).
+                void saveUserBrowseDatasetPreset(directoryHandle, username, REFERRALS_PRESET_KEY, preset);
+                // Admins/permitted users additionally update the shared default.
+                if (canConfigureColumns) {
+                  void saveAdminBrowseDatasetPreset(directoryHandle, REFERRALS_PRESET_KEY, preset);
+                }
+```
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayInspectionResults.tsx`
+
+**Before:**
+```ts
+        const preset = adminFile.browseData[REFERRALS_PRESET_KEY] ?? userFile.browseData[REFERRALS_PRESET_KEY];
+```
+
+**After:**
+```ts
+        // Personal-over-admin: a user's own saved layout wins; the admin shared
+        // preset is only the default for users who never customized their columns.
+        const preset = userFile.browseData[REFERRALS_PRESET_KEY] ?? adminFile.browseData[REFERRALS_PRESET_KEY];
+```
+
+---
+
+
+## v43.9 — 2026-07-13 — B-04: monotonic `sourceLogRevision` guard on sample-mirror writes
+
+Mirror writes (`syncSampleMirrors`) were unordered fire-and-forget with no
+ordering guard, so an older derivation running on one machine could clobber a
+mirror already written from a newer log revision on another (e.g. resurrecting
+a stale `pending` over a newer `completed`). Both the main mirror and each
+per-employee mirror now read the currently-persisted `sourceLogRevision`
+before writing and skip the write if the existing revision is greater than or
+equal to the incoming one.
+
+**File:** `src/data/samples/sampleMirrorStorage.ts`
+
+**Before:**
+```ts
+  await safeWriteJson(mainDir, MAIN_SAMPLES_FILE, mainFile);
+
+  const entriesByEmployee = new Map<string, DistributionEntry[]>();
+  ...
+  await Promise.all(
+    [...entriesByEmployee.entries()].map(([username, entries]) =>
+      safeWriteJson<EmployeeSamplesFile>(
+        employeesDir,
+        employeeSamplesFileName(username),
+        { monthFolderName, username, updatedAt, sourceLogRevision, entries }
+      )
+    )
+  );
+```
+
+**After:**
+```ts
+async function readMirrorRevision(
+  dir: DirectoryHandleLike,
+  fileName: string
+): Promise<number | null> {
+  const result = await safeReadJson<{ sourceLogRevision?: number }>(dir, fileName);
+  if (result.ok && typeof result.value.sourceLogRevision === "number") {
+    return result.value.sourceLogRevision;
+  }
+  return null;
+}
+...
+  // Monotonic guard: never let an older derivation (lower sourceLogRevision)
+  // clobber a mirror already written from a newer log revision.
+  const existingMainRevision = await readMirrorRevision(mainDir, MAIN_SAMPLES_FILE);
+  if (existingMainRevision === null || existingMainRevision < sourceLogRevision) {
+    await safeWriteJson(mainDir, MAIN_SAMPLES_FILE, mainFile);
+  }
+
+  const entriesByEmployee = new Map<string, DistributionEntry[]>();
+  ...
+  await Promise.all(
+    [...entriesByEmployee.entries()].map(async ([username, entries]) => {
+      const fileName = employeeSamplesFileName(username);
+      const existingRevision = await readMirrorRevision(employeesDir, fileName);
+      if (existingRevision !== null && existingRevision >= sourceLogRevision) {
+        return; // a newer (or equal) derivation already wrote this mirror
+      }
+      await safeWriteJson<EmployeeSamplesFile>(employeesDir, fileName, {
+        monthFolderName, username, updatedAt, sourceLogRevision, entries,
+      });
+    })
+  );
+```
+
+**File:** `src/data/samples/sampleMirrorStorage.test.ts`
+
+**Before:** `(no such tests)`
+
+New `describe("syncSampleMirrors monotonic guard")` block: "skips writing a
+mirror when the existing file has a newer-or-equal sourceLogRevision" (rev 5
+written, then rev 3 arrives late — mirror stays at rev 5/`pending`) and "writes
+when the incoming sourceLogRevision is newer" (rev 3 then rev 5 — mirror
+advances to rev 5/`completed`).
+
+---
+
+
+## v43.8 — 2026-07-13 — B-05: `saveMonthRun` lock/CAS + TOCTOU guard against a sample drawn mid-save
+
+`saveMonthRun` wrote 5 month files with no lock/CAS (unlike
+`updateMonthStatus`/`closeMonth`), and the UI's re-process confirmation check
+was TOCTOU-racy — a sample could be drawn between the check and the write,
+and the overwrite would silently orphan it. `saveMonthRun` now serializes
+against `updateMonthStatus`/`closeMonth`/`reopenMonth` and concurrent saves
+via `withResourceLock(manifestLockKey(...))`, and re-checks under the lock
+whether a sample already exists; if one appeared since the caller's pre-check
+it aborts with `sampleExists: true` unless the caller passes
+`confirmedOverwrite: true`.
+
+**File:** `src/data/population/populationStorage.ts`
+
+**Before:**
+```ts
+export type SaveMonthRunParams = {
+  ...
+  sourceFiles?: { risk?: SourceFileMetadata | null; bi?: SourceFileMetadata | null };
+};
+
+export type SaveMonthRunResult = {
+  ok: true;
+  monthFolderName: string;
+} | {
+  ok: false;
+  error: string;
+};
+
+export async function saveMonthRun(
+  params: SaveMonthRunParams
+): Promise<SaveMonthRunResult> {
+  // Month lock gate — rejects with MonthClosedError when the month is closed.
+  await ensureMonthWritable(
+    params.directoryHandle,
+    formatMonthFolderName(params.month, params.year)
+  );
+  try {
+    const { directoryHandle, ..., nonCertScanRows } = params;
+    const monthFolderName = formatMonthFolderName(month, year);
+    const now = new Date().toISOString();
+    // Ensure numbered population folder exists
+    ...
+```
+
+**After:**
+```ts
+export type SaveMonthRunParams = {
+  ...
+  sourceFiles?: { risk?: SourceFileMetadata | null; bi?: SourceFileMetadata | null };
+  /**
+   * When false/undefined, saveMonthRun re-checks (under the manifest lock) that
+   * no sample was drawn for this month before overwriting the population; if one
+   * appeared it aborts with `sampleExists: true` so the caller can prompt for
+   * confirmation. Pass true once the user has explicitly confirmed the overwrite.
+   */
+  confirmedOverwrite?: boolean;
+};
+
+export type SaveMonthRunResult = {
+  ok: true;
+  monthFolderName: string;
+} | {
+  ok: false;
+  error: string;
+  /** Set when the abort was caused by a sample that appeared since the pre-check (TOCTOU). */
+  sampleExists?: true;
+};
+
+export async function saveMonthRun(
+  params: SaveMonthRunParams
+): Promise<SaveMonthRunResult> {
+  const monthFolderName = formatMonthFolderName(params.month, params.year);
+  await ensureMonthWritable(params.directoryHandle, monthFolderName);
+
+  // Serialize the 5-file write against updateMonthStatus / closeMonth / reopenMonth
+  // and any concurrent same-browser save (shared `manifestLockKey`).
+  return withResourceLock(manifestLockKey(monthFolderName), () =>
+    saveMonthRunLocked(params, monthFolderName)
+  );
+}
+
+async function saveMonthRunLocked(
+  params: SaveMonthRunParams,
+  monthFolderName: string
+): Promise<SaveMonthRunResult> {
+  try {
+    const { directoryHandle, ..., nonCertScanRows, confirmedOverwrite } = params;
+
+    // TOCTOU guard: re-check under the lock that no sample was drawn since the
+    // caller's pre-check.
+    if (!confirmedOverwrite) {
+      const existingSample = await loadSampleMaster(directoryHandle, monthFolderName);
+      if (existingSample) {
+        return {
+          ok: false,
+          error: `يوجد سحب عينة لهذا الشهر (${monthFolderName}) — تأكيد الاستبدال مطلوب قبل إعادة الحفظ.`,
+          sampleExists: true,
+        };
+      }
+    }
+
+    const now = new Date().toISOString();
+    // Ensure numbered population folder exists
+    ...
+```
+
+**File:** `src/data/population/populationStorage.test.ts`
+
+**Before:** `(no such test)`
+
+New test "saveMonthRun aborts (sampleExists) when a sample was drawn and
+overwrite is not confirmed" — draws a sample after the first save, confirms a
+plain re-save is blocked with `sampleExists: true`, and that passing
+`confirmedOverwrite: true` lets it proceed.
+
+**File:** `src/components/Sidebar/Tabs/Population/index.tsx`
+
+Wires `confirmedOverwrite` through the UI: the normal save path calls
+`commitSaveToDisk(processingResult, riskResult, false)`; when the result comes
+back with `sampleExists: true`, the existing "pending reprocess" confirmation
+dialog is shown, and its confirm handler now calls `commitSaveToDisk(...,
+true)`.
+
+**Before:**
+```ts
+    await commitSaveToDisk(processingResult, riskResult);
+  }
+
+  async function commitSaveToDisk(
+    processingResult: PopulationProcessingResult,
+    riskResult: RiskWorkbookResult
+  ): Promise<void> {
+    ...
+      if (result.ok) {
+        ...
+      } else {
+        setSaveToDiskMessage({ type: "error", text: `فشل الحفظ: ${result.error}` });
+      }
+```
+```ts
+          if (pending) {
+            void commitSaveToDisk(pending.processingResult, pending.riskResult);
+          }
+```
+
+**After:**
+```ts
+    await commitSaveToDisk(processingResult, riskResult, false);
+  }
+
+  async function commitSaveToDisk(
+    processingResult: PopulationProcessingResult,
+    riskResult: RiskWorkbookResult,
+    confirmedOverwrite: boolean
+  ): Promise<void> {
+    ...
+      if (result.ok) {
+        ...
+      } else if (result.sampleExists) {
+        // A sample was drawn between the pre-check and the locked write (TOCTOU):
+        // prompt for explicit overwrite confirmation instead of silently failing.
+        setPendingReprocessSave({ processingResult, riskResult });
+      } else {
+        setSaveToDiskMessage({ type: "error", text: `فشل الحفظ: ${result.error}` });
+      }
+```
+```ts
+          if (pending) {
+            void commitSaveToDisk(pending.processingResult, pending.riskResult, true);
+          }
+```
+
+---
+
+
+## v43.7 — 2026-07-13 — C-02: block manual reassignment of a completed row (require reopen flow)
+
+Manual reassignment (the drag/select reassignment path in the Population tab,
+separate from bulk assignment) had no guard against targeting an already
+`completed` row — it would silently un-complete the row and discard the
+submitted answer, bypassing the dedicated reopen-approval workflow. A check
+was added immediately before building the reassign event.
+
+**File:** `src/components/Sidebar/Tabs/Population/index.tsx`
+
+**Before:**
+```ts
+    if (!directoryHandle || !sampleDrawResult) return;
+    setIsDistributing(true);
+    setDistributionMessage(null);
+    const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
+    const username = sessionRef.current?.username ?? "unknown";
+    const existing = distributionCurrent?.entries.find(
+      (e) => e.xrayImageId === xrayImageId
+    );
+    const event = buildReassignEvent({
+      xrayImageId,
+      assignedTo: existing?.assignedTo ?? reassignedTo,
+      ...
+```
+
+**After:**
+```ts
+    if (!directoryHandle || !sampleDrawResult) return;
+    const existing = distributionCurrent?.entries.find(
+      (e) => e.xrayImageId === xrayImageId
+    );
+    // A completed row is terminal for reassignment: moving it would either be
+    // dropped by the derivation guard or lose the submitted answer. Require the
+    // reopen flow first.
+    if (existing?.status === "completed") {
+      setDistributionMessage({
+        type: "error",
+        text: "لا يمكن إعادة تعيين عينة مكتملة — يجب إعادة فتحها أولاً عبر مسار إعادة الفتح.",
+      });
+      return;
+    }
+    setIsDistributing(true);
+    setDistributionMessage(null);
+    const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
+    const username = sessionRef.current?.username ?? "unknown";
+    const event = buildReassignEvent({
+      xrayImageId,
+      assignedTo: existing?.assignedTo ?? reassignedTo,
+      ...
+```
+
+> Note: the same file's phase-navigation handler also gained two new guards in
+> this diff — blocking advancing past Phase 2 without a completed processing
+> result, and past Phase 3 without a drawn sample — which do not correspond to
+> any listed Wave 1 finding ID. Flagged as unmapped; documented here for
+> completeness since it lives in the same file/diff.
+>
+> ```ts
+>     if (currentPhase === 2 && !populationProcessingResult) {
+>       setProcessingMessage("يجب إتمام معالجة المجتمع أولاً قبل الانتقال إلى سحب العينة.");
+>       return;
+>     }
+>     if (currentPhase === 3 && !sampleDrawResult) {
+>       setProcessingMessage("يجب إتمام سحب العينة أولاً قبل الانتقال إلى التوزيع.");
+>       return;
+>     }
+> ```
+
+---
+
+
+## v43.6 — 2026-07-13 — B-06: approval decisions — deterministic first-wins reconciliation across supervisors
+
+Approval decisions live in per-supervisor files; the "already reviewed" check
+was read-only and CAS only covered the reviewer's own file, so two supervisors
+could both "win" on the same request, and `effectiveDecision` picked the
+*latest* timestamp — which could contradict which decision's side-effect
+events (replacement, reopen) actually executed. Two changes: `effectiveDecision`
+is now **first-wins** (earliest `reviewedAt` is authoritative, deterministic
+regardless of clock skew/write order), and `approveReferral` gained two
+re-scans of every supervisor's decision file — once immediately before writing
+its own decision (abort as `already-reviewed` if any decision already exists)
+and once immediately after (abort as `already-reviewed` if a concurrently
+written earlier decision belongs to someone else).
+
+**File:** `src/data/approvals/approvalStorage.ts`
+
+**Before:**
+```ts
+/** The request's current effective decision — the most recent event, or undefined
+ *  if nobody has reviewed it yet. */
+export function effectiveDecision(history: DecisionEvent[]): DecisionEvent | undefined {
+  return history.length > 0 ? history[history.length - 1] : undefined;
+}
+```
+
+**After:**
+```ts
+/** The request's effective decision — FIRST-wins: the EARLIEST decision (by
+ *  reviewedAt) is authoritative, or undefined if nobody has reviewed it yet.
+ *  Decisions live in per-supervisor files, so two reviewers can each write a
+ *  decision before seeing the other's. Latest-wins would make the outcome depend
+ *  on clock skew / write ordering; first-wins is deterministic. `history` is
+ *  pre-sorted oldest→newest by mergeDecisionHistory. */
+export function effectiveDecision(history: DecisionEvent[]): DecisionEvent | undefined {
+  return history.length > 0 ? history[0] : undefined;
+}
+```
+
+**File:** `src/data/approvals/approvalStorage.test.ts`
+
+**Before:**
+```ts
+    expect(effectiveDecision(history)?.status).toBe("approved");
+    expect(effectiveDecision(history)?.reviewedAt).toBe("2026-07-03T09:00:00.000Z");
+```
+
+**After:**
+```ts
+    // First-wins: the EARLIEST decision is authoritative (sup-1 denied @ 07-01),
+    // not the most recent one — deterministic across per-supervisor files.
+    expect(effectiveDecision(history)?.status).toBe("denied");
+    expect(effectiveDecision(history)?.reviewedAt).toBe("2026-07-01T09:00:00.000Z");
+```
+
+**File:** `src/data/referral/approveReferral.ts`
+
+**Before:**
+```ts
+import { executeReplacement } from "../distribution/replacement";
+import { loadMonthPopulationFinal } from "../population/populationStorage";
+import { loadSampleMaster } from "../sampling/sampleStorage";
+import { reopenSubmittedAnswer } from "../answers/reopenAnswer";
+...
+  // 5. Record the decision. On failure the caller retries; step 2 skips re-emission.
+  const updateResult = await updateReferralStatus(directoryHandle, monthFolderName, requestId, {
+    status: "approved",
+    reviewedBy,
+    ...
+  });
+  if (!updateResult.ok) {
+    return { ok: false, code: "decision-failed", error: updateResult.error };
+  }
+
+  return { ok: true, alreadyApplied };
+}
+```
+
+**After:**
+```ts
+import { executeReplacement } from "../distribution/replacement";
+import { loadMonthPopulationFinal } from "../population/populationStorage";
+import { loadSampleMaster } from "../sampling/sampleStorage";
+import { reopenSubmittedAnswer } from "../answers/reopenAnswer";
+import {
+  effectiveDecision,
+  loadAllSupervisorDecisions,
+  mergeDecisionHistory,
+} from "../approvals/approvalStorage";
+...
+  // 5a. Cross-reviewer guard. Re-scan EVERY reviewer's file right before
+  //     persisting; if any decision for this request already exists, abort.
+  const priorDecisions = mergeDecisionHistory(
+    await loadAllSupervisorDecisions(directoryHandle, monthFolderName),
+    "referral",
+    requestId
+  );
+  if (priorDecisions.length > 0) {
+    return { ok: false, code: "already-reviewed" };
+  }
+
+  // 5b. Record the decision. On failure the caller retries; step 2 skips re-emission.
+  const updateResult = await updateReferralStatus(directoryHandle, monthFolderName, requestId, {
+    status: "approved",
+    reviewedBy,
+    ...
+  });
+  if (!updateResult.ok) {
+    return { ok: false, code: "decision-failed", error: updateResult.error };
+  }
+
+  // 5c. First-wins reconciliation. Another reviewer's earlier decision may have
+  //     landed concurrently; re-scan and surface a conflict if we didn't win.
+  const winner = effectiveDecision(
+    mergeDecisionHistory(
+      await loadAllSupervisorDecisions(directoryHandle, monthFolderName),
+      "referral",
+      requestId
+    )
+  );
+  if (winner && winner.reviewedBy !== reviewedBy) {
+    return { ok: false, code: "already-reviewed" };
+  }
+
+  return { ok: true, alreadyApplied };
+}
+```
+
+**File:** `src/data/referral/referralStorage.test.ts`
+
+**Before:**
+```ts
+    const log = await loadReferralLog(root, "5-May-2026");
+    expect(log.requests[0].status).toBe("approved");
+    expect(log.requests[0].history).toHaveLength(2);
+    expect(log.requests[0].history?.[0].status).toBe("denied");
+    expect(log.requests[0].history?.[1].status).toBe("approved");
+  });
+```
+(and, in the replacement-log describe block: `expect(log.requests[0].status).toBe("approved");`)
+
+**After:**
+```ts
+    const log = await loadReferralLog(root, "5-May-2026");
+    // First-wins: the earliest decision (denied) is authoritative; the later
+    // "approved" correction is retained in history but does not override it.
+    expect(log.requests[0].status).toBe("denied");
+    expect(log.requests[0].history).toHaveLength(2);
+    expect(log.requests[0].history?.[0].status).toBe("denied");
+    expect(log.requests[0].history?.[1].status).toBe("approved");
+  });
+
+  it("cross-supervisor: the earliest decision is authoritative (first-wins)", async () => {
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    await appendReferralRequest(root, "5-May-2026", mockReferral("req-1", "alice", "bob"));
+    await updateReferralStatus(root, "5-May-2026", "req-1", {
+      status: "approved", reviewedBy: "sup-1", reviewedAt: "2026-07-01T10:00:00.000Z",
+    });
+    await updateReferralStatus(root, "5-May-2026", "req-1", {
+      status: "denied", reviewedBy: "sup-2", reviewedAt: "2026-07-02T10:00:00.000Z",
+    });
+    const log = await loadReferralLog(root, "5-May-2026");
+    expect(log.requests[0].status).toBe("approved");
+    expect(log.requests[0].reviewedBy).toBe("sup-1");
+  });
+```
+(and the replacement-log test's expectation changed to `.toBe("denied")` with a matching first-wins comment).
+
+---
+
+
+## v43.5 — 2026-07-13 — B-10: casLoop terminal-error classification (see A-01 section above)
+
+The `isPermissionLostError` detection and the `PERMISSION_LOST_ERROR` early
+return live in the same `src/data/storage/casLoop.ts` hunk as the A-01
+verify-callback change and are documented together in the first section above;
+this heading exists only so the finding ID appears in the log. No separate
+file changes beyond `casLoop.ts` / `casLoop.test.ts`.
+
+---
+
+
+## v43.4 — 2026-07-13 — B-11: `.bak` recovery for `readJsonFile` (workspace manifest / users-permissions bootstrap files)
+
+`readJsonFile` (used only for the workspace manifest and
+`users.permissions.json` bootstrap files) had no `.bak` fallback and no
+content-hash verification, unlike every other file which goes through
+`safeReadJson`. A torn write (the File System Access API has no atomic rename)
+could leave the live file missing or truncated and brick workspace entry for
+everyone. `readJsonFile` now falls back to `{file}.bak` when the primary read
+fails with `missing` or `invalid_json` (not for permission/read failures, which
+are not recoverable this way), dispatching a `data:recovered-from-bak` DOM
+event when it does.
+
+**File:** `src/data/storage/fileSystemAccess.ts`
+
+**Before:**
+```ts
+export async function readJsonFile<TFile>(
+  directoryHandle: DirectoryHandleLike,
+  fileName: string
+): Promise<ReadJsonResult<NonNullable<TFile>>> {
+  try {
+    const fileHandle = await directoryHandle.getFileHandle(fileName, {
+      ...
+```
+
+**After:**
+```ts
+export async function readJsonFile<TFile>(
+  directoryHandle: DirectoryHandleLike,
+  fileName: string
+): Promise<ReadJsonResult<NonNullable<TFile>>> {
+  const primary = await readAndParseJsonFile<TFile>(directoryHandle, fileName);
+  if (primary.ok) return primary;
+
+  // A torn write can leave the live file missing or truncated. Mirror
+  // safeReadJson's recovery: fall back to the `{file}.bak` snapshot. Permission
+  // / read failures are NOT recoverable here — pass them through unchanged.
+  if (primary.reason === "missing" || primary.reason === "invalid_json") {
+    const backup = await readAndParseJsonFile<TFile>(directoryHandle, `${fileName}.bak`);
+    if (backup.ok) {
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("data:recovered-from-bak", { detail: { fileName } }));
+      }
+      return backup;
+    }
+  }
+  return primary;
+}
+
+async function readAndParseJsonFile<TFile>(
+  directoryHandle: DirectoryHandleLike,
+  fileName: string
+): Promise<ReadJsonResult<NonNullable<TFile>>> {
+  try {
+    const fileHandle = await directoryHandle.getFileHandle(fileName, {
+      ...
+```
+
+**File:** `src/data/storage/fileSystemAccess.test.ts`
+
+**Before:** `(no such tests)`
+
+Two new tests: ".bak recovery: readJsonFile falls back to the snapshot when the
+live file is missing" and "...recovers from .bak when the live file is
+corrupt" (writes invalid JSON directly to the live file to simulate a torn
+write, confirms recovery returns the `.bak` snapshot's data).
+
+---
+
+
+## v43.3 — 2026-07-13 — C-05: CAS for shared template document and template-selection writes
+
+Both `{templateId}.json` (per-template document, editable by any admin) and
+`template.selection.json` (the shared active-template pointer) were written
+with plain `safeWriteJson` and no revision/write-token check, so two admins
+editing concurrently on two machines could silently clobber each other. Both
+now go through the same CAS pattern used elsewhere (revision + `_writeToken`,
+verified on read-back, plus the new delayed re-verify from A-01), each wrapped
+in its own `withResourceLock` to serialize same-tab writers.
+
+**File:** `src/data/templates/templateTypes.ts`
+
+**Before:**
+```ts
+export type TemplateSchema = {
+  ...
+  updatedBy: string;
+  phases?: TemplatePhase[];
+  fields: TemplateField[];
+};
+```
+
+**After:**
+```ts
+export type TemplateSchema = {
+  ...
+  updatedBy: string;
+  phases?: TemplatePhase[];
+  fields: TemplateField[];
+  /** Monotonic CAS revision for the shared, multi-admin `{templateId}.json` doc. */
+  revision?: number;
+  /** Per-write UUID embedded by casLoop for cross-machine race detection. */
+  _writeToken?: string;
+};
+```
+
+**File:** `src/data/templates/templateStorage.ts`
+
+**Before:**
+```ts
+    const dir = await getTemplatesDir(directoryHandle);
+    await withResourceLock(`${dir.name}/templates-index`, async () => {
+      const fileName = `${schema.templateId}.json`;
+      // Per-id doc — single writer by id, safe to write once outside the CAS loop.
+      await safeWriteJson(dir, fileName, schema);
+
+      await updateTemplateIndex(dir, (templates) => [ ... ]);
+```
+
+**After:**
+```ts
+async function saveTemplateFile(
+  dir: DirectoryHandleLike,
+  schema: TemplateSchema
+): Promise<void> {
+  const fileName = `${schema.templateId}.json`;
+  const outcome = await casLoop<{ ok: true }>(
+    async (writeToken) => {
+      const existing = await safeReadJson<TemplateSchema>(dir, fileName);
+      const nextRevision = (existing.ok ? existing.value.revision ?? 0 : 0) + 1;
+      const updated: TemplateSchema = { ...schema, revision: nextRevision, _writeToken: writeToken };
+      await safeWriteJson(dir, fileName, updated);
+      const verify = await safeReadJson<TemplateSchema>(dir, fileName);
+      if (verify.ok && verify.value.revision === nextRevision && verify.value._writeToken === writeToken) {
+        return {
+          done: true,
+          result: { ok: true as const },
+          verify: async () => {
+            const recheck = await safeReadJson<TemplateSchema>(dir, fileName);
+            return recheck.ok && recheck.value.revision === nextRevision && recheck.value._writeToken === writeToken;
+          },
+        };
+      }
+      return { done: false };
+    },
+    { conflictError: "تعذّر حفظ القالب: تعارض في الكتابة بعد عدة محاولات." }
+  );
+  if (!outcome.ok) throw new Error(outcome.error);
+}
+...
+    const dir = await getTemplatesDir(directoryHandle);
+    await withResourceLock(`${dir.name}/templates-index`, async () => {
+      // Shared per-id doc — two admins on two machines can edit the same
+      // template. CAS makes a concurrent clobber fail loudly and retry.
+      await saveTemplateFile(dir, schema);
+
+      await updateTemplateIndex(dir, (templates) => [ ... ]);
+```
+
+**File:** `src/data/templates/templateStorage.test.ts`
+
+**Before:** `(no such tests)`
+
+Two new tests: "serializes concurrent saves of the SAME template id via per-id
+CAS (no silent clobber)" (fires two concurrent `saveTemplate` calls for the
+same id, asserts the final `revision === 2` and the index has exactly one
+entry — not duplicated) and "stamps a CAS revision and write token on the
+saved template file".
+
+**File:** `src/data/templates/templateSelectionStorage.ts`
+
+**Before:**
+```ts
+import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { getTemplatesRoot } from "../workspace/workspacePaths";
+
+export type InspectionTemplateSelection = {
+  templateId: string;
+  updatedAt: string;
+  updatedBy: string;
+};
+...
+    const dir = await getTemplatesDir(directoryHandle);
+    await safeWriteJson(dir, SELECTION_FILE, selection);
+    return { ok: true };
+```
+
+**After:**
+```ts
+import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { casLoop } from "../storage/casLoop";
+import { withResourceLock } from "../storage/webLocks";
+import { getTemplatesRoot } from "../workspace/workspacePaths";
+
+export type InspectionTemplateSelection = {
+  templateId: string;
+  updatedAt: string;
+  updatedBy: string;
+  /** Monotonic CAS revision for this shared, multi-admin selection file. */
+  revision?: number;
+  /** Per-write UUID embedded by casLoop for cross-machine race detection. */
+  _writeToken?: string;
+};
+...
+    const dir = await getTemplatesDir(directoryHandle);
+    const outcome = await withResourceLock(`${dir.name}/template-selection:rmw`, () =>
+      casLoop<{ ok: true }>(
+        async (writeToken) => {
+          const existing = await safeReadJson<InspectionTemplateSelection>(dir, SELECTION_FILE);
+          const nextRevision = (existing.ok ? existing.value.revision ?? 0 : 0) + 1;
+          const updated: InspectionTemplateSelection = { ...selection, revision: nextRevision, _writeToken: writeToken };
+          await safeWriteJson(dir, SELECTION_FILE, updated);
+          const verify = await safeReadJson<InspectionTemplateSelection>(dir, SELECTION_FILE);
+          if (verify.ok && verify.value.revision === nextRevision && verify.value._writeToken === writeToken) {
+            return {
+              done: true,
+              result: { ok: true as const },
+              verify: async () => {
+                const recheck = await safeReadJson<InspectionTemplateSelection>(dir, SELECTION_FILE);
+                return recheck.ok && recheck.value.revision === nextRevision && recheck.value._writeToken === writeToken;
+              },
+            };
+          }
+          return { done: false };
+        },
+        { conflictError: "تعذّر حفظ اختيار القالب: تعارض في الكتابة بعد عدة محاولات." }
+      )
+    );
+    if (!outcome.ok) return { ok: false, error: outcome.error };
+    return { ok: true };
+```
+
+---
+
+
+## v43.2 — 2026-07-13 — C-11: backup folder name collision guard (random suffix)
+
+`backupFolderName` used only second-granularity timestamps, so two machines
+backing up in the same second would collide on an identical folder name, with
+one silently overwriting the other's snapshot. A short random base36 suffix
+was appended.
+
+**File:** `src/data/backup/backupStorage.ts`
+
+**Before:**
+```ts
+  return `${y}-${mo}-${d}T${h}-${m}-${s}-${mode}`;
+}
+```
+
+**After:**
+```ts
+  // Two machines backing up within the same second would otherwise collide on
+  // an identical folder name (one silently overwriting the other's snapshot).
+  // A short random base36 suffix keeps concurrent backups distinct.
+  const suffix = Math.random().toString(36).slice(2, 6).padStart(4, "0");
+  return `${y}-${mo}-${d}T${h}-${m}-${s}-${mode}-${suffix}`;
+}
+```
+
+---
+
+
+## v43.1 — 2026-07-13 — Unmapped / flagged: `userManagement.test.ts` (reports/kpi permission-ceiling tests)
+
+`src/auth/userManagement.test.ts` was in this task's file scope, but its
+uncommitted diff is entirely about the `reports/analytics` → `reports/kpi` tab
+rename and a new `TAB_ROLE_CEILINGS` guard test (supervisor gets `view` on
+`reports/kpi`, manager has no `settings` access, every non-`admin` default
+permission is checked against its tab's code role ceiling). Per
+`docs/audit/MASTER_AUDIT_2026-07-13.md`, this maps to **B-07**, which the audit
+explicitly assigns to **Wave 2 (Wiring & correctness)**, not Wave 1. It is
+recorded here only because the file was in-scope and modified; the
+orchestrator should likely move this section into a Wave 2 fragment rather
+than merge it under Wave 1.
+
+**File:** `src/auth/userManagement.test.ts`
+
+**Before:**
+```ts
+const ANALYTICS_TAB_ID = "reports/analytics";
+...
+test("MANAGED_TABS registers the analytics dashboard as a sub-tab of reports", () => {
+  const tab = MANAGED_TABS.find((t) => t.id === ANALYTICS_TAB_ID);
+  expect(tab).toBeDefined();
+  expect(tab?.parentId).toBe("reports");
+});
+
+test("createDefaultPermissions defines reports/analytics for every role", () => {
+  const perms = createDefaultPermissions();
+  for (const role of ALL_ROLES) {
+    const entry = perms.find((p) => p.role === role && p.tabId === ANALYTICS_TAB_ID);
+    expect(entry, `missing reports/analytics permission for role ${role}`).toBeDefined();
+  }
+});
+...
+test("reports/analytics defaults to allowed for manager + admin only", () => {
+  const perms = createDefaultPermissions();
+  const accessFor = (role: AuthRole) =>
+    perms.find((p) => p.role === role && p.tabId === ANALYTICS_TAB_ID)?.access;
+
+  expect(accessFor("manager")).not.toBe("none");
+  expect(accessFor("admin")).not.toBe("none");
+  expect(accessFor("admin")).toBe("edit");
+  expect(accessFor("guest")).toBe("none");
+  expect(accessFor("employee")).toBe("none");
+  expect(accessFor("supervisor")).toBe("none");
+});
+```
+
+**After:**
+```ts
+const KPI_TAB_ID = "reports/kpi";
+...
+test("MANAGED_TABS registers the KPI dashboard as a sub-tab of reports and no longer has the stale analytics key", () => {
+  const kpi = MANAGED_TABS.find((t) => t.id === KPI_TAB_ID);
+  expect(kpi).toBeDefined();
+  expect(kpi?.parentId).toBe("reports");
+  expect(MANAGED_TABS.find((t) => t.id === "reports/analytics")).toBeUndefined();
+});
+
+test("createDefaultPermissions defines reports/kpi for every role", () => {
+  const perms = createDefaultPermissions();
+  for (const role of ALL_ROLES) {
+    const entry = perms.find((p) => p.role === role && p.tabId === KPI_TAB_ID);
+    expect(entry, `missing reports/kpi permission for role ${role}`).toBeDefined();
+  }
+  expect(perms.some((p) => p.tabId === "reports/analytics")).toBe(false);
+});
+...
+test("reports/kpi defaults: supervisor view, manager+admin edit, others none", () => {
+  const perms = createDefaultPermissions();
+  const accessFor = (role: AuthRole) => getRolePermission(perms, role, KPI_TAB_ID);
+
+  expect(accessFor("admin")).toBe("edit");
+  expect(accessFor("manager")).toBe("edit");
+  expect(accessFor("supervisor")).toBe("view");
+  expect(accessFor("employee")).toBe("none");
+  expect(accessFor("guest")).toBe("none");
+});
+
+test("every non-'none' default permission stays within its tab's code role ceiling", () => {
+  const perms = createDefaultPermissions();
+  for (const p of perms) {
+    if (p.role === "admin" || p.access === "none") continue;
+    const topLevelTabId = MANAGED_TABS.find((t) => t.id === p.tabId)?.parentId ?? p.tabId;
+    const ceiling = TAB_ROLE_CEILINGS[topLevelTabId];
+    if (!ceiling) continue;
+    expect(ceiling.includes(p.role), `${p.role}:${p.tabId} default="${p.access}" is outside the code ceiling`).toBe(true);
+  }
+});
+
+test("manager has no settings access by default (matches code ceiling)", () => {
+  const perms = createDefaultPermissions();
+  expect(getRolePermission(perms, "manager", "settings")).toBe("none");
+});
+```
+
+---
+
+
+## v43 — 2026-07-13 — C-12: not found in diff scope
+
+The audit lists C-12 (`safeWriteJson` lock key uses leaf dir name only —
+cross-month lock collisions) as part of Wave 1, but `git diff` shows **no
+uncommitted changes to `src/data/storage/safeWrite.ts`** (it was not in this
+task's file scope either, and a targeted `git diff --stat` on
+`src/data/storage/` confirms only `casLoop.ts`, `casLoop.test.ts`, and
+`fileSystemAccess.ts`/`.test.ts` are modified there). Flagging this as a gap:
+either C-12 was already committed previously, is tracked in a different
+in-progress wave/agent not covered by this reconstruction, or the fix has not
+actually landed yet on disk.
+
 ## v42.85 — 2026-07-12 — dead code (hardening-2026-07-08): de-export 4 internal-only helpers; leave a 5th (now fully dead, not just internal) alone
 
 Full-sweep audit, Area 1 "Over-exported" bucket — functions used only inside their own

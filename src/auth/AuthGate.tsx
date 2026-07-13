@@ -47,12 +47,15 @@ import {
   getManagedLoginUsers,
   normalizeUsername,
   persistUserPasswordHash,
+  readUserManagementState,
   subscribeToUserManagementChanges,
   type ManagedLoginUser
 } from "./userManagement";
 import { ORGANIZATION_PATH_TEXT, ZATCA_LOGO_URL } from "../branding/organization";
 import { DEMO_WORKSPACE_NAME } from "../data/workspace/demoWorkspace";
 import { useWorkspace } from "../data/workspace/useWorkspace";
+import { syncUserManagementToDisk } from "../data/workspace/userSync";
+import { logRejection } from "../data/storage/errorLogger";
 
 type AuthGateProps = {
   children: ReactNode | ((session: AuthSession) => ReactNode);
@@ -126,6 +129,10 @@ export default function AuthGate({ children }: AuthGateProps) {
 
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState<MessageType>("");
+
+  // Login-screen banner shown after an involuntary logout (session expiry or a
+  // permission/role change that forced re-authentication).
+  const [logoutNotice, setLogoutNotice] = useState("");
 
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [adminPasscode, setAdminPasscode] = useState("");
@@ -203,6 +210,10 @@ export default function AuthGate({ children }: AuthGateProps) {
 
         if (!userStillExists) {
           clearSession();
+          // Notify on the next tick so the state updater stays side-effect-free.
+          queueMicrotask(() =>
+            setLogoutNotice("تم تحديث صلاحياتك، يرجى تسجيل الدخول مجدداً")
+          );
           return null;
         }
 
@@ -231,7 +242,16 @@ export default function AuthGate({ children }: AuthGateProps) {
     if (!session) return;
 
     recordAuthActivityHeartbeat();
-    const heartbeatId = window.setInterval(recordAuthActivityHeartbeat, 60_000);
+    const heartbeatId = window.setInterval(() => {
+      recordAuthActivityHeartbeat();
+      // Session-expiry watch: if the persisted session has vanished or aged out
+      // (sessionStorage cleared, 7-day TTL exceeded) while we still hold a session
+      // in state, drop to the login screen with a notice.
+      if (readRealSession() === null) {
+        setSession(null);
+        setLogoutNotice("انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً");
+      }
+    }, 60_000);
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === "hidden") recordAuthActivityHeartbeat();
@@ -265,6 +285,7 @@ export default function AuthGate({ children }: AuthGateProps) {
     setIsAdminModalOpen(false);
     setMessage("");
     setMessageType("");
+    setLogoutNotice("");
     setFailedAttempts(0);
     setLockoutUntil(null);
   }, [clearWorkspace]);
@@ -347,6 +368,7 @@ export default function AuthGate({ children }: AuthGateProps) {
   function applySession(nextSession: AuthSession): void {
     writeSession(nextSession);
     setSession(nextSession);
+    setLogoutNotice("");
   }
 
   async function loginAsEmployee(
@@ -398,6 +420,16 @@ export default function AuthGate({ children }: AuthGateProps) {
       try {
         const upgraded = await createPasswordHash(password);
         persistUserPasswordHash(user.id, upgraded);
+        // Persist the upgraded hash to the shared workspace file too — otherwise
+        // the Argon2id rehash lived only in this tab's runtime state and was lost
+        // on reload, re-triggering the upgrade every login. Fire-and-forget.
+        if (directoryHandle) {
+          void syncUserManagementToDisk(
+            directoryHandle,
+            readUserManagementState(),
+            user.username
+          ).catch(logRejection("authGate.persistRehash"));
+        }
       } catch {
         // ignore — login still succeeds with the existing hash
       }
@@ -521,6 +553,12 @@ export default function AuthGate({ children }: AuthGateProps) {
               <h2 id="authTitle">تسجيل الدخول</h2>
               <p>أدخل بياناتك للمتابعة</p>
             </div>
+
+            {logoutNotice && (
+              <div className="auth-message bad" role="alert" aria-live="assertive">
+                {logoutNotice}
+              </div>
+            )}
 
             {hasConfiguredUsers ? (
               <form

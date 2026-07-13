@@ -27,6 +27,21 @@ function employeeSamplesFileName(username: string): string {
   return `${safeWorkspaceFilePart(username)}.samples.json`;
 }
 
+/**
+ * Read the `sourceLogRevision` already persisted in a mirror file, or null when
+ * the file is absent/corrupt. Used by the monotonic write guard below.
+ */
+async function readMirrorRevision(
+  dir: DirectoryHandleLike,
+  fileName: string
+): Promise<number | null> {
+  const result = await safeReadJson<{ sourceLogRevision?: number }>(dir, fileName);
+  if (result.ok && typeof result.value.sourceLogRevision === "number") {
+    return result.value.sourceLogRevision;
+  }
+  return null;
+}
+
 export async function syncSampleMirrors(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
@@ -44,7 +59,14 @@ export async function syncSampleMirrors(
     entries: current.entries,
   };
 
-  await safeWriteJson(mainDir, MAIN_SAMPLES_FILE, mainFile);
+  // Monotonic guard: never let an older derivation (lower sourceLogRevision)
+  // clobber a mirror already written from a newer log revision. Two machines
+  // can derive concurrently; without this an out-of-order write would resurrect
+  // stale entries for readers of the mirror.
+  const existingMainRevision = await readMirrorRevision(mainDir, MAIN_SAMPLES_FILE);
+  if (existingMainRevision === null || existingMainRevision < sourceLogRevision) {
+    await safeWriteJson(mainDir, MAIN_SAMPLES_FILE, mainFile);
+  }
 
   const entriesByEmployee = new Map<string, DistributionEntry[]>();
   for (const entry of current.entries) {
@@ -54,19 +76,20 @@ export async function syncSampleMirrors(
   }
 
   await Promise.all(
-    [...entriesByEmployee.entries()].map(([username, entries]) =>
-      safeWriteJson<EmployeeSamplesFile>(
-        employeesDir,
-        employeeSamplesFileName(username),
-        {
-          monthFolderName,
-          username,
-          updatedAt,
-          sourceLogRevision,
-          entries,
-        }
-      )
-    )
+    [...entriesByEmployee.entries()].map(async ([username, entries]) => {
+      const fileName = employeeSamplesFileName(username);
+      const existingRevision = await readMirrorRevision(employeesDir, fileName);
+      if (existingRevision !== null && existingRevision >= sourceLogRevision) {
+        return; // a newer (or equal) derivation already wrote this mirror
+      }
+      await safeWriteJson<EmployeeSamplesFile>(employeesDir, fileName, {
+        monthFolderName,
+        username,
+        updatedAt,
+        sourceLogRevision,
+        entries,
+      });
+    })
   );
 }
 

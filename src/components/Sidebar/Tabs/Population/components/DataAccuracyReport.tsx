@@ -3,6 +3,7 @@ import { CheckCircle2, ChevronRight } from "lucide-react";
 import * as XLSX from "xlsx";
 import type { NormalizedRiskRow } from "../riskData/riskDataTypes";
 import type { NormalizedBiRow } from "../biData/biDataTypes";
+import { makeBiMatchKey } from "../processing/populationProcessor";
 import "./DataAccuracyReport.css";
 
 // ── column mapping definition ─────────────────────────────────────────────────
@@ -141,9 +142,12 @@ type CompareResult = {
 // ── computation ───────────────────────────────────────────────────────────────
 
 function compare(riskRows: NormalizedRiskRow[], biRows: NormalizedBiRow[]): CompareResult {
+  // Match on the SAME normalized ID+port key the population processor uses
+  // (makeBiMatchKey) so this accuracy report reflects the real BI→risk join —
+  // a bare `xrayImageId.trim()` key silently over- or under-counted matches.
   const biMap = new Map<string, NormalizedBiRow>();
   for (const b of biRows) {
-    if (b.xrayImageId) biMap.set(b.xrayImageId.trim(), b);
+    if (b.xrayImageId) biMap.set(makeBiMatchKey(b.xrayImageId, b.portName), b);
   }
 
   const colCounters: Record<string, { matched: number; mismatched: number }> = {};
@@ -156,7 +160,7 @@ function compare(riskRows: NormalizedRiskRow[], biRows: NormalizedBiRow[]): Comp
 
   for (const r of riskRows) {
     if (!r.xrayImageId) continue;
-    const b = biMap.get(r.xrayImageId.trim());
+    const b = biMap.get(makeBiMatchKey(r.xrayImageId, r.portName));
     if (!b) { onlyInRisk++; continue; }
     matchedIds++;
 
@@ -181,10 +185,12 @@ function compare(riskRows: NormalizedRiskRow[], biRows: NormalizedBiRow[]): Comp
     if (rowHasMismatch) rowsWithMismatch++;
   }
 
-  const riskIds = new Set(riskRows.map(r => r.xrayImageId?.trim()).filter(Boolean));
+  const riskKeys = new Set(
+    riskRows.filter(r => r.xrayImageId).map(r => makeBiMatchKey(r.xrayImageId, r.portName))
+  );
   let onlyInBi = 0;
   for (const b of biRows) {
-    if (b.xrayImageId && !riskIds.has(b.xrayImageId.trim())) onlyInBi++;
+    if (b.xrayImageId && !riskKeys.has(makeBiMatchKey(b.xrayImageId, b.portName))) onlyInBi++;
   }
 
   const totalComparisons = matchedIds * COLUMN_MAPPINGS.length;

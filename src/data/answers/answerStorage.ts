@@ -108,7 +108,14 @@ async function updateEmployeeAnswerFile(
       await safeWriteJson(dir, answerFileName(username), updated);
       const verify = await loadEmployeeAnswers(directoryHandle, monthFolderName, username);
       if (verify.revision === nextRevision && verify._writeToken === writeToken) {
-        return { done: true, result: { ok: true as const } };
+        return {
+          done: true,
+          result: { ok: true as const },
+          verify: async () => {
+            const recheck = await loadEmployeeAnswers(directoryHandle, monthFolderName, username);
+            return recheck.revision === nextRevision && recheck._writeToken === writeToken;
+          },
+        };
       }
       return { done: false };
     },

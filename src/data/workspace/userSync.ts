@@ -106,7 +106,21 @@ export async function syncUserManagementToDisk(
           verify.file.metadata.revision === nextRevision &&
           verify.file.metadata._writeToken === writeToken
         ) {
-          return { done: true, result: { ok: true as const } };
+          return {
+            done: true,
+            result: { ok: true as const },
+            verify: async () => {
+              const recheck = await readJsonFile<UsersPermissionsFile>(
+                userDataDir,
+                WORKSPACE_FILE_NAMES.usersPermissions
+              );
+              return (
+                recheck.ok &&
+                recheck.file.metadata.revision === nextRevision &&
+                recheck.file.metadata._writeToken === writeToken
+              );
+            },
+          };
         }
         return { done: false };
       },

@@ -92,7 +92,16 @@ export async function appendDistributionEvents(
       await safeWriteJson(dir, LOG_FILE, updated);
       const verify = await loadDistributionLog(directoryHandle, monthFolderName);
       if (verify.revision === nextRevision && verify._writeToken === writeToken) {
-        return { done: true, result: { ok: true as const } };
+        return {
+          done: true,
+          result: { ok: true as const },
+          // Delayed re-read guards against a concurrent machine that read the
+          // same base revision and clobbered our commit after this read-back.
+          verify: async () => {
+            const recheck = await loadDistributionLog(directoryHandle, monthFolderName);
+            return recheck.revision === nextRevision && recheck._writeToken === writeToken;
+          },
+        };
       }
       return { done: false };
     },

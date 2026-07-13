@@ -104,10 +104,30 @@ describe("referralStorage", () => {
     });
 
     const log = await loadReferralLog(root, "5-May-2026");
-    expect(log.requests[0].status).toBe("approved");
+    // First-wins: the earliest decision (denied) is authoritative; the later
+    // "approved" correction is retained in history but does not override it.
+    expect(log.requests[0].status).toBe("denied");
     expect(log.requests[0].history).toHaveLength(2);
     expect(log.requests[0].history?.[0].status).toBe("denied");
     expect(log.requests[0].history?.[1].status).toBe("approved");
+  });
+
+  it("cross-supervisor: the earliest decision is authoritative (first-wins)", async () => {
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    await appendReferralRequest(root, "5-May-2026", mockReferral("req-1", "alice", "bob"));
+
+    // Two reviewers each decide the same request in their own file. sup-1 acted
+    // first (earlier reviewedAt); sup-2's later denial must NOT override it.
+    await updateReferralStatus(root, "5-May-2026", "req-1", {
+      status: "approved", reviewedBy: "sup-1", reviewedAt: "2026-07-01T10:00:00.000Z",
+    });
+    await updateReferralStatus(root, "5-May-2026", "req-1", {
+      status: "denied", reviewedBy: "sup-2", reviewedAt: "2026-07-02T10:00:00.000Z",
+    });
+
+    const log = await loadReferralLog(root, "5-May-2026");
+    expect(log.requests[0].status).toBe("approved");
+    expect(log.requests[0].reviewedBy).toBe("sup-1");
   });
 
   it("two concurrent referral decisions on different requests both persist (cross-machine CAS)", async () => {
@@ -195,7 +215,8 @@ describe("replacement requests in referralStorage", () => {
     });
 
     const log = await loadReplacementLog(root, "5-May-2026");
-    expect(log.requests[0].status).toBe("approved");
+    // First-wins: earliest decision (denied) stands; later approval is in history.
+    expect(log.requests[0].status).toBe("denied");
     expect(log.requests[0].history).toHaveLength(2);
   });
 });

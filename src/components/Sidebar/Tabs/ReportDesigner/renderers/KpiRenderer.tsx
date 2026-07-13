@@ -3,6 +3,13 @@ import type { CSSProperties } from "react";
 import type { Element, KpiConfig } from "../../../../../data/reportDesigner/reportTypes";
 import { useWorkspace } from "../../../../../data/workspace/useWorkspace";
 import { listMonthFolders, loadMonthPopulationFinal } from "../../../../../data/population/populationStorage";
+import { loadSampleMaster } from "../../../../../data/sampling/sampleStorage";
+import { loadOrDeriveDistributionCurrent } from "../../../../../data/distribution/distributionStorage";
+import { loadAllEmployeeFiles } from "../../../../../data/answers/answerStorage";
+import { buildExecutiveReportRows } from "../../../../../data/reporting/executiveReportData";
+import { DEFAULT_EXEC_CONFIG } from "../../../../../data/reporting/executiveReportTypes";
+import type { PreparedPopulationRow } from "../../../../../data/population/populationTypes";
+import { aggregate } from "../../../../../data/reportDesigner/query/aggregations";
 
 const AGG_LABELS: Record<string, string> = {
   count: "عدد",
@@ -46,46 +53,57 @@ function computeResult(rows: Array<Record<string, unknown>>, config: KpiConfig):
     return { kind: "breakdown", rows: sorted, total: rows.length };
   }
 
-  switch (config.agg) {
-    case "count":
-      return { kind: "number", value: vals.filter((v) => v != null).length };
-    case "distinctCount": {
-      const unique = Array.from(new Set(vals.filter((v) => v != null).map(toLabel)));
-      if (unique.length <= 8) return { kind: "tags", values: unique };
-      return { kind: "number", value: unique.length };
-    }
-    case "sum":
-      return { kind: "number", value: vals.reduce<number>((acc, v) => acc + (typeof v === "number" ? v : 0), 0) };
-    case "avg": {
-      const nums = vals.filter((v) => v != null).map(Number).filter((n) => !isNaN(n));
-      return { kind: "number", value: nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0 };
-    }
-    case "min": {
-      const nums = vals.filter((v) => v != null).map(Number).filter((n) => !isNaN(n));
-      return { kind: "number", value: nums.length ? Math.min(...nums) : 0 };
-    }
-    case "max": {
-      const nums = vals.filter((v) => v != null).map(Number).filter((n) => !isNaN(n));
-      return { kind: "number", value: nums.length ? Math.max(...nums) : 0 };
-    }
-    default:
-      return { kind: "number", value: 0 };
+  // distinctCount with small cardinality → render the distinct values as chips.
+  if (config.agg === "distinctCount") {
+    const unique = Array.from(new Set(vals.filter((v) => v != null).map(toLabel)));
+    if (unique.length <= 8) return { kind: "tags", values: unique };
+    return { kind: "number", value: unique.length };
   }
+
+  // All other aggregations delegate to the shared report-designer aggregator so
+  // KPI cards match the rest of the report engine exactly.
+  return { kind: "number", value: aggregate(config.agg, vals) };
 }
 
-function usePopulationData(): Array<Record<string, unknown>> | null {
+/**
+ * Loads the latest month and builds the executive report rows the same way the
+ * Power BI export does (`buildExecutiveReportRows`). The KPI field catalog mirrors
+ * `ExecutiveReportRow`, so feeding raw `population.final.json` rows made most
+ * fields silently compute 0 — this hook feeds the real, enriched rows instead.
+ */
+function useExecutiveRows(): Array<Record<string, unknown>> | null {
   const { directoryHandle } = useWorkspace();
   const [rows, setRows] = useState<Array<Record<string, unknown>> | null>(null);
 
   useEffect(() => {
     if (!directoryHandle) return;
+    const root = directoryHandle;
     let cancelled = false;
     async function load() {
-      const months = await listMonthFolders(directoryHandle!);
+      const months = await listMonthFolders(root);
       if (months.length === 0 || cancelled) return;
-      const latest = months[months.length - 1];
-      const pop = await loadMonthPopulationFinal(directoryHandle!, latest.folderName);
-      if (!cancelled) setRows(pop ? pop.rows : null);
+      const month = months[months.length - 1].folderName;
+
+      const populationData = await loadMonthPopulationFinal(root, month);
+      const sample = await loadSampleMaster(root, month);
+      const sampleRows = sample?.rows ?? [];
+      const distribution = await loadOrDeriveDistributionCurrent(root, month, sampleRows);
+      const employeeFiles = await loadAllEmployeeFiles(root, month);
+      if (cancelled) return;
+
+      const execRows = buildExecutiveReportRows({
+        monthFolderName: month,
+        populationRows: (populationData?.rows ?? []) as PreparedPopulationRow[],
+        sample: sample ?? null,
+        distribution: distribution ?? null,
+        employeeFiles,
+        template: null,
+        config: DEFAULT_EXEC_CONFIG,
+      });
+
+      if (!cancelled) {
+        setRows(execRows.map((r) => r as Record<string, unknown>));
+      }
     }
     void load();
     return () => { cancelled = true; };
@@ -101,7 +119,7 @@ interface KpiRendererProps {
 export default function KpiRenderer({ element }: KpiRendererProps) {
   const config = element.config as KpiConfig;
   const s = element.style;
-  const rows = usePopulationData();
+  const rows = useExecutiveRows();
 
   const result: KpiResult = rows ? computeResult(rows, config) : { kind: "number", value: -1 };
   const isLoading = rows === null;

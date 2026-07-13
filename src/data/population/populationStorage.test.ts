@@ -3,6 +3,7 @@ import { expect, it, test } from "vitest";
 import { createMemoryDirectory } from "../storage/memoryDirectory";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { saveMonthRun, loadAllSampleRows, updateMonthStatus } from "./populationStorage";
+import { saveSampleMaster } from "../sampling/sampleStorage";
 import type { MonthManifestData, MonthRawData, PopulationFinalData } from "./monthTypes";
 import type { SampleMasterData } from "../sampling/sampleTypes";
 
@@ -89,6 +90,42 @@ test("saveMonthRun does not write bi.raw.json when no BI rows", async () => {
   const biRaw = await safeReadJson(rawDir, "bi.raw.json");
   expect(biRaw.ok).toBe(false);
   expect((biRaw as { reason: string }).reason).toBe("missing");
+});
+
+function makeSample(): SampleMasterData {
+  return {
+    rngSeed: "seed",
+    totalRequested: 1,
+    totalActual: 1,
+    certScanRequested: 0,
+    nonCertScanRequested: 1,
+    certScanActual: 0,
+    nonCertScanActual: 1,
+    portAllocations: [],
+    stageAllocations: [],
+    drawnAt: new Date().toISOString(),
+    drawnBy: "admin",
+    rows: [{ xrayImageId: "A001" } as never],
+  };
+}
+
+test("saveMonthRun aborts (sampleExists) when a sample was drawn and overwrite is not confirmed", async () => {
+  const dir = createMemoryDirectory();
+  await saveMonthRun({ directoryHandle: dir, ...baseParams });
+
+  // A sample is drawn (e.g. by another machine) after the population was saved.
+  await saveSampleMaster(dir, "5-may-2026", makeSample());
+
+  // Re-processing without explicit confirmation must abort under the lock.
+  const blocked = await saveMonthRun({ directoryHandle: dir, ...baseParams });
+  expect(blocked.ok).toBe(false);
+  if (!blocked.ok) {
+    expect(blocked.sampleExists).toBe(true);
+  }
+
+  // With confirmedOverwrite the save proceeds.
+  const forced = await saveMonthRun({ directoryHandle: dir, ...baseParams, confirmedOverwrite: true });
+  expect(forced.ok).toBe(true);
 });
 
 test("updateMonthStatus survives concurrent advances without losing the higher status (cross-machine CAS)", async () => {

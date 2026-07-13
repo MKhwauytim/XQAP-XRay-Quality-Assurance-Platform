@@ -105,7 +105,6 @@ export const MANAGED_TABS: readonly ManagedTab[] = [
   { id: "reports",                 label: "إدارة التقارير" },
   { id: "reports/reports",         label: "التقارير",              parentId: "reports" },
   { id: "reports/kpi",             label: "مؤشرات الأداء",          parentId: "reports" },
-  { id: "reports/analytics",       label: "لوحة التحليلات التنفيذية", parentId: "reports" },
   { id: "reports/report-designer", label: "مصمم التقارير",          parentId: "reports" },
   { id: "archive",                 label: "إدارة الأرشيف" },
   { id: "user-management",         label: "إدارة المستخدمين" },
@@ -116,6 +115,24 @@ export const MANAGED_TABS: readonly ManagedTab[] = [
   { id: "settings",                label: "إدارة الإعدادات" },
   { id: "change-log",              label: "سجل الإصدارات" },
 ];
+
+// ── Top-level tab role ceilings ───────────────────────────────────────────────
+// Mirrors each tab's hardcoded `tabConfig.allowedRoles` (the code-level ceiling).
+// The permission matrix cannot grant a role access to a tab its code never mounts,
+// so the UI disables (locks) those role×tab cells. Sub-tabs inherit their parent's
+// ceiling. KEEP IN SYNC with the `allowedRoles` in each Tabs/*/index.tsx tabConfig.
+// (Hardcoded here rather than derived from the tab registry to avoid an import
+// cycle: userManagement.ts is a leaf; the registry eagerly imports tab modules
+// that in turn import from this file.)
+export const TAB_ROLE_CEILINGS: Readonly<Record<string, readonly AuthRole[]>> = {
+  "population":         ["guest", "employee", "supervisor", "manager", "admin"],
+  "employee-workspace": ["guest", "employee", "supervisor", "manager", "admin"],
+  "reports":            ["guest", "supervisor", "manager", "admin"],
+  "archive":            ["guest", "supervisor", "manager", "admin"],
+  "user-management":    ["admin"],
+  "settings":           ["guest", "admin"],
+  "change-log":         ["admin"],
+};
 
 // ── Feature catalogue ─────────────────────────────────────────────────────────
 
@@ -364,7 +381,9 @@ export function createDefaultPermissions(): RolePermission[] {
     { role: "manager",    tabId: "reports/report-designer", access: "edit" },
     { role: "manager",    tabId: "archive",            access: "edit" },
     { role: "manager",    tabId: "user-management",    access: "none" },
-    { role: "manager",    tabId: "settings",           access: "edit" },
+    // Settings is code-gated to guest + admin (see TAB_ROLE_CEILINGS); manager
+    // has no access, so the shipped default is "none" to match reality.
+    { role: "manager",    tabId: "settings",           access: "none" },
     // Admin (bootstrap) — always full, locked in normalizer
     { role: "admin",      tabId: "population",              access: "edit" },
     { role: "admin",      tabId: "employee-workspace",      access: "edit" },
@@ -408,12 +427,6 @@ export function createDefaultPermissions(): RolePermission[] {
     { role: "supervisor", tabId: "ew/notifications",        access: "none" },
     { role: "manager",    tabId: "ew/notifications",        access: "edit" },
     { role: "admin",      tabId: "ew/notifications",        access: "edit" },
-    // Analytics dashboard (reports/analytics) — defaults to manager + admin only
-    { role: "guest",      tabId: "reports/analytics",       access: "none" },
-    { role: "employee",   tabId: "reports/analytics",       access: "none" },
-    { role: "supervisor", tabId: "reports/analytics",       access: "none" },
-    { role: "manager",    tabId: "reports/analytics",       access: "view" },
-    { role: "admin",      tabId: "reports/analytics",       access: "edit" },
     // Change log (version & edit history) — admin-only
     { role: "guest",      tabId: "change-log",              access: "none" },
     { role: "employee",   tabId: "change-log",              access: "none" },

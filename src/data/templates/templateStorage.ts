@@ -44,6 +44,56 @@ async function updateTemplateIndex(
   }
 }
 
+/**
+ * CAS read-modify-write of the shared per-id `{templateId}.json` document. Two
+ * admins on two machines can edit the same template concurrently; casLoop bumps
+ * `revision`, stamps `_writeToken`, and verifies both on read-back (plus a
+ * delayed re-verify) so a concurrent clobber fails loudly and retries rather
+ * than silently overwriting the other admin's edit.
+ */
+async function saveTemplateFile(
+  dir: DirectoryHandleLike,
+  schema: TemplateSchema
+): Promise<void> {
+  const fileName = `${schema.templateId}.json`;
+  const outcome = await casLoop<{ ok: true }>(
+    async (writeToken) => {
+      const existing = await safeReadJson<TemplateSchema>(dir, fileName);
+      const nextRevision = (existing.ok ? existing.value.revision ?? 0 : 0) + 1;
+      const updated: TemplateSchema = {
+        ...schema,
+        revision: nextRevision,
+        _writeToken: writeToken,
+      };
+      await safeWriteJson(dir, fileName, updated);
+      const verify = await safeReadJson<TemplateSchema>(dir, fileName);
+      if (
+        verify.ok &&
+        verify.value.revision === nextRevision &&
+        verify.value._writeToken === writeToken
+      ) {
+        return {
+          done: true,
+          result: { ok: true as const },
+          verify: async () => {
+            const recheck = await safeReadJson<TemplateSchema>(dir, fileName);
+            return (
+              recheck.ok &&
+              recheck.value.revision === nextRevision &&
+              recheck.value._writeToken === writeToken
+            );
+          },
+        };
+      }
+      return { done: false };
+    },
+    { conflictError: "تعذّر حفظ القالب: تعارض في الكتابة بعد عدة محاولات." }
+  );
+  if (!outcome.ok) {
+    throw new Error(outcome.error);
+  }
+}
+
 const INDEX_FILE = "templates.index.json";
 const SELECTION_FILE = "template.selection.json";
 
@@ -64,9 +114,10 @@ export async function saveTemplate(
 
     const dir = await getTemplatesDir(directoryHandle);
     await withResourceLock(`${dir.name}/templates-index`, async () => {
-      const fileName = `${schema.templateId}.json`;
-      // Per-id doc — single writer by id, safe to write once outside the CAS loop.
-      await safeWriteJson(dir, fileName, schema);
+      // Shared per-id doc — two admins on two machines can edit the same
+      // template. CAS (revision + _writeToken, verified on read-back) makes a
+      // concurrent clobber fail loudly and retry instead of silently winning.
+      await saveTemplateFile(dir, schema);
 
       await updateTemplateIndex(dir, (templates) =>
         [

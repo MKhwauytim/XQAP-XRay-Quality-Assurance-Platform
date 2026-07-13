@@ -84,8 +84,10 @@ describe("approvalStorage decision events", () => {
 
     const history = mergeDecisionHistory(files, "referral", "req-1");
     expect(history.map((e) => e.reviewedBy)).toEqual(["sup-1", "sup-2", "sup-1"]);
-    expect(effectiveDecision(history)?.status).toBe("approved");
-    expect(effectiveDecision(history)?.reviewedAt).toBe("2026-07-03T09:00:00.000Z");
+    // First-wins: the EARLIEST decision is authoritative (sup-1 denied @ 07-01),
+    // not the most recent one — deterministic across per-supervisor files.
+    expect(effectiveDecision(history)?.status).toBe("denied");
+    expect(effectiveDecision(history)?.reviewedAt).toBe("2026-07-01T09:00:00.000Z");
   });
 
   it("returns undefined for a request with no history", () => {

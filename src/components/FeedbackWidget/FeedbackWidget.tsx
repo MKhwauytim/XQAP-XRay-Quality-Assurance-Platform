@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, X } from "lucide-react";
+import { Check, MessageCircle, X } from "lucide-react";
 import { readSession } from "../../auth/authSession";
 import type { AuthRole } from "../../auth/authTypes";
 import {
@@ -129,8 +129,27 @@ export function FeedbackWidget() {
     filter === "all" ? true : m.status === filter
   );
 
+  // Non-admin authenticated roles have no toolbar feedback button (that trigger
+  // is admin-only in AdminToolbar). Give them a self-contained floating trigger so
+  // everyone can reach the feedback panel. Admins/demo (role "admin") are excluded
+  // to avoid a duplicate trigger.
+  const showFloatingTrigger = Boolean(session) && session?.role !== "admin";
+
   return (
     <>
+      {/* Floating trigger (non-admin roles only) */}
+      {showFloatingTrigger && !open && (
+        <button
+          type="button"
+          className="fb-fab"
+          aria-label="التواصل والاقتراحات"
+          title="التواصل والاقتراحات"
+          onClick={() => window.dispatchEvent(new CustomEvent("feedback:toggle"))}
+        >
+          <MessageCircle size={22} aria-hidden />
+        </button>
+      )}
+
       {/* Panel */}
       {open && (
         <div className="fb-panel" ref={panelRef}>

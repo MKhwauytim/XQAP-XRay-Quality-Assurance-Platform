@@ -49,6 +49,10 @@ export type TemplateSchema = {
   updatedBy: string;
   phases?: TemplatePhase[];
   fields: TemplateField[];
+  /** Monotonic CAS revision for the shared, multi-admin `{templateId}.json` doc. */
+  revision?: number;
+  /** Per-write UUID embedded by casLoop for cross-machine race detection. */
+  _writeToken?: string;
 };
 
 export type TemplateIndex = {

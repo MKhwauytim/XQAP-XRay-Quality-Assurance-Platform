@@ -63,6 +63,7 @@ import {
   loadAdminBrowsePreset,
   loadUserBrowsePreset,
   saveAdminBrowseDatasetPreset,
+  saveUserBrowseDatasetPreset,
 } from "../../../../../data/preferences/browsePresetStorage";
 import InspectionPanel from "../../../../../components/InspectionPanel";
 import {
@@ -318,7 +319,9 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       loadUserBrowsePreset(directoryHandle, username),
     ])
       .then(([adminFile, userFile]) => {
-      const p = adminFile.browseData[REFERRALS_PRESET_KEY] ?? userFile.browseData[REFERRALS_PRESET_KEY];
+      // Personal-over-admin: a user's own saved column layout wins; the admin
+      // shared preset is only the default for users who never customized.
+      const p = userFile.browseData[REFERRALS_PRESET_KEY] ?? adminFile.browseData[REFERRALS_PRESET_KEY];
       if (p) {
         setColPreset({
           order:   p.columnOrder,
@@ -450,9 +453,12 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       // Samples with a pending outgoing referral are hidden from the requesting employee
       const pendingIds = canSeeAll ? new Set<string>() : getPendingReferralIds(referralLog, username);
 
+      // Filter over `all` (fresh derived dist first; the personal mirror is only
+      // the fallback baked into `all` when dist is null). Preferring the mirror
+      // here would show a stale snapshot even when a fresh derivation exists.
       const visible = canSeeAll
         ? all
-        : (personalMirror?.entries ?? all).filter(
+        : all.filter(
             (e) =>
               e.assignedTo === username &&
               e.status !== "replaced" &&
@@ -617,6 +623,34 @@ export default function XrayReferrals({ directoryHandle }: Props) {
 
     try {
       if (fromRecommended) {
+        // Freshness re-check (mirror approveReferral): the rendered candidate
+        // list can be seconds stale on a shared folder. Reload the live state
+        // and confirm (a) the dead row is still owned by the same employee and
+        // still replacement-eligible, and (b) the chosen replacement is not
+        // already sampled or owned — otherwise a concurrent action already used
+        // one side and committing would double-assign / orphan.
+        const freshSample = await loadSampleMaster(directoryHandle, selMonth);
+        const freshRows = (freshSample?.rows ?? []) as PreparedPopulationRow[];
+        const freshDist = await loadOrDeriveDistributionCurrent(directoryHandle, selMonth, freshRows);
+        const STALE_MSG = "البيانات تغيّرت، حدّث الصفحة";
+
+        const freshDead = freshDist?.entries.find((e) => e.xrayImageId === entry.xrayImageId);
+        const deadStillEligible =
+          !!freshDead &&
+          freshDead.assignedTo === entry.assignedTo &&
+          (freshDead.status === "pending" || freshDead.status === "replacement-requested");
+
+        const replacementTaken =
+          freshRows.some((r) => r.xrayImageId === replacement.xrayImageId) ||
+          (freshDist?.entries.some((e) => e.xrayImageId === replacement.xrayImageId) ?? false);
+
+        if (!deadStillEligible || replacementTaken) {
+          setReplacementError(STALE_MSG);
+          setStatusMsg({ type: "error", text: STALE_MSG });
+          await loadData();
+          return;
+        }
+
         // Immediate replacement — no approval needed.
         const result = await executeReplacement({
           directoryHandle,
@@ -857,6 +891,9 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                   widths:         cfg.widths,
                   dateFmt:        cfg.dateFmt,
                 };
+                // Every user persists their own personal layout (isolated).
+                void saveUserBrowseDatasetPreset(directoryHandle, username, REFERRALS_PRESET_KEY, preset);
+                // Admins/permitted users additionally update the shared default.
                 if (canConfigureColumns) {
                   void saveAdminBrowseDatasetPreset(directoryHandle, REFERRALS_PRESET_KEY, preset);
                 }

@@ -182,7 +182,14 @@ export async function appendSampleRow(
       }
       const verify = await loadSampleMaster(directoryHandle, monthFolderName);
       if (verify?.revision === nextRevision && verify._writeToken === writeToken) {
-        return { done: true, result: { ok: true as const, data: updated } };
+        return {
+          done: true,
+          result: { ok: true as const, data: updated },
+          verify: async () => {
+            const recheck = await loadSampleMaster(directoryHandle, monthFolderName);
+            return recheck?.revision === nextRevision && recheck._writeToken === writeToken;
+          },
+        };
       }
       return { done: false };
     },

@@ -331,6 +331,38 @@ export async function readJsonFile<TFile>(
   directoryHandle: DirectoryHandleLike,
   fileName: string
 ): Promise<ReadJsonResult<NonNullable<TFile>>> {
+  const primary = await readAndParseJsonFile<TFile>(directoryHandle, fileName);
+  if (primary.ok) {
+    return primary;
+  }
+
+  // A torn write (safeWriteJson stages/commits without an atomic rename) can
+  // leave the live file missing or truncated. Mirror safeReadJson's recovery:
+  // fall back to the `{file}.bak` snapshot so bootstrap files (workspace.manifest
+  // .json, users.permissions.json) don't brick workspace entry. Permission /
+  // read failures are NOT recoverable here — pass them through unchanged.
+  if (primary.reason === "missing" || primary.reason === "invalid_json") {
+    const backup = await readAndParseJsonFile<TFile>(
+      directoryHandle,
+      `${fileName}.bak`
+    );
+    if (backup.ok) {
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("data:recovered-from-bak", { detail: { fileName } })
+        );
+      }
+      return backup;
+    }
+  }
+
+  return primary;
+}
+
+async function readAndParseJsonFile<TFile>(
+  directoryHandle: DirectoryHandleLike,
+  fileName: string
+): Promise<ReadJsonResult<NonNullable<TFile>>> {
   try {
     const fileHandle = await directoryHandle.getFileHandle(fileName, {
       create: false

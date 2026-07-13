@@ -175,7 +175,9 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
       loadUserBrowsePreset(directoryHandle, username),
     ])
       .then(([adminFile, userFile]) => {
-        const preset = adminFile.browseData[REFERRALS_PRESET_KEY] ?? userFile.browseData[REFERRALS_PRESET_KEY];
+        // Personal-over-admin: a user's own saved layout wins; the admin shared
+        // preset is only the default for users who never customized their columns.
+        const preset = userFile.browseData[REFERRALS_PRESET_KEY] ?? adminFile.browseData[REFERRALS_PRESET_KEY];
         if (preset) {
           setReferralColConfig({
             order: preset.columnOrder,

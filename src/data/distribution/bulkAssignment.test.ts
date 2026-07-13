@@ -3,6 +3,7 @@ import type { PreparedPopulationRow } from "../population/populationTypes";
 import type { EmployeeStageAllocation } from "../population/populationConfig";
 import type { ManagedLoginUser } from "../../auth/userManagement";
 import type { PasswordHashRecord } from "../../auth/passwordCrypto";
+import type { DistributionEntry } from "./distributionTypes";
 import { calculateBulkAssignment } from "./bulkAssignment";
 
 function makeUser(
@@ -136,6 +137,63 @@ test("calculateBulkAssignment fails for CertScan rows if no employee has CertSca
   expect(result.errors).toHaveLength(1);
   expect(result.errors[0]).toContain("خطأ: توجد سجلات CertScan");
   expect(result.events).toHaveLength(0);
+});
+
+function makeEntry(id: string, status: DistributionEntry["status"], assignedTo = "emp"): DistributionEntry {
+  return {
+    xrayImageId: id,
+    assignedTo,
+    status,
+    replacedById: null,
+    lastEventAt: "",
+    row: makeRow(id, "SECOND_STAGE", "NonCertscan"),
+  };
+}
+
+test("re-running bulk assignment emits zero duplicate events for already-owned/completed rows", () => {
+  const rows = [
+    makeRow("img-1", "SECOND_STAGE", "NonCertscan"),
+    makeRow("img-2", "SECOND_STAGE", "NonCertscan"),
+    makeRow("img-3", "SECOND_STAGE", "NonCertscan"),
+  ];
+  const allocations: EmployeeStageAllocation[] = [
+    { username: "emp", stageKey: "second", method: "percentage", value: 100, isActive: true },
+  ];
+  const employees = [makeUser("emp", "employee")];
+
+  // img-1 completed, img-2 already assigned/pending — both must be skipped.
+  const existingEntries: DistributionEntry[] = [
+    makeEntry("img-1", "completed"),
+    makeEntry("img-2", "pending"),
+  ];
+
+  const result = calculateBulkAssignment({
+    rows,
+    allocations,
+    employees,
+    operatorUsername: "test",
+    existingEntries,
+  });
+
+  expect(result.skipped).toBe(2);
+  expect(result.events).toHaveLength(1);
+  expect(result.events[0]!.xrayImageId).toBe("img-3");
+});
+
+test("re-running bulk assignment with all rows already owned emits nothing", () => {
+  const rows = [makeRow("img-1", "SECOND_STAGE", "NonCertscan")];
+  const allocations: EmployeeStageAllocation[] = [
+    { username: "emp", stageKey: "second", method: "percentage", value: 100, isActive: true },
+  ];
+  const result = calculateBulkAssignment({
+    rows,
+    allocations,
+    employees: [makeUser("emp", "employee")],
+    operatorUsername: "test",
+    existingEntries: [makeEntry("img-1", "completed")],
+  });
+  expect(result.events).toHaveLength(0);
+  expect(result.skipped).toBe(1);
 });
 
 test("calculateBulkAssignment assigns CertScan records and normal records correctly", () => {

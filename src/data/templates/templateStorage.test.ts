@@ -84,6 +84,32 @@ describe("templateStorage", () => {
     expect(index.revision).toBe(2);
   });
 
+  it("serializes concurrent saves of the SAME template id via per-id CAS (no silent clobber)", async () => {
+    const root = createMemoryDirectory();
+    // Two admins on two PCs edit the same template at the same instant. The
+    // per-id template-file CAS (revision + _writeToken) must let BOTH writes
+    // participate so neither silently clobbers the other's read-modify-write.
+    await Promise.all([
+      saveTemplate(root, makeTemplate("tmpl-x", "name-a", 1)),
+      saveTemplate(root, makeTemplate("tmpl-x", "name-b", 2)),
+    ]);
+
+    const doc = await loadTemplate(root, "tmpl-x");
+    expect(doc).not.toBeNull();
+    expect(doc?.revision).toBe(2); // both writes went through the CAS chain
+
+    const index = await loadTemplateIndex(root);
+    expect(index.templates).toHaveLength(1); // one entry, not duplicated
+  });
+
+  it("stamps a CAS revision and write token on the saved template file", async () => {
+    const root = createMemoryDirectory();
+    await saveTemplate(root, makeTemplate("tmpl-c", "قالب ج"));
+    const doc = await loadTemplate(root, "tmpl-c");
+    expect(doc?.revision).toBe(1);
+    expect(typeof doc?._writeToken).toBe("string");
+  });
+
   it("creates a recoverable template backup before delete/tombstone", async () => {
     const root = createMemoryDirectory();
     await saveTemplate(root, makeTemplate("tmpl-a", "قالب أ"));

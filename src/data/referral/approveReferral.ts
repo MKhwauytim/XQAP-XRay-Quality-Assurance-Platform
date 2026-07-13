@@ -35,6 +35,11 @@ import { loadMonthPopulationFinal } from "../population/populationStorage";
 import { loadSampleMaster } from "../sampling/sampleStorage";
 import { reopenSubmittedAnswer } from "../answers/reopenAnswer";
 import {
+  effectiveDecision,
+  loadAllSupervisorDecisions,
+  mergeDecisionHistory,
+} from "../approvals/approvalStorage";
+import {
   loadReferralLog,
   loadReopenLog,
   loadReplacementLog,
@@ -113,7 +118,20 @@ export async function approveReferral(params: {
     }
   }
 
-  // 5. Record the decision. On failure the caller retries; step 2 skips re-emission.
+  // 5a. Cross-reviewer guard. Decisions live in per-supervisor files, so step 1's
+  //     merged view can miss a decision another reviewer wrote on a different
+  //     machine between our load and now. Re-scan EVERY reviewer's file right
+  //     before persisting; if any decision for this request already exists, abort.
+  const priorDecisions = mergeDecisionHistory(
+    await loadAllSupervisorDecisions(directoryHandle, monthFolderName),
+    "referral",
+    requestId
+  );
+  if (priorDecisions.length > 0) {
+    return { ok: false, code: "already-reviewed" };
+  }
+
+  // 5b. Record the decision. On failure the caller retries; step 2 skips re-emission.
   const updateResult = await updateReferralStatus(directoryHandle, monthFolderName, requestId, {
     status: "approved",
     reviewedBy,
@@ -122,6 +140,21 @@ export async function approveReferral(params: {
   });
   if (!updateResult.ok) {
     return { ok: false, code: "decision-failed", error: updateResult.error };
+  }
+
+  // 5c. First-wins reconciliation. Another reviewer's earlier decision may have
+  //     landed concurrently (each writes its own file, so 5a can still miss it).
+  //     Re-scan; if the authoritative (earliest) decision is not ours, surface a
+  //     conflict instead of reporting our write as the outcome.
+  const winner = effectiveDecision(
+    mergeDecisionHistory(
+      await loadAllSupervisorDecisions(directoryHandle, monthFolderName),
+      "referral",
+      requestId
+    )
+  );
+  if (winner && winner.reviewedBy !== reviewedBy) {
+    return { ok: false, code: "already-reviewed" };
   }
 
   return { ok: true, alreadyApplied };

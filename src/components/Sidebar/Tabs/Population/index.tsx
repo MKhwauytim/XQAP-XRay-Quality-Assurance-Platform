@@ -763,12 +763,13 @@ export default function PopulationTab() {
       return;
     }
 
-    await commitSaveToDisk(processingResult, riskResult);
+    await commitSaveToDisk(processingResult, riskResult, false);
   }
 
   async function commitSaveToDisk(
     processingResult: PopulationProcessingResult,
-    riskResult: RiskWorkbookResult
+    riskResult: RiskWorkbookResult,
+    confirmedOverwrite: boolean
   ): Promise<void> {
     if (!directoryHandle) return;
 
@@ -815,7 +816,8 @@ export default function PopulationTab() {
         sourceFiles: {
           risk: sourceFileMetadata(uploads.riskAgencyData.file),
           bi: sourceFileMetadata(uploads.businessIntelligenceData.file),
-        }
+        },
+        confirmedOverwrite,
       });
 
       if (result.ok) {
@@ -824,6 +826,10 @@ export default function PopulationTab() {
           text: `تم حفظ شهر ${result.monthFolderName} على القرص بنجاح.`
         });
         setMonthRefreshKey((k) => k + 1);
+      } else if (result.sampleExists) {
+        // A sample was drawn between the pre-check and the locked write (TOCTOU):
+        // prompt for explicit overwrite confirmation instead of silently failing.
+        setPendingReprocessSave({ processingResult, riskResult });
       } else {
         setSaveToDiskMessage({ type: "error", text: `فشل الحفظ: ${result.error}` });
       }
@@ -1025,13 +1031,23 @@ export default function PopulationTab() {
       return;
     }
     if (!directoryHandle || !sampleDrawResult) return;
+    const existing = distributionCurrent?.entries.find(
+      (e) => e.xrayImageId === xrayImageId
+    );
+    // A completed row is terminal for reassignment: moving it would either be
+    // dropped by the derivation guard or lose the submitted answer. Require the
+    // reopen flow first.
+    if (existing?.status === "completed") {
+      setDistributionMessage({
+        type: "error",
+        text: "لا يمكن إعادة تعيين عينة مكتملة — يجب إعادة فتحها أولاً عبر مسار إعادة الفتح.",
+      });
+      return;
+    }
     setIsDistributing(true);
     setDistributionMessage(null);
     const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
     const username = sessionRef.current?.username ?? "unknown";
-    const existing = distributionCurrent?.entries.find(
-      (e) => e.xrayImageId === xrayImageId
-    );
     const event = buildReassignEvent({
       xrayImageId,
       assignedTo: existing?.assignedTo ?? reassignedTo,
@@ -1192,6 +1208,18 @@ export default function PopulationTab() {
   async function moveToNextPhase(): Promise<void> {
     if (currentPhase === 1) {
       await processPhaseOneAndMoveNext();
+      return;
+    }
+
+    // Gate Phase 2→3 on a completed processing result, and Phase 3→4 on a drawn
+    // sample — mirror the Phase-1 gate so downstream phases never open with the
+    // data they depend on still missing.
+    if (currentPhase === 2 && !populationProcessingResult) {
+      setProcessingMessage("يجب إتمام معالجة المجتمع أولاً قبل الانتقال إلى سحب العينة.");
+      return;
+    }
+    if (currentPhase === 3 && !sampleDrawResult) {
+      setProcessingMessage("يجب إتمام سحب العينة أولاً قبل الانتقال إلى التوزيع.");
       return;
     }
 
@@ -1563,7 +1591,7 @@ export default function PopulationTab() {
           const pending = pendingReprocessSave;
           setPendingReprocessSave(null);
           if (pending) {
-            void commitSaveToDisk(pending.processingResult, pending.riskResult);
+            void commitSaveToDisk(pending.processingResult, pending.riskResult, true);
           }
         }}
         onCancel={() => {

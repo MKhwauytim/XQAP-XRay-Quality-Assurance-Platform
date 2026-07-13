@@ -9,12 +9,13 @@ import { logRejection } from "../../../../data/storage/errorLogger";
 import { listMonthFolders, loadMonthPopulationFinal, loadMonthForEditing } from "../../../../data/population/populationStorage";
 import { formatMonthFolderShortLabel } from "../../../../data/population/monthFolder";
 import type { PreparedPopulationRow } from "../../../../data/population/populationTypes";
-import { buildDistributionReport, buildDistributionXlsx } from "../../../../data/reporting/distributionReport";
-import { openOrDownload } from "../../../../data/reporting/htmlReport";
-import { buildSampleXlsx, openSampleReport } from "../../../../data/reporting/sampleReport";
+import { buildDistributionXlsx, openDistributionDocument, openDistributionDeck } from "../../../../data/reporting/distributionReport";
+import { buildSampleXlsx, openSampleReport, openSampleDeck } from "../../../../data/reporting/sampleReport";
 import { openExecutiveReport, buildExecutiveXlsx } from "../../../../data/reporting/executiveReport";
 import { openExecutiveDeck } from "../../../../data/reporting/executive/deck";
 import { openManagementReport } from "../../../../data/reporting/management/managementReport";
+import { openManagementDeck } from "../../../../data/reporting/management/managementDeck";
+import { buildManagementWorkbook } from "../../../../data/reporting/management/managementWorkbook";
 import { useLabels } from "../../../../data/labels/useLabels";
 import { buildReportModel } from "../../../../data/reporting/executive/model/reportModel";
 import type { ReportModel } from "../../../../data/reporting/executive/model/reportModel";
@@ -64,9 +65,13 @@ export const tabConfig: SidebarTabModule["tabConfig"] = {
   ],
 };
 
-type ReportType = "sample" | "sample-xlsx" | "sample-print" | "distribution" | "distribution-xlsx" | "distribution-print" | "executive" | "executive-xlsx" | "executive-deck" | "management";
-type ReportBaseType = "sample" | "distribution" | "executive";
-type ReportFormat = "html" | "xlsx" | "print" | "deck" | "document";
+type ReportType =
+  | "sample" | "sample-xlsx" | "sample-deck"
+  | "distribution" | "distribution-xlsx" | "distribution-deck"
+  | "executive" | "executive-xlsx" | "executive-deck"
+  | "management" | "management-xlsx" | "management-deck";
+type ReportBaseType = "sample" | "distribution" | "executive" | "management";
+type ReportFormat = "xlsx" | "deck" | "document";
 type ReportsSection = "reports" | "kpi";
 
 const KNOWN_REPORT_SECTIONS = new Set<ReportsSection>(["reports", "kpi"]);
@@ -105,7 +110,9 @@ function fmtPct(value: number | null | undefined): string {
 }
 
 function fmtCount(value: number | null | undefined): string {
-  return value != null && Number.isFinite(value) ? value.toLocaleString("ar-SA") : "—";
+  // App standard is Latin (Western) digits — "ar-SA-u-nu-latn" — not the
+  // Arabic-Indic digits "ar-SA" yields (audit C-10).
+  return value != null && Number.isFinite(value) ? value.toLocaleString("ar-SA-u-nu-latn") : "—";
 }
 
 /** username → display name map for reviewers, from managed users. */
@@ -131,8 +138,9 @@ function ReportsContent() {
   const [generating, setGenerating] = useState<ReportType | null>(null);
   const [formats, setFormats] = useState<Record<ReportBaseType, ReportFormat>>({
     executive: "document",
-    sample: "html",
-    distribution: "html",
+    sample: "document",
+    distribution: "document",
+    management: "document",
   });
   const [toast, setToast] = useState<{ type: "ok" | "error"; text: string } | null>(null);
   const [model, setModel] = useState<ReportModel | null>(null);
@@ -309,7 +317,7 @@ function ReportsContent() {
     if (!directoryHandle || !selectedMonth || generating) return;
     setGenerating(type);
     try {
-      if (type === "sample" || type === "sample-xlsx" || type === "sample-print") {
+      if (type === "sample" || type === "sample-xlsx" || type === "sample-deck") {
         const { populationRows, sampleData, manifest } = await loadMonthForEditing(directoryHandle, selectedMonth);
         if (!sampleData) { showToast("error", "لم يتم العثور على بيانات عينة لهذا الشهر."); return; }
         const sampleInput = {
@@ -321,20 +329,27 @@ function ReportsContent() {
         if (type === "sample-xlsx") {
           buildSampleXlsx(sampleInput);
           showToast("ok", "تم تنزيل ملف Excel.");
+        } else if (type === "sample-deck") {
+          openSampleDeck(sampleInput);
+          showToast("ok", "تم فتح عرض العينة (الشرائح) — استخدم طباعة/PDF.");
         } else {
           openSampleReport(sampleInput);
-          showToast("ok", type === "sample-print" ? "تم فتح تقرير العينة للتصدير PDF." : "تم فتح تقرير العينة.");
+          showToast("ok", "تم فتح تقرير العينة التفصيلي — استخدم طباعة/PDF.");
         }
-      } else if (type === "distribution" || type === "distribution-xlsx" || type === "distribution-print") {
+      } else if (type === "distribution" || type === "distribution-xlsx" || type === "distribution-deck") {
         const sample = await loadSampleMaster(directoryHandle, selectedMonth);
         const data = sample ? await loadOrDeriveDistributionCurrent(directoryHandle, selectedMonth, sample.rows) : null;
         if (!data) { showToast("error", "لم يتم العثور على بيانات توزيع لهذا الشهر."); return; }
+        const names = buildDisplayNameMap();
         if (type === "distribution-xlsx") {
-          buildDistributionXlsx(data, selectedMonth);
+          buildDistributionXlsx(data, selectedMonth, names);
           showToast("ok", "تم تنزيل ملف Excel.");
+        } else if (type === "distribution-deck") {
+          openDistributionDeck(data, selectedMonth, names);
+          showToast("ok", "تم فتح عرض التوزيع (الشرائح) — استخدم طباعة/PDF.");
         } else {
-          openOrDownload(buildDistributionReport(data, selectedMonth), `تقرير_التوزيع_${selectedMonth}.html`);
-          showToast("ok", type === "distribution-print" ? "تم فتح تقرير التوزيع للتصدير PDF." : "تم فتح تقرير التوزيع.");
+          openDistributionDocument(data, selectedMonth, names);
+          showToast("ok", "تم فتح تقرير التوزيع التفصيلي — استخدم طباعة/PDF.");
         }
       } else if (type === "executive" || type === "executive-xlsx" || type === "executive-deck") {
         const execInput = await loadExecInput();
@@ -350,11 +365,20 @@ function ReportsContent() {
           openExecutiveReport(execInput, names);
           showToast("ok", "تم فتح التقرير التفصيلي — استخدم طباعة/PDF.");
         }
-      } else if (type === "management") {
+      } else if (type === "management" || type === "management-xlsx" || type === "management-deck") {
         const execInput = await loadExecInput();
         if (!execInput) { showToast("error", labels.mgmt_card_toast_no_population); return; }
-        openManagementReport(execInput, buildDisplayNameMap());
-        showToast("ok", labels.mgmt_card_toast_opened);
+        const names = buildDisplayNameMap();
+        if (type === "management-xlsx") {
+          buildManagementWorkbook(execInput, names);
+          showToast("ok", "تم تنزيل ملف بيانات الإدارة (Excel).");
+        } else if (type === "management-deck") {
+          openManagementDeck(execInput, names);
+          showToast("ok", "تم فتح عرض الإدارة (الشرائح) — استخدم طباعة/PDF.");
+        } else {
+          openManagementReport(execInput, names);
+          showToast("ok", labels.mgmt_card_toast_opened);
+        }
       }
     } catch {
       showToast("error", "حدث خطأ أثناء توليد التقرير.");
@@ -364,28 +388,23 @@ function ReportsContent() {
   }
 
   function selectedReportType(baseType: ReportBaseType): ReportType {
+    // Uniform mapping across all four cards: document → base id, deck → `${base}-deck`,
+    // xlsx → `${base}-xlsx`. Executive keeps its existing "executive" document id.
     const format = formats[baseType];
-    if (baseType === "executive") {
-      if (format === "deck") return "executive-deck";
-      if (format === "xlsx") return "executive-xlsx";
-      return "executive"; // document
-    }
-    if (format === "print") return `${baseType}-print` as ReportType;
+    if (format === "deck") return `${baseType}-deck` as ReportType;
     if (format === "xlsx") return `${baseType}-xlsx` as ReportType;
-    return baseType;
+    return baseType as ReportType; // document
   }
 
   function renderExportControls(baseType: ReportBaseType, toneClass: string): ReactNode {
     const selectedType = selectedReportType(baseType);
     const isBusy = generating === selectedType;
-    const availableFormats: ReportFormat[] =
-      baseType === "executive" ? ["deck", "xlsx", "document"] : ["html", "xlsx", "print"];
+    // Every card now offers the same three formats (audit / Wave 3 rework).
+    const availableFormats: ReportFormat[] = ["deck", "xlsx", "document"];
     const formatTitle = (f: ReportFormat): string =>
       f === "xlsx" ? "بيانات (Excel)"
       : f === "deck" ? "عرض تقديمي (شرائح PDF)"
-      : f === "document" ? "تقرير تفصيلي (PDF)"
-      : f === "html" ? "HTML"
-      : "PDF من HTML";
+      : "تقرير تفصيلي (PDF)";
     return (
       <div className="rh-export-controls" role="group" aria-label="صيغة التصدير">
         <button
@@ -407,7 +426,7 @@ function ReportsContent() {
               aria-label={formatTitle(format)}
               onClick={() => setFormats((prev) => ({ ...prev, [baseType]: format }))}
             >
-              {format === "xlsx" ? <ExcelFormatIcon /> : (format === "deck" || format === "html") ? <PresentationFormatIcon /> : <FileText size={17} strokeWidth={2.2} />}
+              {format === "xlsx" ? <ExcelFormatIcon /> : format === "deck" ? <PresentationFormatIcon /> : <FileText size={17} strokeWidth={2.2} />}
             </button>
           ))}
         </div>
@@ -428,7 +447,7 @@ function ReportsContent() {
   }
 
   const fmtNum = (n: number | null | undefined) =>
-    n != null ? n.toLocaleString("ar-SA") : "—";
+    n != null ? n.toLocaleString("ar-SA-u-nu-latn") : "—";
 
   const busy = generating !== null;
 
@@ -814,7 +833,7 @@ function ReportsContent() {
       </div>
 
       {section === "kpi" && (
-        <TabGuard tabId="reports/analytics">
+        <TabGuard tabId="reports/kpi">
           {renderDashboard()}
         </TabGuard>
       )}
@@ -910,22 +929,13 @@ function ReportsContent() {
             <div className="rh-card-title">{labels.mgmt_report_title}</div>
             <p className="rh-card-desc">{labels.mgmt_card_desc}</p>
             <div className="rh-tags">
+              <span className="rh-tag"><Presentation size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> عرض تقديمي</span>
               <span className="rh-tag"><FileText size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> {labels.mgmt_card_tag_summary}</span>
-              <span className="rh-tag"><Users size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> {labels.mgmt_card_tag_compare}</span>
+              <span className="rh-tag"><Download size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> Excel</span>
             </div>
           </div>
           <div className="rh-card-footer">
-            <div className="rh-export-controls" role="group">
-              <button
-                type="button"
-                className="rh-btn rh-btn-indigo"
-                disabled={busy || !selectedMonth}
-                onClick={() => { void generate("management"); }}
-              >
-                {generating === "management" ? <span className="rh-spinner" /> : null}
-                {generating === "management" ? labels.mgmt_card_generating : labels.mgmt_card_button}
-              </button>
-            </div>
+            {renderExportControls("management", "rh-btn-indigo")}
           </div>
         </div>
 

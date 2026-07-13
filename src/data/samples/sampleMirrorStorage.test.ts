@@ -21,7 +21,8 @@ import { upsertItemAnswer } from "../answers/answerStorage";
 import type { ItemAnswer } from "../answers/answerTypes";
 import type { MonthManifestData } from "../population/monthTypes";
 import { getPopulationMonthDir } from "../workspace/workspacePaths";
-import { getUserWorkspaceFootprint } from "./sampleMirrorStorage";
+import type { DistributionCurrentData, DistributionEntry } from "../distribution/distributionTypes";
+import { getUserWorkspaceFootprint, loadEmployeeSampleMirror, syncSampleMirrors } from "./sampleMirrorStorage";
 
 const MONTH_A = "5-may-2026";
 const MONTH_B = "6-june-2026";
@@ -137,6 +138,59 @@ async function seedAssignments(
   const current = deriveCurrentDistribution(log, rows);
   await saveDistributionCurrent(root, monthFolderName, current);
 }
+
+function makeCurrent(
+  monthFolderName: string,
+  logRevision: number,
+  entries: DistributionEntry[]
+): DistributionCurrentData {
+  return {
+    monthFolderName,
+    logRevision,
+    deriveVersion: 2,
+    derivedAt: new Date().toISOString(),
+    totalAssigned: entries.length,
+    totalCompleted: entries.filter((e) => e.status === "completed").length,
+    totalReplaced: 0,
+    totalPending: entries.filter((e) => e.status === "pending").length,
+    entries,
+  };
+}
+
+function makeMirrorEntry(id: string, status: DistributionEntry["status"]): DistributionEntry {
+  return { xrayImageId: id, assignedTo: EMP, status, replacedById: null, lastEventAt: "", row: makeRow(id) };
+}
+
+describe("syncSampleMirrors monotonic guard", () => {
+  it("skips writing a mirror when the existing file has a newer-or-equal sourceLogRevision", async () => {
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    invalidateMonthLockCache();
+    await ensurePopulationMonthFolder(root, MONTH_A);
+
+    // Newer derivation (rev 5): A1 pending.
+    await syncSampleMirrors(root, MONTH_A, makeCurrent(MONTH_A, 5, [makeMirrorEntry("A1", "pending")]));
+
+    // Older derivation (rev 3) arrives late with A1 completed — must be ignored.
+    await syncSampleMirrors(root, MONTH_A, makeCurrent(MONTH_A, 3, [makeMirrorEntry("A1", "completed")]));
+
+    const mirror = await loadEmployeeSampleMirror(root, MONTH_A, EMP);
+    expect(mirror?.sourceLogRevision).toBe(5);
+    expect(mirror?.entries[0]?.status).toBe("pending");
+  });
+
+  it("writes when the incoming sourceLogRevision is newer", async () => {
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    invalidateMonthLockCache();
+    await ensurePopulationMonthFolder(root, MONTH_A);
+
+    await syncSampleMirrors(root, MONTH_A, makeCurrent(MONTH_A, 3, [makeMirrorEntry("A1", "pending")]));
+    await syncSampleMirrors(root, MONTH_A, makeCurrent(MONTH_A, 5, [makeMirrorEntry("A1", "completed")]));
+
+    const mirror = await loadEmployeeSampleMirror(root, MONTH_A, EMP);
+    expect(mirror?.sourceLogRevision).toBe(5);
+    expect(mirror?.entries[0]?.status).toBe("completed");
+  });
+});
 
 describe("getUserWorkspaceFootprint", () => {
   it("lists only months with pending mirror entries; completed-only months are excluded", async () => {

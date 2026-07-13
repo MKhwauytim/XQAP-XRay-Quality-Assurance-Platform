@@ -268,6 +268,76 @@ test("reopened after replaced is dropped by the terminal-state guard", () => {
   expect(result.totalAssigned).toBe(1); // only B2 lives
 });
 
+test("a bare assigned after completed is dropped (completed is terminal for reassignment)", () => {
+  const rows = [makeRow("A1")];
+  const log = makeLog([
+      buildAssignEvent({ xrayImageId: "A1", assignedTo: "emp1", eventBy: "admin" }),
+      buildCompletedEvent({ xrayImageId: "A1", assignedTo: "emp1", eventBy: "emp1" }),
+      // Stray assign after completion must NOT flip the row back to pending.
+      buildAssignEvent({ xrayImageId: "A1", assignedTo: "emp2", eventBy: "admin" })
+  ]);
+  clearErrors();
+  const result = deriveCurrentDistribution(log, rows);
+  expect(result.entries[0]!.status).toBe("completed");
+  expect(result.entries[0]!.assignedTo).toBe("emp1");
+  expect(result.totalCompleted).toBe(1);
+  expect(result.totalPending).toBe(0);
+  // The dropped assign must not create/inflate a quota for emp2.
+  expect(result.quotas?.emp2).toBeUndefined();
+  const deriveErrors = getRecentErrors().filter((e) => e.context === "distribution:derive");
+  expect(deriveErrors).toHaveLength(1);
+});
+
+test("a reassigned after completed is dropped; only reopened returns it to pending", () => {
+  const rows = [makeRow("A1")];
+  const reassignDropped = makeLog([
+      buildAssignEvent({ xrayImageId: "A1", assignedTo: "emp1", eventBy: "admin" }),
+      buildCompletedEvent({ xrayImageId: "A1", assignedTo: "emp1", eventBy: "emp1" }),
+      buildReassignEvent({ xrayImageId: "A1", assignedTo: "emp1", reassignedTo: "emp2", eventBy: "admin" })
+  ]);
+  const dropped = deriveCurrentDistribution(reassignDropped, rows);
+  expect(dropped.entries[0]!.status).toBe("completed");
+  expect(dropped.entries[0]!.assignedTo).toBe("emp1");
+
+  const reopened = makeLog([
+      buildAssignEvent({ xrayImageId: "A1", assignedTo: "emp1", eventBy: "admin" }),
+      buildCompletedEvent({ xrayImageId: "A1", assignedTo: "emp1", eventBy: "emp1" }),
+      buildReopenedEvent({ xrayImageId: "A1", assignedTo: "emp1", eventBy: "sup1" })
+  ]);
+  const returned = deriveCurrentDistribution(reopened, rows);
+  expect(returned.entries[0]!.status).toBe("pending");
+});
+
+test("an unknown/newer eventType preserves the existing completed status (never downgrades)", () => {
+  const rows = [makeRow("A1")];
+  const unknownEvent = {
+    ...buildCompletedEvent({ xrayImageId: "A1", assignedTo: "emp1", eventBy: "sys" }),
+    eventType: "future-event-type",
+  } as unknown as DistributionLog["events"][number];
+  const log = makeLog([
+      buildAssignEvent({ xrayImageId: "A1", assignedTo: "emp1", eventBy: "admin" }),
+      buildCompletedEvent({ xrayImageId: "A1", assignedTo: "emp1", eventBy: "emp1" }),
+      unknownEvent
+  ]);
+  clearErrors();
+  const result = deriveCurrentDistribution(log, rows);
+  expect(result.entries[0]!.status).toBe("completed");
+  expect(result.entries[0]!.assignedTo).toBe("emp1");
+  expect(result.totalCompleted).toBe(1);
+  const deriveErrors = getRecentErrors().filter((e) => e.context === "distribution:derive");
+  expect(deriveErrors).toHaveLength(1);
+});
+
+test("an unknown eventType with no prior entry creates nothing", () => {
+  const rows = [makeRow("A1")];
+  const unknownEvent = {
+    ...buildAssignEvent({ xrayImageId: "A1", assignedTo: "emp1", eventBy: "sys" }),
+    eventType: "mystery",
+  } as unknown as DistributionLog["events"][number];
+  const result = deriveCurrentDistribution(makeLog([unknownEvent]), rows);
+  expect(result.entries).toHaveLength(0);
+});
+
 test("multiple items tracked independently", () => {
   const rows = [makeRow("A1"), makeRow("A2"), makeRow("A3")];
   const log = makeLog([

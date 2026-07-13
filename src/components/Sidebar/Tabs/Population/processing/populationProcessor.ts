@@ -158,7 +158,7 @@ function normalizeArabicText(value: unknown): string {
     .replace(/ى/g, "ي");
 }
 
-function normalizeXrayId(value: unknown): string {
+export function normalizeXrayId(value: unknown): string {
   return normalizeText(value).toUpperCase();
 }
 
@@ -362,7 +362,7 @@ function toPreparedDraftRow(row: NormalizedRiskRow): PreparedDraftRow {
   };
 }
 
-function makeBiMatchKey(
+export function makeBiMatchKey(
   xrayImageId: string | null,
   portName: string | null
 ): string {
