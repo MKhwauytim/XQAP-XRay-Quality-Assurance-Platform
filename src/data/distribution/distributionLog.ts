@@ -18,6 +18,14 @@ import { logError } from "../storage/errorLogger";
  */
 export const DERIVE_VERSION = 2;
 
+/**
+ * Current distribution-event schema version (A7). Stamped on every newly built
+ * event; a missing version reads as 1 (legacy). The fold drops-and-preserves any
+ * event whose version exceeds this, so an older client never mis-folds a newer
+ * event shape. Bump when the event schema changes in a fold-affecting way.
+ */
+export const EVENT_SCHEMA_VERSION = 1;
+
 export function createEventId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return `evt-${crypto.randomUUID()}`;
@@ -50,6 +58,7 @@ export function buildAssignEvent(params: {
 }): DistributionEvent {
   return {
     eventId: createEventId(),
+    eventSchemaVersion: EVENT_SCHEMA_VERSION,
     eventType: "assigned",
     xrayImageId: params.xrayImageId,
     assignedTo: params.assignedTo,
@@ -71,6 +80,7 @@ export function buildReassignEvent(params: {
 }): DistributionEvent {
   return {
     eventId: createEventId(),
+    eventSchemaVersion: EVENT_SCHEMA_VERSION,
     eventType: "reassigned",
     xrayImageId: params.xrayImageId,
     assignedTo: params.assignedTo,
@@ -91,6 +101,7 @@ export function buildReopenedEvent(params: {
 }): DistributionEvent {
   return {
     eventId: createEventId(),
+    eventSchemaVersion: EVENT_SCHEMA_VERSION,
     eventType: "reopened",
     xrayImageId: params.xrayImageId,
     assignedTo: params.assignedTo,
@@ -110,6 +121,7 @@ export function buildReopenRequestedEvent(params: {
 }): DistributionEvent {
   return {
     eventId: createEventId(),
+    eventSchemaVersion: EVENT_SCHEMA_VERSION,
     eventType: "reopen-requested",
     xrayImageId: params.xrayImageId,
     assignedTo: params.assignedTo,
@@ -127,6 +139,7 @@ export function buildCompletedEvent(params: {
 }): DistributionEvent {
   return {
     eventId: createEventId(),
+    eventSchemaVersion: EVENT_SCHEMA_VERSION,
     eventType: "completed",
     xrayImageId: params.xrayImageId,
     assignedTo: params.assignedTo,
@@ -143,6 +156,7 @@ export function buildReplacementRequestedEvent(params: {
 }): DistributionEvent {
   return {
     eventId: createEventId(),
+    eventSchemaVersion: EVENT_SCHEMA_VERSION,
     eventType: "replacement-requested",
     xrayImageId: params.xrayImageId,
     assignedTo: params.assignedTo,
@@ -161,6 +175,7 @@ export function buildReplacedEvent(params: {
 }): DistributionEvent {
   return {
     eventId: createEventId(),
+    eventSchemaVersion: EVENT_SCHEMA_VERSION,
     eventType: "replaced",
     xrayImageId: params.xrayImageId,
     assignedTo: params.assignedTo,
@@ -203,6 +218,16 @@ export function deriveCurrentDistribution(
     const existing = entryMap.get(evt.xrayImageId);
     if (existing) {
       replacedById = existing.replacedById;
+    }
+
+    // Event schema-version guard (A7): an event stamped with a version newer
+    // than this reader understands may carry semantics we would fold wrong.
+    // Preserve-existing (never downgrade a live entry) and drop it — the same
+    // defensive posture as the unknown-eventType default branch below.
+    if ((evt.eventSchemaVersion ?? 1) > EVENT_SCHEMA_VERSION) {
+      droppedEventIds.add(evt.eventId);
+      droppedImageIds.add(evt.xrayImageId);
+      continue;
     }
 
     // Terminal-state guard: a replaced row is dead. Any later event other than

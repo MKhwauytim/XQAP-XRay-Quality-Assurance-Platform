@@ -43,6 +43,8 @@ export function FeedbackWidget() {
   const [text, setText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  // B6: surface a CAS write conflict (submit/reply throw on exhausted retries).
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   // Reply state per message
   const [replyTexts, setReplyTexts] = useState<Record<string, string>>({});
@@ -88,16 +90,23 @@ export function FeedbackWidget() {
   async function handleSubmit() {
     if (!directoryHandle || !session || !text.trim()) return;
     setSubmitting(true);
-    await submitFeedback(directoryHandle, {
-      from: session.username,
-      role: session.role,
-      category,
-      text: text.trim(),
-    });
-    setSubmitting(false);
-    setSubmitted(true);
-    setText("");
-    void refresh();
+    setSubmitError(null);
+    try {
+      await submitFeedback(directoryHandle, {
+        from: session.username,
+        role: session.role,
+        category,
+        text: text.trim(),
+      });
+      setSubmitted(true);
+      setText("");
+      void refresh();
+    } catch (err) {
+      // B6: never fail silently — a CAS conflict surfaces its Arabic message.
+      setSubmitError(err instanceof Error ? err.message : "تعذّر حفظ الملاحظة — أعد المحاولة.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   async function handleReply(msgId: string, resolve = false) {
@@ -105,20 +114,27 @@ export function FeedbackWidget() {
     const replyText = replyTexts[msgId]?.trim();
     if (!replyText && !resolve) return;
     setReplying(msgId);
-    await replyToFeedback(
-      directoryHandle,
-      msgId,
-      {
-        from: session.username,
-        role: session.role,
-        text: replyText ?? "",
-        timestamp: new Date().toISOString(),
-      },
-      resolve
-    );
-    setReplyTexts((prev) => ({ ...prev, [msgId]: "" }));
-    setReplying(null);
-    void refresh();
+    setSubmitError(null);
+    try {
+      await replyToFeedback(
+        directoryHandle,
+        msgId,
+        {
+          from: session.username,
+          role: session.role,
+          text: replyText ?? "",
+          timestamp: new Date().toISOString(),
+        },
+        resolve
+      );
+      setReplyTexts((prev) => ({ ...prev, [msgId]: "" }));
+      void refresh();
+    } catch (err) {
+      // B6: surface a CAS conflict instead of an unhandled rejection.
+      setSubmitError(err instanceof Error ? err.message : "تعذّر حفظ الرد — أعد المحاولة.");
+    } finally {
+      setReplying(null);
+    }
   }
 
   const openCount = messages.filter((m) => m.status === "open").length;
@@ -245,6 +261,11 @@ export function FeedbackWidget() {
                     >
                       {submitting ? "جاري الإرسال..." : "إرسال"}
                     </button>
+                    {submitError && (
+                      <p className="fb-error" role="alert" style={{ color: "#dc2626", marginTop: 8, fontSize: 13 }}>
+                        {submitError}
+                      </p>
+                    )}
                   </div>
                 )}
 

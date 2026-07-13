@@ -252,3 +252,17 @@
 /* ── Empty ─────────────────────────────────────────────────── */
 
 .dar-empty { padding: 32px; text-align: center; color: var(--c-ink-4, #9DB3C9); font-size: 13px; }
+
+/* ── Referential-integrity orphan scan (B3) ────────────────── */
+.orphan-scan { margin-top: 20px; padding: 16px; border: 1px solid rgba(120,130,150,.25); border-radius: 12px; }
+.orphan-scan-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.orphan-scan-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.orphan-category { padding: 12px; border: 1px solid rgba(120,130,150,.2); border-radius: 10px; }
+.orphan-category.has-orphans { border-color: rgba(220,38,38,.4); background: rgba(220,38,38,.04); }
+.orphan-category-head { display: flex; align-items: center; gap: 8px; width: 100%; background: none; border: 0; cursor: pointer; font-size: 14px; padding: 0; text-align: start; }
+.orphan-category-head:disabled { cursor: default; }
+.orphan-cat-title { flex: 1; font-weight: 600; }
+.orphan-cat-desc { margin: 6px 0 0; font-size: 12px; color: var(--p-muted, #64748b); }
+.orphan-cat-ids { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.orphan-id-chip { font-size: 12px; background: rgba(120,130,150,.12); padding: 2px 6px; border-radius: 5px; font-family: monospace; }
+.orphan-id-more { font-size: 12px; color: var(--p-muted, #64748b); align-self: center; }

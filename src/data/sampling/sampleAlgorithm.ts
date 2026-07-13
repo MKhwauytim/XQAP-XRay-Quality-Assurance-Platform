@@ -11,6 +11,17 @@ import type {
   StageAllocation
 } from "./sampleTypes";
 
+/**
+ * Reproducibility pin (A2). Bound to the RNG seed so a historical draw can be
+ * recognised as replayable only under the code version that produced it.
+ *
+ * RULE: bump this constant on ANY semantic change to `drawSample` (apportionment,
+ * split, draw order, spillover, stage redistribution). A pure refactor that
+ * provably preserves the exact drawn set for every seed does NOT bump it.
+ * Format: "MAJOR.MINOR" — MAJOR for a change that alters which rows are drawn.
+ */
+export const SAMPLING_ALGORITHM_VERSION = "1.0";
+
 // Group population rows by portName
 function groupByPort(
   rows: PreparedPopulationRow[]
@@ -167,6 +178,7 @@ export function drawSample(
 
     const data: SampleMasterData = {
       rngSeed: config.rngSeed,
+      samplingAlgorithmVersion: SAMPLING_ALGORITHM_VERSION,
       totalRequested: sampleSize,
       totalActual: allDrawnRows.length,
       certScanRequested: totalCertScanRequested,
@@ -445,6 +457,7 @@ export function drawSample(
   const portAllocations = Array.from(portAllocationsMap.values());
   const data: SampleMasterData = {
     rngSeed,
+    samplingAlgorithmVersion: SAMPLING_ALGORITHM_VERSION,
     totalRequested,
     totalActual: allDrawnRows.length,
     certScanRequested: totalCertScanRequested,

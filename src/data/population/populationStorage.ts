@@ -1,5 +1,5 @@
 import type { DirectoryHandleLike, FileHandleLike } from "../storage/fileSystemAccess";
-import { safeWriteJson, safeReadJson } from "../storage/safeWrite";
+import { safeWriteJson, safeWriteJsonText, safeReadJson, readEnvelopeRevision } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
 import { withResourceLock } from "../storage/webLocks";
 import { logError } from "../storage/errorLogger";
@@ -174,6 +174,37 @@ async function ensureFolder(
   return parent.getDirectoryHandle(name, { create: true });
 }
 
+/**
+ * Immutable raw layer (A5). If `{base}.raw.json` already exists in `rawDir`, copy
+ * it verbatim to `{base}.raw.{ISO-ts}.superseded.json` (colons stripped from the
+ * timestamp for filename safety) before it is overwritten, so the prior import is
+ * never silently lost. Returns the archived file name (to stamp `supersedes` on
+ * the new file), or null when there was nothing to supersede.
+ *
+ * Best-effort by contract: an archival failure is logged and returns null rather
+ * than aborting the whole save — the re-import still proceeds, and A5's guarantee
+ * degrades to "no archive this time" instead of blocking data entry.
+ */
+async function archiveExistingRaw(
+  rawDir: DirectoryHandleLike,
+  base: "risk" | "bi"
+): Promise<string | null> {
+  const liveName = `${base}.raw.json`;
+  try {
+    const existing = await safeReadJson<MonthRawData>(rawDir, liveName);
+    if (!existing.ok) return null;
+    const stamp = new Date().toISOString().replace(/:/g, "");
+    const archiveName = `${base}.raw.${stamp}.superseded.json`;
+    // Preserve the prior file's exact bytes (including its own `supersedes`
+    // chain) rather than re-wrapping — the archive is the original record.
+    await safeWriteJsonText(rawDir, archiveName, existing.rawText);
+    return archiveName;
+  } catch (error) {
+    logError("population:archive-raw", error);
+    return null;
+  }
+}
+
 export async function saveMonthRun(
   params: SaveMonthRunParams
 ): Promise<SaveMonthRunResult> {
@@ -249,23 +280,27 @@ async function saveMonthRunLocked(
       await saveBinaryFile(rawDir, `bi.source.${ext}`, buf);
     }
 
-    // Save risk raw JSON
+    // Save risk raw JSON — archive any prior import first (A5, immutable raw).
     if (riskRawRows.length > 0) {
+      const supersedes = await archiveExistingRaw(rawDir, "risk");
       const riskRaw: MonthRawData = {
         sourceFileName: riskFileName ?? "unknown",
         importedAt: now,
         importedBy: username,
+        supersedes,
         rows: riskRawRows
       };
       await safeWriteJson(rawDir, "risk.raw.json", riskRaw);
     }
 
-    // Save BI raw JSON
+    // Save BI raw JSON — archive any prior import first (A5, immutable raw).
     if (biRawRows.length > 0) {
+      const supersedes = await archiveExistingRaw(rawDir, "bi");
       const biRaw: MonthRawData = {
         sourceFileName: biFileName ?? "unknown",
         importedAt: now,
         importedBy: username,
+        supersedes,
         rows: biRawRows
       };
       await safeWriteJson(rawDir, "bi.raw.json", biRaw);
@@ -522,6 +557,20 @@ export async function loadMonthPopulationFinal(
       "population.final.json"
     );
     return result.ok ? result.value : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Envelope revision of `population.final.json` for report-to-revision linkage (B2). */
+export async function loadMonthPopulationFinalRevision(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<number | null> {
+  try {
+    const monthDir = await getMonthDir(directoryHandle, monthFolderName);
+    const processedDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false });
+    return await readEnvelopeRevision(processedDir, "population.final.json");
   } catch {
     return null;
   }

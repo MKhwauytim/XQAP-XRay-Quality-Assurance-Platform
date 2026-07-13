@@ -33,6 +33,7 @@ export function NotificationBanner({ session, directoryHandle }: Props) {
   useLabels();
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [accepting, setAccepting] = useState(false);
+  const [acceptError, setAcceptError] = useState<string | null>(null);
 
   const audience = isNotificationAudienceRole(session.role);
 
@@ -74,9 +75,17 @@ export function NotificationBanner({ session, directoryHandle }: Props) {
   async function handleAccept() {
     if (accepting || !directoryHandle || !current) return;
     setAccepting(true);
+    setAcceptError(null);
     try {
-      await acceptNotification(directoryHandle, current.id, session.username);
-      await reload();
+      // B6: surface a CAS write conflict instead of dropping the acknowledgement.
+      const result = await acceptNotification(directoryHandle, current.id, session.username);
+      if (result.ok) {
+        await reload();
+      } else {
+        setAcceptError(result.error);
+      }
+    } catch (err) {
+      setAcceptError(err instanceof Error ? err.message : "تعذّر حفظ الاطّلاع — أعد المحاولة.");
     } finally {
       setAccepting(false);
     }
@@ -101,6 +110,11 @@ export function NotificationBanner({ session, directoryHandle }: Props) {
       >
         <Check size={14} aria-hidden /> {labels.notif_accept_btn}
       </button>
+      {acceptError && (
+        <span className="app-notification-banner-error" role="alert" style={{ color: "#fecaca" }}>
+          {acceptError}
+        </span>
+      )}
     </div>
   );
 }

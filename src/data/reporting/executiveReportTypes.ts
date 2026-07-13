@@ -4,6 +4,7 @@ import type { SampleMasterData } from "../sampling/sampleTypes";
 import type { DistributionCurrentData } from "../distribution/distributionTypes";
 import type { EmployeeAnswerFile } from "../answers/answerTypes";
 import type { TemplateSchema } from "../templates/templateTypes";
+import type { SourceRevisions } from "./sourceRevisions";
 
 export type VerificationCategory =
   | "correct-suspicious"
@@ -218,4 +219,9 @@ export type ExecutiveReportInput = {
   employeeFiles: EmployeeAnswerFile[];
   template: TemplateSchema | null;
   config: ExecutiveReportConfig;
+  /**
+   * Report-to-revision linkage (B2): source file name → `JsonEnvelope.metadata.revision`
+   * captured at load time. Optional — legacy callers omit it and the footer renders nothing.
+   */
+  sourceRevisions?: SourceRevisions;
 };

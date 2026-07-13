@@ -53,6 +53,12 @@ export type MonthRawData = {
   sourceFileName: string;
   importedAt: string;
   importedBy: string;
+  /**
+   * Immutable-raw-layer link (A5). When a re-import supersedes a previous raw
+   * file, the prior file is archived to `{base}.{ISO-ts}.superseded.json` and
+   * this records that archived file name. Absent on first import / legacy files.
+   */
+  supersedes?: string | null;
   rows: Array<Record<string, unknown>>;
 };
 

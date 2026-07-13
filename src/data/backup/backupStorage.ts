@@ -8,6 +8,7 @@ import type { MonthManifestData, MonthRawData, PopulationFinalData } from "../po
 import type { SampleMasterData } from "../sampling/sampleTypes";
 import type { DirectoryHandleLike, FileHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson, safeWriteJsonText } from "../storage/safeWrite";
+import { logError } from "../storage/errorLogger";
 import { exportLabelsSnapshot } from "../workspace/labelsSnapshot";
 import {
   getPopulationMonthDir,
@@ -27,6 +28,19 @@ const AUTO_STATE_FILE = "auto-backup-state.json";
 const AUTO_SETTINGS_FILE = "auto-backup-settings.json";
 const EXCEL_MAX_ROWS = 1_048_576;
 const XLSX_ROWS_PER_PART = 250_000;
+
+/**
+ * Backup retention policy (A8). Written policy, enforced in code:
+ *   - MANUAL backups are kept indefinitely (operator-initiated, deliberate
+ *     restore points) — never auto-pruned.
+ *   - PRE-RESTORE rollback snapshots are kept indefinitely (safety net for an
+ *     in-progress restore) — never auto-pruned.
+ *   - AUTOMATIC backups are pruned to the AUTO_BACKUP_RETENTION_COUNT most
+ *     recent (by createdAt); older automatic backups are removed after each new
+ *     automatic backup succeeds.
+ * See `docs/data-system-report.md` (retention section) for the authoritative doc.
+ */
+export const AUTO_BACKUP_RETENTION_COUNT = 30;
 
 type DirectoryEntryLike = {
   name: string;
@@ -564,6 +578,54 @@ async function exportTemplatesXlsx(
   }
 }
 
+/**
+ * Prune automatic backups beyond AUTO_BACKUP_RETENTION_COUNT most recent (A8).
+ * Manual and pre-restore backups are never touched. Best-effort: any failure is
+ * logged and swallowed so a prune problem never blocks or fails a backup.
+ * Returns the folder names removed (empty when nothing was pruned).
+ */
+export async function pruneAutoBackups(
+  directoryHandle: DirectoryHandleLike
+): Promise<string[]> {
+  try {
+    const backupsDir = await getBackupsDir(directoryHandle);
+    if (!backupsDir.removeEntry) return [];
+
+    const autos: Array<{ folderName: string; createdAt: number }> = [];
+    for (const entry of await collectEntries(backupsDir)) {
+      if (entry.kind !== "directory") continue;
+      const backupDir = await tryGetDirectory(backupsDir, entry.name);
+      if (!backupDir) continue;
+      const manifestResult = await safeReadJson<BackupManifest>(backupDir, "backup.manifest.json");
+      if (!manifestResult.ok) continue;
+      if (manifestResult.value.mode !== "automatic") continue; // keep manual + pre-restore
+      autos.push({
+        folderName: entry.name,
+        createdAt: Date.parse(manifestResult.value.createdAt) || 0,
+      });
+    }
+
+    if (autos.length <= AUTO_BACKUP_RETENTION_COUNT) return [];
+
+    // Newest first; everything past the retention count is stale.
+    autos.sort((a, b) => b.createdAt - a.createdAt);
+    const stale = autos.slice(AUTO_BACKUP_RETENTION_COUNT);
+    const removed: string[] = [];
+    for (const item of stale) {
+      try {
+        await backupsDir.removeEntry(item.folderName, { recursive: true });
+        removed.push(item.folderName);
+      } catch (error) {
+        logError("backup:prune-remove", error);
+      }
+    }
+    return removed;
+  } catch (error) {
+    logError("backup:prune", error);
+    return [];
+  }
+}
+
 export async function createBackup(
   directoryHandle: DirectoryHandleLike,
   months: MonthFolderInfo[],
@@ -612,6 +674,9 @@ export async function createBackup(
         lastBackupBy: username,
         frequency: settings.frequency,
       });
+      // A8 retention: prune automatic backups beyond the retention count. Runs
+      // only after a fresh automatic backup so manual restores never trigger it.
+      await pruneAutoBackups(directoryHandle);
     }
 
     return { ok: true, folderName, manifest };

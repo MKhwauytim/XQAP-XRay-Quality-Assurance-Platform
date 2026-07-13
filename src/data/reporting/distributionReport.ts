@@ -22,6 +22,13 @@ import { slide, split, heroNumber, heroChart, kpiTile, kpiBand, miniTable, numbe
 import { donut, rankedBar } from "./executive/ui/charts";
 import { icon } from "./executive/ui/icons";
 import { buildDocViewer, buildDeckViewer, formatMonthLabel, formatIssueDate } from "./shared/reportChrome";
+import {
+  sourceRevisionsFooterHtml,
+  sourceRevisionsSheetAoa,
+  SOURCE_REVISIONS_SHEET_NAME_AR,
+  hasSourceRevisions,
+  type SourceRevisions,
+} from "./sourceRevisions";
 
 const STATUS_LABELS: Record<string, string> = {
   pending: "قيد الانتظار",
@@ -318,6 +325,7 @@ export function buildDistributionDocument(
   data: DistributionCurrentData,
   monthFolderName: string,
   employeeDisplayNames: Record<string, string> = {},
+  sourceRevisions?: SourceRevisions,
 ): string {
   const m = computeDistributionModel(data, monthFolderName, employeeDisplayNames);
   return buildDocViewer({
@@ -326,6 +334,7 @@ export function buildDistributionDocument(
     brandTitle: "تقرير التوزيع",
     brandSub: `ضمان جودة الأشعة — ${m.monthLabel}`,
     iconName: "users",
+    footerNote: sourceRevisionsFooterHtml(sourceRevisions, esc),
   });
 }
 
@@ -333,6 +342,7 @@ export function buildDistributionDeck(
   data: DistributionCurrentData,
   monthFolderName: string,
   employeeDisplayNames: Record<string, string> = {},
+  sourceRevisions?: SourceRevisions,
 ): string {
   const m = computeDistributionModel(data, monthFolderName, employeeDisplayNames);
   return buildDeckViewer({
@@ -341,6 +351,7 @@ export function buildDistributionDeck(
     brandTitle: "عرض التوزيع",
     brandSub: `ضمان جودة الأشعة — ${m.monthLabel}`,
     iconName: "users",
+    footerNote: sourceRevisionsFooterHtml(sourceRevisions, esc),
   });
 }
 
@@ -348,6 +359,7 @@ export function buildDistributionXlsx(
   data: DistributionCurrentData,
   monthFolderName: string,
   employeeDisplayNames: Record<string, string> = {},
+  sourceRevisions?: SourceRevisions,
 ): void {
   const m = computeDistributionModel(data, monthFolderName, employeeDisplayNames);
   const nameOf = (u: string): string => employeeDisplayNames[u] ?? u;
@@ -407,6 +419,13 @@ export function buildDistributionXlsx(
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(assignments), "التعيينات");
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(perEmployee), "حسب الموظف");
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(statusSummary), "الحالة والأحداث");
+  if (hasSourceRevisions(sourceRevisions)) {
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.aoa_to_sheet(sourceRevisionsSheetAoa(sourceRevisions)),
+      SOURCE_REVISIONS_SHEET_NAME_AR
+    );
+  }
 
   XLSX.writeFile(wb, `تقرير_التوزيع_${monthFolderName}.xlsx`);
 }
@@ -422,14 +441,16 @@ export function openDistributionDocument(
   data: DistributionCurrentData,
   monthFolderName: string,
   employeeDisplayNames: Record<string, string> = {},
+  sourceRevisions?: SourceRevisions,
 ): void {
-  openOrDownload(buildDistributionDocument(data, monthFolderName, employeeDisplayNames), `تقرير_التوزيع_${monthFolderName}.html`);
+  openOrDownload(buildDistributionDocument(data, monthFolderName, employeeDisplayNames, sourceRevisions), `تقرير_التوزيع_${monthFolderName}.html`);
 }
 
 export function openDistributionDeck(
   data: DistributionCurrentData,
   monthFolderName: string,
   employeeDisplayNames: Record<string, string> = {},
+  sourceRevisions?: SourceRevisions,
 ): void {
-  openOrDownload(buildDistributionDeck(data, monthFolderName, employeeDisplayNames), `عرض_التوزيع_${monthFolderName}.html`);
+  openOrDownload(buildDistributionDeck(data, monthFolderName, employeeDisplayNames, sourceRevisions), `عرض_التوزيع_${monthFolderName}.html`);
 }

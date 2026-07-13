@@ -34,8 +34,11 @@ import {
   appendDistributionEvent,
   appendDistributionEvents,
   loadDistributionLog,
+  loadOrDeriveDistributionCurrent,
   saveDistributionCurrent
 } from "../../../../data/distribution/distributionStorage";
+import { loadAllEmployeeFiles } from "../../../../data/answers/answerStorage";
+import { scanReferentialIntegrity, type OrphanScanResult } from "../../../../data/integrity/orphanScan";
 import {
   buildAssignEvent,
   buildCompletedEvent,
@@ -49,7 +52,16 @@ import type {
   DistributionEvent
 } from "../../../../data/distribution/distributionTypes";
 import { drawSample } from "../../../../data/sampling/sampleAlgorithm";
-import { loadSampleMaster, saveSampleMaster } from "../../../../data/sampling/sampleStorage";
+import { approveSampleMaster, loadSampleMaster, saveSampleMaster } from "../../../../data/sampling/sampleStorage";
+import { buildSamplingPlan, saveSamplingPlan } from "../../../../data/sampling/samplingPlanStorage";
+import type { SamplingPlanPriorMonthAdvisory } from "../../../../data/sampling/samplingPlanStorage";
+import { loadPriorMonthAdvisory } from "../../../../data/sampling/switchingRuleAdvisory";
+import {
+  evaluateApprovalEligibility,
+  buildSampleApproval,
+  isDistributionAllowed,
+  sampleRequiresApproval,
+} from "../../../../data/sampling/sampleApprovalRules";
 import type { SampleMasterData } from "../../../../data/sampling/sampleTypes";
 import {
   loadAdminBrowsePreset,
@@ -349,6 +361,9 @@ export default function PopulationTab() {
       }
 
       setSampleDrawResult(data.sampleData);
+      // Loaded from disk → not a this-session draw, so the four-eyes gate treats it
+      // as approved-by-legacy (B1) and does not block distribution of existing months.
+      setSampleNeedsApproval(false);
       setDistributionCurrent(data.distributionCurrent);
 
       if (data.distributionCurrent || data.sampleData) {
@@ -370,7 +385,11 @@ export default function PopulationTab() {
     }
     setConfig(newConfig);
     if (directoryHandle) {
-      await savePopulationConfig(directoryHandle, newConfig);
+      // B6: surface a CAS conflict instead of silently dropping the config change.
+      const result = await savePopulationConfig(directoryHandle, newConfig);
+      if (!result.ok) {
+        setProcessingMessage(result.error);
+      }
     }
   }
 
@@ -402,6 +421,21 @@ export default function PopulationTab() {
       .then(setSelectedMonthClosed)
       .catch(() => setSelectedMonthClosed(false));
   }, [directoryHandle, saveMonth, saveYear, monthRefreshKey]);
+  // B4: compute the prior-month switching-rule advisory for the selected month so
+  // it can be surfaced in Phase 3 BEFORE the draw. Advisory only — never blocks.
+  useEffect(() => {
+    if (!directoryHandle) {
+      setPriorMonthAdvisory(null);
+      return;
+    }
+    let cancelled = false;
+    const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
+    loadPriorMonthAdvisory(directoryHandle, monthFolderName)
+      .then((advisory) => { if (!cancelled) setPriorMonthAdvisory(advisory); })
+      .catch(() => { if (!cancelled) setPriorMonthAdvisory(null); });
+    return () => { cancelled = true; };
+  }, [directoryHandle, saveMonth, saveYear, monthRefreshKey]);
+
   const [isSavingToDisk, setIsSavingToDisk] = useState(false);
   const [saveToDiskMessage, setSaveToDiskMessage] = useState<SaveMessage>(null);
   // Pending re-process save awaiting user confirmation (month already has a drawn sample).
@@ -417,6 +451,21 @@ export default function PopulationTab() {
     useState<SampleMasterData | null>(null);
   const [sampleSaveMessage, setSampleSaveMessage] =
     useState<SaveMessage>(null);
+  // B1 four-eyes gate: a sample drawn in THIS session must be approved by a second
+  // person before distribution. Legacy/previous-session samples (loaded from disk,
+  // flag stays false) are treated as approved-by-legacy so existing months aren't bricked.
+  const [sampleNeedsApproval, setSampleNeedsApproval] = useState(false);
+  // Reload-safe gate: a new-era sample (samplingAlgorithmVersion stamped) without an
+  // approval requires one even when loaded from disk in a fresh session.
+  const effectiveSampleNeedsApproval =
+    sampleNeedsApproval ||
+    (sampleDrawResult ? sampleRequiresApproval(sampleDrawResult) : false);
+  const [isApprovingSample, setIsApprovingSample] = useState(false);
+  // B4 switching-rule advisory computed for the currently-selected month.
+  const [priorMonthAdvisory, setPriorMonthAdvisory] =
+    useState<SamplingPlanPriorMonthAdvisory | null>(null);
+  // B3 referential-integrity orphan scan for the selected month (Phase 2 view).
+  const [orphanScan, setOrphanScan] = useState<OrphanScanResult | null>(null);
 
   // Phase 4 — distribution
   const [distributionCurrent, setDistributionCurrent] =
@@ -447,6 +496,49 @@ export default function PopulationTab() {
   const [certScanPasteText, setCertScanPasteText] = useState("");
   const [populationProcessingResult, setPopulationProcessingResult] =
     useState<PopulationProcessingResult | null>(null);
+
+  // B3: compute the orphan scan for the selected month when the Phase 2 report is
+  // visible. Best-effort — any load failure clears the scan (section renders nothing).
+  useEffect(() => {
+    if (!directoryHandle || currentPhase !== 2 || !populationProcessingResult) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync clear when preconditions unmet
+      setOrphanScan(null);
+      return;
+    }
+    let cancelled = false;
+    const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
+    const populationRows = populationProcessingResult.preparedRows;
+    void (async () => {
+      try {
+        const sample = await loadSampleMaster(directoryHandle, monthFolderName);
+        const distribution = sample
+          ? await loadOrDeriveDistributionCurrent(directoryHandle, monthFolderName, sample.rows)
+          : null;
+        const employeeFiles = await loadAllEmployeeFiles(directoryHandle, monthFolderName);
+        if (cancelled) return;
+        const answersIds: string[] = [];
+        const approvalsIds: string[] = [];
+        for (const file of employeeFiles) {
+          for (const item of file.items) answersIds.push(item.xrayImageId);
+          for (const req of file.referralRequests ?? []) approvalsIds.push(...req.xrayImageIds);
+          for (const req of file.replacementRequests ?? []) {
+            approvalsIds.push(req.originalXrayImageId, req.replacementXrayImageId);
+          }
+        }
+        const scan = scanReferentialIntegrity({
+          populationIds: populationRows.map((r) => r.xrayImageId),
+          sampleIds: (sample?.rows ?? []).map((r) => r.xrayImageId),
+          distributionIds: (distribution?.entries ?? []).map((e) => e.xrayImageId),
+          answersIds,
+          approvalsIds,
+        });
+        if (!cancelled) setOrphanScan(scan);
+      } catch {
+        if (!cancelled) setOrphanScan(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [directoryHandle, currentPhase, populationProcessingResult, saveMonth, saveYear, monthRefreshKey]);
 
   const isPhaseOneComplete = useMemo(
     () => Boolean(uploads.riskAgencyData.file),
@@ -894,6 +986,8 @@ export default function PopulationTab() {
       }
 
       setSampleDrawResult(drawResult.data);
+      // B1: a freshly-drawn sample requires four-eyes approval before distribution.
+      setSampleNeedsApproval(!drawResult.data.approval);
 
       if (directoryHandle) {
         const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
@@ -904,6 +998,26 @@ export default function PopulationTab() {
         );
         if (saveResult.ok) {
           await updateMonthStatus(directoryHandle, monthFolderName, "sampled");
+          // A1: persist the documented sampling plan next to the sample master.
+          // Best-effort — a plan-write failure must not fail the draw itself.
+          try {
+            // B4: fold the switching-rule advisory (prior-month suspicion signal)
+            // into the plan. Advisory only — never changes the quotas above.
+            const advisory = await loadPriorMonthAdvisory(directoryHandle, monthFolderName);
+            const plan = buildSamplingPlan({
+              monthFolderName,
+              populationRows: populationProcessingResult.preparedRows,
+              sampleData: drawResult.data,
+              createdBy: username,
+              priorMonthAdvisory: advisory,
+            });
+            const planResult = await saveSamplingPlan(directoryHandle, monthFolderName, plan);
+            if (!planResult.ok) {
+              logError("population:save-sampling-plan", new Error(planResult.error));
+            }
+          } catch (planError) {
+            logError("population:save-sampling-plan", planError);
+          }
           void appendWorkspaceAction(directoryHandle, {
             actor: username,
             actorRole: sessionRef.current?.role ?? "unknown",
@@ -948,6 +1062,64 @@ export default function PopulationTab() {
       }
     } finally {
       setIsDrawingSample(false);
+    }
+  }
+
+  // B1: four-eyes sample-release approval. Available to supervisor/manager/admin who
+  // is NOT the drawer; admin may self-approve but an explicit warning note is recorded.
+  async function handleApproveSample(): Promise<void> {
+    if (!directoryHandle || !sampleDrawResult) {
+      setSampleSaveMessage({ type: "error", text: getLabels().sample_approve_no_sample });
+      return;
+    }
+    const role = sessionRef.current?.role ?? "guest";
+    const username = sessionRef.current?.username ?? "unknown";
+    const eligibility = evaluateApprovalEligibility(role, username, sampleDrawResult.drawnBy);
+    if (!eligibility.allowed) {
+      setSampleSaveMessage({
+        type: "error",
+        text: eligibility.reason === "self-approval-blocked"
+          ? getLabels().sample_approve_self_blocked
+          : getLabels().sample_approve_no_permission,
+      });
+      return;
+    }
+    setIsApprovingSample(true);
+    setSampleSaveMessage(null);
+    try {
+      const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
+      const approval = buildSampleApproval({
+        approvedBy: username,
+        role,
+        drawnBy: sampleDrawResult.drawnBy,
+        approvedAt: new Date().toISOString(),
+        selfApprovalNote: getLabels().sample_approve_admin_self_note,
+      });
+      const result = await approveSampleMaster(directoryHandle, monthFolderName, approval);
+      if (result.ok) {
+        setSampleDrawResult(result.data);
+        setSampleNeedsApproval(false);
+        void appendWorkspaceAction(directoryHandle, {
+          actor: username,
+          actorRole: role,
+          action: "sample-drawn",
+          monthFolderName,
+          target: sampleDrawResult.drawnBy,
+          details: { event: "sample-approved", selfApproval: eligibility.selfApproval },
+        });
+        setSampleSaveMessage({ type: "ok", text: getLabels().sample_approve_done });
+      } else {
+        setSampleSaveMessage({ type: "error", text: result.error });
+      }
+    } catch (error) {
+      if (error instanceof MonthClosedError) {
+        setSampleSaveMessage({ type: "error", text: getLabels().msg_month_closed_write_blocked });
+      } else {
+        logError("population:approve-sample", error);
+        setSampleSaveMessage({ type: "error", text: "حدث خطأ غير متوقع أثناء اعتماد العينة." });
+      }
+    } finally {
+      setIsApprovingSample(false);
     }
   }
 
@@ -1222,6 +1394,15 @@ export default function PopulationTab() {
       setProcessingMessage("يجب إتمام سحب العينة أولاً قبل الانتقال إلى التوزيع.");
       return;
     }
+    // B1: four-eyes gate — a sample drawn this session must carry an approval before
+    // distribution. Legacy/previous-session samples (sampleNeedsApproval=false) pass.
+    if (
+      currentPhase === 3 &&
+      !isDistributionAllowed({ approval: sampleDrawResult?.approval, needsApproval: effectiveSampleNeedsApproval })
+    ) {
+      setSampleSaveMessage({ type: "error", text: getLabels().sample_gate_blocked });
+      return;
+    }
 
     setCompletedPhaseIds((currentCompletedPhases) =>
       currentCompletedPhases.includes(currentPhase)
@@ -1473,6 +1654,7 @@ export default function PopulationTab() {
             isSavingToDisk={isSavingToDisk}
             saveToDiskMessage={saveToDiskMessage}
             hasDiskWorkspace={Boolean(directoryHandle)}
+            orphanScan={orphanScan}
             onCertScanPasteTextChange={handleCertScanChange}
             onProcessPopulation={handleProcessPopulation}
             onExportPopulation={handleExportPopulation}
@@ -1490,6 +1672,11 @@ export default function PopulationTab() {
             sampleSaveMessage={sampleSaveMessage}
             config={config}
             userRole={sessionRef.current?.role ?? "employee"}
+            currentUsername={sessionRef.current?.username ?? "unknown"}
+            priorMonthAdvisory={priorMonthAdvisory}
+            sampleNeedsApproval={effectiveSampleNeedsApproval}
+            isApprovingSample={isApprovingSample}
+            onApproveSample={() => { void handleApproveSample(); }}
             onConfigChange={handleConfigChange}
             onSampleSeedChange={setSampleSeed}
             onDrawSample={() => { void handleDrawSample(); }}

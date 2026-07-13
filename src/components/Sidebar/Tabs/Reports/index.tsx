@@ -4,9 +4,10 @@ import ReportDesignerTab from "../ReportDesigner";
 import { AlertTriangle, BarChart2, BarChart3, Building2, Check, ClipboardList, Database, Download, FileStack, FileText, Filter, FolderOpen, Globe, History, Presentation, User, Users, X } from "lucide-react";
 
 import type { SidebarTabModule } from "../tabTypes";
-import { loadOrDeriveDistributionCurrent } from "../../../../data/distribution/distributionStorage";
+import { loadOrDeriveDistributionCurrent, loadDistributionCurrentRevision } from "../../../../data/distribution/distributionStorage";
 import { logRejection } from "../../../../data/storage/errorLogger";
-import { listMonthFolders, loadMonthPopulationFinal, loadMonthForEditing } from "../../../../data/population/populationStorage";
+import { listMonthFolders, loadMonthPopulationFinal, loadMonthForEditing, loadMonthPopulationFinalRevision } from "../../../../data/population/populationStorage";
+import type { SourceRevisions } from "../../../../data/reporting/sourceRevisions";
 import { formatMonthFolderShortLabel } from "../../../../data/population/monthFolder";
 import type { PreparedPopulationRow } from "../../../../data/population/populationTypes";
 import { buildDistributionXlsx, openDistributionDocument, openDistributionDeck } from "../../../../data/reporting/distributionReport";
@@ -24,7 +25,7 @@ import { DEFAULT_EXEC_CONFIG } from "../../../../data/reporting/executiveReportT
 import type { ExecutiveReportInput } from "../../../../data/reporting/executiveReportTypes";
 import { getManagedLoginUsers } from "../../../../auth/userManagement";
 import { TabGuard } from "../../../PermissionGuard";
-import { loadSampleMaster } from "../../../../data/sampling/sampleStorage";
+import { loadSampleMaster, loadSampleMasterRevision } from "../../../../data/sampling/sampleStorage";
 import { loadAllEmployeeFiles } from "../../../../data/answers/answerStorage";
 import { loadTemplate } from "../../../../data/templates/templateStorage";
 import { loadInspectionTemplateSelection } from "../../../../data/templates/templateSelectionStorage";
@@ -126,6 +127,15 @@ function Chart({ svg }: { svg: string }) {
   return <div className="rh-chart" dangerouslySetInnerHTML={{ __html: svg }} />;
 }
 
+/** B2: fold (fileName → revision|null) pairs into a SourceRevisions map, dropping absent files. */
+function collectRevisions(pairs: Array<[string, number | null]>): SourceRevisions {
+  const out: SourceRevisions = {};
+  for (const [file, rev] of pairs) {
+    if (rev !== null) out[file] = rev;
+  }
+  return out;
+}
+
 // Inner component that holds all the existing Reports state and logic.
 function ReportsContent() {
   const { directoryHandle } = useWorkspace();
@@ -214,11 +224,14 @@ function ReportsContent() {
   // dashboard and the exported artifacts can never disagree.
   const loadExecInput = useCallback(async (): Promise<ExecutiveReportInput | null> => {
     if (!directoryHandle || !selectedMonth) return null;
-    const [populationFinal, sample, employeeFiles, templateSelection] = await Promise.all([
+    const [populationFinal, sample, employeeFiles, templateSelection, popRev, sampleRev, distRev] = await Promise.all([
       loadMonthPopulationFinal(directoryHandle, selectedMonth),
       loadSampleMaster(directoryHandle, selectedMonth),
       loadAllEmployeeFiles(directoryHandle, selectedMonth),
       loadInspectionTemplateSelection(directoryHandle),
+      loadMonthPopulationFinalRevision(directoryHandle, selectedMonth),
+      loadSampleMasterRevision(directoryHandle, selectedMonth),
+      loadDistributionCurrentRevision(directoryHandle, selectedMonth),
     ]);
     if (!populationFinal) return null;
     const template = templateSelection?.templateId
@@ -227,6 +240,12 @@ function ReportsContent() {
     const distribution = sample
       ? await loadOrDeriveDistributionCurrent(directoryHandle, selectedMonth, sample.rows)
       : null;
+    // B2: cite the exact source-file revisions this report was built from.
+    const sourceRevisions = collectRevisions([
+      ["population.final.json", popRev],
+      ["sample.master.json", sampleRev],
+      ["distribution.current.json", distRev],
+    ]);
     return {
       monthFolderName: selectedMonth,
       populationRows: populationFinal.rows as unknown as PreparedPopulationRow[],
@@ -235,6 +254,7 @@ function ReportsContent() {
       employeeFiles,
       template,
       config: DEFAULT_EXEC_CONFIG,
+      sourceRevisions,
     };
   }, [directoryHandle, selectedMonth]);
 
@@ -320,11 +340,19 @@ function ReportsContent() {
       if (type === "sample" || type === "sample-xlsx" || type === "sample-deck") {
         const { populationRows, sampleData, manifest } = await loadMonthForEditing(directoryHandle, selectedMonth);
         if (!sampleData) { showToast("error", "لم يتم العثور على بيانات عينة لهذا الشهر."); return; }
+        const [samplePopRev, sampleMasterRev] = await Promise.all([
+          loadMonthPopulationFinalRevision(directoryHandle, selectedMonth),
+          loadSampleMasterRevision(directoryHandle, selectedMonth),
+        ]);
         const sampleInput = {
           monthFolderName: selectedMonth,
           manifest,
           populationRows: (populationRows ?? []) as unknown as PreparedPopulationRow[],
           sample: sampleData,
+          sourceRevisions: collectRevisions([
+            ["population.final.json", samplePopRev],
+            ["sample.master.json", sampleMasterRev],
+          ]),
         };
         if (type === "sample-xlsx") {
           buildSampleXlsx(sampleInput);
@@ -341,14 +369,22 @@ function ReportsContent() {
         const data = sample ? await loadOrDeriveDistributionCurrent(directoryHandle, selectedMonth, sample.rows) : null;
         if (!data) { showToast("error", "لم يتم العثور على بيانات توزيع لهذا الشهر."); return; }
         const names = buildDisplayNameMap();
+        const [distSampleRev, distCurrentRev] = await Promise.all([
+          loadSampleMasterRevision(directoryHandle, selectedMonth),
+          loadDistributionCurrentRevision(directoryHandle, selectedMonth),
+        ]);
+        const distRevisions = collectRevisions([
+          ["sample.master.json", distSampleRev],
+          ["distribution.current.json", distCurrentRev],
+        ]);
         if (type === "distribution-xlsx") {
-          buildDistributionXlsx(data, selectedMonth, names);
+          buildDistributionXlsx(data, selectedMonth, names, distRevisions);
           showToast("ok", "تم تنزيل ملف Excel.");
         } else if (type === "distribution-deck") {
-          openDistributionDeck(data, selectedMonth, names);
+          openDistributionDeck(data, selectedMonth, names, distRevisions);
           showToast("ok", "تم فتح عرض التوزيع (الشرائح) — استخدم طباعة/PDF.");
         } else {
-          openDistributionDocument(data, selectedMonth, names);
+          openDistributionDocument(data, selectedMonth, names, distRevisions);
           showToast("ok", "تم فتح تقرير التوزيع التفصيلي — استخدم طباعة/PDF.");
         }
       } else if (type === "executive" || type === "executive-xlsx" || type === "executive-deck") {

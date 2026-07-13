@@ -1,6 +1,7 @@
 import { EXEC_CSS } from "./theme";
 import { esc } from "./primitives";
 import { icon } from "./ui/icons";
+import { SOURCE_REVISIONS_CSS } from "../sourceRevisions";
 
 // Viewer JS: builds the sidebar TOC and highlights the active page via an
 // IntersectionObserver. The legacy `fitPages()` transform:scale() auto-shrink hack
@@ -31,14 +32,14 @@ const VIEWER_JS = `(function(){
   pages.forEach(function(p){obs.observe(p);});
 })();`;
 
-export function buildViewerHtml(slides: string, monthLabel: string): string {
+export function buildViewerHtml(slides: string, monthLabel: string, footerNote = ""): string {
   return `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>التقرير التنفيذي — ${esc(monthLabel)}</title>
-<style>${EXEC_CSS}</style>
+<style>${EXEC_CSS}${SOURCE_REVISIONS_CSS}</style>
 </head>
 <body>
 <div class="viewer">
@@ -58,6 +59,7 @@ export function buildViewerHtml(slides: string, monthLabel: string): string {
   </aside>
   <main class="content">
 ${slides}
+${footerNote}
   </main>
 </div>
 <script>${VIEWER_JS}</script>

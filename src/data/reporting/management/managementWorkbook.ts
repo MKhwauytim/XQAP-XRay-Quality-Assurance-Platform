@@ -14,6 +14,11 @@ import { buildReportModel } from "../executive/model/reportModel";
 import type { ReportModel } from "../executive/model/reportModel";
 import type { DataSufficiencyBand } from "../executive/model/dataSufficiency";
 import type { ExecutiveReportInput } from "../executiveReportTypes";
+import {
+  sourceRevisionsSheetAoa,
+  SOURCE_REVISIONS_SHEET_NAME_AR,
+  hasSourceRevisions,
+} from "../sourceRevisions";
 
 type Cell = string | number;
 
@@ -145,6 +150,13 @@ export function buildManagementWorkbookObject(
   append("الأداء حسب المنفذ", portSheet(model));
   append("أداء المراجعين", reviewerSheet(model));
   append("الحالة والإجراءات", statusSheet(model, input));
+  if (hasSourceRevisions(input.sourceRevisions)) {
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.aoa_to_sheet(sourceRevisionsSheetAoa(input.sourceRevisions)),
+      SOURCE_REVISIONS_SHEET_NAME_AR
+    );
+  }
   return wb;
 }
 

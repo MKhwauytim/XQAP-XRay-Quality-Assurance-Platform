@@ -489,6 +489,32 @@ export async function safeWriteJsonText(
   });
 }
 
+/**
+ * Read just the `JsonEnvelope.metadata.revision` of a file (B2 report-to-revision
+ * linkage) without unwrapping/returning the (potentially large) data. Returns the
+ * numeric revision, or `null` when the file is missing, corrupt, unwrapped (bare
+ * JSON with no envelope), or uses the string-schema workspace-management shape.
+ * Falls back to the `.bak` snapshot so a report can still cite a recoverable file.
+ */
+export async function readEnvelopeRevision(
+  dir: DirectoryHandleLike,
+  fileName: string
+): Promise<number | null> {
+  const extract = (parsed: unknown): number | null => {
+    if (
+      isEnvelope(parsed) &&
+      typeof parsed.metadata.schemaVersion === "number" &&
+      typeof parsed.metadata.revision === "number"
+    ) {
+      return parsed.metadata.revision;
+    }
+    return null;
+  };
+  const live = extract(parseValidJson(await readText(dir, fileName)));
+  if (live !== null) return live;
+  return extract(parseValidJson(await readText(dir, `${fileName}.bak`)));
+}
+
 export async function safeReadJson<T>(
   dir: DirectoryHandleLike,
   fileName: string

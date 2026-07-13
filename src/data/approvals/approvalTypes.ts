@@ -25,6 +25,14 @@ export type DecisionEvent = {
   reviewedBy: string;
   reviewedAt: string;
   reviewNotes?: string;
+  /**
+   * djb2 hash of the immediately-preceding decision in this supervisor's chain (B5).
+   * Absent on the first decision in a file and on legacy events written before B5.
+   * TAMPER-EVIDENT ONLY: with no backend/secret key an editor who rewrites a decision
+   * can recompute the whole chain — this catches accidental/out-of-band edits, not a
+   * determined tamperer (see docs/SECURITY_MODEL.md).
+   */
+  previousDecisionHash?: string;
 };
 
 export type SupervisorDecisionFile = {

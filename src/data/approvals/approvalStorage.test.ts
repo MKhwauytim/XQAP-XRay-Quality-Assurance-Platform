@@ -4,8 +4,10 @@ import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import {
   appendDecisionEvent,
   effectiveDecision,
+  hashDecisionEvent,
   loadSupervisorDecisions,
   mergeDecisionHistory,
+  verifyDecisionChain,
 } from "./approvalStorage";
 
 describe("approvalStorage decision events", () => {
@@ -92,5 +94,60 @@ describe("approvalStorage decision events", () => {
 
   it("returns undefined for a request with no history", () => {
     expect(effectiveDecision([])).toBeUndefined();
+  });
+});
+
+describe("B5 decision hash-chaining (tamper-evident)", () => {
+  it("stamps previousDecisionHash on every event after the first", async () => {
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    await appendDecisionEvent(root, "5-may-2026", "sup-1", {
+      requestId: "req-1", kind: "referral", status: "approved",
+      reviewedBy: "sup-1", reviewedAt: "2026-07-01T10:00:00.000Z",
+    });
+    await appendDecisionEvent(root, "5-may-2026", "sup-1", {
+      requestId: "req-2", kind: "referral", status: "denied",
+      reviewedBy: "sup-1", reviewedAt: "2026-07-02T10:00:00.000Z",
+    });
+    await appendDecisionEvent(root, "5-may-2026", "sup-1", {
+      requestId: "req-3", kind: "replacement", status: "approved",
+      reviewedBy: "sup-1", reviewedAt: "2026-07-03T10:00:00.000Z",
+    });
+
+    const file = await loadSupervisorDecisions(root, "5-may-2026", "sup-1");
+    const events = file.decisionEvents ?? [];
+    expect(events).toHaveLength(3);
+    // First event has no predecessor → no hash.
+    expect(events[0].previousDecisionHash).toBeUndefined();
+    // Each later event chains to the actual hash of its predecessor.
+    expect(events[1].previousDecisionHash).toBe(hashDecisionEvent(events[0]));
+    expect(events[2].previousDecisionHash).toBe(hashDecisionEvent(events[1]));
+    // The intact chain verifies.
+    expect(verifyDecisionChain(events)).toBeNull();
+  });
+
+  it("verifyDecisionChain reports the first broken link when an event is tampered", async () => {
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    await appendDecisionEvent(root, "5-may-2026", "sup-1", {
+      requestId: "req-1", kind: "referral", status: "approved",
+      reviewedBy: "sup-1", reviewedAt: "2026-07-01T10:00:00.000Z",
+    });
+    await appendDecisionEvent(root, "5-may-2026", "sup-1", {
+      requestId: "req-2", kind: "referral", status: "denied",
+      reviewedBy: "sup-1", reviewedAt: "2026-07-02T10:00:00.000Z",
+    });
+    const file = await loadSupervisorDecisions(root, "5-may-2026", "sup-1");
+    const events = file.decisionEvents ?? [];
+    // Out-of-band edit: flip the first decision's status. Now event[1]'s recorded
+    // previousDecisionHash no longer matches the (mutated) event[0].
+    const tampered = [{ ...events[0], status: "denied" as const }, events[1]];
+    expect(verifyDecisionChain(tampered)).toBe(1);
+  });
+
+  it("treats a pre-B5 legacy chain (no previousDecisionHash) as intact", () => {
+    const legacy = [
+      { requestId: "a", kind: "referral" as const, status: "approved" as const, reviewedBy: "s", reviewedAt: "2026-07-01T10:00:00.000Z" },
+      { requestId: "b", kind: "referral" as const, status: "denied" as const, reviewedBy: "s", reviewedAt: "2026-07-02T10:00:00.000Z" },
+    ];
+    expect(verifyDecisionChain(legacy)).toBeNull();
   });
 });

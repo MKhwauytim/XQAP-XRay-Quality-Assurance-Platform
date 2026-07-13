@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
-import { CheckCircle2, ChevronRight } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronRight } from "lucide-react";
 import * as XLSX from "xlsx";
 import type { NormalizedRiskRow } from "../riskData/riskDataTypes";
 import type { NormalizedBiRow } from "../biData/biDataTypes";
 import { makeBiMatchKey } from "../processing/populationProcessor";
+import type { OrphanScanResult } from "../../../../../data/integrity/orphanScan";
 import "./DataAccuracyReport.css";
 
 // ── column mapping definition ─────────────────────────────────────────────────
@@ -223,6 +224,83 @@ function compare(riskRows: NormalizedRiskRow[], biRows: NormalizedBiRow[]): Comp
     colStats,
     mismatches,
   };
+}
+
+// ── Referential-integrity (orphan scan) section (B3) ───────────────────────────
+
+const ORPHAN_DISPLAY_CAP = 50;
+
+/** One orphan category: count + capped, expandable id list. */
+function OrphanCategory({ title, description, ids }: { title: string; description: string; ids: string[] }) {
+  const [open, setOpen] = useState(false);
+  const hasOrphans = ids.length > 0;
+  const shown = ids.slice(0, ORPHAN_DISPLAY_CAP);
+  const extra = ids.length - shown.length;
+  return (
+    <div className={`orphan-category${hasOrphans ? " has-orphans" : ""}`}>
+      <button
+        type="button"
+        className="orphan-category-head"
+        onClick={() => hasOrphans && setOpen((o) => !o)}
+        disabled={!hasOrphans}
+        aria-expanded={open}
+      >
+        <span className="orphan-cat-icon" aria-hidden>
+          {hasOrphans ? <AlertTriangle size={15} color="#dc2626" /> : <CheckCircle2 size={15} color="#16a34a" />}
+        </span>
+        <span className="orphan-cat-title">{title}</span>
+        <span className="orphan-cat-count" style={{ color: hasOrphans ? "#dc2626" : "#16a34a", fontWeight: 700 }}>
+          {ids.length.toLocaleString("ar-SA-u-nu-latn")}
+        </span>
+        {hasOrphans ? <ChevronRight size={14} style={{ transform: open ? "rotate(90deg)" : undefined }} /> : null}
+      </button>
+      <p className="orphan-cat-desc">{description}</p>
+      {open && hasOrphans ? (
+        <div className="orphan-cat-ids" dir="ltr">
+          {shown.map((id) => (
+            <code key={id} className="orphan-id-chip">{id}</code>
+          ))}
+          {extra > 0 ? (
+            <span className="orphan-id-more" dir="rtl">+{extra.toLocaleString("ar-SA-u-nu-latn")} أخرى</span>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** Referential-integrity orphan scan (B3). Renders nothing when `scan` is null. */
+export function OrphanScanSection({ scan }: { scan: OrphanScanResult | null }) {
+  if (!scan) return null;
+  return (
+    <div className="orphan-scan" aria-label="فحص السلامة المرجعية">
+      <div className="orphan-scan-head">
+        <h3 className="dar-col-table-title">فحص السلامة المرجعية (الصفوف اليتيمة)</h3>
+        {scan.clean ? (
+          <span className="orphan-scan-clean" style={{ color: "#16a34a", display: "inline-flex", alignItems: "center", gap: 4 }}>
+            <CheckCircle2 size={15} /> لا توجد صفوف يتيمة — السلاسل المرجعية سليمة
+          </span>
+        ) : null}
+      </div>
+      <div className="orphan-scan-grid">
+        <OrphanCategory
+          title="إجابات دون توزيع"
+          description="معرّفات لها إجابات محفوظة لكنها غير موجودة في لقطة التوزيع الحالية."
+          ids={scan.answersOrphans}
+        />
+        <OrphanCategory
+          title="طلبات اعتماد دون توزيع"
+          description="معرّفات مشار إليها في طلبات الإحالة/الاستبدال لكنها غير موجودة في لقطة التوزيع الحالية."
+          ids={scan.approvalsOrphans}
+        />
+        <OrphanCategory
+          title="عينة دون مجتمع"
+          description="صفوف في العينة المسحوبة لا يقابلها معرّف في المجتمع النهائي."
+          ids={scan.sampleOrphans}
+        />
+      </div>
+    </div>
+  );
 }
 
 // ── component ─────────────────────────────────────────────────────────────────

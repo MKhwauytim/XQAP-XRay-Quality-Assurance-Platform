@@ -6,15 +6,16 @@
 import { DECK_CSS } from "./deckTheme";
 import { esc } from "../primitives";
 import { icon } from "../ui/icons";
+import { SOURCE_REVISIONS_CSS } from "../../sourceRevisions";
 
-export function buildDeckHtml(slides: string, monthLabel: string): string {
+export function buildDeckHtml(slides: string, monthLabel: string, footerNote = ""): string {
   return `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>العرض التنفيذي — ${esc(monthLabel)}</title>
-<style>${DECK_CSS}</style>
+<style>${DECK_CSS}${SOURCE_REVISIONS_CSS}</style>
 </head>
 <body>
 <div class="deck-viewer">
@@ -39,6 +40,7 @@ export function buildDeckHtml(slides: string, monthLabel: string): string {
     </div>
   </div>
 ${slides}
+${footerNote}
 </div>
 </body>
 </html>`;

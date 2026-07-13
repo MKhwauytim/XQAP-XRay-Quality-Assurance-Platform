@@ -4,6 +4,817 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v49 — 2026-07-14 — B1 four-eyes gate made reload-safe (persistent marker)
+
+Wave B gated only samples drawn in the current session (in-memory `sampleNeedsApproval` flag), so drawing a sample and reloading the tab made it look "legacy" and bypassed the four-eyes gate. Every new-era draw carries the A2 `samplingAlgorithmVersion` stamp on disk, which is the persistent discriminator: stamped + unapproved ⇒ approval required, regardless of session. Legacy samples (no stamp) still pass.
+
+**File:** `src/data/sampling/sampleApprovalRules.ts`
+
+**Before:**
+```ts
+/**
+ * Is the Phase 3 → Phase 4 (distribution) transition allowed for this sample?
+```
+
+**After:**
+```ts
+export function sampleRequiresApproval(sample: {
+  samplingAlgorithmVersion?: string;
+  approval?: SampleApproval;
+}): boolean {
+  return Boolean(sample.samplingAlgorithmVersion) && !sample.approval;
+}
+
+/**
+ * Is the Phase 3 → Phase 4 (distribution) transition allowed for this sample?
+```
+
+**File:** `src/components/Sidebar/Tabs/Population/index.tsx`
+
+**Before:**
+```tsx
+  const [sampleNeedsApproval, setSampleNeedsApproval] = useState(false);
+  ...
+      !isDistributionAllowed({ approval: sampleDrawResult?.approval, needsApproval: sampleNeedsApproval })
+  ...
+            sampleNeedsApproval={sampleNeedsApproval}
+```
+
+**After:**
+```tsx
+  const [sampleNeedsApproval, setSampleNeedsApproval] = useState(false);
+  const effectiveSampleNeedsApproval =
+    sampleNeedsApproval ||
+    (sampleDrawResult ? sampleRequiresApproval(sampleDrawResult) : false);
+  ...
+      !isDistributionAllowed({ approval: sampleDrawResult?.approval, needsApproval: effectiveSampleNeedsApproval })
+  ...
+            sampleNeedsApproval={effectiveSampleNeedsApproval}
+```
+
+**File:** `src/data/sampling/sampleApprovalRules.test.ts`
+
+**Before:**
+```ts
+(no sampleRequiresApproval coverage)
+```
+
+**After:**
+```ts
+describe("sampleRequiresApproval — reload-safe persistent gate", () => { /* 3 tests: stamped+unapproved ⇒ true; stamped+approved ⇒ false; legacy ⇒ false */ });
+```
+
+## v48.7 — 2026-07-14 — B1 Four-eyes sample-release gate (Population Phase 3 → Phase 4)
+
+**File:** `src/data/sampling/sampleApprovalRules.ts` (new)
+
+**Before:**
+```
+(new file)
+```
+
+**After:**
+```ts
+// Pure decision helpers extracted from the Phase 3 UI so the gate is unit-testable:
+export function evaluateApprovalEligibility(role, username, drawnBy): ApprovalEligibility // non-approver → insufficient-role; approver-but-drawer → self-approval-blocked unless admin
+export function buildSampleApproval(params): SampleApproval // records `note` only on admin self-approval
+export function isDistributionAllowed({ approval, needsApproval }): boolean // approval OR legacy (needsApproval=false)
+```
+
+**File:** `src/data/labels/labelsStore.ts`
+
+**Before:**
+```ts
+  // Population — sampling & processing guards
+  sample_redraw_blocked: "لا يمكن إعادة سحب العينة بعد بدء التوزيع: ...",
+```
+
+**After:**
+```ts
+  // Population — sampling & processing guards
+  sample_redraw_blocked: "لا يمكن إعادة سحب العينة بعد بدء التوزيع: ...",
+
+  // Four-eyes sample release gate (B1)
+  sample_approval_section_title: "اعتماد العينة (مبدأ ازدواجية المراجعة)",
+  // …intro, pending, state, note_label, legacy_note, approve_btn, approving,
+  //   self_blocked, admin_self_note, no_permission, done, no_sample, gate_blocked…
+
+  // Switching-rule advisory (B4)
+  switching_advisory_title / _rate / _normal / _tightened / _disclaimer
+```
+
+**File:** `src/components/Sidebar/Tabs/Population/index.tsx`
+
+**Before:**
+```tsx
+    if (currentPhase === 3 && !sampleDrawResult) { setProcessingMessage(...); return; }
+```
+
+**After:**
+```tsx
+    if (currentPhase === 3 && !sampleDrawResult) { setProcessingMessage(...); return; }
+    // B1 gate: this-session draw must be approved; legacy/previous-session samples pass.
+    if (currentPhase === 3 &&
+        !isDistributionAllowed({ approval: sampleDrawResult?.approval, needsApproval: sampleNeedsApproval })) {
+      setSampleSaveMessage({ type: "error", text: getLabels().sample_gate_blocked });
+      return;
+    }
+```
+Also: `handleApproveSample()` (role/non-drawer/admin-self-note enforcement via `evaluateApprovalEligibility` + `buildSampleApproval` → `approveSampleMaster`); `sampleNeedsApproval` state set true after a fresh draw, reset false on month load.
+
+**File:** `src/components/Sidebar/Tabs/Population/components/PhaseThreeSampling.tsx`
+
+Added `SampleApprovalPanel` (approved / legacy / pending-with-approve-button states) and new props (`currentUsername`, `sampleNeedsApproval`, `isApprovingSample`, `onApproveSample`, `priorMonthAdvisory`).
+
+---
+
+
+## v48.6 — 2026-07-14 — B2 Report-to-revision linkage
+
+**File:** `src/data/reporting/sourceRevisions.ts` (new)
+
+**After:**
+```ts
+export type SourceRevisions = Record<string, number>;
+export function sourceRevisionsFooterHtml(revisions, escFn): string // escaped HTML block, "" when empty
+export function sourceRevisionsSheetAoa(revisions): (string|number)[][] // Excel "مراجعات المصادر" sheet
+export const SOURCE_REVISIONS_CSS // shared footer styling
+```
+
+**File:** `src/data/storage/safeWrite.ts`
+
+**Before:**
+```ts
+export async function safeReadJson<T>(dir, fileName): Promise<SafeReadResult<T>> {
+```
+
+**After:**
+```ts
+export async function readEnvelopeRevision(dir, fileName): Promise<number | null> { /* metadata.revision or null; falls back to .bak */ }
+
+export async function safeReadJson<T>(dir, fileName): Promise<SafeReadResult<T>> {
+```
+
+**File:** `src/data/population/populationStorage.ts`, `src/data/sampling/sampleStorage.ts`, `src/data/distribution/distributionStorage.ts`
+
+Added companion revision loaders: `loadMonthPopulationFinalRevision`, `loadSampleMasterRevision`, `loadDistributionCurrentRevision` (each reuses `readEnvelopeRevision`).
+
+**File:** `src/data/reporting/executiveReportTypes.ts`, `src/data/reporting/sampleReport.ts`
+
+Added optional `sourceRevisions?: SourceRevisions` to `ExecutiveReportInput` and `SampleReportInput`; distribution/management builders take an optional 4th `sourceRevisions` param.
+
+**File:** `src/data/reporting/shared/reportChrome.ts`, `.../executive/viewer.ts`, `.../executive/deck/viewer.ts`, `.../management/managementReport.ts`
+
+Viewers gained an optional footer slot (`footerNote` / footer arg) that renders `sourceRevisionsFooterHtml(...)`; document/deck/report now print the source-revision block.
+
+**File:** report Excel builders (`sampleReport.ts`, `distributionReport.ts`, `executive/workbook/workbook.ts`, `management/managementWorkbook.ts`)
+
+**Before:**
+```ts
+  XLSX.utils.book_append_sheet(wb, ..., "4 · العينة المسحوبة");
+  XLSX.writeFile(wb, ...);
+```
+
+**After:**
+```ts
+  XLSX.utils.book_append_sheet(wb, ..., "4 · العينة المسحوبة");
+  if (hasSourceRevisions(sourceRevisions)) {
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sourceRevisionsSheetAoa(sourceRevisions)), SOURCE_REVISIONS_SHEET_NAME_AR);
+  }
+  XLSX.writeFile(wb, ...);
+```
+
+**File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
+
+`loadExecInput` + the sample/distribution generate branches now collect envelope revisions (population.final / sample.master / distribution.current) into a `SourceRevisions` map and pass it into the report inputs / builder calls.
+
+---
+
+
+## v48.5 — 2026-07-14 — B3 Referential-integrity (orphan) scan in the Data Accuracy view
+
+**File:** `src/data/integrity/orphanScan.ts` (new)
+
+**After:**
+```ts
+export function scanReferentialIntegrity(input: OrphanScanInput): OrphanScanResult
+// answersOrphans / approvalsOrphans (ids absent from current distribution) + sampleOrphans (ids absent from population); deduped + sorted.
+```
+
+**File:** `src/components/Sidebar/Tabs/Population/components/DataAccuracyReport.tsx`
+
+Added exported `OrphanScanSection` (counts + expandable id lists, capped at 50 with "+N أخرى").
+
+**File:** `src/components/Sidebar/Tabs/Population/components/PhaseTwoReportAndProcessing.tsx`
+
+Renders `<OrphanScanSection scan={orphanScan} />` (independent of BI availability); new optional `orphanScan` prop.
+
+**File:** `src/components/Sidebar/Tabs/Population/index.tsx`
+
+Added a Phase-2 effect that loads sample/distribution/employee files for the selected month, builds id sets, and computes `scanReferentialIntegrity(...)`.
+
+---
+
+
+## v48.4 — 2026-07-14 — B4 Switching-rule advisory (ISO 2859-1 / Z1.4)
+
+**File:** `src/data/sampling/samplingPlanStorage.ts`
+
+**Before:**
+```ts
+export type SamplingPlan = { …; inspectionLevelNote: string; riskBasis: SamplingPlanRiskBasis; };
+```
+
+**After:**
+```ts
+export const SUSPICION_TIGHTEN_THRESHOLD = 0.05;
+export function computeSuspicionRate(rows): number | null // share of xrayLevelTwoResult === اشتباه; null on empty
+export function recommendationFromRate(rate): "normal" | "tightened-review" | null // >5% → tightened
+export type SamplingPlanPriorMonthAdvisory = { priorMonthFolderName; priorMonthSuspicionRate; inspectionRecommendation };
+export type SamplingPlan = { …; riskBasis; priorMonthAdvisory?: SamplingPlanPriorMonthAdvisory; };
+// buildSamplingPlan folds params.priorMonthAdvisory in when provided.
+```
+
+**File:** `src/data/sampling/switchingRuleAdvisory.ts` (new)
+
+`findPriorMonthFolder` + `loadPriorMonthAdvisory` — read the chronologically-prior month's population and compute the advisory; all-null when no prior month/rows. Advisory only.
+
+**File:** `src/components/Sidebar/Tabs/Population/index.tsx` / `PhaseThreeSampling.tsx`
+
+`handleDrawSample` now loads the advisory and passes it into `buildSamplingPlan`. Phase 3 shows a `SwitchingAdvisory` banner (normal vs tightened-review) before the draw.
+
+---
+
+
+## v48.3 — 2026-07-14 — B5 Decision hash-chaining (tamper-evident)
+
+**File:** `src/data/approvals/approvalTypes.ts`
+
+**After:**
+```ts
+export type DecisionEvent = { …; previousDecisionHash?: string; }; // djb2 chain link; tamper-EVIDENT only
+```
+
+**File:** `src/data/approvals/approvalStorage.ts`
+
+**Before:**
+```ts
+          decisionEvents: [...(current.decisionEvents ?? []), event],
+```
+
+**After:**
+```ts
+export function hashDecisionEvent(event): string { return simpleHash(JSON.stringify(event)); }
+export function verifyDecisionChain(events): number | null // index of first broken link, or null
+// appendDecisionEvent stamps previousDecisionHash = hashDecisionEvent(lastEvent) from stored state:
+          decisionEvents: [...priorEvents, chainedEvent],
+```
+
+**File:** `src/data/audit/actionLog.ts`
+
+**Before:**
+```ts
+      const updated: WorkspaceActionArchiveFile = { year, revision: …, updatedAt, entries: [...] };
+```
+
+**After:**
+```ts
+export function hashActionArchive(archive): string
+// archiveOverflow links each year to the previous year's archive:
+      let previousArchiveHash = archive.previousArchiveHash;
+      if (previousArchiveHash === undefined) { const prior = await readArchiveFile(dir, year-1); if (prior.revision > 0) previousArchiveHash = hashActionArchive(prior); }
+      const updated: WorkspaceActionArchiveFile = { year, revision: …, updatedAt, ...(previousArchiveHash !== undefined ? { previousArchiveHash } : {}), entries: [...] };
+```
+
+---
+
+
+## v48.2 — 2026-07-14 — B6 casLoop conflict-UX pass (surface exhausted-retry errors)
+
+**File:** `src/components/Sidebar/Tabs/Population/index.tsx` (`handleConfigChange`)
+
+**Before:**
+```tsx
+      await savePopulationConfig(directoryHandle, newConfig);
+```
+
+**After:**
+```tsx
+      const result = await savePopulationConfig(directoryHandle, newConfig);
+      if (!result.ok) { setProcessingMessage(result.error); }
+```
+
+**File:** `src/components/FeedbackWidget/FeedbackWidget.tsx`
+
+`handleSubmit` / `handleReply` wrapped in try/catch — a CAS conflict (submit/reply throw on exhausted retries) now surfaces an Arabic `submitError` inline and resets the busy state, instead of an unhandled rejection + stuck spinner.
+
+**File:** `src/components/NotificationBanner/NotificationBanner.tsx`
+
+`handleAccept` now checks the `acceptNotification` result and surfaces `acceptError` instead of silently dropping the acknowledgement on conflict.
+
+(Audit finding: template save, template-selection save, notification post, month close/reopen, backup/restore already surface `result.error`. Best-effort background writes — `appendWorkspaceAction`, `authActivityLog` — remain intentionally console-only by contract.)
+
+---
+
+
+## v48.1 — 2026-07-14 — B7 SECURITY_MODEL.md addendum
+
+**File:** `docs/SECURITY_MODEL.md`
+
+Added §6 (Wave B7): (a) `contentHash` and B5 hash-chains are corruption-detection / tamper-EVIDENT only (no secret key → recomputable); (b) shared-folder concurrency (CAS + Web Locks best-effort, loud conflict on exhausted retries) is an accepted permanent limitation of the no-backend design; (c) NCA ECC-2:2024 full compliance would require a server (references `docs/research/PIPELINE_RESEARCH_2026-07-14.md` §7).
+
+---
+
+
+## v48 — 2026-07-14 — Wave B tests added
+
+- `src/data/sampling/sampleApprovalRules.test.ts` — B1 gate (legacy-approved, self-approve-note, non-drawer rule).
+- `src/data/sampling/samplingPlanStorage.test.ts` (extended) — B4 `computeSuspicionRate` / `recommendationFromRate` / plan folding.
+- `src/data/approvals/approvalStorage.test.ts` (extended) — B5 chain stamping + `verifyDecisionChain` (intact / tampered / legacy).
+- `src/data/reporting/sourceRevisions.test.ts` — B2 helper + revisions appear in sample document/deck output; omitted → no footer.
+- `src/data/integrity/orphanScan.test.ts` — B3 orphan classification.
+
+## v47.8 — 2026-07-14 — A2 Reproducibility pin: SAMPLING_ALGORITHM_VERSION bound to the seed
+
+**File:** `src/data/sampling/sampleAlgorithm.ts`
+
+**Before:**
+```ts
+import type {
+  PortAllocation,
+  SampleConfig,
+  SampleDrawResult,
+  SampleMasterData,
+  StageAllocation
+} from "./sampleTypes";
+```
+
+**After:**
+```ts
+import type {
+  PortAllocation,
+  SampleConfig,
+  SampleDrawResult,
+  SampleMasterData,
+  StageAllocation
+} from "./sampleTypes";
+
+/** Reproducibility pin (A2). Bump on ANY semantic change to drawSample. */
+export const SAMPLING_ALGORITHM_VERSION = "1.0";
+```
+
+Both `SampleMasterData` construction sites (legacy `totalSampleSize` path and stage-by-stage path)
+now stamp `samplingAlgorithmVersion: SAMPLING_ALGORITHM_VERSION` immediately after `rngSeed`.
+
+**File:** `src/data/sampling/sampleTypes.ts`
+
+**Before:**
+```ts
+export type SampleMasterData = {
+  rngSeed: string;
+  totalRequested: number;
+  ...
+  drawnAt: string;
+  drawnBy: string;
+  revision?: number;
+  _writeToken?: string;
+  rows: PreparedPopulationRow[];
+};
+```
+
+**After:**
+```ts
+export type SampleApproval = {
+  approvedBy: string;
+  approvedAt: string;
+  role: string;
+  note?: string;
+};
+
+export type SampleMasterData = {
+  rngSeed: string;
+  samplingAlgorithmVersion?: string;   // A2
+  totalRequested: number;
+  ...
+  drawnAt: string;
+  drawnBy: string;
+  approval?: SampleApproval;           // A3
+  revision?: number;
+  _writeToken?: string;
+  rows: PreparedPopulationRow[];
+};
+```
+
+---
+
+
+## v47.7 — 2026-07-14 — A3 Four-eyes sample release (data fields + approveSampleMaster CAS function)
+
+**File:** `src/data/sampling/sampleStorage.ts`
+
+**Before:**
+```ts
+import type { PortAllocation, SampleMasterData, StageAllocation } from "./sampleTypes";
+...
+/** Idempotently append a replacement row to the sample master using a CAS retry loop. */
+export async function appendSampleRow(
+```
+
+**After:**
+```ts
+import type { PortAllocation, SampleApproval, SampleMasterData, StageAllocation } from "./sampleTypes";
+...
+/** Record a four-eyes approval on the sample master (A3), CAS discipline, first-approval-wins. */
+export async function approveSampleMaster(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  approval: SampleApproval
+): Promise<{ ok: true; data: SampleMasterData } | { ok: false; error: string }> {
+  await ensureMonthWritable(directoryHandle, monthFolderName);
+  return casLoop(async (writeToken) => {
+    const current = await loadSampleMaster(directoryHandle, monthFolderName);
+    if (!current) return { done: true, result: { ok: false, error: "لا توجد بيانات عينة للشهر المحدد." } };
+    if (current.approval) return { done: true, result: { ok: true, data: current } }; // first wins
+    const nextRevision = (current.revision ?? 0) + 1;
+    const updated = { ...current, approval, revision: nextRevision, _writeToken: writeToken };
+    const writeResult = await saveSampleMaster(directoryHandle, monthFolderName, updated);
+    if (!writeResult.ok) return { done: false };
+    const verify = await loadSampleMaster(directoryHandle, monthFolderName);
+    if (verify?.revision === nextRevision && verify._writeToken === writeToken) {
+      return { done: true, result: { ok: true, data: updated }, verify: async () => { ... } };
+    }
+    return { done: false };
+  }, { conflictError: "تعارض في الكتابة: لم يتمكن النظام من تسجيل اعتماد العينة بعد عدة محاولات." });
+}
+
+/** Idempotently append a replacement row to the sample master using a CAS retry loop. */
+export async function appendSampleRow(
+```
+
+---
+
+
+## v47.6 — 2026-07-14 — A1 Sampling plan record (samplingPlanStorage.ts + draw-path wiring)
+
+**File:** `src/data/sampling/samplingPlanStorage.ts` (new file)
+
+**Before:** _(did not exist)_
+
+**After:** new module exporting `SamplingPlan` type, `SAMPLING_PLAN_SCHEMA = 1`, pure `buildSamplingPlan(...)`
+(computes lot definition = ports + per-stage split, `targetSampleFraction`, advisory quality/inspection-level
+notes, and risk-basis share of affirmative `targetedByRiskEngine` rows in population vs sample, plus the seed +
+`samplingAlgorithmVersion` it binds to), and `saveSamplingPlan` / `loadSamplingPlan` (file `sampling.plan.json`
+next to `sample.master.json`, via `safeWriteJson`/`safeReadJson`, month-lock gated on write).
+
+**File:** `src/components/Sidebar/Tabs/Population/index.tsx`
+
+**Before:**
+```ts
+import { loadSampleMaster, saveSampleMaster } from "../../../../data/sampling/sampleStorage";
+...
+        if (saveResult.ok) {
+          await updateMonthStatus(directoryHandle, monthFolderName, "sampled");
+          void appendWorkspaceAction(directoryHandle, {
+```
+
+**After:**
+```ts
+import { loadSampleMaster, saveSampleMaster } from "../../../../data/sampling/sampleStorage";
+import { buildSamplingPlan, saveSamplingPlan } from "../../../../data/sampling/samplingPlanStorage";
+...
+        if (saveResult.ok) {
+          await updateMonthStatus(directoryHandle, monthFolderName, "sampled");
+          // A1: persist the documented sampling plan (best-effort — must not fail the draw).
+          try {
+            const plan = buildSamplingPlan({
+              monthFolderName,
+              populationRows: populationProcessingResult.preparedRows,
+              sampleData: drawResult.data,
+              createdBy: username,
+            });
+            const planResult = await saveSamplingPlan(directoryHandle, monthFolderName, plan);
+            if (!planResult.ok) logError("population:save-sampling-plan", new Error(planResult.error));
+          } catch (planError) {
+            logError("population:save-sampling-plan", planError);
+          }
+          void appendWorkspaceAction(directoryHandle, {
+```
+
+---
+
+
+## v47.5 — 2026-07-14 — A4 Per-item answer value history (append-only, capped, first-kept)
+
+**File:** `src/data/answers/answerTypes.ts`
+
+**Before:**
+```ts
+export type ItemAnswer = {
+  ...
+  status: ItemAnswerStatus;
+  history?: ItemAnswerHistoryEntry[];
+};
+```
+
+**After:**
+```ts
+export type ItemValueHistoryReason = "save" | "reopen-correction";
+export type ItemValueSnapshot = { answers: FieldAnswer[]; status: ItemAnswerStatus; submittedAt: string | null; lastSavedAt: string; };
+export type ItemValueHistoryEntry = { changedAt: string; changedBy: string; reason: ItemValueHistoryReason; previous: ItemValueSnapshot; };
+
+export type ItemAnswer = {
+  ...
+  status: ItemAnswerStatus;
+  history?: ItemAnswerHistoryEntry[];
+  valueHistory?: ItemValueHistoryEntry[];   // A4
+};
+```
+
+> Deviation note: A4 is stored in a NEW `valueHistory[]` field rather than reusing the existing
+> `history[]`, because `history[]` already carries a different (reopen-event) shape with a live
+> consumer (`reopenAnswer.ts` reads `.previousSubmittedAt`). Overloading it would break backward
+> compatibility. `valueHistory` is additive and optional, satisfying the design's intent.
+
+**File:** `src/data/answers/answerStorage.ts`
+
+**Before:**
+```ts
+import type { EmployeeAnswerFile, ItemAnswer, ItemAnswerHistoryEntry } from "./answerTypes";
+...
+export async function saveEmployeeAnswers(...) {
+  return updateEmployeeAnswerFile(..., (file) => ({ ...file, items }));
+}
+export async function upsertItemAnswer(...) {
+  return updateEmployeeAnswerFile(..., (file) => {
+    const others = file.items.filter((i) => i.xrayImageId !== item.xrayImageId);
+    return { ...file, items: [...others, item] };
+  });
+}
+```
+
+**After:**
+```ts
+import type { EmployeeAnswerFile, ItemAnswer, ItemAnswerHistoryEntry, ItemValueHistoryEntry } from "./answerTypes";
+
+export const VALUE_HISTORY_CAP = 20;
+function appendValueHistory(existing, entry) { /* keep first(index 0) + last CAP-1 on overflow */ }
+function changeReason(previous) { /* "reopen-correction" if previously-reopened draft, else "save" */ }
+function withValueHistory(previous, next) { /* first insert → none; overwrite → snapshot previous */ }
+
+export async function saveEmployeeAnswers(...) {
+  return updateEmployeeAnswerFile(..., (file) => {
+    const prevById = new Map(file.items.map((i) => [i.xrayImageId, i]));
+    return { ...file, items: items.map((item) => withValueHistory(prevById.get(item.xrayImageId), item)) };
+  });
+}
+export async function upsertItemAnswer(...) {
+  return updateEmployeeAnswerFile(..., (file) => {
+    const previous = file.items.find((i) => i.xrayImageId === item.xrayImageId);
+    const others = file.items.filter((i) => i.xrayImageId !== item.xrayImageId);
+    return { ...file, items: [...others, withValueHistory(previous, item)] };
+  });
+}
+```
+
+---
+
+
+## v47.4 — 2026-07-14 — A5 Immutable raw imports (bronze layer)
+
+**File:** `src/data/population/monthTypes.ts`
+
+**Before:**
+```ts
+export type MonthRawData = {
+  sourceFileName: string;
+  importedAt: string;
+  importedBy: string;
+  rows: Array<Record<string, unknown>>;
+};
+```
+
+**After:**
+```ts
+export type MonthRawData = {
+  sourceFileName: string;
+  importedAt: string;
+  importedBy: string;
+  supersedes?: string | null;   // A5 — archived prior raw file name
+  rows: Array<Record<string, unknown>>;
+};
+```
+
+**File:** `src/data/population/populationStorage.ts`
+
+**Before:**
+```ts
+import { safeWriteJson, safeReadJson } from "../storage/safeWrite";
+...
+    // Save risk raw JSON
+    if (riskRawRows.length > 0) {
+      const riskRaw: MonthRawData = { sourceFileName: riskFileName ?? "unknown", importedAt: now, importedBy: username, rows: riskRawRows };
+      await safeWriteJson(rawDir, "risk.raw.json", riskRaw);
+    }
+    // Save BI raw JSON
+    if (biRawRows.length > 0) {
+      const biRaw: MonthRawData = { sourceFileName: biFileName ?? "unknown", importedAt: now, importedBy: username, rows: biRawRows };
+      await safeWriteJson(rawDir, "bi.raw.json", biRaw);
+    }
+```
+
+**After:**
+```ts
+import { safeWriteJson, safeWriteJsonText, safeReadJson } from "../storage/safeWrite";
+...
+// New helper: archive {base}.raw.json verbatim to {base}.raw.{ISO-ts-no-colons}.superseded.json,
+// returns the archived name (best-effort — logs + returns null on failure).
+async function archiveExistingRaw(rawDir, base: "risk" | "bi"): Promise<string | null> { ... }
+...
+    // Save risk raw JSON — archive any prior import first (A5).
+    if (riskRawRows.length > 0) {
+      const supersedes = await archiveExistingRaw(rawDir, "risk");
+      const riskRaw: MonthRawData = { ...supersedes, rows: riskRawRows };
+      await safeWriteJson(rawDir, "risk.raw.json", riskRaw);
+    }
+    // Save BI raw JSON — archive any prior import first (A5).
+    if (biRawRows.length > 0) {
+      const supersedes = await archiveExistingRaw(rawDir, "bi");
+      const biRaw: MonthRawData = { ...supersedes, rows: biRawRows };
+      await safeWriteJson(rawDir, "bi.raw.json", biRaw);
+    }
+```
+
+---
+
+
+## v47.3 — 2026-07-14 — A6 Audit-log archival instead of truncation
+
+**File:** `src/data/audit/actionLog.ts`
+
+**Before:**
+```ts
+const MAX_ACTION_ENTRIES = 10_000;
+...
+        const updated: WorkspaceActionLogFile = {
+          revision: nextRevision,
+          _writeToken: writeToken,
+          updatedAt: fullEntry.at,
+          entries: [...existing.entries, fullEntry].slice(-MAX_ACTION_ENTRIES),
+        };
+        await safeWriteJson(dir, ACTIONS_LOG_FILE, updated);
+```
+
+**After:**
+```ts
+const DEFAULT_MAX_ACTION_ENTRIES = 10_000;
+let maxActionEntries = DEFAULT_MAX_ACTION_ENTRIES; // + __set/__reset test seams
+// + WorkspaceActionArchiveFile type, archiveFileName(year), entryYear(entry),
+//   readArchiveFile(dir, year), archiveOverflow(dir, overflow) [idempotent by id],
+//   and readWorkspaceActionArchive(dir, year) export.
+...
+        const combined = [...existing.entries, fullEntry];
+        let liveEntries = combined;
+        if (combined.length > maxActionEntries) {
+          const overflowCount = combined.length - maxActionEntries;
+          const overflow = combined.slice(0, overflowCount);
+          const archived = await archiveOverflow(dir, overflow); // per-year actions.archive.{year}.json
+          if (archived) liveEntries = combined.slice(overflowCount);
+          // archive failure → keep full list (blocks trim; never drop unarchived)
+        }
+        const updated: WorkspaceActionLogFile = { revision: nextRevision, _writeToken: writeToken, updatedAt: fullEntry.at, entries: liveEntries };
+        await safeWriteJson(dir, ACTIONS_LOG_FILE, updated);
+```
+
+---
+
+
+## v47.2 — 2026-07-14 — A7 Event schema versioning
+
+**File:** `src/data/distribution/distributionTypes.ts`
+
+**Before:**
+```ts
+export type DistributionEvent = {
+  eventId: string;
+  eventType: DistributionEventType;
+  xrayImageId: string;
+  ...
+};
+```
+
+**After:**
+```ts
+export type DistributionEvent = {
+  eventId: string;
+  eventType: DistributionEventType;
+  eventSchemaVersion?: number;   // A7 — absent = 1 on read
+  xrayImageId: string;
+  ...
+};
+```
+
+**File:** `src/data/distribution/distributionLog.ts`
+
+**Before:**
+```ts
+export const DERIVE_VERSION = 2;
+...
+export function buildAssignEvent(...) {
+  return { eventId: createEventId(), eventType: "assigned", ... };
+}
+...
+    const existing = entryMap.get(evt.xrayImageId);
+    if (existing) { replacedById = existing.replacedById; }
+
+    // Terminal-state guard: a replaced row is dead.
+```
+
+**After:**
+```ts
+export const DERIVE_VERSION = 2;
+export const EVENT_SCHEMA_VERSION = 1;   // A7
+...
+// Every build* function now stamps `eventSchemaVersion: EVENT_SCHEMA_VERSION`
+// immediately after `eventId: createEventId(),`.
+...
+    const existing = entryMap.get(evt.xrayImageId);
+    if (existing) { replacedById = existing.replacedById; }
+
+    // Event schema-version guard (A7): drop-and-preserve any newer-versioned event.
+    if ((evt.eventSchemaVersion ?? 1) > EVENT_SCHEMA_VERSION) {
+      droppedEventIds.add(evt.eventId);
+      droppedImageIds.add(evt.xrayImageId);
+      continue;
+    }
+
+    // Terminal-state guard: a replaced row is dead.
+```
+
+---
+
+
+## v47.1 — 2026-07-14 — A8 Backup retention policy (constants + prune)
+
+**File:** `src/data/backup/backupStorage.ts`
+
+**Before:**
+```ts
+import { safeReadJson, safeWriteJson, safeWriteJsonText } from "../storage/safeWrite";
+...
+const XLSX_ROWS_PER_PART = 250_000;
+...
+    if (mode === "automatic") {
+      const settings = await loadAutoBackupSettings(directoryHandle);
+      await safeWriteJson<AutoBackupState>(backupsDir, AUTO_STATE_FILE, { ... });
+    }
+    return { ok: true, folderName, manifest };
+```
+
+**After:**
+```ts
+import { safeReadJson, safeWriteJson, safeWriteJsonText } from "../storage/safeWrite";
+import { logError } from "../storage/errorLogger";
+...
+const XLSX_ROWS_PER_PART = 250_000;
+export const AUTO_BACKUP_RETENTION_COUNT = 30;   // A8 — keep all manual + pre-restore; prune auto beyond 30
+// + pruneAutoBackups(directoryHandle): enumerate backup manifests, keep manual/pre-restore,
+//   remove automatic backups beyond the 30 most recent (by createdAt). Best-effort.
+...
+    if (mode === "automatic") {
+      const settings = await loadAutoBackupSettings(directoryHandle);
+      await safeWriteJson<AutoBackupState>(backupsDir, AUTO_STATE_FILE, { ... });
+      await pruneAutoBackups(directoryHandle);   // A8
+    }
+    return { ok: true, folderName, manifest };
+```
+
+**File:** `src/data/storage/memoryDirectory.ts`
+
+**Before:** _(no `removeEntry` — File System Access `removeEntry` was unimplemented in the in-memory test helper)_
+
+**After:** added `removeEntry(name, { recursive })` (deletes files, and dirs when empty or `recursive`)
+so A8 prune (and any future deletion behavior) is testable with `createMemoryDirectory()`.
+
+**File:** `docs/data-system-report.md`
+
+Added `sampling.plan.json`, `actions.archive.{year}.json`, and `risk/bi.raw.{ISO-ts}.superseded.json` to
+the file-inventory table, plus a "Backup retention policy (A8)" subsection under Data Protection Notes.
+
+---
+
+
+## v47 — 2026-07-14 — Wave A tests added
+
+- `src/data/sampling/samplingPlanStorage.test.ts` — build (lot/fraction/version/risk share), empty-population safety, save/load round-trip, legacy-null.
+- `src/data/sampling/approveSampleMaster.test.ts` — approval CAS write-back, idempotent first-wins, no-sample failure.
+- `src/data/answers/answerValueHistory.test.ts` — first-insert-no-history, overwrite snapshot, reopen-correction reason, cap + first-kept.
+- `src/data/population/rawSupersede.test.ts` — first import (no supersedes/archive), re-import archives verbatim + stamps `supersedes` (colon-free name).
+- `src/data/distribution/eventSchemaVersion.test.ts` — builders stamp version, legacy default-on-read, unknown-future drop-and-preserve.
+- `src/data/audit/actionLogArchival.test.ts` — overflow→archive + live trim, archive-failure blocks trim.
+- `src/data/backup/pruneAutoBackups.test.ts` — prune beyond retention (keep manual/pre-restore), no-op under cap.
+
+Gates: `npx tsc -b` clean · `npm run lint` clean · `npm run test:run` 532 passed (513 baseline + 19 added).
+
 ## v46.3 — 2026-07-14 — C-12 (safeWrite lock-key collision) accepted, not fixed
 
 `safeWriteJson`/`restoreJson` lock on `` `${dir.name}/${fileName}` `` (`src/data/storage/safeWrite.ts`). `dir.name` is the leaf folder name, so e.g. two months' `1-main/sample.master.json` share one lock key. Web Locks are advisory and origin-scoped: a collision only falsely serializes unrelated writes — it cannot corrupt data. Fixing it requires threading full workspace paths through every storage caller; deferred as not worth the churn. Documented here so the audit trail shows a decision, not an omission.

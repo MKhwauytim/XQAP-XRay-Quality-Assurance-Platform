@@ -17,6 +17,7 @@ import { donut, rankedBar } from "../executive/ui/charts";
 import { icon } from "../executive/ui/icons";
 import { buildDeckViewer, formatMonthLabel } from "../shared/reportChrome";
 import { openOrDownload } from "../htmlReport";
+import { sourceRevisionsFooterHtml } from "../sourceRevisions";
 import type { ExecutiveReportInput } from "../executiveReportTypes";
 
 const BAND_LABELS: Record<DataSufficiencyBand, string> = {
@@ -155,6 +156,7 @@ export function buildManagementDeck(
     brandTitle: "عرض الإدارة",
     brandSub: `ضمان جودة الأشعة — ${monthLabel}`,
     iconName: "shield",
+    footerNote: sourceRevisionsFooterHtml(input.sourceRevisions, esc),
   });
 }
 

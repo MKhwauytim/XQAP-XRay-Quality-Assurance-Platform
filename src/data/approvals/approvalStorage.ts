@@ -2,9 +2,34 @@ import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
 import { withResourceLock } from "../storage/webLocks";
+import { simpleHash } from "../storage/jsonEnvelope";
 import { ensureMonthWritable } from "../population/monthLock";
 import type { DecisionEvent, DecisionEventKind, SupervisorDecisionFile } from "./approvalTypes";
 import { getPopulationMonthDir, getSampleApprovalsDir, safeWorkspaceFilePart } from "../workspace/workspacePaths";
+
+/**
+ * djb2 hash of one decision event (B5). Serialises the event as stored so the chain
+ * is reproducible from the file alone. TAMPER-EVIDENT only — no secret key.
+ */
+export function hashDecisionEvent(event: DecisionEvent): string {
+  return simpleHash(JSON.stringify(event));
+}
+
+/**
+ * Verify the `previousDecisionHash` chain over a supervisor's `decisionEvents`
+ * (B5). Returns the index of the first event whose recorded previous-hash does not
+ * match the actual hash of its predecessor, or `null` when the whole chain is
+ * intact. Events predating B5 (no `previousDecisionHash`) are skipped, so a legacy
+ * file is never reported as broken.
+ */
+export function verifyDecisionChain(events: DecisionEvent[]): number | null {
+  for (let i = 1; i < events.length; i++) {
+    const recorded = events[i].previousDecisionHash;
+    if (recorded === undefined) continue; // legacy / pre-B5 event — not chained
+    if (recorded !== hashDecisionEvent(events[i - 1])) return i;
+  }
+  return null;
+}
 
 type DirectoryEntryLike = { name: string; kind: string };
 
@@ -112,11 +137,18 @@ export async function appendDecisionEvent(
         const appDir = await getApprovalsDir(directoryHandle, monthFolderName);
         const current = await loadSupervisorDecisions(directoryHandle, monthFolderName, supervisorUsername);
         const nextRevision = (current.revision ?? 0) + 1;
+        const priorEvents = current.decisionEvents ?? [];
+        // B5: chain this decision to the immediately-preceding one in the file. The
+        // hash is stamped here (from stored state), never trusted from the caller.
+        const lastEvent = priorEvents[priorEvents.length - 1];
+        const chainedEvent: DecisionEvent = lastEvent
+          ? { ...event, previousDecisionHash: hashDecisionEvent(lastEvent) }
+          : { ...event };
         const updated: SupervisorDecisionFile = {
           ...current,
           revision: nextRevision,
           _writeToken: writeToken,
-          decisionEvents: [...(current.decisionEvents ?? []), event],
+          decisionEvents: [...priorEvents, chainedEvent],
           lastUpdatedAt: new Date().toISOString(),
         };
         await safeWriteJson(appDir, fileName, updated);

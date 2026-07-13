@@ -72,6 +72,23 @@ function makeDirectoryHandle(
       }
       return makeDirectoryHandle(dirName, child);
     },
+    removeEntry: async (entryName: string, options?: { recursive?: boolean }) => {
+      if (node.files.has(entryName)) {
+        node.files.delete(entryName);
+        return;
+      }
+      const child = node.dirs.get(entryName);
+      if (child) {
+        if (!options?.recursive && (child.files.size > 0 || child.dirs.size > 0)) {
+          const error = new Error(`Directory not empty: ${entryName}`);
+          error.name = "InvalidModificationError";
+          throw error;
+        }
+        node.dirs.delete(entryName);
+        return;
+      }
+      throw notFound(entryName);
+    },
     queryPermission: async () => "granted" as const,
     requestPermission: async () => "granted" as const,
     values: async function* () {

@@ -137,7 +137,7 @@ Each `population.final.json` row and each sampled `rows[]` item uses the process
 | `{username}.samples.json` | Employee mirror: `monthFolderName`, `username`, `updatedAt`, `sourceLogRevision`, `entries[]`. |
 | `{username}.answers.json` | `username`, `monthFolderName`, `revision`, `_writeToken`, `lastUpdatedAt`, `items[]`, `referralRequests[]`, `replacementRequests[]`. |
 | `items[]` | `xrayImageId`, `templateId`, `templateVersion`, `answers`, `lastSavedAt`, `submittedAt`, `answeredBy`, `status`. |
-| `{supervisor}.decisions.json` | `supervisorUsername`, `monthFolderName`, `referralDecisions[]`, `replacementDecisions[]`, `lastUpdatedAt`. |
+| `{supervisor}.decisions.json` | `supervisorUsername`, `monthFolderName`, `referralDecisions[]`, `replacementDecisions[]`, `decisionEvents[]`, `lastUpdatedAt`. Each `decisionEvents[]` entry carries an optional `previousDecisionHash` (B5) — a djb2 hash of the immediately-preceding decision in the file, forming a tamper-EVIDENT chain (absent on the first/legacy events; no cryptographic non-repudiation — see `docs/SECURITY_MODEL.md` §6). |
 | `activity.log.json` | `revision`, `updatedAt`, `entries[]`. |
 | activity `entries[]` | `id`, `username`, `role`, `signedInAt`, `lastSeenAt`, `signedOutAt`, `durationMs`, `closeReason`. |
 
@@ -193,6 +193,9 @@ Both files use `safeWriteJson` / `safeReadJson` and the `JsonEnvelope` schema-ve
 | `admin-shared.browse-preset.json` | `5-system/user-presets/` | Shared/admin table column preferences. |
 | `{username}.browse-preset.json` | `5-system/user-presets/` | User-specific table column preferences. |
 | `backup.manifest.json` and copied data files | `5-system/backups/{timestamp}/` | Manual/automatic backup snapshots. |
+| `actions.archive.{year}.json` | `5-system/audit/` | Per-year archive of audit entries evicted from the live `actions.log.json` once it exceeds its 10,000-entry cap (A6). Overflow is archived before the live log is trimmed; archive failure blocks the trim so no entry is dropped unarchived. **B5:** records an optional `previousArchiveHash` (djb2 hash of the previous calendar year's archive at write time) forming a tamper-EVIDENT year-to-year chain. |
+| `sampling.plan.json` | `2-samples/{month}/1-main/` | Documented sampling plan written at draw time next to `sample.master.json` (A1): lot definition (ports, per-stage split), target sample fraction, advisory quality/inspection-level notes, risk-basis share, and the seed + algorithm version the draw binds to. **B4:** also carries an optional `priorMonthAdvisory` (`priorMonthFolderName`, `priorMonthSuspicionRate` = share of the prior month's rows with `xrayLevelTwoResult` = اشتباه, `inspectionRecommendation` = `normal`/`tightened-review` at the >5% threshold). Advisory only — never changes quotas; absent on legacy plans. |
+| `risk.raw.{ISO-ts}.superseded.json` / `bi.raw.{ISO-ts}.superseded.json` | `1-population/{month}/1-raw/` | Immutable-raw archive (A5): the prior raw import, copied verbatim before a re-import overwrites the live `risk.raw.json` / `bi.raw.json`. The new live file records the archived name in `supersedes`. |
 | `population.csv` | `5-system/powerbi-export/{month}/` | All `ExecutiveReportRow` records (UTF-8 BOM CSV, 26 columns). |
 | `sample.csv` | `5-system/powerbi-export/{month}/` | `selectedInSample=true` subset of `population.csv`. |
 | `README.txt` | `5-system/powerbi-export/{month}/` | Bilingual connection instructions (Arabic + English) for Power BI Desktop. |
@@ -202,6 +205,12 @@ Both files use `safeWriteJson` / `safeReadJson` and the `JsonEnvelope` schema-ve
 - JSON writes use the safe write layer where available: temporary write, commit, backup `.bak`, and content-hash validation.
 - Concurrent writes use Web Locks or compare-and-swap loops in high-conflict areas such as distribution and answer files.
 - The activity log is best-effort workspace audit data. It records app-observed time, including heartbeat and close events when the browser delivers them; it is not a centralized attendance system.
+
+### Backup retention policy (A8)
+
+- **Manual** backups are kept indefinitely — operator-initiated, deliberate restore points; never auto-pruned.
+- **Pre-restore** rollback snapshots are kept indefinitely — the safety net for an in-progress restore; never auto-pruned.
+- **Automatic** backups are pruned to the 30 most recent (by `createdAt`); older automatic backups are removed after each new automatic backup succeeds. The count is `AUTO_BACKUP_RETENTION_COUNT` in `src/data/backup/backupStorage.ts`.
 - **Restore semantics (merge, not prune):** restoring a backup re-writes files that exist in the
   backup snapshot only — it does not delete files created after the backup was taken. Newer
   on-disk data than the backup is left untouched. A rollback snapshot is created automatically

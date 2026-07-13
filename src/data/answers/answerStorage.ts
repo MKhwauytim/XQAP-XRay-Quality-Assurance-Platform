@@ -2,7 +2,12 @@ import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
 import { ensureMonthWritable } from "../population/monthLock";
-import type { EmployeeAnswerFile, ItemAnswer, ItemAnswerHistoryEntry } from "./answerTypes";
+import type {
+  EmployeeAnswerFile,
+  ItemAnswer,
+  ItemAnswerHistoryEntry,
+  ItemValueHistoryEntry,
+} from "./answerTypes";
 import type { ReferralRequest, ReopenRequest, ReplacementRequest } from "../referral/referralTypes";
 import { getPopulationMonthDir, getSampleEmployeeDir, safeWorkspaceFilePart } from "../workspace/workspacePaths";
 
@@ -53,6 +58,59 @@ function answerFileName(username: string): string {
 
 function emptyAnswerFile(username: string, monthFolderName: string): EmployeeAnswerFile {
   return { username, monthFolderName, revision: 0, items: [] };
+}
+
+/**
+ * Per-item value-history cap (A4). A documented retention decision, not silent
+ * loss: on overflow the first/original entry is always preserved and only the
+ * middle is pruned, so the earliest recorded state and the most recent
+ * VALUE_HISTORY_CAP-1 changes are always available.
+ */
+export const VALUE_HISTORY_CAP = 20;
+
+function appendValueHistory(
+  existing: ItemValueHistoryEntry[] | undefined,
+  entry: ItemValueHistoryEntry
+): ItemValueHistoryEntry[] {
+  const list = [...(existing ?? []), entry];
+  if (list.length <= VALUE_HISTORY_CAP) return list;
+  // Keep the original (index 0) plus the most recent VALUE_HISTORY_CAP-1 entries.
+  const first = list[0]!;
+  const tail = list.slice(list.length - (VALUE_HISTORY_CAP - 1));
+  return [first, ...tail];
+}
+
+/** A save onto a previously-reopened draft is a correction; otherwise a plain save. */
+function changeReason(previous: ItemAnswer): ItemValueHistoryEntry["reason"] {
+  const wasReopened =
+    previous.status === "draft" &&
+    (previous.history?.some((h) => h.action === "reopened") ?? false);
+  return wasReopened ? "reopen-correction" : "save";
+}
+
+/**
+ * Return `next` with an A4 value-history entry appended when it overwrites an
+ * existing item (`previous`). A first insert (no previous) records nothing.
+ * The incoming item's own `valueHistory` is ignored; history is always folded
+ * from the stored `previous` so a client cannot rewrite the trail.
+ */
+function withValueHistory(previous: ItemAnswer | undefined, next: ItemAnswer): ItemAnswer {
+  if (!previous) {
+    // First insert of this item — no prior state to snapshot.
+    return { ...next, valueHistory: undefined };
+  }
+  const entry: ItemValueHistoryEntry = {
+    changedAt: new Date().toISOString(),
+    changedBy: next.answeredBy,
+    reason: changeReason(previous),
+    previous: {
+      answers: previous.answers,
+      status: previous.status,
+      submittedAt: previous.submittedAt,
+      lastSavedAt: previous.lastSavedAt,
+    },
+  };
+  return { ...next, valueHistory: appendValueHistory(previous.valueHistory, entry) };
 }
 
 export async function loadEmployeeAnswers(
@@ -129,10 +187,15 @@ export async function saveEmployeeAnswers(
   username: string,
   items: ItemAnswer[]
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  return updateEmployeeAnswerFile(directoryHandle, monthFolderName, username, (file) => ({
-    ...file,
-    items,
-  }));
+  return updateEmployeeAnswerFile(directoryHandle, monthFolderName, username, (file) => {
+    // A4: fold each incoming item against its stored predecessor so an
+    // overwriting bulk save snapshots the prior answers/status into valueHistory.
+    const prevById = new Map(file.items.map((i) => [i.xrayImageId, i]));
+    return {
+      ...file,
+      items: items.map((item) => withValueHistory(prevById.get(item.xrayImageId), item)),
+    };
+  });
 }
 
 export async function upsertItemAnswer(
@@ -142,8 +205,10 @@ export async function upsertItemAnswer(
   item: ItemAnswer
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   return updateEmployeeAnswerFile(directoryHandle, monthFolderName, username, (file) => {
+    const previous = file.items.find((i) => i.xrayImageId === item.xrayImageId);
     const others = file.items.filter((i) => i.xrayImageId !== item.xrayImageId);
-    return { ...file, items: [...others, item] };
+    // A4: record the overwritten snapshot before replacing the item.
+    return { ...file, items: [...others, withValueHistory(previous, item)] };
   });
 }
 

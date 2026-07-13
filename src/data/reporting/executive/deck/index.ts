@@ -10,6 +10,8 @@ import { buildReportModel } from "../model/reportModel";
 import { buildDeckSlides } from "./slides";
 import { buildDeckHtml } from "./viewer";
 import { openOrDownload } from "../../htmlReport";
+import { esc } from "../primitives";
+import { sourceRevisionsFooterHtml } from "../../sourceRevisions";
 import type { ExecutiveReportInput } from "../../executiveReportTypes";
 
 const ARABIC_MONTHS = ["يناير","فبراير","مارس","أبريل","مايو","يونيو","يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"];
@@ -27,7 +29,11 @@ export function buildExecutiveDeck(
 ): string {
   const model = buildReportModel(input, employeeDisplayNames);
   const slides = buildDeckSlides(model);
-  return buildDeckHtml(slides, formatMonthLabel(input.monthFolderName));
+  return buildDeckHtml(
+    slides,
+    formatMonthLabel(input.monthFolderName),
+    sourceRevisionsFooterHtml(input.sourceRevisions, esc),
+  );
 }
 
 export function openExecutiveDeck(

@@ -1,11 +1,11 @@
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import { getStageKey } from "../population/stageHelpers";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
-import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { readEnvelopeRevision, safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
 import { ensureMonthWritable } from "../population/monthLock";
 import { getPopulationMonthDir, getSampleMainDir } from "../workspace/workspacePaths";
-import type { PortAllocation, SampleMasterData, StageAllocation } from "./sampleTypes";
+import type { PortAllocation, SampleApproval, SampleMasterData, StageAllocation } from "./sampleTypes";
 
 const SAMPLE_FILE = "sample.master.json";
 
@@ -39,6 +39,24 @@ export async function saveSampleMaster(
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";
     return { ok: false, error: msg };
+  }
+}
+
+/** Envelope revision of `sample.master.json` for report-to-revision linkage (B2). */
+export async function loadSampleMasterRevision(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<number | null> {
+  try {
+    const sampleDir = await getSampleDir(directoryHandle, monthFolderName, false);
+    const rev = await readEnvelopeRevision(sampleDir, SAMPLE_FILE);
+    if (rev !== null) return rev;
+  } catch { /* fall through to legacy layout */ }
+  try {
+    const legacyDir = await getLegacySampleDir(directoryHandle, monthFolderName);
+    return await readEnvelopeRevision(legacyDir, SAMPLE_FILE);
+  } catch {
+    return null;
   }
 }
 
@@ -142,6 +160,61 @@ function incrementStageAllocations(
           nonCertScanDrawn: item.nonCertScanDrawn + (isCertScan ? 0 : 1),
         }
       : item
+  );
+}
+
+/**
+ * Record a four-eyes sample-release approval on the sample master (A3), using a
+ * CAS retry loop so a concurrent row append/approval on another machine cannot
+ * clobber it. Idempotent by outcome: once an approval exists it is preserved
+ * (first approval wins) and the call returns ok without overwriting.
+ *
+ * Data-layer only — this does NOT enforce that the approver differs from
+ * `drawnBy` or holds a sufficient role; Wave B gates the UI on those rules.
+ */
+export async function approveSampleMaster(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  approval: SampleApproval
+): Promise<{ ok: true; data: SampleMasterData } | { ok: false; error: string }> {
+  // Month lock gate — before the CAS loop so a closed month rejects loudly.
+  await ensureMonthWritable(directoryHandle, monthFolderName);
+  return casLoop<{ ok: true; data: SampleMasterData } | { ok: false; error: string }>(
+    async (writeToken) => {
+      const current = await loadSampleMaster(directoryHandle, monthFolderName);
+      if (!current) {
+        return { done: true, result: { ok: false as const, error: "لا توجد بيانات عينة للشهر المحدد." } };
+      }
+      // First approval wins — never overwrite an existing release record.
+      if (current.approval) {
+        return { done: true, result: { ok: true as const, data: current } };
+      }
+      const nextRevision = (current.revision ?? 0) + 1;
+      const updated: SampleMasterData = {
+        ...current,
+        approval,
+        revision: nextRevision,
+        _writeToken: writeToken,
+      };
+      const writeResult = await saveSampleMaster(directoryHandle, monthFolderName, updated);
+      if (!writeResult.ok) {
+        // Transient write error — let the CAS loop retry rather than aborting permanently.
+        return { done: false };
+      }
+      const verify = await loadSampleMaster(directoryHandle, monthFolderName);
+      if (verify?.revision === nextRevision && verify._writeToken === writeToken) {
+        return {
+          done: true,
+          result: { ok: true as const, data: updated },
+          verify: async () => {
+            const recheck = await loadSampleMaster(directoryHandle, monthFolderName);
+            return recheck?.revision === nextRevision && recheck._writeToken === writeToken;
+          },
+        };
+      }
+      return { done: false };
+    },
+    { conflictError: "تعارض في الكتابة: لم يتمكن النظام من تسجيل اعتماد العينة بعد عدة محاولات." }
   );
 }
 

@@ -12,6 +12,7 @@ import { EXEC_CSS } from "../executive/theme";
 import { DECK_CSS } from "../executive/deck/deckTheme";
 import { esc } from "../executive/primitives";
 import { icon } from "../executive/ui/icons";
+import { SOURCE_REVISIONS_CSS } from "../sourceRevisions";
 
 /** TOC builder + active-page highlighter — identical behaviour to the executive
  *  document viewer, kept here so the shared chrome is self-contained. */
@@ -50,6 +51,11 @@ export type ChromeOpts = {
   brandSub: string;
   /** Icon name (ui/icons) for the brand mark. Defaults to "shield". */
   iconName?: string;
+  /**
+   * Optional footer HTML appended after the content/slides (B2 source-revision
+   * block). Already-escaped by the caller. Empty string → nothing rendered.
+   */
+  footerNote?: string;
 };
 
 /** A4-portrait document viewer: left sidebar TOC + print button + content column. */
@@ -61,7 +67,7 @@ export function buildDocViewer(opts: ChromeOpts): string {
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>${esc(opts.docTitle)}</title>
-<style>${EXEC_CSS}</style>
+<style>${EXEC_CSS}${SOURCE_REVISIONS_CSS}</style>
 </head>
 <body>
 <div class="viewer">
@@ -81,6 +87,7 @@ export function buildDocViewer(opts: ChromeOpts): string {
   </aside>
   <main class="content">
 ${opts.slides}
+${opts.footerNote ?? ""}
   </main>
 </div>
 <script>${VIEWER_JS}</script>
@@ -97,7 +104,7 @@ export function buildDeckViewer(opts: ChromeOpts): string {
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>${esc(opts.docTitle)}</title>
-<style>${DECK_CSS}</style>
+<style>${DECK_CSS}${SOURCE_REVISIONS_CSS}</style>
 </head>
 <body>
 <div class="deck-viewer">
@@ -122,6 +129,7 @@ export function buildDeckViewer(opts: ChromeOpts): string {
     </div>
   </div>
 ${opts.slides}
+${opts.footerNote ?? ""}
 </div>
 </body>
 </html>`;

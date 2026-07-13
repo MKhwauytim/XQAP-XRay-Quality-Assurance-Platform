@@ -1,7 +1,8 @@
 import type { RiskWorkbookResult } from "../riskData/riskDataTypes";
 import type { BiWorkbookResult } from "../biData/biDataTypes";
 import type { PopulationProcessingResult } from "../processing/populationProcessingTypes";
-import DataAccuracyReport from "./DataAccuracyReport";
+import type { OrphanScanResult } from "../../../../../data/integrity/orphanScan";
+import DataAccuracyReport, { OrphanScanSection } from "./DataAccuracyReport";
 import PopulationProcessingReport from "./PopulationProcessingReport";
 import { AlertTriangle, Check, FolderOpen, X } from "lucide-react";
 import CertScanGrid from "./CertScanGrid";
@@ -26,6 +27,8 @@ type PhaseTwoReportAndProcessingProps = {
   isSavingToDisk: boolean;
   saveToDiskMessage: SaveMessage;
   hasDiskWorkspace: boolean;
+  /** B3 referential-integrity orphan scan for the saved month, or null when unavailable. */
+  orphanScan?: OrphanScanResult | null;
   onCertScanPasteTextChange: (value: string) => void;
   onProcessPopulation: () => void;
   onExportPopulation: () => void;
@@ -46,6 +49,7 @@ export default function PhaseTwoReportAndProcessing({
   isSavingToDisk,
   saveToDiskMessage,
   hasDiskWorkspace,
+  orphanScan = null,
   onCertScanPasteTextChange,
   onProcessPopulation,
   onExportPopulation,
@@ -140,6 +144,8 @@ export default function PhaseTwoReportAndProcessing({
             biRows={biWorkbookResult.rows}
           />
         ) : null}
+        {/* B3: referential-integrity orphan scan — independent of BI availability. */}
+        <OrphanScanSection scan={orphanScan} />
       </div>
 
       {/* ── Step B: CertScan + Processing ── */}

@@ -93,6 +93,29 @@ export const DEFAULT_LABELS = {
 
   // Population — sampling & processing guards
   sample_redraw_blocked: "لا يمكن إعادة سحب العينة بعد بدء التوزيع: يوجد سجل توزيع فعّال لهذا الشهر، وإعادة السحب ستؤدي إلى فقدان التعيينات والإجابات المسجلة.",
+
+  // Four-eyes sample release gate (B1)
+  sample_approval_section_title: "اعتماد العينة (مبدأ ازدواجية المراجعة)",
+  sample_approval_intro:         "قبل بدء التوزيع، يجب اعتماد العينة المسحوبة من مسؤول (مشرف/مدير/مدير نظام) غير الشخص الذي سحبها.",
+  sample_approval_pending:       "بانتظار الاعتماد — لا يمكن بدء توزيع هذه العينة قبل اعتمادها.",
+  sample_approval_state:         "مُعتمدة بواسطة {user} ({role}) — {date}",
+  sample_approval_note_label:    "ملاحظة الاعتماد",
+  sample_approval_legacy_note:   "عينة سابقة بدون سجل اعتماد — تُعامل كمعتمدة سلفاً (توافق رجعي).",
+  sample_approve_btn:            "اعتماد العينة",
+  sample_approving:              "جارٍ الاعتماد...",
+  sample_approve_self_blocked:   "لا يمكنك اعتماد عينة سحبتها بنفسك — يلزم اعتماد مسؤول آخر.",
+  sample_approve_admin_self_note: "اعتماد ذاتي من مدير النظام (واقع فريق من 9 أشخاص) — سُجّلت ملاحظة تحذيرية بذلك.",
+  sample_approve_no_permission:  "لا تملك صلاحية اعتماد العينة — تتطلب دور مشرف أو مدير أو مدير نظام.",
+  sample_approve_done:           "تم اعتماد العينة بنجاح.",
+  sample_approve_no_sample:      "لا توجد عينة مسحوبة للاعتماد.",
+  sample_gate_blocked:           "يجب اعتماد العينة قبل الانتقال إلى مرحلة التوزيع.",
+
+  // Switching-rule advisory (B4) — ISO 2859-1 / Z1.4 tightened/normal signal
+  switching_advisory_title:      "توصية استرشادية (قاعدة التبديل)",
+  switching_advisory_rate:       "معدل الاشتباه للشهر السابق ({month}): {rate}",
+  switching_advisory_normal:     "التوصية: فحص عادي — معدل الاشتباه ضمن الحد المعتاد.",
+  switching_advisory_tightened:  "التوصية: مراجعة مشددة — تجاوز معدل الاشتباه للشهر السابق حد التنبيه (5%). هذه إشارة استرشادية فقط ولا تُغيّر الحصص تلقائياً.",
+  switching_advisory_disclaimer: "استرشادية فقط: القرار النهائي لتشديد المعاينة يعود للجهة المختصة.",
   population_reprocess_confirm_title: "إعادة معالجة شهر يحتوي عينة",
   population_reprocess_confirm_message: "توجد عينة مسحوبة لهذا الشهر بالفعل. حفظ نتائج المعالجة الجديدة سيجعل العينة الحالية غير متطابقة مع المجتمع الجديد. هل تريد المتابعة والحفظ؟",
   population_reprocess_cancelled: "تم إلغاء الحفظ — بقيت بيانات الشهر السابقة دون تغيير.",

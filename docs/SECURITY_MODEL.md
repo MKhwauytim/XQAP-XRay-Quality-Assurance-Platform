@@ -105,3 +105,51 @@ decision to defend against actively malicious local users.
 
 **Accepted by:** XQAP maintainers (hardening batch, branch `hardening-2026-07-08`)
 **Date:** 2026-07-08
+
+## 6. Addendum — data-pipeline rework (2026-07-14, Wave B7)
+
+Three clarifications added alongside the Wave A/B data-pipeline rework
+(`docs/architecture/DATA_PIPELINE_REWORK_2026-07-14.md`). None change the posture in §1;
+they make explicit what the new integrity fields do and do not guarantee.
+
+### (a) `contentHash` is corruption-detection, not tamper-proofing
+
+Every workspace JSON file carries `JsonEnvelope.metadata.contentHash`, a **non-cryptographic
+djb2-style digest** (`simpleHash` in `src/data/storage/jsonEnvelope.ts`). On read, `validateEnvelope`
+recomputes it and rejects a file whose stored hash no longer matches its data — this catches
+partial writes, disk corruption, and truncation. It provides **no protection against deliberate
+tampering**: the hash has no secret key, so anyone who edits a file can recompute a matching
+`contentHash` and the change passes validation. The same limitation applies to the Wave B5
+hash-chains (`previousDecisionHash` on approval decisions, `previousArchiveHash` on audit-log
+archives): they are **tamper-EVIDENT, not tamper-PROOF** — they surface an accidental or
+out-of-band edit that breaks the chain, but a determined editor with file access can recompute the
+entire chain. A cryptographically strong, keyed MAC would add no real security here because the key
+would have to ship in the client bundle (there is no server to hold it) — see §1.
+
+### (b) Shared-folder concurrency is an accepted permanent limitation
+
+Multiple machines can point at the same workspace folder (e.g. a network share). Concurrent writes
+are guarded **best-effort** by the Web Locks API (within a tab/origin) and by a Compare-And-Swap
+retry loop (`casLoop`) that embeds a per-write UUID token and re-reads to detect a lost update
+across machines. This is genuinely useful but is **not** a distributed lock: there is no central
+authority to arbitrate two machines that read the same base revision and commit within the same
+narrow window. When CAS retries are exhausted, the write **fails loudly with an Arabic conflict
+message** (Wave B6 ensures user-initiated writes surface this rather than failing silently) so the
+user can reload and retry — data is never silently lost, but true simultaneous cross-machine
+serialization is out of reach without a backend. This is an **accepted, permanent limitation** of
+the no-backend design, not a defect to be fixed.
+
+### (c) NCA ECC-2:2024 note
+
+The Saudi National Cybersecurity Authority's Essential Cybersecurity Controls (ECC-2:2024) apply in
+full to government entities and would require controls this browser-only SPA cannot enforce:
+encryption of data at rest and in transit per classification, centralized logging/SIEM
+integration, and network-layer controls. Full ECC compliance is therefore **out of scope for the
+no-backend architecture** and would require a server-backed rework (identity provider,
+server-side authorization, encrypted central store, audit forwarding). The app aligns where it
+costs nothing — plain-JSON records with retention/archival policy, per-file revisioning, and an
+append-only audit trail — but these are voluntary alignments, not compliance. See
+`docs/research/PIPELINE_RESEARCH_2026-07-14.md` §7 for the underlying survey.
+
+**Accepted by:** XQAP maintainers (data-pipeline rework, Wave B7)
+**Date:** 2026-07-14

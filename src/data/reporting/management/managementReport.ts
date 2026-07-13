@@ -21,6 +21,11 @@ import { openOrDownload } from "../htmlReport";
 import { getLabels, type Labels } from "../../labels/labelsStore";
 import type { ExecutiveReportInput } from "../executiveReportTypes";
 import type { DataSufficiencyBand } from "../executive/model/dataSufficiency";
+import {
+  sourceRevisionsFooterHtml,
+  SOURCE_REVISIONS_CSS,
+  type SourceRevisions,
+} from "../sourceRevisions";
 
 const ARABIC_MONTHS = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"];
 
@@ -290,7 +295,13 @@ body{font-family:"Segoe UI",Tahoma,Arial,sans-serif;direction:rtl;color:var(--mr
 }
 `;
 
-function renderHtml(model: ReportModel, L: Labels, monthLabel: string, issueDate: string): string {
+function renderHtml(
+  model: ReportModel,
+  L: Labels,
+  monthLabel: string,
+  issueDate: string,
+  sourceRevisions?: SourceRevisions,
+): string {
   const s = model.summary;
   const kpis = `<div class="mr-kpis">
     ${kpiCard(L.mgmt_report_kpi_accuracy, fmtPct(s.overallAccuracy), "gold")}
@@ -315,7 +326,7 @@ function renderHtml(model: ReportModel, L: Labels, monthLabel: string, issueDate
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>${esc(L.mgmt_report_title)} — ${esc(monthLabel)}</title>
-<style>${REPORT_CSS}</style>
+<style>${REPORT_CSS}${SOURCE_REVISIONS_CSS}</style>
 </head>
 <body>
 <div class="mr-doc">
@@ -337,6 +348,7 @@ function renderHtml(model: ReportModel, L: Labels, monthLabel: string, issueDate
   ${portSection(model, L)}
   ${actionsSection(model, L)}
   ${dataQualityFooter(model, L)}
+  ${sourceRevisionsFooterHtml(sourceRevisions, esc)}
   <div class="mr-footer">${esc(L.mgmt_report_generated_by)}</div>
 </div>
 </body>
@@ -352,7 +364,7 @@ export function buildManagementReport(
 ): string {
   const model = buildReportModel(input, employeeDisplayNames);
   const L = getLabels();
-  return renderHtml(model, L, formatMonthLabel(input.monthFolderName), formatIssueDate());
+  return renderHtml(model, L, formatMonthLabel(input.monthFolderName), formatIssueDate(), input.sourceRevisions);
 }
 
 /** Build and open (or download) the management report in a new tab. */

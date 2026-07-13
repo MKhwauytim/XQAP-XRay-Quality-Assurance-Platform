@@ -1,12 +1,16 @@
 import type { PreparedPopulationRow } from "../../../../../data/population/populationTypes";
 import type { SampleMasterData } from "../../../../../data/sampling/sampleTypes";
+import type { SamplingPlanPriorMonthAdvisory } from "../../../../../data/sampling/samplingPlanStorage";
 import type { PopulationConfig, StageSamplingRule } from "../../../../../data/population/populationConfig";
 import { formatNumber, getStageKey } from "./helpers";
 import SummaryCard from "./SummaryCard";
 import { useState } from "react";
-import { AlertTriangle, Lock, Unlock } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Info, Lock, ShieldCheck, Unlock } from "lucide-react";
 import { hasFeature, readUserManagementState } from "../../../../../auth/userManagement";
 import type { AuthRole } from "../../../../../auth/authTypes";
+import { getLabels } from "../../../../../data/labels/labelsStore";
+import { formatMonthFolderShortLabel } from "../../../../../data/population/monthFolder";
+import { evaluateApprovalEligibility, isSelfApproval } from "../../../../../data/sampling/sampleApprovalRules";
 
 type SaveMessage = { type: "ok" | "error"; text: string } | null;
 
@@ -18,10 +22,160 @@ type PhaseThreeSamplingProps = {
   sampleSaveMessage: SaveMessage;
   config: PopulationConfig;
   userRole: string;
+  currentUsername: string;
+  priorMonthAdvisory: SamplingPlanPriorMonthAdvisory | null;
+  sampleNeedsApproval: boolean;
+  isApprovingSample: boolean;
+  onApproveSample: () => void;
   onConfigChange: (config: PopulationConfig) => void;
   onSampleSeedChange: (seed: string) => void;
   onDrawSample: () => void;
 };
+
+function fillTemplate(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{(\w+)\}/g, (_m, key) => vars[key] ?? `{${key}}`);
+}
+
+/** B4: prior-month switching-rule advisory banner. Renders nothing when there is no signal. */
+function SwitchingAdvisory({ advisory }: { advisory: SamplingPlanPriorMonthAdvisory | null }) {
+  if (!advisory || advisory.priorMonthSuspicionRate === null || !advisory.inspectionRecommendation) {
+    return null;
+  }
+  const L = getLabels();
+  const tightened = advisory.inspectionRecommendation === "tightened-review";
+  const monthLabel = advisory.priorMonthFolderName
+    ? formatMonthFolderShortLabel(advisory.priorMonthFolderName)
+    : "";
+  const ratePct = `${(advisory.priorMonthSuspicionRate * 100).toFixed(1)}%`;
+  return (
+    <div
+      className={`switching-advisory${tightened ? " tightened" : ""}`}
+      role="status"
+      style={{
+        margin: "12px 0",
+        padding: "12px 16px",
+        borderRadius: 10,
+        border: `1px solid ${tightened ? "#d97706" : "#0ea5e9"}`,
+        background: tightened ? "rgba(217,119,6,.08)" : "rgba(14,165,233,.06)",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700 }}>
+        <Info size={16} aria-hidden />
+        {L.switching_advisory_title}
+      </div>
+      <p style={{ margin: "6px 0 0" }}>
+        {fillTemplate(L.switching_advisory_rate, { month: monthLabel, rate: ratePct })}
+      </p>
+      <p style={{ margin: "4px 0 0" }}>
+        {tightened ? L.switching_advisory_tightened : L.switching_advisory_normal}
+      </p>
+      <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--p-muted)" }}>
+        {L.switching_advisory_disclaimer}
+      </p>
+    </div>
+  );
+}
+
+/** B1: four-eyes approval panel — shown after a sample is drawn. */
+function SampleApprovalPanel({
+  sample,
+  userRole,
+  currentUsername,
+  needsApproval,
+  isApproving,
+  onApprove,
+}: {
+  sample: SampleMasterData;
+  userRole: string;
+  currentUsername: string;
+  needsApproval: boolean;
+  isApproving: boolean;
+  onApprove: () => void;
+}) {
+  const L = getLabels();
+  const isSelf = isSelfApproval(currentUsername, sample.drawnBy);
+  const eligibility = evaluateApprovalEligibility(userRole, currentUsername, sample.drawnBy);
+  const canApproveNow = eligibility.allowed;
+  const canApproveRole = eligibility.allowed || eligibility.reason === "self-approval-blocked";
+
+  if (sample.approval) {
+    const a = sample.approval;
+    return (
+      <div className="sample-approval-panel approved" role="status" style={approvalBoxStyle("#059669")}>
+        <div style={approvalTitleStyle}>
+          <ShieldCheck size={16} aria-hidden /> {L.sample_approval_section_title}
+        </div>
+        <p style={{ margin: "6px 0 0", display: "flex", alignItems: "center", gap: 6 }}>
+          <CheckCircle2 size={15} style={{ color: "#059669" }} aria-hidden />
+          {fillTemplate(L.sample_approval_state, {
+            user: a.approvedBy,
+            role: a.role,
+            date: new Date(a.approvedAt).toLocaleString("ar-SA-u-nu-latn"),
+          })}
+        </p>
+        {a.note ? (
+          <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--p-muted)" }}>
+            {L.sample_approval_note_label}: {a.note}
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+
+  // No approval recorded. If this is a legacy/previous-session sample (needsApproval
+  // false) show the legacy note; otherwise show the pending-approval gate + action.
+  if (!needsApproval) {
+    return (
+      <div className="sample-approval-panel legacy" role="status" style={approvalBoxStyle("#64748b")}>
+        <div style={approvalTitleStyle}>
+          <ShieldCheck size={16} aria-hidden /> {L.sample_approval_section_title}
+        </div>
+        <p style={{ margin: "6px 0 0", fontSize: 13, color: "var(--p-muted)" }}>
+          {L.sample_approval_legacy_note}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="sample-approval-panel pending" role="status" style={approvalBoxStyle("#d97706")}>
+      <div style={approvalTitleStyle}>
+        <AlertTriangle size={16} aria-hidden /> {L.sample_approval_section_title}
+      </div>
+      <p style={{ margin: "6px 0 0" }}>{L.sample_approval_intro}</p>
+      <p style={{ margin: "4px 0 8px", fontWeight: 700, color: "#b45309" }}>
+        {L.sample_approval_pending}
+      </p>
+      <button
+        type="button"
+        className="primary-action"
+        onClick={onApprove}
+        disabled={isApproving || !canApproveNow}
+        title={!canApproveNow
+          ? (isSelf ? L.sample_approve_self_blocked : L.sample_approve_no_permission)
+          : ""}
+      >
+        {isApproving ? L.sample_approving : L.sample_approve_btn}
+      </button>
+      {!canApproveNow ? (
+        <p style={{ margin: "6px 0 0", fontSize: 12, color: "#b45309" }}>
+          {isSelf && canApproveRole ? L.sample_approve_self_blocked : L.sample_approve_no_permission}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+const approvalTitleStyle = { display: "flex", alignItems: "center", gap: 8, fontWeight: 700 } as const;
+function approvalBoxStyle(color: string) {
+  return {
+    margin: "14px 0",
+    padding: "12px 16px",
+    borderRadius: 10,
+    border: `1px solid ${color}`,
+    background: `${color}14`,
+  } as const;
+}
 
 const STAGE_LABELS: Record<string, string> = {
   first:  "المستوى الأول",
@@ -38,6 +192,11 @@ export default function PhaseThreeSampling({
   sampleSaveMessage,
   config,
   userRole,
+  currentUsername,
+  priorMonthAdvisory,
+  sampleNeedsApproval,
+  isApprovingSample,
+  onApproveSample,
   onConfigChange,
   onSampleSeedChange,
   onDrawSample
@@ -73,6 +232,8 @@ export default function PhaseThreeSampling({
           </p>
         </div>
       </div>
+
+      <SwitchingAdvisory advisory={priorMonthAdvisory} />
 
       <div className="sampling-config-panel">
         <div className="sampling-stage-rules">
@@ -266,6 +427,17 @@ export default function PhaseThreeSampling({
           </div>
         )}
       </div>
+
+      {sampleDrawResult && (
+        <SampleApprovalPanel
+          sample={sampleDrawResult}
+          userRole={userRole}
+          currentUsername={currentUsername}
+          needsApproval={sampleNeedsApproval}
+          isApproving={isApprovingSample}
+          onApprove={onApproveSample}
+        />
+      )}
 
       {sampleDrawResult && <SampleResultReport data={sampleDrawResult} />}
     </section>

@@ -5,6 +5,11 @@ import type { PreparedPopulationRow } from "../../../population/populationTypes"
 import { buildReportModel } from "../model/reportModel";
 import type { ReportModel } from "../model/reportModel";
 import type { DecisionRecord, ResultSource } from "../model/decisionFactTable";
+import {
+  sourceRevisionsSheetAoa,
+  SOURCE_REVISIONS_SHEET_NAME_AR,
+  hasSourceRevisions,
+} from "../../sourceRevisions";
 
 /**
  * Deliverable C — The Workbook (design spec §7).
@@ -595,6 +600,15 @@ export function buildExecutiveWorkbookObject(
   append(SHEET_NAMES.employeeByPort, employeeByPortSheet(model));
   append(SHEET_NAMES.errorAnalysis, errorAnalysisSheet(model));
   append(SHEET_NAMES.crossTeam, crossTeamSheet(model));
+
+  // B2: report-to-revision linkage — cite the exact source-file revisions used.
+  if (hasSourceRevisions(input.sourceRevisions)) {
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.aoa_to_sheet(sourceRevisionsSheetAoa(input.sourceRevisions)),
+      SOURCE_REVISIONS_SHEET_NAME_AR
+    );
+  }
 
   return wb;
 }

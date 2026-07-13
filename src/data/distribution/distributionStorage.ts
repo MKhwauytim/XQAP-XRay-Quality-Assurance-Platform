@@ -6,7 +6,7 @@ import type {
   DistributionLog
 } from "./distributionTypes";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
-import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { readEnvelopeRevision, safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { logError, logRejection } from "../storage/errorLogger";
 import { casLoop } from "../storage/casLoop";
 import { ensureMonthWritable } from "../population/monthLock";
@@ -29,6 +29,24 @@ async function getLegacyDistributionDir(
   monthFolderName: string
 ): Promise<DirectoryHandleLike> {
   return getPopulationMonthDir(directoryHandle, monthFolderName, false);
+}
+
+/** Envelope revision of `distribution.current.json` for report-to-revision linkage (B2). */
+export async function loadDistributionCurrentRevision(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<number | null> {
+  try {
+    const dir = await getDistributionDir(directoryHandle, monthFolderName, false);
+    const rev = await readEnvelopeRevision(dir, CURRENT_FILE);
+    if (rev !== null) return rev;
+  } catch { /* fall through to legacy layout */ }
+  try {
+    const legacyDir = await getLegacyDistributionDir(directoryHandle, monthFolderName);
+    return await readEnvelopeRevision(legacyDir, CURRENT_FILE);
+  } catch {
+    return null;
+  }
 }
 
 export async function loadDistributionLog(

@@ -45,12 +45,21 @@ import {
   formatMonthLabel,
   formatIssueDate,
 } from "./shared/reportChrome";
+import {
+  sourceRevisionsFooterHtml,
+  sourceRevisionsSheetAoa,
+  SOURCE_REVISIONS_SHEET_NAME_AR,
+  hasSourceRevisions,
+  type SourceRevisions,
+} from "./sourceRevisions";
 
 export type SampleReportInput = {
   monthFolderName: string;
   manifest: MonthManifestData | null;
   populationRows: PreparedPopulationRow[];
   sample: SampleMasterData;
+  /** Report-to-revision linkage (B2). Optional; footer/sheet render nothing when omitted. */
+  sourceRevisions?: SourceRevisions;
 };
 
 // ─── Lineage model (pure) ─────────────────────────────────────────────────────
@@ -416,6 +425,7 @@ export function buildSampleDocument(input: SampleReportInput): string {
     brandTitle: "تقرير العينة",
     brandSub: `ضمان جودة الأشعة — ${m.monthLabel}`,
     iconName: "layers",
+    footerNote: sourceRevisionsFooterHtml(input.sourceRevisions, deckEsc),
   });
 }
 
@@ -427,6 +437,7 @@ export function buildSampleDeck(input: SampleReportInput): string {
     brandTitle: "عرض العينة",
     brandSub: `ضمان جودة الأشعة — ${m.monthLabel}`,
     iconName: "layers",
+    footerNote: sourceRevisionsFooterHtml(input.sourceRevisions, deckEsc),
   });
 }
 
@@ -518,6 +529,13 @@ export function buildSampleXlsx(input: SampleReportInput): void {
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(strata), "3 · الطبقات");
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(stages), "3 · المستويات");
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(drawn), "4 · العينة المسحوبة");
+  if (hasSourceRevisions(input.sourceRevisions)) {
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.aoa_to_sheet(sourceRevisionsSheetAoa(input.sourceRevisions)),
+      SOURCE_REVISIONS_SHEET_NAME_AR
+    );
+  }
 
   XLSX.writeFile(wb, `تقرير_العينة_${input.monthFolderName}.xlsx`);
 }

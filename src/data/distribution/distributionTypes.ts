@@ -12,6 +12,13 @@ export type DistributionEventType =
 export type DistributionEvent = {
   eventId: string;
   eventType: DistributionEventType;
+  /**
+   * Event-sourcing replay-safety version (A7). Stamped as 1 on newly appended
+   * events; absent means 1 on read. The fold preserves-existing (drops) any
+   * event whose version is newer than the reader understands, so a future shape
+   * change can never fold ambiguously on an older client.
+   */
+  eventSchemaVersion?: number;
   xrayImageId: string;
   assignedTo: string;
   replacedById?: string;
