@@ -67,13 +67,13 @@ export function buildDocumentSlides(model: ReportModel, issueDate: string): stri
     subtitle: "حجم المجتمع وتوزيعه، العينة والتغطية، وجودة البيانات.",
     iconName: "layers", pageNo: pad(n), dividerNum: "1",
     toc: [
-      { n: pad(n + 1), t: "مجتمع الحالات في لمحة" },
+      { n: pad(n + 1), t: "مجتمع الصور في لمحة" },
       { n: pad(n + 2), t: "المجتمع حسب المنفذ" },
       { n: pad(n + 4), t: "العينة والإنجاز" },
     ],
   }));
   n += 1;
-  pages.push(buildPopulationGlance(model, pad(n))); tocPart1!.pages.push({ n: pad(n), t: "مجتمع الحالات في لمحة" }); n += 1;
+  pages.push(buildPopulationGlance(model, pad(n))); tocPart1!.pages.push({ n: pad(n), t: "مجتمع الصور في لمحة" }); n += 1;
   pages.push(buildPopulationByPort(model, pad(n))); tocPart1!.pages.push({ n: pad(n), t: "المجتمع حسب المنفذ" }); n += 1;
   pages.push(buildPopulationByStage(model, pad(n))); tocPart1!.pages.push({ n: pad(n), t: "المجتمع حسب المستوى" }); n += 1;
   pages.push(buildSampleCompletion(model, pad(n))); tocPart1!.pages.push({ n: pad(n), t: "العينة والإنجاز" }); n += 1;

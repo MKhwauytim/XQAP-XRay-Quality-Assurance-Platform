@@ -110,7 +110,7 @@ export function buildAgreementMatrix(model: ReportModel, pageNo: string): string
     ${executiveClose({
       shows: strongest ? `أقوى تطابق بين ${pairLabel(strongest)} وأضعفه بين ${pairLabel(weakest)}.` : "لا توجد أزواج قابلة للمقارنة هذه الفترة.",
       matters: "مواضع تفرّد قرارات المستويين عن بقية المصادر تستحق مراجعة أدق.",
-      action: "مراجعة الحالات التي تنفرد فيها قرارات المستويين عن جميع الفرق الأخرى.",
+      action: "مراجعة الصور التي تنفرد فيها قرارات المستويين عن جميع الفرق الأخرى.",
     })}`;
   return page({ id: "page-matrix", title: "مصفوفة التطابق الكاملة", pageNo, railTabs: TABS, body });
 }

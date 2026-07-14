@@ -49,9 +49,9 @@ export function buildPopulationGlance(model: ReportModel, pageNo: string): strin
     .sort((a, b) => b[1] - a[1])
     .map(([label, value]) => ({ label, value }));
 
-  const body = `${pageHeader({ iconName: "layers", eyebrow: "الجزء الأول · النطاق", title: "مجتمع الحالات في لمحة", subtitle: "الحجم الإجمالي وتوزيع الحركة" })}
+  const body = `${pageHeader({ iconName: "layers", eyebrow: "الجزء الأول · النطاق", title: "مجتمع الصور في لمحة", subtitle: "الحجم الإجمالي وتوزيع الحركة" })}
     ${kpiStrip([
-      kpi({ label: "إجمالي الحالات", value: fmtNum(model.population.total), tone: "gold" }),
+      kpi({ label: "إجمالي الصور", value: fmtNum(model.population.total), tone: "gold" }),
       kpi({ label: "بري", value: fmtNum(land), tone: "green" }),
       kpi({ label: "بحري", value: fmtNum(sea), tone: "blue" }),
       kpi({ label: "عدد المنافذ", value: fmtNum(ports), tone: "slate" }),
@@ -61,10 +61,10 @@ export function buildPopulationGlance(model: ReportModel, pageNo: string): strin
         { label: "بري", value: land },
         { label: "بحري", value: sea },
       ], { width: 220, height: 200 }), { height: 210 }), { iconName: "chart" })}
-      ${panel("الحالات حسب نمط الحركة", figure(rankedBar(movementBars, { width: 360, height: 200 }), { height: 210 }), { iconName: "chart" })}
+      ${panel("الصور حسب نمط الحركة", figure(rankedBar(movementBars, { width: 360, height: 200 }), { height: 210 }), { iconName: "chart" })}
     </div>
     ${executiveClose(populationClose(model.population.total, model.population.suspicionRate, ports))}`;
-  return page({ id: "page-pop-glance", title: "مجتمع الحالات في لمحة", pageNo, railTabs: TABS, body });
+  return page({ id: "page-pop-glance", title: "مجتمع الصور في لمحة", pageNo, railTabs: TABS, body });
 }
 
 export function buildPopulationByPort(model: ReportModel, pageNo: string): string {
@@ -104,14 +104,14 @@ export function buildPopulationByStage(model: ReportModel, pageNo: string): stri
   const stageShare = stages.map((s) => ({ label: s.stageLabel, value: s.population }));
   const rows = stages.map((s) => [s.stageLabel, fmtNum(s.population), fmtNum(s.sampleSize), fmtPct(s.coverage)]);
 
-  const body = `${pageHeader({ iconName: "layers", eyebrow: "الجزء الأول · النطاق", title: "المجتمع حسب المستوى والمنفذ", subtitle: "توزيع الحالات على مستويات الدراسة" })}
+  const body = `${pageHeader({ iconName: "layers", eyebrow: "الجزء الأول · النطاق", title: "المجتمع حسب المستوى والمنفذ", subtitle: "توزيع الصور على مستويات الدراسة" })}
     ${kpiStrip(stages.slice(0, 4).map((s, i) => kpi({ label: s.stageLabel, value: fmtNum(s.population), tone: (["gold", "blue", "slate", "coral"][i] ?? "gold") as "gold" })), Math.max(1, Math.min(4, stages.length)))}
     <div class="grid grid-2 page-fill" style="margin-top:14px">
       ${panel("حصة المستويات", figure(donut(stageShare, { width: 220, height: 200 }), { height: 210 }), { iconName: "chart" })}
       ${panel("المستويات والعينة", dataTable({ headers: ["المستوى", "المجتمع", "العينة", "التغطية"], rows }))}
     </div>
     ${executiveClose({
-      shows: `توزّعت الحالات على ${fmtNum(stages.length)} مستويات للدراسة.`,
+      shows: `توزّعت الصور على ${fmtNum(stages.length)} مستويات للدراسة.`,
       matters: "توزيع المستويات يوضح أين تتركّز أعباء الفحص والمراجعة.",
       action: "موازنة العينة عبر المستويات بما يضمن تمثيلًا عادلًا.",
     })}`;
@@ -159,7 +159,7 @@ export function buildDataQualityExclusions(model: ReportModel, pageNo: string): 
 
   const body = `${pageHeader({ iconName: "document", eyebrow: "الجزء الأول · المنهجية", title: "جودة البيانات والاستبعادات", subtitle: "الصدق في عرض النواقص" })}
     ${kpiStrip([
-      kpi({ label: "حالات معالجة", value: fmtNum(model.population.total), tone: "green" }),
+      kpi({ label: "صور معالجة", value: fmtNum(model.population.total), tone: "green" }),
       kpi({ label: "قرارات قابلة للتقييم", value: fmtNum(model.dataQuality.evaluableDecisionRecords), tone: "gold" }),
       kpi({ label: "حالة BI", value: model.dataQuality.biAvailable ? "متاحة" : "غير متاحة", tone: model.dataQuality.biAvailable ? "blue" : "coral" }),
     ], 3)}
@@ -168,13 +168,13 @@ export function buildDataQualityExclusions(model: ReportModel, pageNo: string): 
       ${panel("ملاحظات جودة البيانات", `
         <ul class="doc-list">
           <li>${esc(model.exclusions.note)}</li>
-          <li>${model.dataQuality.inspectorIdentityMapped ? "هوية المفتش مرتبطة عبر BI." : "هوية المفتش غير مرتبطة (لم تتم مطابقة BI) — تُعرض الدقة الفردية كحالة فارغة."}</li>
+          <li>${model.dataQuality.inspectorIdentityMapped ? "هوية المفتش مرتبطة عبر BI." : "هوية المفتش غير مرتبطة (لم تتم مطابقة BI) — تُعرض الدقة الفردية كصورة فارغة."}</li>
           <li>القيم الناقصة تُعرض "—" ولا تُحتسب كـ "0%".</li>
         </ul>`)}
     </div>
     ${noteBox(`نطاق كفاية البيانات الإجمالي: ${bandLabel(model.dataQuality.overallBand)}.`, "alert")}
     ${executiveClose({
-      shows: `${fmtNum(model.population.total)} حالة معالجة و${fmtNum(model.dataQuality.evaluableDecisionRecords)} قرار قابل للتقييم.`,
+      shows: `${fmtNum(model.population.total)} صورة معالجة و${fmtNum(model.dataQuality.evaluableDecisionRecords)} قرار قابل للتقييم.`,
       matters: "شفافية الاستبعادات والنواقص شرط لمصداقية النتائج.",
       action: model.dataQuality.biAvailable ? "متابعة اكتمال البيانات للفترات القادمة." : "إكمال مطابقة BI لتفعيل المساءلة الفردية.",
     })}`;

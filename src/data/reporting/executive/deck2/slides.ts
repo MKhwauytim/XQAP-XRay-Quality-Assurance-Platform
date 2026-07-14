@@ -4,8 +4,8 @@
 //   2  المحتويات    — the report sections and the goal of each
 //   3  المعجم       — key terms and what each means
 //   4  فاصل القسم الأول — مجتمع الفحص
-//   5  مجتمع الحالات بناءً على المخاطر — the 4 risk stages: population + sample per stage
-//   6+ مجتمع حالات الفحص للشهر — two tables (منافذ برية / بحرية), paginated when long
+//   5  مجتمع الصور بناءً على المخاطر — the 4 risk stages: population + sample per stage
+//   6+ مجتمع صور الفحص للشهر — two tables (منافذ برية / بحرية), paginated when long
 //
 // Design/CSS is intentionally minimal for now: it reuses the v1 deck theme so the
 // content reads clearly; the dedicated visual pass happens after content approval.
@@ -407,7 +407,7 @@ export function monthInNumbersSlide(model: ReportModel, num: number, total: numb
       tone: "cyan",
       icon: "check",
       value: fmtNum(model.sample.studied),
-      label: "الحالات المدروسة",
+      label: "الصور المدروسة",
       sub: `إنجاز ${fmtPct(model.sample.completionRate)} من العيّنة`,
     },
     {
@@ -415,13 +415,13 @@ export function monthInNumbersSlide(model: ReportModel, num: number, total: numb
       icon: "alert",
       value: fmtPct(model.population.suspicionRate),
       label: "نسبة الاشتباه",
-      sub: `${fmtNum(model.population.suspicious)} حالة اشتباه في المجتمع`,
+      sub: `${fmtNum(model.population.suspicious)} صورة اشتباه في المجتمع`,
     },
     {
       tone: "purple",
       icon: "flag",
       value: fmtNum(model.errorAnalysis.totals.missedSuspicion + model.errorAnalysis.totals.falseSuspicion),
-      label: "حالات الاختلاف مع المراجع",
+      label: "صور الاختلاف مع المراجع",
       sub: "اشتباه فائت + اشتباه خاطئ",
     },
     {
@@ -446,9 +446,9 @@ export function monthInNumbersSlide(model: ReportModel, num: number, total: numb
     .join("");
   const body = `<div class="v2-num-layout">
       <div class="v2-num-hero">
-        <span class="v2-num-hero-label">إجمالي مجتمع الحالات</span>
+        <span class="v2-num-hero-label">إجمالي مجتمع الصور</span>
         <span class="v2-num-hero-value">${fmtNum(model.population.total)}</span>
-        <span class="v2-num-hero-unit">حالة فحص بالأشعة خلال ${esc(model.summary.periodId)}</span>
+        <span class="v2-num-hero-unit">صورة فحص بالأشعة خلال ${esc(model.summary.periodId)}</span>
         <div class="v2-num-hero-rule"></div>
         <div class="v2-num-hero-split">
           <span><b>${fmtNum(model.population.clean)}</b><small>سليمة</small></span>
@@ -488,8 +488,8 @@ const GLOSSARY_CATEGORIES: GlossaryCategory[] = [
     icon: "layers",
     tone: "gold",
     terms: [
-      { term: "مجتمع الفحص", def: "جميع حالات الفحص بالأشعة المسجّلة خلال الشهر بعد المعالجة واستبعاد السجلات غير الصالحة.", icon: "layers" },
-      { term: "مستويات المخاطر", def: "تصنيف الحالات وفق محرّك المخاطر إلى أربعة مستويات، من الأول (منخفض) إلى الرابع (حرج).", icon: "layers" },
+      { term: "مجتمع الفحص", def: "جميع صور الفحص بالأشعة المسجّلة خلال الشهر بعد المعالجة واستبعاد السجلات غير الصالحة.", icon: "layers" },
+      { term: "مستويات المخاطر", def: "تصنيف الصور وفق محرّك المخاطر إلى أربعة مستويات، من الأول (منخفض) إلى الرابع (حرج).", icon: "layers" },
       { term: "العيّنة", def: "مجموعة جزئية تُسحب عشوائيًا بطريقة طبقية من المجتمع لتخضع للدراسة التفصيلية.", icon: "scan" },
       { term: "التغطية", def: "نسبة حجم العيّنة إلى حجم المجتمع، ومدى تمثيل العيّنة للمجتمع.", icon: "gauge" },
     ],
@@ -500,7 +500,7 @@ const GLOSSARY_CATEGORIES: GlossaryCategory[] = [
     tone: "coral",
     terms: [
       { term: "اشتباه", def: "قرار فحص يشير إلى شبهة تستدعي التحقق؛ ويقابله «سليمة» حين لا تظهر شبهة.", icon: "alert" },
-      { term: "الاشتباه الفائت", def: "حالة قرّر الفحص أنها سليمة وأثبت المراجع أنها اشتباه، وهو الخطر الأمني الأول.", icon: "alert" },
+      { term: "الاشتباه الفائت", def: "صورة قرّر الفحص أنها سليمة وأثبت المراجع أنها اشتباه، وهو الخطر الأمني الأول.", icon: "alert" },
       { term: "المراجع (المعيار)", def: "نتيجة خبير الجودة التي تُقاس عليها دقة قرارات الفحص وتُعتمد مرجعًا.", icon: "shield" },
       { term: "كفاية البيانات", def: "حدّ أدنى من القرارات القابلة للتقييم قبل إصدار حكم أو ترتيب؛ ما دونه يُوصف ولا يُرتّب.", icon: "document" },
     ],
@@ -610,7 +610,7 @@ export function sectionSeparatorSlide(opts: {
 </section>`;
 }
 
-// ── Page 5 — مجتمع الحالات بناءً على المخاطر ────────────────────────────────
+// ── Page 5 — مجتمع الصور بناءً على المخاطر ────────────────────────────────
 const STAGE_TONES = ["gold", "blue", "green", "coral"] as const;
 
 /** Short severity tag shown at the bottom of each card (per the reference
@@ -710,7 +710,7 @@ export function riskStagesSlide(model: ReportModel, num: number, total: number, 
         </div>
         <div class="v2-stage-body">
           <div class="v2-stage-figs">
-            <div class="v2-stage-fig"><b>${fmtNum(s.population)}</b><small>الحالات</small></div>
+            <div class="v2-stage-fig"><b>${fmtNum(s.population)}</b><small>الصور</small></div>
             <div class="v2-stage-fig"><b>${fmtNum(s.sampleSize)}</b><small>العيّنة</small></div>
           </div>
           <div class="v2-stage-gauge">
@@ -724,17 +724,17 @@ export function riskStagesSlide(model: ReportModel, num: number, total: number, 
     })
     .join("");
   const totals = `<div class="v2-totals-band">
-    <div class="v2-totals-item"><span class="v2-totals-icon">${icon("layers", 16)}</span><span><b>${fmtNum(model.population.total)}</b><small>إجمالي المجتمع (حالة)</small></span></div>
+    <div class="v2-totals-item"><span class="v2-totals-icon">${icon("layers", 16)}</span><span><b>${fmtNum(model.population.total)}</b><small>إجمالي المجتمع (صورة)</small></span></div>
     <div class="v2-totals-item"><span class="v2-totals-icon">${icon("scan", 16)}</span><span><b>${fmtNum(model.sample.total)}</b><small>إجمالي العيّنة</small></span></div>
     <div class="v2-totals-item"><span class="v2-totals-icon">${icon("gauge", 16)}</span><span><b>${fmtPct(model.sample.coverage)}</b><small>التغطية الكلية</small></span></div>
   </div>`;
   const body = `<div class="v2-risk-layout">${stageProportionBar(stages)}<div class="kpi-band n${Math.min(4, Math.max(2, stages.length))}">${tiles}</div>${totals}</div>`;
   return v2Slide({
     id: "slide-risk-stages",
-    title: "مجتمع الحالات بناءً على المخاطر",
+    title: "مجتمع الصور بناءً على المخاطر",
     eyebrow: "القسم 1 — مجتمع الفحص",
     iconName: "gauge",
-    headline: "مجتمع الحالات بناءً على المخاطر",
+    headline: "مجتمع الصور بناءً على المخاطر",
     subhead: "توزيع المجتمع بعد المعالجة على مستويات المخاطر الأربعة، وحصة كل مستوى من العيّنة.",
     bodyVariants: [body, body, body, body],
     variantPreview,
@@ -744,7 +744,7 @@ export function riskStagesSlide(model: ReportModel, num: number, total: number, 
   });
 }
 
-// ── Page 6+ — مجتمع حالات الفحص للشهر (جداول المنافذ) ───────────────────────
+// ── Page 6+ — مجتمع صور الفحص للشهر (جداول المنافذ) ───────────────────────
 type PortPopRow = {
   name: string;
   total: number;
@@ -828,7 +828,7 @@ function blankFillerRow(fillerPx: number, span: number, rowH: number): string {
 
 /**
  * One land/sea table as a tinted card (per the reference design). `population`
- * = plain month numbers (الحالات/سليمة/اشتباه). `sample` = same shape, but every
+ * = plain month numbers (الصور/سليمة/اشتباه). `sample` = same shape, but every
  * numeric cell stacks the drawn-sample figure over `من {population}`, plus a
  * التغطية column. The gap before الإجمالي is ONE spacer row sized to the
  * EXACT leftover pixels in the card's budget (not a fixed row count — a fixed
@@ -847,7 +847,7 @@ function portTable(
   const span = mode === "population" ? 4 : 5;
   const dataRowCount = rows.length > 0 ? rows.length : 1; // the "—" placeholder counts as one row
   // Magnitude-column data bars (pure CSS background, zero added row height): the
-  // الحالات column in population mode, the العيّنة column in sample mode, each
+  // الصور column in population mode, the العيّنة column in sample mode, each
   // scaled to the largest value in this chunk. Tone tracks the port variant
   // (green = land, blue = sea) so the bar reads as "size of this port".
   const magTone: CellTone = variant === "land" ? "green" : "blue";
@@ -880,11 +880,11 @@ function portTable(
 
   const headSub =
     mode === "population"
-      ? `${fmtNum(rows.length)} منفذ · ${fmtNum(totalPop)} حالة`
-      : `${fmtNum(rows.length)} منفذ · ${fmtNum(totalSample)} عيّنة من ${fmtNum(totalPop)} حالة`;
+      ? `${fmtNum(rows.length)} منفذ · ${fmtNum(totalPop)} صورة`
+      : `${fmtNum(rows.length)} منفذ · ${fmtNum(totalSample)} عيّنة من ${fmtNum(totalPop)} صورة`;
   const ths =
     mode === "population"
-      ? `<th>المنفذ</th><th>الحالات</th><th>سليمة</th><th>اشتباه</th>`
+      ? `<th>المنفذ</th><th>الصور</th><th>سليمة</th><th>اشتباه</th>`
       : `<th>المنفذ</th><th>العيّنة</th><th>سليمة</th><th>اشتباه</th><th>التغطية</th>`;
   const headIcon = variant === "land" ? "truck" : "ship";
   const cls = `v2-port-col ${variant}${mode === "sample" ? " sample-mode" : ""}${compact ? " compact" : ""}`;
@@ -972,7 +972,7 @@ export function portsOverviewSlide(model: ReportModel, num: number, total: numbe
     eyebrow: "القسم 1 — مجتمع الفحص",
     iconName: "chart",
     headline: `أبرز المنافذ في مجتمع ${model.summary.periodId}`,
-    subhead: "ترتيب المنافذ البرية والبحرية بحسب حجم الحالات، قبل الجداول التفصيلية.",
+    subhead: "ترتيب المنافذ البرية والبحرية بحسب حجم الصور، قبل الجداول التفصيلية.",
     bodyVariants: [body, body, body, body],
     variantPreview,
     num,
@@ -994,11 +994,11 @@ export function portPopulationSlideBuilders(model: ReportModel, variantPreview: 
       const body = `<div class="v2-port-split">${portTable("المنافذ البرية", landChunk, "population", "land", plan.compact)}${portTable("المنافذ البحرية", seaChunk, "population", "sea", plan.compact)}</div>`;
       return v2Slide({
         id: `slide-port-population-${page + 1}`,
-        title: `مجتمع حالات الفحص${cont}`,
+        title: `مجتمع صور الفحص${cont}`,
         eyebrow: "القسم 1 — مجتمع الفحص",
         iconName: "port",
-        headline: `مجتمع حالات الفحص لشهر ${model.summary.periodId}${cont}`,
-        subhead: "منهجية التصنيف: تُصنَّف الحالة اشتباهًا إذا كانت نتيجة المستوى الأول أو الثاني اشتباهًا، وفي غير ذلك تُصنَّف سليمة.",
+        headline: `مجتمع صور الفحص لشهر ${model.summary.periodId}${cont}`,
+        subhead: "منهجية التصنيف: تُصنَّف الصورة اشتباهًا إذا كانت نتيجة المستوى الأول أو الثاني اشتباهًا، وفي غير ذلك تُصنَّف سليمة.",
         bodyVariants: [body, body, body, body],
         variantPreview,
         num,
@@ -1122,7 +1122,7 @@ function ghostRows(count: number): string {
  *  (sample.stageAllocations present), StageProfile's population comes from a
  *  frozen sample-draw-time snapshot, which is not guaranteed to equal a fresh
  *  count of `ports` (built from *current* model.rows) — summing `ports` here
- *  could visibly disagree with the number shown on the "مجتمع الحالات بناءً
+ *  could visibly disagree with the number shown on the "مجتمع الصور بناءً
  *  على المخاطر" page for the same stage. سليمة/اشتباه have no equivalent on
  *  StageProfile, so those two columns still sum from `ports` — the best
  *  available breakdown, and in the rare case population changed after
@@ -1212,7 +1212,7 @@ function stagePortSampleCard(stage: StageProfile, i: number, ports: PortPopRow[]
   </div>`;
 }
 
-/** Population page: مجتمع حالات الفحص حسب المستوى والمنفذ. Never paginated —
+/** Population page: مجتمع صور الفحص حسب المستوى والمنفذ. Never paginated —
  *  top-N is fixed, so row count doesn't grow with the port list the way the
  *  land/sea tables' does. */
 export function stagePortPopulationSlide(
@@ -1228,10 +1228,10 @@ export function stagePortPopulationSlide(
   const body = `<div class="v2-stage-port-grid">${cards}</div>`;
   return v2Slide({
     id: "slide-stage-port-population",
-    title: "مجتمع حالات الفحص حسب المستوى والمنفذ",
+    title: "مجتمع صور الفحص حسب المستوى والمنفذ",
     eyebrow: "القسم 1 — مجتمع الفحص",
     iconName: "layers",
-    headline: `مجتمع حالات الفحص حسب المستوى والمنفذ لشهر ${model.summary.periodId}`,
+    headline: `مجتمع صور الفحص حسب المستوى والمنفذ لشهر ${model.summary.periodId}`,
     subhead: "أعلى 5 منافذ بالحجم لكل مستوى مخاطر، مع إجمالي شامل لجميع المنافذ.",
     bodyVariants: [body, body, body, body],
     variantPreview,
@@ -1563,11 +1563,11 @@ export function closingSlide(
   const sourcesBlock = `<div class="v2-src-grid">
     <div class="v2-src-card gold">
       <div class="v2-src-head">${badgeIcon("layers", 15)}<b>بيانات وكالة المخاطر</b><span class="v2-src-tag">المصدر الأساسي</span></div>
-      <p>${fmtNum(src.riskRowCount)} حالة مسجّلة هذا الشهر</p>
+      <p>${fmtNum(src.riskRowCount)} صورة مسجّلة هذا الشهر</p>
     </div>
     <div class="v2-src-card ${src.biProvided ? "blue" : "off"}">
       <div class="v2-src-head">${badgeIcon("scan", 15)}<b>بيانات ذكاء الأعمال</b><span class="v2-src-tag">مصدر داعم</span></div>
-      <p>${src.biProvided ? `مُقدَّم — أثرى ${fmtNum(src.biMatchedCount)} حالة بالمطابقة` : "غير مُقدَّم هذا الشهر"}</p>
+      <p>${src.biProvided ? `مُقدَّم — أثرى ${fmtNum(src.biMatchedCount)} صورة بالمطابقة` : "غير مُقدَّم هذا الشهر"}</p>
     </div>
   </div>`;
   const body = `<div class="v2-closing">
@@ -1646,10 +1646,10 @@ export function buildDeckV2Slides(
         iconName: "layers",
         title: "مجتمع الفحص",
         blurb:
-          "التعريف بمجتمع الحالات لهذا الشهر: حجمه، توزيعه على مستويات المخاطر، وتوزيعه على المنافذ البرية والبحرية، وهو الأساس الذي سُحبت منه العيّنة.",
+          "التعريف بمجتمع الصور لهذا الشهر: حجمه، توزيعه على مستويات المخاطر، وتوزيعه على المنافذ البرية والبحرية، وهو الأساس الذي سُحبت منه العيّنة.",
         keyStatValue: fmtNum(model.population.total),
-        keyStatLabel: "حالة في مجتمع الشهر",
-        takeaway: `عيّنة ${fmtNum(model.sample.total)} حالة بتغطية ${fmtPct(model.sample.coverage)} تمثّل هذا المجتمع.`,
+        keyStatLabel: "صورة في مجتمع الشهر",
+        takeaway: `عيّنة ${fmtNum(model.sample.total)} صورة بتغطية ${fmtPct(model.sample.coverage)} تمثّل هذا المجتمع.`,
         tone: "gold",
         seedBase,
         num,
@@ -1676,7 +1676,7 @@ export function buildDeckV2Slides(
           "جودة الصور المفحوصة في كل منفذ (التوفّر والتحديد والجودة المقبولة)، ودقة قرارات الفحص بين الاشتباه والسليمة.",
         keyStatValue: model.summary.overallAccuracy === null ? "—" : fmtPct(model.summary.overallAccuracy),
         keyStatLabel: "الدقة العامة لقرارات الفحص",
-        takeaway: "المسار من المجتمع إلى الحالات المدروسة ثم المشتبه بها.",
+        takeaway: "المسار من المجتمع إلى الصور المدروسة ثم المشتبه بها.",
         extra: resultsFunnel,
         tone: "cyan",
         seedBase,
@@ -1710,7 +1710,7 @@ export function buildDeckV2Slides(
       iconName: "chart",
       tone: "gold",
       figure: fmtNum(model.population.total),
-      figureLabel: "حالة",
+      figureLabel: "صورة",
     },
     {
       title: "المعجم",
@@ -1723,7 +1723,7 @@ export function buildDeckV2Slides(
     },
     {
       title: "القسم الأول — مجتمع الفحص",
-      goal: "التعريف بمجتمع الحالات وتوزيعه بحسب المخاطر والمنافذ، وأساس سحب العيّنة.",
+      goal: "التعريف بمجتمع الصور وتوزيعه بحسب المخاطر والمنافذ، وأساس سحب العيّنة.",
       range: `${pad(sectionOneStart)}–${pad(sectionOneEnd)}`,
       iconName: "layers",
       tone: "green",

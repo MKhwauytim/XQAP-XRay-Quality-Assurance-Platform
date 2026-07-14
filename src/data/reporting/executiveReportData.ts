@@ -490,7 +490,7 @@ export function generateNarrativeFindings(
   // Quality risk
   if (kpis.missedSuspicionRate !== null && kpis.missedSuspicionRate > config.maximumMissedSuspicionRate) {
     findings.push(
-      `تجاوزت نسبة الاشتباه الفائت ${fmtPct(kpis.missedSuspicionRate)} الحد المقبول (${fmtPct(config.maximumMissedSuspicionRate)})، وهو مؤشر خطر يستوجب مراجعة الحالات المصنفة سليمة والتحقق من دقتها.`
+      `تجاوزت نسبة الاشتباه الفائت ${fmtPct(kpis.missedSuspicionRate)} الحد المقبول (${fmtPct(config.maximumMissedSuspicionRate)})، وهو مؤشر خطر يستوجب مراجعة الصور المصنفة سليمة والتحقق من دقتها.`
     );
   }
 

@@ -100,7 +100,7 @@ export function buildPriorityActions(model: ReportModel, pageNo: string): string
 export function buildExclusions(model: ReportModel, pageNo: string): string {
   const body = `${pageHeader({ iconName: "document", eyebrow: "الجزء الخامس · الصدق", title: "الاستبعادات", subtitle: "الصفوف المستبعدة وأسبابها" })}
     ${kpiStrip([
-      kpi({ label: "حالات معالجة", value: fmtNum(model.population.total), tone: "green" }),
+      kpi({ label: "صور معالجة", value: fmtNum(model.population.total), tone: "green" }),
       kpi({ label: "قرارات قابلة للتقييم", value: fmtNum(model.dataQuality.evaluableDecisionRecords), tone: "gold" }),
       kpi({ label: "إجمالي القرارات", value: fmtNum(model.dataQuality.totalDecisionRecords), tone: "slate" }),
     ], 3)}
@@ -109,7 +109,7 @@ export function buildExclusions(model: ReportModel, pageNo: string): string {
         <ul class="doc-list">
           <li>${escapeText(model.exclusions.note)}</li>
           <li>القرارات غير القابلة للتقييم تُستبعد من حساب الدقة (لا صورة، أو لا نتيجة مراجع، أو لا هوية مفتش).</li>
-          <li>نتائج الفرق الأخرى اختيارية؛ غيابها لا يستبعد الحالة، ويُعرض "—".</li>
+          <li>نتائج الفرق الأخرى اختيارية؛ غيابها لا يستبعد الصورة، ويُعرض "—".</li>
         </ul>`, { fill: true, iconName: "document" })}
     </div>
     ${noteBox("تُوثَّق الصفوف المستبعدة بالتفصيل في تقرير معالجة المجتمع (processing.summary.json).")}`;

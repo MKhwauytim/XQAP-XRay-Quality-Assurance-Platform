@@ -40,7 +40,7 @@ export function buildCover(model: ReportModel, issueDate: string): string {
       <h1>التقرير التنفيذي لضمان جودة الأشعة</h1>
       <div class="subtitle">دقة قرارات المستوى الأول والثاني — تحليل أمني للجودة</div>
       <div class="rule"></div>
-      <p class="lead">فترة التقرير: ${esc(issueDate)}<br>مجتمع الحالات محل الدراسة: ${esc(model.summary.periodId)}<br>إجمالي المجتمع: ${fmtNum(model.population.total)} حالة</p>
+      <p class="lead">فترة التقرير: ${esc(issueDate)}<br>مجتمع الصور محل الدراسة: ${esc(model.summary.periodId)}<br>إجمالي المجتمع: ${fmtNum(model.population.total)} صورة</p>
       <div class="level-strip">
         <div style="--accent:var(--gold)">المستوى الأول</div>
         <div style="--accent:var(--blue)">المستوى الثاني</div>

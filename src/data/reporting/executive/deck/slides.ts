@@ -117,7 +117,7 @@ export function agendaSlide(items: AgendaItem[], num: number, total: number): st
     eyebrow: "الفهرس",
     iconName: "layers",
     headline: "ما الذي يغطيه هذا العرض",
-    subhead: "أربعة محاور من مجتمع الحالات إلى القرارات المطلوبة.",
+    subhead: "أربعة محاور من مجتمع الصور إلى القرارات المطلوبة.",
     body,
     decision: "خارطة القراءة — أين تجد كل قرار داخل العرض.",
   });
@@ -166,7 +166,7 @@ export function scopeSlide(model: ReportModel, num: number, total: number): stri
   ];
   const left = heroNumber({
     value: fmtNum(p.total),
-    caption: "إجمالي حالات المجتمع المدروس",
+    caption: "إجمالي صور المجتمع المدروس",
     sub: `${fmtNum(p.byPort.length)} منفذ · العينة ${fmtNum(model.sample.total)} · التغطية ${fmtPct(model.sample.coverage)}`,
     tone: "gold",
   });
@@ -465,7 +465,7 @@ export function supportSlide(model: ReportModel, num: number, total: number): st
       iconName: "check",
       headline: "لا يوجد مفتشون ضمن نطاق الأولوية هذه الفترة",
       body: emptyHero(
-        "لا توجد حالات أولوية ببيانات كافية",
+        "لا توجد صور أولوية ببيانات كافية",
         "لم يبلغ أي مفتش حد البيانات الكافية مع مؤشر اشتباه فائت يستدعي تدخلًا مركّزًا هذه الفترة.",
       ),
       decision: "الاستمرار في المتابعة الدورية دون تدخل فردي.",
@@ -478,7 +478,7 @@ export function supportSlide(model: ReportModel, num: number, total: number): st
     return {
       iconName: "alert",
       title: `المفتش ${r.inspectorId}`,
-      text: `اشتباه فائت ${fmtPct(missedRate)} على ${fmtNum(r.evaluable)} قرار قابل للتقييم — الدليل: ${fmtNum(r.missedSuspicion)} حالة اشتباه فائتة.`,
+      text: `اشتباه فائت ${fmtPct(missedRate)} على ${fmtNum(r.evaluable)} قرار قابل للتقييم — الدليل: ${fmtNum(r.missedSuspicion)} صورة اشتباه فائتة.`,
       tone: "coral" as const,
     };
   });
@@ -492,7 +492,7 @@ export function supportSlide(model: ReportModel, num: number, total: number): st
     headline: "المفتشون الذين يحتاجون دعمًا مركّزًا",
     subhead: "مرتّبون بالاشتباه الفائت (الخطر الأمني الأول) مع توفّر بيانات كافية.",
     body: cards(items, needSupport.length >= 3 ? 3 : 2),
-    decision: "تدريب أو متابعة مستهدفة للحالات ذات الخطر الأعلى.",
+    decision: "تدريب أو متابعة مستهدفة للصور ذات الخطر الأعلى.",
   });
 }
 
@@ -512,7 +512,7 @@ export function riskSlide(model: ReportModel, num: number, total: number): strin
       headline: "أين يتركّز الخطر الأكبر؟",
       body: emptyHero(
         "لا يوجد اشتباه فائت مسجّل هذه الفترة",
-        "لم تُرصد حالات اشتباه فائت ضمن القرارات القابلة للتقييم — لا يوجد تركّز خطر يُبرز هذه الفترة.",
+        "لم تُرصد صور اشتباه فائت ضمن القرارات القابلة للتقييم — لا يوجد تركّز خطر يُبرز هذه الفترة.",
       ),
       decision: "لا يلزم تحديد مالك خطر هذه الفترة؛ الاستمرار في الرصد.",
     });
@@ -525,8 +525,8 @@ export function riskSlide(model: ReportModel, num: number, total: number): strin
   const topPort = byPort[0];
   const left = heroNumber({
     value: fmtNum(model.errorAnalysis.totals.missedSuspicion),
-    caption: "إجمالي حالات الاشتباه الفائت",
-    sub: `الأعلى تركّزًا: ${topPort.key} (${fmtNum(topPort.missedSuspicion)} حالة)`,
+    caption: "إجمالي صور الاشتباه الفائت",
+    sub: `الأعلى تركّزًا: ${topPort.key} (${fmtNum(topPort.missedSuspicion)} صورة)`,
     tone: "coral",
   });
   return slide({

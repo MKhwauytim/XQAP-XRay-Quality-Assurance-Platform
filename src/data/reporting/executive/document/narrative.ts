@@ -12,7 +12,7 @@ function pct(n: number | null): string {
 
 export function populationClose(total: number, suspicionRate: number, portCount: number): CloseLines {
   return {
-    shows: `يضم مجتمع الدراسة ${fmtNum(total)} حالة موزعة على ${fmtNum(portCount)} منفذًا، بنسبة اشتباه ${pct(suspicionRate)}.`,
+    shows: `يضم مجتمع الدراسة ${fmtNum(total)} صورة موزعة على ${fmtNum(portCount)} منفذًا، بنسبة اشتباه ${pct(suspicionRate)}.`,
     matters: "حجم المجتمع وتوزيعه يحددان تمثيلية النتائج ومجالات تركيز التدقيق.",
     action: "اعتماد المجتمع أساسًا للتحليل، ومراجعة المنافذ ذات الكثافة العالية أولًا.",
   };
@@ -22,7 +22,7 @@ export function coverageClose(coverage: number, completion: number): CloseLines 
   return {
     shows: `بلغت تغطية العينة ${pct(coverage)} وإنجاز الدراسة ${pct(completion)}.`,
     matters: "اكتمال الدراسة شرط لموثوقية مؤشرات الدقة اللاحقة.",
-    action: completion >= 95 ? "متابعة الإنجاز الكامل للفترة القادمة." : "استكمال الحالات غير المدروسة قبل اعتماد النتائج النهائية.",
+    action: completion >= 95 ? "متابعة الإنجاز الكامل للفترة القادمة." : "استكمال الصور غير المدروسة قبل اعتماد النتائج النهائية.",
   };
 }
 

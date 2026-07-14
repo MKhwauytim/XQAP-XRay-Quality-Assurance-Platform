@@ -200,7 +200,7 @@ describe("stage×port grid slides", () => {
         popRow({ xrayImageId: "XR-2", stage: "المستوى الأول", portName: "ميناء ب", xrayLevelOneResult: "اشتباه", xrayLevelTwoResult: "اشتباه" }),
       ]),
     );
-    expect(html).toContain("مجتمع حالات الفحص حسب المستوى والمنفذ");
+    expect(html).toContain("مجتمع صور الفحص حسب المستوى والمنفذ");
     expect(html).toContain("عيّنة الفحص المسحوبة حسب المستوى والمنفذ");
     expect(html).toContain('id="slide-stage-port-population"');
     expect(html).toContain('id="slide-stage-port-sample"');
@@ -245,7 +245,7 @@ describe("closing slide — data-source attribution + embedded Arabic font", () 
       ]),
     );
     expect(html).toContain('<div class="v2-src-card blue"');
-    expect(html).toContain("أثرى 1 حالة بالمطابقة");
+    expect(html).toContain("أثرى 1 صورة بالمطابقة");
     expect(html).not.toContain("غير مُقدَّم هذا الشهر");
   });
 

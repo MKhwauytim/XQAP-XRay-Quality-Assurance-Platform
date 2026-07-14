@@ -4,6 +4,26 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v54.1 — 2026-07-14 — Report terminology: حالة → صورة for x-ray records
+
+Owner request ("any reference for حالة become صورة"). Reviewed, phrase-mapped rename across the reporting layer — NOT a blind replace: حالة-as-"status" survives untouched (column headers الحالة, حالة التوزيع, حالة الإجابة, حالة BI, workflow labels), and the port name منفذ حالة عمار is data. 64 case-sense occurrences renamed across deck2, deck v1, the executive document parts (scope/risk/corroboration/narrative), executiveReportData findings, and the two KPI-dashboard labels (`rk_pchart_empty`, `rk_tooltip_cases`). Examples:
+
+**Files:** `src/data/reporting/executive/deck2/slides.ts`, `deck/slides.ts`, `document/{frontMatter,index,narrative,partScope,partRisk,partCorroboration}.ts`, `executiveReportData.ts`, `deck2.test.ts`, `src/data/labels/labelsStore.ts`
+
+**Before:**
+```
+مجتمع الحالات · حالات الفحص · الحالات المدروسة · ${n} حالة · إجمالي الحالات ·
+تُصنَّف الحالة اشتباهًا · حالة مسجّلة · أثرى N حالة بالمطابقة · عدد الحالات
+```
+
+**After:**
+```
+مجتمع الصور · صور الفحص · الصور المدروسة · ${n} صورة · إجمالي الصور ·
+تُصنَّف الصورة اشتباهًا · صورة مسجّلة · أثرى N صورة بالمطابقة · عدد الصور
+```
+
+Preview-verified: 0 case-sense حالة remain in the rendered deck (only the منفذ حالة عمار port name); grammar intact (both nouns feminine, so adjectives needed no change).
+
 ## v54 — 2026-07-14 — Closing slide: data-source attribution replaces the provenance QR
 
 Owner request ("no qr code" + "say if the data is from source 1 بيانات ذكاء الأعمال or source 2 بيانات وكالة المخاطر based on the data entered in data processing"). The QR feature is fully removed (helper module + tests, async `openExecutiveDeckV2WithQr` wrapper, `provenanceQrSvg` params, QR CSS, and the `qrcode` dependency — Reports-tab call sites reverted to the sync `openExecutiveDeckV2`). In its place, the closing slide's provenance block now opens with a "مصادر البيانات المُدخلة" card pair derived from what data processing actually ingested:
