@@ -63,14 +63,23 @@ const STAGE_LABELS: Record<(typeof STAGE_KEYS)[number], string> = {
 // Risk-engine stage mix (roughly: most cases low stage, few at the top).
 const STAGE_WEIGHTS = [0.45, 0.3, 0.18, 0.07];
 
-function pickStage(): (typeof STAGE_KEYS)[number] {
+function pickStage(portIdx: number): (typeof STAGE_KEYS)[number] {
   const r = rnd();
   let acc = 0;
+  let picked: (typeof STAGE_KEYS)[number] = "first";
   for (let i = 0; i < STAGE_KEYS.length; i++) {
     acc += STAGE_WEIGHTS[i];
-    if (r < acc) return STAGE_KEYS[i];
+    if (r < acc) {
+      picked = STAGE_KEYS[i];
+      break;
+    }
   }
-  return "first";
+  // Concentrate high stages in the first few ports — real months look like
+  // this (level 4 in one or two ports only), which exercises the stage-port
+  // cards' ghost-row padding in the preview instead of always filling 5 rows.
+  if (picked === "fourth" && portIdx >= 2) picked = "third";
+  if (picked === "second" && portIdx >= 4) picked = "first";
+  return picked;
 }
 
 function makeRow(
@@ -78,11 +87,12 @@ function makeRow(
   portName: string,
   portCode: string,
   isSea: boolean,
+  portIdx: number,
 ): PreparedPopulationRow {
   const suspicious1 = rnd() < 0.05;
   const suspicious2 = suspicious1 ? rnd() < 0.7 : rnd() < 0.02;
   return {
-    stage: STAGE_RAW_ALIASES[pickStage()],
+    stage: STAGE_RAW_ALIASES[pickStage(portIdx)],
     xrayImageId: `XR-${String(id).padStart(5, "0")}`,
     xrayEntryDate: null,
     portCode,
@@ -259,13 +269,16 @@ export function buildPreviewInput(): ExecutiveReportInput {
   seed = 42; // reset so repeated calls produce identical data
   const rows: PreparedPopulationRow[] = [];
   let id = 1;
+  let portIdx = 0;
   for (const [name, count] of LAND_PORTS) {
     const code = `L${String(id).padStart(2, "0")}`;
-    for (let i = 0; i < count; i++) rows.push(makeRow(id++, name, code, false));
+    for (let i = 0; i < count; i++) rows.push(makeRow(id++, name, code, false, portIdx));
+    portIdx++;
   }
   for (const [name, count] of SEA_PORTS) {
     const code = `S${String(id).padStart(2, "0")}`;
-    for (let i = 0; i < count; i++) rows.push(makeRow(id++, name, code, true));
+    for (let i = 0; i < count; i++) rows.push(makeRow(id++, name, code, true, portIdx));
+    portIdx++;
   }
   const sample = drawSample(rows);
   return {

@@ -743,6 +743,14 @@ export function collectStagePortStats(model: ReportModel): Map<string, PortPopRo
   return result;
 }
 
+/** Muted placeholder rows padding a stage card's table up to the fixed
+ *  STAGE_CARD_TOP_N body-row count. Real row height/borders (they are ordinary
+ *  `<tr>`s), so the table grid reads as deliberate rather than truncated. */
+function ghostRows(count: number): string {
+  if (count <= 0) return "";
+  return `<tr class="v2-ghost"><td>—</td><td></td><td></td><td></td></tr>`.repeat(count);
+}
+
 /** One stage's card on the population page: المنفذ | سليمة | اشتباه | الإجمالي,
  *  top STAGE_CARD_TOP_N ports by population, with a stage-wide totals row.
  *
@@ -761,16 +769,18 @@ export function collectStagePortStats(model: ReportModel): Map<string, PortPopRo
 function stagePortPopulationCard(stage: StageProfile, i: number, ports: PortPopRow[]): string {
   const tone = STAGE_TONES[i % STAGE_TONES.length];
   const top = ports.slice(0, STAGE_CARD_TOP_N);
-  const dataRowCount = top.length > 0 ? top.length : 1;
+  // Always render exactly STAGE_CARD_TOP_N body rows: stages with fewer ports
+  // get muted "ghost" rows so all four cards share identical table geometry —
+  // otherwise short cards showed a large blank void between the last data row
+  // and the pinned totals row (owner-reported inconsistency, 2026-07-14).
+  const dataRowCount = STAGE_CARD_TOP_N;
   const trs =
-    top.length > 0
-      ? top
-          .map(
-            (p) =>
-              `<tr><td>${esc(p.name)}</td><td>${fmtNum(p.clean)}</td><td>${fmtNum(p.suspicious)}</td><td>${fmtNum(p.total)}</td></tr>`,
-          )
-          .join("")
-      : `<tr><td colspan="4"><span class="insuff">—</span></td></tr>`;
+    top
+      .map(
+        (p) =>
+          `<tr><td>${esc(p.name)}</td><td>${fmtNum(p.clean)}</td><td>${fmtNum(p.suspicious)}</td><td>${fmtNum(p.total)}</td></tr>`,
+      )
+      .join("") + ghostRows(STAGE_CARD_TOP_N - top.length);
 
   const usedPx = METRICS_COMPACT.theadH + METRICS_COMPACT.tfootH + dataRowCount * METRICS_COMPACT.rowH;
   const fillerPx = Math.max(0, STAGE_CARD_TABLE_BUDGET_PX - usedPx);
@@ -807,16 +817,16 @@ function stagePortPopulationCard(stage: StageProfile, i: number, ports: PortPopR
 function stagePortSampleCard(stage: StageProfile, i: number, ports: PortPopRow[]): string {
   const tone = STAGE_TONES[i % STAGE_TONES.length];
   const top = ports.slice(0, STAGE_CARD_TOP_N);
-  const dataRowCount = top.length > 0 ? top.length : 1;
+  // Same fixed-geometry rule as stagePortPopulationCard: exactly TOP_N body
+  // rows, ghost-padded, so the totals row sits at the same height in all cards.
+  const dataRowCount = STAGE_CARD_TOP_N;
   const trs =
-    top.length > 0
-      ? top
-          .map((p) => {
-            const coverage = p.total > 0 ? (p.sampleTotal / p.total) * 100 : 0;
-            return `<tr><td>${esc(p.name)}</td><td>${fmtNum(p.total)}</td><td>${fmtNum(p.sampleTotal)}</td><td>${fmtPct(coverage)}</td></tr>`;
-          })
-          .join("")
-      : `<tr><td colspan="4"><span class="insuff">—</span></td></tr>`;
+    top
+      .map((p) => {
+        const coverage = p.total > 0 ? (p.sampleTotal / p.total) * 100 : 0;
+        return `<tr><td>${esc(p.name)}</td><td>${fmtNum(p.total)}</td><td>${fmtNum(p.sampleTotal)}</td><td>${fmtPct(coverage)}</td></tr>`;
+      })
+      .join("") + ghostRows(STAGE_CARD_TOP_N - top.length);
 
   const usedPx = METRICS_COMPACT.theadH + METRICS_COMPACT.tfootH + dataRowCount * METRICS_COMPACT.rowH;
   const fillerPx = Math.max(0, STAGE_CARD_TABLE_BUDGET_PX - usedPx);

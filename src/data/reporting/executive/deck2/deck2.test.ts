@@ -97,6 +97,15 @@ describe("buildExecutiveDeckV2 — production path (no opts)", () => {
     expect(html).toContain("مراجعة 3");
   });
 
+  it("pads stage-port cards with ghost rows to the fixed 5-row geometry", () => {
+    // One stage, one port → each stage-port card (population + sample slides)
+    // shows 1 data row + 4 ghost rows, so the totals row sits at the same
+    // height as a full card's.
+    const html = buildExecutiveDeckV2(input([popRow()]));
+    const ghostCount = (html.match(/class="v2-ghost"/g) ?? []).length;
+    expect(ghostCount).toBe(8); // 4 ghosts × 2 slides
+  });
+
   it("omits the footer entirely when no revisions are supplied", () => {
     // Match markup, not the bare substring — SOURCE_REVISIONS_CSS always ships
     // the `.srev-file` selector text (same false-positive noted above for the

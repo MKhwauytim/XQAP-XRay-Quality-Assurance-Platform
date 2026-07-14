@@ -248,6 +248,11 @@ export const DECK_V2_CSS = `
 .v2-stage-port-card .deck-table{width:100%;}
 .v2-stage-port-card .deck-table th,.v2-stage-port-card .deck-table td{padding:3px 6px;font-size:0.6rem;}
 .v2-stage-port-card .deck-table th{font-size:0.58rem;}
+/* Ghost rows: pad stages with fewer than TOP_N ports so every card's table has
+   identical geometry (same row count, totals row at the same height). Ordinary
+   <tr>s (real height + borders) with muted ink — the grid reads as deliberate. */
+.v2-stage-port-card .deck-table tr.v2-ghost td{color:rgba(255,255,255,.16);}
+body.theme-light .v2-stage-port-card .deck-table tr.v2-ghost td{color:rgba(10,45,74,.22);}
 /* The sample page's "{sampleSize} / {population}" figure in the card header —
    dir="ltr" on this span (set in slides.ts) prevents the same bidi-reversal
    bug the variant-switcher counter had (EDIT_LOG v40.7: "1 / 4" rendered as

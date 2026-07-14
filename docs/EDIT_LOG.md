@@ -4,6 +4,68 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v51.2 — 2026-07-14 — deck2 stage×port cards: fixed 5-row geometry (ghost rows)
+
+Owner-reported inconsistency: stages with fewer than 5 ports (real months concentrate levels 2/4 in one or two ports) left a large blank void between the last data row and the pinned totals row, while full cards looked dense. Every card now renders exactly `STAGE_CARD_TOP_N` body rows — short stages are padded with muted "ghost" rows (ordinary `<tr>`s, real height and borders) so all four cards share identical table geometry and the totals row sits at the same height everywhere. Verified in the preview: tfoot offset 180px in all cards on both stage-port slides.
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**Before:**
+```ts
+  const dataRowCount = top.length > 0 ? top.length : 1;
+  const trs =
+    top.length > 0
+      ? top.map((p) => `<tr>...`).join("")
+      : `<tr><td colspan="4"><span class="insuff">—</span></td></tr>`;
+```
+
+**After:**
+```ts
+  const dataRowCount = STAGE_CARD_TOP_N;
+  const trs =
+    top.map((p) => `<tr>...`).join("") + ghostRows(STAGE_CARD_TOP_N - top.length);
+```
+(New `ghostRows(count)` helper; same change applied to both `stagePortPopulationCard` and `stagePortSampleCard`.)
+
+**File:** `src/data/reporting/executive/deck2/theme.ts`
+
+**Before:**
+```css
+.v2-stage-port-card .deck-table th{font-size:0.58rem;}
+```
+
+**After:**
+```css
+.v2-stage-port-card .deck-table th{font-size:0.58rem;}
+.v2-stage-port-card .deck-table tr.v2-ghost td{color:rgba(255,255,255,.16);}
+body.theme-light .v2-stage-port-card .deck-table tr.v2-ghost td{color:rgba(10,45,74,.22);}
+```
+
+**File:** `src/dev/deckPreviewFixture.ts`
+
+**Before:**
+```ts
+function pickStage(): ... // uniform stage mix across all 14 ports
+```
+
+**After:**
+```ts
+function pickStage(portIdx: number): ... // level 4 only in the first 2 ports, level 2 in the first 4
+```
+(Mirrors real months so the preview exercises the ghost-row path.)
+
+**File:** `src/data/reporting/executive/deck2/deck2.test.ts`
+
+**Before:**
+```ts
+(no geometry coverage)
+```
+
+**After:**
+```ts
+it("pads stage-port cards with ghost rows to the fixed 5-row geometry", ...); // 4 ghosts × 2 slides
+```
+
 ## v51.1 — 2026-07-14 — deck2 stage×port cards empty on real data (raw stage aliases)
 
 Owner reported empty port tables and zero سليمة/اشتباه sums on the live deck's "حسب المستوى والمنفذ" pages with real September 2026 data. Root cause: real processed rows store the RAW Excel stage alias in `row.stage` (e.g. "SECOND_STAG", "2", "الثاني" — see `DEFAULT_STAGE_MAPPINGS`), while `StageProfile.stageLabel` is the canonical Arabic label frozen at draw time. `collectStagePortStats` grouped by the raw value and the cards looked up by the canonical label, so every lookup missed. The dev-preview fixture used canonical labels and masked the bug. Same raw-equality bug zeroed per-stage "studied" counts in `calculateExecutiveKPIs`.
