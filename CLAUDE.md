@@ -56,7 +56,7 @@ npx vitest run src/data/sampling/sampleAlgorithm.test.ts  # run a single test fi
 - The workspace features require the **File System Access API** (`showDirectoryPicker`), so the app only fully works in Chromium browsers (Chrome/Edge). Other browsers get the `unsupported_browser` state.
 - TypeScript is in strict mode. `createWritable` on `FileHandleLike` is typed as optional — always guard with `if (!fh.createWritable) return/continue;` before calling it.
 - Excel parsing runs in a **Web Worker** (`src/workers/workbookWorker.ts`) to avoid blocking the UI. The worker posts `progress` and `result` messages back to the main thread.
-- `recharts` is a declared dependency but currently has **no imports in `src/`** (verified 2026-07-05 — earlier chart usage was removed). Keep it: the planned Tier-2 KPI upgrade (p-chart drift bands, see `docs/audit/TEAM_REVIEW_2026-07-05.md`) will use it. If that plan is dropped, remove the dependency instead.
+- `recharts` is now used by the **KPI dashboard** (`section === "kpi"` in `Reports/index.tsx` → `Reports/ReviewerKpiPanel.tsx`), which renders the Tier-2 per-reviewer / per-port SPC **p-charts** (control-limit drift bands; see `docs/audit/TEAM_REVIEW_2026-07-05.md` and research gap #18). It is imported nowhere else — if the p-charts are ever removed, drop the dependency too. recharts is LTR-internal; the p-chart wraps the `ResponsiveContainer` in `dir="ltr"` and restores RTL reading order via `XAxis reversed` + right-oriented `YAxis`.
 
 ## Disk layout (workspace folder)
 
@@ -179,4 +179,3 @@ All UI strings that may need customization are stored in `src/data/labels/labels
 - Plain CSS co-located per component (no CSS framework).
 - `import type` for type-only imports; ESLint + Prettier configured.
 - Tests use Vitest with `node` environment and a `createMemoryDirectory()` helper (`src/data/storage/memoryDirectory.ts`) that implements `DirectoryHandleLike` in memory — use it for any test that needs file I/O.
-- There is also an **in-app test runner** at `src/test-runner/` (browser-side, separate from Vitest) for integration smoke-tests that need real browser APIs.

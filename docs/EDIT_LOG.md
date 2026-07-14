@@ -4,6 +4,145 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v50 — 2026-07-14 — Per-reviewer KPI upgrade + SPC p-charts (recharts)
+
+Adds a pure per-reviewer KPI + p-chart stats module, full unit tests, and a
+recharts-driven KPI-dashboard panel (reviewer/port control charts). recharts —
+previously unimported — is now used for its sanctioned purpose. Spec:
+`docs/audit/TEAM_REVIEW_2026-07-05.md` Tier 2; research gap #18.
+
+**File:** `src/data/reporting/executive/model/reviewerKpis.ts`
+
+**Before:**
+```ts
+// (new file)
+```
+
+**After:**
+```ts
+// Pure math over the decision fact table. Exports:
+//   percentile(sortedAsc, q)                     — R-7 linear interpolation
+//   buildPChart(raw, minN=5)                     — pooled p̄ = Σx/Σn; per-group
+//     UCL/LCL_i = p̄ ± 3·√(p̄(1−p̄)/n_i) clamped [0,1]; n=0 dropped; n<minN → lowN
+//     (never signalled out-of-control); outOfControl = !lowN && (p>ucl || p<lcl)
+//   buildReviewerKpis(records, referral?, quota?, minN=5) → ReviewerKpiModel
+//     Collapses the 2-per-case fact table by xrayImageId, then per reviewer:
+//     workload (assigned), completed, completionRate, throughputVsQuota,
+//     turnaround median + p90 hours (assignedAt→submittedAt), suspicion-or-referral
+//     rate, referralRate; plus reviewer & port p-charts.
+```
+
+**File:** `src/data/reporting/executive/model/reviewerKpis.test.ts`
+
+**Before:**
+```ts
+// (new file)
+```
+
+**After:**
+```ts
+// 21 unit tests: percentile edges; p-chart hand-computed fixtures (p̄=0.5 n=10
+// & n=100 OOC, p̄=0, p̄=1, single group, clamping, zero-n drop, all-zero-n,
+// low-n suppression); reviewer KPI collapse/rates/turnaround/referral folding,
+// reviewer & port p-charts, null-reviewer skip, quota on/off, empty table.
+```
+
+**File:** `src/data/reporting/executive/model/reportModel.ts`
+
+**Before:**
+```ts
+import { buildAggregates } from "./aggregates";
+import type { Aggregates } from "./aggregates";
+import { band } from "./dataSufficiency";
+// … ReportModel had no reviewerKpis field; buildReportModel returned { …, factTable, rows, kpis }
+```
+
+**After:**
+```ts
+import { buildReviewerKpis } from "./reviewerKpis";
+import type { ReviewerKpiModel, ReviewerReferralInput } from "./reviewerKpis";
+// ReportModel gains `reviewerKpis: ReviewerKpiModel`. buildReportModel folds
+// input.employeeFiles[].referralRequests into a ReviewerReferralInput
+// (requestCountByReviewer + referredImageIds) and computes buildReviewerKpis(factTable, referral).
+```
+
+**File:** `src/data/labels/labelsStore.ts`
+
+**Before:**
+```ts
+  notif_mgr_audience_none:     "لا يوجد موظفون أو مشرفون نشطون في قائمة الاستهداف.",
+} as const;
+```
+
+**After:**
+```ts
+  notif_mgr_audience_none:     "لا يوجد موظفون أو مشرفون نشطون في قائمة الاستهداف.",
+  // ── Per-reviewer KPI upgrade + SPC p-charts (Tier-2 / research gap #18) ──
+  // rk_section_title … rk_status_in_control  (37 new Arabic label keys:
+  //   section header/desc, reviewer/port toggle, empty state, 9 table headers,
+  //   p-chart titles/desc/empty, axis, 5 legend items, 6 tooltip terms, 3 statuses)
+} as const;
+```
+
+**File:** `src/components/Sidebar/Tabs/Reports/ReviewerKpiPanel.tsx`
+
+**Before:**
+```tsx
+// (new file)
+```
+
+**After:**
+```tsx
+// recharts ComposedChart p-chart: recessive gray range-Area band (stepAfter) +
+// dashed UCL/LCL step-lines + dashed ReferenceLine centre (p̄) + Scatter data
+// marks. Status marks are colour + a redundant non-colour cue: in-control =
+// filled sky dot; out-of-control = coral dot + reserved ring; low-n = HOLLOW
+// muted dot. Arabic tooltip (Latin digits), custom legend, reviewer/port toggle,
+// per-reviewer KPI table, Arabic empty state. RTL: dir="ltr" wrapper + XAxis
+// reversed + right-oriented YAxis. Palette validated CVD ΔE 73.4 (≥12 target).
+```
+
+**File:** `src/components/Sidebar/Tabs/Reports/ReviewerKpiPanel.css`
+
+**Before:**
+```css
+/* (new file) */
+```
+
+**After:**
+```css
+/* Panel/table/toggle/legend/tooltip styling via app tokens (--c-*), no naked hex. */
+```
+
+**File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
+
+**Before:**
+```tsx
+import { rankedBar, gauge, donut, heatmap } from "../../../../data/reporting/executive/ui/charts";
+// … renderDashboard rendered the error-type heatmap directly after the reviewer overview
+```
+
+**After:**
+```tsx
+import ReviewerKpiPanel from "./ReviewerKpiPanel";
+// renderDashboard defines `const reviewerNames = buildDisplayNameMap();` and renders
+// <ReviewerKpiPanel model={model.reviewerKpis} resolveName={u => reviewerNames[u] ?? u} />
+// between the reviewer overview and the error-type heatmap.
+```
+
+**File:** `CLAUDE.md`
+
+**Before:**
+```md
+- `recharts` is a declared dependency but currently has **no imports in `src/`** …
+```
+
+**After:**
+```md
+- `recharts` is now used by the **KPI dashboard** … renders the Tier-2 per-reviewer
+  / per-port SPC p-charts … RTL via dir="ltr" wrapper + XAxis reversed + right YAxis.
+```
+
 ## v49 — 2026-07-14 — B1 four-eyes gate made reload-safe (persistent marker)
 
 Wave B gated only samples drawn in the current session (in-memory `sampleNeedsApproval` flag), so drawing a sample and reloading the tab made it look "legacy" and bypassed the four-eyes gate. Every new-era draw carries the A2 `samplingAlgorithmVersion` stamp on disk, which is the persistent discriminator: stamped + unapproved ⇒ approval required, regardless of session. Legacy samples (no stamp) still pass.

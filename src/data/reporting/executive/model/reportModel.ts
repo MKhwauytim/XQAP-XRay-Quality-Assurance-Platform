@@ -19,6 +19,8 @@ import {
 import type { DecisionRecord, ImageResultComparison } from "./decisionFactTable";
 import { buildAggregates } from "./aggregates";
 import type { Aggregates } from "./aggregates";
+import { buildReviewerKpis } from "./reviewerKpis";
+import type { ReviewerKpiModel, ReviewerReferralInput } from "./reviewerKpis";
 import { band } from "./dataSufficiency";
 import type { DataSufficiencyBand } from "./dataSufficiency";
 
@@ -109,6 +111,9 @@ export type ReportModel = {
     reviewerAgreement: Aggregates["reviewerAgreement"];
     crossTeamMatrix: Aggregates["crossTeamMatrix"];
   };
+  /** Per-reviewer KPI upgrade (Tier-2): workload, throughput, turnaround, referral
+   *  rate + SPC p-charts (suspicion-or-referral rate per reviewer / per port). */
+  reviewerKpis: ReviewerKpiModel;
   /** Raw analytical primitives, exposed for renderers/workbook that need detail. */
   factTable: DecisionRecord[];
   rows: ExecutiveReportRow[];
@@ -193,6 +198,20 @@ export function buildReportModel(
 
   const evaluableDecisionRecords = factTable.filter((r) => r.decisionEvaluable).length;
 
+  // Reviewer KPIs (Tier-2): fold the month's referral requests (from the answer
+  // files) into a storage-agnostic signal, then compute over the fact table.
+  const referral: ReviewerReferralInput = { requestCountByReviewer: new Map(), referredImageIds: new Set() };
+  for (const file of input.employeeFiles) {
+    for (const req of file.referralRequests ?? []) {
+      referral.requestCountByReviewer.set(
+        req.fromEmployee,
+        (referral.requestCountByReviewer.get(req.fromEmployee) ?? 0) + 1
+      );
+      for (const id of req.xrayImageIds) referral.referredImageIds.add(id);
+    }
+  }
+  const reviewerKpis = buildReviewerKpis(factTable, referral);
+
   const dist = input.distribution;
 
   return {
@@ -272,6 +291,7 @@ export function buildReportModel(
       reviewerAgreement: aggregates.reviewerAgreement,
       crossTeamMatrix: aggregates.crossTeamMatrix,
     },
+    reviewerKpis,
     factTable,
     rows,
     kpis,

@@ -21,6 +21,7 @@ import { useLabels } from "../../../../data/labels/useLabels";
 import { buildReportModel } from "../../../../data/reporting/executive/model/reportModel";
 import type { ReportModel } from "../../../../data/reporting/executive/model/reportModel";
 import { rankedBar, gauge, donut, heatmap } from "../../../../data/reporting/executive/ui/charts";
+import ReviewerKpiPanel from "./ReviewerKpiPanel";
 import { DEFAULT_EXEC_CONFIG } from "../../../../data/reporting/executiveReportTypes";
 import type { ExecutiveReportInput } from "../../../../data/reporting/executiveReportTypes";
 import { getManagedLoginUsers } from "../../../../auth/userManagement";
@@ -521,6 +522,7 @@ function ReportsContent() {
 
     const s = model.summary;
     const dq = model.dataQuality;
+    const reviewerNames = buildDisplayNameMap();
     const headlineNote = (band: string) =>
       band === "none" || band === "insufficient" ? INSUFFICIENT_NOTE : undefined;
 
@@ -765,6 +767,12 @@ function ReportsContent() {
             </table>
           </div>
         </section>
+
+        {/* Per-reviewer KPIs + SPC p-charts (Tier-2 / research gap #18) */}
+        <ReviewerKpiPanel
+          model={model.reviewerKpis}
+          resolveName={(username) => reviewerNames[username] ?? username}
+        />
 
         {/* Error-type mix by port (heatmap) */}
         {model.errorAnalysis.byPort.length > 0 && (
