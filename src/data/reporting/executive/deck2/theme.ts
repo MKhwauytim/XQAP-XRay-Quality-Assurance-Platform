@@ -253,6 +253,18 @@ export const DECK_V2_CSS = `
    <tr>s (real height + borders) with muted ink — the grid reads as deliberate. */
 .v2-stage-port-card .deck-table tr.v2-ghost td{color:rgba(255,255,255,.16);}
 body.theme-light .v2-stage-port-card .deck-table tr.v2-ghost td{color:rgba(10,45,74,.22);}
+/* Totals row (الإجمالي): a distinct summary band tinted with the card's own
+   stage tone, so it reads as a conclusion rather than a sixth data row.
+   color-mix is safe — this app is Chromium-only (File System Access API). */
+.v2-stage-port-card .deck-table tfoot td{
+  font-weight:900;color:#fff;border-bottom:0;
+  border-top:1.5px solid rgba(255,255,255,.25);background:rgba(255,255,255,.07);
+}
+.v2-stage-port-card.gold  .deck-table tfoot td{background:color-mix(in srgb, var(--gold) 16%, transparent);border-top-color:color-mix(in srgb, var(--gold) 55%, transparent);}
+.v2-stage-port-card.blue  .deck-table tfoot td{background:color-mix(in srgb, var(--blue) 16%, transparent);border-top-color:color-mix(in srgb, var(--blue) 55%, transparent);}
+.v2-stage-port-card.green .deck-table tfoot td{background:color-mix(in srgb, var(--green) 16%, transparent);border-top-color:color-mix(in srgb, var(--green) 55%, transparent);}
+.v2-stage-port-card.coral .deck-table tfoot td{background:color-mix(in srgb, var(--coral) 16%, transparent);border-top-color:color-mix(in srgb, var(--coral) 55%, transparent);}
+body.theme-light .v2-stage-port-card .deck-table tfoot td{color:#0a2d4a;}
 /* The sample page's "{sampleSize} / {population}" figure in the card header —
    dir="ltr" on this span (set in slides.ts) prevents the same bidi-reversal
    bug the variant-switcher counter had (EDIT_LOG v40.7: "1 / 4" rendered as

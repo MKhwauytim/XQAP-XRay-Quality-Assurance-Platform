@@ -4,6 +4,28 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v51.3 — 2026-07-14 — deck2 stage×port cards: tone-tinted الإجمالي totals row
+
+Owner request. The stage-port cards' totals row had no styling of its own and blended in with the data rows. It is now a distinct summary band tinted with the card's own stage tone (gold/blue/green/coral at 16% alpha, 55% top border, weight 900), with dark ink under the light theme. `color-mix` is safe — Chromium-only app.
+
+**File:** `src/data/reporting/executive/deck2/theme.ts`
+
+**Before:**
+```css
+(no .v2-stage-port-card tfoot styling)
+```
+
+**After:**
+```css
+.v2-stage-port-card .deck-table tfoot td{
+  font-weight:900;color:#fff;border-bottom:0;
+  border-top:1.5px solid rgba(255,255,255,.25);background:rgba(255,255,255,.07);
+}
+.v2-stage-port-card.gold  .deck-table tfoot td{background:color-mix(in srgb, var(--gold) 16%, transparent);border-top-color:color-mix(in srgb, var(--gold) 55%, transparent);}
+/* + .blue / .green / .coral equivalents */
+body.theme-light .v2-stage-port-card .deck-table tfoot td{color:#0a2d4a;}
+```
+
 ## v51.2 — 2026-07-14 — deck2 stage×port cards: fixed 5-row geometry (ghost rows)
 
 Owner-reported inconsistency: stages with fewer than 5 ports (real months concentrate levels 2/4 in one or two ports) left a large blank void between the last data row and the pinned totals row, while full cards looked dense. Every card now renders exactly `STAGE_CARD_TOP_N` body rows — short stages are padded with muted "ghost" rows (ordinary `<tr>`s, real height and borders) so all four cards share identical table geometry and the totals row sits at the same height everywhere. Verified in the preview: tfoot offset 180px in all cards on both stage-port slides.
