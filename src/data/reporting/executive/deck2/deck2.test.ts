@@ -226,26 +226,27 @@ describe("stage×port grid slides", () => {
   });
 });
 
-describe("visual libraries wave — provenance QR + embedded Arabic font", () => {
-  // A sentinel SVG so the assertion keys on the exact spliced markup, not on the
-  // (always-present) `.v2-prov-qr` CSS selector text in the theme block.
-  const FAKE_QR = '<svg data-fake-qr="1" viewBox="0 0 10 10"></svg>';
-
-  it("splices the provenance QR into the closing slide when revisions exist", () => {
-    const withRev = {
-      ...input([popRow()]),
-      sourceRevisions: { "population.final.json": 7 },
-    };
-    const html = buildExecutiveDeckV2(withRev, {}, { provenanceQrSvg: FAKE_QR });
-    expect(html).toContain('<div class="v2-prov-qr">');
-    expect(html).toContain('data-fake-qr="1"');
+describe("closing slide — data-source attribution + embedded Arabic font", () => {
+  it("shows the risk-agency base source with the row count, and BI as absent when never provided", () => {
+    // Default popRow has biEnrichmentStatus "BI Not Provided" and biMatched false.
+    const html = buildExecutiveDeckV2(input([popRow(), popRow({ xrayImageId: "XR-2" })]));
+    expect(html).toContain("بيانات وكالة المخاطر");
+    expect(html).toContain("المصدر الأساسي");
+    expect(html).toContain("بيانات ذكاء الأعمال");
+    expect(html).toContain("غير مُقدَّم هذا الشهر");
+    expect(html).toContain('<div class="v2-src-card off"');
   });
 
-  it("omits the QR and keeps the graceful empty state when no revisions are supplied", () => {
-    const html = buildExecutiveDeckV2(input([popRow()]), {}, { provenanceQrSvg: FAKE_QR });
-    expect(html).toContain('<div class="v2-prov-empty"');
-    expect(html).not.toContain('data-fake-qr="1"');
-    expect(html).not.toContain('<div class="v2-prov-qr">');
+  it("shows BI as provided with the enriched-row count when the processor matched rows", () => {
+    const html = buildExecutiveDeckV2(
+      input([
+        popRow({ biEnrichmentStatus: "BI Matched", biMatched: true }),
+        popRow({ xrayImageId: "XR-2" }),
+      ]),
+    );
+    expect(html).toContain('<div class="v2-src-card blue"');
+    expect(html).toContain("أثرى 1 حالة بالمطابقة");
+    expect(html).not.toContain("غير مُقدَّم هذا الشهر");
   });
 
   it("embeds the IBM Plex Sans Arabic @font-face (base64 woff2) in the report HTML", () => {

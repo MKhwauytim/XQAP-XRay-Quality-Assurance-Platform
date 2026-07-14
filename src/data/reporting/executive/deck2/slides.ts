@@ -1545,7 +1545,6 @@ export function closingSlide(
   num: number,
   total: number,
   variantPreview: boolean,
-  provenanceQrSvg?: string,
 ): string {
   const entries = sourceRevisionEntries(sourceRevisions);
   const provenance =
@@ -1557,13 +1556,20 @@ export function closingSlide(
           )
           .join("")}</div>`
       : `<div class="v2-prov-empty">لم تُسجَّل مراجعات لملفات المصدر مع هذا التقرير.</div>`;
-  // Provenance QR — only when there are revisions to trace AND a prebuilt QR was
-  // supplied (the QR is generated async before the sync build; see
-  // openExecutiveDeckV2WithQr). White card + dark modules for scanner contrast.
-  const qrBlock =
-    entries.length > 0 && provenanceQrSvg
-      ? `<div class="v2-prov-qr"><div class="v2-prov-qr-card" aria-hidden="true">${provenanceQrSvg}</div><span class="v2-prov-qr-cap">امسح للتحقّق من مصدر البيانات</span></div>`
-      : "";
+  // Source attribution (owner request): which upload sources fed this month —
+  // the risk-agency base file (always, every row originates from it) and the
+  // optional BI supporting file, detected from the processor's row flags.
+  const src = model.dataSources;
+  const sourcesBlock = `<div class="v2-src-grid">
+    <div class="v2-src-card gold">
+      <div class="v2-src-head">${badgeIcon("layers", 15)}<b>بيانات وكالة المخاطر</b><span class="v2-src-tag">المصدر الأساسي</span></div>
+      <p>${fmtNum(src.riskRowCount)} حالة مسجّلة هذا الشهر</p>
+    </div>
+    <div class="v2-src-card ${src.biProvided ? "blue" : "off"}">
+      <div class="v2-src-head">${badgeIcon("scan", 15)}<b>بيانات ذكاء الأعمال</b><span class="v2-src-tag">مصدر داعم</span></div>
+      <p>${src.biProvided ? `مُقدَّم — أثرى ${fmtNum(src.biMatchedCount)} حالة بالمطابقة` : "غير مُقدَّم هذا الشهر"}</p>
+    </div>
+  </div>`;
   const body = `<div class="v2-closing">
       <div class="v2-closing-main">
         <div class="v2-closing-icon">${badgeIcon("document", 26)}</div>
@@ -1571,8 +1577,10 @@ export function closingSlide(
         <div class="v2-sep-rule"></div>
         <p>يربط هذا التقرير بنسخة البيانات المحدَّدة وقت التوليد؛ رقم المراجعة لكل ملف مصدر يضمن إمكانية التتبّع والمراجعة.</p>
         <div class="v2-prov-block">
-          <div class="v2-prov-title"><span class="v2-prov-title-icon">${icon("layers", 14)}</span>مراجعات ملفات المصدر</div>
-          <div class="v2-prov-body">${provenance}${qrBlock}</div>
+          <div class="v2-prov-title"><span class="v2-prov-title-icon">${icon("layers", 14)}</span>مصادر البيانات المُدخلة</div>
+          ${sourcesBlock}
+          <div class="v2-prov-title"><span class="v2-prov-title-icon">${icon("document", 14)}</span>مراجعات ملفات المصدر</div>
+          <div class="v2-prov-body">${provenance}</div>
         </div>
       </div>
       <div class="v2-closing-side">
@@ -1611,7 +1619,6 @@ export function buildDeckV2Slides(
   variantPreview = false,
   sourceRevisions?: SourceRevisions,
   seedBase = "",
-  provenanceQrSvg?: string,
 ): string {
   const glossaryBuilders = glossarySlideBuilders(variantPreview); // 1..N pages, paginated by term count
 
@@ -1752,6 +1759,6 @@ export function buildDeckV2Slides(
     slides.push(build(num, total));
     num += 1;
   }
-  slides.push(closingSlide(model, sourceRevisions, closingNum, total, variantPreview, provenanceQrSvg));
+  slides.push(closingSlide(model, sourceRevisions, closingNum, total, variantPreview));
   return slides.join("\n");
 }

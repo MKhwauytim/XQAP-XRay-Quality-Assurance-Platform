@@ -1,5 +1,5 @@
 // Ambient module declarations for vendored visual libraries that ship no types.
-// (qrcode, geopattern, d3-shape, d3-scale all have @types packages; only
+// (geopattern, d3-shape, d3-scale have @types packages; only
 // trianglify's browser bundle needs a hand-written shim.)
 
 declare module "trianglify/dist/trianglify.bundle.js" {

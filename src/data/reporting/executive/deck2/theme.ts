@@ -852,14 +852,33 @@ body.theme-light .slide.v2-cover .v2-org-logo{filter:brightness(0) invert(1);}
 .v2-sep-slide .v2-sep-pattern svg{width:100%;height:100%;display:block;}
 body.theme-light .v2-sep-slide .v2-sep-pattern{opacity:.05;}
 
-/* Closing provenance body — revisions list beside the QR card. */
+/* Closing provenance body — revisions list. */
 .v2-prov-body{display:flex;gap:18px;align-items:stretch;}
 .v2-prov-body .v2-prov-list,.v2-prov-body .v2-prov-empty{flex:1 1 auto;min-width:0;}
-.v2-prov-qr{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;flex-shrink:0;}
-.v2-prov-qr-card{width:96px;height:96px;padding:7px;border-radius:12px;background:#fff;box-shadow:0 4px 14px rgba(0,0,0,.25);-webkit-print-color-adjust:exact;print-color-adjust:exact;}
-.v2-prov-qr-card svg{width:100%;height:100%;display:block;}
-.v2-prov-qr-cap{font-size:0.62rem;font-weight:700;color:var(--slate);text-align:center;max-width:104px;line-height:1.3;}
-body.theme-light .v2-prov-qr-cap{color:#607386;}
+
+/* Data-source attribution cards (closing slide): which upload sources fed the
+   month — risk-agency base file (gold, always) and the optional BI supporting
+   file (blue when provided, muted "off" when absent). */
+.v2-src-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:10px 0 14px;}
+.v2-src-card{
+  border:1px solid rgba(255,255,255,.14);border-radius:14px;padding:12px 14px;
+  background:linear-gradient(180deg,rgba(14,58,95,.55),rgba(7,39,67,.75));
+}
+.v2-src-head{display:flex;align-items:center;gap:9px;margin-bottom:6px;}
+.v2-src-head b{font-size:0.82rem;font-weight:800;color:#fff;}
+.v2-src-tag{
+  margin-inline-start:auto;flex-shrink:0;padding:2px 10px;border-radius:999px;
+  font-size:0.58rem;font-weight:800;color:var(--gold);
+  border:1px solid rgba(244,180,0,.4);background:rgba(244,180,0,.08);
+}
+.v2-src-card.blue .v2-src-tag{color:var(--blue);border-color:rgba(107,169,248,.4);background:rgba(107,169,248,.08);}
+.v2-src-card.off .v2-src-tag{color:var(--slate);border-color:rgba(138,160,181,.35);background:rgba(138,160,181,.08);}
+.v2-src-card p{margin:0;font-size:0.74rem;font-weight:600;color:rgba(255,255,255,.85);}
+.v2-src-card.off{opacity:.72;}
+.v2-src-card.off p{color:var(--slate);}
+body.theme-light .v2-src-card{background:#fff;border-color:#dfe6ee;}
+body.theme-light .v2-src-head b{color:#0a2d4a;}
+body.theme-light .v2-src-card p{color:#33506a;}
 
 /* Stat-tile texture — one hand-copied hero-patterns "hexagons" motif baked at
    <=.05 alpha, layered above the tile gradient as texture (not noise). */

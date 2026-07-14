@@ -114,6 +114,14 @@ export type ReportModel = {
   /** Per-reviewer KPI upgrade (Tier-2): workload, throughput, turnaround, referral
    *  rate + SPC p-charts (suspicion-or-referral rate per reviewer / per port). */
   reviewerKpis: ReviewerKpiModel;
+  /** Which upload sources fed this month (from data processing): the risk-agency
+   *  file is the required base (every row comes from it); BI is the optional
+   *  supporting file, detected from the rows' enrichment flags. */
+  dataSources: {
+    riskRowCount: number;
+    biProvided: boolean;
+    biMatchedCount: number;
+  };
   /** Raw analytical primitives, exposed for renderers/workbook that need detail. */
   factTable: DecisionRecord[];
   rows: ExecutiveReportRow[];
@@ -212,6 +220,19 @@ export function buildReportModel(
   }
   const reviewerKpis = buildReviewerKpis(factTable, referral);
 
+  // Source attribution (owner request 2026-07-14): risk-agency data is the
+  // required base file — every population row originates from it. BI is the
+  // optional supporting file; its presence is detected from the enrichment
+  // flags the processor stamped on the rows.
+  const biMatchedCount = input.populationRows.filter((r) => r.biMatched).length;
+  const dataSources = {
+    riskRowCount: input.populationRows.length,
+    biProvided:
+      biMatchedCount > 0 ||
+      input.populationRows.some((r) => r.biEnrichmentStatus !== "BI Not Provided"),
+    biMatchedCount,
+  };
+
   const dist = input.distribution;
 
   return {
@@ -292,6 +313,7 @@ export function buildReportModel(
       crossTeamMatrix: aggregates.crossTeamMatrix,
     },
     reviewerKpis,
+    dataSources,
     factTable,
     rows,
     kpis,

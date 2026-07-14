@@ -13,7 +13,6 @@ import { icon } from "../ui/icons";
 import { openOrDownload } from "../../htmlReport";
 import { SOURCE_REVISIONS_CSS, sourceRevisionsFooterHtml } from "../../sourceRevisions";
 import { ARABIC_FONT_FACE_CSS } from "../../../../branding/fonts";
-import { buildProvenanceString, generateProvenanceQrSvg } from "../ui/provenanceQr";
 import type { ExecutiveReportInput } from "../../executiveReportTypes";
 
 const ARABIC_MONTHS = ["يناير","فبراير","مارس","أبريل","مايو","يونيو","يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"];
@@ -192,7 +191,7 @@ ${footerNote}
 export function buildExecutiveDeckV2(
   input: ExecutiveReportInput,
   employeeDisplayNames: Record<string, string> = {},
-  opts?: { variantPreview?: boolean; provenanceQrSvg?: string },
+  opts?: { variantPreview?: boolean },
 ): string {
   const variantPreview = opts?.variantPreview ?? false;
   const model = buildReportModel(input, employeeDisplayNames);
@@ -202,7 +201,6 @@ export function buildExecutiveDeckV2(
     variantPreview,
     input.sourceRevisions,
     input.monthFolderName,
-    opts?.provenanceQrSvg,
   );
   return buildDeckV2Html(
     slides,
@@ -222,21 +220,3 @@ export function openExecutiveDeckV2(
   );
 }
 
-/**
- * Async deck open that first generates the provenance QR (qrcode's SVG API is
- * async) then builds + opens the deck synchronously with the prebuilt QR spliced
- * into the closing slide. Wire live call sites to THIS wrapper; the sync
- * `openExecutiveDeckV2` stays for backward compatibility (renders without a QR).
- */
-export async function openExecutiveDeckV2WithQr(
-  input: ExecutiveReportInput,
-  employeeDisplayNames: Record<string, string> = {},
-): Promise<void> {
-  const provenanceQrSvg = await generateProvenanceQrSvg(
-    buildProvenanceString(input.monthFolderName, input.sourceRevisions, new Date()),
-  );
-  openOrDownload(
-    buildExecutiveDeckV2(input, employeeDisplayNames, { provenanceQrSvg }),
-    `العرض_التنفيذي_${input.monthFolderName}.html`,
-  );
-}

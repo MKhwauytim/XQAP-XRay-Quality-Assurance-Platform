@@ -4,6 +4,71 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v54 — 2026-07-14 — Closing slide: data-source attribution replaces the provenance QR
+
+Owner request ("no qr code" + "say if the data is from source 1 بيانات ذكاء الأعمال or source 2 بيانات وكالة المخاطر based on the data entered in data processing"). The QR feature is fully removed (helper module + tests, async `openExecutiveDeckV2WithQr` wrapper, `provenanceQrSvg` params, QR CSS, and the `qrcode` dependency — Reports-tab call sites reverted to the sync `openExecutiveDeckV2`). In its place, the closing slide's provenance block now opens with a "مصادر البيانات المُدخلة" card pair derived from what data processing actually ingested:
+
+- **بيانات وكالة المخاطر** (gold, المصدر الأساسي) — always present; shows the month's row count (every population row originates from the risk file).
+- **بيانات ذكاء الأعمال** (مصدر داعم) — blue "مُقدَّم — أثرى N حالة بالمطابقة" when the processor matched BI rows, muted "غير مُقدَّم هذا الشهر" otherwise; detected from the rows' `biMatched`/`biEnrichmentStatus` flags.
+
+**File:** `src/data/reporting/executive/model/reportModel.ts`
+
+**Before:**
+```ts
+  reviewerKpis: ReviewerKpiModel;
+  factTable: DecisionRecord[];
+```
+
+**After:**
+```ts
+  reviewerKpis: ReviewerKpiModel;
+  dataSources: { riskRowCount: number; biProvided: boolean; biMatchedCount: number };
+  factTable: DecisionRecord[];
+// computed in buildReportModel from input.populationRows (biMatched / biEnrichmentStatus)
+```
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**Before:**
+```ts
+closingSlide(model, sourceRevisions, num, total, variantPreview, provenanceQrSvg?)
+// qrBlock spliced beside the revisions list
+```
+
+**After:**
+```ts
+closingSlide(model, sourceRevisions, num, total, variantPreview)
+// sourcesBlock (v2-src-grid: gold base card + blue/off BI card) above the revisions list
+```
+
+**File:** `src/data/reporting/executive/deck2/index.ts`
+
+**Before:**
+```ts
+opts?: { variantPreview?: boolean; provenanceQrSvg?: string }
+export async function openExecutiveDeckV2WithQr(...) { ... }
+```
+
+**After:**
+```ts
+opts?: { variantPreview?: boolean }
+// (wrapper deleted; Reports/index.tsx call sites back to openExecutiveDeckV2)
+```
+
+**File:** `src/data/reporting/executive/deck2/theme.ts`
+
+**Before:**
+```css
+.v2-prov-qr{...} .v2-prov-qr-card{...} .v2-prov-qr-cap{...}
+```
+
+**After:**
+```css
+.v2-src-grid{...} .v2-src-card{... gold default / .blue provided / .off absent ...} /* + light theme */
+```
+
+**File:** `src/data/reporting/executive/deck2/deck2.test.ts` — QR splice tests replaced by two data-source tests (BI absent → "غير مُقدَّم هذا الشهر" + off card; BI matched → blue card + enriched count). `src/data/reporting/executive/ui/provenanceQr.ts` and its test deleted; `qrcode`/`@types/qrcode` uninstalled.
+
 ## v53.6 — 2026-07-14 — Glossary slide: two semantic category bands
 
 Owner request ("organize this page with categories and better design"). The 8-term flat 4×2 grid with per-card rainbow accents became two labeled category bands whose color carries meaning: gold = مصطلحات المجتمع والعيّنة (population, risk levels, sample, coverage), coral = مصطلحات القرارات والجودة (suspicion, missed suspicion, reference standard, data sufficiency) — the same order the deck's sections flow. Each band: tone-coded chip (icon + label) + gradient hairline + its four cards inheriting the band tone. Cards tightened (38px icon badges, smaller type) to fit the two header rows; verified zero clipping in preview.
