@@ -14,9 +14,65 @@ import type { ReportModel } from "../model/reportModel";
 import type { StageProfile } from "../../executiveReportTypes";
 import { esc, fmtNum, fmtPct } from "../primitives";
 import { icon } from "../ui/icons";
+import { rankedBar, funnel } from "../ui/charts";
 import { isRankable } from "../model/dataSufficiency";
 import { formatStageLabel } from "../../../population/stageHelpers";
 import { ORGANIZATION_PATH, ZATCA_LOGO_URL } from "../../../../branding/organization";
+import type { SourceRevisions } from "../../sourceRevisions";
+import { sourceRevisionEntries } from "../../sourceRevisions";
+
+// ── In-cell visuals (pure background — never change row height/padding/font) ──
+type CellTone = "gold" | "blue" | "green" | "coral" | "neutral";
+
+/**
+ * Wrap a numeric cell's inner HTML in a <td> that paints a tone-tinted
+ * proportional bar behind the text, growing from the inline-start edge (right,
+ * in this RTL deck). The bar is a CSS background only (`.v2-bar-cell` in
+ * theme.ts reads `--w`), so it adds ZERO layout height — the fragile
+ * pixel-budget table machinery (METRICS_*, TABLE_BUDGET_PX, ghost/blank rows)
+ * stays exactly valid. `pct` is the value's share of the column max, 0–100.
+ */
+function barCell(inner: string, pct: number, tone: CellTone = "neutral"): string {
+  const w = Math.max(0, Math.min(100, Number.isFinite(pct) ? pct : 0));
+  return `<td class="v2-bar-cell ${tone}" style="--w:${w.toFixed(1)}%">${inner}</td>`;
+}
+
+/**
+ * A percentage cell that doubles as a threshold-scored bar: the fill width is
+ * the percentage itself, the tone is green at/above `target` and warning-amber
+ * below it, and a below-target cell also carries an alert glyph (icons.ts) so
+ * the status is NEVER conveyed by color alone. Null (no data) renders the muted
+ * "—" like `pctCell`, with no bar.
+ */
+function threshCell(v: number | null, target: number): string {
+  if (v === null) return `<td class="v2-bar-cell neutral"><span class="insuff">—</span></td>`;
+  const val = Math.max(0, Math.min(100, v));
+  const below = val < target;
+  const tone = below ? "warn" : "ok";
+  const flag = below ? `<span class="v2-cell-flag" aria-hidden="true">${icon("alert", 10)}</span>` : "";
+  return `<td class="v2-bar-cell ${tone}" style="--w:${val.toFixed(1)}%">${flag}${fmtPct(v)}</td>`;
+}
+
+/** Largest value in a list, floored at 1 so a proportional bar never divides by
+ *  zero (an all-zero column simply yields empty bars). */
+function maxOf(values: number[]): number {
+  return Math.max(1, ...values.filter((v) => Number.isFinite(v)));
+}
+
+/** Display thresholds for the section-2 percent tables. Mirror the report
+ *  config defaults (`DEFAULT_EXEC_CONFIG.accuracyTarget` = 90); the ReportModel
+ *  doesn't carry config, so these are named constants here rather than magic
+ *  numbers. Below-target cells get the warning tone + alert glyph in threshCell. */
+const ACCURACY_TARGET = 90;
+const MARKING_TARGET = 90;
+
+/** A distribution percent cell (quality عالي/متوسط/منخفض): a tone-colored bar of
+ *  fixed polarity (green = good share, coral = risk share), NOT threshold-scored.
+ *  Null renders the muted "—". */
+function qualCell(v: number | null, tone: CellTone): string {
+  if (v === null) return `<td class="v2-bar-cell neutral"><span class="insuff">—</span></td>`;
+  return barCell(fmtPct(v), Math.max(0, Math.min(100, v)), tone);
+}
 
 const ARABIC_MONTHS = ["يناير","فبراير","مارس","أبريل","مايو","يونيو","يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"];
 
@@ -105,9 +161,11 @@ function slideControls(slideId: string, variantPreview: boolean): string {
 export const NAV_SECTIONS = {
   cover: "الغلاف",
   toc: "المحتويات",
+  summary: "الشهر في أرقام",
   glossary: "المعجم",
   section1: "القسم 1 — مجتمع الفحص",
   section2: "القسم 2 — نتائج فحص الجودة",
+  closing: "مصدر البيانات",
 } as const;
 export type NavSectionKey = keyof typeof NAV_SECTIONS;
 
@@ -201,17 +259,36 @@ function v2Slide(opts: {
 }
 
 // ── Page 1 — الغلاف ─────────────────────────────────────────────────────────
+/** Low-contrast geometric band (SVG pattern) used behind the cover + section
+ *  covers — thin gold diagonals + a hairline grid, brand-amplifying, recessive.
+ *  Pure decoration (aria-hidden); no data, so no esc() needed. */
+function coverBand(): string {
+  return `<svg class="v2-cover-band" viewBox="0 0 1200 400" preserveAspectRatio="none" aria-hidden="true">
+    <defs>
+      <pattern id="v2band-diag" width="26" height="26" patternUnits="userSpaceOnUse" patternTransform="rotate(-18)">
+        <line x1="0" y1="0" x2="0" y2="26" stroke="var(--gold)" stroke-width="1" stroke-opacity="0.06"/>
+      </pattern>
+      <linearGradient id="v2band-fade" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="var(--gold)" stop-opacity="0"/>
+        <stop offset="1" stop-color="var(--gold)" stop-opacity="0.10"/>
+      </linearGradient>
+    </defs>
+    <rect x="0" y="0" width="1200" height="400" fill="url(#v2band-diag)"/>
+    <rect x="0" y="250" width="1200" height="150" fill="url(#v2band-fade)"/>
+  </svg>`;
+}
+
 export function coverSlide(model: ReportModel, generatedAt: Date, variantPreview: boolean): string {
   const [, department, section] = ORGANIZATION_PATH;
   const meta = [
-    { label: "فترة الدراسة (عيّنة شهر)", value: model.summary.periodId, iconName: "layers" },
-    { label: "تاريخ إصدار التقرير", value: formatDate(generatedAt), iconName: "document" },
+    { label: "فترة الدراسة", value: model.summary.periodId, iconName: "layers" },
+    { label: "تاريخ الإصدار", value: formatDate(generatedAt), iconName: "document" },
     { label: "الإدارة", value: department, iconName: "users" },
     { label: "القسم", value: section, iconName: "shield" },
   ]
     .map(
       (m) => `<div class="v2-cover-meta-item">
-        <span class="v2-cover-meta-icon">${badgeIcon(m.iconName, 20)}</span>
+        <span class="v2-cover-meta-icon">${badgeIcon(m.iconName, 18)}</span>
         <span class="v2-cover-meta-text">
           <span class="v2-cover-meta-label">${esc(m.label)}</span>
           <span class="v2-cover-meta-value">${esc(m.value)}</span>
@@ -219,8 +296,7 @@ export function coverSlide(model: ReportModel, generatedAt: Date, variantPreview
       </div>`,
     )
     .join("");
-  // Org header block (per the reference mockups): logo + gold divider + the
-  // organizational hierarchy lines, top-start of the page.
+  // Org header block: logo + gold divider + the organizational hierarchy lines.
   const orgBlock = `<div class="v2-org">
       <img class="v2-org-logo" src="${ZATCA_LOGO_URL}" alt="هيئة الزكاة والضريبة والجمارك"/>
       <div class="v2-org-lines">
@@ -228,15 +304,26 @@ export function coverSlide(model: ReportModel, generatedAt: Date, variantPreview
         ${ORGANIZATION_PATH.map((line) => `<span>${esc(line)}</span>`).join("")}
       </div>
     </div>`;
-  const coverBody = `<div class="title-kicker">عرض تنفيذي</div>
-      <h1>تقرير ضمان جودة فحص الأشعة</h1>
-      <div class="title-rule"></div>
-      <div class="v2-cover-meta">${meta}</div>
-      <div class="title-classify"><span>${icon("shield", 14)}</span>داخلي — للاستخدام التنفيذي</div>`;
+  // Asymmetric hero: giant month lockup + title on the start side, stacked
+  // issue-metadata column on the end side, gold rule system between them.
+  const coverBody = `<div class="v2-cover-grid">
+      <div class="v2-cover-hero">
+        <div class="v2-cover-kicker"><span class="v2-cover-kicker-dot"></span>عرض تنفيذي · تقرير شهري</div>
+        <h1 class="v2-cover-title">تقرير ضمان جودة<br/>فحص الأشعة</h1>
+        <div class="v2-cover-rule"></div>
+        <div class="v2-cover-lockup">
+          <span class="v2-cover-lockup-label">فترة الدراسة (عيّنة شهر)</span>
+          <span class="v2-cover-lockup-period">${esc(model.summary.periodId)}</span>
+        </div>
+        <div class="v2-cover-badge"><span>${icon("shield", 13)}</span>داخلي — للاستخدام التنفيذي</div>
+      </div>
+      <div class="v2-cover-meta-col">${meta}</div>
+    </div>`;
   const body = renderVariants("slide-cover", [coverBody, coverBody, coverBody, coverBody], variantPreview);
-  return `<section class="slide v2 title-slide" id="slide-cover" data-title="الغلاف" data-section="cover" data-section-label="${esc(NAV_SECTIONS.cover)}">
+  return `<section class="slide v2 title-slide v2-cover" id="slide-cover" data-title="الغلاف" data-section="cover" data-section-label="${esc(NAV_SECTIONS.cover)}">
     ${slideControls("slide-cover", variantPreview)}
     <div class="slide-art" aria-hidden="true"></div>
+    ${coverBand()}
     ${orgBlock}
     <div class="slide-inner">
       ${body}
@@ -245,15 +332,30 @@ export function coverSlide(model: ReportModel, generatedAt: Date, variantPreview
 }
 
 // ── Page 2 — المحتويات ──────────────────────────────────────────────────────
-export type TocItem = { title: string; goal: string; range: string; iconName: string };
+export type TocItem = {
+  title: string;
+  goal: string;
+  range: string;
+  iconName: string;
+  tone: string;
+  figure: string;
+  figureLabel: string;
+};
 
 export function tocSlide(items: TocItem[], num: number, total: number, variantPreview: boolean): string {
-  const body = `<div class="deck-agenda">${items
+  const body = `<div class="v2-toc-grid">${items
     .map(
-      (it, i) => `<div class="deck-agenda-item">
-        <div class="deck-agenda-num">${pad(i + 1)}</div>
-        <div class="deck-agenda-body"><h4><span class="deck-agenda-icon">${icon(it.iconName, 15)}</span>${esc(it.title)}</h4><p>${esc(it.goal)}</p></div>
-        <div class="deck-agenda-range" dir="ltr">${esc(it.range)}</div>
+      (it, i) => `<div class="v2-toc-card ${esc(it.tone)}">
+        <div class="v2-toc-num">${pad(i + 1)}</div>
+        <div class="v2-toc-main">
+          <h4><span class="v2-toc-icon">${icon(it.iconName, 16)}</span>${esc(it.title)}</h4>
+          <p>${esc(it.goal)}</p>
+        </div>
+        <div class="v2-toc-side">
+          <div class="v2-toc-figure">${esc(it.figure)}</div>
+          <div class="v2-toc-figure-label">${esc(it.figureLabel)}</div>
+          <div class="v2-toc-range" dir="ltr">${esc(it.range)}</div>
+        </div>
       </div>`,
     )
     .join("")}</div>`;
@@ -263,7 +365,7 @@ export function tocSlide(items: TocItem[], num: number, total: number, variantPr
     eyebrow: "المحتويات",
     iconName: "layers",
     headline: "محتويات التقرير",
-    subhead: "أقسام التقرير والهدف من كل قسم.",
+    subhead: "أقسام التقرير والهدف من كل قسم، ونطاق صفحاته.",
     bodyVariants: [body, body, body, body],
     variantPreview,
     num,
@@ -272,22 +374,104 @@ export function tocSlide(items: TocItem[], num: number, total: number, variantPr
   });
 }
 
+// ── NEW — الشهر في أرقام (headline dashboard) ────────────────────────────────
+/** One dominant hero number (population) plus five stat tiles pulled straight
+ *  from the ReportModel. Each tile renders a graceful "—" empty state when its
+ *  metric lacks data (denominator-gated rates), never a misleading zero. No
+ *  prior-month I/O — the deck builders stay pure over one month's input. */
+export function monthInNumbersSlide(model: ReportModel, num: number, total: number, variantPreview: boolean): string {
+  const accuracy = model.summary.overallAccuracy;
+  const tiles: Array<{ tone: string; icon: string; value: string; label: string; sub: string }> = [
+    {
+      tone: "blue",
+      icon: "scan",
+      value: fmtNum(model.sample.total),
+      label: "حجم العيّنة",
+      sub: `تغطية ${fmtPct(model.sample.coverage)} من المجتمع`,
+    },
+    {
+      tone: "cyan",
+      icon: "check",
+      value: fmtNum(model.sample.studied),
+      label: "الحالات المدروسة",
+      sub: `إنجاز ${fmtPct(model.sample.completionRate)} من العيّنة`,
+    },
+    {
+      tone: "coral",
+      icon: "alert",
+      value: fmtPct(model.population.suspicionRate),
+      label: "نسبة الاشتباه",
+      sub: `${fmtNum(model.population.suspicious)} حالة اشتباه في المجتمع`,
+    },
+    {
+      tone: "purple",
+      icon: "flag",
+      value: fmtNum(model.errorAnalysis.totals.missedSuspicion + model.errorAnalysis.totals.falseSuspicion),
+      label: "حالات الاختلاف مع المراجع",
+      sub: "اشتباه فائت + اشتباه خاطئ",
+    },
+    {
+      tone: "green",
+      icon: "gauge",
+      value: accuracy === null ? "—" : fmtPct(accuracy),
+      label: "الدقة العامة",
+      sub: accuracy === null ? "بيانات غير كافية للتقييم" : "مطابقة قرارات الفحص للمراجع",
+    },
+  ];
+  const tilesHtml = tiles
+    .map(
+      (t) => `<div class="v2-num-tile ${t.tone}">
+        <span class="v2-num-tile-icon">${badgeIcon(t.icon, 18)}</span>
+        <div class="v2-num-tile-body">
+          <span class="v2-num-tile-value">${esc(t.value)}</span>
+          <span class="v2-num-tile-label">${esc(t.label)}</span>
+          <span class="v2-num-tile-sub">${esc(t.sub)}</span>
+        </div>
+      </div>`,
+    )
+    .join("");
+  const body = `<div class="v2-num-layout">
+      <div class="v2-num-hero">
+        <span class="v2-num-hero-label">إجمالي مجتمع الحالات</span>
+        <span class="v2-num-hero-value">${fmtNum(model.population.total)}</span>
+        <span class="v2-num-hero-unit">حالة فحص بالأشعة خلال ${esc(model.summary.periodId)}</span>
+        <div class="v2-num-hero-rule"></div>
+        <div class="v2-num-hero-split">
+          <span><b>${fmtNum(model.population.clean)}</b><small>سليمة</small></span>
+          <span><b>${fmtNum(model.population.suspicious)}</b><small>اشتباه</small></span>
+        </div>
+      </div>
+      <div class="v2-num-tiles">${tilesHtml}</div>
+    </div>`;
+  return v2Slide({
+    id: "slide-month-numbers",
+    title: "الشهر في أرقام",
+    eyebrow: "لمحة تنفيذية",
+    iconName: "chart",
+    headline: "الشهر في أرقام",
+    subhead: "أبرز مؤشرات الشهر في لوحة واحدة — من حجم المجتمع إلى دقة القرارات.",
+    bodyVariants: [body, body, body, body],
+    variantPreview,
+    num,
+    total,
+    section: "summary",
+  });
+}
+
 // ── Page 3 — المعجم ─────────────────────────────────────────────────────────
 type Tone = "gold" | "blue" | "green" | "coral" | "slate" | "purple" | "cyan";
 
-/** Starter glossary — terms, definitions, icon, and accent tone are content, edit freely here. */
+/** Essential glossary — the 8 terms an executive must share before reading the
+ *  numbers (trimmed from 12; term, definition, icon, and accent tone are content
+ *  and edit freely here). Definitions kept to ~two lines for the larger cards. */
 const GLOSSARY: Array<{ term: string; def: string; icon: string; tone: Tone }> = [
   { term: "مجتمع الفحص", def: "جميع حالات الفحص بالأشعة المسجّلة خلال الشهر بعد المعالجة واستبعاد السجلات غير الصالحة.", icon: "layers", tone: "gold" },
   { term: "العيّنة", def: "مجموعة جزئية تُسحب عشوائيًا بطريقة طبقية من المجتمع لتخضع للدراسة التفصيلية.", icon: "scan", tone: "blue" },
-  { term: "التغطية", def: "نسبة حجم العيّنة إلى حجم المجتمع.", icon: "gauge", tone: "green" },
-  { term: "سليمة", def: "قرار فحص لا يشير إلى وجود شبهة في الصورة.", icon: "check", tone: "green" },
-  { term: "اشتباه", def: "قرار فحص يشير إلى شبهة تستدعي التحقق.", icon: "alert", tone: "coral" },
-  { term: "مستويات المخاطر", def: "تصنيف الحالات وفق محرّك المخاطر إلى أربعة مستويات، من الأول إلى الرابع.", icon: "layers", tone: "purple" },
-  { term: "المستوى الأول / الثاني", def: "قرار المفتش الأول على الصورة، ثم مراجعة المفتش الثاني للقرار.", icon: "flag", tone: "blue" },
-  { term: "المراجع (المعيار)", def: "نتيجة خبير الجودة التي تُقاس عليها دقة قرارات الفحص.", icon: "shield", tone: "gold" },
+  { term: "التغطية", def: "نسبة حجم العيّنة إلى حجم المجتمع — مدى تمثيل العيّنة للمجتمع.", icon: "gauge", tone: "green" },
+  { term: "اشتباه", def: "قرار فحص يشير إلى شبهة تستدعي التحقق؛ ويقابله «سليمة» حين لا تظهر شبهة.", icon: "alert", tone: "coral" },
+  { term: "مستويات المخاطر", def: "تصنيف الحالات وفق محرّك المخاطر إلى أربعة مستويات، من الأول (منخفض) إلى الرابع (حرج).", icon: "layers", tone: "purple" },
+  { term: "المراجع (المعيار)", def: "نتيجة خبير الجودة التي تُقاس عليها دقة قرارات الفحص وتُعتمد مرجعًا.", icon: "shield", tone: "gold" },
   { term: "الاشتباه الفائت", def: "حالة قرّر الفحص أنها سليمة وأثبت المراجع أنها اشتباه — الخطر الأمني الأول.", icon: "alert", tone: "coral" },
-  { term: "الاشتباه الخاطئ", def: "حالة قرّر الفحص أنها اشتباه وأثبت المراجع أنها سليمة.", icon: "alert", tone: "slate" },
-  { term: "CertScan", def: "الحالات الموثّقة بشهادة مسح معتمدة ضمن بيانات الفحص.", icon: "shield", tone: "cyan" },
   { term: "كفاية البيانات", def: "حدّ أدنى من القرارات القابلة للتقييم قبل إصدار حكم أو ترتيب — ما دونه يُوصف ولا يُرتّب.", icon: "document", tone: "slate" },
 ];
 
@@ -302,8 +486,9 @@ function termCard(g: (typeof GLOSSARY)[number]): string {
   </div>`;
 }
 
-/** Terms per page — beyond this the glossary overflows to a continuation page. */
-const GLOSSARY_TERMS_PER_PAGE = 12;
+/** Terms per page — beyond this the glossary overflows to a continuation page.
+ *  8 essential terms now fit one page in a 4×2 grid of larger cards. */
+const GLOSSARY_TERMS_PER_PAGE = 8;
 
 /** Build one or more المعجم slides (paginated card grid, per the reference design). */
 export function glossarySlideBuilders(variantPreview: boolean): SlideBuilder[] {
@@ -332,34 +517,48 @@ export function glossarySlideBuilders(variantPreview: boolean): SlideBuilder[] {
   return builders;
 }
 
-// ── Section separator (page 4 pattern) ──────────────────────────────────────
-export function sectionSeparatorSlide(
-  sectionNo: number,
-  sectionKey: NavSectionKey,
-  iconName: string,
-  title: string,
-  blurb: string,
-  num: number,
-  total: number,
-  variantPreview: boolean,
-): string {
-  const sepBody = `<div class="v2-sep">
-      <div class="v2-sep-icon">${badgeIcon(iconName, 30)}</div>
-      <div class="v2-sep-num">${pad(sectionNo)}</div>
-      <h2>${esc(title)}</h2>
-      <div class="v2-sep-rule"></div>
-      <p>${esc(blurb)}</p>
+// ── Section separator — full-bleed color-blocked cover ───────────────────────
+export function sectionSeparatorSlide(opts: {
+  sectionNo: number;
+  sectionKey: NavSectionKey;
+  iconName: string;
+  title: string;
+  blurb: string;
+  keyStatValue: string;
+  keyStatLabel: string;
+  takeaway: string;
+  /** Optional extra visual (e.g. the results funnel), rendered in the side column. */
+  extra?: string;
+  tone: string;
+  num: number;
+  total: number;
+  variantPreview: boolean;
+}): string {
+  const { sectionNo, sectionKey, iconName, title, blurb, keyStatValue, keyStatLabel, takeaway, extra, tone, num, total, variantPreview } = opts;
+  const sepBody = `<div class="v2-sep ${esc(tone)}">
+      <div class="v2-sep-numeral" aria-hidden="true">${pad(sectionNo)}</div>
+      <div class="v2-sep-main">
+        <div class="v2-sep-eyebrow"><span class="v2-sep-eyebrow-icon">${icon(iconName, 15)}</span>القسم ${esc(String(sectionNo))}</div>
+        <h2>${esc(title)}</h2>
+        <div class="v2-sep-rule"></div>
+        <p>${esc(blurb)}</p>
+        <div class="v2-sep-takeaway"><span class="v2-sep-takeaway-icon">${icon("arrow", 14)}</span>${esc(takeaway)}</div>
+      </div>
+      <div class="v2-sep-side">
+        <div class="v2-sep-stat">
+          <span class="v2-sep-stat-value">${esc(keyStatValue)}</span>
+          <span class="v2-sep-stat-label">${esc(keyStatLabel)}</span>
+        </div>
+        ${extra ? `<div class="v2-sep-extra">${extra}</div>` : ""}
+      </div>
     </div>`;
   const body = renderVariants(`slide-sep-${sectionNo}`, [sepBody, sepBody, sepBody, sepBody], variantPreview);
-  return `<section class="slide v2" id="slide-sep-${sectionNo}" data-title="${esc(title)}" data-section="${sectionKey}" data-section-label="${esc(NAV_SECTIONS[sectionKey])}">
+  return `<section class="slide v2 v2-sep-slide ${esc(tone)}" id="slide-sep-${sectionNo}" data-title="${esc(title)}" data-section="${sectionKey}" data-section-label="${esc(NAV_SECTIONS[sectionKey])}">
   ${printToggle()}
   ${sideRail(sectionKey)}
   <div class="v2-sep-bg" aria-hidden="true"></div>
+  ${coverBand()}
   <div class="slide-inner">
-    <div class="slide-eyebrow">
-      <span class="slide-eyebrow-icon">${icon(iconName, 16)}</span>
-      <span>القسم ${esc(String(sectionNo))}</span>
-    </div>
     ${body}
   </div>
   ${pageFoot(num, total)}
@@ -405,6 +604,54 @@ export const STAGE_CARD_TOP_N = 5;
  *  its own content. */
 export const STAGE_CARD_TABLE_BUDGET_PX = 160;
 
+/** Compact 180° coverage arc for a stage tile — a micro SVG dial that inherits
+ *  the tile's tone via `currentColor`. Low→high reads left→right (a physical
+ *  gauge), same convention as ui/charts.ts `gauge`. Decorative (the percentage
+ *  is printed beside it as text), so aria-hidden and no interpolated data. */
+function microArc(pct: number): string {
+  const p = Math.max(0, Math.min(100, Number.isFinite(pct) ? pct : 0));
+  const W = 58;
+  const H = 34;
+  const cx = W / 2;
+  const cy = H - 4;
+  const rad = 23;
+  const sw = 5;
+  const at = (ang: number): [number, number] => [cx + rad * Math.cos(ang), cy + rad * Math.sin(ang)];
+  const [x0, y0] = at(Math.PI);
+  const [x1, y1] = at(Math.PI + (p / 100) * Math.PI);
+  const track = `M ${x0.toFixed(1)} ${y0.toFixed(1)} A ${rad} ${rad} 0 0 1 ${(cx + rad).toFixed(1)} ${cy.toFixed(1)}`;
+  const val = `M ${x0.toFixed(1)} ${y0.toFixed(1)} A ${rad} ${rad} 0 0 1 ${x1.toFixed(1)} ${y1.toFixed(1)}`;
+  return `<svg class="v2-micro-arc" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" aria-hidden="true">
+    <path d="${track}" fill="none" stroke="var(--line)" stroke-width="${sw}" stroke-linecap="round"/>
+    <path d="${val}" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round"/>
+  </svg>`;
+}
+
+/** Full-width stacked proportion bar: population share by risk stage, tone-coded,
+ *  with the percentage printed inside each segment (dark ink, never the series
+ *  color) and a direct-label legend below (the secondary encoding that keeps the
+ *  brand stage tones legible under CVD). Pure HTML/CSS, RTL-native. */
+function stageProportionBar(stages: StageProfile[]): string {
+  const total = stages.reduce((s, x) => s + x.population, 0) || 1;
+  const segs = stages
+    .map((s, i) => {
+      const tone = STAGE_TONES[i % STAGE_TONES.length];
+      const pct = (s.population / total) * 100;
+      return `<div class="v2-prop-seg ${tone}" style="width:${pct.toFixed(3)}%">${pct >= 6 ? `<span class="v2-prop-seg-pct">${fmtPct(pct, 0)}</span>` : ""}</div>`;
+    })
+    .join("");
+  const legend = stages
+    .map((s, i) => {
+      const tone = STAGE_TONES[i % STAGE_TONES.length];
+      return `<span class="v2-prop-key ${tone}"><i></i>${esc(s.stageLabel)} · ${fmtNum(s.population)}</span>`;
+    })
+    .join("");
+  return `<div class="v2-prop">
+    <div class="v2-prop-bar">${segs}</div>
+    <div class="v2-prop-legend">${legend}</div>
+  </div>`;
+}
+
 export function riskStagesSlide(model: ReportModel, num: number, total: number, variantPreview: boolean): string {
   const stages = model.population.byStage;
   const tiles = stages
@@ -416,21 +663,27 @@ export function riskStagesSlide(model: ReportModel, num: number, total: number, 
           <span class="v2-stage-num">${i + 1}</span>
           <b>${esc(s.stageLabel)}</b>
         </div>
-        <div class="v2-stage-list">
-          <div class="v2-stage-row"><span>الحالات</span><b>${fmtNum(s.population)}</b></div>
-          <div class="v2-stage-row"><span>العيّنة</span><b>${fmtNum(s.sampleSize)}</b></div>
-          <div class="v2-stage-row"><span>التغطية</span><b>${fmtPct(s.coverage)}</b></div>
+        <div class="v2-stage-body">
+          <div class="v2-stage-figs">
+            <div class="v2-stage-fig"><b>${fmtNum(s.population)}</b><small>الحالات</small></div>
+            <div class="v2-stage-fig"><b>${fmtNum(s.sampleSize)}</b><small>العيّنة</small></div>
+          </div>
+          <div class="v2-stage-gauge">
+            ${microArc(s.coverage)}
+            <span class="v2-stage-gauge-pct">${fmtPct(s.coverage)}</span>
+            <span class="v2-stage-gauge-label">التغطية</span>
+          </div>
         </div>
         <div class="v2-stage-tag">${esc(tag)}</div>
       </div>`;
     })
     .join("");
   const totals = `<div class="v2-totals-band">
-    <div class="v2-totals-item"><span class="v2-totals-icon">${icon("layers", 18)}</span><span><b>${fmtNum(model.population.total)}</b><small>إجمالي المجتمع (حالة)</small></span></div>
-    <div class="v2-totals-item"><span class="v2-totals-icon">${icon("scan", 18)}</span><span><b>${fmtNum(model.sample.total)}</b><small>إجمالي العيّنة</small></span></div>
-    <div class="v2-totals-item"><span class="v2-totals-icon">${icon("gauge", 18)}</span><span><b>${fmtPct(model.sample.coverage)}</b><small>التغطية الكلية</small></span></div>
+    <div class="v2-totals-item"><span class="v2-totals-icon">${icon("layers", 16)}</span><span><b>${fmtNum(model.population.total)}</b><small>إجمالي المجتمع (حالة)</small></span></div>
+    <div class="v2-totals-item"><span class="v2-totals-icon">${icon("scan", 16)}</span><span><b>${fmtNum(model.sample.total)}</b><small>إجمالي العيّنة</small></span></div>
+    <div class="v2-totals-item"><span class="v2-totals-icon">${icon("gauge", 16)}</span><span><b>${fmtPct(model.sample.coverage)}</b><small>التغطية الكلية</small></span></div>
   </div>`;
-  const body = `<div class="kpi-band n${Math.min(4, Math.max(2, stages.length))}">${tiles}</div>${totals}`;
+  const body = `<div class="v2-risk-layout">${stageProportionBar(stages)}<div class="kpi-band n${Math.min(4, Math.max(2, stages.length))}">${tiles}</div>${totals}</div>`;
   return v2Slide({
     id: "slide-risk-stages",
     title: "مجتمع الحالات بناءً على المخاطر",
@@ -504,7 +757,11 @@ function frac(sampleN: number, popN: number): string {
 type ModeMetrics = { rowH: number; theadH: number; tfootH: number };
 const METRICS_NORMAL: ModeMetrics = { rowH: 41.6, theadH: 41.2, tfootH: 41.2 };
 const METRICS_COMPACT: ModeMetrics = { rowH: 25.4, theadH: 25, tfootH: 25 };
-const METRICS_COMPACT_SAMPLE: ModeMetrics = { rowH: 23.925, theadH: 25, tfootH: 23.525 };
+// Re-measured 2026-07-14 after the theme-v3 type-scale change shifted text-metric
+// rounding (same phenomenon as the v39.29 re-measure): the previous values (rowH
+// 23.925 / theadH 25 / tfootH 23.525) under-estimated all three, clipping the
+// sample tables' totals row ~10px past the card bottom on screen.
+const METRICS_COMPACT_SAMPLE: ModeMetrics = { rowH: 25.125, theadH: 24.5, tfootH: 24.625 };
 
 /** Vertical budget for one card's thead+rows+tfoot together, measured live:
  *  the 16:9 slide's `.slide-body` renders at 458.8px, a card header at 70px
@@ -544,15 +801,21 @@ function portTable(
 ): string {
   const span = mode === "population" ? 4 : 5;
   const dataRowCount = rows.length > 0 ? rows.length : 1; // the "—" placeholder counts as one row
+  // Magnitude-column data bars (pure CSS background, zero added row height): the
+  // الحالات column in population mode, the العيّنة column in sample mode, each
+  // scaled to the largest value in this chunk. Tone tracks the port variant
+  // (green = land, blue = sea) so the bar reads as "size of this port".
+  const magTone: CellTone = variant === "land" ? "green" : "blue";
+  const maxMag = maxOf(rows.map((p) => (mode === "population" ? p.total : p.sampleTotal)));
   const trs =
     rows.length > 0
       ? rows
           .map((p) => {
             if (mode === "population") {
-              return `<tr><td>${esc(p.name)}</td><td>${fmtNum(p.total)}</td><td>${fmtNum(p.clean)}</td><td>${fmtNum(p.suspicious)}</td></tr>`;
+              return `<tr><td>${esc(p.name)}</td>${barCell(fmtNum(p.total), (p.total / maxMag) * 100, magTone)}<td>${fmtNum(p.clean)}</td><td>${fmtNum(p.suspicious)}</td></tr>`;
             }
             const coverage = p.total > 0 ? (p.sampleTotal / p.total) * 100 : 0;
-            return `<tr><td>${esc(p.name)}</td><td>${frac(p.sampleTotal, p.total)}</td><td>${frac(p.sampleClean, p.clean)}</td><td>${frac(p.sampleSuspicious, p.suspicious)}</td><td>${fmtPct(coverage)}</td></tr>`;
+            return `<tr><td>${esc(p.name)}</td>${barCell(frac(p.sampleTotal, p.total), (p.sampleTotal / maxMag) * 100, magTone)}<td>${frac(p.sampleClean, p.clean)}</td><td>${frac(p.sampleSuspicious, p.suspicious)}</td><td>${fmtPct(coverage)}</td></tr>`;
           })
           .join("")
       : `<tr><td colspan="${span}"><span class="insuff">—</span></td></tr>`;
@@ -628,6 +891,49 @@ function planPortPages(landCount: number, seaCount: number, baseRowsPerPage: num
     return { pages: 1, rowsPerPage: maxCount, compact: true };
   }
   return { pages: Math.ceil(maxCount / baseRowsPerPage), rowsPerPage: baseRowsPerPage, compact: false };
+}
+
+/**
+ * Chart-first overview that LEADS the port section: two ranked bars (top land
+ * ports · top sea ports) at full size on their own slide. This is the "split
+ * composition" the overhaul asks for, delivered as a dedicated slide rather
+ * than stacked above the port tables — the land/sea tables run on a fixed,
+ * measured pixel budget (TABLE_BUDGET_PX, METRICS_*, ghost/blank rows) that
+ * leaves no vertical room for a ~150px 5-bar chart above them without clipping
+ * the totals row in the many-port production case. A separate slide touches
+ * none of that machinery and gives the chart the space it needs. (Deviation
+ * from the spec's "same page as the table", made for production safety.) */
+export function portsOverviewSlide(model: ReportModel, num: number, total: number, variantPreview: boolean): string {
+  const { land, sea } = collectPortStats(model);
+  const top = (rows: PortPopRow[]) =>
+    rows
+      .slice()
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 6)
+      .map((p) => ({ label: p.name, value: p.total }));
+  const body = `<div class="v2-port-ovr">
+      <div class="v2-port-ovr-col land">
+        <div class="v2-port-ovr-head"><span class="v2-port-ovr-icon">${badgeIcon("truck", 22)}</span><div><b>المنافذ البرية</b><span>أعلى المنافذ حجمًا في المجتمع</span></div></div>
+        <div class="v2-port-ovr-chart">${rankedBar(top(land), {})}</div>
+      </div>
+      <div class="v2-port-ovr-col sea">
+        <div class="v2-port-ovr-head"><span class="v2-port-ovr-icon">${badgeIcon("ship", 22)}</span><div><b>المنافذ البحرية</b><span>أعلى المنافذ حجمًا في المجتمع</span></div></div>
+        <div class="v2-port-ovr-chart">${rankedBar(top(sea), {})}</div>
+      </div>
+    </div>`;
+  return v2Slide({
+    id: "slide-port-overview",
+    title: "أبرز المنافذ",
+    eyebrow: "القسم 1 — مجتمع الفحص",
+    iconName: "chart",
+    headline: `أبرز المنافذ في مجتمع ${model.summary.periodId}`,
+    subhead: "ترتيب المنافذ البرية والبحرية بحسب حجم الحالات، قبل الجداول التفصيلية.",
+    bodyVariants: [body, body, body, body],
+    variantPreview,
+    num,
+    total,
+    section: "section1",
+  });
 }
 
 /** Build one or more port-population slides (paginated land/sea in parallel). */
@@ -784,11 +1090,12 @@ function stagePortPopulationCard(stage: StageProfile, i: number, ports: PortPopR
   // otherwise short cards showed a large blank void between the last data row
   // and the pinned totals row (owner-reported inconsistency, 2026-07-14).
   const dataRowCount = STAGE_CARD_TOP_N;
+  const maxTotal = maxOf(top.map((p) => p.total));
   const trs =
     top
       .map(
         (p) =>
-          `<tr><td>${esc(p.name)}</td><td>${fmtNum(p.clean)}</td><td>${fmtNum(p.suspicious)}</td><td>${fmtNum(p.total)}</td></tr>`,
+          `<tr><td>${esc(p.name)}</td><td>${fmtNum(p.clean)}</td><td>${fmtNum(p.suspicious)}</td>${barCell(fmtNum(p.total), (p.total / maxTotal) * 100, tone)}</tr>`,
       )
       .join("") + ghostRows(STAGE_CARD_TOP_N - top.length);
 
@@ -830,11 +1137,12 @@ function stagePortSampleCard(stage: StageProfile, i: number, ports: PortPopRow[]
   // Same fixed-geometry rule as stagePortPopulationCard: exactly TOP_N body
   // rows, ghost-padded, so the totals row sits at the same height in all cards.
   const dataRowCount = STAGE_CARD_TOP_N;
+  const maxSample = maxOf(top.map((p) => p.sampleTotal));
   const trs =
     top
       .map((p) => {
         const coverage = p.total > 0 ? (p.sampleTotal / p.total) * 100 : 0;
-        return `<tr><td>${esc(p.name)}</td><td>${fmtNum(p.total)}</td><td>${fmtNum(p.sampleTotal)}</td><td>${fmtPct(coverage)}</td></tr>`;
+        return `<tr><td>${esc(p.name)}</td><td>${fmtNum(p.total)}</td>${barCell(fmtNum(p.sampleTotal), (p.sampleTotal / maxSample) * 100, tone)}<td>${fmtPct(coverage)}</td></tr>`;
       })
       .join("") + ghostRows(STAGE_CARD_TOP_N - top.length);
 
@@ -993,7 +1301,7 @@ function qualityTable(title: string, rows: PortQualityRow[], variant: "land" | "
             const med = rateOf(p.medQ, evaluated);
             const low = rateOf(p.lowQ, evaluated);
             const marking = rateOf(p.markingPresent, p.markingPresent + p.markingMissing);
-            return `<tr><td>${esc(p.name)}</td><td>${pctCell(high)}</td><td>${pctCell(med)}</td><td>${pctCell(low)}</td><td>${pctCell(marking)}</td></tr>`;
+            return `<tr><td>${esc(p.name)}</td>${qualCell(high, "green")}${qualCell(med, "gold")}${qualCell(low, "coral")}${threshCell(marking, MARKING_TARGET)}</tr>`;
           })
           .join("")
       : `<tr><td colspan="${span}"><span class="insuff">—</span></td></tr>`;
@@ -1110,8 +1418,11 @@ function accuracyTable(title: string, rows: PortAccuracyRow[], variant: "land" |
             const accuracy = rateOf(p.correctClean + p.correctSuspicion, p.evaluable);
             const detection = rateOf(p.correctSuspicion, p.correctSuspicion + p.missedSuspicion);
             const clean = rateOf(p.correctClean, p.correctClean + p.falseSuspicion);
-            const show = (v: number | null) => pctCell(p.rankable ? v : null);
-            return `<tr><td>${esc(p.name)}</td><td>${show(accuracy)}</td><td>${show(detection)}</td><td>${show(clean)}</td></tr>`;
+            // Below-target rows carry the warning tone + alert glyph (never color
+            // alone). Unrankable ports (insufficient data) show muted "—", no bar.
+            const show = (v: number | null) =>
+              p.rankable ? threshCell(v, ACCURACY_TARGET) : `<td class="v2-bar-cell neutral"><span class="insuff">—</span></td>`;
+            return `<tr><td>${esc(p.name)}</td>${show(accuracy)}${show(detection)}${show(clean)}</tr>`;
           })
           .join("")
       : `<tr><td colspan="${span}"><span class="insuff">—</span></td></tr>`;
@@ -1176,6 +1487,65 @@ export function accuracyPortSlideBuilders(model: ReportModel, variantPreview: bo
   return builders;
 }
 
+// ── NEW — closing slide (data provenance + classification + organization) ─────
+/** Elevates the source-revisions footer into a designed provenance block, paired
+ *  with the classification reminder and the organization line. When no revisions
+ *  are supplied it renders a graceful note rather than an empty block. Does NOT
+ *  use the legacy `.srev-*` markup, so the footer-omission test (no `.srev-file`
+ *  when revisions are absent) stays valid — the on-screen footer contract is
+ *  untouched, this slide is an additional designed presentation. */
+export function closingSlide(
+  model: ReportModel,
+  sourceRevisions: SourceRevisions | undefined,
+  num: number,
+  total: number,
+  variantPreview: boolean,
+): string {
+  const entries = sourceRevisionEntries(sourceRevisions);
+  const provenance =
+    entries.length > 0
+      ? `<div class="v2-prov-list">${entries
+          .map(
+            ([file, rev]) =>
+              `<div class="v2-prov-item"><span class="v2-prov-file" dir="ltr">${esc(file)}</span><span class="v2-prov-rev">مراجعة ${esc(String(rev))}</span></div>`,
+          )
+          .join("")}</div>`
+      : `<div class="v2-prov-empty">لم تُسجَّل مراجعات لملفات المصدر مع هذا التقرير.</div>`;
+  const body = `<div class="v2-closing">
+      <div class="v2-closing-main">
+        <div class="v2-closing-icon">${badgeIcon("document", 26)}</div>
+        <h2>مصدر البيانات والاعتماد</h2>
+        <div class="v2-sep-rule"></div>
+        <p>يربط هذا التقرير بنسخة البيانات المحدَّدة وقت التوليد؛ رقم المراجعة لكل ملف مصدر يضمن إمكانية التتبّع والمراجعة.</p>
+        <div class="v2-prov-block">
+          <div class="v2-prov-title"><span class="v2-prov-title-icon">${icon("layers", 14)}</span>مراجعات ملفات المصدر</div>
+          ${provenance}
+        </div>
+      </div>
+      <div class="v2-closing-side">
+        <div class="v2-closing-badge"><span>${icon("shield", 13)}</span>داخلي — للاستخدام التنفيذي</div>
+        <div class="v2-closing-org">
+          <b>هيئة الزكاة والضريبة والجمارك</b>
+          ${ORGANIZATION_PATH.map((l) => `<span>${esc(l)}</span>`).join("")}
+        </div>
+        <div class="v2-closing-period">${esc(model.summary.periodId)}</div>
+      </div>
+    </div>`;
+  return v2Slide({
+    id: "slide-closing",
+    title: "مصدر البيانات",
+    eyebrow: "خاتمة",
+    iconName: "shield",
+    headline: "مصدر البيانات والاعتماد",
+    subhead: "تتبّع نسخة البيانات، والتصنيف، والجهة المُصدِرة.",
+    bodyVariants: [body, body, body, body],
+    variantPreview,
+    num,
+    total,
+    section: "closing",
+  });
+}
+
 // ── Assembly ─────────────────────────────────────────────────────────────────
 /**
  * Build all v2 slides in order. Section page ranges on the المحتويات slide are
@@ -1186,77 +1556,131 @@ export function buildDeckV2Slides(
   model: ReportModel,
   generatedAt = new Date(),
   variantPreview = false,
+  sourceRevisions?: SourceRevisions,
 ): string {
   const glossaryBuilders = glossarySlideBuilders(variantPreview); // 1..N pages, paginated by term count
+
+  // Section-2 opener funnel: population → sample → studied → اشتباه (studied
+  // cases flagged as اشتباه), computed once from the model.
+  const studiedSuspicion = model.rows.filter(
+    (r) => r.answerStatus === "submitted" && r.imageResult === "اشتباه",
+  ).length;
+  const resultsFunnel = funnel(
+    [
+      { label: "المجتمع", value: model.population.total },
+      { label: "العيّنة", value: model.sample.total },
+      { label: "المدروسة", value: model.sample.studied },
+      { label: "اشتباه", value: studiedSuspicion },
+    ],
+    { width: 340, height: 200 },
+  );
 
   // Section 1 — مجتمع الفحص: separator + risk stages + port tables (1..N pages).
   const sectionOne: SlideBuilder[] = [
     (num, total) =>
-      sectionSeparatorSlide(
-        1,
-        "section1",
-        "layers",
-        "مجتمع الفحص",
-        "التعريف بمجتمع الحالات لهذا الشهر: حجمه، توزيعه على مستويات المخاطر، وتوزيعه على المنافذ البرية والبحرية — الأساس الذي سُحبت منه العيّنة.",
+      sectionSeparatorSlide({
+        sectionNo: 1,
+        sectionKey: "section1",
+        iconName: "layers",
+        title: "مجتمع الفحص",
+        blurb:
+          "التعريف بمجتمع الحالات لهذا الشهر: حجمه، توزيعه على مستويات المخاطر، وتوزيعه على المنافذ البرية والبحرية، وهو الأساس الذي سُحبت منه العيّنة.",
+        keyStatValue: fmtNum(model.population.total),
+        keyStatLabel: "حالة في مجتمع الشهر",
+        takeaway: `عيّنة ${fmtNum(model.sample.total)} حالة بتغطية ${fmtPct(model.sample.coverage)} تمثّل هذا المجتمع.`,
+        tone: "gold",
         num,
         total,
         variantPreview,
-      ),
+      }),
     (num, total) => riskStagesSlide(model, num, total, variantPreview),
+    (num, total) => portsOverviewSlide(model, num, total, variantPreview),
     ...portPopulationSlideBuilders(model, variantPreview),
     ...portSampleSlideBuilders(model, variantPreview),
     (num, total) => stagePortPopulationSlide(model, num, total, variantPreview),
     (num, total) => stagePortSampleSlide(model, num, total, variantPreview),
   ];
 
-  // Section 2 — نتائج فحص الجودة: separator + image-quality page(s) + accuracy page(s).
+  // Section 2 — نتائج فحص الجودة: separator (with funnel) + image-quality + accuracy.
   const sectionTwo: SlideBuilder[] = [
     (num, total) =>
-      sectionSeparatorSlide(
-        2,
-        "section2",
-        "gauge",
-        "نتائج فحص الجودة",
-        "جودة الصور المفحوصة في كل منفذ (التوفر والتحديد والجودة المقبولة)، ودقة قرارات الفحص بين الاشتباه والسليمة.",
+      sectionSeparatorSlide({
+        sectionNo: 2,
+        sectionKey: "section2",
+        iconName: "gauge",
+        title: "نتائج فحص الجودة",
+        blurb:
+          "جودة الصور المفحوصة في كل منفذ (التوفّر والتحديد والجودة المقبولة)، ودقة قرارات الفحص بين الاشتباه والسليمة.",
+        keyStatValue: model.summary.overallAccuracy === null ? "—" : fmtPct(model.summary.overallAccuracy),
+        keyStatLabel: "الدقة العامة لقرارات الفحص",
+        takeaway: "المسار من المجتمع إلى الحالات المدروسة ثم المشتبه بها.",
+        extra: resultsFunnel,
+        tone: "cyan",
         num,
         total,
         variantPreview,
-      ),
+      }),
     ...qualityPortSlideBuilders(model, variantPreview),
     ...accuracyPortSlideBuilders(model, variantPreview),
   ];
 
-  const total = 2 + glossaryBuilders.length + sectionOne.length + sectionTwo.length; // cover + toc + glossary(N) + section 1 + section 2
-  const glossaryStart = 3;
-  const glossaryEnd = 2 + glossaryBuilders.length;
+  // Page order: cover(1) · toc(2) · month-in-numbers(3) · glossary(N) ·
+  // section 1 · section 2 · closing(last).
+  const total =
+    3 + glossaryBuilders.length + sectionOne.length + sectionTwo.length + 1; // +cover+toc+summary, +closing
+  const glossaryStart = 4;
+  const glossaryEnd = 3 + glossaryBuilders.length;
   const sectionOneStart = glossaryEnd + 1;
   const sectionOneEnd = sectionOneStart + sectionOne.length - 1;
   const sectionTwoStart = sectionOneEnd + 1;
+  const sectionTwoEnd = sectionTwoStart + sectionTwo.length - 1;
+  const closingNum = total;
 
+  const accuracyFig =
+    model.summary.overallAccuracy === null ? "—" : fmtPct(model.summary.overallAccuracy);
   const tocItems: TocItem[] = [
+    {
+      title: "الشهر في أرقام",
+      goal: "أبرز مؤشرات الشهر في لوحة واحدة.",
+      range: pad(3),
+      iconName: "chart",
+      tone: "gold",
+      figure: fmtNum(model.population.total),
+      figureLabel: "حالة",
+    },
     {
       title: "المعجم",
       goal: "توحيد المصطلحات الرئيسية قبل قراءة النتائج.",
       range: glossaryEnd > glossaryStart ? `${pad(glossaryStart)}–${pad(glossaryEnd)}` : pad(glossaryStart),
       iconName: "document",
+      tone: "blue",
+      figure: fmtNum(GLOSSARY.length),
+      figureLabel: "مصطلح",
     },
     {
       title: "القسم الأول — مجتمع الفحص",
       goal: "التعريف بمجتمع الحالات وتوزيعه بحسب المخاطر والمنافذ، وأساس سحب العيّنة.",
       range: `${pad(sectionOneStart)}–${pad(sectionOneEnd)}`,
       iconName: "layers",
+      tone: "green",
+      figure: fmtNum(model.sample.total),
+      figureLabel: "عيّنة",
     },
     {
       title: "القسم الثاني — نتائج فحص الجودة",
       goal: "جودة الصور المفحوصة، ودقة قرارات الفحص بين الاشتباه والسليمة، لكل منفذ.",
-      range: `${pad(sectionTwoStart)}–${pad(total)}`,
+      range: `${pad(sectionTwoStart)}–${pad(sectionTwoEnd)}`,
       iconName: "gauge",
+      tone: "coral",
+      figure: accuracyFig,
+      figureLabel: "الدقة",
     },
   ];
 
   const slides: string[] = [
     coverSlide(model, generatedAt, variantPreview),
     tocSlide(tocItems, 2, total, variantPreview),
+    monthInNumbersSlide(model, 3, total, variantPreview),
   ];
   let num = glossaryStart;
   for (const build of glossaryBuilders) {
@@ -1271,5 +1695,6 @@ export function buildDeckV2Slides(
     slides.push(build(num, total));
     num += 1;
   }
+  slides.push(closingSlide(model, sourceRevisions, closingNum, total, variantPreview));
   return slides.join("\n");
 }

@@ -8,6 +8,7 @@ import {
   quadrantScatter,
   heatmap,
   sparkline,
+  funnel,
 } from "./charts";
 import { XSS_PAYLOADS, XSS_MARKER, findLiveInjection } from "../../xssPayloads";
 
@@ -379,5 +380,45 @@ describe("sparkline", () => {
     const svg = sparkline([7, 7, 7], {});
     assertSvg(svg);
     expect(svg).not.toContain("NaN");
+  });
+});
+
+describe("funnel", () => {
+  it("renders a valid SVG with a rect per stage and the stage labels", () => {
+    const svg = funnel(
+      [
+        { label: "المجتمع", value: 1000 },
+        { label: "العيّنة", value: 80 },
+        { label: "المدروسة", value: 72 },
+        { label: "اشتباه", value: 6 },
+      ],
+      { width: 340, height: 200 },
+    );
+    assertSvg(svg);
+    // one <rect> per stage (bars) — connectors are <path>, so count rects.
+    const rects = svg.match(/<rect /g) ?? [];
+    expect(rects.length).toBe(4);
+    expect(svg).toContain("المجتمع");
+    expect(svg).toContain("اشتباه");
+    expect(svg).not.toContain("NaN");
+  });
+
+  it("compacts large counts with a thousands suffix", () => {
+    const svg = funnel([{ label: "المجتمع", value: 24000 }], {});
+    assertSvg(svg);
+    expect(svg).toContain("24k");
+  });
+
+  it("handles empty and all-zero data without throwing", () => {
+    assertSvg(funnel([], {}));
+    const zero = funnel([{ label: "x", value: 0 }], {});
+    assertSvg(zero);
+    expect(zero).not.toContain("NaN");
+  });
+
+  it("escapes injected labels (no live markup)", () => {
+    const svg = funnel([{ label: XSS_PAYLOADS.scriptTag + XSS_MARKER, value: 5 }], {});
+    expect(findLiveInjection(svg)).toBeNull();
+    expect(svg).toContain(XSS_MARKER);
   });
 });

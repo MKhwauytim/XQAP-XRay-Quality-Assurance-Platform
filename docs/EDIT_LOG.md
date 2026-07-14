@@ -4,6 +4,238 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v52.4 — 2026-07-14 — Re-measure METRICS_COMPACT_SAMPLE (totals-row clip)
+
+Orchestrator fixup after the overhaul: the compact sample tables' measured metrics went stale when theme v3 shifted text-metric rounding, clipping the totals row ~10px past the card bottom on screen. Re-measured live in the preview (the constants' original tuning method).
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**Before:**
+```ts
+const METRICS_COMPACT_SAMPLE: ModeMetrics = { rowH: 23.925, theadH: 25, tfootH: 23.525 };
+```
+
+**After:**
+```ts
+const METRICS_COMPACT_SAMPLE: ModeMetrics = { rowH: 25.125, theadH: 24.5, tfootH: 24.625 };
+```
+(Verified: tfoot overflow 0.0px on every land/sea card of both port slides; 0/15 slides overflow horizontally.)
+
+## v52.3 — 2026-07-14 — deck2 theme v3: type scale, depth, gold hairlines, entrance motion, data-bar cells, print + light parity
+
+**File:** `src/data/reporting/executive/deck2/theme.ts`
+
+Added a large "THEME v3" layer at the end of `DECK_V2_CSS` plus targeted edits to
+the cover/glossary rules. New systems: fixed-rem type-scale vars on `.slide.v2`;
+`@keyframes v2-rise` entrance stagger gated to `@media screen and
+(prefers-reduced-motion:no-preference)` and disabled under `@media print`;
+`.v2-bar-cell` in-cell data bars (background-only, `--w` custom property);
+components for the redesigned cover, TOC, month-in-numbers, section separators,
+risk proportion bar + micro gauges, ports overview, closing/provenance; light-theme
+parity and print `print-color-adjust:exact` / `break-inside:avoid` for every new element.
+
+**Before:**
+```css
+.v2-term-grid{
+  display:grid;grid-template-columns:repeat(4,1fr);grid-template-rows:repeat(3,1fr);gap:12px;
+  align-content:stretch;height:100%;
+}
+/* (no data-bar, motion, cover-grid, toc-card, num-tile, sep v3, prop-bar, closing rules) */
+```
+
+**After:**
+```css
+.v2-term-grid{
+  display:grid;grid-template-columns:repeat(4,1fr);grid-template-rows:repeat(2,1fr);gap:16px;
+  align-content:stretch;height:100%;
+}
+/* THEME v3 layer added: */
+@keyframes v2-rise{from{opacity:0;transform:translateY(12px);}to{opacity:1;transform:none;}}
+@media screen and (prefers-reduced-motion:no-preference){ .slide.v2 .slide-body{animation:v2-rise .55s ease both;animation-delay:.18s;} /* + eyebrow/headline/subhead */ }
+@media print{ .slide.v2 .slide-body{animation:none!important;} }
+.v2-bar-cell{background-image:linear-gradient(to left,var(--bar,transparent) 0,var(--bar,transparent) var(--w,0%),transparent var(--w,0%));background-repeat:no-repeat;print-color-adjust:exact;}
+.v2-bar-cell.warn{--bar:rgba(244,180,0,.30);}
+.v2-prop-seg{...}  .v2-cover-grid{...}  .v2-toc-card{...}  .v2-num-tile{...}
+.v2-sep{grid-template-columns:auto 1fr auto;...}  .v2-sep-numeral{-webkit-text-stroke:2px rgba(244,180,0,.5);}
+.v2-closing{...}  .v2-prov-item{...}
+/* + full light-theme parity block for every new component */
+```
+
+**File:** `src/data/reporting/executive/deck2/theme.ts` (cover pseudo-element fix)
+
+**Before:**
+```css
+/* cover inherited .slide.title-slide .slide-art::before {left:-4%; ...rotate} */
+```
+
+**After:**
+```css
+.slide.v2-cover .slide-art::before,.slide.v2-cover .slide-art::after{display:none;}
+/* v3 cover uses its own SVG band + glows; the inherited rotated rectangle also
+   inflated scrollWidth by ~53px (clipped but noisy) */
+```
+
+---
+
+
+## v52.2 — 2026-07-14 — deck2 slides: cover, TOC, NEW month-in-numbers, glossary 12→8, separators, risk proportion bar + gauges, ports overview, data bars, threshold cells, NEW closing slide
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+### Cover — asymmetric hero lockup + geometric band
+
+**Before:**
+```ts
+const coverBody = `<div class="title-kicker">عرض تنفيذي</div>
+  <h1>تقرير ضمان جودة فحص الأشعة</h1>
+  <div class="title-rule"></div>
+  <div class="v2-cover-meta">${meta}</div>
+  <div class="title-classify">...داخلي — للاستخدام التنفيذي</div>`;
+```
+
+**After:**
+```ts
+const coverBody = `<div class="v2-cover-grid">
+  <div class="v2-cover-hero">
+    <div class="v2-cover-kicker">...عرض تنفيذي · تقرير شهري</div>
+    <h1 class="v2-cover-title">تقرير ضمان جودة<br/>فحص الأشعة</h1>
+    <div class="v2-cover-rule"></div>
+    <div class="v2-cover-lockup"><span ...>فترة الدراسة</span>
+      <span class="v2-cover-lockup-period">${esc(model.summary.periodId)}</span></div>
+    <div class="v2-cover-badge">...داخلي — للاستخدام التنفيذي</div>
+  </div>
+  <div class="v2-cover-meta-col">${meta}</div>
+</div>`;
+// + coverBand() SVG geometric pattern, layered navy depth glows in CSS
+```
+
+### NEW — monthInNumbersSlide (الشهر في أرقام)
+
+**After (new builder):**
+```ts
+export function monthInNumbersSlide(model, num, total, variantPreview): string {
+  // hero = model.population.total; 5 tiles: sample+coverage, studied+completion,
+  // suspicion rate, disagreement count, overall accuracy (— when null).
+  ...
+}
+```
+
+### Glossary 12 → 8 essential terms
+
+**Before:** `const GLOSSARY = [ /* 12 terms */ ];  const GLOSSARY_TERMS_PER_PAGE = 12;`
+**After:** `const GLOSSARY = [ /* 8 essential terms */ ];  const GLOSSARY_TERMS_PER_PAGE = 8;` (4×2 grid, larger 46px icon badges)
+
+### Section separator — full-bleed color-blocked cover (opts object)
+
+**Before:**
+```ts
+export function sectionSeparatorSlide(sectionNo, sectionKey, iconName, title, blurb, num, total, variantPreview)
+// body: icon + big number + h2 + rule + blurb (centered)
+```
+
+**After:**
+```ts
+export function sectionSeparatorSlide(opts: { sectionNo; sectionKey; iconName; title; blurb;
+  keyStatValue; keyStatLabel; takeaway; extra?; tone; num; total; variantPreview })
+// giant outlined numeral (-webkit-text-stroke) + eyebrow/h2/rule/blurb/takeaway
+// + side column: key-stat tile + optional `extra` (the results funnel on section 2)
+```
+
+### Risk-stages slide — proportion bar + per-tile coverage micro-gauge
+
+**Before:**
+```ts
+const body = `<div class="kpi-band n4">${tiles}</div>${totals}`;
+// tile: الحالات / العيّنة / التغطية rows
+```
+
+**After:**
+```ts
+const body = `<div class="v2-risk-layout">${stageProportionBar(stages)}<div class="kpi-band n4">${tiles}</div>${totals}</div>`;
+// stageProportionBar(): full-width stacked tone-coded share bar + direct-label legend
+// tile: two figs + microArc(coverage) SVG dial (inherits tile tone)
+```
+
+### Port tables — in-cell data bars (background only, zero row-height change)
+
+**Before:**
+```ts
+return `<tr><td>${esc(p.name)}</td><td>${fmtNum(p.total)}</td><td>${fmtNum(p.clean)}</td><td>${fmtNum(p.suspicious)}</td></tr>`;
+```
+
+**After:**
+```ts
+return `<tr><td>${esc(p.name)}</td>${barCell(fmtNum(p.total),(p.total/maxMag)*100,magTone)}<td>${fmtNum(p.clean)}</td><td>${fmtNum(p.suspicious)}</td></tr>`;
+// barCell adds only a --w CSS var + linear-gradient background; METRICS_*, TABLE_BUDGET_PX,
+// ghost/blank rows untouched (verified in preview: no NEW tfoot clipping).
+```
+
+### NEW — portsOverviewSlide (chart-first split composition)
+
+**After (new builder):** two full-size `rankedBar`s (top land ports · top sea ports)
+on a dedicated slide leading the port section. Deviation from spec's "same page as
+the table": the fixed table pixel-budget leaves no vertical room for a ~150px 5-bar
+chart above the tables without clipping the totals row in the many-port case; a
+dedicated slide touches none of the fragile machinery.
+
+### Quality / accuracy — threshold-colored bar cells + alert glyph
+
+**Before:** `<td>${pctCell(high)}</td>...<td>${pctCell(marking)}</td>` / `<td>${show(accuracy)}</td>...`
+**After:** `${qualCell(high,"green")}${qualCell(med,"gold")}${qualCell(low,"coral")}${threshCell(marking,MARKING_TARGET)}`
+and accuracy rows use `threshCell(v, ACCURACY_TARGET)` — below-target cells get the
+warn tone + `alert` glyph (status never by color alone).
+
+### NEW — closingSlide (data provenance + classification + organization)
+
+**After (new builder):** designed provenance block from `sourceRevisions`
+(graceful empty state when absent, using `.v2-prov-empty` not the legacy
+`.srev-*` markup so the footer-omission test stays valid) + classification badge +
+organization line. Fed via a new optional 4th param on `buildDeckV2Slides` and
+`input.sourceRevisions` in index.ts. The on-screen `sourceRevisionsFooterHtml`
+footer is preserved unchanged (v51 contract).
+
+### Assembly — new page order + TOC figures
+
+**Before:** cover · toc · glossary(N) · section1 · section2 (`total = 2 + …`)
+**After:** cover · toc · month-in-numbers · glossary(N) · section1(+ports overview) · section2 · closing
+(`total = 3 + glossary + s1 + s2 + 1`); TOC items gain `tone`, `figure`, `figureLabel`;
+NAV_SECTIONS gains `summary` and `closing`.
+
+---
+
+
+## v52.1 — 2026-07-14 — charts: new `funnel` SVG builder
+
+**File:** `src/data/reporting/executive/ui/charts.ts`
+
+**After (new pure builder):**
+```ts
+export function funnel(data: LabeledValue[], opts: ChartOpts = {}): string {
+  // Vertically stacked, horizontally centered tone bars (width ∝ value/max) with
+  // connector trapezoids; stage label right (RTL start), value left; escText on labels;
+  // empty/all-zero safe; compact "k" suffix for large counts.
+}
+```
+
+**File:** `src/data/reporting/executive/deck2/index.ts`
+
+**Before:** `const slides = buildDeckV2Slides(model, new Date(), variantPreview);`
+**After:** `const slides = buildDeckV2Slides(model, new Date(), variantPreview, input.sourceRevisions);`
+
+---
+
+
+## v52 — 2026-07-14 — tests: funnel + new deck2 slides/structures
+
+**File:** `src/data/reporting/executive/ui/charts.test.ts` — added `funnel` suite (valid SVG,
+per-stage rects, label escaping, empty/zero/compact).
+
+**File:** `src/data/reporting/executive/deck2/deck2.test.ts` — added coverage for the
+month-in-numbers dashboard (5 tiles), the closing provenance slide (revisions present +
+graceful empty), the section-2 funnel, in-cell data bars, and the 4 tone-coded TOC cards.
+
+Test count: 591 → 600 (all green). Bundle: 3,099,450 B → 3,136,331 B (+36.9 KB raw).
+
 ## v51.5 — 2026-07-14 — Repo/docs reorganization: sectioned docs tree + root cleanup
 
 Owner request ("organize this ... smarter and better sections"). Docs-only moves plus three comment-path updates in code. New structure: `docs/architecture/` (+ `data-system-report.md`, `SECURITY_MODEL.md` moved in), new `docs/product/` (PRODUCT_PAGES, GAP_ANALYSIS, PRODUCT_SPECIFICATION, RELEASE_CHECKLIST), `docs/design/` (+ design-system.md, UI_ENHANCEMENT_PLAN), new `docs/archive/` (legacy 01–04 docs, EDIT_LOG.design-staging, `plans-history/` = former docs/superpowers). New `docs/README.md` index with a domain guide (data intake, sampling, distribution, answers, approvals, reporting, KPIs, auth, storage → code + docs). Root cleanup: stale logs and `lint-report.json` removed, `testsprite_tests/tmp/` untracked, both gitignored. `docs/EDIT_LOG.md` deliberately NOT moved (build imports it via `?raw`).

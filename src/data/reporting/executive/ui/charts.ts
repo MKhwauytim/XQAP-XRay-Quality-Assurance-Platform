@@ -485,6 +485,67 @@ export function heatmap(data: Matrix, opts: ChartOpts = {}): string {
   return svgOpen(w, h) + colLabels + cells + legend + `</svg>`;
 }
 
+// ── funnel — sequential stage-conversion bars (population → … → اشتباه) ───────
+// Vertically stacked, horizontally centered bars whose width is proportional to
+// each stage's value against the FIRST (widest) stage — the classic conversion
+// funnel. RTL-native: the stage label sits on the right, the value on the left,
+// both outside the bar so they never collide with the fill color (anti-slop rule:
+// text never in a chart-series color). Each bar is directly labeled and separated
+// by a vertical gap, which is the secondary encoding that makes the brand stage
+// tones legible under CVD. Pure SVG, no runtime JS, empty-state safe.
+export function funnel(data: LabeledValue[], opts: ChartOpts = {}): string {
+  const clean = (data ?? []).filter((d) => Number.isFinite(d.value) && d.value >= 0);
+  if (clean.length === 0) return emptyState(opts.width, opts.height, opts.emptyNote);
+  const w = opts.width ?? 360;
+  const h = opts.height ?? 240;
+  const max = Math.max(1, ...clean.map((d) => d.value));
+  const n = clean.length;
+  const padTop = 6;
+  const padBottom = 6;
+  const rowH = (h - padTop - padBottom) / n;
+  const barH = Math.max(14, rowH * 0.62);
+  const cx = w / 2;
+  const maxBarW = w * 0.5; // leave room for label (right) + value (left)
+  const minBarW = 26;
+
+  let bars = "";
+  clean.forEach((d, i) => {
+    const frac = d.value / max;
+    const bw = Math.max(minBarW, frac * maxBarW);
+    const x = cx - bw / 2;
+    const y = padTop + i * rowH + (rowH - barH) / 2;
+    const midY = y + barH / 2;
+    // Connector trapezoid to the next (narrower) stage — a faint neutral wedge
+    // that reads as "flow" without competing with the tone-coded bars.
+    if (i < n - 1) {
+      const nextFrac = clean[i + 1].value / max;
+      const nbw = Math.max(minBarW, nextFrac * maxBarW);
+      const y2 = padTop + (i + 1) * rowH + (rowH - barH) / 2;
+      const gapTop = y + barH;
+      bars +=
+        `<path d="M ${r(cx - bw / 2)} ${r(gapTop)} L ${r(cx + bw / 2)} ${r(gapTop)} ` +
+        `L ${r(cx + nbw / 2)} ${r(y2)} L ${r(cx - nbw / 2)} ${r(y2)} Z" ` +
+        `fill="${cssVar("line")}" fill-opacity="0.5"/>`;
+    }
+    bars +=
+      `<rect x="${r(x)}" y="${r(y)}" width="${r(bw)}" height="${r(barH)}" rx="6" fill="${seriesColor(i)}"/>` +
+      // stage label — right side (RTL start), neutral text color
+      `<text x="${r(cx + maxBarW / 2 + 10)}" y="${r(midY)}" text-anchor="start" dominant-baseline="middle" font-size="${TYPE.caption}" font-weight="700" fill="${cssVar("text")}">${escText(d.label)}</text>` +
+      // value — left side (RTL end), primary accent
+      `<text x="${r(cx - maxBarW / 2 - 10)}" y="${r(midY)}" text-anchor="end" dominant-baseline="middle" font-size="${TYPE.body}" font-weight="800" fill="${cssVar("text")}">${escText(fmtCompact(d.value))}</text>`;
+  });
+
+  return svgOpen(w, h) + bars + `</svg>`;
+}
+
+/** Compact integer for chart labels: thousands as "k" so long funnel counts
+ *  don't overrun the reserved label gutter. Latin digits (matches chart axes). */
+function fmtCompact(v: number): string {
+  const n = Math.round(v);
+  if (n >= 10000) return String(Math.round(n / 1000)) + "k";
+  return String(n);
+}
+
 // ── sparkline — compact trend line ──────────────────────────────────────────
 
 export function sparkline(values: number[], opts: ChartOpts = {}): string {

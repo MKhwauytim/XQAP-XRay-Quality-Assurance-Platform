@@ -135,6 +135,63 @@ describe("buildExecutiveDeckV2 — preview mode", () => {
   });
 });
 
+describe("visual overhaul — new slides & structures", () => {
+  it("renders the الشهر في أرقام headline dashboard slide", () => {
+    const html = buildExecutiveDeckV2(input([popRow(), popRow({ xrayImageId: "XR-2" })]));
+    expect(html).toContain('id="slide-month-numbers"');
+    expect(html).toContain("الشهر في أرقام");
+    expect(html).toContain("v2-num-hero-value");
+    // five stat tiles
+    const tiles = (html.match(/class="v2-num-tile /g) ?? []).length;
+    expect(tiles).toBe(5);
+  });
+
+  it("renders the closing provenance slide, elevating source revisions into a designed block", () => {
+    const withRev = {
+      ...input([popRow()]),
+      sourceRevisions: { "population.final.json": 7, "sample.master.json": 3 },
+    };
+    const html = buildExecutiveDeckV2(withRev);
+    expect(html).toContain('id="slide-closing"');
+    // Match the markup tag, not the bare class — the CSS block ships the
+    // `.v2-prov-item` selector text unconditionally (same false-positive as the
+    // variant-stack CSS check above).
+    expect(html).toContain('<div class="v2-prov-item"');
+    expect(html).toContain("population.final.json");
+    expect(html).toContain("مراجعة 7");
+    // graceful empty state when no revisions
+    const html2 = buildExecutiveDeckV2(input([popRow()]));
+    expect(html2).toContain('id="slide-closing"');
+    expect(html2).toContain('<div class="v2-prov-empty"');
+    expect(html2).not.toContain('<div class="v2-prov-item"');
+  });
+
+  it("emits the results funnel (SVG) on the section-2 separator", () => {
+    const html = buildExecutiveDeckV2(input([popRow(), popRow({ xrayImageId: "XR-2" })]));
+    expect(html).toContain("v2-sep-extra");
+    // funnel stage labels
+    expect(html).toContain("المدروسة");
+  });
+
+  it("paints in-cell proportional data bars in the port tables (background only)", () => {
+    const html = buildExecutiveDeckV2(
+      input([
+        popRow({ portName: "ميناء أ" }),
+        popRow({ xrayImageId: "XR-2", portName: "ميناء ب" }),
+      ]),
+    );
+    expect(html).toContain("v2-bar-cell");
+    expect(html).toContain("--w:");
+  });
+
+  it("renders four tone-coded TOC cards each with a key figure", () => {
+    const html = buildExecutiveDeckV2(input([popRow()]));
+    const cards = (html.match(/class="v2-toc-card /g) ?? []).length;
+    expect(cards).toBe(4);
+    expect(html).toContain("v2-toc-figure");
+  });
+});
+
 describe("stage×port grid slides", () => {
   it("renders both new slide titles and the الإجمالي totals row in production output", () => {
     const html = buildExecutiveDeckV2(

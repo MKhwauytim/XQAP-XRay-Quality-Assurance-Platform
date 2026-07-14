@@ -194,7 +194,7 @@ export function buildExecutiveDeckV2(
 ): string {
   const variantPreview = opts?.variantPreview ?? false;
   const model = buildReportModel(input, employeeDisplayNames);
-  const slides = buildDeckV2Slides(model, new Date(), variantPreview);
+  const slides = buildDeckV2Slides(model, new Date(), variantPreview, input.sourceRevisions);
   return buildDeckV2Html(
     slides,
     formatMonthLabel(input.monthFolderName),
