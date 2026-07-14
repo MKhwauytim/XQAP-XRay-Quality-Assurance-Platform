@@ -79,6 +79,33 @@ describe("collectStagePortStats", () => {
     expect(stage2[0]).toMatchObject({ name: "ميناء أ", total: 1 });
   });
 
+  it("canonicalizes RAW Excel stage aliases so cards keyed by canonical labels find them (real-data regression)", () => {
+    // Real workspaces store the raw Excel alias in row.stage ("SECOND_STAG",
+    // "2", "الثاني", ...), not the canonical label. Raw-key grouping produced
+    // empty port tables and zero سليمة/اشتباه sums in the live deck.
+    const model = buildReportModel(
+      input([
+        popRow({ xrayImageId: "1", stage: "FIRST_STAGE", portName: "ميناء أ" }),
+        popRow({ xrayImageId: "2", stage: "1", portName: "ميناء أ", xrayLevelOneResult: "اشتباه" }),
+        popRow({ xrayImageId: "3", stage: "SECOND_STAG", portName: "ميناء ب" }),
+        popRow({ xrayImageId: "4", stage: "الثاني", portName: "ميناء ب" }),
+        popRow({ xrayImageId: "5", stage: "قيمة غير معروفة", portName: "ميناء ج" }),
+      ]),
+    );
+
+    const byStage = collectStagePortStats(model);
+    const stage1 = byStage.get("المستوى الأول") ?? [];
+    expect(stage1).toHaveLength(1);
+    expect(stage1[0]).toMatchObject({ name: "ميناء أ", total: 2, clean: 1, suspicious: 1 });
+
+    const stage2 = byStage.get("المستوى الثاني") ?? [];
+    expect(stage2).toHaveLength(1);
+    expect(stage2[0]).toMatchObject({ name: "ميناء ب", total: 2 });
+
+    // Unknown aliases stay under their raw string (fallback-branch behavior).
+    expect(byStage.get("قيمة غير معروفة")?.[0]).toMatchObject({ name: "ميناء ج", total: 1 });
+  });
+
   it("sums to the same totals as model.population.byStage (the invariant the design spec requires)", () => {
     const rows: PreparedPopulationRow[] = [];
     const stages = ["المستوى الأول", "المستوى الثاني", "المستوى الثالث", "المستوى الرابع"];

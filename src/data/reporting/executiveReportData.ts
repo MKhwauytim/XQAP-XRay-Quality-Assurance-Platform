@@ -1,4 +1,5 @@
 import type { SampleMasterData } from "../sampling/sampleTypes";
+import { formatStageLabel } from "../population/stageHelpers";
 import type { FieldAnswer } from "../answers/answerTypes";
 import type { TemplateSchema } from "../templates/templateTypes";
 import type {
@@ -377,7 +378,11 @@ export function calculateExecutiveKPIs(
   if (sample?.stageAllocations && sample.stageAllocations.length > 0) {
     for (const alloc of sample.stageAllocations) {
       const stageStudied = rows.filter(
-        (r) => r.selectedInSample && r.answerStatus === "submitted" && r.stage === alloc.stageLabel
+        // Canonicalize the row's raw stage alias before comparing: alloc.stageLabel
+        // is the canonical Arabic label frozen at draw time, while r.stage is the
+        // raw Excel value (e.g. "SECOND_STAG") — raw equality zeroed stage-level
+        // "studied" counts on real data.
+        (r) => r.selectedInSample && r.answerStatus === "submitted" && formatStageLabel(r.stage) === alloc.stageLabel
       ).length;
       const completionRateStage = alloc.actualDrawn > 0 ? (stageStudied / alloc.actualDrawn) * 100 : 0;
       stageProfiles.push({

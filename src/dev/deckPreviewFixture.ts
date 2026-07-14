@@ -41,6 +41,19 @@ const SEA_PORTS: Array<[string, number]> = [
 ];
 
 const STAGE_KEYS = ["first", "second", "third", "fourth"] as const;
+// RAW Excel aliases, exactly as real processed workspaces store them in
+// row.stage (see DEFAULT_STAGE_MAPPINGS) — NOT the canonical Arabic labels.
+// The fixture previously used canonical labels, which masked a real-data bug:
+// deck2's stage-port cards grouped rows by raw stage but looked up by the
+// canonical label, rendering empty tables against every real workspace.
+const STAGE_RAW_ALIASES: Record<(typeof STAGE_KEYS)[number], string> = {
+  first: "FIRST_STAGE",
+  second: "SECOND_STAG",
+  third: "THIRD_STAGE",
+  fourth: "FORTH_STAGE",
+};
+// Canonical labels, used only where real data is also canonical (the
+// draw-time StageAllocation records).
 const STAGE_LABELS: Record<(typeof STAGE_KEYS)[number], string> = {
   first: "المستوى الأول",
   second: "المستوى الثاني",
@@ -69,7 +82,7 @@ function makeRow(
   const suspicious1 = rnd() < 0.05;
   const suspicious2 = suspicious1 ? rnd() < 0.7 : rnd() < 0.02;
   return {
-    stage: STAGE_LABELS[pickStage()],
+    stage: STAGE_RAW_ALIASES[pickStage()],
     xrayImageId: `XR-${String(id).padStart(5, "0")}`,
     xrayEntryDate: null,
     portCode,
@@ -138,8 +151,11 @@ function drawSample(rows: PreparedPopulationRow[], coverage = 0.075): SampleMast
 
   const stageAllocations: StageAllocation[] = STAGE_KEYS.map((key) => {
     const label = STAGE_LABELS[key];
-    const pop = rows.filter((r) => r.stage === label);
-    const drawn = sampleRows.filter((r) => r.stage === label);
+    // Rows carry the RAW alias; only the allocation record is canonical —
+    // mirroring exactly what the real sampler produces.
+    const rawAlias = STAGE_RAW_ALIASES[key];
+    const pop = rows.filter((r) => r.stage === rawAlias);
+    const drawn = sampleRows.filter((r) => r.stage === rawAlias);
     return {
       stageKey: key,
       stageLabel: label,

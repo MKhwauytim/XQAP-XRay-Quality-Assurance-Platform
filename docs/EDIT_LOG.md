@@ -4,6 +4,72 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v51.1 — 2026-07-14 — deck2 stage×port cards empty on real data (raw stage aliases)
+
+Owner reported empty port tables and zero سليمة/اشتباه sums on the live deck's "حسب المستوى والمنفذ" pages with real September 2026 data. Root cause: real processed rows store the RAW Excel stage alias in `row.stage` (e.g. "SECOND_STAG", "2", "الثاني" — see `DEFAULT_STAGE_MAPPINGS`), while `StageProfile.stageLabel` is the canonical Arabic label frozen at draw time. `collectStagePortStats` grouped by the raw value and the cards looked up by the canonical label, so every lookup missed. The dev-preview fixture used canonical labels and masked the bug. Same raw-equality bug zeroed per-stage "studied" counts in `calculateExecutiveKPIs`.
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**Before:**
+```ts
+    const stageKey = r.stage ?? "غير محدد";
+...
+    .map((s, i) => stagePortPopulationCard(s, i, byStage.get(s.stageLabel) ?? []))
+...
+    .map((s, i) => stagePortSampleCard(s, i, byStage.get(s.stageLabel) ?? []))
+```
+
+**After:**
+```ts
+    const stageKey = r.stage ? formatStageLabel(r.stage) : "غير محدد";
+...
+    .map((s, i) => stagePortPopulationCard(s, i, byStage.get(formatStageLabel(s.stageLabel)) ?? []))
+...
+    .map((s, i) => stagePortSampleCard(s, i, byStage.get(formatStageLabel(s.stageLabel)) ?? []))
+```
+(`formatStageLabel` maps known aliases to the canonical label and echoes unknown strings unchanged, so the no-sample fallback branch still matches.)
+
+**File:** `src/data/reporting/executiveReportData.ts`
+
+**Before:**
+```ts
+        (r) => r.selectedInSample && r.answerStatus === "submitted" && r.stage === alloc.stageLabel
+```
+
+**After:**
+```ts
+        (r) => r.selectedInSample && r.answerStatus === "submitted" && formatStageLabel(r.stage) === alloc.stageLabel
+```
+
+**File:** `src/dev/deckPreviewFixture.ts`
+
+**Before:**
+```ts
+    stage: STAGE_LABELS[pickStage()],
+...
+    const pop = rows.filter((r) => r.stage === label);
+```
+
+**After:**
+```ts
+    stage: STAGE_RAW_ALIASES[pickStage()],   // raw aliases, like real workspaces
+...
+    const pop = rows.filter((r) => r.stage === rawAlias);
+```
+(The fixture now stores raw aliases in rows and canonical labels only in the draw-time allocation records — exactly mirroring the real sampler — so the preview can no longer mask alias-mismatch bugs.)
+
+**File:** `src/data/reporting/executive/deck2/stagePortStats.test.ts`
+
+**Before:**
+```ts
+(only canonical-label stage fixtures)
+```
+
+**After:**
+```ts
+it("canonicalizes RAW Excel stage aliases so cards keyed by canonical labels find them (real-data regression)", ...);
+```
+
 ## v51 — 2026-07-14 — Executive deck: deck2 replaces v1 as the live edition
 
 Owner-requested replacement: the Reports tab's executive deck export now opens the deck2 rebuild (the `/deck-preview.html` mockup) instead of the v1 deck. Same `ExecutiveReportInput` → `ReportModel` contract, so all numbers stay identical to the Document/Workbook editions; deck2 additionally gains the B2 source-revisions footer the v1 deck already had. v1 (`executive/deck/`) is kept as the reference edition (still used by the dev preview toggle and tests).

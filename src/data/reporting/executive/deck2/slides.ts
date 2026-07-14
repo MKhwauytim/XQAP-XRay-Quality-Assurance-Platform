@@ -15,6 +15,7 @@ import type { StageProfile } from "../../executiveReportTypes";
 import { esc, fmtNum, fmtPct } from "../primitives";
 import { icon } from "../ui/icons";
 import { isRankable } from "../model/dataSufficiency";
+import { formatStageLabel } from "../../../population/stageHelpers";
 import { ORGANIZATION_PATH, ZATCA_LOGO_URL } from "../../../../branding/organization";
 
 const ARABIC_MONTHS = ["يناير","فبراير","مارس","أبريل","مايو","يونيو","يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"];
@@ -707,7 +708,14 @@ export function portSampleSlideBuilders(model: ReportModel, variantPreview: bool
 export function collectStagePortStats(model: ReportModel): Map<string, PortPopRow[]> {
   const byStage = new Map<string, Map<string, PortPopRow>>();
   for (const r of model.rows) {
-    const stageKey = r.stage ?? "غير محدد";
+    // Canonicalize: real rows carry the RAW Excel stage alias (e.g. "SECOND_STAG",
+    // "2", "الثاني"), while StageProfile.stageLabel is the canonical Arabic label
+    // frozen at sample-draw time. Raw-key grouping made every card lookup miss on
+    // real data (empty port tables, zero سليمة/اشتباه sums) — the synthetic
+    // preview fixture used canonical labels and masked it. formatStageLabel maps
+    // known aliases to the canonical label and echoes unknown strings unchanged,
+    // so the fallback branch (raw StageProfile labels) still matches too.
+    const stageKey = r.stage ? formatStageLabel(r.stage) : "غير محدد";
     const portName = r.portName ?? "غير محدد";
     let portMap = byStage.get(stageKey);
     if (!portMap) {
@@ -842,7 +850,7 @@ export function stagePortPopulationSlide(
 ): string {
   const byStage = collectStagePortStats(model);
   const cards = model.population.byStage
-    .map((s, i) => stagePortPopulationCard(s, i, byStage.get(s.stageLabel) ?? []))
+    .map((s, i) => stagePortPopulationCard(s, i, byStage.get(formatStageLabel(s.stageLabel)) ?? []))
     .join("");
   const body = `<div class="v2-stage-port-grid">${cards}</div>`;
   return v2Slide({
@@ -869,7 +877,7 @@ export function stagePortSampleSlide(
 ): string {
   const byStage = collectStagePortStats(model);
   const cards = model.population.byStage
-    .map((s, i) => stagePortSampleCard(s, i, byStage.get(s.stageLabel) ?? []))
+    .map((s, i) => stagePortSampleCard(s, i, byStage.get(formatStageLabel(s.stageLabel)) ?? []))
     .join("");
   const body = `<div class="v2-stage-port-grid">${cards}</div>`;
   return v2Slide({
