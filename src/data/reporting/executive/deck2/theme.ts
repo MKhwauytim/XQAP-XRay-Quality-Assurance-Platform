@@ -130,13 +130,27 @@ export const DECK_V2_CSS = `
 .deck-agenda-item:nth-child(4) .deck-agenda-icon{color:var(--coral);}
 
 /* ── Glossary icon-card grid (reference design) ───────────────────────────── */
+/* Glossary: two labeled category bands (sampling vocabulary / judgment
+   vocabulary) — the chip + hairline header carries the category tone, and the
+   cards inherit it, so accent color means membership, not decoration. */
+.v2-term-section{display:flex;flex-direction:column;gap:16px;height:100%;}
+.v2-term-band{display:flex;flex-direction:column;gap:10px;flex:1;min-height:0;}
+.v2-term-band-head{display:flex;align-items:center;gap:14px;}
+.v2-term-band-chip{
+  display:inline-flex;align-items:center;gap:8px;flex-shrink:0;
+  padding:5px 14px;border-radius:999px;font-size:0.72rem;font-weight:800;
+  color:var(--gold);border:1px solid rgba(244,180,0,.4);background:rgba(244,180,0,.08);
+}
+.v2-term-band.coral .v2-term-band-chip{color:var(--coral);border-color:rgba(255,118,95,.4);background:rgba(255,118,95,.08);}
+.v2-term-band-rule{flex:1;height:1px;background:linear-gradient(to left,rgba(244,180,0,.45),transparent);}
+.v2-term-band.coral .v2-term-band-rule{background:linear-gradient(to left,rgba(255,118,95,.45),transparent);}
 .v2-term-grid{
-  display:grid;grid-template-columns:repeat(4,1fr);grid-template-rows:repeat(2,1fr);gap:16px;
-  align-content:stretch;height:100%;
+  display:grid;grid-template-columns:repeat(4,1fr);grid-template-rows:1fr;gap:14px;
+  align-content:stretch;flex:1;min-height:0;
 }
 .v2-term-card{
-  display:flex;flex-direction:column;gap:12px;min-width:0;
-  border:1px solid rgba(255,255,255,.14);border-radius:14px;padding:18px 16px 16px;
+  display:flex;flex-direction:column;gap:9px;min-width:0;
+  border:1px solid rgba(255,255,255,.14);border-radius:14px;padding:14px 14px 13px;
   background:linear-gradient(180deg,rgba(14,58,95,.6),rgba(7,39,67,.8));
   position:relative;overflow:hidden;
 }
@@ -150,7 +164,7 @@ export const DECK_V2_CSS = `
 .v2-term-card-head{display:flex;align-items:center;gap:10px;}
 .v2-term-icon{
   display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;
-  width:46px;height:46px;border-radius:14px;border:1.6px solid currentColor;color:var(--gold);
+  width:38px;height:38px;border-radius:12px;border:1.6px solid currentColor;color:var(--gold);
   background:rgba(244,180,0,.08);
 }
 .v2-term-card.blue .v2-term-icon{background:rgba(107,169,248,.1);}
@@ -165,8 +179,10 @@ export const DECK_V2_CSS = `
 .v2-term-card.slate .v2-term-icon{color:var(--slate);}
 .v2-term-card.purple .v2-term-icon{color:var(--purple);}
 .v2-term-card.cyan .v2-term-icon{color:var(--cyan);}
-.v2-term-card-head b{font-size:1rem;font-weight:800;color:#fff;line-height:1.25;}
-.v2-term-card p{margin:0;font-size:0.8rem;line-height:1.6;color:rgba(255,255,255,.82);}
+.v2-term-card-head b{font-size:0.92rem;font-weight:800;color:#fff;line-height:1.25;}
+.v2-term-card p{margin:0;font-size:0.74rem;line-height:1.55;color:rgba(255,255,255,.82);}
+body.theme-light .v2-term-band-chip{background:rgba(244,180,0,.12);}
+body.theme-light .v2-term-band.coral .v2-term-band-chip{background:rgba(255,118,95,.12);}
 
 /* ── Section separator ────────────────────────────────────────────────────── */
 /* Decorative glow behind the separator content — reuses the cover page's
@@ -805,7 +821,7 @@ body.theme-light .v2-num-hero-value,body.theme-light .v2-cover-lockup-period,bod
 /* ── Print: keep every new colored element ink-faithful, avoid mid-slide breaks ── */
 @media print{
   .v2-bar-cell,.v2-prop-seg,.v2-num-tile,.v2-sep-stat,.v2-num-hero,.v2-toc-num,.v2-sep-numeral{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
-  .v2-toc-card,.v2-num-tile,.v2-term-card,.v2-stage-card,.v2-port-col,.v2-prov-item{break-inside:avoid;}
+  .v2-toc-card,.v2-num-tile,.v2-term-card,.v2-term-band,.v2-stage-card,.v2-port-col,.v2-prov-item{break-inside:avoid;}
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

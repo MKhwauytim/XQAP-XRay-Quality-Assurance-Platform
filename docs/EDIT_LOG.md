@@ -4,6 +4,44 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v53.6 — 2026-07-14 — Glossary slide: two semantic category bands
+
+Owner request ("organize this page with categories and better design"). The 8-term flat 4×2 grid with per-card rainbow accents became two labeled category bands whose color carries meaning: gold = مصطلحات المجتمع والعيّنة (population, risk levels, sample, coverage), coral = مصطلحات القرارات والجودة (suspicion, missed suspicion, reference standard, data sufficiency) — the same order the deck's sections flow. Each band: tone-coded chip (icon + label) + gradient hairline + its four cards inheriting the band tone. Cards tightened (38px icon badges, smaller type) to fit the two header rows; verified zero clipping in preview.
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**Before:**
+```ts
+const GLOSSARY: Array<{ term; def; icon; tone }> = [ /* 8 flat entries, mixed tones */ ];
+// glossarySlideBuilders paginated a flat 4×2 grid (GLOSSARY_TERMS_PER_PAGE = 8)
+```
+
+**After:**
+```ts
+const GLOSSARY_CATEGORIES: GlossaryCategory[] = [
+  { label: "مصطلحات المجتمع والعيّنة", tone: "gold",  terms: [/* 4 */] },
+  { label: "مصطلحات القرارات والجودة", tone: "coral", terms: [/* 4 */] },
+];
+// termBand(cat) renders chip + hairline + cards; single-slide builder
+```
+
+**File:** `src/data/reporting/executive/deck2/theme.ts`
+
+**Before:**
+```css
+.v2-term-grid{ ... grid-template-rows:repeat(2,1fr); height:100%; }
+.v2-term-icon{ width:46px;height:46px; ... }
+```
+
+**After:**
+```css
+.v2-term-section{display:flex;flex-direction:column;gap:16px;height:100%;}
+.v2-term-band{...} .v2-term-band-chip{...tone pill...} .v2-term-band-rule{...gradient hairline...}
+.v2-term-grid{ ... grid-template-rows:1fr; flex:1; }
+.v2-term-icon{ width:38px;height:38px; ... }
+/* + light-theme chip tints, band break-inside:avoid for print */
+```
+
 ## v53.5 — 2026-07-14 — Add visual libraries + type shims (dependencies)
 
 **File:** `package.json`
@@ -339,7 +377,7 @@ assertion unchanged (structural — no test asserted exact path strings).
 ---
 
 
-## v53 — v{N}.5 — 2026-07-14 — Tests for the wave
+## v53 — 2026-07-14 — Tests for the wave
 
 **Files (new):** `src/data/reporting/executive/ui/generativeArt.test.ts`
 (deterministic seeded mesh + pattern, `<svg>` prefix, seed sensitivity),

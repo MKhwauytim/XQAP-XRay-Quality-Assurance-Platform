@@ -475,50 +475,71 @@ export function monthInNumbersSlide(model: ReportModel, num: number, total: numb
 // ── Page 3 — المعجم ─────────────────────────────────────────────────────────
 type Tone = "gold" | "blue" | "green" | "coral" | "slate" | "purple" | "cyan";
 
-/** Essential glossary — the 8 terms an executive must share before reading the
- *  numbers (trimmed from 12; term, definition, icon, and accent tone are content
- *  and edit freely here). Definitions kept to ~two lines for the larger cards. */
-const GLOSSARY: Array<{ term: string; def: string; icon: string; tone: Tone }> = [
-  { term: "مجتمع الفحص", def: "جميع حالات الفحص بالأشعة المسجّلة خلال الشهر بعد المعالجة واستبعاد السجلات غير الصالحة.", icon: "layers", tone: "gold" },
-  { term: "العيّنة", def: "مجموعة جزئية تُسحب عشوائيًا بطريقة طبقية من المجتمع لتخضع للدراسة التفصيلية.", icon: "scan", tone: "blue" },
-  { term: "التغطية", def: "نسبة حجم العيّنة إلى حجم المجتمع — مدى تمثيل العيّنة للمجتمع.", icon: "gauge", tone: "green" },
-  { term: "اشتباه", def: "قرار فحص يشير إلى شبهة تستدعي التحقق؛ ويقابله «سليمة» حين لا تظهر شبهة.", icon: "alert", tone: "coral" },
-  { term: "مستويات المخاطر", def: "تصنيف الحالات وفق محرّك المخاطر إلى أربعة مستويات، من الأول (منخفض) إلى الرابع (حرج).", icon: "layers", tone: "purple" },
-  { term: "المراجع (المعيار)", def: "نتيجة خبير الجودة التي تُقاس عليها دقة قرارات الفحص وتُعتمد مرجعًا.", icon: "shield", tone: "gold" },
-  { term: "الاشتباه الفائت", def: "حالة قرّر الفحص أنها سليمة وأثبت المراجع أنها اشتباه — الخطر الأمني الأول.", icon: "alert", tone: "coral" },
-  { term: "كفاية البيانات", def: "حدّ أدنى من القرارات القابلة للتقييم قبل إصدار حكم أو ترتيب — ما دونه يُوصف ولا يُرتّب.", icon: "document", tone: "slate" },
+/** Essential glossary, organized into two semantic categories (owner request
+ *  2026-07-14): sampling vocabulary first, judgment vocabulary second — the
+ *  same order the deck's own sections flow. Color follows the CATEGORY (gold =
+ *  population/sample, coral = decisions/quality), not the individual card, so
+ *  the accent carries meaning instead of decoration. Per-term icons stay. */
+type GlossaryTerm = { term: string; def: string; icon: string };
+type GlossaryCategory = { label: string; icon: string; tone: Tone; terms: GlossaryTerm[] };
+const GLOSSARY_CATEGORIES: GlossaryCategory[] = [
+  {
+    label: "مصطلحات المجتمع والعيّنة",
+    icon: "layers",
+    tone: "gold",
+    terms: [
+      { term: "مجتمع الفحص", def: "جميع حالات الفحص بالأشعة المسجّلة خلال الشهر بعد المعالجة واستبعاد السجلات غير الصالحة.", icon: "layers" },
+      { term: "مستويات المخاطر", def: "تصنيف الحالات وفق محرّك المخاطر إلى أربعة مستويات، من الأول (منخفض) إلى الرابع (حرج).", icon: "layers" },
+      { term: "العيّنة", def: "مجموعة جزئية تُسحب عشوائيًا بطريقة طبقية من المجتمع لتخضع للدراسة التفصيلية.", icon: "scan" },
+      { term: "التغطية", def: "نسبة حجم العيّنة إلى حجم المجتمع، ومدى تمثيل العيّنة للمجتمع.", icon: "gauge" },
+    ],
+  },
+  {
+    label: "مصطلحات القرارات والجودة",
+    icon: "shield",
+    tone: "coral",
+    terms: [
+      { term: "اشتباه", def: "قرار فحص يشير إلى شبهة تستدعي التحقق؛ ويقابله «سليمة» حين لا تظهر شبهة.", icon: "alert" },
+      { term: "الاشتباه الفائت", def: "حالة قرّر الفحص أنها سليمة وأثبت المراجع أنها اشتباه، وهو الخطر الأمني الأول.", icon: "alert" },
+      { term: "المراجع (المعيار)", def: "نتيجة خبير الجودة التي تُقاس عليها دقة قرارات الفحص وتُعتمد مرجعًا.", icon: "shield" },
+      { term: "كفاية البيانات", def: "حدّ أدنى من القرارات القابلة للتقييم قبل إصدار حكم أو ترتيب؛ ما دونه يُوصف ولا يُرتّب.", icon: "document" },
+    ],
+  },
 ];
 
-/** One glossary card: icon-circle badge + term + definition, colored bottom border. */
-function termCard(g: (typeof GLOSSARY)[number]): string {
-  return `<div class="v2-term-card ${g.tone}">
+/** One glossary card: icon badge + term + definition, category-toned bottom rule. */
+function termCard(g: GlossaryTerm, tone: Tone): string {
+  return `<div class="v2-term-card ${tone}">
     <div class="v2-term-card-head">
-      <span class="v2-term-icon">${badgeIcon(g.icon, 20)}</span>
+      <span class="v2-term-icon">${badgeIcon(g.icon, 18)}</span>
       <b>${esc(g.term)}</b>
     </div>
     <p>${esc(g.def)}</p>
   </div>`;
 }
 
-/** Terms per page — beyond this the glossary overflows to a continuation page.
- *  8 essential terms now fit one page in a 4×2 grid of larger cards. */
-const GLOSSARY_TERMS_PER_PAGE = 8;
+/** One labeled category band: tone-coded chip + hairline + its four cards. */
+function termBand(cat: GlossaryCategory): string {
+  return `<div class="v2-term-band ${cat.tone}">
+    <div class="v2-term-band-head">
+      <span class="v2-term-band-chip">${badgeIcon(cat.icon, 14)}<b>${esc(cat.label)}</b></span>
+      <span class="v2-term-band-rule"></span>
+    </div>
+    <div class="v2-term-grid">${cat.terms.map((t) => termCard(t, cat.tone)).join("")}</div>
+  </div>`;
+}
 
-/** Build one or more المعجم slides (paginated card grid, per the reference design). */
+/** Build the المعجم slide: two labeled category bands (fits one page). */
 export function glossarySlideBuilders(variantPreview: boolean): SlideBuilder[] {
-  const pages = Math.max(1, Math.ceil(GLOSSARY.length / GLOSSARY_TERMS_PER_PAGE));
-  const builders: SlideBuilder[] = [];
-  for (let page = 0; page < pages; page++) {
-    const chunk = GLOSSARY.slice(page * GLOSSARY_TERMS_PER_PAGE, (page + 1) * GLOSSARY_TERMS_PER_PAGE);
-    const cont = page > 0 ? " (تابع)" : "";
-    builders.push((num, total) => {
-      const body = `<div class="v2-term-grid">${chunk.map(termCard).join("")}</div>`;
+  return [
+    (num, total) => {
+      const body = `<div class="v2-term-section">${GLOSSARY_CATEGORIES.map(termBand).join("")}</div>`;
       return v2Slide({
-        id: `slide-glossary-${page + 1}`,
-        title: `المعجم${cont}`,
+        id: "slide-glossary-1",
+        title: "المعجم",
         eyebrow: "المعجم",
         iconName: "document",
-        headline: `المعجم — المصطلحات الرئيسية${cont}`,
+        headline: "المعجم — المصطلحات الرئيسية",
         subhead: "توحيد المصطلحات قبل قراءة النتائج.",
         bodyVariants: [body, body, body, body],
         variantPreview,
@@ -526,9 +547,8 @@ export function glossarySlideBuilders(variantPreview: boolean): SlideBuilder[] {
         total,
         section: "glossary",
       });
-    });
-  }
-  return builders;
+    },
+  ];
 }
 
 // ── Section separator — full-bleed color-blocked cover ───────────────────────
@@ -1691,7 +1711,7 @@ export function buildDeckV2Slides(
       range: glossaryEnd > glossaryStart ? `${pad(glossaryStart)}–${pad(glossaryEnd)}` : pad(glossaryStart),
       iconName: "document",
       tone: "blue",
-      figure: fmtNum(GLOSSARY.length),
+      figure: fmtNum(GLOSSARY_CATEGORIES.reduce((s, c) => s + c.terms.length, 0)),
       figureLabel: "مصطلح",
     },
     {
