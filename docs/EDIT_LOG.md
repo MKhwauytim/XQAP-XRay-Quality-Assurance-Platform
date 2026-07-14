@@ -4,6 +4,53 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v51.4 — 2026-07-14 — deck2 land/sea tables: ruled filler instead of blank void
+
+Owner request ("fix the gaps under الاجمالي for all tables"): the land/sea port, quality, and accuracy tables pin their الإجمالي row to the card bottom with one pixel-exact invisible spacer, which left a featureless void when a table has few rows. The spacer now carries `--ghost-row-h` (the tier's exact measured row height) and CSS paints faint row separators inside it with a repeating gradient, so the leftover space reads as continued empty grid. Deliberately NOT real ghost `<tr>`s here: plain-cell ghosts render taller than the sample table's stacked frac rows and would break the measured budget math (METRICS_*), clipping the totals row. The stage-port cards (v51.2) keep their real ghost rows — all their cells are plain.
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**Before:**
+```ts
+  const blankRow =
+    fillerPx > 0 ? `<tr class="v2-blank" style="height:${fillerPx}px"><td colspan="${span}">&nbsp;</td></tr>` : "";
+```
+(in portTable, qualityTable, accuracyTable)
+
+**After:**
+```ts
+function blankFillerRow(fillerPx: number, span: number, rowH: number): string {
+  if (fillerPx <= 0) return "";
+  return `<tr class="v2-blank" style="height:${fillerPx}px;--ghost-row-h:${rowH}px"><td colspan="${span}">&nbsp;</td></tr>`;
+}
+...
+  const blankRow = blankFillerRow(fillerPx, span, metrics.rowH);
+```
+
+**File:** `src/data/reporting/executive/deck2/theme.ts`
+
+**Before:**
+```css
+.v2-port-col .deck-table tbody tr.v2-blank,
+.v2-port-col .deck-table tbody tr.v2-blank td{
+  border-bottom-color:transparent;color:transparent;background:transparent!important;
+}
+```
+
+**After:**
+```css
+.v2-port-col .deck-table tbody tr.v2-blank,
+.v2-port-col .deck-table tbody tr.v2-blank td{ border-bottom-color:transparent;color:transparent; }
+.v2-port-col .deck-table tbody tr.v2-blank{background:transparent!important;}
+.v2-port-col .deck-table tbody tr.v2-blank td{
+  background:repeating-linear-gradient(to bottom, transparent 0,
+    transparent calc(var(--ghost-row-h,41.6px) - 1px),
+    rgba(255,255,255,.07) calc(var(--ghost-row-h,41.6px) - 1px),
+    rgba(255,255,255,.07) var(--ghost-row-h,41.6px))!important;
+}
+/* + body.theme-light variant with rgba(10,45,74,.09) */
+```
+
 ## v51.3 — 2026-07-14 — deck2 stage×port cards: tone-tinted الإجمالي totals row
 
 Owner request. The stage-port cards' totals row had no styling of its own and blended in with the data rows. It is now a distinct summary band tinted with the card's own stage tone (gold/blue/green/coral at 16% alpha, 55% top border, weight 900), with dark ink under the light theme. `color-mix` is safe — Chromium-only app.

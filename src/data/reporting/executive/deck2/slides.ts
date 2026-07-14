@@ -513,6 +513,17 @@ const METRICS_COMPACT_SAMPLE: ModeMetrics = { rowH: 23.925, theadH: 25, tfootH: 
  *  clipping (its 1px border eats into the content box on each side). */
 const TABLE_BUDGET_PX = 387;
 
+/** The pixel-exact tfoot-pinning spacer, carrying this tier's exact row height
+ *  (--ghost-row-h) so the CSS can paint faint row separators inside it — the
+ *  leftover space reads as continued empty grid, not a void. Deliberately ONE
+ *  pixel-sized row, NOT real ghost <tr>s: plain-cell ghosts render taller than
+ *  the sample table's stacked frac rows and would break the measured budget
+ *  math (see METRICS_* notes above), clipping the totals row. */
+function blankFillerRow(fillerPx: number, span: number, rowH: number): string {
+  if (fillerPx <= 0) return "";
+  return `<tr class="v2-blank" style="height:${fillerPx}px;--ghost-row-h:${rowH}px"><td colspan="${span}">&nbsp;</td></tr>`;
+}
+
 /**
  * One land/sea table as a tinted card (per the reference design). `population`
  * = plain month numbers (الحالات/سليمة/اشتباه). `sample` = same shape, but every
@@ -549,8 +560,7 @@ function portTable(
   const metrics = compact ? (mode === "sample" ? METRICS_COMPACT_SAMPLE : METRICS_COMPACT) : METRICS_NORMAL;
   const usedPx = metrics.theadH + metrics.tfootH + dataRowCount * metrics.rowH;
   const fillerPx = Math.max(0, TABLE_BUDGET_PX - usedPx);
-  const blankRow =
-    fillerPx > 0 ? `<tr class="v2-blank" style="height:${fillerPx}px"><td colspan="${span}">&nbsp;</td></tr>` : "";
+  const blankRow = blankFillerRow(fillerPx, span, metrics.rowH);
 
   const sum = (f: (p: PortPopRow) => number) => rows.reduce((s, p) => s + f(p), 0);
   const totalPop = sum((p) => p.total);
@@ -991,8 +1001,7 @@ function qualityTable(title: string, rows: PortQualityRow[], variant: "land" | "
   const metrics = compact ? METRICS_COMPACT : METRICS_NORMAL;
   const usedPx = metrics.theadH + metrics.tfootH + dataRowCount * metrics.rowH;
   const fillerPx = Math.max(0, TABLE_BUDGET_PX - usedPx);
-  const blankRow =
-    fillerPx > 0 ? `<tr class="v2-blank" style="height:${fillerPx}px"><td colspan="${span}">&nbsp;</td></tr>` : "";
+  const blankRow = blankFillerRow(fillerPx, span, metrics.rowH);
 
   const sum = (f: (p: PortQualityRow) => number) => rows.reduce((s, p) => s + f(p), 0);
   const totalMarkP = sum((p) => p.markingPresent);
@@ -1110,8 +1119,7 @@ function accuracyTable(title: string, rows: PortAccuracyRow[], variant: "land" |
   const metrics = compact ? METRICS_COMPACT : METRICS_NORMAL;
   const usedPx = metrics.theadH + metrics.tfootH + dataRowCount * metrics.rowH;
   const fillerPx = Math.max(0, TABLE_BUDGET_PX - usedPx);
-  const blankRow =
-    fillerPx > 0 ? `<tr class="v2-blank" style="height:${fillerPx}px"><td colspan="${span}">&nbsp;</td></tr>` : "";
+  const blankRow = blankFillerRow(fillerPx, span, metrics.rowH);
 
   const sum = (f: (p: PortAccuracyRow) => number) => rows.reduce((s, p) => s + f(p), 0);
   const totalEvaluable = sum((p) => p.evaluable);

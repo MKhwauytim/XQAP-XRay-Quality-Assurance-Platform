@@ -315,12 +315,31 @@ body.theme-light .v2-stage-port-card .deck-table tfoot td{color:#0a2d4a;}
   font-weight:900;color:#fff;background:rgba(255,255,255,.07);
   border-top:1px solid rgba(255,255,255,.2);border-bottom:0;
 }
-/* Invisible spacer rows — push tfoot down to a fixed, consistent bottom position.
-   Both the <tr> (zebra-stripe background lives here) and its <td> must be
-   overridden, or every other blank row shows a faint stripe bleeding through. */
+/* Spacer rows — push tfoot down to a fixed, consistent bottom position.
+   The <tr> (zebra-stripe background lives here) must stay transparent, or
+   every other blank row shows a faint stripe bleeding through. The <td>,
+   however, is painted with faint row separators at this tier's EXACT row
+   height (--ghost-row-h, set inline in slides.ts) so the leftover space
+   reads as continued empty grid rather than a void under the data rows
+   (owner-reported gap inconsistency, 2026-07-14). */
 .v2-port-col .deck-table tbody tr.v2-blank,
 .v2-port-col .deck-table tbody tr.v2-blank td{
-  border-bottom-color:transparent;color:transparent;background:transparent!important;
+  border-bottom-color:transparent;color:transparent;
+}
+.v2-port-col .deck-table tbody tr.v2-blank{background:transparent!important;}
+.v2-port-col .deck-table tbody tr.v2-blank td{
+  background:repeating-linear-gradient(to bottom,
+    transparent 0,
+    transparent calc(var(--ghost-row-h,41.6px) - 1px),
+    rgba(255,255,255,.07) calc(var(--ghost-row-h,41.6px) - 1px),
+    rgba(255,255,255,.07) var(--ghost-row-h,41.6px))!important;
+}
+body.theme-light .v2-port-col .deck-table tbody tr.v2-blank td{
+  background:repeating-linear-gradient(to bottom,
+    transparent 0,
+    transparent calc(var(--ghost-row-h,41.6px) - 1px),
+    rgba(10,45,74,.09) calc(var(--ghost-row-h,41.6px) - 1px),
+    rgba(10,45,74,.09) var(--ghost-row-h,41.6px))!important;
 }
 /* Compact variant (small overflow, 1-3 rows): trims padding/font so a table
    can fit its full port list on one page instead of spilling a nearly empty
