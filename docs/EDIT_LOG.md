@@ -4,6 +4,66 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v51 — 2026-07-14 — Executive deck: deck2 replaces v1 as the live edition
+
+Owner-requested replacement: the Reports tab's executive deck export now opens the deck2 rebuild (the `/deck-preview.html` mockup) instead of the v1 deck. Same `ExecutiveReportInput` → `ReportModel` contract, so all numbers stay identical to the Document/Workbook editions; deck2 additionally gains the B2 source-revisions footer the v1 deck already had. v1 (`executive/deck/`) is kept as the reference edition (still used by the dev preview toggle and tests).
+
+**File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
+
+**Before:**
+```tsx
+import { openExecutiveDeck } from "../../../../data/reporting/executive/deck";
+...
+        openExecutiveDeck(execInput, names);   // handleExport("deck")
+...
+          openExecutiveDeck(execInput, names); // generate("executive-deck")
+```
+
+**After:**
+```tsx
+import { openExecutiveDeckV2 } from "../../../../data/reporting/executive/deck2";
+...
+        openExecutiveDeckV2(execInput, names);
+...
+          openExecutiveDeckV2(execInput, names);
+```
+
+**File:** `src/data/reporting/executive/deck2/index.ts`
+
+**Before:**
+```ts
+<style>${DECK_CSS}${DECK_V2_CSS}</style>
+...
+  return buildDeckV2Html(slides, formatMonthLabel(input.monthFolderName), variantPreview);
+```
+
+**After:**
+```ts
+<style>${DECK_CSS}${DECK_V2_CSS}${SOURCE_REVISIONS_CSS}</style>
+...
+  return buildDeckV2Html(
+    slides,
+    formatMonthLabel(input.monthFolderName),
+    variantPreview,
+    sourceRevisionsFooterHtml(input.sourceRevisions, esc),
+  );
+```
+(`buildDeckV2Html` gained an optional `footerNote = ""` parameter rendered after the slides, mirroring the v1 viewer.)
+
+**File:** `src/data/reporting/executive/deck2/deck2.test.ts`
+
+**Before:**
+```ts
+(no source-revisions coverage)
+```
+
+**After:**
+```ts
+it("renders the source-revisions footer when the input carries revisions (B2)", ...);
+it("omits the footer entirely when no revisions are supplied", ...); // markup-anchored assertion
+```
+(Also updated the stale "wired to the live button" comments in `executive/deck/index.ts` and `executiveBuilders.xss.test.ts`.)
+
 ## v50 — 2026-07-14 — Per-reviewer KPI upgrade + SPC p-charts (recharts)
 
 Adds a pure per-reviewer KPI + p-chart stats module, full unit tests, and a

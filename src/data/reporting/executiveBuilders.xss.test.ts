@@ -1,8 +1,8 @@
 // D2 (Batch 3) — XSS regression tests for the four report builders that share the
 // `ExecutiveReportInput` model:
 //   - buildExecutiveReport   (executive document path)
-//   - buildExecutiveDeck     (v1 presentation deck — the edition wired to the live button)
-//   - buildExecutiveDeckV2   (deck2 presentation)
+//   - buildExecutiveDeck     (v1 presentation deck — reference edition)
+//   - buildExecutiveDeckV2   (deck2 presentation — wired to the live button since 2026-07-14)
 //   - buildManagementReport  (C2 management report)
 //
 // They take the identical input type, so one shared `makeMaliciousExecInput()` avoids

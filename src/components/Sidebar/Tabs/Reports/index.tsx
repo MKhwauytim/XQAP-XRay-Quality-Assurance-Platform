@@ -13,7 +13,7 @@ import type { PreparedPopulationRow } from "../../../../data/population/populati
 import { buildDistributionXlsx, openDistributionDocument, openDistributionDeck } from "../../../../data/reporting/distributionReport";
 import { buildSampleXlsx, openSampleReport, openSampleDeck } from "../../../../data/reporting/sampleReport";
 import { openExecutiveReport, buildExecutiveXlsx } from "../../../../data/reporting/executiveReport";
-import { openExecutiveDeck } from "../../../../data/reporting/executive/deck";
+import { openExecutiveDeckV2 } from "../../../../data/reporting/executive/deck2";
 import { openManagementReport } from "../../../../data/reporting/management/managementReport";
 import { openManagementDeck } from "../../../../data/reporting/management/managementDeck";
 import { buildManagementWorkbook } from "../../../../data/reporting/management/managementWorkbook";
@@ -221,7 +221,7 @@ function ReportsContent() {
   }, [directoryHandle, selectedMonth]);
 
   // Assemble the executive-report input from disk — the SAME inputs that feed
-  // openExecutiveReport / openExecutiveDeck / buildExecutiveXlsx, so the live
+  // openExecutiveReport / openExecutiveDeckV2 / buildExecutiveXlsx, so the live
   // dashboard and the exported artifacts can never disagree.
   const loadExecInput = useCallback(async (): Promise<ExecutiveReportInput | null> => {
     if (!directoryHandle || !selectedMonth) return null;
@@ -306,7 +306,7 @@ function ReportsContent() {
         openExecutiveReport(execInput, names);
         showToast("ok", "تم فتح التقرير التفصيلي.");
       } else if (kind === "deck") {
-        openExecutiveDeck(execInput, names);
+        openExecutiveDeckV2(execInput, names);
         showToast("ok", "تم فتح العرض التنفيذي.");
       } else {
         buildExecutiveXlsx(execInput, names);
@@ -396,7 +396,7 @@ function ReportsContent() {
           buildExecutiveXlsx(execInput, names);
           showToast("ok", "تم تنزيل ملف بيانات التقرير (Excel).");
         } else if (type === "executive-deck") {
-          openExecutiveDeck(execInput, names);
+          openExecutiveDeckV2(execInput, names);
           showToast("ok", "تم فتح العرض التنفيذي (الشرائح) — استخدم طباعة/PDF.");
         } else {
           openExecutiveReport(execInput, names);

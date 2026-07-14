@@ -85,6 +85,25 @@ describe("buildExecutiveDeckV2 — production path (no opts)", () => {
     const b = buildExecutiveDeckV2(fixture, {}, { variantPreview: false });
     expect(a).toBe(b);
   });
+
+  it("renders the source-revisions footer when the input carries revisions (B2)", () => {
+    const fixture = {
+      ...input([popRow()]),
+      sourceRevisions: { "population.final.json": 7, "sample.master.json": 3 },
+    };
+    const html = buildExecutiveDeckV2(fixture);
+    expect(html).toContain("population.final.json");
+    expect(html).toContain("مراجعة 7");
+    expect(html).toContain("مراجعة 3");
+  });
+
+  it("omits the footer entirely when no revisions are supplied", () => {
+    // Match markup, not the bare substring — SOURCE_REVISIONS_CSS always ships
+    // the `.srev-file` selector text (same false-positive noted above for the
+    // variant-stack CSS).
+    const html = buildExecutiveDeckV2(input([popRow()]));
+    expect(html).not.toContain('<span class="srev-file"');
+  });
 });
 
 describe("buildExecutiveDeckV2 — preview mode", () => {

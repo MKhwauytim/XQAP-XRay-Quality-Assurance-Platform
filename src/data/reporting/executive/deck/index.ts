@@ -2,7 +2,9 @@
 // landscape slides from a single `ReportModel` (design §3.6) — the same analytical
 // layer that powers the Document and Workbook, so the numbers can never disagree.
 //
-// Public contract (the Reports/analytics dashboard imports these):
+// REFERENCE EDITION (v1). As of 2026-07-14 the Reports tab exports deck2
+// (../deck2) instead; this edition is kept for comparison and the dev preview
+// (/deck-preview.html) only.
 //   buildExecutiveDeck(input, employeeDisplayNames?) → string (self-contained HTML)
 //   openExecutiveDeck(input, employeeDisplayNames?)  → void   (open/download)
 

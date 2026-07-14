@@ -1,7 +1,8 @@
 // Executive deck v2 entry points (content-first rework, 2026-07-04).
 // Same contract as the v1 deck: one ReportModel drives everything, so the
-// numbers can never disagree with the Document/Workbook editions. The v1 deck
-// (../deck) stays untouched as the reference edition until v2 replaces it.
+// numbers can never disagree with the Document/Workbook editions.
+// LIVE EDITION since 2026-07-14: the Reports tab's executive deck export calls
+// openExecutiveDeckV2. The v1 deck (../deck) remains as the reference edition.
 
 import { buildReportModel } from "../model/reportModel";
 import { buildDeckV2Slides } from "./slides";
@@ -10,6 +11,7 @@ import { DECK_V2_CSS } from "./theme";
 import { esc } from "../primitives";
 import { icon } from "../ui/icons";
 import { openOrDownload } from "../../htmlReport";
+import { SOURCE_REVISIONS_CSS, sourceRevisionsFooterHtml } from "../../sourceRevisions";
 import type { ExecutiveReportInput } from "../../executiveReportTypes";
 
 const ARABIC_MONTHS = ["يناير","فبراير","مارس","أبريل","مايو","يونيو","يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"];
@@ -130,14 +132,19 @@ const DECK_VARIANT_SCRIPT = `(function(){
   }).catch(function(){});
 })();`;
 
-export function buildDeckV2Html(slides: string, monthLabel: string, variantPreview = false): string {
+export function buildDeckV2Html(
+  slides: string,
+  monthLabel: string,
+  variantPreview = false,
+  footerNote = "",
+): string {
   return `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>العرض التنفيذي — ${esc(monthLabel)}</title>
-<style>${DECK_CSS}${DECK_V2_CSS}</style>
+<style>${DECK_CSS}${DECK_V2_CSS}${SOURCE_REVISIONS_CSS}</style>
 </head>
 <body>
 <nav class="deck-nav" id="deck-nav" aria-label="التنقّل بين أقسام العرض">
@@ -173,6 +180,7 @@ export function buildDeckV2Html(slides: string, monthLabel: string, variantPrevi
     </div>
   </div>
 ${slides}
+${footerNote}
 </div>
 <script>${DECK_NAV_SCRIPT}${variantPreview ? DECK_VARIANT_SCRIPT : ""}</script>
 </body>
@@ -187,7 +195,12 @@ export function buildExecutiveDeckV2(
   const variantPreview = opts?.variantPreview ?? false;
   const model = buildReportModel(input, employeeDisplayNames);
   const slides = buildDeckV2Slides(model, new Date(), variantPreview);
-  return buildDeckV2Html(slides, formatMonthLabel(input.monthFolderName), variantPreview);
+  return buildDeckV2Html(
+    slides,
+    formatMonthLabel(input.monthFolderName),
+    variantPreview,
+    sourceRevisionsFooterHtml(input.sourceRevisions, esc),
+  );
 }
 
 export function openExecutiveDeckV2(
