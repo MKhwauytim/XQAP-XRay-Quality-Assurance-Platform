@@ -38,7 +38,7 @@ const XLSX_ROWS_PER_PART = 250_000;
  *   - AUTOMATIC backups are pruned to the AUTO_BACKUP_RETENTION_COUNT most
  *     recent (by createdAt); older automatic backups are removed after each new
  *     automatic backup succeeds.
- * See `docs/data-system-report.md` (retention section) for the authoritative doc.
+ * See `docs/architecture/data-system-report.md` (retention section) for the authoritative doc.
  */
 export const AUTO_BACKUP_RETENTION_COUNT = 30;
 

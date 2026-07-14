@@ -62,7 +62,7 @@ npx vitest run src/data/sampling/sampleAlgorithm.test.ts  # run a single test fi
 
 The user picks a root directory. The current layout uses **numbered roots**; legacy
 unnumbered folders (`Population/`, `templates/`, `.system/`) are still read when present.
-**`docs/data-system-report.md` is the authoritative, detailed reference for every file
+**`docs/architecture/data-system-report.md` is the authoritative, detailed reference for every file
 and path** — keep it in sync. Summary:
 
 ```
@@ -93,7 +93,7 @@ Month folder names follow the pattern `{month}-{monthname-en}-{year}`, lowercase
    - Roles: `guest` / `employee` / `supervisor` / `manager` / `admin` (5 roles — see `AuthRole` in `authTypes.ts`). `admin` is the bootstrap superuser; `manager` is the top managed role. `App.tsx` filters tabs by role + permission matrix.
    - `MANAGED_TABS` in `userManagement.ts` must list every tab; `createDefaultPermissions()` must include all role×tab combinations.
 
-   > **Security model — advisory only.** With no backend, all role/permission checks run in the browser and all business data is plain JSON on disk. A determined user can edit `localStorage` or the JSON files directly to self-elevate or tamper. The auth layer is a UX/role-routing guard, **not** a trust boundary. The bootstrap admin hash ships in the client bundle, so the passcode must be strong (it is offline-crackable). Do not treat this app as a defense against malicious insiders. Full risk-acceptance detail (trust boundary, passcode policy, viewer-passcode note, localStorage/JSON tamperability, sign-off): `docs/SECURITY_MODEL.md`.
+   > **Security model — advisory only.** With no backend, all role/permission checks run in the browser and all business data is plain JSON on disk. A determined user can edit `localStorage` or the JSON files directly to self-elevate or tamper. The auth layer is a UX/role-routing guard, **not** a trust boundary. The bootstrap admin hash ships in the client bundle, so the passcode must be strong (it is offline-crackable). Do not treat this app as a defense against malicious insiders. Full risk-acceptance detail (trust boundary, passcode policy, viewer-passcode note, localStorage/JSON tamperability, sign-off): `docs/architecture/SECURITY_MODEL.md`.
 
 2. **Workspace folder on disk (business data)** — `src/data/`
    - Safe write layer: `safeWriteJson` / `safeReadJson` in `src/data/storage/safeWrite.ts`. Each write: snapshot current → `{file}.bak`, stage serialized content in `{file}.tmp` and verify it, then commit to the live file and re-verify (rolling back from `.bak` on failure). The File System Access API has no atomic rename, so this is snapshot-and-verify, not a true atomic swap; `safeReadJson` recovers from `.bak` if the live file is corrupt.

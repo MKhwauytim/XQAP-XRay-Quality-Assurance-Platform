@@ -4,6 +4,22 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v51.5 — 2026-07-14 — Repo/docs reorganization: sectioned docs tree + root cleanup
+
+Owner request ("organize this ... smarter and better sections"). Docs-only moves plus three comment-path updates in code. New structure: `docs/architecture/` (+ `data-system-report.md`, `SECURITY_MODEL.md` moved in), new `docs/product/` (PRODUCT_PAGES, GAP_ANALYSIS, PRODUCT_SPECIFICATION, RELEASE_CHECKLIST), `docs/design/` (+ design-system.md, UI_ENHANCEMENT_PLAN), new `docs/archive/` (legacy 01–04 docs, EDIT_LOG.design-staging, `plans-history/` = former docs/superpowers). New `docs/README.md` index with a domain guide (data intake, sampling, distribution, answers, approvals, reporting, KPIs, auth, storage → code + docs). Root cleanup: stale logs and `lint-report.json` removed, `testsprite_tests/tmp/` untracked, both gitignored. `docs/EDIT_LOG.md` deliberately NOT moved (build imports it via `?raw`).
+
+**File:** `CLAUDE.md`, `src/data/approvals/approvalTypes.ts`, `src/data/audit/actionLog.ts`, `src/data/backup/backupStorage.ts`
+
+**Before:**
+```
+docs/data-system-report.md · docs/SECURITY_MODEL.md   (comment/doc references)
+```
+
+**After:**
+```
+docs/architecture/data-system-report.md · docs/architecture/SECURITY_MODEL.md
+```
+
 ## v51.4 — 2026-07-14 — deck2 land/sea tables: ruled filler instead of blank void
 
 Owner request ("fix the gaps under الاجمالي for all tables"): the land/sea port, quality, and accuracy tables pin their الإجمالي row to the card bottom with one pixel-exact invisible spacer, which left a featureless void when a table has few rows. The spacer now carries `--ghost-row-h` (the tier's exact measured row height) and CSS paints faint row separators inside it with a repeating gradient, so the leftover space reads as continued empty grid. Deliberately NOT real ghost `<tr>`s here: plain-cell ghosts render taller than the sample table's stacked frac rows and would break the measured budget math (METRICS_*), clipping the totals row. The stage-port cards (v51.2) keep their real ghost rows — all their cells are plain.

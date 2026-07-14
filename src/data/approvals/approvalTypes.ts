@@ -30,7 +30,7 @@ export type DecisionEvent = {
    * Absent on the first decision in a file and on legacy events written before B5.
    * TAMPER-EVIDENT ONLY: with no backend/secret key an editor who rewrites a decision
    * can recompute the whole chain — this catches accidental/out-of-band edits, not a
-   * determined tamperer (see docs/SECURITY_MODEL.md).
+   * determined tamperer (see docs/architecture/SECURITY_MODEL.md).
    */
   previousDecisionHash?: string;
 };

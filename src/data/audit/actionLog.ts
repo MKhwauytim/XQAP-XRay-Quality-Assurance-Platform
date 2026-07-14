@@ -53,7 +53,7 @@ export type WorkspaceActionArchiveFile = {
    * djb2 hash of the previous calendar year's archive file at the time this one was
    * written (B5). Absent when no prior-year archive exists. TAMPER-EVIDENT only —
    * no secret key, so a determined editor can recompute the chain (see
-   * docs/SECURITY_MODEL.md); it catches accidental/out-of-band edits.
+   * docs/architecture/SECURITY_MODEL.md); it catches accidental/out-of-band edits.
    */
   previousArchiveHash?: string;
   entries: WorkspaceActionEntry[];
