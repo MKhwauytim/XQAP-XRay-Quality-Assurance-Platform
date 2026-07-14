@@ -15,11 +15,17 @@
     "check:hex-literals": "node scripts/check-hex-literals.mjs"
   },
   "dependencies": {
+    "@fontsource/ibm-plex-sans-arabic": "^5.2.9",
+    "d3-scale": "^4.0.2",
+    "d3-shape": "^3.2.0",
+    "geopattern": "^1.2.3",
     "hash-wasm": "^4.12.0",
     "lucide-react": "^1.21.0",
+    "qrcode": "^1.5.4",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "recharts": "^3.8.1",
+    "trianglify": "^4.1.1",
     "xlsx": "file:vendor/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
@@ -27,7 +33,11 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
+    "@types/d3-scale": "^4.0.9",
+    "@types/d3-shape": "^3.1.8",
+    "@types/geopattern": "^1.2.9",
     "@types/node": "^25.9.3",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",

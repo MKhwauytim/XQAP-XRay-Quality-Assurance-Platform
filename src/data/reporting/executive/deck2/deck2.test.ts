@@ -225,3 +225,42 @@ describe("stage×port grid slides", () => {
     expect(stage1Card).toContain("<td>الإجمالي</td><td>1</td><td>1</td><td>2</td>");
   });
 });
+
+describe("visual libraries wave — provenance QR + embedded Arabic font", () => {
+  // A sentinel SVG so the assertion keys on the exact spliced markup, not on the
+  // (always-present) `.v2-prov-qr` CSS selector text in the theme block.
+  const FAKE_QR = '<svg data-fake-qr="1" viewBox="0 0 10 10"></svg>';
+
+  it("splices the provenance QR into the closing slide when revisions exist", () => {
+    const withRev = {
+      ...input([popRow()]),
+      sourceRevisions: { "population.final.json": 7 },
+    };
+    const html = buildExecutiveDeckV2(withRev, {}, { provenanceQrSvg: FAKE_QR });
+    expect(html).toContain('<div class="v2-prov-qr">');
+    expect(html).toContain('data-fake-qr="1"');
+  });
+
+  it("omits the QR and keeps the graceful empty state when no revisions are supplied", () => {
+    const html = buildExecutiveDeckV2(input([popRow()]), {}, { provenanceQrSvg: FAKE_QR });
+    expect(html).toContain('<div class="v2-prov-empty"');
+    expect(html).not.toContain('data-fake-qr="1"');
+    expect(html).not.toContain('<div class="v2-prov-qr">');
+  });
+
+  it("embeds the IBM Plex Sans Arabic @font-face (base64 woff2) in the report HTML", () => {
+    const html = buildExecutiveDeckV2(input([popRow()]));
+    expect(html).toContain("@font-face");
+    expect(html).toContain('font-family:"IBM Plex Sans Arabic"');
+    expect(html).toContain("base64");
+    expect(html).toContain('format("woff2")');
+  });
+
+  it("renders a deterministic seeded cover mesh SVG on the cover slide", () => {
+    const a = buildExecutiveDeckV2(input([popRow()]));
+    const b = buildExecutiveDeckV2(input([popRow()]));
+    expect(a).toContain('class="v2-cover-mesh"');
+    // Same month key → byte-identical deck output (mesh + patterns are seeded).
+    expect(a).toBe(b);
+  });
+});

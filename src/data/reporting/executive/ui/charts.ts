@@ -14,6 +14,12 @@
 
 import { FONT_FAMILY, TYPE, clamp, clampPct, cssVar, seriesColor } from "./tokens";
 import { esc } from "../primitives";
+// Headless d3 geometry: path-string generators only (no DOM, no renderer). Used
+// for smoother donut/gauge arcs (padAngle + cornerRadius), a monotone sparkline
+// curve, and a smooth funnel connector — the escText/RTL/empty-state discipline
+// and every public signature below are unchanged; d3 only produces the `d="…"`.
+import { arc as d3arc, pie as d3pie, line as d3line, area as d3area, curveMonotoneX, curveBumpY } from "d3-shape";
+import { scaleLinear } from "d3-scale";
 
 // ── shared helpers ──────────────────────────────────────────────────────────
 
@@ -149,15 +155,6 @@ export function rankedBar(data: LabeledValue[], opts: ChartOpts = {}): string {
 
 // ── donut ───────────────────────────────────────────────────────────────────
 
-function arcPath(cx: number, cy: number, rad: number, a0: number, a1: number): string {
-  const x0 = cx + rad * Math.cos(a0);
-  const y0 = cy + rad * Math.sin(a0);
-  const x1 = cx + rad * Math.cos(a1);
-  const y1 = cy + rad * Math.sin(a1);
-  const large = a1 - a0 > Math.PI ? 1 : 0;
-  return `M ${r(x0)} ${r(y0)} A ${r(rad)} ${r(rad)} 0 ${large} 1 ${r(x1)} ${r(y1)}`;
-}
-
 export function donut(data: LabeledValue[], opts: ChartOpts = {}): string {
   const positive = (data ?? []).filter((d) => Number.isFinite(d.value) && d.value > 0);
   const total = positive.reduce((s, d) => s + d.value, 0);
@@ -175,19 +172,26 @@ export function donut(data: LabeledValue[], opts: ChartOpts = {}): string {
   const cy = ringAreaH / 2;
   const rad = Math.min(w, ringAreaH) / 2 - 14;
   const stroke = Math.max(10, rad * 0.34);
+  const rOuter = rad + stroke / 2;
+  const rInner = Math.max(0, rad - stroke / 2);
 
-  let acc = -Math.PI / 2;
-  const segs = positive
-    .map((d, i) => {
-      const frac = d.value / total; // total > 0 guaranteed
-      const a0 = acc;
-      const a1 = acc + frac * Math.PI * 2;
-      acc = a1;
-      // full-circle single segment: draw a ring instead of a 0-length arc
-      if (frac >= 0.9999) {
-        return `<circle cx="${r(cx)}" cy="${r(cy)}" r="${r(rad)}" fill="none" stroke="${seriesColor(i)}" stroke-width="${r(stroke)}"/>`;
-      }
-      return `<path d="${arcPath(cx, cy, rad, a0, a1)}" fill="none" stroke="${seriesColor(i)}" stroke-width="${r(stroke)}" stroke-linecap="butt"/>`;
+  // d3-pie lays out the segments (start at 12 o'clock, clockwise — same as the
+  // hand-rolled `-π/2` start), d3-arc renders each as a true filled annulus with
+  // a small padAngle gap and rounded corners. A lone full-circle segment gets no
+  // pad/corner so it stays a clean ring.
+  const single = positive.length === 1;
+  const arcGen = d3arc<{ startAngle: number; endAngle: number }>()
+    .innerRadius(rInner)
+    .outerRadius(rOuter)
+    .padAngle(single ? 0 : 0.02)
+    .cornerRadius(single ? 0 : Math.min(6, stroke / 2));
+  const layout = d3pie<LabeledValue>()
+    .sort(null)
+    .value((d) => d.value)(positive);
+  const segs = layout
+    .map((sliceArc, i) => {
+      const d = arcGen({ startAngle: sliceArc.startAngle, endAngle: sliceArc.endAngle }) ?? "";
+      return `<path d="${d}" fill="${seriesColor(i)}" transform="translate(${r(cx)},${r(cy)})"/>`;
     })
     .join("");
 
@@ -232,11 +236,18 @@ export function gauge(value: number | null, opts: ChartOpts = {}): string {
   const cy = dialH - 18;
   const rad = Math.min(w / 2, dialH - 24) - 8;
   const stroke = Math.max(10, rad * 0.22);
-  // semicircle from 180° (left) to 0° (right)
-  const a0 = Math.PI;
-  const a1 = Math.PI + (pct / 100) * Math.PI;
+  // Upper semicircle, low→high reading left→right (a physical dial). In d3-arc's
+  // convention (0 = 12 o'clock, clockwise +), the left end is −π/2 and the right
+  // end is +π/2, so the value sweeps −π/2 → −π/2 + (pct/100)·π.
+  const A_START = -Math.PI / 2;
+  const A_END = Math.PI / 2;
+  const aVal = A_START + (pct / 100) * Math.PI;
   const role =
     pct >= 90 ? "success" : pct >= 75 ? "primary" : pct >= 50 ? "info" : "danger";
+  const dialArc = d3arc<{ startAngle: number; endAngle: number }>()
+    .innerRadius(rad - stroke / 2)
+    .outerRadius(rad + stroke / 2)
+    .cornerRadius(stroke / 2);
   // Axis reference labels at the two ends of the dial's scale. The dial itself stays
   // geometric (a semicircle always reads low→high left→right, like a physical gauge) —
   // only the tick text-anchors are RTL-tuned so neither label runs past the viewBox.
@@ -245,10 +256,14 @@ export function gauge(value: number | null, opts: ChartOpts = {}): string {
     `<text x="${r(cx - rad)}" y="${r(tickY)}" text-anchor="start" font-size="${TYPE.micro}" fill="${cssVar("muted")}">0%</text>` +
     `<text x="${r(cx + rad)}" y="${r(tickY)}" text-anchor="end" font-size="${TYPE.micro}" fill="${cssVar("muted")}">100%</text>`;
 
+  const trackPath = dialArc({ startAngle: A_START, endAngle: A_END }) ?? "";
+  const valuePath = dialArc({ startAngle: A_START, endAngle: aVal }) ?? "";
   return (
     svgOpen(w, h) +
-    `<path d="${arcPath(cx, cy, rad, a0, 2 * Math.PI)}" fill="none" stroke="${cssVar("line")}" stroke-width="${r(stroke)}" stroke-linecap="round"/>` +
-    `<path d="${arcPath(cx, cy, rad, a0, a1)}" fill="none" stroke="${cssVar(role)}" stroke-width="${r(stroke)}" stroke-linecap="round"/>` +
+    `<g transform="translate(${r(cx)},${r(cy)})">` +
+    `<path d="${trackPath}" fill="${cssVar("line")}"/>` +
+    (pct > 0 ? `<path d="${valuePath}" fill="${cssVar(role)}"/>` : "") +
+    `</g>` +
     `<text x="${r(cx)}" y="${r(cy - 6)}" text-anchor="middle" font-size="${TYPE.title}" font-weight="800" fill="${cssVar("text")}">${r(Math.round(pct))}%</text>` +
     axis +
     `</svg>`
@@ -508,6 +523,15 @@ export function funnel(data: LabeledValue[], opts: ChartOpts = {}): string {
   const maxBarW = w * 0.5; // leave room for label (right) + value (left)
   const minBarW = 26;
 
+  // Smooth connector between a stage and the next (narrower) one: a d3-area whose
+  // left/right edges bump-curve from this bar's half-width to the next bar's, so
+  // the "flow" reads as an organic funnel rather than a hard trapezoid.
+  const wedge = d3area<{ y: number; hw: number }>()
+    .x0((p) => cx - p.hw)
+    .x1((p) => cx + p.hw)
+    .y((p) => p.y)
+    .curve(curveBumpY);
+
   let bars = "";
   clean.forEach((d, i) => {
     const frac = d.value / max;
@@ -515,17 +539,19 @@ export function funnel(data: LabeledValue[], opts: ChartOpts = {}): string {
     const x = cx - bw / 2;
     const y = padTop + i * rowH + (rowH - barH) / 2;
     const midY = y + barH / 2;
-    // Connector trapezoid to the next (narrower) stage — a faint neutral wedge
-    // that reads as "flow" without competing with the tone-coded bars.
+    // Connector to the next (narrower) stage — a faint neutral wedge that reads
+    // as "flow" without competing with the tone-coded bars.
     if (i < n - 1) {
       const nextFrac = clean[i + 1].value / max;
       const nbw = Math.max(minBarW, nextFrac * maxBarW);
       const y2 = padTop + (i + 1) * rowH + (rowH - barH) / 2;
       const gapTop = y + barH;
-      bars +=
-        `<path d="M ${r(cx - bw / 2)} ${r(gapTop)} L ${r(cx + bw / 2)} ${r(gapTop)} ` +
-        `L ${r(cx + nbw / 2)} ${r(y2)} L ${r(cx - nbw / 2)} ${r(y2)} Z" ` +
-        `fill="${cssVar("line")}" fill-opacity="0.5"/>`;
+      const wedgePath =
+        wedge([
+          { y: gapTop, hw: bw / 2 },
+          { y: y2, hw: nbw / 2 },
+        ]) ?? "";
+      bars += `<path d="${wedgePath}" fill="${cssVar("line")}" fill-opacity="0.5"/>`;
     }
     bars +=
       `<rect x="${r(x)}" y="${r(y)}" width="${r(bw)}" height="${r(barH)}" rx="6" fill="${seriesColor(i)}"/>` +
@@ -554,18 +580,21 @@ export function sparkline(values: number[], opts: ChartOpts = {}): string {
   const w = opts.width ?? 120;
   const h = opts.height ?? 32;
   const pad = 3;
-  const plotW = w - pad * 2;
-  const plotH = h - pad * 2;
   const min = Math.min(...data);
   const max = Math.max(...data);
   const range = max - min; // may be 0 for a flat line
   const n = data.length;
 
-  const xAt = (i: number) => (n === 1 ? w / 2 : pad + (i / (n - 1)) * plotW);
-  const yAt = (v: number) => {
-    if (range === 0) return pad + plotH / 2; // flat-line guard (no divide-by-zero)
-    return pad + (1 - (v - min) / range) * plotH;
-  };
+  // d3 scales map index→x and value→y; a flat series widens the domain by ±1 so
+  // the line centers vertically (no divide-by-zero). curveMonotoneX renders a
+  // smooth trend that never overshoots the data points.
+  const x = scaleLinear()
+    .domain([0, Math.max(1, n - 1)])
+    .range([pad, w - pad]);
+  const y = scaleLinear()
+    .domain(range === 0 ? [min - 1, max + 1] : [min, max])
+    .range([h - pad, pad]);
+  const yAt = (v: number) => y(v);
 
   if (n === 1) {
     return (
@@ -575,14 +604,16 @@ export function sparkline(values: number[], opts: ChartOpts = {}): string {
     );
   }
 
-  const dPath = data
-    .map((v, i) => `${i === 0 ? "M" : "L"} ${r(xAt(i))} ${r(yAt(v))}`)
-    .join(" ");
+  const dPath =
+    d3line<number>()
+      .x((_, i) => x(i))
+      .y((v) => y(v))
+      .curve(curveMonotoneX)(data) ?? "";
 
   return (
     svgOpen(w, h) +
     `<path d="${dPath}" fill="none" stroke="${cssVar("primary")}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>` +
-    `<circle cx="${r(xAt(n - 1))}" cy="${r(yAt(data[n - 1]))}" r="2" fill="${cssVar("primary")}"/>` +
+    `<circle cx="${r(x(n - 1))}" cy="${r(yAt(data[n - 1]))}" r="2" fill="${cssVar("primary")}"/>` +
     `</svg>`
   );
 }

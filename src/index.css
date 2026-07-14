@@ -161,7 +161,7 @@
   --t-spring: 520ms;
 
   /* ── Typography ────────────────────────────────────────────── */
-  --font-sans: "Somar Sans", "Plus Jakarta Sans", "Segoe UI", system-ui, sans-serif;
+  --font-sans: "Somar Sans", "IBM Plex Sans Arabic", "Plus Jakarta Sans", "Segoe UI", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", "Cascadia Code", "Consolas", ui-monospace, monospace;
 
   --fw-light:    300;

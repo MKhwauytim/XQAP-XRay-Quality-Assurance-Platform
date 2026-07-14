@@ -7,6 +7,7 @@ import { DECK_CSS } from "./deckTheme";
 import { esc } from "../primitives";
 import { icon } from "../ui/icons";
 import { SOURCE_REVISIONS_CSS } from "../../sourceRevisions";
+import { ARABIC_FONT_FACE_CSS } from "../../../../branding/fonts";
 
 export function buildDeckHtml(slides: string, monthLabel: string, footerNote = ""): string {
   return `<!DOCTYPE html>
@@ -15,7 +16,7 @@ export function buildDeckHtml(slides: string, monthLabel: string, footerNote = "
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>العرض التنفيذي — ${esc(monthLabel)}</title>
-<style>${DECK_CSS}${SOURCE_REVISIONS_CSS}</style>
+<style>${ARABIC_FONT_FACE_CSS}${DECK_CSS}${SOURCE_REVISIONS_CSS}</style>
 </head>
 <body>
 <div class="deck-viewer">

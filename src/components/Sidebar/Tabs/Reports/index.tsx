@@ -13,7 +13,7 @@ import type { PreparedPopulationRow } from "../../../../data/population/populati
 import { buildDistributionXlsx, openDistributionDocument, openDistributionDeck } from "../../../../data/reporting/distributionReport";
 import { buildSampleXlsx, openSampleReport, openSampleDeck } from "../../../../data/reporting/sampleReport";
 import { openExecutiveReport, buildExecutiveXlsx } from "../../../../data/reporting/executiveReport";
-import { openExecutiveDeckV2 } from "../../../../data/reporting/executive/deck2";
+import { openExecutiveDeckV2WithQr } from "../../../../data/reporting/executive/deck2";
 import { openManagementReport } from "../../../../data/reporting/management/managementReport";
 import { openManagementDeck } from "../../../../data/reporting/management/managementDeck";
 import { buildManagementWorkbook } from "../../../../data/reporting/management/managementWorkbook";
@@ -306,7 +306,7 @@ function ReportsContent() {
         openExecutiveReport(execInput, names);
         showToast("ok", "تم فتح التقرير التفصيلي.");
       } else if (kind === "deck") {
-        openExecutiveDeckV2(execInput, names);
+        await openExecutiveDeckV2WithQr(execInput, names);
         showToast("ok", "تم فتح العرض التنفيذي.");
       } else {
         buildExecutiveXlsx(execInput, names);
@@ -396,7 +396,7 @@ function ReportsContent() {
           buildExecutiveXlsx(execInput, names);
           showToast("ok", "تم تنزيل ملف بيانات التقرير (Excel).");
         } else if (type === "executive-deck") {
-          openExecutiveDeckV2(execInput, names);
+          await openExecutiveDeckV2WithQr(execInput, names);
           showToast("ok", "تم فتح العرض التنفيذي (الشرائح) — استخدم طباعة/PDF.");
         } else {
           openExecutiveReport(execInput, names);

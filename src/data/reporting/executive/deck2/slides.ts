@@ -15,6 +15,7 @@ import type { StageProfile } from "../../executiveReportTypes";
 import { esc, fmtNum, fmtPct } from "../primitives";
 import { icon } from "../ui/icons";
 import { rankedBar, funnel } from "../ui/charts";
+import { coverMeshSvg, dividerPatternSvg } from "../ui/generativeArt";
 import { isRankable } from "../model/dataSufficiency";
 import { formatStageLabel } from "../../../population/stageHelpers";
 import { ORGANIZATION_PATH, ZATCA_LOGO_URL } from "../../../../branding/organization";
@@ -278,8 +279,20 @@ function coverBand(): string {
   </svg>`;
 }
 
-export function coverSlide(model: ReportModel, generatedAt: Date, variantPreview: boolean): string {
+export function coverSlide(
+  model: ReportModel,
+  generatedAt: Date,
+  variantPreview: boolean,
+  seedBase = "",
+): string {
   const [, department, section] = ORGANIZATION_PATH;
+  // Seeded low-poly navy mesh behind the glow + geometric band (aria-hidden,
+  // pure decoration). Deterministic on the month key so the cover is stable
+  // across opens; "" on failure so the cover falls back to its gradient.
+  const meshSvg = coverMeshSvg(seedBase || model.summary.periodId);
+  const meshLayer = meshSvg
+    ? `<div class="v2-cover-mesh" aria-hidden="true">${meshSvg}</div>`
+    : "";
   const meta = [
     { label: "فترة الدراسة", value: model.summary.periodId, iconName: "layers" },
     { label: "تاريخ الإصدار", value: formatDate(generatedAt), iconName: "document" },
@@ -322,6 +335,7 @@ export function coverSlide(model: ReportModel, generatedAt: Date, variantPreview
   const body = renderVariants("slide-cover", [coverBody, coverBody, coverBody, coverBody], variantPreview);
   return `<section class="slide v2 title-slide v2-cover" id="slide-cover" data-title="الغلاف" data-section="cover" data-section-label="${esc(NAV_SECTIONS.cover)}">
     ${slideControls("slide-cover", variantPreview)}
+    ${meshLayer}
     <div class="slide-art" aria-hidden="true"></div>
     ${coverBand()}
     ${orgBlock}
@@ -530,11 +544,21 @@ export function sectionSeparatorSlide(opts: {
   /** Optional extra visual (e.g. the results funnel), rendered in the side column. */
   extra?: string;
   tone: string;
+  /** Deterministic seed base (month key) for the background pattern. */
+  seedBase?: string;
   num: number;
   total: number;
   variantPreview: boolean;
 }): string {
-  const { sectionNo, sectionKey, iconName, title, blurb, keyStatValue, keyStatLabel, takeaway, extra, tone, num, total, variantPreview } = opts;
+  const { sectionNo, sectionKey, iconName, title, blurb, keyStatValue, keyStatLabel, takeaway, extra, tone, seedBase, num, total, variantPreview } = opts;
+  // Seeded geometric pattern overlay, tinted to the section tone at very low
+  // opacity (CSS-controlled) so it never touches headline contrast. Seed =
+  // month key + section id → deterministic per report.
+  const patternTone = tone === "cyan" ? "#32c5d2" : "#f4b400";
+  const patternSvg = dividerPatternSvg(`${seedBase ?? ""}__${sectionKey}`, patternTone);
+  const patternLayer = patternSvg
+    ? `<div class="v2-sep-pattern" aria-hidden="true">${patternSvg}</div>`
+    : "";
   const sepBody = `<div class="v2-sep ${esc(tone)}">
       <div class="v2-sep-numeral" aria-hidden="true">${pad(sectionNo)}</div>
       <div class="v2-sep-main">
@@ -557,6 +581,7 @@ export function sectionSeparatorSlide(opts: {
   ${printToggle()}
   ${sideRail(sectionKey)}
   <div class="v2-sep-bg" aria-hidden="true"></div>
+  ${patternLayer}
   ${coverBand()}
   <div class="slide-inner">
     ${body}
@@ -1500,6 +1525,7 @@ export function closingSlide(
   num: number,
   total: number,
   variantPreview: boolean,
+  provenanceQrSvg?: string,
 ): string {
   const entries = sourceRevisionEntries(sourceRevisions);
   const provenance =
@@ -1511,6 +1537,13 @@ export function closingSlide(
           )
           .join("")}</div>`
       : `<div class="v2-prov-empty">لم تُسجَّل مراجعات لملفات المصدر مع هذا التقرير.</div>`;
+  // Provenance QR — only when there are revisions to trace AND a prebuilt QR was
+  // supplied (the QR is generated async before the sync build; see
+  // openExecutiveDeckV2WithQr). White card + dark modules for scanner contrast.
+  const qrBlock =
+    entries.length > 0 && provenanceQrSvg
+      ? `<div class="v2-prov-qr"><div class="v2-prov-qr-card" aria-hidden="true">${provenanceQrSvg}</div><span class="v2-prov-qr-cap">امسح للتحقّق من مصدر البيانات</span></div>`
+      : "";
   const body = `<div class="v2-closing">
       <div class="v2-closing-main">
         <div class="v2-closing-icon">${badgeIcon("document", 26)}</div>
@@ -1519,7 +1552,7 @@ export function closingSlide(
         <p>يربط هذا التقرير بنسخة البيانات المحدَّدة وقت التوليد؛ رقم المراجعة لكل ملف مصدر يضمن إمكانية التتبّع والمراجعة.</p>
         <div class="v2-prov-block">
           <div class="v2-prov-title"><span class="v2-prov-title-icon">${icon("layers", 14)}</span>مراجعات ملفات المصدر</div>
-          ${provenance}
+          <div class="v2-prov-body">${provenance}${qrBlock}</div>
         </div>
       </div>
       <div class="v2-closing-side">
@@ -1557,6 +1590,8 @@ export function buildDeckV2Slides(
   generatedAt = new Date(),
   variantPreview = false,
   sourceRevisions?: SourceRevisions,
+  seedBase = "",
+  provenanceQrSvg?: string,
 ): string {
   const glossaryBuilders = glossarySlideBuilders(variantPreview); // 1..N pages, paginated by term count
 
@@ -1589,6 +1624,7 @@ export function buildDeckV2Slides(
         keyStatLabel: "حالة في مجتمع الشهر",
         takeaway: `عيّنة ${fmtNum(model.sample.total)} حالة بتغطية ${fmtPct(model.sample.coverage)} تمثّل هذا المجتمع.`,
         tone: "gold",
+        seedBase,
         num,
         total,
         variantPreview,
@@ -1616,6 +1652,7 @@ export function buildDeckV2Slides(
         takeaway: "المسار من المجتمع إلى الحالات المدروسة ثم المشتبه بها.",
         extra: resultsFunnel,
         tone: "cyan",
+        seedBase,
         num,
         total,
         variantPreview,
@@ -1678,7 +1715,7 @@ export function buildDeckV2Slides(
   ];
 
   const slides: string[] = [
-    coverSlide(model, generatedAt, variantPreview),
+    coverSlide(model, generatedAt, variantPreview, seedBase),
     tocSlide(tocItems, 2, total, variantPreview),
     monthInNumbersSlide(model, 3, total, variantPreview),
   ];
@@ -1695,6 +1732,6 @@ export function buildDeckV2Slides(
     slides.push(build(num, total));
     num += 1;
   }
-  slides.push(closingSlide(model, sourceRevisions, closingNum, total, variantPreview));
+  slides.push(closingSlide(model, sourceRevisions, closingNum, total, variantPreview, provenanceQrSvg));
   return slides.join("\n");
 }

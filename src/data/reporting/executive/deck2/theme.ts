@@ -808,10 +808,53 @@ body.theme-light .v2-num-hero-value,body.theme-light .v2-cover-lockup-period,bod
   .v2-toc-card,.v2-num-tile,.v2-term-card,.v2-stage-card,.v2-port-col,.v2-prov-item{break-inside:avoid;}
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   VIS wave (2026-07-14) — seeded generative art (cover mesh · divider patterns),
+   provenance QR, and stat-tile texture. All art is deterministic per report and
+   fully inlined (no network). Print + light-theme parity inline per rule.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Cover low-poly mesh — full-bleed, behind the glow/band, above the base bg. */
+.slide.v2-cover .v2-cover-mesh{position:absolute;inset:0;z-index:0;overflow:hidden;pointer-events:none;opacity:.6;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+.slide.v2-cover .v2-cover-mesh svg{width:100%;height:100%;display:block;}
+/* Keep the cover DARK in both themes: an executive cover reads best as a rich
+   navy plate, and the seeded navy mesh + white cover text would clash on a light
+   cover. (VIS decision — content slides still flip to light with the toggle.) */
+body.theme-light .slide.v2-cover{background:linear-gradient(155deg,#073257,#041d38 58%,#03152b),var(--navy);}
+body.theme-light .slide.v2-cover .v2-cover-title{color:#fff;}
+body.theme-light .slide.v2-cover .v2-cover-lockup-label{color:var(--slate);}
+body.theme-light .slide.v2-cover .v2-cover-meta-item{background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(255,255,255,.015));border-color:rgba(255,255,255,.12);}
+body.theme-light .slide.v2-cover .v2-cover-meta-value{color:#fff;}
+body.theme-light .slide.v2-cover .v2-cover-meta-label{color:var(--slate);}
+body.theme-light .slide.v2-cover .v2-org-lines b{color:#fff;}
+body.theme-light .slide.v2-cover .v2-org-lines span{color:rgba(255,255,255,.6);}
+body.theme-light .slide.v2-cover .v2-org-logo{filter:brightness(0) invert(1);}
+
+/* Section-separator seeded pattern — very low opacity so the white-on-dark
+   headline contrast is untouched; above the color-block bg, below the content. */
+.v2-sep-slide .v2-sep-pattern{position:absolute;inset:0;z-index:0;overflow:hidden;pointer-events:none;opacity:.07;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+.v2-sep-slide .v2-sep-pattern svg{width:100%;height:100%;display:block;}
+body.theme-light .v2-sep-slide .v2-sep-pattern{opacity:.05;}
+
+/* Closing provenance body — revisions list beside the QR card. */
+.v2-prov-body{display:flex;gap:18px;align-items:stretch;}
+.v2-prov-body .v2-prov-list,.v2-prov-body .v2-prov-empty{flex:1 1 auto;min-width:0;}
+.v2-prov-qr{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;flex-shrink:0;}
+.v2-prov-qr-card{width:96px;height:96px;padding:7px;border-radius:12px;background:#fff;box-shadow:0 4px 14px rgba(0,0,0,.25);-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+.v2-prov-qr-card svg{width:100%;height:100%;display:block;}
+.v2-prov-qr-cap{font-size:0.62rem;font-weight:700;color:var(--slate);text-align:center;max-width:104px;line-height:1.3;}
+body.theme-light .v2-prov-qr-cap{color:#607386;}
+
+/* Stat-tile texture — one hand-copied hero-patterns "hexagons" motif baked at
+   <=.05 alpha, layered above the tile gradient as texture (not noise). */
+.v2-num-tile{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='49' viewBox='0 0 28 49'%3E%3Cg fill='%23ffffff' fill-opacity='0.045'%3E%3Cpath d='M13.99 9.25l13 7.5v15l-13 7.5L1 31.75v-15l12.99-7.5zM3 17.9v12.7l10.99 6.34 11-6.35V17.9l-11-6.34L3 17.9zM0 15l12.98-7.5V0h-2v6.35L0 12.69v2.3zm0 18.5L12.98 41v8h-2v-6.85L0 35.81v-2.3zM15 0v7.5L27.99 15H28v-2.31h-.01L17 6.35V0h-2zm0 49v-8l12.99-7.5H28v2.31h-.01L17 42.15V49h-2z'/%3E%3C/g%3E%3C/svg%3E"),linear-gradient(180deg,rgba(14,58,95,.6),rgba(7,39,67,.75));background-repeat:repeat,no-repeat;}
+body.theme-light .v2-num-tile{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='49' viewBox='0 0 28 49'%3E%3Cg fill='%230a2d4a' fill-opacity='0.04'%3E%3Cpath d='M13.99 9.25l13 7.5v15l-13 7.5L1 31.75v-15l12.99-7.5zM3 17.9v12.7l10.99 6.34 11-6.35V17.9l-11-6.34L3 17.9zM0 15l12.98-7.5V0h-2v6.35L0 12.69v2.3zm0 18.5L12.98 41v8h-2v-6.85L0 35.81v-2.3zM15 0v7.5L27.99 15H28v-2.31h-.01L17 6.35V0h-2zm0 49v-8l12.99-7.5H28v2.31h-.01L17 42.15V49h-2z'/%3E%3C/g%3E%3C/svg%3E");background-repeat:repeat;}
+
 @media(max-width:820px){
   .v2-cover-grid,.v2-num-layout,.v2-closing,.v2-sep{grid-template-columns:1fr;}
   .v2-num-tiles{grid-template-columns:1fr 1fr;grid-template-rows:auto;}
   .v2-sep-numeral{font-size:6rem;}
   .v2-sep-side{width:auto;}
+  .v2-prov-body{flex-direction:column;align-items:flex-start;}
 }
 `;

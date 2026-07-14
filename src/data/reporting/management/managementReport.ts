@@ -26,6 +26,7 @@ import {
   SOURCE_REVISIONS_CSS,
   type SourceRevisions,
 } from "../sourceRevisions";
+import { ARABIC_FONT_FACE_CSS } from "../../../branding/fonts";
 
 const ARABIC_MONTHS = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"];
 
@@ -326,7 +327,7 @@ function renderHtml(
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>${esc(L.mgmt_report_title)} — ${esc(monthLabel)}</title>
-<style>${REPORT_CSS}${SOURCE_REVISIONS_CSS}</style>
+<style>${ARABIC_FONT_FACE_CSS}${REPORT_CSS}${SOURCE_REVISIONS_CSS}</style>
 </head>
 <body>
 <div class="mr-doc">

@@ -2,6 +2,7 @@ import { EXEC_CSS } from "./theme";
 import { esc } from "./primitives";
 import { icon } from "./ui/icons";
 import { SOURCE_REVISIONS_CSS } from "../sourceRevisions";
+import { ARABIC_FONT_FACE_CSS } from "../../../branding/fonts";
 
 // Viewer JS: builds the sidebar TOC and highlights the active page via an
 // IntersectionObserver. The legacy `fitPages()` transform:scale() auto-shrink hack
@@ -39,7 +40,7 @@ export function buildViewerHtml(slides: string, monthLabel: string, footerNote =
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>التقرير التنفيذي — ${esc(monthLabel)}</title>
-<style>${EXEC_CSS}${SOURCE_REVISIONS_CSS}</style>
+<style>${ARABIC_FONT_FACE_CSS}${EXEC_CSS}${SOURCE_REVISIONS_CSS}</style>
 </head>
 <body>
 <div class="viewer">

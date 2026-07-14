@@ -4,6 +4,358 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v53.5 — 2026-07-14 — Add visual libraries + type shims (dependencies)
+
+**File:** `package.json`
+
+**Before:**
+```json
+  "dependencies": {
+    "hash-wasm": "^4.12.0",
+    "lucide-react": "^1.21.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "recharts": "^3.8.1",
+    "xlsx": "file:vendor/xlsx-0.20.3.tgz"
+  },
+```
+
+**After:**
+```json
+  "dependencies": {
+    "@fontsource/ibm-plex-sans-arabic": "^5.x",
+    "d3-scale": "^4.x",
+    "d3-shape": "^3.x",
+    "geopattern": "^1.x",
+    "hash-wasm": "^4.12.0",
+    "lucide-react": "^1.21.0",
+    "qrcode": "^1.x",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "recharts": "^3.8.1",
+    "trianglify": "^4.x",
+    "xlsx": "file:vendor/xlsx-0.20.3.tgz"
+  },
+```
+(devDependencies also gained `@types/qrcode`, `@types/d3-shape`,
+`@types/d3-scale`, `@types/geopattern`. `trianglify` was installed with
+`--ignore-scripts` so its native `canvas` optional dep never builds — we import
+its DOM-free browser bundle instead. The vendored `xlsx` was NOT touched.)
+
+**File:** `src/types/vendor-shims.d.ts` (new)
+
+**After:**
+```ts
+declare module "trianglify/dist/trianglify.bundle.js" {
+  interface TrianglifyOptions { width?: number; height?: number; cellSize?: number;
+    variance?: number; seed?: string | null; xColors?: string[] | string;
+    yColors?: string[] | string; colorSpace?: string; strokeWidth?: number; fill?: boolean; }
+  interface TrianglifySvgTree { toString(): string; }
+  interface TrianglifyPattern { toSVGTree(opts?: Record<string, unknown>): TrianglifySvgTree; }
+  function trianglify(opts?: TrianglifyOptions): TrianglifyPattern;
+  export default trianglify;
+}
+```
+
+---
+
+
+## v53.4 — 2026-07-14 — Embed IBM Plex Sans Arabic as a shared @font-face string
+
+**File:** `src/branding/fonts.ts` (new)
+
+**After:**
+```ts
+import arabic400 from "@fontsource/ibm-plex-sans-arabic/files/ibm-plex-sans-arabic-arabic-400-normal.woff2?inline";
+import arabic700 from "@fontsource/ibm-plex-sans-arabic/files/ibm-plex-sans-arabic-arabic-700-normal.woff2?inline";
+export const ARABIC_FONT_FAMILY = "IBM Plex Sans Arabic";
+export const ARABIC_FONT_FACE_CSS =
+  `@font-face{font-family:"IBM Plex Sans Arabic";font-style:normal;font-weight:400;font-display:swap;src:url(${arabic400}) format("woff2");}` +
+  `@font-face{font-family:"IBM Plex Sans Arabic";font-style:normal;font-weight:700;font-display:swap;src:url(${arabic700}) format("woff2");}`;
+```
+
+**File:** `src/main.tsx`
+
+**Before:**
+```tsx
+import { WorkspaceProvider } from "./data/workspace/WorkspaceProvider";
+
+import "./index.css";
+import "./styles/primitives.css";
+
+const rootElement = document.getElementById("root");
+```
+
+**After:**
+```tsx
+import { WorkspaceProvider } from "./data/workspace/WorkspaceProvider";
+import { ARABIC_FONT_FACE_CSS } from "./branding/fonts";
+
+import "./index.css";
+import "./styles/primitives.css";
+
+const fontStyle = document.createElement("style");
+fontStyle.setAttribute("data-arabic-font", "");
+fontStyle.textContent = ARABIC_FONT_FACE_CSS;
+document.head.appendChild(fontStyle);
+
+const rootElement = document.getElementById("root");
+```
+
+**File:** `src/index.css`
+
+**Before:**
+```css
+  --font-sans: "Somar Sans", "Plus Jakarta Sans", "Segoe UI", system-ui, sans-serif;
+```
+
+**After:**
+```css
+  --font-sans: "Somar Sans", "IBM Plex Sans Arabic", "Plus Jakarta Sans", "Segoe UI", system-ui, sans-serif;
+```
+
+**Files (report `<style>` blocks — each prepends `${ARABIC_FONT_FACE_CSS}` and
+adds the import):** `src/data/reporting/executive/deck2/index.ts`,
+`src/data/reporting/shared/reportChrome.ts` (both doc + deck wrappers),
+`src/data/reporting/executive/viewer.ts`,
+`src/data/reporting/executive/deck/viewer.ts` (v1 deck — viewer CSS only),
+`src/data/reporting/management/managementReport.ts`.
+
+**Before (representative — deck2/index.ts):**
+```ts
+<style>${DECK_CSS}${DECK_V2_CSS}${SOURCE_REVISIONS_CSS}</style>
+```
+
+**After:**
+```ts
+<style>${ARABIC_FONT_FACE_CSS}${DECK_CSS}${DECK_V2_CSS}${SOURCE_REVISIONS_CSS}</style>
+```
+
+---
+
+
+## v53.3 — 2026-07-14 — Seeded generative art + provenance QR helpers
+
+**File:** `src/data/reporting/executive/ui/generativeArt.ts` (new)
+
+**After:**
+```ts
+import trianglify from "trianglify/dist/trianglify.bundle.js";
+import GeoPattern from "geopattern";
+function sanitizeSelfSvg(svg: unknown): string {
+  return typeof svg === "string" && svg.trimStart().startsWith("<svg") ? svg : "";
+}
+export function coverMeshSvg(seed: string): string {
+  try {
+    const pattern = trianglify({ width: 960, height: 540, cellSize: 150, variance: 0.55,
+      seed, xColors: ["#020e1c","#03152b","#062a48","#073257","#0a3a5f"], colorSpace: "lab" });
+    return sanitizeSelfSvg(pattern.toSVGTree().toString());
+  } catch { return ""; }
+}
+export function dividerPatternSvg(seed: string, colorHex: string): string {
+  try { return sanitizeSelfSvg(GeoPattern.generate(seed, { color: colorHex }).toString()); }
+  catch { return ""; }
+}
+```
+
+**File:** `src/data/reporting/executive/ui/provenanceQr.ts` (new)
+
+**After:**
+```ts
+import QRCode from "qrcode";
+import { sourceRevisionEntries } from "../../sourceRevisions";
+export function buildProvenanceString(monthFolderName, revisions, generatedAt): string {
+  const revPart = sourceRevisionEntries(revisions).map(([f, r]) => `${f}:${r}`).join(";");
+  const date = `${generatedAt.getFullYear()}-${pad2(month)}-${pad2(day)}`;
+  return [monthFolderName, revPart, date].filter((p) => p.length > 0).join("|");
+}
+export async function generateProvenanceQrSvg(text: string): Promise<string> {
+  try {
+    const svg = await QRCode.toString(text, { type: "svg", margin: 2,
+      errorCorrectionLevel: "M", color: { dark: "#0a2d4a", light: "#ffffff" } });
+    return typeof svg === "string" && svg.trimStart().startsWith("<svg") ? svg : "";
+  } catch { return ""; }
+}
+```
+
+---
+
+
+## v53.2 — 2026-07-14 — Wire art + QR into deck2 (cover mesh, divider patterns, closing QR)
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**Before (cover):**
+```ts
+export function coverSlide(model: ReportModel, generatedAt: Date, variantPreview: boolean): string {
+  const [, department, section] = ORGANIZATION_PATH;
+...
+    ${slideControls("slide-cover", variantPreview)}
+    <div class="slide-art" aria-hidden="true"></div>
+    ${coverBand()}
+```
+
+**After:**
+```ts
+export function coverSlide(model, generatedAt, variantPreview, seedBase = ""): string {
+  const [, department, section] = ORGANIZATION_PATH;
+  const meshSvg = coverMeshSvg(seedBase || model.summary.periodId);
+  const meshLayer = meshSvg ? `<div class="v2-cover-mesh" aria-hidden="true">${meshSvg}</div>` : "";
+...
+    ${slideControls("slide-cover", variantPreview)}
+    ${meshLayer}
+    <div class="slide-art" aria-hidden="true"></div>
+    ${coverBand()}
+```
+
+**Before (section separator):** used only `tone`, no pattern; markup had
+`<div class="v2-sep-bg"></div> ${coverBand()}`.
+
+**After:** opts gained `seedBase?`; builds
+`patternTone = tone === "cyan" ? "#32c5d2" : "#f4b400"`,
+`dividerPatternSvg(`${seedBase ?? ""}__${sectionKey}`, patternTone)` into a
+`<div class="v2-sep-pattern" aria-hidden="true">…</div>` inserted after
+`v2-sep-bg`.
+
+**Before (closing):**
+```ts
+export function closingSlide(model, sourceRevisions, num, total, variantPreview): string {
+...
+        <div class="v2-prov-block">
+          <div class="v2-prov-title">…</div>
+          ${provenance}
+        </div>
+```
+
+**After:**
+```ts
+export function closingSlide(model, sourceRevisions, num, total, variantPreview, provenanceQrSvg?): string {
+...
+  const qrBlock = entries.length > 0 && provenanceQrSvg
+    ? `<div class="v2-prov-qr"><div class="v2-prov-qr-card" aria-hidden="true">${provenanceQrSvg}</div><span class="v2-prov-qr-cap">امسح للتحقّق من مصدر البيانات</span></div>`
+    : "";
+...
+        <div class="v2-prov-block">
+          <div class="v2-prov-title">…</div>
+          <div class="v2-prov-body">${provenance}${qrBlock}</div>
+        </div>
+```
+
+**Before (`buildDeckV2Slides` signature + cover/sep/closing calls):**
+```ts
+export function buildDeckV2Slides(model, generatedAt = new Date(), variantPreview = false, sourceRevisions?): string {
+...
+    coverSlide(model, generatedAt, variantPreview),
+...
+  slides.push(closingSlide(model, sourceRevisions, closingNum, total, variantPreview));
+```
+
+**After:**
+```ts
+export function buildDeckV2Slides(model, generatedAt = new Date(), variantPreview = false, sourceRevisions?, seedBase = "", provenanceQrSvg?): string {
+...
+    coverSlide(model, generatedAt, variantPreview, seedBase),
+...  // both sectionSeparatorSlide calls now pass `seedBase`
+  slides.push(closingSlide(model, sourceRevisions, closingNum, total, variantPreview, provenanceQrSvg));
+```
+
+**File:** `src/data/reporting/executive/deck2/index.ts`
+
+**Before:**
+```ts
+export function buildExecutiveDeckV2(input, employeeDisplayNames = {}, opts?: { variantPreview?: boolean }): string {
+  const variantPreview = opts?.variantPreview ?? false;
+  const model = buildReportModel(input, employeeDisplayNames);
+  const slides = buildDeckV2Slides(model, new Date(), variantPreview, input.sourceRevisions);
+  ...
+}
+export function openExecutiveDeckV2(input, employeeDisplayNames = {}): void { … }
+```
+
+**After:**
+```ts
+export function buildExecutiveDeckV2(input, employeeDisplayNames = {}, opts?: { variantPreview?: boolean; provenanceQrSvg?: string }): string {
+  const variantPreview = opts?.variantPreview ?? false;
+  const model = buildReportModel(input, employeeDisplayNames);
+  const slides = buildDeckV2Slides(model, new Date(), variantPreview, input.sourceRevisions, input.monthFolderName, opts?.provenanceQrSvg);
+  ...
+}
+export function openExecutiveDeckV2(input, employeeDisplayNames = {}): void { … }        // unchanged, no QR
+export async function openExecutiveDeckV2WithQr(input, employeeDisplayNames = {}): Promise<void> {
+  const provenanceQrSvg = await generateProvenanceQrSvg(
+    buildProvenanceString(input.monthFolderName, input.sourceRevisions, new Date()));
+  openOrDownload(buildExecutiveDeckV2(input, employeeDisplayNames, { provenanceQrSvg }), `العرض_التنفيذي_${input.monthFolderName}.html`);
+}
+```
+
+**File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
+
+**Before:**
+```tsx
+import { openExecutiveDeckV2 } from "…/deck2";
+...
+        openExecutiveDeckV2(execInput, names);                 // handleExport("deck")
+...
+          openExecutiveDeckV2(execInput, names);               // generate("executive-deck")
+```
+
+**After:**
+```tsx
+import { openExecutiveDeckV2WithQr } from "…/deck2";
+...
+        await openExecutiveDeckV2WithQr(execInput, names);     // handleExport("deck")
+...
+          await openExecutiveDeckV2WithQr(execInput, names);   // generate("executive-deck")
+```
+
+**File:** `src/data/reporting/executive/deck2/theme.ts` — appended a VIS-wave CSS
+block: `.v2-cover-mesh` (full-bleed, z0, opacity .6, print-color-adjust), the
+light-theme "cover stays dark" overrides (mesh + white cover text read in both
+themes — documented decision), `.v2-sep-pattern` (opacity .07/.05, z0),
+`.v2-prov-body`/`.v2-prov-qr`/`.v2-prov-qr-card` (96px white card, dark QR),
+and the hand-copied hero-patterns "hexagons" data-URI texture on `.v2-num-tile`
+(baked ≤.045 alpha, layered over the gradient).
+
+---
+
+
+## v53.1 — 2026-07-14 — charts.ts geometry via d3-shape + d3-scale
+
+**File:** `src/data/reporting/executive/ui/charts.ts`
+
+**Before:** hand-rolled `arcPath()` for donut/gauge (stroke rings), a hand-rolled
+trapezoid funnel connector, and a linear-scaled straight-segment sparkline.
+
+**After:** imports
+`{ arc, pie, line, area, curveMonotoneX, curveBumpY } from "d3-shape"` and
+`{ scaleLinear } from "d3-scale"`; `arcPath` removed. Donut → `d3pie` +
+filled-annulus `d3arc` with `padAngle(.02)` + rounded `cornerRadius`; gauge →
+`d3arc` annulus (`cornerRadius(stroke/2)`, upper semicircle −π/2→+π/2); funnel
+connector → `d3area` with `curveBumpY` (smooth flow, bars still `<rect>`);
+sparkline → `scaleLinear` + `d3line.curve(curveMonotoneX)`. Public signatures,
+`escText`/RTL/empty-state discipline, viewBox, and every `charts.test.ts`
+assertion unchanged (structural — no test asserted exact path strings).
+
+---
+
+
+## v53 — v{N}.5 — 2026-07-14 — Tests for the wave
+
+**Files (new):** `src/data/reporting/executive/ui/generativeArt.test.ts`
+(deterministic seeded mesh + pattern, `<svg>` prefix, seed sensitivity),
+`src/data/reporting/executive/ui/provenanceQr.test.ts` (provenance string shape,
+QR `<svg>` output).
+
+**File:** `src/data/reporting/executive/deck2/deck2.test.ts` — added a
+`describe("visual libraries wave …")` block: QR spliced into the closing slide
+when revisions exist; QR omitted + graceful empty state when absent; embedded
+IBM Plex `@font-face` (base64 woff2) present in report HTML; deterministic cover
+mesh + byte-identical deck output for the same month key.
+
+Gates after the wave: `tsc -b` clean · `npm run lint` clean · `test:run`
+613 passed (600 baseline + 13 new) · `npm run build` single-file 3,359,278 bytes
+(baseline 3,137,304 → **+216.8 KB raw / +125.6 KB gzip**).
+
 ## v52.4 — 2026-07-14 — Re-measure METRICS_COMPACT_SAMPLE (totals-row clip)
 
 Orchestrator fixup after the overhaul: the compact sample tables' measured metrics went stale when theme v3 shifted text-metric rounding, clipping the totals row ~10px past the card bottom on screen. Re-measured live in the preview (the constants' original tuning method).

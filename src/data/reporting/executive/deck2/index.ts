@@ -12,6 +12,8 @@ import { esc } from "../primitives";
 import { icon } from "../ui/icons";
 import { openOrDownload } from "../../htmlReport";
 import { SOURCE_REVISIONS_CSS, sourceRevisionsFooterHtml } from "../../sourceRevisions";
+import { ARABIC_FONT_FACE_CSS } from "../../../../branding/fonts";
+import { buildProvenanceString, generateProvenanceQrSvg } from "../ui/provenanceQr";
 import type { ExecutiveReportInput } from "../../executiveReportTypes";
 
 const ARABIC_MONTHS = ["يناير","فبراير","مارس","أبريل","مايو","يونيو","يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"];
@@ -144,7 +146,7 @@ export function buildDeckV2Html(
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>العرض التنفيذي — ${esc(monthLabel)}</title>
-<style>${DECK_CSS}${DECK_V2_CSS}${SOURCE_REVISIONS_CSS}</style>
+<style>${ARABIC_FONT_FACE_CSS}${DECK_CSS}${DECK_V2_CSS}${SOURCE_REVISIONS_CSS}</style>
 </head>
 <body>
 <nav class="deck-nav" id="deck-nav" aria-label="التنقّل بين أقسام العرض">
@@ -190,11 +192,18 @@ ${footerNote}
 export function buildExecutiveDeckV2(
   input: ExecutiveReportInput,
   employeeDisplayNames: Record<string, string> = {},
-  opts?: { variantPreview?: boolean },
+  opts?: { variantPreview?: boolean; provenanceQrSvg?: string },
 ): string {
   const variantPreview = opts?.variantPreview ?? false;
   const model = buildReportModel(input, employeeDisplayNames);
-  const slides = buildDeckV2Slides(model, new Date(), variantPreview, input.sourceRevisions);
+  const slides = buildDeckV2Slides(
+    model,
+    new Date(),
+    variantPreview,
+    input.sourceRevisions,
+    input.monthFolderName,
+    opts?.provenanceQrSvg,
+  );
   return buildDeckV2Html(
     slides,
     formatMonthLabel(input.monthFolderName),
@@ -209,6 +218,25 @@ export function openExecutiveDeckV2(
 ): void {
   openOrDownload(
     buildExecutiveDeckV2(input, employeeDisplayNames),
+    `العرض_التنفيذي_${input.monthFolderName}.html`,
+  );
+}
+
+/**
+ * Async deck open that first generates the provenance QR (qrcode's SVG API is
+ * async) then builds + opens the deck synchronously with the prebuilt QR spliced
+ * into the closing slide. Wire live call sites to THIS wrapper; the sync
+ * `openExecutiveDeckV2` stays for backward compatibility (renders without a QR).
+ */
+export async function openExecutiveDeckV2WithQr(
+  input: ExecutiveReportInput,
+  employeeDisplayNames: Record<string, string> = {},
+): Promise<void> {
+  const provenanceQrSvg = await generateProvenanceQrSvg(
+    buildProvenanceString(input.monthFolderName, input.sourceRevisions, new Date()),
+  );
+  openOrDownload(
+    buildExecutiveDeckV2(input, employeeDisplayNames, { provenanceQrSvg }),
     `العرض_التنفيذي_${input.monthFolderName}.html`,
   );
 }
