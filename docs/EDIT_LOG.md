@@ -4,6 +4,17 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v55 — 2026-07-16 — Global month selector in header replaces all per-tab month filters
+
+Spec: docs/superpowers/specs/2026-07-16-global-month-selector-design.md.
+New GlobalMonthProvider context + toolbar selector; all tabs consume useGlobalMonth().
+
+**File:** `src/data/month/globalMonthLogic.ts` (new)
+
+**Before:** _(file did not exist)_
+
+**After:** selection-resolution logic (latest/stored/pending reconciliation) — see file.
+
 ## v54.1 — 2026-07-14 — Report terminology: حالة → صورة for x-ray records
 
 Owner request ("any reference for حالة become صورة"). Reviewed, phrase-mapped rename across the reporting layer — NOT a blind replace: حالة-as-"status" survives untouched (column headers الحالة, حالة التوزيع, حالة الإجابة, حالة BI, workflow labels), and the port name منفذ حالة عمار is data. 64 case-sense occurrences renamed across deck2, deck v1, the executive document parts (scope/risk/corroboration/narrative), executiveReportData findings, and the two KPI-dashboard labels (`rk_pchart_empty`, `rk_tooltip_cases`). Examples:
