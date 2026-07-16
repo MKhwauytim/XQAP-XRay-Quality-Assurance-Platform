@@ -15,6 +15,24 @@ New GlobalMonthProvider context + toolbar selector; all tabs consume useGlobalMo
 
 **After:** selection-resolution logic (latest/stored/pending reconciliation) — see file.
 
+**File:** `src/data/month/GlobalMonthContext.ts` (new)
+
+**Before:** _(file did not exist)_
+
+**After:** `React.createContext` for `GlobalMonthContextValue` (months, selection, isSelectedMonthClosed, setSelectedMonth, startNewMonth, refreshMonths, registerMonthChangeGuard) plus the `MonthChangeGuard` type — see file.
+
+**File:** `src/data/month/GlobalMonthProvider.tsx` (new)
+
+**Before:** _(file did not exist)_
+
+**After:** provider component wrapping `globalMonthLogic.ts` selection resolution around `useWorkspace()`, `listMonthFolders`, and `isMonthClosed`; exposes month-change guards gated by `window.confirm` — see file.
+
+**File:** `src/data/month/useGlobalMonth.ts` (new)
+
+**Before:** _(file did not exist)_
+
+**After:** `useContext(GlobalMonthContext)` hook, throws when used outside `GlobalMonthProvider` — see file.
+
 ## v54.1 — 2026-07-14 — Report terminology: حالة → صورة for x-ray records
 
 Owner request ("any reference for حالة become صورة"). Reviewed, phrase-mapped rename across the reporting layer — NOT a blind replace: حالة-as-"status" survives untouched (column headers الحالة, حالة التوزيع, حالة الإجابة, حالة BI, workflow labels), and the port name منفذ حالة عمار is data. 64 case-sense occurrences renamed across deck2, deck v1, the executive document parts (scope/risk/corroboration/narrative), executiveReportData findings, and the two KPI-dashboard labels (`rk_pchart_empty`, `rk_tooltip_cases`). Examples:
