@@ -39,11 +39,11 @@ describe("resolveInitialSelection", () => {
   });
 
   it("falls back to latest when the stored folder is gone", () => {
-    expect(resolveInitialSelection(MONTHS, "1-january-2020").folderName).toBe("5-may-2026");
+    expect(resolveInitialSelection(MONTHS, "1-january-2020")).toMatchObject({ folderName: "5-may-2026" });
   });
 
   it("falls back to latest when nothing is stored", () => {
-    expect(resolveInitialSelection(MONTHS, null).folderName).toBe("5-may-2026");
+    expect(resolveInitialSelection(MONTHS, null)).toMatchObject({ folderName: "5-may-2026" });
   });
 });
 
@@ -55,7 +55,7 @@ describe("reconcileSelection", () => {
 
   it("moves to latest when the selected folder disappeared", () => {
     const cur = { kind: "existing" as const, month: 1, year: 2020, folderName: "1-january-2020" };
-    expect(reconcileSelection(MONTHS, cur).folderName).toBe("5-may-2026");
+    expect(reconcileSelection(MONTHS, cur)).toMatchObject({ folderName: "5-may-2026" });
   });
 
   it("promotes a pending month once its folder appears", () => {
@@ -71,6 +71,6 @@ describe("reconcileSelection", () => {
   });
 
   it("resolves 'none' to latest", () => {
-    expect(reconcileSelection(MONTHS, { kind: "none" }).folderName).toBe("5-may-2026");
+    expect(reconcileSelection(MONTHS, { kind: "none" })).toMatchObject({ folderName: "5-may-2026" });
   });
 });

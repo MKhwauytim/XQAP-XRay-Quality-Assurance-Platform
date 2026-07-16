@@ -33,6 +33,10 @@ New GlobalMonthProvider context + toolbar selector; all tabs consume useGlobalMo
 
 **After:** `useContext(GlobalMonthContext)` hook, throws when used outside `GlobalMonthProvider` — see file.
 
+**File:** `src/data/month/globalMonthLogic.test.ts`
+
+**Note:** Union access narrowing — replaced direct `.folderName` property access (TS2339 errors) with `.toMatchObject({ folderName: ... })` assertions (4 call sites); passes `tsc -b` and `vitest run`.
+
 ## v54.1 — 2026-07-14 — Report terminology: حالة → صورة for x-ray records
 
 Owner request ("any reference for حالة become صورة"). Reviewed, phrase-mapped rename across the reporting layer — NOT a blind replace: حالة-as-"status" survives untouched (column headers الحالة, حالة التوزيع, حالة الإجابة, حالة BI, workflow labels), and the port name منفذ حالة عمار is data. 64 case-sense occurrences renamed across deck2, deck v1, the executive document parts (scope/risk/corroboration/narrative), executiveReportData findings, and the two KPI-dashboard labels (`rk_pchart_empty`, `rk_tooltip_cases`). Examples:
