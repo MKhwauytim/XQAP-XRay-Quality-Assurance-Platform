@@ -79,7 +79,11 @@ function useExecutiveRows(): Array<Record<string, unknown>> | null {
   const [rows, setRows] = useState<Array<Record<string, unknown>> | null>(null);
 
   useEffect(() => {
-    if (!directoryHandle || !monthFolder) return;
+    if (!directoryHandle || !monthFolder) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync reset so a pending/none selection never shows a previous month's KPIs
+      setRows(null);
+      return;
+    }
     const root = directoryHandle;
     const month = monthFolder;
     let cancelled = false;

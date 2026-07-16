@@ -1041,6 +1041,26 @@ function useExecutiveRows(): Array<Record<string, unknown>> | null {
 
 Removed the auto-latest logic: `listMonthFolders` no longer called, removed from imports. Now consumes `useGlobalMonth()` and uses the globally selected month (or sets `monthFolder` to `null` if selection is pending/none, triggering the early return). Dependency array updated to include `monthFolder` instead of just `directoryHandle`.
 
+**Review fix (same day): stale KPI rows survive a selection change to pending/none.** Once `rows` was populated for month A, switching the global selection to a pending month ("شهر جديد") or none re-ran the effect but hit the early `return` before touching `rows` — the KPI cards kept showing month A's numbers with no cue. The early-exit path now resets `rows` to `null` so the dashboard falls back to its loading/empty presentation. Mirrors the falsy-month reset pattern in `useApprovalData.ts` (Follow-up 7) and `XrayInspectionResults.tsx` (Follow-up 6).
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/renderers/KpiRenderer.tsx`
+
+**Before:**
+```tsx
+  useEffect(() => {
+    if (!directoryHandle || !monthFolder) return;
+```
+
+**After:**
+```tsx
+  useEffect(() => {
+    if (!directoryHandle || !monthFolder) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync reset so a pending/none selection never shows a previous month's KPIs
+      setRows(null);
+      return;
+    }
+```
+
 ## v54.1 — 2026-07-14 — Report terminology: حالة → صورة for x-ray records
 
 Owner request ("any reference for حالة become صورة"). Reviewed, phrase-mapped rename across the reporting layer — NOT a blind replace: حالة-as-"status" survives untouched (column headers الحالة, حالة التوزيع, حالة الإجابة, حالة BI, workflow labels), and the port name منفذ حالة عمار is data. 64 case-sense occurrences renamed across deck2, deck v1, the executive document parts (scope/risk/corroboration/narrative), executiveReportData findings, and the two KPI-dashboard labels (`rk_pchart_empty`, `rk_tooltip_cases`). Examples:
