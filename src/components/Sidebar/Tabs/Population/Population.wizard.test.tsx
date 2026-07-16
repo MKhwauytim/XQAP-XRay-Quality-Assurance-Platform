@@ -34,6 +34,19 @@ vi.mock("../../../../auth/usePermissions", () => ({
   usePermissions: () => ({ can: () => true }),
 }));
 
+// Global month context: no workspace in this test → selection none, no months.
+vi.mock("../../../../data/month/useGlobalMonth", () => ({
+  useGlobalMonth: () => ({
+    months: [],
+    selection: { kind: "none" },
+    isSelectedMonthClosed: false,
+    setSelectedMonth: () => {},
+    startNewMonth: () => {},
+    refreshMonths: async () => {},
+    registerMonthChangeGuard: () => () => {},
+  }),
+}));
+
 import PopulationTab from "./index";
 import { getPhaseStatus } from "./components/helpers";
 

@@ -7,11 +7,6 @@ import PopulationProcessingReport from "./PopulationProcessingReport";
 import { AlertTriangle, Check, FolderOpen, X } from "lucide-react";
 import CertScanGrid from "./CertScanGrid";
 
-const ARABIC_MONTHS = [
-  "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
-  "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"
-];
-
 type SaveMessage = { type: "ok" | "error"; text: string } | null;
 
 type PhaseTwoReportAndProcessingProps = {
@@ -23,7 +18,7 @@ type PhaseTwoReportAndProcessingProps = {
   isProcessingPopulation: boolean;
   processingProgressMessage?: string;
   processingProgressPercent?: number;
-  saveMonth: number;
+  monthLabel: string;
   isSavingToDisk: boolean;
   saveToDiskMessage: SaveMessage;
   hasDiskWorkspace: boolean;
@@ -33,7 +28,6 @@ type PhaseTwoReportAndProcessingProps = {
   onProcessPopulation: () => void;
   onExportPopulation: () => void;
   onExportPhaseReport: () => void;
-  onMonthChange: (month: number) => void;
 };
 
 export default function PhaseTwoReportAndProcessing({
@@ -45,7 +39,7 @@ export default function PhaseTwoReportAndProcessing({
   isProcessingPopulation,
   processingProgressMessage,
   processingProgressPercent = 0,
-  saveMonth,
+  monthLabel,
   isSavingToDisk,
   saveToDiskMessage,
   hasDiskWorkspace,
@@ -54,7 +48,6 @@ export default function PhaseTwoReportAndProcessing({
   onProcessPopulation,
   onExportPopulation,
   onExportPhaseReport,
-  onMonthChange,
 }: PhaseTwoReportAndProcessingProps) {
 
   // Show placeholder only when there is absolutely nothing to display
@@ -83,19 +76,7 @@ export default function PhaseTwoReportAndProcessing({
         {hasDiskWorkspace && (
           <div className="phase2-save-panel">
             <span className="phase2-month-label">شهر الحفظ</span>
-            <div className="phase2-month-grid" role="group">
-              {ARABIC_MONTHS.map((name, idx) => (
-                <button
-                  key={idx + 1}
-                  type="button"
-                  className={`phase2-month-btn${saveMonth === idx + 1 ? " active" : ""}`}
-                  onClick={() => onMonthChange(idx + 1)}
-                  aria-pressed={saveMonth === idx + 1}
-                >
-                  {name}
-                </button>
-              ))}
-            </div>
+            <strong className="phase2-month-current">{monthLabel}</strong>
             {isSavingToDisk && (
               <span className="phase2-save-msg" role="status">⏳ جاري الحفظ التلقائي...</span>
             )}

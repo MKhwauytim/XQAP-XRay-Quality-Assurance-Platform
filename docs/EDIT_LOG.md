@@ -1061,6 +1061,61 @@ Removed the auto-latest logic: `listMonthFolders` no longer called, removed from
     }
 ```
 
+### Follow-up 9: Population wizard driven by the global month (2026-07-16)
+
+The Population tab no longer owns its own month state. The global selection IS the wizard's
+month: selecting an existing month in the header auto-loads it from disk, selecting a pending
+"شهر جديد" resets to a clean Phase-1 import flow, and unsaved parsed uploads veto a month
+switch via a registered guard + the provider's `window.confirm`.
+
+**File:** `src/components/Sidebar/Tabs/Population/Population.wizard.test.tsx`
+
+**Before:** only `useWorkspace` + `usePermissions` mocked.
+
+**After:** added a `vi.mock("../../../../data/month/useGlobalMonth")` returning a no-workspace
+context (`selection: { kind: "none" }`, empty `months`, inert `setSelectedMonth`/`startNewMonth`/
+`refreshMonths`/`registerMonthChangeGuard`) so the rendered wizard test keeps passing once
+`index.tsx` consumes the hook.
+
+**File:** `src/components/Sidebar/Tabs/Population/index.tsx`
+
+**Before:** local `saveMonth`/`saveYear` `useState` seeded from `currentMonthFolderInfo()`; a
+`selectedMonthClosed` state + effect calling `isMonthClosed`; an `existingMonths`/`isLoadingMonths`
+state + effect calling `listMonthFolders`; the `pop-load-month` handler called
+`handleLoadExistingMonth` directly; `handleLoadExistingMonth` set `saveMonth`/`saveYear`; a
+Phase-1 "فتح شهر سابق" month-card grid.
+
+**After:** `saveMonth`/`saveYear` are derived consts from `useGlobalMonth().selection` (falling
+back to `currentMonthFolderInfo()` only in the no-workspace `kind: "none"` state);
+`selectedMonthClosed = isSelectedMonthClosed` (provider-owned); `existingMonths`/`isLoadingMonths`
++ their effect removed; a `registerMonthChangeGuard` effect vetoes month switches while
+`hasUnsavedSessionWorkRef.current` is true (message `getLabels().gm_month_switch_confirm`); a
+`resetForNewMonth()` clears all Phase-1..4 wizard state; a `loadedFolderRef`-guarded auto-load
+effect reacts to `globalMonth` (existing → `handleLoadExistingMonth`, pending → `resetForNewMonth`);
+the worker `done` branch sets `hasUnsavedSessionWorkRef.current = true`; `commitSaveToDisk`'s
+`result.ok` branch clears it and calls `void refreshMonths()`; the `pop-load-month` handler now
+calls `setGlobalMonth(e.detail.folderName)`; the Phase-1 month-card grid is gone (the
+`isLoadingMonthData` indicator was moved directly above `<PhaseOneUpload>`); `isMonthClosed` and
+`listMonthFolders` dropped from imports (kept `MonthClosedError`); the
+`<PhaseTwoReportAndProcessing>` call passes `monthLabel={formatMonthFolderShortLabel(formatMonthFolderName(saveMonth, saveYear))}`
+instead of `saveMonth`/`onMonthChange`.
+
+**File:** `src/components/Sidebar/Tabs/Population/components/PhaseTwoReportAndProcessing.tsx`
+
+**Before:** `ARABIC_MONTHS` const + `saveMonth: number` / `onMonthChange` props driving a
+12-button month grid.
+
+**After:** `ARABIC_MONTHS` deleted; props take a read-only `monthLabel: string` (replacing
+`saveMonth`, `onMonthChange` removed); the month-button grid replaced by
+`<strong className="phase2-month-current">{monthLabel}</strong>`.
+
+**File:** `src/components/Sidebar/Tabs/Population/Population.css`
+
+**Before:** _(no `.phase2-month-current` rule)_
+
+**After:** added `.phase2-month-current { font-size: 14px; font-weight: 700; }` next to
+`.phase2-month-label`.
+
 ## v54.1 — 2026-07-14 — Report terminology: حالة → صورة for x-ray records
 
 Owner request ("any reference for حالة become صورة"). Reviewed, phrase-mapped rename across the reporting layer — NOT a blind replace: حالة-as-"status" survives untouched (column headers الحالة, حالة التوزيع, حالة الإجابة, حالة BI, workflow labels), and the port name منفذ حالة عمار is data. 64 case-sense occurrences renamed across deck2, deck v1, the executive document parts (scope/risk/corroboration/narrative), executiveReportData findings, and the two KPI-dashboard labels (`rk_pchart_empty`, `rk_tooltip_cases`). Examples:

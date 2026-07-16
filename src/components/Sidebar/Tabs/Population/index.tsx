@@ -20,7 +20,6 @@ import { currentMonthFolderInfo, formatMonthFolderName, formatMonthFolderShortLa
 import type { MonthFolderInfo } from "../../../../data/population/monthFolder";
 import {
   saveMonthRun,
-  listMonthFolders,
   loadMonthForEditing,
   loadCertScanGlobal,
   saveCertScanGlobal,
@@ -71,6 +70,7 @@ import {
 } from "../../../../data/preferences/browsePresetStorage";
 import { writeEmployeeXlsx } from "../../../../data/answers/employeeXlsx";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
+import { useGlobalMonth } from "../../../../data/month/useGlobalMonth";
 
 import type { BiWorkbookResult, NormalizedBiRow } from "./biData/biDataTypes";
 
@@ -102,7 +102,7 @@ import {
 } from "../../../../data/population/populationConfig";
 
 import { getLabels } from "../../../../data/labels/labelsStore";
-import { MonthClosedError, isMonthClosed } from "../../../../data/population/monthLock";
+import { MonthClosedError } from "../../../../data/population/monthLock";
 import { appendWorkspaceAction } from "../../../../data/audit/actionLog";
 
 import "./Population.css";
@@ -206,9 +206,16 @@ export default function PopulationTab() {
   const { can } = usePermissions();
   const sessionRef = useRef(readSession());
   const [activeSubTab, setActiveSubTab] = useState<SubTab>("process");
+  const {
+    selection: globalMonth,
+    setSelectedMonth: setGlobalMonth,
+    refreshMonths,
+    registerMonthChangeGuard,
+    isSelectedMonthClosed,
+  } = useGlobalMonth();
   // Month close-out (Tier-1 Item A): a closed month is view-only — draw and
   // distribution capabilities are withdrawn regardless of role permissions.
-  const [selectedMonthClosed, setSelectedMonthClosed] = useState(false);
+  const selectedMonthClosed = isSelectedMonthClosed;
   const canUploadData = can("upload-data");
   const canProcessPopulation = can("process-population");
   const canConfigureSample = can("configure-sample");
@@ -233,23 +240,8 @@ export default function PopulationTab() {
   }, [directoryHandle]);
 
   // Month picker state
-  const [existingMonths, setExistingMonths] = useState<MonthFolderInfo[]>([]);
-  const [isLoadingMonths, setIsLoadingMonths] = useState(false);
   const [isLoadingMonthData, setIsLoadingMonthData] = useState(false);
   const [monthRefreshKey, setMonthRefreshKey] = useState(0);
-
-  useEffect(() => {
-    if (!directoryHandle) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync cleanup when workspace is removed; effect correctly synchronizes with File System Access API
-      setExistingMonths([]);
-      return;
-    }
-    setIsLoadingMonths(true);
-    listMonthFolders(directoryHandle)
-      .then((months) => setExistingMonths([...months].reverse()))
-      .catch(() => setExistingMonths([]))
-      .finally(() => setIsLoadingMonths(false));
-  }, [directoryHandle, monthRefreshKey]);
 
   // Load cumulative CertScan data from workspace on mount
   useEffect(() => {
@@ -280,17 +272,18 @@ export default function PopulationTab() {
     const handler = (e: CustomEvent<MonthFolderInfo>) => {
       setActiveSubTab("process");
       window.dispatchEvent(new CustomEvent("pop-subtab-changed", { detail: "process" }));
-      void handleLoadExistingMonth(e.detail);
+      // The auto-load effect reacts to the selection change (guard included).
+      setGlobalMonth(e.detail.folderName);
     };
     window.addEventListener("pop-load-month", handler as EventListener);
     return () => window.removeEventListener("pop-load-month", handler as EventListener);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [directoryHandle]);
+  }, [setGlobalMonth]);
 
   async function handleLoadExistingMonth(info: MonthFolderInfo): Promise<void> {
     if (!directoryHandle) return;
     setIsLoadingMonthData(true);
     try {
+      hasUnsavedSessionWorkRef.current = false;
       const data = await loadMonthForEditing(directoryHandle, info.folderName);
 
       // Reconstruct RiskWorkbookResult from saved raw rows
@@ -354,8 +347,6 @@ export default function PopulationTab() {
           invalidResultRows: data.processingSummary?.invalidResultRows ?? [],
           summary: data.processingSummary?.summary ?? fallbackSummary
         });
-        setSaveMonth(info.month);
-        setSaveYear(info.year);
       } else {
         setPopulationProcessingResult(null);
       }
@@ -377,6 +368,59 @@ export default function PopulationTab() {
       setIsLoadingMonthData(false);
     }
   }
+
+  // Unsaved in-session work (parsed uploads not yet auto-saved) — switching the
+  // global month would discard it, so the provider asks for confirmation first.
+  const hasUnsavedSessionWorkRef = useRef(false);
+  useEffect(
+    () =>
+      registerMonthChangeGuard(() =>
+        hasUnsavedSessionWorkRef.current ? getLabels().gm_month_switch_confirm : null
+      ),
+    [registerMonthChangeGuard]
+  );
+
+  /** Clean Phase-1 state targeting the (pending) global month. */
+  function resetForNewMonth(): void {
+    hasUnsavedSessionWorkRef.current = false;
+    setUploads({
+      riskAgencyData: { file: null, source: null },
+      businessIntelligenceData: { file: null, source: null },
+    });
+    setRiskWorkbookResult(null);
+    setBiWorkbookResult(null);
+    setPopulationProcessingResult(null);
+    setSampleDrawResult(null);
+    setSampleNeedsApproval(false);
+    setDistributionCurrent(null);
+    setSaveToDiskMessage(null);
+    setSampleSaveMessage(null);
+    setDistributionMessage(null);
+    setUploadError("");
+    setProcessingMessage("");
+    setCurrentPhase(1);
+    setCompletedPhaseIds([]);
+  }
+
+  // The global month IS the wizard's month: selecting an existing month loads it
+  // from disk; selecting a pending (new) month resets to a clean import flow.
+  const loadedFolderRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!directoryHandle || globalMonth.kind === "none") return;
+    if (loadedFolderRef.current === globalMonth.folderName) return;
+    loadedFolderRef.current = globalMonth.folderName;
+    if (globalMonth.kind === "existing") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing wizard state to the external global-month selection; the load/reset IS the intended effect
+      void handleLoadExistingMonth({
+        month: globalMonth.month,
+        year: globalMonth.year,
+        folderName: globalMonth.folderName,
+      });
+    } else {
+      resetForNewMonth();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- handleLoadExistingMonth/resetForNewMonth are stable per render cycle; keying on folderName prevents load loops
+  }, [directoryHandle, globalMonth]);
 
   async function handleConfigChange(newConfig: PopulationConfig) {
     if (!canConfigureSample) {
@@ -405,22 +449,12 @@ export default function PopulationTab() {
   const [currentPhase, setCurrentPhase] = useState(1);
   const [completedPhaseIds, setCompletedPhaseIds] = useState<number[]>([]);
 
-  const initialMonth = currentMonthFolderInfo();
-  const [saveMonth, setSaveMonth] = useState(initialMonth.month);
-  const [saveYear, setSaveYear] = useState(initialMonth.year);
+  // The save target is ALWAYS the globally selected month. The current-calendar
+  // fallback only covers the no-workspace state, where saving is impossible anyway.
+  const fallbackMonth = currentMonthFolderInfo();
+  const saveMonth = globalMonth.kind === "none" ? fallbackMonth.month : globalMonth.month;
+  const saveYear = globalMonth.kind === "none" ? fallbackMonth.year : globalMonth.year;
 
-  // Track the month-lock state of the selected month (Tier-1 Item A).
-  useEffect(() => {
-    if (!directoryHandle) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync reset when workspace is disconnected
-      setSelectedMonthClosed(false);
-      return;
-    }
-    const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
-    isMonthClosed(directoryHandle, monthFolderName)
-      .then(setSelectedMonthClosed)
-      .catch(() => setSelectedMonthClosed(false));
-  }, [directoryHandle, saveMonth, saveYear, monthRefreshKey]);
   // B4: compute the prior-month switching-rule advisory for the selected month so
   // it can be surfaced in Phase 3 BEFORE the draw. Advisory only — never blocks.
   useEffect(() => {
@@ -714,6 +748,7 @@ export default function PopulationTab() {
         } else if (msg.type === "done") {
           setRiskWorkbookResult(msg.riskResult);
           setBiWorkbookResult(msg.biResult);
+          hasUnsavedSessionWorkRef.current = true;
           if (msg.warning) setProcessingMessage(msg.warning);
           setCompletedPhaseIds((prev) =>
             prev.includes(1) ? prev : [...prev, 1]
@@ -918,6 +953,8 @@ export default function PopulationTab() {
           text: `تم حفظ شهر ${result.monthFolderName} على القرص بنجاح.`
         });
         setMonthRefreshKey((k) => k + 1);
+        hasUnsavedSessionWorkRef.current = false;
+        void refreshMonths();
       } else if (result.sampleExists) {
         // A sample was drawn between the pre-check and the locked write (TOCTOU):
         // prompt for explicit overwrite confirmation instead of silently failing.
@@ -1594,37 +1631,8 @@ export default function PopulationTab() {
       <main className="phase-panel">
         {currentPhase === 1 ? (
           <>
-            {directoryHandle && (isLoadingMonths || existingMonths.length > 0) && (
-              <div className="month-picker-section">
-                <div className="month-picker-header">
-                  <h3>فتح شهر سابق</h3>
-                  <p>اختر شهراً محفوظاً مسبقاً للمتابعة من حيث توقفت.</p>
-                </div>
-                {isLoadingMonthData && (
-                  <div className="month-picker-loading">جاري تحميل بيانات الشهر...</div>
-                )}
-                <div className="month-picker-grid">
-                  {isLoadingMonths ? (
-                    <div className="month-picker-loading">جاري تحميل الأشهر المحفوظة...</div>
-                  ) : (
-                    existingMonths.map((s) => (
-                      <button
-                        key={s.folderName}
-                        type="button"
-                        className="month-card"
-                        onClick={() => { void handleLoadExistingMonth(s); }}
-                        disabled={isLoadingMonthData}
-                      >
-                        <span className="month-card-name">{s.folderName}</span>
-                        <span className="month-card-rows">{s.month}/{s.year}</span>
-                      </button>
-                    ))
-                  )}
-                </div>
-                <div className="month-picker-divider">
-                  <span>أو ارفع بيانات شهر جديد</span>
-                </div>
-              </div>
+            {isLoadingMonthData && (
+              <div className="month-picker-loading">جاري تحميل بيانات الشهر...</div>
             )}
             <PhaseOneUpload
               uploads={uploads}
@@ -1650,7 +1658,7 @@ export default function PopulationTab() {
             isProcessingPopulation={isProcessingPopulation}
             processingProgressMessage={processingProgressMessage}
             processingProgressPercent={processingProgressPercent}
-            saveMonth={saveMonth}
+            monthLabel={formatMonthFolderShortLabel(formatMonthFolderName(saveMonth, saveYear))}
             isSavingToDisk={isSavingToDisk}
             saveToDiskMessage={saveToDiskMessage}
             hasDiskWorkspace={Boolean(directoryHandle)}
@@ -1659,7 +1667,6 @@ export default function PopulationTab() {
             onProcessPopulation={handleProcessPopulation}
             onExportPopulation={handleExportPopulation}
             onExportPhaseReport={handleExportPhaseTwoReport}
-            onMonthChange={setSaveMonth}
           />
         ) : null}
 
