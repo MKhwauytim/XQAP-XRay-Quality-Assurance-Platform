@@ -10,7 +10,7 @@
   z-index: 1000;
 
   display: grid;
-  grid-template-columns: minmax(190px, 1fr) auto minmax(190px, 1fr);
+  grid-template-columns: minmax(190px, 1fr) auto auto minmax(190px, 1fr);
   align-items: center;
   gap: 16px;
 
@@ -256,6 +256,13 @@
   .auth-toolbar-actions {
     width: 100%;
     justify-content: space-between;
+  }
+
+  /* GlobalMonthSelector: 4th toolbar child — stack full-width and let its own
+     contents wrap instead of overflowing the narrow single-column layout. */
+  .gms-root {
+    width: 100%;
+    flex-wrap: wrap;
   }
 
   .auth-role-switcher {

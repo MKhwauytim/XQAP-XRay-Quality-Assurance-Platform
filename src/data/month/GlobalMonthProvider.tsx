@@ -93,28 +93,30 @@ export function GlobalMonthProvider({ children }: { children: ReactNode }) {
     return true;
   }, []);
 
-  const setSelectedMonth = useCallback((folderName: string) => {
+  const setSelectedMonth = useCallback((folderName: string): boolean => {
     const prev = selectionRef.current;
-    if (prev.kind !== "none" && prev.folderName === folderName) return;
+    if (prev.kind !== "none" && prev.folderName === folderName) return false;
     const match = monthsRef.current.find((entry) => entry.folderName === folderName);
-    if (!match) return;
-    if (!confirmGuardedChange()) return;
+    if (!match) return false;
+    if (!confirmGuardedChange()) return false;
     const next: GlobalMonthSelection = { kind: "existing", ...match };
     persistSelection(next);
     setSelection(next);
+    return true;
   }, [confirmGuardedChange]);
 
-  const startNewMonth = useCallback((month: number, year: number) => {
+  const startNewMonth = useCallback((month: number, year: number): boolean => {
     const folderName = formatMonthFolderName(month, year);
     const prev = selectionRef.current;
-    if (prev.kind !== "none" && prev.folderName === folderName) return;
-    if (!confirmGuardedChange()) return;
+    if (prev.kind !== "none" && prev.folderName === folderName) return false;
+    if (!confirmGuardedChange()) return false;
     const match = monthsRef.current.find((entry) => entry.folderName === folderName);
     const next: GlobalMonthSelection = match
       ? { kind: "existing", ...match }
       : { kind: "pending", month, year, folderName };
     persistSelection(next);
     setSelection(next);
+    return true;
   }, [confirmGuardedChange]);
 
   const refreshMonths = useCallback(async () => {

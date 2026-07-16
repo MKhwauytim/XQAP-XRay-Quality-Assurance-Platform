@@ -11,8 +11,10 @@ export type GlobalMonthContextValue = {
   selection: GlobalMonthSelection;
   /** Month-lock state (Tier-1 Item A) for the current selection. */
   isSelectedMonthClosed: boolean;
-  setSelectedMonth: (folderName: string) => void;
-  startNewMonth: (month: number, year: number) => void;
+  /** Switches to an existing month. Returns true when the change was applied, false on a no-op (already selected / unknown folder) or when a registered guard declined the switch. */
+  setSelectedMonth: (folderName: string) => boolean;
+  /** Starts (or switches to) a month. Returns true when the change was applied, false on a no-op (already selected) or when a registered guard declined the switch. */
+  startNewMonth: (month: number, year: number) => boolean;
   refreshMonths: () => Promise<void>;
   registerMonthChangeGuard: (guard: MonthChangeGuard) => () => void;
 };

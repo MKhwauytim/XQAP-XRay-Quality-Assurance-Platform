@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CalendarPlus, Lock } from "lucide-react";
 
 import { useGlobalMonth } from "../../data/month/useGlobalMonth";
@@ -13,6 +13,9 @@ const ARABIC_MONTHS = [
   "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر",
 ];
 
+const MIN_YEAR = 2020;
+const MAX_YEAR = 2100;
+
 type GlobalMonthSelectorProps = {
   /** False in demo mode: the read-only workspace never creates months. */
   allowCreate: boolean;
@@ -24,7 +27,33 @@ export function GlobalMonthSelector({ allowCreate }: GlobalMonthSelectorProps) {
   const labels = useLabels();
   const [pickerOpen, setPickerOpen] = useState(false);
   const [newMonth, setNewMonth] = useState(() => new Date().getMonth() + 1);
-  const [newYear, setNewYear] = useState(() => new Date().getFullYear());
+  // Raw string state (not a number) so the field can be cleared while typing
+  // without silently coercing to 0; validated against MIN_YEAR/MAX_YEAR below.
+  const [newYearInput, setNewYearInput] = useState(() => String(new Date().getFullYear()));
+  const popoverWrapRef = useRef<HTMLDivElement>(null);
+
+  const parsedYear = Number(newYearInput);
+  const isYearValid = newYearInput !== "" && Number.isInteger(parsedYear)
+    && parsedYear >= MIN_YEAR && parsedYear <= MAX_YEAR;
+
+  // Escape key + outside-click dismissal for the "new month" popover.
+  useEffect(() => {
+    if (!pickerOpen) return;
+    function handlePointerDown(event: MouseEvent) {
+      if (popoverWrapRef.current && !popoverWrapRef.current.contains(event.target as Node)) {
+        setPickerOpen(false);
+      }
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setPickerOpen(false);
+    }
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [pickerOpen]);
 
   // No workspace yet — the toolbar has nothing month-related to show.
   if (selection.kind === "none") return null;
@@ -63,7 +92,7 @@ export function GlobalMonthSelector({ allowCreate }: GlobalMonthSelectorProps) {
       )}
 
       {canCreate && (
-        <div className="gms-new-wrap">
+        <div className="gms-new-wrap" ref={popoverWrapRef}>
           <button
             type="button"
             className="gms-new-btn"
@@ -93,12 +122,13 @@ export function GlobalMonthSelector({ allowCreate }: GlobalMonthSelectorProps) {
                 <input
                   type="number"
                   className="gms-year-input"
-                  min={2020}
-                  max={2100}
-                  value={newYear}
+                  min={MIN_YEAR}
+                  max={MAX_YEAR}
+                  value={newYearInput}
                   onChange={(event) => {
-                    const parsed = Number(event.target.value);
-                    if (Number.isInteger(parsed)) setNewYear(parsed);
+                    const raw = event.target.value;
+                    // Allow clearing the field while typing; only ever store digit strings.
+                    if (raw === "" || /^\d+$/.test(raw)) setNewYearInput(raw);
                   }}
                 />
               </label>
@@ -106,7 +136,12 @@ export function GlobalMonthSelector({ allowCreate }: GlobalMonthSelectorProps) {
                 <button
                   type="button"
                   className="gms-confirm"
-                  onClick={() => { startNewMonth(newMonth, newYear); setPickerOpen(false); }}
+                  disabled={!isYearValid}
+                  onClick={() => {
+                    if (!isYearValid) return;
+                    const applied = startNewMonth(newMonth, parsedYear);
+                    if (applied) setPickerOpen(false);
+                  }}
                 >
                   {labels.gm_confirm}
                 </button>

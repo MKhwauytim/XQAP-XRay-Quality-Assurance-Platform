@@ -159,6 +159,120 @@ function App() {
       { key: "gm_all_months",          desc: "تسمية عرض كل الأشهر" },
 ```
 
+### Follow-up: review-finding fixes for Task 3 (2026-07-16)
+
+**File:** `src/auth/AdminToolbar.css`
+
+**Before:**
+```css
+.auth-admin-toolbar {
+  ...
+  grid-template-columns: minmax(190px, 1fr) auto minmax(190px, 1fr);
+  ...
+}
+```
+```css
+@media (max-width: 640px) {
+  ...
+  .auth-toolbar-status,
+  .auth-toolbar-preview-panel,
+  .auth-toolbar-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+  ...
+}
+```
+
+**After:** grid-template-columns extended to a 4th `auto` track (status | month selector | preview panel | actions) so `GlobalMonthSelector`'s `.gms-root` no longer wraps to an implicit row; mobile breakpoint gets a `.gms-root { width: 100%; flex-wrap: wrap; }` rule so it stacks/wraps like the other toolbar zones.
+
+**File:** `src/components/GlobalMonthSelector/GlobalMonthSelector.tsx`
+
+**Before:** year `<input>` bound directly to numeric `newYear` state (`Number(event.target.value)`, coerces `""` to `0`, any integer accepted); confirm handler called `startNewMonth(newMonth, newYear); setPickerOpen(false);` unconditionally; no Escape/outside-click dismissal for the popover.
+
+**After:** year input backed by raw string state (`newYearInput`), only digit strings accepted onChange; a derived `isYearValid` (`2020–2100` range) gates both the confirm button's `disabled` and the confirm handler; confirm handler only calls `setPickerOpen(false)` when `startNewMonth(...)` returns `true`; added a `useEffect` (scoped to `pickerOpen`) with `mousedown` + `keydown`(Escape) document listeners, ref on `.gms-new-wrap`, mirroring the outside-click pattern already used in `FeedbackWidget.tsx`.
+
+**File:** `src/components/GlobalMonthSelector/GlobalMonthSelector.css`
+
+**Before:**
+```css
+.gms-label {
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0.75;
+}
+...
+.gms-new-btn {
+  ...
+  border: 1px dashed rgba(0, 0, 0, 0.25);
+  background: transparent;
+  ...
+}
+```
+
+**After:** `.gms-label` gets an explicit `color: rgba(255, 255, 255, 0.75)` (drops the bare `opacity`); `.gms-new-btn` gets an explicit `color: rgba(255, 255, 255, 0.92)` and a light `border: 1px dashed rgba(255, 255, 255, 0.35)` matching the dark-navy toolbar palette (`AdminToolbar.css`'s `rgba(255,255,255,…)` convention). Popover-internal rules (`.gms-popover`, `.gms-month-btn`, `.gms-confirm`, `.gms-cancel`) untouched — popover stays light.
+
+**File:** `src/data/month/GlobalMonthContext.ts`
+
+**Before:**
+```ts
+  setSelectedMonth: (folderName: string) => void;
+  startNewMonth: (month: number, year: number) => void;
+```
+
+**After:**
+```ts
+  /** Returns true when the change was applied; false on a no-op (already selected / unknown folder) or a declined guard. */
+  setSelectedMonth: (folderName: string) => boolean;
+  /** Returns true when the change was applied; false on a no-op (already selected) or a declined guard. */
+  startNewMonth: (month: number, year: number) => boolean;
+```
+
+**File:** `src/data/month/GlobalMonthProvider.tsx`
+
+**Before:**
+```ts
+  const setSelectedMonth = useCallback((folderName: string) => {
+    const prev = selectionRef.current;
+    if (prev.kind !== "none" && prev.folderName === folderName) return;
+    const match = monthsRef.current.find((entry) => entry.folderName === folderName);
+    if (!match) return;
+    if (!confirmGuardedChange()) return;
+    const next: GlobalMonthSelection = { kind: "existing", ...match };
+    persistSelection(next);
+    setSelection(next);
+  }, [confirmGuardedChange]);
+
+  const startNewMonth = useCallback((month: number, year: number) => {
+    const folderName = formatMonthFolderName(month, year);
+    const prev = selectionRef.current;
+    if (prev.kind !== "none" && prev.folderName === folderName) return;
+    if (!confirmGuardedChange()) return;
+    const match = monthsRef.current.find((entry) => entry.folderName === folderName);
+    const next: GlobalMonthSelection = match
+      ? { kind: "existing", ...match }
+      : { kind: "pending", month, year, folderName };
+    persistSelection(next);
+    setSelection(next);
+  }, [confirmGuardedChange]);
+```
+
+**After:** both callbacks now return `boolean` — `false` on the early-return no-op/guard-declined branches, `true` right after `setSelection(next)`.
+
+**File:** `src/data/month/GlobalMonthProvider.test.tsx`
+
+**Before:**
+```tsx
+    act(() => result.current.setSelectedMonth("4-april-2026"));
+    expect(confirmSpy).toHaveBeenCalledWith("unsaved!");
+    expect(result.current.selection).toMatchObject({ folderName: "5-may-2026" });
+    confirmSpy.mockReturnValue(true);
+    act(() => result.current.setSelectedMonth("4-april-2026"));
+    expect(result.current.selection).toMatchObject({ folderName: "4-april-2026" });
+```
+
+**After:** captures `let ok: boolean` around each `act()` call and asserts `expect(ok!).toBe(false)` after the declined guard, `expect(ok!).toBe(true)` after the accepted one.
+
 ## v54.1 — 2026-07-14 — Report terminology: حالة → صورة for x-ray records
 
 Owner request ("any reference for حالة become صورة"). Reviewed, phrase-mapped rename across the reporting layer — NOT a blind replace: حالة-as-"status" survives untouched (column headers الحالة, حالة التوزيع, حالة الإجابة, حالة BI, workflow labels), and the port name منفذ حالة عمار is data. 64 case-sense occurrences renamed across deck2, deck v1, the executive document parts (scope/risk/corroboration/narrative), executiveReportData findings, and the two KPI-dashboard labels (`rk_pchart_empty`, `rk_tooltip_cases`). Examples:

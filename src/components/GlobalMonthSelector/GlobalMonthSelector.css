@@ -8,7 +8,7 @@
 .gms-label {
   font-size: 12px;
   font-weight: 600;
-  opacity: 0.75;
+  color: rgba(255, 255, 255, 0.75);
 }
 
 .gms-select {
@@ -41,15 +41,16 @@
   align-items: center;
   gap: 5px;
   padding: 4px 10px;
-  border: 1px dashed rgba(0, 0, 0, 0.25);
+  border: 1px dashed rgba(255, 255, 255, 0.35);
   border-radius: 6px;
   background: transparent;
+  color: rgba(255, 255, 255, 0.92);
   font: inherit;
   font-size: 12px;
   cursor: pointer;
 }
 
-.gms-new-btn:hover { background: rgba(0, 0, 0, 0.05); }
+.gms-new-btn:hover { background: rgba(255, 255, 255, 0.1); }
 
 .gms-popover {
   position: absolute;

@@ -82,12 +82,15 @@ describe("GlobalMonthProvider", () => {
     await waitFor(() => expect(result.current.months).toHaveLength(2));
     let unregister: () => void;
     act(() => { unregister = result.current.registerMonthChangeGuard(() => "unsaved!"); });
-    act(() => result.current.setSelectedMonth("4-april-2026"));
+    let ok: boolean;
+    act(() => { ok = result.current.setSelectedMonth("4-april-2026"); });
     expect(confirmSpy).toHaveBeenCalledWith("unsaved!");
     expect(result.current.selection).toMatchObject({ folderName: "5-may-2026" });
+    expect(ok!).toBe(false);
     confirmSpy.mockReturnValue(true);
-    act(() => result.current.setSelectedMonth("4-april-2026"));
+    act(() => { ok = result.current.setSelectedMonth("4-april-2026"); });
     expect(result.current.selection).toMatchObject({ folderName: "4-april-2026" });
+    expect(ok!).toBe(true);
     act(() => unregister!());
   });
 
