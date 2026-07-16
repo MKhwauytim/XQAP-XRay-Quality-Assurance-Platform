@@ -50,15 +50,15 @@ $fileUri = ([Uri]$resolvedIndex).AbsoluteUri
 
 **File:** `public/create-desktop-shortcut.ps1` (encoding fix)
 
-**Before:** UTF-8 without BOM (legacy PowerShell 5.1 failed to parse it)
+**Before:** UTF-8 without BOM — legacy Windows PowerShell 5.1 (`powershell.exe`, the interpreter this feature's `.bat` actually invokes) decodes a BOM-less script using the system ANSI codepage, not UTF-8, so the Arabic string literals in the source broke tokenization: `powershell.exe` threw a fatal parser error (`TerminatorExpectedAtEndOfString`) and created no shortcut at all. `pwsh` (PowerShell 7, used for all of this plan's earlier testing) has no such gap, which is why this went undetected until the real end-user invocation path was exercised in this task.
 
-**After:** UTF-8 with BOM (legacy PowerShell can now read it correctly with console set to UTF-8 via `chcp 65001`)
+**After:** UTF-8 with BOM. The BOM alone fixes source parsing under `powershell.exe` — independently verified this is necessary and sufficient (a BOM-less script with only `chcp 65001` added to the `.bat` still threw the identical parser error). `pwsh` is unaffected by the BOM either way.
 
 **File:** `public/Create Desktop Shortcut.bat` (new)
 
 **Before:** _(file did not exist)_
 
-**After:** one-click wrapper that runs `create-desktop-shortcut.ps1` with a bypassed execution policy, so double-clicking works without a PowerShell security prompt. Includes `chcp 65001` to set console to UTF-8 so Arabic text renders correctly.
+**After:** one-click wrapper that runs `create-desktop-shortcut.ps1` with a bypassed execution policy, so double-clicking works without a PowerShell security prompt. Also sets `chcp 65001` — a separate, independent fix from the BOM above: the BOM controls how the *script source* is decoded (parsing), while `chcp` controls how the *console output* (the Arabic success/error messages) is displayed. Without `chcp`, the shortcut is still created correctly but the on-screen messages render as `?` — one does not substitute for the other.
 
 The raw-string URI concatenation left non-ASCII deployment path segments (e.g. an Arabic folder name) as literal Unicode, which `WshShortcut.Save()` silently ANSI-marshals to `?` with no exception — the shortcut "succeeds" but launches a dead URL. `[Uri]::AbsoluteUri` percent-encodes to pure ASCII, which survives ANSI marshaling intact and is decoded correctly by Chrome/Edge. `.Description` is free text (not a URI, can't be percent-encoded) and hits the same ANSI-marshaling corruption, producing visible `?????` mojibake in the shortcut's Properties/tooltip; since a true fix needs `IShellLinkW` (out of scope — pure-`WScript.Shell` constraint), the property is dropped rather than shipped garbled. The Desktop `.lnk` filename itself (already Arabic, via the staging-path fix) is unaffected either way.
 
