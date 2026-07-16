@@ -743,6 +743,159 @@ function QueueToolbar({
 
 `formatMonthFolderShortLabel` import removed entirely — confirmed no other reference in the file after this edit. `listMonthFolders` removed from the `populationStorage` import; `loadMonthPopulationFinal` kept (still used by `openReplacementDialog`). The month-listing effect and local `months`/`selMonth` state are gone — `selMonth` is now derived from the app-wide `useGlobalMonth()` selection, same convention as the Reports tab (Follow-up 4).
 
+### Follow-up 7: ReferralApproval consumes the global month (2026-07-16)
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/useApprovalData.ts`
+
+**Before:**
+```ts
+import { MonthClosedError } from "../../../../../../data/population/monthLock";
+import type { MonthFolderInfo } from "../../../../../../data/population/monthFolder";
+import { listMonthFolders } from "../../../../../../data/population/populationStorage";
+import type { PreparedPopulationRow } from "../../../../../../data/population/populationTypes";
+```
+```ts
+  const [months, setMonths] = useState<MonthFolderInfo[]>([]);
+  const [selMonth, setSelMonth] = useState("");
+```
+```ts
+  useEffect(() => {
+    listMonthFolders(directoryHandle)
+      .then((ms) => {
+        setMonths(ms);
+        if (ms.length > 0) setSelMonth((cur) => cur || ms[ms.length - 1]!.folderName);
+        else setLoadState("ready");
+      })
+      .catch(() => setLoadState("error"));
+  }, [directoryHandle]);
+```
+```ts
+  return {
+    username, role, canApproveReferrals, canApproveReplacements, canApproveReopens,
+    userDisplayMap, months, selMonth, setSelMonth,
+```
+
+**After:**
+```ts
+import { MonthClosedError } from "../../../../../../data/population/monthLock";
+import type { PreparedPopulationRow } from "../../../../../../data/population/populationTypes";
+```
+```ts
+import { useGlobalMonth } from "../../../../../../data/month/useGlobalMonth";
+```
+```ts
+  const { months, selection: globalMonth } = useGlobalMonth();
+  const selMonth = globalMonth.kind === "existing" ? globalMonth.folderName : "";
+```
+```ts
+  // No selected on-disk month → nothing to load; land in the ready/empty state.
+  useEffect(() => {
+    if (!selMonth) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync empty-state reset when no month folder is selected
+      setLoadState("ready");
+    }
+  }, [selMonth]);
+```
+```ts
+  return {
+    username, role, canApproveReferrals, canApproveReplacements, canApproveReopens,
+    userDisplayMap, months, selMonth,
+```
+
+`MonthFolderInfo` type import and `listMonthFolders` import removed (no longer called directly — the provider owns month listing). The month-listing effect and local `months`/`selMonth` state are gone — `selMonth` is now derived from the app-wide `useGlobalMonth()` selection, same convention as Reports (Follow-up 4), XrayReferrals (Follow-up 5), and XrayInspectionResults (Follow-up 6). `setSelMonth` dropped from the hook's return — approve/deny actions already write against each request's own `monthFolderName` (bug #3 fix, untouched by this change), never the UI's selected month.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/index.tsx`
+
+**Before:**
+```tsx
+import { formatMonthFolderShortLabel } from "../../../../../../data/population/monthFolder";
+```
+```tsx
+    username, canApproveReferrals, canApproveReplacements, canApproveReopens,
+    userDisplayMap, months, selMonth, setSelMonth,
+    requests, sampleDetails, loadState, reload,
+```
+```tsx
+            <label className="ew-label" htmlFor="ra-month">
+              الشهر
+              <select id="ra-month" className="ew-select" value={selMonth} onChange={(e) => setSelMonth(e.target.value)}>
+                {months.map((m) => <option key={m.folderName} value={m.folderName}>{formatMonthFolderShortLabel(m.folderName)}</option>)}
+              </select>
+            </label>
+
+            <SummaryBar counts={counts} active={statusFilter} onSelect={setStatusFilter} />
+```
+
+**After:**
+
+Import removed entirely.
+
+```tsx
+    username, canApproveReferrals, canApproveReplacements, canApproveReopens,
+    userDisplayMap, months,
+    requests, sampleDetails, loadState, reload,
+```
+```tsx
+            <SummaryBar counts={counts} active={statusFilter} onSelect={setStatusFilter} />
+```
+
+`formatMonthFolderShortLabel` import removed entirely — confirmed no other reference in the file after this edit. `selMonth` dropped from the destructure too (not just `setSelMonth`) — with the `<select>` gone it had no remaining reader in this file and would trip `no-unused-vars`; `months` is still read (for the "no processed months yet" empty state) so it stays. The header's global month selector is now the only way to change the selected month.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/useApprovalData.test.tsx`
+
+**Before:**
+```tsx
+import { afterEach, describe, expect, it } from "vitest";
+```
+```tsx
+import { useApprovalData } from "./useApprovalData";
+```
+(no module mock)
+```tsx
+    const { result } = renderHook(() => useApprovalData(root));
+    await waitFor(() => expect(result.current.loadState).toBe("ready"));
+    act(() => result.current.setSelMonth("4-april-2026"));
+    await waitFor(() => expect(result.current.referrals).toHaveLength(1));
+```
+```tsx
+    const { result } = renderHook(() => useApprovalData(root));
+    await waitFor(() => expect(result.current.loadState).toBe("ready"));
+    act(() => result.current.setSelMonth("4-april-2026")); // reviewer has a different month open
+```
+
+**After:**
+```tsx
+import { afterEach, describe, expect, it, vi } from "vitest";
+```
+```tsx
+import { useApprovalData } from "./useApprovalData";
+
+vi.mock("../../../../../../data/month/useGlobalMonth", () => ({
+  useGlobalMonth: () => ({
+    months: [{ month: 4, year: 2026, folderName: "4-april-2026" }],
+    selection: { kind: "existing", month: 4, year: 2026, folderName: "4-april-2026" },
+    isSelectedMonthClosed: false,
+    setSelectedMonth: () => true,
+    startNewMonth: () => true,
+    refreshMonths: async () => {},
+    registerMonthChangeGuard: () => () => {},
+  }),
+}));
+```
+```tsx
+    const { result } = renderHook(() => useApprovalData(root));
+    await waitFor(() => expect(result.current.loadState).toBe("ready"));
+    await waitFor(() => expect(result.current.referrals).toHaveLength(1));
+```
+```tsx
+    const { result } = renderHook(() => useApprovalData(root));
+    await waitFor(() => expect(result.current.loadState).toBe("ready")); // reviewer has a different month open — mocked global selection is "4-april-2026"
+```
+
+The brief's suggested mock month (`5-may-2026`) didn't match this file's fixtures: `mockReferral` call sites use `"4-april-2026"` and `"3-march-2026"` (both regression tests predate the global-month work). The mock's `selection.folderName` is fixed at `"4-april-2026"` — matching the first test's fixture month so its load-and-list assertion still exercises real data, and staying distinct from the second test's `"3-march-2026"` fixture so its "reviewer has a different month open" case still holds without a `setSelMonth` call (which no longer exists on the hook).
+
+**Verification:** `npx vitest run "src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval"`, `npx tsc -b`, `npx eslint` on the three touched files, full `npm run test:run`.
+
 ## v54.1 — 2026-07-14 — Report terminology: حالة → صورة for x-ray records
 
 Owner request ("any reference for حالة become صورة"). Reviewed, phrase-mapped rename across the reporting layer — NOT a blind replace: حالة-as-"status" survives untouched (column headers الحالة, حالة التوزيع, حالة الإجابة, حالة BI, workflow labels), and the port name منفذ حالة عمار is data. 64 case-sense occurrences renamed across deck2, deck v1, the executive document parts (scope/risk/corroboration/narrative), executiveReportData findings, and the two KPI-dashboard labels (`rk_pchart_empty`, `rk_tooltip_cases`). Examples:

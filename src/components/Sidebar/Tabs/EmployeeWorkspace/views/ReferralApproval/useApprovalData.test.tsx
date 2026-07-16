@@ -1,6 +1,6 @@
 /* @vitest-environment jsdom */
-import { afterEach, describe, expect, it } from "vitest";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { renderHook, waitFor } from "@testing-library/react";
 import { createMemoryDirectory } from "../../../../../../data/storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../../../../../../data/storage/fileSystemAccess";
 import { clearSession, writeSession } from "../../../../../../auth/authSession";
@@ -16,6 +16,18 @@ import {
 } from "../../../../../../data/referral/referralStorage";
 import type { ReferralRequest } from "../../../../../../data/referral/referralTypes";
 import { useApprovalData } from "./useApprovalData";
+
+vi.mock("../../../../../../data/month/useGlobalMonth", () => ({
+  useGlobalMonth: () => ({
+    months: [{ month: 4, year: 2026, folderName: "4-april-2026" }],
+    selection: { kind: "existing", month: 4, year: 2026, folderName: "4-april-2026" },
+    isSelectedMonthClosed: false,
+    setSelectedMonth: () => true,
+    startNewMonth: () => true,
+    refreshMonths: async () => {},
+    registerMonthChangeGuard: () => () => {},
+  }),
+}));
 
 afterEach(() => clearSession());
 
@@ -56,7 +68,6 @@ describe("useApprovalData deny-flow regressions", () => {
 
     const { result } = renderHook(() => useApprovalData(root));
     await waitFor(() => expect(result.current.loadState).toBe("ready"));
-    act(() => result.current.setSelMonth("4-april-2026"));
     await waitFor(() => expect(result.current.referrals).toHaveLength(1));
 
     const outcome = await result.current.denyReferral(req, "too late");
@@ -74,8 +85,7 @@ describe("useApprovalData deny-flow regressions", () => {
     await appendReferralRequest(root, "3-march-2026", req);
 
     const { result } = renderHook(() => useApprovalData(root));
-    await waitFor(() => expect(result.current.loadState).toBe("ready"));
-    act(() => result.current.setSelMonth("4-april-2026")); // reviewer has a different month open
+    await waitFor(() => expect(result.current.loadState).toBe("ready")); // reviewer has a different month open — mocked global selection is "4-april-2026"
 
     const outcome = await result.current.denyReferral(req, "wrong port");
     expect(outcome.ok).toBe(true);

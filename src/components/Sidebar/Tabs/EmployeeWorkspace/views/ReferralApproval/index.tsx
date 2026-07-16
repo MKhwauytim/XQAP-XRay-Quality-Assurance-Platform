@@ -3,7 +3,6 @@ import { CalendarOff, X } from "lucide-react";
 import { PageHeader } from "../../../../../../components/PageHeader/PageHeader";
 import { EmptyState, ErrorState, LoadingState } from "../../../../../../components/StateViews/StateViews";
 import type { DirectoryHandleLike } from "../../../../../../data/storage/fileSystemAccess";
-import { formatMonthFolderShortLabel } from "../../../../../../data/population/monthFolder";
 import { isReferral, isReplacement, type CardRequest } from "./requestKind";
 import RequestList from "./RequestList";
 import ReviewModal from "./ReviewModal";
@@ -21,7 +20,7 @@ type Props = { directoryHandle: DirectoryHandleLike };
 export default function ReferralApproval({ directoryHandle }: Props) {
   const {
     username, canApproveReferrals, canApproveReplacements, canApproveReopens,
-    userDisplayMap, months, selMonth, setSelMonth,
+    userDisplayMap, months,
     requests, sampleDetails, loadState, reload,
     approve, deny, canReviewRequest, bulkDecision,
   } = useApprovalData(directoryHandle);
@@ -108,13 +107,6 @@ export default function ReferralApproval({ directoryHandle }: Props) {
       ) : (
         <>
           <div className="ew-referral-toolbar">
-            <label className="ew-label" htmlFor="ra-month">
-              الشهر
-              <select id="ra-month" className="ew-select" value={selMonth} onChange={(e) => setSelMonth(e.target.value)}>
-                {months.map((m) => <option key={m.folderName} value={m.folderName}>{formatMonthFolderShortLabel(m.folderName)}</option>)}
-              </select>
-            </label>
-
             <SummaryBar counts={counts} active={statusFilter} onSelect={setStatusFilter} />
           </div>
 

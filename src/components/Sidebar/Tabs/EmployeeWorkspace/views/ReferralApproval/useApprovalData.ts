@@ -9,9 +9,8 @@ import { appendWorkspaceAction } from "../../../../../../data/audit/actionLog";
 import { getLabels } from "../../../../../../data/labels/labelsStore";
 import { loadOrDeriveDistributionCurrent } from "../../../../../../data/distribution/distributionStorage";
 import type { DistributionEntry } from "../../../../../../data/distribution/distributionTypes";
+import { useGlobalMonth } from "../../../../../../data/month/useGlobalMonth";
 import { MonthClosedError } from "../../../../../../data/population/monthLock";
-import type { MonthFolderInfo } from "../../../../../../data/population/monthFolder";
-import { listMonthFolders } from "../../../../../../data/population/populationStorage";
 import type { PreparedPopulationRow } from "../../../../../../data/population/populationTypes";
 import {
   approveReferral as approveReferralDomain,
@@ -80,8 +79,8 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
   const userDisplayMap: Record<string, string> = {};
   for (const u of userManagementState.users) userDisplayMap[u.username] = u.displayName;
 
-  const [months, setMonths] = useState<MonthFolderInfo[]>([]);
-  const [selMonth, setSelMonth] = useState("");
+  const { months, selection: globalMonth } = useGlobalMonth();
+  const selMonth = globalMonth.kind === "existing" ? globalMonth.folderName : "";
   const [referrals, setReferrals] = useState<ReferralRequest[]>([]);
   const [replacements, setReplacements] = useState<ReplacementRequest[]>([]);
   const [reopens, setReopens] = useState<ReopenRequest[]>([]);
@@ -92,15 +91,13 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
   // the results of a later selection.
   const loadTokenRef = useRef(0);
 
+  // No selected on-disk month → nothing to load; land in the ready/empty state.
   useEffect(() => {
-    listMonthFolders(directoryHandle)
-      .then((ms) => {
-        setMonths(ms);
-        if (ms.length > 0) setSelMonth((cur) => cur || ms[ms.length - 1]!.folderName);
-        else setLoadState("ready");
-      })
-      .catch(() => setLoadState("error"));
-  }, [directoryHandle]);
+    if (!selMonth) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync empty-state reset when no month folder is selected
+      setLoadState("ready");
+    }
+  }, [selMonth]);
 
   const loadData = useCallback(async () => {
     if (!selMonth) return;
@@ -394,7 +391,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
 
   return {
     username, role, canApproveReferrals, canApproveReplacements, canApproveReopens,
-    userDisplayMap, months, selMonth, setSelMonth,
+    userDisplayMap, months, selMonth,
     referrals, replacements, reopens, requests, sampleDetails, loadState, reload: loadData,
     approveReferral, denyReferral, approveReplacement, denyReplacement, approveReopen, denyReopen,
     approve, deny, canReviewRequest, bulkDecision,
