@@ -390,6 +390,98 @@ Re-scoped (0,2,0 / hover 0,3,0) so the intended dashed-light look actually beats
     expect(ok!).toBe(false); // no-op: already the current selection
 ```
 
+### Follow-up 4: Reports tab consumes the global month (2026-07-16)
+
+**File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
+
+**Before:**
+```tsx
+import { listMonthFolders, loadMonthPopulationFinal, loadMonthForEditing, loadMonthPopulationFinalRevision } from "../../../../data/population/populationStorage";
+```
+```tsx
+  const [months, setMonths] = useState<Array<{ folderName: string }>>([]);
+  const [selectedMonth, setSelectedMonth] = useState("");
+```
+```tsx
+  useEffect(() => {
+    if (!directoryHandle) return;
+    void listMonthFolders(directoryHandle)
+      .then((list) => {
+        setMonths(list);
+        if (list.length > 0) setSelectedMonth(list[list.length - 1]!.folderName);
+      })
+      .catch(logRejection("reports:listMonthFolders"));
+  }, [directoryHandle]);
+```
+```tsx
+        <select
+          className="rh-month-select"
+          value={selectedMonth}
+          onChange={(e) => setSelectedMonth(e.target.value)}
+        >
+          {months.length === 0 ? (
+            <option value="">لا توجد أشهر</option>
+          ) : (
+            months.map((m) => (
+              <option key={m.folderName} value={m.folderName}>
+                {formatMonthFolderShortLabel(m.folderName)}
+              </option>
+            ))
+          )}
+        </select>
+```
+
+**After:**
+```tsx
+import { loadMonthPopulationFinal, loadMonthForEditing, loadMonthPopulationFinalRevision } from "../../../../data/population/populationStorage";
+```
+```tsx
+import { useGlobalMonth } from "../../../../data/month/useGlobalMonth";
+```
+```tsx
+  const { selection: globalMonth } = useGlobalMonth();
+  // Pending months have no folder on disk yet — treat them as "no data" (empty states).
+  const selectedMonth = globalMonth.kind === "existing" ? globalMonth.folderName : "";
+```
+```tsx
+        <strong className="rh-month-current">
+          {globalMonth.kind === "none"
+            ? "لا توجد أشهر"
+            : formatMonthFolderShortLabel(globalMonth.folderName)}
+        </strong>
+```
+Removed the local month-listing state/effect entirely — the Reports tab now derives `selectedMonth` from the app-wide `useGlobalMonth()` selection instead of maintaining its own `<select>`.
+
+**File:** `src/components/Sidebar/Tabs/Reports/Reports.css`
+
+**Before:**
+```css
+.rh-month-select {
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-sm, 8px);
+  font-size: 13.5px;
+  font-weight: 700;
+  background: var(--c-surface);
+  color: var(--c-navy);
+  min-width: 160px;
+  cursor: pointer;
+  outline: none;
+  font-family: inherit;
+  transition: border-color 150ms;
+}
+.rh-month-select:focus { border-color: var(--c-sky); }
+```
+
+**After:**
+```css
+.rh-month-current {
+  font-size: 13px;
+  font-weight: 700;
+}
+```
+`.rh-month-select` rules removed (dead — no `<select>` remains in this tab; confirmed no other file references the class).
+
 ## v54.1 — 2026-07-14 — Report terminology: حالة → صورة for x-ray records
 
 Owner request ("any reference for حالة become صورة"). Reviewed, phrase-mapped rename across the reporting layer — NOT a blind replace: حالة-as-"status" survives untouched (column headers الحالة, حالة التوزيع, حالة الإجابة, حالة BI, workflow labels), and the port name منفذ حالة عمار is data. 64 case-sense occurrences renamed across deck2, deck v1, the executive document parts (scope/risk/corroboration/narrative), executiveReportData findings, and the two KPI-dashboard labels (`rk_pchart_empty`, `rk_tooltip_cases`). Examples:

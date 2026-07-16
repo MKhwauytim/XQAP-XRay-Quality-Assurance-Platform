@@ -155,21 +155,10 @@
   color: var(--c-ink-3);
   white-space: nowrap;
 }
-.rh-month-select {
-  padding: var(--sp-2) var(--sp-3);
-  border: 1px solid var(--c-border);
-  border-radius: var(--r-sm, 8px);
-  font-size: 13.5px;
+.rh-month-current {
+  font-size: 13px;
   font-weight: 700;
-  background: var(--c-surface);
-  color: var(--c-navy);
-  min-width: 160px;
-  cursor: pointer;
-  outline: none;
-  font-family: inherit;
-  transition: border-color 150ms;
 }
-.rh-month-select:focus { border-color: var(--c-sky); }
 .rh-month-sep { flex: 1; height: 1px; background: var(--c-border); min-width: 16px; }
 .rh-month-chips { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 

@@ -6,7 +6,8 @@ import { AlertTriangle, BarChart2, BarChart3, Building2, Check, ClipboardList, D
 import type { SidebarTabModule } from "../tabTypes";
 import { loadOrDeriveDistributionCurrent, loadDistributionCurrentRevision } from "../../../../data/distribution/distributionStorage";
 import { logRejection } from "../../../../data/storage/errorLogger";
-import { listMonthFolders, loadMonthPopulationFinal, loadMonthForEditing, loadMonthPopulationFinalRevision } from "../../../../data/population/populationStorage";
+import { loadMonthPopulationFinal, loadMonthForEditing, loadMonthPopulationFinalRevision } from "../../../../data/population/populationStorage";
+import { useGlobalMonth } from "../../../../data/month/useGlobalMonth";
 import type { SourceRevisions } from "../../../../data/reporting/sourceRevisions";
 import { formatMonthFolderShortLabel } from "../../../../data/population/monthFolder";
 import type { PreparedPopulationRow } from "../../../../data/population/populationTypes";
@@ -142,8 +143,9 @@ function ReportsContent() {
   const { directoryHandle } = useWorkspace();
   const labels = useLabels();
 
-  const [months, setMonths] = useState<Array<{ folderName: string }>>([]);
-  const [selectedMonth, setSelectedMonth] = useState("");
+  const { selection: globalMonth } = useGlobalMonth();
+  // Pending months have no folder on disk yet — treat them as "no data" (empty states).
+  const selectedMonth = globalMonth.kind === "existing" ? globalMonth.folderName : "";
   const [monthMeta, setMonthMeta] = useState<MonthMeta | null>(null);
   const [section, setSection] = useState<ReportsSection>("reports");
   const [generating, setGenerating] = useState<ReportType | null>(null);
@@ -161,16 +163,6 @@ function ReportsContent() {
   const [pbiExporting, setPbiExporting] = useState(false);
   const [pbiResult, setPbiResult] = useState<ExportManifest | null>(null);
   const [pbiError, setPbiError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!directoryHandle) return;
-    void listMonthFolders(directoryHandle)
-      .then((list) => {
-        setMonths(list);
-        if (list.length > 0) setSelectedMonth(list[list.length - 1]!.folderName);
-      })
-      .catch(logRejection("reports:listMonthFolders"));
-  }, [directoryHandle]);
 
   useEffect(() => {
     window.dispatchEvent(new CustomEvent("pop-subtab-changed", { detail: section }));
@@ -844,21 +836,11 @@ function ReportsContent() {
       {/* ── Month bar ───────────────────────────────── */}
       <div className="rh-month-bar">
         <span className="rh-month-label">الشهر</span>
-        <select
-          className="rh-month-select"
-          value={selectedMonth}
-          onChange={(e) => setSelectedMonth(e.target.value)}
-        >
-          {months.length === 0 ? (
-            <option value="">لا توجد أشهر</option>
-          ) : (
-            months.map((m) => (
-              <option key={m.folderName} value={m.folderName}>
-                {formatMonthFolderShortLabel(m.folderName)}
-              </option>
-            ))
-          )}
-        </select>
+        <strong className="rh-month-current">
+          {globalMonth.kind === "none"
+            ? "لا توجد أشهر"
+            : formatMonthFolderShortLabel(globalMonth.folderName)}
+        </strong>
         <div className="rh-month-sep" />
         <div className="rh-month-chips">
           <span className="rh-chip rh-chip-pop">
