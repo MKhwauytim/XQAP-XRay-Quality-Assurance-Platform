@@ -1,4 +1,4 @@
-# Creates a Desktop shortcut that launches this app in browser "app mode"
+﻿# Creates a Desktop shortcut that launches this app in browser "app mode"
 # (its own window, no tabs/address bar) via Chrome or Edge, using the icon
 # shipped alongside this script. Safe to re-run — e.g. after moving this
 # folder to a new location, re-running repairs the shortcut's target path.
