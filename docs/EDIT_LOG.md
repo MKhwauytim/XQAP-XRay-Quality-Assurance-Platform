@@ -37,6 +37,128 @@ New GlobalMonthProvider context + toolbar selector; all tabs consume useGlobalMo
 
 **Note:** Union access narrowing — replaced direct `.folderName` property access (TS2339 errors) with `.toMatchObject({ folderName: ... })` assertions (4 call sites); passes `tsc -b` and `vitest run`.
 
+**File:** `src/data/labels/labelsStore.ts`
+
+**Before:**
+```ts
+  label_month:      "الشهر",
+  label_template:   "النموذج",
+```
+
+**After:**
+```ts
+  label_month:      "الشهر",
+  // Global month selector (top toolbar)
+  gm_label:                "الشهر",
+  gm_new_month_btn:        "شهر جديد",
+  gm_new_month_title:      "بدء شهر جديد",
+  gm_year_label:           "السنة",
+  gm_confirm:              "اختيار",
+  gm_cancel:               "إلغاء",
+  gm_pending_suffix:       "(جديد)",
+  gm_locked_badge:         "مُقفل",
+  gm_no_months:            "لا توجد أشهر",
+  gm_all_months:           "كل الأشهر",
+  gm_month_switch_confirm: "توجد بيانات غير محفوظة في معالجة المجتمع — تغيير الشهر سيتجاهلها ويحمّل بيانات الشهر المحدد. هل تريد المتابعة؟",
+  label_template:   "النموذج",
+```
+
+**File:** `src/components/GlobalMonthSelector/GlobalMonthSelector.tsx` (new)
+
+**Before:** _(file did not exist)_
+
+**After:** `<GlobalMonthSelector allowCreate>` — month `<select>` bound to `useGlobalMonth()`, closed-month lock badge, and (when `allowCreate` and `can("process-population")`) a "شهر جديد" popover with a 12-button Arabic month grid + year input calling `startNewMonth` — see file.
+
+**File:** `src/components/GlobalMonthSelector/GlobalMonthSelector.css` (new)
+
+**Before:** _(file did not exist)_
+
+**After:** styles for `.gms-root`, `.gms-select`, `.gms-locked`, `.gms-new-btn`, `.gms-popover`, `.gms-month-grid`/`.gms-month-btn`, `.gms-year-input`, `.gms-popover-actions` — see file.
+
+**File:** `src/auth/AdminToolbar.tsx`
+
+**Before:**
+```tsx
+import { useWorkspace } from "../data/workspace/useWorkspace";
+```
+```tsx
+      </div>
+
+      <div className="auth-toolbar-preview-panel">
+```
+
+**After:**
+```tsx
+import { useWorkspace } from "../data/workspace/useWorkspace";
+import { GlobalMonthSelector } from "../components/GlobalMonthSelector/GlobalMonthSelector";
+```
+```tsx
+      </div>
+
+      <GlobalMonthSelector allowCreate={!isDemo} />
+
+      <div className="auth-toolbar-preview-panel">
+```
+
+**File:** `src/App.tsx`
+
+**Before:**
+```tsx
+function App() {
+  return (
+    <WorkspacePicker>
+      <AuthGate>
+        {(session) => (
+          <WorkspaceGate session={session}>
+            {/* key on role so switching the admin role-preview remounts the app,
+                forcing components that read the session once at mount to re-read it. */}
+            <AppContent key={session.role} session={session} />
+          </WorkspaceGate>
+        )}
+      </AuthGate>
+    </WorkspacePicker>
+  );
+}
+```
+
+**After:**
+```tsx
+function App() {
+  return (
+    <WorkspacePicker>
+      <GlobalMonthProvider>
+        <AuthGate>
+          {(session) => (
+            <WorkspaceGate session={session}>
+              {/* key on role so switching the admin role-preview remounts the app,
+                  forcing components that read the session once at mount to re-read it. */}
+              <AppContent key={session.role} session={session} />
+            </WorkspaceGate>
+          )}
+        </AuthGate>
+      </GlobalMonthProvider>
+    </WorkspacePicker>
+  );
+}
+```
+(plus the import `import { GlobalMonthProvider } from "./data/month/GlobalMonthProvider";`)
+
+**File:** `src/components/Sidebar/Tabs/Settings/index.tsx`
+
+**Before:**
+```ts
+      { key: "label_month",            desc: "تسمية حقل الشهر" },
+```
+
+**After:**
+```ts
+      { key: "label_month",            desc: "تسمية حقل الشهر" },
+      { key: "gm_label",               desc: "تسمية الشهر في الشريط العلوي" },
+      { key: "gm_new_month_btn",       desc: "زر شهر جديد" },
+      { key: "gm_month_switch_confirm", desc: "رسالة تأكيد تغيير الشهر مع بيانات غير محفوظة" },
+      { key: "gm_all_months",          desc: "تسمية عرض كل الأشهر" },
+```
+
 ## v54.1 — 2026-07-14 — Report terminology: حالة → صورة for x-ray records
 
 Owner request ("any reference for حالة become صورة"). Reviewed, phrase-mapped rename across the reporting layer — NOT a blind replace: حالة-as-"status" survives untouched (column headers الحالة, حالة التوزيع, حالة الإجابة, حالة BI, workflow labels), and the port name منفذ حالة عمار is data. 64 case-sense occurrences renamed across deck2, deck v1, the executive document parts (scope/risk/corroboration/narrative), executiveReportData findings, and the two KPI-dashboard labels (`rk_pchart_empty`, `rk_tooltip_cases`). Examples:

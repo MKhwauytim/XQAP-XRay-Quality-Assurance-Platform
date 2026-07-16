@@ -13,6 +13,7 @@ import {
 import type { AuthRole, AuthSession } from "./authTypes";
 import { getManagedLoginUsers } from "./userManagement";
 import { useWorkspace } from "../data/workspace/useWorkspace";
+import { GlobalMonthSelector } from "../components/GlobalMonthSelector/GlobalMonthSelector";
 
 const PREVIEW_ROLE_IDS: AuthRole[] = ["admin", "manager", "supervisor", "employee", "guest"];
 
@@ -100,6 +101,8 @@ export function AdminToolbar({
           </span>
         )}
       </div>
+
+      <GlobalMonthSelector allowCreate={!isDemo} />
 
       <div className="auth-toolbar-preview-panel">
         {isRealAdmin && (

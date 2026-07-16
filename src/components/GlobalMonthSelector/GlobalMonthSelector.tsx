@@ -1,0 +1,123 @@
+import { useState } from "react";
+import { CalendarPlus, Lock } from "lucide-react";
+
+import { useGlobalMonth } from "../../data/month/useGlobalMonth";
+import { usePermissions } from "../../auth/usePermissions";
+import { useLabels } from "../../data/labels/useLabels";
+import { formatMonthFolderShortLabel } from "../../data/population/monthFolder";
+
+import "./GlobalMonthSelector.css";
+
+const ARABIC_MONTHS = [
+  "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
+  "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر",
+];
+
+type GlobalMonthSelectorProps = {
+  /** False in demo mode: the read-only workspace never creates months. */
+  allowCreate: boolean;
+};
+
+export function GlobalMonthSelector({ allowCreate }: GlobalMonthSelectorProps) {
+  const { months, selection, isSelectedMonthClosed, setSelectedMonth, startNewMonth } = useGlobalMonth();
+  const { can } = usePermissions();
+  const labels = useLabels();
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [newMonth, setNewMonth] = useState(() => new Date().getMonth() + 1);
+  const [newYear, setNewYear] = useState(() => new Date().getFullYear());
+
+  // No workspace yet — the toolbar has nothing month-related to show.
+  if (selection.kind === "none") return null;
+
+  const canCreate = allowCreate && can("process-population");
+  const isPending = selection.kind === "pending";
+
+  return (
+    <div className="gms-root" dir="rtl">
+      <label className="gms-label" htmlFor="global-month-select">{labels.gm_label}</label>
+      <select
+        id="global-month-select"
+        className="gms-select"
+        value={selection.folderName}
+        onChange={(event) => setSelectedMonth(event.target.value)}
+      >
+        {isPending && (
+          <option value={selection.folderName}>
+            {formatMonthFolderShortLabel(selection.folderName)} {labels.gm_pending_suffix}
+          </option>
+        )}
+        {months.length === 0 && !isPending && (
+          <option value={selection.folderName}>{labels.gm_no_months}</option>
+        )}
+        {months.map((entry) => (
+          <option key={entry.folderName} value={entry.folderName}>
+            {formatMonthFolderShortLabel(entry.folderName)}
+          </option>
+        ))}
+      </select>
+
+      {isSelectedMonthClosed && (
+        <span className="gms-locked" title={labels.msg_month_closed_banner}>
+          <Lock size={12} aria-hidden /> {labels.gm_locked_badge}
+        </span>
+      )}
+
+      {canCreate && (
+        <div className="gms-new-wrap">
+          <button
+            type="button"
+            className="gms-new-btn"
+            onClick={() => setPickerOpen((open) => !open)}
+            aria-expanded={pickerOpen}
+          >
+            <CalendarPlus size={14} aria-hidden /> {labels.gm_new_month_btn}
+          </button>
+          {pickerOpen && (
+            <div className="gms-popover" role="dialog" aria-label={labels.gm_new_month_title}>
+              <strong className="gms-popover-title">{labels.gm_new_month_title}</strong>
+              <div className="gms-month-grid" role="group">
+                {ARABIC_MONTHS.map((name, idx) => (
+                  <button
+                    key={idx + 1}
+                    type="button"
+                    className={`gms-month-btn${newMonth === idx + 1 ? " active" : ""}`}
+                    onClick={() => setNewMonth(idx + 1)}
+                    aria-pressed={newMonth === idx + 1}
+                  >
+                    {name}
+                  </button>
+                ))}
+              </div>
+              <label className="gms-year-label">
+                {labels.gm_year_label}
+                <input
+                  type="number"
+                  className="gms-year-input"
+                  min={2020}
+                  max={2100}
+                  value={newYear}
+                  onChange={(event) => {
+                    const parsed = Number(event.target.value);
+                    if (Number.isInteger(parsed)) setNewYear(parsed);
+                  }}
+                />
+              </label>
+              <div className="gms-popover-actions">
+                <button
+                  type="button"
+                  className="gms-confirm"
+                  onClick={() => { startNewMonth(newMonth, newYear); setPickerOpen(false); }}
+                >
+                  {labels.gm_confirm}
+                </button>
+                <button type="button" className="gms-cancel" onClick={() => setPickerOpen(false)}>
+                  {labels.gm_cancel}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

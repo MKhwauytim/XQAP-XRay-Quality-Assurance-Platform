@@ -83,6 +83,18 @@ export const DEFAULT_LABELS = {
   status_replaced:  "مستبدلة",
   value_empty:      "—",
   label_month:      "الشهر",
+  // Global month selector (top toolbar)
+  gm_label:                "الشهر",
+  gm_new_month_btn:        "شهر جديد",
+  gm_new_month_title:      "بدء شهر جديد",
+  gm_year_label:           "السنة",
+  gm_confirm:              "اختيار",
+  gm_cancel:               "إلغاء",
+  gm_pending_suffix:       "(جديد)",
+  gm_locked_badge:         "مُقفل",
+  gm_no_months:            "لا توجد أشهر",
+  gm_all_months:           "كل الأشهر",
+  gm_month_switch_confirm: "توجد بيانات غير محفوظة في معالجة المجتمع — تغيير الشهر سيتجاهلها ويحمّل بيانات الشهر المحدد. هل تريد المتابعة؟",
   label_template:   "النموذج",
 
   // X-ray results messages
