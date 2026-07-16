@@ -217,12 +217,17 @@ export default function PopulationTab() {
   // Month close-out (Tier-1 Item A): a closed month is view-only — draw and
   // distribution capabilities are withdrawn regardless of role permissions.
   const selectedMonthClosed = isSelectedMonthClosed;
+  // True while an existing month's data is being loaded from disk. During this
+  // window the in-memory population/sample/distribution still belong to the
+  // PREVIOUS month while saveMonth/saveYear already point at the new one, so
+  // every mutating capability is withdrawn until the load resolves (CRITICAL 1).
+  const [isLoadingMonthData, setIsLoadingMonthData] = useState(false);
   const canUploadData = can("upload-data");
   const canProcessPopulation = can("process-population");
   const canConfigureSample = can("configure-sample");
-  const canDrawSample = can("draw-sample") && !selectedMonthClosed;
-  const canDistributeSamples = can("distribute-samples") && !selectedMonthClosed;
-  const canBulkAssign = can("bulk-assign") && !selectedMonthClosed;
+  const canDrawSample = can("draw-sample") && !selectedMonthClosed && !isLoadingMonthData;
+  const canDistributeSamples = can("distribute-samples") && !selectedMonthClosed && !isLoadingMonthData;
+  const canBulkAssign = can("bulk-assign") && !selectedMonthClosed && !isLoadingMonthData;
   const canViewBrowse = can("view-browse");
   const canExportReports = can("export-reports");
 
@@ -241,7 +246,6 @@ export default function PopulationTab() {
   }, [directoryHandle]);
 
   // Month picker state
-  const [isLoadingMonthData, setIsLoadingMonthData] = useState(false);
   const [monthRefreshKey, setMonthRefreshKey] = useState(0);
 
   // Load cumulative CertScan data from workspace on mount
@@ -412,11 +416,20 @@ export default function PopulationTab() {
     if (loadedFolderRef.current === globalMonth.folderName) return;
     loadedFolderRef.current = globalMonth.folderName;
     if (globalMonth.kind === "existing") {
+      const targetFolder = globalMonth.folderName;
       // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing wizard state to the external global-month selection; the load/reset IS the intended effect
       void handleLoadExistingMonth({
         month: globalMonth.month,
         year: globalMonth.year,
         folderName: globalMonth.folderName,
+      }).catch((error) => {
+        // A rejected load leaves the previous month's data under this month's
+        // header. Reset to a clean empty state, surface the failure, and clear
+        // the stamp so re-selecting the same month retries the load (CRITICAL 1b).
+        logError("population:auto-load-month", error);
+        resetForNewMonth();
+        setProcessingMessage("تعذر تحميل بيانات الشهر — أعد المحاولة");
+        if (loadedFolderRef.current === targetFolder) loadedFolderRef.current = null;
       });
     } else {
       resetForNewMonth();
@@ -456,6 +469,12 @@ export default function PopulationTab() {
   const fallbackMonth = currentMonthFolderInfo();
   const saveMonth = globalMonth.kind === "none" ? fallbackMonth.month : globalMonth.month;
   const saveYear = globalMonth.kind === "none" ? fallbackMonth.year : globalMonth.year;
+
+  // Tracks the folder the wizard's save target currently points at, reassigned on
+  // every render. The epoch check in handleProcessPopulation compares against this
+  // to detect a month switch that landed while processing was in flight (CRITICAL 1).
+  const wizardFolderRef = useRef("");
+  wizardFolderRef.current = globalMonth.kind === "none" ? "" : globalMonth.folderName;
 
   // B4: compute the prior-month switching-rule advisory for the selected month so
   // it can be surfaced in Phase 3 BEFORE the draw. Advisory only — never blocks.
@@ -786,6 +805,10 @@ export default function PopulationTab() {
   }
 
   async function handleProcessPopulation(): Promise<void> {
+    if (isLoadingMonthData) {
+      setProcessingMessage("جارٍ تحميل بيانات الشهر — انتظر حتى يكتمل التحميل قبل المعالجة.");
+      return;
+    }
     if (!canProcessPopulation) {
       setProcessingMessage("لا تملك صلاحية معالجة المجتمع.");
       return;
@@ -796,6 +819,9 @@ export default function PopulationTab() {
       return;
     }
 
+    // Capture the target folder so we can detect a month switch that resolves
+    // while processing is in flight (CRITICAL 1c).
+    const epochFolder = wizardFolderRef.current;
     setIsProcessingPopulation(true);
     setProcessingMessage("");
     setProcessingProgressMessage("بدء معالجة المجتمع...");
@@ -810,6 +836,14 @@ export default function PopulationTab() {
         setProcessingProgressMessage(stage);
         setProcessingProgressPercent(percent);
       });
+
+      // The global month changed while processing ran — committing would repopulate
+      // the old month's rows under the new month's header and auto-save into the
+      // wrong folder. Discard the stale result.
+      if (wizardFolderRef.current !== epochFolder) {
+        setProcessingMessage("تغيّر الشهر أثناء المعالجة — تم تجاهل النتيجة. أعد المحاولة للشهر الحالي.");
+        return;
+      }
 
       setPopulationProcessingResult(result);
       // Auto-save to disk after successful processing
@@ -840,6 +874,10 @@ export default function PopulationTab() {
   }
 
   function handleExportPopulation(): void {
+    if (isLoadingMonthData) {
+      setProcessingMessage("جارٍ تحميل بيانات الشهر — انتظر حتى يكتمل التحميل قبل التصدير.");
+      return;
+    }
     if (!canExportReports) {
       setProcessingMessage("لا تملك صلاحية تصدير التقارير.");
       return;
@@ -859,6 +897,10 @@ export default function PopulationTab() {
   }
 
   function handleExportPhaseTwoReport(): void {
+    if (isLoadingMonthData) {
+      setProcessingMessage("جارٍ تحميل بيانات الشهر — انتظر حتى يكتمل التحميل قبل التصدير.");
+      return;
+    }
     if (!canExportReports) {
       setProcessingMessage("لا تملك صلاحية تصدير التقارير.");
       return;
@@ -1107,6 +1149,10 @@ export default function PopulationTab() {
   // B1: four-eyes sample-release approval. Available to supervisor/manager/admin who
   // is NOT the drawer; admin may self-approve but an explicit warning note is recorded.
   async function handleApproveSample(): Promise<void> {
+    if (isLoadingMonthData) {
+      setSampleSaveMessage({ type: "error", text: "جارٍ تحميل بيانات الشهر — انتظر حتى يكتمل التحميل." });
+      return;
+    }
     if (!directoryHandle || !sampleDrawResult) {
       setSampleSaveMessage({ type: "error", text: getLabels().sample_approve_no_sample });
       return;
@@ -1631,23 +1677,23 @@ export default function PopulationTab() {
 
       {/* ── Active Phase Panel ── */}
       <main className="phase-panel">
+        {/* Loading indicator renders for ALL phases so a mid-load Phase 3/4 view
+            makes the in-flight month switch visible, not just Phase 1 (CRITICAL 1). */}
+        {isLoadingMonthData && (
+          <div className="month-picker-loading">جاري تحميل بيانات الشهر...</div>
+        )}
         {currentPhase === 1 ? (
-          <>
-            {isLoadingMonthData && (
-              <div className="month-picker-loading">جاري تحميل بيانات الشهر...</div>
-            )}
-            <PhaseOneUpload
-              uploads={uploads}
-              uploadError={uploadError}
-              processingMessage={processingMessage}
-              isProcessingWorkbooks={isProcessingWorkbooks}
-              riskAgencyInputRef={riskAgencyInputRef}
-              businessIntelligenceInputRef={businessIntelligenceInputRef}
-              onPickFile={pickExcelFile}
-              onClearFile={clearSelectedFile}
-              onFallbackFileChange={handleFallbackFileChange}
-            />
-          </>
+          <PhaseOneUpload
+            uploads={uploads}
+            uploadError={uploadError}
+            processingMessage={processingMessage}
+            isProcessingWorkbooks={isProcessingWorkbooks}
+            riskAgencyInputRef={riskAgencyInputRef}
+            businessIntelligenceInputRef={businessIntelligenceInputRef}
+            onPickFile={pickExcelFile}
+            onClearFile={clearSelectedFile}
+            onFallbackFileChange={handleFallbackFileChange}
+          />
         ) : null}
 
         {currentPhase === 2 ? (

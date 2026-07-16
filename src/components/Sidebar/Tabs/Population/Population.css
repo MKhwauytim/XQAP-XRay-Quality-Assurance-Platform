@@ -2571,19 +2571,6 @@ select.save-disk-input {
   font-weight: var(--p-medium);
 }
 
-.bv-month-filter select {
-  min-width: 150px;
-  height: 38px;
-  padding: 0 var(--sp-3);
-  border: 1.5px solid var(--p-border);
-  border-radius: 8px;
-  background: var(--c-surface);
-  color: var(--p-primary);
-  font-family: var(--p-font);
-  font-size: 13px;
-  font-weight: var(--p-medium);
-}
-
 .bv-dataset-row {
   display: flex;
   justify-content: flex-start;
@@ -2635,10 +2622,6 @@ select.save-disk-input {
 
   .bv-month-filter {
     width: 100%;
-  }
-
-  .bv-month-filter select {
-    flex: 1;
   }
 }
 

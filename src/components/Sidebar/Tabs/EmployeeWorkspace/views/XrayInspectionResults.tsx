@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CalendarOff } from "lucide-react";
 import { readSession } from "../../../../../auth/authSession";
 import {
@@ -185,7 +185,11 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
     }
   }, [selectedMonth]);
 
+  // Load-token guard (mirrors useApprovalData): a slow load for a previously
+  // selected month must not clobber a later selection or the falsy-reset above.
+  const loadTokenRef = useRef(0);
   const loadData = useCallback(async () => {
+    const token = ++loadTokenRef.current;
     if (!selectedMonth) return;
     setLoadState("loading");
     try {
@@ -237,6 +241,7 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
         }
       }
 
+      if (token !== loadTokenRef.current) return; // superseded by a newer month selection
       setTemplate(activeTemplate);
       setRows(entries.map(({ entry, movement }) => ({
         entry,
@@ -246,7 +251,7 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
       setAuditRows(audit);
       setLoadState("ready");
     } catch {
-      setLoadState("error");
+      if (token === loadTokenRef.current) setLoadState("error");
     }
   }, [canSeeAll, directoryHandle, selectedMonth, username, viewMode]);
 

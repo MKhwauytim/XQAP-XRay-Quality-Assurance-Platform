@@ -1352,6 +1352,322 @@ Owner request ("any reference for حالة become صورة"). Reviewed, phrase-m
 
 Preview-verified: 0 case-sense حالة remain in the rendered deck (only the منفذ حالة عمار port name); grammar intact (both nouns feminine, so adjectives needed no change).
 
+### Final-review fixes — 2026-07-16 — close cross-month write window + propagate falsy-month resets
+
+Final whole-branch review of the global-month-selector feature. Six findings closed.
+
+**File:** `src/components/Sidebar/Tabs/Population/index.tsx`
+
+CRITICAL 1 — the wizard's save target (`saveMonth`/`saveYear`) flips to the new month the instant the global selection changes, while the in-memory population/sample/distribution stay the old month's until the async load resolves. Introduced a `wizardFolderRef` (reassigned every render to the current global-month folder) and gated all mutating capability on `isLoadingMonthData`.
+
+**Before:**
+```tsx
+  const canDrawSample = can("draw-sample") && !selectedMonthClosed;
+  const canDistributeSamples = can("distribute-samples") && !selectedMonthClosed;
+  const canBulkAssign = can("bulk-assign") && !selectedMonthClosed;
+  // ...
+  // Month picker state
+  const [isLoadingMonthData, setIsLoadingMonthData] = useState(false);
+```
+
+**After:**
+```tsx
+  const [isLoadingMonthData, setIsLoadingMonthData] = useState(false);
+  const canDrawSample = can("draw-sample") && !selectedMonthClosed && !isLoadingMonthData;
+  const canDistributeSamples = can("distribute-samples") && !selectedMonthClosed && !isLoadingMonthData;
+  const canBulkAssign = can("bulk-assign") && !selectedMonthClosed && !isLoadingMonthData;
+```
+
+Added `wizardFolderRef` beside the save-target derivation; epoch check discards a processing result whose folder changed mid-flight; `isLoadingMonthData` guards on `handleProcessPopulation`, `handleApproveSample`, `handleExportPopulation`, `handleExportPhaseTwoReport`; auto-load effect now `.catch`es a rejected load → `resetForNewMonth()` + Arabic error + clears `loadedFolderRef` so re-selecting retries; loading indicator moved to the top of `<main className="phase-panel">` so it renders for all four phases.
+
+**Before (auto-load effect):**
+```tsx
+    if (globalMonth.kind === "existing") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- ...
+      void handleLoadExistingMonth({ month: globalMonth.month, year: globalMonth.year, folderName: globalMonth.folderName });
+    } else {
+      resetForNewMonth();
+    }
+```
+
+**After (auto-load effect):**
+```tsx
+    if (globalMonth.kind === "existing") {
+      const targetFolder = globalMonth.folderName;
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- ...
+      void handleLoadExistingMonth({ month: globalMonth.month, year: globalMonth.year, folderName: globalMonth.folderName })
+        .catch((error) => {
+          logError("population:auto-load-month", error);
+          resetForNewMonth();
+          setProcessingMessage("تعذر تحميل بيانات الشهر — أعد المحاولة");
+          if (loadedFolderRef.current === targetFolder) loadedFolderRef.current = null;
+        });
+    } else {
+      resetForNewMonth();
+    }
+```
+
+**Before (handleProcessPopulation):**
+```tsx
+  async function handleProcessPopulation(): Promise<void> {
+    if (!canProcessPopulation) { ... }
+    if (!riskWorkbookResult) { ... }
+    setIsProcessingPopulation(true);
+    // ...
+      const result = await processPopulation(...);
+      setPopulationProcessingResult(result);
+      if (directoryHandle && riskWorkbookResult) { await performSaveToDisk(result, riskWorkbookResult); }
+```
+
+**After (handleProcessPopulation):**
+```tsx
+  async function handleProcessPopulation(): Promise<void> {
+    if (isLoadingMonthData) { setProcessingMessage("جارٍ تحميل بيانات الشهر — انتظر حتى يكتمل التحميل قبل المعالجة."); return; }
+    if (!canProcessPopulation) { ... }
+    if (!riskWorkbookResult) { ... }
+    const epochFolder = wizardFolderRef.current;
+    setIsProcessingPopulation(true);
+    // ...
+      const result = await processPopulation(...);
+      if (wizardFolderRef.current !== epochFolder) { setProcessingMessage("تغيّر الشهر أثناء المعالجة — تم تجاهل النتيجة. أعد المحاولة للشهر الحالي."); return; }
+      setPopulationProcessingResult(result);
+      if (directoryHandle && riskWorkbookResult) { await performSaveToDisk(result, riskWorkbookResult); }
+```
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx`
+
+IMPORTANT 2 + IMPORTANT 3 — added the sibling falsy-month reset effect, `!selMonth` guards on `handleSave`/`handleReopenAnswer`/`handleRequestReopen`, and the `loadTokenRef` invalidation pattern (token bump first in `loadData`, commit-guard before the setState block and in catch).
+
+**Before:**
+```tsx
+import { useCallback, useEffect, useMemo, useState } from "react";
+// ...
+  const loadData = useCallback(async () => {
+    if (!selMonth) return;
+    setLoadState("loading");
+    setSelEntryId(null);
+    setSelectedIds(new Set());
+    try {
+      // ...awaits, then interleaved commits...
+      setAllEntries(all);
+      setEntries(visible);
+      // ...
+      setAnswers(files.flatMap((f) => f.items));
+      setLoadState("ready");
+    } catch {
+      setLoadState("error");
+    }
+  }, [directoryHandle, selMonth, username, canSeeAll]);
+```
+
+**After:**
+```tsx
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+// ...
+  const loadTokenRef = useRef(0);
+  useEffect(() => {
+    if (!selMonth) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync empty-state reset when no month folder is selected
+      setEntries([]); setAllEntries([]); setAnswers([]); setSampleMaster(null);
+      setMyQuota(null); setPopulationRows([]); setSelEntryId(null); setSelectedIds(new Set());
+      setLoadState("ready");
+    }
+  }, [selMonth]);
+
+  const loadData = useCallback(async () => {
+    const token = ++loadTokenRef.current;
+    if (!selMonth) return;
+    setLoadState("loading");
+    setSelEntryId(null);
+    setSelectedIds(new Set());
+    try {
+      // ...all awaits complete, results held in locals...
+      if (token !== loadTokenRef.current) return; // superseded by a newer month selection
+      setAllEntries(all); setEntries(visible); setSampleMaster(sample);
+      setMyQuota(quota); setPopulationRows([]); setAnswers(answerItems);
+      setLoadState("ready");
+    } catch {
+      if (token === loadTokenRef.current) setLoadState("error");
+    }
+  }, [directoryHandle, selMonth, username, canSeeAll]);
+```
+
+Write guards, e.g. `handleSave`:
+
+**Before:**
+```tsx
+    if (!activeTpl) return;
+    const now  = new Date().toISOString();
+```
+
+**After:**
+```tsx
+    if (!activeTpl || !selMonth) return;
+    const now  = new Date().toISOString();
+```
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayInspectionResults.tsx`
+
+IMPORTANT 3 — added `loadTokenRef` invalidation to `loadData`.
+
+**Before:**
+```tsx
+import { useCallback, useEffect, useMemo, useState } from "react";
+// ...
+  const loadData = useCallback(async () => {
+    if (!selectedMonth) return;
+    setLoadState("loading");
+    try {
+      // ...awaits...
+      setTemplate(activeTemplate);
+      setRows(...);
+      setAuditRows(audit);
+      setLoadState("ready");
+    } catch {
+      setLoadState("error");
+    }
+  }, [canSeeAll, directoryHandle, selectedMonth, username, viewMode]);
+```
+
+**After:**
+```tsx
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+// ...
+  const loadTokenRef = useRef(0);
+  const loadData = useCallback(async () => {
+    const token = ++loadTokenRef.current;
+    if (!selectedMonth) return;
+    setLoadState("loading");
+    try {
+      // ...awaits...
+      if (token !== loadTokenRef.current) return; // superseded by a newer month selection
+      setTemplate(activeTemplate);
+      setRows(...);
+      setAuditRows(audit);
+      setLoadState("ready");
+    } catch {
+      if (token === loadTokenRef.current) setLoadState("error");
+    }
+  }, [canSeeAll, directoryHandle, selectedMonth, username, viewMode]);
+```
+
+**File:** `src/data/month/GlobalMonthProvider.tsx`
+
+MINOR 4 — `refreshMonths` wrapped in try/catch (keep current state on failure); workspace-change effect `.catch` now also resets the selection so a stale selection can't linger across workspaces.
+
+**Before:**
+```tsx
+      .catch(() => {
+        if (!cancelled) setMonths([]);
+      });
+  // ...
+  const refreshMonths = useCallback(async () => {
+    if (!directoryHandle) return;
+    const list = await listMonthFolders(directoryHandle);
+    setMonths(list);
+    setSelection((prev) => { const next = reconcileSelection(list, prev); persistSelection(next); return next; });
+    setLockCheckTick((tick) => tick + 1);
+  }, [directoryHandle]);
+```
+
+**After:**
+```tsx
+      .catch((error) => {
+        if (!cancelled) { setMonths([]); setSelection({ kind: "none" }); }
+        logError("globalMonth:listMonthFolders", error);
+      });
+  // ...
+  const refreshMonths = useCallback(async () => {
+    if (!directoryHandle) return;
+    try {
+      const list = await listMonthFolders(directoryHandle);
+      setMonths(list);
+      setSelection((prev) => { const next = reconcileSelection(list, prev); persistSelection(next); return next; });
+      setLockCheckTick((tick) => tick + 1);
+    } catch (error) {
+      logError("globalMonth:refreshMonths", error); // keep current months/selection
+    }
+  }, [directoryHandle]);
+```
+
+Note: `listMonthFolders` already swallows its own errors and returns `[]`, so these catch branches are defensive-only; not cheaply unit-testable without module mocking, so no provider test was added (documented in report).
+
+**File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
+
+MINOR 5 — reworded the Power BI empty-month hint to reference the toolbar selector.
+
+**Before:**
+```tsx
+                <span className="rh-pbi-month-empty">اختر شهراً أعلاه</span>
+```
+
+**After:**
+```tsx
+                <span className="rh-pbi-month-empty">اختر شهراً من الشريط العلوي</span>
+```
+
+**File:** `src/components/Sidebar/Tabs/Population/Population.css`
+
+MINOR 6 — deleted the dead `.bv-month-filter select` rules (the month `<select>` was replaced by the global toolbar selector; only the "all months" checkbox remains under `.bv-month-filter`). Kept the `.bv-month-filter` base and its mobile `width: 100%` override.
+
+**Before:**
+```css
+.bv-month-filter select {
+  min-width: 150px;
+  height: 38px;
+  padding: 0 var(--sp-3);
+  border: 1.5px solid var(--p-border);
+  border-radius: 8px;
+  background: var(--c-surface);
+  color: var(--p-primary);
+  font-family: var(--p-font);
+  font-size: 13px;
+  font-weight: var(--p-medium);
+}
+/* ...and in the @media (max-width: 900px) block: */
+  .bv-month-filter select {
+    flex: 1;
+  }
+```
+
+**After:** _(both rule blocks removed)_
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx` (lint follow-up)
+
+The IMPORTANT 3 `loadTokenRef` addition made `handleReopenAnswer`/`handleRequestReopen` (both call `loadData` on success, which now bumps `loadTokenRef.current`) fail the React Compiler's `react-hooks/refs` rule when passed as inline JSX callbacks — same false-positive class already suppressed in `GlobalMonthProvider.tsx`. Added the matching disable comments; `npm run lint` is clean.
+
+**Before:**
+```tsx
+                  onReopen={
+                    canReopenAnswer
+                      ? (reason) => { void handleReopenAnswer(selEntry, reason); }
+                      : undefined
+                  }
+                  onRequestReopen={
+                    selEntry.assignedTo === username
+                      ? (reason) => { void handleRequestReopen(selEntry, reason); }
+                      : undefined
+                  }
+```
+
+**After:**
+```tsx
+                  onReopen={
+                    canReopenAnswer
+                      // eslint-disable-next-line react-hooks/refs -- handleReopenAnswer's post-write loadData() bumps loadTokenRef.current inside an event-handler call chain, never during render
+                      ? (reason) => { void handleReopenAnswer(selEntry, reason); }
+                      : undefined
+                  }
+                  onRequestReopen={
+                    selEntry.assignedTo === username
+                      // eslint-disable-next-line react-hooks/refs -- see onReopen above; handleRequestReopen's loadData() call is the same pattern
+                      ? (reason) => { void handleRequestReopen(selEntry, reason); }
+                      : undefined
+                  }
+```
+
+Verification (all six findings + this follow-up): `npx tsc -b` clean; `npm run lint` clean; `npm run test:run` → 90 files, 627 tests, all passing.
+
 ## v54 — 2026-07-14 — Closing slide: data-source attribution replaces the provenance QR
 
 Owner request ("no qr code" + "say if the data is from source 1 بيانات ذكاء الأعمال or source 2 بيانات وكالة المخاطر based on the data entered in data processing"). The QR feature is fully removed (helper module + tests, async `openExecutiveDeckV2WithQr` wrapper, `provenanceQrSvg` params, QR CSS, and the `qrcode` dependency — Reports-tab call sites reverted to the sync `openExecutiveDeckV2`). In its place, the closing slide's provenance block now opens with a "مصادر البيانات المُدخلة" card pair derived from what data processing actually ingested:

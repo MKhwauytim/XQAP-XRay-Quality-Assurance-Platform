@@ -991,7 +991,7 @@ function ReportsContent() {
                   {selectedMonth}
                 </span>
               ) : (
-                <span className="rh-pbi-month-empty">اختر شهراً أعلاه</span>
+                <span className="rh-pbi-month-empty">اختر شهراً من الشريط العلوي</span>
               )}
               <button
                 className="rh-btn rh-btn-indigo"

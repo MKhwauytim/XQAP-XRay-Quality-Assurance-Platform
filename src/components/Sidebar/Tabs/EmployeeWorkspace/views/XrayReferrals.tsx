@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { X, AlertTriangle, RotateCw } from "lucide-react";
 import { useFocusTrap } from "../../../../../hooks/useFocusTrap";
 import { readSession } from "../../../../../auth/authSession";
@@ -424,7 +424,32 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     };
   }, [allEntries, entries, displayEntries, canSeeAll, username, answersMap]);
 
+  // Bug (load-token): guards a slow load for a previously-selected month from
+  // clobbering a later selection — including the truthy→"" empty transition.
+  const loadTokenRef = useRef(0);
+
+  // No selected on-disk month (empty workspace or a pending new month) → clear the
+  // loaded queue and land in the ready/empty state (sibling to the load-token guard).
+  useEffect(() => {
+    if (!selMonth) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync empty-state reset when no month folder is selected
+      setEntries([]);
+      setAllEntries([]);
+      setAnswers([]);
+      setSampleMaster(null);
+      setMyQuota(null);
+      setPopulationRows([]);
+      setSelEntryId(null);
+      setSelectedIds(new Set());
+      setLoadState("ready");
+    }
+  }, [selMonth]);
+
   const loadData = useCallback(async () => {
+    // Invalidate any in-flight load first — even the no-month early return must
+    // stale older loads, or a truthy→"" selMonth transition would let an in-flight
+    // load commit stale rows over the empty-ready state.
+    const token = ++loadTokenRef.current;
     if (!selMonth) return;
     setLoadState("loading");
     setSelEntryId(null);
@@ -458,29 +483,35 @@ export default function XrayReferrals({ directoryHandle }: Props) {
               e.status !== "replaced" &&
               !pendingIds.has(e.xrayImageId)
           );
-      setAllEntries(all);
-      setEntries(visible);
-      setSampleMaster(sample);
 
       // Extract frozen daily quota for the current employee.
-      if (dist?.quotas?.[username]) {
-        const q = dist.quotas[username];
-        setMyQuota({ dailyQuota: q.dailyQuota, daysRemaining: q.daysRemainingAtAssignment, sampleCount: q.sampleCount });
-      } else {
-        setMyQuota(null);
-      }
-      // populationRows is intentionally left empty here — populated on demand when
-      // the replacement dialog is opened (see openReplacementDialog).
-      setPopulationRows([]);
+      const quota: PersonalQuota = dist?.quotas?.[username]
+        ? {
+            dailyQuota: dist.quotas[username].dailyQuota,
+            daysRemaining: dist.quotas[username].daysRemainingAtAssignment,
+            sampleCount: dist.quotas[username].sampleCount,
+          }
+        : null;
 
       const users = canSeeAll ? [...new Set(all.map((e) => e.assignedTo))] : [username];
       const files = await Promise.all(
         users.map((u) => loadEmployeeAnswers(directoryHandle, selMonth, u))
       );
-      setAnswers(files.flatMap((f) => f.items));
+      const answerItems = files.flatMap((f) => f.items);
+
+      if (token !== loadTokenRef.current) return; // superseded by a newer month selection
+
+      setAllEntries(all);
+      setEntries(visible);
+      setSampleMaster(sample);
+      setMyQuota(quota);
+      // populationRows is intentionally left empty here — populated on demand when
+      // the replacement dialog is opened (see openReplacementDialog).
+      setPopulationRows([]);
+      setAnswers(answerItems);
       setLoadState("ready");
     } catch {
-      setLoadState("error");
+      if (token === loadTokenRef.current) setLoadState("error");
     }
   }, [directoryHandle, selMonth, username, canSeeAll]);
   /* eslint-enable react-hooks/preserve-manual-memoization */
@@ -495,7 +526,9 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   async function handleSave(
     xrayImageId: string, ans: FieldAnswer[], _submit: boolean, forUser: string
   ): Promise<void> {
-    if (!activeTpl) return;
+    // No on-disk month selected → the upsert target folder would be "" (writes
+    // to the workspace root). Bail before touching disk.
+    if (!activeTpl || !selMonth) return;
     const now  = new Date().toISOString();
     const item: ItemAnswer = {
       xrayImageId, templateId: activeTpl.templateId, templateVersion: activeTpl.version,
@@ -525,6 +558,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   }
 
   async function handleReopenAnswer(entry: DistributionEntry, reason: string): Promise<void> {
+    if (!selMonth) return;
     try {
       const result = await reopenSubmittedAnswer({
         directoryHandle,
@@ -554,6 +588,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   // Batch B: employee self-service reopen. Branches on canReopenInstant — either
   // applies immediately or files a pending request routed to a supervisor.
   async function handleRequestReopen(entry: DistributionEntry, reason: string): Promise<void> {
+    if (!selMonth) return;
     try {
       const result = await submitReopenRequest({
         directoryHandle,
@@ -948,11 +983,13 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                   }
                   onReopen={
                     canReopenAnswer
+                      // eslint-disable-next-line react-hooks/refs -- handleReopenAnswer's post-write loadData() bumps loadTokenRef.current inside an event-handler call chain, never during render
                       ? (reason) => { void handleReopenAnswer(selEntry, reason); }
                       : undefined
                   }
                   onRequestReopen={
                     selEntry.assignedTo === username
+                      // eslint-disable-next-line react-hooks/refs -- see onReopen above; handleRequestReopen's loadData() call is the same pattern
                       ? (reason) => { void handleRequestReopen(selEntry, reason); }
                       : undefined
                   }

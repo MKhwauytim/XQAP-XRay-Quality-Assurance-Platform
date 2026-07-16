@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { useWorkspace } from "../workspace/useWorkspace";
+import { logError } from "../storage/errorLogger";
 import { listMonthFolders } from "../population/populationStorage";
 import { isMonthClosed } from "../population/monthLock";
 import { formatMonthFolderName, type MonthFolderInfo } from "../population/monthFolder";
@@ -64,8 +65,14 @@ export function GlobalMonthProvider({ children }: { children: ReactNode }) {
           return next;
         });
       })
-      .catch(() => {
-        if (!cancelled) setMonths([]);
+      .catch((error) => {
+        // Listing failed — drop to an empty list AND clear the selection so a
+        // stale month from a previous workspace can't linger.
+        if (!cancelled) {
+          setMonths([]);
+          setSelection({ kind: "none" });
+        }
+        logError("globalMonth:listMonthFolders", error);
       });
     return () => { cancelled = true; };
   }, [directoryHandle]);
@@ -121,14 +128,20 @@ export function GlobalMonthProvider({ children }: { children: ReactNode }) {
 
   const refreshMonths = useCallback(async () => {
     if (!directoryHandle) return;
-    const list = await listMonthFolders(directoryHandle);
-    setMonths(list);
-    setSelection((prev) => {
-      const next = reconcileSelection(list, prev);
-      persistSelection(next);
-      return next;
-    });
-    setLockCheckTick((tick) => tick + 1);
+    try {
+      const list = await listMonthFolders(directoryHandle);
+      setMonths(list);
+      setSelection((prev) => {
+        const next = reconcileSelection(list, prev);
+        persistSelection(next);
+        return next;
+      });
+      setLockCheckTick((tick) => tick + 1);
+    } catch (error) {
+      // Keep the current months/selection on a listing failure rather than
+      // wiping the picker.
+      logError("globalMonth:refreshMonths", error);
+    }
   }, [directoryHandle]);
 
   const registerMonthChangeGuard = useCallback((guard: MonthChangeGuard) => {
