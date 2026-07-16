@@ -62,6 +62,19 @@ $fileUri = ([Uri]$resolvedIndex).AbsoluteUri
 
 The raw-string URI concatenation left non-ASCII deployment path segments (e.g. an Arabic folder name) as literal Unicode, which `WshShortcut.Save()` silently ANSI-marshals to `?` with no exception — the shortcut "succeeds" but launches a dead URL. `[Uri]::AbsoluteUri` percent-encodes to pure ASCII, which survives ANSI marshaling intact and is decoded correctly by Chrome/Edge. `.Description` is free text (not a URI, can't be percent-encoded) and hits the same ANSI-marshaling corruption, producing visible `?????` mojibake in the shortcut's Properties/tooltip; since a true fix needs `IShellLinkW` (out of scope — pure-`WScript.Shell` constraint), the property is dropped rather than shipped garbled. The Desktop `.lnk` filename itself (already Arabic, via the staging-path fix) is unaffected either way.
 
+**File:** `CLAUDE.md`
+
+**Before:**
+```markdown
+- The `xlsx` dependency is **vendored** at `vendor/xlsx-0.20.3.tgz` ...
+```
+
+**After:**
+```markdown
+- `public/app-icon.ico`, `public/create-desktop-shortcut.ps1`, and `public/Create Desktop Shortcut.bat` are static deployment-tooling assets, not build artifacts — Vite's default `public/` handling copies them into `dist/` unchanged on every build. `app-icon.ico` is generated once by `scripts/generate-app-icon.ps1` (dev-only, not shipped) and only needs regenerating if the brand mark in `index.html`'s inline SVG favicon changes.
+- The `xlsx` dependency is **vendored** at `vendor/xlsx-0.20.3.tgz` ...
+```
+
 ---
 
 ## v55 — 2026-07-16 — Global month selector in header replaces all per-tab month filters
