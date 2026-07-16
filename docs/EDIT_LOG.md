@@ -273,6 +273,48 @@ function App() {
 
 **After:** captures `let ok: boolean` around each `act()` call and asserts `expect(ok!).toBe(false)` after the declined guard, `expect(ok!).toBe(true)` after the accepted one.
 
+### Follow-up 2: popover button legibility vs the toolbar button cascade (2026-07-16)
+
+`AdminToolbar.css`'s toolbar-wide `.auth-admin-toolbar button` rule (specificity 0,1,1) and its `:hover` companion (0,2,1) out-rank the popover's original single-class button selectors (0,1,0), repainting the month-grid/confirm/cancel buttons translucent-white-on-white inside the light popover; the popover's title/year-label text also inherited the toolbar's white `color`. Verified via computed-style repro before and after.
+
+**File:** `src/components/GlobalMonthSelector/GlobalMonthSelector.css`
+
+**Before:**
+```css
+.gms-popover {
+  ...
+  background: #fff;
+  ...
+}
+...
+.gms-month-btn { ... background: #fff; ... }          /* no color */
+.gms-month-btn.active { background: #0f6cbd; ... }
+.gms-confirm { ... border: none; background: #0f6cbd; color: #fff; ... }
+.gms-cancel { ... background: transparent; ... }       /* no color */
+```
+
+**After:**
+```css
+.gms-popover {
+  ...
+  background: #fff;
+  color: var(--c-ink);   /* stops inheriting the toolbar's white */
+  ...
+}
+...
+.gms-popover .gms-month-btn { ... color: var(--c-ink); ... }   /* (0,2,0) beats (0,1,1) */
+.gms-popover .gms-month-btn:hover { background: rgba(0,0,0,0.05); border-color: rgba(0,0,0,0.22); }
+.gms-popover .gms-month-btn.active,
+.gms-popover .gms-month-btn.active:hover { background: #0f6cbd; ... }
+.gms-popover .gms-confirm { ... border: 1px solid #0f6cbd; ... }
+.gms-popover .gms-confirm:hover:not(:disabled) { background: #0d5ea6; border-color: #0d5ea6; }
+.gms-popover .gms-confirm:disabled { cursor: not-allowed; background: #0f6cbd; border-color: #0f6cbd; }
+.gms-popover .gms-cancel { ... color: var(--c-ink); ... }
+.gms-popover .gms-cancel:hover { background: rgba(0,0,0,0.05); border-color: rgba(0,0,0,0.25); }
+```
+
+All popover-internal button rules are scoped under `.gms-popover` (two classes, 0,2,0; hover variants 0,3,0) so they win over the toolbar-wide rule and its `:hover` (0,2,1). The `:disabled` rule also pins the confirm button's blue because the toolbar hover rule has no `:disabled` guard. Confirm's `border: none` became a solid blue border so confirm and cancel have equal heights.
+
 ## v54.1 — 2026-07-14 — Report terminology: حالة → صورة for x-ray records
 
 Owner request ("any reference for حالة become صورة"). Reviewed, phrase-mapped rename across the reporting layer — NOT a blind replace: حالة-as-"status" survives untouched (column headers الحالة, حالة التوزيع, حالة الإجابة, حالة BI, workflow labels), and the port name منفذ حالة عمار is data. 64 case-sense occurrences renamed across deck2, deck v1, the executive document parts (scope/risk/corroboration/narrative), executiveReportData findings, and the two KPI-dashboard labels (`rk_pchart_empty`, `rk_tooltip_cases`). Examples:
