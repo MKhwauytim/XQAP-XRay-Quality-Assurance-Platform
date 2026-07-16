@@ -4,7 +4,7 @@ import { CalendarPlus, Lock } from "lucide-react";
 import { useGlobalMonth } from "../../data/month/useGlobalMonth";
 import { usePermissions } from "../../auth/usePermissions";
 import { useLabels } from "../../data/labels/useLabels";
-import { formatMonthFolderShortLabel } from "../../data/population/monthFolder";
+import { formatMonthFolderName, formatMonthFolderShortLabel } from "../../data/population/monthFolder";
 
 import "./GlobalMonthSelector.css";
 
@@ -55,8 +55,11 @@ export function GlobalMonthSelector({ allowCreate }: GlobalMonthSelectorProps) {
     };
   }, [pickerOpen]);
 
-  // No workspace yet — the toolbar has nothing month-related to show.
-  if (selection.kind === "none") return null;
+  // No workspace / month list still loading — render an empty stable placeholder
+  // so .auth-admin-toolbar's 4-track grid always has 4 children (returning null
+  // would collapse a track, pull the actions cluster inward, and cause a layout
+  // jump when the async month-list load completes).
+  if (selection.kind === "none") return <div className="gms-root" aria-hidden />;
 
   const canCreate = allowCreate && can("process-population");
   const isPending = selection.kind === "pending";
@@ -139,6 +142,11 @@ export function GlobalMonthSelector({ allowCreate }: GlobalMonthSelectorProps) {
                   disabled={!isYearValid}
                   onClick={() => {
                     if (!isYearValid) return;
+                    // Picked the already-selected month — nothing to change, just close.
+                    if (formatMonthFolderName(newMonth, parsedYear) === selection.folderName) {
+                      setPickerOpen(false);
+                      return;
+                    }
                     const applied = startNewMonth(newMonth, parsedYear);
                     if (applied) setPickerOpen(false);
                   }}

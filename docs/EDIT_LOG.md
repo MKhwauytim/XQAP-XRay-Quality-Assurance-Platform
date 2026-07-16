@@ -315,6 +315,81 @@ function App() {
 
 All popover-internal button rules are scoped under `.gms-popover` (two classes, 0,2,0; hover variants 0,3,0) so they win over the toolbar-wide rule and its `:hover` (0,2,1). The `:disabled` rule also pins the confirm button's blue because the toolbar hover rule has no `:disabled` guard. Confirm's `border: none` became a solid blue border so confirm and cancel have equal heights.
 
+### Follow-up 3: stable grid placeholder + selector polish (2026-07-16)
+
+**File:** `src/components/GlobalMonthSelector/GlobalMonthSelector.tsx`
+
+**Before:**
+```tsx
+  // No workspace yet — the toolbar has nothing month-related to show.
+  if (selection.kind === "none") return null;
+```
+```tsx
+                  onClick={() => {
+                    if (!isYearValid) return;
+                    const applied = startNewMonth(newMonth, parsedYear);
+                    if (applied) setPickerOpen(false);
+                  }}
+```
+
+**After:**
+```tsx
+  // No workspace / month list still loading — render an empty stable placeholder
+  // so .auth-admin-toolbar's 4-track grid keeps 4 children (returning null would
+  // collapse a track and pull the actions cluster inward, with a layout jump
+  // when the async month-list load completes).
+  if (selection.kind === "none") return <div className="gms-root" aria-hidden />;
+```
+```tsx
+                  onClick={() => {
+                    if (!isYearValid) return;
+                    // Picked the already-selected month — nothing to change, just close.
+                    if (formatMonthFolderName(newMonth, parsedYear) === selection.folderName) {
+                      setPickerOpen(false);
+                      return;
+                    }
+                    const applied = startNewMonth(newMonth, parsedYear);
+                    if (applied) setPickerOpen(false);
+                  }}
+```
+(plus `formatMonthFolderName` added to the existing `../../data/population/monthFolder` import)
+
+**File:** `src/components/GlobalMonthSelector/GlobalMonthSelector.css`
+
+**Before:**
+```css
+.gms-new-btn { ... border: 1px dashed rgba(255, 255, 255, 0.35); ... }
+.gms-new-btn:hover { background: rgba(255, 255, 255, 0.1); }
+```
+
+**After:**
+```css
+.gms-root .gms-new-btn { ... border: 1px dashed rgba(255, 255, 255, 0.35); ... }
+.gms-root .gms-new-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.5);
+}
+```
+Re-scoped (0,2,0 / hover 0,3,0) so the intended dashed-light look actually beats `.auth-admin-toolbar button` (0,1,1) and its `:hover` (0,2,1) — the previous single-class declarations were dead in the cascade.
+
+**File:** `src/data/month/GlobalMonthProvider.test.tsx`
+
+**Before:**
+```tsx
+    act(() => result.current.startNewMonth(6, 2026));
+    expect(result.current.selection).toMatchObject({ kind: "pending", folderName: "6-june-2026" });
+```
+
+**After:**
+```tsx
+    let ok: boolean;
+    act(() => { ok = result.current.startNewMonth(6, 2026); });
+    expect(ok!).toBe(true);
+    expect(result.current.selection).toMatchObject({ kind: "pending", folderName: "6-june-2026" });
+    act(() => { ok = result.current.startNewMonth(6, 2026); });
+    expect(ok!).toBe(false); // no-op: already the current selection
+```
+
 ## v54.1 — 2026-07-14 — Report terminology: حالة → صورة for x-ray records
 
 Owner request ("any reference for حالة become صورة"). Reviewed, phrase-mapped rename across the reporting layer — NOT a blind replace: حالة-as-"status" survives untouched (column headers الحالة, حالة التوزيع, حالة الإجابة, حالة BI, workflow labels), and the port name منفذ حالة عمار is data. 64 case-sense occurrences renamed across deck2, deck v1, the executive document parts (scope/risk/corroboration/narrative), executiveReportData findings, and the two KPI-dashboard labels (`rk_pchart_empty`, `rk_tooltip_cases`). Examples:

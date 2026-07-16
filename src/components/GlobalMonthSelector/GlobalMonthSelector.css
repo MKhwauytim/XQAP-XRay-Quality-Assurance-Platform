@@ -36,7 +36,9 @@
 
 .gms-new-wrap { position: relative; }
 
-.gms-new-btn {
+/* Scoped under .gms-root (0,2,0 / hover 0,3,0) so the dashed-light look wins
+   over the toolbar-wide `.auth-admin-toolbar button` rule and its `:hover`. */
+.gms-root .gms-new-btn {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -50,7 +52,10 @@
   cursor: pointer;
 }
 
-.gms-new-btn:hover { background: rgba(255, 255, 255, 0.1); }
+.gms-root .gms-new-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.5);
+}
 
 .gms-popover {
   position: absolute;

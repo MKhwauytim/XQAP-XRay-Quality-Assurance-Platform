@@ -98,7 +98,12 @@ describe("GlobalMonthProvider", () => {
     const root = await makeWorkspace(["5-may-2026"]);
     const { result } = renderHook(() => useGlobalMonth(), { wrapper: makeWrapper(root) });
     await waitFor(() => expect(result.current.months).toHaveLength(1));
-    act(() => result.current.startNewMonth(6, 2026));
+    let ok: boolean;
+    act(() => { ok = result.current.startNewMonth(6, 2026); });
+    expect(ok!).toBe(true);
+    expect(result.current.selection).toMatchObject({ kind: "pending", folderName: "6-june-2026" });
+    act(() => { ok = result.current.startNewMonth(6, 2026); });
+    expect(ok!).toBe(false); // no-op: already the current selection
     expect(result.current.selection).toMatchObject({ kind: "pending", folderName: "6-june-2026" });
     const population = await root.getDirectoryHandle("1-population");
     await population.getDirectoryHandle("6-june-2026", { create: true });
