@@ -4,6 +4,34 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v55.2 — 2026-07-16 — Quality pass: staleness guards, CAS consistency, test-truth, a11y
+
+Evidence-backed fixes from an app-wide quality survey (`.superpowers/sdd/app-quality-survey.md`),
+scoped to Batches 1-3 (see spec: docs/superpowers/specs/2026-07-16-quality-pass-batches-1-3-design.md).
+No product-scope items touched.
+
+**File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
+
+**Before:**
+```tsx
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync null-clear when workspace or month is deselected; synchronizes with external workspace state
+    if (!directoryHandle || !selectedMonth) { setMonthMeta(null); return; }
+    setMonthMeta(null);
+    void (async () => {
+      try {
+        const [pop, sample] = await Promise.all([...]);
+        ...
+        setMonthMeta({ folderName: selectedMonth, populationCount: popRows.length, ... });
+      } catch {
+        setMonthMeta({ folderName: selectedMonth, populationCount: null, ... });
+      }
+    })();
+  }, [directoryHandle, selectedMonth]);
+```
+
+**After:** adds a `cancelled` flag (mirroring the KPI-model effect immediately below it) so a slow load for a previously-selected month can never overwrite a newer selection's chips — see file.
+
 ## v55.1 — 2026-07-16 — Desktop app-mode shortcut
 
 Spec: docs/superpowers/specs/2026-07-16-desktop-shortcut-design.md. Adds a
