@@ -10,6 +10,7 @@ This app is a browser-only Arabic RTL SPA. It has no backend database. Data is s
 | `localStorage` | `xray_user_management_v1` | Managed users, password hashes, roles, tab permissions, feature permissions | Stores password hashes, not raw passwords. |
 | `localStorage` | `xray_custom_labels_v1` | Customized Arabic UI labels | Used by the settings/labels system. |
 | `localStorage` | `xray_last_login_username_v1` | Last username typed at login | Convenience prefill only (`loginPersistence.ts`). |
+| `sessionStorage` | `xray_global_month_v1` | Selected month folder name for the app-wide month selector | Written by `GlobalMonthProvider` (`src/data/month/`); read back on load and reconciled against the current month list. See "Global Month Provider" below. |
 
 ## Workspace Folder Data
 
@@ -25,6 +26,33 @@ The current workspace layout uses numbered roots, with legacy fallbacks still su
 | `6-templates/` | Inspection templates and template index/selection files. |
 
 Legacy folders still read when present: `Population/`, `.system/`, and `templates/`.
+
+### Global Month Provider
+
+As of 2026-07-16, a single app-wide month selection replaces the per-tab month filters/pickers
+that used to exist on Reports, Employee Workspace views, Referral Approval, the KPI dashboard, and
+the Population wizard. `src/data/month/` owns this: `globalMonthLogic.ts` (pure selection
+resolution — latest/stored/pending reconciliation), `GlobalMonthContext.ts` +
+`GlobalMonthProvider.tsx` (React context wrapping `useWorkspace()` and the month-folder listing),
+and `useGlobalMonth()` (the hook every tab consumes for `{ months, selection,
+isSelectedMonthClosed, setSelectedMonth, startNewMonth, refreshMonths, registerMonthChangeGuard }`).
+The provider mounts once in `App.tsx`, above the tab router, and renders the selector
+(`src/components/GlobalMonthSelector/`) in the top toolbar.
+
+The selected folder name persists to `sessionStorage` under `xray_global_month_v1` (see the
+Browser Storage table above) so a page reload keeps the same month; it is re-validated against a
+fresh `listMonthFolders()` result on load (a since-deleted or since-closed folder falls back to the
+latest available month). Tabs that need to react to close/reopen or new-month creation call
+`refreshMonths()` (e.g. Archive's `handleMonthLockConfirm` after a successful close/reopen) rather
+than re-listing folders themselves.
+
+This is a UI/state change only — **no disk layout changed**. Month folders, manifests, and all
+files under `1-population/{month}/` through `6-templates/` are exactly as documented above; the
+provider only changes which month's data is displayed on screen. The Population "browse" view
+(`BrowseDataView` in `src/components/Sidebar/Tabs/Population/index.tsx`) is the one exception to
+"global month only": it defaults to the globally-selected month's rows but keeps a local
+"كل الأشهر" (all months) checkbox to widen the table to every month on disk without changing the
+global selection.
 
 ## Population And Sample Files
 

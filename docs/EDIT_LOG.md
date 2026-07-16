@@ -1116,6 +1116,222 @@ instead of `saveMonth`/`onMonthChange`.
 **After:** added `.phase2-month-current { font-size: 14px; font-weight: 700; }` next to
 `.phase2-month-label`.
 
+### Follow-up 10: Browse scope toggle, Archive refresh, docs sync (2026-07-16)
+
+Final task of the global month feature. `BrowseDataView` (Population tab) no longer owns a
+local `<select>` of every month folder found in its loaded rows — it now defaults to the
+app-wide `useGlobalMonth()` selection and offers a single "كل الأشهر" checkbox to widen the
+table to every month on disk without touching the global selection. Archive's month
+close/reopen flow now tells the provider to re-list months so a closed/reopened month's lock
+state is immediately reflected in the header selector. Plus two cleanup items carried over
+from Task 9's review.
+
+**File:** `src/components/Sidebar/Tabs/Population/index.tsx`
+
+**Before:**
+```tsx
+    setUploadError("");
+    setProcessingMessage("");
+    setCurrentPhase(1);
+    setCompletedPhaseIds([]);
+  }
+```
+
+**After:** (defensive: a stale reprocess-confirm payload must never survive a month switch)
+```tsx
+    setUploadError("");
+    setProcessingMessage("");
+    setCurrentPhase(1);
+    setCompletedPhaseIds([]);
+    setPendingReprocessSave(null);
+  }
+```
+
+**Before:** (`BrowseDataView`)
+```tsx
+  const [dataset, setDataset] = useState<BrowseDatasetKind>("population");
+  const [rows, setRows] = useState<BrowseRow[]>([]);
+  const [selectedMonthFilter, setSelectedMonthFilter] = useState("all");
+  const [loading, setLoading] = useState(false);
+  ...
+  const monthOptions = useMemo(
+    () =>
+      Array.from(new Set(collectMonthOptions(rows))).sort((first, second) => second.localeCompare(first)),
+    [rows]
+  );
+
+  const effectiveMonthFilter = useMemo(
+    () =>
+      selectedMonthFilter === "all" || monthOptions.includes(selectedMonthFilter)
+        ? selectedMonthFilter
+        : "all",
+    [monthOptions, selectedMonthFilter]
+  );
+
+  const monthFilteredRows = useMemo(
+    () =>
+      effectiveMonthFilter === "all"
+        ? rows
+        : rows.filter((row) => row._monthFolder === effectiveMonthFilter),
+    [rows, effectiveMonthFilter]
+  );
+```
+and in `exportFilteredRowsToXlsx`:
+```tsx
+    const monthName =
+      selectedMonthFilter === "all"
+        ? "كل الأشهر"
+        : formatMonthFolderLabel(selectedMonthFilter);
+```
+and the header filter UI:
+```tsx
+          <label className="bv-month-filter" htmlFor="browseMonthFilter">
+            <span>الشهر</span>
+            <select
+              id="browseMonthFilter"
+              value={selectedMonthFilter}
+              onChange={(event) => setSelectedMonthFilter(event.target.value)}
+            >
+              <option value="all">الكل</option>
+              {monthOptions.map((monthFolder) => (
+                <option key={monthFolder} value={monthFolder}>
+                  {formatMonthFolderLabel(monthFolder)}
+                </option>
+              ))}
+            </select>
+          </label>
+```
+and the module-level `collectMonthOptions(rows: BrowseRow[])` helper (only caller was
+`monthOptions`, now deleted).
+
+**After:**
+```tsx
+  const { selection: globalMonth } = useGlobalMonth();
+  const labels = useLabels();
+  const [showAllMonths, setShowAllMonths] = useState(false);
+  const globalFolder = globalMonth.kind === "none" ? null : globalMonth.folderName;
+  const [dataset, setDataset] = useState<BrowseDatasetKind>("population");
+  const [rows, setRows] = useState<BrowseRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  ...
+  const monthFilteredRows = useMemo(
+    () =>
+      showAllMonths || !globalFolder
+        ? rows
+        : rows.filter((row) => row._monthFolder === globalFolder),
+    [rows, showAllMonths, globalFolder]
+  );
+```
+`exportFilteredRowsToXlsx`:
+```tsx
+    const monthName =
+      showAllMonths || !globalFolder
+        ? labels.gm_all_months
+        : formatMonthFolderShortLabel(globalFolder);
+```
+header UI:
+```tsx
+          <label className="bv-month-filter" htmlFor="browseAllMonths">
+            <input
+              id="browseAllMonths"
+              type="checkbox"
+              checked={showAllMonths}
+              onChange={(event) => setShowAllMonths(event.target.checked)}
+            />
+            <span>{labels.gm_all_months}</span>
+          </label>
+```
+`useLabels` imported from `../../../../data/labels/useLabels` (new import, alongside the
+existing `getLabels` import). `formatMonthFolderLabel` (module-level helper, distinct from
+`collectMonthOptions`) is **kept** — it is still called from `getBrowseDisplayValue` for the
+`_monthFolder` column when rendering the "كل الأشهر" table, so it did not become unused.
+
+**File:** `src/components/Sidebar/Tabs/Population/Population.css`
+
+**Before:** `.month-picker-section`, `.month-picker-header`/`h3`/`p`, `.month-picker-grid`,
+`.month-card`/`:hover`/`:disabled`, `.month-card-name`/`-rows`/`-badges`, `.month-badge`/`.ok`/
+`.off`, `.month-picker-divider`/`::before`/`::after` — dead rules left over from the Phase-1
+"فتح شهر سابق" month-card grid removed in Task 9 (Follow-up 9); confirmed zero `.tsx`/`.ts`
+references to any of these class names before deleting. `.month-picker-loading` **kept** (still
+referenced by the loading indicator above `<PhaseOneUpload>`).
+
+**After:** only `.month-picker-loading { font-size: 13px; color: var(--p-muted); padding:
+var(--sp-2) 0; }` remains in that section; the rest of the block was removed. The section
+comment above it was re-worded from `Month Picker (Phase 1 — existing months)` to `Month load
+indicator (Phase 1 — global-month auto-load)` since the picker it described no longer exists —
+the remaining rule now only styles the loading indicator shown while the global-month selection
+auto-loads a month's data.
+
+**File:** `src/components/Sidebar/Tabs/Archive/index.tsx`
+
+**Before:**
+```tsx
+import { useWorkspace } from "../../../../data/workspace/useWorkspace";
+import { formatDateTime, formatNumber } from "../../../../utils/formatting";
+...
+export default function ArchiveTab() {
+  const { directoryHandle } = useWorkspace();
+  const session = readSession();
+  ...
+          action: mode === "close" ? "month-closed" : "month-reopened",
+          monthFolderName: folderName,
+          details: note.trim() ? { note: note.trim() } : undefined,
+        });
+        setLockTarget(null);
+```
+
+**After:**
+```tsx
+import { useWorkspace } from "../../../../data/workspace/useWorkspace";
+import { useGlobalMonth } from "../../../../data/month/useGlobalMonth";
+import { formatDateTime, formatNumber } from "../../../../utils/formatting";
+...
+export default function ArchiveTab() {
+  const { directoryHandle } = useWorkspace();
+  const { refreshMonths } = useGlobalMonth();
+  const session = readSession();
+  ...
+          action: mode === "close" ? "month-closed" : "month-reopened",
+          monthFolderName: folderName,
+          details: note.trim() ? { note: note.trim() } : undefined,
+        });
+        void refreshMonths();
+        setLockTarget(null);
+```
+`handleMonthLockConfirm` handles both `close` and `reopen` through the same `result.ok`
+success branch (mode-ternary for the audit action/message), so one `refreshMonths()` call
+covers both paths.
+
+**File:** `docs/architecture/data-system-report.md`
+
+**Before:** Browser Storage table had no `sessionStorage` row; no subsection on the global
+month provider.
+
+**After:** added a `sessionStorage` / `xray_global_month_v1` row to the Browser Storage table,
+and a new "Global Month Provider" subsection (after "Workspace Folder Data") documenting
+`src/data/month/`, the `useGlobalMonth()` hook shape, the sessionStorage persistence/
+reconciliation behavior, `refreshMonths()`, and that this is a UI/state change only — no disk
+layout changed. Also notes `BrowseDataView`'s "كل الأشهر" toggle as the one screen that departs
+from "global month only".
+
+**File:** `CLAUDE.md`
+
+**Before:**
+```md
+| Preferences | `src/data/preferences/` | Browse preset storage |
+| Error logger | `src/data/storage/errorLogger.ts` | In-memory ring buffer (last 50 entries) for silent-catch observability; `logError`, `getRecentErrors`, `clearErrors` |
+```
+
+**After:**
+```md
+| Preferences | `src/data/preferences/` | Browse preset storage |
+| Global month | `src/data/month/` | App-wide month selection (provider + toolbar selector); sessionStorage key `xray_global_month_v1` |
+| Error logger | `src/data/storage/errorLogger.ts` | In-memory ring buffer (last 50 entries) for silent-catch observability; `logError`, `getRecentErrors`, `clearErrors` |
+```
+The "Current tabs" table and tab-workflow prose were reviewed for per-tab month-filter mentions
+to update — none found (the table only lists sub-tab ids, not filter behavior), so no further
+edit was needed there.
+
 ## v54.1 — 2026-07-14 — Report terminology: حالة → صورة for x-ray records
 
 Owner request ("any reference for حالة become صورة"). Reviewed, phrase-mapped rename across the reporting layer — NOT a blind replace: حالة-as-"status" survives untouched (column headers الحالة, حالة التوزيع, حالة الإجابة, حالة BI, workflow labels), and the port name منفذ حالة عمار is data. 64 case-sense occurrences renamed across deck2, deck v1, the executive document parts (scope/risk/corroboration/narrative), executiveReportData findings, and the two KPI-dashboard labels (`rk_pchart_empty`, `rk_tooltip_cases`). Examples:

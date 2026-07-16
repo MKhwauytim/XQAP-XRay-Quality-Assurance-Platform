@@ -102,6 +102,7 @@ import {
 } from "../../../../data/population/populationConfig";
 
 import { getLabels } from "../../../../data/labels/labelsStore";
+import { useLabels } from "../../../../data/labels/useLabels";
 import { MonthClosedError } from "../../../../data/population/monthLock";
 import { appendWorkspaceAction } from "../../../../data/audit/actionLog";
 
@@ -400,6 +401,7 @@ export default function PopulationTab() {
     setProcessingMessage("");
     setCurrentPhase(1);
     setCompletedPhaseIds([]);
+    setPendingReprocessSave(null);
   }
 
   // The global month IS the wizard's month: selecting an existing month loads it
@@ -2078,12 +2080,6 @@ function formatMonthFolderLabel(monthFolder: string): string {
   return formatMonthFolderShortLabel(monthFolder);
 }
 
-function collectMonthOptions(rows: BrowseRow[]): string[] {
-  return Array.from(
-    new Set(rows.map((row) => row._monthFolder).filter(Boolean))
-  ).sort((first, second) => second.localeCompare(first));
-}
-
 function formatBrowseCellValue(value: unknown): string {
   if (value === null || value === undefined || value === "") {
     return "—";
@@ -2162,9 +2158,12 @@ function BrowseDataView({
   username: string;
   config: PopulationConfig;
 }) {
+  const { selection: globalMonth } = useGlobalMonth();
+  const labels = useLabels();
+  const [showAllMonths, setShowAllMonths] = useState(false);
+  const globalFolder = globalMonth.kind === "none" ? null : globalMonth.folderName;
   const [dataset, setDataset] = useState<BrowseDatasetKind>("population");
   const [rows, setRows] = useState<BrowseRow[]>([]);
-  const [selectedMonthFilter, setSelectedMonthFilter] = useState("all");
   const [loading, setLoading] = useState(false);
   const browsePresetRef = useRef<UserBrowsePresetFile | null>(null);
   const [isPresetLoaded, setIsPresetLoaded] = useState(false);
@@ -2240,26 +2239,12 @@ function BrowseDataView({
       .finally(() => setLoading(false));
   }, [dataset, directoryHandle, isPresetLoaded, refreshKey]);
 
-  const monthOptions = useMemo(
-    () =>
-      Array.from(new Set(collectMonthOptions(rows))).sort((first, second) => second.localeCompare(first)),
-    [rows]
-  );
-
-  const effectiveMonthFilter = useMemo(
-    () =>
-      selectedMonthFilter === "all" || monthOptions.includes(selectedMonthFilter)
-        ? selectedMonthFilter
-        : "all",
-    [monthOptions, selectedMonthFilter]
-  );
-
   const monthFilteredRows = useMemo(
     () =>
-      effectiveMonthFilter === "all"
+      showAllMonths || !globalFolder
         ? rows
-        : rows.filter((row) => row._monthFolder === effectiveMonthFilter),
-    [rows, effectiveMonthFilter]
+        : rows.filter((row) => row._monthFolder === globalFolder),
+    [rows, showAllMonths, globalFolder]
   );
   // LINT-01c: Instead of a setState-in-effect, reset column filters by
   // deriving the key from `dataset` and using it as a React key on the
@@ -2405,9 +2390,9 @@ function BrowseDataView({
     XLSX.utils.book_append_sheet(workbook, worksheet, "البيانات");
 
     const monthName =
-      selectedMonthFilter === "all"
-        ? "كل الأشهر"
-        : formatMonthFolderLabel(selectedMonthFilter);
+      showAllMonths || !globalFolder
+        ? labels.gm_all_months
+        : formatMonthFolderShortLabel(globalFolder);
     const fileName = safeExportFileName(
       `البيانات - ${activeDataset.label} - ${monthName}.xlsx`
     );
@@ -2431,20 +2416,14 @@ function BrowseDataView({
         subtitle={activeDataset.description}
       >
         <div className="bv-header-actions">
-          <label className="bv-month-filter" htmlFor="browseMonthFilter">
-            <span>الشهر</span>
-            <select
-              id="browseMonthFilter"
-              value={selectedMonthFilter}
-              onChange={(event) => setSelectedMonthFilter(event.target.value)}
-            >
-              <option value="all">الكل</option>
-              {monthOptions.map((monthFolder) => (
-                <option key={monthFolder} value={monthFolder}>
-                  {formatMonthFolderLabel(monthFolder)}
-                </option>
-              ))}
-            </select>
+          <label className="bv-month-filter" htmlFor="browseAllMonths">
+            <input
+              id="browseAllMonths"
+              type="checkbox"
+              checked={showAllMonths}
+              onChange={(event) => setShowAllMonths(event.target.checked)}
+            />
+            <span>{labels.gm_all_months}</span>
           </label>
         </div>
       </PageHeader>

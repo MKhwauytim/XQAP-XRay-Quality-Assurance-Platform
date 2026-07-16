@@ -117,6 +117,7 @@ Month folder names follow the pattern `{month}-{monthname-en}-{year}`, lowercase
 | Feedback | `src/data/feedback/` | User feedback records |
 | Labels | `src/data/labels/` | UI label overrides (`labelsStore.ts`) persisted to `localStorage`; `useLabels()` re-renders on change |
 | Preferences | `src/data/preferences/` | Browse preset storage |
+| Global month | `src/data/month/` | App-wide month selection (provider + toolbar selector); sessionStorage key `xray_global_month_v1` |
 | Error logger | `src/data/storage/errorLogger.ts` | In-memory ring buffer (last 50 entries) for silent-catch observability; `logError`, `getRecentErrors`, `clearErrors` |
 | JsonEnvelope | `src/data/storage/jsonEnvelope.ts` | Schema versioning wrapper for all `safeWriteJson` writes; `wrap`, `isEnvelope`, `unwrap` factory functions |
 

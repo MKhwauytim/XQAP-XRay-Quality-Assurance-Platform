@@ -2458,127 +2458,13 @@ select.save-disk-input {
 }
 
 /* ================================================================
-   Month Picker (Phase 1 — existing months)
+   Month load indicator (Phase 1 — global-month auto-load)
    ================================================================ */
-
-.month-picker-section {
-  background: var(--p-surface);
-  border: 1px solid var(--p-border);
-  border-radius: var(--p-radius-lg);
-  padding: var(--sp-5) var(--sp-6);
-  margin-bottom: var(--sp-4);
-}
-
-.month-picker-header {
-  margin-bottom: var(--sp-4);
-}
-
-.month-picker-header h3 {
-  margin: 0 0 var(--sp-1);
-  font-size: 15px;
-  font-weight: var(--p-bold);
-  color: var(--p-primary);
-}
-
-.month-picker-header p {
-  margin: 0;
-  font-size: 13px;
-  color: var(--p-muted);
-}
-
-.month-picker-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-  gap: var(--sp-3);
-  margin-bottom: var(--sp-4);
-}
 
 .month-picker-loading {
   font-size: 13px;
   color: var(--p-muted);
   padding: var(--sp-2) 0;
-}
-
-.month-card {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-  padding: var(--sp-3) var(--sp-4);
-  background: var(--p-surface-soft);
-  border: 1px solid var(--p-border);
-  border-radius: var(--p-radius-md);
-  cursor: pointer;
-  text-align: right;
-  font-family: var(--p-font);
-  transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
-}
-
-.month-card:hover:not(:disabled) {
-  border-color: var(--p-primary);
-  background: var(--p-primary-light);
-  box-shadow: 0 2px 8px rgba(23, 54, 93, 0.10);
-}
-
-.month-card:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.month-card-name {
-  font-size: 13px;
-  font-weight: var(--p-bold);
-  color: var(--p-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.month-card-rows {
-  font-size: 12px;
-  font-weight: var(--p-medium);
-  color: var(--p-text-secondary);
-  font-variant-numeric: tabular-nums;
-}
-
-.month-card-badges {
-  display: flex;
-  gap: var(--sp-1);
-  flex-wrap: wrap;
-}
-
-.month-badge {
-  font-size: 10.5px;
-  font-weight: var(--p-bold);
-  padding: var(--sp-1) var(--sp-2);
-  border-radius: var(--p-radius-pill);
-}
-
-.month-badge.ok {
-  background: var(--p-success-bg);
-  color: var(--p-success);
-}
-
-.month-badge.off {
-  background: var(--p-surface-soft);
-  color: var(--p-muted);
-  border: 1px solid var(--p-border);
-}
-
-.month-picker-divider {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  font-size: 12px;
-  color: var(--p-muted);
-  font-weight: var(--p-medium);
-}
-
-.month-picker-divider::before,
-.month-picker-divider::after {
-  content: "";
-  flex: 1;
-  height: 1px;
-  background: var(--p-border);
 }
 
 /* ================================================================

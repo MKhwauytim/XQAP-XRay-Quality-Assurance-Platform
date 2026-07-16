@@ -30,6 +30,7 @@ import { WORKSPACE_FILE_NAMES } from "../../../../data/workspace/workspaceDefaul
 import { getUserDataRoot } from "../../../../data/workspace/workspacePaths";
 import type { UsersPermissionsFile } from "../../../../data/workspace/workspaceTypes";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
+import { useGlobalMonth } from "../../../../data/month/useGlobalMonth";
 import { formatDateTime, formatNumber } from "../../../../utils/formatting";
 import type { SidebarTabModule } from "../tabTypes";
 import "./Archive.css";
@@ -63,6 +64,7 @@ function modeLabel(mode: BackupHistoryItem["mode"]): string {
 
 export default function ArchiveTab() {
   const { directoryHandle } = useWorkspace();
+  const { refreshMonths } = useGlobalMonth();
   const session = readSession();
   const username = session?.username ?? "unknown";
   const isAdmin = session?.role === "admin";
@@ -178,6 +180,7 @@ export default function ArchiveTab() {
           monthFolderName: folderName,
           details: note.trim() ? { note: note.trim() } : undefined,
         });
+        void refreshMonths();
         setLockTarget(null);
         setMessage({
           type: "ok",
