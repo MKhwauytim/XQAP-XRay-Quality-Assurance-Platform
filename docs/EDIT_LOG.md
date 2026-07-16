@@ -482,6 +482,140 @@ Removed the local month-listing state/effect entirely — the Reports tab now de
 ```
 `.rh-month-select` rules removed (dead — no `<select>` remains in this tab; confirmed no other file references the class).
 
+### Follow-up 6: XrayInspectionResults consumes the global month (2026-07-16)
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayInspectionResults.tsx`
+
+**Before:**
+```tsx
+import { loadAdminBrowsePreset, loadUserBrowsePreset } from "../../../../../data/preferences/browsePresetStorage";
+import { listMonthFolders } from "../../../../../data/population/populationStorage";
+import { formatMonthFolderShortLabel } from "../../../../../data/population/monthFolder";
+import { loadSampleMaster } from "../../../../../data/sampling/sampleStorage";
+```
+```tsx
+type MonthOption = {
+  month: number;
+  year: number;
+  folderName: string;
+};
+
+type Props = {
+```
+```tsx
+  const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [months, setMonths] = useState<MonthOption[]>([]);
+  const [selectedMonth, setSelectedMonth] = useState("");
+  const [rows, setRows] = useState<ResultRow[]>([]);
+```
+```tsx
+  useEffect(() => {
+    void listMonthFolders(directoryHandle)
+      .then((monthFolders) => {
+        setMonths(monthFolders);
+        if (monthFolders.length > 0) {
+          setSelectedMonth(monthFolders[monthFolders.length - 1]!.folderName);
+        } else {
+          setRows([]);
+          setTemplate(null);
+          setLoadState("ready");
+        }
+      })
+      .catch((error) => {
+        setLoadState("error");
+        logRejection("xrayInspectionResults:listMonthFolders")(error);
+      });
+
+    void Promise.all([
+```
+```tsx
+          exportFileName={`نتائج فحص الأشعة - ${selectedMonth || "كل الأشهر"}.xlsx`}
+          toolbarEndExtra={renderViewSwitcher(viewMode, setViewMode)}
+          toolbarStart={
+            <label className="ew-label" htmlFor="xray-results-month">
+              {L.label_month}
+              <select
+                id="xray-results-month"
+                className="ew-select"
+                value={selectedMonth}
+                onChange={(event) => setSelectedMonth(event.target.value)}
+              >
+                {months.map((month) => (
+                  <option key={month.folderName} value={month.folderName}>{formatMonthFolderShortLabel(month.folderName)}</option>
+                ))}
+              </select>
+            </label>
+          }
+        />
+```
+```tsx
+          exportFileName={`${viewMode === "replaced" ? "سجل المستبدلة" : "سجل المحالة والمنقولة"} - ${selectedMonth || "كل الأشهر"}.xlsx`}
+          toolbarEndExtra={renderViewSwitcher(viewMode, setViewMode)}
+          toolbarStart={
+            <label className="ew-label" htmlFor="xray-results-month-audit">
+              {L.label_month}
+              <select
+                id="xray-results-month-audit"
+                className="ew-select"
+                value={selectedMonth}
+                onChange={(event) => setSelectedMonth(event.target.value)}
+              >
+                {months.map((month) => (
+                  <option key={month.folderName} value={month.folderName}>{formatMonthFolderShortLabel(month.folderName)}</option>
+                ))}
+              </select>
+            </label>
+          }
+        />
+```
+
+**After:**
+```tsx
+import { loadAdminBrowsePreset, loadUserBrowsePreset } from "../../../../../data/preferences/browsePresetStorage";
+import { loadSampleMaster } from "../../../../../data/sampling/sampleStorage";
+```
+```tsx
+import { useLabels, type Labels } from "../../../../../data/labels/useLabels";
+import { useGlobalMonth } from "../../../../../data/month/useGlobalMonth";
+```
+```tsx
+type Props = {
+```
+```tsx
+  const [loadState, setLoadState] = useState<LoadState>("loading");
+  const { months, selection: globalMonth } = useGlobalMonth();
+  const selectedMonth = globalMonth.kind === "existing" ? globalMonth.folderName : "";
+  const [rows, setRows] = useState<ResultRow[]>([]);
+```
+```tsx
+  useEffect(() => {
+    void Promise.all([
+```
+```tsx
+  // No selected on-disk month (empty workspace or a pending new month) → empty, ready state.
+  useEffect(() => {
+    if (!selectedMonth) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync empty-state reset when no month folder is selected
+      setRows([]);
+      setAuditRows([]);
+      setTemplate(null);
+      setLoadState("ready");
+    }
+  }, [selectedMonth]);
+```
+```tsx
+          exportFileName={`نتائج فحص الأشعة - ${selectedMonth || "كل الأشهر"}.xlsx`}
+          toolbarEndExtra={renderViewSwitcher(viewMode, setViewMode)}
+        />
+```
+```tsx
+          exportFileName={`${viewMode === "replaced" ? "سجل المستبدلة" : "سجل المحالة والمنقولة"} - ${selectedMonth || "كل الأشهر"}.xlsx`}
+          toolbarEndExtra={renderViewSwitcher(viewMode, setViewMode)}
+        />
+```
+
+`MonthOption` type deleted — replaced by `MonthFolderInfo` from the `useGlobalMonth()` hook. `listMonthFolders` import removed (no longer called directly — the provider owns month listing); `formatMonthFolderShortLabel` import removed (only consumer was the deleted `<select>` markup). Both `toolbarStart` month `<select>` blocks (`xray-results-month`, `xray-results-month-audit`) removed entirely — `toolbarStart` prop dropped since the label was its only content. `loadData`'s `if (!selectedMonth) return;` early-return already existed and stays as a guard, but with the old flow gone nothing else flipped `loadState` to `"ready"` when there were zero months / a pending month — so a dedicated effect (with the repo's `set-state-in-effect` eslint-disable convention) resets `rows`/`auditRows`/`template` and sets `loadState` to `"ready"` whenever `selectedMonth` is empty. Same convention as Reports (Follow-up 4) and XrayReferrals (Follow-up 5).
+
 ### Follow-up 5: XrayReferrals tab consumes the global month (2026-07-16)
 
 **File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx`
