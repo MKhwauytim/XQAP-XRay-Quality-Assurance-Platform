@@ -1,7 +1,7 @@
-# Desktop App-Mode Shortcut — Design Spec
+# Desktop App-Mode Shortcut — Design Spec [DONE — merged to main]
 
 - **Date:** 2026-07-16
-- **Status:** Approved by user (2026-07-16)
+- **Status:** ✅ DONE — implemented, reviewed, and merged to main via [PR #20](https://github.com/MKhwauytim/XQAP-XRay-Quality-Assurance-Platform/pull/20) (2026-07-16). Implementation plan: `docs/superpowers/plans/2026-07-16-desktop-shortcut.md`.
 - **Scope:** Give the existing single-file build an installed-app look and feel (own window, no browser tabs/address bar, taskbar/desktop icon) without a service worker, a manifest, or a second build output.
 
 ## Background

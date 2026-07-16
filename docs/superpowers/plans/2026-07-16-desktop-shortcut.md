@@ -1,4 +1,6 @@
-# Desktop App-Mode Shortcut Implementation Plan
+# Desktop App-Mode Shortcut Implementation Plan [DONE — merged to main]
+
+> **STATUS: ✅ DONE.** All 4 tasks implemented, reviewed (with 2 real bugs caught and fixed: an Arabic-path URI corruption, and a legacy-PowerShell BOM parse failure), whole-branch reviewed twice ("Ready to merge: Yes"), and merged to main via [PR #20](https://github.com/MKhwauytim/XQAP-XRay-Quality-Assurance-Platform/pull/20) on 2026-07-16. Full task-by-task evidence trail: `.superpowers/sdd/progress.md` and `.superpowers/sdd/task-{1,2,3,4}-report.md`.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -32,7 +34,7 @@
 **Interfaces:**
 - Produces: `public/app-icon.ico` — a real multi-resolution Windows ICO (16/32/48/256px frames, each PNG-compressed) that Task 2's script references by relative path (`Join-Path $scriptDir "app-icon.ico"`) and that Task 4 verifies lands in `dist/`.
 
-- [ ] **Step 1: EDIT_LOG entry**
+- [x] **Step 1: EDIT_LOG entry**
 
 Check the current top entry in `docs/EDIT_LOG.md` first (`Read` the first ~10 lines) to confirm the next version number, then insert at the very top:
 
@@ -58,7 +60,7 @@ wrapper) shipped alongside the existing single-file build.
 
 (Adjust the version number if `docs/EDIT_LOG.md`'s current top entry is not `## v55` — use the next decimal bump after whatever is actually there.)
 
-- [ ] **Step 2: Write the icon generator script**
+- [x] **Step 2: Write the icon generator script**
 
 Create `scripts/generate-app-icon.ps1`:
 
@@ -186,7 +188,7 @@ $stream.Dispose()
 Write-Host "Wrote $outputPath ($($frames.Count) frames: $($sizes -join ', ')px)" -ForegroundColor Green
 ```
 
-- [ ] **Step 3: Run the generator and verify the output is a real multi-frame ICO**
+- [x] **Step 3: Run the generator and verify the output is a real multi-frame ICO**
 
 Run: `pwsh -NoProfile -File scripts/generate-app-icon.ps1`
 Expected: `Wrote ...\public\app-icon.ico (4 frames: 16, 32, 48, 256px)`
@@ -199,7 +201,7 @@ pwsh -NoProfile -Command "$b = [System.IO.File]::ReadAllBytes('public/app-icon.i
 ```
 Expected: `reserved=0 type=1 count=4` (ICO magic: reserved word = 0, type = 1, 4 frames) and a size in the tens-of-KB range (four PNG frames, the 256px one dominating). If `count` is not `4` or the file is only a few hundred bytes, the write failed — do not proceed; re-check the script for an unhandled exception.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add scripts/generate-app-icon.ps1 public/app-icon.ico docs/EDIT_LOG.md
@@ -217,7 +219,7 @@ git commit -m "feat(shortcut): generate the multi-resolution app icon"
 - Consumes: `public/app-icon.ico` (Task 1's output — referenced by relative path from this script's own location, not a hardcoded path).
 - Produces: a `.lnk` file on the user's Desktop named `نظام معالجة بيانات الأشعة.lnk`. Task 3's `.bat` wrapper invokes this script by relative path (`%~dp0create-desktop-shortcut.ps1`).
 
-- [ ] **Step 1: EDIT_LOG entry**
+- [x] **Step 1: EDIT_LOG entry**
 
 Append under the `## v55.1` heading from Task 1:
 
@@ -229,7 +231,7 @@ Append under the `## v55.1` heading from Task 1:
 **After:** self-locating shortcut creator — detects Chrome/Edge, verifies `index.html` exists, creates a re-runnable Desktop `.lnk` in app-mode. See file.
 ```
 
-- [ ] **Step 2: Write the script**
+- [x] **Step 2: Write the script**
 
 Create `public/create-desktop-shortcut.ps1`:
 
@@ -288,7 +290,7 @@ $shortcut.Save()
 Write-Host "تم إنشاء اختصار على سطح المكتب: $shortcutName" -ForegroundColor Green
 ```
 
-- [ ] **Step 3: Verify the happy path in a scratch directory with spaces AND parentheses in its name**
+- [x] **Step 3: Verify the happy path in a scratch directory with spaces AND parentheses in its name**
 
 This directly exercises the quoting requirement from Global Constraints — create a throwaway scratch folder whose name has both a space and parentheses (mirroring this very repo's own path shape), copy the script + icon + a stub `index.html` into it, run it, and inspect the resulting shortcut's actual COM properties.
 
@@ -319,7 +321,7 @@ Expected:
 
 If any of the three properties is empty, truncated at the space, or split at the parenthesis, the quoting is broken — stop and fix the `Arguments` line before continuing.
 
-- [ ] **Step 4: Verify the missing-index.html error path**
+- [x] **Step 4: Verify the missing-index.html error path**
 
 Run:
 ```powershell
@@ -334,7 +336,7 @@ pwsh -NoProfile -Command "
 ```
 Expected: prints the Arabic "لم يتم العثور على index.html" error and `ExitCode=1` — no shortcut is created (nothing to clean up beyond the scratch folder).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add public/create-desktop-shortcut.ps1 docs/EDIT_LOG.md
@@ -351,7 +353,7 @@ git commit -m "feat(shortcut): PowerShell shortcut-creation script"
 **Interfaces:**
 - Consumes: `public/create-desktop-shortcut.ps1` (Task 2), invoked by relative path so it works from wherever the `dist/` folder ends up.
 
-- [ ] **Step 1: EDIT_LOG entry**
+- [x] **Step 1: EDIT_LOG entry**
 
 Append under `## v55.1`:
 
@@ -363,7 +365,7 @@ Append under `## v55.1`:
 **After:** one-click wrapper that runs `create-desktop-shortcut.ps1` with a bypassed execution policy, so double-clicking works without a PowerShell security prompt.
 ```
 
-- [ ] **Step 2: Write the wrapper**
+- [x] **Step 2: Write the wrapper**
 
 Create `public/Create Desktop Shortcut.bat`:
 
@@ -375,14 +377,14 @@ pause
 
 (`%~dp0` expands to this `.bat` file's own directory with a trailing backslash, so `%~dp0create-desktop-shortcut.ps1` resolves correctly regardless of where the folder is copied to. `pause` keeps the console window open after the script finishes so the user can read the success/error message before it closes — otherwise a double-clicked `.bat` closes its window immediately on completion.)
 
-- [ ] **Step 3: Verify it runs the PowerShell script correctly**
+- [x] **Step 3: Verify it runs the PowerShell script correctly**
 
 Run: `cmd /c ""public/Create Desktop Shortcut.bat" < NUL"` (the `< NUL` supplies an empty stdin so `pause` doesn't hang the automated run)
 Expected: the same success/error output as Task 2 Step 3/4's manual runs (in this case, run against the real `public/` folder in the repo, which has a real `index.html` — expect the success message and a real shortcut created on the Desktop this time; clean it up afterward with `Remove-Item` so it doesn't linger from an automated verification run).
 
 Run cleanup: `pwsh -NoProfile -Command "Remove-Item (Join-Path ([Environment]::GetFolderPath('Desktop')) 'نظام معالجة بيانات الأشعة.lnk') -Force -ErrorAction SilentlyContinue"`
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add "public/Create Desktop Shortcut.bat" docs/EDIT_LOG.md
@@ -401,7 +403,7 @@ git commit -m "feat(shortcut): one-click .bat wrapper"
 - Consumes: Tasks 1–3's three `public/` files.
 - Produces: confirms `npm run build` ships all three files in `dist/` automatically — the acceptance criterion for the whole feature.
 
-- [ ] **Step 1: EDIT_LOG entry**
+- [x] **Step 1: EDIT_LOG entry**
 
 Append under `## v55.1`:
 
@@ -420,11 +422,11 @@ Append under `## v55.1`:
 \`\`\`
 ```
 
-- [ ] **Step 2: Add the CLAUDE.md line**
+- [x] **Step 2: Add the CLAUDE.md line**
 
 In `CLAUDE.md`, under "Build & dependency gotchas", add the new bullet from Step 1's After block (as its own line in that section — exact position among the existing bullets doesn't matter, just keep it inside that section).
 
-- [ ] **Step 3: Run a real build and verify all three files ship**
+- [x] **Step 3: Run a real build and verify all three files ship**
 
 Run: `npm run build`
 Expected: build succeeds (same as always — no config changed).
@@ -432,7 +434,7 @@ Expected: build succeeds (same as always — no config changed).
 Run: `ls dist/app-icon.ico dist/create-desktop-shortcut.ps1 "dist/Create Desktop Shortcut.bat"`
 Expected: all three files listed, present in `dist/` alongside `dist/index.html`, with no manual copy step — proving Vite's `public/` passthrough picked them up automatically.
 
-- [ ] **Step 4: End-to-end smoke test against the real build output**
+- [x] **Step 4: End-to-end smoke test against the real build output**
 
 Run:
 ```powershell
@@ -445,7 +447,7 @@ pwsh -NoProfile -Command "
 ```
 Expected: success message, `Shortcut exists: True`, then cleaned up. This is the real acceptance test for the whole feature — the actual shipped build output, run for real, from this repo's actual path (which itself contains the space-and-parentheses edge case).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add CLAUDE.md docs/EDIT_LOG.md
