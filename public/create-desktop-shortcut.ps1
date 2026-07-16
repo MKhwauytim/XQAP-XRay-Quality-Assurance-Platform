@@ -32,7 +32,14 @@ if (-not $browserPath) {
 }
 
 $resolvedIndex = (Resolve-Path $indexPath).Path
-$fileUri = "file:///" + ($resolvedIndex -replace '\\', '/')
+# Build the URI via .NET's Uri class rather than raw string concatenation.
+# AbsoluteUri percent-encodes non-ASCII characters (e.g. an Arabic deployment
+# folder name) into a pure-ASCII string. That matters because WshShortcut.Save()
+# (below) silently ANSI-marshals any literal non-ASCII characters in property
+# values to "?" with NO exception -- the shortcut would "succeed" but launch a
+# dead URL. A pure-ASCII percent-encoded URI survives that marshaling intact,
+# and Chrome/Edge decode the %XX sequences back to the real path correctly.
+$fileUri = ([Uri]$resolvedIndex).AbsoluteUri
 
 $desktop = [Environment]::GetFolderPath("Desktop")
 $shortcutName = "نظام معالجة بيانات الأشعة.lnk"
@@ -58,7 +65,14 @@ $shortcut = $shell.CreateShortcut($stagingPath)
 $shortcut.TargetPath = $browserPath
 $shortcut.Arguments = "--app=`"$fileUri`" --new-window"
 $shortcut.WorkingDirectory = $scriptDir
-$shortcut.Description = "نظام معالجة بيانات الأشعة"
+# .Description intentionally omitted: it is free text (not a URI, so it can't
+# be percent-encoded the way Arguments is above) and hits the same
+# ANSI-marshaling corruption in WshShortcut.Save(), producing visible "?????"
+# mojibake in the shortcut's Properties/tooltip on ANSI-incompatible systems.
+# A true fix needs IShellLinkW, which is out of scope for this pure
+# WScript.Shell script. No Description is strictly better than a garbled one;
+# the shortcut's Desktop filename (Arabic, via the staging-path fix above)
+# and its actual launch behavior are unaffected either way.
 if (Test-Path $iconPath) {
     $shortcut.IconLocation = (Resolve-Path $iconPath).Path
 }

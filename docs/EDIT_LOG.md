@@ -28,6 +28,28 @@ wrapper) shipped alongside the existing single-file build.
 
 **After:** self-locating shortcut creator — detects Chrome/Edge, verifies `index.html` exists, creates a re-runnable Desktop `.lnk` in app-mode. See file.
 
+**File:** `public/create-desktop-shortcut.ps1` (fix)
+
+**Before:**
+```powershell
+$resolvedIndex = (Resolve-Path $indexPath).Path
+$fileUri = "file:///" + ($resolvedIndex -replace '\\', '/')
+```
+```powershell
+$shortcut.Description = "نظام معالجة بيانات الأشعة"
+```
+
+**After:**
+```powershell
+$resolvedIndex = (Resolve-Path $indexPath).Path
+$fileUri = ([Uri]$resolvedIndex).AbsoluteUri
+```
+```powershell
+# .Description intentionally omitted -- see comment above the property block.
+```
+
+The raw-string URI concatenation left non-ASCII deployment path segments (e.g. an Arabic folder name) as literal Unicode, which `WshShortcut.Save()` silently ANSI-marshals to `?` with no exception — the shortcut "succeeds" but launches a dead URL. `[Uri]::AbsoluteUri` percent-encodes to pure ASCII, which survives ANSI marshaling intact and is decoded correctly by Chrome/Edge. `.Description` is free text (not a URI, can't be percent-encoded) and hits the same ANSI-marshaling corruption, producing visible `?????` mojibake in the shortcut's Properties/tooltip; since a true fix needs `IShellLinkW` (out of scope — pure-`WScript.Shell` constraint), the property is dropped rather than shipped garbled. The Desktop `.lnk` filename itself (already Arabic, via the staging-path fix) is unaffected either way.
+
 ---
 
 ## v55 — 2026-07-16 — Global month selector in header replaces all per-tab month filters
