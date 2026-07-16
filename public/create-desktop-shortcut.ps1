@@ -73,6 +73,30 @@ $shortcut.WorkingDirectory = $scriptDir
 # WScript.Shell script. No Description is strictly better than a garbled one;
 # the shortcut's Desktop filename (Arabic, via the staging-path fix above)
 # and its actual launch behavior are unaffected either way.
+#
+# IconLocation (below) and WorkingDirectory (set earlier, alongside
+# TargetPath/Arguments) hit this same ANSI-marshaling limitation. Both are
+# plain Win32 path properties, not URIs, so neither can be percent-encoded
+# the way $fileUri is above. On a deployment folder path containing
+# non-ASCII characters (e.g. Arabic), WshShortcut.Save() silently
+# ANSI-marshals both to "?" characters, same as .Description. For
+# IconLocation that produces an illegal path string, so the shortcut falls
+# back to the browser's own default icon instead of app-icon.ico -- the
+# launch itself still works. For WorkingDirectory the stored value becomes a
+# "?"-filled, invalid path, but since $fileUri above is an absolute URI,
+# Chrome/Edge don't need the shortcut's working directory to resolve it, so
+# this degrades silently with no effect on launch behavior. Cosmetic
+# degradation only, not a broken launch; a true fix needs IShellLinkW
+# (out of scope, see above).
+#
+# Separately, the staging-path trick above ($stagingPath under $env:TEMP)
+# assumes $env:TEMP itself is representable in the system's ANSI codepage.
+# In the narrow case where the current Windows user profile is itself
+# non-ASCII (e.g. an Arabic username) on an ANSI-incompatible machine,
+# $shortcut.Save() throws its raw .NET exception ("Unable to save shortcut
+# ...") instead of one of this script's friendly Arabic error messages --
+# with no leftover files (a clean failure), just an English one. Documented
+# and accepted as-is; not worth a try/catch wrapper for this edge case.
 if (Test-Path $iconPath) {
     $shortcut.IconLocation = (Resolve-Path $iconPath).Path
 }

@@ -1,4 +1,4 @@
-# One-time generator for public/app-icon.ico. Reproduces the shapes of the
+﻿# One-time generator for public/app-icon.ico. Reproduces the shapes of the
 # inline SVG favicon in index.html (navy rounded-square mark, white "film"
 # panel, three scan lines, teal checkmark badge) at 16/32/48/256px using
 # GDI+ primitives, then hand-assembles a real multi-resolution Windows ICO

@@ -75,6 +75,18 @@ The raw-string URI concatenation left non-ASCII deployment path segments (e.g. a
 - The `xlsx` dependency is **vendored** at `vendor/xlsx-0.20.3.tgz` ...
 ```
 
+**File:** `public/create-desktop-shortcut.ps1` (docs-only — final whole-branch review)
+
+**Before:** `.Description` comment block ended at "...and its actual launch behavior are unaffected either way." with no commentary on `IconLocation` or `WorkingDirectory`, and no note on the `%TEMP%`-staging-path assumption.
+
+**After:** added one comment block (between the existing `.Description` comment and the `IconLocation` assignment) documenting that `IconLocation` and `WorkingDirectory` hit the same ANSI-marshaling limitation as `.Description` — neither is a URI, so neither can be percent-encoded, and both silently corrupt to `?` on a non-ASCII deployment path. Impact: `IconLocation` falls back to the browser's default icon (launch still works); `WorkingDirectory` becomes an invalid path but is irrelevant since `$fileUri` is absolute. Also documented, as a note in the same block, that the `$stagingPath` trick assumes `%TEMP%` itself is ANSI-representable — if the Windows username itself is non-ASCII on an ANSI-incompatible machine, `.Save()` throws a raw English .NET exception instead of the script's Arabic error messages, but fails cleanly (no leftover files). Both are accepted, documented limitations — no functional/logic change.
+
+**File:** `scripts/generate-app-icon.ps1` (docs-only — final whole-branch review)
+
+**Before:** UTF-8 without BOM (4692 bytes); line 5 comment contained a literal em-dash (U+2014).
+
+**After:** UTF-8 with BOM (EF BB BF prefix, 4695 bytes) — same technique as the `create-desktop-shortcut.ps1` encoding fix above (BOM prepended, no other bytes touched), for consistency with this branch's BOM-for-non-ASCII-content pattern given the em-dash on line 5. Regenerated `public/app-icon.ico` with `pwsh -File scripts/generate-app-icon.ps1` after the change and confirmed the output is byte-identical (SHA-256 `8d6b1421...66ef8b3` matches before and after) — the encoding change altered only the script's own file, not its behavior.
+
 ---
 
 ## v55 — 2026-07-16 — Global month selector in header replaces all per-tab month filters
