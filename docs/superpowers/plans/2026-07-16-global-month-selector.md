@@ -1,4 +1,6 @@
-# Global Month Selector Implementation Plan
+# Global Month Selector Implementation Plan [DONE — merged to main]
+
+> **STATUS: ✅ DONE.** All 10 tasks implemented and reviewed (several with fix rounds catching real bugs: a load-token race in the approval queue, a stale-KPI-rows bug, and — in the post-plan final review — a cross-month write window in the Population wizard, closed in a dedicated fix commit). Whole-branch reviewed twice: "Ready to merge: Yes". Merged to `origin/main` @ `69a86b2e` on 2026-07-16. One narrower non-blocking follow-up (an overlapping-load race in `handleLoadExistingMonth` under a rapid double month-switch) remains open — tracked in `.superpowers/sdd/progress.md`.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -39,7 +41,7 @@
   - `resolveInitialSelection(months: MonthFolderInfo[], storedFolderName: string | null): GlobalMonthSelection`
   - `reconcileSelection(months: MonthFolderInfo[], current: GlobalMonthSelection): GlobalMonthSelection`
 
-- [ ] **Step 1: EDIT_LOG entry**
+- [x] **Step 1: EDIT_LOG entry**
 
 Insert at the top of `docs/EDIT_LOG.md` (immediately before the `## v54.1` heading):
 
@@ -56,7 +58,7 @@ New GlobalMonthProvider context + toolbar selector; all tabs consume useGlobalMo
 **After:** selection-resolution logic (latest/stored/pending reconciliation) — see file.
 ```
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Create `src/data/month/globalMonthLogic.test.ts`:
 
@@ -139,12 +141,12 @@ describe("reconcileSelection", () => {
 });
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 Run: `npx vitest run src/data/month/globalMonthLogic.test.ts`
 Expected: FAIL — cannot resolve `./globalMonthLogic`
 
-- [ ] **Step 4: Write the implementation**
+- [x] **Step 4: Write the implementation**
 
 Create `src/data/month/globalMonthLogic.ts`:
 
@@ -200,12 +202,12 @@ export function reconcileSelection(
 }
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 Run: `npx vitest run src/data/month/globalMonthLogic.test.ts`
 Expected: PASS (9 tests)
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/data/month/globalMonthLogic.ts src/data/month/globalMonthLogic.test.ts docs/EDIT_LOG.md
@@ -231,9 +233,9 @@ git commit -m "feat(month): global month selection logic module"
   - `useGlobalMonth(): GlobalMonthContextValue` (throws outside provider)
   - `GlobalMonthProvider({ children })`
 
-- [ ] **Step 1: EDIT_LOG entry** — append three `**File:** (new)` blocks for the context, provider, and hook under `## v55`.
+- [x] **Step 1: EDIT_LOG entry** — append three `**File:** (new)` blocks for the context, provider, and hook under `## v55`.
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Create `src/data/month/GlobalMonthProvider.test.tsx`:
 
@@ -352,12 +354,12 @@ describe("GlobalMonthProvider", () => {
 });
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 Run: `npx vitest run src/data/month/GlobalMonthProvider.test.tsx`
 Expected: FAIL — cannot resolve `./GlobalMonthProvider`
 
-- [ ] **Step 4: Write the implementation**
+- [x] **Step 4: Write the implementation**
 
 Create `src/data/month/GlobalMonthContext.ts`:
 
@@ -560,12 +562,12 @@ export function GlobalMonthProvider({ children }: { children: ReactNode }) {
 }
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 Run: `npx vitest run src/data/month/GlobalMonthProvider.test.tsx src/data/month/globalMonthLogic.test.ts`
 Expected: PASS (all)
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/data/month docs/EDIT_LOG.md
@@ -589,9 +591,9 @@ git commit -m "feat(month): GlobalMonthProvider context + useGlobalMonth hook"
 - Consumes: `useGlobalMonth`, `usePermissions().can("process-population")`, `useLabels`, `formatMonthFolderShortLabel`
 - Produces: `<GlobalMonthSelector allowCreate={boolean} />` rendered in the toolbar; labels `gm_label`, `gm_new_month_btn`, `gm_new_month_title`, `gm_year_label`, `gm_confirm`, `gm_cancel`, `gm_pending_suffix`, `gm_locked_badge`, `gm_no_months`, `gm_all_months`, `gm_month_switch_confirm`
 
-- [ ] **Step 1: EDIT_LOG entry** — append `**File:**` blocks for all six files under `## v55`.
+- [x] **Step 1: EDIT_LOG entry** — append `**File:**` blocks for all six files under `## v55`.
 
-- [ ] **Step 2: Add label keys**
+- [x] **Step 2: Add label keys**
 
 In `src/data/labels/labelsStore.ts`, directly after the line `label_month:      "الشهر",` add:
 
@@ -619,7 +621,7 @@ In `src/components/Sidebar/Tabs/Settings/index.tsx`, after the entry `{ key: "la
       { key: "gm_all_months",          desc: "تسمية عرض كل الأشهر" },
 ```
 
-- [ ] **Step 3: Create the selector component**
+- [x] **Step 3: Create the selector component**
 
 Create `src/components/GlobalMonthSelector/GlobalMonthSelector.tsx`:
 
@@ -889,7 +891,7 @@ Create `src/components/GlobalMonthSelector/GlobalMonthSelector.css`:
 }
 ```
 
-- [ ] **Step 4: Mount the provider in App.tsx**
+- [x] **Step 4: Mount the provider in App.tsx**
 
 In `src/App.tsx` add the import:
 
@@ -918,7 +920,7 @@ function App() {
 
 closing accordingly (`</AuthGate>` → `</AuthGate>\n      </GlobalMonthProvider>`).
 
-- [ ] **Step 5: Render the selector in AdminToolbar**
+- [x] **Step 5: Render the selector in AdminToolbar**
 
 In `src/auth/AdminToolbar.tsx` add the import:
 
@@ -932,13 +934,13 @@ and between the closing `</div>` of `auth-toolbar-status` (after the workspace c
       <GlobalMonthSelector allowCreate={!isDemo} />
 ```
 
-- [ ] **Step 6: Verify manually + typecheck**
+- [x] **Step 6: Verify manually + typecheck**
 
 Run: `npx tsc -b && npx vitest run src/data/month`
 Expected: clean typecheck, month tests PASS.
 Then `npm run dev` (via the preview tools when executing interactively) and confirm: selector appears in the toolbar, lists months, "شهر جديد" opens the picker for admin, and switching persists across a reload (sessionStorage).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/components/GlobalMonthSelector src/auth/AdminToolbar.tsx src/App.tsx src/data/labels/labelsStore.ts "src/components/Sidebar/Tabs/Settings/index.tsx" docs/EDIT_LOG.md
@@ -957,9 +959,9 @@ git commit -m "feat(month): global month selector in the top toolbar"
 - Consumes: `useGlobalMonth` (import path `../../../../data/month/useGlobalMonth`)
 - Produces: no API changes; `selectedMonth` inside the component is now derived.
 
-- [ ] **Step 1: EDIT_LOG entry** for this file under `## v55`.
+- [x] **Step 1: EDIT_LOG entry** for this file under `## v55`.
 
-- [ ] **Step 2: Replace local month state**
+- [x] **Step 2: Replace local month state**
 
 Remove:
 
@@ -989,7 +991,7 @@ and the listing effect:
 
 Add the import `import { useGlobalMonth } from "../../../../data/month/useGlobalMonth";` and remove `listMonthFolders` from the `populationStorage` import (keep the other named imports).
 
-- [ ] **Step 3: Replace the month-bar select with a static label**
+- [x] **Step 3: Replace the month-bar select with a static label**
 
 Replace:
 
@@ -1030,14 +1032,14 @@ Add to `src/components/Sidebar/Tabs/Reports/Reports.css` (or the CSS file the mo
 }
 ```
 
-- [ ] **Step 4: Fix any leftover `months` references**
+- [x] **Step 4: Fix any leftover `months` references**
 
 Search the file for remaining `months`/`setMonths`/`setSelectedMonth` references and remove/adjust (the export-disable conditions use `selectedMonth`, which still exists).
 
 Run: `npx tsc -b`
 Expected: clean.
 
-- [ ] **Step 5: Run tests + commit**
+- [x] **Step 5: Run tests + commit**
 
 Run: `npm run test:run` (Reports has no dedicated test file; the suite guards regressions)
 Expected: PASS.
@@ -1058,9 +1060,9 @@ git commit -m "refactor(reports): consume global month selection"
 **Interfaces:**
 - Consumes: `useGlobalMonth` (import path `../../../../../data/month/useGlobalMonth`)
 
-- [ ] **Step 1: EDIT_LOG entry** for this file under `## v55`.
+- [x] **Step 1: EDIT_LOG entry** for this file under `## v55`.
 
-- [ ] **Step 2: Replace local month state**
+- [x] **Step 2: Replace local month state**
 
 Remove:
 
@@ -1089,7 +1091,7 @@ Add:
 
 Add the `useGlobalMonth` import; remove `listMonthFolders` from the `populationStorage` import (keep `loadMonthPopulationFinal`).
 
-- [ ] **Step 3: Strip the month select from QueueToolbar**
+- [x] **Step 3: Strip the month select from QueueToolbar**
 
 In the `QueueToolbar` call site remove the three props:
 
@@ -1119,7 +1121,7 @@ In the `QueueToolbar` definition remove `months`, `selectedMonth`, `onMonthChang
 
 Remove the now-unused `formatMonthFolderShortLabel` import if nothing else in the file uses it (verify with a file search first).
 
-- [ ] **Step 4: Typecheck + tests + commit**
+- [x] **Step 4: Typecheck + tests + commit**
 
 Run: `npx tsc -b && npm run test:run`
 Expected: PASS.
@@ -1140,9 +1142,9 @@ git commit -m "refactor(ew): xray referrals consume global month"
 **Interfaces:**
 - Consumes: `useGlobalMonth` (import path `../../../../../data/month/useGlobalMonth`)
 
-- [ ] **Step 1: EDIT_LOG entry** for this file under `## v55`.
+- [x] **Step 1: EDIT_LOG entry** for this file under `## v55`.
 
-- [ ] **Step 2: Replace local month state**
+- [x] **Step 2: Replace local month state**
 
 Delete the `MonthOption` type (lines 121–125) and replace:
 
@@ -1195,7 +1197,7 @@ keeping the browse-preset `Promise.all` in that effect. Then add a new effect di
 
 Add the `useGlobalMonth` import; remove the `listMonthFolders` import (line 35).
 
-- [ ] **Step 3: Remove both month selects from the render**
+- [x] **Step 3: Remove both month selects from the render**
 
 Delete the active-view block:
 
@@ -1217,7 +1219,7 @@ Delete the active-view block:
 
 and the equivalent audit-view block (`id="xray-results-month-audit"`). If the surrounding toolbar container becomes empty, remove it too. Remove the `formatMonthFolderShortLabel` import if now unused.
 
-- [ ] **Step 4: Typecheck + tests + commit**
+- [x] **Step 4: Typecheck + tests + commit**
 
 Run: `npx tsc -b && npm run test:run`
 Expected: PASS.
@@ -1241,9 +1243,9 @@ git commit -m "refactor(ew): inspection results consume global month"
 - Consumes: `useGlobalMonth` (import path `../../../../../../data/month/useGlobalMonth`)
 - Produces: `useApprovalData` return drops `setSelMonth`; keeps `months`, `selMonth`.
 
-- [ ] **Step 1: EDIT_LOG entry** for the three files under `## v55`.
+- [x] **Step 1: EDIT_LOG entry** for the three files under `## v55`.
 
-- [ ] **Step 2: Rewire the hook**
+- [x] **Step 2: Rewire the hook**
 
 In `useApprovalData.ts` replace:
 
@@ -1287,7 +1289,7 @@ and add:
 
 In the return object change `userDisplayMap, months, selMonth, setSelMonth,` to `userDisplayMap, months, selMonth,`. Add the `useGlobalMonth` import; remove the `listMonthFolders` import (and `MonthFolderInfo` import if now unused).
 
-- [ ] **Step 3: Remove the select from the view**
+- [x] **Step 3: Remove the select from the view**
 
 In `ReferralApproval/index.tsx` update the destructure (drop `setSelMonth`) and replace:
 
@@ -1310,7 +1312,7 @@ with:
 
 Remove the `formatMonthFolderShortLabel` import if now unused in that file.
 
-- [ ] **Step 4: Update the hook test**
+- [x] **Step 4: Update the hook test**
 
 In `useApprovalData.test.tsx`, after the existing imports add a module mock (the fixture month used throughout the file is what the mock must select — verify it is `5-may-2026` and adjust if the fixtures use another folder):
 
@@ -1330,7 +1332,7 @@ vi.mock("../../../../../../data/month/useGlobalMonth", () => ({
 
 (add `vi` to the vitest import if missing). Remove any test steps that called `setSelMonth`.
 
-- [ ] **Step 5: Run tests + commit**
+- [x] **Step 5: Run tests + commit**
 
 Run: `npx vitest run "src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval" && npx tsc -b`
 Expected: PASS.
@@ -1351,9 +1353,9 @@ git commit -m "refactor(ew): referral approval consumes global month"
 **Interfaces:**
 - Consumes: `useGlobalMonth` (import path `../../../../../data/month/useGlobalMonth`)
 
-- [ ] **Step 1: EDIT_LOG entry** for this file under `## v55`.
+- [x] **Step 1: EDIT_LOG entry** for this file under `## v55`.
 
-- [ ] **Step 2: Replace the auto-latest logic**
+- [x] **Step 2: Replace the auto-latest logic**
 
 Replace the body of `useExecutiveRows` (keeping its JSDoc, updated to say "the globally selected month" instead of "the latest month"):
 
@@ -1401,7 +1403,7 @@ function useExecutiveRows(): Array<Record<string, unknown>> | null {
 
 Add the `useGlobalMonth` import; remove `listMonthFolders` from the `populationStorage` import (keep `loadMonthPopulationFinal`).
 
-- [ ] **Step 3: Typecheck + tests + commit**
+- [x] **Step 3: Typecheck + tests + commit**
 
 Run: `npx tsc -b && npm run test:run`
 Expected: PASS.
@@ -1426,9 +1428,9 @@ git commit -m "refactor(report-designer): KPI renderer consumes global month"
 - Consumes: `useGlobalMonth` (import path `../../../../data/month/useGlobalMonth`), `getLabels().gm_month_switch_confirm`
 - Produces: `PhaseTwoReportAndProcessing` prop change — `saveMonth: number` and `onMonthChange` replaced by `monthLabel: string`.
 
-- [ ] **Step 1: EDIT_LOG entry** for the four files under `## v55`.
+- [x] **Step 1: EDIT_LOG entry** for the four files under `## v55`.
 
-- [ ] **Step 2: Update the wizard test first (it pins the contract)**
+- [x] **Step 2: Update the wizard test first (it pins the contract)**
 
 In `Population.wizard.test.tsx`, after the `usePermissions` mock add:
 
@@ -1450,7 +1452,7 @@ vi.mock("../../../../data/month/useGlobalMonth", () => ({
 Run: `npx vitest run src/components/Sidebar/Tabs/Population/Population.wizard.test.tsx`
 Expected: still PASS (mock is inert until index.tsx uses the hook).
 
-- [ ] **Step 3: Derive month/year from the global selection**
+- [x] **Step 3: Derive month/year from the global selection**
 
 In `src/components/Sidebar/Tabs/Population/index.tsx` add the import:
 
@@ -1483,7 +1485,7 @@ with:
   const saveYear = globalMonth.kind === "none" ? fallbackMonth.year : globalMonth.year;
 ```
 
-- [ ] **Step 4: Replace the month-lock state with the provider's**
+- [x] **Step 4: Replace the month-lock state with the provider's**
 
 Delete the state declaration:
 
@@ -1516,7 +1518,7 @@ Add instead (near the derivation from Step 3):
 
 Remove the now-unused `isMonthClosed` import if nothing else references it (keep `MonthClosedError`).
 
-- [ ] **Step 5: Remove the local month list; add unsaved-work guard, auto-load, and reset**
+- [x] **Step 5: Remove the local month list; add unsaved-work guard, auto-load, and reset**
 
 Delete the state + effect (lines ~236–252):
 
@@ -1604,7 +1606,7 @@ and DELETE these two lines from it:
         setSaveYear(info.year);
 ```
 
-- [ ] **Step 6: Mark dirty on fresh parse; clear + refresh on save**
+- [x] **Step 6: Mark dirty on fresh parse; clear + refresh on save**
 
 In the worker `onMessage` handler, `done` branch, after `setBiWorkbookResult(msg.biResult);` add:
 
@@ -1619,7 +1621,7 @@ In `commitSaveToDisk`, in the `result.ok` branch after `setMonthRefreshKey((k) =
         void refreshMonths();
 ```
 
-- [ ] **Step 7: Route the pop-load-month event through the global selection**
+- [x] **Step 7: Route the pop-load-month event through the global selection**
 
 Replace the effect (lines ~278–288):
 
@@ -1651,7 +1653,7 @@ with:
   }, [setGlobalMonth]);
 ```
 
-- [ ] **Step 8: Remove the Phase-1 "فتح شهر سابق" section**
+- [x] **Step 8: Remove the Phase-1 "فتح شهر سابق" section**
 
 Delete the block (lines ~1597–1628) from `{directoryHandle && (isLoadingMonths || existingMonths.length > 0) && (` through the closing `)}` that contains `month-picker-section`, keeping the `isLoadingMonthData` loading indicator by moving it directly above `<PhaseOneUpload`:
 
@@ -1662,7 +1664,7 @@ Delete the block (lines ~1597–1628) from `{directoryHandle && (isLoadingMonths
             <PhaseOneUpload
 ```
 
-- [ ] **Step 9: Phase-2 read-only save month**
+- [x] **Step 9: Phase-2 read-only save month**
 
 In `PhaseTwoReportAndProcessing.tsx`: delete the `ARABIC_MONTHS` const; in the props type replace `saveMonth: number;` with `monthLabel: string;` and delete `onMonthChange: (month: number) => void;`; update the destructuring accordingly; replace the month-grid block:
 
@@ -1705,7 +1707,7 @@ and delete the `onMonthChange={...}` prop line. In `Population.css` add next to 
 }
 ```
 
-- [ ] **Step 10: Typecheck, fix leftovers, run tests**
+- [x] **Step 10: Typecheck, fix leftovers, run tests**
 
 Run: `npx tsc -b`
 Fix any remaining references to `setSaveMonth`, `setSaveYear`, `existingMonths`, `isLoadingMonths`, `setSelectedMonthClosed` (all must be gone).
@@ -1713,7 +1715,7 @@ Fix any remaining references to `setSaveMonth`, `setSaveYear`, `existingMonths`,
 Run: `npx vitest run src/components/Sidebar/Tabs/Population/Population.wizard.test.tsx && npm run test:run`
 Expected: PASS.
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add "src/components/Sidebar/Tabs/Population" docs/EDIT_LOG.md
@@ -1734,9 +1736,9 @@ git commit -m "refactor(population): wizard driven by the global month selection
 **Interfaces:**
 - Consumes: `useGlobalMonth`, label `gm_all_months` via `useLabels`
 
-- [ ] **Step 1: EDIT_LOG entry** for these files under `## v55`.
+- [x] **Step 1: EDIT_LOG entry** for these files under `## v55`.
 
-- [ ] **Step 2: BrowseDataView — global month + "كل الأشهر" toggle**
+- [x] **Step 2: BrowseDataView — global month + "كل الأشهر" toggle**
 
 Inside `BrowseDataView` replace:
 
@@ -1821,7 +1823,7 @@ with:
 
 Delete the now-unused `formatMonthFolderLabel` and `collectMonthOptions` helper functions (lines ~2070–2078) if nothing else references them.
 
-- [ ] **Step 3: Archive refreshes the provider after close/reopen**
+- [x] **Step 3: Archive refreshes the provider after close/reopen**
 
 In `src/components/Sidebar/Tabs/Archive/index.tsx` add the import (`../../../../data/month/useGlobalMonth`) and inside the component:
 
@@ -1835,12 +1837,12 @@ In `handleMonthLockConfirm`, after the successful close/reopen (where the audit 
       void refreshMonths();
 ```
 
-- [ ] **Step 4: Docs sync**
+- [x] **Step 4: Docs sync**
 
 - `docs/architecture/data-system-report.md`: add a short subsection noting the global month provider (`src/data/month/`), the `xray_global_month_v1` sessionStorage key, and that no disk layout changed.
 - `CLAUDE.md`: in the Architecture section add one line under the data-layer modules table: `| Global month | src/data/month/ | App-wide month selection (provider + toolbar selector); sessionStorage key xray_global_month_v1 |` and update the tab descriptions if they mention per-tab month filters.
 
-- [ ] **Step 5: Full verification**
+- [x] **Step 5: Full verification**
 
 Run: `npm run test:run`
 Expected: all suites PASS.
@@ -1850,7 +1852,7 @@ Run: `npm run build`
 Expected: single-file build succeeds; note the reported `dist/index.html` size.
 Interactive check (dev server via preview tools): switch months in the header on each tab (Reports, Employee Workspace views, Approval, Population process + browse, KPI), create a new month, verify the confirm dialog fires with unsaved uploads, verify browse "كل الأشهر" toggle.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add "src/components/Sidebar/Tabs/Population/index.tsx" "src/components/Sidebar/Tabs/Archive/index.tsx" docs/architecture/data-system-report.md CLAUDE.md docs/EDIT_LOG.md

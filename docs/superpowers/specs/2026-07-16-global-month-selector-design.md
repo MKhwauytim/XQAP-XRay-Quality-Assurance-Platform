@@ -1,7 +1,7 @@
-# Global Month Selector — Design Spec
+# Global Month Selector — Design Spec [DONE — merged to main]
 
 - **Date:** 2026-07-16
-- **Status:** Awaiting user approval
+- **Status:** ✅ DONE — approved, implemented (10 tasks + final-review fixes), whole-branch reviewed ("Ready to merge: Yes"), and merged to `origin/main` @ `69a86b2e` (2026-07-16, worked directly on main per this session's convention — no separate PR). Implementation plan: `docs/superpowers/plans/2026-07-16-global-month-selector.md`. One narrower non-blocking follow-up was identified post-merge (an overlapping-load race in Population's `handleLoadExistingMonth` under a rapid double month-switch) — tracked in `.superpowers/sdd/progress.md`, not yet fixed.
 - **Scope:** Replace every per-tab month-selection control with a single global month selector in the app's top toolbar that drives the entire app.
 
 ## Goal
