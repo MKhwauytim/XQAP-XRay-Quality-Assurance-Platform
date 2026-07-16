@@ -28,11 +28,10 @@ import {
 } from "../../../../../data/distribution/replacement";
 import { isAssignableSampleRole } from "../../../../../data/distribution/bulkAssignment";
 import { loadPopulationConfig, type StageAliasMappings } from "../../../../../data/population/populationConfig";
-import { formatMonthFolderShortLabel } from "../../../../../data/population/monthFolder";
 import {
-  listMonthFolders,
   loadMonthPopulationFinal,
 } from "../../../../../data/population/populationStorage";
+import { useGlobalMonth } from "../../../../../data/month/useGlobalMonth";
 import {
   loadSampleMaster,
 } from "../../../../../data/sampling/sampleStorage";
@@ -252,8 +251,9 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   const baseColumns = useMemo(() => buildXrayColumns(L), [L]);
 
   const [loadState, setLoadState]   = useState<LoadState>("idle");
-  const [months, setMonths]         = useState<Array<{ month: number; year: number; folderName: string }>>([]);
-  const [selMonth, setSelMonth]     = useState("");
+  const { selection: globalMonth } = useGlobalMonth();
+  // Pending months have no folder on disk yet — treat them as "no data" (empty states).
+  const selMonth = globalMonth.kind === "existing" ? globalMonth.folderName : "";
   const [entries, setEntries]       = useState<DistributionEntry[]>([]);
   const [allEntries, setAllEntries] = useState<DistributionEntry[]>([]);
   const [tplIndex, setTplIndex]     = useState<Array<{ templateId: string; templateName: string; version: number }>>([]);
@@ -297,12 +297,6 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   }
 
   useEffect(() => {
-    void listMonthFolders(directoryHandle)
-      .then((ms) => {
-        setMonths(ms);
-        if (ms.length > 0) setSelMonth(ms[ms.length - 1]!.folderName);
-      })
-      .catch(logRejection("xrayReferrals:listMonthFolders"));
     void loadTemplateIndex(directoryHandle)
       .then((idx) => setTplIndex(idx.templates))
       .catch(logRejection("xrayReferrals:loadTemplateIndex"));
@@ -821,9 +815,6 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       >
         <QueueToolbar
           labels={L}
-          months={months}
-          selectedMonth={selMonth}
-          onMonthChange={setSelMonth}
           templates={tplIndex}
           selectedTemplateId={selTplId}
           activeTemplate={activeTpl}
@@ -1015,9 +1006,6 @@ export default function XrayReferrals({ directoryHandle }: Props) {
 
 function QueueToolbar({
   labels,
-  months,
-  selectedMonth,
-  onMonthChange,
   templates,
   selectedTemplateId,
   activeTemplate,
@@ -1026,9 +1014,6 @@ function QueueToolbar({
   onReloadTemplate,
 }: {
   labels: Labels;
-  months: Array<{ month: number; year: number; folderName: string }>;
-  selectedMonth: string;
-  onMonthChange: (month: string) => void;
   templates: Array<{ templateId: string; templateName: string; version: number }>;
   selectedTemplateId: string;
   activeTemplate: TemplateSchema | null;
@@ -1038,20 +1023,6 @@ function QueueToolbar({
 }) {
   return (
     <div className="ew-ref-queue-toolbar">
-      <label className="ew-label" htmlFor="ref-month">
-        {labels.label_month}
-        <select
-          id="ref-month"
-          className="ew-select"
-          value={selectedMonth}
-          onChange={(e) => onMonthChange(e.target.value)}
-        >
-          {months.map((m) => (
-            <option key={m.folderName} value={m.folderName}>{formatMonthFolderShortLabel(m.folderName)}</option>
-          ))}
-        </select>
-      </label>
-
       <label className="ew-label" htmlFor="ref-tpl">
         {labels.label_template}
         <div className="ew-ref-template-control">

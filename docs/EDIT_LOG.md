@@ -482,6 +482,133 @@ Removed the local month-listing state/effect entirely — the Reports tab now de
 ```
 `.rh-month-select` rules removed (dead — no `<select>` remains in this tab; confirmed no other file references the class).
 
+### Follow-up 5: XrayReferrals tab consumes the global month (2026-07-16)
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx`
+
+**Before:**
+```tsx
+import { formatMonthFolderShortLabel } from "../../../../../data/population/monthFolder";
+import {
+  listMonthFolders,
+  loadMonthPopulationFinal,
+} from "../../../../../data/population/populationStorage";
+```
+```tsx
+  const [loadState, setLoadState]   = useState<LoadState>("idle");
+  const [months, setMonths]         = useState<Array<{ month: number; year: number; folderName: string }>>([]);
+  const [selMonth, setSelMonth]     = useState("");
+```
+```tsx
+  useEffect(() => {
+    void listMonthFolders(directoryHandle)
+      .then((ms) => {
+        setMonths(ms);
+        if (ms.length > 0) setSelMonth(ms[ms.length - 1]!.folderName);
+      })
+      .catch(logRejection("xrayReferrals:listMonthFolders"));
+    void loadTemplateIndex(directoryHandle)
+```
+```tsx
+        <QueueToolbar
+          labels={L}
+          months={months}
+          selectedMonth={selMonth}
+          onMonthChange={setSelMonth}
+          templates={tplIndex}
+```
+```tsx
+function QueueToolbar({
+  labels,
+  months,
+  selectedMonth,
+  onMonthChange,
+  templates,
+  selectedTemplateId,
+  activeTemplate,
+  canSetTemplate,
+  onTemplateChange,
+  onReloadTemplate,
+}: {
+  labels: Labels;
+  months: Array<{ month: number; year: number; folderName: string }>;
+  selectedMonth: string;
+  onMonthChange: (month: string) => void;
+  templates: Array<{ templateId: string; templateName: string; version: number }>;
+  selectedTemplateId: string;
+  activeTemplate: TemplateSchema | null;
+  canSetTemplate: boolean;
+  onTemplateChange: (id: string) => void;
+  onReloadTemplate: () => void;
+}) {
+  return (
+    <div className="ew-ref-queue-toolbar">
+      <label className="ew-label" htmlFor="ref-month">
+        {labels.label_month}
+        <select
+          id="ref-month"
+          className="ew-select"
+          value={selectedMonth}
+          onChange={(e) => onMonthChange(e.target.value)}
+        >
+          {months.map((m) => (
+            <option key={m.folderName} value={m.folderName}>{formatMonthFolderShortLabel(m.folderName)}</option>
+          ))}
+        </select>
+      </label>
+
+      <label className="ew-label" htmlFor="ref-tpl">
+```
+
+**After:**
+```tsx
+import {
+  loadMonthPopulationFinal,
+} from "../../../../../data/population/populationStorage";
+```
+```tsx
+import { useGlobalMonth } from "../../../../../data/month/useGlobalMonth";
+```
+```tsx
+  const [loadState, setLoadState]   = useState<LoadState>("idle");
+  const { selection: globalMonth } = useGlobalMonth();
+  // Pending months have no folder on disk yet — treat them as "no data" (empty states).
+  const selMonth = globalMonth.kind === "existing" ? globalMonth.folderName : "";
+```
+```tsx
+  useEffect(() => {
+    void loadTemplateIndex(directoryHandle)
+```
+```tsx
+        <QueueToolbar
+          labels={L}
+          templates={tplIndex}
+```
+```tsx
+function QueueToolbar({
+  labels,
+  templates,
+  selectedTemplateId,
+  activeTemplate,
+  canSetTemplate,
+  onTemplateChange,
+  onReloadTemplate,
+}: {
+  labels: Labels;
+  templates: Array<{ templateId: string; templateName: string; version: number }>;
+  selectedTemplateId: string;
+  activeTemplate: TemplateSchema | null;
+  canSetTemplate: boolean;
+  onTemplateChange: (id: string) => void;
+  onReloadTemplate: () => void;
+}) {
+  return (
+    <div className="ew-ref-queue-toolbar">
+      <label className="ew-label" htmlFor="ref-tpl">
+```
+
+`formatMonthFolderShortLabel` import removed entirely — confirmed no other reference in the file after this edit. `listMonthFolders` removed from the `populationStorage` import; `loadMonthPopulationFinal` kept (still used by `openReplacementDialog`). The month-listing effect and local `months`/`selMonth` state are gone — `selMonth` is now derived from the app-wide `useGlobalMonth()` selection, same convention as the Reports tab (Follow-up 4).
+
 ## v54.1 — 2026-07-14 — Report terminology: حالة → صورة for x-ray records
 
 Owner request ("any reference for حالة become صورة"). Reviewed, phrase-mapped rename across the reporting layer — NOT a blind replace: حالة-as-"status" survives untouched (column headers الحالة, حالة التوزيع, حالة الإجابة, حالة BI, workflow labels), and the port name منفذ حالة عمار is data. 64 case-sense occurrences renamed across deck2, deck v1, the executive document parts (scope/risk/corroboration/narrative), executiveReportData findings, and the two KPI-dashboard labels (`rk_pchart_empty`, `rk_tooltip_cases`). Examples:
