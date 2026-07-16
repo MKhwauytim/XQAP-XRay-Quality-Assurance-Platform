@@ -896,6 +896,33 @@ The brief's suggested mock month (`5-may-2026`) didn't match this file's fixture
 
 **Verification:** `npx vitest run "src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval"`, `npx tsc -b`, `npx eslint` on the three touched files, full `npm run test:run`.
 
+**Review fix (same day): load-token guard bypassed on truthy→"" selMonth transition.** `loadData`'s `if (!selMonth) return;` early return ran BEFORE `++loadTokenRef.current`, so when the global selection moved from an existing month (load in flight) to pending/none, the in-flight load's token still matched and it committed stale referrals/replacements/reopens/sampleDetails + `setLoadState("ready")` over the empty-ready state the sync effect had just set. Fix: bump the token first, so ANY invocation of `loadData` — including the no-month early return — invalidates in-flight loads.
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/useApprovalData.ts`
+
+**Before:**
+```ts
+  const loadData = useCallback(async () => {
+    if (!selMonth) return;
+    const token = ++loadTokenRef.current;
+    setLoadState("loading");
+```
+
+**After:**
+```ts
+  const loadData = useCallback(async () => {
+    // Invalidate any in-flight load first — even the no-month early return must
+    // stale older loads, or a truthy→"" selMonth transition would let an in-flight
+    // load commit stale rows over the empty-ready state.
+    const token = ++loadTokenRef.current;
+    if (!selMonth) return;
+    setLoadState("loading");
+```
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/useApprovalData.test.tsx`
+
+Regression test added: the static `vi.mock` selection became a mutable `vi.hoisted` state object (`globalMonthMock.state.selection`, reset to the april default in `afterEach`) that the mock factory reads at hook-call time. The new test (`discards an in-flight load when the selection flips to a pending month mid-flight`) seeds an april referral, mounts the hook (load starts), synchronously flips the selection to `{ kind: "pending", … "6-june-2026" }` and `rerender()`s before any promise resolves, then flushes timers inside `act` and asserts `loadState === "ready"` with `referrals` empty — without the fix the stale april load commits 1 referral and the test fails. `act` re-imported from `@testing-library/react` for the flush.
+
 ## v54.1 — 2026-07-14 — Report terminology: حالة → صورة for x-ray records
 
 Owner request ("any reference for حالة become صورة"). Reviewed, phrase-mapped rename across the reporting layer — NOT a blind replace: حالة-as-"status" survives untouched (column headers الحالة, حالة التوزيع, حالة الإجابة, حالة BI, workflow labels), and the port name منفذ حالة عمار is data. 64 case-sense occurrences renamed across deck2, deck v1, the executive document parts (scope/risk/corroboration/narrative), executiveReportData findings, and the two KPI-dashboard labels (`rk_pchart_empty`, `rk_tooltip_cases`). Examples:

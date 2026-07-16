@@ -100,8 +100,11 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
   }, [selMonth]);
 
   const loadData = useCallback(async () => {
-    if (!selMonth) return;
+    // Invalidate any in-flight load first — even the no-month early return must
+    // stale older loads, or a truthy→"" selMonth transition would let an in-flight
+    // load commit stale rows over the empty-ready state.
     const token = ++loadTokenRef.current;
+    if (!selMonth) return;
     setLoadState("loading");
     try {
       const [refLog, repLog, reoLog] = await Promise.all([
