@@ -923,6 +923,124 @@ The brief's suggested mock month (`5-may-2026`) didn't match this file's fixture
 
 Regression test added: the static `vi.mock` selection became a mutable `vi.hoisted` state object (`globalMonthMock.state.selection`, reset to the april default in `afterEach`) that the mock factory reads at hook-call time. The new test (`discards an in-flight load when the selection flips to a pending month mid-flight`) seeds an april referral, mounts the hook (load starts), synchronously flips the selection to `{ kind: "pending", … "6-june-2026" }` and `rerender()`s before any promise resolves, then flushes timers inside `act` and asserts `loadState === "ready"` with `referrals` empty — without the fix the stale april load commits 1 referral and the test fails. `act` re-imported from `@testing-library/react` for the flush.
 
+### Follow-up 8: KpiRenderer consumes the global month (2026-07-16)
+
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/renderers/KpiRenderer.tsx`
+
+**Before:**
+```tsx
+import { useEffect, useState } from "react";
+import type { CSSProperties } from "react";
+import type { Element, KpiConfig } from "../../../../../data/reportDesigner/reportTypes";
+import { useWorkspace } from "../../../../../data/workspace/useWorkspace";
+import { listMonthFolders, loadMonthPopulationFinal } from "../../../../../data/population/populationStorage";
+...
+/**
+ * Loads the latest month and builds the executive report rows the same way the
+ * Power BI export does (`buildExecutiveReportRows`). The KPI field catalog mirrors
+ * `ExecutiveReportRow`, so feeding raw `population.final.json` rows made most
+ * fields silently compute 0 — this hook feeds the real, enriched rows instead.
+ */
+function useExecutiveRows(): Array<Record<string, unknown>> | null {
+  const { directoryHandle } = useWorkspace();
+  const [rows, setRows] = useState<Array<Record<string, unknown>> | null>(null);
+
+  useEffect(() => {
+    if (!directoryHandle) return;
+    const root = directoryHandle;
+    let cancelled = false;
+    async function load() {
+      const months = await listMonthFolders(root);
+      if (months.length === 0 || cancelled) return;
+      const month = months[months.length - 1].folderName;
+
+      const populationData = await loadMonthPopulationFinal(root, month);
+      const sample = await loadSampleMaster(root, month);
+      const sampleRows = sample?.rows ?? [];
+      const distribution = await loadOrDeriveDistributionCurrent(root, month, sampleRows);
+      const employeeFiles = await loadAllEmployeeFiles(root, month);
+      if (cancelled) return;
+
+      const execRows = buildExecutiveReportRows({
+        monthFolderName: month,
+        populationRows: (populationData?.rows ?? []) as PreparedPopulationRow[],
+        sample: sample ?? null,
+        distribution: distribution ?? null,
+        employeeFiles,
+        template: null,
+        config: DEFAULT_EXEC_CONFIG,
+      });
+
+      if (!cancelled) {
+        setRows(execRows.map((r) => r as Record<string, unknown>));
+      }
+    }
+    void load();
+    return () => { cancelled = true; };
+  }, [directoryHandle]);
+
+  return rows;
+}
+```
+
+**After:**
+```tsx
+import { useEffect, useState } from "react";
+import type { CSSProperties } from "react";
+import type { Element, KpiConfig } from "../../../../../data/reportDesigner/reportTypes";
+import { useWorkspace } from "../../../../../data/workspace/useWorkspace";
+import { loadMonthPopulationFinal } from "../../../../../data/population/populationStorage";
+import { useGlobalMonth } from "../../../../../data/month/useGlobalMonth";
+...
+/**
+ * Loads the globally selected month and builds the executive report rows the same way the
+ * Power BI export does (`buildExecutiveReportRows`). The KPI field catalog mirrors
+ * `ExecutiveReportRow`, so feeding raw `population.final.json` rows made most
+ * fields silently compute 0 — this hook feeds the real, enriched rows instead.
+ */
+function useExecutiveRows(): Array<Record<string, unknown>> | null {
+  const { directoryHandle } = useWorkspace();
+  const { selection } = useGlobalMonth();
+  const monthFolder = selection.kind === "existing" ? selection.folderName : null;
+  const [rows, setRows] = useState<Array<Record<string, unknown>> | null>(null);
+
+  useEffect(() => {
+    if (!directoryHandle || !monthFolder) return;
+    const root = directoryHandle;
+    const month = monthFolder;
+    let cancelled = false;
+    async function load() {
+      const populationData = await loadMonthPopulationFinal(root, month);
+      const sample = await loadSampleMaster(root, month);
+      const sampleRows = sample?.rows ?? [];
+      const distribution = await loadOrDeriveDistributionCurrent(root, month, sampleRows);
+      const employeeFiles = await loadAllEmployeeFiles(root, month);
+      if (cancelled) return;
+
+      const execRows = buildExecutiveReportRows({
+        monthFolderName: month,
+        populationRows: (populationData?.rows ?? []) as PreparedPopulationRow[],
+        sample: sample ?? null,
+        distribution: distribution ?? null,
+        employeeFiles,
+        template: null,
+        config: DEFAULT_EXEC_CONFIG,
+      });
+
+      if (!cancelled) {
+        setRows(execRows.map((r) => r as Record<string, unknown>));
+      }
+    }
+    void load();
+    return () => { cancelled = true; };
+  }, [directoryHandle, monthFolder]);
+
+  return rows;
+}
+```
+
+Removed the auto-latest logic: `listMonthFolders` no longer called, removed from imports. Now consumes `useGlobalMonth()` and uses the globally selected month (or sets `monthFolder` to `null` if selection is pending/none, triggering the early return). Dependency array updated to include `monthFolder` instead of just `directoryHandle`.
+
 ## v54.1 — 2026-07-14 — Report terminology: حالة → صورة for x-ray records
 
 Owner request ("any reference for حالة become صورة"). Reviewed, phrase-mapped rename across the reporting layer — NOT a blind replace: حالة-as-"status" survives untouched (column headers الحالة, حالة التوزيع, حالة الإجابة, حالة BI, workflow labels), and the port name منفذ حالة عمار is data. 64 case-sense occurrences renamed across deck2, deck v1, the executive document parts (scope/risk/corroboration/narrative), executiveReportData findings, and the two KPI-dashboard labels (`rk_pchart_empty`, `rk_tooltip_cases`). Examples:

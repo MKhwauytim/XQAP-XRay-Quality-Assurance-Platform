@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 import type { Element, KpiConfig } from "../../../../../data/reportDesigner/reportTypes";
 import { useWorkspace } from "../../../../../data/workspace/useWorkspace";
-import { listMonthFolders, loadMonthPopulationFinal } from "../../../../../data/population/populationStorage";
+import { loadMonthPopulationFinal } from "../../../../../data/population/populationStorage";
 import { loadSampleMaster } from "../../../../../data/sampling/sampleStorage";
 import { loadOrDeriveDistributionCurrent } from "../../../../../data/distribution/distributionStorage";
 import { loadAllEmployeeFiles } from "../../../../../data/answers/answerStorage";
@@ -10,6 +10,7 @@ import { buildExecutiveReportRows } from "../../../../../data/reporting/executiv
 import { DEFAULT_EXEC_CONFIG } from "../../../../../data/reporting/executiveReportTypes";
 import type { PreparedPopulationRow } from "../../../../../data/population/populationTypes";
 import { aggregate } from "../../../../../data/reportDesigner/query/aggregations";
+import { useGlobalMonth } from "../../../../../data/month/useGlobalMonth";
 
 const AGG_LABELS: Record<string, string> = {
   count: "عدد",
@@ -66,24 +67,23 @@ function computeResult(rows: Array<Record<string, unknown>>, config: KpiConfig):
 }
 
 /**
- * Loads the latest month and builds the executive report rows the same way the
+ * Loads the globally selected month and builds the executive report rows the same way the
  * Power BI export does (`buildExecutiveReportRows`). The KPI field catalog mirrors
  * `ExecutiveReportRow`, so feeding raw `population.final.json` rows made most
  * fields silently compute 0 — this hook feeds the real, enriched rows instead.
  */
 function useExecutiveRows(): Array<Record<string, unknown>> | null {
   const { directoryHandle } = useWorkspace();
+  const { selection } = useGlobalMonth();
+  const monthFolder = selection.kind === "existing" ? selection.folderName : null;
   const [rows, setRows] = useState<Array<Record<string, unknown>> | null>(null);
 
   useEffect(() => {
-    if (!directoryHandle) return;
+    if (!directoryHandle || !monthFolder) return;
     const root = directoryHandle;
+    const month = monthFolder;
     let cancelled = false;
     async function load() {
-      const months = await listMonthFolders(root);
-      if (months.length === 0 || cancelled) return;
-      const month = months[months.length - 1].folderName;
-
       const populationData = await loadMonthPopulationFinal(root, month);
       const sample = await loadSampleMaster(root, month);
       const sampleRows = sample?.rows ?? [];
@@ -107,7 +107,7 @@ function useExecutiveRows(): Array<Record<string, unknown>> | null {
     }
     void load();
     return () => { cancelled = true; };
-  }, [directoryHandle]);
+  }, [directoryHandle, monthFolder]);
 
   return rows;
 }
