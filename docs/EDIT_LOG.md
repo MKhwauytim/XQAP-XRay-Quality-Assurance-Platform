@@ -34,7 +34,7 @@ untouched — see file.
 **File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx` and new sibling `XrayReferrals/subComponents.tsx`
 
 **Before:** 1545-line single file containing the main `XrayReferrals` component plus 8 already
-prop-driven, already-decoupled sub-components and 5 pure helper functions, all at module scope.
+prop-driven, already-decoupled sub-components and 7 pure helper functions, all at module scope.
 
 **After:** the 8 sub-components (`QueueToolbar`, `SelectionActionBar`, `SampleDetailPanel`,
 `ReferralRequestModal`, `ReferralSamplePreview`, `StatusBadge`, `ReferralStatsStrip`,
