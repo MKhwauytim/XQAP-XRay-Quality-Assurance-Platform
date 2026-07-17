@@ -83,6 +83,18 @@ No product-scope items touched.
     }
 ```
 
+**File:** `src/data/reporting/reportBuilders.xss.test.ts`
+
+**Before:** management deck only (`buildManagementDeck`) covered by the XSS test set.
+
+**After:** adds a `buildManagementReport` case using the same `maliciousExecInput()` fixture, closing the gap between the file's claimed coverage and its actual coverage.
+
+**File:** `src/data/reporting/management/managementReport.ts`
+
+**Before:** header comment claims membership in "the D2 XSS test set" without it being true.
+
+**After:** comment corrected to reflect actual test coverage (now true, per the test added above).
+
 ## v55.1 — 2026-07-16 — Desktop app-mode shortcut
 
 Spec: docs/superpowers/specs/2026-07-16-desktop-shortcut-design.md. Adds a
