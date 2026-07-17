@@ -64,6 +64,25 @@ No product-scope items touched.
 
 **After:** adds a `loadMonthTokenRef` (mirroring the load-token pattern already used in `useApprovalData.ts`/`XrayInspectionResults.tsx`/`XrayReferrals.tsx`) so a rapid double-switch of the header month can never let a superseded load's data commit over a newer selection's, or let a superseded load's rejection wipe a newer load's already-successful data — see file.
 
+**Follow-up (same day):** the `loadMonthTokenRef` bump above only covered the `existing` branch of the auto-load effect. The sibling `else` branch (selecting a pending/new month, which calls `resetForNewMonth()`) did not bump the token, so a slow in-flight `existing`-month load could still resolve afterward with a matching (stale) token and commit its data over the clean new-month import screen — same clobber class, existing→pending instead of existing→existing.
+
+**File:** `src/components/Sidebar/Tabs/Population/index.tsx`
+
+**Before:**
+```tsx
+    } else {
+      resetForNewMonth();
+    }
+```
+
+**After:**
+```tsx
+    } else {
+      ++loadMonthTokenRef.current;
+      resetForNewMonth();
+    }
+```
+
 ## v55.1 — 2026-07-16 — Desktop app-mode shortcut
 
 Spec: docs/superpowers/specs/2026-07-16-desktop-shortcut-design.md. Adds a

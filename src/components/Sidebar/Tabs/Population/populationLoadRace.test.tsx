@@ -29,6 +29,13 @@
 // its promise directly (so its post-await continuation, buggy or fixed, has
 // definitely run before we assert) -> assert May's 2-row state is still what
 // is displayed, never April's stale 1-row state.
+//
+// A second test covers the same clobber class for the OTHER branch of the
+// auto-load effect: existing month -> PENDING (new) month. That branch calls
+// resetForNewMonth() synchronously (no promise involved) instead of starting
+// a new load, so the same "flip to a fresher selection, then release the
+// stale gate" sequence is used, but the assertion target is the population
+// chip's clean "—" (idle) state rather than a second month's row count.
 
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, cleanup, act } from "@testing-library/react";
@@ -51,14 +58,17 @@ vi.mock("../../../../auth/usePermissions", () => ({
 
 const APRIL_FOLDER = "4-april-2026";
 const MAY_FOLDER = "5-may-2026";
+const JUNE_PENDING_FOLDER = "6-june-2026";
 
-type MockSelection = { kind: "existing"; month: number; year: number; folderName: string };
+type MockSelection =
+  | { kind: "existing"; month: number; year: number; folderName: string }
+  | { kind: "pending"; month: number; year: number; folderName: string };
 
 // Mutable selection the mocked hook reads — flipped mid-test to simulate a
 // rapid double month-switch (established pattern: see
 // useApprovalData.test.tsx's globalMonthMock).
 const monthMock = vi.hoisted(() => {
-  const state: { selection: { kind: "existing"; month: number; year: number; folderName: string } } = {
+  const state: { selection: MockSelection } = {
     selection: { kind: "existing", month: 4, year: 2026, folderName: "4-april-2026" },
   };
   return { state };
@@ -91,15 +101,24 @@ vi.mock("../../../../data/workspace/useWorkspace", () => ({
 }));
 
 // The controlled gate + per-folder promise capture that forces the race.
+// The gate is resettable (`resetGate`) so each test gets its own fresh,
+// unresolved block on the April folder's load — needed because a promise,
+// once resolved, stays resolved, and multiple tests in this file each block
+// on "4-april-2026".
 const raceMock = vi.hoisted(() => {
   let resolveAprilGate: (() => void) | null = null;
-  const aprilGatePromise = new Promise<void>((resolve) => {
-    resolveAprilGate = resolve;
-  });
+  let aprilGatePromise: Promise<void> = Promise.resolve();
   const loadPromises: Record<string, Promise<unknown>> = {};
+  function resetGate(): void {
+    aprilGatePromise = new Promise<void>((resolve) => {
+      resolveAprilGate = resolve;
+    });
+  }
+  resetGate();
   return {
-    aprilGatePromise,
+    getAprilGatePromise: () => aprilGatePromise,
     resolveAprilGate: () => resolveAprilGate?.(),
+    resetGate,
     loadPromises,
   };
 });
@@ -111,7 +130,7 @@ vi.mock("../../../../data/population/populationStorage", async (importOriginal) 
     loadMonthForEditing: (dir: DirectoryHandleLike, folderName: string) => {
       const run = (async () => {
         if (folderName === APRIL_FOLDER) {
-          await raceMock.aprilGatePromise;
+          await raceMock.getAprilGatePromise();
         }
         return actual.loadMonthForEditing(dir, folderName);
       })();
@@ -135,10 +154,16 @@ afterEach(() => {
   vi.unstubAllGlobals();
   monthMock.state.selection = { kind: "existing", month: 4, year: 2026, folderName: APRIL_FOLDER };
   workspaceMock.state.directoryHandle = null;
+  raceMock.loadPromises[APRIL_FOLDER] = Promise.resolve();
+  raceMock.resetGate();
 });
 
 function selectExisting(month: number, year: number, folderName: string): MockSelection {
   return { kind: "existing", month, year, folderName };
+}
+
+function selectPending(month: number, year: number, folderName: string): MockSelection {
+  return { kind: "pending", month, year, folderName };
 }
 
 function populationChipText(): string | null {
@@ -151,6 +176,7 @@ function populationChipText(): string | null {
 describe("Population — overlapping month-load race (I-2)", () => {
   it("a superseded (April) load's data never overwrites a newer (May) load that already committed", async () => {
     vi.stubGlobal("ResizeObserver", ResizeObserverStub);
+    raceMock.resetGate();
 
     const dir = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
     workspaceMock.state.directoryHandle = dir;
@@ -213,6 +239,58 @@ describe("Population — overlapping month-load race (I-2)", () => {
     // May's data must STILL be what's displayed — April's superseded load
     // must not have clobbered it with its stale 1-row state.
     expect(populationChipText()).toContain("2 صف");
+    expect(populationChipText()).not.toContain("1 صف");
+  });
+
+  it("a superseded (April) load's data never overwrites a newer pending (new-month) reset", async () => {
+    vi.stubGlobal("ResizeObserver", ResizeObserverStub);
+    raceMock.resetGate();
+
+    const dir = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    workspaceMock.state.directoryHandle = dir;
+
+    // Seed April with real, saved data so its load has something concrete to
+    // (attempt to) commit late.
+    await saveMonthRun({
+      directoryHandle: dir,
+      month: 4,
+      year: 2026,
+      username: "tester",
+      riskFileName: null,
+      biFileName: null,
+      certScanUsed: false,
+      riskRawRows: [],
+      biRawRows: [],
+      processedRows: [{ xrayImageId: "APR-1" }],
+      certScanRows: 0,
+      nonCertScanRows: 1,
+    });
+
+    // Mount on April — the auto-load effect starts April's load, which blocks
+    // on the gate inside the mocked loadMonthForEditing.
+    monthMock.state.selection = selectExisting(4, 2026, APRIL_FOLDER);
+    const { rerender } = render(<PopulationTab />);
+
+    // Flip to a PENDING (new, unsaved) month before April's load resolves —
+    // the else-branch of the auto-load effect runs synchronously
+    // (resetForNewMonth, no promise to await), so no act(async) is needed here.
+    monthMock.state.selection = selectPending(6, 2026, JUNE_PENDING_FOLDER);
+    rerender(<PopulationTab />);
+
+    // The clean reset must already be in effect — no population data at all.
+    expect(populationChipText()).toContain("—");
+
+    // Release the stale April load and await its promise directly, so its
+    // post-await continuation (buggy overwrite, or fixed no-op) has
+    // definitely run by the time we assert — no reliance on poll timing.
+    await act(async () => {
+      raceMock.resolveAprilGate();
+      await raceMock.loadPromises[APRIL_FOLDER];
+    });
+
+    // The clean new-month state must STILL be what's displayed — April's
+    // superseded load must not have clobbered it with its stale 1-row state.
+    expect(populationChipText()).toContain("—");
     expect(populationChipText()).not.toContain("1 صف");
   });
 });

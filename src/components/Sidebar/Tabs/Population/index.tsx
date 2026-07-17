@@ -437,6 +437,9 @@ export default function PopulationTab() {
         if (loadedFolderRef.current === targetFolder) loadedFolderRef.current = null;
       });
     } else {
+      // Invalidate any in-flight existing-month load so it can never resolve
+      // later and commit its stale data over this clean new-month reset.
+      ++loadMonthTokenRef.current;
       resetForNewMonth();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- handleLoadExistingMonth/resetForNewMonth are stable per render cycle; keying on folderName prevents load loops
