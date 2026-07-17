@@ -369,10 +369,17 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: Editor
               return;
             }
 
-            // Field drag (from الحقول panel)
+            // Field drag (from الحقول panel). The payload normally comes from
+            // this app's own drag source, but a malformed/external drop must
+            // not throw uncaught into the drop handler.
             const raw = e.dataTransfer.getData("application/x-rd-field");
             if (!raw) return;
-            const { field, label, role } = JSON.parse(raw) as { field: string; label: string; role: FieldRole };
+            let field: string, label: string, role: FieldRole;
+            try {
+              ({ field, label, role } = JSON.parse(raw) as { field: string; label: string; role: FieldRole });
+            } catch {
+              return;
+            }
             const { cx, cy } = getDropCoords();
 
             // If dropping a dimension onto an existing KPI → set as groupBy breakdown

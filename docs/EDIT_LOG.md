@@ -157,6 +157,17 @@ No product-scope items touched.
 
 **After:** write-completes-without-throwing + correct-filename test, locating the written file via the same `getSampleEmployeeDir` helper the production code uses (`2-samples/{month}/2-employees/`). Note: `createMemoryDirectory()`'s file mock only faithfully round-trips string content, not binary `ArrayBuffer` writes — see the test file's own comment for the resulting scope limitation.
 
+**File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
+
+**Before:**
+```tsx
+            const raw = e.dataTransfer.getData("application/x-rd-field");
+            if (!raw) return;
+            const { field, label, role } = JSON.parse(raw) as { field: string; label: string; role: FieldRole };
+```
+
+**After:** wraps the `JSON.parse` in try/catch; a malformed payload (e.g. a drop from an external source) now no-ops instead of throwing uncaught into the drop handler.
+
 ## v55.1 — 2026-07-16 — Desktop app-mode shortcut
 
 Spec: docs/superpowers/specs/2026-07-16-desktop-shortcut-design.md. Adds a
