@@ -1,4 +1,6 @@
-# Batch 4 Safe Items Implementation Plan
+# Batch 4 Safe Items Implementation Plan [DONE — merged to main]
+
+> **STATUS: ✅ DONE.** All 4 tasks implemented and reviewed. The final whole-branch review caught a genuine Important finding: `user-management/actions` had been deliberately left out of `MANAGED_TABS`/`createDefaultPermissions()` per a plan rationale that turned out to be factually wrong (registering a tab and granting new access are different operations — admin's permission bypass plus the existing role-ceiling lock make registration behaviorally inert). Fixed and re-verified twice. Merged to main via [PR #23](https://github.com/MKhwauytim/XQAP-XRay-Quality-Assurance-Platform/pull/23) on 2026-07-17. Full task-by-task evidence trail: `.superpowers/sdd/progress.md`.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -30,7 +32,7 @@
 - Consumes: nothing new.
 - Produces: no signature change to `normalizeDate(value: string | null): string | null` — behavior-only addition.
 
-- [ ] **Step 1: EDIT_LOG entry**
+- [x] **Step 1: EDIT_LOG entry**
 
 Check the current top entry in `docs/EDIT_LOG.md` first, then insert at the top:
 
@@ -63,7 +65,7 @@ fires when day-first is syntactically impossible (second component 13-31) and mo
 untouched — see file.
 ```
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 First re-read the current `normalizeDate` function in the real file to confirm the exact current code (line numbers/whitespace may have drifted). Then add to `populationProcessor.test.ts`:
 
@@ -113,12 +115,12 @@ describe("normalizeDate", () => {
 });
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 Run: `npx vitest run src/components/Sidebar/Tabs/Population/processing/populationProcessor.test.ts`
 Expected: the day-first/unambiguous/raw-fallback cases PASS already (existing behavior); the two "rescues" cases (`"12/25/2025"`, `"06/15/2025"`, `"01/31/2025"`) FAIL, currently returning the raw input string instead of an ISO date.
 
-- [ ] **Step 4: Apply the fix**
+- [x] **Step 4: Apply the fix**
 
 In `normalizeDate`, immediately after the existing day-first `if` block (inside the same `if (numMatch) { ... }` block, after its closing `}` but still within the outer `if (numMatch)`), add:
 
@@ -156,12 +158,12 @@ The full numeric branch should now read:
   }
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 Run: `npx vitest run src/components/Sidebar/Tabs/Population/processing/populationProcessor.test.ts`
 Expected: all cases pass, including the full existing test suite in this file (the `processPopulation` tests) unaffected.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/components/Sidebar/Tabs/Population/processing/populationProcessor.ts src/components/Sidebar/Tabs/Population/processing/populationProcessor.test.ts docs/EDIT_LOG.md
@@ -182,7 +184,7 @@ git commit -m "fix(population): rescue unambiguous month>12 dates that today fal
 
 **This is a verbatim code MOVE, not a rewrite.** Do not retype the function bodies from memory — cut them from the real file and paste them into the new file, exactly as they are, using your editor tools directly on the real files. The methodology below tells you WHAT to move and HOW to verify safety; the actual code content is whatever is currently in the file (read it yourself before moving anything).
 
-- [ ] **Step 1: EDIT_LOG entry**
+- [x] **Step 1: EDIT_LOG entry**
 
 Append under the `## v56` heading:
 
@@ -197,7 +199,7 @@ prop-driven, already-decoupled sub-components and 5 pure helper functions, all a
 verified by the existing test suite passing unchanged. ~500-line reduction in the main file.
 ```
 
-- [ ] **Step 2: Verify the extraction candidates are genuinely safe (read the real file first)**
+- [x] **Step 2: Verify the extraction candidates are genuinely safe (read the real file first)**
 
 Read the current `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx` in full for the candidate ranges below (line numbers as of this plan's writing — confirm they still match, the file may have shifted):
 
@@ -211,7 +213,7 @@ For EACH candidate, confirm before moving it:
 
 If ANY candidate fails check 2, stop including it in the move and note it in your report — do not force an unsafe extraction to hit a line-count target.
 
-- [ ] **Step 3: Create the sibling file and move the verified-safe candidates**
+- [x] **Step 3: Create the sibling file and move the verified-safe candidates**
 
 Create `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals/subComponents.tsx`. Note the new file lives in a `XrayReferrals/` subdirectory sibling to the original `XrayReferrals.tsx` — this means:
 - All relative import paths inside the moved code need ONE additional `../` prepended (since the new file is one directory level deeper than the original).
@@ -219,7 +221,7 @@ Create `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals/subCom
 
 Move each verified-safe function (Step 2) into the new file, preserving its exact body. Add `export` to each (they were file-private before; the main file now needs to import them). Add whatever type imports (`DistributionEntry`, `ItemAnswer`, `Labels`, `DataTableCol`, etc.) each moved piece needs — copy the exact import lines from the original file's top-of-file imports (adjusting relative paths per the note above), including only what the moved code actually uses (don't blanket-copy the entire original import list if a given piece doesn't need it — but it's fine to share one clean import block across the whole new file for whatever the union of all moved pieces needs).
 
-- [ ] **Step 4: Update `XrayReferrals.tsx` to import the moved pieces**
+- [x] **Step 4: Update `XrayReferrals.tsx` to import the moved pieces**
 
 Remove the moved function bodies from `XrayReferrals.tsx`. Add an import at the top pulling in whatever moved names the main component still references:
 
@@ -243,7 +245,7 @@ import {
 
 (Adjust this list to match whatever Step 2/3 actually verified and moved — if `buildDefaultColConfig`/`loadLocalColConfig` were included, add them too; if they were excluded, don't.)
 
-- [ ] **Step 5: Verify with the real gates — this is the actual proof of correctness for a move**
+- [x] **Step 5: Verify with the real gates — this is the actual proof of correctness for a move**
 
 Run: `npx tsc -b`
 Expected: clean. Any prop-shape mismatch, missing export, or wrong import path shows up here immediately.
@@ -254,7 +256,7 @@ Expected: identical pass/fail results to before the move — this is the real be
 Run: `npx eslint src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals/subComponents.tsx`
 Expected: clean.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals/subComponents.tsx docs/EDIT_LOG.md
@@ -275,7 +277,7 @@ git commit -m "refactor(ew): extract already-decoupled XrayReferrals sub-compone
 
 **Decision already made (per spec):** admin-only (the existing UserManagementTab's access level — no permission-matrix changes needed since sub-tabs inside an already-admin-only top-level tab don't need separate `MANAGED_TABS`/`createDefaultPermissions` entries).
 
-- [ ] **Step 1: EDIT_LOG entry**
+- [x] **Step 1: EDIT_LOG entry**
 
 Append under `## v56`:
 
@@ -297,7 +299,7 @@ matching the tab's existing access level — see file.
 **After:** adds `um_actions_tab_label` and 16 `um_action_type_*` keys — see file.
 ```
 
-- [ ] **Step 2: Add label keys**
+- [x] **Step 2: Add label keys**
 
 In `src/data/labels/labelsStore.ts`, read the file's current structure near other `um_*` keys (Settings/UserManagement section) and add, in the same style:
 
@@ -337,7 +339,7 @@ In `src/data/labels/labelsStore.ts`, read the file's current structure near othe
 
 Also register these in `src/components/Sidebar/Tabs/Settings/index.tsx`'s label-editor list, matching the pattern for the other `um_*`/label entries in that file (find the existing registration block and add these alongside it, one `{ key: "...", desc: "..." }` per new key).
 
-- [ ] **Step 3: Wire the new sub-tab**
+- [x] **Step 3: Wire the new sub-tab**
 
 In `src/components/Sidebar/Tabs/UserManagement/index.tsx`:
 
@@ -374,7 +376,7 @@ import {
 } from "../../../../data/audit/actionLog";
 ```
 
-- [ ] **Step 4: Add the loading state and effect**
+- [x] **Step 4: Add the loading state and effect**
 
 Near the existing `activityEntries`/`isActivityLoading` state (line ~141-142), add:
 
@@ -402,7 +404,7 @@ Near the existing activity-loading effect (line ~185-195), add a sibling effect 
   }, [section, directoryHandle]);
 ```
 
-- [ ] **Step 5: Add the display-label map and `renderActions()`**
+- [x] **Step 5: Add the display-label map and `renderActions()`**
 
 Near the top of the file (module scope, alongside other constant maps like `PERMISSION_LABELS`), add:
 
@@ -506,7 +508,7 @@ Add `renderActions()` near the existing `renderActivity()` function, mirroring i
 
 Check that `formatDateTime` is already available in this file's scope (it's used by `renderActivity()`) — if it's a local helper, reuse it; if imported, no change needed. Check that `L` (the labels object) is the correct in-scope variable name for this component by looking at how `renderActivity()` or other render functions reference label values — if this component uses `useLabels()` under a different variable name, or reads labels a different way (e.g. `getLabels()` calls inline), match the file's ACTUAL convention rather than assuming `L`.
 
-- [ ] **Step 6: Wire the render**
+- [x] **Step 6: Wire the render**
 
 Near the existing `{section === "activity" && renderActivity()}` line (~1221), add:
 
@@ -514,7 +516,7 @@ Near the existing `{section === "activity" && renderActivity()}` line (~1221), a
       {section === "actions" && renderActions()}
 ```
 
-- [ ] **Step 7: Verify**
+- [x] **Step 7: Verify**
 
 Run: `npx tsc -b`
 Expected: clean — the `Record<WorkspaceActionType, ...>` exhaustiveness check is the main thing to watch; if it errors, the union has grown since this plan was written and you need to add the missing mapping entries (both the label keys and the map), not suppress the error.
@@ -524,11 +526,11 @@ Expected: clean.
 
 Check for an existing UserManagement test file (`Glob "src/components/Sidebar/Tabs/UserManagement/*.test.tsx"`). If one exists and it's practical to add a focused test for `renderActions()` (rendering with a few mock `WorkspaceActionEntry` values and asserting the table shows the right count/labels), add one. If none exists and the component is large enough that forcing new test infrastructure would be disproportionate, it's acceptable to skip — document the decision explicitly in your report, matching this session's established practice.
 
-- [ ] **Step 8: Update CLAUDE.md**
+- [x] **Step 8: Update CLAUDE.md**
 
 In `CLAUDE.md`'s tab table (the "Current tabs" section documenting sub-tabs per top-level tab), find the `user-management` row and add `actions` to its sub-tabs list, matching the existing format for that row.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add src/components/Sidebar/Tabs/UserManagement/index.tsx src/data/labels/labelsStore.ts "src/components/Sidebar/Tabs/Settings/index.tsx" CLAUDE.md docs/EDIT_LOG.md
@@ -542,27 +544,27 @@ git commit -m "feat(user-management): minimal read-only governance audit-log vie
 **Files:**
 - None (verification only).
 
-- [ ] **Step 1: Full test suite**
+- [x] **Step 1: Full test suite**
 
 Run: `npm run test:run`
 Expected: all tests pass, including the new `normalizeDate` tests and any new/unchanged tests from Tasks 2-3.
 
-- [ ] **Step 2: Typecheck**
+- [x] **Step 2: Typecheck**
 
 Run: `npx tsc -b`
 Expected: clean.
 
-- [ ] **Step 3: Lint**
+- [x] **Step 3: Lint**
 
 Run: `npm run lint`
 Expected: clean.
 
-- [ ] **Step 4: Build**
+- [x] **Step 4: Build**
 
 Run: `npm run build`
 Expected: succeeds; note the reported `dist/index.html` size.
 
-- [ ] **Step 5: Commit (if any stray changes)**
+- [x] **Step 5: Commit (if any stray changes)**
 
 ```bash
 git status --short

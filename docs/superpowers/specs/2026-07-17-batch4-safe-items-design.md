@@ -1,7 +1,7 @@
-# Batch 4 Safe Items — Design Spec
+# Batch 4 Safe Items — Design Spec [DONE — merged to main]
 
 - **Date:** 2026-07-17
-- **Status:** Approved (autonomous /goal run — items pre-triaged by an independent read-only investigation separating safe bug-fixes/mechanical work from genuine product decisions)
+- **Status:** ✅ DONE — implemented (4 tasks), reviewed (task-level + whole-branch, catching 1 Important permission-matrix registration gap), and merged to main via [PR #23](https://github.com/MKhwauytim/XQAP-XRay-Quality-Assurance-Platform/pull/23) (2026-07-17). Implementation plan: `docs/superpowers/plans/2026-07-17-batch4-safe-items.md`.
 - **Scope:** Execute the three Batch 4 items an independent triage (`.superpowers/sdd/batch4-triage.md`) found to be safe, bounded, and testable without requiring a product/policy decision. The two remaining Batch 4 items (hardcoded-Arabic sweep, D3(b) heuristic tuning) stay deferred — the triage found genuine landmines in both (data-value literals that must not move, an interpolated-string primitive that doesn't exist yet, and a heuristic-tuning judgment call) that a "no question asked" autonomous pass should not force through.
 
 ## Background
