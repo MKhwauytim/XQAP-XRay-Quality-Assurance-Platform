@@ -389,6 +389,12 @@ export default function PopulationTab() {
   /** Clean Phase-1 state targeting the (pending) global month. */
   function resetForNewMonth(): void {
     hasUnsavedSessionWorkRef.current = false;
+    // Clear unconditionally: a stale existing-month load may still be
+    // in-flight (its token already invalidated by the caller), in which case
+    // its own `finally` will skip clearing this flag once it resolves — so a
+    // clean new-month state must clear it here itself, or the wizard would be
+    // stuck permanently "loading" (CRITICAL — I-2 follow-up regression).
+    setIsLoadingMonthData(false);
     setUploads({
       riskAgencyData: { file: null, source: null },
       businessIntelligenceData: { file: null, source: null },

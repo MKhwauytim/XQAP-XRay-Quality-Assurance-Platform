@@ -76,10 +76,10 @@ async function updateDesignIndex(
  * CAS read-modify-write of the shared per-id `{reportId}.json` document. Two
  * supervisors/managers on two machines can edit the same report design
  * concurrently; casLoop bumps `revision`, stamps `_writeToken`, and verifies
- * both on read-back so a concurrent clobber fails loudly and retries rather
- * than silently overwriting the other author's edit. Mirrors
- * `templateStorage.ts`'s `saveTemplateFile` for the analogous per-id shape
- * (minus the delayed re-verify callback — tracked separately, M-3).
+ * both on read-back (plus a delayed re-verify) so a concurrent clobber fails
+ * loudly and retries rather than silently overwriting the other author's
+ * edit. Mirrors `templateStorage.ts`'s `saveTemplateFile` for the analogous
+ * per-id shape.
  */
 async function saveDesignFile(
   dir: DirectoryHandleLike,
@@ -107,7 +107,18 @@ async function saveDesignFile(
         verify.value.revision === nextRevision &&
         verify.value._writeToken === writeToken
       ) {
-        return { done: true, result: { ok: true as const, doc: updated } };
+        return {
+          done: true,
+          result: { ok: true as const, doc: updated },
+          verify: async () => {
+            const recheck = await safeReadJson<ReportDocument>(dir, fileName);
+            return (
+              recheck.ok &&
+              recheck.value.revision === nextRevision &&
+              recheck.value._writeToken === writeToken
+            );
+          },
+        };
       }
       return { done: false };
     },

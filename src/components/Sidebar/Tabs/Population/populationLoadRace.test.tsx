@@ -173,6 +173,17 @@ function populationChipText(): string | null {
   return chip?.textContent ?? null;
 }
 
+// The month-load-in-progress banner (`.month-picker-loading`, "جاري تحميل
+// بيانات الشهر..." — see Population/index.tsx). Bound to `isLoadingMonthData`,
+// which `handleLoadExistingMonth` sets true at the start of every existing-
+// month load. Used to catch the "stuck loading forever" regression: a stale
+// load's own `finally` is correctly gated on the load token and skips
+// clearing the flag once superseded, so nothing else clearing it (i.e.
+// `resetForNewMonth()` not touching it) leaves it permanently true.
+function isLoadingBannerPresent(): boolean {
+  return document.querySelector(".month-picker-loading") !== null;
+}
+
 describe("Population — overlapping month-load race (I-2)", () => {
   it("a superseded (April) load's data never overwrites a newer (May) load that already committed", async () => {
     vi.stubGlobal("ResizeObserver", ResizeObserverStub);
@@ -271,6 +282,9 @@ describe("Population — overlapping month-load race (I-2)", () => {
     monthMock.state.selection = selectExisting(4, 2026, APRIL_FOLDER);
     const { rerender } = render(<PopulationTab />);
 
+    // Sanity check: April's in-flight load has the loading banner up.
+    expect(isLoadingBannerPresent()).toBe(true);
+
     // Flip to a PENDING (new, unsaved) month before April's load resolves —
     // the else-branch of the auto-load effect runs synchronously
     // (resetForNewMonth, no promise to await), so no act(async) is needed here.
@@ -279,6 +293,11 @@ describe("Population — overlapping month-load race (I-2)", () => {
 
     // The clean reset must already be in effect — no population data at all.
     expect(populationChipText()).toContain("—");
+    // Regression guard: entering the clean pending/new-month state must clear
+    // the loading flag immediately, even though April's stale load is still
+    // in flight — resetForNewMonth() is the only thing that runs synchronously
+    // on this branch, so it must be the one clearing it (see index.tsx).
+    expect(isLoadingBannerPresent()).toBe(false);
 
     // Release the stale April load and await its promise directly, so its
     // post-await continuation (buggy overwrite, or fixed no-op) has
@@ -292,5 +311,12 @@ describe("Population — overlapping month-load race (I-2)", () => {
     // superseded load must not have clobbered it with its stale 1-row state.
     expect(populationChipText()).toContain("—");
     expect(populationChipText()).not.toContain("1 صف");
+    // The stale load's gated `finally` (token mismatch) must NOT be the only
+    // thing standing between the user and a permanently stuck loading banner:
+    // it correctly skips clearing the flag, so the pending-branch clear above
+    // must be what keeps it cleared here too — a real fix clears it once and
+    // it stays cleared; the regression left it stuck true forever from this
+    // point on (CRITICAL — I-2 follow-up regression).
+    expect(isLoadingBannerPresent()).toBe(false);
   });
 });

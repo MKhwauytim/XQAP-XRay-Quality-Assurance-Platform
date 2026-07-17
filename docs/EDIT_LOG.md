@@ -32,6 +32,12 @@ No product-scope items touched.
 
 **After:** adds a `cancelled` flag (mirroring the KPI-model effect immediately below it) so a slow load for a previously-selected month can never overwrite a newer selection's chips — see file.
 
+**File:** `src/components/Sidebar/Tabs/Reports/index.test.tsx` (new)
+
+**Before:** _(file did not exist)_
+
+**After:** regression test for the I-1 fix above — forces the newer-month-resolves-first / older-month-resolves-later inversion deterministically via per-month controlled promises, and asserts the chip keeps the newer month's data.
+
 **File:** `src/components/Sidebar/Tabs/Population/index.tsx`
 
 **Before:**
@@ -83,17 +89,23 @@ No product-scope items touched.
     }
 ```
 
+**File:** `src/components/Sidebar/Tabs/Population/populationLoadRace.test.tsx` (new)
+
+**Before:** _(file did not exist)_
+
+**After:** regression tests for the I-2 fix and its same-day follow-up above — deterministically forces a stale (April) load to resolve AFTER a fresher (May, then pending/new-month) selection has already committed, and asserts the stale load's continuation never clobbers the fresher state.
+
 **File:** `src/data/reporting/reportBuilders.xss.test.ts`
 
 **Before:** management deck only (`buildManagementDeck`) covered by the XSS test set.
 
 **After:** adds a `buildManagementReport` case using the same `maliciousExecInput()` fixture, closing the gap between the file's claimed coverage and its actual coverage.
 
-**File:** `src/data/reporting/management/managementReport.ts`
+**File:** `src/data/reporting/management/managementReport.ts` (no edit — verified, not corrected)
 
-**Before:** header comment claims membership in "the D2 XSS test set" without it being true.
+**Before:** Task 3 set out to check the header comment's claim of membership in "the D2 XSS test set".
 
-**After:** comment corrected to reflect actual test coverage (now true, per the test added above).
+**After:** no edit was needed. The comment's claim was already true once the `buildManagementReport` XSS test above landed — this entry previously (incorrectly) implied the comment itself had been changed; `git diff main -- src/data/reporting/management/managementReport.ts` on this branch is empty, confirming the file is untouched.
 
 **File:** `src/data/reportDesigner/reportTypes.ts`
 
@@ -115,11 +127,23 @@ No product-scope items touched.
 
 **After:** the per-id document write is now wrapped in the same casLoop protocol as `templateStorage.ts`'s `saveTemplateFile` (revision + `_writeToken`, verified on read-back), closing the silent-clobber gap the "single writer by id" comment had assumed away — see file.
 
+**File:** `src/data/reportDesigner/storage/reportDesignStorage.test.ts`
+
+**Before:** no coverage of the same-report-id concurrent-write path (only cross-id concurrency and basic round-trip/delete were covered).
+
+**After:** adds a same-id concurrent-save test proving the per-id CAS fix above actually serializes writers instead of one silently clobbering the other (the index-entry-count assertion is the real no-clobber proof — see the test's own comment).
+
 **File:** `src/data/population/monthLock.ts`
 
 **Before:** `closeMonth`/`reopenMonth` verify only in-attempt (immediate read-back), no delayed re-verify.
 
 **After:** both gain the same delayed `verify:` callback used by `templateStorage.ts saveTemplateFile`/`templateSelectionStorage.ts` — this file governs whether a closed month stays frozen against further writes, which is exactly the class of risk the delayed-verify tier exists for.
+
+**File:** `src/data/population/monthLock.test.ts`
+
+**Before:** no coverage proving `closeMonth`/`reopenMonth`'s delayed `verify:` callback (added above) is actually reached rather than merely present in source.
+
+**After:** adds two elapsed-time-based tests (`elapsedMs >= 60`, matching casLoop's `VERIFY_MIN_DELAY_MS` settle window) confirming the callback is wired in and the normal non-conflicting case still succeeds — see file for why this deliberately doesn't duplicate `casLoop.test.ts`'s adversarial-timing coverage.
 
 **File:** `src/data/feedback/feedbackStorage.ts`
 
@@ -173,6 +197,98 @@ No product-scope items touched.
 **Before:** the "new month" popover has Escape/outside-click dismissal but no Tab-focus-trap and no auto-focus on open — a keyboard-only user can tab out of it into the page behind.
 
 **After:** adopts the shared `useFocusTrap` hook (same pattern as `AuthGate.tsx`'s admin-passcode modal), attached to the `.gms-popover` element and enabled while `pickerOpen`. The hook's own Escape handling replaces the popover's previously-manual Escape listener; outside-click dismissal (which the hook doesn't cover) is unchanged.
+
+**File:** `src/components/GlobalMonthSelector/GlobalMonthSelector.test.tsx` (new)
+
+**Before:** _(file did not exist)_
+
+**After:** regression test for the focus-trap fix above — asserts focus moves into the popover on open, Tab wraps instead of escaping the trap, and Escape still closes it.
+
+**Final whole-branch review fixes (same day):** a reviewer pass over the finished v55.2 batch found one critical regression the I-2 follow-up itself introduced, one dangling doc pointer, and the EDIT_LOG accuracy/completeness gaps fixed by the entries above.
+
+**File:** `src/components/Sidebar/Tabs/Population/index.tsx`
+
+**Before:**
+```tsx
+  function resetForNewMonth(): void {
+    hasUnsavedSessionWorkRef.current = false;
+    setUploads({ ... });
+    ...
+  }
+```
+
+**After:**
+```tsx
+  function resetForNewMonth(): void {
+    hasUnsavedSessionWorkRef.current = false;
+    // Clear unconditionally: a stale existing-month load may still be
+    // in-flight (its token already invalidated by the caller), in which case
+    // its own `finally` will skip clearing this flag once it resolves — so a
+    // clean new-month state must clear it here itself, or the wizard would be
+    // stuck permanently "loading" (CRITICAL — I-2 follow-up regression).
+    setIsLoadingMonthData(false);
+    setUploads({ ... });
+    ...
+  }
+```
+The I-2 follow-up above (bumping `loadMonthTokenRef` in the pending/new-month branch) correctly stopped a stale load from ever clobbering the clean reset's *data*, but left nothing clearing `isLoadingMonthData` on that path: the stale load's own `finally` is (correctly) gated on the token and now skips the clear, and `resetForNewMonth()` never touched the flag either — so an existing→pending switch mid-load left the wizard permanently stuck "loading" (process-population refused, draw/distribute/bulk-assign capabilities withdrawn forever). Fixing it inside `resetForNewMonth()` covers every caller uniformly (the pending branch and the auto-load effect's catch handler alike).
+
+**File:** `src/components/Sidebar/Tabs/Population/populationLoadRace.test.tsx`
+
+**Before:** the existing→pending race test only asserted the population status chip's clean "—" state.
+
+**After:** adds assertions on the `.month-picker-loading` banner (bound to `isLoadingMonthData`) at three points — present during April's in-flight load, cleared immediately on the pending switch, and still cleared after April's stale load resolves — catching the stuck-loading regression the chip-only assertion missed. Fail-first verified: fails with `expected true to be false` on the pre-fix code, passes after the `resetForNewMonth()` fix above.
+
+**File:** `src/data/reportDesigner/storage/reportDesignStorage.ts`
+
+**Before:**
+```ts
+      if (
+        verify.ok &&
+        verify.value.revision === nextRevision &&
+        verify.value._writeToken === writeToken
+      ) {
+        return { done: true, result: { ok: true as const, doc: updated } };
+      }
+      return { done: false };
+```
+And the JSDoc above `saveDesignFile` read: "Mirrors `templateStorage.ts`'s `saveTemplateFile` for the analogous per-id shape (minus the delayed re-verify callback — tracked separately, M-3)."
+
+**After:**
+```ts
+      if (
+        verify.ok &&
+        verify.value.revision === nextRevision &&
+        verify.value._writeToken === writeToken
+      ) {
+        return {
+          done: true,
+          result: { ok: true as const, doc: updated },
+          verify: async () => {
+            const recheck = await safeReadJson<ReportDocument>(dir, fileName);
+            return (
+              recheck.ok &&
+              recheck.value.revision === nextRevision &&
+              recheck.value._writeToken === writeToken
+            );
+          },
+        };
+      }
+      return { done: false };
+```
+The Task 5 (M-3) casLoop delayed-verify audit never revisited `saveDesignFile` (it wasn't in that task's original site list), leaving the JSDoc's "tracked separately, M-3" pointer dangling — M-3 had already finished without addressing it. Since `saveDesignFile` protects the same class of per-id multi-writer document the audit's own comments elsewhere call out as needing "the stronger protection," it gets the same delayed-verify callback as `saveTemplateFile`/`monthLock.ts`. JSDoc updated to say the file now matches `saveTemplateFile` fully, not "minus" it.
+
+**File:** `src/data/reportDesigner/storage/reportDesignStorage.test.ts`
+
+**Before:** no coverage proving `saveDesignFile`'s new delayed `verify:` callback is actually reached.
+
+**After:** adds an elapsed-time-based test (`elapsedMs >= 60`, same pattern as `monthLock.test.ts`'s M-3 tests above) confirming the callback is wired in and a normal non-conflicting save still succeeds. Fail-first verified: fails with `expected 0 to be greater than or equal to 60` without the `verify` callback, passes with it.
+
+**File:** `docs/EDIT_LOG.md` (this file)
+
+**Before:** the `managementReport.ts` entry (Task 3, above) implied an edit had been made; five new/modified test files from this section had no entries at all.
+
+**After:** corrected the `managementReport.ts` entry to state no edit occurred (verified via empty `git diff`), and added entries for `Reports/index.test.tsx`, `populationLoadRace.test.tsx`, `reportDesignStorage.test.ts` (Task 4/M-2's same-id CAS test), `monthLock.test.ts` (Task 5/M-3's delayed-verify tests), and `GlobalMonthSelector.test.tsx` — see entries above.
 
 ## v55.1 — 2026-07-16 — Desktop app-mode shortcut
 

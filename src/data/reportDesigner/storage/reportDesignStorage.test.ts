@@ -68,4 +68,37 @@ describe("reportDesignStorage", () => {
     const index = await loadDesignIndex(dir);
     expect(index.designs).toHaveLength(1); // one entry, not duplicated
   });
+
+  // Delayed-verify regression coverage (M-3 follow-up: saveDesignFile was the
+  // one per-id casLoop site the M-3 audit didn't reach — see EDIT_LOG v55.2).
+  //
+  // casLoop's delayed-verify mechanism itself (sleep, re-read, retry-on-false)
+  // is already exercised in isolation by `src/data/storage/casLoop.test.ts`.
+  // Re-running that adversarial-timing scenario here would duplicate that
+  // coverage. What isn't covered elsewhere is whether saveDesignFile's attempt
+  // function actually WIRES UP the `verify` callback (as opposed to it being
+  // absent) and still completes correctly in the normal, non-conflicting case.
+  // This test checks exactly that: the delayed-verify path is provably
+  // exercised (the call takes at least as long as casLoop's post-success
+  // settle delay, which only happens when a `verify` callback was supplied —
+  // see VERIFY_MIN_DELAY_MS/VERIFY_MAX_DELAY_MS in casLoop.ts) and the design
+  // still saves correctly.
+  it("saveDesign's delayed verify is actually wired in and a normal (non-conflicting) save still succeeds", async () => {
+    const dir = createMemoryDirectory("root");
+    const doc = createEmptyDocument("تصميم للتحقق المؤجل", "admin");
+
+    const start = Date.now();
+    const saved = await saveDesign(dir, doc);
+    const elapsedMs = Date.now() - start;
+
+    expect(saved.ok).toBe(true);
+    // casLoop sleeps VERIFY_MIN_DELAY_MS..VERIFY_MAX_DELAY_MS (80-180ms).
+    // Without a `verify` callback, this call returns in a few ms. A
+    // comfortable lower bound confirms the callback is really reached, not
+    // just present in source.
+    expect(elapsedMs).toBeGreaterThanOrEqual(60);
+
+    const loaded = await loadDesign(dir, doc.reportId);
+    expect(loaded?.reportName).toBe("تصميم للتحقق المؤجل");
+  });
 });
