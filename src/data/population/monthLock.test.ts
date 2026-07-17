@@ -269,4 +269,61 @@ describe("monthLock", () => {
     setReadOnlyMode(true);
     await expect(ensureMonthWritable(root, MONTH)).resolves.toBeUndefined();
   });
+
+  // Delayed-verify regression coverage.
+  //
+  // `casLoop`'s delayed-verify mechanism itself (sleep, re-read, retry-on-false)
+  // is already exercised in isolation by `src/data/storage/casLoop.test.ts`
+  // ("retries when a delayed verify detects a concurrent clobber" and "catches
+  // a lost update against a memory directory and re-wins on retry" — the
+  // latter using the exact revision + _writeToken + safeReadJson/safeWriteJson
+  // shape monthLock.ts itself uses). Re-running that adversarial-timing
+  // scenario here against closeMonth/reopenMonth would duplicate that
+  // coverage rather than add to it. What isn't covered anywhere else is
+  // whether closeMonth/reopenMonth's attempt functions actually WIRE UP the
+  // `verify` callback (as opposed to it being present in source but never
+  // reached) and still complete correctly in the normal, non-conflicting
+  // case. These two tests check exactly that: the delayed verify path is
+  // provably exercised (the call takes at least as long as casLoop's
+  // post-success settle delay, which only happens when a `verify` callback
+  // was supplied) and the end state is still correct.
+  it("closeMonth's delayed verify is actually wired in and a normal (non-conflicting) close still succeeds", async () => {
+    const root = makeRoot();
+    await seedManifest(root, "distributed");
+
+    const start = Date.now();
+    const result = await closeMonth(root, MONTH, "admin", "نهاية الشهر");
+    const elapsedMs = Date.now() - start;
+
+    expect(result.ok).toBe(true);
+    // casLoop sleeps VERIFY_MIN_DELAY_MS..VERIFY_MAX_DELAY_MS (80-180ms, see
+    // casLoop.ts) before calling a supplied `verify` callback. Without one,
+    // this call returns in a few ms. A comfortable lower bound confirms the
+    // callback is really reached, not just present in source.
+    expect(elapsedMs).toBeGreaterThanOrEqual(60);
+
+    expect(await isMonthClosed(root, MONTH)).toBe(true);
+    const manifest = await readManifest(root);
+    expect(manifest.status).toBe("closed");
+    expect(manifest.statusBeforeClose).toBe("distributed");
+  });
+
+  it("reopenMonth's delayed verify is actually wired in and a normal (non-conflicting) reopen still succeeds", async () => {
+    const root = makeRoot();
+    await seedManifest(root, "sampled");
+    await closeMonth(root, MONTH, "admin");
+    invalidateMonthLockCache();
+
+    const start = Date.now();
+    const result = await reopenMonth(root, MONTH, "admin");
+    const elapsedMs = Date.now() - start;
+
+    expect(result.ok).toBe(true);
+    expect(elapsedMs).toBeGreaterThanOrEqual(60);
+
+    expect(await isMonthClosed(root, MONTH)).toBe(false);
+    const manifest = await readManifest(root);
+    expect(manifest.status).toBe("sampled");
+    expect(manifest.reopenedBy).toBe("admin");
+  });
 });

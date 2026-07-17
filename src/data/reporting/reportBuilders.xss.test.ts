@@ -14,6 +14,7 @@ import { describe, expect, it } from "vitest";
 import { buildSampleDocument, buildSampleDeck, type SampleReportInput } from "./sampleReport";
 import { buildDistributionDocument, buildDistributionDeck } from "./distributionReport";
 import { buildManagementDeck } from "./management/managementDeck";
+import { buildManagementReport } from "./management/managementReport";
 import { makeRow, makeManifest, makeSampleMaster, makeDistribution } from "./reportTestFixtures";
 import { DEFAULT_EXEC_CONFIG } from "./executiveReportTypes";
 import type { ExecutiveReportInput } from "./executiveReportTypes";
@@ -119,5 +120,12 @@ describe("management deck — XSS escaping", () => {
   it("escapes injected port names, reviewer names and the month label", () => {
     const { input, names } = maliciousExecInput();
     assertSafe(buildManagementDeck(input, names));
+  });
+});
+
+describe("management document — XSS escaping", () => {
+  it("escapes injected port names, reviewer names and the month label", () => {
+    const { input, names } = maliciousExecInput();
+    assertSafe(buildManagementReport(input, names));
   });
 });

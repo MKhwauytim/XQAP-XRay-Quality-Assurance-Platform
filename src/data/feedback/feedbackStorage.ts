@@ -77,6 +77,10 @@ export async function loadFeedback(dir: DirectoryHandleLike): Promise<FeedbackMe
  * verifies BOTH on read-back so a concurrent write from another machine is never
  * silently dropped. Same RMW-append contract as
  * `approvalStorage.appendDecisionEvent`.
+ *
+ * No delayed verify: feedback messages are low-stakes user input (not
+ * business-critical RMW data) — a rare lost update means at most a
+ * re-submission, not data corruption. See docs/EDIT_LOG.md v55.2.
  */
 async function mutateFeedback(
   dir: DirectoryHandleLike,

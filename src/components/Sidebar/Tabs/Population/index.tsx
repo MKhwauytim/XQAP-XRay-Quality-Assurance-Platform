@@ -284,12 +284,13 @@ export default function PopulationTab() {
     return () => window.removeEventListener("pop-load-month", handler as EventListener);
   }, [setGlobalMonth]);
 
-  async function handleLoadExistingMonth(info: MonthFolderInfo): Promise<void> {
+  async function handleLoadExistingMonth(info: MonthFolderInfo, token: number): Promise<void> {
     if (!directoryHandle) return;
     setIsLoadingMonthData(true);
     try {
       hasUnsavedSessionWorkRef.current = false;
       const data = await loadMonthForEditing(directoryHandle, info.folderName);
+      if (token !== loadMonthTokenRef.current) return; // superseded by a newer month selection
 
       // Reconstruct RiskWorkbookResult from saved raw rows
       if (data.riskRawRows.length > 0) {
@@ -370,7 +371,7 @@ export default function PopulationTab() {
         setCompletedPhaseIds([1, 2]);
       }
     } finally {
-      setIsLoadingMonthData(false);
+      if (token === loadMonthTokenRef.current) setIsLoadingMonthData(false);
     }
   }
 
@@ -388,6 +389,12 @@ export default function PopulationTab() {
   /** Clean Phase-1 state targeting the (pending) global month. */
   function resetForNewMonth(): void {
     hasUnsavedSessionWorkRef.current = false;
+    // Clear unconditionally: a stale existing-month load may still be
+    // in-flight (its token already invalidated by the caller), in which case
+    // its own `finally` will skip clearing this flag once it resolves — so a
+    // clean new-month state must clear it here itself, or the wizard would be
+    // stuck permanently "loading" (CRITICAL — I-2 follow-up regression).
+    setIsLoadingMonthData(false);
     setUploads({
       riskAgencyData: { file: null, source: null },
       businessIntelligenceData: { file: null, source: null },
@@ -410,6 +417,7 @@ export default function PopulationTab() {
 
   // The global month IS the wizard's month: selecting an existing month loads it
   // from disk; selecting a pending (new) month resets to a clean import flow.
+  const loadMonthTokenRef = useRef(0);
   const loadedFolderRef = useRef<string | null>(null);
   useEffect(() => {
     if (!directoryHandle || globalMonth.kind === "none") return;
@@ -417,12 +425,15 @@ export default function PopulationTab() {
     loadedFolderRef.current = globalMonth.folderName;
     if (globalMonth.kind === "existing") {
       const targetFolder = globalMonth.folderName;
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing wizard state to the external global-month selection; the load/reset IS the intended effect
+      const token = ++loadMonthTokenRef.current;
       void handleLoadExistingMonth({
         month: globalMonth.month,
         year: globalMonth.year,
         folderName: globalMonth.folderName,
-      }).catch((error) => {
+      }, token).catch((error) => {
+        // Guarded on the token so a STALE (superseded) rejection can never
+        // wipe a newer load's already-committed, successful data.
+        if (token !== loadMonthTokenRef.current) return;
         // A rejected load leaves the previous month's data under this month's
         // header. Reset to a clean empty state, surface the failure, and clear
         // the stamp so re-selecting the same month retries the load (CRITICAL 1b).
@@ -432,6 +443,9 @@ export default function PopulationTab() {
         if (loadedFolderRef.current === targetFolder) loadedFolderRef.current = null;
       });
     } else {
+      // Invalidate any in-flight existing-month load so it can never resolve
+      // later and commit its stale data over this clean new-month reset.
+      ++loadMonthTokenRef.current;
       resetForNewMonth();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- handleLoadExistingMonth/resetForNewMonth are stable per render cycle; keying on folderName prevents load loops

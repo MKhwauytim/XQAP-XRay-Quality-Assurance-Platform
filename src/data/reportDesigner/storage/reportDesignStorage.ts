@@ -33,6 +33,12 @@ async function getDesignsDir(
  * `withResourceLock` serializes same-tab writers, casLoop re-reads fresh, bumps
  * `revision`, stamps `_writeToken`, and verifies both on read-back so a concurrent
  * author's index entry on another machine is never silently dropped.
+ *
+ * No delayed verify: index entries are eventually-consistent by nature — a
+ * transient one-write-behind entry self-heals on the next save. The
+ * stronger protection lives on the per-id document (saveDesignFile, below,
+ * hardened in Task 4), which is where real content divergence would
+ * actually matter.
  */
 async function updateDesignIndex(
   dir: DirectoryHandleLike,
@@ -66,6 +72,64 @@ async function updateDesignIndex(
   }
 }
 
+/**
+ * CAS read-modify-write of the shared per-id `{reportId}.json` document. Two
+ * supervisors/managers on two machines can edit the same report design
+ * concurrently; casLoop bumps `revision`, stamps `_writeToken`, and verifies
+ * both on read-back (plus a delayed re-verify) so a concurrent clobber fails
+ * loudly and retries rather than silently overwriting the other author's
+ * edit. Mirrors `templateStorage.ts`'s `saveTemplateFile` for the analogous
+ * per-id shape.
+ */
+async function saveDesignFile(
+  dir: DirectoryHandleLike,
+  doc: ReportDocument
+): Promise<ReportDocument> {
+  const fileName = `${doc.reportId}.json`;
+  // Wrap the doc in { ok: true; doc } (rather than casLoop<ReportDocument>
+  // directly) so the `!outcome.ok` failure check below is a valid discriminant:
+  // ReportDocument itself has no `ok` field, so casLoop<ReportDocument> would
+  // make a *successful* outcome (a bare ReportDocument) also read as falsy
+  // `outcome.ok`, tripping the throw on every save.
+  const outcome = await casLoop<{ ok: true; doc: ReportDocument }>(
+    async (writeToken) => {
+      const existing = await safeReadJson<ReportDocument>(dir, fileName);
+      const nextRevision = (existing.ok ? existing.value.revision ?? 0 : 0) + 1;
+      const updated: ReportDocument = {
+        ...doc,
+        revision: nextRevision,
+        _writeToken: writeToken,
+      };
+      await safeWriteJson(dir, fileName, updated);
+      const verify = await safeReadJson<ReportDocument>(dir, fileName);
+      if (
+        verify.ok &&
+        verify.value.revision === nextRevision &&
+        verify.value._writeToken === writeToken
+      ) {
+        return {
+          done: true,
+          result: { ok: true as const, doc: updated },
+          verify: async () => {
+            const recheck = await safeReadJson<ReportDocument>(dir, fileName);
+            return (
+              recheck.ok &&
+              recheck.value.revision === nextRevision &&
+              recheck.value._writeToken === writeToken
+            );
+          },
+        };
+      }
+      return { done: false };
+    },
+    { conflictError: "تعذّر حفظ تصميم التقرير: تعارض في الكتابة بعد عدة محاولات." }
+  );
+  if (!outcome.ok) {
+    throw new Error(outcome.error);
+  }
+  return outcome.doc;
+}
+
 export async function saveDesign(
   directoryHandle: DirectoryHandleLike,
   doc: ReportDocument
@@ -77,8 +141,11 @@ export async function saveDesign(
 
     const dir = await getDesignsDir(directoryHandle);
     await withResourceLock(`${dir.name}/designs-index`, async () => {
-      // Per-id doc — single writer by id, safe to write once outside the CAS loop.
-      await safeWriteJson(dir, `${doc.reportId}.json`, doc);
+      // Shared per-id doc — two supervisors/managers on two machines can edit
+      // the same design. CAS (revision + _writeToken, verified on read-back)
+      // makes a concurrent clobber fail loudly and retry instead of silently
+      // winning.
+      await saveDesignFile(dir, doc);
 
       await updateDesignIndex(dir, (designs) =>
         [

@@ -183,6 +183,7 @@ function ReportsContent() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- sync null-clear when workspace or month is deselected; synchronizes with external workspace state
     if (!directoryHandle || !selectedMonth) { setMonthMeta(null); return; }
+    let cancelled = false;
     setMonthMeta(null);
     void (async () => {
       try {
@@ -190,8 +191,10 @@ function ReportsContent() {
           loadMonthPopulationFinal(directoryHandle, selectedMonth),
           loadSampleMaster(directoryHandle, selectedMonth),
         ]);
+        if (cancelled) return;
         const popRows = pop ? (pop.rows as unknown as PreparedPopulationRow[]) : [];
         const employeeFiles = sample ? await loadAllEmployeeFiles(directoryHandle, selectedMonth) : [];
+        if (cancelled) return;
         const submittedIds = new Set(
           employeeFiles.flatMap((file) =>
             file.items
@@ -207,9 +210,12 @@ function ReportsContent() {
           studiedCount: answered > 0 ? answered : null,
         });
       } catch {
-        setMonthMeta({ folderName: selectedMonth, populationCount: null, sampleCount: null, studiedCount: null });
+        if (!cancelled) {
+          setMonthMeta({ folderName: selectedMonth, populationCount: null, sampleCount: null, studiedCount: null });
+        }
       }
     })();
+    return () => { cancelled = true; };
   }, [directoryHandle, selectedMonth]);
 
   // Assemble the executive-report input from disk — the SAME inputs that feed
