@@ -168,6 +168,12 @@ No product-scope items touched.
 
 **After:** wraps the `JSON.parse` in try/catch; a malformed payload (e.g. a drop from an external source) now no-ops instead of throwing uncaught into the drop handler.
 
+**File:** `src/components/GlobalMonthSelector/GlobalMonthSelector.tsx`
+
+**Before:** the "new month" popover has Escape/outside-click dismissal but no Tab-focus-trap and no auto-focus on open — a keyboard-only user can tab out of it into the page behind.
+
+**After:** adopts the shared `useFocusTrap` hook (same pattern as `AuthGate.tsx`'s admin-passcode modal), attached to the `.gms-popover` element and enabled while `pickerOpen`. The hook's own Escape handling replaces the popover's previously-manual Escape listener; outside-click dismissal (which the hook doesn't cover) is unchanged.
+
 ## v55.1 — 2026-07-16 — Desktop app-mode shortcut
 
 Spec: docs/superpowers/specs/2026-07-16-desktop-shortcut-design.md. Adds a

@@ -5,6 +5,7 @@ import { useGlobalMonth } from "../../data/month/useGlobalMonth";
 import { usePermissions } from "../../auth/usePermissions";
 import { useLabels } from "../../data/labels/useLabels";
 import { formatMonthFolderName, formatMonthFolderShortLabel } from "../../data/population/monthFolder";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
 
 import "./GlobalMonthSelector.css";
 
@@ -31,12 +32,17 @@ export function GlobalMonthSelector({ allowCreate }: GlobalMonthSelectorProps) {
   // without silently coercing to 0; validated against MIN_YEAR/MAX_YEAR below.
   const [newYearInput, setNewYearInput] = useState(() => String(new Date().getFullYear()));
   const popoverWrapRef = useRef<HTMLDivElement>(null);
+  const popoverFocusTrapRef = useFocusTrap<HTMLDivElement>({
+    onEscape: () => setPickerOpen(false),
+    enabled: pickerOpen,
+  });
 
   const parsedYear = Number(newYearInput);
   const isYearValid = newYearInput !== "" && Number.isInteger(parsedYear)
     && parsedYear >= MIN_YEAR && parsedYear <= MAX_YEAR;
 
-  // Escape key + outside-click dismissal for the "new month" popover.
+  // Outside-click dismissal. Escape and Tab-trapping are handled by
+  // useFocusTrap (popoverFocusTrapRef), attached to the popover element below.
   useEffect(() => {
     if (!pickerOpen) return;
     function handlePointerDown(event: MouseEvent) {
@@ -44,15 +50,8 @@ export function GlobalMonthSelector({ allowCreate }: GlobalMonthSelectorProps) {
         setPickerOpen(false);
       }
     }
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setPickerOpen(false);
-    }
     document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
+    return () => document.removeEventListener("mousedown", handlePointerDown);
   }, [pickerOpen]);
 
   // No workspace / month list still loading — render an empty stable placeholder
@@ -105,7 +104,7 @@ export function GlobalMonthSelector({ allowCreate }: GlobalMonthSelectorProps) {
             <CalendarPlus size={14} aria-hidden /> {labels.gm_new_month_btn}
           </button>
           {pickerOpen && (
-            <div className="gms-popover" role="dialog" aria-label={labels.gm_new_month_title}>
+            <div className="gms-popover" role="dialog" aria-label={labels.gm_new_month_title} ref={popoverFocusTrapRef}>
               <strong className="gms-popover-title">{labels.gm_new_month_title}</strong>
               <div className="gms-month-grid" role="group">
                 {ARABIC_MONTHS.map((name, idx) => (
