@@ -95,6 +95,26 @@ No product-scope items touched.
 
 **After:** comment corrected to reflect actual test coverage (now true, per the test added above).
 
+**File:** `src/data/reportDesigner/reportTypes.ts`
+
+**Before:** `ReportDocument` has no CAS fields.
+
+**After:** adds optional `revision`/`_writeToken` fields, matching `TemplateSchema`'s equivalent fields — see file.
+
+**File:** `src/data/reportDesigner/storage/reportDesignStorage.ts`
+
+**Before:**
+```ts
+    await withResourceLock(`${dir.name}/designs-index`, async () => {
+      // Per-id doc — single writer by id, safe to write once outside the CAS loop.
+      await safeWriteJson(dir, `${doc.reportId}.json`, doc);
+
+      await updateDesignIndex(dir, (designs) => ...);
+    });
+```
+
+**After:** the per-id document write is now wrapped in the same casLoop protocol as `templateStorage.ts`'s `saveTemplateFile` (revision + `_writeToken`, verified on read-back), closing the silent-clobber gap the "single writer by id" comment had assumed away — see file.
+
 ## v55.1 — 2026-07-16 — Desktop app-mode shortcut
 
 Spec: docs/superpowers/specs/2026-07-16-desktop-shortcut-design.md. Adds a

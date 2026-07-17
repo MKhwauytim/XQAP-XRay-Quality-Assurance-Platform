@@ -93,6 +93,10 @@ export type ReportDocument = {
   dataSources: DataSourceRef[];
   pages: Page[];
   reportFilters: Filter[];
+  /** Monotonic CAS revision for this shared, multi-writer per-id document. */
+  revision?: number;
+  /** Per-write UUID embedded by casLoop for cross-machine race detection. */
+  _writeToken?: string;
 };
 
 // A4 portrait at 96dpi = 794 x 1123 px.

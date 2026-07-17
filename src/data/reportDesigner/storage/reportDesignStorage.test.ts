@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createMemoryDirectory } from "../../storage/memoryDirectory";
-import { createEmptyDocument } from "../reportTypes";
+import { createEmptyDocument, type Page } from "../reportTypes";
 import {
   saveDesign,
   loadDesign,
@@ -46,5 +46,22 @@ describe("reportDesignStorage", () => {
     );
     // Both writes participated in the CAS protocol → revision advanced past both.
     expect(index.revision).toBe(2);
+  });
+
+  it("serializes concurrent saves of the SAME report id via per-id CAS (no silent clobber)", async () => {
+    const dir = createMemoryDirectory("root");
+    const doc = createEmptyDocument("تصميم مشترك", "admin");
+    // Two supervisors on two PCs edit the SAME design at the same instant.
+    const docA = { ...doc, pages: [] };
+    const extraPage: Page = { pageId: "p1", name: "صفحة 2", order: 1, filters: [], elements: [] };
+    const docB = { ...doc, pages: [extraPage] };
+    await Promise.all([saveDesign(dir, docA), saveDesign(dir, docB)]);
+
+    const loaded = await loadDesign(dir, doc.reportId);
+    expect(loaded).not.toBeNull();
+    expect(loaded?.revision).toBe(2); // both writes participated in the CAS chain
+
+    const index = await loadDesignIndex(dir);
+    expect(index.designs).toHaveLength(1); // one entry, not duplicated
   });
 });
