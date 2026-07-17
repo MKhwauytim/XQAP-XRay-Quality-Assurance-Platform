@@ -145,7 +145,7 @@ Tabs are auto-discovered: `tabRegistry.ts` uses `import.meta.glob("./*/index.tsx
 | `employee-workspace` | `Tabs/EmployeeWorkspace/` | all | 15 | `ew/xray-referrals`, `ew/xray-results`, `ew/referral-approval`, `ew/inspection-form` (renders `Tabs/TemplateBuilder/`) |
 | `reports` | `Tabs/Reports/` | guest, supervisor, manager, admin | 25 | `reports`, `kpi` (manager, admin), `report-designer` (supervisor, manager, admin → `Tabs/ReportDesigner/`) |
 | `archive` | `Tabs/Archive/` | guest, supervisor, manager, admin | 30 | — |
-| `user-management` | `Tabs/UserManagement/` | admin | 40 | `users`, `page-permissions`, `feature-permissions`, `activity` |
+| `user-management` | `Tabs/UserManagement/` | admin | 40 | `users`, `page-permissions`, `feature-permissions`, `activity`, `actions` |
 | `settings` | `Tabs/Settings/` | guest, admin | 95 | — |
 | `change-log` | `Tabs/ChangeLog/` | admin | 96 | — |
 

@@ -1,5 +1,5 @@
-import { describe, expect, test } from "vitest";
-import { processPopulation } from "./populationProcessor";
+import { describe, expect, test, it } from "vitest";
+import { processPopulation, normalizeDate } from "./populationProcessor";
 import type { RiskWorkbookResult } from "../riskData/riskDataTypes";
 import type { BiWorkbookResult } from "../biData/biDataTypes";
 import type { PopulationProcessingInput } from "./populationProcessingTypes";
@@ -274,5 +274,46 @@ describe("processPopulation async processing and column preservation", () => {
 
     expect(result.preparedRows.length).toBe(0);
     expect(result.invalidResultRows.length).toBe(1);
+  });
+});
+
+describe("normalizeDate", () => {
+  it("keeps day-first parsing for values where both readings would be valid (the documented ambiguous policy — do not change)", () => {
+    // 3 April 2026 under the existing day-first assumption. This is the
+    // genuinely ambiguous case (a US-locale author might have meant 4 March);
+    // the policy decision stays out of scope — this test is a regression
+    // guard that the fix below does NOT alter this behavior.
+    expect(normalizeDate("03/04/2026")).toBe("2026-04-03");
+  });
+
+  it("keeps unambiguous day-first values unchanged", () => {
+    expect(normalizeDate("25/12/2025")).toBe("2025-12-25");
+  });
+
+  it("rescues values where day-first is syntactically impossible but month-first is valid", () => {
+    // "12/25/2025" — day-first would need month=25, which is invalid; the
+    // only valid reading is month-first: December 25, 2025.
+    expect(normalizeDate("12/25/2025")).toBe("2025-12-25");
+  });
+
+  it("rescues another month>12 case", () => {
+    // "06/15/2025" — day-first needs month=15 (invalid); month-first: June 15, 2025.
+    expect(normalizeDate("06/15/2025")).toBe("2025-06-15");
+  });
+
+  it("rescues a case where the day-first day slot would also be invalid on its own reading", () => {
+    // "01/31/2025" — day-first needs month=31 (invalid); month-first: January 31, 2025.
+    expect(normalizeDate("01/31/2025")).toBe("2025-01-31");
+  });
+
+  it("still returns raw when NEITHER reading is valid", () => {
+    // Both components exceed 12: "13/25/2025" — day-first month=25 invalid,
+    // month-first would read this as month=13 (invalid) day=25. Neither reading works, so it must stay un-normalized.
+    expect(normalizeDate("13/25/2025")).toBe("13/25/2025");
+  });
+
+  it("returns null for empty/null input, unchanged", () => {
+    expect(normalizeDate(null)).toBeNull();
+    expect(normalizeDate("")).toBeNull();
   });
 });
