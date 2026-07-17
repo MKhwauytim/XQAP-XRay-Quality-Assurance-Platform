@@ -1,4 +1,6 @@
-# Quality Pass — Batches 1-3 Implementation Plan
+# Quality Pass — Batches 1-3 Implementation Plan [DONE — merged to main]
+
+> **STATUS: ✅ DONE.** All 9 tasks implemented and reviewed. Two implementers independently caught real bugs in this plan's OWN sample code (a casLoop type-signature bug; a non-discriminating test), both verified empirically and fixed correctly. The final whole-branch review caught a genuine Critical regression (Population's `isLoadingMonthData` could get stuck `true` forever after the I-2 follow-up) plus an Important gap (a per-id report-design write missing delayed-verify CAS protection) — both closed with fail-first-verified fixes. Merged to main via [PR #21](https://github.com/MKhwauytim/XQAP-XRay-Quality-Assurance-Platform/pull/21) on 2026-07-17. Full task-by-task evidence trail: `.superpowers/sdd/progress.md` and `.superpowers/sdd/task-{1..8}-report.md`.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -31,7 +33,7 @@
 - Consumes: nothing new — this is a same-file fix mirroring the KPI-model effect immediately below it (`:255-261` in the same file, unchanged).
 - Produces: no new exports; behavior-only fix.
 
-- [ ] **Step 1: EDIT_LOG entry**
+- [x] **Step 1: EDIT_LOG entry**
 
 Insert at the top of `docs/EDIT_LOG.md` (check the current top heading first and use the correct next version number):
 
@@ -65,7 +67,7 @@ No product-scope items touched.
 **After:** adds a `cancelled` flag (mirroring the KPI-model effect immediately below it) so a slow load for a previously-selected month can never overwrite a newer selection's chips — see file.
 ```
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 First check whether a test file already exists for this component:
 
@@ -136,11 +138,11 @@ describe("Reports month-summary chips — staleness guard", () => {
 
 **Note for the implementer:** this component-level test is a weak regression guard for a pure timing race (jsdom has no real async scheduling variance to force the exact "A resolves after B" ordering deterministically without invasive mocking of `loadMonthPopulationFinal`/`loadSampleMaster` with manually-controlled promise resolution order). If you find a cleaner way to deterministically force the race (e.g. mocking `loadMonthPopulationFinal` to return a manually-controlled promise, switching `selectedMonth` via a re-render, then resolving the older promise last, and asserting `monthMeta.folderName` matches the newer selection, not the older one) — prefer that; it is a stronger test than the smoke-test above. If deterministic forcing proves impractical, ship the smoke test and say so explicitly in your report — do not fake a race that isn't actually being forced.
 
-- [ ] **Step 3: Run test to verify current behavior (baseline, may pass or fail depending on test strength)**
+- [x] **Step 3: Run test to verify current behavior (baseline, may pass or fail depending on test strength)**
 
 Run: `npx vitest run src/components/Sidebar/Tabs/Reports/index.test.tsx`
 
-- [ ] **Step 4: Apply the fix**
+- [x] **Step 4: Apply the fix**
 
 In `src/components/Sidebar/Tabs/Reports/index.tsx`, replace the `monthMeta` effect (`:183-213`) with:
 
@@ -187,12 +189,12 @@ In `src/components/Sidebar/Tabs/Reports/index.tsx`, replace the `monthMeta` effe
 
 (Two new `if (cancelled) return;` checks added inside the try block — after each `await` boundary — plus the catch-branch guard and the cleanup function, matching the KPI effect's exact shape.)
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 Run: `npx vitest run src/components/Sidebar/Tabs/Reports/index.test.tsx`
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/components/Sidebar/Tabs/Reports/index.tsx docs/EDIT_LOG.md
@@ -212,7 +214,7 @@ git commit -m "fix(reports): guard month-summary chips against a stale-load race
 - Consumes: nothing new.
 - Produces: `handleLoadExistingMonth` gains a second parameter (`token: number`); its sole call site (the auto-load effect) is updated to match. No other code calls this function (verified: `grep -n "handleLoadExistingMonth(" src/components/Sidebar/Tabs/Population/index.tsx` shows exactly one call site plus the definition).
 
-- [ ] **Step 1: EDIT_LOG entry**
+- [x] **Step 1: EDIT_LOG entry**
 
 Append under the `## v55.2` heading:
 
@@ -250,7 +252,7 @@ Append under the `## v55.2` heading:
 **After:** adds a `loadMonthTokenRef` (mirroring the load-token pattern already used in `useApprovalData.ts`/`XrayInspectionResults.tsx`/`XrayReferrals.tsx`) so a rapid double-switch of the header month can never let a superseded load's data commit over a newer selection's, or let a superseded load's rejection wipe a newer load's already-successful data — see file.
 ```
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Open `src/components/Sidebar/Tabs/Population/Population.wizard.test.tsx` and check its existing mocks (it mocks `useWorkspace` to `{ directoryHandle: null }` and `useGlobalMonth` to `{ selection: { kind: "none" }, ... }` per the global-month-selector work done earlier this session). This existing setup renders the wizard with NO directory handle, which never reaches `handleLoadExistingMonth` at all — testing the overlapping-load race requires a REAL directory handle with real month data, which is a bigger test setup than this file currently has.
 
@@ -372,12 +374,12 @@ describe("Population — overlapping month-load race", () => {
 
 **Note for the implementer:** if `saveMonthRun`'s exact parameter shape doesn't match what's shown above (check `src/data/population/populationStorage.ts`'s actual `saveMonthRun` signature — the plan brief may not have every field exactly right), fix the test to match the real signature; don't skip writing a real test over a signature mismatch. If forcing a genuine race deterministically in jsdom proves impractical even with the rerender approach, fall back to a narrower unit-level test of just the token-comparison logic (extract it isn't extractable without a larger refactor, so in that case, document in your report why a full-component race test was used instead and what specifically it verifies).
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 Run: `npx vitest run src/components/Sidebar/Tabs/Population/populationLoadRace.test.tsx`
 Expected: FAIL (or the test may pass by luck due to jsdom's microtask ordering not actually reproducing the race — if so, note this in your report; the fix is still correct and necessary per the code-level reasoning in the spec, and Step 2's note already anticipates this).
 
-- [ ] **Step 4: Apply the fix**
+- [x] **Step 4: Apply the fix**
 
 In `src/components/Sidebar/Tabs/Population/index.tsx`, add a token ref next to `loadedFolderRef` (around line 413):
 
@@ -438,12 +440,12 @@ Update the calling effect (around line 414-438):
   }, [directoryHandle, globalMonth]);
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 Run: `npx vitest run src/components/Sidebar/Tabs/Population/populationLoadRace.test.tsx src/components/Sidebar/Tabs/Population/Population.wizard.test.tsx`
 Expected: PASS (both files)
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/components/Sidebar/Tabs/Population/index.tsx docs/EDIT_LOG.md
@@ -463,7 +465,7 @@ git commit -m "fix(population): guard handleLoadExistingMonth against an overlap
 - Consumes: `buildManagementReport` (already exported from `managementReport.ts` — verify its exact export name and signature by reading the file's exports before writing the test), `maliciousExecInput()` (already defined in the test file, reused from the existing management-deck test block).
 - Produces: no new exports.
 
-- [ ] **Step 1: EDIT_LOG entry**
+- [x] **Step 1: EDIT_LOG entry**
 
 Append under `## v55.2`:
 
@@ -481,13 +483,13 @@ Append under `## v55.2`:
 **After:** comment corrected to reflect actual test coverage (now true, per the test added above).
 ```
 
-- [ ] **Step 2: Check `buildManagementReport`'s actual export/signature**
+- [x] **Step 2: Check `buildManagementReport`'s actual export/signature**
 
 Run: `grep -n "^export function buildManagementReport\|^export async function buildManagementReport" src/data/reporting/management/managementReport.ts`
 
 Confirm its parameter shape matches `buildManagementDeck`'s usage in the existing test (`buildManagementDeck(input, names)` — an `ExecutiveReportInput` and a `Record<string, string>` display-name map). If `buildManagementReport`'s signature differs, adjust Step 3's test call accordingly — don't guess, read the actual function signature first.
 
-- [ ] **Step 3: Write the failing test**
+- [x] **Step 3: Write the failing test**
 
 In `src/data/reporting/reportBuilders.xss.test.ts`, add after the existing `describe("management deck — XSS escaping", ...)` block (which uses `maliciousExecInput()`):
 
@@ -507,12 +509,12 @@ describe("management document — XSS escaping", () => {
 
 (Adjust the call signature to match whatever Step 2 confirmed — if `buildManagementReport` takes different or additional parameters than `buildManagementDeck`, use the real signature.)
 
-- [ ] **Step 4: Run test to verify it fails or passes cleanly**
+- [x] **Step 4: Run test to verify it fails or passes cleanly**
 
 Run: `npx vitest run src/data/reporting/reportBuilders.xss.test.ts`
 Expected: the new test should actually PASS immediately (the survey confirmed `buildManagementReport` already routes everything through `esc()` — this is a test-truth fix, not a code-behavior fix). If it unexpectedly FAILS, that means the survey's "low risk" assessment was wrong and there's a real escaping gap — in that case, stop and treat it as a real Important finding: fix the actual escaping bug in `managementReport.ts` before proceeding, and note this escalation clearly in your report.
 
-- [ ] **Step 5: Correct the header comment**
+- [x] **Step 5: Correct the header comment**
 
 In `src/data/reporting/management/managementReport.ts`, the header comment (`:9-12`) currently reads:
 
@@ -525,7 +527,7 @@ In `src/data/reporting/management/managementReport.ts`, the header comment (`:9-
 
 This claim is now true (Step 3 added the missing test) — no change needed to the comment's substance, but double check it still accurately says "D2 XSS test set" and that claim now holds; if the comment needs no edit because Step 3 made it true, say so in your report rather than editing something that doesn't need editing.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/data/reporting/reportBuilders.xss.test.ts docs/EDIT_LOG.md
@@ -545,7 +547,7 @@ git commit -m "test(reporting): add missing XSS coverage for the management docu
 - Consumes: `casLoop` (`src/data/storage/casLoop.ts`, already imported in this file for the index writer), `safeReadJson`/`safeWriteJson` (already imported).
 - Produces: `ReportDocument` gains two new optional fields (`revision?: number`, `_writeToken?: string`) — purely additive, does not break any existing consumer since both are optional and every read site already tolerates unknown/absent fields via `safeReadJson`'s generic typing.
 
-- [ ] **Step 1: EDIT_LOG entry**
+- [x] **Step 1: EDIT_LOG entry**
 
 Append under `## v55.2`:
 
@@ -571,7 +573,7 @@ Append under `## v55.2`:
 **After:** the per-id document write is now wrapped in the same casLoop protocol as `templateStorage.ts`'s `saveTemplateFile` (revision + `_writeToken`, verified on read-back), closing the silent-clobber gap the "single writer by id" comment had assumed away — see file.
 ```
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 In `src/data/reportDesigner/storage/reportDesignStorage.test.ts`, add after the existing `"preserves both index entries on concurrent saves"` test:
 
@@ -595,12 +597,12 @@ In `src/data/reportDesigner/storage/reportDesignStorage.test.ts`, add after the 
 
 (If `Page` type requires more fields than shown for a minimal valid page object, check `src/data/reportDesigner/reportTypes.ts`'s `Page` type and adjust `docB`'s `pages` array to satisfy it — don't leave a type error.)
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 Run: `npx vitest run src/data/reportDesigner/storage/reportDesignStorage.test.ts`
 Expected: FAIL — `loaded?.revision` is `undefined` (no CAS wrap yet means no revision stamping).
 
-- [ ] **Step 4: Add the CAS fields to `ReportDocument`**
+- [x] **Step 4: Add the CAS fields to `ReportDocument`**
 
 In `src/data/reportDesigner/reportTypes.ts`, add to the `ReportDocument` type (around line 85-96):
 
@@ -623,7 +625,7 @@ export type ReportDocument = {
 };
 ```
 
-- [ ] **Step 5: Wrap the per-id write in casLoop**
+- [x] **Step 5: Wrap the per-id write in casLoop**
 
 In `src/data/reportDesigner/storage/reportDesignStorage.ts`, add a new helper function (mirroring `saveTemplateFile`) and use it inside `saveDesign`:
 
@@ -693,12 +695,12 @@ with:
 
 (The rest of `saveDesign`'s `updateDesignIndex(...)` call and its closing braces stay unchanged.)
 
-- [ ] **Step 6: Run test to verify it passes**
+- [x] **Step 6: Run test to verify it passes**
 
 Run: `npx vitest run src/data/reportDesigner/storage/reportDesignStorage.test.ts`
 Expected: PASS (all tests in the file, including the new one)
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/data/reportDesigner/reportTypes.ts src/data/reportDesigner/storage/reportDesignStorage.ts src/data/reportDesigner/storage/reportDesignStorage.test.ts docs/EDIT_LOG.md
@@ -721,7 +723,7 @@ git commit -m "fix(report-designer): CAS-protect the per-id design document writ
 - Consumes: `casLoop`'s `verify` callback support (already used by `templateStorage.ts saveTemplateFile` and `templateSelectionStorage.ts` — read `src/data/storage/casLoop.ts`'s type definition for the exact `verify` callback signature before writing `monthLock.ts`'s version).
 - Produces: no new exports; `closeMonth`/`reopenMonth`'s CAS attempt functions gain a `verify:` callback in their return object.
 
-- [ ] **Step 1: EDIT_LOG entry**
+- [x] **Step 1: EDIT_LOG entry**
 
 Append under `## v55.2`:
 
@@ -757,13 +759,13 @@ Append under `## v55.2`:
 **After:** same rationale as the template index writer above — the per-id document (Task 4) now carries the stronger protection. No behavior change.
 ```
 
-- [ ] **Step 2: Read `casLoop`'s `verify` callback type**
+- [x] **Step 2: Read `casLoop`'s `verify` callback type**
 
 Run: `grep -n "verify" src/data/storage/casLoop.ts`
 
 Confirm the exact shape casLoop expects for the delayed-verify callback (should match the pattern already seen in `templateStorage.ts saveTemplateFile` and `templateSelectionStorage.ts`: `verify: async () => boolean`, returning whether the write still holds on a delayed re-read). Use the REAL type from this file, not the assumed shape below, if they differ.
 
-- [ ] **Step 3: Write the failing test for monthLock's delayed verify**
+- [x] **Step 3: Write the failing test for monthLock's delayed verify**
 
 Open `src/data/population/monthLock.test.ts` and check its existing structure (`Glob`/`Read` it first to match its exact helper functions and fixture style — likely uses `createMemoryDirectory()` and some month-manifest seeding helper). Add a test in the same style as whatever CAS-conflict test already exists for `templateStorage.test.ts` or `templateSelectionStorage`'s test, adapted to `closeMonth`:
 
@@ -788,7 +790,7 @@ Open `src/data/population/monthLock.test.ts` and check its existing structure (`
 
 **Note for the implementer:** check `src/data/storage/casLoop.test.ts` first — if `casLoop`'s delayed-verify mechanism is ALREADY unit-tested there in isolation (verifying that a `verify: async () => false` return correctly triggers a retry), then `monthLock.ts`'s test only needs to confirm `closeMonth`/`reopenMonth` still work correctly in the normal (non-conflicting) case after adding the `verify:` callback — a full adversarial-timing integration test would be duplicating `casLoop.test.ts`'s own coverage. Write whichever is the honest, non-redundant test; explain your choice in the report.
 
-- [ ] **Step 4: Add delayed verify to `closeMonth`/`reopenMonth`**
+- [x] **Step 4: Add delayed verify to `closeMonth`/`reopenMonth`**
 
 In `src/data/population/monthLock.ts`, in BOTH `closeMonth`'s and `reopenMonth`'s casLoop attempt functions, change the success-return block from:
 
@@ -829,7 +831,7 @@ to:
 
 (Apply this to both `closeMonth` and `reopenMonth` — they have near-identical structure per the file's own comment "Same casLoop protocol as closeMonth / updateMonthStatus".)
 
-- [ ] **Step 5: Add rationale comments to the four lower-risk sites**
+- [x] **Step 5: Add rationale comments to the four lower-risk sites**
 
 In `src/data/feedback/feedbackStorage.ts`, in the JSDoc comment above `mutateFeedback` (or immediately before the `casLoop` call if there's no JSDoc), add one line:
 
@@ -858,12 +860,12 @@ In `src/data/templates/templateStorage.ts`, above `updateTemplateIndex`'s casLoo
 
 In `src/data/reportDesigner/storage/reportDesignStorage.ts`, above `updateDesignIndex`'s casLoop call, the equivalent comment (same rationale, now also true for the per-id document per Task 4).
 
-- [ ] **Step 6: Run test to verify it passes**
+- [x] **Step 6: Run test to verify it passes**
 
 Run: `npx vitest run src/data/population/monthLock.test.ts`
 Expected: PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/data/population/monthLock.ts src/data/population/monthLock.test.ts src/data/feedback/feedbackStorage.ts src/auth/authActivityLog.ts src/data/templates/templateStorage.ts src/data/reportDesigner/storage/reportDesignStorage.ts docs/EDIT_LOG.md
@@ -882,7 +884,7 @@ git commit -m "fix(storage): add monthLock delayed-verify; document the sites th
 - Consumes: `loadInspectionTemplateSelection`/`saveInspectionTemplateSelection` (already exported from `templateSelectionStorage.ts`), `writeEmployeeXlsx` (already exported from `employeeXlsx.ts`), `createMemoryDirectory()`.
 - Produces: no new exports; test-only files.
 
-- [ ] **Step 1: EDIT_LOG entry**
+- [x] **Step 1: EDIT_LOG entry**
 
 Append under `## v55.2`:
 
@@ -900,7 +902,7 @@ Append under `## v55.2`:
 **After:** write-completes-without-throwing + correct-filename test. Note: `createMemoryDirectory()`'s file mock only faithfully round-trips string content, not binary `ArrayBuffer` writes — see the test file's own comment for the resulting scope limitation.
 ```
 
-- [ ] **Step 2: Write `templateSelectionStorage.test.ts`**
+- [x] **Step 2: Write `templateSelectionStorage.test.ts`**
 
 Create `src/data/templates/templateSelectionStorage.test.ts`:
 
@@ -961,12 +963,12 @@ describe("templateSelectionStorage", () => {
 });
 ```
 
-- [ ] **Step 3: Run test to verify it passes**
+- [x] **Step 3: Run test to verify it passes**
 
 Run: `npx vitest run src/data/templates/templateSelectionStorage.test.ts`
 Expected: PASS (this module is already fully implemented with CAS — this is pure test-addition, no code change).
 
-- [ ] **Step 4: Write `employeeXlsx.test.ts`**
+- [x] **Step 4: Write `employeeXlsx.test.ts`**
 
 Create `src/data/answers/employeeXlsx.test.ts`:
 
@@ -1044,12 +1046,12 @@ describe("employeeXlsx", () => {
 
 **Note for the implementer:** the first test's directory-lookup path is a best guess — before finalizing, read `getSampleEmployeeDir` in `src/data/workspace/workspacePaths.ts` to get the REAL folder structure (`2-samples/{month}/...` may have an additional `employees` or role-scoped subfolder) and correct the lookup so the test's existence-check is genuine, not accidentally always-null (which would make the test pass vacuously without checking anything — `expect(sampleDir).not.toBeNull()` passing because `sampleDir` really exists is the requirement, not because the catch swallowed a real error).
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 Run: `npx vitest run src/data/answers/employeeXlsx.test.ts`
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/data/templates/templateSelectionStorage.test.ts src/data/answers/employeeXlsx.test.ts docs/EDIT_LOG.md
@@ -1068,7 +1070,7 @@ git commit -m "test(data): add missing coverage for templateSelectionStorage and
 - Consumes: nothing new.
 - Produces: no new exports; behavior-only fix (malformed drag payload no longer throws uncaught).
 
-- [ ] **Step 1: EDIT_LOG entry**
+- [x] **Step 1: EDIT_LOG entry**
 
 Append under `## v55.2`:
 
@@ -1085,7 +1087,7 @@ Append under `## v55.2`:
 **After:** wraps the `JSON.parse` in try/catch; a malformed payload (e.g. a drop from an external source) now no-ops instead of throwing uncaught into the drop handler.
 ```
 
-- [ ] **Step 2: Apply the fix**
+- [x] **Step 2: Apply the fix**
 
 In `src/components/Sidebar/Tabs/ReportDesigner/index.tsx` (around line 372-376), replace:
 
@@ -1112,18 +1114,18 @@ with:
             }
 ```
 
-- [ ] **Step 3: Verify no type errors from the destructuring change**
+- [x] **Step 3: Verify no type errors from the destructuring change**
 
 Run: `npx tsc -b`
 Expected: clean (the `let` + try/catch destructuring is a standard TS pattern; confirm no downstream code in the same function shadows `field`/`label`/`role` in a way that breaks — read the ~30 lines after this change to confirm `field`/`label`/`role` are used the same way as before).
 
-- [ ] **Step 4: Add or note test coverage**
+- [x] **Step 4: Add or note test coverage**
 
 Check: `ls src/components/Sidebar/Tabs/ReportDesigner/*.test.tsx 2>/dev/null || echo "none"`
 
 If a test file exists and already tests the drop handler, add a case asserting a malformed `application/x-rd-field` payload doesn't throw (construct a `DragEvent`-like object with a `dataTransfer.getData` mock returning invalid JSON, call the handler, assert no exception). If no test file exists and the drop handler is deeply embedded in a large component (typical for drag-and-drop canvas editors), a full render+drag-simulate test may be disproportionate — in that case, skip adding a new test file for this alone and say so explicitly in your report, noting the fix was verified via the `tsc -b` type-check plus manual code reading (the fix is a narrow, obviously-correct try/catch — this is one of the cases where forcing a test adds little value over honest documentation of the gap).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/components/Sidebar/Tabs/ReportDesigner/index.tsx docs/EDIT_LOG.md
@@ -1142,7 +1144,7 @@ git commit -m "fix(report-designer): guard drag-drop JSON.parse against malforme
 - Consumes: `useFocusTrap` (`src/hooks/useFocusTrap.ts`, already used elsewhere e.g. `AuthGate.tsx`'s `adminModalRef` pattern).
 - Produces: no new exports; the popover gains focus-trapping.
 
-- [ ] **Step 1: EDIT_LOG entry**
+- [x] **Step 1: EDIT_LOG entry**
 
 Append under `## v55.2`:
 
@@ -1154,7 +1156,7 @@ Append under `## v55.2`:
 **After:** adopts the shared `useFocusTrap` hook (same pattern as `AuthGate.tsx`'s admin-passcode modal), attached to the `.gms-popover` element and enabled while `pickerOpen`. The hook's own Escape handling replaces the popover's previously-manual Escape listener; outside-click dismissal (which the hook doesn't cover) is unchanged.
 ```
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Create `src/components/GlobalMonthSelector/GlobalMonthSelector.test.tsx`:
 
@@ -1219,12 +1221,12 @@ describe("GlobalMonthSelector — new-month popover focus trap", () => {
 
 **Note for the implementer:** if `usePermissions`'s real import path or `can` signature differs from this mock, or if `GlobalMonthSelector`'s exact button text for "شهر جديد" doesn't match `labels.gm_new_month_btn`'s actual rendered text, adjust the test's selectors to match reality — read the component and `labelsStore.ts` first if the test doesn't find the expected elements.
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 Run: `npx vitest run src/components/GlobalMonthSelector/GlobalMonthSelector.test.tsx`
 Expected: FAIL — the popover currently has no focus trap, so the "Tab does not escape" assertion fails (focus moves wherever the browser's default tab order takes it, not back to the first element).
 
-- [ ] **Step 4: Apply the fix**
+- [x] **Step 4: Apply the fix**
 
 In `src/components/GlobalMonthSelector/GlobalMonthSelector.tsx`:
 
@@ -1289,12 +1291,12 @@ Attach `popoverFocusTrapRef` to the popover's `role="dialog"` element:
             <div className="gms-popover" role="dialog" aria-label={labels.gm_new_month_title} ref={popoverFocusTrapRef}>
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 Run: `npx vitest run src/components/GlobalMonthSelector/GlobalMonthSelector.test.tsx`
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/components/GlobalMonthSelector/GlobalMonthSelector.tsx src/components/GlobalMonthSelector/GlobalMonthSelector.test.tsx docs/EDIT_LOG.md
@@ -1312,27 +1314,27 @@ git commit -m "fix(month): focus-trap the new-month popover for keyboard users"
 - Consumes: all 8 prior tasks' output.
 - Produces: confirms the whole branch is green before final review.
 
-- [ ] **Step 1: Full test suite**
+- [x] **Step 1: Full test suite**
 
 Run: `npm run test:run`
 Expected: all tests pass, including the 6+ new test files/cases added across Tasks 1-8.
 
-- [ ] **Step 2: Typecheck**
+- [x] **Step 2: Typecheck**
 
 Run: `npx tsc -b`
 Expected: clean.
 
-- [ ] **Step 3: Lint**
+- [x] **Step 3: Lint**
 
 Run: `npm run lint`
 Expected: clean.
 
-- [ ] **Step 4: Build**
+- [x] **Step 4: Build**
 
 Run: `npm run build`
 Expected: succeeds; note the reported `dist/index.html` size (informational only — none of these 8 fixes touch bundle-affecting code paths at scale).
 
-- [ ] **Step 5: Commit (if any stray changes)**
+- [x] **Step 5: Commit (if any stray changes)**
 
 ```bash
 git status --short

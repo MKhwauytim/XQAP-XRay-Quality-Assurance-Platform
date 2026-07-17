@@ -1,7 +1,7 @@
-# Quality Pass — Batches 1-3 (Correctness, Test-Truth, A11y) Design Spec
+# Quality Pass — Batches 1-3 (Correctness, Test-Truth, A11y) Design Spec [DONE — merged to main]
 
 - **Date:** 2026-07-16
-- **Status:** Approved (autonomous /goal run — findings pre-vetted by an independent read-only survey, no open design questions)
+- **Status:** ✅ DONE — implemented (9 tasks), reviewed (2 rounds: task-level + whole-branch, catching 1 Critical regression + 1 Important gap along the way), and merged to main via [PR #21](https://github.com/MKhwauytim/XQAP-XRay-Quality-Assurance-Platform/pull/21) (2026-07-17). Implementation plan: `docs/superpowers/plans/2026-07-16-quality-pass-batches-1-3.md`.
 - **Scope:** Fix the 7 real, evidence-backed findings from `.superpowers/sdd/app-quality-survey.md` that the survey itself scoped as safe for an unattended fix pass (Batches 1-3), plus one carried-over follow-up (I-2) from the just-merged global-month-selector feature's final review. Batch 4 (date-parsing locale policy, governance-log viewer, component splitting, hardcoded-Arabic sweep) is explicitly excluded — the survey labels those as product/scope decisions requiring owner input, not overnight fixes, and this spec respects that boundary.
 
 ## Background
