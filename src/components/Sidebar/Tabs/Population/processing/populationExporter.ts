@@ -265,75 +265,99 @@ function preparedRowToExport(
   row: PreparedPopulationRow,
   columnsSetting?: ExportColumnSetting[]
 ): Record<string, unknown> {
-  if (!columnsSetting || columnsSetting.length === 0) {
-    const base = {
-      "Source Row Number": row.sourceRowNumber,
-      "Source Sheet": row.sourceSheetName,
-      "المستوى": row.stage,
-      "معرف الأشعة": row.xrayImageId,
-      "تاريخ دخول الأشعة": row.xrayEntryDate,
-      "رمز المنفذ": row.portCode,
-      "نوع المنفذ": row.portType,
-      "اسم المنفذ": row.portName,
-      "رقم البيان": row.declarationNumber,
-      "تاريخ البيان": row.declarationDate,
-      "رقم اللوحة/الحاوية": row.plateOrContainerNumber,
-      "رقم الهيكل": row.chassisNumber,
-      "نتيجة المستوى الأول للأشعة": row.xrayLevelOneResult,
-      "نتيجة المستوى الثاني للأشعة": row.xrayLevelTwoResult,
-      "نتيجة المعاين": row.otherResults?.manual?.result ?? null,
-      "رمز نتيجة المعاين": row.otherResults?.manual?.code ?? null,
-      "نتيجة المفتش المعاكس": row.otherResults?.opposite?.result ?? null,
-      "رمز نتيجة المفتش المعاكس": row.otherResults?.opposite?.code ?? null,
-      "موظف التفتيش المعاكس": row.otherResults?.opposite?.employeeId ?? null,
-      "نتيجة الوسائل الحية": row.otherResults?.liveMeans?.result ?? null,
-      "رمز نتيجة الوسائل الحية": row.otherResults?.liveMeans?.code ?? null,
-      "موظف الوسائل الحية": row.otherResults?.liveMeans?.employeeId ?? null,
-      "ملاحظة المستويات": row.notes ?? null,
-      "نوع الحركة": row.movementType,
-      "رقم المحضر": row.reportNumber,
-      "مستهدف من محرك المخاطر": row.targetedByRiskEngine,
-      "رسالة المخاطر": row.riskMessage,
-      "CertScan Status": row.certScanStatus,
-      "CertScan Snippet": row.certScanSnippet,
-      "Original CertScan Snippet": row.originalCertScanSnippet,
-      "BI Enrichment Status": row.biEnrichmentStatus,
-      "BI Matched": row.biMatched ? "Yes" : "No",
-      "BI Filled Fields": row.biFilledFields.join(" | ")
-    };
-
-    const extras = getUnmappedRawFields(row.rawRow, RISK_COLUMN_ALIASES);
-    return { ...base, ...extras };
-  }
-
-  const resultObj: Record<string, unknown> = {};
-  const sortedSetting = columnsSetting
-    .filter((c) => c.isEnabled)
-    .sort((a, b) => a.order - b.order);
-
-  for (const col of sortedSetting) {
-    const key = col.fieldKey;
-    const header = col.exportHeader;
-    if (key in row) {
-      resultObj[header] = (row as Record<string, unknown>)[key];
-    } else if (row.rawRow && key in row.rawRow) {
-      resultObj[header] = row.rawRow[key];
-    } else {
-      resultObj[header] = null;
-    }
-  }
-
-  const enabledKeys = new Set(columnsSetting.map((c) => c.fieldKey));
-  if (row.rawRow) {
-    for (const [key, value] of Object.entries(row.rawRow)) {
-      if (!enabledKeys.has(key)) {
-        resultObj[key] = value;
-      }
-    }
-  }
-
-  return resultObj;
+  return !columnsSetting || columnsSetting.length === 0
+    ? defaultPreparedRowToExport(row)
+    : configuredPreparedRowToExport(row, columnsSetting);
 }
+
+function defaultPreparedRowToExport(row: PreparedPopulationRow): Record<string, unknown> {
+  const base = {
+    "Source Row Number": row.sourceRowNumber,
+    "Source Sheet": row.sourceSheetName,
+    "المستوى": row.stage,
+    "معرف الأشعة": row.xrayImageId,
+    "تاريخ دخول الأشعة": row.xrayEntryDate,
+    "رمز المنفذ": row.portCode,
+    "نوع المنفذ": row.portType,
+    "اسم المنفذ": row.portName,
+    "رقم البيان": row.declarationNumber,
+    "تاريخ البيان": row.declarationDate,
+    "رقم اللوحة/الحاوية": row.plateOrContainerNumber,
+    "رقم الهيكل": row.chassisNumber,
+    "نتيجة المستوى الأول للأشعة": row.xrayLevelOneResult,
+    "نتيجة المستوى الثاني للأشعة": row.xrayLevelTwoResult,
+    ...otherTeamResultsToExport(row),
+    "ملاحظة المستويات": row.notes ?? null,
+    "نوع الحركة": row.movementType,
+    "رقم المحضر": row.reportNumber,
+    "مستهدف من محرك المخاطر": row.targetedByRiskEngine,
+    "رسالة المخاطر": row.riskMessage,
+    "CertScan Status": row.certScanStatus,
+    "CertScan Snippet": row.certScanSnippet,
+    "Original CertScan Snippet": row.originalCertScanSnippet,
+    "BI Enrichment Status": row.biEnrichmentStatus,
+    "BI Matched": row.biMatched ? "Yes" : "No",
+    "BI Filled Fields": row.biFilledFields.join(" | ")
+  };
+  return { ...base, ...getUnmappedRawFields(row.rawRow, RISK_COLUMN_ALIASES) };
+}
+
+function otherTeamResultsToExport(row: PreparedPopulationRow): Record<string, unknown> {
+  return {
+    "نتيجة المعاين": teamResultField(row, "manual", "result"),
+    "رمز نتيجة المعاين": teamResultField(row, "manual", "code"),
+    "نتيجة المفتش المعاكس": teamResultField(row, "opposite", "result"),
+    "رمز نتيجة المفتش المعاكس": teamResultField(row, "opposite", "code"),
+    "موظف التفتيش المعاكس": teamResultField(row, "opposite", "employeeId"),
+    "نتيجة الوسائل الحية": teamResultField(row, "liveMeans", "result"),
+    "رمز نتيجة الوسائل الحية": teamResultField(row, "liveMeans", "code"),
+    "موظف الوسائل الحية": teamResultField(row, "liveMeans", "employeeId")
+  };
+}
+
+function teamResultField(
+  row: PreparedPopulationRow,
+  team: keyof PreparedPopulationRow["otherResults"],
+  field: keyof PreparedPopulationRow["otherResults"]["manual"]
+): string | null {
+  return row.otherResults?.[team]?.[field] ?? null;
+}
+
+function configuredColumnValue(row: PreparedPopulationRow, key: string): unknown {
+  if (key in row) return (row as unknown as Record<string, unknown>)[key];
+  if (row.rawRow && key in row.rawRow) return row.rawRow[key];
+  return null;
+}
+
+function appendUnconfiguredRawFields(
+  target: Record<string, unknown>,
+  row: PreparedPopulationRow,
+  configuredKeys: ReadonlySet<string>
+): void {
+  for (const [key, value] of Object.entries(row.rawRow ?? {})) {
+    if (!configuredKeys.has(key)) target[key] = value;
+  }
+}
+
+function configuredPreparedRowToExport(
+  row: PreparedPopulationRow,
+  columnsSetting: ExportColumnSetting[]
+): Record<string, unknown> {
+  const exported: Record<string, unknown> = {};
+  const enabledColumns = columnsSetting
+    .filter((column) => column.isEnabled)
+    .sort((first, second) => first.order - second.order);
+  for (const column of enabledColumns) {
+    exported[column.exportHeader] = configuredColumnValue(row, column.fieldKey);
+  }
+  appendUnconfiguredRawFields(
+    exported,
+    row,
+    new Set(columnsSetting.map((column) => column.fieldKey))
+  );
+  return exported;
+}
+
 
 function preparedRowsToExport(
   rows: PreparedPopulationRow[],
@@ -427,101 +451,112 @@ function summaryToExport(
   ];
 }
 
+function comparisonStatus(riskCount: number, biCount: number): string {
+  if (riskCount > 0 && biCount === 0) return "Risk Only";
+  if (riskCount === 0 && biCount > 0) return "BI Only";
+  return "Matched";
+}
+
+function nullableField<T extends object, K extends keyof T>(row: T | null, key: K): T[K] | null {
+  return row?.[key] ?? null;
+}
+
+function sourceRowNumbers(rows: Array<{ sourceRowNumber: number }>): string {
+  return rows.map((row) => row.sourceRowNumber).join(" | ");
+}
+
+function sourceSheetNames(rows: Array<{ sourceSheetName: string }>): string {
+  return Array.from(new Set(rows.map((row) => row.sourceSheetName))).join(" | ");
+}
+
+function riskComparisonFields(row: NormalizedRiskRow | null): Record<string, unknown> {
+  return {
+    "Risk المستوى": nullableField(row, "stage"),
+    "Risk معرف الأشعة": nullableField(row, "xrayImageId"),
+    "Risk تاريخ دخول الأشعة": nullableField(row, "xrayEntryDate"),
+    "Risk نوع المنفذ": nullableField(row, "portType"),
+    "Risk اسم المنفذ": nullableField(row, "portName"),
+    "Risk رقم البيان": nullableField(row, "declarationNumber"),
+    "Risk تاريخ البيان": nullableField(row, "declarationDate"),
+    "Risk رقم اللوحة/الحاوية": nullableField(row, "plateOrContainerNumber"),
+    "Risk رقم الهيكل": nullableField(row, "chassisNumber"),
+    "Risk نتيجة المستوى الأول للأشعة": nullableField(row, "xrayLevelOneResult"),
+    "Risk نتيجة المستوى الثاني للأشعة": nullableField(row, "xrayLevelTwoResult"),
+    "Risk نوع الحركة": nullableField(row, "movementType"),
+    "Risk رقم المحضر": nullableField(row, "reportNumber"),
+    "Risk مستهدف من محرك المخاطر": nullableField(row, "targetedByRiskEngine"),
+    "Risk رسالة المخاطر": nullableField(row, "riskMessage")
+  };
+}
+
+function biComparisonFields(row: NormalizedBiRow | null): Record<string, unknown> {
+  return {
+    "BI معرف الأشعة": nullableField(row, "xrayImageId"),
+    "BI تاريخ دخول الأشعة": nullableField(row, "xrayEntryDate"),
+    "BI نوع المنفذ": nullableField(row, "portType"),
+    "BI اسم المنفذ": nullableField(row, "portName"),
+    "BI رقم البيان": nullableField(row, "declarationNumber"),
+    "BI تاريخ البيان": nullableField(row, "declarationDate"),
+    "BI رقم اللوحة/الحاوية": nullableField(row, "plateOrContainerNumber"),
+    "BI رقم الهيكل": nullableField(row, "chassisNumber"),
+    "BI نتيجة المستوى الأول للأشعة": nullableField(row, "levelOneResult"),
+    "BI نتيجة المستوى الثاني للأشعة": nullableField(row, "levelTwoResult"),
+    "BI Source": nullableField(row, "source")
+  };
+}
+
+function comparisonRowToExport(
+  key: string,
+  riskRowsByKey: Map<string, NormalizedRiskRow[]>,
+  biRowsByKey: Map<string, NormalizedBiRow[]>
+): Record<string, unknown> {
+  const riskRows = riskRowsByKey.get(key) ?? [];
+  const biRows = biRowsByKey.get(key) ?? [];
+  return {
+    "Comparison Status": comparisonStatus(riskRows.length, biRows.length),
+    "Risk Row Count": riskRows.length,
+    "BI Row Count": biRows.length,
+    "Risk Source Row Numbers": sourceRowNumbers(riskRows),
+    "Risk Source Sheets": sourceSheetNames(riskRows),
+    ...riskComparisonFields(riskRows[0] ?? null),
+    "BI Source Row Numbers": sourceRowNumbers(biRows),
+    "BI Source Sheets": sourceSheetNames(biRows),
+    ...biComparisonFields(biRows[0] ?? null)
+  };
+}
+
+type ComparisonKeySource = {
+  xrayImageId: unknown;
+  portName: unknown;
+};
+
+function buildComparisonLookup<T extends ComparisonKeySource>(
+  rows: readonly T[],
+): Map<string, T[]> {
+  const lookup = new Map<string, T[]>();
+  for (const row of rows) {
+    const key = makeComparisonKey(row.xrayImageId, row.portName);
+    const matches = lookup.get(key) ?? [];
+    matches.push(row);
+    lookup.set(key, matches);
+  }
+  return lookup;
+}
+
 function riskBiComparisonToExport(
   riskWorkbookResult: RiskWorkbookResult,
   biWorkbookResult: BiWorkbookResult | null
 ): Record<string, unknown>[] {
-  const riskRowsByKey = new Map<string, NormalizedRiskRow[]>();
-  const biRowsByKey = new Map<string, NormalizedBiRow[]>();
-
-  for (const row of riskWorkbookResult.rows) {
-    const key = makeComparisonKey(row.xrayImageId, row.portName);
-    const rows = riskRowsByKey.get(key) ?? [];
-
-    rows.push(row);
-    riskRowsByKey.set(key, rows);
-  }
-
-  for (const row of biWorkbookResult?.rows ?? []) {
-    const key = makeComparisonKey(row.xrayImageId, row.portName);
-    const rows = biRowsByKey.get(key) ?? [];
-
-    rows.push(row);
-    biRowsByKey.set(key, rows);
-  }
-
-  const allKeys = Array.from(
-    new Set([...riskRowsByKey.keys(), ...biRowsByKey.keys()])
+  const riskRowsByKey = buildComparisonLookup<NormalizedRiskRow>(
+    riskWorkbookResult.rows,
   );
-
-  return allKeys.map((key) => {
-    const riskRows = riskRowsByKey.get(key) ?? [];
-    const biRows = biRowsByKey.get(key) ?? [];
-
-    const firstRiskRow = riskRows[0] ?? null;
-    const firstBiRow = biRows[0] ?? null;
-
-    let comparisonStatus = "Matched";
-
-    if (riskRows.length > 0 && biRows.length === 0) {
-      comparisonStatus = "Risk Only";
-    }
-
-    if (riskRows.length === 0 && biRows.length > 0) {
-      comparisonStatus = "BI Only";
-    }
-
-    return {
-      "Comparison Status": comparisonStatus,
-      "Risk Row Count": riskRows.length,
-      "BI Row Count": biRows.length,
-
-      "Risk Source Row Numbers": riskRows
-        .map((row) => row.sourceRowNumber)
-        .join(" | "),
-      "Risk Source Sheets": Array.from(
-        new Set(riskRows.map((row) => row.sourceSheetName))
-      ).join(" | "),
-
-      "Risk المستوى": firstRiskRow?.stage ?? null,
-      "Risk معرف الأشعة": firstRiskRow?.xrayImageId ?? null,
-      "Risk تاريخ دخول الأشعة": firstRiskRow?.xrayEntryDate ?? null,
-      "Risk نوع المنفذ": firstRiskRow?.portType ?? null,
-      "Risk اسم المنفذ": firstRiskRow?.portName ?? null,
-      "Risk رقم البيان": firstRiskRow?.declarationNumber ?? null,
-      "Risk تاريخ البيان": firstRiskRow?.declarationDate ?? null,
-      "Risk رقم اللوحة/الحاوية": firstRiskRow?.plateOrContainerNumber ?? null,
-      "Risk رقم الهيكل": firstRiskRow?.chassisNumber ?? null,
-      "Risk نتيجة المستوى الأول للأشعة":
-        firstRiskRow?.xrayLevelOneResult ?? null,
-      "Risk نتيجة المستوى الثاني للأشعة":
-        firstRiskRow?.xrayLevelTwoResult ?? null,
-      "Risk نوع الحركة": firstRiskRow?.movementType ?? null,
-      "Risk رقم المحضر": firstRiskRow?.reportNumber ?? null,
-      "Risk مستهدف من محرك المخاطر": firstRiskRow?.targetedByRiskEngine ?? null,
-      "Risk رسالة المخاطر": firstRiskRow?.riskMessage ?? null,
-
-      "BI Source Row Numbers": biRows
-        .map((row) => row.sourceRowNumber)
-        .join(" | "),
-      "BI Source Sheets": Array.from(
-        new Set(biRows.map((row) => row.sourceSheetName))
-      ).join(" | "),
-
-      "BI معرف الأشعة": firstBiRow?.xrayImageId ?? null,
-      "BI تاريخ دخول الأشعة": firstBiRow?.xrayEntryDate ?? null,
-      "BI نوع المنفذ": firstBiRow?.portType ?? null,
-      "BI اسم المنفذ": firstBiRow?.portName ?? null,
-      "BI رقم البيان": firstBiRow?.declarationNumber ?? null,
-      "BI تاريخ البيان": firstBiRow?.declarationDate ?? null,
-      "BI رقم اللوحة/الحاوية": firstBiRow?.plateOrContainerNumber ?? null,
-      "BI رقم الهيكل": firstBiRow?.chassisNumber ?? null,
-      "BI نتيجة المستوى الأول للأشعة": firstBiRow?.levelOneResult ?? null,
-      "BI نتيجة المستوى الثاني للأشعة": firstBiRow?.levelTwoResult ?? null,
-      "BI Source": firstBiRow?.source ?? null
-    };
-  });
+  const biRowsByKey = buildComparisonLookup<NormalizedBiRow>(
+    biWorkbookResult?.rows ?? [],
+  );
+  const allKeys = Array.from(new Set([...riskRowsByKey.keys(), ...biRowsByKey.keys()]));
+  return allKeys.map((key) => comparisonRowToExport(key, riskRowsByKey, biRowsByKey));
 }
+
 
 export function exportPopulationProcessingResult(
   result: PopulationProcessingResult,

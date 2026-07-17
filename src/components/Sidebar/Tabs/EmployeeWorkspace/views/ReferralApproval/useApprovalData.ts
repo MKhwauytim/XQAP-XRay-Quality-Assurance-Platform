@@ -1,10 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { readSession } from "../../../../../../auth/authSession";
-import {
-  hasFeature,
-  readUserManagementState,
-  subscribeToUserManagementChanges,
-} from "../../../../../../auth/userManagement";
+import { usePermissions } from "../../../../../../auth/usePermissions";
+import { readUserManagementState } from "../../../../../../auth/userManagement";
 import { appendWorkspaceAction } from "../../../../../../data/audit/actionLog";
 import { getLabels } from "../../../../../../data/labels/labelsStore";
 import { loadOrDeriveDistributionCurrent } from "../../../../../../data/distribution/distributionStorage";
@@ -67,14 +64,13 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
   const username = session?.username ?? "";
   const role = session?.role ?? "employee";
 
-  const [, forcePermissionRefresh] = useState(0);
-  useEffect(() => subscribeToUserManagementChanges(() => forcePermissionRefresh((n) => n + 1)), []);
+  const { canMutate } = usePermissions();
   const userManagementState = readUserManagementState();
-  const canApproveReferrals = hasFeature(userManagementState.featurePermissions, role, "approve-referrals");
-  const canApproveReplacements = hasFeature(userManagementState.featurePermissions, role, "approve-replacements");
+  const canApproveReferrals = canMutate("approve-referrals");
+  const canApproveReplacements = canMutate("approve-replacements");
   // Reopen requests are gated on the existing supervisor reopen-authority feature —
   // whoever may directly reopen answers may approve employee reopen requests.
-  const canApproveReopens = hasFeature(userManagementState.featurePermissions, role, "ew.reopenAnswer");
+  const canApproveReopens = canMutate("ew.reopenAnswer");
 
   const userDisplayMap: Record<string, string> = {};
   for (const u of userManagementState.users) userDisplayMap[u.username] = u.displayName;
@@ -151,6 +147,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
   // request.monthFolderName, never the UI's selected month (bug #3).
 
   async function approveReferral(request: ReferralRequest, notes: string): Promise<OpResult> {
+    if (!canApproveReferrals) return { ok: false, error: "لا تملك صلاحية اعتماد الإحالات، أو أن مساحة العمل للقراءة فقط." };
     try {
       const result = await approveReferralDomain({
         directoryHandle,
@@ -178,6 +175,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
   }
 
   async function denyReferral(request: ReferralRequest, notes: string): Promise<OpResult> {
+    if (!canApproveReferrals) return { ok: false, error: "لا تملك صلاحية رفض الإحالات، أو أن مساحة العمل للقراءة فقط." };
     try {
       const result = await denyReferralDomain({
         directoryHandle,
@@ -204,6 +202,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
   }
 
   async function approveReplacement(request: ReplacementRequest, notes: string): Promise<OpResult> {
+    if (!canApproveReplacements) return { ok: false, error: "لا تملك صلاحية اعتماد الاستبدالات، أو أن مساحة العمل للقراءة فقط." };
     try {
       const result = await approveReplacementDomain({
         directoryHandle,
@@ -231,6 +230,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
   }
 
   async function denyReplacement(request: ReplacementRequest, notes: string): Promise<OpResult> {
+    if (!canApproveReplacements) return { ok: false, error: "لا تملك صلاحية رفض الاستبدالات، أو أن مساحة العمل للقراءة فقط." };
     try {
       const result = await denyReplacementDomain({
         directoryHandle,
@@ -257,6 +257,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
   }
 
   async function approveReopen(request: ReopenRequest, notes: string): Promise<OpResult> {
+    if (!canApproveReopens) return { ok: false, error: "لا تملك صلاحية اعتماد إعادة الفتح، أو أن مساحة العمل للقراءة فقط." };
     try {
       const result = await approveReopenDomain({
         directoryHandle,
@@ -285,6 +286,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
   }
 
   async function denyReopen(request: ReopenRequest, notes: string): Promise<OpResult> {
+    if (!canApproveReopens) return { ok: false, error: "لا تملك صلاحية رفض إعادة الفتح، أو أن مساحة العمل للقراءة فقط." };
     try {
       const result = await denyReopenDomain({
         directoryHandle,
@@ -322,12 +324,14 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
   }
 
   async function approve(request: CardRequest, notes: string): Promise<OpResult> {
+    if (!canReviewRequest(request)) return { ok: false, error: "لا تملك صلاحية اعتماد هذا الطلب، أو أن مساحة العمل للقراءة فقط." };
     if (isReferral(request)) return approveReferral(request, notes);
     if (isReplacement(request)) return approveReplacement(request, notes);
     return approveReopen(request, notes);
   }
 
   async function deny(request: CardRequest, notes: string): Promise<OpResult> {
+    if (!canReviewRequest(request)) return { ok: false, error: "لا تملك صلاحية رفض هذا الطلب، أو أن مساحة العمل للقراءة فقط." };
     if (isReferral(request)) return denyReferral(request, notes);
     if (isReplacement(request)) return denyReplacement(request, notes);
     return denyReopen(request, notes);

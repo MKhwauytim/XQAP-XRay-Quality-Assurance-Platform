@@ -4,6 +4,7 @@ import { LayoutDashboard } from "lucide-react";
 import type { SidebarTabModule } from "../tabTypes";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
 import { usePermissions } from "../../../../auth/usePermissions";
+import { tabAllowedRoles } from "../../../../auth/tabCatalog";
 import { AccessDenied } from "../../../PermissionGuard";
 import TemplateBuilderTab from "../TemplateBuilder";
 import XrayReferrals from "./views/XrayReferrals";
@@ -41,7 +42,7 @@ export const tabConfig: SidebarTabModule["tabConfig"] = {
   id: "employee-workspace",
   label: "إدارة مساحة العمل",
   order: 15,
-  allowedRoles: ["guest", "employee", "supervisor", "manager", "admin"],
+  allowedRoles: tabAllowedRoles("employee-workspace"),
   icon: <LayoutDashboard size={20} strokeWidth={1.8} aria-hidden />,
   subTabs: [
     { id: SUB_TAB_XRAY_REFERRALS,    label: "صور الأشعة المحالة" },

@@ -1,122 +1,106 @@
 # AGENTS.md
 
-This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
-
-X-ray quality control app (`x-ray-quality-app-v1`): an Arabic, RTL-first React 19 + TypeScript + Vite SPA for importing radiology BI/risk data from Excel, processing a population, drawing a stratified random sample, distributing assignments to employees, collecting answers, and generating self-contained HTML reports. **No backend** — all state lives in the browser or in a user-selected workspace folder on disk.
+Guidance for agents working on the X-ray quality control application: an Arabic, RTL-first React 19 + TypeScript + Vite SPA for importing radiology BI/risk Excel data, processing a population, drawing a stratified sample, distributing work, collecting answers, and producing self-contained reports. There is no backend; business data lives in a user-selected workspace folder and auth/preferences live in browser storage.
 
 ## Commands
 
 ```bash
-npm run dev        # Vite dev server
-npm run build      # tsc -b && vite build → single self-contained dist/index.html
-npm run lint       # ESLint
-npm run preview    # Preview the built file
-npm run test:run   # Vitest (node env), 58 tests
-npm run test       # Vitest watch mode
+npm run dev                 # Vite development server
+npm run typecheck           # strict TypeScript check
+npm run lint                # ESLint over the repository
+npm run check:complexity    # complexity/large-function regression budget
+npm run test:run            # Vitest, 711 tests in 109 files as of v56.2
+npm run build               # tsc -b + one-file Vite build
+npm run check:bundle-size   # raw/gzip release budget
+npm run check:release       # package version ↔ EDIT_LOG consistency
+npm run check:vendor        # vendored SheetJS SHA-256
+npm run preview             # preview production build
 ```
 
-## Build & dependency gotchas
+## Build and platform constraints
 
-- `vite-plugin-singlefile` inlines everything (`assetsInlineLimit` maxed, `cssCodeSplit: false`): the build output is **one portable `dist/index.html`** (~942 kB, 286 kB gzip).
-- The `xlsx` dependency is installed from a **SheetJS CDN tarball** (`https://cdn.sheetjs.com/xlsx-0.20.3/...`), not the npm registry — `npm install` needs access to that URL; don't "upgrade" it to the stale npm package.
-- The workspace features require the **File System Access API** (`showDirectoryPicker`), so the app only fully works in Chromium browsers (Chrome/Edge). Other browsers get the `unsupported_browser` state.
-- TypeScript is in strict mode. `createWritable` on `FileHandleLike` is typed as optional — always guard with `if (!fh.createWritable) return/continue;` before calling it.
+- `vite-plugin-singlefile` produces one portable `dist/index.html` (~3.04 MB, ~1.13 MB gzip in v56.2). The ChangeLog raw import is truncated at build time.
+- SheetJS is vendored at `vendor/xlsx-0.20.3.tgz`; `package.json` uses `file:vendor/xlsx-0.20.3.tgz`. Do not replace it with the stale npm-registry package. Follow `vendor/README.md` and update the reviewed checksum when upgrading.
+- Full workspace support requires the File System Access API (`showDirectoryPicker`), so use Chrome or Edge. Other browsers receive the unsupported-browser state.
+- TypeScript uses strict mode and `erasableSyntaxOnly`. `FileHandleLike.createWritable` is optional; guard it before calling.
+- Run every release gate listed in `docs/product/RELEASE_CHECKLIST.md`.
 
-## Disk layout (workspace folder)
+## Workspace layout
 
-The user picks a root directory. Inside:
-
-```
-Population/
-  {MM-MonthName-YYYY}/         ← one folder per processed month
-    month.manifest.json
-    risk.raw.json
-    population.final.json
-    bi.raw.json                 ← only if BI rows present
-    sample/
-      sample.master.json
-    distribution.log.json       ← append-only event log
-    distribution.current.json   ← derived snapshot
-    employee-answers/
-      {username}.answers.json
-templates/
-  {templateId}.json
-  templates.index.json
-.system/
-  backups/
-    {YYYY-MM-DDTHH-MM-SS}/     ← backup snapshots
-      backup.manifest.json
-      {month}/ …key files…
+```text
+1-population/{month}/
+  month.manifest.json
+  1-raw/risk.raw.json, bi.raw.json
+  2-processed/population.final.json, processing.summary.json
+2-samples/{month}/
+  1-main/sample.master.json, distribution.events/{eventId}.json,
+         distribution.log.json, distribution.current.json, main.samples.json
+  2-employees/{username}.samples.json, {username}.answers.json
+  3-approvals/{supervisor}.decisions.json
+3-user-data/
+4-reports/designs/
+5-system/
+  workspace.schema.json
+  backups/, audit/, locks/, notifications/, feedback/, user-presets/
+6-templates/
+  {templateId}.json, templates.index.json, template.selection.json
 ```
 
-Month folder names follow the pattern `{month}-{MonthName-en}-{year}` (e.g. `5-May-2026`).
+Month folders use `{month}-{MonthName-en}-{year}`, for example `5-May-2026`. Legacy readers still support `Population/`, `.system/`, and `templates/`. Never silently move/delete legacy roots. Workspace schema changes must be detected read-only, dry-run first, backed up, validated, and idempotent.
 
-## Architecture
+## Persistence boundaries
 
-### Two persistence layers — don't mix them
+### Browser storage — `src/auth/`
 
-1. **Browser storage (auth & permissions)** — `src/auth/`
-   - Login: passwords hashed with PBKDF2-SHA256, 210k iterations (`passwordCrypto.ts`). Bootstrap `admin` hash in `authConfig.ts`.
-   - Session → `sessionStorage`; managed users + role→tab permission matrix → `localStorage` (`xray_user_management_v1`), changes broadcast via custom DOM event (`subscribeToUserManagementChanges`).
-   - Roles: `employee` / `supervisor` / `admin`. `App.tsx` filters tabs by role + permission matrix.
-   - `MANAGED_TABS` in `userManagement.ts` must list every tab; `createDefaultPermissions()` must include all role×tab combinations.
+- Sessions use `sessionStorage`; managed users, password hashes, roles, and permission matrices use `localStorage`.
+- Roles are `guest`, `employee`, `supervisor`, `manager`, and `admin`.
+- New passwords use Argon2id; legacy PBKDF2 records are upgraded when authenticated.
+- `src/auth/tabCatalog.ts` is the source of truth for tab IDs, Arabic labels, parent relationships, and role ceilings. Permission defaults are derived/tested against it.
+- Use `canMutate`/the centralized mutation capability for every persistent UI action. Check at both render and handler boundaries.
+- This is advisory client-side authorization, not a security boundary. See `docs/architecture/SECURITY_MODEL.md`.
 
-2. **Workspace folder on disk (business data)** — `src/data/`
-   - Safe write layer: `safeWriteJson` / `safeReadJson` in `src/data/storage/safeWrite.ts` — temp→commit pattern with `.bak` snapshots.
-   - `JsonEnvelope<TData>` wraps every JSON file: `{ metadata: { schemaVersion, revision, contentHash, ... }, data }`.
-   - Web Locks API (with promise-chain fallback) prevents concurrent writes within a tab.
-   - `WorkspaceProvider.tsx` / `useWorkspace.ts` — React context for directory handle.
+### Workspace data — `src/data/`
 
-### Data-layer modules
+- `safeWriteJson`/`safeReadJson` use temp→commit with verified backups and typed read-only/transient failure handling.
+- JSON business files use `JsonEnvelope<TData>` metadata with schema version, revision, and content hash.
+- Web Locks coordinate one browser context; promise-chain fallback is local only.
+- Distribution durability uses immutable per-event files. `distribution.log.json` is a compatibility projection and `distribution.current.json` is a rebuildable cache keyed by `eventSetId`.
+- Corrupt current, legacy, or immutable events must fail explicitly; never reinterpret corrupt governance data as empty.
+- Browser filesystem APIs cannot guarantee atomic workspace-wide migration, global multi-device ordering, multi-event transactions, or exactly-once delivery. Those require a backend.
+
+## Main data modules
 
 | Module | Path | Responsibility |
-|--------|------|----------------|
-| Population storage | `src/data/population/` | Month folder CRUD, manifest, raw/final JSON |
-| Sampling | `src/data/sampling/` | Hamilton apportionment, Mulberry32 RNG, Fisher-Yates, draw algorithm |
-| Distribution | `src/data/distribution/` | Append-only event log, `deriveCurrentDistribution` fold |
-| Templates | `src/data/templates/` | Template schema CRUD + index |
-| Answers | `src/data/answers/` | Per-employee per-month answer files |
-| Reporting | `src/data/reporting/` | Self-contained Arabic HTML report builders |
-| Backup | `src/data/backup/` | Copy key files to `.system/backups/`, archive status check |
+|---|---|---|
+| Population | `src/data/population/` | Month CRUD, manifests, raw/final data, month locks |
+| Sampling | `src/data/sampling/` | Hamilton allocation, seeded RNG, staged draw, spillover |
+| Distribution | `src/data/distribution/` | Immutable events, compatibility projection, derived state |
+| Templates | `src/data/templates/` | Inspection template schema/storage/index |
+| Answers/approvals | `src/data/answers/`, `src/data/approvals/`, `src/data/referral/` | Employee answers and governed transitions |
+| Reporting | `src/data/reporting/` | Arabic HTML, workbook, document, and executive deck builders |
+| Backup/audit | `src/data/backup/`, `src/data/audit/` | Snapshots, restore checks, activity and action logs |
 
-### Tab system
+## Tab system
 
-Tabs are auto-discovered: `tabRegistry.ts` uses `import.meta.glob("./*/index.tsx", { eager: true })` over `src/components/Sidebar/Tabs/`. Each tab folder exports a default component + a `tabConfig` (id, label, order, allowedRoles). Also register in `MANAGED_TABS` and `createDefaultPermissions()` in `userManagement.ts`.
+Top-level tabs are auto-discovered by `tabRegistry.ts` through `import.meta.glob`. Every tab exports a component and `tabConfig`; metadata must agree with `src/auth/tabCatalog.ts`.
 
-**Current tabs:**
+| ID | Roles ceiling | Order |
+|---|---|---:|
+| `population` | all roles | 10 |
+| `employee-workspace` | all roles | 15 |
+| `reports` | guest, supervisor, manager, admin | 25 |
+| `archive` | guest, supervisor, manager, admin | 30 |
+| `user-management` | admin | 40 |
+| `settings` | guest, admin | 95 |
+| `change-log` | admin | 96 |
 
-| Tab id | File | Roles | Order |
-|--------|------|-------|-------|
-| `population` | `Tabs/Population/` | all | 10 |
-| `employee-workspace` | `Tabs/EmployeeWorkspace/` | all | 15 |
-| `template-builder` | `Tabs/TemplateBuilder/` | admin | 20 |
-| `reports` | `Tabs/Reports/` | supervisor, admin | 25 |
-| `archive` | `Tabs/Archive/` | supervisor, admin | 30 |
-| `user-management` | `Tabs/UserManagement/` | admin | 40 |
-
-### Population tab — core workflow
-
-The Population tab orchestrates the end-to-end flow:
-- **Phase 1** Excel import (BI + risk data via SheetJS)
-- **Phase 2** Population processing + save to disk (`month.manifest.json`, `risk.raw.json`, `population.final.json`)
-- **Phase 3** Sample draw: Hamilton apportionment by port → CertScan/NonCertScan split → Fisher-Yates draw → capacity-weighted spillover
-- **Phase 4** Distribution: assign rows to employees → append-only event log → derived current state
-
-Subfolders: `biData/`, `riskData/`, `processing/`, `reporting/`.
-
-### Sampling algorithm
-
-- `rng.ts`: Mulberry32 PRNG (`createRng(seed)`), djb2 hash (`hashSeedString`), Fisher-Yates (`shuffleInPlace`), draw-without-replacement.
-- `apportionment.ts`: Hamilton's method (largest-remainder). Ties broken alphabetically.
-- `sampleAlgorithm.ts`: Groups rows by portName → Hamilton apportionment → second Hamilton per port for CertScan/NonCertScan split → draw → spillover redistribution for under-capacity ports.
-
-### Distribution event log
-
-Events: `assigned` | `completed` | `replacement-requested` | `replaced` | `reassigned`. Stored append-only in `distribution.log.json`. `deriveCurrentDistribution()` folds events in order — last event per `xrayImageId` wins — to produce the current state snapshot.
+Template Builder is the Employee Workspace inspection-form surface. Report Designer is a Reports sub-tab. Do not register them as duplicate top-level tabs.
 
 ## Conventions
 
-- **UI text is Arabic, layout is RTL** (`dir="rtl"` on containers). All user-facing strings must be Arabic; code identifiers stay English.
-- Plain CSS co-located per component (no CSS framework).
-- `import type` for type-only imports; ESLint + Prettier configured.
-- Tests use Vitest with `node` environment and a `createMemoryDirectory()` helper that implements `DirectoryHandleLike` in memory.
+- All user-facing copy is Arabic and containers are RTL; code/file identifiers remain English.
+- Use colocated plain CSS and shared tokens/primitives. Honor reduced motion, keyboard focus, and semantic labels.
+- Use `import type` for type-only imports.
+- Keep deterministic sampling behavior and `SAMPLING_ALGORITHM_VERSION` stable unless a deliberate migration/version bump is approved.
+- Use `createMemoryDirectory()` for filesystem tests. Characterize output before changing persistence, sampling, report exports, or event folding.
+- Preserve unrelated user changes in a dirty worktree. Run focused tests while editing, then the complete release gate before handoff.

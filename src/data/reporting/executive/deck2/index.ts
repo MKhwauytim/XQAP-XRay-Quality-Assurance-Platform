@@ -14,15 +14,7 @@ import { openOrDownload } from "../../htmlReport";
 import { SOURCE_REVISIONS_CSS, sourceRevisionsFooterHtml } from "../../sourceRevisions";
 import { ARABIC_FONT_FACE_CSS } from "../../../../branding/fonts";
 import type { ExecutiveReportInput } from "../../executiveReportTypes";
-
-const ARABIC_MONTHS = ["يناير","فبراير","مارس","أبريل","مايو","يونيو","يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"];
-
-function formatMonthLabel(folderName: string): string {
-  const m = /^(\d{1,2})-[A-Za-z]+-(\d{4})$/.exec(folderName.trim());
-  if (!m) return folderName;
-  const name = ARABIC_MONTHS[Number(m[1]) - 1];
-  return name ? `${name} ${m[2]}` : folderName;
-}
+import { formatMonthFolderShortLabel } from "../../../population/monthFolder";
 
 /**
  * On-screen-only side nav (hidden under `@media print`, see theme.ts): lists
@@ -204,7 +196,7 @@ export function buildExecutiveDeckV2(
   );
   return buildDeckV2Html(
     slides,
-    formatMonthLabel(input.monthFolderName),
+    formatMonthFolderShortLabel(input.monthFolderName),
     variantPreview,
     sourceRevisionsFooterHtml(input.sourceRevisions, esc),
   );

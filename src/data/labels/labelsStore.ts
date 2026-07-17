@@ -4,16 +4,16 @@ export const DEFAULT_LABELS = {
   sidebar_subtitle: "مسارات العمل الرئيسية",
 
   // Settings page
-  page_settings_eyebrow:  "System Settings",
+  page_settings_eyebrow:  "إدارة النظام",
   page_settings_title:    "إعدادات النظام",
   page_settings_subtitle: "تخصيص تسميات النظام — تُطبَّق فورياً في جميع أنحاء التطبيق",
 
   // Employee workspace pages
-  page_xray_referrals_eyebrow:      "Inspection Workspace",
+  page_xray_referrals_eyebrow:      "مساحة عمل الفحص",
   page_xray_referrals_title:        "صور الأشعة المحالة",
   page_xray_referrals_subtitle_own: "اعرض العينات المسندة إليك وأكمل نموذج الفحص لكل صورة.",
   page_xray_referrals_subtitle_all: "عرض جميع صور الأشعة المحالة ومتابعة حالة الفحص.",
-  page_xray_results_eyebrow:        "Inspection Results",
+  page_xray_results_eyebrow:        "نتائج الفحص",
   page_xray_results_title:          "نتائج فحص الأشعة",
   page_xray_results_subtitle:       "جدول يجمع بيانات العينات الظاهرة مع إجابات نموذج الفحص.",
 

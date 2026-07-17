@@ -30,7 +30,6 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: undefined,
-        inlineDynamicImports: true,
       },
     },
   },

@@ -35,21 +35,21 @@ export function parseMonthFolderName(name: string): MonthFolderInfo | null {
   return { month, year, folderName: name };
 }
 
-const MONTH_ABBR_EN = [
-  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+const MONTH_NAMES_AR = [
+  "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
+  "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"
 ] as const;
 
 /**
- * Short display label for a month/year pair, e.g. "May 2026" — 3-letter English abbreviation +
- * Latin-numeral year. Display-only: never use this to derive/compare a folder name.
+ * Arabic display label for a month/year pair, e.g. "مايو 2026".
+ * Display-only: never use this to derive or compare a folder name.
  */
-function formatMonthShortLabel(month: number, year: number): string {
-  const abbr = MONTH_ABBR_EN[month - 1];
-  return abbr ? `${abbr} ${year}` : `${month}/${year}`;
+export function formatMonthShortLabel(month: number, year: number): string {
+  const name = MONTH_NAMES_AR[month - 1];
+  return name ? `${name} ${year}` : `${month}/${year}`;
 }
 
-/** Same as `formatMonthShortLabel`, but takes a folder name directly (e.g. "5-may-2026" → "May 2026").
+/** Same as `formatMonthShortLabel`, but takes a folder name directly (e.g. "5-may-2026" to "مايو 2026").
  * Falls back to the raw folder name if it cannot be parsed. */
 export function formatMonthFolderShortLabel(folderName: string): string {
   const info = parseMonthFolderName(folderName);

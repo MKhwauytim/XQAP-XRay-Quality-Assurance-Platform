@@ -5,7 +5,7 @@ import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeWriteJson } from "../storage/safeWrite";
 import { getUserDataRoot } from "../workspace/workspacePaths";
 import { WORKSPACE_FILE_NAMES } from "../workspace/workspaceDefaults";
-import { createBackup } from "./backupStorage";
+import { createBackup, loadArchiveStatus } from "./backupStorage";
 
 function makeRoot(): DirectoryHandleLike {
   return createMemoryDirectory("root") as DirectoryHandleLike;
@@ -43,5 +43,92 @@ describe("createBackup — Tier-1 Item F coverage", () => {
     expect(
       result.manifest.jsonFilesBackedUp.some((f) => f.endsWith("labels.snapshot.json"))
     ).toBe(true);
+  });
+});
+
+const month = { folderName: "5-may-2026", month: 5, year: 2026 };
+
+async function seedPopulationLayout(
+  root: DirectoryHandleLike,
+  layout: "current" | "legacy"
+): Promise<void> {
+  const populationRoot = await root.getDirectoryHandle(
+    layout === "current" ? "1-population" : "Population",
+    { create: true }
+  );
+  const monthDir = await populationRoot.getDirectoryHandle(month.folderName, { create: true });
+  const rawDir = await monthDir.getDirectoryHandle(layout === "current" ? "1-raw" : "raw", { create: true });
+  const processedDir = await monthDir.getDirectoryHandle(
+    layout === "current" ? "2-processed" : "processed",
+    { create: true }
+  );
+
+  await safeWriteJson(monthDir, "month.manifest.json", {
+    monthFolderName: month.folderName,
+    month: month.month,
+    year: month.year,
+    processedAt: "2026-05-31T10:00:00.000Z",
+    processedBy: "admin",
+    riskFileName: "risk.xlsx",
+    biFileName: null,
+    certScanUsed: false,
+    templateVersion: null,
+    rngSeed: null,
+    totalRawRows: 2,
+    totalProcessedRows: 2,
+    status: "processed-saved",
+  });
+  await safeWriteJson(rawDir, "risk.raw.json", {
+    sourceFileName: "risk.xlsx",
+    importedAt: "2026-05-31T10:00:00.000Z",
+    importedBy: "admin",
+    rows: [{ id: 1 }, { id: 2 }],
+  });
+  await safeWriteJson(processedDir, "population.final.json", {
+    sourceMonthFolder: month.folderName,
+    processedAt: "2026-05-31T10:00:00.000Z",
+    processedBy: "admin",
+    totalRows: 2,
+    certScanRows: 0,
+    nonCertScanRows: 2,
+    rows: [{ id: 1 }, { id: 2 }],
+  });
+}
+
+describe("archive population path compatibility", () => {
+  it("loads current numbered population folders and exports their rows", async () => {
+    const root = makeRoot();
+    await seedPopulationLayout(root, "current");
+
+    const [status] = await loadArchiveStatus(root, [month]);
+    expect(status).toMatchObject({
+      hasManifest: true,
+      hasPopulation: true,
+      hasRawRisk: true,
+      totalProcessedRows: 2,
+    });
+
+    const backup = await createBackup(root, [month], "admin", "manual");
+    expect(backup.ok).toBe(true);
+    if (!backup.ok) return;
+    expect(backup.manifest.datasets).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ dataset: "population-final", rowCount: 2 }),
+        expect.objectContaining({ dataset: "risk-raw", rowCount: 2 }),
+      ])
+    );
+  });
+
+  it("continues to load legacy unnumbered population folders", async () => {
+    const root = makeRoot();
+    await seedPopulationLayout(root, "legacy");
+
+    const [status] = await loadArchiveStatus(root, [month]);
+    expect(status).toMatchObject({
+      hasManifest: true,
+      hasPopulation: true,
+      hasRawRisk: true,
+      totalProcessedRows: 2,
+    });
   });
 });

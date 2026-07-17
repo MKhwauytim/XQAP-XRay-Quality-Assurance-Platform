@@ -14,6 +14,7 @@ import { esc } from "../executive/primitives";
 import { icon } from "../executive/ui/icons";
 import { SOURCE_REVISIONS_CSS } from "../sourceRevisions";
 import { ARABIC_FONT_FACE_CSS } from "../../../branding/fonts";
+import { formatMonthFolderShortLabel } from "../../population/monthFolder";
 
 /** TOC builder + active-page highlighter — identical behaviour to the executive
  *  document viewer, kept here so the shared chrome is self-contained. */
@@ -136,14 +137,9 @@ ${opts.footerNote ?? ""}
 </html>`;
 }
 
-const ARABIC_MONTHS = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"];
-
 /** Shared month-folder → Arabic label (e.g. "5-may-2026" → "مايو 2026"). */
 export function formatMonthLabel(folderName: string): string {
-  const m = /^(\d{1,2})-[A-Za-z]+-(\d{4})$/.exec(folderName.trim());
-  if (!m) return folderName;
-  const name = ARABIC_MONTHS[Number(m[1]) - 1];
-  return name ? `${name} ${m[2]}` : folderName;
+  return formatMonthFolderShortLabel(folderName);
 }
 
 /** Shared "DD / MM / YYYY" issue-date stamp. */

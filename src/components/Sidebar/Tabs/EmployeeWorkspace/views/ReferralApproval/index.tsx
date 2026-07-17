@@ -76,7 +76,7 @@ export default function ReferralApproval({ directoryHandle }: Props) {
   return (
     <section className="ew-page" dir="rtl">
       <PageHeader
-        eyebrow="Request Approval"
+        eyebrow="اعتماد الطلبات"
         title="اعتماد الطلبات"
         subtitle={canReview ? "مراجعة طلبات الإحالة والاستبدال وإعادة فتح الحالة." : "الطلبات التي أرسلتها."}
       />

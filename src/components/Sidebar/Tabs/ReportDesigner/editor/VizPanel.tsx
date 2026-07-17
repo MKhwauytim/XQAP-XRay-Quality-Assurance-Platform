@@ -1,12 +1,8 @@
 import { useRef } from "react";
 import {
-  BarChart2,
   Image,
-  LayoutTemplate,
   Minus,
   Square,
-  Table2,
-  TrendingUp,
   Type,
 } from "lucide-react";
 import type { Element } from "../../../../../data/reportDesigner/reportTypes";
@@ -24,18 +20,13 @@ const SW = 1.8;
 const VIZ_TYPES: Array<{
   label: string;
   icon: React.ReactNode;
-  disabled: boolean;
   draggable: boolean;
-  key: "text" | "shape" | "image" | "table" | "chart" | "kpi" | "line" | "section";
+  key: "text" | "shape" | "image" | "line";
 }> = [
-  { label: "نص",   icon: <Type           size={22} strokeWidth={SW} />, disabled: false, draggable: true,  key: "text" },
-  { label: "شكل",  icon: <Square         size={22} strokeWidth={SW} />, disabled: false, draggable: true,  key: "shape" },
-  { label: "صورة", icon: <Image          size={22} strokeWidth={SW} />, disabled: false, draggable: false, key: "image" },
-  { label: "جدول", icon: <Table2         size={22} strokeWidth={SW} />, disabled: true,  draggable: false, key: "table" },
-  { label: "مخطط", icon: <BarChart2      size={22} strokeWidth={SW} />, disabled: true,  draggable: false, key: "chart" },
-  { label: "KPI",  icon: <TrendingUp     size={22} strokeWidth={SW} />, disabled: true,  draggable: false, key: "kpi" },
-  { label: "خط",   icon: <Minus          size={22} strokeWidth={SW} />, disabled: false, draggable: true,  key: "line" },
-  { label: "قسم",  icon: <LayoutTemplate size={22} strokeWidth={SW} />, disabled: true,  draggable: false, key: "section" },
+  { label: "نص", icon: <Type size={22} strokeWidth={SW} />, draggable: true, key: "text" },
+  { label: "شكل", icon: <Square size={22} strokeWidth={SW} />, draggable: true, key: "shape" },
+  { label: "صورة", icon: <Image size={22} strokeWidth={SW} />, draggable: false, key: "image" },
+  { label: "خط", icon: <Minus size={22} strokeWidth={SW} />, draggable: true, key: "line" },
 ];
 
 export default function VizPanel({ selectedElement, onAddElement, onImageSelected, onUpdate }: VizPanelProps) {
@@ -70,7 +61,6 @@ export default function VizPanel({ selectedElement, onAddElement, onImageSelecte
             key={t.key}
             className="rd-viz-icon-btn"
             title={t.label}
-            disabled={t.disabled}
             onClick={() => handleTypeClick(t.key)}
             type="button"
             aria-label={t.label}

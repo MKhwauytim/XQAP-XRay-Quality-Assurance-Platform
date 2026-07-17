@@ -53,7 +53,7 @@ vi.mock("../../../../workers/workbookWorker?worker&inline", () => ({
 }));
 
 vi.mock("../../../../auth/usePermissions", () => ({
-  usePermissions: () => ({ can: () => true }),
+  usePermissions: () => ({ can: () => true, canMutate: () => true }),
 }));
 
 const APRIL_FOLDER = "4-april-2026";

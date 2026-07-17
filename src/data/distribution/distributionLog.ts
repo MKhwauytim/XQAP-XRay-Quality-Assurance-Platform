@@ -1,14 +1,17 @@
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import type {
   DistributionCurrentData,
-  DistributionEntry,
   DistributionEvent,
-  DistributionLog,
-  DistributionStatus,
-  EmployeeQuota
+  DistributionLog
 } from "./distributionTypes";
-import { parseMonthFolderName } from "../population/monthFolder";
 import { logError } from "../storage/errorLogger";
+import {
+  deriveEmployeeQuotas,
+  foldDistributionEvents,
+  summarizeDistribution
+} from "./distributionDerivation";
+
+export { computeDaysRemainingForDeadline } from "./distributionDerivation";
 
 /**
  * Version of the derivation algorithm in deriveCurrentDistribution. Bump when
@@ -40,14 +43,6 @@ export function createEventId(): string {
  * Math.ceil of the remaining time, so any part of "today" still counts as a
  * full remaining day, and the value is clamped to a minimum of 0 once past due.
  */
-export function computeDaysRemainingForDeadline(month: number, year: number, fromDate = new Date()): number {
-  const lastDay = new Date(year, month, 0).getDate(); // last day of month
-  const deadlineDay = lastDay - 3;
-  const deadline = new Date(year, month - 1, deadlineDay, 23, 59, 59);
-  const msRemaining = deadline.getTime() - fromDate.getTime();
-  return Math.max(0, Math.ceil(msRemaining / (1000 * 60 * 60 * 24)));
-}
-
 export function buildAssignEvent(params: {
   xrayImageId: string;
   assignedTo: string;
@@ -192,134 +187,11 @@ export function deriveCurrentDistribution(
   log: DistributionLog,
   sampleRows: PreparedPopulationRow[]
 ): DistributionCurrentData {
-  const rowMap = new Map<string, PreparedPopulationRow>(
-    sampleRows.map((r) => [r.xrayImageId, r])
+  const { entries, droppedEventIds, droppedImageIds } = foldDistributionEvents(
+    log.events,
+    sampleRows,
+    EVENT_SCHEMA_VERSION
   );
-
-  // Process events in order; latest event for each xrayImageId wins.
-  const entryMap = new Map<string, DistributionEntry>();
-
-  // Events dropped by the terminal-state guard: excluded from the quota pass
-  // (they would inflate sampleCount/dailyQuota) and reported once, aggregated,
-  // after the fold (instead of one ring-buffer entry per event per derivation).
-  const droppedEventIds = new Set<string>();
-  const droppedImageIds = new Set<string>();
-
-  for (const evt of log.events) {
-    const row = rowMap.get(evt.xrayImageId);
-    if (!row) continue;
-
-    // status/assignedTo are definitely assigned by every switch arm below
-    // (the default arm `continue`s when there is nothing to preserve).
-    let status: DistributionStatus;
-    let assignedTo: string;
-    let replacedById: string | null = null;
-
-    const existing = entryMap.get(evt.xrayImageId);
-    if (existing) {
-      replacedById = existing.replacedById;
-    }
-
-    // Event schema-version guard (A7): an event stamped with a version newer
-    // than this reader understands may carry semantics we would fold wrong.
-    // Preserve-existing (never downgrade a live entry) and drop it — the same
-    // defensive posture as the unknown-eventType default branch below.
-    if ((evt.eventSchemaVersion ?? 1) > EVENT_SCHEMA_VERSION) {
-      droppedEventIds.add(evt.eventId);
-      droppedImageIds.add(evt.xrayImageId);
-      continue;
-    }
-
-    // Terminal-state guard: a replaced row is dead. Any later event other than
-    // another "replaced" is an illegal transition (it would resurrect the row
-    // and double-count it next to its replacement) — drop it and log.
-    if (existing?.status === "replaced" && evt.eventType !== "replaced") {
-      droppedEventIds.add(evt.eventId);
-      droppedImageIds.add(evt.xrayImageId);
-      continue;
-    }
-
-    // Terminal-state guard (completed): a bare "assigned"/"reassigned" after
-    // completion would silently flip the row back to pending and discard the
-    // employee's submitted answer. Only an explicit "reopened" may return a
-    // completed row to pending; every other legal transition
-    // (completed/replacement-requested/replaced/reopen-requested/reopened) is
-    // still handled by the switch below. Drop the illegal event and report it.
-    if (
-      existing?.status === "completed" &&
-      (evt.eventType === "assigned" || evt.eventType === "reassigned")
-    ) {
-      droppedEventIds.add(evt.eventId);
-      droppedImageIds.add(evt.xrayImageId);
-      continue;
-    }
-
-    switch (evt.eventType) {
-      case "assigned":
-        status = "pending";
-        assignedTo = evt.assignedTo;
-        break;
-      case "reassigned":
-        status = "pending";
-        assignedTo = evt.reassignedTo ?? evt.assignedTo;
-        break;
-      case "completed":
-        status = "completed";
-        assignedTo = existing?.assignedTo ?? evt.assignedTo;
-        break;
-      case "replacement-requested":
-        status = "replacement-requested";
-        assignedTo = existing?.assignedTo ?? evt.assignedTo;
-        break;
-      case "replaced":
-        status = "replaced";
-        replacedById = evt.replacedById ?? null;
-        assignedTo = existing?.assignedTo ?? evt.assignedTo;
-        break;
-      case "reopen-requested":
-        // Pending self-service reopen request (approval-gated). A non-mutating
-        // marker: the row keeps its prior status (a submitted/completed row stays
-        // completed) — only the terminal "reopened" event returns it to pending.
-        // Illegal after "replaced" — the terminal-state guard above drops it.
-        status = existing?.status ?? "pending";
-        assignedTo = existing?.assignedTo ?? evt.assignedTo;
-        replacedById = existing?.replacedById ?? null;
-        break;
-      case "reopened":
-        // Returns a completed item to the employee's queue for correction.
-        // Illegal after "replaced" — the terminal-state guard above drops it.
-        status = "pending";
-        assignedTo = existing?.assignedTo ?? evt.assignedTo;
-        break;
-      default: {
-        // Unknown/newer event type or corrupt data. Never downgrade a live
-        // entry to "pending": preserve the existing row's
-        // status/assignment/replacedById and record the event as dropped, so a
-        // newer client's event types (or garbage) can't silently un-complete
-        // rows on an older client. With no existing entry there is nothing to
-        // preserve — skip creating one from an event we can't interpret.
-        droppedEventIds.add(evt.eventId);
-        droppedImageIds.add(evt.xrayImageId);
-        if (!existing) continue;
-        status = existing.status;
-        assignedTo = existing.assignedTo;
-        replacedById = existing.replacedById;
-        break;
-      }
-    }
-
-    entryMap.set(evt.xrayImageId, {
-      xrayImageId: evt.xrayImageId,
-      assignedTo,
-      status,
-      replacedById,
-      lastEventAt: evt.eventAt,
-      row
-    });
-  }
-
-  const entries = Array.from(entryMap.values());
-  const now = new Date().toISOString();
 
   // One aggregated report per derivation (not per event): a log permanently
   // containing illegal events would otherwise crowd the error ring buffer on
@@ -333,49 +205,8 @@ export function deriveCurrentDistribution(
     );
   }
 
-  // Derive per-employee quotas from assignment events.
-  // Daily quota = employee sample count / days from first assignment until 3 days before month end.
-  const quotaMap: Record<string, EmployeeQuota> = {};
-  const assignCountPerEmployee: Record<string, number> = {};
-  const firstAssignEventPerEmployee: Record<string, DistributionEvent> = {};
-  const latestQuotaEventPerEmployee: Record<string, DistributionEvent> = {};
-
-  for (const evt of log.events) {
-    // Skip events the fold guard dropped (illegal assigned-after-replaced):
-    // counting them would inflate that employee's sampleCount / dailyQuota.
-    if (evt.eventType === "assigned" && !droppedEventIds.has(evt.eventId)) {
-      if (!firstAssignEventPerEmployee[evt.assignedTo]) {
-        firstAssignEventPerEmployee[evt.assignedTo] = evt;
-      }
-      assignCountPerEmployee[evt.assignedTo] = (assignCountPerEmployee[evt.assignedTo] ?? 0) + 1;
-
-      if (evt.dailyQuota !== undefined && evt.daysRemainingAtAssignment !== undefined) {
-        latestQuotaEventPerEmployee[evt.assignedTo] = evt;
-      }
-    }
-  }
-
-  const monthInfo = parseMonthFolderName(log.monthFolderName);
-  for (const [username, firstAssignEvent] of Object.entries(firstAssignEventPerEmployee)) {
-    const sampleCount = assignCountPerEmployee[username] ?? 0;
-    if (sampleCount <= 0) continue;
-
-    const firstAssignedAt = new Date(firstAssignEvent.eventAt);
-    const storedQuotaEvent = latestQuotaEventPerEmployee[username];
-    const daysRemaining = monthInfo && !Number.isNaN(firstAssignedAt.getTime())
-      ? computeDaysRemainingForDeadline(monthInfo.month, monthInfo.year, firstAssignedAt)
-      : storedQuotaEvent?.daysRemainingAtAssignment;
-    if (daysRemaining === undefined) continue;
-
-    const daysForQuota = Math.max(1, daysRemaining);
-    quotaMap[username] = {
-      username,
-      sampleCount,
-      dailyQuota: Math.ceil(sampleCount / daysForQuota),
-      daysRemainingAtAssignment: daysRemaining,
-      assignedAt: firstAssignEvent.eventAt,
-    };
-  }
+  const quotas = deriveEmployeeQuotas(log.events, droppedEventIds, log.monthFolderName);
+  const summary = summarizeDistribution(entries);
 
   return {
     monthFolderName: log.monthFolderName,
@@ -384,14 +215,11 @@ export function deriveCurrentDistribution(
     // treats a missing revision as 0 and would freeze mirrors otherwise.
     logRevision: log.revision,
     deriveVersion: DERIVE_VERSION,
-    derivedAt: now,
+    derivedAt: new Date().toISOString(),
     // Live (non-replaced) entries only. Invariant:
     // totalPending + totalCompleted + count(status === "replacement-requested") === totalAssigned.
-    totalAssigned: entries.filter((e) => e.status !== "replaced").length,
-    totalCompleted: entries.filter((e) => e.status === "completed").length,
-    totalReplaced: entries.filter((e) => e.status === "replaced").length,
-    totalPending: entries.filter((e) => e.status === "pending").length,
+    ...summary,
     entries,
-    quotas: Object.keys(quotaMap).length > 0 ? quotaMap : undefined,
+    quotas,
   };
 }

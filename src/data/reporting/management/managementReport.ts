@@ -27,15 +27,7 @@ import {
   type SourceRevisions,
 } from "../sourceRevisions";
 import { ARABIC_FONT_FACE_CSS } from "../../../branding/fonts";
-
-const ARABIC_MONTHS = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"];
-
-function formatMonthLabel(folderName: string): string {
-  const m = /^(\d{1,2})-[A-Za-z]+-(\d{4})$/.exec(folderName.trim());
-  if (!m) return folderName;
-  const name = ARABIC_MONTHS[Number(m[1]) - 1];
-  return name ? `${name} ${m[2]}` : folderName;
-}
+import { formatMonthFolderShortLabel } from "../../population/monthFolder";
 
 function formatIssueDate(d = new Date()): string {
   return `${String(d.getDate()).padStart(2, "0")} / ${String(d.getMonth() + 1).padStart(2, "0")} / ${d.getFullYear()}`;
@@ -365,7 +357,7 @@ export function buildManagementReport(
 ): string {
   const model = buildReportModel(input, employeeDisplayNames);
   const L = getLabels();
-  return renderHtml(model, L, formatMonthLabel(input.monthFolderName), formatIssueDate(), input.sourceRevisions);
+  return renderHtml(model, L, formatMonthFolderShortLabel(input.monthFolderName), formatIssueDate(), input.sourceRevisions);
 }
 
 /** Build and open (or download) the management report in a new tab. */

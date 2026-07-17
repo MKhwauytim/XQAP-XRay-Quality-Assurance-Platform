@@ -1,60 +1,76 @@
-// Seeded generative-art helpers for the executive deck (VIS wave, 2026-07-14).
-// Both outputs are DETERMINISTIC on their seed string, so the same report always
-// regenerates byte-identical art (no churn between opens), and PURE SVG strings
-// (no canvas, no DOM, no network) so they inline into the self-contained report.
-//
-// Security: the seed strings can carry user-controlled data (e.g. a malicious
-// monthFolderName). Neither library echoes the seed into its output — trianglify
-// and geopattern hash it into geometry/colour only — but as defence in depth
-// `sanitizeSelfSvg` still gates every return on the expected `<svg` prefix and
-// discards anything else, so no unescaped input can ever flow into the markup.
+// Small deterministic SVG generators for executive-report decoration.
+// Keeping this logic local avoids pulling native-canvas and unmaintained pattern
+// packages into the production dependency tree. Seeds affect geometry only and
+// are never copied into the generated markup.
 
-// trianglify's default entry does `require('canvas')` (a native node addon) at
-// module top level, which neither the browser nor node/vitest can load here; its
-// pre-bundled browser build (`dist/trianglify.bundle.js`) drops that require and
-// still exposes the headless `toSVGTree().toString()` path we use.
-import trianglify from "trianglify/dist/trianglify.bundle.js";
-import GeoPattern from "geopattern";
+const COVER_COLORS = ["#020e1c", "#03152b", "#062a48", "#073257", "#0a3a5f"];
+const SAFE_HEX_COLOR = /^#[0-9a-f]{6}$/i;
 
-/** Return the SVG only if it is genuinely an `<svg …>` string; else "". */
-function sanitizeSelfSvg(svg: unknown): string {
-  return typeof svg === "string" && svg.trimStart().startsWith("<svg") ? svg : "";
+function hashSeed(seed: string): number {
+  let hash = 5381;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash = ((hash << 5) + hash) ^ seed.charCodeAt(index);
+  }
+  return hash >>> 0;
 }
 
-/**
- * Full-bleed low-poly cover mesh in the brand navy range, seeded by the month
- * key so a given report's cover is always the same. Large cells (institutional,
- * not confetti), low variance, dark-blues-only palette. Serialized via
- * trianglify's SVG tree (never rasterized). Returns "" on any failure so the
- * cover degrades gracefully to its gradient background.
- */
+function createSeededRandom(seed: string): () => number {
+  let state = hashSeed(seed) || 0x6d2b79f5;
+  return () => {
+    state += 0x6d2b79f5;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4_294_967_296;
+  };
+}
+
+/** A deterministic, full-bleed low-poly mesh for the executive cover. */
 export function coverMeshSvg(seed: string): string {
-  try {
-    const pattern = trianglify({
-      width: 960,
-      height: 540,
-      cellSize: 150,
-      variance: 0.55,
-      seed,
-      xColors: ["#020e1c", "#03152b", "#062a48", "#073257", "#0a3a5f"],
-      colorSpace: "lab",
-    });
-    return sanitizeSelfSvg(pattern.toSVGTree().toString());
-  } catch {
-    return "";
+  const random = createSeededRandom(seed);
+  const width = 960;
+  const height = 540;
+  const cellWidth = 160;
+  const cellHeight = 135;
+  const polygons: string[] = [];
+
+  for (let row = 0; row < height / cellHeight; row += 1) {
+    for (let column = 0; column < width / cellWidth; column += 1) {
+      const x = column * cellWidth;
+      const y = row * cellHeight;
+      const offsetX = Math.round((random() - 0.5) * 44);
+      const offsetY = Math.round((random() - 0.5) * 36);
+      const centerX = x + cellWidth / 2 + offsetX;
+      const centerY = y + cellHeight / 2 + offsetY;
+      const colorA = COVER_COLORS[Math.floor(random() * COVER_COLORS.length)];
+      const colorB = COVER_COLORS[Math.floor(random() * COVER_COLORS.length)];
+      polygons.push(
+        `<path d="M${x} ${y}H${x + cellWidth}L${centerX} ${centerY}Z" fill="${colorA}"/>`,
+        `<path d="M${x + cellWidth} ${y}V${y + cellHeight}L${centerX} ${centerY}Z" fill="${colorB}"/>`,
+        `<path d="M${x + cellWidth} ${y + cellHeight}H${x}L${centerX} ${centerY}Z" fill="${colorA}"/>`,
+        `<path d="M${x} ${y + cellHeight}V${y}L${centerX} ${centerY}Z" fill="${colorB}"/>`,
+      );
+    }
   }
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">${polygons.join("")}</svg>`;
 }
 
-/**
- * Subtle seeded geometric pattern for a section-separator background, tinted to
- * the section tone. Rendered at very low opacity by the caller's CSS so it never
- * reduces headline contrast. Returns "" on any failure (separator keeps its
- * color-blocked design).
- */
+/** A deterministic geometric separator pattern using a caller-supplied safe color. */
 export function dividerPatternSvg(seed: string, colorHex: string): string {
-  try {
-    return sanitizeSelfSvg(GeoPattern.generate(seed, { color: colorHex }).toString());
-  } catch {
-    return "";
+  const random = createSeededRandom(seed);
+  const color = SAFE_HEX_COLOR.test(colorHex) ? colorHex : "#0a3a5f";
+  const shapes: string[] = [];
+
+  for (let index = 0; index < 18; index += 1) {
+    const x = Math.round(random() * 320);
+    const y = Math.round(random() * 180);
+    const size = 8 + Math.round(random() * 24);
+    const rotation = Math.round(random() * 90);
+    shapes.push(
+      `<rect x="${x}" y="${y}" width="${size}" height="${size}" rx="2" transform="rotate(${rotation} ${x + size / 2} ${y + size / 2})" fill="${color}" fill-opacity="0.22"/>`,
+    );
   }
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" width="320" height="180">${shapes.join("")}</svg>`;
 }

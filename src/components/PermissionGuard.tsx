@@ -22,24 +22,6 @@ export function TabGuard({ tabId, min = "view", children, fallback }: TabGuardPr
   return <>{fallback ?? <AccessDenied />}</>;
 }
 
-// ── Feature guard ─────────────────────────────────────────────────────────────
-
-type FeatureGuardProps = {
-  featureId: string;
-  children: ReactNode;
-  fallback?: ReactNode;
-};
-
-/**
- * Renders `children` only if the current role has the feature enabled AND
- * the parent tab is not blocked (cascade). Uses `fallback` otherwise.
- */
-export function FeatureGuard({ featureId, children, fallback }: FeatureGuardProps) {
-  const { can } = usePermissions();
-  if (can(featureId)) return <>{children}</>;
-  return <>{fallback ?? null}</>;
-}
-
 // ── Access denied page ────────────────────────────────────────────────────────
 
 export function AccessDenied() {

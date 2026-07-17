@@ -13,7 +13,7 @@
   padding: var(--sp-4, 16px);
 }
 
-.rk-head h3 {
+.rk-head h2 {
   margin: 0 0 var(--sp-2, 8px);
   font-size: 15px;
   font-weight: 800;
@@ -85,7 +85,7 @@
   gap: var(--sp-3, 12px);
   flex-wrap: wrap;
 }
-.rk-chart-topbar h4 {
+.rk-chart-topbar h3 {
   margin: 0;
   font-size: 13.5px;
   font-weight: 800;
@@ -125,7 +125,30 @@
   box-shadow: 0 1px 5px rgba(6, 36, 74, 0.12);
 }
 
-.rk-chart { width: 100%; }
+.rk-chart {
+  width: 100%;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.rk-native-chart {
+  display: block;
+  width: 100%;
+  min-width: 720px;
+  height: auto;
+  font-family: var(--font-sans, "Somar Sans", "Segoe UI", sans-serif);
+}
+.rk-axis-label,
+.rk-axis-title,
+.rk-x-label {
+  fill: var(--c-ink-3);
+  font-size: 11px;
+}
+.rk-axis-title {
+  font-weight: 700;
+}
+.rk-x-label {
+  font-size: 10.5px;
+}
 .rk-chart-empty {
   display: grid;
   place-items: center;
@@ -183,37 +206,6 @@
   border: 1px dashed var(--c-ink-4);
 }
 
-/* ── Tooltip ─────────────────────────────────────────────── */
-.rk-tip {
-  min-width: 180px;
-  padding: var(--sp-3, 12px);
-  background: var(--c-surface);
-  border: 1px solid var(--c-border);
-  border-radius: var(--r-md, 8px);
-  box-shadow: var(--sh-sm);
-  font-size: 12px;
-}
-.rk-tip-title {
-  font-weight: 800;
-  color: var(--c-navy);
-  margin-bottom: var(--sp-2, 8px);
-  padding-bottom: var(--sp-2, 8px);
-  border-bottom: 1px solid var(--c-border);
-}
-.rk-tip-list { margin: 0; display: grid; gap: var(--sp-1, 4px); }
-.rk-tip-list > div {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-4, 16px);
-}
-.rk-tip-list dt { margin: 0; color: var(--c-ink-3); }
-.rk-tip-list dd { margin: 0; font-weight: 800; color: var(--c-navy); }
-.rk-tip-status { margin-top: var(--sp-1, 4px); padding-top: var(--sp-2, 8px); border-top: 1px solid var(--c-border); }
-.rk-tip-status-out dd { color: var(--c-coral); }
-.rk-tip-status-low dd { color: var(--c-ink-4); }
-.rk-tip-status-in dd { color: var(--c-teal-deep); }
-
-@media (max-width: 760px) {
+@media (max-width: 767px) {
   .rk-chart-topbar { align-items: flex-start; flex-direction: column; }
 }

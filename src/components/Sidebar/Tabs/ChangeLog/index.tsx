@@ -3,6 +3,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { History, Search } from "lucide-react";
 
 import { PageHeader } from "../../../../components/PageHeader/PageHeader";
+import { tabAllowedRoles } from "../../../../auth/tabCatalog";
 import { formatNumber } from "../../../../utils/formatting";
 import type { SidebarTabModule } from "../tabTypes";
 // Bundled at build time from the repo's authoritative edit log. Newest-first.
@@ -13,7 +14,7 @@ export const tabConfig: SidebarTabModule["tabConfig"] = {
   id: "change-log",
   label: "سجل الإصدارات",
   order: 96,
-  allowedRoles: ["admin"],
+  allowedRoles: tabAllowedRoles("change-log"),
   icon: <History size={20} strokeWidth={1.8} aria-hidden />,
 };
 

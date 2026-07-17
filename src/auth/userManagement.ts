@@ -1,5 +1,8 @@
 import type { PasswordHashRecord } from "./passwordCrypto";
 import type { AuthRole, LoginUser } from "./authTypes";
+import { MANAGED_TABS } from "./tabCatalog";
+export { MANAGED_TABS, TAB_ROLE_CEILINGS } from "./tabCatalog";
+export type { ManagedTab } from "./tabCatalog";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -28,6 +31,8 @@ export type FeatureDefinition = {
   id: string;
   label: string;
   description: string;
+  /** Defaults to workspace-backed so new mutations fail closed without a mounted workspace. */
+  mutationStorage?: "workspace" | "browser";
 };
 
 export type FeatureGroup = {
@@ -85,56 +90,6 @@ export const MANAGED_ROLES: Array<{
 
 // ── Tab catalogue ─────────────────────────────────────────────────────────────
 
-export type ManagedTab = {
-  id: string;
-  label: string;
-  /** When set, this is a nested sub-tab of the given parent tab. */
-  parentId?: string;
-};
-
-export const MANAGED_TABS: readonly ManagedTab[] = [
-  { id: "population",              label: "إدارة بيانات الأشعة" },
-  { id: "population/process",      label: "معالجة البيانات",        parentId: "population" },
-  { id: "population/browse",       label: "استعراض البيانات",       parentId: "population" },
-  { id: "employee-workspace",      label: "إدارة مساحة العمل" },
-  { id: "ew/xray-referrals",       label: "صور الأشعة المحالة",      parentId: "employee-workspace" },
-  { id: "ew/xray-results",         label: "نتائج فحص الأشعة",       parentId: "employee-workspace" },
-  { id: "ew/referral-approval",    label: "اعتماد الطلبات",          parentId: "employee-workspace" },
-  { id: "ew/inspection-form",      label: "نموذج الفحص (مساحة العمل)", parentId: "employee-workspace" },
-  { id: "ew/notifications",        label: "مركز الإشعارات",           parentId: "employee-workspace" },
-  { id: "reports",                 label: "إدارة التقارير" },
-  { id: "reports/reports",         label: "التقارير",              parentId: "reports" },
-  { id: "reports/kpi",             label: "مؤشرات الأداء",          parentId: "reports" },
-  { id: "reports/report-designer", label: "مصمم التقارير",          parentId: "reports" },
-  { id: "archive",                 label: "إدارة الأرشيف" },
-  { id: "user-management",         label: "إدارة المستخدمين" },
-  { id: "user-management/users",               label: "المستخدمون",          parentId: "user-management" },
-  { id: "user-management/page-permissions",    label: "صلاحيات الصفحات",     parentId: "user-management" },
-  { id: "user-management/feature-permissions", label: "صلاحيات الميزات",     parentId: "user-management" },
-  { id: "user-management/activity",            label: "متابعة الأنشطة",      parentId: "user-management" },
-  { id: "user-management/actions",             label: "سجل الإجراءات",       parentId: "user-management" },
-  { id: "settings",                label: "إدارة الإعدادات" },
-  { id: "change-log",              label: "سجل الإصدارات" },
-];
-
-// ── Top-level tab role ceilings ───────────────────────────────────────────────
-// Mirrors each tab's hardcoded `tabConfig.allowedRoles` (the code-level ceiling).
-// The permission matrix cannot grant a role access to a tab its code never mounts,
-// so the UI disables (locks) those role×tab cells. Sub-tabs inherit their parent's
-// ceiling. KEEP IN SYNC with the `allowedRoles` in each Tabs/*/index.tsx tabConfig.
-// (Hardcoded here rather than derived from the tab registry to avoid an import
-// cycle: userManagement.ts is a leaf; the registry eagerly imports tab modules
-// that in turn import from this file.)
-export const TAB_ROLE_CEILINGS: Readonly<Record<string, readonly AuthRole[]>> = {
-  "population":         ["guest", "employee", "supervisor", "manager", "admin"],
-  "employee-workspace": ["guest", "employee", "supervisor", "manager", "admin"],
-  "reports":            ["guest", "supervisor", "manager", "admin"],
-  "archive":            ["guest", "supervisor", "manager", "admin"],
-  "user-management":    ["admin"],
-  "settings":           ["guest", "admin"],
-  "change-log":         ["admin"],
-};
-
 // ── Feature catalogue ─────────────────────────────────────────────────────────
 
 export const MANAGED_FEATURE_GROUPS: readonly FeatureGroup[] = [
@@ -181,6 +136,7 @@ export const MANAGED_FEATURE_GROUPS: readonly FeatureGroup[] = [
         id: "configure-referral-columns",
         label: "تخصيص أعمدة صور الأشعة المحالة",
         description: "إظهار زر الأعمدة وتغيير الأعمدة الظاهرة في جدول صور الأشعة المحالة",
+        mutationStorage: "browser",
       },
       {
         id: "ew.reopenAnswer",
@@ -258,16 +214,19 @@ export const MANAGED_FEATURE_GROUPS: readonly FeatureGroup[] = [
         id: "manage-users",
         label: "إدارة المستخدمين",
         description: "إضافة وتعديل وتعطيل حسابات المستخدمين",
+        mutationStorage: "browser",
       },
       {
         id: "reset-passwords",
         label: "إعادة تعيين كلمات المرور",
         description: "تغيير كلمات مرور المستخدمين الآخرين",
+        mutationStorage: "browser",
       },
       {
         id: "edit-permissions",
         label: "تعديل مصفوفة الصلاحيات",
         description: "تغيير صلاحيات الأدوار في مصفوفتَي الصفحات والميزات",
+        mutationStorage: "browser",
       },
       {
         id: "export-reports",
@@ -289,6 +248,27 @@ export const MANAGED_FEATURE_GROUPS: readonly FeatureGroup[] = [
         label: "عرض سجل الأخطاء",
         description: "إظهار سجل الأخطاء الأخيرة داخل صفحة الإعدادات",
       },
+      {
+        id: "archive.createBackup",
+        label: "إنشاء النسخ الاحتياطية",
+        description: "إنشاء نسخة احتياطية يدوية وتغيير جدول النسخ التلقائي",
+      },
+      {
+        id: "archive.restoreBackup",
+        label: "استعادة النسخ الاحتياطية",
+        description: "استعادة نسخة سابقة واستيراد المستخدمين والتسميات منها",
+      },
+      {
+        id: "report-designer.edit",
+        label: "تحرير تصاميم التقارير",
+        description: "إنشاء تصاميم التقارير وتعديلها وحذفها",
+      },
+      {
+        id: "edit-interface-labels",
+        label: "تعديل تسميات الواجهة",
+        description: "تعديل نصوص الواجهة واستعادة قيمها الافتراضية من صفحة الإعدادات",
+        mutationStorage: "browser",
+      },
     ],
   },
 ] as const;
@@ -303,9 +283,9 @@ export const TAB_FEATURE_MAP: Readonly<Record<string, readonly string[]>> = {
   "population":         ["upload-data", "process-population", "configure-sample", "draw-sample", "distribute-samples", "bulk-assign", "view-browse", "unlock-sampling-stage"],
   "employee-workspace": ["approve-referrals", "approve-replacements", "view-all-entries", "view-employee-stats", "submit-referrals", "request-replacement", "submit-answers", "configure-referral-columns", "ew.reopenAnswer", "manage-inspection-template", "employee-reopen-instant", "post-notification"],
   "user-management":    ["manage-users", "reset-passwords", "edit-permissions"],
-  "reports":            ["export-reports"],
-  "archive":            ["export-archive", "archive.closeMonth"],
-  "settings":           ["view-error-log"],
+  "reports":            ["export-reports", "report-designer.edit"],
+  "archive":            ["export-archive", "archive.closeMonth", "archive.createBackup", "archive.restoreBackup"],
+  "settings":           ["view-error-log", "edit-interface-labels"],
 };
 
 /** Reverse lookup: feature ID → parent tab ID. */
@@ -313,6 +293,18 @@ export const FEATURE_TAB_LOOKUP: Readonly<Record<string, string>> = Object.fromE
   Object.entries(TAB_FEATURE_MAP).flatMap(([tabId, features]) =>
     features.map((f) => [f, tabId])
   )
+);
+
+/** Feature persistence scope. Unannotated features are workspace-backed by design. */
+export const FEATURE_MUTATION_STORAGE_LOOKUP: Readonly<
+  Record<string, "workspace" | "browser">
+> = Object.fromEntries(
+  MANAGED_FEATURE_GROUPS.flatMap((group) =>
+    group.features.map((feature) => [
+      feature.id,
+      feature.mutationStorage ?? "workspace",
+    ]),
+  ),
 );
 
 // Default feature enabled-state per role per featureId
@@ -344,7 +336,11 @@ const FEATURE_DEFAULTS: Record<string, Partial<Record<AuthRole, boolean>>> = {
   "export-reports":       { guest: false, employee: false, supervisor: true,  manager: true  },
   "export-archive":       { guest: false, employee: false, supervisor: false, manager: true  },
   "archive.closeMonth":   { guest: false, employee: false, supervisor: false, manager: false },
+  "archive.createBackup": { guest: false, employee: false, supervisor: false, manager: true },
+  "archive.restoreBackup": { guest: false, employee: false, supervisor: false, manager: false },
+  "report-designer.edit": { guest: false, employee: false, supervisor: false, manager: true },
   "view-error-log":       { guest: false, employee: false, supervisor: false, manager: false },
+  "edit-interface-labels": { guest: false, employee: false, supervisor: false, manager: false },
 };
 
 // ── Default creators ──────────────────────────────────────────────────────────

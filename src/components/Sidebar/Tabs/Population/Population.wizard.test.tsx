@@ -31,7 +31,7 @@ vi.mock("../../../../data/workspace/useWorkspace", () => ({
 
 // Grant every feature so no permission gate hides wizard controls.
 vi.mock("../../../../auth/usePermissions", () => ({
-  usePermissions: () => ({ can: () => true }),
+  usePermissions: () => ({ can: () => true, canMutate: () => true }),
 }));
 
 // Global month context: no workspace in this test → selection none, no months.

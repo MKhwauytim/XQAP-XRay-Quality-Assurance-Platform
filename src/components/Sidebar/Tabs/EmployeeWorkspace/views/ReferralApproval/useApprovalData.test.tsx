@@ -38,6 +38,15 @@ vi.mock("../../../../../../data/month/useGlobalMonth", () => ({
   }),
 }));
 
+// The production hook is mounted below WorkspaceGate. These focused hook tests
+// supply their directory directly, so mirror the ready workspace capability.
+vi.mock("../../../../../../data/workspace/useWorkspace", () => ({
+  useWorkspace: () => ({
+    directoryHandle: {} as DirectoryHandleLike,
+    status: "ready",
+  }),
+}));
+
 afterEach(() => {
   clearSession();
   globalMonthMock.state.selection = globalMonthMock.APRIL;

@@ -1,6 +1,7 @@
 import type { DirectoryHandleLike } from "./fileSystemAccess";
-import { isReadOnlyMode } from "./readOnlyMode";
+import { assertWritableMode } from "./readOnlyMode";
 import { withResourceLock } from "./webLocks";
+import { withWorkspaceWriteAccess } from "./workspaceWriteAccess";
 import {
   ENVELOPE_SCHEMA_VERSION,
   createSimpleHasher,
@@ -17,27 +18,47 @@ export type SafeReadResult<T> =
   | { ok: true; value: T; recoveredFromBak: boolean; rawText: string }
   | { ok: false; reason: "missing" | "corrupt" };
 
+function errorName(error: unknown): string | undefined {
+  return error && typeof error === "object" ? (error as { name?: string }).name : undefined;
+}
+
 function isNotFound(error: unknown): boolean {
-  return Boolean(
-    error &&
-      typeof error === "object" &&
-      (error as { name?: string }).name === "NotFoundError"
-  );
+  return errorName(error) === "NotFoundError";
+}
+
+function isNotReadable(error: unknown): boolean {
+  return errorName(error) === "NotReadableError";
+}
+
+// A handle can briefly become unreadable while another Chromium process swaps
+// a file. Retry that transient condition, but never reinterpret it as a missing
+// file: doing so would allow safeReadJson to return a stale .bak and could make
+// write verification roll a successful commit back to its previous contents.
+const NOT_READABLE_RETRY_DELAYS_MS = [20, 60] as const;
+
+function wait(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 async function readText(
   dir: DirectoryHandleLike,
   name: string
 ): Promise<string | null> {
-  try {
-    const handle = await dir.getFileHandle(name, { create: false });
-    const file = await handle.getFile();
-    return await file.text();
-  } catch (error) {
-    if (isNotFound(error)) {
-      return null;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      const handle = await dir.getFileHandle(name, { create: false });
+      const file = await handle.getFile();
+      return await file.text();
+    } catch (error) {
+      if (isNotFound(error)) {
+        return null;
+      }
+      if (isNotReadable(error) && attempt < NOT_READABLE_RETRY_DELAYS_MS.length) {
+        await wait(NOT_READABLE_RETRY_DELAYS_MS[attempt]!);
+        continue;
+      }
+      throw error;
     }
-    throw error;
   }
 }
 
@@ -225,13 +246,13 @@ export async function safeWriteJson<T>(
   fileName: string,
   value: T
 ): Promise<void> {
-  // Demo/viewer mode is read-only: succeed silently without touching storage.
-  if (isReadOnlyMode()) return;
+  assertWritableMode();
 
   const tmpName = `${fileName}.tmp`;
 
   // Lock per directory+file so same-named files in different folders don't contend.
-  await withResourceLock(`${dir.name}/${fileName}`, async () => {
+  await withWorkspaceWriteAccess(dir, () =>
+    withResourceLock(`${dir.name}/${fileName}`, async () => {
     const current = await readText(dir, fileName);
     const parsedCurrent = parseValidJson(current);
     const previousRevision =
@@ -397,7 +418,8 @@ export async function safeWriteJson<T>(
 
     // 4. Best-effort cleanup of the temp file.
     await removeQuietly(dir, tmpName);
-  });
+    }),
+  );
 }
 
 export async function safeWriteJsonText(
@@ -405,8 +427,7 @@ export async function safeWriteJsonText(
   fileName: string,
   jsonText: string
 ): Promise<void> {
-  // Demo/viewer mode is read-only: succeed silently without touching storage.
-  if (isReadOnlyMode()) return;
+  assertWritableMode();
 
   const parsed = parseValidJson(jsonText);
   if (!parsed) {
@@ -432,7 +453,8 @@ export async function safeWriteJsonText(
   }
   const tmpName = `${fileName}.tmp`;
 
-  await withResourceLock(`${dir.name}/${fileName}`, async () => {
+  await withWorkspaceWriteAccess(dir, () =>
+    withResourceLock(`${dir.name}/${fileName}`, async () => {
     const current = await readText(dir, fileName);
     if (parseValidJson(current) !== null) {
       await writeText(dir, `${fileName}.bak`, current as string);
@@ -486,7 +508,8 @@ export async function safeWriteJsonText(
     }
 
     await removeQuietly(dir, tmpName);
-  });
+    }),
+  );
 }
 
 /**

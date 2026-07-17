@@ -1,21 +1,14 @@
 import { useState, type ReactElement } from "react";
-import {
-  Area,
-  CartesianGrid,
-  ComposedChart,
-  Line,
-  ReferenceLine,
-  ResponsiveContainer,
-  Scatter,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 
 import { useLabels } from "../../../../data/labels/useLabels";
 import type { Labels } from "../../../../data/labels/labelsStore";
 import type { PChart, PChartGroup, ReviewerKpiModel } from "../../../../data/reporting/executive/model/reviewerKpis";
 import { P_CHART_MIN_N } from "../../../../data/reporting/executive/model/reviewerKpis";
+import {
+  buildPChartSvgGeometry,
+  P_CHART_SVG,
+  type SvgPoint,
+} from "./pChartSvgGeometry";
 import "./ReviewerKpiPanel.css";
 
 /* ── Fixed palette (validated: CVD ΔE 73.4, ≥12 target; light mode all-PASS) ──
@@ -44,8 +37,6 @@ type ChartDatum = {
   uclPct: number;
   lclPct: number;
   centerPct: number;
-  /** [lcl, ucl] percent tuple → recharts range Area (the control band). */
-  band: [number, number];
   n: number;
   status: MarkStatus;
 };
@@ -68,7 +59,6 @@ function toData(chart: PChart, resolveName: (key: string) => string): ChartDatum
     uclPct: g.ucl * 100,
     lclPct: g.lcl * 100,
     centerPct: center * 100,
-    band: [g.lcl * 100, g.ucl * 100],
     n: g.n,
     status: statusOf(g),
   }));
@@ -80,112 +70,146 @@ const pf = (n: number | null): string =>
 const hf = (n: number | null): string =>
   n == null || !Number.isFinite(n) ? "—" : n.toFixed(1);
 
-/** Custom scatter mark: colour + a redundant non-colour cue per status. */
-function MarkShape(props: { cx?: number; cy?: number; payload?: ChartDatum }): ReactElement {
-  const { cx, cy, payload } = props;
-  if (cx == null || cy == null || !payload) return <g />;
-  const fill = colorFor(payload.status);
-  if (payload.status === "low") {
-    // hollow marker — shape encodes "small sample", not colour alone
-    return <circle cx={cx} cy={cy} r={5} fill="var(--c-surface)" stroke={fill} strokeWidth={2} />;
+function statusText(datum: ChartDatum, labels: Labels): string {
+  return datum.status === "out"
+    ? labels.rk_status_out_of_control
+    : datum.status === "low"
+      ? labels.rk_status_low_n.replace("{n}", nf(P_CHART_MIN_N))
+      : labels.rk_status_in_control;
+}
+
+function marker(datum: ChartDatum, point: SvgPoint): ReactElement {
+  const fill = colorFor(datum.status);
+  if (datum.status === "low") {
+    return <circle cx={point.x} cy={point.pY} r={5} fill="var(--c-surface)" stroke={fill} strokeWidth={2} />;
   }
-  if (payload.status === "out") {
-    // filled dot + reserved outer ring (redundant with the danger colour)
+  if (datum.status === "out") {
     return (
-      <g>
-        <circle cx={cx} cy={cy} r={9} fill="none" stroke={fill} strokeWidth={1.6} opacity={0.9} />
-        <circle cx={cx} cy={cy} r={5} fill={fill} />
-      </g>
+      <>
+        <circle cx={point.x} cy={point.pY} r={9} fill="none" stroke={fill} strokeWidth={1.6} opacity={0.9} />
+        <circle cx={point.x} cy={point.pY} r={5} fill={fill} />
+      </>
     );
   }
-  return <circle cx={cx} cy={cy} r={5} fill={fill} />;
+  return <circle cx={point.x} cy={point.pY} r={5} fill={fill} />;
 }
 
-function ChartTooltip(props: {
-  active?: boolean;
-  payload?: Array<{ payload: ChartDatum }>;
+function PChartView(props: {
+  chart: PChart;
+  resolveName: (key: string) => string;
   labels: Labels;
-}): ReactElement | null {
-  const { active, payload, labels } = props;
-  if (!active || !payload || payload.length === 0) return null;
-  const d = payload[0]!.payload;
-  const statusText =
-    d.status === "out"
-      ? labels.rk_status_out_of_control
-      : d.status === "low"
-        ? labels.rk_status_low_n.replace("{n}", nf(P_CHART_MIN_N))
-        : labels.rk_status_in_control;
-  return (
-    <div className="rk-tip" dir="rtl">
-      <div className="rk-tip-title">{d.name}</div>
-      <dl className="rk-tip-list">
-        <div><dt>{labels.rk_tooltip_proportion}</dt><dd>{pf(d.pPct)}</dd></div>
-        <div><dt>{labels.rk_tooltip_cases}</dt><dd>{nf(d.n)}</dd></div>
-        <div><dt>{labels.rk_tooltip_center}</dt><dd>{pf(d.centerPct)}</dd></div>
-        <div><dt>{labels.rk_tooltip_ucl}</dt><dd>{pf(d.uclPct)}</dd></div>
-        <div><dt>{labels.rk_tooltip_lcl}</dt><dd>{pf(d.lclPct)}</dd></div>
-        <div className={`rk-tip-status rk-tip-status-${d.status}`}><dt>{labels.rk_tooltip_status}</dt><dd>{statusText}</dd></div>
-      </dl>
-    </div>
-  );
-}
-
-function PChartView(props: { chart: PChart; resolveName: (key: string) => string; labels: Labels }): ReactElement {
-  const { chart, resolveName, labels } = props;
+  title: string;
+}): ReactElement {
+  const { chart, resolveName, labels, title } = props;
   if (chart.center === null || chart.groups.length === 0) {
     return <div className="rk-chart-empty">{labels.rk_pchart_empty}</div>;
   }
   const data = toData(chart, resolveName);
   const centerPct = chart.center * 100;
+  const geometry = buildPChartSvgGeometry(data, centerPct);
+  const yTicks = [0, 25, 50, 75, 100];
+  const { width: svgWidth, height: svgHeight, plot } = P_CHART_SVG;
+  const yForTick = (value: number) =>
+    plot.top + ((100 - value) / 100) * (plot.bottom - plot.top);
   return (
-    // recharts is LTR-internal: wrap in dir="ltr" so its layout math is correct,
-    // then re-establish RTL reading order via XAxis `reversed` (first category on
-    // the right) and place the Y axis on the right (orientation="right").
-    <div className="rk-chart" dir="ltr">
-      <ResponsiveContainer width="100%" height={300}>
-        <ComposedChart data={data} margin={{ top: 12, right: 16, bottom: 40, left: 8 }}>
-          <CartesianGrid stroke={COLOR.grid} strokeDasharray="2 4" vertical={false} />
-          {/* Control band (recessive gray range area, stepped) */}
-          <Area
-            dataKey="band"
-            type="stepAfter"
-            fill={COLOR.band}
-            fillOpacity={0.12}
-            stroke="none"
-            isAnimationActive={false}
-            activeDot={false}
-            legendType="none"
+    <>
+      <table className="rk-sr-only">
+        <caption>{title}</caption>
+        <thead>
+          <tr>
+            <th>المجموعة</th>
+            <th>النسبة</th>
+            <th>عدد الحالات</th>
+            <th>{labels.rk_tooltip_center}</th>
+            <th>{labels.rk_tooltip_ucl}</th>
+            <th>{labels.rk_tooltip_lcl}</th>
+            <th>الحالة</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.map((datum) => (
+            <tr key={datum.key}>
+              <td>{datum.name}</td>
+              <td>{pf(datum.pPct)}</td>
+              <td>{nf(datum.n)}</td>
+              <td>{pf(datum.centerPct)}</td>
+              <td>{pf(datum.uclPct)}</td>
+              <td>{pf(datum.lclPct)}</td>
+              <td>{statusText(datum, labels)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="rk-chart" dir="ltr" aria-hidden="true">
+        <svg
+          className="rk-native-chart"
+          viewBox={`0 0 ${svgWidth} ${svgHeight}`}
+          focusable="false"
+          preserveAspectRatio="xMidYMid meet"
+        >
+          {yTicks.map((tick) => {
+            const y = yForTick(tick);
+            return (
+              <g key={tick}>
+                <line x1={plot.left} x2={plot.right} y1={y} y2={y} stroke={COLOR.grid} strokeDasharray="2 4" />
+                <text x={plot.right + 10} y={y + 4} className="rk-axis-label">{nf(tick)}</text>
+              </g>
+            );
+          })}
+          <line x1={plot.right} x2={plot.right} y1={plot.top} y2={plot.bottom} stroke={COLOR.axis} />
+          <line x1={plot.left} x2={plot.right} y1={plot.bottom} y2={plot.bottom} stroke={COLOR.axis} />
+          <path d={geometry.bandPath} fill={COLOR.band} fillOpacity={0.12} stroke="none" />
+          <path d={geometry.upperPath} fill="none" stroke={COLOR.band} strokeWidth={1} strokeDasharray="4 3" />
+          <path d={geometry.lowerPath} fill="none" stroke={COLOR.band} strokeWidth={1} strokeDasharray="4 3" />
+          <line
+            x1={plot.left}
+            x2={plot.right}
+            y1={geometry.centerY}
+            y2={geometry.centerY}
+            stroke={COLOR.center}
+            strokeWidth={1.4}
+            strokeDasharray="6 4"
           />
-          {/* Crisp band edges */}
-          <Line dataKey="uclPct" type="stepAfter" stroke={COLOR.band} strokeWidth={1} strokeDasharray="4 3" dot={false} isAnimationActive={false} legendType="none" />
-          <Line dataKey="lclPct" type="stepAfter" stroke={COLOR.band} strokeWidth={1} strokeDasharray="4 3" dot={false} isAnimationActive={false} legendType="none" />
-          {/* Pooled centre line p̄ */}
-          <ReferenceLine y={centerPct} stroke={COLOR.center} strokeDasharray="6 4" strokeWidth={1.4} ifOverflow="extendDomain" />
-          <XAxis
-            dataKey="name"
-            type="category"
-            reversed
-            interval={0}
-            tick={{ fontSize: 11, fill: COLOR.axis }}
-            angle={-30}
-            textAnchor="end"
-            height={56}
-            stroke={COLOR.axis}
-          />
-          <YAxis
-            orientation="right"
-            domain={[0, 100]}
-            tickFormatter={(v: number) => nf(v)}
-            tick={{ fontSize: 11, fill: COLOR.axis }}
-            label={{ value: labels.rk_axis_proportion, angle: -90, position: "insideRight", fill: COLOR.axis, fontSize: 11 }}
-            stroke={COLOR.axis}
-          />
-          <Tooltip content={<ChartTooltip labels={labels} />} cursor={{ stroke: COLOR.grid }} />
-          {/* Data marks (carry the visual weight) */}
-          <Scatter dataKey="pPct" shape={<MarkShape />} isAnimationActive={false} />
-        </ComposedChart>
-      </ResponsiveContainer>
-    </div>
+          <text
+            className="rk-axis-title"
+            x={svgWidth - 12}
+            y={(plot.top + plot.bottom) / 2}
+            textAnchor="middle"
+            transform={`rotate(-90 ${svgWidth - 12} ${(plot.top + plot.bottom) / 2})`}
+          >
+            {labels.rk_axis_proportion}
+          </text>
+          {data.map((datum, index) => {
+            const point = geometry.points[index]!;
+            const tooltip = [
+              datum.name,
+              `${labels.rk_tooltip_proportion} ${pf(datum.pPct)}`,
+              `${labels.rk_tooltip_cases} ${nf(datum.n)}`,
+              `${labels.rk_tooltip_center} ${pf(datum.centerPct)}`,
+              `${labels.rk_tooltip_ucl} ${pf(datum.uclPct)}`,
+              `${labels.rk_tooltip_lcl} ${pf(datum.lclPct)}`,
+              statusText(datum, labels),
+            ].join("، ");
+            return (
+              <g key={datum.key}>
+                <title>{tooltip}</title>
+                {marker(datum, point)}
+                <text
+                  x={point.x}
+                  y={plot.bottom + 18}
+                  className="rk-x-label"
+                  textAnchor="end"
+                  transform={`rotate(-30 ${point.x} ${plot.bottom + 18})`}
+                  direction="rtl"
+                >
+                  {datum.name}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+    </>
   );
 }
 
@@ -228,7 +252,7 @@ export default function ReviewerKpiPanel(props: {
   return (
     <section className="rk-panel" dir="rtl">
       <header className="rk-head">
-        <h3>{labels.rk_section_title}</h3>
+        <h2>{labels.rk_section_title}</h2>
         <p>{labels.rk_section_desc}</p>
       </header>
 
@@ -270,12 +294,11 @@ export default function ReviewerKpiPanel(props: {
       {/* p-chart with reviewer/port toggle */}
       <div className="rk-chart-block">
         <div className="rk-chart-topbar">
-          <h4>{chartTitle}</h4>
-          <div className="rk-toggle" role="tablist" aria-label={labels.rk_section_title}>
+          <h3>{chartTitle}</h3>
+          <div className="rk-toggle" role="group" aria-label={labels.rk_section_title}>
             <button
               type="button"
-              role="tab"
-              aria-selected={view === "reviewer"}
+              aria-pressed={view === "reviewer"}
               className={view === "reviewer" ? "active" : ""}
               onClick={() => setView("reviewer")}
             >
@@ -283,8 +306,7 @@ export default function ReviewerKpiPanel(props: {
             </button>
             <button
               type="button"
-              role="tab"
-              aria-selected={view === "port"}
+              aria-pressed={view === "port"}
               className={view === "port" ? "active" : ""}
               onClick={() => setView("port")}
             >
@@ -293,7 +315,12 @@ export default function ReviewerKpiPanel(props: {
           </div>
         </div>
         <p className="rk-chart-desc">{labels.rk_pchart_desc}</p>
-        <PChartView chart={activeChart} resolveName={chartResolve} labels={labels} />
+        <PChartView
+          chart={activeChart}
+          resolveName={chartResolve}
+          labels={labels}
+          title={chartTitle}
+        />
         <ChartLegend labels={labels} />
       </div>
     </section>

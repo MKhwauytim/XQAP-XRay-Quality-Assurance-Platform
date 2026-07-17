@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, X, LayoutGrid } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, X, LayoutGrid, Menu } from "lucide-react";
 
 import { EmptyState } from "./components/StateViews/StateViews";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -28,6 +28,7 @@ import {
   WorkspaceGate,
   WorkspacePicker
 } from "./data/workspace/WorkspaceGate";
+import { touchTabMountLru } from "./app/tabMountLru";
 
 import "./App.css";
 
@@ -40,6 +41,7 @@ function AppContent({ session }: AppContentProps) {
   const labels = useLabels();
   const [selectedTabId, setSelectedTabId] = useState("");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [permissions, setPermissions] = useState<RolePermission[]>(
     () => readUserManagementState().permissions
   );
@@ -135,30 +137,43 @@ function AppContent({ session }: AppContentProps) {
     allowedTabs.find((tab) => tab.id === selectedTabId) ?? allowedTabs[0];
 
   const activeTabId = activeTab?.id ?? "";
+  const tabScrollPositions = useRef(new Map<string, number>());
 
-  // Lazy-mount: track which tabs have been visited so their state survives tab switches
-  const [mountedTabIds, setMountedTabIds] = useState<Set<string>>(
-    () => new Set(activeTabId ? [activeTabId] : [])
+  useEffect(() => {
+    if (!activeTabId) return;
+    const scrollPositions = tabScrollPositions.current;
+    const animationFrame = window.requestAnimationFrame(() => {
+      window.scrollTo({ top: scrollPositions.get(activeTabId) ?? 0 });
+    });
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      scrollPositions.set(activeTabId, window.scrollY);
+    };
+  }, [activeTabId]);
+
+  // Keep only the three most recently used tabs mounted. This preserves the
+  // common back-and-forth workflow without retaining every large dataset and
+  // hidden DOM tree for the lifetime of the application.
+  const [mountedTabIds, setMountedTabIds] = useState<string[]>(
+    () => activeTabId ? [activeTabId] : []
   );
 
   useEffect(() => {
-    if (activeTabId) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- accumulates visited tabs; useMemo cannot grow a Set across renders, making this effect the correct pattern
-      setMountedTabIds((prev) =>
-        prev.has(activeTabId) ? prev : new Set([...prev, activeTabId])
-      );
-    }
-  }, [activeTabId]);
+    const allowedIds = new Set(allowedTabs.map((tab) => tab.id));
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the LRU changes in response to navigation and access changes
+    setMountedTabIds((current) =>
+      touchTabMountLru(current, activeTabId, allowedIds)
+    );
+  }, [activeTabId, allowedTabs]);
 
-  // Drop tabs that are no longer allowed (role change)
   useEffect(() => {
-    const allowedIds = new Set(allowedTabs.map((t) => t.id));
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- prunes stale tab refs on role change; set updater ensures a single re-render
-    setMountedTabIds((prev) => {
-      const next = new Set([...prev].filter((id) => allowedIds.has(id)));
-      return next.size !== prev.size ? next : prev;
-    });
-  }, [allowedTabs]);
+    if (!isMobileSidebarOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isMobileSidebarOpen]);
 
   function toggleSidebar(): void {
     setIsSidebarCollapsed((current) => !current);
@@ -178,6 +193,15 @@ function AppContent({ session }: AppContentProps) {
         className={`app-shell ${isSidebarCollapsed ? "sidebar-collapsed" : ""}`}
         dir="rtl"
       >
+      {isMobileSidebarOpen && (
+        <button
+          type="button"
+          className="app-mobile-nav-backdrop"
+          onClick={() => setIsMobileSidebarOpen(false)}
+          aria-hidden="true"
+          tabIndex={-1}
+        />
+      )}
       {bakWarning && (
         <div className="app-bak-warning">
           <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><AlertTriangle size={16} /> {bakWarning}</span>
@@ -204,17 +228,39 @@ function AppContent({ session }: AppContentProps) {
         tabs={allowedTabs}
         activeTabId={activeTabId}
         isCollapsed={isSidebarCollapsed}
-        onTabSelect={setSelectedTabId}
+        isMobileOpen={isMobileSidebarOpen}
+        onTabSelect={(tabId) => {
+          setSelectedTabId(tabId);
+          setIsMobileSidebarOpen(false);
+        }}
         onToggleCollapse={toggleSidebar}
+        onMobileClose={() => setIsMobileSidebarOpen(false)}
       />
 
-      <section className="app-workspace" aria-label={labels.app_workspace_aria}>
+      <section
+        className="app-workspace"
+        aria-label={labels.app_workspace_aria}
+        aria-hidden={isMobileSidebarOpen || undefined}
+        inert={isMobileSidebarOpen || undefined}
+      >
+        <button
+          type="button"
+          className="app-mobile-nav-button"
+          onClick={() => setIsMobileSidebarOpen(true)}
+          aria-label="فتح قائمة التنقل"
+          aria-expanded={isMobileSidebarOpen}
+          aria-controls="app-sidebar"
+        >
+          <Menu size={20} aria-hidden />
+          <span>القائمة</span>
+        </button>
         {allowedTabs.length === 0 && <NoAvailableTabs role={session.role} />}
         {allowedTabs.map((tab) =>
-          mountedTabIds.has(tab.id) ? (
+          mountedTabIds.includes(tab.id) ? (
             <div
               key={tab.id}
-              style={tab.id !== activeTabId ? { display: "none" } : undefined}
+              hidden={tab.id !== activeTabId}
+              aria-hidden={tab.id !== activeTabId}
             >
               {/* Per-tab boundary: a crash in one tab shows its own recovery UI
                   without unmounting the shell or the other mounted tabs. The root

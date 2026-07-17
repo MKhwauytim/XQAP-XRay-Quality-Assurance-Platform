@@ -1,5 +1,4 @@
 import type { SampleMasterData } from "../sampling/sampleTypes";
-import { formatStageLabel } from "../population/stageHelpers";
 import type { FieldAnswer } from "../answers/answerTypes";
 import type { TemplateSchema } from "../templates/templateTypes";
 import type {
@@ -7,9 +6,8 @@ import type {
   ExecutiveKPIs,
   ExecutiveReportConfig,
   ExecutiveReportInput,
-  PortProfile,
-  StageProfile,
 } from "./executiveReportTypes";
+import { buildPortProfiles, buildStageProfiles } from "./executiveKpiProfiles";
 
 type SubmittedAnswerInfo = {
   answers: FieldAnswer[];
@@ -294,130 +292,8 @@ export function calculateExecutiveKPIs(
     Math.max(1, lowQualityCount + mediumQualityCount)
   );
 
-  // Port profiles
-  const portMap = new Map<string, ExecutiveReportRow[]>();
-  for (const row of rows) {
-    const key = row.portName ?? "غير محدد";
-    const arr = portMap.get(key) ?? [];
-    arr.push(row);
-    portMap.set(key, arr);
-  }
-
-  const portProfiles: PortProfile[] = [];
-  for (const [portName, portRows] of portMap) {
-    const population = portRows.length;
-    const clean = portRows.filter((r) => r.imageResult === "سليمة").length;
-    const suspicious = portRows.filter((r) => r.imageResult === "اشتباه").length;
-    const portSuspicionRate = population > 0 ? (suspicious / population) * 100 : 0;
-
-    const samplePortRows = portRows.filter((r) => r.selectedInSample);
-    const sampleSize = samplePortRows.length;
-    const coverage = population > 0 ? (sampleSize / population) * 100 : 0;
-    const studied = samplePortRows.filter((r) => r.answerStatus === "submitted").length;
-    const completionRatePort = sampleSize > 0 ? (studied / sampleSize) * 100 : 0;
-
-    const portValid = portRows.filter((r) => r.verificationCategory !== null);
-    const portStudied = portValid.length;
-    const isReliable = portStudied >= config.minimumReliableSampleSize;
-
-    const portCorrect = portValid.filter((r) => r.imageResultAccurate === true).length;
-    const accuracy = isReliable ? (portCorrect / portStudied) * 100 : null;
-
-    const portExpertSusp = portValid.filter(
-      (r) => r.verificationCategory === "correct-suspicious" || r.verificationCategory === "missed-suspicious"
-    ).length;
-    const portMissed = portValid.filter((r) => r.verificationCategory === "missed-suspicious").length;
-    const portCorrectSusp = portValid.filter((r) => r.verificationCategory === "correct-suspicious").length;
-    const suspiciousDetectionRatePort =
-      isReliable && portExpertSusp > 0 ? (portCorrectSusp / portExpertSusp) * 100 : null;
-    const missedSuspicionRatePort =
-      isReliable && portExpertSusp > 0 ? (portMissed / portExpertSusp) * 100 : null;
-
-    const portL1Correct = portValid.filter((r) => r.levelOneAccurate === true).length;
-    const portL2Correct = portValid.filter((r) => r.levelTwoAccurate === true).length;
-    const levelOneAccuracyPort = isReliable ? (portL1Correct / portStudied) * 100 : null;
-    const levelTwoAccuracyPort = isReliable ? (portL2Correct / portStudied) * 100 : null;
-
-    let status: PortProfile["status"] = "insufficient";
-    if (isReliable && accuracy !== null && missedSuspicionRatePort !== null) {
-      if (accuracy >= config.accuracyTarget + 3 && missedSuspicionRatePort <= config.maximumMissedSuspicionRate / 2) {
-        status = "excellent";
-      } else if (accuracy >= config.accuracyTarget && missedSuspicionRatePort <= config.maximumMissedSuspicionRate) {
-        status = "stable";
-      } else if (accuracy >= config.accuracyTarget - 5) {
-        status = "monitor";
-      } else {
-        status = "priority";
-      }
-    } else if (isReliable && accuracy !== null) {
-      status = accuracy >= config.accuracyTarget ? "stable" : "monitor";
-    }
-
-    portProfiles.push({
-      portName,
-      population,
-      clean,
-      suspicious,
-      suspicionRate: portSuspicionRate,
-      sampleSize,
-      coverage,
-      studied,
-      completionRate: completionRatePort,
-      accuracy,
-      suspiciousDetectionRate: suspiciousDetectionRatePort,
-      missedSuspicionRate: missedSuspicionRatePort,
-      levelOneAccuracy: levelOneAccuracyPort,
-      levelTwoAccuracy: levelTwoAccuracyPort,
-      status,
-    });
-  }
-  portProfiles.sort((a, b) => b.population - a.population);
-
-  // Stage profiles
-  const stageProfiles: StageProfile[] = [];
-  if (sample?.stageAllocations && sample.stageAllocations.length > 0) {
-    for (const alloc of sample.stageAllocations) {
-      const stageStudied = rows.filter(
-        // Canonicalize the row's raw stage alias before comparing: alloc.stageLabel
-        // is the canonical Arabic label frozen at draw time, while r.stage is the
-        // raw Excel value (e.g. "SECOND_STAG") — raw equality zeroed stage-level
-        // "studied" counts on real data.
-        (r) => r.selectedInSample && r.answerStatus === "submitted" && formatStageLabel(r.stage) === alloc.stageLabel
-      ).length;
-      const completionRateStage = alloc.actualDrawn > 0 ? (stageStudied / alloc.actualDrawn) * 100 : 0;
-      stageProfiles.push({
-        stageKey: alloc.stageKey,
-        stageLabel: alloc.stageLabel,
-        population: alloc.populationSize,
-        sampleSize: alloc.actualDrawn,
-        coverage: alloc.populationSize > 0 ? (alloc.actualDrawn / alloc.populationSize) * 100 : 0,
-        studied: stageStudied,
-        completionRate: completionRateStage,
-      });
-    }
-  } else {
-    const stageMap = new Map<string, ExecutiveReportRow[]>();
-    for (const row of rows) {
-      const key = row.stage ?? "غير محدد";
-      const arr = stageMap.get(key) ?? [];
-      arr.push(row);
-      stageMap.set(key, arr);
-    }
-    let i = 0;
-    for (const [stageLabel, stageRows] of stageMap) {
-      const sampleSize = stageRows.filter((r) => r.selectedInSample).length;
-      const stageStudied = stageRows.filter((r) => r.selectedInSample && r.answerStatus === "submitted").length;
-      stageProfiles.push({
-        stageKey: String(i++),
-        stageLabel,
-        population: stageRows.length,
-        sampleSize,
-        coverage: stageRows.length > 0 ? (sampleSize / stageRows.length) * 100 : 0,
-        studied: stageStudied,
-        completionRate: sampleSize > 0 ? (stageStudied / sampleSize) * 100 : 0,
-      });
-    }
-  }
+  const portProfiles = buildPortProfiles(rows, config);
+  const stageProfiles = buildStageProfiles(rows, sample);
 
   return {
     totalPopulation,

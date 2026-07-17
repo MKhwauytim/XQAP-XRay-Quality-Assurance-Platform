@@ -1,14 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { readSession } from "../../../../../auth/authSession";
+import { usePermissions } from "../../../../../auth/usePermissions";
 import { PageHeader } from "../../../../../components/PageHeader/PageHeader";
 import { logRejection } from "../../../../../data/storage/errorLogger";
-import {
-  getRolePermission,
-  hasFeature,
-  readUserManagementState,
-  subscribeToUserManagementChanges,
-} from "../../../../../auth/userManagement";
 import {
   loadEmployeeAnswers,
   upsertItemAnswer,
@@ -127,54 +122,18 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   const session  = readSession();
   const username = session?.username ?? "";
   const role     = session?.role ?? "employee";
-  /** Only admin can mutate distribution data (replacements, etc.). */
-  const canEdit   = role === "admin";
-  // Re-render when the permission matrix changes (e.g. admin edits User Management while
-  // this tab stays mounted) — otherwise canSeeAll/canEdit/etc. below stay frozen at the
-  // last unrelated render's snapshot.
-  const [, forcePermissionRefresh] = useState(0);
-  useEffect(() => subscribeToUserManagementChanges(() => forcePermissionRefresh((n) => n + 1)), []);
-  const userManagementState = readUserManagementState();
+  const { can, canMutate } = usePermissions();
   /** Oversight view is permission-driven; ordinary users only see their own samples. */
-  const canSeeAll = hasFeature(
-    userManagementState.featurePermissions,
-    role,
-    "view-all-entries"
-  );
-  const canSetTemplate =
-    canEdit ||
-    getRolePermission(
-      userManagementState.permissions,
-      role,
-      "ew/inspection-form"
-    ) === "edit";
-  const canConfigureColumns = hasFeature(
-    userManagementState.featurePermissions,
-    role,
-    "configure-referral-columns"
-  );
-  const canRequestReplacement = hasFeature(
-    userManagementState.featurePermissions,
-    role,
-    "request-replacement"
-  );
-  const canSubmitReferrals = hasFeature(
-    userManagementState.featurePermissions,
-    role,
-    "submit-referrals"
-  );
-  const canReopenAnswer = hasFeature(
-    userManagementState.featurePermissions,
-    role,
-    "ew.reopenAnswer"
-  );
+  const canSeeAll = can("view-all-entries");
+  const canSetTemplate = canMutate("manage-inspection-template");
+  const canConfigureColumns = canMutate("configure-referral-columns");
+  const canRequestReplacement = canMutate("request-replacement");
+  const canSubmitReferrals = canMutate("submit-referrals");
+  const canSubmitAnswers = canMutate("submit-answers");
+  const canReopenAnswer = canMutate("ew.reopenAnswer");
   // Batch B: when enabled for this role, the employee's self-service reopen request
   // is applied instantly; when disabled it is routed to a supervisor for approval.
-  const canReopenInstant = hasFeature(
-    userManagementState.featurePermissions,
-    role,
-    "employee-reopen-instant"
-  );
+  const canReopenInstant = can("employee-reopen-instant");
   const L = useLabels();
   const baseColumns = useMemo(() => buildXrayColumns(L), [L]);
 
@@ -456,6 +415,10 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   ): Promise<void> {
     // No on-disk month selected → the upsert target folder would be "" (writes
     // to the workspace root). Bail before touching disk.
+    if (!canSubmitAnswers) {
+      setStatusMsg({ type: "error", text: "لا تملك صلاحية تقديم الإجابات، أو أن مساحة العمل للقراءة فقط." });
+      return;
+    }
     if (!activeTpl || !selMonth) return;
     const now  = new Date().toISOString();
     const item: ItemAnswer = {
@@ -486,6 +449,10 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   }
 
   async function handleReopenAnswer(entry: DistributionEntry, reason: string): Promise<void> {
+    if (!canReopenAnswer) {
+      setStatusMsg({ type: "error", text: "لا تملك صلاحية إعادة فتح الإجابات، أو أن مساحة العمل للقراءة فقط." });
+      return;
+    }
     if (!selMonth) return;
     try {
       const result = await reopenSubmittedAnswer({
@@ -516,6 +483,10 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   // Batch B: employee self-service reopen. Branches on canReopenInstant — either
   // applies immediately or files a pending request routed to a supervisor.
   async function handleRequestReopen(entry: DistributionEntry, reason: string): Promise<void> {
+    if (!canSubmitAnswers) {
+      setStatusMsg({ type: "error", text: "لا تملك صلاحية طلب إعادة فتح الإجابة، أو أن مساحة العمل للقراءة فقط." });
+      return;
+    }
     if (!selMonth) return;
     try {
       const result = await submitReopenRequest({
@@ -550,6 +521,10 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   }
 
   async function openReplacementDialog(entry: DistributionEntry): Promise<void> {
+    if (!canRequestReplacement) {
+      setStatusMsg({ type: "error", text: "لا تملك صلاحية طلب الاستبدال، أو أن مساحة العمل للقراءة فقط." });
+      return;
+    }
     if (!sampleMaster) return;
     // Load full population lazily — only when the replacement dialog is opened.
     let pop = populationRows;
@@ -573,6 +548,10 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     reason: string,
     fromRecommended: boolean
   ): Promise<void> {
+    if (!canRequestReplacement) {
+      setStatusMsg({ type: "error", text: "لا تملك صلاحية طلب الاستبدال، أو أن مساحة العمل للقراءة فقط." });
+      return;
+    }
     if (!selMonth || replacementBusy) return;
 
     setReplacementBusy(true);
@@ -685,6 +664,10 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     reason: string,
     xrayImageIds: string[]
   ): Promise<void> {
+    if (!canSubmitReferrals) {
+      setStatusMsg({ type: "error", text: "لا تملك صلاحية تقديم الإحالات، أو أن مساحة العمل للقراءة فقط." });
+      return;
+    }
     if (!selMonth || xrayImageIds.length === 0) return;
     const request: ReferralRequest = {
       requestId: `ref-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,

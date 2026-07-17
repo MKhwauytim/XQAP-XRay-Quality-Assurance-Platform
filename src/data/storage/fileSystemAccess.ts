@@ -21,6 +21,7 @@ import {
   type WorkspaceStatus,
   type WorkspaceStructureCheckResult
 } from "../workspace/workspaceTypes";
+import { detectWorkspaceSchema, initializeWorkspaceSchemaMetadata } from "../workspace/workspaceSchema";
 
 type FileSystemPermissionMode = "read" | "readwrite";
 type FileSystemPermissionState = "granted" | "denied" | "prompt";
@@ -325,6 +326,11 @@ export async function createWorkspaceStructure(
     WORKSPACE_FILE_NAMES.usersPermissions,
     await prepareFileForWrite(createDefaultUsersPermissions(username), username)
   );
+
+  const schema = await detectWorkspaceSchema(directoryHandle);
+  if (schema.layout === "current" && schema.missingCurrentRoots.length === 0) {
+    await initializeWorkspaceSchemaMetadata(directoryHandle, username);
+  }
 }
 
 export async function readJsonFile<TFile>(

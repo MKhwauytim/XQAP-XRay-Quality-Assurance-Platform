@@ -34,7 +34,7 @@ export const REPORTS_SUBFOLDERS = {
   designs: "designs",
 } as const;
 
-const LEGACY_ROOTS = {
+export const LEGACY_WORKSPACE_ROOTS = {
   population: "Population",
   system: ".system",
   templates: "templates",
@@ -62,7 +62,7 @@ export async function getPopulationRoot(
   directoryHandle: DirectoryHandleLike,
   create = true
 ): Promise<DirectoryHandleLike> {
-  return getRoot(directoryHandle, WORKSPACE_ROOTS.population, LEGACY_ROOTS.population, create);
+  return getRoot(directoryHandle, WORKSPACE_ROOTS.population, LEGACY_WORKSPACE_ROOTS.population, create);
 }
 
 export async function getPopulationMonthDir(
@@ -128,7 +128,7 @@ export async function getSystemRoot(
   directoryHandle: DirectoryHandleLike,
   create = true
 ): Promise<DirectoryHandleLike> {
-  return getRoot(directoryHandle, WORKSPACE_ROOTS.system, LEGACY_ROOTS.system, create);
+  return getRoot(directoryHandle, WORKSPACE_ROOTS.system, LEGACY_WORKSPACE_ROOTS.system, create);
 }
 
 export async function getReportsRoot(
@@ -142,7 +142,7 @@ export async function getTemplatesRoot(
   directoryHandle: DirectoryHandleLike,
   create = true
 ): Promise<DirectoryHandleLike> {
-  return getRoot(directoryHandle, WORKSPACE_ROOTS.templates, LEGACY_ROOTS.templates, create);
+  return getRoot(directoryHandle, WORKSPACE_ROOTS.templates, LEGACY_WORKSPACE_ROOTS.templates, create);
 }
 
 export function safeWorkspaceFilePart(value: string): string {

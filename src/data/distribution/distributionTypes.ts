@@ -49,6 +49,12 @@ export type DistributionLog = {
   revision: number;
   /** Per-write UUID embedded by casLoop for cross-machine race detection. */
   _writeToken?: string;
+  /**
+   * Deterministic identity of the merged event-id set. Unlike `revision`, this
+   * changes when immutable event files written by another machine are found,
+   * even when a compatibility-log writer lost a last-writer-wins race.
+   */
+  eventSetId?: string;
   events: DistributionEvent[];
 };
 
@@ -73,6 +79,8 @@ export type DistributionCurrentData = {
   logRevision?: number;
   /** Version of deriveCurrentDistribution that produced this snapshot; missing or older than DERIVE_VERSION means stale. */
   deriveVersion?: number;
+  /** Event-set identity used to validate this rebuildable cache. */
+  eventSetId?: string;
   derivedAt: string;
   totalAssigned: number;
   totalCompleted: number;

@@ -2,6 +2,8 @@ import { expect, test } from "vitest";
 
 import {
   formatMonthFolderName,
+  formatMonthFolderShortLabel,
+  formatMonthShortLabel,
   parseMonthFolderName
 } from "./monthFolder";
 
@@ -33,4 +35,10 @@ test("parseMonthFolderName returns null for invalid names", () => {
   expect(parseMonthFolderName("5-Xyz-2026")).toBeNull();
   expect(parseMonthFolderName("random")).toBeNull();
   expect(parseMonthFolderName("")).toBeNull();
+});
+
+test("month display labels are Arabic without changing the folder format", () => {
+  expect(formatMonthShortLabel(5, 2026)).toBe("مايو 2026");
+  expect(formatMonthFolderShortLabel("12-december-2025")).toBe("ديسمبر 2025");
+  expect(formatMonthFolderShortLabel("legacy-folder")).toBe("legacy-folder");
 });

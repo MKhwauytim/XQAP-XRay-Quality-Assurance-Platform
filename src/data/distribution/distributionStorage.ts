@@ -12,6 +12,12 @@ import { casLoop } from "../storage/casLoop";
 import { ensureMonthWritable } from "../population/monthLock";
 import { syncSampleMirrors } from "../samples/sampleMirrorStorage";
 import { getPopulationMonthDir, getSampleMainDir } from "../workspace/workspacePaths";
+import {
+  distributionEventSetId,
+  loadImmutableDistributionEvents,
+  mergeDistributionEvents,
+  writeImmutableDistributionEvent,
+} from "./distributionEventStore";
 
 const LOG_FILE = "distribution.log.json";
 const CURRENT_FILE = "distribution.current.json";
@@ -29,6 +35,122 @@ async function getLegacyDistributionDir(
   monthFolderName: string
 ): Promise<DirectoryHandleLike> {
   return getPopulationMonthDir(directoryHandle, monthFolderName, false);
+}
+
+type DistributionLogSources = {
+  currentLog: DistributionLog | null;
+  legacyLog: DistributionLog | null;
+  immutableEvents: DistributionEvent[];
+};
+
+async function openOptionalDirectory(
+  resolve: () => Promise<DirectoryHandleLike>
+): Promise<DirectoryHandleLike | null> {
+  try {
+    return await resolve();
+  } catch {
+    return null;
+  }
+}
+
+async function readCompatibilityLog(
+  directory: DirectoryHandleLike | null,
+  corruptMessage: string
+): Promise<DistributionLog | null> {
+  if (!directory) return null;
+  const result = await safeReadJson<DistributionLog>(directory, LOG_FILE);
+  if (result.ok) return result.value;
+  if (result.reason === "corrupt") throw new Error(corruptMessage);
+  return null;
+}
+
+async function readCurrentDistributionSource(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<Pick<DistributionLogSources, "currentLog" | "immutableEvents">> {
+  const directory = await openOptionalDirectory(() =>
+    getDistributionDir(directoryHandle, monthFolderName, false)
+  );
+  const currentLog = await readCompatibilityLog(
+    directory,
+    `Corrupt distribution compatibility log: ${LOG_FILE}`
+  );
+  // Existing immutable event directories are strict: corrupt/unreadable files
+  // propagate so no caller can derive a silently incomplete snapshot.
+  const immutableEvents = directory
+    ? await loadImmutableDistributionEvents(directory)
+    : [];
+  return { currentLog, immutableEvents };
+}
+
+async function readLegacyDistributionLog(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<DistributionLog | null> {
+  const directory = await openOptionalDirectory(() =>
+    getLegacyDistributionDir(directoryHandle, monthFolderName)
+  );
+  return readCompatibilityLog(
+    directory,
+    `Corrupt legacy distribution log: ${LOG_FILE}`
+  );
+}
+
+function normalizeCompatibilityLog(log: DistributionLog | null): DistributionLog {
+  if (log) return log;
+  return { monthFolderName: "", revision: 0, events: [] };
+}
+
+function selectWriteToken(
+  currentLog: DistributionLog,
+  legacyLog: DistributionLog
+): string | undefined {
+  if (currentLog._writeToken) return currentLog._writeToken;
+  return legacyLog._writeToken;
+}
+
+function mergeDistributionLogSources(
+  monthFolderName: string,
+  sources: DistributionLogSources
+): DistributionLog {
+  const currentLog = normalizeCompatibilityLog(sources.currentLog);
+  const legacyLog = normalizeCompatibilityLog(sources.legacyLog);
+  let compatibilityBase = legacyLog.events;
+  let otherCompatibility = currentLog.events;
+  if (currentLog.events.length > 0) {
+    compatibilityBase = currentLog.events;
+    otherCompatibility = legacyLog.events;
+  }
+  const compatibilityEvents = mergeDistributionEvents(compatibilityBase, otherCompatibility);
+  const events = mergeDistributionEvents(compatibilityEvents, sources.immutableEvents);
+  return {
+    monthFolderName,
+    revision: Math.max(currentLog.revision, legacyLog.revision),
+    _writeToken: selectWriteToken(currentLog, legacyLog),
+    eventSetId: distributionEventSetId(events),
+    events,
+  };
+}
+
+function preserveAppendedBatchOrder(
+  existingEvents: DistributionEvent[],
+  appendedEvents: DistributionEvent[],
+  appendedIds: Set<string>,
+  projectedIds: Set<string>
+): DistributionEvent[] {
+  if (appendedEvents.every((event) => projectedIds.has(event.eventId))) return existingEvents;
+  return [
+    ...existingEvents.filter((event) => !appendedIds.has(event.eventId)),
+    ...appendedEvents,
+  ];
+}
+
+async function readProjectedEventIds(directory: DirectoryHandleLike): Promise<Set<string>> {
+  const projected = await readCompatibilityLog(
+    directory,
+    `Corrupt distribution compatibility log: ${LOG_FILE}`
+  );
+  return new Set(projected?.events.map((event) => event.eventId) ?? []);
 }
 
 /** Envelope revision of `distribution.current.json` for report-to-revision linkage (B2). */
@@ -53,31 +175,9 @@ export async function loadDistributionLog(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string
 ): Promise<DistributionLog> {
-  try {
-    const dir = await getDistributionDir(directoryHandle, monthFolderName, false);
-    const result = await safeReadJson<DistributionLog>(dir, LOG_FILE);
-    if (result.ok) {
-      // Backfill revision for legacy files that didn't have it
-      return {
-        ...result.value,
-        revision: result.value.revision ?? 0
-      };
-    }
-  } catch {
-    // Fallback for workspaces created before the numbered samples layout.
-  }
-
-  try {
-    const legacyDir = await getLegacyDistributionDir(directoryHandle, monthFolderName);
-    const result = await safeReadJson<DistributionLog>(legacyDir, LOG_FILE);
-    if (result.ok) {
-      return { ...result.value, revision: result.value.revision ?? 0 };
-    }
-  } catch {
-    // Missing legacy file is normal for new workspaces.
-  }
-
-  return { monthFolderName, revision: 0, events: [] };
+  const current = await readCurrentDistributionSource(directoryHandle, monthFolderName);
+  const legacyLog = await readLegacyDistributionLog(directoryHandle, monthFolderName);
+  return mergeDistributionLogSources(monthFolderName, { ...current, legacyLog });
 }
 
 export async function appendDistributionEvent(
@@ -96,16 +196,41 @@ export async function appendDistributionEvents(
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   // Month lock gate — before the CAS loop so a closed month rejects loudly.
   await ensureMonthWritable(directoryHandle, monthFolderName);
+  if (events.length === 0) return { ok: true };
+  const ids = new Set<string>();
+  for (const event of events) {
+    if (ids.has(event.eventId)) {
+      return { ok: false, error: `معرّف حدث مكرر: ${event.eventId}` };
+    }
+    ids.add(event.eventId);
+  }
+
+  // Each event is durable in its own file before the mutable compatibility
+  // projection is updated. Distinct writers therefore do not share a target.
+  const eventDir = await getDistributionDir(directoryHandle, monthFolderName);
+  try {
+    for (const event of events) {
+      await writeImmutableDistributionEvent(eventDir, event);
+    }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+
   return casLoop<{ ok: true } | { ok: false; error: string }>(
     async (writeToken) => {
       const dir = await getDistributionDir(directoryHandle, monthFolderName);
+      const projectedIds = await readProjectedEventIds(dir);
       const existing = await loadDistributionLog(directoryHandle, monthFolderName);
       const nextRevision = (existing.revision ?? 0) + 1;
       const updated: DistributionLog = {
         monthFolderName,
         revision: nextRevision,
         _writeToken: writeToken,
-        events: [...existing.events, ...events],
+        eventSetId: existing.eventSetId,
+        // The loader already includes this immutable batch. Overlay the caller's
+        // batch order before writing the compatibility projection, because two
+        // events built in the same millisecond cannot be ordered by timestamp.
+        events: preserveAppendedBatchOrder(existing.events, events, ids, projectedIds),
       };
       await safeWriteJson(dir, LOG_FILE, updated);
       const verify = await loadDistributionLog(directoryHandle, monthFolderName);
@@ -181,15 +306,17 @@ function hasQuotaForAssignedEmployees(
  * Load or derive the current distribution state.
  *
  * Strategy:
- * - Load the distribution log (source of truth).
+ * - Merge the legacy compatibility log with immutable event files (source of
+ *   truth for events written by current clients).
  * - Load the cached current snapshot.
  * - If the cache's `logRevision` matches the log's `revision`, the cache is
  *   fresh and is returned as-is (fast path).
  * - If stale or absent, re-derive from the log, persist the new cache, and
  *   return the derived result.
  *
- * This ensures every reader always sees a consistent view, even if two
- * machines wrote to the log concurrently.
+ * `eventSetId` invalidates a cache when a concurrent immutable file appears
+ * without a matching compatibility-log revision. This prevents silent event
+ * omission; it does not claim a distributed ordering/transaction guarantee.
  */
 export async function loadOrDeriveDistributionCurrent(
   directoryHandle: DirectoryHandleLike,
@@ -212,6 +339,7 @@ export async function loadOrDeriveDistributionCurrent(
       cached &&
       cached.deriveVersion === DERIVE_VERSION &&
       cached.logRevision === log.revision &&
+      cached.eventSetId === log.eventSetId &&
       hasQuotaForAssignedEmployees(cached, log)
     ) {
       return cached;
@@ -221,7 +349,8 @@ export async function loadOrDeriveDistributionCurrent(
     const derived = deriveCurrentDistribution(log, sampleRows);
     const withRevision: DistributionCurrentData = {
       ...derived,
-      logRevision: log.revision
+      logRevision: log.revision,
+      eventSetId: log.eventSetId
     };
 
     // Best-effort cache write — don't block on errors, but log for observability.

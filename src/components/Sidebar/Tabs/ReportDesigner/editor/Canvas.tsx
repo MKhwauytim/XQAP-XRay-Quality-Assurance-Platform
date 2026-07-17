@@ -25,7 +25,7 @@ function ElementBody({ element }: { element: Element }) {
   if (kind === "shape") return <ShapeRenderer element={element} />;
   if (kind === "image") return <ImageRenderer element={element} />;
   if (kind === "kpi") return <KpiRenderer element={element} />;
-  // Placeholder for table / chart / kpi (not yet implemented)
+  // Compatibility fallback for table/chart elements from experimental design files.
   return (
     <div className="rd-element-placeholder">
       {element.name}

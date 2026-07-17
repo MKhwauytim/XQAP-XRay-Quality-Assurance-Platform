@@ -38,8 +38,14 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Verify release metadata and vendored dependencies
+        run: npm run check:release && npm run check:vendor
+
       - name: Lint
         run: npm run lint:ci
+
+      - name: Complexity regression budget
+        run: npm run check:complexity
 
       - name: Hex-literal regression guard (B4)
         run: npm run check:hex-literals
@@ -49,3 +55,6 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Bundle-size budget
+        run: npm run check:bundle-size

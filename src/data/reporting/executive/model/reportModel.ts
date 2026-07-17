@@ -23,6 +23,7 @@ import { buildReviewerKpis } from "./reviewerKpis";
 import type { ReviewerKpiModel, ReviewerReferralInput } from "./reviewerKpis";
 import { band } from "./dataSufficiency";
 import type { DataSufficiencyBand } from "./dataSufficiency";
+import { formatMonthFolderShortLabel } from "../../../population/monthFolder";
 
 /**
  * The single typed analytical artifact (design spec §3.6) — the in-memory
@@ -128,20 +129,11 @@ export type ReportModel = {
   kpis: ExecutiveKPIs;
 };
 
-const ARABIC_MONTHS = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"];
-
-function periodIdFromFolder(folderName: string): string {
-  const m = /^(\d{1,2})-[A-Za-z]+-(\d{4})$/.exec(folderName.trim());
-  if (!m) return folderName;
-  const name = ARABIC_MONTHS[Number(m[1]) - 1];
-  return name ? `${name} ${m[2]}` : folderName;
-}
-
 export function buildReportModel(
   input: ExecutiveReportInput,
   employeeDisplayNames: Record<string, string> = {}
 ): ReportModel {
-  const periodId = periodIdFromFolder(input.monthFolderName);
+  const periodId = formatMonthFolderShortLabel(input.monthFolderName);
 
   const rows = buildExecutiveReportRows(input);
   const kpis = calculateExecutiveKPIs(rows, input.sample, input.config);

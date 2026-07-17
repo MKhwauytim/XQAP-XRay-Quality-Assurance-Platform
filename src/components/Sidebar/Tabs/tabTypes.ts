@@ -4,14 +4,14 @@ import type { AuthRole } from "../../../auth/authTypes";
 export type SidebarSubTab = {
   id: string;
   label: string;
-  allowedRoles?: AuthRole[];
+  allowedRoles?: readonly AuthRole[];
 };
 
 export type SidebarTabDefinition = {
   id: string;
   label: string;
   order: number;
-  allowedRoles: AuthRole[];
+  allowedRoles: readonly AuthRole[];
   icon: ReactNode;
   TabComponent: ComponentType;
   subTabs?: SidebarSubTab[];

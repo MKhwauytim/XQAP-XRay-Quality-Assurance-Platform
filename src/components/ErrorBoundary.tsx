@@ -1,6 +1,7 @@
 import { Component } from "react";
 import type { ErrorInfo, ReactNode } from "react";
 import { AlertTriangle } from "lucide-react";
+import { logError } from "../data/storage/errorLogger";
 
 type Props = { children: ReactNode };
 type State = { error: Error | null };
@@ -16,7 +17,10 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
-    console.error("[ErrorBoundary]", error.message, info.componentStack);
+    logError(
+      "ui:error-boundary",
+      new Error(`${error.message}${info.componentStack ? `\n${info.componentStack}` : ""}`),
+    );
   }
 
   render(): ReactNode {

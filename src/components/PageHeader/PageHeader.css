@@ -83,7 +83,7 @@
   min-height: 36px;
 }
 
-@media (max-width: 760px) {
+@media (max-width: 767px) {
   .page-header {
     gap: 14px;
     margin-bottom: 16px;

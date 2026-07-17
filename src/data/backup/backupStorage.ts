@@ -15,6 +15,7 @@ import {
   getSampleMainDir,
   getSystemRoot,
   getTemplatesRoot,
+  POPULATION_SUBFOLDERS,
   SYSTEM_FOLDER_NAMES,
   WORKSPACE_ROOTS,
 } from "../workspace/workspacePaths";
@@ -220,8 +221,9 @@ async function readTextFile(dir: DirectoryHandleLike, fileName: string): Promise
     const fh = await dir.getFileHandle(fileName, { create: false });
     const file = await fh.getFile();
     return file.text();
-  } catch {
-    return null;
+  } catch (error) {
+    if (isNotFoundError(error)) return null;
+    throw error;
   }
 }
 
@@ -283,11 +285,19 @@ async function writeRowsAsChunkedXlsx(params: {
 
 // A backup walks the whole workspace while normal saves run: each safeWriteJson
 // creates and then removes a {file}.tmp, mutating a directory mid-enumeration.
-// Chromium then rejects the directory iterator / a follow-up getDirectoryHandle
-// with NotFoundError. Tolerate that instead of aborting the entire backup.
+// Chromium can then reject a follow-up lookup with NotFoundError. A
+// NotReadableError is different: the entry still exists but cannot currently be
+// read, so it must propagate rather than silently producing a partial backup.
 function isNotFoundError(error: unknown): boolean {
   return Boolean(
     error && typeof error === "object" && (error as { name?: string }).name === "NotFoundError"
+  );
+}
+
+function isMissingWorkspaceLocation(error: unknown): boolean {
+  return (
+    isNotFoundError(error) ||
+    (error instanceof Error && error.message.startsWith("Missing workspace folder:"))
   );
 }
 
@@ -411,30 +421,75 @@ async function restoreJsonTree(params: {
   }
 }
 
+type LocatedJson<T> =
+  | { state: "ok"; value: T }
+  | { state: "missing" | "corrupt" };
+
+async function readJsonAt<T>(
+  baseDir: DirectoryHandleLike,
+  path: readonly string[]
+): Promise<LocatedJson<T>> {
+  try {
+    let dir = baseDir;
+    for (let index = 0; index < path.length - 1; index += 1) {
+      dir = await dir.getDirectoryHandle(path[index]!, { create: false });
+    }
+    const result = await safeReadJson<T>(dir, path[path.length - 1]!);
+    if (result.ok) return { state: "ok", value: result.value };
+    return { state: result.reason };
+  } catch (error) {
+    if (isNotFoundError(error)) return { state: "missing" };
+    throw error;
+  }
+}
+
 async function loadMonthJson<T>(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
-  path: string[]
+  path: readonly string[]
 ): Promise<T | null> {
-  try {
-    const fileName = path[path.length - 1]!;
-    const isSampleMainFile =
-      path[0] === "sample" ||
-      fileName === "distribution.current.json" ||
-      fileName === "distribution.log.json";
+  const fileName = path[path.length - 1]!;
+  const isSampleMainFile =
+    path[0] === "sample" ||
+    fileName === "distribution.current.json" ||
+    fileName === "distribution.log.json";
 
-    let dir = isSampleMainFile
-      ? await getSampleMainDir(directoryHandle, monthFolderName, false)
-      : await getMonthDir(directoryHandle, monthFolderName);
-    const pathStart = isSampleMainFile && path[0] === "sample" ? 1 : 0;
-    for (let index = pathStart; index < path.length - 1; index += 1) {
-      dir = await dir.getDirectoryHandle(path[index]!, { create: false });
+  if (isSampleMainFile) {
+    let current: LocatedJson<T> = { state: "missing" };
+    try {
+      const sampleMain = await getSampleMainDir(directoryHandle, monthFolderName, false);
+      current = await readJsonAt<T>(sampleMain, [fileName]);
+    } catch (error) {
+      if (!isMissingWorkspaceLocation(error)) throw error;
     }
-    const result = await safeReadJson<T>(dir, fileName);
-    return result.ok ? result.value : null;
-  } catch {
-    return null;
+    if (current.state === "ok") return current.value;
+    if (current.state === "corrupt") return null;
+
+    // Compatibility for workspaces created before samples moved to the
+    // numbered 2-samples/{month}/1-main root.
+    const legacyMonth = await getMonthDir(directoryHandle, monthFolderName);
+    const legacyPath = path[0] === "sample" ? path : [fileName];
+    const legacy = await readJsonAt<T>(legacyMonth, legacyPath);
+    return legacy.state === "ok" ? legacy.value : null;
   }
+
+  const monthDir = await getMonthDir(directoryHandle, monthFolderName);
+  const current = await readJsonAt<T>(monthDir, path);
+  if (current.state === "ok") return current.value;
+  if (current.state === "corrupt") return null;
+
+  // The root already supports Population as a legacy alias. These candidates
+  // preserve its unnumbered raw/processed children without making new code
+  // depend on those obsolete names.
+  const legacyFolder =
+    path[0] === POPULATION_SUBFOLDERS.raw
+      ? "raw"
+      : path[0] === POPULATION_SUBFOLDERS.processed
+        ? "processed"
+        : null;
+  if (!legacyFolder) return null;
+  const legacy = await readJsonAt<T>(monthDir, [legacyFolder, ...path.slice(1)]);
+  return legacy.state === "ok" ? legacy.value : null;
 }
 
 function addMonth(row: Record<string, unknown>, month: MonthFolderInfo): Record<string, unknown> {
@@ -510,9 +565,9 @@ async function exportMonthXlsx(params: {
   const summaries: BackupDatasetSummary[] = [];
 
   const manifest = await loadMonthJson<MonthManifestData>(directoryHandle, month.folderName, ["month.manifest.json"]);
-  const population = await loadMonthJson<PopulationFinalData>(directoryHandle, month.folderName, ["processed", "population.final.json"]);
-  const riskRaw = await loadMonthJson<MonthRawData>(directoryHandle, month.folderName, ["raw", "risk.raw.json"]);
-  const biRaw = await loadMonthJson<MonthRawData>(directoryHandle, month.folderName, ["raw", "bi.raw.json"]);
+  const population = await loadMonthJson<PopulationFinalData>(directoryHandle, month.folderName, [POPULATION_SUBFOLDERS.processed, "population.final.json"]);
+  const riskRaw = await loadMonthJson<MonthRawData>(directoryHandle, month.folderName, [POPULATION_SUBFOLDERS.raw, "risk.raw.json"]);
+  const biRaw = await loadMonthJson<MonthRawData>(directoryHandle, month.folderName, [POPULATION_SUBFOLDERS.raw, "bi.raw.json"]);
   const sample = await loadMonthJson<SampleMasterData>(directoryHandle, month.folderName, ["sample", "sample.master.json"]);
   const distribution = await loadMonthJson<DistributionCurrentData>(directoryHandle, month.folderName, ["distribution.current.json"]);
   const distributionLog = await loadMonthJson<{ events?: unknown[] }>(directoryHandle, month.folderName, ["distribution.log.json"]);
@@ -831,9 +886,9 @@ export async function loadArchiveStatus(
 
   for (const month of months) {
     const manifest = await loadMonthJson<MonthManifestData>(directoryHandle, month.folderName, ["month.manifest.json"]);
-    const population = await loadMonthJson<PopulationFinalData>(directoryHandle, month.folderName, ["processed", "population.final.json"]);
-    const riskRaw = await loadMonthJson<MonthRawData>(directoryHandle, month.folderName, ["raw", "risk.raw.json"]);
-    const biRaw = await loadMonthJson<MonthRawData>(directoryHandle, month.folderName, ["raw", "bi.raw.json"]);
+    const population = await loadMonthJson<PopulationFinalData>(directoryHandle, month.folderName, [POPULATION_SUBFOLDERS.processed, "population.final.json"]);
+    const riskRaw = await loadMonthJson<MonthRawData>(directoryHandle, month.folderName, [POPULATION_SUBFOLDERS.raw, "risk.raw.json"]);
+    const biRaw = await loadMonthJson<MonthRawData>(directoryHandle, month.folderName, [POPULATION_SUBFOLDERS.raw, "bi.raw.json"]);
     const sample = await loadMonthJson<SampleMasterData>(directoryHandle, month.folderName, ["sample", "sample.master.json"]);
     const distribution = await loadMonthJson<DistributionCurrentData>(directoryHandle, month.folderName, ["distribution.current.json"]);
     const answerFiles = await loadAllEmployeeFiles(directoryHandle, month.folderName);

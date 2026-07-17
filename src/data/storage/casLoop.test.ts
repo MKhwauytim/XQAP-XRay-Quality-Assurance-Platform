@@ -117,7 +117,7 @@ describe("casLoop — terminal permission-error classification", () => {
     });
   });
 
-  it("aborts on a NoModificationAllowedError and on a permission-flavoured message", async () => {
+  it("aborts on a NoModificationAllowedError", async () => {
     const byName = await casLoop<string>(
       async () => {
         const err = new Error("boom");
@@ -131,15 +131,24 @@ describe("casLoop — terminal permission-error classification", () => {
       error: expect.stringContaining("فقد الوصول إلى مجلد العمل"),
     });
 
-    const byMessage = await casLoop<string>(
+  });
+
+  it("does not misclassify a transient NotReadableError as lost permission", async () => {
+    let attempts = 0;
+    const result = await casLoop<string>(
       async () => {
-        throw new Error("write permission denied");
+        attempts += 1;
+        const error = new Error("Could not be read due to temporary permission problems");
+        error.name = "NotReadableError";
+        throw error;
       },
-      { maxRetries: 5, baseDelayMs: 1 }
+      { maxRetries: 3, baseDelayMs: 1 }
     );
-    expect(byMessage).toEqual({
+
+    expect(attempts).toBe(3);
+    expect(result).toEqual({
       ok: false,
-      error: expect.stringContaining("فقد الوصول إلى مجلد العمل"),
+      error: "Could not be read due to temporary permission problems",
     });
   });
 

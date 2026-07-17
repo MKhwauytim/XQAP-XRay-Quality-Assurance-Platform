@@ -135,9 +135,13 @@ across machines. This is genuinely useful but is **not** a distributed lock: the
 authority to arbitrate two machines that read the same base revision and commit within the same
 narrow window. When CAS retries are exhausted, the write **fails loudly with an Arabic conflict
 message** (Wave B6 ensures user-initiated writes surface this rather than failing silently) so the
-user can reload and retry — data is never silently lost, but true simultaneous cross-machine
-serialization is out of reach without a backend. This is an **accepted, permanent limitation** of
-the no-backend design, not a defect to be fixed.
+user can reload and retry. Distribution events written by current clients additionally use one
+immutable file per unique event id; the shared `distribution.log.json` is a backward-compatible
+projection, and `distribution.current.json` is rebuildable. This substantially narrows lost-update
+risk for that event stream, but it does **not** provide distributed ordering, atomic multi-event
+transactions, or exactly-once delivery. Other mutable files can still suffer an undetected
+last-writer-wins race. True cross-machine serialization requires a backend or another central
+transaction authority. This remains an accepted limitation of the no-backend design.
 
 ### (c) NCA ECC-2:2024 note
 

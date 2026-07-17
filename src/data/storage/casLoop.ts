@@ -35,23 +35,17 @@ function verifyDelayMs(): number {
   );
 }
 
-// A DOMException/error that means the folder permission is gone — not a write
-// conflict. Detected by name (NotAllowedError / SecurityError /
-// NoModificationAllowedError) or a permission-flavoured message.
+// A DOMException that means the folder permission is gone, identified by its
+// stable platform name. Do not classify from message text: Chromium's transient
+// NotReadableError message can mention "permission problems" even though a
+// retry may succeed.
 function isPermissionLostError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const name = (error as { name?: string }).name;
-  if (
+  return (
     name === "NotAllowedError" ||
     name === "SecurityError" ||
     name === "NoModificationAllowedError"
-  ) {
-    return true;
-  }
-  const message = (error as { message?: string }).message;
-  return (
-    typeof message === "string" &&
-    /permission|not allowed|no modification allowed/i.test(message)
   );
 }
 

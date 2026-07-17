@@ -16,6 +16,8 @@ type PhaseFourDistributionProps = {
   distributionCurrent: DistributionCurrentData | null;
   distributionMessage: SaveMessage;
   isDistributing: boolean;
+  canConfigure: boolean;
+  canDistribute: boolean;
   config: PopulationConfig;
   operatorUsername: string;
   saveMonth: number;
@@ -48,6 +50,8 @@ export default function PhaseFourDistribution({
   distributionCurrent,
   distributionMessage,
   isDistributing,
+  canConfigure,
+  canDistribute,
   config,
   operatorUsername,
   saveMonth,
@@ -352,6 +356,8 @@ export default function PhaseFourDistribution({
                       <input
                         type="checkbox"
                         checked={alloc.isActive}
+                        disabled={!canConfigure}
+                        aria-label={`تفعيل ${emp.displayName} في ${STAGE_LABELS[selectedStageTab]}`}
                         onChange={(e) =>
                           handleAllocationChange(emp.username, selectedStageTab, "isActive", e.target.checked)
                         }
@@ -361,7 +367,7 @@ export default function PhaseFourDistribution({
                     <span>
                       <select
                         className="save-disk-input"
-                        disabled={!alloc.isActive}
+                        disabled={!canConfigure || !alloc.isActive}
                         value={alloc.method}
                         onChange={(e) =>
                           handleAllocationChange(emp.username, selectedStageTab, "method", e.target.value)
@@ -376,7 +382,7 @@ export default function PhaseFourDistribution({
                       <input
                         type="number"
                         className="save-disk-input"
-                        disabled={!alloc.isActive}
+                        disabled={!canConfigure || !alloc.isActive}
                         min={0}
                         value={alloc.value}
                         onChange={(e) =>
@@ -453,7 +459,8 @@ export default function PhaseFourDistribution({
               type="button"
               className="primary-action"
               onClick={handleRunBulkAssignment}
-              disabled={isDistributing}
+              disabled={!canDistribute || isDistributing}
+              title={!canDistribute ? "لا تملك صلاحية حفظ التوزيع، أو أن مساحة العمل للقراءة فقط." : undefined}
             >
               {isDistributing ? "جاري توزيع وحفظ التعيينات..." : "تطبيق وحفظ التوزيع التلقائي"}
             </button>
@@ -550,7 +557,7 @@ export default function PhaseFourDistribution({
                     row={row}
                     entry={entry ?? null}
                     employees={employees}
-                    isDisabled={isDistributing}
+                    isDisabled={!canDistribute || isDistributing}
                     onAssign={onAssign}
                     onReassign={onReassign}
                     onMarkComplete={onMarkComplete}

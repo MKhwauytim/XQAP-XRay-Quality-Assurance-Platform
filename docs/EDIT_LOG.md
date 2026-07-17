@@ -4,6 +4,104 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v56.2 - 2026-07-17 - Integrity, authorization, Arabic UI, and production hardening
+
+This release supersedes the transient-read behavior described in v56.1. An existing
+`NotReadableError` is never equivalent to a missing file: reads retry briefly and then fail
+explicitly, preventing stale-backup fallback and rollback of a successful commit.
+
+Key changes include current and legacy archive-path compatibility, typed read-only rejection,
+fail-closed mutation authorization, Arabic display dates and report actions, deterministic local
+report artwork with the vulnerable pattern dependency chain removed, bundle and vendor integrity
+CI budgets, responsive/accessibility hardening, and explicit workspace migration/concurrency
+coverage. Detailed behavior is protected by the related storage, permission, archive, reporting,
+workspace, and UI tests.
+
+The completed hardening also adds immutable per-event distribution storage, a single typed tab
+catalog, a bounded three-tab mount cache, an accessible mobile drawer, a native SVG reviewer
+p-chart (removing Recharts), workspace schema detection/dry-run metadata, and complexity
+decomposition for sampling, distribution, Population, mapping settings, user management, KPI
+profiles, and population exports. Unfinished Report Designer controls are no longer advertised.
+The final live Chromium smoke test also closed two render-layer gaps: Phase Four distribution
+controls now reflect read-only authorization before interaction, and the RTL mobile drawer is
+anchored to the correct physical edge while preserving focus trapping, Escape close, focus
+restoration, and background inertness.
+The follow-up review makes mutation storage scope explicit: workspace-backed commands require a
+ready mounted directory and return `workspace-unavailable` otherwise, while the few browser-backed
+administration commands remain intentionally independent. It also consolidates duplicate Risk/BI
+comparison grouping and splits the former 1,016-line `MappingSettingsModal.tsx` into a 238-line
+orchestrator, a controller, pure configuration helpers, and secondary tab sections.
+The controller is now protected by behavior-level characterization tests covering reopen/mode
+effects, current-prop usage, Risk/BI/sheet/stage mappings, detected settings, workflow mutations,
+custom fields, and export columns, plus rendered tab wiring. Workspace JSON writes also re-query
+live read/write permission at the shared safe-write boundary; denied or prompt state blocks before
+file access and moves the workspace gate to a reconnect-required state.
+The release gate passes 711 tests in 109 files, strict typecheck, full lint, a complexity regression
+budget, zero npm advisories, vendor/release integrity checks, and a single-file build of about
+3.04 MB (about 1.13 MB gzip).
+
+## v56.1 — 2026-07-17 — Fix: automatic backup aborting on transient NotReadableError
+
+Bug: "تعذر إنشاء النسخة الاحتياطية التلقائية: The requested file could not be read,
+typically due to permission problems that have occurred after a reference to a file was
+acquired." Root cause: per the File System Access spec, `FileSystemFileHandle.getFile()`
+throws `NotReadableError` (not `NotFoundError`) when a file becomes transiently unreadable
+after its handle was acquired — e.g. another `safeWriteJson` elsewhere in the workspace
+mid-swapping the same file via its `.tmp`/`.bak` dance while an automatic backup is walking
+the tree. The existing race-tolerance in both `safeWrite.ts`'s `readText` and
+`backupStorage.ts`'s directory-walk helpers only whitelisted `NotFoundError`, so this
+sibling error propagated uncaught and failed the entire automatic backup instead of being
+treated as "unreadable right now, skip it" like the `NotFoundError` case already was.
+
+**File:** `src/data/storage/safeWrite.ts`
+
+**Before:**
+```ts
+function isNotFound(error: unknown): boolean {
+  return Boolean(
+    error &&
+      typeof error === "object" &&
+      (error as { name?: string }).name === "NotFoundError"
+  );
+}
+```
+
+**After:**
+```ts
+function isMissingOrUnreadable(error: unknown): boolean {
+  const name = error && typeof error === "object" ? (error as { name?: string }).name : undefined;
+  return name === "NotFoundError" || name === "NotReadableError";
+}
+```
+(and the `readText` call site's `isNotFound(error)` check renamed to `isMissingOrUnreadable(error)`)
+
+**File:** `src/data/backup/backupStorage.ts`
+
+**Before:**
+```ts
+function isNotFoundError(error: unknown): boolean {
+  return Boolean(
+    error && typeof error === "object" && (error as { name?: string }).name === "NotFoundError"
+  );
+}
+```
+
+**After:**
+```ts
+function isNotFoundError(error: unknown): boolean {
+  const name = error && typeof error === "object" ? (error as { name?: string }).name : undefined;
+  return name === "NotFoundError" || name === "NotReadableError";
+}
+```
+
+**File:** `src/data/storage/safeWrite.test.ts`
+
+**Before:** no coverage of `safeReadJson` behavior when `getFile()` throws `NotReadableError`.
+
+**After:** adds a regression test that wraps a memory directory so `getFile()` throws
+`NotReadableError` (with the exact reported message) for an existing file, and asserts
+`safeReadJson` returns `{ ok: false }` instead of throwing.
+
 ## v56 — 2026-07-17 — Batch 4 safe items: date-parsing rescue, XrayReferrals extraction, audit-log viewer
 
 Three items from an independent Batch-4 triage (`.superpowers/sdd/batch4-triage.md`) found

@@ -15,15 +15,7 @@ import { openOrDownload } from "../../htmlReport";
 import { esc } from "../primitives";
 import { sourceRevisionsFooterHtml } from "../../sourceRevisions";
 import type { ExecutiveReportInput } from "../../executiveReportTypes";
-
-const ARABIC_MONTHS = ["يناير","فبراير","مارس","أبريل","مايو","يونيو","يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"];
-
-function formatMonthLabel(folderName: string): string {
-  const m = /^(\d{1,2})-[A-Za-z]+-(\d{4})$/.exec(folderName.trim());
-  if (!m) return folderName;
-  const name = ARABIC_MONTHS[Number(m[1]) - 1];
-  return name ? `${name} ${m[2]}` : folderName;
-}
+import { formatMonthFolderShortLabel } from "../../../population/monthFolder";
 
 export function buildExecutiveDeck(
   input: ExecutiveReportInput,
@@ -33,7 +25,7 @@ export function buildExecutiveDeck(
   const slides = buildDeckSlides(model);
   return buildDeckHtml(
     slides,
-    formatMonthLabel(input.monthFolderName),
+    formatMonthFolderShortLabel(input.monthFolderName),
     sourceRevisionsFooterHtml(input.sourceRevisions, esc),
   );
 }

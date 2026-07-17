@@ -64,7 +64,7 @@ function buildCoverPage(data: PopulationReportData): string {
 
       <div class="cover-grid">
         <div>
-          <div class="kicker">Population Processing Report</div>
+          <div class="kicker">تقرير معالجة المجتمع</div>
           <h1>${escapeHtml(data.title)}</h1>
           <p>${escapeHtml(data.phaseLabel)} — ${escapeHtml(data.generatedMonth)}</p>
 

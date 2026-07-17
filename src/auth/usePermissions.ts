@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
+import { isReadOnlyMode } from "../data/storage/readOnlyMode";
+import { useWorkspace } from "../data/workspace/useWorkspace";
 import { readSession } from "./authSession";
 import type { AuthRole } from "./authTypes";
+import {
+  getMutationCapability,
+  type MutationCapability,
+} from "./mutationCapability";
 import {
   FEATURE_TAB_LOOKUP,
   hasFeature,
@@ -25,6 +31,12 @@ export type UsePermissionsResult = {
    * is not blocked. Cascade: page=none → all features on that page return false.
    */
   can: (featureId: string) => boolean;
+  /**
+   * Authorizes a state-changing command. Unlike `can`, this requires edit
+   * access on the parent page and rejects the global read-only/demo mode.
+   */
+  canMutate: (featureId: string) => boolean;
+  getMutationCapability: (featureId: string) => MutationCapability;
   permissions: RolePermission[];
   featurePermissions: FeaturePermission[];
 };
@@ -34,12 +46,15 @@ const GUEST_FALLBACK: UsePermissionsResult = {
   username: "",
   canAccessTab: () => false,
   can: () => false,
+  canMutate: () => false,
+  getMutationCapability: () => ({ allowed: false, reason: "page-not-editable" }),
   permissions: [],
   featurePermissions: [],
 };
 
 export function usePermissions(): UsePermissionsResult {
   const [, forceUpdate] = useState(0);
+  const { directoryHandle, status: workspaceStatus } = useWorkspace();
 
   useEffect(() => {
     return subscribeToUserManagementChanges(() => forceUpdate((n) => n + 1));
@@ -50,6 +65,16 @@ export function usePermissions(): UsePermissionsResult {
 
   const state = readUserManagementState();
   const { role, username } = session;
+  const mutationCapability = (featureId: string) =>
+    getMutationCapability({
+      role,
+      featureId,
+      permissions: state.permissions,
+      featurePermissions: state.featurePermissions,
+      isReadOnly: session.mode === "demo" || isReadOnlyMode(),
+      workspaceReady:
+        workspaceStatus === "ready" && directoryHandle !== null,
+    });
 
   return {
     role,
@@ -65,6 +90,8 @@ export function usePermissions(): UsePermissionsResult {
       }
       return hasFeature(state.featurePermissions, role, featureId);
     },
+    canMutate: (featureId) => mutationCapability(featureId).allowed,
+    getMutationCapability: mutationCapability,
     permissions: state.permissions,
     featurePermissions: state.featurePermissions,
   };

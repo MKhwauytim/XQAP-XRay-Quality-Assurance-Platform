@@ -6,8 +6,7 @@ import { formatNumber, getStageKey } from "./helpers";
 import SummaryCard from "./SummaryCard";
 import { useState } from "react";
 import { AlertTriangle, CheckCircle2, Info, Lock, ShieldCheck, Unlock } from "lucide-react";
-import { hasFeature, readUserManagementState } from "../../../../../auth/userManagement";
-import type { AuthRole } from "../../../../../auth/authTypes";
+import { usePermissions } from "../../../../../auth/usePermissions";
 import { getLabels } from "../../../../../data/labels/labelsStore";
 import { formatMonthFolderShortLabel } from "../../../../../data/population/monthFolder";
 import { evaluateApprovalEligibility, isSelfApproval } from "../../../../../data/sampling/sampleApprovalRules";
@@ -201,6 +200,8 @@ export default function PhaseThreeSampling({
   onSampleSeedChange,
   onDrawSample
 }: PhaseThreeSamplingProps) {
+  const { canMutate } = usePermissions();
+  const canUnlock = canMutate("unlock-sampling-stage");
   const [isAdminUnlocked, setIsAdminUnlocked] = useState(false);
 
   const stageCounts = {
@@ -258,12 +259,6 @@ export default function PhaseThreeSampling({
 
             const isAutoLocked = rule.stageKey === "first" || (rule.minRequiredCount > 0 && size < rule.minRequiredCount);
             const isLockedState = (rule.isLocked || isAutoLocked) && !isAdminUnlocked;
-            const canUnlock = hasFeature(
-              readUserManagementState().featurePermissions,
-              userRole as AuthRole,
-              "unlock-sampling-stage"
-            );
-
             return (
               <div
                 key={rule.stageKey}

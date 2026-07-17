@@ -3,8 +3,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Archive, X } from "lucide-react";
 
 import { readSession } from "../../../../auth/authSession";
+import { tabAllowedRoles } from "../../../../auth/tabCatalog";
+import { usePermissions } from "../../../../auth/usePermissions";
 import { useFocusTrap } from "../../../../hooks/useFocusTrap";
 import { PageHeader } from "../../../../components/PageHeader/PageHeader";
+import { formatMonthFolderShortLabel } from "../../../../data/population/monthFolder";
 import {
   createBackup,
   loadArchiveStatus,
@@ -22,7 +25,7 @@ import {
 import { listMonthFolders } from "../../../../data/population/populationStorage";
 import { closeMonth, reopenMonth } from "../../../../data/population/monthLock";
 import { appendWorkspaceAction } from "../../../../data/audit/actionLog";
-import { hasFeature, readUserManagementState, syncUsersFromDisk } from "../../../../auth/userManagement";
+import { syncUsersFromDisk } from "../../../../auth/userManagement";
 import { getLabels } from "../../../../data/labels/labelsStore";
 import { importLabelsSnapshot } from "../../../../data/workspace/labelsSnapshot";
 import { readJsonFile } from "../../../../data/storage/fileSystemAccess";
@@ -39,7 +42,7 @@ export const tabConfig: SidebarTabModule["tabConfig"] = {
   id: "archive",
   label: "إدارة الأرشيف",
   order: 30,
-  allowedRoles: ["guest", "supervisor", "manager", "admin"],
+  allowedRoles: tabAllowedRoles("archive"),
   icon: <Archive size={20} strokeWidth={1.8} aria-hidden />,
 };
 
@@ -66,8 +69,12 @@ export default function ArchiveTab() {
   const { directoryHandle } = useWorkspace();
   const { refreshMonths } = useGlobalMonth();
   const session = readSession();
+  const { canMutate } = usePermissions();
   const username = session?.username ?? "unknown";
-  const isAdmin = session?.role === "admin";
+  const canCreateBackup = canMutate("archive.createBackup");
+  const canRestoreBackup = canMutate("archive.restoreBackup");
+  const canCloseMonth = canMutate("archive.closeMonth");
+  const mutationDeniedTitle = "يتطلب هذا الإجراء صلاحية التعديل ومساحة عمل قابلة للكتابة.";
 
   const [statuses, setStatuses] = useState<MonthArchiveStatus[]>([]);
   const [history, setHistory] = useState<BackupHistoryItem[]>([]);
@@ -83,14 +90,6 @@ export default function ArchiveTab() {
   const [message, setMessage] = useState<{ type: "ok" | "error"; text: string } | null>(null);
   const [lockTarget, setLockTarget] = useState<{ folderName: string; mode: "close" | "reopen" } | null>(null);
   const [isLocking, setIsLocking] = useState(false);
-
-  // Month close-out is gated solely by the archive.closeMonth feature toggle (admin-only by
-  // default; admins can extend it to other roles from the feature-permission matrix).
-  const role = session?.role ?? "guest";
-  const canCloseMonth = useMemo(
-    () => hasFeature(readUserManagementState().featurePermissions, role, "archive.closeMonth"),
-    [role]
-  );
 
   const refresh = useCallback(async () => {
     if (!directoryHandle) return;
@@ -125,7 +124,7 @@ export default function ArchiveTab() {
   }, [refresh]);
 
   async function handleBackup(): Promise<void> {
-    if (!directoryHandle || !isAdmin) return;
+    if (!directoryHandle || !canCreateBackup) return;
     setIsBackingUp(true);
     setMessage(null);
     try {
@@ -146,7 +145,7 @@ export default function ArchiveTab() {
   }
 
   async function handleFrequencyChange(frequency: AutoBackupFrequency): Promise<void> {
-    if (!directoryHandle || !isAdmin) return;
+    if (!directoryHandle || !canCreateBackup) return;
     setIsSavingSettings(true);
     setMessage(null);
     try {
@@ -198,7 +197,7 @@ export default function ArchiveTab() {
   }
 
   async function handleRestore(folderName: string): Promise<void> {
-    if (!directoryHandle || !isAdmin) return;
+    if (!directoryHandle || !canRestoreBackup) return;
     setIsBackingUp(true);
     setMessage(null);
     try {
@@ -226,7 +225,7 @@ export default function ArchiveTab() {
   }
 
   async function handleImportUsersLabels(): Promise<void> {
-    if (!directoryHandle || !isAdmin) return;
+    if (!directoryHandle || !canRestoreBackup) return;
     setIsImportingUsersLabels(true);
     try {
       const result = await readJsonFile<UsersPermissionsFile>(
@@ -282,20 +281,19 @@ export default function ArchiveTab() {
   return (
     <section className="arc-page" dir="rtl">
       <PageHeader
-        eyebrow="Archive"
+        eyebrow="حفظ السجلات"
         title="الأرشيف"
         subtitle="نسخ احتياطي تلقائي للمدير، مع نسخ JSON كاملة وتصدير XLSX مجزأ للبيانات الكبيرة."
       >
-        {isAdmin ? (
-          <button
+        <button
             type="button"
             className="arc-btn-primary"
-            disabled={isBackingUp}
+            disabled={isBackingUp || !canCreateBackup}
+            title={!canCreateBackup ? mutationDeniedTitle : undefined}
             onClick={() => { void handleBackup(); }}
           >
             {isBackingUp ? "جاري إنشاء النسخة..." : "نسخ احتياطي الآن"}
           </button>
-        ) : null}
       </PageHeader>
 
       {message ? (
@@ -304,12 +302,13 @@ export default function ArchiveTab() {
         </div>
       ) : null}
 
-      {justRestored && isAdmin ? (
+      {justRestored ? (
         <div className="arc-msg-ok" role="status">
           <button
             type="button"
             className="arc-btn-secondary"
-            disabled={isImportingUsersLabels}
+            disabled={isImportingUsersLabels || !canRestoreBackup}
+            title={!canRestoreBackup ? mutationDeniedTitle : undefined}
             onClick={() => { void handleImportUsersLabels(); }}
           >
             {isImportingUsersLabels ? "جاري الاستيراد..." : getLabels().backup_import_users_labels_btn}
@@ -329,7 +328,7 @@ export default function ArchiveTab() {
         <section className="arc-panel arc-auto-panel">
           <div className="arc-panel-header">
             <div>
-              <span className="arc-panel-kicker">Automatic Backup</span>
+              <span className="arc-panel-kicker">النسخ التلقائي</span>
               <h2>النسخ الاحتياطي التلقائي</h2>
             </div>
             <span className={autoState ? "arc-state-ok" : "arc-state-waiting"}>
@@ -340,7 +339,7 @@ export default function ArchiveTab() {
             عند دخول المدير وبعد جاهزية مساحة العمل، يتم إنشاء نسخة تلقائياً حسب الفترة المحددة داخل
             <code>.system/backups</code>.
           </p>
-          {isAdmin ? (
+          {canCreateBackup ? (
             <label className="arc-setting-row" htmlFor="backup-frequency">
               <span>فترة النسخ</span>
               <select
@@ -381,7 +380,7 @@ export default function ArchiveTab() {
         <section className="arc-panel">
           <div className="arc-panel-header">
             <div>
-              <span className="arc-panel-kicker">Export Strategy</span>
+              <span className="arc-panel-kicker">سياسة التصدير</span>
               <h2>محتويات النسخة</h2>
             </div>
           </div>
@@ -396,7 +395,7 @@ export default function ArchiveTab() {
       <section className="arc-panel">
         <div className="arc-panel-header">
           <div>
-            <span className="arc-panel-kicker">Processed Months</span>
+            <span className="arc-panel-kicker">الأشهر المعالجة</span>
             <h2>حالة الأشهر المعالجة</h2>
           </div>
           <button type="button" className="arc-btn-secondary" onClick={() => { void refresh(); }} disabled={isLoading}>
@@ -426,7 +425,7 @@ export default function ArchiveTab() {
               <tbody>
                 {statuses.map((item) => (
                   <tr key={item.folderName}>
-                    <td className="arc-month-name">{item.folderName}</td>
+                    <td className="arc-month-name">{formatMonthFolderShortLabel(item.folderName)}</td>
                     <td>
                       <span className={`arc-badge arc-badge-${item.manifestStatus ?? "none"}`}>
                         {statusLabel(item.manifestStatus)}
@@ -436,7 +435,7 @@ export default function ArchiveTab() {
                     <td>
                       {item.hasRawRisk || item.hasRawBi ? (
                         <span className="arc-compact">
-                          {item.hasRawRisk ? "Risk" : ""}
+                          {item.hasRawRisk ? "المخاطر" : ""}
                           {item.hasRawRisk && item.hasRawBi ? " / " : ""}
                           {item.hasRawBi ? "BI" : ""}
                         </span>
@@ -489,7 +488,7 @@ export default function ArchiveTab() {
       <section className="arc-panel">
         <div className="arc-panel-header">
           <div>
-            <span className="arc-panel-kicker">Backup History</span>
+            <span className="arc-panel-kicker">سجل النسخ الاحتياطية</span>
             <h2>آخر النسخ الاحتياطية</h2>
           </div>
         </div>
@@ -508,16 +507,15 @@ export default function ArchiveTab() {
                   <span>{formatNumber(item.jsonFilesCount)} JSON</span>
                   <span>{formatNumber(item.xlsxFilesCount)} XLSX</span>
                   <span>{formatNumber(item.totalRows)} صف</span>
-                  {isAdmin ? (
-                    <button
+                  <button
                       type="button"
                       className="arc-restore-btn"
-                      disabled={isBackingUp}
+                      disabled={isBackingUp || !canRestoreBackup}
+                      title={!canRestoreBackup ? mutationDeniedTitle : undefined}
                       onClick={() => setRestoreTarget(item)}
                     >
                       استعادة
                     </button>
-                  ) : null}
                 </div>
               </article>
             ))}
@@ -646,7 +644,7 @@ function RestoreDialog({
       <div className="arc-restore-modal">
         <div className="arc-restore-header">
           <div>
-            <span className="arc-panel-kicker">Restore Backup</span>
+            <span className="arc-panel-kicker">استعادة النسخة</span>
             <h2>استعادة نسخة احتياطية</h2>
           </div>
           <button type="button" className="arc-modal-close" onClick={onClose} aria-label="إغلاق">

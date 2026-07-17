@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "vitest";
 
 import { createMemoryDirectory } from "./memoryDirectory";
 import { simpleHash } from "./jsonEnvelope";
+import { setReadOnlyMode } from "./readOnlyMode";
 import {
   __resetStreamingForcedSizeLimitForTests,
   __setStreamingForcedSizeLimitForTests,
@@ -13,6 +14,7 @@ import type { DirectoryHandleLike, FileHandleLike } from "./fileSystemAccess";
 
 afterEach(() => {
   __resetStreamingForcedSizeLimitForTests();
+  setReadOnlyMode(false);
 });
 
 async function readRaw(
@@ -92,6 +94,110 @@ test("plain writes increment envelope revision from the current live file", asyn
   };
   expect(live.metadata.revision).toBe(2);
   expect(live.data.v).toBe(2);
+});
+
+function notReadableError(): Error {
+  const error = new Error("The requested file is temporarily unreadable.");
+  error.name = "NotReadableError";
+  return error;
+}
+
+test("safeReadJson retries a transient NotReadableError", async () => {
+  const dir = createMemoryDirectory();
+  await safeWriteJson(dir, "a.json", { v: 1 });
+
+  const realGetFileHandle = dir.getFileHandle.bind(dir);
+  let failuresRemaining = 1;
+  const flaky: DirectoryHandleLike = {
+    ...dir,
+    getFileHandle: async (name: string, options?: { create?: boolean }) => {
+      const handle = await realGetFileHandle(name, options);
+      if (name === "a.json") {
+        return {
+          ...handle,
+          getFile: async (): Promise<File> => {
+            if (failuresRemaining > 0) {
+              failuresRemaining -= 1;
+              throw notReadableError();
+            }
+            return handle.getFile();
+          },
+        } as FileHandleLike;
+      }
+      return handle;
+    },
+  };
+
+  const result = await safeReadJson<{ v: number }>(flaky, "a.json");
+  expect(result.ok && result.value.v).toBe(1);
+  expect(failuresRemaining).toBe(0);
+});
+
+test("safe writes reject with a typed error in read-only mode and preserve live data", async () => {
+  const dir = createMemoryDirectory();
+  await safeWriteJson(dir, "a.json", { v: 1 });
+  const original = await readRaw(dir, "a.json");
+  setReadOnlyMode(true);
+
+  await expect(safeWriteJson(dir, "a.json", { v: 2 })).rejects.toMatchObject({
+    name: "ReadOnlyModeError",
+    code: "read_only",
+  });
+  await expect(safeWriteJsonText(dir, "a.json", original)).rejects.toMatchObject({
+    name: "ReadOnlyModeError",
+    code: "read_only",
+  });
+  expect(await readRaw(dir, "a.json")).toBe(original);
+});
+
+test("safeReadJson propagates an exhausted NotReadableError instead of falling back to .bak", async () => {
+  const dir = createMemoryDirectory();
+  await safeWriteJson(dir, "a.json", { v: 1 });
+  await safeWriteJson(dir, "a.json", { v: 2 });
+
+  const realGetFileHandle = dir.getFileHandle.bind(dir);
+  const unreadable: DirectoryHandleLike = {
+    ...dir,
+    getFileHandle: async (name, options) => {
+      const handle = await realGetFileHandle(name, options);
+      return name === "a.json"
+        ? { ...handle, getFile: async () => { throw notReadableError(); } } as FileHandleLike
+        : handle;
+    },
+  };
+
+  await expect(safeReadJson(unreadable, "a.json")).rejects.toMatchObject({
+    name: "NotReadableError",
+  });
+});
+
+test("transient unreadability during live verification does not roll back a successful commit", async () => {
+  const base = createMemoryDirectory();
+  await safeWriteJson(base, "a.json", { v: 1 });
+
+  const realGetFileHandle = base.getFileHandle.bind(base);
+  let liveReads = 0;
+  const flaky: DirectoryHandleLike = {
+    ...base,
+    getFileHandle: async (name, options) => {
+      const handle = await realGetFileHandle(name, options);
+      if (name !== "a.json") return handle;
+      return {
+        ...handle,
+        getFile: async () => {
+          liveReads += 1;
+          // Read 1 snapshots the old live value; read 2 verifies the new commit.
+          if (liveReads === 2) throw notReadableError();
+          return handle.getFile();
+        },
+      } satisfies FileHandleLike;
+    },
+  };
+
+  await safeWriteJson(flaky, "a.json", { v: 2 });
+
+  const result = await safeReadJson<{ v: number }>(base, "a.json");
+  expect(result.ok && result.value.v).toBe(2);
 });
 
 test("safeReadJson recovers from .bak when the live file is corrupt", async () => {

@@ -27,6 +27,12 @@ The current workspace layout uses numbered roots, with legacy fallbacks still su
 
 Legacy folders still read when present: `Population/`, `.system/`, and `templates/`.
 
+`5-system/workspace.schema.json` records the validated layout kind (`current`, `legacy`, or
+`mixed`), schema version, migration actor/time, verified backup id, and whether legacy readers are
+still required. Detection and migration planning are read-only by default. Applying the marker is
+idempotent and requires a confirmed backup; it deliberately does not move or delete legacy roots
+because the File System Access API cannot make a whole-workspace move atomic.
+
 ### Global Month Provider
 
 As of 2026-07-16, a single app-wide month selection replaces the per-tab month filters/pickers
@@ -49,7 +55,7 @@ than re-listing folders themselves.
 This is a UI/state change only — **no disk layout changed**. Month folders, manifests, and all
 files under `1-population/{month}/` through `6-templates/` are exactly as documented above; the
 provider only changes which month's data is displayed on screen. The Population "browse" view
-(`BrowseDataView` in `src/components/Sidebar/Tabs/Population/index.tsx`) is the one exception to
+(`BrowseDataView` in `src/components/Sidebar/Tabs/Population/BrowseDataView.tsx`) is the one exception to
 "global month only": it defaults to the globally-selected month's rows but keeps a local
 "كل الأشهر" (all months) checkbox to widen the table to every month on disk without changing the
 global selection.
@@ -64,7 +70,8 @@ global selection.
 | `population.final.json` | `1-population/{month}/2-processed/` or legacy month folder | Final processed population rows used for sampling and reporting. |
 | `processing.summary.json` | `1-population/{month}/2-processed/` | Processing summary/validation data. |
 | `sample.master.json` | `2-samples/{month}/1-main/` | Drawn sample rows and sample configuration/result metadata. |
-| `distribution.log.json` | `2-samples/{month}/1-main/` | Append-only assignment event log. |
+| `distribution.events/{eventId}.json` | `2-samples/{month}/1-main/` | Immutable durable assignment event envelopes. |
+| `distribution.log.json` | `2-samples/{month}/1-main/` | Backward-compatible event-log projection. |
 | `distribution.current.json` | `2-samples/{month}/1-main/` | Derived current distribution snapshot. |
 | `main.samples.json` | `2-samples/{month}/1-main/` | Mirror of all assigned sample entries. |
 | `{username}.samples.json` | `2-samples/{month}/2-employees/` | Per-employee sample mirror. |
@@ -157,9 +164,10 @@ Each `population.final.json` row and each sampled `rows[]` item uses the process
 
 | File | Fields |
 | --- | --- |
-| `distribution.log.json` | `monthFolderName`, `revision`, `_writeToken`, `events[]`. |
+| `distribution.events/{eventId}.json` | Immutable event files used by current clients as the durable distribution event source. Unique ids make independent writers target different files; this is not a distributed transaction or ordering guarantee. |
+| `distribution.log.json` | Backward-compatible projection: `monthFolderName`, `revision`, `_writeToken`, `eventSetId`, `events[]`. Legacy readers remain supported. |
 | `events[]` | `eventId`, `eventType`, `xrayImageId`, `assignedTo`, `replacedById`, `reassignedTo`, `eventAt`, `eventBy`, `notes`, `dailyQuota`, `daysRemainingAtAssignment`. |
-| `distribution.current.json` | `monthFolderName`, `logRevision`, `derivedAt`, totals for assigned/completed/replaced/pending, `entries[]`, `quotas`. |
+| `distribution.current.json` | Rebuildable cache: `monthFolderName`, `logRevision`, `eventSetId`, `derivedAt`, totals for assigned/completed/replaced/pending, `entries[]`, `quotas`. |
 | `entries[]` | `xrayImageId`, `assignedTo`, `status`, `replacedById`, `lastEventAt`, `row`. |
 | `quotas` | Per employee: `username`, `sampleCount`, `dailyQuota`, `daysRemainingAtAssignment`, `assignedAt`. |
 | `{username}.samples.json` | Employee mirror: `monthFolderName`, `username`, `updatedAt`, `sourceLogRevision`, `entries[]`. |

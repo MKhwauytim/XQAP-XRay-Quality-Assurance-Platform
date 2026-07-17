@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ClipboardList, X } from "lucide-react";
 
 import { readSession } from "../../../../auth/authSession";
-import { hasFeature, readUserManagementState } from "../../../../auth/userManagement";
+import { usePermissions } from "../../../../auth/usePermissions";
 import {
   createFieldId,
   createPhaseId,
@@ -170,7 +170,7 @@ export default function TemplateBuilderTab() {
   const { directoryHandle } = useWorkspace();
   const session = readSession();
   const username = session?.username ?? "unknown";
-  const role = session?.role ?? "employee";
+  const { can, canMutate } = usePermissions();
 
   const [mode, setMode] = useState<EditorMode>("list");
   const [index, setIndex] = useState<TemplateIndex>({ templates: [] });
@@ -185,12 +185,9 @@ export default function TemplateBuilderTab() {
       .catch(logRejection("templateBuilder:loadTemplateIndex"));
   }, [directoryHandle]);
 
-  const canManageTemplates = hasFeature(
-    readUserManagementState().featurePermissions,
-    role,
-    "manage-inspection-template"
-  );
-  if (!canManageTemplates) {
+  const canViewTemplates = can("manage-inspection-template");
+  const canManageTemplates = canMutate("manage-inspection-template");
+  if (!canViewTemplates) {
     return (
       <section className="tb-page" dir="rtl">
         <div className="tb-empty">إدارة نموذج الفحص متاحة حسب الصلاحية الممنوحة فقط.</div>
@@ -199,6 +196,7 @@ export default function TemplateBuilderTab() {
   }
 
   async function handleCreate(): Promise<void> {
+    if (!canManageTemplates) return;
     const now = new Date().toISOString();
     const firstPhaseId = createPhaseId();
     const secondPhaseId = createPhaseId();
@@ -222,12 +220,14 @@ export default function TemplateBuilderTab() {
   }
 
   function handleCreateDefault(): void {
+    if (!canManageTemplates) return;
     setActiveSchema(buildDefaultInspectionTemplate(username));
     setMode("create");
     setStatusMessage(null);
   }
 
   async function handleEdit(templateId: string): Promise<void> {
+    if (!canManageTemplates) return;
     if (!directoryHandle) return;
     setIsLoading(true);
     try {
@@ -250,6 +250,10 @@ export default function TemplateBuilderTab() {
   }
 
   async function handleSave(schema: TemplateSchema): Promise<void> {
+    if (!canManageTemplates) {
+      setStatusMessage({ type: "error", text: "لا تملك صلاحية تعديل النموذج، أو أن مساحة العمل للقراءة فقط." });
+      return;
+    }
     if (!directoryHandle) return;
     setIsLoading(true);
     try {
@@ -280,6 +284,10 @@ export default function TemplateBuilderTab() {
   }
 
   async function handleDelete(templateId: string): Promise<void> {
+    if (!canManageTemplates) {
+      setStatusMessage({ type: "error", text: "لا تملك صلاحية حذف النموذج، أو أن مساحة العمل للقراءة فقط." });
+      return;
+    }
     if (!directoryHandle) return;
     setIsLoading(true);
     try {
@@ -311,7 +319,7 @@ export default function TemplateBuilderTab() {
   return (
     <section className="tb-page" dir="rtl">
       <PageHeader
-        eyebrow="Inspection Form"
+        eyebrow="نموذج الفحص"
         title="نموذج الفحص"
         subtitle="يتم تجهيز قوالب الفحص من خلال هذه القائمة."
       >
@@ -320,6 +328,7 @@ export default function TemplateBuilderTab() {
             <button
               type="button"
               className="tb-btn-secondary"
+              disabled={!canManageTemplates}
               onClick={handleCreateDefault}
               title="يُنشئ النموذج الافتراضي لضمان جودة الأشعة جاهزاً للتعديل"
             >
@@ -328,6 +337,7 @@ export default function TemplateBuilderTab() {
             <button
               type="button"
               className="tb-btn-primary"
+              disabled={!canManageTemplates}
               onClick={() => { void handleCreate(); }}
             >
               + نموذج جديد
@@ -357,7 +367,7 @@ export default function TemplateBuilderTab() {
       {isLoading ? <div className="tb-loading">جاري التحميل...</div> : null}
 
       {mode === "list" ? (
-        <TemplateList index={index} onEdit={handleEdit} onDelete={handleDelete} />
+        <TemplateList index={index} onEdit={handleEdit} onDelete={handleDelete} canEdit={canManageTemplates} />
       ) : activeSchema ? (
         <TemplateEditor
           schema={activeSchema}
@@ -373,11 +383,13 @@ export default function TemplateBuilderTab() {
 function TemplateList({
   index,
   onEdit,
-  onDelete
+  onDelete,
+  canEdit,
 }: {
   index: TemplateIndex;
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
+  canEdit: boolean;
 }) {
   if (index.templates.length === 0) {
     return (
@@ -401,10 +413,10 @@ function TemplateList({
             </p>
           </div>
           <div className="tb-card-actions">
-            <button type="button" className="tb-btn-secondary" onClick={() => onEdit(template.templateId)}>
+            <button type="button" className="tb-btn-secondary" disabled={!canEdit} title={!canEdit ? "الصفحة للعرض فقط أو مساحة العمل للقراءة فقط." : undefined} onClick={() => onEdit(template.templateId)}>
               تعديل
             </button>
-            <button type="button" className="tb-btn-danger" onClick={() => onDelete(template.templateId)}>
+            <button type="button" className="tb-btn-danger" disabled={!canEdit} title={!canEdit ? "الصفحة للعرض فقط أو مساحة العمل للقراءة فقط." : undefined} onClick={() => onDelete(template.templateId)}>
               حذف
             </button>
           </div>

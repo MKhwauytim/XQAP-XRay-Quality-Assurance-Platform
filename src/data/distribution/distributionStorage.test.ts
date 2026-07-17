@@ -84,6 +84,22 @@ describe("distributionStorage", () => {
     expect(log.events).toHaveLength(3);
   });
 
+  it("retains concurrent appends as distinct immutable events", async () => {
+    const root = await makeRoot();
+    const month = "5-May-2026";
+    const first = buildAssignEvent({ xrayImageId: "A1", assignedTo: "alice", eventBy: "admin" });
+    const second = buildAssignEvent({ xrayImageId: "A2", assignedTo: "bob", eventBy: "admin" });
+
+    const results = await Promise.all([
+      appendDistributionEvent(root, month, first),
+      appendDistributionEvent(root, month, second),
+    ]);
+    expect(results).toEqual([{ ok: true }, { ok: true }]);
+    const log = await loadDistributionLog(root, month);
+    expect(log.events.map((event) => event.eventId).sort()).toEqual([first.eventId, second.eventId].sort());
+    expect(log.eventSetId).toMatch(/^2:/);
+  });
+
   it("ignores a cached snapshot without deriveVersion and re-derives", async () => {
     const root = await makeRoot();
     const month = "5-May-2026";

@@ -42,22 +42,24 @@ If an edit touches multiple files, add one `**File:**` block per file under the 
 npm run dev        # Vite dev server
 npm run build      # tsc -b && vite build → single self-contained dist/index.html
 npm run lint       # ESLint
+npm run typecheck  # strict TypeScript check
+npm run check:complexity # complexity/large-function regression budget
 npm run preview    # Preview the built file
-npm run test:run   # Vitest (node env), all tests
+npm run test:run   # Vitest, 711 tests / 109 files as of v56.2
 npm run test       # Vitest watch mode
 npx vitest run src/data/sampling/sampleAlgorithm.test.ts  # run a single test file
 ```
 
 ## Build & dependency gotchas
 
-- `vite-plugin-singlefile` inlines everything (`assetsInlineLimit` maxed, `cssCodeSplit: false`): the build output is **one portable `dist/index.html`** (~2.64 MB, ~968 kB gzip as of 2026-07-12 — size grows with features. The ChangeLog tab's `?raw` import of `docs/EDIT_LOG.md` is truncated to the most recent versions at build time by `src/build/editLogTruncatePlugin.ts`, so the full git history no longer inflates the bundle — only the truncated tail does. Re-check after large additions).
-- Whole-product audit + prototype→product roadmap: `docs/audit/FULL_SYSTEM_AUDIT_2026-07-02.md` (extends `docs/audit/MASTER_AUDIT_REPORT.md`).
+- `vite-plugin-singlefile` inlines everything (`assetsInlineLimit` maxed, `cssCodeSplit: false`): v56.2 produces one portable `dist/index.html` (~3.04 MB, ~1.13 MB gzip). The ChangeLog `?raw` import is truncated by `src/build/editLogTruncatePlugin.ts`. `npm run check:bundle-size` is the release budget.
+- Current whole-product revision and roadmap: `docs/audit/FULL_REVISION_2026-07-17.md`.
 - `public/app-icon.ico`, `public/create-desktop-shortcut.ps1`, and `public/Create Desktop Shortcut.bat` are static deployment-tooling assets, not build artifacts — Vite's default `public/` handling copies them into `dist/` unchanged on every build. `app-icon.ico` is generated once by `scripts/generate-app-icon.ps1` (dev-only, not shipped) and only needs regenerating if the brand mark in `index.html`'s inline SVG favicon changes.
 - The `xlsx` dependency is **vendored** at `vendor/xlsx-0.20.3.tgz` (`package.json` points at `file:vendor/xlsx-0.20.3.tgz`) — originally sourced from the SheetJS CDN tarball (`https://cdn.sheetjs.com/xlsx-0.20.3/...`), not the npm registry. Vendoring means `npm ci` no longer needs network access to that CDN (required for CI, see `.github/workflows/ci.yml`). Don't "upgrade" it to the stale npm-registry `xlsx` package; see `vendor/README.md` for the upgrade procedure.
 - The workspace features require the **File System Access API** (`showDirectoryPicker`), so the app only fully works in Chromium browsers (Chrome/Edge). Other browsers get the `unsupported_browser` state.
-- TypeScript is in strict mode. `createWritable` on `FileHandleLike` is typed as optional — always guard with `if (!fh.createWritable) return/continue;` before calling it.
+- TypeScript is in strict mode with `erasableSyntaxOnly`. `createWritable` on `FileHandleLike` is typed as optional — always guard it before calling.
 - Excel parsing runs in a **Web Worker** (`src/workers/workbookWorker.ts`) to avoid blocking the UI. The worker posts `progress` and `result` messages back to the main thread.
-- `recharts` is now used by the **KPI dashboard** (`section === "kpi"` in `Reports/index.tsx` → `Reports/ReviewerKpiPanel.tsx`), which renders the Tier-2 per-reviewer / per-port SPC **p-charts** (control-limit drift bands; see `docs/audit/TEAM_REVIEW_2026-07-05.md` and research gap #18). It is imported nowhere else — if the p-charts are ever removed, drop the dependency too. recharts is LTR-internal; the p-chart wraps the `ResponsiveContainer` in `dir="ltr"` and restores RTL reading order via `XAxis reversed` + right-oriented `YAxis`.
+- Reviewer KPI p-charts use a native responsive SVG plus a semantic screen-reader table; Recharts is intentionally not a dependency.
 
 ## Disk layout (workspace folder)
 
@@ -73,16 +75,17 @@ and path** — keep it in sync. Summary:
     1-raw/       risk.raw.json, bi.raw.json (BI only if present)
     2-processed/ population.final.json, processing.summary.json
 2-samples/
-  {month}/1-main/   sample.master.json, distribution.log.json (append-only),
-                    distribution.current.json (derived), main.samples.json
+  {month}/1-main/   sample.master.json, distribution.events/{eventId}.json (immutable),
+                    distribution.log.json (compatibility projection),
+                    distribution.current.json (derived cache), main.samples.json
   {month}/…        per-employee sample mirrors, answers, referral/replacement, approvals
 3-user-data/       workspace user/permission files (when initialized via workspace defaults)
 4-reports/         generated report artifacts (when report flows write to disk)
-5-system/          backups/, browse & table presets, auto-backup settings/state, activity audit log
+5-system/          workspace.schema.json, backups/, audit/, locks/, presets, notifications
 6-templates/       {templateId}.json, templates.index.json, template selection
 ```
 
-Month folder names follow the pattern `{month}-{monthname-en}-{year}`, lowercase (e.g. `5-may-2026`).
+Month folder names follow `{month}-{MonthName-en}-{year}` (e.g. `5-May-2026`). Legacy roots remain readable; schema migration is dry-run/backup-first and never silently moves or deletes them.
 
 ## Architecture
 
@@ -92,12 +95,13 @@ Month folder names follow the pattern `{month}-{monthname-en}-{year}`, lowercase
    - Login: new passwords hashed with **Argon2id** via `hash-wasm` (m=19 MiB, t=2, p=1 — OWASP 2026 baseline). Legacy PBKDF2-SHA256 hashes are still verified for backwards compatibility, and are **transparently upgraded to Argon2id on successful login** (`needsRehash` → `persistUserPasswordHash`). Bootstrap `admin` hash stored in `authConfig.ts`.
    - Session → runtime module variable in `authSession.ts`, persisted to **`sessionStorage`** (`xray_auth_session_v1`, SEC-02): it survives a page reload but auto-clears when the tab/browser closes. A 7-day TTL applies as a secondary guard on read-back. This is a UX convenience, **not** a security control (see the security-model note below). Managed users + role→tab permission matrix → `localStorage` (`xray_user_management_v1`), changes broadcast via custom DOM event (`subscribeToUserManagementChanges`).
    - Roles: `guest` / `employee` / `supervisor` / `manager` / `admin` (5 roles — see `AuthRole` in `authTypes.ts`). `admin` is the bootstrap superuser; `manager` is the top managed role. `App.tsx` filters tabs by role + permission matrix.
-   - `MANAGED_TABS` in `userManagement.ts` must list every tab; `createDefaultPermissions()` must include all role×tab combinations.
+   - `src/auth/tabCatalog.ts` is the source of truth for IDs, Arabic labels, parent relationships, and role ceilings. Defaults and registry consistency are tested against it.
+   - Use the centralized `canMutate` capability at both render and handler boundaries for persistent actions.
 
    > **Security model — advisory only.** With no backend, all role/permission checks run in the browser and all business data is plain JSON on disk. A determined user can edit `localStorage` or the JSON files directly to self-elevate or tamper. The auth layer is a UX/role-routing guard, **not** a trust boundary. The bootstrap admin hash ships in the client bundle, so the passcode must be strong (it is offline-crackable). Do not treat this app as a defense against malicious insiders. Full risk-acceptance detail (trust boundary, passcode policy, viewer-passcode note, localStorage/JSON tamperability, sign-off): `docs/architecture/SECURITY_MODEL.md`.
 
 2. **Workspace folder on disk (business data)** — `src/data/`
-   - Safe write layer: `safeWriteJson` / `safeReadJson` in `src/data/storage/safeWrite.ts`. Each write: snapshot current → `{file}.bak`, stage serialized content in `{file}.tmp` and verify it, then commit to the live file and re-verify (rolling back from `.bak` on failure). The File System Access API has no atomic rename, so this is snapshot-and-verify, not a true atomic swap; `safeReadJson` recovers from `.bak` if the live file is corrupt.
+   - Safe write layer: `safeWriteJson` / `safeReadJson` in `src/data/storage/safeWrite.ts`. Writes preserve the last valid `.bak`, stage and verify `.tmp`, then commit/re-verify. Transient `NotReadableError` is retried and never reinterpreted as a missing file; read-only handles fail with a typed error.
    - `JsonEnvelope<TData>` wraps every JSON file: `{ metadata: { schemaVersion, revision, contentHash, writtenAt }, data }`. Schema versioning via `wrap/unwrap/isEnvelope` in `src/data/storage/jsonEnvelope.ts`.
    - Web Locks API (with promise-chain fallback) prevents concurrent writes within a tab.
    - `WorkspaceProvider.tsx` / `useWorkspace.ts` — React context for directory handle.
@@ -108,7 +112,7 @@ Month folder names follow the pattern `{month}-{monthname-en}-{year}`, lowercase
 |--------|------|----------------|
 | Population storage | `src/data/population/` | Month folder CRUD, manifest, raw/final JSON |
 | Sampling | `src/data/sampling/` | Hamilton apportionment, Mulberry32 RNG, Fisher-Yates, draw algorithm |
-| Distribution | `src/data/distribution/` | Append-only event log, `deriveCurrentDistribution` fold, bulk assignment, replacement |
+| Distribution | `src/data/distribution/` | Immutable event envelopes, compatibility log projection, derived state, assignment/replacement |
 | Templates | `src/data/templates/` | Template schema CRUD + index + runtime evaluation |
 | Answers | `src/data/answers/` | Per-employee per-month answer files |
 | Reporting | `src/data/reporting/` | Self-contained Arabic HTML report builders (sample + distribution + executive) |
@@ -135,7 +139,7 @@ Month folder names follow the pattern `{month}-{monthname-en}-{year}`, lowercase
 
 ### Tab system
 
-Tabs are auto-discovered: `tabRegistry.ts` uses `import.meta.glob("./*/index.tsx", { eager: true })` over `src/components/Sidebar/Tabs/`. Each tab folder exports a default component + a `tabConfig` (id, label, order, allowedRoles, icon). Also register in `MANAGED_TABS` and `createDefaultPermissions()` in `userManagement.ts`.
+Tabs are auto-discovered by `tabRegistry.ts`. Each top-level tab exports a default component and `tabConfig`; its metadata must agree with `src/auth/tabCatalog.ts`.
 
 **Current tabs (as of 2026-07-02):**
 
@@ -169,7 +173,7 @@ Subfolders: `biData/`, `riskData/`, `processing/`, `reporting/`.
 
 ### Distribution event log
 
-Events: `assigned` | `completed` | `replacement-requested` | `replaced` | `reassigned`. Stored append-only in `distribution.log.json`. `deriveCurrentDistribution()` folds events in order — last event per `xrayImageId` wins — to produce the current state snapshot.
+Events include assignment, completion, replacement, reassignment, reopen request, and reopen transitions. Current clients durably write `distribution.events/{eventId}.json`; `distribution.log.json` is a legacy projection and `distribution.current.json` a rebuildable cache. The fold enforces legal terminal-state transitions and reports dropped/unrecognized events. Strict global multi-device ordering or atomic multi-event transactions require a backend.
 
 ### Labels / localization
 
@@ -179,5 +183,5 @@ All UI strings that may need customization are stored in `src/data/labels/labels
 
 - **UI text is Arabic, layout is RTL** (`dir="rtl"` on containers). All user-facing strings must be Arabic (or added as label keys); code identifiers stay English.
 - Plain CSS co-located per component (no CSS framework).
-- `import type` for type-only imports; ESLint + Prettier configured.
+- `import type` for type-only imports; ESLint is the formatting/static-analysis gate.
 - Tests use Vitest with `node` environment and a `createMemoryDirectory()` helper (`src/data/storage/memoryDirectory.ts`) that implements `DirectoryHandleLike` in memory — use it for any test that needs file I/O.

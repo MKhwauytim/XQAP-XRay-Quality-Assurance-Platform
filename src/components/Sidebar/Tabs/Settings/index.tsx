@@ -1,5 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useState, useCallback } from "react";
+import { tabAllowedRoles } from "../../../../auth/tabCatalog";
 import type { ReactNode } from "react";
 import {
   AlertTriangle,
@@ -36,12 +37,13 @@ import "./Settings.css";
 import { PageHeader } from "../../../../components/PageHeader/PageHeader";
 import { ErrorLogSection } from "./ErrorLogSection";
 import { AboutSection } from "./AboutSection";
+import { usePermissions } from "../../../../auth/usePermissions";
 
 export const tabConfig: SidebarTabModule["tabConfig"] = {
   id:           "settings",
   label:        "إدارة الإعدادات",
   order:        95,
-  allowedRoles: ["guest", "admin"],
+  allowedRoles: tabAllowedRoles("settings"),
   icon:         <Settings size={20} strokeWidth={1.8} aria-hidden />,
 };
 
@@ -249,7 +251,15 @@ const LABEL_GROUPS: LabelGroup[] = [
 
 // ── row component ─────────────────────────────────────────────────────────────
 
-function LabelRow({ labelKey, desc }: { labelKey: LabelKey; desc: string }) {
+function LabelRow({
+  labelKey,
+  desc,
+  canEdit,
+}: {
+  labelKey: LabelKey;
+  desc: string;
+  canEdit: boolean;
+}) {
   const current = getLabels()[labelKey];
   const custom  = isCustomized(labelKey);
   const [val, setVal] = useState<string>(current);
@@ -268,17 +278,19 @@ function LabelRow({ labelKey, desc }: { labelKey: LabelKey; desc: string }) {
   }
 
   const save = useCallback(() => {
+    if (!canEdit) return;
     setLabel(labelKey, val);
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
     if (directoryHandle) void exportLabelsSnapshot(directoryHandle);
-  }, [labelKey, val, directoryHandle]);
+  }, [canEdit, labelKey, val, directoryHandle]);
 
   const reset = useCallback(() => {
+    if (!canEdit) return;
     resetLabel(labelKey);
     setVal(DEFAULT_LABELS[labelKey]);
     if (directoryHandle) void exportLabelsSnapshot(directoryHandle);
-  }, [labelKey, directoryHandle]);
+  }, [canEdit, labelKey, directoryHandle]);
 
   const handleKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") save();
@@ -289,7 +301,12 @@ function LabelRow({ labelKey, desc }: { labelKey: LabelKey; desc: string }) {
     <div className={`settings-label-row${custom ? " is-custom" : ""}`}>
       {/* Column 1: description + key + default */}
       <div className="settings-label-meta">
-        <span className="settings-label-desc">{desc}</span>
+        <label
+          className="settings-label-desc"
+          htmlFor={`label-setting-${labelKey}`}
+        >
+          {desc}
+        </label>
         <span className="settings-label-key">{labelKey}</span>
         {custom && (
           <span className="settings-label-default">
@@ -300,12 +317,15 @@ function LabelRow({ labelKey, desc }: { labelKey: LabelKey; desc: string }) {
       {/* Column 2: input + saved badge + reset */}
       <div className="settings-label-control">
         <input
+          id={`label-setting-${labelKey}`}
           type="text"
           className={`settings-label-input${custom ? " is-custom" : ""}`}
           value={val}
           onChange={(e) => setVal(e.target.value)}
           onBlur={save}
           onKeyDown={handleKey}
+          disabled={!canEdit}
+          title={!canEdit ? "هذه الصفحة متاحة للعرض فقط" : undefined}
           dir="rtl"
         />
         {saved && <span className="settings-saved-badge"><Check size={12} style={{ verticalAlign: "middle", marginInlineEnd: 3 }} /> تم</span>}
@@ -313,10 +333,11 @@ function LabelRow({ labelKey, desc }: { labelKey: LabelKey; desc: string }) {
           type="button"
           className="settings-reset-btn"
           onClick={reset}
-          disabled={!custom}
+          disabled={!canEdit || !custom}
           title="استعادة القيمة الافتراضية"
+          aria-label={`استعادة القيمة الافتراضية للحقل: ${desc}`}
         >
-          <RotateCcw size={13} />
+          <RotateCcw size={13} aria-hidden />
         </button>
       </div>
     </div>
@@ -330,8 +351,11 @@ function SettingsPage() {
   const [confirmReset, setConfirmReset] = useState(false);
   const [openSections, setOpenSections] = useState<Set<string>>(() => new Set());
   const { directoryHandle } = useWorkspace();
+  const { canMutate } = usePermissions();
+  const canEditLabels = canMutate("edit-interface-labels");
 
   function handleResetAll() {
+    if (!canEditLabels) return;
     if (!confirmReset) { setConfirmReset(true); return; }
     resetAllLabels();
     setConfirmReset(false);
@@ -362,6 +386,7 @@ function SettingsPage() {
               type="button"
               className="settings-reset-all-btn"
               onClick={handleResetAll}
+              disabled={!canEditLabels}
             >
               {confirmReset ? <><AlertTriangle size={14} style={{ verticalAlign: "middle", marginInlineEnd: 4 }} /> تأكيد الاستعادة؟</> : <><RotateCcw size={13} style={{ verticalAlign: "middle", marginInlineEnd: 4 }} /> استعادة الكل ({customCount} تعديل)</>}
             </button>
@@ -406,7 +431,7 @@ function SettingsPage() {
                 {isOpen && (
                   <div className="settings-section-body">
                     {group.keys.map(({ key, desc }) => (
-                      <LabelRow key={key} labelKey={key} desc={desc} />
+                      <LabelRow key={key} labelKey={key} desc={desc} canEdit={canEditLabels} />
                     ))}
                   </div>
                 )}

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { coverMeshSvg, dividerPatternSvg } from "./generativeArt";
 
-describe("coverMeshSvg (trianglify, headless)", () => {
+describe("coverMeshSvg", () => {
   it("returns a non-empty <svg> string", () => {
     const svg = coverMeshSvg("5-may-2026");
     expect(svg.startsWith("<svg")).toBe(true);
@@ -18,7 +18,7 @@ describe("coverMeshSvg (trianglify, headless)", () => {
   });
 });
 
-describe("dividerPatternSvg (geopattern, headless)", () => {
+describe("dividerPatternSvg", () => {
   it("returns a non-empty <svg> string", () => {
     const svg = dividerPatternSvg("5-may-2026__section1", "#f4b400");
     expect(svg.startsWith("<svg")).toBe(true);
@@ -35,5 +35,11 @@ describe("dividerPatternSvg (geopattern, headless)", () => {
     expect(dividerPatternSvg("5-may-2026__section1", "#f4b400")).not.toBe(
       dividerPatternSvg("5-may-2026__section2", "#f4b400"),
     );
+  });
+
+  it("does not interpolate unsafe color input into markup", () => {
+    const svg = dividerPatternSvg("seed", '" onload="alert(1)');
+    expect(svg).not.toContain("onload");
+    expect(svg).toContain("#0a3a5f");
   });
 });

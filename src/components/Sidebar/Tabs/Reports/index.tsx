@@ -26,6 +26,7 @@ import ReviewerKpiPanel from "./ReviewerKpiPanel";
 import { DEFAULT_EXEC_CONFIG } from "../../../../data/reporting/executiveReportTypes";
 import type { ExecutiveReportInput } from "../../../../data/reporting/executiveReportTypes";
 import { getManagedLoginUsers } from "../../../../auth/userManagement";
+import { tabAllowedRoles } from "../../../../auth/tabCatalog";
 import { TabGuard } from "../../../PermissionGuard";
 import { loadSampleMaster, loadSampleMasterRevision } from "../../../../data/sampling/sampleStorage";
 import { loadAllEmployeeFiles } from "../../../../data/answers/answerStorage";
@@ -59,12 +60,12 @@ export const tabConfig: SidebarTabModule["tabConfig"] = {
   id: "reports",
   label: "إدارة التقارير",
   order: 25,
-  allowedRoles: ["guest", "supervisor", "manager", "admin"],
+  allowedRoles: tabAllowedRoles("reports"),
   icon: <BarChart3 size={20} strokeWidth={1.8} aria-hidden />,
   subTabs: [
     { id: "reports", label: "التقارير" },
-    { id: "kpi", label: "مؤشرات الأداء", allowedRoles: ["manager", "admin"] },
-    { id: "report-designer", label: "مصمم التقارير", allowedRoles: ["supervisor", "manager", "admin"] },
+    { id: "kpi", label: "مؤشرات الأداء", allowedRoles: tabAllowedRoles("reports/kpi") },
+    { id: "report-designer", label: "مصمم التقارير", allowedRoles: tabAllowedRoles("reports/report-designer") },
   ],
 };
 
@@ -358,10 +359,10 @@ function ReportsContent() {
           showToast("ok", "تم تنزيل ملف Excel.");
         } else if (type === "sample-deck") {
           openSampleDeck(sampleInput);
-          showToast("ok", "تم فتح عرض العينة (الشرائح) — استخدم طباعة/PDF.");
+          showToast("ok", "تم فتح عرض العينة. استخدم أمر الطباعة للحفظ بصيغة PDF.");
         } else {
           openSampleReport(sampleInput);
-          showToast("ok", "تم فتح تقرير العينة التفصيلي — استخدم طباعة/PDF.");
+          showToast("ok", "تم فتح تقرير العينة التفصيلي. استخدم أمر الطباعة للحفظ بصيغة PDF.");
         }
       } else if (type === "distribution" || type === "distribution-xlsx" || type === "distribution-deck") {
         const sample = await loadSampleMaster(directoryHandle, selectedMonth);
@@ -381,10 +382,10 @@ function ReportsContent() {
           showToast("ok", "تم تنزيل ملف Excel.");
         } else if (type === "distribution-deck") {
           openDistributionDeck(data, selectedMonth, names, distRevisions);
-          showToast("ok", "تم فتح عرض التوزيع (الشرائح) — استخدم طباعة/PDF.");
+          showToast("ok", "تم فتح عرض التوزيع. استخدم أمر الطباعة للحفظ بصيغة PDF.");
         } else {
           openDistributionDocument(data, selectedMonth, names, distRevisions);
-          showToast("ok", "تم فتح تقرير التوزيع التفصيلي — استخدم طباعة/PDF.");
+          showToast("ok", "تم فتح تقرير التوزيع التفصيلي. استخدم أمر الطباعة للحفظ بصيغة PDF.");
         }
       } else if (type === "executive" || type === "executive-xlsx" || type === "executive-deck") {
         const execInput = await loadExecInput();
@@ -395,10 +396,10 @@ function ReportsContent() {
           showToast("ok", "تم تنزيل ملف بيانات التقرير (Excel).");
         } else if (type === "executive-deck") {
           openExecutiveDeckV2(execInput, names);
-          showToast("ok", "تم فتح العرض التنفيذي (الشرائح) — استخدم طباعة/PDF.");
+          showToast("ok", "تم فتح العرض التنفيذي. استخدم أمر الطباعة للحفظ بصيغة PDF.");
         } else {
           openExecutiveReport(execInput, names);
-          showToast("ok", "تم فتح التقرير التفصيلي — استخدم طباعة/PDF.");
+          showToast("ok", "تم فتح التقرير التفصيلي. استخدم أمر الطباعة للحفظ بصيغة PDF.");
         }
       } else if (type === "management" || type === "management-xlsx" || type === "management-deck") {
         const execInput = await loadExecInput();
@@ -409,7 +410,7 @@ function ReportsContent() {
           showToast("ok", "تم تنزيل ملف بيانات الإدارة (Excel).");
         } else if (type === "management-deck") {
           openManagementDeck(execInput, names);
-          showToast("ok", "تم فتح عرض الإدارة (الشرائح) — استخدم طباعة/PDF.");
+          showToast("ok", "تم فتح عرض الإدارة. استخدم أمر الطباعة للحفظ بصيغة PDF.");
         } else {
           openManagementReport(execInput, names);
           showToast("ok", labels.mgmt_card_toast_opened);
@@ -438,8 +439,8 @@ function ReportsContent() {
     const availableFormats: ReportFormat[] = ["deck", "xlsx", "document"];
     const formatTitle = (f: ReportFormat): string =>
       f === "xlsx" ? "بيانات (Excel)"
-      : f === "deck" ? "عرض تقديمي (شرائح PDF)"
-      : "تقرير تفصيلي (PDF)";
+      : f === "deck" ? "عرض تقديمي تفاعلي (HTML)"
+      : "تقرير تفصيلي تفاعلي (HTML)";
     return (
       <div className="rh-export-controls" role="group" aria-label="صيغة التصدير">
         <button
@@ -557,7 +558,7 @@ function ReportsContent() {
             onClick={() => { void handleExport("document"); }}
           >
             {exporting === "document" ? <span className="rh-spinner" /> : <FileText size={15} strokeWidth={2} />}
-            التقرير التفصيلي (PDF)
+            فتح التقرير التفصيلي (HTML)
           </button>
           <button
             type="button"
@@ -566,7 +567,7 @@ function ReportsContent() {
             onClick={() => { void handleExport("deck"); }}
           >
             {exporting === "deck" ? <span className="rh-spinner" /> : <BarChart2 size={15} strokeWidth={2} />}
-            العرض التنفيذي (PDF)
+            فتح العرض التنفيذي (HTML)
           </button>
           <button
             type="button"
@@ -813,7 +814,7 @@ function ReportsContent() {
       {/* ── Page header ─────────────────────────────── */}
       <div className="rh-header">
         <div className="rh-header-main">
-          <div className="rh-eyebrow">Reports</div>
+          <div className="rh-eyebrow">إدارة التقارير</div>
           <h1 className="rh-title">مركز التقارير</h1>
           <p className="rh-sub">اختر التقرير المناسب وولّده مباشرةً — تقارير HTML تفاعلية جاهزة للمشاركة والطباعة.</p>
         </div>

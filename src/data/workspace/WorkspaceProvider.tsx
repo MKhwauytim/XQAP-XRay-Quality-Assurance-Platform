@@ -22,6 +22,7 @@ import {
 } from "./WorkspaceContext";
 import { createDemoWorkspace } from "./demoWorkspace";
 import { setReadOnlyMode } from "../storage/readOnlyMode";
+import { WORKSPACE_PERMISSION_LOST_EVENT } from "../storage/workspaceWriteAccess";
 
 import type {
   WorkspaceLoadedFiles,
@@ -281,6 +282,27 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     );
     void clearLastWorkspace();
   }, []);
+
+  useEffect(() => {
+    const handlePermissionLost = () => {
+      if (!directoryHandle) return;
+      setStatus("permission_denied");
+      setLoadedFiles(emptyLoadedFiles);
+      setMessage(
+        "فُقد إذن الوصول إلى مساحة العمل. أعد اختيار المجلد لاستعادة الاتصال.",
+      );
+    };
+
+    window.addEventListener(
+      WORKSPACE_PERMISSION_LOST_EVENT,
+      handlePermissionLost,
+    );
+    return () =>
+      window.removeEventListener(
+        WORKSPACE_PERMISSION_LOST_EVENT,
+        handlePermissionLost,
+      );
+  }, [directoryHandle]);
 
   const value = useMemo<WorkspaceContextValue>(
     () => ({

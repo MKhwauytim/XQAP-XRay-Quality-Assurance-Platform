@@ -39,8 +39,9 @@ function sortNewestFirst(list: AppNotification[]): AppNotification[] {
 
 export default function NotificationManager({ directoryHandle }: Props) {
   useLabels();
-  const { can, username } = usePermissions();
-  const canPost = can("post-notification");
+  const { can, canMutate, username } = usePermissions();
+  const canSeePost = can("post-notification");
+  const canPost = canMutate("post-notification");
 
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [message, setMessage] = useState("");
@@ -70,6 +71,10 @@ export default function NotificationManager({ directoryHandle }: Props) {
   );
 
   const handlePost = useCallback(async () => {
+    if (!canPost) {
+      setStatus({ type: "error", text: "لا تملك صلاحية النشر، أو أن مساحة العمل للقراءة فقط." });
+      return;
+    }
     const text = message.trim();
     if (!text || busy) return;
     setBusy(true);
@@ -83,7 +88,7 @@ export default function NotificationManager({ directoryHandle }: Props) {
     } else {
       setStatus({ type: "error", text: result.error });
     }
-  }, [message, busy, directoryHandle, username, reload]);
+  }, [message, busy, canPost, directoryHandle, username, reload]);
 
   const labels = getLabels();
 
@@ -95,7 +100,7 @@ export default function NotificationManager({ directoryHandle }: Props) {
         subtitle={labels.notif_mgr_subtitle}
       />
 
-      {canPost && (
+      {canSeePost && (
         <div className="ntf-post-card">
           <label className="ntf-post-label" htmlFor="ntf-post-input">
             {labels.notif_mgr_post_label}
@@ -119,7 +124,8 @@ export default function NotificationManager({ directoryHandle }: Props) {
               type="button"
               className="ntf-post-btn"
               onClick={handlePost}
-              disabled={busy || message.trim().length === 0}
+            disabled={busy || message.trim().length === 0 || !canPost}
+            title={!canPost ? "يتطلب النشر صلاحية التعديل ومساحة عمل قابلة للكتابة." : undefined}
             >
               <Send size={15} aria-hidden />{" "}
               {busy ? labels.notif_mgr_posting : labels.notif_mgr_post_btn}

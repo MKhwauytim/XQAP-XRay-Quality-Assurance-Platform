@@ -1,8 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 
-import { ChevronRight, Trash2, UserCog } from "lucide-react";
+import { UserCog } from "lucide-react";
 import {
-  Fragment,
   useCallback,
   useEffect,
   useMemo,
@@ -13,22 +12,16 @@ import {
 
 import type { AuthRole } from "../../../../auth/authTypes";
 import { readSession } from "../../../../auth/authSession";
+import { tabAllowedRoles } from "../../../../auth/tabCatalog";
+import { usePermissions } from "../../../../auth/usePermissions";
 import { logRejection } from "../../../../data/storage/errorLogger";
 import {
   readAuthActivityLog,
   type AuthActivityLogEntry,
-  type AuthActivityCloseReason,
 } from "../../../../auth/authActivityLog";
 import { createPasswordHash } from "../../../../auth/passwordCrypto";
 import {
-  MANAGED_FEATURE_GROUPS,
-  MANAGED_ROLES,
-  MANAGED_TABS,
-  TAB_FEATURE_MAP,
-  TAB_ROLE_CEILINGS,
   createManagedUser,
-  hasFeature,
-  hasRolePermission,
   isUsernameAvailable,
   normalizeUsername,
   readUserManagementState,
@@ -45,14 +38,23 @@ import {
   appendWorkspaceAction,
   readWorkspaceActions,
   type WorkspaceActionEntry,
-  type WorkspaceActionType,
 } from "../../../../data/audit/actionLog";
-import { getLabels, type LabelKey } from "../../../../data/labels/labelsStore";
+import { getLabels } from "../../../../data/labels/labelsStore";
 import { syncUserManagementToDisk } from "../../../../data/workspace/userSync";
 import type { SidebarTabModule } from "../tabTypes";
 
 import "./UserManagement.css";
 import { PageHeader } from "../../../../components/PageHeader/PageHeader";
+import {
+  FeaturePermissionsSection,
+  PagePermissionsSection,
+  type FeatureSubGroup,
+} from "./PermissionSections";
+import { ActionsSection, ActivitySection } from "./AuditSections";
+import {
+  UsersSection,
+} from "./UsersSection";
+import { INITIAL_USER_FORM, type UserFormState } from "./userForm";
 
 // ── Tab config ────────────────────────────────────────────────────────────────
 
@@ -60,7 +62,7 @@ export const tabConfig: SidebarTabModule["tabConfig"] = {
   id: "user-management",
   label: "إدارة المستخدمين",
   order: 40,
-  allowedRoles: ["admin"],
+  allowedRoles: tabAllowedRoles("user-management"),
   icon: <UserCog size={20} strokeWidth={1.8} aria-hidden />,
   subTabs: [
     { id: "users", label: "المستخدمون" },
@@ -74,7 +76,6 @@ export const tabConfig: SidebarTabModule["tabConfig"] = {
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type PageSection = "users" | "page-permissions" | "feature-permissions" | "activity" | "actions";
-type FeatureSubGroup = "workspace" | "population" | "admin";
 
 const KNOWN_USER_MANAGEMENT_SECTIONS = new Set<PageSection>([
   "users",
@@ -84,67 +85,7 @@ const KNOWN_USER_MANAGEMENT_SECTIONS = new Set<PageSection>([
   "actions",
 ]);
 
-/**
- * A role×tab cell is code-locked when the role falls outside the tab's hardcoded
- * `tabConfig.allowedRoles` ceiling (TAB_ROLE_CEILINGS). Such a cell can never take
- * effect at runtime, so the matrix disables it. `topLevelTabId` is the parent tab
- * id (sub-tabs inherit their parent's ceiling).
- */
-function isCeilingLocked(role: AuthRole, topLevelTabId: string): boolean {
-  const ceiling = TAB_ROLE_CEILINGS[topLevelTabId];
-  return ceiling ? !ceiling.includes(role) : false;
-}
 
-type UserFormState = {
-  username: string;
-  displayName: string;
-  password: string;
-  role: AuthRole;
-  hasCertScanLicense: boolean;
-};
-
-const INITIAL_FORM: UserFormState = {
-  username: "",
-  displayName: "",
-  password: "",
-  role: "employee",
-  hasCertScanLicense: false,
-};
-
-const PERMISSION_LABELS: Record<PermissionLevel, string> = {
-  none: "لا وصول",
-  view: "عرض فقط",
-  edit: "تعديل كامل",
-};
-
-const PERMISSION_HELP: Record<PermissionLevel, string> = {
-  none: "لا تظهر الصفحة لهذا الدور.",
-  view: "تظهر الصفحة دون إجراءات تعديل.",
-  edit: "عرض الصفحة واستخدام أدواتها.",
-};
-
-// Display-label key for each WorkspaceActionType (src/data/audit/actionLog.ts). A
-// Record over that union makes TypeScript flag a missing entry at compile time if
-// the union ever grows — verified exhaustive against the real 16-value union as of
-// 2026-07-17 (see docs/EDIT_LOG.md v56).
-const ACTION_TYPE_LABEL_KEYS: Record<WorkspaceActionType, LabelKey> = {
-  "user-deleted": "um_action_type_user_deleted",
-  "user-created": "um_action_type_user_created",
-  "permission-changed": "um_action_type_permission_changed",
-  "feature-permission-changed": "um_action_type_feature_permission_changed",
-  "sample-drawn": "um_action_type_sample_drawn",
-  "distribution-bulk-assigned": "um_action_type_distribution_bulk_assigned",
-  "referral-approved": "um_action_type_referral_approved",
-  "referral-denied": "um_action_type_referral_denied",
-  "replacement-approved": "um_action_type_replacement_approved",
-  "replacement-denied": "um_action_type_replacement_denied",
-  "reopen-approved": "um_action_type_reopen_approved",
-  "reopen-denied": "um_action_type_reopen_denied",
-  "answer-reopened": "um_action_type_answer_reopened",
-  "month-closed": "um_action_type_month_closed",
-  "month-reopened": "um_action_type_month_reopened",
-  "backup-restored": "um_action_type_backup_restored",
-};
 
 // ── Main component ────────────────────────────────────────────────────────────
 
@@ -154,7 +95,7 @@ export default function UserManagementTab() {
   );
   const [section, setSection] = useState<PageSection>("users");
   const [featureGroup, setFeatureGroup] = useState<FeatureSubGroup>("workspace");
-  const [form, setForm] = useState<UserFormState>(INITIAL_FORM);
+  const [form, setForm] = useState<UserFormState>(INITIAL_USER_FORM);
   const [showAddForm, setShowAddForm] = useState(false);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<AuthRole | "all">("all");
@@ -174,30 +115,13 @@ export default function UserManagementTab() {
   const [isActionsLoading, setIsActionsLoading] = useState(false);
 
   const session = readSession();
+  const { canMutate } = usePermissions();
   const { directoryHandle } = useWorkspace();
   const savingToDiskRef = useRef(false);
 
-  const canEdit =
-    session?.role === "admin" ||
-    Boolean(
-      session &&
-        hasRolePermission(state.permissions, session.role, "user-management", "edit") &&
-        hasFeature(state.featurePermissions, session.role, "manage-users")
-    );
-
-  const canEditPermissions =
-    session?.role === "admin" ||
-    Boolean(
-      session &&
-        hasFeature(state.featurePermissions, session.role, "edit-permissions")
-    );
-
-  const canResetPasswords =
-    session?.role === "admin" ||
-    Boolean(
-      session &&
-        hasFeature(state.featurePermissions, session.role, "reset-passwords")
-    );
+  const canEdit = canMutate("manage-users");
+  const canEditPermissions = canMutate("edit-permissions");
+  const canResetPasswords = canMutate("reset-passwords");
 
   useEffect(() => {
     window.dispatchEvent(new CustomEvent("pop-subtab-changed", { detail: section }));
@@ -330,7 +254,7 @@ export default function UserManagementTab() {
         hasCertScanLicense: form.hasCertScanLicense,
       });
       persistState({ ...state, users: [...state.users, newUser] });
-      setForm(INITIAL_FORM);
+      setForm(INITIAL_USER_FORM);
       setShowAddForm(false);
       showMsg("تمت إضافة المستخدم.", "ok");
     } catch {
@@ -513,13 +437,6 @@ export default function UserManagementTab() {
     persistState({ ...state, featurePermissions: next });
   }
 
-  function getTabAccess(role: AuthRole, tabId: string): PermissionLevel {
-    if (role === "admin") return "edit";
-    // Every role×tab pair now has an explicit row (or resolves to "none"); no inheritance.
-    const explicit = state.permissions.find((p) => p.role === role && p.tabId === tabId);
-    return explicit ? explicit.access : "none";
-  }
-
   function toggleParent(tabId: string) {
     setCollapsedParents((prev) => {
       const next = new Set(prev);
@@ -528,775 +445,12 @@ export default function UserManagementTab() {
     });
   }
 
-  function getFeatureEnabled(role: AuthRole, featureId: string): boolean {
-    if (role === "admin") return true;
-    return (
-      state.featurePermissions.find((f) => f.role === role && f.featureId === featureId)
-        ?.enabled ?? false
-    );
-  }
-
-  // ── Render helpers ───────────────────────────────────────────────────────────
-
-  const ROLE_BADGE_COLORS: Record<string, string> = {
-    guest: "um-badge-guest",
-    employee: "um-badge-employee",
-    supervisor: "um-badge-supervisor",
-    manager: "um-badge-manager",
-    admin: "um-badge-admin",
-  };
-
-  function RoleBadge({ role }: { role: AuthRole }) {
-    const label = MANAGED_ROLES.find((r) => r.id === role)?.label ?? role;
-    return <span className={`um-role-badge ${ROLE_BADGE_COLORS[role] ?? ""}`}>{label}</span>;
-  }
-
-  function formatDuration(ms: number): string {
-    const totalMinutes = Math.max(0, Math.round(ms / 60_000));
-    const hours = Math.floor(totalMinutes / 60);
-    const minutes = totalMinutes % 60;
-    return `${hours.toLocaleString("ar-SA-u-nu-latn")}س ${minutes.toLocaleString("ar-SA-u-nu-latn")}د`;
-  }
-
-  function formatDateTime(value: string | null): string {
-    if (!value) return "لم يسجل خروج";
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return value;
-    return date.toLocaleString("ar-SA-u-nu-latn", {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  }
-
-  function getDateKey(value: string): string {
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return "";
-    return date.toISOString().slice(0, 10);
-  }
-
-  function getWeekStartKey(value: string): string {
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return "";
-    const day = date.getDay();
-    date.setDate(date.getDate() - day);
-    date.setHours(0, 0, 0, 0);
-    return date.toISOString().slice(0, 10);
-  }
-
-  function getCloseReasonLabel(reason: AuthActivityCloseReason | null): string {
-    if (reason === "logout") return "تسجيل خروج";
-    if (reason === "expired") return "انتهت الجلسة";
-    if (reason === "session-replaced") return "دخول جديد";
-    if (reason === "page-closed") return "إغلاق التطبيق/المتصفح";
-    return "نشط";
-  }
-
-  // ── Section: Users ───────────────────────────────────────────────────────────
-
-  function renderUsers() {
-    return (
-      <div className="um-section">
-        {/* Toolbar */}
-        <div className="um-users-toolbar">
-          <input
-            className="um-search"
-            type="search"
-            placeholder="ابحث باسم المستخدم أو الاسم الظاهر…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            dir="rtl"
-          />
-          <div className="um-filter-pills">
-            {(["all", "active", "inactive"] as const).map((s) => (
-              <button
-                key={s}
-                className={`um-filter-pill ${statusFilter === s ? "active" : ""}`}
-                onClick={() => setStatusFilter(s)}
-              >
-                {s === "all" ? "الكل" : s === "active" ? "نشط" : "موقوف"}
-              </button>
-            ))}
-          </div>
-          <div className="um-filter-pills">
-            <button
-              className={`um-filter-pill ${roleFilter === "all" ? "active" : ""}`}
-              onClick={() => setRoleFilter("all")}
-            >
-              كل الأدوار
-            </button>
-            {MANAGED_ROLES.map((r) => (
-              <button
-                key={r.id}
-                className={`um-filter-pill ${roleFilter === r.id ? "active" : ""}`}
-                onClick={() => setRoleFilter(r.id)}
-              >
-                {r.label}
-              </button>
-            ))}
-          </div>
-          {canEdit && (
-            <button
-              className="um-add-btn"
-              onClick={() => setShowAddForm((v) => !v)}
-            >
-              {showAddForm ? "إلغاء" : "+ إضافة مستخدم"}
-            </button>
-          )}
-        </div>
-
-        {/* Add user form */}
-        {showAddForm && canEdit && (
-          <form className="um-add-form" onSubmit={handleAddUser}>
-            <h3 className="um-add-form-title">مستخدم جديد</h3>
-            <div className="um-add-form-grid">
-              <label>
-                <span>اسم المستخدم</span>
-                <input
-                  value={form.username}
-                  onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))}
-                  disabled={isSaving}
-                  autoComplete="off"
-                  dir="ltr"
-                />
-              </label>
-              <label>
-                <span>الاسم الظاهر</span>
-                <input
-                  value={form.displayName}
-                  onChange={(e) => setForm((f) => ({ ...f, displayName: e.target.value }))}
-                  disabled={isSaving}
-                  autoComplete="off"
-                />
-              </label>
-              <label>
-                <span>الدور</span>
-                <select
-                  value={form.role}
-                  onChange={(e) => setForm((f) => ({ ...f, role: e.target.value as AuthRole }))}
-                  disabled={isSaving}
-                >
-                  {MANAGED_ROLES.map((r) => (
-                    <option key={r.id} value={r.id}>{r.label}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                <span>كلمة المرور</span>
-                <input
-                  type="password"
-                  value={form.password}
-                  onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
-                  disabled={isSaving}
-                  autoComplete="new-password"
-                />
-              </label>
-            </div>
-            <label className="um-certcheck">
-              <input
-                type="checkbox"
-                checked={form.hasCertScanLicense}
-                onChange={(e) => setForm((f) => ({ ...f, hasCertScanLicense: e.target.checked }))}
-                disabled={isSaving}
-              />
-              <span>رخصة CertScan</span>
-            </label>
-            <button type="submit" className="um-submit-btn" disabled={isSaving}>
-              {isSaving ? "جارٍ الإضافة…" : "إضافة المستخدم"}
-            </button>
-          </form>
-        )}
-
-        {/* User table */}
-        {filteredUsers.length === 0 ? (
-          <div className="um-empty">لا يوجد مستخدمون مطابقون.</div>
-        ) : (
-          <div className="um-user-table">
-            <div className="um-user-table-head">
-              <span>المستخدم</span>
-              <span>الدور</span>
-              <span>الحالة / CertScan</span>
-              <span>كلمة المرور</span>
-              <span></span>
-            </div>
-            {filteredUsers.map((user) => {
-              const isConfirmingDelete = confirmDelete === user.id;
-              const identityDraft = getIdentityDraft(user);
-              const hasIdentityChanges =
-                normalizeUsername(identityDraft.username) !== user.username ||
-                identityDraft.displayName.trim() !== user.displayName;
-              return (
-                <div key={user.id} className={`um-user-row ${!user.isActive ? "um-user-inactive" : ""}`}>
-                  {/* Name + username */}
-                  <div className="um-user-name">
-                    <div className="um-user-status-dot" data-active={user.isActive} />
-                    <div className="um-user-identity-edit">
-                      <input
-                        value={identityDraft.displayName}
-                        disabled={!canEdit || isSaving}
-                        onChange={(event) =>
-                          updateIdentityDraft(user, "displayName", event.target.value)
-                        }
-                        aria-label="الاسم الظاهر"
-                        placeholder="الاسم الظاهر"
-                      />
-                      <input
-                        value={identityDraft.username}
-                        disabled={!canEdit || isSaving}
-                        onChange={(event) =>
-                          updateIdentityDraft(user, "username", event.target.value)
-                        }
-                        aria-label="اسم المستخدم"
-                        placeholder="اسم المستخدم"
-                        autoComplete="off"
-                        dir="ltr"
-                      />
-                      {canEdit && (
-                        <div className="um-identity-actions">
-                          <button
-                            type="button"
-                            className="um-identity-save"
-                            disabled={!hasIdentityChanges || isSaving}
-                            onClick={() => handleSaveIdentity(user)}
-                          >
-                            حفظ
-                          </button>
-                          {hasIdentityChanges && (
-                            <button
-                              type="button"
-                              className="um-identity-reset"
-                              disabled={isSaving}
-                              onClick={() => resetIdentityDraft(user.id)}
-                            >
-                              تراجع
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Role select */}
-                  <select
-                    value={user.role}
-                    disabled={!canEdit || isSaving}
-                    onChange={(e) =>
-                      updateUser(user.id, (u) => ({ ...u, role: e.target.value as AuthRole }))
-                    }
-                    className="um-role-select"
-                  >
-                    {MANAGED_ROLES.map((r) => (
-                      <option key={r.id} value={r.id}>{r.label}</option>
-                    ))}
-                  </select>
-
-                  {/* Toggles */}
-                  <div className="um-user-toggles">
-                    <label className="um-toggle-label">
-                      <input
-                        type="checkbox"
-                        checked={user.isActive}
-                        disabled={!canEdit || isSaving}
-                        onChange={(e) =>
-                          updateUser(user.id, (u) => ({ ...u, isActive: e.target.checked }))
-                        }
-                      />
-                      <span>{user.isActive ? "نشط" : "موقوف"}</span>
-                    </label>
-                    <label className="um-toggle-label">
-                      <input
-                        type="checkbox"
-                        checked={user.hasCertScanLicense ?? false}
-                        disabled={!canEdit || isSaving}
-                        onChange={(e) =>
-                          updateUser(user.id, (u) => ({ ...u, hasCertScanLicense: e.target.checked }))
-                        }
-                      />
-                      <span>CertScan</span>
-                    </label>
-                  </div>
-
-                  {/* Password reset */}
-                  <div className="um-password-reset">
-                    <input
-                      type="password"
-                      value={resetPasswords[user.id] ?? ""}
-                      disabled={!canResetPasswords || isSaving}
-                      onChange={(e) =>
-                        setResetPasswords((r) => ({ ...r, [user.id]: e.target.value }))
-                      }
-                      placeholder="كلمة مرور جديدة"
-                      autoComplete="new-password"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => void handleResetPassword(user.id)}
-                      disabled={!canResetPasswords || isSaving}
-                    >
-                      تحديث
-                    </button>
-                  </div>
-
-                  {/* Delete */}
-                  <div className="um-user-actions">
-                    {isConfirmingDelete ? (
-                      <>
-                        <button
-                          className="um-delete-confirm"
-                          disabled={isCheckingDeletion}
-                          onClick={() => { void handleDeleteUser(user.id); }}
-                        >
-                          {isCheckingDeletion ? getLabels().um_delete_checking : "تأكيد الحذف"}
-                        </button>
-                        <button
-                          className="um-delete-cancel"
-                          disabled={isCheckingDeletion}
-                          onClick={() => { setConfirmDelete(null); setDeleteBlockedInfo(null); }}
-                        >
-                          إلغاء
-                        </button>
-                      </>
-                    ) : (
-                      canEdit && (
-                        <button
-                          className="um-delete-btn"
-                          onClick={() => setConfirmDelete(user.id)}
-                          title="حذف المستخدم"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      )
-                    )}
-                  </div>
-                  {deleteBlockedInfo?.userId === user.id && (
-                    <div className="um-user-actions" style={{ gridColumn: "1 / -1" }}>
-                      <ul>
-                        {deleteBlockedInfo.lines.map((line) => (
-                          <li key={line}>{line}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // ── Section: Page permissions (Matrix A) ─────────────────────────────────────
-
-  function renderPermCell(role: { id: AuthRole; label: string }, tabId: string, locked: boolean) {
-    const isAdminRole = role.id === "admin";
-    const current = getTabAccess(role.id, tabId);
-    const isLocked = locked || isAdminRole || !canEditPermissions;
-    return (
-      <div className="um-matrix-cell">
-        <div className="um-seg-group">
-          {(["none", "view", "edit"] as PermissionLevel[]).map((lvl) => (
-            <button
-              key={lvl}
-              className={`um-seg-btn um-seg-${lvl} ${current === lvl ? "active" : ""}`}
-              disabled={isLocked}
-              onClick={() => updateTabPermission(role.id, tabId, lvl)}
-              title={
-                isAdminRole ? "مسؤول النظام يملك صلاحيات كاملة دائماً"
-                : locked ? "هذه الصفحة مقيدة بالكود لهذه الأدوار"
-                : PERMISSION_HELP[lvl]
-              }
-              aria-label={`${role.label}: ${tabId} - ${PERMISSION_LABELS[lvl]}`}
-            >
-              {PERMISSION_LABELS[lvl]}
-            </button>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  function renderPagePermissions() {
-    const topLevelTabs = MANAGED_TABS.filter((t) => !t.parentId);
-
-    return (
-      <div className="um-section">
-        <div className="um-matrix-desc">
-          حدد ما إذا كان كل دور يستطيع <strong>رؤية</strong> التبويب،
-          أو <strong>تعديله</strong> بشكل كامل، أو لا يملك وصولاً إليه.
-          تعطيل الوصول لصفحة يعطّل تلقائياً جميع ميزاتها.
-          لكل تبويب فرعي إعداد صريح مستقل عن تبويبه الأب.
-        </div>
-
-        <div className="um-permission-legend" aria-label="شرح مستويات صلاحيات الصفحات">
-          {(["edit", "view", "none"] as PermissionLevel[]).map((lvl) => (
-            <div key={lvl} className={`um-permission-legend-item um-legend-${lvl}`}>
-              <span className="um-permission-dot" aria-hidden="true" />
-              <strong>{PERMISSION_LABELS[lvl]}</strong>
-              <span>{PERMISSION_HELP[lvl]}</span>
-            </div>
-          ))}
-        </div>
-
-        <div className="um-perm-table-wrap">
-          <table className="um-perm-table">
-            <thead>
-              <tr>
-                <th className="um-perm-tab-col">الصفحة / التبويب</th>
-                {MANAGED_ROLES.map((r) => (
-                  <th key={r.id} className="um-perm-role-col">
-                    <RoleBadge role={r.id} />
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {topLevelTabs.map((tab) => {
-                const subTabs = MANAGED_TABS.filter((t) => t.parentId === tab.id);
-                const hasSubTabs = subTabs.length > 0;
-                const isCollapsed = collapsedParents.has(tab.id);
-                return (
-                  <Fragment key={tab.id}>
-                    {/* Top-level tab row — clickable when it has sub-tabs */}
-                    <tr
-                      className={`um-perm-row-parent${hasSubTabs ? " um-perm-row-expandable" : ""}`}
-                      onClick={hasSubTabs ? () => toggleParent(tab.id) : undefined}
-                    >
-                      <td className="um-perm-tab-name">
-                        {hasSubTabs && (
-                          <span
-                            className="um-parent-chevron"
-                            style={{ transform: isCollapsed ? "rotate(0deg)" : "rotate(90deg)" }}
-                            aria-hidden="true"
-                          ><ChevronRight size={14} /></span>
-                        )}
-                        <strong>{tab.label}</strong>
-                        {hasSubTabs && (
-                          <span className="um-subtabs-count">{subTabs.length}</span>
-                        )}
-                      </td>
-                      {MANAGED_ROLES.map((role) => (
-                        <td key={role.id} className="um-perm-cell">
-                          {renderPermCell(role, tab.id, isCeilingLocked(role.id, tab.id))}
-                        </td>
-                      ))}
-                    </tr>
-                    {/* Sub-tab rows — hidden when parent is collapsed. Sub-tabs
-                        inherit the parent tab's code-level role ceiling. */}
-                    {!isCollapsed && subTabs.map((sub) => (
-                      <tr key={sub.id} className="um-perm-row-child">
-                        <td className="um-perm-tab-name um-perm-subtab">
-                          <span className="um-subtab-indicator">↳</span> {sub.label}
-                        </td>
-                        {MANAGED_ROLES.map((role) => (
-                          <td key={role.id} className="um-perm-cell">
-                            {renderPermCell(role, sub.id, isCeilingLocked(role.id, tab.id))}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </Fragment>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    );
-  }
-
-  // ── Section: Feature permissions (Matrix B) ───────────────────────────────────
-
-  function renderFeaturePermissions() {
-    const currentGroup = MANAGED_FEATURE_GROUPS.find((g) => g.groupId === featureGroup);
-
-    return (
-      <div className="um-section">
-        <div className="um-matrix-desc">
-          فعّل أو عطّل صلاحيات محددة لكل دور. الميزات المرتبطة بصفحة معطَّلة الوصول
-          تظهر بلون رمادي ولا تنتج أثراً — تعطيل الصفحة يلغيها تلقائياً.
-        </div>
-
-        <div className="um-feat-nav">
-          {MANAGED_FEATURE_GROUPS.map((g) => (
-            <button
-              key={g.groupId}
-              className={`um-feat-tab ${featureGroup === g.groupId ? "active" : ""}`}
-              onClick={() => setFeatureGroup(g.groupId as FeatureSubGroup)}
-            >
-              {g.label}
-            </button>
-          ))}
-        </div>
-
-        {currentGroup && (
-          <div className="um-feat-matrix-wrap">
-            <table className="um-feat-table">
-              <thead>
-                <tr>
-                  <th className="um-feat-label-col">الميزة</th>
-                  {MANAGED_ROLES.map((r) => (
-                    <th key={r.id} className="um-feat-role-col">
-                      <RoleBadge role={r.id} />
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {currentGroup.features.map((feat) => {
-                  // Find which tab this feature belongs to (for cascade display)
-                  const parentTabId = Object.entries(TAB_FEATURE_MAP).find(([, feats]) =>
-                    feats.includes(feat.id)
-                  )?.[0];
-
-                  return (
-                    <tr key={feat.id}>
-                      <td className="um-feat-name">
-                        <strong>{feat.label}</strong>
-                        <span>{feat.description}</span>
-                      </td>
-                      {MANAGED_ROLES.map((role) => {
-                        const pageBlocked =
-                          parentTabId != null &&
-                          getTabAccess(role.id, parentTabId) === "none";
-                        const enabled = getFeatureEnabled(role.id, feat.id);
-                        return (
-                          <td key={role.id} className="um-feat-cell">
-                            <label
-                              className={`um-toggle ${pageBlocked ? "um-toggle-cascade-off" : ""}`}
-                              title={
-                                pageBlocked
-                                  ? "يتطلب تفعيل صلاحية الصفحة أولاً"
-                                  : undefined
-                              }
-                            >
-                              <input
-                                type="checkbox"
-                                checked={enabled}
-                                disabled={pageBlocked || !canEditPermissions}
-                                onChange={(e) =>
-                                  updateFeaturePermission(role.id, feat.id, e.target.checked)
-                                }
-                              />
-                              <span className="um-toggle-slider" />
-                            </label>
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  function renderActivity() {
-    const todayKey = getDateKey(new Date().toISOString());
-    const weekKey = getWeekStartKey(new Date().toISOString());
-    const userMap = new Map(state.users.map((user) => [user.username, user]));
-
-    const summaries = state.users
-      .filter((user) => user.role === "employee" || user.role === "supervisor")
-      .map((user) => {
-        const entries = activityEntries.filter((entry) => entry.username === user.username);
-        const todayMs = entries
-          .filter((entry) => getDateKey(entry.signedInAt) === todayKey)
-          .reduce((sum, entry) => sum + entry.durationMs, 0);
-        const weekMs = entries
-          .filter((entry) => getWeekStartKey(entry.signedInAt) === weekKey)
-          .reduce((sum, entry) => sum + entry.durationMs, 0);
-        const latest = entries
-          .slice()
-          .sort((a, b) => Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt))[0] ?? null;
-        return { user, todayMs, weekMs, signIns: entries.length, latest };
-      })
-      .sort((a, b) => b.weekMs - a.weekMs || a.user.displayName.localeCompare(b.user.displayName, "ar"));
-
-    const latestEntries = activityEntries
-      .slice()
-      .sort((a, b) => Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt))
-      .slice(0, 100);
-
-    return (
-      <div className="um-section">
-        <div className="um-matrix-desc">
-          تعرض هذه الصفحة سجلات الدخول وساعات العمل المحفوظة داخل مساحة العمل في
-          <strong> 5-system/audit/activity.log.json</strong>.
-        </div>
-
-        <div className="um-activity-toolbar">
-          <button
-            type="button"
-            className="um-add-btn"
-            onClick={() => {
-              setIsActivityLoading(true);
-              void readAuthActivityLog()
-                .then(setActivityEntries)
-                .catch(logRejection("userManagement:refreshActivityLog"))
-                .finally(() => setIsActivityLoading(false));
-            }}
-          >
-            تحديث السجل
-          </button>
-          <span>{isActivityLoading ? "جاري تحميل الأنشطة..." : `${activityEntries.length.toLocaleString("ar-SA-u-nu-latn")} سجل`}</span>
-        </div>
-
-        <div className="um-activity-summary-grid">
-          {summaries.map(({ user, todayMs, weekMs, signIns, latest }) => (
-            <article key={user.id} className="um-activity-card">
-              <div>
-                <strong>{user.displayName}</strong>
-                <span>{user.username}</span>
-              </div>
-              <dl>
-                <div>
-                  <dt>اليوم</dt>
-                  <dd>{formatDuration(todayMs)}</dd>
-                </div>
-                <div>
-                  <dt>هذا الأسبوع</dt>
-                  <dd>{formatDuration(weekMs)}</dd>
-                </div>
-                <div>
-                  <dt>مرات الدخول</dt>
-                  <dd>{signIns.toLocaleString("ar-SA-u-nu-latn")}</dd>
-                </div>
-                <div>
-                  <dt>آخر حالة</dt>
-                  <dd>{getCloseReasonLabel(latest?.closeReason ?? null)}</dd>
-                </div>
-              </dl>
-            </article>
-          ))}
-        </div>
-
-        {latestEntries.length === 0 ? (
-          <div className="um-empty">لا توجد سجلات نشاط محفوظة بعد.</div>
-        ) : (
-          <div className="um-activity-table-wrap">
-            <table className="um-activity-table">
-              <thead>
-                <tr>
-                  <th>المستخدم</th>
-                  <th>الدور</th>
-                  <th>دخول</th>
-                  <th>آخر ظهور</th>
-                  <th>خروج / إغلاق</th>
-                  <th>المدة</th>
-                  <th>السبب</th>
-                </tr>
-              </thead>
-              <tbody>
-                {latestEntries.map((entry) => {
-                  const user = userMap.get(entry.username);
-                  return (
-                    <tr key={entry.id}>
-                      <td>
-                        <strong>{user?.displayName ?? entry.username}</strong>
-                        <span>{entry.username}</span>
-                      </td>
-                      <td>{user ? <RoleBadge role={user.role} /> : entry.role}</td>
-                      <td>{formatDateTime(entry.signedInAt)}</td>
-                      <td>{formatDateTime(entry.lastSeenAt)}</td>
-                      <td>{formatDateTime(entry.signedOutAt)}</td>
-                      <td>{formatDuration(entry.durationMs)}</td>
-                      <td>{getCloseReasonLabel(entry.closeReason)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  function renderActions() {
-    const L = getLabels();
-    const sortedEntries = actionEntries
-      .slice()
-      .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
-      .slice(0, 200);
-
-    return (
-      <div className="um-section">
-        <h3 className="um-add-form-title">{L.um_actions_tab_label}</h3>
-        <div className="um-matrix-desc">
-          {L.um_actions_desc}
-          <strong> 5-system/audit/actions.log.json</strong>
-        </div>
-
-        <div className="um-activity-toolbar">
-          <button
-            type="button"
-            className="um-add-btn"
-            onClick={() => {
-              if (!directoryHandle) return;
-              setIsActionsLoading(true);
-              void readWorkspaceActions(directoryHandle)
-                .then(setActionEntries)
-                .catch(logRejection("userManagement:refreshWorkspaceActions"))
-                .finally(() => setIsActionsLoading(false));
-            }}
-          >
-            {L.um_actions_refresh_btn}
-          </button>
-          <span>
-            {isActionsLoading
-              ? L.um_actions_loading
-              : `${actionEntries.length.toLocaleString("ar-SA-u-nu-latn")} ${L.um_actions_count_suffix}`}
-          </span>
-        </div>
-
-        {sortedEntries.length === 0 ? (
-          <div className="um-empty">{L.um_actions_empty}</div>
-        ) : (
-          <div className="um-activity-table-wrap">
-            <table className="um-activity-table">
-              <thead>
-                <tr>
-                  <th>{L.um_actions_col_time}</th>
-                  <th>{L.um_actions_col_actor}</th>
-                  <th>{L.um_actions_col_role}</th>
-                  <th>{L.um_actions_col_action}</th>
-                  <th>{L.um_actions_col_target}</th>
-                  <th>{L.um_actions_col_month}</th>
-                  <th>{L.um_actions_col_details}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedEntries.map((entry) => (
-                  <tr key={entry.id}>
-                    <td>{formatDateTime(entry.at)}</td>
-                    <td>{entry.actor}</td>
-                    <td>{entry.actorRole}</td>
-                    <td>{L[ACTION_TYPE_LABEL_KEYS[entry.action]] ?? entry.action}</td>
-                    <td>{entry.target ?? "—"}</td>
-                    <td>{entry.monthFolderName ?? "—"}</td>
-                    <td>{entry.details ? JSON.stringify(entry.details) : "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    );
-  }
-
   // ── Render ───────────────────────────────────────────────────────────────────
 
   return (
     <section className="um-page" aria-label="إدارة المستخدمين">
       <PageHeader
-        eyebrow="Administration"
+        eyebrow="إدارة النظام"
         title="إدارة المستخدمين والصلاحيات"
         subtitle="أضف المستخدمين، حدد أدوارهم، واضبط صلاحيات كل دور على مصفوفتين مستقلتين."
       >
@@ -1336,11 +490,89 @@ export default function UserManagementTab() {
       )}
 
       {/* Section content */}
-      {section === "users" && renderUsers()}
-      {section === "page-permissions" && renderPagePermissions()}
-      {section === "feature-permissions" && renderFeaturePermissions()}
-      {section === "activity" && renderActivity()}
-      {section === "actions" && renderActions()}
+      {section === "users" && (
+        <UsersSection
+          filteredUsers={filteredUsers}
+          search={search}
+          onSearchChange={setSearch}
+          roleFilter={roleFilter}
+          onRoleFilterChange={setRoleFilter}
+          statusFilter={statusFilter}
+          onStatusFilterChange={setStatusFilter}
+          canEdit={canEdit}
+          canResetPasswords={canResetPasswords}
+          isSaving={isSaving}
+          isCheckingDeletion={isCheckingDeletion}
+          showAddForm={showAddForm}
+          onToggleAddForm={() => setShowAddForm((visible) => !visible)}
+          form={form}
+          setForm={setForm}
+          onAddUser={handleAddUser}
+          getIdentityDraft={getIdentityDraft}
+          onIdentityDraftChange={updateIdentityDraft}
+          onSaveIdentity={handleSaveIdentity}
+          onResetIdentity={resetIdentityDraft}
+          onUpdateUser={updateUser}
+          resetPasswords={resetPasswords}
+          setResetPasswords={setResetPasswords}
+          onResetPassword={handleResetPassword}
+          confirmDelete={confirmDelete}
+          onRequestDelete={setConfirmDelete}
+          onCancelDelete={() => {
+            setConfirmDelete(null);
+            setDeleteBlockedInfo(null);
+          }}
+          onConfirmDelete={handleDeleteUser}
+          deleteBlockedInfo={deleteBlockedInfo}
+        />
+      )}
+      {section === "page-permissions" && (
+        <PagePermissionsSection
+          permissions={state.permissions}
+          collapsedParents={collapsedParents}
+          canEdit={canEditPermissions}
+          onToggleParent={toggleParent}
+          onUpdate={updateTabPermission}
+        />
+      )}
+      {section === "feature-permissions" && (
+        <FeaturePermissionsSection
+          permissions={state.permissions}
+          featurePermissions={state.featurePermissions}
+          featureGroup={featureGroup}
+          canEdit={canEditPermissions}
+          onGroupChange={setFeatureGroup}
+          onUpdate={updateFeaturePermission}
+        />
+      )}
+      {section === "activity" && (
+        <ActivitySection
+          users={state.users}
+          entries={activityEntries}
+          isLoading={isActivityLoading}
+          onRefresh={() => {
+            setIsActivityLoading(true);
+            void readAuthActivityLog()
+              .then(setActivityEntries)
+              .catch(logRejection("userManagement:refreshActivityLog"))
+              .finally(() => setIsActivityLoading(false));
+          }}
+        />
+      )}
+      {section === "actions" && (
+        <ActionsSection
+          entries={actionEntries}
+          isLoading={isActionsLoading}
+          onRefresh={() => {
+            if (!directoryHandle) return;
+            setIsActionsLoading(true);
+            void readWorkspaceActions(directoryHandle)
+              .then(setActionEntries)
+              .catch(logRejection("userManagement:refreshWorkspaceActions"))
+              .finally(() => setIsActionsLoading(false));
+          }}
+        />
+      )}
     </section>
   );
 }

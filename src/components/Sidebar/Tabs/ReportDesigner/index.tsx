@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { readSession } from "../../../../auth/authSession";
+import { usePermissions } from "../../../../auth/usePermissions";
 import { logRejection } from "../../../../data/storage/errorLogger";
 import {
   loadDesignIndex,
@@ -64,9 +65,10 @@ interface EditorHostProps {
   directoryHandle: DirectoryHandleLike;
   currentUser: string;
   onBack: () => void;
+  canEdit: boolean;
 }
 
-function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: EditorHostProps) {
+function EditorHost({ initialDoc, directoryHandle, currentUser, onBack, canEdit }: EditorHostProps) {
   const [doc, setDoc] = useState<ReportDocument>(initialDoc);
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -112,6 +114,10 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: Editor
   }, [doc]);
 
   async function performSave(docToSave: ReportDocument) {
+    if (!canEdit) {
+      setSaveError("لا تملك صلاحية تعديل تصاميم التقارير، أو أن مساحة العمل للقراءة فقط.");
+      return;
+    }
     const now = new Date().toISOString();
     const stamped: ReportDocument = {
       ...docToSave,
@@ -465,6 +471,9 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: Editor
 
 export default function ReportDesigner() {
   const { directoryHandle } = useWorkspace();
+  const { canMutate } = usePermissions();
+  const canEditDesigns = canMutate("report-designer.edit");
+  const editDeniedTitle = "يتطلب تعديل التصاميم صلاحية التعديل ومساحة عمل قابلة للكتابة.";
   const currentUser = readSession()?.username ?? "admin";
 
   const [view, setView] = useState<View>("list");
@@ -561,6 +570,7 @@ export default function ReportDesigner() {
         initialDoc={openDoc}
         directoryHandle={directoryHandle}
         currentUser={currentUser}
+        canEdit={canEditDesigns}
         onBack={() => {
           setView("list");
           setOpenDoc(null);
@@ -572,6 +582,7 @@ export default function ReportDesigner() {
   // --- List view ---
 
   async function handleCreate() {
+    if (!canEditDesigns) return;
     const name = newName.trim();
     if (!name) {
       setCreateError("الرجاء إدخال اسم للتقرير.");
@@ -609,6 +620,7 @@ export default function ReportDesigner() {
   }
 
   async function handleDelete(reportId: string) {
+    if (!canEditDesigns) return;
     if (!directoryHandle) return;
     setDeletingId(reportId);
     setDeleteError(null);
@@ -628,13 +640,15 @@ export default function ReportDesigner() {
   return (
     <div className="rd-root" dir="rtl">
       <PageHeader
-        eyebrow="Report Designer"
+        eyebrow="تصميم التقارير"
         title="مصمم التقارير"
         subtitle="صمّم تقارير مخصصة — صفحات وعناصر ومخططات من بيانات الشهر المعالج."
       >
         {!showNewForm && (
           <button
             className="rd-btn rd-btn-primary"
+            disabled={!canEditDesigns}
+            title={!canEditDesigns ? editDeniedTitle : undefined}
             onClick={() => {
               setShowNewForm(true);
               setCreateError(null);
@@ -662,13 +676,13 @@ export default function ReportDesigner() {
                 setCreateError(null);
               }
             }}
-            disabled={creating}
+            disabled={creating || !canEditDesigns}
           />
           <select
             className="rd-new-select"
             value={newPreset}
             onChange={(e) => setNewPreset(e.target.value as PageSizePreset)}
-            disabled={creating}
+            disabled={creating || !canEditDesigns}
             dir="rtl"
             title="حجم الصفحة"
             aria-label="حجم الصفحة"
@@ -680,7 +694,7 @@ export default function ReportDesigner() {
           <button
             className="rd-btn rd-btn-primary"
             onClick={() => void handleCreate()}
-            disabled={creating}
+            disabled={creating || !canEditDesigns}
           >
             {creating ? "جاري الإنشاء..." : "إنشاء"}
           </button>
@@ -710,19 +724,6 @@ export default function ReportDesigner() {
           icon={<LayoutTemplate />}
           title="لا توجد تقارير محفوظة بعد"
           description="أنشئ أول تقرير مخصص لبدء تصميم صفحاته وعناصره."
-          actions={
-            !showNewForm && (
-              <button
-                className="rd-btn rd-btn-primary"
-                onClick={() => {
-                  setShowNewForm(true);
-                  setCreateError(null);
-                }}
-              >
-                + تقرير جديد
-              </button>
-            )
-          }
         />
       ) : (
         <ul className="rd-cards">
@@ -737,10 +738,12 @@ export default function ReportDesigner() {
                 <div
                   className={`rd-card-thumb${busy ? " rd-card-thumb--loading" : ""}`}
                   role="button"
-                  tabIndex={0}
+                  tabIndex={canEditDesigns ? 0 : -1}
+                  aria-disabled={!canEditDesigns}
+                  title={!canEditDesigns ? editDeniedTitle : undefined}
                   aria-label={`فتح ${d.reportName}`}
-                  onClick={() => { if (!busy) void handleOpen(d.reportId); }}
-                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") void handleOpen(d.reportId); }}
+                  onClick={() => { if (!busy && canEditDesigns) void handleOpen(d.reportId); }}
+                  onKeyDown={(e) => { if (canEditDesigns && (e.key === "Enter" || e.key === " ")) void handleOpen(d.reportId); }}
                 >
                   {isOpening && <span className="rd-card-thumb-spinner">جاري التحميل…</span>}
                   {!isOpening && thumbDoc ? (
@@ -768,14 +771,16 @@ export default function ReportDesigner() {
                     <button
                       className="rd-btn rd-btn-primary rd-btn-sm"
                       onClick={() => void handleOpen(d.reportId)}
-                      disabled={busy}
+                      disabled={busy || !canEditDesigns}
+                      title={!canEditDesigns ? editDeniedTitle : undefined}
                     >
                       {isOpening ? "…" : "فتح"}
                     </button>
                     <button
                       className="rd-btn rd-btn-danger rd-btn-sm"
                       onClick={() => setConfirmDeleteId(d.reportId)}
-                      disabled={busy}
+                      disabled={busy || !canEditDesigns}
+                      title={!canEditDesigns ? editDeniedTitle : undefined}
                     >
                       {isDeleting ? "…" : "حذف"}
                     </button>

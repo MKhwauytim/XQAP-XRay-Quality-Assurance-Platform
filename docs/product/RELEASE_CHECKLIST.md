@@ -16,6 +16,8 @@ Run through this before cutting a release (tagging a commit as the version users
       envelope `schemaVersion` fields are a different concept — on-disk data schema versioning —
       and are expected to appear separately; don't confuse them with the app release version.)
 - [ ] Confirm the running app shows the bumped version: Settings tab → "حول النظام" card.
+- [ ] Run `npm run check:release`; it must confirm that `package.json` and the latest
+      `docs/EDIT_LOG.md` heading agree.
 
 ## 2. CHANGELOG cut
 
@@ -48,13 +50,27 @@ Run through this before cutting a release (tagging a commit as the version users
 
 ## 5. Gate
 
+- [ ] `npm ci` succeeds from a clean dependency tree without downloading SheetJS from its CDN.
+- [ ] `npm run check:vendor` — the vendored SheetJS tarball matches its reviewed SHA-256.
 - [ ] `npm run lint` — clean.
 - [ ] `npm run typecheck` — clean.
 - [ ] `npm run test:run` — all green.
 - [ ] `npm run build` — succeeds, `dist/index.html` produced.
+- [ ] `npm run check:bundle-size` — raw and gzip bundle budgets pass.
+- [ ] `npm audit` — no unresolved production or development advisory.
+- [ ] Smoke-test the built app in Chromium at desktop and 390 px: Arabic labels, keyboard
+      focus, mobile drawer, read-only mode, permission-denied actions, and report exports.
 - [ ] CI (`.github/workflows/ci.yml`) is green on the commit being released.
 
-## 6. Tag
+## 6. Data safety
+
+- [ ] Exercise workspace detection with current, legacy, and mixed-layout fixtures.
+- [ ] Run every migration as a dry-run first and verify a backup before applying metadata.
+- [ ] Exercise transient `NotReadableError`, corrupt live data with a valid backup, and
+      concurrent distribution append tests.
+- [ ] Preserve the previous distributable and its verified workspace backup for rollback.
+
+## 7. Tag
 
 - [ ] Commit the version bump (and any docs-sync edits) with a message referencing the EDIT_LOG
       entry.

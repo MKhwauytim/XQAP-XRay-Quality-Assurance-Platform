@@ -382,37 +382,6 @@
   to { transform: rotate(360deg); }
 }
 
-/* ── Skeleton placeholders (adopt for loading tables/cards) ──── */
-
-.ui-skeleton {
-  position: relative;
-  overflow: hidden;
-  background: var(--c-surface-2);
-  border-radius: var(--r-sm);
-}
-.ui-skeleton::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  transform: translateX(-100%);
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(255, 255, 255, 0.65),
-    transparent
-  );
-  animation: ui-shimmer 1.4s ease-in-out infinite;
-}
-.ui-skeleton--text { height: 12px; margin-block: 6px; }
-.ui-skeleton--line { height: 12px; }
-.ui-skeleton--title { height: 20px; width: 40%; }
-.ui-skeleton--block { height: 96px; }
-
-@keyframes ui-shimmer {
-  100% { transform: translateX(100%); }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .ui-spinner { animation-duration: 1.6s; }
-  .ui-skeleton::after { animation: none; }
 }

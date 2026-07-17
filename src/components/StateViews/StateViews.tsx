@@ -7,7 +7,7 @@ import { Inbox, AlertTriangle } from "lucide-react";
  * "something went wrong" (ErrorState). Centralising these keeps the empty /
  * loading / error moments visually identical across every tab — the moments
  * most visible during a live demonstration. Styles live in primitives.css
- * (.ui-state / .ui-spinner / .ui-skeleton).
+ * (.ui-state / .ui-spinner).
  */
 
 type EmptyStateProps = {
@@ -94,27 +94,5 @@ export function ErrorState({
       {description && <p className="ui-state__body">{description}</p>}
       {actions && <div className="ui-state__actions">{actions}</div>}
     </div>
-  );
-}
-
-/**
- * Lightweight skeleton block for table/card loading states. Compose several
- * rows to mirror the shape of the content being loaded.
- */
-export function Skeleton({
-  variant = "line",
-  width,
-  className
-}: {
-  variant?: "line" | "text" | "title" | "block";
-  width?: string | number;
-  className?: string;
-}) {
-  return (
-    <div
-      className={`ui-skeleton ui-skeleton--${variant}${className ? ` ${className}` : ""}`}
-      style={width !== undefined ? { width } : undefined}
-      aria-hidden="true"
-    />
   );
 }

@@ -5,15 +5,14 @@ import {
   useRef,
   useState,
   useEffect,
-  type ChangeEvent,
-  type DragEvent
+  type ChangeEvent
 } from "react";
-import * as XLSX from "xlsx";
-import { Check, Database, ScanLine, Settings2 } from "lucide-react";
+import { ScanLine } from "lucide-react";
 
 import type { SidebarTabModule } from "../tabTypes";
 
 import { readSession } from "../../../../auth/authSession";
+import { tabAllowedRoles } from "../../../../auth/tabCatalog";
 import { usePermissions } from "../../../../auth/usePermissions";
 import { logError, logRejection } from "../../../../data/storage/errorLogger";
 import { currentMonthFolderInfo, formatMonthFolderName, formatMonthFolderShortLabel } from "../../../../data/population/monthFolder";
@@ -25,9 +24,6 @@ import {
   saveCertScanGlobal,
   saveSamplingProof,
   updateMonthStatus,
-  loadBrowseRows,
-  type BrowseDatasetKind,
-  type BrowseRow,
 } from "../../../../data/population/populationStorage";
 import {
   appendDistributionEvent,
@@ -47,7 +43,6 @@ import {
 } from "../../../../data/distribution/distributionLog";
 import type {
   DistributionCurrentData,
-  DistributionEntry,
   DistributionEvent
 } from "../../../../data/distribution/distributionTypes";
 import { drawSample } from "../../../../data/sampling/sampleAlgorithm";
@@ -62,30 +57,23 @@ import {
   sampleRequiresApproval,
 } from "../../../../data/sampling/sampleApprovalRules";
 import type { SampleMasterData } from "../../../../data/sampling/sampleTypes";
-import {
-  loadAdminBrowsePreset,
-  loadUserBrowsePreset,
-  saveAdminBrowseDatasetPreset,
-  type UserBrowsePresetFile
-} from "../../../../data/preferences/browsePresetStorage";
 import { writeEmployeeXlsx } from "../../../../data/answers/employeeXlsx";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
 import { useGlobalMonth } from "../../../../data/month/useGlobalMonth";
 
-import type { BiWorkbookResult, NormalizedBiRow } from "./biData/biDataTypes";
+import type { BiWorkbookResult } from "./biData/biDataTypes";
 
 import { exportPopulationProcessingResult } from "./processing/populationExporter";
 import { processPopulation } from "./processing/populationProcessor";
-import type { PopulationProcessingResult, PreparedPopulationRow } from "./processing/populationProcessingTypes";
+import type { PopulationProcessingResult } from "./processing/populationProcessingTypes";
 
 import { exportPopulationReport } from "./reporting/reportExporter";
 
-import type { NormalizedRiskRow, RiskWorkbookResult } from "./riskData/riskDataTypes";
+import type { RiskWorkbookResult } from "./riskData/riskDataTypes";
 
 import WorkbookWorker from "../../../../workers/workbookWorker?worker&inline";
 import type { WorkbookWorkerRequest, WorkbookWorkerResponse } from "../../../../workers/workbookWorkerTypes";
 
-import { formatStageLabel, getPhaseStatus } from "./components/helpers";
 import PhaseOneUpload from "./components/PhaseOneUpload";
 import PhaseTwoReportAndProcessing from "./components/PhaseTwoReportAndProcessing";
 import PhaseThreeSampling from "./components/PhaseThreeSampling";
@@ -96,20 +84,31 @@ import {
   loadPopulationConfig,
   savePopulationConfig,
   type PopulationConfig,
-  DEFAULT_POPULATION_CONFIG,
-  DEFAULT_MAPPING_TEMPLATE,
-  DEFAULT_SYSTEM_FIELDS
+  DEFAULT_POPULATION_CONFIG
 } from "../../../../data/population/populationConfig";
 
 import { getLabels } from "../../../../data/labels/labelsStore";
-import { useLabels } from "../../../../data/labels/useLabels";
 import { MonthClosedError } from "../../../../data/population/monthLock";
 import { appendWorkspaceAction } from "../../../../data/audit/actionLog";
 
 import "./Population.css";
 import { ConfirmDialog } from "../../../../components/ConfirmDialog/ConfirmDialog";
-import { PageHeader } from "../../../../components/PageHeader/PageHeader";
-import { EmptyState, LoadingState } from "../../../../components/StateViews/StateViews";
+import BrowseDataView from "./BrowseDataView";
+import {
+  buildAssignedEntryMap,
+  buildLoadedMonthState,
+  distributionErrorText,
+  isSupportedExcelFile,
+  PHASES,
+  sourceFileMetadata,
+  stableHash
+} from "./populationWorkflowHelpers";
+import {
+  PopulationHeader,
+  PopulationPhaseFooter,
+  PopulationStatusBar,
+  PopulationStepper
+} from "./components/PopulationWorkflowChrome";
 
 type UploadKey = "riskAgencyData" | "businessIntelligenceData";
 
@@ -118,72 +117,12 @@ type UploadState = {
   source: "file-system-api" | "input-fallback" | null;
 };
 
-function sourceFileMetadata(file: File | null): { name: string; size: number; lastModified: number } | null {
-  if (!file) return null;
-  return {
-    name: file.name,
-    size: file.size,
-    lastModified: file.lastModified,
-  };
-}
-
-function stableStringify(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map(stableStringify).join(",")}]`;
-  }
-  if (value && typeof value === "object") {
-    const entries = Object.entries(value as Record<string, unknown>)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, entryValue]) => `${JSON.stringify(key)}:${stableStringify(entryValue)}`);
-    return `{${entries.join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
-
-function stableHash(value: unknown): string {
-  const text = stableStringify(value);
-  let hash = 5381;
-  for (let i = 0; i < text.length; i++) {
-    hash = ((hash << 5) + hash) ^ text.charCodeAt(i);
-  }
-  return (hash >>> 0).toString(36);
-}
-
-type PhaseDefinition = {
-  id: number;
-  title: string;
-  description: string;
-};
-
-const PHASES: PhaseDefinition[] = [
-  {
-    id: 1,
-    title: "رفع البيانات",
-    description: "رفع ملفات Excel المطلوبة لبدء معالجة بيانات المجتمع."
-  },
-  {
-    id: 2,
-    title: "تقرير البيانات والمعالجة",
-    description: "عرض تقرير مصغر للملفات ثم متابعة منطق المعالجة."
-  },
-  {
-    id: 3,
-    title: "اختيار العينة",
-    description: "تطبيق منطق اختيار العينة حسب قواعد العمل المعتمدة."
-  },
-  {
-    id: 4,
-    title: "توزيع العينة",
-    description: "توزيع عناصر العينة على الموظفين المصرح لهم داخل النظام."
-  }
-];
-
 
 export const tabConfig: SidebarTabModule["tabConfig"] = {
   id: "population",
   label: "إدارة بيانات الأشعة",
   order: 10,
-  allowedRoles: ["guest", "employee", "supervisor", "manager", "admin"],
+  allowedRoles: tabAllowedRoles("population"),
   icon: <ScanLine size={20} strokeWidth={1.8} aria-hidden />,
   subTabs: [
     { id: "process", label: "معالجة البيانات" },
@@ -191,20 +130,13 @@ export const tabConfig: SidebarTabModule["tabConfig"] = {
   ]
 };
 
-function isSupportedExcelFile(file: File): boolean {
-  const normalizedFileName = file.name.toLowerCase();
-  return (
-    normalizedFileName.endsWith(".xlsx") || normalizedFileName.endsWith(".xls")
-  );
-}
-
 type SaveMessage = { type: "ok" | "error"; text: string } | null;
 
 type SubTab = "process" | "browse";
 
 export default function PopulationTab() {
   const { directoryHandle } = useWorkspace();
-  const { can } = usePermissions();
+  const { can, canMutate } = usePermissions();
   const sessionRef = useRef(readSession());
   const [activeSubTab, setActiveSubTab] = useState<SubTab>("process");
   const {
@@ -222,12 +154,12 @@ export default function PopulationTab() {
   // PREVIOUS month while saveMonth/saveYear already point at the new one, so
   // every mutating capability is withdrawn until the load resolves (CRITICAL 1).
   const [isLoadingMonthData, setIsLoadingMonthData] = useState(false);
-  const canUploadData = can("upload-data");
-  const canProcessPopulation = can("process-population");
-  const canConfigureSample = can("configure-sample");
-  const canDrawSample = can("draw-sample") && !selectedMonthClosed && !isLoadingMonthData;
-  const canDistributeSamples = can("distribute-samples") && !selectedMonthClosed && !isLoadingMonthData;
-  const canBulkAssign = can("bulk-assign") && !selectedMonthClosed && !isLoadingMonthData;
+  const canUploadData = canMutate("upload-data");
+  const canProcessPopulation = canMutate("process-population");
+  const canConfigureSample = canMutate("configure-sample");
+  const canDrawSample = canMutate("draw-sample") && !selectedMonthClosed && !isLoadingMonthData;
+  const canDistributeSamples = canMutate("distribute-samples") && !selectedMonthClosed && !isLoadingMonthData;
+  const canBulkAssign = canMutate("bulk-assign") && !selectedMonthClosed && !isLoadingMonthData;
   const canViewBrowse = can("view-browse");
   const canExportReports = can("export-reports");
 
@@ -291,84 +223,19 @@ export default function PopulationTab() {
       hasUnsavedSessionWorkRef.current = false;
       const data = await loadMonthForEditing(directoryHandle, info.folderName);
       if (token !== loadMonthTokenRef.current) return; // superseded by a newer month selection
-
-      // Reconstruct RiskWorkbookResult from saved raw rows
-      if (data.riskRawRows.length > 0) {
-        const reconstructed: RiskWorkbookResult = {
-          rows: data.riskRawRows as unknown as NormalizedRiskRow[],
-          sheetSummaries: [],
-          unknownSheetNames: [],
-          totalOriginalRows: data.riskRawRows.length,
-          totalNormalizedRows: data.riskRawRows.length,
-          totalExcludedMissingXrayIdCount: 0,
-        };
-        setRiskWorkbookResult(reconstructed);
-      } else {
-        setRiskWorkbookResult(null);
-      }
-
-      // Reconstruct BiWorkbookResult from saved raw rows
-      if (data.biRawRows.length > 0) {
-        const reconstructed: BiWorkbookResult = {
-          rows: data.biRawRows as unknown as NormalizedBiRow[],
-          sheetSummaries: [],
-          unknownSheetNames: [],
-          totalOriginalRows: data.biRawRows.length,
-          totalNormalizedRows: data.biRawRows.length,
-          totalExcludedMissingXrayIdCount: 0,
-        };
-        setBiWorkbookResult(reconstructed);
-      } else {
-        setBiWorkbookResult(null);
-      }
-
-      if (data.populationRows) {
-        const fallbackSummary: PopulationProcessingResult["summary"] = {
-          riskOriginalRows: data.populationRows.length,
-          validRiskIdRows: data.populationRows.length,
-          invalidRiskIdRows: 0,
-          duplicateRiskIdRows: 0,
-          rowsAfterDeduplication: data.populationRows.length,
-          removedInvalidResultRows: 0,
-          finalPreparedPopulationRows: data.populationRows.length,
-          certScanRows: data.certScanRows,
-          nonCertScanRows: data.nonCertScanRows,
-          certScanPercentage: data.populationRows.length > 0
-            ? Math.round((data.certScanRows / data.populationRows.length) * 100)
-            : 0,
-          nonCertScanPercentage: data.populationRows.length > 0
-            ? Math.round((data.nonCertScanRows / data.populationRows.length) * 100)
-            : 0,
-          biProvided: data.biRawRows.length > 0,
-          biMatchedRows: 0,
-          biUnmatchedRows: 0,
-          biMatchPercentage: 0,
-          totalBiFilledFields: 0,
-          biFieldFillSummary: []
-        };
-        setPopulationProcessingResult({
-          preparedRows: data.populationRows as unknown as PreparedPopulationRow[],
-          removedRows: data.processingSummary?.removedRows ?? [],
-          duplicateRows: data.processingSummary?.duplicateRows ?? [],
-          invalidResultRows: data.processingSummary?.invalidResultRows ?? [],
-          summary: data.processingSummary?.summary ?? fallbackSummary
-        });
-      } else {
-        setPopulationProcessingResult(null);
-      }
-
-      setSampleDrawResult(data.sampleData);
+      const loaded = buildLoadedMonthState(data);
+      setRiskWorkbookResult(loaded.riskWorkbook);
+      setBiWorkbookResult(loaded.biWorkbook);
+      setPopulationProcessingResult(loaded.population);
+      setSampleDrawResult(loaded.sample);
       // Loaded from disk → not a this-session draw, so the four-eyes gate treats it
       // as approved-by-legacy (B1) and does not block distribution of existing months.
       setSampleNeedsApproval(false);
-      setDistributionCurrent(data.distributionCurrent);
+      setDistributionCurrent(loaded.distribution);
 
-      if (data.distributionCurrent || data.sampleData) {
-        setCurrentPhase(4);
-        setCompletedPhaseIds([1, 2, 3]);
-      } else if (data.populationRows) {
-        setCurrentPhase(3);
-        setCompletedPhaseIds([1, 2]);
+      if (loaded.phase) {
+        setCurrentPhase(loaded.phase.current);
+        setCompletedPhaseIds(loaded.phase.completed);
       }
     } finally {
       if (token === loadMonthTokenRef.current) setIsLoadingMonthData(false);
@@ -937,7 +804,10 @@ export default function PopulationTab() {
     processingResult: PopulationProcessingResult,
     riskResult: RiskWorkbookResult
   ): Promise<void> {
-    if (!directoryHandle) return;
+    if (!directoryHandle || !canProcessPopulation) {
+      setSaveToDiskMessage({ type: "error", text: "لا تملك صلاحية حفظ بيانات المجتمع، أو أن مساحة العمل للقراءة فقط." });
+      return;
+    }
 
     // Guard: re-processing a month that already has a drawn sample would make
     // that sample no longer match the new population — confirm before overwriting.
@@ -956,7 +826,10 @@ export default function PopulationTab() {
     riskResult: RiskWorkbookResult,
     confirmedOverwrite: boolean
   ): Promise<void> {
-    if (!directoryHandle) return;
+    if (!directoryHandle || !canProcessPopulation) {
+      setSaveToDiskMessage({ type: "error", text: "لا تملك صلاحية حفظ بيانات المجتمع، أو أن مساحة العمل للقراءة فقط." });
+      return;
+    }
 
     const username = sessionRef.current?.username ?? "unknown";
     setIsSavingToDisk(true);
@@ -1163,6 +1036,10 @@ export default function PopulationTab() {
   // B1: four-eyes sample-release approval. Available to supervisor/manager/admin who
   // is NOT the drawer; admin may self-approve but an explicit warning note is recorded.
   async function handleApproveSample(): Promise<void> {
+    if (!canDrawSample) {
+      setSampleSaveMessage({ type: "error", text: "لا تملك صلاحية اعتماد العينة، أو أن مساحة العمل للقراءة فقط." });
+      return;
+    }
     if (isLoadingMonthData) {
       setSampleSaveMessage({ type: "error", text: "جارٍ تحميل بيانات الشهر — انتظر حتى يكتمل التحميل." });
       return;
@@ -1220,12 +1097,6 @@ export default function PopulationTab() {
     } finally {
       setIsApprovingSample(false);
     }
-  }
-
-  // Shared error text for distribution handlers (MonthClosedError-aware).
-  function distributionErrorText(error: unknown): string {
-    if (error instanceof MonthClosedError) return getLabels().msg_month_closed_write_blocked;
-    return error instanceof Error ? error.message : "خطأ غير معروف";
   }
 
   async function refreshDistribution(monthFolderName: string): Promise<void> {
@@ -1287,7 +1158,7 @@ export default function PopulationTab() {
         setDistributionMessage({ type: "error", text: result.error });
       }
     } catch (error) {
-      setDistributionMessage({ type: "error", text: distributionErrorText(error) });
+      setDistributionMessage({ type: "error", text: distributionErrorText(error, getLabels().msg_month_closed_write_blocked) });
     } finally {
       setIsDistributing(false);
     }
@@ -1338,7 +1209,7 @@ export default function PopulationTab() {
         setDistributionMessage({ type: "error", text: result.error });
       }
     } catch (error) {
-      setDistributionMessage({ type: "error", text: distributionErrorText(error) });
+      setDistributionMessage({ type: "error", text: distributionErrorText(error, getLabels().msg_month_closed_write_blocked) });
     } finally {
       setIsDistributing(false);
     }
@@ -1375,7 +1246,7 @@ export default function PopulationTab() {
         setDistributionMessage({ type: "error", text: result.error });
       }
     } catch (error) {
-      setDistributionMessage({ type: "error", text: distributionErrorText(error) });
+      setDistributionMessage({ type: "error", text: distributionErrorText(error, getLabels().msg_month_closed_write_blocked) });
     } finally {
       setIsDistributing(false);
     }
@@ -1412,7 +1283,7 @@ export default function PopulationTab() {
         setDistributionMessage({ type: "error", text: result.error });
       }
     } catch (error) {
-      setDistributionMessage({ type: "error", text: distributionErrorText(error) });
+      setDistributionMessage({ type: "error", text: distributionErrorText(error, getLabels().msg_month_closed_write_blocked) });
     } finally {
       setIsDistributing(false);
     }
@@ -1444,24 +1315,7 @@ export default function PopulationTab() {
         });
         await refreshDistribution(monthFolderName);
         // Build per-employee entry lists then write one XLSX per employee (fire-and-forget).
-        const rowMap = new Map(sampleDrawResult.rows.map((r) => [r.xrayImageId, r]));
-        const assignedMap = new Map<string, DistributionEntry[]>();
-        for (const ev of events) {
-          if (ev.eventType !== "assigned") continue;
-          const row = rowMap.get(ev.xrayImageId);
-          if (!row) continue;
-          const entry: DistributionEntry = {
-            xrayImageId: ev.xrayImageId,
-            assignedTo: ev.assignedTo,
-            status: "pending",
-            replacedById: null,
-            lastEventAt: ev.eventAt,
-            row,
-          };
-          const list = assignedMap.get(ev.assignedTo) ?? [];
-          list.push(entry);
-          assignedMap.set(ev.assignedTo, list);
-        }
+        const assignedMap = buildAssignedEntryMap(events, sampleDrawResult.rows);
         for (const [emp, empEntries] of assignedMap) {
           void writeEmployeeXlsx(directoryHandle, monthFolderName, emp, empEntries).catch(() => undefined);
         }
@@ -1470,7 +1324,7 @@ export default function PopulationTab() {
         setDistributionMessage({ type: "error", text: result.error });
       }
     } catch (error) {
-      setDistributionMessage({ type: "error", text: distributionErrorText(error) });
+      setDistributionMessage({ type: "error", text: distributionErrorText(error, getLabels().msg_month_closed_write_blocked) });
     } finally {
       setIsDistributing(false);
     }
@@ -1547,106 +1401,18 @@ export default function PopulationTab() {
       {/* ── Process sub-tab ── */}
       {activeSubTab !== "process" ? null : (<>
 
-      {/* ── Header ── */}
-      <PageHeader
-        eyebrow="Population Processing"
-        title="معالجة المجتمع"
-        subtitle="مسار عمل مخصص لرفع بيانات المجتمع، تحضيرها، اختيار العينة، ثم توزيع العينة على الموظفين داخل النظام."
-      >
-        <div className="header-settings-stack">
-          <button
-            type="button"
-            className="header-settings-btn"
-            onClick={() => {
-              if (canConfigureSample) {
-                setSettingsModalMode("mapping");
-              } else {
-                setProcessingMessage("لا تملك صلاحية تعديل إعدادات الربط والتصدير.");
-              }
-            }}
-            aria-label="فتح إعدادات الربط والتصدير"
-            disabled={!canConfigureSample}
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-            </svg>
-            إعدادات الربط والتصدير
-          </button>
-          <button
-            type="button"
-            className="header-settings-btn"
-            onClick={() => {
-              if (canConfigureSample) {
-                setSettingsModalMode("processing");
-              } else {
-                setProcessingMessage("لا تملك صلاحية تعديل إعدادات المعالجة.");
-              }
-            }}
-            aria-label="فتح إعدادات المعالجة"
-            disabled={!canConfigureSample}
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M6 3v4"/><path d="M18 3v4"/><path d="M3 9h18"/><path d="M8 14h8"/><path d="M8 18h5"/><rect x="3" y="5" width="18" height="16" rx="2"/>
-            </svg>
-            إعدادات المعالجة
-          </button>
-        </div>
-      </PageHeader>
-
-      {/* ── Status Bar ── */}
-      <div className="population-status-bar" aria-label="حالة معالجة المجتمع">
-        <span className="status-bar-label">الحالة:</span>
-
-        <div className="status-chip">
-          <span className="status-chip-key">الشهر</span>
-          <span className="status-chip-val">{saveMonth}/{saveYear}</span>
-        </div>
-
-        <div className="status-bar-divider" aria-hidden="true" />
-
-        <div className="status-chip">
-          <span className="status-chip-key">المجتمع</span>
-          <span className={`status-chip-val ${populationProcessingResult ? "ok" : "idle"}`}>
-            {populationProcessingResult
-              ? `${populationProcessingResult.preparedRows.length.toLocaleString("ar-SA-u-nu-latn")} صف`
-              : "—"}
-          </span>
-        </div>
-
-        <div className="status-bar-divider" aria-hidden="true" />
-
-        <div className="status-chip">
-          <span className="status-chip-key">العينة</span>
-          <span className={`status-chip-val ${sampleDrawResult ? "ok" : "idle"}`}>
-            {sampleDrawResult
-              ? `${sampleDrawResult.totalActual.toLocaleString("ar-SA-u-nu-latn")} عنصر`
-              : "—"}
-          </span>
-        </div>
-
-        <div className="status-bar-divider" aria-hidden="true" />
-
-        <div className="status-chip">
-          <span className="status-chip-key">التوزيع</span>
-          <span className={`status-chip-val ${distributionCurrent && distributionCurrent.totalAssigned > 0 ? "ok" : "idle"}`}>
-            {distributionCurrent && distributionCurrent.totalAssigned > 0
-              ? `${distributionCurrent.totalAssigned.toLocaleString("ar-SA-u-nu-latn")} معين`
-              : "—"}
-          </span>
-        </div>
-
-        <div className="status-bar-divider" aria-hidden="true" />
-
-        <div className="status-chip">
-          <span className="status-chip-key">بيانات BI</span>
-          <span className={`status-chip-val ${biWorkbookResult ? "ok" : "idle"}`}>
-            {biWorkbookResult
-              ? `${biWorkbookResult.totalNormalizedRows.toLocaleString("ar-SA-u-nu-latn")} صف`
-              : "غير مرفوع"}
-          </span>
-        </div>
-      </div>
-
+      <PopulationHeader
+        canConfigure={canConfigureSample}
+        onOpenSettings={setSettingsModalMode}
+      />
+      <PopulationStatusBar
+        month={saveMonth}
+        year={saveYear}
+        population={populationProcessingResult}
+        sample={sampleDrawResult}
+        distribution={distributionCurrent}
+        biWorkbook={biWorkbookResult}
+      />
       {/* ── Closed-month banner (Tier-1 Item A) ── */}
       {selectedMonthClosed ? (
         <div className="upload-warning" role="status">
@@ -1655,39 +1421,11 @@ export default function PopulationTab() {
       ) : null}
 
       {/* ── Horizontal Stepper ── */}
-      <nav className="phase-stepper" aria-label="مراحل معالجة المجتمع">
-        {PHASES.map((phase) => {
-          const status = getPhaseStatus(phase.id, currentPhase, completedPhaseIds);
-          const isClickable = status === "completed" || status === "active";
-          return (
-            <div
-              key={phase.id}
-              className={`stepper-item ${status}${isClickable ? " clickable" : ""}`}
-              aria-current={status === "active" ? "step" : undefined}
-              role={isClickable ? "button" : undefined}
-              tabIndex={isClickable ? 0 : undefined}
-              onClick={() => isClickable && setCurrentPhase(phase.id)}
-              onKeyDown={(e) => {
-                if (isClickable && (e.key === "Enter" || e.key === " ")) {
-                  e.preventDefault();
-                  setCurrentPhase(phase.id);
-                }
-              }}
-            >
-              <div className="stepper-node">
-                <div className="stepper-circle" aria-hidden="true">
-                  {status === "completed" ? <Check size={13} /> : phase.id}
-                </div>
-                <div className="stepper-text">
-                  <span className="stepper-num">المرحلة {phase.id}</span>
-                  <strong className="stepper-title">{phase.title}</strong>
-                  <span className="stepper-desc">{phase.description}</span>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </nav>
+      <PopulationStepper
+        currentPhase={currentPhase}
+        completedPhaseIds={completedPhaseIds}
+        onSelect={setCurrentPhase}
+      />
 
       {/* ── Active Phase Panel ── */}
       <main className="phase-panel">
@@ -1758,6 +1496,8 @@ export default function PopulationTab() {
             distributionCurrent={distributionCurrent}
             distributionMessage={distributionMessage}
             isDistributing={isDistributing}
+            canConfigure={canConfigureSample}
+            canDistribute={canDistributeSamples}
             config={config}
             operatorUsername={sessionRef.current?.username ?? "unknown"}
             saveMonth={saveMonth}
@@ -1779,38 +1519,15 @@ export default function PopulationTab() {
         ) : null}
       </main>
 
-      <footer className="phase-actions">
-        <p className="phase-actions-hint">
-          {currentPhase < PHASES.length
-            ? <strong>{PHASE_HINTS[currentPhase]}</strong>
-            : <strong>اكتملت جميع المراحل <Check size={14} style={{ verticalAlign: "middle" }} /></strong>
-          }
-        </p>
-
-        <button
-          type="button"
-          className="secondary-action"
-          onClick={moveToPreviousPhase}
-          disabled={currentPhase === 1 || isProcessingWorkbooks || isProcessingPopulation}
-        >
-          السابق →
-        </button>
-
-        {currentPhase < PHASES.length && (
-          <button
-            type="button"
-            className="primary-action"
-            onClick={() => { void moveToNextPhase(); }}
-            disabled={
-              isProcessingWorkbooks ||
-              isProcessingPopulation ||
-              (currentPhase === 1 && !isPhaseOneComplete)
-            }
-          >
-            {isProcessingWorkbooks ? "جاري القراءة..." : "← التالي"}
-          </button>
-        )}
-      </footer>
+      <PopulationPhaseFooter
+        currentPhase={currentPhase}
+        hint={PHASE_HINTS[currentPhase]}
+        busy={isProcessingWorkbooks || isProcessingPopulation}
+        reading={isProcessingWorkbooks}
+        nextDisabled={isProcessingWorkbooks || isProcessingPopulation || (currentPhase === 1 && !isPhaseOneComplete)}
+        onPrevious={moveToPreviousPhase}
+        onNext={() => { void moveToNextPhase(); }}
+      />
 
       <MappingSettingsModal
         isOpen={settingsModalMode !== null}
@@ -1856,828 +1573,6 @@ export default function PopulationTab() {
         }}
       />
       </>)}
-    </section>
-  );
-}
-
-// ── Browse sub-tab ────────────────────────────────────────────────────────────
-const BROWSE_COLUMNS: { key: string; label: string; default: boolean }[] = [
-  { key: "stage",                 label: "المستوى",              default: true  },
-  { key: "xrayImageId",           label: "معرف الأشعة",          default: true  },
-  { key: "xrayEntryDate",         label: "تاريخ الدخول",         default: true  },
-  { key: "portType",              label: "نوع المنفذ",           default: true  },
-  { key: "portName",              label: "المنفذ",               default: true  },
-  { key: "xrayLevelOneResult",    label: "نتيجة المستوى 1",      default: true  },
-  { key: "xrayLevelTwoResult",    label: "نتيجة المستوى 2",      default: true  },
-  { key: "plateOrContainerNumber",label: "رقم اللوحة/الحاوية",   default: true  },
-  { key: "certScanStatus",        label: "CertScan",             default: false },
-  { key: "declarationNumber",     label: "رقم البيان",           default: false },
-  { key: "movementType",          label: "نوع الحركة",           default: false },
-  { key: "biEnrichmentStatus",    label: "حالة BI",              default: false },
-  { key: "_monthFolder",          label: "الشهر المصدر",         default: false },
-];
-
-// Curated defaults (Batch A / A2) — ground truth from the user's real workspace screenshot.
-// risk-raw's own field is `entryDate` ("تاريخ الدخول") — distinct from population/BI's
-// `xrayEntryDate` ("تاريخ دخول الأشعة"). BI has no `stage` field, so its set drops that column.
-const RISK_RAW_DEFAULT_COLUMN_KEYS: string[] = [
-  "stage", "xrayImageId", "entryDate", "portType", "portName",
-  "xrayLevelOneResult", "xrayLevelTwoResult", "plateOrContainerNumber"
-];
-const BI_RAW_DEFAULT_COLUMN_KEYS: string[] = [
-  "xrayImageId", "xrayEntryDate", "portType", "portName",
-  "levelOneResult", "levelTwoResult", "plateOrContainerNumber"
-];
-
-type BrowseColumn = { key: string; label: string; default: boolean };
-
-const RAW_COLUMN_LABELS: Record<string, string> = {
-  source: "المصدر",
-  portType: "نوع المنفذ",
-  portCode: "رمز المنفذ",
-  preliminaryDeclarationNumber: "رقم البيان المبدئي",
-  declarationNumber: "رقم البيان",
-  declarationDate: "تاريخ البيان",
-  declarationHijriDate: "تاريخ البيان هجري",
-  inboundOutboundType: "نوع الوارد/الصادر",
-  declarationType: "نوع البيان",
-  declarationStatus: "حالة البيان",
-  chassisNumber: "رقم الهيكل",
-  governance: "الحوكمة",
-  levelOneEmployee: "موظف المستوى الأول",
-  entryDate: "تاريخ الدخول",
-  levelOneResult: "نتيجة المستوى 1",
-  levelTwoResult: "نتيجة المستوى 2",
-  movementType: "نوع الحركة",
-  plateOrContainerNumber: "رقم اللوحة/الحاوية",
-  xrayEntryDate: "تاريخ دخول الأشعة",
-  reportNumber: "رقم المحضر",
-  targetedByRiskEngine: "مستهدف محرك المخاطر",
-  riskMessage: "رسالة المخاطر",
-  sourceSheetName: "اسم الورقة",
-  sourceRowNumber: "رقم الصف في المصدر",
-  certScanStatus: "حالة CertScan",
-  certScanSnippet: "نص CertScan",
-  originalCertScanSnippet: "نص CertScan الأصلي",
-  biEnrichmentStatus: "حالة إثراء ذكاء الأعمال",
-  biMatched: "مطابق في ذكاء الأعمال",
-  biFilledFields: "حقول ذكاء الأعمال المضافة",
-  xrayLevelOneResult: "نتيجة المستوى الأول",
-  xrayLevelTwoResult: "نتيجة المستوى الثاني",
-  stage: "المستوى",
-  _monthFolder: "الشهر المصدر"
-};
-
-const NORMALIZED_COLUMN_LABELS: Record<string, string> = (() => {
-  const labels: Record<string, string> = {};
-
-  function add(key: string, label: string): void {
-    labels[normalizeColumnKey(key)] = label;
-  }
-
-  for (const column of BROWSE_COLUMNS) {
-    add(column.key, column.label);
-  }
-
-  for (const field of DEFAULT_SYSTEM_FIELDS) {
-    add(field.key, field.labelAr);
-  }
-
-  for (const [fieldKey, aliases] of Object.entries(DEFAULT_MAPPING_TEMPLATE.columnMappings)) {
-    const fieldLabel =
-      DEFAULT_SYSTEM_FIELDS.find((field) => field.key === fieldKey)?.labelAr ??
-      RAW_COLUMN_LABELS[fieldKey];
-
-    if (!fieldLabel) {
-      continue;
-    }
-
-    add(fieldKey, fieldLabel);
-    for (const alias of aliases) {
-      add(alias, fieldLabel);
-    }
-  }
-
-  for (const [key, label] of Object.entries(RAW_COLUMN_LABELS)) {
-    add(key, label);
-  }
-
-  return labels;
-})();
-
-function normalizeColumnKey(key: string): string {
-  return key
-    .trim()
-    .replace(/[\s_\-/\\]+/g, "")
-    .toLowerCase();
-}
-
-function getBrowseColumnLabel(key: string): string {
-  return NORMALIZED_COLUMN_LABELS[normalizeColumnKey(key)] ?? key;
-}
-
-function buildBrowseColumns(rows: BrowseRow[]): BrowseColumn[] {
-  const baseKeys = new Set(BROWSE_COLUMNS.map((column) => column.key));
-  const dynamicKeys = new Set<string>();
-
-  for (const row of rows.slice(0, 100)) {
-    for (const key of Object.keys(row)) {
-      if (key === "_month" || key === "_year" || baseKeys.has(key)) {
-        continue;
-      }
-      dynamicKeys.add(key);
-    }
-  }
-
-  return [
-    ...BROWSE_COLUMNS,
-    ...Array.from(dynamicKeys).map((key) => ({
-      key,
-      label: getBrowseColumnLabel(key),
-      default: false
-    }))
-  ];
-}
-
-function orderBrowseColumns(
-  columns: BrowseColumn[],
-  columnOrder: string[]
-): BrowseColumn[] {
-  const orderIndex = new Map(columnOrder.map((key, index) => [key, index]));
-
-  return [...columns].sort((first, second) => {
-    const firstIndex = orderIndex.get(first.key) ?? Number.MAX_SAFE_INTEGER;
-    const secondIndex = orderIndex.get(second.key) ?? Number.MAX_SAFE_INTEGER;
-
-    if (firstIndex !== secondIndex) {
-      return firstIndex - secondIndex;
-    }
-
-    return columns.indexOf(first) - columns.indexOf(second);
-  });
-}
-
-function mergeColumnOrder(
-  savedOrder: string[] | undefined,
-  availableKeys: string[]
-): string[] {
-  if (!savedOrder || savedOrder.length === 0) {
-    return availableKeys;
-  }
-
-  const available = new Set(availableKeys);
-  const ordered = savedOrder.filter((key) => available.has(key));
-  const missing = availableKeys.filter((key) => !ordered.includes(key));
-  return [...ordered, ...missing];
-}
-
-function resolveVisibleColumns(
-  dataset: BrowseDatasetKind,
-  columns: BrowseColumn[],
-  savedVisibleColumns: string[] | undefined
-): Set<string> {
-  const availableKeys = new Set(columns.map((column) => column.key));
-
-  if (savedVisibleColumns && savedVisibleColumns.length > 0) {
-    return new Set(savedVisibleColumns.filter((key) => availableKeys.has(key)));
-  }
-
-  return defaultVisibleColumns(dataset, columns);
-}
-
-function curatedDefaultKeys(dataset: BrowseDatasetKind): string[] {
-  if (dataset === "risk-raw") return RISK_RAW_DEFAULT_COLUMN_KEYS;
-  if (dataset === "bi-raw") return BI_RAW_DEFAULT_COLUMN_KEYS;
-  return [];
-}
-
-function defaultVisibleColumns(
-  dataset: BrowseDatasetKind,
-  columns: BrowseColumn[]
-): Set<string> {
-  if (dataset === "population" || dataset === "sample") {
-    return new Set(columns.filter((column) => column.default).map((column) => column.key));
-  }
-
-  const curated = curatedDefaultKeys(dataset);
-  if (curated.length > 0) {
-    const availableKeys = new Set(columns.map((column) => column.key));
-    const matchedCurated = curated.filter((key) => availableKeys.has(key));
-    if (matchedCurated.length > 0) {
-      return new Set(matchedCurated);
-    }
-  }
-
-  const rawKeys = columns
-    .filter((column) => !column.key.startsWith("_") && !BROWSE_COLUMNS.some((base) => base.key === column.key))
-    .slice(0, 12)
-    .map((column) => column.key);
-
-  return new Set([...rawKeys, "_monthFolder"]);
-}
-
-// Places curated keys first (in curated order), then appends whatever else is available — only
-// takes effect when no per-dataset order has been saved to a preset yet (see mergeColumnOrder).
-function defaultColumnOrderKeys(
-  dataset: BrowseDatasetKind,
-  columns: BrowseColumn[]
-): string[] {
-  const curated = curatedDefaultKeys(dataset);
-  const availableKeys = columns.map((column) => column.key);
-  if (curated.length === 0) {
-    return availableKeys;
-  }
-
-  const curatedPresent = curated.filter((key) => availableKeys.includes(key));
-  const remaining = availableKeys.filter((key) => !curatedPresent.includes(key));
-  return [...curatedPresent, ...remaining];
-}
-
-const BROWSE_DATASETS: Array<{
-  id: BrowseDatasetKind;
-  label: string;
-  description: string;
-}> = [
-  {
-    id: "population",
-    label: "المجتمع النهائي",
-    description: "البيانات المعالجة التي تُستخدم لاحقاً لسحب العينة."
-  },
-  {
-    id: "sample",
-    label: "العينة المسحوبة",
-    description: "السجلات التي تم اختيارها كعينة من المجتمع النهائي."
-  },
-  {
-    id: "risk-raw",
-    label: "تحليل المخاطر",
-    description: "صفوف ملف المخاطر كما قُرئت من Excel ومحفوظة للرجوع فقط."
-  },
-  {
-    id: "bi-raw",
-    label: "ذكاء الأعمال",
-    description: "صفوف ذكاء الأعمال كما قُرئت من Excel ومحفوظة للرجوع فقط."
-  }
-];
-
-const STAGE_FILTER_ORDER: Record<string, number> = {
-  "المستوى الأول": 1,
-  "المستوى الثاني": 2,
-  "المستوى الثالث": 3,
-  "المستوى الرابع": 4
-};
-
-function compareBrowseFilterOptions(first: string, second: string): number {
-  const firstStageOrder = STAGE_FILTER_ORDER[first];
-  const secondStageOrder = STAGE_FILTER_ORDER[second];
-  if (firstStageOrder !== undefined || secondStageOrder !== undefined) {
-    return (firstStageOrder ?? Number.MAX_SAFE_INTEGER) - (secondStageOrder ?? Number.MAX_SAFE_INTEGER);
-  }
-  return first.localeCompare(second, "ar");
-}
-
-function formatMonthFolderLabel(monthFolder: string): string {
-  return formatMonthFolderShortLabel(monthFolder);
-}
-
-function formatBrowseCellValue(value: unknown): string {
-  if (value === null || value === undefined || value === "") {
-    return "—";
-  }
-
-  if (Array.isArray(value)) {
-    return value.map(formatBrowseCellValue).join("، ");
-  }
-
-  if (typeof value === "boolean") {
-    return value ? "نعم" : "لا";
-  }
-
-  return String(value);
-}
-
-function getBrowseDisplayValue(
-  row: BrowseRow,
-  key: string,
-  stageMappings?: PopulationConfig["stageMappings"]
-): string {
-  if (key === "stage") {
-    return formatStageLabel(row[key], stageMappings);
-  }
-
-  if (key === "_monthFolder") {
-    return formatMonthFolderLabel(String(row[key] ?? ""));
-  }
-
-  return formatBrowseCellValue(row[key]);
-}
-
-function rowMatchesSearch(
-  row: BrowseRow,
-  search: string,
-  stageMappings?: PopulationConfig["stageMappings"]
-): boolean {
-  const normalizedSearch = search.trim().toLowerCase();
-  if (!normalizedSearch) {
-    return true;
-  }
-
-  return Object.keys(row).some((key) =>
-    getBrowseDisplayValue(row, key, stageMappings).toLowerCase().includes(normalizedSearch)
-  );
-}
-
-function rowMatchesColumnFilters(
-  row: BrowseRow,
-  filters: Record<string, string[]>,
-  exceptKey?: string,
-  stageMappings?: PopulationConfig["stageMappings"]
-): boolean {
-  return Object.entries(filters).every(([key, selectedValues]) => {
-    if (key === exceptKey || selectedValues.length === 0) {
-      return true;
-    }
-
-    return selectedValues.includes(getBrowseDisplayValue(row, key, stageMappings));
-  });
-}
-
-function safeExportFileName(value: string): string {
-  // eslint-disable-next-line no-control-regex -- intentionally strips ASCII control characters (U+0000-U+001F) from file names
-  return value.replace(/[<>:"/\\|?*\u0000-\u001F]+/g, "-").replace(/\s+/g, "_");
-}
-
-function BrowseDataView({
-  directoryHandle,
-  refreshKey,
-  username,
-  config
-}: {
-  directoryHandle: unknown;
-  refreshKey: number;
-  username: string;
-  config: PopulationConfig;
-}) {
-  const { selection: globalMonth } = useGlobalMonth();
-  const labels = useLabels();
-  const [showAllMonths, setShowAllMonths] = useState(false);
-  const globalFolder = globalMonth.kind === "none" ? null : globalMonth.folderName;
-  const [dataset, setDataset] = useState<BrowseDatasetKind>("population");
-  const [rows, setRows] = useState<BrowseRow[]>([]);
-  const [loading, setLoading] = useState(false);
-  const browsePresetRef = useRef<UserBrowsePresetFile | null>(null);
-  const [isPresetLoaded, setIsPresetLoaded] = useState(false);
-  const [visibleCols, setVisibleCols] = useState<Set<string>>(
-    () => new Set(BROWSE_COLUMNS.filter((c) => c.default).map((c) => c.key))
-  );
-  const [columnOrder, setColumnOrder] = useState<string[]>(
-    () => BROWSE_COLUMNS.map((column) => column.key)
-  );
-  const [draggedColumnKey, setDraggedColumnKey] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
-  const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
-  const [openFilterColumn, setOpenFilterColumn] = useState<string | null>(null);
-  const [colPickerOpen, setColPickerOpen] = useState(false);
-
-  useEffect(() => {
-    if (!directoryHandle) {
-      browsePresetRef.current = null;
-      const id = setTimeout(() => setIsPresetLoaded(true), 0);
-      return () => clearTimeout(id);
-    }
-
-    const loadingId = setTimeout(() => setIsPresetLoaded(false), 0);
-    const workspaceHandle = directoryHandle as Parameters<typeof loadUserBrowsePreset>[0];
-    void Promise.all([
-      loadAdminBrowsePreset(workspaceHandle),
-      loadUserBrowsePreset(workspaceHandle, username)
-    ])
-      .then(([adminPreset, userPreset]) => {
-        const nextPreset = {
-          username,
-          browseData: {
-            ...userPreset.browseData,
-            ...adminPreset.browseData
-          }
-        };
-        browsePresetRef.current = nextPreset;
-      })
-      .catch(() => {
-        const emptyPreset = { username, browseData: {} };
-        browsePresetRef.current = emptyPreset;
-      })
-      .finally(() => setIsPresetLoaded(true));
-    return () => clearTimeout(loadingId);
-  }, [directoryHandle, username]);
-
-  useEffect(() => {
-    if (!directoryHandle || !isPresetLoaded) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync loading indicator before async browse row load; necessary to show spinner while data fetches
-    setLoading(true);
-    loadBrowseRows(
-      directoryHandle as Parameters<typeof loadBrowseRows>[0],
-      dataset
-    )
-      .then((nextRows) => {
-        const nextColumns = buildBrowseColumns(nextRows);
-        const datasetPreset = browsePresetRef.current?.browseData[dataset];
-        const nextOrder = mergeColumnOrder(
-          datasetPreset?.columnOrder,
-          defaultColumnOrderKeys(dataset, nextColumns)
-        );
-        const nextVisible = resolveVisibleColumns(
-          dataset,
-          nextColumns,
-          datasetPreset?.visibleColumns
-        );
-
-        setRows(nextRows);
-        setColumnOrder(nextOrder);
-        setVisibleCols(nextVisible);
-      })
-      .catch(() => setRows([]))
-      .finally(() => setLoading(false));
-  }, [dataset, directoryHandle, isPresetLoaded, refreshKey]);
-
-  const monthFilteredRows = useMemo(
-    () =>
-      showAllMonths || !globalFolder
-        ? rows
-        : rows.filter((row) => row._monthFolder === globalFolder),
-    [rows, showAllMonths, globalFolder]
-  );
-  // LINT-01c: Instead of a setState-in-effect, reset column filters by
-  // deriving the key from `dataset` and using it as a React key on the
-  // filter container (see BrowseDataView render). Here we set state
-  // safely inside a microtask to avoid the synchronous-setState lint error.
-  useEffect(() => {
-    const id = setTimeout(() => {
-      setColumnFilters({});
-      setOpenFilterColumn(null);
-    }, 0);
-    return () => clearTimeout(id);
-  }, [dataset]);
-
-  // ── Derived stats ──
-  const total = monthFilteredRows.length;
-
-  const browseColumns = useMemo(() => buildBrowseColumns(rows), [rows]);
-  const orderedColumns = useMemo(
-    () => orderBrowseColumns(browseColumns, columnOrder),
-    [browseColumns, columnOrder]
-  );
-  const activeCols = orderedColumns.filter((c) => visibleCols.has(c.key));
-  const activeDataset = BROWSE_DATASETS.find((item) => item.id === dataset) ?? BROWSE_DATASETS[0]!;
-
-  // ── Filtered table rows ──
-  const searchFilteredRows = useMemo(
-    () => monthFilteredRows.filter((row) => rowMatchesSearch(row, search, config.stageMappings)),
-    [monthFilteredRows, search, config.stageMappings]
-  );
-  const filteredRows = useMemo(
-    () =>
-      searchFilteredRows.filter((row) =>
-        rowMatchesColumnFilters(row, columnFilters, undefined, config.stageMappings)
-      ),
-    [columnFilters, searchFilteredRows, config.stageMappings]
-  );
-  const activeFilterCount = Object.values(columnFilters).filter((values) => values.length > 0).length;
-  function saveCurrentPreset(nextOrder: string[], nextVisible: Set<string>): void {
-    if (!directoryHandle) {
-      return;
-    }
-
-    const visibleColumns = Array.from(nextVisible);
-    const datasetPreset = {
-      columnOrder: nextOrder,
-      visibleColumns
-    };
-
-    browsePresetRef.current = {
-      username,
-      browseData: {
-        ...(browsePresetRef.current?.browseData ?? {}),
-        [dataset]: {
-          ...datasetPreset,
-          updatedAt: new Date().toISOString()
-        }
-      }
-    };
-
-    if (readSession()?.role === "admin") {
-      void saveAdminBrowseDatasetPreset(
-        directoryHandle as Parameters<typeof saveAdminBrowseDatasetPreset>[0],
-        dataset,
-        datasetPreset
-      );
-    }
-  }
-
-  function handleColumnDrop(targetKey: string): void {
-    if (!draggedColumnKey || draggedColumnKey === targetKey) {
-      setDraggedColumnKey(null);
-      return;
-    }
-
-    setColumnOrder((currentOrder) => {
-      const currentKeys = orderedColumns.map((column) => column.key);
-      const baseOrder = currentOrder.length > 0 ? currentOrder : currentKeys;
-      const nextOrder = baseOrder.filter((key) => key !== draggedColumnKey);
-      const targetIndex = nextOrder.indexOf(targetKey);
-
-      if (targetIndex === -1) {
-        return baseOrder;
-      }
-
-      nextOrder.splice(targetIndex, 0, draggedColumnKey);
-      saveCurrentPreset(nextOrder, visibleCols);
-      return nextOrder;
-    });
-    setDraggedColumnKey(null);
-  }
-
-  function handleColumnDragOver(event: DragEvent<HTMLTableCellElement>): void {
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "move";
-  }
-
-  function getColumnFilterOptions(columnKey: string): string[] {
-    return Array.from(
-      new Set(filteredRows.map((row) => getBrowseDisplayValue(row, columnKey, config.stageMappings)))
-    ).sort(compareBrowseFilterOptions);
-  }
-
-  function toggleColumnFilterValue(columnKey: string, value: string): void {
-    setColumnFilters((current) => {
-      const selected = new Set(current[columnKey] ?? []);
-      if (selected.has(value)) {
-        selected.delete(value);
-      } else {
-        selected.add(value);
-      }
-
-      const next = { ...current };
-      if (selected.size === 0) {
-        delete next[columnKey];
-      } else {
-        next[columnKey] = Array.from(selected);
-      }
-      return next;
-    });
-  }
-
-  function clearColumnFilter(columnKey: string): void {
-    setColumnFilters((current) => {
-      const next = { ...current };
-      delete next[columnKey];
-      return next;
-    });
-  }
-
-  function clearAllTableFilters(): void {
-    setSearch("");
-    setColumnFilters({});
-    setOpenFilterColumn(null);
-  }
-
-  function exportFilteredRowsToXlsx(): void {
-    const header = activeCols.map((column) => column.label);
-    const body = filteredRows.map((row) =>
-      activeCols.map((column) => getBrowseDisplayValue(row, column.key, config.stageMappings))
-    );
-    const worksheet = XLSX.utils.aoa_to_sheet([header, ...body]);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "البيانات");
-
-    const monthName =
-      showAllMonths || !globalFolder
-        ? labels.gm_all_months
-        : formatMonthFolderShortLabel(globalFolder);
-    const fileName = safeExportFileName(
-      `البيانات - ${activeDataset.label} - ${monthName}.xlsx`
-    );
-
-    XLSX.writeFile(workbook, fileName);
-  }
-
-  if (!directoryHandle) {
-    return (
-      <div className="placeholder-phase" style={{ marginTop: 40 }}>
-        <p>يجب اختيار مساحة عمل أولاً.</p>
-      </div>
-    );
-  }
-
-  return (
-    <section className="browse-data-view" aria-label="البيانات">
-      <PageHeader
-        eyebrow="Browse Data"
-        title="البيانات"
-        subtitle={activeDataset.description}
-      >
-        <div className="bv-header-actions">
-          <label className="bv-month-filter" htmlFor="browseAllMonths">
-            <input
-              id="browseAllMonths"
-              type="checkbox"
-              checked={showAllMonths}
-              onChange={(event) => setShowAllMonths(event.target.checked)}
-            />
-            <span>{labels.gm_all_months}</span>
-          </label>
-        </div>
-      </PageHeader>
-
-      <div className="bv-dataset-row">
-        <div className="bv-dataset-toggle" role="group" aria-label="مصدر البيانات">
-          {BROWSE_DATASETS.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={`bv-toggle-btn${dataset === item.id ? " active" : ""}`}
-              onClick={() => setDataset(item.id)}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {loading && <LoadingState label="جاري تحميل بيانات جميع الأشهر..." />}
-
-      {!loading && total === 0 && (
-        <EmptyState
-          icon={<Database />}
-          title="لا توجد بيانات محفوظة لهذا المصدر بعد"
-          description="ابدأ بمعالجة شهر من تبويب معالجة المجتمع لتظهر بياناته هنا."
-        />
-      )}
-
-      {!loading && total > 0 && (
-        <div className="bv-table-view">
-          {/* Toolbar */}
-          <div className="bv-table-toolbar">
-            <input
-              type="text"
-              className="bv-search"
-              placeholder="بحث في جميع الأعمدة..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-            <span className="bv-row-count">
-              {filteredRows.length.toLocaleString("ar-SA-u-nu-latn")} صف
-              {(search || activeFilterCount > 0) && ` من ${total.toLocaleString("ar-SA-u-nu-latn")}`}
-            </span>
-            <button
-              type="button"
-              className="bv-export-btn"
-              onClick={exportFilteredRowsToXlsx}
-              disabled={activeCols.length === 0}
-            >
-              تصدير XLSX
-            </button>
-            {(search || activeFilterCount > 0) && (
-              <button
-                type="button"
-                className="bv-clear-filters-btn"
-                onClick={clearAllTableFilters}
-              >
-                مسح التصفية
-              </button>
-            )}
-            <div className="bv-col-picker-wrap">
-              <button
-                type="button"
-                className="bv-col-picker-btn"
-                onClick={() => setColPickerOpen((o) => !o)}
-              >
-                <Settings2 size={14} style={{ verticalAlign: "middle", marginInlineEnd: 4 }} /> الأعمدة ({visibleCols.size})
-              </button>
-              {colPickerOpen && (
-                <div
-                  className="bv-col-picker-dropdown"
-                  onClick={(event) => event.stopPropagation()}
-                  onMouseDown={(event) => event.stopPropagation()}
-                >
-                  {orderedColumns.map((c) => (
-                    <label key={c.key} className="bv-col-option">
-                      <input
-                        type="checkbox"
-                        checked={visibleCols.has(c.key)}
-                        onClick={(event) => event.stopPropagation()}
-                        onChange={(event) => {
-                          event.stopPropagation();
-                          setVisibleCols((prev) => {
-                            const next = new Set(prev);
-                            if (next.has(c.key)) { next.delete(c.key); } else { next.add(c.key); }
-                            saveCurrentPreset(columnOrder, next);
-                            return next;
-                          });
-                        }}
-                      />
-                      {c.label}
-                    </label>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Table */}
-          <div className="bv-table-scroll">
-            <table className="bv-table">
-              <thead>
-                <tr>
-                  {activeCols.map((c) => (
-                    <th
-                      key={c.key}
-                      className={`bv-th bv-th-draggable${draggedColumnKey === c.key ? " dragging" : ""}`}
-                      draggable
-                      title="اسحب العمود لتغيير ترتيبه"
-                      onDragStart={(event) => {
-                        setDraggedColumnKey(c.key);
-                        event.dataTransfer.effectAllowed = "move";
-                        event.dataTransfer.setData("text/plain", c.key);
-                      }}
-                      onDragOver={handleColumnDragOver}
-                      onDrop={() => handleColumnDrop(c.key)}
-                      onDragEnd={() => setDraggedColumnKey(null)}
-                    >
-                      <div className="bv-th-content">
-                        <span className="bv-th-actions">
-                          <span className="bv-th-grip" aria-hidden="true">⋮⋮</span>
-                        </span>
-                        <button
-                          type="button"
-                          className={`bv-filter-btn${columnFilters[c.key]?.length ? " active" : ""}`}
-                          aria-label={`تصفية ${c.label}`}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setOpenFilterColumn((current) => current === c.key ? null : c.key);
-                          }}
-                          onMouseDown={(event) => event.stopPropagation()}
-                          draggable={false}
-                        >
-                          ▾
-                        </button>
-                        <span className="bv-th-label">{c.label}</span>
-                      </div>
-                      {openFilterColumn === c.key && (
-                        <div
-                          className="bv-column-filter-menu"
-                          onClick={(event) => event.stopPropagation()}
-                          onMouseDown={(event) => event.stopPropagation()}
-                        >
-                          <div className="bv-filter-menu-head">
-                            <strong>{c.label}</strong>
-                            <button
-                              type="button"
-                              onClick={() => clearColumnFilter(c.key)}
-                              disabled={!columnFilters[c.key]?.length}
-                            >
-                              مسح
-                            </button>
-                          </div>
-                          <div className="bv-filter-options">
-                            {getColumnFilterOptions(c.key).length === 0 && (
-                              <span className="bv-filter-empty">لا توجد خيارات</span>
-                            )}
-                            {getColumnFilterOptions(c.key).map((option) => (
-                              <label key={option} className="bv-filter-option">
-                                <input
-                                  type="checkbox"
-                                  checked={(columnFilters[c.key] ?? []).includes(option)}
-                                  onChange={() => toggleColumnFilterValue(c.key, option)}
-                                />
-                                <span title={option}>{option}</span>
-                              </label>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filteredRows.slice(0, 500).map((row, i) => (
-                  <tr key={i} className={i % 2 === 0 ? "bv-row-even" : ""}>
-                    {activeCols.map((c) => {
-                      const val = getBrowseDisplayValue(row, c.key, config.stageMappings);
-                      return <td key={c.key} className="bv-td">{val}</td>;
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {filteredRows.length > 500 && (
-              <div className="certscan-overflow-note">
-                عرض أول 500 صف من {filteredRows.length.toLocaleString("ar-SA-u-nu-latn")}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </section>
   );
 }
