@@ -4,6 +4,35 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v56 — 2026-07-17 — Batch 4 safe items: date-parsing rescue, XrayReferrals extraction, audit-log viewer
+
+Three items from an independent Batch-4 triage (`.superpowers/sdd/batch4-triage.md`) found
+safe to execute without a product/policy decision. Spec:
+docs/superpowers/specs/2026-07-17-batch4-safe-items-design.md.
+
+**File:** `src/components/Sidebar/Tabs/Population/processing/populationProcessor.ts`
+
+**Before:**
+```ts
+  const numMatch = raw.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$/);
+  if (numMatch) {
+    const [, d, m, y0] = numMatch;
+    let y = y0;
+    if (y.length === 2) y = parseInt(y, 10) >= 50 ? `19${y}` : `20${y}`;
+    const day = parseInt(d, 10), month = parseInt(m, 10), year = parseInt(y, 10);
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return `${year}-${pad2(month)}-${pad2(day)}`;
+    }
+  }
+```
+
+**After:** adds a month-first fallback gated strictly behind the existing day-first check — only
+fires when day-first is syntactically impossible (second component 13-31) and month-first is valid
+(first component 1-12). The genuinely ambiguous both-valid case (e.g. "03/04/2026") is completely
+untouched — see file.
+
+---
+
 ## v55.2 — 2026-07-16 — Quality pass: staleness guards, CAS consistency, test-truth, a11y
 
 Evidence-backed fixes from an app-wide quality survey (`.superpowers/sdd/app-quality-survey.md`),

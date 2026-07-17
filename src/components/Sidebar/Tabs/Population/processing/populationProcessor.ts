@@ -239,6 +239,14 @@ export function normalizeDate(value: string | null): string | null {
     if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
       return `${year}-${pad2(month)}-${pad2(day)}`;
     }
+    // Day-first is syntactically impossible (the "month" slot is 13-31, which
+    // can never be a real month) but the month-first reading IS valid — the
+    // only unambiguous interpretation left. This never touches the genuinely
+    // ambiguous both-valid case (e.g. "03/04/2026"), which stays gated behind
+    // the day-first check above and is completely unaffected.
+    if (day >= 1 && day <= 12 && month >= 13 && month <= 31) {
+      return `${year}-${pad2(day)}-${pad2(month)}`;
+    }
   }
 
   // DDMmmYYYY or DD/Mmm/YYYY or DD-Mmm-YYYY (e.g. 12Dec2025, 12/Dec/2025)
