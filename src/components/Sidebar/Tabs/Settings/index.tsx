@@ -219,6 +219,7 @@ const LABEL_GROUPS: LabelGroup[] = [
       { key: "um_actions_refresh_btn", desc: "زر تحديث سجل الإجراءات" },
       { key: "um_actions_loading",     desc: "رسالة تحميل سجل الإجراءات" },
       { key: "um_actions_empty",       desc: "رسالة عدم وجود إجراءات مسجلة" },
+      { key: "um_actions_count_suffix", desc: "لاحقة عدد السجلات" },
       { key: "um_actions_col_time",    desc: "عمود الوقت في سجل الإجراءات" },
       { key: "um_actions_col_actor",   desc: "عمود المستخدم في سجل الإجراءات" },
       { key: "um_actions_col_role",    desc: "عمود الدور في سجل الإجراءات" },

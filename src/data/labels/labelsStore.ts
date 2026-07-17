@@ -376,6 +376,7 @@ export const DEFAULT_LABELS = {
   um_actions_refresh_btn:      "تحديث السجل",
   um_actions_loading:          "جاري تحميل السجل...",
   um_actions_empty:            "لا توجد إجراءات مسجلة بعد.",
+  um_actions_count_suffix:     "سجل",
   um_actions_col_time:         "الوقت",
   um_actions_col_actor:        "المستخدم",
   um_actions_col_role:         "الدور",

@@ -1251,7 +1251,7 @@ export default function UserManagementTab() {
           <span>
             {isActionsLoading
               ? L.um_actions_loading
-              : `${actionEntries.length.toLocaleString("ar-SA-u-nu-latn")} سجل`}
+              : `${actionEntries.length.toLocaleString("ar-SA-u-nu-latn")} ${L.um_actions_count_suffix}`}
           </span>
         </div>
 
