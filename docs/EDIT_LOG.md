@@ -31,6 +31,15 @@ fires when day-first is syntactically impossible (second component 13-31) and mo
 (first component 1-12). The genuinely ambiguous both-valid case (e.g. "03/04/2026") is completely
 untouched — see file.
 
+**File:** `src/components/Sidebar/Tabs/Population/processing/populationProcessor.test.ts`
+
+**Before:** no coverage of `normalizeDate`'s day-first vs. month-first fallback behavior.
+
+**After:** adds a `describe("normalizeDate")` block (7 tests) covering the untouched ambiguous
+both-valid case, unchanged unambiguous day-first values, the 3 month>12 rescue cases (including
+the day-first-day-slot-also-invalid variant), the neither-reading-valid fallback, and null/empty
+input — see file.
+
 **File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx` and new sibling `XrayReferrals/subComponents.tsx`
 
 **Before:** 1545-line single file containing the main `XrayReferrals` component plus 8 already
@@ -61,29 +70,36 @@ from 4 call sites) has a reader (`readWorkspaceActions`) but nothing renders it.
 sub-tab's structure (lazy-loaded on tab activation via a staleness-guarded effect, plain table,
 refresh button — including that effect's real quirk of only clearing the loading flag in `finally`
 rather than setting it `true` on mount, matched verbatim for fidelity). Admin-only, matching the
-tab's existing access level — no `MANAGED_TABS`/`createDefaultPermissions` change needed since
-`getRolePermission` always resolves `"edit"` for `role === "admin"` regardless of matrix entries,
-and the top-level tab's `allowedRoles`/`TAB_ROLE_CEILINGS` already restrict the whole tab (and all
-its sub-tab matrix cells) to admin — see file. A `Record<WorkspaceActionType, LabelKey>` map
-(`ACTION_TYPE_LABEL_KEYS`) drives the per-row action label; TypeScript's exhaustiveness check on
-that Record against the real 16-value `WorkspaceActionType` union confirmed no drift since the
-union was last read.
+tab's existing access level. `getRolePermission` always resolves `"edit"` for `role === "admin"`
+regardless of matrix entries, and the top-level tab's `allowedRoles`/`TAB_ROLE_CEILINGS` already
+restrict the whole tab (and all its sub-tab matrix cells) to admin, so this sub-tab needed no
+`MANAGED_TABS`/`createDefaultPermissions` entry to *function*. That omission was still a defect
+against CLAUDE.md's "`MANAGED_TABS` must list every tab" rule and left the admin-facing Page
+Permissions matrix showing 4 of 5 UserManagement sub-tabs (the sidebar already showed all 5, since
+`App.tsx`'s sidebar filter uses that same unconditional admin bypass) — corrected in the
+`src/auth/userManagement.ts` entry below (final whole-branch review fix). A
+`Record<WorkspaceActionType, LabelKey>` map (`ACTION_TYPE_LABEL_KEYS`) drives the per-row action
+label; TypeScript's exhaustiveness check on that Record against the real 16-value
+`WorkspaceActionType` union confirmed no drift since the union was last read.
 
 **File:** `src/data/labels/labelsStore.ts`
 
 **Before:** no labels for the 16 `WorkspaceActionType` values or the new sub-tab/section text.
 
 **After:** adds `um_actions_tab_label` + 11 `um_actions_*` section/table-chrome keys + 16
-`um_action_type_*` keys (28 new keys total) — see file.
+`um_action_type_*` keys (28 new keys total at the time). Follow-up fix (commit `688c5799`, Task 3
+review Minor) added a 29th key, `um_actions_count_suffix`, replacing a hardcoded "سجل" word in the
+`renderActions()` toolbar count text with a label lookup — see file. **Corrected count: 29 new
+keys total.**
 
 **File:** `src/components/Sidebar/Tabs/Settings/index.tsx`
 
 **Before:** label editor's `LABEL_GROUPS` had no group covering `um_*` keys (the pre-existing
 `um_delete_*` keys from the Tier-1 user-deletion guard were never registered there either).
 
-**After:** adds a new "سجل الإجراءات" `LABEL_GROUPS` entry listing all 28 new `um_actions_*`/
-`um_action_type_*` keys, matching the file's existing per-group `{ key, desc }` structure — see
-file.
+**After:** adds a new "سجل الإجراءات" `LABEL_GROUPS` entry listing all 29 new `um_actions_*`/
+`um_action_type_*` keys (including the follow-up `um_actions_count_suffix` entry from commit
+`688c5799`), matching the file's existing per-group `{ key, desc }` structure — see file.
 
 **File:** `CLAUDE.md`
 
@@ -91,6 +107,27 @@ file.
 `feature-permissions`, `activity`.
 
 **After:** appends `actions` to that row's sub-tab list.
+
+**File:** `src/auth/userManagement.ts`
+
+**Before:** `MANAGED_TABS` and `createDefaultPermissions()` register `user-management/users`,
+`user-management/page-permissions`, `user-management/feature-permissions`, and
+`user-management/activity` (each with a `MANAGED_TABS` row and an admin `"edit"` row in
+`createDefaultPermissions()`), but not `user-management/actions` — the sub-tab added above.
+
+**After:** adds the matching `MANAGED_TABS` row
+(`{ id: "user-management/actions", label: "سجل الإجراءات", parentId: "user-management" }`) and
+admin `createDefaultPermissions()` row (`access: "edit"`), same pattern as its 4 siblings. Final
+whole-branch review Important finding. Verified zero runtime access change for any role: admin's
+`getRolePermission` short-circuits to `"edit"` before any matrix lookup, and
+`TAB_ROLE_CEILINGS["user-management"] = ["admin"]` already keeps every other role off the entire
+tab in `App.tsx`'s sidebar filter — so the sidebar already showed 5 UserManagement sub-tabs before
+this fix (`tabConfig.subTabs` in `UserManagement/index.tsx` always listed `actions`). The only
+effect is that `UserManagement/index.tsx`'s Page Permissions matrix
+(`MANAGED_TABS.filter((t) => !t.parentId)` / `.filter((t) => t.parentId === tab.id)`) now renders
+5 UserManagement sub-tab rows instead of 4, matching the sidebar and satisfying CLAUDE.md's
+"`MANAGED_TABS` must list every tab" requirement. `src/auth/userManagement.test.ts` has no
+assertion on `MANAGED_TABS`'s length, so the addition is unconstrained there.
 
 ---
 

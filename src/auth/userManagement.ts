@@ -112,6 +112,7 @@ export const MANAGED_TABS: readonly ManagedTab[] = [
   { id: "user-management/page-permissions",    label: "صلاحيات الصفحات",     parentId: "user-management" },
   { id: "user-management/feature-permissions", label: "صلاحيات الميزات",     parentId: "user-management" },
   { id: "user-management/activity",            label: "متابعة الأنشطة",      parentId: "user-management" },
+  { id: "user-management/actions",             label: "سجل الإجراءات",       parentId: "user-management" },
   { id: "settings",                label: "إدارة الإعدادات" },
   { id: "change-log",              label: "سجل الإصدارات" },
 ];
@@ -399,6 +400,7 @@ export function createDefaultPermissions(): RolePermission[] {
     { role: "admin",      tabId: "user-management/page-permissions",    access: "edit" },
     { role: "admin",      tabId: "user-management/feature-permissions", access: "edit" },
     { role: "admin",      tabId: "user-management/activity",            access: "edit" },
+    { role: "admin",      tabId: "user-management/actions",             access: "edit" },
     { role: "admin",      tabId: "settings",                access: "edit" },
     // Manager — full access to EW sub-tabs
     { role: "manager",    tabId: "ew/xray-referrals",       access: "edit" },
