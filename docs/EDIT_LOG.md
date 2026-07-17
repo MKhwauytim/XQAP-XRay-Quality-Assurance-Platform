@@ -145,6 +145,18 @@ No product-scope items touched.
 
 **After:** same rationale as the template index writer above — the per-id document (Task 4) now carries the stronger protection. No behavior change.
 
+**File:** `src/data/templates/templateSelectionStorage.test.ts` (new)
+
+**Before:** _(file did not exist)_
+
+**After:** round-trip save/load test + a same-key concurrent-write CAS test, closing the "zero tests" gap for this disk-writing module.
+
+**File:** `src/data/answers/employeeXlsx.test.ts` (new)
+
+**Before:** _(file did not exist)_
+
+**After:** write-completes-without-throwing + correct-filename test, locating the written file via the same `getSampleEmployeeDir` helper the production code uses (`2-samples/{month}/2-employees/`). Note: `createMemoryDirectory()`'s file mock only faithfully round-trips string content, not binary `ArrayBuffer` writes — see the test file's own comment for the resulting scope limitation.
+
 ## v55.1 — 2026-07-16 — Desktop app-mode shortcut
 
 Spec: docs/superpowers/specs/2026-07-16-desktop-shortcut-design.md. Adds a
