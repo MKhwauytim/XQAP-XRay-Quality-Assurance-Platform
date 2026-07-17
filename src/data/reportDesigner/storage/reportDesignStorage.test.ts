@@ -61,6 +61,10 @@ describe("reportDesignStorage", () => {
     expect(loaded).not.toBeNull();
     expect(loaded?.revision).toBe(2); // both writes participated in the CAS chain
 
+    // The real no-clobber proof: without the fix, saveDesignFile throws on
+    // every save (see reportDesignStorage.ts), which short-circuits the index
+    // update inside the same withResourceLock callback — so this assertion is
+    // what actually fails under the bug, not the revision check above.
     const index = await loadDesignIndex(dir);
     expect(index.designs).toHaveLength(1); // one entry, not duplicated
   });

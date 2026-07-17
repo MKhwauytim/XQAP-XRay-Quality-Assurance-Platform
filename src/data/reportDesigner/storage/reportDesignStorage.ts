@@ -72,7 +72,8 @@ async function updateDesignIndex(
  * concurrently; casLoop bumps `revision`, stamps `_writeToken`, and verifies
  * both on read-back so a concurrent clobber fails loudly and retries rather
  * than silently overwriting the other author's edit. Mirrors
- * `templateStorage.ts`'s `saveTemplateFile` for the analogous per-id shape.
+ * `templateStorage.ts`'s `saveTemplateFile` for the analogous per-id shape
+ * (minus the delayed re-verify callback — tracked separately, M-3).
  */
 async function saveDesignFile(
   dir: DirectoryHandleLike,
