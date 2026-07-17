@@ -369,6 +369,38 @@ export const DEFAULT_LABELS = {
   rk_status_out_of_control:    "خارج الضبط",
   rk_status_low_n:             "عيّنة صغيرة (n < {n})",
   rk_status_in_control:        "ضمن الضبط",
+
+  // ── UserManagement — governance actions log viewer (C-15) ──
+  um_actions_tab_label:        "سجل الإجراءات",
+  um_actions_desc:             "سجل الإجراءات الإدارية المحفوظ داخل مساحة العمل في",
+  um_actions_refresh_btn:      "تحديث السجل",
+  um_actions_loading:          "جاري تحميل السجل...",
+  um_actions_empty:            "لا توجد إجراءات مسجلة بعد.",
+  um_actions_col_time:         "الوقت",
+  um_actions_col_actor:        "المستخدم",
+  um_actions_col_role:         "الدور",
+  um_actions_col_action:       "الإجراء",
+  um_actions_col_target:       "الهدف",
+  um_actions_col_month:        "الشهر",
+  um_actions_col_details:      "تفاصيل",
+  // Display labels for WorkspaceActionType (src/data/audit/actionLog.ts) — verified
+  // against the real 16-value union before finalizing this list (2026-07-17).
+  um_action_type_user_deleted:               "حذف مستخدم",
+  um_action_type_user_created:               "إنشاء مستخدم",
+  um_action_type_permission_changed:         "تغيير صلاحية صفحة",
+  um_action_type_feature_permission_changed: "تغيير صلاحية ميزة",
+  um_action_type_sample_drawn:               "سحب عينة",
+  um_action_type_distribution_bulk_assigned: "توزيع جماعي",
+  um_action_type_referral_approved:          "اعتماد إحالة",
+  um_action_type_referral_denied:            "رفض إحالة",
+  um_action_type_replacement_approved:       "اعتماد استبدال",
+  um_action_type_replacement_denied:         "رفض استبدال",
+  um_action_type_reopen_approved:            "اعتماد إعادة فتح",
+  um_action_type_reopen_denied:              "رفض إعادة فتح",
+  um_action_type_answer_reopened:            "إعادة فتح إجابة",
+  um_action_type_month_closed:               "إقفال شهر",
+  um_action_type_month_reopened:             "إعادة فتح شهر",
+  um_action_type_backup_restored:            "استرجاع نسخة احتياطية",
 } as const;
 
 export type LabelKey = keyof typeof DEFAULT_LABELS;

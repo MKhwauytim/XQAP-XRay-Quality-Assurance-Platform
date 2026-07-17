@@ -41,8 +41,13 @@ import {
 } from "../../../../auth/userManagement";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
 import { getUserWorkspaceFootprint } from "../../../../data/samples/sampleMirrorStorage";
-import { appendWorkspaceAction } from "../../../../data/audit/actionLog";
-import { getLabels } from "../../../../data/labels/labelsStore";
+import {
+  appendWorkspaceAction,
+  readWorkspaceActions,
+  type WorkspaceActionEntry,
+  type WorkspaceActionType,
+} from "../../../../data/audit/actionLog";
+import { getLabels, type LabelKey } from "../../../../data/labels/labelsStore";
 import { syncUserManagementToDisk } from "../../../../data/workspace/userSync";
 import type { SidebarTabModule } from "../tabTypes";
 
@@ -62,12 +67,13 @@ export const tabConfig: SidebarTabModule["tabConfig"] = {
     { id: "page-permissions", label: "صلاحيات الصفحات" },
     { id: "feature-permissions", label: "صلاحيات الميزات" },
     { id: "activity", label: "متابعة الأنشطة" },
+    { id: "actions", label: "سجل الإجراءات" },
   ],
 };
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type PageSection = "users" | "page-permissions" | "feature-permissions" | "activity";
+type PageSection = "users" | "page-permissions" | "feature-permissions" | "activity" | "actions";
 type FeatureSubGroup = "workspace" | "population" | "admin";
 
 const KNOWN_USER_MANAGEMENT_SECTIONS = new Set<PageSection>([
@@ -75,6 +81,7 @@ const KNOWN_USER_MANAGEMENT_SECTIONS = new Set<PageSection>([
   "page-permissions",
   "feature-permissions",
   "activity",
+  "actions",
 ]);
 
 /**
@@ -116,6 +123,29 @@ const PERMISSION_HELP: Record<PermissionLevel, string> = {
   edit: "عرض الصفحة واستخدام أدواتها.",
 };
 
+// Display-label key for each WorkspaceActionType (src/data/audit/actionLog.ts). A
+// Record over that union makes TypeScript flag a missing entry at compile time if
+// the union ever grows — verified exhaustive against the real 16-value union as of
+// 2026-07-17 (see docs/EDIT_LOG.md v56).
+const ACTION_TYPE_LABEL_KEYS: Record<WorkspaceActionType, LabelKey> = {
+  "user-deleted": "um_action_type_user_deleted",
+  "user-created": "um_action_type_user_created",
+  "permission-changed": "um_action_type_permission_changed",
+  "feature-permission-changed": "um_action_type_feature_permission_changed",
+  "sample-drawn": "um_action_type_sample_drawn",
+  "distribution-bulk-assigned": "um_action_type_distribution_bulk_assigned",
+  "referral-approved": "um_action_type_referral_approved",
+  "referral-denied": "um_action_type_referral_denied",
+  "replacement-approved": "um_action_type_replacement_approved",
+  "replacement-denied": "um_action_type_replacement_denied",
+  "reopen-approved": "um_action_type_reopen_approved",
+  "reopen-denied": "um_action_type_reopen_denied",
+  "answer-reopened": "um_action_type_answer_reopened",
+  "month-closed": "um_action_type_month_closed",
+  "month-reopened": "um_action_type_month_reopened",
+  "backup-restored": "um_action_type_backup_restored",
+};
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function UserManagementTab() {
@@ -140,6 +170,8 @@ export default function UserManagementTab() {
   const [collapsedParents, setCollapsedParents] = useState<Set<string>>(new Set());
   const [activityEntries, setActivityEntries] = useState<AuthActivityLogEntry[]>([]);
   const [isActivityLoading, setIsActivityLoading] = useState(false);
+  const [actionEntries, setActionEntries] = useState<WorkspaceActionEntry[]>([]);
+  const [isActionsLoading, setIsActionsLoading] = useState(false);
 
   const session = readSession();
   const { directoryHandle } = useWorkspace();
@@ -192,6 +224,22 @@ export default function UserManagementTab() {
       .catch(logRejection("userManagement:readAuthActivityLog"))
       .finally(() => {
         if (!cancelled) setIsActivityLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [section, directoryHandle]);
+
+  useEffect(() => {
+    if (section !== "actions" || !directoryHandle) return;
+    let cancelled = false;
+    void readWorkspaceActions(directoryHandle)
+      .then((entries) => {
+        if (!cancelled) setActionEntries(entries);
+      })
+      .catch(logRejection("userManagement:readWorkspaceActions"))
+      .finally(() => {
+        if (!cancelled) setIsActionsLoading(false);
       });
     return () => {
       cancelled = true;
@@ -1170,6 +1218,79 @@ export default function UserManagementTab() {
     );
   }
 
+  function renderActions() {
+    const L = getLabels();
+    const sortedEntries = actionEntries
+      .slice()
+      .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
+      .slice(0, 200);
+
+    return (
+      <div className="um-section">
+        <h3 className="um-add-form-title">{L.um_actions_tab_label}</h3>
+        <div className="um-matrix-desc">
+          {L.um_actions_desc}
+          <strong> 5-system/audit/actions.log.json</strong>
+        </div>
+
+        <div className="um-activity-toolbar">
+          <button
+            type="button"
+            className="um-add-btn"
+            onClick={() => {
+              if (!directoryHandle) return;
+              setIsActionsLoading(true);
+              void readWorkspaceActions(directoryHandle)
+                .then(setActionEntries)
+                .catch(logRejection("userManagement:refreshWorkspaceActions"))
+                .finally(() => setIsActionsLoading(false));
+            }}
+          >
+            {L.um_actions_refresh_btn}
+          </button>
+          <span>
+            {isActionsLoading
+              ? L.um_actions_loading
+              : `${actionEntries.length.toLocaleString("ar-SA-u-nu-latn")} سجل`}
+          </span>
+        </div>
+
+        {sortedEntries.length === 0 ? (
+          <div className="um-empty">{L.um_actions_empty}</div>
+        ) : (
+          <div className="um-activity-table-wrap">
+            <table className="um-activity-table">
+              <thead>
+                <tr>
+                  <th>{L.um_actions_col_time}</th>
+                  <th>{L.um_actions_col_actor}</th>
+                  <th>{L.um_actions_col_role}</th>
+                  <th>{L.um_actions_col_action}</th>
+                  <th>{L.um_actions_col_target}</th>
+                  <th>{L.um_actions_col_month}</th>
+                  <th>{L.um_actions_col_details}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sortedEntries.map((entry) => (
+                  <tr key={entry.id}>
+                    <td>{formatDateTime(entry.at)}</td>
+                    <td>{entry.actor}</td>
+                    <td>{entry.actorRole}</td>
+                    <td>{L[ACTION_TYPE_LABEL_KEYS[entry.action]] ?? entry.action}</td>
+                    <td>{entry.target ?? "—"}</td>
+                    <td>{entry.monthFolderName ?? "—"}</td>
+                    <td>{entry.details ? JSON.stringify(entry.details) : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   // ── Render ───────────────────────────────────────────────────────────────────
 
   return (
@@ -1219,6 +1340,7 @@ export default function UserManagementTab() {
       {section === "page-permissions" && renderPagePermissions()}
       {section === "feature-permissions" && renderFeaturePermissions()}
       {section === "activity" && renderActivity()}
+      {section === "actions" && renderActions()}
     </section>
   );
 }

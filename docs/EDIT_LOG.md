@@ -51,6 +51,47 @@ in `XrayReferrals.tsx` but gained an `export` keyword so the moved `ReferralStat
 change — verified by the existing test suite passing unchanged (95 files / 650 tests, before and
 after). ~500-line reduction in the main file.
 
+**File:** `src/components/Sidebar/Tabs/UserManagement/index.tsx`
+
+**Before:** UserManagement has `users`/`page-permissions`/`feature-permissions`/`activity` sub-tabs;
+the governance action log (`5-system/audit/actions.log.json`, written via `appendWorkspaceAction`
+from 4 call sites) has a reader (`readWorkspaceActions`) but nothing renders it.
+
+**After:** adds a new `actions` sub-tab, `renderActions()`, mirroring the existing `activity`
+sub-tab's structure (lazy-loaded on tab activation via a staleness-guarded effect, plain table,
+refresh button — including that effect's real quirk of only clearing the loading flag in `finally`
+rather than setting it `true` on mount, matched verbatim for fidelity). Admin-only, matching the
+tab's existing access level — no `MANAGED_TABS`/`createDefaultPermissions` change needed since
+`getRolePermission` always resolves `"edit"` for `role === "admin"` regardless of matrix entries,
+and the top-level tab's `allowedRoles`/`TAB_ROLE_CEILINGS` already restrict the whole tab (and all
+its sub-tab matrix cells) to admin — see file. A `Record<WorkspaceActionType, LabelKey>` map
+(`ACTION_TYPE_LABEL_KEYS`) drives the per-row action label; TypeScript's exhaustiveness check on
+that Record against the real 16-value `WorkspaceActionType` union confirmed no drift since the
+union was last read.
+
+**File:** `src/data/labels/labelsStore.ts`
+
+**Before:** no labels for the 16 `WorkspaceActionType` values or the new sub-tab/section text.
+
+**After:** adds `um_actions_tab_label` + 11 `um_actions_*` section/table-chrome keys + 16
+`um_action_type_*` keys (28 new keys total) — see file.
+
+**File:** `src/components/Sidebar/Tabs/Settings/index.tsx`
+
+**Before:** label editor's `LABEL_GROUPS` had no group covering `um_*` keys (the pre-existing
+`um_delete_*` keys from the Tier-1 user-deletion guard were never registered there either).
+
+**After:** adds a new "سجل الإجراءات" `LABEL_GROUPS` entry listing all 28 new `um_actions_*`/
+`um_action_type_*` keys, matching the file's existing per-group `{ key, desc }` structure — see
+file.
+
+**File:** `CLAUDE.md`
+
+**Before:** `user-management` tab table row listed sub-tabs `users`, `page-permissions`,
+`feature-permissions`, `activity`.
+
+**After:** appends `actions` to that row's sub-tab list.
+
 ---
 
 ## v55.2 — 2026-07-16 — Quality pass: staleness guards, CAS consistency, test-truth, a11y
