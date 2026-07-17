@@ -31,6 +31,26 @@ fires when day-first is syntactically impossible (second component 13-31) and mo
 (first component 1-12). The genuinely ambiguous both-valid case (e.g. "03/04/2026") is completely
 untouched — see file.
 
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx` and new sibling `XrayReferrals/subComponents.tsx`
+
+**Before:** 1545-line single file containing the main `XrayReferrals` component plus 8 already
+prop-driven, already-decoupled sub-components and 5 pure helper functions, all at module scope.
+
+**After:** the 8 sub-components (`QueueToolbar`, `SelectionActionBar`, `SampleDetailPanel`,
+`ReferralRequestModal`, `ReferralSamplePreview`, `StatusBadge`, `ReferralStatsStrip`,
+`ReplacementDialog`) plus 7 pure helpers (`buildXrayColumns`, `buildDefaultColConfig`,
+`loadLocalColConfig`, `getVisibleReferralColumns`, `pct`, `getReferralPreviewValue`,
+`isStudyCompleted`) move verbatim to a new sibling file `XrayReferrals/subComponents.tsx`;
+`XrayReferrals.tsx` imports them back. `buildDefaultColConfig`/`loadLocalColConfig` were
+independently verified safe (no closure over main-component state) — moving them required also
+moving the two small module constants they and `getVisibleReferralColumns` depend on
+(`DEFAULT_VISIBLE`, `SELECT_COL_ID`), re-exported and imported back into `XrayReferrals.tsx`. Three
+main-component state-shape types (`PersonalStats`, `PersonalQuota`, `ReplacementDialogState`) stay
+in `XrayReferrals.tsx` but gained an `export` keyword so the moved `ReferralStatsStrip`/
+`ReplacementDialog` can `import type` them back — a structural, behavior-neutral change. No logic
+change — verified by the existing test suite passing unchanged (95 files / 650 tests, before and
+after). ~500-line reduction in the main file.
+
 ---
 
 ## v55.2 — 2026-07-16 — Quality pass: staleness guards, CAS consistency, test-truth, a11y
