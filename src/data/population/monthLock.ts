@@ -167,7 +167,18 @@ export async function closeMonth(
             verify.value.revision === nextRevision &&
             verify.value._writeToken === writeToken
           ) {
-            return { done: true, result: { ok: true as const } };
+            return {
+              done: true,
+              result: { ok: true as const },
+              verify: async () => {
+                const recheck = await safeReadJson<MonthManifestData>(monthDir, MANIFEST_FILE);
+                return (
+                  recheck.ok &&
+                  recheck.value.revision === nextRevision &&
+                  recheck.value._writeToken === writeToken
+                );
+              },
+            };
           }
           return { done: false };
         },
@@ -234,7 +245,18 @@ export async function reopenMonth(
             verify.value.revision === nextRevision &&
             verify.value._writeToken === writeToken
           ) {
-            return { done: true, result: { ok: true as const } };
+            return {
+              done: true,
+              result: { ok: true as const },
+              verify: async () => {
+                const recheck = await safeReadJson<MonthManifestData>(monthDir, MANIFEST_FILE);
+                return (
+                  recheck.ok &&
+                  recheck.value.revision === nextRevision &&
+                  recheck.value._writeToken === writeToken
+                );
+              },
+            };
           }
           return { done: false };
         },

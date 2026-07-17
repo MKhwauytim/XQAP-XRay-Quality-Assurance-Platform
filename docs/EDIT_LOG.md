@@ -115,6 +115,36 @@ No product-scope items touched.
 
 **After:** the per-id document write is now wrapped in the same casLoop protocol as `templateStorage.ts`'s `saveTemplateFile` (revision + `_writeToken`, verified on read-back), closing the silent-clobber gap the "single writer by id" comment had assumed away — see file.
 
+**File:** `src/data/population/monthLock.ts`
+
+**Before:** `closeMonth`/`reopenMonth` verify only in-attempt (immediate read-back), no delayed re-verify.
+
+**After:** both gain the same delayed `verify:` callback used by `templateStorage.ts saveTemplateFile`/`templateSelectionStorage.ts` — this file governs whether a closed month stays frozen against further writes, which is exactly the class of risk the delayed-verify tier exists for.
+
+**File:** `src/data/feedback/feedbackStorage.ts`
+
+**Before:** in-attempt-only verify, no comment explaining why.
+
+**After:** one-line rationale comment added — feedback messages are low-stakes user input, not business-critical RMW data; a rare lost update means at most a re-submission, not data corruption. No behavior change.
+
+**File:** `src/auth/authActivityLog.ts`
+
+**Before:** in-attempt-only verify, no comment explaining why.
+
+**After:** one-line rationale comment added — the merge-by-session-id pattern is self-healing (a losing writer's entries survive to the next flush attempt, per the existing "advances only on a verified write" comment already in the file); delayed verify would be redundant. No behavior change.
+
+**File:** `src/data/templates/templateStorage.ts` (index writer only)
+
+**Before:** in-attempt-only verify on `updateTemplateIndex`, no comment explaining why (the per-id `saveTemplateFile` already has delayed verify and its own comment).
+
+**After:** one-line rationale comment added — index entries are eventually-consistent by nature (a transient one-write-behind entry self-heals on the next save); the actual content-divergence risk lives in the per-id document, which already has the stronger protection. No behavior change.
+
+**File:** `src/data/reportDesigner/storage/reportDesignStorage.ts` (index writer only)
+
+**Before:** in-attempt-only verify on `updateDesignIndex`, no comment.
+
+**After:** same rationale as the template index writer above — the per-id document (Task 4) now carries the stronger protection. No behavior change.
+
 ## v55.1 — 2026-07-16 — Desktop app-mode shortcut
 
 Spec: docs/superpowers/specs/2026-07-16-desktop-shortcut-design.md. Adds a

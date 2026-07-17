@@ -11,6 +11,11 @@ import type { TemplateIndex, TemplateSchema } from "./templateTypes";
  * (held by the caller) serializes same-tab writers, while casLoop re-reads fresh,
  * bumps `revision`, stamps `_writeToken`, and verifies both on read-back so a
  * concurrent author's index entry on another machine is never silently dropped.
+ *
+ * No delayed verify: index entries are eventually-consistent by nature — a
+ * transient one-write-behind entry self-heals on the next save. The
+ * stronger protection lives on the per-id document (saveTemplateFile,
+ * below), which is where real content divergence would actually matter.
  */
 async function updateTemplateIndex(
   dir: DirectoryHandleLike,

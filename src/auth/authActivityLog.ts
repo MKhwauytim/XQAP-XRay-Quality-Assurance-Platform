@@ -122,6 +122,10 @@ async function flushMemoryToWorkspace(): Promise<void> {
   // and verifies both on read-back so a concurrent machine's entries are never
   // silently dropped by this flush. `memoryEntries` advances only on a verified
   // write, so a losing writer retries with fresh state on the next flush.
+  //
+  // No delayed verify: the merge-by-session-id pattern is self-healing — a
+  // losing writer's entries survive (memoryEntries only advances on a
+  // verified write) and are picked up whole on the next flush attempt.
   await casLoop<{ ok: true }>(
     async (writeToken) => {
       const existing = await readDiskLog();
