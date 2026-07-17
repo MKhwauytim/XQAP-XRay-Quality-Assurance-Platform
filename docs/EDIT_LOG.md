@@ -32,6 +32,38 @@ No product-scope items touched.
 
 **After:** adds a `cancelled` flag (mirroring the KPI-model effect immediately below it) so a slow load for a previously-selected month can never overwrite a newer selection's chips — see file.
 
+**File:** `src/components/Sidebar/Tabs/Population/index.tsx`
+
+**Before:**
+```tsx
+  async function handleLoadExistingMonth(info: MonthFolderInfo): Promise<void> {
+    if (!directoryHandle) return;
+    setIsLoadingMonthData(true);
+    try {
+      ...
+    } finally {
+      setIsLoadingMonthData(false);
+    }
+  }
+
+  const loadedFolderRef = useRef<string | null>(null);
+  useEffect(() => {
+    ...
+    if (globalMonth.kind === "existing") {
+      const targetFolder = globalMonth.folderName;
+      void handleLoadExistingMonth({ ... }).catch((error) => {
+        logError("population:auto-load-month", error);
+        resetForNewMonth();
+        setProcessingMessage("تعذر تحميل بيانات الشهر — أعد المحاولة");
+        if (loadedFolderRef.current === targetFolder) loadedFolderRef.current = null;
+      });
+    }
+    ...
+  }, [directoryHandle, globalMonth]);
+```
+
+**After:** adds a `loadMonthTokenRef` (mirroring the load-token pattern already used in `useApprovalData.ts`/`XrayInspectionResults.tsx`/`XrayReferrals.tsx`) so a rapid double-switch of the header month can never let a superseded load's data commit over a newer selection's, or let a superseded load's rejection wipe a newer load's already-successful data — see file.
+
 ## v55.1 — 2026-07-16 — Desktop app-mode shortcut
 
 Spec: docs/superpowers/specs/2026-07-16-desktop-shortcut-design.md. Adds a
