@@ -132,3 +132,18 @@ describe("archive population path compatibility", () => {
     });
   });
 });
+
+describe("createBackup — month folder missing from population root (repro)", () => {
+  it("does not abort the whole backup when a listed month has no population folder", async () => {
+    const root = makeRoot();
+    // Population root exists but has no subfolder for this month — e.g. the
+    // month only has sample/distribution data, or its population folder was
+    // removed/renamed concurrently with the backup walk (the same class of
+    // race documented in v41.4, but hitting the unguarded loadMonthJson path
+    // instead of the guarded copyAllJsonFiles/copyJsonTree walk).
+    await root.getDirectoryHandle("1-population", { create: true });
+
+    const result = await createBackup(root, [month], "admin", "manual");
+    expect(result.ok).toBe(true);
+  });
+});

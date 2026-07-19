@@ -467,13 +467,24 @@ async function loadMonthJson<T>(
 
     // Compatibility for workspaces created before samples moved to the
     // numbered 2-samples/{month}/1-main root.
-    const legacyMonth = await getMonthDir(directoryHandle, monthFolderName);
-    const legacyPath = path[0] === "sample" ? path : [fileName];
-    const legacy = await readJsonAt<T>(legacyMonth, legacyPath);
-    return legacy.state === "ok" ? legacy.value : null;
+    try {
+      const legacyMonth = await getMonthDir(directoryHandle, monthFolderName);
+      const legacyPath = path[0] === "sample" ? path : [fileName];
+      const legacy = await readJsonAt<T>(legacyMonth, legacyPath);
+      return legacy.state === "ok" ? legacy.value : null;
+    } catch (error) {
+      if (isMissingWorkspaceLocation(error)) return null;
+      throw error;
+    }
   }
 
-  const monthDir = await getMonthDir(directoryHandle, monthFolderName);
+  let monthDir: DirectoryHandleLike;
+  try {
+    monthDir = await getMonthDir(directoryHandle, monthFolderName);
+  } catch (error) {
+    if (isMissingWorkspaceLocation(error)) return null;
+    throw error;
+  }
   const current = await readJsonAt<T>(monthDir, path);
   if (current.state === "ok") return current.value;
   if (current.state === "corrupt") return null;

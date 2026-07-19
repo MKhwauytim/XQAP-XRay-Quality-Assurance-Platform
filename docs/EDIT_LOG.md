@@ -4,6 +4,79 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v56.3 — 2026-07-19 — Fix auto-backup aborting when a listed month has no population folder
+
+**Symptom:** `تعذر إنشاء النسخة الاحتياطية التلقائية: A requested file or directory could not
+be found at the time an operation was processed.` — the same user-visible message the v41.4 fix
+addressed, but recurring.
+
+**Root cause:** v41.4 hardened the `copyAllJsonFiles`/`copyJsonTree` tree walk against a mid-scan
+`NotFoundError` race, but `createBackup`'s other traversal — `exportMonthXlsx` →
+`loadMonthJson` — was never hardened. `loadMonthJson` calls `getMonthDir` (→
+`getPopulationMonthDir(..., false)`) directly, with no try/catch, in two places: the
+sample-main-file legacy-fallback branch and the plain non-sample-main branch. `listMonthFolders`
+(the source of the `months` array passed into `createDailyAdminBackupIfDue`/`createBackup`)
+enumerates month folders that exist at listing time; if a listed month has no corresponding
+folder under the population root by the time `exportMonthXlsx` reaches it — because it only has
+sample/distribution data, or because the folder was renamed/removed by a concurrent write while
+the backup was walking the rest of the tree — `getMonthDir`'s inner
+`populationRoot.getDirectoryHandle(monthFolderName, { create: false })` throws `NotFoundError`
+uncaught. That propagates through `exportMonthXlsx` to `createBackup`'s outer catch, which
+aborts and reports the *entire* backup as failed instead of treating that one month's population
+data as absent (as the already-guarded sample-main branch does via `isMissingWorkspaceLocation`).
+
+**Fix:** wrap both unguarded `getMonthDir` call sites in `loadMonthJson` with the same
+`isMissingWorkspaceLocation` tolerance already used for the sample-main lookup, returning `null`
+for that dataset instead of throwing.
+
+**File:** `src/data/backup/backupStorage.ts`
+
+**Before:**
+```ts
+    // Compatibility for workspaces created before samples moved to the
+    // numbered 2-samples/{month}/1-main root.
+    const legacyMonth = await getMonthDir(directoryHandle, monthFolderName);
+    const legacyPath = path[0] === "sample" ? path : [fileName];
+    const legacy = await readJsonAt<T>(legacyMonth, legacyPath);
+    return legacy.state === "ok" ? legacy.value : null;
+  }
+
+  const monthDir = await getMonthDir(directoryHandle, monthFolderName);
+  const current = await readJsonAt<T>(monthDir, path);
+```
+
+**After:**
+```ts
+    // Compatibility for workspaces created before samples moved to the
+    // numbered 2-samples/{month}/1-main root.
+    try {
+      const legacyMonth = await getMonthDir(directoryHandle, monthFolderName);
+      const legacyPath = path[0] === "sample" ? path : [fileName];
+      const legacy = await readJsonAt<T>(legacyMonth, legacyPath);
+      return legacy.state === "ok" ? legacy.value : null;
+    } catch (error) {
+      if (isMissingWorkspaceLocation(error)) return null;
+      throw error;
+    }
+  }
+
+  let monthDir: DirectoryHandleLike;
+  try {
+    monthDir = await getMonthDir(directoryHandle, monthFolderName);
+  } catch (error) {
+    if (isMissingWorkspaceLocation(error)) return null;
+    throw error;
+  }
+  const current = await readJsonAt<T>(monthDir, path);
+```
+
+**File:** `src/data/backup/backupStorage.test.ts`
+
+**Before:** no coverage for a listed month whose population folder does not exist.
+
+**After:** added a repro test (`createBackup — month folder missing from population root`)
+asserting `createBackup` still succeeds when one listed month has no population subfolder.
+
 ## v56.2 - 2026-07-17 - Integrity, authorization, Arabic UI, and production hardening
 
 This release supersedes the transient-read behavior described in v56.1. An existing
