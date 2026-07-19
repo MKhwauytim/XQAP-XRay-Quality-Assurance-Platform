@@ -1,6 +1,7 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
+import { logError } from "../storage/errorLogger";
 import { ensureMonthWritable } from "../population/monthLock";
 import type {
   EmployeeAnswerFile,
@@ -324,7 +325,8 @@ export async function loadAllEmployeeFiles(
       if (r.ok) results.push(r.value);
     }
     return results;
-  } catch {
+  } catch (err) {
+    logError("answerStorage:loadAllEmployeeFiles", err instanceof Error ? err : new Error(String(err)));
     return [];
   }
 }

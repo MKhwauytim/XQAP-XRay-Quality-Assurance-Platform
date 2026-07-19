@@ -4,6 +4,144 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v56.4 — 2026-07-19 — Recover salvageable stashed cleanup: dead `submit` param removal, silent-catch logging, lint rule
+
+Recovered from a stale `git stash` (branch `feat/login-screen-rework`, never committed) during a
+branch/stash audit. Cherry-picked only the pieces still valid against current `main`; dropped the
+rest because current code already supersedes them (see below).
+
+**Applied:**
+
+**File:** `eslint.config.js`
+
+**Before:**
+```js
+    languageOptions: {
+      globals: globals.browser,
+    },
+  },
+])
+```
+
+**After:**
+```js
+    languageOptions: {
+      globals: globals.browser,
+    },
+    rules: {
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+    },
+  },
+])
+```
+
+**File:** `src/components/InspectionPanel/index.tsx`
+
+`onSave`'s `submit` boolean was always called with the literal `true` (`submitStudy`'s only
+caller) and never read downstream — dead parameter.
+
+**Before:**
+```ts
+  onSave: (ans: FieldAnswer[], submit: boolean) => Promise<void>;
+...
+    void onSave(collect(), true);
+```
+
+**After:**
+```ts
+  onSave: (ans: FieldAnswer[]) => Promise<void>;
+...
+    void onSave(collect());
+```
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx`
+
+**Before:**
+```ts
+  async function handleSave(
+    xrayImageId: string, ans: FieldAnswer[], _submit: boolean, forUser: string
+  ): Promise<void> {
+...
+                  onSave={(ans, submit) =>
+                    handleSave(selEntry.xrayImageId, ans, submit, selEntry.assignedTo)
+                  }
+```
+
+**After:**
+```ts
+  async function handleSave(
+    xrayImageId: string, ans: FieldAnswer[], forUser: string
+  ): Promise<void> {
+...
+                  onSave={(ans) =>
+                    handleSave(selEntry.xrayImageId, ans, selEntry.assignedTo)
+                  }
+```
+
+**File:** `src/components/Sidebar/Tabs/Population/index.tsx`
+
+The new lint rule's `argsIgnorePattern: '^_'` makes this disable comment redundant.
+
+**Before:**
+```ts
+        processedRows: processingResult.preparedRows.map(
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          ({ rawRow: _rawRow, ...rest }) => rest
+        ) as Array<Record<string, unknown>>,
+```
+
+**After:**
+```ts
+        processedRows: processingResult.preparedRows.map(
+          ({ rawRow: _rawRow, ...rest }) => rest
+        ) as Array<Record<string, unknown>>,
+```
+
+**File:** `src/data/answers/answerStorage.ts`
+
+`loadAllEmployeeFiles` silently swallowed errors with no observability, inconsistent with this
+codebase's `logError`/`errorLogger.ts` silent-catch convention used elsewhere.
+
+**Before:**
+```ts
+import { casLoop } from "../storage/casLoop";
+import { ensureMonthWritable } from "../population/monthLock";
+...
+    return results;
+  } catch {
+    return [];
+  }
+```
+
+**After:**
+```ts
+import { casLoop } from "../storage/casLoop";
+import { logError } from "../storage/errorLogger";
+import { ensureMonthWritable } from "../population/monthLock";
+...
+    return results;
+  } catch (err) {
+    logError("answerStorage:loadAllEmployeeFiles", err instanceof Error ? err : new Error(String(err)));
+    return [];
+  }
+```
+
+**Deliberately dropped (not applied):**
+
+- `src/data/storage/casLoop.ts` — stash changed `casLoop` to return immediately on *any* caught
+  error (no retry). Superseded: current `main` already has a more targeted fix
+  (`isPermissionLostError` aborts immediately for unrecoverable permission loss, while other
+  errors — e.g. transient `NotReadableError` — still retry with backoff). Applying the stash's
+  version would have been a regression, killing that retry behavior.
+- `src/data/distribution/distributionLog.ts` — stash changed employee daily-quota counting to
+  derive `sampleCount` from final entry state (excluding `replaced`) instead of raw `assigned`
+  events, to stop a reassigned-away item inflating the original assignee's quota. The surrounding
+  code has since been refactored into `distributionDerivation.ts`
+  (`deriveEmployeeQuotas`/`collectAssignmentFacts`), so the old patch doesn't map onto current
+  code, and reapplying the idea blind — with no test coverage for this scenario — risked a wrong
+  behavior change to quota math. Flagged separately for someone to investigate with a test first
+  rather than applied here.
+
 ## v56.3 — 2026-07-19 — Fix auto-backup aborting when a listed month has no population folder
 
 **Symptom:** `تعذر إنشاء النسخة الاحتياطية التلقائية: A requested file or directory could not

@@ -19,7 +19,7 @@ type Props = {
   savedAnswer: ItemAnswer | null;
   readonly: boolean;
   onClose: () => void;
-  onSave: (ans: FieldAnswer[], submit: boolean) => Promise<void>;
+  onSave: (ans: FieldAnswer[]) => Promise<void>;
   /** Omit when the current user cannot trigger replacements. */
   onReplace?: (entry: DistributionEntry) => void;
   /** Omit when the current user cannot transfer this sample to another user. */
@@ -152,7 +152,7 @@ export default function InspectionPanel({
       return;
     }
     setValidationMsg(null);
-    void onSave(collect(), true);
+    void onSave(collect());
   }
 
   function goToNextPhase(): void {

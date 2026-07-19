@@ -852,7 +852,6 @@ export default function PopulationTab() {
           : [],
         // Strip rawRow before persisting — raw data is already in risk.raw.json
         processedRows: processingResult.preparedRows.map(
-          // eslint-disable-next-line @typescript-eslint/no-unused-vars
           ({ rawRow: _rawRow, ...rest }) => rest
         ) as Array<Record<string, unknown>>,
         certScanRows: processingResult.summary.certScanRows,

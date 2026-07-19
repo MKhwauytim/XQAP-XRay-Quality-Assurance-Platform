@@ -411,7 +411,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   }
 
   async function handleSave(
-    xrayImageId: string, ans: FieldAnswer[], _submit: boolean, forUser: string
+    xrayImageId: string, ans: FieldAnswer[], forUser: string
   ): Promise<void> {
     // No on-disk month selected → the upsert target folder would be "" (writes
     // to the workspace root). Bail before touching disk.
@@ -879,8 +879,8 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                   savedAnswer={selAnswer}
                   readonly={canSeeAll && selEntry.assignedTo !== username}
                   onClose={() => setSelEntryId(null)}
-                  onSave={(ans, submit) =>
-                    handleSave(selEntry.xrayImageId, ans, submit, selEntry.assignedTo)
+                  onSave={(ans) =>
+                    handleSave(selEntry.xrayImageId, ans, selEntry.assignedTo)
                   }
                   onReplace={
                     (canRequestReplacement || canSubmitReferrals) && selEntry.assignedTo === username && selEntry.status === "pending"
