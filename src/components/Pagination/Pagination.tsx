@@ -1,3 +1,4 @@
+import { useState } from "react";
 import "./Pagination.css";
 import { DATA_PAGE_SIZE, clampPage } from "./paginationUtils";
 
@@ -16,13 +17,30 @@ export default function Pagination({
   pageSize = DATA_PAGE_SIZE,
   itemLabel = "صف",
 }: PaginationProps) {
-  if (totalItems <= pageSize) return null;
-
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
   const safePage = clampPage(page, totalItems, pageSize);
   const firstItem = (safePage - 1) * pageSize + 1;
   const lastItem = Math.min(safePage * pageSize, totalItems);
-  const goToPage = (nextPage: number) => onPageChange(clampPage(nextPage, totalItems, pageSize));
+  const [pageInput, setPageInput] = useState({ page: safePage, value: String(safePage) });
+  const pageInputValue = pageInput.page === safePage ? pageInput.value : String(safePage);
+
+  if (totalItems <= pageSize) return null;
+
+  const goToPage = (nextPage: number) => {
+    const targetPage = clampPage(nextPage, totalItems, pageSize);
+    setPageInput({ page: targetPage, value: String(targetPage) });
+    onPageChange(targetPage);
+  };
+
+  const commitPageInput = () => {
+    const value = pageInputValue.trim();
+    if (!value) {
+      setPageInput({ page: safePage, value: String(safePage) });
+      return;
+    }
+    const nextPage = Number(value);
+    if (Number.isFinite(nextPage)) goToPage(nextPage);
+  };
 
   return (
     <nav className="data-pagination" aria-label="التنقل بين صفحات البيانات">
@@ -38,11 +56,18 @@ export default function Pagination({
             type="number"
             min={1}
             max={totalPages}
-            value={safePage}
             aria-label="رقم الصفحة"
-            onChange={(event) => {
-              const nextPage = Number(event.target.value);
-              if (Number.isFinite(nextPage)) goToPage(nextPage);
+            value={pageInputValue}
+            onChange={(event) => setPageInput({ page: safePage, value: event.target.value })}
+            onBlur={commitPageInput}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                commitPageInput();
+              }
+              if (event.key === "Escape") {
+                setPageInput({ page: safePage, value: String(safePage) });
+              }
             }}
           />
           <span>من {totalPages.toLocaleString("ar-SA-u-nu-latn")}</span>

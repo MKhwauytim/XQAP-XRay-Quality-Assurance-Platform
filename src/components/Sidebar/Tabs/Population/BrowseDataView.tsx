@@ -27,6 +27,7 @@ import { EmptyState, LoadingState } from "../../../../components/StateViews/Stat
 import Pagination from "../../../../components/Pagination/Pagination";
 import { DATA_PAGE_SIZE, clampPage, pageSlice } from "../../../../components/Pagination/paginationUtils";
 import { formatStageLabel } from "./components/helpers";
+import { buildBrowseFilterOptionPreview } from "./browseFilterOptions";
 
 // ── Browse sub-tab ────────────────────────────────────────────────────────────
 const BROWSE_COLUMNS: { key: string; label: string; default: boolean }[] = [
@@ -521,19 +522,13 @@ export default function BrowseDataView({
   const activeFilterCount = Object.values(columnFilters).filter((values) => values.length > 0).length;
   const openFilterValues = useMemo(() => {
     if (!openFilterColumn) return { options: [] as string[], truncated: false };
-    const values = new Set(columnFilters[openFilterColumn] ?? []);
-    let truncated = false;
-    for (const row of filteredRows) {
-      values.add(getBrowseDisplayValue(row, openFilterColumn, config.stageMappings));
-      if (values.size > DATA_PAGE_SIZE) {
-        truncated = true;
-        break;
-      }
-    }
-    return {
-      options: Array.from(values).sort(compareBrowseFilterOptions).slice(0, DATA_PAGE_SIZE),
-      truncated,
-    };
+    return buildBrowseFilterOptionPreview(
+      filteredRows,
+      columnFilters[openFilterColumn] ?? [],
+      (row) => getBrowseDisplayValue(row, openFilterColumn, config.stageMappings),
+      compareBrowseFilterOptions,
+      DATA_PAGE_SIZE,
+    );
   }, [openFilterColumn, columnFilters, filteredRows, config.stageMappings]);
   function saveCurrentPreset(nextOrder: string[], nextVisible: Set<string>): void {
     if (!directoryHandle) {
