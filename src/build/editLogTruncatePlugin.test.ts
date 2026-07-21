@@ -1,8 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { countVersionHeadings, truncateEditLog } from "./editLogTruncatePlugin";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  countVersionHeadings,
+  readDailyEditLogs,
+  truncateEditLog,
+} from "./editLogTruncatePlugin";
 
 function makeLog(count: number): string {
-  const header = "# EDIT_LOG.md\n\nVersion history.\n\n---\n\n";
+  const header = "# Edit log — 2026-07-01\n\nVersion history.\n\n---\n\n";
   const entries = [];
   for (let i = count; i >= 1; i--) {
     entries.push(
@@ -14,6 +21,30 @@ function makeLog(count: number): string {
 }
 
 const HEADING_RE = /^## v[\d.]+ /gm;
+
+describe("readDailyEditLogs", () => {
+  it("combines dated files newest-first without leaking their document headers", () => {
+    const directory = mkdtempSync(join(tmpdir(), "xqap-edit-logs-"));
+    try {
+      writeFileSync(
+        join(directory, "2026-07-20.md"),
+        "# Edit log — 2026-07-20\n\n---\n\n## v1.0 — 2026-07-20 — older\n\nOld body.\n",
+      );
+      writeFileSync(
+        join(directory, "2026-07-21.md"),
+        "# Edit log — 2026-07-21\n\n---\n\n## v2.0 — 2026-07-21 — newer\n\nNew body.\n",
+      );
+      writeFileSync(join(directory, "README.md"), "ignored");
+
+      const result = readDailyEditLogs(directory);
+      expect(result.indexOf("## v2.0")).toBeLessThan(result.indexOf("## v1.0"));
+      expect(result).not.toContain("# Edit log");
+      expect(countVersionHeadings(result)).toBe(2);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("countVersionHeadings", () => {
   it("counts every version heading regardless of truncation", () => {
@@ -69,7 +100,7 @@ describe("truncateEditLog", () => {
     const result = truncateEditLog(log, 20);
     expect(result).toMatch(/## v0\.0 — \d{4}-\d{2}-\d{2} — /);
     expect(result).toContain("5"); // omitted count (25 - 20)
-    expect(result).toContain("docs/EDIT_LOG.md");
+    expect(result).toContain("docs/edit logs/");
   });
 
   it("the v0.0 notice sorts after every real version under numeric-descending order", () => {

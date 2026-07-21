@@ -6,8 +6,8 @@ import { PageHeader } from "../../../../components/PageHeader/PageHeader";
 import { tabAllowedRoles } from "../../../../auth/tabCatalog";
 import { formatNumber } from "../../../../utils/formatting";
 import type { SidebarTabModule } from "../tabTypes";
-// Bundled at build time from the repo's authoritative edit log. Newest-first.
-import editLogRaw from "../../../../../docs/EDIT_LOG.md?raw";
+// Aggregated from the repo's date-organized edit logs. Newest-first.
+import editLogRaw from "virtual:edit-log";
 import "./ChangeLog.css";
 
 export const tabConfig: SidebarTabModule["tabConfig"] = {

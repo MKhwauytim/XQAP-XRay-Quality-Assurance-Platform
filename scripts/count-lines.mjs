@@ -1,5 +1,5 @@
 // Total line count across every git-tracked text file in the repo — the "how big is the whole
-// app right now" number referenced from EDIT_LOG.md entries (see CLAUDE.md's edit log
+// app right now" number referenced from daily edit-log entries (see CLAUDE.md's edit log
 // requirement). Binary files (fonts, the vendored xlsx tarball) are skipped: "lines" is
 // meaningless for them and counting would inflate the total with noise, not real content.
 //

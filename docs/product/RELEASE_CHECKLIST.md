@@ -17,11 +17,11 @@ Run through this before cutting a release (tagging a commit as the version users
       and are expected to appear separately; don't confuse them with the app release version.)
 - [ ] Confirm the running app shows the bumped version: Settings tab → "حول النظام" card.
 - [ ] Run `npm run check:release`; it must confirm that `package.json` and the latest
-      `docs/EDIT_LOG.md` heading agree.
+      latest `docs/edit logs/YYYY-MM-DD.md` heading agree.
 
 ## 2. CHANGELOG cut
 
-- [ ] Skim `docs/EDIT_LOG.md` entries since the last release tag.
+- [ ] Skim the `docs/edit logs/` entries since the last release tag.
 - [ ] Summarize the major-version-worthy items (features, breaking changes, notable fixes) into
       a short human-readable release note if one is being published externally. The in-app
       ChangeLog tab already surfaces the full entry detail — this step is for anything shipped
@@ -33,7 +33,7 @@ Run through this before cutting a release (tagging a commit as the version users
       Vite build output.
 - [ ] Compare against the last recorded size in `CLAUDE.md`'s "Build & dependency gotchas"
       section. If it moved meaningfully, update that note (`~X MB, ~Y kB gzip as of <date>`).
-- [ ] If the jump is unexpectedly large, check whether `docs/EDIT_LOG.md` grew a lot since the
+- [ ] If the jump is unexpectedly large, check whether recent files in `docs/edit logs/` grew a lot since the
       last release — the ChangeLog tab's build-time truncation (`src/build/editLogTruncatePlugin.ts`,
       currently keeping the most recent 20 versions) bounds this, but a burst of very large
       entries can still move the needle; consider whether the kept-version count still makes

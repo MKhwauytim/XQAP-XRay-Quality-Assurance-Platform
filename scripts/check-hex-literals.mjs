@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // B4 regression guard — x-ray-quality-app-v1
 //
-// The B4 hex-literal token sweep (see docs/EDIT_LOG.md v42.18-v42.22 and
+// The B4 hex-literal token sweep (see docs/edit logs/2026-07-08.md, v42.18-v42.22, and
 // docs/audit/hardening-2026-07-08/03-approved-plan.md, "Batch 1 — Visual
 // System") mapped raw #hex color literals in the four highest-offender CSS
 // files to semantic tokens in src/index.css. Every literal remaining after

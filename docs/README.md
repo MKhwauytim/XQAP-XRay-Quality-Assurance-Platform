@@ -1,11 +1,12 @@
 # Documentation Index — x-ray-quality-app
 
-Organized by purpose. `EDIT_LOG.md` stays at this level — the build imports it (`?raw`, truncated by `src/build/editLogTruncatePlugin.ts`).
+Organized by purpose. Complete version history lives in `edit logs/`, with exactly one `YYYY-MM-DD.md` file per logged day. The app aggregates these files through `src/build/editLogTruncatePlugin.ts`.
 
 ## Sections
 
 | Folder | What lives there |
 |---|---|
+| [`edit logs/`](edit%20logs/) | Complete code change history, organized as one Markdown file per date and linked to the in-app Change Log |
 | [`architecture/`](architecture/) | How the system works: [`data-system-report.md`](architecture/data-system-report.md) (**authoritative disk-layout & file reference**), [`SECURITY_MODEL.md`](architecture/SECURITY_MODEL.md) (advisory-only trust model, risk acceptance), [`DATA_PIPELINE_REWORK_2026-07-14.md`](architecture/DATA_PIPELINE_REWORK_2026-07-14.md) (integrity-layer design record) |
 | [`product/`](product/) | What the product is: [`PRODUCT_PAGES.md`](product/PRODUCT_PAGES.md) (every page/tab described), [`GAP_ANALYSIS.md`](product/GAP_ANALYSIS.md) (incomplete features rated by impact), [`PRODUCT_SPECIFICATION.md`](product/PRODUCT_SPECIFICATION.md), [`RELEASE_CHECKLIST.md`](product/RELEASE_CHECKLIST.md) |
 | [`audit/`](audit/) | Audit reports & fix-wave records (2026-06 → 2026-07), newest: [`FULL_REVISION_2026-07-17.md`](audit/FULL_REVISION_2026-07-17.md) |
@@ -29,5 +30,5 @@ Organized by purpose. `EDIT_LOG.md` stays at this level — the build imports it
 
 ## Conventions
 
-- Every code edit is logged in `EDIT_LOG.md` (before/after, semver-lite) **before** it is applied — see CLAUDE.md.
+- Every code edit is logged in today's `edit logs/YYYY-MM-DD.md` file (before/after, semver-lite) **before** it is applied — see CLAUDE.md.
 - Audit and plan documents are immutable history: they keep the file paths that were true when written; this index and CLAUDE.md always point at current paths.

@@ -51,7 +51,7 @@ Four sub-sections: **Users** (CRUD, roles, active flag, CertScan license, passwo
 Label customization center: ~11 collapsible groups of UI strings backed by the label store (localStorage + workspace snapshot), per-row and bulk reset; error-log viewer (in-memory ring buffer, admin feature-gated); about/version info.
 
 ### 7. Change Log (`change-log`, admin)
-Versioned edit history parsed from `docs/EDIT_LOG.md` (bundled at build, truncated to recent versions): searchable, collapsible entries, newest first.
+Versioned edit history aggregated from `docs/edit logs/*.md` (one file per date; truncated to recent versions in production builds): searchable, collapsible entries, newest first.
 
 ## Data flow at a glance
 

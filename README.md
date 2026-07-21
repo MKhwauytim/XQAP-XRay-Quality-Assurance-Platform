@@ -204,5 +204,5 @@ An initial **admin** account is bootstrapped with a passcode stored in the clien
 ## Support & Documentation
 
 - **CLAUDE.md** — Comprehensive architecture guide for developers
-- **EDIT_LOG.md** — Complete version history with before/after code snippets
+- **docs/edit logs/** — Complete version history with one dated Markdown file per day and before/after code snippets
 - **docs/superpowers/plans/** — Implementation plans and design decisions
