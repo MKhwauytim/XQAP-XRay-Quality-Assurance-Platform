@@ -21,6 +21,39 @@ import {
 
 const LOG_FILE = "distribution.log.json";
 const CURRENT_FILE = "distribution.current.json";
+const IMMUTABLE_EVENT_WRITE_CONCURRENCY = 4;
+
+export type DistributionWriteProgress =
+  | { phase: "events"; completed: number; total: number }
+  | { phase: "projection" | "verification" | "complete"; completed: number; total: number };
+
+type AppendDistributionEventsOptions = {
+  onProgress?: (progress: DistributionWriteProgress) => void;
+};
+
+async function writeImmutableEventBatch(
+  directory: DirectoryHandleLike,
+  events: DistributionEvent[],
+  onProgress?: AppendDistributionEventsOptions["onProgress"]
+): Promise<void> {
+  let nextIndex = 0;
+  let completed = 0;
+  onProgress?.({ phase: "events", completed, total: events.length });
+
+  async function worker(): Promise<void> {
+    while (nextIndex < events.length) {
+      const event = events[nextIndex];
+      nextIndex += 1;
+      if (!event) return;
+      await writeImmutableDistributionEvent(directory, event);
+      completed += 1;
+      onProgress?.({ phase: "events", completed, total: events.length });
+    }
+  }
+
+  const workerCount = Math.min(IMMUTABLE_EVENT_WRITE_CONCURRENCY, events.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+}
 
 async function getDistributionDir(
   directoryHandle: DirectoryHandleLike,
@@ -192,7 +225,8 @@ export async function appendDistributionEvent(
 export async function appendDistributionEvents(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
-  events: DistributionEvent[]
+  events: DistributionEvent[],
+  options?: AppendDistributionEventsOptions
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   // Month lock gate — before the CAS loop so a closed month rejects loudly.
   await ensureMonthWritable(directoryHandle, monthFolderName);
@@ -209,14 +243,15 @@ export async function appendDistributionEvents(
   // projection is updated. Distinct writers therefore do not share a target.
   const eventDir = await getDistributionDir(directoryHandle, monthFolderName);
   try {
-    for (const event of events) {
-      await writeImmutableDistributionEvent(eventDir, event);
-    }
+    // These files are independent, so a small bounded pool reduces large-batch
+    // save time without creating an unbounded burst against the workspace disk.
+    await writeImmutableEventBatch(eventDir, events, options?.onProgress);
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
 
-  return casLoop<{ ok: true } | { ok: false; error: string }>(
+  options?.onProgress?.({ phase: "projection", completed: events.length, total: events.length });
+  const result = await casLoop<{ ok: true } | { ok: false; error: string }>(
     async (writeToken) => {
       const dir = await getDistributionDir(directoryHandle, monthFolderName);
       const projectedIds = await readProjectedEventIds(dir);
@@ -241,6 +276,7 @@ export async function appendDistributionEvents(
           // Delayed re-read guards against a concurrent machine that read the
           // same base revision and clobbered our commit after this read-back.
           verify: async () => {
+            options?.onProgress?.({ phase: "verification", completed: events.length, total: events.length });
             const recheck = await loadDistributionLog(directoryHandle, monthFolderName);
             return recheck.revision === nextRevision && recheck._writeToken === writeToken;
           },
@@ -250,6 +286,10 @@ export async function appendDistributionEvents(
     },
     { conflictError: "تعارض في الكتابة: لم يتمكن النظام من حفظ الأحداث بعد عدة محاولات." }
   );
+  if (result.ok) {
+    options?.onProgress?.({ phase: "complete", completed: events.length, total: events.length });
+  }
+  return result;
 }
 
 export async function saveDistributionCurrent(
