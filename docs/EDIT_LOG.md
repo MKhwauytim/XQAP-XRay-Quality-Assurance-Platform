@@ -4,7 +4,347 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
-## v56.4 — 2026-07-19 — Recover salvageable stashed cleanup: dead `submit` param removal, silent-catch logging, lint rule
+## v56.9 — 2026-07-20 — Fix: ChangeLog "إجمالي الإصدارات" undercounted after build-time truncation, add whole-repo line-count tooling
+
+Two asks from the owner. First, a real bug: the ChangeLog tab's "إجمالي الإصدارات" (total
+versions) stat read `entries.length` off the *bundled* `EDIT_LOG.md` content, which
+`editLogTruncatePlugin.ts` truncates to the most recent 20 entries (+1 synthetic notice) in
+production builds — so a build with 470+ real versions in `docs/EDIT_LOG.md` displayed "21".
+Fixed by computing the true count from the full, untruncated file at build time and injecting it
+as a Vite `define` constant (`__EDIT_LOG_TOTAL_VERSIONS__`), the same pattern already used for
+`__APP_VERSION__`. The dev server and Vitest get the same define so the constant is never
+`undefined` outside a production build; the component still falls back to `entries.length` if it
+somehow is.
+
+Second, going forward every `EDIT_LOG.md` entry must record whole-repo line-count stats (total
+before/after the edit, files changed, lines added/removed) — added `scripts/count-lines.mjs`
+(`npm run count-lines`) which sums lines across every git-tracked text file (skips the vendored
+`xlsx` tarball and the 4 `.woff` fonts — binary, "lines" is meaningless there) and documented the
+new required `**Lines:**` field in `CLAUDE.md`'s edit log section. This entry is the first to use
+it.
+
+**File:** `src/build/editLogTruncatePlugin.ts`
+
+**Before:**
+```ts
+const HEADING_RE = /^## v[\d.]+ /gm;
+
+/**
+```
+
+**After:**
+```ts
+const HEADING_RE = /^## v[\d.]+ /gm;
+
+/**
+ * Count real version headings in an EDIT_LOG.md-shaped string (before any truncation). Used to
+ * inject the true total version count as a build-time constant — the ChangeLog tab's "إجمالي
+ * الإصدارات" stat must reflect this, not `entries.length` of the (possibly truncated) bundled
+ * log, or a production build under-reports its own history.
+ */
+export function countVersionHeadings(content: string): number {
+  return [...content.matchAll(HEADING_RE)].length;
+}
+
+/**
+```
+
+**File:** `vite.config.ts`
+
+**Before:**
+```ts
+import { editLogTruncatePlugin } from "./src/build/editLogTruncatePlugin";
+...
+export default defineConfig({
+  plugins: [react(), viteSingleFile(), deckStyleChoicesPlugin(), editLogTruncatePlugin()],
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
+```
+
+**After:**
+```ts
+import { editLogTruncatePlugin, countVersionHeadings } from "./src/build/editLogTruncatePlugin";
+...
+const editLogTotalVersions = countVersionHeadings(
+  readFileSync(fileURLToPath(new URL("./docs/EDIT_LOG.md", import.meta.url)), "utf8")
+);
+
+export default defineConfig({
+  plugins: [react(), viteSingleFile(), deckStyleChoicesPlugin(), editLogTruncatePlugin()],
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+    __EDIT_LOG_TOTAL_VERSIONS__: String(editLogTotalVersions),
+  },
+```
+
+**File:** `vitest.config.ts` — mirrored the same `countVersionHeadings` define as `vite.config.ts`, matching the existing `__APP_VERSION__` mirroring.
+
+**File:** `src/vite-env.d.ts`
+
+**Before:**
+```ts
+declare const __APP_VERSION__: string;
+```
+
+**After:**
+```ts
+declare const __APP_VERSION__: string;
+
+declare const __EDIT_LOG_TOTAL_VERSIONS__: number;
+```
+
+**File:** `src/components/Sidebar/Tabs/ChangeLog/index.tsx`
+
+**Before:**
+```tsx
+          <span className="cl-summary-value">{formatNumber(entries.length)}</span>
+```
+
+**After:**
+```tsx
+          <span className="cl-summary-value">
+            {formatNumber(
+              typeof __EDIT_LOG_TOTAL_VERSIONS__ !== "undefined"
+                ? __EDIT_LOG_TOTAL_VERSIONS__
+                : entries.length
+            )}
+          </span>
+```
+
+**File:** `src/build/editLogTruncatePlugin.test.ts` — added a `describe("countVersionHeadings", …)` block covering the plain-count case and the case that matters (count stays the true total even when run against an already-truncated string).
+
+**File:** `scripts/count-lines.mjs` (new) — `git ls-files`, skip binary extensions + a null-byte sniff, sum `\n`-split line counts, print total + per-extension breakdown (`--quiet` for just the number).
+
+**File:** `package.json` — added `"count-lines": "node scripts/count-lines.mjs"` to `scripts`.
+
+**File:** `CLAUDE.md` — added the `**Lines:**` field (#7) to the edit log requirement, with the `npm run count-lines -- --quiet` + `git diff --stat` recipe.
+
+**Lines:** 167796 → 167855 (net +59) · 8 files, +69 / -10 — plus the new `scripts/count-lines.mjs` itself (65 lines), not yet reflected in either figure since it isn't `git add`-ed and the counter only sums tracked files; it'll show up in the next entry's "before" once staged.
+
+---
+
+## v56.8 — 2026-07-20 — Chore: categorize every EDIT_LOG.md entry title (Fix / Add / Change / Remove / Refactor / Security / Docs / Chore)
+
+Owner asked for the ChangeLog tab to read like a real categorized changelog instead of freeform
+titles — the ChangeLog UI (`src/components/Sidebar/Tabs/ChangeLog/index.tsx`) already rendered
+whatever text followed the version/date in each `## vX — date — Title` heading, so this was a
+title-text-only rewrite: every one of the 470 existing headings (v1.0 → v56.7) now starts with
+one of eight categories — `Fix:`, `Add:`, `Change:`, `Remove:`, `Refactor:`, `Security:`, `Docs:`,
+`Chore:` — optionally followed by a `(scope):` carried over from entries that already used a
+`feat(scope):`/`fix(scope):` convention. Classification was mechanical (a disposable Node script,
+not committed) with keyword-based rules plus ~20 hand-corrected overrides for cases the rules
+mis-read (e.g. "drop" inside "drag-and-drop" false-matching "Remove", or generic words like
+"permission"/"audit"/"reopen" over-matching "Security"). Only heading lines were touched — every
+body paragraph, code block, and `**File:**`/`**Before:**`/`**After:**` block is byte-identical to
+before (verified via diff on the file with heading lines stripped). `CLAUDE.md`'s edit-log
+requirement now documents the category convention for future entries. Two pre-existing issues
+fixed in passing: the `v56.2` heading used plain hyphens instead of em-dashes, so the ChangeLog
+tab's parser (which requires `—`) had never actually rendered it as a separate entry; and 50
+entries whose original title already led with the bare category word (e.g. "Fix broken
+print/PDF export…") ended up with a duplicated word ("Fix: Fix broken…") on the first pass, fixed
+in a second pass.
+
+A full copy of the file as it stood immediately before this rewrite (470 entries, original
+titles) is kept at `docs/archive/EDIT_LOG.pre-categorization-2026-07-20.md` for reference/rollback.
+
+**File:** `docs/EDIT_LOG.md`
+
+**Before (representative sample — full before-state is the archive copy above; note: these
+sample lines intentionally do NOT start with `## ` like a real heading would, so the ChangeLog
+tab's line-based parser — which has no markdown-code-fence awareness — doesn't mistake this
+illustrative list for real duplicate entries):**
+```md
+- v56.1 — 2026-07-17 — Fix: automatic backup aborting on transient NotReadableError
+- v53.5 — 2026-07-14 — Add visual libraries + type shims (dependencies)
+- v46.1 — 2026-07-14 — Lint: remove useless initializers in the distribution fold
+- v37.7 — 2026-07-01 — refactor(auth): move audit log to 5-system/audit/activity.log.json
+```
+
+**After:**
+```md
+- v56.1 — 2026-07-17 — Fix: automatic backup aborting on transient NotReadableError
+- v53.5 — 2026-07-14 — Chore: visual libraries + type shims (dependencies)
+- v46.1 — 2026-07-14 — Remove: Lint: useless initializers in the distribution fold
+- v37.7 — 2026-07-01 — Refactor (auth): Move audit log to 5-system/audit/activity.log.json
+```
+
+**File:** `CLAUDE.md`
+
+**Before:**
+```md
+2. **Date** — ISO date (YYYY-MM-DD)
+3. **What changed** — brief description
+...
+## v{N} — YYYY-MM-DD — {short description}
+```
+
+**After:**
+```md
+2. **Date** — ISO date (YYYY-MM-DD)
+3. **Category** — the title must start with one of: `Fix:`, `Add:`, `Change:`, `Remove:`,
+   `Refactor:`, `Security:`, `Docs:`, `Chore:` (a `(scope):` may follow, e.g. `Fix (auth): …`).
+...
+## v{N} — YYYY-MM-DD — {Category}: {short description}
+```
+
+---
+
+## v56.7 — 2026-07-20 — Fix: broken print/PDF export: conflicting global `@page` rule
+
+Owner reported the executive deck's printed PDF was "totally messed up" — wrong paper size,
+missing content, and large white gaps above/below every slide, confirmed via the owner's own
+Chrome print-preview screenshots (Microsoft Print to PDF). Root cause: `EXEC_CSS` (the shared
+base theme in `theme.ts`, imported by every report edition — Document, Workbook, and both deck
+editions) declares `@page{size:A4 portrait;margin:0;}` unconditionally, since `@page` has no
+selector to scope it to Document-only consumers. `deckTheme.ts` (imported by BOTH deck editions
+via `DECK_CSS = EXEC_CSS + deck rules`) declares its own `@page{size:297mm 167mm;margin:0;}`
+later in the same assembled stylesheet, but two separate `@page{}` block occurrences don't
+reliably merge/override across browsers and OS print drivers the way normal selector rules do —
+the deck's `.slide` element still measured itself at 297×167mm (landscape) while the actual paper
+canvas stayed A4 portrait (210×297mm), so the wider slide got shrunk to fit the narrower paper,
+producing exactly the reported symptoms.
+
+Fix: moved the Document-viewer-only print block (the `@page` rule plus its `.sidebar`/`.viewer`/
+`.content`/`.page`/`.right-rail`/`.page-inner` companion rules — all Document-viewer class names,
+never used by the deck) out of the shared `EXEC_CSS` into a new `EXEC_DOCUMENT_PRINT_CSS` export,
+included only by the two Document-viewer builders (`viewer.ts`, `reportChrome.ts`) that actually
+need it. `EXEC_CSS` itself keeps only genuinely shared rules (fonts, `:root` color tokens, Document
+body layout used elsewhere) with no `@page` declaration, so `DECK_CSS`'s own `@page{size:297mm
+167mm}` is now the only `@page` rule in the deck's assembled stylesheet — no more ambiguity.
+
+**File:** `src/data/reporting/executive/theme.ts`
+
+**Before:**
+```ts
+/* ── Print ────────────────────────────────────────────────────────────── */
+@media print{
+  @page{size:A4 portrait;margin:0;}
+  body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  .sidebar{display:none!important;}
+  .viewer{display:block;}
+  .content{padding:0;background:transparent;}
+  .page{page-break-after:always;break-after:page;margin:0;box-shadow:none;border:0;width:210mm;aspect-ratio:auto;min-height:297mm;}
+  .page:last-child{page-break-after:auto;break-after:auto;}
+  .right-rail{display:none;}
+  .page-inner{margin-right:0;width:100%;padding:20mm 20mm 20mm 20mm;}
+}
+
+/* ── Document renderer (Phase 3) — fixed A4 budget, no runtime scaling ─────── */
+```
+(this block was INSIDE `EXEC_CSS`'s template literal, before its closing backtick)
+
+**After:**
+```ts
+/* ── Document renderer (Phase 3) — fixed A4 budget, no runtime scaling ─────── */
+```
+(the print block is removed from `EXEC_CSS` entirely; `EXEC_CSS`'s closing backtick now sits right
+after the file's last `.doc-legend-item span{...}` rule)
+
+New export added after `EXEC_CSS`'s closing backtick:
+```ts
+/** Document-viewer-only print rules (A4 portrait, `.sidebar`/`.viewer`/`.content`/`.page`/
+ *  `.right-rail`/`.page-inner` — none of these classes exist in the deck editions). Split out of
+ *  EXEC_CSS 2026-07-20: EXEC_CSS is shared by the deck too, and an unconditional `@page` here was
+ *  fighting deckTheme.ts's own `@page{size:297mm 167mm}`, breaking the deck's printed PDF (wrong
+ *  paper size, missing content, white gaps around every slide). Included only by the Document
+ *  viewer builders (viewer.ts, reportChrome.ts) that actually use these classes. */
+export const EXEC_DOCUMENT_PRINT_CSS = `
+@media print{
+  @page{size:A4 portrait;margin:0;}
+  body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  .sidebar{display:none!important;}
+  .viewer{display:block;}
+  .content{padding:0;background:transparent;}
+  .page{page-break-after:always;break-after:page;margin:0;box-shadow:none;border:0;width:210mm;aspect-ratio:auto;min-height:297mm;}
+  .page:last-child{page-break-after:auto;break-after:auto;}
+  .right-rail{display:none;}
+  .page-inner{margin-right:0;width:100%;padding:20mm 20mm 20mm 20mm;}
+}
+`;
+```
+
+**File:** `src/data/reporting/executive/viewer.ts`
+
+**Before:**
+```ts
+import { EXEC_CSS } from "./theme";
+...
+<style>${ARABIC_FONT_FACE_CSS}${EXEC_CSS}${SOURCE_REVISIONS_CSS}</style>
+```
+
+**After:**
+```ts
+import { EXEC_CSS, EXEC_DOCUMENT_PRINT_CSS } from "./theme";
+...
+<style>${ARABIC_FONT_FACE_CSS}${EXEC_CSS}${EXEC_DOCUMENT_PRINT_CSS}${SOURCE_REVISIONS_CSS}</style>
+```
+
+**File:** `src/data/reporting/shared/reportChrome.ts`
+
+**Before:**
+```ts
+import { EXEC_CSS } from "../executive/theme";
+...
+<style>${ARABIC_FONT_FACE_CSS}${EXEC_CSS}${SOURCE_REVISIONS_CSS}</style>
+```
+
+**After:**
+```ts
+import { EXEC_CSS, EXEC_DOCUMENT_PRINT_CSS } from "../executive/theme";
+...
+<style>${ARABIC_FONT_FACE_CSS}${EXEC_CSS}${EXEC_DOCUMENT_PRINT_CSS}${SOURCE_REVISIONS_CSS}</style>
+```
+
+## v56.6 — 2026-07-20 — Remove: desktop-shortcut/app-mode tooling; `dist/` is now index.html only
+
+User decided against adding PWA support (manifest/service worker) after learning service workers
+don't work over the `file://` URLs the desktop shortcut used to launch with, and asked to instead
+drop the app-mode launcher entirely so `npm run build` produces a `dist/` containing nothing but
+the single static `index.html`. The old `.bat` also invoked
+`powershell -ExecutionPolicy Bypass -File ...`, a command-line pattern commonly flagged by
+antivirus/EDR heuristics — removing the feature removes that concern too.
+
+**Removed (via `git rm`):**
+- `public/create-desktop-shortcut.ps1`
+- `public/Create Desktop Shortcut.bat`
+- `public/app-icon.ico`
+
+`public/` is now empty and no longer exists in the tree. `scripts/generate-app-icon.ps1`
+(dev-only, generates `app-icon.ico`) is left in place but is currently unused.
+
+**File:** `CLAUDE.md`
+
+**Before:**
+```md
+- `public/app-icon.ico`, `public/create-desktop-shortcut.ps1`, and `public/Create Desktop Shortcut.bat` are static deployment-tooling assets, not build artifacts — Vite's default `public/` handling copies them into `dist/` unchanged on every build. `app-icon.ico` is generated once by `scripts/generate-app-icon.ps1` (dev-only, not shipped) and only needs regenerating if the brand mark in `index.html`'s inline SVG favicon changes.
+```
+
+**After:**
+```md
+- `dist/` is intentionally just the single self-contained `index.html` — no other files. The `public/` folder is empty on purpose; anything dropped in it gets copied into `dist/` unchanged by Vite's default handling, which would break that guarantee. The desktop-shortcut "launch as app window" tooling (`create-desktop-shortcut.ps1` / `.bat` / `app-icon.ico`) that used to live there was removed 2026-07-20 — the app is distributed as a plain static file now, opened directly or served statically. `scripts/generate-app-icon.ps1` (dev-only, not shipped) still exists but is currently unused now that `app-icon.ico` is gone.
+```
+
+## v56.5 — 2026-07-20 — Fix: build: `SampleDetailPanel.onSave` still had the dead `submit` param
+
+v56.4 dropped the unused `submit` boolean from `InspectionPanel`'s `onSave` and its `XrayReferrals.tsx`
+call site, but `SampleDetailPanel` in `subComponents.tsx` (extracted from `XrayReferrals.tsx` in
+`f07a0c51`, a separate commit) still declared the old 2-arg signature and passed it straight through
+to `InspectionPanel`, breaking `npm run build` with TS2322 ("too few arguments").
+
+**File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals/subComponents.tsx`
+
+**Before:**
+```ts
+  onSave: (ans: FieldAnswer[], submit: boolean) => Promise<void>;
+```
+
+**After:**
+```ts
+  onSave: (ans: FieldAnswer[]) => Promise<void>;
+```
+
+## v56.4 — 2026-07-19 — Chore: Recover salvageable stashed cleanup: dead `submit` param removal, silent-catch logging, lint rule
 
 Recovered from a stale `git stash` (branch `feat/login-screen-rework`, never committed) during a
 branch/stash audit. Cherry-picked only the pieces still valid against current `main`; dropped the
@@ -142,7 +482,7 @@ import { ensureMonthWritable } from "../population/monthLock";
   behavior change to quota math. Flagged separately for someone to investigate with a test first
   rather than applied here.
 
-## v56.3 — 2026-07-19 — Fix auto-backup aborting when a listed month has no population folder
+## v56.3 — 2026-07-19 — Fix: auto-backup aborting when a listed month has no population folder
 
 **Symptom:** `تعذر إنشاء النسخة الاحتياطية التلقائية: A requested file or directory could not
 be found at the time an operation was processed.` — the same user-visible message the v41.4 fix
@@ -215,7 +555,7 @@ for that dataset instead of throwing.
 **After:** added a repro test (`createBackup — month folder missing from population root`)
 asserting `createBackup` still succeeds when one listed month has no population subfolder.
 
-## v56.2 - 2026-07-17 - Integrity, authorization, Arabic UI, and production hardening
+## v56.2 — 2026-07-17 — Security: Integrity, authorization, Arabic UI, and production hardening
 
 This release supersedes the transient-read behavior described in v56.1. An existing
 `NotReadableError` is never equivalent to a missing file: reads retry briefly and then fail
@@ -251,7 +591,7 @@ The release gate passes 711 tests in 109 files, strict typecheck, full lint, a c
 budget, zero npm advisories, vendor/release integrity checks, and a single-file build of about
 3.04 MB (about 1.13 MB gzip).
 
-## v56.1 — 2026-07-17 — Fix: automatic backup aborting on transient NotReadableError
+## v56.1 — 2026-07-17 — Fix: Automatic backup aborting on transient NotReadableError
 
 Bug: "تعذر إنشاء النسخة الاحتياطية التلقائية: The requested file could not be read,
 typically due to permission problems that have occurred after a reference to a file was
@@ -313,7 +653,7 @@ function isNotFoundError(error: unknown): boolean {
 `NotReadableError` (with the exact reported message) for an existing file, and asserts
 `safeReadJson` returns `{ ok: false }` instead of throwing.
 
-## v56 — 2026-07-17 — Batch 4 safe items: date-parsing rescue, XrayReferrals extraction, audit-log viewer
+## v56 — 2026-07-17 — Change: Batch 4 safe items: date-parsing rescue, XrayReferrals extraction, audit-log viewer
 
 Three items from an independent Batch-4 triage (`.superpowers/sdd/batch4-triage.md`) found
 safe to execute without a product/policy decision. Spec:
@@ -440,7 +780,7 @@ assertion on `MANAGED_TABS`'s length, so the addition is unconstrained there.
 
 ---
 
-## v55.2 — 2026-07-16 — Quality pass: staleness guards, CAS consistency, test-truth, a11y
+## v55.2 — 2026-07-16 — Chore: Quality pass: staleness guards, CAS consistency, test-truth, a11y
 
 Evidence-backed fixes from an app-wide quality survey (`.superpowers/sdd/app-quality-survey.md`),
 scoped to Batches 1-3 (see spec: docs/superpowers/specs/2026-07-16-quality-pass-batches-1-3-design.md).
@@ -726,7 +1066,7 @@ The Task 5 (M-3) casLoop delayed-verify audit never revisited `saveDesignFile` (
 
 **After:** corrected the `managementReport.ts` entry to state no edit occurred (verified via empty `git diff`), and added entries for `Reports/index.test.tsx`, `populationLoadRace.test.tsx`, `reportDesignStorage.test.ts` (Task 4/M-2's same-id CAS test), `monthLock.test.ts` (Task 5/M-3's delayed-verify tests), and `GlobalMonthSelector.test.tsx` — see entries above.
 
-## v55.1 — 2026-07-16 — Desktop app-mode shortcut
+## v55.1 — 2026-07-16 — Change: Desktop app-mode shortcut
 
 Spec: docs/superpowers/specs/2026-07-16-desktop-shortcut-design.md. Adds a
 Windows app-mode Desktop shortcut (icon + PowerShell creation script + .bat
@@ -811,7 +1151,7 @@ The raw-string URI concatenation left non-ASCII deployment path segments (e.g. a
 
 ---
 
-## v55 — 2026-07-16 — Global month selector in header replaces all per-tab month filters
+## v55 — 2026-07-16 — Change: Global month selector in header replaces all per-tab month filters
 
 Spec: docs/superpowers/specs/2026-07-16-global-month-selector-design.md.
 New GlobalMonthProvider context + toolbar selector; all tabs consume useGlobalMonth().
@@ -2139,7 +2479,7 @@ The "Current tabs" table and tab-workflow prose were reviewed for per-tab month-
 to update — none found (the table only lists sub-tab ids, not filter behavior), so no further
 edit was needed there.
 
-## v54.1 — 2026-07-14 — Report terminology: حالة → صورة for x-ray records
+## v54.1 — 2026-07-14 — Change: Report terminology: حالة → صورة for x-ray records
 
 Owner request ("any reference for حالة become صورة"). Reviewed, phrase-mapped rename across the reporting layer — NOT a blind replace: حالة-as-"status" survives untouched (column headers الحالة, حالة التوزيع, حالة الإجابة, حالة BI, workflow labels), and the port name منفذ حالة عمار is data. 64 case-sense occurrences renamed across deck2, deck v1, the executive document parts (scope/risk/corroboration/narrative), executiveReportData findings, and the two KPI-dashboard labels (`rk_pchart_empty`, `rk_tooltip_cases`). Examples:
 
@@ -2475,7 +2815,7 @@ The IMPORTANT 3 `loadTokenRef` addition made `handleReopenAnswer`/`handleRequest
 
 Verification (all six findings + this follow-up): `npx tsc -b` clean; `npm run lint` clean; `npm run test:run` → 90 files, 627 tests, all passing.
 
-## v54 — 2026-07-14 — Closing slide: data-source attribution replaces the provenance QR
+## v54 — 2026-07-14 — Change: Closing slide: data-source attribution replaces the provenance QR
 
 Owner request ("no qr code" + "say if the data is from source 1 بيانات ذكاء الأعمال or source 2 بيانات وكالة المخاطر based on the data entered in data processing"). The QR feature is fully removed (helper module + tests, async `openExecutiveDeckV2WithQr` wrapper, `provenanceQrSvg` params, QR CSS, and the `qrcode` dependency — Reports-tab call sites reverted to the sync `openExecutiveDeckV2`). In its place, the closing slide's provenance block now opens with a "مصادر البيانات المُدخلة" card pair derived from what data processing actually ingested:
 
@@ -2540,7 +2880,7 @@ opts?: { variantPreview?: boolean }
 
 **File:** `src/data/reporting/executive/deck2/deck2.test.ts` — QR splice tests replaced by two data-source tests (BI absent → "غير مُقدَّم هذا الشهر" + off card; BI matched → blue card + enriched count). `src/data/reporting/executive/ui/provenanceQr.ts` and its test deleted; `qrcode`/`@types/qrcode` uninstalled.
 
-## v53.6 — 2026-07-14 — Glossary slide: two semantic category bands
+## v53.6 — 2026-07-14 — Change: Glossary slide: two semantic category bands
 
 Owner request ("organize this page with categories and better design"). The 8-term flat 4×2 grid with per-card rainbow accents became two labeled category bands whose color carries meaning: gold = مصطلحات المجتمع والعيّنة (population, risk levels, sample, coverage), coral = مصطلحات القرارات والجودة (suspicion, missed suspicion, reference standard, data sufficiency) — the same order the deck's sections flow. Each band: tone-coded chip (icon + label) + gradient hairline + its four cards inheriting the band tone. Cards tightened (38px icon badges, smaller type) to fit the two header rows; verified zero clipping in preview.
 
@@ -2578,7 +2918,7 @@ const GLOSSARY_CATEGORIES: GlossaryCategory[] = [
 /* + light-theme chip tints, band break-inside:avoid for print */
 ```
 
-## v53.5 — 2026-07-14 — Add visual libraries + type shims (dependencies)
+## v53.5 — 2026-07-14 — Chore: Add visual libraries + type shims (dependencies)
 
 **File:** `package.json`
 
@@ -2634,7 +2974,7 @@ declare module "trianglify/dist/trianglify.bundle.js" {
 ---
 
 
-## v53.4 — 2026-07-14 — Embed IBM Plex Sans Arabic as a shared @font-face string
+## v53.4 — 2026-07-14 — Change: Embed IBM Plex Sans Arabic as a shared @font-face string
 
 **File:** `src/branding/fonts.ts` (new)
 
@@ -2708,7 +3048,7 @@ adds the import):** `src/data/reporting/executive/deck2/index.ts`,
 ---
 
 
-## v53.3 — 2026-07-14 — Seeded generative art + provenance QR helpers
+## v53.3 — 2026-07-14 — Change: Seeded generative art + provenance QR helpers
 
 **File:** `src/data/reporting/executive/ui/generativeArt.ts` (new)
 
@@ -2755,7 +3095,7 @@ export async function generateProvenanceQrSvg(text: string): Promise<string> {
 ---
 
 
-## v53.2 — 2026-07-14 — Wire art + QR into deck2 (cover mesh, divider patterns, closing QR)
+## v53.2 — 2026-07-14 — Add: Wire art + QR into deck2 (cover mesh, divider patterns, closing QR)
 
 **File:** `src/data/reporting/executive/deck2/slides.ts`
 
@@ -2893,7 +3233,7 @@ and the hand-copied hero-patterns "hexagons" data-URI texture on `.v2-num-tile`
 ---
 
 
-## v53.1 — 2026-07-14 — charts.ts geometry via d3-shape + d3-scale
+## v53.1 — 2026-07-14 — Change: Charts.ts geometry via d3-shape + d3-scale
 
 **File:** `src/data/reporting/executive/ui/charts.ts`
 
@@ -2913,7 +3253,7 @@ assertion unchanged (structural — no test asserted exact path strings).
 ---
 
 
-## v53 — 2026-07-14 — Tests for the wave
+## v53 — 2026-07-14 — Chore: Tests for the wave
 
 **Files (new):** `src/data/reporting/executive/ui/generativeArt.test.ts`
 (deterministic seeded mesh + pattern, `<svg>` prefix, seed sensitivity),
@@ -2930,7 +3270,7 @@ Gates after the wave: `tsc -b` clean · `npm run lint` clean · `test:run`
 613 passed (600 baseline + 13 new) · `npm run build` single-file 3,359,278 bytes
 (baseline 3,137,304 → **+216.8 KB raw / +125.6 KB gzip**).
 
-## v52.4 — 2026-07-14 — Re-measure METRICS_COMPACT_SAMPLE (totals-row clip)
+## v52.4 — 2026-07-14 — Change: Re-measure METRICS_COMPACT_SAMPLE (totals-row clip)
 
 Orchestrator fixup after the overhaul: the compact sample tables' measured metrics went stale when theme v3 shifted text-metric rounding, clipping the totals row ~10px past the card bottom on screen. Re-measured live in the preview (the constants' original tuning method).
 
@@ -2947,7 +3287,7 @@ const METRICS_COMPACT_SAMPLE: ModeMetrics = { rowH: 25.125, theadH: 24.5, tfootH
 ```
 (Verified: tfoot overflow 0.0px on every land/sea card of both port slides; 0/15 slides overflow horizontally.)
 
-## v52.3 — 2026-07-14 — deck2 theme v3: type scale, depth, gold hairlines, entrance motion, data-bar cells, print + light parity
+## v52.3 — 2026-07-14 — Change: Deck2 theme v3: type scale, depth, gold hairlines, entrance motion, data-bar cells, print + light parity
 
 **File:** `src/data/reporting/executive/deck2/theme.ts`
 
@@ -3004,7 +3344,7 @@ parity and print `print-color-adjust:exact` / `break-inside:avoid` for every new
 ---
 
 
-## v52.2 — 2026-07-14 — deck2 slides: cover, TOC, NEW month-in-numbers, glossary 12→8, separators, risk proportion bar + gauges, ports overview, data bars, threshold cells, NEW closing slide
+## v52.2 — 2026-07-14 — Add: Deck2 slides: cover, TOC, NEW month-in-numbers, glossary 12→8, separators, risk proportion bar + gauges, ports overview, data bars, threshold cells, NEW closing slide
 
 **File:** `src/data/reporting/executive/deck2/slides.ts`
 
@@ -3130,7 +3470,7 @@ NAV_SECTIONS gains `summary` and `closing`.
 ---
 
 
-## v52.1 — 2026-07-14 — charts: new `funnel` SVG builder
+## v52.1 — 2026-07-14 — Add: Charts: new `funnel` SVG builder
 
 **File:** `src/data/reporting/executive/ui/charts.ts`
 
@@ -3151,7 +3491,7 @@ export function funnel(data: LabeledValue[], opts: ChartOpts = {}): string {
 ---
 
 
-## v52 — 2026-07-14 — tests: funnel + new deck2 slides/structures
+## v52 — 2026-07-14 — Chore: Tests: funnel + new deck2 slides/structures
 
 **File:** `src/data/reporting/executive/ui/charts.test.ts` — added `funnel` suite (valid SVG,
 per-stage rects, label escaping, empty/zero/compact).
@@ -3162,7 +3502,7 @@ graceful empty), the section-2 funnel, in-cell data bars, and the 4 tone-coded T
 
 Test count: 591 → 600 (all green). Bundle: 3,099,450 B → 3,136,331 B (+36.9 KB raw).
 
-## v51.5 — 2026-07-14 — Repo/docs reorganization: sectioned docs tree + root cleanup
+## v51.5 — 2026-07-14 — Refactor: Repo/docs reorganization: sectioned docs tree + root cleanup
 
 Owner request ("organize this ... smarter and better sections"). Docs-only moves plus three comment-path updates in code. New structure: `docs/architecture/` (+ `data-system-report.md`, `SECURITY_MODEL.md` moved in), new `docs/product/` (PRODUCT_PAGES, GAP_ANALYSIS, PRODUCT_SPECIFICATION, RELEASE_CHECKLIST), `docs/design/` (+ design-system.md, UI_ENHANCEMENT_PLAN), new `docs/archive/` (legacy 01–04 docs, EDIT_LOG.design-staging, `plans-history/` = former docs/superpowers). New `docs/README.md` index with a domain guide (data intake, sampling, distribution, answers, approvals, reporting, KPIs, auth, storage → code + docs). Root cleanup: stale logs and `lint-report.json` removed, `testsprite_tests/tmp/` untracked, both gitignored. `docs/EDIT_LOG.md` deliberately NOT moved (build imports it via `?raw`).
 
@@ -3178,7 +3518,7 @@ docs/data-system-report.md · docs/SECURITY_MODEL.md   (comment/doc references)
 docs/architecture/data-system-report.md · docs/architecture/SECURITY_MODEL.md
 ```
 
-## v51.4 — 2026-07-14 — deck2 land/sea tables: ruled filler instead of blank void
+## v51.4 — 2026-07-14 — Change: Deck2 land/sea tables: ruled filler instead of blank void
 
 Owner request ("fix the gaps under الاجمالي for all tables"): the land/sea port, quality, and accuracy tables pin their الإجمالي row to the card bottom with one pixel-exact invisible spacer, which left a featureless void when a table has few rows. The spacer now carries `--ghost-row-h` (the tier's exact measured row height) and CSS paints faint row separators inside it with a repeating gradient, so the leftover space reads as continued empty grid. Deliberately NOT real ghost `<tr>`s here: plain-cell ghosts render taller than the sample table's stacked frac rows and would break the measured budget math (METRICS_*), clipping the totals row. The stage-port cards (v51.2) keep their real ghost rows — all their cells are plain.
 
@@ -3225,7 +3565,7 @@ function blankFillerRow(fillerPx: number, span: number, rowH: number): string {
 /* + body.theme-light variant with rgba(10,45,74,.09) */
 ```
 
-## v51.3 — 2026-07-14 — deck2 stage×port cards: tone-tinted الإجمالي totals row
+## v51.3 — 2026-07-14 — Change: Deck2 stage×port cards: tone-tinted الإجمالي totals row
 
 Owner request. The stage-port cards' totals row had no styling of its own and blended in with the data rows. It is now a distinct summary band tinted with the card's own stage tone (gold/blue/green/coral at 16% alpha, 55% top border, weight 900), with dark ink under the light theme. `color-mix` is safe — Chromium-only app.
 
@@ -3247,7 +3587,7 @@ Owner request. The stage-port cards' totals row had no styling of its own and bl
 body.theme-light .v2-stage-port-card .deck-table tfoot td{color:#0a2d4a;}
 ```
 
-## v51.2 — 2026-07-14 — deck2 stage×port cards: fixed 5-row geometry (ghost rows)
+## v51.2 — 2026-07-14 — Fix: Deck2 stage×port cards: fixed 5-row geometry (ghost rows)
 
 Owner-reported inconsistency: stages with fewer than 5 ports (real months concentrate levels 2/4 in one or two ports) left a large blank void between the last data row and the pinned totals row, while full cards looked dense. Every card now renders exactly `STAGE_CARD_TOP_N` body rows — short stages are padded with muted "ghost" rows (ordinary `<tr>`s, real height and borders) so all four cards share identical table geometry and the totals row sits at the same height everywhere. Verified in the preview: tfoot offset 180px in all cards on both stage-port slides.
 
@@ -3309,7 +3649,7 @@ function pickStage(portIdx: number): ... // level 4 only in the first 2 ports, l
 it("pads stage-port cards with ghost rows to the fixed 5-row geometry", ...); // 4 ghosts × 2 slides
 ```
 
-## v51.1 — 2026-07-14 — deck2 stage×port cards empty on real data (raw stage aliases)
+## v51.1 — 2026-07-14 — Change: Deck2 stage×port cards empty on real data (raw stage aliases)
 
 Owner reported empty port tables and zero سليمة/اشتباه sums on the live deck's "حسب المستوى والمنفذ" pages with real September 2026 data. Root cause: real processed rows store the RAW Excel stage alias in `row.stage` (e.g. "SECOND_STAG", "2", "الثاني" — see `DEFAULT_STAGE_MAPPINGS`), while `StageProfile.stageLabel` is the canonical Arabic label frozen at draw time. `collectStagePortStats` grouped by the raw value and the cards looked up by the canonical label, so every lookup missed. The dev-preview fixture used canonical labels and masked the bug. Same raw-equality bug zeroed per-stage "studied" counts in `calculateExecutiveKPIs`.
 
@@ -3375,7 +3715,7 @@ Owner reported empty port tables and zero سليمة/اشتباه sums on the li
 it("canonicalizes RAW Excel stage aliases so cards keyed by canonical labels find them (real-data regression)", ...);
 ```
 
-## v51 — 2026-07-14 — Executive deck: deck2 replaces v1 as the live edition
+## v51 — 2026-07-14 — Change: Executive deck: deck2 replaces v1 as the live edition
 
 Owner-requested replacement: the Reports tab's executive deck export now opens the deck2 rebuild (the `/deck-preview.html` mockup) instead of the v1 deck. Same `ExecutiveReportInput` → `ReportModel` contract, so all numbers stay identical to the Document/Workbook editions; deck2 additionally gains the B2 source-revisions footer the v1 deck already had. v1 (`executive/deck/`) is kept as the reference edition (still used by the dev preview toggle and tests).
 
@@ -3435,7 +3775,7 @@ it("omits the footer entirely when no revisions are supplied", ...); // markup-a
 ```
 (Also updated the stale "wired to the live button" comments in `executive/deck/index.ts` and `executiveBuilders.xss.test.ts`.)
 
-## v50 — 2026-07-14 — Per-reviewer KPI upgrade + SPC p-charts (recharts)
+## v50 — 2026-07-14 — Change: Per-reviewer KPI upgrade + SPC p-charts (recharts)
 
 Adds a pure per-reviewer KPI + p-chart stats module, full unit tests, and a
 recharts-driven KPI-dashboard panel (reviewer/port control charts). recharts —
@@ -3574,7 +3914,7 @@ import ReviewerKpiPanel from "./ReviewerKpiPanel";
   / per-port SPC p-charts … RTL via dir="ltr" wrapper + XAxis reversed + right YAxis.
 ```
 
-## v49 — 2026-07-14 — B1 four-eyes gate made reload-safe (persistent marker)
+## v49 — 2026-07-14 — Security: B1 four-eyes gate made reload-safe (persistent marker)
 
 Wave B gated only samples drawn in the current session (in-memory `sampleNeedsApproval` flag), so drawing a sample and reloading the tab made it look "legacy" and bypassed the four-eyes gate. Every new-era draw carries the A2 `samplingAlgorithmVersion` stamp on disk, which is the persistent discriminator: stamped + unapproved ⇒ approval required, regardless of session. Legacy samples (no stamp) still pass.
 
@@ -3634,7 +3974,7 @@ export function sampleRequiresApproval(sample: {
 describe("sampleRequiresApproval — reload-safe persistent gate", () => { /* 3 tests: stamped+unapproved ⇒ true; stamped+approved ⇒ false; legacy ⇒ false */ });
 ```
 
-## v48.7 — 2026-07-14 — B1 Four-eyes sample-release gate (Population Phase 3 → Phase 4)
+## v48.7 — 2026-07-14 — Security: B1 Four-eyes sample-release gate (Population Phase 3 → Phase 4)
 
 **File:** `src/data/sampling/sampleApprovalRules.ts` (new)
 
@@ -3699,7 +4039,7 @@ Added `SampleApprovalPanel` (approved / legacy / pending-with-approve-button sta
 ---
 
 
-## v48.6 — 2026-07-14 — B2 Report-to-revision linkage
+## v48.6 — 2026-07-14 — Change: B2 Report-to-revision linkage
 
 **File:** `src/data/reporting/sourceRevisions.ts` (new)
 
@@ -3761,7 +4101,7 @@ Viewers gained an optional footer slot (`footerNote` / footer arg) that renders 
 ---
 
 
-## v48.5 — 2026-07-14 — B3 Referential-integrity (orphan) scan in the Data Accuracy view
+## v48.5 — 2026-07-14 — Change: B3 Referential-integrity (orphan) scan in the Data Accuracy view
 
 **File:** `src/data/integrity/orphanScan.ts` (new)
 
@@ -3786,7 +4126,7 @@ Added a Phase-2 effect that loads sample/distribution/employee files for the sel
 ---
 
 
-## v48.4 — 2026-07-14 — B4 Switching-rule advisory (ISO 2859-1 / Z1.4)
+## v48.4 — 2026-07-14 — Change: B4 Switching-rule advisory (ISO 2859-1 / Z1.4)
 
 **File:** `src/data/sampling/samplingPlanStorage.ts`
 
@@ -3816,7 +4156,7 @@ export type SamplingPlan = { …; riskBasis; priorMonthAdvisory?: SamplingPlanPr
 ---
 
 
-## v48.3 — 2026-07-14 — B5 Decision hash-chaining (tamper-evident)
+## v48.3 — 2026-07-14 — Security: B5 Decision hash-chaining (tamper-evident)
 
 **File:** `src/data/approvals/approvalTypes.ts`
 
@@ -3859,7 +4199,7 @@ export function hashActionArchive(archive): string
 ---
 
 
-## v48.2 — 2026-07-14 — B6 casLoop conflict-UX pass (surface exhausted-retry errors)
+## v48.2 — 2026-07-14 — Security: B6 casLoop conflict-UX pass (surface exhausted-retry errors)
 
 **File:** `src/components/Sidebar/Tabs/Population/index.tsx` (`handleConfigChange`)
 
@@ -3887,7 +4227,7 @@ export function hashActionArchive(archive): string
 ---
 
 
-## v48.1 — 2026-07-14 — B7 SECURITY_MODEL.md addendum
+## v48.1 — 2026-07-14 — Security: B7 SECURITY_MODEL.md addendum
 
 **File:** `docs/SECURITY_MODEL.md`
 
@@ -3896,7 +4236,7 @@ Added §6 (Wave B7): (a) `contentHash` and B5 hash-chains are corruption-detecti
 ---
 
 
-## v48 — 2026-07-14 — Wave B tests added
+## v48 — 2026-07-14 — Chore: Wave B tests added
 
 - `src/data/sampling/sampleApprovalRules.test.ts` — B1 gate (legacy-approved, self-approve-note, non-drawer rule).
 - `src/data/sampling/samplingPlanStorage.test.ts` (extended) — B4 `computeSuspicionRate` / `recommendationFromRate` / plan folding.
@@ -3904,7 +4244,7 @@ Added §6 (Wave B7): (a) `contentHash` and B5 hash-chains are corruption-detecti
 - `src/data/reporting/sourceRevisions.test.ts` — B2 helper + revisions appear in sample document/deck output; omitted → no footer.
 - `src/data/integrity/orphanScan.test.ts` — B3 orphan classification.
 
-## v47.8 — 2026-07-14 — A2 Reproducibility pin: SAMPLING_ALGORITHM_VERSION bound to the seed
+## v47.8 — 2026-07-14 — Change: A2 Reproducibility pin: SAMPLING_ALGORITHM_VERSION bound to the seed
 
 **File:** `src/data/sampling/sampleAlgorithm.ts`
 
@@ -3978,7 +4318,7 @@ export type SampleMasterData = {
 ---
 
 
-## v47.7 — 2026-07-14 — A3 Four-eyes sample release (data fields + approveSampleMaster CAS function)
+## v47.7 — 2026-07-14 — Security: A3 Four-eyes sample release (data fields + approveSampleMaster CAS function)
 
 **File:** `src/data/sampling/sampleStorage.ts`
 
@@ -4024,7 +4364,7 @@ export async function appendSampleRow(
 ---
 
 
-## v47.6 — 2026-07-14 — A1 Sampling plan record (samplingPlanStorage.ts + draw-path wiring)
+## v47.6 — 2026-07-14 — Add: A1 Sampling plan record (samplingPlanStorage.ts + draw-path wiring)
 
 **File:** `src/data/sampling/samplingPlanStorage.ts` (new file)
 
@@ -4073,7 +4413,7 @@ import { buildSamplingPlan, saveSamplingPlan } from "../../../../data/sampling/s
 ---
 
 
-## v47.5 — 2026-07-14 — A4 Per-item answer value history (append-only, capped, first-kept)
+## v47.5 — 2026-07-14 — Change: A4 Per-item answer value history (append-only, capped, first-kept)
 
 **File:** `src/data/answers/answerTypes.ts`
 
@@ -4149,7 +4489,7 @@ export async function upsertItemAnswer(...) {
 ---
 
 
-## v47.4 — 2026-07-14 — A5 Immutable raw imports (bronze layer)
+## v47.4 — 2026-07-14 — Change: A5 Immutable raw imports (bronze layer)
 
 **File:** `src/data/population/monthTypes.ts`
 
@@ -4217,7 +4557,7 @@ async function archiveExistingRaw(rawDir, base: "risk" | "bi"): Promise<string |
 ---
 
 
-## v47.3 — 2026-07-14 — A6 Audit-log archival instead of truncation
+## v47.3 — 2026-07-14 — Change: A6 Audit-log archival instead of truncation
 
 **File:** `src/data/audit/actionLog.ts`
 
@@ -4258,7 +4598,7 @@ let maxActionEntries = DEFAULT_MAX_ACTION_ENTRIES; // + __set/__reset test seams
 ---
 
 
-## v47.2 — 2026-07-14 — A7 Event schema versioning
+## v47.2 — 2026-07-14 — Change: A7 Event schema versioning
 
 **File:** `src/data/distribution/distributionTypes.ts`
 
@@ -4323,7 +4663,7 @@ export const EVENT_SCHEMA_VERSION = 1;   // A7
 ---
 
 
-## v47.1 — 2026-07-14 — A8 Backup retention policy (constants + prune)
+## v47.1 — 2026-07-14 — Change: A8 Backup retention policy (constants + prune)
 
 **File:** `src/data/backup/backupStorage.ts`
 
@@ -4373,7 +4713,7 @@ the file-inventory table, plus a "Backup retention policy (A8)" subsection under
 ---
 
 
-## v47 — 2026-07-14 — Wave A tests added
+## v47 — 2026-07-14 — Chore: Wave A tests added
 
 - `src/data/sampling/samplingPlanStorage.test.ts` — build (lot/fraction/version/risk share), empty-population safety, save/load round-trip, legacy-null.
 - `src/data/sampling/approveSampleMaster.test.ts` — approval CAS write-back, idempotent first-wins, no-sample failure.
@@ -4385,13 +4725,13 @@ the file-inventory table, plus a "Backup retention policy (A8)" subsection under
 
 Gates: `npx tsc -b` clean · `npm run lint` clean · `npm run test:run` 532 passed (513 baseline + 19 added).
 
-## v46.3 — 2026-07-14 — C-12 (safeWrite lock-key collision) accepted, not fixed
+## v46.3 — 2026-07-14 — Fix: C-12 (safeWrite lock-key collision) accepted, not fixed
 
 `safeWriteJson`/`restoreJson` lock on `` `${dir.name}/${fileName}` `` (`src/data/storage/safeWrite.ts`). `dir.name` is the leaf folder name, so e.g. two months' `1-main/sample.master.json` share one lock key. Web Locks are advisory and origin-scoped: a collision only falsely serializes unrelated writes — it cannot corrupt data. Fixing it requires threading full workspace paths through every storage caller; deferred as not worth the churn. Documented here so the audit trail shows a decision, not an omission.
 
 
 
-## v46.2 — 2026-07-13 — Enable TypeScript strict mode (B-09)
+## v46.2 — 2026-07-13 — Add: Enable TypeScript strict mode (B-09)
 
 CLAUDE.md documents strict mode but neither tsconfig set it. A dry-run with `strict: true` produced **zero** errors in both projects (the code was already written to strict discipline), so enforcement is now on.
 
@@ -4427,7 +4767,7 @@ CLAUDE.md documents strict mode but neither tsconfig set it. A dry-run with `str
 
 
 
-## v46.1 — 2026-07-14 — Lint: remove useless initializers in the distribution fold
+## v46.1 — 2026-07-14 — Remove: Lint: remove useless initializers in the distribution fold
 
 `no-useless-assignment` at the fold's loop head — `status`/`assignedTo` initializers were overwritten on every reachable path (the default arm `continue`s when nothing exists to preserve).
 
@@ -4450,7 +4790,7 @@ CLAUDE.md documents strict mode but neither tsconfig set it. A dry-run with `str
 ```
 
 
-## v46 — 2026-07-13 — deriveCurrentDistribution stamps logRevision itself (P1 fixup)
+## v46 — 2026-07-13 — Change: DeriveCurrentDistribution stamps logRevision itself (P1 fixup)
 
 The Wave 1 mirror monotonic guard (`syncSampleMirrors`) reads `current.logRevision ?? 0`. Callers that passed a directly-derived snapshot (without the manual `logRevision: log.revision` stamp) synced mirrors at revision 0, and the guard (`existing >= incoming` → skip) then froze the mirror after the first write. Stamp the revision inside the derive so every snapshot carries it.
 
@@ -4476,7 +4816,7 @@ The Wave 1 mirror monotonic guard (`syncSampleMirrors`) reads `current.logRevisi
     derivedAt: now,
 ```
 
-## v45.8 — 2026-07-13 — Wave 3 overview: report system rework (3-output model)
+## v45.8 — 2026-07-13 — Change: Wave 3 overview: report system rework (3-output model)
 
 Reworks the SAMPLE, DISTRIBUTION and MANAGEMENT reports to the same 3-output model
 as the reference EXECUTIVE report (Document / Deck / Excel), built on the executive
@@ -4488,7 +4828,7 @@ functionally.
 ---
 
 
-## v45.7 — 2026-07-13 — C-08: single hardened HTML-escaping primitive (encode & < > " ')
+## v45.7 — 2026-07-13 — Security: C-08: single hardened HTML-escaping primitive (encode & < > " ')
 
 **File:** `src/data/reporting/executive/primitives.ts`
 
@@ -4558,7 +4898,7 @@ function escText(s: string | null | undefined): string {
 ---
 
 
-## v45.6 — 2026-07-13 — C-10: Reports dashboard uses app-standard Latin digits
+## v45.6 — 2026-07-13 — Change: C-10: Reports dashboard uses app-standard Latin digits
 
 **File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
 
@@ -4585,7 +4925,7 @@ function fmtCount(value: number | null | undefined): string {
 ---
 
 
-## v45.5 — 2026-07-13 — Shared report chrome (parameterised doc/deck viewers)
+## v45.5 — 2026-07-13 — Refactor: Shared report chrome (parameterised doc/deck viewers)
 
 **File:** `src/data/reporting/shared/reportChrome.ts`
 
@@ -4614,7 +4954,7 @@ export function formatIssueDate(d = new Date()): string { /* "DD / MM / YYYY" */
 ---
 
 
-## v45.4 — 2026-07-13 — SAMPLE report → 3-output lineage model (Document / Deck / Excel)
+## v45.4 — 2026-07-13 — Change: SAMPLE report → 3-output lineage model (Document / Deck / Excel)
 
 Replaces the legacy flat HTML (`buildSampleReport`) + flat xlsx with a lineage model
 (`computeSampleLineage`) and three renderers telling the received → processed →
@@ -4646,7 +4986,7 @@ export function openSampleDeck(input: SampleReportInput): void { openOrDownload(
 ---
 
 
-## v45.3 — 2026-07-13 — DISTRIBUTION report → 3-output model (Document / Deck / Excel)
+## v45.3 — 2026-07-13 — Change: DISTRIBUTION report → 3-output model (Document / Deck / Excel)
 
 Replaces the legacy flat HTML (`buildDistributionReport`) + flat xlsx with
 `computeDistributionModel` and three renderers: drawn sample → assignments →
@@ -4674,7 +5014,7 @@ export function openDistributionDeck(…): void { … }
 ---
 
 
-## v45.2 — 2026-07-13 — MANAGEMENT report: add Deck + Excel outputs
+## v45.2 — 2026-07-13 — Add: MANAGEMENT report: add Deck + Excel outputs
 
 Keeps the existing management Document (`openManagementReport`) unchanged; adds the
 two missing outputs, both driven by the same `ReportModel`.
@@ -4714,7 +5054,7 @@ export function buildManagementWorkbook(input, employeeDisplayNames = {}): void 
 ---
 
 
-## v45.1 — 2026-07-13 — Reports tab: all four cards offer Document / Deck / Excel
+## v45.1 — 2026-07-13 — Change: Reports tab: all four cards offer Document / Deck / Excel
 
 **File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
 
@@ -4744,7 +5084,7 @@ type ReportFormat = "xlsx" | "deck" | "document";
 ---
 
 
-## v45 — 2026-07-13 — C-07 + data-correctness tests for the new builders
+## v45 — 2026-07-13 — Chore: C-07 + data-correctness tests for the new builders
 
 **File:** `src/data/reporting/reportTestFixtures.ts` — **(new file)** — `makeRow` / `makeManifest` / `makeSampleMaster` / `makeDistribution` factories (pure data, no test-framework imports).
 
@@ -4769,7 +5109,7 @@ describe("sample builders — XSS escaping", () => {
 });
 ```
 
-## v44.7 — 2026-07-13 — Permission matrix single-authority + dead-cell locking (P1)
+## v44.7 — 2026-07-13 — Change: Permission matrix single-authority + dead-cell locking (P1)
 
 **File:** `src/components/Sidebar/Sidebar.tsx`
 
@@ -4851,7 +5191,7 @@ const locked = false;
 ---
 
 
-## v44.6 — 2026-07-13 — KPI renderer uses executive rows, shared aggregate (P0)
+## v44.6 — 2026-07-13 — Change: KPI renderer uses executive rows, shared aggregate (P0)
 
 **File:** `src/components/Sidebar/Tabs/ReportDesigner/renderers/KpiRenderer.tsx`
 
@@ -4878,7 +5218,7 @@ function useExecutiveRows() {
 ---
 
 
-## v44.5 — 2026-07-13 — Data Accuracy Report key matches real processing (P1)
+## v44.5 — 2026-07-13 — Change: Data Accuracy Report key matches real processing (P1)
 
 **File:** `src/components/Sidebar/Tabs/Population/processing/populationProcessor.ts`
 
@@ -4919,7 +5259,7 @@ if (b.xrayImageId && !riskKeys.has(makeBiMatchKey(b.xrayImageId, b.portName))) o
 ---
 
 
-## v44.4 — 2026-07-13 — CSV formula-injection mitigation (P2)
+## v44.4 — 2026-07-13 — Security: CSV formula-injection mitigation (P2)
 
 **File:** `src/data/powerbiExport/csvSerializer.ts`
 
@@ -4941,7 +5281,7 @@ if (str.includes(",") || str.includes('"') || str.includes("\n")) {
 ---
 
 
-## v44.3 — 2026-07-13 — Argon2id rehash persisted to disk (P2)
+## v44.3 — 2026-07-13 — Security: Argon2id rehash persisted to disk (P2)
 
 **File:** `src/auth/AuthGate.tsx`
 
@@ -4964,7 +5304,7 @@ if (directoryHandle) {
 ---
 
 
-## v44.2 — 2026-07-13 — Per-tab error boundaries (P2)
+## v44.2 — 2026-07-13 — Change: Per-tab error boundaries (P2)
 
 **File:** `src/App.tsx`
 
@@ -4987,7 +5327,7 @@ if (directoryHandle) {
 ---
 
 
-## v44.1 — 2026-07-13 — Session expiry + forced-logout messaging (P2)
+## v44.1 — 2026-07-13 — Change: Session expiry + forced-logout messaging (P2)
 
 **File:** `src/auth/AuthGate.tsx`
 
@@ -5011,7 +5351,7 @@ const heartbeatId = window.setInterval(() => {
 ---
 
 
-## v44 — 2026-07-13 — Feedback trigger for non-admin roles (P2)
+## v44 — 2026-07-13 — Change: Feedback trigger for non-admin roles (P2)
 
 **File:** `src/components/FeedbackWidget/FeedbackWidget.tsx`
 
@@ -5038,7 +5378,7 @@ return (
 ```
 (Added `.fb-fab` styles to `FeedbackWidget.css`.)
 
-## v43.16 — 2026-07-13 — Wave 1 overview: data-safety batch (reconstructed log)
+## v43.16 — 2026-07-13 — Change: Wave 1 overview: data-safety batch (reconstructed log)
 
 The v43.x entries below reconstruct edit-log entries for the "Wave 1 — data safety" batch
 (`docs/audit/MASTER_AUDIT_2026-07-13.md`) that were applied without being
@@ -5049,7 +5389,7 @@ audit finding ID.
 ---
 
 
-## v43.15 — 2026-07-13 — A-01: casLoop compare-before-write hardening (core + terminal-error classification)
+## v43.15 — 2026-07-13 — Security: A-01: casLoop compare-before-write hardening (core + terminal-error classification)
 
 The CAS loop only detected a conflict if a competing write landed *between* its
 own write and its in-attempt read-back. A slightly-later competing write (A
@@ -5166,7 +5506,7 @@ error).
 ---
 
 
-## v43.14 — 2026-07-13 — A-01: thread the `verify` callback through every casLoop call site
+## v43.14 — 2026-07-13 — Security: A-01: thread the `verify` callback through every casLoop call site
 
 Eight `casLoop` call sites across the shared-file writers were updated to pass
 the new `verify` callback (a delayed re-read of the same revision/write-token
@@ -5217,7 +5557,7 @@ return { done: false };
 ---
 
 
-## v43.13 — 2026-07-13 — B-01: bulk assignment idempotency (skip already-owned/completed rows) + distribution-log terminal guard for `completed`
+## v43.13 — 2026-07-13 — Change: B-01: bulk assignment idempotency (skip already-owned/completed rows) + distribution-log terminal guard for `completed`
 
 Re-running bulk assignment emitted a fresh `assigned` event for every row,
 including rows already `completed` or already `pending` under someone else —
@@ -5396,7 +5736,7 @@ new `previewData.skipped > 0` note rendered in the preview block.)
 ---
 
 
-## v43.12 — 2026-07-13 — C-01: unknown/newer distribution eventType preserves existing state instead of resetting to pending
+## v43.12 — 2026-07-13 — Change: C-01: unknown/newer distribution eventType preserves existing state instead of resetting to pending
 
 `deriveCurrentDistribution`'s `switch (evt.eventType)` had no `default` case,
 so TypeScript's control flow let `status`/`assignedTo`/`replacedById` fall
@@ -5455,7 +5795,7 @@ creates nothing" (asserts `entries` stays empty rather than materializing a
 ---
 
 
-## v43.11 — 2026-07-13 — B-02/B-03: XrayReferrals stale-entry replacement guard + mirror-vs-derived preference
+## v43.11 — 2026-07-13 — Fix: B-02/B-03: XrayReferrals stale-entry replacement guard + mirror-vs-derived preference
 
 Two related staleness bugs in the employee referrals view: (1) the instant
 "recommended replacement" path used the in-memory entry captured when the
@@ -5553,7 +5893,7 @@ the B-02 freshness re-check above now also protects at the UI layer.)
 ---
 
 
-## v43.10 — 2026-07-13 — C-04: per-employee browse-column presets no longer dead-wired to the shared admin file
+## v43.10 — 2026-07-13 — Add: C-04: per-employee browse-column presets no longer dead-wired to the shared admin file
 
 Column presets for the referrals/results browse views always saved to the
 shared admin file and, on load, preferred the admin file over the user's own
@@ -5619,7 +5959,7 @@ import {
 ---
 
 
-## v43.9 — 2026-07-13 — B-04: monotonic `sourceLogRevision` guard on sample-mirror writes
+## v43.9 — 2026-07-13 — Change: B-04: monotonic `sourceLogRevision` guard on sample-mirror writes
 
 Mirror writes (`syncSampleMirrors`) were unordered fire-and-forget with no
 ordering guard, so an older derivation running on one machine could clobber a
@@ -5697,7 +6037,7 @@ advances to rev 5/`completed`).
 ---
 
 
-## v43.8 — 2026-07-13 — B-05: `saveMonthRun` lock/CAS + TOCTOU guard against a sample drawn mid-save
+## v43.8 — 2026-07-13 — Security: B-05: `saveMonthRun` lock/CAS + TOCTOU guard against a sample drawn mid-save
 
 `saveMonthRun` wrote 5 month files with no lock/CAS (unlike
 `updateMonthStatus`/`closeMonth`), and the UI's re-process confirmation check
@@ -5873,7 +6213,7 @@ true)`.
 ---
 
 
-## v43.7 — 2026-07-13 — C-02: block manual reassignment of a completed row (require reopen flow)
+## v43.7 — 2026-07-13 — Change: C-02: block manual reassignment of a completed row (require reopen flow)
 
 Manual reassignment (the drag/select reassignment path in the Population tab,
 separate from bulk assignment) had no guard against targeting an already
@@ -5945,7 +6285,7 @@ was added immediately before building the reassign event.
 ---
 
 
-## v43.6 — 2026-07-13 — B-06: approval decisions — deterministic first-wins reconciliation across supervisors
+## v43.6 — 2026-07-13 — Change: B-06: approval decisions — deterministic first-wins reconciliation across supervisors
 
 Approval decisions live in per-supervisor files; the "already reviewed" check
 was read-only and CAS only covered the reviewer's own file, so two supervisors
@@ -6115,7 +6455,7 @@ import {
 ---
 
 
-## v43.5 — 2026-07-13 — B-10: casLoop terminal-error classification (see A-01 section above)
+## v43.5 — 2026-07-13 — Security: B-10: casLoop terminal-error classification (see A-01 section above)
 
 The `isPermissionLostError` detection and the `PERMISSION_LOST_ERROR` early
 return live in the same `src/data/storage/casLoop.ts` hunk as the A-01
@@ -6126,7 +6466,7 @@ file changes beyond `casLoop.ts` / `casLoop.test.ts`.
 ---
 
 
-## v43.4 — 2026-07-13 — B-11: `.bak` recovery for `readJsonFile` (workspace manifest / users-permissions bootstrap files)
+## v43.4 — 2026-07-13 — Change: B-11: `.bak` recovery for `readJsonFile` (workspace manifest / users-permissions bootstrap files)
 
 `readJsonFile` (used only for the workspace manifest and
 `users.permissions.json` bootstrap files) had no `.bak` fallback and no
@@ -6196,7 +6536,7 @@ write, confirms recovery returns the `.bak` snapshot's data).
 ---
 
 
-## v43.3 — 2026-07-13 — C-05: CAS for shared template document and template-selection writes
+## v43.3 — 2026-07-13 — Change: C-05: CAS for shared template document and template-selection writes
 
 Both `{templateId}.json` (per-template document, editable by any admin) and
 `template.selection.json` (the shared active-template pointer) were written
@@ -6361,7 +6701,7 @@ export type InspectionTemplateSelection = {
 ---
 
 
-## v43.2 — 2026-07-13 — C-11: backup folder name collision guard (random suffix)
+## v43.2 — 2026-07-13 — Fix: C-11: backup folder name collision guard (random suffix)
 
 `backupFolderName` used only second-granularity timestamps, so two machines
 backing up in the same second would collide on an identical folder name, with
@@ -6389,7 +6729,7 @@ was appended.
 ---
 
 
-## v43.1 — 2026-07-13 — Unmapped / flagged: `userManagement.test.ts` (reports/kpi permission-ceiling tests)
+## v43.1 — 2026-07-13 — Chore: Unmapped / flagged: `userManagement.test.ts` (reports/kpi permission-ceiling tests)
 
 `src/auth/userManagement.test.ts` was in this task's file scope, but its
 uncommitted diff is entirely about the `reports/analytics` → `reports/kpi` tab
@@ -6487,7 +6827,7 @@ test("manager has no settings access by default (matches code ceiling)", () => {
 ---
 
 
-## v43 — 2026-07-13 — C-12: not found in diff scope
+## v43 — 2026-07-13 — Fix: C-12: not found in diff scope
 
 The audit lists C-12 (`safeWriteJson` lock key uses leaf dir name only —
 cross-month lock collisions) as part of Wave 1, but `git diff` shows **no
@@ -6499,7 +6839,7 @@ either C-12 was already committed previously, is tracked in a different
 in-progress wave/agent not covered by this reconstruction, or the fix has not
 actually landed yet on disk.
 
-## v42.85 — 2026-07-12 — dead code (hardening-2026-07-08): de-export 4 internal-only helpers; leave a 5th (now fully dead, not just internal) alone
+## v42.85 — 2026-07-12 — Remove: Dead code (hardening-2026-07-08): de-export 4 internal-only helpers; leave a 5th (now fully dead, not just internal) alone
 
 Full-sweep audit, Area 1 "Over-exported" bucket — functions used only inside their own
 file, where `export` is unnecessary. Verified each of the five named items individually
@@ -6565,7 +6905,7 @@ async function loadDistributionCurrent(
 
 ---
 
-## v42.84 — 2026-07-12 — dead code (hardening-2026-07-08): remove 2 dead exports
+## v42.84 — 2026-07-12 — Remove: Dead code (hardening-2026-07-08): remove 2 dead exports
 
 Full-sweep audit, Area 1 "Dead exports" bucket. Both verified individually to have zero
 call sites anywhere in `src/` (including their own file) beyond the definition line
@@ -6673,7 +7013,7 @@ export async function loadMainSampleMirror(
 
 ---
 
-## v42.83 — 2026-07-12 — dead code (hardening-2026-07-08): remove the dead edit-lock trio (superseded by webLocks + casLoop)
+## v42.83 — 2026-07-12 — Remove: Dead code (hardening-2026-07-08): remove the dead edit-lock trio (superseded by webLocks + casLoop)
 
 Full-sweep audit, Area 1 "Dead subsystem" bucket. `acquireEditLock`/`releaseEditLock`/
 `saveJsonWithRevisionCheck` in `fileSystemAccess.ts` were a legacy optimistic-lock-file +
@@ -6751,7 +7091,7 @@ export type AcquireLockResult =
 
 ---
 
-## v42.82 — 2026-07-12 — dead code (hardening-2026-07-08): delete 3 confirmed-dead files
+## v42.82 — 2026-07-12 — Remove: Dead code (hardening-2026-07-08): delete 3 confirmed-dead files
 
 Full-sweep audit, Area 1 "Dead files" bucket. Three files with zero importers anywhere in `src/`,
 verified individually with `grep -r` before deletion (each search matched only the file's own
@@ -6798,7 +7138,7 @@ with no importers anywhere in `src/`.
 
 ---
 
-## v42.81 — 2026-07-12 — S4 (hardening-2026-07-08): catch the uncaught month/preset load rejections in inspection-results view
+## v42.81 — 2026-07-12 — Security: S4 (hardening-2026-07-08): catch the uncaught month/preset load rejections in inspection-results view
 
 Full-sweep finding S4. `XrayInspectionResults.tsx`'s mount effect fires two promise chains with no
 `.catch`, unlike every sibling loader (`XrayReferrals.tsx`, `EmployeeDashboard.tsx`, `Reports/index.tsx`
@@ -6912,7 +7252,7 @@ import { EmptyState, ErrorState, LoadingState } from "../../../../../components/
 
 ---
 
-## v42.80 — 2026-07-12 — S6 (hardening-2026-07-08): make the auth-session activity-log flush CAS-safe
+## v42.80 — 2026-07-12 — Security: S6 (hardening-2026-07-08): make the auth-session activity-log flush CAS-safe
 
 Full-sweep finding S6. `5-system/…/activity.log.json` is written by every machine's login/logout/heartbeat.
 `flushMemoryToWorkspace` was serialized only by an in-module `writeChain` (same-tab); `mergeEntries` unions by
@@ -6996,7 +7336,7 @@ entry (written directly to `activity.log.json`) instead of clobbering it: after 
 sessions are persisted and the revision advanced past the external write (proving a fresh re-read, not a
 blind rev-2 overwrite).
 
-## v42.79 — 2026-07-12 — S5 (hardening-2026-07-08): CAS-guard the template & report-design index files
+## v42.79 — 2026-07-12 — Security: S5 (hardening-2026-07-08): CAS-guard the template & report-design index files
 
 Full-sweep finding S5. `templates.index.json` and `designs.index.json` are shared multi-writer index files
 edited by every supervisor/manager/admin on every machine, but their read-modify-write was guarded only by
@@ -7060,7 +7400,7 @@ concurrent two-author save test asserting both index entries survive and the rev
 **File:** `src/data/reportDesigner/storage/reportDesignStorage.test.ts` — added a concurrent two-author save
 test asserting both index entries survive.
 
-## v42.78 — 2026-07-12 — S3 (hardening-2026-07-08): bring closeMonth/reopenMonth into the manifest casLoop protocol
+## v42.78 — 2026-07-12 — Security: S3 (hardening-2026-07-08): bring closeMonth/reopenMonth into the manifest casLoop protocol
 
 Full-sweep finding S3. `closeMonth`/`reopenMonth` wrote `month.manifest.json` with a plain `safeWriteJson`
 that spread the read manifest forward — no `revision` bump, no `_writeToken` stamp — while
@@ -7131,7 +7471,7 @@ The top-of-file doc comment was also updated: `closeMonth`/`reopenMonth` still b
 `updateMonthStatus(..., "distributed")` on the same month can never leave the month un-closed (the close wins
 or the advance is rejected as a stale write — never a silent un-close).
 
-## v42.77 — 2026-07-12 — S2 (hardening-2026-07-08): CAS-guard the shared feedback log
+## v42.77 — 2026-07-12 — Security: S2 (hardening-2026-07-08): CAS-guard the shared feedback log
 
 Full-sweep finding S2. `5-system/feedback/messages.json` is appended to by any user on any machine, but
 `submitFeedback`/`replyToFeedback`/`saveFeedback` were read-modify-write guarded only by `withResourceLock`
@@ -7208,7 +7548,7 @@ export async function replyToFeedback(dir, messageId, reply, resolve): Promise<v
 **File:** `src/data/feedback/feedbackStorage.test.ts` (new) — round-trip + legacy bare-array read + a
 two-racing-submits concurrency test asserting both messages survive (no silent lost update).
 
-## v42.76 — 2026-07-12 — S1 (hardening-2026-07-08): CAS-guard users.permissions.json write (password hashes)
+## v42.76 — 2026-07-12 — Security: S1 (hardening-2026-07-08): CAS-guard users.permissions.json write (password hashes)
 
 Full-sweep finding S1 (`docs/audit/hardening-2026-07-08/full-sweep-findings.md`). `syncUserManagementToDisk`
 wrote the whole users/permissions/password-hash file as a full-state replace with no lock, no casLoop, and
@@ -7351,7 +7691,7 @@ export async function syncUserManagementToDisk(
 `syncUserManagementToDisk` calls against the same in-memory directory) asserting the second write is not lost:
 the persisted revision advances past both and the last writer's user set is intact.
 
-## v42.75 — 2026-07-12 — QA advisory 1: admit reopen-only approvers to the unified approval sub-tab
+## v42.75 — 2026-07-12 — Refactor: QA advisory 1: admit reopen-only approvers to the unified approval sub-tab
 
 **File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/index.tsx`
 
@@ -7396,7 +7736,7 @@ hardening pipeline's C5 item added build-time EDIT_LOG truncation.
 - `vite-plugin-singlefile` inlines everything (`assetsInlineLimit` maxed, `cssCodeSplit: false`): the build output is **one portable `dist/index.html`** (~2.64 MB, ~968 kB gzip as of 2026-07-12 — size grows with features. The ChangeLog tab's `?raw` import of `docs/EDIT_LOG.md` is truncated to the most recent versions at build time by `src/build/editLogTruncatePlugin.ts`, so the full git history no longer inflates the bundle — only the truncated tail does. Re-check after large additions).
 ```
 
-## v42.74 — 2026-07-12 — E (feature-batch): permission-default tests (defense-in-depth: only admin/manager post)
+## v42.74 — 2026-07-12 — Chore: E (feature-batch): permission-default tests (defense-in-depth: only admin/manager post)
 
 Batch E item 7 (tests). Strengthens the acceptance criterion "employees/supervisors cannot post" with a
 matrix-level regression guard, mirroring the existing `reports/analytics` default tests.
@@ -7406,7 +7746,7 @@ employee-workspace, that its default access is admin/manager `edit` and guest/em
 and that the `post-notification` feature defaults enabled for admin/manager only (via
 `createDefaultFeaturePermissions` + `hasFeature`).
 
-## v42.73 — 2026-07-12 — E (feature-batch): document notifications file in data-system-report
+## v42.73 — 2026-07-12 — Change: E (feature-batch): document notifications file in data-system-report
 
 Batch E item 6 (docs). CLAUDE.md requires `docs/data-system-report.md` to stay the authoritative
 reference for every workspace file/path — add the new notification-center file.
@@ -7414,7 +7754,7 @@ reference for every workspace file/path — add the new notification-center file
 **File:** `docs/data-system-report.md` — add `notifications.json` (`5-system/notifications/`) to the
 system-files table and mention "notification center" in the `5-system/` root-folder description.
 
-## v42.72 — 2026-07-12 — E (feature-batch): app-shell acknowledgement banner
+## v42.72 — 2026-07-12 — Change: E (feature-batch): app-shell acknowledgement banner
 
 Batch E item 5 (banner). Persistent orange banner mounted at the app shell, shown whenever the current
 user is in the must-accept audience (employee/supervisor) and has ≥1 unaccepted notification.
@@ -7458,7 +7798,7 @@ user is in the must-accept audience (employee/supervisor) and has ≥1 unaccepte
       <main
 ```
 
-## v42.71 — 2026-07-12 — E (feature-batch): notification-manager view + EW sub-tab
+## v42.71 — 2026-07-12 — Change: E (feature-batch): notification-manager view + EW sub-tab
 
 Batch E item 4 (admin-facing UI). New `NotificationManager` view where admin/manager post a
 notification and see, per notification, which audience users have accepted vs. are still pending.
@@ -7498,7 +7838,7 @@ const SUB_TAB_NOTIFICATIONS     = "notifications";
 routing arm `if (activeSubTab === SUB_TAB_NOTIFICATIONS) { if (!canAccessTab("ew/notifications")) return
 <AccessDenied />; return <NotificationManager directoryHandle={directoryHandle} />; }`.)
 
-## v42.70 — 2026-07-12 — E (feature-batch): notification-center label keys
+## v42.70 — 2026-07-12 — Change: E (feature-batch): notification-center label keys
 
 Batch E item 3 (labels). Adds a `notif_*` label group to `DEFAULT_LABELS` so the banner + manager UI
 strings are admin-customizable (CLAUDE.md: prefer label keys over hard-coded Arabic). Covers the accept
@@ -7510,7 +7850,7 @@ button, the "+N more" banner suffix, and the manager view's header/form/empty-st
 `notif_mgr_empty_title`, `notif_mgr_empty_desc`, `notif_mgr_posted_by`, `notif_mgr_accepted_summary`,
 `notif_mgr_accepted`, `notif_mgr_pending`, `notif_mgr_audience_none` to the `DEFAULT_LABELS` object.
 
-## v42.69 — 2026-07-12 — E (feature-batch): notification permissions wiring (featureId + sub-tab)
+## v42.69 — 2026-07-12 — Add: E (feature-batch): notification permissions wiring (featureId + sub-tab)
 
 Batch E item 2 (permission matrix). Follows Batch C's exact shape for wiring a new capability into
 `userManagement.ts`.
@@ -7569,7 +7909,7 @@ Batch E item 2 (permission matrix). Follows Batch C's exact shape for wiring a n
 Plus: `post-notification` added to `TAB_FEATURE_MAP["employee-workspace"]`, `FEATURE_DEFAULTS`, and five
 `ew/notifications` rows in `createDefaultPermissions()`.
 
-## v42.68 — 2026-07-12 — E (feature-batch): notification-center data module + 5-system folder
+## v42.68 — 2026-07-12 — Change: E (feature-batch): notification-center data module + 5-system folder
 
 Batch E item 1 (data layer). New workspace subsystem for admin/manager broadcast notifications
 that employee/supervisor users must acknowledge ("قبول").
@@ -7617,7 +7957,7 @@ folder name added to workspacePaths.
 
 **File:** `src/data/workspace/workspacePaths.test.ts` — extend the `SYSTEM_FOLDER_NAMES` equality snapshot with `notifications: "notifications"`.
 
-## v42.67 — 2026-07-12 — B2 (feature-batch): unified اعتماد الطلبات page (referral + replacement + reopen)
+## v42.67 — 2026-07-12 — Refactor: B2 (feature-batch): unified اعتماد الطلبات page (referral + replacement + reopen)
 
 Batch B item 2. Merges referral, replacement, AND reopen requests into ONE chronological, filterable
 approval list, replacing the old referral/replacement `section` tab switch.
@@ -7681,7 +8021,7 @@ each of the three kinds; sorts the merged list chronologically (newest first out
 sorts oldest-first in bulk/pending mode; shows kind-specific meta so rows are easy to tell apart;
 renders approve/deny actions only for pending rows the current reviewer is allowed to review.
 
-## v42.66 — 2026-07-12 — B1 (feature-batch): employee "طلب إعادة فتح الحالة" button + wiring
+## v42.66 — 2026-07-12 — Add: B1 (feature-batch): employee "طلب إعادة فتح الحالة" button + wiring
 
 Batch B item 1 (employee UI). Adds the self-service reopen button to a submitted answer in the
 inspection panel and wires it through XrayReferrals to the `submitReopenRequest` orchestrator (v42.65).
@@ -7748,7 +8088,7 @@ inspection panel and wires it through XrayReferrals to the `submitReopenRequest`
 `submitReopenRequest` import, `canReopenInstant`, `handleRequestReopen`, `onRequestReopen` prop,
 and the `SampleDetailPanel` passthrough of `onRequestReopen`.)
 
-## v42.65 — 2026-07-12 — B1 (feature-batch): reopen-request data model, fold arm, storage + orchestrator
+## v42.65 — 2026-07-12 — Change: B1 (feature-batch): reopen-request data model, fold arm, storage + orchestrator
 
 Batch B item 1 (data layer only — UI in v42.66). New employee self-service "reopen case" request
 flow modeled on the existing referral/replacement request pattern (now CAS-safe per Batch D). This
@@ -7960,7 +8300,7 @@ request, leaves the answer submitted, and logs a `reopen-requested` event; appro
 to draft and records an approved decision; deny leaves the answer submitted and records a denied
 decision; and re-approving an already-reviewed request is rejected (idempotency).
 
-## v42.64 — 2026-07-12 — C4 (feature-batch): scaffold employee-reopen-instant per-role setting
+## v42.64 — 2026-07-12 — Add: C4 (feature-batch): scaffold employee-reopen-instant per-role setting
 
 Batch C item 4. Added a new per-role feature toggle `employee-reopen-instant` (group
 "workspace"/إدارة مساحة العمل, mapped to the `employee-workspace` tab) as the schema + admin-UI
@@ -8019,7 +8359,7 @@ ANY submitted answer), which is untouched.
   "employee-reopen-instant": { guest: false, employee: false, supervisor: false, manager: false },
 ```
 
-## v42.63 — 2026-07-12 — C3.5 (feature-batch): gate shared referral browse-preset push on configure-referral-columns
+## v42.63 — 2026-07-12 — Change: C3.5 (feature-batch): gate shared referral browse-preset push on configure-referral-columns
 
 Batch C item 3, gap 5. In `XrayReferrals.tsx` the push of the shared admin browse-preset was
 hardcoded to `role === "admin"`. Replaced with the existing `configure-referral-columns` feature
@@ -8045,7 +8385,7 @@ this aligns "can edit columns" with "can publish the shared preset".
                 }
 ```
 
-## v42.62 — 2026-07-12 — C3.4 (feature-batch): gate ErrorLogSection on new view-error-log feature
+## v42.62 — 2026-07-12 — Add: C3.4 (feature-batch): gate ErrorLogSection on new view-error-log feature
 
 Batch C item 3, gap 4. `Settings/ErrorLogSection.tsx` hid the error log with a hardcoded
 `role !== "admin"`. Added a new featureId `view-error-log` (group "admin"/الإدارة والتقارير,
@@ -8118,7 +8458,7 @@ guard to `usePermissions().can("view-error-log")`.
   if (!can("view-error-log")) return null;
 ```
 
-## v42.61 — 2026-07-12 — C3.3 (feature-batch): gate TemplateBuilder on new manage-inspection-template feature
+## v42.61 — 2026-07-12 — Add: C3.3 (feature-batch): gate TemplateBuilder on new manage-inspection-template feature
 
 Batch C item 3, gap 3. `TemplateBuilder/index.tsx` blocked the page with a hardcoded
 `role !== "manager" && role !== "admin"`. Added a new featureId `manage-inspection-template`
@@ -8207,7 +8547,7 @@ import { hasFeature, readUserManagementState } from "../../../../auth/userManage
   }
 ```
 
-## v42.60 — 2026-07-12 — C3.2 (feature-batch): fix non-functional archive.closeMonth toggle (remove isAdmin hardcode)
+## v42.60 — 2026-07-12 — Fix (feature-batch): C3.2 non-functional archive.closeMonth toggle (remove isAdmin hardcode)
 
 Batch C item 3, gap 2. `Archive/index.tsx` computed `canCloseMonth` as
 `isAdmin && hasFeature(..., "archive.closeMonth")` — the leading `isAdmin &&` made the existing
@@ -8239,7 +8579,7 @@ stays admin-only, so no change out of the box.
   );
 ```
 
-## v42.59 — 2026-07-12 — C3.1 (feature-batch): gate sampling-stage unlock on new unlock-sampling-stage feature
+## v42.59 — 2026-07-12 — Add: C3.1 (feature-batch): gate sampling-stage unlock on new unlock-sampling-stage feature
 
 Batch C item 3, gap 1. `PhaseThreeSampling.tsx` computed `canUnlock = userRole === "admin"`.
 Added a new featureId `unlock-sampling-stage` (group "population"/معالجة المجتمع, mapped to the
@@ -8313,7 +8653,7 @@ import type { AuthRole } from "../../../../../auth/authTypes";
             );
 ```
 
-## v42.58 — 2026-07-12 — C2 (feature-batch): verify shipped defaults == Test6 export (no-op, documentation)
+## v42.58 — 2026-07-12 — Docs: C2 (feature-batch): verify shipped defaults == Test6 export (no-op, documentation)
 
 Batch C item 2. Re-read the user's real workspace export
 `C:\Users\WorkNStudy\Downloads\Test6\3-user-data\users.permissions.json` fresh and compared its
@@ -8330,7 +8670,7 @@ workspace seeded with these very defaults (identical users/roles too). The only 
 ("leave existing defaults for anything not in Test6") those stay as-is. This entry records the
 verification; there is no accompanying source diff.
 
-## v42.57 — 2026-07-12 — C1 (feature-batch): bake موروث sub-tab access into explicit rows, remove inheritance fallback
+## v42.57 — 2026-07-12 — Refactor (feature-batch): C1 bake موروث sub-tab access into explicit rows, remove inheritance fallback
 
 Batch C item 1. The 4 sub-tabs `population/process`, `population/browse`, `reports/reports`,
 `reports/kpi` previously had NO explicit rows in `createDefaultPermissions()` and resolved their
@@ -8500,7 +8840,7 @@ test("C1 regression: 4 formerly-inherited sub-tabs keep their effective access f
 });
 ```
 
-## v42.56 — 2026-07-12 — D (feature-batch): CAS-protect savePopulationConfig (population config)
+## v42.56 — 2026-07-12 — Security: D (feature-batch): CAS-protect savePopulationConfig (population config)
 
 Batch D. `config.json` (system/custom fields, mapping templates, sampling rules, employee
 allocations) is a shared, multi-writer file — any admin on any PC can edit it. Routed
@@ -8599,7 +8939,7 @@ into the loaded config object (honest test of the whole-object-replace contract 
 merge claimed), and **two concurrent config saves survive without throwing or corrupting the file
 (cross-machine CAS)**, asserting the persisted result is exactly one writer's intact payload.
 
-## v42.55 — 2026-07-12 — D (feature-batch): CAS-protect updateMonthStatus (month.manifest.json)
+## v42.55 — 2026-07-12 — Security: D (feature-batch): CAS-protect updateMonthStatus (month.manifest.json)
 
 Batch D. `updateMonthStatus` is a read-modify-write on the shared `month.manifest.json`: it advances
 the month's status monotonically (raw-saved → processed-saved → sampled → distributed). Two PCs can
@@ -8732,7 +9072,7 @@ export async function updateMonthStatus(
 }
 ```
 
-## v42.54 — 2026-07-12 — D (feature-batch): CAS-protect the admin shared browse preset
+## v42.54 — 2026-07-12 — Security: D (feature-batch): CAS-protect the admin shared browse preset
 
 Batch D. `saveAdminBrowseDatasetPreset` writes `admin-shared.browse-preset.json` — a **shared,
 multi-writer** file: any admin on any PC can change browse-view column order/visibility. It is a
@@ -8846,7 +9186,7 @@ export async function saveAdminBrowseDatasetPreset(
 }
 ```
 
-## v42.53 — 2026-07-12 — D (feature-batch): CAS-protect supervisor decision appends (approvals + referral)
+## v42.53 — 2026-07-12 — Security: D (feature-batch): CAS-protect supervisor decision appends (approvals + referral)
 
 Batch D (cross-machine write safety). `appendDecisionEvent` is the shared write path behind
 `referralStorage.updateReferralStatus`/`updateReplacementStatus` — every referral/replacement
@@ -8999,7 +9339,7 @@ different requests both persist (cross-machine CAS)** — the referral-side proo
 `appendDecisionEvent`'s CAS protection is transitively sufficient (referralStorage itself needed no
 code change, per the entry above).
 
-## v42.52 — 2026-07-12 — A4 (feature-batch): restrict the referral-recipient picker to employee/supervisor
+## v42.52 — 2026-07-12 — Change: A4 (feature-batch): restrict the referral-recipient picker to employee/supervisor
 
 **File:** `src/data/distribution/bulkAssignment.ts`
 
@@ -9045,7 +9385,7 @@ sample-assignment context.
     .sort((a, b) => a.displayName.localeCompare(b.displayName, "ar"));
 ```
 
-## v42.51 — 2026-07-12 — A3 (feature-batch): short Latin month labels across every month-filter select
+## v42.51 — 2026-07-12 — Change: A3 (feature-batch): short Latin month labels across every month-filter select
 
 Audited every month-related filter/selector in the app (grep for `listMonthFolders`/`MonthFolderInfo`/
 `selectedMonth` across Population browse, Archive, Reports, KPI, ReferralApproval, XrayReferrals,
@@ -9252,7 +9592,7 @@ not verifiable via the running app.
             ))}
 ```
 
-## v42.50 — 2026-07-12 — A2 (feature-batch): curated browse-view defaults for risk-raw/bi-raw/population
+## v42.50 — 2026-07-12 — Change: A2 (feature-batch): curated browse-view defaults for risk-raw/bi-raw/population
 
 **File:** `src/components/Sidebar/Tabs/Population/index.tsx`
 
@@ -9415,7 +9755,7 @@ function defaultColumnOrderKeys(
         );
 ```
 
-## v42.49 — 2026-07-12 — A1 (feature-batch): expose levelOneEmployee/levelTwoEmployee as mappable system fields
+## v42.49 — 2026-07-12 — Add: A1 (feature-batch): expose levelOneEmployee/levelTwoEmployee as mappable system fields
 
 **File:** `src/data/population/populationConfig.ts`
 
@@ -9443,7 +9783,7 @@ A item 1): no entries added to `DEFAULT_MAPPING_TEMPLATE.columnMappings` or `biC
 ];
 ```
 
-## v42.48 — 2026-07-12 — fix(demo): seed `qualityImageResult` so demo KPIs render non-zero (QA hardening-2026-07-08, Rework Item 1)
+## v42.48 — 2026-07-12 — Fix (demo): Seed `qualityImageResult` so demo KPIs render non-zero (QA hardening-2026-07-08, Rework Item 1)
 
 **File:** `src/data/workspace/demoWorkspace.ts`
 
@@ -9587,7 +9927,7 @@ selection — out of scope here, left as a separate follow-up per the review.
   }
 ```
 
-## v42.47 — 2026-07-11 — E2 (Batch 5): chart axis labels + legends in the executive report chart primitives
+## v42.47 — 2026-07-11 — Change: E2 (Batch 5): chart axis labels + legends in the executive report chart primitives
 
 Closes the E2 gap identified in the hardening audit: `charts.ts` had 10 `<text>` elements
 (group/column/row labels, center/percentage readouts) but no dedicated axis-reference or legend
@@ -10295,7 +10635,7 @@ Plus one `it()` per chart type (added at the end of each existing `describe()` b
 the legend/axis-ticks addition, the single-item skip case, and (for `donut`/`groupedBars`) the
 escaping check — see the file for the exact assertions.
 
-## v42.43 — 2026-07-11 — E1 (Batch 5): shared `useFocusTrap` hook + Testing Library unit test
+## v42.43 — 2026-07-11 — Chore: E1 (Batch 5): shared `useFocusTrap` hook + Testing Library unit test
 
 Accessibility pass groundwork. The 8 `role="dialog"` components had ad-hoc or missing focus
 management: `ConfirmDialog` and `AuthGate`'s admin modal each hand-rolled a slightly different
@@ -10327,7 +10667,7 @@ last focusable wraps to the first, Shift+Tab from the first wraps to the last, E
 `onEscape` callback, and unmounting restores focus to the trigger element that was focused before
 the trap activated. Also asserts initial focus lands on the first focusable on open.
 
-## v42.44 — 2026-07-11 — E1 (Batch 5): adopt useFocusTrap in ConfirmDialog + AuthGate admin modal
+## v42.44 — 2026-07-11 — Change: E1 (Batch 5): adopt useFocusTrap in ConfirmDialog + AuthGate admin modal
 
 Replaces the two hand-rolled focus traps with the shared `useFocusTrap` hook. Both had a
 partial trap (`ConfirmDialog` also handled Escape + focus-restore; `AuthGate`'s admin modal
@@ -10414,7 +10754,7 @@ button's `disabled` prop. Fixed by deriving `disabled` from the already-ticking
 // After:  disabled={lockoutUntil !== null && lockoutSecondsLeft > 0}
 ```
 
-## v42.45 — 2026-07-11 — E1 (Batch 5): adopt useFocusTrap in EmployeeWorkspace dialogs + icon-button aria-labels
+## v42.45 — 2026-07-11 — Change: E1 (Batch 5): adopt useFocusTrap in EmployeeWorkspace dialogs + icon-button aria-labels
 
 Adopts the shared hook in the four EmployeeWorkspace modal dialogs and adds accessible names to
 two icon-only dismiss buttons that had none.
@@ -10457,7 +10797,7 @@ return (
     <button ... aria-label="إغلاق" onClick={() => setStatusMsg(null)}><X size={14} /></button>
 ```
 
-## v42.46 — 2026-07-11 — E1 (Batch 5): adopt useFocusTrap in Archive, WorkspaceGate + FieldDropDialog
+## v42.46 — 2026-07-11 — Change: E1 (Batch 5): adopt useFocusTrap in Archive, WorkspaceGate + FieldDropDialog
 
 Completes E1 hook adoption across the remaining four `role="dialog"` instances (the 8th file,
 `WorkspaceGate.tsx`, also carries the non-modal `FirstRunChecklist` `role="complementary"`
@@ -10501,7 +10841,7 @@ return (
   <div ref={dialogRef} className="arc-modal-backdrop" role="dialog" aria-modal="true">
 ```
 
-## v42.42 — 2026-07-11 — D3 (Batch 3): import-mapping edge-case tests (column-hint resolution)
+## v42.42 — 2026-07-11 — Chore: D3 (Batch 3): import-mapping edge-case tests (column-hint resolution)
 
 D3's target is `buildColumnHintsFromRows` — the function that resolves a workbook's actual Excel
 column headers against `PopulationConfig.systemFields` + `mappingTemplates[0].columnMappings` /
@@ -10612,7 +10952,7 @@ Unit tests for `buildColumnHintsFromRows` covering the D3 spec:
 
 ---
 
-## v42.41 — 2026-07-11 — D1 (Batch 3): component + end-to-end workflow tests
+## v42.41 — 2026-07-11 — Chore: D1 (Batch 3): component + end-to-end workflow tests
 
 Adds workflow tests (one happy + one failure per stage) across the full pipeline plus
 characterization tests for the two named UI surfaces. All file I/O uses the in-memory
@@ -10653,7 +10993,7 @@ WORKER BOUNDARY noted in the header: advancing via a real import needs the Excel
 the node/jsdom env cannot run, so real progression is characterized through the pure phase-status
 function rather than by driving an upload.
 
-## v42.40 — 2026-07-11 — D2 (Batch 3): XSS regression tests for all report builders + shared payload fixture
+## v42.40 — 2026-07-11 — Security: D2 (Batch 3): XSS regression tests for all report builders + shared payload fixture
 
 Adds a shared payload corpus and one XSS test file per report builder, asserting injected markup
 (via port names, employee display names, and answer/label fields) is escaped in the output and never
@@ -10721,7 +11061,7 @@ render), reviewer display names (`employeeDisplayNames` map, wired through a sub
 distribution entry so a reviewer profile renders), and answer/label fields (`notes` on the rows).
 Every block asserts `findLiveInjection` is null and the escaped marker is present.
 
-## v42.39 — 2026-07-11 — D2 (Batch 3): close two report-builder escaping gaps found in the XSS audit
+## v42.39 — 2026-07-11 — Security: D2 (Batch 3): close two report-builder escaping gaps found in the XSS audit
 
 D2 production audit swept `src/data/reporting/executive/**`, the deck2 builder, and the
 management report builder for template-literal interpolations of *model/user* data that bypass
@@ -10825,7 +11165,7 @@ import {
     <div class="title-sub">تقرير شهر: ${esc(model.summary.periodId)}</div>
 ```
 
-## v42.38 — 2026-07-08 — C1 (Batch 2): seed realistic demo data (month + sample + distribution + answers)
+## v42.38 — 2026-07-08 — Change: C1 (Batch 2): seed realistic demo data (month + sample + distribution + answers)
 
 **File:** `src/data/workspace/demoWorkspace.ts`
 
@@ -10884,7 +11224,7 @@ export async function createDemoWorkspace(): Promise<DirectoryHandleLike> {
 // constants added above — see file for the full seeding pipeline.
 ```
 
-## v42.37 — 2026-07-08 — C6 (Batch 2): label-coverage audit, WorkspaceGate.tsx
+## v42.37 — 2026-07-08 — Change: C6 (Batch 2): label-coverage audit, WorkspaceGate.tsx
 
 **File:** `src/data/labels/labelsStore.ts`
 
@@ -10937,7 +11277,7 @@ export function WorkspacePicker({ children }: WorkspacePickerProps) {
   // … all replaced with labels.wsgate_* — see file for each call site …
 ```
 
-## v42.36 — 2026-07-08 — C6 (Batch 2): label-coverage audit, App.tsx
+## v42.36 — 2026-07-08 — Change: C6 (Batch 2): label-coverage audit, App.tsx
 
 **File:** `src/data/labels/labelsStore.ts`
 
@@ -10996,7 +11336,7 @@ setBakWarning(
 // … all of the above now read from getLabels()/useLabels() — see file for each call site.
 ```
 
-## v42.35 — 2026-07-08 — C3 (Batch 2): guard the first-run card against short viewports
+## v42.35 — 2026-07-08 — Change: C3 (Batch 2): guard the first-run card against short viewports
 
 **File:** `src/data/workspace/WorkspaceGate.css`
 
@@ -11019,7 +11359,7 @@ heights it is unchanged.
 }
 ```
 
-## v42.34 — 2026-07-08 — C3 (Batch 2): first-run checklist styles
+## v42.34 — 2026-07-08 — Change: C3 (Batch 2): first-run checklist styles
 
 **File:** `src/data/workspace/WorkspaceGate.css`
 
@@ -11045,7 +11385,7 @@ hex fallbacks, mirroring the rest of this file.
 .firstrun-checklist { position: fixed; inset-inline-end: 24px; bottom: 96px; /* …see file… */ }
 ```
 
-## v42.33 — 2026-07-08 — C3 (Batch 2): first-run admin checklist in WorkspaceGate
+## v42.33 — 2026-07-08 — Change: C3 (Batch 2): first-run admin checklist in WorkspaceGate
 
 **File:** `src/data/workspace/WorkspaceGate.tsx`
 
@@ -11082,7 +11422,7 @@ supporting imports (`Check`/`Keyboard`/`Rocket`/`X` icons, `useLabels`, `listMon
 Plus a new `FirstRunChecklist` component + module helpers (`readDismissed`, `navigateToTab`,
 `hasNonDefaultUser`, `permissionsAreCustomized`) appended to the file.
 
-## v42.32 — 2026-07-08 — C3 (Batch 2): add first-run admin-checklist label keys
+## v42.32 — 2026-07-08 — Add: C3 (Batch 2): add first-run admin-checklist label keys
 
 **File:** `src/data/labels/labelsStore.ts`
 
@@ -11105,7 +11445,7 @@ user-facing string routes through an admin-overridable label key.
 } as const;
 ```
 
-## v42.31 — 2026-07-08 — C2 (Batch 2): wire the تقرير الإدارة Reports card live (remove "قريباً")
+## v42.31 — 2026-07-08 — Add (Batch 2): C2 wire the تقرير الإدارة Reports card live (remove "قريباً")
 
 **File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
 
@@ -11177,7 +11517,7 @@ now-unused `Settings2` icon from the `lucide-react` import (the card's old tag u
 
 ---
 
-## v42.30 — 2026-07-08 — C2 (Batch 2): new management-report builder module
+## v42.30 — 2026-07-08 — Add: C2 (Batch 2): new management-report builder module
 
 **File:** `src/data/reporting/management/managementReport.ts` (new file)
 
@@ -11200,7 +11540,7 @@ accuracy table, priority actions list, data-quality footer.
 // See src/data/reporting/management/managementReport.ts — buildManagementReport / openManagementReport
 ```
 
-## v42.29 — 2026-07-08 — C2 (Batch 2): add management-report (تقرير الإدارة) label keys
+## v42.29 — 2026-07-08 — Add: C2 (Batch 2): add management-report (تقرير الإدارة) label keys
 
 **File:** `src/data/labels/labelsStore.ts`
 
@@ -11225,7 +11565,7 @@ through an admin-overridable label key (CLAUDE.md convention), not a hard-coded 
 } as const;
 ```
 
-## v42.24 — 2026-07-08 — B5 (Batch 1): DataTable header truncation fix, numeric-column alignment, filter-row consistency
+## v42.24 — 2026-07-08 — Fix: B5 (Batch 1): DataTable header truncation fix, numeric-column alignment, filter-row consistency
 
 **File:** `src/components/DataTable/utils.ts`
 
@@ -11468,7 +11808,7 @@ gzip, in line with the existing baseline).
 
 ---
 
-## v42.25 — 2026-07-08 — B6 (Batch 1) scaffold decision + consumption, file 1/4: EmployeeWorkspace.css
+## v42.25 — 2026-07-08 — Add: B6 (Batch 1) scaffold decision + consumption, file 1/4: EmployeeWorkspace.css
 
 **Plan deviation (documented per B6 sequencing: "token scaffold" step, done after B5 per the
 mandated B4 -> B6-scaffold -> B5 -> B6-consumption order):** the approved plan says to add a
@@ -11551,7 +11891,7 @@ that `--sp-1`/`--sp-2`/`--sp-4`/`--sp-5` resolve to `4px`/`8px`/`16px`/`20px` as
 
 ---
 
-## v42.26 — 2026-07-08 — B6 (Batch 1) consumption, file 2/4: Reports.css
+## v42.26 — 2026-07-08 — Change: B6 (Batch 1) consumption, file 2/4: Reports.css
 
 **File:** `src/components/Sidebar/Tabs/Reports/Reports.css`
 
@@ -11592,7 +11932,7 @@ px in padding/margin/gap)`). `npm run lint` and `npm run test:run` green (364/36
 
 ---
 
-## v42.27 — 2026-07-08 — B6 (Batch 1) consumption, file 3/4: Population.css
+## v42.27 — 2026-07-08 — Change: B6 (Batch 1) consumption, file 3/4: Population.css
 
 **File:** `src/components/Sidebar/Tabs/Population/Population.css`
 
@@ -11629,7 +11969,7 @@ raw px in padding/margin/gap)`). `npm run lint` and `npm run test:run` green (36
 
 ---
 
-## v42.28 — 2026-07-08 — B6 (Batch 1) consumption, file 4/4: UserManagement.css
+## v42.28 — 2026-07-08 — Change: B6 (Batch 1) consumption, file 4/4: UserManagement.css
 
 **File:** `src/components/Sidebar/Tabs/UserManagement/UserManagement.css`
 
@@ -11663,7 +12003,7 @@ unannotated raw px in padding/margin/gap)`). `npm run lint` and `npm run test:ru
 
 ---
 
-## v42.23 — 2026-07-08 — B4 (Batch 1) regression guard: scripts/check-hex-literals.mjs
+## v42.23 — 2026-07-08 — Fix: B4 (Batch 1) regression guard: scripts/check-hex-literals.mjs
 
 **File:** `scripts/check-hex-literals.mjs` (new)
 
@@ -11721,7 +12061,7 @@ throwaway change. `npm run lint`, `npm run check:hex-literals`, and `npm run tes
 
 ---
 
-## v42.22 — 2026-07-08 — B4 (Batch 1), file 4/4: hex-literal token sweep of Population.css
+## v42.22 — 2026-07-08 — Change: B4 (Batch 1), file 4/4: hex-literal token sweep of Population.css
 
 **File:** `src/components/Sidebar/Tabs/Population/Population.css`
 
@@ -11798,7 +12138,7 @@ confirmed the Population tab renders identically (`.population-page` computed `c
 
 ---
 
-## v42.21 — 2026-07-08 — B4 (Batch 1), file 3/4: hex-literal token sweep of DataTable.css
+## v42.21 — 2026-07-08 — Change: B4 (Batch 1), file 3/4: hex-literal token sweep of DataTable.css
 
 **File:** `src/components/DataTable/DataTable.css`
 
@@ -11879,7 +12219,7 @@ Full hex → token mapping applied: `#009ADE`→`--c-sky`, `#FFFFFF`→`--c-surf
 
 ---
 
-## v42.20 — 2026-07-08 — B4 (Batch 1), file 2/4: hex-literal token sweep of Reports.css
+## v42.20 — 2026-07-08 — Change: B4 (Batch 1), file 2/4: hex-literal token sweep of Reports.css
 
 **File:** `src/components/Sidebar/Tabs/Reports/Reports.css`
 
@@ -11945,7 +12285,7 @@ Full hex → token mapping applied in this file: `#0E2444`/`#0e2444`→`--c-navy
 
 ---
 
-## v42.19 — 2026-07-08 — B4 (Batch 1), file 1/4: hex-literal token sweep of EmployeeWorkspace.css
+## v42.19 — 2026-07-08 — Change: B4 (Batch 1), file 1/4: hex-literal token sweep of EmployeeWorkspace.css
 
 **File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/EmployeeWorkspace.css`
 
@@ -12032,7 +12372,7 @@ passing); verified via preview `getComputedStyle` that `--c-navy`, `--c-emerald`
 
 ---
 
-## v42.18 — 2026-07-08 — B4 (Batch 1) prep: add "Extended accents" tokens to index.css for the hex-literal sweep
+## v42.18 — 2026-07-08 — Add: B4 (Batch 1) prep: add "Extended accents" tokens to index.css for the hex-literal sweep
 
 **File:** `src/index.css`
 
@@ -12087,7 +12427,7 @@ only adds the tokens; the sweep commits that follow reference them via `var(--to
 
 ---
 
-## v42.17 — 2026-07-08 — D7 (Batch 4): version stamp (single source of truth via Vite `define`) + docs/RELEASE_CHECKLIST.md
+## v42.17 — 2026-07-08 — Docs: D7 (Batch 4): version stamp (single source of truth via Vite `define`) + docs/RELEASE_CHECKLIST.md
 
 **File:** `package.json`
 
@@ -12274,7 +12614,7 @@ pre-existing constant for the auth subsystem's own internal versioning, not the 
 version — noted here to avoid confusion, not renamed (out of scope, no plan instruction to
 consolidate it).
 
-## v42.16 — 2026-07-08 — D6 (Batch 4): add docs/SECURITY_MODEL.md — the one-page risk-acceptance doc (restored item, dropped by the earlier draft)
+## v42.16 — 2026-07-08 — Docs (Batch 4): D6 add docs/SECURITY_MODEL.md — the one-page risk-acceptance doc (restored item, dropped by the earlier draft)
 
 **File:** `docs/SECURITY_MODEL.md` (new)
 
@@ -12307,7 +12647,7 @@ closes with an explicit "Accepted by / date" line for audit-trail purposes.
 
 No production code changes — doc-only item, per the plan's acceptance criteria.
 
-## v42.15 — 2026-07-08 — D4 (Batch 4): add a CI workflow gating push/PR on typecheck + lint + test + build
+## v42.15 — 2026-07-08 — Chore: D4 (Batch 4): add a CI workflow gating push/PR on typecheck + lint + test + build
 
 **File:** `.github/workflows/ci.yml` (new)
 
@@ -12330,7 +12670,7 @@ SheetJS CDN being reachable from GitHub's runners, and after C5 (EDIT_LOG trunca
 `npm run build` step in this workflow exercises the truncation path, per the plan's hard
 sequencing (D5 before D4; C5 before/with D4).
 
-## v42.14 — 2026-07-08 — C5 (Batch 4): truncate EDIT_LOG.md at build time so the ChangeLog tab stops inflating the bundle by the full ~700 kB log
+## v42.14 — 2026-07-08 — Change: C5 (Batch 4): truncate EDIT_LOG.md at build time so the ChangeLog tab stops inflating the bundle by the full ~700 kB log
 
 **File:** `src/build/editLogTruncatePlugin.ts` (new)
 
@@ -12408,7 +12748,7 @@ Verified both already resolved prior to this batch: `docs/EDIT_LOG.md` contains 
 (checked via a byte scan) and `.gitattributes` already has `*.md text` (plus `*.ts`/`*.tsx`/
 `*.css`/`*.json`). No changes needed for either sub-item.
 
-## v42.13 — 2026-07-08 — D5 (Batch 4): vendor the SheetJS xlsx tarball instead of fetching it from the CDN at install time
+## v42.13 — 2026-07-08 — Chore: D5 (Batch 4): vendor the SheetJS xlsx tarball instead of fetching it from the CDN at install time
 
 **File:** `vendor/xlsx-0.20.3.tgz` (new)
 
@@ -12470,7 +12810,7 @@ instead of the CDN URL. Lockfile committed.
 - The `xlsx` dependency is **vendored** at `vendor/xlsx-0.20.3.tgz` (`package.json` points at `file:vendor/xlsx-0.20.3.tgz`) — originally sourced from the SheetJS CDN tarball (`https://cdn.sheetjs.com/xlsx-0.20.3/...`), not the npm registry. Vendoring means `npm ci` no longer needs network access to that CDN (required for CI, see `.github/workflows/ci.yml`). Don't "upgrade" it to the stale npm-registry `xlsx` package; see `vendor/README.md` for the upgrade procedure.
 ```
 
-## v42.12 — 2026-07-08 — Referral approval rework: fix duplicate bulk-result banner, friendly labels in bulk confirm modal
+## v42.12 — 2026-07-08 — Fix: Referral approval rework: fix duplicate bulk-result banner, friendly labels in bulk confirm modal
 
 **File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/index.tsx`
 
@@ -12541,7 +12881,7 @@ import RequestCard, { isReferral } from "./RequestCard";
 
 The bulk confirm modal previously showed raw request IDs (e.g. `req-a1b2c3`), not useful to a reviewer deciding whether to confirm. `describeSelected` mirrors the exact label format `useApprovalData.ts`'s `bulkReferralDecision`/`bulkReplacementDecision` compute for `BulkOutcome.label`, so the pre-confirm list and post-action result banner are visually consistent.
 
-## v42.11 — 2026-07-07 — Referral approval rework: suppress known-safe lint rules
+## v42.11 — 2026-07-07 — Chore: Referral approval rework: suppress known-safe lint rules
 
 **File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/RequestCard.tsx`
 
@@ -12561,7 +12901,7 @@ The bulk confirm modal previously showed raw request IDs (e.g. `req-a1b2c3`), no
 
 **After:** added the same `// eslint-disable-next-line react-hooks/set-state-in-effect` suppression, mirroring the deleted monolithic file's original comment for this exact line.
 
-## v42.10 — 2026-07-07 — Referral approval rework (11/11): orchestration + CSS, retire monolithic file
+## v42.10 — 2026-07-07 — Refactor: Referral approval rework (11/11): orchestration + CSS, retire monolithic file
 
 **File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval.tsx`
 
@@ -12577,7 +12917,7 @@ The bulk confirm modal previously showed raw request IDs (e.g. `req-a1b2c3`), no
 
 ---
 
-## v42.9 — 2026-07-07 — Referral approval rework (10/11): cross-month HistoryView
+## v42.9 — 2026-07-07 — Change: Referral approval rework (10/11): cross-month HistoryView
 
 **File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/HistoryView.tsx`
 
@@ -12587,7 +12927,7 @@ The bulk confirm modal previously showed raw request IDs (e.g. `req-a1b2c3`), no
 
 ---
 
-## v42.8 — 2026-07-07 — Referral approval rework (9/11): extract ReviewModal
+## v42.8 — 2026-07-07 — Refactor: Referral approval rework (9/11): extract ReviewModal
 
 **File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/ReviewModal.tsx`
 
@@ -12597,7 +12937,7 @@ The bulk confirm modal previously showed raw request IDs (e.g. `req-a1b2c3`), no
 
 ---
 
-## v42.7 — 2026-07-07 — Referral approval rework (8/11): RequestList with bulk actions
+## v42.7 — 2026-07-07 — Change: Referral approval rework (8/11): RequestList with bulk actions
 
 **File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/RequestList.tsx`
 
@@ -12607,7 +12947,7 @@ The bulk confirm modal previously showed raw request IDs (e.g. `req-a1b2c3`), no
 
 ---
 
-## v42.6 — 2026-07-07 — Referral approval rework (7/11): SummaryBar component
+## v42.6 — 2026-07-07 — Change: Referral approval rework (7/11): SummaryBar component
 
 **File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/SummaryBar.tsx`
 
@@ -12617,7 +12957,7 @@ The bulk confirm modal previously showed raw request IDs (e.g. `req-a1b2c3`), no
 
 ---
 
-## v42.5 — 2026-07-07 — Referral approval rework (6/11): unified RequestCard
+## v42.5 — 2026-07-07 — Refactor: Referral approval rework (6/11): unified RequestCard
 
 **File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/RequestCard.tsx`
 
@@ -12627,7 +12967,7 @@ The bulk confirm modal previously showed raw request IDs (e.g. `req-a1b2c3`), no
 
 ---
 
-## v42.4 — 2026-07-07 — Referral approval rework (5/11): RequestTimeline component
+## v42.4 — 2026-07-07 — Change: Referral approval rework (5/11): RequestTimeline component
 
 **File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/RequestTimeline.tsx`
 
@@ -12637,7 +12977,7 @@ The bulk confirm modal previously showed raw request IDs (e.g. `req-a1b2c3`), no
 
 ---
 
-## v42.3 — 2026-07-07 — Referral approval rework (4/11): useApprovalData hook
+## v42.3 — 2026-07-07 — Change: Referral approval rework (4/11): useApprovalData hook
 
 **File:** `src/components/Sidebar/Tabs/EmployeeWorkspace/views/ReferralApproval/useApprovalData.ts`
 
@@ -12647,7 +12987,7 @@ The bulk confirm modal previously showed raw request IDs (e.g. `req-a1b2c3`), no
 
 ---
 
-## v42.2 — 2026-07-07 — Referral approval rework (3/11): wire decision history into referralStorage
+## v42.2 — 2026-07-07 — Add: Referral approval rework (3/11): wire decision history into referralStorage
 
 **File:** `src/data/referral/referralTypes.ts`
 
@@ -12669,7 +13009,7 @@ The bulk confirm modal previously showed raw request IDs (e.g. `req-a1b2c3`), no
 
 ---
 
-## v42.1 — 2026-07-07 — Referral approval rework (2/11): idempotency + ownership guards
+## v42.1 — 2026-07-07 — Change: Referral approval rework (2/11): idempotency + ownership guards
 
 **File:** `src/data/approvals/approvalGuards.ts`
 
@@ -12679,7 +13019,7 @@ The bulk confirm modal previously showed raw request IDs (e.g. `req-a1b2c3`), no
 
 ---
 
-## v42.0 — 2026-07-07 — Referral approval rework (1/11): append-only decision-event log
+## v42.0 — 2026-07-07 — Change: Referral approval rework (1/11): append-only decision-event log
 
 **File:** `src/data/approvals/approvalTypes.ts`
 
@@ -12693,7 +13033,7 @@ The bulk confirm modal previously showed raw request IDs (e.g. `req-a1b2c3`), no
 
 **After:** added `appendDecisionEvent`, `mergeDecisionHistory`, `effectiveDecision`.
 
-## v41.4 — 2026-07-05 — Fix auto-backup NotFoundError race during concurrent saves
+## v41.4 — 2026-07-05 — Fix: auto-backup NotFoundError race during concurrent saves
 
 **Symptom:** `تعذر إنشاء النسخة الاحتياطية التلقائية: A requested file or directory could not
 be found at the time an operation was processed.` shown by `App.tsx:107` while the user is
@@ -12888,7 +13228,7 @@ Also added `const LEGACY_SYSTEM_ROOT = ".system";` near the top constants (match
 
 ---
 
-## v41.37 — 2026-07-05 — Make Hamilton tie-break locale-independent (sample reproducibility)
+## v41.37 — 2026-07-05 — Change: Make Hamilton tie-break locale-independent (sample reproducibility)
 
 > Renumbered from v41.27 (duplicate identifier) — see v41.38.
 
@@ -12935,7 +13275,7 @@ Re-verification of historical draws should use the code version that produced th
 
 ---
 
-## v41.36 — 2026-07-05 — Fix browse-preset save self-deadlock (lock-key collision with safeWriteJson)
+## v41.36 — 2026-07-05 — Fix: browse-preset save self-deadlock (lock-key collision with safeWriteJson)
 
 > Renumbered from v41.26 (duplicate identifier) — see v41.38.
 
@@ -12987,7 +13327,7 @@ fix) and that concurrent saves of different datasets both persist without droppi
 
 ---
 
-## v41.3 — 2026-07-05 — Remove stage-port totals band; fix pre-existing grid overflow bug
+## v41.3 — 2026-07-05 — Remove: stage-port totals band; fix pre-existing grid overflow bug
 
 Removed the top `.v2-totals-band` from both new stage-port slides (population and sample, per
 user request) so the 2×2 card grid fills the freed vertical space. This exposed a real,
@@ -13042,7 +13382,7 @@ width (1120px, reached at any viewport ≥ ~1372px wide — a stable, reproducib
 
 ---
 
-## v41 — 2026-07-05 — Add stage×port grid population and sample slides to deck2
+## v41 — 2026-07-05 — Add: stage×port grid population and sample slides to deck2
 
 Task 3 of the deck2 stage×port grid plan: builds the two new slides on top of Task 1's
 `collectStagePortStats` collector and Task 2's CSS/sizing constants, and wires them into
@@ -13072,7 +13412,7 @@ asserting both new slide titles/ids appear in production output, one asserting t
 population card's totals row shows the pinned `stage.population` alongside the summed
 سليمة/اشتباه columns.
 
-## v41.1 — 2026-07-05 — Tune stage-card table budget against live-measured render (Task 4)
+## v41.1 — 2026-07-05 — Chore: Tune stage-card table budget against live-measured render (Task 4)
 
 Task 4 of the deck2 stage×port grid plan: live-measured `.v2-stage-port-card` table vs.
 card heights in the dev preview (`/deck-preview.html`) on both new slides
@@ -13113,7 +13453,7 @@ export let STAGE_CARD_TABLE_BUDGET_PX = 150;
 export let STAGE_CARD_TABLE_BUDGET_PX = 177;
 ```
 
-## v41.2 — 2026-07-05 — deck2 stage×port grid: collector (Task 1) + CSS/constants (Task 2)
+## v41.2 — 2026-07-05 — Change: Deck2 stage×port grid: collector (Task 1) + CSS/constants (Task 2)
 
 Retroactive log entry for Tasks 1–2 of the deck2 stage×port grid plan (Tasks 3–4 are logged
 above as v41/v41.1; this entry fills the gap so all four tasks are documented). Adds two new
@@ -13212,7 +13552,7 @@ export let STAGE_CARD_TABLE_BUDGET_PX = 150; // tuned to 177 in Task 4 — see v
 Verified: `npx tsc -b` clean; `npx vitest run src/data/reporting/executive/deck2/` passing
 throughout (3/3 in `stagePortStats.test.ts`, full suite green after Tasks 3–4 landed).
 
-## v40.9 — 2026-07-05 — Fix remaining light-mode table contrast; sun/moon slider replaces text toggle
+## v40.9 — 2026-07-05 — Fix: remaining light-mode table contrast; sun/moon slider replaces text toggle
 
 Two more reports against the light theme: (1) port-result tables (`.v2-port-col .deck-table
 th`) still had white header text — its light override changed only the background, not the
@@ -13289,7 +13629,7 @@ capture artifact, not a real CSS bug.)
 
 ---
 
-## v40.8 — 2026-07-05 — Fix cover-slide overlap; group variant switcher with print toggle
+## v40.8 — 2026-07-05 — Fix: cover-slide overlap; group variant switcher with print toggle
 
 Two dev-preview bugs on the deck2 cover slide, reported against a screenshot: (1) the
 centered title-slide content (headline, meta grid) overlapped the absolutely-positioned
@@ -13401,7 +13741,7 @@ theme.ts).
 
 ---
 
-## v40.7 — 2026-07-05 — Fix bidi-reversed variant-switcher label ("4 / 1" instead of "1 / 4")
+## v40.7 — 2026-07-05 — Fix: bidi-reversed variant-switcher label ("4 / 1" instead of "1 / 4")
 
 The style-variant switcher's counter (top-left corner of each slide in variant-preview
 mode) read "1 / 4" in the DOM but rendered visually as "4 / 1", because the document is
@@ -13438,7 +13778,7 @@ switcher's counter was missing the same guard.
 
 ---
 
-## v40.6 — 2026-07-05 — Move light/dark toggle into the deck toolbar; fix light-theme white-on-white text
+## v40.6 — 2026-07-05 — Fix: Move light/dark toggle into the deck toolbar; fix light-theme white-on-white text
 
 The dev-preview harness (`deck-preview.html`) drove the deck's light/dark toggle from a
 button in the outer chrome bar, above the iframe — not inside the deck's own toolbar next
@@ -13565,7 +13905,7 @@ btnTheme.addEventListener("click", () => {
 
 ---
 
-## v40.5 — 2026-07-05 — Retroactive log entry: test-hygiene cleanup in deckStyleChoices.test.ts
+## v40.5 — 2026-07-05 — Chore: Retroactive log entry: test-hygiene cleanup in deckStyleChoices.test.ts
 
 The final whole-branch review of the deck2-style-switcher workstream caught that commit
 `8155b0bd` (a Task 2 implementer's fix for a `tsc -b` failure left over from Task 1/v39)
@@ -13596,7 +13936,7 @@ import { mkdtempSync, rmSync, existsSync, writeFileSync } from "node:fs";
 
 ---
 
-## v40.4 — 2026-07-05 — Fix the 2 failing assertions from v40.3's known finding
+## v40.4 — 2026-07-05 — Fix: the 2 failing assertions from v40.3's known finding
 
 Resolves v40.3's reported (not silently patched) test failure: the two production-path
 assertions used a bare `not.toContain("v2-variant-stack")` check, which false-failed
@@ -13661,7 +14001,7 @@ describe("buildExecutiveDeckV2 — production path (no opts)", () => {
 
 ---
 
-## v40.3 — 2026-07-05 — Production-path regression test for deck2 variant switcher
+## v40.3 — 2026-07-05 — Fix: Production-path regression test for deck2 variant switcher
 
 Adds the regression test that locks in the single most important correctness property of the deck2-style-switcher workstream: `buildExecutiveDeckV2` called with no `opts` (or `variantPreview: false`) must produce byte-identical output to before Tasks 1-8, with no variant-switcher markup leaking into production output. Also verifies preview mode (`variantPreview: true`) emits exactly one `.v2-variant-stack` per slide with 4 panels each. Task 9 (final task) of the deck2-style-switcher workstream.
 
@@ -13715,7 +14055,7 @@ describe("buildExecutiveDeckV2 — preview mode", () => {
 
 ---
 
-## v40.2 — 2026-07-05 — Preview harness wiring + light/dark toggle
+## v40.2 — 2026-07-05 — Add: Preview harness wiring + light/dark toggle
 
 Wires the dev-only preview harness (`deck-preview.html` + `src/dev/deckPreview.ts`) to always request variant-preview mode and adds a light/dark theme toggle button. The preview harness now passes `{ variantPreview: true }` to `buildExecutiveDeckV2`, enabling the style-variant cycling controls on every deck2 slide. The new theme toggle button applies/removes the `theme-light` class on the iframe body, persisting the choice until the user clicks the button again. Task 8 of the deck2-style-switcher workstream.
 
@@ -13848,7 +14188,7 @@ show("v2");
 
 ---
 
-## v40.1 — 2026-07-05 — Thread variantPreview through buildExecutiveDeckV2
+## v40.1 — 2026-07-05 — Change: Thread variantPreview through buildExecutiveDeckV2
 
 Wires the `variantPreview` parameter through the public API of the executive deck v2 builder. Adds the `DECK_VARIANT_SCRIPT` client-side controller (only injected when `variantPreview=true`) and updates `buildDeckV2Html` and `buildExecutiveDeckV2` signatures to accept and propagate the variant-preview flag. Task 7 of the deck2-style-switcher workstream.
 
@@ -14028,7 +14368,7 @@ export function openExecutiveDeckV2(
 
 ---
 
-## v40 — 2026-07-05 — 4-variant plumbing for every deck2 slide builder
+## v40 — 2026-07-05 — Change: 4-variant plumbing for every deck2 slide builder
 
 Architectural change enabling the dev-only style-variant switcher (Tasks 4-6 of the deck2-style-switcher workstream). Adds a `renderVariants(slideId, bodies, variantPreview)` helper that renders only `bodies[0]` when `variantPreview` is false (byte-identical to today's production output) or all 4 panels behind a cycle-switcher when true. `v2Slide()`'s `body: string` option becomes `bodyVariants: readonly [string,string,string,string]; variantPreview: boolean`. Every builder in the file is migrated to accept/thread `variantPreview` and pass `[body, body, body, body]` (literal duplicates for now — a later plan authors the real alternate designs): `coverSlide`, `tocSlide`, `glossarySlideBuilders`, `sectionSeparatorSlide` (Task 5), then `riskStagesSlide`, `portPopulationSlideBuilders`, `portSampleSlideBuilders`, `qualityPortSlideBuilders`, `accuracyPortSlideBuilders`, and the assembly function `buildDeckV2Slides` (Task 6), which now takes an optional `variantPreview = false` parameter and threads it into every builder call.
 
@@ -14186,7 +14526,7 @@ export function buildDeckV2Slides(
 
 ---
 
-## v39 — 2026-07-05 — Dev-only deck style-choices persistence helpers
+## v39 — 2026-07-05 — Change: Dev-only deck style-choices persistence helpers
 
 New dev-only modules for the deck-preview style-switcher (Task 1 of the deck2-style-switcher workstream). Provides Node.js-based persistence (not browser APIs) for tracking which style variant the user has selected for each slide in the executive-report deck preview. Used only by the Vite dev-server middleware in future tasks.
 
@@ -14312,7 +14652,7 @@ describe("deckStyleChoices", () => {
 
 ---
 
-## v39.1 — 2026-07-05 — Vite dev middleware for deck style-choice persistence
+## v39.1 — 2026-07-05 — Change: Vite dev middleware for deck style-choice persistence
 
 Wraps Task 1's `readChoices`/`writeChoice` helpers in a Vite dev-server middleware plugin exposing `GET`/`POST /__deck-style-choices`, and registers it in `vite.config.ts`. Dev-only: the middleware is only wired into `configureServer`, so it never runs in the `npm run build` output. Also ignores the `dev-workspace/` scratch folder the middleware writes to.
 
@@ -14418,7 +14758,7 @@ dev-workspace
 
 ---
 
-## v39.2 — 2026-07-05 — Variant-switcher CSS + light-theme re-skin (deck2)
+## v39.2 — 2026-07-05 — Change: Variant-switcher CSS + light-theme re-skin (deck2)
 
 Adds CSS for the dev-preview style-variant switcher chrome (`.v2-variant-stack`, `.v2-variant-panel`, `.v2-variant-switcher`, `.v2-variant-prev`/`.v2-variant-next`, `.v2-variant-label`) and a `body.theme-light` light-theme re-skin for both deck2-only components (v2-term-card, v2-stage-card, v2-port-col, v2-rail) and shared v1 components (kpi-tile, deck-table). These classes are not wired to any markup yet; they will be used by Task 4's `renderVariants()` function and Task 7's theme-toggle button. This task is purely CSS, no logic or markup changes.
 
@@ -14503,7 +14843,7 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
-## v39.32 — 2026-07-05 — Change default visible columns on the X-ray referrals table
+## v39.32 — 2026-07-05 — Change: default visible columns on the X-ray referrals table
 
 Per user request (screenshot of desired column-picker state): default visible
 set now shows level 1/2 inspection results instead of the distribution date
@@ -14529,7 +14869,7 @@ const DEFAULT_VISIBLE = [
 
 ---
 
-## v39.31 — 2026-07-05 — Fix DataTable sticky-column and default-order bugs breaking the referrals table headers
+## v39.31 — 2026-07-05 — Fix: DataTable sticky-column and default-order bugs breaking the referrals table headers
 
 Root-caused visual bugs reported on the "صور الأشعة المحالة" (X-ray referrals)
 table, where headers/columns rendered torn apart with large gaps or
@@ -14705,7 +15045,7 @@ export default defineConfig({
 
 ---
 
-## v39.30 — 2026-07-05 — Deck v2: risk-stage cards redesigned to reference layout; TOC badges decluttered
+## v39.30 — 2026-07-05 — Change: Deck v2: risk-stage cards redesigned to reference layout; TOC badges decluttered
 
 Per the user's reference screenshot (numbered card layout: circle badge +
 title, a list of rows separated by thin divider lines, a short colored tag
@@ -14756,7 +15096,7 @@ at the card's bottom, alternating panel tint):
 
 ---
 
-## v39.29 — 2026-07-05 — Deck v2: fix totals gap, icon centering, drop rank page, trim wording
+## v39.29 — 2026-07-05 — Fix: Deck v2: fix totals gap, icon centering, drop rank page, trim wording
 
 Four fixes from user screenshots/feedback:
 
@@ -14809,7 +15149,7 @@ function badgeIcon(name, size): string { /* wraps icon() with transform: transla
 
 ---
 
-## v39.28 — 2026-07-05 — Deck v2: methodology note box + ranked-accuracy chart page
+## v39.28 — 2026-07-05 — Change: Deck v2: methodology note box + ranked-accuracy chart page
 
 Continues applying methods from the reference mockups (not a literal asset
 clone — the corner "suitcase" illustration is deliberately deferred until
@@ -14845,7 +15185,7 @@ export function accuracyRankSlideBuilder(model): SlideBuilder { /* rankedBar cha
 
 ---
 
-## v39.26 — 2026-07-05 — Deck v2: quality page shows per-level quality mix, drops availability
+## v39.26 — 2026-07-05 — Change: Deck v2: quality page shows per-level quality mix, drops availability
 
 Per user direction with reference mockups: نتائج جودة الصور في المنافذ now
 shows the percentage of EACH quality level (عالي / متوسط / منخفض) per port
@@ -14875,7 +15215,7 @@ const marking = rateOf(p.markingPresent, p.markingPresent + p.markingMissing);
 
 ---
 
-## v39.27 — 2026-07-05 — Deck v2: reference-mockup chrome — side tab rail, cover org block, footer page numbers
+## v39.27 — 2026-07-05 — Change: Deck v2: reference-mockup chrome — side tab rail, cover org block, footer page numbers
 
 Design pass driven by the user's professional reference mockups ("similar
 and even better", "make it feel human generated"). Three chrome elements
@@ -14915,7 +15255,7 @@ print-toggle corner swap).
 
 ---
 
-## v39.25 — 2026-07-05 — Deck v2: overnight visual pass — full verification
+## v39.25 — 2026-07-05 — Change: Deck v2: overnight visual pass — full verification
 
 Closes out the overnight visual-enhancement pass (v39.19–v39.24: side nav,
 cover/TOC, section separators, risk stages, port table depth, quality/
@@ -14942,7 +15282,7 @@ v39.18 — this was a visuals-only round, page by page as directed.
 
 ---
 
-## v39.24 — 2026-07-05 — Deck v2: quality/accuracy pages — mute "—" cells like the rest of the deck
+## v39.24 — 2026-07-05 — Change: Deck v2: quality/accuracy pages — mute "—" cells like the rest of the deck
 
 Section 2's per-port rate cells (نتائج جودة الصور / دقة نتائج المنافذ) render
 "—" for zero-denominator or below-data-sufficiency values, but rendered it as
@@ -14968,7 +15308,7 @@ const show = (v: number | null) => (p.rankable ? fmtPct(v) : `<span class="insuf
 
 ---
 
-## v39.23 — 2026-07-05 — Deck v2: port table card visual pass (depth + icon-circle header)
+## v39.23 — 2026-07-05 — Change: Deck v2: port table card visual pass (depth + icon-circle header)
 
 Port table cards (population, sample, and — since they share the same
 `.v2-port-col`/`qualityTable`/`accuracyTable` markup — the section-2 quality
@@ -14998,7 +15338,7 @@ glyph to an icon-circle badge matching the language already established by
 
 ---
 
-## v39.22 — 2026-07-05 — Deck v2: مجتمع الحالات بناءً على المخاطر visual pass
+## v39.22 — 2026-07-05 — Change: Deck v2: مجتمع الحالات بناءً على المخاطر visual pass
 
 Risk-stage tiles got a severity-matched icon badge (المستوى الأول → check,
 … الرابع → shield, escalating with the level's real-world severity per
@@ -15029,7 +15369,7 @@ const totals = `<div class="v2-totals-band"><div class="v2-totals-item">…</div
 
 ---
 
-## v39.21 — 2026-07-05 — Deck v2: section-separator visual pass (glossary already polished)
+## v39.21 — 2026-07-05 — Change: Deck v2: section-separator visual pass (glossary already polished)
 
 Continuing the page-by-page visual pass. المعجم (glossary) already got a
 dedicated icon-card redesign in v39.11 and needs no further work right now.
@@ -15065,7 +15405,7 @@ export function sectionSeparatorSlide(sectionNo, sectionKey, iconName, title, bl
 
 ---
 
-## v39.20 — 2026-07-05 — Deck v2: cover + المحتويات visual pass
+## v39.20 — 2026-07-05 — Change: Deck v2: cover + المحتويات visual pass
 
 Content-first visual pass, page by page per user direction ("work on the
 visuals per deck or page not all report at once"). This entry covers the
@@ -15105,7 +15445,7 @@ badge, and a touch more visual separation between items.
 
 ---
 
-## v39.19 — 2026-07-05 — Deck v2: side navigation bar (section + page progress)
+## v39.19 — 2026-07-05 — Change: Deck v2: side navigation bar (section + page progress)
 
 Adds a persistent on-screen left rail (hidden in print and below 1280px):
 lists every section (الغلاف / المحتويات / المعجم / القسم 1 / القسم 2),
@@ -15151,7 +15491,7 @@ export type NavSectionKey = keyof typeof NAV_SECTIONS;
 
 ---
 
-## v39.18 — 2026-07-04 — Deck preview fixture: synthetic template + submitted answers
+## v39.18 — 2026-07-04 — Change: Deck preview fixture: synthetic template + submitted answers
 
 The section-2 pages (image quality / accuracy per port) rendered nothing but
 "—" in the live preview because `buildPreviewInput()` passed
@@ -15192,7 +15532,7 @@ return {
 
 ---
 
-## v39.17 — 2026-07-04 — Deck v2: section 2 — نتائج فحص الجودة (image quality + accuracy per port)
+## v39.17 — 2026-07-04 — Change: Deck v2: section 2 — نتائج فحص الجودة (image quality + accuracy per port)
 
 Adds the second content section, built on the app's real inspection template
 fields (`buildDefaultInspectionTemplate` in
@@ -15242,7 +15582,7 @@ entry the same way section 1's did.
 
 ---
 
-## v39.16 — 2026-07-04 — Deck v2: fix frac-cell number overlap; correctly unify row height
+## v39.16 — 2026-07-04 — Fix: Deck v2: fix frac-cell number overlap; correctly unify row height
 
 v39.14's row-height unification used `line-height:.6` on the sample table's
 stacked "N من M" cell — this looked fine by `getBoundingClientRect()` (line
@@ -15322,7 +15662,7 @@ const BASE_ROWS_PER_PAGE = 7;
 
 ---
 
-## v39.15 — 2026-07-04 — Deck v2: per-slide print-include toggle (top-right corner, no JS)
+## v39.15 — 2026-07-04 — Change: Deck v2: per-slide print-include toggle (top-right corner, no JS)
 
 Each slide now has a small checkbox switch in its literal top-right corner
 (on-screen only). Unchecking it excludes that slide from the printed/PDF
@@ -15368,7 +15708,7 @@ function printToggle(): string {
 
 ---
 
-## v39.14 — 2026-07-04 — Deck v2: unify row height between population and sample tables
+## v39.14 — 2026-07-04 — Refactor: Deck v2: unify row height between population and sample tables
 
 The two port-table modes rendered at different row heights (population 35px
 plain cells vs sample 46px stacked "N من M" frac cells), so the two pages
@@ -15426,7 +15766,7 @@ const METRICS_COMPACT: ModeMetrics = { rowH: 22, theadH: 22, tfootH: 22 };
 
 ---
 
-## v39.13 — 2026-07-04 — Deck v2: dynamic pixel-exact filler row — totals always flush to card bottom
+## v39.13 — 2026-07-04 — Change: Deck v2: dynamic pixel-exact filler row — totals always flush to card bottom
 
 v39.8–v39.10 padded `tbody` with N discrete blank `<tr>` rows up to a fixed
 row-count target. That target was calibrated with deliberate safety slack
@@ -15478,7 +15818,7 @@ function portTable(title, rows, mode, variant, compact: boolean): string {
 
 ---
 
-## v39.12 — 2026-07-04 — Deck v2: blank filler rows no longer show a faint zebra-stripe tint
+## v39.12 — 2026-07-04 — Change: Deck v2: blank filler rows no longer show a faint zebra-stripe tint
 
 The invisible spacer rows added in v39.8 (padding `tbody` up to a page's row
 budget so الإجمالي lands at a fixed position) only zeroed out the `<td>`
@@ -15507,7 +15847,7 @@ meant to be fully invisible spacers.
 
 ---
 
-## v39.11 — 2026-07-04 — Deck v2: glossary redesigned as icon-card grid + risk-stage meanings
+## v39.11 — 2026-07-04 — Change: Deck v2: glossary redesigned as icon-card grid + risk-stage meanings
 
 Two content changes per user reference image:
 
@@ -15560,7 +15900,7 @@ export function riskStagesSlide(model, num, total): string {
 
 ---
 
-## v39.10 — 2026-07-04 — Deck v2: per-mode row budget — sample table's frac cells are taller than plain cells
+## v39.10 — 2026-07-04 — Chore: Deck v2: per-mode row budget — sample table's frac cells are taller than plain cells
 
 v39.9's fix used one shared `BASE_ROWS_PER_PAGE` for both port-table modes, but
 live measurement showed the sample table's stacked "N من M" frac cells render
@@ -15602,7 +15942,7 @@ function planPortPages(landCount, seaCount, baseRowsPerPage: number): PortPagePl
 
 ---
 
-## v39.9 — 2026-07-04 — Deck v2: fix port-table overflow clipping — corrected row-height math
+## v39.9 — 2026-07-04 — Fix: Deck v2: fix port-table overflow clipping — corrected row-height math
 
 v39.8's blank-row padding exposed a pre-existing math error: `BASE_ROWS_PER_PAGE`
 was estimated at 10 assuming ~26px rows, but the real rendered row height
@@ -15673,7 +16013,7 @@ const BASE_ROWS_PER_PAGE = 9;
 
 ---
 
-## v39.8 — 2026-07-04 — Deck v2: pin الإجمالي to a fixed bottom row + math-based pagination with overflow compression
+## v39.8 — 2026-07-04 — Fix: Deck v2: pin الإجمالي to a fixed bottom row + math-based pagination with overflow compression
 
 Two fixes to the port tables, per user direction:
 
@@ -15747,7 +16087,7 @@ function portTable(title, rows, mode, variant, targetRows, compact): string {
 
 ---
 
-## v39.7 — 2026-07-04 — Deck v2: normalize land/sea port tables (tinted cards, totals row, watermark filler)
+## v39.7 — 2026-07-04 — Change: Deck v2: normalize land/sea port tables (tinted cards, totals row, watermark filler)
 
 Sea ports are usually fewer than land ports, so the two tables ended at
 different heights and the sea column looked truncated. Following the user's
@@ -15813,7 +16153,7 @@ function portTable(title: string, rows: PortPopRow[], mode: "population" | "samp
 
 ---
 
-## v39.6 — 2026-07-04 — Deck v2: un-merge — pure population page + sample mirror page with stacked cells
+## v39.6 — 2026-07-04 — Change: Deck v2: un-merge — pure population page + sample mirror page with stacked cells
 
 Reverts the v39.5 single-page merge per user direction. Two pages again:
 (1) pure population — المنفذ · الحالات · سليمة · اشتباه, plain numbers;
@@ -15841,7 +16181,7 @@ export function portSampleSlideBuilders(model: ReportModel): SlideBuilder[] { �
 
 ---
 
-## v39.5 — 2026-07-04 — Deck v2: merge population + sample port pages into one coverage page
+## v39.5 — 2026-07-04 — Change: Deck v2: merge population + sample port pages into one coverage page
 
 Reading population and sample across two pages was unreadable. The two pages
 are now ONE page per chunk of ports: columns المنفذ · سليمة · اشتباه ·
@@ -15888,7 +16228,7 @@ export function portPopulationSlideBuilders(model: ReportModel): SlideBuilder[] 
 
 ---
 
-## v39.4 — 2026-07-04 — Deck preview: paint immediately, build decks lazily
+## v39.4 — 2026-07-04 — Change: Deck preview: paint immediately, build decks lazily
 
 The dev preview built BOTH deck editions synchronously at module load (two
 `buildReportModel` passes over ~3,500 rows) before the first paint — after
@@ -15921,7 +16261,7 @@ function show(which: "v2" | "v1"): void {
 
 ---
 
-## v39.3 — 2026-07-04 — Deck v2: new page — عيّنة الفحص per port (same land/sea tables, sample numbers)
+## v39.3 — 2026-07-04 — Add: Deck v2: new page — عيّنة الفحص per port (same land/sea tables, sample numbers)
 
 Adds the sample-view twin of the port-population page: same two-column
 land/sea layout, but each port row shows the drawn sample and its
@@ -15952,7 +16292,7 @@ export function portSampleSlideBuilders(model: ReportModel): SlideBuilder[] { �
 
 ---
 
-## v39.2 — 2026-07-04 — Deck v2: remove the العيّنة column from the port tables
+## v39.2 — 2026-07-04 — Remove: Deck v2: remove the العيّنة column from the port tables
 
 Also updates the slide subhead, which still promised the sample share
 (`وحصة كل منفذ من العيّنة` → `والاشتباه.`).
@@ -15981,7 +16321,7 @@ type PortPopRow = { name: string; total: number; clean: number; suspicious: numb
 
 ---
 
-## v39.1 — 2026-07-04 — Deck v2: auto-fit the المنفذ column in the port tables
+## v39.1 — 2026-07-04 — Change: Deck v2: auto-fit the المنفذ column in the port tables
 
 Port names were squeezed/ellipsized by the equal column distribution. The name
 column now auto-fits its content; the four numeric columns shrink to content
@@ -16007,7 +16347,7 @@ width (`width:1%` + nowrap trick).
 
 ---
 
-## v39 — 2026-07-04 — Executive deck v2 (content-first rework) + live dev preview page
+## v39 — 2026-07-04 — Change: Executive deck v2 (content-first rework) + live dev preview page
 
 Started the ground-up rework of the executive presentation (deck) edition. A new
 `deck2/` module renders the new page structure (cover → contents → glossary →
@@ -16055,7 +16395,7 @@ export function buildExecutiveDeckV2(input: ExecutiveReportInput, names = {}): s
 
 **File:** `.claude/launch.json` *(new file — dev-server launch config for live preview)*
 
-## v38.4 — 2026-07-02 — Truly single-file build: inline fonts + favicon, drop public/ assets
+## v38.4 — 2026-07-02 — Change: Truly single-file build: inline fonts + favicon, drop public/ assets
 
 `npm run build` emitted `dist/fonts/` and `dist/logo.svg` alongside `dist/index.html` because
 `vite-plugin-singlefile` only inlines *bundled* assets — everything in `public/` is copied
@@ -16128,7 +16468,7 @@ declare module "*.woff?inline" {
 and the executive report inlines them via `theme.ts` `?inline` imports)
 
 ---
-## v38.3 — 2026-07-02 — DataTable render loop via onFilteredRowsChange (BUGFIX LOG-03)
+## v38.3 — 2026-07-02 — Fix: DataTable render loop via onFilteredRowsChange (LOG-03)
 
 New finding surfaced during post-fix verification (registered as LOG-03 in
 `docs/audit/FULL_SYSTEM_AUDIT_2026-07-02.md`): opening صور الأشعة المحالة logged
@@ -16194,7 +16534,7 @@ props; and `XrayReferrals.rowMatchesFilter` is memoized with `useCallback([answe
   }, [answersMap]);
 ```
 
-## v38.2 — 2026-07-02 — StateViews rollout: consistent empty/loading states on data screens (DESIGN UIX-01)
+## v38.2 — 2026-07-02 — Change: StateViews rollout: consistent empty/loading states on data screens (UIX-01)
 
 Fixes UIX-01 from `docs/audit/FULL_SYSTEM_AUDIT_2026-07-02.md`: the shared
 `EmptyState`/`LoadingState` library (added v36.4) was used only by `App.tsx`, so every tab had
@@ -16262,7 +16602,7 @@ four `<p className="ew-empty">…</p>` states → `LoadingState` / `ErrorState` 
 **File:** `src/components/Sidebar/Tabs/TemplateBuilder/index.tsx` — `tb-empty` div → `EmptyState`.
 **File:** `src/components/Sidebar/Tabs/Population/index.tsx` — browse empty paragraph → `EmptyState`.
 
-## v38.1 — 2026-07-02 — Report Designer aligned to the design system (DESIGN UIX-03)
+## v38.1 — 2026-07-02 — Change: Report Designer aligned to the design system (UIX-03)
 
 Fixes UIX-03 from `docs/audit/FULL_SYSTEM_AUDIT_2026-07-02.md`: the Report Designer list
 screen was visibly off-system — a bare `<h2>` instead of the `PageHeader` pattern every other
@@ -16343,7 +16683,7 @@ plain-text empty/loading states. Now: `PageHeader` (eyebrow/title/subtitle + act
 }
 ```
 
-## v38.0 — 2026-07-02 — Shared ConfirmDialog component; native window.confirm eliminated (FEATURE UIX-02)
+## v38.0 — 2026-07-02 — Add: Shared ConfirmDialog component; native window.confirm eliminated (UIX-02)
 
 Fixes UIX-02 from `docs/audit/FULL_SYSTEM_AUDIT_2026-07-02.md`: three destructive actions used
 native `window.confirm()` — an unstyled LTR browser dialog with English chrome buttons, jarring
@@ -16403,7 +16743,7 @@ runs `handleDelete` on confirm)
 ```
 (a `<ConfirmDialog danger …>` in the modal executes the armed removal)
 
-## v37.15 — 2026-07-02 — CLAUDE.md sync: tab table, bundle size, audit cross-link (DOCS TEC-03)
+## v37.15 — 2026-07-02 — Docs: CLAUDE.md sync: tab table, bundle size, audit cross-link (TEC-03)
 
 Fixes TEC-03 from `docs/audit/FULL_SYSTEM_AUDIT_2026-07-02.md`. The CLAUDE.md tab table was
 stale: `template-builder` is no longer a standalone tab (it renders as the نموذج الفحص
@@ -16438,7 +16778,7 @@ cross-references.
 ```
 (plus the bundle-size sentence update in "Build & dependency gotchas")
 
-## v37.14 — 2026-07-02 — ZATCA logo bundled locally; no more zatca.gov.sa hot-link (BUGFIX VIS-05)
+## v37.14 — 2026-07-02 — Fix: ZATCA logo bundled locally; no more zatca.gov.sa hot-link (VIS-05)
 
 Fixes VIS-05 from `docs/audit/FULL_SYSTEM_AUDIT_2026-07-02.md`: the brand logo was hot-linked
 from `https://zatca.gov.sa/...` in four places (sidebar, sign-in screen, executive-report
@@ -16473,7 +16813,7 @@ export const ZATCA_LOGO_URL = `data:image/svg+xml;charset=utf-8,${encodeURICompo
 **File:** `src/data/reporting/executive/deck/slides.ts` — title-slide logo `src` now interpolates `ZATCA_LOGO_URL`.
 (all three keep their existing `onerror` fallbacks)
 
-## v37.13 — 2026-07-02 — ChangeLog tab: bidi-correct English prose + Western digits (BUGFIX VIS-03/VIS-04)
+## v37.13 — 2026-07-02 — Change: ChangeLog tab: bidi-correct English prose + Western digits (BUGFIX VIS-03/VIS-04)
 
 Fixes VIS-03/VIS-04 from `docs/audit/FULL_SYSTEM_AUDIT_2026-07-02.md`. Entry bodies and titles
 in سجل الإصدارات are mostly English commit prose but rendered inside the RTL container, so
@@ -16528,7 +16868,7 @@ app-wide Western-digit standard — now uses the shared `formatNumber` (`ar-SA-u
 }
 ```
 
-## v37.12 — 2026-07-02 — Permission matrices: visible scrollbar + sticky label column (BUGFIX VIS-02)
+## v37.12 — 2026-07-02 — Fix: Permission matrices: visible scrollbar + sticky label column (VIS-02)
 
 Fixes VIS-02 from `docs/audit/FULL_SYSTEM_AUDIT_2026-07-02.md`: on the صلاحيات الصفحات and
 صلاحيات الميزات matrices the leftmost role column (مدير) was clipped at laptop widths
@@ -16590,7 +16930,7 @@ inline start, so the row labels stay put while the role columns scroll.
 explicit `background: #ffffff` on `.um-feat-name` / reliance on existing row backgrounds for
 `.um-perm-tab-name` so pinned cells don't turn transparent while scrolling)
 
-## v37.11 — 2026-07-02 — Demo banner moved in-flow; no longer covers the session toolbar (BUGFIX VIS-01)
+## v37.11 — 2026-07-02 — Fix: Demo banner moved in-flow; no longer covers the session toolbar (VIS-01)
 
 Fixes VIS-01 from `docs/audit/FULL_SYSTEM_AUDIT_2026-07-02.md`: the demo-mode banner was
 `position: fixed; top: 0; z-index: 9999`, sitting on top of the sticky `AdminToolbar`
@@ -16657,7 +16997,7 @@ overlaps; its inline styles moved to an `.app-demo-banner` class in `App.css`.
 .app-backup-toast {
 ```
 
-## v37.10 — 2026-07-02 — Demo session registered with authSession module; demo never persisted (BUGFIX LOG-01/LOG-02)
+## v37.10 — 2026-07-02 — Change: Demo session registered with authSession module; demo never persisted (BUGFIX LOG-01/LOG-02)
 
 Fixes LOG-01 from `docs/audit/FULL_SYSTEM_AUDIT_2026-07-02.md`: the demo/viewer auto-login
 stored the session **only in AuthGate React state** and never called `writeSession()`, so
@@ -16732,7 +17072,7 @@ export function writeSession(session: AuthSession): void {
 `readSession`/`readRealSession` but absent from (fake) `sessionStorage`; normal session
 persisted; demo write clears a previously persisted session.
 
-## v37.9 — 2026-07-02 — EDIT_LOG NUL-byte cleanup + .gitattributes text rules (TOOLING)
+## v37.9 — 2026-07-02 — Chore: EDIT_LOG NUL-byte cleanup + .gitattributes text rules
 
 Closes the remainder of DATA-02 from `docs/audit/MASTER_AUDIT_REPORT.md`: one stray NUL byte
 was still embedded in this file (enough for `file`/`grep` to classify it as binary). Stripped
@@ -16757,7 +17097,7 @@ silently degrading the audit trail.
 *.json text
 ```
 
-## v37.8 — 2026-07-02 — Full system audit (code + UI/UX + product) and prototype→final-product plan (DOCS)
+## v37.8 — 2026-07-02 — Docs: Full system audit (code + UI/UX + product) and prototype→final-product plan
 
 Documentation-only change. Adds `docs/audit/FULL_SYSTEM_AUDIT_2026-07-02.md`: a whole-product
 audit performed by driving the live app in Chromium (all tabs, two viewport sizes, DOM-level
@@ -16786,7 +17126,7 @@ colors bypass the token system). Consolidates all open items into Milestones A�
 Full audit findings register (LOG/VIS/UIX/TEC series) + 5-milestone roadmap; see file.
 ```
 
-## v36.4 — 2026-07-01 — Change Log admin tab + shared EmptyState/LoadingState/ErrorState primitives (FEATURE)
+## v36.4 — 2026-07-01 — Add: Change Log admin tab + shared EmptyState/LoadingState/ErrorState primitives
 
 Renumbered from an initial `v35.0` to `v36.4` to avoid colliding with the `v35.0`–`v36.3`
 entries already logged further below — those documented this same feature area (state-view
@@ -16876,7 +17216,7 @@ roles: `none`).
 
 ---
 
-## v34.7 — 2026-07-01 — Deck: Western digits everywhere + fix RTL bidi reversal of number ranges (BUG)
+## v34.7 — 2026-07-01 — Fix: Deck: Western digits everywhere + fix RTL bidi reversal of number ranges
 
 Two fixes, both must-rules for the report:
 
@@ -16969,7 +17309,7 @@ export function buildDeckSlides(model: ReportModel): string {
 
 ---
 
-## v34.6 — 2026-07-01 — Deck: add الفهرس (agenda) slide as new slide 2 (FEATURE)
+## v34.6 — 2026-07-01 — Add: Deck: add الفهرس (agenda) slide as new slide 2
 
 New slide 2 — a roadmap/agenda slide inserted right after the title slide, before the
 executive summary (which shifts to slide 3). Deck grows 14 → 15 slides. Lists 4 sections
@@ -17017,7 +17357,7 @@ Also: all subsequent `// ── Slide N —` comments renumbered +1; `buildDeckS
 ---
 
 
-## v37.6 — 2026-07-01 — Docs updated for renamed workspace file structure
+## v37.6 — 2026-07-01 — Refactor: Docs updated for renamed workspace file structure
 
 Task 9 of the workspace file/folder naming convention refactor. Documentation-only change: brings `docs/data-system-report.md`, `CLAUDE.md`, and `README.md` in line with the numbered-lowercase-kebab-case workspace layout that Tasks 1–8 already implemented in code (see the `v37.0`–`v37.5` entries above for the actual code changes). No source files touched.
 
@@ -17260,7 +17600,7 @@ Month folder names follow the pattern `{month}-{monthname-en}-{year}`, lowercase
 
 ---
 
-## v37.5 — 2026-07-01 — Backups folder centralize + template selection file rename
+## v37.5 — 2026-07-01 — Refactor: Backups folder centralize + template selection file rename
 
 Task 8 of the workspace file/folder naming convention refactor. Two changes: (1) `backupStorage.ts` now sources `BACKUPS_FOLDER` from `SYSTEM_FOLDER_NAMES.backups` (i.e., `"backups"`, lowercase, unnumbered) instead of a hardcoded `"3-Backups"` literal, centralizing folder-name references; (2) template selection file renamed from `active.inspection-template.json` to `template.selection.json` to match the `entity.qualifier.json` file-naming convention. Also fixed `templateStorage.test.ts`'s hardcoded `"6-Templates"` reference to match the lowercased root already set in Task 1.
 
@@ -17323,7 +17663,7 @@ const SELECTION_FILE = "template.selection.json";
 
 ---
 
-## v37.4 — 2026-07-01 — Centralize user-presets/feedback/designs folder names, no value change
+## v37.4 — 2026-07-01 — Refactor: Centralize user-presets/feedback/designs folder names, no value change
 
 Task 7 of the workspace file/folder naming convention refactor. Three storage modules
 (`browsePresetStorage.ts`, `feedbackStorage.ts`, `reportDesignStorage.ts`) each had a local
@@ -17451,7 +17791,7 @@ async function getDesignsDir(
 
 ---
 
-## v37.3 — 2026-07-01 — Use SYSTEM_FOLDER_NAMES.powerbiExport and rename LISEZMOI.txt to README.txt
+## v37.3 — 2026-07-01 — Refactor: Use SYSTEM_FOLDER_NAMES.powerbiExport and rename LISEZMOI.txt to README.txt
 
 Task 6 of the workspace file/folder naming convention refactor. `exportWriter.ts` previously
 hardcoded the literal `"powerbi-export"` for the subdirectory under the system root. Swapped
@@ -17543,7 +17883,7 @@ Also updated the instructions file reference in the export-result panel UI from 
 
 ---
 
-## v37.2 — 2026-07-01 — Use POPULATION_SUBFOLDERS (1-raw/2-processed) instead of raw/processed literals
+## v37.2 — 2026-07-01 — Change: Use POPULATION_SUBFOLDERS (1-raw/2-processed) instead of raw/processed literals
 
 Task 4 of the workspace file/folder naming convention refactor. `populationStorage.ts` previously
 hardcoded the literals `"raw"` and `"processed"` for every `getDirectoryHandle` call under a
@@ -17632,7 +17972,7 @@ title-case root and month-folder literals, and the pre-numbering subfolder liter
 
 ---
 
-## v37.1 — 2026-07-01 — Wire workspace init path to central WORKSPACE_ROOTS/SYSTEM_FOLDER_NAMES constants
+## v37.1 — 2026-07-01 — Add: Wire workspace init path to central WORKSPACE_ROOTS/SYSTEM_FOLDER_NAMES constants
 
 Task 3 of the workspace file/folder naming convention refactor. `workspaceDefaults.ts` and
 `fileSystemAccess.ts` (the `createWorkspaceStructure()` init path) previously hardcoded their
@@ -17764,7 +18104,7 @@ import {
 
 ---
 
-## v37.0 — 2026-07-01 — Lowercase month folder names (kebab-case)
+## v37.0 — 2026-07-01 — Change: Lowercase month folder names (kebab-case)
 
 **File:** `src/data/population/monthFolder.ts`
 
@@ -17815,7 +18155,7 @@ test("formatMonthFolderName produces MM-monthname-YYYY (lowercase)", () => {
 
 ---
 
-## v37.7 — 2026-07-01 — refactor(auth): move audit log to 5-system/audit/activity.log.json
+## v37.7 — 2026-07-01 — Refactor (auth): Move audit log to 5-system/audit/activity.log.json
 
 Implements Task 5 of the workspace naming standardization plan.
 Moves the auth activity audit log from 5-System/2-Audit/auth-activity.log.json to the
@@ -17889,7 +18229,7 @@ async function getActivityAuditDir(create: boolean): Promise<DirectoryHandleLike
           <strong> 5-system/audit/activity.log.json</strong>.
 ```
 
-## v36.3 — 2026-07-01 — Top header: polish the mode indicator + add workspace & user chips (FEATURE)
+## v36.3 — 2026-07-01 — Add: Top header: polish the mode indicator + add workspace & user chips
 
 Worked the post-login top header (`AdminToolbar`). The "الوضع الحالي / وضع الإدارة" block is
 the current role/mode indicator for the role-preview system; kept it but made it clearer,
@@ -17903,7 +18243,7 @@ and added the operational context the header was missing.
 
 ---
 
-## v36.2 — 2026-07-01 — Logs tab: sort by version number; de-duplicate logo to the sidebar only (DESIGN)
+## v36.2 — 2026-07-01 — Change: Logs tab: sort by version number; de-duplicate logo to the sidebar only
 
 Feedback fixes on the v36.0/v36.1 work.
 
@@ -17917,7 +18257,7 @@ Feedback fixes on the v36.0/v36.1 work.
 
 ---
 
-## v36.1 — 2026-07-01 — Branding: ZATCA logo in the nav bar + top header, with recolor filters (DESIGN)
+## v36.1 — 2026-07-01 — Change: Branding: ZATCA logo in the nav bar + top header, with recolor filters
 
 Added the official ZATCA identity mark (same source as the sign-in screen) to the two
 persistent dark-navy surfaces — the sidebar navigation header and the post-login top
@@ -17937,7 +18277,7 @@ the text wordmark stands alone (never a broken-image icon).
 
 ---
 
-## v36.0 — 2026-07-01 — Admin: version & edit-history tab (سجل الإصدارات) (FEATURE)
+## v36.0 — 2026-07-01 — Add: Admin: version & edit-history tab (سجل الإصدارات)
 
 New admin-only navigation item at the end of the sidebar that renders this edit log
 inside the app — all versions, each version's edits, dates and change type — with
@@ -17956,7 +18296,7 @@ change history.
 
 ---
 
-## v35.1 — 2026-07-01 — UI polish: workspace front-door badge + de-emoji sweep (DESIGN)
+## v35.1 — 2026-07-01 — Change: UI polish: workspace front-door badge + de-emoji sweep
 
 **File:** `src/data/workspace/WorkspaceGate.css` — `.workspace-gate-icon` changed from a bare `font-size:40px` glyph slot to a 68px circular branded badge framing the lucide icon.
 
@@ -17972,7 +18312,7 @@ change history.
 
 ---
 
-## v35.0 — 2026-07-01 — UI polish Phase 1/2 foundation: state-view primitives + view-enter motion (FEATURE)
+## v35.0 — 2026-07-01 — Add: UI polish Phase 1/2 foundation: state-view primitives + view-enter motion
 
 Kicks off the leadership-approved UI polish effort (see `docs/UI_ENHANCEMENT_PLAN.md`).
 Identity unchanged (blue/white, Somar Sans, RTL); additive only.
@@ -17989,7 +18329,7 @@ Identity unchanged (blue/white, Somar Sans, RTL); additive only.
 
 ---
 
-## v34.5 — 2026-07-01 — Wire the executive-report card to its three real outputs: deck / Excel / document (BUG)
+## v34.5 — 2026-07-01 — Fix: Wire the executive-report card to its three real outputs: deck / Excel / document
 
 The Reports-tab executive card's three format icons were wired to document(html) / Excel /
 document(print) — the **deck was never exported from the card** (Phase 6 only wired it into
@@ -18009,7 +18349,7 @@ icons map to the three distinct deliverables:
 
 ---
 
-## v34.4 — 2026-07-01 — Fix report crash on population.final.json written before the five-source pipeline (BUG)
+## v34.4 — 2026-07-01 — Fix: report crash on population.final.json written before the five-source pipeline
 
 Generating the executive report from the app failed with "حدث خطأ أثناء توليد التقرير".
 Root cause: `population.final.json` saved before v28.0 has no `otherResults`/`notes`, but
@@ -18048,7 +18388,7 @@ on a population row with `otherResults`/`notes` deleted must not throw.
 
 ---
 
-## v34.3 — 2026-07-01 — Report visual QA fixes: ranked-bar labels, logo, land/sea donut, headline (BUG)
+## v34.3 — 2026-07-01 — Fix: Report visual QA fixes: ranked-bar labels, logo, land/sea donut, headline
 
 Visual-QA pass (rendered document + deck in a browser). Fixes:
 - **Ranked-bar labels** (`ui/charts.ts`): rebuilt `rankedBar` as HTML/CSS instead of SVG —
@@ -18069,7 +18409,7 @@ Visual-QA pass (rendered document + deck in a browser). Fixes:
 
 ---
 
-## v34.2 — 2026-06-30 — Deck verdict slide: gate on image-level accuracy, not inspector evaluability (BUG)
+## v34.2 — 2026-06-30 — Fix: Deck verdict slide: gate on image-level accuracy, not inspector evaluability
 
 Visual QA found the deck's flagship "حُكم الدقة" slide showing a false
 "لا توجد قرارات قابلة للتقييم" empty state while the Document's accuracy page (same
@@ -18100,7 +18440,7 @@ deck's own executive-summary subhead.
 
 ---
 
-## v34.1 — 2026-06-30 — Executive report rework cleanup: remove superseded renderer + lint (CHORE)
+## v34.1 — 2026-06-30 — Chore: Executive report rework cleanup: remove superseded renderer + lint
 
 Phase 3 replaced the old per-page executive renderer with the `document/` module but left
 the previous files orphaned. Removed the now-dead code (confirmed no live imports; tsc +
@@ -18139,7 +18479,7 @@ only (removed the `\u{FE00}-\u{FE0F}` variation-selector range that tripped
 
 ---
 
-## v34.0 — 2026-06-30 — Executive report Phase 6: in-app Analytics dashboard + exports + managed permission (FEATURE)
+## v34.0 — 2026-06-30 — Add: Executive report Phase 6: in-app Analytics dashboard + exports + managed permission
 
 Upgraded the Reports tab's `مؤشرات الأداء` (`kpi`) sub-section into a live high-level
 analytics dashboard built from one `buildReportModel(execInput)` call (design §8): headline
@@ -18195,7 +18535,7 @@ import { TabGuard } from "../../../PermissionGuard";
 
 ---
 
-## v33.0 — 2026-06-30 — Executive report Phase 4: the Presentation (deck) (FEATURE)
+## v33.0 — 2026-06-30 — Add: Executive report Phase 4: the Presentation (deck)
 
 New `src/data/reporting/executive/deck/` — ~14 curated 16:9 landscape slides built from the
 single `ReportModel` (blueprint §3), reusing `ui/charts.ts`, `ui/icons.ts` (no emoji), and
@@ -18216,7 +18556,7 @@ export function openExecutiveDeck(input: ExecutiveReportInput, employeeDisplayNa
 
 ---
 
-## v32.0 — 2026-06-30 — Executive report Phase 5: data Workbook (.xlsx) (FEATURE)
+## v32.0 — 2026-06-30 — Add: Executive report Phase 5: data Workbook (.xlsx)
 
 New `executive/workbook/workbook.ts` (`buildExecutiveWorkbook`) emits one `.xlsx` with the
 full raw→processed→analytical chain (design §7): Raw-Risk, Raw-BI (unavailable note),
@@ -18263,7 +18603,7 @@ export function buildExecutiveXlsx(
 
 ---
 
-## v31.0 — 2026-06-30 — Executive report Phase 3: Document renderer rebuilt on ReportModel (FEATURE)
+## v31.0 — 2026-06-30 — Add: Executive report Phase 3: Document renderer rebuilt on ReportModel
 
 Rebuilt the executive Document as an A4-portrait, model-driven renderer (design §5,
 blueprint §2). New `executive/document/` module assembles front matter + 5 parts (Scope &
@@ -18316,7 +18656,7 @@ structure: asserts A4-portrait sizing, theme tokens, cover + level definitions, 
 
 ---
 
-## v30.0 — 2026-06-30 — Executive report Phase 1: analytical layer (ReportModel) (FEATURE)
+## v30.0 — 2026-06-30 — Add: Executive report Phase 1: analytical layer (ReportModel)
 
 The single computed analytical layer for the rework (design spec §3): a decision-level
 fact table, the six-source image comparison + cross-team agreement views, data-sufficiency
@@ -18410,7 +18750,7 @@ cross-team matrix), `model/reportModel.ts` (`ReportModel`, `buildReportModel`),
 
 ---
 
-## v29.0 — 2026-06-30 — Executive report Phase 2: visual primitives (tokens, icons, charts) (FEATURE)
+## v29.0 — 2026-06-30 — Add: Executive report Phase 2: visual primitives (tokens, icons, charts)
 
 Adds the static-SVG visual system for the executive-report rework (design spec §4):
 centralized design tokens, stroke-based line icons (no emoji), and pure-function
@@ -18467,7 +18807,7 @@ no NaN/Infinity (no divide-by-zero), percentage clamping. 34 tests pass.
 
 ---
 
-## v28.0 — 2026-06-30 — Executive report Phase 0: carry all five result sources through the population pipeline (FEATURE)
+## v28.0 — 2026-06-30 — Add: Executive report Phase 0: carry all five result sources through the population pipeline
 
 The three previously-dropped result sources (manual / opposite / live-means) plus
 `notes` now flow through `PreparedPopulationRow` at the source, enabling the
@@ -18593,7 +18933,7 @@ missing L1/L2 still excluded.
 
 ---
 
-## v27.6 — 2026-06-30 — auth: point sign-in logo at external ZATCA SVG
+## v27.6 — 2026-06-30 — Change: Auth: point sign-in logo at external ZATCA SVG
 
 **File:** `src/auth/AuthGate.tsx`
 
@@ -18621,7 +18961,7 @@ The login screen logo now loads the official ZATCA logo from zatca.gov.sa instea
 
 ---
 
-## v27.7 — 2026-06-30 — auth: size & center the ZATCA logo on the brand panel
+## v27.7 — 2026-06-30 — Change: Auth: size & center the ZATCA logo on the brand panel
 
 **File:** `src/auth/AuthGate.css`
 
@@ -18686,7 +19026,7 @@ Mobile override (`max-width` block) updated from a 46×46 square to a 132×52 la
 
 ---
 
-## v27.5 — 2026-06-29 — design: shadow hierarchy — remove box-shadow from flat toolbar and card elements
+## v27.5 — 2026-06-29 — Change: Shadow hierarchy — remove box-shadow from flat toolbar and card elements
 
 **Files:** `src/components/DataTable/DataTable.css`, `src/index.css` (audit — no changes required)
 
@@ -18707,7 +19047,7 @@ No code edits applied — the codebase already enforces the intended shadow hier
 
 ---
 
-## v27.4 — 2026-06-29 — design: replace transition:all with specific properties across CSS
+## v27.4 — 2026-06-29 — Change: Replace transition:all with specific properties across CSS
 
 **Files:** `src/components/DataTable/DataTable.css`, `src/components/Sidebar/Tabs/UserManagement/UserManagement.css`, `src/components/Sidebar/Tabs/Population/Population.css`, `src/components/Sidebar/Tabs/Settings/Settings.css`, `src/components/Sidebar/Tabs/EmployeeWorkspace/EmployeeWorkspace.css`
 
@@ -18717,7 +19057,7 @@ No code edits applied — the codebase already enforces the intended shadow hier
 
 ---
 
-## v27.3 — 2026-06-29 — design: typography — tabular-nums on data cells, lighter table header weight
+## v27.3 — 2026-06-29 — Change: Typography — tabular-nums on data cells, lighter table header weight
 
 **File:** `src/components/DataTable/DataTable.css`
 
@@ -18729,7 +19069,7 @@ Note: No `.stat-value`, `.kpi-value`, or `.metric` classes found in `src/index.c
 
 ---
 
-## v27.2 — 2026-06-29 — design: sidebar active nav item — tighter background opacity + label tracking
+## v27.2 — 2026-06-29 — Change: Sidebar active nav item — tighter background opacity + label tracking
 
 **File:** `src/components/Sidebar/Sidebar.css`
 
@@ -18739,7 +19079,7 @@ Note: No `.stat-value`, `.kpi-value`, or `.metric` classes found in `src/index.c
 
 ---
 
-## v27.1 — 2026-06-29 — design: AuthGate brand panel + decorative rings + button shimmer cleanup
+## v27.1 — 2026-06-29 — Change: AuthGate brand panel + decorative rings + button shimmer cleanup
 
 **File:** `src/auth/AuthGate.css`
 
@@ -18747,7 +19087,7 @@ Note: No `.stat-value`, `.kpi-value`, or `.metric` classes found in `src/index.c
 
 **After:** Single clean directional linear gradient for brand panel; `.auth-brand-ring` block removed entirely; shimmer pseudo-element removed; button hover uses existing translateY + shadow only.
 
-## v27.0 — 2026-06-29 — design: remove AI-tell decorative noise from AuthGate login screen
+## v27.0 — 2026-06-29 — Change: Remove AI-tell decorative noise from AuthGate login screen
 
 **File:** `src/auth/AuthGate.css`
 
@@ -18800,7 +19140,7 @@ background: linear-gradient(170deg, #112C50 0%, #0A1D36 60%, #071428 100%);
 
 ---
 
-## v26.1 — 2026-06-29 — fix: quota miscounting after reassignment; casLoop non-transient retry; dead _submit param; silent answer-file catch
+## v26.1 — 2026-06-29 — Fix: Quota miscounting after reassignment; casLoop non-transient retry; dead _submit param; silent answer-file catch
 
 **File:** `src/data/distribution/distributionLog.ts` — quota `assignCountPerEmployee` now counts from final entryMap (post-reassignment) instead of raw assigned events. Replaced items excluded. Sample sizes are unaffected (quotas are display-only).
 
@@ -18812,7 +19152,7 @@ background: linear-gradient(170deg, #112C50 0%, #0A1D36 60%, #071428 100%);
 
 ---
 
-## v26 — 2026-06-29 — feat: premium split-panel login screen rework
+## v26 — 2026-06-29 — Add: Premium split-panel login screen rework
 
 **File:** `src/auth/AuthGate.tsx`
 
@@ -18858,7 +19198,7 @@ background: linear-gradient(170deg, #112C50 0%, #0A1D36 60%, #071428 100%);
 
 ---
 
-## v25.5 — 2026-06-29 — fix: restore lint gate — argsIgnorePattern + remove stale eslint-disable
+## v25.5 — 2026-06-29 — Fix: Restore lint gate — argsIgnorePattern + remove stale eslint-disable
 
 **File:** `eslint.config.js`
 
@@ -18885,7 +19225,7 @@ background: linear-gradient(170deg, #112C50 0%, #0A1D36 60%, #071428 100%);
 
 ---
 
-## v25.4 — 2026-06-29 — Task 5: Integration review
+## v25.4 — 2026-06-29 — Change: Task 5: Integration review
 
 **File:** `src/data/reporting/executive/pages/distributionOverview.ts`
 
@@ -18962,7 +19302,7 @@ background: linear-gradient(170deg, #112C50 0%, #0A1D36 60%, #071428 100%);
 
 ---
 
-## v25.3 — 2026-06-29 — Task 4: Per-port employee analysis section
+## v25.3 — 2026-06-29 — Change: Task 4: Per-port employee analysis section
 
 **File:** `src/data/reporting/executive/portEmployeeData.ts`
 
@@ -19030,7 +19370,7 @@ import { buildPortEmployeeAnalysisPages } from "./pages/portEmployeeAnalysis";
 
 ---
 
-## v25.2 — 2026-06-29 — Task 3: Fix empty space on data pages
+## v25.2 — 2026-06-29 — Fix: Task 3: Fix empty space on data pages
 
 **File:** `src/data/reporting/executive/pages/populationByRisk.ts`
 
@@ -19161,7 +19501,7 @@ import { buildPortEmployeeAnalysisPages } from "./pages/portEmployeeAnalysis";
 
 ---
 
-## v25.0 — 2026-06-29 — Task 1: CSS empty-space fixes (theme.ts)
+## v25.0 — 2026-06-29 — Fix: Task 1: CSS empty-space fixes (theme.ts)
 
 **File:** `src/data/reporting/executive/theme.ts`
 
@@ -19247,7 +19587,7 @@ import { buildPortEmployeeAnalysisPages } from "./pages/portEmployeeAnalysis";
 
 ---
 
-## v25.1 — 2026-06-29 — Task 2: Part divider redesign (3-band layout)
+## v25.1 — 2026-06-29 — Change: Task 2: Part divider redesign (3-band layout)
 
 **File:** `src/data/reporting/executive/pages/partDivider.ts`
 
@@ -19373,7 +19713,7 @@ export const buildPart6Divider = buildPart3Divider;
 
 ---
 
-## v24.2 — 2026-06-29 — Replace الدورة with الفترة throughout report
+## v24.2 — 2026-06-29 — Change: Replace الدورة with الفترة throughout report
 
 **Files:** `src/data/reporting/executive/pages/sampleByLevel.ts`, `src/data/reporting/executive/pages/empPriority.ts`, `src/data/reporting/executive/pages/empStability.ts`, `src/data/reporting/executive/pages/empByDecision.ts`, `src/data/reporting/executive/pages/errorTypes.ts`, `src/data/reporting/executive/pages/empByPort.ts`, `src/data/reporting/executive/pages/suspectCategories.ts`, `src/data/reporting/executive/pages/empImageQuality.ts`
 
@@ -19399,7 +19739,7 @@ export const buildPart6Divider = buildPart3Divider;
 
 ---
 
-## v24.1 — 2026-06-29 — Review fix: broken bar CSS in levelAgreement page
+## v24.1 — 2026-06-29 — Fix: Review fix: broken bar CSS in levelAgreement page
 
 **File:** `src/data/reporting/executive/pages/levelAgreement.ts`
 
@@ -19417,7 +19757,7 @@ The `%` unit was transposed to the end of the `background` value instead of the 
 
 ---
 
-## v24.0 — 2026-06-29 — UI design taste enhancement: polish CSS, cover art, anti-AI design
+## v24.0 — 2026-06-29 — Change: UI design taste enhancement: polish CSS, cover art, anti-AI design
 
 **File:** `src/data/reporting/executive/theme.ts`
 
@@ -19445,7 +19785,7 @@ The `%` unit was transposed to the end of the `background` value instead of the 
 
 ---
 
-## v22.1 — 2026-06-29 — Wire L1/L2 employee IDs through population pipeline to ExecutiveReportRow
+## v22.1 — 2026-06-29 — Add: Wire L1/L2 employee IDs through population pipeline to ExecutiveReportRow
 
 **File:** `src/data/population/populationTypes.ts`
 
@@ -19528,7 +19868,7 @@ The `%` unit was transposed to the end of the `background` value instead of the 
 
 ---
 
-## v23.0 — 2026-06-29 — Implementer: write all 23 page builders with live data
+## v23.0 — 2026-06-29 — Change: Implementer: write all 23 page builders with live data
 
 **File:** `src/data/reporting/executive/pages/*.ts` (all page files), `src/data/reporting/executive/index.ts`
 
@@ -19556,7 +19896,7 @@ The `%` unit was transposed to the end of the `background` value instead of the 
 
 ---
 
-## v22.0 — 2026-06-29 — Visual designer: adopt HTML mockup CSS + viewer shell
+## v22.0 — 2026-06-29 — Change: Visual designer: adopt HTML mockup CSS + viewer shell
 
 **File:** `src/data/reporting/executive/theme.ts`
 
@@ -19584,7 +19924,7 @@ The `%` unit was transposed to the end of the `background` value instead of the 
 
 ---
 
-## v22.1 — 2026-06-29 — Rewrite all executive report pages to HTML mockup v4 design classes
+## v22.1 — 2026-06-29 — Change: Rewrite all executive report pages to HTML mockup v4 design classes
 
 All page files migrated from `.xr-*` prefixed CSS classes to new HTML mockup v4 design system
 (`.page`, `.right-rail`, `.rail-main`, `.rail-tab`, `.page-inner`, `.card`, `.metric`, `.chip`,
@@ -19617,7 +19957,7 @@ All page files migrated from `.xr-*` prefixed CSS classes to new HTML mockup v4 
 
 ---
 
-## v21.0 — 2026-06-29 — Redesign executive report to portrait A4 document format
+## v21.0 — 2026-06-29 — Change: Redesign executive report to portrait A4 document format
 
 **Files:** All files in `src/data/reporting/executive/` (theme.ts, viewer.ts, assemble.ts, all pages/)
 
@@ -19717,7 +20057,7 @@ return buildViewerHtml(slides, ctx.monthLabel);
 
 ---
 
-## v20.9 — 2026-06-29 — feat(executive-report): add employee analytics pages Phase 4 (Task 14)
+## v20.9 — 2026-06-29 — Add (executive-report): employee analytics pages Phase 4 (Task 14)
 
 **File:** `src/data/reporting/executive/pages/empOverview.ts`
 
@@ -19867,7 +20207,7 @@ kpiCard({ label: "نسبة دقة الاشتباه", ... })
 
 ---
 
-## v20.8 — 2026-06-29 — feat(executive-report): add employee analytics data module with tests (Task 13)
+## v20.8 — 2026-06-29 — Add (executive-report): employee analytics data module with tests (Task 13)
 
 **File:** `src/data/reporting/executive/executiveEmployeeData.ts`
 
@@ -19894,7 +20234,7 @@ kpiCard({ label: "نسبة دقة الاشتباه", ... })
 
 ---
 
-## v20.7 — 2026-06-29 — feat(executive-report): add accuracy-by-level and level-agreement pages (Phase 3)
+## v20.7 — 2026-06-29 — Add (executive-report): accuracy-by-level and level-agreement pages (Phase 3)
 
 **File:** `src/data/reporting/executive/pages/accuracyByLevel.ts`
 
@@ -20032,7 +20372,7 @@ import { buildAppendix } from "./pages/appendix";
 
 ---
 
-## v20.6 — 2026-06-29 — feat(executive-report): add accuracy by port page (Phase 3)
+## v20.6 — 2026-06-29 — Add (executive-report): accuracy by port page (Phase 3)
 
 **File:** `src/data/reporting/executive/pages/accuracyByPort.ts`
 
@@ -20119,7 +20459,7 @@ import { buildAppendix } from "./pages/appendix";
 
 ---
 
-## v20.5 — 2026-06-29 — feat(executive-report): add distribution overview page (Phase 2)
+## v20.5 — 2026-06-29 — Add (executive-report): distribution overview page (Phase 2)
 
 **File:** `src/data/reporting/executive/pages/distributionOverview.ts`
 
@@ -20254,7 +20594,7 @@ import { buildAppendix } from "./pages/appendix";
 
 ---
 
-## v20.4 — 2026-06-29 — feat(executive-report): add population-by-level and sample-by-level pages (Phase 2)
+## v20.4 — 2026-06-29 — Add (executive-report): population-by-level and sample-by-level pages (Phase 2)
 
 **File:** `src/data/reporting/executive/pages/populationByLevel.ts`
 
@@ -20428,7 +20768,7 @@ export function buildExecutiveReport(
 
 ---
 
-## v20.3 — 2026-06-29 — feat(executive-report): add executive intro KPI dashboard page (Phase 2)
+## v20.3 — 2026-06-29 — Add (executive-report): executive intro KPI dashboard page (Phase 2)
 
 **File:** `src/data/reporting/executive/pages/execIntro.ts`
 
@@ -20526,7 +20866,7 @@ import { buildAppendix } from "./pages/appendix";
 
 ---
 
-## v20.2 — 2026-06-29 — feat(executive-report): wire new dark-navy viewer as the active report (Phase 1)
+## v20.2 — 2026-06-29 — Add (executive-report): Wire new dark-navy viewer as the active report (Phase 1)
 
 **File:** `src/data/reporting/executive/index.ts`
 
@@ -20607,7 +20947,7 @@ export function buildExecutiveXlsx(input: ExecutiveReportInput): void { ... }
 
 ---
 
-## v20.1 — 2026-06-29 — feat(executive-report): add viewer shell and assembler
+## v20.1 — 2026-06-29 — Add (executive-report): viewer shell and assembler
 
 **File:** `src/data/reporting/executive/viewer.ts`
 
@@ -20685,7 +21025,7 @@ export function assembleReport(
 
 ---
 
-## v20.0 — 2026-06-29 — feat(executive-report): add population-by-risk and appendix pages
+## v20.0 — 2026-06-29 — Add (executive-report): population-by-risk and appendix pages
 
 **File:** `src/data/reporting/executive/pages/populationByRisk.ts`
 
@@ -20703,7 +21043,7 @@ export function assembleReport(
 
 ---
 
-## v19.9 — 2026-06-29 — feat(executive-report): add cover, toc, glossary, part-divider page builders
+## v19.9 — 2026-06-29 — Add (executive-report): cover, toc, glossary, part-divider page builders
 
 **File:** `src/data/reporting/executive/pages/cover.ts`
 
@@ -20737,7 +21077,7 @@ export function assembleReport(
 
 ---
 
-## v19.8 — 2026-06-29 — feat(executive-report): add render context
+## v19.8 — 2026-06-29 — Add (executive-report): render context
 
 **File:** `src/data/reporting/executive/context.ts`
 
@@ -20747,7 +21087,7 @@ export function assembleReport(
 
 ---
 
-## v19.7 — 2026-06-29 — fix(executive-report): add missing statPill helper to primitives
+## v19.7 — 2026-06-29 — Fix (executive-report): Add missing statPill helper to primitives
 
 **File:** `src/data/reporting/executive/primitives.ts`
 
@@ -20776,7 +21116,7 @@ export function statPill({ label, value }: { label: string; value: string }): st
 
 ---
 
-## v19.6 — 2026-06-29 — executive report rework: create primitives.ts
+## v19.6 — 2026-06-29 — Add: Executive report rework: create primitives.ts
 
 **File:** `src/data/reporting/executive/primitives.ts`
 
@@ -20786,7 +21126,7 @@ export function statPill({ label, value }: { label: string; value: string }): st
 
 ---
 
-## v19.5 — 2026-06-29 — executive report rework: create theme.ts
+## v19.5 — 2026-06-29 — Add: Executive report rework: create theme.ts
 
 **File:** `src/data/reporting/executive/theme.ts`
 
@@ -20796,7 +21136,7 @@ export function statPill({ label, value }: { label: string; value: string }): st
 
 ---
 
-## v19.4 — 2026-06-29 — Add "combobox" field type: free-text input with preset autocomplete suggestions; add موقع الاشتباه field to default template phase 2
+## v19.4 — 2026-06-29 — Add: "combobox" field type: free-text input with preset autocomplete suggestions; add موقع الاشتباه field to default template phase 2
 
 **File:** `src/data/templates/templateTypes.ts`
 
@@ -20839,7 +21179,7 @@ export type TemplateFieldType =
 
 ---
 
-## v19.3 — 2026-06-29 — Power BI export: use page-level month selector instead of duplicate dropdown
+## v19.3 — 2026-06-29 — Fix: Power BI export: use page-level month selector instead of duplicate dropdown
 
 **File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
 
@@ -20849,7 +21189,7 @@ export type TemplateFieldType =
 
 ---
 
-## v19.2 — 2026-06-29 — KPI breakdown, distinctCount unique values, deselect on empty click
+## v19.2 — 2026-06-29 — Change: KPI breakdown, distinctCount unique values, deselect on empty click
 
 **File:** `src/data/reportDesigner/reportTypes.ts`
 
@@ -20910,7 +21250,7 @@ export type KpiConfig = {
 
 ---
 
-## v19.1 — 2026-06-29 — KPI live data binding + export path copy button
+## v19.1 — 2026-06-29 — Change: KPI live data binding + export path copy button
 
 **File:** `src/components/Sidebar/Tabs/ReportDesigner/renderers/KpiRenderer.tsx`
 
@@ -20936,7 +21276,7 @@ export type KpiConfig = {
 
 ---
 
-## v19.0 — 2026-06-29 — Smooth drag/resize + thumbnail card list + tab nesting
+## v19.0 — 2026-06-29 — Change: Smooth drag/resize + thumbnail card list + tab nesting
 
 ### Smooth drag/resize (useCanvasInteractions + Canvas)
 
@@ -20980,7 +21320,7 @@ Added `canvasRef` returned from hook and attached to canvas outer div; `data-rd-
 
 ---
 
-## v18.6 — 2026-06-29 — Replace Ribbon emojis with lucide-react icons
+## v18.6 — 2026-06-29 — Change: Replace Ribbon emojis with lucide-react icons
 
 **File:** `src/.../editor/Ribbon.tsx`
 
@@ -20998,7 +21338,7 @@ Added `canvasRef` returned from hook and attached to canvas outer div; `data-rd-
 
 ---
 
-## v18.5 — 2026-06-29 — Field drop → KPI card + centered drop positions
+## v18.5 — 2026-06-29 — Change: Field drop → KPI card + centered drop positions
 
 **File:** `src/.../renderers/KpiRenderer.tsx` (new) — KPI card: field name (top), "—" placeholder (center), agg badge (bottom)
 
@@ -21012,7 +21352,7 @@ Added `canvasRef` returned from hook and attached to canvas outer div; `data-rd-
 
 ---
 
-## v18.4 — 2026-06-29 — VizPanel drag-and-drop + icon strokeWidth fix
+## v18.4 — 2026-06-29 — Fix: VizPanel drag-and-drop + icon strokeWidth fix
 
 **File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/VizPanel.tsx`
 
@@ -21064,7 +21404,7 @@ Added `line-height: 0` to `.rd-viz-icon-btn .rd-viz-icon` so SVG icons are not p
 
 ---
 
-## v18.3 — 2026-06-29 — Field drop aggregation dialog
+## v18.3 — 2026-06-29 — Change: Field drop aggregation dialog
 
 **File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/FieldDropDialog.tsx` (new)
 
@@ -21091,7 +21431,7 @@ Dimensions: بدون تجميع / عدد / عدد مميز. Measures: مجموع
 
 ---
 
-## v18.2 — 2026-06-29 — Replace emojis in FieldsPanel and VizPanel with lucide-react icons
+## v18.2 — 2026-06-29 — Change: Replace emojis in FieldsPanel and VizPanel with lucide-react icons
 
 **File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/FieldsPanel.tsx`
 
@@ -21129,7 +21469,7 @@ const VIZ_TYPES = [
 
 ---
 
-## v18.1 — 2026-06-29 — Fix shape default visibility + fields panel drag-and-drop
+## v18.1 — 2026-06-29 — Fix: shape default visibility + fields panel drag-and-drop
 
 **File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
 
@@ -21212,7 +21552,7 @@ border: s.borderWidth != null && s.borderWidth > 0
 
 ---
 
-## v18.0 — 2026-06-28 — Fix stale closure in deletePage, type-safe export rows, unified page-size labels, remove dead CSS
+## v18.0 — 2026-06-28 — Fix: Stale closure in deletePage, type-safe export rows, unified page-size labels, remove dead CSS
 
 **File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
 
@@ -21310,7 +21650,7 @@ import { PAGE_SIZE_LABELS } from "../../../../../data/reportDesigner/reportTypes
 
 ---
 
-## v17.0 — 2026-06-28 — Export manager + Power BI section in Reports tab
+## v17.0 — 2026-06-28 — Change: Export manager + Power BI section in Reports tab
 
 **File:** `src/data/powerbiExport/exportManager.ts`
 
@@ -21373,7 +21713,7 @@ export async function runPowerBiExport(root, month): Promise<ExportManifest>
 
 ---
 
-## v16.0 — 2026-06-28 — Export writer (workspace file I/O) for Power BI export
+## v16.0 — 2026-06-28 — Change: Export writer (workspace file I/O) for Power BI export
 
 **File:** `src/data/powerbiExport/exportWriter.ts`
 
@@ -21495,7 +21835,7 @@ describe("writeCsvExport", () => {
 
 ---
 
-## v15.0 — 2026-06-28 — CSV serializer + export types for Power BI export
+## v15.0 — 2026-06-28 — Change: CSV serializer + export types for Power BI export
 
 **File:** `src/data/powerbiExport/exportTypes.ts`
 
@@ -21605,7 +21945,7 @@ describe("toCsvString", () => {
 
 ---
 
-## v14.1 — 2026-06-28 — Fix unused-var lint error in ReportDesigner EditorHost
+## v14.1 — 2026-06-28 — Fix: unused-var lint error in ReportDesigner EditorHost
 
 **File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
 
@@ -21621,7 +21961,7 @@ const [, setSaveError] = useState<string | null>(null);
 
 ---
 
-## v14.0 — 2026-06-28 — Create-dialog size selector + pageSizeLabel helper
+## v14.0 — 2026-06-28 — Add: Create-dialog size selector + pageSizeLabel helper
 
 **File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
 
@@ -21678,7 +22018,7 @@ function pageSizeLabel(p: PageSizePreset): string {
 
 ---
 
-## v13.0 — 2026-06-28 — VizPanel element type grid + Ribbon toolbar redesign
+## v13.0 — 2026-06-28 — Change: VizPanel element type grid + Ribbon toolbar redesign
 
 **File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/VizPanel.tsx`
 
@@ -21733,7 +22073,7 @@ export default function Ribbon({ doc, saving, showFields, showFormat, onToggleFi
 
 ---
 
-## v12.0 — 2026-06-28 — FieldsPanel component (searchable field catalog tree)
+## v12.0 — 2026-06-28 — Change: FieldsPanel component (searchable field catalog tree)
 
 **File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/FieldsPanel.tsx`
 
@@ -21870,7 +22210,7 @@ import "./ReportDesigner.css";
 
 ---
 
-## v11.0 — 2026-06-28 — PagesBar component (bottom page tab bar)
+## v11.0 — 2026-06-28 — Change: PagesBar component (bottom page tab bar)
 
 **File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/PagesBar.tsx`
 
@@ -22039,7 +22379,7 @@ import "./ReportDesigner.css";
 
 ---
 
-## v10.0 — 2026-06-28 — Power BI 3-panel layout shell
+## v10.0 — 2026-06-28 — Change: Power BI 3-panel layout shell
 
 **File:** `src/data/reportDesigner/reportTypes.ts`
 
@@ -22136,7 +22476,7 @@ return (
 
 ---
 
-## v9.0 — 2026-06-28 — feat(report-designer): add slide page-size presets (16:9, 4:3, FHD)
+## v9.0 — 2026-06-28 — Add (report-designer): slide page-size presets (16:9, 4:3, FHD)
 
 **File:** `src/data/reportDesigner/reportTypes.ts`
 
@@ -22277,7 +22617,7 @@ describe("slide page-size presets", () => {
 
 ---
 
-## v8.1 — 2026-06-28 — fix(report-designer): CSSProperties import, DesignIndex doc, admin permission row
+## v8.1 — 2026-06-28 — Fix (report-designer): CSSProperties import, DesignIndex doc, admin permission row
 
 **File:** `src/components/Sidebar/Tabs/ReportDesigner/renderers/TextRenderer.tsx`
 
@@ -22347,7 +22687,7 @@ import type { Element, TextConfig } from "../../../../../data/reportDesigner/rep
 
 ---
 
-## v8.0 — 2026-06-28 — Phase-1 integration pass: test suite, typecheck, lint, build verification; docs update
+## v8.0 — 2026-06-28 — Chore: Phase-1 integration pass: test suite, typecheck, lint, build verification; docs update
 
 **File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
 
@@ -22443,7 +22783,7 @@ Both files use `safeWriteJson` / `safeReadJson` and the `JsonEnvelope` schema-ve
 
 ---
 
-## v7.14 — 2026-06-28 — Report Designer: print/PDF view (Task 1.7)
+## v7.14 — 2026-06-28 — Change: Report Designer: print/PDF view (Task 1.7)
 
 **File:** `src/components/Sidebar/Tabs/ReportDesigner/PrintView.tsx` _(new file)_
 
@@ -22603,7 +22943,7 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack }: Editor
 
 ---
 
-## v7.13 — 2026-06-28 — Fix: page mutation stale closures in Report Designer
+## v7.13 — 2026-06-28 — Fix: Page mutation stale closures in Report Designer
 
 **File:** `src/components/Sidebar/Tabs/ReportDesigner/index.tsx`
 
@@ -22667,7 +23007,7 @@ function deletePage() {
 
 ---
 
-## v7.12 — 2026-06-28 — Report Designer: Toolbar, Inspector, autosave (Task 1.6)
+## v7.12 — 2026-06-28 — Change: Report Designer: Toolbar, Inspector, autosave (Task 1.6)
 
 Phase 1, Task 1.6: wires the full editor — Toolbar (add elements/pages, page nav, save, print), Inspector (selected-element property editor), and debounced autosave (800 ms) with an explicit Save button.
 
@@ -22723,7 +23063,7 @@ Phase 1, Task 1.6: wires the full editor — Toolbar (add elements/pages, page n
 
 ---
 
-## v7.11 — 2026-06-28 — Report Designer: drag/resize/select interactions (Task 1.5)
+## v7.11 — 2026-06-28 — Change: Report Designer: drag/resize/select interactions (Task 1.5)
 
 Phase 1, Task 1.5: pointer-event drag and resize interactions for canvas elements.
 
@@ -22776,7 +23116,7 @@ interface CanvasProps {
 
 ---
 
-## v7.12.1 — 2026-06-28 — Fix: update onElementChange ref in effect not during render
+## v7.12.1 — 2026-06-28 — Fix: Update onElementChange ref in effect not during render
 
 **File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/useCanvasInteractions.ts`
 
@@ -22802,7 +23142,7 @@ Updating `ref.current` during render is a React anti-pattern and can cause unexp
 
 ---
 
-## v7.12 — 2026-06-28 — Fix: pointer capture + stable onElementChange ref in useCanvasInteractions
+## v7.12 — 2026-06-28 — Fix: Pointer capture + stable onElementChange ref in useCanvasInteractions
 
 **File:** `src/components/Sidebar/Tabs/ReportDesigner/editor/useCanvasInteractions.ts`
 
@@ -22862,7 +23202,7 @@ onPointerUp={mode === "edit" ? onPointerUp : undefined}
 
 ---
 
-## v7.10 — 2026-06-28 — Fix implicit React.CSSProperties imports in canvas components
+## v7.10 — 2026-06-28 — Fix: implicit React.CSSProperties imports in canvas components
 
 Small fix for type imports in Report Designer canvas components. The `React.CSSProperties` type was used implicitly without an explicit import. Changed to `import type { CSSProperties } from "react"` and replaced all instances of `React.CSSProperties` with the explicit `CSSProperties` type.
 
@@ -22908,7 +23248,7 @@ const divStyle: CSSProperties = { ... };
 
 ---
 
-## v7.9 — 2026-06-28 — Report Designer: canvas surface + static renderers (Task 1.4)
+## v7.9 — 2026-06-28 — Change: Report Designer: canvas surface + static renderers (Task 1.4)
 
 Phase 1, Task 1.4: Canvas component and pure element renderers for text, shape, and image. Canvas renders a page at exact `pageSetup.width × height` pixels (scaled by optional `zoom`), positions elements absolutely by (x,y,w,h), sorts by z-index, and dispatches to the correct renderer. In edit mode clicking elements calls `onSelect`; selected element receives `rd-element--selected` class for blue outline. Table/chart/kpi elements show a placeholder div. TextRenderer applies ElementStyle to displayed text. ShapeRenderer handles rect/ellipse/line/divider. ImageRenderer renders img with object-fit contain.
 
@@ -22944,7 +23284,7 @@ Phase 1, Task 1.4: Canvas component and pure element renderers for text, shape, 
 
 ---
 
-## v7.8 — 2026-06-28 — Report Designer: design list create/open/delete (Task 1.3)
+## v7.8 — 2026-06-28 — Add: Report Designer: design list create/open/delete (Task 1.3)
 
 Phase 1, Task 1.3: Wire the storage layer to the ReportDesigner UI. Replaces the skeleton body with a full list view (load index on mount, new-design inline input, open/delete per row) and an editor placeholder view. Uses `loadDesignIndex`, `saveDesign`, `deleteDesign`, `loadDesign` from `reportDesignStorage.ts` and `createEmptyDocument` from `reportTypes.ts`.
 
@@ -23009,7 +23349,7 @@ expect(tabConfig.allowedRoles).toEqual(["supervisor", "manager", "admin"]);
 
 ---
 
-## v7.7 — 2026-06-28 — Report Designer: register tab skeleton (FEATURE)
+## v7.7 — 2026-06-28 — Add: Report Designer: register tab skeleton
 
 Phase 1, Task 1.2: Register the "مصمم التقارير" tab in the auto-discovery system. Creates the tab skeleton component + CSS, adds the tab to `MANAGED_TABS`, and adds four default-permission rows (guest/employee/supervisor/manager) to `createDefaultPermissions()` in `userManagement.ts`.
 
@@ -23096,7 +23436,7 @@ export default function ReportDesigner() {
 
 ---
 
-## v7.6 — 2026-06-28 — Report Designer: canvas geometry helpers (FEATURE)
+## v7.6 — 2026-06-28 — Add: Report Designer: canvas geometry helpers
 
 Phase 1, Task 1.1: Implement pure canvas geometry helper functions for the Report Designer. These functions provide snap-to-grid, rectangle snapping, resize-from-handle, and hit-test capabilities used by drag/resize interactions. No UI — only TypeScript helpers with comprehensive test coverage.
 
@@ -23173,7 +23513,7 @@ describe("geometry", () => {
 
 ---
 
-## v7.5 — 2026-06-28 — Report Designer: design storage CRUD + index (FEATURE)
+## v7.5 — 2026-06-28 — Add: Report Designer: design storage CRUD + index
 
 Phase 0, Task 0.6: Implement disk storage for ReportDocument designs, mirroring templateStorage.ts. Files live in `4-Reports/designs/` (created on demand). Index file is `designs.index.json`. Exports `DesignIndex`, `saveDesign`, `loadDesign`, `loadDesignIndex`, `deleteDesign`.
 
@@ -23360,7 +23700,7 @@ describe("reportDesignStorage", () => {
 
 ---
 
-## v7.4 — 2026-06-28 — Fix grouping key delimiter to prevent collisions (BUG)
+## v7.4 — 2026-06-28 — Fix: grouping key delimiter to prevent collisions
 
 Grouping key was built by joining multiple `groupBy` dimension values with a space `" "`. This caused false key collisions when dimension values themselves contained spaces. For example, `{name: "John Smith", dept: "HR"}` and `{name: "John", dept: "Smith HR"}` both produced key `"John Smith HR"`. Changed the delimiter from `" "` to `"\x00"` (null byte, which cannot appear in normal string data) to prevent collisions.
 
@@ -23378,7 +23718,7 @@ const key = spec.groupBy.map((g) => String(row[g] ?? "")).join("\x00");
 
 ---
 
-## v7.3 — 2026-06-28 — Report Designer: runQuery group-by engine (FEATURE)
+## v7.3 — 2026-06-28 — Add: Report Designer: runQuery group-by engine
 
 Phase 0, Task 0.4: Implement the core query engine that combines filtering, grouping, aggregation, sorting, and limiting. The runQuery function accepts filtered rows, groups them by dimension fields, computes aggregates, optionally sorts the results, and optionally applies a limit. Output measure keys use the `as` alias if provided, else `${agg}_${field}`. Group keys preserve the dimension field names. When groupBy is empty, returns a single aggregate row (grand total). Handles percentOfTotal aggregations by pre-computing grand totals.
 
@@ -23524,7 +23864,7 @@ describe("runQuery", () => {
 
 ---
 
-## v7.2 — 2026-06-28 — Report Designer: filter predicates for query engine (FEATURE)
+## v7.2 — 2026-06-28 — Add: Report Designer: filter predicates for query engine
 
 Phase 0, Task 0.3: Create pure filter predicate functions for the report query engine. Implements row filtering via a composable filter array with support for 8 filter operations: equals, notEquals, in, between, contains, truthy, falsy, topN. The topN operation is intentionally a no-op here; topN filtering is applied post-aggregation in the runQuery engine.
 
@@ -23616,7 +23956,7 @@ describe("applyFilters", () => {
 
 ---
 
-## v7.1 — 2026-06-28 — Report Designer: aggregation functions for query engine (FEATURE)
+## v7.1 — 2026-06-28 — Add: Report Designer: aggregation functions for query engine
 
 Phase 0, Task 0.2: Create pure aggregation functions for the report query engine. Implements the complete set of aggregation operations (count, distinctCount, sum, avg, min, max, percentOfTotal) with proper handling of nulls, booleans, and non-numeric values.
 
@@ -23711,7 +24051,7 @@ describe("aggregate", () => {
 
 ---
 
-## v7.0 — 2026-06-28 — Report Designer: core document model types and factory (FEATURE)
+## v7.0 — 2026-06-28 — Add: Report Designer: core document model types and factory
 
 Phase 0, Task 0.1: Create the foundational document model types and factory function for the Report Designer feature. All subsequent Report Designer tasks depend on these types.
 
@@ -23870,7 +24210,7 @@ describe("createEmptyDocument", () => {
 
 ---
 
-## v6.1 — 2026-06-28 — Incremental content-hashing removes the read-side stringify ceiling (FEATURE)
+## v6.1 — 2026-06-28 — Add: Incremental content-hashing removes the read-side stringify ceiling
 
 Completes the symmetry of v6.0. v6.0 removed the **write**-side ceiling, but the
 **read** path still recomputed `simpleHash(JSON.stringify(envelope.data))` in
@@ -23932,7 +24272,7 @@ equals `simpleHash(JSON.stringify(value))` across mixed values, and
 
 ---
 
-## v6.0 — 2026-06-28 — Streamed safe-writes remove the JSON.stringify string-length ceiling (FEATURE)
+## v6.0 — 2026-06-28 — Add: Streamed safe-writes remove the JSON.stringify string-length ceiling
 
 Follow-up to v5.40 (which only halved the size by writing large payloads
 compact). A truly enormous payload (e.g. millions of rows) can still exceed
@@ -24041,7 +24381,7 @@ if (compact === null || compact.length > streamingForcedSizeLimit) {
 
 ---
 
-## v5.40 — 2026-06-28 — Fix "Invalid string length" when saving large processed data (BUG)
+## v5.40 — 2026-06-28 — Fix: "Invalid string length" when saving large processed data
 
 Root cause: saving a large processed population (e.g. ~300k rows) failed with
 the on-screen message `فشل الحفظ: Invalid string length`. `saveMonthRun`
@@ -24083,7 +24423,7 @@ const serialized = skipVerify
 
 ---
 
-## v5.39 — 2026-06-28 — Handle floating-promise rejections in data loaders (ERR-01)
+## v5.39 — 2026-06-28 — Fix: Handle floating-promise rejections in data loaders (ERR-01)
 
 Audit finding ERR-01: 13 fire-and-forget data loaders across 6 files used
 `void X.then(...)` (some with `.finally`) but no `.catch`. A rejected load
@@ -24130,7 +24470,7 @@ export function logRejection(context: string): (error: unknown) => void {
 
 ---
 
-## v5.38 — 2026-06-28 — Fix CLAUDE.md documentation drift (DOC-01)
+## v5.38 — 2026-06-28 — Fix: CLAUDE.md documentation drift (DOC-01)
 
 Audit finding DOC-01: three confirmed drifts in `CLAUDE.md`. (1) Bundle size
 said "~942 kB, 286 kB gzip"; actual `vite build` output is 1.9 MB / 664 kB gzip.
@@ -24144,7 +24484,7 @@ description said "runtime-only … no localStorage"; it is now `sessionStorage`
 
 ---
 
-## v5.37 — 2026-06-28 — Session storage moved from localStorage to sessionStorage (SEC-02)
+## v5.37 — 2026-06-28 — Change: Session storage moved from localStorage to sessionStorage (SEC-02)
 
 Audit finding SEC-02: `authSession.ts` persisted the auth session to
 `localStorage` (7-day TTL), but `CLAUDE.md` and `docs/data-system-report.md`
@@ -24237,7 +24577,7 @@ function clearStoredSession(): void {
 
 ---
 
-## v5.36 — 2026-06-25 — Fix 300k-row BI parse failure (stack overflow + memory)
+## v5.36 — 2026-06-25 — Fix: 300k-row BI parse failure (stack overflow + memory)
 
 Root cause: `allRows.push(...validRows)` spreads up to 300k arguments, exceeding
 V8's call-stack argument limit (`RangeError: Maximum call stack size exceeded`).
@@ -24321,7 +24661,7 @@ for (const cellRef in worksheet) {
 
 ---
 
-## v5.35 — 2026-06-25 — Remove panel-position toggle; fix col-picker portal positioning; patch employeeXlsx write cast
+## v5.35 — 2026-06-25 — Remove: panel-position toggle; fix col-picker portal positioning; patch employeeXlsx write cast
 
 **File:** `src/data/answers/employeeXlsx.ts`
 
@@ -24506,7 +24846,7 @@ export type UserBrowsePresetFile = { username: string; browseData: ...; };
 
 ---
 
-## v5.34 — 2026-06-25 — replace hand-coded sidebar SVG icons with Lucide stroke icons
+## v5.34 — 2026-06-25 — Change: Replace hand-coded sidebar SVG icons with Lucide stroke icons
 
 **Files:** all 6 sidebar tab index.tsx files (Population, EmployeeWorkspace, Reports, Archive, UserManagement, Settings)
 
@@ -24514,7 +24854,7 @@ Replace filled blob SVG icon functions with Lucide React stroke icons for consis
 
 ---
 
-## v5.33 — 2026-06-25 — add per-employee XLSX export on distribution and completion
+## v5.33 — 2026-06-25 — Add: per-employee XLSX export on distribution and completion
 
 **File:** `src/data/answers/employeeXlsx.ts` (new)
 
@@ -24584,7 +24924,7 @@ if (result.ok) {
 
 ---
 
-## v5.32 — 2026-06-25 — fix TS2345 type errors in PhaseThreeSampling handleRuleChange call sites
+## v5.32 — 2026-06-25 — Fix: TS2345 type errors in PhaseThreeSampling handleRuleChange call sites
 
 **File:** `src/components/Sidebar/Tabs/Population/components/PhaseThreeSampling.tsx`
 
@@ -24610,7 +24950,7 @@ handleRuleChange(rule.stageKey, "certScanMethod", e.target.value as StageSamplin
 
 ---
 
-## v5.31 — 2026-06-25 — resolve 6 residual ESLint errors (any, unused-vars, control-regex, set-state-in-effect)
+## v5.31 — 2026-06-25 — Chore: Resolve 6 residual ESLint errors (any, unused-vars, control-regex, set-state-in-effect)
 
 **File:** `src/components/Sidebar/Tabs/Population/index.tsx`
 
@@ -24699,7 +25039,7 @@ function slide4(kpis: ExecutiveKPIs, _monthLabel: string): string { // eslint-di
 
 ---
 
-## v5.30 — 2026-06-25 — bump version to 1.0.0
+## v5.30 — 2026-06-25 — Chore: Bump version to 1.0.0
 
 **File:** `package.json`
 
@@ -24715,7 +25055,7 @@ function slide4(kpis: ExecutiveKPIs, _monthLabel: string): string { // eslint-di
 
 ---
 
-## v5.29 — 2026-06-25 — Write complete README.md
+## v5.29 — 2026-06-25 — Docs: Write complete README.md
 
 **File:** `README.md`
 
@@ -24729,7 +25069,7 @@ Replaced with comprehensive project README covering: project title and descripti
 
 ---
 
-## v5.28 — 2026-06-25 — Remove unused parameters from DataTable col-config helpers
+## v5.28 — 2026-06-25 — Remove: unused parameters from DataTable col-config helpers
 
 **File:** `src/components/DataTable/index.tsx`
 
@@ -24840,7 +25180,7 @@ setReferralColConfig(loadLocalReferralColConfig() ?? buildDefaultReferralColConf
 
 ---
 
-## v5.27 — 2026-06-25 — Extract DataTable non-component exports to utils.ts to fix fast-refresh boundary
+## v5.27 — 2026-06-25 — Fix: Extract DataTable non-component exports to utils.ts to fix fast-refresh boundary
 
 **File:** `src/components/DataTable/utils.ts` (new file)
 
@@ -24922,7 +25262,7 @@ import { DateFormatMode, DATE_FORMAT_LABELS, looksLikeDate, formatDate, toIsoDat
 
 ---
 
-## v5.26 — 2026-06-25 — Suppress set-state-in-effect for async-load and cleanup effects across 3 files
+## v5.26 — 2026-06-25 — Change: Suppress set-state-in-effect for async-load and cleanup effects across 3 files
 
 **File:** `src/components/FeedbackWidget/FeedbackWidget.tsx`
 
@@ -25011,7 +25351,7 @@ useEffect(() => {
 
 ---
 
-## v5.25 — 2026-06-25 — Suppress set-state-in-effect for tab accumulation effects in App.tsx
+## v5.25 — 2026-06-25 — Change: Suppress set-state-in-effect for tab accumulation effects in App.tsx
 
 **File:** `src/App.tsx`
 
@@ -25065,7 +25405,7 @@ useEffect(() => {
 
 ---
 
-## v5.24 — 2026-06-25 — Replace initialization effect with lazy useState in CertScanGrid
+## v5.24 — 2026-06-25 — Change: Replace initialization effect with lazy useState in CertScanGrid
 
 **File:** `src/components/Sidebar/Tabs/Population/components/CertScanGrid.tsx`
 
@@ -25106,7 +25446,7 @@ const pasteRef = useRef<HTMLDivElement>(null);
 
 ---
 
-## v5.23 — 2026-06-25 — Fix set-state-in-effect and purity violations in MappingSettingsModal
+## v5.23 — 2026-06-25 — Fix: set-state-in-effect and purity violations in MappingSettingsModal
 
 **File:** `src/components/Sidebar/Tabs/Population/components/MappingSettingsModal.tsx`
 
@@ -25140,7 +25480,7 @@ stepId: `custom-${crypto.randomUUID().slice(0, 8)}`,
 
 ---
 
-## v5.22 — 2026-06-25 — Replace set-state-in-effect in InspectionPanel with derived safeActivePhaseId
+## v5.22 — 2026-06-25 — Change: Replace set-state-in-effect in InspectionPanel with derived safeActivePhaseId
 
 **File:** `src/components/InspectionPanel/index.tsx`
 
@@ -25193,7 +25533,7 @@ const safeActivePhaseId: string = (() => {
 
 ---
 
-## v5.20 — 2026-06-25 — Type PhaseThreeSampling props and fix prefer-const
+## v5.20 — 2026-06-25 — Fix: Type PhaseThreeSampling props and fix prefer-const
 
 **File:** `src/components/Sidebar/Tabs/Population/components/PhaseThreeSampling.tsx`
 
@@ -25246,7 +25586,7 @@ type PhaseThreeSamplingProps = {
 
 ---
 
-## v5.21 — 2026-06-25 — Replace useState+useEffect for detectedDates with useMemo; suppress column-resize immutability lint
+## v5.21 — 2026-06-25 — Chore: Replace useState+useEffect for detectedDates with useMemo; suppress column-resize immutability lint
 
 **File:** `src/components/DataTable/index.tsx`
 
@@ -25303,7 +25643,7 @@ document.body.style.userSelect = "none";
 
 ---
 
-## v5.19 — 2026-06-25 — Remove explicit any and fix useMemo deps in PhaseFourDistribution
+## v5.19 — 2026-06-25 — Remove: explicit any and fix useMemo deps in PhaseFourDistribution
 
 **File:** `src/components/Sidebar/Tabs/Population/components/PhaseFourDistribution.tsx`
 
@@ -25365,7 +25705,7 @@ import type { DistributionCurrentData, DistributionEvent } from "../../../../../
 
 ---
 
-## v5.18 — 2026-06-25 — Remove explicit any annotations from MappingSettingsModal
+## v5.18 — 2026-06-25 — Remove: explicit any annotations from MappingSettingsModal
 
 **File:** `src/components/Sidebar/Tabs/Population/components/MappingSettingsModal.tsx`
 
@@ -25427,7 +25767,7 @@ const handleExportColumnChange = (fieldKey: string, field: keyof ExportColumnSet
 
 ---
 
-## v5.17 — 2026-06-25 — Add enterprise readiness implementation plan
+## v5.17 — 2026-06-25 — Add: enterprise readiness implementation plan
 
 **File:** `docs/superpowers/plans/2026-06-25-enterprise-readiness.md`
 
@@ -25444,13 +25784,13 @@ const handleExportColumnChange = (fieldKey: string, field: keyof ExportColumnSet
 
 ---
 
-## v4.5 — 2026-06-24 — Complete icon overhaul, semantic fixes, formatting utilities, type-safety hardening
+## v4.5 — 2026-06-24 — Refactor: Complete icon overhaul, semantic fixes, formatting utilities, type-safety hardening
 
 Full icon pass: replace all remaining Unicode symbol characters (×, ✕, ✓, ›, ↺, ⊟, ⊞, ⊙, ◈, ◎, ⟳) with lucide-react components across 14 files. Improve semantically wrong icon choices in Settings LABEL_GROUPS and Reports. Create `src/utils/formatting.ts` to consolidate 3 duplicate `formatNumber` and 2 `formatDate` implementations. Remove `as any` casts in `Population/index.tsx`. Add null guards for `riskWorkbookResult` and `biWorkbookResult` in `PhaseTwoReportAndProcessing.tsx`. Decision: XrayReportsDashboard NOT restored — Reports tab already handles reporting; keeping data in Population tab would violate separation of concerns.
 
 ---
 
-## v4.4 — 2026-06-24 — Replace all emoji characters with lucide-react SVG icons
+## v4.4 — 2026-06-24 — Change: Replace all emoji characters with lucide-react SVG icons
 
 Install `lucide-react` and replace every emoji/pictographic character in the UI with a proper SVG icon component. Files changed: `WorkspaceGate.tsx`, `ErrorBoundary.tsx`, `App.tsx`, `ErrorLogSection.tsx`, `Settings/index.tsx`, `CertScanGrid.tsx`, `MappingSettingsModal.tsx`, `PhaseFourDistribution.tsx`, `PhaseThreeSampling.tsx`, `PhaseTwoReportAndProcessing.tsx`, `DataAccuracyReport.tsx`, `Reports/index.tsx`, `Population/index.tsx`, `labelsStore.ts`.
 
@@ -25468,7 +25808,7 @@ Install `lucide-react` and replace every emoji/pictographic character in the UI 
 
 ---
 
-## v7.5 — 2026-06-28 — Report Designer: field catalog and data model (FEATURE)
+## v7.5 — 2026-06-28 — Add: Report Designer: field catalog and data model
 
 Phase 0, Task 0.5: Create the field catalog (Arabic-labeled metadata for all ExecutiveReportRow fields) and the data model builder that feeds tables to the query engine. The field catalog defines FieldRole, FieldType, and FieldMeta for 24 fact table columns with complete Arabic localization. The data model builder ingests fact rows, port profiles, and stage profiles, then exposes them as named tables with full metadata for rendering tables, charts, and KPIs in the Report Designer.
 
@@ -25602,7 +25942,7 @@ describe("buildDataModel", () => {
 
 ---
 
-## v5.16 — 2026-06-24 — Fix: remove lockout reset on username field change
+## v5.16 — 2026-06-24 — Fix: Remove lockout reset on username field change
 
 **File:** `src/auth/AuthGate.tsx`
 
@@ -25642,7 +25982,7 @@ describe("buildDataModel", () => {
 
 ---
 
-## v5.15 — 2026-06-24 — Update CLAUDE.md to reflect Tasks 1-13 changes
+## v5.15 — 2026-06-24 — Docs: Update CLAUDE.md to reflect Tasks 1-13 changes
 
 **File:** `CLAUDE.md`
 
@@ -25717,7 +26057,7 @@ describe("buildDataModel", () => {
 
 ---
 
-## v5.14 — 2026-06-24 — Broaden isEnvelope guard to detect workspace-style string schemaVersion
+## v5.14 — 2026-06-24 — Change: Broaden isEnvelope guard to detect workspace-style string schemaVersion
 
 **File:** `src/data/storage/jsonEnvelope.ts`
 
@@ -25764,7 +26104,7 @@ export function isEnvelope(value: unknown): value is JsonEnvelope<unknown> {
 
 ---
 
-## v5.13 — 2026-06-24 — Add JsonEnvelope schema versioning to safeWriteJson / safeReadJson
+## v5.13 — 2026-06-24 — Add: JsonEnvelope schema versioning to safeWriteJson / safeReadJson
 
 **File:** `src/data/storage/jsonEnvelope.ts` *(new file)*
 
@@ -25860,7 +26200,7 @@ expect(bak.ok && bak.file.data.a).toBe(1);
 
 ---
 
-## v5.12 — 2026-06-24 — Surface error log in Settings tab (admin only, collapsible)
+## v5.12 — 2026-06-24 — Change: Surface error log in Settings tab (admin only, collapsible)
 
 **File:** `src/components/Sidebar/Tabs/Settings/ErrorLogSection.tsx` *(new file)*
 
@@ -25907,7 +26247,7 @@ import { ErrorLogSection } from "./ErrorLogSection";
 
 ---
 
-## v5.11 — 2026-06-24 — Parallelize listMonthSummaries with Promise.allSettled
+## v5.11 — 2026-06-24 — Change: Parallelize listMonthSummaries with Promise.allSettled
 
 **File:** `src/data/population/populationStorage.ts`
 
@@ -26044,7 +26384,7 @@ export async function listMonthSummaries(
 
 ---
 
-## v5.10 — 2026-06-24 — Add distributionStorage integration tests
+## v5.10 — 2026-06-24 — Chore: Add distributionStorage integration tests
 
 **File:** `src/data/distribution/distributionStorage.test.ts`
 
@@ -26061,7 +26401,7 @@ export async function listMonthSummaries(
 
 ---
 
-## v5.9 — 2026-06-24 — Add React component smoke tests for AuthGate login flow
+## v5.9 — 2026-06-24 — Chore: Add React component smoke tests for AuthGate login flow
 
 **File:** `vitest.config.ts`
 
@@ -26092,7 +26432,7 @@ include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
 
 ---
 
-## v5.8 — 2026-06-24 — Add centralized error logger, wire up key silent catches in populationStorage
+## v5.8 — 2026-06-24 — Refactor: Add centralized error logger, wire up key silent catches in populationStorage
 
 **File:** `src/data/storage/errorLogger.ts` (created)
 
@@ -26163,7 +26503,7 @@ import { logError } from "../storage/errorLogger";
 
 ---
 
-## v5.7 — 2026-06-24 — Extract AdminToolbar component from AuthGate
+## v5.7 — 2026-06-24 — Refactor: Extract AdminToolbar component from AuthGate
 
 **File:** `src/auth/AdminToolbar.tsx` (created)
 
@@ -26230,7 +26570,7 @@ import { AdminToolbar } from "./AdminToolbar";
 
 ---
 
-## v5.6 — 2026-06-24 — Extract resolveSampleDir helper, deduplicate dual-path fallback
+## v5.6 — 2026-06-24 — Refactor: Extract resolveSampleDir helper, deduplicate dual-path fallback
 
 **File:** `src/data/population/populationStorage.ts`
 
@@ -26283,7 +26623,7 @@ async function resolveSampleDir(
 
 ---
 
-## v5.5 — 2026-06-24 — Move App.tsx inline styles to CSS classes
+## v5.5 — 2026-06-24 — Change: Move App.tsx inline styles to CSS classes
 
 **File:** `src/App.css`
 
@@ -26451,7 +26791,7 @@ function NoAvailableTabs({ role }: { role: AuthSession["role"] }) {
 
 ---
 
-## v5.4 — 2026-06-24 — Add keyboard focus trap to admin passcode modal
+## v5.4 — 2026-06-24 — Add: keyboard focus trap to admin passcode modal
 
 **File:** `src/auth/AuthGate.tsx`
 
@@ -26487,7 +26827,7 @@ const triggerRef = useRef<HTMLElement | null>(null);
 
 ---
 
-## v5.3 — 2026-06-24 — Add 3-attempt login lockout with 30-second countdown
+## v5.3 — 2026-06-24 — Add: 3-attempt login lockout with 30-second countdown
 
 **File:** `src/auth/AuthGate.tsx`
 
@@ -26525,7 +26865,7 @@ const LOCKOUT_DURATION_MS = 30_000;
 
 ---
 
-## v5.2 — 2026-06-24 — Add aria-label to admin passcode input, fix auth-message bad-class binding
+## v5.2 — 2026-06-24 — Fix: Add aria-label to admin passcode input, fix auth-message bad-class binding
 
 **File:** `src/auth/AuthGate.tsx`
 
@@ -26612,7 +26952,7 @@ const LOCKOUT_DURATION_MS = 30_000;
 
 ---
 
-## v5.1 — 2026-06-24 — Remove dead SESSION_KEY constant
+## v5.1 — 2026-06-24 — Remove: dead SESSION_KEY constant
 
 **File:** `src/auth/authConfig.ts`
 
@@ -26626,7 +26966,7 @@ export const SESSION_KEY = "xray_local_login_session_v1";
 
 ---
 
-## v5.0 — 2026-06-24 — Workspace path restructuring, runtime-only auth session, samples mirror module
+## v5.0 — 2026-06-24 — Refactor: Workspace path restructuring, runtime-only auth session, samples mirror module
 
 **Summary:** Major architectural refactor across 39 files covering:
 1. Numbered workspace folder layout (`1-Population`, `2-Samples`, `3-User Data`, `4-Reports`, `5-System`, `6-Templates`) with legacy-path migration fallback.
@@ -26711,7 +27051,7 @@ export async function clearWorkspaceHandle(): Promise<void>
 
 ---
 
-## v4.11 — 2026-06-24 — InspectionPanel: fix toolbar position + full-height panel
+## v4.11 — 2026-06-24 — Fix: InspectionPanel: fix toolbar position + full-height panel
 
 **Root cause:** `DataTable` renders a Fragment (`<>...</>`). When placed directly as a flex child of `.ew-split`, its toolbar and table body each become separate flex items in the RTL row — causing the toolbar to appear as a side column to the right of the rows instead of above them.
 
@@ -26726,7 +27066,7 @@ export async function clearWorkspaceHandle(): Promise<void>
 
 ---
 
-## v4.10 — 2026-06-24 — InspectionPanel: fix footer, remove duplicate chips, always-on panel
+## v4.10 — 2026-06-24 — Fix: InspectionPanel: footer, remove duplicate chips, always-on panel
 
 **File:** `src/components/InspectionPanel/InspectionPanel.css`
 - Added `min-height: 0` to `.ip-form-body` so the form body shrinks within the constrained panel height and the footer (حفظ مسودة / تقديم buttons) is always visible.
@@ -26745,7 +27085,7 @@ export async function clearWorkspaceHandle(): Promise<void>
 
 ---
 
-## v4.9 — 2026-06-24 — InspectionPanel: sticky viewport layout + true split-screen bottom mode
+## v4.9 — 2026-06-24 — Change: InspectionPanel: sticky viewport layout + true split-screen bottom mode
 
 **File:** `src/components/InspectionPanel/InspectionPanel.css`
 
@@ -26806,7 +27146,7 @@ export async function clearWorkspaceHandle(): Promise<void>
 
 ---
 
-## v4.8 — 2026-06-24 — InspectionPanel: side-panel layout for sample review
+## v4.8 — 2026-06-24 — Change: InspectionPanel: side-panel layout for sample review
 
 Replaced the inline table-row expand form with a dedicated `InspectionPanel` component rendered alongside the DataTable. Employees can toggle the panel between right and bottom positions; the choice is saved to their browse preset JSON. The panel shows a visual phase stepper, a metadata header that mirrors the user's active column selection, a single-column form, and a sticky footer with save/submit actions.
 
@@ -26814,7 +27154,7 @@ Replaced the inline table-row expand form with a dedicated `InspectionPanel` com
 
 ---
 
-## v4.7 — 2026-06-24 — Cascade condition support + default template "no image" logic
+## v4.7 — 2026-06-24 — Change: Cascade condition support + default template "no image" logic
 
 **Files:** `src/data/templates/templateRuntime.ts`, `src/components/Sidebar/Tabs/EmployeeWorkspace/views/XrayReferrals.tsx`, `src/components/Sidebar/Tabs/EmployeeWorkspace/views/EmployeeDashboard.tsx`, `src/components/Sidebar/Tabs/TemplateBuilder/index.tsx`
 
@@ -26855,7 +27195,7 @@ export function isFieldVisible(
 
 ---
 
-## v4.6 — 2026-06-24 — Workspace repair for invalid_structure on new PC
+## v4.6 — 2026-06-24 — Add: Workspace repair for invalid_structure on new PC
 
 **File:** `src/data/workspace/WorkspaceGate.tsx`
 
@@ -26937,7 +27277,7 @@ return (
 
 ---
 
-## v4.5 — 2026-06-24 — Smart result-value normalization in BI vs Risk comparison + default inspection template
+## v4.5 — 2026-06-24 — Change: Smart result-value normalization in BI vs Risk comparison + default inspection template
 
 Two independent features:
 
@@ -26980,7 +27320,7 @@ Added "النموذج الافتراضي" button in the list view next to "نم�
 
 ---
 
-## v1.0 — 2026-06-23 — Initial full codebase commit
+## v1.0 — 2026-06-23 — Change: Initial full codebase commit
 
 First push of the complete XQAP v1 application to GitHub. Covers all phases:
 population import, stratified sampling, distribution, employee workspace,
@@ -26990,7 +27330,7 @@ No before/after diff — this is the baseline from which all future edits are me
 
 ---
 
-## v2 — 2026-06-23 — Full-audit remediation + 7-day persistent login
+## v2 — 2026-06-23 — Change: Full-audit remediation + 7-day persistent login
 
 Applies the findings of the codebase audit (all except C3 login-throttling, descoped by
 the user) and adds session persistence. Highlights: rotated the bootstrap admin passcode to
@@ -27068,7 +27408,7 @@ from the username before building the filename (M4).
 
 ---
 
-## v2.1 — 2026-06-23 — Expert observation date column ("تاريخ رصد الخبير")
+## v2.1 — 2026-06-23 — Change: Expert observation date column ("تاريخ رصد الخبير")
 
 Surfaces the timestamp captured when an employee submits ("تقديم") an inspection — already
 stored as `ItemAnswer.submittedAt` — as a dedicated, unified column in both the referrals
@@ -27113,7 +27453,7 @@ exports per row.
 
 ---
 
-## v2.3 — 2026-06-23 — DataTable auto-fit columns
+## v2.3 — 2026-06-23 — Change: DataTable auto-fit columns
 
 The shared `DataTable` used `table-layout: fixed` with forced percentage widths, so columns
 could not grow to their content — headers like "المستوى" wrapped to "الم ستو ى". Switched to
@@ -27141,7 +27481,7 @@ inspection results, referrals, reports, archive). Other tables already used auto
 
 ---
 
-## v2.4 — 2026-06-23 — Fix: newly-added columns invisible under an older saved column config
+## v2.4 — 2026-06-23 — Fix: Newly-added columns invisible under an older saved column config
 
 A column added to a table (e.g. `submittedAt` / "تاريخ رصد الخبير") never rendered for users whose
 column config was persisted before it existed: `visibleCols` and both drag handlers read strictly
@@ -27150,7 +27490,7 @@ Introduced a `normalizedOrder` that reconciles the saved order with the current 
 ids in place, prepends missing alwaysVisible, appends other missing columns, drops stale ids), and
 based rendering + reordering on it.
 
-## v3 — 2026-06-23 — Admin role-preview switcher (impersonate roles to test permissions)
+## v3 — 2026-06-23 — Chore: Admin role-preview switcher (impersonate roles to test permissions)
 
 Added an admin-only control in the top toolbar (next to "تسجيل الخروج") to preview the app as any
 role — ضيف / الموظف / المشرف / المدير / الإدارة — so an admin can verify each role's tabs and
@@ -27174,7 +27514,7 @@ amber `.auth-toolbar-preview` impersonation indicator.
 
 ---
 
-## v3.2 — 2026-06-23 — Role-preview: segmented switch (not buttons, not select)
+## v3.2 — 2026-06-23 — Change: Role-preview: segmented switch (not buttons, not select)
 
 The role-preview control is now a **connected pill segmented switch**: all role options
 sit inside one rounded pill container so they look and feel like a single toggle switch,
@@ -27190,7 +27530,7 @@ shadow). Amber-bar variant preserved.
 
 ---
 
-## v3.3 — 2026-06-23 — Supervisor view toggle in صور الأشعة المحالة
+## v3.3 — 2026-06-23 — Change: Supervisor view toggle in صور الأشعة المحالة
 
 Supervisors and admins can now switch between "الكل" (see everyone's rows) and
 "مسنداتي فقط" (see only rows assigned to the current logged-in user) using a segmented
@@ -27210,7 +27550,7 @@ switch at the top of the table. Employees and guests are unaffected.
 
 ---
 
-## v3.4 — 2026-06-23 — Replacement candidate pool capped at 1000 (performance)
+## v3.4 — 2026-06-23 — Change: Replacement candidate pool capped at 1000 (performance)
 
 Opening the replacement dialog previously rendered ALL eligible population rows in the
 UI, causing severe lag on large populations (10 000+ rows). The candidate pool is now
@@ -27245,7 +27585,7 @@ return { recommended: [], all: capRandom(fallbackStage?.[1] ?? [], REPLACEMENT_P
 
 ---
 
-## v3.5 — 2026-06-23 — Fix BI dataset not recognized for non-standard sheet names
+## v3.5 — 2026-06-23 — Fix: BI dataset not recognized for non-standard sheet names
 
 The BI workbook parser rejected any sheet whose name did not contain "وارد" or "صادر",
 adding it to `unknownSheetNames` and skipping all its rows. This caused the entire BI
@@ -27272,7 +27612,7 @@ for BI-only files. Recognized sheet names ("بحري وارد" etc.) continue to
 
 ---
 
-## v3.6 — 2026-06-23 — Permission matrix: sub-tabs hidden when role has no view permission
+## v3.6 — 2026-06-23 — Change: Permission matrix: sub-tabs hidden when role has no view permission
 
 Sub-tabs inside employee-workspace (لوحة الإحصائيات, صور الأشعة المحالة, نتائج فحص الأشعة,
 اعتماد الطلبات, نموذج الفحص) were always shown in the sidebar regardless of permissions —
@@ -27304,7 +27644,7 @@ return SIDEBAR_TABS
 
 ---
 
-## v3.1 — 2026-06-23 — Role-preview: dropdown toggle, grouped with تسجيل الخروج
+## v3.1 — 2026-06-23 — Change: Role-preview: dropdown toggle, grouped with تسجيل الخروج
 
 Replaced the row of chip buttons with a compact `<select>` dropdown and moved it into a
 flex group with تسجيل الخروج so both controls sit together on the left end of the toolbar.
@@ -27360,7 +27700,7 @@ the same `columnOrder` guard to the referrals preset for consistency.
 
 ---
 
-## v2.4 — 2026-06-23 — Fix: newly-added columns invisible under an older saved column config
+## v2.4 — 2026-06-23 — Fix: Newly-added columns invisible under an older saved column config
 
 A column added to a table (e.g. `submittedAt` / "تاريخ رصد الخبير") never rendered for users whose
 column config was persisted before it existed: `visibleCols` and both drag handlers read strictly
@@ -27395,7 +27735,7 @@ function handleDrop(targetId) { const order = [...normalizedOrder]; if (sp<0||tp
 
 ---
 
-## v4.4 — 2026-06-23 — XLSX export for all report cards + auth footer workspace button
+## v4.4 — 2026-06-23 — Change: XLSX export for all report cards + auth footer workspace button
 
 **File:** `src/auth/AuthGate.tsx`
 
@@ -27444,7 +27784,7 @@ Added `buildExecutiveXlsx(input)` — exports 4-sheet XLSX:
 
 ---
 
-## v4.3 — 2026-06-23 — Sample report rewrite (rich HTML + XLSX) and executive report 5-slide restructure
+## v4.3 — 2026-06-23 — Refactor: Sample report rewrite (rich HTML + XLSX) and executive report 5-slide restructure
 
 **File:** `src/data/reporting/executiveReport.ts`
 
@@ -27498,7 +27838,7 @@ stage breakdown, 50-row sample preview) plus `buildSampleXlsx()` generating a 5-
 
 ---
 
-## v4.1 — 2026-06-23 — Reports Hub: card-grid page design
+## v4.1 — 2026-06-23 — Change: Reports Hub: card-grid page design
 
 **File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
 
@@ -27547,7 +27887,7 @@ Removed three unused `import type` lines (`PreparedPopulationRow`, `Distribution
 
 ---
 
-## v4.0 — 2026-06-23 — Executive Report: 8-slide HTML presentation module
+## v4.0 — 2026-06-23 — Change: Executive Report: 8-slide HTML presentation module
 
 **File:** `src/data/reporting/executiveReportTypes.ts` *(new)*
 
@@ -27622,7 +27962,7 @@ const REPORT_LABELS: Record<ReportType, string> = {
 
 ---
 
-## v4.5 — 2026-06-29 — Fix: executive report badgeHtml CSS class injection, sidebar nav labels
+## v4.5 — 2026-06-29 — Fix: Executive report badgeHtml CSS class injection, sidebar nav labels
 
 **File:** `src/data/reporting/executive/primitives.ts`
 
@@ -27669,7 +28009,7 @@ export function badgeHtml(status: "excellent" | "stable" | "monitor" | "priority
 
 ---
 
-## v28 — 2026-06-30 — design system: shared primitives layer + token extensions + gentle global form polish
+## v28 — 2026-06-30 — Change: Design system: shared primitives layer + token extensions + gentle global form polish
 
 Foundation phase of the "Refined Cohesion" UI elevation (spec: `docs/superpowers/specs/2026-06-30-refined-cohesion-ui-design.md`). Adds a single source of truth for buttons/cards/stats/badges/fields so tabs stop re-rolling their own. Additive and low-risk: new tokens, a new opt-in `primitives.css`, two thin React wrappers, and a gentle base style for otherwise-unstyled native form controls (component classes still override).
 
@@ -27755,7 +28095,7 @@ import "./styles/primitives.css";
 
 ---
 
-## v28.1 — 2026-06-30 — design system: token migration + polish across component surfaces (parallel agent pass)
+## v28.1 — 2026-06-30 — Change: Design system: token migration + polish across component surfaces (parallel agent pass)
 
 Surface-by-surface refinement consuming the v28 foundation. Off-token hardcoded hex replaced with nearest tokens; ad-hoc paddings moved to the `--sp-*` scale; shadows unified to `--sh-*` tiers; `transition: all` replaced with explicit, token-driven property transitions; focus rings unified to `box-shadow: var(--focus-ring)`. Behavior and class names unchanged (TSX selectors preserved). Representative changes per file:
 
@@ -27819,7 +28159,7 @@ Surface-by-surface refinement consuming the v28 foundation. Off-token hardcoded 
 
 ---
 
-## v28.2 — 2026-06-30 — design system: shell-adjacent + misc surface touch-ups
+## v28.2 — 2026-06-30 — Change: Design system: shell-adjacent + misc surface touch-ups
 
 Final sweep. Most remaining component CSS (TemplateBuilder, PageHeader, AdminToolbar, WorkspaceGate, ErrorLogSection, FeedbackWidget, DataAccuracyReport) was already token-clean and left unchanged. Minor refinements only:
 
@@ -27829,7 +28169,7 @@ Final sweep. Most remaining component CSS (TemplateBuilder, PageHeader, AdminToo
 
 ---
 
-## v28.3 — 2026-06-30 — visible polish pass (every-screen surfaces)
+## v28.3 — 2026-06-30 — Change: Visible polish pass (every-screen surfaces)
 
 The v28.x token migration was visually a no-op (hex → tokens that resolve to identical pixels). This pass makes deliberately *visible* changes to the highest-frequency shared surfaces.
 
@@ -27881,7 +28221,7 @@ The v28.x token migration was visually a no-op (hex → tokens that resolve to i
 
 **File:** `src/styles/primitives.css` — `.ui-stat::before` accent bar widened 3px→4px and changed from flat `--c-sky` to `--sky-gradient`; `--premium` variant now uses `--gold-accent-bar`.
 
-## v29 — 2026-06-30 — viewer/demo mode (login bypass + read-only) + visible polish wiring
+## v29 — 2026-06-30 — Add: Viewer/demo mode (login bypass + read-only) + visible polish wiring
 
 Adds a built-in `viewer` / `view` account that mounts a read-only, in-memory demo
 workspace and skips the folder picker, so the app can be explored end-to-end (and
@@ -27911,7 +28251,7 @@ tokens into visible surfaces.
 
 ---
 
-## v29.1 — 2026-06-30 — fix: restore connect-first workflow; demo entry moved to the picker
+## v29.1 — 2026-06-30 — Fix: Restore connect-first workflow; demo entry moved to the picker
 
 The v29 gate reorder (login-first) was wrong: the workspace folder holds the
 users/permissions file, so the app must connect to the address FIRST to load the
@@ -27932,14 +28272,14 @@ the demo entry to the picker screen instead.
 
 ---
 
-## v29.2 — 2026-06-30 — view mode: hidden Alt+A+T passcode entry (replaces visible button)
+## v29.2 — 2026-06-30 — Change: View mode: hidden Alt+A+T passcode entry (replaces visible button)
 
 Made the demo/view entry a hidden backdoor mirroring the admin shortcut, instead of
 a visible button on the address picker.
 
 ---
 
-## v41.11 — 2026-07-05 — Archive tab audit: show dropped distribution total, surface refresh errors, don't misreport skipped file copies
+## v41.11 — 2026-07-05 — Fix: Archive tab audit: show dropped distribution total, surface refresh errors, don't misreport skipped file copies
 
 Audit of `src/components/Sidebar/Tabs/Archive/` and `src/data/backup/backupStorage.ts`.
 Three targeted fixes:
@@ -28090,7 +28430,7 @@ and (in `copyAllJsonFiles`)
     if (wrote) copied.push(entry.name);
 ```
 
-## v41.12 — 2026-07-05 — Settings/ChangeLog audit: add missing label group entry + fix stale LabelRow input
+## v41.12 — 2026-07-05 — Fix: Settings/ChangeLog audit: add missing label group entry + fix stale LabelRow input
 
 Audit of `Settings`/`ChangeLog` tabs and `labelsStore`/`browsePresetStorage`. Found `col_expert_observation_date`
 (used as a real column header in `XrayReferrals.tsx` and `XrayInspectionResults.tsx`) was missing from
@@ -28127,7 +28467,7 @@ function LabelRow({ labelKey, desc }: { labelKey: LabelKey; desc: string }) {
   useEffect(() => setVal(current), [current]);
 ```
 
-## v41.13 — 2026-07-05 — Data-layer audit: fix read-modify-write races in feedback + browse presets
+## v41.13 — 2026-07-05 — Fix: Data-layer audit: fix read-modify-write races in feedback + browse presets
 
 Audit of `src/data/{population,sampling,distribution,answers,approvals,referral,feedback,storage,powerbiExport,preferences}`.
 Most of this layer is CAS-loop or event-log based (answers, approvals, distribution, sample append)
@@ -28207,7 +28547,7 @@ export async function saveUserBrowseDatasetPreset(
 column/width preset saves for the same user (or the shared admin preset) merge instead of racing.
 ```
 
-## v41.14 — 2026-07-05 — UserManagement/auth audit: fix report-designer permission-key mismatch
+## v41.14 — 2026-07-05 — Fix: UserManagement/auth audit: fix report-designer permission-key mismatch
 
 Audit of `src/components/Sidebar/Tabs/UserManagement/` and `src/auth/`. Found a real
 tab/permission-key mismatch: `App.tsx`'s `allowedTabs` memo builds each sub-tab's
@@ -28267,7 +28607,7 @@ in `Reports/index.tsx` are unaffected — those are UI-local ids, not permission
     { role: "admin",      tabId: "reports/report-designer",         access: "edit" },
 ```
 
-## v41.15 — 2026-07-05 — Population tab audit: remove dead mini-report code (stale stage mapping bug)
+## v41.15 — 2026-07-05 — Remove: Population tab audit: remove dead mini-report code (stale stage mapping bug)
 
 Audit of `src/components/Sidebar/Tabs/Population/` and subfolders. `createRiskMiniReport` /
 `createBiMiniReport` / `buildRiskStageCountsBySheet` in `components/helpers.ts` and the whole
@@ -28320,7 +28660,7 @@ importers anywhere in `src/`.
 
 ---
 
-## v41.16 — 2026-07-05 — template system audit: fix condition-cycle stack overflow, orphaned selection on delete, dead role-check helper
+## v41.16 — 2026-07-05 — Fix: Template system audit: condition-cycle stack overflow, orphaned selection on delete, dead role-check helper
 
 Audit of `src/data/templates/` and `TemplateBuilder`. Three bugs found and fixed:
 (1) `isFieldVisible` recursed into a field's condition source with no cycle guard —
@@ -28444,7 +28784,7 @@ never imported, and its role logic contradicted the real gating in `TemplateBuil
 
 **After:** stale comment removed (no replacement — nothing references it anymore).
 
-## v41.17 — 2026-07-05 — Reports/ReportDesigner tab audit: fix silently-swallowed post-delete list refresh
+## v41.17 — 2026-07-05 — Fix: Reports/ReportDesigner tab audit: silently-swallowed post-delete list refresh
 
 Audit of `src/components/Sidebar/Tabs/Reports/` and `src/components/Sidebar/Tabs/ReportDesigner/`
 (role gating for the KPI sub-tab and report-designer sub-tab checked and confirmed correctly
@@ -28489,7 +28829,7 @@ here.
       .catch(logRejection("reportDesigner:refreshIndexAfterDelete"));
 ```
 
-## v41.18 — 2026-07-05 — Reports/ReportDesigner audit: fix missing permission guard on report-designer sub-tab
+## v41.18 — 2026-07-05 — Fix: Reports/ReportDesigner audit: fix missing permission guard on report-designer sub-tab
 
 Audit of `src/components/Sidebar/Tabs/Reports/` and `src/components/Sidebar/Tabs/ReportDesigner/`.
 Found a real access-control gap: the `kpi` sub-section in `ReportsContent` is wrapped in
@@ -28528,7 +28868,7 @@ the other pass rather than re-touching it.
   return <ReportsContent />;
 ```
 
-## v41.19 — 2026-07-05 — ReportDesigner: surface silent autosave failures
+## v41.19 — 2026-07-05 — Change: ReportDesigner: surface silent autosave failures
 
 Audit of `Reports`/`ReportDesigner` tabs (scope: `src/components/Sidebar/Tabs/Reports/`,
 `src/components/Sidebar/Tabs/ReportDesigner/`). `EditorHost.performSave` called
@@ -28676,7 +29016,7 @@ export default function Ribbon({
 }
 ```
 
-## v41.20 — 2026-07-05 — EmployeeWorkspace audit: fix stale permission reads on user-management change
+## v41.20 — 2026-07-05 — Fix: EmployeeWorkspace audit: fix stale permission reads on user-management change
 
 Audit of `src/components/Sidebar/Tabs/EmployeeWorkspace/` (views + index). Found `XrayReferrals.tsx`,
 `XrayInspectionResults.tsx`, and `ReferralApproval.tsx` all call `readUserManagementState()` /
@@ -28808,7 +29148,7 @@ export default function ReferralApproval({ directoryHandle }: Props) {
   const userManagementState = readUserManagementState();
 ```
 
-## v41.21 — 2026-07-05 — Reports: handle clipboard-write rejection on Power BI path copy
+## v41.21 — 2026-07-05 — Change: Reports: handle clipboard-write rejection on Power BI path copy
 
 The "نسخ" (copy) button for the Power BI export path used
 `void navigator.clipboard.writeText(fullHint)` — `navigator.clipboard.writeText` returns
@@ -28831,7 +29171,7 @@ a button that appears to do nothing and no diagnostic trail. Routed through the 
                       }}
 ```
 
-## v41.22 — 2026-07-05 — Population tab audit: fix undefined-crash in export column handler + stale CertScan grid on async month load
+## v41.22 — 2026-07-05 — Fix: Population tab audit: fix undefined-crash in export column handler + stale CertScan grid on async month load
 
 Second, independent pass over `src/components/Sidebar/Tabs/Population/` (biData/, riskData/,
 processing/, reporting/, components/), on top of the earlier v41.5 entry in this file that
@@ -28917,7 +29257,7 @@ export default function CertScanGrid({ initialText, onDataChange }: CertScanGrid
   }, [initialText]);
 ```
 
-## v41.23 — 2026-07-05 — Synthesis pass: fix lint errors introduced by parallel audit agents
+## v41.23 — 2026-07-05 — Fix: Synthesis pass: fix lint errors introduced by parallel audit agents
 
 After nine parallel audit agents (population, employee workspace, reports/report-designer,
 archive, user-management, settings/change-log, cross-page connections, data layer, templates)
@@ -28981,7 +29321,7 @@ export let STAGE_CARD_TABLE_BUDGET_PX = 160;
 export const STAGE_CARD_TABLE_BUDGET_PX = 160;
 ```
 
-## v41.24 — 2026-07-05 — Retroactive: DataTable sticky-column offset/order fixes, self-contained fonts + favicon
+## v41.24 — 2026-07-05 — Fix: Retroactive: DataTable sticky-column offset/order fixes, self-contained fonts + favicon
 
 Older uncommitted work found staged ahead of the audit-pass commits above. Logging it
 retroactively before committing. Two real `DataTable` bugs plus a build-portability change:
@@ -29111,7 +29451,7 @@ fix mirrored locally + `subscribeToUserManagementChanges` re-render fix (see sum
 by the inlined copies above).
 
 
-## v41.25 — 2026-07-05 — Distribution: totalAssigned counts live entries only (excludes replaced)
+## v41.25 — 2026-07-05 — Change: Distribution: totalAssigned counts live entries only (excludes replaced)
 
 **File:** `src/data/distribution/distributionLog.ts`
 
@@ -29160,7 +29500,7 @@ by the inlined copies above).
 });
 ```
 
-## v41.26 — 2026-07-05 — Replacement: deterministic seeded candidate capping (audit reproducibility)
+## v41.26 — 2026-07-05 — Change: Replacement: deterministic seeded candidate capping (audit reproducibility)
 
 **File:** `src/data/distribution/replacement.ts`
 
@@ -29192,7 +29532,7 @@ Plus: import `createRng`, `drawWithoutReplacement`, `hashSeedString`, `type Rng`
 
 **After:** new test "caps oversized pools deterministically from the sample seed and dead row id" — builds 150 same-stage candidates, calls `getReplacementCandidates` twice, asserts both calls return identical 100-item lists.
 
-## v41.27 — 2026-07-05 — Sampling: reconcile per-port actuals after spillover in legacy totalSampleSize branch
+## v41.27 — 2026-07-05 — Change: Sampling: reconcile per-port actuals after spillover in legacy totalSampleSize branch
 
 **File:** `src/data/sampling/sampleAlgorithm.ts`
 
@@ -29262,7 +29602,7 @@ Plus: import `createRng`, `drawWithoutReplacement`, `hashSeedString`, `type Rng`
 ```
 Plus: new test "legacy branch reconciles per-port actuals when spillover fires" — a port whose rows include out-of-union certScanStatus values (runtime data drift) forces underfill + spillover; asserts per-port actuals sum to the grand total.
 
-## v41.28 — 2026-07-05 — Distribution fold: replaced is terminal — drop illegal resurrecting events
+## v41.28 — 2026-07-05 — Change: Distribution fold: replaced is terminal — drop illegal resurrecting events
 
 **File:** `src/data/distribution/distributionLog.ts`
 
@@ -29306,7 +29646,7 @@ Plus: import `logError` from `../storage/errorLogger`.
 
 **After:** new test "a stray late event cannot resurrect a replaced row" — assign A1 and B2, replace A1 with B2, then append a late "assigned"/"completed" for A1; asserts A1 stays replaced, replacedById preserved, and totalAssigned still counts only B2.
 
-## v41.29 — 2026-07-05 — Distribution storage: log swallowed cache-write and derive failures
+## v41.29 — 2026-07-05 — Change: Distribution storage: log swallowed cache-write and derive failures
 
 **File:** `src/data/distribution/distributionStorage.ts`
 
@@ -29342,7 +29682,7 @@ Plus: import `logError` from `../storage/errorLogger`.
 ```
 Plus: import `logError`, `logRejection` from `../storage/errorLogger`.
 
-## v41.30 — 2026-07-05 — Population: hard-block sample re-draw once distribution events exist
+## v41.30 — 2026-07-05 — Change: Population: hard-block sample re-draw once distribution events exist
 
 **File:** `src/data/labels/labelsStore.ts`
 
@@ -29396,7 +29736,7 @@ Plus: import `logError`, `logRejection` from `../storage/errorLogger`.
 ```
 Plus: import `getLabels` from `../../../../data/labels/labelsStore`.
 
-## v41.31 — 2026-07-05 — Population: confirm before saving a re-processed month that already has a drawn sample
+## v41.31 — 2026-07-05 — Change: Population: confirm before saving a re-processed month that already has a drawn sample
 
 **File:** `src/data/labels/labelsStore.ts`
 
@@ -29458,7 +29798,7 @@ Plus: import `getLabels` from `../../../../data/labels/labelsStore`.
 ```
 Plus: new state `pendingReprocessSave`, `<ConfirmDialog>` rendered next to `MappingSettingsModal` (confirm → `commitSaveToDisk`, cancel → cancellation message), imports of `ConfirmDialog` and `loadSampleMaster`.
 
-## v41.32 — 2026-07-05 — Month manifest: wire dead "sampled"/"distributed" statuses
+## v41.32 — 2026-07-05 — Add: Month manifest: wire dead "sampled"/"distributed" statuses
 
 **File:** `src/data/population/populationStorage.ts`
 
@@ -29522,7 +29862,7 @@ export async function updateMonthStatus(
 ```
 Plus: after a successful single assignment (`handleAssign`) and a successful bulk batch (`handleApplyBulkAssignment`), call `updateMonthStatus(directoryHandle, monthFolderName, "distributed")` (monotonic helper makes repeat calls no-ops); `updateMonthStatus` added to the populationStorage import list.
 
-## v41.33 — 2026-07-05 — Executive report: completion in the model derives from submitted answers, not distribution events
+## v41.33 — 2026-07-05 — Change: Executive report: completion in the model derives from submitted answers, not distribution events
 
 **File:** `src/data/reporting/executive/model/reportModel.ts`
 
@@ -29550,7 +29890,7 @@ Plus: after a successful single assignment (`handleAssign`) and a successful bul
     },
 ```
 
-## v41.34 — 2026-07-05 — Remove emoji glyphs: lucide icons instead
+## v41.34 — 2026-07-05 — Remove: emoji glyphs: lucide icons instead
 
 **File:** `src/components/Sidebar/Tabs/Reports/index.tsx`
 
@@ -29584,7 +29924,7 @@ import { ChevronDown, ChevronUp, Plus, Settings2, X } from "lucide-react";
                 <h4 style={{ fontSize: "14px", fontWeight: "bold", marginBottom: "8px", display: "flex", alignItems: "center", gap: "6px" }}><Plus size={14} strokeWidth={2.5} aria-hidden /> إضافة حقل مخصص جديد</h4>
 ```
 
-## v41.38 — 2026-07-05 — Docs integrity: resolve duplicate EDIT_LOG version identifiers
+## v41.38 — 2026-07-05 — Fix: Docs integrity: resolve duplicate EDIT_LOG version identifiers
 
 **File:** `docs/EDIT_LOG.md`
 
@@ -29612,7 +29952,7 @@ Also appended a reproducibility-epoch note to the Hamilton tie-break entry (now 
 // until the whole suite times out. Before the v41.36 fix the outer read-modify-write
 ```
 
-## v41.39 — 2026-07-05 — Distribution: version-stamp derived snapshots so pre-fix caches are re-derived
+## v41.39 — 2026-07-05 — Fix: Distribution: version-stamp derived snapshots so pre-fix caches are re-derived
 
 **File:** `src/data/distribution/distributionLog.ts`
 
@@ -29677,7 +30017,7 @@ Plus: import `DERIVE_VERSION` from `./distributionLog`.
 
 New test "ignores a cached snapshot without deriveVersion and re-derives": seeds a log with one assignment, writes a stale pre-fix cache (matching `logRevision`, valid quotas, absurd totals, no `deriveVersion`), and asserts `loadOrDeriveDistributionCurrent` returns re-derived data stamped with `DERIVE_VERSION`.
 
-## v41.40 — 2026-07-05 — Distribution fold: quota pass skips events dropped by the terminal-state guard
+## v41.40 — 2026-07-05 — Fix: Distribution fold: quota pass skips events dropped by the terminal-state guard
 
 **File:** `src/data/distribution/distributionLog.ts`
 
@@ -29702,7 +30042,7 @@ Dropped event ids are collected into a `droppedEventIds` set inside the fold's t
 
 Extended "a stray late event cannot resurrect a replaced row": stray events now target a second employee (emp2); asserts `quotas.emp2` is undefined (dropped assignment does not create a quota) and `quotas.emp1.sampleCount` stays 2.
 
-## v41.41 — 2026-07-05 — Distribution fold: aggregate illegal-event logging to one entry per derivation
+## v41.41 — 2026-07-05 — Change: Distribution fold: aggregate illegal-event logging to one entry per derivation
 
 **File:** `src/data/distribution/distributionLog.ts`
 
@@ -29733,7 +30073,7 @@ With a single aggregated `logError("distribution:derive", …)` after the fold s
 
 Resurrection test additionally clears the error ring buffer before deriving and asserts exactly one aggregated `distribution:derive` entry is logged for two dropped events.
 
-## v41.42 — 2026-07-05 — W1 (Tier-1 Item I): safeWrite promotes the verified .tmp when live commit fails and no usable .bak exists
+## v41.42 — 2026-07-05 — Change: W1 (Tier-1 Item I): safeWrite promotes the verified .tmp when live commit fails and no usable .bak exists
 
 Behavioral changes: (1) promotion converts a previously-thrown failure into a SUCCESS when the
 staged .tmp is intact and can be committed; (2) on total failure the .tmp is now KEPT on disk
@@ -29802,7 +30142,7 @@ file and .bak are unreadable (reuses the recoveredFromBak flag and recovery even
 
 New failure-injection tests (corrupting wrapper around createMemoryDirectory targeting only live-file writes): first-write promotion succeeds with no .bak; valid-.bak rollback behavior preserved; corrupt-.bak promotion succeeds; total-failure keeps .tmp and safeReadJson recovers it; streamed variants via `__setStreamingForcedSizeLimitForTests(0)`; success-path regression asserting `.tmp` cleanup via a removeEntry recorder.
 
-## v41.43 — 2026-07-05 — W2 (Tier-1 Item E): workspace action audit log module
+## v41.43 — 2026-07-05 — Change: W2 (Tier-1 Item E): workspace action audit log module
 
 **File:** `src/data/audit/actionLog.ts` (new)
 
@@ -29826,7 +30166,7 @@ Tests: append+read round-trip (id/at stamped); 10,000-entry cap enforcement (old
 failure tolerance (throwing handle resolves without throwing and lands in the error ring buffer);
 two concurrent appends both survive.
 
-## v41.49 — 2026-07-07 — KPI dashboard (مؤشرات الأداء): charts rendered invisible in-app — define chart palette variables in Reports.css
+## v41.49 — 2026-07-07 — Fix: KPI dashboard (مؤشرات الأداء): charts rendered invisible in-app — define chart palette variables in Reports.css
 
 > Renumbered from v41.44 (duplicate identifier) — see v41.53.
 
@@ -29886,7 +30226,7 @@ Regression test: reads `Reports.css` and asserts every chart color-role
 variable from `COLOR_ROLE` (executive/ui/tokens.ts) is defined, so the
 dashboard palette can't silently disappear again.
 
-## v41.44 — 2026-07-05 — W3 (Tier-1 Item A): month close-out/lock — schema, lock module, write gates, Archive UI
+## v41.44 — 2026-07-05 — Change: W3 (Tier-1 Item A): month close-out/lock — schema, lock module, write gates, Archive UI
 
 Shared-file batching note: this entry also contains the Item-D parts of `answerTypes.ts` /
 `answerStorage.ts` (`reopenItemAnswer` + history) and BOTH new feature ids in
@@ -30003,7 +30343,7 @@ guarded writers reject with MonthClosedError after close and succeed after reope
 updateMonthStatus no-op on closed; TTL cache behavior via invalidate + test TTL seam; demo
 read-only mode never throws.
 
-## v41.50 — 2026-07-07 — KPI dashboard: distinguish "population not processed" from "analysis failed" in the empty state
+## v41.50 — 2026-07-07 — Change: KPI dashboard: distinguish "population not processed" from "analysis failed" in the empty state
 
 > Renumbered from v41.45 (duplicate identifier) — see v41.53.
 
@@ -30098,7 +30438,7 @@ actionable message for each case.
     }
 ```
 
-## v41.51 — 2026-07-07 — populationStorage: STATUS_RANK missing "closed" — type error broke the build
+## v41.51 — 2026-07-07 — Fix: PopulationStorage: STATUS_RANK missing "closed" — type error broke the build
 
 > Renumbered from v41.46 (duplicate identifier) — see v41.53.
 
@@ -30130,7 +30470,7 @@ const STATUS_RANK: Record<MonthManifestData["status"], number> = {
 };
 ```
 
-## v41.45 — 2026-07-05 — W4 (Tier-1 Item H) + batched Population edits: zeroed-snapshot guard, closed-month UI, audit hooks
+## v41.45 — 2026-07-05 — Change: W4 (Tier-1 Item H) + batched Population edits: zeroed-snapshot guard, closed-month UI, audit hooks
 
 Shared-file batching: `Population/index.tsx` is edited once for Items H (guard), A
 (closed-month disable + banner + MonthClosedError handling) and E (sample-drawn /
@@ -30205,7 +30545,7 @@ New regression test documenting that `deriveCurrentDistribution(logWithEvents, [
 entries (the data-layer behavior the UI guard protects against), with a comment pointing at the
 guard in `Population/index.tsx`.
 
-## v41.46 — 2026-07-05 — W5 (Tier-1 Item C): referral/replacement approval idempotency + audit hooks
+## v41.46 — 2026-07-05 — Change: W5 (Tier-1 Item C): referral/replacement approval idempotency + audit hooks
 
 Shared-file batching: `distributionTypes.ts` and `distributionLog.ts` are edited once here
 carrying BOTH the Item-C additions (sourceRequestId) and the Item-D event model ("reopened"
@@ -30291,7 +30631,7 @@ reassignment); replay after simulated decision-write failure (pre-applied events
 request → zero new events, decision recorded); non-pending → no events/decision change;
 ownership drift → abort with no events; closed month → rejects with MonthClosedError.
 
-## v41.52 — 2026-07-07 — Sample draw: reject population where no row matches any configured stage (was silently "succeeding" with a zeroed sample)
+## v41.52 — 2026-07-07 — Fix: Sample draw: reject population where no row matches any configured stage (was silently "succeeding" with a zeroed sample)
 
 > Renumbered from v41.47 (duplicate identifier) — see v41.53.
 
@@ -30354,7 +30694,7 @@ Added test: `drawSample rejects a population whose stage values match none of
 the four configured stages` — 100 rows all stamped `stage: "Level 1"` (not in
 `DEFAULT_STAGE_MAPPINGS`), asserts `result.ok === false`.
 
-## v41.47 — 2026-07-05 — W6 (Tier-1 Item D): reopen-for-correction of submitted answers
+## v41.47 — 2026-07-05 — Change: W6 (Tier-1 Item D): reopen-for-correction of submitted answers
 
 Batched prerequisites landed earlier: answer history schema + `reopenItemAnswer` (v41.44,
 answerTypes/answerStorage), `"reopened"` event type + `buildReopenedEvent` + fold case
@@ -30402,7 +30742,7 @@ rejects with MonthClosedError.
 Fold tests: `assigned → completed → reopened` → status "pending", same assignee;
 `replaced → reopened` → dropped by the terminal-state guard (entry stays replaced).
 
-## v41.48 — 2026-07-05 — Fix a real TDZ/hoisting hazard in XrayReferrals.tsx found while chasing the W6 lint gate
+## v41.48 — 2026-07-05 — Fix: a real TDZ/hoisting hazard in XrayReferrals.tsx found while chasing the W6 lint gate
 
 **Context:** the W6 lint gate failed with 12 "React Compiler" errors. Investigation (diffing
 against `git show HEAD:...XrayReferrals.tsx`, which lints 0-clean) showed none of the 12 are on
@@ -30466,7 +30806,7 @@ spec never asked me to touch, which the spec's "no refactor beyond scope" rule f
 not block `tsc -b` or `npm run test:run`; they are React Compiler optimization-skip warnings,
 not correctness bugs.
 
-## v41.53 — 2026-07-05 — Docs integrity: resolve a second batch of duplicate EDIT_LOG version identifiers
+## v41.53 — 2026-07-05 — Fix: Docs integrity: resolve a second batch of duplicate EDIT_LOG version identifiers
 
 **File:** `docs/EDIT_LOG.md`
 
@@ -30495,7 +30835,7 @@ therefore redundant but harmless — the early return fires first — and satisf
 rank entry), so it is left in place rather than removed, avoiding a second edit of a file this
 session already owns for other reasons.
 
-## v41.54 — 2026-07-05 — W7 (Tier-1 Item B): user deletion guard — footprint check, block-not-force-reassign
+## v41.54 — 2026-07-05 — Security: W7 (Tier-1 Item B): user deletion guard — footprint check, block-not-force-reassign
 
 **File:** `src/data/samples/sampleMirrorStorage.ts`
 
@@ -30536,7 +30876,7 @@ only A with the correct pending count; closed month with pending entries → exc
 `activeAssignments`; answers file but no mirror → `answerFileMonths` populated,
 `activeAssignments` empty; no files anywhere → both arrays empty.
 
-## v41.55 — 2026-07-05 — W8+W9 (Tier-1 Items F/G): backup coverage of browser storage + restore-semantics label
+## v41.55 — 2026-07-05 — Change: W8+W9 (Tier-1 Items F/G): backup coverage of browser storage + restore-semantics label
 
 **Verification (spec F.1, Task 1):** confirmed already satisfied, no code change needed.
 `UsersPermissionsData.featurePermissions?: FeaturePermission[]` already exists

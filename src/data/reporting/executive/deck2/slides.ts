@@ -14,7 +14,7 @@ import type { ReportModel } from "../model/reportModel";
 import type { StageProfile } from "../../executiveReportTypes";
 import { esc, fmtNum, fmtPct } from "../primitives";
 import { icon } from "../ui/icons";
-import { rankedBar, funnel } from "../ui/charts";
+import { funnel } from "../ui/charts";
 import { coverMeshSvg, dividerPatternSvg } from "../ui/generativeArt";
 import { isRankable } from "../model/dataSufficiency";
 import { formatStageLabel } from "../../../population/stageHelpers";
@@ -162,7 +162,7 @@ function slideControls(slideId: string, variantPreview: boolean): string {
 export const NAV_SECTIONS = {
   cover: "الغلاف",
   toc: "المحتويات",
-  summary: "الشهر في أرقام",
+  summary: "مؤشرات الشهر",
   glossary: "المعجم",
   section1: "القسم 1 — مجتمع الفحص",
   section2: "القسم 2 — نتائج فحص الجودة",
@@ -388,28 +388,19 @@ export function tocSlide(items: TocItem[], num: number, total: number, variantPr
   });
 }
 
-// ── NEW — الشهر في أرقام (headline dashboard) ────────────────────────────────
-/** One dominant hero number (population) plus five stat tiles pulled straight
- *  from the ReportModel. Each tile renders a graceful "—" empty state when its
- *  metric lacks data (denominator-gated rates), never a misleading zero. No
- *  prior-month I/O — the deck builders stay pure over one month's input. */
+// ── مؤشرات الشهر (headline dashboard + top ports) ─────────────────────────────
+/** One compact hero number (population) plus stat tiles split into two
+ *  visually distinct groups — raw population/sample counts vs. the one metric
+ *  that comes out of the reviewer-accuracy STUDY, not a straight tally — then
+ *  the top-6 land/sea ports by volume as ranked tables (bar-in-cell, same
+ *  `deck-table`/`barCell` language as every other port page in this deck,
+ *  replacing the old standalone chart page this slide absorbed). Each tile
+ *  renders a graceful "—" empty state when its metric lacks data
+ *  (denominator-gated rates), never a misleading zero. No prior-month I/O —
+ *  the deck builders stay pure over one month's input. */
 export function monthInNumbersSlide(model: ReportModel, num: number, total: number, variantPreview: boolean): string {
   const accuracy = model.summary.overallAccuracy;
-  const tiles: Array<{ tone: string; icon: string; value: string; label: string; sub: string }> = [
-    {
-      tone: "blue",
-      icon: "scan",
-      value: fmtNum(model.sample.total),
-      label: "حجم العيّنة",
-      sub: `تغطية ${fmtPct(model.sample.coverage)} من المجتمع`,
-    },
-    {
-      tone: "cyan",
-      icon: "check",
-      value: fmtNum(model.sample.studied),
-      label: "الصور المدروسة",
-      sub: `إنجاز ${fmtPct(model.sample.completionRate)} من العيّنة`,
-    },
+  const rawTiles: Array<{ tone: string; icon: string; value: string; label: string; sub: string }> = [
     {
       tone: "coral",
       icon: "alert",
@@ -418,58 +409,114 @@ export function monthInNumbersSlide(model: ReportModel, num: number, total: numb
       sub: `${fmtNum(model.population.suspicious)} صورة اشتباه في المجتمع`,
     },
     {
-      tone: "purple",
-      icon: "flag",
-      value: fmtNum(model.errorAnalysis.totals.missedSuspicion + model.errorAnalysis.totals.falseSuspicion),
-      label: "صور الاختلاف مع المراجع",
-      sub: "اشتباه فائت + اشتباه خاطئ",
+      tone: "blue",
+      icon: "scan",
+      value: fmtPct(model.sample.coverage),
+      label: "نسبة حجم العيّنة",
+      sub: `${fmtNum(model.sample.total)} من ${fmtNum(model.population.total)} صورة`,
     },
     {
-      tone: "green",
-      icon: "gauge",
-      value: accuracy === null ? "—" : fmtPct(accuracy),
-      label: "الدقة العامة",
-      sub: accuracy === null ? "بيانات غير كافية للتقييم" : "مطابقة قرارات الفحص للمراجع",
+      tone: "cyan",
+      icon: "check",
+      value: fmtNum(model.sample.studied),
+      label: "الصور المدروسة",
+      sub: `إنجاز ${fmtPct(model.sample.completionRate)} من العيّنة`,
     },
   ];
-  const tilesHtml = tiles
-    .map(
-      (t) => `<div class="v2-num-tile ${t.tone}">
+  const studyTile = {
+    tone: "green",
+    icon: "gauge",
+    value: accuracy === null ? "—" : fmtPct(accuracy),
+    label: "الدقة العامة",
+    sub: accuracy === null ? "بيانات غير كافية للتقييم" : "مطابقة قرارات الفحص للمراجع",
+  };
+  const renderTile = (t: { tone: string; icon: string; value: string; label: string; sub: string }) =>
+    `<div class="v2-num-tile ${t.tone}">
         <span class="v2-num-tile-icon">${badgeIcon(t.icon, 18)}</span>
         <div class="v2-num-tile-body">
           <span class="v2-num-tile-value">${esc(t.value)}</span>
           <span class="v2-num-tile-label">${esc(t.label)}</span>
           <span class="v2-num-tile-sub">${esc(t.sub)}</span>
         </div>
-      </div>`,
-    )
-    .join("");
-  const body = `<div class="v2-num-layout">
-      <div class="v2-num-hero">
-        <span class="v2-num-hero-label">إجمالي مجتمع الصور</span>
-        <span class="v2-num-hero-value">${fmtNum(model.population.total)}</span>
-        <span class="v2-num-hero-unit">صورة فحص بالأشعة خلال ${esc(model.summary.periodId)}</span>
-        <div class="v2-num-hero-rule"></div>
-        <div class="v2-num-hero-split">
-          <span><b>${fmtNum(model.population.clean)}</b><small>سليمة</small></span>
-          <span><b>${fmtNum(model.population.suspicious)}</b><small>اشتباه</small></span>
+      </div>`;
+  const { land, sea } = collectPortStats(model);
+  const body = `<div class="v2-summary-layout">
+      <div class="v2-summary-top">
+        <div class="v2-num-hero compact">
+          <span class="v2-num-hero-label">إجمالي مجتمع الصور</span>
+          <span class="v2-num-hero-value">${fmtNum(model.population.total)}</span>
+          <span class="v2-num-hero-unit">صورة فحص بالأشعة خلال ${esc(model.summary.periodId)}</span>
+          <div class="v2-num-hero-rule"></div>
+          <div class="v2-num-hero-split">
+            <span><b>${fmtNum(model.population.clean)}</b><small>سليمة</small></span>
+            <span><b>${fmtNum(model.population.suspicious)}</b><small>اشتباه</small></span>
+          </div>
+        </div>
+        <div class="v2-summary-tilegroups">
+          <div class="v2-tile-group raw">
+            <span class="v2-tile-group-label">بيانات المجتمع والعيّنة</span>
+            <div class="v2-num-tiles">${rawTiles.map(renderTile).join("")}</div>
+          </div>
+          <div class="v2-tile-group study">
+            <span class="v2-tile-group-label">من دراسة المراجعة</span>
+            <div class="v2-num-tiles">${renderTile(studyTile)}</div>
+          </div>
         </div>
       </div>
-      <div class="v2-num-tiles">${tilesHtml}</div>
+      <div class="v2-port-ovr">
+        ${summaryPortTable("المنافذ البرية", "truck", "land", land)}
+        ${summaryPortTable("المنافذ البحرية", "ship", "sea", sea)}
+      </div>
     </div>`;
   return v2Slide({
     id: "slide-month-numbers",
-    title: "الشهر في أرقام",
+    title: "مؤشرات الشهر",
     eyebrow: "لمحة تنفيذية",
     iconName: "chart",
-    headline: "الشهر في أرقام",
-    subhead: "أبرز مؤشرات الشهر في لوحة واحدة — من حجم المجتمع إلى دقة القرارات.",
+    headline: "مؤشرات الشهر",
+    subhead: "أبرز مؤشرات الشهر، ثم أعلى المنافذ حجمًا — قبل الجداول التفصيلية.",
     bodyVariants: [body, body, body, body],
     variantPreview,
     num,
     total,
     section: "summary",
   });
+}
+
+/** Top-3-by-volume ranked table for one land/sea group on the merged summary
+ *  page — same `.v2-port-col`/`deck-table`/`barCell` shell the detailed
+ *  port-population pages use later in the deck, but the shared bottom band
+ *  only has ~175px per column (measured live), well short of what the normal
+ *  card header + even `.compact` rows need — so this ALSO gets the `.summary`
+ *  modifier that shrinks just the header (smaller badge, tighter padding),
+ *  scoped separately from `.compact` so it never touches the OTHER pages'
+ *  paginated-overflow row density that `.compact` also drives. No pagination
+ *  machinery (this is a curated preview, not the full listing). الإجمالي
+ *  sums over ALL ports in the group, not just the shown top 3. */
+function summaryPortTable(title: string, iconName: string, variant: "land" | "sea", rows: PortPopRow[]): string {
+  const TOP_N = 3;
+  const top = rows
+    .slice()
+    .sort((a, b) => b.total - a.total)
+    .slice(0, TOP_N);
+  const max = maxOf(top.map((p) => p.total));
+  const tone = variant === "land" ? "green" : "blue";
+  const trs = top
+    .map((p) => `<tr><td>${esc(p.name)}</td>${barCell(fmtNum(p.total), (p.total / max) * 100, tone)}</tr>`)
+    .join("");
+  const total = rows.reduce((s, p) => s + p.total, 0);
+  const totalsRow = `<tr><td>الإجمالي</td><td>${fmtNum(total)}</td></tr>`;
+  return `<div class="v2-port-col ${variant} compact summary">
+    <div class="v2-port-col-head">
+      <span class="v2-port-col-icon">${badgeIcon(iconName, 16)}</span>
+      <div><b>${esc(title)}</b><span>أعلى ${fmtNum(top.length)} من ${fmtNum(rows.length)} منفذ</span></div>
+    </div>
+    <table class="deck-table">
+      <thead><tr><th>المنفذ</th><th>إجمالي الصور</th></tr></thead>
+      <tbody>${trs}</tbody>
+      <tfoot>${totalsRow}</tfoot>
+    </table>
+  </div>`;
 }
 
 // ── Page 3 — المعجم ─────────────────────────────────────────────────────────
@@ -699,27 +746,30 @@ function stageProportionBar(stages: StageProfile[]): string {
 
 export function riskStagesSlide(model: ReportModel, num: number, total: number, variantPreview: boolean): string {
   const stages = model.population.byStage;
+  const populationTotal = stages.reduce((sum, stage) => sum + stage.population, 0) || 1;
+
   const tiles = stages
-    .map((s, i) => {
+    .map((stage, i) => {
       const tone = STAGE_TONES[i % STAGE_TONES.length];
-      const tag = STAGE_SHORT_TAG[s.stageLabel] ?? `المستوى ${i + 1}`;
-      return `<div class="v2-stage-card ${tone}">
-        <div class="v2-stage-head">
+      const tag = STAGE_SHORT_TAG[stage.stageLabel] ?? `المستوى ${i + 1}`;
+      const share = (stage.population / populationTotal) * 100;
+      return `<div class="v2-risk-tile ${tone}">
+        <div class="v2-risk-tile-head">
           <span class="v2-stage-num">${i + 1}</span>
-          <b>${esc(s.stageLabel)}</b>
+          <span class="v2-risk-tile-titles"><b>${esc(stage.stageLabel)}</b><small>${esc(tag)}</small></span>
+          <span class="v2-risk-tile-share"><b>${fmtPct(share, 0)}</b><small>من المجتمع</small></span>
         </div>
-        <div class="v2-stage-body">
-          <div class="v2-stage-figs">
-            <div class="v2-stage-fig"><b>${fmtNum(s.population)}</b><small>الصور</small></div>
-            <div class="v2-stage-fig"><b>${fmtNum(s.sampleSize)}</b><small>العيّنة</small></div>
+        <div class="v2-risk-tile-main">
+          <div class="v2-risk-tile-figure">
+            <b>${fmtNum(stage.population)}</b>
+            <span>صورة ضمن مجتمع الشهر</span>
           </div>
-          <div class="v2-stage-gauge">
-            ${microArc(s.coverage)}
-            <span class="v2-stage-gauge-pct">${fmtPct(s.coverage)}</span>
-            <span class="v2-stage-gauge-label">التغطية</span>
-          </div>
+          ${microArc(stage.coverage)}
         </div>
-        <div class="v2-stage-tag">${esc(tag)}</div>
+        <div class="v2-risk-tile-foot">
+          <span><b>${fmtNum(stage.sampleSize)}</b><small>العيّنة</small></span>
+          <span class="accent"><b>${fmtPct(stage.coverage)}</b><small>تغطية العيّنة</small></span>
+        </div>
       </div>`;
     })
     .join("");
@@ -728,7 +778,11 @@ export function riskStagesSlide(model: ReportModel, num: number, total: number, 
     <div class="v2-totals-item"><span class="v2-totals-icon">${icon("scan", 16)}</span><span><b>${fmtNum(model.sample.total)}</b><small>إجمالي العيّنة</small></span></div>
     <div class="v2-totals-item"><span class="v2-totals-icon">${icon("gauge", 16)}</span><span><b>${fmtPct(model.sample.coverage)}</b><small>التغطية الكلية</small></span></div>
   </div>`;
-  const body = `<div class="v2-risk-layout">${stageProportionBar(stages)}<div class="kpi-band n${Math.min(4, Math.max(2, stages.length))}">${tiles}</div>${totals}</div>`;
+  const body = `<div class="v2-risk-layout">
+    ${stageProportionBar(stages)}
+    <div class="v2-risk-tile-grid">${tiles}</div>
+    ${totals}
+  </div>`;
   return v2Slide({
     id: "slide-risk-stages",
     title: "مجتمع الصور بناءً على المخاطر",
@@ -936,49 +990,6 @@ function planPortPages(landCount: number, seaCount: number, baseRowsPerPage: num
     return { pages: 1, rowsPerPage: maxCount, compact: true };
   }
   return { pages: Math.ceil(maxCount / baseRowsPerPage), rowsPerPage: baseRowsPerPage, compact: false };
-}
-
-/**
- * Chart-first overview that LEADS the port section: two ranked bars (top land
- * ports · top sea ports) at full size on their own slide. This is the "split
- * composition" the overhaul asks for, delivered as a dedicated slide rather
- * than stacked above the port tables — the land/sea tables run on a fixed,
- * measured pixel budget (TABLE_BUDGET_PX, METRICS_*, ghost/blank rows) that
- * leaves no vertical room for a ~150px 5-bar chart above them without clipping
- * the totals row in the many-port production case. A separate slide touches
- * none of that machinery and gives the chart the space it needs. (Deviation
- * from the spec's "same page as the table", made for production safety.) */
-export function portsOverviewSlide(model: ReportModel, num: number, total: number, variantPreview: boolean): string {
-  const { land, sea } = collectPortStats(model);
-  const top = (rows: PortPopRow[]) =>
-    rows
-      .slice()
-      .sort((a, b) => b.total - a.total)
-      .slice(0, 6)
-      .map((p) => ({ label: p.name, value: p.total }));
-  const body = `<div class="v2-port-ovr">
-      <div class="v2-port-ovr-col land">
-        <div class="v2-port-ovr-head"><span class="v2-port-ovr-icon">${badgeIcon("truck", 22)}</span><div><b>المنافذ البرية</b><span>أعلى المنافذ حجمًا في المجتمع</span></div></div>
-        <div class="v2-port-ovr-chart">${rankedBar(top(land), {})}</div>
-      </div>
-      <div class="v2-port-ovr-col sea">
-        <div class="v2-port-ovr-head"><span class="v2-port-ovr-icon">${badgeIcon("ship", 22)}</span><div><b>المنافذ البحرية</b><span>أعلى المنافذ حجمًا في المجتمع</span></div></div>
-        <div class="v2-port-ovr-chart">${rankedBar(top(sea), {})}</div>
-      </div>
-    </div>`;
-  return v2Slide({
-    id: "slide-port-overview",
-    title: "أبرز المنافذ",
-    eyebrow: "القسم 1 — مجتمع الفحص",
-    iconName: "chart",
-    headline: `أبرز المنافذ في مجتمع ${model.summary.periodId}`,
-    subhead: "ترتيب المنافذ البرية والبحرية بحسب حجم الصور، قبل الجداول التفصيلية.",
-    bodyVariants: [body, body, body, body],
-    variantPreview,
-    num,
-    total,
-    section: "section1",
-  });
 }
 
 /** Build one or more port-population slides (paginated land/sea in parallel). */
@@ -1613,6 +1624,14 @@ export function closingSlide(
  * computed from the real build sequence (never hand-typed), so the TOC cannot
  * drift as pages are added, removed, or paginated differently month to month.
  */
+/** Owner request 2026-07-20: hide the مؤشرات الشهر slide (monthInNumbersSlide)
+ *  from the generated report. NOT a removal — the function, its
+ *  summaryPortTable helper, and every TOC/page-numbering hook for it stay in
+ *  the code, just skipped, so it can be flipped back on without rebuilding
+ *  any of it. Do not delete monthInNumbersSlide/summaryPortTable while this
+ *  is false; they are dormant, not dead code. */
+const SHOW_MONTH_NUMBERS_SLIDE = false;
+
 export function buildDeckV2Slides(
   model: ReportModel,
   generatedAt = new Date(),
@@ -1657,7 +1676,6 @@ export function buildDeckV2Slides(
         variantPreview,
       }),
     (num, total) => riskStagesSlide(model, num, total, variantPreview),
-    (num, total) => portsOverviewSlide(model, num, total, variantPreview),
     ...portPopulationSlideBuilders(model, variantPreview),
     ...portSampleSlideBuilders(model, variantPreview),
     (num, total) => stagePortPopulationSlide(model, num, total, variantPreview),
@@ -1688,12 +1706,14 @@ export function buildDeckV2Slides(
     ...accuracyPortSlideBuilders(model, variantPreview),
   ];
 
-  // Page order: cover(1) · toc(2) · month-in-numbers(3) · glossary(N) ·
-  // section 1 · section 2 · closing(last).
+  // Page order: cover(1) · toc(2) · [month-in-numbers(3) — currently hidden,
+  // see SHOW_MONTH_NUMBERS_SLIDE] · glossary(N) · section 1 · section 2 ·
+  // closing(last).
+  const summaryPageCount = SHOW_MONTH_NUMBERS_SLIDE ? 1 : 0;
   const total =
-    3 + glossaryBuilders.length + sectionOne.length + sectionTwo.length + 1; // +cover+toc+summary, +closing
-  const glossaryStart = 4;
-  const glossaryEnd = 3 + glossaryBuilders.length;
+    2 + summaryPageCount + glossaryBuilders.length + sectionOne.length + sectionTwo.length + 1; // +cover+toc(+summary), +closing
+  const glossaryStart = 3 + summaryPageCount;
+  const glossaryEnd = glossaryStart - 1 + glossaryBuilders.length;
   const sectionOneStart = glossaryEnd + 1;
   const sectionOneEnd = sectionOneStart + sectionOne.length - 1;
   const sectionTwoStart = sectionOneEnd + 1;
@@ -1703,15 +1723,22 @@ export function buildDeckV2Slides(
   const accuracyFig =
     model.summary.overallAccuracy === null ? "—" : fmtPct(model.summary.overallAccuracy);
   const tocItems: TocItem[] = [
-    {
-      title: "الشهر في أرقام",
-      goal: "أبرز مؤشرات الشهر في لوحة واحدة.",
-      range: pad(3),
-      iconName: "chart",
-      tone: "gold",
-      figure: fmtNum(model.population.total),
-      figureLabel: "صورة",
-    },
+    // مؤشرات الشهر's TOC entry only exists while the page itself is rendered
+    // (SHOW_MONTH_NUMBERS_SLIDE) — a range pointing at a page that isn't there
+    // would be a broken link, not a "coming soon" note.
+    ...(SHOW_MONTH_NUMBERS_SLIDE
+      ? [
+          {
+            title: "مؤشرات الشهر",
+            goal: "أبرز مؤشرات الشهر، ثم أعلى المنافذ حجمًا.",
+            range: pad(3),
+            iconName: "chart",
+            tone: "gold",
+            figure: fmtNum(model.population.total),
+            figureLabel: "صورة",
+          },
+        ]
+      : []),
     {
       title: "المعجم",
       goal: "توحيد المصطلحات الرئيسية قبل قراءة النتائج.",
@@ -1744,8 +1771,10 @@ export function buildDeckV2Slides(
   const slides: string[] = [
     coverSlide(model, generatedAt, variantPreview, seedBase),
     tocSlide(tocItems, 2, total, variantPreview),
-    monthInNumbersSlide(model, 3, total, variantPreview),
   ];
+  if (SHOW_MONTH_NUMBERS_SLIDE) {
+    slides.push(monthInNumbersSlide(model, 3, total, variantPreview));
+  }
   let num = glossaryStart;
   for (const build of glossaryBuilders) {
     slides.push(build(num, total));

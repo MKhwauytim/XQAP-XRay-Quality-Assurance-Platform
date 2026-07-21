@@ -540,6 +540,20 @@ body.theme-light .v2-variant-switcher button{background:rgba(10,45,74,.08);color
 /* ── Type scale (fixed rem — print-safe) + gold hairline token ──────────────── */
 .slide.v2{--fs-hero:4.4rem;--fs-display:1.7rem;--fs-num-hero:5rem;--gold-hair:rgba(244,180,0,.5);}
 
+/* ── Shared hex-texture card background (the ".v2-num-tile" motif, reused) ──
+   One hand-copied hero-patterns "hexagons" motif baked at <=.05 alpha, defined
+   ONCE here and referenced by every card that wants the same quiet texture —
+   layer it as background-image's FIRST entry, with the card's own color/
+   gradient as the second, e.g.:
+     background-image:var(--v2-hex-tex), linear-gradient(...);
+     background-repeat:repeat, no-repeat;
+   and mirror with --v2-hex-tex-light under body.theme-light. Adding the
+   texture to a new card is then a 2-line addition, not a copy-pasted data URI. */
+.slide.v2{
+  --v2-hex-tex:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='49' viewBox='0 0 28 49'%3E%3Cg fill='%23ffffff' fill-opacity='0.045'%3E%3Cpath d='M13.99 9.25l13 7.5v15l-13 7.5L1 31.75v-15l12.99-7.5zM3 17.9v12.7l10.99 6.34 11-6.35V17.9l-11-6.34L3 17.9zM0 15l12.98-7.5V0h-2v6.35L0 12.69v2.3zm0 18.5L12.98 41v8h-2v-6.85L0 35.81v-2.3zM15 0v7.5L27.99 15H28v-2.31h-.01L17 6.35V0h-2zm0 49v-8l12.99-7.5H28v2.31h-.01L17 42.15V49h-2z'/%3E%3C/g%3E%3C/svg%3E");
+  --v2-hex-tex-light:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='49' viewBox='0 0 28 49'%3E%3Cg fill='%230a2d4a' fill-opacity='0.04'%3E%3Cpath d='M13.99 9.25l13 7.5v15l-13 7.5L1 31.75v-15l12.99-7.5zM3 17.9v12.7l10.99 6.34 11-6.35V17.9l-11-6.34L3 17.9zM0 15l12.98-7.5V0h-2v6.35L0 12.69v2.3zm0 18.5L12.98 41v8h-2v-6.85L0 35.81v-2.3zM15 0v7.5L27.99 15H28v-2.31h-.01L17 6.35V0h-2zm0 49v-8l12.99-7.5H28v2.31h-.01L17 42.15V49h-2z'/%3E%3C/g%3E%3C/svg%3E");
+}
+
 /* ── Entrance stagger (on-screen only; never in print or reduced-motion) ────── */
 @keyframes v2-rise{from{opacity:0;transform:translateY(12px);}to{opacity:1;transform:none;}}
 @media screen and (prefers-reduced-motion:no-preference){
@@ -633,13 +647,34 @@ body.theme-light .v2-bar-cell.warn{--bar:rgba(244,180,0,.34);}
 .v2-toc-figure-label{font-size:0.64rem;font-weight:700;color:var(--slate);}
 .v2-toc-range{margin-top:5px;font-size:0.72rem;font-weight:800;color:rgba(255,255,255,.6);border:1px solid rgba(255,255,255,.16);border-radius:999px;padding:3px 12px;font-variant-numeric:tabular-nums;}
 
-/* ── الشهر في أرقام — hero number + 5 stat tiles ────────────────────────────── */
-.v2-num-layout{display:grid;grid-template-columns:1fr 1.75fr;gap:20px;height:100%;align-items:stretch;}
+/* ── مؤشرات الشهر — compact hero + grouped stat tiles + port tables ─────────── */
+/* Owner feedback 2026-07-20: this page absorbed the old standalone ports-chart
+   page, so the top band (hero + tiles) had to shrink to leave room for the
+   port tables below — hence \`.compact\` on the hero and the flatter tile
+   groups instead of the old full-height 2-row tile grid. Raw population/
+   sample tiles and the one reviewer-accuracy tile are separate \`.v2-tile-group\`
+   blocks (own label caption) so the two data sources never read as one
+   undifferentiated pile — the accuracy number comes from a STUDY, not a
+   straight tally. */
+.v2-summary-layout{display:flex;flex-direction:column;gap:14px;height:100%;}
+.v2-summary-top{display:grid;grid-template-columns:.9fr 2.1fr;gap:16px;flex:0 0 auto;}
+.v2-summary-tilegroups{display:flex;gap:14px;align-items:stretch;}
+.v2-tile-group{display:flex;flex-direction:column;gap:7px;min-width:0;}
+.v2-tile-group.raw{flex:3;}
+.v2-tile-group.study{flex:1;}
+.v2-tile-group-label{font-size:0.6rem;font-weight:800;color:var(--slate);letter-spacing:.03em;padding-inline-start:2px;}
+.v2-tile-group .v2-num-tiles{flex:1;}
+.v2-tile-group.raw .v2-num-tiles{grid-template-columns:repeat(3,1fr);}
+.v2-tile-group.study .v2-num-tiles{grid-template-columns:1fr;height:100%;}
+.v2-tile-group.study .v2-num-tile{height:100%;}
 .v2-num-hero{
   display:flex;flex-direction:column;justify-content:center;gap:6px;padding:22px 24px;
   border:1px solid rgba(244,180,0,.28);border-radius:16px;
   background:linear-gradient(160deg,rgba(244,180,0,.12),rgba(244,180,0,.02));
 }
+.v2-num-hero.compact{padding:14px 18px;gap:4px;}
+.v2-num-hero.compact .v2-num-hero-value{font-size:2.5rem;}
+.v2-num-hero.compact .v2-num-hero-rule{margin:6px 0 2px;}
 .v2-num-hero-label{font-size:0.82rem;font-weight:700;color:var(--slate);}
 .v2-num-hero-value{font-size:var(--fs-num-hero);font-weight:900;line-height:.95;color:var(--gold);letter-spacing:-.02em;font-variant-numeric:tabular-nums;text-shadow:0 0 34px rgba(244,180,0,.22);}
 .v2-num-hero-unit{font-size:0.84rem;color:rgba(255,255,255,.8);line-height:1.4;}
@@ -648,7 +683,7 @@ body.theme-light .v2-bar-cell.warn{--bar:rgba(244,180,0,.34);}
 .v2-num-hero-split span{display:flex;flex-direction:column;}
 .v2-num-hero-split b{font-size:1.4rem;font-weight:900;color:#fff;line-height:1;font-variant-numeric:tabular-nums;}
 .v2-num-hero-split small{font-size:0.72rem;color:var(--slate);margin-top:3px;}
-.v2-num-tiles{display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:1fr 1fr;gap:14px;}
+.v2-num-tiles{display:grid;gap:14px;}
 .v2-num-tile{
   display:flex;align-items:flex-start;gap:12px;min-width:0;
   border:1px solid rgba(255,255,255,.13);border-radius:14px;padding:14px 15px;
@@ -740,24 +775,82 @@ body.theme-light .v2-bar-cell.warn{--bar:rgba(244,180,0,.34);}
 .v2-stage-gauge-pct{font-size:0.86rem;font-weight:900;color:currentColor;font-variant-numeric:tabular-nums;margin-top:-2px;}
 .v2-stage-gauge-label{font-size:0.6rem;color:var(--slate);font-weight:700;}
 
-/* ── Ports overview slide — two full-size ranked bars (land · sea) ──────────── */
-.v2-port-ovr{display:grid;grid-template-columns:1fr 1fr;gap:22px;height:100%;align-items:stretch;}
-.v2-port-ovr-col{
-  display:flex;flex-direction:column;gap:14px;min-width:0;
-  border:1px solid rgba(255,255,255,.14);border-radius:14px;padding:18px 22px;
-  background:linear-gradient(180deg,rgba(20,66,48,.5),rgba(10,40,30,.62));box-shadow:0 10px 24px rgba(0,0,0,.2);
+/* Risk page rework #2: all four levels get equal visual weight as a uniform
+   2×2 tile grid (owner feedback 2026-07-20 — the old hero+row layout read as
+   cluttered/unbalanced). Each tile reuses the same card anatomy (numbered
+   badge, title+tag, share badge, population figure, coverage gauge, footer
+   stats) so the eye learns the pattern once and scans all four the same way;
+   tone color is confined to the badge/gauge/accent number, not the whole card. */
+.v2-risk-layout{gap:12px;justify-content:stretch;}
+.v2-risk-layout .v2-prop{gap:7px;}
+.v2-risk-layout .v2-prop-bar{height:28px;}
+.v2-risk-layout .v2-prop-legend{gap:4px 16px;}
+.v2-risk-tile-grid{
+  display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:12px;
+  flex:1;min-height:0;
 }
-.v2-port-ovr-col.sea{background:linear-gradient(180deg,rgba(16,52,92,.55),rgba(8,32,60,.66));}
-.v2-port-ovr-head{display:flex;align-items:center;gap:12px;}
-.v2-port-ovr-icon{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;width:40px;height:40px;border-radius:12px;color:var(--green);border:1.5px solid rgba(139,195,74,.4);background:rgba(139,195,74,.1);}
-.v2-port-ovr-col.sea .v2-port-ovr-icon{color:var(--blue);border-color:rgba(107,169,248,.4);background:rgba(107,169,248,.1);}
-.v2-port-ovr-head b{display:block;font-size:1rem;font-weight:800;color:#fff;}
-.v2-port-ovr-head span{display:block;font-size:0.72rem;color:var(--slate);font-weight:600;margin-top:2px;}
-.v2-port-ovr-chart{flex:1;min-height:0;}
-body.theme-light .v2-port-ovr-col{background:linear-gradient(180deg,#eef7ee,#e4f1e4);box-shadow:0 6px 16px rgba(10,45,74,.06);}
-body.theme-light .v2-port-ovr-col.sea{background:linear-gradient(180deg,#eaf2fb,#dfeaf8);}
-body.theme-light .v2-port-ovr-head b{color:#0a2d4a;}
-body.theme-light .v2-port-ovr-head span{color:#607386;}
+.v2-risk-tile{
+  display:flex;flex-direction:column;min-width:0;overflow:hidden;
+  border:1px solid rgba(255,255,255,.14);border-radius:14px;
+  background:linear-gradient(165deg,rgba(244,180,0,.11),rgba(14,58,95,.42) 55%,rgba(7,39,67,.72));
+}
+.v2-risk-tile.blue{background:linear-gradient(165deg,rgba(58,140,214,.13),rgba(14,58,95,.42) 55%,rgba(7,39,67,.72));}
+.v2-risk-tile.green{background:linear-gradient(165deg,rgba(52,168,120,.13),rgba(14,58,95,.42) 55%,rgba(7,39,67,.72));}
+.v2-risk-tile.coral{background:linear-gradient(165deg,rgba(224,86,86,.13),rgba(14,58,95,.42) 55%,rgba(7,39,67,.72));}
+.v2-risk-tile-head{display:flex;align-items:center;gap:9px;padding:10px 12px 8px;border-bottom:1px solid rgba(255,255,255,.1);}
+.v2-risk-tile-titles{display:flex;flex-direction:column;gap:1px;min-width:0;flex:1;}
+.v2-risk-tile-titles b{font-size:.78rem;color:#fff;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.v2-risk-tile-titles small{font-size:.58rem;color:var(--slate);font-weight:700;}
+.v2-risk-tile-share{display:flex;flex-direction:column;align-items:flex-end;gap:0;flex-shrink:0;}
+.v2-risk-tile-share b{font-size:1rem;line-height:1;color:var(--gold);font-weight:900;font-variant-numeric:tabular-nums;}
+.v2-risk-tile.blue .v2-risk-tile-share b{color:var(--blue);}
+.v2-risk-tile.green .v2-risk-tile-share b{color:var(--green);}
+.v2-risk-tile.coral .v2-risk-tile-share b{color:var(--coral);}
+.v2-risk-tile-share small{font-size:.54rem;color:var(--slate);font-weight:700;}
+.v2-risk-tile-main{display:flex;align-items:center;justify-content:space-between;gap:8px;flex:1;padding:8px 14px;}
+.v2-risk-tile-figure{display:flex;flex-direction:column;gap:2px;min-width:0;}
+.v2-risk-tile-figure b{font-size:1.55rem;line-height:1;color:#fff;font-weight:900;font-variant-numeric:tabular-nums;letter-spacing:-.01em;}
+.v2-risk-tile-figure span{font-size:.6rem;color:var(--slate);font-weight:700;}
+.v2-risk-tile-main .v2-micro-arc{width:52px;height:auto;color:var(--gold);flex-shrink:0;}
+.v2-risk-tile.blue .v2-risk-tile-main .v2-micro-arc{color:var(--blue);}
+.v2-risk-tile.green .v2-risk-tile-main .v2-micro-arc{color:var(--green);}
+.v2-risk-tile.coral .v2-risk-tile-main .v2-micro-arc{color:var(--coral);}
+.v2-risk-tile-foot{
+  display:flex;align-items:center;justify-content:space-around;gap:8px;
+  padding:7px 12px;background:rgba(2,20,37,.32);border-top:1px solid rgba(255,255,255,.1);
+}
+.v2-risk-tile-foot span{display:flex;flex-direction:column;align-items:center;gap:1px;}
+.v2-risk-tile-foot b{font-size:.86rem;color:#fff;font-weight:900;line-height:1;font-variant-numeric:tabular-nums;}
+.v2-risk-tile-foot small{font-size:.54rem;color:var(--slate);font-weight:700;}
+.v2-risk-tile-foot span.accent b{color:var(--gold);}
+.v2-risk-tile.blue .v2-risk-tile-foot span.accent b{color:var(--blue);}
+.v2-risk-tile.green .v2-risk-tile-foot span.accent b{color:var(--green);}
+.v2-risk-tile.coral .v2-risk-tile-foot span.accent b{color:var(--coral);}
+.v2-risk-layout .v2-totals-band{margin-top:0;gap:10px;}
+.v2-risk-layout .v2-totals-item{padding:9px 14px;}
+.v2-risk-layout .v2-totals-item b{font-size:1.05rem;}
+.v2-risk-layout .v2-totals-item small{font-size:.63rem;}
+body.theme-light .v2-risk-tile{background:linear-gradient(165deg,rgba(244,180,0,.1),#fff 55%,#f5f8fb);border-color:#dde4ea;}
+body.theme-light .v2-risk-tile-head{border-color:#e4e9ee;}
+body.theme-light .v2-risk-tile-titles b,body.theme-light .v2-risk-tile-figure b,body.theme-light .v2-risk-tile-foot b{color:#0a2d4a;}
+body.theme-light .v2-risk-tile-foot{background:rgba(10,45,74,.035);border-color:#e4e9ee;}
+@media(max-width:820px){
+  .v2-risk-tile-grid{grid-template-columns:1fr;grid-template-rows:repeat(4,auto);}
+}
+
+/* ── Ports overview strip (bottom half of the merged summary page) — reuses
+   .v2-port-col/.v2-port-col-head/deck-table (the SAME shell the detailed
+   port-population pages use later in the deck), just this grid wrapper is
+   local to the summary page's shorter bottom band. ──────────────────────── */
+.v2-port-ovr{display:grid;grid-template-columns:1fr 1fr;gap:22px;flex:1;min-height:0;}
+.v2-port-ovr .v2-port-col{height:100%;}
+/* .summary: shrinks ONLY the card header (badge + padding), scoped separately
+   from .compact (which the OTHER port pages also use, for row density under
+   pagination overflow) so this fix never bleeds into those pages' headers. */
+.v2-port-col.summary .v2-port-col-head{padding:6px 12px;gap:8px;}
+.v2-port-col.summary .v2-port-col-head .v2-port-col-icon{width:22px;height:22px;}
+.v2-port-col.summary .v2-port-col-head b{font-size:0.78rem;}
+.v2-port-col.summary .v2-port-col-head span{font-size:0.6rem;margin-top:0;}
 
 /* ── Stage×port card — stronger stage-tone header accent ────────────────────── */
 .v2-stage-port-card .v2-stage-head{padding-bottom:6px;border-bottom:1.5px solid rgba(255,255,255,.12);}
@@ -821,7 +914,7 @@ body.theme-light .v2-num-hero-value,body.theme-light .v2-cover-lockup-period,bod
 /* ── Print: keep every new colored element ink-faithful, avoid mid-slide breaks ── */
 @media print{
   .v2-bar-cell,.v2-prop-seg,.v2-num-tile,.v2-sep-stat,.v2-num-hero,.v2-toc-num,.v2-sep-numeral{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
-  .v2-toc-card,.v2-num-tile,.v2-term-card,.v2-term-band,.v2-stage-card,.v2-port-col,.v2-prov-item{break-inside:avoid;}
+  .v2-toc-card,.v2-num-tile,.v2-term-card,.v2-term-band,.v2-stage-card,.v2-risk-tile,.v2-port-col,.v2-prov-item{break-inside:avoid;}
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -880,14 +973,32 @@ body.theme-light .v2-src-card{background:#fff;border-color:#dfe6ee;}
 body.theme-light .v2-src-head b{color:#0a2d4a;}
 body.theme-light .v2-src-card p{color:#33506a;}
 
-/* Stat-tile texture — one hand-copied hero-patterns "hexagons" motif baked at
-   <=.05 alpha, layered above the tile gradient as texture (not noise). */
-.v2-num-tile{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='49' viewBox='0 0 28 49'%3E%3Cg fill='%23ffffff' fill-opacity='0.045'%3E%3Cpath d='M13.99 9.25l13 7.5v15l-13 7.5L1 31.75v-15l12.99-7.5zM3 17.9v12.7l10.99 6.34 11-6.35V17.9l-11-6.34L3 17.9zM0 15l12.98-7.5V0h-2v6.35L0 12.69v2.3zm0 18.5L12.98 41v8h-2v-6.85L0 35.81v-2.3zM15 0v7.5L27.99 15H28v-2.31h-.01L17 6.35V0h-2zm0 49v-8l12.99-7.5H28v2.31h-.01L17 42.15V49h-2z'/%3E%3C/g%3E%3C/svg%3E"),linear-gradient(180deg,rgba(14,58,95,.6),rgba(7,39,67,.75));background-repeat:repeat,no-repeat;}
-body.theme-light .v2-num-tile{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='49' viewBox='0 0 28 49'%3E%3Cg fill='%230a2d4a' fill-opacity='0.04'%3E%3Cpath d='M13.99 9.25l13 7.5v15l-13 7.5L1 31.75v-15l12.99-7.5zM3 17.9v12.7l10.99 6.34 11-6.35V17.9l-11-6.34L3 17.9zM0 15l12.98-7.5V0h-2v6.35L0 12.69v2.3zm0 18.5L12.98 41v8h-2v-6.85L0 35.81v-2.3zM15 0v7.5L27.99 15H28v-2.31h-.01L17 6.35V0h-2zm0 49v-8l12.99-7.5H28v2.31h-.01L17 42.15V49h-2z'/%3E%3C/g%3E%3C/svg%3E");background-repeat:repeat;}
+/* Stat-tile texture — now the shared --v2-hex-tex component (see the .slide.v2
+   var block above), layered above each card's own gradient as texture (not
+   noise). Extended here to every card of the same "icon + text" shape family:
+   glossary term cards, TOC section cards, risk-stage tiles, and the closing
+   page's source-attribution cards — the tile treatment was the one owner
+   feedback (2026-07-20) asked to spread everywhere, not just stat tiles. */
+.v2-num-tile{background-image:var(--v2-hex-tex),linear-gradient(180deg,rgba(14,58,95,.6),rgba(7,39,67,.75));background-repeat:repeat,no-repeat;}
+body.theme-light .v2-num-tile{background-image:var(--v2-hex-tex-light),linear-gradient(180deg,rgba(14,58,95,.6),rgba(7,39,67,.75));background-repeat:repeat,no-repeat;}
+.v2-term-card{background-image:var(--v2-hex-tex),linear-gradient(180deg,rgba(14,58,95,.6),rgba(7,39,67,.8));background-repeat:repeat,no-repeat;}
+body.theme-light .v2-term-card{background-image:var(--v2-hex-tex-light),none;background-repeat:repeat,no-repeat;}
+.v2-toc-card{background-image:var(--v2-hex-tex),linear-gradient(180deg,rgba(255,255,255,.022),rgba(255,255,255,.022));background-repeat:repeat,no-repeat;}
+body.theme-light .v2-toc-card{background-image:var(--v2-hex-tex-light),none;background-repeat:repeat,no-repeat;}
+.v2-risk-tile{background-image:var(--v2-hex-tex),linear-gradient(165deg,rgba(244,180,0,.11),rgba(14,58,95,.42) 55%,rgba(7,39,67,.72));background-repeat:repeat,no-repeat;}
+.v2-risk-tile.blue{background-image:var(--v2-hex-tex),linear-gradient(165deg,rgba(58,140,214,.13),rgba(14,58,95,.42) 55%,rgba(7,39,67,.72));}
+.v2-risk-tile.green{background-image:var(--v2-hex-tex),linear-gradient(165deg,rgba(52,168,120,.13),rgba(14,58,95,.42) 55%,rgba(7,39,67,.72));}
+.v2-risk-tile.coral{background-image:var(--v2-hex-tex),linear-gradient(165deg,rgba(224,86,86,.13),rgba(14,58,95,.42) 55%,rgba(7,39,67,.72));}
+body.theme-light .v2-risk-tile{background-image:var(--v2-hex-tex-light),linear-gradient(165deg,rgba(244,180,0,.1),#fff 55%,#f5f8fb);background-repeat:repeat,no-repeat;}
+.v2-src-card{background-image:var(--v2-hex-tex),linear-gradient(180deg,rgba(14,58,95,.55),rgba(7,39,67,.75));background-repeat:repeat,no-repeat;}
+body.theme-light .v2-src-card{background-image:var(--v2-hex-tex-light),none;background-repeat:repeat,no-repeat;}
 
 @media(max-width:820px){
-  .v2-cover-grid,.v2-num-layout,.v2-closing,.v2-sep{grid-template-columns:1fr;}
-  .v2-num-tiles{grid-template-columns:1fr 1fr;grid-template-rows:auto;}
+  .v2-cover-grid,.v2-closing,.v2-sep{grid-template-columns:1fr;}
+  .v2-summary-top{grid-template-columns:1fr;}
+  .v2-summary-tilegroups{flex-direction:column;}
+  .v2-port-ovr{grid-template-columns:1fr;}
+  .v2-tile-group.raw .v2-num-tiles{grid-template-columns:1fr 1fr;}
   .v2-sep-numeral{font-size:6rem;}
   .v2-sep-side{width:auto;}
   .v2-prov-body{flex-direction:column;align-items:flex-start;}
