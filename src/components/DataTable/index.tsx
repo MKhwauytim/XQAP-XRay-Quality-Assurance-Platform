@@ -12,6 +12,8 @@ import {
 } from "react";
 import * as XLSX from "xlsx";
 import { useLabels } from "../../data/labels/useLabels";
+import Pagination from "../Pagination/Pagination";
+import { DATA_PAGE_SIZE, clampPage, pageSlice } from "../Pagination/paginationUtils";
 import "./DataTable.css";
 import {
   type DateFormatMode,
@@ -299,6 +301,8 @@ export default function DataTable<TRow>({
   } | null>(null);
   const [scrollTop, setScrollTop]             = useState(0);
   const [containerHeight, setContainerHeight] = useState(600);
+  const rowsPageKey = `${rows.length}:${rows[0] ? getRowKey(rows[0]) : ""}:${rows.at(-1) ? getRowKey(rows.at(-1)!) : ""}`;
+  const [pageState, setPageState] = useState<{ rowsKey: string; page: number }>(() => ({ rowsKey: rowsPageKey, page: 1 }));
 
   function setColCfg(c: ColConfig): void {
     setColCfgState(c);
@@ -385,17 +389,35 @@ export default function DataTable<TRow>({
 
   // Column filters applied on top of search
   const filteredRows = useMemo(
-    () => searchFilteredRows.filter((row) =>
-      visibleCols.every((col) => {
-        const f = filters[col.id];
-        if (!f || isFilterEmpty(f)) return true;
-        const custom = rowMatchesFilter?.(row, col.id, f);
-        if (custom !== null && custom !== undefined) return custom;
-        return defaultRowMatchesFilter(row, col, f, detectedDates);
-      })
-    ),
+    () => {
+      const hasColumnFilters = Object.values(filters).some((filter) => !isFilterEmpty(filter));
+      if (!hasColumnFilters) return searchFilteredRows;
+      return searchFilteredRows.filter((row) =>
+        visibleCols.every((col) => {
+          const f = filters[col.id];
+          if (!f || isFilterEmpty(f)) return true;
+          const custom = rowMatchesFilter?.(row, col.id, f);
+          if (custom !== null && custom !== undefined) return custom;
+          return defaultRowMatchesFilter(row, col, f, detectedDates);
+        })
+      );
+    },
     [searchFilteredRows, visibleCols, filters, rowMatchesFilter, detectedDates]
   );
+
+  const requestedPage = pageState.rowsKey === rowsPageKey ? pageState.page : 1;
+  const page = clampPage(requestedPage, filteredRows.length, DATA_PAGE_SIZE);
+  const pageRows = useMemo(
+    () => pageSlice(filteredRows, page, DATA_PAGE_SIZE),
+    [filteredRows, page]
+  );
+
+  function changePage(nextPage: number): void {
+    setPageState({ rowsKey: rowsPageKey, page: nextPage });
+    const tableWrap = tableWrapRef.current;
+    if (tableWrap) tableWrap.scrollTop = 0;
+    setScrollTop(0);
+  }
 
   // LOG-03: only notify when the visible rows actually changed. filteredRows can
   // get a fresh array identity on every render when a consumer passes an
@@ -420,18 +442,18 @@ export default function DataTable<TRow>({
   const OVERSCAN = 8;
 
   const vRawStart = Math.max(0, Math.floor(scrollTop / VROW_H) - OVERSCAN);
-  const vRawEnd   = Math.min(filteredRows.length, Math.ceil((scrollTop + containerHeight) / VROW_H) + OVERSCAN);
+  const vRawEnd   = Math.min(pageRows.length, Math.ceil((scrollTop + containerHeight) / VROW_H) + OVERSCAN);
 
   // Always include the expanded row in the slice so it is never unmounted while open.
   const expandedIdx = expandedKey != null
-    ? filteredRows.findIndex((r) => getRowKey(r) === expandedKey)
+    ? pageRows.findIndex((r) => getRowKey(r) === expandedKey)
     : -1;
   const visStart    = expandedIdx >= 0 ? Math.min(vRawStart, expandedIdx) : vRawStart;
   const visEnd      = expandedIdx >= 0 ? Math.max(vRawEnd,   expandedIdx + 1) : vRawEnd;
 
-  const virtualRows = filteredRows.slice(visStart, visEnd);
+  const virtualRows = pageRows.slice(visStart, visEnd);
   const topPad      = visStart * VROW_H;
-  const bottomPad   = Math.max(0, (filteredRows.length - visEnd) * VROW_H);
+  const bottomPad   = Math.max(0, (pageRows.length - visEnd) * VROW_H);
 
   // Unique values for the currently-open multiselect dropdown.
   // Computed from the rows currently visible after search and active filters.
@@ -463,9 +485,18 @@ export default function DataTable<TRow>({
 
   // Filter state helpers
   const activeFilterCount = Object.values(filters).filter((f) => !isFilterEmpty(f)).length;
-  function setFilter(colId: string, f: AnyFilter): void { setFilters((p) => ({ ...p, [colId]: f })); }
-  function clearFilter(colId: string): void { setFilters((p) => { const n = { ...p }; delete n[colId]; return n; }); }
-  function clearAllFilters(): void { setFilters({}); }
+  function setFilter(colId: string, f: AnyFilter): void {
+    setFilters((p) => ({ ...p, [colId]: f }));
+    setPageState({ rowsKey: rowsPageKey, page: 1 });
+  }
+  function clearFilter(colId: string): void {
+    setFilters((p) => { const n = { ...p }; delete n[colId]; return n; });
+    setPageState({ rowsKey: rowsPageKey, page: 1 });
+  }
+  function clearAllFilters(): void {
+    setFilters({});
+    setPageState({ rowsKey: rowsPageKey, page: 1 });
+  }
 
   // XLSX export — visible columns, filtered rows, accessor values
   function handleExport(): void {
@@ -629,6 +660,7 @@ export default function DataTable<TRow>({
             onChange={(e) => {
               const v = e.target.value;
               setGlobalSearch(v);
+              setPageState({ rowsKey: rowsPageKey, page: 1 });
               if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
               searchDebounceRef.current = setTimeout(
                 () => setDebouncedSearch(v.trim().toLowerCase()),
@@ -640,7 +672,7 @@ export default function DataTable<TRow>({
             <button
               type="button"
               className="dt-clear-filters-btn"
-              onClick={() => { clearAllFilters(); setGlobalSearch(""); setDebouncedSearch(""); }}
+              onClick={() => { clearAllFilters(); setGlobalSearch(""); setDebouncedSearch(""); setPageState({ rowsKey: rowsPageKey, page: 1 }); }}
             >
               {L.dt_clear_filters} {activeFilterCount > 0 ? `(${activeFilterCount})` : ""}
             </button>
@@ -822,6 +854,11 @@ export default function DataTable<TRow>({
           </tbody>
         </table>
       </div>
+      <Pagination
+        page={page}
+        totalItems={filteredRows.length}
+        onPageChange={changePage}
+      />
     </>
   );
 }

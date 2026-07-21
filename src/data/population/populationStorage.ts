@@ -625,8 +625,34 @@ export async function loadAllRawRows(
 
 export async function loadBrowseRows(
   directoryHandle: DirectoryHandleLike,
-  dataset: BrowseDatasetKind
+  dataset: BrowseDatasetKind,
+  monthFolderName?: string
 ): Promise<BrowseRow[]> {
+  if (monthFolderName) {
+    const info = parseMonthFolderName(monthFolderName);
+    if (!info) return [];
+
+    if (dataset === "sample") {
+      const sample = await loadSampleMaster(directoryHandle, monthFolderName);
+      return (sample?.rows ?? []).map((row) => appendMonthInfo(row, info));
+    }
+
+    if (dataset === "population") {
+      const population = await loadMonthPopulationFinal(directoryHandle, monthFolderName);
+      return (population?.rows ?? []).map((row) => appendMonthInfo(row, info));
+    }
+
+    try {
+      const monthDir = await getMonthDir(directoryHandle, monthFolderName);
+      const rawDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.raw, { create: false });
+      const fileName = dataset === "risk-raw" ? "risk.raw.json" : "bi.raw.json";
+      const result = await safeReadJson<{ rows: Array<Record<string, unknown>> }>(rawDir, fileName);
+      return result.ok ? (result.value.rows ?? []).map((row) => appendMonthInfo(row, info)) : [];
+    } catch {
+      return [];
+    }
+  }
+
   if (dataset === "sample") {
     return loadAllSampleRows(directoryHandle);
   }

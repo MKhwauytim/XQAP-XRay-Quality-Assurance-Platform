@@ -10,6 +10,8 @@ import {
   type FeedbackMessage,
 } from "../../data/feedback/feedbackStorage";
 import { useWorkspace } from "../../data/workspace/useWorkspace";
+import Pagination from "../Pagination/Pagination";
+import { clampPage, pageSlice } from "../Pagination/paginationUtils";
 import "./FeedbackWidget.css";
 
 const CATEGORY_LABELS: Record<FeedbackCategory, string> = {
@@ -37,6 +39,8 @@ export function FeedbackWidget() {
   const [loading, setLoading] = useState(false);
   const [adminTab, setAdminTab] = useState<"new" | "all">("new");
   const [filter, setFilter] = useState<"open" | "resolved" | "all">("open");
+  const [myPage, setMyPage] = useState(1);
+  const [adminPage, setAdminPage] = useState(1);
 
   // Submit form state
   const [category, setCategory] = useState<FeedbackCategory>("suggestion");
@@ -144,6 +148,8 @@ export function FeedbackWidget() {
   const filteredMessages = messages.filter((m) =>
     filter === "all" ? true : m.status === filter
   );
+  const safeMyPage = clampPage(myPage, myMessages.length);
+  const safeAdminPage = clampPage(adminPage, filteredMessages.length);
 
   // Non-admin authenticated roles have no toolbar feedback button (that trigger
   // is admin-only in AdminToolbar). Give them a self-contained floating trigger so
@@ -203,7 +209,7 @@ export function FeedbackWidget() {
                 <button
                   key={f}
                   className={`fb-filter-btn${filter === f ? " active" : ""}`}
-                  onClick={() => setFilter(f)}
+                  onClick={() => { setFilter(f); setAdminPage(1); }}
                 >
                   {f === "open" ? "مفتوحة" : f === "resolved" ? "مغلقة" : "الكل"}
                 </button>
@@ -274,7 +280,7 @@ export function FeedbackWidget() {
                   <div style={{ marginTop: 20 }}>
                     <span className="fb-label">رسائلي السابقة</span>
                     <div className="fb-msg-list" style={{ marginTop: 8 }}>
-                      {myMessages.map((msg) => (
+                      {pageSlice(myMessages, safeMyPage).map((msg) => (
                         <MessageCard
                           key={msg.id}
                           msg={msg}
@@ -289,6 +295,7 @@ export function FeedbackWidget() {
                         />
                       ))}
                     </div>
+                    <Pagination page={safeMyPage} totalItems={myMessages.length} onPageChange={setMyPage} itemLabel="رسالة" />
                   </div>
                 )}
               </>
@@ -302,8 +309,9 @@ export function FeedbackWidget() {
                 ) : filteredMessages.length === 0 ? (
                   <p className="fb-empty">لا توجد رسائل</p>
                 ) : (
-                  <div className="fb-msg-list">
-                    {filteredMessages.map((msg) => (
+                  <>
+                    <div className="fb-msg-list">
+                      {pageSlice(filteredMessages, safeAdminPage).map((msg) => (
                       <MessageCard
                         key={msg.id}
                         msg={msg}
@@ -316,8 +324,10 @@ export function FeedbackWidget() {
                         onResolve={() => { void handleReply(msg.id, true); }}
                         isSending={replying === msg.id}
                       />
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                    <Pagination page={safeAdminPage} totalItems={filteredMessages.length} onPageChange={setAdminPage} itemLabel="رسالة" />
+                  </>
                 )}
               </>
             )}

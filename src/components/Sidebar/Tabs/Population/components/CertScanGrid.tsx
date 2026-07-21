@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Check, ClipboardList } from "lucide-react";
+import Pagination from "../../../../../components/Pagination/Pagination";
+import { DATA_PAGE_SIZE, clampPage, pageSlice } from "../../../../../components/Pagination/paginationUtils";
 
 type HighlightType = "port" | "sn" | null;
 
@@ -72,6 +74,7 @@ export default function CertScanGrid({ initialText, onDataChange }: CertScanGrid
   const [portCol, setPortCol] = useState<number | null>(() => parsed0?.portCol ?? null);
   const [snCol, setSnCol] = useState<number | null>(() => parsed0?.snCol ?? null);
   const [activeHL, setActiveHL] = useState<HighlightType>(null);
+  const [page, setPage] = useState(1);
   const pasteRef = useRef<HTMLDivElement>(null);
   const hasHydratedRef = useRef(Boolean(parsed0));
 
@@ -106,6 +109,7 @@ export default function CertScanGrid({ initialText, onDataChange }: CertScanGrid
   function applyPaste(text: string) {
     const incoming = parsePaste(text);
     if (!incoming.length) return;
+    setPage(1);
 
     // Auto-detect columns in incoming data
     const headers = incoming[0].map((h) => h.toLowerCase());
@@ -162,6 +166,7 @@ export default function CertScanGrid({ initialText, onDataChange }: CertScanGrid
     setPortCol(null);
     setSnCol(null);
     setActiveHL(null);
+    setPage(1);
     onDataChange("");
   }
 
@@ -293,8 +298,8 @@ export default function CertScanGrid({ initialText, onDataChange }: CertScanGrid
               </tr>
             </thead>
             <tbody>
-              {gridData.slice(1, 201).map((row, ri) => (
-                <tr key={ri} className={ri % 2 === 0 ? "cg-row-even" : ""}>
+              {pageSlice(gridData.slice(1), page, DATA_PAGE_SIZE).map((row, ri) => (
+                <tr key={`${clampPage(page, Math.max(0, gridData.length - 1))}-${ri}`} className={ri % 2 === 0 ? "cg-row-even" : ""}>
                   {Array.from({ length: maxCols }, (_, ci) => (
                     <td
                       key={ci}
@@ -313,11 +318,12 @@ export default function CertScanGrid({ initialText, onDataChange }: CertScanGrid
               ))}
             </tbody>
           </table>
-          {gridData.length > 201 && (
-            <div className="certscan-overflow-note">
-              عرض أول 200 صف من {(gridData.length - 1).toLocaleString("ar-SA-u-nu-latn")}
-            </div>
-          )}
+          <Pagination
+            page={clampPage(page, Math.max(0, gridData.length - 1))}
+            totalItems={Math.max(0, gridData.length - 1)}
+            onPageChange={setPage}
+            itemLabel="جهاز"
+          />
         </div>
       )}
     </div>

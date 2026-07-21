@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { useFocusTrap } from "../../../../../../hooks/useFocusTrap";
 import RequestCard from "./RequestCard";
+import Pagination from "../../../../../../components/Pagination/Pagination";
+import { clampPage, pageSlice } from "../../../../../../components/Pagination/paginationUtils";
 import { isReferral, isReplacement, type CardRequest } from "./requestKind";
 import type { DistributionEntry } from "../../../../../../data/distribution/distributionTypes";
 import type { PreparedPopulationRow } from "../../../../../../data/population/populationTypes";
@@ -28,6 +30,8 @@ export default function RequestList({ requests, bulkEnabled, userDisplayMap, sam
   const [bulkNotes, setBulkNotes] = useState("");
   const [bulkResult, setBulkResult] = useState<BulkOutcome[] | null>(null);
   const [bulkRunning, setBulkRunning] = useState(false);
+  const requestsPageKey = `${requests.length}:${requests[0]?.requestId ?? ""}:${requests.at(-1)?.requestId ?? ""}`;
+  const [pageState, setPageState] = useState<{ requestsKey: string; page: number }>(() => ({ requestsKey: requestsPageKey, page: 1 }));
 
   // Focus-trap for the inline bulk-confirm modal (gated on bulkAction).
   const bulkDialogRef = useFocusTrap<HTMLDivElement>({
@@ -43,6 +47,9 @@ export default function RequestList({ requests, bulkEnabled, userDisplayMap, sam
   const sorted = requests.slice().sort((a, b) =>
     bulkEnabled ? a.requestedAt.localeCompare(b.requestedAt) : b.requestedAt.localeCompare(a.requestedAt)
   );
+  const requestedPage = pageState.requestsKey === requestsPageKey ? pageState.page : 1;
+  const page = clampPage(requestedPage, sorted.length);
+  const pagedRequests = pageSlice(sorted, page);
   const selectedRequests = sorted.filter((r) => selected.has(r.requestId));
 
   function toggleSelect(id: string): void {
@@ -95,7 +102,7 @@ export default function RequestList({ requests, bulkEnabled, userDisplayMap, sam
         </div>
       )}
 
-      {sorted.map((request) => (
+      {pagedRequests.map((request) => (
         <RequestCard
           key={request.requestId}
           request={request}
@@ -111,6 +118,13 @@ export default function RequestList({ requests, bulkEnabled, userDisplayMap, sam
           onToggleSelect={() => toggleSelect(request.requestId)}
         />
       ))}
+
+      <Pagination
+        page={page}
+        totalItems={sorted.length}
+        onPageChange={(nextPage) => setPageState({ requestsKey: requestsPageKey, page: nextPage })}
+        itemLabel="طلب"
+      />
 
       {bulkAction && (
         <div ref={bulkDialogRef} className="ew-modal-backdrop" role="dialog" aria-modal="true">

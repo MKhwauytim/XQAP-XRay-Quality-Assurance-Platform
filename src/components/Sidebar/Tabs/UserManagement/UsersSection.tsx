@@ -1,5 +1,5 @@
 import { Trash2 } from "lucide-react";
-import type { Dispatch, FormEventHandler, SetStateAction } from "react";
+import { useState, type Dispatch, type FormEventHandler, type SetStateAction } from "react";
 
 import type { AuthRole } from "../../../../auth/authTypes";
 import {
@@ -9,6 +9,8 @@ import {
 } from "../../../../auth/userManagement";
 import { getLabels } from "../../../../data/labels/labelsStore";
 import type { UserFormState } from "./userForm";
+import Pagination from "../../../../components/Pagination/Pagination";
+import { clampPage, pageSlice } from "../../../../components/Pagination/paginationUtils";
 
 type IdentityDraft = { username: string; displayName: string };
 
@@ -83,6 +85,10 @@ function UserRow({ user, props }: { user: ManagedLoginUser; props: UsersSectionP
 }
 
 export function UsersSection(props: UsersSectionProps) {
+  const usersPageKey = `${props.filteredUsers.length}:${props.filteredUsers[0]?.id ?? ""}:${props.filteredUsers.at(-1)?.id ?? ""}`;
+  const [pageState, setPageState] = useState<{ usersKey: string; page: number }>(() => ({ usersKey: usersPageKey, page: 1 }));
+  const page = clampPage(pageState.usersKey === usersPageKey ? pageState.page : 1, props.filteredUsers.length);
+  const pagedUsers = pageSlice(props.filteredUsers, page);
   return <div className="um-section">
     <div className="um-users-toolbar">
       <input className="um-search" type="search" placeholder="ابحث باسم المستخدم أو الاسم الظاهر…" value={props.search} onChange={(event) => props.onSearchChange(event.target.value)} dir="rtl" />
@@ -106,7 +112,8 @@ export function UsersSection(props: UsersSectionProps) {
     </form>}
     {props.filteredUsers.length === 0 ? <div className="um-empty">لا يوجد مستخدمون مطابقون.</div> : <div className="um-user-table">
       <div className="um-user-table-head"><span>المستخدم</span><span>الدور</span><span>الحالة / CertScan</span><span>كلمة المرور</span><span></span></div>
-      {props.filteredUsers.map((user) => <UserRow key={user.id} user={user} props={props} />)}
+      {pagedUsers.map((user) => <UserRow key={user.id} user={user} props={props} />)}
     </div>}
+    <Pagination page={page} totalItems={props.filteredUsers.length} onPageChange={(nextPage) => setPageState({ usersKey: usersPageKey, page: nextPage })} itemLabel="مستخدم" />
   </div>;
 }
