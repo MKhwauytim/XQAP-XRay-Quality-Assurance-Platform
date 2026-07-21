@@ -6,7 +6,7 @@ X-ray quality control app (`x-ray-quality-app-v1`): an Arabic, RTL-first React 1
 
 ## Edit log requirement
 
-**Before applying any code edit**, record it in `docs/EDIT_LOG.md`. Every entry must capture:
+**Before applying any code edit**, record it in `docs/edit logs/YYYY-MM-DD.md` (the file for the current date). Every entry must capture:
 
 1. **Version** — increment using semver-lite:
    - Major feature, refactor, or architectural change → bump the whole number (v1 → v2 → v3)
@@ -19,7 +19,7 @@ X-ray quality control app (`x-ray-quality-app-v1`): an Arabic, RTL-first React 1
 7. **Lines** — whole-repo line-count stats, since a full revert-by-hand isn't realistic once an entry's own `**Before**`/`**After**` snippets are just excerpts. Run `npm run count-lines -- --quiet` **before** starting the edit and again **after**; combine with `git diff --stat` (once the edit is staged) for the added/removed breakdown of the touched files. Record as:
    `**Lines:** {total before} → {total after} (net {+/-N}) · {files changed} files, +{added} / -{removed}`
 
-Use this format in `docs/EDIT_LOG.md`:
+Use this format in the applicable daily file under `docs/edit logs/`:
 
 ```markdown
 ## v{N} — YYYY-MM-DD — {Category}: {short description}
@@ -39,7 +39,7 @@ Use this format in `docs/EDIT_LOG.md`:
 **Lines:** 167850 → 167912 (net +62) · 3 files, +70 / -8
 ```
 
-If an edit touches multiple files, add one `**File:**` block per file under the same version entry — the `**Lines:**` line still appears once per entry, covering the whole edit. Create `docs/EDIT_LOG.md` if it does not exist yet.
+If an edit touches multiple files, add one `**File:**` block per file under the same version entry — the `**Lines:**` line still appears once per entry, covering the whole edit. Create today's dated file if it does not exist yet; never create a second file for the same date.
 
 ## Commands
 
@@ -57,7 +57,7 @@ npx vitest run src/data/sampling/sampleAlgorithm.test.ts  # run a single test fi
 
 ## Build & dependency gotchas
 
-- `vite-plugin-singlefile` inlines everything (`assetsInlineLimit` maxed, `cssCodeSplit: false`): v56.2 produces one portable `dist/index.html` (~3.04 MB, ~1.13 MB gzip). The ChangeLog `?raw` import is truncated by `src/build/editLogTruncatePlugin.ts`. `npm run check:bundle-size` is the release budget.
+- `vite-plugin-singlefile` inlines everything (`assetsInlineLimit` maxed, `cssCodeSplit: false`): v56.2 produces one portable `dist/index.html` (~3.04 MB, ~1.13 MB gzip). The ChangeLog virtual module aggregates `docs/edit logs/*.md` and is truncated by `src/build/editLogTruncatePlugin.ts`. `npm run check:bundle-size` is the release budget.
 - Current whole-product revision and roadmap: `docs/audit/FULL_REVISION_2026-07-17.md`.
 - `dist/` is intentionally just the single self-contained `index.html` — no other files. The `public/` folder is empty on purpose; anything dropped in it gets copied into `dist/` unchanged by Vite's default handling, which would break that guarantee. The desktop-shortcut "launch as app window" tooling (`create-desktop-shortcut.ps1` / `.bat` / `app-icon.ico`) that used to live there was removed 2026-07-20 — the app is distributed as a plain static file now, opened directly or served statically. `scripts/generate-app-icon.ps1` (dev-only, not shipped) still exists but is currently unused now that `app-icon.ico` is gone.
 - The `xlsx` dependency is **vendored** at `vendor/xlsx-0.20.3.tgz` (`package.json` points at `file:vendor/xlsx-0.20.3.tgz`) — originally sourced from the SheetJS CDN tarball (`https://cdn.sheetjs.com/xlsx-0.20.3/...`), not the npm registry. Vendoring means `npm ci` no longer needs network access to that CDN (required for CI, see `.github/workflows/ci.yml`). Don't "upgrade" it to the stale npm-registry `xlsx` package; see `vendor/README.md` for the upgrade procedure.

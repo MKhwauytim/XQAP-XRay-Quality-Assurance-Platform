@@ -1,7 +1,7 @@
 {
   "name": "x-ray-quality-app",
   "private": true,
-  "version": "56.13.0",
+  "version": "57.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -16,6 +16,7 @@
     "check:complexity": "eslint src --max-warnings 0 --rule \"complexity: [error, 60]\" --rule \"max-lines-per-function: [error, 1450]\"",
     "check:bundle-size": "node scripts/check-bundle-size.mjs",
     "check:release": "node scripts/check-release-consistency.mjs",
+    "check:release-consistency": "node scripts/check-release-consistency.mjs",
     "check:vendor": "node scripts/check-vendor-integrity.mjs",
     "count-lines": "node scripts/count-lines.mjs"
   },

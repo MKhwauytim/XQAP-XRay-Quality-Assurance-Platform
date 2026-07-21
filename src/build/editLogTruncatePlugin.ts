@@ -1,43 +1,43 @@
-// Vite build plugin: truncates the `?raw` import of docs/EDIT_LOG.md so the shipped bundle
-// doesn't inline the entire (multi-hundred-KB, ever-growing) edit log. Build-only (`apply:
-// "build"`) — the dev server keeps serving the full log unmodified, since seeing the whole
-// history is useful while authoring new EDIT_LOG entries.
-//
-// The repo file `docs/EDIT_LOG.md` itself is never written to. Only the in-memory module
-// content produced for this one import is shortened.
+// Vite virtual-module plugin for the date-organized files in docs/edit logs/.
+// Development serves the complete history. Production keeps only the newest entries so the
+// portable single-file build does not absorb the full, ever-growing documentation archive.
 import type { Plugin } from "vite";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 /** Default number of most-recent version entries to keep in the shipped bundle. */
 export const DEFAULT_KEEP_VERSIONS = 20;
+export const EDIT_LOG_VIRTUAL_ID = "virtual:edit-log";
 
-// Matches a version heading line, e.g. "## v42.13 " — deliberately loose (no full line anchor
-// on the far end) so `matchAll` gives us just the *start* offset of each heading for slicing.
+const RESOLVED_EDIT_LOG_VIRTUAL_ID = `\0${EDIT_LOG_VIRTUAL_ID}`;
+const DAILY_LOG_FILE_RE = /^\d{4}-\d{2}-\d{2}\.md$/;
 const HEADING_RE = /^## v[\d.]+ /gm;
+const DEFAULT_EDIT_LOG_DIRECTORY = fileURLToPath(
+  new URL("../../docs/edit%20logs/", import.meta.url),
+);
 
-/**
- * Count real version headings in an EDIT_LOG.md-shaped string (before any truncation). Used to
- * inject the true total version count as a build-time constant — the ChangeLog tab's "إجمالي
- * الإصدارات" stat must reflect this, not `entries.length` of the (possibly truncated) bundled
- * log, or a production build under-reports its own history.
- */
+/** Read every daily log in newest-date-first order as one parser-compatible document. */
+export function readDailyEditLogs(directory = DEFAULT_EDIT_LOG_DIRECTORY): string {
+  return readdirSync(directory, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && DAILY_LOG_FILE_RE.test(entry.name))
+    .map((entry) => entry.name)
+    .sort((a, b) => b.localeCompare(a))
+    .map((name) => {
+      const dailyFile = readFileSync(join(directory, name), "utf8");
+      const firstEntryIndex = dailyFile.search(HEADING_RE);
+      return firstEntryIndex >= 0 ? dailyFile.slice(firstEntryIndex).trim() : "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** Count all real version headings across the aggregated daily history. */
 export function countVersionHeadings(content: string): number {
   return [...content.matchAll(HEADING_RE)].length;
 }
 
-/**
- * Truncate an EDIT_LOG.md-shaped markdown string to the first `keep` version headings
- * (the log is prepend-ordered — newest entries are added at the top of the file — so "first
- * N headings from the top" means "N most recent versions").
- *
- * The cut always lands exactly on a heading boundary (never mid-entry): we slice up to the
- * byte offset where the (keep+1)-th heading begins. A synthetic "v0.0" notice entry is
- * appended explaining the truncation; v0.0 sorts after every real version under the
- * ChangeLog tab's newest-first ordering, so it always renders last without disturbing real
- * entries.
- *
- * Pure function — no file I/O — so it's directly unit-testable.
- */
+/** Keep complete entries only, cutting exactly at the next version heading. */
 export function truncateEditLog(content: string, keep: number = DEFAULT_KEEP_VERSIONS): string {
   const matches = [...content.matchAll(HEADING_RE)];
   if (matches.length <= keep) return content;
@@ -52,23 +52,29 @@ export function truncateEditLog(content: string, keep: number = DEFAULT_KEEP_VER
   const notice =
     `## v0.0 — ${today} — سجل مختصر: تم حذف ${omitted} إصدارًا أقدم من هذه النسخة المضمّنة\n\n` +
     `تم اختصار سجل الإصدارات المضمّن داخل هذا الإصدار من التطبيق ليحتوي على آخر ${keep} إصدارًا ` +
-    `فقط، وذلك لتقليل حجم الملف المبني. للاطلاع على السجل الكامل لجميع الإصدارات، راجع ` +
-    "`docs/EDIT_LOG.md` في مستودع المشروع.\n";
+    `فقط، وذلك لتقليل حجم الملف المبني. للاطلاع على السجل الكامل، راجع الملفات اليومية في ` +
+    "`docs/edit logs/` في مستودع المشروع.\n";
 
   return `${header}${kept}${notice}`;
 }
 
-export function editLogTruncatePlugin(): Plugin {
+export function editLogTruncatePlugin(directory = DEFAULT_EDIT_LOG_DIRECTORY): Plugin {
+  let isBuild = false;
+
   return {
-    name: "edit-log-truncate",
-    apply: "build",
+    name: "edit-log-daily-files",
     enforce: "pre",
+    configResolved(config) {
+      isBuild = config.command === "build";
+    },
+    resolveId(id) {
+      return id === EDIT_LOG_VIRTUAL_ID ? RESOLVED_EDIT_LOG_VIRTUAL_ID : null;
+    },
     load(id) {
-      if (!id.endsWith("EDIT_LOG.md?raw")) return null;
-      const filePath = id.slice(0, id.length - "?raw".length);
-      const raw = readFileSync(filePath, "utf8");
-      const truncated = truncateEditLog(raw);
-      return `export default ${JSON.stringify(truncated)};`;
+      if (id !== RESOLVED_EDIT_LOG_VIRTUAL_ID) return null;
+      const completeHistory = readDailyEditLogs(directory);
+      const bundledHistory = isBuild ? truncateEditLog(completeHistory) : completeHistory;
+      return `export default ${JSON.stringify(bundledHistory)};`;
     },
   };
 }

@@ -12,14 +12,14 @@ npm run check:complexity    # complexity/large-function regression budget
 npm run test:run            # Vitest, 711 tests in 109 files as of v56.2
 npm run build               # tsc -b + one-file Vite build
 npm run check:bundle-size   # raw/gzip release budget
-npm run check:release       # package version ↔ EDIT_LOG consistency
+npm run check:release       # package version ↔ latest daily edit-log consistency
 npm run check:vendor        # vendored SheetJS SHA-256
 npm run preview             # preview production build
 ```
 
 ## Build and platform constraints
 
-- `vite-plugin-singlefile` produces one portable `dist/index.html` (~3.04 MB, ~1.13 MB gzip in v56.2). The ChangeLog raw import is truncated at build time.
+- `vite-plugin-singlefile` produces one portable `dist/index.html` (~3.04 MB, ~1.13 MB gzip in v56.2). The ChangeLog aggregates `docs/edit logs/*.md` and is truncated at build time.
 - SheetJS is vendored at `vendor/xlsx-0.20.3.tgz`; `package.json` uses `file:vendor/xlsx-0.20.3.tgz`. Do not replace it with the stale npm-registry package. Follow `vendor/README.md` and update the reviewed checksum when upgrading.
 - Full workspace support requires the File System Access API (`showDirectoryPicker`), so use Chrome or Edge. Other browsers receive the unsupported-browser state.
 - TypeScript uses strict mode and `erasableSyntaxOnly`. `FileHandleLike.createWritable` is optional; guard it before calling.

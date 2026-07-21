@@ -80,7 +80,7 @@ export async function loadFeedback(dir: DirectoryHandleLike): Promise<FeedbackMe
  *
  * No delayed verify: feedback messages are low-stakes user input (not
  * business-critical RMW data) — a rare lost update means at most a
- * re-submission, not data corruption. See docs/EDIT_LOG.md v55.2.
+ * re-submission, not data corruption. See docs/edit logs/2026-07-14.md v55.2.
  */
 async function mutateFeedback(
   dir: DirectoryHandleLike,
