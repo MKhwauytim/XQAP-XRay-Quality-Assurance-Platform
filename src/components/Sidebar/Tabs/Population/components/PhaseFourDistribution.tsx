@@ -16,6 +16,7 @@ type PhaseFourDistributionProps = {
   distributionCurrent: DistributionCurrentData | null;
   distributionMessage: SaveMessage;
   isDistributing: boolean;
+  distributionProgress: { percent: number; message: string } | null;
   canConfigure: boolean;
   canDistribute: boolean;
   config: PopulationConfig;
@@ -50,6 +51,7 @@ export default function PhaseFourDistribution({
   distributionCurrent,
   distributionMessage,
   isDistributing,
+  distributionProgress,
   canConfigure,
   canDistribute,
   config,
@@ -465,6 +467,26 @@ export default function PhaseFourDistribution({
               {isDistributing ? "جاري توزيع وحفظ التعيينات..." : "تطبيق وحفظ التوزيع التلقائي"}
             </button>
           </div>
+          {isDistributing && distributionProgress && (
+            <div className="distribution-save-progress">
+              <div
+                className="progress-bar-bg"
+                role="progressbar"
+                aria-label="تقدم حفظ التوزيع"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={distributionProgress.percent}
+                aria-valuetext={distributionProgress.message}
+              >
+                <div className="progress-bar-fill" style={{ width: `${distributionProgress.percent}%` }} />
+              </div>
+              <div className="distribution-save-progress-label">
+                <span>{distributionProgress.message}</span>
+                <strong>{distributionProgress.percent.toLocaleString("ar-SA")}٪</strong>
+              </div>
+              <p>يمكن أن يستغرق الحفظ وقتاً أطول عند توزيع عدد كبير من العينات. لا تغلق الصفحة أو مجلد مساحة العمل.</p>
+            </div>
+          )}
         </div>
       ) : (
         <div className="distribution-manual-panel">

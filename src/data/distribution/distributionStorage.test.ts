@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { createMemoryDirectory } from "../storage/memoryDirectory";
 import {
   appendDistributionEvent,
+  appendDistributionEvents,
   loadDistributionLog,
   loadOrDeriveDistributionCurrent,
   saveDistributionCurrent,
@@ -82,6 +83,27 @@ describe("distributionStorage", () => {
     }
     const log = await loadDistributionLog(root, "5-May-2026");
     expect(log.events).toHaveLength(3);
+  });
+
+  it("reports durable progress while appending a bulk event batch", async () => {
+    const root = await makeRoot();
+    const events = Array.from({ length: 9 }, (_, index) =>
+      buildAssignEvent({
+        xrayImageId: `bulk-${index}`,
+        assignedTo: "alice",
+        eventBy: "admin",
+      })
+    );
+    const progress: Array<{ phase: string; completed: number; total: number }> = [];
+
+    const result = await appendDistributionEvents(root, "5-May-2026", events, {
+      onProgress: (update) => progress.push(update),
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(progress.filter((update) => update.phase === "events").map((update) => update.completed))
+      .toEqual(Array.from({ length: 10 }, (_, index) => index));
+    expect(progress.at(-1)).toEqual({ phase: "complete", completed: 9, total: 9 });
   });
 
   it("retains concurrent appends as distinct immutable events", async () => {

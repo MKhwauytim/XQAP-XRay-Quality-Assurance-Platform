@@ -1159,6 +1159,12 @@
   transition: width 300ms ease;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .progress-bar-fill {
+    transition: none;
+  }
+}
+
 .progress-bar-label {
   margin: 0;
   color: var(--p-muted);
@@ -1753,6 +1759,36 @@ select.save-disk-input {
 .dist-footer-row {
   display: flex;
   justify-content: flex-end;
+}
+
+.distribution-save-progress {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--p-border);
+  border-radius: var(--p-radius-sm);
+  background: var(--p-surface-soft);
+}
+
+.distribution-save-progress-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  color: var(--p-text-secondary);
+  font-size: 13px;
+}
+
+.distribution-save-progress-label strong {
+  color: var(--p-primary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.distribution-save-progress p {
+  margin: 0;
+  color: var(--p-muted);
+  font-size: 12px;
 }
 
 /* Manual distribution table */

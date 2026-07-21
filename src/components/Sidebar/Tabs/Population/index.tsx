@@ -30,7 +30,8 @@ import {
   appendDistributionEvents,
   loadDistributionLog,
   loadOrDeriveDistributionCurrent,
-  saveDistributionCurrent
+  saveDistributionCurrent,
+  type DistributionWriteProgress,
 } from "../../../../data/distribution/distributionStorage";
 import { loadAllEmployeeFiles } from "../../../../data/answers/answerStorage";
 import { scanReferentialIntegrity, type OrphanScanResult } from "../../../../data/integrity/orphanScan";
@@ -131,6 +132,24 @@ export const tabConfig: SidebarTabModule["tabConfig"] = {
 };
 
 type SaveMessage = { type: "ok" | "error"; text: string } | null;
+type DistributionProgressState = { percent: number; message: string } | null;
+
+function distributionProgressFromWrite(progress: DistributionWriteProgress): Exclude<DistributionProgressState, null> {
+  if (progress.phase === "events") {
+    const ratio = progress.total === 0 ? 1 : progress.completed / progress.total;
+    return {
+      percent: 5 + Math.round(ratio * 65),
+      message: `جارٍ حفظ التعيينات (${progress.completed.toLocaleString("ar-SA")} من ${progress.total.toLocaleString("ar-SA")})...`,
+    };
+  }
+  if (progress.phase === "projection") {
+    return { percent: 74, message: "جارٍ تحديث سجل التوزيع المجمع..." };
+  }
+  if (progress.phase === "verification") {
+    return { percent: 82, message: "جارٍ التحقق من سلامة الحفظ..." };
+  }
+  return { percent: 86, message: "تم حفظ التعيينات، جارٍ تحديث حالة الشهر..." };
+}
 
 type SubTab = "process" | "browse";
 
@@ -406,9 +425,9 @@ export default function PopulationTab() {
   // Phase 4 — distribution
   const [distributionCurrent, setDistributionCurrent] =
     useState<DistributionCurrentData | null>(null);
-  const [distributionMessage, setDistributionMessage] =
-    useState<SaveMessage>(null);
+  const [distributionMessage, setDistributionMessage] = useState<SaveMessage>(null);
   const [isDistributing, setIsDistributing] = useState(false);
+  const [distributionProgress, setDistributionProgress] = useState<DistributionProgressState>(null);
 
   const [uploads, setUploads] = useState<Record<UploadKey, UploadState>>({
     riskAgencyData: { file: null, source: null },
@@ -1296,14 +1315,19 @@ export default function PopulationTab() {
     if (!directoryHandle || !sampleDrawResult) return;
     setIsDistributing(true);
     setDistributionMessage(null);
+    setDistributionProgress({ percent: 2, message: "جارٍ تجهيز ملفات التعيينات للحفظ..." });
     const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
     try {
       const result = await appendDistributionEvents(
         directoryHandle,
         monthFolderName,
-        events
+        events,
+        {
+          onProgress: (progress) => setDistributionProgress(distributionProgressFromWrite(progress)),
+        }
       );
       if (result.ok) {
+        setDistributionProgress({ percent: 88, message: "جارٍ تحديث حالة الشهر..." });
         await updateMonthStatus(directoryHandle, monthFolderName, "distributed");
         void appendWorkspaceAction(directoryHandle, {
           actor: sessionRef.current?.username ?? "unknown",
@@ -1312,12 +1336,14 @@ export default function PopulationTab() {
           monthFolderName,
           details: { events: events.length },
         });
+        setDistributionProgress({ percent: 92, message: "جارٍ بناء ملخص التوزيع النهائي..." });
         await refreshDistribution(monthFolderName);
         // Build per-employee entry lists then write one XLSX per employee (fire-and-forget).
         const assignedMap = buildAssignedEntryMap(events, sampleDrawResult.rows);
         for (const [emp, empEntries] of assignedMap) {
           void writeEmployeeXlsx(directoryHandle, monthFolderName, emp, empEntries).catch(() => undefined);
         }
+        setDistributionProgress({ percent: 100, message: "اكتمل حفظ التوزيع بنجاح." });
         setDistributionMessage({ type: "ok", text: "تم تطبيق وحفظ التوزيع الجماعي بنجاح." });
       } else {
         setDistributionMessage({ type: "error", text: result.error });
@@ -1326,6 +1352,7 @@ export default function PopulationTab() {
       setDistributionMessage({ type: "error", text: distributionErrorText(error, getLabels().msg_month_closed_write_blocked) });
     } finally {
       setIsDistributing(false);
+      setDistributionProgress(null);
     }
   }
 
@@ -1495,6 +1522,7 @@ export default function PopulationTab() {
             distributionCurrent={distributionCurrent}
             distributionMessage={distributionMessage}
             isDistributing={isDistributing}
+            distributionProgress={distributionProgress}
             canConfigure={canConfigureSample}
             canDistribute={canDistributeSamples}
             config={config}
