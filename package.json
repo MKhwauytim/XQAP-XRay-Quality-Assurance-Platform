@@ -16,7 +16,8 @@
     "check:complexity": "eslint src --max-warnings 0 --rule \"complexity: [error, 60]\" --rule \"max-lines-per-function: [error, 1450]\"",
     "check:bundle-size": "node scripts/check-bundle-size.mjs",
     "check:release": "node scripts/check-release-consistency.mjs",
-    "check:vendor": "node scripts/check-vendor-integrity.mjs"
+    "check:vendor": "node scripts/check-vendor-integrity.mjs",
+    "count-lines": "node scripts/count-lines.mjs"
   },
   "dependencies": {
     "@fontsource/ibm-plex-sans-arabic": "^5.2.9",

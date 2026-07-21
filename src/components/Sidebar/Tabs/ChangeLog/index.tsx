@@ -203,7 +203,13 @@ function ChangeLogTab() {
       <div className="cl-summary">
         <div className="cl-summary-stat">
           <span className="cl-summary-label">إجمالي الإصدارات</span>
-          <span className="cl-summary-value">{formatNumber(entries.length)}</span>
+          <span className="cl-summary-value">
+            {formatNumber(
+              typeof __EDIT_LOG_TOTAL_VERSIONS__ !== "undefined"
+                ? __EDIT_LOG_TOTAL_VERSIONS__
+                : entries.length
+            )}
+          </span>
         </div>
         {latest && (
           <div className="cl-summary-stat">

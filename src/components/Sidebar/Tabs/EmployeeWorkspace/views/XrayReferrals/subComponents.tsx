@@ -229,7 +229,7 @@ export function SampleDetailPanel({
   savedAnswer: ItemAnswer | null;
   readonly: boolean;
   onClose: () => void;
-  onSave: (ans: FieldAnswer[], submit: boolean) => Promise<void>;
+  onSave: (ans: FieldAnswer[]) => Promise<void>;
   onReplace?: (entry: DistributionEntry) => void;
   onReassign?: (entry: DistributionEntry) => void;
   onReopen?: (reason: string) => void;
