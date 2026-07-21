@@ -3,6 +3,8 @@ import { Check, Clock, Megaphone, Pin, Send } from "lucide-react";
 
 import { PageHeader } from "../../../../PageHeader/PageHeader";
 import { EmptyState } from "../../../../StateViews/StateViews";
+import Pagination from "../../../../Pagination/Pagination";
+import { clampPage, pageSlice } from "../../../../Pagination/paginationUtils";
 import type { DirectoryHandleLike } from "../../../../../data/storage/fileSystemAccess";
 import { usePermissions } from "../../../../../auth/usePermissions";
 import { getManagedLoginUsers } from "../../../../../auth/userManagement";
@@ -44,6 +46,7 @@ export default function NotificationManager({ directoryHandle }: Props) {
   const canPost = canMutate("post-notification");
 
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [page, setPage] = useState(1);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<PostStatus>(null);
@@ -91,6 +94,9 @@ export default function NotificationManager({ directoryHandle }: Props) {
   }, [message, busy, canPost, directoryHandle, username, reload]);
 
   const labels = getLabels();
+
+  const safePage = clampPage(page, notifications.length);
+  const pagedNotifications = pageSlice(notifications, safePage);
 
   return (
     <section className="ntf-page" dir="rtl">
@@ -142,7 +148,7 @@ export default function NotificationManager({ directoryHandle }: Props) {
         />
       ) : (
         <ul className="ntf-list">
-          {notifications.map((n) => {
+          {pagedNotifications.map((n) => {
             const acceptedCount = audienceUsers.filter((u) =>
               hasAccepted(n, u.username)
             ).length;
@@ -193,6 +199,7 @@ export default function NotificationManager({ directoryHandle }: Props) {
           })}
         </ul>
       )}
+      <Pagination page={safePage} totalItems={notifications.length} onPageChange={setPage} itemLabel="إشعار" />
     </section>
   );
 }

@@ -2,7 +2,7 @@ import { expect, it, test } from "vitest";
 
 import { createMemoryDirectory } from "../storage/memoryDirectory";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
-import { saveMonthRun, loadAllSampleRows, updateMonthStatus } from "./populationStorage";
+import { saveMonthRun, loadAllSampleRows, loadBrowseRows, updateMonthStatus } from "./populationStorage";
 import { saveSampleMaster } from "../sampling/sampleStorage";
 import type { MonthManifestData, MonthRawData, PopulationFinalData } from "./monthTypes";
 import type { SampleMasterData } from "../sampling/sampleTypes";
@@ -90,6 +90,24 @@ test("saveMonthRun does not write bi.raw.json when no BI rows", async () => {
   const biRaw = await safeReadJson(rawDir, "bi.raw.json");
   expect(biRaw.ok).toBe(false);
   expect((biRaw as { reason: string }).reason).toBe("missing");
+});
+
+test("loadBrowseRows reads only the selected month unless all months are requested", async () => {
+  const dir = createMemoryDirectory();
+  await saveMonthRun({ directoryHandle: dir, ...baseParams });
+  await saveMonthRun({
+    directoryHandle: dir,
+    ...baseParams,
+    month: 6,
+    processedRows: [{ xrayImageId: "B001", certScanStatus: "NonCertscan" }],
+  });
+
+  const selectedMonthRows = await loadBrowseRows(dir, "population", "5-may-2026");
+  expect(selectedMonthRows.map((row) => row.xrayImageId)).toEqual(["A001"]);
+  expect(selectedMonthRows[0]?._monthFolder).toBe("5-may-2026");
+
+  const allMonthRows = await loadBrowseRows(dir, "population");
+  expect(allMonthRows.map((row) => row.xrayImageId).sort()).toEqual(["A001", "B001"]);
 });
 
 function makeSample(): SampleMasterData {

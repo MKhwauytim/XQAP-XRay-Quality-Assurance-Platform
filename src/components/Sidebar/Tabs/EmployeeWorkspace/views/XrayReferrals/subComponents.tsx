@@ -18,6 +18,8 @@ import {
   type DateFormatMode,
 } from "../../../../../../components/DataTable/utils";
 import InspectionPanel from "../../../../../../components/InspectionPanel";
+import Pagination from "../../../../../../components/Pagination/Pagination";
+import { clampPage, pageSlice } from "../../../../../../components/Pagination/paginationUtils";
 import { useLabels, type Labels } from "../../../../../../data/labels/useLabels";
 import { formatStageLabel } from "../../../Population/components/helpers";
 import type { PreparedPopulationRow } from "../../../Population/processing/populationProcessingTypes";
@@ -516,8 +518,11 @@ export function ReplacementDialog({
     state.recommended.length > 0 ? "recommended" : "all"
   );
   const [reason, setReason] = useState("");
+  const [page, setPage] = useState(1);
   const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onClose });
   const rows = tab === "recommended" ? state.recommended : state.all;
+  const safePage = clampPage(page, rows.length);
+  const pagedRows = pageSlice(rows, safePage);
   const stageLabel = formatStageLabel(state.entry.row.stage, stageMappings);
   const reasonTrimmed = reason.trim();
   const canSelect = reasonTrimmed.length > 0;
@@ -562,14 +567,14 @@ export function ReplacementDialog({
           <button
             type="button"
             className={tab === "recommended" ? "active" : ""}
-            onClick={() => setTab("recommended")}
+            onClick={() => { setTab("recommended"); setPage(1); }}
           >
             الموصى بها ({state.recommended.length})
           </button>
           <button
             type="button"
             className={tab === "all" ? "active" : ""}
-            onClick={() => setTab("all")}
+            onClick={() => { setTab("all"); setPage(1); }}
           >
             كل البدائل ({state.all.length})
           </button>
@@ -587,7 +592,7 @@ export function ReplacementDialog({
           </div>
         ) : (
           <div className="ew-replace-list">
-            {rows.map((row) => (
+            {pagedRows.map((row) => (
               <article key={row.xrayImageId} className="ew-replace-row">
                 <div>
                   <strong>{row.xrayImageId}</strong>
@@ -612,6 +617,7 @@ export function ReplacementDialog({
             ))}
           </div>
         )}
+        <Pagination page={safePage} totalItems={rows.length} onPageChange={setPage} itemLabel="بديل" />
       </div>
     </div>
   );

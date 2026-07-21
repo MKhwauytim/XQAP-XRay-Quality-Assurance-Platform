@@ -5,6 +5,8 @@ import type { NormalizedRiskRow } from "../riskData/riskDataTypes";
 import type { NormalizedBiRow } from "../biData/biDataTypes";
 import { makeBiMatchKey } from "../processing/populationProcessor";
 import type { OrphanScanResult } from "../../../../../data/integrity/orphanScan";
+import Pagination from "../../../../../components/Pagination/Pagination";
+import { clampPage, pageSlice } from "../../../../../components/Pagination/paginationUtils";
 import "./DataAccuracyReport.css";
 
 // ── column mapping definition ─────────────────────────────────────────────────
@@ -305,8 +307,6 @@ export function OrphanScanSection({ scan }: { scan: OrphanScanResult | null }) {
 
 // ── component ─────────────────────────────────────────────────────────────────
 
-const PAGE_SIZE = 50;
-
 export default function DataAccuracyReport({
   riskRows,
   biRows,
@@ -318,7 +318,8 @@ export default function DataAccuracyReport({
 
   const [search,    setSearch]    = useState("");
   const [colFilter, setColFilter] = useState("__all__");
-  const [page,      setPage]      = useState(1);
+  const resultPageKey = `${result.mismatches.length}:${result.mismatches[0]?.xrayImageId ?? ""}:${result.mismatches.at(-1)?.xrayImageId ?? ""}`;
+  const [pageState, setPageState] = useState<{ resultKey: string; page: number }>(() => ({ resultKey: resultPageKey, page: 1 }));
 
   const filtered = useMemo(() => {
     let rows = result.mismatches;
@@ -334,11 +335,11 @@ export default function DataAccuracyReport({
     return rows;
   }, [result.mismatches, colFilter, search]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const paginated  = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const page = clampPage(pageState.resultKey === resultPageKey ? pageState.page : 1, filtered.length);
+  const paginated = pageSlice(filtered, page);
 
-  function handleSearch(v: string) { setSearch(v);    setPage(1); }
-  function handleFilter(v: string) { setColFilter(v); setPage(1); }
+  function handleSearch(v: string) { setSearch(v);    setPageState({ resultKey: resultPageKey, page: 1 }); }
+  function handleFilter(v: string) { setColFilter(v); setPageState({ resultKey: resultPageKey, page: 1 }); }
 
   function handleExportExcel() {
     // Sheet 1: column accuracy summary
@@ -502,24 +503,7 @@ export default function DataAccuracyReport({
                 </span>
               </div>
             ))}
-            {totalPages > 1 && (
-              <div className="dar-pagination">
-                <span>الصفحة {page} من {totalPages} ({filtered.length.toLocaleString("ar-SA-u-nu-latn")} اختلاف)</span>
-                <div className="dar-page-btns">
-                  <button className="dar-page-btn" onClick={() => setPage(1)}       disabled={page === 1}>«</button>
-                  <button className="dar-page-btn" onClick={() => setPage(p => p - 1)} disabled={page === 1}>‹</button>
-                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                    const start = Math.max(1, Math.min(page - 2, totalPages - 4));
-                    const pg = start + i;
-                    return pg <= totalPages ? (
-                      <button key={pg} className={`dar-page-btn${pg === page ? " active" : ""}`} onClick={() => setPage(pg)}>{pg}</button>
-                    ) : null;
-                  })}
-                  <button className="dar-page-btn" onClick={() => setPage(p => p + 1)} disabled={page === totalPages}><ChevronRight size={14} /></button>
-                  <button className="dar-page-btn" onClick={() => setPage(totalPages)} disabled={page === totalPages}>»</button>
-                </div>
-              </div>
-            )}
+            <Pagination page={page} totalItems={filtered.length} onPageChange={(nextPage) => setPageState({ resultKey: resultPageKey, page: nextPage })} itemLabel="اختلاف" />
           </>
         )}
       </div>

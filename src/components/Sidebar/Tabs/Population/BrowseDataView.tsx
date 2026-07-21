@@ -24,6 +24,8 @@ import { useGlobalMonth } from "../../../../data/month/useGlobalMonth";
 import { useLabels } from "../../../../data/labels/useLabels";
 import { PageHeader } from "../../../../components/PageHeader/PageHeader";
 import { EmptyState, LoadingState } from "../../../../components/StateViews/StateViews";
+import Pagination from "../../../../components/Pagination/Pagination";
+import { DATA_PAGE_SIZE, clampPage, pageSlice } from "../../../../components/Pagination/paginationUtils";
 import { formatStageLabel } from "./components/helpers";
 
 // ── Browse sub-tab ────────────────────────────────────────────────────────────
@@ -404,6 +406,8 @@ export default function BrowseDataView({
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
   const [openFilterColumn, setOpenFilterColumn] = useState<string | null>(null);
   const [colPickerOpen, setColPickerOpen] = useState(false);
+  const rowsPageKey = `${rows.length}:${rows[0]?._monthFolder ?? ""}:${rows[0]?.xrayImageId ?? ""}:${rows.at(-1)?._monthFolder ?? ""}:${rows.at(-1)?.xrayImageId ?? ""}`;
+  const [pageState, setPageState] = useState<{ rowsKey: string; page: number }>(() => ({ rowsKey: rowsPageKey, page: 1 }));
 
   useEffect(() => {
     if (!directoryHandle) {
@@ -442,7 +446,8 @@ export default function BrowseDataView({
     setLoading(true);
     loadBrowseRows(
       directoryHandle as Parameters<typeof loadBrowseRows>[0],
-      dataset
+      dataset,
+      showAllMonths ? undefined : globalFolder ?? undefined
     )
       .then((nextRows) => {
         const nextColumns = buildBrowseColumns(nextRows);
@@ -463,7 +468,7 @@ export default function BrowseDataView({
       })
       .catch(() => setRows([]))
       .finally(() => setLoading(false));
-  }, [dataset, directoryHandle, isPresetLoaded, refreshKey]);
+  }, [dataset, directoryHandle, globalFolder, isPresetLoaded, refreshKey, showAllMonths]);
 
   const monthFilteredRows = useMemo(
     () =>
@@ -497,17 +502,39 @@ export default function BrowseDataView({
 
   // ── Filtered table rows ──
   const searchFilteredRows = useMemo(
-    () => monthFilteredRows.filter((row) => rowMatchesSearch(row, search, config.stageMappings)),
+    () => search.trim()
+      ? monthFilteredRows.filter((row) => rowMatchesSearch(row, search, config.stageMappings))
+      : monthFilteredRows,
     [monthFilteredRows, search, config.stageMappings]
   );
   const filteredRows = useMemo(
-    () =>
-      searchFilteredRows.filter((row) =>
-        rowMatchesColumnFilters(row, columnFilters, undefined, config.stageMappings)
-      ),
+    () => Object.values(columnFilters).some((values) => values.length > 0)
+      ? searchFilteredRows.filter((row) =>
+          rowMatchesColumnFilters(row, columnFilters, undefined, config.stageMappings)
+        )
+      : searchFilteredRows,
     [columnFilters, searchFilteredRows, config.stageMappings]
   );
+  const requestedPage = pageState.rowsKey === rowsPageKey ? pageState.page : 1;
+  const page = clampPage(requestedPage, filteredRows.length, DATA_PAGE_SIZE);
+  const pagedRows = useMemo(() => pageSlice(filteredRows, page), [filteredRows, page]);
   const activeFilterCount = Object.values(columnFilters).filter((values) => values.length > 0).length;
+  const openFilterValues = useMemo(() => {
+    if (!openFilterColumn) return { options: [] as string[], truncated: false };
+    const values = new Set(columnFilters[openFilterColumn] ?? []);
+    let truncated = false;
+    for (const row of filteredRows) {
+      values.add(getBrowseDisplayValue(row, openFilterColumn, config.stageMappings));
+      if (values.size > DATA_PAGE_SIZE) {
+        truncated = true;
+        break;
+      }
+    }
+    return {
+      options: Array.from(values).sort(compareBrowseFilterOptions).slice(0, DATA_PAGE_SIZE),
+      truncated,
+    };
+  }, [openFilterColumn, columnFilters, filteredRows, config.stageMappings]);
   function saveCurrentPreset(nextOrder: string[], nextVisible: Set<string>): void {
     if (!directoryHandle) {
       return;
@@ -567,13 +594,8 @@ export default function BrowseDataView({
     event.dataTransfer.dropEffect = "move";
   }
 
-  function getColumnFilterOptions(columnKey: string): string[] {
-    return Array.from(
-      new Set(filteredRows.map((row) => getBrowseDisplayValue(row, columnKey, config.stageMappings)))
-    ).sort(compareBrowseFilterOptions);
-  }
-
   function toggleColumnFilterValue(columnKey: string, value: string): void {
+    setPageState({ rowsKey: rowsPageKey, page: 1 });
     setColumnFilters((current) => {
       const selected = new Set(current[columnKey] ?? []);
       if (selected.has(value)) {
@@ -593,6 +615,7 @@ export default function BrowseDataView({
   }
 
   function clearColumnFilter(columnKey: string): void {
+    setPageState({ rowsKey: rowsPageKey, page: 1 });
     setColumnFilters((current) => {
       const next = { ...current };
       delete next[columnKey];
@@ -604,6 +627,7 @@ export default function BrowseDataView({
     setSearch("");
     setColumnFilters({});
     setOpenFilterColumn(null);
+    setPageState({ rowsKey: rowsPageKey, page: 1 });
   }
 
   function exportFilteredRowsToXlsx(): void {
@@ -669,7 +693,7 @@ export default function BrowseDataView({
         </div>
       </div>
 
-      {loading && <LoadingState label="جاري تحميل بيانات جميع الأشهر..." />}
+      {loading && <LoadingState label={showAllMonths ? "جاري تحميل بيانات جميع الأشهر..." : "جاري تحميل بيانات الشهر المحدد..."} />}
 
       {!loading && total === 0 && (
         <EmptyState
@@ -688,7 +712,7 @@ export default function BrowseDataView({
               className="bv-search"
               placeholder="بحث في جميع الأعمدة..."
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => { setSearch(e.target.value); setPageState({ rowsKey: rowsPageKey, page: 1 }); }}
             />
             <span className="bv-row-count">
               {filteredRows.length.toLocaleString("ar-SA-u-nu-latn")} صف
@@ -805,10 +829,10 @@ export default function BrowseDataView({
                             </button>
                           </div>
                           <div className="bv-filter-options">
-                            {getColumnFilterOptions(c.key).length === 0 && (
+                            {openFilterValues.options.length === 0 && (
                               <span className="bv-filter-empty">لا توجد خيارات</span>
                             )}
-                            {getColumnFilterOptions(c.key).map((option) => (
+                            {openFilterValues.options.map((option) => (
                               <label key={option} className="bv-filter-option">
                                 <input
                                   type="checkbox"
@@ -818,6 +842,9 @@ export default function BrowseDataView({
                                 <span title={option}>{option}</span>
                               </label>
                             ))}
+                            {openFilterValues.truncated && (
+                              <span className="bv-filter-empty">عرض أول 100 قيمة. استخدم البحث للوصول إلى قيم أخرى.</span>
+                            )}
                           </div>
                         </div>
                       )}
@@ -826,8 +853,8 @@ export default function BrowseDataView({
                 </tr>
               </thead>
               <tbody>
-                {filteredRows.slice(0, 500).map((row, i) => (
-                  <tr key={i} className={i % 2 === 0 ? "bv-row-even" : ""}>
+                {pagedRows.map((row, i) => (
+                  <tr key={`${page}-${i}`} className={i % 2 === 0 ? "bv-row-even" : ""}>
                     {activeCols.map((c) => {
                       const val = getBrowseDisplayValue(row, c.key, config.stageMappings);
                       return <td key={c.key} className="bv-td">{val}</td>;
@@ -836,12 +863,12 @@ export default function BrowseDataView({
                 ))}
               </tbody>
             </table>
-            {filteredRows.length > 500 && (
-              <div className="certscan-overflow-note">
-                عرض أول 500 صف من {filteredRows.length.toLocaleString("ar-SA-u-nu-latn")}
-              </div>
-            )}
           </div>
+          <Pagination
+            page={page}
+            totalItems={filteredRows.length}
+            onPageChange={(nextPage) => setPageState({ rowsKey: rowsPageKey, page: nextPage })}
+          />
         </div>
       )}
     </section>

@@ -132,4 +132,83 @@ describe("DataTable — RTL render + interactions (characterization)", () => {
     expect(cell).not.toBeNull();
     expect(cell).toHaveAttribute("title", LONG_NOTE);
   });
+
+  it("limits large datasets to 100-row pages and can move to the next page", () => {
+    const rows = Array.from({ length: 150 }, (_, index): Row => ({
+      id: String(index + 1),
+      name: `اسم ${index + 1}`,
+      port: "جدة",
+      note: `ملاحظة ${index + 1}`,
+    }));
+
+    renderTable({ rows });
+
+    expect(screen.getByText(/عرض 1 إلى 100 من 150 صف/)).toBeInTheDocument();
+    expect(screen.getByText("اسم 1")).toBeInTheDocument();
+    expect(screen.queryByText("اسم 101")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "الصفحة التالية" }));
+
+    expect(screen.getByText(/عرض 101 إلى 150 من 150 صف/)).toBeInTheDocument();
+    expect(screen.getByText("اسم 101")).toBeInTheDocument();
+    expect(screen.queryByText("اسم 1")).not.toBeInTheDocument();
+  });
+
+  it("searches the full dataset and finds a match beyond the first 100 rows", async () => {
+    const rows = Array.from({ length: 150 }, (_, index): Row => ({
+      id: String(index + 1),
+      name: `اسم ${index + 1}`,
+      port: "جدة",
+      note: index === 149 ? "المطابقة المتأخرة" : "ملاحظة عادية",
+    }));
+
+    renderTable({ rows });
+    fireEvent.change(screen.getByPlaceholderText("بحث في جميع الأعمدة..."), {
+      target: { value: "المطابقة المتأخرة" },
+    });
+
+    await waitFor(() => expect(screen.getByText("اسم 150")).toBeInTheDocument());
+    expect(screen.queryByText("اسم 1")).not.toBeInTheDocument();
+    expect(screen.getByText(/^1 \/ 150 صف$/)).toBeInTheDocument();
+  });
+
+  it("resets to page 1 when search changes", async () => {
+    const rows = Array.from({ length: 150 }, (_, index): Row => ({
+      id: String(index + 1),
+      name: `اسم ${index + 1}`,
+      port: "جدة",
+      note: index < 120 ? "مجموعة البحث" : "خارج المجموعة",
+    }));
+
+    renderTable({ rows });
+    fireEvent.click(screen.getByRole("button", { name: "الصفحة التالية" }));
+    expect(screen.getByText(/عرض 101 إلى 150 من 150 صف/)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText("بحث في جميع الأعمدة..."), {
+      target: { value: "مجموعة البحث" },
+    });
+
+    await waitFor(() => expect(screen.getByText(/عرض 1 إلى 100 من 120 صف/)).toBeInTheDocument());
+    expect(screen.getByText("اسم 1")).toBeInTheDocument();
+  });
+
+  it("exports every filtered row, not only the visible 100-row page", () => {
+    const rows = Array.from({ length: 150 }, (_, index): Row => ({
+      id: String(index + 1),
+      name: `اسم ${index + 1}`,
+      port: "جدة",
+      note: `ملاحظة ${index + 1}`,
+    }));
+    const writeFile = vi.mocked(XLSX.writeFile);
+    writeFile.mockClear();
+
+    renderTable({ rows });
+    fireEvent.click(screen.getByRole("button", { name: "تصدير XLSX" }));
+
+    const workbook = writeFile.mock.calls[0]?.[0];
+    expect(workbook).toBeDefined();
+    const worksheet = workbook?.Sheets[workbook.SheetNames[0]!];
+    const exportedRows = XLSX.utils.sheet_to_json<unknown[]>(worksheet!, { header: 1 });
+    expect(exportedRows).toHaveLength(151);
+  });
 });
