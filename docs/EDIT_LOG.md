@@ -4,6 +4,85 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v56.11 — 2026-07-21 — Change: embedded report fonts from `font-display:swap` to `block`
+
+Owner reported the executive deck v2 report taking roughly a minute to render on first
+open (blank white page), and the glossary page's term-card grid collapsing to near-zero
+row height in Chrome specifically while rendering correctly in Edge on the same
+generated file. Could not reproduce either symptom directly in this session's sandboxed
+browser tooling (the generated report — reproduced from the exact production code path,
+`buildExecutiveDeckV2(input)` with no opts — rendered quickly and correctly there), and
+HTML-generation time itself measured at ~110ms (Node), ruling out slow generation as the
+bottleneck. This is a theory-driven fix based on a real, plausible mechanism, not a
+confirmed root cause — flagged to the owner as unverified pending their retest.
+
+Also found and fixed, separately, a pre-existing document-integrity issue while working
+in this file: a stray duplicate "# EDIT_LOG.md" title/intro block was buried mid-file
+(old line ~14910, right before the old "v39.32" entry), with entries v39.1/v39.2 sitting
+in the wrong order just before it. Removed the one clear duplicate header. A broader
+sweep found 8 MORE duplicate version-number headings elsewhere in the file
+(v2.4/v4.4/v4.5/v7.5/v7.12/v22.1/v39/v39.1/v39.2) — flagged as a separate follow-up task,
+not fixed here (needs entry-by-entry review to avoid losing unique historical content).
+
+Both embedded font families (`Somar`, the brand font in `theme.ts`'s `EXEC_CSS`, and
+`IBM Plex Sans Arabic`, the Arabic fallback in `branding/fonts.ts`'s
+`ARABIC_FONT_FACE_CSS`) declared `font-display:swap` on every `@font-face` rule. `swap`
+is designed for slow *network* font loads: paint text in a fallback font immediately, lay
+out the page, then swap to the real font and relayout once it arrives. Every font here is
+already embedded as a base64 data URI in the same document — there is no network fetch to
+avoid blocking on, so `swap` provides none of its intended benefit while still forcing an
+initial fallback-font layout pass and a later relayout on swap. If a CSS Grid row's height
+(e.g. `.v2-term-grid{grid-template-rows:1fr}`) gets computed from the fallback font's text
+metrics before the swap-triggered relayout fully invalidates it, the row can be left
+undersized — exactly the "collapsed to a thin bar" pattern reported, and browser-specific
+differences in swap/relayout timing would explain why Chrome and Edge diverged on the
+identical file.
+
+Fix: `font-display:block` instead. For an already-embedded (not network-fetched) font,
+`block`'s brief invisible-text period is effectively imperceptible (decode is near-instant
+for a data URI), and text is laid out with the REAL font from the first visible paint —
+no fallback-metrics layout pass, no relayout-triggered race.
+
+**File:** `src/data/reporting/executive/theme.ts`
+
+**Before:**
+```ts
+export const EXEC_CSS = `
+@font-face{font-family:"Somar";src:url("${somarRegular}") format("woff");font-weight:400;font-style:normal;font-display:swap;}
+@font-face{font-family:"Somar";src:url("${somarBold}") format("woff");font-weight:700;font-style:normal;font-display:swap;}
+@font-face{font-family:"Somar";src:url("${somarMedium}") format("woff");font-weight:500;font-style:normal;font-display:swap;}
+@font-face{font-family:"Somar";src:url("${somarLight}") format("woff");font-weight:300;font-style:normal;font-display:swap;}
+```
+
+**After:**
+```ts
+export const EXEC_CSS = `
+@font-face{font-family:"Somar";src:url("${somarRegular}") format("woff");font-weight:400;font-style:normal;font-display:block;}
+@font-face{font-family:"Somar";src:url("${somarBold}") format("woff");font-weight:700;font-style:normal;font-display:block;}
+@font-face{font-family:"Somar";src:url("${somarMedium}") format("woff");font-weight:500;font-style:normal;font-display:block;}
+@font-face{font-family:"Somar";src:url("${somarLight}") format("woff");font-weight:300;font-style:normal;font-display:block;}
+```
+
+**File:** `src/branding/fonts.ts`
+
+**Before:**
+```ts
+export const ARABIC_FONT_FACE_CSS =
+  `@font-face{font-family:"IBM Plex Sans Arabic";font-style:normal;font-weight:400;` +
+  `font-display:swap;src:url(${arabic400}) format("woff2");}` +
+  `@font-face{font-family:"IBM Plex Sans Arabic";font-style:normal;font-weight:700;` +
+  `font-display:swap;src:url(${arabic700}) format("woff2");}`;
+```
+
+**After:**
+```ts
+export const ARABIC_FONT_FACE_CSS =
+  `@font-face{font-family:"IBM Plex Sans Arabic";font-style:normal;font-weight:400;` +
+  `font-display:block;src:url(${arabic400}) format("woff2");}` +
+  `@font-face{font-family:"IBM Plex Sans Arabic";font-style:normal;font-weight:700;` +
+  `font-display:block;src:url(${arabic700}) format("woff2");}`;
+```
+
 ## v56.10 — 2026-07-21 — Fix: invalid `@page size:...landscape` in deck print CSS silently dropped the custom page size
 
 Investigation (multi-agent workflow this session) found the executive deck v2's print `@page`
@@ -14904,12 +14983,6 @@ body.theme-light .v2-variant-switcher{background:rgba(255,255,255,.85);border-co
 body.theme-light .v2-variant-switcher button{background:rgba(10,45,74,.08);color:#0a2d4a;}
 `;
 ```
-
----
-
-# EDIT_LOG.md
-
-Version history for the XQAP codebase. Every code edit must be logged here before it is applied.
 
 ---
 

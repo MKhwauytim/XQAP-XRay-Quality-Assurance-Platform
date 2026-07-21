@@ -6,10 +6,14 @@
 // referenced by every consumer through the single `ARABIC_FONT_FACE_CSS` string.
 //
 // Weights 400 + 700 only (owner-approved ~116 KB base64 for the two Arabic-
-// subset weights). `font-display: swap` so text paints immediately in the
-// fallback face and swaps in IBM Plex when ready. This face sits AFTER the
-// brand face ("Somar") in every stack — it is a high-quality Arabic fallback,
-// not a replacement for the brand typography.
+// subset weights). `font-display: block` — the font is embedded (no network
+// fetch to avoid blocking on), so `swap`'s fallback-then-relayout behavior
+// buys nothing here and risks a layout race (a CSS Grid `1fr` row sized from
+// fallback-font metrics, then never fully invalidated after the swap); a data
+// URI decodes near-instantly, so `block`'s brief invisible-text period is
+// imperceptible while avoiding that race entirely (2026-07-21). This face
+// sits AFTER the brand face ("Somar") in every stack — it is a high-quality
+// Arabic fallback, not a replacement for the brand typography.
 
 import arabic400 from "@fontsource/ibm-plex-sans-arabic/files/ibm-plex-sans-arabic-arabic-400-normal.woff2?inline";
 import arabic700 from "@fontsource/ibm-plex-sans-arabic/files/ibm-plex-sans-arabic-arabic-700-normal.woff2?inline";
@@ -25,6 +29,6 @@ export const ARABIC_FONT_FAMILY = "IBM Plex Sans Arabic";
  */
 export const ARABIC_FONT_FACE_CSS =
   `@font-face{font-family:"IBM Plex Sans Arabic";font-style:normal;font-weight:400;` +
-  `font-display:swap;src:url(${arabic400}) format("woff2");}` +
+  `font-display:block;src:url(${arabic400}) format("woff2");}` +
   `@font-face{font-family:"IBM Plex Sans Arabic";font-style:normal;font-weight:700;` +
-  `font-display:swap;src:url(${arabic700}) format("woff2");}`;
+  `font-display:block;src:url(${arabic700}) format("woff2");}`;

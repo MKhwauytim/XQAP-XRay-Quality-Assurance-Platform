@@ -12,10 +12,10 @@ import somarMedium from "../../../assets/fonts/SomarSans-Medium.woff?inline";
 import somarLight from "../../../assets/fonts/SomarSans-Light.woff?inline";
 
 export const EXEC_CSS = `
-@font-face{font-family:"Somar";src:url("${somarRegular}") format("woff");font-weight:400;font-style:normal;font-display:swap;}
-@font-face{font-family:"Somar";src:url("${somarBold}") format("woff");font-weight:700;font-style:normal;font-display:swap;}
-@font-face{font-family:"Somar";src:url("${somarMedium}") format("woff");font-weight:500;font-style:normal;font-display:swap;}
-@font-face{font-family:"Somar";src:url("${somarLight}") format("woff");font-weight:300;font-style:normal;font-display:swap;}
+@font-face{font-family:"Somar";src:url("${somarRegular}") format("woff");font-weight:400;font-style:normal;font-display:block;}
+@font-face{font-family:"Somar";src:url("${somarBold}") format("woff");font-weight:700;font-style:normal;font-display:block;}
+@font-face{font-family:"Somar";src:url("${somarMedium}") format("woff");font-weight:500;font-style:normal;font-display:block;}
+@font-face{font-family:"Somar";src:url("${somarLight}") format("woff");font-weight:300;font-style:normal;font-display:block;}
 :root{
   --navy:#062846;
   --navy-2:#0a3456;
