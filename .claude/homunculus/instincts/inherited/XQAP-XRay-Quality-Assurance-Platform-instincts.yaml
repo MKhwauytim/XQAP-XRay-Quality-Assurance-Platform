@@ -1,0 +1,593 @@
+# Instincts generated from https://github.com/MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+# Generated: 2026-07-17T01:21:02.604Z
+# Version: 2.0
+# NOTE: This file supplements (does not replace) any existing curated instincts.
+# High-confidence manually curated instincts should be preserved alongside these.
+
+---
+id: XQAP-XRay-Quality-Assurance-Platform-commit-conventional
+trigger: "when writing a commit message"
+confidence: 0.85
+domain: git
+source: repo-analysis
+source_repo: https://github.com/MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# XQAP XRay Quality Assurance Platform Commit Conventional
+
+## Action
+
+Use conventional commit format with prefixes: fix, docs, test
+
+## Evidence
+
+- 12 commits analyzed
+- Detected conventional commit pattern
+- Examples: docs: quality-pass (batches 1-3) implementation plan, fix(reports): guard month-summary chips against a stale-load race
+
+---
+id: XQAP-XRay-Quality-Assurance-Platform-commit-length
+trigger: "when writing a commit message"
+confidence: 0.6
+domain: git
+source: repo-analysis
+source_repo: https://github.com/MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# XQAP XRay Quality Assurance Platform Commit Length
+
+## Action
+
+Write moderate-length commit messages (~72 characters)
+
+## Evidence
+
+- Average commit message length: 72 chars
+- Based on 12 commits
+
+---
+id: XQAP-XRay-Quality-Assurance-Platform-naming-files
+trigger: "when creating a new file"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# XQAP XRay Quality Assurance Platform Naming Files
+
+## Action
+
+Use camelCase naming convention
+
+## Evidence
+
+- Analyzed file naming patterns in repository
+- Dominant pattern: camelCase
+
+---
+id: XQAP-XRay-Quality-Assurance-Platform-import-relative
+trigger: "when importing modules"
+confidence: 0.75
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# XQAP XRay Quality Assurance Platform Import Relative
+
+## Action
+
+Use relative imports for project files
+
+## Evidence
+
+- Import analysis shows relative import pattern
+- Example: import { x } from '../lib/x'
+
+---
+id: XQAP-XRay-Quality-Assurance-Platform-export-style
+trigger: "when exporting from a module"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# XQAP XRay Quality Assurance Platform Export Style
+
+## Action
+
+Prefer named exports
+
+## Evidence
+
+- Export pattern analysis
+- Dominant style: named
+
+---
+id: XQAP-XRay-Quality-Assurance-Platform-arch-type-based
+trigger: "when adding new code"
+confidence: 0.8
+domain: architecture
+source: repo-analysis
+source_repo: https://github.com/MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# XQAP XRay Quality Assurance Platform Arch Type Based
+
+## Action
+
+Place code in the appropriate type folder (components/, services/, utils/, etc.)
+
+## Evidence
+
+- Type-based module organization detected
+- Folders: auth, components, data
+
+---
+id: XQAP-XRay-Quality-Assurance-Platform-test-colocate
+trigger: "when writing tests"
+confidence: 0.85
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# XQAP XRay Quality Assurance Platform Test Colocate
+
+## Action
+
+Place test file next to the source file (e.g., Button.test.tsx next to Button.tsx)
+
+## Evidence
+
+- Colocated test pattern detected
+- Tests live alongside source files
+
+---
+id: XQAP-XRay-Quality-Assurance-Platform-test-framework
+trigger: "when writing tests"
+confidence: 0.9
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# XQAP XRay Quality Assurance Platform Test Framework
+
+## Action
+
+Use vitest as the test framework
+
+## Evidence
+
+- Test framework detected: vitest
+- File pattern: *.test.ts
+
+---
+id: XQAP-XRay-Quality-Assurance-Platform-test-naming
+trigger: "when creating a test file"
+confidence: 0.85
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# XQAP XRay Quality Assurance Platform Test Naming
+
+## Action
+
+Name test files using the pattern: *.test.ts
+
+## Evidence
+
+- File pattern: *.test.ts
+- Consistent across test files
+
+---
+id: XQAP-XRay-Quality-Assurance-Platform-test-mocking
+trigger: "when mocking dependencies in tests"
+confidence: 0.75
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# XQAP XRay Quality Assurance Platform Test Mocking
+
+## Action
+
+Use vi.mock for mocking
+
+## Evidence
+
+- Mocking pattern detected: vi.mock
+- Consistent across test files
+
+---
+id: XQAP-XRay-Quality-Assurance-Platform-test-types
+trigger: "when planning tests for a feature"
+confidence: 0.7
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# XQAP XRay Quality Assurance Platform Test Types
+
+## Action
+
+Write unit, integration tests to match project standards
+
+## Evidence
+
+- Test types detected: unit, integration
+- Coverage config: no
+
+---
+id: XQAP-XRay-Quality-Assurance-Platform-workflow-bugfix-with-test-and-edit-log
+trigger: "when doing bugfix with test and edit log"
+confidence: 0.7
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# XQAP XRay Quality Assurance Platform Workflow Bugfix With Test And Edit Log
+
+## Action
+
+Follow the bugfix-with-test-and-edit-log workflow:
+1. Edit the source file to fix the bug.
+2. Update or add a test file for the affected module/component.
+3. Update docs/EDIT_LOG.md to record the change.
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~4x per month
+- Files: docs/EDIT_LOG.md, src/components/Sidebar/Tabs/Population/index.tsx, src/components/Sidebar/Tabs/Population/populationLoadRace.test.tsx
+
+---
+id: XQAP-XRay-Quality-Assurance-Platform-workflow-add-or-improve-test-with-edit-log
+trigger: "when doing add or improve test with edit log"
+confidence: 0.6
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# XQAP XRay Quality Assurance Platform Workflow Add Or Improve Test With Edit Log
+
+## Action
+
+Follow the add-or-improve-test-with-edit-log workflow:
+1. Add or update test file(s) for the relevant module.
+2. Update docs/EDIT_LOG.md to record the addition or improvement.
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~2x per month
+- Files: docs/EDIT_LOG.md, src/data/reporting/reportBuilders.xss.test.ts, src/data/answers/employeeXlsx.test.ts
+
+---
+id: XQAP-XRay-Quality-Assurance-Platform-workflow-feature-or-bugfix-in-report-designer-with-edit-log-and-tests
+trigger: "when doing feature or bugfix in report designer with edit log and tests"
+confidence: 0.6
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# XQAP XRay Quality Assurance Platform Workflow Feature Or Bugfix In Report Designer With Edit Log And Tests
+
+## Action
+
+Follow the feature-or-bugfix-in-report-designer-with-edit-log-and-tests workflow:
+1. Edit src/data/reportDesigner/storage/reportDesignStorage.ts to implement feature or fix.
+2. Update or add src/data/reportDesigner/storage/reportDesignStorage.test.ts.
+3. Update docs/EDIT_LOG.md.
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~2x per month
+- Files: docs/EDIT_LOG.md, src/data/reportDesigner/storage/reportDesignStorage.ts, src/data/reportDesigner/storage/reportDesignStorage.test.ts
+
+---
+id: xqap-xray-quality-assurance-platform-instinct-file-naming
+trigger: "When creating or renaming a file in the codebase"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# Xqap Xray Quality Assurance Platform Instinct File Naming
+
+## Action
+
+Use camelCase for file names
+
+## Evidence
+
+- Pattern in namingConventions.files
+- Observed in src/components/Sidebar/Tabs/Population/index.tsx
+
+---
+id: xqap-xray-quality-assurance-platform-instinct-function-naming
+trigger: "When defining a new function"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# Xqap Xray Quality Assurance Platform Instinct Function Naming
+
+## Action
+
+Use camelCase for function names
+
+## Evidence
+
+- Pattern in namingConventions.functions
+- TypeScript code style analysis
+
+---
+id: xqap-xray-quality-assurance-platform-instinct-class-naming
+trigger: "When defining a new class"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# Xqap Xray Quality Assurance Platform Instinct Class Naming
+
+## Action
+
+Use PascalCase for class names
+
+## Evidence
+
+- Pattern in namingConventions.classes
+
+---
+id: xqap-xray-quality-assurance-platform-instinct-constant-naming
+trigger: "When declaring a constant"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# Xqap Xray Quality Assurance Platform Instinct Constant Naming
+
+## Action
+
+Use SCREAMING_SNAKE_CASE for constant names
+
+## Evidence
+
+- Pattern in namingConventions.constants
+
+---
+id: xqap-xray-quality-assurance-platform-instinct-import-style
+trigger: "When importing modules"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# Xqap Xray Quality Assurance Platform Instinct Import Style
+
+## Action
+
+Use relative import paths
+
+## Evidence
+
+- importStyle: relative
+- Observed in TypeScript files
+
+---
+id: xqap-xray-quality-assurance-platform-instinct-export-style
+trigger: "When exporting modules or functions"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# Xqap Xray Quality Assurance Platform Instinct Export Style
+
+## Action
+
+Use named exports
+
+## Evidence
+
+- exportStyle: named
+
+---
+id: xqap-xray-quality-assurance-platform-instinct-test-file-pattern
+trigger: "When creating a test file"
+confidence: 0.9
+domain: testing
+source: repo-analysis
+source_repo: MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# Xqap Xray Quality Assurance Platform Instinct Test File Pattern
+
+## Action
+
+Name the file with the pattern *.test.ts
+
+## Evidence
+
+- Pattern in testing.filePattern
+- Seen in src/data/reporting/reportBuilders.xss.test.ts
+
+---
+id: xqap-xray-quality-assurance-platform-instinct-test-framework
+trigger: "When writing tests"
+confidence: 0.9
+domain: testing
+source: repo-analysis
+source_repo: MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# Xqap Xray Quality Assurance Platform Instinct Test Framework
+
+## Action
+
+Use the vitest testing framework
+
+## Evidence
+
+- testing.framework: vitest
+- Observed in test files
+
+---
+id: xqap-xray-quality-assurance-platform-instinct-mocking-style
+trigger: "When mocking modules in tests"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# Xqap Xray Quality Assurance Platform Instinct Mocking Style
+
+## Action
+
+Use vi.mock for mocking
+
+## Evidence
+
+- testing.mockingStyle: vi.mock
+
+---
+id: xqap-xray-quality-assurance-platform-instinct-test-type
+trigger: "When designing tests"
+confidence: 0.7
+domain: testing
+source: repo-analysis
+source_repo: MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# Xqap Xray Quality Assurance Platform Instinct Test Type
+
+## Action
+
+Write both unit and integration tests as appropriate
+
+## Evidence
+
+- testing.testTypes: unit, integration
+
+---
+id: xqap-xray-quality-assurance-platform-instinct-git-commit-format
+trigger: "When making a git commit"
+confidence: 0.9
+domain: git
+source: repo-analysis
+source_repo: MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# Xqap Xray Quality Assurance Platform Instinct Git Commit Format
+
+## Action
+
+Use conventional commit prefixes: fix, docs, or test, followed by a colon and a short description
+
+## Evidence
+
+- commits.type: conventional
+- commits.prefixes: fix, docs, test
+- Examples in commit history
+
+---
+id: xqap-xray-quality-assurance-platform-instinct-commit-length
+trigger: "When writing a commit message"
+confidence: 0.7
+domain: git
+source: repo-analysis
+source_repo: MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# Xqap Xray Quality Assurance Platform Instinct Commit Length
+
+## Action
+
+Keep the commit message around 72 characters on average
+
+## Evidence
+
+- commits.averageLength: 72
+
+---
+id: xqap-xray-quality-assurance-platform-instinct-bugfix-with-test-and-edit-log
+trigger: "When fixing a bug in a component or data module"
+confidence: 0.95
+domain: workflow
+source: repo-analysis
+source_repo: MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# Xqap Xray Quality Assurance Platform Instinct Bugfix With Test And Edit Log
+
+## Action
+
+Edit the source file to fix the bug, update or add a test file for the affected module/component, and update docs/EDIT_LOG.md to record the change
+
+## Evidence
+
+- Workflow: bugfix-with-test-and-edit-log
+- Example commit sequences and files
+
+---
+id: xqap-xray-quality-assurance-platform-instinct-add-or-improve-test-with-edit-log
+trigger: "When adding or improving test coverage for a module"
+confidence: 0.9
+domain: workflow
+source: repo-analysis
+source_repo: MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# Xqap Xray Quality Assurance Platform Instinct Add Or Improve Test With Edit Log
+
+## Action
+
+Add or update test file(s) for the relevant module and update docs/EDIT_LOG.md to record the addition or improvement
+
+## Evidence
+
+- Workflow: add-or-improve-test-with-edit-log
+- Example commit sequences and files
+
+---
+id: xqap-xray-quality-assurance-platform-instinct-feature-or-bugfix-in-report-designer-with-edit-log-and-tests
+trigger: "When implementing a feature or fixing a bug in report designer storage"
+confidence: 0.85
+domain: workflow
+source: repo-analysis
+source_repo: MKhwauytim/XQAP-XRay-Quality-Assurance-Platform
+---
+
+# Xqap Xray Quality Assurance Platform Instinct Feature Or Bugfix In Report Designer With Edit Log And Tests
+
+## Action
+
+Edit src/data/reportDesigner/storage/reportDesignStorage.ts to implement the feature or fix, update or add src/data/reportDesigner/storage/reportDesignStorage.test.ts, and update docs/EDIT_LOG.md
+
+## Evidence
+
+- Workflow: feature-or-bugfix-in-report-designer-with-edit-log-and-tests
+- Example commit sequences and files
+
