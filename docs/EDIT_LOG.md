@@ -4,6 +4,76 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v56.10 — 2026-07-21 — Fix: invalid `@page size:...landscape` in deck print CSS silently dropped the custom page size
+
+Investigation (multi-agent workflow this session) found the executive deck v2's print `@page`
+rule at `deckTheme.ts` combined explicit two-length dimensions with the `landscape` keyword:
+`@page{size:297mm 167mm landscape;margin:0;}`. Per the CSS Paged Media `size` grammar, explicit
+`<length>{1,2}` and the `portrait`/`landscape` keyword are mutually-exclusive top-level
+alternatives, not combinable — Chromium treats the whole declaration as invalid and drops the
+`size` value entirely (keeping only `margin:0`), so printed output falls back to whatever
+paper size/orientation the browser/OS driver defaults to instead of the deck's intended
+297mm x 167mm landscape page. Meanwhile `.slide{width:297mm;height:167mm;...}` under the same
+`@media print` block is unconditional and still forces the slide box to the correct size — so the
+page box (wrong/default) and the slide box (correct) mismatch, producing white space and/or
+wrong-size gaps depending on what the fallback paper happens to be. This is common to both the
+real-app delivery path (`openOrDownload` blob tab) and the dev-preview path (`deck-preview.html`
+iframe `.srcdoc`), since both import the same shared `DECK_CSS`. Verified live in Chromium (via
+CSSOM/`insertRule`) two independent ways: the invalid combination is empirically dropped, while
+`size:297mm 167mm` alone (no keyword) parses correctly.
+
+Fix: drop the invalid `landscape` keyword. `297mm 167mm` already fully and unambiguously
+specifies a landscape-shaped page — no keyword is needed once explicit dimensions are given.
+Also rewrote the now-inaccurate comment above the rule (it previously justified keeping
+`landscape` for a print-dialog "Layout control" quirk from an earlier fix attempt this same
+session; that combination is invalid CSS, so the premise doesn't hold and would mislead a future
+editor into re-adding the keyword).
+
+Not fixed / out of scope: the OS "Microsoft Print to PDF" driver's independent,
+unfixable-from-CSS limitation of ignoring any website's custom `@page` size (pre-existing,
+already explained to the owner); the residual possibility that a browser's print-dialog "Layout"
+control still needs to be manually checked even with a now-valid `@page` size (a driver/browser-UI
+quirk, not a CSS bug). A separate, unrelated cosmetic issue was flagged (missing
+`justify-content:center` on `.v2-variant-stack`/`.v2-variant-panel` in `deck2/theme.ts`,
+dev-preview-only, not touched here — out of scope for this fix).
+
+**File:** `src/data/reporting/executive/deck/deckTheme.ts`
+
+**Before:**
+```css
+/* ── Print: 16:9 landscape, one slide per page, no toolbar ────────────── */
+/* The explicit landscape keyword (not just wider-than-tall dimensions) is the
+   documented Chromium pattern for getting the print dialog's own Layout control
+   to default to Landscape instead of Portrait — Chromium browsers have a known,
+   longstanding quirk (https://groups.google.com/a/chromium.org/g/chromium-bugs/c/dTz8xlegaJA)
+   where @page sizing alone doesn't always win against the dialog's own default.
+   This does NOT fix printing via the "Microsoft Print to PDF" Windows driver —
+   that driver ignores ANY website's custom @page size and silently forces
+   Letter/A4 (confirmed via Microsoft's own support docs), independent of browser
+   or CSS. Use the browser's own "Save as PDF" destination instead. */
+@media print{
+  @page{size:297mm 167mm landscape;margin:0;}
+```
+
+**After:**
+```css
+/* ── Print: 16:9 landscape, one slide per page, no toolbar ────────────── */
+/* Explicit two-length @page size (297mm x 167mm) already fully specifies a
+   landscape-shaped page — do NOT add the landscape keyword alongside it.
+   Per the CSS Paged Media spec, explicit <length>{1,2} and the portrait/
+   landscape keyword are separate, mutually-exclusive grammar alternatives for
+   the size property; combining them is invalid and Chromium silently drops
+   the entire @page size (keeping only margin), falling back to the print
+   dialog's default paper — which then mismatches the .slide box below (forced
+   to 297mm x 167mm regardless), producing white space / wrong-size gaps.
+   This does NOT fix printing via the "Microsoft Print to PDF" Windows driver —
+   that driver ignores ANY website's custom @page size and silently forces
+   Letter/A4 (confirmed via Microsoft's own support docs), independent of browser
+   or CSS. Use the browser's own "Save as PDF" destination instead. */
+@media print{
+  @page{size:297mm 167mm;margin:0;}
+```
+
 ## v56.9 — 2026-07-20 — Fix: ChangeLog "إجمالي الإصدارات" undercounted after build-time truncation, add whole-repo line-count tooling
 
 Two asks from the owner. First, a real bug: the ChangeLog tab's "إجمالي الإصدارات" (total
