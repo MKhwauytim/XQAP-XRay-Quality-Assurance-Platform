@@ -324,7 +324,7 @@ function renderHtml(
 <body>
 <div class="mr-doc">
   <div class="mr-toolbar">
-    <button type="button" class="mr-print-btn" onclick="window.print()">${esc(L.mgmt_report_print)}</button>
+    <button type="button" class="mr-print-btn" onclick="window.print()" title="${esc(L.mgmt_report_print_hint)}">${esc(L.mgmt_report_print)}</button>
   </div>
   <header class="mr-header">
     <h1>${esc(L.mgmt_report_title)}</h1>

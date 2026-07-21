@@ -206,6 +206,7 @@ export const DEFAULT_LABELS = {
   mgmt_report_period_label:     "الفترة",
   mgmt_report_issued_label:     "تاريخ الإصدار",
   mgmt_report_print:            "طباعة / PDF",
+  mgmt_report_print_hint:       "اختر «حفظ كـ PDF» من المتصفح عند الطباعة، وليس «Microsoft Print to PDF»، لضمان الحجم والجودة الصحيحين",
   mgmt_report_generated_by:     "مُولّد آلياً من نظام ضمان جودة الأشعة",
   mgmt_report_kpi_accuracy:     "دقة الفحص الإجمالية",
   mgmt_report_kpi_detection:    "معدل كشف الاشتباه",

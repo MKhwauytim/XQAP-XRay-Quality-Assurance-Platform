@@ -433,7 +433,7 @@ tbody tr:hover{background:rgba(244,180,0,.04);}
 }
 .context-band .stat-stack .stat-pill b{font-size:1.2rem;font-weight:800;}
 .context-band .stat-stack .stat-pill span{font-size:0.78rem;color:var(--muted);}
-@media(max-width:980px){.context-band{grid-template-columns:1fr;}}
+@media screen and (max-width:980px){.context-band{grid-template-columns:1fr;}}
 
 /* ── Feature grid (part 3 cover) ─────────────────────────────────────── */
 .feature-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:20px}
@@ -571,8 +571,10 @@ tbody tr:hover{background:rgba(244,180,0,.04);}
 .page.toc-page .appendix-list span{display:block;color:#dce7f2;font-size:13px;position:relative;padding-right:14px;}
 .page.toc-page .appendix-list span::before{content:"";position:absolute;right:0;top:7px;width:5px;height:5px;border-radius:50%;background:var(--gold);}
 
-/* ── Responsive ───────────────────────────────────────────────────────── */
-@media(max-width:980px){
+/* ── Responsive (screen only — an unqualified query here would also match
+   the ~794px-wide A4 print page box and collapse printed document reports
+   to this mobile layout; scoped 2026-07-21) ─────────────────────────────── */
+@media screen and (max-width:980px){
   .viewer{grid-template-columns:1fr}
   .sidebar{position:relative;height:auto;flex-direction:column;}
   .content{padding:14px 4px 40px}
@@ -676,7 +678,13 @@ export const EXEC_DOCUMENT_PRINT_CSS = `
   .viewer{display:block;}
   .content{padding:0;background:transparent;}
   .page{page-break-after:always;break-after:page;margin:0;box-shadow:none;border:0;width:210mm;aspect-ratio:auto;min-height:297mm;}
-  .page:last-child{page-break-after:auto;break-after:auto;}
+  /* Not ":last-child" — the source-revisions footer (sourceRevisions.ts) is
+     appended after the slides/pages, so the true last .page is never the
+     last DOM child when it's present; that left the real last page still
+     carrying break-after:page, printing the footer alone on a stray extra
+     page. ":has()" targets "no .page follows me" directly, independent of
+     trailing siblings (2026-07-21). */
+  .page:not(:has(~ .page)){page-break-after:auto;break-after:auto;}
   .right-rail{display:none;}
   .page-inner{margin-right:0;width:100%;padding:20mm 20mm 20mm 20mm;}
 }

@@ -4,6 +4,230 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v56.12 — 2026-07-21 — Fix: broken print/export-to-PDF (wrong content, stray page, unhidden control) + slow/blank tab open
+
+Owner reported four recurring PDF-export symptoms across the reporting/print codebase:
+visually broken output, white space above/below pages, exports taking "forever" (blank
+white page for ~1 minute before content appears), and low output quality. A 4-agent
+read-only audit (one each on Fable/Opus/Haiku/Sonnet tiers) independently reviewed the
+reporting codebase and print CSS; two agents (Opus, Fable) independently converged on
+the same root-cause bug in `openOrDownload()`, and Fable additionally found two CSS
+correctness bugs neither of the others caught. All three were independently re-verified
+by reading the exact source before fixing, and the deck2 pagination fix was further
+verified empirically: headless `chrome --print-to-pdf` / `msedge --print-to-pdf` against
+the real production HTML (`buildExecutiveDeckV2` with source revisions populated, exactly
+matching a live Reports-tab export) went from 14 pages (with a stray trailing page) to
+the correct 13, with every page sized exactly 297.0×166.9mm in both browsers.
+
+1. **`openOrDownload()` could never take its "popup succeeded" path.** Per the HTML
+   spec, `window.open(url, "_blank", "noopener,noreferrer")` always returns `null` —
+   even when the tab opens successfully — so the function always fell through to its
+   "popup blocked" fallback: every export produced an unwanted duplicate `.html`
+   download, then synchronously called `URL.revokeObjectURL()` on the blob URL the
+   just-opened tab was still navigating to, a real mechanism for a permanently blank
+   opened tab. Rewritten to mirror the already-proven pattern in
+   `Sidebar/Tabs/Population/reporting/reportExporter.ts`: `window.open("", "_blank")`
+   (no feature string, returns a real handle) → sever `opener` → `document.write` the
+   HTML directly, with no blob URL and no revoke race at all.
+2. **Unscoped `@media(max-width:…)` rules leaked into printed output.** None of the
+   responsive breakpoints in `theme.ts`/`deckTheme.ts`/`deck2/theme.ts` had a `screen`
+   qualifier. During print, `@media` width evaluates against the page box: A4 portrait
+   is ~794px wide (under the document viewer's 980px breakpoint), so every printed
+   document report (executive, sample, distribution) silently collapsed to the mobile
+   grid/heading layout inside a fixed-height `overflow:hidden` page. Decks escaped this
+   only by luck (297mm page ≈ 1123px, above their 820/1280px breakpoints) — scoped
+   defensively there too. Fixed by adding `screen and` to all 8 occurrences.
+3. **deck2 section-separator slides printed a bare, unhidden, unpositioned print
+   toggle.** Every other slide wraps its print-include toggle in `slideControls()`
+   (which positions it `absolute` and hides it via `@media print{.slide-controls{...}}`);
+   the separator slides called the bare `printToggle()` instead, so the toggle both
+   printed on every deck2 PDF's section-separator pages and shifted the on-screen
+   layout as an in-flow element. Fixed by using `slideControls()` there too.
+4. **Every printed deck (and document report) with source revisions got a stray
+   trailing page.** The `.source-revisions` footer (`sourceRevisions.ts`) is appended
+   after the last `.page`/`.slide`, so it — not the last content element — became the
+   true last DOM child, and `.page:last-child`/`.slide:last-child{page-break-after:auto}`
+   never matched the real last page/slide, which kept forcing a break after itself.
+   Changed both selectors to `:not(:has(~ .page))` / `:not(:has(~ .slide))` ("no
+   sibling of this type follows me"), which correctly targets the true last element
+   regardless of trailing siblings. For deck2 specifically, the footer duplicated
+   `closingSlide()` (deck2's own provenance slide, added 2026-07-14) — its fixed-height
+   last slide always fully occupies the page regardless of the break-after value, so
+   the footer would still spill onto its own page; deck2 now also hides
+   `.source-revisions` under `@media print` (on-screen behavior unchanged — deliberate,
+   see `closingSlide()`'s comment). Deck v1/management deck have no equivalent slide and
+   keep printing the footer normally.
+5. Added a `title` hint ("اختر «حفظ كـ PDF» من المتصفح عند الطباعة، وليس «Microsoft
+   Print to PDF»…") to every report/deck print button. Windows' "Microsoft Print to
+   PDF" OS driver ignores any site's custom `@page` size (documented Microsoft
+   behavior, not fixable from CSS) — very plausibly the direct cause of "wrong
+   size"/"low quality" if that's the selected print destination.
+
+**File:** `src/data/reporting/htmlReport.ts`
+
+**Before:**
+```ts
+export function openOrDownload(html: string, filename: string): void {
+  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const w = window.open(url, "_blank", "noopener,noreferrer");
+  if (w) {
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    return;
+  }
+  // Fallback: download
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+```
+
+**After:**
+```ts
+export function openOrDownload(html: string, filename: string): void {
+  const reportWindow = window.open("", "_blank");
+  if (reportWindow) {
+    try {
+      reportWindow.opener = null;
+      reportWindow.document.open();
+      reportWindow.document.write(html);
+      reportWindow.document.close();
+      return;
+    } catch {
+      try {
+        reportWindow.close();
+      } catch {
+        // Ignore close errors.
+      }
+    }
+  }
+  // Fallback: popup blocked (or writing to it failed) — download instead.
+  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+```
+
+**File:** `src/data/reporting/executive/theme.ts`
+
+**Before:**
+```css
+@media(max-width:980px){.context-band{grid-template-columns:1fr;}}
+...
+/* ── Responsive ───────────────────────────────────────────────────────── */
+@media(max-width:980px){
+```
+
+**After:**
+```css
+@media screen and (max-width:980px){.context-band{grid-template-columns:1fr;}}
+...
+/* ── Responsive (screen only — an unqualified query here would also match
+   the ~794px-wide A4 print page box and collapse printed document reports
+   to this mobile layout; scoped 2026-07-21) ─────────────────────────────── */
+@media screen and (max-width:980px){
+```
+
+Also changed `.page:last-child{page-break-after:auto;break-after:auto;}` (inside
+`EXEC_DOCUMENT_PRINT_CSS`) to `.page:not(:has(~ .page)){page-break-after:auto;break-after:auto;}`.
+
+**File:** `src/data/reporting/executive/deck/deckTheme.ts`
+
+**Before:**
+```css
+@media(max-width:820px){
+...
+  .slide:last-child{page-break-after:auto;break-after:auto;}
+```
+
+**After:**
+```css
+@media screen and (max-width:820px){
+...
+  .slide:not(:has(~ .slide)){page-break-after:auto;break-after:auto;}
+```
+
+**File:** `src/data/reporting/executive/deck2/theme.ts`
+
+**Before:**
+```css
+@media(min-width:1281px){ ... }
+@media(max-width:1280px){ ... }
+@media(max-width:820px){ ... }   /* ×3 occurrences */
+```
+
+**After:**
+```css
+@media screen and (min-width:1281px){ ... }
+@media screen and (max-width:1280px){ ... }
+@media screen and (max-width:820px){ ... }   /* ×3 occurrences */
+```
+
+Also added `.source-revisions{display:none!important;}` to the existing
+`@media print{...}` block (print-only; on-screen footer unchanged).
+
+**File:** `src/data/reporting/executive/deck2/slides.ts`
+
+**Before:**
+```ts
+  return `<section class="slide v2 v2-sep-slide ${esc(tone)}" id="slide-sep-${sectionNo}" data-title="${esc(title)}" data-section="${sectionKey}" data-section-label="${esc(NAV_SECTIONS[sectionKey])}">
+  ${printToggle()}
+  ${sideRail(sectionKey)}
+```
+
+**After:**
+```ts
+  return `<section class="slide v2 v2-sep-slide ${esc(tone)}" id="slide-sep-${sectionNo}" data-title="${esc(title)}" data-section="${sectionKey}" data-section-label="${esc(NAV_SECTIONS[sectionKey])}">
+  ${slideControls(`slide-sep-${sectionNo}`, variantPreview)}
+  ${sideRail(sectionKey)}
+```
+
+**File:** `src/data/reporting/executive/viewer.ts`, `src/data/reporting/executive/deck/viewer.ts`,
+`src/data/reporting/executive/deck2/index.ts`, `src/data/reporting/shared/reportChrome.ts` (×2 buttons)
+
+**Before:**
+```html
+<button class="btn" onclick="window.print()">طباعة / PDF</button>
+```
+
+**After:**
+```html
+<button class="btn" onclick="window.print()" title="اختر «حفظ كـ PDF» من المتصفح عند الطباعة، وليس «Microsoft Print to PDF»، لضمان الحجم والجودة الصحيحين">طباعة / PDF</button>
+```
+
+**File:** `src/data/labels/labelsStore.ts`, `src/data/reporting/management/managementReport.ts`
+
+**Before:**
+```ts
+  mgmt_report_print:            "طباعة / PDF",
+```
+```ts
+    <button type="button" class="mr-print-btn" onclick="window.print()">${esc(L.mgmt_report_print)}</button>
+```
+
+**After:**
+```ts
+  mgmt_report_print:            "طباعة / PDF",
+  mgmt_report_print_hint:       "اختر «حفظ كـ PDF» من المتصفح عند الطباعة، وليس «Microsoft Print to PDF»، لضمان الحجم والجودة الصحيحين",
+```
+```ts
+    <button type="button" class="mr-print-btn" onclick="window.print()" title="${esc(L.mgmt_report_print_hint)}">${esc(L.mgmt_report_print)}</button>
+```
+
+**Lines:** 198962 → 199013 (net +51) · 11 files, +75 / -24
+
+---
+
 ## v56.11 — 2026-07-21 — Change: embedded report fonts from `font-display:swap` to `block`
 
 Owner reported the executive deck v2 report taking roughly a minute to render on first

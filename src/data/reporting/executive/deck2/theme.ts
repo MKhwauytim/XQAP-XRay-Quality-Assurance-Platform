@@ -29,10 +29,10 @@ export const DECK_V2_CSS = `
 }
 .deck-nav-item a:hover{background:rgba(255,255,255,.06);color:#fff;}
 .deck-nav-item.active a{background:rgba(244,180,0,.13);border-color:rgba(244,180,0,.4);color:var(--gold);}
-@media(min-width:1281px){
+@media screen and (min-width:1281px){
   .deck-viewer-v2{padding-inline-start:calc(236px + 16px);}
 }
-@media(max-width:1280px){
+@media screen and (max-width:1280px){
   .deck-nav{display:none;}
 }
 @media print{
@@ -442,7 +442,7 @@ body.theme-light .v2-port-col .deck-table tbody tr.v2-blank td{
   .slide:has(.slide-print-toggle input:not(:checked)){display:none!important;}
 }
 
-@media(max-width:820px){
+@media screen and (max-width:820px){
   .v2-term-grid,.v2-port-split,.v2-cover-meta{grid-template-columns:1fr;}
 }
 
@@ -834,7 +834,7 @@ body.theme-light .v2-risk-tile{background:linear-gradient(165deg,rgba(244,180,0,
 body.theme-light .v2-risk-tile-head{border-color:#e4e9ee;}
 body.theme-light .v2-risk-tile-titles b,body.theme-light .v2-risk-tile-figure b,body.theme-light .v2-risk-tile-foot b{color:#0a2d4a;}
 body.theme-light .v2-risk-tile-foot{background:rgba(10,45,74,.035);border-color:#e4e9ee;}
-@media(max-width:820px){
+@media screen and (max-width:820px){
   .v2-risk-tile-grid{grid-template-columns:1fr;grid-template-rows:repeat(4,auto);}
 }
 
@@ -915,6 +915,17 @@ body.theme-light .v2-num-hero-value,body.theme-light .v2-cover-lockup-period,bod
 @media print{
   .v2-bar-cell,.v2-prop-seg,.v2-num-tile,.v2-sep-stat,.v2-num-hero,.v2-toc-num,.v2-sep-numeral{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
   .v2-toc-card,.v2-num-tile,.v2-term-card,.v2-term-band,.v2-stage-card,.v2-risk-tile,.v2-port-col,.v2-prov-item{break-inside:avoid;}
+  /* The compact .source-revisions footer (sourceRevisions.ts, shared across
+     every report edition) is pure duplication here — closingSlide() already
+     re-presents the same revisions in a designed provenance block as the
+     deck's actual last slide. Left visible, the footer has nowhere to fit
+     on the fixed-height last slide's page and spills onto its own stray
+     trailing page in every printed deck2 PDF. Print-only: the on-screen
+     compact footer stays (deliberate — see closingSlide()'s comment), only
+     the printed duplicate is removed. Scoped to DECK_V2_CSS so deck v1 and
+     the document viewers (which have no equivalent closing slide) keep
+     printing it normally (2026-07-21). */
+  .source-revisions{display:none!important;}
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -993,7 +1004,7 @@ body.theme-light .v2-risk-tile{background-image:var(--v2-hex-tex-light),linear-g
 .v2-src-card{background-image:var(--v2-hex-tex),linear-gradient(180deg,rgba(14,58,95,.55),rgba(7,39,67,.75));background-repeat:repeat,no-repeat;}
 body.theme-light .v2-src-card{background-image:var(--v2-hex-tex-light),none;background-repeat:repeat,no-repeat;}
 
-@media(max-width:820px){
+@media screen and (max-width:820px){
   .v2-cover-grid,.v2-closing,.v2-sep{grid-template-columns:1fr;}
   .v2-summary-top{grid-template-columns:1fr;}
   .v2-summary-tilegroups{flex-direction:column;}

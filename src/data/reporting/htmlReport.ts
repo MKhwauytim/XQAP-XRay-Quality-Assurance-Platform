@@ -63,15 +63,40 @@ export function escHtml(str: string): string {
   return esc(str);
 }
 
+/**
+ * Opens `html` in a new tab via `document.write`, falling back to a file
+ * download if the popup is blocked. Deliberately does NOT use
+ * `window.open(url, "_blank", "noopener")` on a blob: URL — per spec,
+ * passing "noopener" makes `window.open` always return `null` even when the
+ * tab opens successfully, so that pattern can never detect success, always
+ * falls through to the download fallback, and revokes the blob URL
+ * synchronously while the popup is still navigating to it (a real source of
+ * a blank/broken opened tab). `window.open("", "_blank")` (no feature
+ * string) returns a real handle instead, letting us sever `opener` directly
+ * and write the document in, with no blob URL and no revoke race at all —
+ * same pattern already proven in
+ * Sidebar/Tabs/Population/reporting/reportExporter.ts (2026-07-21).
+ */
 export function openOrDownload(html: string, filename: string): void {
+  const reportWindow = window.open("", "_blank");
+  if (reportWindow) {
+    try {
+      reportWindow.opener = null;
+      reportWindow.document.open();
+      reportWindow.document.write(html);
+      reportWindow.document.close();
+      return;
+    } catch {
+      try {
+        reportWindow.close();
+      } catch {
+        // Ignore close errors.
+      }
+    }
+  }
+  // Fallback: popup blocked (or writing to it failed) — download instead.
   const blob = new Blob([html], { type: "text/html;charset=utf-8" });
   const url = URL.createObjectURL(blob);
-  const w = window.open(url, "_blank", "noopener,noreferrer");
-  if (w) {
-    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-    return;
-  }
-  // Fallback: download
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;

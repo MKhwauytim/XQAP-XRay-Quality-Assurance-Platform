@@ -169,7 +169,7 @@ export function buildDeckV2Html(
           <span class="theme-toggle-thumb"></span>
         </span>
       </label>
-      <button class="btn" onclick="window.print()">طباعة / PDF</button>
+      <button class="btn" onclick="window.print()" title="اختر «حفظ كـ PDF» من المتصفح عند الطباعة، وليس «Microsoft Print to PDF»، لضمان الحجم والجودة الصحيحين">طباعة / PDF</button>
     </div>
   </div>
 ${slides}
