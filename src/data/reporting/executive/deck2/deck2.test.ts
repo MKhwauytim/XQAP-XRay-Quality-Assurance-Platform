@@ -4,6 +4,8 @@ import { DEFAULT_EXEC_CONFIG } from "../../executiveReportTypes";
 import type { ExecutiveReportInput } from "../../executiveReportTypes";
 import type { PreparedPopulationRow } from "../../../population/populationTypes";
 import { buildExecutiveDeckV2 } from "./index";
+import { buildReportModel } from "../model/reportModel";
+import { monthInNumbersSlide } from "./slides";
 
 function popRow(overrides: Partial<PreparedPopulationRow> = {}): PreparedPopulationRow {
   return {
@@ -136,14 +138,44 @@ describe("buildExecutiveDeckV2 — preview mode", () => {
 });
 
 describe("visual overhaul — new slides & structures", () => {
-  it("renders the الشهر في أرقام headline dashboard slide", () => {
+  it("hides the مؤشرات الشهر slide from the generated deck (owner request 2026-07-20)", () => {
+    // SHOW_MONTH_NUMBERS_SLIDE in slides.ts gates this off — the slide is
+    // dormant, not deleted. This locks in the hidden state so a future edit
+    // doesn't silently flip it back on.
     const html = buildExecutiveDeckV2(input([popRow(), popRow({ xrayImageId: "XR-2" })]));
+    expect(html).not.toContain('id="slide-month-numbers"');
+    // Match the rendered heading/TOC tags, not the bare Arabic phrase — the
+    // CSS's own section-header comment (theme.ts, same convention every other
+    // deck2 section comment already uses) legitimately contains this string
+    // too, and a plain substring check would false-positive on that alone.
+    expect(html).not.toContain('data-title="مؤشرات الشهر"');
+    expect(html).not.toContain(">مؤشرات الشهر<");
+    // the old standalone ports-overview page stays absorbed/removed regardless
+    expect(html).not.toContain('id="slide-port-overview"');
+  });
+
+  it("monthInNumbersSlide still renders correctly when called directly (dormant, not broken)", () => {
+    // Exercises the hidden slide in isolation so its code stays covered while
+    // SHOW_MONTH_NUMBERS_SLIDE is false — same content assertions the merged
+    // KPI-dashboard + top-ports-table design had when it was live.
+    const model = buildReportModel(
+      input([
+        popRow({ portName: "ميناء أ" }),
+        popRow({ xrayImageId: "XR-2", portName: "ميناء ب" }),
+      ]),
+    );
+    const html = monthInNumbersSlide(model, 3, 20, false);
     expect(html).toContain('id="slide-month-numbers"');
-    expect(html).toContain("الشهر في أرقام");
+    expect(html).toContain("مؤشرات الشهر");
+    expect(html).not.toContain("الشهر في أرقام");
     expect(html).toContain("v2-num-hero-value");
-    // five stat tiles
+    // raw population/sample tiles (3) + the one reviewer-accuracy tile, grouped separately
     const tiles = (html.match(/class="v2-num-tile /g) ?? []).length;
-    expect(tiles).toBe(5);
+    expect(tiles).toBe(4);
+    // the disagreement-with-reviewer tile was dropped per owner feedback
+    expect(html).not.toContain("صور الاختلاف مع المراجع");
+    expect(html).toContain("أعلى");
+    expect(html).toContain("v2-port-col");
   });
 
   it("renders the closing provenance slide, elevating source revisions into a designed block", () => {
@@ -184,10 +216,10 @@ describe("visual overhaul — new slides & structures", () => {
     expect(html).toContain("--w:");
   });
 
-  it("renders four tone-coded TOC cards each with a key figure", () => {
+  it("renders three tone-coded TOC cards each with a key figure (مؤشرات الشهر's card is hidden along with its slide)", () => {
     const html = buildExecutiveDeckV2(input([popRow()]));
     const cards = (html.match(/class="v2-toc-card /g) ?? []).length;
-    expect(cards).toBe(4);
+    expect(cards).toBe(3);
     expect(html).toContain("v2-toc-figure");
   });
 });

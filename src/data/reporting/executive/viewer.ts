@@ -1,4 +1,4 @@
-import { EXEC_CSS } from "./theme";
+import { EXEC_CSS, EXEC_DOCUMENT_PRINT_CSS } from "./theme";
 import { esc } from "./primitives";
 import { icon } from "./ui/icons";
 import { SOURCE_REVISIONS_CSS } from "../sourceRevisions";
@@ -40,7 +40,7 @@ export function buildViewerHtml(slides: string, monthLabel: string, footerNote =
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>التقرير التنفيذي — ${esc(monthLabel)}</title>
-<style>${ARABIC_FONT_FACE_CSS}${EXEC_CSS}${SOURCE_REVISIONS_CSS}</style>
+<style>${ARABIC_FONT_FACE_CSS}${EXEC_CSS}${EXEC_DOCUMENT_PRINT_CSS}${SOURCE_REVISIONS_CSS}</style>
 </head>
 <body>
 <div class="viewer">

@@ -16,6 +16,16 @@ export const DEFAULT_KEEP_VERSIONS = 20;
 const HEADING_RE = /^## v[\d.]+ /gm;
 
 /**
+ * Count real version headings in an EDIT_LOG.md-shaped string (before any truncation). Used to
+ * inject the true total version count as a build-time constant — the ChangeLog tab's "إجمالي
+ * الإصدارات" stat must reflect this, not `entries.length` of the (possibly truncated) bundled
+ * log, or a production build under-reports its own history.
+ */
+export function countVersionHeadings(content: string): number {
+  return [...content.matchAll(HEADING_RE)].length;
+}
+
+/**
  * Truncate an EDIT_LOG.md-shaped markdown string to the first `keep` version headings
  * (the log is prepend-ordered — newest entries are added at the top of the file — so "first
  * N headings from the top" means "N most recent versions").

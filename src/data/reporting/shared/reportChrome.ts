@@ -8,7 +8,7 @@
 // Pure HTML-string builders — no React, no DOM, no runtime JS beyond the small
 // TOC/print chrome carried inline (identical to the executive viewer's).
 
-import { EXEC_CSS } from "../executive/theme";
+import { EXEC_CSS, EXEC_DOCUMENT_PRINT_CSS } from "../executive/theme";
 import { DECK_CSS } from "../executive/deck/deckTheme";
 import { esc } from "../executive/primitives";
 import { icon } from "../executive/ui/icons";
@@ -69,7 +69,7 @@ export function buildDocViewer(opts: ChromeOpts): string {
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>${esc(opts.docTitle)}</title>
-<style>${ARABIC_FONT_FACE_CSS}${EXEC_CSS}${SOURCE_REVISIONS_CSS}</style>
+<style>${ARABIC_FONT_FACE_CSS}${EXEC_CSS}${EXEC_DOCUMENT_PRINT_CSS}${SOURCE_REVISIONS_CSS}</style>
 </head>
 <body>
 <div class="viewer">

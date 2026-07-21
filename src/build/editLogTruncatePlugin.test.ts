@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { truncateEditLog } from "./editLogTruncatePlugin";
+import { countVersionHeadings, truncateEditLog } from "./editLogTruncatePlugin";
 
 function makeLog(count: number): string {
   const header = "# EDIT_LOG.md\n\nVersion history.\n\n---\n\n";
@@ -14,6 +14,23 @@ function makeLog(count: number): string {
 }
 
 const HEADING_RE = /^## v[\d.]+ /gm;
+
+describe("countVersionHeadings", () => {
+  it("counts every version heading regardless of truncation", () => {
+    expect(countVersionHeadings(makeLog(5))).toBe(5);
+    expect(countVersionHeadings(makeLog(30))).toBe(30);
+  });
+
+  it("stays the true count even after the log is truncated", () => {
+    const log = makeLog(30);
+    const trueTotal = countVersionHeadings(log);
+    const truncated = truncateEditLog(log, 20);
+    expect(trueTotal).toBe(30);
+    // The truncated string only has 21 headings (20 kept + notice) — counting it directly
+    // would under-report, which is exactly the bug this constant exists to avoid.
+    expect(countVersionHeadings(truncated)).toBe(21);
+  });
+});
 
 describe("truncateEditLog", () => {
   it("is a no-op when the entry count is at or below the keep threshold", () => {

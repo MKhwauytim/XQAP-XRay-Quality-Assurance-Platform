@@ -301,8 +301,17 @@ ${EXEC_CSS}
 .slide.title-slide .title-levels .l3{--accent:var(--slate);} .slide.title-slide .title-levels .l4{--accent:var(--coral);}
 
 /* ── Print: 16:9 landscape, one slide per page, no toolbar ────────────── */
+/* The explicit landscape keyword (not just wider-than-tall dimensions) is the
+   documented Chromium pattern for getting the print dialog's own Layout control
+   to default to Landscape instead of Portrait — Chromium browsers have a known,
+   longstanding quirk (https://groups.google.com/a/chromium.org/g/chromium-bugs/c/dTz8xlegaJA)
+   where @page sizing alone doesn't always win against the dialog's own default.
+   This does NOT fix printing via the "Microsoft Print to PDF" Windows driver —
+   that driver ignores ANY website's custom @page size and silently forces
+   Letter/A4 (confirmed via Microsoft's own support docs), independent of browser
+   or CSS. Use the browser's own "Save as PDF" destination instead. */
 @media print{
-  @page{size:297mm 167mm;margin:0;}
+  @page{size:297mm 167mm landscape;margin:0;}
   body{-webkit-print-color-adjust:exact;print-color-adjust:exact;background:#fff;}
   .deck-toolbar{display:none!important;}
   .deck-viewer{padding:0;background:transparent;}

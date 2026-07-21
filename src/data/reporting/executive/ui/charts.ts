@@ -13,6 +13,7 @@
 //   • every legend/axis label routes through escText() — no new unescaped interpolation
 
 import { FONT_FAMILY, TYPE, clamp, clampPct, cssVar, seriesColor } from "./tokens";
+import type { ColorRole } from "./tokens";
 import { esc } from "../primitives";
 // Headless d3 geometry: path-string generators only (no DOM, no renderer). Used
 // for smoother donut/gauge arcs (padAngle + cornerRadius), a monotone sparkline
@@ -110,6 +111,13 @@ export type ChartOpts = {
   width?: number;
   height?: number;
   emptyNote?: string;
+  /** Single-hue mode for rankedBar: every bar uses this color role instead of
+   *  cycling through SERIES_ROLES. Use when the rows are a ranked top-N of the
+   *  SAME category (e.g. ports within one land/sea group), not distinct series —
+   *  a per-row rainbow there implies categorical meaning that isn't real and
+   *  fights whatever tone the surrounding card already carries. Rank stays
+   *  legible via bar length plus a light per-row opacity taper. */
+  tone?: ColorRole;
 };
 
 // ── rankedBar — horizontal bars, labels on the RIGHT (RTL) ──────────────────
@@ -120,16 +128,19 @@ export function rankedBar(data: LabeledValue[], opts: ChartOpts = {}): string {
   // renderers, so labels + values live in HTML where RTL Arabic always shapes correctly.
   // RTL row order (right → left): label · bar track (fills from right) · value.
   const max = Math.max(0, ...data.map((d) => (Number.isFinite(d.value) ? d.value : 0)));
+  const monoFill = opts.tone ? cssVar(opts.tone) : null;
   const rows = data
     .map((d, i) => {
       const v = Number.isFinite(d.value) ? Math.max(0, d.value) : 0;
       const pct = max > 0 ? clamp((v / max) * 100, 0, 100) : 0;
       const w = pct > 0 ? Math.max(3, pct) : 0;
+      const fill = monoFill ?? seriesColor(i);
+      const fade = monoFill ? Math.max(0.55, 1 - i * 0.08) : 1;
       return (
         `<div style="display:flex;align-items:center;gap:12px;width:100%">` +
         `<span style="flex:0 0 auto;min-width:96px;max-width:40%;text-align:right;font-weight:600;font-size:14px;color:${cssVar("text")};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escText(d.label)}</span>` +
         `<span style="flex:1 1 auto;height:26px;border-radius:8px;background:${cssVar("line")};position:relative;overflow:hidden">` +
-        `<i style="position:absolute;inset-inline-end:0;top:0;height:100%;width:${r(w)}%;background:${seriesColor(i)};border-radius:8px"></i></span>` +
+        `<i style="position:absolute;inset-inline-end:0;top:0;height:100%;width:${r(w)}%;background:${fill};opacity:${r(fade)};border-radius:8px"></i></span>` +
         `<span style="flex:0 0 auto;min-width:38px;text-align:left;font-weight:800;font-size:14px;color:${cssVar("primary")}">${r(v)}</span>` +
         `</div>`
       );

@@ -590,19 +590,6 @@ tbody tr:hover{background:rgba(244,180,0,.04);}
   .big-divider .divider-toc{grid-template-columns:1fr;}
 }
 
-/* ── Print ────────────────────────────────────────────────────────────── */
-@media print{
-  @page{size:A4 portrait;margin:0;}
-  body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
-  .sidebar{display:none!important;}
-  .viewer{display:block;}
-  .content{padding:0;background:transparent;}
-  .page{page-break-after:always;break-after:page;margin:0;box-shadow:none;border:0;width:210mm;aspect-ratio:auto;min-height:297mm;}
-  .page:last-child{page-break-after:auto;break-after:auto;}
-  .right-rail{display:none;}
-  .page-inner{margin-right:0;width:100%;padding:20mm 20mm 20mm 20mm;}
-}
-
 /* ── Document renderer (Phase 3) — fixed A4 budget, no runtime scaling ─────── */
 /* Eyebrow header (icon + label) above each section title. */
 .doc-eyebrow{display:flex;align-items:center;gap:8px;color:var(--gold);
@@ -673,4 +660,24 @@ tbody tr:hover{background:rgba(244,180,0,.04);}
 .doc-legend-item{display:flex;align-items:flex-start;gap:9px;}
 .doc-legend-item b{display:block;font-size:0.8rem;color:#fff;}
 .doc-legend-item span{font-size:0.72rem;}
+`;
+
+/** Document-viewer-only print rules (A4 portrait, `.sidebar`/`.viewer`/`.content`/`.page`/
+ *  `.right-rail`/`.page-inner` — none of these classes exist in the deck editions). Split out of
+ *  EXEC_CSS 2026-07-20: EXEC_CSS is shared by the deck too, and an unconditional `@page` here was
+ *  fighting deckTheme.ts's own `@page{size:297mm 167mm}`, breaking the deck's printed PDF (wrong
+ *  paper size, missing content, white gaps around every slide). Included only by the Document
+ *  viewer builders (viewer.ts, reportChrome.ts) that actually use these classes. */
+export const EXEC_DOCUMENT_PRINT_CSS = `
+@media print{
+  @page{size:A4 portrait;margin:0;}
+  body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  .sidebar{display:none!important;}
+  .viewer{display:block;}
+  .content{padding:0;background:transparent;}
+  .page{page-break-after:always;break-after:page;margin:0;box-shadow:none;border:0;width:210mm;aspect-ratio:auto;min-height:297mm;}
+  .page:last-child{page-break-after:auto;break-after:auto;}
+  .right-rail{display:none;}
+  .page-inner{margin-right:0;width:100%;padding:20mm 20mm 20mm 20mm;}
+}
 `;
