@@ -77,6 +77,11 @@ function isBootstrapAdminSession(session: AuthSession): boolean {
   );
 }
 
+function getRememberedLoginUsername(): string {
+  const username = readLastLoginUsername();
+  return username === BOOTSTRAP_ADMIN_USERNAME ? "" : username;
+}
+
 function getInitialSession(): AuthSession | null {
   const storedSession = readRealSession();
 
@@ -123,7 +128,7 @@ export default function AuthGate({ children }: AuthGateProps) {
     getManagedLoginUsers()
   );
 
-  const [selectedUsername, setSelectedUsername] = useState(readLastLoginUsername);
+  const [selectedUsername, setSelectedUsername] = useState(getRememberedLoginUsername);
   const [password, setPassword] = useState("");
   const [isPasswordVisible, setIsPasswordVisible] = useState(false);
 
@@ -279,7 +284,7 @@ export default function AuthGate({ children }: AuthGateProps) {
 
     setSession(null);
     setPreviewRoleState(null);
-    setSelectedUsername(readLastLoginUsername());
+    setSelectedUsername(getRememberedLoginUsername());
     setPassword("");
     setAdminPasscode("");
     setIsAdminModalOpen(false);
@@ -458,7 +463,7 @@ export default function AuthGate({ children }: AuthGateProps) {
 
     const nextSession = createSession(ADMIN_ROLE, BOOTSTRAP_ADMIN_USERNAME);
     applySession(nextSession);
-    writeLastLoginUsername(BOOTSTRAP_ADMIN_USERNAME);
+    clearLastLoginUsername();
 
     setAdminPasscode("");
     setIsAdminModalOpen(false);

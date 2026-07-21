@@ -4,6 +4,51 @@ Version history for the XQAP codebase. Every code edit must be logged here befor
 
 ---
 
+## v56.13 — 2026-07-21 — Fix: keep the bootstrap admin out of the username field
+
+The bootstrap administrator was saved as the last login, causing `admin` to appear in
+the public username field for the next user. Bootstrap admin logins now clear that value,
+and an already-saved bootstrap username is ignored; normal managed usernames remain
+remembered.
+
+**File:** `src/auth/AuthGate.tsx`
+
+**Before:**
+```ts
+const [selectedUsername, setSelectedUsername] = useState(readLastLoginUsername);
+```
+
+**After:**
+```ts
+const [selectedUsername, setSelectedUsername] = useState(getRememberedLoginUsername);
+```
+
+**File:** `src/auth/AuthGate.test.tsx`
+
+**Before:**
+```ts
+describe("AuthGate — login form", () => {
+```
+
+**After:**
+```ts
+expect(screen.getByLabelText("اسم المستخدم")).toHaveValue("");
+```
+
+**File:** `package.json`
+
+**Before:** `"version": "56.12.0"`
+
+**After:** `"version": "56.13.0"`
+
+**File:** `package-lock.json`
+
+**Before:** `"version": "56.12.0"`
+
+**After:** `"version": "56.13.0"`
+
+**Lines:** 200656 → 200724 (net +68) · 5 files, +74 / -6
+
 ## v56.12 — 2026-07-21 — Fix: broken print/export-to-PDF (wrong content, stray page, unhidden control) + slow/blank tab open
 
 Owner reported four recurring PDF-export symptoms across the reporting/print codebase:
