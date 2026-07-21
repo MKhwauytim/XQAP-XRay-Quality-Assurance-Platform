@@ -5,6 +5,7 @@ import AuthGate from "./AuthGate";
 import * as userManagement from "./userManagement";
 import * as authSession from "./authSession";
 import * as passwordCrypto from "./passwordCrypto";
+import { writeLastLoginUsername } from "./loginPersistence";
 
 // Minimal mock workspace context
 vi.mock("../data/workspace/useWorkspace", () => ({
@@ -12,6 +13,7 @@ vi.mock("../data/workspace/useWorkspace", () => ({
 }));
 
 beforeEach(() => {
+  localStorage.clear();
   vi.restoreAllMocks();
   vi.spyOn(authSession, "readRealSession").mockReturnValue(null);
 });
@@ -21,6 +23,22 @@ afterEach(() => {
 });
 
 describe("AuthGate — login form", () => {
+  it("leaves the username blank when the bootstrap admin was the last login", () => {
+    writeLastLoginUsername("admin");
+    vi.spyOn(userManagement, "getManagedLoginUsers").mockReturnValue([
+      {
+        id: "u1", username: "testuser", displayName: "Test", role: "employee",
+        passwordHash: { algorithm: "argon2id", encoded: "x" },
+        isActive: true, hasCertScanLicense: false,
+        createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+      },
+    ]);
+
+    render(<AuthGate>{() => <div>authenticated</div>}</AuthGate>);
+
+    expect(screen.getByLabelText("اسم المستخدم")).toHaveValue("");
+  });
+
   it("renders login form when no active session and users exist", () => {
     vi.spyOn(userManagement, "getManagedLoginUsers").mockReturnValue([
       {
