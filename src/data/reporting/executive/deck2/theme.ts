@@ -926,6 +926,22 @@ body.theme-light .v2-num-hero-value,body.theme-light .v2-cover-lockup-period,bod
      the document viewers (which have no equivalent closing slide) keep
      printing it normally (2026-07-21). */
   .source-revisions{display:none!important;}
+  /* Drop the --v2-hex-tex/--v2-hex-tex-light decorative background pattern
+     in print. It's a tiny (28x49px) SVG data URI tiled via
+     background-repeat:repeat across .v2-num-tile/.v2-term-card/.v2-toc-card/
+     .v2-risk-tile/.v2-src-card — on screen that's cheap (the browser
+     rasterizes the tile once and repeats the bitmap), but Chromium's
+     print-to-PDF pipeline emits a repeated background-image as a PDF
+     tiling-pattern XObject that the CONSUMING viewer (e.g. Edge's PDFium)
+     must re-evaluate tile-by-tile at render time. On a page with many
+     textured cards — the glossary page's term-cards especially — that is
+     real, measurable per-page render cost in the PDF viewer: a strong,
+     concrete match for "one specific slide is slow to paint, the rest are
+     fine" (2026-07-21, owner-reported). Overriding both custom properties
+     to none here turns that background-image layer into a no-op for
+     every consumer at once (they all read the variable); the gradient
+     layer each consumer also carries is untouched. */
+  .slide.v2{--v2-hex-tex:none;--v2-hex-tex-light:none;}
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
