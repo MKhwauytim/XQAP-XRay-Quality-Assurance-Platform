@@ -645,7 +645,7 @@ export function sectionSeparatorSlide(opts: {
     </div>`;
   const body = renderVariants(`slide-sep-${sectionNo}`, [sepBody, sepBody, sepBody, sepBody], variantPreview);
   return `<section class="slide v2 v2-sep-slide ${esc(tone)}" id="slide-sep-${sectionNo}" data-title="${esc(title)}" data-section="${sectionKey}" data-section-label="${esc(NAV_SECTIONS[sectionKey])}">
-  ${printToggle()}
+  ${slideControls(`slide-sep-${sectionNo}`, variantPreview)}
   ${sideRail(sectionKey)}
   <div class="v2-sep-bg" aria-hidden="true"></div>
   ${patternLayer}

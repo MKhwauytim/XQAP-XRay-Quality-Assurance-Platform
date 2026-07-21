@@ -322,11 +322,17 @@ ${EXEC_CSS}
     width:297mm;height:167mm;aspect-ratio:auto;margin:0;border:0;border-radius:0;
     box-shadow:none;page-break-after:always;break-after:page;
   }
-  .slide:last-child{page-break-after:auto;break-after:auto;}
+  /* Not ":last-child" — the source-revisions footer (sourceRevisions.ts) is
+     appended after the slides, so the true last .slide is never the last DOM
+     child when it's present; that left the real last slide still carrying
+     break-after:page, printing the footer alone on a stray extra page.
+     ":has()" targets "no .slide follows me" directly, independent of
+     trailing siblings (2026-07-21). */
+  .slide:not(:has(~ .slide)){page-break-after:auto;break-after:auto;}
 }
 
 /* ── Responsive (on-screen review) ────────────────────────────────────── */
-@media(max-width:820px){
+@media screen and (max-width:820px){
   .slide-split,.slide-split.wide-left,.slide-split.even{grid-template-columns:1fr;}
   .kpi-band.n4,.kpi-band.n5{grid-template-columns:repeat(2,1fr);}
   .kpi-band.n3{grid-template-columns:1fr 1fr;}
