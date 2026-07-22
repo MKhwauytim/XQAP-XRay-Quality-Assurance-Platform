@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { icon, ICON_NAMES, shield, gauge, check } from "./icons";
+import { icon, ICON_NAMES, shield, gauge, check, expand, compress } from "./icons";
 
 // Detects the vast majority of emoji codepoints (pictographic, symbols, dingbats,
 // regional indicators) plus the variation-selector / ZWJ / keycap joiners that
@@ -74,6 +74,13 @@ describe("icons", () => {
     expect(shield()).toBe(icon("shield"));
     expect(gauge()).toBe(icon("gauge"));
     expect(check()).toBe(icon("check"));
+  });
+
+  it("includes expand/compress icons for the deck2 slideshow fullscreen control", () => {
+    expect(ICON_NAMES).toContain("expand");
+    expect(ICON_NAMES).toContain("compress");
+    expect(expand()).toBe(icon("expand"));
+    expect(compress()).toBe(icon("compress"));
   });
 
   it("no icon contains any emoji glyph", () => {

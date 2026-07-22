@@ -56,6 +56,12 @@ const PATHS: Record<string, string> = {
   // Moon (crescent) — dark/light toggle
   moon:
     '<path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z"/>',
+  // Expand — fullscreen enter (four outward-pointing corner brackets)
+  expand:
+    '<path d="M9 4H4v5"/><path d="M15 4h5v5"/><path d="M4 15v5h5"/><path d="M20 15v5h-5"/>',
+  // Compress — fullscreen exit (same four brackets, pointing inward)
+  compress:
+    '<path d="M4 9h5V4"/><path d="M20 9h-5V4"/><path d="M4 15h5v5"/><path d="M20 15h-5v5"/>',
 };
 
 /** All registered icon names. */
@@ -96,3 +102,5 @@ export const truck = (size?: number): string => icon("truck", size);
 export const ship = (size?: number): string => icon("ship", size);
 export const sun = (size?: number): string => icon("sun", size);
 export const moon = (size?: number): string => icon("moon", size);
+export const expand = (size?: number): string => icon("expand", size);
+export const compress = (size?: number): string => icon("compress", size);

@@ -199,6 +199,8 @@ const LABEL_GROUPS: LabelGroup[] = [
       { key: "exec_chart_stage_summary", desc: "جدول ملخص المستويات" },
       { key: "exec_deck_fullscreen_enter", desc: "زر فتح العرض بملء الشاشة" },
       { key: "exec_deck_fullscreen_exit",  desc: "زر إنهاء عرض ملء الشاشة" },
+      { key: "exec_deck_slideshow_prev",   desc: "زر الشريحة السابقة في العرض التقديمي" },
+      { key: "exec_deck_slideshow_next",   desc: "زر الشريحة التالية في العرض التقديمي" },
     ],
   },
   {

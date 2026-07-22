@@ -118,6 +118,17 @@ describe("buildExecutiveDeckV2 — production path (no opts)", () => {
     expect(html).toMatch(/@media print\{[\s\S]*?\.btn-fullscreen\{display:none!important;\}/);
   });
 
+  it("replaces the fullscreen scroll-stack with single-slide presentation CSS", () => {
+    const html = buildExecutiveDeckV2(input([popRow()]));
+    expect(html).toContain("body.deck-fullscreen .slide{display:none;margin:0;}");
+    expect(html).toContain("body.deck-fullscreen .slide.deck-slide-active{");
+    expect(html).toContain(".btn-slide-nav,.deck-slide-counter{display:none;}");
+    expect(html).toContain(".btn-fullscreen-icon-compress{display:none;}");
+    expect(html).toMatch(
+      /@media print\{[\s\S]*?\.btn-slide-nav,\.deck-slide-counter\{display:none!important;\}/,
+    );
+  });
+
   it("uses the configurable Arabic labels for the full-screen control", () => {
     setLabel("exec_deck_fullscreen_enter", "عرض موسّع");
     setLabel("exec_deck_fullscreen_exit", "إنهاء العرض الموسّع");
@@ -129,6 +140,58 @@ describe("buildExecutiveDeckV2 — production path (no opts)", () => {
       resetLabel("exec_deck_fullscreen_enter");
       resetLabel("exec_deck_fullscreen_exit");
     }
+  });
+
+  it("uses an icon-only expand/compress fullscreen button instead of a text label", () => {
+    const html = buildExecutiveDeckV2(input([popRow()]));
+    expect(html).toContain('class="btn-fullscreen-icon btn-fullscreen-icon-expand"');
+    expect(html).toContain('class="btn-fullscreen-icon btn-fullscreen-icon-compress"');
+    expect(html).not.toContain(">ملء الشاشة</button>");
+  });
+
+  it("renders single-slide presentation navigation elements and script", () => {
+    const html = buildExecutiveDeckV2(input([popRow()]));
+    expect(html).toContain('id="deck-slide-prev"');
+    expect(html).toContain('id="deck-slide-next"');
+    expect(html).toContain('id="deck-slide-counter"');
+    expect(html).toContain("var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'))");
+    expect(html).toContain("classList.toggle('deck-slide-active'");
+    expect(html).toContain("document.addEventListener('keydown'");
+    expect(html).toContain("document.addEventListener('mousemove'");
+    expect(html).toContain("e.key === 'ArrowLeft'");
+    expect(html).toContain("e.key === 'ArrowRight'");
+  });
+
+  it("uses the configurable Arabic labels for the slide prev/next controls", () => {
+    setLabel("exec_deck_slideshow_prev", "الشريحة السابقة (مخصص)");
+    setLabel("exec_deck_slideshow_next", "الشريحة التالية (مخصص)");
+    try {
+      const html = buildExecutiveDeckV2(input([popRow()]));
+      expect(html).toContain('aria-label="الشريحة السابقة (مخصص)"');
+      expect(html).toContain('aria-label="الشريحة التالية (مخصص)"');
+    } finally {
+      resetLabel("exec_deck_slideshow_prev");
+      resetLabel("exec_deck_slideshow_next");
+    }
+  });
+
+  it("does not force-scroll on initial page load, only after a real fullscreen session ends", () => {
+    // everActivated guard: sync() runs once unconditionally at script init,
+    // before the user has ever entered fullscreen. Without the guard, that
+    // initial call fell into the "just exited" branch and scrolled to slide 0.
+    const html = buildExecutiveDeckV2(input([popRow()]));
+    expect(html).toContain("var everActivated = false;");
+    expect(html).toContain("everActivated = true;");
+    expect(html).toMatch(
+      /if \(everActivated\) \{\s*var el = slides\[activeIndex\];\s*if \(el && el\.scrollIntoView\) el\.scrollIntoView\(\{ block: 'start' \}\);\s*\}/,
+    );
+  });
+
+  it("excludes per-slide controls (e.g. the print-include toggle) from the click-to-advance handler", () => {
+    const html = buildExecutiveDeckV2(input([popRow()]));
+    expect(html).toContain(
+      "e.target.closest('.btn-slide-nav, .deck-slide-counter, #deck-fullscreen-button, .slide-controls')",
+    );
   });
 
   it("omits the footer entirely when no revisions are supplied", () => {
