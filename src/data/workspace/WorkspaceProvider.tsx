@@ -61,6 +61,14 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
   const [loadedFiles, setLoadedFiles] =
     useState<WorkspaceLoadedFiles>(emptyLoadedFiles);
 
+  // See the usersHydrated doc comment on WorkspaceContextValue: flips true
+  // only once applyDiskUsers has actually synced this workspace connection's
+  // users.permissions.json into the in-memory user-management state, which
+  // happens strictly after (and separately from) the `status` transition to
+  // "ready". Consumers must gate any "does this session's user still exist"
+  // check on this flag, not on status alone.
+  const [usersHydrated, setUsersHydrated] = useState(false);
+
   const [missingItems, setMissingItems] = useState<string[]>([]);
   const [invalidItems, setInvalidItems] = useState<string[]>([]);
   const [pendingReconnect, setPendingReconnect] = useState(false);
@@ -94,6 +102,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       const files = await loadWorkspaceFiles(handle);
       setLoadedFiles(files);
       applyDiskUsers(files);
+      setUsersHydrated(true);
     } else {
       setLoadedFiles(emptyLoadedFiles);
     }
@@ -233,6 +242,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
         const files = await loadWorkspaceFiles(directoryHandle);
         setLoadedFiles(files);
         applyDiskUsers(files);
+        setUsersHydrated(true);
       } else {
         setLoadedFiles(emptyLoadedFiles);
       }
@@ -271,6 +281,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
           const files = await loadWorkspaceFiles(directoryHandle);
           setLoadedFiles(files);
           applyDiskUsers(files);
+          setUsersHydrated(true);
         } else {
           setLoadedFiles(emptyLoadedFiles);
         }
@@ -296,6 +307,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     setDirectoryHandle(null);
     setSelectedDirectoryName("");
     setLoadedFiles(emptyLoadedFiles);
+    setUsersHydrated(false);
     setMissingItems([]);
     setInvalidItems([]);
     setPendingReconnect(false);
@@ -344,6 +356,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       message,
       isSupported: isFileSystemAccessSupported(),
       pendingReconnect,
+      usersHydrated,
       selectWorkspace,
       reconnectWorkspace,
       reloadWorkspace,
@@ -359,6 +372,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       missingItems,
       invalidItems,
       pendingReconnect,
+      usersHydrated,
       message,
       selectWorkspace,
       reconnectWorkspace,

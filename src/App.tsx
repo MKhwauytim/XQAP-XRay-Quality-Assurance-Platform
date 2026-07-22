@@ -9,6 +9,7 @@ import type { AuthSession } from "./auth/authTypes";
 import {
   hasRolePermission,
   readUserManagementState,
+  roleCeilingFor,
   subscribeToUserManagementChanges,
   type RolePermission
 } from "./auth/userManagement";
@@ -67,11 +68,17 @@ function AppContent({ session }: AppContentProps) {
         .map((tab) => {
           if (!tab.subTabs || tab.subTabs.length === 0) return tab;
           // employee-workspace sub-tabs are registered in MANAGED_TABS as "ew/<subId>".
-          // Filter to only sub-tabs the current role can view per the permission matrix.
+          // Filter to only sub-tabs the current role can view per the permission matrix
+          // AND the sub-tab's own code role ceiling -- a sub-tab's ceiling is independent
+          // of its parent's and may be narrower (e.g. reports/kpi vs. reports), so it must
+          // be checked with the full sub-tab id, not inherited from the parent tab.
           const prefix = tab.id === "employee-workspace" ? "ew/" : `${tab.id}/`;
-          const allowedSubTabs = tab.subTabs.filter((sub) =>
-            hasRolePermission(permissions, session.role, `${prefix}${sub.id}`, "view")
-          );
+          const allowedSubTabs = tab.subTabs.filter((sub) => {
+            const subTabId = `${prefix}${sub.id}`;
+            const ceiling = roleCeilingFor(subTabId);
+            if (ceiling && !ceiling.includes(session.role)) return false;
+            return hasRolePermission(permissions, session.role, subTabId, "view");
+          });
           return { ...tab, subTabs: allowedSubTabs };
         });
     },
@@ -97,7 +104,16 @@ function AppContent({ session }: AppContentProps) {
   }, []);
 
   useEffect(() => {
-    if (session.role !== "admin" || session.mode === "demo" || !directoryHandle || workspaceStatus !== "ready") return;
+    // Auto-backup runs for admin AND manager sessions now -- day-to-day deployments are
+    // often manager-led, and requiring an admin login just to get a daily backup meant
+    // most real deployments never actually got one. (The backup itself is unchanged --
+    // see backupStorage.ts for the due-check/dedupe logic.)
+    if (
+      (session.role !== "admin" && session.role !== "manager") ||
+      session.mode === "demo" ||
+      !directoryHandle ||
+      workspaceStatus !== "ready"
+    ) return;
     let cancelled = false;
     const timer = window.setTimeout(() => {
       if (!cancelled) setAutoBackupRunning(true);
@@ -133,8 +149,16 @@ function AppContent({ session }: AppContentProps) {
     };
   }, [autoBackupAttemptKey, directoryHandle, session.mode, session.role, session.username, workspaceStatus]);
 
+  // A2: when no explicit tab is selected (or the previous selection is no longer
+  // allowed), employees land on their workspace rather than whatever tab happens to
+  // sort first in allowedTabs. Landing-order preference only -- employee-workspace
+  // must still pass the role + permission-matrix filter above to be present at all.
+  const defaultTab =
+    session.role === "employee"
+      ? allowedTabs.find((tab) => tab.id === "employee-workspace") ?? allowedTabs[0]
+      : allowedTabs[0];
   const activeTab =
-    allowedTabs.find((tab) => tab.id === selectedTabId) ?? allowedTabs[0];
+    allowedTabs.find((tab) => tab.id === selectedTabId) ?? defaultTab;
 
   const activeTabId = activeTab?.id ?? "";
   const tabScrollPositions = useRef(new Map<string, number>());

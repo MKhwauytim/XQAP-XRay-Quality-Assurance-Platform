@@ -1,7 +1,7 @@
 import type { PasswordHashRecord } from "./passwordCrypto";
 import type { AuthRole, LoginUser } from "./authTypes";
 import { MANAGED_TABS } from "./tabCatalog";
-export { MANAGED_TABS, TAB_ROLE_CEILINGS } from "./tabCatalog";
+export { MANAGED_TABS, roleCeilingFor, SUB_TAB_ROLE_CEILINGS, TAB_ROLE_CEILINGS } from "./tabCatalog";
 export type { ManagedTab } from "./tabCatalog";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -111,11 +111,6 @@ export const MANAGED_FEATURE_GROUPS: readonly FeatureGroup[] = [
         id: "view-all-entries",
         label: "عرض عينات جميع الموظفين",
         description: "مشاهدة عينات الموظفين الآخرين — لا عيناته الشخصية فقط",
-      },
-      {
-        id: "view-employee-stats",
-        label: "إحصائيات تفصيلية لكل موظف",
-        description: "عرض إحصائيات تفصيلية لأداء الموظفين عند توفرها",
       },
       {
         id: "submit-referrals",
@@ -234,11 +229,6 @@ export const MANAGED_FEATURE_GROUPS: readonly FeatureGroup[] = [
         description: "تنزيل ملفات التقارير بصيغة Excel أو PDF",
       },
       {
-        id: "export-archive",
-        label: "تصدير من الأرشيف",
-        description: "تنزيل البيانات المؤرشفة",
-      },
-      {
         id: "archive.closeMonth",
         label: "إقفال الأشهر وإعادة فتحها",
         description: "إقفال شهر لمنع أي تعديل على بياناته أو إعادة فتحه للتعديل",
@@ -281,10 +271,16 @@ const ALL_FEATURE_IDS = MANAGED_FEATURE_GROUPS.flatMap((g) =>
 /** Maps each tab to the feature IDs that belong to it. */
 export const TAB_FEATURE_MAP: Readonly<Record<string, readonly string[]>> = {
   "population":         ["upload-data", "process-population", "configure-sample", "draw-sample", "distribute-samples", "bulk-assign", "view-browse", "unlock-sampling-stage"],
-  "employee-workspace": ["approve-referrals", "approve-replacements", "view-all-entries", "view-employee-stats", "submit-referrals", "request-replacement", "submit-answers", "configure-referral-columns", "ew.reopenAnswer", "manage-inspection-template", "employee-reopen-instant", "post-notification"],
+  "employee-workspace": ["approve-referrals", "approve-replacements", "view-all-entries", "submit-referrals", "request-replacement", "submit-answers", "configure-referral-columns", "ew.reopenAnswer", "manage-inspection-template", "employee-reopen-instant"],
+  // post-notification is rendered on the ew/notifications top-level tab (NotificationManager),
+  // never on employee-workspace -- cascading it against employee-workspace let can()/
+  // getMutationCapability() authorize posting off employee-workspace's edit access even when
+  // ew/notifications itself was view-only or blocked for the role. Keep in sync with
+  // NotificationCenter/index.tsx.
+  "ew/notifications":   ["post-notification"],
   "user-management":    ["manage-users", "reset-passwords", "edit-permissions"],
   "reports":            ["export-reports", "report-designer.edit"],
-  "archive":            ["export-archive", "archive.closeMonth", "archive.createBackup", "archive.restoreBackup"],
+  "archive":            ["archive.closeMonth", "archive.createBackup", "archive.restoreBackup"],
   "settings":           ["view-error-log", "edit-interface-labels"],
 };
 
@@ -313,7 +309,6 @@ const FEATURE_DEFAULTS: Record<string, Partial<Record<AuthRole, boolean>>> = {
   "approve-referrals":    { guest: false, employee: false, supervisor: true,  manager: true  },
   "approve-replacements": { guest: false, employee: false, supervisor: true,  manager: true  },
   "view-all-entries":     { guest: false, employee: false, supervisor: true,  manager: true  },
-  "view-employee-stats":  { guest: false, employee: false, supervisor: true,  manager: true  },
   "submit-referrals":     { guest: false, employee: true,  supervisor: true,  manager: false },
   "request-replacement":  { guest: false, employee: true,  supervisor: true,  manager: true  },
   "submit-answers":       { guest: false, employee: true,  supervisor: false, manager: false },
@@ -334,7 +329,6 @@ const FEATURE_DEFAULTS: Record<string, Partial<Record<AuthRole, boolean>>> = {
   "reset-passwords":      { guest: false, employee: false, supervisor: false, manager: false },
   "edit-permissions":     { guest: false, employee: false, supervisor: false, manager: false },
   "export-reports":       { guest: false, employee: false, supervisor: true,  manager: true  },
-  "export-archive":       { guest: false, employee: false, supervisor: false, manager: true  },
   "archive.closeMonth":   { guest: false, employee: false, supervisor: false, manager: false },
   "archive.createBackup": { guest: false, employee: false, supervisor: false, manager: true },
   "archive.restoreBackup": { guest: false, employee: false, supervisor: false, manager: false },
@@ -403,16 +397,20 @@ export function createDefaultPermissions(): RolePermission[] {
     { role: "manager",    tabId: "ew/xray-results",         access: "edit" },
     { role: "manager",    tabId: "ew/referral-approval",    access: "edit" },
     { role: "manager",    tabId: "ew/inspection-form",      access: "edit" },
-    // Supervisor — can see all EW sub-tabs
+    // Supervisor — can see all EW sub-tabs, except inspection-form: manage-inspection-template
+    // defaults off for supervisors (FEATURE_DEFAULTS below), so the tab was a guaranteed-blocked
+    // dead end (TemplateBuilder renders its own access-denied empty state for it). "none" hides
+    // the sidebar entry instead of linking to a page that can never do anything for this role.
     { role: "supervisor", tabId: "ew/xray-referrals",       access: "edit" },
     { role: "supervisor", tabId: "ew/xray-results",         access: "edit" },
     { role: "supervisor", tabId: "ew/referral-approval",    access: "edit" },
-    { role: "supervisor", tabId: "ew/inspection-form",      access: "view" },
-    // Employee — restricted EW sub-tabs
+    { role: "supervisor", tabId: "ew/inspection-form",      access: "none" },
+    // Employee — restricted EW sub-tabs; inspection-form is "none" for the same dead-end reason
+    // (manage-inspection-template also defaults off for employees).
     { role: "employee",   tabId: "ew/xray-referrals",       access: "edit" },
     { role: "employee",   tabId: "ew/xray-results",         access: "view" },
     { role: "employee",   tabId: "ew/referral-approval",    access: "none" },
-    { role: "employee",   tabId: "ew/inspection-form",      access: "edit" },
+    { role: "employee",   tabId: "ew/inspection-form",      access: "none" },
     // Guest — no EW sub-tab access
     { role: "guest",      tabId: "ew/xray-referrals",       access: "none" },
     { role: "guest",      tabId: "ew/xray-results",         access: "none" },

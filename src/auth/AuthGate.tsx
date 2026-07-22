@@ -77,35 +77,44 @@ function isBootstrapAdminSession(session: AuthSession): boolean {
   );
 }
 
+// Sessions never backed by a managed/disk user record: the real bootstrap admin
+// (a hardcoded credential, never present in the managed-users list) and the
+// demo/viewer account (an in-memory-only preview identity — role "admin" for
+// full tab visibility, but username "viewer", so it fails isBootstrapAdminSession
+// too). Both must be exempt from stillHasManagedUser() validation, or they are
+// misdiagnosed as a deleted/deactivated managed user and cleared on every login.
+function isExemptFromManagedUserValidation(session: AuthSession): boolean {
+  return isBootstrapAdminSession(session) || session.mode === "demo";
+}
+
 function getRememberedLoginUsername(): string {
   const username = readLastLoginUsername();
   return username === BOOTSTRAP_ADMIN_USERNAME ? "" : username;
 }
 
-function getInitialSession(): AuthSession | null {
-  const storedSession = readRealSession();
-
-  if (!storedSession) {
-    return null;
-  }
-
-  if (isBootstrapAdminSession(storedSession)) {
-    return storedSession;
-  }
-
-  const userStillExists = getManagedLoginUsers().some(
+function stillHasManagedUser(
+  session: AuthSession,
+  users: ManagedLoginUser[]
+): boolean {
+  return users.some(
     (user) =>
-      user.username === storedSession.username &&
-      user.role === storedSession.role &&
+      user.username === session.username &&
+      user.role === session.role &&
       user.isActive
   );
+}
 
-  if (!userStillExists) {
-    clearSession();
-    return null;
-  }
-
-  return storedSession;
+// Intentionally does NOT validate a non-bootstrap-admin session against
+// getManagedLoginUsers() here. At first mount, WorkspaceProvider has not yet
+// hydrated the in-memory user-management state from the workspace's
+// users.permissions.json — that sync (applyDiskUsers) runs asynchronously,
+// strictly after the workspace resolves to "ready". Checking this early would
+// only ever see the default seed users, so a legitimate persisted session for
+// a real disk-backed managed user would be misdiagnosed as stale and cleared
+// (the startup session-drop race). The real existence check runs later, once
+// WorkspaceContext reports usersHydrated — see the effect below.
+function getInitialSession(): AuthSession | null {
+  return readRealSession();
 }
 
 function normalizeShortcutKey(key: string): string {
@@ -120,6 +129,7 @@ export default function AuthGate({ children }: AuthGateProps) {
   const {
     directoryHandle,
     status: workspaceStatus,
+    usersHydrated,
     selectWorkspace,
     clearWorkspace
   } = useWorkspace();
@@ -202,30 +212,52 @@ export default function AuthGate({ children }: AuthGateProps) {
       setManagedUsers(nextUsers);
 
       setSession((currentSession) => {
-        if (!currentSession || isBootstrapAdminSession(currentSession)) {
+        if (!currentSession || isExemptFromManagedUserValidation(currentSession)) {
           return currentSession;
         }
 
-        const userStillExists = nextUsers.some(
-          (user) =>
-            user.username === currentSession.username &&
-            user.role === currentSession.role &&
-            user.isActive
-        );
-
-        if (!userStillExists) {
-          clearSession();
-          // Notify on the next tick so the state updater stays side-effect-free.
-          queueMicrotask(() =>
-            setLogoutNotice("تم تحديث صلاحياتك، يرجى تسجيل الدخول مجدداً")
-          );
-          return null;
+        if (stillHasManagedUser(currentSession, nextUsers)) {
+          return currentSession;
         }
 
-        return currentSession;
+        clearSession();
+        // Notify on the next tick so the state updater stays side-effect-free.
+        queueMicrotask(() =>
+          setLogoutNotice("تم تحديث صلاحياتك، يرجى تسجيل الدخول مجدداً")
+        );
+        return null;
       });
     });
   }, []);
+
+  // Deferred counterpart to getInitialSession(): performs the "does this
+  // session's user still exist" check once WorkspaceContext confirms the
+  // workspace's on-disk users have actually been synced in (usersHydrated),
+  // rather than at mount time when only the default seed users are visible.
+  // Reads the CURRENT session (whatever getInitialSession produced, or a
+  // session set since), so it correctly re-validates whenever usersHydrated
+  // flips back to true — including after a workspace switch, since
+  // WorkspaceProvider resets usersHydrated to false in clearWorkspace().
+  useEffect(() => {
+    if (!usersHydrated) return;
+
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot re-validation reacting to WorkspaceContext's usersHydrated flip (an external sync source, not derivable render state); guarded by usersHydrated so it settles in one step per hydration
+    setSession((currentSession) => {
+      if (!currentSession || isExemptFromManagedUserValidation(currentSession)) {
+        return currentSession;
+      }
+
+      if (stillHasManagedUser(currentSession, getManagedLoginUsers())) {
+        return currentSession;
+      }
+
+      clearSession();
+      queueMicrotask(() =>
+        setLogoutNotice("تم تحديث صلاحياتك، يرجى تسجيل الدخول مجدداً")
+      );
+      return null;
+    });
+  }, [usersHydrated]);
 
   useEffect(() => {
     if (lockoutUntil === null) return;

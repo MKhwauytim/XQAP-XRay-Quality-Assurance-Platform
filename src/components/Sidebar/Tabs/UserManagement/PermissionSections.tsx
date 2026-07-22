@@ -6,8 +6,8 @@ import {
   MANAGED_FEATURE_GROUPS,
   MANAGED_ROLES,
   MANAGED_TABS,
+  roleCeilingFor,
   TAB_FEATURE_MAP,
-  TAB_ROLE_CEILINGS,
   type FeaturePermission,
   type PermissionLevel,
   type RolePermission,
@@ -28,9 +28,18 @@ const PERMISSION_HELP: Record<PermissionLevel, string> = {
   edit: "عرض الصفحة واستخدام أدواتها.",
 };
 
-function isCeilingLocked(role: AuthRole, topLevelTabId: string): boolean {
-  const ceiling = TAB_ROLE_CEILINGS[topLevelTabId];
+function isCeilingLocked(role: AuthRole, tabId: string): boolean {
+  // B1: tabId may be a top-level tab OR a sub-tab -- roleCeilingFor checks both,
+  // so a sub-tab with a narrower ceiling than its parent (e.g. reports/kpi) is
+  // locked correctly instead of silently falling back to the parent's ceiling.
+  const ceiling = roleCeilingFor(tabId);
   return ceiling ? !ceiling.includes(role) : false;
+}
+
+/** True when a tab's code ceiling is admin-only -- i.e. no matrix edit can ever open it up. */
+function isAdminOnlyCeiling(tabId: string): boolean {
+  const ceiling = roleCeilingFor(tabId);
+  return !!ceiling && ceiling.length === 1 && ceiling[0] === "admin";
 }
 
 function getTabAccess(permissions: RolePermission[], role: AuthRole, tabId: string): PermissionLevel {
@@ -118,7 +127,7 @@ export function PagePermissionsSection(props: {
                   {!isCollapsed && subTabs.map((sub) => (
                     <tr key={sub.id} className="um-perm-row-child">
                       <td className="um-perm-tab-name um-perm-subtab"><span className="um-subtab-indicator">↳</span> {sub.label}</td>
-                      {MANAGED_ROLES.map((role) => <td key={role.id} className="um-perm-cell"><PermissionCell role={role} tabId={sub.id} locked={isCeilingLocked(role.id, tab.id)} canEdit={props.canEdit} permissions={props.permissions} onUpdate={props.onUpdate} /></td>)}
+                      {MANAGED_ROLES.map((role) => <td key={role.id} className="um-perm-cell"><PermissionCell role={role} tabId={sub.id} locked={isCeilingLocked(role.id, sub.id)} canEdit={props.canEdit} permissions={props.permissions} onUpdate={props.onUpdate} /></td>)}
                     </tr>
                   ))}
                 </Fragment>
@@ -152,12 +161,32 @@ export function FeaturePermissionsSection(props: {
             <thead><tr><th className="um-feat-label-col">الميزة</th>{MANAGED_ROLES.map((role) => <th key={role.id} className="um-feat-role-col"><RoleBadge role={role.id} /></th>)}</tr></thead>
             <tbody>{currentGroup.features.map((feature) => {
               const parentTabId = Object.entries(TAB_FEATURE_MAP).find(([, features]) => features.includes(feature.id))?.[0];
+              // Some features (manage-users, reset-passwords, edit-permissions) live on a
+              // page whose ceiling is admin-only in the code -- toggling them on for any
+              // other role is permanently inert, not just currently cascade-blocked by the
+              // matrix. Annotate that distinction instead of showing the generic "enable
+              // the page first" hint, which implies the admin could unlock it via the matrix.
+              const adminOnlyPage = parentTabId != null && isAdminOnlyCeiling(parentTabId);
               return <tr key={feature.id}>
-                <td className="um-feat-name"><strong>{feature.label}</strong><span>{feature.description}</span></td>
+                <td className="um-feat-name">
+                  <strong>{feature.label}</strong>
+                  <span>{feature.description}</span>
+                  {adminOnlyPage && (
+                    <span style={{ display: "block", fontSize: "0.75em", opacity: 0.7, marginTop: 2 }}>
+                      * صفحتها الأصلية خاصة بالمسؤول فقط بحكم الكود — تفعيلها لباقي الأدوار بلا أثر.
+                    </span>
+                  )}
+                </td>
                 {MANAGED_ROLES.map((role) => {
                   const pageBlocked = parentTabId != null && getTabAccess(props.permissions, role.id, parentTabId) === "none";
+                  const ceilingScoped = adminOnlyPage && role.id !== "admin";
                   const enabled = role.id === "admin" || (props.featurePermissions.find((item) => item.role === role.id && item.featureId === feature.id)?.enabled ?? false);
-                  return <td key={role.id} className="um-feat-cell"><label className={`um-toggle ${pageBlocked ? "um-toggle-cascade-off" : ""}`} title={pageBlocked ? "يتطلب تفعيل صلاحية الصفحة أولاً" : undefined}><input type="checkbox" checked={enabled} disabled={pageBlocked || !props.canEdit} onChange={(event) => props.onUpdate(role.id, feature.id, event.target.checked)} /><span className="um-toggle-slider" /></label></td>;
+                  const title = ceilingScoped
+                    ? "هذه الصفحة مخصّصة للمسؤول فقط بحكم الكود — لا يمكن فتحها لباقي الأدوار"
+                    : pageBlocked
+                      ? "يتطلب تفعيل صلاحية الصفحة أولاً"
+                      : undefined;
+                  return <td key={role.id} className="um-feat-cell"><label className={`um-toggle ${pageBlocked ? "um-toggle-cascade-off" : ""}`} title={title}><input type="checkbox" checked={enabled} disabled={pageBlocked || !props.canEdit} onChange={(event) => props.onUpdate(role.id, feature.id, event.target.checked)} /><span className="um-toggle-slider" /></label></td>;
                 })}
               </tr>;
             })}</tbody>

@@ -98,7 +98,7 @@ Month folder names follow `{month}-{MonthName-en}-{year}` (e.g. `5-May-2026`). L
 
 1. **Browser storage (auth & permissions)** — `src/auth/`
    - Login: new passwords hashed with **Argon2id** via `hash-wasm` (m=19 MiB, t=2, p=1 — OWASP 2026 baseline). Legacy PBKDF2-SHA256 hashes are still verified for backwards compatibility, and are **transparently upgraded to Argon2id on successful login** (`needsRehash` → `persistUserPasswordHash`). Bootstrap `admin` hash stored in `authConfig.ts`.
-   - Session → runtime module variable in `authSession.ts`, persisted to **`sessionStorage`** (`xray_auth_session_v1`, SEC-02): it survives a page reload but auto-clears when the tab/browser closes. A 7-day TTL applies as a secondary guard on read-back. This is a UX convenience, **not** a security control (see the security-model note below). Managed users + role→tab permission matrix → `localStorage` (`xray_user_management_v1`), changes broadcast via custom DOM event (`subscribeToUserManagementChanges`).
+   - Session → runtime module variable in `authSession.ts`, persisted to **`sessionStorage`** (`xray_auth_session_v1`, SEC-02): it survives a page reload but auto-clears when the tab/browser closes. A 7-day TTL applies as a secondary guard on read-back. This is a UX convenience, **not** a security control (see the security-model note below). Managed users + role→tab permission matrix live in an in-memory runtime variable in `userManagement.ts` (changes broadcast via custom DOM event, `subscribeToUserManagementChanges`) — **not** `localStorage`; the workspace disk file `3-user-data/users.permissions.json` (synced via `syncUserManagementToDisk`/`syncUsersFromDisk` in `src/data/workspace/userSync.ts`) is the sole persistence, so this state resets to disk-synced defaults on a fresh page load with no workspace mounted yet.
    - Roles: `guest` / `employee` / `supervisor` / `manager` / `admin` (5 roles — see `AuthRole` in `authTypes.ts`). `admin` is the bootstrap superuser; `manager` is the top managed role. `App.tsx` filters tabs by role + permission matrix.
    - `src/auth/tabCatalog.ts` is the source of truth for IDs, Arabic labels, parent relationships, and role ceilings. Defaults and registry consistency are tested against it.
    - Use the centralized `canMutate` capability at both render and handler boundaries for persistent actions.
@@ -153,7 +153,7 @@ Tabs are auto-discovered by `tabRegistry.ts`. Each top-level tab exports a defau
 | `population` | `Tabs/Population/` | all | 10 | `process`, `browse` |
 | `employee-workspace` | `Tabs/EmployeeWorkspace/` | all | 15 | `ew/xray-referrals`, `ew/xray-results`, `ew/referral-approval`, `ew/inspection-form` (renders `Tabs/TemplateBuilder/`) |
 | `ew/notifications` | `Tabs/NotificationCenter/` | all (defaults to manager, admin) | 20 | — |
-| `reports` | `Tabs/Reports/` | guest, supervisor, manager, admin | 25 | `reports`, `kpi` (manager, admin), `report-designer` (supervisor, manager, admin → `Tabs/ReportDesigner/`) |
+| `reports` | `Tabs/Reports/` | guest, supervisor, manager, admin | 25 | `reports`, `kpi` (supervisor, manager, admin), `report-designer` (supervisor, manager, admin → `Tabs/ReportDesigner/`) |
 | `archive` | `Tabs/Archive/` | guest, supervisor, manager, admin | 30 | — |
 | `user-management` | `Tabs/UserManagement/` | admin | 40 | `users`, `page-permissions`, `feature-permissions`, `activity`, `actions` |
 | `settings` | `Tabs/Settings/` | guest, admin | 95 | — |

@@ -5,9 +5,12 @@ import {
   createDefaultFeaturePermissions,
   createDefaultPermissions,
   createManagedUser,
+  FEATURE_TAB_LOOKUP,
   getRolePermission,
   hasFeature,
   MANAGED_TABS,
+  roleCeilingFor,
+  TAB_FEATURE_MAP,
   TAB_ROLE_CEILINGS,
   type PermissionLevel,
 } from "./userManagement";
@@ -133,4 +136,63 @@ test("every non-'none' default permission stays within its tab's code role ceili
 test("manager has no settings access by default (matches code ceiling)", () => {
   const perms = createDefaultPermissions();
   expect(getRolePermission(perms, "manager", "settings")).toBe("none");
+});
+
+// ── B1: sub-tab role ceilings ───────────────────────────────────────────────
+
+test("every non-'none' default permission stays within its OWN tab's code role ceiling (sub-tabs included)", () => {
+  // Stronger than the parent-ceiling check above: now that sub-tab ceilings are
+  // enforced at runtime (App.tsx sub-tab filter, usePermissions.canAccessTab,
+  // PermissionSections' isCeilingLocked), every default must respect its OWN
+  // ceiling too, not just its parent's -- e.g. reports/kpi vs. reports.
+  const perms = createDefaultPermissions();
+  for (const p of perms) {
+    if (p.role === "admin" || p.access === "none") continue;
+    const ceiling = roleCeilingFor(p.tabId);
+    if (!ceiling) continue;
+    expect(
+      ceiling.includes(p.role),
+      `${p.role}:${p.tabId} default="${p.access}" is outside its own code role ceiling`
+    ).toBe(true);
+  }
+});
+
+test("reports/kpi ceiling includes supervisor (widened) while report-designer keeps excluding guest", () => {
+  expect(roleCeilingFor("reports/kpi")).toEqual(["supervisor", "manager", "admin"]);
+  expect(roleCeilingFor("reports/report-designer")).not.toContain("guest");
+});
+
+// ── B1 (task 2): post-notification cascade fix ──────────────────────────────
+
+test("post-notification cascades against ew/notifications, not employee-workspace", () => {
+  expect(FEATURE_TAB_LOOKUP["post-notification"]).toBe("ew/notifications");
+  expect(TAB_FEATURE_MAP["employee-workspace"]).not.toContain("post-notification");
+  expect(TAB_FEATURE_MAP["ew/notifications"]).toContain("post-notification");
+});
+
+// ── B1 (task 3): ew/inspection-form dead end ────────────────────────────────
+
+test("ew/inspection-form defaults to none for employee and supervisor (dead-end fix); manager keeps edit", () => {
+  const perms = createDefaultPermissions();
+  const feats = createDefaultFeaturePermissions();
+  for (const role of ["employee", "supervisor"] as const) {
+    expect(getRolePermission(perms, role, "ew/inspection-form"), `${role}:ew/inspection-form`).toBe("none");
+    // The tab was hidden precisely because manage-inspection-template is off for
+    // these roles by default -- guard that the two facts stay in sync.
+    expect(hasFeature(feats, role, "manage-inspection-template"), `${role}:manage-inspection-template`).toBe(false);
+  }
+  expect(getRolePermission(perms, "manager", "ew/inspection-form")).toBe("edit");
+  expect(hasFeature(feats, "manager", "manage-inspection-template")).toBe(true);
+});
+
+// ── B1 (task 4): decorative feature toggles removed ─────────────────────────
+
+test("export-archive and view-employee-stats are removed (zero consumers)", () => {
+  const ids = new Set(createDefaultFeaturePermissions().map((f) => f.featureId));
+  expect(ids.has("export-archive")).toBe(false);
+  expect(ids.has("view-employee-stats")).toBe(false);
+  expect(TAB_FEATURE_MAP["archive"]).not.toContain("export-archive");
+  expect(TAB_FEATURE_MAP["employee-workspace"]).not.toContain("view-employee-stats");
+  expect(FEATURE_TAB_LOOKUP["export-archive"]).toBeUndefined();
+  expect(FEATURE_TAB_LOOKUP["view-employee-stats"]).toBeUndefined();
 });

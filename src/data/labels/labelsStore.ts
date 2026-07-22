@@ -135,6 +135,7 @@ export const DEFAULT_LABELS = {
   // Month close-out / lock (Tier-1 Item A)
   archive_close_month_btn:          "إقفال الشهر",
   archive_reopen_month_btn:         "إعادة فتح الشهر",
+  archive_month_action_kicker:      "إدارة الشهر",
   archive_month_closed_badge:       "مُقفل",
   archive_close_month_confirm:      "سيتم إقفال الشهر ومنع أي تعديل على بياناته (العينات، التوزيع، الإجابات، الإحالات). هل أنت متأكد؟",
   archive_reopen_month_confirm:     "سيتم إعادة فتح الشهر والسماح بالتعديل مجدداً. يتطلب ذكر السبب.",
@@ -325,7 +326,7 @@ export const DEFAULT_LABELS = {
   notif_accept_btn:            "قبول",
   notif_banner_more:           "و{count} إشعار آخر بانتظار الاطّلاع",
   notif_banner_aria:           "إشعار مثبّت",
-  notif_mgr_eyebrow:           "مساحة العمل",
+  notif_mgr_eyebrow:           "مركز الإشعارات",
   notif_mgr_title:             "مركز الإشعارات",
   notif_mgr_subtitle:          "انشر إشعاراً لجميع الموظفين والمشرفين وتابع من اطّلع عليه",
   notif_mgr_post_label:        "نص الإشعار الجديد",

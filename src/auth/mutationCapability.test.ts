@@ -142,4 +142,44 @@ describe("getMutationCapability", () => {
       }),
     ).toEqual({ allowed: true, reason: null });
   });
+
+  // B1 (task 2): post-notification must cascade against ew/notifications, not
+  // employee-workspace -- otherwise a role with employee-workspace edit access
+  // but no access to ew/notifications could be authorized to post.
+  it("allows post-notification for a manager with default permissions", () => {
+    expect(
+      getMutationCapability({
+        role: "manager",
+        featureId: "post-notification",
+        permissions,
+        featurePermissions,
+        isReadOnly: false,
+        workspaceReady: true,
+      })
+    ).toEqual({ allowed: true, reason: null });
+  });
+
+  it("denies post-notification when ew/notifications is blocked, even though employee-workspace stays editable (C2 regression)", () => {
+    const scopedPermissions = permissions.map((p) =>
+      p.role === "manager" && p.tabId === "ew/notifications"
+        ? { ...p, access: "none" as const }
+        : p
+    );
+    // Sanity: employee-workspace is untouched -- if the cascade were still wired
+    // to the old (wrong) tab, this scenario would incorrectly allow the mutation.
+    expect(
+      scopedPermissions.find((p) => p.role === "manager" && p.tabId === "employee-workspace")?.access
+    ).toBe("edit");
+
+    expect(
+      getMutationCapability({
+        role: "manager",
+        featureId: "post-notification",
+        permissions: scopedPermissions,
+        featurePermissions,
+        isReadOnly: false,
+        workspaceReady: true,
+      })
+    ).toEqual({ allowed: false, reason: "page-not-editable" });
+  });
 });

@@ -251,32 +251,26 @@ export async function checkWorkspaceStructure(
 export async function loadWorkspaceFiles(
   directoryHandle: DirectoryHandleLike
 ): Promise<WorkspaceLoadedFiles> {
-  const systemDir = await getSystemRoot(directoryHandle, false).catch(() => null);
+  // Only usersPermissions is actually consumed (by WorkspaceProvider's
+  // applyDiskUsers). manifest/sampleMaster/sampleDistribution used to be read
+  // here too, but nothing ever read the results back out of WorkspaceLoadedFiles
+  // — and the root-level sample.master.json / sample.distribution.json paths
+  // don't even exist under the current numbered layout (2-samples/{month}/...),
+  // so those two reads always failed with "missing" on every workspace load.
+  // They're kept as always-null in the returned shape (rather than removed from
+  // the WorkspaceLoadedFiles type) since that type lives in workspaceTypes.ts,
+  // outside this change's scope.
   const userDataDir = await getUserDataRoot(directoryHandle, false).catch(() => null);
-
-  const manifest = await readJsonFile<WorkspaceLoadedFiles["manifest"]>(
-    systemDir ?? directoryHandle,
-    WORKSPACE_FILE_NAMES.manifest
-  );
 
   const usersPermissions = await readJsonFile<
     WorkspaceLoadedFiles["usersPermissions"]
   >(userDataDir ?? directoryHandle, WORKSPACE_FILE_NAMES.usersPermissions);
 
-  const sampleMaster = await readJsonFile<WorkspaceLoadedFiles["sampleMaster"]>(
-    directoryHandle,
-    WORKSPACE_FILE_NAMES.sampleMaster
-  );
-
-  const sampleDistribution = await readJsonFile<
-    WorkspaceLoadedFiles["sampleDistribution"]
-  >(directoryHandle, WORKSPACE_FILE_NAMES.sampleDistribution);
-
   return {
-    manifest: manifest.ok ? manifest.file : null,
+    manifest: null,
     usersPermissions: usersPermissions.ok ? usersPermissions.file : null,
-    sampleMaster: sampleMaster.ok ? sampleMaster.file : null,
-    sampleDistribution: sampleDistribution.ok ? sampleDistribution.file : null
+    sampleMaster: null,
+    sampleDistribution: null
   };
 }
 
