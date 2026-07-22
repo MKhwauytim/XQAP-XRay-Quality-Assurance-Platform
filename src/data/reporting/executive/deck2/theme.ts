@@ -46,12 +46,13 @@ body.deck-fullscreen .deck-viewer-v2{
 body.deck-fullscreen .deck-toolbar{
   position:static;background:none;border:none;box-shadow:none;padding:0;margin:0;pointer-events:none;
 }
-body.deck-fullscreen .deck-toolbar>*{display:none;}
-body.deck-fullscreen .deck-toolbar .btn-fullscreen{
+body.deck-fullscreen .deck-toolbar>.deck-brand,
+body.deck-fullscreen .deck-toolbar-actions>*:not(.btn-fullscreen){display:none;}
+body.deck-fullscreen .btn-fullscreen{
   display:inline-flex;position:fixed;top:16px;inset-inline-end:16px;z-index:95;
   opacity:0;pointer-events:none;transition:opacity .25s ease;
 }
-body.deck-fullscreen.deck-controls-visible .deck-toolbar .btn-fullscreen{
+body.deck-fullscreen.deck-controls-visible .btn-fullscreen{
   opacity:1;pointer-events:auto;
 }
 body.deck-fullscreen .slide{display:none;margin:0;}
