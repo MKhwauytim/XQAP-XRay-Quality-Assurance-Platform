@@ -118,6 +118,17 @@ describe("buildExecutiveDeckV2 — production path (no opts)", () => {
     expect(html).toMatch(/@media print\{[\s\S]*?\.btn-fullscreen\{display:none!important;\}/);
   });
 
+  it("replaces the fullscreen scroll-stack with single-slide presentation CSS", () => {
+    const html = buildExecutiveDeckV2(input([popRow()]));
+    expect(html).toContain("body.deck-fullscreen .slide{display:none;margin:0;}");
+    expect(html).toContain("body.deck-fullscreen .slide.deck-slide-active{");
+    expect(html).toContain(".btn-slide-nav,.deck-slide-counter{display:none;}");
+    expect(html).toContain(".btn-fullscreen-icon-compress{display:none;}");
+    expect(html).toMatch(
+      /@media print\{[\s\S]*?\.btn-slide-nav,\.deck-slide-counter\{display:none!important;\}/,
+    );
+  });
+
   it("uses the configurable Arabic labels for the full-screen control", () => {
     setLabel("exec_deck_fullscreen_enter", "عرض موسّع");
     setLabel("exec_deck_fullscreen_exit", "إنهاء العرض الموسّع");

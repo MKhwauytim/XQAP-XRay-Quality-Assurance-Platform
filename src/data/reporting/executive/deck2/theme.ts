@@ -30,22 +30,62 @@ export const DECK_V2_CSS = `
 .deck-nav-item a:hover{background:rgba(255,255,255,.06);color:#fff;}
 .deck-nav-item.active a{background:rgba(244,180,0,.13);border-color:rgba(244,180,0,.4);color:var(--gold);}
 
-/* Full-screen review keeps the exit control available while fitting every
-   16:9 slide inside the current viewport. */
-body.deck-fullscreen{overflow-y:auto;scroll-snap-type:y mandatory;}
+/* ── Slideshow (single-slide) fullscreen mode ──────────────────────────────
+   body.deck-fullscreen now means true one-slide-at-a-time presentation mode
+   (DECK_FULLSCREEN_SCRIPT tracks the active index and toggles
+   .deck-slide-active). Side-nav and toolbar chrome (brand/theme/print) are
+   hidden outright; the fullscreen button and the prev/next/counter cluster
+   fade in on mousemove and fade out after ~2.5s idle via
+   body.deck-controls-visible, toggled by the same script. Escape always
+   exits natively regardless of this state. */
+body.deck-fullscreen{overflow:hidden;}
 body.deck-fullscreen .deck-nav{display:none;}
-body.deck-fullscreen .deck-viewer-v2{padding:78px 16px 16px;}
-body.deck-fullscreen .deck-toolbar{
-  position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:80;
-  width:min(1120px,calc(100vw - 32px));margin:0;padding:9px 14px;
+body.deck-fullscreen .deck-viewer-v2{
+  padding:0;display:flex;align-items:center;justify-content:center;height:100dvh;
 }
-body.deck-fullscreen .slide{
-  width:min(calc(100vw - 32px),calc((100dvh - 94px) * 297 / 167));
-  margin:0 auto 18px;scroll-snap-align:start;scroll-snap-stop:always;
+body.deck-fullscreen .deck-toolbar{
+  position:static;background:none;border:none;box-shadow:none;padding:0;margin:0;pointer-events:none;
+}
+body.deck-fullscreen .deck-toolbar>*{display:none;}
+body.deck-fullscreen .deck-toolbar .btn-fullscreen{
+  display:inline-flex;position:fixed;top:16px;inset-inline-end:16px;z-index:95;
+  opacity:0;pointer-events:none;transition:opacity .25s ease;
+}
+body.deck-fullscreen.deck-controls-visible .deck-toolbar .btn-fullscreen{
+  opacity:1;pointer-events:auto;
+}
+body.deck-fullscreen .slide{display:none;margin:0;}
+body.deck-fullscreen .slide.deck-slide-active{
+  display:flex;
+  width:min(calc(100vw - 32px),calc((100dvh - 32px) * 297 / 167));
 }
 body.deck-fullscreen .srev-footer{display:none;}
 body.theme-light .btn-fullscreen{color:#fff;}
 .btn-fullscreen:focus-visible{outline:3px solid var(--gold);outline-offset:3px;}
+.btn-fullscreen-icon-compress{display:none;}
+.btn-fullscreen[aria-pressed="true"] .btn-fullscreen-icon-expand{display:none;}
+.btn-fullscreen[aria-pressed="true"] .btn-fullscreen-icon-compress{display:inline-flex;}
+.btn-slide-nav,.deck-slide-counter{display:none;}
+body.deck-fullscreen .btn-slide-nav{
+  display:flex;position:fixed;top:50%;transform:translateY(-50%);z-index:90;
+  width:44px;height:44px;border-radius:50%;align-items:center;justify-content:center;
+  background:rgba(2,16,30,.55);border:1px solid rgba(255,255,255,.25);color:#fff;cursor:pointer;
+  opacity:0;pointer-events:none;transition:opacity .25s ease;
+}
+body.deck-fullscreen .btn-slide-nav:disabled{cursor:default;}
+body.deck-fullscreen .btn-slide-prev{inset-inline-start:20px;}
+body.deck-fullscreen .btn-slide-next{inset-inline-end:20px;}
+body.deck-fullscreen .btn-slide-prev svg{transform:scaleX(-1);}
+body.deck-fullscreen .deck-slide-counter{
+  display:block;position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:90;
+  font-size:.78rem;font-weight:700;color:#fff;background:rgba(2,16,30,.55);
+  padding:4px 12px;border-radius:999px;font-variant-numeric:tabular-nums;
+  opacity:0;pointer-events:none;transition:opacity .25s ease;
+}
+body.deck-fullscreen.deck-controls-visible .btn-slide-nav:not(:disabled),
+body.deck-fullscreen.deck-controls-visible .deck-slide-counter{
+  opacity:1;pointer-events:auto;
+}
 @media screen and (min-width:1281px){
   .deck-viewer-v2{padding-inline-start:calc(236px + 16px);}
 }
@@ -55,6 +95,7 @@ body.theme-light .btn-fullscreen{color:#fff;}
 @media print{
   .deck-nav{display:none!important;}
   .btn-fullscreen{display:none!important;}
+  .btn-slide-nav,.deck-slide-counter{display:none!important;}
 }
 
 /* ── Printed side tab rail (reference-mockup chrome, prints with the page) ── */
