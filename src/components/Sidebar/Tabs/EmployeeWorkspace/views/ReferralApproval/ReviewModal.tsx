@@ -1,19 +1,39 @@
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { X } from "lucide-react";
 
 import { useFocusTrap } from "../../../../../../hooks/useFocusTrap";
+import { useLabels } from "../../../../../../data/labels/useLabels";
 
 type Props = {
   title: string;
   description: ReactNode;
   isApprove: boolean;
   onClose: () => void;
-  onConfirm: (notes: string) => void;
+  onConfirm: (notes: string) => Promise<void>;
 };
 
 export default function ReviewModal({ title, description, isApprove, onClose, onConfirm }: Props) {
   const [notes, setNotes] = useState("");
+  const [running, setRunning] = useState(false);
+  const runningRef = useRef(false);
+  const L = useLabels();
   const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onClose });
+
+  async function handleConfirm(): Promise<void> {
+    // The ref closes the same-render double-click window before React commits
+    // the disabled state, so slow filesystem writes cannot append twice.
+    if (runningRef.current) return;
+    runningRef.current = true;
+    setRunning(true);
+    try {
+      await onConfirm(notes);
+    } catch {
+      // The parent normally converts domain failures to a visible status. Keep
+      // the dialog usable if an unexpected callback error escapes instead.
+      runningRef.current = false;
+      setRunning(false);
+    }
+  }
 
   return (
     <div ref={dialogRef} className="ew-modal-backdrop" role="dialog" aria-modal="true">
@@ -39,13 +59,14 @@ export default function ReviewModal({ title, description, isApprove, onClose, on
           />
         </div>
         <div className="ew-replace-reason" style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8, paddingBottom: 16 }}>
-          <button type="button" className="ew-btn-secondary" onClick={onClose}>إلغاء</button>
+          <button type="button" className="ew-btn-secondary" onClick={onClose} disabled={running}>إلغاء</button>
           <button
             type="button"
             className={isApprove ? "ew-btn-primary" : "ew-btn-deny"}
-            onClick={() => onConfirm(notes)}
+            onClick={() => void handleConfirm()}
+            disabled={running}
           >
-            {isApprove ? "تأكيد الموافقة" : "تأكيد الرفض"}
+            {running ? L.referral_review_saving : isApprove ? "تأكيد الموافقة" : "تأكيد الرفض"}
           </button>
         </div>
       </div>
