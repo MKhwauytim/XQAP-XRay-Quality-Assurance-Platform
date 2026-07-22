@@ -296,7 +296,7 @@ export const DEFAULT_LABELS = {
   wsgate_unsupported_retry:    "يُرجى فتح التطبيق في متصفح مدعوم والمحاولة مجدداً.",
   wsgate_picker_title:         "اختر مساحة العمل",
   wsgate_picker_reconnect_msg: "تم العثور على مساحة عمل سابقة. انقر على «إعادة الاتصال» للمتابعة، أو اختر مجلداً جديداً.",
-  wsgate_picker_select_msg:    "حدد مجلد مساحة العمل. سيطلب المتصفح إذن القراءة والكتابة مرة واحدة فقط.",
+  wsgate_picker_select_msg:    "حدد مجلد مساحة العمل للقراءة. سيطلب المتصفح إذن الكتابة عند تنفيذ أول تعديل فقط.",
   wsgate_reconnect_btn:        "إعادة الاتصال بمساحة العمل",
   wsgate_pick_folder_btn:      "اختيار مجلد",
   wsgate_view_modal_title:     "وضع العرض",

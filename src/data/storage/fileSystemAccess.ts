@@ -134,12 +134,25 @@ export async function ensureDirectoryPermission(
   return requestedPermission === "granted";
 }
 
+export async function queryDirectoryPermission(
+  directoryHandle: DirectoryHandleLike,
+  mode: FileSystemPermissionMode
+): Promise<FileSystemPermissionState> {
+  const queryPermission = directoryHandle.queryPermission;
+
+  if (!queryPermission) {
+    return "granted";
+  }
+
+  return queryPermission.call(directoryHandle, { mode });
+}
+
 export async function checkWorkspaceStructure(
   directoryHandle: DirectoryHandleLike
 ): Promise<WorkspaceStructureCheckResult> {
   const hasReadPermission = await ensureDirectoryPermission(
     directoryHandle,
-    "readwrite"
+    "read"
   );
 
   if (!hasReadPermission) {
@@ -147,7 +160,7 @@ export async function checkWorkspaceStructure(
       status: "permission_denied",
       missingItems: [],
       invalidItems: [],
-      message: "لم يتم منح صلاحية القراءة والكتابة لمجلد مساحة العمل."
+      message: "لم يتم منح صلاحية قراءة مجلد مساحة العمل."
     };
   }
 
