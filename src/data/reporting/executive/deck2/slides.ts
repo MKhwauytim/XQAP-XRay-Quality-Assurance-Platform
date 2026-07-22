@@ -30,7 +30,7 @@ type CellTone = "gold" | "blue" | "green" | "coral" | "neutral";
  * proportional bar behind the text, growing from the inline-start edge (right,
  * in this RTL deck). The bar is a CSS background only (`.v2-bar-cell` in
  * theme.ts reads `--w`), so it adds ZERO layout height — the fragile
- * pixel-budget table machinery (METRICS_*, TABLE_BUDGET_PX, ghost/blank rows)
+ * table pagination machinery
  * stays exactly valid. `pct` is the value's share of the column max, 0–100.
  */
 function barCell(inner: string, pct: number, tone: CellTone = "neutral"): string {
@@ -675,27 +675,6 @@ const STAGE_SHORT_TAG: Record<string, string> = {
  *  full table", same convention as portTable/qualityTable/accuracyTable). */
 export const STAGE_CARD_TOP_N = 5;
 
-/** Vertical budget (px) for one stage-×-port card's thead+rows+tfoot, at
- *  METRICS_COMPACT row heights.
- *
- *  Task 4 (v41.1) originally set this to 177 — the full 5-row `usedPx` under
- *  METRICS_COMPACT — reasoning that `.v2-stage-card` "stretches to its
- *  CSS-grid row regardless of this value." That check only verified the
- *  TABLE fits within its own CARD (which trivially holds once the card's
- *  height is driven by the table itself) — it never checked whether the
- *  2-row `.v2-stage-port-grid` as a whole fits within `.slide-body`'s fixed
- *  458.8px, so it missed that 2×256.8px (the card height that 177px produces)
- *  plus the row gap overflows the slide by ~46-127px, silently clipped by
- *  `.slide{overflow:hidden}`. Re-measured (this pass): available height per
- *  row = `(458.8 − 14px gap) / 2 ≈ 222.4px`; per-card non-table overhead
- *  (padding 12+10px, border 0.8px×2, header 28px + 8px margin) ≈ 59.6px;
- *  so the table budget is `222.4 − 59.6 ≈ 162.8px`. Set to 160 for a small
- *  safety margin against sub-pixel rounding. Requires `.v2-stage-port-grid`
- *  to have `grid-template-rows:1fr 1fr` (added alongside this fix) so both
- *  rows actually split the available height evenly instead of each sizing to
- *  its own content. */
-export const STAGE_CARD_TABLE_BUDGET_PX = 160;
-
 /** Compact 180° coverage arc for a stage tile — a micro SVG dial that inherits
  *  the tile's tone via `currentColor`. Low→high reads left→right (a physical
  *  gauge), same convention as ui/charts.ts `gauge`. Decorative (the percentage
@@ -845,41 +824,6 @@ function frac(sampleN: number, popN: number): string {
   return `<span class="v2-frac"><b>${fmtNum(sampleN)}</b><span>من ${fmtNum(popN)}</span></span>`;
 }
 
-/** Row metrics, measured live in the browser with sub-pixel precision
- *  (v39.9/v39.10, retuned v39.16, re-measured v39.29 after the side-rail
- *  width change subtly shifted text-metric rounding). The sample table's
- *  stacked "N من M" cells (`.v2-frac`) are tuned in CSS to land close to the
- *  population table's plain single-line row height, but NOT identically —
- *  v39.29 found the compact tier's frac cells measure ~1.1-1.5px shorter
- *  than plain cells at the current layout width, so compact tier needs its
- *  own metrics for `mode === "sample"` rather than assuming parity. */
-type ModeMetrics = { rowH: number; theadH: number; tfootH: number };
-const METRICS_NORMAL: ModeMetrics = { rowH: 41.6, theadH: 41.2, tfootH: 41.2 };
-const METRICS_COMPACT: ModeMetrics = { rowH: 25.4, theadH: 25, tfootH: 25 };
-// Re-measured 2026-07-14 after the theme-v3 type-scale change shifted text-metric
-// rounding (same phenomenon as the v39.29 re-measure): the previous values (rowH
-// 23.925 / theadH 25 / tfootH 23.525) under-estimated all three, clipping the
-// sample tables' totals row ~10px past the card bottom on screen.
-const METRICS_COMPACT_SAMPLE: ModeMetrics = { rowH: 25.125, theadH: 24.5, tfootH: 24.625 };
-
-/** Vertical budget for one card's thead+rows+tfoot together, measured live:
- *  the 16:9 slide's `.slide-body` renders at 458.8px, a card header at 70px
- *  (388.8px), minus a small safety margin for the border-box + sub-pixel
- *  rounding that otherwise causes a 1-2px overflow in `.v2-port-col`'s own
- *  clipping (its 1px border eats into the content box on each side). */
-const TABLE_BUDGET_PX = 387;
-
-/** The pixel-exact tfoot-pinning spacer, carrying this tier's exact row height
- *  (--ghost-row-h) so the CSS can paint faint row separators inside it — the
- *  leftover space reads as continued empty grid, not a void. Deliberately ONE
- *  pixel-sized row, NOT real ghost <tr>s: plain-cell ghosts render taller than
- *  the sample table's stacked frac rows and would break the measured budget
- *  math (see METRICS_* notes above), clipping the totals row. */
-function blankFillerRow(fillerPx: number, span: number, rowH: number): string {
-  if (fillerPx <= 0) return "";
-  return `<tr class="v2-blank" style="height:${fillerPx}px;--ghost-row-h:${rowH}px"><td colspan="${span}">&nbsp;</td></tr>`;
-}
-
 /**
  * One land/sea table as a tinted card (per the reference design). `population`
  * = plain month numbers (الصور/سليمة/اشتباه). `sample` = same shape, but every
@@ -899,7 +843,6 @@ function portTable(
   compact: boolean,
 ): string {
   const span = mode === "population" ? 4 : 5;
-  const dataRowCount = rows.length > 0 ? rows.length : 1; // the "—" placeholder counts as one row
   // Magnitude-column data bars (pure CSS background, zero added row height): the
   // الصور column in population mode, the العيّنة column in sample mode, each
   // scaled to the largest value in this chunk. Tone tracks the port variant
@@ -918,11 +861,6 @@ function portTable(
           })
           .join("")
       : `<tr><td colspan="${span}"><span class="insuff">—</span></td></tr>`;
-
-  const metrics = compact ? (mode === "sample" ? METRICS_COMPACT_SAMPLE : METRICS_COMPACT) : METRICS_NORMAL;
-  const usedPx = metrics.theadH + metrics.tfootH + dataRowCount * metrics.rowH;
-  const fillerPx = Math.max(0, TABLE_BUDGET_PX - usedPx);
-  const blankRow = blankFillerRow(fillerPx, span, metrics.rowH);
 
   const sum = (f: (p: PortPopRow) => number) => rows.reduce((s, p) => s + f(p), 0);
   const totalPop = sum((p) => p.total);
@@ -950,7 +888,7 @@ function portTable(
     </div>
     <table class="deck-table">
       <thead><tr>${ths}</tr></thead>
-      <tbody>${trs}${blankRow}</tbody>
+      <tbody>${trs}</tbody>
       <tfoot>${totalsRow}</tfoot>
     </table>
   </div>`;
@@ -1115,14 +1053,6 @@ export function collectStagePortStats(model: ReportModel): Map<string, PortPopRo
   return result;
 }
 
-/** Muted placeholder rows padding a stage card's table up to the fixed
- *  STAGE_CARD_TOP_N body-row count. Real row height/borders (they are ordinary
- *  `<tr>`s), so the table grid reads as deliberate rather than truncated. */
-function ghostRows(count: number): string {
-  if (count <= 0) return "";
-  return `<tr class="v2-ghost"><td>—</td><td></td><td></td><td></td></tr>`.repeat(count);
-}
-
 /** One stage's card on the population page: المنفذ | سليمة | اشتباه | الإجمالي,
  *  top STAGE_CARD_TOP_N ports by population, with a stage-wide totals row.
  *
@@ -1141,11 +1071,6 @@ function ghostRows(count: number): string {
 function stagePortPopulationCard(stage: StageProfile, i: number, ports: PortPopRow[]): string {
   const tone = STAGE_TONES[i % STAGE_TONES.length];
   const top = ports.slice(0, STAGE_CARD_TOP_N);
-  // Always render exactly STAGE_CARD_TOP_N body rows: stages with fewer ports
-  // get muted "ghost" rows so all four cards share identical table geometry —
-  // otherwise short cards showed a large blank void between the last data row
-  // and the pinned totals row (owner-reported inconsistency, 2026-07-14).
-  const dataRowCount = STAGE_CARD_TOP_N;
   const maxTotal = maxOf(top.map((p) => p.total));
   const trs =
     top
@@ -1153,12 +1078,7 @@ function stagePortPopulationCard(stage: StageProfile, i: number, ports: PortPopR
         (p) =>
           `<tr><td>${esc(p.name)}</td><td>${fmtNum(p.clean)}</td><td>${fmtNum(p.suspicious)}</td>${barCell(fmtNum(p.total), (p.total / maxTotal) * 100, tone)}</tr>`,
       )
-      .join("") + ghostRows(STAGE_CARD_TOP_N - top.length);
-
-  const usedPx = METRICS_COMPACT.theadH + METRICS_COMPACT.tfootH + dataRowCount * METRICS_COMPACT.rowH;
-  const fillerPx = Math.max(0, STAGE_CARD_TABLE_BUDGET_PX - usedPx);
-  const blankRow =
-    fillerPx > 0 ? `<tr class="v2-blank" style="height:${fillerPx}px"><td colspan="4">&nbsp;</td></tr>` : "";
+      .join("");
 
   const sum = (f: (p: PortPopRow) => number) => ports.reduce((s, p) => s + f(p), 0);
   const totalsRow = `<tr><td>الإجمالي</td><td>${fmtNum(sum((p) => p.clean))}</td><td>${fmtNum(sum((p) => p.suspicious))}</td><td>${fmtNum(stage.population)}</td></tr>`;
@@ -1170,7 +1090,7 @@ function stagePortPopulationCard(stage: StageProfile, i: number, ports: PortPopR
     </div>
     <table class="deck-table">
       <thead><tr><th>المنفذ</th><th>سليمة</th><th>اشتباه</th><th>الإجمالي</th></tr></thead>
-      <tbody>${trs}${blankRow}</tbody>
+      <tbody>${trs}</tbody>
       <tfoot>${totalsRow}</tfoot>
     </table>
   </div>`;
@@ -1190,9 +1110,6 @@ function stagePortPopulationCard(stage: StageProfile, i: number, ports: PortPopR
 function stagePortSampleCard(stage: StageProfile, i: number, ports: PortPopRow[]): string {
   const tone = STAGE_TONES[i % STAGE_TONES.length];
   const top = ports.slice(0, STAGE_CARD_TOP_N);
-  // Same fixed-geometry rule as stagePortPopulationCard: exactly TOP_N body
-  // rows, ghost-padded, so the totals row sits at the same height in all cards.
-  const dataRowCount = STAGE_CARD_TOP_N;
   const maxSample = maxOf(top.map((p) => p.sampleTotal));
   const trs =
     top
@@ -1200,12 +1117,7 @@ function stagePortSampleCard(stage: StageProfile, i: number, ports: PortPopRow[]
         const coverage = p.total > 0 ? (p.sampleTotal / p.total) * 100 : 0;
         return `<tr><td>${esc(p.name)}</td><td>${fmtNum(p.total)}</td>${barCell(fmtNum(p.sampleTotal), (p.sampleTotal / maxSample) * 100, tone)}<td>${fmtPct(coverage)}</td></tr>`;
       })
-      .join("") + ghostRows(STAGE_CARD_TOP_N - top.length);
-
-  const usedPx = METRICS_COMPACT.theadH + METRICS_COMPACT.tfootH + dataRowCount * METRICS_COMPACT.rowH;
-  const fillerPx = Math.max(0, STAGE_CARD_TABLE_BUDGET_PX - usedPx);
-  const blankRow =
-    fillerPx > 0 ? `<tr class="v2-blank" style="height:${fillerPx}px"><td colspan="4">&nbsp;</td></tr>` : "";
+      .join("");
 
   const totalsRow = `<tr><td>الإجمالي</td><td>${fmtNum(stage.population)}</td><td>${fmtNum(stage.sampleSize)}</td><td>${fmtPct(stage.coverage)}</td></tr>`;
 
@@ -1217,7 +1129,7 @@ function stagePortSampleCard(stage: StageProfile, i: number, ports: PortPopRow[]
     </div>
     <table class="deck-table">
       <thead><tr><th>المنفذ</th><th>مجتمع المرحلة</th><th>العيّنة المستهدفة</th><th>نسبة التغطية</th></tr></thead>
-      <tbody>${trs}${blankRow}</tbody>
+      <tbody>${trs}</tbody>
       <tfoot>${totalsRow}</tfoot>
     </table>
   </div>`;
@@ -1345,7 +1257,6 @@ function collectPortQualityStats(model: ReportModel): { land: PortQualityRow[]; 
 
 function qualityTable(title: string, rows: PortQualityRow[], variant: "land" | "sea", compact: boolean): string {
   const span = 5;
-  const dataRowCount = rows.length > 0 ? rows.length : 1;
   const trs =
     rows.length > 0
       ? rows
@@ -1361,11 +1272,6 @@ function qualityTable(title: string, rows: PortQualityRow[], variant: "land" | "
           })
           .join("")
       : `<tr><td colspan="${span}"><span class="insuff">—</span></td></tr>`;
-
-  const metrics = compact ? METRICS_COMPACT : METRICS_NORMAL;
-  const usedPx = metrics.theadH + metrics.tfootH + dataRowCount * metrics.rowH;
-  const fillerPx = Math.max(0, TABLE_BUDGET_PX - usedPx);
-  const blankRow = blankFillerRow(fillerPx, span, metrics.rowH);
 
   const sum = (f: (p: PortQualityRow) => number) => rows.reduce((s, p) => s + f(p), 0);
   const totalMarkP = sum((p) => p.markingPresent);
@@ -1388,7 +1294,7 @@ function qualityTable(title: string, rows: PortQualityRow[], variant: "land" | "
     </div>
     <table class="deck-table">
       <thead><tr>${ths}</tr></thead>
-      <tbody>${trs}${blankRow}</tbody>
+      <tbody>${trs}</tbody>
       <tfoot>${totalsRow}</tfoot>
     </table>
   </div>`;
@@ -1466,7 +1372,6 @@ function collectPortAccuracyRows(model: ReportModel): { land: PortAccuracyRow[];
 
 function accuracyTable(title: string, rows: PortAccuracyRow[], variant: "land" | "sea", compact: boolean): string {
   const span = 4;
-  const dataRowCount = rows.length > 0 ? rows.length : 1;
   const trs =
     rows.length > 0
       ? rows
@@ -1482,11 +1387,6 @@ function accuracyTable(title: string, rows: PortAccuracyRow[], variant: "land" |
           })
           .join("")
       : `<tr><td colspan="${span}"><span class="insuff">—</span></td></tr>`;
-
-  const metrics = compact ? METRICS_COMPACT : METRICS_NORMAL;
-  const usedPx = metrics.theadH + metrics.tfootH + dataRowCount * metrics.rowH;
-  const fillerPx = Math.max(0, TABLE_BUDGET_PX - usedPx);
-  const blankRow = blankFillerRow(fillerPx, span, metrics.rowH);
 
   const sum = (f: (p: PortAccuracyRow) => number) => rows.reduce((s, p) => s + f(p), 0);
   const totalEvaluable = sum((p) => p.evaluable);
@@ -1508,7 +1408,7 @@ function accuracyTable(title: string, rows: PortAccuracyRow[], variant: "land" |
     </div>
     <table class="deck-table">
       <thead><tr>${ths}</tr></thead>
-      <tbody>${trs}${blankRow}</tbody>
+      <tbody>${trs}</tbody>
       <tfoot>${totalsRow}</tfoot>
     </table>
   </div>`;

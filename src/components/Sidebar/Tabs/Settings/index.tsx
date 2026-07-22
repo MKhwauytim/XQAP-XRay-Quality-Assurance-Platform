@@ -197,6 +197,8 @@ const LABEL_GROUPS: LabelGroup[] = [
       { key: "exec_chart_daily",         desc: "رسم التوزيع اليومي للصور" },
       { key: "exec_chart_stage",         desc: "رسم توزيع المستويات" },
       { key: "exec_chart_stage_summary", desc: "جدول ملخص المستويات" },
+      { key: "exec_deck_fullscreen_enter", desc: "زر فتح العرض بملء الشاشة" },
+      { key: "exec_deck_fullscreen_exit",  desc: "زر إنهاء عرض ملء الشاشة" },
     ],
   },
   {

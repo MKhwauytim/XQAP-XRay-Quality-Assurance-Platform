@@ -191,6 +191,8 @@ export const DEFAULT_LABELS = {
   exec_chart_daily:         "توزيع المجتمع على حسب اليوم",
   exec_chart_stage:         "توزيع المجتمع حسب المستوى",
   exec_chart_stage_summary: "ملخص حسب المستوى",
+  exec_deck_fullscreen_enter: "ملء الشاشة",
+  exec_deck_fullscreen_exit:  "إنهاء ملء الشاشة",
 
   // Overview view
   ov_chart_trend:         "تطور المجتمع والعينة والإنجاز عبر الأشهر",

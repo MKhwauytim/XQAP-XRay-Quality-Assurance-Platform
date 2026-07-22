@@ -6,6 +6,7 @@ import type { PreparedPopulationRow } from "../../../population/populationTypes"
 import { buildExecutiveDeckV2 } from "./index";
 import { buildReportModel } from "../model/reportModel";
 import { monthInNumbersSlide } from "./slides";
+import { resetLabel, setLabel } from "../../../labels/labelsStore";
 
 function popRow(overrides: Partial<PreparedPopulationRow> = {}): PreparedPopulationRow {
   return {
@@ -99,13 +100,35 @@ describe("buildExecutiveDeckV2 — production path (no opts)", () => {
     expect(html).toContain("مراجعة 3");
   });
 
-  it("pads stage-port cards with ghost rows to the fixed 5-row geometry", () => {
-    // One stage, one port → each stage-port card (population + sample slides)
-    // shows 1 data row + 4 ghost rows, so the totals row sits at the same
-    // height as a full card's.
+  it("does not render artificial blank or ghost table rows", () => {
     const html = buildExecutiveDeckV2(input([popRow()]));
-    const ghostCount = (html.match(/class="v2-ghost"/g) ?? []).length;
-    expect(ghostCount).toBe(8); // 4 ghosts × 2 slides
+    expect(html).not.toContain('class="v2-ghost"');
+    expect(html).not.toContain('class="v2-blank"');
+  });
+
+  it("includes an accessible full-screen presentation control", () => {
+    const html = buildExecutiveDeckV2(input([popRow()]));
+    expect(html).toContain('id="deck-fullscreen-button"');
+    expect(html).toContain('aria-label="ملء الشاشة"');
+    expect(html).toContain("root.requestFullscreen || root.webkitRequestFullscreen");
+    expect(html).toContain("button.hidden = true");
+    expect(html).toContain("document.addEventListener('fullscreenchange', sync)");
+    expect(html).toContain("document.addEventListener('fullscreenerror', disable)");
+    expect(html).toContain("aria-pressed=\"false\"");
+    expect(html).toMatch(/@media print\{[\s\S]*?\.btn-fullscreen\{display:none!important;\}/);
+  });
+
+  it("uses the configurable Arabic labels for the full-screen control", () => {
+    setLabel("exec_deck_fullscreen_enter", "عرض موسّع");
+    setLabel("exec_deck_fullscreen_exit", "إنهاء العرض الموسّع");
+    try {
+      const html = buildExecutiveDeckV2(input([popRow()]));
+      expect(html).toContain('aria-label="عرض موسّع"');
+      expect(html).toContain('data-exit-label="إنهاء العرض الموسّع"');
+    } finally {
+      resetLabel("exec_deck_fullscreen_enter");
+      resetLabel("exec_deck_fullscreen_exit");
+    }
   });
 
   it("omits the footer entirely when no revisions are supplied", () => {
