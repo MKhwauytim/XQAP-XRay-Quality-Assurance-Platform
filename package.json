@@ -1,7 +1,7 @@
 {
   "name": "x-ray-quality-app",
   "private": true,
-  "version": "57.7.0",
+  "version": "57.8.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
