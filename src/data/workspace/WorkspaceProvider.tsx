@@ -9,8 +9,10 @@ import {
 import {
   checkWorkspaceStructure,
   createWorkspaceStructure,
+  ensureDirectoryPermission,
   isFileSystemAccessSupported,
   loadWorkspaceFiles,
+  queryDirectoryPermission,
   selectWorkspaceDirectory,
   type DirectoryHandleLike
 } from "../storage/fileSystemAccess";
@@ -21,6 +23,7 @@ import {
   type WorkspaceContextValue
 } from "./WorkspaceContext";
 import { createDemoWorkspace } from "./demoWorkspace";
+import { getLabels } from "../labels/labelsStore";
 import { setReadOnlyMode } from "../storage/readOnlyMode";
 import { WORKSPACE_PERMISSION_LOST_EVENT } from "../storage/workspaceWriteAccess";
 
@@ -60,6 +63,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
 
   const [missingItems, setMissingItems] = useState<string[]>([]);
   const [invalidItems, setInvalidItems] = useState<string[]>([]);
+  const [pendingReconnect, setPendingReconnect] = useState(false);
 
   const [message, setMessage] = useState(
     isFileSystemAccessSupported()
@@ -71,6 +75,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     handle: DirectoryHandleLike,
     options?: { persist?: boolean; restored?: boolean }
   ): Promise<void> => {
+    setPendingReconnect(false);
     setDirectoryHandle(handle);
     setSelectedDirectoryName(handle.name);
 
@@ -120,6 +125,18 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
         }
 
         setMessage(`جار إعادة الاتصال بمساحة العمل: ${persisted.directoryName}.`);
+        const permission = await queryDirectoryPermission(
+          persisted.directoryHandle,
+          "read"
+        );
+        if (permission !== "granted") {
+          setDirectoryHandle(persisted.directoryHandle);
+          setSelectedDirectoryName(persisted.directoryName);
+          setPendingReconnect(true);
+          setStatus("not_selected");
+          setMessage(getLabels().wsgate_picker_reconnect_msg);
+          return;
+        }
         await applyWorkspaceHandle(persisted.directoryHandle, {
           persist: false,
           restored: true
@@ -147,13 +164,24 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     try {
       setStatus("checking");
       setMessage(`جار إعادة الاتصال بمساحة العمل: ${persisted.directoryName}.`);
+      const hasReadPermission = await ensureDirectoryPermission(
+        persisted.directoryHandle,
+        "read"
+      );
+      if (!hasReadPermission) {
+        setPendingReconnect(true);
+        setStatus("not_selected");
+        setMessage(getLabels().wsgate_picker_reconnect_msg);
+        return;
+      }
       await applyWorkspaceHandle(persisted.directoryHandle, {
         persist: false,
         restored: true
       });
     } catch {
-      setStatus("permission_denied");
-      setMessage("تعذر استعادة مساحة العمل المحفوظة. اختر المجلد يدوياً.");
+      setPendingReconnect(true);
+      setStatus("not_selected");
+      setMessage(getLabels().wsgate_picker_reconnect_msg);
     }
   }, [applyWorkspaceHandle]);
 
@@ -169,7 +197,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       setStatus("checking");
       setMessage("جار اختيار وفحص مجلد مساحة العمل.");
 
-      const handle = await selectWorkspaceDirectory("readwrite");
+      const handle = await selectWorkspaceDirectory("read");
       await applyWorkspaceHandle(handle);
     } catch (error) {
       if (isAbortError(error)) {
@@ -270,6 +298,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     setLoadedFiles(emptyLoadedFiles);
     setMissingItems([]);
     setInvalidItems([]);
+    setPendingReconnect(false);
 
     setStatus(
       isFileSystemAccessSupported() ? "not_selected" : "unsupported_browser"
@@ -314,7 +343,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       invalidItems,
       message,
       isSupported: isFileSystemAccessSupported(),
-      pendingReconnect: false,
+      pendingReconnect,
       selectWorkspace,
       reconnectWorkspace,
       reloadWorkspace,
@@ -329,6 +358,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       loadedFiles,
       missingItems,
       invalidItems,
+      pendingReconnect,
       message,
       selectWorkspace,
       reconnectWorkspace,

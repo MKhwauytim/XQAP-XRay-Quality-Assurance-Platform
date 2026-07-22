@@ -1,7 +1,22 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 
 import { createMemoryDirectory } from "./memoryDirectory";
-import { createWorkspaceStructure, readJsonFile, writeJsonFile } from "./fileSystemAccess";
+import {
+  checkWorkspaceStructure,
+  createWorkspaceStructure,
+  readJsonFile,
+  writeJsonFile,
+} from "./fileSystemAccess";
+
+test("workspace checks require read permission only", async () => {
+  const dir = createMemoryDirectory();
+  const queryPermission = vi.fn(async () => "granted" as const);
+  dir.queryPermission = queryPermission;
+
+  await checkWorkspaceStructure(dir);
+
+  expect(queryPermission).toHaveBeenCalledWith({ mode: "read" });
+});
 
 test("writeJsonFile produces a .bak snapshot on the second write", async () => {
   const dir = createMemoryDirectory();

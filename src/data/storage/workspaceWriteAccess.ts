@@ -6,7 +6,7 @@ export class WorkspacePermissionError extends Error {
   readonly code = "workspace_permission_unavailable";
 
   constructor() {
-    super("فُقد إذن الكتابة على مساحة العمل. أعد الاتصال بالمجلد ثم حاول مرة أخرى.");
+    super("يلزم السماح بالكتابة على مساحة العمل لإكمال هذا الإجراء.");
     this.name = "WorkspacePermissionError";
   }
 }
@@ -37,9 +37,20 @@ async function assertCurrentWritePermission(
 ): Promise<void> {
   if (!directoryHandle.queryPermission) return;
 
-  const state = await directoryHandle.queryPermission.call(directoryHandle, {
+  let state = await directoryHandle.queryPermission.call(directoryHandle, {
     mode: "readwrite",
   });
+
+  if (state === "prompt" && directoryHandle.requestPermission) {
+    try {
+      state = await directoryHandle.requestPermission.call(directoryHandle, {
+        mode: "readwrite",
+      });
+    } catch {
+      throw new WorkspacePermissionError();
+    }
+  }
+
   if (state !== "granted") {
     throw new WorkspacePermissionError();
   }
@@ -47,8 +58,9 @@ async function assertCurrentWritePermission(
 
 /**
  * Revalidates the live File System Access permission immediately before a disk
- * command. It deliberately does not call requestPermission: permission prompts
- * belong to the explicit workspace reconnect flow and require user activation.
+ * command. A remembered workspace is opened read-only, so the first mutation
+ * requests write access from the user instead of forcing them to pick the
+ * directory again.
  */
 export async function withWorkspaceWriteAccess<T>(
   directoryHandle: DirectoryHandleLike,
@@ -58,7 +70,9 @@ export async function withWorkspaceWriteAccess<T>(
     await assertCurrentWritePermission(directoryHandle);
     return await operation();
   } catch (error) {
-    if (isPermissionFailure(error)) notifyPermissionLost();
+    if (!(error instanceof WorkspacePermissionError) && isPermissionFailure(error)) {
+      notifyPermissionLost();
+    }
     throw error;
   }
 }

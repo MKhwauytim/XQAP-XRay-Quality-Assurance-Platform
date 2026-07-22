@@ -11,10 +11,12 @@ import {
 
 function withPermission(
   state: "granted" | "denied" | "prompt",
+  requestedState: "granted" | "denied" = "granted",
 ): DirectoryHandleLike {
   return {
     ...createMemoryDirectory("permission-test"),
     queryPermission: vi.fn(async () => state),
+    requestPermission: vi.fn(async () => requestedState),
   };
 }
 
@@ -28,22 +30,51 @@ describe("withWorkspaceWriteAccess", () => {
     expect(operation).toHaveBeenCalledOnce();
   });
 
+  it("requests permission and runs the command when write access is needed", async () => {
+    const directory = withPermission("prompt");
+    const operation = vi.fn(async () => "saved");
+
+    await expect(
+      withWorkspaceWriteAccess(directory, operation),
+    ).resolves.toBe("saved");
+    expect(directory.requestPermission).toHaveBeenCalledWith({ mode: "readwrite" });
+    expect(operation).toHaveBeenCalledOnce();
+  });
+
   it.each(["denied", "prompt"] as const)(
-    "fails before writing and broadcasts permission loss when state is %s",
+    "fails before writing without disconnecting readable workspace when state is %s",
     async (state) => {
       const operation = vi.fn(async () => "must-not-run");
       const listener = vi.fn();
       window.addEventListener(WORKSPACE_PERMISSION_LOST_EVENT, listener);
 
       await expect(
-        withWorkspaceWriteAccess(withPermission(state), operation),
+        withWorkspaceWriteAccess(withPermission(state, "denied"), operation),
       ).rejects.toBeInstanceOf(WorkspacePermissionError);
 
       expect(operation).not.toHaveBeenCalled();
-      expect(listener).toHaveBeenCalledOnce();
+      expect(listener).not.toHaveBeenCalled();
       window.removeEventListener(WORKSPACE_PERMISSION_LOST_EVENT, listener);
     },
   );
+
+  it("keeps the readable workspace connected when a write prompt cannot open", async () => {
+    const directory = withPermission("prompt");
+    directory.requestPermission = vi.fn(async () => {
+      const error = new Error("User activation is required");
+      error.name = "SecurityError";
+      throw error;
+    });
+    const listener = vi.fn();
+    window.addEventListener(WORKSPACE_PERMISSION_LOST_EVENT, listener);
+
+    await expect(
+      withWorkspaceWriteAccess(directory, async () => "must-not-run"),
+    ).rejects.toBeInstanceOf(WorkspacePermissionError);
+
+    expect(listener).not.toHaveBeenCalled();
+    window.removeEventListener(WORKSPACE_PERMISSION_LOST_EVENT, listener);
+  });
 
   it("broadcasts permission errors raised after a granted preflight", async () => {
     const listener = vi.fn();
