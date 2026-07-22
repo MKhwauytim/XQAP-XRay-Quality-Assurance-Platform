@@ -23,7 +23,7 @@ export const TAB_CATALOG: readonly TabCatalogEntry[] = [
   { id: "ew/xray-results", label: "نتائج فحص الأشعة", parentId: "employee-workspace", allowedRoles: ALL_ROLES },
   { id: "ew/referral-approval", label: "اعتماد الطلبات", parentId: "employee-workspace", allowedRoles: ALL_ROLES },
   { id: "ew/inspection-form", label: "نموذج الفحص (مساحة العمل)", parentId: "employee-workspace", allowedRoles: ALL_ROLES },
-  { id: "ew/notifications", label: "مركز الإشعارات", parentId: "employee-workspace", allowedRoles: ALL_ROLES },
+  { id: "ew/notifications", label: "مركز الإشعارات", allowedRoles: ALL_ROLES },
   { id: "reports", label: "إدارة التقارير", allowedRoles: REPORT_ROLES },
   { id: "reports/reports", label: "التقارير", parentId: "reports", allowedRoles: REPORT_ROLES },
   { id: "reports/kpi", label: "مؤشرات الأداء", parentId: "reports", allowedRoles: ["manager", "admin"] },

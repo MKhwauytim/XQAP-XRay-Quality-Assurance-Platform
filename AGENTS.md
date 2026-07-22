@@ -88,6 +88,7 @@ Top-level tabs are auto-discovered by `tabRegistry.ts` through `import.meta.glob
 |---|---|---:|
 | `population` | all roles | 10 |
 | `employee-workspace` | all roles | 15 |
+| `ew/notifications` | all roles | 20 |
 | `reports` | guest, supervisor, manager, admin | 25 |
 | `archive` | guest, supervisor, manager, admin | 30 |
 | `user-management` | admin | 40 |

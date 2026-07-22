@@ -146,12 +146,13 @@ Month folder names follow `{month}-{MonthName-en}-{year}` (e.g. `5-May-2026`). L
 
 Tabs are auto-discovered by `tabRegistry.ts`. Each top-level tab exports a default component and `tabConfig`; its metadata must agree with `src/auth/tabCatalog.ts`.
 
-**Current tabs (as of 2026-07-02):**
+**Current tabs (as of 2026-07-22):**
 
 | Tab id | File | Roles | Order | Sub-tabs |
 |--------|------|-------|-------|----------|
 | `population` | `Tabs/Population/` | all | 10 | `process`, `browse` |
 | `employee-workspace` | `Tabs/EmployeeWorkspace/` | all | 15 | `ew/xray-referrals`, `ew/xray-results`, `ew/referral-approval`, `ew/inspection-form` (renders `Tabs/TemplateBuilder/`) |
+| `ew/notifications` | `Tabs/NotificationCenter/` | all (defaults to manager, admin) | 20 | — |
 | `reports` | `Tabs/Reports/` | guest, supervisor, manager, admin | 25 | `reports`, `kpi` (manager, admin), `report-designer` (supervisor, manager, admin → `Tabs/ReportDesigner/`) |
 | `archive` | `Tabs/Archive/` | guest, supervisor, manager, admin | 30 | — |
 | `user-management` | `Tabs/UserManagement/` | admin | 40 | `users`, `page-permissions`, `feature-permissions`, `activity`, `actions` |

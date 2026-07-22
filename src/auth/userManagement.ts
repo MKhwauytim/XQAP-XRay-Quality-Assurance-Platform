@@ -418,7 +418,7 @@ export function createDefaultPermissions(): RolePermission[] {
     { role: "guest",      tabId: "ew/xray-results",         access: "none" },
     { role: "guest",      tabId: "ew/referral-approval",    access: "none" },
     { role: "guest",      tabId: "ew/inspection-form",      access: "none" },
-    // Notification center (ew/notifications) — admin + manager post/monitor only;
+    // Notification center (ew/notifications) is a top-level category for admin + manager;
     // audience roles (employee/supervisor) get the banner, not the manager view.
     { role: "guest",      tabId: "ew/notifications",        access: "none" },
     { role: "employee",   tabId: "ew/notifications",        access: "none" },
