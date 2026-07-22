@@ -162,6 +162,11 @@ describe("buildExecutiveDeckV2 — production path (no opts)", () => {
     expect(html).toContain("e.key === 'ArrowRight'");
   });
 
+  it("renders the slide counter with dir=\"ltr\" so the N / M numerals don't reverse in this RTL report", () => {
+    const html = buildExecutiveDeckV2(input([popRow()]));
+    expect(html).toContain('id="deck-slide-counter" dir="ltr"');
+  });
+
   it("uses the configurable Arabic labels for the slide prev/next controls", () => {
     setLabel("exec_deck_slideshow_prev", "الشريحة السابقة (مخصص)");
     setLabel("exec_deck_slideshow_next", "الشريحة التالية (مخصص)");

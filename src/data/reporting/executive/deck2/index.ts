@@ -186,6 +186,7 @@ const DECK_FULLSCREEN_SCRIPT = `(function(){
     button.setAttribute('aria-label', label);
     button.setAttribute('title', label);
     if (active) {
+      button.blur();
       renderSlide();
       showControls();
     } else {
@@ -214,8 +215,8 @@ const DECK_FULLSCREEN_SCRIPT = `(function(){
 
   document.addEventListener('keydown', function(e){
     if (!current()) return;
-    if (e.key === 'ArrowLeft' || e.key === 'PageUp') { goTo(activeIndex - 1); showControls(); }
-    else if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') { goTo(activeIndex + 1); showControls(); }
+    if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); goTo(activeIndex - 1); showControls(); }
+    else if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') { e.preventDefault(); goTo(activeIndex + 1); showControls(); }
   });
 
   document.addEventListener('click', function(e){
@@ -288,7 +289,7 @@ ${footerNote}
 </div>
 <button type="button" class="btn-slide-nav btn-slide-prev" id="deck-slide-prev" aria-label="${slidePrevLabel}" title="${slidePrevLabel}">${icon("arrow", 20)}</button>
 <button type="button" class="btn-slide-nav btn-slide-next" id="deck-slide-next" aria-label="${slideNextLabel}" title="${slideNextLabel}">${icon("arrow", 20)}</button>
-<span class="deck-slide-counter" id="deck-slide-counter"></span>
+<span class="deck-slide-counter" id="deck-slide-counter" dir="ltr"></span>
 <script>${DECK_NAV_SCRIPT}${DECK_FULLSCREEN_SCRIPT}${variantPreview ? DECK_VARIANT_SCRIPT : ""}</script>
 </body>
 </html>`;

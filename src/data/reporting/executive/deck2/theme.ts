@@ -61,6 +61,7 @@ body.deck-fullscreen .slide.deck-slide-active{
   width:min(calc(100vw - 32px),calc((100dvh - 32px) * 297 / 167));
 }
 body.deck-fullscreen .srev-footer{display:none;}
+body.deck-fullscreen .slide-controls{display:none;}
 body.theme-light .btn-fullscreen{color:#fff;}
 .btn-fullscreen:focus-visible{outline:3px solid var(--gold);outline-offset:3px;}
 .btn-fullscreen-icon-compress{display:none;}
