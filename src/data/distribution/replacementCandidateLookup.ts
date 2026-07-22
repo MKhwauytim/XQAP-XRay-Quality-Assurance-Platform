@@ -7,6 +7,7 @@
  */
 
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import { logError } from "../storage/errorLogger";
 import { createRng, hashSeedString } from "../sampling/rng";
 import type { SampleMasterData } from "../sampling/sampleTypes";
 import type { DistributionEntry } from "./distributionTypes";
@@ -50,13 +51,29 @@ export async function getReplacementCandidatesIndexed(
   const manifest =
     sourceRevision === null ? null : await loadReplacementIndexManifest(directoryHandle, monthFolderName);
 
-  if (sourceRevision !== null && manifest && isReplacementIndexFresh(manifest, sourceRevision, liveHash)) {
+  // Tracked so a fallback (of any kind) leaves a breadcrumb in the error-log
+  // ring buffer — every failure mode here silently degrades to the safe full
+  // scan, which means nothing would otherwise indicate whether the index is
+  // actually working in production. Deliberately NOT logged on the success
+  // path: that would flood the 50-entry ring buffer with routine noise on
+  // every dialog open and drown out genuine errors.
+  let fallbackReason: string;
+  if (sourceRevision === null) {
+    fallbackReason = "no-population-revision";
+  } else if (!manifest) {
+    fallbackReason = "missing-index";
+  } else if (!isReplacementIndexFresh(manifest, sourceRevision, liveHash)) {
+    fallbackReason = "stale-index";
+  } else {
     const indexed = await readFromIndex(directoryHandle, monthFolderName, entry, sampleMaster, allEntries, stageMappings, manifest);
     if (indexed) return indexed;
     // Manifest claimed fresh but a bucket it lists failed to read (missing or
     // corrupt despite being published) — fall through to the safe full-scan
     // path rather than silently under-counting candidates.
+    fallbackReason = "bucket-read-failure";
   }
+
+  logError("distribution:replacement-index-fallback", `month=${monthFolderName} reason=${fallbackReason}`);
 
   const finalData = await loadMonthPopulationFinal(directoryHandle, monthFolderName);
   const populationRows = (finalData?.rows ?? []) as PreparedPopulationRow[];

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { createMemoryDirectory } from "../storage/memoryDirectory";
 import { safeWriteJson } from "../storage/safeWrite";
+import { clearErrors, getRecentErrors } from "../storage/errorLogger";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { getPopulationMonthDir, POPULATION_SUBFOLDERS } from "../workspace/workspacePaths";
 import type { PreparedPopulationRow } from "../population/populationTypes";
@@ -237,6 +238,68 @@ describe("getReplacementCandidatesIndexed", () => {
 
     const manifest = await loadReplacementIndexManifest(root, MONTH);
     expect(manifest).not.toBeNull();
+  });
+
+  describe("observability: whether the indexed path or the fallback actually fired", () => {
+    it("logs a breadcrumb with a reason when falling back because the index is missing", async () => {
+      const root = createMemoryDirectory();
+      const deadRow = makeRow("dead", "المستوى الأول", "PortA");
+      const entry = makeEntry(deadRow);
+      const rows = [deadRow, makeRow("c1", "المستوى الأول", "PortA")];
+      const monthDir = await getPopulationMonthDir(root, MONTH, true);
+      const processedDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: true });
+      await safeWriteJson(processedDir, "population.final.json", {
+        sourceMonthFolder: MONTH, processedAt: new Date().toISOString(), processedBy: "admin",
+        totalRows: rows.length, certScanRows: rows.length, nonCertScanRows: 0, rows,
+      });
+
+      clearErrors();
+      const sampleMaster = makeSampleMaster([deadRow]);
+      await getReplacementCandidatesIndexed(root, MONTH, entry, sampleMaster, [entry]);
+
+      const logged = getRecentErrors().filter((e) => e.context === "distribution:replacement-index-fallback");
+      expect(logged).toHaveLength(1);
+      expect(logged[0]!.message).toContain(MONTH);
+      expect(logged[0]!.message).toContain("missing-index");
+    });
+
+    it("logs a breadcrumb with a distinct reason when falling back because the index is stale", async () => {
+      const root = createMemoryDirectory();
+      const deadRow = makeRow("dead", "المستوى الأول", "PortA");
+      const entry = makeEntry(deadRow);
+      const rows = [deadRow, makeRow("c1", "المستوى الأول", "PortA")];
+      await seedFreshMonth(root, rows);
+      // Bump population.final.json's revision without rebuilding the index.
+      const monthDir = await getPopulationMonthDir(root, MONTH, false);
+      const processedDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false });
+      await safeWriteJson(processedDir, "population.final.json", {
+        sourceMonthFolder: MONTH, processedAt: new Date().toISOString(), processedBy: "admin",
+        totalRows: rows.length, certScanRows: rows.length, nonCertScanRows: 0, rows,
+      });
+
+      clearErrors();
+      const sampleMaster = makeSampleMaster([deadRow]);
+      await getReplacementCandidatesIndexed(root, MONTH, entry, sampleMaster, [entry]);
+
+      const logged = getRecentErrors().filter((e) => e.context === "distribution:replacement-index-fallback");
+      expect(logged).toHaveLength(1);
+      expect(logged[0]!.message).toContain("stale-index");
+    });
+
+    it("logs nothing when the index is fresh and used successfully — no noise on the routine path", async () => {
+      const root = createMemoryDirectory();
+      const deadRow = makeRow("dead", "المستوى الأول", "PortA");
+      const entry = makeEntry(deadRow);
+      const rows = [deadRow, makeRow("c1", "المستوى الأول", "PortA")];
+      await seedFreshMonth(root, rows);
+
+      clearErrors();
+      const sampleMaster = makeSampleMaster([deadRow]);
+      const result = await getReplacementCandidatesIndexed(root, MONTH, entry, sampleMaster, [entry]);
+
+      expect(result.recommended.map((r) => r.xrayImageId)).toEqual(["c1"]); // confirms the indexed path really ran
+      expect(getRecentErrors().filter((e) => e.context === "distribution:replacement-index-fallback")).toHaveLength(0);
+    });
   });
 
   describe("equivalence with the full-scan path (identical ids, identical order)", () => {
