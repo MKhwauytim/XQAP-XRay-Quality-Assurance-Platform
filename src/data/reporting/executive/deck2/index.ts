@@ -15,6 +15,7 @@ import { SOURCE_REVISIONS_CSS, sourceRevisionsFooterHtml } from "../../sourceRev
 import { ARABIC_FONT_FACE_CSS } from "../../../../branding/fonts";
 import type { ExecutiveReportInput } from "../../executiveReportTypes";
 import { formatMonthFolderShortLabel } from "../../../population/monthFolder";
+import { getLabels } from "../../../labels/labelsStore";
 
 /**
  * On-screen-only side nav (hidden under `@media print`, see theme.ts): lists
@@ -125,12 +126,50 @@ const DECK_VARIANT_SCRIPT = `(function(){
   }).catch(function(){});
 })();`;
 
+/** Full-screen presentation control for the exported, self-contained HTML. */
+const DECK_FULLSCREEN_SCRIPT = `(function(){
+  var button = document.getElementById('deck-fullscreen-button');
+  if (!button) return;
+  var root = document.documentElement;
+  var request = root.requestFullscreen || root.webkitRequestFullscreen;
+  var exit = document.exitFullscreen || document.webkitExitFullscreen;
+  function current(){ return document.fullscreenElement || document.webkitFullscreenElement; }
+  function disable(){
+    document.body.classList.remove('deck-fullscreen');
+    button.hidden = true;
+  }
+  if (typeof request !== 'function' || typeof exit !== 'function') { disable(); return; }
+  function sync(){
+    var active = Boolean(current());
+    var label = button.getAttribute(active ? 'data-exit-label' : 'data-enter-label');
+    document.body.classList.toggle('deck-fullscreen', active);
+    button.textContent = label;
+    button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    button.setAttribute('aria-label', label);
+    button.setAttribute('title', label);
+  }
+  button.addEventListener('click', function(){
+    var action;
+    try { action = current() ? exit.call(document) : request.call(root); }
+    catch (_) { disable(); return; }
+    if (action && typeof action.catch === 'function') action.catch(disable);
+  });
+  document.addEventListener('fullscreenchange', sync);
+  document.addEventListener('webkitfullscreenchange', sync);
+  document.addEventListener('fullscreenerror', disable);
+  document.addEventListener('webkitfullscreenerror', disable);
+  sync();
+})();`;
+
 export function buildDeckV2Html(
   slides: string,
   monthLabel: string,
   variantPreview = false,
   footerNote = "",
 ): string {
+  const labels = getLabels();
+  const fullscreenEnter = esc(labels.exec_deck_fullscreen_enter);
+  const fullscreenExit = esc(labels.exec_deck_fullscreen_exit);
   return `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -169,13 +208,14 @@ export function buildDeckV2Html(
           <span class="theme-toggle-thumb"></span>
         </span>
       </label>
+      <button class="btn btn-fullscreen" id="deck-fullscreen-button" type="button" aria-pressed="false" aria-label="${fullscreenEnter}" title="${fullscreenEnter}" data-enter-label="${fullscreenEnter}" data-exit-label="${fullscreenExit}">${fullscreenEnter}</button>
       <button class="btn" onclick="window.print()" title="اختر «حفظ كـ PDF» من المتصفح عند الطباعة، وليس «Microsoft Print to PDF»، لضمان الحجم والجودة الصحيحين">طباعة / PDF</button>
     </div>
   </div>
 ${slides}
 ${footerNote}
 </div>
-<script>${DECK_NAV_SCRIPT}${variantPreview ? DECK_VARIANT_SCRIPT : ""}</script>
+<script>${DECK_NAV_SCRIPT}${DECK_FULLSCREEN_SCRIPT}${variantPreview ? DECK_VARIANT_SCRIPT : ""}</script>
 </body>
 </html>`;
 }

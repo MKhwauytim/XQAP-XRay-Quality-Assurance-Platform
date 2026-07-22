@@ -29,6 +29,23 @@ export const DECK_V2_CSS = `
 }
 .deck-nav-item a:hover{background:rgba(255,255,255,.06);color:#fff;}
 .deck-nav-item.active a{background:rgba(244,180,0,.13);border-color:rgba(244,180,0,.4);color:var(--gold);}
+
+/* Full-screen review keeps the exit control available while fitting every
+   16:9 slide inside the current viewport. */
+body.deck-fullscreen{overflow-y:auto;scroll-snap-type:y mandatory;}
+body.deck-fullscreen .deck-nav{display:none;}
+body.deck-fullscreen .deck-viewer-v2{padding:78px 16px 16px;}
+body.deck-fullscreen .deck-toolbar{
+  position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:80;
+  width:min(1120px,calc(100vw - 32px));margin:0;padding:9px 14px;
+}
+body.deck-fullscreen .slide{
+  width:min(calc(100vw - 32px),calc((100dvh - 94px) * 297 / 167));
+  margin:0 auto 18px;scroll-snap-align:start;scroll-snap-stop:always;
+}
+body.deck-fullscreen .srev-footer{display:none;}
+body.theme-light .btn-fullscreen{color:#fff;}
+.btn-fullscreen:focus-visible{outline:3px solid var(--gold);outline-offset:3px;}
 @media screen and (min-width:1281px){
   .deck-viewer-v2{padding-inline-start:calc(236px + 16px);}
 }
@@ -37,6 +54,7 @@ export const DECK_V2_CSS = `
 }
 @media print{
   .deck-nav{display:none!important;}
+  .btn-fullscreen{display:none!important;}
 }
 
 /* ── Printed side tab rail (reference-mockup chrome, prints with the page) ── */
@@ -274,11 +292,6 @@ body.theme-light .v2-term-band.coral .v2-term-band-chip{background:rgba(255,118,
 .v2-stage-port-card .deck-table{width:100%;}
 .v2-stage-port-card .deck-table th,.v2-stage-port-card .deck-table td{padding:3px 6px;font-size:0.6rem;}
 .v2-stage-port-card .deck-table th{font-size:0.58rem;}
-/* Ghost rows: pad stages with fewer than TOP_N ports so every card's table has
-   identical geometry (same row count, totals row at the same height). Ordinary
-   <tr>s (real height + borders) with muted ink — the grid reads as deliberate. */
-.v2-stage-port-card .deck-table tr.v2-ghost td{color:rgba(255,255,255,.16);}
-body.theme-light .v2-stage-port-card .deck-table tr.v2-ghost td{color:rgba(10,45,74,.22);}
 /* Totals row (الإجمالي): a distinct summary band tinted with the card's own
    stage tone, so it reads as a conclusion rather than a sixth data row.
    color-mix is safe — this app is Chromium-only (File System Access API). */
@@ -301,11 +314,8 @@ body.theme-light .v2-stage-port-card .deck-table tfoot td{color:#0a2d4a;}
 .v2-stage-port-card.coral .v2-stage-port-figure{color:var(--coral);}
 
 /* ── Port population tables (land / sea, side by side) ────────────────────── */
-/* Tinted cards per the reference design: green = بري, blue = بحري. Both cards
-   stretch to equal height; every table ends with an الإجمالي totals row. A
-   single invisible ".v2-blank" spacer row (inline height:Npx, computed in
-   slides.ts from the exact leftover pixels in the card's budget) pins tfoot
-   flush to the card's bottom regardless of how many real ports are here. */
+/* Tinted cards per the reference design: green = بري, blue = بحري. Tables
+   contain only real data rows followed directly by the الإجمالي totals row. */
 .v2-port-split{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:stretch;height:100%;}
 .v2-port-col{
   display:flex;flex-direction:column;gap:0;min-width:0;
@@ -340,32 +350,6 @@ body.theme-light .v2-stage-port-card .deck-table tfoot td{color:#0a2d4a;}
 .v2-port-col .deck-table tfoot td{
   font-weight:900;color:#fff;background:rgba(255,255,255,.07);
   border-top:1px solid rgba(255,255,255,.2);border-bottom:0;
-}
-/* Spacer rows — push tfoot down to a fixed, consistent bottom position.
-   The <tr> (zebra-stripe background lives here) must stay transparent, or
-   every other blank row shows a faint stripe bleeding through. The <td>,
-   however, is painted with faint row separators at this tier's EXACT row
-   height (--ghost-row-h, set inline in slides.ts) so the leftover space
-   reads as continued empty grid rather than a void under the data rows
-   (owner-reported gap inconsistency, 2026-07-14). */
-.v2-port-col .deck-table tbody tr.v2-blank,
-.v2-port-col .deck-table tbody tr.v2-blank td{
-  border-bottom-color:transparent;color:transparent;
-}
-.v2-port-col .deck-table tbody tr.v2-blank{background:transparent!important;}
-.v2-port-col .deck-table tbody tr.v2-blank td{
-  background:repeating-linear-gradient(to bottom,
-    transparent 0,
-    transparent calc(var(--ghost-row-h,41.6px) - 1px),
-    rgba(255,255,255,.07) calc(var(--ghost-row-h,41.6px) - 1px),
-    rgba(255,255,255,.07) var(--ghost-row-h,41.6px))!important;
-}
-body.theme-light .v2-port-col .deck-table tbody tr.v2-blank td{
-  background:repeating-linear-gradient(to bottom,
-    transparent 0,
-    transparent calc(var(--ghost-row-h,41.6px) - 1px),
-    rgba(10,45,74,.09) calc(var(--ghost-row-h,41.6px) - 1px),
-    rgba(10,45,74,.09) var(--ghost-row-h,41.6px))!important;
 }
 /* Compact variant (small overflow, 1-3 rows): trims padding/font so a table
    can fit its full port list on one page instead of spilling a nearly empty
@@ -443,13 +427,29 @@ body.theme-light .v2-port-col .deck-table tbody tr.v2-blank td{
 }
 
 @media screen and (max-width:820px){
-  .v2-term-grid,.v2-port-split,.v2-cover-meta{grid-template-columns:1fr;}
+  .deck-viewer-v2{padding:12px 8px 36px;}
+  .deck-toolbar{position:relative;flex-wrap:wrap;margin-bottom:12px;padding:10px 12px;}
+  .deck-toolbar .deck-brand span{display:none;}
+  .deck-toolbar-actions{gap:8px;flex-wrap:wrap;}
+  .deck-toolbar .btn{padding:8px 11px;font-size:.72rem;}
+  .slide.v2{aspect-ratio:auto;min-height:0;overflow:visible;}
+  .slide.v2 .v2-rail{display:none;}
+  .slide.v2 .slide-inner{padding:24px 16px 28px;}
+  .slide.v2.title-slide.v2-cover .slide-inner{padding:100px 20px 36px;}
+  .slide.v2 .slide-body{overflow:visible;}
+  .v2-term-grid,.v2-port-split,.v2-cover-meta,.v2-stage-port-grid{grid-template-columns:1fr;grid-template-rows:auto;height:auto;}
+  .v2-port-col{overflow-x:auto;}
+  .v2-port-col .deck-table{min-width:0;table-layout:fixed;}
+  .v2-port-col .deck-table th:first-child,.v2-port-col .deck-table td:first-child{width:34%;overflow-wrap:anywhere;}
+  .v2-port-col .deck-table th:not(:first-child),.v2-port-col .deck-table td:not(:first-child){width:auto;}
+  .v2-stage-port-card .deck-table{table-layout:fixed;}
+  .v2-stage-port-card .deck-table th,.v2-stage-port-card .deck-table td{overflow-wrap:anywhere;}
 }
 
 /* ── Style-variant switcher (dev-preview only, never in production output) ── */
 /* .v2-variant-stack takes over the flex-sizing role of whatever container it
    sits in (\`.slide-body\` or directly \`.slide-inner\`), so wrapping existing
-   content in it does not change any pixel-budget math (TABLE_BUDGET_PX etc.)
+   content in it does not change the slide's flex sizing
    — only the ACTIVE panel is flex/visible, matching the original single-child
    layout the budget math was measured against. The switcher UI itself now
    lives in \`.slide-controls\` (next to the print toggle), not inside the
