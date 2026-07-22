@@ -155,6 +155,33 @@
   outline: none;
 }
 
+.arc-backup-export-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: -8px 0 18px;
+  padding: 12px 14px;
+  border: 1px solid var(--c-border, #DDE6EF);
+  border-radius: 8px;
+  background: var(--c-surface-2, #F6F8FA);
+  color: var(--c-navy-3, #143A68);
+  cursor: pointer;
+}
+
+.arc-backup-export-option input {
+  margin-top: 3px;
+}
+
+.arc-backup-export-option span {
+  display: grid;
+  gap: 3px;
+}
+
+.arc-backup-export-option small {
+  color: var(--c-text-muted, #5B6B7E);
+  line-height: 1.6;
+}
+
 .arc-meta-list div {
   min-width: 0;
   padding: 10px;

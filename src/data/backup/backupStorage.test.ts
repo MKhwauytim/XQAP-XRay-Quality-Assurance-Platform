@@ -3,9 +3,15 @@ import { describe, expect, it } from "vitest";
 import { createMemoryDirectory } from "../storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeWriteJson } from "../storage/safeWrite";
-import { getUserDataRoot } from "../workspace/workspacePaths";
+import { getSystemRoot, getUserDataRoot } from "../workspace/workspacePaths";
 import { WORKSPACE_FILE_NAMES } from "../workspace/workspaceDefaults";
-import { createBackup, loadArchiveStatus } from "./backupStorage";
+import {
+  assertXlsxDatasetWithinLimit,
+  createBackup,
+  loadArchiveStatus,
+  loadBackupHistory,
+  XLSX_MAX_ROWS_PER_DATASET,
+} from "./backupStorage";
 
 function makeRoot(): DirectoryHandleLike {
   return createMemoryDirectory("root") as DirectoryHandleLike;
@@ -43,6 +49,8 @@ describe("createBackup — Tier-1 Item F coverage", () => {
     expect(
       result.manifest.jsonFilesBackedUp.some((f) => f.endsWith("labels.snapshot.json"))
     ).toBe(true);
+    expect(result.manifest.xlsxFilesBackedUp).toEqual([]);
+    expect(result.manifest.datasets).toEqual([]);
   });
 });
 
@@ -108,7 +116,9 @@ describe("archive population path compatibility", () => {
       totalProcessedRows: 2,
     });
 
-    const backup = await createBackup(root, [month], "admin", "manual");
+    const backup = await createBackup(root, [month], "admin", "manual", {
+      includeXlsxExports: true,
+    });
     expect(backup.ok).toBe(true);
     if (!backup.ok) return;
     expect(backup.manifest.datasets).toEqual(
@@ -130,6 +140,50 @@ describe("archive population path compatibility", () => {
       hasRawRisk: true,
       totalProcessedRows: 2,
     });
+  });
+});
+
+describe("backup XLSX compatibility export", () => {
+  it("rejects a 400k-row dataset before allocating a worksheet", () => {
+    expect(() => assertXlsxDatasetWithinLimit("population-final", 400_000)).toThrow(
+      /تعذر إنشاء ملفات XLSX الاختيارية/
+    );
+    expect(() =>
+      assertXlsxDatasetWithinLimit("population-final", XLSX_MAX_ROWS_PER_DATASET)
+    ).not.toThrow();
+  });
+});
+
+describe("loadBackupHistory compatibility", () => {
+  it("reads legacy manifests with populated XLSX fields", async () => {
+    const root = makeRoot();
+    const systemDir = await getSystemRoot(root, true);
+    const backupsDir = await systemDir.getDirectoryHandle("backups", { create: true });
+    const legacyDir = await backupsDir.getDirectoryHandle("legacy-with-xlsx", { create: true });
+    await safeWriteJson(legacyDir, "backup.manifest.json", {
+      createdAt: "2026-07-01T00:00:00.000Z",
+      createdBy: "admin",
+      mode: "manual",
+      monthsFolders: [month.folderName],
+      jsonFilesBackedUp: ["1-population/month.json"],
+      xlsxFilesBackedUp: ["xlsx/population.xlsx"],
+      datasets: [{
+        dataset: "population-final",
+        monthFolderName: month.folderName,
+        rowCount: 400_000,
+        xlsxFiles: ["xlsx/population.xlsx"],
+      }],
+      rowLimitPerWorkbookPart: 250_000,
+      excelSheetRowLimit: 1_048_576,
+    });
+
+    await expect(loadBackupHistory(root)).resolves.toEqual([
+      expect.objectContaining({
+        folderName: "legacy-with-xlsx",
+        xlsxFilesCount: 1,
+        totalRows: 400_000,
+      }),
+    ]);
   });
 });
 

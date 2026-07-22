@@ -28,7 +28,9 @@ const LEGACY_SYSTEM_ROOT = ".system";
 const AUTO_STATE_FILE = "auto-backup-state.json";
 const AUTO_SETTINGS_FILE = "auto-backup-settings.json";
 const EXCEL_MAX_ROWS = 1_048_576;
-const XLSX_ROWS_PER_PART = 250_000;
+const XLSX_ROWS_PER_PART = 25_000;
+const XLSX_CELLS_PER_PART = 250_000;
+export const XLSX_MAX_ROWS_PER_DATASET = 100_000;
 
 /**
  * Backup retention policy (A8). Written policy, enforced in code:
@@ -119,8 +121,17 @@ export type MonthArchiveStatus = {
 };
 
 type BackupResult =
-  | { ok: true; folderName: string; manifest: BackupManifest }
+  | { ok: true; folderName: string; manifest: BackupManifest; xlsxWarning?: string }
   | { ok: false; error: string };
+
+export type CreateBackupOptions = {
+  /**
+   * Convenience exports are not part of the restorable snapshot. Keep them
+   * opt-in so routine and pre-restore backups do not duplicate the entire
+   * workspace through SheetJS in browser memory.
+   */
+  includeXlsxExports?: boolean;
+};
 
 export type RestoreResult =
   | { ok: true; restoredFiles: string[]; rollbackFolderName: string }
@@ -250,8 +261,26 @@ function flattenRecord(value: unknown, prefix = ""): Record<string, unknown> {
   return output;
 }
 
-function rowsToWorksheet(rows: Array<Record<string, unknown>>): XLSX.WorkSheet {
-  const header = Array.from(new Set(rows.flatMap((row) => Object.keys(row))));
+function collectHeaders(rows: Array<Record<string, unknown>>): string[] {
+  const headers = new Set<string>();
+  for (const row of rows) {
+    for (const key of Object.keys(row)) headers.add(key);
+  }
+  return Array.from(headers);
+}
+
+export function assertXlsxDatasetWithinLimit(dataset: string, rowCount: number): void {
+  if (rowCount <= XLSX_MAX_ROWS_PER_DATASET) return;
+  throw new Error(
+    `تعذر إنشاء ملفات XLSX الاختيارية: مجموعة ${dataset} تحتوي ${rowCount.toLocaleString("ar-SA")} صفاً، `
+    + `والحد الآمن هو ${XLSX_MAX_ROWS_PER_DATASET.toLocaleString("ar-SA")}. اكتملت نسخة JSON القابلة للاستعادة.`
+  );
+}
+
+function rowsToWorksheet(
+  rows: Array<Record<string, unknown>>,
+  header: string[]
+): XLSX.WorkSheet {
   return XLSX.utils.json_to_sheet(rows.length > 0 ? rows : [{}], { header });
 }
 
@@ -263,16 +292,25 @@ async function writeRowsAsChunkedXlsx(params: {
 }): Promise<string[]> {
   const { xlsxDir, dataset, monthFolderName, rows } = params;
   if (rows.length === 0) return [];
+  assertXlsxDatasetWithinLimit(dataset, rows.length);
 
   const safeDataset = sanitizeFilePart(dataset);
   const safeMonth = monthFolderName ? sanitizeFilePart(monthFolderName) : "all";
   const files: string[] = [];
-  const chunkSize = Math.min(XLSX_ROWS_PER_PART, EXCEL_MAX_ROWS - 1);
+  const header = collectHeaders(rows);
+  const chunkSize = Math.max(
+    1,
+    Math.min(
+      XLSX_ROWS_PER_PART,
+      EXCEL_MAX_ROWS - 1,
+      Math.floor(XLSX_CELLS_PER_PART / Math.max(1, header.length))
+    )
+  );
 
   for (let start = 0, part = 1; start < rows.length; start += chunkSize, part += 1) {
     const chunk = rows.slice(start, start + chunkSize);
     const workbook = XLSX.utils.book_new();
-    const worksheet = rowsToWorksheet(chunk);
+    const worksheet = rowsToWorksheet(chunk, header);
     XLSX.utils.book_append_sheet(workbook, worksheet, "data");
     const data = XLSX.write(workbook, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
     const fileName = `${safeDataset}-${safeMonth}-part-${String(part).padStart(3, "0")}.xlsx`;
@@ -577,12 +615,28 @@ async function exportMonthXlsx(params: {
 
   const manifest = await loadMonthJson<MonthManifestData>(directoryHandle, month.folderName, ["month.manifest.json"]);
   const population = await loadMonthJson<PopulationFinalData>(directoryHandle, month.folderName, [POPULATION_SUBFOLDERS.processed, "population.final.json"]);
+  assertXlsxDatasetWithinLimit("population-final", population?.rows.length ?? 0);
   const riskRaw = await loadMonthJson<MonthRawData>(directoryHandle, month.folderName, [POPULATION_SUBFOLDERS.raw, "risk.raw.json"]);
+  assertXlsxDatasetWithinLimit("risk-raw", riskRaw?.rows.length ?? 0);
   const biRaw = await loadMonthJson<MonthRawData>(directoryHandle, month.folderName, [POPULATION_SUBFOLDERS.raw, "bi.raw.json"]);
+  assertXlsxDatasetWithinLimit("bi-raw", biRaw?.rows.length ?? 0);
   const sample = await loadMonthJson<SampleMasterData>(directoryHandle, month.folderName, ["sample", "sample.master.json"]);
+  assertXlsxDatasetWithinLimit("sample-master", sample?.rows.length ?? 0);
   const distribution = await loadMonthJson<DistributionCurrentData>(directoryHandle, month.folderName, ["distribution.current.json"]);
+  assertXlsxDatasetWithinLimit("distribution-current", distribution?.entries.length ?? 0);
   const distributionLog = await loadMonthJson<{ events?: unknown[] }>(directoryHandle, month.folderName, ["distribution.log.json"]);
+  assertXlsxDatasetWithinLimit("distribution-log", distributionLog?.events?.length ?? 0);
   const employeeFiles = await loadAllEmployeeFiles(directoryHandle, month.folderName);
+  const answerItemCount = employeeFiles.reduce((sum, file) => sum + (file.items?.length ?? 0), 0);
+  const answerFieldCount = employeeFiles.reduce(
+    (sum, file) => sum + (file.items ?? []).reduce(
+      (itemSum, item) => itemSum + (item.answers?.length ?? 0),
+      0
+    ),
+    0
+  );
+  assertXlsxDatasetWithinLimit("employee-answer-items", answerItemCount);
+  assertXlsxDatasetWithinLimit("employee-answer-fields", answerFieldCount);
 
   const datasets: Array<{ name: string; rows: Array<Record<string, unknown>> }> = [
     { name: "manifest", rows: manifest ? [addMonth(flattenRecord(manifest), month)] : [] },
@@ -696,14 +750,14 @@ export async function createBackup(
   directoryHandle: DirectoryHandleLike,
   months: MonthFolderInfo[],
   username: string,
-  mode: BackupMode = "manual"
+  mode: BackupMode = "manual",
+  options: CreateBackupOptions = {}
 ): Promise<BackupResult> {
   try {
     const now = new Date();
     const folderName = backupFolderName(now, mode);
     const backupsDir = await getBackupsDir(directoryHandle);
     const backupDir = await ensureDir(backupsDir, folderName);
-    const xlsxDir = await ensureDir(backupDir, "xlsx");
 
     // Best-effort: capture a fresh labels-override snapshot before walking
     // the tree, so it is included by copyAllJsonFiles below (Tier-1 Item F).
@@ -711,11 +765,21 @@ export async function createBackup(
 
     const jsonFilesBackedUp = await copyAllJsonFiles(directoryHandle, backupDir);
     const datasets: BackupDatasetSummary[] = [];
+    let xlsxWarning: string | undefined;
 
-    for (const month of months) {
-      datasets.push(...await exportMonthXlsx({ directoryHandle, xlsxDir, month }));
+    if (options.includeXlsxExports) {
+      try {
+        const xlsxDir = await ensureDir(backupDir, "xlsx");
+        for (const month of months) {
+          datasets.push(...await exportMonthXlsx({ directoryHandle, xlsxDir, month }));
+        }
+        datasets.push(...await exportTemplatesXlsx(directoryHandle, xlsxDir));
+      } catch (error) {
+        xlsxWarning = error instanceof Error
+          ? error.message
+          : "تعذر إنشاء ملفات XLSX الاختيارية. اكتملت نسخة JSON القابلة للاستعادة.";
+      }
     }
-    datasets.push(...await exportTemplatesXlsx(directoryHandle, xlsxDir));
 
     const xlsxFilesBackedUp = datasets.flatMap((dataset) => dataset.xlsxFiles);
     const manifest: BackupManifest = {
@@ -745,7 +809,7 @@ export async function createBackup(
       await pruneAutoBackups(directoryHandle);
     }
 
-    return { ok: true, folderName, manifest };
+    return { ok: true, folderName, manifest, xlsxWarning };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Unknown error" };
   }
