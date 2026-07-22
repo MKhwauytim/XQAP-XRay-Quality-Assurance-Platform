@@ -7,17 +7,16 @@
  * Contract for approvals:
  * 1. Re-load fresh request state — never trust the rendered list. A request
  *    that is no longer "pending" returns `already-reviewed`.
- * 2. Replay guard: if the distribution log already contains events stamped
- *    with this request's `sourceRequestId`, the transfer ALREADY happened —
- *    skip re-emission and go straight to recording the decision. (This must
- *    run BEFORE the ownership check: after the events apply, ownership has
- *    moved, and a retry following a decision-write failure would otherwise
- *    abort forever.)
- * 3. Ownership check (only when events are about to be emitted): every id
- *    must still be assigned to the requesting employee in an active state —
- *    otherwise abort ALL (atomic semantics), no auto-deny.
- * 4. Events are appended in ONE call (atomic within the log). A decision-write
- *    failure afterwards is retriable: the replay guard prevents double-apply.
+ * 2. Replay guard: compare request ids per sample against persisted reassignment
+ *    events. A complete transfer skips re-emission; a partial immutable-file
+ *    batch resumes only the missing ids. This runs BEFORE ownership checks because
+ *    ownership has already moved for successfully persisted ids.
+ * 3. Ownership check (only for events still to emit): every missing id must remain
+ *    assigned to the requesting employee in an active state — otherwise abort
+ *    without auto-denying the request.
+ * 4. Missing events are appended in one appendDistributionEvents call. Each event
+ *    is independently durable, so the post-append fold verifies the entire request
+ *    before the decision is recorded. A decision-write failure remains retriable.
  *
  * MonthClosedError from the storage gates propagates to the caller.
  */
@@ -29,7 +28,7 @@ import {
   loadDistributionLog,
   loadOrDeriveDistributionCurrent,
 } from "../distribution/distributionStorage";
-import { buildReassignEvent } from "../distribution/distributionLog";
+import { buildReassignEvent, deriveCurrentDistribution } from "../distribution/distributionLog";
 import { executeReplacement } from "../distribution/replacement";
 import { loadMonthPopulationFinal } from "../population/populationStorage";
 import { loadSampleMaster } from "../sampling/sampleStorage";
@@ -77,19 +76,37 @@ export async function approveReferral(params: {
     return { ok: false, code: "already-reviewed" };
   }
 
-  // 2. Replay guard (before ownership — see module docblock).
+  // 2. Replay guard (before ownership — see module docblock). Immutable event
+  //    files are written individually, so an interrupted batch can be partial;
+  //    track replay state per sample rather than treating one event as the
+  //    completion of the whole request.
   const distLog = await loadDistributionLog(directoryHandle, monthFolderName);
-  const alreadyApplied = distLog.events.some((e) => e.sourceRequestId === fresh.requestId);
+  const appliedIds = new Set(
+    distLog.events
+      .filter(
+        (event) =>
+          event.sourceRequestId === fresh.requestId &&
+          event.eventType === "reassigned" &&
+          event.reassignedTo === fresh.toEmployee
+      )
+      .map((event) => event.xrayImageId)
+  );
+  const missingIds = fresh.xrayImageIds.filter((id) => !appliedIds.has(id));
+  const alreadyApplied = missingIds.length === 0;
+  const sample = await loadSampleMaster(directoryHandle, monthFolderName);
+  if (!sample) {
+    return { ok: false, code: "invalid-request", error: "تعذر تحميل ملف العينة للتحقق من الإحالة." };
+  }
 
   if (!alreadyApplied) {
     // 3. Ownership check — all-or-nothing.
-    const sample = await loadSampleMaster(directoryHandle, monthFolderName);
-    const current = await loadOrDeriveDistributionCurrent(
-      directoryHandle,
-      monthFolderName,
-      sample?.rows ?? []
-    );
-    const notOwned = fresh.xrayImageIds.filter((id) => {
+    // Validate against the event log loaded above, which is the source of truth.
+    // distribution.current.json is only a rebuildable cache and can be stale even
+    // when its revision metadata happens to match (for example after a restored or
+    // manually copied workspace). Trusting it here made approval fail while denial,
+    // which does not inspect distribution state, continued to work.
+    const current = deriveCurrentDistribution(distLog, sample.rows);
+    const notOwned = missingIds.filter((id) => {
       const entry = current?.entries.find((e) => e.xrayImageId === id);
       return (
         !entry ||
@@ -101,8 +118,8 @@ export async function approveReferral(params: {
       return { ok: false, code: "stale-ownership", staleIds: notOwned };
     }
 
-    // 4. One append = atomic within the log; every event carries the request id.
-    const events = fresh.xrayImageIds.map((id) =>
+    // 4. Append the missing batch; every event carries the request id.
+    const events = missingIds.map((id) =>
       buildReassignEvent({
         xrayImageId: id,
         assignedTo: fresh.fromEmployee,
@@ -116,6 +133,24 @@ export async function approveReferral(params: {
     if (!distResult.ok) {
       return { ok: false, code: "dist-failed", error: distResult.error };
     }
+
+  }
+
+  // Do not record an approved decision unless replaying all persisted events
+  // actually produces the complete requested ownership transfer. This also
+  // verifies the no-append replay path after an earlier decision-write failure.
+  const persistedLog = await loadDistributionLog(directoryHandle, monthFolderName);
+  const persistedCurrent = deriveCurrentDistribution(persistedLog, sample.rows);
+  const notTransferred = fresh.xrayImageIds.filter((id) => {
+    const entry = persistedCurrent.entries.find((candidate) => candidate.xrayImageId === id);
+    return !entry || entry.assignedTo !== fresh.toEmployee || entry.status !== "pending";
+  });
+  if (notTransferred.length > 0) {
+    return {
+      ok: false,
+      code: "dist-failed",
+      error: `تعذر التحقق من نقل العينات التالية: ${notTransferred.join("، ")}`,
+    };
   }
 
   // 5a. Cross-reviewer guard. Decisions live in per-supervisor files, so step 1's

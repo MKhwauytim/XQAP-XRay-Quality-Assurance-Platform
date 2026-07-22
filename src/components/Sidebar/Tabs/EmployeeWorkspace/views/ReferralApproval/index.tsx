@@ -149,7 +149,7 @@ export default function ReferralApproval({ directoryHandle }: Props) {
           description={describeDialog(dialog.request, dialog.action)}
           isApprove={dialog.action === "approve"}
           onClose={() => setDialog(null)}
-          onConfirm={(notes) => void (dialog.action === "approve" ? handleApprove(dialog.request, notes) : handleDeny(dialog.request, notes))}
+          onConfirm={(notes) => dialog.action === "approve" ? handleApprove(dialog.request, notes) : handleDeny(dialog.request, notes)}
         />
       )}
     </section>

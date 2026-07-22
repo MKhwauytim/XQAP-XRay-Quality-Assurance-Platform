@@ -154,6 +154,7 @@ export const DEFAULT_LABELS = {
   msg_request_already_reviewed: "تمت مراجعة هذا الطلب مسبقاً — تم تحديث القائمة.",
   msg_referral_stale_ownership: "تعذر الاعتماد — بعض العينات لم تعد معيّنة للموظف الطالب: {ids}. حدّث الصفحة وراجع الطلب.",
   msg_referral_decision_retry:  "تم نقل العينات لكن تعذر حفظ قرار الاعتماد — اضغط اعتماد مرة أخرى لإكمال التسجيل (لن يتكرر النقل).",
+  referral_review_saving:       "جارٍ حفظ القرار…",
 
   // Reopen-for-correction (Tier-1 Item D)
   ip_reopen_btn:                "إعادة فتح للتصحيح",

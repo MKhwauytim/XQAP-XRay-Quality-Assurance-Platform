@@ -16,8 +16,10 @@ import type { SampleMasterData } from "../sampling/sampleTypes";
 import {
   appendDistributionEvents,
   loadDistributionLog,
+  saveDistributionCurrent,
 } from "../distribution/distributionStorage";
 import {
+  DERIVE_VERSION,
   buildAssignEvent,
   buildReassignEvent,
   deriveCurrentDistribution,
@@ -141,6 +143,41 @@ describe("approveReferral", () => {
     expect(current.entries.every((e) => e.assignedTo === "emp2")).toBe(true);
   });
 
+  it("uses the immutable event log rather than a stale current cache for ownership validation", async () => {
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    await seed(root);
+
+    const log = await loadDistributionLog(root, MONTH);
+    const row = makeRow("A1");
+    await saveDistributionCurrent(root, MONTH, {
+      monthFolderName: MONTH,
+      deriveVersion: DERIVE_VERSION,
+      logRevision: log.revision,
+      eventSetId: log.eventSetId,
+      derivedAt: new Date().toISOString(),
+      totalAssigned: 2,
+      totalCompleted: 0,
+      totalReplaced: 0,
+      totalPending: 2,
+      entries: [
+        { xrayImageId: "A1", assignedTo: "wrong-owner", status: "pending", replacedById: null, lastEventAt: new Date().toISOString(), row },
+        { xrayImageId: "A2", assignedTo: "wrong-owner", status: "pending", replacedById: null, lastEventAt: new Date().toISOString(), row: makeRow("A2") },
+      ],
+    });
+
+    const result = await approveReferral({
+      directoryHandle: root,
+      monthFolderName: MONTH,
+      requestId: REQ_ID,
+      reviewedBy: "sup1",
+    });
+
+    expect(result).toEqual({ ok: true, alreadyApplied: false });
+    const current = deriveCurrentDistribution(await loadDistributionLog(root, MONTH), [makeRow("A1"), makeRow("A2")]);
+    expect(current.entries.every((entry) => entry.assignedTo === "emp2")).toBe(true);
+    expect((await loadReferralLog(root, MONTH)).requests[0]!.status).toBe("approved");
+  });
+
   it("replay after a decision-write failure emits zero new events and records the decision", async () => {
     const root = createMemoryDirectory("root") as DirectoryHandleLike;
     await seed(root);
@@ -172,6 +209,37 @@ describe("approveReferral", () => {
     // Decision recorded.
     const refLog = await loadReferralLog(root, MONTH);
     expect(refLog.requests[0]!.status).toBe("approved");
+  });
+
+  it("repairs a partially persisted immutable-event batch before recording approval", async () => {
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    await seed(root);
+
+    // Simulate interruption after the first independent immutable event file.
+    await appendDistributionEvents(root, MONTH, [
+      buildReassignEvent({
+        xrayImageId: "A1",
+        assignedTo: "emp1",
+        reassignedTo: "emp2",
+        eventBy: "sup1",
+        sourceRequestId: REQ_ID,
+      }),
+    ]);
+
+    const result = await approveReferral({
+      directoryHandle: root,
+      monthFolderName: MONTH,
+      requestId: REQ_ID,
+      reviewedBy: "sup1",
+    });
+
+    expect(result).toEqual({ ok: true, alreadyApplied: false });
+    const log = await loadDistributionLog(root, MONTH);
+    const requestEvents = log.events.filter((event) => event.sourceRequestId === REQ_ID);
+    expect(requestEvents.map((event) => event.xrayImageId).sort()).toEqual(["A1", "A2"]);
+    const current = deriveCurrentDistribution(log, [makeRow("A1"), makeRow("A2")]);
+    expect(current.entries.every((entry) => entry.assignedTo === "emp2")).toBe(true);
+    expect((await loadReferralLog(root, MONTH)).requests[0]!.status).toBe("approved");
   });
 
   it("non-pending request: no events, no decision change", async () => {
