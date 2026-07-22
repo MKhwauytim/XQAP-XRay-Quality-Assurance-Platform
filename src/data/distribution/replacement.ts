@@ -45,12 +45,45 @@ export type ReplacementCandidates = {
  */
 // Deterministic cap: draws `limit` rows with the caller's seeded RNG so the
 // same inputs always produce the same candidate list (audit reproducibility).
-function capSeeded<T>(pool: T[], limit: number, rng: Rng): T[] {
+// Exported so replacementCandidateLookup.ts can apply the identical cap to
+// rows sourced from the replacement-candidate index instead of a full scan.
+export function capSeeded<T>(pool: T[], limit: number, rng: Rng): T[] {
   if (pool.length <= limit) return pool;
   return drawWithoutReplacement(pool, limit, rng);
 }
 
-const REPLACEMENT_POOL_LIMIT = 100;
+export const REPLACEMENT_POOL_LIMIT = 100;
+
+/** Ids to exclude from candidacy: already sampled, or already owned by any
+ *  distribution entry. Exported so both the full-scan and indexed candidate
+ *  paths apply the exact same dedup rule. */
+export function buildExclusionSets(
+  sampleMaster: SampleMasterData,
+  allEntries: DistributionEntry[]
+): { sampleIds: Set<string>; ownedIds: Set<string> } {
+  return {
+    sampleIds: new Set(sampleMaster.rows.map((r) => r.xrayImageId)),
+    ownedIds: new Set(allEntries.map((e) => e.xrayImageId)),
+  };
+}
+
+/** A row is eligible as a replacement for `entry` when it has a valid id, isn't
+ *  the dead row itself, isn't already sampled/owned, and shares the dead row's
+ *  CertScan tier. Exported for reuse by the indexed candidate-lookup path. */
+export function isEligibleCandidate(
+  row: PreparedPopulationRow,
+  entry: DistributionEntry,
+  sampleIds: Set<string>,
+  ownedIds: Set<string>
+): boolean {
+  return (
+    Boolean(row.xrayImageId) &&
+    row.xrayImageId !== entry.xrayImageId &&
+    !sampleIds.has(row.xrayImageId) &&
+    !ownedIds.has(row.xrayImageId) &&
+    row.certScanStatus === entry.row.certScanStatus
+  );
+}
 
 export function getReplacementCandidates(
   entry: DistributionEntry,
@@ -63,21 +96,11 @@ export function getReplacementCandidates(
   // list on every call, so replacement pools are reproducible for audits.
   const rng = createRng(hashSeedString(`${sampleMaster.rngSeed}:${entry.xrayImageId}`));
 
-  // Build exclusion sets.
-  const sampleIds = new Set(sampleMaster.rows.map((r) => r.xrayImageId));
-  const ownedIds  = new Set(allEntries.map((e) => e.xrayImageId));
+  const { sampleIds, ownedIds } = buildExclusionSets(sampleMaster, allEntries);
   const deadStageKey = getStageKey(entry.row.stage, stageMappings);
-  const deadTier     = entry.row.certScanStatus;
 
   // Base pool: valid id, not the dead row itself, not already sampled, not owned, same tier.
-  const base = populationRows.filter(
-    (row) =>
-      Boolean(row.xrayImageId) &&
-      row.xrayImageId !== entry.xrayImageId &&
-      !sampleIds.has(row.xrayImageId) &&
-      !ownedIds.has(row.xrayImageId) &&
-      row.certScanStatus === deadTier
-  );
+  const base = populationRows.filter((row) => isEligibleCandidate(row, entry, sampleIds, ownedIds));
 
   // Primary pool: same stage.
   const sameStage = base.filter(

@@ -11,6 +11,12 @@ export type StageCounts = {
   unknown: number;
 };
 
+// The real return type of getStageKey (5 values, including "unknown") — as
+// opposed to the narrower 4-value StageKey re-exported above, which only
+// covers the mapped/known stages. Consumers that must handle every row
+// (e.g. a partitioned index) need this wider type, not StageKey.
+export type StageCountKey = keyof StageCounts;
+
 const STAGE_LABELS_AR: Record<StageKey, string> = {
   first: "المستوى الأول",
   second: "المستوى الثاني",
@@ -33,16 +39,25 @@ export function createEmptyStageCounts(): StageCounts {
   return { first: 0, second: 0, third: 0, fourth: 0, unknown: 0 };
 }
 
-export function getStageKey(
-  stage: string | null,
+// Single source of truth for "defaults + override" merge, so any code that
+// needs to reason about the mappings getStageKey will actually use (e.g. to
+// hash them for staleness detection) resolves them identically.
+export function resolveStageMappings(
   stageMappings?: Partial<StageAliasMappings>
-): keyof StageCounts {
-  const text = String(stage ?? "").trim();
-  const up = normalizeStageToken(text);
-  const mappings = {
+): StageAliasMappings {
+  return {
     ...DEFAULT_STAGE_MAPPINGS,
     ...(stageMappings ?? {})
   };
+}
+
+export function getStageKey(
+  stage: string | null,
+  stageMappings?: Partial<StageAliasMappings>
+): StageCountKey {
+  const text = String(stage ?? "").trim();
+  const up = normalizeStageToken(text);
+  const mappings = resolveStageMappings(stageMappings);
 
   for (const stageKey of ["first", "second", "third", "fourth"] as const) {
     const aliases = mappings[stageKey] ?? [];

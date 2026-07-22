@@ -1,5 +1,6 @@
 import * as XLSX from "xlsx";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import { withWorkspaceWriteAccess } from "../storage/workspaceWriteAccess";
 import { getSampleEmployeeDir, safeWorkspaceFilePart } from "../workspace/workspacePaths";
 import type { DistributionEntry } from "../distribution/distributionTypes";
 import type { ItemAnswer } from "./answerTypes";
@@ -80,10 +81,12 @@ export async function writeEmployeeXlsx(
 
   const buf: ArrayBuffer = XLSX.write(wb, { type: "array", bookType: "xlsx" });
 
-  const dir = await getSampleEmployeeDir(directoryHandle, monthFolderName, true);
-  const fh = await dir.getFileHandle(xlsxFileName(username), { create: true });
-  if (!fh.createWritable) return;
-  const writable = await fh.createWritable();
-  await (writable as unknown as { write: (data: unknown) => Promise<void> }).write(buf);
-  await writable.close();
+  await withWorkspaceWriteAccess(directoryHandle, async () => {
+    const dir = await getSampleEmployeeDir(directoryHandle, monthFolderName, true);
+    const fh = await dir.getFileHandle(xlsxFileName(username), { create: true });
+    if (!fh.createWritable) return;
+    const writable = await fh.createWritable();
+    await (writable as unknown as { write: (data: unknown) => Promise<void> }).write(buf);
+    await writable.close();
+  });
 }

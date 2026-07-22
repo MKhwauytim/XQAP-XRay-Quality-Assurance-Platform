@@ -2,7 +2,10 @@ import { expect, it, test } from "vitest";
 
 import { createMemoryDirectory } from "../storage/memoryDirectory";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { WorkspacePermissionError } from "../storage/workspaceWriteAccess";
+import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { saveMonthRun, loadAllSampleRows, loadBrowseRows, updateMonthStatus } from "./populationStorage";
+import { loadReplacementBucket, loadReplacementIndexManifest } from "./replacementIndexStorage";
 import { saveSampleMaster } from "../sampling/sampleStorage";
 import type { MonthManifestData, MonthRawData, PopulationFinalData } from "./monthTypes";
 import type { SampleMasterData } from "../sampling/sampleTypes";
@@ -144,6 +147,96 @@ test("saveMonthRun aborts (sampleExists) when a sample was drawn and overwrite i
   // With confirmedOverwrite the save proceeds.
   const forced = await saveMonthRun({ directoryHandle: dir, ...baseParams, confirmedOverwrite: true });
   expect(forced.ok).toBe(true);
+});
+
+test("saveMonthRun requests write permission before creating folders, on a freshly-restored read-only workspace", async () => {
+  // A remembered workspace (PR #36) opens with read permission only; the first
+  // save must request write access itself rather than assuming it already holds it.
+  const dir = createMemoryDirectory("root", {
+    initialWritePermission: "prompt",
+    writePermissionRequestOutcome: "granted",
+  });
+
+  const result = await saveMonthRun({ directoryHandle: dir, ...baseParams });
+
+  expect(result.ok).toBe(true);
+  if (!result.ok) return;
+  const population = await dir.getDirectoryHandle("1-population", { create: false });
+  const monthDir = await population.getDirectoryHandle("5-may-2026", { create: false });
+  expect(monthDir.name).toBe("5-may-2026");
+});
+
+test("saveMonthRun fails with the Arabic permission message, not a raw browser error, when the user declines write access", async () => {
+  const dir = createMemoryDirectory("root", {
+    initialWritePermission: "prompt",
+    writePermissionRequestOutcome: "denied",
+  });
+
+  const result = await saveMonthRun({ directoryHandle: dir, ...baseParams });
+
+  expect(result.ok).toBe(false);
+  if (result.ok) return;
+  expect(result.error).toBe(new WorkspacePermissionError().message);
+
+  // Nothing should have been left behind — the whole operation was declined before writing.
+  await expect(
+    dir.getDirectoryHandle("1-population", { create: false })
+  ).rejects.toThrow();
+});
+
+function withDeniedFolder(dir: DirectoryHandleLike, deniedName: string): DirectoryHandleLike {
+  return {
+    ...dir,
+    getDirectoryHandle: async (name: string, options?: { create?: boolean }) => {
+      if (name === deniedName) {
+        throw new Error(`Simulated failure creating "${deniedName}"`);
+      }
+      const child = await dir.getDirectoryHandle(name, options);
+      return withDeniedFolder(child, deniedName);
+    },
+  };
+}
+
+test("saveMonthRun writes a fresh replacement-candidate index alongside population.final.json", async () => {
+  const dir = createMemoryDirectory();
+  const result = await saveMonthRun({ directoryHandle: dir, ...baseParams });
+  expect(result.ok).toBe(true);
+
+  const manifest = await loadReplacementIndexManifest(dir, "5-may-2026");
+  expect(manifest).not.toBeNull();
+  expect(manifest?.totalIndexedRows).toBe(1);
+
+  // baseParams' one row is NonCertScan, stage unset -> "unknown".
+  const bucket = await loadReplacementBucket(dir, "5-may-2026", "NonCertscan", "unknown");
+  expect(bucket?.map((r) => r.xrayImageId)).toEqual(["A001"]);
+});
+
+test("reprocessing a month advances the index's sourceRevision and rebuilds bucket contents", async () => {
+  const dir = createMemoryDirectory();
+  await saveMonthRun({ directoryHandle: dir, ...baseParams });
+  const first = await loadReplacementIndexManifest(dir, "5-may-2026");
+
+  await saveMonthRun({
+    directoryHandle: dir,
+    ...baseParams,
+    confirmedOverwrite: true,
+    processedRows: [{ xrayImageId: "B002", certScanStatus: "NonCertscan" }],
+  });
+  const second = await loadReplacementIndexManifest(dir, "5-may-2026");
+
+  expect(second!.sourceRevision).toBeGreaterThan(first!.sourceRevision);
+  const bucket = await loadReplacementBucket(dir, "5-may-2026", "NonCertscan", "unknown");
+  expect(bucket?.map((r) => r.xrayImageId)).toEqual(["B002"]);
+});
+
+test("saveMonthRun still succeeds (ok:true) even when the replacement index fails to build", async () => {
+  const dir = withDeniedFolder(createMemoryDirectory(), "replacement-index");
+  const result = await saveMonthRun({ directoryHandle: dir, ...baseParams });
+
+  expect(result.ok).toBe(true);
+  // Confirms the simulated failure actually happened (not a vacuous pass).
+  const manifest = await loadReplacementIndexManifest(dir, "5-may-2026");
+  expect(manifest).toBeNull();
 });
 
 test("updateMonthStatus survives concurrent advances without losing the higher status (cross-machine CAS)", async () => {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createMemoryDirectory } from "../storage/memoryDirectory";
+import { WorkspacePermissionError } from "../storage/workspaceWriteAccess";
 import { writeEmployeeXlsx } from "./employeeXlsx";
 import { getSampleEmployeeDir } from "../workspace/workspacePaths";
 import type { DistributionEntry } from "../distribution/distributionTypes";
@@ -78,5 +79,36 @@ describe("employeeXlsx", () => {
     const employeeDir = await getSampleEmployeeDir(root, "5-may-2026", false);
     const fileHandle = await employeeDir.getFileHandle("bob.xlsx", { create: false });
     expect(fileHandle.name).toBe("bob.xlsx");
+  });
+
+  it("requests write permission and succeeds on a freshly-restored read-only workspace", async () => {
+    const root = createMemoryDirectory("root", {
+      initialWritePermission: "prompt",
+      writePermissionRequestOutcome: "granted",
+    });
+    const entries = [makeEntry("IMG-1", "carol")];
+
+    await expect(
+      writeEmployeeXlsx(root, "5-may-2026", "carol", entries)
+    ).resolves.not.toThrow();
+
+    // Confirms the write actually landed (not just "didn't throw") — a
+    // withWorkspaceWriteAccess that resolved without invoking the wrapped
+    // operation would pass the assertion above but fail this one.
+    const employeeDir = await getSampleEmployeeDir(root, "5-may-2026", false);
+    const fileHandle = await employeeDir.getFileHandle("carol.xlsx", { create: false });
+    expect(fileHandle.name).toBe("carol.xlsx");
+  });
+
+  it("rejects with the Arabic permission message, not a raw browser error, when write access is declined", async () => {
+    const root = createMemoryDirectory("root", {
+      initialWritePermission: "prompt",
+      writePermissionRequestOutcome: "denied",
+    });
+    const entries = [makeEntry("IMG-1", "dave")];
+
+    await expect(
+      writeEmployeeXlsx(root, "5-may-2026", "dave", entries)
+    ).rejects.toThrow(new WorkspacePermissionError().message);
   });
 });

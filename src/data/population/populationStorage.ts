@@ -2,6 +2,7 @@ import type { DirectoryHandleLike, FileHandleLike } from "../storage/fileSystemA
 import { safeWriteJson, safeWriteJsonText, safeReadJson, readEnvelopeRevision } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
 import { withResourceLock } from "../storage/webLocks";
+import { withWorkspaceWriteAccess } from "../storage/workspaceWriteAccess";
 import { logError } from "../storage/errorLogger";
 import { ensureMonthWritable, manifestLockKey } from "./monthLock";
 import { formatMonthFolderName, parseMonthFolderName, type MonthFolderInfo } from "./monthFolder";
@@ -16,6 +17,9 @@ import type { SampleMasterData } from "../sampling/sampleTypes";
 import type { DistributionCurrentData } from "../distribution/distributionTypes";
 import { loadOrDeriveDistributionCurrent } from "../distribution/distributionStorage";
 import { loadSampleMaster } from "../sampling/sampleStorage";
+import { loadPopulationConfig } from "./populationConfig";
+import { rebuildReplacementIndex } from "./replacementIndexStorage";
+import type { PreparedPopulationRow } from "./populationTypes";
 import {
   getPopulationMonthDir,
   getPopulationRoot,
@@ -258,100 +262,127 @@ async function saveMonthRunLocked(
 
     const now = new Date().toISOString();
 
-    // Ensure numbered population folder exists
-    const populationDir = await getPopulationRoot(directoryHandle, true);
+    // A remembered workspace (PR #36) opens with read permission only — request
+    // write access here, before the first folder is created, instead of letting
+    // a raw NotAllowedError surface from deep inside ensureFolder/saveBinaryFile.
+    return await withWorkspaceWriteAccess(directoryHandle, async () => {
+      // Ensure numbered population folder exists
+      const populationDir = await getPopulationRoot(directoryHandle, true);
 
-    // Create month folder and subfolders
-    const monthDir = await ensureFolder(populationDir, monthFolderName);
-    const rawDir = await ensureFolder(monthDir, POPULATION_SUBFOLDERS.raw);
-    const processedDir = await ensureFolder(monthDir, POPULATION_SUBFOLDERS.processed);
-    await ensureFolder(monthDir, "sample");
-    await ensureFolder(monthDir, "reports");
+      // Create month folder and subfolders
+      const monthDir = await ensureFolder(populationDir, monthFolderName);
+      const rawDir = await ensureFolder(monthDir, POPULATION_SUBFOLDERS.raw);
+      const processedDir = await ensureFolder(monthDir, POPULATION_SUBFOLDERS.processed);
+      await ensureFolder(monthDir, "sample");
+      await ensureFolder(monthDir, "reports");
 
-    // Copy source xlsx files as-is
-    if (params.riskSourceFile) {
-      const buf = await params.riskSourceFile.arrayBuffer();
-      const ext = params.riskSourceFile.name.split(".").pop() ?? "xlsx";
-      await saveBinaryFile(rawDir, `risk.source.${ext}`, buf);
-    }
-    if (params.biSourceFile) {
-      const buf = await params.biSourceFile.arrayBuffer();
-      const ext = params.biSourceFile.name.split(".").pop() ?? "xlsx";
-      await saveBinaryFile(rawDir, `bi.source.${ext}`, buf);
-    }
+      // Copy source xlsx files as-is
+      if (params.riskSourceFile) {
+        const buf = await params.riskSourceFile.arrayBuffer();
+        const ext = params.riskSourceFile.name.split(".").pop() ?? "xlsx";
+        await saveBinaryFile(rawDir, `risk.source.${ext}`, buf);
+      }
+      if (params.biSourceFile) {
+        const buf = await params.biSourceFile.arrayBuffer();
+        const ext = params.biSourceFile.name.split(".").pop() ?? "xlsx";
+        await saveBinaryFile(rawDir, `bi.source.${ext}`, buf);
+      }
 
-    // Save risk raw JSON — archive any prior import first (A5, immutable raw).
-    if (riskRawRows.length > 0) {
-      const supersedes = await archiveExistingRaw(rawDir, "risk");
-      const riskRaw: MonthRawData = {
-        sourceFileName: riskFileName ?? "unknown",
-        importedAt: now,
-        importedBy: username,
-        supersedes,
-        rows: riskRawRows
+      // Save risk raw JSON — archive any prior import first (A5, immutable raw).
+      if (riskRawRows.length > 0) {
+        const supersedes = await archiveExistingRaw(rawDir, "risk");
+        const riskRaw: MonthRawData = {
+          sourceFileName: riskFileName ?? "unknown",
+          importedAt: now,
+          importedBy: username,
+          supersedes,
+          rows: riskRawRows
+        };
+        await safeWriteJson(rawDir, "risk.raw.json", riskRaw);
+      }
+
+      // Save BI raw JSON — archive any prior import first (A5, immutable raw).
+      if (biRawRows.length > 0) {
+        const supersedes = await archiveExistingRaw(rawDir, "bi");
+        const biRaw: MonthRawData = {
+          sourceFileName: biFileName ?? "unknown",
+          importedAt: now,
+          importedBy: username,
+          supersedes,
+          rows: biRawRows
+        };
+        await safeWriteJson(rawDir, "bi.raw.json", biRaw);
+      }
+
+      // Save processed population
+      const finalData: PopulationFinalData = {
+        sourceMonthFolder: monthFolderName,
+        processedAt: now,
+        processedBy: username,
+        totalRows: processedRows.length,
+        certScanRows,
+        nonCertScanRows,
+        rows: processedRows
       };
-      await safeWriteJson(rawDir, "risk.raw.json", riskRaw);
-    }
+      await safeWriteJson(processedDir, "population.final.json", finalData);
 
-    // Save BI raw JSON — archive any prior import first (A5, immutable raw).
-    if (biRawRows.length > 0) {
-      const supersedes = await archiveExistingRaw(rawDir, "bi");
-      const biRaw: MonthRawData = {
-        sourceFileName: biFileName ?? "unknown",
-        importedAt: now,
-        importedBy: username,
-        supersedes,
-        rows: biRawRows
+      // Best-effort, non-fatal: a replacement-candidate lookup index (deliberate
+      // exception to the pending large-population performance proposal's phase
+      // sequence — see docs/edit logs/2026-07-22.md v59.0). Its failure must never
+      // sink an otherwise-successful population save; the replacement flow falls
+      // back to a full-population read when the index is missing or stale.
+      try {
+        const sourceRevision = await readEnvelopeRevision(processedDir, "population.final.json");
+        if (sourceRevision !== null) {
+          const config = await loadPopulationConfig(directoryHandle);
+          await rebuildReplacementIndex(
+            directoryHandle,
+            monthFolderName,
+            processedRows as PreparedPopulationRow[],
+            config.stageMappings,
+            sourceRevision,
+            username
+          );
+        }
+      } catch (error) {
+        logError("population:rebuild-replacement-index", error);
+      }
+
+      if (params.processingSummary) {
+        const summaryData: ProcessingSummaryData = {
+          ...params.processingSummary,
+          savedAt: now,
+        };
+        await safeWriteJson(processedDir, "processing.summary.json", summaryData);
+      }
+
+      // Save month manifest
+      const manifest: MonthManifestData = {
+        monthFolderName,
+        month,
+        year,
+        processedAt: now,
+        processedBy: username,
+        runnedAt: now,
+        runnedBy: username,
+        riskFileName,
+        biFileName,
+        certScanUsed,
+        templateVersion: null,
+        rngSeed: null,
+        totalRawRows: riskRawRows.length,
+        totalProcessedRows: processedRows.length,
+        status: "processed-saved",
+        processingFingerprint: params.processingFingerprint ?? null,
+        processingSummaryFile: params.processingSummary
+          ? `${POPULATION_SUBFOLDERS.processed}/processing.summary.json`
+          : null,
+        sourceFiles: params.sourceFiles
       };
-      await safeWriteJson(rawDir, "bi.raw.json", biRaw);
-    }
+      await safeWriteJson(monthDir, "month.manifest.json", manifest);
 
-    // Save processed population
-    const finalData: PopulationFinalData = {
-      sourceMonthFolder: monthFolderName,
-      processedAt: now,
-      processedBy: username,
-      totalRows: processedRows.length,
-      certScanRows,
-      nonCertScanRows,
-      rows: processedRows
-    };
-    await safeWriteJson(processedDir, "population.final.json", finalData);
-
-    if (params.processingSummary) {
-      const summaryData: ProcessingSummaryData = {
-        ...params.processingSummary,
-        savedAt: now,
-      };
-      await safeWriteJson(processedDir, "processing.summary.json", summaryData);
-    }
-
-    // Save month manifest
-    const manifest: MonthManifestData = {
-      monthFolderName,
-      month,
-      year,
-      processedAt: now,
-      processedBy: username,
-      runnedAt: now,
-      runnedBy: username,
-      riskFileName,
-      biFileName,
-      certScanUsed,
-      templateVersion: null,
-      rngSeed: null,
-      totalRawRows: riskRawRows.length,
-      totalProcessedRows: processedRows.length,
-      status: "processed-saved",
-      processingFingerprint: params.processingFingerprint ?? null,
-      processingSummaryFile: params.processingSummary
-        ? `${POPULATION_SUBFOLDERS.processed}/processing.summary.json`
-        : null,
-      sourceFiles: params.sourceFiles
-    };
-    await safeWriteJson(monthDir, "month.manifest.json", manifest);
-
-    return { ok: true, monthFolderName };
+      return { ok: true, monthFolderName };
+    });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Unknown error during save";

@@ -8,6 +8,7 @@ import type { MonthManifestData, MonthRawData, PopulationFinalData } from "../po
 import type { SampleMasterData } from "../sampling/sampleTypes";
 import type { DirectoryHandleLike, FileHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson, safeWriteJsonText } from "../storage/safeWrite";
+import { withWorkspaceWriteAccess } from "../storage/workspaceWriteAccess";
 import { logError } from "../storage/errorLogger";
 import { exportLabelsSnapshot } from "../workspace/labelsSnapshot";
 import {
@@ -754,62 +755,67 @@ export async function createBackup(
   options: CreateBackupOptions = {}
 ): Promise<BackupResult> {
   try {
-    const now = new Date();
-    const folderName = backupFolderName(now, mode);
-    const backupsDir = await getBackupsDir(directoryHandle);
-    const backupDir = await ensureDir(backupsDir, folderName);
+    // A remembered workspace (PR #36) opens with read permission only — request
+    // write access here, before the backup folder is created, instead of letting
+    // a raw NotAllowedError surface from deep inside ensureDir/writeBinaryFile.
+    return await withWorkspaceWriteAccess(directoryHandle, async () => {
+      const now = new Date();
+      const folderName = backupFolderName(now, mode);
+      const backupsDir = await getBackupsDir(directoryHandle);
+      const backupDir = await ensureDir(backupsDir, folderName);
 
-    // Best-effort: capture a fresh labels-override snapshot before walking
-    // the tree, so it is included by copyAllJsonFiles below (Tier-1 Item F).
-    await exportLabelsSnapshot(directoryHandle);
+      // Best-effort: capture a fresh labels-override snapshot before walking
+      // the tree, so it is included by copyAllJsonFiles below (Tier-1 Item F).
+      await exportLabelsSnapshot(directoryHandle);
 
-    const jsonFilesBackedUp = await copyAllJsonFiles(directoryHandle, backupDir);
-    const datasets: BackupDatasetSummary[] = [];
-    let xlsxWarning: string | undefined;
+      const jsonFilesBackedUp = await copyAllJsonFiles(directoryHandle, backupDir);
+      const datasets: BackupDatasetSummary[] = [];
+      let xlsxWarning: string | undefined;
 
-    if (options.includeXlsxExports) {
-      try {
-        const xlsxDir = await ensureDir(backupDir, "xlsx");
-        for (const month of months) {
-          datasets.push(...await exportMonthXlsx({ directoryHandle, xlsxDir, month }));
+      if (options.includeXlsxExports) {
+        try {
+          const xlsxDir = await ensureDir(backupDir, "xlsx");
+          for (const month of months) {
+            datasets.push(...await exportMonthXlsx({ directoryHandle, xlsxDir, month }));
+          }
+          datasets.push(...await exportTemplatesXlsx(directoryHandle, xlsxDir));
+        } catch (error) {
+          xlsxWarning = error instanceof Error
+            ? error.message
+            : "تعذر إنشاء ملفات XLSX الاختيارية. اكتملت نسخة JSON القابلة للاستعادة.";
         }
-        datasets.push(...await exportTemplatesXlsx(directoryHandle, xlsxDir));
-      } catch (error) {
-        xlsxWarning = error instanceof Error
-          ? error.message
-          : "تعذر إنشاء ملفات XLSX الاختيارية. اكتملت نسخة JSON القابلة للاستعادة.";
       }
-    }
 
-    const xlsxFilesBackedUp = datasets.flatMap((dataset) => dataset.xlsxFiles);
-    const manifest: BackupManifest = {
-      createdAt: now.toISOString(),
-      createdBy: username,
-      mode,
-      monthsFolders: months.map((month) => month.folderName),
-      jsonFilesBackedUp,
-      xlsxFilesBackedUp,
-      datasets,
-      rowLimitPerWorkbookPart: XLSX_ROWS_PER_PART,
-      excelSheetRowLimit: EXCEL_MAX_ROWS,
-    };
+      const xlsxFilesBackedUp = datasets.flatMap((dataset) => dataset.xlsxFiles);
+      const manifest: BackupManifest = {
+        createdAt: now.toISOString(),
+        createdBy: username,
+        mode,
+        monthsFolders: months.map((month) => month.folderName),
+        jsonFilesBackedUp,
+        xlsxFilesBackedUp,
+        datasets,
+        rowLimitPerWorkbookPart: XLSX_ROWS_PER_PART,
+        excelSheetRowLimit: EXCEL_MAX_ROWS,
+      };
 
-    await safeWriteJson(backupDir, "backup.manifest.json", manifest);
-    if (mode === "automatic") {
-      const settings = await loadAutoBackupSettings(directoryHandle);
-      await safeWriteJson<AutoBackupState>(backupsDir, AUTO_STATE_FILE, {
-        lastBackupPeriodKey: periodKey(settings.frequency, now),
-        lastBackupAt: now.toISOString(),
-        lastBackupFolderName: folderName,
-        lastBackupBy: username,
-        frequency: settings.frequency,
-      });
-      // A8 retention: prune automatic backups beyond the retention count. Runs
-      // only after a fresh automatic backup so manual restores never trigger it.
-      await pruneAutoBackups(directoryHandle);
-    }
+      await safeWriteJson(backupDir, "backup.manifest.json", manifest);
+      if (mode === "automatic") {
+        const settings = await loadAutoBackupSettings(directoryHandle);
+        await safeWriteJson<AutoBackupState>(backupsDir, AUTO_STATE_FILE, {
+          lastBackupPeriodKey: periodKey(settings.frequency, now),
+          lastBackupAt: now.toISOString(),
+          lastBackupFolderName: folderName,
+          lastBackupBy: username,
+          frequency: settings.frequency,
+        });
+        // A8 retention: prune automatic backups beyond the retention count. Runs
+        // only after a fresh automatic backup so manual restores never trigger it.
+        await pruneAutoBackups(directoryHandle);
+      }
 
-    return { ok: true, folderName, manifest, xlsxWarning };
+      return { ok: true, folderName, manifest, xlsxWarning };
+    });
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Unknown error" };
   }
@@ -820,12 +826,20 @@ export async function createDailyAdminBackupIfDue(
   months: MonthFolderInfo[],
   username: string
 ): Promise<BackupResult | { ok: true; skipped: true; reason: string; state: AutoBackupState | null }> {
-  const backupsDir = await getBackupsDir(directoryHandle);
-  const settings = await loadAutoBackupSettings(directoryHandle);
-  const stateResult = await safeReadJson<StoredAutoBackupState>(backupsDir, AUTO_STATE_FILE);
-  const state = stateResult.ok ? normalizeAutoBackupState(stateResult.value) : null;
-  if (state?.frequency === settings.frequency && state.lastBackupPeriodKey === periodKey(settings.frequency)) {
-    return { ok: true, skipped: true, reason: "already-backed-up-today", state };
+  try {
+    const backupsDir = await getBackupsDir(directoryHandle);
+    const settings = await loadAutoBackupSettings(directoryHandle);
+    const stateResult = await safeReadJson<StoredAutoBackupState>(backupsDir, AUTO_STATE_FILE);
+    const state = stateResult.ok ? normalizeAutoBackupState(stateResult.value) : null;
+    if (state?.frequency === settings.frequency && state.lastBackupPeriodKey === periodKey(settings.frequency)) {
+      return { ok: true, skipped: true, reason: "already-backed-up-today", state };
+    }
+  } catch (error) {
+    // A freshly-restored remembered workspace (PR #36) may still be read-only
+    // at this point — resolve with a clean failure instead of rejecting just to
+    // answer "is a backup due"; createBackup below is the operation that
+    // actually needs (and correctly requests) write access.
+    return { ok: false, error: error instanceof Error ? error.message : "Unknown error" };
   }
   return createBackup(directoryHandle, months, username, "automatic");
 }
@@ -875,23 +889,28 @@ export async function restoreBackupSnapshot(params: {
   username: string;
 }): Promise<RestoreResult> {
   try {
-    const backupsDir = await getBackupsDir(params.directoryHandle);
-    const sourceBackupDir = await backupsDir.getDirectoryHandle(params.backupFolderName, { create: false });
-    const jsonDir = await sourceBackupDir.getDirectoryHandle("json", { create: false });
-    const rollback = await createBackup(params.directoryHandle, params.months, params.username, "pre-restore");
-    if (!rollback.ok) {
-      return { ok: false, error: `تعذر إنشاء نسخة الرجوع قبل الاستعادة: ${rollback.error}` };
-    }
+    // Restoring is the highest-stakes write in the app (it overwrites the live
+    // workspace) — re-check write access up front rather than discovering the
+    // gap partway through the pre-restore rollback backup or the tree restore.
+    return await withWorkspaceWriteAccess(params.directoryHandle, async () => {
+      const backupsDir = await getBackupsDir(params.directoryHandle);
+      const sourceBackupDir = await backupsDir.getDirectoryHandle(params.backupFolderName, { create: false });
+      const jsonDir = await sourceBackupDir.getDirectoryHandle("json", { create: false });
+      const rollback = await createBackup(params.directoryHandle, params.months, params.username, "pre-restore");
+      if (!rollback.ok) {
+        return { ok: false, error: `تعذر إنشاء نسخة الرجوع قبل الاستعادة: ${rollback.error}` };
+      }
 
-    const restored: string[] = [];
-    await restoreJsonTree({
-      sourceDir: jsonDir,
-      targetDir: params.directoryHandle,
-      sourcePath: "",
-      restored,
+      const restored: string[] = [];
+      await restoreJsonTree({
+        sourceDir: jsonDir,
+        targetDir: params.directoryHandle,
+        sourcePath: "",
+        restored,
+      });
+
+      return { ok: true, restoredFiles: restored, rollbackFolderName: rollback.folderName };
     });
-
-    return { ok: true, restoredFiles: restored, rollbackFolderName: rollback.folderName };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Unknown error" };
   }

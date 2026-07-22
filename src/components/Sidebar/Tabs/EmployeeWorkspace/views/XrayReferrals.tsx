@@ -17,13 +17,10 @@ import {
 } from "../../../../../data/distribution/distributionStorage";
 import type { DistributionEntry } from "../../../../../data/distribution/distributionTypes";
 import {
-  getReplacementCandidates,
   executeReplacement,
 } from "../../../../../data/distribution/replacement";
+import { getReplacementCandidatesIndexed } from "../../../../../data/distribution/replacementCandidateLookup";
 import { loadPopulationConfig, type StageAliasMappings } from "../../../../../data/population/populationConfig";
-import {
-  loadMonthPopulationFinal,
-} from "../../../../../data/population/populationStorage";
 import { useGlobalMonth } from "../../../../../data/month/useGlobalMonth";
 import {
   loadSampleMaster,
@@ -151,7 +148,6 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   const [statusMsg, setStatusMsg]   = useState<StatusMsg>(null);
   const [stageMappings, setStageMappings] = useState<StageAliasMappings | undefined>(undefined);
   const [sampleMaster, setSampleMaster] = useState<SampleMasterData | null>(null);
-  const [populationRows, setPopulationRows] = useState<PreparedPopulationRow[]>([]);
   const [replacementDialog, setReplacementDialog] = useState<ReplacementDialogState>(null);
   const [replacementError, setReplacementError] = useState<string | null>(null);
   // Permissioned oversight users can switch to "all", but the page opens on personal samples.
@@ -325,7 +321,6 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       setAnswers([]);
       setSampleMaster(null);
       setMyQuota(null);
-      setPopulationRows([]);
       setSelEntryId(null);
       setSelectedIds(new Set());
       setLoadState("ready");
@@ -392,9 +387,6 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       setEntries(visible);
       setSampleMaster(sample);
       setMyQuota(quota);
-      // populationRows is intentionally left empty here — populated on demand when
-      // the replacement dialog is opened (see openReplacementDialog).
-      setPopulationRows([]);
       setAnswers(answerItems);
       setLoadState("ready");
     } catch {
@@ -525,19 +517,19 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       setStatusMsg({ type: "error", text: "لا تملك صلاحية طلب الاستبدال، أو أن مساحة العمل للقراءة فقط." });
       return;
     }
-    if (!sampleMaster) return;
-    // Load full population lazily — only when the replacement dialog is opened.
-    let pop = populationRows;
-    if (pop.length === 0 && selMonth) {
-      try {
-        const population = await loadMonthPopulationFinal(directoryHandle, selMonth);
-        pop = (population?.rows ?? []) as PreparedPopulationRow[];
-        setPopulationRows(pop);
-      } catch { /* dialog will show empty candidates gracefully */ }
+    if (!sampleMaster || !selMonth) return;
+    // Reads only the matching replacement-index bucket when one exists for
+    // this month, instead of the full population.final.json — falls back to
+    // a full read (and rebuilds the index in the background) for months
+    // processed before this index existed.
+    let candidates: Awaited<ReturnType<typeof getReplacementCandidatesIndexed>>;
+    try {
+      candidates = await getReplacementCandidatesIndexed(
+        directoryHandle, selMonth, entry, sampleMaster, allEntries, stageMappings, username
+      );
+    } catch {
+      candidates = { recommended: [], all: [] }; // dialog will show empty candidates gracefully
     }
-    const candidates = getReplacementCandidates(
-      entry, pop, sampleMaster, allEntries, stageMappings
-    );
     setReplacementError(null);
     setReplacementDialog({ entry, ...candidates });
   }

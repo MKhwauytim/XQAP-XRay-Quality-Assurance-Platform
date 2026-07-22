@@ -1,15 +1,18 @@
 import { describe, expect, it } from "vitest";
 
-import { createMemoryDirectory } from "../storage/memoryDirectory";
+import { createMemoryDirectory, setSimulatedWritePermission } from "../storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeWriteJson } from "../storage/safeWrite";
+import { WorkspacePermissionError } from "../storage/workspaceWriteAccess";
 import { getSystemRoot, getUserDataRoot } from "../workspace/workspacePaths";
 import { WORKSPACE_FILE_NAMES } from "../workspace/workspaceDefaults";
 import {
   assertXlsxDatasetWithinLimit,
   createBackup,
+  createDailyAdminBackupIfDue,
   loadArchiveStatus,
   loadBackupHistory,
+  restoreBackupSnapshot,
   XLSX_MAX_ROWS_PER_DATASET,
 } from "./backupStorage";
 
@@ -199,5 +202,62 @@ describe("createBackup — month folder missing from population root (repro)", (
 
     const result = await createBackup(root, [month], "admin", "manual");
     expect(result.ok).toBe(true);
+  });
+});
+
+describe("write-permission gate (deferred workspace write access, PR #36 follow-up)", () => {
+  it("createBackup requests write permission and succeeds on a freshly-restored read-only workspace", async () => {
+    const root = createMemoryDirectory("root", {
+      initialWritePermission: "prompt",
+      writePermissionRequestOutcome: "granted",
+    });
+
+    const result = await createBackup(root, [], "admin", "manual");
+    expect(result.ok).toBe(true);
+  });
+
+  it("createBackup fails with the Arabic permission message, not a raw browser error, when write access is declined", async () => {
+    const root = createMemoryDirectory("root", {
+      initialWritePermission: "prompt",
+      writePermissionRequestOutcome: "denied",
+    });
+
+    const result = await createBackup(root, [], "admin", "manual");
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toBe(new WorkspacePermissionError().message);
+  });
+
+  it("restoreBackupSnapshot re-checks write permission independently of the backup that created the snapshot", async () => {
+    const root = makeRoot();
+    await seedPopulationLayout(root, "current");
+    const backup = await createBackup(root, [month], "admin", "manual");
+    expect(backup.ok).toBe(true);
+    if (!backup.ok) return;
+
+    // Simulate a new session reconnecting the same on-disk workspace read-only
+    // (PR #36) before the user triggers a restore.
+    setSimulatedWritePermission(root, "prompt", "denied");
+
+    const restored = await restoreBackupSnapshot({
+      directoryHandle: root,
+      months: [month],
+      backupFolderName: backup.folderName,
+      username: "admin",
+    });
+    expect(restored.ok).toBe(false);
+    if (restored.ok) return;
+    expect(restored.error).toBe(new WorkspacePermissionError().message);
+  });
+
+  it("createDailyAdminBackupIfDue resolves with a clean error instead of rejecting when write permission is unavailable", async () => {
+    const root = createMemoryDirectory("root", {
+      initialWritePermission: "prompt",
+      writePermissionRequestOutcome: "denied",
+    });
+
+    await expect(
+      createDailyAdminBackupIfDue(root, [], "admin")
+    ).resolves.toMatchObject({ ok: false });
   });
 });
