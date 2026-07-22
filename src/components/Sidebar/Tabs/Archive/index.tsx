@@ -82,6 +82,7 @@ export default function ArchiveTab() {
   const [autoSettings, setAutoSettings] = useState<AutoBackupSettings | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isBackingUp, setIsBackingUp] = useState(false);
+  const [includeXlsxExports, setIncludeXlsxExports] = useState(false);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [restoreTarget, setRestoreTarget] = useState<BackupHistoryItem | null>(null);
   // Set right after a successful restore — offers the opt-in Item F import step.
@@ -129,11 +130,15 @@ export default function ArchiveTab() {
     setMessage(null);
     try {
       const months = await listMonthFolders(directoryHandle);
-      const result = await createBackup(directoryHandle, months, username, "manual");
+      const result = await createBackup(directoryHandle, months, username, "manual", {
+        includeXlsxExports,
+      });
       if (result.ok) {
         setMessage({
-          type: "ok",
-          text: `تم إنشاء النسخة الاحتياطية في .system/backups/${result.folderName}`,
+          type: result.xlsxWarning ? "error" : "ok",
+          text: result.xlsxWarning
+            ? `تم إنشاء نسخة JSON في .system/backups/${result.folderName}. ${result.xlsxWarning}`
+            : `تم إنشاء النسخة الاحتياطية في .system/backups/${result.folderName}`,
         });
         await refresh();
       } else {
@@ -283,7 +288,7 @@ export default function ArchiveTab() {
       <PageHeader
         eyebrow="حفظ السجلات"
         title="الأرشيف"
-        subtitle="نسخ احتياطي تلقائي للمدير، مع نسخ JSON كاملة وتصدير XLSX مجزأ للبيانات الكبيرة."
+        subtitle="نسخ احتياطي سريع وموثوق للمدير، مع حفظ ملفات JSON الكاملة القابلة للاستعادة."
       >
         <button
             type="button"
@@ -295,6 +300,21 @@ export default function ArchiveTab() {
             {isBackingUp ? "جاري إنشاء النسخة..." : "نسخ احتياطي الآن"}
           </button>
       </PageHeader>
+
+      {canCreateBackup ? (
+        <label className="arc-backup-export-option">
+          <input
+            type="checkbox"
+            checked={includeXlsxExports}
+            disabled={isBackingUp}
+            onChange={(event) => setIncludeXlsxExports(event.target.checked)}
+          />
+          <span>
+            <strong>{getLabels().backup_include_xlsx_option}</strong>
+            <small>{getLabels().backup_include_xlsx_hint}</small>
+          </span>
+        </label>
+      ) : null}
 
       {message ? (
         <div className={message.type === "ok" ? "arc-msg-ok" : "arc-msg-error"} role="status">
@@ -386,8 +406,8 @@ export default function ArchiveTab() {
           </div>
           <ul className="arc-feature-list">
             <li>نسخ JSON كاملة لكل ملفات النظام والقوالب والأشهر، مع تجاهل مجلد النسخ القديمة.</li>
-            <li>ملفات XLSX لكل شهر: المجتمع، الخام، العينة، التوزيع، سجل التوزيع، وإجابات الموظفين.</li>
-            <li>تقسيم XLSX تلقائياً إلى أجزاء عند البيانات الكبيرة حتى لا يتجاوز أي ملف حد Excel.</li>
+            <li>تحتوي ملفات JSON على جميع البيانات اللازمة للاستعادة دون إنشاء نسخ XLSX مكررة وبطيئة.</li>
+            <li>يمكن تصدير البيانات للعرض والتحليل من أدوات التقارير المخصصة بشكل مستقل.</li>
           </ul>
         </section>
       </div>
