@@ -194,6 +194,8 @@ export const DEFAULT_LABELS = {
   exec_chart_stage_summary: "ملخص حسب المستوى",
   exec_deck_fullscreen_enter: "ملء الشاشة",
   exec_deck_fullscreen_exit:  "إنهاء ملء الشاشة",
+  exec_deck_slideshow_prev:   "الشريحة السابقة",
+  exec_deck_slideshow_next:   "الشريحة التالية",
 
   // Overview view
   ov_chart_trend:         "تطور المجتمع والعينة والإنجاز عبر الأشهر",

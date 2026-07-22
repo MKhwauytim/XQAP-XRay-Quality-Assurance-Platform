@@ -139,15 +139,61 @@ const DECK_FULLSCREEN_SCRIPT = `(function(){
     button.hidden = true;
   }
   if (typeof request !== 'function' || typeof exit !== 'function') { disable(); return; }
+
+  var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+  var activeIndex = 0;
+  var prevBtn = document.getElementById('deck-slide-prev');
+  var nextBtn = document.getElementById('deck-slide-next');
+  var counter = document.getElementById('deck-slide-counter');
+  var hideTimer = null;
+
+  function showControls(){
+    document.body.classList.add('deck-controls-visible');
+    if (hideTimer) clearTimeout(hideTimer);
+    hideTimer = setTimeout(function(){ document.body.classList.remove('deck-controls-visible'); }, 2500);
+  }
+
+  function renderSlide(){
+    for (var i = 0; i < slides.length; i++) {
+      slides[i].classList.toggle('deck-slide-active', i === activeIndex);
+    }
+    if (counter) counter.textContent = (activeIndex + 1) + ' / ' + slides.length;
+    if (prevBtn) prevBtn.disabled = activeIndex === 0;
+    if (nextBtn) nextBtn.disabled = activeIndex === slides.length - 1;
+  }
+
+  function goTo(index){
+    if (index < 0 || index >= slides.length || index === activeIndex) return;
+    activeIndex = index;
+    renderSlide();
+  }
+
   function sync(){
     var active = Boolean(current());
     var label = button.getAttribute(active ? 'data-exit-label' : 'data-enter-label');
+    if (active) {
+      var thresholdY = window.innerHeight * 0.35;
+      var idx = 0;
+      for (var i = 0; i < slides.length; i++) {
+        if (slides[i].getBoundingClientRect().top <= thresholdY) idx = i; else break;
+      }
+      activeIndex = idx;
+    }
     document.body.classList.toggle('deck-fullscreen', active);
-    button.textContent = label;
     button.setAttribute('aria-pressed', active ? 'true' : 'false');
     button.setAttribute('aria-label', label);
     button.setAttribute('title', label);
+    if (active) {
+      renderSlide();
+      showControls();
+    } else {
+      document.body.classList.remove('deck-controls-visible');
+      if (hideTimer) clearTimeout(hideTimer);
+      var el = slides[activeIndex];
+      if (el && el.scrollIntoView) el.scrollIntoView({ block: 'start' });
+    }
   }
+
   button.addEventListener('click', function(){
     var action;
     try { action = current() ? exit.call(document) : request.call(root); }
@@ -158,6 +204,25 @@ const DECK_FULLSCREEN_SCRIPT = `(function(){
   document.addEventListener('webkitfullscreenchange', sync);
   document.addEventListener('fullscreenerror', disable);
   document.addEventListener('webkitfullscreenerror', disable);
+
+  if (prevBtn) prevBtn.addEventListener('click', function(e){ e.stopPropagation(); goTo(activeIndex - 1); showControls(); });
+  if (nextBtn) nextBtn.addEventListener('click', function(e){ e.stopPropagation(); goTo(activeIndex + 1); showControls(); });
+
+  document.addEventListener('keydown', function(e){
+    if (!current()) return;
+    if (e.key === 'ArrowLeft' || e.key === 'PageUp') { goTo(activeIndex - 1); showControls(); }
+    else if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') { goTo(activeIndex + 1); showControls(); }
+  });
+
+  document.addEventListener('click', function(e){
+    if (!current()) return;
+    if (e.target.closest('.btn-slide-nav, .deck-slide-counter, #deck-fullscreen-button')) return;
+    goTo(activeIndex + 1);
+    showControls();
+  });
+
+  document.addEventListener('mousemove', function(){ if (current()) showControls(); });
+
   sync();
 })();`;
 
@@ -170,6 +235,8 @@ export function buildDeckV2Html(
   const labels = getLabels();
   const fullscreenEnter = esc(labels.exec_deck_fullscreen_enter);
   const fullscreenExit = esc(labels.exec_deck_fullscreen_exit);
+  const slidePrevLabel = esc(labels.exec_deck_slideshow_prev);
+  const slideNextLabel = esc(labels.exec_deck_slideshow_next);
   return `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -208,13 +275,16 @@ export function buildDeckV2Html(
           <span class="theme-toggle-thumb"></span>
         </span>
       </label>
-      <button class="btn btn-fullscreen" id="deck-fullscreen-button" type="button" aria-pressed="false" aria-label="${fullscreenEnter}" title="${fullscreenEnter}" data-enter-label="${fullscreenEnter}" data-exit-label="${fullscreenExit}">${fullscreenEnter}</button>
+      <button class="btn btn-fullscreen" id="deck-fullscreen-button" type="button" aria-pressed="false" aria-label="${fullscreenEnter}" title="${fullscreenEnter}" data-enter-label="${fullscreenEnter}" data-exit-label="${fullscreenExit}"><span class="btn-fullscreen-icon btn-fullscreen-icon-expand">${icon("expand", 15)}</span><span class="btn-fullscreen-icon btn-fullscreen-icon-compress">${icon("compress", 15)}</span></button>
       <button class="btn" onclick="window.print()" title="اختر «حفظ كـ PDF» من المتصفح عند الطباعة، وليس «Microsoft Print to PDF»، لضمان الحجم والجودة الصحيحين">طباعة / PDF</button>
     </div>
   </div>
 ${slides}
 ${footerNote}
 </div>
+<button type="button" class="btn-slide-nav btn-slide-prev" id="deck-slide-prev" aria-label="${slidePrevLabel}" title="${slidePrevLabel}">${icon("arrow", 20)}</button>
+<button type="button" class="btn-slide-nav btn-slide-next" id="deck-slide-next" aria-label="${slideNextLabel}" title="${slideNextLabel}">${icon("arrow", 20)}</button>
+<span class="deck-slide-counter" id="deck-slide-counter"></span>
 <script>${DECK_NAV_SCRIPT}${DECK_FULLSCREEN_SCRIPT}${variantPreview ? DECK_VARIANT_SCRIPT : ""}</script>
 </body>
 </html>`;

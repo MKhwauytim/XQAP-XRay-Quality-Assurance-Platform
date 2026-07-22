@@ -142,6 +142,39 @@ describe("buildExecutiveDeckV2 — production path (no opts)", () => {
     }
   });
 
+  it("uses an icon-only expand/compress fullscreen button instead of a text label", () => {
+    const html = buildExecutiveDeckV2(input([popRow()]));
+    expect(html).toContain('class="btn-fullscreen-icon btn-fullscreen-icon-expand"');
+    expect(html).toContain('class="btn-fullscreen-icon btn-fullscreen-icon-compress"');
+    expect(html).not.toContain(">ملء الشاشة</button>");
+  });
+
+  it("renders single-slide presentation navigation elements and script", () => {
+    const html = buildExecutiveDeckV2(input([popRow()]));
+    expect(html).toContain('id="deck-slide-prev"');
+    expect(html).toContain('id="deck-slide-next"');
+    expect(html).toContain('id="deck-slide-counter"');
+    expect(html).toContain("var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'))");
+    expect(html).toContain("classList.toggle('deck-slide-active'");
+    expect(html).toContain("document.addEventListener('keydown'");
+    expect(html).toContain("document.addEventListener('mousemove'");
+    expect(html).toContain("e.key === 'ArrowLeft'");
+    expect(html).toContain("e.key === 'ArrowRight'");
+  });
+
+  it("uses the configurable Arabic labels for the slide prev/next controls", () => {
+    setLabel("exec_deck_slideshow_prev", "الشريحة السابقة (مخصص)");
+    setLabel("exec_deck_slideshow_next", "الشريحة التالية (مخصص)");
+    try {
+      const html = buildExecutiveDeckV2(input([popRow()]));
+      expect(html).toContain('aria-label="الشريحة السابقة (مخصص)"');
+      expect(html).toContain('aria-label="الشريحة التالية (مخصص)"');
+    } finally {
+      resetLabel("exec_deck_slideshow_prev");
+      resetLabel("exec_deck_slideshow_next");
+    }
+  });
+
   it("omits the footer entirely when no revisions are supplied", () => {
     // Match markup, not the bare substring — SOURCE_REVISIONS_CSS always ships
     // the `.srev-file` selector text (same false-positive noted above for the
