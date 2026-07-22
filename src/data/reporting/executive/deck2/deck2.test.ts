@@ -175,6 +175,25 @@ describe("buildExecutiveDeckV2 — production path (no opts)", () => {
     }
   });
 
+  it("does not force-scroll on initial page load, only after a real fullscreen session ends", () => {
+    // everActivated guard: sync() runs once unconditionally at script init,
+    // before the user has ever entered fullscreen. Without the guard, that
+    // initial call fell into the "just exited" branch and scrolled to slide 0.
+    const html = buildExecutiveDeckV2(input([popRow()]));
+    expect(html).toContain("var everActivated = false;");
+    expect(html).toContain("everActivated = true;");
+    expect(html).toMatch(
+      /if \(everActivated\) \{\s*var el = slides\[activeIndex\];\s*if \(el && el\.scrollIntoView\) el\.scrollIntoView\(\{ block: 'start' \}\);\s*\}/,
+    );
+  });
+
+  it("excludes per-slide controls (e.g. the print-include toggle) from the click-to-advance handler", () => {
+    const html = buildExecutiveDeckV2(input([popRow()]));
+    expect(html).toContain(
+      "e.target.closest('.btn-slide-nav, .deck-slide-counter, #deck-fullscreen-button, .slide-controls')",
+    );
+  });
+
   it("omits the footer entirely when no revisions are supplied", () => {
     // Match markup, not the bare substring — SOURCE_REVISIONS_CSS always ships
     // the `.srev-file` selector text (same false-positive noted above for the
