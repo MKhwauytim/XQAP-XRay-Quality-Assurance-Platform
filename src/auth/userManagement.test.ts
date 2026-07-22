@@ -73,10 +73,11 @@ test("C1 regression: 4 formerly-inherited sub-tabs keep their effective access f
   }
 });
 
-test("MANAGED_TABS registers the notification center as a sub-tab of employee-workspace", () => {
+test("MANAGED_TABS registers the notification center as a top-level category", () => {
   const tab = MANAGED_TABS.find((t) => t.id === NOTIFICATIONS_TAB_ID);
   expect(tab).toBeDefined();
-  expect(tab?.parentId).toBe("employee-workspace");
+  expect(tab?.parentId).toBeUndefined();
+  expect(TAB_ROLE_CEILINGS[NOTIFICATIONS_TAB_ID]).toEqual(ALL_ROLES);
 });
 
 test("ew/notifications manager view defaults to admin + manager only", () => {
