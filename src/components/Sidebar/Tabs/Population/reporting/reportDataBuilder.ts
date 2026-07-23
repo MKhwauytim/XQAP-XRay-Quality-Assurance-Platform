@@ -1,7 +1,9 @@
 import type { BiWorkbookResult } from "../biData/biDataTypes";
 import { getStageKey as getNormalizedStageKey } from "../components/helpers";
+import { makeBiMatchKey } from "../processing/populationProcessor";
 import type { PopulationProcessingResult } from "../processing/populationProcessingTypes";
 import type { RiskWorkbookResult } from "../riskData/riskDataTypes";
+import { createEmptyStageCounts } from "../../../../../data/population/stageHelpers";
 import type {
   BiFillReportRow,
   BiRiskComparisonReport,
@@ -95,16 +97,6 @@ function formatReportMonth(date: Date): string {
   }).format(date);
 }
 
-function createEmptyStageCounts(): StageCounts {
-  return {
-    first: 0,
-    second: 0,
-    third: 0,
-    fourth: 0,
-    unknown: 0
-  };
-}
-
 function getStageKey(stage: string | null): keyof StageCounts {
   return getNormalizedStageKey(stage);
 }
@@ -123,10 +115,6 @@ function getPhaseLabel(scope: BuildPopulationReportInput["scope"]): string {
 
 function normalizeText(value: unknown): string {
   return String(value ?? "").trim().replace(/\s+/g, " ");
-}
-
-function normalizeXrayId(value: unknown): string {
-  return normalizeText(value).toUpperCase();
 }
 
 function asRecord(value: unknown): UnknownRecord {
@@ -152,15 +140,21 @@ function getStringFieldValue(row: unknown, keys: string[]): string {
 }
 
 function makeComparisonKey(row: unknown): string {
-  const xrayImageId = normalizeXrayId(
-    getFieldValue(row, ["xrayImageId", "xrayScanId", "xrayImageID"])
-  );
+  // Match on the same normalized xrayImageId+portName key the population
+  // processor and DataAccuracyReport use (makeBiMatchKey) — a bare
+  // xrayImageId collapses distinct rows that happen to share an ID across
+  // different ports into a single comparison entry, silently under-counting
+  // matches. The xrayScanId/xrayImageID probes were stale: normalized risk
+  // and BI rows only ever carry `xrayImageId`.
+  const xrayImageId = getStringFieldValue(row, ["xrayImageId"]);
 
   if (!xrayImageId) {
     return "";
   }
 
-  return xrayImageId;
+  const portName = getStringFieldValue(row, ["portName"]);
+
+  return makeBiMatchKey(xrayImageId, portName);
 }
 
 function valuesMatch(firstValue: unknown, secondValue: unknown): boolean {
@@ -450,11 +444,7 @@ function buildBiRiskComparisonReport(
 
       if (sampleDifferentRows.length < 10) {
         sampleDifferentRows.push({
-          xrayImageId: getStringFieldValue(riskRow, [
-            "xrayImageId",
-            "xrayScanId",
-            "xrayImageID"
-          ]),
+          xrayImageId: getStringFieldValue(riskRow, ["xrayImageId"]),
           portName: getStringFieldValue(riskRow, ["portName"]),
           differentFields
         });

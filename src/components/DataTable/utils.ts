@@ -34,7 +34,15 @@ export function looksLikeDate(v: string): boolean {
 // optionally a trailing "%". Deliberately narrow — IDs, phone numbers, and
 // codes that merely start with a digit must NOT match, or they'd be wrongly
 // end-aligned and shown with tabular-nums as if they were a magnitude.
-const NUMERIC_RE = /^-?\d{1,3}(,\d{3})*(\.\d+)?%?$|^-?\d+(\.\d+)?%?$/;
+//
+// B11: the plain-digit alternative (second branch) is bounded to ~6 digits
+// before an optional decimal fraction. It used to be `\d+` (unbounded), which
+// happily matched long ID/declaration/report numbers (national IDs, phone
+// numbers, tracking codes) — those merely LOOK numeric but aren't a magnitude,
+// so end-aligning them was visually wrong. The thousand-separated alternative
+// above is unaffected: an explicit "1,234,567" grouping is unambiguously a
+// magnitude no matter how long.
+const NUMERIC_RE = /^-?\d{1,3}(,\d{3})*(\.\d+)?%?$|^-?\d{1,6}(\.\d+)?%?$/;
 
 export function looksLikeNumber(v: string): boolean {
   return NUMERIC_RE.test(v.trim());

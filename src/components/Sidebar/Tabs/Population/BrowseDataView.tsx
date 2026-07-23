@@ -522,14 +522,22 @@ export default function BrowseDataView({
   const activeFilterCount = Object.values(columnFilters).filter((values) => values.length > 0).length;
   const openFilterValues = useMemo(() => {
     if (!openFilterColumn) return { options: [] as string[], truncated: false };
+    // Build the option list from rows filtered by every OTHER active column
+    // filter (and search) but NOT this column's own filter. Reusing the fully
+    // filtered `filteredRows` here caused a "single-select collapse": once a
+    // value was checked, `filteredRows` was already restricted to rows
+    // matching that value, so every other option vanished from the dropdown.
+    const rowsForOpenColumn = searchFilteredRows.filter((row) =>
+      rowMatchesColumnFilters(row, columnFilters, openFilterColumn, config.stageMappings)
+    );
     return buildBrowseFilterOptionPreview(
-      filteredRows,
+      rowsForOpenColumn,
       columnFilters[openFilterColumn] ?? [],
       (row) => getBrowseDisplayValue(row, openFilterColumn, config.stageMappings),
       compareBrowseFilterOptions,
       DATA_PAGE_SIZE,
     );
-  }, [openFilterColumn, columnFilters, filteredRows, config.stageMappings]);
+  }, [openFilterColumn, columnFilters, searchFilteredRows, config.stageMappings]);
   function saveCurrentPreset(nextOrder: string[], nextVisible: Set<string>): void {
     if (!directoryHandle) {
       return;

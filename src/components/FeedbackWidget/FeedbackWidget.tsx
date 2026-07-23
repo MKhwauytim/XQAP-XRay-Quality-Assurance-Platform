@@ -151,11 +151,16 @@ export function FeedbackWidget() {
   const safeMyPage = clampPage(myPage, myMessages.length);
   const safeAdminPage = clampPage(adminPage, filteredMessages.length);
 
-  // Non-admin authenticated roles have no toolbar feedback button (that trigger
-  // is admin-only in AdminToolbar). Give them a self-contained floating trigger so
-  // everyone can reach the feedback panel. Admins/demo (role "admin") are excluded
-  // to avoid a duplicate trigger.
-  const showFloatingTrigger = Boolean(session) && session?.role !== "admin";
+  // The read-only demo/viewer session reports role "admin" purely to unlock
+  // full tab visibility (see AdminToolbar's own isDemo/isRealAdmin split) — it
+  // is NOT a real admin. AdminToolbar's inline feedback button is gated on
+  // `isRealAdmin` (role "admin" AND NOT demo), so a plain `role !== "admin"`
+  // check here excluded demo sessions from the floating trigger too, leaving
+  // them with no way at all to open feedback. Only the REAL admin — who has
+  // AdminToolbar's own button — is excluded, to avoid a duplicate trigger.
+  const isDemoSession = session?.mode === "demo";
+  const showFloatingTrigger =
+    Boolean(session) && (session?.role !== "admin" || isDemoSession);
 
   return (
     <>

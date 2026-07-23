@@ -89,37 +89,3 @@ export function noticeBox(text: string): string {
 export function pagePanel(title: string, body: string): string {
   return `<div class="xr-panel"><div class="xr-panel-title">${esc(title)}</div>${body}</div>`;
 }
-
-/** Minimal inline SVG radar for up to 6 axes. values 0–100. */
-export function radarSvg(points: { label: string; value: number }[]): string {
-  const n = points.length;
-  if (n < 3) return "";
-  const cx = 150, cy = 130, r = 100;
-  const angle = (i: number) => (Math.PI * 2 * i) / n - Math.PI / 2;
-  const pt = (i: number, scale: number) => {
-    const a = angle(i);
-    return [cx + Math.cos(a) * r * scale, cy + Math.sin(a) * r * scale];
-  };
-  const rings = [0.25, 0.5, 0.75, 1].map(s =>
-    `<polygon points="${points.map((_, i) => pt(i, s).join(",")).join(" ")}" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>`
-  ).join("");
-  const axes = points.map((_, i) => {
-    const [x, y] = pt(i, 1);
-    return `<line x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>`;
-  }).join("");
-  const dataPath = points.map((p, i) => {
-    const [x, y] = pt(i, p.value / 100);
-    return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
-  }).join(" ") + "Z";
-  const labels = points.map((p, i) => {
-    const [x, y] = pt(i, 1.22);
-    const anchor = x < cx - 5 ? "end" : x > cx + 5 ? "start" : "middle";
-    return `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" text-anchor="${anchor}" font-size="9" fill="#7a9bb5" font-family="Somar,Arial">${esc(p.label)}</text>`;
-  }).join("");
-  return `<svg viewBox="0 0 300 260" xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
-    ${rings}${axes}
-    <path d="${dataPath}" fill="rgba(227,160,0,0.18)" stroke="#e3a000" stroke-width="2"/>
-    ${points.map((p, i) => { const [x,y] = pt(i, p.value/100); return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="#e3a000"/>`; }).join("")}
-    ${labels}
-  </svg>`;
-}

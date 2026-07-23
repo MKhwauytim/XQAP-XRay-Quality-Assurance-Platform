@@ -7,8 +7,9 @@ import {
   buildImageComparisons,
   classifyOutcome,
 } from "./decisionFactTable";
+import type { ImageResultComparison, ResultSource, ResultValue } from "./decisionFactTable";
 import { band, isRankable } from "./dataSufficiency";
-import { buildAggregates } from "./aggregates";
+import { buildAggregates, buildCrossTeamMatrix } from "./aggregates";
 import { buildReportModel } from "./reportModel";
 import type { ExecutiveReportInput } from "../../executiveReportTypes";
 import type { PreparedPopulationRow } from "../../../population/populationTypes";
@@ -300,6 +301,152 @@ describe("aggregates — cross-team agreement counted only when both present", (
     const manual = agg.reviewerAgreement.find((r) => r.source === "manual")!;
     expect(manual.comparable).toBe(0);
     expect(manual.agreementRate).toBeNull();
+  });
+});
+
+describe("buildCrossTeamMatrix — single-pass rewrite exact equivalence (perf B2)", () => {
+  // Independent "naive" oracle — a verbatim copy of the pre-optimization
+  // per-pair full-array-scan algorithm (15 separate scans of `comparisons`,
+  // one per source pair). Deliberately NOT imported from aggregates.ts: the
+  // point is to prove the production single-pass rewrite (one pass over
+  // `comparisons`, accumulating a Map<"sourceA|sourceB", {comparable,agree}>,
+  // then materializing the 15 cells) produces byte-for-byte identical output
+  // to the old approach — not merely that it is internally self-consistent.
+  const REFERENCE_SOURCES: ResultSource[] = [
+    "levelOne",
+    "levelTwo",
+    "manual",
+    "opposite",
+    "liveMeans",
+    "review",
+  ];
+
+  function referenceRate(num: number, den: number): number | null {
+    return den > 0 ? (num / den) * 100 : null;
+  }
+
+  function referenceCrossTeamMatrix(comparisons: ImageResultComparison[]): Array<{
+    sourceA: ResultSource;
+    sourceB: ResultSource;
+    comparable: number;
+    agree: number;
+    disagree: number;
+    agreementRate: number | null;
+  }> {
+    const cells: Array<{
+      sourceA: ResultSource;
+      sourceB: ResultSource;
+      comparable: number;
+      agree: number;
+      disagree: number;
+      agreementRate: number | null;
+    }> = [];
+    for (let i = 0; i < REFERENCE_SOURCES.length; i++) {
+      for (let j = i + 1; j < REFERENCE_SOURCES.length; j++) {
+        const sourceA = REFERENCE_SOURCES[i];
+        const sourceB = REFERENCE_SOURCES[j];
+        let comparable = 0;
+        let agree = 0;
+        for (const img of comparisons) {
+          const a = img.results[sourceA];
+          const b = img.results[sourceB];
+          if (a === null || b === null) continue;
+          comparable += 1;
+          if (a === b) agree += 1;
+        }
+        cells.push({
+          sourceA,
+          sourceB,
+          comparable,
+          agree,
+          disagree: comparable - agree,
+          agreementRate: referenceRate(agree, comparable),
+        });
+      }
+    }
+    return cells;
+  }
+
+  const RESULT_CYCLE: (ResultValue | null)[] = ["سليمة", "اشتباه", null];
+
+  function buildFixtureComparisons(count: number): ImageResultComparison[] {
+    return Array.from({ length: count }, (_, idx) => {
+      const results = {} as Record<ResultSource, ResultValue | null>;
+      REFERENCE_SOURCES.forEach((source, sIdx) => {
+        results[source] = RESULT_CYCLE[(idx + sIdx * 2) % RESULT_CYCLE.length];
+      });
+      return {
+        xrayImageId: `FIX-${idx}`,
+        portName: idx % 2 === 0 ? "منفذ أ" : "منفذ ب",
+        results,
+        agreesWithReview: {},
+      };
+    });
+  }
+
+  it("matches the naive reference implementation on a varied fixture (nulls + agree + disagree mixed)", () => {
+    const comparisons = buildFixtureComparisons(25);
+    const actual = buildCrossTeamMatrix(comparisons);
+    const expected = referenceCrossTeamMatrix(comparisons);
+    expect(actual).toHaveLength(15); // C(6,2) source pairs
+    expect(actual).toEqual(expected);
+  });
+
+  it("matches the naive reference on an empty comparisons array", () => {
+    expect(buildCrossTeamMatrix([])).toEqual(referenceCrossTeamMatrix([]));
+  });
+
+  it("matches the naive reference when every source is null (nothing comparable)", () => {
+    const allNull: ImageResultComparison[] = [
+      {
+        xrayImageId: "N-1",
+        portName: null,
+        results: {
+          levelOne: null,
+          levelTwo: null,
+          manual: null,
+          opposite: null,
+          liveMeans: null,
+          review: null,
+        },
+        agreesWithReview: {},
+      },
+    ];
+    const actual = buildCrossTeamMatrix(allNull);
+    expect(actual).toEqual(referenceCrossTeamMatrix(allNull));
+    expect(actual.every((c) => c.comparable === 0 && c.agreementRate === null)).toBe(true);
+  });
+
+  it("hand-verified case: one fully-populated image where only the reviewer disagrees", () => {
+    const image: ImageResultComparison = {
+      xrayImageId: "HAND-1",
+      portName: "منفذ الاختبار",
+      results: {
+        levelOne: "سليمة",
+        levelTwo: "سليمة",
+        manual: "سليمة",
+        opposite: "سليمة",
+        liveMeans: "سليمة",
+        review: "اشتباه",
+      },
+      agreesWithReview: {},
+    };
+    const cells = buildCrossTeamMatrix([image]);
+    expect(cells).toHaveLength(15);
+    for (const cell of cells) {
+      expect(cell.comparable).toBe(1);
+      if (cell.sourceA === "review" || cell.sourceB === "review") {
+        expect(cell.agree).toBe(0);
+        expect(cell.disagree).toBe(1);
+        expect(cell.agreementRate).toBe(0);
+      } else {
+        expect(cell.agree).toBe(1);
+        expect(cell.disagree).toBe(0);
+        expect(cell.agreementRate).toBe(100);
+      }
+    }
+    // 10 pairs among the 5 non-review sources + 5 pairs vs review = 15
+    expect(cells.filter((c) => c.sourceA === "review" || c.sourceB === "review")).toHaveLength(5);
   });
 });
 

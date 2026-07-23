@@ -5,7 +5,6 @@ export { formatNumber } from "../../../../../utils/formatting";
 import {
   getStageKey,
   formatStageLabel,
-  createEmptyStageCounts,
 } from "../../../../../data/population/stageHelpers";
 import type {
   StageCounts,
@@ -14,7 +13,7 @@ import type {
 } from "../../../../../data/population/stageHelpers";
 
 export type { StageCounts, StageKey, StageAliasMappings };
-export { getStageKey, formatStageLabel, createEmptyStageCounts };
+export { getStageKey, formatStageLabel };
 
 export type PhaseStatus = "available" | "locked" | "completed" | "active";
 

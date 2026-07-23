@@ -85,7 +85,46 @@ const KNOWN_USER_MANAGEMENT_SECTIONS = new Set<PageSection>([
   "actions",
 ]);
 
+// ── Coalesced disk writer ─────────────────────────────────────────────────────
 
+type MutableRef<T> = { current: T };
+
+/**
+ * Runs `run(value)` with "coalesce to latest" semantics: if a call arrives
+ * while a previous call is still in flight, `value` simply replaces whatever
+ * is queued in `pendingRef` and the in-flight call drains it (and anything
+ * even newer that arrives meanwhile) once it settles -- instead of the call
+ * being silently skipped, which is what a bare `runningRef.current` skip-guard
+ * would do. Exported for direct unit testing; not part of this tab's public
+ * surface.
+ */
+export async function coalesceToLatest<T>(
+  runningRef: MutableRef<boolean>,
+  pendingRef: MutableRef<T | null>,
+  run: (value: T) => Promise<void>,
+  value: T
+): Promise<void> {
+  if (runningRef.current) {
+    pendingRef.current = value;
+    return;
+  }
+  runningRef.current = true;
+  let current: T | null = value;
+  try {
+    while (current !== null) {
+      try {
+        await run(current);
+      } catch {
+        // `run` owns its own error handling/logging (see saveUsersToDisk) --
+        // a failed write must not stop a newer queued value from draining.
+      }
+      current = pendingRef.current;
+      pendingRef.current = null;
+    }
+  } finally {
+    runningRef.current = false;
+  }
+}
 
 // ── Main component ────────────────────────────────────────────────────────────
 
@@ -118,6 +157,7 @@ export default function UserManagementTab() {
   const { canMutate } = usePermissions();
   const { directoryHandle } = useWorkspace();
   const savingToDiskRef = useRef(false);
+  const pendingStateRef = useRef<UserManagementState | null>(null);
 
   const canEdit = canMutate("manage-users");
   const canEditPermissions = canMutate("edit-permissions");
@@ -141,6 +181,8 @@ export default function UserManagementTab() {
   useEffect(() => {
     if (section !== "activity") return;
     let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync loading indicator before async activity-log read; necessary to show spinner while data fetches
+    setIsActivityLoading(true);
     void readAuthActivityLog()
       .then((entries) => {
         if (!cancelled) setActivityEntries(entries);
@@ -155,8 +197,17 @@ export default function UserManagementTab() {
   }, [section, directoryHandle]);
 
   useEffect(() => {
-    if (section !== "actions" || !directoryHandle) return;
+    if (section !== "actions") return;
+    if (!directoryHandle) {
+      // Nothing to read without a connected workspace -- resolve the flag so
+      // it can't stay stuck "loading" from a previous in-flight read whose
+      // cleanup just cancelled it (e.g. the workspace was disconnected).
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync empty-state reset when no workspace is connected
+      setIsActionsLoading(false);
+      return;
+    }
     let cancelled = false;
+    setIsActionsLoading(true);
     void readWorkspaceActions(directoryHandle)
       .then((entries) => {
         if (!cancelled) setActionEntries(entries);
@@ -189,18 +240,20 @@ export default function UserManagementTab() {
   }, [state.users, search, roleFilter, statusFilter]);
 
   // ── Persistence ─────────────────────────────────────────────────────────────
+  //
+  // Disk is the sole roster persistence (SEC-01 users.permissions.json), so a
+  // write that never happens is a silently lost admin edit, not just a stale
+  // cache. coalesceToLatest replaces the old bare skip-guard (which dropped
+  // whatever state a call carried whenever a previous write was still in
+  // flight): a call that arrives mid-write only replaces the pending value,
+  // and the in-flight write drains it afterward instead of losing it.
 
-  const saveUsersToDisk = useCallback(async (next: UserManagementState): Promise<void> => {
-    if (!directoryHandle || savingToDiskRef.current) return;
-    savingToDiskRef.current = true;
-    try {
+  const saveUsersToDisk = useCallback((next: UserManagementState): Promise<void> => {
+    if (!directoryHandle) return Promise.resolve();
+    return coalesceToLatest(savingToDiskRef, pendingStateRef, async (state) => {
       const actor = readSession()?.username ?? "admin";
-      await syncUserManagementToDisk(directoryHandle, next, actor);
-    } catch {
-      // non-fatal — runtime state remains updated; disk save can be retried.
-    } finally {
-      savingToDiskRef.current = false;
-    }
+      await syncUserManagementToDisk(directoryHandle, state, actor);
+    }, next);
   }, [directoryHandle]);
 
   const persistState = useCallback(
@@ -550,6 +603,7 @@ export default function UserManagementTab() {
           users={state.users}
           entries={activityEntries}
           isLoading={isActivityLoading}
+          hasWorkspace={!!directoryHandle}
           onRefresh={() => {
             setIsActivityLoading(true);
             void readAuthActivityLog()
@@ -563,6 +617,7 @@ export default function UserManagementTab() {
         <ActionsSection
           entries={actionEntries}
           isLoading={isActionsLoading}
+          hasWorkspace={!!directoryHandle}
           onRefresh={() => {
             if (!directoryHandle) return;
             setIsActionsLoading(true);

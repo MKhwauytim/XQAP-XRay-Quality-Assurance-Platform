@@ -73,7 +73,8 @@ function createNode(): MemoryNode {
 
 function makeFileHandle(
   name: string,
-  node: MemoryNode
+  node: MemoryNode,
+  permission: SharedPermission
 ): FileHandleLike {
   return {
     kind: "file",
@@ -84,6 +85,15 @@ function makeFileHandle(
       return new File([content], name, { type: "application/json" });
     },
     createWritable: async () => {
+      // Mirrors the real File System Access API: createWritable() itself
+      // requires (and re-checks) readwrite permission at call time — a handle
+      // obtained while permission was "granted" doesn't stay valid forever.
+      // Without this, a test that flips permission via
+      // setSimulatedWritePermission() AFTER a handle was already obtained
+      // couldn't observe the resulting write failure through this handle.
+      if (permission.state !== "granted") {
+        throw writePermissionDenied(name);
+      }
       let buffer = "";
       return {
         write: async (data: string) => {
@@ -107,16 +117,23 @@ function makeDirectoryHandle(
     kind: "directory" as const,
     name,
     getFileHandle: async (fileName: string, options?: { create?: boolean }) => {
-      if (!node.files.has(fileName)) {
-        if (!options?.create) {
-          throw notFound(fileName);
-        }
-        if (permission.state !== "granted") {
-          throw writePermissionDenied(fileName);
-        }
+      const exists = node.files.has(fileName);
+      if (!exists && !options?.create) {
+        throw notFound(fileName);
+      }
+      // B11: this check used to live inside the `!exists` branch only, so
+      // `getFileHandle(existingFile, { create: true })` — the common
+      // "get-or-create for writing" call shape — silently bypassed the
+      // permission gate for any file that already happened to exist. The real
+      // File System Access API requires readwrite permission for `create: true`
+      // unconditionally, whether or not the target already exists.
+      if (options?.create && permission.state !== "granted") {
+        throw writePermissionDenied(fileName);
+      }
+      if (!exists) {
         node.files.set(fileName, { content: "" });
       }
-      return makeFileHandle(fileName, node);
+      return makeFileHandle(fileName, node, permission);
     },
     getDirectoryHandle: async (dirName: string, options?: { create?: boolean }) => {
       let child = node.dirs.get(dirName);

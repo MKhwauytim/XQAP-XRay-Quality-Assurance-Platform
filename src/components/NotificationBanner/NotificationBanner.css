@@ -23,8 +23,15 @@
 .app-notification-banner-text {
   max-width: min(70ch, 100%);
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* Wrap up to 3 lines instead of clipping to a single nowrap+ellipsis line —
+     the must-accept audience needs to read the whole announcement before
+     pressing "قبول". `title` on the element (see NotificationBanner.tsx) is a
+     hover fallback for the rare message that still exceeds 3 lines. */
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 
 .app-notification-banner-count {
@@ -57,4 +64,19 @@
 .app-notification-banner-accept:disabled {
   opacity: 0.6;
   cursor: default;
+}
+
+/* Own dark pill background (not just the raw orange gradient) so the white
+   text keeps >= 4.5:1 contrast (WCAG AA, normal text) regardless of where
+   along the two-stop gradient the error happens to render — measured ~6.4:1
+   against the gradient's darkest stop (#E8590C), vs. ~2:1 for the previous
+   inline color: #fecaca. */
+.app-notification-banner-error {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  padding: 3px 10px;
+  border-radius: var(--r-sm, 6px);
+  background: rgba(0, 0, 0, 0.3);
+  color: #fff;
 }

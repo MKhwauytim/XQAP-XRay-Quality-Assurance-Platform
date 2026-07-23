@@ -11,6 +11,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import * as XLSX from "xlsx";
 import DataTable, { type DataTableCol } from "./index";
+import { looksLikeNumber } from "./utils";
 
 // The vendored xlsx module namespace is frozen (ESM), so `vi.spyOn` can't replace writeFile.
 // Partial-mock the module: keep the real `utils` (the export builds a real sheet) but stub
@@ -210,5 +211,71 @@ describe("DataTable — RTL render + interactions (characterization)", () => {
     const worksheet = workbook?.Sheets[workbook.SheetNames[0]!];
     const exportedRows = XLSX.utils.sheet_to_json<unknown[]>(worksheet!, { header: 1 });
     expect(exportedRows).toHaveLength(151);
+  });
+});
+
+// B11 — DataTable hardening: last-visible-column guard, empty-results
+// placeholder, and an explicit aria-label on the per-column filter button.
+describe("DataTable — B11 hardening", () => {
+  it("refuses to hide the last visible column via the column-visibility picker", async () => {
+    renderTable();
+    fireEvent.click(screen.getByRole("button", { name: /^الأعمدة/ }));
+    const hideButtons = screen.getAllByTitle("إخفاء");
+    expect(hideButtons).toHaveLength(COLUMNS.length);
+
+    // Hide two of the three columns (index order [name, port, note]), leaving
+    // exactly one ("الاسم") visible.
+    fireEvent.click(hideButtons[2]!); // hide "ملاحظة"
+    fireEvent.click(screen.getAllByTitle("إخفاء")[1]!); // hide "المنفذ"
+
+    await waitFor(() => expect(screen.queryByText(LONG_NOTE)).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /^الأعمدة/ })).toHaveTextContent("الأعمدة (1)");
+
+    // No "إخفاء" toggle remains — the last visible column's button switches to
+    // a disabled hint instead, so the grid can never go fully blank.
+    expect(screen.queryAllByTitle("إخفاء")).toHaveLength(0);
+    const lastToggle = screen.getByTitle("يجب أن يبقى عمود واحد ظاهرًا على الأقل");
+    expect(lastToggle).toBeDisabled();
+
+    // Clicking it anyway must not hide the column.
+    fireEvent.click(lastToggle);
+    expect(screen.getByRole("button", { name: /^الأعمدة/ })).toHaveTextContent("الأعمدة (1)");
+    expect(screen.getByText("أحمد")).toBeInTheDocument();
+  });
+
+  it("shows a 'no matching results' placeholder when search hides every row but data exists", async () => {
+    renderTable();
+    fireEvent.change(screen.getByPlaceholderText("بحث في جميع الأعمدة..."), {
+      target: { value: "نص-غير-موجود-إطلاقا" },
+    });
+
+    await waitFor(() => expect(screen.getByText("لا توجد نتائج مطابقة")).toBeInTheDocument());
+    expect(screen.queryByText("أحمد")).not.toBeInTheDocument();
+  });
+
+  it("does not show the empty-results placeholder when rows are present and unfiltered", () => {
+    renderTable();
+    expect(screen.queryByText("لا توجد نتائج مطابقة")).not.toBeInTheDocument();
+  });
+
+  it("exposes an aria-label on the per-column filter button (its visible content is only '▾')", () => {
+    renderTable();
+    expect(screen.getByRole("button", { name: "تصفية: المنفذ" })).toBeInTheDocument();
+  });
+});
+
+describe("looksLikeNumber — B11 bound on the plain-digit alternative", () => {
+  it("still matches short magnitudes, decimals, percentages, and thousand-separated numbers", () => {
+    expect(looksLikeNumber("123456")).toBe(true);
+    expect(looksLikeNumber("42")).toBe(true);
+    expect(looksLikeNumber("-42")).toBe(true);
+    expect(looksLikeNumber("99.5%")).toBe(true);
+    expect(looksLikeNumber("1,234,567")).toBe(true);
+  });
+
+  it("rejects phone-number-shaped and long-ID-shaped digit strings that merely look numeric", () => {
+    expect(looksLikeNumber("0501234567")).toBe(false); // 10-digit mobile number
+    expect(looksLikeNumber("1234567890123")).toBe(false); // 13-digit national ID
+    expect(looksLikeNumber("1234567")).toBe(false); // 7 digits — just past the ~6-digit bound
   });
 });

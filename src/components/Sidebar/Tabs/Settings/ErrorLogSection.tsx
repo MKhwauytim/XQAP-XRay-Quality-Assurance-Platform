@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AlertTriangle, ChevronRight } from "lucide-react";
 import {
   clearErrors,
@@ -8,19 +8,39 @@ import {
 import { usePermissions } from "../../../../auth/usePermissions";
 import "./ErrorLogSection.css";
 
+// Keeps the badge count (and, while expanded, the entry list) live even when
+// nothing on screen triggers a re-render otherwise — matches the polling
+// cadence already used for background refreshes elsewhere (NotificationBanner).
+const REFRESH_INTERVAL_MS = 60_000;
+
 export function ErrorLogSection() {
-  const { can } = usePermissions();
+  const { can, canMutate } = usePermissions();
+  const canView = can("view-error-log");
+  const canClear = canMutate("view-error-log");
   const [isOpen, setIsOpen] = useState(false);
   const [errors, setErrors] = useState<ErrorEntry[]>(() => getRecentErrors());
 
-  if (!can("view-error-log")) return null;
-  if (errors.length === 0 && !isOpen) return null;
+  // Refresh on an interval instead of relying only on the one-time mount
+  // snapshot, so the header's badge count (rendered whether or not the panel
+  // is open) doesn't go stale for the rest of the session.
+  useEffect(() => {
+    if (!canView) return;
+    const id = window.setInterval(() => setErrors(getRecentErrors()), REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(id);
+  }, [canView]);
+
+  // Always render the collapsed header when the user can view the log —
+  // previously an empty log hid the whole section, so an admin had no way to
+  // discover the feature exists (or to notice new errors arrive later, since
+  // a hidden component never re-renders to pick them up).
+  if (!canView) return null;
 
   function handleRefresh() {
     setErrors(getRecentErrors());
   }
 
   function handleClear() {
+    if (!canClear) return;
     clearErrors();
     setErrors([]);
   }
@@ -51,6 +71,8 @@ export function ErrorLogSection() {
               type="button"
               className="error-log-clear-btn"
               onClick={handleClear}
+              disabled={!canClear}
+              title={!canClear ? "لا تملك صلاحية مسح سجل الأخطاء" : undefined}
             >
               مسح السجل
             </button>

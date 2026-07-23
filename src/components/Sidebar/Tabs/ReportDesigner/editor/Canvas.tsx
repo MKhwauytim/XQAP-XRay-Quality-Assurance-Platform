@@ -15,6 +15,17 @@ interface CanvasProps {
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   mode: "edit" | "view";
+  /**
+   * When `mode === "edit"`, further restricts the surface to selection/inspection
+   * only — no drag, no resize handles, no onElementChange calls. Ignored when
+   * `mode === "view"` (already fully inert there, e.g. the design-list thumbnail).
+   * Lets a view-only user (B6 supervisor fix) still click an element to inspect
+   * its properties in Inspector without being able to move/resize it — the
+   * mutation surface is render-gated here instead of only being rejected
+   * ~800ms later by the editor's debounced autosave. Defaults to true so
+   * existing callers that never pass it keep today's full-edit behavior.
+   */
+  canEdit?: boolean;
   zoom?: number;
   onElementChange?: (elementId: string, rect: Rect) => void;
 }
@@ -39,11 +50,15 @@ export default function Canvas({
   selectedId,
   onSelect,
   mode,
+  canEdit = true,
   zoom = 1,
   onElementChange,
 }: CanvasProps) {
   const page = doc.pages[pageIndex];
   const { width, height } = doc.pageSetup;
+  // Selection (click-to-inspect) only requires edit *mode*; actually moving or
+  // resizing an element additionally requires edit *permission*.
+  const editable = mode === "edit" && canEdit;
 
   const interactionGrid = 8;
   const { canvasRef, onElementPointerDown, onHandlePointerDown, onPointerMove, onPointerUp } = useCanvasInteractions({
@@ -96,7 +111,7 @@ export default function Canvas({
       <div style={innerStyle}>
         {sortedElements.map((el) => {
           const isSelected = mode === "edit" && el.elementId === selectedId;
-          const isInteractive = mode === "edit" && !el.locked && onElementChange != null;
+          const isInteractive = editable && !el.locked && onElementChange != null;
           const currentRect: Rect = { x: el.x, y: el.y, w: el.w, h: el.h };
 
           const wrapperStyle: CSSProperties = {
@@ -138,7 +153,7 @@ export default function Canvas({
             >
               <ElementBody element={el} />
 
-              {isSelected && !el.locked && onElementChange != null &&
+              {isSelected && !el.locked && onElementChange != null && editable &&
                 RESIZE_HANDLES.map((handle) => (
                   <div
                     key={handle}

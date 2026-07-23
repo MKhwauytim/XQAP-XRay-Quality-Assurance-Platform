@@ -12,6 +12,7 @@ import {
 import {
   getUnacceptedFor,
   isNotificationAudienceRole,
+  shouldShowBanner,
   type AppNotification,
 } from "../../data/notifications/notificationTypes";
 import "./NotificationBanner.css";
@@ -62,8 +63,12 @@ export function NotificationBanner({ session, directoryHandle }: Props) {
     };
   }, [audience, directoryHandle, reload]);
 
-  // Hide for non-audience roles or when no workspace is connected.
-  if (!audience || !directoryHandle) return null;
+  // Hide when no workspace is connected, or when the shared audience+acceptance
+  // rule (notificationTypes.shouldShowBanner) says this user has nothing
+  // outstanding to acknowledge.
+  if (!directoryHandle || !shouldShowBanner(session.role, session.username, notifications)) {
+    return null;
+  }
 
   const unaccepted = getUnacceptedFor(notifications, session.username);
   const current = unaccepted[0];
@@ -96,7 +101,9 @@ export function NotificationBanner({ session, directoryHandle }: Props) {
       <span className="app-notification-banner-icon" aria-label={labels.notif_banner_aria}>
         <Pin size={16} aria-hidden />
       </span>
-      <span className="app-notification-banner-text">{current.message}</span>
+      <span className="app-notification-banner-text" title={current.message}>
+        {current.message}
+      </span>
       {remaining > 0 && (
         <span className="app-notification-banner-count">
           {labels.notif_banner_more.replace("{count}", String(remaining))}
@@ -111,7 +118,7 @@ export function NotificationBanner({ session, directoryHandle }: Props) {
         <Check size={14} aria-hidden /> {labels.notif_accept_btn}
       </button>
       {acceptError && (
-        <span className="app-notification-banner-error" role="alert" style={{ color: "#fecaca" }}>
+        <span className="app-notification-banner-error" role="alert">
           {acceptError}
         </span>
       )}

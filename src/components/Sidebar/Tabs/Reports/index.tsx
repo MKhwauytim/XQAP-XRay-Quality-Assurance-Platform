@@ -27,6 +27,7 @@ import { DEFAULT_EXEC_CONFIG } from "../../../../data/reporting/executiveReportT
 import type { ExecutiveReportInput } from "../../../../data/reporting/executiveReportTypes";
 import { getManagedLoginUsers } from "../../../../auth/userManagement";
 import { tabAllowedRoles } from "../../../../auth/tabCatalog";
+import { usePermissions } from "../../../../auth/usePermissions";
 import { TabGuard } from "../../../PermissionGuard";
 import { loadSampleMaster, loadSampleMasterRevision } from "../../../../data/sampling/sampleStorage";
 import { loadAllEmployeeFiles } from "../../../../data/answers/answerStorage";
@@ -142,11 +143,20 @@ function collectRevisions(pairs: Array<[string, number | null]>): SourceRevision
 // Inner component that holds all the existing Reports state and logic.
 function ReportsContent() {
   const { directoryHandle } = useWorkspace();
+  const { can, canMutate } = usePermissions();
   const labels = useLabels();
 
   const { selection: globalMonth } = useGlobalMonth();
   // Pending months have no folder on disk yet — treat them as "no data" (empty states).
   const selectedMonth = globalMonth.kind === "existing" ? globalMonth.folderName : "";
+  // B5: export/generate controls must be permission-gated — previously ANY authenticated
+  // user who could reach this tab could trigger real exports (including the PowerBI
+  // disk write in handlePbiExport) with no check against the "export-reports" feature.
+  // canExportReports drives render-time disable/hide (mirrors Population/index.tsx:183);
+  // the mutating handlers (handleExport, handlePbiExport, generate) additionally
+  // re-check canMutate() as the authoritative, defense-in-depth gate right before doing
+  // real work, so a control that is (incorrectly) left enabled can never still mutate.
+  const canExportReports = can("export-reports");
   const [monthMeta, setMonthMeta] = useState<MonthMeta | null>(null);
   const [section, setSection] = useState<ReportsSection>("reports");
   const [generating, setGenerating] = useState<ReportType | null>(null);
@@ -296,6 +306,10 @@ function ReportsContent() {
   // Dashboard export actions — reuse the assembled exec input for all three.
   async function handleExport(kind: "document" | "deck" | "xlsx"): Promise<void> {
     if (!directoryHandle || !selectedMonth || exporting) return;
+    if (!canMutate("export-reports")) {
+      showToast("error", "لا تملك صلاحية تصدير التقارير.");
+      return;
+    }
     setExporting(kind);
     try {
       const execInput = await loadExecInput();
@@ -320,6 +334,10 @@ function ReportsContent() {
 
   async function handlePbiExport() {
     if (!directoryHandle || !selectedMonth) return;
+    if (!canMutate("export-reports")) {
+      setPbiError("لا تملك صلاحية تصدير التقارير.");
+      return;
+    }
     setPbiExporting(true);
     setPbiResult(null);
     setPbiError(null);
@@ -335,6 +353,10 @@ function ReportsContent() {
 
   async function generate(type: ReportType): Promise<void> {
     if (!directoryHandle || !selectedMonth || generating) return;
+    if (!canMutate("export-reports")) {
+      showToast("error", "لا تملك صلاحية تصدير التقارير.");
+      return;
+    }
     setGenerating(type);
     try {
       if (type === "sample" || type === "sample-xlsx" || type === "sample-deck") {
@@ -432,6 +454,22 @@ function ReportsContent() {
     return baseType as ReportType; // document
   }
 
+  // Explains why an export/generate control is disabled — permission first (an
+  // outright "you cannot export" is the most actionable reason), then the pending-
+  // vs-no-month distinction (B5 polish: a pending month has no processed population
+  // yet, which reads very differently from "no months exist at all"). Returns
+  // undefined once the control is fully enabled, so callers can pass it straight to
+  // `title` without an extra ternary at each call site.
+  function exportDisabledTitle(): string | undefined {
+    if (!canExportReports) return "لا تملك صلاحية تصدير التقارير.";
+    if (!selectedMonth) {
+      return globalMonth.kind === "pending"
+        ? "لم تتم معالجة مجتمع هذا الشهر بعد — لا توجد بيانات جاهزة للتصدير."
+        : "لا يوجد شهر محدد يحتوي بيانات — لا يوجد ما يمكن تصديره.";
+    }
+    return undefined;
+  }
+
   function renderExportControls(baseType: ReportBaseType, toneClass: string): ReactNode {
     const selectedType = selectedReportType(baseType);
     const isBusy = generating === selectedType;
@@ -446,7 +484,8 @@ function ReportsContent() {
         <button
           type="button"
           className={`rh-btn ${toneClass}`}
-          disabled={busy || !selectedMonth}
+          disabled={busy || !selectedMonth || !canExportReports}
+          title={exportDisabledTitle()}
           onClick={() => { void generate(selectedType); }}
         >
           {isBusy ? <span className="rh-spinner" /> : null}
@@ -554,7 +593,8 @@ function ReportsContent() {
           <button
             type="button"
             className="rh-btn rh-btn-teal"
-            disabled={exporting !== null || !selectedMonth}
+            disabled={exporting !== null || !selectedMonth || !canExportReports}
+            title={exportDisabledTitle()}
             onClick={() => { void handleExport("document"); }}
           >
             {exporting === "document" ? <span className="rh-spinner" /> : <FileText size={15} strokeWidth={2} />}
@@ -563,7 +603,8 @@ function ReportsContent() {
           <button
             type="button"
             className="rh-btn rh-btn-navy"
-            disabled={exporting !== null || !selectedMonth}
+            disabled={exporting !== null || !selectedMonth || !canExportReports}
+            title={exportDisabledTitle()}
             onClick={() => { void handleExport("deck"); }}
           >
             {exporting === "deck" ? <span className="rh-spinner" /> : <BarChart2 size={15} strokeWidth={2} />}
@@ -572,7 +613,8 @@ function ReportsContent() {
           <button
             type="button"
             className="rh-btn rh-btn-indigo"
-            disabled={exporting !== null || !selectedMonth}
+            disabled={exporting !== null || !selectedMonth || !canExportReports}
+            title={exportDisabledTitle()}
             onClick={() => { void handleExport("xlsx"); }}
           >
             {exporting === "xlsx" ? <span className="rh-spinner" /> : <Download size={15} strokeWidth={2} />}
@@ -865,6 +907,15 @@ function ReportsContent() {
         </div>
       </div>
 
+      {/* B5: a "pending" month has no folder on disk yet, so every export/generate
+          control below is disabled — explain why instead of leaving it a silent gap
+          next to a header that already shows the pending month's name. */}
+      {globalMonth.kind === "pending" && (
+        <p className="rh-pbi-month-empty">
+          لم تتم معالجة مجتمع الشهر المحدد بعد — عناصر التقارير والتصدير تبقى معطّلة حتى تتم معالجة بيانات هذا الشهر من تبويب «إدارة بيانات الأشعة».
+        </p>
+      )}
+
       {section === "kpi" && (
         <TabGuard tabId="reports/kpi">
           {renderDashboard()}
@@ -997,13 +1048,16 @@ function ReportsContent() {
                   <Database size={12} strokeWidth={1.8} />
                   {selectedMonth}
                 </span>
+              ) : globalMonth.kind === "pending" ? (
+                <span className="rh-pbi-month-empty">لم تتم معالجة مجتمع الشهر المحدد بعد</span>
               ) : (
                 <span className="rh-pbi-month-empty">اختر شهراً من الشريط العلوي</span>
               )}
               <button
                 className="rh-btn rh-btn-indigo"
                 onClick={() => void handlePbiExport()}
-                disabled={!selectedMonth || pbiExporting || !directoryHandle}
+                disabled={!selectedMonth || pbiExporting || !directoryHandle || !canExportReports}
+                title={exportDisabledTitle()}
                 type="button"
               >
                 {pbiExporting ? <span className="rh-spinner" /> : null}
@@ -1020,21 +1074,24 @@ function ReportsContent() {
             <div className="rh-quick-actions">
               <button
                 className="rh-quick-btn"
-                disabled={busy || !selectedMonth}
+                disabled={busy || !selectedMonth || !canExportReports}
+                title={exportDisabledTitle()}
                 onClick={() => { void generate("executive"); }}
               >
                 <BarChart2 size={16} style={{ verticalAlign: "middle", marginInlineEnd: 5 }} /> التقرير التنفيذي
               </button>
               <button
                 className="rh-quick-btn"
-                disabled={busy || !selectedMonth}
+                disabled={busy || !selectedMonth || !canExportReports}
+                title={exportDisabledTitle()}
                 onClick={() => { void generate("sample"); }}
               >
                 <FileStack size={16} style={{ verticalAlign: "middle" }} /> تقرير العينة
               </button>
               <button
                 className="rh-quick-btn"
-                disabled={busy || !selectedMonth}
+                disabled={busy || !selectedMonth || !canExportReports}
+                title={exportDisabledTitle()}
                 onClick={() => { void generate("distribution"); }}
               >
                 <Users size={16} style={{ verticalAlign: "middle", marginInlineEnd: 5 }} /> تقرير التوزيع
@@ -1073,7 +1130,9 @@ function ReportsContent() {
                 <ul className="rh-pbi-file-list">
                   {pbiResult.files.map((f) => (
                     <li key={f.fileName}>
-                      <code>{f.fileName}</code> — {f.rowCount.toLocaleString("ar")} سطر
+                      {/* App standard is Latin (Western) digits — "ar-SA-u-nu-latn" — not
+                          the Arabic-Indic digits plain "ar" yields (mirrors fmtCount above). */}
+                      <code>{f.fileName}</code> — {f.rowCount.toLocaleString("ar-SA-u-nu-latn")} سطر
                     </li>
                   ))}
                   <li><code>README.txt</code> — تعليمات الاتصال</li>

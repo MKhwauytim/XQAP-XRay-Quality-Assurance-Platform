@@ -75,7 +75,14 @@ export type DataTableProps<TRow = unknown> = {
   rows: TRow[];
   getRowKey: (row: TRow) => string;
   renderCell: (col: DataTableCol<TRow>, row: TRow, meta: CellMeta) => ReactNode;
-  storageKey: string;
+  /**
+   * @deprecated No longer read internally — column config now derives purely
+   * from `columns` / `defaultVisible` / `initialColConfig`, and persistence is
+   * the caller's responsibility via `onColConfigChange`. Kept optional (rather
+   * than removed) so existing call sites don't need to change; safe to delete
+   * once they do.
+   */
+  storageKey?: string;
   defaultVisible?: string[];
   isAdmin?: boolean;
   /**
@@ -148,10 +155,6 @@ function loadColConfig<TRow>(
   return buildDefault(columns, defaultVisible);
 }
 
-function saveColConfig(): void {
-  // Durable table preferences should be saved through onColConfigChange.
-}
-
 // ── Filter utilities ──────────────────────────────────────────────────────────
 
 function defaultRowMatchesFilter<TRow>(
@@ -218,7 +221,6 @@ export default function DataTable<TRow>({
   rows,
   getRowKey,
   renderCell,
-  storageKey,
   defaultVisible,
   isAdmin = false,
   rowMatchesFilter,
@@ -306,7 +308,6 @@ export default function DataTable<TRow>({
 
   function setColCfg(c: ColConfig): void {
     setColCfgState(c);
-    saveColConfig();
     if (onColConfigChange) {
       if (colChangeDebouncerRef.current) clearTimeout(colChangeDebouncerRef.current);
       colChangeDebouncerRef.current = setTimeout(() => { onColConfigChange(c); }, 800);
@@ -319,9 +320,8 @@ export default function DataTable<TRow>({
     if (initialColConfig && !initialSyncedRef.current) {
       initialSyncedRef.current = true;
       setColCfgState(initialColConfig);
-      saveColConfig();
     }
-  }, [initialColConfig, storageKey]);
+  }, [initialColConfig]);
 
   // Close filter menu when table scrolls (button has moved, position would be stale).
   // Also track scrollTop + container height for row virtualisation.
@@ -636,7 +636,6 @@ export default function DataTable<TRow>({
       document.removeEventListener("mouseup",   onUp);
       // Persist on release
       setColCfgState((prev) => {
-        saveColConfig();
         onColConfigChange?.(prev);
         return prev;
       });
@@ -771,6 +770,7 @@ export default function DataTable<TRow>({
                         type="button"
                         className={`dt-filter-btn${hasFilter ? " active" : ""}`}
                         title={`تصفية: ${col.label}`}
+                        aria-label={`تصفية: ${col.label}`}
                         onClick={(e) => {
                           e.stopPropagation();
                           const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -805,6 +805,21 @@ export default function DataTable<TRow>({
             {topPad > 0 && (
               <tr aria-hidden="true" style={{ height: topPad }}>
                 <td colSpan={visibleCols.length} style={{ padding: 0, border: "none" }} />
+              </tr>
+            )}
+            {/* B11: search/filters can legitimately hide every row — without this,
+                the tbody just goes blank beneath the header with no indication of
+                why. Only shown when there IS data (rows.length > 0); a table with
+                zero rows to begin with is unaffected. */}
+            {filteredRows.length === 0 && rows.length > 0 && (
+              <tr className="dt-empty-row">
+                <td
+                  colSpan={Math.max(1, visibleCols.length)}
+                  className="dt-empty-td"
+                  style={{ textAlign: "center", padding: "28px 12px", color: "var(--c-ink-4)", fontSize: 13 }}
+                >
+                  لا توجد نتائج مطابقة
+                </td>
               </tr>
             )}
             {virtualRows.map((row) => {
@@ -891,6 +906,11 @@ function ColPickerPanel({
   }, [onClose]);
 
   const cols = columns.filter((c) => !c.adminOnly || isAdmin);
+  // B11: how many of the picker's own candidate columns are currently shown.
+  // Hiding the last one would leave the grid fully blank with no visible way
+  // back in short of the "إعادة الافتراضي" reset button — refuse the toggle
+  // instead (mirrors the alwaysVisible guard right below).
+  const visibleCount = cols.filter((c) => !cfg.hidden.includes(c.id)).length;
   const pickerWidth = 300;
   const style: CSSProperties = {
     position: "fixed",
@@ -901,7 +921,9 @@ function ColPickerPanel({
 
   function toggle(id: string): void {
     if (columns.find((c) => c.id === id)?.alwaysVisible) return;
-    const hidden = cfg.hidden.includes(id)
+    const isHidden = cfg.hidden.includes(id);
+    if (!isHidden && visibleCount <= 1) return; // refuse to hide the last visible column
+    const hidden = isHidden
       ? cfg.hidden.filter((h) => h !== id)
       : [...cfg.hidden, id];
     onChange({ ...cfg, hidden });
@@ -932,8 +954,9 @@ function ColPickerPanel({
       <p className="dt-col-picker-hint">{L.dt_columns_hint}</p>
       <div className="dt-col-list">
         {cols.map((col) => {
-          const hidden    = cfg.hidden.includes(col.id);
-          const isDateCol = col.isDate || detectedDates.has(col.id);
+          const hidden       = cfg.hidden.includes(col.id);
+          const isDateCol    = col.isDate || detectedDates.has(col.id);
+          const isLastVisible = !hidden && visibleCount <= 1;
           return (
             <div
               key={col.id}
@@ -980,8 +1003,14 @@ function ColPickerPanel({
               <button
                 type="button"
                 className="dt-col-eye-btn"
-                disabled={!!col.alwaysVisible}
-                title={hidden ? L.dt_show_column : L.dt_hide_column}
+                disabled={!!col.alwaysVisible || isLastVisible}
+                title={
+                  hidden
+                    ? L.dt_show_column
+                    : isLastVisible
+                      ? "يجب أن يبقى عمود واحد ظاهرًا على الأقل"
+                      : L.dt_hide_column
+                }
                 onClick={(e) => { e.stopPropagation(); toggle(col.id); }}
               >
                 {hidden

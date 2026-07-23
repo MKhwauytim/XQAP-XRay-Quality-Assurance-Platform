@@ -37,11 +37,9 @@ function createHeaderLookup(row: RiskSourceRow): Map<string, unknown> {
 }
 
 function getFirstAvailableValue(
-  row: RiskSourceRow,
+  lookup: Map<string, unknown>,
   candidateHeaders: readonly string[]
 ): string | null {
-  const lookup = createHeaderLookup(row);
-
   for (const candidateHeader of candidateHeaders) {
     const normalizedCandidateHeader = normalizeHeader(candidateHeader);
     const value = normalizeCellValue(lookup.get(normalizedCandidateHeader));
@@ -65,67 +63,71 @@ export function normalizeRiskRow(params: {
 
   const aliases = columnMappings || RISK_COLUMN_ALIASES;
 
+  // Built once per row instead of once per field (~27 fields) — the lookup
+  // itself does not depend on which candidate headers are being resolved.
+  const lookup = createHeaderLookup(sourceRow);
+
   const reportNumber = getFirstAvailableValue(
-    sourceRow,
+    lookup,
     aliases.reportNumber || RISK_COLUMN_ALIASES.reportNumber
   );
 
   return {
     movementType,
 
-    portCode: getFirstAvailableValue(sourceRow, aliases.portCode || RISK_COLUMN_ALIASES.portCode),
-    portName: getFirstAvailableValue(sourceRow, aliases.portName || RISK_COLUMN_ALIASES.portName),
-    portType: getFirstAvailableValue(sourceRow, aliases.portType || RISK_COLUMN_ALIASES.portType),
+    portCode: getFirstAvailableValue(lookup, aliases.portCode || RISK_COLUMN_ALIASES.portCode),
+    portName: getFirstAvailableValue(lookup, aliases.portName || RISK_COLUMN_ALIASES.portName),
+    portType: getFirstAvailableValue(lookup, aliases.portType || RISK_COLUMN_ALIASES.portType),
 
     movementNumber: getFirstAvailableValue(
-      sourceRow,
+      lookup,
       aliases.movementNumber || RISK_COLUMN_ALIASES.movementNumber
     ),
     movementDate: getFirstAvailableValue(
-      sourceRow,
+      lookup,
       aliases.movementDate || RISK_COLUMN_ALIASES.movementDate
     ),
     movementHijriDate: getFirstAvailableValue(
-      sourceRow,
+      lookup,
       aliases.movementHijriDate || RISK_COLUMN_ALIASES.movementHijriDate
     ),
 
     declarationNumber: getFirstAvailableValue(
-      sourceRow,
+      lookup,
       aliases.declarationNumber || RISK_COLUMN_ALIASES.declarationNumber
     ),
     declarationDate: getFirstAvailableValue(
-      sourceRow,
+      lookup,
       aliases.declarationDate || RISK_COLUMN_ALIASES.declarationDate
     ),
     declarationHijriDate: getFirstAvailableValue(
-      sourceRow,
+      lookup,
       aliases.declarationHijriDate || RISK_COLUMN_ALIASES.declarationHijriDate
     ),
 
     manifestNumber: getFirstAvailableValue(
-      sourceRow,
+      lookup,
       aliases.manifestNumber || RISK_COLUMN_ALIASES.manifestNumber
     ),
     manifestType: getFirstAvailableValue(
-      sourceRow,
+      lookup,
       aliases.manifestType || RISK_COLUMN_ALIASES.manifestType
     ),
 
     plateOrContainerNumber: getFirstAvailableValue(
-      sourceRow,
+      lookup,
       aliases.plateOrContainerNumber || RISK_COLUMN_ALIASES.plateOrContainerNumber
     ),
     finalDestination: getFirstAvailableValue(
-      sourceRow,
+      lookup,
       aliases.finalDestination || RISK_COLUMN_ALIASES.finalDestination
     ),
 
-    entryDate: getFirstAvailableValue(sourceRow, aliases.entryDate || RISK_COLUMN_ALIASES.entryDate),
-    exitDate: getFirstAvailableValue(sourceRow, aliases.exitDate || RISK_COLUMN_ALIASES.exitDate),
+    entryDate: getFirstAvailableValue(lookup, aliases.entryDate || RISK_COLUMN_ALIASES.entryDate),
+    exitDate: getFirstAvailableValue(lookup, aliases.exitDate || RISK_COLUMN_ALIASES.exitDate),
 
     chassisNumber: getFirstAvailableValue(
-      sourceRow,
+      lookup,
       aliases.chassisNumber || RISK_COLUMN_ALIASES.chassisNumber
     ),
 
@@ -133,44 +135,44 @@ export function normalizeRiskRow(params: {
     hasReport: reportNumber !== null,
 
     xrayLevelOneResult: getFirstAvailableValue(
-      sourceRow,
+      lookup,
       aliases.xrayLevelOneResult || RISK_COLUMN_ALIASES.xrayLevelOneResult
     ),
     xrayLevelTwoResult: getFirstAvailableValue(
-      sourceRow,
+      lookup,
       aliases.xrayLevelTwoResult || RISK_COLUMN_ALIASES.xrayLevelTwoResult
     ),
     inspectorResult: getFirstAvailableValue(
-      sourceRow,
+      lookup,
       aliases.inspectorResult || RISK_COLUMN_ALIASES.inspectorResult
     ),
     oppositeInspectorResult: getFirstAvailableValue(
-      sourceRow,
+      lookup,
       aliases.oppositeInspectorResult || RISK_COLUMN_ALIASES.oppositeInspectorResult
     ),
     liveMeansResult: getFirstAvailableValue(
-      sourceRow,
+      lookup,
       aliases.liveMeansResult || RISK_COLUMN_ALIASES.liveMeansResult
     ),
 
     xrayImageId: getFirstAvailableValue(
-      sourceRow,
+      lookup,
       aliases.xrayImageId || RISK_COLUMN_ALIASES.xrayImageId
     ),
     xrayEntryDate: getFirstAvailableValue(
-      sourceRow,
+      lookup,
       aliases.xrayEntryDate || RISK_COLUMN_ALIASES.xrayEntryDate
     ),
 
     targetedByRiskEngine: getFirstAvailableValue(
-      sourceRow,
+      lookup,
       aliases.targetedByRiskEngine || RISK_COLUMN_ALIASES.targetedByRiskEngine
     ),
     riskMessage: getFirstAvailableValue(
-      sourceRow,
+      lookup,
       aliases.riskMessage || RISK_COLUMN_ALIASES.riskMessage
     ),
-    stage: getFirstAvailableValue(sourceRow, aliases.stage || RISK_COLUMN_ALIASES.stage),
+    stage: getFirstAvailableValue(lookup, aliases.stage || RISK_COLUMN_ALIASES.stage),
 
     rawRow: sourceRow,
     sourceSheetName,

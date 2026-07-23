@@ -13,6 +13,8 @@ interface VizPanelProps {
   onAddElement: (type: "text" | "shape") => void;
   onImageSelected: (dataUrl: string) => void;
   onUpdate: (id: string, patch: Partial<Element>) => void;
+  /** False for a view-only user — disables adding elements and editing the selected one's properties. */
+  canEdit: boolean;
 }
 
 const SW = 1.8;
@@ -29,10 +31,11 @@ const VIZ_TYPES: Array<{
   { label: "خط", icon: <Minus size={22} strokeWidth={SW} />, draggable: true, key: "line" },
 ];
 
-export default function VizPanel({ selectedElement, onAddElement, onImageSelected, onUpdate }: VizPanelProps) {
+export default function VizPanel({ selectedElement, onAddElement, onImageSelected, onUpdate, canEdit }: VizPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   function handleImageFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    if (!canEdit) { e.target.value = ""; return; }
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
@@ -42,6 +45,7 @@ export default function VizPanel({ selectedElement, onAddElement, onImageSelecte
   }
 
   function handleTypeClick(key: string) {
+    if (!canEdit) return;
     if (key === "image") { fileInputRef.current?.click(); return; }
     if (key === "text" || key === "shape" || key === "line") onAddElement(key === "line" ? "shape" : key);
   }
@@ -64,8 +68,9 @@ export default function VizPanel({ selectedElement, onAddElement, onImageSelecte
             onClick={() => handleTypeClick(t.key)}
             type="button"
             aria-label={t.label}
-            draggable={t.draggable}
-            onDragStart={t.draggable ? (e) => {
+            disabled={!canEdit}
+            draggable={t.draggable && canEdit}
+            onDragStart={t.draggable && canEdit ? (e) => {
               e.dataTransfer.effectAllowed = "copy";
               e.dataTransfer.setData("application/x-rd-viz-type", t.key);
             } : undefined}
@@ -87,7 +92,7 @@ export default function VizPanel({ selectedElement, onAddElement, onImageSelecte
         <div className="rd-panel-header">
           <span>التنسيق</span>
         </div>
-        <Inspector element={selectedElement} onUpdate={handleInspectorUpdate} />
+        <Inspector element={selectedElement} onUpdate={handleInspectorUpdate} canEdit={canEdit} />
       </div>
     </div>
   );

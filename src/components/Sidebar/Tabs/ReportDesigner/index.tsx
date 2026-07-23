@@ -42,7 +42,9 @@ type View = "list" | "editor";
 
 function formatDate(iso: string): string {
   try {
-    return new Date(iso).toLocaleString("ar-SA", {
+    // App standard is Latin (Western) digits — "ar-SA-u-nu-latn" — not the
+    // Arabic-Indic digits plain "ar-SA" yields (audit C-10 / B6).
+    return new Date(iso).toLocaleString("ar-SA-u-nu-latn", {
       year: "numeric",
       month: "short",
       day: "numeric",
@@ -146,7 +148,7 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack, canEdit 
   const currentPage = doc.pages[currentPageIndex];
 
   function addElement(type: "text" | "shape", x = 50, y = 50) {
-    if (!currentPage) return;
+    if (!canEdit || !currentPage) return;
     const newEl: Element = {
       elementId: createElementId(),
       type,
@@ -174,7 +176,7 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack, canEdit 
   }
 
   function addImageElement(dataUrl: string) {
-    if (!currentPage) return;
+    if (!canEdit || !currentPage) return;
     const newEl: Element = {
       elementId: createElementId(),
       type: "image",
@@ -199,7 +201,7 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack, canEdit 
   }
 
   function addFieldElement(label: string, fieldName: string, role: FieldRole, x = 50, y = 50, agg: AggChoice = "none") {
-    if (!currentPage) return;
+    if (!canEdit || !currentPage) return;
     const isDim = role === "dimension";
     const fill = isDim ? "#dce6f1" : "#dff6dd";
     const borderColor = isDim ? "#0078d4" : "#107c10";
@@ -246,6 +248,7 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack, canEdit 
   }
 
   function updateElement(updated: Element) {
+    if (!canEdit) return;
     setDoc((d) => ({
       ...d,
       pages: d.pages.map((p, i) =>
@@ -269,11 +272,13 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack, canEdit 
   }
 
   function handlePageSizeChange(preset: PageSizePreset) {
+    if (!canEdit) return;
     const ps = getPageSetup(preset);
     setDoc((d) => ({ ...d, pageSetup: ps }));
   }
 
   const handleElementChange = useCallback((elementId: string, rect: Rect) => {
+    if (!canEdit) return;
     setDoc((d) => ({
       ...d,
       pages: d.pages.map((p, i) =>
@@ -289,11 +294,12 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack, canEdit 
           : p
       ),
     }));
-  }, [currentPageIndex]);
+  }, [currentPageIndex, canEdit]);
 
   // ── Page mutations ──
 
   function addPage() {
+    if (!canEdit) return;
     const newPage = {
       pageId: createPageId(),
       name: `صفحة ${doc.pages.length + 1}`,
@@ -310,6 +316,7 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack, canEdit 
   }
 
   function handleDeletePage(index: number) {
+    if (!canEdit) return;
     setDoc((d) => {
       if (d.pages.length <= 1) return d;
       const pages = d.pages.filter((_, i) => i !== index);
@@ -330,6 +337,7 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack, canEdit 
           saveError={saveError}
           showFields={showFields}
           showFormat={showFormat}
+          canEdit={canEdit}
           onToggleFields={() => setShowFields((v) => !v)}
           onToggleFormat={() => setShowFormat((v) => !v)}
           onSave={handleExplicitSave}
@@ -351,9 +359,10 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack, canEdit 
             "--rd-page-width": `${doc.pageSetup.width}px`,
             "--rd-page-height": `${doc.pageSetup.height}px`,
           } as React.CSSProperties}
-          onDragOver={(e) => e.preventDefault()}
+          onDragOver={(e) => { if (canEdit) e.preventDefault(); }}
           onDrop={(e) => {
             e.preventDefault();
+            if (!canEdit) return;
             const canvasPage = canvasAreaRef.current?.querySelector(".rd-canvas") as HTMLElement | null;
             const getDropCoords = (): { cx: number; cy: number } => {
               if (!canvasPage) return { cx: 50, cy: 50 };
@@ -431,6 +440,7 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack, canEdit 
             selectedId={selectedId}
             onSelect={setSelectedId}
             mode="edit"
+            canEdit={canEdit}
             zoom={1}
             onElementChange={handleElementChange}
           />
@@ -442,6 +452,7 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack, canEdit 
             onAddElement={addElement}
             onImageSelected={addImageElement}
             onUpdate={handleElementUpdate}
+            canEdit={canEdit}
           />
         </div>
 
@@ -471,8 +482,16 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack, canEdit 
 
 export default function ReportDesigner() {
   const { directoryHandle } = useWorkspace();
-  const { canMutate } = usePermissions();
+  const { canMutate, canAccessTab } = usePermissions();
   const canEditDesigns = canMutate("report-designer.edit");
+  // B6: opening/printing/browsing a saved design is a read, not a mutation — it only
+  // needs tab *view* access, which is already enforced one level up by the `TabGuard`
+  // that wraps this component in Reports/index.tsx. Gating those actions on
+  // canEditDesigns instead made a supervisor's granted "view" access to
+  // reports/report-designer completely inert: they could reach this page but every
+  // open/print/thumbnail affordance stayed disabled. canMutate("report-designer.edit")
+  // is reserved below for the true mutations — create, save, delete.
+  const canViewDesigns = canAccessTab("reports/report-designer");
   const editDeniedTitle = "يتطلب تعديل التصاميم صلاحية التعديل ومساحة عمل قابلة للكتابة.";
   const currentUser = readSession()?.username ?? "admin";
 
@@ -606,6 +625,7 @@ export default function ReportDesigner() {
   }
 
   async function handleOpen(reportId: string) {
+    if (!canViewDesigns) return;
     if (!directoryHandle) return;
     setOpeningId(reportId);
     setOpenError(null);
@@ -738,12 +758,11 @@ export default function ReportDesigner() {
                 <div
                   className={`rd-card-thumb${busy ? " rd-card-thumb--loading" : ""}`}
                   role="button"
-                  tabIndex={canEditDesigns ? 0 : -1}
-                  aria-disabled={!canEditDesigns}
-                  title={!canEditDesigns ? editDeniedTitle : undefined}
+                  tabIndex={canViewDesigns ? 0 : -1}
+                  aria-disabled={!canViewDesigns}
                   aria-label={`فتح ${d.reportName}`}
-                  onClick={() => { if (!busy && canEditDesigns) void handleOpen(d.reportId); }}
-                  onKeyDown={(e) => { if (canEditDesigns && (e.key === "Enter" || e.key === " ")) void handleOpen(d.reportId); }}
+                  onClick={() => { if (!busy && canViewDesigns) void handleOpen(d.reportId); }}
+                  onKeyDown={(e) => { if (canViewDesigns && (e.key === "Enter" || e.key === " ")) void handleOpen(d.reportId); }}
                 >
                   {isOpening && <span className="rd-card-thumb-spinner">جاري التحميل…</span>}
                   {!isOpening && thumbDoc ? (
@@ -771,8 +790,7 @@ export default function ReportDesigner() {
                     <button
                       className="rd-btn rd-btn-primary rd-btn-sm"
                       onClick={() => void handleOpen(d.reportId)}
-                      disabled={busy || !canEditDesigns}
-                      title={!canEditDesigns ? editDeniedTitle : undefined}
+                      disabled={busy || !canViewDesigns}
                     >
                       {isOpening ? "…" : "فتح"}
                     </button>

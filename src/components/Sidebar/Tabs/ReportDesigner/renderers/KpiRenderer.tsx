@@ -163,7 +163,9 @@ export default function KpiRenderer({ element }: KpiRendererProps) {
 
         {!isLoading && result.kind === "number" && (
           <span style={{ fontSize: 26, fontWeight: 700, color: s.color ?? "#201f1e", lineHeight: 1 }}>
-            {result.value.toLocaleString("ar-SA")}
+            {/* App standard is Latin (Western) digits — "ar-SA-u-nu-latn" — not the
+                Arabic-Indic digits plain "ar-SA" yields (audit C-10 / B6). */}
+            {result.value.toLocaleString("ar-SA-u-nu-latn")}
           </span>
         )}
 
@@ -199,7 +201,7 @@ export default function KpiRenderer({ element }: KpiRendererProps) {
                     <div style={{ width: `${pct}%`, height: "100%", background: accentColor, borderRadius: 2 }} />
                   </div>
                   <span style={{ fontSize: 10, fontWeight: 700, color: accentColor, flexShrink: 0, minWidth: 16, textAlign: "left" }}>
-                    {count.toLocaleString("ar-SA")}
+                    {count.toLocaleString("ar-SA-u-nu-latn")}
                   </span>
                 </div>
               );

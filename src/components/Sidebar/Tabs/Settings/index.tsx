@@ -11,6 +11,7 @@ import {
   FileText,
   History,
   MessageSquare,
+  MoreHorizontal,
   PanelLeft,
   PieChart,
   RotateCcw,
@@ -55,7 +56,7 @@ type LabelGroup = {
   keys:  { key: LabelKey; desc: string }[];
 };
 
-const LABEL_GROUPS: LabelGroup[] = [
+export const LABEL_GROUPS: LabelGroup[] = [
   {
     icon:  <PanelLeft size={18} />,
     title: "القائمة الجانبية",
@@ -253,6 +254,38 @@ const LABEL_GROUPS: LabelGroup[] = [
   },
 ];
 
+// ── generated fallback group ──────────────────────────────────────────────────
+// LABEL_GROUPS above is hand-curated, so any key added to DEFAULT_LABELS without
+// also adding a row here would silently be unreachable from the editor. Close
+// that gap for good: claim every remaining DEFAULT_LABELS key into one "أخرى"
+// (Other) group, generated rather than hand-described, so it can never miss a
+// future key. Covered by index.test.tsx asserting the two sets are exhaustive.
+
+const CLAIMED_LABEL_KEYS = new Set<LabelKey>(
+  LABEL_GROUPS.flatMap((group) => group.keys.map((k) => k.key))
+);
+
+/** "sample_approval_intro" → "sample approval intro" — mechanical, invents no copy. */
+function humanizeLabelKey(key: string): string {
+  return key.replace(/_/g, " ");
+}
+
+export const OTHER_LABEL_KEYS: LabelKey[] = (
+  Object.keys(DEFAULT_LABELS) as LabelKey[]
+).filter((key) => !CLAIMED_LABEL_KEYS.has(key));
+
+const OTHER_LABEL_GROUP: LabelGroup = {
+  icon:  <MoreHorizontal size={18} />,
+  title: "أخرى",
+  keys:  OTHER_LABEL_KEYS.map((key) => ({ key, desc: humanizeLabelKey(key) })),
+};
+
+// Rendered list: the curated groups, plus the generated catch-all only when it
+// actually has something to show (keeps a future 100%-covered state from
+// rendering an empty "أخرى" section).
+const ALL_LABEL_GROUPS: LabelGroup[] =
+  OTHER_LABEL_GROUP.keys.length > 0 ? [...LABEL_GROUPS, OTHER_LABEL_GROUP] : LABEL_GROUPS;
+
 // ── row component ─────────────────────────────────────────────────────────────
 
 function LabelRow({
@@ -283,6 +316,10 @@ function LabelRow({
 
   const save = useCallback(() => {
     if (!canEdit) return;
+    // No-op blur (focus in/out without an actual edit, or retyping the same
+    // text): skip the localStorage write, the exportLabelsSnapshot disk
+    // round-trip, and the "saved" badge flash — nothing changed.
+    if (val === getLabels()[labelKey]) return;
     setLabel(labelKey, val);
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
@@ -411,7 +448,7 @@ function SettingsPage() {
         </div>
 
         <div className="settings-category-body">
-          {LABEL_GROUPS.map((group) => {
+          {ALL_LABEL_GROUPS.map((group) => {
             const isOpen = openSections.has(group.title);
             const groupCustomCount = group.keys.filter((k) => isCustomized(k.key)).length;
             return (

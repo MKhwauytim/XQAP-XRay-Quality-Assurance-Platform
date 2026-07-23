@@ -10,6 +10,13 @@ interface RibbonProps {
   saveError?: string | null;
   showFields: boolean;
   showFormat: boolean;
+  /**
+   * False for a view-only user (e.g. supervisor without report-designer.edit).
+   * Disables the mutation controls — save and page-size — while leaving
+   * navigation (back), layout toggles, and print available, since those never
+   * write to the design document.
+   */
+  canEdit: boolean;
   onToggleFields: () => void;
   onToggleFormat: () => void;
   onSave: () => void;
@@ -18,8 +25,10 @@ interface RibbonProps {
   onBack: () => void;
 }
 
+const editDeniedTitle = "لا تملك صلاحية تعديل تصاميم التقارير، أو أن مساحة العمل للقراءة فقط.";
+
 export default function Ribbon({
-  doc, saving, saveError, showFields, showFormat,
+  doc, saving, saveError, showFields, showFormat, canEdit,
   onToggleFields, onToggleFormat,
   onSave, onPrint, onPageSizeChange, onBack,
 }: RibbonProps) {
@@ -36,6 +45,7 @@ export default function Ribbon({
           <select
             value={doc.pageSetup.size}
             onChange={(e) => onPageSizeChange(e.target.value as PageSizePreset)}
+            disabled={!canEdit}
             style={{
               fontSize: "12px",
               border: "1px solid var(--rd-ribbon-border)",
@@ -43,9 +53,9 @@ export default function Ribbon({
               padding: "2px 6px",
               background: "#fff",
               direction: "rtl",
-              cursor: "pointer",
+              cursor: canEdit ? "pointer" : "not-allowed",
             }}
-            title="حجم الصفحة"
+            title={canEdit ? "حجم الصفحة" : editDeniedTitle}
             aria-label="حجم الصفحة"
           >
             {(Object.keys(PAGE_SIZE_LABELS) as PageSizePreset[]).map((key) => (
@@ -86,7 +96,13 @@ export default function Ribbon({
           تعذّر الحفظ التلقائي
         </span>
       )}
-      <button className="rd-ribbon-btn" onClick={onSave} disabled={saving} type="button" title="حفظ">
+      <button
+        className="rd-ribbon-btn"
+        onClick={onSave}
+        disabled={saving || !canEdit}
+        type="button"
+        title={canEdit ? "حفظ" : editDeniedTitle}
+      >
         <span className="rd-ribbon-btn-icon"><Save size={18} strokeWidth={SW} /></span>
         <span>حفظ</span>
       </button>

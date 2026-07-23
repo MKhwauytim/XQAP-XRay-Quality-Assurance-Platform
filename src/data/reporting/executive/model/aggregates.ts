@@ -200,21 +200,51 @@ function buildReviewerAgreement(comparisons: ImageResultComparison[]): ReviewerA
   });
 }
 
+type PairTally = { comparable: number; agree: number };
+
+function pairKey(sourceA: ResultSource, sourceB: ResultSource): string {
+  return `${sourceA}|${sourceB}`;
+}
+
+/**
+ * Perf B2: one pass over `comparisons`, accumulating a
+ * Map<"sourceA|sourceB", {comparable,agree}> for all 15 source pairs at
+ * once, then materializing the 15 output cells from the map. Previously this
+ * ran the C(6,2)=15 source pairs as an outer loop and rescanned the full
+ * `comparisons` array once per pair (15 full scans). Per-pair counts are
+ * plain integer sums, so accumulation order cannot change the result —
+ * verified by an exact-equivalence test against the prior per-pair-scan
+ * implementation in model.test.ts.
+ */
 function buildCrossTeamMatrix(comparisons: ImageResultComparison[]): CrossTeamMatrixCell[] {
+  const tallies = new Map<string, PairTally>();
+  for (const img of comparisons) {
+    for (let i = 0; i < ALL_SOURCES.length; i++) {
+      const sourceA = ALL_SOURCES[i];
+      const a = img.results[sourceA];
+      if (a === null) continue;
+      for (let j = i + 1; j < ALL_SOURCES.length; j++) {
+        const sourceB = ALL_SOURCES[j];
+        const b = img.results[sourceB];
+        if (b === null) continue;
+        const key = pairKey(sourceA, sourceB);
+        const existing = tallies.get(key);
+        if (existing) {
+          existing.comparable += 1;
+          if (a === b) existing.agree += 1;
+        } else {
+          tallies.set(key, { comparable: 1, agree: a === b ? 1 : 0 });
+        }
+      }
+    }
+  }
+
   const cells: CrossTeamMatrixCell[] = [];
   for (let i = 0; i < ALL_SOURCES.length; i++) {
     for (let j = i + 1; j < ALL_SOURCES.length; j++) {
       const sourceA = ALL_SOURCES[i];
       const sourceB = ALL_SOURCES[j];
-      let comparable = 0;
-      let agree = 0;
-      for (const img of comparisons) {
-        const a = img.results[sourceA];
-        const b = img.results[sourceB];
-        if (a === null || b === null) continue;
-        comparable += 1;
-        if (a === b) agree += 1;
-      }
+      const { comparable, agree } = tallies.get(pairKey(sourceA, sourceB)) ?? { comparable: 0, agree: 0 };
       cells.push({
         sourceA,
         sourceB,
@@ -286,5 +316,5 @@ export function buildAggregates(
   };
 }
 
-export { metricsFromCounts, emptyCounts, tally };
+export { metricsFromCounts, emptyCounts, tally, buildCrossTeamMatrix };
 export type { Counts };

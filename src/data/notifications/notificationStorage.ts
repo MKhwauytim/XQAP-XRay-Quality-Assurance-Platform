@@ -14,6 +14,7 @@ import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
 import { withResourceLock } from "../storage/webLocks";
+import { withWorkspaceWriteAccess } from "../storage/workspaceWriteAccess";
 import { logError } from "../storage/errorLogger";
 import { getSystemRoot, SYSTEM_FOLDER_NAMES } from "../workspace/workspacePaths";
 import type { AppNotification, NotificationsFile } from "./notificationTypes";
@@ -86,42 +87,49 @@ async function mutateNotifications(
   updater: (list: AppNotification[]) => AppNotification[]
 ): Promise<NotificationWriteResult> {
   try {
-    // `:rmw` suffix keeps this outer read-modify-write lock distinct from
-    // safeWriteJson's internal `${dir.name}/${fileName}` lock (withResourceLock
-    // is not reentrant — a colliding key self-deadlocks).
-    const result = await withResourceLock(
-      `notifications/${NOTIFICATIONS_FILE}:rmw`,
-      () =>
-        casLoop<{ ok: true }>(
-          async (writeToken) => {
-            const dir = await getNotificationsDir(directoryHandle, true);
-            const existing = await readNotificationsFile(directoryHandle);
-            const nextRevision = (existing.revision ?? 0) + 1;
-            const updated: NotificationsFile = {
-              revision: nextRevision,
-              _writeToken: writeToken,
-              updatedAt: new Date().toISOString(),
-              notifications: updater(existing.notifications).slice(-MAX_NOTIFICATIONS),
-            };
-            await safeWriteJson(dir, NOTIFICATIONS_FILE, updated);
-            const verify = await readNotificationsFile(directoryHandle);
-            if (verify.revision === nextRevision && verify._writeToken === writeToken) {
-              return { done: true, result: { ok: true as const } };
+    // A remembered workspace (PR #36) opens with read permission only — request
+    // write access here, before the notifications folder is created, instead of
+    // letting a raw NotAllowedError surface from inside the CAS loop, where
+    // casLoop's terminal permission-lost path would misreport a reconnected
+    // read-only session as "access lost, reconnect" (mirrors exportWriter.ts).
+    return await withWorkspaceWriteAccess(directoryHandle, async () => {
+      // `:rmw` suffix keeps this outer read-modify-write lock distinct from
+      // safeWriteJson's internal `${dir.name}/${fileName}` lock (withResourceLock
+      // is not reentrant — a colliding key self-deadlocks).
+      const result = await withResourceLock(
+        `notifications/${NOTIFICATIONS_FILE}:rmw`,
+        () =>
+          casLoop<{ ok: true }>(
+            async (writeToken) => {
+              const dir = await getNotificationsDir(directoryHandle, true);
+              const existing = await readNotificationsFile(directoryHandle);
+              const nextRevision = (existing.revision ?? 0) + 1;
+              const updated: NotificationsFile = {
+                revision: nextRevision,
+                _writeToken: writeToken,
+                updatedAt: new Date().toISOString(),
+                notifications: updater(existing.notifications).slice(-MAX_NOTIFICATIONS),
+              };
+              await safeWriteJson(dir, NOTIFICATIONS_FILE, updated);
+              const verify = await readNotificationsFile(directoryHandle);
+              if (verify.revision === nextRevision && verify._writeToken === writeToken) {
+                return { done: true, result: { ok: true as const } };
+              }
+              return { done: false };
+            },
+            {
+              maxRetries: 6,
+              baseDelayMs: 50,
+              conflictError:
+                "تعارض في الكتابة: تعذّر حفظ الإشعارات بعد عدة محاولات.",
             }
-            return { done: false };
-          },
-          {
-            maxRetries: 6,
-            baseDelayMs: 50,
-            conflictError:
-              "تعارض في الكتابة: تعذّر حفظ الإشعارات بعد عدة محاولات.",
-          }
-        )
-    );
-    if ("ok" in result && result.ok === false) {
-      return { ok: false, error: result.error };
-    }
-    return { ok: true };
+          )
+      );
+      if ("ok" in result && result.ok === false) {
+        return { ok: false, error: result.error };
+      }
+      return { ok: true };
+    });
   } catch (error) {
     logError("notifications:write", error);
     return {

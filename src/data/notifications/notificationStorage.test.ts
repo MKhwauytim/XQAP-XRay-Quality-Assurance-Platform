@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { createMemoryDirectory } from "../storage/memoryDirectory";
 import { clearErrors } from "../storage/errorLogger";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import { WorkspacePermissionError } from "../storage/workspaceWriteAccess";
 import {
   acceptNotification,
   loadNotifications,
@@ -148,5 +149,50 @@ describe("notificationStorage", () => {
     ]);
     const list = await loadNotifications(root);
     expect(list.map((n) => n.message).sort()).toEqual(["من المدير أ", "من المدير ب"]);
+  });
+
+  it("requests write permission before creating the notifications folder, on a freshly-restored read-only workspace", async () => {
+    // A remembered workspace (PR #36) opens with read permission only; the first
+    // notification write must request write access itself — via the one-click
+    // browser prompt — rather than assuming it already holds it. Regression test
+    // for the withWorkspaceWriteAccess gap (mirrors populationStorage.test.ts /
+    // exportWriter.test.ts for the same class of bug).
+    const root = createMemoryDirectory("root", {
+      initialWritePermission: "prompt",
+      writePermissionRequestOutcome: "granted",
+    });
+
+    const result = await postNotification(root, {
+      message: "تعميم بعد إعادة الاتصال بمساحة العمل",
+      postedBy: "manager1",
+    });
+
+    expect(result.ok).toBe(true);
+    const list = await loadNotifications(root);
+    expect(list).toHaveLength(1);
+    expect(list[0]!.message).toBe("تعميم بعد إعادة الاتصال بمساحة العمل");
+  });
+
+  it("fails with the Arabic permission-required message, not casLoop's misleading reconnect message, when write access is declined", async () => {
+    const root = createMemoryDirectory("root", {
+      initialWritePermission: "prompt",
+      writePermissionRequestOutcome: "denied",
+    });
+
+    const result = await postNotification(root, { message: "تعميم", postedBy: "manager1" });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toBe(new WorkspacePermissionError().message);
+    // Must NOT be casLoop's terminal "access lost, reconnect" message — that
+    // would wrongly tell a merely-not-yet-granted user to reconnect the whole
+    // workspace instead of just accepting the one-click permission prompt.
+    expect(result.error).not.toBe("فقد الوصول إلى مجلد العمل — أعد الاتصال بمساحة العمل.");
+
+    // Nothing should have been created — declined before any folder was made.
+    await expect(
+      root.getDirectoryHandle("5-system", { create: false })
+    ).rejects.toThrow();
+    expect(await loadNotifications(root)).toHaveLength(0);
   });
 });
