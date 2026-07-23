@@ -727,30 +727,43 @@ export async function loadMonthForEditing(
   try {
     const monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, false);
 
-    const [manifestResult, popBundle, summaryBundle, rawBundle, sampleBundle] = await Promise.all([
-      safeReadJson<MonthManifestData>(monthDir, "month.manifest.json"),
+    // Read the manifest first (small, fast) to decide whether the two raw
+    // import files are worth reading at all -- they can each hold up to the
+    // full 200k-400k row population for the month. A2026-07-22 perf finding:
+    // once a month has actually been processed (any status past "raw-saved"),
+    // nothing downstream of loadMonthForEditing reads riskRawRows/biRawRows
+    // for phase derivation, sampling, distribution, or browse -- only Phase
+    // 1/2's own display of the originally-uploaded workbook needs them, and
+    // that only applies while the month is still awaiting processing. A
+    // missing/unreadable manifest keeps the previous always-attempt behavior
+    // (safe fallback -- never skip on uncertainty).
+    const manifestResult = await safeReadJson<MonthManifestData>(monthDir, "month.manifest.json");
+    const manifest = manifestResult?.ok ? manifestResult.value : null;
+    const needsRawWorkbooks = !manifest || manifest.status === "raw-saved";
+
+    const [popBundle, summaryBundle, rawBundle, sampleBundle] = await Promise.all([
       monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false })
         .then((dir) => safeReadJson<PopulationFinalData>(dir, "population.final.json"))
         .catch(() => null),
       monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false })
         .then((dir) => safeReadJson<ProcessingSummaryData>(dir, "processing.summary.json"))
         .catch(() => null),
-      monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.raw, { create: false })
-        .then(async (dir) => {
-          const [risk, bi] = await Promise.all([
-            safeReadJson<MonthRawData>(dir, "risk.raw.json"),
-            safeReadJson<MonthRawData>(dir, "bi.raw.json"),
-          ]);
-          return { risk, bi };
-        })
-        .catch(() => null),
+      needsRawWorkbooks
+        ? monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.raw, { create: false })
+            .then(async (dir) => {
+              const [risk, bi] = await Promise.all([
+                safeReadJson<MonthRawData>(dir, "risk.raw.json"),
+                safeReadJson<MonthRawData>(dir, "bi.raw.json"),
+              ]);
+              return { risk, bi };
+            })
+            .catch(() => null)
+        : Promise.resolve(null),
       resolveSampleDir(directoryHandle, monthFolderName, monthDir)
         .then((dir) =>
           dir ? safeReadJson<SampleMasterData>(dir, "sample.master.json") : null
         ),
     ]);
-
-    const manifest = manifestResult?.ok ? manifestResult.value : null;
 
     let populationRows: Array<Record<string, unknown>> | null = null;
     let certScanRows = 0;

@@ -4,11 +4,12 @@ import { createMemoryDirectory } from "../storage/memoryDirectory";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { WorkspacePermissionError } from "../storage/workspaceWriteAccess";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
-import { saveMonthRun, loadAllSampleRows, loadBrowseRows, updateMonthStatus } from "./populationStorage";
+import { saveMonthRun, loadAllSampleRows, loadBrowseRows, updateMonthStatus, loadMonthForEditing } from "./populationStorage";
 import { loadReplacementBucket, loadReplacementIndexManifest } from "./replacementIndexStorage";
 import { saveSampleMaster } from "../sampling/sampleStorage";
 import type { MonthManifestData, MonthRawData, PopulationFinalData } from "./monthTypes";
 import type { SampleMasterData } from "../sampling/sampleTypes";
+import { getPopulationMonthDir, POPULATION_SUBFOLDERS } from "../workspace/workspacePaths";
 
 const baseParams = {
   month: 5,
@@ -93,6 +94,81 @@ test("saveMonthRun does not write bi.raw.json when no BI rows", async () => {
   const biRaw = await safeReadJson(rawDir, "bi.raw.json");
   expect(biRaw.ok).toBe(false);
   expect((biRaw as { reason: string }).reason).toBe("missing");
+});
+
+test("loadMonthForEditing skips reading risk.raw.json/bi.raw.json once a month is processed (A1 perf: avoids the two largest per-row files for every already-processed month view)", async () => {
+  const dir = createMemoryDirectory();
+  // saveMonthRun always leaves status "processed-saved" and writes risk.raw.json
+  // alongside population.final.json -- the exact real-world shape this optimization
+  // targets: raw files still exist on disk, but are no longer needed for display.
+  await saveMonthRun({ directoryHandle: dir, ...baseParams });
+
+  const data = await loadMonthForEditing(dir, "5-may-2026");
+
+  // Proves this is a smart skip based on manifest.status, not "file missing":
+  // the file genuinely exists (verified by the earlier "writes risk.raw.json" test
+  // against the same saveMonthRun fixture) yet riskRawRows comes back empty.
+  expect(data.riskRawRows).toEqual([]);
+  expect(data.biRawRows).toEqual([]);
+  // Everything actually needed for phase/browse/sample display is unaffected.
+  expect(data.populationRows).toHaveLength(1);
+  expect(data.manifest?.status).toBe("processed-saved");
+});
+
+test("loadMonthForEditing still reads risk.raw.json/bi.raw.json for a month whose manifest is still at raw-saved (Phase 1/2 genuinely needs it)", async () => {
+  const dir = createMemoryDirectory();
+  const monthDir = await getPopulationMonthDir(dir, "5-may-2026", true);
+  const rawDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.raw, { create: true });
+
+  const manifest: MonthManifestData = {
+    monthFolderName: "5-may-2026",
+    month: 5,
+    year: 2026,
+    processedAt: new Date().toISOString(),
+    processedBy: "test-admin",
+    riskFileName: "risk.xlsx",
+    biFileName: null,
+    certScanUsed: false,
+    templateVersion: null,
+    rngSeed: null,
+    totalRawRows: 1,
+    totalProcessedRows: 0,
+    status: "raw-saved",
+  };
+  await safeWriteJson(monthDir, "month.manifest.json", manifest);
+
+  const riskRaw: MonthRawData = {
+    importedAt: new Date().toISOString(),
+    importedBy: "test-admin",
+    sourceFileName: "risk.xlsx",
+    rows: [{ id: "A001", port: "بري" }],
+  };
+  await safeWriteJson(rawDir, "risk.raw.json", riskRaw);
+
+  const data = await loadMonthForEditing(dir, "5-may-2026");
+
+  expect(data.riskRawRows).toHaveLength(1);
+  expect(data.populationRows).toBeNull(); // not processed yet -- no population.final.json
+  expect(data.manifest?.status).toBe("raw-saved");
+});
+
+test("loadMonthForEditing still attempts raw reads when the manifest itself is missing/unreadable (safe fallback, unchanged from before this optimization)", async () => {
+  const dir = createMemoryDirectory();
+  const monthDir = await getPopulationMonthDir(dir, "5-may-2026", true);
+  const rawDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.raw, { create: true });
+  const riskRaw: MonthRawData = {
+    importedAt: new Date().toISOString(),
+    importedBy: "test-admin",
+    sourceFileName: "risk.xlsx",
+    rows: [{ id: "A001", port: "بري" }],
+  };
+  await safeWriteJson(rawDir, "risk.raw.json", riskRaw);
+  // Deliberately no month.manifest.json written.
+
+  const data = await loadMonthForEditing(dir, "5-may-2026");
+
+  expect(data.manifest).toBeNull();
+  expect(data.riskRawRows).toHaveLength(1);
 });
 
 test("loadBrowseRows reads only the selected month unless all months are requested", async () => {
