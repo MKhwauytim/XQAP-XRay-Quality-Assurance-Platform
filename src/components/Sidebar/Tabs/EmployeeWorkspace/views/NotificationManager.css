@@ -130,6 +130,7 @@
   line-height: 1.5;
   color: var(--c-navy);
   white-space: pre-wrap;
+  overflow-wrap: break-word;
 }
 
 .ntf-card-meta {

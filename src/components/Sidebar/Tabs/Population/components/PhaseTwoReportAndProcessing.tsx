@@ -24,6 +24,15 @@ type PhaseTwoReportAndProcessingProps = {
   hasDiskWorkspace: boolean;
   /** B3 referential-integrity orphan scan for the saved month, or null when unavailable. */
   orphanScan?: OrphanScanResult | null;
+  /** B13: render-time gate for the process button — process-population permission combined
+   *  with the closed-month and month-loading flags (index.tsx's canProcessNow), matching
+   *  Phase 4's canDistribute pattern. */
+  canProcess: boolean;
+  /** B13: render-time gate for the export buttons — export-reports permission combined with
+   *  the month-loading flag (index.tsx's canExportNow; export does not write to the
+   *  workspace so it is not gated on closed-month, matching handleExportPopulation's
+   *  existing handler-side check). */
+  canExport: boolean;
   onCertScanPasteTextChange: (value: string) => void;
   onProcessPopulation: () => void;
   onExportPopulation: () => void;
@@ -44,6 +53,8 @@ export default function PhaseTwoReportAndProcessing({
   saveToDiskMessage,
   hasDiskWorkspace,
   orphanScan = null,
+  canProcess,
+  canExport,
   onCertScanPasteTextChange,
   onProcessPopulation,
   onExportPopulation,
@@ -146,8 +157,14 @@ export default function PhaseTwoReportAndProcessing({
             type="button"
             className="proc-run-btn"
             onClick={onProcessPopulation}
-            disabled={isProcessingPopulation || loadedFromDisk}
-            title={loadedFromDisk ? "ارفع الملفات من المرحلة الأولى لإعادة المعالجة" : undefined}
+            disabled={isProcessingPopulation || loadedFromDisk || !canProcess}
+            title={
+              !canProcess
+                ? "لا تملك صلاحية معالجة المجتمع، أو أن الشهر مغلق حالياً، أو أن بيانات الشهر قيد التحميل."
+                : loadedFromDisk
+                ? "ارفع الملفات من المرحلة الأولى لإعادة المعالجة"
+                : undefined
+            }
           >
             {isProcessingPopulation ? (
               <>
@@ -170,7 +187,8 @@ export default function PhaseTwoReportAndProcessing({
                 type="button"
                 className="proc-export-btn"
                 onClick={onExportPhaseReport}
-                title="تصدير تقرير المعالجة"
+                disabled={!canExport}
+                title={!canExport ? "لا تملك صلاحية تصدير التقارير." : "تصدير تقرير المعالجة"}
               >
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
@@ -183,7 +201,8 @@ export default function PhaseTwoReportAndProcessing({
                 type="button"
                 className="proc-export-btn primary"
                 onClick={onExportPopulation}
-                title="تصدير المجتمع النهائي Excel"
+                disabled={!canExport}
+                title={!canExport ? "لا تملك صلاحية تصدير التقارير." : "تصدير المجتمع النهائي Excel"}
               >
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>

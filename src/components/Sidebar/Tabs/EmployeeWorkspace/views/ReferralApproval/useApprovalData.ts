@@ -364,44 +364,11 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
     return outcomes;
   }
 
-  async function bulkReferralDecision(
-    requests: ReferralRequest[], action: "approve" | "deny", notes: string
-  ): Promise<BulkOutcome[]> {
-    const outcomes: BulkOutcome[] = [];
-    for (const request of requests) {
-      const result = action === "approve" ? await approveReferral(request, notes) : await denyReferral(request, notes);
-      outcomes.push({
-        requestId: request.requestId,
-        label: `${userDisplayMap[request.fromEmployee] ?? request.fromEmployee} ← ${userDisplayMap[request.toEmployee] ?? request.toEmployee}`,
-        ok: result.ok,
-        error: result.ok ? undefined : result.error,
-      });
-    }
-    return outcomes;
-  }
-
-  async function bulkReplacementDecision(
-    requests: ReplacementRequest[], action: "approve" | "deny", notes: string
-  ): Promise<BulkOutcome[]> {
-    const outcomes: BulkOutcome[] = [];
-    for (const request of requests) {
-      const result = action === "approve" ? await approveReplacement(request, notes) : await denyReplacement(request, notes);
-      outcomes.push({
-        requestId: request.requestId,
-        label: `${request.originalXrayImageId} → ${request.replacementXrayImageId}`,
-        ok: result.ok,
-        error: result.ok ? undefined : result.error,
-      });
-    }
-    return outcomes;
-  }
-
   return {
     username, role, canApproveReferrals, canApproveReplacements, canApproveReopens,
     userDisplayMap, months, selMonth,
     referrals, replacements, reopens, requests, sampleDetails, loadState, reload: loadData,
     approveReferral, denyReferral, approveReplacement, denyReplacement, approveReopen, denyReopen,
     approve, deny, canReviewRequest, bulkDecision,
-    bulkReferralDecision, bulkReplacementDecision,
   };
 }

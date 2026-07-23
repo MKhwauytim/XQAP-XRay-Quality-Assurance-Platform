@@ -25,6 +25,20 @@ type PhaseThreeSamplingProps = {
   priorMonthAdvisory: SamplingPlanPriorMonthAdvisory | null;
   sampleNeedsApproval: boolean;
   isApprovingSample: boolean;
+  /** B13: gates the "سحب العينات وحفظها" (draw sample) button — already combines
+   *  permission + closed-month + in-flight-month-load in index.tsx, matching the
+   *  canDrawSample used by its own handler-side check (handleDrawSample). */
+  canDrawSample: boolean;
+  /** B13: gates the stage-rule and CertScan-quota fields (render-time), matching the
+   *  canConfigureSample already enforced handler-side in handleConfigChange. */
+  canConfigureSample: boolean;
+  /**
+   * B13: shared wizard status/error text (index.tsx's setProcessingMessage). Phase 3 did
+   * not render this previously, so a rejected config edit (e.g. handleConfigChange denying
+   * a CertScan quota change for lack of permission) surfaced no visible feedback — the
+   * input just silently reverted to its previous value on the next render.
+   */
+  processingMessage: string;
   onApproveSample: () => void;
   onConfigChange: (config: PopulationConfig) => void;
   onSampleSeedChange: (seed: string) => void;
@@ -195,6 +209,9 @@ export default function PhaseThreeSampling({
   priorMonthAdvisory,
   sampleNeedsApproval,
   isApprovingSample,
+  canDrawSample,
+  canConfigureSample,
+  processingMessage,
   onApproveSample,
   onConfigChange,
   onSampleSeedChange,
@@ -342,6 +359,7 @@ export default function PhaseThreeSampling({
                       <select
                         className="save-disk-input"
                         value={rule.certScanMethod}
+                        disabled={isLockedState || !canConfigureSample}
                         onChange={(e) =>
                           handleRuleChange(rule.stageKey, "certScanMethod", e.target.value as StageSamplingRule[keyof StageSamplingRule])
                         }
@@ -362,6 +380,7 @@ export default function PhaseThreeSampling({
                             : rule.certScanExactCount
                         }
                         min={0}
+                        disabled={isLockedState || !canConfigureSample}
                         onChange={(e) => {
                           const v = parseInt(e.target.value, 10) || 0;
                           if (rule.certScanMethod === "percentage") {
@@ -407,11 +426,18 @@ export default function PhaseThreeSampling({
             type="button"
             className="primary-action"
             onClick={onDrawSample}
-            disabled={isDrawingSample || populationRows.length === 0}
+            disabled={isDrawingSample || populationRows.length === 0 || !canDrawSample}
+            title={!canDrawSample ? "لا تملك صلاحية سحب العينة، أو أن الشهر مغلق، أو أن بيانات الشهر قيد التحميل." : undefined}
           >
             {isDrawingSample ? "جاري سحب العينات..." : "سحب العينات وحفظها"}
           </button>
         </div>
+
+        {processingMessage && (
+          <div className="upload-warning" role="status">
+            {processingMessage}
+          </div>
+        )}
 
         {sampleSaveMessage && (
           <div

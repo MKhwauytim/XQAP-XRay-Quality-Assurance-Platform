@@ -1,5 +1,6 @@
 import type {
   ReferralRequest,
+  ReferralStatus,
   ReopenRequest,
   ReplacementRequest,
 } from "../../../../../../data/referral/referralTypes";
@@ -36,4 +37,18 @@ export const KIND_LABELS: Record<RequestKind, string> = {
   referral: "إحالة",
   replacement: "استبدال",
   reopen: "إعادة فتح",
+};
+
+/** Shared status badge copy/class — kept in one place so HistoryView and
+ *  RequestCard can never drift on the Arabic wording or badge tone. */
+export const STATUS_BADGE_LABEL: Record<ReferralStatus, string> = {
+  pending: "معلق",
+  approved: "مقبول",
+  denied: "مرفوض",
+};
+
+export const STATUS_BADGE_CLASS: Record<ReferralStatus, string> = {
+  pending: "ew-ref-badge-pending",
+  approved: "ew-ref-badge-approved",
+  denied: "ew-ref-badge-denied",
 };

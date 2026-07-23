@@ -13,6 +13,14 @@ type PhaseOneUploadProps = {
   uploadError: string;
   processingMessage: string;
   isProcessingWorkbooks: boolean;
+  /**
+   * B13: render-time gate for the file-picker cards — combines upload-data permission with
+   * the closed-month and month-loading flags (index.tsx's canUploadNow), matching Phase 4's
+   * canDistribute pattern. FileUploadCard has no `disabled` prop of its own (owned by a
+   * different bucket), so the cards are visually + interactively disabled via a wrapper here
+   * rather than by threading a new prop into FileUploadCard itself.
+   */
+  canUpload: boolean;
   riskAgencyInputRef: RefObject<HTMLInputElement | null>;
   businessIntelligenceInputRef: RefObject<HTMLInputElement | null>;
   onPickFile: (uploadKey: UploadKey) => void;
@@ -50,6 +58,7 @@ export default function PhaseOneUpload({
   uploadError,
   processingMessage,
   isProcessingWorkbooks,
+  canUpload,
   riskAgencyInputRef,
   businessIntelligenceInputRef,
   onPickFile,
@@ -68,7 +77,12 @@ export default function PhaseOneUpload({
         </div>
       </div>
 
-      <div className="upload-grid">
+      <div
+        className="upload-grid"
+        aria-disabled={!canUpload}
+        title={!canUpload ? "لا تملك صلاحية رفع ملفات البيانات، أو أن الشهر مغلق حالياً، أو أن بيانات الشهر قيد التحميل." : undefined}
+        style={!canUpload ? { opacity: 0.55, pointerEvents: "none", cursor: "not-allowed" } : undefined}
+      >
         <FileUploadCard
           title="بيانات وكالة المخاطر"
           description="ملف أساسي يحتوي على أوراق بري، بحري، افراد، وعبور."

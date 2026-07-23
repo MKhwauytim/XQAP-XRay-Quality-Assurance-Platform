@@ -97,18 +97,27 @@ export function getVisibleReferralColumns(
   cfg: ColConfig,
   isAdmin: boolean
 ): DataTableCol<DistributionEntry>[] {
-  const orderedIds = new Set(cfg.order);
-  const missingAlways = columns.filter((column) => column.alwaysVisible && !orderedIds.has(column.id));
-  return [
-    ...missingAlways,
-    ...cfg.order
-      .map((id) => columns.find((column) => column.id === id))
-      .filter((column): column is DataTableCol<DistributionEntry> => Boolean(column)),
-  ].filter((column) =>
-    column.id !== SELECT_COL_ID &&
-    !cfg.hidden.includes(column.id) &&
-    (!column.adminOnly || isAdmin)
-  );
+  // Reconcile the saved column order with the current column set (mirrors
+  // DataTable/index.tsx's own normalizedOrder reconciliation):
+  //  • keep known ids in their saved position,
+  //  • prepend any missing alwaysVisible columns,
+  //  • append any other column added to buildXrayColumns after this preset was
+  //    saved — otherwise it would silently vanish from the referral-request
+  //    preview forever for any user with a saved layout.
+  const known = new Set(columns.map((column) => column.id));
+  const kept = cfg.order.filter((id) => known.has(id));
+  const keptSet = new Set(kept);
+  const missingAlways = columns.filter((column) => column.alwaysVisible && !keptSet.has(column.id)).map((column) => column.id);
+  const missingRest = columns.filter((column) => !column.alwaysVisible && !keptSet.has(column.id)).map((column) => column.id);
+  const order = [...missingAlways, ...kept, ...missingRest];
+  return order
+    .map((id) => columns.find((column) => column.id === id))
+    .filter((column): column is DataTableCol<DistributionEntry> => Boolean(column))
+    .filter((column) =>
+      column.id !== SELECT_COL_ID &&
+      !cfg.hidden.includes(column.id) &&
+      (!column.adminOnly || isAdmin)
+    );
 }
 
 export function pct(n: number, d: number): number {

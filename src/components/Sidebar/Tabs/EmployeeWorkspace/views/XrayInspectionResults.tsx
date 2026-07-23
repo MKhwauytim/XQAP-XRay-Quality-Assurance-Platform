@@ -1,11 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CalendarOff } from "lucide-react";
 import { readSession } from "../../../../../auth/authSession";
-import {
-  hasFeature,
-  readUserManagementState,
-  subscribeToUserManagementChanges,
-} from "../../../../../auth/userManagement";
+import { usePermissions } from "../../../../../auth/usePermissions";
 import { PageHeader } from "../../../../../components/PageHeader/PageHeader";
 import { logRejection } from "../../../../../data/storage/errorLogger";
 import { EmptyState, ErrorState, LoadingState } from "../../../../../components/StateViews/StateViews";
@@ -126,22 +122,22 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
   const sampleColumns = useMemo(() => buildSampleColumns(L), [L]);
   const session = readSession();
   const username = session?.username ?? "";
-  const role = session?.role ?? "employee";
-  // Re-render on permission-matrix changes so canSeeAll doesn't stay stale while mounted.
-  const [, forcePermissionRefresh] = useState(0);
-  useEffect(() => subscribeToUserManagementChanges(() => forcePermissionRefresh((n) => n + 1)), []);
-  const userManagementState = readUserManagementState();
-  const canSeeAll = hasFeature(
-    userManagementState.featurePermissions,
-    role,
-    "view-all-entries"
-  );
+  // usePermissions() already subscribes to permission-matrix changes internally,
+  // so canSeeAll re-renders on change without a manual subscribe/forceUpdate block.
+  const { can } = usePermissions();
+  const canSeeAll = can("view-all-entries");
 
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const { months, selection: globalMonth } = useGlobalMonth();
   const selectedMonth = globalMonth.kind === "existing" ? globalMonth.folderName : "";
   const [rows, setRows] = useState<ResultRow[]>([]);
-  const [auditRows, setAuditRows] = useState<AuditRow[]>([]);
+  // Raw audit-log inputs (not the derived AuditRow[]) — buildAuditRows is a pure
+  // filter over these driven by viewMode via the auditRows memo below, so toggling
+  // النتائج/المستبدلة/المحالة never has to re-read distribution/referral/replacement
+  // logs or every employee's answer file again (see loadData's dependency array).
+  const [auditEvents, setAuditEvents] = useState<DistributionEvent[]>([]);
+  const [auditReferralRequests, setAuditReferralRequests] = useState<ReferralRequest[]>([]);
+  const [auditReplacementRequests, setAuditReplacementRequests] = useState<ReplacementRequest[]>([]);
   const [viewMode, setViewMode] = useState<ResultsViewMode>("active");
   const [template, setTemplate] = useState<TemplateSchema | null>(null);
   const [referralColConfig, setReferralColConfig] = useState<ColConfig | null>(null);
@@ -179,7 +175,9 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
     if (!selectedMonth) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- sync empty-state reset when no month folder is selected
       setRows([]);
-      setAuditRows([]);
+      setAuditEvents([]);
+      setAuditReferralRequests([]);
+      setAuditReplacementRequests([]);
       setTemplate(null);
       setLoadState("ready");
     }
@@ -221,14 +219,6 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
           if (!canSeeAll && !isVisibleToUser(entry, movement, username)) return false;
           return entry.status !== "replaced";
         });
-      const audit = buildAuditRows({
-        events: log.events,
-        referralRequests: referralLog.requests,
-        replacementRequests: replacementLog.requests,
-        canSeeAll,
-        username,
-        mode: viewMode,
-      });
 
       const answerFiles = canSeeAll
         ? await loadAllEmployeeFiles(directoryHandle, selectedMonth)
@@ -248,12 +238,14 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
         movement,
         answer: answerByKey.get(`${entry.xrayImageId}::${entry.assignedTo}`) ?? null,
       })));
-      setAuditRows(audit);
+      setAuditEvents(log.events);
+      setAuditReferralRequests(referralLog.requests);
+      setAuditReplacementRequests(replacementLog.requests);
       setLoadState("ready");
     } catch {
       if (token === loadTokenRef.current) setLoadState("error");
     }
-  }, [canSeeAll, directoryHandle, selectedMonth, username, viewMode]);
+  }, [canSeeAll, directoryHandle, selectedMonth, username]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -261,6 +253,22 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
     }, 0);
     return () => window.clearTimeout(timer);
   }, [loadData]);
+
+  // Pure filter over the raw audit-log state loadData already fetched — buildAuditRows
+  // itself takes `mode` and returns [] outright for "active", so re-deriving this on
+  // viewMode toggles is cheap and never touches the workspace folder again.
+  const auditRows = useMemo<AuditRow[]>(
+    () =>
+      buildAuditRows({
+        events: auditEvents,
+        referralRequests: auditReferralRequests,
+        replacementRequests: auditReplacementRequests,
+        canSeeAll,
+        username,
+        mode: viewMode,
+      }),
+    [auditEvents, auditReferralRequests, auditReplacementRequests, canSeeAll, username, viewMode]
+  );
 
   const answerFields = useMemo(
     () =>

@@ -19,6 +19,14 @@ type PhaseFourDistributionProps = {
   distributionProgress: { percent: number; message: string } | null;
   canConfigure: boolean;
   canDistribute: boolean;
+  /**
+   * B13: gates the bulk-assignment ("تطبيق وحفظ التوزيع التلقائي") action specifically.
+   * Distinct from canDistribute (per-row assign/reassign/complete/replace) because the
+   * two features have independent role defaults — e.g. shipped supervisor defaults grant
+   * bulk-assign but not distribute-samples, so reusing canDistribute here wrongly disabled
+   * the bulk button for supervisors who actually have the permission.
+   */
+  canBulkAssign: boolean;
   config: PopulationConfig;
   operatorUsername: string;
   saveMonth: number;
@@ -54,6 +62,7 @@ export default function PhaseFourDistribution({
   distributionProgress,
   canConfigure,
   canDistribute,
+  canBulkAssign,
   config,
   operatorUsername,
   saveMonth,
@@ -225,6 +234,10 @@ export default function PhaseFourDistribution({
   );
 
   const handleRunBulkAssignment = async () => {
+    if (!canBulkAssign) {
+      setBulkError("لا تملك صلاحية التوزيع الجماعي.");
+      return;
+    }
     setBulkError("");
     const { events, errors, skipped } = calculateBulkAssignment({
       rows: sampleRows,
@@ -461,8 +474,8 @@ export default function PhaseFourDistribution({
               type="button"
               className="primary-action"
               onClick={handleRunBulkAssignment}
-              disabled={!canDistribute || isDistributing}
-              title={!canDistribute ? "لا تملك صلاحية حفظ التوزيع، أو أن مساحة العمل للقراءة فقط." : undefined}
+              disabled={!canBulkAssign || isDistributing}
+              title={!canBulkAssign ? "لا تملك صلاحية التوزيع الجماعي، أو أن مساحة العمل للقراءة فقط." : undefined}
             >
               {isDistributing ? "جاري توزيع وحفظ التعيينات..." : "تطبيق وحفظ التوزيع التلقائي"}
             </button>

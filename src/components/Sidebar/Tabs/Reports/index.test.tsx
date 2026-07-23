@@ -52,7 +52,11 @@ const pbiExportMock = vi.hoisted(() => ({
 }));
 
 vi.mock("../../../../data/powerbiExport/exportManager", () => ({
-  runPowerBiExport: (...args: unknown[]) => pbiExportMock.impl(...args),
+  // No test here asserts on the forwarded arguments (only call count/absence),
+  // so the mock takes none -- avoids TS2556 (tsc -b's stricter check on
+  // spreading a non-tuple `unknown[]` into a zero-arg vi.fn() mock's inferred
+  // call signature) without changing any test's observable behavior.
+  runPowerBiExport: () => pbiExportMock.impl(),
 }));
 
 vi.mock("../../../../data/month/useGlobalMonth", () => ({

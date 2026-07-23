@@ -220,12 +220,13 @@ async function writeTextFile(dir: DirectoryHandleLike, fileName: string, content
   return true;
 }
 
-async function writeBinaryFile(dir: DirectoryHandleLike, fileName: string, content: ArrayBuffer): Promise<void> {
+async function writeBinaryFile(dir: DirectoryHandleLike, fileName: string, content: ArrayBuffer): Promise<boolean> {
   const fh: FileHandleLike = await dir.getFileHandle(fileName, { create: true });
   const writable = await fh.createWritable?.();
-  if (!writable) return;
+  if (!writable) return false;
   await (writable as unknown as { write: (data: unknown) => Promise<void> }).write(content);
   await writable.close();
+  return true;
 }
 
 async function readTextFile(dir: DirectoryHandleLike, fileName: string): Promise<string | null> {
@@ -315,8 +316,12 @@ async function writeRowsAsChunkedXlsx(params: {
     XLSX.utils.book_append_sheet(workbook, worksheet, "data");
     const data = XLSX.write(workbook, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
     const fileName = `${safeDataset}-${safeMonth}-part-${String(part).padStart(3, "0")}.xlsx`;
-    await writeBinaryFile(xlsxDir, fileName, data);
-    files.push(`xlsx/${fileName}`);
+    // Only record a chunk as backed up once it actually wrote (writeBinaryFile
+    // returns false when the handle has no createWritable, e.g. a read-only
+    // FileHandleLike) — otherwise the manifest's xlsxFilesBackedUp/datasets would
+    // claim a file exists that was silently skipped.
+    const wrote = await writeBinaryFile(xlsxDir, fileName, data);
+    if (wrote) files.push(`xlsx/${fileName}`);
   }
 
   return files;
@@ -615,6 +620,15 @@ async function exportMonthXlsx(params: {
   const summaries: BackupDatasetSummary[] = [];
 
   const manifest = await loadMonthJson<MonthManifestData>(directoryHandle, month.folderName, ["month.manifest.json"]);
+  // B3 perf: population.final.json can hold the entire month's population (tens
+  // of thousands of rows, potentially tens of MB). Reject an oversized dataset
+  // using the manifest's cheap totalProcessedRows BEFORE paying to load+parse
+  // the full file. The assert below still re-checks the ACTUAL loaded row count,
+  // so a stale/hand-edited manifest can never let an oversized workbook through —
+  // this is purely a fast pre-check, not a replacement for the real guard.
+  if (manifest) {
+    assertXlsxDatasetWithinLimit("population-final", manifest.totalProcessedRows);
+  }
   const population = await loadMonthJson<PopulationFinalData>(directoryHandle, month.folderName, [POPULATION_SUBFOLDERS.processed, "population.final.json"]);
   assertXlsxDatasetWithinLimit("population-final", population?.rows.length ?? 0);
   const riskRaw = await loadMonthJson<MonthRawData>(directoryHandle, month.folderName, [POPULATION_SUBFOLDERS.raw, "risk.raw.json"]);
@@ -802,6 +816,16 @@ export async function createBackup(
       await safeWriteJson(backupDir, "backup.manifest.json", manifest);
       if (mode === "automatic") {
         const settings = await loadAutoBackupSettings(directoryHandle);
+        // casLoop EXEMPTION (documented, not routed): AUTO_STATE_FILE is a
+        // derived "which backup ran last" pointer, not authoritative data — the
+        // real record is the immutable backup folder + backup.manifest.json this
+        // function just wrote above, which is never overwritten. Two machines
+        // racing an automatic backup at the same moment can only clobber which
+        // of their (both already-persisted) backups this pointer references;
+        // no backup is ever lost, mirroring how distribution.current.json is
+        // documented as a rebuildable cache rather than a CAS-protected source
+        // of truth. Not worth a revision/_writeToken schema addition for a
+        // last-write-wins status cache.
         await safeWriteJson<AutoBackupState>(backupsDir, AUTO_STATE_FILE, {
           lastBackupPeriodKey: periodKey(settings.frequency, now),
           lastBackupAt: now.toISOString(),
@@ -863,6 +887,12 @@ export async function loadAutoBackupSettings(
   };
 }
 
+// casLoop EXEMPTION (documented, not routed): this is a whole-object overwrite
+// of a single admin-chosen scalar (frequency), not a read-modify-write merge of
+// independent fields — there is no partial update a concurrent writer could
+// clobber. A race between two admins just means the later save wins outright,
+// which is normal last-admin-wins settings semantics, not a lost update. Adding
+// a revision/_writeToken pair (schema change) buys nothing here.
 export async function saveAutoBackupSettings(
   directoryHandle: DirectoryHandleLike,
   frequency: AutoBackupFrequency,
@@ -972,6 +1002,24 @@ export async function loadBackupHistory(
   }
 }
 
+// B3 perf: true once population processing has definitely completed — i.e. the
+// manifest's status (or, for a closed month, its statusBeforeClose) is past
+// "raw-saved". population.final.json is written in the SAME synchronous save as
+// this manifest (populationStorage.saveMonthRun writes the file, then the
+// manifest, in one un-interrupted flow whose errors propagate), so once that
+// stage is reached the manifest's own totalProcessedRows is a trustworthy count
+// — unlike manifestStatus's "sampled"/"distributed" advances, which go through
+// the separately-scheduled, best-effort updateMonthStatus() and so can legitimately
+// lag behind the real sample/distribution files. Defaults to "not reached" for any
+// manifest shape we can't confidently read (missing statusBeforeClose on a closed
+// month, etc.) so the caller falls back to the real file read instead of guessing.
+function populationStageReached(manifest: MonthManifestData | null): boolean {
+  if (!manifest) return false;
+  const effectiveStatus =
+    manifest.status === "closed" ? manifest.statusBeforeClose ?? "raw-saved" : manifest.status;
+  return effectiveStatus !== "raw-saved";
+}
+
 export async function loadArchiveStatus(
   directoryHandle: DirectoryHandleLike,
   months: MonthFolderInfo[]
@@ -980,9 +1028,33 @@ export async function loadArchiveStatus(
 
   for (const month of months) {
     const manifest = await loadMonthJson<MonthManifestData>(directoryHandle, month.folderName, ["month.manifest.json"]);
-    const population = await loadMonthJson<PopulationFinalData>(directoryHandle, month.folderName, [POPULATION_SUBFOLDERS.processed, "population.final.json"]);
+
+    // Prefer the manifest's own totalProcessedRows/status for the population
+    // tile instead of loading and parsing the full population.final.json (by far
+    // the largest per-month file — see populationStageReached above for why the
+    // manifest can be trusted here). Any manifest we can't confidently read this
+    // way falls back to the original full read, so accuracy never regresses.
+    let hasPopulation: boolean;
+    let totalProcessedRows: number;
+    if (populationStageReached(manifest) && typeof manifest?.totalProcessedRows === "number") {
+      hasPopulation = true;
+      totalProcessedRows = manifest.totalProcessedRows;
+    } else {
+      const population = await loadMonthJson<PopulationFinalData>(directoryHandle, month.folderName, [POPULATION_SUBFOLDERS.processed, "population.final.json"]);
+      hasPopulation = Boolean(population);
+      totalProcessedRows = population?.totalRows ?? manifest?.totalProcessedRows ?? 0;
+    }
+
     const riskRaw = await loadMonthJson<MonthRawData>(directoryHandle, month.folderName, [POPULATION_SUBFOLDERS.raw, "risk.raw.json"]);
     const biRaw = await loadMonthJson<MonthRawData>(directoryHandle, month.folderName, [POPULATION_SUBFOLDERS.raw, "bi.raw.json"]);
+    // NOTE (scope): sample.master.json / distribution.current.json are NOT given
+    // the same manifest-only shortcut. Their manifestStatus advance ("sampled" /
+    // "distributed") runs through updateMonthStatus(), which is explicitly
+    // best-effort and can silently fail to persist even though the underlying
+    // file write already succeeded (see its doc comment in populationStorage.ts) —
+    // trusting status here could make the archive tiles LESS truthful, not more,
+    // for the one class of drift this bucket exists to fix. They also have no
+    // manifest-cached row count to shortcut to, unlike totalProcessedRows above.
     const sample = await loadMonthJson<SampleMasterData>(directoryHandle, month.folderName, ["sample", "sample.master.json"]);
     const distribution = await loadMonthJson<DistributionCurrentData>(directoryHandle, month.folderName, ["distribution.current.json"]);
     const answerFiles = await loadAllEmployeeFiles(directoryHandle, month.folderName);
@@ -993,14 +1065,14 @@ export async function loadArchiveStatus(
       month: month.month,
       year: month.year,
       hasManifest: Boolean(manifest),
-      hasPopulation: Boolean(population),
+      hasPopulation,
       hasRawRisk: Boolean(riskRaw),
       hasRawBi: Boolean(biRaw),
       hasSample: Boolean(sample),
       hasDistribution: Boolean(distribution),
       hasAnswers: answerFiles.length > 0,
       manifestStatus: manifest?.status ?? null,
-      totalProcessedRows: population?.totalRows ?? manifest?.totalProcessedRows ?? 0,
+      totalProcessedRows,
       sampleRows: sample?.rows?.length ?? 0,
       distributionRows: distribution?.entries?.length ?? 0,
       answerFiles: answerFiles.length,

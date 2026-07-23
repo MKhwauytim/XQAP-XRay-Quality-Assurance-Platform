@@ -383,6 +383,11 @@
   color: #166534;
 }
 
+.arc-badge-closed {
+  background: var(--c-danger-bg, #FDE8EA);
+  color: var(--c-danger, #9F1624);
+}
+
 .arc-miss {
   color: var(--c-ink-4, #8395AC);
   font-weight: 700;
@@ -500,6 +505,21 @@
   cursor: pointer;
   font-size: 20px;
   line-height: 1;
+}
+
+/* Item 1: restore/close-reopen failures render INSIDE the modal card (the
+   backdrop below is z-index:10020 and fully covers the page-level arc-msg-error
+   banner, so a failure that leaves the dialog open must repeat itself here). */
+.arc-modal-error {
+  margin: 18px 18px 0;
+  padding: 11px 14px;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: var(--c-danger-bg, #FDE8EA);
+  color: var(--c-danger, #9F1624);
+  font-size: 13px;
+  font-weight: 750;
+  line-height: 1.6;
 }
 
 .arc-restore-warning {

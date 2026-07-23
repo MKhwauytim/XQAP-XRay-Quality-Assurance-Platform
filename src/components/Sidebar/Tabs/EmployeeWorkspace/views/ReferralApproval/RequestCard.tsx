@@ -1,7 +1,16 @@
 import RequestTimeline from "./RequestTimeline";
 import type { DistributionEntry } from "../../../../../../data/distribution/distributionTypes";
 import type { PreparedPopulationRow } from "../../../../../../data/population/populationTypes";
-import { KIND_LABELS, isReferral, isReopen, isReplacement, requestKind, type CardRequest } from "./requestKind";
+import {
+  isReferral,
+  isReopen,
+  isReplacement,
+  requestKind,
+  KIND_LABELS,
+  STATUS_BADGE_CLASS,
+  STATUS_BADGE_LABEL,
+  type CardRequest,
+} from "./requestKind";
 
 type SampleDetail = DistributionEntry | PreparedPopulationRow;
 
@@ -18,9 +27,6 @@ type Props = {
   selected: boolean;
   onToggleSelect: () => void;
 };
-
-const STATUS_LABELS: Record<string, string> = { pending: "معلق", approved: "مقبول", denied: "مرفوض" };
-const STATUS_CLASSES: Record<string, string> = { pending: "ew-ref-badge-pending", approved: "ew-ref-badge-approved", denied: "ew-ref-badge-denied" };
 
 function getDetailRow(detail: SampleDetail | undefined): PreparedPopulationRow | undefined {
   if (!detail) return undefined;
@@ -114,7 +120,7 @@ export default function RequestCard(props: Props) {
         </div>
         <div className="ew-referral-card-actions">
           <span className={`ew-req-kind-badge ew-req-kind-${kind}`}>{KIND_LABELS[kind]}</span>
-          <span className={`ew-ref-badge ${STATUS_CLASSES[request.status] ?? ""}`}>{STATUS_LABELS[request.status] ?? request.status}</span>
+          <span className={`ew-ref-badge ${STATUS_BADGE_CLASS[request.status]}`}>{STATUS_BADGE_LABEL[request.status]}</span>
           {showActions && (
             <>
               <button type="button" className="ew-btn-primary ew-btn-sm" onClick={onApprove}>موافقة</button>

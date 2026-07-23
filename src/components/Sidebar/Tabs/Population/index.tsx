@@ -14,6 +14,7 @@ import type { SidebarTabModule } from "../tabTypes";
 import { readSession } from "../../../../auth/authSession";
 import { tabAllowedRoles } from "../../../../auth/tabCatalog";
 import { usePermissions } from "../../../../auth/usePermissions";
+import type { UsePermissionsResult } from "../../../../auth/usePermissions";
 import { logError, logRejection } from "../../../../data/storage/errorLogger";
 import { currentMonthFolderInfo, formatMonthFolderName, formatMonthFolderShortLabel } from "../../../../data/population/monthFolder";
 import type { MonthFolderInfo } from "../../../../data/population/monthFolder";
@@ -153,6 +154,56 @@ function distributionProgressFromWrite(progress: DistributionWriteProgress): Exc
 
 type SubTab = "process" | "browse";
 
+type WizardCapabilities = {
+  canUploadData: boolean;
+  canProcessPopulation: boolean;
+  canConfigureSample: boolean;
+  canDrawSample: boolean;
+  canDistributeSamples: boolean;
+  canBulkAssign: boolean;
+  canViewBrowse: boolean;
+  canExportReports: boolean;
+  canUploadNow: boolean;
+  canProcessNow: boolean;
+  canExportNow: boolean;
+};
+
+/**
+ * Derives every role/feature capability the Population wizard's phase panels read, plus the
+ * closed-month/month-loading withdrawal already established for Phase 3/4 (canDrawSample,
+ * canDistributeSamples, canBulkAssign) and extended to Phase 1/2's render-time button gating
+ * (B13: canUploadNow/canProcessNow/canExportNow). The Phase 1/2 handler-side checks
+ * (pickExcelFile, handleProcessPopulation, handleExportPopulation, ...) keep their own existing
+ * permission + isLoadingMonthData checks; closed-month writes are independently rejected at the
+ * storage layer (MonthClosedError), so the *Now flags below are additive UX gates only, not a
+ * new write-path check. Pulled out of PopulationTab itself to stay under this repo's
+ * max-lines-per-function/complexity budget (npm run check:complexity) — the component was
+ * already at the line ceiling before this fix.
+ */
+function computeWizardCapabilities(
+  can: UsePermissionsResult["can"],
+  canMutate: UsePermissionsResult["canMutate"],
+  selectedMonthClosed: boolean,
+  isLoadingMonthData: boolean
+): WizardCapabilities {
+  const canUploadData = canMutate("upload-data");
+  const canProcessPopulation = canMutate("process-population");
+  const canExportReports = can("export-reports");
+  return {
+    canUploadData,
+    canProcessPopulation,
+    canConfigureSample: canMutate("configure-sample"),
+    canDrawSample: canMutate("draw-sample") && !selectedMonthClosed && !isLoadingMonthData,
+    canDistributeSamples: canMutate("distribute-samples") && !selectedMonthClosed && !isLoadingMonthData,
+    canBulkAssign: canMutate("bulk-assign") && !selectedMonthClosed && !isLoadingMonthData,
+    canViewBrowse: can("view-browse"),
+    canExportReports,
+    canUploadNow: canUploadData && !selectedMonthClosed && !isLoadingMonthData,
+    canProcessNow: canProcessPopulation && !selectedMonthClosed && !isLoadingMonthData,
+    canExportNow: canExportReports && !isLoadingMonthData,
+  };
+}
+
 export default function PopulationTab() {
   const { directoryHandle } = useWorkspace();
   const { can, canMutate } = usePermissions();
@@ -173,15 +224,7 @@ export default function PopulationTab() {
   // PREVIOUS month while saveMonth/saveYear already point at the new one, so
   // every mutating capability is withdrawn until the load resolves (CRITICAL 1).
   const [isLoadingMonthData, setIsLoadingMonthData] = useState(false);
-  const canUploadData = canMutate("upload-data");
-  const canProcessPopulation = canMutate("process-population");
-  const canConfigureSample = canMutate("configure-sample");
-  const canDrawSample = canMutate("draw-sample") && !selectedMonthClosed && !isLoadingMonthData;
-  const canDistributeSamples = canMutate("distribute-samples") && !selectedMonthClosed && !isLoadingMonthData;
-  const canBulkAssign = canMutate("bulk-assign") && !selectedMonthClosed && !isLoadingMonthData;
-  const canViewBrowse = can("view-browse");
-  const canExportReports = can("export-reports");
-
+  const { canUploadData, canProcessPopulation, canConfigureSample, canDrawSample, canDistributeSamples, canBulkAssign, canViewBrowse, canExportReports, canUploadNow, canProcessNow, canExportNow } = computeWizardCapabilities(can, canMutate, selectedMonthClosed, isLoadingMonthData);
   const [config, setConfig] = useState<PopulationConfig>(DEFAULT_POPULATION_CONFIG);
   const [settingsModalMode, setSettingsModalMode] = useState<"mapping" | "processing" | null>(null);
 
@@ -1466,6 +1509,7 @@ export default function PopulationTab() {
             uploadError={uploadError}
             processingMessage={processingMessage}
             isProcessingWorkbooks={isProcessingWorkbooks}
+            canUpload={canUploadNow}
             riskAgencyInputRef={riskAgencyInputRef}
             businessIntelligenceInputRef={businessIntelligenceInputRef}
             onPickFile={pickExcelFile}
@@ -1489,6 +1533,8 @@ export default function PopulationTab() {
             saveToDiskMessage={saveToDiskMessage}
             hasDiskWorkspace={Boolean(directoryHandle)}
             orphanScan={orphanScan}
+            canProcess={canProcessNow}
+            canExport={canExportNow}
             onCertScanPasteTextChange={handleCertScanChange}
             onProcessPopulation={handleProcessPopulation}
             onExportPopulation={handleExportPopulation}
@@ -1509,6 +1555,9 @@ export default function PopulationTab() {
             priorMonthAdvisory={priorMonthAdvisory}
             sampleNeedsApproval={effectiveSampleNeedsApproval}
             isApprovingSample={isApprovingSample}
+            canDrawSample={canDrawSample}
+            canConfigureSample={canConfigureSample}
+            processingMessage={processingMessage}
             onApproveSample={() => { void handleApproveSample(); }}
             onConfigChange={handleConfigChange}
             onSampleSeedChange={setSampleSeed}
@@ -1525,6 +1574,7 @@ export default function PopulationTab() {
             distributionProgress={distributionProgress}
             canConfigure={canConfigureSample}
             canDistribute={canDistributeSamples}
+            canBulkAssign={canBulkAssign}
             config={config}
             operatorUsername={sessionRef.current?.username ?? "unknown"}
             saveMonth={saveMonth}

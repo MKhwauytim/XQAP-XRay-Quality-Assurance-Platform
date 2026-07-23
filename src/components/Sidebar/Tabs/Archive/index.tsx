@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Archive, X } from "lucide-react";
 
 import { readSession } from "../../../../auth/authSession";
@@ -28,7 +28,7 @@ import { appendWorkspaceAction } from "../../../../data/audit/actionLog";
 import { syncUsersFromDisk } from "../../../../auth/userManagement";
 import { getLabels } from "../../../../data/labels/labelsStore";
 import { importLabelsSnapshot } from "../../../../data/workspace/labelsSnapshot";
-import { readJsonFile } from "../../../../data/storage/fileSystemAccess";
+import { readJsonFile, type ReadJsonResult } from "../../../../data/storage/fileSystemAccess";
 import { WORKSPACE_FILE_NAMES } from "../../../../data/workspace/workspaceDefaults";
 import { getUserDataRoot } from "../../../../data/workspace/workspacePaths";
 import type { UsersPermissionsFile } from "../../../../data/workspace/workspaceTypes";
@@ -91,9 +91,26 @@ export default function ArchiveTab() {
   const [message, setMessage] = useState<{ type: "ok" | "error"; text: string } | null>(null);
   const [lockTarget, setLockTarget] = useState<{ folderName: string; mode: "close" | "reopen" } | null>(null);
   const [isLocking, setIsLocking] = useState(false);
+  // Modal-scoped failure text for RestoreDialog/MonthLockDialog (item 1): kept
+  // separate from `message` (which can hold unrelated, stale text from an
+  // earlier action) so a dialog never shows another operation's leftover error.
+  const [dialogError, setDialogError] = useState<string | null>(null);
+
+  // refresh() fires from the mount effect, the manual "تحديث" button, and after
+  // every mutating action (backup/restore/close/reopen) — those can overlap
+  // (e.g. a manual refresh click while a backup's own post-success refresh is
+  // still in flight). isLoadingRef is a synchronous re-entry guard (a ref, not
+  // the isLoading STATE, so checking it can't itself trigger the effect below to
+  // re-fire and loop); refreshTokenRef additionally makes sure that if two calls
+  // ever do overlap, only the LATEST one's result is ever committed — mirrors
+  // Population/index.tsx's loadMonthTokenRef pattern.
+  const isLoadingRef = useRef(false);
+  const refreshTokenRef = useRef(0);
 
   const refresh = useCallback(async () => {
-    if (!directoryHandle) return;
+    if (!directoryHandle || isLoadingRef.current) return;
+    isLoadingRef.current = true;
+    const token = ++refreshTokenRef.current;
     setIsLoading(true);
     try {
       const months = await listMonthFolders(directoryHandle);
@@ -103,17 +120,22 @@ export default function ArchiveTab() {
         loadAutoBackupState(directoryHandle),
         loadAutoBackupSettings(directoryHandle),
       ]);
+      if (token !== refreshTokenRef.current) return; // superseded by a newer refresh
       setStatuses(statusList);
       setHistory(backupHistory);
       setAutoState(state);
       setAutoSettings(settings);
     } catch (error) {
+      if (token !== refreshTokenRef.current) return;
       setMessage({
         type: "error",
         text: `تعذر تحميل بيانات الأرشيف: ${error instanceof Error ? error.message : "خطأ غير معروف"}`,
       });
     } finally {
-      setIsLoading(false);
+      if (token === refreshTokenRef.current) {
+        isLoadingRef.current = false;
+        setIsLoading(false);
+      }
     }
   }, [directoryHandle]);
 
@@ -170,6 +192,7 @@ export default function ArchiveTab() {
     if (!directoryHandle || !canCloseMonth || !lockTarget) return;
     setIsLocking(true);
     setMessage(null);
+    setDialogError(null);
     try {
       const { folderName, mode } = lockTarget;
       const result =
@@ -194,7 +217,13 @@ export default function ArchiveTab() {
         });
         await refresh();
       } else {
+        // Item 1: the dialog stays open on failure (only the success branch
+        // above clears lockTarget) — its z-index:10020 backdrop fully covers
+        // this top-level banner, so without dialogError the failure was
+        // invisible. Set both: dialogError renders live inside the modal card,
+        // message keeps the reason visible if the user then closes the dialog.
         setMessage({ type: "error", text: result.error });
+        setDialogError(result.error);
       }
     } finally {
       setIsLocking(false);
@@ -205,6 +234,7 @@ export default function ArchiveTab() {
     if (!directoryHandle || !canRestoreBackup) return;
     setIsBackingUp(true);
     setMessage(null);
+    setDialogError(null);
     try {
       const months = await listMonthFolders(directoryHandle);
       const result = await restoreBackupSnapshot({
@@ -222,7 +252,12 @@ export default function ArchiveTab() {
         });
         await refresh();
       } else {
-        setMessage({ type: "error", text: `فشلت الاستعادة: ${result.error}` });
+        // Item 1: see the matching comment in handleMonthLockConfirm — the
+        // restore dialog also stays open on failure and sits under the same
+        // modal backdrop, so the failure needs its own in-modal rendering.
+        const text = `فشلت الاستعادة: ${result.error}`;
+        setMessage({ type: "error", text });
+        setDialogError(text);
       }
     } finally {
       setIsBackingUp(false);
@@ -232,14 +267,28 @@ export default function ArchiveTab() {
   async function handleImportUsersLabels(): Promise<void> {
     if (!directoryHandle || !canRestoreBackup) return;
     setIsImportingUsersLabels(true);
+    setMessage(null);
     try {
-      const result = await readJsonFile<UsersPermissionsFile>(
-        await getUserDataRoot(directoryHandle, false),
-        WORKSPACE_FILE_NAMES.usersPermissions
-      );
-      if (result.ok) {
+      // getUserDataRoot(..., false) throws on a legacy workspace with no
+      // 3-user-data/ folder (no legacy-root fallback for it — see
+      // workspacePaths.getRoot). Isolate that from the labels import below: a
+      // missing users file must not also skip the (independently readable)
+      // labels snapshot, and either way the failure must surface instead of
+      // becoming a silent unhandled rejection behind `void handleImportUsersLabels()`.
+      let usersResult: ReadJsonResult<UsersPermissionsFile> | null = null;
+      let usersError: string | null = null;
+      try {
+        const userDataDir = await getUserDataRoot(directoryHandle, false);
+        usersResult = await readJsonFile<UsersPermissionsFile>(userDataDir, WORKSPACE_FILE_NAMES.usersPermissions);
+      } catch (error) {
+        usersError = error instanceof Error ? error.message : "خطأ غير معروف";
+      }
+
+      const labelsAppliedCount = await importLabelsSnapshot(directoryHandle);
+
+      if (usersResult?.ok) {
         syncUsersFromDisk(
-          result.file.data.users.map((u) => ({
+          usersResult.file.data.users.map((u) => ({
             id: u.id,
             username: u.username,
             displayName: u.displayName,
@@ -250,13 +299,33 @@ export default function ArchiveTab() {
             createdAt: u.createdAt,
             updatedAt: u.updatedAt,
           })),
-          result.file.data.permissions,
-          result.file.data.featurePermissions
+          usersResult.file.data.permissions,
+          usersResult.file.data.featurePermissions
         );
+        setJustRestored(false);
+        setMessage({
+          type: "ok",
+          text: `${getLabels().backup_import_users_labels_done} (${formatNumber(labelsAppliedCount)} تسمية مخصصة مطبّقة)`,
+        });
+      } else {
+        // Only the "ok" success message claims users/permissions were imported —
+        // a missing/corrupt/unreadable users file must not report success.
+        setMessage({
+          type: "error",
+          text: usersError
+            ? `تعذر استيراد المستخدمين والصلاحيات: ${usersError} (تم تطبيق ${formatNumber(labelsAppliedCount)} تسمية مخصصة فقط).`
+            : `تعذر قراءة ملف المستخدمين والصلاحيات من النسخة (تم تطبيق ${formatNumber(labelsAppliedCount)} تسمية مخصصة فقط).`,
+        });
       }
-      await importLabelsSnapshot(directoryHandle);
-      setJustRestored(false);
-      setMessage({ type: "ok", text: getLabels().backup_import_users_labels_done });
+    } catch (error) {
+      // Safety net for anything unexpected outside the inner getUserDataRoot/
+      // readJsonFile guard above (importLabelsSnapshot/syncUsersFromDisk are not
+      // expected to throw, but a silent unhandled rejection behind
+      // `void handleImportUsersLabels()` must never be the failure mode here).
+      setMessage({
+        type: "error",
+        text: `تعذر استيراد المستخدمين والتسميات: ${error instanceof Error ? error.message : "خطأ غير معروف"}`,
+      });
     } finally {
       setIsImportingUsersLabels(false);
     }
@@ -356,7 +425,9 @@ export default function ArchiveTab() {
             </span>
           </div>
           <p>
-            عند دخول المدير وبعد جاهزية مساحة العمل، يتم إنشاء نسخة تلقائياً حسب الفترة المحددة داخل
+            {/* Wave 1 extended the createDailyAdminBackupIfDue trigger (App.tsx) from
+                admin-only to admin || manager — this copy is updated to match. */}
+            عند دخول المدير أو المسؤول وبعد جاهزية مساحة العمل، يتم إنشاء نسخة تلقائياً حسب الفترة المحددة داخل
             <code>.system/backups</code>.
           </p>
           {canCreateBackup ? (
@@ -479,7 +550,7 @@ export default function ArchiveTab() {
                             type="button"
                             className="arc-btn-secondary"
                             disabled={isLocking}
-                            onClick={() => setLockTarget({ folderName: item.folderName, mode: "reopen" })}
+                            onClick={() => { setDialogError(null); setLockTarget({ folderName: item.folderName, mode: "reopen" }); }}
                           >
                             {getLabels().archive_reopen_month_btn}
                           </button>
@@ -488,7 +559,7 @@ export default function ArchiveTab() {
                             type="button"
                             className="arc-btn-secondary"
                             disabled={isLocking}
-                            onClick={() => setLockTarget({ folderName: item.folderName, mode: "close" })}
+                            onClick={() => { setDialogError(null); setLockTarget({ folderName: item.folderName, mode: "close" }); }}
                           >
                             {getLabels().archive_close_month_btn}
                           </button>
@@ -532,7 +603,7 @@ export default function ArchiveTab() {
                       className="arc-restore-btn"
                       disabled={isBackingUp || !canRestoreBackup}
                       title={!canRestoreBackup ? mutationDeniedTitle : undefined}
-                      onClick={() => setRestoreTarget(item)}
+                      onClick={() => { setDialogError(null); setRestoreTarget(item); }}
                     >
                       استعادة
                     </button>
@@ -547,6 +618,7 @@ export default function ArchiveTab() {
         <RestoreDialog
           target={restoreTarget}
           busy={isBackingUp}
+          error={dialogError}
           onClose={() => setRestoreTarget(null)}
           onConfirm={() => { void handleRestore(restoreTarget.folderName); }}
         />
@@ -557,6 +629,7 @@ export default function ArchiveTab() {
           folderName={lockTarget.folderName}
           mode={lockTarget.mode}
           busy={isLocking}
+          error={dialogError}
           onClose={() => setLockTarget(null)}
           onConfirm={(note) => { void handleMonthLockConfirm(note); }}
         />
@@ -569,12 +642,14 @@ function MonthLockDialog({
   folderName,
   mode,
   busy,
+  error,
   onClose,
   onConfirm,
 }: {
   folderName: string;
   mode: "close" | "reopen";
   busy: boolean;
+  error: string | null;
   onClose: () => void;
   onConfirm: (note: string) => void;
 }) {
@@ -590,13 +665,19 @@ function MonthLockDialog({
       <div className="arc-restore-modal">
         <div className="arc-restore-header">
           <div>
-            <span className="arc-panel-kicker">{isClose ? "Close Month" : "Reopen Month"}</span>
+            <span className="arc-panel-kicker">{L.archive_month_action_kicker}</span>
             <h2>{isClose ? L.archive_close_month_btn : L.archive_reopen_month_btn}</h2>
           </div>
           <button type="button" className="arc-modal-close" onClick={onClose} aria-label="إغلاق">
             <X size={16} />
           </button>
         </div>
+
+        {error ? (
+          <div className="arc-modal-error" role="alert">
+            {error}
+          </div>
+        ) : null}
 
         <div className={`arc-restore-warning${isClose ? " is-danger" : ""}`}>
           <strong>{folderName}</strong>
@@ -644,11 +725,13 @@ function SummaryTile({ label, value }: { label: string; value: string }) {
 function RestoreDialog({
   target,
   busy,
+  error,
   onClose,
   onConfirm,
 }: {
   target: BackupHistoryItem;
   busy: boolean;
+  error: string | null;
   onClose: () => void;
   onConfirm: () => void;
 }) {
@@ -671,6 +754,12 @@ function RestoreDialog({
             <X size={16} />
           </button>
         </div>
+
+        {error ? (
+          <div className="arc-modal-error" role="alert">
+            {error}
+          </div>
+        ) : null}
 
         {step === 1 ? (
           <>

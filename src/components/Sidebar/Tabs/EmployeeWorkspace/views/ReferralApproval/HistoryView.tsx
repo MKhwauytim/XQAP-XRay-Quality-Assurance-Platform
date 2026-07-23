@@ -5,6 +5,7 @@ import { listMonthFolders } from "../../../../../../data/population/populationSt
 import { loadReferralLog, loadReopenLog, loadReplacementLog } from "../../../../../../data/referral/referralStorage";
 import type { ReferralRequest } from "../../../../../../data/referral/referralTypes";
 import type { DirectoryHandleLike } from "../../../../../../data/storage/fileSystemAccess";
+import { KIND_LABELS, STATUS_BADGE_CLASS, STATUS_BADGE_LABEL } from "./requestKind";
 import RequestTimeline from "./RequestTimeline";
 
 type HistoryRow = {
@@ -31,16 +32,11 @@ type Props = {
   userDisplayMap: Record<string, string>;
 };
 
-const KIND_LABEL: Record<HistoryRow["kind"], string> = { referral: "إحالة", replacement: "استبدال", reopen: "إعادة فتح" };
-
 const STATUS_OPTIONS = [
   { value: "pending", label: "معلق" },
   { value: "approved", label: "مقبول" },
   { value: "denied", label: "مرفوض" },
 ];
-
-const STATUS_BADGE_LABEL: Record<HistoryRow["status"], string> = { pending: "معلق", approved: "مقبول", denied: "مرفوض" };
-const STATUS_BADGE_CLASS: Record<HistoryRow["status"], string> = { pending: "ew-ref-badge-pending", approved: "ew-ref-badge-approved", denied: "ew-ref-badge-denied" };
 
 export default function HistoryView({ directoryHandle, username, canApproveReferrals, canApproveReplacements, canApproveReopens, userDisplayMap }: Props) {
   const [rows, setRows] = useState<HistoryRow[]>([]);
@@ -110,7 +106,7 @@ export default function HistoryView({ directoryHandle, username, canApproveRefer
 
   const columns: DataTableCol<HistoryRow>[] = [
     { id: "monthFolderName", label: "الشهر", widthFr: 1.2, accessor: (r) => r.monthFolderName },
-    { id: "kind", label: "النوع", widthFr: 1, accessor: (r) => KIND_LABEL[r.kind] },
+    { id: "kind", label: "النوع", widthFr: 1, accessor: (r) => KIND_LABELS[r.kind] },
     { id: "requester", label: "مقدّم الطلب", widthFr: 1.4, accessor: (r) => r.requester },
     { id: "details", label: "التفاصيل", widthFr: 2, accessor: (r) => r.details },
     { id: "status", label: "الحالة", widthFr: 1, filterKind: "status", statusOptions: STATUS_OPTIONS, accessor: (r) => r.status },

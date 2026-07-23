@@ -3,7 +3,7 @@ import { X } from "lucide-react";
 import { readSession } from "../../../../../auth/authSession";
 import { usePermissions } from "../../../../../auth/usePermissions";
 import { PageHeader } from "../../../../../components/PageHeader/PageHeader";
-import { logRejection } from "../../../../../data/storage/errorLogger";
+import { logError, logRejection } from "../../../../../data/storage/errorLogger";
 import {
   loadEmployeeAnswers,
   upsertItemAnswer,
@@ -527,7 +527,8 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       candidates = await getReplacementCandidatesIndexed(
         directoryHandle, selMonth, entry, sampleMaster, allEntries, stageMappings, username
       );
-    } catch {
+    } catch (error) {
+      logError("xrayReferrals:getReplacementCandidatesIndexed", error);
       candidates = { recommended: [], all: [] }; // dialog will show empty candidates gracefully
     }
     setReplacementError(null);
@@ -869,13 +870,13 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                   entry={selEntry}
                   template={activeTpl}
                   savedAnswer={selAnswer}
-                  readonly={canSeeAll && selEntry.assignedTo !== username}
+                  readonly={!canSubmitAnswers || (canSeeAll && selEntry.assignedTo !== username)}
                   onClose={() => setSelEntryId(null)}
                   onSave={(ans) =>
                     handleSave(selEntry.xrayImageId, ans, selEntry.assignedTo)
                   }
                   onReplace={
-                    (canRequestReplacement || canSubmitReferrals) && selEntry.assignedTo === username && selEntry.status === "pending"
+                    canRequestReplacement && selEntry.assignedTo === username && selEntry.status === "pending"
                       ? openReplacementDialog
                       : undefined
                   }
@@ -891,7 +892,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                       : undefined
                   }
                   onRequestReopen={
-                    selEntry.assignedTo === username
+                    canSubmitAnswers && selEntry.assignedTo === username
                       // eslint-disable-next-line react-hooks/refs -- see onReopen above; handleRequestReopen's loadData() call is the same pattern
                       ? (reason) => { void handleRequestReopen(selEntry, reason); }
                       : undefined

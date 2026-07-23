@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import { createMemoryDirectory, setSimulatedWritePermission } from "../storage/memoryDirectory";
-import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import type { DirectoryHandleLike, FileHandleLike } from "../storage/fileSystemAccess";
 import { safeWriteJson } from "../storage/safeWrite";
 import { WorkspacePermissionError } from "../storage/workspaceWriteAccess";
 import { getSystemRoot, getUserDataRoot } from "../workspace/workspacePaths";
 import { WORKSPACE_FILE_NAMES } from "../workspace/workspaceDefaults";
+import type { MonthManifestData } from "../population/monthTypes";
 import {
   assertXlsxDatasetWithinLimit,
   createBackup,
@@ -104,6 +105,81 @@ async function seedPopulationLayout(
     nonCertScanRows: 2,
     rows: [{ id: 1 }, { id: 2 }],
   });
+}
+
+/** Writes ONLY month.manifest.json (current numbered layout) — no population.final.json
+ *  — so a test can prove loadArchiveStatus/exportMonthXlsx used the manifest's own
+ *  fields instead of falling back to a full read. */
+async function writeManifestOnly(
+  root: DirectoryHandleLike,
+  overrides: Partial<MonthManifestData> = {}
+): Promise<void> {
+  const populationRoot = await root.getDirectoryHandle("1-population", { create: true });
+  const monthDir = await populationRoot.getDirectoryHandle(month.folderName, { create: true });
+  const manifest: MonthManifestData = {
+    monthFolderName: month.folderName,
+    month: month.month,
+    year: month.year,
+    processedAt: "2026-05-31T10:00:00.000Z",
+    processedBy: "admin",
+    riskFileName: "risk.xlsx",
+    biFileName: null,
+    certScanUsed: false,
+    templateVersion: null,
+    rngSeed: null,
+    totalRawRows: 2,
+    totalProcessedRows: 2,
+    status: "processed-saved",
+    ...overrides,
+  };
+  await safeWriteJson(monthDir, "month.manifest.json", manifest);
+}
+
+/** Writes ONLY population.final.json (current numbered layout) — no manifest —
+ *  used to prove the legacy-fallback read path still returns accurate data when
+ *  the manifest can't be trusted. */
+async function writePopulationOnly(root: DirectoryHandleLike, rowCount: number): Promise<void> {
+  const populationRoot = await root.getDirectoryHandle("1-population", { create: true });
+  const monthDir = await populationRoot.getDirectoryHandle(month.folderName, { create: true });
+  const processedDir = await monthDir.getDirectoryHandle("2-processed", { create: true });
+  await safeWriteJson(processedDir, "population.final.json", {
+    sourceMonthFolder: month.folderName,
+    processedAt: "2026-05-31T10:00:00.000Z",
+    processedBy: "admin",
+    totalRows: rowCount,
+    certScanRows: 0,
+    nonCertScanRows: rowCount,
+    rows: Array.from({ length: rowCount }, (_, i) => ({ id: i })),
+  });
+}
+
+/**
+ * Wraps a real memory directory so every FileHandleLike for a ".xlsx" file is
+ * missing createWritable (createWritable is typed optional on FileHandleLike —
+ * see CLAUDE.md) while every other path (JSON reads/writes, directory
+ * traversal) passes straight through to the real handle. Lets a test simulate
+ * "writeBinaryFile got a handle it cannot write through" without needing
+ * memoryDirectory.ts (not in this bucket's owned files) to support it directly.
+ */
+function wrapDirDenyingXlsxWrites(real: DirectoryHandleLike): DirectoryHandleLike {
+  const wrapped: DirectoryHandleLike = {
+    ...real,
+    getFileHandle: async (fileName: string, options?: { create?: boolean }) => {
+      const fh = await real.getFileHandle(fileName, options);
+      if (!fileName.endsWith(".xlsx")) return fh;
+      // Explicitly rebuild without createWritable (rather than destructure-and-
+      // discard) — createWritable is OPTIONAL on FileHandleLike, so omitting it
+      // here is itself a valid, real shape (see CLAUDE.md's guard-before-calling
+      // note), not a hack.
+      const stripped: FileHandleLike = { kind: fh.kind, name: fh.name, getFile: fh.getFile };
+      return stripped;
+    },
+    getDirectoryHandle: async (dirName: string, options?: { create?: boolean }) => {
+      const child = await real.getDirectoryHandle(dirName, options);
+      return wrapDirDenyingXlsxWrites(child);
+    },
+  };
+  return wrapped;
 }
 
 describe("archive population path compatibility", () => {
@@ -259,5 +335,150 @@ describe("write-permission gate (deferred workspace write access, PR #36 follow-
     await expect(
       createDailyAdminBackupIfDue(root, [], "admin")
     ).resolves.toMatchObject({ ok: false });
+  });
+});
+
+describe("writeBinaryFile — accurate xlsx chunk accounting (item 5)", () => {
+  it("does not record an xlsx chunk as backed up when the handle cannot be written through", async () => {
+    const real = makeRoot();
+    await seedPopulationLayout(real, "current");
+    const root = wrapDirDenyingXlsxWrites(real);
+
+    const result = await createBackup(root, [month], "admin", "manual", {
+      includeXlsxExports: true,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // Every dataset with rows (population-final, risk-raw) attempted a chunk
+    // write; every one of those handles was denied a writable stream, so NONE
+    // of them may appear as backed up — previously the file name was pushed
+    // unconditionally regardless of whether the write actually happened.
+    expect(result.manifest.xlsxFilesBackedUp).toEqual([]);
+    const populationDataset = result.manifest.datasets.find((d) => d.dataset === "population-final");
+    expect(populationDataset?.rowCount).toBe(2);
+    expect(populationDataset?.xlsxFiles).toEqual([]);
+  });
+
+  it("still records xlsx chunks normally once the handle CAN be written through (control)", async () => {
+    const root = makeRoot();
+    await seedPopulationLayout(root, "current");
+
+    const result = await createBackup(root, [month], "admin", "manual", {
+      includeXlsxExports: true,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.manifest.xlsxFilesBackedUp.length).toBeGreaterThan(0);
+    const populationDataset = result.manifest.datasets.find((d) => d.dataset === "population-final");
+    expect(populationDataset?.xlsxFiles.length).toBe(1);
+  });
+});
+
+describe("exportMonthXlsx — manifest pre-check before loading population.final.json (B3 perf)", () => {
+  it("rejects an oversized population dataset using the manifest's cheap totalProcessedRows, even when the real file is small", async () => {
+    const root = makeRoot();
+    // Manifest claims a dataset far past the safe XLSX limit; the actual
+    // population.final.json is tiny. Under the OLD code (which only checked
+    // population.rows.length AFTER loading it) this would NOT reject — proving
+    // the manifest-based pre-check is really what fires here.
+    await writeManifestOnly(root, { totalProcessedRows: XLSX_MAX_ROWS_PER_DATASET + 1 });
+    await writePopulationOnly(root, 2);
+
+    const result = await createBackup(root, [month], "admin", "manual", {
+      includeXlsxExports: true,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.xlsxWarning).toMatch(/تعذر إنشاء ملفات XLSX الاختيارية/);
+    expect(result.xlsxWarning).toMatch(/population-final/);
+  });
+
+  it("still succeeds for a population dataset within the limit (control)", async () => {
+    const root = makeRoot();
+    await writeManifestOnly(root, { totalProcessedRows: 2 });
+    await writePopulationOnly(root, 2);
+
+    const result = await createBackup(root, [month], "admin", "manual", {
+      includeXlsxExports: true,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.xlsxWarning).toBeUndefined();
+  });
+});
+
+describe("loadArchiveStatus — manifest-based population shortcut (B3 perf)", () => {
+  it("trusts manifest.totalProcessedRows/status once population processing was reached, without needing population.final.json", async () => {
+    const root = makeRoot();
+    // No population.final.json written at all — if the shortcut weren't taken,
+    // the legacy full-read fallback would report hasPopulation: false.
+    await writeManifestOnly(root, { status: "sampled", totalProcessedRows: 7 });
+
+    const [status] = await loadArchiveStatus(root, [month]);
+    expect(status).toMatchObject({ hasPopulation: true, totalProcessedRows: 7 });
+  });
+
+  it("reports no population for a month still at raw-saved (population not yet processed)", async () => {
+    const root = makeRoot();
+    await writeManifestOnly(root, { status: "raw-saved", totalProcessedRows: 0 });
+
+    const [status] = await loadArchiveStatus(root, [month]);
+    expect(status.hasPopulation).toBe(false);
+  });
+
+  it("reports no population for a month CLOSED before processing (statusBeforeClose: raw-saved) — truthfulness edge case", async () => {
+    const root = makeRoot();
+    // A month can be closed at any stage. If closed while still raw-saved,
+    // population.final.json never existed — the shortcut must not claim
+    // otherwise just because status itself reads "closed".
+    await writeManifestOnly(root, {
+      status: "closed",
+      statusBeforeClose: "raw-saved",
+      totalProcessedRows: 0,
+    });
+
+    const [status] = await loadArchiveStatus(root, [month]);
+    expect(status.hasPopulation).toBe(false);
+  });
+
+  it("trusts the manifest for a month CLOSED after processing (statusBeforeClose: distributed)", async () => {
+    const root = makeRoot();
+    await writeManifestOnly(root, {
+      status: "closed",
+      statusBeforeClose: "distributed",
+      totalProcessedRows: 42,
+    });
+
+    const [status] = await loadArchiveStatus(root, [month]);
+    expect(status).toMatchObject({ hasPopulation: true, totalProcessedRows: 42 });
+  });
+
+  it("falls back to a full population.final.json read when the manifest is missing totalProcessedRows (legacy shape)", async () => {
+    const root = makeRoot();
+    const populationRoot = await root.getDirectoryHandle("1-population", { create: true });
+    const monthDir = await populationRoot.getDirectoryHandle(month.folderName, { create: true });
+    // Legacy manifest shape missing totalProcessedRows entirely — the shortcut
+    // must recognize it cannot trust this manifest and fall back to the real file.
+    const legacyManifest = {
+      monthFolderName: month.folderName,
+      month: month.month,
+      year: month.year,
+      processedAt: "2026-05-31T10:00:00.000Z",
+      processedBy: "admin",
+      riskFileName: "risk.xlsx",
+      biFileName: null,
+      certScanUsed: false,
+      templateVersion: null,
+      rngSeed: null,
+      totalRawRows: 2,
+      status: "processed-saved" as const,
+    };
+    await safeWriteJson(monthDir, "month.manifest.json", legacyManifest);
+    await writePopulationOnly(root, 9);
+
+    const [status] = await loadArchiveStatus(root, [month]);
+    expect(status).toMatchObject({ hasPopulation: true, totalProcessedRows: 9 });
   });
 });
