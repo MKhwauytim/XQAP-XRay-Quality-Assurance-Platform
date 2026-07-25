@@ -14,249 +14,51 @@ import type { ReportModel } from "../model/reportModel";
 import type { StageProfile } from "../../executiveReportTypes";
 import { esc, fmtNum, fmtPct } from "../primitives";
 import { icon } from "../ui/icons";
-import { funnel } from "../ui/charts";
 import { coverMeshSvg, dividerPatternSvg } from "../ui/generativeArt";
 import { isRankable } from "../model/dataSufficiency";
 import { formatStageLabel } from "../../../population/stageHelpers";
+import { DEFAULT_SAMPLING_RULES } from "../../../population/populationConfig";
 import { ORGANIZATION_PATH, ZATCA_LOGO_URL } from "../../../../branding/organization";
 import type { SourceRevisions } from "../../sourceRevisions";
 import { sourceRevisionEntries } from "../../sourceRevisions";
+import {
+  ACCURACY_TARGET,
+  BASE_ROWS_PER_PAGE,
+  MARKING_TARGET,
+  NAV_SECTIONS,
+  STAGE_TONES,
+  badgeIcon,
+  barCell,
+  collectPortStats,
+  fillerRow,
+  frac,
+  maxOf,
+  pad,
+  pctCell,
+  planPortPages,
+  qualCell,
+  rateOf,
+  renderVariants,
+  slideControls,
+  sideRail,
+  pageFoot,
+  portTableCard,
+  threshCell,
+  v2Slide,
+} from "./slideKit";
+import type { CellTone, NavSectionKey, PortPopRow, SlideBuilder } from "./slideKit";
+import { sectionThreeBuilders } from "./section3";
 
-// ── In-cell visuals (pure background — never change row height/padding/font) ──
-type CellTone = "gold" | "blue" | "green" | "coral" | "neutral";
-
-/**
- * Wrap a numeric cell's inner HTML in a <td> that paints a tone-tinted
- * proportional bar behind the text, growing from the inline-start edge (right,
- * in this RTL deck). The bar is a CSS background only (`.v2-bar-cell` in
- * theme.ts reads `--w`), so it adds ZERO layout height — the fragile
- * table pagination machinery
- * stays exactly valid. `pct` is the value's share of the column max, 0–100.
- */
-function barCell(inner: string, pct: number, tone: CellTone = "neutral"): string {
-  const w = Math.max(0, Math.min(100, Number.isFinite(pct) ? pct : 0));
-  return `<td class="v2-bar-cell ${tone}" style="--w:${w.toFixed(1)}%">${inner}</td>`;
-}
-
-/**
- * A percentage cell that doubles as a threshold-scored bar: the fill width is
- * the percentage itself, the tone is green at/above `target` and warning-amber
- * below it, and a below-target cell also carries an alert glyph (icons.ts) so
- * the status is NEVER conveyed by color alone. Null (no data) renders the muted
- * "—" like `pctCell`, with no bar.
- */
-function threshCell(v: number | null, target: number): string {
-  if (v === null) return `<td class="v2-bar-cell neutral"><span class="insuff">—</span></td>`;
-  const val = Math.max(0, Math.min(100, v));
-  const below = val < target;
-  const tone = below ? "warn" : "ok";
-  const flag = below ? `<span class="v2-cell-flag" aria-hidden="true">${icon("alert", 10)}</span>` : "";
-  return `<td class="v2-bar-cell ${tone}" style="--w:${val.toFixed(1)}%">${flag}${fmtPct(v)}</td>`;
-}
-
-/** Largest value in a list, floored at 1 so a proportional bar never divides by
- *  zero (an all-zero column simply yields empty bars). */
-function maxOf(values: number[]): number {
-  return Math.max(1, ...values.filter((v) => Number.isFinite(v)));
-}
-
-/** Display thresholds for the section-2 percent tables. Mirror the report
- *  config defaults (`DEFAULT_EXEC_CONFIG.accuracyTarget` = 90); the ReportModel
- *  doesn't carry config, so these are named constants here rather than magic
- *  numbers. Below-target cells get the warning tone + alert glyph in threshCell. */
-const ACCURACY_TARGET = 90;
-const MARKING_TARGET = 90;
-
-/** A distribution percent cell (quality عالي/متوسط/منخفض): a tone-colored bar of
- *  fixed polarity (green = good share, coral = risk share), NOT threshold-scored.
- *  Null renders the muted "—". */
-function qualCell(v: number | null, tone: CellTone): string {
-  if (v === null) return `<td class="v2-bar-cell neutral"><span class="insuff">—</span></td>`;
-  return barCell(fmtPct(v), Math.max(0, Math.min(100, v)), tone);
-}
+// The slide kit is the single source of truth for these two, but they were
+// public from `slides.ts` before the kit existed — re-exported so any existing
+// importer keeps working.
+export { NAV_SECTIONS };
+export type { NavSectionKey };
 
 const ARABIC_MONTHS = ["يناير","فبراير","مارس","أبريل","مايو","يونيو","يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"];
 
-function pad(n: number): string {
-  return String(n).padStart(2, "0");
-}
-
 function formatDate(d: Date): string {
   return `${d.getDate()} ${ARABIC_MONTHS[d.getMonth()]} ${d.getFullYear()}`;
-}
-
-/** A slide builder that receives its final 1-based number and the deck total. */
-type SlideBuilder = (num: number, total: number) => string;
-
-/**
- * Optical-centering correction for icons placed inside a circular badge.
- * Measured via `getBBox()` on every icon in the registry, rendered inside
- * its actual circle: most glyphs sit within ~0.5 of a 24-unit viewBox from
- * true center (imperceptible), but a few don't — `gauge`'s dial is drawn in
- * the lower half of its box, `truck` and `flag` are each off by ~1 unit on
- * one axis. Values are the glyph-bbox-center offset from (12,12) as a
- * percentage of the 24-unit viewBox, so the correction holds at any render
- * size (percentage `transform` is relative to the SVG's own box).
- */
-const ICON_OPTICAL_NUDGE: Record<string, { x: number; y: number }> = {
-  gauge: { x: 0, y: -10.8 },
-  truck: { x: 2.1, y: -8.5 },
-  flag: { x: 6.3, y: 0 },
-};
-
-/** Renders an icon meant to sit centered inside a circular badge, applying
- *  the optical-centering correction above when one exists for that icon.
- *  Plain (non-badge) icon usage elsewhere in the deck is unaffected. */
-function badgeIcon(name: string, size: number): string {
-  const nudge = ICON_OPTICAL_NUDGE[name];
-  if (!nudge) return icon(name, size);
-  return `<span style="display:inline-flex;transform:translate(${nudge.x}%,${nudge.y}%)">${icon(name, size)}</span>`;
-}
-
-/**
- * Per-slide print-include switch, on-screen only. Pure CSS, no script:
- * unchecking it excludes the WHOLE slide from print/PDF output via the
- * `.slide:has(.slide-print-toggle input:not(:checked))` rule in theme.ts —
- * safe to rely on `:has()` since this app already targets Chromium only
- * (File System Access API). Defaults checked (included). Rendered inside
- * `slideControls()`, which positions it (top-right corner).
- */
-function printToggle(): string {
-  return `<label class="slide-print-toggle" title="تضمين هذه الصفحة عند الطباعة">
-    <input type="checkbox" checked/>
-    <span class="slide-print-toggle-track"><span class="slide-print-toggle-thumb"></span></span>
-  </label>`;
-}
-
-/**
- * Style-variant arrow-cycle control, dev-preview only. `data-for` points at
- * the matching `.v2-variant-stack`'s `data-slide-id` (same slide, but the
- * switcher itself lives in `slideControls()`'s top-right cluster, not nested
- * inside the stack — see DECK_VARIANT_SCRIPT in index.ts for the lookup).
- */
-function variantSwitcher(slideId: string): string {
-  return `<div class="v2-variant-switcher" data-for="${esc(slideId)}" dir="ltr">
-    <button type="button" class="v2-variant-prev" aria-label="النمط السابق">‹</button>
-    <span class="v2-variant-label">1 / 4</span>
-    <button type="button" class="v2-variant-next" aria-label="النمط التالي">›</button>
-  </div>`;
-}
-
-/**
- * Top-right controls cluster for a slide: the print-include toggle, plus
- * (dev-preview only) the style-variant switcher right next to it — grouped in
- * one positioned wrapper (theme.ts's `.slide-controls`) instead of each being
- * independently absolutely-positioned.
- */
-function slideControls(slideId: string, variantPreview: boolean): string {
-  return `<div class="slide-controls">
-    ${printToggle()}
-    ${variantPreview ? variantSwitcher(slideId) : ""}
-  </div>`;
-}
-
-/** Section keys shared by the side nav (deck2/index.ts) and every slide builder
- *  that belongs to that section, so the nav's list and highlight logic can be
- *  derived purely from `data-section`/`data-section-label` attributes already
- *  in the DOM — no separate section registry to keep in sync. */
-export const NAV_SECTIONS = {
-  cover: "الغلاف",
-  toc: "المحتويات",
-  summary: "مؤشرات الشهر",
-  glossary: "المعجم",
-  section1: "القسم 1 — مجتمع الفحص",
-  section2: "القسم 2 — نتائج فحص الجودة",
-  closing: "مصدر البيانات",
-} as const;
-export type NavSectionKey = keyof typeof NAV_SECTIONS;
-
-/**
- * Printed side tab rail (per the user's reference mockups): a vertical
- * report-title strip plus one rotated tab per section, running down every
- * content slide's inline-start edge, active section highlighted gold. Unlike
- * the on-screen deck-nav this is PART of the slide, so it prints. Arabic in
- * `writing-mode:vertical-rl` renders rotated 90° in Chromium — exactly the
- * look of the reference pages' edge tabs.
- */
-function sideRail(active: NavSectionKey): string {
-  const tabs: Array<{ key: NavSectionKey; label: string }> = [
-    { key: "glossary", label: "المعجم" },
-    { key: "section1", label: "مجتمع الفحص" },
-    { key: "section2", label: "نتائج فحص الجودة" },
-  ];
-  return `<div class="v2-rail" aria-hidden="true">
-    <div class="v2-rail-title">التقرير التنفيذي لضمان جودة الأشعة</div>
-    ${tabs
-      .map((t) => `<div class="v2-rail-tab${t.key === active ? " active" : ""}">${esc(t.label)}</div>`)
-      .join("")}
-  </div>`;
-}
-
-/** Footer page number, centered with short gold rules either side (the
- *  references' bottom-of-page device). Absolutely positioned inside the
- *  slide's existing bottom padding band — no impact on the body budget. */
-function pageFoot(num: number, total: number): string {
-  return `<div class="v2-page-foot" dir="ltr">${pad(num)} / ${pad(total)}</div>`;
-}
-
-/**
- * Wraps a slide's varying content into 1-of-4 selectable style variants.
- * Production (`variantPreview=false`) renders ONLY `bodies[0]` — byte-identical
- * to the single-variant output that existed before the switcher (a dev-preview
- * feature; see docs/superpowers/specs/2026-07-05-deck2-style-switcher-design.md).
- * Preview mode renders all 4, one visible via CSS (`.v2-variant-panel.active`).
- * The arrow-cycle control that drives this lives separately in
- * `slideControls()`/`variantSwitcher()`; the inline script in deck2/index.ts
- * (DECK_VARIANT_SCRIPT) wires the two together by matching `data-for` to
- * `data-slide-id` and persists the choice.
- */
-function renderVariants(
-  slideId: string,
-  bodies: readonly [string, string, string, string],
-  variantPreview: boolean,
-): string {
-  if (!variantPreview) return bodies[0];
-  const panels = bodies
-    .map(
-      (html, i) =>
-        `<div class="v2-variant-panel${i === 0 ? " active" : ""}" data-variant-index="${i}">${html}</div>`,
-    )
-    .join("");
-  return `<div class="v2-variant-stack" data-slide-id="${esc(slideId)}" data-active-index="0">${panels}</div>`;
-}
-
-// ── v2 slide shell — rail + eyebrow + headline + body + footer page num. ────
-// Unlike v1 there is no "decision footer"; the footer concept is gone in v2.
-function v2Slide(opts: {
-  id: string;
-  title: string;
-  eyebrow: string;
-  iconName: string;
-  headline: string;
-  subhead?: string;
-  bodyVariants: readonly [string, string, string, string];
-  variantPreview: boolean;
-  num: number;
-  total: number;
-  slideClass?: string;
-  section: NavSectionKey;
-}): string {
-  const cls = `slide v2${opts.slideClass ? " " + opts.slideClass : ""}`;
-  const body = renderVariants(opts.id, opts.bodyVariants, opts.variantPreview);
-  return `<section class="${cls}" id="${esc(opts.id)}" data-title="${esc(opts.title)}" data-section="${opts.section}" data-section-label="${esc(NAV_SECTIONS[opts.section])}">
-  ${slideControls(opts.id, opts.variantPreview)}
-  ${sideRail(opts.section)}
-  <div class="slide-inner">
-    <div class="slide-eyebrow">
-      <span class="slide-eyebrow-icon">${icon(opts.iconName, 16)}</span>
-      <span>${esc(opts.eyebrow)}</span>
-    </div>
-    <div class="slide-headline">${esc(opts.headline)}</div>
-    ${opts.subhead ? `<div class="slide-subhead">${esc(opts.subhead)}</div>` : ""}
-    <div class="slide-body">${body}</div>
-  </div>
-  ${pageFoot(opts.num, opts.total)}
-</section>`;
 }
 
 // ── Page 1 — الغلاف ─────────────────────────────────────────────────────────
@@ -535,10 +337,17 @@ const GLOSSARY_CATEGORIES: GlossaryCategory[] = [
     icon: "layers",
     tone: "gold",
     terms: [
-      { term: "مجتمع الفحص", def: "جميع صور الفحص بالأشعة المسجّلة خلال الشهر بعد المعالجة واستبعاد السجلات غير الصالحة.", icon: "layers" },
-      { term: "مستويات المخاطر", def: "تصنيف الصور وفق محرّك المخاطر إلى أربعة مستويات، من الأول (منخفض) إلى الرابع (حرج).", icon: "layers" },
-      { term: "العيّنة", def: "مجموعة جزئية تُسحب عشوائيًا بطريقة طبقية من المجتمع لتخضع للدراسة التفصيلية.", icon: "scan" },
-      { term: "التغطية", def: "نسبة حجم العيّنة إلى حجم المجتمع، ومدى تمثيل العيّنة للمجتمع.", icon: "gauge" },
+      // Was: "جميع صور الفحص بالأشعة المسجّلة خلال الشهر…" — wrong. The population is not an
+      // undifferentiated month dump: populationProcessor drops invalid IDs, duplicates, and rows
+      // whose level-1/2 result cannot be normalized, and every survivor is classified onto one of
+      // the four levels from the risk file's المستوى column (stageHelpers.getStageKey).
+      { term: "مجتمع الفحص", def: "حالات أشعة الشهر بعد استبعاد المعرّفات غير الصالحة والمكرّرة وغير المقروءة النتيجة، مصنّفةً على مستويات المخاطر الأربعة.", icon: "layers" },
+      // Was: "تُسحب عشوائيًا بطريقة طبقية" — wrong. Allocation is quota-driven per level; the
+      // randomness (Mulberry32 + Fisher-Yates) operates only INSIDE each level's quota.
+      { term: "العيّنة", def: "الصور المسحوبة للدراسة وفق وزن سحب محدَّد مسبقًا لكل مستوى، مع اختيار عشوائي داخل حصة المستوى الواحد.", icon: "scan" },
+      // Was: "…ومدى تمثيل العيّنة للمجتمع" — unsupportable. The draw is deliberately
+      // non-proportional (census + fixed quotas), so coverage carries no representativeness signal.
+      { term: "التغطية", def: "نسبة حجم العيّنة المسحوبة إلى حجم المجتمع؛ مقياس حجم لا يدل على تمثيل العيّنة للمجتمع.", icon: "gauge" },
     ],
   },
   {
@@ -547,12 +356,124 @@ const GLOSSARY_CATEGORIES: GlossaryCategory[] = [
     tone: "coral",
     terms: [
       { term: "اشتباه", def: "قرار فحص يشير إلى شبهة تستدعي التحقق؛ ويقابله «سليمة» حين لا تظهر شبهة.", icon: "alert" },
-      { term: "الاشتباه الفائت", def: "صورة قرّر الفحص أنها سليمة وأثبت المراجع أنها اشتباه، وهو الخطر الأمني الأول.", icon: "alert" },
-      { term: "المراجع (المعيار)", def: "نتيجة خبير الجودة التي تُقاس عليها دقة قرارات الفحص وتُعتمد مرجعًا.", icon: "shield" },
-      { term: "كفاية البيانات", def: "حدّ أدنى من القرارات القابلة للتقييم قبل إصدار حكم أو ترتيب؛ ما دونه يُوصف ولا يُرتّب.", icon: "document" },
+      // Was: "صورة قرّر الفحص أنها سليمة…" — wrong unit. classifyOutcome scores each level's
+      // decision independently, so the unit is a decision and one image can yield two.
+      { term: "الاشتباه الفائت", def: "قرار مستوى واحد رأى الصورة سليمة وأثبت المراجع أنها اشتباه؛ ولكل صورة قراران يُقيَّمان مستقلّين.", icon: "alert" },
     ],
   },
 ];
+
+/**
+ * The four risk levels, each with its own definition — previously collapsed into
+ * a single "مستويات المخاطر" glossary card that also got them wrong.
+ *
+ * These are FOUR CATEGORICAL DETECTION SCENARIOS, NOT a severity ranking
+ * (owner, 2026-07-25: "they are all important and have different goals"). Two
+ * consequences, both load-bearing:
+ *   1. No severity vocabulary here — no منخفض/متوسط/مرتفع/حرج, no "escalating"
+ *      language, and nothing implying level N outranks level N−1.
+ *   2. The classification is NOT produced by محرّك المخاطر. `stage` is imported
+ *      verbatim from the risk file's `المستوى` column; `targetedByRiskEngine` is
+ *      a separate column, and the risk engine characterizes level 2 only.
+ * Wording is the owner's own, from the reference deck they supplied.
+ * Tone follows STAGE_TONES so a colour means the same level here as on the
+ * stage×port pages — category identity, not severity.
+ */
+/**
+ * Draw weight per level, derived from the app's own sampling rules rather than
+ * typed in — `DEFAULT_SAMPLING_RULES` in populationConfig.ts.
+ *
+ * The two rule methods mean two different bases, which is why these do not sum
+ * to 100 and must not be presented as if they did:
+ *   • `percentage` (المستوى الأول) — a share of that level's OWN population.
+ *     Configured at 100, i.e. a full census, and locked.
+ *   • `exact` (المستويات الثاني–الرابع) — a fixed count, shown here as its share
+ *     of the exact-quota pool: 2500 / 1875 / 1875 of 6250 = 40% / 30% / 30%.
+ *
+ * Reads the configured defaults, so a month whose rules were overridden in the
+ * sampling wizard would still show these. Surfacing the per-month rule would
+ * need `targetQuota` carried onto `StageProfile`, which currently drops it
+ * (executiveKpiProfiles.ts `buildStageProfiles`).
+ */
+const LEVEL_DRAW_WEIGHTS: (number | null)[] = (() => {
+  const order = ["first", "second", "third", "fourth"] as const;
+  const rules = order.map((key) => DEFAULT_SAMPLING_RULES.find((r) => r.stageKey === key));
+  const exactPool = rules.reduce((sum, r) => sum + (r?.method === "exact" ? r.value : 0), 0);
+  return rules.map((r) => {
+    if (!r) return null;
+    if (r.method === "percentage") return r.value;
+    return rateOf(r.value, exactPool);
+  });
+})();
+
+type RiskLevel = { name: string; def: string; measures: string; icon: string; tone: Tone };
+const RISK_LEVELS: RiskLevel[] = [
+  {
+    name: "المستوى الأول",
+    def: "الحالات التي تم الاشتباه بها في الأشعة من قبل المستوى الأول أو الثاني، دون مؤشرات من الفرق الأمنية الأخرى ودون استهداف من محرك المخاطر.",
+    measures: "انفراد الفحص بالاشتباه دون مؤشرات أخرى.",
+    icon: "shield",
+    tone: "gold",
+  },
+  {
+    name: "المستوى الثاني",
+    def: "الحالات التي استهدفها محرك المخاطر، ولم يتم الاشتباه بها من قبل المستوى الأول والثاني.",
+    measures: "ما يلتقطه محرك المخاطر ولا يلتقطه الفحص.",
+    icon: "flag",
+    tone: "blue",
+  },
+  {
+    name: "المستوى الثالث",
+    def: "الحالات التي لم يتم الاشتباه بها من قبل المستويين أو أحدهما، وتم الاشتباه بها من قبل أحد الفرق الأمنية الأخرى.",
+    measures: "ما تلتقطه الفرق الأمنية الأخرى ولا يلتقطه الفحص.",
+    icon: "users",
+    tone: "green",
+  },
+  {
+    name: "المستوى الرابع",
+    def: "الحالات التي تحتوي على ضبط أمني أو اجتازت الأشعة من جهات خارجية دون اكتشاف الاشتباه من المسؤولين.",
+    measures: "ما ثبت فواته بضبط أمني أو باكتشاف خارجي.",
+    icon: "alert",
+    tone: "coral",
+  },
+];
+
+/**
+ * One full-height level column: icon + quiet ordinal, name, rule, definition,
+ * this month's live share of the population, and a "ما يقيسه" footer.
+ *
+ * The share block (owner request 2026-07-25) is real data on an otherwise
+ * definitional page, so it is labelled with the period and its base is printed
+ * next to it — a reader must never take it for a fixed property of the level.
+ * `share` is the level's own population over the month's total population, from
+ * `model.population.byStage`, matched to this card by stage label. A level with
+ * no matching profile (a month whose risk file used labels the alias table
+ * doesn't know) renders "—", never 0%.
+ */
+function levelCard(lv: RiskLevel, i: number): string {
+  const weight = LEVEL_DRAW_WEIGHTS[i] ?? null;
+  const figure =
+    weight === null
+      ? `<span class="v2-level-share-empty insuff">—</span>`
+      : `<b dir="ltr">${fmtPct(weight, 0)}</b>`;
+  return `<div class="v2-level-card ${lv.tone}">
+    <div class="v2-level-head">
+      <span class="v2-level-icon">${badgeIcon(lv.icon, 24)}</span>
+      <span class="v2-level-num" dir="ltr" aria-hidden="true">${pad(i + 1)}</span>
+    </div>
+    <h4>${esc(lv.name)}</h4>
+    <span class="v2-level-rule" aria-hidden="true"></span>
+    <p>${esc(lv.def)}</p>
+    <div class="v2-level-share">
+      <span>وزن السحب</span>
+      ${figure}
+    </div>
+    <div class="v2-level-goal">
+      <span>ما يقيسه</span>
+      <b>${esc(lv.measures)}</b>
+    </div>
+  </div>`;
+}
 
 /** One glossary card: icon badge + term + definition, category-toned bottom rule. */
 function termCard(g: GlossaryTerm, tone: Tone): string {
@@ -565,20 +486,47 @@ function termCard(g: GlossaryTerm, tone: Tone): string {
   </div>`;
 }
 
-/** One labeled category band: tone-coded chip + hairline + its four cards. */
+/** One labeled category band: tone-coded chip + hairline + its cards.
+ *  Column count follows the band's own term count (`--cols`) rather than a
+ *  fixed 4, so a band keeps full-width cards instead of a ragged trailing gap
+ *  when terms are added or removed. */
 function termBand(cat: GlossaryCategory): string {
   return `<div class="v2-term-band ${cat.tone}">
     <div class="v2-term-band-head">
       <span class="v2-term-band-chip">${badgeIcon(cat.icon, 14)}<b>${esc(cat.label)}</b></span>
       <span class="v2-term-band-rule"></span>
     </div>
-    <div class="v2-term-grid">${cat.terms.map((t) => termCard(t, cat.tone)).join("")}</div>
+    <div class="v2-term-grid" style="--cols:${cat.terms.length}">${cat.terms.map((t) => termCard(t, cat.tone)).join("")}</div>
   </div>`;
 }
 
-/** Build the المعجم slide: two labeled category bands (fits one page). */
+/**
+ * Build the المعجم pages. Two slides, not one (owner, 2026-07-25): the four
+ * risk levels each carry their own definition now, and those definitions run
+ * roughly twice the length the 4×2 term grid was sized for (existing terms are
+ * 61–86 chars, a level definition is ~125). Splitting is what keeps both pages
+ * readable instead of cramming twelve entries onto one.
+ *   1. مستويات المخاطر — four full-height columns, one per level
+ *   2. المصطلحات الرئيسية — the two category bands, four terms each
+ */
 export function glossarySlideBuilders(variantPreview: boolean): SlideBuilder[] {
   return [
+    (num, total) => {
+      const body = `<div class="v2-level-grid">${RISK_LEVELS.map(levelCard).join("")}</div>`;
+      return v2Slide({
+        id: "slide-glossary-levels",
+        title: "مستويات المخاطر",
+        eyebrow: "المعجم",
+        iconName: "layers",
+        headline: "المعجم — مستويات المخاطر",
+        subhead: "أربعة مستويات لكل منها تعريفه وغرضه؛ تصنيفٌ للحالات لا ترتيبٌ لخطورتها.",
+        bodyVariants: [body, body, body, body],
+        variantPreview,
+        num,
+        total,
+        section: "glossary",
+      });
+    },
     (num, total) => {
       const body = `<div class="v2-term-section">${GLOSSARY_CATEGORIES.map(termBand).join("")}</div>`;
       return v2Slide({
@@ -599,17 +547,25 @@ export function glossarySlideBuilders(variantPreview: boolean): SlideBuilder[] {
 }
 
 // ── Section separator — full-bleed color-blocked cover ───────────────────────
+/**
+ * A pure title card: section number, section name, and one-sentence definition.
+ * Nothing else (owner, 2026-07-25).
+ *
+ * It previously also carried a headline statistic, a takeaway strip, and an
+ * optional chart. Those are gone deliberately — a divider's job is to mark a
+ * boundary and set up what follows, and every figure it showed was already
+ * stated, in context and with its base, on the pages immediately after it.
+ * `keyStatValue`/`keyStatLabel`/`takeaway`/`extra` were dropped from the
+ * options rather than left ignored, so no call site can quietly pass data that
+ * never renders.
+ */
 export function sectionSeparatorSlide(opts: {
   sectionNo: number;
   sectionKey: NavSectionKey;
   iconName: string;
   title: string;
+  /** The section's one-sentence تعريف — the only prose on the slide. */
   blurb: string;
-  keyStatValue: string;
-  keyStatLabel: string;
-  takeaway: string;
-  /** Optional extra visual (e.g. the results funnel), rendered in the side column. */
-  extra?: string;
   tone: string;
   /** Deterministic seed base (month key) for the background pattern. */
   seedBase?: string;
@@ -617,7 +573,7 @@ export function sectionSeparatorSlide(opts: {
   total: number;
   variantPreview: boolean;
 }): string {
-  const { sectionNo, sectionKey, iconName, title, blurb, keyStatValue, keyStatLabel, takeaway, extra, tone, seedBase, num, total, variantPreview } = opts;
+  const { sectionNo, sectionKey, iconName, title, blurb, tone, seedBase, num, total, variantPreview } = opts;
   // Seeded geometric pattern overlay, tinted to the section tone at very low
   // opacity (CSS-controlled) so it never touches headline contrast. Seed =
   // month key + section id → deterministic per report.
@@ -626,21 +582,17 @@ export function sectionSeparatorSlide(opts: {
   const patternLayer = patternSvg
     ? `<div class="v2-sep-pattern" aria-hidden="true">${patternSvg}</div>`
     : "";
+  // Centred single column. The oversized outlined numeral sits behind the
+  // lockup as a watermark rather than beside it, so the eye lands on the
+  // section name first and the number reads as ornament.
   const sepBody = `<div class="v2-sep ${esc(tone)}">
-      <div class="v2-sep-numeral" aria-hidden="true">${pad(sectionNo)}</div>
-      <div class="v2-sep-main">
-        <div class="v2-sep-eyebrow"><span class="v2-sep-eyebrow-icon">${icon(iconName, 15)}</span>القسم ${esc(String(sectionNo))}</div>
+      <div class="v2-sep-watermark" aria-hidden="true">${pad(sectionNo)}</div>
+      <div class="v2-sep-lockup">
+        <span class="v2-sep-badge">${icon(iconName, 30)}</span>
+        <div class="v2-sep-eyebrow">القسم ${esc(String(sectionNo))}</div>
         <h2>${esc(title)}</h2>
         <div class="v2-sep-rule"></div>
         <p>${esc(blurb)}</p>
-        <div class="v2-sep-takeaway"><span class="v2-sep-takeaway-icon">${icon("arrow", 14)}</span>${esc(takeaway)}</div>
-      </div>
-      <div class="v2-sep-side">
-        <div class="v2-sep-stat">
-          <span class="v2-sep-stat-value">${esc(keyStatValue)}</span>
-          <span class="v2-sep-stat-label">${esc(keyStatLabel)}</span>
-        </div>
-        ${extra ? `<div class="v2-sep-extra">${extra}</div>` : ""}
       </div>
     </div>`;
   const body = renderVariants(`slide-sep-${sectionNo}`, [sepBody, sepBody, sepBody, sepBody], variantPreview);
@@ -658,17 +610,19 @@ export function sectionSeparatorSlide(opts: {
 }
 
 // ── Page 5 — مجتمع الصور بناءً على المخاطر ────────────────────────────────
-const STAGE_TONES = ["gold", "blue", "green", "coral"] as const;
-
-/** Short severity tag shown at the bottom of each card (per the reference
- *  layout's "source of truth" / "final artifact" style caption). Keyed by
- *  stage label so an unmatched/custom label just falls back to the number. */
-const STAGE_SHORT_TAG: Record<string, string> = {
-  "المستوى الأول": "مستوى منخفض",
-  "المستوى الثاني": "مستوى متوسط",
-  "المستوى الثالث": "مستوى مرتفع",
-  "المستوى الرابع": "مستوى حرج",
-};
+/**
+ * Short tag shown at the bottom of each stage tile. Used to read
+ * "مستوى منخفض/متوسط/مرتفع/حرج" — a severity ranking that does not exist (the
+ * four levels are categorical detection scenarios with different goals, see
+ * `RISK_LEVELS`'s doc comment; [[risk-levels-are-categorical]]). Replaced with
+ * the same وزن السحب figure the glossary's level cards show
+ * (`LEVEL_DRAW_WEIGHTS`), so this page and the glossary agree instead of one
+ * of them implying a ranking the other has already dropped.
+ */
+function stageShortTag(i: number): string {
+  const weight = LEVEL_DRAW_WEIGHTS[i];
+  return weight === undefined || weight === null ? `المستوى ${i + 1}` : `وزن السحب ${fmtPct(weight, 0)}`;
+}
 
 /** How many ports each stage-×-port card shows individually before folding the
  *  rest into its الإجمالي row (design spec §2.3 — "curated top-N, never the
@@ -730,7 +684,7 @@ export function riskStagesSlide(model: ReportModel, num: number, total: number, 
   const tiles = stages
     .map((stage, i) => {
       const tone = STAGE_TONES[i % STAGE_TONES.length];
-      const tag = STAGE_SHORT_TAG[stage.stageLabel] ?? `المستوى ${i + 1}`;
+      const tag = stageShortTag(i);
       const share = (stage.population / populationTotal) * 100;
       return `<div class="v2-risk-tile ${tone}">
         <div class="v2-risk-tile-head">
@@ -778,52 +732,6 @@ export function riskStagesSlide(model: ReportModel, num: number, total: number, 
 }
 
 // ── Page 6+ — مجتمع صور الفحص للشهر (جداول المنافذ) ───────────────────────
-type PortPopRow = {
-  name: string;
-  total: number;
-  clean: number;
-  suspicious: number;
-  sampleTotal: number;
-  sampleClean: number;
-  sampleSuspicious: number;
-};
-
-function collectPortStats(model: ReportModel): { land: PortPopRow[]; sea: PortPopRow[] } {
-  const map = new Map<string, PortPopRow & { sea: boolean }>();
-  for (const r of model.rows) {
-    const name = r.portName ?? "غير محدد";
-    let cur = map.get(name);
-    if (!cur) {
-      cur = {
-        name,
-        total: 0,
-        clean: 0,
-        suspicious: 0,
-        sampleTotal: 0,
-        sampleClean: 0,
-        sampleSuspicious: 0,
-        sea: (r.portType ?? "").includes("بحري"),
-      };
-      map.set(name, cur);
-    }
-    cur.total += 1;
-    if (r.imageResult === "اشتباه") cur.suspicious += 1;
-    else cur.clean += 1;
-    if (r.selectedInSample) {
-      cur.sampleTotal += 1;
-      if (r.imageResult === "اشتباه") cur.sampleSuspicious += 1;
-      else cur.sampleClean += 1;
-    }
-  }
-  const all = [...map.values()].sort((a, b) => b.total - a.total);
-  return { land: all.filter((p) => !p.sea), sea: all.filter((p) => p.sea) };
-}
-
-/** A stacked cell: the sample figure (big) over its population base (small). */
-function frac(sampleN: number, popN: number): string {
-  return `<span class="v2-frac"><b>${fmtNum(sampleN)}</b><span>من ${fmtNum(popN)}</span></span>`;
-}
-
 /**
  * One land/sea table as a tinted card (per the reference design). `population`
  * = plain month numbers (الصور/سليمة/اشتباه). `sample` = same shape, but every
@@ -874,60 +782,24 @@ function portTable(
     mode === "population"
       ? `${fmtNum(rows.length)} منفذ · ${fmtNum(totalPop)} صورة`
       : `${fmtNum(rows.length)} منفذ · ${fmtNum(totalSample)} عيّنة من ${fmtNum(totalPop)} صورة`;
-  const ths =
+  const theadCells =
     mode === "population"
       ? `<th>المنفذ</th><th>الصور</th><th>سليمة</th><th>اشتباه</th>`
       : `<th>المنفذ</th><th>العيّنة</th><th>سليمة</th><th>اشتباه</th><th>التغطية</th>`;
-  const headIcon = variant === "land" ? "truck" : "ship";
-  const cls = `v2-port-col ${variant}${mode === "sample" ? " sample-mode" : ""}${compact ? " compact" : ""}`;
 
-  return `<div class="${cls}">
-    <div class="v2-port-col-head">
-      <span class="v2-port-col-icon">${badgeIcon(headIcon, 26)}</span>
-      <div><b>${esc(title)}</b><span>${headSub}</span></div>
-    </div>
-    <table class="deck-table">
-      <thead><tr>${ths}</tr></thead>
-      <tbody>${trs}</tbody>
-      <tfoot>${totalsRow}</tfoot>
-    </table>
-  </div>`;
-}
-
-/**
- * Row budget, measured live (v39.10, recomputed v39.16 for the taller,
- * ink-safe row height) — each `.v2-port-col` card clips its own overflow, so
- * a table taller than its card silently loses its bottom rows (the totals
- * row first). The 16:9 slide's `.slide-body` renders at 459px and a card
- * header at 71px, leaving a 388px budget for thead+rows+tfoot together →
- * (388 − 41 − 41) / 41 ≈ 7 rows. Both port-table modes share this budget
- * since the sample table's stacked cells are tuned to the exact same row
- * height as the population table's plain cells.
- */
-const BASE_ROWS_PER_PAGE = 7;
-
-/**
- * If a table overflows its base budget by only 1–3 rows, compress row height
- * slightly (the `compact` CSS variant) so everyone fits on one page instead
- * of spilling those 1–3 rows onto a near-empty continuation page. Beyond a
- * 3-row overflow, paginate normally at the base row size. The shared compact
- * tier was measured to comfortably fit BASE+3 for both modes (12 population
- * rows, 9 sample rows) with 80px+ of slack to spare.
- */
-const COMPRESS_OVERFLOW_MAX = 3;
-
-type PortPagePlan = { pages: number; rowsPerPage: number; compact: boolean };
-
-function planPortPages(landCount: number, seaCount: number, baseRowsPerPage: number): PortPagePlan {
-  const maxCount = Math.max(landCount, seaCount);
-  if (maxCount <= baseRowsPerPage) {
-    return { pages: 1, rowsPerPage: baseRowsPerPage, compact: false };
-  }
-  const overflow = maxCount - baseRowsPerPage;
-  if (overflow <= COMPRESS_OVERFLOW_MAX) {
-    return { pages: 1, rowsPerPage: maxCount, compact: true };
-  }
-  return { pages: Math.ceil(maxCount / baseRowsPerPage), rowsPerPage: baseRowsPerPage, compact: false };
+  return portTableCard({
+    title,
+    headSub,
+    headIcon: variant === "land" ? "truck" : "ship",
+    variant,
+    compact,
+    sampleMode: mode === "sample",
+    theadCells,
+    bodyRowsHtml: trs,
+    rowCount: rows.length,
+    span,
+    totalsRowHtml: totalsRow,
+  });
 }
 
 /** Build one or more port-population slides (paginated land/sea in parallel). */
@@ -1090,7 +962,7 @@ function stagePortPopulationCard(stage: StageProfile, i: number, ports: PortPopR
     </div>
     <table class="deck-table">
       <thead><tr><th>المنفذ</th><th>سليمة</th><th>اشتباه</th><th>الإجمالي</th></tr></thead>
-      <tbody>${trs}</tbody>
+      <tbody>${trs}${fillerRow(4, top.length)}</tbody>
       <tfoot>${totalsRow}</tfoot>
     </table>
   </div>`;
@@ -1129,7 +1001,7 @@ function stagePortSampleCard(stage: StageProfile, i: number, ports: PortPopRow[]
     </div>
     <table class="deck-table">
       <thead><tr><th>المنفذ</th><th>مجتمع المرحلة</th><th>العيّنة المستهدفة</th><th>نسبة التغطية</th></tr></thead>
-      <tbody>${trs}</tbody>
+      <tbody>${trs}${fillerRow(4, top.length)}</tbody>
       <tfoot>${totalsRow}</tfoot>
     </table>
   </div>`;
@@ -1203,17 +1075,6 @@ type PortQualityRow = {
   lowQ: number;
 };
 
-/** Denominator-gated rate — null (renders "—") when there's nothing to divide by. */
-function rateOf(num: number, den: number): number | null {
-  return den > 0 ? (num / den) * 100 : null;
-}
-
-/** A percentage cell, muted (`.insuff`, matching the v1 deck's own port
- *  tables) when there's nothing to show rather than plain white "—" text. */
-function pctCell(v: number | null): string {
-  return v === null ? `<span class="insuff">—</span>` : fmtPct(v);
-}
-
 /**
  * Per-port image-quality tallies, computed fresh from `model.rows` using the
  * EXACT same predicates as the global KPI calculator
@@ -1255,7 +1116,12 @@ function collectPortQualityStats(model: ReportModel): { land: PortQualityRow[]; 
   return { land: all.filter((p) => !p.sea), sea: all.filter((p) => p.sea) };
 }
 
-function qualityTable(title: string, rows: PortQualityRow[], variant: "land" | "sea", compact: boolean): string {
+function qualityTable(
+  title: string,
+  rows: PortQualityRow[],
+  variant: "land" | "sea",
+  compact: boolean,
+): string {
   const span = 5;
   const trs =
     rows.length > 0
@@ -1282,22 +1148,18 @@ function qualityTable(title: string, rows: PortQualityRow[], variant: "land" | "
   const totalEvaluated = totalHigh + totalMed + totalLow;
   const totalsRow = `<tr><td>الإجمالي</td><td>${pctCell(rateOf(totalHigh, totalEvaluated))}</td><td>${pctCell(rateOf(totalMed, totalEvaluated))}</td><td>${pctCell(rateOf(totalLow, totalEvaluated))}</td><td>${pctCell(rateOf(totalMarkP, totalMarkP + totalMarkM))}</td></tr>`;
 
-  const headSub = `${fmtNum(rows.length)} منفذ`;
-  const ths = `<th>المنفذ</th><th>عالي</th><th>متوسط</th><th>منخفض</th><th>التحديد</th>`;
-  const headIcon = variant === "land" ? "truck" : "ship";
-  const cls = `v2-port-col ${variant}${compact ? " compact" : ""}`;
-
-  return `<div class="${cls}">
-    <div class="v2-port-col-head">
-      <span class="v2-port-col-icon">${badgeIcon(headIcon, 26)}</span>
-      <div><b>${esc(title)}</b><span>${headSub}</span></div>
-    </div>
-    <table class="deck-table">
-      <thead><tr>${ths}</tr></thead>
-      <tbody>${trs}</tbody>
-      <tfoot>${totalsRow}</tfoot>
-    </table>
-  </div>`;
+  return portTableCard({
+    title,
+    headSub: `${fmtNum(rows.length)} منفذ`,
+    headIcon: variant === "land" ? "truck" : "ship",
+    variant,
+    compact,
+    theadCells: `<th>المنفذ</th><th>عالي</th><th>متوسط</th><th>منخفض</th><th>التحديد</th>`,
+    bodyRowsHtml: trs,
+    rowCount: rows.length,
+    span,
+    totalsRowHtml: totalsRow,
+  });
 }
 
 /** Build one or more image-quality slides (paginated land/sea in parallel). */
@@ -1370,7 +1232,12 @@ function collectPortAccuracyRows(model: ReportModel): { land: PortAccuracyRow[];
   return { land: all.filter((p) => !p.sea), sea: all.filter((p) => p.sea) };
 }
 
-function accuracyTable(title: string, rows: PortAccuracyRow[], variant: "land" | "sea", compact: boolean): string {
+function accuracyTable(
+  title: string,
+  rows: PortAccuracyRow[],
+  variant: "land" | "sea",
+  compact: boolean,
+): string {
   const span = 4;
   const trs =
     rows.length > 0
@@ -1396,22 +1263,18 @@ function accuracyTable(title: string, rows: PortAccuracyRow[], variant: "land" |
   const totalFS = sum((p) => p.falseSuspicion);
   const totalsRow = `<tr><td>الإجمالي</td><td>${pctCell(rateOf(totalCC + totalCS, totalEvaluable))}</td><td>${pctCell(rateOf(totalCS, totalCS + totalMS))}</td><td>${pctCell(rateOf(totalCC, totalCC + totalFS))}</td></tr>`;
 
-  const headSub = `${fmtNum(rows.length)} منفذ`;
-  const ths = `<th>المنفذ</th><th>الدقة العامة</th><th>دقة الاشتباه</th><th>دقة السليمة</th>`;
-  const headIcon = variant === "land" ? "truck" : "ship";
-  const cls = `v2-port-col ${variant}${compact ? " compact" : ""}`;
-
-  return `<div class="${cls}">
-    <div class="v2-port-col-head">
-      <span class="v2-port-col-icon">${badgeIcon(headIcon, 26)}</span>
-      <div><b>${esc(title)}</b><span>${headSub}</span></div>
-    </div>
-    <table class="deck-table">
-      <thead><tr>${ths}</tr></thead>
-      <tbody>${trs}</tbody>
-      <tfoot>${totalsRow}</tfoot>
-    </table>
-  </div>`;
+  return portTableCard({
+    title,
+    headSub: `${fmtNum(rows.length)} منفذ`,
+    headIcon: variant === "land" ? "truck" : "ship",
+    variant,
+    compact,
+    theadCells: `<th>المنفذ</th><th>الدقة العامة</th><th>دقة الاشتباه</th><th>دقة السليمة</th>`,
+    bodyRowsHtml: trs,
+    rowCount: rows.length,
+    span,
+    totalsRowHtml: totalsRow,
+  });
 }
 
 /** Build one or more port-accuracy slides (paginated land/sea in parallel). */
@@ -1539,22 +1402,10 @@ export function buildDeckV2Slides(
   sourceRevisions?: SourceRevisions,
   seedBase = "",
 ): string {
-  const glossaryBuilders = glossarySlideBuilders(variantPreview); // 1..N pages, paginated by term count
+  const glossaryBuilders = glossarySlideBuilders(variantPreview); // levels page + terms page
 
-  // Section-2 opener funnel: population → sample → studied → اشتباه (studied
-  // cases flagged as اشتباه), computed once from the model.
-  const studiedSuspicion = model.rows.filter(
-    (r) => r.answerStatus === "submitted" && r.imageResult === "اشتباه",
-  ).length;
-  const resultsFunnel = funnel(
-    [
-      { label: "المجتمع", value: model.population.total },
-      { label: "العيّنة", value: model.sample.total },
-      { label: "المدروسة", value: model.sample.studied },
-      { label: "اشتباه", value: studiedSuspicion },
-    ],
-    { width: 340, height: 200 },
-  );
+  // (The section-2 opener funnel was removed with the separator's side column —
+  // separators now carry only the section number, name, and تعريف.)
 
   // Section 1 — مجتمع الفحص: separator + risk stages + port tables (1..N pages).
   const sectionOne: SlideBuilder[] = [
@@ -1566,9 +1417,6 @@ export function buildDeckV2Slides(
         title: "مجتمع الفحص",
         blurb:
           "التعريف بمجتمع الصور لهذا الشهر: حجمه، توزيعه على مستويات المخاطر، وتوزيعه على المنافذ البرية والبحرية، وهو الأساس الذي سُحبت منه العيّنة.",
-        keyStatValue: fmtNum(model.population.total),
-        keyStatLabel: "صورة في مجتمع الشهر",
-        takeaway: `عيّنة ${fmtNum(model.sample.total)} صورة بتغطية ${fmtPct(model.sample.coverage)} تمثّل هذا المجتمع.`,
         tone: "gold",
         seedBase,
         num,
@@ -1582,7 +1430,7 @@ export function buildDeckV2Slides(
     (num, total) => stagePortSampleSlide(model, num, total, variantPreview),
   ];
 
-  // Section 2 — نتائج فحص الجودة: separator (with funnel) + image-quality + accuracy.
+  // Section 2 — نتائج فحص الجودة: separator + image-quality + accuracy.
   const sectionTwo: SlideBuilder[] = [
     (num, total) =>
       sectionSeparatorSlide({
@@ -1592,10 +1440,6 @@ export function buildDeckV2Slides(
         title: "نتائج فحص الجودة",
         blurb:
           "جودة الصور المفحوصة في كل منفذ (التوفّر والتحديد والجودة المقبولة)، ودقة قرارات الفحص بين الاشتباه والسليمة.",
-        keyStatValue: model.summary.overallAccuracy === null ? "—" : fmtPct(model.summary.overallAccuracy),
-        keyStatLabel: "الدقة العامة لقرارات الفحص",
-        takeaway: "المسار من المجتمع إلى الصور المدروسة ثم المشتبه بها.",
-        extra: resultsFunnel,
         tone: "cyan",
         seedBase,
         num,
@@ -1606,18 +1450,31 @@ export function buildDeckV2Slides(
     ...accuracyPortSlideBuilders(model, variantPreview),
   ];
 
+  // Section 3 — التحاليل المتقدمة: assembled entirely in section3/index.ts, so
+  // adding a page there needs no change here. Empty is a supported state and a
+  // complete no-op: zero pages, zero TOC rows, page numbering unchanged.
+  const sectionThree: SlideBuilder[] = sectionThreeBuilders(model, variantPreview);
+
   // Page order: cover(1) · toc(2) · [month-in-numbers(3) — currently hidden,
   // see SHOW_MONTH_NUMBERS_SLIDE] · glossary(N) · section 1 · section 2 ·
-  // closing(last).
+  // section 3 · closing(last).
   const summaryPageCount = SHOW_MONTH_NUMBERS_SLIDE ? 1 : 0;
   const total =
-    2 + summaryPageCount + glossaryBuilders.length + sectionOne.length + sectionTwo.length + 1; // +cover+toc(+summary), +closing
+    2 +
+    summaryPageCount +
+    glossaryBuilders.length +
+    sectionOne.length +
+    sectionTwo.length +
+    sectionThree.length +
+    1; // +cover+toc(+summary), +closing
   const glossaryStart = 3 + summaryPageCount;
   const glossaryEnd = glossaryStart - 1 + glossaryBuilders.length;
   const sectionOneStart = glossaryEnd + 1;
   const sectionOneEnd = sectionOneStart + sectionOne.length - 1;
   const sectionTwoStart = sectionOneEnd + 1;
   const sectionTwoEnd = sectionTwoStart + sectionTwo.length - 1;
+  const sectionThreeStart = sectionTwoEnd + 1;
+  const sectionThreeEnd = sectionThreeStart + sectionThree.length - 1;
   const closingNum = total;
 
   const accuracyFig =
@@ -1666,6 +1523,26 @@ export function buildDeckV2Slides(
       figure: accuracyFig,
       figureLabel: "الدقة",
     },
+    // Same rule as مؤشرات الشهر above: a section with zero pages gets NO TOC
+    // row — a range pointing at pages that aren't in the deck would be a
+    // broken link. While section3/index.ts returns an empty array this entry
+    // simply doesn't exist, and the TOC is byte-identical to before.
+    ...(sectionThree.length > 0
+      ? [
+          {
+            title: "القسم الثالث — التحاليل المتقدمة",
+            goal: "تحاليل معمّقة تُكمل قراءة نتائج الجودة والدقة.",
+            range:
+              sectionThreeEnd > sectionThreeStart
+                ? `${pad(sectionThreeStart)}–${pad(sectionThreeEnd)}`
+                : pad(sectionThreeStart),
+            iconName: "chart",
+            tone: "purple",
+            figure: fmtNum(sectionThree.length),
+            figureLabel: "صفحة",
+          },
+        ]
+      : []),
   ];
 
   const slides: string[] = [
@@ -1685,6 +1562,10 @@ export function buildDeckV2Slides(
     num += 1;
   }
   for (const build of sectionTwo) {
+    slides.push(build(num, total));
+    num += 1;
+  }
+  for (const build of sectionThree) {
     slides.push(build(num, total));
     num += 1;
   }

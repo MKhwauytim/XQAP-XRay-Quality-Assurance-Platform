@@ -8,6 +8,11 @@ import { buildReportModel } from "../model/reportModel";
 import { buildDeckV2Slides } from "./slides";
 import { DECK_CSS } from "../deck/deckTheme";
 import { DECK_V2_CSS } from "./theme";
+// Section 3's pages each own their CSS in their own module; this is the single
+// concatenation of all six, kept out of theme.ts so six parallel page authors
+// never contend for one stylesheet. Placed after DECK_V2_CSS so a page can
+// still override a shared component default where it deliberately needs to.
+import { SECTION_THREE_CSS } from "./section3";
 import { esc } from "../primitives";
 import { icon } from "../ui/icons";
 import { openOrDownload } from "../../htmlReport";
@@ -68,6 +73,98 @@ const DECK_NAV_SCRIPT = `(function(){
 })();`;
 
 /**
+ * Pins each land/sea/stage table's الإجمالي totals row flush to the bottom
+ * of its (fixed-height) card, for any row count. `fillerRow()` in slides.ts
+ * inserts an empty `tr.v2-fill-row` between a table's data rows and its
+ * totals row but leaves its height at 0 (CSS can't know the leftover pixels
+ * — row height differs by mode/compact/sample-mode, see slides.ts's
+ * `fillerRow` doc comment); this script measures the leftover live and
+ * stretches the filler to match, the same "measure, don't estimate" approach
+ * the row-height tuning elsewhere in this deck already uses.
+ *
+ * The measurement is a self-correcting DELTA — "how far is tfoot's bottom
+ * from the card's inner bottom edge, add that to whatever the filler is
+ * already at" — rather than an absolute `card − header − table` subtraction.
+ * The subtraction form silently misses every box-model contributor that
+ * isn't one of those three rects (card padding, the head's margin-bottom,
+ * border widths) and lands tens of pixels off; a delta needs no model of the
+ * box at all, converges in one pass, and stays correct on re-runs where the
+ * filler is already non-zero. Two passes absorb any reflow-order coupling
+ * between sibling cards in the same grid row.
+ *
+ * Runs on load, on resize/fullscreen (the card's own
+ * height can change), and is re-invoked by DECK_VARIANT_SCRIPT's `apply()`
+ * below whenever a dev-preview variant panel is switched in — a
+ * newly-activated panel was `display:none` (zero-height) during the initial
+ * pass, so its fillers need their own measurement once visible.
+ */
+const DECK_TABLE_FILL_SCRIPT = `(function(){
+  function fillCards(){
+    var cards = document.querySelectorAll('.v2-port-col, .v2-stage-port-card');
+    for (var pass = 0; pass < 2; pass++){
+      for (var i = 0; i < cards.length; i++){
+        var card = cards[i];
+        var fillTd = card.querySelector('tr.v2-fill-row td');
+        var tfoot = card.querySelector('tfoot');
+        if (!fillTd || !tfoot) continue;
+        var cs = getComputedStyle(card);
+        var innerBottom = card.getBoundingClientRect().bottom
+          - parseFloat(cs.paddingBottom) - parseFloat(cs.borderBottomWidth);
+        var next = (parseFloat(fillTd.style.height) || 0)
+          + (innerBottom - tfoot.getBoundingClientRect().bottom);
+        fillTd.style.height = (next > 0 ? next : 0) + 'px';
+      }
+    }
+  }
+  window.__deckFillCards = fillCards;
+  fillCards();
+  // Re-measure after the initial pass — verified live, twice over, that ONE
+  // fix point is not enough:
+  //   1. document.fonts.ready alone: still measured a stale (too-short) row
+  //      height even though document.fonts.status read "loaded" by the time
+  //      the callback ran — the FontFaceSet resolving is not the same event
+  //      as the browser finishing the reflow that swapping the font triggers.
+  //   2. A later manual re-run always corrected it, confirming fillCards()
+  //      itself is right and this is purely a "ran before layout settled"
+  //      timing gap, not a logic bug.
+  // So this re-measures on three independent, cheap signals instead of
+  // trusting any single one: fonts.ready (as an early attempt), window
+  // 'load' (images/subresources finished, layout is as settled as a page
+  // load gets), and a double-rAF (two full paint cycles after 'load', to
+  // clear whatever reflow was still pending when 'load' fired). Re-running
+  // fillCards() an extra time when nothing actually shifted is a no-op — the
+  // delta it computes is 0 — so there is no real cost to checking more than
+  // once.
+  var refire = function(){ fillCards(); };
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(refire);
+  window.addEventListener('load', function(){
+    refire();
+    requestAnimationFrame(function(){ requestAnimationFrame(refire); });
+  });
+  // Bounded polling safety net on top of the event-based re-fires above.
+  // Verified live (twice) that a single "the page is ready" signal is not
+  // reliable enough — even document.fonts.ready firing, plus a post-load
+  // double-rAF, still measured a stale height on at least one real reload.
+  // Rather than keep guessing at which ONE event is the true "layout has
+  // settled" moment, poll on a plain interval for a few seconds after load
+  // and let the polling itself be the guarantee: whatever the actual cause of
+  // a delayed reflow is (font swap, image decode, a slow device, something
+  // this list didn't anticipate), it will be caught within one poll tick.
+  // Each tick is O(cards) and a no-op when nothing has shifted (the delta
+  // fillCards() computes is 0), so polling for a few seconds costs nothing
+  // measurable even on a large deck.
+  var pollTicks = 0;
+  var pollId = setInterval(function(){
+    fillCards();
+    pollTicks += 1;
+    if (pollTicks >= 20) clearInterval(pollId); // ~3s at 150ms/tick, then stop
+  }, 150);
+  window.addEventListener('resize', fillCards);
+  document.addEventListener('fullscreenchange', fillCards);
+  document.addEventListener('webkitfullscreenchange', fillCards);
+})();`;
+
+/**
  * Style-variant arrow-cycling + persistence, dev-preview only (only appended
  * to the document when `variantPreview` is true — see buildDeckV2Html below).
  * Cycles `.v2-variant-panel.active` within each `.v2-variant-stack` and POSTs
@@ -86,6 +183,7 @@ const DECK_VARIANT_SCRIPT = `(function(){
     var panels = Array.prototype.slice.call(stack.querySelectorAll('.v2-variant-panel'));
     panels.forEach(function(p, i){ p.classList.toggle('active', i === index); });
     stack.setAttribute('data-active-index', String(index));
+    if (window.__deckFillCards) window.__deckFillCards();
   }
   function setLabel(switcher, index, total){
     var label = switcher.querySelector('.v2-variant-label');
@@ -248,7 +346,7 @@ export function buildDeckV2Html(
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>العرض التنفيذي — ${esc(monthLabel)}</title>
-<style>${ARABIC_FONT_FACE_CSS}${DECK_CSS}${DECK_V2_CSS}${SOURCE_REVISIONS_CSS}</style>
+<style>${ARABIC_FONT_FACE_CSS}${DECK_CSS}${DECK_V2_CSS}${SECTION_THREE_CSS}${SOURCE_REVISIONS_CSS}</style>
 </head>
 <body>
 <nav class="deck-nav" id="deck-nav" aria-label="التنقّل بين أقسام العرض">
@@ -290,7 +388,7 @@ ${footerNote}
 <button type="button" class="btn-slide-nav btn-slide-prev" id="deck-slide-prev" aria-label="${slidePrevLabel}" title="${slidePrevLabel}">${icon("arrow", 20)}</button>
 <button type="button" class="btn-slide-nav btn-slide-next" id="deck-slide-next" aria-label="${slideNextLabel}" title="${slideNextLabel}">${icon("arrow", 20)}</button>
 <span class="deck-slide-counter" id="deck-slide-counter" dir="ltr"></span>
-<script>${DECK_NAV_SCRIPT}${DECK_FULLSCREEN_SCRIPT}${variantPreview ? DECK_VARIANT_SCRIPT : ""}</script>
+<script>${DECK_NAV_SCRIPT}${DECK_TABLE_FILL_SCRIPT}${DECK_FULLSCREEN_SCRIPT}${variantPreview ? DECK_VARIANT_SCRIPT : ""}</script>
 </body>
 </html>`;
 }
