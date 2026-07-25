@@ -8,6 +8,7 @@ import { buildReportModel } from "../model/reportModel";
 import { buildDeckV2Slides } from "./slides";
 import { DECK_CSS } from "../deck/deckTheme";
 import { DECK_V2_CSS } from "./theme";
+import { setActiveStyleChoices } from "./slideKit";
 // Section 3's pages each own their CSS in their own module; this is the single
 // concatenation of all six, kept out of theme.ts so six parallel page authors
 // never contend for one stylesheet. Placed after DECK_V2_CSS so a page can
@@ -190,11 +191,19 @@ const DECK_VARIANT_SCRIPT = `(function(){
     if (label) label.textContent = (index + 1) + ' / ' + total;
   }
   function persist(slideId, index){
+    // Dev-tool persistence (Vite middleware, harmless 404 in the real app).
     fetch('/__deck-style-choices', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ slideId: slideId, variantIndex: index })
     }).catch(function(){});
+    // In-app admin customizer bridge: this script only ever runs inside a
+    // variantPreview=true document, which is always embedded (the dev tool's
+    // own iframe, or the in-app customizer's iframe) — never the standalone
+    // opened/downloaded report, which is never in variantPreview mode. A
+    // parentless top-level window would just message itself here, which is
+    // harmless (nothing listens).
+    window.parent.postMessage({ type: 'deck2-style-choice', slideId: slideId, variantIndex: index }, '*');
   }
   switchers.forEach(function(switcher){
     var slideId = switcher.getAttribute('data-for');
@@ -396,31 +405,37 @@ ${footerNote}
 export function buildExecutiveDeckV2(
   input: ExecutiveReportInput,
   employeeDisplayNames: Record<string, string> = {},
-  opts?: { variantPreview?: boolean },
+  opts?: { variantPreview?: boolean; styleChoices?: Record<string, number> },
 ): string {
   const variantPreview = opts?.variantPreview ?? false;
-  const model = buildReportModel(input, employeeDisplayNames);
-  const slides = buildDeckV2Slides(
-    model,
-    new Date(),
-    variantPreview,
-    input.sourceRevisions,
-    input.monthFolderName,
-  );
-  return buildDeckV2Html(
-    slides,
-    formatMonthFolderShortLabel(input.monthFolderName),
-    variantPreview,
-    sourceRevisionsFooterHtml(input.sourceRevisions, esc),
-  );
+  setActiveStyleChoices(opts?.styleChoices ?? null);
+  try {
+    const model = buildReportModel(input, employeeDisplayNames);
+    const slides = buildDeckV2Slides(
+      model,
+      new Date(),
+      variantPreview,
+      input.sourceRevisions,
+      input.monthFolderName,
+    );
+    return buildDeckV2Html(
+      slides,
+      formatMonthFolderShortLabel(input.monthFolderName),
+      variantPreview,
+      sourceRevisionsFooterHtml(input.sourceRevisions, esc),
+    );
+  } finally {
+    setActiveStyleChoices(null);
+  }
 }
 
 export function openExecutiveDeckV2(
   input: ExecutiveReportInput,
   employeeDisplayNames: Record<string, string> = {},
+  styleChoices?: Record<string, number>,
 ): void {
   openOrDownload(
-    buildExecutiveDeckV2(input, employeeDisplayNames),
+    buildExecutiveDeckV2(input, employeeDisplayNames, { styleChoices }),
     `العرض_التنفيذي_${input.monthFolderName}.html`,
   );
 }

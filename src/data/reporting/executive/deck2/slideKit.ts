@@ -193,29 +193,68 @@ export function pageFoot(num: number, total: number): string {
 }
 
 /**
+ * Module-level "active style choices" for the duration of one
+ * `buildExecutiveDeckV2` call — set once at the top of that function, read by
+ * `renderVariants` below. Deliberately NOT a parameter threaded through every
+ * one of the ~18 slide-builder functions: `renderVariants` is already the
+ * single choke point every slide (via `v2Slide`, plus the two direct callers
+ * `coverSlide`/`sectionSeparatorSlide`) funnels through, so scoping the state
+ * here confines this whole feature to this file + deck2/index.ts. Reports are
+ * always built synchronously within one JS turn (no concurrent
+ * `buildExecutiveDeckV2` calls can interleave), so there's no cross-call
+ * interference risk. See
+ * docs/superpowers/specs/2026-07-25-admin-report-customization-design.md.
+ */
+let activeStyleChoices: Record<string, number> | null = null;
+
+export function setActiveStyleChoices(choices: Record<string, number> | null): void {
+  activeStyleChoices = choices;
+}
+
+export function getActiveStyleChoices(): Record<string, number> | null {
+  return activeStyleChoices;
+}
+
+/** Clamps a saved/requested variant index to a valid 0-3 slot, defaulting to
+ *  0 for anything missing, non-numeric, or out of range — an admin choice
+ *  saved against a slide id that no longer exists, or a stale/corrupt file,
+ *  must never throw or render `undefined`. */
+function resolveVariantIndex(slideId: string): number {
+  const choice = activeStyleChoices?.[slideId];
+  return typeof choice === "number" && Number.isInteger(choice) && choice >= 0 && choice <= 3 ? choice : 0;
+}
+
+/**
  * Wraps a slide's varying content into 1-of-4 selectable style variants.
- * Production (`variantPreview=false`) renders ONLY `bodies[0]` — byte-identical
- * to the single-variant output that existed before the switcher (a dev-preview
- * feature; see docs/superpowers/specs/2026-07-05-deck2-style-switcher-design.md).
- * Preview mode renders all 4, one visible via CSS (`.v2-variant-panel.active`).
- * The arrow-cycle control that drives this lives separately in
- * `slideControls()`/`variantSwitcher()`; the inline script in deck2/index.ts
- * (DECK_VARIANT_SCRIPT) wires the two together by matching `data-for` to
- * `data-slide-id` and persists the choice.
+ * Production (`variantPreview=false`) renders `bodies[resolveVariantIndex(slideId)]`
+ * — `bodies[0]` when no admin choice is saved for this slide, byte-identical
+ * to the single-variant output that existed before the switcher (a
+ * dev-preview feature; see
+ * docs/superpowers/specs/2026-07-05-deck2-style-switcher-design.md — and now
+ * also the production selection mechanism for the in-app admin customizer,
+ * docs/superpowers/specs/2026-07-25-admin-report-customization-design.md).
+ * Preview mode renders all 4, one visible via CSS (`.v2-variant-panel.active`),
+ * initially the saved choice (or panel 0) instead of always panel 0, so
+ * re-opening the customizer shows what's currently saved.
+ * The arrow-cycle control that drives interactive switching lives separately
+ * in `slideControls()`/`variantSwitcher()`; the inline script in
+ * deck2/index.ts (DECK_VARIANT_SCRIPT) wires the two together by matching
+ * `data-for` to `data-slide-id` and persists the choice.
  */
 export function renderVariants(
   slideId: string,
   bodies: readonly [string, string, string, string],
   variantPreview: boolean,
 ): string {
-  if (!variantPreview) return bodies[0];
+  const initialIndex = resolveVariantIndex(slideId);
+  if (!variantPreview) return bodies[initialIndex];
   const panels = bodies
     .map(
       (html, i) =>
-        `<div class="v2-variant-panel${i === 0 ? " active" : ""}" data-variant-index="${i}">${html}</div>`,
+        `<div class="v2-variant-panel${i === initialIndex ? " active" : ""}" data-variant-index="${i}">${html}</div>`,
     )
     .join("");
-  return `<div class="v2-variant-stack" data-slide-id="${esc(slideId)}" data-active-index="0">${panels}</div>`;
+  return `<div class="v2-variant-stack" data-slide-id="${esc(slideId)}" data-active-index="${initialIndex}">${panels}</div>`;
 }
 
 // ── v2 slide shell — rail + eyebrow + headline + body + footer page num. ────

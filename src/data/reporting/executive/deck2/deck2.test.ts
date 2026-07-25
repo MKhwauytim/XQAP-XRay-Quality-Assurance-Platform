@@ -449,3 +449,48 @@ describe("riskStagesSlide — variant 2/4: compare-bars + exact-figures table (2
     expect(panel0).not.toContain("v2-level-table-card");
   });
 });
+
+describe("style choices — production selection + backward compatibility (2026-07-25)", () => {
+  it("with no styleChoices opt, output is byte-identical to today (regression guard)", () => {
+    const a = buildExecutiveDeckV2(input([popRow(), popRow({ xrayImageId: "XR-2" })]));
+    const b = buildExecutiveDeckV2(input([popRow(), popRow({ xrayImageId: "XR-2" })]), {}, {});
+    expect(a).toBe(b);
+  });
+
+  it("with styleChoices selecting slot 1 for slide-risk-stages, production output renders variant 1's markup instead of variant 0's", () => {
+    const fixture = input([
+      popRow({ stage: "المستوى الأول" }),
+      popRow({ xrayImageId: "XR-2", stage: "المستوى الثالث" }),
+    ]);
+    const defaultHtml = buildExecutiveDeckV2(fixture);
+    const customHtml = buildExecutiveDeckV2(fixture, {}, { styleChoices: { "slide-risk-stages": 1 } });
+
+    // NOTE: the deck's static CSS (theme.ts) always defines .v2-cbar/.v2-level-table-card/
+    // .v2-risk-tile-grid rules regardless of which variant is selected — all 4 variants' CSS
+    // ships in every report, only the markup differs — so assertions below match the HTML
+    // *markup* tag (`<div class="...">`), not a bare class-name substring that would also
+    // match the always-present CSS text and defeat the point of these checks.
+
+    // Variant 0 (today's tiles + proportion bar) markup is present by default...
+    expect(defaultHtml).toContain('<div class="v2-risk-tile-grid">');
+    expect(defaultHtml).not.toContain('<div class="v2-cbar">');
+    expect(defaultHtml).not.toContain('<div class="v2-level-table-card">');
+
+    // ...but with the style choice applied, the SAME slide now renders variant 1's markup instead.
+    expect(customHtml).not.toContain('<div class="v2-risk-tile-grid">');
+    expect(customHtml).toContain('<div class="v2-cbar">');
+    expect(customHtml).toContain('<div class="v2-level-table-card">');
+
+    // Every other slide is unaffected by a choice scoped to slide-risk-stages only.
+    expect(customHtml).toContain('class="v2-toc-card ');
+  });
+
+  it("an out-of-range or unknown slide id in styleChoices is ignored (falls back to variant 0), never throws", () => {
+    const fixture = input([popRow()]);
+    expect(() =>
+      buildExecutiveDeckV2(fixture, {}, { styleChoices: { "slide-risk-stages": 99, "no-such-slide": 2 } }),
+    ).not.toThrow();
+    const html = buildExecutiveDeckV2(fixture, {}, { styleChoices: { "slide-risk-stages": 99 } });
+    expect(html).toContain('<div class="v2-risk-tile-grid">'); // fell back to variant 0, not a crash or an out-of-bounds undefined render
+  });
+});
