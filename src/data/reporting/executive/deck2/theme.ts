@@ -1041,17 +1041,21 @@ body.theme-light .v2-risk-tile-foot{background:rgba(10,45,74,.035);border-color:
 .v2-cbar-fill.green{background:var(--green);}
 .v2-cbar-fill.coral{background:var(--coral);}
 .v2-cbar-value{flex:0 0 auto;min-width:40px;text-align:left;font-size:.82rem;font-weight:900;color:#fff;font-variant-numeric:tabular-nums;}
-.v2-level-table-card{margin-top:14px;}
+.v2-level-table-card{margin-top:14px;flex:1 1 auto;min-height:0;display:flex;flex-direction:column;justify-content:center;}
 .v2-level-table-card .deck-table th,.v2-level-table-card .deck-table td{padding:9px 10px;font-size:.76rem;text-align:center;}
 .v2-level-table-card .deck-table th:nth-child(2),.v2-level-table-card .deck-table td:nth-child(2){text-align:right;}
 .v2-level-row-num{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;font-size:.68rem;font-weight:900;color:var(--navy);background:var(--gold);}
 .v2-level-row-num.blue{background:var(--blue);}
 .v2-level-row-num.green{background:var(--green);}
 .v2-level-row-num.coral{background:var(--coral);}
-.v2-level-table-card .deck-table tfoot td{font-weight:900;}
+.v2-level-table-card .deck-table tfoot td{
+  font-weight:900;color:#fff;background:rgba(255,255,255,.07);
+  border-top:1px solid rgba(255,255,255,.2);border-bottom:0;
+}
 body.theme-light .v2-cbar-label,body.theme-light .v2-cbar-value{color:#0a2d4a;}
 body.theme-light .v2-cbar-track{background:#eef2f6;border-color:#dde4ea;}
 body.theme-light .v2-level-row-num{color:#fff;}
+body.theme-light .v2-level-table-card .deck-table tfoot td{color:#0a2d4a;}
 
 /* ── Ports overview strip (bottom half of the merged summary page) — reuses
    .v2-port-col/.v2-port-col-head/deck-table (the SAME shell the detailed
