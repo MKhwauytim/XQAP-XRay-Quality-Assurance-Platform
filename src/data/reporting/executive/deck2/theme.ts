@@ -205,8 +205,11 @@ body.deck-fullscreen.deck-controls-visible .deck-slide-counter{
 .v2-term-band.coral .v2-term-band-chip{color:var(--coral);border-color:rgba(255,118,95,.4);background:rgba(255,118,95,.08);}
 .v2-term-band-rule{flex:1;height:1px;background:linear-gradient(to left,rgba(244,180,0,.45),transparent);}
 .v2-term-band.coral .v2-term-band-rule{background:linear-gradient(to left,rgba(255,118,95,.45),transparent);}
+/* Column count is set per band via the inline --cols custom property (see
+   termBand() in slides.ts) so a band with 3 or 2 terms still fills its row
+   instead of leaving a ragged gap where the 4th card used to be. */
 .v2-term-grid{
-  display:grid;grid-template-columns:repeat(4,1fr);grid-template-rows:1fr;gap:14px;
+  display:grid;grid-template-columns:repeat(var(--cols,4),1fr);grid-template-rows:1fr;gap:14px;
   align-content:stretch;flex:1;min-height:0;
 }
 .v2-term-card{
@@ -244,6 +247,108 @@ body.deck-fullscreen.deck-controls-visible .deck-slide-counter{
 .v2-term-card p{margin:0;font-size:0.74rem;line-height:1.55;color:rgba(255,255,255,.82);}
 body.theme-light .v2-term-band-chip{background:rgba(244,180,0,.12);}
 body.theme-light .v2-term-band.coral .v2-term-band-chip{background:rgba(255,118,95,.12);}
+
+/* ── Risk-level definition cards (one full-height column per level) ───────── */
+/* The four levels get their own glossary page rather than one lumped
+   "مستويات المخاطر" card, because each level's definition is ~2x the length
+   the .v2-term-card grid was sized for (measured: existing terms run 61-86
+   chars, a level definition runs ~125). Four columns across the 459px body
+   gives each definition a comfortable measure without shrinking type.
+   Tone is NOT decoration here: it is the SAME gold/blue/green/coral order as
+   STAGE_TONES in slides.ts, so a color means the same level on this page as
+   it does on the stage x port pages and the risk-stage tiles. */
+.v2-level-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;flex:1;min-height:0;}
+.v2-level-card{
+  display:flex;flex-direction:column;gap:11px;min-width:0;
+  border:1px solid rgba(255,255,255,.14);border-radius:16px;padding:20px 18px 18px;
+  background:linear-gradient(180deg,rgba(14,58,95,.62),rgba(7,39,67,.85));
+  position:relative;overflow:hidden;
+}
+/* Bottom keyline — the same device .v2-term-card uses, slightly heavier so the
+   level pages read as the "headline" glossary page of the two. */
+.v2-level-card::after{content:"";position:absolute;left:0;right:0;bottom:0;height:5px;background:var(--gold);}
+.v2-level-card.blue::after{background:var(--blue);}
+.v2-level-card.green::after{background:var(--green);}
+.v2-level-card.coral::after{background:var(--coral);}
+.v2-level-head{display:flex;align-items:center;justify-content:space-between;gap:10px;}
+.v2-level-icon{
+  display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;
+  width:50px;height:50px;border-radius:15px;border:1.6px solid currentColor;
+  color:var(--gold);background:rgba(244,180,0,.08);
+}
+.v2-level-card.blue .v2-level-icon{color:var(--blue);background:rgba(107,169,248,.1);}
+.v2-level-card.green .v2-level-icon{color:var(--green);background:rgba(139,195,74,.1);}
+.v2-level-card.coral .v2-level-icon{color:var(--coral);background:rgba(255,118,95,.1);}
+/* Ordinal marker, set large and low-contrast so it reads as a quiet index
+   rather than competing with the level title for attention. */
+.v2-level-num{
+  font-size:2.5rem;font-weight:900;line-height:1;color:var(--gold);opacity:.22;
+  flex-shrink:0;letter-spacing:-.03em;
+}
+.v2-level-card.blue .v2-level-num{color:var(--blue);}
+.v2-level-card.green .v2-level-num{color:var(--green);}
+.v2-level-card.coral .v2-level-num{color:var(--coral);}
+.v2-level-card h4{margin:0;font-size:1.02rem;font-weight:900;color:#fff;line-height:1.3;}
+.v2-level-rule{height:3px;width:44px;border-radius:2px;background:var(--gold);opacity:.8;flex-shrink:0;}
+.v2-level-card.blue .v2-level-rule{background:var(--blue);}
+.v2-level-card.green .v2-level-rule{background:var(--green);}
+.v2-level-card.coral .v2-level-rule{background:var(--coral);}
+/* flex:1 makes every definition occupy the same vertical space regardless of
+   how many lines it wraps to, which is what puts all four وزن السحب blocks on
+   one baseline. Without it each block floats directly under its own paragraph
+   and the four land at different heights. */
+.v2-level-card p{margin:0;flex:1;font-size:0.79rem;line-height:1.72;color:rgba(255,255,255,.84);}
+/* Live per-level share of this month's population. Centred in the slack between
+   the definition and the footer — the auto block margin is what claims that
+   space, so it grows and shrinks with the definition's line count instead of
+   needing a fixed height. Real data on a definitional page, so it carries its
+   period label and its base underneath the figure. */
+.v2-level-share{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+  padding:14px 8px;border-radius:12px;text-align:center;
+  background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);
+}
+.v2-level-share > span{
+  font-size:0.6rem;font-weight:700;letter-spacing:.04em;color:var(--slate);text-align:center;
+}
+.v2-level-share b{
+  font-size:2rem;font-weight:900;line-height:1.1;color:var(--gold);
+  font-variant-numeric:tabular-nums;
+}
+.v2-level-card.blue .v2-level-share b{color:var(--blue);}
+.v2-level-card.green .v2-level-share b{color:var(--green);}
+.v2-level-card.coral .v2-level-share b{color:var(--coral);}
+.v2-level-share small{
+  display:block;font-size:0.56rem;color:var(--muted);text-align:center;line-height:1.45;
+}
+.v2-level-share-sample{margin-top:3px;opacity:.85;}
+.v2-level-share-empty{font-size:1.4rem;font-weight:900;}
+body.theme-light .v2-level-share{background:rgba(10,45,74,.04);border-color:rgba(10,45,74,.12);}
+body.theme-light .v2-level-share small{color:#607386;}
+body.theme-light .v2-level-share > span{color:#607386;}
+
+/* "ما يقيسه" footer — pushed to the card's bottom edge by the auto margin so
+   all four align on one baseline regardless of how many lines each definition
+   wraps to. This footer is what carries the "four different goals, not four
+   severity tiers" point structurally, so it must not be dropped. */
+.v2-level-goal{
+  margin-top:auto;padding-top:11px;border-top:1px solid rgba(255,255,255,.12);
+  display:flex;flex-direction:column;gap:3px;
+}
+.v2-level-goal span{
+  font-size:0.62rem;font-weight:800;letter-spacing:.06em;color:var(--gold);opacity:.85;
+}
+.v2-level-card.blue .v2-level-goal span{color:var(--blue);}
+.v2-level-card.green .v2-level-goal span{color:var(--green);}
+.v2-level-card.coral .v2-level-goal span{color:var(--coral);}
+.v2-level-goal b{font-size:0.72rem;font-weight:700;line-height:1.5;color:rgba(255,255,255,.9);}
+body.theme-light .v2-level-goal{border-top-color:rgba(10,45,74,.14);}
+body.theme-light .v2-level-goal b{color:#0a2d4a;}
+body.theme-light .v2-level-card{
+  background:linear-gradient(180deg,#f7fafd,#eef3f9);border-color:#dde4ea;
+}
+body.theme-light .v2-level-card h4{color:#0a2d4a;}
+body.theme-light .v2-level-card p{color:#33475b;}
 
 /* ── Section separator ────────────────────────────────────────────────────── */
 /* Decorative glow behind the separator content — reuses the cover page's
@@ -413,6 +518,25 @@ body.theme-light .v2-stage-port-card .deck-table tfoot td{color:#0a2d4a;}
   width:auto;overflow:visible;text-overflow:clip;
 }
 .v2-port-col .deck-table th:not(:first-child),.v2-port-col .deck-table td:not(:first-child){width:1%;}
+/* Filler row (see slides.ts's fillerRow()): pure empty space with no border/
+   zebra/padding, sized by DECK_TABLE_FILL_SCRIPT (deck2/index.ts) after real
+   layout — never assign it a fixed height here. Selectors mirror every
+   tbody-td padding rule above so this always wins on specificity, not just
+   !important-vs-!important source order. */
+.v2-port-col .deck-table tbody tr.v2-fill-row,
+.v2-port-col.compact .deck-table tbody tr.v2-fill-row,
+.v2-port-col.sample-mode .deck-table tbody tr.v2-fill-row,
+.v2-port-col.sample-mode.compact .deck-table tbody tr.v2-fill-row,
+.v2-stage-port-card .deck-table tbody tr.v2-fill-row{
+  background:transparent!important;
+}
+.v2-port-col .deck-table tbody tr.v2-fill-row td,
+.v2-port-col.compact .deck-table tbody tr.v2-fill-row td,
+.v2-port-col.sample-mode .deck-table tbody tr.v2-fill-row td,
+.v2-port-col.sample-mode.compact .deck-table tbody tr.v2-fill-row td,
+.v2-stage-port-card .deck-table tbody tr.v2-fill-row td{
+  padding:0!important;border-bottom:0!important;
+}
 /* Stacked العيّنة cell: sample (big) over "من {population}" (small). Tuned
    (v39.16) against real font-metric ink measurements (canvas measureText
    actualBoundingBoxAscent/Descent), not just layout-box gaps — a layout gap
@@ -480,13 +604,18 @@ body.theme-light .v2-stage-port-card .deck-table tfoot td{color:#0a2d4a;}
   .slide.v2 .slide-inner{padding:24px 16px 28px;}
   .slide.v2.title-slide.v2-cover .slide-inner{padding:100px 20px 36px;}
   .slide.v2 .slide-body{overflow:visible;}
-  .v2-term-grid,.v2-port-split,.v2-cover-meta,.v2-stage-port-grid{grid-template-columns:1fr;grid-template-rows:auto;height:auto;}
+  .v2-term-grid,.v2-port-split,.v2-cover-meta,.v2-stage-port-grid,.v2-level-grid{grid-template-columns:1fr;grid-template-rows:auto;height:auto;}
   .v2-port-col{overflow-x:auto;}
   .v2-port-col .deck-table{min-width:0;table-layout:fixed;}
   .v2-port-col .deck-table th:first-child,.v2-port-col .deck-table td:first-child{width:34%;overflow-wrap:anywhere;}
   .v2-port-col .deck-table th:not(:first-child),.v2-port-col .deck-table td:not(:first-child){width:auto;}
   .v2-stage-port-card .deck-table{table-layout:fixed;}
   .v2-stage-port-card .deck-table th,.v2-stage-port-card .deck-table td{overflow-wrap:anywhere;}
+  /* Cards are height:auto here, so there is no leftover space to absorb —
+     the filler's measured inline height (set for the fixed-height 16:9
+     layout) would become pure dead space. !important because it has to beat
+     an inline style. */
+  tr.v2-fill-row td{height:0!important;}
 }
 
 /* ── Style-variant switcher (dev-preview only, never in production output) ── */
@@ -583,18 +712,20 @@ body.theme-light .v2-variant-switcher button{background:rgba(10,45,74,.08);color
 /* ── Type scale (fixed rem — print-safe) + gold hairline token ──────────────── */
 .slide.v2{--fs-hero:4.4rem;--fs-display:1.7rem;--fs-num-hero:5rem;--gold-hair:rgba(244,180,0,.5);}
 
-/* ── Shared hex-texture card background (the ".v2-num-tile" motif, reused) ──
-   One hand-copied hero-patterns "hexagons" motif baked at <=.05 alpha, defined
-   ONCE here and referenced by every card that wants the same quiet texture —
-   layer it as background-image's FIRST entry, with the card's own color/
-   gradient as the second, e.g.:
-     background-image:var(--v2-hex-tex), linear-gradient(...);
-     background-repeat:repeat, no-repeat;
-   and mirror with --v2-hex-tex-light under body.theme-light. Adding the
-   texture to a new card is then a 2-line addition, not a copy-pasted data URI. */
+/* ── Card background texture hook (hexagon motif REMOVED, owner 2026-07-25) ──
+   These two custom properties used to carry a repeating hexagon SVG that every
+   card layered as its first background-image. The hexagon is gone from the
+   design, so both resolve to none.
+   They are kept as properties rather than deleted because ~13 components
+   reference them (.v2-num-tile, .v2-term-card, .v2-toc-card, .v2-risk-tile,
+   .v2-src-card, …) as two background-image layers, the texture var first and
+   their own gradient second. Setting them to none here removes the texture
+   from all of them in one place and leaves those declarations valid — a none
+   layer simply paints nothing. Do not reintroduce a pattern here without
+   asking; it would reappear deck-wide. */
 .slide.v2{
-  --v2-hex-tex:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='49' viewBox='0 0 28 49'%3E%3Cg fill='%23ffffff' fill-opacity='0.045'%3E%3Cpath d='M13.99 9.25l13 7.5v15l-13 7.5L1 31.75v-15l12.99-7.5zM3 17.9v12.7l10.99 6.34 11-6.35V17.9l-11-6.34L3 17.9zM0 15l12.98-7.5V0h-2v6.35L0 12.69v2.3zm0 18.5L12.98 41v8h-2v-6.85L0 35.81v-2.3zM15 0v7.5L27.99 15H28v-2.31h-.01L17 6.35V0h-2zm0 49v-8l12.99-7.5H28v2.31h-.01L17 42.15V49h-2z'/%3E%3C/g%3E%3C/svg%3E");
-  --v2-hex-tex-light:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='49' viewBox='0 0 28 49'%3E%3Cg fill='%230a2d4a' fill-opacity='0.04'%3E%3Cpath d='M13.99 9.25l13 7.5v15l-13 7.5L1 31.75v-15l12.99-7.5zM3 17.9v12.7l10.99 6.34 11-6.35V17.9l-11-6.34L3 17.9zM0 15l12.98-7.5V0h-2v6.35L0 12.69v2.3zm0 18.5L12.98 41v8h-2v-6.85L0 35.81v-2.3zM15 0v7.5L27.99 15H28v-2.31h-.01L17 6.35V0h-2zm0 49v-8l12.99-7.5H28v2.31h-.01L17 42.15V49h-2z'/%3E%3C/g%3E%3C/svg%3E");
+  --v2-hex-tex:none;
+  --v2-hex-tex-light:none;
 }
 
 /* ── Entrance stagger (on-screen only; never in print or reduced-motion) ────── */
@@ -758,39 +889,53 @@ body.theme-light .v2-bar-cell.warn{--bar:rgba(244,180,0,.34);}
 }
 .v2-sep-slide.cyan .v2-sep-bg{background:radial-gradient(ellipse 55% 55% at 22% 32%,rgba(50,197,210,.14),transparent 62%),radial-gradient(ellipse 55% 50% at 85% 82%,rgba(139,195,74,.09),transparent 62%);}
 .v2-sep-slide .v2-cover-band{z-index:0;}
+/* Pure title card: number, name, تعريف. Nothing else (owner, 2026-07-25).
+   Centred single column with the section numeral behind the lockup as an
+   oversized outlined watermark, so the section NAME is what the eye lands on
+   and the number reads as ornament rather than as a competing figure. The old
+   3-column grid (numeral | text | stat card) is gone with the stat card. */
 .v2-sep{
-  position:relative;z-index:1;flex:1;display:grid;
-  grid-template-columns:auto 1fr auto;align-items:center;gap:30px;
+  position:relative;z-index:1;flex:1;
+  display:flex;align-items:center;justify-content:center;text-align:center;
 }
-.v2-sep-numeral{
-  font-size:12rem;font-weight:900;line-height:.8;letter-spacing:-.04em;
-  color:transparent;-webkit-text-stroke:2px rgba(244,180,0,.5);
-  font-variant-numeric:tabular-nums;user-select:none;
+.v2-sep-watermark{
+  position:absolute;top:50%;left:50%;transform:translate(-50%,-52%);
+  font-size:23rem;font-weight:900;line-height:.78;letter-spacing:-.05em;
+  color:transparent;-webkit-text-stroke:2px rgba(244,180,0,.16);
+  font-variant-numeric:tabular-nums;user-select:none;pointer-events:none;z-index:0;
 }
-.v2-sep-slide.cyan .v2-sep-numeral{-webkit-text-stroke-color:rgba(50,197,210,.55);}
-.v2-sep-main{min-width:0;max-width:560px;}
-.v2-sep-eyebrow{display:inline-flex;align-items:center;gap:9px;color:var(--gold);font-weight:800;font-size:0.78rem;letter-spacing:.14em;}
+.v2-sep-slide.cyan .v2-sep-watermark{-webkit-text-stroke-color:rgba(50,197,210,.18);}
+.v2-sep-lockup{
+  position:relative;z-index:1;min-width:0;max-width:660px;
+  display:flex;flex-direction:column;align-items:center;
+}
+.v2-sep-badge{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:74px;height:74px;border-radius:50%;color:var(--gold);
+  border:1.6px solid rgba(244,180,0,.42);background:rgba(244,180,0,.09);
+  box-shadow:0 0 0 10px rgba(244,180,0,.045),0 14px 40px rgba(0,0,0,.3);
+  margin-bottom:20px;
+}
+.v2-sep-slide.cyan .v2-sep-badge{
+  color:var(--cyan);border-color:rgba(50,197,210,.42);background:rgba(50,197,210,.09);
+  box-shadow:0 0 0 10px rgba(50,197,210,.05),0 14px 40px rgba(0,0,0,.3);
+}
+.v2-sep-eyebrow{
+  color:var(--gold);font-weight:800;font-size:0.8rem;letter-spacing:.22em;
+}
 .v2-sep-slide.cyan .v2-sep-eyebrow{color:var(--cyan);}
-.v2-sep-eyebrow-icon{display:inline-flex;}
-.v2-sep h2{font-size:2.7rem;color:#fff;margin:12px 0 0;font-weight:900;line-height:1.08;}
-.v2-sep-rule{height:3px;width:74px;background:var(--gold);border-radius:2px;margin:14px 0;}
-.v2-sep-slide.cyan .v2-sep-rule{background:var(--cyan);}
-.v2-sep p{color:var(--muted);font-size:0.92rem;line-height:1.7;margin:0;}
-.v2-sep-takeaway{display:flex;align-items:center;gap:10px;margin-top:16px;padding:11px 16px;border-inline-start:3px solid var(--gold);border-radius:0 10px 10px 0;background:rgba(255,255,255,.03);font-size:0.86rem;font-weight:700;color:rgba(255,255,255,.9);}
-.v2-sep-slide.cyan .v2-sep-takeaway{border-inline-start-color:var(--cyan);}
-.v2-sep-takeaway-icon{display:inline-flex;color:var(--gold);flex-shrink:0;}
-.v2-sep-slide.cyan .v2-sep-takeaway-icon{color:var(--cyan);}
-.v2-sep-side{display:flex;flex-direction:column;align-items:stretch;gap:14px;width:250px;flex-shrink:0;}
-.v2-sep-stat{
-  display:flex;flex-direction:column;gap:3px;padding:16px 18px;text-align:center;
-  border:1px solid rgba(244,180,0,.3);border-radius:16px;background:linear-gradient(160deg,rgba(244,180,0,.12),rgba(244,180,0,.02));
+.v2-sep h2{
+  font-size:3.4rem;color:#fff;margin:10px 0 0;font-weight:900;line-height:1.12;
+  text-shadow:0 10px 40px rgba(0,0,0,.35);
 }
-.v2-sep-slide.cyan .v2-sep-stat{border-color:rgba(50,197,210,.3);background:linear-gradient(160deg,rgba(50,197,210,.12),rgba(50,197,210,.02));}
-.v2-sep-stat-value{font-size:2.6rem;font-weight:900;color:var(--gold);line-height:1;font-variant-numeric:tabular-nums;}
-.v2-sep-slide.cyan .v2-sep-stat-value{color:var(--cyan);}
-.v2-sep-stat-label{font-size:0.72rem;font-weight:700;color:var(--slate);line-height:1.35;}
-.v2-sep-extra{border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:10px;background:rgba(2,20,37,.4);}
-.v2-sep-extra svg{display:block;width:100%;height:auto;}
+/* Short centred rule, tapering to transparent at both ends so it reads as a
+   divider rather than an underline. */
+.v2-sep-rule{
+  height:3px;width:96px;border-radius:2px;margin:20px 0;
+  background:linear-gradient(90deg,transparent,var(--gold),transparent);
+}
+.v2-sep-slide.cyan .v2-sep-rule{background:linear-gradient(90deg,transparent,var(--cyan),transparent);}
+.v2-sep p{color:var(--muted);font-size:0.96rem;line-height:1.85;margin:0;max-width:620px;}
 
 /* ── Risk-stages slide v3 — proportion bar + tiles with coverage gauges ─────── */
 .v2-risk-layout{display:flex;flex-direction:column;gap:16px;height:100%;justify-content:center;}
@@ -927,7 +1072,7 @@ body.theme-light .v2-risk-tile-foot{background:rgba(10,45,74,.035);border-color:
 /* ── Light-theme parity for the v3 components ───────────────────────────────── */
 body.theme-light .slide.v2-cover{background:linear-gradient(150deg,#ffffff,#eef3f8 60%,#e6edf4);}
 body.theme-light .v2-cover-title{color:#0a2d4a;}
-body.theme-light .v2-cover-lockup-label,body.theme-light .v2-num-hero-label,body.theme-light .v2-num-tile-sub,body.theme-light .v2-toc-figure-label,body.theme-light .v2-sep-stat-label{color:#607386;}
+body.theme-light .v2-cover-lockup-label,body.theme-light .v2-num-hero-label,body.theme-light .v2-num-tile-sub,body.theme-light .v2-toc-figure-label{color:#607386;}
 body.theme-light .v2-toc-card{background:#ffffff;border-color:#dde4ea;box-shadow:0 6px 16px rgba(10,45,74,.06);}
 body.theme-light .v2-toc-main h4{color:#0a2d4a;}
 body.theme-light .v2-toc-main p{color:#3a4a58;}
@@ -942,9 +1087,9 @@ body.theme-light .v2-sep-slide.gold{background:linear-gradient(150deg,#ffffff,#f
 body.theme-light .v2-sep-slide.cyan{background:linear-gradient(150deg,#ffffff,#eef7f9 60%,#e4f1f4);}
 body.theme-light .v2-sep h2{color:#0a2d4a;}
 body.theme-light .v2-sep p{color:#607386;}
-body.theme-light .v2-sep-takeaway{background:rgba(10,45,74,.04);color:#0a2d4a;}
-body.theme-light .v2-sep-numeral{-webkit-text-stroke-color:rgba(244,180,0,.6);}
-body.theme-light .v2-sep-slide.cyan .v2-sep-numeral{-webkit-text-stroke-color:rgba(50,197,210,.6);}
+body.theme-light .v2-sep-badge{box-shadow:none;}
+body.theme-light .v2-sep-watermark{-webkit-text-stroke-color:rgba(244,180,0,.12);}
+body.theme-light .v2-sep-slide.cyan .v2-sep-watermark{-webkit-text-stroke-color:rgba(50,197,210,.13);}
 body.theme-light .v2-prop-bar{border-color:#dde4ea;}
 body.theme-light .v2-prop-key i{outline:1px solid rgba(10,45,74,.08);}
 body.theme-light .v2-port-ranked{background:#ffffff;border-color:#dde4ea;box-shadow:0 6px 16px rgba(10,45,74,.05);}
@@ -952,12 +1097,12 @@ body.theme-light .v2-port-ranked-head{color:#0a2d4a;}
 body.theme-light .v2-prov-block{background:#f6f9fc;border-color:#dde4ea;}
 body.theme-light .v2-prov-file{color:#0a2d4a;}
 body.theme-light .v2-closing-side{border-inline-start-color:#dde4ea;}
-body.theme-light .v2-num-hero-value,body.theme-light .v2-cover-lockup-period,body.theme-light .v2-toc-figure,body.theme-light .v2-sep-stat-value,body.theme-light .v2-closing-period{text-shadow:none;}
+body.theme-light .v2-num-hero-value,body.theme-light .v2-cover-lockup-period,body.theme-light .v2-toc-figure,body.theme-light .v2-closing-period{text-shadow:none;}
 
 /* ── Print: keep every new colored element ink-faithful, avoid mid-slide breaks ── */
 @media print{
-  .v2-bar-cell,.v2-prop-seg,.v2-num-tile,.v2-sep-stat,.v2-num-hero,.v2-toc-num,.v2-sep-numeral{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
-  .v2-toc-card,.v2-num-tile,.v2-term-card,.v2-term-band,.v2-stage-card,.v2-risk-tile,.v2-port-col,.v2-prov-item{break-inside:avoid;}
+  .v2-bar-cell,.v2-prop-seg,.v2-num-tile,.v2-num-hero,.v2-toc-num,.v2-sep-watermark{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  .v2-toc-card,.v2-num-tile,.v2-term-card,.v2-term-band,.v2-level-card,.v2-stage-card,.v2-risk-tile,.v2-port-col,.v2-prov-item{break-inside:avoid;}
   /* The compact .source-revisions footer (sourceRevisions.ts, shared across
      every report edition) is pure duplication here — closingSlide() already
      re-presents the same revisions in a designed provenance block as the
@@ -1064,13 +1209,12 @@ body.theme-light .v2-risk-tile{background-image:var(--v2-hex-tex-light),linear-g
 body.theme-light .v2-src-card{background-image:var(--v2-hex-tex-light),none;background-repeat:repeat,no-repeat;}
 
 @media screen and (max-width:820px){
-  .v2-cover-grid,.v2-closing,.v2-sep{grid-template-columns:1fr;}
+  .v2-cover-grid,.v2-closing{grid-template-columns:1fr;}
   .v2-summary-top{grid-template-columns:1fr;}
   .v2-summary-tilegroups{flex-direction:column;}
   .v2-port-ovr{grid-template-columns:1fr;}
   .v2-tile-group.raw .v2-num-tiles{grid-template-columns:1fr 1fr;}
-  .v2-sep-numeral{font-size:6rem;}
-  .v2-sep-side{width:auto;}
+  .v2-sep-watermark{font-size:11rem;}
   .v2-prov-body{flex-direction:column;align-items:flex-start;}
 }
 `;

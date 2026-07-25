@@ -44,21 +44,28 @@ If an edit touches multiple files, add one `**File:**` block per file under the 
 ## Commands
 
 ```bash
-npm run dev        # Vite dev server
-npm run build      # tsc -b && vite build → single self-contained dist/index.html
-npm run lint       # ESLint
-npm run typecheck  # strict TypeScript check
-npm run check:complexity # complexity/large-function regression budget
-npm run preview    # Preview the built file
-npm run test:run   # Vitest, 711 tests / 109 files as of v56.2
-npm run test       # Vitest watch mode
+npm run dev             # Vite dev server
+npm run build           # tsc -b && vite build → single self-contained dist/index.html
+npm run lint            # ESLint over the whole repo (lint:ci scopes to src/, --max-warnings 0, used in CI)
+npm run typecheck       # strict TypeScript check
+npm run check:complexity     # complexity/large-function regression budget (CI gate)
+npm run check:hex-literals   # regression guard against raw hex color literals (B4)
+npm run check:release        # package.json version ↔ latest docs/edit logs/ entry agree
+npm run check:vendor         # vendored SheetJS tarball SHA-256 matches vendor/README.md
+npm run check:bundle-size    # dist/index.html raw/gzip release budget
+npm run count-lines -- --quiet  # whole-repo line count (run before/after every edit, see below)
+npm run preview         # Preview the built file
+npm run test:run        # Vitest, 945 tests / 141 files as of v59.24
+npm run test            # Vitest watch mode
 npx vitest run src/data/sampling/sampleAlgorithm.test.ts  # run a single test file
 ```
+
+Full pre-release gate sequence (version bump, docs sync, data-safety checks): `docs/product/RELEASE_CHECKLIST.md`.
 
 ## Build & dependency gotchas
 
 - `vite-plugin-singlefile` inlines everything (`assetsInlineLimit` maxed, `cssCodeSplit: false`): v59.24 produces one portable `dist/index.html` (~3.18 MB, ~1.17 MB gzip). The ChangeLog virtual module aggregates `docs/edit logs/*.md` and is truncated by `src/build/editLogTruncatePlugin.ts`. `npm run check:bundle-size` is the release budget.
-- Current whole-product revision and roadmap: `docs/audit/FULL_REVISION_2026-07-17.md`.
+- Historical full-product revision snapshot (v56.2 fixes): `docs/audit/FULL_REVISION_2026-07-17.md`. The active forward-looking item is `docs/architecture/LARGE_POPULATION_PERFORMANCE_PROPOSAL_2026-07-22.md` — proposed, pending owner approval, for populations above ~200k rows/month (paged repository reads, port-partitioned files, bounded LRU cache). Its Phase A→B→C→D sequence gates any finding marked **proposal-covered** in `docs/audit/APP_DATA_MANAGEMENT_AUDIT_2026-07-22.md`; don't implement those independently of the approved phase order.
 - `dist/` is intentionally just the single self-contained `index.html` — no other files. The `public/` folder is empty on purpose; anything dropped in it gets copied into `dist/` unchanged by Vite's default handling, which would break that guarantee. The desktop-shortcut "launch as app window" tooling (`create-desktop-shortcut.ps1` / `.bat` / `app-icon.ico`) that used to live there was removed 2026-07-20 — the app is distributed as a plain static file now, opened directly or served statically. `scripts/generate-app-icon.ps1` (dev-only, not shipped) still exists but is currently unused now that `app-icon.ico` is gone.
 - The `xlsx` dependency is **vendored** at `vendor/xlsx-0.20.3.tgz` (`package.json` points at `file:vendor/xlsx-0.20.3.tgz`) — originally sourced from the SheetJS CDN tarball (`https://cdn.sheetjs.com/xlsx-0.20.3/...`), not the npm registry. Vendoring means `npm ci` no longer needs network access to that CDN (required for CI, see `.github/workflows/ci.yml`). Don't "upgrade" it to the stale npm-registry `xlsx` package; see `vendor/README.md` for the upgrade procedure.
 - The workspace features require the **File System Access API** (`showDirectoryPicker`), so the app only fully works in Chromium browsers (Chrome/Edge). Other browsers get the `unsupported_browser` state.
@@ -109,6 +116,7 @@ Month folder names follow `{month}-{MonthName-en}-{year}` (e.g. `5-May-2026`). L
    - Safe write layer: `safeWriteJson` / `safeReadJson` in `src/data/storage/safeWrite.ts`. Writes preserve the last valid `.bak`, stage and verify `.tmp`, then commit/re-verify. Transient `NotReadableError` is retried and never reinterpreted as a missing file; read-only handles fail with a typed error.
    - `JsonEnvelope<TData>` wraps every JSON file: `{ metadata: { schemaVersion, revision, contentHash, writtenAt }, data }`. Schema versioning via `wrap/unwrap/isEnvelope` in `src/data/storage/jsonEnvelope.ts`.
    - Web Locks API (with promise-chain fallback) prevents concurrent writes within a tab.
+   - `casLoop` (`src/data/storage/casLoop.ts`) is the cross-machine/cross-tab counterpart for single-file shared state (e.g. notifications, action log): each write embeds a fresh UUID token, verifies it on read-back, and retries with jittered backoff if a competing writer's revision won. Distinct from the event-log append pattern used by distribution.
    - `WorkspaceProvider.tsx` / `useWorkspace.ts` — React context for directory handle.
 
 ### Data-layer modules
@@ -120,14 +128,21 @@ Month folder names follow `{month}-{MonthName-en}-{year}` (e.g. `5-May-2026`). L
 | Distribution | `src/data/distribution/` | Immutable event envelopes, compatibility log projection, derived state, assignment/replacement |
 | Templates | `src/data/templates/` | Template schema CRUD + index + runtime evaluation |
 | Answers | `src/data/answers/` | Per-employee per-month answer files |
+| Sample mirrors | `src/data/samples/` | Per-employee `*.samples.json` mirror storage — distinct from `sampling/` (the draw algorithm itself) |
 | Reporting | `src/data/reporting/` | Self-contained Arabic HTML report builders (sample + distribution + executive) |
+| Report Designer | `src/data/reportDesigner/` | Canvas geometry + design storage, plus a `query/` sub-engine (field catalog, filters, aggregations) powering the drag-and-drop designer |
+| Power BI export | `src/data/powerbiExport/` | CSV export of population/sample/distribution/answer/executive rows for external BI ingestion |
 | Backup | `src/data/backup/` | Copy key files to `.system/backups/`, archive status check |
 | Approvals | `src/data/approvals/` | Referral approval records |
 | Referrals | `src/data/referral/` | Referral request storage |
+| Notifications | `src/data/notifications/` | Workspace-wide broadcast notifications + per-recipient acknowledgement (`ew/notifications` tab); single CAS-protected file |
+| Audit | `src/data/audit/` | CAS-protected action-log event history + archival |
+| Data integrity | `src/data/integrity/` | `orphanScan.ts` — referential-integrity check (B3) across the population → sample → distribution → answers/approvals `xrayImageId` chain |
 | Feedback | `src/data/feedback/` | User feedback records |
 | Labels | `src/data/labels/` | UI label overrides (`labelsStore.ts`) persisted to `localStorage`; `useLabels()` re-renders on change |
 | Preferences | `src/data/preferences/` | Browse preset storage |
 | Global month | `src/data/month/` | App-wide month selection (provider + toolbar selector); sessionStorage key `xray_global_month_v1` |
+| Workspace | `src/data/workspace/` | Directory-handle context/provider, numbered-root path resolution (`workspacePaths.ts`), layout schema detection/migration (`workspaceSchema.ts`: current/legacy/mixed/empty), defaults, demo workspace |
 | Error logger | `src/data/storage/errorLogger.ts` | In-memory ring buffer (last 50 entries) for silent-catch observability; `logError`, `getRecentErrors`, `clearErrors` |
 | JsonEnvelope | `src/data/storage/jsonEnvelope.ts` | Schema versioning wrapper for all `safeWriteJson` writes; `wrap`, `isEnvelope`, `unwrap` factory functions |
 
@@ -176,6 +191,7 @@ Subfolders: `biData/`, `riskData/`, `processing/`, `reporting/`.
 - `rng.ts`: Mulberry32 PRNG (`createRng(seed)`), djb2 hash (`hashSeedString`), Fisher-Yates (`shuffleInPlace`), draw-without-replacement.
 - `apportionment.ts`: Hamilton's method (largest-remainder). Ties broken alphabetically.
 - `sampleAlgorithm.ts`: Groups rows by portName → Hamilton apportionment → second Hamilton per port for CertScan/NonCertScan split → draw → spillover redistribution for under-capacity ports.
+- `samplingAlgorithmVersion` (A2, in `sampleTypes.ts`) is stamped onto every draw alongside its RNG seed. Bump `SAMPLING_ALGORITHM_VERSION` only on a deliberate, approved change to `drawSample`'s semantics — it's how a historical draw is recognized as non-replayable under newer code.
 
 ### Distribution event log
 
@@ -191,3 +207,4 @@ All UI strings that may need customization are stored in `src/data/labels/labels
 - Plain CSS co-located per component (no CSS framework).
 - `import type` for type-only imports; ESLint is the formatting/static-analysis gate.
 - Tests use Vitest with `node` environment and a `createMemoryDirectory()` helper (`src/data/storage/memoryDirectory.ts`) that implements `DirectoryHandleLike` in memory — use it for any test that needs file I/O.
+- Sampling, distribution event folding, and report/export builders are deterministic by design — characterize current output (golden fixture/snapshot) before changing any of them, not after.

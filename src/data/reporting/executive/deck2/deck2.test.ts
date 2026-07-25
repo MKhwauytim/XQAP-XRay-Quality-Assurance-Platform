@@ -289,11 +289,16 @@ describe("visual overhaul — new slides & structures", () => {
     expect(html2).not.toContain('<div class="v2-prov-item"');
   });
 
-  it("emits the results funnel (SVG) on the section-2 separator", () => {
+  it("section separators are a pure title card — number, name, تعريف, nothing else (2026-07-25)", () => {
+    // The results funnel and the v2-sep-extra/v2-sep-stat side column were
+    // removed per the owner's request: a separator should carry no figures,
+    // only the section identity and its one-sentence definition.
     const html = buildExecutiveDeckV2(input([popRow(), popRow({ xrayImageId: "XR-2" })]));
-    expect(html).toContain("v2-sep-extra");
-    // funnel stage labels
-    expect(html).toContain("المدروسة");
+    expect(html).not.toContain("v2-sep-extra");
+    expect(html).not.toContain("v2-sep-stat");
+    expect(html).not.toContain("v2-sep-takeaway");
+    expect(html).toContain("v2-sep-lockup");
+    expect(html).toContain("v2-sep-watermark");
   });
 
   it("paints in-cell proportional data bars in the port tables (background only)", () => {
@@ -307,10 +312,14 @@ describe("visual overhaul — new slides & structures", () => {
     expect(html).toContain("--w:");
   });
 
-  it("renders three tone-coded TOC cards each with a key figure (مؤشرات الشهر's card is hidden along with its slide)", () => {
+  it("renders four tone-coded TOC cards each with a key figure (مؤشرات الشهر's card is hidden along with its slide)", () => {
     const html = buildExecutiveDeckV2(input([popRow()]));
     const cards = (html.match(/class="v2-toc-card /g) ?? []).length;
-    expect(cards).toBe(3);
+    // المعجم + القسم 1 + القسم 2 + القسم 3 (التحاليل المتقدمة, added 2026-07-25).
+    // The count tracks sections that actually render pages — a section whose
+    // builder list is empty contributes no card, which is what kept this at 3
+    // while section 3 was still scaffolding.
+    expect(cards).toBe(4);
     expect(html).toContain("v2-toc-figure");
   });
 });
