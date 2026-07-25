@@ -1026,6 +1026,33 @@ body.theme-light .v2-risk-tile-foot{background:rgba(10,45,74,.035);border-color:
   .v2-risk-tile-grid{grid-template-columns:1fr;grid-template-rows:repeat(4,auto);}
 }
 
+/* ── Compare-bars + exact-figures table — risk-stages slide, variant 2/4
+   (docs/superpowers/specs/2026-07-25-deck2-risk-stages-variant2-design.md).
+   Variant 0's tiles/proportion-bar above are untouched; this is an alternate
+   body for the same slide, selected only via the dev-preview variant
+   switcher — never shipped in production. */
+.v2-cbar{display:flex;flex-direction:column;gap:10px;}
+.v2-cbar-row{display:flex;align-items:center;gap:12px;}
+.v2-cbar-label{flex:0 0 auto;min-width:110px;font-size:.78rem;font-weight:700;color:#fff;text-align:right;}
+.v2-cbar-track{flex:1 1 auto;height:22px;border-radius:7px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);overflow:hidden;position:relative;}
+.v2-cbar-fill{position:absolute;inset-inline-end:0;top:0;height:100%;border-radius:7px;}
+.v2-cbar-fill.gold{background:var(--gold);}
+.v2-cbar-fill.blue{background:var(--blue);}
+.v2-cbar-fill.green{background:var(--green);}
+.v2-cbar-fill.coral{background:var(--coral);}
+.v2-cbar-value{flex:0 0 auto;min-width:40px;text-align:left;font-size:.82rem;font-weight:900;color:#fff;font-variant-numeric:tabular-nums;}
+.v2-level-table-card{margin-top:14px;}
+.v2-level-table-card .deck-table th,.v2-level-table-card .deck-table td{padding:9px 10px;font-size:.76rem;text-align:center;}
+.v2-level-table-card .deck-table th:nth-child(2),.v2-level-table-card .deck-table td:nth-child(2){text-align:right;}
+.v2-level-row-num{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;font-size:.68rem;font-weight:900;color:var(--navy);background:var(--gold);}
+.v2-level-row-num.blue{background:var(--blue);}
+.v2-level-row-num.green{background:var(--green);}
+.v2-level-row-num.coral{background:var(--coral);}
+.v2-level-table-card .deck-table tfoot td{font-weight:900;}
+body.theme-light .v2-cbar-label,body.theme-light .v2-cbar-value{color:#0a2d4a;}
+body.theme-light .v2-cbar-track{background:#eef2f6;border-color:#dde4ea;}
+body.theme-light .v2-level-row-num{color:#fff;}
+
 /* ── Ports overview strip (bottom half of the merged summary page) — reuses
    .v2-port-col/.v2-port-col-head/deck-table (the SAME shell the detailed
    port-population pages use later in the deck), just this grid wrapper is

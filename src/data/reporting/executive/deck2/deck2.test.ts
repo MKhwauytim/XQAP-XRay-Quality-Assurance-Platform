@@ -5,7 +5,8 @@ import type { ExecutiveReportInput } from "../../executiveReportTypes";
 import type { PreparedPopulationRow } from "../../../population/populationTypes";
 import { buildExecutiveDeckV2 } from "./index";
 import { buildReportModel } from "../model/reportModel";
-import { monthInNumbersSlide } from "./slides";
+import { monthInNumbersSlide, riskStagesSlide } from "./slides";
+import { fmtNum } from "../primitives";
 import { resetLabel, setLabel } from "../../../labels/labelsStore";
 
 function popRow(overrides: Partial<PreparedPopulationRow> = {}): PreparedPopulationRow {
@@ -395,5 +396,56 @@ describe("closing slide — data-source attribution + embedded Arabic font", () 
     expect(a).toContain('class="v2-cover-mesh"');
     // Same month key → byte-identical deck output (mesh + patterns are seeded).
     expect(a).toBe(b);
+  });
+});
+
+describe("riskStagesSlide — variant 2/4: compare-bars + exact-figures table (2026-07-25)", () => {
+  it("variant 0 (production / variantPreview=false) never renders the new compare-bars or table markup", () => {
+    const model = buildReportModel(
+      input([popRow({ stage: "المستوى الأول" }), popRow({ xrayImageId: "XR-2", stage: "المستوى الثالث" })]),
+    );
+    const html = riskStagesSlide(model, 5, 20, false);
+    expect(html).not.toContain("v2-cbar");
+    expect(html).not.toContain("v2-level-table-card");
+    // variant 0's own markup still renders untouched
+    expect(html).toContain("v2-risk-tile-grid");
+    expect(html).toContain("v2-prop-bar");
+  });
+
+  it("preview mode's slot 2 (data-variant-index=\"1\") renders the compare-bars + exact-figures table with the model's real per-level and total figures", () => {
+    const model = buildReportModel(
+      input([popRow({ stage: "المستوى الأول" }), popRow({ xrayImageId: "XR-2", stage: "المستوى الثالث" })]),
+    );
+    const html = riskStagesSlide(model, 5, 20, true);
+
+    const panels = [...html.matchAll(/<div class="v2-variant-panel(?: active)?" data-variant-index="\d"/g)];
+    expect(panels.length).toBe(4);
+
+    // Isolate panel 1's HTML (between its own opening tag and the next panel's).
+    const start = html.indexOf('data-variant-index="1"');
+    const end = html.indexOf('data-variant-index="2"');
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const panel1 = html.slice(start, end);
+
+    expect(panel1).toContain('<div class="v2-cbar">');
+    expect(panel1).toContain('<div class="v2-level-table-card">');
+    expect((panel1.match(/class="v2-cbar-row"/g) ?? []).length).toBe(model.population.byStage.length);
+
+    // Every stage's real population/sample figures must appear in the table.
+    model.population.byStage.forEach((stage) => {
+      expect(panel1).toContain(fmtNum(stage.population));
+      expect(panel1).toContain(fmtNum(stage.sampleSize));
+    });
+
+    // The totals row must use the exact same totals variant 0's bottom band renders.
+    expect(panel1).toContain(fmtNum(model.population.total));
+    expect(panel1).toContain(fmtNum(model.sample.total));
+
+    // Variant 0's own panel (index 0) must be untouched — still has the tiles, not the table.
+    const panel0Start = html.indexOf('data-variant-index="0"');
+    const panel0 = html.slice(panel0Start, start);
+    expect(panel0).toContain("v2-risk-tile-grid");
+    expect(panel0).not.toContain("v2-level-table-card");
   });
 });

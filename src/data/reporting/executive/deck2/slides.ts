@@ -677,6 +677,75 @@ function stageProportionBar(stages: StageProfile[]): string {
   </div>`;
 }
 
+/**
+ * Horizontal compare-bars: one row per risk level, RTL (label on the right,
+ * value on the left, bar fills right→left), tone-colored per STAGE_TONES,
+ * value = share of population (%). Variant 2/4 for this slide
+ * (docs/superpowers/specs/2026-07-25-deck2-risk-stages-variant2-design.md) —
+ * a quick side-by-side read of relative size; levelFiguresTable() right below
+ * carries the full numeric breakdown, so this view never needs its own axis
+ * or legend.
+ */
+function stageCompareBars(stages: StageProfile[], populationTotal: number): string {
+  const shares = stages.map((s) => (s.population / populationTotal) * 100);
+  const max = Math.max(0, ...shares);
+  const rows = stages
+    .map((s, i) => {
+      const tone = STAGE_TONES[i % STAGE_TONES.length];
+      const pct = shares[i];
+      const w = max > 0 ? Math.max(2, (pct / max) * 100) : 0;
+      return `<div class="v2-cbar-row">
+        <span class="v2-cbar-label">${esc(s.stageLabel)}</span>
+        <span class="v2-cbar-track"><i class="v2-cbar-fill ${tone}" style="width:${w.toFixed(1)}%"></i></span>
+        <span class="v2-cbar-value">${fmtPct(pct, 0)}</span>
+      </div>`;
+    })
+    .join("");
+  return `<div class="v2-cbar">${rows}</div>`;
+}
+
+/**
+ * Exact-figures table for the 4 risk levels — one row per level plus a
+ * totals row using the exact same population/sample/coverage totals variant
+ * 0's bottom band renders, so the two variants never disagree. Variant 2/4
+ * for this slide, see stageCompareBars() above.
+ */
+function levelFiguresTable(
+  stages: StageProfile[],
+  populationTotal: number,
+  totals: { population: number; sample: number; coverage: number },
+): string {
+  const rows = stages
+    .map((s, i) => {
+      const tone = STAGE_TONES[i % STAGE_TONES.length];
+      const share = (s.population / populationTotal) * 100;
+      const weight = LEVEL_DRAW_WEIGHTS[i] ?? null;
+      return `<tr>
+        <td><span class="v2-level-row-num ${tone}">${i + 1}</span></td>
+        <td>${esc(s.stageLabel)}</td>
+        <td>${fmtPct(weight, 0)}</td>
+        <td>${fmtPct(share, 0)}</td>
+        <td>${fmtNum(s.population)}</td>
+        <td>${fmtNum(s.sampleSize)}</td>
+        <td>${fmtPct(s.coverage)}</td>
+      </tr>`;
+    })
+    .join("");
+  return `<div class="v2-level-table-card">
+    <table class="deck-table">
+      <thead><tr>
+        <th></th><th>المستوى</th><th>وزن العينة</th><th>من المجتمع</th>
+        <th>صورة</th><th>العيّنة</th><th>تغطية العيّنة</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr>
+        <td></td><td>الإجمالي</td><td>—</td><td>100%</td>
+        <td>${fmtNum(totals.population)}</td><td>${fmtNum(totals.sample)}</td><td>${fmtPct(totals.coverage)}</td>
+      </tr></tfoot>
+    </table>
+  </div>`;
+}
+
 export function riskStagesSlide(model: ReportModel, num: number, total: number, variantPreview: boolean): string {
   const stages = model.population.byStage;
   const populationTotal = stages.reduce((sum, stage) => sum + stage.population, 0) || 1;
@@ -716,6 +785,14 @@ export function riskStagesSlide(model: ReportModel, num: number, total: number, 
     <div class="v2-risk-tile-grid">${tiles}</div>
     ${totals}
   </div>`;
+  const body2 = `<div class="v2-risk-layout">
+    ${stageCompareBars(stages, populationTotal)}
+    ${levelFiguresTable(stages, populationTotal, {
+      population: model.population.total,
+      sample: model.sample.total,
+      coverage: model.sample.coverage,
+    })}
+  </div>`;
   return v2Slide({
     id: "slide-risk-stages",
     title: "مجتمع الصور بناءً على المخاطر",
@@ -723,7 +800,7 @@ export function riskStagesSlide(model: ReportModel, num: number, total: number, 
     iconName: "gauge",
     headline: "مجتمع الصور بناءً على المخاطر",
     subhead: "توزيع المجتمع بعد المعالجة على مستويات المخاطر الأربعة، وحصة كل مستوى من العيّنة.",
-    bodyVariants: [body, body, body, body],
+    bodyVariants: [body, body2, body, body],
     variantPreview,
     num,
     total,
