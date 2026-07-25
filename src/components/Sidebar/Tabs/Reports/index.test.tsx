@@ -395,6 +395,39 @@ describe("Reports KPI dashboard — admin-only design-customizer gate (D1)", () 
 
     expect(screen.queryByRole("button", { name: /تخصيص تصميم العرض/ })).not.toBeInTheDocument();
   });
+
+  // Whole-branch review finding: handleOpenCustomizer had no handler-time canMutate
+  // re-check (unlike handleExport/handlePbiExport/generate's documented defense-in-depth
+  // pattern), so a control incorrectly left enabled could still open the customizer.
+  it("blocks opening the design customizer at the handler when canMutate is false, even though can=true leaves the button enabled", async () => {
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    (globalThis as { __testDir?: DirectoryHandleLike }).__testDir = root;
+    authSessionMock.state.role = "admin";
+    permissionsMock.state = { can: true, canMutate: false };
+
+    render(<ReportsTab />);
+
+    await act(async () => {
+      deferredFor("4-april-2026").resolve(mockPop(0));
+      await Promise.resolve();
+    });
+
+    fireEvent.click(screen.getByRole("tab", { name: "مؤشرات" }));
+
+    const customizerButton = await screen.findByRole("button", { name: /تخصيص تصميم العرض/ });
+    // can=true keeps the render-time gate open (the control is usable-looking)...
+    expect(customizerButton).not.toBeDisabled();
+
+    // ...but the handler's own canMutate() re-check must still reject the action.
+    fireEvent.click(customizerButton);
+
+    await waitFor(() => {
+      expect(screen.getByText("لا تملك صلاحية تصدير التقارير.")).toBeInTheDocument();
+    });
+
+    // The customizer dialog must never have opened.
+    expect(screen.queryByRole("dialog", { name: "تخصيص تصميم العرض التنفيذي" })).not.toBeInTheDocument();
+  });
 });
 
 // D1 — executive-deck export must load the admin's saved style choices BEFORE

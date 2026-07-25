@@ -341,6 +341,10 @@ function ReportsContent() {
 
   async function handleOpenCustomizer(): Promise<void> {
     if (!directoryHandle || !selectedMonth) return;
+    if (!canMutate("export-reports")) {
+      showToast("error", "لا تملك صلاحية تصدير التقارير.");
+      return;
+    }
     const execInput = await loadExecInput();
     if (!execInput) { showToast("error", "لم يتم العثور على بيانات المجتمع. يجب معالجة المجتمع أولاً."); return; }
     setCustomizerInput({ execInput, names: buildDisplayNameMap() });
@@ -1178,6 +1182,7 @@ function ReportsContent() {
         execInput={customizerInput.execInput}
         employeeDisplayNames={customizerInput.names}
         directoryHandle={directoryHandle}
+        canMutate={canMutate}
         onClose={() => setCustomizerOpen(false)}
       />
     ) : null}

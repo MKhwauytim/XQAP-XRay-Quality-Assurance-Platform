@@ -126,9 +126,10 @@ export function printToggle(): string {
  * inside the stack — see DECK_VARIANT_SCRIPT in index.ts for the lookup).
  */
 export function variantSwitcher(slideId: string): string {
+  const label = resolveVariantIndex(slideId) + 1;
   return `<div class="v2-variant-switcher" data-for="${esc(slideId)}" dir="ltr">
     <button type="button" class="v2-variant-prev" aria-label="النمط السابق">‹</button>
-    <span class="v2-variant-label">1 / 4</span>
+    <span class="v2-variant-label">${label} / 4</span>
     <button type="button" class="v2-variant-next" aria-label="النمط التالي">›</button>
   </div>`;
 }

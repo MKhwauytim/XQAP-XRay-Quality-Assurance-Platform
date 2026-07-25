@@ -493,4 +493,29 @@ describe("style choices — production selection + backward compatibility (2026-
     const html = buildExecutiveDeckV2(fixture, {}, { styleChoices: { "slide-risk-stages": 99 } });
     expect(html).toContain('<div class="v2-risk-tile-grid">'); // fell back to variant 0, not a crash or an out-of-bounds undefined render
   });
+
+  it("preview mode: the variant-switcher label matches the pre-selected panel (regression — the label used to be hardcoded '1 / 4' regardless of the saved choice)", () => {
+    const fixture = input([popRow(), popRow({ xrayImageId: "XR-2" })]);
+
+    // No saved choice → panel 0 is pre-selected → label reads "1 / 4".
+    const defaultHtml = buildExecutiveDeckV2(fixture, {}, { variantPreview: true });
+    const defaultSwitcherStart = defaultHtml.indexOf('data-for="slide-risk-stages"');
+    expect(defaultSwitcherStart).toBeGreaterThan(-1);
+    expect(defaultHtml.slice(defaultSwitcherStart, defaultSwitcherStart + 300)).toContain(
+      '<span class="v2-variant-label">1 / 4</span>',
+    );
+
+    // Saved choice selects slot 2 (0-based) → panel 2 is pre-selected → label must read "3 / 4", not "1 / 4".
+    const customHtml = buildExecutiveDeckV2(fixture, {}, {
+      variantPreview: true,
+      styleChoices: { "slide-risk-stages": 2 },
+    });
+    const customSwitcherStart = customHtml.indexOf('data-for="slide-risk-stages"');
+    expect(customSwitcherStart).toBeGreaterThan(-1);
+    expect(customHtml.slice(customSwitcherStart, customSwitcherStart + 300)).toContain(
+      '<span class="v2-variant-label">3 / 4</span>',
+    );
+    // Also confirm the matching panel stack was actually pre-selected (not just the label).
+    expect(customHtml).toContain('data-slide-id="slide-risk-stages" data-active-index="2"');
+  });
 });

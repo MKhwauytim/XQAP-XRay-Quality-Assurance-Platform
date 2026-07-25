@@ -10,6 +10,7 @@ type Props = {
   execInput: ExecutiveReportInput;
   employeeDisplayNames: Record<string, string>;
   directoryHandle: DirectoryHandleLike;
+  canMutate: (featureId: string) => boolean;
   onClose: () => void;
 };
 
@@ -24,7 +25,7 @@ type MessageEventLike = { data?: { type?: string; slideId?: string; variantIndex
  * click, matching "customize... and save it" as one deliberate action.
  * See docs/superpowers/specs/2026-07-25-admin-report-customization-design.md.
  */
-export default function DeckDesignCustomizer({ execInput, employeeDisplayNames, directoryHandle, onClose }: Props) {
+export default function DeckDesignCustomizer({ execInput, employeeDisplayNames, directoryHandle, canMutate, onClose }: Props) {
   const [loadedChoices, setLoadedChoices] = useState<Record<string, number> | null>(null);
   const [ready, setReady] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -63,6 +64,10 @@ export default function DeckDesignCustomizer({ execInput, employeeDisplayNames, 
   }, [ready, execInput, employeeDisplayNames, loadedChoices]);
 
   async function handleSave() {
+    if (!canMutate("export-reports")) {
+      setStatus({ kind: "error", text: "لا تملك صلاحية تصدير التقارير." });
+      return;
+    }
     const session = readSession();
     setSaving(true);
     setStatus(null);

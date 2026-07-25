@@ -226,6 +226,7 @@ Both files use `safeWriteJson` / `safeReadJson` and the `JsonEnvelope` schema-ve
 | `templates.index.json` | `6-templates/` | Template list and latest versions. |
 | `{templateId}.json` | `6-templates/` | Inspection template schema and fields. |
 | `template.selection.json` | `6-templates/` | Selected active inspection template. |
+| `deck2.style-choices.json` | `6-templates/` | Global (not per-month), admin-set per-slide design-variant choice (0-3) for the executive deck v2's presentation styling — which of each slide's 4 style variants renders in production. Shared, multi-admin file: same CAS contract (`revision` + `_writeToken`, verified on read-back) as `template.selection.json`. |
 | `admin-shared.browse-preset.json` | `5-system/user-presets/` | Shared/admin table column preferences. |
 | `{username}.browse-preset.json` | `5-system/user-presets/` | User-specific table column preferences. |
 | `backup.manifest.json` and copied JSON data files | `5-system/backups/{timestamp}/` | Manual/automatic restorable snapshots. Routine backups do not rebuild redundant XLSX exports; spreadsheet generation is an explicit compatibility option. |
