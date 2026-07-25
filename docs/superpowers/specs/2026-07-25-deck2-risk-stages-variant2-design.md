@@ -67,7 +67,7 @@ Body variant 1, top to bottom:
    in `slides.ts`, placed next to the existing `stageProportionBar()` (same file, same
    input shape) — a sibling, not a replacement.
 2. **Exact-figures table** — one `<table class="deck-table">` row per level:
-   `#` (numbered badge, same `pad(i+1)` convention as the tiles) · المستوى (name) · وزن
+   `#` (numbered badge, same `i + 1` convention as the tiles' `.v2-stage-num`) · المستوى (name) · وزن
    العينة (draw weight %, "—" when null, matching `levelCard`'s own null handling) · من
    المجتمع (share %) · صورة (population, `fmtNum`) · العيّنة (sample, `fmtNum`) · تغطية
    العيّنة (coverage %). Totals `<tfoot>` row: "الإجمالي" · "—" (weight has no aggregate
