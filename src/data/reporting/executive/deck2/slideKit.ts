@@ -216,13 +216,43 @@ export function getActiveStyleChoices(): Record<string, number> | null {
   return activeStyleChoices;
 }
 
-/** Clamps a saved/requested variant index to a valid 0-3 slot, defaulting to
- *  0 for anything missing, non-numeric, or out of range — an admin choice
- *  saved against a slide id that no longer exists, or a stale/corrupt file,
- *  must never throw or render `undefined`. */
+/**
+ * Strips a trailing `-<digits>` page-number suffix, e.g. `slide-port-population-3`
+ * → `slide-port-population`. Paginated builders use 3 different suffix
+ * conventions (always-suffixed from page 1; bare on page 0, suffixed from
+ * page 1) — this normalizes all of them to one stable "family" key so a
+ * saved style choice survives the deck's page count changing month to month
+ * (see docs/superpowers/specs/2026-07-25-deck2-design-systems-design.md §3).
+ * A no-op for non-paginated slide ids (no trailing page number to strip).
+ */
+function familyKeyOf(slideId: string): string {
+  return slideId.replace(/-\d+$/, "");
+}
+
+/** Clamps a valid-shape choice to a 0-3 slot; returns null for anything
+ *  missing, non-numeric, or out of range. */
+function clampChoice(choice: unknown): number | null {
+  return typeof choice === "number" && Number.isInteger(choice) && choice >= 0 && choice <= 3
+    ? choice
+    : null;
+}
+
+/**
+ * Resolves the variant index to render for a given slide id: exact id match
+ * first (so an already-saved per-page-id choice from before the family-key
+ * fix keeps working), then the slide's family key (a choice saved without a
+ * page-number suffix applies to every page count), then the deck-wide
+ * default key `"*"`, then 0. Never throws — a choice saved against a slide
+ * id that no longer exists, or a stale/corrupt file, silently falls through
+ * to the next tier instead.
+ */
 function resolveVariantIndex(slideId: string): number {
-  const choice = activeStyleChoices?.[slideId];
-  return typeof choice === "number" && Number.isInteger(choice) && choice >= 0 && choice <= 3 ? choice : 0;
+  const exact = clampChoice(activeStyleChoices?.[slideId]);
+  if (exact !== null) return exact;
+  const family = clampChoice(activeStyleChoices?.[familyKeyOf(slideId)]);
+  if (family !== null) return family;
+  const deckDefault = clampChoice(activeStyleChoices?.["*"]);
+  return deckDefault !== null ? deckDefault : 0;
 }
 
 /**

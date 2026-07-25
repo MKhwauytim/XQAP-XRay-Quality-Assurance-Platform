@@ -190,12 +190,20 @@ const DECK_VARIANT_SCRIPT = `(function(){
     var label = switcher.querySelector('.v2-variant-label');
     if (label) label.textContent = (index + 1) + ' / ' + total;
   }
+  // Mirrors slideKit.ts's familyKeyOf() — strips a trailing page-number
+  // suffix so a saved choice survives the deck's page count changing month
+  // to month (see docs/superpowers/specs/2026-07-25-deck2-design-systems-design.md
+  // §3). A no-op for non-paginated slide ids.
+  function familyKeyOf(slideId){
+    return slideId.replace(/-\\d+$/, '');
+  }
   function persist(slideId, index){
+    var key = familyKeyOf(slideId);
     // Dev-tool persistence (Vite middleware, harmless 404 in the real app).
     fetch('/__deck-style-choices', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ slideId: slideId, variantIndex: index })
+      body: JSON.stringify({ slideId: key, variantIndex: index })
     }).catch(function(){});
     // In-app admin customizer bridge: this script only ever runs inside a
     // variantPreview=true document, which is always embedded (the dev tool's
@@ -203,7 +211,7 @@ const DECK_VARIANT_SCRIPT = `(function(){
     // opened/downloaded report, which is never in variantPreview mode. A
     // parentless top-level window would just message itself here, which is
     // harmless (nothing listens).
-    window.parent.postMessage({ type: 'deck2-style-choice', slideId: slideId, variantIndex: index }, '*');
+    window.parent.postMessage({ type: 'deck2-style-choice', slideId: key, variantIndex: index }, '*');
   }
   switchers.forEach(function(switcher){
     var slideId = switcher.getAttribute('data-for');

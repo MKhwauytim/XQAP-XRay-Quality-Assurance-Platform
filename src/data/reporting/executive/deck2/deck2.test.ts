@@ -519,3 +519,46 @@ describe("style choices — production selection + backward compatibility (2026-
     expect(customHtml).toContain('data-slide-id="slide-risk-stages" data-active-index="2"');
   });
 });
+
+describe("variant-choice family-key resolution (2026-07-25, deck2-design-systems fix)", () => {
+  it("resolves a choice saved under a paginated slide's FAMILY key (no trailing page number) regardless of the exact page id being rendered", () => {
+    // slide-port-population-N is the always-suffixed convention (page+1, starting at 1).
+    const fixture = input([
+      popRow({ portName: "ميناء أ" }),
+      popRow({ xrayImageId: "XR-2", portName: "ميناء ب" }),
+    ]);
+    const html = buildExecutiveDeckV2(fixture, {}, {
+      variantPreview: true,
+      styleChoices: { "slide-port-population": 1 },
+    });
+    // The rendered page is "slide-port-population-1" (single page, 2 ports) — its
+    // family key "slide-port-population" matches the saved choice, so panel 1
+    // (not panel 0) should be the pre-selected active one for this slide.
+    const start = html.indexOf('data-slide-id="slide-port-population-1"');
+    expect(start).toBeGreaterThan(-1);
+    const stackOpenTag = html.slice(start - 60, start + 120);
+    expect(stackOpenTag).toContain('data-active-index="1"');
+  });
+
+  it("an exact per-page-id saved choice still wins over a family-key choice for that same page (backward compatibility)", () => {
+    const fixture = input([popRow(), popRow({ xrayImageId: "XR-2" })]);
+    const html = buildExecutiveDeckV2(fixture, {}, {
+      variantPreview: true,
+      styleChoices: { "slide-port-population": 1, "slide-port-population-1": 2 },
+    });
+    const start = html.indexOf('data-slide-id="slide-port-population-1"');
+    const stackOpenTag = html.slice(start - 60, start + 120);
+    expect(stackOpenTag).toContain('data-active-index="2"');
+  });
+
+  it("non-paginated slides are unaffected (family key equals the exact id, a no-op)", () => {
+    const fixture = input([popRow()]);
+    const html = buildExecutiveDeckV2(fixture, {}, {
+      variantPreview: true,
+      styleChoices: { "slide-cover": 2 },
+    });
+    const start = html.indexOf('data-slide-id="slide-cover"');
+    const stackOpenTag = html.slice(start - 60, start + 120);
+    expect(stackOpenTag).toContain('data-active-index="2"');
+  });
+});
