@@ -294,7 +294,7 @@ body.theme-light .v2-term-band.coral .v2-term-band-chip{background:rgba(255,118,
 .v2-level-card.green .v2-level-rule{background:var(--green);}
 .v2-level-card.coral .v2-level-rule{background:var(--coral);}
 /* flex:1 makes every definition occupy the same vertical space regardless of
-   how many lines it wraps to, which is what puts all four وزن السحب blocks on
+   how many lines it wraps to, which is what puts all four وزن العينة blocks on
    one baseline. Without it each block floats directly under its own paragraph
    and the four land at different heights. */
 .v2-level-card p{margin:0;flex:1;font-size:0.79rem;line-height:1.72;color:rgba(255,255,255,.84);}

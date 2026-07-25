@@ -465,7 +465,7 @@ function levelCard(lv: RiskLevel, i: number): string {
     <span class="v2-level-rule" aria-hidden="true"></span>
     <p>${esc(lv.def)}</p>
     <div class="v2-level-share">
-      <span>وزن السحب</span>
+      <span>وزن العينة</span>
       ${figure}
     </div>
     <div class="v2-level-goal">
@@ -615,13 +615,13 @@ export function sectionSeparatorSlide(opts: {
  * "مستوى منخفض/متوسط/مرتفع/حرج" — a severity ranking that does not exist (the
  * four levels are categorical detection scenarios with different goals, see
  * `RISK_LEVELS`'s doc comment; [[risk-levels-are-categorical]]). Replaced with
- * the same وزن السحب figure the glossary's level cards show
+ * the same وزن العينة figure the glossary's level cards show
  * (`LEVEL_DRAW_WEIGHTS`), so this page and the glossary agree instead of one
  * of them implying a ranking the other has already dropped.
  */
 function stageShortTag(i: number): string {
   const weight = LEVEL_DRAW_WEIGHTS[i];
-  return weight === undefined || weight === null ? `المستوى ${i + 1}` : `وزن السحب ${fmtPct(weight, 0)}`;
+  return weight === undefined || weight === null ? `المستوى ${i + 1}` : `وزن العينة ${fmtPct(weight, 0)}`;
 }
 
 /** How many ports each stage-×-port card shows individually before folding the
