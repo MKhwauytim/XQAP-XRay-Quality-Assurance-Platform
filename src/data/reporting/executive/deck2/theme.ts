@@ -1041,21 +1041,39 @@ body.theme-light .v2-risk-tile-foot{background:rgba(10,45,74,.035);border-color:
 .v2-cbar-fill.green{background:var(--green);}
 .v2-cbar-fill.coral{background:var(--coral);}
 .v2-cbar-value{flex:0 0 auto;min-width:40px;text-align:left;font-size:.82rem;font-weight:900;color:#fff;font-variant-numeric:tabular-nums;}
-.v2-level-table-card{margin-top:14px;flex:1 1 auto;min-height:0;display:flex;flex-direction:column;justify-content:center;}
-.v2-level-table-card .deck-table th,.v2-level-table-card .deck-table td{padding:9px 10px;font-size:.76rem;text-align:center;}
-.v2-level-table-card .deck-table th:nth-child(2),.v2-level-table-card .deck-table td:nth-child(2){text-align:right;}
+/* .v2-level-table-card is the legacy name \`levelFiguresTable\` (slides.ts)
+   still renders, kept byte-for-byte so slide-risk-stages's shipped variant-1
+   output never churns (see deck2.test.ts's "levelFiguresTable byte-identity
+   characterization" test). .v2-lg-table-card is the new shared name
+   \`ledgerTableCard\` (slideKit.ts) uses by default for every other
+   Ledger-system table (deck2-design-systems Task 1, 2026-07-25) — combined
+   selectors below so both names get IDENTICAL rules, per design spec §4
+   ("keep .v2-level-table-card as an alias of the new .v2-lg-table-card"). */
+.v2-level-table-card,.v2-lg-table-card{margin-top:14px;flex:1 1 auto;min-height:0;display:flex;flex-direction:column;justify-content:center;}
+.v2-level-table-card .deck-table th,.v2-level-table-card .deck-table td,
+.v2-lg-table-card .deck-table th,.v2-lg-table-card .deck-table td{padding:9px 10px;font-size:.76rem;text-align:center;}
+.v2-level-table-card .deck-table th:nth-child(2),.v2-level-table-card .deck-table td:nth-child(2),
+.v2-lg-table-card .deck-table th:nth-child(2),.v2-lg-table-card .deck-table td:nth-child(2){text-align:right;}
 .v2-level-row-num{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;font-size:.68rem;font-weight:900;color:var(--navy);background:var(--gold);}
 .v2-level-row-num.blue{background:var(--blue);}
 .v2-level-row-num.green{background:var(--green);}
 .v2-level-row-num.coral{background:var(--coral);}
-.v2-level-table-card .deck-table tfoot td{
+.v2-level-table-card .deck-table tfoot td,
+.v2-lg-table-card .deck-table tfoot td{
   font-weight:900;color:#fff;background:rgba(255,255,255,.07);
   border-top:1px solid rgba(255,255,255,.2);border-bottom:0;
 }
+/* New in the new class only — \`ledgerTableCard\`'s optional \`title\` slot
+   has no equivalent in the legacy .v2-level-table-card shape
+   (levelFiguresTable never passes a title), so it is not part of the alias
+   contract above. */
+.v2-lg-table-card-title{font-size:.8rem;font-weight:800;color:#fff;margin-bottom:8px;}
 body.theme-light .v2-cbar-label,body.theme-light .v2-cbar-value{color:#0a2d4a;}
 body.theme-light .v2-cbar-track{background:#eef2f6;border-color:#dde4ea;}
 body.theme-light .v2-level-row-num{color:#fff;}
-body.theme-light .v2-level-table-card .deck-table tfoot td{color:#0a2d4a;}
+body.theme-light .v2-level-table-card .deck-table tfoot td,
+body.theme-light .v2-lg-table-card .deck-table tfoot td{color:#0a2d4a;}
+body.theme-light .v2-lg-table-card-title{color:#0a2d4a;}
 
 /* ── Ports overview strip (bottom half of the merged summary page) — reuses
    .v2-port-col/.v2-port-col-head/deck-table (the SAME shell the detailed

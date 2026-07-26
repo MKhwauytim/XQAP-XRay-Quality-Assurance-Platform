@@ -32,7 +32,9 @@ import {
   collectPortStats,
   fillerRow,
   frac,
+  ledgerTableCard,
   maxOf,
+  microArc,
   pad,
   pctCell,
   planPortPages,
@@ -629,29 +631,6 @@ function stageShortTag(i: number): string {
  *  full table", same convention as portTable/qualityTable/accuracyTable). */
 export const STAGE_CARD_TOP_N = 5;
 
-/** Compact 180° coverage arc for a stage tile — a micro SVG dial that inherits
- *  the tile's tone via `currentColor`. Low→high reads left→right (a physical
- *  gauge), same convention as ui/charts.ts `gauge`. Decorative (the percentage
- *  is printed beside it as text), so aria-hidden and no interpolated data. */
-function microArc(pct: number): string {
-  const p = Math.max(0, Math.min(100, Number.isFinite(pct) ? pct : 0));
-  const W = 58;
-  const H = 34;
-  const cx = W / 2;
-  const cy = H - 4;
-  const rad = 23;
-  const sw = 5;
-  const at = (ang: number): [number, number] => [cx + rad * Math.cos(ang), cy + rad * Math.sin(ang)];
-  const [x0, y0] = at(Math.PI);
-  const [x1, y1] = at(Math.PI + (p / 100) * Math.PI);
-  const track = `M ${x0.toFixed(1)} ${y0.toFixed(1)} A ${rad} ${rad} 0 0 1 ${(cx + rad).toFixed(1)} ${cy.toFixed(1)}`;
-  const val = `M ${x0.toFixed(1)} ${y0.toFixed(1)} A ${rad} ${rad} 0 0 1 ${x1.toFixed(1)} ${y1.toFixed(1)}`;
-  return `<svg class="v2-micro-arc" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" aria-hidden="true">
-    <path d="${track}" fill="none" stroke="var(--line)" stroke-width="${sw}" stroke-linecap="round"/>
-    <path d="${val}" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round"/>
-  </svg>`;
-}
-
 /** Full-width stacked proportion bar: population share by risk stage, tone-coded,
  *  with the percentage printed inside each segment (dark ink, never the series
  *  color) and a direct-label legend below (the secondary encoding that keeps the
@@ -709,6 +688,17 @@ function stageCompareBars(stages: StageProfile[], populationTotal: number): stri
  * totals row using the exact same population/sample/coverage totals variant
  * 0's bottom band renders, so the two variants never disagree. Variant 2/4
  * for this slide, see stageCompareBars() above.
+ *
+ * Reimplemented on top of the shared `ledgerTableCard` (slideKit.ts,
+ * 2026-07-25, deck2-design-systems Task 1) instead of hand-rolling its own
+ * `<table>` markup — `deck2.test.ts`'s
+ * "levelFiguresTable byte-identity characterization" test pins this page's
+ * variant-1 output to prove the extraction changed nothing. Two deliberate
+ * non-defaults keep it that way: `cardClass: "v2-level-table-card"` (the
+ * legacy name, aliased to `.v2-lg-table-card` in theme.ts) and `rowCount: 0`
+ * (this card centers its fixed 4-row content via CSS rather than pinning a
+ * totals row, so it opts out of `ledgerTableCard`'s filler-row mechanism —
+ * see that function's doc comment).
  */
 function levelFiguresTable(
   stages: StageProfile[],
@@ -731,19 +721,20 @@ function levelFiguresTable(
       </tr>`;
     })
     .join("");
-  return `<div class="v2-level-table-card">
-    <table class="deck-table">
-      <thead><tr>
+  return ledgerTableCard({
+    cardClass: "v2-level-table-card",
+    theadCells: `
         <th></th><th>المستوى</th><th>وزن العينة</th><th>من المجتمع</th>
         <th>صورة</th><th>العيّنة</th><th>تغطية العيّنة</th>
-      </tr></thead>
-      <tbody>${rows}</tbody>
-      <tfoot><tr>
+      `,
+    bodyRowsHtml: rows,
+    totalsRowHtml: `<tr>
         <td></td><td>الإجمالي</td><td>—</td><td>100%</td>
         <td>${fmtNum(totals.population)}</td><td>${fmtNum(totals.sample)}</td><td>${fmtPct(totals.coverage)}</td>
-      </tr></tfoot>
-    </table>
-  </div>`;
+      </tr>`,
+    span: 7,
+    rowCount: 0,
+  });
 }
 
 export function riskStagesSlide(model: ReportModel, num: number, total: number, variantPreview: boolean): string {

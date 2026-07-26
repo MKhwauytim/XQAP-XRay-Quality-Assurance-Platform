@@ -105,6 +105,35 @@ export function badgeIcon(name: string, size: number): string {
 }
 
 /**
+ * Compact 180° coverage arc for a stage tile — a micro SVG dial that inherits
+ * its caller's tone via `currentColor`. Low→high reads left→right (a physical
+ * gauge), same convention as ui/charts.ts `gauge`. Decorative (the percentage
+ * is printed beside it as text), so aria-hidden and no interpolated data.
+ * Lifted here from `slides.ts` (2026-07-25, deck2-design-systems Task 1) so
+ * Briefing's lede gauge (design spec §2, slot 2) can reuse it too — same
+ * cross-file sharing convention this module already uses for `STAGE_TONES`/
+ * `badgeIcon`/`fmtPct`: defined once here, imported everywhere else.
+ */
+export function microArc(pct: number): string {
+  const p = Math.max(0, Math.min(100, Number.isFinite(pct) ? pct : 0));
+  const W = 58;
+  const H = 34;
+  const cx = W / 2;
+  const cy = H - 4;
+  const rad = 23;
+  const sw = 5;
+  const at = (ang: number): [number, number] => [cx + rad * Math.cos(ang), cy + rad * Math.sin(ang)];
+  const [x0, y0] = at(Math.PI);
+  const [x1, y1] = at(Math.PI + (p / 100) * Math.PI);
+  const track = `M ${x0.toFixed(1)} ${y0.toFixed(1)} A ${rad} ${rad} 0 0 1 ${(cx + rad).toFixed(1)} ${cy.toFixed(1)}`;
+  const val = `M ${x0.toFixed(1)} ${y0.toFixed(1)} A ${rad} ${rad} 0 0 1 ${x1.toFixed(1)} ${y1.toFixed(1)}`;
+  return `<svg class="v2-micro-arc" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" aria-hidden="true">
+    <path d="${track}" fill="none" stroke="var(--line)" stroke-width="${sw}" stroke-linecap="round"/>
+    <path d="${val}" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round"/>
+  </svg>`;
+}
+
+/**
  * Per-slide print-include switch, on-screen only. Pure CSS, no script:
  * unchecking it excludes the WHOLE slide from print/PDF output via the
  * `.slide:has(.slide-print-toggle input:not(:checked))` rule in theme.ts —
@@ -446,6 +475,66 @@ export function portTableCard(opts: {
       <span class="v2-port-col-icon">${badgeIcon(opts.headIcon, 26)}</span>
       <div><b>${esc(opts.title)}</b><span>${esc(opts.headSub)}</span></div>
     </div>
+    <table class="deck-table">
+      <thead><tr>${opts.theadCells}</tr></thead>
+      <tbody>${opts.bodyRowsHtml}${fillerRow(opts.span, opts.rowCount)}</tbody>
+      <tfoot>${opts.totalsRowHtml}</tfoot>
+    </table>
+  </div>`;
+}
+
+/**
+ * A general-purpose table-card shell for the "Ledger" design system (spec's
+ * slot 1 — verifiability: tables and figure-strips only). Generalizes
+ * `portTableCard`'s shape (table/totals-row/filler-row/span) so any
+ * table-only page can render through the same mechanism without hand-rolling
+ * its own `<table>` markup — the same motivation `portTableCard` itself
+ * documents, one level more generic: this one has no icon+title card head
+ * (that shape is specific to the per-port land/sea cards), just an optional
+ * plain title line, since most Ledger tables sit inside a page that already
+ * has its own headline/section title.
+ *
+ * `cardClass` defaults to the new shared `.v2-lg-table-card` class (theme.ts).
+ * `levelFiguresTable` (slides.ts) passes the legacy `.v2-level-table-card`
+ * name instead so `slide-risk-stages`'s already-shipped variant-1 markup never
+ * churns — `.v2-level-table-card` is kept as a `theme.ts` alias of
+ * `.v2-lg-table-card`'s rules (design spec §4), so both class names render
+ * identically; this override exists purely to keep that one page's
+ * byte-for-byte output stable, not because the two classes style differently.
+ *
+ * `rowCount` also gates the filler row exactly like `portTableCard` does (via
+ * `fillerRow`) — a caller whose card CENTERS its fixed content instead of
+ * pinning a totals row flush to the bottom (like `levelFiguresTable`'s small
+ * 4-row table) passes `rowCount: 0` to opt out of that pinning trick, since
+ * `DECK_TABLE_FILL_SCRIPT` (deck2/index.ts) only ever measures/sizes
+ * `.v2-port-col`/`.v2-stage-port-card` cards — an unmeasured filler row would
+ * just be dead markup anywhere else.
+ */
+export function ledgerTableCard(opts: {
+  /** Optional plain title line above the table. Omitted entirely (no markup,
+   *  not even an empty wrapper) when not supplied — callers whose page
+   *  headline already names the table don't pay for an empty title slot. */
+  title?: string;
+  /** Header cell markup WITHOUT the surrounding `<tr>` — same convention as
+   *  `portTableCard.theadCells`. */
+  theadCells: string;
+  /** Concatenated `<tr>...</tr>` markup for the data rows. */
+  bodyRowsHtml: string;
+  /** Totals `<tr>...</tr>` markup. */
+  totalsRowHtml: string;
+  /** Column count — the `colspan` fillerRow uses when `rowCount > 0`. */
+  span: number;
+  /** Real data-row count, feeding `fillerRow` exactly like `portTableCard`.
+   *  Pass 0 to opt out of the filler row entirely (see doc comment above). */
+  rowCount: number;
+  /** Wrapper `<div>` class. Default `"v2-lg-table-card"`. */
+  cardClass?: string;
+}): string {
+  const cls = opts.cardClass ?? "v2-lg-table-card";
+  const titleHtml = opts.title
+    ? `\n    <div class="v2-lg-table-card-title">${esc(opts.title)}</div>`
+    : "";
+  return `<div class="${cls}">${titleHtml}
     <table class="deck-table">
       <thead><tr>${opts.theadCells}</tr></thead>
       <tbody>${opts.bodyRowsHtml}${fillerRow(opts.span, opts.rowCount)}</tbody>

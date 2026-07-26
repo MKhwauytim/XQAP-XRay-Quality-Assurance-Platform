@@ -450,6 +450,68 @@ describe("riskStagesSlide — variant 2/4: compare-bars + exact-figures table (2
   });
 });
 
+describe("levelFiguresTable byte-identity characterization (2026-07-25, deck2-design-systems Task 1)", () => {
+  // Captured VERBATIM from riskStagesSlide's variant-1 panel BEFORE levelFiguresTable
+  // was reimplemented on top of the new shared `ledgerTableCard` primitive
+  // (slideKit.ts). This is the regression tripwire for that extraction: if the
+  // generalization changes even one byte of this already-shipped page's output,
+  // this test fails first, before any subtler downstream test would notice.
+  const EXPECTED_PANEL1 =
+    `data-variant-index="1"><div class="v2-risk-layout">\n` +
+    `    <div class="v2-cbar"><div class="v2-cbar-row">\n` +
+    `        <span class="v2-cbar-label">المستوى الأول</span>\n` +
+    `        <span class="v2-cbar-track"><i class="v2-cbar-fill gold" style="width:100.0%"></i></span>\n` +
+    `        <span class="v2-cbar-value">50%</span>\n` +
+    `      </div><div class="v2-cbar-row">\n` +
+    `        <span class="v2-cbar-label">المستوى الثالث</span>\n` +
+    `        <span class="v2-cbar-track"><i class="v2-cbar-fill blue" style="width:100.0%"></i></span>\n` +
+    `        <span class="v2-cbar-value">50%</span>\n` +
+    `      </div></div>\n` +
+    `    <div class="v2-level-table-card">\n` +
+    `    <table class="deck-table">\n` +
+    `      <thead><tr>\n` +
+    `        <th></th><th>المستوى</th><th>وزن العينة</th><th>من المجتمع</th>\n` +
+    `        <th>صورة</th><th>العيّنة</th><th>تغطية العيّنة</th>\n` +
+    `      </tr></thead>\n` +
+    `      <tbody><tr>\n` +
+    `        <td><span class="v2-level-row-num gold">1</span></td>\n` +
+    `        <td>المستوى الأول</td>\n` +
+    `        <td>100%</td>\n` +
+    `        <td>50%</td>\n` +
+    `        <td>1</td>\n` +
+    `        <td>0</td>\n` +
+    `        <td>0.0%</td>\n` +
+    `      </tr><tr>\n` +
+    `        <td><span class="v2-level-row-num blue">2</span></td>\n` +
+    `        <td>المستوى الثالث</td>\n` +
+    `        <td>40%</td>\n` +
+    `        <td>50%</td>\n` +
+    `        <td>1</td>\n` +
+    `        <td>0</td>\n` +
+    `        <td>0.0%</td>\n` +
+    `      </tr></tbody>\n` +
+    `      <tfoot><tr>\n` +
+    `        <td></td><td>الإجمالي</td><td>—</td><td>100%</td>\n` +
+    `        <td>2</td><td>0</td><td>0.0%</td>\n` +
+    `      </tr></tfoot>\n` +
+    `    </table>\n` +
+    `  </div>\n` +
+    `  </div></div><div class="v2-variant-panel" `;
+
+  it("slide-risk-stages variant-1 panel is byte-identical to the pre-extraction output", () => {
+    const model = buildReportModel(
+      input([popRow({ stage: "المستوى الأول" }), popRow({ xrayImageId: "XR-2", stage: "المستوى الثالث" })]),
+    );
+    const html = riskStagesSlide(model, 5, 20, true);
+    const start = html.indexOf('data-variant-index="1"');
+    const end = html.indexOf('data-variant-index="2"');
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const panel1 = html.slice(start, end);
+    expect(panel1).toBe(EXPECTED_PANEL1);
+  });
+});
+
 describe("style choices — production selection + backward compatibility (2026-07-25)", () => {
   it("with no styleChoices opt, output is byte-identical to today (regression guard)", () => {
     const a = buildExecutiveDeckV2(input([popRow(), popRow({ xrayImageId: "XR-2" })]));

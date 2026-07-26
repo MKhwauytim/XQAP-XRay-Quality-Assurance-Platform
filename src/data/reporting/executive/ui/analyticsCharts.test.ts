@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { bubbleScatter, percentHeatmap } from "./analyticsCharts";
-import type { BubblePoint, HeatMatrix } from "./analyticsCharts";
+import { bubbleScatter, percentHeatmap, metricMatrix } from "./analyticsCharts";
+import type { BubblePoint, HeatMatrix, MetricMatrixData } from "./analyticsCharts";
 import { XSS_PAYLOADS, XSS_MARKER, findLiveInjection } from "../../xssPayloads";
 
 // Same emoji guard the sibling chart tests use (see charts.test.ts / icons.test.ts —
@@ -479,6 +479,157 @@ describe("percentHeatmap", () => {
     for (const y of ys) {
       expect(y).toBeGreaterThanOrEqual(0);
       expect(y).toBeLessThanOrEqual(h);
+    }
+  });
+});
+
+// Genuinely new code (2026-07-25, deck2-design-systems Task 1) — not an
+// extraction of percentHeatmap, so it gets its own from-scratch coverage
+// rather than a characterization test.
+describe("metricMatrix", () => {
+  const NORMAL: MetricMatrixData = {
+    rowLabels: ["ميناء أ", "ميناء ب"],
+    columns: [
+      { label: "الصور", domain: [0, 1000], ramp: "sequential-gold", values: [820, 140] },
+      { label: "اشتباه", domain: [0, 200], ramp: "sequential-gold", values: [60, 5] },
+    ],
+  };
+
+  it("renders normal data: each column's own domain in its header, and a value in every populated cell", () => {
+    const html = metricMatrix(NORMAL, { width: 460, height: 220, caption: "مصفوفة المنافذ" });
+    assertFigure(html);
+    expect(html).toContain("مصفوفة المنافذ");
+    expect(html).toContain("ميناء أ");
+    expect(html).toContain("الصور");
+    expect(html).toContain(">820<");
+    expect(html).toContain(">140<");
+    expect(html).toContain(">60<");
+    expect(html).toContain(">5<");
+    // each column's OWN domain is printed in its header — never a shared scale.
+    expect(html).toContain(">0–1000<");
+    expect(html).toContain(">0–200<");
+    // cell ink is always var(--navy) (cssVar("surface")) — theme-invariant,
+    // never currentColor, since every fill here is opaque.
+    expect(html).toContain('fill="var(--navy)"');
+  });
+
+  it("renders a — cell for a null/undefined/NaN value, never a fake number", () => {
+    const data: MetricMatrixData = {
+      rowLabels: ["صف"],
+      columns: [
+        {
+          label: "عمود",
+          domain: [0, 100],
+          ramp: "sequential-gold",
+          values: [null],
+        },
+      ],
+    };
+    const html = metricMatrix(data, { width: 320, height: 180 });
+    assertFigure(html);
+    expect(html).toContain(">—<");
+    // missing cells get an outline, not a fill
+    expect(html).toContain('fill="none" stroke="currentColor"');
+    expect(html).toContain("<td>—</td>");
+
+    // undefined and NaN behave identically to null.
+    for (const v of [undefined, Number.NaN]) {
+      const h2 = metricMatrix(
+        { rowLabels: ["صف"], columns: [{ label: "عمود", domain: [0, 100], ramp: "sequential-gold", values: [v] }] },
+        { width: 320, height: 180 },
+      );
+      assertFigure(h2);
+      expect(h2).toContain(">—<");
+    }
+  });
+
+  it("handles an empty column (shorter than rowLabels, including values: []) without crashing", () => {
+    const data: MetricMatrixData = {
+      rowLabels: ["صف 1", "صف 2"],
+      columns: [
+        { label: "بيانات", domain: [0, 50], ramp: "sequential-gold", values: [10, 20] },
+        { label: "فارغ", domain: [0, 50], ramp: "sequential-gold", values: [] },
+      ],
+    };
+    const html = metricMatrix(data, { width: 380, height: 220 });
+    assertFigure(html);
+    expect(html).toContain(">10<");
+    expect(html).toContain(">20<");
+    expect(html).toContain("فارغ");
+    // every cell of the empty column reads as missing, not a crash or a fake 0.
+    expect((html.match(/>—<\/text>/g) ?? []).length).toBe(2);
+  });
+
+  it("diverging-green-coral tints below the domain midpoint green and above it coral", () => {
+    const data: MetricMatrixData = {
+      rowLabels: ["منخفض", "وسط", "مرتفع"],
+      columns: [
+        { label: "فرق", domain: [-100, 100], ramp: "diverging-green-coral", values: [-100, 0, 100] },
+      ],
+    };
+    const html = metricMatrix(data, { width: 300, height: 220 });
+    assertFigure(html);
+    const greens = [...html.matchAll(/fill="var\(--green\)" fill-opacity="([\d.]+)"/g)].map((m) => Number(m[1]));
+    const corals = [...html.matchAll(/fill="var\(--coral\)" fill-opacity="([\d.]+)"/g)].map((m) => Number(m[1]));
+    // the minimum (-100) tints full-strength green; the midpoint (0) and the
+    // maximum (100) both fall on the >=0 (coral) side of the split — the
+    // midpoint at t=0 (i.e. pure neutral base, no visible overlay), the
+    // maximum at full-strength coral.
+    expect(greens).toEqual([1]);
+    expect(corals).toEqual([0, 1]);
+  });
+
+  it("renders a neutral empty state for empty / null input", () => {
+    for (const html of [
+      metricMatrix({ rowLabels: [], columns: [] }, { width: 300, height: 180, emptyNote: "لا بيانات" }),
+      metricMatrix({ rowLabels: ["أ"], columns: [] }, { width: 300, height: 180, emptyNote: "لا بيانات" }),
+      metricMatrix(null, { width: 300, height: 180, emptyNote: "لا بيانات" }),
+      metricMatrix(undefined, { width: 300, height: 180, emptyNote: "لا بيانات" }),
+    ]) {
+      assertFigure(html);
+      expect(html).toContain("—");
+      expect(html).toContain("لا بيانات");
+    }
+  });
+
+  it("handles an all-identical column (or a zero-width domain) without dividing by zero", () => {
+    const html = metricMatrix(
+      {
+        rowLabels: ["أ", "ب"],
+        columns: [
+          { label: "ثابت", domain: [10, 10], ramp: "sequential-gold", values: [10, 10] },
+          { label: "متباين", domain: [5, 5], ramp: "diverging-green-coral", values: [5, 5] },
+        ],
+      },
+      { width: 380, height: 220 },
+    );
+    assertFigure(html);
+    expect((html.match(/>10<\/text>/g) ?? []).length).toBe(2);
+    expect((html.match(/>5<\/text>/g) ?? []).length).toBe(2);
+  });
+
+  it("escapes injected markup in row/column labels and captions", () => {
+    const html = metricMatrix(
+      {
+        rowLabels: [XSS_PAYLOADS.scriptTag],
+        columns: [{ label: XSS_PAYLOADS.imgOnerror, domain: [0, 100], ramp: "sequential-gold", values: [50] }],
+      },
+      { width: 320, height: 180, caption: XSS_PAYLOADS.svgOnload, rowHeader: XSS_PAYLOADS.attrBreak },
+    );
+    expect(findLiveInjection(html)).toBeNull();
+    expect(html).toContain(XSS_MARKER);
+    expect(html).toContain("&lt;script&gt;");
+  });
+
+  it("never draws past the requested width/height box", () => {
+    const w = 460;
+    const h = 240;
+    const html = metricMatrix(NORMAL, { width: w, height: h });
+    expect(html).toContain(`viewBox="0 0 ${w} ${h}"`);
+    const xs = [...html.matchAll(/ (?:x|x1|x2|cx)="([-\d.]+)"/g)].map((m) => Number(m[1]));
+    for (const x of xs) {
+      expect(x).toBeGreaterThanOrEqual(0);
+      expect(x).toBeLessThanOrEqual(w);
     }
   });
 });
