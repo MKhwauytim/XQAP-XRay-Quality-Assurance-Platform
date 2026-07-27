@@ -21,6 +21,7 @@ import { DEFAULT_SAMPLING_RULES } from "../../../population/populationConfig";
 import { ORGANIZATION_PATH, ZATCA_LOGO_URL } from "../../../../branding/organization";
 import type { SourceRevisions } from "../../sourceRevisions";
 import { sourceRevisionEntries } from "../../sourceRevisions";
+import { metricMatrix } from "../ui/analyticsCharts";
 import {
   ACCURACY_TARGET,
   BASE_ROWS_PER_PAGE,
@@ -870,6 +871,169 @@ function portTable(
   });
 }
 
+/**
+ * Ledger-system (slot 1 — السجل, "verifiability") port table: reuses the exact
+ * same data + `barCell` magnitude tint as `portTable()` above ("this is the
+ * shape ledger changes least — correct, because slot 0 already leans this
+ * way," design spec), but through the new plain-title `ledgerTableCard`
+ * (slideKit.ts) instead of the icon-badge `.v2-port-col` shell — Ledger's
+ * whole vocabulary is tables and figure-strips, no decorative card chrome.
+ * Ports are already sorted descending by `collectPortStats`, so the small
+ * ordinal badge (`.v2-lg-idx`) sitting inside the first cell before the port
+ * name doubles as a rank indicator rather than a fabricated new figure — and
+ * per the brief, it's deliberately NOT a new column (no column budget to
+ * spare on a half-width card).
+ *
+ * `rowCount: 0` opts out of `ledgerTableCard`'s filler-row bottom-pinning:
+ * `DECK_TABLE_FILL_SCRIPT` (deck2/index.ts) only ever measures
+ * `.v2-port-col`/`.v2-stage-port-card` cards, so an unmeasured filler row
+ * under a different card shell would just be dead markup (see
+ * `ledgerTableCard`'s own doc comment). The totals row simply follows the
+ * last data row directly — see task-2-report.md for the full reasoning why
+ * this reads correctly for Ledger's plainer, document-style table instead of
+ * attempting an unsupported pinned-bottom look.
+ */
+function ledgerPortTable(title: string, rows: PortPopRow[], variant: "land" | "sea", compact: boolean): string {
+  const magTone: CellTone = variant === "land" ? "green" : "blue";
+  const maxMag = maxOf(rows.map((p) => p.total));
+  const trs =
+    rows.length > 0
+      ? rows
+          .map(
+            (p, i) =>
+              `<tr><td><span class="v2-lg-idx">${i + 1}</span>${esc(p.name)}</td>${barCell(fmtNum(p.total), (p.total / maxMag) * 100, magTone)}<td>${fmtNum(p.clean)}</td><td>${fmtNum(p.suspicious)}</td></tr>`,
+          )
+          .join("")
+      : `<tr><td colspan="4"><span class="insuff">—</span></td></tr>`;
+  const sum = (f: (p: PortPopRow) => number) => rows.reduce((s, p) => s + f(p), 0);
+  const totalsRow = `<tr><td>الإجمالي</td><td>${fmtNum(sum((p) => p.total))}</td><td>${fmtNum(sum((p) => p.clean))}</td><td>${fmtNum(sum((p) => p.suspicious))}</td></tr>`;
+  return ledgerTableCard({
+    title,
+    theadCells: `<th>المنفذ</th><th>الصور</th><th>سليمة</th><th>اشتباه</th>`,
+    bodyRowsHtml: trs,
+    totalsRowHtml: totalsRow,
+    span: 4,
+    rowCount: 0,
+    cardClass: `v2-lg-port-card${compact ? " compact" : ""}`,
+  });
+}
+
+/**
+ * Briefing-system (slot 2 — الإحاطة, "recall") body for the port-population
+ * page: one lede figure (the leading port of THIS page's own land+sea slice —
+ * never the whole month, since pagination is fixed upstream of variants),
+ * a ≤3-figure support strip, then a combined, magnitude-ranked list of ports.
+ *
+ * The rank list combines land+sea into ONE list (re-sorted by total, since
+ * "rank" here means "across the whole page", not "within land" / "within
+ * sea" separately) capped at `rowsPerPage` entries — the exact row budget the
+ * design proposal's arithmetic is measured against (7 rows base tier, up to
+ * 10 at the compact tier: lede 90 + support 54 + 7×44 = 452 ≤ 459 at base;
+ * 90 + 10×36 = 450 ≤ 459 at compact, support strip dropped). For real month
+ * data where a page's combined land+sea count exceeds that cap, the surplus
+ * is simply not shown (Briefing is a "curated top-N" system by design, the
+ * same precedent `STAGE_CARD_TOP_N` already sets elsewhere in this deck) —
+ * see task-2-report.md for the judgment call and its trade-off.
+ *
+ * `compact` is `plan.compact` from `planPortPages` — the SAME tier signal
+ * `portTable()`'s own `compact` param already reads, not a new one.
+ */
+function briefingPortRank(
+  landChunk: PortPopRow[],
+  seaChunk: PortPopRow[],
+  compact: boolean,
+  rowsPerPage: number,
+): string {
+  const combined = [...landChunk, ...seaChunk].sort((a, b) => b.total - a.total);
+  if (combined.length === 0) {
+    return `<div class="v2-sys-brief v2-bf-port-population">
+      <div class="v2-bf-lede"><div class="v2-bf-lede-figure gold"><span class="insuff">—</span></div></div>
+    </div>`;
+  }
+  const lead = combined[0];
+  const sliceTotal = combined.reduce((s, p) => s + p.total, 0);
+  const maxMag = maxOf(combined.map((p) => p.total));
+  const shown = combined.slice(0, rowsPerPage);
+  const rankRows = shown
+    .map(
+      (p, i) => `<div class="v2-bf-rank-row">
+        <span class="v2-bf-rank-num gold">${i + 1}</span>
+        <span class="v2-bf-rank-label">${esc(p.name)}</span>
+        <span class="v2-bf-rank-track"><i class="v2-bf-rank-fill gold" style="width:${((p.total / maxMag) * 100).toFixed(1)}%"></i></span>
+        <span class="v2-bf-rank-value">${fmtNum(p.total)}</span>
+        <span class="v2-bf-rank-secondary">اشتباه ${fmtNum(p.suspicious)}</span>
+      </div>`,
+    )
+    .join("");
+  const supportStrip = compact
+    ? ""
+    : `<div class="v2-totals-band">
+        <div class="v2-totals-item"><span class="v2-totals-icon">${icon("port", 16)}</span><span><b>${fmtNum(combined.length)}</b><small>عدد المنافذ في هذه الصفحة</small></span></div>
+        <div class="v2-totals-item"><span class="v2-totals-icon">${icon("check", 16)}</span><span><b>${fmtNum(combined.reduce((s, p) => s + p.clean, 0))}</b><small>إجمالي الصور السليمة</small></span></div>
+        <div class="v2-totals-item"><span class="v2-totals-icon">${icon("alert", 16)}</span><span><b>${fmtNum(combined.reduce((s, p) => s + p.suspicious, 0))}</b><small>إجمالي صور الاشتباه</small></span></div>
+      </div>`;
+  return `<div class="v2-sys-brief v2-bf-port-population">
+    <div class="v2-bf-lede">
+      <div class="v2-bf-lede-figure gold">${fmtNum(lead.total)}</div>
+      <div class="v2-bf-lede-label">أعلى منفذ: ${esc(lead.name)} — ${fmtNum(lead.total)} صورة</div>
+      <div class="v2-bf-lede-basis">من إجمالي ${fmtNum(sliceTotal)} صورة ضمن هذه الصفحة</div>
+    </div>
+    ${supportStrip}
+    <div class="v2-bf-rank${compact ? " compact" : ""}">${rankRows}</div>
+  </div>`;
+}
+
+/**
+ * Grid-system (slot 3 — الشبكة, "comparison") body for the port-population
+ * page: ports (rows) × 4 metric columns (الصور / سليمة / اشتباه / نسبة
+ * الاشتباه), each column normalized to its OWN domain via `metricMatrix`
+ * (ui/analyticsCharts.ts) — never a shared scale across unlike units. The
+ * rate column uses the same "sequential-gold" ramp as the count columns
+ * (rather than a diverging ramp) because, unlike accuracy-vs-90%, this page
+ * has no fixed target threshold for نسبة الاشتباه to diverge around — see
+ * task-2-report.md for this judgment call.
+ *
+ * Land and sea render as two SEPARATE matrices side by side (mirrors every
+ * other variant's land/sea split in this deck) rather than one combined
+ * matrix with a row-group divider — `metricMatrix` has no divider affordance
+ * of its own, and adding one would mean changing Task 1's already-reviewed
+ * shared primitive; see task-2-report.md for the full rationale.
+ */
+function gridPortMatrix(title: string, rows: PortPopRow[], variant: "land" | "sea", compact: boolean): string {
+  const rate = (p: PortPopRow) => rateOf(p.suspicious, p.total);
+  const matrix = metricMatrix(
+    {
+      rowLabels: rows.map((p) => p.name),
+      columns: [
+        {
+          label: "الصور",
+          domain: [0, maxOf(rows.map((p) => p.total))],
+          ramp: "sequential-gold",
+          values: rows.map((p) => p.total),
+        },
+        {
+          label: "سليمة",
+          domain: [0, maxOf(rows.map((p) => p.clean))],
+          ramp: "sequential-gold",
+          values: rows.map((p) => p.clean),
+        },
+        {
+          label: "اشتباه",
+          domain: [0, maxOf(rows.map((p) => p.suspicious))],
+          ramp: "sequential-gold",
+          values: rows.map((p) => p.suspicious),
+        },
+        { label: "نسبة الاشتباه", domain: [0, 100], ramp: "sequential-gold", values: rows.map(rate) },
+      ],
+    },
+    { width: 620, height: 320, compact, caption: `مصفوفة ${title}`, rowHeader: "المنفذ", emptyNote: "لا توجد بيانات" },
+  );
+  return `<div class="v2-gd-panel ${variant}">
+    <div class="v2-gd-panel-head"><b>${esc(title)}</b><span>${fmtNum(rows.length)} منفذ</span></div>
+    <div class="v2-gd-panel-chart">${matrix}</div>
+  </div>`;
+}
+
 /** Build one or more port-population slides (paginated land/sea in parallel). */
 export function portPopulationSlideBuilders(model: ReportModel, variantPreview: boolean): SlideBuilder[] {
   const { land, sea } = collectPortStats(model);
@@ -881,6 +1045,9 @@ export function portPopulationSlideBuilders(model: ReportModel, variantPreview: 
     const cont = page > 0 ? " (تابع)" : "";
     builders.push((num, total) => {
       const body = `<div class="v2-port-split">${portTable("المنافذ البرية", landChunk, "population", "land", plan.compact)}${portTable("المنافذ البحرية", seaChunk, "population", "sea", plan.compact)}</div>`;
+      const ledgerBody = `<div class="v2-sys-ledger v2-lg-port-population"><div class="v2-lg-split">${ledgerPortTable("المنافذ البرية", landChunk, "land", plan.compact)}${ledgerPortTable("المنافذ البحرية", seaChunk, "sea", plan.compact)}</div></div>`;
+      const briefingBody = briefingPortRank(landChunk, seaChunk, plan.compact, plan.rowsPerPage);
+      const gridBody = `<div class="v2-sys-grid v2-gd-port-population"><div class="v2-gd-split">${gridPortMatrix("المنافذ البرية", landChunk, "land", plan.compact)}${gridPortMatrix("المنافذ البحرية", seaChunk, "sea", plan.compact)}</div></div>`;
       return v2Slide({
         id: `slide-port-population-${page + 1}`,
         title: `مجتمع صور الفحص${cont}`,
@@ -888,7 +1055,7 @@ export function portPopulationSlideBuilders(model: ReportModel, variantPreview: 
         iconName: "port",
         headline: `مجتمع صور الفحص لشهر ${model.summary.periodId}${cont}`,
         subhead: "منهجية التصنيف: تُصنَّف الصورة اشتباهًا إذا كانت نتيجة المستوى الأول أو الثاني اشتباهًا، وفي غير ذلك تُصنَّف سليمة.",
-        bodyVariants: [body, body, body, body],
+        bodyVariants: [body, ledgerBody, briefingBody, gridBody],
         variantPreview,
         num,
         total,

@@ -1266,4 +1266,180 @@ body.theme-light .v2-src-card{background-image:var(--v2-hex-tex-light),none;back
   .v2-sep-watermark{font-size:11rem;}
   .v2-prov-body{flex-direction:column;align-items:flex-start;}
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   DECK2 DESIGN SYSTEMS (2026-07-25) — three cohesive, deck-wide variant
+   grammars (design spec docs/superpowers/specs/2026-07-25-deck2-design-
+   systems-design.md). Each block below is a SHARED system, not a page: any
+   future page rebuilt in one of these systems reuses these rules directly.
+   The exemplar this task proves them on is slide-port-population-1; its own
+   page-local classes (.v2-lg-port-population/.v2-bf-port-population/
+   .v2-gd-port-population) sit in their own labelled sub-section per system,
+   per the namespacing convention (outermost element carries both a system
+   class and a page class).
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── LEDGER (slot 1 — السجل, verifiability): tables + figure-strips only —
+   no charts, arcs, donuts, or tiles. Reuses the existing barCell/threshCell
+   numeric vocabulary unchanged; color stays strictly functional. ──────────── */
+.v2-sys-ledger{height:100%;}
+/* Every numeral in a Ledger table reads as a fixed-width column of digits —
+   tabular-nums keeps a totals row's figures vertically aligned with the data
+   rows above it even as digit counts vary row to row. */
+.v2-sys-ledger .deck-table td{font-variant-numeric:tabular-nums;}
+/* Generic 2-up split (today: land/sea) — any future Ledger page with a
+   natural pair of tables reuses this instead of redefining its own grid. */
+.v2-lg-split{display:grid;grid-template-columns:1fr 1fr;gap:20px;height:100%;align-items:start;}
+/* Ordinal badge sitting inside a table's first cell, before the row's label —
+   NOT a new column (no column budget to spare on a half-width card). Reuses
+   the same small circular-numeral look as .v2-level-row-num (slot 1's own
+   precedent on slide-risk-stages) so every Ledger ordinal badge in the deck
+   reads the same way. */
+.v2-lg-idx{
+  display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;
+  width:20px;height:20px;border-radius:50%;font-size:.66rem;font-weight:900;
+  color:var(--navy);background:var(--gold);margin-inline-end:8px;
+  font-variant-numeric:tabular-nums;
+}
+/* Reusable paginated Ledger table card: plain title + deck-table, no icon
+   head (see ledgerTableCard's own doc comment — most Ledger tables sit
+   inside a page that already has its own headline). A DIFFERENT card class
+   from the shared \`.v2-lg-table-card\` levelFiguresTable uses (deliberately —
+   a 4-column ranked list needs its own column alignment/compact-tier rules
+   that must not bleed into that already-shipped 7-column table), but just as
+   reusable for any future paginated Ledger page shaped like this one. */
+.v2-lg-port-card{
+  background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.1);
+  border-radius:14px;padding:14px 16px;
+}
+.v2-lg-port-card .deck-table th,.v2-lg-port-card .deck-table td{padding:9px 12px;font-size:.78rem;text-align:center;}
+.v2-lg-port-card .deck-table th:first-child,.v2-lg-port-card .deck-table td:first-child{text-align:right;}
+.v2-lg-port-card .deck-table tfoot td{
+  font-weight:900;color:#fff;background:rgba(255,255,255,.06);
+  border-top:1px solid rgba(255,255,255,.2);border-bottom:0;
+}
+/* Compact tier (same \`plan.compact\` signal portTable()'s own \`compact\` param
+   already reads from planPortPages) — shrink rows so up to
+   BASE_ROWS_PER_PAGE + COMPRESS_OVERFLOW_MAX ports still fit the slide-body
+   budget without a pinned filler row to help (see ledgerPortTable() in
+   slides.ts — this card opts out of that mechanism entirely). */
+.v2-lg-port-card.compact .deck-table th,.v2-lg-port-card.compact .deck-table td{padding:5px 9px;font-size:.68rem;}
+.v2-lg-port-card.compact .v2-lg-idx{width:16px;height:16px;font-size:.58rem;margin-inline-end:6px;}
+body.theme-light .v2-lg-idx{color:#fff;}
+body.theme-light .v2-lg-port-card{background:#fff;border-color:#dde4ea;box-shadow:0 6px 16px rgba(10,45,74,.06);}
+body.theme-light .v2-lg-port-card .deck-table tfoot td{color:#0a2d4a;background:rgba(10,45,74,.05);border-top-color:rgba(10,45,74,.15);}
+
+/* Page-local: slide-port-population (Ledger). Nothing bespoke beyond the
+   shared components above — this selector exists as the required namespacing
+   hook (design spec §3.1) and is where a future visual difference unique to
+   this page's Ledger variant would land. */
+.v2-lg-port-population{height:100%;}
+
+/* ── BRIEFING (slot 2 — الإحاطة, recall): one lede figure per page + a
+   ≤3-figure support strip + at most one ranked-bar list. Tables are demoted
+   to ranked bars (.v2-bf-rank). One fixed tone per page (this page: gold). ── */
+.v2-sys-brief{display:flex;flex-direction:column;height:100%;gap:14px;justify-content:center;}
+.v2-bf-lede{text-align:center;}
+.v2-bf-lede-figure{font-size:3.2rem;font-weight:900;line-height:1;font-variant-numeric:tabular-nums;}
+.v2-bf-lede-figure.gold{color:var(--gold);text-shadow:0 0 30px rgba(244,180,0,.22);}
+.v2-bf-lede-figure.blue{color:var(--blue);text-shadow:0 0 30px rgba(107,169,248,.22);}
+.v2-bf-lede-figure.green{color:var(--green);text-shadow:0 0 30px rgba(139,195,74,.22);}
+.v2-bf-lede-figure.coral{color:var(--coral);text-shadow:0 0 30px rgba(255,118,95,.22);}
+.v2-bf-lede-label{margin-top:4px;font-size:.92rem;font-weight:700;color:#fff;}
+.v2-bf-lede-basis{
+  display:inline-flex;margin-top:8px;padding:3px 12px;border-radius:999px;
+  font-size:.68rem;font-weight:700;color:var(--slate);
+  border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.03);
+}
+/* Ranked-bar list — the shared skeleton \`.v2-cbar-row\` was repointed here per
+   the design spec's reuse verdicts (add rank numeral + a secondary figure,
+   \`stageCompareBars\`/\`.v2-cbar*\` itself stays untouched on slide-risk-stages). */
+.v2-bf-rank{display:flex;flex-direction:column;gap:5px;flex:1;min-height:0;justify-content:center;}
+.v2-bf-rank-row{display:flex;align-items:center;gap:10px;height:44px;}
+.v2-bf-rank.compact .v2-bf-rank-row{height:36px;}
+.v2-bf-rank-num{
+  display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;
+  width:22px;height:22px;border-radius:50%;font-size:.68rem;font-weight:900;
+  color:var(--navy);font-variant-numeric:tabular-nums;
+}
+.v2-bf-rank-num.gold{background:var(--gold);} .v2-bf-rank-num.blue{background:var(--blue);}
+.v2-bf-rank-num.green{background:var(--green);} .v2-bf-rank-num.coral{background:var(--coral);}
+.v2-bf-rank.compact .v2-bf-rank-num{width:18px;height:18px;font-size:.6rem;}
+.v2-bf-rank-label{
+  flex:0 0 auto;width:150px;font-size:.78rem;font-weight:700;color:#fff;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.v2-bf-rank-track{
+  flex:1 1 auto;height:20px;border-radius:6px;background:rgba(255,255,255,.08);
+  border:1px solid rgba(255,255,255,.12);overflow:hidden;position:relative;
+}
+.v2-bf-rank-fill{position:absolute;inset-inline-end:0;top:0;height:100%;border-radius:6px;}
+.v2-bf-rank-fill.gold{background:var(--gold);} .v2-bf-rank-fill.blue{background:var(--blue);}
+.v2-bf-rank-fill.green{background:var(--green);} .v2-bf-rank-fill.coral{background:var(--coral);}
+.v2-bf-rank-value{
+  flex:0 0 auto;min-width:48px;text-align:left;font-size:.8rem;font-weight:900;
+  color:#fff;font-variant-numeric:tabular-nums;
+}
+.v2-bf-rank-secondary{
+  flex:0 0 auto;min-width:74px;text-align:left;font-size:.66rem;font-weight:700;
+  color:var(--slate);font-variant-numeric:tabular-nums;
+}
+/* Briefing's own dressing of the shared .v2-totals-band/.v2-totals-item
+   support-strip component (design spec: one markup component, restyled per
+   system) — tighter than slot 0's risk-stages usage since Briefing's row
+   budget is the tightest of the three systems. */
+.v2-sys-brief .v2-totals-band{margin-top:0;gap:10px;}
+.v2-sys-brief .v2-totals-item{padding:8px 12px;border-radius:10px;}
+.v2-sys-brief .v2-totals-item b{font-size:1rem;}
+.v2-sys-brief .v2-totals-item small{font-size:.62rem;}
+body.theme-light .v2-bf-lede-label{color:#0a2d4a;}
+body.theme-light .v2-bf-lede-basis{color:#607386;border-color:#dde4ea;background:#fff;}
+body.theme-light .v2-bf-rank-num{color:#fff;}
+body.theme-light .v2-bf-rank-label{color:#0a2d4a;}
+body.theme-light .v2-bf-rank-track{background:#eef2f6;border-color:#dde4ea;}
+body.theme-light .v2-bf-rank-value{color:#0a2d4a;}
+body.theme-light .v2-bf-rank-secondary{color:#607386;}
+
+/* Page-local: slide-port-population (Briefing). Nothing bespoke beyond the
+   shared components above — namespacing hook per design spec §3.1. */
+.v2-bf-port-population{height:100%;}
+
+/* ── GRID (slot 3 — الشبكة, comparison): every page becomes one matrix of
+   metricMatrix cells, each column normalized to its OWN domain, ink always
+   navy (theme-invariant — see metricMatrix's own doc comment). ──────────── */
+.v2-sys-grid{height:100%;}
+/* grid-template-rows:minmax(0,1fr) is load-bearing, not decorative: with only
+   grid-template-columns set, the single implicit row auto-sizes to its
+   tallest item's CONTENT height instead of the grid's own height — and since
+   that content is an SVG figure asking for height:100% of an otherwise-
+   indefinite ancestor, the two resolve circularly to whatever the SVG's
+   intrinsic aspect ratio produces, overflowing .slide-body's fixed budget
+   (measured during this task's own visual QA: ~350px of clipping without
+   this rule). minmax(0,1fr) forces the row to the container's real height,
+   which is what lets .v2-gd-panel/.v2-gd-panel-chart's flex/percent chain
+   below correctly bound the figure instead. */
+.v2-gd-split{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:minmax(0,1fr);gap:20px;height:100%;}
+.v2-gd-panel{
+  display:flex;flex-direction:column;gap:8px;min-width:0;min-height:0;
+  border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:12px 14px;
+  background:rgba(255,255,255,.02);
+}
+.v2-gd-panel-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;}
+.v2-gd-panel-head b{font-size:.9rem;font-weight:800;color:#fff;}
+.v2-gd-panel-head span{font-size:.7rem;font-weight:600;color:var(--slate);}
+.v2-gd-panel-chart{flex:1;min-height:0;}
+.v2-gd-panel-chart figure{height:100%;}
+body.theme-light .v2-gd-panel{background:#fff;border-color:#dde4ea;box-shadow:0 6px 16px rgba(10,45,74,.06);}
+body.theme-light .v2-gd-panel-head b{color:#0a2d4a;}
+body.theme-light .v2-gd-panel-head span{color:#607386;}
+
+/* Page-local: slide-port-population (Grid) — land/sea tint on the panel
+   border + count caption, mirroring every other variant's land=green/
+   sea=blue convention in this deck. */
+.v2-gd-port-population .v2-gd-panel.land{border-color:rgba(139,195,74,.35);}
+.v2-gd-port-population .v2-gd-panel.sea{border-color:rgba(107,169,248,.35);}
+.v2-gd-port-population .v2-gd-panel.land .v2-gd-panel-head span{color:var(--green);}
+.v2-gd-port-population .v2-gd-panel.sea .v2-gd-panel-head span{color:var(--blue);}
+body.theme-light .v2-gd-port-population .v2-gd-panel.land .v2-gd-panel-head span{color:#4a7a1f;}
+body.theme-light .v2-gd-port-population .v2-gd-panel.sea .v2-gd-panel-head span{color:#2f6fb0;}
 `;

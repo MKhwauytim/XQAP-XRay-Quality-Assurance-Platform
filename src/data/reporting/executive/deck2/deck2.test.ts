@@ -5,7 +5,7 @@ import type { ExecutiveReportInput } from "../../executiveReportTypes";
 import type { PreparedPopulationRow } from "../../../population/populationTypes";
 import { buildExecutiveDeckV2 } from "./index";
 import { buildReportModel } from "../model/reportModel";
-import { monthInNumbersSlide, riskStagesSlide } from "./slides";
+import { monthInNumbersSlide, portPopulationSlideBuilders, riskStagesSlide } from "./slides";
 import { fmtNum } from "../primitives";
 import { resetLabel, setLabel } from "../../../labels/labelsStore";
 
@@ -622,5 +622,140 @@ describe("variant-choice family-key resolution (2026-07-25, deck2-design-systems
     const start = html.indexOf('data-slide-id="slide-cover"');
     const stackOpenTag = html.slice(start - 60, start + 120);
     expect(stackOpenTag).toContain('data-active-index="2"');
+  });
+});
+
+describe("portPopulationSlideBuilders — Ledger/Briefing/Grid design systems (2026-07-25, deck2-design-systems Task 2)", () => {
+  // Captured VERBATIM (2026-07-25, before any Task 2 code change) from
+  // portPopulationSlideBuilders(model, false)[0](6, 20) for a 2-port (1 land,
+  // 1 sea) fixture. This is the regression tripwire for this task: variant 0
+  // (production) must never change while variants 1-3 are added alongside it.
+  const EXPECTED_VARIANT0 =
+    `<section class="slide v2" id="slide-port-population-1" data-title="مجتمع صور الفحص" data-section="section1" data-section-label="القسم 1 — مجتمع الفحص">\n` +
+    `  <div class="slide-controls">\n` +
+    `    <label class="slide-print-toggle" title="تضمين هذه الصفحة عند الطباعة">\n` +
+    `    <input type="checkbox" checked/>\n` +
+    `    <span class="slide-print-toggle-track"><span class="slide-print-toggle-thumb"></span></span>\n` +
+    `  </label>\n` +
+    `    \n` +
+    `  </div>\n` +
+    `  <div class="v2-rail" aria-hidden="true">\n` +
+    `    <div class="v2-rail-title">التقرير التنفيذي لضمان جودة الأشعة</div>\n` +
+    `    <div class="v2-rail-tab">المعجم</div><div class="v2-rail-tab active">مجتمع الفحص</div><div class="v2-rail-tab">نتائج فحص الجودة</div><div class="v2-rail-tab">التحاليل المتقدمة</div>\n` +
+    `  </div>\n` +
+    `  <div class="slide-inner">\n` +
+    `    <div class="slide-eyebrow">\n` +
+    `      <span class="slide-eyebrow-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M5 21V8l7-4 7 4v13"/><path d="M5 21h14"/><path d="M9 21v-6h6v6"/></svg></span>\n` +
+    `      <span>القسم 1 — مجتمع الفحص</span>\n` +
+    `    </div>\n` +
+    `    <div class="slide-headline">مجتمع صور الفحص لشهر مايو 2026</div>\n` +
+    `    <div class="slide-subhead">منهجية التصنيف: تُصنَّف الصورة اشتباهًا إذا كانت نتيجة المستوى الأول أو الثاني اشتباهًا، وفي غير ذلك تُصنَّف سليمة.</div>\n` +
+    `    <div class="slide-body"><div class="v2-port-split"><div class="v2-port-col land">\n` +
+    `    <div class="v2-port-col-head">\n` +
+    `      <span class="v2-port-col-icon"><span style="display:inline-flex;transform:translate(2.1%,-8.5%)"><svg viewBox="0 0 24 24" width="26" height="26" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M2 16V8a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v8"/><path d="M14 11h4l3 3v2h-2.2"/><circle cx="7" cy="17.5" r="1.7"/><circle cx="16.8" cy="17.5" r="1.7"/><path d="M8.7 17.5h6.4"/><path d="M2 16h3.3"/></svg></span></span>\n` +
+    `      <div><b>المنافذ البرية</b><span>1 منفذ · 1 صورة</span></div>\n` +
+    `    </div>\n` +
+    `    <table class="deck-table">\n` +
+    `      <thead><tr><th>المنفذ</th><th>الصور</th><th>سليمة</th><th>اشتباه</th></tr></thead>\n` +
+    `      <tbody><tr><td>منفذ أ</td><td class="v2-bar-cell green" style="--w:100.0%">1</td><td>1</td><td>0</td></tr><tr class="v2-fill-row" aria-hidden="true"><td colspan="4"></td></tr></tbody>\n` +
+    `      <tfoot><tr><td>الإجمالي</td><td>1</td><td>1</td><td>0</td></tr></tfoot>\n` +
+    `    </table>\n` +
+    `  </div><div class="v2-port-col sea">\n` +
+    `    <div class="v2-port-col-head">\n` +
+    `      <span class="v2-port-col-icon"><svg viewBox="0 0 24 24" width="26" height="26" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M4 15l1.6 4.5h12.8L20 15l-8-2.6L4 15z"/><path d="M12 12.4V4"/><path d="M12 4l5.5 6.5H12"/></svg></span>\n` +
+    `      <div><b>المنافذ البحرية</b><span>1 منفذ · 1 صورة</span></div>\n` +
+    `    </div>\n` +
+    `    <table class="deck-table">\n` +
+    `      <thead><tr><th>المنفذ</th><th>الصور</th><th>سليمة</th><th>اشتباه</th></tr></thead>\n` +
+    `      <tbody><tr><td>منفذ ب</td><td class="v2-bar-cell blue" style="--w:100.0%">1</td><td>0</td><td>1</td></tr><tr class="v2-fill-row" aria-hidden="true"><td colspan="4"></td></tr></tbody>\n` +
+    `      <tfoot><tr><td>الإجمالي</td><td>1</td><td>0</td><td>1</td></tr></tfoot>\n` +
+    `    </table>\n` +
+    `  </div></div></div>\n` +
+    `  </div>\n` +
+    `  <div class="v2-page-foot" dir="ltr">06 / 20</div>\n` +
+    `</section>`;
+
+  function twoPortModel() {
+    return buildReportModel(
+      input([
+        popRow({ portName: "منفذ أ", portType: "منفذ بري" }),
+        popRow({ xrayImageId: "XR-2", portName: "منفذ ب", portType: "منفذ بحري", xrayLevelOneResult: "اشتباه" }),
+      ]),
+    );
+  }
+
+  it("(a) variant 0 (production) is byte-identical to before this task — regression guard", () => {
+    const html = portPopulationSlideBuilders(twoPortModel(), false)[0](6, 20);
+    expect(html).toBe(EXPECTED_VARIANT0);
+  });
+
+  it("(b) preview mode panel 1 contains v2-sys-ledger markup and NOT v2-sys-brief/v2-sys-grid", () => {
+    const html = portPopulationSlideBuilders(twoPortModel(), true)[0](6, 20);
+    const start = html.indexOf('data-variant-index="1"');
+    const end = html.indexOf('data-variant-index="2"');
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const panel1 = html.slice(start, end);
+    expect(panel1).toContain("v2-sys-ledger");
+    expect(panel1).toContain("v2-lg-port-population");
+    expect(panel1).not.toContain("v2-sys-brief");
+    expect(panel1).not.toContain("v2-sys-grid");
+    // Ordinal badge inside the first cell, not a new column.
+    expect(panel1).toContain('<span class="v2-lg-idx">1</span>منفذ أ');
+    expect(panel1).toContain('<span class="v2-lg-idx">1</span>منفذ ب');
+    // Every port's real figures still appear (same data, different shell).
+    expect(panel1).toContain(">1<"); // total/clean/suspicious counts
+
+    const panel0Start = html.indexOf('data-variant-index="0"');
+    const panel0 = html.slice(panel0Start, start);
+    expect(panel0).toContain("v2-port-split");
+    expect(panel0).not.toContain("v2-sys-ledger");
+  });
+
+  it("(c) preview mode panel 2 contains v2-sys-brief and the lede figure text for THIS page's leading port", () => {
+    const html = portPopulationSlideBuilders(twoPortModel(), true)[0](6, 20);
+    const start = html.indexOf('data-variant-index="2"');
+    const end = html.indexOf('data-variant-index="3"');
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const panel2 = html.slice(start, end);
+    expect(panel2).toContain("v2-sys-brief");
+    expect(panel2).toContain("v2-bf-port-population");
+    // Both ports have total=1, so land's "منفذ أ" wins the stable sort (first inserted).
+    expect(panel2).toContain('<div class="v2-bf-lede-figure gold">1</div>');
+    expect(panel2).toContain("أعلى منفذ: منفذ أ — 1 صورة");
+    // Base tier (only 2 ports; nowhere near the compact-tier threshold) keeps the support strip.
+    expect(panel2).toContain("v2-totals-band");
+  });
+
+  it("(d) preview mode panel 3 contains v2-sys-grid and a metricMatrix-produced figure/table", () => {
+    const html = portPopulationSlideBuilders(twoPortModel(), true)[0](6, 20);
+    const start = html.indexOf('data-variant-index="3"');
+    expect(start).toBeGreaterThan(-1);
+    const panel3 = html.slice(start);
+    expect(panel3).toContain("v2-sys-grid");
+    expect(panel3).toContain("v2-gd-port-population");
+    expect(panel3).toContain("<figure");
+    expect(panel3).toContain('<table dir="rtl"');
+    // Real port names appear as row labels in the screen-reader table.
+    expect(panel3).toContain("منفذ أ");
+    expect(panel3).toContain("منفذ ب");
+  });
+
+  it("(e) Briefing drops the support strip at the compact tier, using the SAME plan.compact signal portTable()'s own compact param already reads", () => {
+    // 8 land ports, 0 sea → maxCount=8, overflow=1 (≤ COMPRESS_OVERFLOW_MAX=3) → compact tier, 1 page.
+    const rows = Array.from({ length: 8 }, (_, i) =>
+      popRow({ xrayImageId: `XR-${i}`, portName: `منفذ ${i}`, portType: "منفذ بري" }),
+    );
+    const model = buildReportModel(input(rows));
+    const builders = portPopulationSlideBuilders(model, true);
+    expect(builders).toHaveLength(1); // compact tier folds everything onto one page
+    const html = builders[0](6, 20);
+    const start = html.indexOf('data-variant-index="2"');
+    const end = html.indexOf('data-variant-index="3"');
+    const panel2 = html.slice(start, end);
+    expect(panel2).not.toContain("v2-totals-band");
+    expect(panel2).toContain('class="v2-bf-rank compact"');
+    expect((panel2.match(/class="v2-bf-rank-row"/g) ?? []).length).toBe(8);
   });
 });
