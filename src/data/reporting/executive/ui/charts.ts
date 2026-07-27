@@ -43,19 +43,24 @@ function svgOpen(w: number, h: number): string {
     // own fix): the report document is <html dir="rtl">, and SVG's own
     // text-anchor:start|end resolves against the *inline base direction* —
     // with nothing stopping the inheritance, every text-anchor="end"/"start"
-    // in this file (8 sites: `heatmap`'s row labels, `funnel`'s label/value
-    // pair, `gauge`'s scale ticks, `legendRows`' legend text) silently
-    // mirrored, rendering off canvas. `rankedBar` is unaffected — it
-    // deliberately renders HTML/CSS, not SVG text, per its own comment
-    // above. Confirmed live via `openExecutiveReport` (the "Document"
-    // report edition, reachable from the Reports tab) — but that's only
-    // one of six real consumers of this module: `document/part*.ts`,
-    // `deck/slides.ts` (the presentation deck's older "v1" edition,
-    // `sampleReport.ts`, `distributionReport.ts`, and
-    // `management/managementDeck.ts` all build charts through this same
-    // file, so all six were equally affected. This module's coordinate-math
-    // RTL techniques (see the header comment above) were always correct
-    // and remain untouched — they solve a different problem (bar/axis
+    // in this file (8 sites: `legendRows`' legend text, `gauge`'s 2 scale
+    // ticks, `funnel`'s label/value pair, `heatmap`'s row label plus its own
+    // 2 inline colour-scale ticks — `heatmap` does NOT go through
+    // `legendRows` for those) silently mirrored, rendering off canvas.
+    // `rankedBar` is unaffected — it deliberately renders HTML/CSS, not SVG
+    // text, per its own comment above. Confirmed live via
+    // `openExecutiveReport` (the "Document" report edition, reachable from
+    // the Reports tab) → `buildDocumentSlides` → `document/part*.ts`, one
+    // of several real consumers of this module: `deck/slides.ts` (the
+    // presentation deck's older "v1" edition), `sampleReport.ts`,
+    // `distributionReport.ts`, `management/managementDeck.ts`, and
+    // `Reports/index.tsx` itself, which imports `rankedBar`/`gauge`/
+    // `donut`/`heatmap` directly to render charts in the app's OWN
+    // `dir="rtl"` UI, not just inside an exported report — the one consumer
+    // a reader would never find from a report-module-only list. All were
+    // equally affected. This module's coordinate-math RTL techniques (see
+    // the header comment above) were always correct and remain untouched —
+    // they solve a different problem (bar/axis
     // direction) than text-anchor resolution, and neither substitutes for
     // the other.
     `width="100%" height="100%" font-family='${FONT_FAMILY}' style="direction:ltr">`
