@@ -43,14 +43,21 @@ function svgOpen(w: number, h: number): string {
     // own fix): the report document is <html dir="rtl">, and SVG's own
     // text-anchor:start|end resolves against the *inline base direction* —
     // with nothing stopping the inheritance, every text-anchor="end"/"start"
-    // in this file (heatGrid row labels, rankedBar's label/value, donut/
-    // gauge scale ticks, legend text) silently mirrored, rendering off
-    // canvas. Confirmed live via the Reports tab's openExecutiveReport path
-    // (the "document" edition), which is this file's real production
-    // consumer. This is the file this module's own charts have relied on
-    // being RTL-safe "through coordinate math instead" (see the header
-    // comment above) — that claim was true for the coordinate math, but
-    // false for text-anchor, which resolves independently of it.
+    // in this file (8 sites: `heatmap`'s row labels, `funnel`'s label/value
+    // pair, `gauge`'s scale ticks, `legendRows`' legend text) silently
+    // mirrored, rendering off canvas. `rankedBar` is unaffected — it
+    // deliberately renders HTML/CSS, not SVG text, per its own comment
+    // above. Confirmed live via `openExecutiveReport` (the "Document"
+    // report edition, reachable from the Reports tab) — but that's only
+    // one of six real consumers of this module: `document/part*.ts`,
+    // `deck/slides.ts` (the presentation deck's older "v1" edition,
+    // `sampleReport.ts`, `distributionReport.ts`, and
+    // `management/managementDeck.ts` all build charts through this same
+    // file, so all six were equally affected. This module's coordinate-math
+    // RTL techniques (see the header comment above) were always correct
+    // and remain untouched — they solve a different problem (bar/axis
+    // direction) than text-anchor resolution, and neither substitutes for
+    // the other.
     `width="100%" height="100%" font-family='${FONT_FAMILY}' style="direction:ltr">`
   );
 }

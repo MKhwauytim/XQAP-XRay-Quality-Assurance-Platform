@@ -820,6 +820,39 @@ describe("portPopulationSlideBuilders — Ledger/Briefing/Grid design systems (2
     expect(panel2).toContain("إجمالي 20 صورة");
     expect(panel2).toContain("أعلى 13 من");
   });
+
+  it("(h) 2026-07-25: when the folded remainder's aggregate exceeds the single largest named port's total, its bar renders WIDER than rank #1's — not tied at a shared 100% cap", () => {
+    // Same 20-port/7-folded shape as (g): every port has total=1, so
+    // maxMag=1 but restTotal (7 folded ports) = 7 — the remainder
+    // genuinely represents more images than any single named port.
+    const rows = [
+      ...Array.from({ length: 10 }, (_, i) =>
+        popRow({ xrayImageId: `L-${i}`, portName: `بر ${i}`, portType: "منفذ بري" }),
+      ),
+      ...Array.from({ length: 10 }, (_, i) =>
+        popRow({ xrayImageId: `S-${i}`, portName: `بحر ${i}`, portType: "منفذ بحري" }),
+      ),
+    ];
+    const model = buildReportModel(input(rows));
+    const builders = portPopulationSlideBuilders(model, true);
+    const html = builders[0](6, 20);
+    const start = html.indexOf('data-variant-index="2"');
+    const end = html.indexOf('data-variant-index="3"');
+    const panel2 = html.slice(start, end);
+    const widths = [...panel2.matchAll(/class="v2-bf-rank-fill (?:gold|rest)" style="width:([\d.]+)%"/g)].map((m) =>
+      Number(m[1]),
+    );
+    const rank1Width = widths[0];
+    const restWidth = widths[widths.length - 1];
+    // Rank #1 (a single port, total=1) must render narrower than 100% once
+    // scaled against the remainder's larger aggregate (1/7 ≈ 14.3%) — the
+    // bug this test guards against is rank #1 ALSO rendering at 100%
+    // (which happens if named rows keep scaling against maxMag alone while
+    // only the remainder is rescaled).
+    expect(rank1Width).toBeCloseTo((1 / 7) * 100, 1);
+    expect(restWidth).toBe(100);
+    expect(restWidth).toBeGreaterThan(rank1Width);
+  });
 });
 
 describe("briefingRankPlan (2026-07-25, deck2-design-systems design ruling)", () => {

@@ -942,29 +942,31 @@ function briefingPortRank(landChunk: PortPopRow[], seaChunk: PortPopRow[]): stri
   const plan = briefingRankPlan(combined.length);
   const namedRows = combined.slice(0, plan.named);
   const restRows = combined.slice(plan.named);
+  const restTotal = restRows.reduce((s, p) => s + p.total, 0);
+  const restSuspicious = restRows.reduce((s, p) => s + p.suspicious, 0);
+  // A peer review (2026-07-25) caught that an earlier version of this fix
+  // was an algebraic no-op (Math.min(100, x/a*100) === x/max(a,x)*100 for
+  // a>=1, so the rendered width never actually changed). The REAL fix: named
+  // rows and the remainder row must share ONE scale, computed with the
+  // remainder's real aggregate folded in — not each computing its own
+  // ratio against maxMag alone. When the folded aggregate exceeds the
+  // single largest named port, every bar (rank #1 included) now shrinks
+  // proportionally, so the remainder can genuinely render wider than rank
+  // #1 when it truly represents more images — instead of both silently
+  // capping at 100% and reading as tied.
+  const scaleMax = plan.folded > 0 ? Math.max(maxMag, restTotal) : maxMag;
 
   const rowHtml = (i: number, p: PortPopRow) => `<div class="v2-bf-rank-row">
         <span class="v2-bf-rank-num gold">${i + 1}</span>
         <span class="v2-bf-rank-label">${esc(p.name)}</span>
-        <span class="v2-bf-rank-track"><i class="v2-bf-rank-fill gold" style="width:${((p.total / maxMag) * 100).toFixed(1)}%"></i></span>
+        <span class="v2-bf-rank-track"><i class="v2-bf-rank-fill gold" style="width:${((p.total / scaleMax) * 100).toFixed(1)}%"></i></span>
         <span class="v2-bf-rank-value">${fmtNum(p.total)}</span>
         <span class="v2-bf-rank-secondary">اشتباه ${fmtNum(p.suspicious)}</span>
       </div>`;
 
   const allRows = namedRows.map((p, i) => rowHtml(i, p));
   if (plan.folded > 0) {
-    const restTotal = restRows.reduce((s, p) => s + p.total, 0);
-    const restSuspicious = restRows.reduce((s, p) => s + p.suspicious, 0);
-    // Scale against max(maxMag, restTotal), not maxMag alone (2026-07-25 peer-
-    // review fix): restTotal is an AGGREGATE of several folded ports and can
-    // legitimately exceed the single largest named port's total, and
-    // Math.min(100, ...) was silently clamping that case to a full-width bar
-    // that read as tied with rank #1 — the hatch fill and printed value
-    // disambiguate visually, but the bar itself shouldn't overstate the
-    // magnitude. This keeps the bar honest either way: unclamped when
-    // restTotal <= maxMag, and only genuinely 100% when restTotal really is
-    // the largest value being shown.
-    const restPct = (restTotal / Math.max(maxMag, restTotal)) * 100;
+    const restPct = (restTotal / scaleMax) * 100;
     allRows.push(`<div class="v2-bf-rank-row rest">
         <span class="v2-bf-rank-num">+</span>
         <span class="v2-bf-rank-label">بقية المنافذ (${fmtNum(plan.folded)})</span>
