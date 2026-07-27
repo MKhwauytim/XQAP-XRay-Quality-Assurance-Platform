@@ -39,7 +39,19 @@ function r(n: number): string {
 function svgOpen(w: number, h: number): string {
   return (
     `<svg viewBox="0 0 ${r(w)} ${r(h)}" xmlns="http://www.w3.org/2000/svg" ` +
-    `width="100%" height="100%" font-family='${FONT_FAMILY}'>`
+    // direction:ltr (2026-07-25 fix, shared root cause with ui/analyticsCharts.ts's
+    // own fix): the report document is <html dir="rtl">, and SVG's own
+    // text-anchor:start|end resolves against the *inline base direction* —
+    // with nothing stopping the inheritance, every text-anchor="end"/"start"
+    // in this file (heatGrid row labels, rankedBar's label/value, donut/
+    // gauge scale ticks, legend text) silently mirrored, rendering off
+    // canvas. Confirmed live via the Reports tab's openExecutiveReport path
+    // (the "document" edition), which is this file's real production
+    // consumer. This is the file this module's own charts have relied on
+    // being RTL-safe "through coordinate math instead" (see the header
+    // comment above) — that claim was true for the coordinate math, but
+    // false for text-anchor, which resolves independently of it.
+    `width="100%" height="100%" font-family='${FONT_FAMILY}' style="direction:ltr">`
   );
 }
 

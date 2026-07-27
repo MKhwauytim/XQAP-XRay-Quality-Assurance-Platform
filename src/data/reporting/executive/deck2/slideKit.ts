@@ -588,11 +588,15 @@ export function planPortPages(landCount: number, seaCount: number, baseRowsPerPa
  * which borrowed `planPortPages`'s PER-COLUMN table-geometry budget for a
  * COMBINED ranked list and silently dropped rows past it).
  *
- * Budget (measured against the real 459px `.slide-body`): lede 112 + support
- * strip 55 + 2×14 flex gaps = 181, leaving H=278... — see the design ruling;
- * shipped constant is 264 (the ruling's own arithmetic, kept verbatim so a
- * future re-measurement has one place to update). Row gap is 5px at every
- * tier, so per-column capacity is floor((264+5)/(rowH+5)).
+ * Budget (measured against the real 459px `.slide-body`, per the design
+ * ruling): 459 − 112 (lede) − 55 (support strip) − 2×14 (flex gaps) = 264.
+ * Row gap is 5px at every tier, so per-column capacity is
+ * floor((264+5)/(rowH+5)) — see `capFor` below, the single place this
+ * arithmetic actually lives (a peer review, 2026-07-25, caught this comment's
+ * first draft stating "181...278" — arithmetic that didn't reconcile with
+ * the shipped 264 constant; corrected here, and `BRIEFING_RANK_DENSEST_CAP`
+ * below is now derived from `capFor` instead of a second hardcoded copy of
+ * the same number, so the two can no longer drift out of sync).
  *
  * The ladder tries, in order: 1 col @44px (cap 5) → 1 col @36px (cap 6) →
  * 2 cols @44px (cap 10) → 2 cols @36px (cap 12) → 2 cols @30px (cap 14,
@@ -615,15 +619,18 @@ export type BriefingRankPlan = {
   folded: number;
 };
 
-const BRIEFING_RANK_BUDGET_PX = 264;
+export const BRIEFING_RANK_BUDGET_PX = 264;
 const BRIEFING_RANK_ROW_GAP_PX = 5;
-const BRIEFING_RANK_DENSEST_CAP = 14;
-const BRIEFING_RANK_NAMED_WHEN_FOLDED = 13;
 
 function capFor(rowH: number, columns: 1 | 2): number {
   const perColumn = Math.floor((BRIEFING_RANK_BUDGET_PX + BRIEFING_RANK_ROW_GAP_PX) / (rowH + BRIEFING_RANK_ROW_GAP_PX));
   return perColumn * columns;
 }
+
+// Derived from capFor (not a second hardcoded copy of the same number, per
+// the 2026-07-25 peer-review fix) — the densest tier's own capacity.
+const BRIEFING_RANK_DENSEST_CAP = capFor(30, 2);
+const BRIEFING_RANK_NAMED_WHEN_FOLDED = BRIEFING_RANK_DENSEST_CAP - 1;
 
 export function briefingRankPlan(n: number): BriefingRankPlan {
   const ladder: Array<{ tier: BriefingRankPlan["tier"]; rowH: 44 | 36 | 30; columns: 1 | 2 }> = [

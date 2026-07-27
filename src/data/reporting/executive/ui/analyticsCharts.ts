@@ -21,9 +21,19 @@
 //
 // 1. NO `direction="rtl"` ON THE <svg>. In SVG, `text-anchor:start|end` resolves
 //    against the *inline base direction*: under direction=rtl, "start" becomes
-//    the RIGHT edge and "end" the LEFT — silently mirroring every anchor in the
-//    file. charts.ts leaves the root LTR and expresses RTL through coordinate
-//    math instead; this file does the same so both modules read identically.
+//    the RIGHT edge and "end" the LEFT — silently mirroring every anchor.
+//    The report document root is `<html dir="rtl">` — every element inherits
+//    that unless something stops it, INCLUDING an <svg> with no RTL ancestor
+//    of its own (the figure wrapper below is not the source; the document
+//    root already is). Both this module's svgOpen() and charts.ts's own
+//    svgOpen() therefore set `style="direction:ltr"` directly on the <svg>
+//    (2026-07-25 fix — a peer review caught that an earlier version of this
+//    note wrongly blamed only the <figure dir="rtl"> wrapper below, which
+//    left charts.ts's own text-anchor="end"/"start" sites — heatGrid,
+//    rankedBar, donut/gauge scale ticks — mirrored in production with no
+//    wrapper in sight to blame). Coordinate math (points 2/3 below) is a
+//    SEPARATE, correct RTL technique and was never the issue here — it's
+//    orthogonal to text-anchor resolution, not a substitute for it.
 //    (Arabic glyph shaping/bidi inside a single <text> run is unaffected — the
 //    bidi algorithm still lays the Arabic run out right-to-left.)
 // 2. SCATTER X AXIS RUNS RIGHT → LEFT. The x scale's *range* is reversed
@@ -92,16 +102,17 @@ function svgOpen(w: number, h: number, title: string): string {
     // aria-hidden: the paired <table> below carries the semantics (see header).
     `aria-hidden="true" focusable="false" ` +
     // direction:ltr is load-bearing, not decorative (2026-07-25 fix): the
-    // wrapping <figure dir="rtl"> below is required for the paired
-    // screen-reader <table>'s semantics (header note 3), but `dir` is
-    // inherited via CSS `direction`, and SVG's own `text-anchor:start|end`
-    // resolves against the *inline base direction* (header note 1) — with
-    // nothing stopping the inheritance, every text-anchor="end"/"start" in
-    // this file silently mirrored, rendering row/column labels off-canvas.
-    // Confirmed live: without this, the shipped percentHeatmap AND this
-    // module's other charts were already rendering clipped labels in
-    // production. This one declaration is what actually enforces the header
-    // comment's rule, not just documents it.
+    // document root is <html dir="rtl">, and SVG's own `text-anchor:
+    // start|end` resolves against the *inline base direction* (header note
+    // 1) — with nothing on the <svg> itself to stop the inheritance, every
+    // text-anchor="end"/"start" in this file silently mirrored, rendering
+    // row/column labels off-canvas. Confirmed live: without this, the
+    // shipped percentHeatmap AND this module's other charts were already
+    // rendering clipped labels in production — and so was ui/charts.ts's
+    // svgOpen(), fixed the same way, since it inherits from the same
+    // document root, not from any wrapper either file has. This one
+    // declaration is what actually enforces the header comment's rule, not
+    // just documents it.
     `style="${PRINT_EXACT}display:block;direction:ltr" data-chart="${escText(title)}">`
   );
 }

@@ -129,6 +129,19 @@ describe("donut", () => {
   });
 });
 
+describe("svgOpen direction:ltr (2026-07-25 regression)", () => {
+  it("forces direction:ltr on every chart's <svg> so text-anchor isn't mirrored by the document's <html dir=\"rtl\">", () => {
+    // Same shared root cause and fix as ui/analyticsCharts.ts's svgOpen —
+    // this file's heatmap()/rankedBar()/donut()/gauge() all have
+    // text-anchor="end"/"start" sites that silently mirrored off-canvas in
+    // production (reachable via openExecutiveReport, the "document" report
+    // edition) before this fix.
+    const svg = donut([{ label: "سليمة", value: 70 }], {});
+    const svgOpenTag = svg.slice(svg.indexOf("<svg"), svg.indexOf(">", svg.indexOf("<svg")) + 1);
+    expect(svgOpenTag).toContain("direction:ltr");
+  });
+});
+
 describe("gauge", () => {
   it("renders a single percentage", () => {
     const svg = gauge(82.5, {});

@@ -6,7 +6,7 @@ import type { PreparedPopulationRow } from "../../../population/populationTypes"
 import { buildExecutiveDeckV2 } from "./index";
 import { buildReportModel } from "../model/reportModel";
 import { monthInNumbersSlide, portPopulationSlideBuilders, riskStagesSlide } from "./slides";
-import { briefingRankPlan } from "./slideKit";
+import { briefingRankPlan, BRIEFING_RANK_BUDGET_PX } from "./slideKit";
 import { fmtNum } from "../primitives";
 import { resetLabel, setLabel } from "../../../labels/labelsStore";
 
@@ -850,11 +850,11 @@ describe("briefingRankPlan (2026-07-25, deck2-design-systems design ruling)", ()
     }
   });
 
-  it("every plan fits inside the 264px rank-list budget: rowsPerColumn × rowH + (rowsPerColumn-1) × 5 <= 264", () => {
+  it("every plan fits inside the shared rank-list budget: rowsPerColumn × rowH + (rowsPerColumn-1) × 5 <= BRIEFING_RANK_BUDGET_PX", () => {
     for (let n = 0; n <= 30; n++) {
       const plan = briefingRankPlan(n);
       const used = plan.rowsPerColumn * plan.rowH + Math.max(0, plan.rowsPerColumn - 1) * 5;
-      expect(used).toBeLessThanOrEqual(264);
+      expect(used).toBeLessThanOrEqual(BRIEFING_RANK_BUDGET_PX);
     }
   });
 });

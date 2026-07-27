@@ -921,26 +921,6 @@ function ledgerPortTable(title: string, rows: PortPopRow[], variant: "land" | "s
 }
 
 /**
- * Briefing-system (slot 2 — الإحاطة, "recall") body for the port-population
- * page: one lede figure (the leading port of THIS page's own land+sea slice —
- * never the whole month, since pagination is fixed upstream of variants),
- * a ≤3-figure support strip, then a combined, magnitude-ranked list of ports.
- *
- * The rank list combines land+sea into ONE list (re-sorted by total, since
- * "rank" here means "across the whole page", not "within land" / "within
- * sea" separately) capped at `rowsPerPage` entries — the exact row budget the
- * design proposal's arithmetic is measured against (7 rows base tier, up to
- * 10 at the compact tier: lede 90 + support 54 + 7×44 = 452 ≤ 459 at base;
- * 90 + 10×36 = 450 ≤ 459 at compact, support strip dropped). For real month
- * data where a page's combined land+sea count exceeds that cap, the surplus
- * is simply not shown (Briefing is a "curated top-N" system by design, the
- * same precedent `STAGE_CARD_TOP_N` already sets elsewhere in this deck) —
- * see task-2-report.md for the judgment call and its trade-off.
- *
- * `compact` is `plan.compact` from `planPortPages` — the SAME tier signal
- * `portTable()`'s own `compact` param already reads, not a new one.
- */
-/**
  * Briefing system (slot 2) body for the port-population page. Density is
  * entirely delegated to `briefingRankPlan` (slideKit.ts) — this function
  * never re-derives a row budget or reads slot-0's table-geometry plan
@@ -975,7 +955,16 @@ function briefingPortRank(landChunk: PortPopRow[], seaChunk: PortPopRow[]): stri
   if (plan.folded > 0) {
     const restTotal = restRows.reduce((s, p) => s + p.total, 0);
     const restSuspicious = restRows.reduce((s, p) => s + p.suspicious, 0);
-    const restPct = Math.min(100, (restTotal / maxMag) * 100);
+    // Scale against max(maxMag, restTotal), not maxMag alone (2026-07-25 peer-
+    // review fix): restTotal is an AGGREGATE of several folded ports and can
+    // legitimately exceed the single largest named port's total, and
+    // Math.min(100, ...) was silently clamping that case to a full-width bar
+    // that read as tied with rank #1 — the hatch fill and printed value
+    // disambiguate visually, but the bar itself shouldn't overstate the
+    // magnitude. This keeps the bar honest either way: unclamped when
+    // restTotal <= maxMag, and only genuinely 100% when restTotal really is
+    // the largest value being shown.
+    const restPct = (restTotal / Math.max(maxMag, restTotal)) * 100;
     allRows.push(`<div class="v2-bf-rank-row rest">
         <span class="v2-bf-rank-num">+</span>
         <span class="v2-bf-rank-label">بقية المنافذ (${fmtNum(plan.folded)})</span>
