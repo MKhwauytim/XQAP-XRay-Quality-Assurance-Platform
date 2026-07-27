@@ -6,6 +6,7 @@ import type { PreparedPopulationRow } from "../../../population/populationTypes"
 import { buildExecutiveDeckV2 } from "./index";
 import { buildReportModel } from "../model/reportModel";
 import { monthInNumbersSlide, portPopulationSlideBuilders, riskStagesSlide } from "./slides";
+import { briefingRankPlan } from "./slideKit";
 import { fmtNum } from "../primitives";
 import { resetLabel, setLabel } from "../../../labels/labelsStore";
 
@@ -742,20 +743,118 @@ describe("portPopulationSlideBuilders — Ledger/Briefing/Grid design systems (2
     expect(panel3).toContain("منفذ ب");
   });
 
-  it("(e) Briefing drops the support strip at the compact tier, using the SAME plan.compact signal portTable()'s own compact param already reads", () => {
-    // 8 land ports, 0 sea → maxCount=8, overflow=1 (≤ COMPRESS_OVERFLOW_MAX=3) → compact tier, 1 page.
+  it("(e) Briefing's support strip is unconditional (2026-07-25 design-ruling fix — it was previously and wrongly dropped on planPortPages' table-geometry compact signal, which has no bearing on Briefing's own budget) and 8 ports render in 2 columns at the comfortable tier", () => {
+    // 8 land ports, 0 sea → maxCount=8, overflow=1 (≤ COMPRESS_OVERFLOW_MAX=3) → portTable()'s
+    // OWN compact tier, 1 page — but Briefing no longer reads that signal at all.
+    // briefingRankPlan(8): step3 (2 cols, comfortable 44px, cap 10) since 8 ≤ 10.
     const rows = Array.from({ length: 8 }, (_, i) =>
       popRow({ xrayImageId: `XR-${i}`, portName: `منفذ ${i}`, portType: "منفذ بري" }),
     );
     const model = buildReportModel(input(rows));
     const builders = portPopulationSlideBuilders(model, true);
-    expect(builders).toHaveLength(1); // compact tier folds everything onto one page
+    expect(builders).toHaveLength(1); // compact tier folds everything onto one page (slot 0's own tables)
     const html = builders[0](6, 20);
     const start = html.indexOf('data-variant-index="2"');
     const end = html.indexOf('data-variant-index="3"');
     const panel2 = html.slice(start, end);
-    expect(panel2).not.toContain("v2-totals-band");
-    expect(panel2).toContain('class="v2-bf-rank compact"');
-    expect((panel2.match(/class="v2-bf-rank-row"/g) ?? []).length).toBe(8);
+    expect(panel2).toContain("v2-totals-band"); // unconditional now
+    expect(panel2).toContain('class="v2-bf-rank t-comfortable"');
+    expect((panel2.match(/class="v2-bf-rank-col"/g) ?? []).length).toBe(2);
+    expect((panel2.match(/class="v2-bf-rank-row"/g) ?? []).length).toBe(8); // all 8, no fold
+    expect(panel2).not.toContain('class="v2-bf-rank-row rest"');
+  });
+
+  it("(f) 2026-07-25 regression: a 14-port slice (the exact reported-bug scenario) renders ALL 14 ports individually, no silent drop, no fold row", () => {
+    // 7 land + 7 sea = 14 combined — the previous implementation's bug capped
+    // the combined rank list at rowsPerPage (7) and silently dropped the other 6.
+    const rows = [
+      ...Array.from({ length: 7 }, (_, i) =>
+        popRow({ xrayImageId: `L-${i}`, portName: `بر ${i}`, portType: "منفذ بري" }),
+      ),
+      ...Array.from({ length: 7 }, (_, i) =>
+        popRow({ xrayImageId: `S-${i}`, portName: `بحر ${i}`, portType: "منفذ بحري" }),
+      ),
+    ];
+    const model = buildReportModel(input(rows));
+    const builders = portPopulationSlideBuilders(model, true);
+    const html = builders[0](6, 20);
+    const start = html.indexOf('data-variant-index="2"');
+    const end = html.indexOf('data-variant-index="3"');
+    const panel2 = html.slice(start, end);
+    // briefingRankPlan(14): densest step (2 cols, dense 30px, cap 14) — exactly full, no fold.
+    expect(panel2).toContain('class="v2-bf-rank t-dense"');
+    expect((panel2.match(/class="v2-bf-rank-row"/g) ?? []).length).toBe(14);
+    expect(panel2).not.toContain('class="v2-bf-rank-row rest"');
+    for (let i = 0; i < 7; i++) {
+      expect(panel2).toContain(`بر ${i}`);
+      expect(panel2).toContain(`بحر ${i}`);
+    }
+    // Basis chip states the "all shown" form, not the "folded" form.
+    expect(panel2).toContain("جميع منافذ الصفحة");
+  });
+
+  it("(g) 2026-07-25: a 20-port slice folds the tail into one remainder row, and the completeness invariant holds — Σ(shown values) === the basis chip's stated total", () => {
+    const rows = [
+      ...Array.from({ length: 10 }, (_, i) =>
+        popRow({ xrayImageId: `L-${i}`, portName: `بر ${i}`, portType: "منفذ بري" }),
+      ),
+      ...Array.from({ length: 10 }, (_, i) =>
+        popRow({ xrayImageId: `S-${i}`, portName: `بحر ${i}`, portType: "منفذ بحري" }),
+      ),
+    ];
+    const model = buildReportModel(input(rows));
+    const builders = portPopulationSlideBuilders(model, true);
+    const html = builders[0](6, 20);
+    const start = html.indexOf('data-variant-index="2"');
+    const end = html.indexOf('data-variant-index="3"');
+    const panel2 = html.slice(start, end);
+    // briefingRankPlan(20): densest tier caps at 14 total slots → 13 named + 1 remainder.
+    expect((panel2.match(/class="v2-bf-rank-row(?: rest)?"/g) ?? []).length).toBe(14);
+    expect((panel2.match(/class="v2-bf-rank-row rest"/g) ?? []).length).toBe(1);
+    expect(panel2).toContain("بقية المنافذ (7)"); // 20 - 13 named = 7 folded
+    // Every rendered row's value (rank rows + the remainder row) is 1 image each,
+    // so the total across all 20 real ports is 20 — same number the basis chip states.
+    const values = [...panel2.matchAll(/<span class="v2-bf-rank-value">(\d+)<\/span>/g)].map((m) => Number(m[1]));
+    const sumShown = values.reduce((s, v) => s + v, 0);
+    expect(sumShown).toBe(20);
+    expect(panel2).toContain("إجمالي 20 صورة");
+    expect(panel2).toContain("أعلى 13 من");
+  });
+});
+
+describe("briefingRankPlan (2026-07-25, deck2-design-systems design ruling)", () => {
+  it("follows the exact ladder from n=0 through the densest tier's capacity (n=14), never folding", () => {
+    const cases: Array<[number, ReturnType<typeof briefingRankPlan>["tier"], 1 | 2, number]> = [
+      [1, "comfortable", 1, 44],
+      [5, "comfortable", 1, 44],
+      [6, "compact", 1, 36],
+      [7, "comfortable", 2, 44],
+      [10, "comfortable", 2, 44],
+      [11, "compact", 2, 36],
+      [12, "compact", 2, 36],
+      [13, "dense", 2, 30],
+      [14, "dense", 2, 30],
+    ];
+    for (const [n, tier, columns, rowH] of cases) {
+      const plan = briefingRankPlan(n);
+      expect(plan).toMatchObject({ tier, columns, rowH, named: n, folded: 0 });
+    }
+  });
+
+  it("folds beyond n=14, never folding exactly 1 item", () => {
+    for (const n of [15, 16, 20, 24]) {
+      const plan = briefingRankPlan(n);
+      expect(plan.named).toBe(13);
+      expect(plan.folded).toBe(n - 13);
+      expect(plan.folded).toBeGreaterThanOrEqual(2); // never fold exactly one
+    }
+  });
+
+  it("every plan fits inside the 264px rank-list budget: rowsPerColumn × rowH + (rowsPerColumn-1) × 5 <= 264", () => {
+    for (let n = 0; n <= 30; n++) {
+      const plan = briefingRankPlan(n);
+      const used = plan.rowsPerColumn * plan.rowH + Math.max(0, plan.rowsPerColumn - 1) * 5;
+      expect(used).toBeLessThanOrEqual(264);
+    }
   });
 });

@@ -91,7 +91,18 @@ function svgOpen(w: number, h: number, title: string): string {
     `width="100%" height="100%" font-family='${FONT_FAMILY}' ` +
     // aria-hidden: the paired <table> below carries the semantics (see header).
     `aria-hidden="true" focusable="false" ` +
-    `style="${PRINT_EXACT}display:block" data-chart="${escText(title)}">`
+    // direction:ltr is load-bearing, not decorative (2026-07-25 fix): the
+    // wrapping <figure dir="rtl"> below is required for the paired
+    // screen-reader <table>'s semantics (header note 3), but `dir` is
+    // inherited via CSS `direction`, and SVG's own `text-anchor:start|end`
+    // resolves against the *inline base direction* (header note 1) — with
+    // nothing stopping the inheritance, every text-anchor="end"/"start" in
+    // this file silently mirrored, rendering row/column labels off-canvas.
+    // Confirmed live: without this, the shipped percentHeatmap AND this
+    // module's other charts were already rendering clipped labels in
+    // production. This one declaration is what actually enforces the header
+    // comment's rule, not just documents it.
+    `style="${PRINT_EXACT}display:block;direction:ltr" data-chart="${escText(title)}">`
   );
 }
 

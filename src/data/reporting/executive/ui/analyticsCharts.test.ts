@@ -298,6 +298,12 @@ describe("percentHeatmap", () => {
     expect(html).toContain("أقل");
   });
 
+  it("forces direction:ltr on the <svg> so text-anchor isn't mirrored by the wrapping dir=\"rtl\" <figure> (2026-07-25 regression — this silently clipped every row/column label off-canvas in production before the fix)", () => {
+    const html = percentHeatmap(MATRIX, { width: 460, height: 220, caption: "جودة الصور" });
+    const svgOpenTag = html.slice(html.indexOf("<svg"), html.indexOf(">", html.indexOf("<svg")) + 1);
+    expect(svgOpenTag).toContain("direction:ltr");
+  });
+
   it("orders columns RIGHT-to-LEFT — cols[0] is painted at the right edge", () => {
     const html = percentHeatmap(
       { rows: ["ص"], cols: ["أول", "ثانٍ", "ثالث"], values: [[10, 50, 90]] },
@@ -511,6 +517,12 @@ describe("metricMatrix", () => {
     // cell ink is always var(--navy) (cssVar("surface")) — theme-invariant,
     // never currentColor, since every fill here is opaque.
     expect(html).toContain('fill="var(--navy)"');
+  });
+
+  it("forces direction:ltr on the <svg> so row-label text-anchor=\"end\" isn't mirrored off-canvas by the wrapping dir=\"rtl\" <figure> (2026-07-25 regression, shared root cause with percentHeatmap's own fix)", () => {
+    const html = metricMatrix(NORMAL, { width: 460, height: 220, caption: "مصفوفة المنافذ" });
+    const svgOpenTag = html.slice(html.indexOf("<svg"), html.indexOf(">", html.indexOf("<svg")) + 1);
+    expect(svgOpenTag).toContain("direction:ltr");
   });
 
   it("renders a — cell for a null/undefined/NaN value, never a fake number", () => {

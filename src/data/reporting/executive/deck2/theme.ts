@@ -1070,7 +1070,12 @@ body.theme-light .v2-risk-tile-foot{background:rgba(10,45,74,.035);border-color:
 .v2-lg-table-card-title{font-size:.8rem;font-weight:800;color:#fff;margin-bottom:8px;}
 body.theme-light .v2-cbar-label,body.theme-light .v2-cbar-value{color:#0a2d4a;}
 body.theme-light .v2-cbar-track{background:#eef2f6;border-color:#dde4ea;}
-body.theme-light .v2-level-row-num{color:#fff;}
+/* No light-theme override for .v2-level-row-num's ink: --gold/--blue/--green/
+   --coral don't change value between themes, so var(--navy) (the base rule's
+   color) already has good contrast in both — a previous color:#fff override
+   here made this ~1.86:1 (barely readable) in light theme; removed as a real
+   bug fix, 2026-07-25, alongside the same mistake caught on the new
+   .v2-lg-idx/.v2-bf-rank-num (design-systems Task 2). */
 body.theme-light .v2-level-table-card .deck-table tfoot td,
 body.theme-light .v2-lg-table-card .deck-table tfoot td{color:#0a2d4a;}
 body.theme-light .v2-lg-table-card-title{color:#0a2d4a;}
@@ -1325,7 +1330,9 @@ body.theme-light .v2-src-card{background-image:var(--v2-hex-tex-light),none;back
    slides.ts — this card opts out of that mechanism entirely). */
 .v2-lg-port-card.compact .deck-table th,.v2-lg-port-card.compact .deck-table td{padding:5px 9px;font-size:.68rem;}
 .v2-lg-port-card.compact .v2-lg-idx{width:16px;height:16px;font-size:.58rem;margin-inline-end:6px;}
-body.theme-light .v2-lg-idx{color:#fff;}
+/* No light-theme ink override — same reasoning as .v2-level-row-num above:
+   the tone backgrounds don't change value between themes, so var(--navy)
+   already has good contrast in both. */
 body.theme-light .v2-lg-port-card{background:#fff;border-color:#dde4ea;box-shadow:0 6px 16px rgba(10,45,74,.06);}
 body.theme-light .v2-lg-port-card .deck-table tfoot td{color:#0a2d4a;background:rgba(10,45,74,.05);border-top-color:rgba(10,45,74,.15);}
 
@@ -1351,12 +1358,29 @@ body.theme-light .v2-lg-port-card .deck-table tfoot td{color:#0a2d4a;background:
   font-size:.68rem;font-weight:700;color:var(--slate);
   border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.03);
 }
-/* Ranked-bar list — the shared skeleton \`.v2-cbar-row\` was repointed here per
-   the design spec's reuse verdicts (add rank numeral + a secondary figure,
-   \`stageCompareBars\`/\`.v2-cbar*\` itself stays untouched on slide-risk-stages). */
-.v2-bf-rank{display:flex;flex-direction:column;gap:5px;flex:1;min-height:0;justify-content:center;}
-.v2-bf-rank-row{display:flex;align-items:center;gap:10px;height:44px;}
-.v2-bf-rank.compact .v2-bf-rank-row{height:36px;}
+/* Ranked-bar list — a labeled-bar-plus-value skeleton in the same spirit as
+   the shared \`.v2-cbar-row\` (a peer review, 2026-07-25, correctly caught
+   that this is a parallel reimplementation, not a repoint of that class —
+   \`.v2-cbar*\` is untouched and \`stageCompareBars\`/slide-risk-stages keep
+   rendering it directly; a genuine shared-class repoint is a follow-up worth
+   doing, not done here to avoid touching that already-shipped page's CSS
+   mid-fix). \`.v2-bf-rank-row\` adds a rank numeral + a secondary figure that
+   \`.v2-cbar-row\` doesn't have.
+   Density (1-vs-2 columns, row-height tier) is entirely decided by
+   \`briefingRankPlan\` (slideKit.ts) and expressed here only as a \`.t-*\` tier
+   class plus however many \`.v2-bf-rank-col\` children the caller renders — no
+   page-specific CSS. \`flex:0 0 var(--bf-row-h)\` is the 2026-07-25 fix for a
+   real bug: \`flex:1\` on a row let flexbox silently squash rows below their
+   declared height to make everything fit, which is exactly the "silently
+   drops information" failure this whole system was rebuilt to avoid — the
+   TS capacity math is what must guarantee no overflow now, not shrinkage. */
+.v2-bf-rank{display:flex;gap:18px;flex:1 1 auto;min-height:0;align-items:stretch;}
+.v2-bf-rank-col{display:flex;flex-direction:column;gap:5px;flex:1 1 0;min-width:0;justify-content:center;}
+.v2-bf-rank-row{display:flex;align-items:center;gap:10px;flex:0 0 var(--bf-row-h);height:var(--bf-row-h);}
+.v2-bf-rank.t-comfortable{--bf-row-h:44px;}
+.v2-bf-rank.t-compact{--bf-row-h:36px;}
+.v2-bf-rank.t-dense{--bf-row-h:30px;gap:14px;}
+.v2-bf-rank.t-dense .v2-bf-rank-row{gap:8px;}
 .v2-bf-rank-num{
   display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;
   width:22px;height:22px;border-radius:50%;font-size:.68rem;font-weight:900;
@@ -1364,39 +1388,72 @@ body.theme-light .v2-lg-port-card .deck-table tfoot td{color:#0a2d4a;background:
 }
 .v2-bf-rank-num.gold{background:var(--gold);} .v2-bf-rank-num.blue{background:var(--blue);}
 .v2-bf-rank-num.green{background:var(--green);} .v2-bf-rank-num.coral{background:var(--coral);}
-.v2-bf-rank.compact .v2-bf-rank-num{width:18px;height:18px;font-size:.6rem;}
+.v2-bf-rank.t-compact .v2-bf-rank-num{width:19px;height:19px;font-size:.64rem;}
+.v2-bf-rank.t-dense .v2-bf-rank-num{width:17px;height:17px;font-size:.6rem;}
+/* Remainder row ("+N أخرى"): muted hollow numeral (visually NOT a rank),
+   hatched track fill (visually NOT a peer port) — the printed value is the
+   authority, per the design ruling's completeness invariant (Σ shown values
+   === the basis chip's total, in both the folded and unfolded case). */
+.v2-bf-rank-num:not(.gold):not(.blue):not(.green):not(.coral){
+  background:transparent;border:1.5px dashed rgba(255,255,255,.35);color:var(--slate);
+}
 .v2-bf-rank-label{
   flex:0 0 auto;width:150px;font-size:.78rem;font-weight:700;color:#fff;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
+.v2-bf-rank.t-compact .v2-bf-rank-label{width:140px;font-size:.74rem;}
+.v2-bf-rank.t-dense .v2-bf-rank-label{width:118px;font-size:.7rem;}
+.v2-bf-rank-row.rest .v2-bf-rank-label{color:var(--slate);font-style:italic;}
 .v2-bf-rank-track{
   flex:1 1 auto;height:20px;border-radius:6px;background:rgba(255,255,255,.08);
   border:1px solid rgba(255,255,255,.12);overflow:hidden;position:relative;
 }
+.v2-bf-rank.t-compact .v2-bf-rank-track{height:17px;}
+.v2-bf-rank.t-dense .v2-bf-rank-track{height:14px;}
 .v2-bf-rank-fill{position:absolute;inset-inline-end:0;top:0;height:100%;border-radius:6px;}
 .v2-bf-rank-fill.gold{background:var(--gold);} .v2-bf-rank-fill.blue{background:var(--blue);}
 .v2-bf-rank-fill.green{background:var(--green);} .v2-bf-rank-fill.coral{background:var(--coral);}
+.v2-bf-rank-fill.rest{
+  background:repeating-linear-gradient(45deg,var(--slate),var(--slate) 3px,transparent 3px,transparent 7px);
+  opacity:.6;
+}
 .v2-bf-rank-value{
   flex:0 0 auto;min-width:48px;text-align:left;font-size:.8rem;font-weight:900;
   color:#fff;font-variant-numeric:tabular-nums;
 }
+.v2-bf-rank.t-compact .v2-bf-rank-value{min-width:46px;font-size:.76rem;}
+.v2-bf-rank.t-dense .v2-bf-rank-value{min-width:44px;font-size:.7rem;}
 .v2-bf-rank-secondary{
   flex:0 0 auto;min-width:74px;text-align:left;font-size:.66rem;font-weight:700;
   color:var(--slate);font-variant-numeric:tabular-nums;
 }
+.v2-bf-rank.t-compact .v2-bf-rank-secondary{min-width:70px;font-size:.64rem;}
+.v2-bf-rank.t-dense .v2-bf-rank-secondary{min-width:66px;font-size:.62rem;}
 /* Briefing's own dressing of the shared .v2-totals-band/.v2-totals-item
    support-strip component (design spec: one markup component, restyled per
    system) — tighter than slot 0's risk-stages usage since Briefing's row
-   budget is the tightest of the three systems. */
+   budget is the tightest of the three systems. Unconditional per the design
+   ruling (it was previously and wrongly dropped on a signal — planPortPages'
+   table-geometry \`compact\` — that had no bearing on Briefing's own budget). */
 .v2-sys-brief .v2-totals-band{margin-top:0;gap:10px;}
 .v2-sys-brief .v2-totals-item{padding:8px 12px;border-radius:10px;}
 .v2-sys-brief .v2-totals-item b{font-size:1rem;}
 .v2-sys-brief .v2-totals-item small{font-size:.62rem;}
 body.theme-light .v2-bf-lede-label{color:#0a2d4a;}
 body.theme-light .v2-bf-lede-basis{color:#607386;border-color:#dde4ea;background:#fff;}
-body.theme-light .v2-bf-rank-num{color:#fff;}
+/* No light-theme ink override for the tone-numbered rank badges — same
+   reasoning as .v2-level-row-num/.v2-lg-idx above (var(--navy) already
+   contrasts well against every tone in both themes). The remainder-row
+   numeral (no tone class) keeps its own dedicated override below. */
+body.theme-light .v2-bf-rank-num:not(.gold):not(.blue):not(.green):not(.coral){
+  background:transparent;border-color:rgba(10,45,74,.3);color:#607386;
+}
 body.theme-light .v2-bf-rank-label{color:#0a2d4a;}
+body.theme-light .v2-bf-rank-row.rest .v2-bf-rank-label{color:#607386;}
 body.theme-light .v2-bf-rank-track{background:#eef2f6;border-color:#dde4ea;}
+body.theme-light .v2-bf-rank-fill.rest{
+  background:repeating-linear-gradient(45deg,#607386,#607386 3px,transparent 3px,transparent 7px);
+}
 body.theme-light .v2-bf-rank-value{color:#0a2d4a;}
 body.theme-light .v2-bf-rank-secondary{color:#607386;}
 
@@ -1408,16 +1465,19 @@ body.theme-light .v2-bf-rank-secondary{color:#607386;}
    metricMatrix cells, each column normalized to its OWN domain, ink always
    navy (theme-invariant — see metricMatrix's own doc comment). ──────────── */
 .v2-sys-grid{height:100%;}
-/* grid-template-rows:minmax(0,1fr) is load-bearing, not decorative: with only
-   grid-template-columns set, the single implicit row auto-sizes to its
-   tallest item's CONTENT height instead of the grid's own height — and since
-   that content is an SVG figure asking for height:100% of an otherwise-
-   indefinite ancestor, the two resolve circularly to whatever the SVG's
-   intrinsic aspect ratio produces, overflowing .slide-body's fixed budget
-   (measured during this task's own visual QA: ~350px of clipping without
-   this rule). minmax(0,1fr) forces the row to the container's real height,
-   which is what lets .v2-gd-panel/.v2-gd-panel-chart's flex/percent chain
-   below correctly bound the figure instead. */
+/* grid-template-rows:minmax(0,1fr): kept as a defensive declaration, NOT
+   because it's currently load-bearing — a peer review (2026-07-25)
+   independently re-tested by toggling this property live and found zero
+   height/overflow difference with the current \`.v2-gd-panel\`/
+   \`.v2-gd-panel-chart\` flex/min-height:0 chain, which already bounds the
+   figure correctly on its own. An earlier draft of this comment claimed a
+   ~350px clip this rule fixed; that measurement was very likely the same
+   348px sr-only accessible-table false-positive this task's own visual-QA
+   process separately (and correctly) identified and excluded elsewhere —
+   i.e. probably never a real bug. The declaration is harmless and documents
+   intent (an explicit row height contract, not an implicit auto-size one),
+   so it stays; do not cite it as fixing a reproduced defect without
+   re-verifying first. */
 .v2-gd-split{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:minmax(0,1fr);gap:20px;height:100%;}
 .v2-gd-panel{
   display:flex;flex-direction:column;gap:8px;min-width:0;min-height:0;

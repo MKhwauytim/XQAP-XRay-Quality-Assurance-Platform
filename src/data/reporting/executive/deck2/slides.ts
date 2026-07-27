@@ -30,6 +30,7 @@ import {
   STAGE_TONES,
   badgeIcon,
   barCell,
+  briefingRankPlan,
   collectPortStats,
   fillerRow,
   frac,
@@ -39,6 +40,7 @@ import {
   pad,
   pctCell,
   planPortPages,
+  portCountPhrase,
   qualCell,
   rateOf,
   renderVariants,
@@ -938,12 +940,16 @@ function ledgerPortTable(title: string, rows: PortPopRow[], variant: "land" | "s
  * `compact` is `plan.compact` from `planPortPages` — the SAME tier signal
  * `portTable()`'s own `compact` param already reads, not a new one.
  */
-function briefingPortRank(
-  landChunk: PortPopRow[],
-  seaChunk: PortPopRow[],
-  compact: boolean,
-  rowsPerPage: number,
-): string {
+/**
+ * Briefing system (slot 2) body for the port-population page. Density is
+ * entirely delegated to `briefingRankPlan` (slideKit.ts) — this function
+ * never re-derives a row budget or reads slot-0's table-geometry plan
+ * (`planPortPages`'s `compact`/`rowsPerPage` are a PER-COLUMN table budget;
+ * this is a COMBINED ranked list, a category error that silently dropped
+ * rows in this function's first version — see the 2026-07-25 design-advisor
+ * ruling this rewrite implements verbatim).
+ */
+function briefingPortRank(landChunk: PortPopRow[], seaChunk: PortPopRow[]): string {
   const combined = [...landChunk, ...seaChunk].sort((a, b) => b.total - a.total);
   if (combined.length === 0) {
     return `<div class="v2-sys-brief v2-bf-port-population">
@@ -953,33 +959,63 @@ function briefingPortRank(
   const lead = combined[0];
   const sliceTotal = combined.reduce((s, p) => s + p.total, 0);
   const maxMag = maxOf(combined.map((p) => p.total));
-  const shown = combined.slice(0, rowsPerPage);
-  const rankRows = shown
-    .map(
-      (p, i) => `<div class="v2-bf-rank-row">
+  const plan = briefingRankPlan(combined.length);
+  const namedRows = combined.slice(0, plan.named);
+  const restRows = combined.slice(plan.named);
+
+  const rowHtml = (i: number, p: PortPopRow) => `<div class="v2-bf-rank-row">
         <span class="v2-bf-rank-num gold">${i + 1}</span>
         <span class="v2-bf-rank-label">${esc(p.name)}</span>
         <span class="v2-bf-rank-track"><i class="v2-bf-rank-fill gold" style="width:${((p.total / maxMag) * 100).toFixed(1)}%"></i></span>
         <span class="v2-bf-rank-value">${fmtNum(p.total)}</span>
         <span class="v2-bf-rank-secondary">اشتباه ${fmtNum(p.suspicious)}</span>
-      </div>`,
-    )
-    .join("");
-  const supportStrip = compact
-    ? ""
-    : `<div class="v2-totals-band">
-        <div class="v2-totals-item"><span class="v2-totals-icon">${icon("port", 16)}</span><span><b>${fmtNum(combined.length)}</b><small>عدد المنافذ في هذه الصفحة</small></span></div>
-        <div class="v2-totals-item"><span class="v2-totals-icon">${icon("check", 16)}</span><span><b>${fmtNum(combined.reduce((s, p) => s + p.clean, 0))}</b><small>إجمالي الصور السليمة</small></span></div>
-        <div class="v2-totals-item"><span class="v2-totals-icon">${icon("alert", 16)}</span><span><b>${fmtNum(combined.reduce((s, p) => s + p.suspicious, 0))}</b><small>إجمالي صور الاشتباه</small></span></div>
       </div>`;
+
+  const allRows = namedRows.map((p, i) => rowHtml(i, p));
+  if (plan.folded > 0) {
+    const restTotal = restRows.reduce((s, p) => s + p.total, 0);
+    const restSuspicious = restRows.reduce((s, p) => s + p.suspicious, 0);
+    const restPct = Math.min(100, (restTotal / maxMag) * 100);
+    allRows.push(`<div class="v2-bf-rank-row rest">
+        <span class="v2-bf-rank-num">+</span>
+        <span class="v2-bf-rank-label">بقية المنافذ (${fmtNum(plan.folded)})</span>
+        <span class="v2-bf-rank-track"><i class="v2-bf-rank-fill rest" style="width:${restPct.toFixed(1)}%"></i></span>
+        <span class="v2-bf-rank-value">${fmtNum(restTotal)}</span>
+        <span class="v2-bf-rank-secondary">اشتباه ${fmtNum(restSuspicious)}</span>
+      </div>`);
+  }
+  // First (rightmost, RTL) column gets ranks 1…K top-to-bottom; second column
+  // gets the rest — per the design ruling, not a naive interleave.
+  const totalRowsShown = allRows.length;
+  const firstColCount = plan.columns === 1 ? totalRowsShown : Math.ceil(totalRowsShown / 2);
+  const cols =
+    plan.columns === 1
+      ? [allRows]
+      : [allRows.slice(0, firstColCount), allRows.slice(firstColCount)];
+  const colsHtml = cols
+    .map((colRows) => `<div class="v2-bf-rank-col">${colRows.join("")}</div>`)
+    .join("");
+
+  const cleanTotal = combined.reduce((s, p) => s + p.clean, 0);
+  const suspiciousTotal = combined.reduce((s, p) => s + p.suspicious, 0);
+  const suspicionRate = rateOf(suspiciousTotal, sliceTotal);
+  const supportStrip = `<div class="v2-totals-band">
+        <div class="v2-totals-item"><span class="v2-totals-icon">${icon("check", 16)}</span><span><b>${fmtNum(cleanTotal)}</b><small>إجمالي الصور السليمة</small></span></div>
+        <div class="v2-totals-item"><span class="v2-totals-icon">${icon("alert", 16)}</span><span><b>${fmtNum(suspiciousTotal)}</b><small>إجمالي صور الاشتباه</small></span></div>
+        <div class="v2-totals-item"><span class="v2-totals-icon">${icon("gauge", 16)}</span><span><b>${pctCell(suspicionRate)}</b><small>نسبة الاشتباه للصفحة</small></span></div>
+      </div>`;
+  const basis =
+    plan.folded > 0
+      ? `أعلى ${fmtNum(plan.named)} من ${portCountPhrase(combined.length)} · البقية مجمّعة · إجمالي ${fmtNum(sliceTotal)} صورة`
+      : `جميع منافذ الصفحة (${portCountPhrase(combined.length)}) · إجمالي ${fmtNum(sliceTotal)} صورة`;
   return `<div class="v2-sys-brief v2-bf-port-population">
     <div class="v2-bf-lede">
       <div class="v2-bf-lede-figure gold">${fmtNum(lead.total)}</div>
       <div class="v2-bf-lede-label">أعلى منفذ: ${esc(lead.name)} — ${fmtNum(lead.total)} صورة</div>
-      <div class="v2-bf-lede-basis">من إجمالي ${fmtNum(sliceTotal)} صورة ضمن هذه الصفحة</div>
+      <div class="v2-bf-lede-basis">${basis}</div>
     </div>
     ${supportStrip}
-    <div class="v2-bf-rank${compact ? " compact" : ""}">${rankRows}</div>
+    <div class="v2-bf-rank t-${plan.tier}">${colsHtml}</div>
   </div>`;
 }
 
@@ -1046,7 +1082,7 @@ export function portPopulationSlideBuilders(model: ReportModel, variantPreview: 
     builders.push((num, total) => {
       const body = `<div class="v2-port-split">${portTable("المنافذ البرية", landChunk, "population", "land", plan.compact)}${portTable("المنافذ البحرية", seaChunk, "population", "sea", plan.compact)}</div>`;
       const ledgerBody = `<div class="v2-sys-ledger v2-lg-port-population"><div class="v2-lg-split">${ledgerPortTable("المنافذ البرية", landChunk, "land", plan.compact)}${ledgerPortTable("المنافذ البحرية", seaChunk, "sea", plan.compact)}</div></div>`;
-      const briefingBody = briefingPortRank(landChunk, seaChunk, plan.compact, plan.rowsPerPage);
+      const briefingBody = briefingPortRank(landChunk, seaChunk);
       const gridBody = `<div class="v2-sys-grid v2-gd-port-population"><div class="v2-gd-split">${gridPortMatrix("المنافذ البرية", landChunk, "land", plan.compact)}${gridPortMatrix("المنافذ البحرية", seaChunk, "sea", plan.compact)}</div></div>`;
       return v2Slide({
         id: `slide-port-population-${page + 1}`,

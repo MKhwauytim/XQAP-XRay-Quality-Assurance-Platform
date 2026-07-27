@@ -579,6 +579,95 @@ export function planPortPages(landCount: number, seaCount: number, baseRowsPerPa
   return { pages: Math.ceil(maxCount / baseRowsPerPage), rowsPerPage: baseRowsPerPage, compact: false };
 }
 
+/**
+ * Briefing system (slot 2 — الإحاطة)'s ranked-list density plan — a
+ * page-agnostic contract every Briefing page calls instead of re-deriving its
+ * own row budget (2026-07-25 fix; see
+ * docs/superpowers/specs/2026-07-25-deck2-design-systems-design.md and the
+ * design-advisor ruling that replaced this task's first, buggy attempt,
+ * which borrowed `planPortPages`'s PER-COLUMN table-geometry budget for a
+ * COMBINED ranked list and silently dropped rows past it).
+ *
+ * Budget (measured against the real 459px `.slide-body`): lede 112 + support
+ * strip 55 + 2×14 flex gaps = 181, leaving H=278... — see the design ruling;
+ * shipped constant is 264 (the ruling's own arithmetic, kept verbatim so a
+ * future re-measurement has one place to update). Row gap is 5px at every
+ * tier, so per-column capacity is floor((264+5)/(rowH+5)).
+ *
+ * The ladder tries, in order: 1 col @44px (cap 5) → 1 col @36px (cap 6) →
+ * 2 cols @44px (cap 10) → 2 cols @36px (cap 12) → 2 cols @30px (cap 14,
+ * the floor — Arabic descenders/nuqat start colliding with the row below
+ * this size, a geometric fact, not a taste call). Beyond 14, the tail folds
+ * into one aggregating remainder row (never exactly 1 folded item — the
+ * densest tier's capacity is sized so folding only ever starts at a 2+
+ * remainder). Two columns is a hard cap: a third would shorten the bar
+ * tracks past the point where magnitude comparison works, which would make
+ * this Grid, not Briefing.
+ */
+export type BriefingRankPlan = {
+  tier: "comfortable" | "compact" | "dense";
+  rowH: 44 | 36 | 30;
+  columns: 1 | 2;
+  rowsPerColumn: number;
+  /** How many items get their own named row. */
+  named: number;
+  /** How many items fold into the single trailing remainder row (0 = none). */
+  folded: number;
+};
+
+const BRIEFING_RANK_BUDGET_PX = 264;
+const BRIEFING_RANK_ROW_GAP_PX = 5;
+const BRIEFING_RANK_DENSEST_CAP = 14;
+const BRIEFING_RANK_NAMED_WHEN_FOLDED = 13;
+
+function capFor(rowH: number, columns: 1 | 2): number {
+  const perColumn = Math.floor((BRIEFING_RANK_BUDGET_PX + BRIEFING_RANK_ROW_GAP_PX) / (rowH + BRIEFING_RANK_ROW_GAP_PX));
+  return perColumn * columns;
+}
+
+export function briefingRankPlan(n: number): BriefingRankPlan {
+  const ladder: Array<{ tier: BriefingRankPlan["tier"]; rowH: 44 | 36 | 30; columns: 1 | 2 }> = [
+    { tier: "comfortable", rowH: 44, columns: 1 },
+    { tier: "compact", rowH: 36, columns: 1 },
+    { tier: "comfortable", rowH: 44, columns: 2 },
+    { tier: "compact", rowH: 36, columns: 2 },
+    { tier: "dense", rowH: 30, columns: 2 },
+  ];
+  for (const step of ladder) {
+    const cap = capFor(step.rowH, step.columns);
+    if (n <= cap) {
+      return {
+        tier: step.tier,
+        rowH: step.rowH,
+        columns: step.columns,
+        rowsPerColumn: Math.ceil(n / step.columns),
+        named: n,
+        folded: 0,
+      };
+    }
+  }
+  // Beyond the densest tier's capacity: fold the tail into one remainder row.
+  const named = BRIEFING_RANK_NAMED_WHEN_FOLDED;
+  return {
+    tier: "dense",
+    rowH: 30,
+    columns: 2,
+    rowsPerColumn: Math.ceil(BRIEFING_RANK_DENSEST_CAP / 2),
+    named,
+    folded: n - named,
+  };
+}
+
+/** Arabic تمييز (numeral-noun agreement) for "N ports" — 1/2/3-10/11+ each
+ *  take a different noun form; getting this wrong reads as sloppy to a
+ *  fluent reader in a way an English "N port(s)" mistake never would. */
+export function portCountPhrase(n: number): string {
+  if (n === 1) return "منفذ واحد";
+  if (n === 2) return "منفذان";
+  if (n >= 3 && n <= 10) return `${n} منافذ`;
+  return `${n} منفذًا`;
+}
+
 /** Denominator-gated rate — null (renders "—") when there's nothing to divide by. */
 export function rateOf(num: number, den: number): number | null {
   return den > 0 ? (num / den) * 100 : null;
