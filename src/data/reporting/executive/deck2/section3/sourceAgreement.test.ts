@@ -7,6 +7,7 @@ import type { SampleMasterData } from "../../../../sampling/sampleTypes";
 import type { ExecutiveReportInput } from "../../../executiveReportTypes";
 import { DEFAULT_EXEC_CONFIG } from "../../../executiveReportTypes";
 import { buildReportModel } from "../../model/reportModel";
+import { BASE_ROWS_PER_PAGE, COMPRESS_OVERFLOW_MAX } from "../slideKit";
 import { SOURCE_AGREEMENT_CSS, sourceAgreementSlide } from "./sourceAgreement";
 
 const NOW = "2026-06-01T00:00:00.000Z";
@@ -327,5 +328,338 @@ describe("sourceAgreementSlide — structure & determinism", () => {
     expect(SOURCE_AGREEMENT_CSS).toContain(".s3sa-ngrid");
     expect(SOURCE_AGREEMENT_CSS).toContain(".s3sa-foot");
     expect(SOURCE_AGREEMENT_CSS).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Ledger / Briefing / Grid fan-out (fan-out plan §11d, batch B3 item 2)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Isolate one variant panel's HTML — same technique deck2.test.ts /
+ *  fanoutB2a.test.ts / fanoutB3StagePort.test.ts all use. */
+function panelSlice(html: string, index: 0 | 1 | 2 | 3): string {
+  const start = html.indexOf(`data-variant-index="${index}"`);
+  expect(start).toBeGreaterThan(-1);
+  if (index === 3) return html.slice(start);
+  const end = html.indexOf(`data-variant-index="${index + 1}"`);
+  expect(end).toBeGreaterThan(start);
+  return html.slice(start, end);
+}
+
+function renderPreview(inp: ExecutiveReportInput): string {
+  return sourceAgreementSlide(buildReportModel(inp), 12, 24, true);
+}
+
+const SCOPE_TEXT =
+  "المقارنات التي تشمل «المراجع» تقتصر على صور العيّنة المدروسة؛ وما عداها يشمل مجتمع الشهر كاملًا.";
+const LEVEL_TEXT = "«المستوى الأول» و«المستوى الثاني» هنا هما مستويا فحص الأشعة، وليسا مستويات المخاطر الأربعة.";
+
+describe("sourceAgreementSlide — Ledger (panel 1)", () => {
+  it("renders a 15-pair table split 8/7 across two sub-tables, beside the reviewer table, in a v2-lg-split layout", () => {
+    const { rows, reviews } = knownProfile();
+    const html = renderPreview(input(rows, { sample: true, reviews }));
+    const panel = panelSlice(html, 1);
+
+    expect(panel).toContain('class="v2-sys-ledger s3sa-lg"');
+    expect(panel).toContain('class="v2-lg-split"');
+    expect(panel).toContain("s3sa-lg-pairs");
+
+    const pairTables = panel.match(/class="deck-table s3sa-lg-pair-table"/g) ?? [];
+    expect(pairTables.length).toBe(2);
+
+    // 20 ordinal badges total: 15 pairs (both sub-tables) + 5 reviewer rows
+    // (ledgerPortCard's own ordinals) — the strongest structural proof all 15
+    // pairs are actually rendered, not just "a table exists".
+    expect(countOf(panel, 'class="v2-lg-idx"')).toBe(20);
+
+    // 8 + 7 split: count <tr> rows inside each sub-table's own tbody
+    // specifically (bounded to its own </table>, not the rest of the panel).
+    const subTables = [...panel.matchAll(/<table class="deck-table s3sa-lg-pair-table">[\s\S]*?<\/table>/g)].map(
+      (m) => m[0],
+    );
+    expect(subTables.length).toBe(2);
+    const rowsInA = (subTables[0].match(/<tr>/g) ?? []).length - 1; // minus the thead row
+    const rowsInB = (subTables[1].match(/<tr>/g) ?? []).length - 1;
+    expect(rowsInA).toBe(8);
+    expect(rowsInB).toBe(7);
+
+    // The reviewer table (P2 ledgerPortCard) sits beside it — 5 rows, own ordinals.
+    expect(panel).toContain("v2-lg-port-card");
+    expect(panel).toContain("المقارنة بنتيجة المراجع");
+  });
+
+  it("drops the ن grid in Ledger only — the pair table's count column already carries it", () => {
+    const { rows, reviews } = knownProfile();
+    const html = renderPreview(input(rows, { sample: true, reviews }));
+    const panel = panelSlice(html, 1);
+    expect(panel).not.toContain("s3sa-ngrid");
+  });
+
+  it("has ZERO chart markup anywhere in its panel — the strongest 'no charts in Ledger' check", () => {
+    // Small icon glyphs (e.g. threshCell's below-target alert flag) are ALSO
+    // inline <svg> — that's the deck-wide icon() convention, not a chart, and
+    // is legitimate inside Ledger (spec §2: functional colour/glyphs are
+    // Ledger-legal). The genuinely distinguishing signal is analyticsCharts.ts's
+    // OWN markup: every chart figure it builds carries a `data-chart="…"`
+    // attribute (see percentHeatmap/metricMatrix's svgOpen()) and wraps its
+    // SVG in a <figure> — neither ever appears from a plain icon() call. So
+    // checking those two markers, not a blanket "<svg", is what actually
+    // proves no chart slipped into Ledger.
+    const { rows, reviews } = knownProfile();
+    const html = renderPreview(input(rows, { sample: true, reviews }));
+    const panel = panelSlice(html, 1);
+    expect(panel).toContain("<svg"); // sanity: icon glyphs (e.g. the alert flag) DO still appear
+    expect(panel).not.toContain("<figure");
+    expect(panel).not.toContain('data-chart="');
+    expect(panel).not.toContain("percentHeatmap");
+  });
+
+  it("carries both mandatory footnotes verbatim", () => {
+    const { rows, reviews } = knownProfile();
+    const html = renderPreview(input(rows, { sample: true, reviews }));
+    const panel = panelSlice(html, 1);
+    expect(panel).toContain(SCOPE_TEXT);
+    expect(panel).toContain(LEVEL_TEXT);
+  });
+
+  it("pools a real totals line (never per-sub-column) from the summed pair counts, never averaging rates", () => {
+    const { rows, reviews } = knownProfile();
+    const model = buildReportModel(input(rows, { sample: true, reviews }));
+    const pair = model.resultComparison.crossTeamMatrix.find(
+      (c) => c.sourceA === "levelOne" && c.sourceB === "levelTwo",
+    )!;
+    expect(pair.comparable).toBe(20);
+    const html = sourceAgreementSlide(model, 12, 24, true);
+    const panel = panelSlice(html, 1);
+    // Exactly one totals line for all 15 pairs together.
+    expect(countOf(panel, "s3sa-lg-pair-totals")).toBe(1);
+  });
+
+  describe("15-row pair-table budget (worked arithmetic, not eyeballed)", () => {
+    // Measured LIVE in deck-preview.html (1120px slide width) via
+    // getBoundingClientRect on the actual rendered page, per this session's
+    // browser-driven verification (see the doc comment above
+    // `pairsLedgerCard` in sourceAgreement.ts for the full narrative,
+    // including the real bug this caught: unconstrained column auto-sizing
+    // wrapped rows to 3 lines and the pairs card visually overlapped the
+    // footnote strip below it before `table-layout:fixed` + explicit column
+    // widths were added).
+    const AVAILABLE_SPLIT_BUDGET_PX = 396; // .v2-lg-split's real available height before the mandatory footnote
+    const MEASURED_CARD_HEIGHT_PX = 290; // pairsLedgerCard's real rendered height with this fixture's data
+    const WORST_CASE_ROW_PX = 30; // measured full-2-line-wrap row height at the tightened column widths
+    const THEAD_PX = 20;
+    const ROWS_PER_SUBCOLUMN = 8; // ceil(15 / 2) — see PAIR_SPLIT_AT
+    const CARD_CHROME_PX = 60; // title + totals bar + their margins/gaps (measured)
+
+    it("the real measured card height fits the real measured split budget, with margin to spare", () => {
+      expect(MEASURED_CARD_HEIGHT_PX).toBeLessThan(AVAILABLE_SPLIT_BUDGET_PX);
+      expect(AVAILABLE_SPLIT_BUDGET_PX - MEASURED_CARD_HEIGHT_PX).toBeGreaterThan(50);
+    });
+
+    it("a synthetic worst case — every one of the 8 rows in a sub-column wraps to 2 full lines — still fits the budget", () => {
+      const worstCaseTableHeight = ROWS_PER_SUBCOLUMN * WORST_CASE_ROW_PX + THEAD_PX;
+      const worstCaseCardHeight = worstCaseTableHeight + CARD_CHROME_PX;
+      expect(worstCaseCardHeight).toBeLessThan(AVAILABLE_SPLIT_BUDGET_PX);
+    });
+
+    it("15 rows exceeds this deck's own documented single-column Ledger row ceiling — the split is load-bearing, not cosmetic", () => {
+      // BASE_ROWS_PER_PAGE + COMPRESS_OVERFLOW_MAX (slideKit.ts) is this
+      // deck's own measured, documented ceiling for how many rows a single
+      // Ledger/port table column can safely hold before it must paginate or
+      // otherwise restructure (7 base + 3 compact-tier overflow = 10). All 15
+      // pairs in one packed column would exceed that documented ceiling;
+      // splitting into 8 + 7 sub-columns brings each column's row count back
+      // under it.
+      const SINGLE_COLUMN_ROW_CEILING = BASE_ROWS_PER_PAGE + COMPRESS_OVERFLOW_MAX;
+      const ROW_COUNT = 15;
+      expect(ROW_COUNT).toBeGreaterThan(SINGLE_COLUMN_ROW_CEILING);
+      expect(ROWS_PER_SUBCOLUMN).toBeLessThanOrEqual(SINGLE_COLUMN_ROW_CEILING);
+    });
+  });
+});
+
+describe("sourceAgreementSlide — Briefing (panel 2)", () => {
+  it("ledes with the overall reviewer agreement rate (reviewerTotals' totalRate), scope-disclosure basis, tone green", () => {
+    const { rows, reviews } = knownProfile();
+    const model = buildReportModel(input(rows, { sample: true, reviews }));
+    const totalRate = model.resultComparison.reviewerAgreement.reduce(
+      (acc, r) => {
+        acc.agree += r.agree;
+        acc.comparable += r.comparable;
+        return acc;
+      },
+      { agree: 0, comparable: 0 },
+    );
+    // Sanity: the fixture's own reviewer rows sum as expected (90%/85%/— triple).
+    expect(totalRate.comparable).toBe(40); // 20 (L1×review) + 20 (L2×review); manual/opposite/liveMeans are 0
+
+    const html = sourceAgreementSlide(model, 12, 24, true);
+    const panel = panelSlice(html, 2);
+    expect(panel).toContain('class="v2-sys-brief s3sa-bf"');
+    expect(panel).toContain('<div class="v2-bf-lede-figure green">');
+    expect(panel).toContain("التوافق العام مع المراجع");
+    expect(panel).toContain("يقتصر التوافق مع المراجع على صور العيّنة المدروسة");
+  });
+
+  it("support strip carries the highest pair, lowest pair, and count of compared pairs", () => {
+    const { rows, reviews } = knownProfile();
+    const html = renderPreview(input(rows, { sample: true, reviews }));
+    const panel = panelSlice(html, 2);
+    expect(panel).toContain("أعلى زوج توافقًا");
+    expect(panel).toContain("أدنى زوج توافقًا");
+    expect(panel).toContain("عدد الأزواج المقارَنة");
+    // This fixture has exactly 3 pairs with any comparable images at all
+    // (L1×L2, L1×review, L2×review) — the other 12 (BI never provided) are 0.
+    expect(panel).toContain("<b>3</b>");
+  });
+
+  it("gate-suppressed pairs are EXCLUDED from ranking and folded into a bar-less remainder — never a fabricated rate", () => {
+    // knownProfile's manual/opposite/liveMeans sources are always null (BI
+    // never provided), so their 12 pairs (out of the 15) all have
+    // comparable=0 → band "none" → NOT rankable. Only 3 pairs (L1×L2,
+    // L1×review, L2×review) are rankable. This is a real, naturally-occurring
+    // gate-suppression case, not a contrived one.
+    const { rows, reviews } = knownProfile();
+    const model = buildReportModel(input(rows, { sample: true, reviews }));
+    const suppressedPairs = model.resultComparison.crossTeamMatrix.filter((c) => c.comparable === 0);
+    expect(suppressedPairs.length).toBe(12);
+
+    const html = sourceAgreementSlide(model, 12, 24, true);
+    const panel = panelSlice(html, 2);
+
+    // Exactly 3 REAL named rows (rank #1–3) plus 1 excluded-placeholder row =
+    // 4 total rows — small enough (briefingRankPlan's comfortable-tier cap is
+    // 5) that the density ladder never auto-folds on top of this: the
+    // excluded row below comes from THIS page's own exclusion push, not a
+    // `foldRemainder` invocation.
+    expect((panel.match(/class="v2-bf-rank-row/g) ?? []).length).toBe(4);
+
+    // The excluded pairs get their OWN row, immediately after their label,
+    // with a "—" value — never a fabricated rate. comparable=0 for every
+    // excluded pair → rateOf/gatedRate → null → pctCell renders "—".
+    expect(panel).toContain("أزواج دون حد الكفاية (12)");
+    const excludedRowMatch = panel.match(
+      /<span class="v2-bf-rank-label">أزواج دون حد الكفاية \(12\)<\/span>[\s\S]*?<span class="v2-bf-rank-value">([^<]*)<\/span>/,
+    );
+    expect(excludedRowMatch).not.toBeNull();
+    expect(excludedRowMatch![1]).toBe("—");
+    expect(panel).not.toContain("أزواج دون حد الكفاية (12)%");
+    // Its bar track (if bars render at all here) carries zero width — no
+    // fabricated magnitude either.
+    const excludedTrackMatch = panel.match(
+      /<span class="v2-bf-rank-label">أزواج دون حد الكفاية \(12\)<\/span>\s*<span class="v2-bf-rank-track"><i class="v2-bf-rank-fill \w+" style="width:([\d.]+)%">/,
+    );
+    if (excludedTrackMatch) {
+      expect(excludedTrackMatch[1]).toBe("0.0");
+    }
+  });
+
+  it("named rank rows are the 3 rankable pairs sorted by agreement rate, each with a real (non-fabricated) rate", () => {
+    const { rows, reviews } = knownProfile();
+    const html = renderPreview(input(rows, { sample: true, reviews }));
+    const panel = panelSlice(html, 2);
+    // Known profile rates: L1×L2 75%, L1×review 90%, L2×review 85% — sorted
+    // descending: 90, 85, 75.
+    const values = [...panel.matchAll(/<span class="v2-bf-rank-value">([^<]*)<\/span>/g)].map((m) => m[1]);
+    expect(values[0]).toContain("90");
+    expect(values[1]).toContain("85");
+    expect(values[2]).toContain("75");
+  });
+
+  it("carries both mandatory footnotes verbatim", () => {
+    const { rows, reviews } = knownProfile();
+    const html = renderPreview(input(rows, { sample: true, reviews }));
+    const panel = panelSlice(html, 2);
+    expect(panel).toContain(SCOPE_TEXT);
+    expect(panel).toContain(LEVEL_TEXT);
+  });
+});
+
+describe("sourceAgreementSlide — Grid (panel 3)", () => {
+  it("renders two gridPanel-wrapped panels side by side: the heatmap matrix and the reviewer metricMatrix", () => {
+    const { rows, reviews } = knownProfile();
+    const html = renderPreview(input(rows, { sample: true, reviews }));
+    const panel = panelSlice(html, 3);
+
+    expect(panel).toContain('class="v2-sys-grid s3sa-gd"');
+    expect(panel).toContain('class="v2-gd-split"');
+    // The exact panel-wrapper class only — not `v2-gd-panel-head`/`-chart`,
+    // which also start with the same "v2-gd-panel" substring.
+    expect((panel.match(/class="v2-gd-panel (matrix|reviewer)"/g) ?? []).length).toBe(2);
+    expect(panel).toContain('class="v2-gd-panel matrix"');
+    expect(panel).toContain('class="v2-gd-panel reviewer"');
+  });
+
+  it("keeps the ن grid beneath the heatmap — unlike Ledger, Grid does NOT drop it", () => {
+    const { rows, reviews } = knownProfile();
+    const html = renderPreview(input(rows, { sample: true, reviews }));
+    const panel = panelSlice(html, 3);
+    expect(panel).toContain("s3sa-ngrid");
+    expect(panel).toContain("عدد الصور القابلة للمقارنة");
+  });
+
+  it("the reviewer matrix has the right shape: 5 source rows × 4 metric columns with the plan's column names", () => {
+    const { rows, reviews } = knownProfile();
+    const html = renderPreview(input(rows, { sample: true, reviews }));
+    const panel = panelSlice(html, 3);
+
+    // Isolate the reviewer-matrix panel specifically — the HEATMAP panel
+    // legitimately lists all 6 sources (including "المراجع (المعيار)") in
+    // its own sr-table, so a whole-panel substring check would be a false
+    // negative/positive either way. The reviewer panel starts at its own
+    // gridPanel title text.
+    const revStart = panel.indexOf('class="v2-gd-panel reviewer"');
+    expect(revStart).toBeGreaterThan(-1);
+    const revHtml = panel.slice(revStart);
+
+    for (const label of [
+      "المستوى الأول",
+      "المستوى الثاني",
+      "التفتيش اليدوي",
+      "التفتيش المعاكس",
+      "الوسائل الحية",
+    ]) {
+      expect(revHtml).toContain(label);
+    }
+    // The reviewer itself is never a row in its own comparison matrix.
+    expect(revHtml).not.toContain("المراجع (المعيار)");
+    // Exactly 5 row headers in its accessible sr-table (5 sources, not 6).
+    expect((revHtml.match(/<th scope="row">/g) ?? []).length).toBe(5);
+
+    for (const col of ["التوافق مع المراجع", "اشتباه لديه–سليمة للمراجع", "سليمة لديه–اشتباه للمراجع", "العيّنة"]) {
+      expect(revHtml).toContain(col);
+    }
+    // 5 column headers total in the sr-table: the row-header column
+    // ("المصدر") plus the 4 metric columns — المجتمع/العيّنة's own base is
+    // disclosed via the panel sub-line, not encoded as a SEPARATE 6th metric
+    // column (same discipline portAgreement's Grid variant uses for its own
+    // dropped column).
+    expect((revHtml.match(/<th scope="col">/g) ?? []).length).toBe(5);
+  });
+
+  it("carries both mandatory footnotes verbatim", () => {
+    const { rows, reviews } = knownProfile();
+    const html = renderPreview(input(rows, { sample: true, reviews }));
+    const panel = panelSlice(html, 3);
+    expect(panel).toContain(SCOPE_TEXT);
+    expect(panel).toContain(LEVEL_TEXT);
+  });
+});
+
+describe("sourceAgreementSlide — the 4 systems render distinct, non-degenerate bodies", () => {
+  it("panel 0 (slot 0) is untouched (byte-identical to production), panels 1-3 are genuinely different from it and each other", () => {
+    const { rows, reviews } = knownProfile();
+    const html = renderPreview(input(rows, { sample: true, reviews }));
+    const panel0 = panelSlice(html, 0);
+    const panel1 = panelSlice(html, 1);
+    const panel2 = panelSlice(html, 2);
+    const panel3 = panelSlice(html, 3);
+    expect(panel0).toContain('class="s3sa"');
+    const bodies = [panel0, panel1, panel2, panel3];
+    for (let i = 0; i < bodies.length; i++) {
+      for (let j = i + 1; j < bodies.length; j++) {
+        expect(bodies[i]).not.toBe(bodies[j]);
+      }
+    }
   });
 });

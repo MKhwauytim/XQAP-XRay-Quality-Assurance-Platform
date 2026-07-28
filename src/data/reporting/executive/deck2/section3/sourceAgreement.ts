@@ -48,10 +48,25 @@ import type { ReportModel } from "../../model/reportModel";
 import { band, isRankable } from "../../model/dataSufficiency";
 import { esc, fmtNum, fmtPct } from "../../primitives";
 import { icon } from "../../ui/icons";
-import { percentHeatmap } from "../../ui/analyticsCharts";
+import { metricMatrix, percentHeatmap } from "../../ui/analyticsCharts";
 import type { HeatMatrix } from "../../ui/analyticsCharts";
-import { ACCURACY_TARGET, barCell, fillerRow, maxOf, pctCell, rateOf, threshCell, v2Slide } from "../slideKit";
-import type { CellTone } from "../slideKit";
+import {
+  ACCURACY_TARGET,
+  barCell,
+  briefingLede,
+  briefingRankList,
+  briefingSupport,
+  fillerRow,
+  gridPanel,
+  ledgerIdx,
+  ledgerPortCard,
+  maxOf,
+  pctCell,
+  rateOf,
+  threshCell,
+  v2Slide,
+} from "../slideKit";
+import type { BriefingRankItem, CellTone } from "../slideKit";
 
 // ── Page copy ───────────────────────────────────────────────────────────────
 
@@ -226,6 +241,34 @@ function countCell(value: number, max: number, tone: CellTone): string {
   return barCell(fmtNum(value), (value / max) * 100, tone);
 }
 
+/**
+ * The overall (pooled) reviewer-agreement figure — the single number every
+ * new Briefing/Ledger/Grid slot below sources from, per the fan-out plan
+ * ("lede = overall reviewer agreement rate (`totalRate` from `reviewerCard`)").
+ * Extracted from `reviewerCard`'s own inline computation (2026-07-28) so the
+ * slot-0 card, the new Ledger totals row, and the Briefing lede all read the
+ * SAME pooled figure instead of three independent copies of this formula —
+ * `reviewerCard` below calls this and renders identically to before the
+ * extraction (same inputs, same formula, byte-identical output).
+ */
+type ReviewerTotals = {
+  totalComparable: number;
+  totalAgree: number;
+  /** Pooled from summed counts, never averaged — null below the sufficiency cut. */
+  totalRate: number | null;
+  totalFlagged: number;
+  totalCleared: number;
+};
+
+function reviewerTotals(rows: ReviewerAgreementRow[]): ReviewerTotals {
+  const totalComparable = rows.reduce((s, r) => s + r.comparable, 0);
+  const totalAgree = rows.reduce((s, r) => s + r.agree, 0);
+  const totalFlagged = rows.reduce((s, r) => s + r.teamFlaggedReviewerClean, 0);
+  const totalCleared = rows.reduce((s, r) => s + r.teamClearedReviewerFlagged, 0);
+  const totalRate = isRankable(band(totalComparable)) ? rateOf(totalAgree, totalComparable) : null;
+  return { totalComparable, totalAgree, totalRate, totalFlagged, totalCleared };
+}
+
 function reviewerCard(rows: ReviewerAgreementRow[]): string {
   const flagged = rows.map((r) => r.teamFlaggedReviewerClean);
   const cleared = rows.map((r) => r.teamClearedReviewerFlagged);
@@ -234,11 +277,7 @@ function reviewerCard(rows: ReviewerAgreementRow[]): string {
   // which of the two dominates.
   const barMax = maxOf([...flagged, ...cleared]);
 
-  const totalComparable = rows.reduce((s, r) => s + r.comparable, 0);
-  const totalAgree = rows.reduce((s, r) => s + r.agree, 0);
-  const totalFlagged = flagged.reduce((s, v) => s + v, 0);
-  const totalCleared = cleared.reduce((s, v) => s + v, 0);
-  const totalRate = isRankable(band(totalComparable)) ? rateOf(totalAgree, totalComparable) : null;
+  const { totalComparable, totalRate, totalFlagged, totalCleared } = reviewerTotals(rows);
 
   const trs = rows
     .map(
@@ -297,6 +336,377 @@ function pageBody(model: ReportModel): string {
   </div>`;
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// Ledger / Briefing / Grid fan-out (fan-out plan §11d, batch B3 item 2).
+//
+// All three slots below read the SAME two model collections slot 0 already
+// reads (`crossTeamMatrix`, `reviewerAgreement`) — no new math, same honesty
+// discipline documented at the top of this file (gate on `isRankable`, print
+// `n` even at 0, never color-alone, `esc()` every interpolation).
+// ════════════════════════════════════════════════════════════════════════════
+
+const MUTED_CELL = `<td class="v2-bar-cell neutral"><span class="insuff">—</span></td>`;
+
+/** One of the 15 unique source pairs, resolved against its real cross-team
+ *  matrix cell. `a`/`b` are always `SOURCE_ORDER[ri]`/`SOURCE_ORDER[ci]` with
+ *  `ci < ri`, so `a` is always the LATER source in `SOURCE_ORDER`. */
+type SourcePair = { a: ResultSource; b: ResultSource; cell: CrossTeamMatrixCell };
+
+/**
+ * All 15 pairs, walked in the SAME row-major lower-triangle order
+ * `buildHeatMatrix` uses (row `ri` from 1..5, col `ci` from 0..ri-1) — one
+ * canonical, deterministic pair order shared by the Ledger table and the
+ * Briefing rank list, tied to the same 1..6 `SOURCE_ORDER` numbering used
+ * everywhere else on this page. `buildCrossTeamMatrix` (model/aggregates.ts)
+ * always emits all 15 cells regardless of data (comparable defaults to 0,
+ * never omitted), so `cell` is expected to always resolve — the `if (cell)`
+ * guard is defensive only, mirroring `buildHeatMatrix`'s own `cell ? … : null`
+ * pattern rather than assuming that invariant can never change silently.
+ */
+function orderedPairs(cells: CrossTeamMatrixCell[]): SourcePair[] {
+  const index = indexPairs(cells);
+  const pairs: SourcePair[] = [];
+  for (let ri = 1; ri < SOURCE_ORDER.length; ri++) {
+    for (let ci = 0; ci < ri; ci++) {
+      const a = SOURCE_ORDER[ri];
+      const b = SOURCE_ORDER[ci];
+      const cell = pairAt(index, a, b);
+      if (cell) pairs.push({ a, b, cell });
+    }
+  }
+  return pairs;
+}
+
+function pairLabel(p: SourcePair): string {
+  return `${SOURCE_LABELS[p.a]} — ${SOURCE_LABELS[p.b]}`;
+}
+
+// ── Ledger (fan-out plan §11d) ───────────────────────────────────────────────
+//
+// Charts are banned in Ledger by contract, so the 6×6 lower-triangle
+// `percentHeatmap` becomes a 15-row pair table instead: الزوج | التوافق % |
+// عدد الصور القابلة للمقارنة. The ن grid is DROPPED here only (plan: "Drop
+// the ن grid in Ledger only — redundant once counts are a table column"); the
+// pair table's own count column already carries that information.
+//
+// ── The 15-row budget risk, worked out (fan-out plan's own flagged risk) ────
+// One packed 15-row column cannot fit here at ANY row size: even at
+// `.v2-lg-port-card`'s COMPACT density (~25px/row, the figure the plan's own
+// risk note cites) that's already 15 × 25 = 375px with zero room left for a
+// thead. So this page splits the 15 pairs into two side-by-side SUB-columns
+// (8 + 7) inside the one card sitting in the pairs slot of the outer
+// `.v2-lg-split` (pairs-card | reviewer-card), per the plan's explicit
+// fallback.
+//
+// Splitting alone was NOT enough, though — measured live in
+// deck-preview.html (1120px slide width), the available height for
+// `.v2-lg-split`'s content (everything above the mandatory footnote strip,
+// which this page — unlike the exemplar — must always leave room for) is
+// ~396px. Under the browser's own (non-`fixed`) column auto-sizing, الزوج's
+// long "المصدر أ — المصدر ب" labels were starved of width and wrapped to up
+// to 3 lines, pushing the pairs card to ~432px measured — 36px OVER budget,
+// which didn't clip at the slide edge (nothing here uses `overflow:hidden`)
+// but instead visually OVERLAPPED the footnote strip below it, a worse
+// defect than a clean clip. Fixing the column widths — `table-layout:fixed`
+// with explicit 60/22/18% widths (theme CSS below) so الزوج actually gets
+// the room a 3-column ~240px sub-table can spare — cut real wrapping down to
+// mostly 1–2 lines and measured pairsCardHeight dropped to ~290px, comfortably
+// inside the ~396px budget (~106px slack). A synthetic worst case (every one
+// of the 8 rows in a sub-column wraps to the full 2 lines the tightened
+// column widths still allow) is 8 × 30px + a ~20px thead ≈ 260px for the
+// tables alone, +title/totals/gaps (~60px) ≈ 320px — still under budget. See
+// `sourceAgreement.test.ts`'s "15-row Ledger budget" describe block for the
+// assertion that encodes this arithmetic instead of an eyeballed screenshot
+// check, and this file's own `SOURCE_AGREEMENT_CSS` for the exact column
+// widths this reasoning depends on staying in sync with.
+const PAIR_COL_SPAN = 3;
+/** First sub-column takes the ceiling half (8 of 15), second takes the rest
+ *  (7) — see the budget note above. */
+const PAIR_SPLIT_AT = Math.ceil(15 / 2);
+
+function pairRowHtml(p: SourcePair, i: number): string {
+  const rate = gatedRate(p.cell.comparable, p.cell.agreementRate);
+  return (
+    `<tr><td>${ledgerIdx(i)}${esc(pairLabel(p))}</td>` +
+    (rate === null ? MUTED_CELL : threshCell(rate, ACCURACY_TARGET)) +
+    `<td>${fmtNum(p.cell.comparable)}</td></tr>`
+  );
+}
+
+function pairSubTable(chunk: SourcePair[], startIdx: number): string {
+  const rows =
+    chunk.length > 0
+      ? chunk.map((p, i) => pairRowHtml(p, startIdx + i)).join("")
+      : `<tr><td colspan="${PAIR_COL_SPAN}"><span class="insuff">—</span></td></tr>`;
+  return `<table class="deck-table s3sa-lg-pair-table">
+      <thead><tr><th>${esc("الزوج")}</th><th>${esc("التوافق %")}</th><th>${esc("العيّنة")}</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+/**
+ * The Ledger pairs card: title + two side-by-side 8/7-row sub-tables (the
+ * budget split above) + one pooled totals line beneath both — a single
+ * "الإجمالي" summarizing all 15 pairs together, never split per sub-column
+ * (there is only one real total, not two).
+ */
+function pairsLedgerCard(pairs: SourcePair[]): string {
+  const colA = pairs.slice(0, PAIR_SPLIT_AT);
+  const colB = pairs.slice(PAIR_SPLIT_AT);
+  const totalComparable = pairs.reduce((s, p) => s + p.cell.comparable, 0);
+  const totalAgree = pairs.reduce((s, p) => s + p.cell.agree, 0);
+  const totalRate = isRankable(band(totalComparable)) ? rateOf(totalAgree, totalComparable) : null;
+
+  return `<div class="v2-lg-table-card s3sa-lg-pairs">
+    <div class="v2-lg-table-card-title">${esc("التوافق بين كل زوج مصادر")}</div>
+    <div class="s3sa-lg-pair-split">${pairSubTable(colA, 0)}${pairSubTable(colB, PAIR_SPLIT_AT)}</div>
+    <div class="s3sa-lg-pair-totals">
+      <span>${esc("الإجمالي")}</span><span>${pctCell(totalRate)}</span><span>${fmtNum(totalComparable)}</span>
+    </div>
+  </div>`;
+}
+
+/** Ledger reviewer table — same 5 rows/columns as `reviewerCard`, through the
+ *  shared `ledgerPortCard` shell (P2) with an ordinal badge per row. */
+function ledgerReviewerTable(rows: ReviewerAgreementRow[]): string {
+  const flagged = rows.map((r) => r.teamFlaggedReviewerClean);
+  const cleared = rows.map((r) => r.teamClearedReviewerFlagged);
+  const barMax = maxOf([...flagged, ...cleared]);
+  const { totalComparable, totalRate, totalFlagged, totalCleared } = reviewerTotals(rows);
+
+  const trs = rows
+    .map(
+      (r, i) =>
+        `<tr><td>${ledgerIdx(i)}${esc(SOURCE_LABELS[r.source])}</td>` +
+        threshCell(gatedRate(r.comparable, r.agreementRate), ACCURACY_TARGET) +
+        countCell(r.teamFlaggedReviewerClean, barMax, "gold") +
+        countCell(r.teamClearedReviewerFlagged, barMax, "coral") +
+        `<td>${fmtNum(r.comparable)}</td></tr>`,
+    )
+    .join("");
+
+  const totalsRow =
+    `<tr><td>${esc("الإجمالي")}</td>` +
+    `<td>${pctCell(totalRate)}</td>` +
+    `<td>${fmtNum(totalFlagged)}</td>` +
+    `<td>${fmtNum(totalCleared)}</td>` +
+    `<td>${fmtNum(totalComparable)}</td></tr>`;
+
+  return ledgerPortCard({
+    title: "المقارنة بنتيجة المراجع",
+    theadCells:
+      `<th>${esc("المصدر")}</th><th>${esc("التوافق مع المراجع")}</th>` +
+      `<th>${esc("اشتباه لديه / سليمة للمراجع")}</th><th>${esc("سليمة لديه / اشتباه للمراجع")}</th><th>${esc("العيّنة")}</th>`,
+    bodyRowsHtml: trs,
+    totalsRowHtml: totalsRow,
+    span: 5,
+    rowCount: 0,
+    compact: false,
+  });
+}
+
+function ledgerBody(model: ReportModel): string {
+  const pairs = orderedPairs(model.resultComparison.crossTeamMatrix);
+  return `<div class="v2-sys-ledger s3sa-lg">
+    <div class="v2-lg-split">
+      ${pairsLedgerCard(pairs)}
+      ${ledgerReviewerTable(model.resultComparison.reviewerAgreement)}
+    </div>
+    ${scopeNotes()}
+  </div>`;
+}
+
+// ── Briefing (fan-out plan §11d) ─────────────────────────────────────────────
+//
+// The scope-disclosure basis text below deliberately reuses SCOPE_FOOTNOTE's
+// own phrasing ("تقتصر على صور العيّنة المدروسة") rather than inventing new
+// wording for the same fact, per the plan's instruction to keep the two
+// consistent.
+const REVIEWER_SCOPE_BASIS = "يقتصر التوافق مع المراجع على صور العيّنة المدروسة، لا مجتمع الشهر كاملًا";
+
+function briefingBody(model: ReportModel): string {
+  const pairs = orderedPairs(model.resultComparison.crossTeamMatrix);
+  const totals = reviewerTotals(model.resultComparison.reviewerAgreement);
+
+  const rankable = pairs.filter((p) => isRankable(band(p.cell.comparable)));
+  const excluded = pairs.filter((p) => !isRankable(band(p.cell.comparable)));
+  const comparedCount = pairs.filter((p) => p.cell.comparable > 0).length;
+
+  // Highest/lowest agreement pair, among RANKABLE pairs only — a gate-
+  // suppressed pair's rate is not shown anywhere on this page, so it cannot
+  // honestly be crowned "highest" or "lowest" either.
+  const sorted = [...rankable].sort((x, y) => (y.cell.agreementRate ?? 0) - (x.cell.agreementRate ?? 0));
+  const highest = sorted.length > 0 ? sorted[0] : null;
+  const lowest = sorted.length > 0 ? sorted[sorted.length - 1] : null;
+
+  const supportStrip = briefingSupport([
+    {
+      iconName: "check",
+      value: highest ? pctCell(highest.cell.agreementRate) : "—",
+      label: highest ? `أعلى زوج توافقًا: ${pairLabel(highest)}` : "أعلى زوج توافقًا",
+    },
+    {
+      iconName: "alert",
+      value: lowest ? pctCell(lowest.cell.agreementRate) : "—",
+      label: lowest ? `أدنى زوج توافقًا: ${pairLabel(lowest)}` : "أدنى زوج توافقًا",
+    },
+    { iconName: "scan", value: fmtNum(comparedCount), label: "عدد الأزواج المقارَنة" },
+  ]);
+
+  // Rank rows: the rankable pairs sorted by agreement (already the intended
+  // display order — briefingRankList never re-sorts), then gate-suppressed
+  // pairs folded into one bar-less remainder (never a fabricated rate), same
+  // pattern `briefingAgreementRank`/`briefingAccuracyRank` use elsewhere in
+  // this deck.
+  const rankItems: BriefingRankItem[] = sorted.map((p) => ({
+    label: pairLabel(p),
+    value: p.cell.agreementRate,
+    valueText: pctCell(p.cell.agreementRate),
+    secondaryText: `${fmtNum(p.cell.comparable)} صورة`,
+  }));
+  const rawForFold: Array<{ agree: number; comparable: number }> = sorted.map((p) => ({
+    agree: p.cell.agree,
+    comparable: p.cell.comparable,
+  }));
+  if (excluded.length > 0) {
+    rankItems.push({
+      label: `أزواج دون حد الكفاية (${fmtNum(excluded.length)})`,
+      value: null,
+      valueText: "—",
+      secondaryText: "",
+    });
+    rawForFold.push({
+      agree: excluded.reduce((s, p) => s + p.cell.agree, 0),
+      comparable: excluded.reduce((s, p) => s + p.cell.comparable, 0),
+    });
+  }
+
+  const rankHtml = briefingRankList({
+    items: rankItems,
+    tone: "green",
+    scale: { kind: "fixed", max: 100 },
+    foldRemainder: (folded) => {
+      const raw = rawForFold.slice(rawForFold.length - folded.length);
+      const foldedAgree = raw.reduce((s, r) => s + r.agree, 0);
+      const foldedComparable = raw.reduce((s, r) => s + r.comparable, 0);
+      const rate = rateOf(foldedAgree, foldedComparable);
+      const isPureExclusion = excluded.length > 0 && folded.length === 1 && folded[0].value === null;
+      return {
+        label: isPureExclusion
+          ? `أزواج دون حد الكفاية (${fmtNum(excluded.length)})`
+          : `بقية الأزواج (${fmtNum(folded.length)})`,
+        value: rate,
+        valueText: pctCell(rate),
+        secondaryText: foldedComparable > 0 ? `${fmtNum(foldedComparable)} صورة` : "",
+        rest: true,
+      };
+    },
+  });
+
+  return `<div class="v2-sys-brief s3sa-bf">
+    ${briefingLede({
+      figure: pctCell(totals.totalRate),
+      tone: "green",
+      label: `التوافق العام مع المراجع ${pctCell(totals.totalRate)} — ${fmtNum(totals.totalAgree)} من ${fmtNum(totals.totalComparable)} صورة`,
+      basis: REVIEWER_SCOPE_BASIS,
+    })}
+    ${supportStrip}
+    ${rankHtml}
+    ${scopeNotes()}
+  </div>`;
+}
+
+// ── Grid (fan-out plan §11d) ──────────────────────────────────────────────────
+//
+// The least work in the deck (plan's own framing): `percentHeatmap` already
+// has a single genuine 0–100% scale, so it renders near-as-is, just promoted
+// into the shared `gridPanel` wrapper for visual consistency with every other
+// Grid page. The ن grid stays beneath it (unlike Ledger, which drops it).
+// The reviewer table becomes a second `metricMatrix`, the two panels side by
+// side via the shared `.v2-gd-split`.
+function gridReviewerMatrix(rows: ReviewerAgreementRow[]): string {
+  const flaggedMax = maxOf(rows.map((r) => r.teamFlaggedReviewerClean));
+  const clearedMax = maxOf(rows.map((r) => r.teamClearedReviewerFlagged));
+  const comparableMax = maxOf(rows.map((r) => r.comparable));
+  return metricMatrix(
+    {
+      rowLabels: rows.map((r) => SOURCE_LABELS[r.source]),
+      columns: [
+        {
+          label: "التوافق مع المراجع",
+          domain: [0, 100],
+          ramp: "sequential-gold",
+          values: rows.map((r) => gatedRate(r.comparable, r.agreementRate)),
+        },
+        {
+          label: "اشتباه لديه–سليمة للمراجع",
+          domain: [0, flaggedMax],
+          ramp: "sequential-gold",
+          values: rows.map((r) => r.teamFlaggedReviewerClean),
+        },
+        {
+          label: "سليمة لديه–اشتباه للمراجع",
+          domain: [0, clearedMax],
+          ramp: "sequential-gold",
+          values: rows.map((r) => r.teamClearedReviewerFlagged),
+        },
+        {
+          label: "العيّنة",
+          domain: [0, comparableMax],
+          ramp: "sequential-gold",
+          values: rows.map((r) => r.comparable),
+        },
+      ],
+    },
+    {
+      width: 620,
+      height: 320,
+      caption: "مصفوفة المقارنة بنتيجة المراجع",
+      rowHeader: "المصدر",
+      emptyNote: "لا توجد بيانات",
+    },
+  );
+}
+
+function gridBody(model: ReportModel): string {
+  const cells = model.resultComparison.crossTeamMatrix;
+  const rows = model.resultComparison.reviewerAgreement;
+  const totals = reviewerTotals(rows);
+
+  const heat = percentHeatmap(buildHeatMatrix(cells), {
+    width: 620,
+    height: 320,
+    digits: 0,
+    toneLow: "text",
+    toneHigh: "primary",
+    rowHeaderWidth: 140,
+    caption: "مصفوفة التوافق بين المصادر",
+    rowHeader: "المصدر",
+    legendHighLabel: "توافق أعلى",
+    legendLowLabel: "توافق أقل",
+    emptyNote: "لا توجد مقارنات متاحة",
+  });
+
+  const matrixPanel = gridPanel({
+    title: "مصفوفة التوافق بين المصادر",
+    sub: `${fmtNum(cells.length)} زوجًا · المصفوفة متماثلة، يُعرض النصف السفلي فقط`,
+    variant: "matrix",
+    chartHtml: `<div class="s3sa-gd-heat-wrap"><div class="s3sa-chart">${heat}</div>${comparableGrid(cells)}</div>`,
+  });
+
+  const reviewerPanel = gridPanel({
+    title: "المقارنة بنتيجة المراجع",
+    sub: `التوافق العام ${fmtPct(totals.totalRate)} · العيّنة ${fmtNum(totals.totalComparable)}`,
+    variant: "reviewer",
+    chartHtml: gridReviewerMatrix(rows),
+  });
+
+  return `<div class="v2-sys-grid s3sa-gd">
+    <div class="v2-gd-split">${matrixPanel}${reviewerPanel}</div>
+    ${scopeNotes()}
+  </div>`;
+}
+
 /**
  * The overall source-agreement page. Pure: no `Date`, no `Math.random`, no I/O
  * — the same model always produces byte-identical HTML.
@@ -308,6 +718,9 @@ export function sourceAgreementSlide(
   variantPreview: boolean,
 ): string {
   const body = pageBody(model);
+  const ledgerBodyHtml = ledgerBody(model);
+  const briefingBodyHtml = briefingBody(model);
+  const gridBodyHtml = gridBody(model);
   return v2Slide({
     id: "slide-s3-source-agreement",
     title: TITLE,
@@ -315,7 +728,7 @@ export function sourceAgreementSlide(
     iconName: "scan",
     headline: TITLE,
     subhead: SUBHEAD,
-    bodyVariants: [body, body, body, body],
+    bodyVariants: [body, ledgerBodyHtml, briefingBodyHtml, gridBodyHtml],
     variantPreview,
     num,
     total,
@@ -388,5 +801,70 @@ export const SOURCE_AGREEMENT_CSS = `
 @media print{
   .s3sa-foot,.s3sa-ngrid{break-inside:avoid;}
   .s3sa-foot{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+}
+
+/* ── Ledger — 15-pair table (fan-out plan §11d, batch B3 item 2) ─────────────
+   .v2-lg-table-card's own margin-top:14px (theme.ts) assumes it sits below a
+   preceding headline block; here it's a grid CELL inside .v2-lg-split, so
+   that top margin is cancelled. Everything else reuses .v2-lg-table-card's
+   shared chrome (title style, card background) — only the 2-sub-column split
+   and the pooled totals line are new, page-local shapes. */
+/* .s3sa-lg is the DIRECT parent of both .v2-lg-split and the .s3sa-foot
+   footnote strip (two children) — without this flex/min-height:0 chain,
+   .v2-lg-split's own height:100% (theme.ts default) fills the WHOLE
+   container on its own, and the footnote then adds its height on top,
+   overflowing past the slide's bottom edge (measured live in
+   deck-preview.html: the footnote's own bottom edge sat ~33px past the
+   slide's — the pair table itself was never the problem). Mirrors the exact
+   working pattern .v2-agree-wrap already uses for the same two-children
+   shape on slide-s3-port-agreement (portAgreement.ts). */
+.s3sa-lg{display:flex;flex-direction:column;gap:9px;height:100%;min-height:0;}
+.s3sa-lg .v2-lg-split{flex:1 1 auto;min-height:0;height:auto;}
+.s3sa-lg-pairs{margin-top:0;}
+.s3sa-lg-pair-split{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px;}
+/* Row-budget note: see the pairsLedgerCard doc comment above (sourceAgreement.ts)
+   for the worked arithmetic. table-layout:fixed + explicit column widths
+   give الزوج's long "المصدر أ — المصدر ب" labels the most room a 3-column,
+   ~240px-wide sub-table can spare (measured live in deck-preview.html: without
+   this the browser's auto column sizing under-allocated the label column,
+   causing 3-line wraps that pushed the whole card past its available flex
+   budget and visually overlapped the footnote strip below it). */
+.s3sa-lg-pairs .deck-table{table-layout:fixed;}
+.s3sa-lg-pairs .deck-table th:first-child,.s3sa-lg-pairs .deck-table td:first-child{width:60%;}
+.s3sa-lg-pairs .deck-table th:nth-child(2),.s3sa-lg-pairs .deck-table td:nth-child(2){width:22%;}
+.s3sa-lg-pairs .deck-table th:nth-child(3),.s3sa-lg-pairs .deck-table td:nth-child(3){width:18%;}
+.s3sa-lg-pairs .deck-table th,.s3sa-lg-pairs .deck-table td{
+  padding:3px 2px;font-size:0.54rem;line-height:1.2;text-align:center;
+  white-space:normal;overflow-wrap:anywhere;
+}
+.s3sa-lg-pairs .deck-table th:first-child,.s3sa-lg-pairs .deck-table td:first-child{text-align:right;}
+.s3sa-lg-pairs .v2-lg-idx{width:13px;height:13px;font-size:.46rem;margin-inline-end:3px;}
+.s3sa-lg-pair-totals{
+  display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px;
+  padding:6px 10px;border-radius:8px;font-size:0.62rem;font-weight:800;
+  color:rgba(255,255,255,.92);background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);
+}
+body.theme-light .s3sa-lg-pair-totals{
+  color:rgba(10,45,74,.92);background:rgba(10,45,74,.05);border-color:rgba(10,45,74,.15);
+}
+
+/* ── Briefing — namespacing hook only (design spec §3.1); nothing bespoke
+   beyond the shared lede/support/rank-list components. ──────────────────── */
+.s3sa-bf{height:100%;}
+
+/* ── Grid — the heatmap panel stacks its chart above the ن grid inside one
+   gridPanel chart slot, reusing the already-shared .s3sa-chart/.s3sa-ngrid
+   sizing rules above (both are plain global class names, not scoped under
+   .s3sa, so they apply here unchanged). ─────────────────────────────────── */
+/* Same two-children (.v2-gd-split + .s3sa-foot) flex fix as .s3sa-lg above. */
+.s3sa-gd{display:flex;flex-direction:column;gap:9px;height:100%;min-height:0;}
+.s3sa-gd .v2-gd-split{flex:1 1 auto;min-height:0;height:auto;}
+.s3sa-gd-heat-wrap{display:flex;flex-direction:column;gap:6px;height:100%;min-height:0;}
+
+@media screen and (max-width:820px){
+  .s3sa-lg-pair-split{grid-template-columns:1fr;}
+}
+@media print{
+  .s3sa-lg-pair-totals{break-inside:avoid;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
 }
 `;
