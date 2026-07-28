@@ -170,23 +170,158 @@ export type TocItem = {
   figureLabel: string;
 };
 
-export function tocSlide(items: TocItem[], num: number, total: number, variantPreview: boolean): string {
-  const body = `<div class="v2-toc-grid">${items
-    .map(
-      (it, i) => `<div class="v2-toc-card ${esc(it.tone)}">
+/**
+ * Each section's page SPAN, derived from its `range` string — the only
+ * quantity on this page that is honestly comparable across rows. `figure`
+ * is heterogeneous (a sample count here, an accuracy percentage there), so
+ * it can never be the rankable magnitude; page span can, since every range
+ * comes from the same `pad(n)` / `${pad(start)}–${pad(end)}` (en dash)
+ * construction in `buildDeckV2Slides` (the only place that builds a `range`
+ * string). A lone `pad(n)` (no dash — a single-page section) is span 1.
+ */
+function tocSectionSpan(range: string): number {
+  const parts = range.split("–");
+  if (parts.length === 2) {
+    const start = Number(parts[0]);
+    const end = Number(parts[1]);
+    if (Number.isFinite(start) && Number.isFinite(end)) return end - start + 1;
+  }
+  return 1;
+}
+
+/**
+ * One المحتويات card — shared verbatim by slot 0 and Grid (fan-out plan §1).
+ * `tintPct` is `null` for slot 0, which then renders BYTE-IDENTICAL markup to
+ * the pre-fan-out version (no `style` attribute at all, since `sideStyle` is
+ * the empty string). Grid passes each section's page-span share of the
+ * deck's largest section, so `.v2-toc-side` picks up a `--w`-driven tint
+ * (theme.ts's `.v2-gd-toc` rules) — the same "background-image only, ZERO
+ * layout height" technique `barCell` already uses (see that function's own
+ * doc comment in slideKit.ts), applied to a plain `<div>` instead of a `<td>`.
+ */
+function tocCard(it: TocItem, i: number, tintPct: number | null): string {
+  const sideStyle =
+    tintPct !== null ? ` style="--w:${Math.max(0, Math.min(100, tintPct)).toFixed(1)}%"` : "";
+  return `<div class="v2-toc-card ${esc(it.tone)}">
         <div class="v2-toc-num">${pad(i + 1)}</div>
         <div class="v2-toc-main">
           <h4><span class="v2-toc-icon">${icon(it.iconName, 16)}</span>${esc(it.title)}</h4>
           <p>${esc(it.goal)}</p>
         </div>
-        <div class="v2-toc-side">
+        <div class="v2-toc-side"${sideStyle}>
           <div class="v2-toc-figure">${esc(it.figure)}</div>
           <div class="v2-toc-figure-label">${esc(it.figureLabel)}</div>
           <div class="v2-toc-range" dir="ltr">${esc(it.range)}</div>
         </div>
-      </div>`,
+      </div>`;
+}
+
+/**
+ * Ledger slot for `slide-toc` (fan-out plan §1, batch B4). One row per
+ * section plus a REAL totals row — this deck's own actual page count
+ * (`total`, already passed into `tocSlide` by its only caller), an honest
+ * sum, never a fabricated figure.
+ */
+function tocLedgerTable(items: TocItem[], total: number): string {
+  const rows = items
+    .map(
+      (it, i) => `<tr>
+        <td>${ledgerIdx(i)}</td>
+        <td>${esc(it.title)}</td>
+        <td>${esc(it.goal)}</td>
+        <td>${esc(it.figure)} ${esc(it.figureLabel)}</td>
+        <td dir="ltr">${esc(it.range)}</td>
+      </tr>`,
     )
+    .join("");
+  const totalsRow = `<tr><td></td><td>الإجمالي</td><td></td><td></td><td>${pad(total)} صفحة</td></tr>`;
+  return ledgerTableCard({
+    cardClass: "v2-lg-table-card v2-lg-toc-card",
+    theadCells: `<th></th><th>القسم</th><th>الهدف</th><th>المؤشر</th><th>الصفحات</th>`,
+    bodyRowsHtml: rows,
+    totalsRowHtml: totalsRow,
+    span: 5,
+    rowCount: 0,
+  });
+}
+
+/**
+ * Briefing slot for `slide-toc` (fan-out plan §1). Rank rows stay in
+ * DOCUMENT ORDER — `items` is never re-sorted by span — a reordered
+ * المحتويات stops being a table of contents.
+ */
+function tocBriefing(items: TocItem[], total: number): string {
+  const spans = items.map((it) => tocSectionSpan(it.range));
+  const maxSpan = Math.max(...spans);
+  const minSpan = Math.min(...spans);
+  const supportStrip = briefingSupport([
+    { iconName: "layers", value: fmtNum(items.length), label: "عدد الأقسام" },
+    { iconName: "chart", value: `${fmtNum(maxSpan)} صفحة`, label: "أكبر قسم" },
+    { iconName: "document", value: `${fmtNum(minSpan)} صفحة`, label: "أصغر قسم" },
+  ]);
+  const rankItems: BriefingRankItem[] = items.map((it, i) => ({
+    label: it.title,
+    value: spans[i],
+    valueText: `${fmtNum(spans[i])} صفحة`,
+    secondaryText: `${esc(it.figure)} ${esc(it.figureLabel)}`,
+  }));
+  const rankHtml = briefingRankList({
+    items: rankItems,
+    tone: "blue",
+    scale: { kind: "auto" },
+    // REQUIRED by briefingRankList's type contract (2026-07-28 fix — a missing
+    // foldRemainder used to silently drop the folded tail). Realistically
+    // unreachable (this deck's section count is well under briefingRankPlan's
+    // smallest-tier cap) but implemented for real, pooling the folded
+    // sections' own page spans rather than stubbing a dead branch.
+    foldRemainder: (folded) => {
+      const pooled = folded.reduce((sum, it) => sum + (it.value ?? 0), 0);
+      return {
+        label: `بقية الأقسام (${fmtNum(folded.length)})`,
+        value: pooled,
+        valueText: `${fmtNum(pooled)} صفحة`,
+        secondaryText: "",
+        rest: true,
+      };
+    },
+  });
+  return `<div class="v2-sys-brief v2-bf-toc">
+    ${briefingLede({
+      figure: fmtNum(total),
+      tone: "blue",
+      label: `محتويات التقرير — ${fmtNum(items.length)} أقسام في ${fmtNum(total)} صفحة`,
+      basis: `${fmtNum(items.length)} قسمًا مفهرسًا`,
+    })}
+    ${supportStrip}
+    ${rankHtml}
+  </div>`;
+}
+
+/**
+ * Grid slot for `slide-toc` (fan-out plan §1) — NO real matrix. `figure`
+ * values are heterogeneous strings across sections (a sample count here, an
+ * accuracy percentage there); normalizing them onto one `metricMatrix`
+ * column scale would misrepresent them as comparable quantities. Reuses
+ * `tocCard` (see its own doc comment) — the same card markup slot 0 renders,
+ * wrapped in the Grid system's own class and CSS-restyled (theme.ts's
+ * `.v2-gd-toc`) to uniform equal-size cells with a page-span tint, the same
+ * "reuse another slot's body, CSS-only restyle" precedent `slide-closing`'s
+ * Grid variant already established for its own degenerate case.
+ */
+function tocGrid(items: TocItem[]): string {
+  const spans = items.map((it) => tocSectionSpan(it.range));
+  const maxSpan = maxOf(spans);
+  const body = `<div class="v2-toc-grid">${items
+    .map((it, i) => tocCard(it, i, (spans[i] / maxSpan) * 100))
     .join("")}</div>`;
+  return `<div class="v2-sys-grid v2-gd-toc">${body}</div>`;
+}
+
+export function tocSlide(items: TocItem[], num: number, total: number, variantPreview: boolean): string {
+  const body = `<div class="v2-toc-grid">${items.map((it, i) => tocCard(it, i, null)).join("")}</div>`;
+  const ledgerBody = `<div class="v2-sys-ledger v2-lg-toc">${tocLedgerTable(items, total)}</div>`;
+  const briefingBody = tocBriefing(items, total);
+  const gridBody = tocGrid(items);
   return v2Slide({
     id: "slide-toc",
     title: "المحتويات",
@@ -194,7 +329,7 @@ export function tocSlide(items: TocItem[], num: number, total: number, variantPr
     iconName: "layers",
     headline: "محتويات التقرير",
     subhead: "أقسام التقرير والهدف من كل قسم، ونطاق صفحاته.",
-    bodyVariants: [body, body, body, body],
+    bodyVariants: [body, ledgerBody, briefingBody, gridBody],
     variantPreview,
     num,
     total,
@@ -418,6 +553,21 @@ const LEVEL_DRAW_WEIGHTS: (number | null)[] = (() => {
   });
 })();
 
+/**
+ * حصة العدد الثابت — the pooled exact-quota base `LEVEL_DRAW_WEIGHTS`'s own
+ * IIFE computes internally (`exactPool`, 2500+1875+1875=6250) but never
+ * exposed, needed as its own figure by `slide-glossary-levels`'s Briefing
+ * support strip (fan-out plan §3a). Re-derived here with the IDENTICAL
+ * formula (sum of `method === "exact"` rules' `value`) applied directly to
+ * `DEFAULT_SAMPLING_RULES` — that array already IS the same 4 stage rules in
+ * the same order the IIFE's own `rules` lookup produces, so this is the same
+ * derivation, not a second, potentially-divergent one.
+ */
+const LEVEL_EXACT_POOL = DEFAULT_SAMPLING_RULES.reduce(
+  (sum, r) => sum + (r.method === "exact" ? r.value : 0),
+  0,
+);
+
 type RiskLevel = { name: string; def: string; measures: string; icon: string; tone: Tone };
 const RISK_LEVELS: RiskLevel[] = [
   {
@@ -513,7 +663,14 @@ function stageTone(stage: StageProfile): (typeof STAGE_TONES)[number] | "neutral
  * no matching profile (a month whose risk file used labels the alias table
  * doesn't know) renders "—", never 0%.
  */
-function levelCard(lv: RiskLevel, i: number): string {
+/**
+ * `shareStyle` is an internal seam so `levelCard` (slot 0) and
+ * `levelCardTinted` (Grid, fan-out plan §3a) render the exact same markup
+ * with only the وزن العينة block's inline `style` differing — `levelCard`
+ * passes `""` (no attribute at all, byte-identical to the pre-fan-out
+ * markup), `levelCardTinted` passes a `--w`-driven tint.
+ */
+function levelCardBody(lv: RiskLevel, i: number, shareStyle: string): string {
   const weight = LEVEL_DRAW_WEIGHTS[i] ?? null;
   const figure =
     weight === null
@@ -527,7 +684,7 @@ function levelCard(lv: RiskLevel, i: number): string {
     <h4>${esc(lv.name)}</h4>
     <span class="v2-level-rule" aria-hidden="true"></span>
     <p>${esc(lv.def)}</p>
-    <div class="v2-level-share">
+    <div class="v2-level-share"${shareStyle}>
       <span>وزن العينة</span>
       ${figure}
     </div>
@@ -536,6 +693,25 @@ function levelCard(lv: RiskLevel, i: number): string {
       <b>${esc(lv.measures)}</b>
     </div>
   </div>`;
+}
+
+/** Slot 0's card — no tint, byte-identical to the pre-fan-out markup. */
+function levelCard(lv: RiskLevel, i: number): string {
+  return levelCardBody(lv, i, "");
+}
+
+/**
+ * Grid's card (fan-out plan §3a) — same markup as `levelCard`, plus a
+ * `--w:{weight}%` inline style on `.v2-level-share` so theme.ts's
+ * `.v2-gd-glossary-levels` rules can tint it as a magnitude cell — the same
+ * "background-image only, ZERO layout height" technique `barCell` uses (see
+ * that function's own doc comment in slideKit.ts). A level with no weight
+ * (`null`) gets no style attribute — nothing to tint by.
+ */
+function levelCardTinted(lv: RiskLevel, i: number): string {
+  const weight = LEVEL_DRAW_WEIGHTS[i] ?? null;
+  const shareStyle = weight !== null ? ` style="--w:${Math.max(0, Math.min(100, weight)).toFixed(1)}%"` : "";
+  return levelCardBody(lv, i, shareStyle);
 }
 
 /** One glossary card: icon badge + term + definition, category-toned bottom rule. */
@@ -564,6 +740,202 @@ function termBand(cat: GlossaryCategory): string {
 }
 
 /**
+ * Ledger slot for `slide-glossary-levels` (fan-out plan §3a). One row per
+ * level, `#` reusing `.v2-level-row-num` (the same small ordinal badge
+ * `levelFiguresTable`/slide-risk-stages already established — NOT a fresh
+ * style). No totals row: the weights deliberately don't sum to 100% (two
+ * different bases — see `LEVEL_DRAW_WEIGHTS`'s doc comment); the tfoot
+ * instead carries `LEVEL_WEIGHT_BASIS_FOOTNOTE` — the SAME two-basis caveat
+ * `levelFiguresTable`'s own footnote row uses, verbatim, so a reader never
+ * gets two different explanations for the same fact.
+ *
+ * Tones/weights are indexed by `i` directly (RISK_LEVELS/LEVEL_DRAW_WEIGHTS/
+ * STAGE_TONES's own natural array position), NOT resolved through
+ * `levelIndexForStage` — that resolver exists specifically to map a
+ * *variable-length, potentially-sparse* `StageProfile[]` (a level with zero
+ * sample rows is entirely absent from it) onto these three FIXED four-item
+ * arrays. Here there is no such variable-length array in play at all: this
+ * function iterates `RISK_LEVELS` itself, which is defined in, and always
+ * has, the exact same canonical order `LEVEL_DRAW_WEIGHTS`/`STAGE_TONES` do
+ * (by construction — see `LEVEL_DRAW_WEIGHTS`'s own `order` array). The
+ * identity-mispairing bug class the 2026-07-28 review fixed does not apply
+ * to a fixed-length array indexed by its own loop position.
+ */
+function glossaryLevelsLedgerTable(): string {
+  const rows = RISK_LEVELS.map(
+    (lv, i) => `<tr>
+      <td><span class="v2-level-row-num ${STAGE_TONES[i]}">${i + 1}</span></td>
+      <td>${esc(lv.name)}</td>
+      <td>${esc(lv.def)}</td>
+      <td>${esc(lv.measures)}</td>
+      <td>${fmtPct(LEVEL_DRAW_WEIGHTS[i] ?? null, 0)}</td>
+    </tr>`,
+  ).join("");
+  const footnoteRow = `<tr class="v2-lg-footnote"><td colspan="5">${esc(LEVEL_WEIGHT_BASIS_FOOTNOTE)}</td></tr>`;
+  return ledgerTableCard({
+    cardClass: "v2-lg-table-card v2-lg-glossary-card",
+    theadCells: `<th>#</th><th>المستوى</th><th>التعريف</th><th>ما يقيسه</th><th>وزن العينة</th>`,
+    bodyRowsHtml: rows,
+    totalsRowHtml: footnoteRow,
+    span: 5,
+    rowCount: 0,
+  });
+}
+
+/**
+ * Briefing slot for `slide-glossary-levels` (fan-out plan §3a). Rank rows
+ * are the 4 levels in LEVEL ORDER (RISK_LEVELS's own array order — never
+ * sorted by weight; these are categorical detection scenarios, not a
+ * severity ranking, [[risk-levels-are-categorical]]), each carrying its own
+ * `STAGE_TONES` identity color — same reasoning as the Ledger table above,
+ * indexed directly, no `levelIndexForStage` involved.
+ *
+ * `scale: {kind:"fixed", max:100}`, not `"auto"` — the four weights are on
+ * TWO DIFFERENT BASES (see `LEVEL_DRAW_WEIGHTS`'s doc comment); normalizing
+ * each named row's bar against the other rows' own magnitudes (what "auto"
+ * does) would visually imply they are directly comparable. A fixed 0–100
+ * scale at least anchors every bar to the same percentage axis, and the
+ * basis chip states the caveat in words.
+ */
+function glossaryLevelsBriefing(): string {
+  const supportStrip = briefingSupport([
+    { iconName: "shield", value: fmtPct(LEVEL_DRAW_WEIGHTS[0] ?? 100, 0), label: "وزن المستوى الأول" },
+    { iconName: "layers", value: fmtNum(LEVEL_EXACT_POOL), label: "حصة العدد الثابت" },
+    { iconName: "flag", value: fmtNum(3), label: "عدد المستويات ذات الحصة الثابتة" },
+  ]);
+  const rankItems: BriefingRankItem[] = RISK_LEVELS.map((lv, i) => ({
+    label: lv.name,
+    value: LEVEL_DRAW_WEIGHTS[i] ?? null,
+    valueText: fmtPct(LEVEL_DRAW_WEIGHTS[i] ?? null, 0),
+    secondaryText: esc(lv.measures),
+    tone: STAGE_TONES[i],
+  }));
+  const rankHtml = briefingRankList({
+    items: rankItems,
+    tone: "gold",
+    scale: { kind: "fixed", max: 100 },
+    // REQUIRED by briefingRankList's type contract (2026-07-28 fix). Never
+    // actually fires here — RISK_LEVELS has a fixed 4 rows, well under
+    // briefingRankPlan's smallest-tier cap of 5 — but implemented for real
+    // per this codebase's "no silent data loss on the fold path" discipline.
+    foldRemainder: (folded) => ({
+      label: `بقية المستويات (${fmtNum(folded.length)})`,
+      value: null,
+      valueText: "—",
+      secondaryText: "",
+      rest: true,
+    }),
+  });
+  return `<div class="v2-sys-brief v2-bf-glossary-levels">
+    ${briefingLede({
+      figure: fmtNum(RISK_LEVELS.length),
+      tone: "gold",
+      label: "أربعة مستويات مخاطر — تصنيفٌ للحالات لا ترتيبٌ لخطورتها",
+      basis: "تعريفات ثابتة لا تتغير شهريًا",
+    })}
+    ${supportStrip}
+    ${rankHtml}
+  </div>`;
+}
+
+/**
+ * Grid slot for `slide-glossary-levels` (fan-out plan §3a) — NO real matrix
+ * (one metric — وزن العينة — over four entities), and deliberately does NOT
+ * import `riskStagesSlide`'s live per-month figures to manufacture extra
+ * columns (per the plan: two pages independently asserting the same numbers
+ * is worse than one honestly degenerate Grid). Reuses `levelCardTinted` (see
+ * its own doc comment) — the same `.v2-level-card` markup slot 0 renders,
+ * restyled to uniform cells (theme.ts's `.v2-gd-glossary-levels`) with the
+ * وزن figure driving a tint on `.v2-level-share`.
+ */
+function glossaryLevelsGrid(): string {
+  const body = `<div class="v2-level-grid">${RISK_LEVELS.map((lv, i) => levelCardTinted(lv, i)).join("")}</div>`;
+  return `<div class="v2-sys-grid v2-gd-glossary-levels">${body}</div>`;
+}
+
+/**
+ * Ledger slot for `slide-glossary-1` (fan-out plan §3b) — one stacked
+ * `ledgerTableCard` per `GLOSSARY_CATEGORIES` entry, using `.v2-lg-split.stack`
+ * (already added for `slide-s3-quality`'s Ledger — reused verbatim rather
+ * than a near-duplicate vertical-layout class). `totalsRowHtml: ""` /
+ * `rowCount: 0` — a glossary has nothing to sum.
+ */
+function glossaryTermsLedgerCard(cat: GlossaryCategory): string {
+  const rows = cat.terms.map((t) => `<tr><td>${esc(t.term)}</td><td>${esc(t.def)}</td></tr>`).join("");
+  return ledgerTableCard({
+    title: cat.label,
+    cardClass: "v2-lg-table-card v2-lg-glossary-terms-card",
+    theadCells: `<th>المصطلح</th><th>التعريف</th>`,
+    bodyRowsHtml: rows,
+    totalsRowHtml: "",
+    span: 2,
+    rowCount: 0,
+  });
+}
+
+/**
+ * Briefing slot for `slide-glossary-1` (fan-out plan §3b) — zero numbers on
+ * this page, so the rank list runs `bars:false` (a definitional list, not a
+ * magnitude chart — the same mode `slide-closing`'s source-revision list
+ * uses) and carries NO support strip (`briefingSupport([])` returns `""`
+ * cleanly — verified against its own implementation, a true no-op rather
+ * than dead markup). Rows are grouped by category in `GLOSSARY_CATEGORIES`'s
+ * own order (never sorted, never interleaved) so a reader can still tell
+ * which rows are the sampling vocabulary and which are the judgment
+ * vocabulary, the same grouping slot 0's two labeled bands carry visually.
+ */
+function glossaryTermsBriefing(): string {
+  const allTerms = GLOSSARY_CATEGORIES.flatMap((cat) => cat.terms);
+  const rankItems: BriefingRankItem[] = allTerms.map((t) => ({
+    label: t.term,
+    value: null,
+    valueText: "",
+    secondaryText: esc(t.def),
+  }));
+  const rankHtml = briefingRankList({
+    items: rankItems,
+    tone: "gold",
+    scale: { kind: "auto" },
+    // REQUIRED by briefingRankList's type contract (2026-07-28 fix). Never
+    // actually fires here — a fixed 5-term count, well under
+    // briefingRankPlan's smallest-tier cap — but implemented for real per
+    // this codebase's "no silent data loss on the fold path" discipline.
+    foldRemainder: (folded) => ({
+      label: `+${fmtNum(folded.length)} مصطلحات إضافية`,
+      value: null,
+      valueText: "—",
+      secondaryText: "",
+      rest: true,
+    }),
+    bars: false,
+  });
+  const total = allTerms.length;
+  return `<div class="v2-sys-brief v2-bf-glossary-1">
+    ${briefingLede({
+      figure: fmtNum(total),
+      tone: "gold",
+      label: `${fmtNum(total)} مصطلحًا في فئتين`,
+      basis: GLOSSARY_CATEGORIES.map((c) => esc(c.label)).join(" · "),
+    })}
+    ${rankHtml}
+  </div>`;
+}
+
+/**
+ * Grid slot for `slide-glossary-1` (fan-out plan §3b) — zero metrics (a
+ * glossary has no numbers at all), so Grid reuses `termBand`'s own markup
+ * UNCHANGED (the same "reuse another slot's body, CSS-only restyle"
+ * precedent `slide-closing`'s Grid variant already established for its own
+ * degenerate case) instead of dressing a non-matrix as a fake
+ * `metricMatrix`. No tint (theme.ts's `.v2-gd-glossary-terms`) — there is no
+ * number to tint by.
+ */
+function glossaryTermsGrid(): string {
+  const body = `<div class="v2-term-section">${GLOSSARY_CATEGORIES.map(termBand).join("")}</div>`;
+  return `<div class="v2-sys-grid v2-gd-glossary-terms">${body}</div>`;
+}
+
+/**
  * Build the المعجم pages. Two slides, not one (owner, 2026-07-25): the four
  * risk levels each carry their own definition now, and those definitions run
  * roughly twice the length the 4×2 term grid was sized for (existing terms are
@@ -575,7 +947,10 @@ function termBand(cat: GlossaryCategory): string {
 export function glossarySlideBuilders(variantPreview: boolean): SlideBuilder[] {
   return [
     (num, total) => {
-      const body = `<div class="v2-level-grid">${RISK_LEVELS.map(levelCard).join("")}</div>`;
+      const body = `<div class="v2-level-grid">${RISK_LEVELS.map((lv, i) => levelCard(lv, i)).join("")}</div>`;
+      const ledgerBody = `<div class="v2-sys-ledger v2-lg-glossary-levels">${glossaryLevelsLedgerTable()}</div>`;
+      const briefingBody = glossaryLevelsBriefing();
+      const gridBody = glossaryLevelsGrid();
       return v2Slide({
         id: "slide-glossary-levels",
         title: "مستويات المخاطر",
@@ -583,7 +958,7 @@ export function glossarySlideBuilders(variantPreview: boolean): SlideBuilder[] {
         iconName: "layers",
         headline: "المعجم — مستويات المخاطر",
         subhead: "أربعة مستويات لكل منها تعريفه وغرضه؛ تصنيفٌ للحالات لا ترتيبٌ لخطورتها.",
-        bodyVariants: [body, body, body, body],
+        bodyVariants: [body, ledgerBody, briefingBody, gridBody],
         variantPreview,
         num,
         total,
@@ -592,6 +967,9 @@ export function glossarySlideBuilders(variantPreview: boolean): SlideBuilder[] {
     },
     (num, total) => {
       const body = `<div class="v2-term-section">${GLOSSARY_CATEGORIES.map(termBand).join("")}</div>`;
+      const ledgerBody = `<div class="v2-sys-ledger v2-lg-glossary-1"><div class="v2-lg-split stack">${GLOSSARY_CATEGORIES.map(glossaryTermsLedgerCard).join("")}</div></div>`;
+      const briefingBody = glossaryTermsBriefing();
+      const gridBody = glossaryTermsGrid();
       return v2Slide({
         id: "slide-glossary-1",
         title: "المعجم",
@@ -599,7 +977,7 @@ export function glossarySlideBuilders(variantPreview: boolean): SlideBuilder[] {
         iconName: "document",
         headline: "المعجم — المصطلحات الرئيسية",
         subhead: "توحيد المصطلحات قبل قراءة النتائج.",
-        bodyVariants: [body, body, body, body],
+        bodyVariants: [body, ledgerBody, briefingBody, gridBody],
         variantPreview,
         num,
         total,

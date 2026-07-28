@@ -1443,6 +1443,30 @@ body.theme-light .v2-lg-stage-card .v2-lg-table-card-title{color:#0a2d4a;}
   .v2-lg-closing .v2-closing-side{border-inline-start:0;padding-inline-start:0;}
 }
 
+/* Page-local: slide-toc (Ledger, fan-out plan §1, batch B4). Namespacing
+   hook plus a column-alignment override — الهدف (column 3, a goal sentence)
+   is prose, not a number, so it needs the same right-align treatment the
+   shared .v2-lg-table-card rule already gives column 2 (القسم). */
+.v2-lg-toc{height:100%;}
+.v2-lg-toc-card .deck-table th:nth-child(3),.v2-lg-toc-card .deck-table td:nth-child(3){text-align:right;}
+
+/* Page-local: slide-glossary-levels (Ledger, fan-out plan §3a, batch B4).
+   التعريف (column 3) and ما يقيسه (column 4) are both prose columns needing
+   the right-align override; المستوى (column 2) already gets it from the
+   shared .v2-lg-table-card rule. */
+.v2-lg-glossary-levels{height:100%;}
+.v2-lg-glossary-card .deck-table th:nth-child(3),.v2-lg-glossary-card .deck-table td:nth-child(3),
+.v2-lg-glossary-card .deck-table th:nth-child(4),.v2-lg-glossary-card .deck-table td:nth-child(4){text-align:right;}
+
+/* Page-local: slide-glossary-1 (Ledger, fan-out plan §3b, batch B4) — two
+   stacked .v2-lg-split.stack cards, one per GLOSSARY_CATEGORIES entry (the
+   same modifier slide-s3-quality's Ledger already established, reused
+   verbatim). Both columns are prose (المصطلح/التعريف), so both are forced
+   right — the shared .v2-lg-table-card rule only right-aligns column 2 by
+   default, which would leave المصطلح (column 1) centered. */
+.v2-lg-glossary-1{height:100%;}
+.v2-lg-glossary-terms-card .deck-table th,.v2-lg-glossary-terms-card .deck-table td{text-align:right;}
+
 /* ── BRIEFING (slot 2 — الإحاطة, recall): one lede figure per page + a
    ≤3-figure support strip + at most one ranked-bar list. Tables are demoted
    to ranked bars (.v2-bf-rank). One fixed tone per page (this page: gold). ── */
@@ -1605,6 +1629,38 @@ body.theme-light .v2-bf-rank-secondary{color:#607386;}
 body.theme-light .v2-bf-closing .v2-closing-side{border-top-color:#dde4ea;}
 .v2-bf-closing-empty{font-size:.78rem;font-weight:700;color:var(--slate);text-align:center;line-height:1.7;}
 
+/* Page-local: slide-toc (Briefing, fan-out plan §1, batch B4). Nothing
+   bespoke beyond the shared components — namespacing hook only. */
+.v2-bf-toc{height:100%;}
+
+/* Page-local: slide-glossary-levels (Briefing, fan-out plan §3a, batch B4).
+   Each row's secondary line is a full "ما يقيسه" sentence (~40-50 chars),
+   far past the shared .v2-bf-rank-secondary's 74px min-width (sized for a
+   short "من N صورة"-style figure) — verified against this page's actual
+   RISK_LEVELS[i].measures strings, all longer than any other page's
+   secondary text. Only 4 rows in a single column (briefingRankPlan(4) picks
+   the 1-column comfortable tier), so there is ample unused row width to
+   widen into. text-align is also flipped to right — the shared rule's
+   "left" is tuned for LTR numerals/percentages, wrong for an Arabic
+   sentence. white-space:normal lets it wrap to 2 lines within the 44px
+   comfortable row height instead of the shared rule's implicit single-line
+   overflow. */
+.v2-bf-glossary-levels{height:100%;}
+.v2-bf-glossary-levels .v2-bf-rank-secondary{
+  min-width:230px;max-width:320px;white-space:normal;text-align:right;line-height:1.32;
+}
+
+/* Page-local: slide-glossary-1 (Briefing, fan-out plan §3b, batch B4) —
+   bars:false (a definitional list, no magnitude), so the label already
+   expands (theme.ts's .v2-bf-rank-row.no-bars .v2-bf-rank-label rule);
+   the term's full definition is carried in the secondary slot instead
+   (valueText is left empty — there is no figure to show), so it needs the
+   same widen+wrap+right-align treatment as slide-glossary-levels above. */
+.v2-bf-glossary-1{height:100%;}
+.v2-bf-glossary-1 .v2-bf-rank-secondary{
+  min-width:230px;max-width:340px;white-space:normal;text-align:right;line-height:1.32;
+}
+
 /* ── GRID (slot 3 — الشبكة, comparison): every page becomes one matrix of
    metricMatrix cells, each column normalized to its OWN domain, ink always
    navy (theme-invariant — see metricMatrix's own doc comment). ──────────── */
@@ -1714,4 +1770,74 @@ body.theme-light .v2-gd-closing .v2-lg-table-card{border-color:#dde4ea;}
   .v2-gd-closing{flex-direction:column;align-items:stretch;}
   .v2-gd-closing .v2-closing-side{border-inline-start:0;padding-inline-start:0;}
 }
+
+/* Page-local: slide-toc (Grid, fan-out plan §1, batch B4) — NO real matrix:
+   "figure" values are heterogeneous strings across sections (a sample count
+   here, an accuracy percentage there), so a metricMatrix normalizing them
+   onto one column scale would misrepresent them as comparable. Reuses
+   tocCard's own markup (slides.ts) UNCHANGED, CSS-restyled here to the
+   deck-wide Grid grammar: gap collapses to 0 and each card's rounded
+   border/background give way to a hairline divider between adjacent cells
+   (square corners, uniform equal-size rows via flex:1 on a flex-column
+   parent that already fills the slide body). Each card's page-span drives a
+   --w tint on .v2-toc-side — the SAME "background-image only, ZERO layout
+   height" technique .v2-bar-cell uses (see barCell's doc comment,
+   slideKit.ts) — via a per-tone --gd-tint custom property so the tint
+   color still matches that section's own tone. */
+.v2-gd-toc .v2-toc-grid{gap:0;}
+.v2-gd-toc .v2-toc-card{
+  flex:1;min-height:0;border-radius:0;border:0;background:transparent;
+  border-bottom:1px solid rgba(255,255,255,.14);padding:12px 20px;
+}
+.v2-gd-toc .v2-toc-card:last-child{border-bottom:0;}
+.v2-gd-toc .v2-toc-card::before{width:3px;}
+.v2-gd-toc .v2-toc-side{
+  position:relative;padding-inline-end:8px;
+  background-image:linear-gradient(to top,var(--gd-tint,rgba(244,180,0,.18)) 0,var(--gd-tint,rgba(244,180,0,.18)) var(--w,0%),transparent var(--w,0%));
+  background-repeat:no-repeat;
+}
+.v2-gd-toc .v2-toc-card.blue .v2-toc-side{--gd-tint:rgba(107,169,248,.22);}
+.v2-gd-toc .v2-toc-card.green .v2-toc-side{--gd-tint:rgba(139,195,74,.22);}
+.v2-gd-toc .v2-toc-card.coral .v2-toc-side{--gd-tint:rgba(255,118,95,.24);}
+body.theme-light .v2-gd-toc .v2-toc-card{border-bottom-color:#dde4ea;background:transparent;}
+
+/* Page-local: slide-glossary-levels (Grid, fan-out plan §3a, batch B4) — NO
+   real matrix (one metric — وزن العينة — over four entities); deliberately
+   does not import slide-risk-stages' live per-month figures to manufacture
+   extra columns (two pages independently asserting the same numbers is
+   worse than one honestly degenerate Grid). Reuses levelCardTinted's markup
+   (slides.ts) restyled to uniform, square-cornered cells separated by
+   hairlines instead of .v2-level-card's own rounded borders; the وزن figure
+   drives a --w tint on .v2-level-share via the same per-tone --gd-tint
+   technique .v2-gd-toc uses above. */
+.v2-gd-glossary-levels .v2-level-grid{gap:0;}
+.v2-gd-glossary-levels .v2-level-card{
+  border-radius:0;border:0;background:transparent;
+  border-inline-end:1px solid rgba(255,255,255,.14);padding:18px 16px;
+}
+.v2-gd-glossary-levels .v2-level-card:last-child{border-inline-end:0;}
+.v2-gd-glossary-levels .v2-level-card::after{display:none;}
+.v2-gd-glossary-levels .v2-level-share{
+  position:relative;
+  background-image:linear-gradient(to top,var(--gd-tint,rgba(244,180,0,.16)) 0,var(--gd-tint,rgba(244,180,0,.16)) var(--w,0%),transparent var(--w,0%));
+  background-repeat:no-repeat;
+}
+.v2-gd-glossary-levels .v2-level-card.blue .v2-level-share{--gd-tint:rgba(107,169,248,.2);}
+.v2-gd-glossary-levels .v2-level-card.green .v2-level-share{--gd-tint:rgba(139,195,74,.2);}
+.v2-gd-glossary-levels .v2-level-card.coral .v2-level-share{--gd-tint:rgba(255,118,95,.22);}
+body.theme-light .v2-gd-glossary-levels .v2-level-card{border-inline-end-color:#dde4ea;background:transparent;}
+
+/* Page-local: slide-glossary-1 (Grid, fan-out plan §3b, batch B4) — ZERO
+   metrics (a glossary has no numbers at all), so Grid reuses termBand's own
+   markup (slides.ts) UNCHANGED instead of dressing a non-matrix as a fake
+   metricMatrix. Uniform cells + hairline separators only, matching the two
+   pages above — deliberately NO tint (there is no number to tint by). */
+.v2-gd-glossary-terms .v2-term-grid{gap:0;}
+.v2-gd-glossary-terms .v2-term-card{
+  border-radius:0;border:0;background:transparent;
+  border-inline-end:1px solid rgba(255,255,255,.14);padding:14px 14px 13px;
+}
+.v2-gd-glossary-terms .v2-term-card:last-child{border-inline-end:0;}
+.v2-gd-glossary-terms .v2-term-card::after{display:none;}
+body.theme-light .v2-gd-glossary-terms .v2-term-card{border-inline-end-color:#dde4ea;background:transparent;}
 `;
