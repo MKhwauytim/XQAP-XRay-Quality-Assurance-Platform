@@ -2738,6 +2738,193 @@ export function accuracyPortSlideBuilders(model: ReportModel, variantPreview: bo
  *  use the legacy `.srev-*` markup, so the footer-omission test (no `.srev-file`
  *  when revisions are absent) stays valid — the on-screen footer contract is
  *  untouched, this slide is an additional designed presentation. */
+
+/** Column count for the closing-page Ledger table: الملف/المصدر | الوصف |
+ *  المراجعة/العدد. */
+const CLOSING_LEDGER_SPAN = 3;
+
+/**
+ * Unicode directional-isolate marks (LRI/PDI) — used to isolate a filename's
+ * bidi run inside Briefing's plain-text rank-list label. `briefingRankList`
+ * force-escapes `item.label` (see its doc comment: "do not pre-escape"), so
+ * the `dir="ltr"` HTML attribute `closingLedgerTable` uses directly on its
+ * `<td>` isn't available for a Briefing label; these control characters
+ * achieve the same LTR isolation with plain text, and pass through `esc()`
+ * untouched (it only encodes `& < > " '`) — this is the RTL-clipping lesson
+ * from this fan-out's own history (see the exemplar's peer-reviewed RTL
+ * label-clipping fix) applied where a raw `dir` attribute isn't an option.
+ */
+const LTR_ISOLATE_START = "⁦"; // LRI — Left-to-Right Isolate
+const LTR_ISOLATE_END = "⁩"; // PDI — Pop Directional Isolate
+function isolateLtr(s: string): string {
+  return `${LTR_ISOLATE_START}${s}${LTR_ISOLATE_END}`;
+}
+function stripLtrIsolate(s: string): string {
+  return s.startsWith(LTR_ISOLATE_START) && s.endsWith(LTR_ISOLATE_END)
+    ? s.slice(LTR_ISOLATE_START.length, -LTR_ISOLATE_END.length)
+    : s;
+}
+
+/** Exact wording of the graceful "no revisions" note, shared VERBATIM across
+ *  every system that needs it (Ledger's colspan row, Briefing's empty note) —
+ *  same file this deck has always used for it (previously only `.v2-prov-empty`,
+ *  slot 0). */
+const CLOSING_NO_REVISIONS_NOTE = "لم تُسجَّل مراجعات لملفات المصدر مع هذا التقرير.";
+
+/**
+ * The organization/classification block every slot carries VERBATIM (fan-out
+ * plan §10: "Org block + badge carry verbatim below" for Ledger, "Org block
+ * verbatim" for Briefing) — byte-identical markup/classes to slot 0's
+ * `.v2-closing-side`, factored into its own function so Ledger, Briefing, and
+ * (via `closingGrid`) Grid all render the SAME block instead of three
+ * hand-copies that could drift apart.
+ */
+function closingOrgBlock(model: ReportModel): string {
+  return `<div class="v2-closing-side">
+        <div class="v2-closing-badge"><span>${icon("shield", 13)}</span>داخلي — للاستخدام التنفيذي</div>
+        <div class="v2-closing-org">
+          <b>هيئة الزكاة والضريبة والجمارك</b>
+          ${ORGANIZATION_PATH.map((l) => `<span>${esc(l)}</span>`).join("")}
+        </div>
+        <div class="v2-closing-period">${esc(model.summary.periodId)}</div>
+      </div>`;
+}
+
+/**
+ * Ledger-system provenance table (fan-out plan §10) — the natural fit for
+ * this page: a provenance record IS a ledger. Rows: the two data-source cards
+ * (بيانات وكالة المخاطر / بيانات ذكاء الأعمال, same wording/order as slot 0's
+ * `sourcesBlock`) FIRST, then one row per `sourceRevisionEntries` item
+ * (already file-name sorted — never re-sorted here). tfoot carries the
+ * classification/period line via the SAME `.v2-lg-footnote` muted-caveat
+ * treatment `levelFiguresTable` already established, instead of a numeric
+ * totals row — this page has no quantity to sum.
+ *
+ * Also called DIRECTLY by Grid (`closingGrid` below) — provenance is a
+ * key→value record, not a rankable matrix (zero entities × comparable
+ * metrics), so Grid reuses this exact builder instead of hand-rolling a
+ * second, markup-duplicate table.
+ */
+function closingLedgerTable(model: ReportModel, entries: Array<[string, number]>): string {
+  const src = model.dataSources;
+  const biCell = src.biProvided
+    ? `مُقدَّم — أثرى ${fmtNum(src.biMatchedCount)} صورة`
+    : `<span class="insuff">غير مُقدَّم هذا الشهر</span>`;
+  const sourceRowsHtml = `<tr>
+      <td>بيانات وكالة المخاطر</td><td>المصدر الأساسي</td><td>${fmtNum(src.riskRowCount)} صورة</td>
+    </tr>
+    <tr>
+      <td>بيانات ذكاء الأعمال</td><td>مصدر داعم</td><td>${biCell}</td>
+    </tr>`;
+  const revisionRowsHtml =
+    entries.length > 0
+      ? entries
+          .map(
+            ([file, rev]) =>
+              `<tr><td dir="ltr">${esc(file)}</td><td><span class="insuff">—</span></td><td>مراجعة ${esc(String(rev))}</td></tr>`,
+          )
+          .join("")
+      : `<tr><td colspan="${CLOSING_LEDGER_SPAN}"><span class="insuff">${esc(CLOSING_NO_REVISIONS_NOTE)}</span></td></tr>`;
+  const classificationRow = `<tr class="v2-lg-footnote"><td colspan="${CLOSING_LEDGER_SPAN}">داخلي — للاستخدام التنفيذي · ${esc(model.summary.periodId)}</td></tr>`;
+  return ledgerTableCard({
+    theadCells: `<th>الملف/المصدر</th><th>الوصف</th><th>المراجعة/العدد</th>`,
+    bodyRowsHtml: sourceRowsHtml + revisionRowsHtml,
+    totalsRowHtml: classificationRow,
+    span: CLOSING_LEDGER_SPAN,
+    rowCount: 0,
+  });
+}
+
+/**
+ * Briefing-system lede + support + rank list (fan-out plan §10). Lede IS
+ * `src.riskRowCount` — every row in the month originates from the risk-agency
+ * file, so it is this page's own headline figure (matching slot 0's own use
+ * of the same field). Rank rows (`bars:false` — a provenance list has no
+ * magnitude to bar-chart, the same "definitional list" mode the plan calls
+ * for) list the source-file revisions in the SAME file-name-sorted order
+ * `sourceRevisionEntries`/the Ledger table already use — never independently
+ * re-sorted. Zero revisions renders the shared graceful note instead of an
+ * empty `.v2-bf-rank` wrapper (mirrors `reasonsPanel`'s/other Briefing
+ * variants' "nothing to show → return a note, not dead markup" convention).
+ */
+function closingBriefing(model: ReportModel, entries: Array<[string, number]>): string {
+  const src = model.dataSources;
+  const supportStrip = briefingSupport([
+    {
+      iconName: "scan",
+      value: src.biProvided ? "مُقدَّم" : "غير مُقدَّم",
+      label: src.biProvided
+        ? `ذكاء الأعمال — أثرى ${fmtNum(src.biMatchedCount)} صورة`
+        : "بيانات ذكاء الأعمال",
+    },
+    { iconName: "document", value: fmtNum(entries.length), label: "ملفات مصدر مُسجَّلة" },
+    { iconName: "shield", value: "داخلي", label: "التصنيف" },
+  ]);
+
+  const rankSection =
+    entries.length > 0
+      ? briefingRankList({
+          items: entries.map(([file, rev]) => ({
+            label: isolateLtr(file),
+            value: null,
+            valueText: `مراجعة ${esc(String(rev))}`,
+            secondaryText: "",
+          })),
+          tone: "gold",
+          scale: { kind: "auto" },
+          // REQUIRED by briefingRankList's type contract (2026-07-28 fix — a
+          // missing callback used to silently drop the folded tail with no
+          // remainder row and no type error). Source files have no numeric
+          // magnitude to sum the way a port count/rate does, so unlike most
+          // other foldRemainder implementations in this fan-out the only
+          // honest "pooling" here is literally listing what got folded
+          // (filename + its own revision) in the remainder row's secondary
+          // line — realistically unreachable (this deck rarely tracks more
+          // than a handful of source files, well under briefingRankPlan's
+          // densest-tier cap of 14 named rows), but implemented for real
+          // rather than stubbed, per this codebase's "no silent data loss on
+          // the fold path" discipline.
+          foldRemainder: (folded) => ({
+            label: `+${fmtNum(folded.length)} ملفات إضافية`,
+            value: null,
+            valueText: "—",
+            secondaryText: folded
+              .map((it) => `${esc(stripLtrIsolate(it.label))} ${it.valueText}`)
+              .join("، "),
+            rest: true,
+          }),
+          bars: false,
+        })
+      : `<div class="v2-bf-closing-empty">${esc(CLOSING_NO_REVISIONS_NOTE)}</div>`;
+
+  return `<div class="v2-sys-brief v2-bf-closing">
+    ${briefingLede({
+      figure: fmtNum(src.riskRowCount),
+      tone: "gold",
+      label: `${fmtNum(src.riskRowCount)} صورة من بيانات وكالة المخاطر`,
+      basis: `فترة الدراسة ${esc(model.summary.periodId)}`,
+    })}
+    ${supportStrip}
+    ${rankSection}
+    ${closingOrgBlock(model)}
+  </div>`;
+}
+
+/**
+ * Grid-system body (fan-out plan §10) — a DELIBERATE degenerate case: this
+ * page has zero entities × comparable metrics (provenance is a key→value
+ * record, not a matrix), so instead of dressing a non-matrix as a fake
+ * `metricMatrix` (theatre, not honest visualization), Grid REUSES
+ * `closingLedgerTable`'s own output (plus the same `closingOrgBlock` every
+ * slot carries verbatim) — one table implementation, not two — wrapped in
+ * `.v2-gd-closing` so the deck-wide Grid visual grammar (square corners,
+ * hairline gridlines — see theme.ts's `.v2-gd-closing` rule) still applies to
+ * markup that is otherwise byte-identical to the Ledger slot's.
+ */
+function closingGrid(model: ReportModel, entries: Array<[string, number]>): string {
+  return `<div class="v2-sys-grid v2-gd-closing">${closingLedgerTable(model, entries)}${closingOrgBlock(model)}</div>`;
+}
+
 export function closingSlide(
   model: ReportModel,
   sourceRevisions: SourceRevisions | undefined,
@@ -2791,6 +2978,14 @@ export function closingSlide(
         <div class="v2-closing-period">${esc(model.summary.periodId)}</div>
       </div>
     </div>`;
+
+  // Ledger/Briefing/Grid slots (fan-out plan §10, batch B3 item 5) — slot 0
+  // above is untouched. `entries` is already file-name sorted
+  // (sourceRevisionEntries) and never re-sorted by any of the three.
+  const ledgerBody = `<div class="v2-sys-ledger v2-lg-closing">${closingLedgerTable(model, entries)}${closingOrgBlock(model)}</div>`;
+  const briefingBody = closingBriefing(model, entries);
+  const gridBody = closingGrid(model, entries);
+
   return v2Slide({
     id: "slide-closing",
     title: "مصدر البيانات",
@@ -2798,7 +2993,7 @@ export function closingSlide(
     iconName: "shield",
     headline: "مصدر البيانات والاعتماد",
     subhead: "تتبّع نسخة البيانات، والتصنيف، والجهة المُصدِرة.",
-    bodyVariants: [body, body, body, body],
+    bodyVariants: [body, ledgerBody, briefingBody, gridBody],
     variantPreview,
     num,
     total,

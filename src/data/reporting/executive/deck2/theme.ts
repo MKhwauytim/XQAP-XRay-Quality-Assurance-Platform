@@ -1429,6 +1429,20 @@ body.theme-light .v2-lg-port-card .deck-table tfoot td{color:#0a2d4a;background:
 body.theme-light .v2-lg-stage-card.v2-stage-port-card{background:#fff;border-color:#dde4ea;box-shadow:0 6px 16px rgba(10,45,74,.06);}
 body.theme-light .v2-lg-stage-card .v2-lg-table-card-title{color:#0a2d4a;}
 
+/* Page-local: slide-closing (Ledger, fan-out plan §10, batch B3 item 5) —
+   a namespacing hook plus the layout the table + verbatim org block (see
+   closingOrgBlock, slides.ts, reusing .v2-closing-side's OWN base rules
+   declared earlier in this file — border/padding included) need to sit side
+   by side instead of stacking, mirroring slot 0's own .v2-closing two-column
+   split. */
+.v2-lg-closing{height:100%;display:flex;align-items:center;gap:28px;}
+.v2-lg-closing .v2-lg-table-card{flex:1.5;margin-top:0;}
+.v2-lg-closing .v2-closing-side{flex:1;}
+@media screen and (max-width:820px){
+  .v2-lg-closing{flex-direction:column;align-items:stretch;}
+  .v2-lg-closing .v2-closing-side{border-inline-start:0;padding-inline-start:0;}
+}
+
 /* ── BRIEFING (slot 2 — الإحاطة, recall): one lede figure per page + a
    ≤3-figure support strip + at most one ranked-bar list. Tables are demoted
    to ranked bars (.v2-bf-rank). One fixed tone per page (this page: gold). ── */
@@ -1576,6 +1590,20 @@ body.theme-light .v2-bf-rank-secondary{color:#607386;}
    is handled call-site via truncLabel, not a CSS wrap/overflow rule. */
 .v2-bf-stage-port-population{height:100%;}
 .v2-bf-stage-port-sample{height:100%;}
+/* Page-local: slide-closing (Briefing, fan-out plan §10, batch B3 item 5).
+   The verbatim org block (closingOrgBlock, slides.ts) stacks below the rank
+   list here (Briefing is a single vertical column, unlike Ledger's two-column
+   split), so its side border becomes a top hairline instead of a re-used
+   inline-start border. \`.v2-bf-closing-empty\` is the zero-revisions note
+   (\`briefingSupport([])\`'s own "return a note, not dead markup" convention,
+   applied to the rank-list slot specifically). */
+.v2-bf-closing{height:100%;}
+.v2-bf-closing .v2-closing-side{
+  border-inline-start:0;padding-inline-start:0;
+  border-top:1px solid rgba(255,255,255,.1);padding-top:14px;
+}
+body.theme-light .v2-bf-closing .v2-closing-side{border-top-color:#dde4ea;}
+.v2-bf-closing-empty{font-size:.78rem;font-weight:700;color:var(--slate);text-align:center;line-height:1.7;}
 
 /* ── GRID (slot 3 — الشبكة, comparison): every page becomes one matrix of
    metricMatrix cells, each column normalized to its OWN domain, ink always
@@ -1664,4 +1692,26 @@ body.theme-light .v2-gd-quality-accuracy .v2-gd-panel.sea .v2-gd-panel-head span
 .v2-gd-stage-port-population .v2-gd-panel,.v2-gd-stage-port-sample .v2-gd-panel{flex:1;min-height:0;}
 .v2-gd-stage-port-legend{flex:0 0 auto;font-size:.64rem;font-weight:600;color:var(--slate);text-align:center;}
 body.theme-light .v2-gd-stage-port-legend{color:#607386;}
+
+/* Page-local: slide-closing (Grid, fan-out plan §10, batch B3 item 5) — a
+   DELIBERATE degenerate case: this page has zero entities × comparable
+   metrics (provenance is a key→value record, not a rankable matrix), so
+   Grid reuses closingLedgerTable's own table markup (slides.ts's
+   closingGrid calls that builder DIRECTLY rather than re-deriving a second,
+   duplicate table) instead of dressing a non-matrix as a fake metricMatrix.
+   This class supplies ONLY the deck-wide Grid visual grammar — square
+   corners, hairline gridlines — on top of that identical markup; it does not
+   restyle the table's content. Reuses .v2-lg-closing's own flex/gap/side-block
+   layout (declared in the Ledger section above) since the two slots share
+   the exact same two-column shape, just with a squared-off table on this
+   side. */
+.v2-gd-closing{height:100%;display:flex;align-items:center;gap:28px;}
+.v2-gd-closing .v2-lg-table-card{flex:1.5;margin-top:0;border:1px solid rgba(255,255,255,.14);border-radius:0;}
+.v2-gd-closing .deck-table{border-radius:0;}
+.v2-gd-closing .v2-closing-side{flex:1;}
+body.theme-light .v2-gd-closing .v2-lg-table-card{border-color:#dde4ea;}
+@media screen and (max-width:820px){
+  .v2-gd-closing{flex-direction:column;align-items:stretch;}
+  .v2-gd-closing .v2-closing-side{border-inline-start:0;padding-inline-start:0;}
+}
 `;
