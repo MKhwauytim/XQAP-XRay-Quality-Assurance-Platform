@@ -995,3 +995,41 @@ export function gridPanel(opts: { title: string; sub: string; variant?: string; 
     <div class="v2-gd-panel-chart">${opts.chartHtml}</div>
   </div>`;
 }
+
+// ── P7 — Grid label/value field cells ───────────────────────────────────────
+/**
+ * Grid system (slot 3) label-over-value cell field: the system's uniform
+ * hairline-cell grammar applied to pages that have real fields but NO
+ * comparable numeric domain, so `metricMatrix` would be dishonest (fan-out
+ * plan §3, 2026-07-28 — `slide-cover`/`slide-sep-1/2/3`, the two pages that
+ * closed out the deck2 three-system fan-out).
+ *
+ * Column count/geometry is set by the wrapping page-local `.v2-gd-*` class
+ * (theme.ts) — this function only emits the field markup and the shared
+ * per-cell chrome (hairline borders, padding, label/value typography); it
+ * never decides how many columns a row has or which cells span more than
+ * one column. `wide`'s actual visual effect (e.g. `grid-column:1/-1`, text
+ * wrapping) is therefore ALSO page-local — it is emitted here only as a
+ * `.wide` class hook, deliberately with no shared rule attached, since what
+ * "wide" means depends entirely on the caller's own column template (e.g.
+ * `slide-sep-*`'s `0.6fr 2.4fr` two-column template already puts a
+ * non-`wide` cell in the narrow column and a `wide` one in the remaining
+ * wide column via plain grid auto-flow — no span override needed there).
+ *
+ * `numeric` adds tabular-nums to the value (a shared, purely typographic
+ * effect, unlike `wide`'s geometry). Labels/values are escaped internally —
+ * callers pass raw strings, not pre-escaped HTML.
+ */
+export function gridFieldCells(
+  cells: Array<{ label: string; value: string; numeric?: boolean; wide?: boolean }>,
+): string {
+  const cellsHtml = cells
+    .map((c) => {
+      const cls = ["v2-gd-field-cell", c.numeric ? "num" : "", c.wide ? "wide" : ""]
+        .filter(Boolean)
+        .join(" ");
+      return `<div class="${cls}"><span class="v2-gd-field-label">${esc(c.label)}</span><span class="v2-gd-field-value">${esc(c.value)}</span></div>`;
+    })
+    .join("");
+  return `<div class="v2-gd-field">${cellsHtml}</div>`;
+}
