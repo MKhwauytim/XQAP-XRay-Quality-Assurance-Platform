@@ -1308,6 +1308,171 @@ export function portPopulationSlideBuilders(model: ReportModel, variantPreview: 
   return builders;
 }
 
+/**
+ * Ledger-system port-sample table (fan-out plan §6, batch B2a) — near-clone
+ * of `ledgerPortTable`, but stacked sample-mode cells (`frac()`, "N من M")
+ * instead of plain population counts, through the shared `ledgerPortCard`
+ * (P2) with `extraClass: "sample-mode"` (theme.ts's matching padding rule).
+ * `frac()` is kept deliberately (numerator+denominator in one cell) rather
+ * than splitting into two columns — the plan calls this "maximally
+ * auditable": every sample figure carries its own population base right
+ * next to it, no separate lookup needed.
+ */
+function ledgerPortSampleTable(
+  title: string,
+  rows: PortPopRow[],
+  variant: "land" | "sea",
+  compact: boolean,
+): string {
+  const magTone: CellTone = variant === "land" ? "green" : "blue";
+  const maxMag = maxOf(rows.map((p) => p.sampleTotal));
+  const trs = rows
+    .map((p, i) => {
+      const coverage = p.total > 0 ? (p.sampleTotal / p.total) * 100 : 0;
+      return `<tr><td>${ledgerIdx(i)}${esc(p.name)}</td>${barCell(frac(p.sampleTotal, p.total), (p.sampleTotal / maxMag) * 100, magTone)}<td>${frac(p.sampleClean, p.clean)}</td><td>${frac(p.sampleSuspicious, p.suspicious)}</td><td>${fmtPct(coverage)}</td></tr>`;
+    })
+    .join("");
+  const sum = (f: (p: PortPopRow) => number) => rows.reduce((s, p) => s + f(p), 0);
+  const totalPop = sum((p) => p.total);
+  const totalSample = sum((p) => p.sampleTotal);
+  const totalsRow = `<tr><td>الإجمالي</td><td>${frac(totalSample, totalPop)}</td><td>${frac(sum((p) => p.sampleClean), sum((p) => p.clean))}</td><td>${frac(sum((p) => p.sampleSuspicious), sum((p) => p.suspicious))}</td><td>${fmtPct(totalPop > 0 ? (totalSample / totalPop) * 100 : 0)}</td></tr>`;
+  return ledgerPortCard({
+    title,
+    theadCells: `<th>المنفذ</th><th>العيّنة</th><th>سليمة</th><th>اشتباه</th><th>التغطية</th>`,
+    bodyRowsHtml: trs,
+    totalsRowHtml: totalsRow,
+    span: 5,
+    rowCount: 0,
+    compact,
+    extraClass: "sample-mode",
+  });
+}
+
+/**
+ * Briefing-system port-sample rank list (fan-out plan §6) — sibling of
+ * `briefingPortRank`, ranked by `sampleTotal` (not population `total`) and
+ * toned blue (adjacent to port-population's gold, signalling "same shape,
+ * population→sample"). `foldRemainder` SUMS the folded ports' `sampleTotal`/
+ * `total` and pools coverage from THOSE sums (`rateOf(restSample, restPop)`)
+ * — never averages each folded port's own coverage % — same anti-averaging
+ * discipline every other pooled figure in this fan-out follows.
+ */
+function briefingPortSampleRank(landChunk: PortPopRow[], seaChunk: PortPopRow[]): string {
+  const combined = [...landChunk, ...seaChunk].sort((a, b) => b.sampleTotal - a.sampleTotal);
+  if (combined.length === 0) {
+    return `<div class="v2-sys-brief v2-bf-port-sample">
+      <div class="v2-bf-lede"><div class="v2-bf-lede-figure blue"><span class="insuff">—</span></div></div>
+    </div>`;
+  }
+  const lead = combined[0];
+  const sliceSampleTotal = combined.reduce((s, p) => s + p.sampleTotal, 0);
+  const slicePopTotal = combined.reduce((s, p) => s + p.total, 0);
+  const plan = briefingRankPlan(combined.length);
+
+  const sampleCleanTotal = combined.reduce((s, p) => s + p.sampleClean, 0);
+  const pageCoverage = rateOf(sliceSampleTotal, slicePopTotal);
+  const supportStrip = briefingSupport([
+    { iconName: "scan", value: fmtNum(sliceSampleTotal), label: "إجمالي العيّنة" },
+    { iconName: "check", value: fmtNum(sampleCleanTotal), label: "عيّنة السليمة" },
+    { iconName: "gauge", value: pctCell(pageCoverage), label: "تغطية الصفحة" },
+  ]);
+  const basis =
+    plan.folded > 0
+      ? `أعلى ${fmtNum(plan.named)} من ${portCountPhrase(combined.length)} · إجمالي عيّنة الصفحة ${fmtNum(sliceSampleTotal)} من ${fmtNum(slicePopTotal)}`
+      : `${portCountPhrase(combined.length)} · إجمالي عيّنة الصفحة ${fmtNum(sliceSampleTotal)} من ${fmtNum(slicePopTotal)}`;
+
+  const rankItems: BriefingRankItem[] = combined.map((p) => {
+    const coverage = rateOf(p.sampleTotal, p.total);
+    return {
+      label: p.name,
+      value: p.sampleTotal,
+      valueText: fmtNum(p.sampleTotal),
+      secondaryText: `من ${fmtNum(p.total)} · تغطية ${pctCell(coverage)}`,
+    };
+  });
+  const rankHtml = briefingRankList({
+    items: rankItems,
+    tone: "blue",
+    scale: { kind: "auto" },
+    foldRemainder: (folded) => {
+      // Recover the folded ports' raw sample/population totals from
+      // `combined` (richer than the generic BriefingRankItem[] this
+      // callback receives) by slicing on the folded count — same technique
+      // briefingPortRank's own foldRemainder uses.
+      const restRows = combined.slice(combined.length - folded.length);
+      const restSample = restRows.reduce((s, p) => s + p.sampleTotal, 0);
+      const restPop = restRows.reduce((s, p) => s + p.total, 0);
+      const restCoverage = rateOf(restSample, restPop);
+      return {
+        label: `بقية المنافذ (${fmtNum(folded.length)})`,
+        value: restSample,
+        valueText: fmtNum(restSample),
+        secondaryText: `من ${fmtNum(restPop)} · تغطية ${pctCell(restCoverage)}`,
+        rest: true,
+      };
+    },
+  });
+
+  return `<div class="v2-sys-brief v2-bf-port-sample">
+    ${briefingLede({
+      figure: fmtNum(lead.sampleTotal),
+      tone: "blue",
+      label: `أعلى منفذ عيّنةً: ${esc(lead.name)} — ${fmtNum(lead.sampleTotal)} من ${fmtNum(lead.total)} صورة`,
+      basis,
+    })}
+    ${supportStrip}
+    ${rankHtml}
+  </div>`;
+}
+
+/**
+ * Grid-system port-sample matrix (fan-out plan §6) — sibling of
+ * `gridPortMatrix`, sample-mode columns (العيّنة/المجتمع/التغطية/اشتباه
+ * العيّنة) instead of population-mode ones, all `sequential-gold` (no fixed
+ * target for any of them to diverge around, same reasoning as the exemplar).
+ */
+function gridPortSampleMatrix(
+  title: string,
+  rows: PortPopRow[],
+  variant: "land" | "sea",
+  compact: boolean,
+): string {
+  const coverage = (p: PortPopRow) => rateOf(p.sampleTotal, p.total);
+  const matrix = metricMatrix(
+    {
+      rowLabels: rows.map((p) => p.name),
+      columns: [
+        {
+          label: "العيّنة",
+          domain: [0, maxOf(rows.map((p) => p.sampleTotal))],
+          ramp: "sequential-gold",
+          values: rows.map((p) => p.sampleTotal),
+        },
+        {
+          label: "المجتمع",
+          domain: [0, maxOf(rows.map((p) => p.total))],
+          ramp: "sequential-gold",
+          values: rows.map((p) => p.total),
+        },
+        { label: "التغطية", domain: [0, 100], ramp: "sequential-gold", values: rows.map(coverage) },
+        {
+          label: "اشتباه العيّنة",
+          domain: [0, maxOf(rows.map((p) => p.sampleSuspicious))],
+          ramp: "sequential-gold",
+          values: rows.map((p) => p.sampleSuspicious),
+        },
+      ],
+    },
+    { width: 620, height: 320, compact, caption: `مصفوفة ${title}`, rowHeader: "المنفذ", emptyNote: "لا توجد بيانات" },
+  );
+  return gridPanel({
+    title,
+    sub: `${fmtNum(rows.length)} منفذ`,
+    variant,
+    chartHtml: matrix,
+  });
+}
+
 /** Sample mirror of the population page: sample figures stacked over their population base + coverage. */
 export function portSampleSlideBuilders(model: ReportModel, variantPreview: boolean): SlideBuilder[] {
   const { land, sea } = collectPortStats(model);
@@ -1319,6 +1484,9 @@ export function portSampleSlideBuilders(model: ReportModel, variantPreview: bool
     const cont = page > 0 ? " (تابع)" : "";
     builders.push((num, total) => {
       const body = `<div class="v2-port-split">${portTable("المنافذ البرية", landChunk, "sample", "land", plan.compact)}${portTable("المنافذ البحرية", seaChunk, "sample", "sea", plan.compact)}</div>`;
+      const ledgerBody = `<div class="v2-sys-ledger v2-lg-port-sample"><div class="v2-lg-split">${ledgerPortSampleTable("المنافذ البرية", landChunk, "land", plan.compact)}${ledgerPortSampleTable("المنافذ البحرية", seaChunk, "sea", plan.compact)}</div></div>`;
+      const briefingBody = briefingPortSampleRank(landChunk, seaChunk);
+      const gridBody = `<div class="v2-sys-grid v2-gd-port-sample"><div class="v2-gd-split">${gridPortSampleMatrix("المنافذ البرية", landChunk, "land", plan.compact)}${gridPortSampleMatrix("المنافذ البحرية", seaChunk, "sea", plan.compact)}</div></div>`;
       return v2Slide({
         id: `slide-port-sample-${page + 1}`,
         title: `عيّنة الفحص${cont}`,
@@ -1326,7 +1494,7 @@ export function portSampleSlideBuilders(model: ReportModel, variantPreview: bool
         iconName: "port",
         headline: `عيّنة الفحص المسحوبة لشهر ${model.summary.periodId}${cont}`,
         subhead: "الصفحة نفسها بأرقام العيّنة: كل رقم عيّنة وتحته أساسه من المجتمع، مع نسبة التغطية.",
-        bodyVariants: [body, body, body, body],
+        bodyVariants: [body, ledgerBody, briefingBody, gridBody],
         variantPreview,
         num,
         total,
@@ -1639,6 +1807,220 @@ function qualityTable(
   });
 }
 
+/**
+ * Ledger-system quality table (fan-out plan §8, batch B2a) — near-clone of
+ * `qualityTable`'s columns/tones through the shared `ledgerPortCard` (P2),
+ * plus an ordinal badge. The card `title` discloses the pooled denominator
+ * (`{title} — {N} منفذ · {evaluatedTotal} صورة مُقيَّمة`, per the plan) —
+ * Ledger's whole point is verifiability, and a quality DISTRIBUTION
+ * (عالي/متوسط/منخفض) genuinely needs its base stated once at the card level
+ * (each row already states its own port name; the shared base belongs on
+ * the card, not repeated per row).
+ */
+function ledgerQualityTable(
+  title: string,
+  rows: PortQualityRow[],
+  variant: "land" | "sea",
+  compact: boolean,
+): string {
+  const trs = rows
+    .map((p, i) => {
+      const evaluated = p.highQ + p.medQ + p.lowQ;
+      const high = rateOf(p.highQ, evaluated);
+      const med = rateOf(p.medQ, evaluated);
+      const low = rateOf(p.lowQ, evaluated);
+      const marking = rateOf(p.markingPresent, p.markingPresent + p.markingMissing);
+      return `<tr><td>${ledgerIdx(i)}${esc(p.name)}</td>${qualCell(high, "green")}${qualCell(med, "gold")}${qualCell(low, "coral")}${threshCell(marking, MARKING_TARGET)}</tr>`;
+    })
+    .join("");
+  const sum = (f: (p: PortQualityRow) => number) => rows.reduce((s, p) => s + f(p), 0);
+  const totalMarkP = sum((p) => p.markingPresent);
+  const totalMarkM = sum((p) => p.markingMissing);
+  const totalHigh = sum((p) => p.highQ);
+  const totalMed = sum((p) => p.medQ);
+  const totalLow = sum((p) => p.lowQ);
+  const totalEvaluated = totalHigh + totalMed + totalLow;
+  const totalsRow = `<tr><td>الإجمالي</td><td>${pctCell(rateOf(totalHigh, totalEvaluated))}</td><td>${pctCell(rateOf(totalMed, totalEvaluated))}</td><td>${pctCell(rateOf(totalLow, totalEvaluated))}</td><td>${pctCell(rateOf(totalMarkP, totalMarkP + totalMarkM))}</td></tr>`;
+
+  return ledgerPortCard({
+    title: `${title} — ${fmtNum(rows.length)} منفذ · ${fmtNum(totalEvaluated)} صورة مُقيَّمة`,
+    theadCells: `<th>المنفذ</th><th>عالي</th><th>متوسط</th><th>منخفض</th><th>التحديد</th>`,
+    bodyRowsHtml: trs,
+    totalsRowHtml: totalsRow,
+    span: 5,
+    rowCount: 0,
+    compact,
+  });
+}
+
+/**
+ * Briefing-system quality rank list (fan-out plan §8) — the one page in this
+ * batch with a real EXCLUSION rule, not just a density fold: ports with
+ * `evaluated === 0` carry no quality-level data at all, so they must never
+ * be individually ranked (that would either misrepresent them with a fake
+ * 0% low-quality rate, or silently vanish). They are pulled out of the
+ * ranked set entirely and always surface as ONE aggregate row at the tail —
+ * `منافذ بلا صور مُقيَّمة (k)`, `value: null` (bar-less: `evaluated===0` means
+ * `ΣlowQ/Σevaluated` is definitionally `0/0`, i.e. `rateOf` returns null,
+ * never a fabricated rate) — appended to `items` AFTER the ranked ports.
+ *
+ * This exclusion is orthogonal to `briefingRankList`'s own density-driven
+ * fold (`briefingRankPlan`'s row-budget ladder): real per-page port counts
+ * here (bounded by `planPortPages`/`BASE_ROWS_PER_PAGE`) never approach that
+ * ladder's cap, so in every practical case the appended aggregate is the
+ * WHOLE folded tail and its own label carries straight through. The
+ * `foldRemainder` callback below still handles the (unreachable in practice,
+ * but type-safety-mandatory) case where a very large rankable-port count
+ * ALSO triggers the density fold and mixes real ranked ports into the same
+ * tail — it recomputes the pooled rate correctly either way (via a raw
+ * lowQ/evaluated array parallel to `items`, sliced by the folded count —
+ * `briefingPortRank`'s own established technique) and only falls back to
+ * the generic "بقية المنافذ" wording once the fold is provably NOT pure
+ * exclusion, so a mixed tail is never mislabeled as "unevaluated".
+ */
+function briefingQualityRank(landChunk: PortQualityRow[], seaChunk: PortQualityRow[]): string {
+  const combinedAll = [...landChunk, ...seaChunk];
+  if (combinedAll.length === 0) {
+    return `<div class="v2-sys-brief v2-bf-quality-ports">
+      <div class="v2-bf-lede"><div class="v2-bf-lede-figure coral"><span class="insuff">—</span></div></div>
+    </div>`;
+  }
+  const withEval = combinedAll.map((p) => ({ ...p, evaluated: p.highQ + p.medQ + p.lowQ }));
+  const rankable = withEval
+    .filter((p) => p.evaluated > 0)
+    .sort((a, b) => b.lowQ / b.evaluated - a.lowQ / a.evaluated);
+  const excluded = withEval.filter((p) => p.evaluated === 0);
+
+  const sliceEvaluated = withEval.reduce((s, p) => s + p.evaluated, 0);
+  const sliceHigh = withEval.reduce((s, p) => s + p.highQ, 0);
+  const sliceMed = withEval.reduce((s, p) => s + p.medQ, 0);
+  const sliceLow = withEval.reduce((s, p) => s + p.lowQ, 0);
+  const sliceMarkP = withEval.reduce((s, p) => s + p.markingPresent, 0);
+  const sliceMarkM = withEval.reduce((s, p) => s + p.markingMissing, 0);
+  const lowRate = rateOf(sliceLow, sliceEvaluated);
+
+  const supportStrip = briefingSupport([
+    { iconName: "check", value: pctCell(rateOf(sliceHigh, sliceEvaluated)), label: "عالي (مجمّع)" },
+    { iconName: "gauge", value: pctCell(rateOf(sliceMed, sliceEvaluated)), label: "متوسط (مجمّع)" },
+    { iconName: "flag", value: pctCell(rateOf(sliceMarkP, sliceMarkP + sliceMarkM)), label: "التحديد (مجمّع)" },
+  ]);
+  const basis = `${portCountPhrase(combinedAll.length)} في هذه الصفحة`;
+
+  const rankItems: BriefingRankItem[] = rankable.map((p) => {
+    const rate = rateOf(p.lowQ, p.evaluated);
+    return {
+      label: p.name,
+      value: rate,
+      valueText: pctCell(rate),
+      secondaryText: `من ${fmtNum(p.evaluated)} صورة`,
+    };
+  });
+  // Raw per-item lowQ/evaluated, PARALLEL to rankItems (plus one synthetic
+  // all-zero slot standing in for the whole excluded group), so
+  // foldRemainder can recover real sums for whatever tail actually gets
+  // folded — see this function's doc comment.
+  const rawForFold: Array<{ lowQ: number; evaluated: number }> = rankable.map((p) => ({
+    lowQ: p.lowQ,
+    evaluated: p.evaluated,
+  }));
+  if (excluded.length > 0) {
+    rankItems.push({
+      label: `منافذ بلا صور مُقيَّمة (${fmtNum(excluded.length)})`,
+      value: null,
+      valueText: "—",
+      secondaryText: "",
+    });
+    rawForFold.push({ lowQ: 0, evaluated: 0 });
+  }
+
+  const rankHtml = briefingRankList({
+    items: rankItems,
+    tone: "coral",
+    scale: { kind: "fixed", max: 100 },
+    foldRemainder: (folded) => {
+      const raw = rawForFold.slice(rawForFold.length - folded.length);
+      const foldedLow = raw.reduce((s, r) => s + r.lowQ, 0);
+      const foldedEvaluated = raw.reduce((s, r) => s + r.evaluated, 0);
+      const rate = rateOf(foldedLow, foldedEvaluated);
+      const isPureExclusion = excluded.length > 0 && folded.length === 1 && folded[0].value === null;
+      return {
+        label: isPureExclusion
+          ? `منافذ بلا صور مُقيَّمة (${fmtNum(excluded.length)})`
+          : `بقية المنافذ (${fmtNum(folded.length)})`,
+        value: rate,
+        valueText: pctCell(rate),
+        secondaryText: foldedEvaluated > 0 ? `من ${fmtNum(foldedEvaluated)} صورة` : "",
+        rest: true,
+      };
+    },
+  });
+
+  return `<div class="v2-sys-brief v2-bf-quality-ports">
+    ${briefingLede({
+      figure: pctCell(lowRate),
+      tone: "coral",
+      label: `جودة منخفضة ${pctCell(lowRate)} — ${fmtNum(sliceLow)} من ${fmtNum(sliceEvaluated)} صورة مُقيَّمة`,
+      basis,
+    })}
+    ${supportStrip}
+    ${rankHtml}
+  </div>`;
+}
+
+/**
+ * Grid-system quality matrix (fan-out plan §8) — rows = ports, columns
+ * عالي/متوسط/منخفض/التحديد, ALL `sequential-gold` (the plan explicitly
+ * rejects `diverging-green-coral` for منخفض: a diverging ramp needs a
+ * genuinely meaningful midpoint, which a low-quality share doesn't have —
+ * only a signed delta would). The 90% التحديد target has no threshold
+ * vocabulary in `metricMatrix`, so it's disclosed in the panel head sub
+ * instead (`«{N} منفذ · هدف التحديد {MARKING_TARGET}%»`), same "Ledger/
+ * Briefing carry the caveat honestly, Grid states what it can" pattern
+ * `slide-risk-stages`'s وزن العينة omission already establishes.
+ */
+function gridQualityMatrix(
+  title: string,
+  rows: PortQualityRow[],
+  variant: "land" | "sea",
+  compact: boolean,
+): string {
+  const withEval = rows.map((p) => ({ ...p, evaluated: p.highQ + p.medQ + p.lowQ }));
+  const marking = (p: PortQualityRow) => rateOf(p.markingPresent, p.markingPresent + p.markingMissing);
+  const matrix = metricMatrix(
+    {
+      rowLabels: rows.map((p) => p.name),
+      columns: [
+        {
+          label: "عالي",
+          domain: [0, 100],
+          ramp: "sequential-gold",
+          values: withEval.map((p) => rateOf(p.highQ, p.evaluated)),
+        },
+        {
+          label: "متوسط",
+          domain: [0, 100],
+          ramp: "sequential-gold",
+          values: withEval.map((p) => rateOf(p.medQ, p.evaluated)),
+        },
+        {
+          label: "منخفض",
+          domain: [0, 100],
+          ramp: "sequential-gold",
+          values: withEval.map((p) => rateOf(p.lowQ, p.evaluated)),
+        },
+        { label: "التحديد", domain: [0, 100], ramp: "sequential-gold", values: rows.map(marking) },
+      ],
+    },
+    { width: 620, height: 320, compact, caption: `مصفوفة ${title}`, rowHeader: "المنفذ", emptyNote: "لا توجد بيانات" },
+  );
+  return gridPanel({
+    title,
+    sub: `${fmtNum(rows.length)} منفذ · هدف التحديد ${MARKING_TARGET}%`,
+    variant,
+    chartHtml: matrix,
+  });
+}
+
 /** Build one or more image-quality slides (paginated land/sea in parallel). */
 export function qualityPortSlideBuilders(model: ReportModel, variantPreview: boolean): SlideBuilder[] {
   const { land, sea } = collectPortQualityStats(model);
@@ -1650,6 +2032,9 @@ export function qualityPortSlideBuilders(model: ReportModel, variantPreview: boo
     const cont = page > 0 ? " (تابع)" : "";
     builders.push((num, total) => {
       const body = `<div class="v2-port-split">${qualityTable("المنافذ البرية", landChunk, "land", plan.compact)}${qualityTable("المنافذ البحرية", seaChunk, "sea", plan.compact)}</div>`;
+      const ledgerBody = `<div class="v2-sys-ledger v2-lg-quality-ports"><div class="v2-lg-split">${ledgerQualityTable("المنافذ البرية", landChunk, "land", plan.compact)}${ledgerQualityTable("المنافذ البحرية", seaChunk, "sea", plan.compact)}</div></div>`;
+      const briefingBody = briefingQualityRank(landChunk, seaChunk);
+      const gridBody = `<div class="v2-sys-grid v2-gd-quality-ports"><div class="v2-gd-split">${gridQualityMatrix("المنافذ البرية", landChunk, "land", plan.compact)}${gridQualityMatrix("المنافذ البحرية", seaChunk, "sea", plan.compact)}</div></div>`;
       return v2Slide({
         id: `slide-quality-ports-${page + 1}`,
         title: `نتائج جودة الصور${cont}`,
@@ -1657,7 +2042,7 @@ export function qualityPortSlideBuilders(model: ReportModel, variantPreview: boo
         iconName: "scan",
         headline: `نتائج جودة الصور في المنافذ${cont}`,
         subhead: "توزيع مستويات جودة الصورة (عالي / متوسط / منخفض) ونسبة وجود التحديد في كل منفذ.",
-        bodyVariants: [body, body, body, body],
+        bodyVariants: [body, ledgerBody, briefingBody, gridBody],
         variantPreview,
         num,
         total,
@@ -1754,6 +2139,206 @@ function accuracyTable(
   });
 }
 
+/**
+ * Ledger-system accuracy table (fan-out plan §9, batch B2a) — near-clone of
+ * `accuracyTable`'s columns/tones through `ledgerPortCard` (P2), plus a NEW
+ * العيّنة column (`fmtNum(p.evaluable)`) that slot 0's 4-column table has no
+ * room for — per the plan, "a rate without its denominator is exactly what
+ * Ledger exists to fix," and shown for EVERY row (including unrankable ones,
+ * where it's the only figure the row carries: it's the reason the rates are
+ * muted "—" instead of a fabricated number). Card title carries the pooled
+ * base ("{title} — {N} منفذ · {evaluableTotal} قرار قابل للتقييم" — reusing
+ * the exact "قرار قابل للتقييم" phrase the plan's §11b already establishes
+ * for this same `evaluable` figure elsewhere in the deck).
+ */
+function ledgerAccuracyTable(
+  title: string,
+  rows: PortAccuracyRow[],
+  variant: "land" | "sea",
+  compact: boolean,
+): string {
+  const trs = rows
+    .map((p, i) => {
+      const accuracy = rateOf(p.correctClean + p.correctSuspicion, p.evaluable);
+      const detection = rateOf(p.correctSuspicion, p.correctSuspicion + p.missedSuspicion);
+      const clean = rateOf(p.correctClean, p.correctClean + p.falseSuspicion);
+      const show = (v: number | null) =>
+        p.rankable ? threshCell(v, ACCURACY_TARGET) : `<td class="v2-bar-cell neutral"><span class="insuff">—</span></td>`;
+      return `<tr><td>${ledgerIdx(i)}${esc(p.name)}</td>${show(accuracy)}${show(detection)}${show(clean)}<td>${fmtNum(p.evaluable)}</td></tr>`;
+    })
+    .join("");
+  const sum = (f: (p: PortAccuracyRow) => number) => rows.reduce((s, p) => s + f(p), 0);
+  const totalEvaluable = sum((p) => p.evaluable);
+  const totalCC = sum((p) => p.correctClean);
+  const totalCS = sum((p) => p.correctSuspicion);
+  const totalMS = sum((p) => p.missedSuspicion);
+  const totalFS = sum((p) => p.falseSuspicion);
+  const totalsRow = `<tr><td>الإجمالي</td><td>${pctCell(rateOf(totalCC + totalCS, totalEvaluable))}</td><td>${pctCell(rateOf(totalCS, totalCS + totalMS))}</td><td>${pctCell(rateOf(totalCC, totalCC + totalFS))}</td><td>${fmtNum(totalEvaluable)}</td></tr>`;
+
+  return ledgerPortCard({
+    title: `${title} — ${fmtNum(rows.length)} منفذ · ${fmtNum(totalEvaluable)} قرار قابل للتقييم`,
+    theadCells: `<th>المنفذ</th><th>الدقة العامة</th><th>دقة الاشتباه</th><th>دقة السليمة</th><th>العيّنة</th>`,
+    bodyRowsHtml: trs,
+    totalsRowHtml: totalsRow,
+    span: 5,
+    rowCount: 0,
+    compact,
+  });
+}
+
+/**
+ * Briefing-system accuracy rank list (fan-out plan §9) — ranked ASCENDING
+ * (worst first, not the usual desc-by-magnitude convention every other rank
+ * list in this fan-out uses): the basis chip's «الأقل دقة أولًا» is
+ * load-bearing per the plan — without it, rank #1 would misread as "best"
+ * when it is actually the LEAST accurate port on the page.
+ *
+ * Unrankable ports (`p.rankable === false`, i.e. below `isRankable`'s
+ * data-sufficiency threshold) are excluded from ranking and folded into a
+ * bar-less remainder («منافذ دون حد الكفاية (k)»), never given a fake rate —
+ * same exclusion mechanics as `briefingQualityRank`'s evaluated===0 handling
+ * above (see that function's doc comment for the full design rationale: the
+ * exclusion is orthogonal to `briefingRankList`'s own density fold, and
+ * `foldRemainder` recovers pooled correct/evaluable sums via a raw array
+ * parallel to `items`, sliced by the folded count).
+ */
+function briefingAccuracyRank(landChunk: PortAccuracyRow[], seaChunk: PortAccuracyRow[]): string {
+  const combinedAll = [...landChunk, ...seaChunk];
+  if (combinedAll.length === 0) {
+    return `<div class="v2-sys-brief v2-bf-quality-accuracy">
+      <div class="v2-bf-lede"><div class="v2-bf-lede-figure green"><span class="insuff">—</span></div></div>
+    </div>`;
+  }
+  const rankable = combinedAll
+    .filter((p) => p.rankable)
+    .map((p) => ({ ...p, accuracy: rateOf(p.correctClean + p.correctSuspicion, p.evaluable) }))
+    // Ascending — worst first (see this function's doc comment).
+    .sort((a, b) => (a.accuracy ?? 0) - (b.accuracy ?? 0));
+  const excluded = combinedAll.filter((p) => !p.rankable);
+
+  const sum = (f: (p: PortAccuracyRow) => number) => combinedAll.reduce((s, p) => s + f(p), 0);
+  const totalEvaluable = sum((p) => p.evaluable);
+  const totalCC = sum((p) => p.correctClean);
+  const totalCS = sum((p) => p.correctSuspicion);
+  const totalMS = sum((p) => p.missedSuspicion);
+  const totalFS = sum((p) => p.falseSuspicion);
+  const overallAccuracy = rateOf(totalCC + totalCS, totalEvaluable);
+
+  const supportStrip = briefingSupport([
+    { iconName: "alert", value: pctCell(rateOf(totalCS, totalCS + totalMS)), label: "دقة الاشتباه" },
+    { iconName: "check", value: pctCell(rateOf(totalCC, totalCC + totalFS)), label: "دقة السليمة" },
+    { iconName: "flag", value: fmtNum(excluded.length), label: "دون حد الكفاية" },
+  ]);
+  const basis = `${portCountPhrase(combinedAll.length)} · هدف ${ACCURACY_TARGET}% · الأقل دقة أولًا`;
+
+  const rankItems: BriefingRankItem[] = rankable.map((p) => ({
+    label: p.name,
+    value: p.accuracy,
+    valueText: pctCell(p.accuracy),
+    secondaryText: `العيّنة ${fmtNum(p.evaluable)}`,
+  }));
+  // Raw per-item correct/evaluable counts, PARALLEL to rankItems (plus one
+  // synthetic slot pooling the whole excluded group), so foldRemainder can
+  // recover real sums for whatever tail actually gets folded — same
+  // technique as briefingQualityRank above.
+  const rawForFold: Array<{ correct: number; evaluable: number }> = rankable.map((p) => ({
+    correct: p.correctClean + p.correctSuspicion,
+    evaluable: p.evaluable,
+  }));
+  if (excluded.length > 0) {
+    rankItems.push({
+      label: `منافذ دون حد الكفاية (${fmtNum(excluded.length)})`,
+      value: null,
+      valueText: "—",
+      secondaryText: "",
+    });
+    rawForFold.push({
+      correct: excluded.reduce((s, p) => s + p.correctClean + p.correctSuspicion, 0),
+      evaluable: excluded.reduce((s, p) => s + p.evaluable, 0),
+    });
+  }
+
+  const rankHtml = briefingRankList({
+    items: rankItems,
+    tone: "green",
+    scale: { kind: "fixed", max: 100 },
+    foldRemainder: (folded) => {
+      const raw = rawForFold.slice(rawForFold.length - folded.length);
+      const foldedCorrect = raw.reduce((s, r) => s + r.correct, 0);
+      const foldedEvaluable = raw.reduce((s, r) => s + r.evaluable, 0);
+      const rate = rateOf(foldedCorrect, foldedEvaluable);
+      const isPureExclusion = excluded.length > 0 && folded.length === 1 && folded[0].value === null;
+      return {
+        label: isPureExclusion
+          ? `منافذ دون حد الكفاية (${fmtNum(excluded.length)})`
+          : `بقية المنافذ (${fmtNum(folded.length)})`,
+        value: rate,
+        valueText: pctCell(rate),
+        secondaryText: foldedEvaluable > 0 ? `العيّنة ${fmtNum(foldedEvaluable)}` : "",
+        rest: true,
+      };
+    },
+  });
+
+  return `<div class="v2-sys-brief v2-bf-quality-accuracy">
+    ${briefingLede({
+      figure: pctCell(overallAccuracy),
+      tone: "green",
+      label: `الدقة العامة ${pctCell(overallAccuracy)} — ${fmtNum(totalCC + totalCS)} من ${fmtNum(totalEvaluable)} قرار`,
+      basis,
+    })}
+    ${supportStrip}
+    ${rankHtml}
+  </div>`;
+}
+
+/**
+ * Grid-system accuracy matrix (fan-out plan §9) — rows = ports, columns
+ * الدقة العامة/دقة الاشتباه/دقة السليمة (`[0,100]`) + العيّنة (own domain),
+ * ALL `sequential-gold`. Unrankable ports pass `null` for the three rate
+ * columns (`metricMatrix` renders "—", never a fake value) while still
+ * showing العيّنة — same "state what you can, omit what you can't" pattern
+ * as `gridQualityMatrix`'s marking-target sub line. Panel head sub carries
+ * the accuracy target since `metricMatrix` has no threshold vocabulary of
+ * its own (same reasoning as gridQualityMatrix's التحديد target).
+ */
+function gridAccuracyMatrix(
+  title: string,
+  rows: PortAccuracyRow[],
+  variant: "land" | "sea",
+  compact: boolean,
+): string {
+  const accuracy = (p: PortAccuracyRow) =>
+    p.rankable ? rateOf(p.correctClean + p.correctSuspicion, p.evaluable) : null;
+  const detection = (p: PortAccuracyRow) =>
+    p.rankable ? rateOf(p.correctSuspicion, p.correctSuspicion + p.missedSuspicion) : null;
+  const clean = (p: PortAccuracyRow) =>
+    p.rankable ? rateOf(p.correctClean, p.correctClean + p.falseSuspicion) : null;
+  const matrix = metricMatrix(
+    {
+      rowLabels: rows.map((p) => p.name),
+      columns: [
+        { label: "الدقة العامة", domain: [0, 100], ramp: "sequential-gold", values: rows.map(accuracy) },
+        { label: "دقة الاشتباه", domain: [0, 100], ramp: "sequential-gold", values: rows.map(detection) },
+        { label: "دقة السليمة", domain: [0, 100], ramp: "sequential-gold", values: rows.map(clean) },
+        {
+          label: "العيّنة",
+          domain: [0, maxOf(rows.map((p) => p.evaluable))],
+          ramp: "sequential-gold",
+          values: rows.map((p) => p.evaluable),
+        },
+      ],
+    },
+    { width: 620, height: 320, compact, caption: `مصفوفة ${title}`, rowHeader: "المنفذ", emptyNote: "لا توجد بيانات" },
+  );
+  return gridPanel({
+    title,
+    sub: `${fmtNum(rows.length)} منفذ · هدف الدقة ${ACCURACY_TARGET}%`,
+    variant,
+    chartHtml: matrix,
+  });
+}
+
 /** Build one or more port-accuracy slides (paginated land/sea in parallel). */
 export function accuracyPortSlideBuilders(model: ReportModel, variantPreview: boolean): SlideBuilder[] {
   const { land, sea } = collectPortAccuracyRows(model);
@@ -1765,6 +2350,9 @@ export function accuracyPortSlideBuilders(model: ReportModel, variantPreview: bo
     const cont = page > 0 ? " (تابع)" : "";
     builders.push((num, total) => {
       const body = `<div class="v2-port-split">${accuracyTable("المنافذ البرية", landChunk, "land", plan.compact)}${accuracyTable("المنافذ البحرية", seaChunk, "sea", plan.compact)}</div>`;
+      const ledgerBody = `<div class="v2-sys-ledger v2-lg-quality-accuracy"><div class="v2-lg-split">${ledgerAccuracyTable("المنافذ البرية", landChunk, "land", plan.compact)}${ledgerAccuracyTable("المنافذ البحرية", seaChunk, "sea", plan.compact)}</div></div>`;
+      const briefingBody = briefingAccuracyRank(landChunk, seaChunk);
+      const gridBody = `<div class="v2-sys-grid v2-gd-quality-accuracy"><div class="v2-gd-split">${gridAccuracyMatrix("المنافذ البرية", landChunk, "land", plan.compact)}${gridAccuracyMatrix("المنافذ البحرية", seaChunk, "sea", plan.compact)}</div></div>`;
       return v2Slide({
         id: `slide-quality-accuracy-${page + 1}`,
         title: `دقة نتائج المنافذ${cont}`,
@@ -1772,7 +2360,7 @@ export function accuracyPortSlideBuilders(model: ReportModel, variantPreview: bo
         iconName: "gauge",
         headline: `نتائج دقة نتائج المنافذ (اشتباه / سليمة)${cont}`,
         subhead: "الدقة العامة، ودقة اكتشاف الاشتباه، ودقة تأكيد السليمة.",
-        bodyVariants: [body, body, body, body],
+        bodyVariants: [body, ledgerBody, briefingBody, gridBody],
         variantPreview,
         num,
         total,

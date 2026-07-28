@@ -1363,6 +1363,17 @@ body.theme-light .v2-src-card{background-image:var(--v2-hex-tex-light),none;back
    already has good contrast in both. */
 body.theme-light .v2-lg-port-card{background:#fff;border-color:#dde4ea;box-shadow:0 6px 16px rgba(10,45,74,.06);}
 body.theme-light .v2-lg-port-card .deck-table tfoot td{color:#0a2d4a;background:rgba(10,45,74,.05);border-top-color:rgba(10,45,74,.15);}
+/* Sample-mode (slide-port-sample fan-out, plan §6): frac() cells stack two
+   lines ("N" over "من M"), so rows need more room than the plain single-line
+   population variant. Unlike .v2-port-col.sample-mode (which SHRINKS its
+   padding to hold a fixed measured row height for the pinned-bottom totals
+   trick — see that rule's own comment), Ledger port cards pass rowCount:0
+   and never pin anything, so there's no fixed budget to protect: growing the
+   padding here is simply the correct, simpler fix for this shell. */
+.v2-lg-port-card.sample-mode .deck-table tbody td,
+.v2-lg-port-card.sample-mode .deck-table tfoot td{padding:12px 12px;}
+.v2-lg-port-card.sample-mode.compact .deck-table tbody td,
+.v2-lg-port-card.sample-mode.compact .deck-table tfoot td{padding:6px 9px;}
 
 /* Page-local: slide-port-population (Ledger). Nothing bespoke beyond the
    shared components above — this selector exists as the required namespacing
@@ -1374,6 +1385,12 @@ body.theme-light .v2-lg-port-card .deck-table tfoot td{color:#0a2d4a;background:
    table markup is levelFiguresTable's .v2-level-table-card, styled earlier
    in this file. */
 .v2-lg-risk-stages{height:100%;}
+/* Page-local: slide-port-sample / slide-quality-ports / slide-quality-accuracy
+   (Ledger, fan-out plan §6/§8/§9, batch B2a — mechanical clones of the
+   port-population exemplar). Same "namespacing hook, nothing bespoke" role. */
+.v2-lg-port-sample{height:100%;}
+.v2-lg-quality-ports{height:100%;}
+.v2-lg-quality-accuracy{height:100%;}
 
 /* ── BRIEFING (slot 2 — الإحاطة, recall): one lede figure per page + a
    ≤3-figure support strip + at most one ranked-bar list. Tables are demoted
@@ -1507,6 +1524,13 @@ body.theme-light .v2-bf-rank-secondary{color:#607386;}
    .v2-bf-port-population above — per-row tone comes from briefingRankList's
    item.tone override (slideKit.ts), not page-local CSS. */
 .v2-bf-risk-stages{height:100%;}
+/* Page-local: slide-port-sample / slide-quality-ports / slide-quality-accuracy
+   (Briefing, fan-out plan §6/§8/§9, batch B2a). Same "namespacing hook,
+   nothing bespoke" role — each page's own tone (blue/coral/green) is set on
+   briefingLede/briefingRankList at the call site, not here. */
+.v2-bf-port-sample{height:100%;}
+.v2-bf-quality-ports{height:100%;}
+.v2-bf-quality-accuracy{height:100%;}
 
 /* ── GRID (slot 3 — الشبكة, comparison): every page becomes one matrix of
    metricMatrix cells, each column normalized to its OWN domain, ink always
@@ -1549,6 +1573,32 @@ body.theme-light .v2-gd-panel-head span{color:#607386;}
 .v2-gd-port-population .v2-gd-panel.sea .v2-gd-panel-head span{color:var(--blue);}
 body.theme-light .v2-gd-port-population .v2-gd-panel.land .v2-gd-panel-head span{color:#4a7a1f;}
 body.theme-light .v2-gd-port-population .v2-gd-panel.sea .v2-gd-panel-head span{color:#2f6fb0;}
+
+/* Page-local: slide-port-sample / slide-quality-ports / slide-quality-accuracy
+   (Grid, fan-out plan §6/§8/§9, batch B2a) — same land=green/sea=blue tint
+   convention as slide-port-population above, mechanically repeated per page
+   (this file's own established convention: one page-local block per page,
+   not a shared selector — see the comment on the port-population block). */
+.v2-gd-port-sample .v2-gd-panel.land{border-color:rgba(139,195,74,.35);}
+.v2-gd-port-sample .v2-gd-panel.sea{border-color:rgba(107,169,248,.35);}
+.v2-gd-port-sample .v2-gd-panel.land .v2-gd-panel-head span{color:var(--green);}
+.v2-gd-port-sample .v2-gd-panel.sea .v2-gd-panel-head span{color:var(--blue);}
+body.theme-light .v2-gd-port-sample .v2-gd-panel.land .v2-gd-panel-head span{color:#4a7a1f;}
+body.theme-light .v2-gd-port-sample .v2-gd-panel.sea .v2-gd-panel-head span{color:#2f6fb0;}
+
+.v2-gd-quality-ports .v2-gd-panel.land{border-color:rgba(139,195,74,.35);}
+.v2-gd-quality-ports .v2-gd-panel.sea{border-color:rgba(107,169,248,.35);}
+.v2-gd-quality-ports .v2-gd-panel.land .v2-gd-panel-head span{color:var(--green);}
+.v2-gd-quality-ports .v2-gd-panel.sea .v2-gd-panel-head span{color:var(--blue);}
+body.theme-light .v2-gd-quality-ports .v2-gd-panel.land .v2-gd-panel-head span{color:#4a7a1f;}
+body.theme-light .v2-gd-quality-ports .v2-gd-panel.sea .v2-gd-panel-head span{color:#2f6fb0;}
+
+.v2-gd-quality-accuracy .v2-gd-panel.land{border-color:rgba(139,195,74,.35);}
+.v2-gd-quality-accuracy .v2-gd-panel.sea{border-color:rgba(107,169,248,.35);}
+.v2-gd-quality-accuracy .v2-gd-panel.land .v2-gd-panel-head span{color:var(--green);}
+.v2-gd-quality-accuracy .v2-gd-panel.sea .v2-gd-panel-head span{color:var(--blue);}
+body.theme-light .v2-gd-quality-accuracy .v2-gd-panel.land .v2-gd-panel-head span{color:#4a7a1f;}
+body.theme-light .v2-gd-quality-accuracy .v2-gd-panel.sea .v2-gd-panel-head span{color:#2f6fb0;}
 
 /* Page-local: slide-risk-stages (Grid, fan-out plan §5) — a single
    full-width panel, no land/sea split (so no .v2-gd-split wrapper here);
