@@ -177,71 +177,6 @@ function pairAt(
   return index.get(pairKey(a, b)) ?? index.get(pairKey(b, a));
 }
 
-// ── Left card — the 6×6 agreement matrix ────────────────────────────────────
-
-/**
- * 6×6 matrix, LOWER TRIANGLE ONLY: cell (row ri, col ci) is populated when
- * `ci < ri`, so each of the 15 pairs appears exactly once and the diagonal
- * (a source against itself, always trivially 100%) is blank. The upper
- * triangle and diagonal pass `null`, which `percentHeatmap` renders as its
- * dashed "—" placeholder.
- *
- * Column labels are the source NUMBER (1..6); the full Arabic name lives on
- * the row header carrying the same number. Six full Arabic labels across the
- * top would collide at this card width, and a correlation-style numeric axis
- * keyed to the named rows is both readable and unambiguous.
- */
-function buildHeatMatrix(cells: CrossTeamMatrixCell[]): HeatMatrix {
-  const index = indexPairs(cells);
-  return {
-    rows: SOURCE_ORDER.map((source, i) => `${SOURCE_LABELS[source]} (${i + 1})`),
-    cols: SOURCE_ORDER.map((_, i) => String(i + 1)),
-    values: SOURCE_ORDER.map((rowSource, ri) =>
-      SOURCE_ORDER.map((colSource, ci) => {
-        if (ci >= ri) return null; // diagonal + mirrored upper half
-        const cell = pairAt(index, colSource, rowSource);
-        return cell ? gatedRate(cell.comparable, cell.agreementRate) : null;
-      }),
-    ),
-  };
-}
-
-/**
- * The ن companion to the matrix: the same lower triangle, same 1..6 numbering,
- * carrying `comparable` for every pair — including the pairs whose rate the
- * sufficiency gate suppressed. Structurally-empty lines (row 1 and column 6
- * hold no pairs) are omitted rather than rendered as blank filler.
- */
-function comparableGrid(cells: CrossTeamMatrixCell[]): string {
-  const index = indexPairs(cells);
-  const colSources = SOURCE_ORDER.slice(0, -1); // 1..5
-  const rowSources = SOURCE_ORDER.slice(1); // 2..6
-
-  const head = `<tr><th class="s3sa-void" scope="col"></th>${colSources
-    .map((_, ci) => `<th scope="col">${ci + 1}</th>`)
-    .join("")}</tr>`;
-
-  const bodyRows = rowSources
-    .map((rowSource, k) => {
-      const ri = k + 1;
-      const tds = colSources
-        .map((colSource, ci) => {
-          if (ci >= ri) return `<td class="s3sa-void"></td>`;
-          const cell = pairAt(index, colSource, rowSource);
-          return `<td>${fmtNum(cell ? cell.comparable : 0)}</td>`;
-        })
-        .join("");
-      return `<tr><th scope="row">${ri + 1}</th>${tds}</tr>`;
-    })
-    .join("");
-
-  return `<table class="s3sa-ngrid">
-    <caption>${esc("عدد الصور القابلة للمقارنة (العيّنة) لكل زوج — بترقيم المصادر نفسه أعلاه")}</caption>
-    <thead>${head}</thead>
-    <tbody>${bodyRows}</tbody>
-  </table>`;
-}
-
 // ── matrixCard's new levels × teams chart ────────────────────────────────────
 //
 // 2026-07-28 rework (owner feedback on the previously-shipped 6×6 heatmap:
@@ -255,13 +190,6 @@ function comparableGrid(cells: CrossTeamMatrixCell[]): string {
 // tradeoff to document: 3 real Arabic column headers fit comfortably where 6
 // didn't.
 //
-// NOTE (temporary, resolved by Task 5): `buildHeatMatrix`/`comparableGrid`
-// above this block still exist — `gridBody` still uses them until Task 5
-// rewires it and deletes them, along with the now-stale "Left card — the 6×6
-// agreement matrix" header comment above `buildHeatMatrix`. Task 3 alone
-// leaves two adjacent "Left card"-ish section comments in the file; that's
-// expected and temporary, not a mistake to fix here.
-
 const MATRIX_TITLE = "توافق المستويين مع الفرق الأخرى";
 const MATRIX_SUB = "مقارنة كل مستوى بالتفتيش اليدوي والمعاكس والوسائل الحية";
 
@@ -807,25 +735,25 @@ function gridBody(model: ReportModel): string {
   const rows = model.resultComparison.reviewerAgreement;
   const totals = reviewerTotals(rows);
 
-  const heat = percentHeatmap(buildHeatMatrix(cells), {
+  const heat = percentHeatmap(buildLevelsTeamsMatrix(cells), {
     width: 620,
     height: 320,
     digits: 0,
     toneLow: "text",
     toneHigh: "primary",
-    rowHeaderWidth: 140,
-    caption: "مصفوفة التوافق بين المصادر",
-    rowHeader: "المصدر",
+    rowHeaderWidth: 110,
+    caption: MATRIX_TITLE,
+    rowHeader: "المستوى",
     legendHighLabel: "توافق أعلى",
     legendLowLabel: "توافق أقل",
     emptyNote: "لا توجد مقارنات متاحة",
   });
 
   const matrixPanel = gridPanel({
-    title: "مصفوفة التوافق بين المصادر",
-    sub: `${fmtNum(cells.length)} زوجًا · المصفوفة متماثلة، يُعرض النصف السفلي فقط`,
+    title: MATRIX_TITLE,
+    sub: MATRIX_SUB,
     variant: "matrix",
-    chartHtml: `<div class="s3sa-gd-heat-wrap"><div class="s3sa-chart">${heat}</div>${comparableGrid(cells)}</div>`,
+    chartHtml: `<div class="s3sa-gd-heat-wrap">${levelPairStatHtml(cells)}<div class="s3sa-chart">${heat}</div>${levelsTeamsCountsTable(cells)}</div>`,
   });
 
   const reviewerPanel = gridPanel({
