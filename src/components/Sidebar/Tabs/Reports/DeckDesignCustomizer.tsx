@@ -17,12 +17,36 @@ type Props = {
 type MessageEventLike = { data?: { type?: string; slideId?: string; variantIndex?: number } };
 
 /**
+ * The 3 named design systems (plus the original/default) a "*" deck-wide
+ * choice can select — same 0-3 slot indices `resolveVariantIndex`
+ * (slideKit.ts) resolves per-slide, same Arabic names/ordinal labels used
+ * throughout docs/superpowers/specs/2026-07-25-deck2-design-systems-design.md.
+ */
+const DECK_WIDE_SYSTEMS: ReadonlyArray<{ index: number; label: string }> = [
+  { index: 0, label: "الافتراضي (1/4)" },
+  { index: 1, label: "السجل (2/4)" },
+  { index: 2, label: "الإحاطة (3/4)" },
+  { index: 3, label: "الشبكة (4/4)" },
+];
+
+/**
  * Admin-only in-app design customizer: renders the CURRENT REAL month's
  * report (variantPreview=true, so every slide's arrow-cycle switcher is
  * live) into an iframe, listens for choices via postMessage (the bridge
  * DECK_VARIANT_SCRIPT's persist() now emits unconditionally), and saves the
  * accumulated combination on an explicit Save click — never auto-saves per
  * click, matching "customize... and save it" as one deliberate action.
+ *
+ * The "تطبيق على كل الصفحات" segmented control below the toolbar sets the
+ * engine's deck-wide `"*"` fallback key (`resolveVariantIndex`'s 3rd lookup
+ * tier, slideKit.ts) directly from the React side, rather than through the
+ * iframe's own per-page arrow switchers — clicking it also CLEARS every
+ * per-page override accumulated so far, so "switch all pages to 2/4"
+ * genuinely becomes a consistent whole-deck choice instead of one that
+ * stale per-page overrides could silently reassert on individual pages
+ * later. The per-page arrows remain available afterward to mix and match
+ * on top of that new baseline (both requirements straight from the
+ * commissioning admin's own framing of this feature).
  * See docs/superpowers/specs/2026-07-25-admin-report-customization-design.md.
  */
 export default function DeckDesignCustomizer({ execInput, employeeDisplayNames, directoryHandle, canMutate, onClose }: Props) {
@@ -63,6 +87,22 @@ export default function DeckDesignCustomizer({ execInput, employeeDisplayNames, 
     });
   }, [ready, execInput, employeeDisplayNames, loadedChoices]);
 
+  // Highlights whichever segment matches the last deck-wide choice recorded
+  // in `loadedChoices` (the state that also drives the iframe rebuild below).
+  // Per-page arrow clicks inside the iframe only ever touch `pendingChoices`
+  // (a ref, deliberately non-reactive — see the per-page bridge effect
+  // above), so this can go stale relative to what's live on individual
+  // pages after mixing — an accepted trade-off, since it still answers the
+  // question this control actually asks ("what did I last apply to the
+  // whole deck"), not "does every page currently match it".
+  const activeDeckWideIndex = loadedChoices?.["*"] ?? null;
+
+  function applyDeckWideChoice(index: number) {
+    const next: Record<string, number> = { "*": index };
+    pendingChoices.current = next;
+    setLoadedChoices(next);
+  }
+
   async function handleSave() {
     if (!canMutate("export-reports")) {
       setStatus({ kind: "error", text: "لا تملك صلاحية تصدير التقارير." });
@@ -90,6 +130,23 @@ export default function DeckDesignCustomizer({ execInput, employeeDisplayNames, 
             <button type="button" className="rh-btn" onClick={onClose} aria-label="إغلاق">
               <X size={15} strokeWidth={2} />
             </button>
+          </div>
+        </div>
+        <div className="rh-customizer-deckwide" role="group" aria-label="تطبيق نظام تصميم واحد على كل صفحات العرض">
+          <span className="rh-customizer-deckwide-label">تطبيق على كل الصفحات:</span>
+          <div className="rh-customizer-deckwide-segs">
+            {DECK_WIDE_SYSTEMS.map((sys) => (
+              <button
+                key={sys.index}
+                type="button"
+                className={`rh-customizer-deckwide-seg${activeDeckWideIndex === sys.index ? " active" : ""}`}
+                onClick={() => applyDeckWideChoice(sys.index)}
+                disabled={!ready}
+                aria-pressed={activeDeckWideIndex === sys.index}
+              >
+                {sys.label}
+              </button>
+            ))}
           </div>
         </div>
         <div className="rh-customizer-frame-wrap">

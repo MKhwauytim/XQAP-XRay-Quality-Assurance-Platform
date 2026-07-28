@@ -367,3 +367,243 @@ describe("markingImpactSlide — purity", () => {
     expect(MARKING_IMPACT_CSS).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
   });
 });
+
+// ── Ledger/Briefing/Grid fan-out (2026-07-25 plan §11e, batch B3 item 3) ────
+// Preview mode (`variantPreview: true`) renders all 4 design-system bodies in
+// one HTML string (each wrapped in its own `.v2-variant-panel`), so every
+// assertion below just searches that combined string — the same technique
+// this fan-out's sibling test files (`portAgreement.test.ts`'s "renders four
+// … body variants only in preview mode") use to reach the non-default slots.
+
+/** Uneven arm sizes (30 vs 10) so a naive AVERAGE of the two arms' own
+ *  percentages measurably disagrees with the honest POOLED figure computed
+ *  from their raw counts — the exact tripwire shape this fan-out's other
+ *  pages (e.g. levelAccuracy's `statsOf(sumCounts(...))`) already use to catch
+ *  an averaging bug.
+ *  present: 30 images, 27 accurate → 90.0%.
+ *  absent:  10 images, 5 accurate  → 50.0%.
+ *  Naive average  = (90.0 + 50.0) / 2 = 70.0%.
+ *  Honest pooled  = (27 + 5) / (30 + 10) = 32 / 40 = 80.0%. */
+const PRESENT_UNEVEN = { correctClean: 20, correctSusp: 7, missedSusp: 2, falseSusp: 1 };
+const ABSENT_UNEVEN = { correctClean: 3, correctSusp: 2, missedSusp: 3, falseSusp: 2 };
+
+describe("markingImpactSlide — Ledger (fan-out)", () => {
+  it("renders one 8-column table with both arms and the same figures the slot-0 tiles show", () => {
+    const preview = markingImpactSlide(
+      modelWith([
+        ...arm({ prefix: "M", hasMarking: true, ...STRONG_ARM }),
+        ...arm({ prefix: "N", hasMarking: false, ...WEAK_ARM }),
+      ]),
+      7,
+      20,
+      true,
+    );
+    expect(preview).toContain("<th>الفئة</th><th>العيّنة</th><th>الدقة</th><th>كشف الاشتباه</th>");
+    expect(preview).toContain(
+      "<th>سليمة صحيحة</th><th>اشتباه صحيح</th><th>اشتباه فائت</th><th>اشتباه خاطئ</th>",
+    );
+    // Same accuracy figures the slot-0 tiles print (STRONG_ARM 90.0%, WEAK_ARM 70.0%).
+    expect(preview).toContain(">90.0%<");
+    expect(preview).toContain(">70.0%<");
+    // Raw outcome counts, never a share, in the Ledger cells (WEAK_ARM's own tallies).
+    expect(preview).toContain(">10<"); // WEAK_ARM correctClean
+    expect(preview).toContain(">4<"); // WEAK_ARM correctSusp / missedSusp
+  });
+
+  it("pools the combined-arms totals-row accuracy from raw counts, never averaging the two arms' percentages", () => {
+    const preview = markingImpactSlide(
+      modelWith([
+        ...arm({ prefix: "M", hasMarking: true, ...PRESENT_UNEVEN }),
+        ...arm({ prefix: "N", hasMarking: false, ...ABSENT_UNEVEN }),
+      ]),
+      7,
+      20,
+      true,
+    );
+    // Honest pooled figure: (27 + 5) / (30 + 10) = 80.0%.
+    expect(preview).toContain("<td>الإجمالي</td><td>40</td><td>80.0%</td>");
+    // The naive average of 90.0% and 50.0% (70.0%) must NOT appear as the
+    // totals-row accuracy — proving the totals row pools raw counts instead
+    // of averaging the two arms' own percentages.
+    expect(preview).not.toContain("<td>الإجمالي</td><td>40</td><td>70.0%</td>");
+    // Combined n and combined outcome counts are plain sums either way.
+    expect(preview).toContain("<td>23</td><td>9</td><td>5</td><td>3</td>");
+  });
+
+  it("shows the tfoot الفارق row with a real signed figure when both arms are rankable", () => {
+    const preview = markingImpactSlide(
+      modelWith([
+        ...arm({ prefix: "M", hasMarking: true, ...STRONG_ARM }),
+        ...arm({ prefix: "N", hasMarking: false, ...WEAK_ARM }),
+      ]),
+      7,
+      20,
+      true,
+    );
+    expect(preview).toContain('<tr class="v2-lg-delta-row"><td>الفارق (يوجد − لا يوجد)</td>');
+    // Same effect slot-0's chip prints for this exact fixture (90.0 − 70.0 = +20.0).
+    expect(preview).toContain('<tr class="v2-lg-delta-row"><td>الفارق (يوجد − لا يوجد)</td><td>—</td><td><span dir="ltr">+20.0</span></td>');
+  });
+
+  it("gates the tfoot الفارق row with the SAME rule slot-0's deltaChip uses — both render — together when one arm is below the sufficiency cut", () => {
+    const html = markingImpactSlide(
+      modelWith([
+        ...arm({ prefix: "M", hasMarking: true, correctClean: 5 }), // n=5, below the `limited` cut (10)
+        ...arm({ prefix: "N", hasMarking: false, ...WEAK_ARM }),
+      ]),
+      7,
+      20,
+      true,
+    );
+    // Slot 0's chip (always rendered) is the reference: it must show insufficient.
+    expect(html).toContain('<div class="v2-mark-delta insufficient">');
+    // The Ledger tfoot row, driven by the SAME `comparable()` call, must agree.
+    expect(html).toContain(
+      '<tr class="v2-lg-delta-row"><td>الفارق (يوجد − لا يوجد)</td><td>—</td><td><span class="insuff">—</span></td>',
+    );
+  });
+});
+
+describe("markingImpactSlide — Briefing (fan-out)", () => {
+  it("uses the signed accuracy delta as the lede, with the two arms as fixed-scale rank rows", () => {
+    const preview = markingImpactSlide(
+      modelWith([
+        ...arm({ prefix: "M", hasMarking: true, ...STRONG_ARM }),
+        ...arm({ prefix: "N", hasMarking: false, ...WEAK_ARM }),
+      ]),
+      7,
+      20,
+      true,
+    );
+    // The signed figure is bidi-isolated (dir="ltr") inside this Arabic
+    // sentence (2026-07-28 fix, C4) — same mechanism the standalone lede
+    // figure already used, so the sign renders on the correct side of the
+    // digit instead of flipping under RTL's bidi algorithm.
+    expect(preview).toContain(
+      'فارق الدقة <span dir="ltr">+20.0</span> نقطة — بتحديد 90.0% مقابل بلا تحديد 70.0%',
+    );
+    expect(preview).toContain("العيّنة 20 · كشف 85.7%");
+    expect(preview).toContain("العيّنة 20 · كشف 50.0%");
+  });
+
+  it("mirrors deltaChip's not-comparable fallback exactly — same '—' + insufficient note, not a parallel threshold", () => {
+    const html = markingImpactSlide(
+      modelWith([
+        ...arm({ prefix: "M", hasMarking: true, correctClean: 5 }), // n=5, below the `limited` cut (10)
+        ...arm({ prefix: "N", hasMarking: false, ...WEAK_ARM }),
+      ]),
+      7,
+      20,
+      true,
+    );
+    // Slot 0's own gate output is the reference.
+    expect(html).toContain('<div class="v2-mark-delta insufficient">');
+    expect(html).toContain(`<b class="v2-mark-delta-value"><span class="insuff">—</span></b>`);
+    // Briefing's lede fallback: the SAME insufficiency note, not a different phrase.
+    expect(html).toContain(`فارق الدقة — ${INSUFFICIENT}`);
+    const insuffFigureCount = [...html.matchAll(/<span class="insuff">—<\/span>/g)].length;
+    // Slot 0's chip AND the Briefing lede both render the muted "—" figure —
+    // proving the two variants agree on the SAME comparability verdict for
+    // this fixture (a divergent/looser Briefing gate would drop this to 1).
+    expect(insuffFigureCount).toBeGreaterThanOrEqual(2);
+  });
+
+  it("Briefing body order is lede → support → rank, not lede → rank → support (2026-07-28 whole-branch-review fix, B1)", () => {
+    const model = modelWith([
+      ...arm({ prefix: "M", hasMarking: true, ...STRONG_ARM }),
+      ...arm({ prefix: "N", hasMarking: false, ...WEAK_ARM }),
+    ]);
+    const preview = markingImpactSlide(model, 7, 20, true);
+    const briefStart = preview.indexOf('data-variant-index="2"');
+    const briefEnd = preview.indexOf('data-variant-index="3"');
+    const briefing = preview.slice(briefStart, briefEnd);
+    const ledeIdx = briefing.indexOf('class="v2-bf-lede"');
+    const supportIdx = briefing.indexOf('class="v2-totals-band"');
+    const rankIdx = briefing.indexOf('class="v2-bf-rank ');
+    expect(ledeIdx).toBeGreaterThan(-1);
+    expect(supportIdx).toBeGreaterThan(-1);
+    expect(rankIdx).toBeGreaterThan(-1);
+    expect(ledeIdx).toBeLessThan(supportIdx);
+    expect(supportIdx).toBeLessThan(rankIdx);
+  });
+
+  it("reuses slot 0's totals band verbatim as the support strip", () => {
+    const model = modelWith([
+      ...arm({ prefix: "M", hasMarking: true, ...STRONG_ARM }),
+      ...arm({ prefix: "N", hasMarking: false, ...WEAK_ARM }),
+    ]);
+    const preview = markingImpactSlide(model, 7, 20, true);
+    const totalsBandCount = [...preview.matchAll(/<div class="v2-totals-band">/g)].length;
+    // One in slot 0, one reused verbatim in Briefing, one reused verbatim in Grid.
+    expect(totalsBandCount).toBe(3);
+    expect(preview).toContain("<b>40</b><small>إجمالي الصور المُقيَّمة</small>");
+  });
+});
+
+describe("markingImpactSlide — Grid (fan-out)", () => {
+  it("prints shares of each arm's own n, not raw counts", () => {
+    // present: n=50, correctClean=40 → share 80% (raw count would print "40").
+    const preview = markingImpactSlide(
+      modelWith([
+        ...arm({ prefix: "M", hasMarking: true, correctClean: 40, correctSusp: 5, missedSusp: 3, falseSusp: 2 }),
+        ...arm({ prefix: "N", hasMarking: false, ...WEAK_ARM }),
+      ]),
+      7,
+      20,
+      true,
+    );
+    // accuracy=90, detection=62.5, correctClean share=80, correctSusp share=10,
+    // missedSusp share=6, falseSusp share=4 — all SHARES, never the raw counts
+    // (40/5/3/2) the same arm's Ledger cells would show for the same row.
+    expect(preview).toContain(
+      '<tr><th scope="row">يوجد تحديد</th><td>90</td><td>62.5</td><td>80</td><td>10</td><td>6</td><td>4</td></tr>',
+    );
+  });
+
+  it("nulls ALL SIX cells for an arm below the sufficiency cut — never a partial row", () => {
+    const preview = markingImpactSlide(
+      modelWith([
+        ...arm({ prefix: "M", hasMarking: true, ...STRONG_ARM }),
+        // absent arm has zero evaluated rows at all.
+      ]),
+      7,
+      20,
+      true,
+    );
+    expect(preview).toContain(
+      '<tr><th scope="row">لا يوجد تحديد</th><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>',
+    );
+    // The rankable arm keeps its real figures in the very same matrix.
+    expect(preview).toContain('<tr><th scope="row">يوجد تحديد</th><td>90</td>');
+  });
+
+  it("carries the caveat AND the totals band, unlike Grid pages in this fan-out that drop the totals band", () => {
+    const model = modelWith([
+      ...arm({ prefix: "M", hasMarking: true, ...STRONG_ARM }),
+      ...arm({ prefix: "N", hasMarking: false, ...WEAK_ARM }),
+    ]);
+    const preview = markingImpactSlide(model, 7, 20, true);
+    expect(preview).toContain('<div class="v2-sys-grid v2-gd-marking">');
+  });
+});
+
+describe("markingImpactSlide — mandatory caveat in all four slots", () => {
+  it("carries the caveat strip verbatim in all four design-system bodies", () => {
+    const model = modelWith([
+      ...arm({ prefix: "M", hasMarking: true, ...STRONG_ARM }),
+      ...arm({ prefix: "N", hasMarking: false, ...WEAK_ARM }),
+    ]);
+    const preview = markingImpactSlide(model, 7, 20, true);
+    const occurrences = preview.split(CAVEAT).length - 1;
+    expect(occurrences).toBe(4);
+  });
+
+  it("still carries the caveat in all four slots when the page is in its empty state", () => {
+    const preview = markingImpactSlide(modelWith([]), 1, 1, true);
+    const occurrences = preview.split(CAVEAT).length - 1;
+    expect(occurrences).toBe(4);
+    // The shared empty state itself also appears in all four slots.
+    const emptyCount = [...preview.matchAll(/<div class="v2-mark-empty">/g)].length;
+    expect(emptyCount).toBe(4);
+  });
+});

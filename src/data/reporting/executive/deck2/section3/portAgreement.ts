@@ -31,19 +31,27 @@ import { band, isRankable } from "../../model/dataSufficiency";
 // the muted "—" fallback. Formatting a rate directly would bypass both.
 import { esc, fmtNum } from "../../primitives";
 import { icon } from "../../ui/icons";
+import { metricMatrix } from "../../ui/analyticsCharts";
 import {
   ACCURACY_TARGET,
   BASE_ROWS_PER_PAGE,
   barCell,
+  briefingLede,
+  briefingRankList,
+  briefingSupport,
+  gridPanel,
+  ledgerIdx,
+  ledgerPortCard,
   maxOf,
   pctCell,
   planPortPages,
+  portCountPhrase,
   portTableCard,
   rateOf,
   threshCell,
   v2Slide,
 } from "../slideKit";
-import type { CellTone, SlideBuilder } from "../slideKit";
+import type { BriefingRankItem, CellTone, SlideBuilder } from "../slideKit";
 
 /** Column count of the agreement table — six, so `fillerRow`/`colspan` stay in
  *  one place rather than being retyped at each call site. */
@@ -237,6 +245,249 @@ function agreementTable(
   });
 }
 
+/** The `SCOPE_NOTE` strip, extracted so all 4 body variants (slot 0 plus the
+ *  Ledger/Briefing/Grid fan-out below) render the exact same verbatim markup —
+ *  the plan's standing rule for mandatory prose. */
+function scopeNote(): string {
+  return `<div class="v2-agree-note"><span class="v2-agree-note-icon">${icon("alert", 11)}</span><span>${esc(SCOPE_NOTE)}</span></div>`;
+}
+
+/**
+ * Ledger-system agreement table (fan-out plan §11c, batch B2b) — keeps ALL SIX
+ * columns (the plan is explicit: Ledger must not drop a column to fit), plus
+ * an ordinal badge, through the shared `ledgerPortCard` (P2). Rendered under
+ * the page-specific `.v2-lg-agree` scope class (this file's own CSS export,
+ * below) so the 6-column squeeze this page needs never leaks onto any other
+ * Ledger port card in the deck — a MIRROR of the slot-0 squeeze
+ * (`.v2-agree-split .v2-port-col`, below) re-targeted at `.v2-lg-port-card`,
+ * not an inherited, unscoped, "hope it fits" reuse.
+ */
+function ledgerAgreementTable(
+  title: string,
+  rows: PortAgreementRow[],
+  variant: "land" | "sea",
+  compact: boolean,
+): string {
+  const popMax = maxOf(rows.map((p) => p.l1l2Comparable));
+  const sampleMax = maxOf(rows.map((p) => p.reviewed));
+
+  const trs = rows
+    .map((p, i) => {
+      const gate = (rankable: boolean, num: number, den: number) =>
+        rankable ? threshCell(rateOf(num, den), ACCURACY_TARGET) : MUTED_CELL;
+      return (
+        `<tr><td>${ledgerIdx(i)}${esc(p.name)}</td>` +
+        gate(isRankable(band(p.l1l2Comparable)), p.l1l2Agree, p.l1l2Comparable) +
+        barCell(fmtNum(p.l1l2Comparable), (p.l1l2Comparable / popMax) * 100, POP_COUNT_TONE) +
+        gate(isRankable(band(p.l1RevComparable)), p.l1RevAgree, p.l1RevComparable) +
+        gate(isRankable(band(p.l2RevComparable)), p.l2RevAgree, p.l2RevComparable) +
+        barCell(fmtNum(p.reviewed), (p.reviewed / sampleMax) * 100, SAMPLE_COUNT_TONE) +
+        `</tr>`
+      );
+    })
+    .join("");
+
+  const sum = (f: (p: PortAgreementRow) => number) => rows.reduce((s, p) => s + f(p), 0);
+  const totalL1L2 = sum((p) => p.l1l2Comparable);
+  const totalL1Rev = sum((p) => p.l1RevComparable);
+  const totalL2Rev = sum((p) => p.l2RevComparable);
+  const totalsRow =
+    `<tr><td>الإجمالي</td>` +
+    `<td>${pctCell(rateOf(sum((p) => p.l1l2Agree), totalL1L2))}</td>` +
+    `<td>${fmtNum(totalL1L2)}</td>` +
+    `<td>${pctCell(rateOf(sum((p) => p.l1RevAgree), totalL1Rev))}</td>` +
+    `<td>${pctCell(rateOf(sum((p) => p.l2RevAgree), totalL2Rev))}</td>` +
+    `<td>${fmtNum(sum((p) => p.reviewed))}</td></tr>`;
+
+  return ledgerPortCard({
+    title,
+    theadCells:
+      `<th>المنفذ</th><th>اتفاق المستويين</th><th>المجتمع</th>` +
+      `<th>مطابقة الأول للمراجع</th><th>مطابقة الثاني للمراجع</th><th>العيّنة</th>`,
+    bodyRowsHtml: trs,
+    totalsRowHtml: totalsRow,
+    span: COL_SPAN,
+    rowCount: 0,
+    compact,
+  });
+}
+
+/**
+ * Briefing-system agreement rank list (fan-out plan §11c) — the lede is
+ * pooled اتفاق المستويين on the POPULATION basis («على المجتمع»), while the
+ * support strip's two match-rate items are explicitly labelled «(على
+ * العيّنة)» — the two are DIFFERENT denominators and must never read as one
+ * figure, per this page's whole reason for existing (see the file's own doc
+ * comment, point 2). Ports below the l1↔l2 sufficiency cut are excluded
+ * from ranking and folded into a bar-less remainder, pooled from summed
+ * agree/comparable counts — never averaged. `SCOPE_NOTE` is rendered
+ * verbatim as this variant's last child, same placement as slot 0.
+ *
+ * ⚠️ 2026-07-28 whole-branch-review fix (C3): the rankable ports used to be
+ * kept in `combinedAll`'s raw land-then-sea concatenation order (`landChunk`/
+ * `seaChunk` are each individually ascending/disagreement-first via
+ * `orderRows`, but concatenating them does NOT itself produce one
+ * ascending order across both groups combined — the same artifact
+ * `briefingWorkloadRank` had). Since `briefingRankList`'s fold truncates
+ * POSITIONALLY, this could bucket genuinely low-agreement (high-priority)
+ * ports into "the rest" purely because they fell late in the land/sea
+ * concatenation. Fixed by explicitly sorting the rankable ports by agreement
+ * rate ASCENDING (disagreement-first, the page's own stated ranking
+ * criterion — plan §11c) before building rank rows, so the fold's tail is
+ * always the ports with the LEAST disagreement, never a land/sea artifact.
+ */
+function briefingAgreementRank(landChunk: PortAgreementRow[], seaChunk: PortAgreementRow[]): string {
+  const combinedAll = [...landChunk, ...seaChunk];
+  if (combinedAll.length === 0) {
+    return `<div class="v2-sys-brief v2-bf-agree">
+      <div class="v2-bf-lede"><div class="v2-bf-lede-figure gold"><span class="insuff">—</span></div></div>
+      ${scopeNote()}
+    </div>`;
+  }
+
+  const sum = (f: (p: PortAgreementRow) => number) => combinedAll.reduce((s, p) => s + f(p), 0);
+  const totalL1L2 = sum((p) => p.l1l2Comparable);
+  const totalL1L2Agree = sum((p) => p.l1l2Agree);
+  const totalL1Rev = sum((p) => p.l1RevComparable);
+  const totalL1RevAgree = sum((p) => p.l1RevAgree);
+  const totalL2Rev = sum((p) => p.l2RevComparable);
+  const totalL2RevAgree = sum((p) => p.l2RevAgree);
+  const totalReviewed = sum((p) => p.reviewed);
+  const pooledAgreement = rateOf(totalL1L2Agree, totalL1L2);
+
+  const supportStrip = briefingSupport([
+    { iconName: "check", value: pctCell(rateOf(totalL1RevAgree, totalL1Rev)), label: "مطابقة الأول (على العيّنة)" },
+    { iconName: "check", value: pctCell(rateOf(totalL2RevAgree, totalL2Rev)), label: "مطابقة الثاني (على العيّنة)" },
+    { iconName: "scan", value: fmtNum(totalReviewed), label: "العيّنة المراجَعة" },
+  ]);
+  const basis = `${portCountPhrase(combinedAll.length)} · أساس المجتمع`;
+
+  // Ascending by agreement rate (disagreement-first) — see doc comment above
+  // (2026-07-28 C3 fix). Nulls (should not occur among rankable ports, since
+  // `isRankable` already implies a positive comparable base) sort last as a
+  // defensive fallback, never crash the comparator.
+  const rankable = combinedAll
+    .filter((p) => isRankable(band(p.l1l2Comparable)))
+    .sort((a, b) => {
+      const ra = rateOf(a.l1l2Agree, a.l1l2Comparable);
+      const rb = rateOf(b.l1l2Agree, b.l1l2Comparable);
+      return (ra ?? Infinity) - (rb ?? Infinity);
+    });
+  const excluded = combinedAll.filter((p) => !isRankable(band(p.l1l2Comparable)));
+
+  const rankItems: BriefingRankItem[] = rankable.map((p) => {
+    const rate = rateOf(p.l1l2Agree, p.l1l2Comparable);
+    return {
+      label: p.name,
+      value: rate,
+      valueText: pctCell(rate),
+      secondaryText: `المجتمع ${fmtNum(p.l1l2Comparable)}`,
+    };
+  });
+  // Raw per-item agree/comparable counts, PARALLEL to rankItems (plus one
+  // synthetic slot pooling the whole excluded group), so foldRemainder can
+  // recover a real pooled rate for whatever tail actually gets folded — same
+  // technique briefingQualityRank/briefingAccuracyRank use (slides.ts).
+  const rawForFold: Array<{ agree: number; comparable: number }> = rankable.map((p) => ({
+    agree: p.l1l2Agree,
+    comparable: p.l1l2Comparable,
+  }));
+  if (excluded.length > 0) {
+    rankItems.push({
+      label: `منافذ دون حد الكفاية (${fmtNum(excluded.length)})`,
+      value: null,
+      valueText: "—",
+      secondaryText: "",
+    });
+    rawForFold.push({
+      agree: excluded.reduce((s, p) => s + p.l1l2Agree, 0),
+      comparable: excluded.reduce((s, p) => s + p.l1l2Comparable, 0),
+    });
+  }
+
+  const rankHtml = briefingRankList({
+    items: rankItems,
+    tone: "gold",
+    scale: { kind: "fixed", max: 100 },
+    foldRemainder: (folded) => {
+      const raw = rawForFold.slice(rawForFold.length - folded.length);
+      const foldedAgree = raw.reduce((s, r) => s + r.agree, 0);
+      const foldedComparable = raw.reduce((s, r) => s + r.comparable, 0);
+      const rate = rateOf(foldedAgree, foldedComparable);
+      const isPureExclusion = excluded.length > 0 && folded.length === 1 && folded[0].value === null;
+      return {
+        label: isPureExclusion
+          ? `منافذ دون حد الكفاية (${fmtNum(excluded.length)})`
+          : `بقية المنافذ (${fmtNum(folded.length)})`,
+        value: rate,
+        valueText: pctCell(rate),
+        secondaryText: foldedComparable > 0 ? `المجتمع ${fmtNum(foldedComparable)}` : "",
+        rest: true,
+      };
+    },
+  });
+
+  return `<div class="v2-sys-brief v2-bf-agree">
+    ${briefingLede({
+      figure: pctCell(pooledAgreement),
+      tone: "gold",
+      label: `اتفاق المستويين ${pctCell(pooledAgreement)} — ${fmtNum(totalL1L2Agree)} من ${fmtNum(totalL1L2)} صورة`,
+      basis,
+    })}
+    ${supportStrip}
+    ${rankHtml}
+    ${scopeNote()}
+  </div>`;
+}
+
+/**
+ * Grid-system agreement matrix (fan-out plan §11c) — only FOUR columns
+ * (اتفاق المستويين / مطابقة الأول / مطابقة الثاني / العيّنة): المجتمع is
+ * dropped as an independent column because it is column 1's DENOMINATOR, not
+ * a separate metric — encoding it as a fifth column would double-count the
+ * same figure `metricMatrix` already implies via اتفاق المستويين's own scale.
+ * Both denominators (population for اتفاق المستويين, sample for the two
+ * مطابقة columns) are instead disclosed in the panel head sub-line, so
+ * nothing about the basis split is hidden — just not double-encoded as a
+ * column, per the plan.
+ */
+function gridAgreementMatrix(
+  title: string,
+  rows: PortAgreementRow[],
+  variant: "land" | "sea",
+  compact: boolean,
+): string {
+  const l1l2Rate = (p: PortAgreementRow) =>
+    isRankable(band(p.l1l2Comparable)) ? rateOf(p.l1l2Agree, p.l1l2Comparable) : null;
+  const l1RevRate = (p: PortAgreementRow) =>
+    isRankable(band(p.l1RevComparable)) ? rateOf(p.l1RevAgree, p.l1RevComparable) : null;
+  const l2RevRate = (p: PortAgreementRow) =>
+    isRankable(band(p.l2RevComparable)) ? rateOf(p.l2RevAgree, p.l2RevComparable) : null;
+  const matrix = metricMatrix(
+    {
+      rowLabels: rows.map((p) => p.name),
+      columns: [
+        { label: "اتفاق المستويين", domain: [0, 100], ramp: "sequential-gold", values: rows.map(l1l2Rate) },
+        { label: "مطابقة الأول", domain: [0, 100], ramp: "sequential-gold", values: rows.map(l1RevRate) },
+        { label: "مطابقة الثاني", domain: [0, 100], ramp: "sequential-gold", values: rows.map(l2RevRate) },
+        {
+          label: "العيّنة",
+          domain: [0, maxOf(rows.map((p) => p.reviewed))],
+          ramp: "sequential-gold",
+          values: rows.map((p) => p.reviewed),
+        },
+      ],
+    },
+    { width: 620, height: 320, compact, caption: `مصفوفة ${title}`, rowHeader: "المنفذ", emptyNote: "لا توجد بيانات" },
+  );
+  return gridPanel({
+    title,
+    sub: `${fmtNum(rows.length)} منفذ · اتفاق المستويين على المجتمع، والمطابقة على العيّنة`,
+    variant,
+    chartHtml: matrix,
+  });
+}
+
 /**
  * Build the per-port level-agreement page(s). Land and sea paginate in parallel
  * on the shared port-page plan (`planPortPages`), same as the section-2 port
@@ -260,7 +511,20 @@ export function portAgreementSlideBuilders(model: ReportModel, variantPreview: b
     builders.push((num, total) => {
       const body = `<div class="v2-agree-wrap">
     <div class="v2-port-split v2-agree-split">${agreementTable("المنافذ البرية", landChunk, "land", plan.compact)}${agreementTable("المنافذ البحرية", seaChunk, "sea", plan.compact)}</div>
-    <div class="v2-agree-note"><span class="v2-agree-note-icon">${icon("alert", 11)}</span><span>${esc(SCOPE_NOTE)}</span></div>
+    ${scopeNote()}
+  </div>`;
+      const ledgerBody = `<div class="v2-sys-ledger v2-lg-agree">
+    <div class="v2-agree-wrap">
+      <div class="v2-lg-split">${ledgerAgreementTable("المنافذ البرية", landChunk, "land", plan.compact)}${ledgerAgreementTable("المنافذ البحرية", seaChunk, "sea", plan.compact)}</div>
+      ${scopeNote()}
+    </div>
+  </div>`;
+      const briefingBody = briefingAgreementRank(landChunk, seaChunk);
+      const gridBody = `<div class="v2-sys-grid v2-gd-agree">
+    <div class="v2-agree-wrap">
+      <div class="v2-gd-split">${gridAgreementMatrix("المنافذ البرية", landChunk, "land", plan.compact)}${gridAgreementMatrix("المنافذ البحرية", seaChunk, "sea", plan.compact)}</div>
+      ${scopeNote()}
+    </div>
   </div>`;
       return v2Slide({
         id: `slide-s3-port-agreement${suffix}`,
@@ -270,7 +534,7 @@ export function portAgreementSlideBuilders(model: ReportModel, variantPreview: b
         headline: `توافق المستويات حسب المنفذ${cont}`,
         subhead:
           "نسبة اتفاق المستوى الأول والثاني على النتيجة في كل منفذ، ومطابقة كل مستوى لنتيجة المراجع.",
-        bodyVariants: [body, body, body, body],
+        bodyVariants: [body, ledgerBody, briefingBody, gridBody],
         variantPreview,
         num,
         total,
@@ -297,7 +561,9 @@ export function portAgreementSlideBuilders(model: ReportModel, variantPreview: b
 export const PORT_AGREEMENT_CSS = `
 /* ── Section 3 — توافق المستويات حسب المنفذ ──────────────────────────────── */
 .v2-agree-wrap{display:flex;flex-direction:column;gap:7px;height:100%;min-height:0;}
-.v2-agree-wrap .v2-port-split{flex:1 1 auto;min-height:0;}
+.v2-agree-wrap .v2-port-split,
+.v2-agree-wrap .v2-lg-split,
+.v2-agree-wrap .v2-gd-split{flex:1 1 auto;min-height:0;}
 .v2-agree-split .v2-port-col .deck-table th{
   white-space:normal;line-height:1.15;font-size:0.6rem;padding:6px 4px;vertical-align:middle;
 }
@@ -308,6 +574,33 @@ export const PORT_AGREEMENT_CSS = `
    the card (which clips its own overflow). */
 .v2-agree-split .v2-port-col .deck-table th:first-child,
 .v2-agree-split .v2-port-col .deck-table td:first-child{overflow-wrap:anywhere;}
+/* ── Ledger 6-column squeeze, MIRRORED for .v2-lg-port-card (fan-out plan
+   §11c, batch B2b) ───────────────────────────────────────────────────────
+   Scoped to .v2-lg-agree so this tight sizing never bleeds onto any other
+   Ledger port card in the deck (every other one carries 4-5 columns at the
+   larger default .v2-lg-port-card sizing in theme.ts: 9px/12px padding,
+   .78rem/.68rem font). The numeric ratios below mirror the slot-0 squeeze
+   immediately above it, just re-based off the Ledger card's own (larger)
+   defaults instead of .v2-port-col's. */
+.v2-lg-agree .v2-lg-port-card .deck-table th{
+  white-space:normal;line-height:1.15;font-size:0.62rem;padding:6px 5px;vertical-align:middle;
+}
+.v2-lg-agree .v2-lg-port-card .deck-table td{font-size:0.7rem;padding:8px 5px;}
+.v2-lg-agree .v2-lg-port-card.compact .deck-table th{font-size:0.56rem;padding:3px 4px;}
+.v2-lg-agree .v2-lg-port-card.compact .deck-table td{font-size:0.6rem;padding:3px 4px;}
+.v2-lg-agree .v2-lg-port-card .deck-table th:first-child,
+.v2-lg-agree .v2-lg-port-card .deck-table td:first-child{overflow-wrap:anywhere;}
+.v2-lg-agree .v2-lg-port-card .v2-lg-idx{width:16px;height:16px;font-size:.56rem;margin-inline-end:5px;}
+.v2-lg-agree .v2-lg-port-card.compact .v2-lg-idx{width:14px;height:14px;font-size:.5rem;margin-inline-end:4px;}
+/* Briefing/Grid namespacing hooks — "nothing bespoke beyond the shared
+   components" role, same as every other fanned-out page's page-local hook. */
+.v2-bf-agree,.v2-gd-agree{height:100%;}
+.v2-gd-agree .v2-gd-panel.land{border-color:rgba(139,195,74,.35);}
+.v2-gd-agree .v2-gd-panel.sea{border-color:rgba(107,169,248,.35);}
+.v2-gd-agree .v2-gd-panel.land .v2-gd-panel-head span{color:var(--green);}
+.v2-gd-agree .v2-gd-panel.sea .v2-gd-panel-head span{color:var(--blue);}
+body.theme-light .v2-gd-agree .v2-gd-panel.land .v2-gd-panel-head span{color:color-mix(in srgb, var(--green) 70%, black);}
+body.theme-light .v2-gd-agree .v2-gd-panel.sea .v2-gd-panel-head span{color:color-mix(in srgb, var(--blue) 70%, black);}
 /* Scope caveat strip: the two n columns on this page are DIFFERENT bases. */
 .v2-agree-note{
   display:flex;align-items:flex-start;gap:7px;flex:0 0 auto;

@@ -5,8 +5,15 @@ import type { ExecutiveReportInput } from "../../executiveReportTypes";
 import type { PreparedPopulationRow } from "../../../population/populationTypes";
 import { buildExecutiveDeckV2 } from "./index";
 import { buildReportModel } from "../model/reportModel";
-import { monthInNumbersSlide, portPopulationSlideBuilders, riskStagesSlide } from "./slides";
-import { briefingRankPlan, BRIEFING_RANK_BUDGET_PX } from "./slideKit";
+import {
+  glossarySlideBuilders,
+  monthInNumbersSlide,
+  portPopulationSlideBuilders,
+  riskStagesSlide,
+  tocSlide,
+} from "./slides";
+import type { TocItem } from "./slides";
+import { briefingRankList, briefingRankPlan, BRIEFING_RANK_BUDGET_PX } from "./slideKit";
 import { fmtNum } from "../primitives";
 import { resetLabel, setLabel } from "../../../labels/labelsStore";
 
@@ -400,20 +407,22 @@ describe("closing slide — data-source attribution + embedded Arabic font", () 
   });
 });
 
-describe("riskStagesSlide — variant 2/4: compare-bars + exact-figures table (2026-07-25)", () => {
-  it("variant 0 (production / variantPreview=false) never renders the new compare-bars or table markup", () => {
+describe("slide-risk-stages fan-out — Ledger/Briefing/Grid (2026-07-25 fan-out plan §5 RECONCILIATION)", () => {
+  it("variant 0 (production / variantPreview=false) never renders Ledger/Briefing/Grid markup", () => {
     const model = buildReportModel(
       input([popRow({ stage: "المستوى الأول" }), popRow({ xrayImageId: "XR-2", stage: "المستوى الثالث" })]),
     );
     const html = riskStagesSlide(model, 5, 20, false);
-    expect(html).not.toContain("v2-cbar");
+    expect(html).not.toContain("v2-lg-risk-stages");
+    expect(html).not.toContain("v2-bf-risk-stages");
+    expect(html).not.toContain("v2-gd-risk-stages");
     expect(html).not.toContain("v2-level-table-card");
     // variant 0's own markup still renders untouched
     expect(html).toContain("v2-risk-tile-grid");
     expect(html).toContain("v2-prop-bar");
   });
 
-  it("preview mode's slot 2 (data-variant-index=\"1\") renders the compare-bars + exact-figures table with the model's real per-level and total figures", () => {
+  it('Ledger slot (data-variant-index="1") has no chart markup, adds the «ما يقيسه» column, and carries the two-basis footnote row', () => {
     const model = buildReportModel(
       input([popRow({ stage: "المستوى الأول" }), popRow({ xrayImageId: "XR-2", stage: "المستوى الثالث" })]),
     );
@@ -429,17 +438,37 @@ describe("riskStagesSlide — variant 2/4: compare-bars + exact-figures table (2
     expect(end).toBeGreaterThan(start);
     const panel1 = html.slice(start, end);
 
-    expect(panel1).toContain('<div class="v2-cbar">');
+    // stageCompareBars is gone — this slot is levelFiguresTable alone (no chart).
+    expect(panel1).not.toContain("v2-cbar");
     expect(panel1).toContain('<div class="v2-level-table-card">');
-    expect((panel1.match(/class="v2-cbar-row"/g) ?? []).length).toBe(model.population.byStage.length);
 
-    // Every stage's real population/sample figures must appear in the table.
+    // New «ما يقيسه» column, sourced from RISK_LEVELS[i].measures — resolved
+    // BY IDENTITY (levelIndexForStage), not by this row's position in
+    // `stages`. This fixture's `stages` array is [المستوى الأول, المستوى
+    // الثالث] — level 2 has ZERO rows and is entirely absent, so the second
+    // row is level 3 shifted into array position 1. Pre-2026-07-28, this
+    // assertion actually pinned the BUG: it expected level 2's «ما يقيسه»
+    // text (RISK_LEVELS[1]) on a row that is really about level 3, because
+    // the table paired by loop position instead of by the stage's own
+    // identity. The correct pairing is level 3's own text.
+    expect(panel1).toContain("<th>ما يقيسه</th>");
+    expect(panel1).toContain("انفراد الفحص بالاشتباه دون مؤشرات أخرى.");
+    expect(panel1).toContain("ما تلتقطه الفرق الأمنية الأخرى ولا يلتقطه الفحص.");
+    expect(panel1).not.toContain("ما يلتقطه محرك المخاطر ولا يلتقطه الفحص.");
+
+    // New tfoot footnote row: colspan across all 8 columns, two-basis caveat
+    // worded to agree with LEVEL_DRAW_WEIGHTS's own doc comment. Class is on
+    // the <tr> (theme.ts's selectors are scoped tfoot tr.v2-lg-footnote td;
+    // the pre-2026-07-28 bug put it on the <td> instead, so the caveat
+    // styling never applied and the row rendered as a second bold totals row).
+    expect(panel1).toContain('<tr class="v2-lg-footnote"><td colspan="8">');
+    expect(panel1).toContain("الأساسان مختلفان ولا يجمعان إلى 100%");
+
+    // Every stage's real population/sample figures must still appear in the table.
     model.population.byStage.forEach((stage) => {
       expect(panel1).toContain(fmtNum(stage.population));
       expect(panel1).toContain(fmtNum(stage.sampleSize));
     });
-
-    // The totals row must use the exact same totals variant 0's bottom band renders.
     expect(panel1).toContain(fmtNum(model.population.total));
     expect(panel1).toContain(fmtNum(model.sample.total));
 
@@ -449,57 +478,126 @@ describe("riskStagesSlide — variant 2/4: compare-bars + exact-figures table (2
     expect(panel0).toContain("v2-risk-tile-grid");
     expect(panel0).not.toContain("v2-level-table-card");
   });
+
+  it('Briefing slot (data-variant-index="2") ranks the 4 levels in LEVEL ORDER — never sorted by population size — each with its own STAGE_TONES color', () => {
+    // Population by level: الأول=1 (smallest), الثاني=4 (largest), الثالث=2, الرابع=3.
+    // A magnitude-sorted rank list would put الثاني first; level order must not.
+    const model = buildReportModel(
+      input([
+        popRow({ xrayImageId: "XR-1", stage: "المستوى الأول" }),
+        popRow({ xrayImageId: "XR-2", stage: "المستوى الثاني" }),
+        popRow({ xrayImageId: "XR-3", stage: "المستوى الثاني" }),
+        popRow({ xrayImageId: "XR-4", stage: "المستوى الثاني" }),
+        popRow({ xrayImageId: "XR-5", stage: "المستوى الثاني" }),
+        popRow({ xrayImageId: "XR-6", stage: "المستوى الثالث" }),
+        popRow({ xrayImageId: "XR-7", stage: "المستوى الثالث" }),
+        popRow({ xrayImageId: "XR-8", stage: "المستوى الرابع" }),
+        popRow({ xrayImageId: "XR-9", stage: "المستوى الرابع" }),
+        popRow({ xrayImageId: "XR-10", stage: "المستوى الرابع" }),
+      ]),
+    );
+    const html = riskStagesSlide(model, 5, 20, true);
+    const start = html.indexOf('data-variant-index="2"');
+    const end = html.indexOf('data-variant-index="3"');
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const panel2 = html.slice(start, end);
+
+    expect((panel2.match(/class="v2-bf-rank-row"/g) ?? []).length).toBe(4);
+    const labels = [...panel2.matchAll(/<span class="v2-bf-rank-label">([^<]*)<\/span>/g)].map((m) => m[1]);
+    expect(labels).toEqual(["المستوى الأول", "المستوى الثاني", "المستوى الثالث", "المستوى الرابع"]);
+
+    const tones = [...panel2.matchAll(/<span class="v2-bf-rank-num (\w+)">/g)].map((m) => m[1]);
+    expect(tones).toEqual(["gold", "blue", "green", "coral"]);
+
+    // Lede carries sample coverage with a microArc, not a level count.
+    expect(panel2).toContain('<div class="v2-bf-lede-arc">');
+    expect(panel2).toContain("تغطية العيّنة");
+  });
+
+  it('Grid slot (data-variant-index="3") is one metricMatrix/gridPanel and never encodes وزن العينة', () => {
+    const model = buildReportModel(
+      input([popRow({ stage: "المستوى الأول" }), popRow({ xrayImageId: "XR-2", stage: "المستوى الثالث" })]),
+    );
+    const html = riskStagesSlide(model, 5, 20, true);
+    const start = html.indexOf('data-variant-index="3"');
+    expect(start).toBeGreaterThan(-1);
+    const panel3 = html.slice(start);
+
+    expect(panel3).toContain("v2-sys-grid");
+    expect(panel3).toContain("v2-gd-risk-stages");
+    expect(panel3).toContain('<div class="v2-gd-panel">');
+    expect(panel3).toContain("<figure");
+    expect(panel3).toContain('<table dir="rtl"');
+    expect(panel3).toContain("المستوى الأول");
+    expect(panel3).toContain("المستوى الثالث");
+
+    // وزن العينة is a two-basis config figure metricMatrix has no annotation
+    // affordance to caveat — deliberately excluded from the Grid columns.
+    expect(panel3).not.toContain("وزن العينة");
+  });
 });
 
-describe("levelFiguresTable byte-identity characterization (2026-07-25, deck2-design-systems Task 1)", () => {
-  // Captured VERBATIM from riskStagesSlide's variant-1 panel BEFORE levelFiguresTable
-  // was reimplemented on top of the new shared `ledgerTableCard` primitive
-  // (slideKit.ts). This is the regression tripwire for that extraction: if the
-  // generalization changes even one byte of this already-shipped page's output,
-  // this test fails first, before any subtler downstream test would notice.
+describe("levelFiguresTable byte-identity characterization — SUPERSEDED 2026-07-25 (fan-out plan §5)", () => {
+  // This pin originally proved the ledgerTableCard EXTRACTION (deck2-design-
+  // systems Task 1) changed nothing about the page's then-shipped output. The
+  // fan-out plan's B1 pass deliberately changes that output on purpose
+  // (stageCompareBars dropped from Ledger, «ما يقيسه» column + two-basis
+  // footnote row added — see levelFiguresTable's doc comment in slides.ts and
+  // this date's edit log) — this is NOT a regression the old pin caught; the
+  // expectation below is the NEW post-fan-out golden output, re-captured from
+  // the actual render. The "no v2-cbar, has the new column + footnote" test in
+  // the describe block above carries this test's original *intent* forward
+  // (verifiably-correct shape rather than a frozen byte string); this test
+  // still exists so the shape stays pinned once more, exactly like every
+  // other characterization test in this file.
+  // Re-captured 2026-07-28 (review fix): the previous pin locked in the
+  // level-identity mispairing bug — row 2 (المستوى الثالث, the only stage at
+  // array position 1 since المستوى الثاني has zero rows and never appears in
+  // `stages`) was shown with tone "blue"/ordinal "2"/«ما يقيسه»/وزن العينة
+  // all borrowed from المستوى الثاني (RISK_LEVELS[1]/STAGE_TONES[1]) purely
+  // because it sat at loop position 1. The table now resolves each row's
+  // tone/ordinal/«ما يقيسه»/وزن العينة BY the stage's own identity
+  // (levelIndexForStage in slides.ts), so row 2 correctly shows المستوى
+  // الثالث's own tone ("green"), ordinal ("3"), text, and weight ("30%").
+  // The footnote row's class also moved from the <td> to the <tr> (Finding 2
+  // fix — theme.ts's CSS selectors were always scoped to the <tr>).
   const EXPECTED_PANEL1 =
-    `data-variant-index="1"><div class="v2-risk-layout">\n` +
-    `    <div class="v2-cbar"><div class="v2-cbar-row">\n` +
-    `        <span class="v2-cbar-label">المستوى الأول</span>\n` +
-    `        <span class="v2-cbar-track"><i class="v2-cbar-fill gold" style="width:100.0%"></i></span>\n` +
-    `        <span class="v2-cbar-value">50%</span>\n` +
-    `      </div><div class="v2-cbar-row">\n` +
-    `        <span class="v2-cbar-label">المستوى الثالث</span>\n` +
-    `        <span class="v2-cbar-track"><i class="v2-cbar-fill blue" style="width:100.0%"></i></span>\n` +
-    `        <span class="v2-cbar-value">50%</span>\n` +
-    `      </div></div>\n` +
+    `data-variant-index="1"><div class="v2-sys-ledger v2-lg-risk-stages"><div class="v2-risk-layout">\n` +
     `    <div class="v2-level-table-card">\n` +
     `    <table class="deck-table">\n` +
     `      <thead><tr>\n` +
-    `        <th></th><th>المستوى</th><th>وزن العينة</th><th>من المجتمع</th>\n` +
+    `        <th></th><th>المستوى</th><th>ما يقيسه</th><th>وزن العينة</th><th>من المجتمع</th>\n` +
     `        <th>صورة</th><th>العيّنة</th><th>تغطية العيّنة</th>\n` +
     `      </tr></thead>\n` +
     `      <tbody><tr>\n` +
     `        <td><span class="v2-level-row-num gold">1</span></td>\n` +
     `        <td>المستوى الأول</td>\n` +
+    `        <td>انفراد الفحص بالاشتباه دون مؤشرات أخرى.</td>\n` +
     `        <td>100%</td>\n` +
     `        <td>50%</td>\n` +
     `        <td>1</td>\n` +
     `        <td>0</td>\n` +
     `        <td>0.0%</td>\n` +
     `      </tr><tr>\n` +
-    `        <td><span class="v2-level-row-num blue">2</span></td>\n` +
+    `        <td><span class="v2-level-row-num green">3</span></td>\n` +
     `        <td>المستوى الثالث</td>\n` +
-    `        <td>40%</td>\n` +
+    `        <td>ما تلتقطه الفرق الأمنية الأخرى ولا يلتقطه الفحص.</td>\n` +
+    `        <td>30%</td>\n` +
     `        <td>50%</td>\n` +
     `        <td>1</td>\n` +
     `        <td>0</td>\n` +
     `        <td>0.0%</td>\n` +
     `      </tr></tbody>\n` +
     `      <tfoot><tr>\n` +
-    `        <td></td><td>الإجمالي</td><td>—</td><td>100%</td>\n` +
+    `        <td></td><td>الإجمالي</td><td></td><td>—</td><td>100%</td>\n` +
     `        <td>2</td><td>0</td><td>0.0%</td>\n` +
-    `      </tr></tfoot>\n` +
+    `      </tr><tr class="v2-lg-footnote"><td colspan="8">وزن المستوى الأول نسبة من مجتمعه (حصر شامل)؛ وبقية الأوزان حصص من حصة العدد الثابت — الأساسان مختلفان ولا يجمعان إلى 100%</td></tr></tfoot>\n` +
     `    </table>\n` +
     `  </div>\n` +
-    `  </div></div><div class="v2-variant-panel" `;
+    `  </div></div></div><div class="v2-variant-panel" `;
 
-  it("slide-risk-stages variant-1 panel is byte-identical to the pre-extraction output", () => {
+  it("slide-risk-stages variant-1 panel is byte-identical to the post-fan-out (2026-07-28 review fix) golden output", () => {
     const model = buildReportModel(
       input([popRow({ stage: "المستوى الأول" }), popRow({ xrayImageId: "XR-2", stage: "المستوى الثالث" })]),
     );
@@ -510,6 +608,89 @@ describe("levelFiguresTable byte-identity characterization (2026-07-25, deck2-de
     expect(end).toBeGreaterThan(start);
     const panel1 = html.slice(start, end);
     expect(panel1).toBe(EXPECTED_PANEL1);
+  });
+});
+
+describe("slide-risk-stages level-identity resolution — regression for the 2026-07-28 review fix", () => {
+  // A model with a GAP in `stages` in REVERSED, non-canonical order: only
+  // المستوى الرابع (level 4) and المستوى الثاني (level 2) have rows — levels
+  // 1 and 3 are entirely absent — and level 4's rows come FIRST, so
+  // `model.population.byStage` is [المستوى الرابع, المستوى الثاني], array
+  // positions [0, 1]. Position-based indexing (the pre-fix bug) would pair
+  // position 0 with RISK_LEVELS[0]/STAGE_TONES[0] (level 1's gold/def) and
+  // position 1 with RISK_LEVELS[1] (level 2's def) — both wrong, since the
+  // rows are actually levels 4 and 2. Every assertion below checks each row
+  // renders with ITS OWN level's identity, not the position it happens to
+  // occupy in this reversed, gapped array.
+  function reversedGapModel() {
+    return buildReportModel(
+      input([
+        popRow({ xrayImageId: "XR-1", stage: "المستوى الرابع" }),
+        popRow({ xrayImageId: "XR-2", stage: "المستوى الرابع" }),
+        popRow({ xrayImageId: "XR-3", stage: "المستوى الثاني" }),
+      ]),
+    );
+  }
+
+  it("Ledger table: each row's ordinal/tone/«ما يقيسه»/وزن العينة match its OWN level, not its array position", () => {
+    const model = reversedGapModel();
+    expect(model.population.byStage.map((s) => s.stageLabel)).toEqual(["المستوى الرابع", "المستوى الثاني"]);
+
+    const html = riskStagesSlide(model, 5, 20, true);
+    const start = html.indexOf('data-variant-index="1"');
+    const end = html.indexOf('data-variant-index="2"');
+    const panel1 = html.slice(start, end);
+
+    // Row 1 (array position 0) is المستوى الرابع (level 4): ordinal "4",
+    // tone "coral", its own «ما يقيسه» text and 30% weight — NOT level 1's
+    // gold/"1"/100% that position-based indexing would have produced.
+    expect(panel1).toContain('<span class="v2-level-row-num coral">4</span>');
+    expect(panel1).toContain("ما ثبت فواته بضبط أمني أو باكتشاف خارجي.");
+    // Row 2 (array position 1) is المستوى الثاني (level 2): ordinal "2",
+    // tone "blue", its own text and 40% weight — NOT level 2's OWN identity
+    // borrowed correctly here would coincidentally look unchanged only if
+    // the old code were right; assert it explicitly instead of by omission.
+    expect(panel1).toContain('<span class="v2-level-row-num blue">2</span>');
+    expect(panel1).toContain("ما يلتقطه محرك المخاطر ولا يلتقطه الفحص.");
+
+    const row1 = panel1.slice(panel1.indexOf("المستوى الرابع") - 200, panel1.indexOf("المستوى الرابع") + 300);
+    expect(row1).toContain(">30%<");
+    const row2 = panel1.slice(panel1.indexOf("المستوى الثاني") - 200, panel1.indexOf("المستوى الثاني") + 300);
+    expect(row2).toContain(">40%<");
+  });
+
+  it("Briefing rank list: each row's tone follows its OWN level (display order preserved, never sorted)", () => {
+    const model = reversedGapModel();
+    const html = riskStagesSlide(model, 5, 20, true);
+    const start = html.indexOf('data-variant-index="2"');
+    const end = html.indexOf('data-variant-index="3"');
+    const panel2 = html.slice(start, end);
+
+    const labels = [...panel2.matchAll(/<span class="v2-bf-rank-label">([^<]*)<\/span>/g)].map((m) => m[1]);
+    expect(labels).toEqual(["المستوى الرابع", "المستوى الثاني"]);
+    const tones = [...panel2.matchAll(/<span class="v2-bf-rank-num (\w+)">/g)].map((m) => m[1]);
+    // level 4 → coral, level 2 → blue — never each other's / a positional guess.
+    expect(tones).toEqual(["coral", "blue"]);
+
+    // Basis chip reflects the actual number of levels present (2 here), not
+    // a hardcoded "أربعة مستويات".
+    expect(panel2).toContain('<div class="v2-bf-lede-basis">2 مستويات');
+    expect(panel2).not.toContain("أربعة مستويات");
+  });
+
+  it("gracefully renders '—'/neutral tone for a stage whose label doesn't map to any canonical level, never crashes or mispairs", () => {
+    const model = buildReportModel(
+      input([popRow({ xrayImageId: "XR-1", stage: "تصنيف غير معروف" })]),
+    );
+    expect(() => riskStagesSlide(model, 5, 20, true)).not.toThrow();
+    const html = riskStagesSlide(model, 5, 20, true);
+    const start = html.indexOf('data-variant-index="1"');
+    const end = html.indexOf('data-variant-index="2"');
+    const panel1 = html.slice(start, end);
+    expect(panel1).toContain('<span class="v2-level-row-num neutral">—</span>');
+    // The «ما يقيسه» / وزن العينة cells fall back to "—", never a borrowed
+    // level's real text/number.
+    expect(panel1).toContain("<td>—</td>");
   });
 });
 
@@ -528,7 +709,7 @@ describe("style choices — production selection + backward compatibility (2026-
     const defaultHtml = buildExecutiveDeckV2(fixture);
     const customHtml = buildExecutiveDeckV2(fixture, {}, { styleChoices: { "slide-risk-stages": 1 } });
 
-    // NOTE: the deck's static CSS (theme.ts) always defines .v2-cbar/.v2-level-table-card/
+    // NOTE: the deck's static CSS (theme.ts) always defines .v2-level-table-card/
     // .v2-risk-tile-grid rules regardless of which variant is selected — all 4 variants' CSS
     // ships in every report, only the markup differs — so assertions below match the HTML
     // *markup* tag (`<div class="...">`), not a bare class-name substring that would also
@@ -536,12 +717,10 @@ describe("style choices — production selection + backward compatibility (2026-
 
     // Variant 0 (today's tiles + proportion bar) markup is present by default...
     expect(defaultHtml).toContain('<div class="v2-risk-tile-grid">');
-    expect(defaultHtml).not.toContain('<div class="v2-cbar">');
     expect(defaultHtml).not.toContain('<div class="v2-level-table-card">');
 
     // ...but with the style choice applied, the SAME slide now renders variant 1's markup instead.
     expect(customHtml).not.toContain('<div class="v2-risk-tile-grid">');
-    expect(customHtml).toContain('<div class="v2-cbar">');
     expect(customHtml).toContain('<div class="v2-level-table-card">');
 
     // Every other slide is unaffected by a choice scoped to slide-risk-stages only.
@@ -855,6 +1034,102 @@ describe("portPopulationSlideBuilders — Ledger/Briefing/Grid design systems (2
   });
 });
 
+describe("P0 primitives — characterization: slide-port-population-1 Ledger/Briefing/Grid panels byte-identity (2026-07-25, deck2-fanout-remaining-pages-plan P0)", () => {
+  // Captured VERBATIM (2026-07-25, before the P0 primitives-extraction refactor) from
+  // portPopulationSlideBuilders(twoPortModel(), true)[0](6, 20) — panels 1 (Ledger), 2
+  // (Briefing), 3 (Grid). This is the regression tripwire for the P0 refactor: reimplementing
+  // ledgerPortTable/briefingPortRank/gridPortMatrix on top of the new shared slideKit
+  // primitives (ledgerIdx/ledgerPortCard/briefingLede/briefingSupport/briefingRankList/
+  // gridPanel) must not change a single byte of this already-shipped exemplar page.
+  const EXPECTED_PANEL1_LEDGER =
+    `data-variant-index="1"><div class="v2-sys-ledger v2-lg-port-population"><div class="v2-lg-split"><div class="v2-lg-port-card">
+    <div class="v2-lg-table-card-title">المنافذ البرية</div>
+    <table class="deck-table">
+      <thead><tr><th>المنفذ</th><th>الصور</th><th>سليمة</th><th>اشتباه</th></tr></thead>
+      <tbody><tr><td><span class="v2-lg-idx">1</span>منفذ أ</td><td class="v2-bar-cell green" style="--w:100.0%">1</td><td>1</td><td>0</td></tr></tbody>
+      <tfoot><tr><td>الإجمالي</td><td>1</td><td>1</td><td>0</td></tr></tfoot>
+    </table>
+  </div><div class="v2-lg-port-card">
+    <div class="v2-lg-table-card-title">المنافذ البحرية</div>
+    <table class="deck-table">
+      <thead><tr><th>المنفذ</th><th>الصور</th><th>سليمة</th><th>اشتباه</th></tr></thead>
+      <tbody><tr><td><span class="v2-lg-idx">1</span>منفذ ب</td><td class="v2-bar-cell blue" style="--w:100.0%">1</td><td>0</td><td>1</td></tr></tbody>
+      <tfoot><tr><td>الإجمالي</td><td>1</td><td>0</td><td>1</td></tr></tfoot>
+    </table>
+  </div></div></div></div><div class="v2-variant-panel" `;
+  const EXPECTED_PANEL2_BRIEFING =
+    `data-variant-index="2"><div class="v2-sys-brief v2-bf-port-population">
+    <div class="v2-bf-lede">
+      <div class="v2-bf-lede-figure gold">1</div>
+      <div class="v2-bf-lede-label">أعلى منفذ: منفذ أ — 1 صورة</div>
+      <div class="v2-bf-lede-basis">جميع منافذ الصفحة (منفذان) · إجمالي 2 صورة</div>
+    </div>
+    <div class="v2-totals-band">
+        <div class="v2-totals-item"><span class="v2-totals-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/></svg></span><span><b>1</b><small>إجمالي الصور السليمة</small></span></div>
+        <div class="v2-totals-item"><span class="v2-totals-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l9 16H3l9-16z"/><path d="M12 10v4"/><path d="M12 17.5v.5"/></svg></span><span><b>1</b><small>إجمالي صور الاشتباه</small></span></div>
+        <div class="v2-totals-item"><span class="v2-totals-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M4 18a8 8 0 1 1 16 0"/><path d="M12 18l4-5"/><circle cx="12" cy="18" r="1.2"/></svg></span><span><b>50.0%</b><small>نسبة الاشتباه للصفحة</small></span></div>
+      </div>
+    <div class="v2-bf-rank t-comfortable"><div class="v2-bf-rank-col"><div class="v2-bf-rank-row">
+        <span class="v2-bf-rank-num gold">1</span>
+        <span class="v2-bf-rank-label">منفذ أ</span>
+        <span class="v2-bf-rank-track"><i class="v2-bf-rank-fill gold" style="width:100.0%"></i></span>
+        <span class="v2-bf-rank-value">1</span>
+        <span class="v2-bf-rank-secondary">اشتباه 0</span>
+      </div><div class="v2-bf-rank-row">
+        <span class="v2-bf-rank-num gold">2</span>
+        <span class="v2-bf-rank-label">منفذ ب</span>
+        <span class="v2-bf-rank-track"><i class="v2-bf-rank-fill gold" style="width:100.0%"></i></span>
+        <span class="v2-bf-rank-value">1</span>
+        <span class="v2-bf-rank-secondary">اشتباه 1</span>
+      </div></div></div>
+  </div></div><div class="v2-variant-panel" `;
+  const EXPECTED_PANEL3_GRID =
+    `data-variant-index="3"><div class="v2-sys-grid v2-gd-port-population"><div class="v2-gd-split"><div class="v2-gd-panel land">
+    <div class="v2-gd-panel-head"><b>المنافذ البرية</b><span>1 منفذ</span></div>
+    <div class="v2-gd-panel-chart"><figure dir="rtl" style="margin:0;padding:0;width:100%;height:100%;position:relative"><svg viewBox="0 0 620 320" xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" font-family='"Somar","IBM Plex Sans Arabic","Noto Kufi Arabic","Tahoma","Arial",sans-serif' aria-hidden="true" focusable="false" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;display:block;direction:ltr" data-chart="مصفوفة المنافذ البرية"><text x="458.75" y="13" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" fill-opacity="0.82">الصور</text><text x="458.75" y="25" text-anchor="middle" font-size="9" fill="currentColor" fill-opacity="0.55">0–1</text><text x="328.25" y="13" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" fill-opacity="0.82">سليمة</text><text x="328.25" y="25" text-anchor="middle" font-size="9" fill="currentColor" fill-opacity="0.55">0–1</text><text x="197.75" y="13" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" fill-opacity="0.82">اشتباه</text><text x="197.75" y="25" text-anchor="middle" font-size="9" fill="currentColor" fill-opacity="0.55">0–1</text><text x="67.25" y="13" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" fill-opacity="0.82">نسبة الاشتباه</text><text x="67.25" y="25" text-anchor="middle" font-size="9" fill="currentColor" fill-opacity="0.55">0–100</text><text x="616" y="172" text-anchor="end" dominant-baseline="middle" font-size="11" fill="currentColor" fill-opacity="0.78">منفذ أ</text><rect x="394.5" y="29" width="128.5" height="286" rx="3" fill="var(--white)" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><rect x="394.5" y="29" width="128.5" height="286" rx="3" fill="var(--gold)" fill-opacity="1" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><text x="458.75" y="172" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="var(--navy)">1</text><rect x="264" y="29" width="128.5" height="286" rx="3" fill="var(--white)" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><rect x="264" y="29" width="128.5" height="286" rx="3" fill="var(--gold)" fill-opacity="1" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><text x="328.25" y="172" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="var(--navy)">1</text><rect x="133.5" y="29" width="128.5" height="286" rx="3" fill="var(--white)" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><rect x="133.5" y="29" width="128.5" height="286" rx="3" fill="var(--gold)" fill-opacity="0" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><text x="197.75" y="172" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="var(--navy)">0</text><rect x="3" y="29" width="128.5" height="286" rx="3" fill="var(--white)" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><rect x="3" y="29" width="128.5" height="286" rx="3" fill="var(--gold)" fill-opacity="0" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><text x="67.25" y="172" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="var(--navy)">0</text></svg><table dir="rtl" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);clip-path:inset(50%);white-space:nowrap;border:0"><caption>مصفوفة المنافذ البرية</caption><thead><tr><th scope="col">المنفذ</th><th scope="col">الصور</th><th scope="col">سليمة</th><th scope="col">اشتباه</th><th scope="col">نسبة الاشتباه</th></tr></thead><tbody><tr><th scope="row">منفذ أ</th><td>1</td><td>1</td><td>0</td><td>0</td></tr></tbody></table></figure></div>
+  </div><div class="v2-gd-panel sea">
+    <div class="v2-gd-panel-head"><b>المنافذ البحرية</b><span>1 منفذ</span></div>
+    <div class="v2-gd-panel-chart"><figure dir="rtl" style="margin:0;padding:0;width:100%;height:100%;position:relative"><svg viewBox="0 0 620 320" xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" font-family='"Somar","IBM Plex Sans Arabic","Noto Kufi Arabic","Tahoma","Arial",sans-serif' aria-hidden="true" focusable="false" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;display:block;direction:ltr" data-chart="مصفوفة المنافذ البحرية"><text x="458.75" y="13" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" fill-opacity="0.82">الصور</text><text x="458.75" y="25" text-anchor="middle" font-size="9" fill="currentColor" fill-opacity="0.55">0–1</text><text x="328.25" y="13" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" fill-opacity="0.82">سليمة</text><text x="328.25" y="25" text-anchor="middle" font-size="9" fill="currentColor" fill-opacity="0.55">0–1</text><text x="197.75" y="13" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" fill-opacity="0.82">اشتباه</text><text x="197.75" y="25" text-anchor="middle" font-size="9" fill="currentColor" fill-opacity="0.55">0–1</text><text x="67.25" y="13" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" fill-opacity="0.82">نسبة الاشتباه</text><text x="67.25" y="25" text-anchor="middle" font-size="9" fill="currentColor" fill-opacity="0.55">0–100</text><text x="616" y="172" text-anchor="end" dominant-baseline="middle" font-size="11" fill="currentColor" fill-opacity="0.78">منفذ ب</text><rect x="394.5" y="29" width="128.5" height="286" rx="3" fill="var(--white)" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><rect x="394.5" y="29" width="128.5" height="286" rx="3" fill="var(--gold)" fill-opacity="1" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><text x="458.75" y="172" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="var(--navy)">1</text><rect x="264" y="29" width="128.5" height="286" rx="3" fill="var(--white)" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><rect x="264" y="29" width="128.5" height="286" rx="3" fill="var(--gold)" fill-opacity="0" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><text x="328.25" y="172" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="var(--navy)">0</text><rect x="133.5" y="29" width="128.5" height="286" rx="3" fill="var(--white)" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><rect x="133.5" y="29" width="128.5" height="286" rx="3" fill="var(--gold)" fill-opacity="1" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><text x="197.75" y="172" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="var(--navy)">1</text><rect x="3" y="29" width="128.5" height="286" rx="3" fill="var(--white)" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><rect x="3" y="29" width="128.5" height="286" rx="3" fill="var(--gold)" fill-opacity="1" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><text x="67.25" y="172" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="var(--navy)">100</text></svg><table dir="rtl" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);clip-path:inset(50%);white-space:nowrap;border:0"><caption>مصفوفة المنافذ البحرية</caption><thead><tr><th scope="col">المنفذ</th><th scope="col">الصور</th><th scope="col">سليمة</th><th scope="col">اشتباه</th><th scope="col">نسبة الاشتباه</th></tr></thead><tbody><tr><th scope="row">منفذ ب</th><td>1</td><td>0</td><td>1</td><td>100</td></tr></tbody></table></figure></div>
+  </div></div></div></div></div></div>
+  </div>
+  <div class="v2-page-foot" dir="ltr">06 / 20</div>
+</section>`;
+
+  function twoPortModel() {
+    return buildReportModel(
+      input([
+        popRow({ portName: "منفذ أ", portType: "منفذ بري" }),
+        popRow({ xrayImageId: "XR-2", portName: "منفذ ب", portType: "منفذ بحري", xrayLevelOneResult: "اشتباه" }),
+      ]),
+    );
+  }
+
+  it("panel 1 (Ledger) is byte-identical before and after the P0 extraction", () => {
+    const html = portPopulationSlideBuilders(twoPortModel(), true)[0](6, 20);
+    const start = html.indexOf('data-variant-index="1"');
+    const end = html.indexOf('data-variant-index="2"');
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    expect(html.slice(start, end)).toBe(EXPECTED_PANEL1_LEDGER);
+  });
+
+  it("panel 2 (Briefing) is byte-identical before and after the P0 extraction", () => {
+    const html = portPopulationSlideBuilders(twoPortModel(), true)[0](6, 20);
+    const start = html.indexOf('data-variant-index="2"');
+    const end = html.indexOf('data-variant-index="3"');
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    expect(html.slice(start, end)).toBe(EXPECTED_PANEL2_BRIEFING);
+  });
+
+  it("panel 3 (Grid) is byte-identical before and after the P0 extraction", () => {
+    const html = portPopulationSlideBuilders(twoPortModel(), true)[0](6, 20);
+    const start = html.indexOf('data-variant-index="3"');
+    expect(start).toBeGreaterThan(-1);
+    expect(html.slice(start)).toBe(EXPECTED_PANEL3_GRID);
+  });
+});
+
 describe("briefingRankPlan (2026-07-25, deck2-design-systems design ruling)", () => {
   it("follows the exact ladder from n=0 through the densest tier's capacity (n=14), never folding", () => {
     const cases: Array<[number, ReturnType<typeof briefingRankPlan>["tier"], 1 | 2, number]> = [
@@ -889,5 +1164,360 @@ describe("briefingRankPlan (2026-07-25, deck2-design-systems design ruling)", ()
       const used = plan.rowsPerColumn * plan.rowH + Math.max(0, plan.rowsPerColumn - 1) * 5;
       expect(used).toBeLessThanOrEqual(BRIEFING_RANK_BUDGET_PX);
     }
+  });
+});
+
+describe("briefingRankList — bars:false (2026-07-28 review fix regression, no current caller yet)", () => {
+  // No page currently calls briefingRankList with bars:false (planned for a
+  // later fan-out page — glossary-1/closing per the plan doc), so this had no
+  // shipped-visible symptom, but the doc comment's claim that omitting the
+  // track lets the label "expand" was false: every sibling in the row,
+  // including the label, was flex:0 0 auto/fixed-width, so removing the only
+  // flex:1 1 auto element (the track) just left dead space. Guards both the
+  // track omission (already true) and the new no-bars hook + its CSS rule.
+  const items = [
+    { label: "أولاً", value: null, valueText: "—", secondaryText: "تعريف أول" },
+    { label: "ثانياً", value: null, valueText: "—", secondaryText: "تعريف ثانٍ" },
+  ];
+
+  it("omits .v2-bf-rank-track entirely", () => {
+    const html = briefingRankList({
+      items,
+      tone: "gold",
+      scale: { kind: "auto" },
+      bars: false,
+      foldRemainder: (folded) => ({
+        label: `بقية (${folded.length})`,
+        value: null,
+        valueText: "—",
+        secondaryText: "",
+        rest: true,
+      }),
+    });
+    expect(html).not.toContain("v2-bf-rank-track");
+  });
+
+  it("stamps the no-bars modifier class on every row so theme.ts's rule can let the label expand", () => {
+    const html = briefingRankList({
+      items,
+      tone: "gold",
+      scale: { kind: "auto" },
+      bars: false,
+      foldRemainder: (folded) => ({
+        label: `بقية (${folded.length})`,
+        value: null,
+        valueText: "—",
+        secondaryText: "",
+        rest: true,
+      }),
+    });
+    const rows = [...html.matchAll(/<div class="v2-bf-rank-row[^"]*"/g)].map((m) => m[0]);
+    expect(rows.length).toBe(items.length);
+    expect(rows.every((r) => r.includes("no-bars"))).toBe(true);
+  });
+
+  it("bars:true (default) never stamps no-bars and still renders the track", () => {
+    const html = briefingRankList({
+      items: [{ label: "منفذ أ", value: 5, valueText: "5", secondaryText: "" }],
+      tone: "gold",
+      scale: { kind: "auto" },
+      foldRemainder: (folded) => ({
+        label: `بقية (${folded.length})`,
+        value: null,
+        valueText: "—",
+        secondaryText: "",
+        rest: true,
+      }),
+    });
+    expect(html).toContain("v2-bf-rank-track");
+    expect(html).not.toContain("no-bars");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// B4 — slide-toc / slide-glossary-levels / slide-glossary-1 fan-out
+// (2026-07-25 fan-out plan §1/§3a/§3b, batch B4 — the last remaining pages).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Extracts the HTML between two `data-variant-index` markers (or to the end
+ *  of the string for the last panel) — the same panel-isolation convention
+ *  every other describe block in this file already uses. */
+function isolatePanel(html: string, idx: number): string {
+  const start = html.indexOf(`data-variant-index="${idx}"`);
+  expect(start).toBeGreaterThan(-1);
+  const end = html.indexOf(`data-variant-index="${idx + 1}"`);
+  return end === -1 ? html.slice(start) : html.slice(start, end);
+}
+
+describe("slide-toc fan-out — Ledger/Briefing/Grid (2026-07-25 fan-out plan §1, batch B4)", () => {
+  // Deliberately built so the section with the LARGEST page span (القسم
+  // الثاني, span 7) sits in the MIDDLE of the document order — neither
+  // first nor last. A test built any other way could pass by accident if a
+  // caller sorted descending (largest first) or left it unsorted-but-still-
+  // last; a middle position is the only arrangement a naive sort of either
+  // direction cannot coincidentally reproduce.
+  const items: TocItem[] = [
+    {
+      title: "المعجم",
+      goal: "توحيد المصطلحات.",
+      range: "03",
+      iconName: "document",
+      tone: "blue",
+      figure: "5",
+      figureLabel: "مصطلح",
+    },
+    {
+      title: "القسم الثاني",
+      goal: "جودة الصور ودقة القرارات.",
+      range: "04–10",
+      iconName: "gauge",
+      tone: "coral",
+      figure: "90%",
+      figureLabel: "الدقة",
+    },
+    {
+      title: "القسم الثالث",
+      goal: "تحاليل معمّقة.",
+      range: "11–13",
+      iconName: "chart",
+      tone: "purple",
+      figure: "5",
+      figureLabel: "صفحة",
+    },
+  ];
+  // total (15) is deliberately neither the sum of the spans above (1+7+3=11)
+  // nor any single span. The deck grand TOTAL still drives the Briefing
+  // lede (its own headline "N pages in the whole report" figure), but the
+  // Ledger totals row (2026-07-28 whole-branch-review fix, C2) must sum
+  // ONLY the listed sections' own spans (11) — this deliberate 15-vs-11 gap
+  // is what proves the two slots read from the right source and don't
+  // silently borrow each other's number.
+  const TOTAL = 15;
+
+  it("variant 0 (production) renders byte-identical v2-toc-card markup — no style attribute on .v2-toc-side", () => {
+    const html = tocSlide(items, 2, TOTAL, false);
+    expect(html).not.toContain("v2-sys-ledger");
+    expect(html).not.toContain("v2-sys-brief");
+    expect(html).not.toContain("v2-sys-grid");
+    expect((html.match(/<div class="v2-toc-side">/g) ?? []).length).toBe(3);
+    expect(html).not.toContain('<div class="v2-toc-side" style=');
+  });
+
+  it('Ledger slot (data-variant-index="1") totals row sums the LISTED sections\' own page spans, not the deck\'s overall page count', () => {
+    const html = tocSlide(items, 2, TOTAL, true);
+    const panel1 = isolatePanel(html, 1);
+    expect(panel1).toContain("v2-sys-ledger");
+    expect(panel1).toContain("v2-lg-toc");
+    expect(panel1).toContain(
+      "<th></th><th>القسم</th><th>الهدف</th><th>المؤشر</th><th>الصفحات</th>",
+    );
+    // Honest, verifiable totals row: 1+7+3 = 11, the sum a reader can check
+    // by adding the rows above — NOT 15 (the deck's overall page count,
+    // which also counts cover/التوصيف/الخاتمة pages this table never lists).
+    // 2026-07-28 whole-branch-review fix (C2): this row used to print the
+    // deck grand total here, disagreeing with what the visible rows summed
+    // to — a verifiability-premised table must never do that.
+    expect(panel1).toContain("<tr><td></td><td>الإجمالي</td><td></td><td></td><td>11 صفحة</td></tr>");
+    expect(panel1).not.toContain("15 صفحة");
+  });
+
+  it('Briefing slot (data-variant-index="2") ranks sections in DOCUMENT ORDER — the largest-span section (middle) is neither promoted nor demoted', () => {
+    const html = tocSlide(items, 2, TOTAL, true);
+    const panel2 = isolatePanel(html, 2);
+    expect(panel2).toContain("v2-sys-brief");
+    expect(panel2).toContain("v2-bf-toc");
+
+    const labels = [...panel2.matchAll(/<span class="v2-bf-rank-label">([^<]*)<\/span>/g)].map((m) => m[1]);
+    expect(labels).toEqual(["المعجم", "القسم الثاني", "القسم الثالث"]);
+
+    const values = [...panel2.matchAll(/<span class="v2-bf-rank-value">([^<]*)<\/span>/g)].map((m) => m[1]);
+    expect(values).toEqual(["1 صفحة", "7 صفحة", "3 صفحة"]);
+
+    // Lede is the real deck total (15), not the 11-page span sum.
+    expect(panel2).toContain('<div class="v2-bf-lede-figure blue">15</div>');
+    // Support strip: أكبر قسم/أصغر قسم correctly derived from the 3 spans.
+    expect(panel2).toContain("7 صفحة");
+    expect(panel2).toContain("أكبر قسم");
+    expect(panel2).toContain("1 صفحة");
+    expect(panel2).toContain("أصغر قسم");
+  });
+
+  it('Grid slot (data-variant-index="3") reuses the SAME v2-toc-card markup as slot 0, wrapped in v2-gd-toc, with a page-span --w tint', () => {
+    const html = tocSlide(items, 2, TOTAL, true);
+    const panel0 = isolatePanel(html, 0);
+    const panel3 = isolatePanel(html, 3);
+    expect(panel3).toContain("v2-sys-grid");
+    expect(panel3).toContain("v2-gd-toc");
+
+    // Same 3 cards, same titles/goals as slot 0 — genuinely reused markup,
+    // not a re-derived summary.
+    const panel0Cards = (panel0.match(/class="v2-toc-card/g) ?? []).length;
+    const panel3Cards = (panel3.match(/class="v2-toc-card/g) ?? []).length;
+    expect(panel3Cards).toBe(panel0Cards);
+    expect(panel3).toContain("المعجم");
+    expect(panel3).toContain("القسم الثاني");
+    expect(panel3).toContain("القسم الثالث");
+
+    // Tint: span/maxSpan*100 — spans are [1,7,3], max 7.
+    const tints = [...panel3.matchAll(/<div class="v2-toc-side" style="--w:([\d.]+)%">/g)].map((m) =>
+      Number(m[1]),
+    );
+    expect(tints).toEqual([
+      Number(((1 / 7) * 100).toFixed(1)),
+      100,
+      Number(((3 / 7) * 100).toFixed(1)),
+    ]);
+  });
+});
+
+describe("slide-glossary-levels fan-out — Ledger/Briefing/Grid (2026-07-25 fan-out plan §3a, batch B4)", () => {
+  it("variant 0 (production) is untouched", () => {
+    const [levelsBuilder] = glossarySlideBuilders(false);
+    const html = levelsBuilder(3, 20);
+    expect(html).not.toContain("v2-sys-ledger");
+    expect(html).not.toContain("v2-sys-brief");
+    expect(html).not.toContain("v2-sys-grid");
+    expect(html).toContain("v2-level-grid");
+  });
+
+  it('Ledger slot (data-variant-index="1") footnote wording is IDENTICAL to levelFiguresTable\'s own two-basis footnote — no totals row', () => {
+    const [levelsBuilder] = glossarySlideBuilders(true);
+    const html = levelsBuilder(3, 20);
+    const panel1 = isolatePanel(html, 1);
+    expect(panel1).toContain("v2-sys-ledger");
+    expect(panel1).toContain("v2-lg-glossary-levels");
+    expect(panel1).toContain(
+      "<th>#</th><th>المستوى</th><th>التعريف</th><th>ما يقيسه</th><th>وزن العينة</th>",
+    );
+    // The SAME footnote text riskStagesSlide's levelFiguresTable footnote
+    // uses (pinned verbatim in the "levelFiguresTable byte-identity" describe
+    // block above) — both must read identically, not two different captions
+    // for the same fact.
+    const SHARED_FOOTNOTE =
+      "وزن المستوى الأول نسبة من مجتمعه (حصر شامل)؛ وبقية الأوزان حصص من حصة العدد الثابت — الأساسان مختلفان ولا يجمعان إلى 100%";
+    expect(panel1).toContain(`<tr class="v2-lg-footnote"><td colspan="5">${SHARED_FOOTNOTE}</td></tr>`);
+    const model = buildReportModel(input([popRow({ stage: "المستوى الأول" })]));
+    const riskStagesHtml = riskStagesSlide(model, 5, 20, true);
+    const riskPanel1 = isolatePanel(riskStagesHtml, 1);
+    expect(riskPanel1).toContain(SHARED_FOOTNOTE);
+    // No totals row — the weights deliberately don't sum to 100%.
+    expect(panel1).not.toContain("الإجمالي");
+  });
+
+  it('Briefing slot (data-variant-index="2") ranks the 4 levels in LEVEL ORDER on a FIXED 0-100 scale, each bar width equal to its own raw weight', () => {
+    const [levelsBuilder] = glossarySlideBuilders(true);
+    const html = levelsBuilder(3, 20);
+    const panel2 = isolatePanel(html, 2);
+    expect(panel2).toContain("v2-sys-brief");
+    expect(panel2).toContain("v2-bf-glossary-levels");
+
+    const labels = [...panel2.matchAll(/<span class="v2-bf-rank-label">([^<]*)<\/span>/g)].map((m) => m[1]);
+    expect(labels).toEqual(["المستوى الأول", "المستوى الثاني", "المستوى الثالث", "المستوى الرابع"]);
+    const tones = [...panel2.matchAll(/<span class="v2-bf-rank-num (\w+)">/g)].map((m) => m[1]);
+    expect(tones).toEqual(["gold", "blue", "green", "coral"]);
+
+    // Weights are 100/40/30/30 (see LEVEL_DRAW_WEIGHTS's own doc comment).
+    // A fixed max:100 scale means each bar's fill width equals its raw
+    // weight value exactly (width% === weight%) — the observable signature
+    // of a 0-100 fixed ceiling (an "auto" scale would only coincide with
+    // this by chance if the largest named value happened to be exactly 100,
+    // which it does here since المستوى الأول is locked at 100 — so this
+    // assertion is necessary-but-not-sufficient on its own; it is combined
+    // with the source-level `scale: {kind:"fixed", max:100}` call already
+    // documented in glossaryLevelsBriefing's own doc comment in slides.ts).
+    const widths = [...panel2.matchAll(/<i class="v2-bf-rank-fill \w+" style="width:([\d.]+)%">/g)].map(
+      (m) => Number(m[1]),
+    );
+    expect(widths).toEqual([100, 40, 30, 30]);
+
+    const values = [...panel2.matchAll(/<span class="v2-bf-rank-value">([^<]*)<\/span>/g)].map((m) => m[1]);
+    expect(values).toEqual(["100%", "40%", "30%", "30%"]);
+  });
+
+  it('Grid slot (data-variant-index="3") has NO fabricated cross-page figures — only وزن العينة, never live per-month population/coverage numbers', () => {
+    const [levelsBuilder] = glossarySlideBuilders(true);
+    const html = levelsBuilder(3, 20);
+    const panel3 = isolatePanel(html, 3);
+    expect(panel3).toContain("v2-sys-grid");
+    expect(panel3).toContain("v2-gd-glossary-levels");
+    expect(panel3).toContain("وزن العينة");
+    // riskStagesSlide's own live-data vocabulary must never leak in here —
+    // this page carries only the static وزن العينة figure.
+    expect(panel3).not.toContain("تغطية العيّنة");
+    expect(panel3).not.toContain("من المجتمع");
+    expect(panel3).not.toContain("metricMatrix");
+    expect(panel3).not.toContain("<figure");
+
+    // Tint: raw weight value drives --w directly (100/40/30/30).
+    const tints = [...panel3.matchAll(/<div class="v2-level-share" style="--w:([\d.]+)%">/g)].map((m) =>
+      Number(m[1]),
+    );
+    expect(tints).toEqual([100, 40, 30, 30]);
+  });
+});
+
+describe("slide-glossary-1 fan-out — Ledger/Briefing/Grid (2026-07-25 fan-out plan §3b, batch B4)", () => {
+  it("variant 0 (production) is untouched", () => {
+    const [, termsBuilder] = glossarySlideBuilders(false);
+    const html = termsBuilder(4, 20);
+    expect(html).not.toContain("v2-sys-ledger");
+    expect(html).not.toContain("v2-sys-brief");
+    expect(html).not.toContain("v2-sys-grid");
+    expect(html).toContain("v2-term-section");
+  });
+
+  it('Ledger slot (data-variant-index="1") renders TWO stacked cards via v2-lg-split.stack, one per category, no totals row', () => {
+    const [, termsBuilder] = glossarySlideBuilders(true);
+    const html = termsBuilder(4, 20);
+    const panel1 = isolatePanel(html, 1);
+    expect(panel1).toContain("v2-sys-ledger");
+    expect(panel1).toContain('<div class="v2-lg-split stack">');
+    const cards = (panel1.match(/class="v2-lg-table-card v2-lg-glossary-terms-card"/g) ?? []).length;
+    expect(cards).toBe(2);
+    expect(panel1).toContain("<th>المصطلح</th><th>التعريف</th>");
+    expect(panel1).toContain("مصطلحات المجتمع والعيّنة");
+    expect(panel1).toContain("مصطلحات القرارات والجودة");
+    expect(panel1).toContain("مجتمع الفحص");
+    expect(panel1).toContain("الاشتباه الفائت");
+  });
+
+  it('Briefing slot (data-variant-index="2") uses bars:false, NO support strip, and grouped-by-category document order — foldRemainder never silently drops rows', () => {
+    const [, termsBuilder] = glossarySlideBuilders(true);
+    const html = termsBuilder(4, 20);
+    const panel2 = isolatePanel(html, 2);
+    expect(panel2).toContain("v2-sys-brief");
+    expect(panel2).toContain("v2-bf-glossary-1");
+    expect(panel2).not.toContain("v2-bf-rank-track");
+    expect(panel2).not.toContain("v2-totals-band"); // briefingSupport([]) → ""
+
+    const labels = [...panel2.matchAll(/<span class="v2-bf-rank-label">([^<]*)<\/span>/g)].map((m) => m[1]);
+    // All 5 terms, grouped by category in original order — category 1's 3
+    // terms first, category 2's 2 terms last, never interleaved or sorted.
+    expect(labels).toEqual(["مجتمع الفحص", "العيّنة", "التغطية", "اشتباه", "الاشتباه الفائت"]);
+    expect(labels.length).toBe(5); // no rows silently dropped by the fold path
+
+    const lede = html.match(/<div class="v2-bf-lede-figure gold">([^<]*)<\/div>/);
+    expect(lede?.[1]).toBe("5");
+    expect(panel2).toContain("5 مصطلحًا في فئتين");
+    expect(panel2).toContain("مصطلحات المجتمع والعيّنة · مصطلحات القرارات والجودة");
+  });
+
+  it('Grid slot (data-variant-index="3") is a documented degenerate reuse of termBand — zero metrics, no tint, byte-identical to slot 0\'s cards', () => {
+    const [, termsBuilder] = glossarySlideBuilders(true);
+    const html = termsBuilder(4, 20);
+    const panel0 = isolatePanel(html, 0);
+    const panel3 = isolatePanel(html, 3);
+    expect(panel3).toContain("v2-sys-grid");
+    expect(panel3).toContain("v2-gd-glossary-terms");
+    expect(panel3).toContain("v2-term-section");
+    expect(panel3).not.toContain("--w:");
+    expect(panel3).not.toContain("metricMatrix");
+    expect(panel3).not.toContain("<figure");
+
+    const panel0Cards = (panel0.match(/class="v2-term-card/g) ?? []).length;
+    const panel3Cards = (panel3.match(/class="v2-term-card/g) ?? []).length;
+    expect(panel3Cards).toBe(panel0Cards);
+    expect(panel3).toContain("مجتمع الفحص");
+    expect(panel3).toContain("الاشتباه الفائت");
   });
 });
