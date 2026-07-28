@@ -945,11 +945,16 @@ body.theme-light .v2-bar-cell.warn{--bar:rgba(244,180,0,.34);}
 .v2-prop-seg:last-child{border-inline-end:0;}
 .v2-prop-seg.gold{background:var(--gold);}.v2-prop-seg.blue{background:var(--blue);}
 .v2-prop-seg.green{background:var(--green);}.v2-prop-seg.coral{background:var(--coral);}
+/* Fallback for a stage whose level identity couldn't be resolved
+   (levelIndexForStage, slides.ts) — never a wrong neighbor level's color,
+   see that function's doc comment. */
+.v2-prop-seg.neutral{background:var(--slate);}
 .v2-prop-seg-pct{font-size:0.72rem;font-weight:900;color:var(--navy);font-variant-numeric:tabular-nums;}
 .v2-prop-legend{display:flex;flex-wrap:wrap;gap:6px 18px;justify-content:center;}
 .v2-prop-key{display:inline-flex;align-items:center;gap:7px;font-size:0.72rem;font-weight:700;color:rgba(255,255,255,.82);}
 .v2-prop-key i{width:11px;height:11px;border-radius:3px;background:var(--gold);flex-shrink:0;}
 .v2-prop-key.blue i{background:var(--blue);}.v2-prop-key.green i{background:var(--green);}.v2-prop-key.coral i{background:var(--coral);}
+.v2-prop-key.neutral i{background:var(--slate);}
 .v2-stage-body{display:flex;align-items:center;justify-content:space-between;gap:10px;flex:1;}
 .v2-stage-figs{display:flex;flex-direction:column;gap:8px;}
 .v2-stage-fig{display:flex;flex-direction:column;}
@@ -985,6 +990,10 @@ body.theme-light .v2-bar-cell.warn{--bar:rgba(244,180,0,.34);}
 .v2-risk-tile.blue{background:linear-gradient(165deg,rgba(58,140,214,.13),rgba(14,58,95,.42) 55%,rgba(7,39,67,.72));}
 .v2-risk-tile.green{background:linear-gradient(165deg,rgba(52,168,120,.13),rgba(14,58,95,.42) 55%,rgba(7,39,67,.72));}
 .v2-risk-tile.coral{background:linear-gradient(165deg,rgba(224,86,86,.13),rgba(14,58,95,.42) 55%,rgba(7,39,67,.72));}
+/* Fallback for a stage whose level identity couldn't be resolved
+   (levelIndexForStage, slides.ts) — a muted slate tint, never a wrong
+   neighbor level's color. */
+.v2-risk-tile.neutral{background:linear-gradient(165deg,rgba(138,160,181,.13),rgba(14,58,95,.42) 55%,rgba(7,39,67,.72));}
 .v2-risk-tile-head{display:flex;align-items:center;gap:9px;padding:10px 12px 8px;border-bottom:1px solid rgba(255,255,255,.1);}
 .v2-risk-tile-titles{display:flex;flex-direction:column;gap:1px;min-width:0;flex:1;}
 .v2-risk-tile-titles b{font-size:.78rem;color:#fff;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -994,6 +1003,7 @@ body.theme-light .v2-bar-cell.warn{--bar:rgba(244,180,0,.34);}
 .v2-risk-tile.blue .v2-risk-tile-share b{color:var(--blue);}
 .v2-risk-tile.green .v2-risk-tile-share b{color:var(--green);}
 .v2-risk-tile.coral .v2-risk-tile-share b{color:var(--coral);}
+.v2-risk-tile.neutral .v2-risk-tile-share b{color:var(--slate);}
 .v2-risk-tile-share small{font-size:.54rem;color:var(--slate);font-weight:700;}
 .v2-risk-tile-main{display:flex;align-items:center;justify-content:space-between;gap:8px;flex:1;padding:8px 14px;}
 .v2-risk-tile-figure{display:flex;flex-direction:column;gap:2px;min-width:0;}
@@ -1003,6 +1013,7 @@ body.theme-light .v2-bar-cell.warn{--bar:rgba(244,180,0,.34);}
 .v2-risk-tile.blue .v2-risk-tile-main .v2-micro-arc{color:var(--blue);}
 .v2-risk-tile.green .v2-risk-tile-main .v2-micro-arc{color:var(--green);}
 .v2-risk-tile.coral .v2-risk-tile-main .v2-micro-arc{color:var(--coral);}
+.v2-risk-tile.neutral .v2-risk-tile-main .v2-micro-arc{color:var(--slate);}
 .v2-risk-tile-foot{
   display:flex;align-items:center;justify-content:space-around;gap:8px;
   padding:7px 12px;background:rgba(2,20,37,.32);border-top:1px solid rgba(255,255,255,.1);
@@ -1014,6 +1025,7 @@ body.theme-light .v2-bar-cell.warn{--bar:rgba(244,180,0,.34);}
 .v2-risk-tile.blue .v2-risk-tile-foot span.accent b{color:var(--blue);}
 .v2-risk-tile.green .v2-risk-tile-foot span.accent b{color:var(--green);}
 .v2-risk-tile.coral .v2-risk-tile-foot span.accent b{color:var(--coral);}
+.v2-risk-tile.neutral .v2-risk-tile-foot span.accent b{color:var(--slate);}
 .v2-risk-layout .v2-totals-band{margin-top:0;gap:10px;}
 .v2-risk-layout .v2-totals-item{padding:9px 14px;}
 .v2-risk-layout .v2-totals-item b{font-size:1.05rem;}
@@ -1058,6 +1070,9 @@ body.theme-light .v2-risk-tile-foot{background:rgba(10,45,74,.035);border-color:
 .v2-level-row-num.blue{background:var(--blue);}
 .v2-level-row-num.green{background:var(--green);}
 .v2-level-row-num.coral{background:var(--coral);}
+/* Fallback for a stage whose level identity couldn't be resolved
+   (levelIndexForStage, slides.ts) — never a wrong neighbor level's color. */
+.v2-level-row-num.neutral{background:var(--slate);}
 .v2-level-table-card .deck-table tfoot td,
 .v2-lg-table-card .deck-table tfoot td{
   font-weight:900;color:#fff;background:rgba(255,255,255,.07);
@@ -1270,6 +1285,7 @@ body.theme-light .v2-toc-card{background-image:var(--v2-hex-tex-light),none;back
 .v2-risk-tile.blue{background-image:var(--v2-hex-tex),linear-gradient(165deg,rgba(58,140,214,.13),rgba(14,58,95,.42) 55%,rgba(7,39,67,.72));}
 .v2-risk-tile.green{background-image:var(--v2-hex-tex),linear-gradient(165deg,rgba(52,168,120,.13),rgba(14,58,95,.42) 55%,rgba(7,39,67,.72));}
 .v2-risk-tile.coral{background-image:var(--v2-hex-tex),linear-gradient(165deg,rgba(224,86,86,.13),rgba(14,58,95,.42) 55%,rgba(7,39,67,.72));}
+.v2-risk-tile.neutral{background-image:var(--v2-hex-tex),linear-gradient(165deg,rgba(138,160,181,.13),rgba(14,58,95,.42) 55%,rgba(7,39,67,.72));}
 body.theme-light .v2-risk-tile{background-image:var(--v2-hex-tex-light),linear-gradient(165deg,rgba(244,180,0,.1),#fff 55%,#f5f8fb);background-repeat:repeat,no-repeat;}
 .v2-src-card{background-image:var(--v2-hex-tex),linear-gradient(180deg,rgba(14,58,95,.55),rgba(7,39,67,.75));background-repeat:repeat,no-repeat;}
 body.theme-light .v2-src-card{background-image:var(--v2-hex-tex-light),none;background-repeat:repeat,no-repeat;}
@@ -1424,6 +1440,13 @@ body.theme-light .v2-lg-port-card .deck-table tfoot td{color:#0a2d4a;background:
 .v2-bf-rank.t-compact .v2-bf-rank-label{width:140px;font-size:.74rem;}
 .v2-bf-rank.t-dense .v2-bf-rank-label{width:118px;font-size:.7rem;}
 .v2-bf-rank-row.rest .v2-bf-rank-label{color:var(--slate);font-style:italic;}
+/* bars:false rows (briefingRankList, slideKit.ts) omit .v2-bf-rank-track
+   entirely — without this rule the label stayed pinned at its fixed 150px
+   (every sibling is flex:0 0 auto too), so removing the track just left dead
+   space instead of letting the label expand as the doc comment claimed
+   (2026-07-28 fix — no shipping page uses bars:false yet, caught before it
+   did). */
+.v2-bf-rank-row.no-bars .v2-bf-rank-label{flex:1 1 auto;width:auto;}
 .v2-bf-rank-track{
   flex:1 1 auto;height:20px;border-radius:6px;background:rgba(255,255,255,.08);
   border:1px solid rgba(255,255,255,.12);overflow:hidden;position:relative;

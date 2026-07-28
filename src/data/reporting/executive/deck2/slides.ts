@@ -16,7 +16,7 @@ import { esc, fmtNum, fmtPct } from "../primitives";
 import { icon } from "../ui/icons";
 import { coverMeshSvg, dividerPatternSvg } from "../ui/generativeArt";
 import { isRankable } from "../model/dataSufficiency";
-import { formatStageLabel } from "../../../population/stageHelpers";
+import { formatStageLabel, getStageKey } from "../../../population/stageHelpers";
 import { DEFAULT_SAMPLING_RULES } from "../../../population/populationConfig";
 import { ORGANIZATION_PATH, ZATCA_LOGO_URL } from "../../../../branding/organization";
 import type { SourceRevisions } from "../../sourceRevisions";
@@ -450,6 +450,57 @@ const RISK_LEVELS: RiskLevel[] = [
 ];
 
 /**
+ * Canonical order the four risk levels use across `RISK_LEVELS` /
+ * `LEVEL_DRAW_WEIGHTS` / `STAGE_TONES` — the SAME order `LEVEL_DRAW_WEIGHTS`
+ * derives from `DEFAULT_SAMPLING_RULES` above. A `StageProfile`'s POSITION in
+ * `model.population.byStage` is NOT guaranteed to match this order: a level
+ * with zero sample rows is entirely omitted from `byStage` (the production
+ * path — `sampleAlgorithmInternals.ts`'s stageAllocations loop `continue`s
+ * past `stageRows.length === 0 || target <= 0` — and the no-sample fallback
+ * path in `buildStageProfiles`, which groups by whatever raw labels actually
+ * appear in the rows) — every level AFTER a skipped one then shifts down one
+ * array position. `RISK_LEVELS[i]`/`LEVEL_DRAW_WEIGHTS[i]`/`STAGE_TONES[i]`
+ * must therefore never be indexed by a stage's loop position; resolve
+ * identity via `levelIndexForStage` instead (2026-07-28 review fix).
+ */
+const CANONICAL_STAGE_ORDER = ["first", "second", "third", "fourth"] as const;
+
+/**
+ * Resolve `stage` to its 0-based index into `RISK_LEVELS`/`LEVEL_DRAW_WEIGHTS`/
+ * `STAGE_TONES` BY IDENTITY, never by the stage's position in the `stages`
+ * array it came from (see `CANONICAL_STAGE_ORDER`'s doc comment above).
+ *
+ * Resolved from `stage.stageLabel` via the same alias-matching `getStageKey`
+ * every other stage-classification path in the app uses — NOT from
+ * `stage.stageKey` directly: that field is only a reliable canonical key
+ * ("first"/"second"/…) on the production path (`buildStageProfiles`'s
+ * `sample.stageAllocations` branch); on the no-sample fallback branch it is
+ * stamped `String(index)` (a placeholder, never a real level key), which
+ * would make identity resolution silently fail for the very fixtures/months
+ * that most need it. `stageLabel`, by contrast, is real semantic data on
+ * BOTH branches (either `STAGE_LABELS[stageKey]` or the row's own `stage`
+ * text), so resolving through it — the same way `formatStageLabel` already
+ * does — works uniformly everywhere.
+ *
+ * Returns -1 for a label `getStageKey` can't map to one of the four levels
+ * (legacy/unrecognized wording, or the raw label was never one of the four
+ * to begin with). Callers MUST treat -1 as "unknown level" — render "—" and
+ * a neutral tone — never fall back to a loop index, which would silently
+ * reintroduce the exact bug this helper exists to fix.
+ */
+function levelIndexForStage(stage: StageProfile): number {
+  const key = getStageKey(stage.stageLabel);
+  return CANONICAL_STAGE_ORDER.indexOf(key as (typeof CANONICAL_STAGE_ORDER)[number]);
+}
+
+/** `STAGE_TONES` lookup by level identity (see `levelIndexForStage`);
+ *  `"neutral"` — never a wrong neighbor's color — for an unresolved stage. */
+function stageTone(stage: StageProfile): (typeof STAGE_TONES)[number] | "neutral" {
+  const idx = levelIndexForStage(stage);
+  return idx >= 0 ? STAGE_TONES[idx] : "neutral";
+}
+
+/**
  * One full-height level column: icon + quiet ordinal, name, rule, definition,
  * this month's live share of the population, and a "ما يقيسه" footer.
  *
@@ -629,10 +680,19 @@ export function sectionSeparatorSlide(opts: {
  * the same وزن العينة figure the glossary's level cards show
  * (`LEVEL_DRAW_WEIGHTS`), so this page and the glossary agree instead of one
  * of them implying a ranking the other has already dropped.
+ *
+ * Resolves `stage`'s level BY IDENTITY (`levelIndexForStage`), not by its
+ * position in the caller's loop — a stage's own ordinal ("المستوى ٣") must
+ * follow from what level it actually is, not from where it happens to sit in
+ * a `stages` array that can have levels missing (2026-07-28 review fix; see
+ * `CANONICAL_STAGE_ORDER`'s doc comment). Unresolvable stage → "—", never a
+ * fabricated ordinal.
  */
-function stageShortTag(i: number): string {
-  const weight = LEVEL_DRAW_WEIGHTS[i];
-  return weight === undefined || weight === null ? `المستوى ${i + 1}` : `وزن العينة ${fmtPct(weight, 0)}`;
+function stageShortTag(stage: StageProfile): string {
+  const idx = levelIndexForStage(stage);
+  if (idx < 0) return "—";
+  const weight = LEVEL_DRAW_WEIGHTS[idx];
+  return weight === null ? `المستوى ${idx + 1}` : `وزن العينة ${fmtPct(weight, 0)}`;
 }
 
 /** How many ports each stage-×-port card shows individually before folding the
@@ -647,15 +707,15 @@ export const STAGE_CARD_TOP_N = 5;
 function stageProportionBar(stages: StageProfile[]): string {
   const total = stages.reduce((s, x) => s + x.population, 0) || 1;
   const segs = stages
-    .map((s, i) => {
-      const tone = STAGE_TONES[i % STAGE_TONES.length];
+    .map((s) => {
+      const tone = stageTone(s);
       const pct = (s.population / total) * 100;
       return `<div class="v2-prop-seg ${tone}" style="width:${pct.toFixed(3)}%">${pct >= 6 ? `<span class="v2-prop-seg-pct">${fmtPct(pct, 0)}</span>` : ""}</div>`;
     })
     .join("");
   const legend = stages
-    .map((s, i) => {
-      const tone = STAGE_TONES[i % STAGE_TONES.length];
+    .map((s) => {
+      const tone = stageTone(s);
       return `<span class="v2-prop-key ${tone}"><i></i>${esc(s.stageLabel)} · ${fmtNum(s.population)}</span>`;
     })
     .join("");
@@ -718,13 +778,20 @@ function levelFiguresTable(
   totals: { population: number; sample: number; coverage: number },
 ): string {
   const rows = stages
-    .map((s, i) => {
-      const tone = STAGE_TONES[i % STAGE_TONES.length];
+    .map((s) => {
+      // Resolved BY IDENTITY (levelIndexForStage), not by loop position — see
+      // CANONICAL_STAGE_ORDER's doc comment. `stages` can have a level
+      // missing (zero sample rows), which shifts every later level's array
+      // position down by one; pairing this row's tone/weight/«ما يقيسه» text
+      // by `i` alone silently mispaired it with the WRONG level whenever that
+      // happened (2026-07-28 review fix).
+      const idx = levelIndexForStage(s);
+      const tone = idx >= 0 ? STAGE_TONES[idx] : "neutral";
       const share = (s.population / populationTotal) * 100;
-      const weight = LEVEL_DRAW_WEIGHTS[i] ?? null;
-      const measures = RISK_LEVELS[i]?.measures ?? "";
+      const weight = idx >= 0 ? LEVEL_DRAW_WEIGHTS[idx] ?? null : null;
+      const measures = idx >= 0 ? RISK_LEVELS[idx]?.measures ?? "—" : "—";
       return `<tr>
-        <td><span class="v2-level-row-num ${tone}">${i + 1}</span></td>
+        <td><span class="v2-level-row-num ${tone}">${idx >= 0 ? idx + 1 : "—"}</span></td>
         <td>${esc(s.stageLabel)}</td>
         <td>${esc(measures)}</td>
         <td>${fmtPct(weight, 0)}</td>
@@ -735,7 +802,14 @@ function levelFiguresTable(
       </tr>`;
     })
     .join("");
-  const footnoteRow = `<tr><td colspan="8" class="v2-lg-footnote">${esc(LEVEL_WEIGHT_BASIS_FOOTNOTE)}</td></tr>`;
+  // The class belongs on the <tr> — theme.ts's selectors are scoped
+  // `tfoot tr.v2-lg-footnote td` (muted caveat styling: 600 weight, .62rem,
+  // slate ink, right-aligned, transparent background). Putting it on the
+  // <td> instead (the pre-2026-07-28 bug) meant those selectors never
+  // matched, so the row fell through to the plain `tfoot td` rule and
+  // rendered as a second bold/white/tinted totals row — the opposite of a
+  // caveat disclosing the weights DON'T sum to 100%.
+  const footnoteRow = `<tr class="v2-lg-footnote"><td colspan="8">${esc(LEVEL_WEIGHT_BASIS_FOOTNOTE)}</td></tr>`;
   return ledgerTableCard({
     cardClass: "v2-level-table-card",
     theadCells: `
@@ -757,13 +831,18 @@ export function riskStagesSlide(model: ReportModel, num: number, total: number, 
   const populationTotal = stages.reduce((sum, stage) => sum + stage.population, 0) || 1;
 
   const tiles = stages
-    .map((stage, i) => {
-      const tone = STAGE_TONES[i % STAGE_TONES.length];
-      const tag = stageShortTag(i);
+    .map((stage) => {
+      // BY IDENTITY, not loop position — see CANONICAL_STAGE_ORDER's doc
+      // comment (2026-07-28 review fix). The ordinal badge shows the level's
+      // OWN number (e.g. "٣" for المستوى الثالث), not this tile's display
+      // slot, so it never implies a different level when one is missing.
+      const idx = levelIndexForStage(stage);
+      const tone = stageTone(stage);
+      const tag = stageShortTag(stage);
       const share = (stage.population / populationTotal) * 100;
       return `<div class="v2-risk-tile ${tone}">
         <div class="v2-risk-tile-head">
-          <span class="v2-stage-num">${i + 1}</span>
+          <span class="v2-stage-num">${idx >= 0 ? idx + 1 : "—"}</span>
           <span class="v2-risk-tile-titles"><b>${esc(stage.stageLabel)}</b><small>${esc(tag)}</small></span>
           <span class="v2-risk-tile-share"><b>${fmtPct(share, 0)}</b><small>من المجتمع</small></span>
         </div>
@@ -839,23 +918,50 @@ function riskStagesBriefing(model: ReportModel, stages: StageProfile[], populati
     { iconName: "scan", value: fmtNum(model.sample.total), label: "إجمالي العيّنة" },
     { iconName: "flag", value: esc(largest?.stageLabel ?? "—"), label: "أكبر مستوى حصةً" },
   ]);
-  const rankItems: BriefingRankItem[] = stages.map((s, i) => {
+  const rankItems: BriefingRankItem[] = stages.map((s) => {
+    // BY IDENTITY, not loop position — see CANONICAL_STAGE_ORDER's doc
+    // comment (2026-07-28 review fix). An unresolvable stage omits `tone`
+    // entirely so the row falls back to the list's own default tone ("gold")
+    // rather than borrowing a specific neighbor level's color.
+    const idx = levelIndexForStage(s);
     const share = (s.population / populationTotal) * 100;
     return {
       label: s.stageLabel,
       value: share,
       valueText: fmtPct(share, 0),
       secondaryText: `العيّنة ${fmtNum(s.sampleSize)} · تغطية ${fmtPct(s.coverage)}`,
-      tone: STAGE_TONES[i % STAGE_TONES.length],
+      tone: idx >= 0 ? STAGE_TONES[idx] : undefined,
     };
   });
-  const rankHtml = briefingRankList({ items: rankItems, tone: "gold", scale: { kind: "auto" } });
+  // foldRemainder is required by briefingRankList's type (2026-07-28: a
+  // missing foldRemainder used to silently drop the folded tail with no
+  // remainder row and no type error — see slideKit.ts's doc comment). It can
+  // never actually fire here: briefingRankPlan's smallest-tier cap is 5 and
+  // `stages` has at most 4 rows (the four risk levels), so plan.folded is
+  // always 0 — this callback exists only to satisfy the type contract.
+  const rankHtml = briefingRankList({
+    items: rankItems,
+    tone: "gold",
+    scale: { kind: "auto" },
+    foldRemainder: (folded) => ({
+      label: `بقية المستويات (${fmtNum(folded.length)})`,
+      value: null,
+      valueText: "—",
+      secondaryText: "",
+      rest: true,
+    }),
+  });
   return `<div class="v2-sys-brief v2-bf-risk-stages">
     ${briefingLede({
       figure: fmtPct(model.sample.coverage, 0),
       tone: "gold",
       label: `تغطية العيّنة ${fmtPct(model.sample.coverage, 0)} — ${fmtNum(model.sample.total)} من ${fmtNum(model.population.total)} صورة`,
-      basis: `أربعة مستويات · ${esc(model.summary.periodId)}`,
+      // Reflects the actual number of levels present in `stages` rather than
+      // assuming all four always show up (2026-07-28 review fix) — a month
+      // whose risk file omits a level entirely (or the no-sample fallback
+      // grouping, which only ever sees the levels rows actually carry)
+      // should not claim "أربعة مستويات" when fewer are on the page.
+      basis: `${fmtNum(stages.length)} مستويات · ${esc(model.summary.periodId)}`,
       arc: model.sample.coverage,
     })}
     ${supportStrip}

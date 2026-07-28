@@ -850,9 +850,18 @@ export function briefingSupport(items: Array<{ iconName: string; value: string; 
  * Generalized three ways beyond the exemplar:
  *   1. Per-item `tone` override (`item.tone ?? opts.tone`) — needed for
  *      risk-level identity colors and signed-delta pass/fail rows.
- *   2. `bars: false` — omits the `.v2-bf-rank-track` entirely (CSS then lets
- *      the label expand) for definitional/provenance lists that have no
- *      magnitude to bar-chart. Default `true` (the exemplar's only mode).
+ *   2. `bars: false` — omits the `.v2-bf-rank-track` entirely AND stamps a
+ *      `no-bars` modifier on `.v2-bf-rank-row` so `.v2-bf-rank-label` can
+ *      pick up `flex:1 1 auto` (theme.ts) and genuinely expand into the
+ *      track's now-empty space, for definitional/provenance lists that have
+ *      no magnitude to bar-chart. Default `true` (the exemplar's only mode).
+ *      (2026-07-28: the `no-bars` hook + its CSS rule were missing — the doc
+ *      comment claimed the label already expanded, but every sibling
+ *      including the label was `flex:0 0 auto`/fixed-width, so dropping the
+ *      track just left dead space. No current caller passes `bars:false` yet
+ *      — see the fan-out plan's glossary-1/closing pages — so this was a
+ *      landmine, not a shipped bug; fixed alongside the identity-mispairing
+ *      review pass while already in this file.)
  *   3. `scale: {kind:"fixed", max}` alongside the exemplar's `{kind:"auto"}` —
  *      for rate pages (0–100) where every named row AND the remainder must
  *      normalize against the same fixed ceiling, not each other's magnitudes.
@@ -862,7 +871,11 @@ export function briefingSupport(items: Array<{ iconName: string; value: string; 
  *      `briefingPortRank`'s refactor recovers the folded ports' raw rows via
  *      `combined.slice(combined.length - folded.length)`, using the folded
  *      slice's LENGTH rather than re-deriving `briefingRankPlan`'s ladder a
- *      second time).
+ *      second time). REQUIRED, not optional (2026-07-28): a caller that
+ *      forgot it while `plan.folded > 0` used to have the folded tail
+ *      silently vanish — no remainder row, no type error. Making it
+ *      mandatory forces every caller to decide what happens to overflow
+ *      rows instead of losing them by omission.
  *
  * `items` is ALREADY in display order and is NEVER re-sorted — several later
  * pages intentionally rank by something other than the bar magnitude (level
@@ -873,7 +886,7 @@ export function briefingRankList(opts: {
   items: BriefingRankItem[];
   tone: BriefingTone;
   scale: { kind: "auto" } | { kind: "fixed"; max: number };
-  foldRemainder?: (folded: BriefingRankItem[]) => BriefingRankItem;
+  foldRemainder: (folded: BriefingRankItem[]) => BriefingRankItem;
   bars?: boolean;
 }): string {
   const items = opts.items;
@@ -891,7 +904,7 @@ export function briefingRankList(opts: {
   const maxMag = Math.max(1, ...finiteValues);
 
   const remainderItem: BriefingRankItem | null =
-    plan.folded > 0 && opts.foldRemainder ? opts.foldRemainder(foldedItems) : null;
+    plan.folded > 0 ? opts.foldRemainder(foldedItems) : null;
 
   // The peer-reviewed fix: named rows and the remainder share ONE scale, the
   // remainder's real aggregate folded in — not each computing its own ratio
@@ -913,7 +926,13 @@ export function briefingRankList(opts: {
     const track = showBars
       ? `\n        <span class="v2-bf-rank-track"><i class="v2-bf-rank-fill ${isRest ? "rest" : tone}" style="width:${pctWidth(item.value)}%"></i></span>`
       : "";
-    return `<div class="v2-bf-rank-row${isRest ? " rest" : ""}">
+    // `no-bars` lets theme.ts's matching rule give the label the track's
+    // now-empty flex space instead of leaving it as dead space (see this
+    // function's doc comment, point 2).
+    const rowClass = ["v2-bf-rank-row", isRest ? "rest" : "", showBars ? "" : "no-bars"]
+      .filter(Boolean)
+      .join(" ");
+    return `<div class="${rowClass}">
         <span class="v2-bf-rank-num${isRest ? "" : ` ${tone}`}">${numHtml}</span>
         <span class="v2-bf-rank-label">${esc(item.label)}</span>${track}
         <span class="v2-bf-rank-value">${item.valueText}</span>

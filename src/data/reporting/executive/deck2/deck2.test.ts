@@ -6,7 +6,7 @@ import type { PreparedPopulationRow } from "../../../population/populationTypes"
 import { buildExecutiveDeckV2 } from "./index";
 import { buildReportModel } from "../model/reportModel";
 import { monthInNumbersSlide, portPopulationSlideBuilders, riskStagesSlide } from "./slides";
-import { briefingRankPlan, BRIEFING_RANK_BUDGET_PX } from "./slideKit";
+import { briefingRankList, briefingRankPlan, BRIEFING_RANK_BUDGET_PX } from "./slideKit";
 import { fmtNum } from "../primitives";
 import { resetLabel, setLabel } from "../../../labels/labelsStore";
 
@@ -435,14 +435,26 @@ describe("slide-risk-stages fan-out — Ledger/Briefing/Grid (2026-07-25 fan-out
     expect(panel1).not.toContain("v2-cbar");
     expect(panel1).toContain('<div class="v2-level-table-card">');
 
-    // New «ما يقيسه» column, sourced from RISK_LEVELS[i].measures.
+    // New «ما يقيسه» column, sourced from RISK_LEVELS[i].measures — resolved
+    // BY IDENTITY (levelIndexForStage), not by this row's position in
+    // `stages`. This fixture's `stages` array is [المستوى الأول, المستوى
+    // الثالث] — level 2 has ZERO rows and is entirely absent, so the second
+    // row is level 3 shifted into array position 1. Pre-2026-07-28, this
+    // assertion actually pinned the BUG: it expected level 2's «ما يقيسه»
+    // text (RISK_LEVELS[1]) on a row that is really about level 3, because
+    // the table paired by loop position instead of by the stage's own
+    // identity. The correct pairing is level 3's own text.
     expect(panel1).toContain("<th>ما يقيسه</th>");
     expect(panel1).toContain("انفراد الفحص بالاشتباه دون مؤشرات أخرى.");
-    expect(panel1).toContain("ما يلتقطه محرك المخاطر ولا يلتقطه الفحص.");
+    expect(panel1).toContain("ما تلتقطه الفرق الأمنية الأخرى ولا يلتقطه الفحص.");
+    expect(panel1).not.toContain("ما يلتقطه محرك المخاطر ولا يلتقطه الفحص.");
 
     // New tfoot footnote row: colspan across all 8 columns, two-basis caveat
-    // worded to agree with LEVEL_DRAW_WEIGHTS's own doc comment.
-    expect(panel1).toContain('<tr><td colspan="8" class="v2-lg-footnote">');
+    // worded to agree with LEVEL_DRAW_WEIGHTS's own doc comment. Class is on
+    // the <tr> (theme.ts's selectors are scoped tfoot tr.v2-lg-footnote td;
+    // the pre-2026-07-28 bug put it on the <td> instead, so the caveat
+    // styling never applied and the row rendered as a second bold totals row).
+    expect(panel1).toContain('<tr class="v2-lg-footnote"><td colspan="8">');
     expect(panel1).toContain("الأساسان مختلفان ولا يجمعان إلى 100%");
 
     // Every stage's real population/sample figures must still appear in the table.
@@ -532,6 +544,17 @@ describe("levelFiguresTable byte-identity characterization — SUPERSEDED 2026-0
   // (verifiably-correct shape rather than a frozen byte string); this test
   // still exists so the shape stays pinned once more, exactly like every
   // other characterization test in this file.
+  // Re-captured 2026-07-28 (review fix): the previous pin locked in the
+  // level-identity mispairing bug — row 2 (المستوى الثالث, the only stage at
+  // array position 1 since المستوى الثاني has zero rows and never appears in
+  // `stages`) was shown with tone "blue"/ordinal "2"/«ما يقيسه»/وزن العينة
+  // all borrowed from المستوى الثاني (RISK_LEVELS[1]/STAGE_TONES[1]) purely
+  // because it sat at loop position 1. The table now resolves each row's
+  // tone/ordinal/«ما يقيسه»/وزن العينة BY the stage's own identity
+  // (levelIndexForStage in slides.ts), so row 2 correctly shows المستوى
+  // الثالث's own tone ("green"), ordinal ("3"), text, and weight ("30%").
+  // The footnote row's class also moved from the <td> to the <tr> (Finding 2
+  // fix — theme.ts's CSS selectors were always scoped to the <tr>).
   const EXPECTED_PANEL1 =
     `data-variant-index="1"><div class="v2-sys-ledger v2-lg-risk-stages"><div class="v2-risk-layout">\n` +
     `    <div class="v2-level-table-card">\n` +
@@ -550,10 +573,10 @@ describe("levelFiguresTable byte-identity characterization — SUPERSEDED 2026-0
     `        <td>0</td>\n` +
     `        <td>0.0%</td>\n` +
     `      </tr><tr>\n` +
-    `        <td><span class="v2-level-row-num blue">2</span></td>\n` +
+    `        <td><span class="v2-level-row-num green">3</span></td>\n` +
     `        <td>المستوى الثالث</td>\n` +
-    `        <td>ما يلتقطه محرك المخاطر ولا يلتقطه الفحص.</td>\n` +
-    `        <td>40%</td>\n` +
+    `        <td>ما تلتقطه الفرق الأمنية الأخرى ولا يلتقطه الفحص.</td>\n` +
+    `        <td>30%</td>\n` +
     `        <td>50%</td>\n` +
     `        <td>1</td>\n` +
     `        <td>0</td>\n` +
@@ -562,12 +585,12 @@ describe("levelFiguresTable byte-identity characterization — SUPERSEDED 2026-0
     `      <tfoot><tr>\n` +
     `        <td></td><td>الإجمالي</td><td></td><td>—</td><td>100%</td>\n` +
     `        <td>2</td><td>0</td><td>0.0%</td>\n` +
-    `      </tr><tr><td colspan="8" class="v2-lg-footnote">وزن المستوى الأول نسبة من مجتمعه (حصر شامل)؛ وبقية الأوزان حصص من حصة العدد الثابت — الأساسان مختلفان ولا يجمعان إلى 100%</td></tr></tfoot>\n` +
+    `      </tr><tr class="v2-lg-footnote"><td colspan="8">وزن المستوى الأول نسبة من مجتمعه (حصر شامل)؛ وبقية الأوزان حصص من حصة العدد الثابت — الأساسان مختلفان ولا يجمعان إلى 100%</td></tr></tfoot>\n` +
     `    </table>\n` +
     `  </div>\n` +
     `  </div></div></div><div class="v2-variant-panel" `;
 
-  it("slide-risk-stages variant-1 panel is byte-identical to the post-fan-out (2026-07-25) golden output", () => {
+  it("slide-risk-stages variant-1 panel is byte-identical to the post-fan-out (2026-07-28 review fix) golden output", () => {
     const model = buildReportModel(
       input([popRow({ stage: "المستوى الأول" }), popRow({ xrayImageId: "XR-2", stage: "المستوى الثالث" })]),
     );
@@ -578,6 +601,89 @@ describe("levelFiguresTable byte-identity characterization — SUPERSEDED 2026-0
     expect(end).toBeGreaterThan(start);
     const panel1 = html.slice(start, end);
     expect(panel1).toBe(EXPECTED_PANEL1);
+  });
+});
+
+describe("slide-risk-stages level-identity resolution — regression for the 2026-07-28 review fix", () => {
+  // A model with a GAP in `stages` in REVERSED, non-canonical order: only
+  // المستوى الرابع (level 4) and المستوى الثاني (level 2) have rows — levels
+  // 1 and 3 are entirely absent — and level 4's rows come FIRST, so
+  // `model.population.byStage` is [المستوى الرابع, المستوى الثاني], array
+  // positions [0, 1]. Position-based indexing (the pre-fix bug) would pair
+  // position 0 with RISK_LEVELS[0]/STAGE_TONES[0] (level 1's gold/def) and
+  // position 1 with RISK_LEVELS[1] (level 2's def) — both wrong, since the
+  // rows are actually levels 4 and 2. Every assertion below checks each row
+  // renders with ITS OWN level's identity, not the position it happens to
+  // occupy in this reversed, gapped array.
+  function reversedGapModel() {
+    return buildReportModel(
+      input([
+        popRow({ xrayImageId: "XR-1", stage: "المستوى الرابع" }),
+        popRow({ xrayImageId: "XR-2", stage: "المستوى الرابع" }),
+        popRow({ xrayImageId: "XR-3", stage: "المستوى الثاني" }),
+      ]),
+    );
+  }
+
+  it("Ledger table: each row's ordinal/tone/«ما يقيسه»/وزن العينة match its OWN level, not its array position", () => {
+    const model = reversedGapModel();
+    expect(model.population.byStage.map((s) => s.stageLabel)).toEqual(["المستوى الرابع", "المستوى الثاني"]);
+
+    const html = riskStagesSlide(model, 5, 20, true);
+    const start = html.indexOf('data-variant-index="1"');
+    const end = html.indexOf('data-variant-index="2"');
+    const panel1 = html.slice(start, end);
+
+    // Row 1 (array position 0) is المستوى الرابع (level 4): ordinal "4",
+    // tone "coral", its own «ما يقيسه» text and 30% weight — NOT level 1's
+    // gold/"1"/100% that position-based indexing would have produced.
+    expect(panel1).toContain('<span class="v2-level-row-num coral">4</span>');
+    expect(panel1).toContain("ما ثبت فواته بضبط أمني أو باكتشاف خارجي.");
+    // Row 2 (array position 1) is المستوى الثاني (level 2): ordinal "2",
+    // tone "blue", its own text and 40% weight — NOT level 2's OWN identity
+    // borrowed correctly here would coincidentally look unchanged only if
+    // the old code were right; assert it explicitly instead of by omission.
+    expect(panel1).toContain('<span class="v2-level-row-num blue">2</span>');
+    expect(panel1).toContain("ما يلتقطه محرك المخاطر ولا يلتقطه الفحص.");
+
+    const row1 = panel1.slice(panel1.indexOf("المستوى الرابع") - 200, panel1.indexOf("المستوى الرابع") + 300);
+    expect(row1).toContain(">30%<");
+    const row2 = panel1.slice(panel1.indexOf("المستوى الثاني") - 200, panel1.indexOf("المستوى الثاني") + 300);
+    expect(row2).toContain(">40%<");
+  });
+
+  it("Briefing rank list: each row's tone follows its OWN level (display order preserved, never sorted)", () => {
+    const model = reversedGapModel();
+    const html = riskStagesSlide(model, 5, 20, true);
+    const start = html.indexOf('data-variant-index="2"');
+    const end = html.indexOf('data-variant-index="3"');
+    const panel2 = html.slice(start, end);
+
+    const labels = [...panel2.matchAll(/<span class="v2-bf-rank-label">([^<]*)<\/span>/g)].map((m) => m[1]);
+    expect(labels).toEqual(["المستوى الرابع", "المستوى الثاني"]);
+    const tones = [...panel2.matchAll(/<span class="v2-bf-rank-num (\w+)">/g)].map((m) => m[1]);
+    // level 4 → coral, level 2 → blue — never each other's / a positional guess.
+    expect(tones).toEqual(["coral", "blue"]);
+
+    // Basis chip reflects the actual number of levels present (2 here), not
+    // a hardcoded "أربعة مستويات".
+    expect(panel2).toContain('<div class="v2-bf-lede-basis">2 مستويات');
+    expect(panel2).not.toContain("أربعة مستويات");
+  });
+
+  it("gracefully renders '—'/neutral tone for a stage whose label doesn't map to any canonical level, never crashes or mispairs", () => {
+    const model = buildReportModel(
+      input([popRow({ xrayImageId: "XR-1", stage: "تصنيف غير معروف" })]),
+    );
+    expect(() => riskStagesSlide(model, 5, 20, true)).not.toThrow();
+    const html = riskStagesSlide(model, 5, 20, true);
+    const start = html.indexOf('data-variant-index="1"');
+    const end = html.indexOf('data-variant-index="2"');
+    const panel1 = html.slice(start, end);
+    expect(panel1).toContain('<span class="v2-level-row-num neutral">—</span>');
+    // The «ما يقيسه» / وزن العينة cells fall back to "—", never a borrowed
+    // level's real text/number.
+    expect(panel1).toContain("<td>—</td>");
   });
 });
 
@@ -1051,5 +1157,72 @@ describe("briefingRankPlan (2026-07-25, deck2-design-systems design ruling)", ()
       const used = plan.rowsPerColumn * plan.rowH + Math.max(0, plan.rowsPerColumn - 1) * 5;
       expect(used).toBeLessThanOrEqual(BRIEFING_RANK_BUDGET_PX);
     }
+  });
+});
+
+describe("briefingRankList — bars:false (2026-07-28 review fix regression, no current caller yet)", () => {
+  // No page currently calls briefingRankList with bars:false (planned for a
+  // later fan-out page — glossary-1/closing per the plan doc), so this had no
+  // shipped-visible symptom, but the doc comment's claim that omitting the
+  // track lets the label "expand" was false: every sibling in the row,
+  // including the label, was flex:0 0 auto/fixed-width, so removing the only
+  // flex:1 1 auto element (the track) just left dead space. Guards both the
+  // track omission (already true) and the new no-bars hook + its CSS rule.
+  const items = [
+    { label: "أولاً", value: null, valueText: "—", secondaryText: "تعريف أول" },
+    { label: "ثانياً", value: null, valueText: "—", secondaryText: "تعريف ثانٍ" },
+  ];
+
+  it("omits .v2-bf-rank-track entirely", () => {
+    const html = briefingRankList({
+      items,
+      tone: "gold",
+      scale: { kind: "auto" },
+      bars: false,
+      foldRemainder: (folded) => ({
+        label: `بقية (${folded.length})`,
+        value: null,
+        valueText: "—",
+        secondaryText: "",
+        rest: true,
+      }),
+    });
+    expect(html).not.toContain("v2-bf-rank-track");
+  });
+
+  it("stamps the no-bars modifier class on every row so theme.ts's rule can let the label expand", () => {
+    const html = briefingRankList({
+      items,
+      tone: "gold",
+      scale: { kind: "auto" },
+      bars: false,
+      foldRemainder: (folded) => ({
+        label: `بقية (${folded.length})`,
+        value: null,
+        valueText: "—",
+        secondaryText: "",
+        rest: true,
+      }),
+    });
+    const rows = [...html.matchAll(/<div class="v2-bf-rank-row[^"]*"/g)].map((m) => m[0]);
+    expect(rows.length).toBe(items.length);
+    expect(rows.every((r) => r.includes("no-bars"))).toBe(true);
+  });
+
+  it("bars:true (default) never stamps no-bars and still renders the track", () => {
+    const html = briefingRankList({
+      items: [{ label: "منفذ أ", value: 5, valueText: "5", secondaryText: "" }],
+      tone: "gold",
+      scale: { kind: "auto" },
+      foldRemainder: (folded) => ({
+        label: `بقية (${folded.length})`,
+        value: null,
+        valueText: "—",
+        secondaryText: "",
+        rest: true,
+      }),
+    });
+    expect(html).toContain("v2-bf-rank-track");
+    expect(html).not.toContain("no-bars");
   });
 });
