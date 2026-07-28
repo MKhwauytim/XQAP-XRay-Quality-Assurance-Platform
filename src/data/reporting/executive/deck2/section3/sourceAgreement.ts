@@ -413,14 +413,13 @@ type SourcePair = { a: ResultSource; b: ResultSource; cell: CrossTeamMatrixCell 
 
 /**
  * All 15 pairs, walked in the SAME row-major lower-triangle order
- * `buildHeatMatrix` uses (row `ri` from 1..5, col `ci` from 0..ri-1) — one
- * canonical, deterministic pair order shared by the Ledger table and the
- * Briefing rank list, tied to the same 1..6 `SOURCE_ORDER` numbering used
- * everywhere else on this page. `buildCrossTeamMatrix` (model/aggregates.ts)
- * always emits all 15 cells regardless of data (comparable defaults to 0,
- * never omitted), so `cell` is expected to always resolve — the `if (cell)`
- * guard is defensive only, mirroring `buildHeatMatrix`'s own `cell ? … : null`
- * pattern rather than assuming that invariant can never change silently.
+ * (row `ri` from 1..5, col `ci` from 0..ri-1) — one canonical, deterministic
+ * pair order shared by the Ledger table and the Briefing rank list, tied to
+ * the same 1..6 `SOURCE_ORDER` numbering used everywhere else on this page.
+ * `buildCrossTeamMatrix` (model/aggregates.ts) always emits all 15 cells
+ * regardless of data (comparable defaults to 0, never omitted), so `cell` is
+ * expected to always resolve — the `if (cell)` guard is defensive only, not
+ * an assumption that invariant can never change silently.
  */
 function orderedPairs(cells: CrossTeamMatrixCell[]): SourcePair[] {
   const index = indexPairs(cells);
