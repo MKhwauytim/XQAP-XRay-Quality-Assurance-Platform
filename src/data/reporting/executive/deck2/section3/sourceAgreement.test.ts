@@ -303,7 +303,7 @@ describe("sourceAgreementSlide — honest empty states", () => {
     // standalone stat callout, not the grid — it still reports (20 images).
     const statStart = html.indexOf('class="s3sa-lvl-stat"');
     expect(statStart).toBeGreaterThan(-1);
-    expect(html.slice(statStart, statStart + 300)).toContain("75.0%");
+    expect(html.slice(statStart, html.indexOf("</div>", statStart) + "</div>".length)).toContain("75.0%");
   });
 });
 
@@ -335,7 +335,7 @@ describe("sourceAgreementSlide — rates, gating and ن", () => {
     // level1↔level2 is the standalone stat callout, NOT a grid cell.
     const statStart = html.indexOf('class="s3sa-lvl-stat"');
     expect(statStart).toBeGreaterThan(-1);
-    expect(html.slice(statStart, statStart + 300)).toContain("75.0%");
+    expect(html.slice(statStart, html.indexOf("</div>", statStart) + "</div>".length)).toContain("75.0%");
 
     // level×reviewer numbers stay in the reviewer table only — never
     // re-added to the new grid (the reviewer card next to it already
@@ -355,7 +355,7 @@ describe("sourceAgreementSlide — rates, gating and ن", () => {
     const html = render(input(rows));
     const statStart = html.indexOf('class="s3sa-lvl-stat"');
     expect(statStart).toBeGreaterThan(-1);
-    const statHtml = html.slice(statStart, statStart + 300);
+    const statHtml = html.slice(statStart, html.indexOf("</div>", statStart) + "</div>".length);
     expect(statHtml).toContain('class="insuff"');
     expect(statHtml).not.toContain("100.0%");
     expect(statHtml).toContain("5 صورة");
@@ -366,7 +366,7 @@ describe("sourceAgreementSlide — rates, gating and ن", () => {
     const { rows } = knownProfile(10);
     const html = render(input(rows));
     const statStart = html.indexOf('class="s3sa-lvl-stat"');
-    const statHtml = html.slice(statStart, statStart + 300);
+    const statHtml = html.slice(statStart, html.indexOf("</div>", statStart) + "</div>".length);
     expect(statHtml).toContain("100.0%");
     expect(statHtml).toContain("10 صورة");
   });
