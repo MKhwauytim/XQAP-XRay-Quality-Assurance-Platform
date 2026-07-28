@@ -686,6 +686,28 @@ export function pctCell(v: number | null): string {
   return v === null ? `<span class="insuff">—</span>` : fmtPct(v);
 }
 
+/**
+ * Truncates a caller-supplied label to at most `n` characters, appending a
+ * single ellipsis when it does — a page-agnostic helper for chart column/row
+ * headers with too little horizontal room for a full Arabic name (first
+ * needed by `slide-stage-port-population`/`-sample`'s transposed Grid,
+ * fan-out plan §7: 5 port-name column headers in a narrow matrix).
+ *
+ * Deliberately NOT wired into `metricMatrix`/`analyticsCharts.ts` itself
+ * (the fan-out plan explicitly rules this out) — that module has no separate
+ * "short label for the chart, full label for the sr-table" field, both the
+ * SVG header text and the paired screen-reader `<table>`'s column header
+ * read the same `MetricColumn.label`, so truncating there would silently
+ * truncate the accessible table too, defeating its entire purpose. Callers
+ * that truncate a label with this helper are therefore responsible for
+ * printing the FULL name again somewhere else in their own page markup (see
+ * `slide-stage-port-population`'s Grid legend line) so it stays genuinely
+ * discoverable, not just short.
+ */
+export function truncLabel(s: string, n: number): string {
+  return s.length > n ? `${s.slice(0, n)}…` : s;
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // P0 shared primitives — the fan-out plan's "BUILD THIS FIRST" set
 // (docs/superpowers/specs/2026-07-25-deck2-fanout-remaining-pages-plan.md §0).

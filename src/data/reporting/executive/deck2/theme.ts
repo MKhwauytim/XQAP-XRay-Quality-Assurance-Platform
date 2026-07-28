@@ -1391,6 +1391,37 @@ body.theme-light .v2-lg-port-card .deck-table tfoot td{color:#0a2d4a;background:
 .v2-lg-port-sample{height:100%;}
 .v2-lg-quality-ports{height:100%;}
 .v2-lg-quality-accuracy{height:100%;}
+/* Page-local: slide-stage-port-population / slide-stage-port-sample (Ledger,
+   fan-out plan §7, batch B3 item 1). Unlike every other Ledger page's cards,
+   these 4 sit in the existing 2×2 .v2-stage-port-grid (quarter-slide-height
+   each) rather than a full-width/half-width card — the wrapper needs an
+   actual flex-column layout (not just a namespacing hook) so that grid's own
+   \`flex:1;min-height:0\` rule has a flex parent to size against, the same
+   role .v2-risk-layout plays for slide-risk-stages' Ledger slot. */
+.v2-lg-stage-port-population,.v2-lg-stage-port-sample{display:flex;flex-direction:column;height:100%;}
+/* .v2-lg-stage-card cards pass a bespoke cardClass (ledgerTableCard, not the
+   ledgerPortCard wrapper — see stagePortPopulationLedgerCard's doc comment)
+   that keeps .v2-stage-port-card for DECK_TABLE_FILL_SCRIPT's measurement,
+   so this box borrows THAT class's existing compact table sizing (padding
+   3px/6px, .6rem/.58rem fonts — tuned to fit 5 rows + header + totals in a
+   quarter-slide card) rather than .v2-lg-port-card's much roomier default.
+   The compound selector (.v2-lg-stage-card.v2-stage-port-card) is what makes
+   this win the cascade over .v2-stage-port-card's own same-specificity rule
+   declared earlier in this file — a bare .v2-lg-stage-card selector alone
+   would tie on specificity and lose to declaration order. */
+.v2-lg-stage-card.v2-stage-port-card{border:1px solid rgba(255,255,255,.13);border-radius:14px;background:rgba(255,255,255,.018);padding:12px 12px 10px;}
+.v2-lg-stage-card.v2-stage-port-card .deck-table th,
+.v2-lg-stage-card.v2-stage-port-card .deck-table td{padding:3px 6px;font-size:0.6rem;text-align:center;}
+.v2-lg-stage-card.v2-stage-port-card .deck-table th{font-size:0.58rem;}
+.v2-lg-stage-card.v2-stage-port-card .deck-table th:first-child,
+.v2-lg-stage-card.v2-stage-port-card .deck-table td:first-child{text-align:right;}
+.v2-lg-stage-card .v2-lg-table-card-title{font-size:.64rem;font-weight:800;color:#fff;margin-bottom:4px;}
+/* .v2-lg-idx's deck-wide default (20px/.66rem) is sized for a full/half-width
+   Ledger card — too large for this quarter-slide card's 3px/6px-padded rows,
+   so it borrows .v2-lg-port-card.compact's own smaller ordinal-badge size. */
+.v2-lg-stage-card .v2-lg-idx{width:16px;height:16px;font-size:.58rem;margin-inline-end:6px;}
+body.theme-light .v2-lg-stage-card.v2-stage-port-card{background:#fff;border-color:#dde4ea;box-shadow:0 6px 16px rgba(10,45,74,.06);}
+body.theme-light .v2-lg-stage-card .v2-lg-table-card-title{color:#0a2d4a;}
 
 /* ── BRIEFING (slot 2 — الإحاطة, recall): one lede figure per page + a
    ≤3-figure support strip + at most one ranked-bar list. Tables are demoted
@@ -1531,6 +1562,14 @@ body.theme-light .v2-bf-rank-secondary{color:#607386;}
 .v2-bf-port-sample{height:100%;}
 .v2-bf-quality-ports{height:100%;}
 .v2-bf-quality-accuracy{height:100%;}
+/* Page-local: slide-stage-port-population / slide-stage-port-sample
+   (Briefing, fan-out plan §7). Nothing bespoke beyond the shared components
+   above — the 4 rank rows' per-row tone comes from briefingRankList's
+   item.tone override (slideKit.ts), same mechanism slide-risk-stages uses,
+   not page-local CSS. Secondary-line length risk (a port name plus a count)
+   is handled call-site via truncLabel, not a CSS wrap/overflow rule. */
+.v2-bf-stage-port-population{height:100%;}
+.v2-bf-stage-port-sample{height:100%;}
 
 /* ── GRID (slot 3 — الشبكة, comparison): every page becomes one matrix of
    metricMatrix cells, each column normalized to its OWN domain, ink always
@@ -1606,4 +1645,17 @@ body.theme-light .v2-gd-quality-accuracy .v2-gd-panel.sea .v2-gd-panel-head span
    slide-body height .v2-gd-split's grid would otherwise provide. */
 .v2-gd-risk-stages{height:100%;}
 .v2-gd-risk-stages .v2-gd-panel{height:100%;}
+
+/* Page-local: slide-stage-port-population / slide-stage-port-sample (Grid,
+   fan-out plan §7) — a single full-width TRANSPOSED matrix (rows=stages,
+   columns=top-5 ports) plus a legend line disclosing the 5 columns' full,
+   untruncated port names (see truncLabel's doc comment, slideKit.ts, for why
+   that line exists instead of relying on metricMatrix's own sr-table). The
+   wrapper is an actual flex column (not just a namespacing hook, unlike
+   .v2-gd-risk-stages above) so the panel and the legend line stack instead
+   of the legend being squeezed out by the panel's height:100%. */
+.v2-gd-stage-port-population,.v2-gd-stage-port-sample{height:100%;display:flex;flex-direction:column;gap:8px;}
+.v2-gd-stage-port-population .v2-gd-panel,.v2-gd-stage-port-sample .v2-gd-panel{flex:1;min-height:0;}
+.v2-gd-stage-port-legend{flex:0 0 auto;font-size:.64rem;font-weight:600;color:var(--slate);text-align:center;}
+body.theme-light .v2-gd-stage-port-legend{color:#607386;}
 `;

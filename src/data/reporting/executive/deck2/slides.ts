@@ -55,6 +55,7 @@ import {
   pageFoot,
   portTableCard,
   threshCell,
+  truncLabel,
   v2Slide,
 } from "./slideKit";
 import type { BriefingRankItem, CellTone, NavSectionKey, PortPopRow, SlideBuilder } from "./slideKit";
@@ -1584,9 +1585,17 @@ export function collectStagePortStats(model: ReportModel): Map<string, PortPopRo
  *  على المخاطر" page for the same stage. سليمة/اشتباه have no equivalent on
  *  StageProfile, so those two columns still sum from `ports` — the best
  *  available breakdown, and in the rare case population changed after
- *  sampling, not guaranteed to add up to exactly the pinned الإجمالي. */
-function stagePortPopulationCard(stage: StageProfile, i: number, ports: PortPopRow[]): string {
-  const tone = STAGE_TONES[i % STAGE_TONES.length];
+ *  sampling, not guaranteed to add up to exactly the pinned الإجمالي.
+ *
+ *  Resolved BY IDENTITY (`levelIndexForStage`), not by the caller's loop
+ *  position (2026-07-28 review fix, fan-out plan §7 point 3) — `stage`'s
+ *  ordinal badge and tone must follow the level it actually is, never the
+ *  slot it happens to occupy in `model.population.byStage` (which can have a
+ *  level missing entirely). Unresolvable → neutral tone, "—" ordinal, same
+ *  convention `levelFiguresTable`/`riskStagesSlide` already use. */
+function stagePortPopulationCard(stage: StageProfile, ports: PortPopRow[]): string {
+  const idx = levelIndexForStage(stage);
+  const tone = idx >= 0 ? STAGE_TONES[idx] : "neutral";
   const top = ports.slice(0, STAGE_CARD_TOP_N);
   const maxTotal = maxOf(top.map((p) => p.total));
   const trs =
@@ -1602,7 +1611,7 @@ function stagePortPopulationCard(stage: StageProfile, i: number, ports: PortPopR
 
   return `<div class="v2-stage-card ${tone} v2-stage-port-card">
     <div class="v2-stage-head">
-      <span class="v2-stage-num">${i + 1}</span>
+      <span class="v2-stage-num">${idx >= 0 ? idx + 1 : "—"}</span>
       <b>${esc(stage.stageLabel)}</b>
     </div>
     <table class="deck-table">
@@ -1623,9 +1632,12 @@ function stagePortPopulationCard(stage: StageProfile, i: number, ports: PortPopR
  *  sums over `ports` — this keeps the header figure and the totals row
  *  internally consistent by construction and matching the rest of the deck,
  *  regardless of whether a fresh row tally would agree with the frozen
- *  sample-draw-time allocation. */
-function stagePortSampleCard(stage: StageProfile, i: number, ports: PortPopRow[]): string {
-  const tone = STAGE_TONES[i % STAGE_TONES.length];
+ *  sample-draw-time allocation.
+ *
+ *  Resolved BY IDENTITY, same reasoning as stagePortPopulationCard above. */
+function stagePortSampleCard(stage: StageProfile, ports: PortPopRow[]): string {
+  const idx = levelIndexForStage(stage);
+  const tone = idx >= 0 ? STAGE_TONES[idx] : "neutral";
   const top = ports.slice(0, STAGE_CARD_TOP_N);
   const maxSample = maxOf(top.map((p) => p.sampleTotal));
   const trs =
@@ -1640,7 +1652,7 @@ function stagePortSampleCard(stage: StageProfile, i: number, ports: PortPopRow[]
 
   return `<div class="v2-stage-card ${tone} v2-stage-port-card">
     <div class="v2-stage-head">
-      <span class="v2-stage-num">${i + 1}</span>
+      <span class="v2-stage-num">${idx >= 0 ? idx + 1 : "—"}</span>
       <b>${esc(stage.stageLabel)}</b>
       <span class="v2-stage-port-figure" dir="ltr">${fmtNum(stage.sampleSize)} / ${fmtNum(stage.population)}</span>
     </div>
@@ -1652,6 +1664,340 @@ function stagePortSampleCard(stage: StageProfile, i: number, ports: PortPopRow[]
   </div>`;
 }
 
+/** Looks up one (stage,port) cell's tally from `collectStagePortStats`'s
+ *  output, or `undefined` when that port has zero rows in that stage. The
+ *  caller decides how to render "not found": for this page's own cells (a
+ *  population/sample COUNT) that is a genuine `0`, never a missing value —
+ *  see `stagePortGrid`'s own doc comment. */
+function stagePortCell(
+  byStage: Map<string, PortPopRow[]>,
+  stage: StageProfile,
+  portName: string,
+): PortPopRow | undefined {
+  return byStage.get(formatStageLabel(stage.stageLabel))?.find((p) => p.name === portName);
+}
+
+/** Merges `collectPortStats`'s land+sea `PortPopRow[]` into one list sorted
+ *  by `key` descending — this page groups by STAGE×port, not land×port, so
+ *  the land/sea split doesn't apply to "the top port(s) overall" the way it
+ *  does on the port-population/port-sample pages. */
+function allPortsSortedBy(model: ReportModel, key: "total" | "sampleTotal"): PortPopRow[] {
+  const { land, sea } = collectPortStats(model);
+  return [...land, ...sea].sort((a, b) => b[key] - a[key]);
+}
+
+/** Page-wide top-N ports by OVERALL month population (fan-out plan §7's Grid
+ *  columns) — always ranked by population, on BOTH the population and sample
+ *  pages (see `stagePortGrid`'s doc comment for why the sample page reuses
+ *  this instead of its own sample-ranked top-N: it keeps one shared column
+ *  set meaningful across both pages instead of two silently-different "top
+ *  5" lists). */
+function stagePortTopPorts(model: ReportModel, n: number): PortPopRow[] {
+  return allPortsSortedBy(model, "total").slice(0, n);
+}
+
+/**
+ * Largest single (stage,port) cell across the whole page — the stage×port
+ * Briefing lede (fan-out plan §7): "who leads, and where." Each stage's own
+ * top port (`ports[0]`, already the largest since `collectStagePortStats`
+ * sorts every stage's ports by population descending) is compared against
+ * every other stage's top port; a port further down any stage's own ranking
+ * can never win this comparison, so comparing only `ports[0]` per stage is
+ * sufficient — no need to flatten and re-sort every port on the page.
+ *
+ * Always ranked by POPULATION (`total`), even for the sample page's lede —
+ * this keeps "the leading (stage,port) pair" the SAME pair on both pages
+ * (mirroring how the cards themselves always show the population-sorted
+ * top-5, on both pages); the sample page's briefing then simply reports that
+ * SAME pair's sample figure instead of independently searching for whichever
+ * pair has the largest sampleTotal, which could silently name a different
+ * port than the one the reader already sees leading the population page.
+ */
+function stagePortLede(
+  stages: StageProfile[],
+  byStage: Map<string, PortPopRow[]>,
+): { stage: StageProfile; port: PortPopRow } | null {
+  let best: { stage: StageProfile; port: PortPopRow } | null = null;
+  for (const stage of stages) {
+    const top = byStage.get(formatStageLabel(stage.stageLabel))?.[0];
+    if (!top) continue;
+    if (best === null || top.total > best.port.total) best = { stage, port: top };
+  }
+  return best;
+}
+
+/**
+ * Ledger system (slot 1) card for one stage on the population page (fan-out
+ * plan §7) — same المنفذ/سليمة/اشتباه/الإجمالي columns as slot 0's
+ * `stagePortPopulationCard` plus a `ledgerIdx` ordinal. Totals-row pinning is
+ * IDENTICAL to slot 0's card (see that function's doc comment): الإجمالي
+ * pinned to `stage.population` (the frozen StageProfile snapshot), سليمة/
+ * اشتباه fresh-summed from the FULL port list — never "fixed" to a fresh sum
+ * over just the shown top-5, on purpose.
+ *
+ * Built on `ledgerTableCard` directly, NOT the `ledgerPortCard` P2 wrapper —
+ * `ledgerPortCard` forces its own `.v2-lg-port-card` class prefix, which
+ * leaves no room for the exact `cardClass` this card needs.
+ *
+ * ⚠️ Passes `rowCount: top.length`, NOT the `rowCount: 0` convention every
+ * other Ledger table in this fan-out uses, and KEEPS the `.v2-stage-port-card`
+ * class — `DECK_TABLE_FILL_SCRIPT` (deck2/index.ts) measures cards with that
+ * exact class to pin the totals row flush to the card's bottom edge; dropping
+ * either the class or the real row count silently breaks that measurement
+ * (fan-out plan §7, the "one place Ledger must NOT use rowCount: 0").
+ */
+function stagePortPopulationLedgerCard(stage: StageProfile, ports: PortPopRow[]): string {
+  const idx = levelIndexForStage(stage);
+  const tone = idx >= 0 ? STAGE_TONES[idx] : "neutral";
+  const top = ports.slice(0, STAGE_CARD_TOP_N);
+  const rows =
+    top.length > 0
+      ? top
+          .map(
+            (p, i) =>
+              `<tr>${ledgerIdx(i)}<td>${esc(p.name)}</td><td>${fmtNum(p.clean)}</td><td>${fmtNum(p.suspicious)}</td><td>${fmtNum(p.total)}</td></tr>`,
+          )
+          .join("")
+      : `<tr><td colspan="5"><span class="insuff">—</span></td></tr>`;
+  const sum = (f: (p: PortPopRow) => number) => ports.reduce((s, p) => s + f(p), 0);
+  const totalsRow = `<tr><td></td><td>الإجمالي</td><td>${fmtNum(sum((p) => p.clean))}</td><td>${fmtNum(sum((p) => p.suspicious))}</td><td>${fmtNum(stage.population)}</td></tr>`;
+  return ledgerTableCard({
+    title: `${stage.stageLabel} — أعلى 5 من ${portCountPhrase(ports.length)}`,
+    theadCells: `<th></th><th>المنفذ</th><th>سليمة</th><th>اشتباه</th><th>الإجمالي</th>`,
+    bodyRowsHtml: rows,
+    totalsRowHtml: totalsRow,
+    span: 5,
+    rowCount: top.length,
+    cardClass: `v2-lg-stage-card v2-stage-port-card ${tone}`,
+  });
+}
+
+/** Ledger system (slot 1) card for one stage on the sample page — same shape
+ *  as `stagePortPopulationLedgerCard` above (same pinning contract, same
+ *  `.v2-stage-port-card` + `rowCount: top.length` requirement), but with the
+ *  sample page's own columns/totals (`stage.sampleSize`/`stage.coverage`,
+ *  same pinning caveat as `stagePortSampleCard`). */
+function stagePortSampleLedgerCard(stage: StageProfile, ports: PortPopRow[]): string {
+  const idx = levelIndexForStage(stage);
+  const tone = idx >= 0 ? STAGE_TONES[idx] : "neutral";
+  const top = ports.slice(0, STAGE_CARD_TOP_N);
+  const rows =
+    top.length > 0
+      ? top
+          .map((p, i) => {
+            const coverage = p.total > 0 ? (p.sampleTotal / p.total) * 100 : 0;
+            return `<tr>${ledgerIdx(i)}<td>${esc(p.name)}</td><td>${fmtNum(p.total)}</td><td>${fmtNum(p.sampleTotal)}</td><td>${fmtPct(coverage)}</td></tr>`;
+          })
+          .join("")
+      : `<tr><td colspan="5"><span class="insuff">—</span></td></tr>`;
+  const totalsRow = `<tr><td></td><td>الإجمالي</td><td>${fmtNum(stage.population)}</td><td>${fmtNum(stage.sampleSize)}</td><td>${fmtPct(stage.coverage)}</td></tr>`;
+  return ledgerTableCard({
+    title: `${stage.stageLabel} — أعلى 5 من ${portCountPhrase(ports.length)}`,
+    theadCells: `<th></th><th>المنفذ</th><th>مجتمع المرحلة</th><th>العيّنة المستهدفة</th><th>نسبة التغطية</th>`,
+    bodyRowsHtml: rows,
+    totalsRowHtml: totalsRow,
+    span: 5,
+    rowCount: top.length,
+    cardClass: `v2-lg-stage-card v2-stage-port-card ${tone}`,
+  });
+}
+
+/**
+ * Briefing system (slot 2) for the population stage×port page (fan-out plan
+ * §7). Rank rows are the 4 STAGES themselves — ONE ROW PER STAGE, never a
+ * flat per-port ranking (that would lose the stage grouping this whole page
+ * exists to show) — in stage order, never re-sorted by size, each bar-ed by
+ * that stage's own population and captioned with its own top port. The lede
+ * is the single largest (stage,port) cell on the page (`stagePortLede`),
+ * always naming the SAME port its own stage's top-5 card would show first.
+ */
+function stagePortPopulationBriefing(
+  model: ReportModel,
+  stages: StageProfile[],
+  byStage: Map<string, PortPopRow[]>,
+): string {
+  const lede = stagePortLede(stages, byStage);
+  const ledeIdx = lede ? levelIndexForStage(lede.stage) : -1;
+  const overallTop = allPortsSortedBy(model, "total")[0];
+  const supportStrip = briefingSupport([
+    { iconName: "layers", value: fmtNum(model.population.total), label: "إجمالي المجتمع" },
+    { iconName: "gauge", value: fmtNum(stages.length), label: "عدد المستويات" },
+    { iconName: "flag", value: esc(overallTop?.name ?? "—"), label: "أعلى منفذ إجماليًا" },
+  ]);
+  const rankItems: BriefingRankItem[] = stages.map((s) => {
+    const idx = levelIndexForStage(s);
+    const top = byStage.get(formatStageLabel(s.stageLabel))?.[0];
+    return {
+      label: s.stageLabel,
+      value: s.population,
+      valueText: fmtNum(s.population),
+      secondaryText: top ? `أعلى منفذ: ${esc(truncLabel(top.name, 14))} (${fmtNum(top.total)})` : "—",
+      tone: idx >= 0 ? STAGE_TONES[idx] : undefined,
+    };
+  });
+  // foldRemainder is required by briefingRankList's type but can never
+  // actually fire here — `stages` has at most 4 rows and
+  // briefingRankPlan's smallest tier caps at 5 (same reasoning as
+  // riskStagesBriefing's identical comment).
+  const rankHtml = briefingRankList({
+    items: rankItems,
+    tone: "gold",
+    scale: { kind: "auto" },
+    foldRemainder: (folded) => ({
+      label: `بقية المستويات (${fmtNum(folded.length)})`,
+      value: null,
+      valueText: "—",
+      secondaryText: "",
+      rest: true,
+    }),
+  });
+  return `<div class="v2-sys-brief v2-bf-stage-port-population">
+    ${briefingLede({
+      figure: lede ? fmtNum(lede.port.total) : "—",
+      tone: lede && ledeIdx >= 0 ? STAGE_TONES[ledeIdx] : "gold",
+      label: lede
+        ? `أعلى تركّز: ${esc(lede.port.name)} في ${esc(lede.stage.stageLabel)} — ${fmtNum(lede.port.total)} صورة`
+        : "لا تتوفر بيانات كافية",
+      basis: `أعلى 5 منافذ لكل مستوى · ${esc(model.summary.periodId)}`,
+    })}
+    ${supportStrip}
+    ${rankHtml}
+  </div>`;
+}
+
+/** Briefing system (slot 2) for the sample stage×port page — same shape as
+ *  `stagePortPopulationBriefing` above (same lede pair, same one-row-per-stage
+ *  rank list), but reporting the sample figures: lede/support/rank-row bars
+ *  read `sampleTotal`/`sampleSize`, and each rank row's secondary line is that
+ *  stage's own coverage (rather than repeating the top-port name the
+ *  population page's Briefing already led with). */
+function stagePortSampleBriefing(
+  model: ReportModel,
+  stages: StageProfile[],
+  byStage: Map<string, PortPopRow[]>,
+): string {
+  const lede = stagePortLede(stages, byStage);
+  const ledeIdx = lede ? levelIndexForStage(lede.stage) : -1;
+  const overallTop = allPortsSortedBy(model, "sampleTotal")[0];
+  const supportStrip = briefingSupport([
+    { iconName: "scan", value: fmtNum(model.sample.total), label: "إجمالي العيّنة" },
+    { iconName: "gauge", value: fmtNum(stages.length), label: "عدد المستويات" },
+    { iconName: "flag", value: esc(overallTop?.name ?? "—"), label: "أعلى منفذ عيّنةً" },
+  ]);
+  const rankItems: BriefingRankItem[] = stages.map((s) => {
+    const idx = levelIndexForStage(s);
+    return {
+      label: s.stageLabel,
+      value: s.sampleSize,
+      valueText: fmtNum(s.sampleSize),
+      secondaryText: `تغطية ${fmtPct(s.coverage)}`,
+      tone: idx >= 0 ? STAGE_TONES[idx] : undefined,
+    };
+  });
+  const rankHtml = briefingRankList({
+    items: rankItems,
+    tone: "blue",
+    scale: { kind: "auto" },
+    foldRemainder: (folded) => ({
+      label: `بقية المستويات (${fmtNum(folded.length)})`,
+      value: null,
+      valueText: "—",
+      secondaryText: "",
+      rest: true,
+    }),
+  });
+  return `<div class="v2-sys-brief v2-bf-stage-port-sample">
+    ${briefingLede({
+      figure: lede ? fmtNum(lede.port.sampleTotal) : "—",
+      tone: lede && ledeIdx >= 0 ? STAGE_TONES[ledeIdx] : "blue",
+      label: lede
+        ? `أعلى تركّز عيّنة: ${esc(lede.port.name)} في ${esc(lede.stage.stageLabel)} — ${fmtNum(lede.port.sampleTotal)} صورة`
+        : "لا تتوفر بيانات كافية",
+      basis: `أعلى 5 منافذ لكل مستوى · ${esc(model.summary.periodId)}`,
+    })}
+    ${supportStrip}
+    ${rankHtml}
+  </div>`;
+}
+
+/** Column-header truncation budget for `stagePortGrid`'s 5 port-name columns
+ *  (fan-out plan §7) — see `truncLabel`'s own doc comment for why the full
+ *  names are printed again in this page's Grid legend rather than relying on
+ *  `metricMatrix`'s screen-reader table (which would truncate identically). */
+const STAGE_PORT_LABEL_TRUNC = 10;
+
+/**
+ * Grid system (slot 3) for the stage×port pages — TRANSPOSED from every other
+ * Grid page in this deck (fan-out plan §7 calls this "the best Grid page in
+ * the deck"): rows = the 4 stage labels, columns = the top-5 ports by OVERALL
+ * month population (`stagePortTopPorts` — a page-wide top-5, not each stage's
+ * own top-5, so the same 5 columns mean the same thing on every row, on both
+ * the population AND sample pages — see `stagePortTopPorts`'s own doc
+ * comment for why the sample page reuses the population-ranked column set
+ * instead of picking its own). `mode` selects which figure fills each
+ * (stage,port) cell: `"population"` → that pair's row COUNT, `"sample"` →
+ * its sampleTotal.
+ *
+ * A port with zero rows in a given stage is a REAL `0` — there is no
+ * ambiguity about "did we not measure this" the way a rate column would have
+ * — so `stagePortCell` returning `undefined` renders as the number `0`, never
+ * `null` (which `metricMatrix` renders as a hollow "—", implying missing
+ * data that isn't actually missing here).
+ *
+ * All 5 columns share ONE domain `[0, globalMax]` — deliberately NOT each
+ * column's own independent max, unlike every other `metricMatrix` page in
+ * this deck — per the fan-out plan: a shared scale is what makes the grid
+ * honestly comparable column-to-column (which port actually dominates which
+ * stage), the exact comparison an independent per-column scale would erase.
+ *
+ * The 5 port names are pre-truncated caller-side via `truncLabel` (never
+ * inside `metricMatrix`/`analyticsCharts.ts` itself, per that helper's own
+ * doc comment) — the full names stay discoverable via the legend line
+ * printed below the panel.
+ */
+function stagePortGrid(
+  mode: "population" | "sample",
+  model: ReportModel,
+  stages: StageProfile[],
+  byStage: Map<string, PortPopRow[]>,
+): string {
+  const topPorts = stagePortTopPorts(model, STAGE_CARD_TOP_N);
+  const valueOf = (stage: StageProfile, portName: string): number => {
+    const cell = stagePortCell(byStage, stage, portName);
+    if (!cell) return 0;
+    return mode === "population" ? cell.total : cell.sampleTotal;
+  };
+  const allValues = topPorts.flatMap((p) => stages.map((s) => valueOf(s, p.name)));
+  const globalMax = maxOf(allValues);
+  const columns = topPorts.map((p) => ({
+    label: truncLabel(p.name, STAGE_PORT_LABEL_TRUNC),
+    domain: [0, globalMax] as [number, number],
+    ramp: "sequential-gold" as const,
+    values: stages.map((s) => valueOf(s, p.name)),
+  }));
+  const matrix = metricMatrix(
+    { rowLabels: stages.map((s) => s.stageLabel), columns },
+    {
+      width: 1160,
+      height: 300,
+      caption:
+        mode === "population" ? "مصفوفة المستويات × المنافذ (المجتمع)" : "مصفوفة المستويات × المنافذ (العيّنة)",
+      rowHeader: "المستوى",
+      emptyNote: "لا توجد بيانات",
+    },
+  );
+  const sub =
+    mode === "population"
+      ? `${fmtNum(model.population.total)} صورة · أعلى ${fmtNum(topPorts.length)} منافذ بالمجتمع`
+      : `${fmtNum(model.sample.total)} عيّنة · نفس أعلى ${fmtNum(topPorts.length)} منافذ بالمجتمع`;
+  const panel = gridPanel({ title: "المستويات × المنافذ", sub, chartHtml: matrix });
+  const legend = `<div class="v2-gd-stage-port-legend" dir="rtl">أعمدة المصفوفة: ${topPorts
+    .map((p, i) => `${fmtNum(i + 1)}) ${esc(p.name)}`)
+    .join(" · ")}</div>`;
+  const pageClass = mode === "population" ? "v2-gd-stage-port-population" : "v2-gd-stage-port-sample";
+  return `<div class="v2-sys-grid ${pageClass}">${panel}${legend}</div>`;
+}
+
 /** Population page: مجتمع صور الفحص حسب المستوى والمنفذ. Never paginated —
  *  top-N is fixed, so row count doesn't grow with the port list the way the
  *  land/sea tables' does. */
@@ -1661,11 +2007,18 @@ export function stagePortPopulationSlide(
   total: number,
   variantPreview: boolean,
 ): string {
+  const stages = model.population.byStage;
   const byStage = collectStagePortStats(model);
-  const cards = model.population.byStage
-    .map((s, i) => stagePortPopulationCard(s, i, byStage.get(formatStageLabel(s.stageLabel)) ?? []))
+  const cards = stages
+    .map((s) => stagePortPopulationCard(s, byStage.get(formatStageLabel(s.stageLabel)) ?? []))
     .join("");
   const body = `<div class="v2-stage-port-grid">${cards}</div>`;
+  const ledgerCards = stages
+    .map((s) => stagePortPopulationLedgerCard(s, byStage.get(formatStageLabel(s.stageLabel)) ?? []))
+    .join("");
+  const ledgerBody = `<div class="v2-sys-ledger v2-lg-stage-port-population"><div class="v2-stage-port-grid">${ledgerCards}</div></div>`;
+  const briefingBody = stagePortPopulationBriefing(model, stages, byStage);
+  const gridBody = stagePortGrid("population", model, stages, byStage);
   return v2Slide({
     id: "slide-stage-port-population",
     title: "مجتمع صور الفحص حسب المستوى والمنفذ",
@@ -1673,7 +2026,7 @@ export function stagePortPopulationSlide(
     iconName: "layers",
     headline: `مجتمع صور الفحص حسب المستوى والمنفذ لشهر ${model.summary.periodId}`,
     subhead: "أعلى 5 منافذ بالحجم لكل مستوى مخاطر، مع إجمالي شامل لجميع المنافذ.",
-    bodyVariants: [body, body, body, body],
+    bodyVariants: [body, ledgerBody, briefingBody, gridBody],
     variantPreview,
     num,
     total,
@@ -1688,11 +2041,18 @@ export function stagePortSampleSlide(
   total: number,
   variantPreview: boolean,
 ): string {
+  const stages = model.population.byStage;
   const byStage = collectStagePortStats(model);
-  const cards = model.population.byStage
-    .map((s, i) => stagePortSampleCard(s, i, byStage.get(formatStageLabel(s.stageLabel)) ?? []))
+  const cards = stages
+    .map((s) => stagePortSampleCard(s, byStage.get(formatStageLabel(s.stageLabel)) ?? []))
     .join("");
   const body = `<div class="v2-stage-port-grid">${cards}</div>`;
+  const ledgerCards = stages
+    .map((s) => stagePortSampleLedgerCard(s, byStage.get(formatStageLabel(s.stageLabel)) ?? []))
+    .join("");
+  const ledgerBody = `<div class="v2-sys-ledger v2-lg-stage-port-sample"><div class="v2-stage-port-grid">${ledgerCards}</div></div>`;
+  const briefingBody = stagePortSampleBriefing(model, stages, byStage);
+  const gridBody = stagePortGrid("sample", model, stages, byStage);
   return v2Slide({
     id: "slide-stage-port-sample",
     title: "عيّنة الفحص المسحوبة حسب المستوى والمنفذ",
@@ -1700,7 +2060,7 @@ export function stagePortSampleSlide(
     iconName: "layers",
     headline: `عيّنة الفحص المسحوبة حسب المستوى والمنفذ لشهر ${model.summary.periodId}`,
     subhead: "أعلى 5 منافذ بالحجم لكل مستوى مخاطر، بأرقام العيّنة ونسبة التغطية، مع إجمالي شامل.",
-    bodyVariants: [body, body, body, body],
+    bodyVariants: [body, ledgerBody, briefingBody, gridBody],
     variantPreview,
     num,
     total,
