@@ -27,6 +27,18 @@
 //   3. `max(1, lowQualityCount + mediumQualityCount)` — the base behind
 //              `kpis.lowQualityReasons.percentage`. Used only in the reasons
 //              card, which prints that base in its own subtitle.
+//
+// THREE-SYSTEM FAN-OUT (2026-07-25 plan §11f, batch B3 item 4) — Ledger gets
+// TWO stacked tables (the three strata + pooled totals, then the reasons
+// table with its own subtitle text reused verbatim as the card title so the
+// #3 base disclosure travels with it into every system). Briefing's lede IS
+// `accuracyGradient` and its rank rows are the three strata in a FIXED
+// عالي→متوسط→منخفض order — deliberately NEVER sorted by accuracy, unlike most
+// other Briefing rank lists in this fan-out, because quality has an inherent
+// order the accuracy figures don't get to override — and it deliberately
+// DROPS the reasons table (one recall payload, not two). Grid gets one
+// matrix (strata × {الدقة, الاشتباه الفائت, العيّنة, أساس الاشتباه}) beside
+// the SAME reasons card, unchanged.
 
 import type { ExecutiveReportRow } from "../../../executiveReportTypes";
 import type { ReportModel } from "../../model/reportModel";
@@ -34,8 +46,22 @@ import { band, isRankable } from "../../model/dataSufficiency";
 import type { DataSufficiencyBand } from "../../model/dataSufficiency";
 import { esc, fmtNum, fmtPct } from "../../primitives";
 import { icon } from "../../ui/icons";
-import { ACCURACY_TARGET, barCell, maxOf, pctCell, rateOf, v2Slide } from "../slideKit";
-import type { CellTone } from "../slideKit";
+import { metricMatrix } from "../../ui/analyticsCharts";
+import {
+  ACCURACY_TARGET,
+  barCell,
+  briefingLede,
+  briefingRankList,
+  gridPanel,
+  ledgerIdx,
+  ledgerTableCard,
+  maxOf,
+  pctCell,
+  qualCell,
+  rateOf,
+  v2Slide,
+} from "../slideKit";
+import type { BriefingRankItem, CellTone } from "../slideKit";
 
 // ── Strata ──────────────────────────────────────────────────────────────────
 
@@ -327,6 +353,227 @@ function emptyState(fold: QualityFold): string {
   </div>`;
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// Ledger — two stacked tables (fan-out plan §11f, batch B3 item 4).
+// ════════════════════════════════════════════════════════════════════════════
+
+/** Column count: المستوى | العيّنة | الدقة | الاشتباه الفائت | أساس الاشتباه |
+ *  كفاية البيانات. */
+const LEDGER_STRATA_SPAN = 6;
+
+/**
+ * Ledger-system strata table — rows = the three quality levels, ordinal
+ * folded into المستوى's own cell (`ledgerIdx` + the level name, the same
+ * convention every other Ledger table in this fan-out uses). الدقة and
+ * الاشتباه الفائت both use `qualCell` with the row's OWN `LEVEL_TONE` — a
+ * fixed green/gold/coral quality-tier identity this file already defines and
+ * uses on the tiles, not a re-derived pass/fail colour, and Ledger's plain
+ * percent-bar cell rather than `threshCell` since neither figure has a
+ * target it diverges around on this page. أساس الاشتباه and كفاية البيانات
+ * are plain cells: the missed-suspicion denominator and the sufficiency band
+ * IN WORDS, so a muted "—" in either rate column always has a visible reason
+ * sitting right beside it — the same discipline `qualityTile`'s own
+ * `BAND_LABEL` footer already follows.
+ *
+ * The totals row POOLS raw counts across all three strata — accuracy and the
+ * missed-suspicion rate are both recomputed from SUMMED integer tallies,
+ * never averaged from the three strata's own percentages (the averaging bug
+ * this codebase has shipped before) — gated on the POOLED n's own
+ * sufficiency band, exactly mirroring `collectQualityStrata`'s own
+ * `rankable ? rateOf(...) : null` gate at combined grain, not a looser or
+ * stricter parallel check.
+ */
+function ledgerStrataTable(strata: readonly QualityStratum[]): string {
+  const bodyRowsHtml = strata
+    .map((s, i) => {
+      const tone = LEVEL_TONE[s.level];
+      return (
+        `<tr><td>${ledgerIdx(i)}${esc(s.level)}</td><td>${fmtNum(s.n)}</td>` +
+        `${qualCell(s.accuracy, tone)}${qualCell(s.missedRate, tone)}` +
+        `<td>${fmtNum(s.suspiciousBase)}</td><td>${esc(BAND_LABEL[s.bandKey])}</td></tr>`
+      );
+    })
+    .join("");
+
+  const combinedN = strata.reduce((sum, s) => sum + s.n, 0);
+  const combinedRankable = isRankable(band(combinedN));
+  const combinedAccurate = strata.reduce((sum, s) => sum + s.accurate, 0);
+  const combinedMissed = strata.reduce((sum, s) => sum + s.missedSuspicious, 0);
+  const combinedSuspBase = strata.reduce((sum, s) => sum + s.suspiciousBase, 0);
+  const combinedAccuracy = combinedRankable ? rateOf(combinedAccurate, combinedN) : null;
+  const combinedMissedRate = combinedRankable ? rateOf(combinedMissed, combinedSuspBase) : null;
+  const totalsRowHtml =
+    `<tr><td>الإجمالي</td><td>${fmtNum(combinedN)}</td><td>${pctCell(combinedAccuracy)}</td>` +
+    `<td>${pctCell(combinedMissedRate)}</td><td>${fmtNum(combinedSuspBase)}</td>` +
+    `<td>${esc(BAND_LABEL[band(combinedN)])}</td></tr>`;
+
+  return ledgerTableCard({
+    title: "الدقة والاشتباه الفائت حسب مستوى جودة الصورة",
+    theadCells:
+      `<th>المستوى</th><th>العيّنة</th><th>الدقة</th><th>الاشتباه الفائت</th>` +
+      `<th>أساس الاشتباه</th><th>كفاية البيانات</th>`,
+    bodyRowsHtml,
+    totalsRowHtml,
+    span: LEDGER_STRATA_SPAN,
+    rowCount: 0,
+    cardClass: "v2-lg-table-card v2-qi-lg-strata",
+  });
+}
+
+/**
+ * Ledger-system reasons table — the exact same top-3 rows and base as
+ * `reasonsPanel`, through `ledgerTableCard` instead of the bespoke
+ * `.v2-qi-reasons` card shape. `title` REUSES `reasonsPanel`'s own subtitle
+ * text VERBATIM ("من الصور منخفضة/متوسطة الجودة (N)") rather than inventing
+ * new wording — that text already discloses this table's own base, denominator
+ * #3 in this file's header doc comment, a DIFFERENT base from
+ * `ledgerStrataTable`'s `n_q` above, so the disclosure must travel with the
+ * table into every design system, not just slot 0.
+ */
+function ledgerReasonsTable(model: ReportModel): string {
+  const top = model.kpis.lowQualityReasons.slice(0, 3);
+  const base = model.imageQuality.lowQualityCount + model.imageQuality.mediumQualityCount;
+  const scale = maxOf(top.map((r) => r.count));
+  const bodyRowsHtml =
+    top.length > 0
+      ? top
+          .map(
+            (r) =>
+              `<tr><td>${esc(r.reason)}</td>${barCell(fmtNum(r.count), (r.count / scale) * 100, "coral")}<td>${pctCell(
+                rateOf(r.count, base),
+              )}</td></tr>`,
+          )
+          .join("")
+      : `<tr><td colspan="3"><span class="insuff">لا توجد أسباب مسجَّلة لانخفاض الجودة</span></td></tr>`;
+
+  return ledgerTableCard({
+    title: `من الصور منخفضة/متوسطة الجودة (${fmtNum(base)})`,
+    theadCells: `<th>السبب</th><th>العدد</th><th>النسبة</th>`,
+    bodyRowsHtml,
+    totalsRowHtml: "",
+    span: 3,
+    rowCount: 0,
+    cardClass: "v2-lg-table-card v2-qi-lg-reasons",
+  });
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Briefing — lede IS the accuracy gradient; rank rows = the 3 strata, FIXED
+// عالي→متوسط→منخفض order (fan-out plan §11f).
+// ════════════════════════════════════════════════════════════════════════════
+
+/** Shown whenever the gradient can't be published — mirrors `trendPanel`'s
+ *  own "فارق عالي↔منخفض: —" fallback, gated by the EXACT SAME
+ *  `accuracyGradient` null check, never a parallel/looser threshold. */
+const GRADIENT_INSUFFICIENT_NOTE = "بيانات غير كافية لعالي أو منخفض الجودة";
+
+/**
+ * Briefing-system lede + rank list. The lede figure IS `accuracyGradient` —
+ * this page's own point — through the exact SAME null gate `trendPanel`
+ * already applies (mirrored, not re-derived). Rank rows are the three strata
+ * in FIXED عالي→متوسط→منخفض order — `items` is passed to `briefingRankList`
+ * in that order and NEVER sorted by accuracy or any other value, unlike most
+ * other Briefing rank lists in this fan-out: quality strata have an inherent
+ * order that must survive display regardless of which stratum happens to
+ * score highest. Bar = accuracy on a FIXED 0–100 scale (a rate page, not a
+ * page ranked by each other's magnitude); per-row tone = `LEVEL_TONE`, this
+ * file's own existing quality-tier identity, reused verbatim.
+ * `foldRemainder` is required by the type contract but never actually fires:
+ * 3 named rows never exceeds `briefingRankPlan`'s smallest tier (cap 5) — the
+ * same unreachable-stub pattern `markingImpactSlide`'s own 2-row rank list
+ * uses.
+ */
+function briefingQualityLedeAndRank(strata: readonly QualityStratum[], evaluated: number): string {
+  const gradient = accuracyGradient(strata);
+  const high = strata.find((s) => s.level === "عالي");
+  const low = strata.find((s) => s.level === "منخفض");
+  const figure =
+    gradient === null ? `<span class="insuff">—</span>` : `<span dir="ltr">${signedPoints(gradient)}</span>`;
+  const label =
+    gradient === null || !high || !low
+      ? `تدرّج الدقة — ${esc(GRADIENT_INSUFFICIENT_NOTE)}`
+      : `تدرّج الدقة ${signedPoints(gradient)} نقطة — عالي ${pctCell(high.accuracy)} مقابل منخفض ${pctCell(low.accuracy)}`;
+
+  const rankItems: BriefingRankItem[] = strata.map((s) => ({
+    label: s.level,
+    value: s.accuracy,
+    valueText: pctCell(s.accuracy),
+    secondaryText: `العيّنة ${fmtNum(s.n)} · فائت ${pctCell(s.missedRate)}`,
+    tone: LEVEL_TONE[s.level],
+  }));
+
+  const rankHtml = briefingRankList({
+    items: rankItems,
+    tone: "coral",
+    scale: { kind: "fixed", max: 100 },
+    foldRemainder: (folded) => ({
+      label: `بقية المستويات (${fmtNum(folded.length)})`,
+      value: null,
+      valueText: "—",
+      secondaryText: "",
+      rest: true,
+    }),
+  });
+
+  return `${briefingLede({
+    figure,
+    tone: "coral",
+    label,
+    basis: `${fmtNum(evaluated)} صورة بمستوى جودة محدّد`,
+  })}
+    ${rankHtml}`;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Grid — one matrix, rows = the 3 strata (fan-out plan §11f).
+// ════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Grid-system strata matrix — rows = the three quality levels, columns
+ * الدقة/الاشتباه الفائت (both `[0,100]`) and العيّنة/أساس الاشتباه (both
+ * `[0,max]`), all `sequential-gold` — plain magnitudes/rates with no
+ * meaningful midpoint here, unlike a signed delta column elsewhere in this
+ * fan-out. An unrankable stratum's accuracy/missedRate are already null from
+ * `collectQualityStrata`'s own gate; its n/suspiciousBase are NEVER gated, so
+ * the two count columns keep showing that stratum's real numbers even when
+ * the rate columns read "—" — never a fully-nulled row for a partially
+ * insufficient stratum.
+ */
+function gridQualityMatrix(strata: readonly QualityStratum[], evaluated: number): string {
+  const matrix = metricMatrix(
+    {
+      rowLabels: strata.map((s) => s.level),
+      columns: [
+        { label: "الدقة", domain: [0, 100], ramp: "sequential-gold", values: strata.map((s) => s.accuracy) },
+        {
+          label: "الاشتباه الفائت",
+          domain: [0, 100],
+          ramp: "sequential-gold",
+          values: strata.map((s) => s.missedRate),
+        },
+        {
+          label: "العيّنة",
+          domain: [0, maxOf(strata.map((s) => s.n))],
+          ramp: "sequential-gold",
+          values: strata.map((s) => s.n),
+        },
+        {
+          label: "أساس الاشتباه",
+          domain: [0, maxOf(strata.map((s) => s.suspiciousBase))],
+          ramp: "sequential-gold",
+          values: strata.map((s) => s.suspiciousBase),
+        },
+      ],
+    },
+    { width: 620, height: 320, caption: "مصفوفة جودة الصورة", rowHeader: "المستوى", emptyNote: "لا توجد بيانات" },
+  );
+  return gridPanel({
+    title: "دقة القرارات حسب مستوى جودة الصورة",
+    sub: `${fmtNum(evaluated)} صورة بمستوى جودة محدّد`,
+    chartHtml: matrix,
+  });
+}
+
 // ── Slide ───────────────────────────────────────────────────────────────────
 
 export function qualityImpactSlide(
@@ -351,6 +598,42 @@ export function qualityImpactSlide(
     ${caveat()}
   </div>`;
 
+  // Ledger: two stacked tables (or the shared empty state) + the caveat. No
+  // totals band — the strata table's own العيّنة column and pooled totals row
+  // already carry that figure (same "the table subsumes it" reasoning every
+  // other Ledger page in this fan-out follows).
+  const ledgerBody = `<div class="v2-sys-ledger v2-lg-quality">
+    ${
+      fold.evaluated > 0
+        ? `<div class="v2-lg-split stack">${ledgerStrataTable(fold.strata)}${ledgerReasonsTable(model)}</div>`
+        : emptyState(fold)
+    }
+    ${caveat()}
+  </div>`;
+
+  // Briefing: lede+rank (or the shared empty state), then slot 0's totals
+  // band REUSED VERBATIM as the support strip (per the plan), then the
+  // caveat. The reasons table is deliberately absent — Briefing carries one
+  // recall payload (the strata), not completeness.
+  const briefingBody = `<div class="v2-sys-brief v2-bf-quality">
+    ${fold.evaluated > 0 ? briefingQualityLedeAndRank(fold.strata, fold.evaluated) : emptyState(fold)}
+    ${totalsBand(model, fold)}
+    ${caveat()}
+  </div>`;
+
+  // Grid: one matrix beside the SAME reasons card (or the shared empty
+  // state), plus the caveat. No totals band on Grid — matches the plan's
+  // page-by-page shape for this page (unlike slide-s3-marking's Grid, which
+  // keeps one).
+  const gridBody = `<div class="v2-sys-grid v2-gd-quality">
+    ${
+      fold.evaluated > 0
+        ? `<div class="v2-gd-split">${gridQualityMatrix(fold.strata, fold.evaluated)}${reasonsPanel(model)}</div>`
+        : emptyState(fold)
+    }
+    ${caveat()}
+  </div>`;
+
   return v2Slide({
     id: "slide-s3-quality",
     title: "أثر جودة الصورة على الدقة",
@@ -358,7 +641,7 @@ export function qualityImpactSlide(
     iconName: "gauge",
     headline: "أثر جودة الصورة على الدقة",
     subhead: "دقة القرارات حسب مستوى جودة الصورة: عالي، متوسط، منخفض.",
-    bodyVariants: [body, body, body, body],
+    bodyVariants: [body, ledgerBody, briefingBody, gridBody],
     variantPreview,
     num,
     total,
@@ -441,4 +724,22 @@ body.theme-light .v2-qi-step-track{background:rgba(10,45,74,.08);}
   .v2-risk-tile-grid.v2-qi-tiles{grid-template-columns:1fr;grid-template-rows:repeat(3,auto);}
   .v2-qi-mid{flex-direction:column;}
 }
+
+/* ── Ledger — two stacked tables (fan-out plan §11f, batch B3 item 4) ────── */
+.v2-lg-quality{height:100%;}
+/* Both cards share the flex-grow .v2-lg-table-card already gives them, so a
+   3-row strata table and a 3-row reasons table divide the stacked column's
+   height fairly instead of one collapsing to its intrinsic (shorter) size. */
+.v2-qi-lg-strata,.v2-qi-lg-reasons{margin-top:0;}
+
+/* ── Briefing/Grid namespacing hooks — nothing bespoke beyond the shared
+   components, same "hook only" role every other fanned-out page's page-local
+   class plays. ────────────────────────────────────────────────────────── */
+.v2-bf-quality{height:100%;}
+.v2-gd-quality{height:100%;}
+/* The reasons card (.v2-qi-reasons, unchanged) sits beside the new matrix
+   panel inside the shared .v2-gd-split grid — give it the same full-row
+   stretch .v2-gd-panel gets by default so the two don't visually mismatch
+   in height. */
+.v2-gd-quality .v2-qi-reasons{height:100%;}
 `;

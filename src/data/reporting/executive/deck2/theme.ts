@@ -1323,6 +1323,12 @@ body.theme-light .v2-src-card{background-image:var(--v2-hex-tex-light),none;back
 /* Generic 2-up split (today: land/sea) — any future Ledger page with a
    natural pair of tables reuses this instead of redefining its own grid. */
 .v2-lg-split{display:grid;grid-template-columns:1fr 1fr;gap:20px;height:100%;align-items:start;}
+/* Vertical variant — a caller with two STACKED (not side-by-side) Ledger
+   cards adds this modifier instead of composing a new layout primitive.
+   Higher specificity than .v2-lg-split alone, so it wins regardless of
+   cascade order. First used by slide-s3-quality (fan-out plan §11f, batch B3
+   item 4); the plan's own glossary-1 page (§3b) is expected to reuse it. */
+.v2-lg-split.stack{display:flex;flex-direction:column;align-items:stretch;}
 /* Ordinal badge sitting inside a table's first cell, before the row's label —
    NOT a new column (no column budget to spare on a half-width card). Reuses
    the same small circular-numeral look as .v2-level-row-num (slot 1's own
