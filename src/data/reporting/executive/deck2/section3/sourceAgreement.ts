@@ -189,7 +189,6 @@ function pairAt(
 // is no lower-triangle indexing, no mirrored half, and no numeric-axis
 // tradeoff to document: 3 real Arabic column headers fit comfortably where 6
 // didn't.
-//
 const MATRIX_TITLE = "توافق المستويين مع الفرق الأخرى";
 const MATRIX_SUB = "مقارنة كل مستوى بالتفتيش اليدوي والمعاكس والوسائل الحية";
 
@@ -415,7 +414,7 @@ type SourcePair = { a: ResultSource; b: ResultSource; cell: CrossTeamMatrixCell 
  * All 15 pairs, walked in the SAME row-major lower-triangle order
  * (row `ri` from 1..5, col `ci` from 0..ri-1) — one canonical, deterministic
  * pair order shared by the Ledger table and the Briefing rank list, tied to
- * the same 1..6 `SOURCE_ORDER` numbering used everywhere else on this page.
+ * `SOURCE_ORDER`'s own fixed sequence.
  * `buildCrossTeamMatrix` (model/aggregates.ts) always emits all 15 cells
  * regardless of data (comparable defaults to 0, never omitted), so `cell` is
  * expected to always resolve — the `if (cell)` guard is defensive only, not
@@ -441,9 +440,9 @@ function pairLabel(p: SourcePair): string {
 
 // ── Ledger (fan-out plan §11d) ───────────────────────────────────────────────
 //
-// Charts are banned in Ledger by contract, so the 6×6 lower-triangle
-// `percentHeatmap` becomes a 15-row pair table instead: الزوج | التوافق % |
-// عدد الصور القابلة للمقارنة. The ن grid is DROPPED here only (plan: "Drop
+// Charts are banned in Ledger by contract, so the 15 source pairs are laid
+// out as a table instead: الزوج | التوافق % | عدد الصور القابلة للمقارنة.
+// The ن grid is DROPPED here only (plan: "Drop
 // the ن grid in Ledger only — redundant once counts are a table column"); the
 // pair table's own count column already carries that information.
 //
@@ -854,7 +853,7 @@ export const SOURCE_AGREEMENT_CSS = `
   border:1px solid color-mix(in srgb,currentColor 15%,transparent);
 }
 .s3sa-ngrid th{font-weight:800;background:color-mix(in srgb,currentColor 8%,transparent);}
-.s3sa-ngrid td.s3sa-void,.s3sa-ngrid th.s3sa-void{border-color:transparent;background:none;}
+.s3sa-ngrid th.s3sa-void{border-color:transparent;background:none;}
 
 /* ── Scope + level-axis footnotes (both are correctness statements) ────────── */
 .s3sa-foot{
@@ -872,8 +871,8 @@ export const SOURCE_AGREEMENT_CSS = `
   .s3sa-chart{min-height:280px;}
 }
 @media print{
-  .s3sa-foot,.s3sa-ngrid{break-inside:avoid;}
-  .s3sa-foot{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  .s3sa-foot,.s3sa-ngrid,.s3sa-lvl-stat{break-inside:avoid;}
+  .s3sa-foot,.s3sa-lvl-stat{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
 }
 
 /* ── Ledger — 15-pair table (fan-out plan §11d, batch B3 item 2) ─────────────

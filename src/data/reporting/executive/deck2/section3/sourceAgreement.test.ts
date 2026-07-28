@@ -380,7 +380,9 @@ describe("sourceAgreementSlide — rates, gating and ن", () => {
     // ن is still disclosed for the suppressed level×team cells.
     const countsStart = html.indexOf("عدد الصور القابلة للمقارنة");
     expect(countsStart).toBeGreaterThan(-1);
-    expect(html.slice(countsStart, countsStart + 500)).toContain("<td>5</td>");
+    expect(html.slice(countsStart, html.indexOf("</table>", countsStart) + "</table>".length)).toContain(
+      "<td>5</td>",
+    );
   });
 
   it("shows a level×team grid cell's rate again once it reaches the rankable band", () => {
@@ -389,7 +391,9 @@ describe("sourceAgreementSlide — rates, gating and ن", () => {
     const html = render(input(rows));
     expect(html).toContain(">100%</text>");
     const countsStart = html.indexOf("عدد الصور القابلة للمقارنة");
-    expect(html.slice(countsStart, countsStart + 500)).toContain("<td>10</td>");
+    expect(html.slice(countsStart, html.indexOf("</table>", countsStart) + "</table>".length)).toContain(
+      "<td>10</td>",
+    );
   });
 
   it("renders no rows at all without throwing when the month is empty", () => {
@@ -741,11 +745,11 @@ describe("sourceAgreementSlide — Grid (panel 3)", () => {
     const html = renderPreview(input(rows, { sample: true, reviews }));
     const panel = panelSlice(html, 3);
 
-    // Isolate the reviewer-matrix panel specifically — the HEATMAP panel
-    // legitimately lists all 6 sources (including "المراجع (المعيار)") in
-    // its own sr-table, so a whole-panel substring check would be a false
-    // negative/positive either way. The reviewer panel starts at its own
-    // gridPanel title text.
+    // Isolate the reviewer-matrix panel specifically — checking the whole
+    // panel HTML (heatmap panel + reviewer panel together) would be a false
+    // negative/positive either way for assertions scoped to just one of the
+    // two sub-panels. The reviewer panel starts at its own gridPanel title
+    // text.
     const revStart = panel.indexOf('class="v2-gd-panel reviewer"');
     expect(revStart).toBeGreaterThan(-1);
     const revHtml = panel.slice(revStart);
