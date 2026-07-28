@@ -1477,6 +1477,19 @@ body.theme-light .v2-lg-stage-card .v2-lg-table-card-title{color:#0a2d4a;}
 .v2-bf-lede-figure.blue{color:var(--blue);text-shadow:0 0 30px rgba(107,169,248,.22);}
 .v2-bf-lede-figure.green{color:var(--green);text-shadow:0 0 30px rgba(139,195,74,.22);}
 .v2-bf-lede-figure.coral{color:var(--coral);text-shadow:0 0 30px rgba(255,118,95,.22);}
+/* 2026-07-28 whole-branch-review fix (B2): .insuff has no scoped override
+   inside .v2-bf-lede-figure, so a "no data" placeholder (several pages pass
+   <span class="insuff">—</span> as the lede figure when a comparison is
+   ungated) inherited the full lede treatment — huge size, weight 900, the
+   page's gold/blue/green/coral color, and its glow — making "no data" the
+   MOST visually prominent element on the page. Muted the same way every
+   other out-of-table .insuff usage in this fan-out already is
+   (color:var(--slate), e.g. .v2-mark-layout .insuff in markingImpact.ts),
+   plus resetting the size/weight/glow this specific parent contributes that
+   those other contexts don't. */
+.v2-bf-lede-figure .insuff{
+  color:var(--slate);font-size:1.6rem;font-weight:700;text-shadow:none;
+}
 .v2-bf-lede-label{margin-top:4px;font-size:.92rem;font-weight:700;color:#fff;}
 .v2-bf-lede-basis{
   display:inline-flex;margin-top:8px;padding:3px 12px;border-radius:999px;
@@ -1749,6 +1762,25 @@ body.theme-light .v2-gd-quality-accuracy .v2-gd-panel.sea .v2-gd-panel-head span
 .v2-gd-stage-port-legend{flex:0 0 auto;font-size:.64rem;font-weight:600;color:var(--slate);text-align:center;}
 body.theme-light .v2-gd-stage-port-legend{color:#607386;}
 
+/* ═══════════════════════════════════════════════════════════════════════
+   Degenerate-reuse Grid pages — toc / glossary-levels / glossary-1 / closing
+   ─────────────────────────────────────────────────────────────────────────
+   2026-07-28 whole-branch-review fix (G1): these 4 pages are the ONLY Grid
+   variants that reuse another slot's non-matrix body instead of a real
+   metricMatrix (structurally different from the other 13 "real matrix"
+   pages, which use .v2-gd-panel's 14px-radius/visible-border/tinted-
+   background chrome). Before this fix the 4 disagreed AMONG THEMSELVES too:
+   toc/glossary-levels/glossary-1 used 0px radius + 0px border + transparent
+   background + hairline dividers between cells, while closing alone kept a
+   visible 1px border around its reused table. Per this fan-out's own
+   comments (below), "square corners, hairline gridlines" was always meant
+   to be ONE shared grammar for this whole group — closing's border was the
+   one page that never actually got it. Fixed by dropping closing's outer
+   border/background to match the other three, making all 4 pages
+   consistent: 0px radius, 0px border, transparent background, hairline
+   internal dividers only.
+   ═══════════════════════════════════════════════════════════════════════ */
+
 /* Page-local: slide-closing (Grid, fan-out plan §10, batch B3 item 5) — a
    DELIBERATE degenerate case: this page has zero entities × comparable
    metrics (provenance is a key→value record, not a rankable matrix), so
@@ -1762,10 +1794,9 @@ body.theme-light .v2-gd-stage-port-legend{color:#607386;}
    the exact same two-column shape, just with a squared-off table on this
    side. */
 .v2-gd-closing{height:100%;display:flex;align-items:center;gap:28px;}
-.v2-gd-closing .v2-lg-table-card{flex:1.5;margin-top:0;border:1px solid rgba(255,255,255,.14);border-radius:0;}
+.v2-gd-closing .v2-lg-table-card{flex:1.5;margin-top:0;border:0;border-radius:0;background:transparent;}
 .v2-gd-closing .deck-table{border-radius:0;}
 .v2-gd-closing .v2-closing-side{flex:1;}
-body.theme-light .v2-gd-closing .v2-lg-table-card{border-color:#dde4ea;}
 @media screen and (max-width:820px){
   .v2-gd-closing{flex-direction:column;align-items:stretch;}
   .v2-gd-closing .v2-closing-side{border-inline-start:0;padding-inline-start:0;}
@@ -1783,11 +1814,14 @@ body.theme-light .v2-gd-closing .v2-lg-table-card{border-color:#dde4ea;}
    --w tint on .v2-toc-side — the SAME "background-image only, ZERO layout
    height" technique .v2-bar-cell uses (see barCell's doc comment,
    slideKit.ts) — via a per-tone --gd-tint custom property so the tint
-   color still matches that section's own tone. */
+   color still matches that section's own tone. Cell padding (14px 16px) and
+   tint alphas (.18/.22/.22/.24) are the CANONICAL values shared verbatim by
+   glossary-levels below (2026-07-28 fix, G2 — these two used to drift by
+   ~0.02 alpha and a different padding shorthand for no functional reason). */
 .v2-gd-toc .v2-toc-grid{gap:0;}
 .v2-gd-toc .v2-toc-card{
   flex:1;min-height:0;border-radius:0;border:0;background:transparent;
-  border-bottom:1px solid rgba(255,255,255,.14);padding:12px 20px;
+  border-bottom:1px solid rgba(255,255,255,.14);padding:14px 16px;
 }
 .v2-gd-toc .v2-toc-card:last-child{border-bottom:0;}
 .v2-gd-toc .v2-toc-card::before{width:3px;}
@@ -1799,7 +1833,11 @@ body.theme-light .v2-gd-closing .v2-lg-table-card{border-color:#dde4ea;}
 .v2-gd-toc .v2-toc-card.blue .v2-toc-side{--gd-tint:rgba(107,169,248,.22);}
 .v2-gd-toc .v2-toc-card.green .v2-toc-side{--gd-tint:rgba(139,195,74,.22);}
 .v2-gd-toc .v2-toc-card.coral .v2-toc-side{--gd-tint:rgba(255,118,95,.24);}
-body.theme-light .v2-gd-toc .v2-toc-card{border-bottom-color:#dde4ea;background:transparent;}
+/* box-shadow:none (2026-07-28 fix, G2): the unscoped body.theme-light
+   .v2-toc-card rule (light-theme parity section, above) sets a box-shadow
+   that this Grid override never cleared — background/border went
+   transparent, but the shadow floated under an otherwise-invisible card. */
+body.theme-light .v2-gd-toc .v2-toc-card{border-bottom-color:#dde4ea;background:transparent;box-shadow:none;}
 
 /* Page-local: slide-glossary-levels (Grid, fan-out plan §3a, batch B4) — NO
    real matrix (one metric — وزن العينة — over four entities); deliberately
@@ -1809,35 +1847,41 @@ body.theme-light .v2-gd-toc .v2-toc-card{border-bottom-color:#dde4ea;background:
    (slides.ts) restyled to uniform, square-cornered cells separated by
    hairlines instead of .v2-level-card's own rounded borders; the وزن figure
    drives a --w tint on .v2-level-share via the same per-tone --gd-tint
-   technique .v2-gd-toc uses above. */
+   technique .v2-gd-toc uses above. Padding/tint alphas match .v2-gd-toc's
+   canonical values verbatim (2026-07-28 fix, G2). */
 .v2-gd-glossary-levels .v2-level-grid{gap:0;}
 .v2-gd-glossary-levels .v2-level-card{
   border-radius:0;border:0;background:transparent;
-  border-inline-end:1px solid rgba(255,255,255,.14);padding:18px 16px;
+  border-inline-end:1px solid rgba(255,255,255,.14);padding:14px 16px;
 }
 .v2-gd-glossary-levels .v2-level-card:last-child{border-inline-end:0;}
 .v2-gd-glossary-levels .v2-level-card::after{display:none;}
 .v2-gd-glossary-levels .v2-level-share{
   position:relative;
-  background-image:linear-gradient(to top,var(--gd-tint,rgba(244,180,0,.16)) 0,var(--gd-tint,rgba(244,180,0,.16)) var(--w,0%),transparent var(--w,0%));
+  background-image:linear-gradient(to top,var(--gd-tint,rgba(244,180,0,.18)) 0,var(--gd-tint,rgba(244,180,0,.18)) var(--w,0%),transparent var(--w,0%));
   background-repeat:no-repeat;
 }
-.v2-gd-glossary-levels .v2-level-card.blue .v2-level-share{--gd-tint:rgba(107,169,248,.2);}
-.v2-gd-glossary-levels .v2-level-card.green .v2-level-share{--gd-tint:rgba(139,195,74,.2);}
-.v2-gd-glossary-levels .v2-level-card.coral .v2-level-share{--gd-tint:rgba(255,118,95,.22);}
+.v2-gd-glossary-levels .v2-level-card.blue .v2-level-share{--gd-tint:rgba(107,169,248,.22);}
+.v2-gd-glossary-levels .v2-level-card.green .v2-level-share{--gd-tint:rgba(139,195,74,.22);}
+.v2-gd-glossary-levels .v2-level-card.coral .v2-level-share{--gd-tint:rgba(255,118,95,.24);}
 body.theme-light .v2-gd-glossary-levels .v2-level-card{border-inline-end-color:#dde4ea;background:transparent;}
 
 /* Page-local: slide-glossary-1 (Grid, fan-out plan §3b, batch B4) — ZERO
    metrics (a glossary has no numbers at all), so Grid reuses termBand's own
    markup (slides.ts) UNCHANGED instead of dressing a non-matrix as a fake
    metricMatrix. Uniform cells + hairline separators only, matching the two
-   pages above — deliberately NO tint (there is no number to tint by). */
+   pages above — deliberately NO tint (there is no number to tint by). Cell
+   padding matches the canonical 14px 16px above (2026-07-28 fix, G2 — used
+   to be its own third, slightly different value). */
 .v2-gd-glossary-terms .v2-term-grid{gap:0;}
 .v2-gd-glossary-terms .v2-term-card{
   border-radius:0;border:0;background:transparent;
-  border-inline-end:1px solid rgba(255,255,255,.14);padding:14px 14px 13px;
+  border-inline-end:1px solid rgba(255,255,255,.14);padding:14px 16px;
 }
 .v2-gd-glossary-terms .v2-term-card:last-child{border-inline-end:0;}
 .v2-gd-glossary-terms .v2-term-card::after{display:none;}
-body.theme-light .v2-gd-glossary-terms .v2-term-card{border-inline-end-color:#dde4ea;background:transparent;}
+/* box-shadow:none (2026-07-28 fix, G2): same box-shadow leak as .v2-gd-toc
+   above — the unscoped body.theme-light .v2-term-card rule (theme v3
+   section) sets a box-shadow this override never cleared. */
+body.theme-light .v2-gd-glossary-terms .v2-term-card{border-inline-end-color:#dde4ea;background:transparent;box-shadow:none;}
 `;

@@ -318,14 +318,23 @@ function ledgerAgreementTable(
  * support strip's two match-rate items are explicitly labelled «(على
  * العيّنة)» — the two are DIFFERENT denominators and must never read as one
  * figure, per this page's whole reason for existing (see the file's own doc
- * comment, point 2). Rank rows are kept in the page's OWN existing ordering
- * (`orderRows`'s ascending, disagreement-first order — `landChunk`/
- * `seaChunk` are already sorted that way before pagination), so `combinedAll`
- * below is a plain concatenation with NO added `.sort()`, same as
- * `briefingWorkloadRank`. Ports below the l1↔l2 sufficiency cut are excluded
+ * comment, point 2). Ports below the l1↔l2 sufficiency cut are excluded
  * from ranking and folded into a bar-less remainder, pooled from summed
  * agree/comparable counts — never averaged. `SCOPE_NOTE` is rendered
  * verbatim as this variant's last child, same placement as slot 0.
+ *
+ * ⚠️ 2026-07-28 whole-branch-review fix (C3): the rankable ports used to be
+ * kept in `combinedAll`'s raw land-then-sea concatenation order (`landChunk`/
+ * `seaChunk` are each individually ascending/disagreement-first via
+ * `orderRows`, but concatenating them does NOT itself produce one
+ * ascending order across both groups combined — the same artifact
+ * `briefingWorkloadRank` had). Since `briefingRankList`'s fold truncates
+ * POSITIONALLY, this could bucket genuinely low-agreement (high-priority)
+ * ports into "the rest" purely because they fell late in the land/sea
+ * concatenation. Fixed by explicitly sorting the rankable ports by agreement
+ * rate ASCENDING (disagreement-first, the page's own stated ranking
+ * criterion — plan §11c) before building rank rows, so the fold's tail is
+ * always the ports with the LEAST disagreement, never a land/sea artifact.
  */
 function briefingAgreementRank(landChunk: PortAgreementRow[], seaChunk: PortAgreementRow[]): string {
   const combinedAll = [...landChunk, ...seaChunk];
@@ -353,7 +362,17 @@ function briefingAgreementRank(landChunk: PortAgreementRow[], seaChunk: PortAgre
   ]);
   const basis = `${portCountPhrase(combinedAll.length)} · أساس المجتمع`;
 
-  const rankable = combinedAll.filter((p) => isRankable(band(p.l1l2Comparable)));
+  // Ascending by agreement rate (disagreement-first) — see doc comment above
+  // (2026-07-28 C3 fix). Nulls (should not occur among rankable ports, since
+  // `isRankable` already implies a positive comparable base) sort last as a
+  // defensive fallback, never crash the comparator.
+  const rankable = combinedAll
+    .filter((p) => isRankable(band(p.l1l2Comparable)))
+    .sort((a, b) => {
+      const ra = rateOf(a.l1l2Agree, a.l1l2Comparable);
+      const rb = rateOf(b.l1l2Agree, b.l1l2Comparable);
+      return (ra ?? Infinity) - (rb ?? Infinity);
+    });
   const excluded = combinedAll.filter((p) => !isRankable(band(p.l1l2Comparable)));
 
   const rankItems: BriefingRankItem[] = rankable.map((p) => {

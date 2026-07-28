@@ -475,8 +475,12 @@ describe("markingImpactSlide — Briefing (fan-out)", () => {
       20,
       true,
     );
+    // The signed figure is bidi-isolated (dir="ltr") inside this Arabic
+    // sentence (2026-07-28 fix, C4) — same mechanism the standalone lede
+    // figure already used, so the sign renders on the correct side of the
+    // digit instead of flipping under RTL's bidi algorithm.
     expect(preview).toContain(
-      'فارق الدقة +20.0 نقطة — بتحديد 90.0% مقابل بلا تحديد 70.0%',
+      'فارق الدقة <span dir="ltr">+20.0</span> نقطة — بتحديد 90.0% مقابل بلا تحديد 70.0%',
     );
     expect(preview).toContain("العيّنة 20 · كشف 85.7%");
     expect(preview).toContain("العيّنة 20 · كشف 50.0%");
@@ -502,6 +506,25 @@ describe("markingImpactSlide — Briefing (fan-out)", () => {
     // proving the two variants agree on the SAME comparability verdict for
     // this fixture (a divergent/looser Briefing gate would drop this to 1).
     expect(insuffFigureCount).toBeGreaterThanOrEqual(2);
+  });
+
+  it("Briefing body order is lede → support → rank, not lede → rank → support (2026-07-28 whole-branch-review fix, B1)", () => {
+    const model = modelWith([
+      ...arm({ prefix: "M", hasMarking: true, ...STRONG_ARM }),
+      ...arm({ prefix: "N", hasMarking: false, ...WEAK_ARM }),
+    ]);
+    const preview = markingImpactSlide(model, 7, 20, true);
+    const briefStart = preview.indexOf('data-variant-index="2"');
+    const briefEnd = preview.indexOf('data-variant-index="3"');
+    const briefing = preview.slice(briefStart, briefEnd);
+    const ledeIdx = briefing.indexOf('class="v2-bf-lede"');
+    const supportIdx = briefing.indexOf('class="v2-totals-band"');
+    const rankIdx = briefing.indexOf('class="v2-bf-rank ');
+    expect(ledeIdx).toBeGreaterThan(-1);
+    expect(supportIdx).toBeGreaterThan(-1);
+    expect(rankIdx).toBeGreaterThan(-1);
+    expect(ledeIdx).toBeLessThan(supportIdx);
+    expect(supportIdx).toBeLessThan(rankIdx);
   });
 
   it("reuses slot 0's totals band verbatim as the support strip", () => {

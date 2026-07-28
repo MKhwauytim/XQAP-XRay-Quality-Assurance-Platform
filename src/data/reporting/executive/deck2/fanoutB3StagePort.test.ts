@@ -241,6 +241,57 @@ describe("stage×port Ledger — .v2-stage-port-card + real rowCount (fan-out pl
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// (a2) C1 regression — `ledgerIdx(i)` MUST live inside the row's first <td>,
+// never as a bare sibling of the <tr>'s <td> cells. A whole-branch review
+// (2026-07-28) found both stage×port Ledger row-builders emitted
+// `<tr>${ledgerIdx(i)}<td>...` — the ordinal badge as a direct child of
+// <tr> instead of inside the first <td> — which browsers "foster-parent"
+// out of the table entirely: every data row ends up with ONE FEWER <td>
+// than <thead>/<tfoot> have <th>/<td>, so every real column silently shifts
+// under the wrong header. This asserts the invariant that would have caught
+// it: every rendered data row's <td> count matches its table's own <thead>
+// <th> count, for BOTH the population and the sample page.
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("stage×port Ledger — row/column structural integrity (C1 regression)", () => {
+  function assertRowsMatchHeaderColumnCount(panelHtml: string): void {
+    const tableBlocks = [...panelHtml.matchAll(/<table class="deck-table">([\s\S]*?)<\/table>/g)].map(
+      (m) => m[1],
+    );
+    expect(tableBlocks.length).toBeGreaterThan(0);
+    for (const table of tableBlocks) {
+      const theadMatch = table.match(/<thead><tr>([\s\S]*?)<\/tr><\/thead>/);
+      expect(theadMatch).not.toBeNull();
+      const thCount = [...(theadMatch?.[1].matchAll(/<th\b/g) ?? [])].length;
+
+      const tbodyMatch = table.match(/<tbody>([\s\S]*?)<\/tbody>/);
+      expect(tbodyMatch).not.toBeNull();
+      const dataRows = [...(tbodyMatch?.[1].matchAll(/<tr>((?:(?!<\/tr>)[\s\S])*)<\/tr>/g) ?? [])].filter(
+        (m) => !m[1].includes('class="v2-fill-row"') && !m[0].includes('class="v2-fill-row"'),
+      );
+      expect(dataRows.length).toBeGreaterThan(0);
+      for (const row of dataRows) {
+        const tdCount = [...row[1].matchAll(/<td\b/g)].length;
+        expect(tdCount).toBe(thCount);
+        // The ordinal badge must never be a bare <tr> child (the exact C1
+        // failure mode) — every row must start with a <td>, not a <span>.
+        expect(row[0].startsWith("<tr><td")).toBe(true);
+      }
+    }
+  }
+
+  it("population page: every Ledger row has the same <td> count as its table's <th> count", () => {
+    const html = stagePortPopulationSlide(richFourStageModel(), 7, 20, true);
+    assertRowsMatchHeaderColumnCount(panelSlice(html, 1));
+  });
+
+  it("sample page: every Ledger row has the same <td> count as its table's <th> count", () => {
+    const html = stagePortSampleSlide(richFourStageModel(), 7, 20, true);
+    assertRowsMatchHeaderColumnCount(panelSlice(html, 1));
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
 // (b) Identity-based level indexing under a gap (Ledger + Briefing)
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -285,13 +336,20 @@ describe("stage×port level-identity resolution — regression for positional (l
     expect(values).toEqual([fmtNum(1), fmtNum(4)]);
   });
 
-  it("Briefing lede also resolves the winning stage's tone BY IDENTITY", () => {
+  it("Briefing lede tone is PINNED to the page's own assigned tone (gold), never the winning stage's tone (2026-07-28 whole-branch-review fix, B3)", () => {
     const model = gapModel();
     const html = stagePortPopulationSlide(model, 7, 20, true);
     const panel2 = panelSlice(html, 2);
-    // المستوى الثاني's ميناء ص (4) beats المستوى الرابع's ميناء س (1) —
-    // the lede must carry level 2's OWN tone (blue), not a positional guess.
-    expect(panel2).toContain('<div class="v2-bf-lede-figure blue">');
+    // المستوى الثاني's ميناء ص (4) beats المستوى الرابع's ميناء س (1) — but
+    // the lede figure's tone must stay "gold" (this page's fixed Briefing
+    // tone, per the fan-out plan's tone table) regardless of which stage
+    // happens to hold the largest (stage,port) cell that month. Before the
+    // fix, this lede was `STAGE_TONES[ledeIdx]` (blue here, since level 2
+    // won) — a tone that could change month to month and visually disagree
+    // with the page's own assigned color. Rank rows still carry per-stage
+    // tone identity (see the preceding test) — this fix only pins the lede.
+    expect(panel2).toContain('<div class="v2-bf-lede-figure gold">');
+    expect(panel2).not.toContain('<div class="v2-bf-lede-figure blue">');
     expect(panel2).toContain("أعلى تركّز: ميناء ص في المستوى الثاني");
   });
 });
@@ -360,7 +418,10 @@ describe("stage×port Briefing — 4 rank rows, one per stage, correct bar/secon
     // LONG_PORT's own page-wide total (15) is the page's largest port — but
     // the lede must be the (stage,port) CELL, which is LONG_PORT within
     // المستوى الثاني specifically (10), not either of those larger totals.
-    expect(panel2).toContain(`<div class="v2-bf-lede-figure blue">${fmtNum(10)}</div>`);
+    // Tone is "gold" — this page's own PINNED Briefing tone (B3 fix,
+    // 2026-07-28), not level 2's own STAGE_TONES ("blue"), which is what the
+    // lede used to show before the fix.
+    expect(panel2).toContain(`<div class="v2-bf-lede-figure gold">${fmtNum(10)}</div>`);
     expect(panel2).toContain(`أعلى تركّز: ${LONG_PORT} في المستوى الثاني — ${fmtNum(10)} صورة`);
   });
 });

@@ -83,6 +83,25 @@ const LEVEL_FOOTNOTE =
   "«المستوى الأول» و«المستوى الثاني» هنا هما مستويا فحص الأشعة، وليسا مستويات المخاطر الأربعة.";
 
 /**
+ * Why the pairs table (`pairsLedgerCard`) has NO totals row (2026-07-28
+ * whole-branch-review fix, C6): the 6 sources form C(6,2)=15 pairs, and each
+ * of the 6 sources therefore participates in 5 different pairs — so summing
+ * `comparable` (or `agree`) across all 15 pair rows counts every comparable
+ * image up to 5-10× over, producing a number many times the real population
+ * and presenting it as if it were a genuine total. That directly violates
+ * this file's own "two different bases must never be conflated" discipline
+ * (see the file header). No single correct total exists for "sum of
+ * pair-comparable-counts", so this note replaces the old (wrong) totals bar
+ * instead of a `colspan` figure that would just be a different wrong number.
+ * The reviewer table below it (`ledgerReviewerTable`) is NOT affected — its
+ * 5 rows are 5 DISTINCT non-reviewer sources each compared once against the
+ * reviewer, not overlapping pairs, so summing across those rows is a
+ * legitimate pooled total and is left as-is.
+ */
+const PAIR_NO_TOTAL_NOTE =
+  "لا يوجد إجمالي واحد صحيح لهذا الجدول: كل صورة تدخل في حتى 5 أزواج مقارنة، فجمع عمود العيّنة عبر الأزواج الخمسة عشر يُكرر عدّ الصور نفسها — لذلك لم يُعرض هنا.";
+
+/**
  * The six comparison sources, in the SAME order `aggregates.ts` builds the
  * matrix in. Order is load-bearing twice over: it fixes the matrix axes (so
  * output is deterministic) and it defines the 1..6 numbering the axis labels
@@ -446,22 +465,25 @@ function pairSubTable(chunk: SourcePair[], startIdx: number): string {
 
 /**
  * The Ledger pairs card: title + two side-by-side 8/7-row sub-tables (the
- * budget split above) + one pooled totals line beneath both — a single
- * "الإجمالي" summarizing all 15 pairs together, never split per sub-column
- * (there is only one real total, not two).
+ * budget split above) + a `colspan`-style explanatory note in place of a
+ * totals row.
+ *
+ * ⚠️ 2026-07-28 whole-branch-review fix (C6): this used to sum `comparable`
+ * (and `agree`) across all 15 pairs and present it as "الإجمالي" — but since
+ * each of the 6 sources appears in 5 different pairs, that sum counts every
+ * comparable image up to 5-10× over (see `PAIR_NO_TOTAL_NOTE`'s doc comment
+ * for the full reasoning). No single correct total exists for this specific
+ * table, so none is shown — a `colspan` note explains why instead.
  */
 function pairsLedgerCard(pairs: SourcePair[]): string {
   const colA = pairs.slice(0, PAIR_SPLIT_AT);
   const colB = pairs.slice(PAIR_SPLIT_AT);
-  const totalComparable = pairs.reduce((s, p) => s + p.cell.comparable, 0);
-  const totalAgree = pairs.reduce((s, p) => s + p.cell.agree, 0);
-  const totalRate = isRankable(band(totalComparable)) ? rateOf(totalAgree, totalComparable) : null;
 
   return `<div class="v2-lg-table-card s3sa-lg-pairs">
     <div class="v2-lg-table-card-title">${esc("التوافق بين كل زوج مصادر")}</div>
     <div class="s3sa-lg-pair-split">${pairSubTable(colA, 0)}${pairSubTable(colB, PAIR_SPLIT_AT)}</div>
     <div class="s3sa-lg-pair-totals">
-      <span>${esc("الإجمالي")}</span><span>${pctCell(totalRate)}</span><span>${fmtNum(totalComparable)}</span>
+      <span>${esc(PAIR_NO_TOTAL_NOTE)}</span>
     </div>
   </div>`;
 }
@@ -839,10 +861,14 @@ export const SOURCE_AGREEMENT_CSS = `
 }
 .s3sa-lg-pairs .deck-table th:first-child,.s3sa-lg-pairs .deck-table td:first-child{text-align:right;}
 .s3sa-lg-pairs .v2-lg-idx{width:13px;height:13px;font-size:.46rem;margin-inline-end:3px;}
+/* 2026-07-28 fix (C6): this bar used to hold a 3-span الإجمالي row (label /
+   rate / count); it now holds a single explanatory sentence (no honest total
+   exists for this table — see PAIR_NO_TOTAL_NOTE), so weight/line-height are
+   tuned for prose instead of a bold single-line figure. */
 .s3sa-lg-pair-totals{
-  display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px;
-  padding:6px 10px;border-radius:8px;font-size:0.62rem;font-weight:800;
-  color:rgba(255,255,255,.92);background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);
+  display:flex;align-items:center;gap:8px;margin-top:8px;
+  padding:6px 10px;border-radius:8px;font-size:0.6rem;font-weight:600;line-height:1.4;
+  color:rgba(255,255,255,.72);background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);
 }
 body.theme-light .s3sa-lg-pair-totals{
   color:rgba(10,45,74,.92);background:rgba(10,45,74,.05);border-color:rgba(10,45,74,.15);

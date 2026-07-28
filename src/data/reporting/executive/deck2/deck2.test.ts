@@ -1286,8 +1286,12 @@ describe("slide-toc fan-out — Ledger/Briefing/Grid (2026-07-25 fan-out plan §
     },
   ];
   // total (15) is deliberately neither the sum of the spans above (1+7+3=11)
-  // nor any single span — so a totals row that happened to equal 15 could
-  // only have come from the real `total` param, not a derived/fabricated sum.
+  // nor any single span. The deck grand TOTAL still drives the Briefing
+  // lede (its own headline "N pages in the whole report" figure), but the
+  // Ledger totals row (2026-07-28 whole-branch-review fix, C2) must sum
+  // ONLY the listed sections' own spans (11) — this deliberate 15-vs-11 gap
+  // is what proves the two slots read from the right source and don't
+  // silently borrow each other's number.
   const TOTAL = 15;
 
   it("variant 0 (production) renders byte-identical v2-toc-card markup — no style attribute on .v2-toc-side", () => {
@@ -1299,7 +1303,7 @@ describe("slide-toc fan-out — Ledger/Briefing/Grid (2026-07-25 fan-out plan §
     expect(html).not.toContain('<div class="v2-toc-side" style=');
   });
 
-  it('Ledger slot (data-variant-index="1") totals row shows the REAL deck page count, not a fabricated figure', () => {
+  it('Ledger slot (data-variant-index="1") totals row sums the LISTED sections\' own page spans, not the deck\'s overall page count', () => {
     const html = tocSlide(items, 2, TOTAL, true);
     const panel1 = isolatePanel(html, 1);
     expect(panel1).toContain("v2-sys-ledger");
@@ -1307,9 +1311,14 @@ describe("slide-toc fan-out — Ledger/Briefing/Grid (2026-07-25 fan-out plan §
     expect(panel1).toContain(
       "<th></th><th>القسم</th><th>الهدف</th><th>المؤشر</th><th>الصفحات</th>",
     );
-    // Real totals row: pad(15) === "15", not the 11-page sum of the spans.
-    expect(panel1).toContain("<tr><td></td><td>الإجمالي</td><td></td><td></td><td>15 صفحة</td></tr>");
-    expect(panel1).not.toContain("11 صفحة");
+    // Honest, verifiable totals row: 1+7+3 = 11, the sum a reader can check
+    // by adding the rows above — NOT 15 (the deck's overall page count,
+    // which also counts cover/التوصيف/الخاتمة pages this table never lists).
+    // 2026-07-28 whole-branch-review fix (C2): this row used to print the
+    // deck grand total here, disagreeing with what the visible rows summed
+    // to — a verifiability-premised table must never do that.
+    expect(panel1).toContain("<tr><td></td><td>الإجمالي</td><td></td><td></td><td>11 صفحة</td></tr>");
+    expect(panel1).not.toContain("15 صفحة");
   });
 
   it('Briefing slot (data-variant-index="2") ranks sections in DOCUMENT ORDER — the largest-span section (middle) is neither promoted nor demoted', () => {

@@ -52,6 +52,7 @@ import {
   barCell,
   briefingLede,
   briefingRankList,
+  briefingSupport,
   gridPanel,
   ledgerIdx,
   ledgerTableCard,
@@ -187,9 +188,14 @@ function accuracyGradient(strata: readonly QualityStratum[]): number | null {
   return high.accuracy - low.accuracy;
 }
 
-/** Signed, one-decimal point difference, e.g. "+12.3" / "-4.0" / "0.0". */
+/** Signed, one-decimal point difference, e.g. "+12.3" / "−4.0" / "0.0". Uses
+ *  the proper Unicode minus sign (U+2212), not an ASCII hyphen — aligned with
+ *  `markingImpact.ts`'s `fmtEffect`/`levelAccuracy.ts`'s `signedPointsText`
+ *  (2026-07-28 whole-branch-review fix, C4: this used to be a plain "-",
+ *  the one glyph inconsistency among this fan-out's three signed-delta
+ *  pages). */
 function signedPoints(v: number): string {
-  const sign = v > 0 ? "+" : v < 0 ? "-" : "";
+  const sign = v > 0 ? "+" : v < 0 ? "−" : "";
   return `${sign}${Math.abs(v).toFixed(1)}`;
 }
 
@@ -482,8 +488,26 @@ const GRADIENT_INSUFFICIENT_NOTE = "بيانات غير كافية لعالي أ
  * 3 named rows never exceeds `briefingRankPlan`'s smallest tier (cap 5) — the
  * same unreachable-stub pattern `markingImpactSlide`'s own 2-row rank list
  * uses.
+ *
+ * `supportStrip` is slot 0's totals band, reused VERBATIM via `briefingSupport`
+ * — passed in so this returns lede, THEN support, THEN rank, the SAME order
+ * every other Briefing page in this fan-out uses.
+ *
+ * ⚠️ 2026-07-28 whole-branch-review fixes on this function:
+ *   (B1) used to return only lede+rank, with the caller appending the totals
+ *        band AFTER (lede → rank → support) — the only 2 pages in this
+ *        fan-out (this one and s3-marking) that diverged from every other
+ *        page's lede → support → rank order.
+ *   (C4) the signed gradient embedded in `label` (below) had no bidi
+ *        isolation — measured to render its sign on the wrong side of the
+ *        digit in this RTL sentence, even though the standalone `figure`
+ *        above (same value) was already correctly `dir="ltr"`-wrapped.
  */
-function briefingQualityLedeAndRank(strata: readonly QualityStratum[], evaluated: number): string {
+function briefingQualityLedeAndRank(
+  strata: readonly QualityStratum[],
+  evaluated: number,
+  supportStrip: string,
+): string {
   const gradient = accuracyGradient(strata);
   const high = strata.find((s) => s.level === "عالي");
   const low = strata.find((s) => s.level === "منخفض");
@@ -492,7 +516,7 @@ function briefingQualityLedeAndRank(strata: readonly QualityStratum[], evaluated
   const label =
     gradient === null || !high || !low
       ? `تدرّج الدقة — ${esc(GRADIENT_INSUFFICIENT_NOTE)}`
-      : `تدرّج الدقة ${signedPoints(gradient)} نقطة — عالي ${pctCell(high.accuracy)} مقابل منخفض ${pctCell(low.accuracy)}`;
+      : `تدرّج الدقة <span dir="ltr">${signedPoints(gradient)}</span> نقطة — عالي ${pctCell(high.accuracy)} مقابل منخفض ${pctCell(low.accuracy)}`;
 
   const rankItems: BriefingRankItem[] = strata.map((s) => ({
     label: s.level,
@@ -521,6 +545,7 @@ function briefingQualityLedeAndRank(strata: readonly QualityStratum[], evaluated
     label,
     basis: `${fmtNum(evaluated)} صورة بمستوى جودة محدّد`,
   })}
+    ${supportStrip}
     ${rankHtml}`;
 }
 
@@ -611,13 +636,30 @@ export function qualityImpactSlide(
     ${caveat()}
   </div>`;
 
-  // Briefing: lede+rank (or the shared empty state), then slot 0's totals
-  // band REUSED VERBATIM as the support strip (per the plan), then the
-  // caveat. The reasons table is deliberately absent — Briefing carries one
-  // recall payload (the strata), not completeness.
+  // Briefing: lede, then slot 0's totals band REUSED VERBATIM (via
+  // `briefingSupport`) as the support strip, then the rank list (or the
+  // shared empty state), then the caveat — lede → support → rank, the SAME
+  // order every other Briefing page in this fan-out uses (2026-07-28
+  // whole-branch-review fix, B1 — this used to render lede → rank → support
+  // instead, via a hand-rolled `.v2-totals-band` div appended after the rank
+  // list rather than the shared `briefingSupport` primitive). The reasons
+  // table is deliberately absent — Briefing carries one recall payload (the
+  // strata), not completeness.
+  const briefingSupportStrip = briefingSupport([
+    {
+      iconName: "gauge",
+      value: pctCell(model.imageQuality.acceptableQualityRate),
+      label: "نسبة الجودة المقبولة · أساس مستقل: الإجابات المُسلَّمة",
+    },
+    { iconName: "layers", value: fmtNum(fold.evaluated), label: "صورة بمستوى جودة محدّد ضمن التحليل" },
+    { iconName: "alert", value: fmtNum(fold.unknown), label: "صورة بلا تقييم لمستوى الجودة" },
+  ]);
   const briefingBody = `<div class="v2-sys-brief v2-bf-quality">
-    ${fold.evaluated > 0 ? briefingQualityLedeAndRank(fold.strata, fold.evaluated) : emptyState(fold)}
-    ${totalsBand(model, fold)}
+    ${
+      fold.evaluated > 0
+        ? briefingQualityLedeAndRank(fold.strata, fold.evaluated, briefingSupportStrip)
+        : emptyState(fold)
+    }
     ${caveat()}
   </div>`;
 
@@ -736,7 +778,18 @@ body.theme-light .v2-qi-step-track{background:rgba(10,45,74,.08);}
    components, same "hook only" role every other fanned-out page's page-local
    class plays. ────────────────────────────────────────────────────────── */
 .v2-bf-quality{height:100%;}
-.v2-gd-quality{height:100%;}
+/* 2026-07-28 whole-branch-review fix (C5): .v2-gd-quality used to be bare
+   height:100% with TWO block children (.v2-gd-split, which itself claims
+   height:100%, then the mandatory caveat strip stacked below it) — with no
+   flex context, the split alone filled the wrapper's full height and the
+   caveat had nowhere left to go, overflowing both the 14px body padding and
+   the slide's own overflow:hidden box (measured: 3px clipped). Fixed with
+   the SAME flex-wrapper pattern every sibling with this caveat+split shape
+   already uses (.v2-gd-workload / .v2-gd-marking / .v2-agree-wrap in this
+   fan-out): make this class itself the flex column, and let the split
+   shrink via flex:1 1 auto so the caveat gets its own row. */
+.v2-gd-quality{display:flex;flex-direction:column;gap:12px;height:100%;min-height:0;}
+.v2-gd-quality .v2-gd-split{flex:1 1 auto;min-height:0;}
 /* The reasons card (.v2-qi-reasons, unchanged) sits beside the new matrix
    panel inside the shared .v2-gd-split grid — give it the same full-row
    stretch .v2-gd-panel gets by default so the two don't visually mismatch

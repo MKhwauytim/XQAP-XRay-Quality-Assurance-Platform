@@ -422,17 +422,29 @@ describe("sourceAgreementSlide — Ledger (panel 1)", () => {
     expect(panel).toContain(LEVEL_TEXT);
   });
 
-  it("pools a real totals line (never per-sub-column) from the summed pair counts, never averaging rates", () => {
+  it("2026-07-28 whole-branch-review fix (C6): shows NO totals figure for the 15-pair table — a colspan-style note explains why, instead of a double/multi-counted sum", () => {
+    // Each of the 6 sources appears in 5 of the 15 pairs, so summing
+    // `comparable`/`agree` across all 15 rows would count every comparable
+    // image up to 5-10× over — never a genuine total. This used to render
+    // as "الإجمالي" + a fabricated pooled rate/count; it must not anymore.
     const { rows, reviews } = knownProfile();
     const model = buildReportModel(input(rows, { sample: true, reviews }));
-    const pair = model.resultComparison.crossTeamMatrix.find(
-      (c) => c.sourceA === "levelOne" && c.sourceB === "levelTwo",
-    )!;
-    expect(pair.comparable).toBe(20);
     const html = sourceAgreementSlide(model, 12, 24, true);
     const panel = panelSlice(html, 1);
-    // Exactly one totals line for all 15 pairs together.
+    // Exactly one explanatory bar (same slot the old totals line used),
+    // never per-sub-column.
     expect(countOf(panel, "s3sa-lg-pair-totals")).toBe(1);
+    expect(panel).not.toContain("<span>الإجمالي</span>");
+    const notesBar = panel.slice(panel.indexOf('class="s3sa-lg-pair-totals"'));
+    expect(notesBar).toContain("لا يوجد إجمالي واحد صحيح لهذا الجدول");
+  });
+
+  it("does NOT affect the reviewer table's own totals row — that pools 5 DISTINCT non-reviewer sources, a legitimate total, and is left unchanged", () => {
+    const { rows, reviews } = knownProfile();
+    const model = buildReportModel(input(rows, { sample: true, reviews }));
+    const html = sourceAgreementSlide(model, 12, 24, true);
+    const panel = panelSlice(html, 1);
+    expect(panel).toContain("<td>الإجمالي</td>");
   });
 
   describe("15-row pair-table budget (worked arithmetic, not eyeballed)", () => {

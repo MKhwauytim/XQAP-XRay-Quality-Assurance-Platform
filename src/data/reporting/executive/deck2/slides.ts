@@ -218,11 +218,20 @@ function tocCard(it: TocItem, i: number, tintPct: number | null): string {
 
 /**
  * Ledger slot for `slide-toc` (fan-out plan §1, batch B4). One row per
- * section plus a REAL totals row — this deck's own actual page count
- * (`total`, already passed into `tocSlide` by its only caller), an honest
- * sum, never a fabricated figure.
+ * section plus a REAL totals row — the SUM of the listed sections' own page
+ * spans (`tocSectionSpan`), never the deck's overall page count.
+ *
+ * ⚠️ 2026-07-28 whole-branch-review fix (C2): this used to print the deck's
+ * OVERALL page total (`tocSlide`'s own `total` argument, which also counts
+ * cover/التوصيف/الخاتمة — pages that aren't a listed "section" at all), sitting
+ * directly under rows that only cover the listed sections' own spans. The two
+ * numbers disagree (e.g. rows summing to 18 while the printed total claimed
+ * 21), and a table whose whole premise is "you can verify this by adding the
+ * rows" must never print a total the rows don't actually sum to. Fixed by
+ * summing the rows' own spans instead of taking the deck grand total — the
+ * only honest, self-consistent number for this specific table.
  */
-function tocLedgerTable(items: TocItem[], total: number): string {
+function tocLedgerTable(items: TocItem[]): string {
   const rows = items
     .map(
       (it, i) => `<tr>
@@ -234,7 +243,8 @@ function tocLedgerTable(items: TocItem[], total: number): string {
       </tr>`,
     )
     .join("");
-  const totalsRow = `<tr><td></td><td>الإجمالي</td><td></td><td></td><td>${pad(total)} صفحة</td></tr>`;
+  const sectionsTotal = items.reduce((sum, it) => sum + tocSectionSpan(it.range), 0);
+  const totalsRow = `<tr><td></td><td>الإجمالي</td><td></td><td></td><td>${pad(sectionsTotal)} صفحة</td></tr>`;
   return ledgerTableCard({
     cardClass: "v2-lg-table-card v2-lg-toc-card",
     theadCells: `<th></th><th>القسم</th><th>الهدف</th><th>المؤشر</th><th>الصفحات</th>`,
@@ -319,7 +329,7 @@ function tocGrid(items: TocItem[]): string {
 
 export function tocSlide(items: TocItem[], num: number, total: number, variantPreview: boolean): string {
   const body = `<div class="v2-toc-grid">${items.map((it, i) => tocCard(it, i, null)).join("")}</div>`;
-  const ledgerBody = `<div class="v2-sys-ledger v2-lg-toc">${tocLedgerTable(items, total)}</div>`;
+  const ledgerBody = `<div class="v2-sys-ledger v2-lg-toc">${tocLedgerTable(items)}</div>`;
   const briefingBody = tocBriefing(items, total);
   const gridBody = tocGrid(items);
   return v2Slide({
@@ -2107,11 +2117,27 @@ function stagePortLede(
 /**
  * Ledger system (slot 1) card for one stage on the population page (fan-out
  * plan §7) — same المنفذ/سليمة/اشتباه/الإجمالي columns as slot 0's
- * `stagePortPopulationCard` plus a `ledgerIdx` ordinal. Totals-row pinning is
- * IDENTICAL to slot 0's card (see that function's doc comment): الإجمالي
- * pinned to `stage.population` (the frozen StageProfile snapshot), سليمة/
- * اشتباه fresh-summed from the FULL port list — never "fixed" to a fresh sum
- * over just the shown top-5, on purpose.
+ * `stagePortPopulationCard` plus a `ledgerIdx` ordinal MERGED into the
+ * المنفذ cell — `<td><span class="v2-lg-idx">…</span>${esc(p.name)}</td>`,
+ * the SAME convention `ledgerPortTable`'s row template uses (and every other
+ * Ledger table in this fan-out), so `theadCells`/`totalsRowHtml` carry only
+ * the 4 real columns, never a spurious leading `<th></th>`/`<td></td>` for a
+ * column that has no separate `<td>` of its own.
+ *
+ * ⚠️ 2026-07-28 whole-branch-review fix (C1): this card and its sample-page
+ * twin used to emit `<tr>${ledgerIdx(i)}<td>...` — the ordinal `<span>` as a
+ * bare sibling of the row's `<td>` cells, INSIDE `<tr>` but outside any
+ * `<td>`. Browsers foster-parent that `<span>` out of the table entirely, so
+ * every data row rendered with one fewer real `<td>` than the (then
+ * 5-column) `theadCells`/`totalsRowHtml`, silently shifting every column
+ * under the wrong header. Fixed by merging the badge into the name `<td>`
+ * (matching `ledgerPortTable`) and dropping thead/totals down to the 4 real
+ * columns to match.
+ *
+ * Totals-row pinning is IDENTICAL to slot 0's card (see that function's doc
+ * comment): الإجمالي pinned to `stage.population` (the frozen StageProfile
+ * snapshot), سليمة/اشتباه fresh-summed from the FULL port list — never
+ * "fixed" to a fresh sum over just the shown top-5, on purpose.
  *
  * Built on `ledgerTableCard` directly, NOT the `ledgerPortCard` P2 wrapper —
  * `ledgerPortCard` forces its own `.v2-lg-port-card` class prefix, which
@@ -2133,18 +2159,18 @@ function stagePortPopulationLedgerCard(stage: StageProfile, ports: PortPopRow[])
       ? top
           .map(
             (p, i) =>
-              `<tr>${ledgerIdx(i)}<td>${esc(p.name)}</td><td>${fmtNum(p.clean)}</td><td>${fmtNum(p.suspicious)}</td><td>${fmtNum(p.total)}</td></tr>`,
+              `<tr><td>${ledgerIdx(i)}${esc(p.name)}</td><td>${fmtNum(p.clean)}</td><td>${fmtNum(p.suspicious)}</td><td>${fmtNum(p.total)}</td></tr>`,
           )
           .join("")
-      : `<tr><td colspan="5"><span class="insuff">—</span></td></tr>`;
+      : `<tr><td colspan="4"><span class="insuff">—</span></td></tr>`;
   const sum = (f: (p: PortPopRow) => number) => ports.reduce((s, p) => s + f(p), 0);
-  const totalsRow = `<tr><td></td><td>الإجمالي</td><td>${fmtNum(sum((p) => p.clean))}</td><td>${fmtNum(sum((p) => p.suspicious))}</td><td>${fmtNum(stage.population)}</td></tr>`;
+  const totalsRow = `<tr><td>الإجمالي</td><td>${fmtNum(sum((p) => p.clean))}</td><td>${fmtNum(sum((p) => p.suspicious))}</td><td>${fmtNum(stage.population)}</td></tr>`;
   return ledgerTableCard({
     title: `${stage.stageLabel} — أعلى 5 من ${portCountPhrase(ports.length)}`,
-    theadCells: `<th></th><th>المنفذ</th><th>سليمة</th><th>اشتباه</th><th>الإجمالي</th>`,
+    theadCells: `<th>المنفذ</th><th>سليمة</th><th>اشتباه</th><th>الإجمالي</th>`,
     bodyRowsHtml: rows,
     totalsRowHtml: totalsRow,
-    span: 5,
+    span: 4,
     rowCount: top.length,
     cardClass: `v2-lg-stage-card v2-stage-port-card ${tone}`,
   });
@@ -2164,17 +2190,17 @@ function stagePortSampleLedgerCard(stage: StageProfile, ports: PortPopRow[]): st
       ? top
           .map((p, i) => {
             const coverage = p.total > 0 ? (p.sampleTotal / p.total) * 100 : 0;
-            return `<tr>${ledgerIdx(i)}<td>${esc(p.name)}</td><td>${fmtNum(p.total)}</td><td>${fmtNum(p.sampleTotal)}</td><td>${fmtPct(coverage)}</td></tr>`;
+            return `<tr><td>${ledgerIdx(i)}${esc(p.name)}</td><td>${fmtNum(p.total)}</td><td>${fmtNum(p.sampleTotal)}</td><td>${fmtPct(coverage)}</td></tr>`;
           })
           .join("")
-      : `<tr><td colspan="5"><span class="insuff">—</span></td></tr>`;
-  const totalsRow = `<tr><td></td><td>الإجمالي</td><td>${fmtNum(stage.population)}</td><td>${fmtNum(stage.sampleSize)}</td><td>${fmtPct(stage.coverage)}</td></tr>`;
+      : `<tr><td colspan="4"><span class="insuff">—</span></td></tr>`;
+  const totalsRow = `<tr><td>الإجمالي</td><td>${fmtNum(stage.population)}</td><td>${fmtNum(stage.sampleSize)}</td><td>${fmtPct(stage.coverage)}</td></tr>`;
   return ledgerTableCard({
     title: `${stage.stageLabel} — أعلى 5 من ${portCountPhrase(ports.length)}`,
-    theadCells: `<th></th><th>المنفذ</th><th>مجتمع المرحلة</th><th>العيّنة المستهدفة</th><th>نسبة التغطية</th>`,
+    theadCells: `<th>المنفذ</th><th>مجتمع المرحلة</th><th>العيّنة المستهدفة</th><th>نسبة التغطية</th>`,
     bodyRowsHtml: rows,
     totalsRowHtml: totalsRow,
-    span: 5,
+    span: 4,
     rowCount: top.length,
     cardClass: `v2-lg-stage-card v2-stage-port-card ${tone}`,
   });
@@ -2195,7 +2221,6 @@ function stagePortPopulationBriefing(
   byStage: Map<string, PortPopRow[]>,
 ): string {
   const lede = stagePortLede(stages, byStage);
-  const ledeIdx = lede ? levelIndexForStage(lede.stage) : -1;
   const overallTop = allPortsSortedBy(model, "total")[0];
   const supportStrip = briefingSupport([
     { iconName: "layers", value: fmtNum(model.population.total), label: "إجمالي المجتمع" },
@@ -2232,7 +2257,14 @@ function stagePortPopulationBriefing(
   return `<div class="v2-sys-brief v2-bf-stage-port-population">
     ${briefingLede({
       figure: lede ? fmtNum(lede.port.total) : "—",
-      tone: lede && ledeIdx >= 0 ? STAGE_TONES[ledeIdx] : "gold",
+      // Pinned to this page's OWN assigned Briefing tone (gold — fan-out plan
+      // §0's tone table), never `STAGE_TONES[ledeIdx]` — the lede is ONE
+      // figure identifying the page, not a per-stage row, so its color must
+      // not change month to month depending on which stage happens to hold
+      // the single largest (stage,port) cell. Rank rows below still carry
+      // per-stage `STAGE_TONES` identity; only the lede is pinned (2026-07-28
+      // whole-branch-review fix, B3).
+      tone: "gold",
       label: lede
         ? `أعلى تركّز: ${esc(lede.port.name)} في ${esc(lede.stage.stageLabel)} — ${fmtNum(lede.port.total)} صورة`
         : "لا تتوفر بيانات كافية",
@@ -2255,7 +2287,6 @@ function stagePortSampleBriefing(
   byStage: Map<string, PortPopRow[]>,
 ): string {
   const lede = stagePortLede(stages, byStage);
-  const ledeIdx = lede ? levelIndexForStage(lede.stage) : -1;
   const overallTop = allPortsSortedBy(model, "sampleTotal")[0];
   const supportStrip = briefingSupport([
     { iconName: "scan", value: fmtNum(model.sample.total), label: "إجمالي العيّنة" },
@@ -2287,7 +2318,10 @@ function stagePortSampleBriefing(
   return `<div class="v2-sys-brief v2-bf-stage-port-sample">
     ${briefingLede({
       figure: lede ? fmtNum(lede.port.sampleTotal) : "—",
-      tone: lede && ledeIdx >= 0 ? STAGE_TONES[ledeIdx] : "blue",
+      // Pinned to this page's OWN assigned Briefing tone (blue), same
+      // reasoning as the population page's lede above (B3 fix) — never
+      // `STAGE_TONES[ledeIdx]`.
+      tone: "blue",
       label: lede
         ? `أعلى تركّز عيّنة: ${esc(lede.port.name)} في ${esc(lede.stage.stageLabel)} — ${fmtNum(lede.port.sampleTotal)} صورة`
         : "لا تتوفر بيانات كافية",

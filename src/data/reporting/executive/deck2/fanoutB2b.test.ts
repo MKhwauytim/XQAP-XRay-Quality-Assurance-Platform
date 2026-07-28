@@ -219,32 +219,85 @@ describe("workloadAccuracySlideBuilders — Ledger/Briefing/Grid (fan-out plan �
     expect(panel1).toContain(WORKLOAD_CAVEAT);
   });
 
-  it("(b) Briefing: bar = workload (busiest first is NOT guaranteed — page's own land-then-sea order is kept, not re-sorted), secondary line carries that port's accuracy", () => {
+  it("(b) Briefing: bar = workload, rows sorted workload-descending (2026-07-28 C3 fix), secondary line carries that port's accuracy", () => {
     const html = workloadAccuracySlideBuilders(fixtureModel(), true)[0](6, 20);
     const panel2 = panelSlice(html, 2);
     expect(panel2).toContain("v2-sys-brief");
     expect(panel2).toContain("v2-bf-workload");
 
-    // Lede = the BUSIEST port (منفذ ب, workload 50) even though it is second
-    // in land-then-sea concatenation order — busiest is found by scanning
-    // for the max, not by assuming rank #1 of the (unsorted) rank list.
+    // Lede = the BUSIEST port (منفذ ب, workload 50) — found via a reduce()
+    // scan, not by assuming rank #1, so this stays correct independent of
+    // the rank list's own ordering.
     expect(panel2).toContain("أعلى المنافذ حجمًا: منفذ ب");
     // Its accuracy is insufficient data → the lede figure is muted, never a
     // fabricated rate, even though it's the headline figure.
     expect(panel2).toContain(`<div class="v2-bf-lede-figure gold"><span class="insuff">—</span></div>`);
 
-    // Rank order is landChunk THEN seaChunk, i.e. منفذ أ (workload 10) before
-    // منفذ ب (workload 50) — NOT workload-descending. This is the page's
-    // documented departure from every other rank list in the fan-out.
+    // ⚠️ 2026-07-28 whole-branch-review fix (C3): rows used to render in the
+    // page's raw land-then-sea concatenation order (منفذ أ before منفذ ب,
+    // i.e. workload-ASCENDING here), which is exactly the artifact that let
+    // `briefingRankList`'s POSITIONAL fold bucket large-value ports into "the
+    // rest" purely because of which side of the land/sea split they fell on.
+    // Rows must now be workload-DESCENDING: منفذ ب (50) before منفذ أ (10).
     const labels = [...panel2.matchAll(/<span class="v2-bf-rank-label">([^<]*)<\/span>/g)].map((m) => m[1]);
-    expect(labels).toEqual(["منفذ أ", "منفذ ب"]);
+    expect(labels).toEqual(["منفذ ب", "منفذ أ"]);
     const values = [...panel2.matchAll(/<span class="v2-bf-rank-value">([^<]*)<\/span>/g)].map((m) => m[1]);
-    expect(values).toEqual([fmtNum(10), fmtNum(50)]); // bar VALUE is workload, not accuracy
+    expect(values).toEqual([fmtNum(50), fmtNum(10)]); // bar VALUE is workload, not accuracy
     // Secondary line carries accuracy, muted (never fabricated) for منفذ ب.
     expect(panel2).toContain(`دقة ${fmtPct(90)}`);
     expect(panel2).toContain('دقة <span class="insuff">—</span>');
 
     expect(panel2).toContain(WORKLOAD_CAVEAT);
+  });
+
+  it("(b3) C3 regression: the positional fold buckets the SMALLEST-workload ports, never large ports stranded on the wrong side of the land/sea concatenation", () => {
+    // 10 land ports (workload 1..10, all small) + 8 sea ports (workload
+    // 101..108, all large) = 18 ports, past briefingRankPlan's 14-row
+    // no-fold cap → 13 named + 5 folded. Pre-fix, the raw land-then-sea
+    // concatenation put ALL 10 (small) land ports first, so the tail-sliced
+    // fold would have caught the 5 LARGEST sea ports (104..108) instead of
+    // the 5 smallest overall (land ports 1..5) — exactly the bug this test
+    // is built to catch.
+    const landRows = Array.from({ length: 10 }, (_, i) =>
+      workloadRows(`منفذ ل${i + 1}`, "منفذ بري", i + 1, `L${i + 1}`),
+    ).flat();
+    const seaRows = Array.from({ length: 8 }, (_, i) =>
+      workloadRows(`منفذ ب${i + 1}`, "منفذ بحري", 101 + i, `S${i + 1}`),
+    ).flat();
+    const model = modelWithAccuracy([...landRows, ...seaRows], []);
+    const html = workloadAccuracySlideBuilders(model, true)[0](6, 20);
+    const panel2 = panelSlice(html, 2);
+
+    const labels = [...panel2.matchAll(/<span class="v2-bf-rank-label">([^<]*)<\/span>/g)].map((m) => m[1]);
+    // Every sea port (the large-workload group) must have its OWN named row.
+    for (let i = 1; i <= 8; i++) expect(labels).toContain(`منفذ ب${i}`);
+    // Only the 5 SMALLEST land ports (1..5) may be folded away — the 5
+    // largest land ports (6..10) still get named rows alongside all 8 sea
+    // ports (13 named rows total).
+    for (let i = 6; i <= 10; i++) expect(labels).toContain(`منفذ ل${i}`);
+    for (let i = 1; i <= 5; i++) expect(labels).not.toContain(`منفذ ل${i}`);
+    // 13 named port rows + 1 folded "بقية المنافذ" remainder row = 14 total.
+    expect(labels.length).toBe(14);
+
+    // The folded remainder pools ONLY the 5 smallest land ports' workload
+    // (1+2+3+4+5=15) — never a sea port's workload.
+    expect(panel2).toContain("بقية المنافذ (5)");
+    const remainderIdx = panel2.indexOf("بقية المنافذ (5)");
+    const remainderRow = panel2.slice(panel2.lastIndexOf('<div class="v2-bf-rank-row', remainderIdx));
+    expect(remainderRow).toContain(`>${fmtNum(15)}<`);
+  });
+
+  it("(b2) Briefing body order is lede → support → rank — the deck-wide convention (cross-page control for the 2026-07-28 B1 fix: markingImpact.ts/qualityImpact.ts had drifted to lede → rank → support; this page never did)", () => {
+    const html = workloadAccuracySlideBuilders(fixtureModel(), true)[0](6, 20);
+    const panel2 = panelSlice(html, 2);
+    const ledeIdx = panel2.indexOf('class="v2-bf-lede"');
+    const supportIdx = panel2.indexOf('class="v2-totals-band"');
+    const rankIdx = panel2.indexOf('class="v2-bf-rank ');
+    expect(ledeIdx).toBeGreaterThan(-1);
+    expect(supportIdx).toBeGreaterThan(-1);
+    expect(rankIdx).toBeGreaterThan(-1);
+    expect(ledeIdx).toBeLessThan(supportIdx);
+    expect(supportIdx).toBeLessThan(rankIdx);
   });
 
   it("(c) Grid: حجم الصور/الدقة/الاشتباه الفائت/العيّنة columns, land/sea panels, sequential-gold only", () => {
@@ -651,6 +704,52 @@ describe("portAgreementSlideBuilders — Ledger/Briefing/Grid (fan-out plan §11
     expect(labels).toContain("منافذ دون حد الكفاية (1)");
     const values = [...panel2.matchAll(/<span class="v2-bf-rank-value">([^<]*)<\/span>/g)].map((m) => m[1]);
     expect(values[values.length - 1]).toBe("—");
+  });
+
+  it("(c2) C3 regression: rank rows sort by agreement rate ASCENDING (disagreement-first) — the fold buckets the HIGHEST-agreement (least noteworthy) ports, never a land/sea artifact", () => {
+    // 10 land ports, L1 always EQUALS L2 (100% agreement — boring, deserves
+    // to be folded) + 8 sea ports, L1 always DIFFERS from L2 (0% agreement —
+    // total disagreement, must stay named). 18 ports total, past
+    // briefingRankPlan's 14-row no-fold cap → 13 named + 5 folded. Pre-fix,
+    // the raw land-then-sea concatenation put all 10 (boring, 100%-agree)
+    // land ports first, so the tail-sliced fold would have caught the 5
+    // LEAST-agreeing (most important) sea ports instead of 5 boring land
+    // ports — exactly the bug this test is built to catch.
+    const landRows = Array.from({ length: 10 }, (_, i) =>
+      agreePortRows({
+        port: `منفذ ل${i + 1}`,
+        portType: "منفذ بري",
+        count: 12,
+        idPrefix: `L${i + 1}`,
+        levelOne: () => "سليمة",
+        levelTwo: () => "سليمة", // L1 === L2 always → 100% agreement
+      }),
+    ).flat();
+    const seaRows = Array.from({ length: 8 }, (_, i) =>
+      agreePortRows({
+        port: `منفذ ب${i + 1}`,
+        portType: "منفذ بحري",
+        count: 12,
+        idPrefix: `S${i + 1}`,
+        levelOne: () => "سليمة",
+        levelTwo: () => "اشتباه", // L1 !== L2 always → 0% agreement
+      }),
+    ).flat();
+    const model = agreeModel([...landRows, ...seaRows]);
+    const html = portAgreementSlideBuilders(model, true)[0](1, 1);
+    const panel2 = panelSlice(html, 2);
+
+    const labels = [...panel2.matchAll(/<span class="v2-bf-rank-label">([^<]*)<\/span>/g)].map((m) => m[1]);
+    // Every sea port (0% agreement, most disagreement) must have its OWN
+    // named row — none of these may be folded away.
+    for (let i = 1; i <= 8; i++) expect(labels).toContain(`منفذ ب${i}`);
+    // Only 5 of the 10 (100%-agreement, tied) land ports may be folded; the
+    // other 5 still get named rows alongside all 8 sea ports (13 named total
+    // + 1 "بقية المنافذ" remainder row = 14 label spans).
+    expect(labels.length).toBe(14);
+    expect(labels).toContain("بقية المنافذ (5)");
+    const landNamedCount = labels.filter((l) => l.startsWith("منفذ ل")).length;
+    expect(landNamedCount).toBe(5);
   });
 
   it("(d) Grid: only FOUR columns (المجتمع dropped — it's column 1's denominator), both bases disclosed in the panel sub", () => {

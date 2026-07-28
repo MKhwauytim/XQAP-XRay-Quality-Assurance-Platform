@@ -46,6 +46,7 @@ import {
   barCell,
   briefingLede,
   briefingRankList,
+  briefingSupport,
   gridPanel,
   ledgerIdx,
   ledgerPortCard,
@@ -376,24 +377,42 @@ function ledgerMarkTable(present: MarkStratum, absent: MarkStratum, recorded: nu
 // ════════════════════════════════════════════════════════════════════════════
 
 /**
- * Briefing-system lede + rank list. The lede is الفارق itself — this page's
- * literal point — via the SAME `comparable()` gate `deltaChip`/the Ledger
- * delta row use: not comparable renders the same "—" + `INSUFFICIENT_NOTE`
- * fallback, never a parallel/looser threshold. Rank rows are the two arms on
- * a FIXED 0–100 scale (never each other's magnitude — a fixed scale is the
- * only way "80%" reads the same bar width on every page of this deck),
- * per-row tone = that arm's OWN tone (green for يوجد تحديد, coral for لا
- * يوجد), never a re-derived pass/fail colour. Returns ONLY the lede + rank
- * markup — the caller wraps it with the (unconditionally-rendered) totals
- * band and caveat, exactly the way slot 0 does.
+ * Briefing-system lede + support strip + rank list. The lede is الفارق
+ * itself — this page's literal point — via the SAME `comparable()` gate
+ * `deltaChip`/the Ledger delta row use: not comparable renders the same "—"
+ * + `INSUFFICIENT_NOTE` fallback, never a parallel/looser threshold. Rank
+ * rows are the two arms on a FIXED 0–100 scale (never each other's magnitude
+ * — a fixed scale is the only way "80%" reads the same bar width on every
+ * page of this deck), per-row tone = that arm's OWN tone (green for يوجد
+ * تحديد, coral for لا يوجد), never a re-derived pass/fail colour.
+ *
+ * `supportStrip` is slot 0's totals band, reused VERBATIM via `briefingSupport`
+ * — passed in (not built here) so the caller can render the SAME markup as
+ * its own hand-rolled `.v2-totals-band` div, byte-for-byte. Returns lede,
+ * THEN support, THEN rank — the SAME order every other Briefing page in this
+ * fan-out uses.
+ *
+ * ⚠️ 2026-07-28 whole-branch-review fix (B1): this used to return only
+ * lede+rank, with the caller then appending the totals band AFTER (i.e.
+ * lede → rank → support), the only 2 pages (this one and s3-quality) that
+ * diverged from every other page's lede → support → rank order. Fixed by
+ * threading the support strip through this function so it renders in the
+ * right position.
  */
-function briefingMarkLedeAndRank(present: MarkStratum, absent: MarkStratum): string {
+function briefingMarkLedeAndRank(present: MarkStratum, absent: MarkStratum, supportStrip: string): string {
   const isComparable = comparable(present, absent);
   const figure = isComparable
     ? `<span dir="ltr">${esc(fmtEffect(effectOf(present, absent)))}</span>`
     : `<span class="insuff">—</span>`;
+  // The signed figure embedded in this Arabic sentence needs its OWN
+  // dir="ltr" isolation, same as the standalone `figure` above — measured
+  // 2026-07-28 (C4): a signed value sitting bare inside RTL prose renders
+  // its sign on the WRONG SIDE of the digit (Unicode's bidi algorithm treats
+  // "−20.0" as a weak numeric run with no strong LTR context to anchor it),
+  // even though the exact same value correctly reads left-to-right when
+  // wrapped, as `figure` already is.
   const label = isComparable
-    ? `فارق الدقة ${esc(fmtEffect(effectOf(present, absent)))} نقطة — بتحديد ${pctCell(present.accuracy)} مقابل بلا تحديد ${pctCell(absent.accuracy)}`
+    ? `فارق الدقة <span dir="ltr">${esc(fmtEffect(effectOf(present, absent)))}</span> نقطة — بتحديد ${pctCell(present.accuracy)} مقابل بلا تحديد ${pctCell(absent.accuracy)}`
     : `فارق الدقة — ${esc(INSUFFICIENT_NOTE)}`;
 
   const rankItems: BriefingRankItem[] = [present, absent].map((s) => ({
@@ -426,6 +445,7 @@ function briefingMarkLedeAndRank(present: MarkStratum, absent: MarkStratum): str
     label,
     basis: "مقارنة وصفية بين مجموعتين غير متكافئتين",
   })}
+    ${supportStrip}
     ${rankHtml}`;
 }
 
@@ -538,6 +558,16 @@ export function markingImpactSlide(
     <div class="v2-totals-item"><span class="v2-totals-icon">${icon("document", 16)}</span><span><b>${fmtNum(unknown)}</b><small>صور بلا سجل لحالة التحديد</small></span></div>
   </div>`;
 
+  // Same 3 stats as `totals` above, built through the shared `briefingSupport`
+  // primitive so the Briefing slot renders IDENTICAL `.v2-totals-band` markup
+  // in the right position (lede → support → rank, 2026-07-28 fix, B1) instead
+  // of the hand-rolled div appended after the rank list.
+  const supportStrip = briefingSupport([
+    { iconName: "layers", value: fmtNum(evaluated.length), label: "إجمالي الصور المُقيَّمة" },
+    { iconName: "flag", value: fmtNum(recorded), label: "صور لها سجل لحالة التحديد" },
+    { iconName: "document", value: fmtNum(unknown), label: "صور بلا سجل لحالة التحديد" },
+  ]);
+
   const body = `<div class="v2-risk-layout v2-mark-layout">
     ${recorded > 0 ? compare : emptyState()}
     ${caveat}
@@ -551,12 +581,13 @@ export function markingImpactSlide(
     ${caveat}
   </div>`;
 
-  // Briefing: lede+rank (or the shared empty state), then slot 0's totals
-  // band REUSED VERBATIM as the support strip, then the caveat — the same
-  // three elements, in the same order, slot 0 places them in.
+  // Briefing: lede, then slot 0's totals band REUSED VERBATIM as the support
+  // strip, then the rank list (or the shared empty state), then the caveat —
+  // lede → support → rank, the SAME order every other Briefing page in this
+  // fan-out uses (2026-07-28 whole-branch-review fix, B1 — this used to
+  // render lede → rank → support instead).
   const briefingBody = `<div class="v2-sys-brief v2-bf-marking">
-    ${recorded > 0 ? briefingMarkLedeAndRank(present, absent) : emptyState()}
-    ${totals}
+    ${recorded > 0 ? briefingMarkLedeAndRank(present, absent, supportStrip) : emptyState()}
     ${caveat}
   </div>`;
 

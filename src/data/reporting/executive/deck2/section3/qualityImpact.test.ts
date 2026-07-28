@@ -339,7 +339,9 @@ describe("qualityImpactSlide — three populated strata", () => {
       ...strataRows("متوسط", { correctClean: 17, correctSusp: 2, missedSusp: 1 }, "md"),
       ...strataRows("منخفض", { correctClean: 17, correctSusp: 2, missedSusp: 1 }, "lo"),
     ]);
-    expect(render(inverted)).toContain('فارق عالي↔منخفض: <span dir="ltr">-15.0</span> نقطة');
+    // Proper Unicode minus (U+2212), not an ASCII hyphen — 2026-07-28 fix (C4),
+    // aligned with markingImpact.ts/levelAccuracy.ts's signed-delta glyph.
+    expect(render(inverted)).toContain('فارق عالي↔منخفض: <span dir="ltr">−15.0</span> نقطة');
   });
 
   it("labels each stratum with its sufficiency band in words, not colour alone", () => {
@@ -635,7 +637,24 @@ describe("qualityImpactSlide — Briefing (fan-out)", () => {
     const briefing = briefingPanel(html);
     // THREE_STRATA: عالي 95.0%, منخفض 70.0% → gradient +25.0.
     expect(briefing).toContain('<span dir="ltr">+25.0</span>');
-    expect(briefing).toContain("تدرّج الدقة +25.0 نقطة — عالي 95.0% مقابل منخفض 70.0%");
+    // The signed figure embedded in the label is ALSO bidi-isolated
+    // (2026-07-28 fix, C4) — same dir="ltr" wrap as the standalone figure.
+    expect(briefing).toContain(
+      'تدرّج الدقة <span dir="ltr">+25.0</span> نقطة — عالي 95.0% مقابل منخفض 70.0%',
+    );
+  });
+
+  it("Briefing body order is lede → support → rank, not lede → rank → support (2026-07-28 whole-branch-review fix, B1)", () => {
+    const html = preview(modelOf(THREE_STRATA));
+    const briefing = briefingPanel(html);
+    const ledeIdx = briefing.indexOf('class="v2-bf-lede"');
+    const supportIdx = briefing.indexOf('class="v2-totals-band"');
+    const rankIdx = briefing.indexOf('class="v2-bf-rank ');
+    expect(ledeIdx).toBeGreaterThan(-1);
+    expect(supportIdx).toBeGreaterThan(-1);
+    expect(rankIdx).toBeGreaterThan(-1);
+    expect(ledeIdx).toBeLessThan(supportIdx);
+    expect(supportIdx).toBeLessThan(rankIdx);
   });
 
   it("drops the reasons table entirely — one recall payload, not completeness", () => {

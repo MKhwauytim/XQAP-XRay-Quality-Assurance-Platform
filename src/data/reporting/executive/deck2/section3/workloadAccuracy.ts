@@ -302,19 +302,28 @@ function ledgerWorkloadTable(
  * is WORKLOAD (population image count), never accuracy: this is a volume
  * ranking with accuracy riding along as descriptive context in the secondary
  * line, deliberately NOT the "worst/best accuracy first" pattern the section-2
- * accuracy pages use. Rows are kept in the page's OWN existing
- * workload-descending order: `landChunk`/`seaChunk` are each already
- * workload-desc slices of this page's ports (`collectWorkloadRows` sorts the
- * whole list once, before the land/sea split), so `combinedAll` below is
- * simply their concatenation with NO added `.sort()` — re-sorting here would
- * blur the "which port is busiest" reading this page exists to answer.
+ * accuracy pages use.
+ *
+ * ⚠️ 2026-07-28 whole-branch-review fix (C3): `landChunk`/`seaChunk` are each
+ * individually workload-desc (`collectWorkloadRows` sorts once, before the
+ * land/sea split), but their concatenation is NOT workload-desc across both
+ * groups combined — this is exactly why `busiest` below is found via a
+ * `reduce()` scan instead of trusting `combinedAll[0]`. `briefingRankList`'s
+ * fold, however, truncates POSITIONALLY (it slices the tail, it does not
+ * re-rank), so an unsorted `combinedAll` could bucket several genuinely large
+ * ports into "the rest" purely because they landed late in the land→sea
+ * concatenation, while smaller ports earlier in that concatenation get named
+ * individual rows — reachable at compact density (>13 total ports). Fixed by
+ * sorting `combinedAll` by workload DESCENDING before it's used anywhere
+ * below, so the positional fold actually folds the smallest/least-relevant
+ * tail, matching what "busiest first" already implies.
  *
  * The association-not-causation `CAVEAT` is rendered by the caller, verbatim,
  * in every one of the 4 body variants (the plan's standing rule) — it is
  * appended here as the last child of `.v2-sys-brief`, after the rank list.
  */
 function briefingWorkloadRank(landChunk: WorkloadPortRow[], seaChunk: WorkloadPortRow[]): string {
-  const combinedAll = [...landChunk, ...seaChunk];
+  const combinedAll = [...landChunk, ...seaChunk].sort((a, b) => b.workload - a.workload);
   if (combinedAll.length === 0) {
     return `<div class="v2-sys-brief v2-bf-workload">
       <div class="v2-bf-lede"><div class="v2-bf-lede-figure gold"><span class="insuff">—</span></div></div>
@@ -322,9 +331,10 @@ function briefingWorkloadRank(landChunk: WorkloadPortRow[], seaChunk: WorkloadPo
     </div>`;
   }
 
-  // Busiest port ON THIS PAGE — max by workload, not combinedAll[0]: land and
-  // sea are each individually workload-desc, but concatenating them does not
-  // itself produce one workload-desc order across both groups combined.
+  // Busiest port ON THIS PAGE — found via `reduce()`, not assumed to be
+  // `combinedAll[0]`, so this stays correct independent of whatever ordering
+  // `combinedAll` happens to carry (now workload-desc post-C3-fix, but this
+  // scan never depended on that and is left as the defensive form).
   const busiest = combinedAll.reduce((a, b) => (b.workload > a.workload ? b : a));
   const busiestAccuracy = busiest.rankable ? accuracyOf(busiest) : null;
 
