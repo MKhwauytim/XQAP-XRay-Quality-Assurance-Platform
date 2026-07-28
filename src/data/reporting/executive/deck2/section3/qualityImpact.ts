@@ -773,7 +773,14 @@ body.theme-light .v2-qi-step-track{background:rgba(10,45,74,.08);}
 }
 
 /* ── Ledger — two stacked tables (fan-out plan §11f, batch B3 item 4) ────── */
-.v2-lg-quality{height:100%;}
+/* display:flex column (not the plain height:100% block box this shipped
+   with) so the caveat sibling below .v2-lg-split is actually accounted for
+   in this wrapper's own layout — a block box sized to height:100% does NOT
+   shrink its block-flow children to fit; the caveat simply rendered past
+   the wrapper's (and so the slide's) bottom edge, clipped invisibly by the
+   slide's own overflow:hidden. Same fix .v2-lg-workload already uses. */
+.v2-lg-quality{display:flex;flex-direction:column;height:100%;gap:7px;min-height:0;}
+.v2-lg-quality .v2-lg-split{flex:1 1 auto;min-height:0;}
 /* Both cards share the flex-grow .v2-lg-table-card already gives them, so a
    3-row strata table and a 3-row reasons table divide the stacked column's
    height fairly instead of one collapsing to its intrinsic (shorter) size. */

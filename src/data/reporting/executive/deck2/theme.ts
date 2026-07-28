@@ -435,11 +435,22 @@ body.theme-light .v2-level-card p{color:#33475b;}
    top-left, stage3 bottom-right, stage4 bottom-left — the exact arrangement
    in the reference mockups (2026-07-05 stage-port-grid design spec §3). */
 .v2-stage-port-grid{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:14px;flex:1;min-height:0;}
-.v2-stage-port-card{padding:12px 12px 10px;}
+/* min-height:0 lets this grid item shrink to its 1fr track instead of the
+   default min-height:auto forcing the whole .v2-stage-port-grid row (and so
+   the slide itself, which clips via overflow:hidden) to grow past budget
+   whenever one card's content is even slightly taller than its slice — the
+   classic CSS Grid "item won't shrink below content" trap. Verified live: a
+   long port name (e.g. "منفذ جديدة عرعر") wrapping to 2 lines at a narrower
+   card width was exactly what pushed one stage's card past its row budget. */
+.v2-stage-port-card{padding:12px 12px 10px;min-height:0;overflow:hidden;}
 .v2-stage-port-card .v2-stage-head{margin-bottom:8px;}
-.v2-stage-port-card .deck-table{width:100%;}
+.v2-stage-port-card .deck-table{width:100%;table-layout:fixed;}
 .v2-stage-port-card .deck-table th,.v2-stage-port-card .deck-table td{padding:3px 6px;font-size:0.6rem;}
 .v2-stage-port-card .deck-table th{font-size:0.58rem;}
+/* Port name never wraps to a 2nd line — that's what actually broke the row
+   budget above; truncate long names instead (same convention this deck
+   already uses elsewhere, e.g. .v2-cover-meta-value/.v2-risk-tile-titles). */
+.v2-stage-port-card .deck-table td:first-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 /* Totals row (الإجمالي): a distinct summary band tinted with the card's own
    stage tone, so it reads as a conclusion rather than a sixth data row.
    color-mix is safe — this app is Chromium-only (File System Access API). */
@@ -593,13 +604,17 @@ body.theme-light .v2-stage-port-card .deck-table tfoot td{color:#0a2d4a;}
   .slide:has(.slide-print-toggle input:not(:checked)){display:none!important;}
 }
 
-@media screen and (max-width:820px){
+@media screen and (max-width:900px){
   .deck-viewer-v2{padding:12px 8px 36px;}
   .deck-toolbar{position:relative;flex-wrap:wrap;margin-bottom:12px;padding:10px 12px;}
   .deck-toolbar .deck-brand span{display:none;}
   .deck-toolbar-actions{gap:8px;flex-wrap:wrap;}
   .deck-toolbar .btn{padding:8px 11px;font-size:.72rem;}
-  .slide.v2{aspect-ratio:auto;min-height:0;overflow:visible;}
+  /* height:auto resets the base .slide rule's fixed 630px — without it, a
+     1-column reflow that genuinely needs more than 630px (e.g. two port
+     cards stacked instead of side-by-side) still clipped, since min-height
+     alone can't relax an already-set fixed height. */
+  .slide.v2{aspect-ratio:auto;height:auto;min-height:0;overflow:visible;}
   .slide.v2 .v2-rail{display:none;}
   .slide.v2 .slide-inner{padding:24px 16px 28px;}
   .slide.v2.title-slide.v2-cover .slide-inner{padding:100px 20px 36px;}
@@ -1034,7 +1049,7 @@ body.theme-light .v2-risk-tile{background:linear-gradient(165deg,rgba(244,180,0,
 body.theme-light .v2-risk-tile-head{border-color:#e4e9ee;}
 body.theme-light .v2-risk-tile-titles b,body.theme-light .v2-risk-tile-figure b,body.theme-light .v2-risk-tile-foot b{color:#0a2d4a;}
 body.theme-light .v2-risk-tile-foot{background:rgba(10,45,74,.035);border-color:#e4e9ee;}
-@media screen and (max-width:820px){
+@media screen and (max-width:900px){
   .v2-risk-tile-grid{grid-template-columns:1fr;grid-template-rows:repeat(4,auto);}
 }
 
@@ -1130,7 +1145,13 @@ body.theme-light .v2-lg-table-card-title{color:#0a2d4a;}
 
 /* ── Closing slide — data provenance + classification + organization ────────── */
 .v2-closing{display:grid;grid-template-columns:1.5fr 1fr;gap:28px;height:100%;align-items:stretch;}
-.v2-closing-main{display:flex;flex-direction:column;justify-content:center;}
+/* min-height:0 on both grid items — same "grid item won't shrink below its
+   own content" trap fixed for .v2-stage-port-card: without it, wrapping to
+   an extra line at a narrower slide width (e.g. inside the admin design
+   customizer's iframe, which is rarely exactly the 1120px design width)
+   grows the WHOLE .v2-closing row past its height:100% budget instead of
+   letting these two columns shrink to what's actually available. */
+.v2-closing-main{display:flex;flex-direction:column;justify-content:center;min-height:0;}
 .v2-closing-icon{display:inline-flex;align-items:center;justify-content:center;width:56px;height:56px;border-radius:16px;color:var(--gold);border:1.6px solid rgba(244,180,0,.4);background:rgba(244,180,0,.08);margin-bottom:12px;}
 .v2-closing-main h2{font-size:1.9rem;font-weight:900;color:#fff;margin:0;}
 .v2-closing-main p{font-size:0.86rem;color:var(--muted);line-height:1.7;margin:0 0 16px;max-width:520px;}
@@ -1143,7 +1164,7 @@ body.theme-light .v2-lg-table-card-title{color:#0a2d4a;}
 .v2-prov-file{font-family:"SFMono-Regular",Consolas,monospace;font-size:0.78rem;color:rgba(255,255,255,.86);}
 .v2-prov-rev{font-size:0.76rem;font-weight:800;color:var(--gold);white-space:nowrap;font-variant-numeric:tabular-nums;}
 .v2-prov-empty{font-size:0.8rem;color:var(--slate);}
-.v2-closing-side{display:flex;flex-direction:column;justify-content:center;gap:16px;border-inline-start:1px solid rgba(255,255,255,.1);padding-inline-start:26px;}
+.v2-closing-side{display:flex;flex-direction:column;justify-content:center;gap:16px;border-inline-start:1px solid rgba(255,255,255,.1);padding-inline-start:26px;min-height:0;}
 .v2-closing-badge{display:inline-flex;align-items:center;gap:8px;align-self:flex-start;padding:9px 16px;border:1px solid rgba(244,180,0,.4);border-radius:999px;font-size:0.76rem;font-weight:700;color:var(--gold);background:rgba(244,180,0,.07);}
 .v2-closing-org{display:flex;flex-direction:column;gap:4px;}
 .v2-closing-org b{font-size:0.92rem;font-weight:800;color:#fff;}
@@ -1290,7 +1311,7 @@ body.theme-light .v2-risk-tile{background-image:var(--v2-hex-tex-light),linear-g
 .v2-src-card{background-image:var(--v2-hex-tex),linear-gradient(180deg,rgba(14,58,95,.55),rgba(7,39,67,.75));background-repeat:repeat,no-repeat;}
 body.theme-light .v2-src-card{background-image:var(--v2-hex-tex-light),none;background-repeat:repeat,no-repeat;}
 
-@media screen and (max-width:820px){
+@media screen and (max-width:900px){
   .v2-cover-grid,.v2-closing{grid-template-columns:1fr;}
   .v2-summary-top{grid-template-columns:1fr;}
   .v2-summary-tilegroups{flex-direction:column;}
@@ -1438,7 +1459,7 @@ body.theme-light .v2-lg-stage-card .v2-lg-table-card-title{color:#0a2d4a;}
 .v2-lg-closing{height:100%;display:flex;align-items:center;gap:28px;}
 .v2-lg-closing .v2-lg-table-card{flex:1.5;margin-top:0;}
 .v2-lg-closing .v2-closing-side{flex:1;}
-@media screen and (max-width:820px){
+@media screen and (max-width:900px){
   .v2-lg-closing{flex-direction:column;align-items:stretch;}
   .v2-lg-closing .v2-closing-side{border-inline-start:0;padding-inline-start:0;}
 }
@@ -1913,7 +1934,7 @@ body.theme-light .v2-gd-stage-port-legend{color:#607386;}
 .v2-gd-closing .v2-lg-table-card{flex:1.5;margin-top:0;border:0;border-radius:0;background:transparent;}
 .v2-gd-closing .deck-table{border-radius:0;}
 .v2-gd-closing .v2-closing-side{flex:1;}
-@media screen and (max-width:820px){
+@media screen and (max-width:900px){
   .v2-gd-closing{flex-direction:column;align-items:stretch;}
   .v2-gd-closing .v2-closing-side{border-inline-start:0;padding-inline-start:0;}
 }

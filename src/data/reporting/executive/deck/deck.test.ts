@@ -139,7 +139,14 @@ describe("buildExecutiveDeck — structure", () => {
   it("contains landscape 16:9 print sizing", () => {
     const html = buildExecutiveDeck(input([popRow()]));
     expect(html).toContain("size:297mm 167mm");
-    expect(html).toMatch(/aspect-ratio:297\/167/);
+    // On-screen sizing is a FIXED height (630px), not aspect-ratio-derived
+    // from width (2026-07-28: aspect-ratio let a narrower-than-1120px
+    // container shrink height along with width, silently clipping content
+    // via .slide's own overflow:hidden whenever the row-budget math — all
+    // calibrated against 630px — no longer matched the shrunk height). This
+    // still expresses the same 1120x630 (~16:9) landscape design.
+    expect(html).toMatch(/width:min\(1120px,100%\)/);
+    expect(html).toMatch(/height:630px/);
   });
 
   it("contains inline SVG visuals", () => {

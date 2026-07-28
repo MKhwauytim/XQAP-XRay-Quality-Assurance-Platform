@@ -58,10 +58,21 @@ ${EXEC_CSS}
 .theme-toggle input:checked ~ .theme-toggle-track .theme-toggle-thumb{transform:translateX(26px);}
 @media print{.theme-toggle{display:none!important;}}
 
-/* A 16:9 landscape slide. 297mm × 167mm ≈ 1.778 aspect. */
+/* A 16:9 landscape slide, 1120x630px at the design width. Height is a FIXED
+   px value, not aspect-ratio-derived from width — every page's row-budget
+   math (BASE_ROWS_PER_PAGE, filler-row heights, briefingRankPlan's tiers,
+   etc.) is calibrated against this exact ~630px of vertical room. Letting
+   aspect-ratio shrink height together with width (the previous rule) meant
+   any container narrower than 1120px — a laptop-width browser window, or
+   the admin design customizer's iframe, both very ordinary cases — silently
+   clipped content via this rule's own overflow:hidden, since the budget
+   math never shrinks to match. Width still narrows via min(1120px,100%)
+   for real narrow/mobile viewports; the max-width:900px query below already
+   switches those to aspect-ratio:auto natural flow, so this fixed height
+   only governs the range where the framed-card look is still intended. */
 .slide{
   width:min(1120px,100%);
-  aspect-ratio:297/167;
+  height:630px;
   margin:0 auto 26px;
   position:relative;overflow:hidden;
   background:
@@ -332,12 +343,16 @@ ${EXEC_CSS}
 }
 
 /* ── Responsive (on-screen review) ────────────────────────────────────── */
-@media screen and (max-width:820px){
+@media screen and (max-width:900px){
   .slide-split,.slide-split.wide-left,.slide-split.even{grid-template-columns:1fr;}
   .kpi-band.n4,.kpi-band.n5{grid-template-columns:repeat(2,1fr);}
   .kpi-band.n3{grid-template-columns:1fr 1fr;}
   .deck-cards.n3,.deck-cards.n2{grid-template-columns:1fr;}
-  .slide{aspect-ratio:auto;min-height:520px;}
+  /* height:auto resets the base rule's fixed 630px (needed at the framed-
+     card design width, wrong here) — without it, a 1-column reflow that
+     needs MORE than 630px (e.g. two port cards stacked instead of
+     side-by-side) still clipped via the base rule's overflow:hidden. */
+  .slide{aspect-ratio:auto;height:auto;min-height:520px;}
   .slide-headline{font-size:1.5rem;}
   .slide.title-slide h1{font-size:2rem;}
   .hero-number{font-size:3.4rem;}
