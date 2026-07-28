@@ -1467,6 +1467,59 @@ body.theme-light .v2-lg-stage-card .v2-lg-table-card-title{color:#0a2d4a;}
 .v2-lg-glossary-1{height:100%;}
 .v2-lg-glossary-terms-card .deck-table th,.v2-lg-glossary-terms-card .deck-table td{text-align:right;}
 
+/* Page-local: slide-cover (Ledger, fan-out plan §4, 2026-07-28) — the issue
+   record: a two-column grid (hero title/lockup beside a 7-row table card),
+   the SAME shape slot 0's own \`.v2-cover-grid\` uses. \`.v2-lg-cover-card\` is
+   a STANDALONE card class (not compounded with the shared \`.v2-lg-table-card\`
+   — the same choice \`.v2-lg-port-card\`/\`.v2-lg-stage-card\` already made)
+   because THE COVER IS DARK IN BOTH THEMES BY DESIGN — it needs its own
+   from-scratch light-theme re-override rather than inheriting the shared
+   table's theme-adaptive (light-card-assuming) rules. The deck-wide
+   \`body.theme-light .deck-table{background:#fff;color:#0a2d4a}\` rule
+   (theme parity section, above) would otherwise paint a white table on the
+   cover's dark background in light theme — re-overridden back to dark
+   below, scoped under \`.slide.v2-cover\`, the same pattern
+   \`.v2-cover-meta-item\`/\`.v2-cover-meta-value\` already established.
+   \`.v2-lg-cover-rule\`/\`-hero\` reuse \`var(--line)\`, which is theme-invariant
+   (never redefined for light theme — confirmed against every other
+   \`var(--line)\` usage in this file), so no re-override is needed for those
+   two rules specifically. */
+.v2-lg-cover{display:grid;grid-template-columns:1fr 1.15fr;gap:36px;align-items:center;height:100%;}
+.v2-lg-cover-hero{display:flex;flex-direction:column;gap:15px;min-width:0;}
+.v2-lg-cover-rule{height:1px;width:100%;background:var(--line);}
+.v2-lg-cover-record{min-width:0;}
+.v2-lg-cover-card{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:14px 16px;}
+.v2-lg-cover-card .deck-table th,.v2-lg-cover-card .deck-table td{padding:8px 10px;font-size:.76rem;text-align:center;}
+.v2-lg-cover-card .deck-table th:nth-child(2),.v2-lg-cover-card .deck-table td:nth-child(2){text-align:right;}
+.v2-lg-cover-card .deck-table tfoot td{
+  font-weight:600;font-size:.66rem;line-height:1.5;color:var(--slate);
+  text-align:right;background:transparent;border-top:1px solid rgba(255,255,255,.12);
+}
+body.theme-light .slide.v2-cover .v2-lg-cover-card{background:rgba(255,255,255,.03);border-color:rgba(255,255,255,.12);}
+body.theme-light .slide.v2-cover .deck-table{background:transparent;color:#fff;}
+body.theme-light .slide.v2-cover .deck-table th{background:rgba(255,255,255,.08);color:#fff;}
+body.theme-light .slide.v2-cover .deck-table td{border-color:rgba(255,255,255,.12);color:#fff;}
+body.theme-light .slide.v2-cover .v2-lg-cover-card .deck-table tfoot td{color:var(--slate);background:rgba(255,255,255,.03);border-top-color:rgba(255,255,255,.12);}
+
+/* Page-local: slide-sep-1/2/3 (Ledger, fan-out plan §5, 2026-07-28) — a
+   ruled document opener (hairline/ordinal/title/hairline/hanging-label
+   definition/hairline), DELIBERATELY no table (no data on this page — a
+   one-row table would be theatre). The separator follows the theme (unlike
+   the cover) — every value below is already theme-safe via \`var(--line)\`/
+   \`var(--slate)\`/\`var(--muted)\` (all theme-invariant custom properties) or
+   an existing light-theme pattern (\`.v2-sep-title\` mirrors \`.v2-sep h2\`'s
+   own light override), so no cover-style dark re-override is needed here. */
+.v2-lg-sep{height:100%;display:flex;flex-direction:column;justify-content:center;align-items:flex-start;gap:14px;max-width:640px;}
+.v2-lg-sep-rule{height:1px;width:100%;background:var(--line);}
+.v2-lg-sep-head{display:flex;align-items:center;gap:10px;}
+.v2-lg-sep-eyebrow{font-size:.72rem;font-weight:700;color:var(--slate);letter-spacing:.08em;}
+.v2-lg-sep-title{font-size:2rem;font-weight:800;color:#fff;margin:0;text-align:start;}
+.v2-lg-sep-def-line{display:flex;align-items:baseline;gap:14px;width:100%;}
+.v2-lg-sep-key{flex:0 0 auto;width:70px;font-size:.72rem;font-weight:700;color:var(--slate);}
+.v2-lg-sep-def{flex:1 1 auto;margin:0;font-size:.92rem;line-height:1.85;color:var(--muted);max-width:640px;}
+body.theme-light .v2-lg-sep-title{color:#0a2d4a;}
+body.theme-light .v2-lg-sep-def,body.theme-light .v2-lg-sep-key,body.theme-light .v2-lg-sep-eyebrow{color:#607386;}
+
 /* ── BRIEFING (slot 2 — الإحاطة, recall): one lede figure per page + a
    ≤3-figure support strip + at most one ranked-bar list. Tables are demoted
    to ranked bars (.v2-bf-rank). One fixed tone per page (this page: gold). ── */
@@ -1674,6 +1727,46 @@ body.theme-light .v2-bf-closing .v2-closing-side{border-top-color:#dde4ea;}
   min-width:230px;max-width:340px;white-space:normal;text-align:right;line-height:1.32;
 }
 
+/* Page-local: slide-cover (Briefing, fan-out plan §4, 2026-07-28) — title
+   first (a cover's title cannot be demoted below a statistic), then the
+   lede (population total — SCOPE, never a finding), then the 3-chip support
+   strip. No rank list (nothing on a cover is honestly rankable). Bumped
+   lede figure (4.2rem, larger than the deck-wide 3.2rem default — a cover's
+   headline figure earns more presence than a body-page lede).
+   THE COVER IS DARK IN BOTH THEMES BY DESIGN: \`.v2-bf-lede-label\`/
+   \`.v2-bf-lede-basis\`/\`.v2-totals-item\` all have GENERIC light-theme
+   overrides elsewhere in this file (assuming every OTHER page's light-theme
+   card is a light background) that would otherwise go dark-ink-on-dark
+   here — re-overridden back to dark below, scoped under \`.slide.v2-cover\`,
+   same pattern as \`.v2-cover-meta-item\`. The tone-colored lede figure itself
+   needs no override (\`var(--gold)\` is theme-invariant). */
+.v2-bf-cover{align-items:center;text-align:center;}
+.v2-bf-cover .v2-bf-lede-figure{font-size:4.2rem;}
+.v2-bf-cover .v2-totals-band{width:100%;max-width:560px;}
+body.theme-light .slide.v2-cover .v2-bf-lede-label{color:#fff;}
+body.theme-light .slide.v2-cover .v2-bf-lede-basis{color:var(--slate);border-color:rgba(255,255,255,.14);background:rgba(255,255,255,.03);}
+body.theme-light .slide.v2-cover .v2-totals-item{background:rgba(255,255,255,.02);border-color:rgba(255,255,255,.12);}
+body.theme-light .slide.v2-cover .v2-totals-item b{color:#fff;}
+body.theme-light .slide.v2-cover .v2-totals-item small{color:var(--slate);}
+
+/* Page-local: slide-sep-1/2/3 (Briefing, fan-out plan §5, 2026-07-28) — the
+   cleanest reuse in the whole fan-out: just one \`briefingLede\` call, no
+   support strip, no rank list. Bumped to divider scale (6.4rem, vs. the
+   deck-wide 3.2rem default) since this is the ONLY content on the slide.
+   \`.v2-bf-lede-basis\` is restyled from its default bordered-pill look (wrong
+   for a ~30-word blurb) to a plain paragraph — same page-local-restyle
+   licence \`slide-glossary-levels\`'s \`.v2-bf-rank-secondary\` override already
+   used above. The separator follows the theme (unlike the cover) — no dark
+   re-override needed; \`.v2-bf-lede-label\`/\`-basis\`'s existing GENERIC
+   light-theme rules (this file, Briefing base section) already apply
+   correctly here. */
+.v2-bf-sep{height:100%;}
+.v2-bf-sep .v2-bf-lede-figure{font-size:6.4rem;}
+.v2-bf-sep .v2-bf-lede-basis{
+  display:block;border:0;background:transparent;max-width:620px;margin-inline:auto;
+  font-size:.96rem;line-height:1.85;
+}
+
 /* ── GRID (slot 3 — الشبكة, comparison): every page becomes one matrix of
    metricMatrix cells, each column normalized to its OWN domain, ink always
    navy (theme-invariant — see metricMatrix's own doc comment). ──────────── */
@@ -1705,6 +1798,29 @@ body.theme-light .v2-bf-closing .v2-closing-side{border-top-color:#dde4ea;}
 body.theme-light .v2-gd-panel{background:#fff;border-color:#dde4ea;box-shadow:0 6px 16px rgba(10,45,74,.06);}
 body.theme-light .v2-gd-panel-head b{color:#0a2d4a;}
 body.theme-light .v2-gd-panel-head span{color:#607386;}
+
+/* ── Grid field cells (gridFieldCells, slideKit.ts, fan-out plan §3,
+   2026-07-28) — the label/value cell field for pages with real fields but
+   NO comparable numeric domain (slide-cover, slide-sep-1/2/3), so a
+   metricMatrix would misrepresent them as one comparable scale. Column
+   count/geometry (grid-template-columns, .wide's actual span behavior) is
+   entirely the caller's own page-local class — see gridFieldCells' own doc
+   comment — this block only supplies the shared per-cell chrome: square
+   corners, 1px hairlines, uniform padding, label/value typography. No
+   magnitude tint (unlike metricMatrix's --w fills): these cells have
+   nothing to tint by. ──────────────────────────────────────────────────── */
+.v2-gd-field{display:grid;}
+.v2-gd-field-cell{
+  border-inline-end:1px solid var(--line);border-bottom:1px solid var(--line);
+  padding:10px 14px;display:flex;flex-direction:column;gap:4px;justify-content:center;min-width:0;
+}
+.v2-gd-field-cell.num .v2-gd-field-value{font-variant-numeric:tabular-nums;}
+.v2-gd-field-label{font-size:.68rem;font-weight:700;color:var(--slate);letter-spacing:.02em;}
+.v2-gd-field-value{
+  font-size:.95rem;font-weight:800;color:#fff;overflow:hidden;text-overflow:ellipsis;
+}
+body.theme-light .v2-gd-field-cell{border-color:#dde4ea;}
+body.theme-light .v2-gd-field-value{color:#0a2d4a;}
 
 /* Page-local: slide-port-population (Grid) — land/sea tint on the panel
    border + count caption, mirroring every other variant's land=green/
@@ -1884,4 +2000,48 @@ body.theme-light .v2-gd-glossary-levels .v2-level-card{border-inline-end-color:#
    above — the unscoped body.theme-light .v2-term-card rule (theme v3
    section) sets a box-shadow this override never cleared. */
 body.theme-light .v2-gd-glossary-terms .v2-term-card{border-inline-end-color:#dde4ea;background:transparent;box-shadow:none;}
+
+/* Page-local: slide-cover (Grid, fan-out plan §4, 2026-07-28) — 8
+   gridFieldCells in a 4×2 layout (identification row + scope row), no
+   metricMatrix/gridPanel wrapper (see coverSlide's own doc comment for why).
+   nth-child border removal: column 4 of each row (4n) drops its vertical
+   hairline (nothing to its right); row 2 (n+5) drops its horizontal hairline
+   (nothing below it) — the last row/column of an otherwise uniform grid.
+   THE COVER IS DARK IN BOTH THEMES BY DESIGN (theme.ts's own
+   \`.slide.v2-cover\`/\`body.theme-light .slide.v2-cover\` rules, above) — every
+   rule below that touches a shared, theme-adaptive class
+   (.v2-gd-field-cell/.v2-gd-field-value assume a light card in light theme
+   elsewhere in the deck) is re-overridden back to dark here, the same
+   pattern \`.v2-cover-meta-item\`/\`.v2-cover-meta-value\` already established. */
+.v2-gd-cover{height:100%;display:flex;flex-direction:column;justify-content:center;gap:18px;}
+.v2-gd-cover-rule{height:1px;width:100%;background:var(--line);}
+.v2-gd-cover .v2-gd-field{grid-template-columns:repeat(4,1fr);}
+.v2-gd-cover .v2-gd-field-cell:nth-child(4n){border-inline-end:0;}
+.v2-gd-cover .v2-gd-field-cell:nth-child(n+5){border-bottom:0;}
+body.theme-light .slide.v2-cover .v2-gd-field-cell{border-color:rgba(255,255,255,.13);}
+body.theme-light .slide.v2-cover .v2-gd-field-value{color:#fff;}
+
+/* Page-local: slide-sep-1/2/3 (Grid, fan-out plan §5, 2026-07-28) — one
+   full-width gridPanel (max-width 820px, centered) wrapping gridFieldCells:
+   a narrow رقم القسم cell beside a wide التعريف cell via the panel's own
+   \`0.6fr 2.4fr\` column template (plain grid auto-flow already puts the
+   non-\`wide\` cell in the narrow column and the \`wide\` one in the remaining
+   wide column — no span override needed). Both cells sit in the template's
+   only row, so both drop their bottom hairline; the last (wide) cell also
+   drops its inline-end hairline. Tone-bordered panel variants modelled on
+   the existing \`.v2-gd-port-population .v2-gd-panel.land/.sea\` rules. The
+   separator DOES follow the theme (unlike the cover) — no dark
+   re-override needed here. */
+.v2-gd-sep{height:100%;display:flex;align-items:center;justify-content:center;}
+.v2-gd-sep .v2-gd-panel{max-width:820px;width:100%;margin:auto;}
+.v2-gd-sep .v2-gd-field{grid-template-columns:0.6fr 2.4fr;}
+.v2-gd-sep .v2-gd-field-cell{border-bottom:0;}
+.v2-gd-sep .v2-gd-field-cell:last-child{border-inline-end:0;}
+.v2-gd-sep .v2-gd-field-cell.wide .v2-gd-field-value{white-space:normal;line-height:1.6;font-weight:700;}
+.v2-gd-sep .v2-gd-panel.gold{border-color:rgba(244,180,0,.35);}
+.v2-gd-sep .v2-gd-panel.cyan{border-color:rgba(50,197,210,.35);}
+.v2-gd-sep .v2-gd-panel.gold .v2-gd-panel-head span{color:var(--gold);}
+.v2-gd-sep .v2-gd-panel.cyan .v2-gd-panel-head span{color:#32c5d2;}
+body.theme-light .v2-gd-sep .v2-gd-panel.gold .v2-gd-panel-head span{color:#8a6d1f;}
+body.theme-light .v2-gd-sep .v2-gd-panel.cyan .v2-gd-panel-head span{color:#1f8a94;}
 `;

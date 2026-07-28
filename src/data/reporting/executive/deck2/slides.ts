@@ -37,6 +37,7 @@ import {
   collectPortStats,
   fillerRow,
   frac,
+  gridFieldCells,
   gridPanel,
   ledgerIdx,
   ledgerPortCard,
@@ -58,7 +59,7 @@ import {
   truncLabel,
   v2Slide,
 } from "./slideKit";
-import type { BriefingRankItem, CellTone, NavSectionKey, PortPopRow, SlideBuilder } from "./slideKit";
+import type { BriefingRankItem, BriefingTone, CellTone, NavSectionKey, PortPopRow, SlideBuilder } from "./slideKit";
 import { sectionThreeBuilders } from "./section3";
 
 // The slide kit is the single source of truth for these two, but they were
@@ -146,7 +147,101 @@ export function coverSlide(
       </div>
       <div class="v2-cover-meta-col">${meta}</div>
     </div>`;
-  const body = renderVariants("slide-cover", [coverBody, coverBody, coverBody, coverBody], variantPreview);
+
+  // Ledger/Briefing/Grid slots (fan-out plan §4, 2026-07-28 — the cover was
+  // the last page in the whole deck2 three-system fan-out). Governing rule
+  // for all three: the cover may state SCOPE (population/sample/coverage —
+  // "what this document covers"), never FINDINGS (accuracy/quality/
+  // agreement/ranking) — so none of the three variants below carries a
+  // `briefingRankList`/port ranking of any kind. Every slot carries the same
+  // 4 meta fields + the classification note (field-conservation requirement).
+  const periodId = model.summary.periodId;
+  const genDate = formatDate(generatedAt);
+  const popTotal = fmtNum(model.population.total);
+  const sampleTotal = fmtNum(model.sample.total);
+  const coveragePct = fmtPct(model.sample.coverage, 1);
+
+  // Ledger — the issue record: hero (title+lockup, kicker/badge dropped —
+  // classification moves into the table's own footnote row) beside one
+  // `ledgerTableCard` of 7 rows, no totals row (nothing to sum here).
+  const ledgerRows = [
+    ["فترة الدراسة", esc(periodId)],
+    ["تاريخ الإصدار", esc(genDate)],
+    ["الإدارة", esc(department)],
+    ["القسم", esc(section)],
+    ["مجتمع الصور", `${popTotal} صورة`],
+    ["حجم العيّنة", `${sampleTotal} صورة`],
+    ["تغطية العيّنة", coveragePct],
+  ]
+    .map(([label, value], i) => `<tr><td>${ledgerIdx(i)}</td><td>${label}</td><td>${value}</td></tr>`)
+    .join("");
+  const ledgerFootnote = `<tr class="v2-lg-footnote"><td colspan="3">داخلي — للاستخدام التنفيذي</td></tr>`;
+  const ledgerBody = `<div class="v2-sys-ledger v2-lg-cover">
+      <div class="v2-lg-cover-hero">
+        <h1 class="v2-cover-title">تقرير ضمان جودة<br/>فحص الأشعة</h1>
+        <div class="v2-lg-cover-rule"></div>
+        <div class="v2-cover-lockup">
+          <span class="v2-cover-lockup-label">فترة الدراسة (عيّنة شهر)</span>
+          <span class="v2-cover-lockup-period">${esc(periodId)}</span>
+        </div>
+      </div>
+      <div class="v2-lg-cover-record">${ledgerTableCard({
+        cardClass: "v2-lg-cover-card",
+        theadCells: `<th></th><th>البند</th><th>القيمة</th>`,
+        bodyRowsHtml: ledgerRows,
+        totalsRowHtml: ledgerFootnote,
+        span: 3,
+        rowCount: 0,
+      })}</div>
+    </div>`;
+
+  // Briefing — one figure, then the document: title first (a cover's title
+  // cannot be demoted below a statistic), then the lede (population total —
+  // a SCOPE figure, never a finding), then a 3-chip support strip absorbing
+  // the classification badge. No `arc` (coverage is a different unit than
+  // the lede's count, so it goes in the support strip instead). No
+  // `briefingRankList` — nothing on a cover is honestly rankable.
+  const briefingBody = `<div class="v2-sys-brief v2-bf-cover">
+      <div class="v2-cover-kicker"><span class="v2-cover-kicker-dot"></span>عرض تنفيذي · تقرير شهري</div>
+      <h1 class="v2-cover-title">تقرير ضمان جودة<br/>فحص الأشعة</h1>
+      <div class="v2-cover-rule"></div>
+      ${briefingLede({
+        figure: popTotal,
+        tone: "gold",
+        label: `صورة في مجتمع الفحص — ${esc(periodId)}`,
+        basis: `${esc(department)} · ${esc(section)} · صدر في ${esc(genDate)}`,
+      })}
+      ${briefingSupport([
+        { iconName: "layers", value: sampleTotal, label: "حجم العيّنة" },
+        { iconName: "gauge", value: coveragePct, label: "تغطية العيّنة" },
+        { iconName: "shield", value: "داخلي", label: "تصنيف الوثيقة" },
+      ])}
+    </div>`;
+
+  // Grid — the modular identification plate: no `metricMatrix` (one entity,
+  // 4 strings + 3 figures in 3 different units — nothing shares a scale) and
+  // no `gridPanel` wrapper (its light-theme rule paints a white card, a hard
+  // break on the always-dark cover). 8 cells, 4 cols × 2 rows: identification
+  // row then scope row. No magnitude tint — the three figures share no
+  // common denominator, so a `--w` tint would be invented magnitude. Ink
+  // stays the cover's own dark-page white (not the "always navy" rule
+  // metricMatrix's filled cells follow — these cells are unfilled).
+  const gridBody = `<div class="v2-sys-grid v2-gd-cover">
+      <h1 class="v2-cover-title">تقرير ضمان جودة<br/>فحص الأشعة</h1>
+      <div class="v2-gd-cover-rule"></div>
+      ${gridFieldCells([
+        { label: "فترة الدراسة", value: periodId },
+        { label: "تاريخ الإصدار", value: genDate },
+        { label: "الإدارة", value: department },
+        { label: "القسم", value: section },
+        { label: "مجتمع الصور", value: `${popTotal} صورة`, numeric: true },
+        { label: "حجم العيّنة", value: `${sampleTotal} صورة`, numeric: true },
+        { label: "تغطية العيّنة", value: coveragePct, numeric: true },
+        { label: "التصنيف", value: "داخلي" },
+      ])}
+    </div>`;
+
+  const body = renderVariants("slide-cover", [coverBody, ledgerBody, briefingBody, gridBody], variantPreview);
   return `<section class="slide v2 title-slide v2-cover" id="slide-cover" data-title="الغلاف" data-section="cover" data-section-label="${esc(NAV_SECTIONS.cover)}">
     ${slideControls("slide-cover", variantPreview)}
     ${meshLayer}
@@ -1046,7 +1141,59 @@ export function sectionSeparatorSlide(opts: {
         <p>${esc(blurb)}</p>
       </div>
     </div>`;
-  const body = renderVariants(`slide-sep-${sectionNo}`, [sepBody, sepBody, sepBody, sepBody], variantPreview);
+
+  // Ledger/Briefing/Grid slots (fan-out plan §5, 2026-07-28 — supersedes the
+  // prior "no fan-out for the separators" ruling; see §0 of that plan and
+  // this batch's edit-log entry for why). Input set is closed: sectionNo/
+  // title/blurb/tone — no `model`, no new `opts` field, and no statistics
+  // return to the divider (the owner's strip decision stands). All three
+  // slots drop `.v2-sep-watermark`/`.v2-sep-badge` (slot-0's own vocabulary).
+  const bfTone: BriefingTone = tone === "cyan" ? "blue" : "gold";
+
+  // Ledger — a ruled document opener. Deliberately NO table: there is no
+  // data on this page, and a one-row table would be theatre. `ledgerIdx`
+  // reused at `sectionNo-1` (it is 0-based; renders `i+1` back to `sectionNo`).
+  const ledgerBody = `<div class="v2-sys-ledger v2-lg-sep">
+      <div class="v2-lg-sep-rule"></div>
+      <div class="v2-lg-sep-head">${ledgerIdx(sectionNo - 1)}<span class="v2-lg-sep-eyebrow">القسم</span></div>
+      <h2 class="v2-lg-sep-title">${esc(title)}</h2>
+      <div class="v2-lg-sep-rule"></div>
+      <div class="v2-lg-sep-def-line">
+        <span class="v2-lg-sep-key">التعريف</span>
+        <p class="v2-lg-sep-def">${esc(blurb)}</p>
+      </div>
+      <div class="v2-lg-sep-rule"></div>
+    </div>`;
+
+  // Briefing — the cleanest reuse in the whole fan-out: the divider's 3
+  // fields map 1:1 onto briefingLede's 3 slots. No support strip (nothing to
+  // put in it) and no rank list. `tone` is mapped, never passed through raw
+  // — `BriefingTone` has no "cyan" and there is no `.v2-bf-lede-figure.cyan`
+  // CSS rule (a real bug the fan-out plan explicitly flagged and this
+  // mapping fixes).
+  const briefingBody = `<div class="v2-sys-brief v2-bf-sep">${briefingLede({
+    figure: String(sectionNo),
+    tone: bfTone,
+    label: esc(title),
+    basis: esc(blurb),
+  })}</div>`;
+
+  // Grid — the section card: one full-width gridPanel wrapping gridFieldCells
+  // (section number + the blurb as the wide cell). The section number
+  // appearing in both the panel's `sub` line and a cell is Grid's own idiom
+  // elsewhere in this deck (every Grid page prints a column's domain in the
+  // header and its value in a cell) — not a duplication to "fix".
+  const gridBody = `<div class="v2-sys-grid v2-gd-sep">${gridPanel({
+    title,
+    sub: `القسم ${sectionNo}`,
+    variant: tone,
+    chartHtml: gridFieldCells([
+      { label: "رقم القسم", value: String(sectionNo), numeric: true },
+      { label: "التعريف", value: blurb, wide: true },
+    ]),
+  })}</div>`;
+
+  const body = renderVariants(`slide-sep-${sectionNo}`, [sepBody, ledgerBody, briefingBody, gridBody], variantPreview);
   return `<section class="slide v2 v2-sep-slide ${esc(tone)}" id="slide-sep-${sectionNo}" data-title="${esc(title)}" data-section="${sectionKey}" data-section-label="${esc(NAV_SECTIONS[sectionKey])}">
   ${slideControls(`slide-sep-${sectionNo}`, variantPreview)}
   ${sideRail(sectionKey)}
