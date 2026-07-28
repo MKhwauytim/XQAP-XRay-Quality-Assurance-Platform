@@ -323,10 +323,15 @@ describe("Reports export permission gating (B5)", () => {
 // tests for either the render gate or the export flow below, on the false claim that
 // no test file existed to extend — these two describe blocks close that gap.
 //
-// The button only exists inside the "kpi" sub-tab's dashboard, which only renders
-// once the analytics model has been built from a real (non-null) population — so
-// each test here must switch to that sub-tab and resolve the mocked population load
-// before the toolbar (and therefore the button) appears at all.
+// The button ALSO exists on the default "reports" section's featured executive
+// card (added 2026-07-25 after the owner reported the KPI-toolbar-only button
+// was undiscoverable — most users land on "reports", not "kpi", and never saw
+// it). This describe block tests the original KPI-toolbar location, which only
+// renders once the analytics model has been built from a real (non-null)
+// population — so each test here must switch to that sub-tab and resolve the
+// mocked population load before the toolbar (and therefore the button)
+// appears at all. See the separate describe block below for the reports-card
+// location, which needs no sub-tab navigation.
 describe("Reports KPI dashboard — admin-only design-customizer gate (D1)", () => {
   it("renders the design-customizer button when the session role is admin", async () => {
     const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
@@ -427,6 +432,69 @@ describe("Reports KPI dashboard — admin-only design-customizer gate (D1)", () 
 
     // The customizer dialog must never have opened.
     expect(screen.queryByRole("dialog", { name: "تخصيص تصميم العرض التنفيذي" })).not.toBeInTheDocument();
+  });
+});
+
+// 2026-07-25: the owner reported not seeing the design-customizer button at all —
+// it only existed on the "kpi" sub-tab's dashboard toolbar (tested above), but most
+// users land on the default "reports" section and never navigate there. A second
+// button, same handler, was added to the featured executive card's footer on that
+// default section, needing no sub-tab navigation.
+describe("Reports card — admin-only design-customizer button on the default 'reports' section (discoverability fix)", () => {
+  it("renders the design-customizer button on the featured executive card without navigating away from the default 'reports' section", async () => {
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    (globalThis as { __testDir?: DirectoryHandleLike }).__testDir = root;
+    authSessionMock.state.role = "admin";
+
+    const { container } = render(<ReportsTab />);
+
+    await act(async () => {
+      deferredFor("4-april-2026").resolve(mockPop(0));
+      await Promise.resolve();
+    });
+
+    // No tab click — this is the default render, exactly what the owner saw.
+    const featuredCard = container.querySelector(".rh-card-featured") as HTMLElement;
+    expect(within(featuredCard).getByRole("button", { name: /تخصيص التصميم/ })).toBeInTheDocument();
+  });
+
+  it("does NOT render the reports-card design-customizer button for a non-admin role", async () => {
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    (globalThis as { __testDir?: DirectoryHandleLike }).__testDir = root;
+    authSessionMock.state.role = "supervisor";
+
+    const { container } = render(<ReportsTab />);
+
+    await act(async () => {
+      deferredFor("4-april-2026").resolve(mockPop(0));
+      await Promise.resolve();
+    });
+
+    const featuredCard = container.querySelector(".rh-card-featured") as HTMLElement;
+    // Confirm the card itself rendered (a non-gated control) before trusting the
+    // customizer button's absence.
+    expect(within(featuredCard).getByRole("button", { name: "التصدير" })).toBeInTheDocument();
+    expect(within(featuredCard).queryByRole("button", { name: /تخصيص التصميم/ })).not.toBeInTheDocument();
+  });
+
+  it("clicking the reports-card button opens the same customizer dialog as the KPI-toolbar button", async () => {
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    (globalThis as { __testDir?: DirectoryHandleLike }).__testDir = root;
+    authSessionMock.state.role = "admin";
+
+    const { container } = render(<ReportsTab />);
+
+    await act(async () => {
+      deferredFor("4-april-2026").resolve(mockPop(0));
+      await Promise.resolve();
+    });
+
+    const featuredCard = container.querySelector(".rh-card-featured") as HTMLElement;
+    fireEvent.click(within(featuredCard).getByRole("button", { name: /تخصيص التصميم/ }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: "تخصيص تصميم العرض التنفيذي" })).toBeInTheDocument();
+    });
   });
 });
 

@@ -985,6 +985,18 @@ function ReportsContent() {
           </div>
           <div className="rh-card-footer">
             {renderExportControls("executive", "rh-btn-teal")}
+            {isAdmin ? (
+              <button
+                type="button"
+                className="rh-btn"
+                disabled={busy || !selectedMonth || !canExportReports}
+                title="تخصيص تصميم العرض التنفيذي (للمدير فقط)"
+                onClick={() => { void handleOpenCustomizer(); }}
+              >
+                <Settings2 size={15} strokeWidth={2} />
+                تخصيص التصميم
+              </button>
+            ) : null}
           </div>
         </div>
 
