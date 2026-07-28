@@ -21,9 +21,24 @@
 //
 // 1. NO `direction="rtl"` ON THE <svg>. In SVG, `text-anchor:start|end` resolves
 //    against the *inline base direction*: under direction=rtl, "start" becomes
-//    the RIGHT edge and "end" the LEFT — silently mirroring every anchor in the
-//    file. charts.ts leaves the root LTR and expresses RTL through coordinate
-//    math instead; this file does the same so both modules read identically.
+//    the RIGHT edge and "end" the LEFT — silently mirroring every anchor.
+//    The report document root is `<html dir="rtl">` — every element inherits
+//    that unless something stops it, INCLUDING an <svg> with no RTL ancestor
+//    OF ITS OWN. The `<figure dir="rtl">` wrapper below is A sufficient cause
+//    here (the nearest RTL ancestor for this module's charts), but it is not
+//    the ONLY one — the document root is sufficient on its own, which is why
+//    charts.ts (no `<figure>` wrapper anywhere in that file) had the
+//    identical bug. Both this module's svgOpen() and charts.ts's own
+//    svgOpen() therefore set `style="direction:ltr"` directly on the <svg>
+//    (2026-07-25 fix — a peer review caught that an earlier version of this
+//    note named only the `<figure dir="rtl">` wrapper, which left
+//    charts.ts's own text-anchor="end"/"start" sites — `heatmap`'s row
+//    labels, `funnel`'s label/value pair, `gauge`'s scale ticks, and
+//    `legendRows`' legend text, 8 sites total — mirrored in production with
+//    no `<figure>` in sight to blame; see charts.ts's own svgOpen for the
+//    matching fix and the full site list). Coordinate math (points 2/3
+//    below) is a SEPARATE, correct RTL technique and was never the issue
+//    here — it's orthogonal to text-anchor resolution, not a substitute for it.
 //    (Arabic glyph shaping/bidi inside a single <text> run is unaffected — the
 //    bidi algorithm still lays the Arabic run out right-to-left.)
 // 2. SCATTER X AXIS RUNS RIGHT → LEFT. The x scale's *range* is reversed
@@ -91,7 +106,20 @@ function svgOpen(w: number, h: number, title: string): string {
     `width="100%" height="100%" font-family='${FONT_FAMILY}' ` +
     // aria-hidden: the paired <table> below carries the semantics (see header).
     `aria-hidden="true" focusable="false" ` +
-    `style="${PRINT_EXACT}display:block" data-chart="${escText(title)}">`
+    // direction:ltr is load-bearing, not decorative (2026-07-25 fix): the
+    // document root is <html dir="rtl">, and SVG's own `text-anchor:
+    // start|end` resolves against the *inline base direction* (header note
+    // 1) — with nothing on the <svg> itself to stop the inheritance, every
+    // text-anchor="end"/"start" in this file silently mirrored, rendering
+    // row/column labels off-canvas. Confirmed live: without this, the
+    // shipped percentHeatmap AND this module's other charts were already
+    // rendering clipped labels in production — and so was ui/charts.ts's
+    // svgOpen(), fixed the same way, since the document root alone is
+    // sufficient to cause this regardless of whether an intermediate
+    // wrapper (like the <figure> below) also carries dir="rtl". This one
+    // declaration is what actually enforces the header comment's rule, not
+    // just documents it.
+    `style="${PRINT_EXACT}display:block;direction:ltr" data-chart="${escText(title)}">`
   );
 }
 
@@ -642,6 +670,232 @@ export function percentHeatmap(
     ...cols.map((_, ci) => {
       const raw = data?.values?.[ri]?.[ci];
       return isNum(raw) ? (clampPct(raw) as number).toFixed(digits) + "%" : "—";
+    }),
+  ]);
+  return figure(svg, srTable(title, headers, srRows));
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 3. metricMatrix — rows × MIXED-UNIT metric columns, each normalized to its
+//    own domain (a sibling of percentHeatmap, not a generalization of it — see
+//    design spec §4: "percentHeatmap: do not stretch to mixed units. Add a
+//    sibling metricMatrix() … for Grid's port/stage matrices. Source-agreement's
+//    own Grid variant keeps using percentHeatmap near-as-is [it already has] a
+//    single genuine 0-100 scale.")
+// ════════════════════════════════════════════════════════════════════════════
+
+/** One metric column of a `metricMatrix` — e.g. "الصور" (a volume column) or
+ *  "نسبة الاشتباه %" (a rate column) sitting beside it. Every column is tinted
+ *  and labelled independently; nothing here is ever compared across columns. */
+export type MetricColumn = {
+  /** Column header text. Escaped on render. */
+  label: string;
+  /** This column's OWN normalization domain `[min, max]` — printed in the
+   *  header (never a shared scale across unlike units — the whole reason this
+   *  component exists instead of stretching percentHeatmap to fit). */
+  domain: [number, number];
+  /**
+   * Tint family for this column:
+   *   • "sequential-gold" — one direction, low(neutral)→high(gold). The right
+   *     choice for plain magnitudes/rates with no "good"/"bad" polarity (e.g.
+   *     a volume column, or a rate with no fixed target to diverge around).
+   *   • "diverging-green-coral" — the domain MIDPOINT is neutral; values below
+   *     it tint green (toward the domain min), values above tint coral
+   *     (toward the domain max). The right choice when the column has a
+   *     meaningful center (e.g. a signed delta, or a rate with a known
+   *     good/bad split point).
+   */
+  ramp: "sequential-gold" | "diverging-green-coral";
+  /** One value per row, aligned by index with `rowLabels`. A column shorter
+   *  than `rowLabels` (including a genuinely empty `[]`) simply reads as
+   *  missing for the remaining rows — never a crash. null/undefined/NaN →
+   *  "—" cell, never a fake value. */
+  values: (number | null | undefined)[];
+};
+
+export type MetricMatrixData = {
+  /** Row labels, top → bottom (right-aligned in the RTL row gutter). */
+  rowLabels: string[];
+  columns: MetricColumn[];
+};
+
+export type MetricMatrixOpts = {
+  /** Explicit box — the slide body is 459px tall and usually shared. */
+  width?: number;
+  height?: number;
+  emptyNote?: string;
+  /** Force the compact tier. Default: auto for cols > 6 or rows > 8 (same
+   *  threshold percentHeatmap uses). */
+  compact?: boolean;
+  /** Width (px) of the right-hand row-header gutter. */
+  rowHeaderWidth?: number;
+  /** Screen-reader caption + the row-header column's name. */
+  caption?: string;
+  rowHeader?: string;
+};
+
+/**
+ * Mixed-unit metric matrix: rows × N columns, each column tinted on its OWN
+ * domain/ramp — never a shared scale, since unlike units (a volume next to a
+ * rate) cannot honestly share one. Cell ink is always `var(--navy)`
+ * (`cssVar("surface")`) rather than currentColor: exactly percentHeatmap's own
+ * reasoning — every fill here is opaque and theme-invariant by construction,
+ * so the ink must be too (dark navy clears 4.5:1 on every brand tone in both
+ * themes).
+ *
+ *   • 0 rows or 0 columns                → neutral "—" empty state
+ *   • a column shorter than rows (including `values: []`), or a
+ *     null/undefined/NaN entry        → "—" cell, outlined/unfilled, never a
+ *     fake value
+ *   • an all-identical column (or a zero-width domain) → every present value
+ *     in that column tints at the ramp's neutral point instead of dividing by
+ *     zero
+ *
+ * **A reversed `domain: [hi, lo]` inverts a `diverging-green-coral` column's
+ * polarity — this is an intentional, stable contract, not an accident.**
+ * `tintOf`'s midpoint/half-span math (`mid = (d0+d1)/2`, `half = (d1-d0)/2`,
+ * `signed = (v-mid)/half`) divides by `half`, so swapping the domain's two
+ * endpoints negates `half` and therefore flips the sign of every `signed`
+ * value — whatever tinted green under `[lo, hi]` tints coral under `[hi, lo]`
+ * for the exact same input values, and vice versa. A caller who wants "the
+ * larger raw value reads as the good outcome" (green) passes the domain in
+ * the order that makes that true for their column's own semantics — e.g. a
+ * "level 2 more accurate than level 1" delta column wants a positive delta to
+ * read green, which this ramp gives you by simply choosing which endpoint is
+ * `d0` vs `d1`, with no separate "invert" flag needed. See
+ * `analyticsCharts.test.ts`'s "a reversed domain … inverts … polarity" test
+ * for the reference case, and
+ * `docs/superpowers/specs/2026-07-25-deck2-fanout-remaining-pages-plan.md` §11b
+ * (`slide-s3-level-accuracy`'s الفارق column) for the first real page that
+ * depends on this.
+ */
+export function metricMatrix(
+  data: MetricMatrixData | null | undefined,
+  opts: MetricMatrixOpts = {},
+): string {
+  const w = opts.width ?? 620;
+  const h = opts.height ?? 320;
+  const title = opts.caption ?? "مصفوفة المؤشرات";
+  const rows = data?.rowLabels ?? [];
+  const cols = data?.columns ?? [];
+  if (rows.length === 0 || cols.length === 0) {
+    return emptyState(w, h, title, opts.emptyNote);
+  }
+
+  const compact = opts.compact ?? (cols.length > 6 || rows.length > 8);
+  const fs = compact ? TYPE.micro : TYPE.caption;
+  // Ink is deliberately NOT currentColor — see doc comment above.
+  const ink = cssVar("surface");
+
+  const rowHeaderW = Math.max(40, opts.rowHeaderWidth ?? (compact ? 72 : 96));
+  // Column header carries two lines: the label, then this column's own domain
+  // range beneath it in a smaller face — the mixed-unit equivalent of
+  // percentHeatmap's single shared legend, but per-column since the scales
+  // themselves differ.
+  const headLine1H = fs + 4;
+  const headLine2H = TYPE.micro + 4;
+  const colHeaderH = headLine1H + headLine2H;
+  const gridLeft = 2;
+  const gridRight = Math.max(gridLeft + 20, w - rowHeaderW);
+  const gridTop = colHeaderH;
+  const gridBottom = Math.max(gridTop + 20, h - 4);
+  const cw = (gridRight - gridLeft) / cols.length;
+  const ch = (gridBottom - gridTop) / rows.length;
+  const pad = compact ? 0.5 : 1;
+  const rx = compact ? 0 : 3;
+
+  // RTL: logical column ci is painted at the (cols.length-1-ci)-th slot from
+  // the left, i.e. cols[0] lands flush against the right-hand row gutter —
+  // same convention percentHeatmap uses.
+  const colX = (ci: number): number => gridRight - (ci + 1) * cw;
+
+  /** This column's two-stacked-opaque-rect tint for value `v` (percentHeatmap's
+   *  blend technique — no color-mix(), identical in every renderer and print).
+   *  Returns the base (bottom) fill, the overlay (top) fill, and the overlay's
+   *  fill-opacity `t`. */
+  function tintOf(v: number, col: MetricColumn): { base: string; overlay: string; t: number } {
+    const [d0, d1] = col.domain;
+    const span = d1 - d0;
+    const base = cssVar("text");
+    if (col.ramp === "sequential-gold") {
+      // Divide-by-zero guard: a zero-width (or non-finite) domain means every
+      // present value sits at the same place on the scale → the midpoint.
+      const t = Number.isFinite(span) && span !== 0 ? clamp((v - d0) / span, 0, 1) : 0.5;
+      return { base, overlay: cssVar("primary"), t };
+    }
+    // diverging-green-coral: the domain MIDPOINT is neutral; below it tints
+    // green (toward d0), above it tints coral (toward d1).
+    const mid = (d0 + d1) / 2;
+    const half = span / 2;
+    if (!Number.isFinite(half) || half === 0) return { base, overlay: cssVar("primary"), t: 0.5 };
+    const signed = clamp((v - mid) / half, -1, 1);
+    return signed >= 0
+      ? { base, overlay: cssVar("danger"), t: signed }
+      : { base, overlay: cssVar("success"), t: -signed };
+  }
+
+  let cells = "";
+  rows.forEach((rowLabel, ri) => {
+    const y = gridTop + ri * ch;
+    cells +=
+      `<text x="${r(w - 4)}" y="${r(y + ch / 2)}" text-anchor="end" dominant-baseline="middle" ` +
+      `font-size="${fs}" fill="currentColor" fill-opacity="0.78">${escText(rowLabel)}</text>`;
+    cols.forEach((col, ci) => {
+      const x = colX(ci);
+      const raw = col.values[ri];
+      const v = isNum(raw) ? raw : null;
+      const cx = x + pad;
+      const cy = y + pad;
+      const cwi = Math.max(0, cw - pad * 2);
+      const chi = Math.max(0, ch - pad * 2);
+      if (v === null) {
+        // Missing data — outlined, unfilled, em-dash. Never a fake value.
+        cells +=
+          `<rect x="${r(cx)}" y="${r(cy)}" width="${r(cwi)}" height="${r(chi)}" rx="${rx}" ` +
+          `fill="none" stroke="currentColor" stroke-opacity="0.22" stroke-width="1" stroke-dasharray="3 3"/>` +
+          `<text x="${r(x + cw / 2)}" y="${r(y + ch / 2)}" text-anchor="middle" dominant-baseline="middle" ` +
+          `font-size="${fs}" fill="currentColor" fill-opacity="0.55">—</text>`;
+        return;
+      }
+      const { base, overlay, t } = tintOf(v, col);
+      // Two stacked rects = a literal sRGB blend base→overlay. Opaque, so the
+      // cell looks identical in the dark and light themes and in print.
+      cells +=
+        `<rect x="${r(cx)}" y="${r(cy)}" width="${r(cwi)}" height="${r(chi)}" rx="${rx}" ` +
+        `fill="${base}" style="${PRINT_EXACT}"/>` +
+        `<rect x="${r(cx)}" y="${r(cy)}" width="${r(cwi)}" height="${r(chi)}" rx="${rx}" ` +
+        `fill="${overlay}" fill-opacity="${r(t)}" style="${PRINT_EXACT}"/>` +
+        `<text x="${r(x + cw / 2)}" y="${r(y + ch / 2)}" text-anchor="middle" dominant-baseline="middle" ` +
+        `font-size="${fs}" font-weight="700" fill="${ink}">${escText(fmtTick(v))}</text>`;
+    });
+  });
+
+  // Column headers along the top: label, then this column's own domain range
+  // beneath it — same RTL slot mapping as the cells.
+  const colHeads = cols
+    .map((col, ci) => {
+      const cxm = colX(ci) + cw / 2;
+      return (
+        `<text x="${r(cxm)}" y="${r(headLine1H - 2)}" text-anchor="middle" ` +
+        `font-size="${fs}" font-weight="700" fill="currentColor" fill-opacity="0.82">${escText(col.label)}</text>` +
+        `<text x="${r(cxm)}" y="${r(headLine1H + headLine2H - 3)}" text-anchor="middle" ` +
+        `font-size="${TYPE.micro}" fill="currentColor" fill-opacity="0.55">${escText(
+          `${fmtTick(col.domain[0])}–${fmtTick(col.domain[1])}`,
+        )}</text>`
+      );
+    })
+    .join("");
+
+  const svg = svgOpen(w, h, title) + colHeads + cells + `</svg>`;
+
+  // Screen-reader table keeps the LOGICAL column order and carries dir="rtl"
+  // — assistive tech and print both expect document order here.
+  const headers = [opts.rowHeader ?? "الصف", ...cols.map((c) => c.label)];
+  const srRows = rows.map((rowLabel, ri) => [
+    rowLabel,
+    ...cols.map((col) => {
+      const raw = col.values[ri];
+      return isNum(raw) ? fmtTick(raw) : "—";
     }),
   ]);
   return figure(svg, srTable(title, headers, srRows));

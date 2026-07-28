@@ -196,6 +196,36 @@ const THREE_STRATA: ExecutiveReportRow[] = [
   ...strataRows("منخفض", { correctClean: 12, correctSusp: 2, missedSusp: 4, excessSusp: 2 }, "lo"),
 ];
 
+/**
+ * Uneven strata sizes (10 / 10 / 80) so a naive AVERAGE of the three strata's
+ * own percentages measurably disagrees with the honest POOLED figure computed
+ * from raw counts — the same tripwire shape this fan-out's sibling pages
+ * (e.g. markingImpact's PRESENT_UNEVEN/ABSENT_UNEVEN) already use.
+ *   عالي:   10 images, 10 accurate → 100.0%.
+ *   متوسط:  10 images, 10 accurate → 100.0%.
+ *   منخفض:  80 images, 20 accurate →  25.0%.
+ *   Naive average = (100.0 + 100.0 + 25.0) / 3 = 75.0%.
+ *   Honest pooled = (10 + 10 + 20) / (10 + 10 + 80) = 40 / 100 = 40.0%.
+ */
+const UNEVEN_STRATA: ExecutiveReportRow[] = [
+  ...strataRows("عالي", { correctClean: 10 }, "hi"),
+  ...strataRows("متوسط", { correctClean: 10 }, "md"),
+  ...strataRows("منخفض", { correctClean: 20, missedSusp: 60 }, "lo"),
+];
+
+/**
+ * عالي deliberately scores LOWEST of the three (40.0%), متوسط highest
+ * (90.0%), منخفض in between (60.0%) — neither ascending nor descending in
+ * fixed عالي→متوسط→منخفض display order, so a "sort ascending" OR a "sort
+ * descending by accuracy" regression would both visibly reorder these rows
+ * away from the fixed order the plan requires.
+ */
+const NONSORTED_STRATA: ExecutiveReportRow[] = [
+  ...strataRows("عالي", { correctClean: 4, missedSusp: 6 }, "hi"), // 40.0%
+  ...strataRows("متوسط", { correctClean: 9, missedSusp: 1 }, "md"), // 90.0%
+  ...strataRows("منخفض", { correctClean: 6, missedSusp: 4 }, "lo"), // 60.0%
+];
+
 // ── Shell ───────────────────────────────────────────────────────────────────
 
 describe("qualityImpactSlide — slide shell", () => {
@@ -208,11 +238,19 @@ describe("qualityImpactSlide — slide shell", () => {
     expect(html).toContain("دقة القرارات حسب مستوى جودة الصورة: عالي، متوسط، منخفض.");
   });
 
-  it("renders one body in production and four variant panels in preview", () => {
+  it("renders one body in production and four design-system panels in preview", () => {
     const model = modelOf(THREE_STRATA);
+    // Production (variantPreview=false) is slot 0 alone — its own markup is
+    // unchanged by the fan-out below.
     expect(occurrences(render(model, false), "v2-qi-tiles")).toBe(1);
     const preview = render(model, true);
-    expect(occurrences(preview, "v2-qi-tiles")).toBe(4);
+    // Preview renders all 4 design-system bodies now — Ledger/Briefing/Grid
+    // each have their OWN markup (fan-out plan §11f, batch B3 item 4), so
+    // only slot 0's own panel still carries "v2-qi-tiles"; the other three
+    // are counted via the panel wrapper itself instead.
+    expect(occurrences(preview, "v2-qi-tiles")).toBe(1);
+    const panels = [...preview.matchAll(/<div class="v2-variant-panel(?: active)?" data-variant-index="\d"/g)];
+    expect(panels.length).toBe(4);
     expect(preview).toContain('data-slide-id="slide-s3-quality"');
   });
 
@@ -301,7 +339,9 @@ describe("qualityImpactSlide — three populated strata", () => {
       ...strataRows("متوسط", { correctClean: 17, correctSusp: 2, missedSusp: 1 }, "md"),
       ...strataRows("منخفض", { correctClean: 17, correctSusp: 2, missedSusp: 1 }, "lo"),
     ]);
-    expect(render(inverted)).toContain('فارق عالي↔منخفض: <span dir="ltr">-15.0</span> نقطة');
+    // Proper Unicode minus (U+2212), not an ASCII hyphen — 2026-07-28 fix (C4),
+    // aligned with markingImpact.ts/levelAccuracy.ts's signed-delta glyph.
+    expect(render(inverted)).toContain('فارق عالي↔منخفض: <span dir="ltr">−15.0</span> نقطة');
   });
 
   it("labels each stratum with its sufficiency band in words, not colour alone", () => {
@@ -455,5 +495,221 @@ describe("qualityImpactSlide — determinism and CSS", () => {
     expect(QUALITY_IMPACT_CSS).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
     expect(QUALITY_IMPACT_CSS).toContain(".v2-risk-tile-grid.v2-qi-tiles");
     expect(QUALITY_IMPACT_CSS).toContain(".v2-qi .insuff");
+  });
+});
+
+// ── Ledger/Briefing/Grid fan-out (2026-07-25 plan §11f, batch B3 item 4) ────
+// Preview mode (`variantPreview: true`) renders all 4 design-system bodies in
+// one HTML string (each wrapped in its own `.v2-variant-panel`), so every
+// assertion below just searches that combined string — the same technique
+// this fan-out's sibling test files (markingImpact.test.ts, etc.) use to
+// reach the non-default slots. Panel boundaries are found via each system's
+// own page-local hook (`v2-lg-quality` / `v2-bf-quality` / `v2-gd-quality`),
+// which appear in that fixed order in the markup.
+
+function preview(model: ReportModel): string {
+  return qualityImpactSlide(model, 21, 30, true);
+}
+
+function ledgerPanel(html: string): string {
+  return html.slice(html.indexOf("v2-lg-quality"), html.indexOf("v2-bf-quality"));
+}
+function briefingPanel(html: string): string {
+  return html.slice(html.indexOf("v2-bf-quality"), html.indexOf("v2-gd-quality"));
+}
+function gridPanelOf(html: string): string {
+  return html.slice(html.indexOf("v2-gd-quality"));
+}
+
+const CAVEAT_TEXT = "مقارنة وصفية بين مجموعات غير متكافئة؛ لا تُثبت أثرًا سببيًا لجودة الصورة.";
+
+const REASONS: ReasonCount[] = [
+  { reason: "تشويش في الصورة", count: 12, percentage: 40 },
+  { reason: "زاوية غير مناسبة", count: 9, percentage: 30 },
+  { reason: "تعرض ضوئي منخفض", count: 6, percentage: 20 },
+];
+
+describe("qualityImpactSlide — fan-out shell (all 4 panels present, caveat in each)", () => {
+  it("renders a Ledger, a Briefing and a Grid panel alongside slot 0, in that order", () => {
+    const html = preview(modelOf(THREE_STRATA));
+    const lgIdx = html.indexOf("v2-lg-quality");
+    const bfIdx = html.indexOf("v2-bf-quality");
+    const gdIdx = html.indexOf("v2-gd-quality");
+    expect(lgIdx).toBeGreaterThan(-1);
+    expect(bfIdx).toBeGreaterThan(lgIdx);
+    expect(gdIdx).toBeGreaterThan(bfIdx);
+  });
+
+  it("carries the non-causal caveat verbatim in the Ledger, Briefing and Grid panels", () => {
+    const html = preview(modelOf(THREE_STRATA));
+    expect(ledgerPanel(html)).toContain(CAVEAT_TEXT);
+    expect(briefingPanel(html)).toContain(CAVEAT_TEXT);
+    expect(gridPanelOf(html)).toContain(CAVEAT_TEXT);
+  });
+
+  it("shows the shared empty state (not a system-specific one) in all three new panels when no strata exist", () => {
+    const html = preview(modelOf([reportRow({ imageQuality: null })]));
+    expect(ledgerPanel(html)).toContain("v2-qi-empty");
+    expect(briefingPanel(html)).toContain("v2-qi-empty");
+    expect(gridPanelOf(html)).toContain("v2-qi-empty");
+    expect(ledgerPanel(html)).toContain(CAVEAT_TEXT);
+    expect(briefingPanel(html)).toContain(CAVEAT_TEXT);
+    expect(gridPanelOf(html)).toContain(CAVEAT_TEXT);
+  });
+});
+
+describe("qualityImpactSlide — Ledger (fan-out)", () => {
+  it("renders two stacked tables: the strata table and the reasons table", () => {
+    const html = preview(modelOf(THREE_STRATA, { lowQualityReasons: REASONS, lowQualityCount: 20, mediumQualityCount: 10 }));
+    const ledger = ledgerPanel(html);
+    expect(ledger).toContain('<div class="v2-lg-split stack">');
+    expect(ledger).toContain("<th>المستوى</th><th>العيّنة</th><th>الدقة</th><th>الاشتباه الفائت</th>");
+    expect(ledger).toContain("<th>أساس الاشتباه</th><th>كفاية البيانات</th>");
+    expect(ledger).toContain("<th>السبب</th><th>العدد</th><th>النسبة</th>");
+  });
+
+  it("pools the totals row's accuracy from raw counts, never averaging the three strata's own percentages", () => {
+    const html = preview(modelOf(UNEVEN_STRATA));
+    const ledger = ledgerPanel(html);
+    // Every stratum's own accuracy, unpooled.
+    expect(ledger).toContain(">100.0%<");
+    expect(ledger).toContain(">25.0%<");
+    // Honest pooled totals-row figure: (10 + 10 + 20) / 100 = 40.0%.
+    expect(ledger).toContain("<td>الإجمالي</td><td>100</td><td>40.0%</td>");
+    // The naive average of 100.0%/100.0%/25.0% (75.0%) must NOT appear as the
+    // totals-row accuracy.
+    expect(ledger).not.toContain("<td>الإجمالي</td><td>100</td><td>75.0%</td>");
+  });
+
+  it("gives the reasons table a title matching the reasons card's own existing subtitle text", () => {
+    const html = preview(
+      modelOf(THREE_STRATA, { lowQualityReasons: REASONS, lowQualityCount: 20, mediumQualityCount: 10 }),
+    );
+    const ledger = ledgerPanel(html);
+    // Same base (30), same phrasing, as reasonsPanel's own <small> subtitle.
+    expect(ledger).toContain('<div class="v2-lg-table-card-title">من الصور منخفضة/متوسطة الجودة (30)</div>');
+    expect(gridPanelOf(html)).toContain("<small>من الصور منخفضة/متوسطة الجودة (30)</small>");
+  });
+});
+
+describe("qualityImpactSlide — Briefing (fan-out)", () => {
+  it("keeps the three strata in FIXED عالي→متوسط→منخفض order even though sorting by accuracy would reorder them", () => {
+    // عالي 40.0% (lowest), متوسط 90.0% (highest), منخفض 60.0% (middle) — not
+    // sorted ascending or descending, so either sort direction would visibly
+    // reorder these rows away from the fixed order.
+    const html = preview(modelOf(NONSORTED_STRATA));
+    const briefing = briefingPanel(html);
+    const rankSection = briefing.slice(briefing.indexOf("v2-bf-rank"));
+    const posHigh = rankSection.indexOf("40.0%");
+    const posMid = rankSection.indexOf("90.0%");
+    const posLow = rankSection.indexOf("60.0%");
+    expect(posHigh).toBeGreaterThan(-1);
+    expect(posMid).toBeGreaterThan(-1);
+    expect(posLow).toBeGreaterThan(-1);
+    expect(posHigh).toBeLessThan(posMid);
+    expect(posMid).toBeLessThan(posLow);
+    // Labels themselves are in the same fixed order too.
+    const labelHigh = rankSection.indexOf(">عالي<");
+    const labelMid = rankSection.indexOf(">متوسط<");
+    const labelLow = rankSection.indexOf(">منخفض<");
+    expect(labelHigh).toBeLessThan(labelMid);
+    expect(labelMid).toBeLessThan(labelLow);
+  });
+
+  it("uses the accuracy gradient as the lede, mirroring trendPanel's own null gate when it's not publishable", () => {
+    const thin = modelOf([
+      ...strataRows("عالي", { correctClean: 17, correctSusp: 2, missedSusp: 1 }, "hi"),
+      ...strataRows("متوسط", { correctClean: 15, correctSusp: 2, missedSusp: 2, excessSusp: 1 }, "md"),
+      // n = 5 → "insufficient" → never rankable → accuracy null → gradient null.
+      ...strataRows("منخفض", { correctClean: 2, correctSusp: 1, missedSusp: 2 }, "lo"),
+    ]);
+    const html = preview(thin);
+    // Slot 0's own trendPanel gate renders the same "—" fallback for this model.
+    expect(html).toContain('فارق عالي↔منخفض: <span class="insuff">—</span>');
+    // Briefing's lede mirrors the SAME gate, not a parallel/looser one.
+    const briefing = briefingPanel(html);
+    expect(briefing).toContain("تدرّج الدقة — بيانات غير كافية لعالي أو منخفض الجودة");
+    expect(briefing).toContain('<span class="insuff">—</span>');
+  });
+
+  it("prints the real signed gradient and the high/low figures when both ends are rankable", () => {
+    const html = preview(modelOf(THREE_STRATA));
+    const briefing = briefingPanel(html);
+    // THREE_STRATA: عالي 95.0%, منخفض 70.0% → gradient +25.0.
+    expect(briefing).toContain('<span dir="ltr">+25.0</span>');
+    // The signed figure embedded in the label is ALSO bidi-isolated
+    // (2026-07-28 fix, C4) — same dir="ltr" wrap as the standalone figure.
+    expect(briefing).toContain(
+      'تدرّج الدقة <span dir="ltr">+25.0</span> نقطة — عالي 95.0% مقابل منخفض 70.0%',
+    );
+  });
+
+  it("Briefing body order is lede → support → rank, not lede → rank → support (2026-07-28 whole-branch-review fix, B1)", () => {
+    const html = preview(modelOf(THREE_STRATA));
+    const briefing = briefingPanel(html);
+    const ledeIdx = briefing.indexOf('class="v2-bf-lede"');
+    const supportIdx = briefing.indexOf('class="v2-totals-band"');
+    const rankIdx = briefing.indexOf('class="v2-bf-rank ');
+    expect(ledeIdx).toBeGreaterThan(-1);
+    expect(supportIdx).toBeGreaterThan(-1);
+    expect(rankIdx).toBeGreaterThan(-1);
+    expect(ledeIdx).toBeLessThan(supportIdx);
+    expect(supportIdx).toBeLessThan(rankIdx);
+  });
+
+  it("drops the reasons table entirely — one recall payload, not completeness", () => {
+    const html = preview(
+      modelOf(THREE_STRATA, { lowQualityReasons: REASONS, lowQualityCount: 20, mediumQualityCount: 10 }),
+    );
+    const briefing = briefingPanel(html);
+    expect(briefing).not.toContain("أبرز أسباب انخفاض الجودة");
+    expect(briefing).not.toContain("السبب");
+    expect(briefing).not.toContain("تشويش في الصورة");
+    // Confirms the reasons content genuinely exists elsewhere on the page (it
+    // isn't just missing everywhere due to a fixture mistake).
+    expect(ledgerPanel(html)).toContain("تشويش في الصورة");
+    expect(gridPanelOf(html)).toContain("تشويش في الصورة");
+  });
+
+  it("reuses slot 0's totals band verbatim as the support strip", () => {
+    const html = preview(modelOf(THREE_STRATA, { acceptableQualityRate: 88.8 }));
+    const briefing = briefingPanel(html);
+    expect(briefing).toContain("88.8%");
+    expect(briefing).toContain("نسبة الجودة المقبولة");
+  });
+});
+
+describe("qualityImpactSlide — Grid (fan-out)", () => {
+  it("keeps a partially-insufficient stratum's real counts while nulling only its rate columns", () => {
+    const thin = modelOf([
+      ...strataRows("عالي", { correctClean: 17, correctSusp: 2, missedSusp: 1 }, "hi"),
+      ...strataRows("متوسط", { correctClean: 15, correctSusp: 2, missedSusp: 2, excessSusp: 1 }, "md"),
+      // n = 5 (insufficient), suspiciousBase = correctSusp(1) + missedSusp(2) = 3.
+      ...strataRows("منخفض", { correctClean: 2, correctSusp: 1, missedSusp: 2 }, "lo"),
+    ]);
+    const html = preview(thin);
+    const grid = gridPanelOf(html);
+    // Screen-reader row: rate columns "—", count columns real (5 sample, 3 basis).
+    expect(grid).toContain('<th scope="row">منخفض</th><td>—</td><td>—</td><td>5</td><td>3</td>');
+  });
+
+  it("renders one matrix beside the SAME reasons card, unchanged", () => {
+    const html = preview(
+      modelOf(THREE_STRATA, { lowQualityReasons: REASONS, lowQualityCount: 20, mediumQualityCount: 10 }),
+    );
+    const grid = gridPanelOf(html);
+    expect(grid).toContain('<div class="v2-gd-split">');
+    expect(grid).toContain("مصفوفة جودة الصورة");
+    expect(grid).toContain("أبرز أسباب انخفاض الجودة");
+    expect(grid).toContain("من الصور منخفضة/متوسطة الجودة (30)");
+  });
+
+  it("uses sequential-gold on all four columns, with the sample and basis columns on their own [0,max] domains", () => {
+    const html = preview(modelOf(THREE_STRATA));
+    const grid = gridPanelOf(html);
+    expect(grid).toContain("الدقة");
+    expect(grid).toContain("الاشتباه الفائت");
+    expect(grid).toContain("العيّنة");
+    expect(grid).toContain("أساس الاشتباه");
   });
 });

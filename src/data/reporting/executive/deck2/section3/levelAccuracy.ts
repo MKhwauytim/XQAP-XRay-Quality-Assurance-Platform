@@ -33,17 +33,26 @@ import type { DecisionLevel, OutcomeClass } from "../../model/decisionFactTable"
 import type { ReportModel } from "../../model/reportModel";
 import { esc, fmtNum, fmtPct } from "../../primitives";
 import { icon } from "../../ui/icons";
+import { metricMatrix } from "../../ui/analyticsCharts";
 import {
   ACCURACY_TARGET,
   BASE_ROWS_PER_PAGE,
+  briefingLede,
+  briefingRankList,
+  briefingSupport,
+  gridPanel,
+  ledgerIdx,
+  ledgerPortCard,
+  maxOf,
   pctCell,
   planPortPages,
+  portCountPhrase,
   portTableCard,
   rateOf,
   threshCell,
   v2Slide,
 } from "../slideKit";
-import type { SlideBuilder } from "../slideKit";
+import type { BriefingRankItem, SlideBuilder } from "../slideKit";
 
 /** Matches `foldBy`'s fallback key in model/aggregates.ts, so a port with no
  *  name reconciles against `model.portAccuracy` instead of splitting into two
@@ -264,6 +273,262 @@ function levelTable(
   });
 }
 
+/** Whether both levels have an honest, comparable rate at this port — the
+ *  same gate `deltaCell` already applies (evaluable > 0 on both levels AND
+ *  both above the data-sufficiency cut). Named so the Briefing/Grid variants
+ *  below share one definition of "rankable" with the Ledger table instead of
+ *  re-deriving it. */
+function levelDelta(p: LevelAccuracyRow): number | null {
+  if (p.l1.accuracy === null || p.l2.accuracy === null || !p.l1.rankable || !p.l2.rankable) {
+    return null;
+  }
+  return p.l2.accuracy - p.l1.accuracy;
+}
+
+/**
+ * Signed points figure for Briefing's `valueText` — same rounding/sign
+ * convention as `deltaSpan` (the Ledger figure above: round to 0.1, "+"/"−"
+ * sign always printed), but WITHOUT `deltaSpan`'s `.v2-lvlacc-delta` tone
+ * class — the row's colour comes from `briefingRankList`'s own per-item
+ * `tone` override (green/coral), not from this span. `dir="ltr"` is still
+ * needed on its own: a signed Latin-numeral run inside an RTL rank row would
+ * otherwise reorder.
+ */
+function signedPointsText(points: number): string {
+  const rounded = Math.round(points * 10) / 10;
+  const sign = rounded > 0 ? "+" : rounded < 0 ? "−" : "";
+  return `<span dir="ltr">${sign}${Math.abs(rounded).toFixed(1)}</span>`;
+}
+
+/**
+ * Ledger-system level-accuracy table (fan-out plan §11b, batch B2b) —
+ * near-clone of `levelTable`'s columns through the shared `ledgerPortCard`
+ * (P2), plus an ordinal badge. `deltaSpan` and the detection tooltip carry
+ * over unchanged — a signed figure is data, not a chart, and per-port
+ * detection rate has nowhere else to go without growing the column count.
+ */
+function ledgerLevelTable(
+  title: string,
+  rows: LevelAccuracyRow[],
+  compact: boolean,
+): string {
+  const span = 5;
+  const trs = rows
+    .map(
+      (p, i) =>
+        `<tr><td title="${esc(detectionTooltip(p))}">${ledgerIdx(i)}${esc(p.name)}</td>` +
+        `${accuracyCell(p.l1)}${accuracyCell(p.l2)}${deltaCell(p.l1, p.l2)}` +
+        `<td><span class="v2-lvlacc-n" dir="ltr">${esc(nText(p.l1.evaluable, p.l2.evaluable))}</span></td></tr>`,
+    )
+    .join("");
+
+  const totalL1 = statsOf(sumCounts(rows.map((p) => p.l1.counts)));
+  const totalL2 = statsOf(sumCounts(rows.map((p) => p.l2.counts)));
+  const totalDelta =
+    totalL1.accuracy !== null && totalL2.accuracy !== null
+      ? deltaSpan(totalL2.accuracy - totalL1.accuracy)
+      : `<span class="insuff">—</span>`;
+  const totalsRow =
+    `<tr><td>الإجمالي</td><td>${pctCell(totalL1.accuracy)}</td><td>${pctCell(totalL2.accuracy)}</td>` +
+    `<td>${totalDelta}</td><td><span class="v2-lvlacc-n" dir="ltr">${esc(nText(totalL1.evaluable, totalL2.evaluable))}</span></td></tr>`;
+
+  return ledgerPortCard({
+    title,
+    theadCells:
+      `<th>المنفذ</th><th>دقة المستوى الأول</th><th>دقة المستوى الثاني</th>` +
+      `<th title="الفارق بالنقاط المئوية (المستوى الثاني ناقص المستوى الأول)">الفارق</th><th>العيّنة</th>`,
+    bodyRowsHtml: trs,
+    totalsRowHtml: totalsRow,
+    span,
+    rowCount: 0,
+    compact,
+  });
+}
+
+/**
+ * Briefing-system level-accuracy rank list (fan-out plan §11b) — the one
+ * page in this batch with a genuinely SIGNED bar magnitude. Rank rows are
+ * sorted by `|الفارق| desc` among RANKABLE ports only (`levelDelta` !== null);
+ * `scale: {kind:"auto"}` is computed by `briefingRankList` over `item.value`,
+ * which this function fills with `Math.abs(delta)` — never the signed value —
+ * because a negative magnitude would break the scale/bar-width math (a bar
+ * cannot have a negative percentage width). The DISPLAYED `valueText` still
+ * carries the real signed number (`signedPointsText`), and the row's `tone`
+ * is overridden per-row: green when `delta > 0` (level 2 more accurate),
+ * coral when `delta < 0` — the sign is always printed too, never colour alone.
+ *
+ * Unrankable ports (`levelDelta(p) === null`) are excluded from ranking and
+ * folded into a bar-less remainder, pooled from SUMMED raw counts via
+ * `statsOf(sumCounts(...))` — never averaging each folded port's own delta —
+ * same anti-averaging discipline, and the same `rawForFold`-parallel-to-
+ * `rankItems` technique, every other exclusion in this fan-out uses.
+ */
+function briefingLevelRank(landChunk: LevelAccuracyRow[], seaChunk: LevelAccuracyRow[]): string {
+  const combinedAll = [...landChunk, ...seaChunk];
+  if (combinedAll.length === 0) {
+    return `<div class="v2-sys-brief v2-bf-level-accuracy">
+      <div class="v2-bf-lede"><div class="v2-bf-lede-figure blue"><span class="insuff">—</span></div></div>
+    </div>`;
+  }
+
+  // Pooled lede delta: from SUMMED integer counts, never from averaging each
+  // port's own (already-rounded) rate — same discipline `levelTable`'s own
+  // totals row already follows.
+  const totalL1 = statsOf(sumCounts(combinedAll.map((p) => p.l1.counts)));
+  const totalL2 = statsOf(sumCounts(combinedAll.map((p) => p.l2.counts)));
+  const pooledDelta =
+    totalL1.accuracy !== null && totalL2.accuracy !== null ? totalL2.accuracy - totalL1.accuracy : null;
+
+  const supportStrip = briefingSupport([
+    { iconName: "gauge", value: pctCell(totalL1.accuracy), label: "دقة المستوى الأول" },
+    { iconName: "gauge", value: pctCell(totalL2.accuracy), label: "دقة المستوى الثاني" },
+    { iconName: "scan", value: fmtNum(totalL1.evaluable), label: "العيّنة الإجمالية" },
+  ]);
+  const basis = `${portCountPhrase(combinedAll.length)} · ${fmtNum(totalL1.evaluable)} قرار قابل للتقييم`;
+
+  const rankable = combinedAll
+    .map((p) => ({ p, delta: levelDelta(p) }))
+    .filter((x): x is { p: LevelAccuracyRow; delta: number } => x.delta !== null)
+    .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+  const excluded = combinedAll.filter((p) => levelDelta(p) === null);
+
+  const rankItems: BriefingRankItem[] = rankable.map(({ p, delta }) => ({
+    label: p.name,
+    value: Math.abs(delta),
+    valueText: signedPointsText(delta),
+    secondaryText: `الأول ${pctCell(p.l1.accuracy)} · الثاني ${pctCell(p.l2.accuracy)}`,
+    tone: delta > 0 ? "green" : delta < 0 ? "coral" : undefined,
+  }));
+  // Raw per-item L1/L2 counts, PARALLEL to rankItems (plus one synthetic slot
+  // pooling the whole excluded group), so foldRemainder can recover a real
+  // pooled delta for whatever tail actually gets folded — same technique
+  // briefingQualityRank/briefingAccuracyRank use (slides.ts).
+  const rawForFold: Array<{ l1: LevelCounts; l2: LevelCounts }> = rankable.map((r) => ({
+    l1: r.p.l1.counts,
+    l2: r.p.l2.counts,
+  }));
+  if (excluded.length > 0) {
+    rankItems.push({
+      label: `منافذ دون حد الكفاية (${fmtNum(excluded.length)})`,
+      value: null,
+      valueText: "—",
+      secondaryText: "",
+    });
+    rawForFold.push({
+      l1: sumCounts(excluded.map((p) => p.l1.counts)),
+      l2: sumCounts(excluded.map((p) => p.l2.counts)),
+    });
+  }
+
+  const rankHtml = briefingRankList({
+    items: rankItems,
+    tone: "blue",
+    scale: { kind: "auto" },
+    foldRemainder: (folded) => {
+      const raw = rawForFold.slice(rawForFold.length - folded.length);
+      const totL1 = statsOf(sumCounts(raw.map((r) => r.l1)));
+      const totL2 = statsOf(sumCounts(raw.map((r) => r.l2)));
+      const delta = totL1.accuracy !== null && totL2.accuracy !== null ? totL2.accuracy - totL1.accuracy : null;
+      const isPureExclusion = excluded.length > 0 && folded.length === 1 && folded[0].value === null;
+      return {
+        label: isPureExclusion
+          ? `منافذ دون حد الكفاية (${fmtNum(excluded.length)})`
+          : `بقية المنافذ (${fmtNum(folded.length)})`,
+        value: delta !== null ? Math.abs(delta) : null,
+        valueText: delta !== null ? signedPointsText(delta) : "—",
+        secondaryText: totL1.evaluable > 0 ? `الأول ${pctCell(totL1.accuracy)} · الثاني ${pctCell(totL2.accuracy)}` : "",
+        rest: true,
+      };
+    },
+  });
+
+  return `<div class="v2-sys-brief v2-bf-level-accuracy">
+    ${briefingLede({
+      figure: pooledDelta !== null ? signedPointsText(pooledDelta) : `<span class="insuff">—</span>`,
+      tone: "blue",
+      label:
+        pooledDelta !== null
+          ? `فارق المستويين ${signedPointsText(pooledDelta)} نقطة — الثاني ${pctCell(totalL2.accuracy)} مقابل الأول ${pctCell(totalL1.accuracy)}`
+          : `فارق المستويين — لا تتوفر بيانات كافية للمقارنة`,
+      basis,
+    })}
+    ${supportStrip}
+    ${rankHtml}
+  </div>`;
+}
+
+/**
+ * Grid-system level-accuracy matrix (fan-out plan §11b) — rows = ports,
+ * columns دقة الأول / دقة الثاني (`[0,100] sequential-gold`), الفارق, and
+ * العيّنة (`[0,max] sequential-gold`). الفارق is the ONE column in this
+ * fan-out with a genuine midpoint (zero: neither level is "better" by
+ * default) — it uses `diverging-green-coral` with a REVERSED symmetric
+ * domain `[m, -m]` (`m` = max `|delta|` among this panel's OWN rankable
+ * rows), per `metricMatrix`'s documented reversed-domain contract (P0, see
+ * that function's doc comment and its "reversed domain … inverts polarity"
+ * test): a NORMAL domain `[-m, m]` would tint a positive delta (level 2 more
+ * accurate — the reading this page wants readers to see as "good") CORAL,
+ * because `tintOf` paints values near the domain's high endpoint (`d1`)
+ * coral and values near the low endpoint (`d0`) green. Reversing the
+ * endpoints to `[m, -m]` swaps which raw value sits near `d0` vs `d1`
+ * without touching `tintOf`'s math at all, so a positive delta (near `+m`,
+ * now `d0`) tints green and a negative delta (near `-m`, now `d1`) tints
+ * coral — verified against `metricMatrix`'s own "a reversed domain … inverts
+ * … polarity" unit test in `analyticsCharts.test.ts`, not just read off the
+ * plan doc's notation.
+ * Unrankable ports pass `null` for both accuracy columns AND الفارق (never a
+ * fabricated delta) while still showing العيّنة.
+ */
+function gridLevelMatrix(
+  title: string,
+  rows: LevelAccuracyRow[],
+  variant: "land" | "sea",
+  compact: boolean,
+): string {
+  const deltas = rows.map((p) => levelDelta(p)).filter((d): d is number => d !== null);
+  const m = Math.max(1, ...deltas.map((d) => Math.abs(d)));
+  const sampleOf = (p: LevelAccuracyRow) => Math.max(p.l1.evaluable, p.l2.evaluable);
+  const matrix = metricMatrix(
+    {
+      rowLabels: rows.map((p) => p.name),
+      columns: [
+        {
+          label: "دقة الأول",
+          domain: [0, 100],
+          ramp: "sequential-gold",
+          values: rows.map((p) => (p.l1.rankable ? p.l1.accuracy : null)),
+        },
+        {
+          label: "دقة الثاني",
+          domain: [0, 100],
+          ramp: "sequential-gold",
+          values: rows.map((p) => (p.l2.rankable ? p.l2.accuracy : null)),
+        },
+        {
+          label: "الفارق",
+          // Reversed domain — see this function's doc comment above.
+          domain: [m, -m],
+          ramp: "diverging-green-coral",
+          values: rows.map((p) => levelDelta(p)),
+        },
+        {
+          label: "العيّنة",
+          domain: [0, maxOf(rows.map(sampleOf))],
+          ramp: "sequential-gold",
+          values: rows.map(sampleOf),
+        },
+      ],
+    },
+    { width: 620, height: 320, compact, caption: `مصفوفة ${title}`, rowHeader: "المنفذ", emptyNote: "لا توجد بيانات" },
+  );
+  return gridPanel({
+    title,
+    sub: `${fmtNum(rows.length)} منفذ · الفارق: أخضر = الثاني أدق`,
+    variant,
+    chartHtml: matrix,
+  });
+}
+
 /** Shown when NOT ONE decision in the month carries a reviewer verdict. States
  *  the situation in words and prints no figure at all — the alternative (a
  *  table of «—» rows, or worse a wall of 0%) would read as a measured result. */
@@ -299,6 +564,15 @@ export function levelAccuracySlideBuilders(
       const body = isEmpty
         ? emptyState()
         : `<div class="v2-port-split v2-lvlacc">${levelTable("المنافذ البرية", landChunk, "land", plan.compact)}${levelTable("المنافذ البحرية", seaChunk, "sea", plan.compact)}</div>`;
+      const ledgerBody = isEmpty
+        ? emptyState()
+        : `<div class="v2-sys-ledger v2-lg-level-accuracy"><div class="v2-lg-split">${ledgerLevelTable("المنافذ البرية", landChunk, plan.compact)}${ledgerLevelTable("المنافذ البحرية", seaChunk, plan.compact)}</div></div>`;
+      const briefingBody = isEmpty
+        ? emptyState()
+        : briefingLevelRank(landChunk, seaChunk);
+      const gridBody = isEmpty
+        ? emptyState()
+        : `<div class="v2-sys-grid v2-gd-level-accuracy"><div class="v2-gd-split">${gridLevelMatrix("المنافذ البرية", landChunk, "land", plan.compact)}${gridLevelMatrix("المنافذ البحرية", seaChunk, "sea", plan.compact)}</div></div>`;
       return v2Slide({
         id,
         title: `دقة إجابات المستوى الأول والثاني${cont}`,
@@ -306,7 +580,7 @@ export function levelAccuracySlideBuilders(
         iconName: "layers",
         headline: `دقة إجابات المستوى الأول والثاني${cont}`,
         subhead: "مقارنة قرار كل مستوى بنتيجة المراجع، لكل منفذ.",
-        bodyVariants: [body, body, body, body],
+        bodyVariants: [body, ledgerBody, briefingBody, gridBody],
         variantPreview,
         num,
         total,
@@ -338,6 +612,26 @@ export function levelAccuracySlideBuilders(
  */
 export const LEVEL_ACCURACY_CSS = `
 /* Section 3 — دقة إجابات المستوى الأول والثاني */
+/* Ledger/Briefing/Grid namespacing hooks (fan-out plan §11b, batch B2b) —
+   "nothing bespoke beyond the shared components" role, same as every other
+   fanned-out page's page-local hook (see theme.ts's .v2-lg-port-sample etc.). */
+.v2-lg-level-accuracy,.v2-bf-level-accuracy,.v2-gd-level-accuracy{height:100%;}
+/* deltaSpan's tone classes, re-scoped for the Ledger card: the original rule
+   above targets .v2-port-split.v2-lvlacc (slot 0's shell), which the Ledger
+   card (.v2-lg-port-card, via ledgerPortCard) never sits inside. */
+.v2-lg-level-accuracy .v2-lvlacc-delta{display:inline-block;font-weight:800;font-variant-numeric:tabular-nums;}
+.v2-lg-level-accuracy .v2-lvlacc-delta.up{color:var(--green);}
+.v2-lg-level-accuracy .v2-lvlacc-delta.down{color:var(--coral);}
+.v2-lg-level-accuracy .v2-lvlacc-delta.flat{color:var(--slate);}
+.v2-lg-level-accuracy .v2-lvlacc-n{font-variant-numeric:tabular-nums;}
+/* Grid land/sea accent, matching every other fanned-out Grid page's panel
+   border/sub-line tint convention (theme.ts's .v2-gd-port-population etc.). */
+.v2-gd-level-accuracy .v2-gd-panel.land{border-color:rgba(139,195,74,.35);}
+.v2-gd-level-accuracy .v2-gd-panel.sea{border-color:rgba(107,169,248,.35);}
+.v2-gd-level-accuracy .v2-gd-panel.land .v2-gd-panel-head span{color:var(--green);}
+.v2-gd-level-accuracy .v2-gd-panel.sea .v2-gd-panel-head span{color:var(--blue);}
+body.theme-light .v2-gd-level-accuracy .v2-gd-panel.land .v2-gd-panel-head span{color:color-mix(in srgb, var(--green) 70%, black);}
+body.theme-light .v2-gd-level-accuracy .v2-gd-panel.sea .v2-gd-panel-head span{color:color-mix(in srgb, var(--blue) 70%, black);}
 .v2-port-split.v2-lvlacc .v2-port-col .deck-table th{
   font-size:0.62rem;white-space:nowrap;padding-inline:6px;
 }

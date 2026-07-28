@@ -294,7 +294,7 @@ body.theme-light .v2-term-band.coral .v2-term-band-chip{background:rgba(255,118,
 .v2-level-card.green .v2-level-rule{background:var(--green);}
 .v2-level-card.coral .v2-level-rule{background:var(--coral);}
 /* flex:1 makes every definition occupy the same vertical space regardless of
-   how many lines it wraps to, which is what puts all four وزن السحب blocks on
+   how many lines it wraps to, which is what puts all four وزن العينة blocks on
    one baseline. Without it each block floats directly under its own paragraph
    and the four land at different heights. */
 .v2-level-card p{margin:0;flex:1;font-size:0.79rem;line-height:1.72;color:rgba(255,255,255,.84);}
@@ -945,11 +945,16 @@ body.theme-light .v2-bar-cell.warn{--bar:rgba(244,180,0,.34);}
 .v2-prop-seg:last-child{border-inline-end:0;}
 .v2-prop-seg.gold{background:var(--gold);}.v2-prop-seg.blue{background:var(--blue);}
 .v2-prop-seg.green{background:var(--green);}.v2-prop-seg.coral{background:var(--coral);}
+/* Fallback for a stage whose level identity couldn't be resolved
+   (levelIndexForStage, slides.ts) — never a wrong neighbor level's color,
+   see that function's doc comment. */
+.v2-prop-seg.neutral{background:var(--slate);}
 .v2-prop-seg-pct{font-size:0.72rem;font-weight:900;color:var(--navy);font-variant-numeric:tabular-nums;}
 .v2-prop-legend{display:flex;flex-wrap:wrap;gap:6px 18px;justify-content:center;}
 .v2-prop-key{display:inline-flex;align-items:center;gap:7px;font-size:0.72rem;font-weight:700;color:rgba(255,255,255,.82);}
 .v2-prop-key i{width:11px;height:11px;border-radius:3px;background:var(--gold);flex-shrink:0;}
 .v2-prop-key.blue i{background:var(--blue);}.v2-prop-key.green i{background:var(--green);}.v2-prop-key.coral i{background:var(--coral);}
+.v2-prop-key.neutral i{background:var(--slate);}
 .v2-stage-body{display:flex;align-items:center;justify-content:space-between;gap:10px;flex:1;}
 .v2-stage-figs{display:flex;flex-direction:column;gap:8px;}
 .v2-stage-fig{display:flex;flex-direction:column;}
@@ -985,6 +990,10 @@ body.theme-light .v2-bar-cell.warn{--bar:rgba(244,180,0,.34);}
 .v2-risk-tile.blue{background:linear-gradient(165deg,rgba(58,140,214,.13),rgba(14,58,95,.42) 55%,rgba(7,39,67,.72));}
 .v2-risk-tile.green{background:linear-gradient(165deg,rgba(52,168,120,.13),rgba(14,58,95,.42) 55%,rgba(7,39,67,.72));}
 .v2-risk-tile.coral{background:linear-gradient(165deg,rgba(224,86,86,.13),rgba(14,58,95,.42) 55%,rgba(7,39,67,.72));}
+/* Fallback for a stage whose level identity couldn't be resolved
+   (levelIndexForStage, slides.ts) — a muted slate tint, never a wrong
+   neighbor level's color. */
+.v2-risk-tile.neutral{background:linear-gradient(165deg,rgba(138,160,181,.13),rgba(14,58,95,.42) 55%,rgba(7,39,67,.72));}
 .v2-risk-tile-head{display:flex;align-items:center;gap:9px;padding:10px 12px 8px;border-bottom:1px solid rgba(255,255,255,.1);}
 .v2-risk-tile-titles{display:flex;flex-direction:column;gap:1px;min-width:0;flex:1;}
 .v2-risk-tile-titles b{font-size:.78rem;color:#fff;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -994,6 +1003,7 @@ body.theme-light .v2-bar-cell.warn{--bar:rgba(244,180,0,.34);}
 .v2-risk-tile.blue .v2-risk-tile-share b{color:var(--blue);}
 .v2-risk-tile.green .v2-risk-tile-share b{color:var(--green);}
 .v2-risk-tile.coral .v2-risk-tile-share b{color:var(--coral);}
+.v2-risk-tile.neutral .v2-risk-tile-share b{color:var(--slate);}
 .v2-risk-tile-share small{font-size:.54rem;color:var(--slate);font-weight:700;}
 .v2-risk-tile-main{display:flex;align-items:center;justify-content:space-between;gap:8px;flex:1;padding:8px 14px;}
 .v2-risk-tile-figure{display:flex;flex-direction:column;gap:2px;min-width:0;}
@@ -1003,6 +1013,7 @@ body.theme-light .v2-bar-cell.warn{--bar:rgba(244,180,0,.34);}
 .v2-risk-tile.blue .v2-risk-tile-main .v2-micro-arc{color:var(--blue);}
 .v2-risk-tile.green .v2-risk-tile-main .v2-micro-arc{color:var(--green);}
 .v2-risk-tile.coral .v2-risk-tile-main .v2-micro-arc{color:var(--coral);}
+.v2-risk-tile.neutral .v2-risk-tile-main .v2-micro-arc{color:var(--slate);}
 .v2-risk-tile-foot{
   display:flex;align-items:center;justify-content:space-around;gap:8px;
   padding:7px 12px;background:rgba(2,20,37,.32);border-top:1px solid rgba(255,255,255,.1);
@@ -1014,6 +1025,7 @@ body.theme-light .v2-bar-cell.warn{--bar:rgba(244,180,0,.34);}
 .v2-risk-tile.blue .v2-risk-tile-foot span.accent b{color:var(--blue);}
 .v2-risk-tile.green .v2-risk-tile-foot span.accent b{color:var(--green);}
 .v2-risk-tile.coral .v2-risk-tile-foot span.accent b{color:var(--coral);}
+.v2-risk-tile.neutral .v2-risk-tile-foot span.accent b{color:var(--slate);}
 .v2-risk-layout .v2-totals-band{margin-top:0;gap:10px;}
 .v2-risk-layout .v2-totals-item{padding:9px 14px;}
 .v2-risk-layout .v2-totals-item b{font-size:1.05rem;}
@@ -1025,6 +1037,75 @@ body.theme-light .v2-risk-tile-foot{background:rgba(10,45,74,.035);border-color:
 @media screen and (max-width:820px){
   .v2-risk-tile-grid{grid-template-columns:1fr;grid-template-rows:repeat(4,auto);}
 }
+
+/* .v2-cbar* (compare-bars, risk-stages variant 2/4) removed 2026-07-25
+   (fan-out plan §5 RECONCILIATION): "a labelled bar with a proportional
+   track is a chart by any reading," so it left Ledger and, since
+   \`stageCompareBars\` (slides.ts) had no other caller, the function and this
+   CSS block are dead code, not just unused-by-default — deleted rather than
+   left orphaned. Briefing's \`.v2-bf-rank-row\` below is a PARALLEL
+   reimplementation of the same "labeled bar + value" idea, not a repoint of
+   this now-gone class — see its own doc comment.
+   .v2-level-table-card is the legacy name \`levelFiguresTable\` (slides.ts)
+   still renders (aliased to \`.v2-lg-table-card\`'s rules below, design spec
+   §4 "keep .v2-level-table-card as an alias of the new .v2-lg-table-card").
+   It no longer pins a byte-identical shipped output (that pin was
+   deliberately superseded in the same fan-out pass — see
+   \`levelFiguresTable\`'s doc comment in slides.ts and this date's edit log)
+   — the alias exists purely so this page's table shares the shared Ledger
+   table's visual rules, not to freeze its markup. */
+.v2-level-table-card,.v2-lg-table-card{margin-top:14px;flex:1 1 auto;min-height:0;display:flex;flex-direction:column;justify-content:center;}
+.v2-level-table-card .deck-table th,.v2-level-table-card .deck-table td,
+.v2-lg-table-card .deck-table th,.v2-lg-table-card .deck-table td{padding:9px 10px;font-size:.76rem;text-align:center;}
+.v2-level-table-card .deck-table th:nth-child(2),.v2-level-table-card .deck-table td:nth-child(2),
+.v2-lg-table-card .deck-table th:nth-child(2),.v2-lg-table-card .deck-table td:nth-child(2){text-align:right;}
+/* New 2026-07-25 (fan-out plan §5): the «ما يقيسه» column levelFiguresTable
+   added is a sentence, not a number — right-align it too, like the level-name
+   column, instead of the numeric-column default (center). Scoped to
+   .v2-level-table-card only (not the shared .v2-lg-table-card) since this is
+   this ONE page's column order, not a generic 3rd-column rule every future
+   Ledger table should inherit. */
+.v2-level-table-card .deck-table th:nth-child(3),.v2-level-table-card .deck-table td:nth-child(3){text-align:right;}
+.v2-level-row-num{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;font-size:.68rem;font-weight:900;color:var(--navy);background:var(--gold);}
+.v2-level-row-num.blue{background:var(--blue);}
+.v2-level-row-num.green{background:var(--green);}
+.v2-level-row-num.coral{background:var(--coral);}
+/* Fallback for a stage whose level identity couldn't be resolved
+   (levelIndexForStage, slides.ts) — never a wrong neighbor level's color. */
+.v2-level-row-num.neutral{background:var(--slate);}
+.v2-level-table-card .deck-table tfoot td,
+.v2-lg-table-card .deck-table tfoot td{
+  font-weight:900;color:#fff;background:rgba(255,255,255,.07);
+  border-top:1px solid rgba(255,255,255,.2);border-bottom:0;
+}
+/* New 2026-07-25 (fan-out plan §5): the two-basis footnote row
+   (LEVEL_WEIGHT_BASIS_FOOTNOTE, slides.ts) sits in the same tfoot as the
+   totals row above but must read as a caveat, not a second total — muted,
+   normal weight, right-aligned prose, own top hairline instead of the bold
+   totals-row treatment the base tfoot rule sets. */
+.v2-level-table-card .deck-table tfoot tr.v2-lg-footnote td,
+.v2-lg-table-card .deck-table tfoot tr.v2-lg-footnote td{
+  font-weight:600;font-size:.62rem;line-height:1.5;color:var(--slate);
+  text-align:right;background:transparent;border-top:1px solid rgba(255,255,255,.12);
+}
+/* New in the new class only — \`ledgerTableCard\`'s optional \`title\` slot
+   has no equivalent in the legacy .v2-level-table-card shape
+   (levelFiguresTable never passes a title), so it is not part of the alias
+   contract above. */
+.v2-lg-table-card-title{font-size:.8rem;font-weight:800;color:#fff;margin-bottom:8px;}
+body.theme-light .v2-level-table-card .deck-table tfoot tr.v2-lg-footnote td,
+body.theme-light .v2-lg-table-card .deck-table tfoot tr.v2-lg-footnote td{
+  color:#5b6b7a;border-top-color:rgba(10,45,74,.12);
+}
+/* No light-theme override for .v2-level-row-num's ink: --gold/--blue/--green/
+   --coral don't change value between themes, so var(--navy) (the base rule's
+   color) already has good contrast in both — a previous color:#fff override
+   here made this ~1.86:1 (barely readable) in light theme; removed as a real
+   bug fix, 2026-07-25, alongside the same mistake caught on the new
+   .v2-lg-idx/.v2-bf-rank-num (design-systems Task 2). */
+body.theme-light .v2-level-table-card .deck-table tfoot td,
+body.theme-light .v2-lg-table-card .deck-table tfoot td{color:#0a2d4a;}
+body.theme-light .v2-lg-table-card-title{color:#0a2d4a;}
 
 /* ── Ports overview strip (bottom half of the merged summary page) — reuses
    .v2-port-col/.v2-port-col-head/deck-table (the SAME shell the detailed
@@ -1204,6 +1285,7 @@ body.theme-light .v2-toc-card{background-image:var(--v2-hex-tex-light),none;back
 .v2-risk-tile.blue{background-image:var(--v2-hex-tex),linear-gradient(165deg,rgba(58,140,214,.13),rgba(14,58,95,.42) 55%,rgba(7,39,67,.72));}
 .v2-risk-tile.green{background-image:var(--v2-hex-tex),linear-gradient(165deg,rgba(52,168,120,.13),rgba(14,58,95,.42) 55%,rgba(7,39,67,.72));}
 .v2-risk-tile.coral{background-image:var(--v2-hex-tex),linear-gradient(165deg,rgba(224,86,86,.13),rgba(14,58,95,.42) 55%,rgba(7,39,67,.72));}
+.v2-risk-tile.neutral{background-image:var(--v2-hex-tex),linear-gradient(165deg,rgba(138,160,181,.13),rgba(14,58,95,.42) 55%,rgba(7,39,67,.72));}
 body.theme-light .v2-risk-tile{background-image:var(--v2-hex-tex-light),linear-gradient(165deg,rgba(244,180,0,.1),#fff 55%,#f5f8fb);background-repeat:repeat,no-repeat;}
 .v2-src-card{background-image:var(--v2-hex-tex),linear-gradient(180deg,rgba(14,58,95,.55),rgba(7,39,67,.75));background-repeat:repeat,no-repeat;}
 body.theme-light .v2-src-card{background-image:var(--v2-hex-tex-light),none;background-repeat:repeat,no-repeat;}
@@ -1217,4 +1299,749 @@ body.theme-light .v2-src-card{background-image:var(--v2-hex-tex-light),none;back
   .v2-sep-watermark{font-size:11rem;}
   .v2-prov-body{flex-direction:column;align-items:flex-start;}
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   DECK2 DESIGN SYSTEMS (2026-07-25) — three cohesive, deck-wide variant
+   grammars (design spec docs/superpowers/specs/2026-07-25-deck2-design-
+   systems-design.md). Each block below is a SHARED system, not a page: any
+   future page rebuilt in one of these systems reuses these rules directly.
+   The exemplar this task proves them on is slide-port-population-1; its own
+   page-local classes (.v2-lg-port-population/.v2-bf-port-population/
+   .v2-gd-port-population) sit in their own labelled sub-section per system,
+   per the namespacing convention (outermost element carries both a system
+   class and a page class).
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── LEDGER (slot 1 — السجل, verifiability): tables + figure-strips only —
+   no charts, arcs, donuts, or tiles. Reuses the existing barCell/threshCell
+   numeric vocabulary unchanged; color stays strictly functional. ──────────── */
+.v2-sys-ledger{height:100%;}
+/* Every numeral in a Ledger table reads as a fixed-width column of digits —
+   tabular-nums keeps a totals row's figures vertically aligned with the data
+   rows above it even as digit counts vary row to row. */
+.v2-sys-ledger .deck-table td{font-variant-numeric:tabular-nums;}
+/* Generic 2-up split (today: land/sea) — any future Ledger page with a
+   natural pair of tables reuses this instead of redefining its own grid. */
+.v2-lg-split{display:grid;grid-template-columns:1fr 1fr;gap:20px;height:100%;align-items:start;}
+/* Vertical variant — a caller with two STACKED (not side-by-side) Ledger
+   cards adds this modifier instead of composing a new layout primitive.
+   Higher specificity than .v2-lg-split alone, so it wins regardless of
+   cascade order. First used by slide-s3-quality (fan-out plan §11f, batch B3
+   item 4); the plan's own glossary-1 page (§3b) is expected to reuse it. */
+.v2-lg-split.stack{display:flex;flex-direction:column;align-items:stretch;}
+/* Ordinal badge sitting inside a table's first cell, before the row's label —
+   NOT a new column (no column budget to spare on a half-width card). Reuses
+   the same small circular-numeral look as .v2-level-row-num (slot 1's own
+   precedent on slide-risk-stages) so every Ledger ordinal badge in the deck
+   reads the same way. */
+.v2-lg-idx{
+  display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;
+  width:20px;height:20px;border-radius:50%;font-size:.66rem;font-weight:900;
+  color:var(--navy);background:var(--gold);margin-inline-end:8px;
+  font-variant-numeric:tabular-nums;
+}
+/* Reusable paginated Ledger table card: plain title + deck-table, no icon
+   head (see ledgerTableCard's own doc comment — most Ledger tables sit
+   inside a page that already has its own headline). A DIFFERENT card class
+   from the shared \`.v2-lg-table-card\` levelFiguresTable uses (deliberately —
+   a 4-column ranked list needs its own column alignment/compact-tier rules
+   that must not bleed into that already-shipped 7-column table), but just as
+   reusable for any future paginated Ledger page shaped like this one. */
+.v2-lg-port-card{
+  background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.1);
+  border-radius:14px;padding:14px 16px;
+}
+.v2-lg-port-card .deck-table th,.v2-lg-port-card .deck-table td{padding:9px 12px;font-size:.78rem;text-align:center;}
+.v2-lg-port-card .deck-table th:first-child,.v2-lg-port-card .deck-table td:first-child{text-align:right;}
+.v2-lg-port-card .deck-table tfoot td{
+  font-weight:900;color:#fff;background:rgba(255,255,255,.06);
+  border-top:1px solid rgba(255,255,255,.2);border-bottom:0;
+}
+/* Compact tier (same \`plan.compact\` signal portTable()'s own \`compact\` param
+   already reads from planPortPages) — shrink rows so up to
+   BASE_ROWS_PER_PAGE + COMPRESS_OVERFLOW_MAX ports still fit the slide-body
+   budget without a pinned filler row to help (see ledgerPortTable() in
+   slides.ts — this card opts out of that mechanism entirely). */
+.v2-lg-port-card.compact .deck-table th,.v2-lg-port-card.compact .deck-table td{padding:5px 9px;font-size:.68rem;}
+.v2-lg-port-card.compact .v2-lg-idx{width:16px;height:16px;font-size:.58rem;margin-inline-end:6px;}
+/* No light-theme ink override — same reasoning as .v2-level-row-num above:
+   the tone backgrounds don't change value between themes, so var(--navy)
+   already has good contrast in both. */
+body.theme-light .v2-lg-port-card{background:#fff;border-color:#dde4ea;box-shadow:0 6px 16px rgba(10,45,74,.06);}
+body.theme-light .v2-lg-port-card .deck-table tfoot td{color:#0a2d4a;background:rgba(10,45,74,.05);border-top-color:rgba(10,45,74,.15);}
+/* Sample-mode (slide-port-sample fan-out, plan §6): frac() cells stack two
+   lines ("N" over "من M"), so rows need more room than the plain single-line
+   population variant. Unlike .v2-port-col.sample-mode (which SHRINKS its
+   padding to hold a fixed measured row height for the pinned-bottom totals
+   trick — see that rule's own comment), Ledger port cards pass rowCount:0
+   and never pin anything, so there's no fixed budget to protect: growing the
+   padding here is simply the correct, simpler fix for this shell. */
+.v2-lg-port-card.sample-mode .deck-table tbody td,
+.v2-lg-port-card.sample-mode .deck-table tfoot td{padding:12px 12px;}
+.v2-lg-port-card.sample-mode.compact .deck-table tbody td,
+.v2-lg-port-card.sample-mode.compact .deck-table tfoot td{padding:6px 9px;}
+
+/* Page-local: slide-port-population (Ledger). Nothing bespoke beyond the
+   shared components above — this selector exists as the required namespacing
+   hook (design spec §3.1) and is where a future visual difference unique to
+   this page's Ledger variant would land. */
+.v2-lg-port-population{height:100%;}
+/* Page-local: slide-risk-stages (Ledger, fan-out plan §5). Same "namespacing
+   hook, nothing bespoke" role as .v2-lg-port-population above — the actual
+   table markup is levelFiguresTable's .v2-level-table-card, styled earlier
+   in this file. */
+.v2-lg-risk-stages{height:100%;}
+/* Page-local: slide-port-sample / slide-quality-ports / slide-quality-accuracy
+   (Ledger, fan-out plan §6/§8/§9, batch B2a — mechanical clones of the
+   port-population exemplar). Same "namespacing hook, nothing bespoke" role. */
+.v2-lg-port-sample{height:100%;}
+.v2-lg-quality-ports{height:100%;}
+.v2-lg-quality-accuracy{height:100%;}
+/* Page-local: slide-stage-port-population / slide-stage-port-sample (Ledger,
+   fan-out plan §7, batch B3 item 1). Unlike every other Ledger page's cards,
+   these 4 sit in the existing 2×2 .v2-stage-port-grid (quarter-slide-height
+   each) rather than a full-width/half-width card — the wrapper needs an
+   actual flex-column layout (not just a namespacing hook) so that grid's own
+   \`flex:1;min-height:0\` rule has a flex parent to size against, the same
+   role .v2-risk-layout plays for slide-risk-stages' Ledger slot. */
+.v2-lg-stage-port-population,.v2-lg-stage-port-sample{display:flex;flex-direction:column;height:100%;}
+/* .v2-lg-stage-card cards pass a bespoke cardClass (ledgerTableCard, not the
+   ledgerPortCard wrapper — see stagePortPopulationLedgerCard's doc comment)
+   that keeps .v2-stage-port-card for DECK_TABLE_FILL_SCRIPT's measurement,
+   so this box borrows THAT class's existing compact table sizing (padding
+   3px/6px, .6rem/.58rem fonts — tuned to fit 5 rows + header + totals in a
+   quarter-slide card) rather than .v2-lg-port-card's much roomier default.
+   The compound selector (.v2-lg-stage-card.v2-stage-port-card) is what makes
+   this win the cascade over .v2-stage-port-card's own same-specificity rule
+   declared earlier in this file — a bare .v2-lg-stage-card selector alone
+   would tie on specificity and lose to declaration order. */
+.v2-lg-stage-card.v2-stage-port-card{border:1px solid rgba(255,255,255,.13);border-radius:14px;background:rgba(255,255,255,.018);padding:12px 12px 10px;}
+.v2-lg-stage-card.v2-stage-port-card .deck-table th,
+.v2-lg-stage-card.v2-stage-port-card .deck-table td{padding:3px 6px;font-size:0.6rem;text-align:center;}
+.v2-lg-stage-card.v2-stage-port-card .deck-table th{font-size:0.58rem;}
+.v2-lg-stage-card.v2-stage-port-card .deck-table th:first-child,
+.v2-lg-stage-card.v2-stage-port-card .deck-table td:first-child{text-align:right;}
+.v2-lg-stage-card .v2-lg-table-card-title{font-size:.64rem;font-weight:800;color:#fff;margin-bottom:4px;}
+/* .v2-lg-idx's deck-wide default (20px/.66rem) is sized for a full/half-width
+   Ledger card — too large for this quarter-slide card's 3px/6px-padded rows,
+   so it borrows .v2-lg-port-card.compact's own smaller ordinal-badge size. */
+.v2-lg-stage-card .v2-lg-idx{width:16px;height:16px;font-size:.58rem;margin-inline-end:6px;}
+body.theme-light .v2-lg-stage-card.v2-stage-port-card{background:#fff;border-color:#dde4ea;box-shadow:0 6px 16px rgba(10,45,74,.06);}
+body.theme-light .v2-lg-stage-card .v2-lg-table-card-title{color:#0a2d4a;}
+
+/* Page-local: slide-closing (Ledger, fan-out plan §10, batch B3 item 5) —
+   a namespacing hook plus the layout the table + verbatim org block (see
+   closingOrgBlock, slides.ts, reusing .v2-closing-side's OWN base rules
+   declared earlier in this file — border/padding included) need to sit side
+   by side instead of stacking, mirroring slot 0's own .v2-closing two-column
+   split. */
+.v2-lg-closing{height:100%;display:flex;align-items:center;gap:28px;}
+.v2-lg-closing .v2-lg-table-card{flex:1.5;margin-top:0;}
+.v2-lg-closing .v2-closing-side{flex:1;}
+@media screen and (max-width:820px){
+  .v2-lg-closing{flex-direction:column;align-items:stretch;}
+  .v2-lg-closing .v2-closing-side{border-inline-start:0;padding-inline-start:0;}
+}
+
+/* Page-local: slide-toc (Ledger, fan-out plan §1, batch B4). Namespacing
+   hook plus a column-alignment override — الهدف (column 3, a goal sentence)
+   is prose, not a number, so it needs the same right-align treatment the
+   shared .v2-lg-table-card rule already gives column 2 (القسم). */
+.v2-lg-toc{height:100%;}
+.v2-lg-toc-card .deck-table th:nth-child(3),.v2-lg-toc-card .deck-table td:nth-child(3){text-align:right;}
+
+/* Page-local: slide-glossary-levels (Ledger, fan-out plan §3a, batch B4).
+   التعريف (column 3) and ما يقيسه (column 4) are both prose columns needing
+   the right-align override; المستوى (column 2) already gets it from the
+   shared .v2-lg-table-card rule. */
+.v2-lg-glossary-levels{height:100%;}
+.v2-lg-glossary-card .deck-table th:nth-child(3),.v2-lg-glossary-card .deck-table td:nth-child(3),
+.v2-lg-glossary-card .deck-table th:nth-child(4),.v2-lg-glossary-card .deck-table td:nth-child(4){text-align:right;}
+
+/* Page-local: slide-glossary-1 (Ledger, fan-out plan §3b, batch B4) — two
+   stacked .v2-lg-split.stack cards, one per GLOSSARY_CATEGORIES entry (the
+   same modifier slide-s3-quality's Ledger already established, reused
+   verbatim). Both columns are prose (المصطلح/التعريف), so both are forced
+   right — the shared .v2-lg-table-card rule only right-aligns column 2 by
+   default, which would leave المصطلح (column 1) centered. */
+.v2-lg-glossary-1{height:100%;}
+.v2-lg-glossary-terms-card .deck-table th,.v2-lg-glossary-terms-card .deck-table td{text-align:right;}
+
+/* Page-local: slide-cover (Ledger, fan-out plan §4, 2026-07-28) — the issue
+   record: a two-column grid (hero title/lockup beside a 7-row table card),
+   the SAME shape slot 0's own \`.v2-cover-grid\` uses. \`.v2-lg-cover-card\` is
+   a STANDALONE card class (not compounded with the shared \`.v2-lg-table-card\`
+   — the same choice \`.v2-lg-port-card\`/\`.v2-lg-stage-card\` already made)
+   because THE COVER IS DARK IN BOTH THEMES BY DESIGN — it needs its own
+   from-scratch light-theme re-override rather than inheriting the shared
+   table's theme-adaptive (light-card-assuming) rules. The deck-wide
+   \`body.theme-light .deck-table{background:#fff;color:#0a2d4a}\` rule
+   (theme parity section, above) would otherwise paint a white table on the
+   cover's dark background in light theme — re-overridden back to dark
+   below, scoped under \`.slide.v2-cover\`, the same pattern
+   \`.v2-cover-meta-item\`/\`.v2-cover-meta-value\` already established.
+   \`.v2-lg-cover-rule\`/\`-hero\` reuse \`var(--line)\`, which is theme-invariant
+   (never redefined for light theme — confirmed against every other
+   \`var(--line)\` usage in this file), so no re-override is needed for those
+   two rules specifically. */
+.v2-lg-cover{display:grid;grid-template-columns:1fr 1.15fr;gap:36px;align-items:center;height:100%;}
+.v2-lg-cover-hero{display:flex;flex-direction:column;gap:15px;min-width:0;}
+.v2-lg-cover-rule{height:1px;width:100%;background:var(--line);}
+.v2-lg-cover-record{min-width:0;}
+.v2-lg-cover-card{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:14px 16px;}
+.v2-lg-cover-card .deck-table th,.v2-lg-cover-card .deck-table td{padding:8px 10px;font-size:.76rem;text-align:center;}
+.v2-lg-cover-card .deck-table th:nth-child(2),.v2-lg-cover-card .deck-table td:nth-child(2){text-align:right;}
+.v2-lg-cover-card .deck-table tfoot td{
+  font-weight:600;font-size:.66rem;line-height:1.5;color:var(--slate);
+  text-align:right;background:transparent;border-top:1px solid rgba(255,255,255,.12);
+}
+body.theme-light .slide.v2-cover .v2-lg-cover-card{background:rgba(255,255,255,.03);border-color:rgba(255,255,255,.12);}
+body.theme-light .slide.v2-cover .deck-table{background:transparent;color:#fff;}
+body.theme-light .slide.v2-cover .deck-table th{background:rgba(255,255,255,.08);color:#fff;}
+body.theme-light .slide.v2-cover .deck-table td{border-color:rgba(255,255,255,.12);color:#fff;}
+body.theme-light .slide.v2-cover .v2-lg-cover-card .deck-table tfoot td{color:var(--slate);background:rgba(255,255,255,.03);border-top-color:rgba(255,255,255,.12);}
+
+/* Page-local: slide-sep-1/2/3 (Ledger, fan-out plan §5, 2026-07-28) — a
+   ruled document opener (hairline/ordinal/title/hairline/hanging-label
+   definition/hairline), DELIBERATELY no table (no data on this page — a
+   one-row table would be theatre). The separator follows the theme (unlike
+   the cover) — every value below is already theme-safe via \`var(--line)\`/
+   \`var(--slate)\`/\`var(--muted)\` (all theme-invariant custom properties) or
+   an existing light-theme pattern (\`.v2-sep-title\` mirrors \`.v2-sep h2\`'s
+   own light override), so no cover-style dark re-override is needed here. */
+.v2-lg-sep{height:100%;display:flex;flex-direction:column;justify-content:center;align-items:flex-start;gap:14px;max-width:640px;}
+.v2-lg-sep-rule{height:1px;width:100%;background:var(--line);}
+.v2-lg-sep-head{display:flex;align-items:center;gap:10px;}
+.v2-lg-sep-eyebrow{font-size:.72rem;font-weight:700;color:var(--slate);letter-spacing:.08em;}
+.v2-lg-sep-title{font-size:2rem;font-weight:800;color:#fff;margin:0;text-align:start;}
+.v2-lg-sep-def-line{display:flex;align-items:baseline;gap:14px;width:100%;}
+.v2-lg-sep-key{flex:0 0 auto;width:70px;font-size:.72rem;font-weight:700;color:var(--slate);}
+.v2-lg-sep-def{flex:1 1 auto;margin:0;font-size:.92rem;line-height:1.85;color:var(--muted);max-width:640px;}
+body.theme-light .v2-lg-sep-title{color:#0a2d4a;}
+body.theme-light .v2-lg-sep-def,body.theme-light .v2-lg-sep-key,body.theme-light .v2-lg-sep-eyebrow{color:#607386;}
+
+/* ── BRIEFING (slot 2 — الإحاطة, recall): one lede figure per page + a
+   ≤3-figure support strip + at most one ranked-bar list. Tables are demoted
+   to ranked bars (.v2-bf-rank). One fixed tone per page (this page: gold). ── */
+.v2-sys-brief{display:flex;flex-direction:column;height:100%;gap:14px;justify-content:center;}
+.v2-bf-lede{text-align:center;}
+.v2-bf-lede-figure{font-size:3.2rem;font-weight:900;line-height:1;font-variant-numeric:tabular-nums;}
+.v2-bf-lede-figure.gold{color:var(--gold);text-shadow:0 0 30px rgba(244,180,0,.22);}
+.v2-bf-lede-figure.blue{color:var(--blue);text-shadow:0 0 30px rgba(107,169,248,.22);}
+.v2-bf-lede-figure.green{color:var(--green);text-shadow:0 0 30px rgba(139,195,74,.22);}
+.v2-bf-lede-figure.coral{color:var(--coral);text-shadow:0 0 30px rgba(255,118,95,.22);}
+/* 2026-07-28 whole-branch-review fix (B2): .insuff has no scoped override
+   inside .v2-bf-lede-figure, so a "no data" placeholder (several pages pass
+   <span class="insuff">—</span> as the lede figure when a comparison is
+   ungated) inherited the full lede treatment — huge size, weight 900, the
+   page's gold/blue/green/coral color, and its glow — making "no data" the
+   MOST visually prominent element on the page. Muted the same way every
+   other out-of-table .insuff usage in this fan-out already is
+   (color:var(--slate), e.g. .v2-mark-layout .insuff in markingImpact.ts),
+   plus resetting the size/weight/glow this specific parent contributes that
+   those other contexts don't. */
+.v2-bf-lede-figure .insuff{
+  color:var(--slate);font-size:1.6rem;font-weight:700;text-shadow:none;
+}
+.v2-bf-lede-label{margin-top:4px;font-size:.92rem;font-weight:700;color:#fff;}
+.v2-bf-lede-basis{
+  display:inline-flex;margin-top:8px;padding:3px 12px;border-radius:999px;
+  font-size:.68rem;font-weight:700;color:var(--slate);
+  border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.03);
+}
+/* Ranked-bar list — a labeled-bar-plus-value skeleton originally sketched as a
+   parallel reimplementation of \`.v2-cbar-row\` (a peer review, 2026-07-25,
+   correctly caught it was a parallel build, not a repoint of that class, and
+   deferred a "genuine shared-class repoint" as a follow-up). That follow-up
+   landed later the same day (fan-out plan §5 RECONCILIATION):
+   \`stageCompareBars\`/\`.v2-cbar*\` were removed outright once
+   \`slide-risk-stages\`'s Ledger slot dropped the compare-bars entirely (ruled
+   a chart, out of Ledger by contract) — so \`.v2-bf-rank-row\` is now the ONLY
+   labeled-bar-plus-value skeleton in the deck, not a parallel one. It still
+   adds a rank numeral + a secondary figure that the old \`.v2-cbar-row\`
+   never had.
+   Density (1-vs-2 columns, row-height tier) is entirely decided by
+   \`briefingRankPlan\` (slideKit.ts) and expressed here only as a \`.t-*\` tier
+   class plus however many \`.v2-bf-rank-col\` children the caller renders — no
+   page-specific CSS. \`flex:0 0 var(--bf-row-h)\` is the 2026-07-25 fix for a
+   real bug: \`flex:1\` on a row let flexbox silently squash rows below their
+   declared height to make everything fit, which is exactly the "silently
+   drops information" failure this whole system was rebuilt to avoid — the
+   TS capacity math is what must guarantee no overflow now, not shrinkage. */
+.v2-bf-rank{display:flex;gap:18px;flex:1 1 auto;min-height:0;align-items:stretch;}
+.v2-bf-rank-col{display:flex;flex-direction:column;gap:5px;flex:1 1 0;min-width:0;justify-content:center;}
+.v2-bf-rank-row{display:flex;align-items:center;gap:10px;flex:0 0 var(--bf-row-h);height:var(--bf-row-h);}
+.v2-bf-rank.t-comfortable{--bf-row-h:44px;}
+.v2-bf-rank.t-compact{--bf-row-h:36px;}
+.v2-bf-rank.t-dense{--bf-row-h:30px;gap:14px;}
+.v2-bf-rank.t-dense .v2-bf-rank-row{gap:8px;}
+.v2-bf-rank-num{
+  display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;
+  width:22px;height:22px;border-radius:50%;font-size:.68rem;font-weight:900;
+  color:var(--navy);font-variant-numeric:tabular-nums;
+}
+.v2-bf-rank-num.gold{background:var(--gold);} .v2-bf-rank-num.blue{background:var(--blue);}
+.v2-bf-rank-num.green{background:var(--green);} .v2-bf-rank-num.coral{background:var(--coral);}
+.v2-bf-rank.t-compact .v2-bf-rank-num{width:19px;height:19px;font-size:.64rem;}
+.v2-bf-rank.t-dense .v2-bf-rank-num{width:17px;height:17px;font-size:.6rem;}
+/* Remainder row ("+N أخرى"): muted hollow numeral (visually NOT a rank),
+   hatched track fill (visually NOT a peer port) — the printed value is the
+   authority, per the design ruling's completeness invariant (Σ shown values
+   === the basis chip's total, in both the folded and unfolded case). */
+.v2-bf-rank-num:not(.gold):not(.blue):not(.green):not(.coral){
+  background:transparent;border:1.5px dashed rgba(255,255,255,.35);color:var(--slate);
+}
+.v2-bf-rank-label{
+  flex:0 0 auto;width:150px;font-size:.78rem;font-weight:700;color:#fff;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.v2-bf-rank.t-compact .v2-bf-rank-label{width:140px;font-size:.74rem;}
+.v2-bf-rank.t-dense .v2-bf-rank-label{width:118px;font-size:.7rem;}
+.v2-bf-rank-row.rest .v2-bf-rank-label{color:var(--slate);font-style:italic;}
+/* bars:false rows (briefingRankList, slideKit.ts) omit .v2-bf-rank-track
+   entirely — without this rule the label stayed pinned at its fixed 150px
+   (every sibling is flex:0 0 auto too), so removing the track just left dead
+   space instead of letting the label expand as the doc comment claimed
+   (2026-07-28 fix — no shipping page uses bars:false yet, caught before it
+   did). */
+.v2-bf-rank-row.no-bars .v2-bf-rank-label{flex:1 1 auto;width:auto;}
+.v2-bf-rank-track{
+  flex:1 1 auto;height:20px;border-radius:6px;background:rgba(255,255,255,.08);
+  border:1px solid rgba(255,255,255,.12);overflow:hidden;position:relative;
+}
+.v2-bf-rank.t-compact .v2-bf-rank-track{height:17px;}
+.v2-bf-rank.t-dense .v2-bf-rank-track{height:14px;}
+.v2-bf-rank-fill{position:absolute;inset-inline-end:0;top:0;height:100%;border-radius:6px;}
+.v2-bf-rank-fill.gold{background:var(--gold);} .v2-bf-rank-fill.blue{background:var(--blue);}
+.v2-bf-rank-fill.green{background:var(--green);} .v2-bf-rank-fill.coral{background:var(--coral);}
+.v2-bf-rank-fill.rest{
+  background:repeating-linear-gradient(45deg,var(--slate),var(--slate) 3px,transparent 3px,transparent 7px);
+  opacity:.6;
+}
+.v2-bf-rank-value{
+  flex:0 0 auto;min-width:48px;text-align:left;font-size:.8rem;font-weight:900;
+  color:#fff;font-variant-numeric:tabular-nums;
+}
+.v2-bf-rank.t-compact .v2-bf-rank-value{min-width:46px;font-size:.76rem;}
+.v2-bf-rank.t-dense .v2-bf-rank-value{min-width:44px;font-size:.7rem;}
+.v2-bf-rank-secondary{
+  flex:0 0 auto;min-width:74px;text-align:left;font-size:.66rem;font-weight:700;
+  color:var(--slate);font-variant-numeric:tabular-nums;
+}
+.v2-bf-rank.t-compact .v2-bf-rank-secondary{min-width:70px;font-size:.64rem;}
+.v2-bf-rank.t-dense .v2-bf-rank-secondary{min-width:66px;font-size:.62rem;}
+/* Briefing's own dressing of the shared .v2-totals-band/.v2-totals-item
+   support-strip component (design spec: one markup component, restyled per
+   system) — tighter than slot 0's risk-stages usage since Briefing's row
+   budget is the tightest of the three systems. Unconditional per the design
+   ruling (it was previously and wrongly dropped on a signal — planPortPages'
+   table-geometry \`compact\` — that had no bearing on Briefing's own budget). */
+.v2-sys-brief .v2-totals-band{margin-top:0;gap:10px;}
+.v2-sys-brief .v2-totals-item{padding:8px 12px;border-radius:10px;}
+.v2-sys-brief .v2-totals-item b{font-size:1rem;}
+.v2-sys-brief .v2-totals-item small{font-size:.62rem;}
+body.theme-light .v2-bf-lede-label{color:#0a2d4a;}
+body.theme-light .v2-bf-lede-basis{color:#607386;border-color:#dde4ea;background:#fff;}
+/* No light-theme ink override for the tone-numbered rank badges — same
+   reasoning as .v2-level-row-num/.v2-lg-idx above (var(--navy) already
+   contrasts well against every tone in both themes). The remainder-row
+   numeral (no tone class) keeps its own dedicated override below. */
+body.theme-light .v2-bf-rank-num:not(.gold):not(.blue):not(.green):not(.coral){
+  background:transparent;border-color:rgba(10,45,74,.3);color:#607386;
+}
+body.theme-light .v2-bf-rank-label{color:#0a2d4a;}
+body.theme-light .v2-bf-rank-row.rest .v2-bf-rank-label{color:#607386;}
+body.theme-light .v2-bf-rank-track{background:#eef2f6;border-color:#dde4ea;}
+body.theme-light .v2-bf-rank-fill.rest{
+  background:repeating-linear-gradient(45deg,#607386,#607386 3px,transparent 3px,transparent 7px);
+}
+body.theme-light .v2-bf-rank-value{color:#0a2d4a;}
+body.theme-light .v2-bf-rank-secondary{color:#607386;}
+
+/* Page-local: slide-port-population (Briefing). Nothing bespoke beyond the
+   shared components above — namespacing hook per design spec §3.1. */
+.v2-bf-port-population{height:100%;}
+/* Page-local: slide-risk-stages (Briefing, fan-out plan §5). Same role as
+   .v2-bf-port-population above — per-row tone comes from briefingRankList's
+   item.tone override (slideKit.ts), not page-local CSS. */
+.v2-bf-risk-stages{height:100%;}
+/* Page-local: slide-port-sample / slide-quality-ports / slide-quality-accuracy
+   (Briefing, fan-out plan §6/§8/§9, batch B2a). Same "namespacing hook,
+   nothing bespoke" role — each page's own tone (blue/coral/green) is set on
+   briefingLede/briefingRankList at the call site, not here. */
+.v2-bf-port-sample{height:100%;}
+.v2-bf-quality-ports{height:100%;}
+.v2-bf-quality-accuracy{height:100%;}
+/* Page-local: slide-stage-port-population / slide-stage-port-sample
+   (Briefing, fan-out plan §7). Nothing bespoke beyond the shared components
+   above — the 4 rank rows' per-row tone comes from briefingRankList's
+   item.tone override (slideKit.ts), same mechanism slide-risk-stages uses,
+   not page-local CSS. Secondary-line length risk (a port name plus a count)
+   is handled call-site via truncLabel, not a CSS wrap/overflow rule. */
+.v2-bf-stage-port-population{height:100%;}
+.v2-bf-stage-port-sample{height:100%;}
+/* Page-local: slide-closing (Briefing, fan-out plan §10, batch B3 item 5).
+   The verbatim org block (closingOrgBlock, slides.ts) stacks below the rank
+   list here (Briefing is a single vertical column, unlike Ledger's two-column
+   split), so its side border becomes a top hairline instead of a re-used
+   inline-start border. \`.v2-bf-closing-empty\` is the zero-revisions note
+   (\`briefingSupport([])\`'s own "return a note, not dead markup" convention,
+   applied to the rank-list slot specifically). */
+.v2-bf-closing{height:100%;}
+.v2-bf-closing .v2-closing-side{
+  border-inline-start:0;padding-inline-start:0;
+  border-top:1px solid rgba(255,255,255,.1);padding-top:14px;
+}
+body.theme-light .v2-bf-closing .v2-closing-side{border-top-color:#dde4ea;}
+.v2-bf-closing-empty{font-size:.78rem;font-weight:700;color:var(--slate);text-align:center;line-height:1.7;}
+
+/* Page-local: slide-toc (Briefing, fan-out plan §1, batch B4). Nothing
+   bespoke beyond the shared components — namespacing hook only. */
+.v2-bf-toc{height:100%;}
+
+/* Page-local: slide-glossary-levels (Briefing, fan-out plan §3a, batch B4).
+   Each row's secondary line is a full "ما يقيسه" sentence (~40-50 chars),
+   far past the shared .v2-bf-rank-secondary's 74px min-width (sized for a
+   short "من N صورة"-style figure) — verified against this page's actual
+   RISK_LEVELS[i].measures strings, all longer than any other page's
+   secondary text. Only 4 rows in a single column (briefingRankPlan(4) picks
+   the 1-column comfortable tier), so there is ample unused row width to
+   widen into. text-align is also flipped to right — the shared rule's
+   "left" is tuned for LTR numerals/percentages, wrong for an Arabic
+   sentence. white-space:normal lets it wrap to 2 lines within the 44px
+   comfortable row height instead of the shared rule's implicit single-line
+   overflow. */
+.v2-bf-glossary-levels{height:100%;}
+.v2-bf-glossary-levels .v2-bf-rank-secondary{
+  min-width:230px;max-width:320px;white-space:normal;text-align:right;line-height:1.32;
+}
+
+/* Page-local: slide-glossary-1 (Briefing, fan-out plan §3b, batch B4) —
+   bars:false (a definitional list, no magnitude), so the label already
+   expands (theme.ts's .v2-bf-rank-row.no-bars .v2-bf-rank-label rule);
+   the term's full definition is carried in the secondary slot instead
+   (valueText is left empty — there is no figure to show), so it needs the
+   same widen+wrap+right-align treatment as slide-glossary-levels above. */
+.v2-bf-glossary-1{height:100%;}
+.v2-bf-glossary-1 .v2-bf-rank-secondary{
+  min-width:230px;max-width:340px;white-space:normal;text-align:right;line-height:1.32;
+}
+
+/* Page-local: slide-cover (Briefing, fan-out plan §4, 2026-07-28) — title
+   first (a cover's title cannot be demoted below a statistic), then the
+   lede (population total — SCOPE, never a finding), then the 3-chip support
+   strip. No rank list (nothing on a cover is honestly rankable). Bumped
+   lede figure (4.2rem, larger than the deck-wide 3.2rem default — a cover's
+   headline figure earns more presence than a body-page lede).
+   THE COVER IS DARK IN BOTH THEMES BY DESIGN: \`.v2-bf-lede-label\`/
+   \`.v2-bf-lede-basis\`/\`.v2-totals-item\` all have GENERIC light-theme
+   overrides elsewhere in this file (assuming every OTHER page's light-theme
+   card is a light background) that would otherwise go dark-ink-on-dark
+   here — re-overridden back to dark below, scoped under \`.slide.v2-cover\`,
+   same pattern as \`.v2-cover-meta-item\`. The tone-colored lede figure itself
+   needs no override (\`var(--gold)\` is theme-invariant). */
+.v2-bf-cover{align-items:center;text-align:center;}
+.v2-bf-cover .v2-bf-lede-figure{font-size:4.2rem;}
+.v2-bf-cover .v2-totals-band{width:100%;max-width:560px;}
+body.theme-light .slide.v2-cover .v2-bf-lede-label{color:#fff;}
+body.theme-light .slide.v2-cover .v2-bf-lede-basis{color:var(--slate);border-color:rgba(255,255,255,.14);background:rgba(255,255,255,.03);}
+body.theme-light .slide.v2-cover .v2-totals-item{background:rgba(255,255,255,.02);border-color:rgba(255,255,255,.12);}
+body.theme-light .slide.v2-cover .v2-totals-item b{color:#fff;}
+body.theme-light .slide.v2-cover .v2-totals-item small{color:var(--slate);}
+
+/* Page-local: slide-sep-1/2/3 (Briefing, fan-out plan §5, 2026-07-28) — the
+   cleanest reuse in the whole fan-out: just one \`briefingLede\` call, no
+   support strip, no rank list. Bumped to divider scale (6.4rem, vs. the
+   deck-wide 3.2rem default) since this is the ONLY content on the slide.
+   \`.v2-bf-lede-basis\` is restyled from its default bordered-pill look (wrong
+   for a ~30-word blurb) to a plain paragraph — same page-local-restyle
+   licence \`slide-glossary-levels\`'s \`.v2-bf-rank-secondary\` override already
+   used above. The separator follows the theme (unlike the cover) — no dark
+   re-override needed; \`.v2-bf-lede-label\`/\`-basis\`'s existing GENERIC
+   light-theme rules (this file, Briefing base section) already apply
+   correctly here. */
+.v2-bf-sep{height:100%;}
+.v2-bf-sep .v2-bf-lede-figure{font-size:6.4rem;}
+.v2-bf-sep .v2-bf-lede-basis{
+  display:block;border:0;background:transparent;max-width:620px;margin-inline:auto;
+  font-size:.96rem;line-height:1.85;
+}
+
+/* ── GRID (slot 3 — الشبكة, comparison): every page becomes one matrix of
+   metricMatrix cells, each column normalized to its OWN domain, ink always
+   navy (theme-invariant — see metricMatrix's own doc comment). ──────────── */
+.v2-sys-grid{height:100%;}
+/* grid-template-rows:minmax(0,1fr): kept as a defensive declaration, NOT
+   because it's currently load-bearing — a peer review (2026-07-25)
+   independently re-tested by toggling this property live and found zero
+   height/overflow difference with the current \`.v2-gd-panel\`/
+   \`.v2-gd-panel-chart\` flex/min-height:0 chain, which already bounds the
+   figure correctly on its own. An earlier draft of this comment claimed a
+   ~350px clip this rule fixed; that measurement was very likely the same
+   348px sr-only accessible-table false-positive this task's own visual-QA
+   process separately (and correctly) identified and excluded elsewhere —
+   i.e. probably never a real bug. The declaration is harmless and documents
+   intent (an explicit row height contract, not an implicit auto-size one),
+   so it stays; do not cite it as fixing a reproduced defect without
+   re-verifying first. */
+.v2-gd-split{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:minmax(0,1fr);gap:20px;height:100%;}
+.v2-gd-panel{
+  display:flex;flex-direction:column;gap:8px;min-width:0;min-height:0;
+  border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:12px 14px;
+  background:rgba(255,255,255,.02);
+}
+.v2-gd-panel-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;}
+.v2-gd-panel-head b{font-size:.9rem;font-weight:800;color:#fff;}
+.v2-gd-panel-head span{font-size:.7rem;font-weight:600;color:var(--slate);}
+.v2-gd-panel-chart{flex:1;min-height:0;}
+.v2-gd-panel-chart figure{height:100%;}
+body.theme-light .v2-gd-panel{background:#fff;border-color:#dde4ea;box-shadow:0 6px 16px rgba(10,45,74,.06);}
+body.theme-light .v2-gd-panel-head b{color:#0a2d4a;}
+body.theme-light .v2-gd-panel-head span{color:#607386;}
+
+/* ── Grid field cells (gridFieldCells, slideKit.ts, fan-out plan §3,
+   2026-07-28) — the label/value cell field for pages with real fields but
+   NO comparable numeric domain (slide-cover, slide-sep-1/2/3), so a
+   metricMatrix would misrepresent them as one comparable scale. Column
+   count/geometry (grid-template-columns, .wide's actual span behavior) is
+   entirely the caller's own page-local class — see gridFieldCells' own doc
+   comment — this block only supplies the shared per-cell chrome: square
+   corners, 1px hairlines, uniform padding, label/value typography. No
+   magnitude tint (unlike metricMatrix's --w fills): these cells have
+   nothing to tint by. ──────────────────────────────────────────────────── */
+.v2-gd-field{display:grid;}
+.v2-gd-field-cell{
+  border-inline-end:1px solid var(--line);border-bottom:1px solid var(--line);
+  padding:10px 14px;display:flex;flex-direction:column;gap:4px;justify-content:center;min-width:0;
+}
+.v2-gd-field-cell.num .v2-gd-field-value{font-variant-numeric:tabular-nums;}
+.v2-gd-field-label{font-size:.68rem;font-weight:700;color:var(--slate);letter-spacing:.02em;}
+.v2-gd-field-value{
+  font-size:.95rem;font-weight:800;color:#fff;overflow:hidden;text-overflow:ellipsis;
+}
+body.theme-light .v2-gd-field-cell{border-color:#dde4ea;}
+body.theme-light .v2-gd-field-value{color:#0a2d4a;}
+
+/* Page-local: slide-port-population (Grid) — land/sea tint on the panel
+   border + count caption, mirroring every other variant's land=green/
+   sea=blue convention in this deck. */
+.v2-gd-port-population .v2-gd-panel.land{border-color:rgba(139,195,74,.35);}
+.v2-gd-port-population .v2-gd-panel.sea{border-color:rgba(107,169,248,.35);}
+.v2-gd-port-population .v2-gd-panel.land .v2-gd-panel-head span{color:var(--green);}
+.v2-gd-port-population .v2-gd-panel.sea .v2-gd-panel-head span{color:var(--blue);}
+body.theme-light .v2-gd-port-population .v2-gd-panel.land .v2-gd-panel-head span{color:#4a7a1f;}
+body.theme-light .v2-gd-port-population .v2-gd-panel.sea .v2-gd-panel-head span{color:#2f6fb0;}
+
+/* Page-local: slide-port-sample / slide-quality-ports / slide-quality-accuracy
+   (Grid, fan-out plan §6/§8/§9, batch B2a) — same land=green/sea=blue tint
+   convention as slide-port-population above, mechanically repeated per page
+   (this file's own established convention: one page-local block per page,
+   not a shared selector — see the comment on the port-population block). */
+.v2-gd-port-sample .v2-gd-panel.land{border-color:rgba(139,195,74,.35);}
+.v2-gd-port-sample .v2-gd-panel.sea{border-color:rgba(107,169,248,.35);}
+.v2-gd-port-sample .v2-gd-panel.land .v2-gd-panel-head span{color:var(--green);}
+.v2-gd-port-sample .v2-gd-panel.sea .v2-gd-panel-head span{color:var(--blue);}
+body.theme-light .v2-gd-port-sample .v2-gd-panel.land .v2-gd-panel-head span{color:#4a7a1f;}
+body.theme-light .v2-gd-port-sample .v2-gd-panel.sea .v2-gd-panel-head span{color:#2f6fb0;}
+
+.v2-gd-quality-ports .v2-gd-panel.land{border-color:rgba(139,195,74,.35);}
+.v2-gd-quality-ports .v2-gd-panel.sea{border-color:rgba(107,169,248,.35);}
+.v2-gd-quality-ports .v2-gd-panel.land .v2-gd-panel-head span{color:var(--green);}
+.v2-gd-quality-ports .v2-gd-panel.sea .v2-gd-panel-head span{color:var(--blue);}
+body.theme-light .v2-gd-quality-ports .v2-gd-panel.land .v2-gd-panel-head span{color:#4a7a1f;}
+body.theme-light .v2-gd-quality-ports .v2-gd-panel.sea .v2-gd-panel-head span{color:#2f6fb0;}
+
+.v2-gd-quality-accuracy .v2-gd-panel.land{border-color:rgba(139,195,74,.35);}
+.v2-gd-quality-accuracy .v2-gd-panel.sea{border-color:rgba(107,169,248,.35);}
+.v2-gd-quality-accuracy .v2-gd-panel.land .v2-gd-panel-head span{color:var(--green);}
+.v2-gd-quality-accuracy .v2-gd-panel.sea .v2-gd-panel-head span{color:var(--blue);}
+body.theme-light .v2-gd-quality-accuracy .v2-gd-panel.land .v2-gd-panel-head span{color:#4a7a1f;}
+body.theme-light .v2-gd-quality-accuracy .v2-gd-panel.sea .v2-gd-panel-head span{color:#2f6fb0;}
+
+/* Page-local: slide-risk-stages (Grid, fan-out plan §5) — a single
+   full-width panel, no land/sea split (so no .v2-gd-split wrapper here);
+   these two rules give the wrapper AND its one .v2-gd-panel child the full
+   slide-body height .v2-gd-split's grid would otherwise provide. */
+.v2-gd-risk-stages{height:100%;}
+.v2-gd-risk-stages .v2-gd-panel{height:100%;}
+
+/* Page-local: slide-stage-port-population / slide-stage-port-sample (Grid,
+   fan-out plan §7) — a single full-width TRANSPOSED matrix (rows=stages,
+   columns=top-5 ports) plus a legend line disclosing the 5 columns' full,
+   untruncated port names (see truncLabel's doc comment, slideKit.ts, for why
+   that line exists instead of relying on metricMatrix's own sr-table). The
+   wrapper is an actual flex column (not just a namespacing hook, unlike
+   .v2-gd-risk-stages above) so the panel and the legend line stack instead
+   of the legend being squeezed out by the panel's height:100%. */
+.v2-gd-stage-port-population,.v2-gd-stage-port-sample{height:100%;display:flex;flex-direction:column;gap:8px;}
+.v2-gd-stage-port-population .v2-gd-panel,.v2-gd-stage-port-sample .v2-gd-panel{flex:1;min-height:0;}
+.v2-gd-stage-port-legend{flex:0 0 auto;font-size:.64rem;font-weight:600;color:var(--slate);text-align:center;}
+body.theme-light .v2-gd-stage-port-legend{color:#607386;}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Degenerate-reuse Grid pages — toc / glossary-levels / glossary-1 / closing
+   ─────────────────────────────────────────────────────────────────────────
+   2026-07-28 whole-branch-review fix (G1): these 4 pages are the ONLY Grid
+   variants that reuse another slot's non-matrix body instead of a real
+   metricMatrix (structurally different from the other 13 "real matrix"
+   pages, which use .v2-gd-panel's 14px-radius/visible-border/tinted-
+   background chrome). Before this fix the 4 disagreed AMONG THEMSELVES too:
+   toc/glossary-levels/glossary-1 used 0px radius + 0px border + transparent
+   background + hairline dividers between cells, while closing alone kept a
+   visible 1px border around its reused table. Per this fan-out's own
+   comments (below), "square corners, hairline gridlines" was always meant
+   to be ONE shared grammar for this whole group — closing's border was the
+   one page that never actually got it. Fixed by dropping closing's outer
+   border/background to match the other three, making all 4 pages
+   consistent: 0px radius, 0px border, transparent background, hairline
+   internal dividers only.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* Page-local: slide-closing (Grid, fan-out plan §10, batch B3 item 5) — a
+   DELIBERATE degenerate case: this page has zero entities × comparable
+   metrics (provenance is a key→value record, not a rankable matrix), so
+   Grid reuses closingLedgerTable's own table markup (slides.ts's
+   closingGrid calls that builder DIRECTLY rather than re-deriving a second,
+   duplicate table) instead of dressing a non-matrix as a fake metricMatrix.
+   This class supplies ONLY the deck-wide Grid visual grammar — square
+   corners, hairline gridlines — on top of that identical markup; it does not
+   restyle the table's content. Reuses .v2-lg-closing's own flex/gap/side-block
+   layout (declared in the Ledger section above) since the two slots share
+   the exact same two-column shape, just with a squared-off table on this
+   side. */
+.v2-gd-closing{height:100%;display:flex;align-items:center;gap:28px;}
+.v2-gd-closing .v2-lg-table-card{flex:1.5;margin-top:0;border:0;border-radius:0;background:transparent;}
+.v2-gd-closing .deck-table{border-radius:0;}
+.v2-gd-closing .v2-closing-side{flex:1;}
+@media screen and (max-width:820px){
+  .v2-gd-closing{flex-direction:column;align-items:stretch;}
+  .v2-gd-closing .v2-closing-side{border-inline-start:0;padding-inline-start:0;}
+}
+
+/* Page-local: slide-toc (Grid, fan-out plan §1, batch B4) — NO real matrix:
+   "figure" values are heterogeneous strings across sections (a sample count
+   here, an accuracy percentage there), so a metricMatrix normalizing them
+   onto one column scale would misrepresent them as comparable. Reuses
+   tocCard's own markup (slides.ts) UNCHANGED, CSS-restyled here to the
+   deck-wide Grid grammar: gap collapses to 0 and each card's rounded
+   border/background give way to a hairline divider between adjacent cells
+   (square corners, uniform equal-size rows via flex:1 on a flex-column
+   parent that already fills the slide body). Each card's page-span drives a
+   --w tint on .v2-toc-side — the SAME "background-image only, ZERO layout
+   height" technique .v2-bar-cell uses (see barCell's doc comment,
+   slideKit.ts) — via a per-tone --gd-tint custom property so the tint
+   color still matches that section's own tone. Cell padding (14px 16px) and
+   tint alphas (.18/.22/.22/.24) are the CANONICAL values shared verbatim by
+   glossary-levels below (2026-07-28 fix, G2 — these two used to drift by
+   ~0.02 alpha and a different padding shorthand for no functional reason). */
+.v2-gd-toc .v2-toc-grid{gap:0;}
+.v2-gd-toc .v2-toc-card{
+  flex:1;min-height:0;border-radius:0;border:0;background:transparent;
+  border-bottom:1px solid rgba(255,255,255,.14);padding:14px 16px;
+}
+.v2-gd-toc .v2-toc-card:last-child{border-bottom:0;}
+.v2-gd-toc .v2-toc-card::before{width:3px;}
+.v2-gd-toc .v2-toc-side{
+  position:relative;padding-inline-end:8px;
+  background-image:linear-gradient(to top,var(--gd-tint,rgba(244,180,0,.18)) 0,var(--gd-tint,rgba(244,180,0,.18)) var(--w,0%),transparent var(--w,0%));
+  background-repeat:no-repeat;
+}
+.v2-gd-toc .v2-toc-card.blue .v2-toc-side{--gd-tint:rgba(107,169,248,.22);}
+.v2-gd-toc .v2-toc-card.green .v2-toc-side{--gd-tint:rgba(139,195,74,.22);}
+.v2-gd-toc .v2-toc-card.coral .v2-toc-side{--gd-tint:rgba(255,118,95,.24);}
+/* box-shadow:none (2026-07-28 fix, G2): the unscoped body.theme-light
+   .v2-toc-card rule (light-theme parity section, above) sets a box-shadow
+   that this Grid override never cleared — background/border went
+   transparent, but the shadow floated under an otherwise-invisible card. */
+body.theme-light .v2-gd-toc .v2-toc-card{border-bottom-color:#dde4ea;background:transparent;box-shadow:none;}
+
+/* Page-local: slide-glossary-levels (Grid, fan-out plan §3a, batch B4) — NO
+   real matrix (one metric — وزن العينة — over four entities); deliberately
+   does not import slide-risk-stages' live per-month figures to manufacture
+   extra columns (two pages independently asserting the same numbers is
+   worse than one honestly degenerate Grid). Reuses levelCardTinted's markup
+   (slides.ts) restyled to uniform, square-cornered cells separated by
+   hairlines instead of .v2-level-card's own rounded borders; the وزن figure
+   drives a --w tint on .v2-level-share via the same per-tone --gd-tint
+   technique .v2-gd-toc uses above. Padding/tint alphas match .v2-gd-toc's
+   canonical values verbatim (2026-07-28 fix, G2). */
+.v2-gd-glossary-levels .v2-level-grid{gap:0;}
+.v2-gd-glossary-levels .v2-level-card{
+  border-radius:0;border:0;background:transparent;
+  border-inline-end:1px solid rgba(255,255,255,.14);padding:14px 16px;
+}
+.v2-gd-glossary-levels .v2-level-card:last-child{border-inline-end:0;}
+.v2-gd-glossary-levels .v2-level-card::after{display:none;}
+.v2-gd-glossary-levels .v2-level-share{
+  position:relative;
+  background-image:linear-gradient(to top,var(--gd-tint,rgba(244,180,0,.18)) 0,var(--gd-tint,rgba(244,180,0,.18)) var(--w,0%),transparent var(--w,0%));
+  background-repeat:no-repeat;
+}
+.v2-gd-glossary-levels .v2-level-card.blue .v2-level-share{--gd-tint:rgba(107,169,248,.22);}
+.v2-gd-glossary-levels .v2-level-card.green .v2-level-share{--gd-tint:rgba(139,195,74,.22);}
+.v2-gd-glossary-levels .v2-level-card.coral .v2-level-share{--gd-tint:rgba(255,118,95,.24);}
+body.theme-light .v2-gd-glossary-levels .v2-level-card{border-inline-end-color:#dde4ea;background:transparent;}
+
+/* Page-local: slide-glossary-1 (Grid, fan-out plan §3b, batch B4) — ZERO
+   metrics (a glossary has no numbers at all), so Grid reuses termBand's own
+   markup (slides.ts) UNCHANGED instead of dressing a non-matrix as a fake
+   metricMatrix. Uniform cells + hairline separators only, matching the two
+   pages above — deliberately NO tint (there is no number to tint by). Cell
+   padding matches the canonical 14px 16px above (2026-07-28 fix, G2 — used
+   to be its own third, slightly different value). */
+.v2-gd-glossary-terms .v2-term-grid{gap:0;}
+.v2-gd-glossary-terms .v2-term-card{
+  border-radius:0;border:0;background:transparent;
+  border-inline-end:1px solid rgba(255,255,255,.14);padding:14px 16px;
+}
+.v2-gd-glossary-terms .v2-term-card:last-child{border-inline-end:0;}
+.v2-gd-glossary-terms .v2-term-card::after{display:none;}
+/* box-shadow:none (2026-07-28 fix, G2): same box-shadow leak as .v2-gd-toc
+   above — the unscoped body.theme-light .v2-term-card rule (theme v3
+   section) sets a box-shadow this override never cleared. */
+body.theme-light .v2-gd-glossary-terms .v2-term-card{border-inline-end-color:#dde4ea;background:transparent;box-shadow:none;}
+
+/* Page-local: slide-cover (Grid, fan-out plan §4, 2026-07-28) — 8
+   gridFieldCells in a 4×2 layout (identification row + scope row), no
+   metricMatrix/gridPanel wrapper (see coverSlide's own doc comment for why).
+   nth-child border removal: column 4 of each row (4n) drops its vertical
+   hairline (nothing to its right); row 2 (n+5) drops its horizontal hairline
+   (nothing below it) — the last row/column of an otherwise uniform grid.
+   THE COVER IS DARK IN BOTH THEMES BY DESIGN (theme.ts's own
+   \`.slide.v2-cover\`/\`body.theme-light .slide.v2-cover\` rules, above) — every
+   rule below that touches a shared, theme-adaptive class
+   (.v2-gd-field-cell/.v2-gd-field-value assume a light card in light theme
+   elsewhere in the deck) is re-overridden back to dark here, the same
+   pattern \`.v2-cover-meta-item\`/\`.v2-cover-meta-value\` already established. */
+.v2-gd-cover{height:100%;display:flex;flex-direction:column;justify-content:center;gap:18px;}
+.v2-gd-cover-rule{height:1px;width:100%;background:var(--line);}
+.v2-gd-cover .v2-gd-field{grid-template-columns:repeat(4,1fr);}
+.v2-gd-cover .v2-gd-field-cell:nth-child(4n){border-inline-end:0;}
+.v2-gd-cover .v2-gd-field-cell:nth-child(n+5){border-bottom:0;}
+body.theme-light .slide.v2-cover .v2-gd-field-cell{border-color:rgba(255,255,255,.13);}
+body.theme-light .slide.v2-cover .v2-gd-field-value{color:#fff;}
+
+/* Page-local: slide-sep-1/2/3 (Grid, fan-out plan §5, 2026-07-28) — one
+   full-width gridPanel (max-width 820px, centered) wrapping gridFieldCells:
+   a narrow رقم القسم cell beside a wide التعريف cell via the panel's own
+   \`0.6fr 2.4fr\` column template (plain grid auto-flow already puts the
+   non-\`wide\` cell in the narrow column and the \`wide\` one in the remaining
+   wide column — no span override needed). Both cells sit in the template's
+   only row, so both drop their bottom hairline; the last (wide) cell also
+   drops its inline-end hairline. Tone-bordered panel variants modelled on
+   the existing \`.v2-gd-port-population .v2-gd-panel.land/.sea\` rules. The
+   separator DOES follow the theme (unlike the cover) — no dark
+   re-override needed here. */
+.v2-gd-sep{height:100%;display:flex;align-items:center;justify-content:center;}
+.v2-gd-sep .v2-gd-panel{max-width:820px;width:100%;margin:auto;}
+.v2-gd-sep .v2-gd-field{grid-template-columns:0.6fr 2.4fr;}
+.v2-gd-sep .v2-gd-field-cell{border-bottom:0;}
+.v2-gd-sep .v2-gd-field-cell:last-child{border-inline-end:0;}
+.v2-gd-sep .v2-gd-field-cell.wide .v2-gd-field-value{white-space:normal;line-height:1.6;font-weight:700;}
+.v2-gd-sep .v2-gd-panel.gold{border-color:rgba(244,180,0,.35);}
+.v2-gd-sep .v2-gd-panel.cyan{border-color:rgba(50,197,210,.35);}
+.v2-gd-sep .v2-gd-panel.gold .v2-gd-panel-head span{color:var(--gold);}
+.v2-gd-sep .v2-gd-panel.cyan .v2-gd-panel-head span{color:#32c5d2;}
+body.theme-light .v2-gd-sep .v2-gd-panel.gold .v2-gd-panel-head span{color:#8a6d1f;}
+body.theme-light .v2-gd-sep .v2-gd-panel.cyan .v2-gd-panel-head span{color:#1f8a94;}
 `;

@@ -9,7 +9,7 @@
 // per-month-controlled deferred promise, then resolving the newer month's promise BEFORE the
 // older month's — the precise inversion the `cancelled` flag guard exists to defend against.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { DirectoryHandleLike } from "../../../../data/storage/fileSystemAccess";
 import type { PopulationFinalData } from "../../../../data/population/monthTypes";
 import { createMemoryDirectory } from "../../../../data/storage/memoryDirectory";
@@ -38,7 +38,49 @@ vi.mock("../../../../auth/usePermissions", () => ({
   usePermissions: () => ({
     can: (featureId: string) => (featureId === "export-reports" ? permissionsMock.state.can : true),
     canMutate: (featureId: string) => (featureId === "export-reports" ? permissionsMock.state.canMutate : true),
+    // TabGuard (wraps the "kpi" sub-tab's dashboard) calls canAccessTab — none of the
+    // pre-existing tests ever navigate to that sub-tab, but the admin-customizer-gate
+    // tests below do, so this must exist and stay permissive (that gate isn't what
+    // those tests are checking).
+    canAccessTab: () => true,
   }),
+}));
+
+// D1 — admin-only "تخصيص تصميم العرض" gate (index.tsx: `isAdmin = readSession()?.role
+// === "admin"`). Mutable so individual tests can flip the mocked session's role;
+// defaults to a non-admin/no-session state to match real readSession() behavior in a
+// jsdom test with no sessionStorage populated (i.e. the pre-existing tests' implicit
+// assumption that this button is absent unless a test opts into "admin").
+const authSessionMock = vi.hoisted(() => ({ state: { role: null as string | null } }));
+
+vi.mock("../../../../auth/authSession", () => ({
+  readSession: () => (authSessionMock.state.role ? { role: authSessionMock.state.role } : null),
+}));
+
+// D1 — the executive-deck export flow now loads saved admin style choices before
+// calling openExecutiveDeckV2 (both call sites in index.tsx: handleExport("deck") and
+// generate("executive-deck")). Mocked so no test touches the real templates-root disk
+// path, and so the choices object identity can be asserted on directly.
+const deckStyleChoicesMock = vi.hoisted(() => ({
+  impl: vi.fn(async (_directoryHandle: unknown) => ({
+    choices: { "exec-cover": 2 },
+    updatedAt: new Date().toISOString(),
+    updatedBy: "admin",
+    revision: 1,
+  })),
+}));
+
+vi.mock("../../../../data/reporting/executive/deck2/styleChoices", () => ({
+  loadDeckStyleChoices: (dir: unknown) => deckStyleChoicesMock.impl(dir),
+}));
+
+const deckExportMock = vi.hoisted(() => ({
+  impl: vi.fn((_execInput: unknown, _names: unknown, _styleChoices: unknown) => undefined),
+}));
+
+vi.mock("../../../../data/reporting/executive/deck2", () => ({
+  openExecutiveDeckV2: (execInput: unknown, names: unknown, styleChoices: unknown) =>
+    deckExportMock.impl(execInput, names, styleChoices),
 }));
 
 // Stubs the real (disk-writing) Power BI export so the gating tests below never touch
@@ -117,6 +159,9 @@ afterEach(() => {
   globalMonthMock.state.selection = { kind: "existing", month: 4, year: 2026, folderName: "4-april-2026" };
   permissionsMock.state = { can: true, canMutate: true };
   pbiExportMock.impl.mockClear();
+  authSessionMock.state.role = null;
+  deckStyleChoicesMock.impl.mockClear();
+  deckExportMock.impl.mockClear();
   delete (globalThis as { __testDir?: DirectoryHandleLike }).__testDir;
 });
 
@@ -269,5 +314,232 @@ describe("Reports export permission gating (B5)", () => {
 
     // Confirms this is NOT the generic "no months at all" empty state.
     expect(container.querySelector(".rh-month-current")?.textContent).not.toBe("لا توجد أشهر");
+  });
+});
+
+// D1 — admin-only design-customizer button (index.tsx: `isAdmin = readSession()?.role
+// === "admin"`, gating a `{isAdmin ? (<button>...تخصيص تصميم العرض</button>) : null}`
+// in the KPI dashboard toolbar). A prior review found this task's plan added ZERO
+// tests for either the render gate or the export flow below, on the false claim that
+// no test file existed to extend — these two describe blocks close that gap.
+//
+// The button ALSO exists on the default "reports" section's featured executive
+// card (added 2026-07-25 after the owner reported the KPI-toolbar-only button
+// was undiscoverable — most users land on "reports", not "kpi", and never saw
+// it). This describe block tests the original KPI-toolbar location, which only
+// renders once the analytics model has been built from a real (non-null)
+// population — so each test here must switch to that sub-tab and resolve the
+// mocked population load before the toolbar (and therefore the button)
+// appears at all. See the separate describe block below for the reports-card
+// location, which needs no sub-tab navigation.
+describe("Reports KPI dashboard — admin-only design-customizer gate (D1)", () => {
+  it("renders the design-customizer button when the session role is admin", async () => {
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    (globalThis as { __testDir?: DirectoryHandleLike }).__testDir = root;
+    authSessionMock.state.role = "admin";
+
+    render(<ReportsTab />);
+
+    await act(async () => {
+      deferredFor("4-april-2026").resolve(mockPop(0));
+      await Promise.resolve();
+    });
+
+    fireEvent.click(screen.getByRole("tab", { name: "مؤشرات" }));
+
+    // A genuinely discriminating check: if `isAdmin` were hardcoded `true` this would
+    // still pass, but the paired "non-admin" test below would then fail to observe
+    // the button's absence — the two tests together are what pin the real gate.
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /تخصيص تصميم العرض/ })).toBeInTheDocument();
+    });
+  });
+
+  it("does NOT render the design-customizer button for a non-admin role (supervisor)", async () => {
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    (globalThis as { __testDir?: DirectoryHandleLike }).__testDir = root;
+    authSessionMock.state.role = "supervisor";
+
+    render(<ReportsTab />);
+
+    await act(async () => {
+      deferredFor("4-april-2026").resolve(mockPop(0));
+      await Promise.resolve();
+    });
+
+    fireEvent.click(screen.getByRole("tab", { name: "مؤشرات" }));
+
+    // Confirm the dashboard itself actually mounted (a control that is NOT
+    // admin-gated) before trusting the customizer button's absence — otherwise an
+    // absent button could just mean the dashboard never rendered at all.
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /فتح العرض التنفيذي/ })).toBeInTheDocument();
+    });
+
+    // Hard gate, not a `disabled` attribute — the button must not be in the DOM at all.
+    expect(screen.queryByRole("button", { name: /تخصيص تصميم العرض/ })).not.toBeInTheDocument();
+  });
+
+  it("does NOT render the design-customizer button for a non-admin role (manager)", async () => {
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    (globalThis as { __testDir?: DirectoryHandleLike }).__testDir = root;
+    authSessionMock.state.role = "manager";
+
+    render(<ReportsTab />);
+
+    await act(async () => {
+      deferredFor("4-april-2026").resolve(mockPop(0));
+      await Promise.resolve();
+    });
+
+    fireEvent.click(screen.getByRole("tab", { name: "مؤشرات" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /فتح العرض التنفيذي/ })).toBeInTheDocument();
+    });
+
+    expect(screen.queryByRole("button", { name: /تخصيص تصميم العرض/ })).not.toBeInTheDocument();
+  });
+
+  // Whole-branch review finding: handleOpenCustomizer had no handler-time canMutate
+  // re-check (unlike handleExport/handlePbiExport/generate's documented defense-in-depth
+  // pattern), so a control incorrectly left enabled could still open the customizer.
+  it("blocks opening the design customizer at the handler when canMutate is false, even though can=true leaves the button enabled", async () => {
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    (globalThis as { __testDir?: DirectoryHandleLike }).__testDir = root;
+    authSessionMock.state.role = "admin";
+    permissionsMock.state = { can: true, canMutate: false };
+
+    render(<ReportsTab />);
+
+    await act(async () => {
+      deferredFor("4-april-2026").resolve(mockPop(0));
+      await Promise.resolve();
+    });
+
+    fireEvent.click(screen.getByRole("tab", { name: "مؤشرات" }));
+
+    const customizerButton = await screen.findByRole("button", { name: /تخصيص تصميم العرض/ });
+    // can=true keeps the render-time gate open (the control is usable-looking)...
+    expect(customizerButton).not.toBeDisabled();
+
+    // ...but the handler's own canMutate() re-check must still reject the action.
+    fireEvent.click(customizerButton);
+
+    await waitFor(() => {
+      expect(screen.getByText("لا تملك صلاحية تصدير التقارير.")).toBeInTheDocument();
+    });
+
+    // The customizer dialog must never have opened.
+    expect(screen.queryByRole("dialog", { name: "تخصيص تصميم العرض التنفيذي" })).not.toBeInTheDocument();
+  });
+});
+
+// 2026-07-25: the owner reported not seeing the design-customizer button at all —
+// it only existed on the "kpi" sub-tab's dashboard toolbar (tested above), but most
+// users land on the default "reports" section and never navigate there. A second
+// button, same handler, was added to the featured executive card's footer on that
+// default section, needing no sub-tab navigation.
+describe("Reports card — admin-only design-customizer button on the default 'reports' section (discoverability fix)", () => {
+  it("renders the design-customizer button on the featured executive card without navigating away from the default 'reports' section", async () => {
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    (globalThis as { __testDir?: DirectoryHandleLike }).__testDir = root;
+    authSessionMock.state.role = "admin";
+
+    const { container } = render(<ReportsTab />);
+
+    await act(async () => {
+      deferredFor("4-april-2026").resolve(mockPop(0));
+      await Promise.resolve();
+    });
+
+    // No tab click — this is the default render, exactly what the owner saw.
+    const featuredCard = container.querySelector(".rh-card-featured") as HTMLElement;
+    expect(within(featuredCard).getByRole("button", { name: /تخصيص التصميم/ })).toBeInTheDocument();
+  });
+
+  it("does NOT render the reports-card design-customizer button for a non-admin role", async () => {
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    (globalThis as { __testDir?: DirectoryHandleLike }).__testDir = root;
+    authSessionMock.state.role = "supervisor";
+
+    const { container } = render(<ReportsTab />);
+
+    await act(async () => {
+      deferredFor("4-april-2026").resolve(mockPop(0));
+      await Promise.resolve();
+    });
+
+    const featuredCard = container.querySelector(".rh-card-featured") as HTMLElement;
+    // Confirm the card itself rendered (a non-gated control) before trusting the
+    // customizer button's absence.
+    expect(within(featuredCard).getByRole("button", { name: "التصدير" })).toBeInTheDocument();
+    expect(within(featuredCard).queryByRole("button", { name: /تخصيص التصميم/ })).not.toBeInTheDocument();
+  });
+
+  it("clicking the reports-card button opens the same customizer dialog as the KPI-toolbar button", async () => {
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    (globalThis as { __testDir?: DirectoryHandleLike }).__testDir = root;
+    authSessionMock.state.role = "admin";
+
+    const { container } = render(<ReportsTab />);
+
+    await act(async () => {
+      deferredFor("4-april-2026").resolve(mockPop(0));
+      await Promise.resolve();
+    });
+
+    const featuredCard = container.querySelector(".rh-card-featured") as HTMLElement;
+    fireEvent.click(within(featuredCard).getByRole("button", { name: /تخصيص التصميم/ }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: "تخصيص تصميم العرض التنفيذي" })).toBeInTheDocument();
+    });
+  });
+});
+
+// D1 — executive-deck export must load the admin's saved style choices BEFORE
+// opening the deck, and forward them through as openExecutiveDeckV2's third
+// argument (index.tsx generate(): `const saved = directoryHandle ? await
+// loadDeckStyleChoices(directoryHandle) : null; openExecutiveDeckV2(execInput, names,
+// saved?.choices);`). Exercised via the executive card's "reports"-section export
+// control (format switched to "deck") rather than the KPI dashboard toolbar's twin
+// call site — same code path, far less setup (no model-building required).
+describe("Reports executive-deck export — style choices loaded before export (D1)", () => {
+  it("calls loadDeckStyleChoices before openExecutiveDeckV2 and forwards the loaded choices as the third argument", async () => {
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    (globalThis as { __testDir?: DirectoryHandleLike }).__testDir = root;
+
+    const { container } = render(<ReportsTab />);
+
+    await act(async () => {
+      deferredFor("4-april-2026").resolve(mockPop(0));
+      await Promise.resolve();
+    });
+
+    // Executive is the featured card; switch its format toggle to "deck" (defaults
+    // to "document"), then trigger its "التصدير" button — this is generate("executive-deck").
+    const featuredCard = container.querySelector(".rh-card-featured") as HTMLElement;
+    fireEvent.click(within(featuredCard).getByTitle("عرض تقديمي تفاعلي (HTML)"));
+    fireEvent.click(within(featuredCard).getByRole("button", { name: "التصدير" }));
+
+    await waitFor(() => {
+      expect(deckExportMock.impl).toHaveBeenCalledTimes(1);
+    });
+
+    // 1) loadDeckStyleChoices was actually invoked — reverting the `await
+    //    loadDeckStyleChoices(...)` call in index.tsx would leave this at 0.
+    expect(deckStyleChoicesMock.impl).toHaveBeenCalledTimes(1);
+
+    // 2) it ran BEFORE openExecutiveDeckV2 (index.tsx awaits it first).
+    const loadOrder = deckStyleChoicesMock.impl.mock.invocationCallOrder[0];
+    const exportOrder = deckExportMock.impl.mock.invocationCallOrder[0];
+    expect(loadOrder).toBeLessThan(exportOrder);
+
+    // 3) the loaded choices (not undefined, not some other object) were forwarded as
+    //    the third argument — reverting to `openExecutiveDeckV2(execInput, names)`
+    //    (no third arg) would make this `undefined` instead.
+    const [, , forwardedChoices] = deckExportMock.impl.mock.calls[0];
+    expect(forwardedChoices).toEqual({ "exec-cover": 2 });
   });
 });

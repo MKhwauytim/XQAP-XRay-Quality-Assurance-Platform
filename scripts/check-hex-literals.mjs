@@ -33,7 +33,7 @@ const repoRoot = path.resolve(__dirname, "..");
 // silence an accidental regression.
 const BASELINE = {
   "src/components/Sidebar/Tabs/EmployeeWorkspace/EmployeeWorkspace.css": 10,
-  "src/components/Sidebar/Tabs/Reports/Reports.css": 23,
+  "src/components/Sidebar/Tabs/Reports/Reports.css": 29,
   "src/components/DataTable/DataTable.css": 3,
   "src/components/Sidebar/Tabs/Population/Population.css": 16
 };

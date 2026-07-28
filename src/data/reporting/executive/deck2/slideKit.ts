@@ -105,6 +105,35 @@ export function badgeIcon(name: string, size: number): string {
 }
 
 /**
+ * Compact 180° coverage arc for a stage tile — a micro SVG dial that inherits
+ * its caller's tone via `currentColor`. Low→high reads left→right (a physical
+ * gauge), same convention as ui/charts.ts `gauge`. Decorative (the percentage
+ * is printed beside it as text), so aria-hidden and no interpolated data.
+ * Lifted here from `slides.ts` (2026-07-25, deck2-design-systems Task 1) so
+ * Briefing's lede gauge (design spec §2, slot 2) can reuse it too — same
+ * cross-file sharing convention this module already uses for `STAGE_TONES`/
+ * `badgeIcon`/`fmtPct`: defined once here, imported everywhere else.
+ */
+export function microArc(pct: number): string {
+  const p = Math.max(0, Math.min(100, Number.isFinite(pct) ? pct : 0));
+  const W = 58;
+  const H = 34;
+  const cx = W / 2;
+  const cy = H - 4;
+  const rad = 23;
+  const sw = 5;
+  const at = (ang: number): [number, number] => [cx + rad * Math.cos(ang), cy + rad * Math.sin(ang)];
+  const [x0, y0] = at(Math.PI);
+  const [x1, y1] = at(Math.PI + (p / 100) * Math.PI);
+  const track = `M ${x0.toFixed(1)} ${y0.toFixed(1)} A ${rad} ${rad} 0 0 1 ${(cx + rad).toFixed(1)} ${cy.toFixed(1)}`;
+  const val = `M ${x0.toFixed(1)} ${y0.toFixed(1)} A ${rad} ${rad} 0 0 1 ${x1.toFixed(1)} ${y1.toFixed(1)}`;
+  return `<svg class="v2-micro-arc" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" aria-hidden="true">
+    <path d="${track}" fill="none" stroke="var(--line)" stroke-width="${sw}" stroke-linecap="round"/>
+    <path d="${val}" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round"/>
+  </svg>`;
+}
+
+/**
  * Per-slide print-include switch, on-screen only. Pure CSS, no script:
  * unchecking it excludes the WHOLE slide from print/PDF output via the
  * `.slide:has(.slide-print-toggle input:not(:checked))` rule in theme.ts —
@@ -126,9 +155,10 @@ export function printToggle(): string {
  * inside the stack — see DECK_VARIANT_SCRIPT in index.ts for the lookup).
  */
 export function variantSwitcher(slideId: string): string {
+  const label = resolveVariantIndex(slideId) + 1;
   return `<div class="v2-variant-switcher" data-for="${esc(slideId)}" dir="ltr">
     <button type="button" class="v2-variant-prev" aria-label="النمط السابق">‹</button>
-    <span class="v2-variant-label">1 / 4</span>
+    <span class="v2-variant-label">${label} / 4</span>
     <button type="button" class="v2-variant-next" aria-label="النمط التالي">›</button>
   </div>`;
 }
@@ -193,29 +223,98 @@ export function pageFoot(num: number, total: number): string {
 }
 
 /**
+ * Module-level "active style choices" for the duration of one
+ * `buildExecutiveDeckV2` call — set once at the top of that function, read by
+ * `renderVariants` below. Deliberately NOT a parameter threaded through every
+ * one of the ~18 slide-builder functions: `renderVariants` is already the
+ * single choke point every slide (via `v2Slide`, plus the two direct callers
+ * `coverSlide`/`sectionSeparatorSlide`) funnels through, so scoping the state
+ * here confines this whole feature to this file + deck2/index.ts. Reports are
+ * always built synchronously within one JS turn (no concurrent
+ * `buildExecutiveDeckV2` calls can interleave), so there's no cross-call
+ * interference risk. See
+ * docs/superpowers/specs/2026-07-25-admin-report-customization-design.md.
+ */
+let activeStyleChoices: Record<string, number> | null = null;
+
+export function setActiveStyleChoices(choices: Record<string, number> | null): void {
+  activeStyleChoices = choices;
+}
+
+export function getActiveStyleChoices(): Record<string, number> | null {
+  return activeStyleChoices;
+}
+
+/**
+ * Strips a trailing `-<digits>` page-number suffix, e.g. `slide-port-population-3`
+ * → `slide-port-population`. Paginated builders use 3 different suffix
+ * conventions (always-suffixed from page 1; bare on page 0, suffixed from
+ * page 1) — this normalizes all of them to one stable "family" key so a
+ * saved style choice survives the deck's page count changing month to month
+ * (see docs/superpowers/specs/2026-07-25-deck2-design-systems-design.md §3).
+ * A no-op for non-paginated slide ids (no trailing page number to strip).
+ */
+function familyKeyOf(slideId: string): string {
+  return slideId.replace(/-\d+$/, "");
+}
+
+/** Clamps a valid-shape choice to a 0-3 slot; returns null for anything
+ *  missing, non-numeric, or out of range. */
+function clampChoice(choice: unknown): number | null {
+  return typeof choice === "number" && Number.isInteger(choice) && choice >= 0 && choice <= 3
+    ? choice
+    : null;
+}
+
+/**
+ * Resolves the variant index to render for a given slide id: exact id match
+ * first (so an already-saved per-page-id choice from before the family-key
+ * fix keeps working), then the slide's family key (a choice saved without a
+ * page-number suffix applies to every page count), then the deck-wide
+ * default key `"*"`, then 0. Never throws — a choice saved against a slide
+ * id that no longer exists, or a stale/corrupt file, silently falls through
+ * to the next tier instead.
+ */
+function resolveVariantIndex(slideId: string): number {
+  const exact = clampChoice(activeStyleChoices?.[slideId]);
+  if (exact !== null) return exact;
+  const family = clampChoice(activeStyleChoices?.[familyKeyOf(slideId)]);
+  if (family !== null) return family;
+  const deckDefault = clampChoice(activeStyleChoices?.["*"]);
+  return deckDefault !== null ? deckDefault : 0;
+}
+
+/**
  * Wraps a slide's varying content into 1-of-4 selectable style variants.
- * Production (`variantPreview=false`) renders ONLY `bodies[0]` — byte-identical
- * to the single-variant output that existed before the switcher (a dev-preview
- * feature; see docs/superpowers/specs/2026-07-05-deck2-style-switcher-design.md).
- * Preview mode renders all 4, one visible via CSS (`.v2-variant-panel.active`).
- * The arrow-cycle control that drives this lives separately in
- * `slideControls()`/`variantSwitcher()`; the inline script in deck2/index.ts
- * (DECK_VARIANT_SCRIPT) wires the two together by matching `data-for` to
- * `data-slide-id` and persists the choice.
+ * Production (`variantPreview=false`) renders `bodies[resolveVariantIndex(slideId)]`
+ * — `bodies[0]` when no admin choice is saved for this slide, byte-identical
+ * to the single-variant output that existed before the switcher (a
+ * dev-preview feature; see
+ * docs/superpowers/specs/2026-07-05-deck2-style-switcher-design.md — and now
+ * also the production selection mechanism for the in-app admin customizer,
+ * docs/superpowers/specs/2026-07-25-admin-report-customization-design.md).
+ * Preview mode renders all 4, one visible via CSS (`.v2-variant-panel.active`),
+ * initially the saved choice (or panel 0) instead of always panel 0, so
+ * re-opening the customizer shows what's currently saved.
+ * The arrow-cycle control that drives interactive switching lives separately
+ * in `slideControls()`/`variantSwitcher()`; the inline script in
+ * deck2/index.ts (DECK_VARIANT_SCRIPT) wires the two together by matching
+ * `data-for` to `data-slide-id` and persists the choice.
  */
 export function renderVariants(
   slideId: string,
   bodies: readonly [string, string, string, string],
   variantPreview: boolean,
 ): string {
-  if (!variantPreview) return bodies[0];
+  const initialIndex = resolveVariantIndex(slideId);
+  if (!variantPreview) return bodies[initialIndex];
   const panels = bodies
     .map(
       (html, i) =>
-        `<div class="v2-variant-panel${i === 0 ? " active" : ""}" data-variant-index="${i}">${html}</div>`,
+        `<div class="v2-variant-panel${i === initialIndex ? " active" : ""}" data-variant-index="${i}">${html}</div>`,
     )
     .join("");
-  return `<div class="v2-variant-stack" data-slide-id="${esc(slideId)}" data-active-index="0">${panels}</div>`;
+  return `<div class="v2-variant-stack" data-slide-id="${esc(slideId)}" data-active-index="${initialIndex}">${panels}</div>`;
 }
 
 // ── v2 slide shell — rail + eyebrow + headline + body + footer page num. ────
@@ -385,6 +484,66 @@ export function portTableCard(opts: {
 }
 
 /**
+ * A general-purpose table-card shell for the "Ledger" design system (spec's
+ * slot 1 — verifiability: tables and figure-strips only). Generalizes
+ * `portTableCard`'s shape (table/totals-row/filler-row/span) so any
+ * table-only page can render through the same mechanism without hand-rolling
+ * its own `<table>` markup — the same motivation `portTableCard` itself
+ * documents, one level more generic: this one has no icon+title card head
+ * (that shape is specific to the per-port land/sea cards), just an optional
+ * plain title line, since most Ledger tables sit inside a page that already
+ * has its own headline/section title.
+ *
+ * `cardClass` defaults to the new shared `.v2-lg-table-card` class (theme.ts).
+ * `levelFiguresTable` (slides.ts) passes the legacy `.v2-level-table-card`
+ * name instead so `slide-risk-stages`'s already-shipped variant-1 markup never
+ * churns — `.v2-level-table-card` is kept as a `theme.ts` alias of
+ * `.v2-lg-table-card`'s rules (design spec §4), so both class names render
+ * identically; this override exists purely to keep that one page's
+ * byte-for-byte output stable, not because the two classes style differently.
+ *
+ * `rowCount` also gates the filler row exactly like `portTableCard` does (via
+ * `fillerRow`) — a caller whose card CENTERS its fixed content instead of
+ * pinning a totals row flush to the bottom (like `levelFiguresTable`'s small
+ * 4-row table) passes `rowCount: 0` to opt out of that pinning trick, since
+ * `DECK_TABLE_FILL_SCRIPT` (deck2/index.ts) only ever measures/sizes
+ * `.v2-port-col`/`.v2-stage-port-card` cards — an unmeasured filler row would
+ * just be dead markup anywhere else.
+ */
+export function ledgerTableCard(opts: {
+  /** Optional plain title line above the table. Omitted entirely (no markup,
+   *  not even an empty wrapper) when not supplied — callers whose page
+   *  headline already names the table don't pay for an empty title slot. */
+  title?: string;
+  /** Header cell markup WITHOUT the surrounding `<tr>` — same convention as
+   *  `portTableCard.theadCells`. */
+  theadCells: string;
+  /** Concatenated `<tr>...</tr>` markup for the data rows. */
+  bodyRowsHtml: string;
+  /** Totals `<tr>...</tr>` markup. */
+  totalsRowHtml: string;
+  /** Column count — the `colspan` fillerRow uses when `rowCount > 0`. */
+  span: number;
+  /** Real data-row count, feeding `fillerRow` exactly like `portTableCard`.
+   *  Pass 0 to opt out of the filler row entirely (see doc comment above). */
+  rowCount: number;
+  /** Wrapper `<div>` class. Default `"v2-lg-table-card"`. */
+  cardClass?: string;
+}): string {
+  const cls = opts.cardClass ?? "v2-lg-table-card";
+  const titleHtml = opts.title
+    ? `\n    <div class="v2-lg-table-card-title">${esc(opts.title)}</div>`
+    : "";
+  return `<div class="${cls}">${titleHtml}
+    <table class="deck-table">
+      <thead><tr>${opts.theadCells}</tr></thead>
+      <tbody>${opts.bodyRowsHtml}${fillerRow(opts.span, opts.rowCount)}</tbody>
+      <tfoot>${opts.totalsRowHtml}</tfoot>
+    </table>
+  </div>`;
+}
+
+/**
  * Row budget, measured live (v39.10, recomputed v39.16 for the taller,
  * ink-safe row height) — each `.v2-port-col` card clips its own overflow, so
  * a table taller than its card silently loses its bottom rows (the totals
@@ -420,6 +579,102 @@ export function planPortPages(landCount: number, seaCount: number, baseRowsPerPa
   return { pages: Math.ceil(maxCount / baseRowsPerPage), rowsPerPage: baseRowsPerPage, compact: false };
 }
 
+/**
+ * Briefing system (slot 2 — الإحاطة)'s ranked-list density plan — a
+ * page-agnostic contract every Briefing page calls instead of re-deriving its
+ * own row budget (2026-07-25 fix; see
+ * docs/superpowers/specs/2026-07-25-deck2-design-systems-design.md and the
+ * design-advisor ruling that replaced this task's first, buggy attempt,
+ * which borrowed `planPortPages`'s PER-COLUMN table-geometry budget for a
+ * COMBINED ranked list and silently dropped rows past it).
+ *
+ * Budget (measured against the real 459px `.slide-body`, per the design
+ * ruling): 459 − 112 (lede) − 55 (support strip) − 2×14 (flex gaps) = 264.
+ * Row gap is 5px at every tier, so per-column capacity is
+ * floor((264+5)/(rowH+5)) — see `capFor` below, the single place this
+ * arithmetic actually lives (a peer review, 2026-07-25, caught this comment's
+ * first draft stating "181...278" — arithmetic that didn't reconcile with
+ * the shipped 264 constant; corrected here, and `BRIEFING_RANK_DENSEST_CAP`
+ * below is now derived from `capFor` instead of a second hardcoded copy of
+ * the same number, so the two can no longer drift out of sync).
+ *
+ * The ladder tries, in order: 1 col @44px (cap 5) → 1 col @36px (cap 6) →
+ * 2 cols @44px (cap 10) → 2 cols @36px (cap 12) → 2 cols @30px (cap 14,
+ * the floor — Arabic descenders/nuqat start colliding with the row below
+ * this size, a geometric fact, not a taste call). Beyond 14, the tail folds
+ * into one aggregating remainder row (never exactly 1 folded item — the
+ * densest tier's capacity is sized so folding only ever starts at a 2+
+ * remainder). Two columns is a hard cap: a third would shorten the bar
+ * tracks past the point where magnitude comparison works, which would make
+ * this Grid, not Briefing.
+ */
+export type BriefingRankPlan = {
+  tier: "comfortable" | "compact" | "dense";
+  rowH: 44 | 36 | 30;
+  columns: 1 | 2;
+  rowsPerColumn: number;
+  /** How many items get their own named row. */
+  named: number;
+  /** How many items fold into the single trailing remainder row (0 = none). */
+  folded: number;
+};
+
+export const BRIEFING_RANK_BUDGET_PX = 264;
+const BRIEFING_RANK_ROW_GAP_PX = 5;
+
+function capFor(rowH: number, columns: 1 | 2): number {
+  const perColumn = Math.floor((BRIEFING_RANK_BUDGET_PX + BRIEFING_RANK_ROW_GAP_PX) / (rowH + BRIEFING_RANK_ROW_GAP_PX));
+  return perColumn * columns;
+}
+
+// Derived from capFor (not a second hardcoded copy of the same number, per
+// the 2026-07-25 peer-review fix) — the densest tier's own capacity.
+const BRIEFING_RANK_DENSEST_CAP = capFor(30, 2);
+const BRIEFING_RANK_NAMED_WHEN_FOLDED = BRIEFING_RANK_DENSEST_CAP - 1;
+
+export function briefingRankPlan(n: number): BriefingRankPlan {
+  const ladder: Array<{ tier: BriefingRankPlan["tier"]; rowH: 44 | 36 | 30; columns: 1 | 2 }> = [
+    { tier: "comfortable", rowH: 44, columns: 1 },
+    { tier: "compact", rowH: 36, columns: 1 },
+    { tier: "comfortable", rowH: 44, columns: 2 },
+    { tier: "compact", rowH: 36, columns: 2 },
+    { tier: "dense", rowH: 30, columns: 2 },
+  ];
+  for (const step of ladder) {
+    const cap = capFor(step.rowH, step.columns);
+    if (n <= cap) {
+      return {
+        tier: step.tier,
+        rowH: step.rowH,
+        columns: step.columns,
+        rowsPerColumn: Math.ceil(n / step.columns),
+        named: n,
+        folded: 0,
+      };
+    }
+  }
+  // Beyond the densest tier's capacity: fold the tail into one remainder row.
+  const named = BRIEFING_RANK_NAMED_WHEN_FOLDED;
+  return {
+    tier: "dense",
+    rowH: 30,
+    columns: 2,
+    rowsPerColumn: Math.ceil(BRIEFING_RANK_DENSEST_CAP / 2),
+    named,
+    folded: n - named,
+  };
+}
+
+/** Arabic تمييز (numeral-noun agreement) for "N ports" — 1/2/3-10/11+ each
+ *  take a different noun form; getting this wrong reads as sloppy to a
+ *  fluent reader in a way an English "N port(s)" mistake never would. */
+export function portCountPhrase(n: number): string {
+  if (n === 1) return "منفذ واحد";
+  if (n === 2) return "منفذان";
+  if (n >= 3 && n <= 10) return `${n} منافذ`;
+  return `${n} منفذًا`;
+}
+
 /** Denominator-gated rate — null (renders "—") when there's nothing to divide by. */
 export function rateOf(num: number, den: number): number | null {
   return den > 0 ? (num / den) * 100 : null;
@@ -429,4 +684,352 @@ export function rateOf(num: number, den: number): number | null {
  *  tables) when there's nothing to show rather than plain white "—" text. */
 export function pctCell(v: number | null): string {
   return v === null ? `<span class="insuff">—</span>` : fmtPct(v);
+}
+
+/**
+ * Truncates a caller-supplied label to at most `n` characters, appending a
+ * single ellipsis when it does — a page-agnostic helper for chart column/row
+ * headers with too little horizontal room for a full Arabic name (first
+ * needed by `slide-stage-port-population`/`-sample`'s transposed Grid,
+ * fan-out plan §7: 5 port-name column headers in a narrow matrix).
+ *
+ * Deliberately NOT wired into `metricMatrix`/`analyticsCharts.ts` itself
+ * (the fan-out plan explicitly rules this out) — that module has no separate
+ * "short label for the chart, full label for the sr-table" field, both the
+ * SVG header text and the paired screen-reader `<table>`'s column header
+ * read the same `MetricColumn.label`, so truncating there would silently
+ * truncate the accessible table too, defeating its entire purpose. Callers
+ * that truncate a label with this helper are therefore responsible for
+ * printing the FULL name again somewhere else in their own page markup (see
+ * `slide-stage-port-population`'s Grid legend line) so it stays genuinely
+ * discoverable, not just short.
+ */
+export function truncLabel(s: string, n: number): string {
+  return s.length > n ? `${s.slice(0, n)}…` : s;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// P0 shared primitives — the fan-out plan's "BUILD THIS FIRST" set
+// (docs/superpowers/specs/2026-07-25-deck2-fanout-remaining-pages-plan.md §0).
+//
+// `portPopulationSlideBuilders`'s own `ledgerPortTable`/`briefingPortRank`/
+// `gridPortMatrix` (slides.ts) are the exemplar this set generalizes FROM —
+// every one of these six functions was extracted to reproduce that already-
+// shipped page's markup byte-for-byte (pinned by the characterization tests
+// in deck2.test.ts) while exposing the small number of extra knobs later
+// pages genuinely need (per-row tone overrides, a bar-less list mode, a fixed
+// scale, a caller-supplied remainder builder). None of the extra knobs are
+// exercised by the exemplar itself — they default to the exemplar's exact
+// behavior when omitted.
+// ════════════════════════════════════════════════════════════════════════════
+
+// ── P1 — Ledger ordinal badge ───────────────────────────────────────────────
+/** The small rank badge Ledger tables place before a row's first cell
+ *  (`ledgerPortTable`'s `.v2-lg-idx` — ports are already sorted by whatever
+ *  the caller's own order is, so this doubles as a rank indicator without a
+ *  dedicated column). `i` is the row's 0-based index. */
+export function ledgerIdx(i: number): string {
+  return `<span class="v2-lg-idx">${i + 1}</span>`;
+}
+
+// ── P2 — Ledger port-card wrapper ───────────────────────────────────────────
+/**
+ * Thin wrapper over `ledgerTableCard` for the per-port Ledger cards (the
+ * shape `ledgerPortTable` already uses): assembles the `.v2-lg-port-card`
+ * card-class variants (`compact`/`extraClass`) and — new here, previously
+ * duplicated at each call site — emits the shared colspan "no rows" placeholder
+ * row whenever `bodyRowsHtml` is the empty string, instead of every caller
+ * hand-rolling its own empty-state `<tr>`.
+ *
+ * `rowCount` is NOT defaulted internally — pass it through explicitly. Every
+ * Ledger port card in this deck passes `rowCount: 0` (Ledger's plainer table
+ * doesn't pin a totals row to the card's bottom edge the way `.v2-port-col`/
+ * `.v2-stage-port-card` do, so there is nothing for `DECK_TABLE_FILL_SCRIPT`
+ * to measure) — the one documented exception is the stage×port cards
+ * (`.v2-stage-port-card`, deck2/section "7" of the fan-out plan), which DO
+ * need `rowCount: top.length` to keep their measured totals-pinning working;
+ * that page is out of P0's scope.
+ */
+export function ledgerPortCard(opts: {
+  title: string;
+  theadCells: string;
+  bodyRowsHtml: string;
+  totalsRowHtml: string;
+  span: number;
+  rowCount: number;
+  compact: boolean;
+  extraClass?: string;
+  emptyText?: string;
+}): string {
+  const cardClass = ["v2-lg-port-card", opts.compact ? "compact" : "", opts.extraClass ?? ""]
+    .filter(Boolean)
+    .join(" ");
+  const bodyRowsHtml =
+    opts.bodyRowsHtml !== ""
+      ? opts.bodyRowsHtml
+      : `<tr><td colspan="${opts.span}"><span class="insuff">${esc(opts.emptyText ?? "—")}</span></td></tr>`;
+  return ledgerTableCard({
+    title: opts.title,
+    theadCells: opts.theadCells,
+    bodyRowsHtml,
+    totalsRowHtml: opts.totalsRowHtml,
+    span: opts.span,
+    rowCount: opts.rowCount,
+    cardClass,
+  });
+}
+
+// ── P3/P5 — Briefing tone + rank-item vocabulary ────────────────────────────
+/** Briefing's four tone identities (theme.ts defines the matching CSS). A
+ *  page picks one default tone (see the fan-out plan's page-tone table); a
+ *  `briefingRankList` row may override it per-item (e.g. risk-level identity
+ *  colors, or a signed delta's pass/fail green/coral). */
+export type BriefingTone = "gold" | "blue" | "green" | "coral";
+
+/** One row of a `briefingRankList`. Callers build these already in the
+ *  intended DISPLAY order — the list never re-sorts. */
+export type BriefingRankItem = {
+  /** Raw display name — escaped internally, do not pre-escape. */
+  label: string;
+  /** Bar magnitude. null → row renders with no bar (listed but unmeasured). */
+  value: number | null;
+  /** Pre-formatted figure (fmtNum / fmtPct / signed delta) — printed as-is. */
+  valueText: string;
+  /** Pre-formatted secondary line — printed as-is. */
+  secondaryText: string;
+  /** Per-row tone override; defaults to the list's own `tone`. */
+  tone?: BriefingTone;
+  /** Marks this item as the folded "rest" row: numeral renders "+" instead
+   *  of a rank, and it gets the muted `.rest` styling instead of a tone. Set
+   *  by a `foldRemainder` builder's return value, never by a named row. */
+  rest?: boolean;
+};
+
+// ── P3 — Briefing lede ──────────────────────────────────────────────────────
+/**
+ * The Briefing system's headline block (`.v2-bf-lede`): one big pre-formatted
+ * figure, its tone, a one-line label, and a basis/scope chip underneath.
+ * `figure`/`label`/`basis` are pre-built HTML strings (the caller escapes any
+ * embedded raw data itself, same convention `briefingPortRank`'s original
+ * inline lede used for `esc(lead.name)`) — this function does not re-escape
+ * them, since they are typically composed of several static-Arabic-text +
+ * escaped-substitution pieces, not one raw field.
+ *
+ * `arc` is optional (later pages' `microArc` coverage dial, e.g.
+ * `slide-risk-stages`'s sample-coverage lede) — omitted entirely (no markup)
+ * when not supplied, so pages that don't use it never pay for an empty slot.
+ */
+export function briefingLede(opts: {
+  figure: string;
+  tone: BriefingTone;
+  label: string;
+  basis: string;
+  arc?: number | null;
+}): string {
+  const arcHtml = opts.arc != null ? `\n      <div class="v2-bf-lede-arc">${microArc(opts.arc)}</div>` : "";
+  return `<div class="v2-bf-lede">
+      <div class="v2-bf-lede-figure ${opts.tone}">${opts.figure}</div>${arcHtml}
+      <div class="v2-bf-lede-label">${opts.label}</div>
+      <div class="v2-bf-lede-basis">${opts.basis}</div>
+    </div>`;
+}
+
+// ── P4 — Briefing support strip ─────────────────────────────────────────────
+/**
+ * The Briefing system's 3-stat totals strip (`.v2-totals-band`) beneath the
+ * lede — unconditional per the 2026-07-25 design ruling (see
+ * `briefingRankPlan`'s doc comment): it is never dropped on a density signal.
+ * `slice(0, 3)` is enforced here (the strip has room for exactly 3 stats);
+ * an empty list renders nothing (`""`, not an empty band wrapper) — pages
+ * with no support strip (e.g. `slide-glossary-1`, a zero-numbers page) get a
+ * true no-op, not dead markup.
+ */
+export function briefingSupport(items: Array<{ iconName: string; value: string; label: string }>): string {
+  const use = items.slice(0, 3);
+  if (use.length === 0) return "";
+  const rows = use
+    .map(
+      (it) =>
+        `<div class="v2-totals-item"><span class="v2-totals-icon">${icon(it.iconName, 16)}</span><span><b>${it.value}</b><small>${it.label}</small></span></div>`,
+    )
+    .join("\n        ");
+  return `<div class="v2-totals-band">
+        ${rows}
+      </div>`;
+}
+
+// ── P5 — Briefing ranked list ───────────────────────────────────────────────
+/**
+ * The Briefing system's ranked-bar list (`.v2-bf-rank`) — body extracted
+ * VERBATIM from `briefingPortRank`'s `const plan = briefingRankPlan(...)`
+ * onward (slides.ts, pre-2026-07-25-fan-out), including:
+ *   • the peer-reviewed `scaleMax` fold-in ("named rows and the remainder row
+ *     must share ONE scale, computed with the remainder's real aggregate
+ *     folded in" — v59.48's fix for a v59.47 algebraic no-op);
+ *   • the "first (rightmost, RTL) column gets ranks 1…K top-to-bottom, second
+ *     column gets the rest" split, not a naive interleave.
+ *
+ * Generalized three ways beyond the exemplar:
+ *   1. Per-item `tone` override (`item.tone ?? opts.tone`) — needed for
+ *      risk-level identity colors and signed-delta pass/fail rows.
+ *   2. `bars: false` — omits the `.v2-bf-rank-track` entirely AND stamps a
+ *      `no-bars` modifier on `.v2-bf-rank-row` so `.v2-bf-rank-label` can
+ *      pick up `flex:1 1 auto` (theme.ts) and genuinely expand into the
+ *      track's now-empty space, for definitional/provenance lists that have
+ *      no magnitude to bar-chart. Default `true` (the exemplar's only mode).
+ *      (2026-07-28: the `no-bars` hook + its CSS rule were missing — the doc
+ *      comment claimed the label already expanded, but every sibling
+ *      including the label was `flex:0 0 auto`/fixed-width, so dropping the
+ *      track just left dead space. No current caller passes `bars:false` yet
+ *      — see the fan-out plan's glossary-1/closing pages — so this was a
+ *      landmine, not a shipped bug; fixed alongside the identity-mispairing
+ *      review pass while already in this file.)
+ *   3. `scale: {kind:"fixed", max}` alongside the exemplar's `{kind:"auto"}` —
+ *      for rate pages (0–100) where every named row AND the remainder must
+ *      normalize against the same fixed ceiling, not each other's magnitudes.
+ *   4. `foldRemainder` replaces the exemplar's hardcoded "بقية المنافذ (N)"
+ *      remainder-row construction — callers build their own aggregate (which
+ *      may need richer domain data than a `BriefingRankItem` carries, e.g.
+ *      `briefingPortRank`'s refactor recovers the folded ports' raw rows via
+ *      `combined.slice(combined.length - folded.length)`, using the folded
+ *      slice's LENGTH rather than re-deriving `briefingRankPlan`'s ladder a
+ *      second time). REQUIRED, not optional (2026-07-28): a caller that
+ *      forgot it while `plan.folded > 0` used to have the folded tail
+ *      silently vanish — no remainder row, no type error. Making it
+ *      mandatory forces every caller to decide what happens to overflow
+ *      rows instead of losing them by omission.
+ *
+ * `items` is ALREADY in display order and is NEVER re-sorted — several later
+ * pages intentionally rank by something other than the bar magnitude (level
+ * order, arm order, fixed stratum order), so re-sorting here would silently
+ * break that contract.
+ */
+export function briefingRankList(opts: {
+  items: BriefingRankItem[];
+  tone: BriefingTone;
+  scale: { kind: "auto" } | { kind: "fixed"; max: number };
+  foldRemainder: (folded: BriefingRankItem[]) => BriefingRankItem;
+  bars?: boolean;
+}): string {
+  const items = opts.items;
+  const plan = briefingRankPlan(items.length);
+  const namedItems = items.slice(0, plan.named);
+  const foldedItems = items.slice(plan.named);
+  const showBars = opts.bars ?? true;
+
+  // Same `maxOf`-style floor-at-1 rule, over ALL items (named + folded) —
+  // exactly what the exemplar's `maxOf(combined.map((p) => p.total))` computed
+  // before ever slicing into named/rest.
+  const finiteValues = items
+    .map((it) => it.value)
+    .filter((v): v is number => v !== null && Number.isFinite(v));
+  const maxMag = Math.max(1, ...finiteValues);
+
+  const remainderItem: BriefingRankItem | null =
+    plan.folded > 0 ? opts.foldRemainder(foldedItems) : null;
+
+  // The peer-reviewed fix: named rows and the remainder share ONE scale, the
+  // remainder's real aggregate folded in — not each computing its own ratio
+  // against maxMag alone (see this function's doc comment).
+  const scaleMax =
+    opts.scale.kind === "fixed"
+      ? opts.scale.max
+      : remainderItem !== null && remainderItem.value !== null
+        ? Math.max(maxMag, remainderItem.value)
+        : maxMag;
+
+  const pctWidth = (v: number | null): string => {
+    if (v === null || !Number.isFinite(v) || scaleMax <= 0) return "0.0";
+    return ((v / scaleMax) * 100).toFixed(1);
+  };
+
+  const rowHtml = (item: BriefingRankItem, numHtml: string, isRest: boolean): string => {
+    const tone = item.tone ?? opts.tone;
+    const track = showBars
+      ? `\n        <span class="v2-bf-rank-track"><i class="v2-bf-rank-fill ${isRest ? "rest" : tone}" style="width:${pctWidth(item.value)}%"></i></span>`
+      : "";
+    // `no-bars` lets theme.ts's matching rule give the label the track's
+    // now-empty flex space instead of leaving it as dead space (see this
+    // function's doc comment, point 2).
+    const rowClass = ["v2-bf-rank-row", isRest ? "rest" : "", showBars ? "" : "no-bars"]
+      .filter(Boolean)
+      .join(" ");
+    return `<div class="${rowClass}">
+        <span class="v2-bf-rank-num${isRest ? "" : ` ${tone}`}">${numHtml}</span>
+        <span class="v2-bf-rank-label">${esc(item.label)}</span>${track}
+        <span class="v2-bf-rank-value">${item.valueText}</span>
+        <span class="v2-bf-rank-secondary">${item.secondaryText}</span>
+      </div>`;
+  };
+
+  const allRows = namedItems.map((it, i) => rowHtml(it, String(i + 1), false));
+  if (remainderItem !== null) {
+    allRows.push(rowHtml(remainderItem, "+", true));
+  }
+
+  // First (rightmost, RTL) column gets ranks 1…K top-to-bottom; second column
+  // gets the rest — per the design ruling, not a naive interleave.
+  const totalRowsShown = allRows.length;
+  const firstColCount = plan.columns === 1 ? totalRowsShown : Math.ceil(totalRowsShown / 2);
+  const cols =
+    plan.columns === 1 ? [allRows] : [allRows.slice(0, firstColCount), allRows.slice(firstColCount)];
+  const colsHtml = cols
+    .map((colRows) => `<div class="v2-bf-rank-col">${colRows.join("")}</div>`)
+    .join("");
+
+  return `<div class="v2-bf-rank t-${plan.tier}">${colsHtml}</div>`;
+}
+
+// ── P6 — Grid panel ──────────────────────────────────────────────────────────
+/**
+ * Thin wrapper matching `gridPortMatrix`'s inline `.v2-gd-panel` markup: a
+ * head (title + a caller-supplied "sub" line, e.g. a count or a scope note)
+ * over a chart slot. The chart itself (`metricMatrix`/`percentHeatmap`/etc.,
+ * ui/analyticsCharts.ts) is always built by the caller — this wrapper only
+ * owns the panel chrome, exactly like `gridPortMatrix` did inline.
+ */
+export function gridPanel(opts: { title: string; sub: string; variant?: string; chartHtml: string }): string {
+  const cls = ["v2-gd-panel", opts.variant ?? ""].filter(Boolean).join(" ");
+  return `<div class="${cls}">
+    <div class="v2-gd-panel-head"><b>${esc(opts.title)}</b><span>${esc(opts.sub)}</span></div>
+    <div class="v2-gd-panel-chart">${opts.chartHtml}</div>
+  </div>`;
+}
+
+// ── P7 — Grid label/value field cells ───────────────────────────────────────
+/**
+ * Grid system (slot 3) label-over-value cell field: the system's uniform
+ * hairline-cell grammar applied to pages that have real fields but NO
+ * comparable numeric domain, so `metricMatrix` would be dishonest (fan-out
+ * plan §3, 2026-07-28 — `slide-cover`/`slide-sep-1/2/3`, the two pages that
+ * closed out the deck2 three-system fan-out).
+ *
+ * Column count/geometry is set by the wrapping page-local `.v2-gd-*` class
+ * (theme.ts) — this function only emits the field markup and the shared
+ * per-cell chrome (hairline borders, padding, label/value typography); it
+ * never decides how many columns a row has or which cells span more than
+ * one column. `wide`'s actual visual effect (e.g. `grid-column:1/-1`, text
+ * wrapping) is therefore ALSO page-local — it is emitted here only as a
+ * `.wide` class hook, deliberately with no shared rule attached, since what
+ * "wide" means depends entirely on the caller's own column template (e.g.
+ * `slide-sep-*`'s `0.6fr 2.4fr` two-column template already puts a
+ * non-`wide` cell in the narrow column and a `wide` one in the remaining
+ * wide column via plain grid auto-flow — no span override needed there).
+ *
+ * `numeric` adds tabular-nums to the value (a shared, purely typographic
+ * effect, unlike `wide`'s geometry). Labels/values are escaped internally —
+ * callers pass raw strings, not pre-escaped HTML.
+ */
+export function gridFieldCells(
+  cells: Array<{ label: string; value: string; numeric?: boolean; wide?: boolean }>,
+): string {
+  const cellsHtml = cells
+    .map((c) => {
+      const cls = ["v2-gd-field-cell", c.numeric ? "num" : "", c.wide ? "wide" : ""]
+        .filter(Boolean)
+        .join(" ");
+      return `<div class="${cls}"><span class="v2-gd-field-label">${esc(c.label)}</span><span class="v2-gd-field-value">${esc(c.value)}</span></div>`;
+    })
+    .join("");
+  return `<div class="v2-gd-field">${cellsHtml}</div>`;
 }

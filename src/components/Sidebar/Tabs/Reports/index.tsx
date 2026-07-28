@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import ReportDesignerTab from "../ReportDesigner";
-import { AlertTriangle, BarChart2, BarChart3, Building2, Check, ClipboardList, Database, Download, FileStack, FileText, Filter, FolderOpen, Globe, History, Presentation, User, Users, X } from "lucide-react";
+import { AlertTriangle, BarChart2, BarChart3, Building2, Check, ClipboardList, Database, Download, FileStack, FileText, Filter, FolderOpen, Globe, History, Presentation, Settings2, User, Users, X } from "lucide-react";
 
 import type { SidebarTabModule } from "../tabTypes";
 import { loadOrDeriveDistributionCurrent, loadDistributionCurrentRevision } from "../../../../data/distribution/distributionStorage";
@@ -34,6 +34,9 @@ import { loadAllEmployeeFiles } from "../../../../data/answers/answerStorage";
 import { loadTemplate } from "../../../../data/templates/templateStorage";
 import { loadInspectionTemplateSelection } from "../../../../data/templates/templateSelectionStorage";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
+import { readSession } from "../../../../auth/authSession";
+import { loadDeckStyleChoices } from "../../../../data/reporting/executive/deck2/styleChoices";
+import DeckDesignCustomizer from "./DeckDesignCustomizer";
 import { runPowerBiExport } from "../../../../data/powerbiExport/exportManager";
 import type { ExportManifest } from "../../../../data/powerbiExport/exportTypes";
 import "./Reports.css";
@@ -157,6 +160,9 @@ function ReportsContent() {
   // re-check canMutate() as the authoritative, defense-in-depth gate right before doing
   // real work, so a control that is (incorrectly) left enabled can never still mutate.
   const canExportReports = can("export-reports");
+  const isAdmin = readSession()?.role === "admin";
+  const [customizerOpen, setCustomizerOpen] = useState(false);
+  const [customizerInput, setCustomizerInput] = useState<{ execInput: ExecutiveReportInput; names: Record<string, string> } | null>(null);
   const [monthMeta, setMonthMeta] = useState<MonthMeta | null>(null);
   const [section, setSection] = useState<ReportsSection>("reports");
   const [generating, setGenerating] = useState<ReportType | null>(null);
@@ -319,7 +325,8 @@ function ReportsContent() {
         openExecutiveReport(execInput, names);
         showToast("ok", "تم فتح التقرير التفصيلي.");
       } else if (kind === "deck") {
-        openExecutiveDeckV2(execInput, names);
+        const saved = directoryHandle ? await loadDeckStyleChoices(directoryHandle) : null;
+        openExecutiveDeckV2(execInput, names, saved?.choices);
         showToast("ok", "تم فتح العرض التنفيذي.");
       } else {
         buildExecutiveXlsx(execInput, names);
@@ -330,6 +337,18 @@ function ReportsContent() {
     } finally {
       setExporting(null);
     }
+  }
+
+  async function handleOpenCustomizer(): Promise<void> {
+    if (!directoryHandle || !selectedMonth) return;
+    if (!canMutate("export-reports")) {
+      showToast("error", "لا تملك صلاحية تصدير التقارير.");
+      return;
+    }
+    const execInput = await loadExecInput();
+    if (!execInput) { showToast("error", "لم يتم العثور على بيانات المجتمع. يجب معالجة المجتمع أولاً."); return; }
+    setCustomizerInput({ execInput, names: buildDisplayNameMap() });
+    setCustomizerOpen(true);
   }
 
   async function handlePbiExport() {
@@ -417,7 +436,8 @@ function ReportsContent() {
           buildExecutiveXlsx(execInput, names);
           showToast("ok", "تم تنزيل ملف بيانات التقرير (Excel).");
         } else if (type === "executive-deck") {
-          openExecutiveDeckV2(execInput, names);
+          const saved = directoryHandle ? await loadDeckStyleChoices(directoryHandle) : null;
+          openExecutiveDeckV2(execInput, names, saved?.choices);
           showToast("ok", "تم فتح العرض التنفيذي. استخدم أمر الطباعة للحفظ بصيغة PDF.");
         } else {
           openExecutiveReport(execInput, names);
@@ -610,6 +630,18 @@ function ReportsContent() {
             {exporting === "deck" ? <span className="rh-spinner" /> : <BarChart2 size={15} strokeWidth={2} />}
             فتح العرض التنفيذي (HTML)
           </button>
+          {isAdmin ? (
+            <button
+              type="button"
+              className="rh-btn"
+              disabled={exporting !== null || !selectedMonth || !canExportReports}
+              title="تخصيص تصميم العرض التنفيذي (للمدير فقط)"
+              onClick={() => { void handleOpenCustomizer(); }}
+            >
+              <Settings2 size={15} strokeWidth={2} />
+              تخصيص تصميم العرض
+            </button>
+          ) : null}
           <button
             type="button"
             className="rh-btn rh-btn-indigo"
@@ -843,6 +875,7 @@ function ReportsContent() {
   }
 
   return (
+    <>
     <section className="rh-page" dir="rtl">
       {/* ── Toast ───────────────────────────────────── */}
       {toast && (
@@ -952,6 +985,18 @@ function ReportsContent() {
           </div>
           <div className="rh-card-footer">
             {renderExportControls("executive", "rh-btn-teal")}
+            {isAdmin ? (
+              <button
+                type="button"
+                className="rh-btn"
+                disabled={busy || !selectedMonth || !canExportReports}
+                title="تخصيص تصميم العرض التنفيذي (للمدير فقط)"
+                onClick={() => { void handleOpenCustomizer(); }}
+              >
+                <Settings2 size={15} strokeWidth={2} />
+                تخصيص التصميم
+              </button>
+            ) : null}
           </div>
         </div>
 
@@ -1144,6 +1189,16 @@ function ReportsContent() {
         </>
       )}
     </section>
+    {customizerOpen && customizerInput && directoryHandle ? (
+      <DeckDesignCustomizer
+        execInput={customizerInput.execInput}
+        employeeDisplayNames={customizerInput.names}
+        directoryHandle={directoryHandle}
+        canMutate={canMutate}
+        onClose={() => setCustomizerOpen(false)}
+      />
+    ) : null}
+    </>
   );
 }
 
