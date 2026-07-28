@@ -145,6 +145,50 @@ function knownProfile(count = 20): {
   return { rows, reviews };
 }
 
+/**
+ * 20 images extending `knownProfile` with real manual/opposite/liveMeans
+ * results (`knownProfile` leaves those three permanently null — "BI never
+ * provided" — which is realistic for most months but can't exercise the new
+ * levels×teams grid's real percentages). The L1/L2/reviewer patterns are
+ * IDENTICAL to `knownProfile` (same seeds), so every existing assertion about
+ * those three sources keeps holding; only the three BI-sourced fields are
+ * newly populated:
+ *   • manual    = سليمة on the first 16 images, اشتباه on the last 4
+ *   • opposite  = سليمة on the first 10 images, اشتباه on the last 10
+ *   • liveMeans = سليمة on the first 5 images,  اشتباه on the last 15
+ * Exact resulting agreement rates are read off the built model in each test
+ * (same "guard the fixture against drift" pattern `knownProfile`'s own tests
+ * use), not hand-derived here.
+ */
+function knownTeamsProfile(count = 20): {
+  rows: PreparedPopulationRow[];
+  reviews: Map<string, Result>;
+} {
+  const rows: PreparedPopulationRow[] = [];
+  const reviews = new Map<string, Result>();
+  for (let i = 0; i < count; i++) {
+    const id = `XR-${i + 1}`;
+    const manual: Result = i < 16 ? "سليمة" : "اشتباه";
+    const opposite: Result = i < 10 ? "سليمة" : "اشتباه";
+    const liveMeans: Result = i < 5 ? "سليمة" : "اشتباه";
+    rows.push(
+      popRow({
+        xrayImageId: id,
+        sourceRowNumber: i + 1,
+        xrayLevelOneResult: "سليمة",
+        xrayLevelTwoResult: i < 15 ? "سليمة" : "اشتباه",
+        otherResults: {
+          manual: { result: manual, code: null, employeeId: null },
+          opposite: { result: opposite, code: null, employeeId: null },
+          liveMeans: { result: liveMeans, code: null, employeeId: null },
+        },
+      }),
+    );
+    reviews.set(id, i < 18 ? "سليمة" : "اشتباه");
+  }
+  return { rows, reviews };
+}
+
 function render(inp: ExecutiveReportInput): string {
   return sourceAgreementSlide(buildReportModel(inp), 12, 24, false);
 }
