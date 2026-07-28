@@ -710,6 +710,32 @@ describe("sourceAgreementSlide — Grid (panel 3)", () => {
     expect(panel).toContain("عدد الصور القابلة للمقارنة");
   });
 
+  it("renders the same levels×teams matrix as the default view: 2×3 grid with real names, no numeric axis, plus the level1↔2 stat", () => {
+    const { rows, reviews } = knownTeamsProfile();
+    const html = renderPreview(input(rows, { sample: true, reviews }));
+    const panel = panelSlice(html, 3);
+    const matrixStart = panel.indexOf('class="v2-gd-panel matrix"');
+    expect(matrixStart).toBeGreaterThan(-1);
+    const reviewerStart = panel.indexOf('class="v2-gd-panel reviewer"');
+    expect(reviewerStart).toBeGreaterThan(matrixStart);
+    const matrixHtml = panel.slice(matrixStart, reviewerStart);
+
+    for (const label of [
+      "المستوى الأول",
+      "المستوى الثاني",
+      "التفتيش اليدوي",
+      "التفتيش المعاكس",
+      "الوسائل الحية",
+    ]) {
+      expect(matrixHtml).toContain(label);
+    }
+    // No bare numeric column headers left over from the old 6×6 design.
+    expect(matrixHtml).not.toMatch(/>[1-6]<\/text>/);
+    expect(matrixHtml).toContain('class="s3sa-lvl-stat"');
+    // The reviewer is not a column here — already covered by the reviewer panel.
+    expect(matrixHtml).not.toContain("المراجع (المعيار)");
+  });
+
   it("the reviewer matrix has the right shape: 5 source rows × 4 metric columns with the plan's column names", () => {
     const { rows, reviews } = knownProfile();
     const html = renderPreview(input(rows, { sample: true, reviews }));
