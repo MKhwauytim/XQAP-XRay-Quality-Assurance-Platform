@@ -265,7 +265,6 @@ function scopeNote(): string {
 function ledgerAgreementTable(
   title: string,
   rows: PortAgreementRow[],
-  variant: "land" | "sea",
   compact: boolean,
 ): string {
   const popMax = maxOf(rows.map((p) => p.l1l2Comparable));
@@ -515,7 +514,7 @@ export function portAgreementSlideBuilders(model: ReportModel, variantPreview: b
   </div>`;
       const ledgerBody = `<div class="v2-sys-ledger v2-lg-agree">
     <div class="v2-agree-wrap">
-      <div class="v2-lg-split">${ledgerAgreementTable("المنافذ البرية", landChunk, "land", plan.compact)}${ledgerAgreementTable("المنافذ البحرية", seaChunk, "sea", plan.compact)}</div>
+      <div class="v2-lg-split">${ledgerAgreementTable("المنافذ البرية", landChunk, plan.compact)}${ledgerAgreementTable("المنافذ البحرية", seaChunk, plan.compact)}</div>
       ${scopeNote()}
     </div>
   </div>`;

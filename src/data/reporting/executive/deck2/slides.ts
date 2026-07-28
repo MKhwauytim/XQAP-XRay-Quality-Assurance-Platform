@@ -2739,7 +2739,6 @@ function qualityTable(
 function ledgerQualityTable(
   title: string,
   rows: PortQualityRow[],
-  variant: "land" | "sea",
   compact: boolean,
 ): string {
   const trs = rows
@@ -2951,7 +2950,7 @@ export function qualityPortSlideBuilders(model: ReportModel, variantPreview: boo
     const cont = page > 0 ? " (تابع)" : "";
     builders.push((num, total) => {
       const body = `<div class="v2-port-split">${qualityTable("المنافذ البرية", landChunk, "land", plan.compact)}${qualityTable("المنافذ البحرية", seaChunk, "sea", plan.compact)}</div>`;
-      const ledgerBody = `<div class="v2-sys-ledger v2-lg-quality-ports"><div class="v2-lg-split">${ledgerQualityTable("المنافذ البرية", landChunk, "land", plan.compact)}${ledgerQualityTable("المنافذ البحرية", seaChunk, "sea", plan.compact)}</div></div>`;
+      const ledgerBody = `<div class="v2-sys-ledger v2-lg-quality-ports"><div class="v2-lg-split">${ledgerQualityTable("المنافذ البرية", landChunk, plan.compact)}${ledgerQualityTable("المنافذ البحرية", seaChunk, plan.compact)}</div></div>`;
       const briefingBody = briefingQualityRank(landChunk, seaChunk);
       const gridBody = `<div class="v2-sys-grid v2-gd-quality-ports"><div class="v2-gd-split">${gridQualityMatrix("المنافذ البرية", landChunk, "land", plan.compact)}${gridQualityMatrix("المنافذ البحرية", seaChunk, "sea", plan.compact)}</div></div>`;
       return v2Slide({
@@ -3073,7 +3072,6 @@ function accuracyTable(
 function ledgerAccuracyTable(
   title: string,
   rows: PortAccuracyRow[],
-  variant: "land" | "sea",
   compact: boolean,
 ): string {
   const trs = rows
@@ -3269,7 +3267,7 @@ export function accuracyPortSlideBuilders(model: ReportModel, variantPreview: bo
     const cont = page > 0 ? " (تابع)" : "";
     builders.push((num, total) => {
       const body = `<div class="v2-port-split">${accuracyTable("المنافذ البرية", landChunk, "land", plan.compact)}${accuracyTable("المنافذ البحرية", seaChunk, "sea", plan.compact)}</div>`;
-      const ledgerBody = `<div class="v2-sys-ledger v2-lg-quality-accuracy"><div class="v2-lg-split">${ledgerAccuracyTable("المنافذ البرية", landChunk, "land", plan.compact)}${ledgerAccuracyTable("المنافذ البحرية", seaChunk, "sea", plan.compact)}</div></div>`;
+      const ledgerBody = `<div class="v2-sys-ledger v2-lg-quality-accuracy"><div class="v2-lg-split">${ledgerAccuracyTable("المنافذ البرية", landChunk, plan.compact)}${ledgerAccuracyTable("المنافذ البحرية", seaChunk, plan.compact)}</div></div>`;
       const briefingBody = briefingAccuracyRank(landChunk, seaChunk);
       const gridBody = `<div class="v2-sys-grid v2-gd-quality-accuracy"><div class="v2-gd-split">${gridAccuracyMatrix("المنافذ البرية", landChunk, "land", plan.compact)}${gridAccuracyMatrix("المنافذ البحرية", seaChunk, "sea", plan.compact)}</div></div>`;
       return v2Slide({

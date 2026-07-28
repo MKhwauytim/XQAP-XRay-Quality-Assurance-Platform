@@ -93,7 +93,7 @@ function panelSlice(html: string, index: 0 | 1 | 2 | 3): string {
 function twoPortModel() {
   return buildReportModel(
     input([
-      popRow({ portName: "منفذ أ", portType: "منفذ بري", selectedInSample: true }),
+      popRow({ portName: "منفذ أ", portType: "منفذ بري" }),
       popRow({ xrayImageId: "XR-2", portName: "منفذ ب", portType: "منفذ بحري" }),
     ]),
   );

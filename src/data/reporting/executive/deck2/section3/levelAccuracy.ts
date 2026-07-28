@@ -310,7 +310,6 @@ function signedPointsText(points: number): string {
 function ledgerLevelTable(
   title: string,
   rows: LevelAccuracyRow[],
-  variant: "land" | "sea",
   compact: boolean,
 ): string {
   const span = 5;
@@ -567,7 +566,7 @@ export function levelAccuracySlideBuilders(
         : `<div class="v2-port-split v2-lvlacc">${levelTable("المنافذ البرية", landChunk, "land", plan.compact)}${levelTable("المنافذ البحرية", seaChunk, "sea", plan.compact)}</div>`;
       const ledgerBody = isEmpty
         ? emptyState()
-        : `<div class="v2-sys-ledger v2-lg-level-accuracy"><div class="v2-lg-split">${ledgerLevelTable("المنافذ البرية", landChunk, "land", plan.compact)}${ledgerLevelTable("المنافذ البحرية", seaChunk, "sea", plan.compact)}</div></div>`;
+        : `<div class="v2-sys-ledger v2-lg-level-accuracy"><div class="v2-lg-split">${ledgerLevelTable("المنافذ البرية", landChunk, plan.compact)}${ledgerLevelTable("المنافذ البحرية", seaChunk, plan.compact)}</div></div>`;
       const briefingBody = isEmpty
         ? emptyState()
         : briefingLevelRank(landChunk, seaChunk);

@@ -62,7 +62,7 @@ import {
   rateOf,
   v2Slide,
 } from "../slideKit";
-import type { BriefingRankItem, CellTone } from "../slideKit";
+import type { BriefingRankItem, BriefingTone, CellTone } from "../slideKit";
 
 // ── Strata ──────────────────────────────────────────────────────────────────
 
@@ -523,7 +523,12 @@ function briefingQualityLedeAndRank(
     value: s.accuracy,
     valueText: pctCell(s.accuracy),
     secondaryText: `العيّنة ${fmtNum(s.n)} · فائت ${pctCell(s.missedRate)}`,
-    tone: LEVEL_TONE[s.level],
+    // LEVEL_TONE is typed CellTone (it also feeds qualCell()'s tinted cells
+    // elsewhere in this file, which need "neutral" in their domain), but its
+    // 3 concrete values for these levels are always green/gold/coral — a
+    // proper subset of BriefingTone. Verified, not assumed: see LEVEL_TONE's
+    // own literal above.
+    tone: LEVEL_TONE[s.level] as BriefingTone,
   }));
 
   const rankHtml = briefingRankList({

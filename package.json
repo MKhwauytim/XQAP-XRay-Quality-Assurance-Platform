@@ -1,14 +1,14 @@
 {
   "name": "x-ray-quality-app",
   "private": true,
-  "version": "59.67.0",
+  "version": "59.68.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "lint:ci": "eslint src --max-warnings 0",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc -b",
     "preview": "vite preview",
     "test": "vitest",
     "test:run": "vitest run",
