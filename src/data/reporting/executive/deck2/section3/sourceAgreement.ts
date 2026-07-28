@@ -126,6 +126,25 @@ const SOURCE_LABELS: Record<ResultSource, string> = {
   review: "المراجع (المعيار)",
 };
 
+/**
+ * The two rows of the default/Grid variants' levels×teams matrix — the
+ * report's own primary inspection methods. `SOURCE_ORDER` above is still
+ * used, unchanged, by the Ledger/Briefing variants (they still walk all 15
+ * pairs); these two new groups exist only for the narrower chart.
+ */
+const LEVEL_SOURCES: readonly ResultSource[] = ["levelOne", "levelTwo"] as const;
+
+/**
+ * The three columns of the same chart — the OTHER inspection teams. `review`
+ * is deliberately excluded: the reviewer card sitting next to this chart
+ * already shows both levels vs. the reviewer, so repeating those two numbers
+ * here would just duplicate information one glance away (design spec §5).
+ * level-vs-level itself is also excluded — it isn't a "level vs team"
+ * comparison, so it gets its own standalone stat (`levelPairStatHtml`)
+ * instead of a grid cell.
+ */
+const TEAM_SOURCES: readonly ResultSource[] = ["manual", "opposite", "liveMeans"] as const;
+
 // ── Shared gating ───────────────────────────────────────────────────────────
 
 /**
@@ -223,16 +242,110 @@ function comparableGrid(cells: CrossTeamMatrixCell[]): string {
   </table>`;
 }
 
+// ── matrixCard's new levels × teams chart ────────────────────────────────────
+//
+// 2026-07-28 rework (owner feedback on the previously-shipped 6×6 heatmap:
+// "the graph ... 123456 mean nothing and current page is hard to read"). See
+// `docs/superpowers/specs/2026-07-28-deck2-source-agreement-levels-vs-teams-
+// design.md` for the full rationale. The chart now answers the page's own
+// stated question narrowly — how do the two X-ray levels compare against the
+// other teams — instead of every one of the 15 possible source pairs. This is
+// a genuine 2×3 RECTANGLE (rows ≠ columns), not a symmetric matrix, so there
+// is no lower-triangle indexing, no mirrored half, and no numeric-axis
+// tradeoff to document: 3 real Arabic column headers fit comfortably where 6
+// didn't.
+//
+// NOTE (temporary, resolved by Task 5): `buildHeatMatrix`/`comparableGrid`
+// above this block still exist — `gridBody` still uses them until Task 5
+// rewires it and deletes them, along with the now-stale "Left card — the 6×6
+// agreement matrix" header comment above `buildHeatMatrix`. Task 3 alone
+// leaves two adjacent "Left card"-ish section comments in the file; that's
+// expected and temporary, not a mistake to fix here.
+
+const MATRIX_TITLE = "توافق المستويين مع الفرق الأخرى";
+const MATRIX_SUB = "مقارنة كل مستوى بالتفتيش اليدوي والمعاكس والوسائل الحية";
+
+/**
+ * The 2×3 chart data: rows are the two X-ray inspection levels, columns are
+ * the other three inspection teams (`review` and level-vs-level are
+ * deliberately excluded — see the `TEAM_SOURCES`/`LEVEL_SOURCES` doc comments
+ * above). Each cell is read directly off `crossTeamMatrix`, gated by the same
+ * sufficiency rule every other rate on this page uses.
+ */
+function buildLevelsTeamsMatrix(cells: CrossTeamMatrixCell[]): HeatMatrix {
+  const index = indexPairs(cells);
+  return {
+    rows: LEVEL_SOURCES.map((s) => SOURCE_LABELS[s]),
+    cols: TEAM_SOURCES.map((s) => SOURCE_LABELS[s]),
+    values: LEVEL_SOURCES.map((level) =>
+      TEAM_SOURCES.map((team) => {
+        const cell = pairAt(index, level, team);
+        return cell ? gatedRate(cell.comparable, cell.agreementRate) : null;
+      }),
+    ),
+  };
+}
+
+/**
+ * The ن companion to `buildLevelsTeamsMatrix`: the same 2×3 shape, carrying
+ * `comparable` for every cell, including cells the sufficiency gate
+ * suppressed. `percentHeatmap`'s cell text is percentage-only by contract (it
+ * has no per-cell annotation hook, and that module is owned/edited
+ * elsewhere), so counts still need this separate table — simplified from the
+ * previous triangular design since every (level, team) slot is a real,
+ * non-mirrored comparison (no void cells needed except the blank top-left
+ * corner).
+ */
+function levelsTeamsCountsTable(cells: CrossTeamMatrixCell[]): string {
+  const index = indexPairs(cells);
+  const head = `<tr><th class="s3sa-void" scope="col"></th>${TEAM_SOURCES.map(
+    (team) => `<th scope="col">${esc(SOURCE_LABELS[team])}</th>`,
+  ).join("")}</tr>`;
+
+  const bodyRows = LEVEL_SOURCES.map((level) => {
+    const tds = TEAM_SOURCES.map((team) => {
+      const cell = pairAt(index, level, team);
+      return `<td>${fmtNum(cell ? cell.comparable : 0)}</td>`;
+    }).join("");
+    return `<tr><th scope="row">${esc(SOURCE_LABELS[level])}</th>${tds}</tr>`;
+  }).join("");
+
+  return `<table class="s3sa-ngrid">
+    <caption>${esc("عدد الصور القابلة للمقارنة (العيّنة) لكل خلية")}</caption>
+    <thead>${head}</thead>
+    <tbody>${bodyRows}</tbody>
+  </table>`;
+}
+
+/**
+ * The level1↔level2 agreement stat — a standalone callout, not a grid cell,
+ * since it's a different comparison kind (level vs. level, not level vs.
+ * team). Sits above the levels×teams grid on both the default and Grid
+ * variants. Gated and counted with the exact same discipline as every other
+ * rate on this page: "—" (not a fabricated number) below the sufficiency
+ * cut, the comparable count always shown.
+ */
+function levelPairStatHtml(cells: CrossTeamMatrixCell[]): string {
+  const index = indexPairs(cells);
+  const cell = pairAt(index, "levelOne", "levelTwo");
+  const rate = cell ? gatedRate(cell.comparable, cell.agreementRate) : null;
+  const n = cell ? cell.comparable : 0;
+  return `<div class="s3sa-lvl-stat">
+    <span class="s3sa-lvl-stat-icon" aria-hidden="true">${icon("check", 14)}</span>
+    <span>${esc("توافق المستوى الأول مع الثاني")} — <b>${pctCell(rate)}</b> · ${esc(`${fmtNum(n)} صورة`)}</span>
+  </div>`;
+}
+
 function matrixCard(cells: CrossTeamMatrixCell[]): string {
-  const heat = percentHeatmap(buildHeatMatrix(cells), {
+  const heat = percentHeatmap(buildLevelsTeamsMatrix(cells), {
     width: 620,
     height: 320,
     digits: 0,
     toneLow: "text",
     toneHigh: "primary",
-    rowHeaderWidth: 140,
-    caption: "مصفوفة التوافق بين المصادر",
-    rowHeader: "المصدر",
+    rowHeaderWidth: 110,
+    caption: MATRIX_TITLE,
+    rowHeader: "المستوى",
     // Polarity: stronger tint = higher agreement.
     legendHighLabel: "توافق أعلى",
     legendLowLabel: "توافق أقل",
@@ -242,13 +355,12 @@ function matrixCard(cells: CrossTeamMatrixCell[]): string {
   return `<div class="v2-port-col summary s3sa-col">
     <div class="v2-port-col-head">
       <span class="v2-port-col-icon">${icon("scan", 18)}</span>
-      <div><b>${esc("مصفوفة التوافق بين المصادر")}</b><span>${esc(
-        `${fmtNum(cells.length)} زوجًا · المصفوفة متماثلة، يُعرض النصف السفلي فقط`,
-      )}</span></div>
+      <div><b>${esc(MATRIX_TITLE)}</b><span>${esc(MATRIX_SUB)}</span></div>
     </div>
     <div class="s3sa-body">
+      ${levelPairStatHtml(cells)}
       <div class="s3sa-chart">${heat}</div>
-      ${comparableGrid(cells)}
+      ${levelsTeamsCountsTable(cells)}
     </div>
   </div>`;
 }
@@ -788,6 +900,18 @@ export const SOURCE_AGREEMENT_CSS = `
    via preserveAspectRatio, so the box may flex freely — never a fixed width. */
 .s3sa-chart{flex:1;min-height:0;}
 .s3sa-chart figure{height:100%;}
+
+/* ── Level1↔Level2 stat callout — sits above the levels×teams grid, both the
+   default and Grid variants (2026-07-28 rework, see the doc comment above
+   buildLevelsTeamsMatrix). ──────────────────────────────────────────────── */
+.s3sa-lvl-stat{
+  display:flex;align-items:center;gap:6px;flex-shrink:0;
+  padding:5px 9px;border-radius:8px;font-size:0.62rem;font-weight:700;
+  border:1px solid color-mix(in srgb,var(--gold) 30%,transparent);
+  background:color-mix(in srgb,var(--gold) 8%,transparent);
+}
+.s3sa-lvl-stat-icon{color:var(--gold);display:inline-flex;flex-shrink:0;}
+.s3sa-lvl-stat b{font-weight:800;}
 
 /* ── ن grid: the pair counts behind every matrix cell, gate-suppressed or not ─ */
 .s3sa-ngrid{
