@@ -417,7 +417,7 @@ EOF
 **Interfaces:**
 - Consumes: `CrossTeamMatrixCell`, `ResultSource`, `HeatMatrix`, `percentHeatmap`, `esc`, `fmtNum`, `icon`, `pctCell`, `indexPairs`, `pairAt`, `gatedRate`, `SOURCE_LABELS` — all already defined/imported in this file.
 - Produces (new, used by Task 5 too): `LEVEL_SOURCES: readonly ResultSource[]`, `TEAM_SOURCES: readonly ResultSource[]`, `MATRIX_TITLE: string`, `MATRIX_SUB: string`, `buildLevelsTeamsMatrix(cells: CrossTeamMatrixCell[]): HeatMatrix`, `levelsTeamsCountsTable(cells: CrossTeamMatrixCell[]): string`, `levelPairStatHtml(cells: CrossTeamMatrixCell[]): string`.
-- Removes: `buildHeatMatrix`, `comparableGrid` (both fully replaced — dead after this task, since Task 5 also removes their only other call site).
+- **Correction (found during implementation, 2026-07-28):** `buildHeatMatrix`/`comparableGrid` are NOT removed by this task. `gridBody` (Task 5's scope, not yet touched at this point) still calls both — deleting them here breaks typecheck and every Grid-variant test before Task 5 runs. This task ADDS the three new functions alongside the two old ones and rewires ONLY `matrixCard` to use the new functions. `buildHeatMatrix`/`comparableGrid` become dead code once Task 5 rewires `gridBody` too — Task 5 is the one that deletes them (see its own Step 1).
 
 - [ ] **Step 1: Add the new source-group constants**
 
@@ -473,76 +473,15 @@ const LEVEL_SOURCES: readonly ResultSource[] = ["levelOne", "levelTwo"] as const
 const TEAM_SOURCES: readonly ResultSource[] = ["manual", "opposite", "liveMeans"] as const;
 ```
 
-- [ ] **Step 2: Replace the "Left card" section — delete `buildHeatMatrix`/`comparableGrid`, add the three new functions**
+- [ ] **Step 2: Insert the three new functions and rewrite `matrixCard` — leave `buildHeatMatrix`/`comparableGrid` in place for now**
 
-Find this entire section (currently lines 161-254, from the `// ── Left card` comment through the end of `matrixCard`):
+**Correction (found during implementation, 2026-07-28):** the original version of this step told you to
+delete `buildHeatMatrix`/`comparableGrid` here. Don't — `gridBody` (Task 5's scope) still calls both, and
+this task does not touch `gridBody`. Deleting them now breaks `npm run typecheck` and every Grid-variant
+test. Instead: leave `buildHeatMatrix` and `comparableGrid` exactly as they are (still lines ~161-224,
+still used by `gridBody`), and replace ONLY the `matrixCard` function — currently:
 
 ```ts
-// ── Left card — the 6×6 agreement matrix ────────────────────────────────────
-
-/**
- * 6×6 matrix, LOWER TRIANGLE ONLY: cell (row ri, col ci) is populated when
- * `ci < ri`, so each of the 15 pairs appears exactly once and the diagonal
- * (a source against itself, always trivially 100%) is blank. The upper
- * triangle and diagonal pass `null`, which `percentHeatmap` renders as its
- * dashed "—" placeholder.
- *
- * Column labels are the source NUMBER (1..6); the full Arabic name lives on
- * the row header carrying the same number. Six full Arabic labels across the
- * top would collide at this card width, and a correlation-style numeric axis
- * keyed to the named rows is both readable and unambiguous.
- */
-function buildHeatMatrix(cells: CrossTeamMatrixCell[]): HeatMatrix {
-  const index = indexPairs(cells);
-  return {
-    rows: SOURCE_ORDER.map((source, i) => `${SOURCE_LABELS[source]} (${i + 1})`),
-    cols: SOURCE_ORDER.map((_, i) => String(i + 1)),
-    values: SOURCE_ORDER.map((rowSource, ri) =>
-      SOURCE_ORDER.map((colSource, ci) => {
-        if (ci >= ri) return null; // diagonal + mirrored upper half
-        const cell = pairAt(index, colSource, rowSource);
-        return cell ? gatedRate(cell.comparable, cell.agreementRate) : null;
-      }),
-    ),
-  };
-}
-
-/**
- * The ن companion to the matrix: the same lower triangle, same 1..6 numbering,
- * carrying `comparable` for every pair — including the pairs whose rate the
- * sufficiency gate suppressed. Structurally-empty lines (row 1 and column 6
- * hold no pairs) are omitted rather than rendered as blank filler.
- */
-function comparableGrid(cells: CrossTeamMatrixCell[]): string {
-  const index = indexPairs(cells);
-  const colSources = SOURCE_ORDER.slice(0, -1); // 1..5
-  const rowSources = SOURCE_ORDER.slice(1); // 2..6
-
-  const head = `<tr><th class="s3sa-void" scope="col"></th>${colSources
-    .map((_, ci) => `<th scope="col">${ci + 1}</th>`)
-    .join("")}</tr>`;
-
-  const bodyRows = rowSources
-    .map((rowSource, k) => {
-      const ri = k + 1;
-      const tds = colSources
-        .map((colSource, ci) => {
-          if (ci >= ri) return `<td class="s3sa-void"></td>`;
-          const cell = pairAt(index, colSource, rowSource);
-          return `<td>${fmtNum(cell ? cell.comparable : 0)}</td>`;
-        })
-        .join("");
-      return `<tr><th scope="row">${ri + 1}</th>${tds}</tr>`;
-    })
-    .join("");
-
-  return `<table class="s3sa-ngrid">
-    <caption>${esc("عدد الصور القابلة للمقارنة (العيّنة) لكل زوج — بترقيم المصادر نفسه أعلاه")}</caption>
-    <thead>${head}</thead>
-    <tbody>${bodyRows}</tbody>
-  </table>`;
-}
-
 function matrixCard(cells: CrossTeamMatrixCell[]): string {
   const heat = percentHeatmap(buildHeatMatrix(cells), {
     width: 620,
@@ -574,10 +513,12 @@ function matrixCard(cells: CrossTeamMatrixCell[]): string {
 }
 ```
 
-with:
+with the three new functions PLUS the new `matrixCard` — i.e. this whole block replaces just the old
+`matrixCard` function above (its own opening `function matrixCard` through its closing `}`), inserted at
+that same location, directly after the existing `comparableGrid` function which stays put above it:
 
 ```ts
-// ── Left card — levels × teams agreement matrix ─────────────────────────────
+// ── matrixCard's new levels × teams chart ────────────────────────────────────
 //
 // 2026-07-28 rework (owner feedback on the previously-shipped 6×6 heatmap:
 // "the graph ... 123456 mean nothing and current page is hard to read"). See
@@ -589,6 +530,13 @@ with:
 // is no lower-triangle indexing, no mirrored half, and no numeric-axis
 // tradeoff to document: 3 real Arabic column headers fit comfortably where 6
 // didn't.
+//
+// NOTE (temporary, resolved by Task 5): `buildHeatMatrix`/`comparableGrid`
+// above this block still exist — `gridBody` still uses them until Task 5
+// rewires it and deletes them, along with the now-stale "Left card — the 6×6
+// agreement matrix" header comment above `buildHeatMatrix`. Task 3 alone
+// leaves two adjacent "Left card"-ish section comments in the file; that's
+// expected and temporary, not a mistake to fix here.
 
 const MATRIX_TITLE = "توافق المستويين مع الفرق الأخرى";
 const MATRIX_SUB = "مقارنة كل مستوى بالتفتيش اليدوي والمعاكس والوسائل الحية";
@@ -905,15 +853,99 @@ function gridBody(model: ReportModel): string {
 }
 ```
 
-- [ ] **Step 2: Run typecheck and the full section3 test file**
+- [ ] **Step 2: Delete `buildHeatMatrix`/`comparableGrid` and their now-stale header comment — they are fully dead now that Step 1 rewired their only two call sites**
+
+Task 3 deliberately left these two functions in place (see Task 3's Interfaces "Correction" note) because
+`gridBody` still called them at that point. After Step 1 above, nothing calls them anymore. Find and delete
+this entire block — from the `// ── Left card — the 6×6 agreement matrix` comment through the end of
+`comparableGrid`'s closing `}` (it sits directly above `matrixCard`, which Task 3 already replaced and is
+untouched by this deletion):
+
+```ts
+// ── Left card — the 6×6 agreement matrix ────────────────────────────────────
+
+/**
+ * 6×6 matrix, LOWER TRIANGLE ONLY: cell (row ri, col ci) is populated when
+ * `ci < ri`, so each of the 15 pairs appears exactly once and the diagonal
+ * (a source against itself, always trivially 100%) is blank. The upper
+ * triangle and diagonal pass `null`, which `percentHeatmap` renders as its
+ * dashed "—" placeholder.
+ *
+ * Column labels are the source NUMBER (1..6); the full Arabic name lives on
+ * the row header carrying the same number. Six full Arabic labels across the
+ * top would collide at this card width, and a correlation-style numeric axis
+ * keyed to the named rows is both readable and unambiguous.
+ */
+function buildHeatMatrix(cells: CrossTeamMatrixCell[]): HeatMatrix {
+  const index = indexPairs(cells);
+  return {
+    rows: SOURCE_ORDER.map((source, i) => `${SOURCE_LABELS[source]} (${i + 1})`),
+    cols: SOURCE_ORDER.map((_, i) => String(i + 1)),
+    values: SOURCE_ORDER.map((rowSource, ri) =>
+      SOURCE_ORDER.map((colSource, ci) => {
+        if (ci >= ri) return null; // diagonal + mirrored upper half
+        const cell = pairAt(index, colSource, rowSource);
+        return cell ? gatedRate(cell.comparable, cell.agreementRate) : null;
+      }),
+    ),
+  };
+}
+
+/**
+ * The ن companion to the matrix: the same lower triangle, same 1..6 numbering,
+ * carrying `comparable` for every pair — including the pairs whose rate the
+ * sufficiency gate suppressed. Structurally-empty lines (row 1 and column 6
+ * hold no pairs) are omitted rather than rendered as blank filler.
+ */
+function comparableGrid(cells: CrossTeamMatrixCell[]): string {
+  const index = indexPairs(cells);
+  const colSources = SOURCE_ORDER.slice(0, -1); // 1..5
+  const rowSources = SOURCE_ORDER.slice(1); // 2..6
+
+  const head = `<tr><th class="s3sa-void" scope="col"></th>${colSources
+    .map((_, ci) => `<th scope="col">${ci + 1}</th>`)
+    .join("")}</tr>`;
+
+  const bodyRows = rowSources
+    .map((rowSource, k) => {
+      const ri = k + 1;
+      const tds = colSources
+        .map((colSource, ci) => {
+          if (ci >= ri) return `<td class="s3sa-void"></td>`;
+          const cell = pairAt(index, colSource, rowSource);
+          return `<td>${fmtNum(cell ? cell.comparable : 0)}</td>`;
+        })
+        .join("");
+      return `<tr><th scope="row">${ri + 1}</th>${tds}</tr>`;
+    })
+    .join("");
+
+  return `<table class="s3sa-ngrid">
+    <caption>${esc("عدد الصور القابلة للمقارنة (العيّنة) لكل زوج — بترقيم المصادر نفسه أعلاه")}</caption>
+    <thead>${head}</thead>
+    <tbody>${bodyRows}</tbody>
+  </table>`;
+}
+```
+
+Delete it entirely — nothing replaces it. `matrixCard` (Task 3) and `gridBody` (Step 1 above) both now use
+`buildLevelsTeamsMatrix`/`levelsTeamsCountsTable` instead. Also delete the now-redundant temporary NOTE
+comment that Task 3's Step 2 added above `MATRIX_TITLE` ("NOTE (temporary, resolved by Task 5): ..." —
+5 lines starting with `// NOTE (temporary, resolved by Task 5):` through `// expected and temporary, not a
+mistake to fix here.`) — that note exists solely to explain the two-functions-temporarily-coexist state
+this step just resolved.
+
+- [ ] **Step 3: Run typecheck and the full section3 test file**
 
 Run: `npm run typecheck`
-Expected: PASS.
+Expected: PASS — confirms `buildHeatMatrix`/`comparableGrid` had no other callers (if typecheck fails with
+an unresolved-name error, something outside this page still referenced them — stop and report rather than
+restoring them speculatively; that would mean this plan's "these two call sites only" assumption was wrong).
 
 Run: `npx vitest run src/data/reporting/executive/deck2/section3/sourceAgreement.test.ts`
 Expected: ALL tests in this file PASS, including every test from Tasks 2 and 4, and every pre-existing Ledger/Briefing test (untouched, must still pass unmodified).
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add "src/data/reporting/executive/deck2/section3/sourceAgreement.ts"
