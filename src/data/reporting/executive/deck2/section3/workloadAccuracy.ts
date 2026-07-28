@@ -38,19 +38,27 @@ import type { ReportModel } from "../../model/reportModel";
 import { band, isRankable } from "../../model/dataSufficiency";
 import { esc, fmtNum, fmtPct } from "../../primitives";
 import { icon } from "../../ui/icons";
+import { metricMatrix } from "../../ui/analyticsCharts";
 import {
   ACCURACY_TARGET,
   BASE_ROWS_PER_PAGE,
   barCell,
+  briefingLede,
+  briefingRankList,
+  briefingSupport,
+  gridPanel,
+  ledgerIdx,
+  ledgerPortCard,
   maxOf,
   pctCell,
   planPortPages,
+  portCountPhrase,
   portTableCard,
   rateOf,
   threshCell,
   v2Slide,
 } from "../slideKit";
-import type { SlideBuilder } from "../slideKit";
+import type { BriefingRankItem, SlideBuilder } from "../slideKit";
 
 const SLIDE_ID = "slide-s3-workload";
 const SLIDE_TITLE = "الأداء حسب حجم الأعمال";
@@ -238,6 +246,201 @@ function tableCard(title: string, rows: WorkloadPortRow[], variant: "land" | "se
   });
 }
 
+/**
+ * Ledger-system workload table (fan-out plan §11a, batch B2b) — near-clone of
+ * `tableCard`'s columns/tones through the shared `ledgerPortCard` (P2), plus
+ * an ordinal badge. The caveat strip is appended by the caller below both
+ * land/sea cards, exactly where slot 0 places it.
+ */
+function ledgerWorkloadTable(
+  title: string,
+  rows: WorkloadPortRow[],
+  variant: "land" | "sea",
+  compact: boolean,
+): string {
+  const maxWorkload = maxOf(rows.map((p) => p.workload));
+  const trs = rows
+    .map((p, i) => {
+      const accuracy = p.rankable ? threshCell(accuracyOf(p), ACCURACY_TARGET) : MUTED_CELL;
+      const missed = p.rankable ? missedCell(missedRateOf(p)) : MUTED_CELL;
+      return (
+        `<tr><td>${ledgerIdx(i)}${esc(p.name)}</td>` +
+        barCell(fmtNum(p.workload), (p.workload / maxWorkload) * 100, variant === "land" ? "green" : "blue") +
+        accuracy +
+        missed +
+        `<td>${fmtNum(p.evaluable)}</td></tr>`
+      );
+    })
+    .join("");
+
+  const sum = (f: (p: WorkloadPortRow) => number) => rows.reduce((s, p) => s + f(p), 0);
+  const totWorkload = sum((p) => p.workload);
+  const totEvaluable = sum((p) => p.evaluable);
+  const totCorrect = sum((p) => p.correct);
+  const totCS = sum((p) => p.correctSuspicion);
+  const totMS = sum((p) => p.missedSuspicion);
+  const totRankable = isRankable(band(totEvaluable));
+  const totAccuracy = totRankable ? pctCell(rateOf(totCorrect, totEvaluable)) : pctCell(null);
+  const totMissed = totRankable ? pctCell(rateOf(totMS, totCS + totMS)) : pctCell(null);
+  const totalsRow =
+    `<tr><td>الإجمالي</td><td>${fmtNum(totWorkload)}</td>` +
+    `<td>${totAccuracy}</td><td>${totMissed}</td><td>${fmtNum(totEvaluable)}</td></tr>`;
+
+  return ledgerPortCard({
+    title,
+    theadCells: `<th>المنفذ</th><th>حجم الصور</th><th>الدقة</th><th>الاشتباه الفائت</th><th>العيّنة</th>`,
+    bodyRowsHtml: trs,
+    totalsRowHtml: totalsRow,
+    span: TABLE_SPAN,
+    rowCount: 0,
+    compact,
+  });
+}
+
+/**
+ * Briefing-system workload rank list (fan-out plan §11a) — the bar magnitude
+ * is WORKLOAD (population image count), never accuracy: this is a volume
+ * ranking with accuracy riding along as descriptive context in the secondary
+ * line, deliberately NOT the "worst/best accuracy first" pattern the section-2
+ * accuracy pages use. Rows are kept in the page's OWN existing
+ * workload-descending order: `landChunk`/`seaChunk` are each already
+ * workload-desc slices of this page's ports (`collectWorkloadRows` sorts the
+ * whole list once, before the land/sea split), so `combinedAll` below is
+ * simply their concatenation with NO added `.sort()` — re-sorting here would
+ * blur the "which port is busiest" reading this page exists to answer.
+ *
+ * The association-not-causation `CAVEAT` is rendered by the caller, verbatim,
+ * in every one of the 4 body variants (the plan's standing rule) — it is
+ * appended here as the last child of `.v2-sys-brief`, after the rank list.
+ */
+function briefingWorkloadRank(landChunk: WorkloadPortRow[], seaChunk: WorkloadPortRow[]): string {
+  const combinedAll = [...landChunk, ...seaChunk];
+  if (combinedAll.length === 0) {
+    return `<div class="v2-sys-brief v2-bf-workload">
+      <div class="v2-bf-lede"><div class="v2-bf-lede-figure gold"><span class="insuff">—</span></div></div>
+      ${caveatNote()}
+    </div>`;
+  }
+
+  // Busiest port ON THIS PAGE — max by workload, not combinedAll[0]: land and
+  // sea are each individually workload-desc, but concatenating them does not
+  // itself produce one workload-desc order across both groups combined.
+  const busiest = combinedAll.reduce((a, b) => (b.workload > a.workload ? b : a));
+  const busiestAccuracy = busiest.rankable ? accuracyOf(busiest) : null;
+
+  const sum = (f: (p: WorkloadPortRow) => number) => combinedAll.reduce((s, p) => s + f(p), 0);
+  const totWorkload = sum((p) => p.workload);
+  const totEvaluable = sum((p) => p.evaluable);
+  const totCorrect = sum((p) => p.correct);
+  const totCS = sum((p) => p.correctSuspicion);
+  const totMS = sum((p) => p.missedSuspicion);
+  const totRankable = isRankable(band(totEvaluable));
+  const pooledAccuracy = totRankable ? rateOf(totCorrect, totEvaluable) : null;
+  const pooledMissed = totRankable ? rateOf(totMS, totCS + totMS) : null;
+
+  const supportStrip = briefingSupport([
+    { iconName: "chart", value: fmtNum(totWorkload), label: "إجمالي حجم الصور" },
+    { iconName: "check", value: pctCell(pooledAccuracy), label: "الدقة المجمّعة" },
+    { iconName: "alert", value: pctCell(pooledMissed), label: "الاشتباه الفائت المجمّع" },
+  ]);
+  const basis = `${portCountPhrase(combinedAll.length)} · ارتباط وصفي لا سببي`;
+
+  const rankItems: BriefingRankItem[] = combinedAll.map((p) => ({
+    label: p.name,
+    value: p.workload,
+    valueText: fmtNum(p.workload),
+    secondaryText: `دقة ${pctCell(p.rankable ? accuracyOf(p) : null)}`,
+  }));
+  // Raw per-item workload/correct/evaluable, PARALLEL to rankItems, so
+  // foldRemainder can pool the folded tail's workload sum and accuracy
+  // correctly (never averaging each folded port's own rate) — same technique
+  // every other pooled figure in this fan-out uses.
+  const rawForFold = combinedAll.map((p) => ({
+    workload: p.workload,
+    correct: p.correct,
+    evaluable: p.evaluable,
+  }));
+
+  const rankHtml = briefingRankList({
+    items: rankItems,
+    tone: "gold",
+    scale: { kind: "auto" },
+    foldRemainder: (folded) => {
+      const raw = rawForFold.slice(rawForFold.length - folded.length);
+      const foldedWorkload = raw.reduce((s, r) => s + r.workload, 0);
+      const foldedCorrect = raw.reduce((s, r) => s + r.correct, 0);
+      const foldedEvaluable = raw.reduce((s, r) => s + r.evaluable, 0);
+      const foldedAccuracy = isRankable(band(foldedEvaluable)) ? rateOf(foldedCorrect, foldedEvaluable) : null;
+      return {
+        label: `بقية المنافذ (${fmtNum(folded.length)})`,
+        value: foldedWorkload,
+        valueText: fmtNum(foldedWorkload),
+        secondaryText: `دقة ${pctCell(foldedAccuracy)}`,
+        rest: true,
+      };
+    },
+  });
+
+  return `<div class="v2-sys-brief v2-bf-workload">
+    ${briefingLede({
+      figure: pctCell(busiestAccuracy),
+      tone: "gold",
+      label: `أعلى المنافذ حجمًا: ${esc(busiest.name)} — دقة ${pctCell(busiestAccuracy)} على ${fmtNum(busiest.evaluable)} صورة`,
+      basis,
+    })}
+    ${supportStrip}
+    ${rankHtml}
+    ${caveatNote()}
+  </div>`;
+}
+
+/**
+ * Grid-system workload matrix (fan-out plan §11a) — rows = ports, columns
+ * حجم الصور / الدقة / الاشتباه الفائت / العيّنة, ALL `sequential-gold` (no
+ * diverging ramp: this page's whole point is an association claim, not a
+ * pass/fail split with a meaningful midpoint). Unrankable ports pass `null`
+ * for the two rate columns while still showing حجم الصور/العيّنة — the same
+ * "state what you can, omit what you can't" pattern the section-2 quality/
+ * accuracy Grids use.
+ */
+function gridWorkloadMatrix(
+  title: string,
+  rows: WorkloadPortRow[],
+  variant: "land" | "sea",
+  compact: boolean,
+): string {
+  const accuracy = (p: WorkloadPortRow) => (p.rankable ? accuracyOf(p) : null);
+  const missed = (p: WorkloadPortRow) => (p.rankable ? missedRateOf(p) : null);
+  const matrix = metricMatrix(
+    {
+      rowLabels: rows.map((p) => p.name),
+      columns: [
+        {
+          label: "حجم الصور",
+          domain: [0, maxOf(rows.map((p) => p.workload))],
+          ramp: "sequential-gold",
+          values: rows.map((p) => p.workload),
+        },
+        { label: "الدقة", domain: [0, 100], ramp: "sequential-gold", values: rows.map(accuracy) },
+        { label: "الاشتباه الفائت", domain: [0, 100], ramp: "sequential-gold", values: rows.map(missed) },
+        {
+          label: "العيّنة",
+          domain: [0, maxOf(rows.map((p) => p.evaluable))],
+          ramp: "sequential-gold",
+          values: rows.map((p) => p.evaluable),
+        },
+      ],
+    },
+    { width: 620, height: 320, compact, caption: `مصفوفة ${title}`, rowHeader: "المنفذ", emptyNote: "لا توجد بيانات" },
+  );
+  return gridPanel({
+    title,
+    sub: `${fmtNum(rows.length)} منفذ`,
+    variant,
+    chartHtml: matrix,
+  });
+}
+
 // ── Body ────────────────────────────────────────────────────────────────────
 
 /** Explicit Arabic empty state — never a blank card, never a 0%/NaN table. */
@@ -289,6 +492,15 @@ export function workloadAccuracySlideBuilders(model: ReportModel, variantPreview
         <div class="v2-port-split v2-wl-split">${tableCard("المنافذ البرية", landChunk, "land", plan.compact)}${tableCard("المنافذ البحرية", seaChunk, "sea", plan.compact)}</div>
         ${caveatNote()}
       </div>`;
+      const ledgerBody = `<div class="v2-sys-ledger v2-lg-workload">
+        <div class="v2-lg-split">${ledgerWorkloadTable("المنافذ البرية", landChunk, "land", plan.compact)}${ledgerWorkloadTable("المنافذ البحرية", seaChunk, "sea", plan.compact)}</div>
+        ${caveatNote()}
+      </div>`;
+      const briefingBody = briefingWorkloadRank(landChunk, seaChunk);
+      const gridBody = `<div class="v2-sys-grid v2-gd-workload">
+        <div class="v2-gd-split">${gridWorkloadMatrix("المنافذ البرية", landChunk, "land", plan.compact)}${gridWorkloadMatrix("المنافذ البحرية", seaChunk, "sea", plan.compact)}</div>
+        ${caveatNote()}
+      </div>`;
       return v2Slide({
         id: page === 0 ? SLIDE_ID : `${SLIDE_ID}-${page + 1}`,
         title: `${SLIDE_TITLE}${cont}`,
@@ -296,7 +508,7 @@ export function workloadAccuracySlideBuilders(model: ReportModel, variantPreview
         iconName: "chart",
         headline: `${SLIDE_TITLE}${cont}`,
         subhead: SUBHEAD,
-        bodyVariants: [body, body, body, body],
+        bodyVariants: [body, ledgerBody, briefingBody, gridBody],
         variantPreview,
         num,
         total,
@@ -321,6 +533,15 @@ export function workloadAccuracySlideBuilders(model: ReportModel, variantPreview
 // card in the deck — removed rather than fixed in place.
 export const WORKLOAD_ACCURACY_CSS = `
 /* ── Section 3 · الأداء حسب حجم الأعمال ───────────────────────────────────── */
+/* Ledger/Grid namespacing hooks (fan-out plan §11a, batch B2b) — each wraps
+   its land/sea split PLUS the mandatory caveat strip in a flex column so the
+   split grows to fill the slide body and the caveat sits pinned below it,
+   mirroring slot 0's .v2-wl-layout above. Briefing needs no such wrapper:
+   .v2-sys-brief is already a flex column (theme.ts), so the caveat simply
+   joins the lede/support/rank list as its last flex child. */
+.v2-lg-workload,.v2-gd-workload{display:flex;flex-direction:column;height:100%;gap:7px;min-height:0;}
+.v2-lg-workload .v2-lg-split,.v2-gd-workload .v2-gd-split{flex:1 1 auto;min-height:0;}
+.v2-bf-workload{height:100%;}
 /* Headers stay on one line: a wrapped th would eat a row of the row budget
    and push the totals row out of the clipped card. */
 .v2-wl-split .v2-port-col .deck-table th{white-space:nowrap;}
