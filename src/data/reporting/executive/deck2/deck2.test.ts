@@ -855,6 +855,102 @@ describe("portPopulationSlideBuilders — Ledger/Briefing/Grid design systems (2
   });
 });
 
+describe("P0 primitives — characterization: slide-port-population-1 Ledger/Briefing/Grid panels byte-identity (2026-07-25, deck2-fanout-remaining-pages-plan P0)", () => {
+  // Captured VERBATIM (2026-07-25, before the P0 primitives-extraction refactor) from
+  // portPopulationSlideBuilders(twoPortModel(), true)[0](6, 20) — panels 1 (Ledger), 2
+  // (Briefing), 3 (Grid). This is the regression tripwire for the P0 refactor: reimplementing
+  // ledgerPortTable/briefingPortRank/gridPortMatrix on top of the new shared slideKit
+  // primitives (ledgerIdx/ledgerPortCard/briefingLede/briefingSupport/briefingRankList/
+  // gridPanel) must not change a single byte of this already-shipped exemplar page.
+  const EXPECTED_PANEL1_LEDGER =
+    `data-variant-index="1"><div class="v2-sys-ledger v2-lg-port-population"><div class="v2-lg-split"><div class="v2-lg-port-card">
+    <div class="v2-lg-table-card-title">المنافذ البرية</div>
+    <table class="deck-table">
+      <thead><tr><th>المنفذ</th><th>الصور</th><th>سليمة</th><th>اشتباه</th></tr></thead>
+      <tbody><tr><td><span class="v2-lg-idx">1</span>منفذ أ</td><td class="v2-bar-cell green" style="--w:100.0%">1</td><td>1</td><td>0</td></tr></tbody>
+      <tfoot><tr><td>الإجمالي</td><td>1</td><td>1</td><td>0</td></tr></tfoot>
+    </table>
+  </div><div class="v2-lg-port-card">
+    <div class="v2-lg-table-card-title">المنافذ البحرية</div>
+    <table class="deck-table">
+      <thead><tr><th>المنفذ</th><th>الصور</th><th>سليمة</th><th>اشتباه</th></tr></thead>
+      <tbody><tr><td><span class="v2-lg-idx">1</span>منفذ ب</td><td class="v2-bar-cell blue" style="--w:100.0%">1</td><td>0</td><td>1</td></tr></tbody>
+      <tfoot><tr><td>الإجمالي</td><td>1</td><td>0</td><td>1</td></tr></tfoot>
+    </table>
+  </div></div></div></div><div class="v2-variant-panel" `;
+  const EXPECTED_PANEL2_BRIEFING =
+    `data-variant-index="2"><div class="v2-sys-brief v2-bf-port-population">
+    <div class="v2-bf-lede">
+      <div class="v2-bf-lede-figure gold">1</div>
+      <div class="v2-bf-lede-label">أعلى منفذ: منفذ أ — 1 صورة</div>
+      <div class="v2-bf-lede-basis">جميع منافذ الصفحة (منفذان) · إجمالي 2 صورة</div>
+    </div>
+    <div class="v2-totals-band">
+        <div class="v2-totals-item"><span class="v2-totals-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/></svg></span><span><b>1</b><small>إجمالي الصور السليمة</small></span></div>
+        <div class="v2-totals-item"><span class="v2-totals-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l9 16H3l9-16z"/><path d="M12 10v4"/><path d="M12 17.5v.5"/></svg></span><span><b>1</b><small>إجمالي صور الاشتباه</small></span></div>
+        <div class="v2-totals-item"><span class="v2-totals-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M4 18a8 8 0 1 1 16 0"/><path d="M12 18l4-5"/><circle cx="12" cy="18" r="1.2"/></svg></span><span><b>50.0%</b><small>نسبة الاشتباه للصفحة</small></span></div>
+      </div>
+    <div class="v2-bf-rank t-comfortable"><div class="v2-bf-rank-col"><div class="v2-bf-rank-row">
+        <span class="v2-bf-rank-num gold">1</span>
+        <span class="v2-bf-rank-label">منفذ أ</span>
+        <span class="v2-bf-rank-track"><i class="v2-bf-rank-fill gold" style="width:100.0%"></i></span>
+        <span class="v2-bf-rank-value">1</span>
+        <span class="v2-bf-rank-secondary">اشتباه 0</span>
+      </div><div class="v2-bf-rank-row">
+        <span class="v2-bf-rank-num gold">2</span>
+        <span class="v2-bf-rank-label">منفذ ب</span>
+        <span class="v2-bf-rank-track"><i class="v2-bf-rank-fill gold" style="width:100.0%"></i></span>
+        <span class="v2-bf-rank-value">1</span>
+        <span class="v2-bf-rank-secondary">اشتباه 1</span>
+      </div></div></div>
+  </div></div><div class="v2-variant-panel" `;
+  const EXPECTED_PANEL3_GRID =
+    `data-variant-index="3"><div class="v2-sys-grid v2-gd-port-population"><div class="v2-gd-split"><div class="v2-gd-panel land">
+    <div class="v2-gd-panel-head"><b>المنافذ البرية</b><span>1 منفذ</span></div>
+    <div class="v2-gd-panel-chart"><figure dir="rtl" style="margin:0;padding:0;width:100%;height:100%;position:relative"><svg viewBox="0 0 620 320" xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" font-family='"Somar","IBM Plex Sans Arabic","Noto Kufi Arabic","Tahoma","Arial",sans-serif' aria-hidden="true" focusable="false" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;display:block;direction:ltr" data-chart="مصفوفة المنافذ البرية"><text x="458.75" y="13" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" fill-opacity="0.82">الصور</text><text x="458.75" y="25" text-anchor="middle" font-size="9" fill="currentColor" fill-opacity="0.55">0–1</text><text x="328.25" y="13" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" fill-opacity="0.82">سليمة</text><text x="328.25" y="25" text-anchor="middle" font-size="9" fill="currentColor" fill-opacity="0.55">0–1</text><text x="197.75" y="13" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" fill-opacity="0.82">اشتباه</text><text x="197.75" y="25" text-anchor="middle" font-size="9" fill="currentColor" fill-opacity="0.55">0–1</text><text x="67.25" y="13" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" fill-opacity="0.82">نسبة الاشتباه</text><text x="67.25" y="25" text-anchor="middle" font-size="9" fill="currentColor" fill-opacity="0.55">0–100</text><text x="616" y="172" text-anchor="end" dominant-baseline="middle" font-size="11" fill="currentColor" fill-opacity="0.78">منفذ أ</text><rect x="394.5" y="29" width="128.5" height="286" rx="3" fill="var(--white)" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><rect x="394.5" y="29" width="128.5" height="286" rx="3" fill="var(--gold)" fill-opacity="1" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><text x="458.75" y="172" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="var(--navy)">1</text><rect x="264" y="29" width="128.5" height="286" rx="3" fill="var(--white)" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><rect x="264" y="29" width="128.5" height="286" rx="3" fill="var(--gold)" fill-opacity="1" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><text x="328.25" y="172" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="var(--navy)">1</text><rect x="133.5" y="29" width="128.5" height="286" rx="3" fill="var(--white)" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><rect x="133.5" y="29" width="128.5" height="286" rx="3" fill="var(--gold)" fill-opacity="0" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><text x="197.75" y="172" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="var(--navy)">0</text><rect x="3" y="29" width="128.5" height="286" rx="3" fill="var(--white)" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><rect x="3" y="29" width="128.5" height="286" rx="3" fill="var(--gold)" fill-opacity="0" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><text x="67.25" y="172" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="var(--navy)">0</text></svg><table dir="rtl" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);clip-path:inset(50%);white-space:nowrap;border:0"><caption>مصفوفة المنافذ البرية</caption><thead><tr><th scope="col">المنفذ</th><th scope="col">الصور</th><th scope="col">سليمة</th><th scope="col">اشتباه</th><th scope="col">نسبة الاشتباه</th></tr></thead><tbody><tr><th scope="row">منفذ أ</th><td>1</td><td>1</td><td>0</td><td>0</td></tr></tbody></table></figure></div>
+  </div><div class="v2-gd-panel sea">
+    <div class="v2-gd-panel-head"><b>المنافذ البحرية</b><span>1 منفذ</span></div>
+    <div class="v2-gd-panel-chart"><figure dir="rtl" style="margin:0;padding:0;width:100%;height:100%;position:relative"><svg viewBox="0 0 620 320" xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" font-family='"Somar","IBM Plex Sans Arabic","Noto Kufi Arabic","Tahoma","Arial",sans-serif' aria-hidden="true" focusable="false" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;display:block;direction:ltr" data-chart="مصفوفة المنافذ البحرية"><text x="458.75" y="13" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" fill-opacity="0.82">الصور</text><text x="458.75" y="25" text-anchor="middle" font-size="9" fill="currentColor" fill-opacity="0.55">0–1</text><text x="328.25" y="13" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" fill-opacity="0.82">سليمة</text><text x="328.25" y="25" text-anchor="middle" font-size="9" fill="currentColor" fill-opacity="0.55">0–1</text><text x="197.75" y="13" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" fill-opacity="0.82">اشتباه</text><text x="197.75" y="25" text-anchor="middle" font-size="9" fill="currentColor" fill-opacity="0.55">0–1</text><text x="67.25" y="13" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" fill-opacity="0.82">نسبة الاشتباه</text><text x="67.25" y="25" text-anchor="middle" font-size="9" fill="currentColor" fill-opacity="0.55">0–100</text><text x="616" y="172" text-anchor="end" dominant-baseline="middle" font-size="11" fill="currentColor" fill-opacity="0.78">منفذ ب</text><rect x="394.5" y="29" width="128.5" height="286" rx="3" fill="var(--white)" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><rect x="394.5" y="29" width="128.5" height="286" rx="3" fill="var(--gold)" fill-opacity="1" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><text x="458.75" y="172" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="var(--navy)">1</text><rect x="264" y="29" width="128.5" height="286" rx="3" fill="var(--white)" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><rect x="264" y="29" width="128.5" height="286" rx="3" fill="var(--gold)" fill-opacity="0" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><text x="328.25" y="172" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="var(--navy)">0</text><rect x="133.5" y="29" width="128.5" height="286" rx="3" fill="var(--white)" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><rect x="133.5" y="29" width="128.5" height="286" rx="3" fill="var(--gold)" fill-opacity="1" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><text x="197.75" y="172" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="var(--navy)">1</text><rect x="3" y="29" width="128.5" height="286" rx="3" fill="var(--white)" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><rect x="3" y="29" width="128.5" height="286" rx="3" fill="var(--gold)" fill-opacity="1" style="-webkit-print-color-adjust:exact;print-color-adjust:exact;"/><text x="67.25" y="172" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="var(--navy)">100</text></svg><table dir="rtl" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);clip-path:inset(50%);white-space:nowrap;border:0"><caption>مصفوفة المنافذ البحرية</caption><thead><tr><th scope="col">المنفذ</th><th scope="col">الصور</th><th scope="col">سليمة</th><th scope="col">اشتباه</th><th scope="col">نسبة الاشتباه</th></tr></thead><tbody><tr><th scope="row">منفذ ب</th><td>1</td><td>0</td><td>1</td><td>100</td></tr></tbody></table></figure></div>
+  </div></div></div></div></div></div>
+  </div>
+  <div class="v2-page-foot" dir="ltr">06 / 20</div>
+</section>`;
+
+  function twoPortModel() {
+    return buildReportModel(
+      input([
+        popRow({ portName: "منفذ أ", portType: "منفذ بري" }),
+        popRow({ xrayImageId: "XR-2", portName: "منفذ ب", portType: "منفذ بحري", xrayLevelOneResult: "اشتباه" }),
+      ]),
+    );
+  }
+
+  it("panel 1 (Ledger) is byte-identical before and after the P0 extraction", () => {
+    const html = portPopulationSlideBuilders(twoPortModel(), true)[0](6, 20);
+    const start = html.indexOf('data-variant-index="1"');
+    const end = html.indexOf('data-variant-index="2"');
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    expect(html.slice(start, end)).toBe(EXPECTED_PANEL1_LEDGER);
+  });
+
+  it("panel 2 (Briefing) is byte-identical before and after the P0 extraction", () => {
+    const html = portPopulationSlideBuilders(twoPortModel(), true)[0](6, 20);
+    const start = html.indexOf('data-variant-index="2"');
+    const end = html.indexOf('data-variant-index="3"');
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    expect(html.slice(start, end)).toBe(EXPECTED_PANEL2_BRIEFING);
+  });
+
+  it("panel 3 (Grid) is byte-identical before and after the P0 extraction", () => {
+    const html = portPopulationSlideBuilders(twoPortModel(), true)[0](6, 20);
+    const start = html.indexOf('data-variant-index="3"');
+    expect(start).toBeGreaterThan(-1);
+    expect(html.slice(start)).toBe(EXPECTED_PANEL3_GRID);
+  });
+});
+
 describe("briefingRankPlan (2026-07-25, deck2-design-systems design ruling)", () => {
   it("follows the exact ladder from n=0 through the densest tier's capacity (n=14), never folding", () => {
     const cases: Array<[number, ReturnType<typeof briefingRankPlan>["tier"], 1 | 2, number]> = [

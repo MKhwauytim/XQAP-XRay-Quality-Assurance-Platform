@@ -30,10 +30,16 @@ import {
   STAGE_TONES,
   badgeIcon,
   barCell,
+  briefingLede,
+  briefingRankList,
   briefingRankPlan,
+  briefingSupport,
   collectPortStats,
   fillerRow,
   frac,
+  gridPanel,
+  ledgerIdx,
+  ledgerPortCard,
   ledgerTableCard,
   maxOf,
   microArc,
@@ -51,7 +57,7 @@ import {
   threshCell,
   v2Slide,
 } from "./slideKit";
-import type { CellTone, NavSectionKey, PortPopRow, SlideBuilder } from "./slideKit";
+import type { BriefingRankItem, CellTone, NavSectionKey, PortPopRow, SlideBuilder } from "./slideKit";
 import { sectionThreeBuilders } from "./section3";
 
 // The slide kit is the single source of truth for these two, but they were
@@ -877,16 +883,16 @@ function portTable(
  * Ledger-system (slot 1 — السجل, "verifiability") port table: reuses the exact
  * same data + `barCell` magnitude tint as `portTable()` above ("this is the
  * shape ledger changes least — correct, because slot 0 already leans this
- * way," design spec), but through the new plain-title `ledgerTableCard`
- * (slideKit.ts) instead of the icon-badge `.v2-port-col` shell — Ledger's
- * whole vocabulary is tables and figure-strips, no decorative card chrome.
- * Ports are already sorted descending by `collectPortStats`, so the small
- * ordinal badge (`.v2-lg-idx`) sitting inside the first cell before the port
- * name doubles as a rank indicator rather than a fabricated new figure — and
- * per the brief, it's deliberately NOT a new column (no column budget to
- * spare on a half-width card).
+ * way," design spec), through the shared `ledgerPortCard` primitive
+ * (slideKit.ts P2, 2026-07-25 fan-out-plan P0 extraction) — Ledger's whole
+ * vocabulary is tables and figure-strips, no decorative card chrome. Ports
+ * are already sorted descending by `collectPortStats`, so the small ordinal
+ * badge (`ledgerIdx`, P1) sitting inside the first cell before the port name
+ * doubles as a rank indicator rather than a fabricated new figure — and per
+ * the brief, it's deliberately NOT a new column (no column budget to spare
+ * on a half-width card).
  *
- * `rowCount: 0` opts out of `ledgerTableCard`'s filler-row bottom-pinning:
+ * `rowCount: 0` opts out of `ledgerPortCard`'s filler-row bottom-pinning:
  * `DECK_TABLE_FILL_SCRIPT` (deck2/index.ts) only ever measures
  * `.v2-port-col`/`.v2-stage-port-card` cards, so an unmeasured filler row
  * under a different card shell would just be dead markup (see
@@ -898,25 +904,22 @@ function portTable(
 function ledgerPortTable(title: string, rows: PortPopRow[], variant: "land" | "sea", compact: boolean): string {
   const magTone: CellTone = variant === "land" ? "green" : "blue";
   const maxMag = maxOf(rows.map((p) => p.total));
-  const trs =
-    rows.length > 0
-      ? rows
-          .map(
-            (p, i) =>
-              `<tr><td><span class="v2-lg-idx">${i + 1}</span>${esc(p.name)}</td>${barCell(fmtNum(p.total), (p.total / maxMag) * 100, magTone)}<td>${fmtNum(p.clean)}</td><td>${fmtNum(p.suspicious)}</td></tr>`,
-          )
-          .join("")
-      : `<tr><td colspan="4"><span class="insuff">—</span></td></tr>`;
+  const trs = rows
+    .map(
+      (p, i) =>
+        `<tr><td>${ledgerIdx(i)}${esc(p.name)}</td>${barCell(fmtNum(p.total), (p.total / maxMag) * 100, magTone)}<td>${fmtNum(p.clean)}</td><td>${fmtNum(p.suspicious)}</td></tr>`,
+    )
+    .join("");
   const sum = (f: (p: PortPopRow) => number) => rows.reduce((s, p) => s + f(p), 0);
   const totalsRow = `<tr><td>الإجمالي</td><td>${fmtNum(sum((p) => p.total))}</td><td>${fmtNum(sum((p) => p.clean))}</td><td>${fmtNum(sum((p) => p.suspicious))}</td></tr>`;
-  return ledgerTableCard({
+  return ledgerPortCard({
     title,
     theadCells: `<th>المنفذ</th><th>الصور</th><th>سليمة</th><th>اشتباه</th>`,
     bodyRowsHtml: trs,
     totalsRowHtml: totalsRow,
     span: 4,
     rowCount: 0,
-    cardClass: `v2-lg-port-card${compact ? " compact" : ""}`,
+    compact,
   });
 }
 
@@ -928,6 +931,14 @@ function ledgerPortTable(title: string, rows: PortPopRow[], variant: "land" | "s
  * this is a COMBINED ranked list, a category error that silently dropped
  * rows in this function's first version — see the 2026-07-25 design-advisor
  * ruling this rewrite implements verbatim).
+ *
+ * Built on the shared `briefingLede`/`briefingSupport`/`briefingRankList`
+ * primitives (slideKit.ts P3/P4/P5, 2026-07-25 fan-out-plan P0 extraction) —
+ * this is the reference caller `briefingRankList`'s own doc comment points
+ * to for how `foldRemainder` recovers richer per-port data (`restTotal`/
+ * `restSuspicious`) that a generic `BriefingRankItem` doesn't carry, by
+ * slicing the ORIGINAL `combined` array using the folded slice's length
+ * rather than re-deriving `briefingRankPlan`'s ladder a second time.
  */
 function briefingPortRank(landChunk: PortPopRow[], seaChunk: PortPopRow[]): string {
   const combined = [...landChunk, ...seaChunk].sort((a, b) => b.total - a.total);
@@ -938,75 +949,57 @@ function briefingPortRank(landChunk: PortPopRow[], seaChunk: PortPopRow[]): stri
   }
   const lead = combined[0];
   const sliceTotal = combined.reduce((s, p) => s + p.total, 0);
-  const maxMag = maxOf(combined.map((p) => p.total));
   const plan = briefingRankPlan(combined.length);
-  const namedRows = combined.slice(0, plan.named);
-  const restRows = combined.slice(plan.named);
-  const restTotal = restRows.reduce((s, p) => s + p.total, 0);
-  const restSuspicious = restRows.reduce((s, p) => s + p.suspicious, 0);
-  // A peer review (2026-07-25) caught that an earlier version of this fix
-  // was an algebraic no-op (Math.min(100, x/a*100) === x/max(a,x)*100 for
-  // a>=1, so the rendered width never actually changed). The REAL fix: named
-  // rows and the remainder row must share ONE scale, computed with the
-  // remainder's real aggregate folded in — not each computing its own
-  // ratio against maxMag alone. When the folded aggregate exceeds the
-  // single largest named port, every bar (rank #1 included) now shrinks
-  // proportionally, so the remainder can genuinely render wider than rank
-  // #1 when it truly represents more images — instead of both silently
-  // capping at 100% and reading as tied.
-  const scaleMax = plan.folded > 0 ? Math.max(maxMag, restTotal) : maxMag;
-
-  const rowHtml = (i: number, p: PortPopRow) => `<div class="v2-bf-rank-row">
-        <span class="v2-bf-rank-num gold">${i + 1}</span>
-        <span class="v2-bf-rank-label">${esc(p.name)}</span>
-        <span class="v2-bf-rank-track"><i class="v2-bf-rank-fill gold" style="width:${((p.total / scaleMax) * 100).toFixed(1)}%"></i></span>
-        <span class="v2-bf-rank-value">${fmtNum(p.total)}</span>
-        <span class="v2-bf-rank-secondary">اشتباه ${fmtNum(p.suspicious)}</span>
-      </div>`;
-
-  const allRows = namedRows.map((p, i) => rowHtml(i, p));
-  if (plan.folded > 0) {
-    const restPct = (restTotal / scaleMax) * 100;
-    allRows.push(`<div class="v2-bf-rank-row rest">
-        <span class="v2-bf-rank-num">+</span>
-        <span class="v2-bf-rank-label">بقية المنافذ (${fmtNum(plan.folded)})</span>
-        <span class="v2-bf-rank-track"><i class="v2-bf-rank-fill rest" style="width:${restPct.toFixed(1)}%"></i></span>
-        <span class="v2-bf-rank-value">${fmtNum(restTotal)}</span>
-        <span class="v2-bf-rank-secondary">اشتباه ${fmtNum(restSuspicious)}</span>
-      </div>`);
-  }
-  // First (rightmost, RTL) column gets ranks 1…K top-to-bottom; second column
-  // gets the rest — per the design ruling, not a naive interleave.
-  const totalRowsShown = allRows.length;
-  const firstColCount = plan.columns === 1 ? totalRowsShown : Math.ceil(totalRowsShown / 2);
-  const cols =
-    plan.columns === 1
-      ? [allRows]
-      : [allRows.slice(0, firstColCount), allRows.slice(firstColCount)];
-  const colsHtml = cols
-    .map((colRows) => `<div class="v2-bf-rank-col">${colRows.join("")}</div>`)
-    .join("");
 
   const cleanTotal = combined.reduce((s, p) => s + p.clean, 0);
   const suspiciousTotal = combined.reduce((s, p) => s + p.suspicious, 0);
   const suspicionRate = rateOf(suspiciousTotal, sliceTotal);
-  const supportStrip = `<div class="v2-totals-band">
-        <div class="v2-totals-item"><span class="v2-totals-icon">${icon("check", 16)}</span><span><b>${fmtNum(cleanTotal)}</b><small>إجمالي الصور السليمة</small></span></div>
-        <div class="v2-totals-item"><span class="v2-totals-icon">${icon("alert", 16)}</span><span><b>${fmtNum(suspiciousTotal)}</b><small>إجمالي صور الاشتباه</small></span></div>
-        <div class="v2-totals-item"><span class="v2-totals-icon">${icon("gauge", 16)}</span><span><b>${pctCell(suspicionRate)}</b><small>نسبة الاشتباه للصفحة</small></span></div>
-      </div>`;
+  const supportStrip = briefingSupport([
+    { iconName: "check", value: fmtNum(cleanTotal), label: "إجمالي الصور السليمة" },
+    { iconName: "alert", value: fmtNum(suspiciousTotal), label: "إجمالي صور الاشتباه" },
+    { iconName: "gauge", value: pctCell(suspicionRate), label: "نسبة الاشتباه للصفحة" },
+  ]);
   const basis =
     plan.folded > 0
       ? `أعلى ${fmtNum(plan.named)} من ${portCountPhrase(combined.length)} · البقية مجمّعة · إجمالي ${fmtNum(sliceTotal)} صورة`
       : `جميع منافذ الصفحة (${portCountPhrase(combined.length)}) · إجمالي ${fmtNum(sliceTotal)} صورة`;
+
+  const rankItems: BriefingRankItem[] = combined.map((p) => ({
+    label: p.name,
+    value: p.total,
+    valueText: fmtNum(p.total),
+    secondaryText: `اشتباه ${fmtNum(p.suspicious)}`,
+  }));
+  const rankHtml = briefingRankList({
+    items: rankItems,
+    tone: "gold",
+    scale: { kind: "auto" },
+    foldRemainder: (folded) => {
+      // Recover the folded ports' raw rows from `combined` (richer than the
+      // generic BriefingRankItem[] this callback receives) by slicing on the
+      // folded count rather than re-deriving briefingRankPlan a second time.
+      const restRows = combined.slice(combined.length - folded.length);
+      const restTotal = restRows.reduce((s, p) => s + p.total, 0);
+      const restSuspicious = restRows.reduce((s, p) => s + p.suspicious, 0);
+      return {
+        label: `بقية المنافذ (${fmtNum(folded.length)})`,
+        value: restTotal,
+        valueText: fmtNum(restTotal),
+        secondaryText: `اشتباه ${fmtNum(restSuspicious)}`,
+        rest: true,
+      };
+    },
+  });
+
   return `<div class="v2-sys-brief v2-bf-port-population">
-    <div class="v2-bf-lede">
-      <div class="v2-bf-lede-figure gold">${fmtNum(lead.total)}</div>
-      <div class="v2-bf-lede-label">أعلى منفذ: ${esc(lead.name)} — ${fmtNum(lead.total)} صورة</div>
-      <div class="v2-bf-lede-basis">${basis}</div>
-    </div>
+    ${briefingLede({
+      figure: fmtNum(lead.total),
+      tone: "gold",
+      label: `أعلى منفذ: ${esc(lead.name)} — ${fmtNum(lead.total)} صورة`,
+      basis,
+    })}
     ${supportStrip}
-    <div class="v2-bf-rank t-${plan.tier}">${colsHtml}</div>
+    ${rankHtml}
   </div>`;
 }
 
@@ -1024,7 +1017,9 @@ function briefingPortRank(landChunk: PortPopRow[], seaChunk: PortPopRow[]): stri
  * other variant's land/sea split in this deck) rather than one combined
  * matrix with a row-group divider — `metricMatrix` has no divider affordance
  * of its own, and adding one would mean changing Task 1's already-reviewed
- * shared primitive; see task-2-report.md for the full rationale.
+ * shared primitive; see task-2-report.md for the full rationale. The panel
+ * chrome itself is the shared `gridPanel` primitive (slideKit.ts P6,
+ * 2026-07-25 fan-out-plan P0 extraction).
  */
 function gridPortMatrix(title: string, rows: PortPopRow[], variant: "land" | "sea", compact: boolean): string {
   const rate = (p: PortPopRow) => rateOf(p.suspicious, p.total);
@@ -1055,10 +1050,12 @@ function gridPortMatrix(title: string, rows: PortPopRow[], variant: "land" | "se
     },
     { width: 620, height: 320, compact, caption: `مصفوفة ${title}`, rowHeader: "المنفذ", emptyNote: "لا توجد بيانات" },
   );
-  return `<div class="v2-gd-panel ${variant}">
-    <div class="v2-gd-panel-head"><b>${esc(title)}</b><span>${fmtNum(rows.length)} منفذ</span></div>
-    <div class="v2-gd-panel-chart">${matrix}</div>
-  </div>`;
+  return gridPanel({
+    title,
+    sub: `${fmtNum(rows.length)} منفذ`,
+    variant,
+    chartHtml: matrix,
+  });
 }
 
 /** Build one or more port-population slides (paginated land/sea in parallel). */

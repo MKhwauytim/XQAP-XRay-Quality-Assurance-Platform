@@ -750,6 +750,24 @@ export type MetricMatrixOpts = {
  *   • an all-identical column (or a zero-width domain) → every present value
  *     in that column tints at the ramp's neutral point instead of dividing by
  *     zero
+ *
+ * **A reversed `domain: [hi, lo]` inverts a `diverging-green-coral` column's
+ * polarity — this is an intentional, stable contract, not an accident.**
+ * `tintOf`'s midpoint/half-span math (`mid = (d0+d1)/2`, `half = (d1-d0)/2`,
+ * `signed = (v-mid)/half`) divides by `half`, so swapping the domain's two
+ * endpoints negates `half` and therefore flips the sign of every `signed`
+ * value — whatever tinted green under `[lo, hi]` tints coral under `[hi, lo]`
+ * for the exact same input values, and vice versa. A caller who wants "the
+ * larger raw value reads as the good outcome" (green) passes the domain in
+ * the order that makes that true for their column's own semantics — e.g. a
+ * "level 2 more accurate than level 1" delta column wants a positive delta to
+ * read green, which this ramp gives you by simply choosing which endpoint is
+ * `d0` vs `d1`, with no separate "invert" flag needed. See
+ * `analyticsCharts.test.ts`'s "a reversed domain … inverts … polarity" test
+ * for the reference case, and
+ * `docs/superpowers/specs/2026-07-25-deck2-fanout-remaining-pages-plan.md` §11b
+ * (`slide-s3-level-accuracy`'s الفارق column) for the first real page that
+ * depends on this.
  */
 export function metricMatrix(
   data: MetricMatrixData | null | undefined,

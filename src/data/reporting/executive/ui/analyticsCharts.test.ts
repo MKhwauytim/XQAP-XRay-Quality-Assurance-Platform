@@ -591,6 +591,25 @@ describe("metricMatrix", () => {
     expect(corals).toEqual([0, 1]);
   });
 
+  it("a reversed domain ([hi, lo]) inverts a diverging-green-coral column's polarity — the same values that tint green under [lo, hi] tint coral under [hi, lo], and vice versa (2026-07-25 fan-out plan P7: a stated, stable contract, not an accident)", () => {
+    const build = (domain: [number, number]): MetricMatrixData => ({
+      rowLabels: ["سالب", "موجب"],
+      columns: [{ label: "فرق", domain, ramp: "diverging-green-coral", values: [-50, 50] }],
+    });
+    const toneSequence = (html: string): string[] =>
+      [...html.matchAll(/fill="var\(--(green|coral)\)" fill-opacity="[\d.]+"/g)].map((m) => m[1]);
+
+    // Normal domain [-50, 50]: the negative value (سالب's row) tints green,
+    // the positive value (موجب's row) tints coral.
+    const normal = metricMatrix(build([-50, 50]), { width: 300, height: 220 });
+    expect(toneSequence(normal)).toEqual(["green", "coral"]);
+
+    // Reversed domain [50, -50]: the EXACT SAME two values (-50, 50) flip
+    // which color they get — negative now coral, positive now green.
+    const reversed = metricMatrix(build([50, -50]), { width: 300, height: 220 });
+    expect(toneSequence(reversed)).toEqual(["coral", "green"]);
+  });
+
   it("renders a neutral empty state for empty / null input", () => {
     for (const html of [
       metricMatrix({ rowLabels: [], columns: [] }, { width: 300, height: 180, emptyNote: "لا بيانات" }),
