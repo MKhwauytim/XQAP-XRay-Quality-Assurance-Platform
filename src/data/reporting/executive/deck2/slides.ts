@@ -666,48 +666,51 @@ function stageProportionBar(stages: StageProfile[]): string {
 }
 
 /**
- * Horizontal compare-bars: one row per risk level, RTL (label on the right,
- * value on the left, bar fills right→left), tone-colored per STAGE_TONES,
- * value = share of population (%). Variant 2/4 for this slide
- * (docs/superpowers/specs/2026-07-25-deck2-risk-stages-variant2-design.md) —
- * a quick side-by-side read of relative size; levelFiguresTable() right below
- * carries the full numeric breakdown, so this view never needs its own axis
- * or legend.
+ * Two-basis caveat for وزن العينة, shared VERBATIM with `slide-glossary-levels`'s
+ * Ledger table footnote (fan-out plan §3a/§5, docs/superpowers/specs/
+ * 2026-07-25-deck2-fanout-remaining-pages-plan.md) — worded to agree with
+ * `LEVEL_DRAW_WEIGHTS`'s own doc comment above (percentage-of-own-population
+ * for the first level vs. share-of-the-exact-quota-pool for the rest), so a
+ * reader never gets two different explanations for why these don't sum to
+ * 100%.
  */
-function stageCompareBars(stages: StageProfile[], populationTotal: number): string {
-  const shares = stages.map((s) => (s.population / populationTotal) * 100);
-  const max = Math.max(0, ...shares);
-  const rows = stages
-    .map((s, i) => {
-      const tone = STAGE_TONES[i % STAGE_TONES.length];
-      const pct = shares[i];
-      const w = max > 0 ? Math.max(2, (pct / max) * 100) : 0;
-      return `<div class="v2-cbar-row">
-        <span class="v2-cbar-label">${esc(s.stageLabel)}</span>
-        <span class="v2-cbar-track"><i class="v2-cbar-fill ${tone}" style="width:${w.toFixed(1)}%"></i></span>
-        <span class="v2-cbar-value">${fmtPct(pct, 0)}</span>
-      </div>`;
-    })
-    .join("");
-  return `<div class="v2-cbar">${rows}</div>`;
-}
+const LEVEL_WEIGHT_BASIS_FOOTNOTE =
+  "وزن المستوى الأول نسبة من مجتمعه (حصر شامل)؛ وبقية الأوزان حصص من حصة العدد الثابت — الأساسان مختلفان ولا يجمعان إلى 100%";
 
 /**
- * Exact-figures table for the 4 risk levels — one row per level plus a
- * totals row using the exact same population/sample/coverage totals variant
- * 0's bottom band renders, so the two variants never disagree. Variant 2/4
- * for this slide, see stageCompareBars() above.
+ * Exact-figures table for the 4 risk levels — Ledger slot 1's ENTIRE body for
+ * this page (2026-07-25 fan-out plan §5 RECONCILIATION). `stageCompareBars`
+ * used to render above this table in the Ledger slot; the fan-out plan ruled
+ * it out of Ledger — "a labelled bar with a proportional track is a chart by
+ * any reading," and Ledger is charts-free by contract (design spec §2) — so
+ * `stageCompareBars` no longer exists (removed, not just unused) and this
+ * table is now the whole slot.
+ *
+ * Two additions beyond the pre-fan-out shape:
+ *   1. A «ما يقيسه» column (`RISK_LEVELS[i].measures`) — the card had ~190px
+ *      of vertical slack once stageCompareBars left, which this column uses.
+ *   2. A tfoot footnote row (colspan across every column) carrying
+ *      `LEVEL_WEIGHT_BASIS_FOOTNOTE` — the same two-basis caveat
+ *      `slide-glossary-levels`'s Ledger table will carry.
+ *
+ * ⚠️ THIS DELIBERATELY SUPERSEDES `deck2.test.ts`'s pre-2026-07-25
+ * "levelFiguresTable byte-identity characterization" pin. That test existed
+ * to prove the `ledgerTableCard` EXTRACTION (deck2-design-systems Task 1)
+ * changed nothing about this page's already-shipped output — it was never a
+ * promise that the content itself would never change again. The fan-out
+ * plan's B1 pass supersedes it on purpose; the pinned expectation was updated
+ * to the new shape in the same commit that made this edit, not deleted, and
+ * a new "no v2-cbar, has ما يقيسه + footnote" test replaces the old one's
+ * intent. See `docs/edit logs/2026-07-25.md` (this version's entry) for the
+ * explicit before/after.
  *
  * Reimplemented on top of the shared `ledgerTableCard` (slideKit.ts,
  * 2026-07-25, deck2-design-systems Task 1) instead of hand-rolling its own
- * `<table>` markup — `deck2.test.ts`'s
- * "levelFiguresTable byte-identity characterization" test pins this page's
- * variant-1 output to prove the extraction changed nothing. Two deliberate
- * non-defaults keep it that way: `cardClass: "v2-level-table-card"` (the
- * legacy name, aliased to `.v2-lg-table-card` in theme.ts) and `rowCount: 0`
- * (this card centers its fixed 4-row content via CSS rather than pinning a
- * totals row, so it opts out of `ledgerTableCard`'s filler-row mechanism —
- * see that function's doc comment).
+ * `<table>` markup. Two deliberate non-defaults: `cardClass:
+ * "v2-level-table-card"` (the legacy name, aliased to `.v2-lg-table-card` in
+ * theme.ts) and `rowCount: 0` (this card centers its fixed 4-row content via
+ * CSS rather than pinning a totals row, so it opts out of `ledgerTableCard`'s
+ * filler-row mechanism — see that function's doc comment).
  */
 function levelFiguresTable(
   stages: StageProfile[],
@@ -719,9 +722,11 @@ function levelFiguresTable(
       const tone = STAGE_TONES[i % STAGE_TONES.length];
       const share = (s.population / populationTotal) * 100;
       const weight = LEVEL_DRAW_WEIGHTS[i] ?? null;
+      const measures = RISK_LEVELS[i]?.measures ?? "";
       return `<tr>
         <td><span class="v2-level-row-num ${tone}">${i + 1}</span></td>
         <td>${esc(s.stageLabel)}</td>
+        <td>${esc(measures)}</td>
         <td>${fmtPct(weight, 0)}</td>
         <td>${fmtPct(share, 0)}</td>
         <td>${fmtNum(s.population)}</td>
@@ -730,18 +735,19 @@ function levelFiguresTable(
       </tr>`;
     })
     .join("");
+  const footnoteRow = `<tr><td colspan="8" class="v2-lg-footnote">${esc(LEVEL_WEIGHT_BASIS_FOOTNOTE)}</td></tr>`;
   return ledgerTableCard({
     cardClass: "v2-level-table-card",
     theadCells: `
-        <th></th><th>المستوى</th><th>وزن العينة</th><th>من المجتمع</th>
+        <th></th><th>المستوى</th><th>ما يقيسه</th><th>وزن العينة</th><th>من المجتمع</th>
         <th>صورة</th><th>العيّنة</th><th>تغطية العيّنة</th>
       `,
     bodyRowsHtml: rows,
     totalsRowHtml: `<tr>
-        <td></td><td>الإجمالي</td><td>—</td><td>100%</td>
+        <td></td><td>الإجمالي</td><td></td><td>—</td><td>100%</td>
         <td>${fmtNum(totals.population)}</td><td>${fmtNum(totals.sample)}</td><td>${fmtPct(totals.coverage)}</td>
-      </tr>`,
-    span: 7,
+      </tr>${footnoteRow}`,
+    span: 8,
     rowCount: 0,
   });
 }
@@ -785,14 +791,15 @@ export function riskStagesSlide(model: ReportModel, num: number, total: number, 
     <div class="v2-risk-tile-grid">${tiles}</div>
     ${totals}
   </div>`;
-  const body2 = `<div class="v2-risk-layout">
-    ${stageCompareBars(stages, populationTotal)}
+  const ledgerBody = `<div class="v2-sys-ledger v2-lg-risk-stages"><div class="v2-risk-layout">
     ${levelFiguresTable(stages, populationTotal, {
       population: model.population.total,
       sample: model.sample.total,
       coverage: model.sample.coverage,
     })}
-  </div>`;
+  </div></div>`;
+  const briefingBody = riskStagesBriefing(model, stages, populationTotal);
+  const gridBody = riskStagesGrid(model, stages, populationTotal);
   return v2Slide({
     id: "slide-risk-stages",
     title: "مجتمع الصور بناءً على المخاطر",
@@ -800,12 +807,117 @@ export function riskStagesSlide(model: ReportModel, num: number, total: number, 
     iconName: "gauge",
     headline: "مجتمع الصور بناءً على المخاطر",
     subhead: "توزيع المجتمع بعد المعالجة على مستويات المخاطر الأربعة، وحصة كل مستوى من العيّنة.",
-    bodyVariants: [body, body2, body, body],
+    bodyVariants: [body, ledgerBody, briefingBody, gridBody],
     variantPreview,
     num,
     total,
     section: "section1",
   });
+}
+
+/**
+ * Briefing system (slot 2) body for `slide-risk-stages` (fan-out plan §5).
+ * The lede carries the month's sample COVERAGE (with `microArc`), not a level
+ * count — this page's real headline number is "how much of the month's risk
+ * population got sampled," and "there are four levels" is the glossary's job
+ * (`slide-glossary-levels`, a later fan-out pass). Rank rows are the 4 levels
+ * in LEVEL ORDER, never sorted by size — they are categorical detection
+ * scenarios, not a severity ranking (see `RISK_LEVELS`'s doc comment /
+ * [[risk-levels-are-categorical]]) — each carrying its own `STAGE_TONES`
+ * color as a per-row override of Briefing's usual one-tone-per-page rule.
+ * `STAGE_TONES` is a cross-page IDENTITY encoding (same color = same level on
+ * the glossary, the stage×port cards, and here); the fan-out plan rules that
+ * invariant matters more than this page's tone cohesion.
+ */
+function riskStagesBriefing(model: ReportModel, stages: StageProfile[], populationTotal: number): string {
+  const largest = stages.reduce(
+    (best, s) => (best === null || s.population > best.population ? s : best),
+    null as StageProfile | null,
+  );
+  const supportStrip = briefingSupport([
+    { iconName: "layers", value: fmtNum(model.population.total), label: "إجمالي المجتمع" },
+    { iconName: "scan", value: fmtNum(model.sample.total), label: "إجمالي العيّنة" },
+    { iconName: "flag", value: esc(largest?.stageLabel ?? "—"), label: "أكبر مستوى حصةً" },
+  ]);
+  const rankItems: BriefingRankItem[] = stages.map((s, i) => {
+    const share = (s.population / populationTotal) * 100;
+    return {
+      label: s.stageLabel,
+      value: share,
+      valueText: fmtPct(share, 0),
+      secondaryText: `العيّنة ${fmtNum(s.sampleSize)} · تغطية ${fmtPct(s.coverage)}`,
+      tone: STAGE_TONES[i % STAGE_TONES.length],
+    };
+  });
+  const rankHtml = briefingRankList({ items: rankItems, tone: "gold", scale: { kind: "auto" } });
+  return `<div class="v2-sys-brief v2-bf-risk-stages">
+    ${briefingLede({
+      figure: fmtPct(model.sample.coverage, 0),
+      tone: "gold",
+      label: `تغطية العيّنة ${fmtPct(model.sample.coverage, 0)} — ${fmtNum(model.sample.total)} من ${fmtNum(model.population.total)} صورة`,
+      basis: `أربعة مستويات · ${esc(model.summary.periodId)}`,
+      arc: model.sample.coverage,
+    })}
+    ${supportStrip}
+    ${rankHtml}
+  </div>`;
+}
+
+/**
+ * Grid system (slot 3) body for `slide-risk-stages` (fan-out plan §5): one
+ * full-width `metricMatrix`, rows = the 4 stage labels, 4 own-domain columns
+ * (الصور/العيّنة on their own max, من المجتمع/تغطية العيّنة on [0,100]), all
+ * `sequential-gold` (no fixed target for any of them to diverge around).
+ *
+ * وزن العينة is deliberately NOT a column here — it is a config figure with
+ * TWO different bases (percentage-of-own-population for level 1, share of the
+ * exact-quota pool for the rest; see `LEVEL_DRAW_WEIGHTS`'s doc comment and
+ * `LEVEL_WEIGHT_BASIS_FOOTNOTE` above), and `metricMatrix` has no annotation
+ * affordance to disclose a two-basis caveat on one column. Ledger (footnote
+ * row) and Briefing (basis chip) can carry it honestly; Grid cannot, so it's
+ * left out rather than shown without its caveat.
+ */
+function riskStagesGrid(model: ReportModel, stages: StageProfile[], populationTotal: number): string {
+  const share = (s: StageProfile) => (s.population / populationTotal) * 100;
+  const matrix = metricMatrix(
+    {
+      rowLabels: stages.map((s) => s.stageLabel),
+      columns: [
+        {
+          label: "الصور",
+          domain: [0, maxOf(stages.map((s) => s.population))],
+          ramp: "sequential-gold",
+          values: stages.map((s) => s.population),
+        },
+        {
+          label: "العيّنة",
+          domain: [0, maxOf(stages.map((s) => s.sampleSize))],
+          ramp: "sequential-gold",
+          values: stages.map((s) => s.sampleSize),
+        },
+        { label: "من المجتمع", domain: [0, 100], ramp: "sequential-gold", values: stages.map(share) },
+        {
+          label: "تغطية العيّنة",
+          domain: [0, 100],
+          ramp: "sequential-gold",
+          values: stages.map((s) => s.coverage),
+        },
+      ],
+    },
+    {
+      width: 1160,
+      height: 320,
+      caption: "مصفوفة مستويات المخاطر",
+      rowHeader: "المستوى",
+      emptyNote: "لا توجد بيانات",
+    },
+  );
+  const panel = gridPanel({
+    title: "مستويات المخاطر",
+    sub: `${fmtNum(model.population.total)} صورة · ${fmtNum(model.sample.total)} عيّنة · تغطية ${fmtPct(model.sample.coverage)}`,
+    chartHtml: matrix,
+  });
+  return `<div class="v2-sys-grid v2-gd-risk-stages">${panel}</div>`;
 }
 
 // ── Page 6+ — مجتمع صور الفحص للشهر (جداول المنافذ) ───────────────────────

@@ -1026,34 +1026,34 @@ body.theme-light .v2-risk-tile-foot{background:rgba(10,45,74,.035);border-color:
   .v2-risk-tile-grid{grid-template-columns:1fr;grid-template-rows:repeat(4,auto);}
 }
 
-/* ── Compare-bars + exact-figures table — risk-stages slide, variant 2/4
-   (docs/superpowers/specs/2026-07-25-deck2-risk-stages-variant2-design.md).
-   Variant 0's tiles/proportion-bar above are untouched; this is an alternate
-   body for the same slide, selected only via the dev-preview variant
-   switcher — never shipped in production. */
-.v2-cbar{display:flex;flex-direction:column;gap:10px;}
-.v2-cbar-row{display:flex;align-items:center;gap:12px;}
-.v2-cbar-label{flex:0 0 auto;min-width:110px;font-size:.78rem;font-weight:700;color:#fff;text-align:right;}
-.v2-cbar-track{flex:1 1 auto;height:22px;border-radius:7px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);overflow:hidden;position:relative;}
-.v2-cbar-fill{position:absolute;inset-inline-end:0;top:0;height:100%;border-radius:7px;}
-.v2-cbar-fill.gold{background:var(--gold);}
-.v2-cbar-fill.blue{background:var(--blue);}
-.v2-cbar-fill.green{background:var(--green);}
-.v2-cbar-fill.coral{background:var(--coral);}
-.v2-cbar-value{flex:0 0 auto;min-width:40px;text-align:left;font-size:.82rem;font-weight:900;color:#fff;font-variant-numeric:tabular-nums;}
-/* .v2-level-table-card is the legacy name \`levelFiguresTable\` (slides.ts)
-   still renders, kept byte-for-byte so slide-risk-stages's shipped variant-1
-   output never churns (see deck2.test.ts's "levelFiguresTable byte-identity
-   characterization" test). .v2-lg-table-card is the new shared name
-   \`ledgerTableCard\` (slideKit.ts) uses by default for every other
-   Ledger-system table (deck2-design-systems Task 1, 2026-07-25) — combined
-   selectors below so both names get IDENTICAL rules, per design spec §4
-   ("keep .v2-level-table-card as an alias of the new .v2-lg-table-card"). */
+/* .v2-cbar* (compare-bars, risk-stages variant 2/4) removed 2026-07-25
+   (fan-out plan §5 RECONCILIATION): "a labelled bar with a proportional
+   track is a chart by any reading," so it left Ledger and, since
+   \`stageCompareBars\` (slides.ts) had no other caller, the function and this
+   CSS block are dead code, not just unused-by-default — deleted rather than
+   left orphaned. Briefing's \`.v2-bf-rank-row\` below is a PARALLEL
+   reimplementation of the same "labeled bar + value" idea, not a repoint of
+   this now-gone class — see its own doc comment.
+   .v2-level-table-card is the legacy name \`levelFiguresTable\` (slides.ts)
+   still renders (aliased to \`.v2-lg-table-card\`'s rules below, design spec
+   §4 "keep .v2-level-table-card as an alias of the new .v2-lg-table-card").
+   It no longer pins a byte-identical shipped output (that pin was
+   deliberately superseded in the same fan-out pass — see
+   \`levelFiguresTable\`'s doc comment in slides.ts and this date's edit log)
+   — the alias exists purely so this page's table shares the shared Ledger
+   table's visual rules, not to freeze its markup. */
 .v2-level-table-card,.v2-lg-table-card{margin-top:14px;flex:1 1 auto;min-height:0;display:flex;flex-direction:column;justify-content:center;}
 .v2-level-table-card .deck-table th,.v2-level-table-card .deck-table td,
 .v2-lg-table-card .deck-table th,.v2-lg-table-card .deck-table td{padding:9px 10px;font-size:.76rem;text-align:center;}
 .v2-level-table-card .deck-table th:nth-child(2),.v2-level-table-card .deck-table td:nth-child(2),
 .v2-lg-table-card .deck-table th:nth-child(2),.v2-lg-table-card .deck-table td:nth-child(2){text-align:right;}
+/* New 2026-07-25 (fan-out plan §5): the «ما يقيسه» column levelFiguresTable
+   added is a sentence, not a number — right-align it too, like the level-name
+   column, instead of the numeric-column default (center). Scoped to
+   .v2-level-table-card only (not the shared .v2-lg-table-card) since this is
+   this ONE page's column order, not a generic 3rd-column rule every future
+   Ledger table should inherit. */
+.v2-level-table-card .deck-table th:nth-child(3),.v2-level-table-card .deck-table td:nth-child(3){text-align:right;}
 .v2-level-row-num{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;font-size:.68rem;font-weight:900;color:var(--navy);background:var(--gold);}
 .v2-level-row-num.blue{background:var(--blue);}
 .v2-level-row-num.green{background:var(--green);}
@@ -1063,13 +1063,25 @@ body.theme-light .v2-risk-tile-foot{background:rgba(10,45,74,.035);border-color:
   font-weight:900;color:#fff;background:rgba(255,255,255,.07);
   border-top:1px solid rgba(255,255,255,.2);border-bottom:0;
 }
+/* New 2026-07-25 (fan-out plan §5): the two-basis footnote row
+   (LEVEL_WEIGHT_BASIS_FOOTNOTE, slides.ts) sits in the same tfoot as the
+   totals row above but must read as a caveat, not a second total — muted,
+   normal weight, right-aligned prose, own top hairline instead of the bold
+   totals-row treatment the base tfoot rule sets. */
+.v2-level-table-card .deck-table tfoot tr.v2-lg-footnote td,
+.v2-lg-table-card .deck-table tfoot tr.v2-lg-footnote td{
+  font-weight:600;font-size:.62rem;line-height:1.5;color:var(--slate);
+  text-align:right;background:transparent;border-top:1px solid rgba(255,255,255,.12);
+}
 /* New in the new class only — \`ledgerTableCard\`'s optional \`title\` slot
    has no equivalent in the legacy .v2-level-table-card shape
    (levelFiguresTable never passes a title), so it is not part of the alias
    contract above. */
 .v2-lg-table-card-title{font-size:.8rem;font-weight:800;color:#fff;margin-bottom:8px;}
-body.theme-light .v2-cbar-label,body.theme-light .v2-cbar-value{color:#0a2d4a;}
-body.theme-light .v2-cbar-track{background:#eef2f6;border-color:#dde4ea;}
+body.theme-light .v2-level-table-card .deck-table tfoot tr.v2-lg-footnote td,
+body.theme-light .v2-lg-table-card .deck-table tfoot tr.v2-lg-footnote td{
+  color:#5b6b7a;border-top-color:rgba(10,45,74,.12);
+}
 /* No light-theme override for .v2-level-row-num's ink: --gold/--blue/--green/
    --coral don't change value between themes, so var(--navy) (the base rule's
    color) already has good contrast in both — a previous color:#fff override
@@ -1341,6 +1353,11 @@ body.theme-light .v2-lg-port-card .deck-table tfoot td{color:#0a2d4a;background:
    hook (design spec §3.1) and is where a future visual difference unique to
    this page's Ledger variant would land. */
 .v2-lg-port-population{height:100%;}
+/* Page-local: slide-risk-stages (Ledger, fan-out plan §5). Same "namespacing
+   hook, nothing bespoke" role as .v2-lg-port-population above — the actual
+   table markup is levelFiguresTable's .v2-level-table-card, styled earlier
+   in this file. */
+.v2-lg-risk-stages{height:100%;}
 
 /* ── BRIEFING (slot 2 — الإحاطة, recall): one lede figure per page + a
    ≤3-figure support strip + at most one ranked-bar list. Tables are demoted
@@ -1358,14 +1375,17 @@ body.theme-light .v2-lg-port-card .deck-table tfoot td{color:#0a2d4a;background:
   font-size:.68rem;font-weight:700;color:var(--slate);
   border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.03);
 }
-/* Ranked-bar list — a labeled-bar-plus-value skeleton in the same spirit as
-   the shared \`.v2-cbar-row\` (a peer review, 2026-07-25, correctly caught
-   that this is a parallel reimplementation, not a repoint of that class —
-   \`.v2-cbar*\` is untouched and \`stageCompareBars\`/slide-risk-stages keep
-   rendering it directly; a genuine shared-class repoint is a follow-up worth
-   doing, not done here to avoid touching that already-shipped page's CSS
-   mid-fix). \`.v2-bf-rank-row\` adds a rank numeral + a secondary figure that
-   \`.v2-cbar-row\` doesn't have.
+/* Ranked-bar list — a labeled-bar-plus-value skeleton originally sketched as a
+   parallel reimplementation of \`.v2-cbar-row\` (a peer review, 2026-07-25,
+   correctly caught it was a parallel build, not a repoint of that class, and
+   deferred a "genuine shared-class repoint" as a follow-up). That follow-up
+   landed later the same day (fan-out plan §5 RECONCILIATION):
+   \`stageCompareBars\`/\`.v2-cbar*\` were removed outright once
+   \`slide-risk-stages\`'s Ledger slot dropped the compare-bars entirely (ruled
+   a chart, out of Ledger by contract) — so \`.v2-bf-rank-row\` is now the ONLY
+   labeled-bar-plus-value skeleton in the deck, not a parallel one. It still
+   adds a rank numeral + a secondary figure that the old \`.v2-cbar-row\`
+   never had.
    Density (1-vs-2 columns, row-height tier) is entirely decided by
    \`briefingRankPlan\` (slideKit.ts) and expressed here only as a \`.t-*\` tier
    class plus however many \`.v2-bf-rank-col\` children the caller renders — no
@@ -1460,6 +1480,10 @@ body.theme-light .v2-bf-rank-secondary{color:#607386;}
 /* Page-local: slide-port-population (Briefing). Nothing bespoke beyond the
    shared components above — namespacing hook per design spec §3.1. */
 .v2-bf-port-population{height:100%;}
+/* Page-local: slide-risk-stages (Briefing, fan-out plan §5). Same role as
+   .v2-bf-port-population above — per-row tone comes from briefingRankList's
+   item.tone override (slideKit.ts), not page-local CSS. */
+.v2-bf-risk-stages{height:100%;}
 
 /* ── GRID (slot 3 — الشبكة, comparison): every page becomes one matrix of
    metricMatrix cells, each column normalized to its OWN domain, ink always
@@ -1502,4 +1526,11 @@ body.theme-light .v2-gd-panel-head span{color:#607386;}
 .v2-gd-port-population .v2-gd-panel.sea .v2-gd-panel-head span{color:var(--blue);}
 body.theme-light .v2-gd-port-population .v2-gd-panel.land .v2-gd-panel-head span{color:#4a7a1f;}
 body.theme-light .v2-gd-port-population .v2-gd-panel.sea .v2-gd-panel-head span{color:#2f6fb0;}
+
+/* Page-local: slide-risk-stages (Grid, fan-out plan §5) — a single
+   full-width panel, no land/sea split (so no .v2-gd-split wrapper here);
+   these two rules give the wrapper AND its one .v2-gd-panel child the full
+   slide-body height .v2-gd-split's grid would otherwise provide. */
+.v2-gd-risk-stages{height:100%;}
+.v2-gd-risk-stages .v2-gd-panel{height:100%;}
 `;

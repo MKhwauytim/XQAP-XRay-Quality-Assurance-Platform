@@ -400,20 +400,22 @@ describe("closing slide — data-source attribution + embedded Arabic font", () 
   });
 });
 
-describe("riskStagesSlide — variant 2/4: compare-bars + exact-figures table (2026-07-25)", () => {
-  it("variant 0 (production / variantPreview=false) never renders the new compare-bars or table markup", () => {
+describe("slide-risk-stages fan-out — Ledger/Briefing/Grid (2026-07-25 fan-out plan §5 RECONCILIATION)", () => {
+  it("variant 0 (production / variantPreview=false) never renders Ledger/Briefing/Grid markup", () => {
     const model = buildReportModel(
       input([popRow({ stage: "المستوى الأول" }), popRow({ xrayImageId: "XR-2", stage: "المستوى الثالث" })]),
     );
     const html = riskStagesSlide(model, 5, 20, false);
-    expect(html).not.toContain("v2-cbar");
+    expect(html).not.toContain("v2-lg-risk-stages");
+    expect(html).not.toContain("v2-bf-risk-stages");
+    expect(html).not.toContain("v2-gd-risk-stages");
     expect(html).not.toContain("v2-level-table-card");
     // variant 0's own markup still renders untouched
     expect(html).toContain("v2-risk-tile-grid");
     expect(html).toContain("v2-prop-bar");
   });
 
-  it("preview mode's slot 2 (data-variant-index=\"1\") renders the compare-bars + exact-figures table with the model's real per-level and total figures", () => {
+  it('Ledger slot (data-variant-index="1") has no chart markup, adds the «ما يقيسه» column, and carries the two-basis footnote row', () => {
     const model = buildReportModel(
       input([popRow({ stage: "المستوى الأول" }), popRow({ xrayImageId: "XR-2", stage: "المستوى الثالث" })]),
     );
@@ -429,17 +431,25 @@ describe("riskStagesSlide — variant 2/4: compare-bars + exact-figures table (2
     expect(end).toBeGreaterThan(start);
     const panel1 = html.slice(start, end);
 
-    expect(panel1).toContain('<div class="v2-cbar">');
+    // stageCompareBars is gone — this slot is levelFiguresTable alone (no chart).
+    expect(panel1).not.toContain("v2-cbar");
     expect(panel1).toContain('<div class="v2-level-table-card">');
-    expect((panel1.match(/class="v2-cbar-row"/g) ?? []).length).toBe(model.population.byStage.length);
 
-    // Every stage's real population/sample figures must appear in the table.
+    // New «ما يقيسه» column, sourced from RISK_LEVELS[i].measures.
+    expect(panel1).toContain("<th>ما يقيسه</th>");
+    expect(panel1).toContain("انفراد الفحص بالاشتباه دون مؤشرات أخرى.");
+    expect(panel1).toContain("ما يلتقطه محرك المخاطر ولا يلتقطه الفحص.");
+
+    // New tfoot footnote row: colspan across all 8 columns, two-basis caveat
+    // worded to agree with LEVEL_DRAW_WEIGHTS's own doc comment.
+    expect(panel1).toContain('<tr><td colspan="8" class="v2-lg-footnote">');
+    expect(panel1).toContain("الأساسان مختلفان ولا يجمعان إلى 100%");
+
+    // Every stage's real population/sample figures must still appear in the table.
     model.population.byStage.forEach((stage) => {
       expect(panel1).toContain(fmtNum(stage.population));
       expect(panel1).toContain(fmtNum(stage.sampleSize));
     });
-
-    // The totals row must use the exact same totals variant 0's bottom band renders.
     expect(panel1).toContain(fmtNum(model.population.total));
     expect(panel1).toContain(fmtNum(model.sample.total));
 
@@ -449,34 +459,91 @@ describe("riskStagesSlide — variant 2/4: compare-bars + exact-figures table (2
     expect(panel0).toContain("v2-risk-tile-grid");
     expect(panel0).not.toContain("v2-level-table-card");
   });
+
+  it('Briefing slot (data-variant-index="2") ranks the 4 levels in LEVEL ORDER — never sorted by population size — each with its own STAGE_TONES color', () => {
+    // Population by level: الأول=1 (smallest), الثاني=4 (largest), الثالث=2, الرابع=3.
+    // A magnitude-sorted rank list would put الثاني first; level order must not.
+    const model = buildReportModel(
+      input([
+        popRow({ xrayImageId: "XR-1", stage: "المستوى الأول" }),
+        popRow({ xrayImageId: "XR-2", stage: "المستوى الثاني" }),
+        popRow({ xrayImageId: "XR-3", stage: "المستوى الثاني" }),
+        popRow({ xrayImageId: "XR-4", stage: "المستوى الثاني" }),
+        popRow({ xrayImageId: "XR-5", stage: "المستوى الثاني" }),
+        popRow({ xrayImageId: "XR-6", stage: "المستوى الثالث" }),
+        popRow({ xrayImageId: "XR-7", stage: "المستوى الثالث" }),
+        popRow({ xrayImageId: "XR-8", stage: "المستوى الرابع" }),
+        popRow({ xrayImageId: "XR-9", stage: "المستوى الرابع" }),
+        popRow({ xrayImageId: "XR-10", stage: "المستوى الرابع" }),
+      ]),
+    );
+    const html = riskStagesSlide(model, 5, 20, true);
+    const start = html.indexOf('data-variant-index="2"');
+    const end = html.indexOf('data-variant-index="3"');
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const panel2 = html.slice(start, end);
+
+    expect((panel2.match(/class="v2-bf-rank-row"/g) ?? []).length).toBe(4);
+    const labels = [...panel2.matchAll(/<span class="v2-bf-rank-label">([^<]*)<\/span>/g)].map((m) => m[1]);
+    expect(labels).toEqual(["المستوى الأول", "المستوى الثاني", "المستوى الثالث", "المستوى الرابع"]);
+
+    const tones = [...panel2.matchAll(/<span class="v2-bf-rank-num (\w+)">/g)].map((m) => m[1]);
+    expect(tones).toEqual(["gold", "blue", "green", "coral"]);
+
+    // Lede carries sample coverage with a microArc, not a level count.
+    expect(panel2).toContain('<div class="v2-bf-lede-arc">');
+    expect(panel2).toContain("تغطية العيّنة");
+  });
+
+  it('Grid slot (data-variant-index="3") is one metricMatrix/gridPanel and never encodes وزن العينة', () => {
+    const model = buildReportModel(
+      input([popRow({ stage: "المستوى الأول" }), popRow({ xrayImageId: "XR-2", stage: "المستوى الثالث" })]),
+    );
+    const html = riskStagesSlide(model, 5, 20, true);
+    const start = html.indexOf('data-variant-index="3"');
+    expect(start).toBeGreaterThan(-1);
+    const panel3 = html.slice(start);
+
+    expect(panel3).toContain("v2-sys-grid");
+    expect(panel3).toContain("v2-gd-risk-stages");
+    expect(panel3).toContain('<div class="v2-gd-panel">');
+    expect(panel3).toContain("<figure");
+    expect(panel3).toContain('<table dir="rtl"');
+    expect(panel3).toContain("المستوى الأول");
+    expect(panel3).toContain("المستوى الثالث");
+
+    // وزن العينة is a two-basis config figure metricMatrix has no annotation
+    // affordance to caveat — deliberately excluded from the Grid columns.
+    expect(panel3).not.toContain("وزن العينة");
+  });
 });
 
-describe("levelFiguresTable byte-identity characterization (2026-07-25, deck2-design-systems Task 1)", () => {
-  // Captured VERBATIM from riskStagesSlide's variant-1 panel BEFORE levelFiguresTable
-  // was reimplemented on top of the new shared `ledgerTableCard` primitive
-  // (slideKit.ts). This is the regression tripwire for that extraction: if the
-  // generalization changes even one byte of this already-shipped page's output,
-  // this test fails first, before any subtler downstream test would notice.
+describe("levelFiguresTable byte-identity characterization — SUPERSEDED 2026-07-25 (fan-out plan §5)", () => {
+  // This pin originally proved the ledgerTableCard EXTRACTION (deck2-design-
+  // systems Task 1) changed nothing about the page's then-shipped output. The
+  // fan-out plan's B1 pass deliberately changes that output on purpose
+  // (stageCompareBars dropped from Ledger, «ما يقيسه» column + two-basis
+  // footnote row added — see levelFiguresTable's doc comment in slides.ts and
+  // this date's edit log) — this is NOT a regression the old pin caught; the
+  // expectation below is the NEW post-fan-out golden output, re-captured from
+  // the actual render. The "no v2-cbar, has the new column + footnote" test in
+  // the describe block above carries this test's original *intent* forward
+  // (verifiably-correct shape rather than a frozen byte string); this test
+  // still exists so the shape stays pinned once more, exactly like every
+  // other characterization test in this file.
   const EXPECTED_PANEL1 =
-    `data-variant-index="1"><div class="v2-risk-layout">\n` +
-    `    <div class="v2-cbar"><div class="v2-cbar-row">\n` +
-    `        <span class="v2-cbar-label">المستوى الأول</span>\n` +
-    `        <span class="v2-cbar-track"><i class="v2-cbar-fill gold" style="width:100.0%"></i></span>\n` +
-    `        <span class="v2-cbar-value">50%</span>\n` +
-    `      </div><div class="v2-cbar-row">\n` +
-    `        <span class="v2-cbar-label">المستوى الثالث</span>\n` +
-    `        <span class="v2-cbar-track"><i class="v2-cbar-fill blue" style="width:100.0%"></i></span>\n` +
-    `        <span class="v2-cbar-value">50%</span>\n` +
-    `      </div></div>\n` +
+    `data-variant-index="1"><div class="v2-sys-ledger v2-lg-risk-stages"><div class="v2-risk-layout">\n` +
     `    <div class="v2-level-table-card">\n` +
     `    <table class="deck-table">\n` +
     `      <thead><tr>\n` +
-    `        <th></th><th>المستوى</th><th>وزن العينة</th><th>من المجتمع</th>\n` +
+    `        <th></th><th>المستوى</th><th>ما يقيسه</th><th>وزن العينة</th><th>من المجتمع</th>\n` +
     `        <th>صورة</th><th>العيّنة</th><th>تغطية العيّنة</th>\n` +
     `      </tr></thead>\n` +
     `      <tbody><tr>\n` +
     `        <td><span class="v2-level-row-num gold">1</span></td>\n` +
     `        <td>المستوى الأول</td>\n` +
+    `        <td>انفراد الفحص بالاشتباه دون مؤشرات أخرى.</td>\n` +
     `        <td>100%</td>\n` +
     `        <td>50%</td>\n` +
     `        <td>1</td>\n` +
@@ -485,6 +552,7 @@ describe("levelFiguresTable byte-identity characterization (2026-07-25, deck2-de
     `      </tr><tr>\n` +
     `        <td><span class="v2-level-row-num blue">2</span></td>\n` +
     `        <td>المستوى الثالث</td>\n` +
+    `        <td>ما يلتقطه محرك المخاطر ولا يلتقطه الفحص.</td>\n` +
     `        <td>40%</td>\n` +
     `        <td>50%</td>\n` +
     `        <td>1</td>\n` +
@@ -492,14 +560,14 @@ describe("levelFiguresTable byte-identity characterization (2026-07-25, deck2-de
     `        <td>0.0%</td>\n` +
     `      </tr></tbody>\n` +
     `      <tfoot><tr>\n` +
-    `        <td></td><td>الإجمالي</td><td>—</td><td>100%</td>\n` +
+    `        <td></td><td>الإجمالي</td><td></td><td>—</td><td>100%</td>\n` +
     `        <td>2</td><td>0</td><td>0.0%</td>\n` +
-    `      </tr></tfoot>\n` +
+    `      </tr><tr><td colspan="8" class="v2-lg-footnote">وزن المستوى الأول نسبة من مجتمعه (حصر شامل)؛ وبقية الأوزان حصص من حصة العدد الثابت — الأساسان مختلفان ولا يجمعان إلى 100%</td></tr></tfoot>\n` +
     `    </table>\n` +
     `  </div>\n` +
-    `  </div></div><div class="v2-variant-panel" `;
+    `  </div></div></div><div class="v2-variant-panel" `;
 
-  it("slide-risk-stages variant-1 panel is byte-identical to the pre-extraction output", () => {
+  it("slide-risk-stages variant-1 panel is byte-identical to the post-fan-out (2026-07-25) golden output", () => {
     const model = buildReportModel(
       input([popRow({ stage: "المستوى الأول" }), popRow({ xrayImageId: "XR-2", stage: "المستوى الثالث" })]),
     );
@@ -528,7 +596,7 @@ describe("style choices — production selection + backward compatibility (2026-
     const defaultHtml = buildExecutiveDeckV2(fixture);
     const customHtml = buildExecutiveDeckV2(fixture, {}, { styleChoices: { "slide-risk-stages": 1 } });
 
-    // NOTE: the deck's static CSS (theme.ts) always defines .v2-cbar/.v2-level-table-card/
+    // NOTE: the deck's static CSS (theme.ts) always defines .v2-level-table-card/
     // .v2-risk-tile-grid rules regardless of which variant is selected — all 4 variants' CSS
     // ships in every report, only the markup differs — so assertions below match the HTML
     // *markup* tag (`<div class="...">`), not a bare class-name substring that would also
@@ -536,12 +604,10 @@ describe("style choices — production selection + backward compatibility (2026-
 
     // Variant 0 (today's tiles + proportion bar) markup is present by default...
     expect(defaultHtml).toContain('<div class="v2-risk-tile-grid">');
-    expect(defaultHtml).not.toContain('<div class="v2-cbar">');
     expect(defaultHtml).not.toContain('<div class="v2-level-table-card">');
 
     // ...but with the style choice applied, the SAME slide now renders variant 1's markup instead.
     expect(customHtml).not.toContain('<div class="v2-risk-tile-grid">');
-    expect(customHtml).toContain('<div class="v2-cbar">');
     expect(customHtml).toContain('<div class="v2-level-table-card">');
 
     // Every other slide is unaffected by a choice scoped to slide-risk-stages only.
