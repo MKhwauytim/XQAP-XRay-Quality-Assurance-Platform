@@ -970,7 +970,21 @@ function ReportsContent() {
           <div className="rh-card-body">
             <div className="rh-card-top">
               <div className="rh-icon rh-icon-teal"><BarChart2 size={22} /></div>
-              <span className="rh-badge rh-badge-main">الرئيسي</span>
+              <div className="rh-card-top-left">
+                <span className="rh-badge rh-badge-main">الرئيسي</span>
+                {isAdmin ? (
+                  <button
+                    type="button"
+                    className="rh-card-customize-btn"
+                    disabled={busy || !selectedMonth || !canExportReports}
+                    title="تخصيص تصميم العرض التنفيذي (للمدير فقط)"
+                    aria-label="تخصيص التصميم"
+                    onClick={() => { void handleOpenCustomizer(); }}
+                  >
+                    <Settings2 size={15} strokeWidth={2} />
+                  </button>
+                ) : null}
+              </div>
             </div>
             <div className="rh-card-title">التقرير التنفيذي</div>
             <p className="rh-card-desc">
@@ -985,18 +999,6 @@ function ReportsContent() {
           </div>
           <div className="rh-card-footer">
             {renderExportControls("executive", "rh-btn-teal")}
-            {isAdmin ? (
-              <button
-                type="button"
-                className="rh-btn"
-                disabled={busy || !selectedMonth || !canExportReports}
-                title="تخصيص تصميم العرض التنفيذي (للمدير فقط)"
-                onClick={() => { void handleOpenCustomizer(); }}
-              >
-                <Settings2 size={15} strokeWidth={2} />
-                تخصيص التصميم
-              </button>
-            ) : null}
           </div>
         </div>
 

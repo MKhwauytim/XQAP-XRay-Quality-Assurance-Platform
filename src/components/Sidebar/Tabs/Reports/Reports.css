@@ -489,6 +489,32 @@
   align-items: flex-start;
   justify-content: space-between;
 }
+.rh-card-top-left {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+/* Icon-only admin action, tucked in the card's top-left corner (moved out of
+   the footer, which had no room for it alongside the export controls). */
+.rh-card-customize-btn {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-sm, 8px);
+  background: var(--c-surface);
+  color: var(--c-ink-3);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+}
+.rh-card-customize-btn:not(:disabled):hover {
+  background: var(--c-surface-2);
+  color: var(--c-navy);
+}
+.rh-card-customize-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
 /* Icon */
 .rh-icon {
