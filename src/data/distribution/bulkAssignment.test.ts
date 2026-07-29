@@ -5,6 +5,7 @@ import type { ManagedLoginUser } from "../../auth/userManagement";
 import type { PasswordHashRecord } from "../../auth/passwordCrypto";
 import type { DistributionEntry } from "./distributionTypes";
 import { calculateBulkAssignment } from "./bulkAssignment";
+import { EVENT_SCHEMA_VERSION } from "./distributionLog";
 
 function makeUser(
   username: string,
@@ -252,4 +253,34 @@ test("calculateBulkAssignment assigns CertScan records and normal records correc
   const user2Events = result.events.filter(e => e.assignedTo === "user2");
   expect(user1Events.length).toBeGreaterThanOrEqual(1);
   expect(user2Events.length).toBeGreaterThanOrEqual(1);
+});
+
+test("calculateBulkAssignment stamps every generated event with the current event schema version", () => {
+  const rows = [
+    makeRow("img-c1", "SECOND_STAGE", "Certscan"),
+    makeRow("img-n1", "SECOND_STAGE", "NonCertscan"),
+    makeRow("img-n2", "SECOND_STAGE", "NonCertscan")
+  ];
+
+  const allocations: EmployeeStageAllocation[] = [
+    { username: "user1", stageKey: "second", method: "percentage", value: 50, isActive: true },
+    { username: "user2", stageKey: "second", method: "percentage", value: 50, isActive: true }
+  ];
+
+  const employees: ManagedLoginUser[] = [
+    makeUser("user1", "employee", true),
+    makeUser("user2", "employee", false)
+  ];
+
+  const result = calculateBulkAssignment({
+    rows,
+    allocations,
+    employees,
+    operatorUsername: "test"
+  });
+
+  expect(result.events.length).toBeGreaterThan(0);
+  for (const event of result.events) {
+    expect(event.eventSchemaVersion).toBe(EVENT_SCHEMA_VERSION);
+  }
 });

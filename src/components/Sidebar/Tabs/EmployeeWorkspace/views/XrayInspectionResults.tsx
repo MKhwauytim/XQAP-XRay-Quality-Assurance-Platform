@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CalendarOff } from "lucide-react";
+import { CalendarOff, StickyNote } from "lucide-react";
 import { readSession } from "../../../../../auth/authSession";
 import { usePermissions } from "../../../../../auth/usePermissions";
 import { PageHeader } from "../../../../../components/PageHeader/PageHeader";
@@ -15,7 +15,11 @@ import {
   looksLikeDate,
   type DateFormatMode,
 } from "../../../../../components/DataTable/utils";
-import { loadAllEmployeeFiles, loadEmployeeAnswers } from "../../../../../data/answers/answerStorage";
+import {
+  loadAllEmployeeFiles,
+  loadEmployeeAnswers,
+  setItemQualityNote,
+} from "../../../../../data/answers/answerStorage";
 import type { ItemAnswer } from "../../../../../data/answers/answerTypes";
 import {
   loadDistributionLog,
@@ -36,7 +40,7 @@ import type { TemplateField, TemplateSchema } from "../../../../../data/template
 import type { DirectoryHandleLike } from "../../../../../data/storage/fileSystemAccess";
 import { useLabels, type Labels } from "../../../../../data/labels/useLabels";
 import { useGlobalMonth } from "../../../../../data/month/useGlobalMonth";
-import { formatStageLabel } from "../../Population/components/helpers";
+import { formatStageLabel } from "../../../../../data/population/stageHelpers";
 
 const RESULTS_COL_KEY = "xray_inspection_results_cols_v1";
 const REFERRALS_PRESET_KEY = "xray-referrals";
@@ -84,6 +88,10 @@ type ResultRow = {
   movement: MovementInfo;
 };
 
+function resultRowKey(row: ResultRow): string {
+  return `${row.entry.xrayImageId}::${row.entry.assignedTo}`;
+}
+
 type MovementInfo = {
   status: "normal" | "replaced" | "reassigned";
   from: string | null;
@@ -124,8 +132,14 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
   const username = session?.username ?? "";
   // usePermissions() already subscribes to permission-matrix changes internally,
   // so canSeeAll re-renders on change without a manual subscribe/forceUpdate block.
-  const { can } = usePermissions();
+  const { can, canMutate } = usePermissions();
   const canSeeAll = can("view-all-entries");
+  // P2-2 quality note: gated on the same capability tier as approval decisions
+  // (approve-referrals/approve-replacements — supervisor+manager+admin only) and
+  // reuses "ew.reopenAnswer" specifically because that's the existing capability
+  // already governing supervisor-side direct writes onto ItemAnswer (answerStorage.ts),
+  // rather than inventing a new permission key for the same role tier.
+  const canWriteQualityNote = canMutate("ew.reopenAnswer");
 
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const { months, selection: globalMonth } = useGlobalMonth();
@@ -141,6 +155,12 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
   const [viewMode, setViewMode] = useState<ResultsViewMode>("active");
   const [template, setTemplate] = useState<TemplateSchema | null>(null);
   const [referralColConfig, setReferralColConfig] = useState<ColConfig | null>(null);
+  // P2-2 quality note — expanded-row panel state. Fully independent of the
+  // referral/replacement/reopen reviewNotes/DecisionEvent trail; only touches
+  // ItemAnswer.qualityNote via setItemQualityNote.
+  const [expandedRowKey, setExpandedRowKey] = useState<string | null>(null);
+  const [qualityNoteSavingKey, setQualityNoteSavingKey] = useState<string | null>(null);
+  const [qualityNoteError, setQualityNoteError] = useState<string | null>(null);
 
   useEffect(() => {
     void Promise.all([
@@ -179,6 +199,8 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
       setAuditReferralRequests([]);
       setAuditReplacementRequests([]);
       setTemplate(null);
+      setExpandedRowKey(null);
+      setQualityNoteError(null);
       setLoadState("ready");
     }
   }, [selectedMonth]);
@@ -190,6 +212,8 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
     const token = ++loadTokenRef.current;
     if (!selectedMonth) return;
     setLoadState("loading");
+    setExpandedRowKey(null);
+    setQualityNoteError(null);
     try {
       const [sampleMaster, selection, referralLog, replacementLog] = await Promise.all([
         loadSampleMaster(directoryHandle, selectedMonth),
@@ -295,12 +319,81 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
       accessor: (row) => formatAnswerValue(field, getAnswerValue(row.answer, field.fieldId)),
     }));
 
-    return [...visibleSampleColumns, ...answerColumns];
+    // P2-2: independent supervisor coaching-note column — never derived from or
+    // written to the referral/replacement/reopen reviewNotes/DecisionEvent trail.
+    const qualityNoteColumn: DataTableCol<ResultRow> = {
+      id: "qualityNote",
+      label: L.col_quality_note,
+      widthFr: 14,
+      filterKind: "text",
+      accessor: (row) => row.answer?.qualityNote ?? null,
+    };
+
+    return [...visibleSampleColumns, ...answerColumns, qualityNoteColumn];
   }, [L, answerFields, referralColConfig, sampleColumns]);
 
   const auditColumns = useMemo<DataTableCol<AuditRow>[]>(() => buildAuditColumns(), []);
 
+  // P2-2: persists ItemAnswer.qualityNote via setItemQualityNote (answerStorage.ts).
+  // Gated on canWriteQualityNote — the same capability tier used for approval
+  // decisions (see the comment on canWriteQualityNote above).
+  async function handleSaveQualityNote(row: ResultRow, note: string): Promise<void> {
+    const key = resultRowKey(row);
+    if (!canWriteQualityNote) {
+      setQualityNoteError(L.ew_quality_note_denied);
+      return;
+    }
+    if (!selectedMonth || !row.answer) return;
+    setQualityNoteSavingKey(key);
+    setQualityNoteError(null);
+    try {
+      const result = await setItemQualityNote(
+        directoryHandle,
+        selectedMonth,
+        row.entry.assignedTo,
+        row.entry.xrayImageId,
+        note
+      );
+      if (!result.ok) {
+        setQualityNoteError(result.error);
+        return;
+      }
+      const trimmed = note.trim();
+      setRows((prev) =>
+        prev.map((r) =>
+          r.entry.xrayImageId === row.entry.xrayImageId && r.entry.assignedTo === row.entry.assignedTo && r.answer
+            ? { ...r, answer: { ...r.answer, qualityNote: trimmed.length > 0 ? trimmed : undefined } }
+            : r
+        )
+      );
+    } catch (err) {
+      setQualityNoteError(err instanceof Error ? err.message : "خطأ غير معروف.");
+    } finally {
+      setQualityNoteSavingKey(null);
+    }
+  }
+
   function renderCell(column: DataTableCol<ResultRow>, row: ResultRow, meta: CellMeta) {
+    if (column.id === "qualityNote") {
+      const note = row.answer?.qualityNote ?? null;
+      if (note) {
+        return (
+          <span className="ew-quality-note-badge">
+            <StickyNote size={13} aria-hidden />
+            <span className="ew-quality-note-badge-text">{note}</span>
+          </span>
+        );
+      }
+      if (canWriteQualityNote && row.answer) {
+        return (
+          <span className="ew-quality-note-badge ew-quality-note-badge--empty">
+            <StickyNote size={13} aria-hidden />
+            {L.ew_quality_note_add}
+          </span>
+        );
+      }
+      return <span className="dt-muted">{L.value_empty}</span>;
+    }
     const value = column.accessor(row);
     if (!value) return <span className="dt-muted">{L.value_empty}</span>;
     // The expert observation timestamp is shown with date AND time by default.
@@ -342,7 +435,7 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
         <DataTable<ResultRow>
           columns={columns}
           rows={rows}
-          getRowKey={(row) => `${row.entry.xrayImageId}::${row.entry.assignedTo}`}
+          getRowKey={resultRowKey}
           renderCell={renderCell}
           storageKey={RESULTS_COL_KEY}
           defaultVisible={columns.map((column) => column.id)}
@@ -350,6 +443,23 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
           canConfigureColumns={false}
           exportFileName={`نتائج فحص الأشعة - ${selectedMonth || "كل الأشهر"}.xlsx`}
           toolbarEndExtra={renderViewSwitcher(viewMode, setViewMode)}
+          expandedKey={expandedRowKey}
+          onRowClick={(row) => {
+            const key = resultRowKey(row);
+            setExpandedRowKey((cur) => (cur === key ? null : key));
+            setQualityNoteError(null);
+          }}
+          renderExpanded={(row) => (
+            <QualityNoteEditor
+              key={resultRowKey(row)}
+              row={row}
+              canEdit={canWriteQualityNote}
+              saving={qualityNoteSavingKey === resultRowKey(row)}
+              error={expandedRowKey === resultRowKey(row) ? qualityNoteError : null}
+              labels={L}
+              onSave={handleSaveQualityNote}
+            />
+          )}
         />
       )}
       {loadState === "ready" && months.length > 0 && viewMode !== "active" && (
@@ -397,6 +507,74 @@ function renderViewSwitcher(
       >
         المحالة/المنقولة
       </button>
+    </div>
+  );
+}
+
+/**
+ * P2-2 expanded-row panel: writable supervisor coaching note on ItemAnswer.qualityNote.
+ * Fully independent of the referral/replacement/reopen reviewNotes/DecisionEvent trail
+ * (no import from src/data/approvals or src/data/referral here) — deliberately kept
+ * visually distinct (amber accent, sticky-note icon) from the plain-text read-only
+ * "ملاحظة الاعتماد" reviewNotes column shown in the audit tables of this same file.
+ */
+function QualityNoteEditor({
+  row,
+  canEdit,
+  saving,
+  error,
+  labels: L,
+  onSave,
+}: {
+  row: ResultRow;
+  canEdit: boolean;
+  saving: boolean;
+  error: string | null;
+  labels: Labels;
+  onSave: (row: ResultRow, note: string) => void;
+}) {
+  const [value, setValue] = useState(row.answer?.qualityNote ?? "");
+
+  return (
+    <div className="ew-quality-note-panel" onClick={(e) => e.stopPropagation()}>
+      <div className="ew-quality-note-title">
+        <StickyNote size={15} aria-hidden />
+        <span>{L.ew_quality_note_panel_title}</span>
+      </div>
+      {!row.answer ? (
+        <p className="ew-quality-note-hint">{L.ew_quality_note_no_answer}</p>
+      ) : !canEdit ? (
+        <p className="ew-quality-note-readonly">
+          {row.answer.qualityNote || L.ew_quality_note_empty_readonly}
+        </p>
+      ) : (
+        <>
+          <p className="ew-quality-note-hint">{L.ew_quality_note_hint}</p>
+          <textarea
+            className="ew-input ew-textarea ew-quality-note-textarea"
+            rows={2}
+            value={value}
+            placeholder={L.ew_quality_note_placeholder}
+            disabled={saving}
+            onChange={(e) => setValue(e.target.value)}
+          />
+          <div className="ew-quality-note-actions">
+            <button
+              type="button"
+              className="ew-btn-primary ew-btn-sm"
+              disabled={saving}
+              onClick={() => onSave(row, value)}
+            >
+              {saving ? L.ew_quality_note_saving : L.ew_quality_note_save}
+            </button>
+            {error && (
+              <span className="ew-quality-note-error" role="alert">
+                {error}
+              </span>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }

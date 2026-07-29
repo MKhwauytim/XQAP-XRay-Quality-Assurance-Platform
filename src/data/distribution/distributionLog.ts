@@ -50,6 +50,8 @@ export function buildAssignEvent(params: {
   notes?: string;
   dailyQuota?: number;
   daysRemainingAtAssignment?: number;
+  /** Override for eventAt (defaults to now) — lets batch callers share one timestamp. */
+  eventAt?: string;
 }): DistributionEvent {
   return {
     eventId: createEventId(),
@@ -57,7 +59,7 @@ export function buildAssignEvent(params: {
     eventType: "assigned",
     xrayImageId: params.xrayImageId,
     assignedTo: params.assignedTo,
-    eventAt: new Date().toISOString(),
+    eventAt: params.eventAt ?? new Date().toISOString(),
     eventBy: params.eventBy,
     notes: params.notes,
     dailyQuota: params.dailyQuota,

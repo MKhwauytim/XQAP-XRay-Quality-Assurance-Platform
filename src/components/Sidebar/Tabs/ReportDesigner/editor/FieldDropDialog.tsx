@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { useFocusTrap } from "../../../../../hooks/useFocusTrap";
+import { useLabels } from "../../../../../data/labels/useLabels";
 import type { FieldRole } from "../../../../../data/reportDesigner/query/fieldCatalog";
 import type { Aggregation } from "../../../../../data/reportDesigner/reportTypes";
+import type { Labels } from "../../../../../data/labels/labelsStore";
 
 export type AggChoice = Aggregation | "none";
 
@@ -15,20 +17,24 @@ interface FieldDropDialogProps {
   onCancel: () => void;
 }
 
-const DIMENSION_OPTIONS: Array<{ value: AggChoice; label: string }> = [
-  { value: "none",          label: "بدون تجميع" },
-  { value: "count",         label: "عدد" },
-  { value: "distinctCount", label: "عدد مميز" },
-];
+function dimensionOptions(labels: Labels): Array<{ value: AggChoice; label: string }> {
+  return [
+    { value: "none",          label: labels.rd_agg_none },
+    { value: "count",         label: labels.rd_agg_count },
+    { value: "distinctCount", label: labels.rd_agg_distinct_count },
+  ];
+}
 
-const MEASURE_OPTIONS: Array<{ value: AggChoice; label: string }> = [
-  { value: "sum",            label: "مجموع" },
-  { value: "avg",            label: "متوسط" },
-  { value: "count",          label: "عدد" },
-  { value: "min",            label: "أدنى قيمة" },
-  { value: "max",            label: "أقصى قيمة" },
-  { value: "percentOfTotal", label: "نسبة من الإجمالي" },
-];
+function measureOptions(labels: Labels): Array<{ value: AggChoice; label: string }> {
+  return [
+    { value: "sum",            label: labels.rd_agg_sum },
+    { value: "avg",            label: labels.rd_agg_avg },
+    { value: "count",          label: labels.rd_agg_count },
+    { value: "min",            label: labels.rd_agg_min },
+    { value: "max",            label: labels.rd_agg_max },
+    { value: "percentOfTotal", label: labels.rd_agg_percent_of_total },
+  ];
+}
 
 const DIALOG_W = 228;
 const DIALOG_H = 300;
@@ -42,8 +48,9 @@ export default function FieldDropDialog({
   onConfirm,
   onCancel,
 }: FieldDropDialogProps) {
+  const labels = useLabels();
   const isDimension = role === "dimension";
-  const options = isDimension ? DIMENSION_OPTIONS : MEASURE_OPTIONS;
+  const options = isDimension ? dimensionOptions(labels) : measureOptions(labels);
   const defaultAgg: AggChoice = isDimension ? "none" : "sum";
   const [selected, setSelected] = useState<AggChoice>(defaultAgg);
   const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onCancel });
@@ -62,7 +69,7 @@ export default function FieldDropDialog({
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label={`إعدادات الحقل: ${fieldLabel}`}
+        aria-label={labels.rd_field_dialog_aria.replace("{field}", fieldLabel)}
         style={{
           position: "fixed",
           top,
@@ -97,7 +104,7 @@ export default function FieldDropDialog({
               padding: "2px 7px",
             }}
           >
-            {isDimension ? "بُعد" : "مقياس"}
+            {isDimension ? labels.rd_role_dimension : labels.rd_role_measure}
           </div>
           <div style={{ fontSize: 11, color: "#605e5c", marginTop: 4 }}>{fieldName}</div>
         </div>
@@ -107,7 +114,7 @@ export default function FieldDropDialog({
 
         {/* Aggregation options */}
         <div style={{ fontSize: 12, fontWeight: 600, color: "#605e5c", marginBottom: 6 }}>
-          التجميع
+          {labels.rd_agg_heading}
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 2, marginBottom: 14 }}>
           {options.map((o) => (
@@ -156,7 +163,7 @@ export default function FieldDropDialog({
             }}
             onClick={() => onConfirm(selected)}
           >
-            إضافة
+            {labels.rd_add_btn}
           </button>
           <button
             style={{
@@ -170,7 +177,7 @@ export default function FieldDropDialog({
             }}
             onClick={onCancel}
           >
-            إلغاء
+            {labels.rd_cancel_btn}
           </button>
         </div>
       </div>

@@ -14,7 +14,7 @@
 import * as XLSX from "xlsx";
 
 import type { DistributionCurrentData } from "../distribution/distributionTypes";
-import { openOrDownload } from "./htmlReport";
+import { openReportWindow, writeReportToWindow } from "./htmlReport";
 import { esc, fmtNum, fmtPct } from "./executive/primitives";
 import { page, pageHeader, kpi, kpiStrip, panel } from "./executive/document/shared";
 import { dataTable, paginateRows } from "./executive/document/pagination";
@@ -148,7 +148,15 @@ function pad(n: number): string {
   return String(n).padStart(2, "0");
 }
 
-function distributionDocPages(m: DistributionModel, issueDate: string, detailRows: (string | number | null)[][]): string {
+/**
+ * Yields a turn to the main thread (P3-7). Same convention as
+ * `Population/processing/populationProcessor.ts` and the biData/riskData
+ * workbook parsers — a bare `setTimeout(resolve, 0)`, not a shared import
+ * (there isn't one; every yielding module keeps its own copy).
+ */
+const yieldToMain = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+async function distributionDocPages(m: DistributionModel, issueDate: string, detailRows: (string | number | null)[][]): Promise<string> {
   const pages: string[] = [];
 
   // Page 1 — overview / baseline.
@@ -172,6 +180,7 @@ function distributionDocPages(m: DistributionModel, issueDate: string, detailRow
         ],
       }), { iconName: "arrow" })}`,
   }));
+  await yieldToMain();
 
   // Page 2 — per-employee breakdown (paginated).
   const empHeaders = ["الموظف", "الحصة اليومية", "الإجمالي", "قيد الانتظار", "مكتمل", "طلب استبدال", "مستبدل", "الإنجاز"];
@@ -185,14 +194,16 @@ function distributionDocPages(m: DistributionModel, issueDate: string, detailRow
   ];
   const empChunks = paginateRows({ headers: empHeaders, rows: empRows, rowsPerPage: 18, totalRow: empTotal });
   let pageNo = 2;
-  empChunks.forEach((chunk, i) => {
+  for (let i = 0; i < empChunks.length; i++) {
+    const chunk = empChunks[i];
     pages.push(page({
       id: `d-emp-${i}`, title: i === 0 ? "توزيع الموظفين" : `توزيع الموظفين (${i + 1})`,
       pageNo: pad(pageNo++), railTabs: rotate(DIST_RAILS, 2),
       body: `${pageHeader({ iconName: "user", eyebrow: "المرحلة 2–3", title: "التعيينات لكل موظف", subtitle: "الحصة اليومية، والإجمالي المكلَّف، وحالة الإنجاز لكل موظف." })}
         ${panel(`الموظفون (${fmtNum(m.employees.length)})`, chunk, { iconName: "users" })}`,
     }));
-  });
+    await yieldToMain();
+  }
 
   // Highlights page — replacement/replaced activity.
   if (m.highlights.length > 0) {
@@ -204,19 +215,22 @@ function distributionDocPages(m: DistributionModel, issueDate: string, detailRow
           rows: m.highlights.map((h) => [h.xrayImageId, h.displayName, h.portName, statusLabel(h.status), h.replacedById ?? "—", h.lastEventAt]),
         }), { iconName: "flag" })}`,
     }));
+    await yieldToMain();
   }
 
   // Full detail (paginated).
   const detailHeaders = ["رقم الأشعة", "الموظف", "المنفذ", "CertScan", "الحالة", "آخر حدث"];
   const detailChunks = paginateRows({ headers: detailHeaders, rows: detailRows, rowsPerPage: 22 });
-  detailChunks.forEach((chunk, i) => {
+  for (let i = 0; i < detailChunks.length; i++) {
+    const chunk = detailChunks[i];
     pages.push(page({
       id: `d-detail-${i}`, title: i === 0 ? "تفاصيل التوزيع" : `تفاصيل التوزيع (${i + 1})`,
       pageNo: pad(pageNo++), railTabs: rotate(DIST_RAILS, 3),
       body: `${pageHeader({ iconName: "layers", eyebrow: "المرحلة 4", title: "تفاصيل التوزيع الكاملة", subtitle: `${fmtNum(detailRows.length)} صف موزَّع.` })}
         ${panel("كل الصفوف", chunk, { iconName: "layers" })}`,
     }));
-  });
+    await yieldToMain();
+  }
 
   return pages.join("\n");
 }
@@ -237,10 +251,11 @@ function titleSlide(m: DistributionModel): string {
 </section>`;
 }
 
-function distributionDeckSlides(m: DistributionModel): string {
+async function distributionDeckSlides(m: DistributionModel): Promise<string> {
   const slides: string[] = [];
   const total = 4;
   slides.push(titleSlide(m));
+  await yieldToMain();
 
   // 1 — status overview.
   slides.push(slide({
@@ -263,6 +278,7 @@ function distributionDeckSlides(m: DistributionModel): string {
     ),
     decision: "يعطي الإدارة صورة فورية عن تقدّم الدراسة اليومي.",
   }));
+  await yieldToMain();
 
   // 2 — completion hero.
   slides.push(slide({
@@ -272,6 +288,7 @@ function distributionDeckSlides(m: DistributionModel): string {
     body: heroNumber({ value: fmtPct(m.completionRate), caption: `${fmtNum(m.totalCompleted)} مكتملة من ${fmtNum(m.totalAssigned)} معيّنة`, sub: `${fmtNum(m.totalPending)} صورة ما زالت قيد الانتظار`, tone: "green" }),
     decision: "يحدد ما إذا كان الإيقاع الحالي يفي بالموعد النهائي الشهري.",
   }));
+  await yieldToMain();
 
   // 3 — per-employee load.
   const topEmp = m.employees.slice(0, 8);
@@ -291,6 +308,7 @@ function distributionDeckSlides(m: DistributionModel): string {
         ),
     decision: "يبرز من ينجز وفق حصته ومن يحتاج إعادة توزيع أو دعم.",
   }));
+  await yieldToMain();
 
   // 4 — replacement activity.
   slides.push(slide({
@@ -321,15 +339,15 @@ function detailRowsFor(data: DistributionCurrentData, names: Record<string, stri
   ]);
 }
 
-export function buildDistributionDocument(
+export async function buildDistributionDocument(
   data: DistributionCurrentData,
   monthFolderName: string,
   employeeDisplayNames: Record<string, string> = {},
   sourceRevisions?: SourceRevisions,
-): string {
+): Promise<string> {
   const m = computeDistributionModel(data, monthFolderName, employeeDisplayNames);
   return buildDocViewer({
-    slides: distributionDocPages(m, formatIssueDate(), detailRowsFor(data, employeeDisplayNames)),
+    slides: await distributionDocPages(m, formatIssueDate(), detailRowsFor(data, employeeDisplayNames)),
     docTitle: `تقرير التوزيع — ${m.monthLabel}`,
     brandTitle: "تقرير التوزيع",
     brandSub: `ضمان جودة الأشعة — ${m.monthLabel}`,
@@ -338,15 +356,15 @@ export function buildDistributionDocument(
   });
 }
 
-export function buildDistributionDeck(
+export async function buildDistributionDeck(
   data: DistributionCurrentData,
   monthFolderName: string,
   employeeDisplayNames: Record<string, string> = {},
   sourceRevisions?: SourceRevisions,
-): string {
+): Promise<string> {
   const m = computeDistributionModel(data, monthFolderName, employeeDisplayNames);
   return buildDeckViewer({
-    slides: distributionDeckSlides(m),
+    slides: await distributionDeckSlides(m),
     docTitle: `عرض التوزيع — ${m.monthLabel}`,
     brandTitle: "عرض التوزيع",
     brandSub: `ضمان جودة الأشعة — ${m.monthLabel}`,
@@ -437,20 +455,31 @@ function pctCell(value: number | null): string | number {
 
 // ─── Open / download helpers ──────────────────────────────────────────────────
 
-export function openDistributionDocument(
+/**
+ * Opens the target tab synchronously (still inside the click's user gesture,
+ * P3-7) BEFORE the now-chunked `buildDistributionDocument` build runs, then
+ * writes the finished HTML in once ready — yielding after `window.open()`
+ * would let the click's transient activation lapse and risk a silently
+ * blocked popup.
+ */
+export async function openDistributionDocument(
   data: DistributionCurrentData,
   monthFolderName: string,
   employeeDisplayNames: Record<string, string> = {},
   sourceRevisions?: SourceRevisions,
-): void {
-  openOrDownload(buildDistributionDocument(data, monthFolderName, employeeDisplayNames, sourceRevisions), `تقرير_التوزيع_${monthFolderName}.html`);
+): Promise<void> {
+  const reportWindow = openReportWindow();
+  const html = await buildDistributionDocument(data, monthFolderName, employeeDisplayNames, sourceRevisions);
+  writeReportToWindow(reportWindow, html, `تقرير_التوزيع_${monthFolderName}.html`);
 }
 
-export function openDistributionDeck(
+export async function openDistributionDeck(
   data: DistributionCurrentData,
   monthFolderName: string,
   employeeDisplayNames: Record<string, string> = {},
   sourceRevisions?: SourceRevisions,
-): void {
-  openOrDownload(buildDistributionDeck(data, monthFolderName, employeeDisplayNames, sourceRevisions), `عرض_التوزيع_${monthFolderName}.html`);
+): Promise<void> {
+  const reportWindow = openReportWindow();
+  const html = await buildDistributionDeck(data, monthFolderName, employeeDisplayNames, sourceRevisions);
+  writeReportToWindow(reportWindow, html, `عرض_التوزيع_${monthFolderName}.html`);
 }

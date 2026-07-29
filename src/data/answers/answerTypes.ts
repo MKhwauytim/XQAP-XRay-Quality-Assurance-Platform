@@ -53,6 +53,15 @@ export type ItemAnswer = {
   history?: ItemAnswerHistoryEntry[];
   /** Append-only snapshot trail of overwritten answers/status (A4). */
   valueHistory?: ItemValueHistoryEntry[];
+  /**
+   * Free-text supervisor/reviewer coaching note on this item (P2-2). Independent
+   * of the referral/replacement/reopen `reviewNotes` trail (`ReferralRequest` /
+   * `ReplacementRequest` / `ReopenRequest` / `ApprovalDecision`) — that field is
+   * populated only via a formal approval-gated request; this one lets a
+   * supervisor leave a routine quality note without triggering a reopen or any
+   * approval workflow. Set via `setItemQualityNote` in `answerStorage.ts`.
+   */
+  qualityNote?: string;
 };
 
 export type EmployeeAnswerFile = {

@@ -37,13 +37,21 @@ function pad(n: number): string {
 }
 
 /**
+ * Yields a turn to the main thread (P3-7). Same convention as
+ * `sampleReport.ts`/`distributionReport.ts`/`management/managementDeck.ts` —
+ * a bare `setTimeout(resolve, 0)`, not a shared import (there isn't one;
+ * every yielding module keeps its own copy).
+ */
+const yieldToMain = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+/**
  * Build every Document page in order, returning the joined HTML slides.
  *
  * The front-matter TOC (page 2) is rendered from the SAME page-numbering pass as the
  * real content — never hand-typed literals — so it always matches reality, including
  * the per-port page count, which is dynamic (one page per non-empty port).
  */
-export function buildDocumentSlides(model: ReportModel, issueDate: string): string {
+export async function buildDocumentSlides(model: ReportModel, issueDate: string): Promise<string> {
   const pages: string[] = [];
   const toc: TocPart[] = [
     { title: "الجزء الأول: النطاق والمنهجية", blurb: "ما حجم المجتمع، وكيف اخترنا العينة منه؟", pages: [] },
@@ -56,8 +64,10 @@ export function buildDocumentSlides(model: ReportModel, issueDate: string): stri
 
   // ── Front matter — TOC content is filled in at the end once real numbers are known ──
   pages.push(buildCover(model, issueDate));
+  await yieldToMain();
   const tocSlot = pages.push("") - 1;
   pages.push(buildGlossary(model));
+  await yieldToMain();
 
   let n = 4;
 
@@ -72,12 +82,18 @@ export function buildDocumentSlides(model: ReportModel, issueDate: string): stri
       { n: pad(n + 4), t: "العينة والإنجاز" },
     ],
   }));
+  await yieldToMain();
   n += 1;
   pages.push(buildPopulationGlance(model, pad(n))); tocPart1!.pages.push({ n: pad(n), t: "مجتمع الصور في لمحة" }); n += 1;
+  await yieldToMain();
   pages.push(buildPopulationByPort(model, pad(n))); tocPart1!.pages.push({ n: pad(n), t: "المجتمع حسب المنفذ" }); n += 1;
+  await yieldToMain();
   pages.push(buildPopulationByStage(model, pad(n))); tocPart1!.pages.push({ n: pad(n), t: "المجتمع حسب المستوى" }); n += 1;
+  await yieldToMain();
   pages.push(buildSampleCompletion(model, pad(n))); tocPart1!.pages.push({ n: pad(n), t: "العينة والإنجاز" }); n += 1;
+  await yieldToMain();
   pages.push(buildDataQualityExclusions(model, pad(n))); tocPart1!.pages.push({ n: pad(n), t: "جودة البيانات والاستبعادات" }); n += 1;
+  await yieldToMain();
 
   // ── Part 2 — Inspection Quality ──
   pages.push(divider({
@@ -90,11 +106,16 @@ export function buildDocumentSlides(model: ReportModel, issueDate: string): stri
       { n: pad(n + 3), t: "المستوى الأول مقابل الثاني" },
     ],
   }));
+  await yieldToMain();
   n += 1;
   pages.push(buildAccuracyHeadline(model, pad(n))); tocPart2!.pages.push({ n: pad(n), t: "الدقة والكشف" }); n += 1;
+  await yieldToMain();
   pages.push(buildAccuracyByPort(model, pad(n))); tocPart2!.pages.push({ n: pad(n), t: "الدقة حسب المنفذ" }); n += 1;
+  await yieldToMain();
   pages.push(buildLevelComparison(model, pad(n))); tocPart2!.pages.push({ n: pad(n), t: "المستوى الأول مقابل الثاني" }); n += 1;
+  await yieldToMain();
   pages.push(buildQualityImpact(model, pad(n))); tocPart2!.pages.push({ n: pad(n), t: "جودة الصورة والتحديد" }); n += 1;
+  await yieldToMain();
 
   // ── Part 3 — Corroboration ──
   pages.push(divider({
@@ -106,9 +127,12 @@ export function buildDocumentSlides(model: ReportModel, issueDate: string): stri
       { n: pad(n + 2), t: "مصفوفة التطابق الكاملة" },
     ],
   }));
+  await yieldToMain();
   n += 1;
   pages.push(buildReviewerAgreement(model, pad(n))); tocPart3!.pages.push({ n: pad(n), t: "كل فريق مقابل المراجع" }); n += 1;
+  await yieldToMain();
   pages.push(buildAgreementMatrix(model, pad(n))); tocPart3!.pages.push({ n: pad(n), t: "مصفوفة التطابق الكاملة" }); n += 1;
+  await yieldToMain();
 
   // ── Part 4 — Accountability ──
   pages.push(divider({
@@ -121,11 +145,14 @@ export function buildDocumentSlides(model: ReportModel, issueDate: string): stri
       { n: pad(n + 3), t: "صفحة لكل منفذ" },
     ],
   }));
+  await yieldToMain();
   n += 1;
   pages.push(buildEmployeeOverview(model, pad(n))); tocPart4!.pages.push({ n: pad(n), t: "النظرة العامة للمفتشين" }); n += 1;
+  await yieldToMain();
   pages.push(buildAccuracyByDecision(model, pad(n))); tocPart4!.pages.push({ n: pad(n), t: "الدقة حسب نوع القرار" }); n += 1;
+  await yieldToMain();
   const perPortStart = n;
-  const perPort = buildPerPortPages(model, n);
+  const perPort = await buildPerPortPages(model, n);
   pages.push(...perPort.html);
   n = perPort.nextPageNo;
   const perPortEnd = n - 1;
@@ -134,6 +161,7 @@ export function buildDocumentSlides(model: ReportModel, issueDate: string): stri
     tocPart4!.pages.push({ n: range, t: `صفحة لكل منفذ (${perPort.html.length} منافذ)` });
   }
   pages.push(buildPortComparison(model, pad(n))); tocPart4!.pages.push({ n: pad(n), t: "مقارنة المنافذ" }); n += 1;
+  await yieldToMain();
 
   // ── Part 5 — Risk, Priorities & Actions + Exclusions + Appendix ──
   pages.push(divider({
@@ -146,10 +174,14 @@ export function buildDocumentSlides(model: ReportModel, issueDate: string): stri
       { n: pad(n + 4), t: "المنهجية والملاحق" },
     ],
   }));
+  await yieldToMain();
   n += 1;
   pages.push(buildErrorAnalysis(model, pad(n))); tocPart5!.pages.push({ n: pad(n), t: "تحليل أنواع الأخطاء" }); n += 1;
+  await yieldToMain();
   pages.push(buildPriorityActions(model, pad(n))); tocPart5!.pages.push({ n: pad(n), t: "الأولويات والإجراءات" }); n += 1;
+  await yieldToMain();
   pages.push(buildExclusions(model, pad(n))); tocPart5!.pages.push({ n: pad(n), t: "الاستبعادات" }); n += 1;
+  await yieldToMain();
   pages.push(buildAppendix(model, pad(n))); tocPart5!.pages.push({ n: pad(n), t: "المنهجية والملاحق" });
 
   pages[tocSlot] = buildToc(toc);

@@ -114,6 +114,8 @@ function makeStatus(overrides: Partial<MonthArchiveStatus> = {}): MonthArchiveSt
     totalProcessedRows: 120,
     sampleRows: 40,
     distributionRows: 40,
+    distributionCompleted: 25,
+    distributionPending: 15,
     answerFiles: 3,
     answerItems: 40,
     ...overrides,
@@ -409,5 +411,55 @@ describe("Archive dialog error paths (item 1)", () => {
     });
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(vi.mocked(reopenMonth)).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Archive per-month table — distribution completed/pending breakdown (P2-1)", () => {
+  it("shows the completed/pending breakdown next to the distribution row count", async () => {
+    vi.mocked(loadArchiveStatus).mockResolvedValue([
+      makeStatus({ distributionRows: 40, distributionCompleted: 28, distributionPending: 12 }),
+    ]);
+    loginAs("admin");
+
+    const { container } = render(<ArchiveTab />);
+    await screen.findByText("معالج");
+
+    const breakdown = container.querySelector(".arc-distribution-breakdown");
+    expect(breakdown).not.toBeNull();
+    expect(breakdown!.textContent).toBe(
+      `${L.archive_distribution_completed_label} 28 · ${L.archive_distribution_pending_label} 12`
+    );
+  });
+});
+
+describe("Archive close-month confirm — pending count interpolation (P2-1)", () => {
+  it("interpolates a nonzero distribution-pending count into the close-month confirm text", async () => {
+    vi.mocked(loadArchiveStatus).mockResolvedValue([
+      makeStatus({ manifestStatus: "processed-saved", hasManifest: true, distributionPending: 17 }),
+    ]);
+    loginAs("admin");
+
+    render(<ArchiveTab />);
+    fireEvent.click(await screen.findByRole("button", { name: L.archive_close_month_btn }));
+
+    const dialog = screen.getByRole("dialog");
+    const expectedText = L.archive_close_month_confirm_pending.replace("{pending}", "17");
+    expect(within(dialog).getByText(expectedText)).toBeInTheDocument();
+  });
+
+  it("omits the pending warning when distributionPending is 0", async () => {
+    vi.mocked(loadArchiveStatus).mockResolvedValue([
+      makeStatus({ manifestStatus: "processed-saved", hasManifest: true, distributionPending: 0 }),
+    ]);
+    loginAs("admin");
+
+    render(<ArchiveTab />);
+    fireEvent.click(await screen.findByRole("button", { name: L.archive_close_month_btn }));
+
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText(L.archive_close_month_confirm)).toBeInTheDocument();
+    expect(
+      within(dialog).queryByText(L.archive_close_month_confirm_pending.replace("{pending}", "0"))
+    ).not.toBeInTheDocument();
   });
 });

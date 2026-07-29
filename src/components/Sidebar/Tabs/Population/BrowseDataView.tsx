@@ -376,6 +376,11 @@ function safeExportFileName(value: string): string {
   return value.replace(/[<>:"/\\|?*\u0000-\u001F]+/g, "-").replace(/\s+/g, "_");
 }
 
+// Same yieldToMain idiom used by populationProcessor.ts / riskDataWorkbook.ts —
+// defined locally per-file rather than shared across tab boundaries.
+const yieldToMain = () => new Promise((resolve) => setTimeout(resolve, 0));
+const EXPORT_CHUNK_SIZE = 1000;
+
 export default function BrowseDataView({
   directoryHandle,
   refreshKey,
@@ -389,6 +394,7 @@ export default function BrowseDataView({
 }) {
   const { selection: globalMonth } = useGlobalMonth();
   const labels = useLabels();
+  const [isExporting, setIsExporting] = useState(false);
   const [showAllMonths, setShowAllMonths] = useState(false);
   const globalFolder = globalMonth.kind === "none" ? null : globalMonth.folderName;
   const [dataset, setDataset] = useState<BrowseDatasetKind>("population");
@@ -633,24 +639,39 @@ export default function BrowseDataView({
     setPageState({ rowsKey: rowsPageKey, page: 1 });
   }
 
-  function exportFilteredRowsToXlsx(): void {
-    const header = activeCols.map((column) => column.label);
-    const body = filteredRows.map((row) =>
-      activeCols.map((column) => getBrowseDisplayValue(row, column.key, config.stageMappings))
-    );
-    const worksheet = XLSX.utils.aoa_to_sheet([header, ...body]);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "البيانات");
+  async function exportFilteredRowsToXlsx(): Promise<void> {
+    if (isExporting) return;
+    setIsExporting(true);
+    try {
+      const header = activeCols.map((column) => column.label);
+      const body: string[][] = [];
+      for (let i = 0; i < filteredRows.length; i += EXPORT_CHUNK_SIZE) {
+        const chunk = filteredRows.slice(i, i + EXPORT_CHUNK_SIZE);
+        for (const row of chunk) {
+          body.push(
+            activeCols.map((column) => getBrowseDisplayValue(row, column.key, config.stageMappings))
+          );
+        }
+        if (filteredRows.length > EXPORT_CHUNK_SIZE) {
+          await yieldToMain();
+        }
+      }
+      const worksheet = XLSX.utils.aoa_to_sheet([header, ...body]);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "البيانات");
 
-    const monthName =
-      showAllMonths || !globalFolder
-        ? labels.gm_all_months
-        : formatMonthFolderShortLabel(globalFolder);
-    const fileName = safeExportFileName(
-      `البيانات - ${activeDataset.label} - ${monthName}.xlsx`
-    );
+      const monthName =
+        showAllMonths || !globalFolder
+          ? labels.gm_all_months
+          : formatMonthFolderShortLabel(globalFolder);
+      const fileName = safeExportFileName(
+        `البيانات - ${activeDataset.label} - ${monthName}.xlsx`
+      );
 
-    XLSX.writeFile(workbook, fileName);
+      XLSX.writeFile(workbook, fileName);
+    } finally {
+      setIsExporting(false);
+    }
   }
 
   if (!directoryHandle) {
@@ -725,9 +746,10 @@ export default function BrowseDataView({
               type="button"
               className="bv-export-btn"
               onClick={exportFilteredRowsToXlsx}
-              disabled={activeCols.length === 0}
+              disabled={activeCols.length === 0 || isExporting}
+              aria-busy={isExporting}
             >
-              تصدير XLSX
+              {isExporting ? labels.dt_exporting : "تصدير XLSX"}
             </button>
             {(search || activeFilterCount > 0) && (
               <button

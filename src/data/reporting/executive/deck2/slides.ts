@@ -3572,13 +3572,21 @@ export function closingSlide(
  *  is false; they are dormant, not dead code. */
 const SHOW_MONTH_NUMBERS_SLIDE = false;
 
-export function buildDeckV2Slides(
+/**
+ * Yields a turn to the main thread (P3-7). Same convention as
+ * `sampleReport.ts`/`distributionReport.ts`/`management/managementDeck.ts`/
+ * `executive/document/index.ts` — a bare `setTimeout(resolve, 0)`, not a
+ * shared import (there isn't one; every yielding module keeps its own copy).
+ */
+const yieldToMain = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+export async function buildDeckV2Slides(
   model: ReportModel,
   generatedAt = new Date(),
   variantPreview = false,
   sourceRevisions?: SourceRevisions,
   seedBase = "",
-): string {
+): Promise<string> {
   const glossaryBuilders = glossarySlideBuilders(variantPreview); // levels page + terms page
 
   // (The section-2 opener funnel was removed with the separator's side column —
@@ -3726,25 +3734,31 @@ export function buildDeckV2Slides(
     coverSlide(model, generatedAt, variantPreview, seedBase),
     tocSlide(tocItems, 2, total, variantPreview),
   ];
+  await yieldToMain();
   if (SHOW_MONTH_NUMBERS_SLIDE) {
     slides.push(monthInNumbersSlide(model, 3, total, variantPreview));
+    await yieldToMain();
   }
   let num = glossaryStart;
   for (const build of glossaryBuilders) {
     slides.push(build(num, total));
     num += 1;
+    await yieldToMain();
   }
   for (const build of sectionOne) {
     slides.push(build(num, total));
     num += 1;
+    await yieldToMain();
   }
   for (const build of sectionTwo) {
     slides.push(build(num, total));
     num += 1;
+    await yieldToMain();
   }
   for (const build of sectionThree) {
     slides.push(build(num, total));
     num += 1;
+    await yieldToMain();
   }
   slides.push(closingSlide(model, sourceRevisions, closingNum, total, variantPreview));
   return slides.join("\n");

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { readSession } from "../../../../auth/authSession";
 import { usePermissions } from "../../../../auth/usePermissions";
 import { logRejection } from "../../../../data/storage/errorLogger";
+import { getLabels } from "../../../../data/labels/labelsStore";
+import { useLabels } from "../../../../data/labels/useLabels";
 import {
   loadDesignIndex,
   saveDesign,
@@ -71,6 +73,7 @@ interface EditorHostProps {
 }
 
 function EditorHost({ initialDoc, directoryHandle, currentUser, onBack, canEdit }: EditorHostProps) {
+  const labels = useLabels();
   const [doc, setDoc] = useState<ReportDocument>(initialDoc);
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -112,12 +115,12 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack, canEdit 
         clearTimeout(saveTimerRef.current);
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally scoped to `doc` only; `performSave` is recreated every render and adding it as a dep would restart the debounce timer on each render instead of only on doc changes
   }, [doc]);
 
   async function performSave(docToSave: ReportDocument) {
     if (!canEdit) {
-      setSaveError("لا تملك صلاحية تعديل تصاميم التقارير، أو أن مساحة العمل للقراءة فقط.");
+      setSaveError(labels.rd_edit_denied_msg);
       return;
     }
     const now = new Date().toISOString();
@@ -152,7 +155,7 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack, canEdit 
     const newEl: Element = {
       elementId: createElementId(),
       type,
-      name: "عنصر جديد",
+      name: labels.rd_new_element_name,
       x,
       y,
       w: 200,
@@ -161,7 +164,7 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack, canEdit 
       style: type === "shape" ? { fill: "#dce6f1", borderWidth: 1, borderColor: "#0078d4" } : {},
       config:
         type === "text"
-          ? { kind: "text", text: "نص" }
+          ? { kind: "text", text: labels.rd_default_text_content }
           : { kind: "shape", shape: "rect" },
     };
     setDoc((d) => ({
@@ -180,7 +183,7 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack, canEdit 
     const newEl: Element = {
       elementId: createElementId(),
       type: "image",
-      name: "صورة",
+      name: labels.rd_default_image_name,
       x: 50,
       y: 50,
       w: 200,
@@ -302,7 +305,7 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack, canEdit 
     if (!canEdit) return;
     const newPage = {
       pageId: createPageId(),
-      name: `صفحة ${doc.pages.length + 1}`,
+      name: labels.rd_page_default_name.replace("{n}", String(doc.pages.length + 1)),
       order: doc.pages.length,
       filters: [],
       elements: [],
@@ -481,6 +484,7 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack, canEdit 
 // ── Main tab component ──────────────────────────────────────────────────────
 
 export default function ReportDesigner() {
+  const labels = useLabels();
   const { directoryHandle } = useWorkspace();
   const { canMutate, canAccessTab } = usePermissions();
   const canEditDesigns = canMutate("report-designer.edit");
@@ -492,7 +496,7 @@ export default function ReportDesigner() {
   // open/print/thumbnail affordance stayed disabled. canMutate("report-designer.edit")
   // is reserved below for the true mutations — create, save, delete.
   const canViewDesigns = canAccessTab("reports/report-designer");
-  const editDeniedTitle = "يتطلب تعديل التصاميم صلاحية التعديل ومساحة عمل قابلة للكتابة.";
+  const editDeniedTitle = labels.rd_list_edit_denied_title;
   const currentUser = readSession()?.username ?? "admin";
 
   const [view, setView] = useState<View>("list");
@@ -538,7 +542,7 @@ export default function ReportDesigner() {
       } catch (err: unknown) {
         if (!cancelled) {
           setIndexError(
-            err instanceof Error ? err.message : "خطأ غير متوقع عند تحميل القائمة."
+            err instanceof Error ? err.message : getLabels().rd_index_load_error
           );
           setLoadingIndex(false);
         }
@@ -576,8 +580,8 @@ export default function ReportDesigner() {
   if (!directoryHandle) {
     return (
       <div className="rd-root" dir="rtl">
-        <h2 className="rd-title">مصمم التقارير</h2>
-        <p className="rd-no-workspace">الرجاء اختيار مجلد العمل أولاً.</p>
+        <h2 className="rd-title">{labels.rd_page_title}</h2>
+        <p className="rd-no-workspace">{labels.rd_no_workspace_msg}</p>
       </div>
     );
   }
@@ -604,7 +608,7 @@ export default function ReportDesigner() {
     if (!canEditDesigns) return;
     const name = newName.trim();
     if (!name) {
-      setCreateError("الرجاء إدخال اسم للتقرير.");
+      setCreateError(labels.rd_name_required_error);
       return;
     }
     if (!directoryHandle) return;
@@ -632,7 +636,7 @@ export default function ReportDesigner() {
     const doc = await loadDesign(directoryHandle, reportId);
     setOpeningId(null);
     if (!doc) {
-      setOpenError("تعذّر تحميل التقرير. ربما تم حذف الملف.");
+      setOpenError(labels.rd_open_error);
       return;
     }
     setOpenDoc(doc);
@@ -660,9 +664,9 @@ export default function ReportDesigner() {
   return (
     <div className="rd-root" dir="rtl">
       <PageHeader
-        eyebrow="تصميم التقارير"
-        title="مصمم التقارير"
-        subtitle="صمّم تقارير مخصصة — صفحات وعناصر ومخططات من بيانات الشهر المعالج."
+        eyebrow={labels.rd_page_eyebrow}
+        title={labels.rd_page_title}
+        subtitle={labels.rd_page_subtitle}
       >
         {!showNewForm && (
           <button
@@ -674,7 +678,7 @@ export default function ReportDesigner() {
               setCreateError(null);
             }}
           >
-            + تقرير جديد
+            {labels.rd_new_report_btn}
           </button>
         )}
       </PageHeader>
@@ -685,7 +689,7 @@ export default function ReportDesigner() {
             ref={newNameInputRef}
             className="rd-new-input"
             type="text"
-            placeholder="اسم التقرير"
+            placeholder={labels.rd_report_name_placeholder}
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             onKeyDown={(e) => {
@@ -704,8 +708,8 @@ export default function ReportDesigner() {
             onChange={(e) => setNewPreset(e.target.value as PageSizePreset)}
             disabled={creating || !canEditDesigns}
             dir="rtl"
-            title="حجم الصفحة"
-            aria-label="حجم الصفحة"
+            title={labels.rd_page_size_label}
+            aria-label={labels.rd_page_size_label}
           >
             {(["A4", "Letter", "16:9", "4:3", "16:9-fhd"] as PageSizePreset[]).map((p) => (
               <option key={p} value={p}>{pageSizeLabel(p)}</option>
@@ -716,7 +720,7 @@ export default function ReportDesigner() {
             onClick={() => void handleCreate()}
             disabled={creating || !canEditDesigns}
           >
-            {creating ? "جاري الإنشاء..." : "إنشاء"}
+            {creating ? labels.rd_creating_label : labels.rd_create_btn}
           </button>
           <button
             className="rd-btn rd-btn-secondary"
@@ -727,7 +731,7 @@ export default function ReportDesigner() {
             }}
             disabled={creating}
           >
-            إلغاء
+            {labels.rd_cancel_btn}
           </button>
           {createError && <p className="rd-error">{createError}</p>}
         </div>
@@ -742,8 +746,8 @@ export default function ReportDesigner() {
       ) : index.designs.length === 0 ? (
         <EmptyState
           icon={<LayoutTemplate />}
-          title="لا توجد تقارير محفوظة بعد"
-          description="أنشئ أول تقرير مخصص لبدء تصميم صفحاته وعناصره."
+          title={labels.rd_empty_title}
+          description={labels.rd_empty_desc}
         />
       ) : (
         <ul className="rd-cards">
@@ -760,11 +764,11 @@ export default function ReportDesigner() {
                   role="button"
                   tabIndex={canViewDesigns ? 0 : -1}
                   aria-disabled={!canViewDesigns}
-                  aria-label={`فتح ${d.reportName}`}
+                  aria-label={labels.rd_open_aria.replace("{name}", d.reportName)}
                   onClick={() => { if (!busy && canViewDesigns) void handleOpen(d.reportId); }}
                   onKeyDown={(e) => { if (canViewDesigns && (e.key === "Enter" || e.key === " ")) void handleOpen(d.reportId); }}
                 >
-                  {isOpening && <span className="rd-card-thumb-spinner">جاري التحميل…</span>}
+                  {isOpening && <span className="rd-card-thumb-spinner">{labels.rd_thumb_loading}</span>}
                   {!isOpening && thumbDoc ? (
                     <div className="rd-card-thumb-inner" style={{ pointerEvents: "none" }}>
                       <Canvas
@@ -777,7 +781,7 @@ export default function ReportDesigner() {
                       />
                     </div>
                   ) : (
-                    !isOpening && <span className="rd-card-thumb-placeholder">…</span>
+                    !isOpening && <span className="rd-card-thumb-placeholder">{labels.rd_ellipsis}</span>
                   )}
                 </div>
                 {/* Card footer */}
@@ -792,7 +796,7 @@ export default function ReportDesigner() {
                       onClick={() => void handleOpen(d.reportId)}
                       disabled={busy || !canViewDesigns}
                     >
-                      {isOpening ? "…" : "فتح"}
+                      {isOpening ? labels.rd_ellipsis : labels.rd_open_btn}
                     </button>
                     <button
                       className="rd-btn rd-btn-danger rd-btn-sm"
@@ -800,7 +804,7 @@ export default function ReportDesigner() {
                       disabled={busy || !canEditDesigns}
                       title={!canEditDesigns ? editDeniedTitle : undefined}
                     >
-                      {isDeleting ? "…" : "حذف"}
+                      {isDeleting ? labels.rd_ellipsis : labels.rd_delete_btn}
                     </button>
                   </div>
                 </div>
@@ -813,9 +817,9 @@ export default function ReportDesigner() {
       <ConfirmDialog
         open={confirmDeleteId !== null}
         danger
-        title="حذف التقرير"
-        message="هل أنت متأكد من حذف هذا التقرير؟ لا يمكن التراجع عن هذا الإجراء."
-        confirmLabel="حذف"
+        title={labels.rd_delete_dialog_title}
+        message={labels.rd_delete_dialog_message}
+        confirmLabel={labels.rd_delete_btn}
         onConfirm={() => {
           const id = confirmDeleteId;
           setConfirmDeleteId(null);

@@ -65,6 +65,11 @@ function modeLabel(mode: BackupHistoryItem["mode"]): string {
   return "يدوي";
 }
 
+/** {var}-placeholder interpolation — mirrors PhaseThreeSampling.tsx's local helper (no shared utility exists yet). */
+function fillTemplate(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{(\w+)\}/g, (_m, key) => vars[key] ?? `{${key}}`);
+}
+
 export default function ArchiveTab() {
   const { directoryHandle } = useWorkspace();
   const { refreshMonths } = useGlobalMonth();
@@ -89,7 +94,7 @@ export default function ArchiveTab() {
   const [justRestored, setJustRestored] = useState(false);
   const [isImportingUsersLabels, setIsImportingUsersLabels] = useState(false);
   const [message, setMessage] = useState<{ type: "ok" | "error"; text: string } | null>(null);
-  const [lockTarget, setLockTarget] = useState<{ folderName: string; mode: "close" | "reopen" } | null>(null);
+  const [lockTarget, setLockTarget] = useState<{ folderName: string; mode: "close" | "reopen"; pendingCount: number } | null>(null);
   const [isLocking, setIsLocking] = useState(false);
   // Modal-scoped failure text for RestoreDialog/MonthLockDialog (item 1): kept
   // separate from `message` (which can hold unrelated, stale text from an
@@ -535,7 +540,20 @@ export default function ArchiveTab() {
                       )}
                     </td>
                     <td>{item.hasSample ? formatNumber(item.sampleRows) : <span className="arc-miss">—</span>}</td>
-                    <td>{item.hasDistribution ? formatNumber(item.distributionRows) : <span className="arc-miss">—</span>}</td>
+                    <td>
+                      {item.hasDistribution ? (
+                        <>
+                          {formatNumber(item.distributionRows)}
+                          <span className="arc-compact arc-distribution-breakdown">
+                            {getLabels().archive_distribution_completed_label} {formatNumber(item.distributionCompleted)}
+                            {" · "}
+                            {getLabels().archive_distribution_pending_label} {formatNumber(item.distributionPending)}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="arc-miss">—</span>
+                      )}
+                    </td>
                     <td>
                       {item.hasAnswers ? (
                         <span>{formatNumber(item.answerItems)} / {formatNumber(item.answerFiles)} ملف</span>
@@ -550,7 +568,7 @@ export default function ArchiveTab() {
                             type="button"
                             className="arc-btn-secondary"
                             disabled={isLocking}
-                            onClick={() => { setDialogError(null); setLockTarget({ folderName: item.folderName, mode: "reopen" }); }}
+                            onClick={() => { setDialogError(null); setLockTarget({ folderName: item.folderName, mode: "reopen", pendingCount: item.distributionPending }); }}
                           >
                             {getLabels().archive_reopen_month_btn}
                           </button>
@@ -559,7 +577,7 @@ export default function ArchiveTab() {
                             type="button"
                             className="arc-btn-secondary"
                             disabled={isLocking}
-                            onClick={() => { setDialogError(null); setLockTarget({ folderName: item.folderName, mode: "close" }); }}
+                            onClick={() => { setDialogError(null); setLockTarget({ folderName: item.folderName, mode: "close", pendingCount: item.distributionPending }); }}
                           >
                             {getLabels().archive_close_month_btn}
                           </button>
@@ -628,6 +646,7 @@ export default function ArchiveTab() {
         <MonthLockDialog
           folderName={lockTarget.folderName}
           mode={lockTarget.mode}
+          pendingCount={lockTarget.pendingCount}
           busy={isLocking}
           error={dialogError}
           onClose={() => setLockTarget(null)}
@@ -641,6 +660,7 @@ export default function ArchiveTab() {
 function MonthLockDialog({
   folderName,
   mode,
+  pendingCount,
   busy,
   error,
   onClose,
@@ -648,6 +668,7 @@ function MonthLockDialog({
 }: {
   folderName: string;
   mode: "close" | "reopen";
+  pendingCount: number;
   busy: boolean;
   error: string | null;
   onClose: () => void;
@@ -682,6 +703,9 @@ function MonthLockDialog({
         <div className={`arc-restore-warning${isClose ? " is-danger" : ""}`}>
           <strong>{folderName}</strong>
           <p>{isClose ? L.archive_close_month_confirm : L.archive_reopen_month_confirm}</p>
+          {isClose && pendingCount > 0 ? (
+            <p>{fillTemplate(L.archive_close_month_confirm_pending, { pending: formatNumber(pendingCount) })}</p>
+          ) : null}
         </div>
 
         <input

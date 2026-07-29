@@ -64,6 +64,8 @@ global selection.
 
 | File or Pattern | Typical Location | Purpose |
 | --- | --- | --- |
+| `config.json` | `1-population/` (root, not per-month) | Population processing configuration: system/custom field definitions, column-mapping templates, stage alias mappings, processing workflow presets, export templates, sampling rules, and per-employee stage allocations. |
+| `certscan.global.json` | `1-population/` (root, not per-month) | Global CertScan matching reference text shared across all months. |
 | `month.manifest.json` | `1-population/{month}/` | Month metadata: month/year, processed counts, status, operator info. |
 | `risk.raw.json` | `1-population/{month}/1-raw/` or legacy month folder | Imported risk rows. |
 | `bi.raw.json` | `1-population/{month}/1-raw/` or legacy month folder | Imported BI rows when provided. |
@@ -230,7 +232,10 @@ Both files use `safeWriteJson` / `safeReadJson` and the `JsonEnvelope` schema-ve
 | `admin-shared.browse-preset.json` | `5-system/user-presets/` | Shared/admin table column preferences. |
 | `{username}.browse-preset.json` | `5-system/user-presets/` | User-specific table column preferences. |
 | `backup.manifest.json` and copied JSON data files | `5-system/backups/{timestamp}/` | Manual/automatic restorable snapshots. Routine backups do not rebuild redundant XLSX exports; spreadsheet generation is an explicit compatibility option. |
+| `labels.snapshot.json` | `3-user-data/` | Best-effort snapshot of custom Arabic label overrides (`labelsStore.ts`), which otherwise live only in `localStorage`; captured so workspace backups/restores can cover them (Tier-1 Item F). |
+| `actions.log.json` | `5-system/audit/` | Live governance action audit log (user deletion, permission changes, sample draws, referral decisions, month close/reopen, backup restores), append-only, capped at 10,000 entries (A6). Distinct from `activity.log.json` (sign-in/session audit, documented above) and from its own yearly archive below. |
 | `actions.archive.{year}.json` | `5-system/audit/` | Per-year archive of audit entries evicted from the live `actions.log.json` once it exceeds its 10,000-entry cap (A6). Overflow is archived before the live log is trimmed; archive failure blocks the trim so no entry is dropped unarchived. **B5:** records an optional `previousArchiveHash` (djb2 hash of the previous calendar year's archive at write time) forming a tamper-EVIDENT year-to-year chain. |
+| `sampling-proof.json` | `2-samples/{month}/1-main/` | Audit/proof document written alongside `sample.master.json` at draw time: month/year, `drawnAt`/`drawnBy`, `rngSeed`, `samplingRules`, `portAllocations`, and requested/actual totals (including CertScan/NonCertScan actuals). |
 | `sampling.plan.json` | `2-samples/{month}/1-main/` | Documented sampling plan written at draw time next to `sample.master.json` (A1): lot definition (ports, per-stage split), target sample fraction, advisory quality/inspection-level notes, risk-basis share, and the seed + algorithm version the draw binds to. **B4:** also carries an optional `priorMonthAdvisory` (`priorMonthFolderName`, `priorMonthSuspicionRate` = share of the prior month's rows with `xrayLevelTwoResult` = اشتباه, `inspectionRecommendation` = `normal`/`tightened-review` at the >5% threshold). Advisory only — never changes quotas; absent on legacy plans. |
 | `risk.raw.{ISO-ts}.superseded.json` / `bi.raw.{ISO-ts}.superseded.json` | `1-population/{month}/1-raw/` | Immutable-raw archive (A5): the prior raw import, copied verbatim before a re-import overwrites the live `risk.raw.json` / `bi.raw.json`. The new live file records the archived name in `supersedes`. |
 | `population.csv` | `5-system/powerbi-export/{month}/` | All `ExecutiveReportRow` records (UTF-8 BOM CSV, 26 columns). |

@@ -70,6 +70,41 @@ describe("workspace schema detection and metadata migration", () => {
     await expect(root.getDirectoryHandle(WORKSPACE_ROOTS.system, { create: false })).rejects.toThrow();
   });
 
+  it("records validated metadata idempotently for a mixed layout and keeps both roots in place", async () => {
+    const root = createMemoryDirectory();
+    await root.getDirectoryHandle(WORKSPACE_ROOTS.system, { create: true });
+    await root.getDirectoryHandle(LEGACY_WORKSPACE_ROOTS.population, { create: true });
+
+    const applied = await migrateWorkspaceSchema({
+      root,
+      migratedBy: "admin",
+      backupConfirmed: true,
+      backupId: "backup-2026-07-29",
+      dryRun: false,
+    });
+    expect(applied.alreadyApplied).toBe(true);
+    const detected = await detectWorkspaceSchema(root);
+    expect(detected.layout).toBe("mixed");
+    expect(detected.metadata).toMatchObject({
+      schemaVersion: WORKSPACE_LAYOUT_SCHEMA_VERSION,
+      layout: "mixed",
+      backupId: "backup-2026-07-29",
+      legacyReadersRequired: true,
+    });
+
+    const second = await migrateWorkspaceSchema({
+      root,
+      migratedBy: "another-admin",
+      dryRun: false,
+    });
+    expect(second.actions).toEqual([]);
+    expect((await detectWorkspaceSchema(root)).metadata?.backupId).toBe("backup-2026-07-29");
+    await expect(root.getDirectoryHandle(WORKSPACE_ROOTS.system, { create: false })).resolves.toBeDefined();
+    await expect(
+      root.getDirectoryHandle(LEGACY_WORKSPACE_ROOTS.population, { create: false })
+    ).resolves.toBeDefined();
+  });
+
   it("refuses to stamp an empty directory", async () => {
     const root = createMemoryDirectory();
     await expect(migrateWorkspaceSchema({

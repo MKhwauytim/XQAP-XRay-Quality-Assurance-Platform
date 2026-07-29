@@ -117,6 +117,10 @@ export type MonthArchiveStatus = {
   totalProcessedRows: number;
   sampleRows: number;
   distributionRows: number;
+  /** Pre-aggregated from DistributionCurrentData.totalCompleted (P2-1) — no extra file read. */
+  distributionCompleted: number;
+  /** Pre-aggregated from DistributionCurrentData.totalPending (P2-1) — no extra file read. */
+  distributionPending: number;
   answerFiles: number;
   answerItems: number;
 };
@@ -1075,6 +1079,11 @@ export async function loadArchiveStatus(
       totalProcessedRows,
       sampleRows: sample?.rows?.length ?? 0,
       distributionRows: distribution?.entries?.length ?? 0,
+      // Already-loaded distribution above carries its own pre-aggregated totals
+      // (deriveCurrentDistribution computes them once per fold) — no new file
+      // read needed to surface them here (P2-1).
+      distributionCompleted: distribution?.totalCompleted ?? 0,
+      distributionPending: distribution?.totalPending ?? 0,
       answerFiles: answerFiles.length,
       answerItems,
     });

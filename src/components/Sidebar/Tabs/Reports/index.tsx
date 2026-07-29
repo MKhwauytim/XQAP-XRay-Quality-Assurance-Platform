@@ -322,11 +322,11 @@ function ReportsContent() {
       if (!execInput) { showToast("error", "لم يتم العثور على بيانات المجتمع. يجب معالجة المجتمع أولاً."); return; }
       const names = buildDisplayNameMap();
       if (kind === "document") {
-        openExecutiveReport(execInput, names);
+        await openExecutiveReport(execInput, names);
         showToast("ok", "تم فتح التقرير التفصيلي.");
       } else if (kind === "deck") {
         const saved = directoryHandle ? await loadDeckStyleChoices(directoryHandle) : null;
-        openExecutiveDeckV2(execInput, names, saved?.choices);
+        await openExecutiveDeckV2(execInput, names, saved?.choices);
         showToast("ok", "تم فتح العرض التنفيذي.");
       } else {
         buildExecutiveXlsx(execInput, names);
@@ -399,10 +399,10 @@ function ReportsContent() {
           buildSampleXlsx(sampleInput);
           showToast("ok", "تم تنزيل ملف Excel.");
         } else if (type === "sample-deck") {
-          openSampleDeck(sampleInput);
+          await openSampleDeck(sampleInput);
           showToast("ok", "تم فتح عرض العينة. استخدم أمر الطباعة للحفظ بصيغة PDF.");
         } else {
-          openSampleReport(sampleInput);
+          await openSampleReport(sampleInput);
           showToast("ok", "تم فتح تقرير العينة التفصيلي. استخدم أمر الطباعة للحفظ بصيغة PDF.");
         }
       } else if (type === "distribution" || type === "distribution-xlsx" || type === "distribution-deck") {
@@ -422,10 +422,10 @@ function ReportsContent() {
           buildDistributionXlsx(data, selectedMonth, names, distRevisions);
           showToast("ok", "تم تنزيل ملف Excel.");
         } else if (type === "distribution-deck") {
-          openDistributionDeck(data, selectedMonth, names, distRevisions);
+          await openDistributionDeck(data, selectedMonth, names, distRevisions);
           showToast("ok", "تم فتح عرض التوزيع. استخدم أمر الطباعة للحفظ بصيغة PDF.");
         } else {
-          openDistributionDocument(data, selectedMonth, names, distRevisions);
+          await openDistributionDocument(data, selectedMonth, names, distRevisions);
           showToast("ok", "تم فتح تقرير التوزيع التفصيلي. استخدم أمر الطباعة للحفظ بصيغة PDF.");
         }
       } else if (type === "executive" || type === "executive-xlsx" || type === "executive-deck") {
@@ -437,10 +437,10 @@ function ReportsContent() {
           showToast("ok", "تم تنزيل ملف بيانات التقرير (Excel).");
         } else if (type === "executive-deck") {
           const saved = directoryHandle ? await loadDeckStyleChoices(directoryHandle) : null;
-          openExecutiveDeckV2(execInput, names, saved?.choices);
+          await openExecutiveDeckV2(execInput, names, saved?.choices);
           showToast("ok", "تم فتح العرض التنفيذي. استخدم أمر الطباعة للحفظ بصيغة PDF.");
         } else {
-          openExecutiveReport(execInput, names);
+          await openExecutiveReport(execInput, names);
           showToast("ok", "تم فتح التقرير التفصيلي. استخدم أمر الطباعة للحفظ بصيغة PDF.");
         }
       } else if (type === "management" || type === "management-xlsx" || type === "management-deck") {
@@ -451,7 +451,7 @@ function ReportsContent() {
           buildManagementWorkbook(execInput, names);
           showToast("ok", "تم تنزيل ملف بيانات الإدارة (Excel).");
         } else if (type === "management-deck") {
-          openManagementDeck(execInput, names);
+          await openManagementDeck(execInput, names);
           showToast("ok", "تم فتح عرض الإدارة. استخدم أمر الطباعة للحفظ بصيغة PDF.");
         } else {
           openManagementReport(execInput, names);

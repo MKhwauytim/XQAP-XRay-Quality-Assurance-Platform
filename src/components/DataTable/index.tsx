@@ -214,6 +214,10 @@ function compareFilterOptions(first: string, second: string): number {
   return first.localeCompare(second, "ar");
 }
 
+// Same yieldToMain idiom used by populationProcessor.ts / riskDataWorkbook.ts —
+// defined locally per-file rather than shared across tab boundaries.
+const yieldToMain = () => new Promise((resolve) => setTimeout(resolve, 0));
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function DataTable<TRow>({
@@ -252,6 +256,7 @@ export default function DataTable<TRow>({
   const [openFilterCol, setOpenFilterCol]       = useState<string | null>(null);
   const [filterAnchorRect, setFilterAnchorRect] = useState<DOMRect | null>(null);
   const [filters, setFilters]                   = useState<FiltersMap>({});
+  const [isExporting, setIsExporting]            = useState(false);
   const detectedDates = useMemo<Set<string>>(() => {
     const sample = rows.length > 200 ? rows.slice(0, 200) : rows;
     const detected = new Set<string>();
@@ -498,17 +503,36 @@ export default function DataTable<TRow>({
     setPageState({ rowsKey: rowsPageKey, page: 1 });
   }
 
-  // XLSX export — visible columns, filtered rows, accessor values
-  function handleExport(): void {
-    if (!exportFileName) return;
-    const header = visibleCols.map((c) => c.label);
-    const body = filteredRows.map((row) =>
-      visibleCols.map((col) => col.accessor(row) ?? "")
-    );
-    const ws = XLSX.utils.aoa_to_sheet([header, ...body]);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "البيانات");
-    XLSX.writeFile(wb, exportFileName);
+  // XLSX export — visible columns, filtered rows, accessor values.
+  // Row-array construction is chunked with a main-thread yield between chunks
+  // (same idiom as populationProcessor.ts / riskDataWorkbook.ts) so large
+  // filtered sets don't block the UI thread for the whole build; the final
+  // XLSX.utils/writeFile call is an unavoidable synchronous tail, covered by
+  // the isExporting state below.
+  const EXPORT_CHUNK_SIZE = 1000;
+
+  async function handleExport(): Promise<void> {
+    if (!exportFileName || isExporting) return;
+    setIsExporting(true);
+    try {
+      const header = visibleCols.map((c) => c.label);
+      const body: string[][] = [];
+      for (let i = 0; i < filteredRows.length; i += EXPORT_CHUNK_SIZE) {
+        const chunk = filteredRows.slice(i, i + EXPORT_CHUNK_SIZE);
+        for (const row of chunk) {
+          body.push(visibleCols.map((col) => col.accessor(row) ?? ""));
+        }
+        if (filteredRows.length > EXPORT_CHUNK_SIZE) {
+          await yieldToMain();
+        }
+      }
+      const ws = XLSX.utils.aoa_to_sheet([header, ...body]);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "البيانات");
+      XLSX.writeFile(wb, exportFileName);
+    } finally {
+      setIsExporting(false);
+    }
   }
 
   // Column percentage widths for table-layout: fixed
@@ -687,8 +711,14 @@ export default function DataTable<TRow>({
             ملاءمة الأعمدة
           </button>
           {exportFileName && (
-            <button type="button" className="dt-export-btn" onClick={handleExport}>
-              {L.dt_export_xlsx}
+            <button
+              type="button"
+              className="dt-export-btn"
+              onClick={handleExport}
+              disabled={isExporting}
+              aria-busy={isExporting}
+            >
+              {isExporting ? L.dt_exporting : L.dt_export_xlsx}
             </button>
           )}
           {canConfigureColumns && (
@@ -831,6 +861,21 @@ export default function DataTable<TRow>({
                   <tr
                     className={`dt-tr${isExpanded ? " selected" : ""}${rowClassName ? ` ${rowClassName}` : ""}`}
                     onClick={() => onRowClick?.(row)}
+                    {...(onRowClick
+                      ? {
+                          tabIndex: 0,
+                          "aria-selected": isExpanded,
+                          onKeyDown: (e: React.KeyboardEvent<HTMLTableRowElement>) => {
+                            // Ignore keydowns bubbling up from interactive children (e.g. the
+                            // row-select checkbox) — Space there toggles the checkbox, not the row.
+                            if (e.target !== e.currentTarget) return;
+                            if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
+                              e.preventDefault();
+                              onRowClick(row);
+                            }
+                          },
+                        }
+                      : {})}
                   >
                     {visibleCols.map((col) => {
                       const isDate    = col.isDate || detectedDates.has(col.id);

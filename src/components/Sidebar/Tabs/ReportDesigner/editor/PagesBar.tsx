@@ -1,4 +1,5 @@
 import type { ReportDocument } from "../../../../../data/reportDesigner/reportTypes";
+import { useLabels } from "../../../../../data/labels/useLabels";
 
 interface PagesBarProps {
   doc: ReportDocument;
@@ -9,6 +10,7 @@ interface PagesBarProps {
 }
 
 export default function PagesBar({ doc, currentPageIndex, onSelectPage, onAddPage, onDeletePage }: PagesBarProps) {
+  const labels = useLabels();
   return (
     <div className="rd-pages-bar" dir="rtl">
       {doc.pages.map((page, i) => (
@@ -23,16 +25,16 @@ export default function PagesBar({ doc, currentPageIndex, onSelectPage, onAddPag
           <span
             className="rd-page-tab-del"
             role="button"
-            aria-label={`حذف ${page.name}`}
+            aria-label={labels.rd_delete_page_aria.replace("{name}", page.name)}
             onClick={(e) => { e.stopPropagation(); if (doc.pages.length > 1) onDeletePage(i); }}
-            title="حذف الصفحة"
+            title={labels.rd_delete_page_title}
           >
             ×
           </span>
         </button>
       ))}
-      <button className="rd-page-tab-add" onClick={onAddPage} type="button" title="إضافة صفحة">
-        + صفحة
+      <button className="rd-page-tab-add" onClick={onAddPage} type="button" title={labels.rd_add_page_title}>
+        {labels.rd_add_page_btn}
       </button>
     </div>
   );

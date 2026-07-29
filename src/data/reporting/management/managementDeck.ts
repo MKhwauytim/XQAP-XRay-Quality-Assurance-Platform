@@ -16,7 +16,7 @@ import { slide, split, heroNumber, heroChart, kpiTile, kpiBand, miniTable, numbe
 import { donut, rankedBar } from "../executive/ui/charts";
 import { icon } from "../executive/ui/icons";
 import { buildDeckViewer, formatMonthLabel } from "../shared/reportChrome";
-import { openOrDownload } from "../htmlReport";
+import { openReportWindow, writeReportToWindow } from "../htmlReport";
 import { sourceRevisionsFooterHtml } from "../sourceRevisions";
 import type { ExecutiveReportInput } from "../executiveReportTypes";
 
@@ -41,10 +41,19 @@ function titleSlide(m: ReportModel, monthLabel: string): string {
 </section>`;
 }
 
-function managementDeckSlides(m: ReportModel): string {
+/**
+ * Yields a turn to the main thread (P3-7). Same convention as
+ * `sampleReport.ts`/`distributionReport.ts`/`Population/processing/populationProcessor.ts`
+ * — a bare `setTimeout(resolve, 0)`, not a shared import (there isn't one;
+ * every yielding module keeps its own copy).
+ */
+const yieldToMain = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+async function managementDeckSlides(m: ReportModel): Promise<string> {
   const slides: string[] = [];
   const total = 5;
   slides.push(titleSlide(m, formatMonthLabel(m.summary.monthFolderName)));
+  await yieldToMain();
 
   const s = m.summary;
 
@@ -62,6 +71,7 @@ function managementDeckSlides(m: ReportModel): string {
     ]),
     decision: "يحدد ما إذا كان الأداء ضمن المستهدفات أم يتطلب تدخلاً إدارياً.",
   }));
+  await yieldToMain();
 
   // 2 — population → sample → studied funnel.
   slides.push(slide({
@@ -82,6 +92,7 @@ function managementDeckSlides(m: ReportModel): string {
     ),
     decision: "يوضح مدى تمثيل العينة للمجتمع ونسبة ما أُنجز منها.",
   }));
+  await yieldToMain();
 
   // 3 — port performance (worst accuracy first).
   const ports = [...m.portAccuracy]
@@ -104,6 +115,7 @@ function managementDeckSlides(m: ReportModel): string {
         ),
     decision: "يوجّه الدعم نحو المنافذ الأدنى دقةً والأعلى اشتباهاً فائتاً.",
   }));
+  await yieldToMain();
 
   // 4 — reviewer performance.
   const reviewers = m.employeeOverview.reviewerProfiles.slice(0, 8);
@@ -124,6 +136,7 @@ function managementDeckSlides(m: ReportModel): string {
         }),
     decision: "يحدد المراجعين الموثوقين ومن يحتاج تدقيقاً إضافياً.",
   }));
+  await yieldToMain();
 
   // 5 — actions.
   const actions = m.actions.filter((a) => a && a.trim().length > 0);
@@ -144,14 +157,14 @@ function emptyBody(title: string, detail: string): string {
   return `<div class="deck-empty"><span class="deck-empty-icon">${icon("alert", 36)}</span><b>${esc(title)}</b><span>${esc(detail)}</span></div>`;
 }
 
-export function buildManagementDeck(
+export async function buildManagementDeck(
   input: ExecutiveReportInput,
   employeeDisplayNames: Record<string, string> = {},
-): string {
+): Promise<string> {
   const model = buildReportModel(input, employeeDisplayNames);
   const monthLabel = formatMonthLabel(input.monthFolderName);
   return buildDeckViewer({
-    slides: managementDeckSlides(model),
+    slides: await managementDeckSlides(model),
     docTitle: `عرض الإدارة — ${monthLabel}`,
     brandTitle: "عرض الإدارة",
     brandSub: `ضمان جودة الأشعة — ${monthLabel}`,
@@ -160,9 +173,17 @@ export function buildManagementDeck(
   });
 }
 
-export function openManagementDeck(
+/**
+ * Opens the target tab synchronously (still inside the click's user gesture,
+ * P3-7) BEFORE the now-chunked `buildManagementDeck` build runs, then writes
+ * the finished HTML in once ready — same pattern as `openSampleReport`/
+ * `openDistributionDocument` in sampleReport.ts/distributionReport.ts.
+ */
+export async function openManagementDeck(
   input: ExecutiveReportInput,
   employeeDisplayNames: Record<string, string> = {},
-): void {
-  openOrDownload(buildManagementDeck(input, employeeDisplayNames), `عرض_الإدارة_${input.monthFolderName}.html`);
+): Promise<void> {
+  const reportWindow = openReportWindow();
+  const html = await buildManagementDeck(input, employeeDisplayNames);
+  writeReportToWindow(reportWindow, html, `عرض_الإدارة_${input.monthFolderName}.html`);
 }

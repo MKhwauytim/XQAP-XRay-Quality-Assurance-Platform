@@ -271,12 +271,12 @@ function AppContent({ session }: AppContentProps) {
           type="button"
           className="app-mobile-nav-button"
           onClick={() => setIsMobileSidebarOpen(true)}
-          aria-label="فتح قائمة التنقل"
+          aria-label={labels.app_mobile_nav_aria}
           aria-expanded={isMobileSidebarOpen}
           aria-controls="app-sidebar"
         >
           <Menu size={20} aria-hidden />
-          <span>القائمة</span>
+          <span>{labels.app_mobile_nav_label}</span>
         </button>
         {allowedTabs.length === 0 && <NoAvailableTabs role={session.role} />}
         {allowedTabs.map((tab) =>

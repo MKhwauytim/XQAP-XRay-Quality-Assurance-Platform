@@ -52,16 +52,32 @@ describe("computeDistributionModel", () => {
 });
 
 describe("distribution renderers", () => {
-  it("document uses display names and is a self-contained HTML doc", () => {
-    const html = buildDistributionDocument(data(), "6-June-2026", { u1: "أحمد", u2: "سارة" });
+  it("document uses display names and is a self-contained HTML doc", async () => {
+    const html = await buildDistributionDocument(data(), "6-June-2026", { u1: "أحمد", u2: "سارة" });
     expect(html.startsWith("<!DOCTYPE html>")).toBe(true);
     expect(html).toContain("أحمد");
     expect(html).toContain("تقرير التوزيع");
   });
 
-  it("deck renders slides with the completion figure", () => {
-    const html = buildDistributionDeck(data(), "6-June-2026");
+  it("deck renders slides with the completion figure", async () => {
+    const html = await buildDistributionDeck(data(), "6-June-2026");
     expect(html).toContain("class=\"slide");
     expect(html).toContain("يونيو 2026");
+  });
+});
+
+// ─── Golden snapshot (P3-7) ────────────────────────────────────────────────────
+// Byte-identical proof that adding `await yieldToMain()` breaks inside these
+// builders (main-thread chunking, P3-7) changed ONLY timing, never output.
+// If either snapshot ever needs updating for a real content change, that
+// change must be deliberate and reviewed on its own — never used to paper
+// over an unintended regression introduced by a chunking edit.
+describe("distribution renderers — golden snapshot (P3-7 chunking safety)", () => {
+  it("document output is byte-identical", async () => {
+    expect(await buildDistributionDocument(data(), "6-June-2026", { u1: "أحمد", u2: "سارة" })).toMatchSnapshot();
+  });
+
+  it("deck output is byte-identical", async () => {
+    expect(await buildDistributionDeck(data(), "6-June-2026", { u1: "أحمد", u2: "سارة" })).toMatchSnapshot();
   });
 });

@@ -16,7 +16,7 @@ import * as XLSX from "xlsx";
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import type { SampleMasterData } from "../sampling/sampleTypes";
 import type { MonthManifestData } from "../population/monthTypes";
-import { openOrDownload } from "./htmlReport";
+import { openReportWindow, writeReportToWindow } from "./htmlReport";
 import { fmtNum, fmtPct } from "./executive/primitives";
 import {
   page,
@@ -187,7 +187,15 @@ export function computeSampleLineage(input: SampleReportInput): SampleLineage {
 
 const SAMPLE_RAILS = ["الاستلام", "المعالجة", "الطبقات", "العينة"];
 
-function sampleDocPages(m: SampleLineage, issueDate: string, previewRows: (string | number | null)[][]): string {
+/**
+ * Yields a turn to the main thread (P3-7). Same convention as
+ * `Population/processing/populationProcessor.ts` and the biData/riskData
+ * workbook parsers — a bare `setTimeout(resolve, 0)`, not a shared import
+ * (there isn't one; every yielding module keeps its own copy).
+ */
+const yieldToMain = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+async function sampleDocPages(m: SampleLineage, issueDate: string, previewRows: (string | number | null)[][]): Promise<string> {
   const pages: string[] = [];
 
   // Page 1 — lineage overview.
@@ -211,6 +219,7 @@ function sampleDocPages(m: SampleLineage, issueDate: string, previewRows: (strin
         ],
       }), { iconName: "arrow" })}`,
   }));
+  await yieldToMain();
 
   // Page 2 — received vs processed.
   pages.push(page({
@@ -231,6 +240,7 @@ function sampleDocPages(m: SampleLineage, issueDate: string, previewRows: (strin
         ],
       }))}`,
   }));
+  await yieldToMain();
 
   // Page 3+ — stratification by port (paginated).
   const portHeaders = ["المنفذ", "المجتمع", "Risk", "BI", "Cert", "NonCert", "المخصص", "Cert مسحوب", "NonCert مسحوب", "العينة", "التغطية"];
@@ -249,14 +259,16 @@ function sampleDocPages(m: SampleLineage, issueDate: string, previewRows: (strin
   ];
   const portChunks = paginateRows({ headers: portHeaders, rows: portRows, rowsPerPage: 18, totalRow: portTotal });
   let pageNo = 3;
-  portChunks.forEach((chunk, i) => {
+  for (let i = 0; i < portChunks.length; i++) {
+    const chunk = portChunks[i];
     pages.push(page({
       id: `s-ports-${i}`, title: i === 0 ? "التصنيف حسب المنفذ" : `التصنيف حسب المنفذ (${i + 1})`,
       pageNo: pad(pageNo++), railTabs: rotate(SAMPLE_RAILS, 2),
       body: `${pageHeader({ iconName: "port", eyebrow: "المرحلة 3", title: "التصنيف الطبقي حسب المنفذ", subtitle: "توزيع Hamilton بالحصص، وتقسيم CertScan/NonCertScan، والصفوف المسحوبة فعلياً لكل منفذ." })}
         ${panel(`المنافذ (${fmtNum(m.ports.length)} منفذ)`, chunk, { iconName: "port" })}`,
     }));
-  });
+    await yieldToMain();
+  }
 
   // Stage allocation page.
   pages.push(page({
@@ -277,18 +289,21 @@ function sampleDocPages(m: SampleLineage, issueDate: string, previewRows: (strin
         ],
       }))}`,
   }));
+  await yieldToMain();
 
   // Drawn sample preview (paginated).
   const sampleHeaders = ["رقم الأشعة", "المنفذ", "المستوى", "CertScan", "مصدر BI", "م.أول", "م.ثاني"];
   const sampleChunks = paginateRows({ headers: sampleHeaders, rows: previewRows, rowsPerPage: 20 });
-  sampleChunks.forEach((chunk, i) => {
+  for (let i = 0; i < sampleChunks.length; i++) {
+    const chunk = sampleChunks[i];
     pages.push(page({
       id: `s-drawn-${i}`, title: i === 0 ? "الصفوف المسحوبة" : `الصفوف المسحوبة (${i + 1})`,
       pageNo: pad(pageNo++), railTabs: rotate(SAMPLE_RAILS, 3),
       body: `${pageHeader({ iconName: "check", eyebrow: "المرحلة 4", title: "الصفوف المسحوبة للدراسة", subtitle: `عرض ${fmtNum(previewRows.length)} صف من العينة النهائية.` })}
         ${panel("العينة النهائية", chunk, { iconName: "check" })}`,
     }));
-  });
+    await yieldToMain();
+  }
 
   return pages.join("\n");
 }
@@ -320,11 +335,12 @@ function titleSlide(m: SampleLineage): string {
 </section>`;
 }
 
-function sampleDeckSlides(m: SampleLineage): string {
+async function sampleDeckSlides(m: SampleLineage): Promise<string> {
   const slides: string[] = [];
   const total = 5;
 
   slides.push(titleSlide(m));
+  await yieldToMain();
 
   // 1 — lineage overview.
   slides.push(slide({
@@ -339,6 +355,7 @@ function sampleDeckSlides(m: SampleLineage): string {
     ]),
     decision: "يؤكد اكتمال سلسلة العينة من المصدر حتى السحب النهائي.",
   }));
+  await yieldToMain();
 
   // 2 — received vs processed + source donut.
   slides.push(slide({
@@ -354,6 +371,7 @@ function sampleDeckSlides(m: SampleLineage): string {
     ),
     decision: "يوضح جاهزية البيانات ونسبة الإثراء من BI قبل السحب.",
   }));
+  await yieldToMain();
 
   // 3 — stratification by port.
   const topPorts = m.ports.slice(0, 8);
@@ -373,6 +391,7 @@ function sampleDeckSlides(m: SampleLineage): string {
         ),
     decision: "يبرز المنافذ الأعلى تغطيةً وتلك التي تحتاج مراجعة الحصص.",
   }));
+  await yieldToMain();
 
   // 4 — stages.
   slides.push(slide({
@@ -385,6 +404,7 @@ function sampleDeckSlides(m: SampleLineage): string {
     }),
     decision: "يضمن تمثيل كل مستوى وفق حصته المستهدفة.",
   }));
+  await yieldToMain();
 
   // 5 — drawn result.
   slides.push(slide({
@@ -413,14 +433,14 @@ function emptyBody(): string {
 
 // ─── Public string builders ───────────────────────────────────────────────────
 
-export function buildSampleDocument(input: SampleReportInput): string {
+export async function buildSampleDocument(input: SampleReportInput): Promise<string> {
   const m = computeSampleLineage(input);
   const preview: (string | number | null)[][] = input.sample.rows.slice(0, 60).map((r) => [
     r.xrayImageId, r.portName ?? "—", r.stage ?? "—", r.certScanStatus,
     r.biEnrichmentStatus, r.xrayLevelOneResult, r.xrayLevelTwoResult,
   ]);
   return buildDocViewer({
-    slides: sampleDocPages(m, formatIssueDate(), preview),
+    slides: await sampleDocPages(m, formatIssueDate(), preview),
     docTitle: `تقرير العينة — ${m.monthLabel}`,
     brandTitle: "تقرير العينة",
     brandSub: `ضمان جودة الأشعة — ${m.monthLabel}`,
@@ -429,10 +449,10 @@ export function buildSampleDocument(input: SampleReportInput): string {
   });
 }
 
-export function buildSampleDeck(input: SampleReportInput): string {
+export async function buildSampleDeck(input: SampleReportInput): Promise<string> {
   const m = computeSampleLineage(input);
   return buildDeckViewer({
-    slides: sampleDeckSlides(m),
+    slides: await sampleDeckSlides(m),
     docTitle: `عرض العينة — ${m.monthLabel}`,
     brandTitle: "عرض العينة",
     brandSub: `ضمان جودة الأشعة — ${m.monthLabel}`,
@@ -547,10 +567,20 @@ function pctCell(value: number | null): string | number {
 
 // ─── Open / download helpers ──────────────────────────────────────────────────
 
-export function openSampleReport(input: SampleReportInput): void {
-  openOrDownload(buildSampleDocument(input), `تقرير_العينة_${input.monthFolderName}.html`);
+/**
+ * Opens the target tab synchronously (still inside the click's user gesture,
+ * P3-7) BEFORE the now-chunked `buildSampleDocument` build runs, then writes
+ * the finished HTML in once ready — yielding after `window.open()` would let
+ * the click's transient activation lapse and risk a silently blocked popup.
+ */
+export async function openSampleReport(input: SampleReportInput): Promise<void> {
+  const reportWindow = openReportWindow();
+  const html = await buildSampleDocument(input);
+  writeReportToWindow(reportWindow, html, `تقرير_العينة_${input.monthFolderName}.html`);
 }
 
-export function openSampleDeck(input: SampleReportInput): void {
-  openOrDownload(buildSampleDeck(input), `عرض_العينة_${input.monthFolderName}.html`);
+export async function openSampleDeck(input: SampleReportInput): Promise<void> {
+  const reportWindow = openReportWindow();
+  const html = await buildSampleDeck(input);
+  writeReportToWindow(reportWindow, html, `عرض_العينة_${input.monthFolderName}.html`);
 }

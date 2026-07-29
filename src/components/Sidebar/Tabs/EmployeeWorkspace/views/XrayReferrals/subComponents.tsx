@@ -21,8 +21,8 @@ import InspectionPanel from "../../../../../../components/InspectionPanel";
 import Pagination from "../../../../../../components/Pagination/Pagination";
 import { clampPage, pageSlice } from "../../../../../../components/Pagination/paginationUtils";
 import { useLabels, type Labels } from "../../../../../../data/labels/useLabels";
-import { formatStageLabel } from "../../../Population/components/helpers";
-import type { PreparedPopulationRow } from "../../../Population/processing/populationProcessingTypes";
+import { formatStageLabel } from "../../../../../../data/population/stageHelpers";
+import type { PreparedPopulationRow } from "../../../../../../data/population/populationTypes";
 import type { PersonalStats, PersonalQuota, ReplacementDialogState } from "../XrayReferrals";
 
 // ── Column definitions ────────────────────────────────────────────────────────

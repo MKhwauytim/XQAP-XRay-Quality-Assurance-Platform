@@ -46,8 +46,8 @@ function row(
 }
 
 describe("executive report html", () => {
-  it("renders the A4 executive document in Arabic with SVG icons, not emoji", () => {
-    const html = buildExecutiveReport({
+  it("renders the A4 executive document in Arabic with SVG icons, not emoji", async () => {
+    const html = await buildExecutiveReport({
       monthFolderName: "6-June-2026",
       populationRows: [
         row("XR-1", { portType: "منفذ بري", portName: "جديدة عرعر" }),
@@ -89,22 +89,52 @@ describe("executive report html", () => {
     expect(html).not.toContain("Page 1");
   });
 
-  it("does not crash on legacy population rows missing otherResults/notes (v28.0 back-compat)", () => {
+  it("does not crash on legacy population rows missing otherResults/notes (v28.0 back-compat)", async () => {
     // population.final.json written before the five-source pipeline has no
-    // otherResults/notes; the report must default them, not throw.
+    // otherResults/notes; the report must default them, not throw/reject.
     const legacy = row("XR-LEGACY");
     delete (legacy as Partial<PreparedPopulationRow>).otherResults;
     delete (legacy as Partial<PreparedPopulationRow>).notes;
-    expect(() =>
-      buildExecutiveReport({
-        monthFolderName: "6-June-2026",
-        populationRows: [legacy],
-        sample: null,
-        distribution: null,
-        employeeFiles: [],
-        template: null,
-        config: DEFAULT_EXEC_CONFIG,
-      }),
-    ).not.toThrow();
+    const html = await buildExecutiveReport({
+      monthFolderName: "6-June-2026",
+      populationRows: [legacy],
+      sample: null,
+      distribution: null,
+      employeeFiles: [],
+      template: null,
+      config: DEFAULT_EXEC_CONFIG,
+    });
+    expect(html.length).toBeGreaterThan(0);
+  });
+});
+
+// ─── Golden snapshot (P3-7) ────────────────────────────────────────────────────
+// Byte-identical proof that adding `await yieldToMain()` breaks inside the
+// document orchestrator (`executive/document/index.ts`'s `buildDocumentSlides`,
+// including its `buildPerPortPages` per-port pagination loop) and the
+// `buildExecutiveReport` entry point (main-thread chunking, P3-7) changed ONLY
+// timing, never output. If this snapshot ever needs updating for a real content
+// change, that change must be deliberate and reviewed on its own — never used
+// to paper over an unintended regression introduced by a chunking edit.
+describe("executive report html — golden snapshot (P3-7 chunking safety)", () => {
+  it("output is byte-identical", async () => {
+    const html = await buildExecutiveReport({
+      monthFolderName: "6-June-2026",
+      populationRows: [
+        row("XR-1", { portType: "منفذ بري", portName: "جديدة عرعر" }),
+        row("XR-2", {
+          portType: "منفذ بحري",
+          portName: "ميناء جدة الإسلامي",
+          xrayLevelOneResult: "اشتباه",
+          xrayLevelTwoResult: "اشتباه",
+        }),
+      ],
+      sample: null,
+      distribution: null,
+      employeeFiles: [],
+      template: null,
+      config: DEFAULT_EXEC_CONFIG,
+    });
+    expect(html).toMatchSnapshot();
   });
 });
