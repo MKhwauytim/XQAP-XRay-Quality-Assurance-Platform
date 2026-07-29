@@ -554,6 +554,7 @@
   padding: var(--sp-3) var(--sp-5);
   border-top: 1px solid var(--c-surface-2);
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: flex-start;
   gap: var(--sp-3);
