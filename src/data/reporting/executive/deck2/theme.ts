@@ -1074,13 +1074,6 @@ body.theme-light .v2-risk-tile-foot{background:rgba(10,45,74,.035);border-color:
 .v2-lg-table-card .deck-table th,.v2-lg-table-card .deck-table td{padding:9px 10px;font-size:.76rem;text-align:center;}
 .v2-level-table-card .deck-table th:nth-child(2),.v2-level-table-card .deck-table td:nth-child(2),
 .v2-lg-table-card .deck-table th:nth-child(2),.v2-lg-table-card .deck-table td:nth-child(2){text-align:right;}
-/* New 2026-07-25 (fan-out plan §5): the «ما يقيسه» column levelFiguresTable
-   added is a sentence, not a number — right-align it too, like the level-name
-   column, instead of the numeric-column default (center). Scoped to
-   .v2-level-table-card only (not the shared .v2-lg-table-card) since this is
-   this ONE page's column order, not a generic 3rd-column rule every future
-   Ledger table should inherit. */
-.v2-level-table-card .deck-table th:nth-child(3),.v2-level-table-card .deck-table td:nth-child(3){text-align:right;}
 .v2-level-row-num{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;font-size:.68rem;font-weight:900;color:var(--navy);background:var(--gold);}
 .v2-level-row-num.blue{background:var(--blue);}
 .v2-level-row-num.green{background:var(--green);}

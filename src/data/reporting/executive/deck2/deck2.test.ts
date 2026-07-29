@@ -422,7 +422,7 @@ describe("slide-risk-stages fan-out — Ledger/Briefing/Grid (2026-07-25 fan-out
     expect(html).toContain("v2-prop-bar");
   });
 
-  it('Ledger slot (data-variant-index="1") has no chart markup, adds the «ما يقيسه» column, and carries the two-basis footnote row', () => {
+  it('Ledger slot (data-variant-index="1") has no chart markup and carries the two-basis footnote row', () => {
     const model = buildReportModel(
       input([popRow({ stage: "المستوى الأول" }), popRow({ xrayImageId: "XR-2", stage: "المستوى الثالث" })]),
     );
@@ -442,26 +442,16 @@ describe("slide-risk-stages fan-out — Ledger/Briefing/Grid (2026-07-25 fan-out
     expect(panel1).not.toContain("v2-cbar");
     expect(panel1).toContain('<div class="v2-level-table-card">');
 
-    // New «ما يقيسه» column, sourced from RISK_LEVELS[i].measures — resolved
-    // BY IDENTITY (levelIndexForStage), not by this row's position in
-    // `stages`. This fixture's `stages` array is [المستوى الأول, المستوى
-    // الثالث] — level 2 has ZERO rows and is entirely absent, so the second
-    // row is level 3 shifted into array position 1. Pre-2026-07-28, this
-    // assertion actually pinned the BUG: it expected level 2's «ما يقيسه»
-    // text (RISK_LEVELS[1]) on a row that is really about level 3, because
-    // the table paired by loop position instead of by the stage's own
-    // identity. The correct pairing is level 3's own text.
-    expect(panel1).toContain("<th>ما يقيسه</th>");
-    expect(panel1).toContain("انفراد الفحص بالاشتباه دون مؤشرات أخرى.");
-    expect(panel1).toContain("ما تلتقطه الفرق الأمنية الأخرى ولا يلتقطه الفحص.");
-    expect(panel1).not.toContain("ما يلتقطه محرك المخاطر ولا يلتقطه الفحص.");
+    // Rows are resolved BY IDENTITY (levelIndexForStage), not by this row's
+    // position in `stages` — see the level-identity-resolution describe
+    // block below for dedicated regression coverage of that pairing.
 
-    // New tfoot footnote row: colspan across all 8 columns, two-basis caveat
+    // New tfoot footnote row: colspan across all 7 columns, two-basis caveat
     // worded to agree with LEVEL_DRAW_WEIGHTS's own doc comment. Class is on
     // the <tr> (theme.ts's selectors are scoped tfoot tr.v2-lg-footnote td;
     // the pre-2026-07-28 bug put it on the <td> instead, so the caveat
     // styling never applied and the row rendered as a second bold totals row).
-    expect(panel1).toContain('<tr class="v2-lg-footnote"><td colspan="8">');
+    expect(panel1).toContain('<tr class="v2-lg-footnote"><td colspan="7">');
     expect(panel1).toContain("الأساسان مختلفان ولا يجمعان إلى 100%");
 
     // Every stage's real population/sample figures must still appear in the table.
@@ -554,26 +544,30 @@ describe("levelFiguresTable byte-identity characterization — SUPERSEDED 2026-0
   // Re-captured 2026-07-28 (review fix): the previous pin locked in the
   // level-identity mispairing bug — row 2 (المستوى الثالث, the only stage at
   // array position 1 since المستوى الثاني has zero rows and never appears in
-  // `stages`) was shown with tone "blue"/ordinal "2"/«ما يقيسه»/وزن العينة
-  // all borrowed from المستوى الثاني (RISK_LEVELS[1]/STAGE_TONES[1]) purely
-  // because it sat at loop position 1. The table now resolves each row's
-  // tone/ordinal/«ما يقيسه»/وزن العينة BY the stage's own identity
-  // (levelIndexForStage in slides.ts), so row 2 correctly shows المستوى
-  // الثالث's own tone ("green"), ordinal ("3"), text, and weight ("30%").
-  // The footnote row's class also moved from the <td> to the <tr> (Finding 2
-  // fix — theme.ts's CSS selectors were always scoped to the <tr>).
+  // `stages`) was shown with tone "blue"/ordinal "2"/وزن العينة all borrowed
+  // from المستوى الثاني (RISK_LEVELS[1]/STAGE_TONES[1]) purely because it sat
+  // at loop position 1. The table now resolves each row's tone/ordinal/وزن
+  // العينة BY the stage's own identity (levelIndexForStage in slides.ts), so
+  // row 2 correctly shows المستوى الثالث's own tone ("green"), ordinal ("3"),
+  // and weight ("30%"). The footnote row's class also moved from the <td> to
+  // the <tr> (Finding 2 fix — theme.ts's CSS selectors were always scoped to
+  // the <tr>).
+  // Re-captured again 2026-07-29 (owner request, this date's edit log): the
+  // «ما يقيسه» column was removed — the definition already appears on each
+  // level's own card and on slide-glossary-levels's Ledger table, so this
+  // figures-only table dropped it. Column count 8 → 7; footnote colspan
+  // 8 → 7 to match.
   const EXPECTED_PANEL1 =
     `data-variant-index="1"><div class="v2-sys-ledger v2-lg-risk-stages"><div class="v2-risk-layout">\n` +
     `    <div class="v2-level-table-card">\n` +
     `    <table class="deck-table">\n` +
     `      <thead><tr>\n` +
-    `        <th></th><th>المستوى</th><th>ما يقيسه</th><th>وزن العينة</th><th>من المجتمع</th>\n` +
+    `        <th></th><th>المستوى</th><th>وزن العينة</th><th>من المجتمع</th>\n` +
     `        <th>صورة</th><th>العيّنة</th><th>تغطية العيّنة</th>\n` +
     `      </tr></thead>\n` +
     `      <tbody><tr>\n` +
     `        <td><span class="v2-level-row-num gold">1</span></td>\n` +
     `        <td>المستوى الأول</td>\n` +
-    `        <td>انفراد الفحص بالاشتباه دون مؤشرات أخرى.</td>\n` +
     `        <td>100%</td>\n` +
     `        <td>50%</td>\n` +
     `        <td>1</td>\n` +
@@ -582,7 +576,6 @@ describe("levelFiguresTable byte-identity characterization — SUPERSEDED 2026-0
     `      </tr><tr>\n` +
     `        <td><span class="v2-level-row-num green">3</span></td>\n` +
     `        <td>المستوى الثالث</td>\n` +
-    `        <td>ما تلتقطه الفرق الأمنية الأخرى ولا يلتقطه الفحص.</td>\n` +
     `        <td>30%</td>\n` +
     `        <td>50%</td>\n` +
     `        <td>1</td>\n` +
@@ -590,9 +583,9 @@ describe("levelFiguresTable byte-identity characterization — SUPERSEDED 2026-0
     `        <td>0.0%</td>\n` +
     `      </tr></tbody>\n` +
     `      <tfoot><tr>\n` +
-    `        <td></td><td>الإجمالي</td><td></td><td>—</td><td>100%</td>\n` +
+    `        <td></td><td>الإجمالي</td><td>—</td><td>100%</td>\n` +
     `        <td>2</td><td>0</td><td>0.0%</td>\n` +
-    `      </tr><tr class="v2-lg-footnote"><td colspan="8">وزن المستوى الأول نسبة من مجتمعه (حصر شامل)؛ وبقية الأوزان حصص من حصة العدد الثابت — الأساسان مختلفان ولا يجمعان إلى 100%</td></tr></tfoot>\n` +
+    `      </tr><tr class="v2-lg-footnote"><td colspan="7">وزن المستوى الأول نسبة من مجتمعه (حصر شامل)؛ وبقية الأوزان حصص من حصة العدد الثابت — الأساسان مختلفان ولا يجمعان إلى 100%</td></tr></tfoot>\n` +
     `    </table>\n` +
     `  </div>\n` +
     `  </div></div></div><div class="v2-variant-panel" `;
@@ -632,7 +625,7 @@ describe("slide-risk-stages level-identity resolution — regression for the 202
     );
   }
 
-  it("Ledger table: each row's ordinal/tone/«ما يقيسه»/وزن العينة match its OWN level, not its array position", () => {
+  it("Ledger table: each row's ordinal/tone/وزن العينة match its OWN level, not its array position", () => {
     const model = reversedGapModel();
     expect(model.population.byStage.map((s) => s.stageLabel)).toEqual(["المستوى الرابع", "المستوى الثاني"]);
 
@@ -642,16 +635,14 @@ describe("slide-risk-stages level-identity resolution — regression for the 202
     const panel1 = html.slice(start, end);
 
     // Row 1 (array position 0) is المستوى الرابع (level 4): ordinal "4",
-    // tone "coral", its own «ما يقيسه» text and 30% weight — NOT level 1's
-    // gold/"1"/100% that position-based indexing would have produced.
+    // tone "coral", 30% weight — NOT level 1's gold/"1"/100% that
+    // position-based indexing would have produced.
     expect(panel1).toContain('<span class="v2-level-row-num coral">4</span>');
-    expect(panel1).toContain("ما ثبت فواته بضبط أمني أو باكتشاف خارجي.");
     // Row 2 (array position 1) is المستوى الثاني (level 2): ordinal "2",
-    // tone "blue", its own text and 40% weight — NOT level 2's OWN identity
-    // borrowed correctly here would coincidentally look unchanged only if
-    // the old code were right; assert it explicitly instead of by omission.
+    // tone "blue", 40% weight — NOT level 2's OWN identity borrowed
+    // correctly here would coincidentally look unchanged only if the old
+    // code were right; assert it explicitly instead of by omission.
     expect(panel1).toContain('<span class="v2-level-row-num blue">2</span>');
-    expect(panel1).toContain("ما يلتقطه محرك المخاطر ولا يلتقطه الفحص.");
 
     const row1 = panel1.slice(panel1.indexOf("المستوى الرابع") - 200, panel1.indexOf("المستوى الرابع") + 300);
     expect(row1).toContain(">30%<");
@@ -688,8 +679,8 @@ describe("slide-risk-stages level-identity resolution — regression for the 202
     const end = html.indexOf('data-variant-index="2"');
     const panel1 = html.slice(start, end);
     expect(panel1).toContain('<span class="v2-level-row-num neutral">—</span>');
-    // The «ما يقيسه» / وزن العينة cells fall back to "—", never a borrowed
-    // level's real text/number.
+    // The وزن العينة cell falls back to "—", never a borrowed level's real
+    // number.
     expect(panel1).toContain("<td>—</td>");
   });
 });
