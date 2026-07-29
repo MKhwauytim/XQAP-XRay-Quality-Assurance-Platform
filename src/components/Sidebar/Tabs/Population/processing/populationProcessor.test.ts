@@ -18,10 +18,12 @@ describe("processPopulation async processing and column preservation", () => {
         movementDate: "2026-06-16",
         movementHijriDate: "1447-12-01",
         declarationNumber: "D1",
+        transitDeclarationNumber: "TR1",
         declarationDate: "2026-06-16",
         declarationHijriDate: "1447-12-01",
         manifestNumber: "MN1",
         manifestType: "MT1",
+        manifestDate: "2026-06-16",
         plateOrContainerNumber: "PLATE123",
         finalDestination: "Riyadh",
         entryDate: "2026-06-16",
@@ -63,6 +65,9 @@ describe("processPopulation async processing and column preservation", () => {
         portType: "Land Port",
         portCode: "P1",
         portName: "البطحاء",
+        movementNumber: "BI-M1",
+        movementDate: "2026-06-16",
+        movementHijriDate: "1447-12-01",
         declarationNumber: "D1",
         preliminaryDeclarationNumber: "PD1",
         declarationDate: "2026-06-16",
@@ -122,6 +127,61 @@ describe("processPopulation async processing and column preservation", () => {
     expect(progressSteps.length).toBeGreaterThan(0);
     // Verifies progress goes to 100%
     expect(progressSteps[progressSteps.length - 1].percent).toBe(100);
+  });
+
+  test("carries previously-dropped risk fields (manifest, movement, transit declaration, hijri dates, destination, entry/exit) through to the final prepared row", async () => {
+    const input: PopulationProcessingInput = {
+      riskWorkbookResult: mockRiskResult,
+      biWorkbookResult: mockBiResult,
+      certScanPasteText: ""
+    };
+
+    const result = await processPopulation(input);
+    const row = result.preparedRows[0];
+
+    expect(row).toBeDefined();
+    expect(row.transitDeclarationNumber).toBe("TR1");
+    expect(row.declarationHijriDate).toBe("1447-12-01");
+    expect(row.manifestNumber).toBe("MN1");
+    expect(row.manifestType).toBe("MT1");
+    expect(row.manifestDate).toBe("2026-06-16");
+    expect(row.finalDestination).toBe("Riyadh");
+    expect(row.entryDate).toBe("2026-06-16");
+    expect(row.exitDate).toBe("2026-06-16");
+    // Risk side already has its own movement fields — BI's should not override them.
+    expect(row.movementNumber).toBe("M1");
+    expect(row.movementDate).toBe("2026-06-16");
+    expect(row.movementHijriDate).toBe("1447-12-01");
+  });
+
+  test("fills movementNumber/movementDate/movementHijriDate/declarationHijriDate from BI when the risk side is blank", async () => {
+    const riskBlankMovement: RiskWorkbookResult = {
+      ...mockRiskResult,
+      rows: [
+        {
+          ...mockRiskResult.rows[0],
+          movementNumber: null,
+          movementDate: null,
+          movementHijriDate: null,
+          declarationHijriDate: null
+        }
+      ]
+    };
+
+    const input: PopulationProcessingInput = {
+      riskWorkbookResult: riskBlankMovement,
+      biWorkbookResult: mockBiResult,
+      certScanPasteText: ""
+    };
+
+    const result = await processPopulation(input);
+    const row = result.preparedRows[0];
+
+    expect(row).toBeDefined();
+    expect(row.movementNumber).toBe("BI-M1");
+    expect(row.movementDate).toBe("2026-06-16");
+    expect(row.movementHijriDate).toBe("1447-12-01");
+    expect(row.declarationHijriDate).toBe("1447-12-01");
   });
 
   test("preserves rawRow custom columns and merges BI rawRow columns", async () => {

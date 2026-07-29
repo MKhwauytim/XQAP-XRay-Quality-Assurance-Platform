@@ -101,6 +101,25 @@ describe("normalizeBiRow", () => {
     expect(result.plateOrContainerNumber).toBe("PLT-9");
   });
 
+  it("captures movementNumber/movementDate/movementHijriDate (بري وارد / بري صادر sheets) which previously had no destination fields at all", () => {
+    const sourceRow: BiSourceRow = {
+      "قيد الحركة": "MOV-42",
+      "تاريخ الحركة": "2026-05-11",
+      "تاريخ الحركة هجري": "1447-10-14"
+    };
+
+    const result = normalizeBiRow({
+      sourceRow,
+      source: "بري وارد",
+      sourceSheetName: "بري وارد",
+      sourceRowNumber: 1
+    });
+
+    expect(result.movementNumber).toBe("MOV-42");
+    expect(result.movementDate).toBe("2026-05-11");
+    expect(result.movementHijriDate).toBe("1447-10-14");
+  });
+
   it("honors custom columnMappings over the default aliases", () => {
     const sourceRow: BiSourceRow = {
       CUSTOM_PORT: "Custom BI Port",

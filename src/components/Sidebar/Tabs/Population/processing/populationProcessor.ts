@@ -26,16 +26,29 @@ type PreparedDraftRow = {
   portName: string | null;
 
   declarationNumber: string | null;
+  transitDeclarationNumber: string | null;
   declarationDate: string | null;
+  declarationHijriDate: string | null;
+
+  manifestNumber: string | null;
+  manifestType: string | null;
+  manifestDate: string | null;
 
   plateOrContainerNumber: string | null;
   chassisNumber: string | null;
+  finalDestination: string | null;
 
   xrayLevelOneResult: string | null;
   xrayLevelTwoResult: string | null;
 
   movementType: string | null;
+  movementNumber: string | null;
+  movementDate: string | null;
+  movementHijriDate: string | null;
   reportNumber: string | null;
+
+  entryDate: string | null;
+  exitDate: string | null;
 
   targetedByRiskEngine: string | null;
   riskMessage: string | null;
@@ -65,10 +78,14 @@ type DraftFillableField =
   | "portName"
   | "declarationNumber"
   | "declarationDate"
+  | "declarationHijriDate"
   | "plateOrContainerNumber"
   | "chassisNumber"
   | "xrayLevelOneResult"
-  | "xrayLevelTwoResult";
+  | "xrayLevelTwoResult"
+  | "movementNumber"
+  | "movementDate"
+  | "movementHijriDate";
 
 type BiMatch = {
   row: NormalizedBiRow;
@@ -144,6 +161,26 @@ const BI_FILLABLE_FIELDS: Array<{
     fieldName: "xrayLevelTwoResult",
     biFieldName: "levelTwoResult",
     label: "نتيجة المستوى الثاني للأشعة"
+  },
+  {
+    fieldName: "declarationHijriDate",
+    biFieldName: "declarationHijriDate",
+    label: "تاريخ البيان هجري"
+  },
+  {
+    fieldName: "movementNumber",
+    biFieldName: "movementNumber",
+    label: "رقم الحركة"
+  },
+  {
+    fieldName: "movementDate",
+    biFieldName: "movementDate",
+    label: "تاريخ الحركة"
+  },
+  {
+    fieldName: "movementHijriDate",
+    biFieldName: "movementHijriDate",
+    label: "تاريخ الحركة هجري"
   }
 ];
 
@@ -337,16 +374,29 @@ function toPreparedDraftRow(row: NormalizedRiskRow): PreparedDraftRow {
     portName: row.portName,
 
     declarationNumber: row.declarationNumber,
+    transitDeclarationNumber: row.transitDeclarationNumber,
     declarationDate: normalizeDate(row.declarationDate),
+    declarationHijriDate: row.declarationHijriDate,
+
+    manifestNumber: row.manifestNumber,
+    manifestType: row.manifestType,
+    manifestDate: normalizeDate(row.manifestDate),
 
     plateOrContainerNumber: row.plateOrContainerNumber,
     chassisNumber: row.chassisNumber,
+    finalDestination: row.finalDestination,
 
     xrayLevelOneResult: row.xrayLevelOneResult,
     xrayLevelTwoResult: row.xrayLevelTwoResult,
 
     movementType: row.movementType,
+    movementNumber: row.movementNumber,
+    movementDate: normalizeDate(row.movementDate),
+    movementHijriDate: row.movementHijriDate,
     reportNumber: row.reportNumber,
+
+    entryDate: normalizeDate(row.entryDate),
+    exitDate: normalizeDate(row.exitDate),
 
     targetedByRiskEngine: row.targetedByRiskEngine,
     riskMessage: row.riskMessage,
@@ -484,7 +534,9 @@ function enrichDraftRowFromBi(params: {
     notes: fillFromBi(draftRow.notes, biRow.notes),
   };
 
-  const DATE_FIELDS: DraftFillableField[] = ["xrayEntryDate", "declarationDate"];
+  // Hijri fields (declarationHijriDate, movementHijriDate) are deliberately excluded —
+  // normalizeDate() assumes Gregorian date rules and would corrupt a Hijri value.
+  const DATE_FIELDS: DraftFillableField[] = ["xrayEntryDate", "declarationDate", "movementDate"];
 
   for (const field of BI_FILLABLE_FIELDS) {
     const riskValue = enrichedRow[field.fieldName];
@@ -753,16 +805,29 @@ export async function processPopulation(
         portName: enrichment.row.portName,
 
         declarationNumber: enrichment.row.declarationNumber,
+        transitDeclarationNumber: enrichment.row.transitDeclarationNumber,
         declarationDate: enrichment.row.declarationDate,
+        declarationHijriDate: enrichment.row.declarationHijriDate,
+
+        manifestNumber: enrichment.row.manifestNumber,
+        manifestType: enrichment.row.manifestType,
+        manifestDate: enrichment.row.manifestDate,
 
         plateOrContainerNumber: enrichment.row.plateOrContainerNumber,
         chassisNumber: enrichment.row.chassisNumber,
+        finalDestination: enrichment.row.finalDestination,
 
         xrayLevelOneResult: levelOneResult,
         xrayLevelTwoResult: levelTwoResult,
 
         movementType: enrichment.row.movementType,
+        movementNumber: enrichment.row.movementNumber,
+        movementDate: enrichment.row.movementDate,
+        movementHijriDate: enrichment.row.movementHijriDate,
         reportNumber: enrichment.row.reportNumber,
+
+        entryDate: enrichment.row.entryDate,
+        exitDate: enrichment.row.exitDate,
 
         targetedByRiskEngine: enrichment.row.targetedByRiskEngine,
         riskMessage: enrichment.row.riskMessage,

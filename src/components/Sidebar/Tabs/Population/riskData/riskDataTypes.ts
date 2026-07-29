@@ -10,11 +10,13 @@ export type NormalizedRiskRow = {
   movementHijriDate: string | null;
 
   declarationNumber: string | null;
+  transitDeclarationNumber: string | null;
   declarationDate: string | null;
   declarationHijriDate: string | null;
 
   manifestNumber: string | null;
   manifestType: string | null;
+  manifestDate: string | null;
 
   plateOrContainerNumber: string | null;
   finalDestination: string | null;

@@ -13,9 +13,14 @@ export const RISK_COLUMN_ALIASES = {
 
   declarationNumber: [
     "رقم البيان",
-    "رقم البيان المبدئي",
-    "رقم بيان الترانزيت"
+    "رقم البيان المبدئي"
   ],
+
+  // Transit sheets ("العبور") carry both a preliminary declaration number and
+  // a distinct transit declaration number on the same row — they are not the
+  // same value, so this gets its own field instead of colliding with
+  // declarationNumber above.
+  transitDeclarationNumber: ["رقم بيان الترانزيت"],
 
   declarationDate: [
     "تاريخ البيان",
@@ -28,6 +33,8 @@ export const RISK_COLUMN_ALIASES = {
   manifestNumber: ["رقم المانفيست", "رقم المنافيست"],
 
   manifestType: ["نوع المانفيست", "نوع المنافيست"],
+
+  manifestDate: ["تاريخ المانفيست", "تاريخ المنافيست"],
 
   plateOrContainerNumber: [
     "رقم اللوحة",

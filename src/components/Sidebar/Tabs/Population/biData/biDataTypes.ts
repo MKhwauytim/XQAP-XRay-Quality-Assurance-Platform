@@ -8,6 +8,10 @@ export type NormalizedBiRow = {
   portCode: string | null;
   portName: string | null;
 
+  movementNumber: string | null;
+  movementDate: string | null;
+  movementHijriDate: string | null;
+
   declarationNumber: string | null;
   preliminaryDeclarationNumber: string | null;
   declarationDate: string | null;

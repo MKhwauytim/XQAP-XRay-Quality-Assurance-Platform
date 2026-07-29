@@ -96,6 +96,10 @@ export function normalizeRiskRow(params: {
       lookup,
       aliases.declarationNumber || RISK_COLUMN_ALIASES.declarationNumber
     ),
+    transitDeclarationNumber: getFirstAvailableValue(
+      lookup,
+      aliases.transitDeclarationNumber || RISK_COLUMN_ALIASES.transitDeclarationNumber
+    ),
     declarationDate: getFirstAvailableValue(
       lookup,
       aliases.declarationDate || RISK_COLUMN_ALIASES.declarationDate
@@ -112,6 +116,10 @@ export function normalizeRiskRow(params: {
     manifestType: getFirstAvailableValue(
       lookup,
       aliases.manifestType || RISK_COLUMN_ALIASES.manifestType
+    ),
+    manifestDate: getFirstAvailableValue(
+      lookup,
+      aliases.manifestDate || RISK_COLUMN_ALIASES.manifestDate
     ),
 
     plateOrContainerNumber: getFirstAvailableValue(
