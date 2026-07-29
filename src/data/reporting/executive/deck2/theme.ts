@@ -1467,9 +1467,29 @@ body.theme-light .v2-lg-stage-card .v2-lg-table-card-title{color:#0a2d4a;}
 /* Page-local: slide-toc (Ledger, fan-out plan §1, batch B4). Namespacing
    hook plus a column-alignment override — الهدف (column 3, a goal sentence)
    is prose, not a number, so it needs the same right-align treatment the
-   shared .v2-lg-table-card rule already gives column 2 (القسم). */
+   shared .v2-lg-table-card rule already gives column 2 (القسم).
+   2026-07-28 fix: the shared base theme's own td,th white-space:nowrap /
+   overflow:hidden / text-overflow:ellipsis rule (theme.ts, the OLD deck's
+   generic table reset — deck2 never overrode it for this table) combined
+   with the bare table{table-layout:fixed} rule split this 5-column table
+   into equal fifths and hard-truncated every cell to one line. Column 2
+   (القسم) and column 3 (الهدف) are both prose — section names and full
+   goal sentences — not short labels, so most of their text was being cut
+   off (reported live: "text is outside the border/screen"). Explicit
+   column widths give the two prose columns the room the numeric/date
+   columns never needed, and both are switched to wrap instead of
+   ellipsis-truncate — the whole point of a table of contents is that its
+   goal column is actually readable. */
 .v2-lg-toc{height:100%;}
-.v2-lg-toc-card .deck-table th:nth-child(3),.v2-lg-toc-card .deck-table td:nth-child(3){text-align:right;}
+.v2-lg-toc-card .deck-table{table-layout:fixed;}
+.v2-lg-toc-card .deck-table th:first-child,.v2-lg-toc-card .deck-table td:first-child{width:6%;}
+.v2-lg-toc-card .deck-table th:nth-child(2),.v2-lg-toc-card .deck-table td:nth-child(2){width:20%;}
+.v2-lg-toc-card .deck-table th:nth-child(3),.v2-lg-toc-card .deck-table td:nth-child(3){width:42%;text-align:right;}
+.v2-lg-toc-card .deck-table th:nth-child(4),.v2-lg-toc-card .deck-table td:nth-child(4){width:16%;}
+.v2-lg-toc-card .deck-table th:nth-child(5),.v2-lg-toc-card .deck-table td:nth-child(5){width:16%;}
+.v2-lg-toc-card .deck-table td:nth-child(2),.v2-lg-toc-card .deck-table td:nth-child(3){
+  white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:break-word;line-height:1.35;
+}
 
 /* Page-local: slide-glossary-levels (Ledger, fan-out plan §3a, batch B4).
    التعريف (column 3) and ما يقيسه (column 4) are both prose columns needing
