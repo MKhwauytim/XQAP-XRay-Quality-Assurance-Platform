@@ -52,9 +52,9 @@ describe("normalizeRiskRow", () => {
 
   it("falls through to a later alias when earlier candidate headers are absent (first-available-value ordering)", () => {
     // declarationNumber's alias list is
-    // ["رقم البيان", "رقم البيان المبدئي", "رقم بيان الترانزيت"] — only the
-    // second candidate is present here, so it must still be picked up even
-    // though the lookup Map is now shared across every field's search.
+    // ["رقم البيان", "رقم البيان المبدئي"] — only the second candidate is
+    // present here, so it must still be picked up even though the lookup Map
+    // is now shared across every field's search.
     const sourceRow: RiskSourceRow = {
       "رقم البيان المبدئي": "DEC-PRELIM-9"
     };
@@ -67,6 +67,43 @@ describe("normalizeRiskRow", () => {
     });
 
     expect(result.declarationNumber).toBe("DEC-PRELIM-9");
+  });
+
+  it("stores the transit declaration number separately from declarationNumber instead of colliding (العبور sheet)", () => {
+    // The transit sheet ("العبور") carries both رقم البيان المبدئي and
+    // رقم بيان الترانزيت on the same row — two distinct real values that used
+    // to collide onto the single declarationNumber field (whichever alias
+    // ranked first silently won, the other was lost). They must now land in
+    // two separate fields.
+    const sourceRow: RiskSourceRow = {
+      "رقم البيان المبدئي": "DEC-PRELIM-9",
+      "رقم بيان الترانزيت": "TRANSIT-77"
+    };
+
+    const result = normalizeRiskRow({
+      sourceRow,
+      movementType: "عبور",
+      sourceSheetName: "العبور",
+      sourceRowNumber: 1
+    });
+
+    expect(result.declarationNumber).toBe("DEC-PRELIM-9");
+    expect(result.transitDeclarationNumber).toBe("TRANSIT-77");
+  });
+
+  it("captures manifestDate (بحري sheet) which previously had no destination field at all", () => {
+    const sourceRow: RiskSourceRow = {
+      "تاريخ المانفيست": "2026-05-10"
+    };
+
+    const result = normalizeRiskRow({
+      sourceRow,
+      movementType: "بحري",
+      sourceSheetName: "بحري",
+      sourceRowNumber: 1
+    });
+
+    expect(result.manifestDate).toBe("2026-05-10");
   });
 
   it("normalizes headers so Arabic letter variants and stray internal whitespace still match", () => {

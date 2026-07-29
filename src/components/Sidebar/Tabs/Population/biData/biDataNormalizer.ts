@@ -80,6 +80,19 @@ export function normalizeBiRow(params: {
     portCode: getFirstAvailableValue(lookup, aliases.portCode || BI_COLUMN_ALIASES.portCode),
     portName: getFirstAvailableValue(lookup, aliases.portName || BI_COLUMN_ALIASES.portName),
 
+    movementNumber: getFirstAvailableValue(
+      lookup,
+      aliases.movementNumber || BI_COLUMN_ALIASES.movementNumber
+    ),
+    movementDate: getFirstAvailableValue(
+      lookup,
+      aliases.movementDate || BI_COLUMN_ALIASES.movementDate
+    ),
+    movementHijriDate: getFirstAvailableValue(
+      lookup,
+      aliases.movementHijriDate || BI_COLUMN_ALIASES.movementHijriDate
+    ),
+
     declarationNumber: getFirstAvailableValue(
       lookup,
       aliases.declarationNumber || BI_COLUMN_ALIASES.declarationNumber

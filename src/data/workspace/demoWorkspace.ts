@@ -121,16 +121,29 @@ function buildDemoPopulationRow(seq: number, port: DemoPort): PreparedPopulation
     portName: port.name,
 
     declarationNumber: `DEC-${port.code}-${padded}`,
+    transitDeclarationNumber: null,
     declarationDate: entryDate,
+    declarationHijriDate: null,
+
+    manifestNumber: null,
+    manifestType: null,
+    manifestDate: null,
 
     plateOrContainerNumber: `PLT-${padded}`,
     chassisNumber: `CHS-${padded}`,
+    finalDestination: null,
 
     xrayLevelOneResult: result,
     xrayLevelTwoResult: result,
 
     movementType: "استيراد",
+    movementNumber: null,
+    movementDate: null,
+    movementHijriDate: null,
     reportNumber: null,
+
+    entryDate: null,
+    exitDate: null,
 
     targetedByRiskEngine: isSuspicious ? "نعم" : "لا",
     riskMessage: isSuspicious ? "نمط استيراد غير معتاد" : null,

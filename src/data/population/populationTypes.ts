@@ -28,15 +28,33 @@ export type PreparedPopulationRow = {
 
   declarationNumber: string | null;
   declarationDate: string | null;
+  // Optional (unlike the fields above): added after many report/test fixtures
+  // across the codebase already build a full PreparedPopulationRow literal by
+  // hand, and processPopulation() always sets a concrete value here — making
+  // these required would force every one of those unrelated fixtures to learn
+  // about fields outside their concern.
+  transitDeclarationNumber?: string | null;
+  declarationHijriDate?: string | null;
+
+  manifestNumber?: string | null;
+  manifestType?: string | null;
+  manifestDate?: string | null;
 
   plateOrContainerNumber: string | null;
   chassisNumber: string | null;
+  finalDestination?: string | null;
 
   xrayLevelOneResult: "سليمة" | "اشتباه";
   xrayLevelTwoResult: "سليمة" | "اشتباه";
 
   movementType: string | null;
+  movementNumber?: string | null;
+  movementDate?: string | null;
+  movementHijriDate?: string | null;
   reportNumber: string | null;
+
+  entryDate?: string | null;
+  exitDate?: string | null;
 
   targetedByRiskEngine: string | null;
   riskMessage: string | null;

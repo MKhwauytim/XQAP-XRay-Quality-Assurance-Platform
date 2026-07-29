@@ -22,6 +22,12 @@ export const BI_COLUMN_ALIASES = {
 
   portName: ["اسم المنفذ"],
 
+  movementNumber: ["رقم الحركة", "قيد الحركة"],
+
+  movementDate: ["تاريخ الحركة"],
+
+  movementHijriDate: ["تاريخ الحركة هجري"],
+
   declarationNumber: ["رقم البيان"],
 
   preliminaryDeclarationNumber: [
