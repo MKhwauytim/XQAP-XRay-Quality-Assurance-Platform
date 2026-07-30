@@ -321,12 +321,28 @@ describe("qualityImpactSlide — three populated strata", () => {
     expect(occurrences(html, "العيّنة 20")).toBe(6); // 3 tiles + 3 trend rows
   });
 
-  it("computes the missed-suspicion rate from the confirmed-suspicious base only", () => {
-    expect(html).toContain("33.3%"); // عالي  1/(2+1)
-    expect(html).toContain("50.0%"); // متوسط 2/(2+2)
-    expect(html).toContain("66.7%"); // منخفض 4/(2+4)
+  it("suppresses the missed-suspicion rate when its OWN (confirmed-suspicious) base is below the sufficiency cut, even though n clears it (2026-07-30 fix)", () => {
+    // Each stratum's own n is 20 (clears the cut, hence 95.0/85.0/70.0% accuracy
+    // above), but its suspiciousBase — عالي 2+1=3, متوسط 2+2=4, منخفض 2+4=6 — is
+    // "insufficient" (<10) either way. The missed-suspicion rate must be gated
+    // on ITS OWN denominator, not on n, so all three read the muted "—" here
+    // instead of the raw 33.3%/50.0%/66.7% ratios.
+    expect(html).not.toContain("33.3%");
+    expect(html).not.toContain("50.0%");
+    expect(html).not.toContain("66.7%");
+    expect(occurrences(html, '<span class="accent"><b><span class="insuff">—</span></b><small>الاشتباه الفائت')).toBe(3);
     expect(html).toContain("الاشتباه الفائت من 3");
+    expect(html).toContain("الاشتباه الفائت من 4");
     expect(html).toContain("الاشتباه الفائت من 6");
+  });
+
+  it("still shows the real missed-suspicion rate once its own base clears the sufficiency cut (contrast case for the suppression above)", () => {
+    // n=20 (sufficient), suspiciousBase = correctSusp(6) + missedSusp(6) = 12
+    // ("limited") — both clear their own cuts, so the honest ratio prints:
+    // 6 / (6 + 6) = 50.0%.
+    const html2 = render(modelOf([...strataRows("عالي", { correctClean: 8, correctSusp: 6, missedSusp: 6 }, "hi")]));
+    expect(html2).toContain("50.0%");
+    expect(html2).toContain("الاشتباه الفائت من 12");
   });
 
   it("calls out a correctly signed high↔low gradient", () => {

@@ -267,9 +267,34 @@ describe("markingImpactSlide — both strata populated", () => {
     expect(flipped).toContain('<span dir="ltr">−20.0</span> نقطة مئوية');
   });
 
-  it("prints the per-arm detection rate through the denominator-gated helper", () => {
-    expect(html).toContain("<b>85.7%</b><small>كشف الاشتباه</small>");
-    expect(html).toContain("<b>50.0%</b><small>كشف الاشتباه</small>");
+  it("suppresses the per-arm detection rate when its OWN (correctSusp+missedSusp) base is below the sufficiency cut, even though n clears it (2026-07-30 fix)", () => {
+    // STRONG_ARM's detection base (correctSusp 6 + missedSusp 1 = 7) and
+    // WEAK_ARM's (4 + 4 = 8) are both "insufficient" (<10) even though each
+    // arm's own n (20) clears the accuracy cut used above — detection must be
+    // gated on ITS OWN denominator, not on n, so both read the muted "—" here
+    // instead of the raw 85.7%/50.0% ratios.
+    expect(html).not.toContain("<b>85.7%</b><small>كشف الاشتباه</small>");
+    expect(html).not.toContain("<b>50.0%</b><small>كشف الاشتباه</small>");
+    const suppressed = [
+      ...html.matchAll(/<span class="accent"><b><span class="insuff">—<\/span><\/b><small>كشف الاشتباه<\/small><\/span>/g),
+    ];
+    expect(suppressed.length).toBe(2);
+  });
+
+  it("still shows the real detection rate once its own base clears the sufficiency cut (contrast case for the suppression above)", () => {
+    // n=20 (sufficient), detection base = correctSusp(6) + missedSusp(6) = 12
+    // ("limited") — both clear their own cuts, so the honest ratio prints:
+    // 6 / (6 + 6) = 50.0%.
+    const withSufficientDetection = markingImpactSlide(
+      modelWith([
+        ...arm({ prefix: "M", hasMarking: true, correctClean: 8, correctSusp: 6, missedSusp: 6 }),
+        ...arm({ prefix: "N", hasMarking: false, ...WEAK_ARM }),
+      ]),
+      7,
+      20,
+      false,
+    );
+    expect(withSufficientDetection).toContain("<b>50.0%</b><small>كشف الاشتباه</small>");
   });
 
   it("renders a 100%-stacked outcome bar per arm plus one shared legend", () => {
@@ -482,8 +507,17 @@ describe("markingImpactSlide — Briefing (fan-out)", () => {
     expect(preview).toContain(
       'فارق الدقة <span dir="ltr">+20.0</span> نقطة — بتحديد 90.0% مقابل بلا تحديد 70.0%',
     );
-    expect(preview).toContain("العيّنة 20 · كشف 85.7%");
-    expect(preview).toContain("العيّنة 20 · كشف 50.0%");
+    // Both arms' detection rate is suppressed here (2026-07-30 fix): STRONG_ARM's
+    // own detection base is correctSusp(6)+missedSusp(1)=7 and WEAK_ARM's is
+    // 4+4=8 — both "insufficient" (<10) even though each arm's n (20) clears
+    // the accuracy cut, so the rank rows' secondary text reads the muted "—"
+    // instead of the raw 85.7%/50.0% ratios.
+    const secondary = [
+      ...preview.matchAll(/<span class="v2-bf-rank-secondary">العيّنة 20 · كشف <span class="insuff">—<\/span><\/span>/g),
+    ];
+    expect(secondary.length).toBe(2);
+    expect(preview).not.toContain("العيّنة 20 · كشف 85.7%");
+    expect(preview).not.toContain("العيّنة 20 · كشف 50.0%");
   });
 
   it("mirrors deltaChip's not-comparable fallback exactly — same '—' + insufficient note, not a parallel threshold", () => {
@@ -552,11 +586,15 @@ describe("markingImpactSlide — Grid (fan-out)", () => {
       20,
       true,
     );
-    // accuracy=90, detection=62.5, correctClean share=80, correctSusp share=10,
-    // missedSusp share=6, falseSusp share=4 — all SHARES, never the raw counts
-    // (40/5/3/2) the same arm's Ledger cells would show for the same row.
+    // accuracy=90, correctClean share=80, correctSusp share=10, missedSusp
+    // share=6, falseSusp share=4 — all SHARES, never the raw counts (40/5/3/2)
+    // the same arm's Ledger cells would show for the same row. Detection
+    // itself is suppressed here (2026-07-30 fix): this arm's own detection
+    // base (correctSusp 5 + missedSusp 3 = 8) is "insufficient" (<10) even
+    // though n=50 clears the accuracy cut, so كشف الاشتباه reads "—", not the
+    // raw 62.5% ratio.
     expect(preview).toContain(
-      '<tr><th scope="row">يوجد تحديد</th><td>90</td><td>62.5</td><td>80</td><td>10</td><td>6</td><td>4</td></tr>',
+      '<tr><th scope="row">يوجد تحديد</th><td>90</td><td>—</td><td>80</td><td>10</td><td>6</td><td>4</td></tr>',
     );
   });
 

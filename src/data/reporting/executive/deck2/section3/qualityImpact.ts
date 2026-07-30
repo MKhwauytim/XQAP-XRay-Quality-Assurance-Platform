@@ -105,10 +105,19 @@ type QualityStratum = {
   rankable: boolean;
   /** Null unless the stratum is rankable AND has a positive denominator. */
   accuracy: number | null;
-  /** Missed-suspicion share of the confirmed-suspicious base, same gating. */
+  /** Missed-suspicion share of the confirmed-suspicious base, gated on ITS
+   *  OWN denominator (`missedRateRankable`), NOT `rankable`/`n` — see that
+   *  field's doc comment. */
   missedRate: number | null;
   /** The missed-rate denominator, printed beside it so its size is visible. */
   suspiciousBase: number;
+  /** Whether `missedRate`'s OWN (smaller) denominator — `suspiciousBase` —
+   *  clears the sufficiency cut, independently of `rankable` (gated on `n`,
+   *  accuracy's own denominator). A stratum can have plenty of evaluated
+   *  images yet very few confirmed-suspicion ones, so the missed-suspicion
+   *  rate must be suppressed on ITS OWN thin base even when accuracy is shown
+   *  (2026-07-30 fix). */
+  missedRateRankable: boolean;
 };
 
 type QualityFold = {
@@ -155,6 +164,7 @@ function collectQualityStrata(rows: readonly ExecutiveReportRow[]): QualityFold 
     const bandKey = band(t.n);
     const rankable = isRankable(bandKey);
     const suspiciousBase = t.correctSusp + t.missedSusp;
+    const missedRateRankable = isRankable(band(suspiciousBase));
     return {
       level,
       n: t.n,
@@ -166,10 +176,13 @@ function collectQualityStrata(rows: readonly ExecutiveReportRow[]): QualityFold 
       // rateOf() is the ONLY division on this page: it returns null rather than
       // NaN/0% whenever the denominator is empty. The rankability gate is
       // applied on top of it, so a 1–9 stratum renders "—" even though it has
-      // a mathematically valid ratio.
+      // a mathematically valid ratio. accuracy is gated on the stratum's OWN
+      // `n`; missedRate is gated SEPARATELY on its own (usually smaller)
+      // `suspiciousBase` (2026-07-30 fix), not on `n`.
       accuracy: rankable ? rateOf(t.accurate, t.n) : null,
-      missedRate: rankable ? rateOf(t.missedSusp, suspiciousBase) : null,
+      missedRate: missedRateRankable ? rateOf(t.missedSusp, suspiciousBase) : null,
       suspiciousBase,
+      missedRateRankable,
     } satisfies QualityStratum;
   });
 
@@ -407,7 +420,10 @@ function ledgerStrataTable(strata: readonly QualityStratum[]): string {
   const combinedMissed = strata.reduce((sum, s) => sum + s.missedSuspicious, 0);
   const combinedSuspBase = strata.reduce((sum, s) => sum + s.suspiciousBase, 0);
   const combinedAccuracy = combinedRankable ? rateOf(combinedAccurate, combinedN) : null;
-  const combinedMissedRate = combinedRankable ? rateOf(combinedMissed, combinedSuspBase) : null;
+  // Gated on the POOLED missed-rate base's OWN band, not `combinedRankable`
+  // (which reads `combinedN`) — same own-denominator discipline as
+  // `collectQualityStrata`'s `missedRateRankable` (2026-07-30 fix).
+  const combinedMissedRate = isRankable(band(combinedSuspBase)) ? rateOf(combinedMissed, combinedSuspBase) : null;
   const totalsRowHtml =
     `<tr><td>الإجمالي</td><td>${fmtNum(combinedN)}</td><td>${pctCell(combinedAccuracy)}</td>` +
     `<td>${pctCell(combinedMissedRate)}</td><td>${fmtNum(combinedSuspBase)}</td>` +
@@ -563,11 +579,13 @@ function briefingQualityLedeAndRank(
  * الدقة/الاشتباه الفائت (both `[0,100]`) and العيّنة/أساس الاشتباه (both
  * `[0,max]`), all `sequential-gold` — plain magnitudes/rates with no
  * meaningful midpoint here, unlike a signed delta column elsewhere in this
- * fan-out. An unrankable stratum's accuracy/missedRate are already null from
- * `collectQualityStrata`'s own gate; its n/suspiciousBase are NEVER gated, so
- * the two count columns keep showing that stratum's real numbers even when
- * the rate columns read "—" — never a fully-nulled row for a partially
- * insufficient stratum.
+ * fan-out. `accuracy` and `missedRate` are each already null from
+ * `collectQualityStrata`'s own gate whenever THEIR OWN denominator (`n` for
+ * accuracy, `suspiciousBase` for missedRate — independent since 2026-07-30)
+ * is below the cut, so the two rate columns can go "—" independently of one
+ * another; its n/suspiciousBase are NEVER gated, so the two count columns keep
+ * showing that stratum's real numbers even when a rate column reads "—" —
+ * never a fully-nulled row for a partially insufficient stratum.
  */
 function gridQualityMatrix(strata: readonly QualityStratum[], evaluated: number): string {
   const matrix = metricMatrix(

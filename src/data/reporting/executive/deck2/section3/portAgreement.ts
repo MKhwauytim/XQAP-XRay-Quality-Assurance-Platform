@@ -161,7 +161,10 @@ function collectPortAgreementRows(model: ReportModel): { land: PortAgreementRow[
  * RANKABLE ports (data-sufficiency `limited`/`sufficient` on their OWN L1↔L2
  * comparable count) take part in that ordering; everything below the cut is
  * parked after them, largest base first, since its rate is not shown at all.
- * The final tiebreak is the port name, so the order is total and deterministic.
+ * The final tiebreak is the port name, compared as plain code units (NOT
+ * `localeCompare`, whose collation result can drift with the host's ICU
+ * data) — the same discipline `levelAccuracy.ts`/`workloadAccuracy.ts` already
+ * document and apply, so the order is total and byte-deterministic.
  */
 function orderRows(rows: PortAgreementRow[]): PortAgreementRow[] {
   return [...rows].sort((a, b) => {
@@ -174,7 +177,7 @@ function orderRows(rows: PortAgreementRow[]): PortAgreementRow[] {
       if (aRate !== bRate) return aRate - bRate;
     }
     if (a.l1l2Comparable !== b.l1l2Comparable) return b.l1l2Comparable - a.l1l2Comparable;
-    return a.name.localeCompare(b.name, "ar");
+    return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
   });
 }
 
