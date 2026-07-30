@@ -16,7 +16,7 @@ import { slide, split, heroNumber, heroChart, kpiTile, kpiBand, miniTable, numbe
 import { donut, rankedBar } from "../executive/ui/charts";
 import { icon } from "../executive/ui/icons";
 import { buildDeckViewer, formatMonthLabel } from "../shared/reportChrome";
-import { openReportWindow, writeReportToWindow } from "../htmlReport";
+import { openReportWindow, writeOrCloseOnFailure } from "../htmlReport";
 import { sourceRevisionsFooterHtml } from "../sourceRevisions";
 import type { ExecutiveReportInput } from "../executiveReportTypes";
 
@@ -178,12 +178,18 @@ export async function buildManagementDeck(
  * P3-7) BEFORE the now-chunked `buildManagementDeck` build runs, then writes
  * the finished HTML in once ready — same pattern as `openSampleReport`/
  * `openDistributionDocument` in sampleReport.ts/distributionReport.ts.
+ * `writeOrCloseOnFailure` closes the already-opened tab instead of
+ * abandoning it blank if the build throws (see its doc comment in
+ * htmlReport.ts).
  */
 export async function openManagementDeck(
   input: ExecutiveReportInput,
   employeeDisplayNames: Record<string, string> = {},
 ): Promise<void> {
   const reportWindow = openReportWindow();
-  const html = await buildManagementDeck(input, employeeDisplayNames);
-  writeReportToWindow(reportWindow, html, `عرض_الإدارة_${input.monthFolderName}.html`);
+  await writeOrCloseOnFailure(
+    reportWindow,
+    () => buildManagementDeck(input, employeeDisplayNames),
+    `عرض_الإدارة_${input.monthFolderName}.html`,
+  );
 }

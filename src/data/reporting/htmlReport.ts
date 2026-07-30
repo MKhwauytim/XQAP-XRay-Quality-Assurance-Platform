@@ -139,6 +139,38 @@ export function openOrDownload(html: string, filename: string): void {
   writeReportToWindow(openReportWindow(), html, filename);
 }
 
+/**
+ * Runs `buildHtml` and writes its result into `reportWindow` (opened earlier
+ * via `openReportWindow`, before the build's first `await` — P3-7's "open
+ * early, write once ready" pattern). If `buildHtml` throws, the window it was
+ * meant to fill in would otherwise sit open and permanently blank — the write
+ * only happens on the success path below, and nothing else ever touches
+ * `reportWindow` on a failure. Closing it here instead re-establishes the
+ * pre-P3-7 guarantee (a failed build never leaves a visible tab behind) while
+ * keeping the async/chunked, main-thread-friendly build. Rethrows so the
+ * caller's existing error-toast handling still fires unchanged.
+ */
+export async function writeOrCloseOnFailure(
+  reportWindow: Window | null,
+  buildHtml: () => Promise<string>,
+  filename: string,
+): Promise<void> {
+  let html: string;
+  try {
+    html = await buildHtml();
+  } catch (err) {
+    if (reportWindow) {
+      try {
+        reportWindow.close();
+      } catch {
+        // Ignore; nothing more we can do if the browser refuses to close it.
+      }
+    }
+    throw err;
+  }
+  writeReportToWindow(reportWindow, html, filename);
+}
+
 export function formatNum(n: number): string {
   return n.toLocaleString("ar-SA-u-nu-latn");
 }

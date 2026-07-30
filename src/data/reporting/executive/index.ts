@@ -9,7 +9,7 @@
 import { buildReportModel } from "./model/reportModel";
 import { buildDocumentSlides } from "./document/index";
 import { buildViewerHtml } from "./viewer";
-import { openReportWindow, writeReportToWindow } from "../htmlReport";
+import { openReportWindow, writeOrCloseOnFailure } from "../htmlReport";
 import { esc } from "./primitives";
 import { sourceRevisionsFooterHtml } from "../sourceRevisions";
 import type { ExecutiveReportInput } from "../executiveReportTypes";
@@ -36,13 +36,18 @@ export async function buildExecutiveReport(
  * Opens the target tab synchronously (still inside the click's user gesture,
  * P3-7) BEFORE the now-chunked `buildExecutiveReport` build runs, then writes
  * the finished HTML in once ready — same pattern as `openSampleReport`/
- * `openDistributionDocument`/`openManagementDeck`.
+ * `openDistributionDocument`/`openManagementDeck`. `writeOrCloseOnFailure`
+ * closes the already-opened tab instead of abandoning it blank if the build
+ * throws (see its doc comment in htmlReport.ts).
  */
 export async function openExecutiveReport(
   input: ExecutiveReportInput,
   employeeDisplayNames: Record<string, string> = {},
 ): Promise<void> {
   const reportWindow = openReportWindow();
-  const html = await buildExecutiveReport(input, employeeDisplayNames);
-  writeReportToWindow(reportWindow, html, `التقرير_التنفيذي_${input.monthFolderName}.html`);
+  await writeOrCloseOnFailure(
+    reportWindow,
+    () => buildExecutiveReport(input, employeeDisplayNames),
+    `التقرير_التنفيذي_${input.monthFolderName}.html`,
+  );
 }

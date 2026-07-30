@@ -16,7 +16,7 @@ import { setActiveStyleChoices } from "./slideKit";
 import { SECTION_THREE_CSS } from "./section3";
 import { esc } from "../primitives";
 import { icon } from "../ui/icons";
-import { openReportWindow, writeReportToWindow } from "../../htmlReport";
+import { openReportWindow, writeOrCloseOnFailure } from "../../htmlReport";
 import { SOURCE_REVISIONS_CSS, sourceRevisionsFooterHtml } from "../../sourceRevisions";
 import { ARABIC_FONT_FACE_CSS } from "../../../../branding/fonts";
 import type { ExecutiveReportInput } from "../../executiveReportTypes";
@@ -495,6 +495,9 @@ export async function buildExecutiveDeckV2(
  * P3-7) BEFORE the now-chunked `buildExecutiveDeckV2` build runs, then writes
  * the finished HTML in once ready — same pattern as `openSampleReport`/
  * `openDistributionDocument`/`openManagementDeck`/`openExecutiveReport`.
+ * `writeOrCloseOnFailure` closes the already-opened tab instead of
+ * abandoning it blank if the build throws (see its doc comment in
+ * htmlReport.ts).
  */
 export async function openExecutiveDeckV2(
   input: ExecutiveReportInput,
@@ -502,7 +505,10 @@ export async function openExecutiveDeckV2(
   styleChoices?: Record<string, number>,
 ): Promise<void> {
   const reportWindow = openReportWindow();
-  const html = await buildExecutiveDeckV2(input, employeeDisplayNames, { styleChoices });
-  writeReportToWindow(reportWindow, html, `العرض_التنفيذي_${input.monthFolderName}.html`);
+  await writeOrCloseOnFailure(
+    reportWindow,
+    () => buildExecutiveDeckV2(input, employeeDisplayNames, { styleChoices }),
+    `العرض_التنفيذي_${input.monthFolderName}.html`,
+  );
 }
 

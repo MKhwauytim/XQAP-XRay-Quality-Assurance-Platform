@@ -16,7 +16,7 @@ import * as XLSX from "xlsx";
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import type { SampleMasterData } from "../sampling/sampleTypes";
 import type { MonthManifestData } from "../population/monthTypes";
-import { openReportWindow, writeReportToWindow } from "./htmlReport";
+import { openReportWindow, writeOrCloseOnFailure } from "./htmlReport";
 import { fmtNum, fmtPct } from "./executive/primitives";
 import {
   page,
@@ -572,15 +572,16 @@ function pctCell(value: number | null): string | number {
  * P3-7) BEFORE the now-chunked `buildSampleDocument` build runs, then writes
  * the finished HTML in once ready — yielding after `window.open()` would let
  * the click's transient activation lapse and risk a silently blocked popup.
+ * `writeOrCloseOnFailure` closes the already-opened tab instead of
+ * abandoning it blank if the build throws (see its doc comment in
+ * htmlReport.ts).
  */
 export async function openSampleReport(input: SampleReportInput): Promise<void> {
   const reportWindow = openReportWindow();
-  const html = await buildSampleDocument(input);
-  writeReportToWindow(reportWindow, html, `تقرير_العينة_${input.monthFolderName}.html`);
+  await writeOrCloseOnFailure(reportWindow, () => buildSampleDocument(input), `تقرير_العينة_${input.monthFolderName}.html`);
 }
 
 export async function openSampleDeck(input: SampleReportInput): Promise<void> {
   const reportWindow = openReportWindow();
-  const html = await buildSampleDeck(input);
-  writeReportToWindow(reportWindow, html, `عرض_العينة_${input.monthFolderName}.html`);
+  await writeOrCloseOnFailure(reportWindow, () => buildSampleDeck(input), `عرض_العينة_${input.monthFolderName}.html`);
 }

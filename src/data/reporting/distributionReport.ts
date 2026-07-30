@@ -14,7 +14,7 @@
 import * as XLSX from "xlsx";
 
 import type { DistributionCurrentData } from "../distribution/distributionTypes";
-import { openReportWindow, writeReportToWindow } from "./htmlReport";
+import { openReportWindow, writeOrCloseOnFailure } from "./htmlReport";
 import { esc, fmtNum, fmtPct } from "./executive/primitives";
 import { page, pageHeader, kpi, kpiStrip, panel } from "./executive/document/shared";
 import { dataTable, paginateRows } from "./executive/document/pagination";
@@ -460,7 +460,9 @@ function pctCell(value: number | null): string | number {
  * P3-7) BEFORE the now-chunked `buildDistributionDocument` build runs, then
  * writes the finished HTML in once ready — yielding after `window.open()`
  * would let the click's transient activation lapse and risk a silently
- * blocked popup.
+ * blocked popup. `writeOrCloseOnFailure` closes the already-opened tab
+ * instead of abandoning it blank if the build throws (see its doc comment in
+ * htmlReport.ts).
  */
 export async function openDistributionDocument(
   data: DistributionCurrentData,
@@ -469,8 +471,11 @@ export async function openDistributionDocument(
   sourceRevisions?: SourceRevisions,
 ): Promise<void> {
   const reportWindow = openReportWindow();
-  const html = await buildDistributionDocument(data, monthFolderName, employeeDisplayNames, sourceRevisions);
-  writeReportToWindow(reportWindow, html, `تقرير_التوزيع_${monthFolderName}.html`);
+  await writeOrCloseOnFailure(
+    reportWindow,
+    () => buildDistributionDocument(data, monthFolderName, employeeDisplayNames, sourceRevisions),
+    `تقرير_التوزيع_${monthFolderName}.html`,
+  );
 }
 
 export async function openDistributionDeck(
@@ -480,6 +485,9 @@ export async function openDistributionDeck(
   sourceRevisions?: SourceRevisions,
 ): Promise<void> {
   const reportWindow = openReportWindow();
-  const html = await buildDistributionDeck(data, monthFolderName, employeeDisplayNames, sourceRevisions);
-  writeReportToWindow(reportWindow, html, `عرض_التوزيع_${monthFolderName}.html`);
+  await writeOrCloseOnFailure(
+    reportWindow,
+    () => buildDistributionDeck(data, monthFolderName, employeeDisplayNames, sourceRevisions),
+    `عرض_التوزيع_${monthFolderName}.html`,
+  );
 }
