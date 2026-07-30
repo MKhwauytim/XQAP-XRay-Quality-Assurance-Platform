@@ -51,11 +51,11 @@ function maliciousSampleInput(): SampleReportInput {
 }
 
 describe("sample builders — XSS escaping", () => {
-  it("document escapes injected port names, ids, seed and drawnBy", () => {
-    assertSafe(buildSampleDocument(maliciousSampleInput()));
+  it("document escapes injected port names, ids, seed and drawnBy", async () => {
+    assertSafe(await buildSampleDocument(maliciousSampleInput()));
   });
-  it("deck escapes injected port names and the raw-HTML title slide (seed)", () => {
-    assertSafe(buildSampleDeck(maliciousSampleInput()));
+  it("deck escapes injected port names and the raw-HTML title slide (seed)", async () => {
+    assertSafe(await buildSampleDeck(maliciousSampleInput()));
   });
 });
 
@@ -71,13 +71,13 @@ function maliciousDistribution() {
 }
 
 describe("distribution builders — XSS escaping", () => {
-  it("document escapes injected ids, port names and display names", () => {
+  it("document escapes injected ids, port names and display names", async () => {
     // monthFolderName carries scriptTag → month label renders it verbatim (escaped).
-    const html = buildDistributionDocument(maliciousDistribution(), XSS_PAYLOADS.scriptTag, { [EVIL_USER]: XSS_COMBINED });
+    const html = await buildDistributionDocument(maliciousDistribution(), XSS_PAYLOADS.scriptTag, { [EVIL_USER]: XSS_COMBINED });
     assertSafe(html);
   });
-  it("deck escapes injected data and the raw-HTML title slide (month label)", () => {
-    const html = buildDistributionDeck(maliciousDistribution(), XSS_PAYLOADS.scriptTag, { [EVIL_USER]: XSS_COMBINED });
+  it("deck escapes injected data and the raw-HTML title slide (month label)", async () => {
+    const html = await buildDistributionDeck(maliciousDistribution(), XSS_PAYLOADS.scriptTag, { [EVIL_USER]: XSS_COMBINED });
     assertSafe(html);
   });
 });
@@ -117,9 +117,9 @@ function maliciousExecInput(): { input: ExecutiveReportInput; names: Record<stri
 }
 
 describe("management deck — XSS escaping", () => {
-  it("escapes injected port names, reviewer names and the month label", () => {
+  it("escapes injected port names, reviewer names and the month label", async () => {
     const { input, names } = maliciousExecInput();
-    assertSafe(buildManagementDeck(input, names));
+    assertSafe(await buildManagementDeck(input, names));
   });
 });
 

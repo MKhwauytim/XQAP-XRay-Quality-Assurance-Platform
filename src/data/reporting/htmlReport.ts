@@ -77,11 +77,37 @@ export function escHtml(str: string): string {
  * same pattern already proven in
  * Sidebar/Tabs/Population/reporting/reportExporter.ts (2026-07-21).
  */
-export function openOrDownload(html: string, filename: string): void {
+/**
+ * Opens the same blank same-origin window `openOrDownload` would, but WITHOUT
+ * writing anything into it yet. Split out (P3-7) so callers whose HTML build
+ * is chunked with `await yieldToMain()` breaks (main-thread-friendly report
+ * builders) can still open the tab synchronously, inside the original click
+ * handler and before the first `await` — once an `await` has run, the click's
+ * transient user-activation may have lapsed and `window.open` can be silently
+ * popup-blocked. Pair with `writeReportToWindow` once the (now async) HTML is
+ * ready. Callers that build HTML synchronously should keep using
+ * `openOrDownload`, unchanged.
+ */
+export function openReportWindow(): Window | null {
   const reportWindow = window.open("", "_blank");
   if (reportWindow) {
     try {
       reportWindow.opener = null;
+    } catch {
+      // Ignore; document.open()/write() in writeReportToWindow still work.
+    }
+  }
+  return reportWindow;
+}
+
+/**
+ * Writes `html` into a window previously returned by `openReportWindow`,
+ * falling back to a file download when the window is null or writing fails —
+ * identical fallback behavior to `openOrDownload`.
+ */
+export function writeReportToWindow(reportWindow: Window | null, html: string, filename: string): void {
+  if (reportWindow) {
+    try {
       reportWindow.document.open();
       reportWindow.document.write(html);
       reportWindow.document.close();
@@ -94,7 +120,10 @@ export function openOrDownload(html: string, filename: string): void {
       }
     }
   }
-  // Fallback: popup blocked (or writing to it failed) — download instead.
+  downloadHtml(html, filename);
+}
+
+function downloadHtml(html: string, filename: string): void {
   const blob = new Blob([html], { type: "text/html;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -104,6 +133,10 @@ export function openOrDownload(html: string, filename: string): void {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+export function openOrDownload(html: string, filename: string): void {
+  writeReportToWindow(openReportWindow(), html, filename);
 }
 
 export function formatNum(n: number): string {

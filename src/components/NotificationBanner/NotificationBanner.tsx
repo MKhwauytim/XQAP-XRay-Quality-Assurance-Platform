@@ -5,6 +5,7 @@ import type { AuthSession } from "../../auth/authTypes";
 import type { DirectoryHandleLike } from "../../data/storage/fileSystemAccess";
 import { getLabels } from "../../data/labels/labelsStore";
 import { useLabels } from "../../data/labels/useLabels";
+import { logRejection } from "../../data/storage/errorLogger";
 import {
   acceptNotification,
   loadNotifications,
@@ -53,7 +54,7 @@ export function NotificationBanner({ session, directoryHandle }: Props) {
     // a `.then` callback, not synchronously in the effect body.
     loadNotifications(directoryHandle)
       .then(setNotifications)
-      .catch(() => {});
+      .catch(logRejection("notificationBanner:loadNotifications"));
     const onFocus = () => void reload();
     window.addEventListener("focus", onFocus);
     const interval = window.setInterval(() => void reload(), POLL_INTERVAL_MS);

@@ -1564,6 +1564,74 @@
   transition: background 180ms ease, transform 140ms cubic-bezier(0.32, 0.72, 0, 1), box-shadow 180ms ease;
 }
 
+/* ── Quality note (P2-2) — supervisor coaching note on an ItemAnswer ─────────
+   Deliberately amber-accented (var(--c-warning-*)) so it reads as a distinct,
+   independent annotation — never to be confused with the plain-text read-only
+   "ملاحظة الاعتماد" reviewNotes column rendered elsewhere in this same view. */
+
+.ew-quality-note-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--c-warning-bg);
+  color: var(--c-warning);
+  border: 1px solid var(--c-warning-border);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ew-quality-note-badge-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ew-quality-note-badge--empty {
+  background: var(--c-surface-2);
+  color: var(--c-ink-4);
+  border-style: dashed;
+  font-weight: 500;
+}
+
+.ew-quality-note-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: var(--sp-3) var(--sp-4);
+  margin: 4px 0;
+  background: var(--c-warning-bg);
+  border: 1.5px solid var(--c-warning-border);
+  border-radius: var(--r-sm, 8px);
+  cursor: default;
+}
+
+.ew-quality-note-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--c-warning);
+}
+
+.ew-quality-note-hint { margin: 0; font-size: 12px; color: var(--c-ink-4); }
+
+.ew-quality-note-readonly {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--c-ink);
+}
+
+.ew-quality-note-textarea { min-height: 56px; background: var(--c-surface); }
+
+.ew-quality-note-actions { display: flex; align-items: center; gap: var(--sp-3); }
+
+.ew-quality-note-error { font-size: 12.5px; color: var(--c-danger); }
+
 .ew-btn-referral:hover { background: var(--c-navy-2); transform: translateY(-1px); box-shadow: 0 5px 14px rgba(14, 36, 68, 0.26); }
 .ew-btn-referral:active { transform: translateY(0); }
 .ew-btn-sm { padding: 5px 11px; font-size: 12px; }

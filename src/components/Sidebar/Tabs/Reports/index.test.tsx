@@ -81,6 +81,12 @@ const deckExportMock = vi.hoisted(() => ({
 vi.mock("../../../../data/reporting/executive/deck2", () => ({
   openExecutiveDeckV2: (execInput: unknown, names: unknown, styleChoices: unknown) =>
     deckExportMock.impl(execInput, names, styleChoices),
+  // `DeckDesignCustomizer.tsx` (rendered for real, unmocked, by this same
+  // Reports tab) imports `buildExecutiveDeckV2` directly from this module for
+  // its live iframe preview — P3-7 made it async, so the stub here must
+  // resolve a Promise, not return a bare string.
+  buildExecutiveDeckV2: (_execInput: unknown, _names: unknown, _opts: unknown) =>
+    Promise.resolve("<html><body>mock deck preview</body></html>"),
 }));
 
 // Stubs the real (disk-writing) Power BI export so the gating tests below never touch

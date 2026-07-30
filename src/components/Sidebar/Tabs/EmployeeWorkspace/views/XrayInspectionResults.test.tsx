@@ -26,6 +26,9 @@ import {
 } from "../../../../../data/referral/referralStorage";
 import type { ReferralRequest, ReplacementRequest } from "../../../../../data/referral/referralTypes";
 import type { PreparedPopulationRow } from "../../../../../data/population/populationTypes";
+import { loadEmployeeAnswers, upsertItemAnswer } from "../../../../../data/answers/answerStorage";
+import type { ItemAnswer } from "../../../../../data/answers/answerTypes";
+import { DEFAULT_LABELS } from "../../../../../data/labels/labelsStore";
 import XrayInspectionResults from "./XrayInspectionResults";
 
 const MONTH = "5-may-2026";
@@ -188,5 +191,88 @@ describe("XrayInspectionResults view-mode toggle (no refetch regression)", () =>
 
     getDirectoryHandleSpy.mockRestore();
     getFileHandleSpy.mockRestore();
+  });
+});
+
+// P2-2: writable quality-note control on an item's saved answer. Fully independent
+// of the referral/replacement/reopen reviewNotes/DecisionEvent trail (no request/
+// approval seeded or asserted here) — only exercises ItemAnswer.qualityNote via
+// setItemQualityNote (indirectly, through the rendered control).
+function makeAnswer(overrides?: Partial<ItemAnswer>): ItemAnswer {
+  return {
+    xrayImageId: "IMG-ACTIVE",
+    templateId: "t1",
+    templateVersion: 1,
+    answers: [],
+    lastSavedAt: new Date().toISOString(),
+    submittedAt: null,
+    answeredBy: "emp-1",
+    status: "draft",
+    ...overrides,
+  };
+}
+
+async function seedActiveEntryWithAnswer(): Promise<ReturnType<typeof createMemoryDirectory>> {
+  const root = createMemoryDirectory("root");
+  await saveSampleMaster(root, MONTH, makeSample([makeRow("IMG-ACTIVE")]));
+  const assignResult = await appendDistributionEvents(root, MONTH, [
+    buildAssignEvent({ xrayImageId: "IMG-ACTIVE", assignedTo: "emp-1", eventBy: "admin" }),
+  ]);
+  if (!assignResult.ok) throw new Error(`seed assign failed: ${assignResult.error}`);
+  const answerResult = await upsertItemAnswer(root, MONTH, "emp-1", makeAnswer());
+  if (!answerResult.ok) throw new Error(`seed answer failed: ${answerResult.error}`);
+  return root;
+}
+
+describe("XrayInspectionResults quality note (P2-2)", () => {
+  it("a supervisor (ew.reopenAnswer) can write a quality note that persists to the employee's answer file", async () => {
+    writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = await seedActiveEntryWithAnswer();
+    render(<XrayInspectionResults directoryHandle={root} />);
+
+    await waitFor(() => expect(screen.getAllByText("IMG-ACTIVE").length).toBeGreaterThan(0));
+
+    fireEvent.click(screen.getByRole("row", { name: /IMG-ACTIVE/ }));
+
+    const textarea = await screen.findByPlaceholderText(DEFAULT_LABELS.ew_quality_note_placeholder);
+    fireEvent.change(textarea, { target: { value: "يرجى مراجعة زاوية التصوير." } });
+    fireEvent.click(screen.getByRole("button", { name: DEFAULT_LABELS.ew_quality_note_save }));
+
+    await waitFor(async () => {
+      const file = await loadEmployeeAnswers(root, MONTH, "emp-1");
+      const item = file.items.find((i) => i.xrayImageId === "IMG-ACTIVE");
+      expect(item?.qualityNote).toBe("يرجى مراجعة زاوية التصوير.");
+    });
+
+    // Independence: the write never touched referral/replacement/reopen requests.
+    const file = await loadEmployeeAnswers(root, MONTH, "emp-1");
+    expect(file.referralRequests ?? []).toHaveLength(0);
+    expect(file.replacementRequests ?? []).toHaveLength(0);
+    expect(file.reopenRequests ?? []).toHaveLength(0);
+  });
+
+  it("an employee (no ew.reopenAnswer) sees no writable control — permission-denied at the render boundary", async () => {
+    // Default employee permissions: ew.reopenAnswer is disabled (FEATURE_DEFAULTS),
+    // the same tier gating approve-referrals/approve-replacements.
+    writeSession({ role: "employee", username: "emp-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = await seedActiveEntryWithAnswer();
+    render(<XrayInspectionResults directoryHandle={root} />);
+
+    await waitFor(() => expect(screen.getAllByText("IMG-ACTIVE").length).toBeGreaterThan(0));
+
+    fireEvent.click(screen.getByRole("row", { name: /IMG-ACTIVE/ }));
+
+    await screen.findByText(DEFAULT_LABELS.ew_quality_note_empty_readonly);
+    expect(screen.queryByPlaceholderText(DEFAULT_LABELS.ew_quality_note_placeholder)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: DEFAULT_LABELS.ew_quality_note_save })).not.toBeInTheDocument();
+
+    // Data-layer confirmation: no note was ever persisted for this item.
+    const file = await loadEmployeeAnswers(root, MONTH, "emp-1");
+    const item = file.items.find((i) => i.xrayImageId === "IMG-ACTIVE");
+    expect(item?.qualityNote).toBeUndefined();
   });
 });

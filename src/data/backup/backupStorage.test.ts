@@ -4,7 +4,7 @@ import { createMemoryDirectory, setSimulatedWritePermission } from "../storage/m
 import type { DirectoryHandleLike, FileHandleLike } from "../storage/fileSystemAccess";
 import { safeWriteJson } from "../storage/safeWrite";
 import { WorkspacePermissionError } from "../storage/workspaceWriteAccess";
-import { getSystemRoot, getUserDataRoot } from "../workspace/workspacePaths";
+import { getSampleMainDir, getSystemRoot, getUserDataRoot } from "../workspace/workspacePaths";
 import { WORKSPACE_FILE_NAMES } from "../workspace/workspaceDefaults";
 import type { MonthManifestData } from "../population/monthTypes";
 import {
@@ -480,5 +480,41 @@ describe("loadArchiveStatus — manifest-based population shortcut (B3 perf)", (
 
     const [status] = await loadArchiveStatus(root, [month]);
     expect(status).toMatchObject({ hasPopulation: true, totalProcessedRows: 9 });
+  });
+});
+
+describe("loadArchiveStatus — distribution completed/pending surfacing (P2-1)", () => {
+  it("surfaces totalCompleted/totalPending from the already-loaded DistributionCurrentData without a new file read", async () => {
+    const root = makeRoot();
+    await seedPopulationLayout(root, "current");
+    const sampleMainDir = await getSampleMainDir(root, month.folderName, true);
+    await safeWriteJson(sampleMainDir, "distribution.current.json", {
+      monthFolderName: month.folderName,
+      derivedAt: "2026-05-31T12:00:00.000Z",
+      totalAssigned: 10,
+      totalCompleted: 6,
+      totalReplaced: 0,
+      totalPending: 4,
+      entries: [],
+    });
+
+    const [status] = await loadArchiveStatus(root, [month]);
+    expect(status).toMatchObject({
+      hasDistribution: true,
+      distributionCompleted: 6,
+      distributionPending: 4,
+    });
+  });
+
+  it("defaults distributionCompleted/distributionPending to 0 when no distribution.current.json exists", async () => {
+    const root = makeRoot();
+    await seedPopulationLayout(root, "current");
+
+    const [status] = await loadArchiveStatus(root, [month]);
+    expect(status).toMatchObject({
+      hasDistribution: false,
+      distributionCompleted: 0,
+      distributionPending: 0,
+    });
   });
 });

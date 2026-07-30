@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { Hash, Tag } from "lucide-react";
 import { FACT_FIELDS } from "../../../../../data/reportDesigner/query/fieldCatalog";
+import { useLabels } from "../../../../../data/labels/useLabels";
 
 export default function FieldsPanel() {
+  const labels = useLabels();
   const [search, setSearch] = useState("");
   const [dimOpen, setDimOpen] = useState(true);
   const [measOpen, setMeasOpen] = useState(true);
@@ -18,16 +20,16 @@ export default function FieldsPanel() {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <div className="rd-panel-header">
-        <span>الحقول</span>
+        <span>{labels.rd_fields_label}</span>
       </div>
       <input
         className="rd-fields-search"
         type="search"
-        placeholder="بحث في الحقول..."
+        placeholder={labels.rd_fields_search_placeholder}
         value={search}
         onChange={(e) => setSearch(e.target.value)}
         dir="rtl"
-        aria-label="بحث في الحقول"
+        aria-label={labels.rd_fields_search_aria}
       />
       <div style={{ flex: 1, overflowY: "auto" }}>
         <div className="rd-fields-group">
@@ -40,7 +42,7 @@ export default function FieldsPanel() {
             aria-expanded={dimOpen}
           >
             <span>{dimOpen ? "▾" : "▸"}</span>
-            <span>أبعاد ({dims.length})</span>
+            <span>{labels.rd_fields_dimensions_label.replace("{count}", String(dims.length))}</span>
           </div>
           {dimOpen &&
             dims.map((f) => (
@@ -72,7 +74,7 @@ export default function FieldsPanel() {
             aria-expanded={measOpen}
           >
             <span>{measOpen ? "▾" : "▸"}</span>
-            <span>مقاييس ({meas.length})</span>
+            <span>{labels.rd_fields_measures_label.replace("{count}", String(meas.length))}</span>
           </div>
           {measOpen &&
             meas.map((f) => (
@@ -96,7 +98,7 @@ export default function FieldsPanel() {
         </div>
         {dims.length === 0 && meas.length === 0 && (
           <p style={{ padding: "12px", color: "var(--rd-text-secondary)", fontSize: "13px" }}>
-            لا توجد حقول مطابقة
+            {labels.rd_fields_no_match}
           </p>
         )}
       </div>

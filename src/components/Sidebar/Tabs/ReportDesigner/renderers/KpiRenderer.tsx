@@ -11,20 +11,24 @@ import { DEFAULT_EXEC_CONFIG } from "../../../../../data/reporting/executiveRepo
 import type { PreparedPopulationRow } from "../../../../../data/population/populationTypes";
 import { aggregate } from "../../../../../data/reportDesigner/query/aggregations";
 import { useGlobalMonth } from "../../../../../data/month/useGlobalMonth";
+import { useLabels } from "../../../../../data/labels/useLabels";
+import type { Labels } from "../../../../../data/labels/labelsStore";
 
-const AGG_LABELS: Record<string, string> = {
-  count: "عدد",
-  distinctCount: "عدد مميز",
-  sum: "مجموع",
-  avg: "متوسط",
-  min: "أدنى",
-  max: "أقصى",
-  percentOfTotal: "نسبة",
-};
+function aggBadgeLabels(labels: Labels): Record<string, string> {
+  return {
+    count: labels.rd_agg_count,
+    distinctCount: labels.rd_agg_distinct_count,
+    sum: labels.rd_agg_sum,
+    avg: labels.rd_agg_avg,
+    min: labels.rd_agg_badge_min,
+    max: labels.rd_agg_badge_max,
+    percentOfTotal: labels.rd_agg_badge_percent,
+  };
+}
 
-function toLabel(v: unknown): string {
-  if (v === true || v === "true") return "نعم";
-  if (v === false || v === "false") return "لا";
+function toLabel(v: unknown, labels: Labels): string {
+  if (v === true || v === "true") return labels.rd_bool_yes;
+  if (v === false || v === "false") return labels.rd_bool_no;
   if (v == null) return "";
   return String(v);
 }
@@ -34,7 +38,7 @@ type KpiResult =
   | { kind: "tags"; values: string[] }
   | { kind: "breakdown"; rows: Array<{ label: string; count: number }>; total: number };
 
-function computeResult(rows: Array<Record<string, unknown>>, config: KpiConfig): KpiResult {
+function computeResult(rows: Array<Record<string, unknown>>, config: KpiConfig, labels: Labels): KpiResult {
   const field = config.valueField;
   const vals = rows.map((r) => r[field]);
 
@@ -45,7 +49,7 @@ function computeResult(rows: Array<Record<string, unknown>>, config: KpiConfig):
     for (const r of rows) {
       const gv = r[groupBy];
       if (gv == null) continue;
-      const key = toLabel(gv);
+      const key = toLabel(gv, labels);
       map.set(key, (map.get(key) ?? 0) + 1);
     }
     const sorted = Array.from(map.entries())
@@ -56,7 +60,7 @@ function computeResult(rows: Array<Record<string, unknown>>, config: KpiConfig):
 
   // distinctCount with small cardinality → render the distinct values as chips.
   if (config.agg === "distinctCount") {
-    const unique = Array.from(new Set(vals.filter((v) => v != null).map(toLabel)));
+    const unique = Array.from(new Set(vals.filter((v) => v != null).map((v) => toLabel(v, labels))));
     if (unique.length <= 8) return { kind: "tags", values: unique };
     return { kind: "number", value: unique.length };
   }
@@ -121,12 +125,14 @@ interface KpiRendererProps {
 }
 
 export default function KpiRenderer({ element }: KpiRendererProps) {
+  const labels = useLabels();
   const config = element.config as KpiConfig;
   const s = element.style;
   const rows = useExecutiveRows();
 
-  const result: KpiResult = rows ? computeResult(rows, config) : { kind: "number", value: -1 };
+  const result: KpiResult = rows ? computeResult(rows, config, labels) : { kind: "number", value: -1 };
   const isLoading = rows === null;
+  const AGG_LABELS = aggBadgeLabels(labels);
   const accentColor = s.borderColor ?? "#0078d4";
 
   const containerStyle: CSSProperties = {
@@ -207,7 +213,7 @@ export default function KpiRenderer({ element }: KpiRendererProps) {
               );
             })}
             {result.rows.length > 5 && (
-              <span style={{ fontSize: 9, color: "#a19f9d" }}>+{result.rows.length - 5} أخرى</span>
+              <span style={{ fontSize: 9, color: "#a19f9d" }}>+{result.rows.length - 5} {labels.rd_more_suffix}</span>
             )}
           </div>
         )}

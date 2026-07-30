@@ -1282,12 +1282,15 @@ const LEVEL_WEIGHT_BASIS_FOOTNOTE =
  * `stageCompareBars` no longer exists (removed, not just unused) and this
  * table is now the whole slot.
  *
- * Two additions beyond the pre-fan-out shape:
- *   1. A «ما يقيسه» column (`RISK_LEVELS[i].measures`) — the card had ~190px
- *      of vertical slack once stageCompareBars left, which this column uses.
- *   2. A tfoot footnote row (colspan across every column) carrying
- *      `LEVEL_WEIGHT_BASIS_FOOTNOTE` — the same two-basis caveat
- *      `slide-glossary-levels`'s Ledger table will carry.
+ * One addition beyond the pre-fan-out shape: a tfoot footnote row (colspan
+ * across every column) carrying `LEVEL_WEIGHT_BASIS_FOOTNOTE` — the same
+ * two-basis caveat `slide-glossary-levels`'s Ledger table carries.
+ *
+ * A «ما يقيسه» column (`RISK_LEVELS[i].measures`) briefly existed here
+ * (2026-07-25 fan-out plan §5) but was removed on 2026-07-29 (owner request,
+ * this date's edit log) — the definition already appears on each level's
+ * own card (`levelCardBody`) and on `glossaryLevelsLedgerTable`'s slot,
+ * so this figures-only table dropped it to stay focused on the numbers.
  *
  * ⚠️ THIS DELIBERATELY SUPERSEDES `deck2.test.ts`'s pre-2026-07-25
  * "levelFiguresTable byte-identity characterization" pin. That test existed
@@ -1318,18 +1321,16 @@ function levelFiguresTable(
       // Resolved BY IDENTITY (levelIndexForStage), not by loop position — see
       // CANONICAL_STAGE_ORDER's doc comment. `stages` can have a level
       // missing (zero sample rows), which shifts every later level's array
-      // position down by one; pairing this row's tone/weight/«ما يقيسه» text
-      // by `i` alone silently mispaired it with the WRONG level whenever that
-      // happened (2026-07-28 review fix).
+      // position down by one; pairing this row's tone/weight by `i` alone
+      // silently mispaired it with the WRONG level whenever that happened
+      // (2026-07-28 review fix).
       const idx = levelIndexForStage(s);
       const tone = idx >= 0 ? STAGE_TONES[idx] : "neutral";
       const share = (s.population / populationTotal) * 100;
       const weight = idx >= 0 ? LEVEL_DRAW_WEIGHTS[idx] ?? null : null;
-      const measures = idx >= 0 ? RISK_LEVELS[idx]?.measures ?? "—" : "—";
       return `<tr>
         <td><span class="v2-level-row-num ${tone}">${idx >= 0 ? idx + 1 : "—"}</span></td>
         <td>${esc(s.stageLabel)}</td>
-        <td>${esc(measures)}</td>
         <td>${fmtPct(weight, 0)}</td>
         <td>${fmtPct(share, 0)}</td>
         <td>${fmtNum(s.population)}</td>
@@ -1345,19 +1346,19 @@ function levelFiguresTable(
   // matched, so the row fell through to the plain `tfoot td` rule and
   // rendered as a second bold/white/tinted totals row — the opposite of a
   // caveat disclosing the weights DON'T sum to 100%.
-  const footnoteRow = `<tr class="v2-lg-footnote"><td colspan="8">${esc(LEVEL_WEIGHT_BASIS_FOOTNOTE)}</td></tr>`;
+  const footnoteRow = `<tr class="v2-lg-footnote"><td colspan="7">${esc(LEVEL_WEIGHT_BASIS_FOOTNOTE)}</td></tr>`;
   return ledgerTableCard({
     cardClass: "v2-level-table-card",
     theadCells: `
-        <th></th><th>المستوى</th><th>ما يقيسه</th><th>وزن العينة</th><th>من المجتمع</th>
+        <th></th><th>المستوى</th><th>وزن العينة</th><th>من المجتمع</th>
         <th>صورة</th><th>العيّنة</th><th>تغطية العيّنة</th>
       `,
     bodyRowsHtml: rows,
     totalsRowHtml: `<tr>
-        <td></td><td>الإجمالي</td><td></td><td>—</td><td>100%</td>
+        <td></td><td>الإجمالي</td><td>—</td><td>100%</td>
         <td>${fmtNum(totals.population)}</td><td>${fmtNum(totals.sample)}</td><td>${fmtPct(totals.coverage)}</td>
       </tr>${footnoteRow}`,
-    span: 8,
+    span: 7,
     rowCount: 0,
   });
 }
@@ -3572,13 +3573,21 @@ export function closingSlide(
  *  is false; they are dormant, not dead code. */
 const SHOW_MONTH_NUMBERS_SLIDE = false;
 
-export function buildDeckV2Slides(
+/**
+ * Yields a turn to the main thread (P3-7). Same convention as
+ * `sampleReport.ts`/`distributionReport.ts`/`management/managementDeck.ts`/
+ * `executive/document/index.ts` — a bare `setTimeout(resolve, 0)`, not a
+ * shared import (there isn't one; every yielding module keeps its own copy).
+ */
+const yieldToMain = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+export async function buildDeckV2Slides(
   model: ReportModel,
   generatedAt = new Date(),
   variantPreview = false,
   sourceRevisions?: SourceRevisions,
   seedBase = "",
-): string {
+): Promise<string> {
   const glossaryBuilders = glossarySlideBuilders(variantPreview); // levels page + terms page
 
   // (The section-2 opener funnel was removed with the separator's side column —
@@ -3726,25 +3735,31 @@ export function buildDeckV2Slides(
     coverSlide(model, generatedAt, variantPreview, seedBase),
     tocSlide(tocItems, 2, total, variantPreview),
   ];
+  await yieldToMain();
   if (SHOW_MONTH_NUMBERS_SLIDE) {
     slides.push(monthInNumbersSlide(model, 3, total, variantPreview));
+    await yieldToMain();
   }
   let num = glossaryStart;
   for (const build of glossaryBuilders) {
     slides.push(build(num, total));
     num += 1;
+    await yieldToMain();
   }
   for (const build of sectionOne) {
     slides.push(build(num, total));
     num += 1;
+    await yieldToMain();
   }
   for (const build of sectionTwo) {
     slides.push(build(num, total));
     num += 1;
+    await yieldToMain();
   }
   for (const build of sectionThree) {
     slides.push(build(num, total));
     num += 1;
+    await yieldToMain();
   }
   slides.push(closingSlide(model, sourceRevisions, closingNum, total, variantPreview));
   return slides.join("\n");

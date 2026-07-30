@@ -25,6 +25,14 @@ import { employeeClose, portAccuracyClose } from "./narrative";
 
 const TABS = ["الجزء الرابع", "الجزء الأول", "الجزء الثاني", "الجزء الثالث", "الجزء الخامس"];
 
+/**
+ * Yields a turn to the main thread (P3-7). Same convention as
+ * `sampleReport.ts`/`distributionReport.ts`/`management/managementDeck.ts` —
+ * a bare `setTimeout(resolve, 0)`, not a shared import (there isn't one;
+ * every yielding module keeps its own copy).
+ */
+const yieldToMain = () => new Promise((resolve) => setTimeout(resolve, 0));
+
 const UNMAPPED_TITLE = "هوية المفتش غير مرتبطة (لم تتم مطابقة BI)";
 const UNMAPPED_DETAIL =
   "تتطلب المساءلة الفردية ربط هوية المفتش من بيانات BI. لم تتم المطابقة هذه الفترة، لذا لا تُعرض أسماء أو أرقام مفتشين، ولا تُنسب الدقة لأي فرد.";
@@ -128,7 +136,7 @@ export function buildAccuracyByDecision(model: ReportModel, pageNo: string): str
 }
 
 /** One page per port (land first, by volume). Keyed on inspectorId; unmapped → empty state. */
-export function buildPerPortPages(model: ReportModel, startPageNo: number): { html: string[]; nextPageNo: number } {
+export async function buildPerPortPages(model: ReportModel, startPageNo: number): Promise<{ html: string[]; nextPageNo: number }> {
   const html: string[] = [];
   let pageNo = startPageNo;
 
@@ -158,6 +166,7 @@ export function buildPerPortPages(model: ReportModel, startPageNo: number): { ht
         ${emptyState(UNMAPPED_TITLE, UNMAPPED_DETAIL)}
         ${executiveClose(employeeClose(false, 0, null))}`;
       html.push(page({ id: `page-port-${slug(portName)}`, title: `المنفذ: ${portName}`, pageNo: no, railTabs: TABS, body }));
+      await yieldToMain();
       continue;
     }
 
@@ -195,6 +204,7 @@ export function buildPerPortPages(model: ReportModel, startPageNo: number): { ht
         action: insufficientPort ? "زيادة حجم العينة على هذا المنفذ قبل اتخاذ قرارات." : "متابعة المفتشين الأقل دقة على هذا المنفذ.",
       })}`;
     html.push(page({ id: `page-port-${slug(portName)}`, title: `المنفذ: ${portName}`, pageNo: no, railTabs: TABS, body }));
+    await yieldToMain();
   }
 
   return { html, nextPageNo: pageNo };

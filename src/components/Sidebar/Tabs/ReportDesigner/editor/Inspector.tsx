@@ -1,4 +1,6 @@
 import type { Aggregation, Element, ElementStyle } from "../../../../../data/reportDesigner/reportTypes";
+import { useLabels } from "../../../../../data/labels/useLabels";
+import type { Labels } from "../../../../../data/labels/labelsStore";
 
 interface InspectorProps {
   element: Element | null;
@@ -15,21 +17,25 @@ function updateStyle(el: Element, patch: Partial<ElementStyle>): Element {
 // canvas (its DIMENSION_OPTIONS ∪ MEASURE_OPTIONS, "none" excluded — a KPI element always
 // carries a concrete Aggregation once created; "none" there instead produces a plain text
 // element, see addFieldElement in ReportDesigner/index.tsx).
-const KPI_AGG_OPTIONS: Array<{ value: Aggregation; label: string }> = [
-  { value: "count", label: "عدد" },
-  { value: "distinctCount", label: "عدد مميز" },
-  { value: "sum", label: "مجموع" },
-  { value: "avg", label: "متوسط" },
-  { value: "min", label: "أدنى قيمة" },
-  { value: "max", label: "أقصى قيمة" },
-  { value: "percentOfTotal", label: "نسبة من الإجمالي" },
-];
+function kpiAggOptions(labels: Labels): Array<{ value: Aggregation; label: string }> {
+  return [
+    { value: "count", label: labels.rd_agg_count },
+    { value: "distinctCount", label: labels.rd_agg_distinct_count },
+    { value: "sum", label: labels.rd_agg_sum },
+    { value: "avg", label: labels.rd_agg_avg },
+    { value: "min", label: labels.rd_agg_min },
+    { value: "max", label: labels.rd_agg_max },
+    { value: "percentOfTotal", label: labels.rd_agg_percent_of_total },
+  ];
+}
 
 export default function Inspector({ element, onUpdate, canEdit }: InspectorProps) {
+  const labels = useLabels();
   if (!element) return null;
 
   const s = element.style;
   const cfg = element.config;
+  const KPI_AGG_OPTIONS = kpiAggOptions(labels);
 
   function num(val: number | undefined): string {
     return val != null ? String(val) : "";
@@ -48,11 +54,11 @@ export default function Inspector({ element, onUpdate, canEdit }: InspectorProps
   return (
     <div className="rd-inspector" dir="rtl">
       <div className="rd-inspector-section">
-        <p className="rd-inspector-heading">العنصر</p>
+        <p className="rd-inspector-heading">{labels.rd_insp_heading_element}</p>
 
         {/* Name */}
         <div className="rd-inspector-field">
-          <label className="rd-inspector-label">الاسم</label>
+          <label className="rd-inspector-label">{labels.rd_insp_label_name}</label>
           <input
             className="rd-inspector-input"
             type="text"
@@ -65,14 +71,14 @@ export default function Inspector({ element, onUpdate, canEdit }: InspectorProps
 
       {/* ── Geometry ── */}
       <div className="rd-inspector-section">
-        <p className="rd-inspector-heading">الموضع والحجم</p>
+        <p className="rd-inspector-heading">{labels.rd_insp_heading_geometry}</p>
         <div className="rd-inspector-grid4">
           {(
             [
-              { label: "س", key: "x" as const },
-              { label: "ص", key: "y" as const },
-              { label: "عرض", key: "w" as const },
-              { label: "ارتفاع", key: "h" as const },
+              { label: labels.rd_insp_label_x, key: "x" as const },
+              { label: labels.rd_insp_label_y, key: "y" as const },
+              { label: labels.rd_insp_label_w, key: "w" as const },
+              { label: labels.rd_insp_label_h, key: "h" as const },
             ] as Array<{ label: string; key: "x" | "y" | "w" | "h" }>
           ).map(({ label, key }) => (
             <div key={key} className="rd-inspector-field">
@@ -93,10 +99,10 @@ export default function Inspector({ element, onUpdate, canEdit }: InspectorProps
 
       {/* ── Style ── */}
       <div className="rd-inspector-section">
-        <p className="rd-inspector-heading">المظهر</p>
+        <p className="rd-inspector-heading">{labels.rd_insp_heading_style}</p>
 
         <div className="rd-inspector-field">
-          <label className="rd-inspector-label">لون الخلفية</label>
+          <label className="rd-inspector-label">{labels.rd_insp_label_fill}</label>
           <div className="rd-inspector-color-row">
             <input
               type="color"
@@ -117,7 +123,7 @@ export default function Inspector({ element, onUpdate, canEdit }: InspectorProps
         </div>
 
         <div className="rd-inspector-field">
-          <label className="rd-inspector-label">لون الحدود</label>
+          <label className="rd-inspector-label">{labels.rd_insp_label_border_color}</label>
           <div className="rd-inspector-color-row">
             <input
               type="color"
@@ -140,7 +146,7 @@ export default function Inspector({ element, onUpdate, canEdit }: InspectorProps
         </div>
 
         <div className="rd-inspector-field">
-          <label className="rd-inspector-label">سمك الحدود</label>
+          <label className="rd-inspector-label">{labels.rd_insp_label_border_width}</label>
           <input
             className="rd-inspector-input rd-inspector-input--num"
             type="number"
@@ -155,7 +161,7 @@ export default function Inspector({ element, onUpdate, canEdit }: InspectorProps
         </div>
 
         <div className="rd-inspector-field">
-          <label className="rd-inspector-label">لون النص</label>
+          <label className="rd-inspector-label">{labels.rd_insp_label_text_color}</label>
           <div className="rd-inspector-color-row">
             <input
               type="color"
@@ -179,7 +185,7 @@ export default function Inspector({ element, onUpdate, canEdit }: InspectorProps
 
         <div className="rd-inspector-grid2">
           <div className="rd-inspector-field">
-            <label className="rd-inspector-label">حجم الخط</label>
+            <label className="rd-inspector-label">{labels.rd_insp_label_font_size}</label>
             <input
               className="rd-inspector-input rd-inspector-input--num"
               type="number"
@@ -194,7 +200,7 @@ export default function Inspector({ element, onUpdate, canEdit }: InspectorProps
             />
           </div>
           <div className="rd-inspector-field">
-            <label className="rd-inspector-label">وزن الخط</label>
+            <label className="rd-inspector-label">{labels.rd_insp_label_font_weight}</label>
             <input
               className="rd-inspector-input rd-inspector-input--num"
               type="number"
@@ -213,7 +219,7 @@ export default function Inspector({ element, onUpdate, canEdit }: InspectorProps
 
         <div className="rd-inspector-grid2">
           <div className="rd-inspector-field">
-            <label className="rd-inspector-label">حشوة</label>
+            <label className="rd-inspector-label">{labels.rd_insp_label_padding}</label>
             <input
               className="rd-inspector-input rd-inspector-input--num"
               type="number"
@@ -227,7 +233,7 @@ export default function Inspector({ element, onUpdate, canEdit }: InspectorProps
             />
           </div>
           <div className="rd-inspector-field">
-            <label className="rd-inspector-label">شفافية (0–1)</label>
+            <label className="rd-inspector-label">{labels.rd_insp_label_opacity}</label>
             <input
               className="rd-inspector-input rd-inspector-input--num"
               type="number"
@@ -245,7 +251,7 @@ export default function Inspector({ element, onUpdate, canEdit }: InspectorProps
         </div>
 
         <div className="rd-inspector-field">
-          <label className="rd-inspector-label">محاذاة النص</label>
+          <label className="rd-inspector-label">{labels.rd_insp_label_text_align}</label>
           <select
             className="rd-inspector-select"
             value={s.textAlign ?? "right"}
@@ -258,20 +264,20 @@ export default function Inspector({ element, onUpdate, canEdit }: InspectorProps
               )
             }
           >
-            <option value="right">يمين</option>
-            <option value="center">وسط</option>
-            <option value="left">يسار</option>
+            <option value="right">{labels.rd_align_right}</option>
+            <option value="center">{labels.rd_align_center}</option>
+            <option value="left">{labels.rd_align_left}</option>
           </select>
         </div>
       </div>
 
       {/* ── Type-specific content ── */}
       <div className="rd-inspector-section">
-        <p className="rd-inspector-heading">المحتوى</p>
+        <p className="rd-inspector-heading">{labels.rd_insp_heading_content}</p>
 
         {cfg.kind === "text" && (
           <div className="rd-inspector-field">
-            <label className="rd-inspector-label">النص</label>
+            <label className="rd-inspector-label">{labels.rd_insp_label_text}</label>
             <textarea
               className="rd-inspector-textarea"
               rows={4}
@@ -286,7 +292,7 @@ export default function Inspector({ element, onUpdate, canEdit }: InspectorProps
 
         {cfg.kind === "shape" && (
           <div className="rd-inspector-field">
-            <label className="rd-inspector-label">نوع الشكل</label>
+            <label className="rd-inspector-label">{labels.rd_insp_label_shape_type}</label>
             <select
               className="rd-inspector-select"
               value={cfg.shape}
@@ -301,24 +307,24 @@ export default function Inspector({ element, onUpdate, canEdit }: InspectorProps
                 })
               }
             >
-              <option value="rect">مستطيل</option>
-              <option value="line">خط</option>
-              <option value="ellipse">بيضاوي</option>
-              <option value="divider">فاصل</option>
+              <option value="rect">{labels.rd_shape_rect}</option>
+              <option value="line">{labels.rd_shape_line}</option>
+              <option value="ellipse">{labels.rd_shape_ellipse}</option>
+              <option value="divider">{labels.rd_shape_divider}</option>
             </select>
           </div>
         )}
 
         {cfg.kind === "image" && (
           <p className="rd-inspector-placeholder">
-            صورة — لا يمكن تغييرها من هنا.
+            {labels.rd_insp_image_note}
           </p>
         )}
 
         {cfg.kind === "kpi" && (
           <>
             <div className="rd-inspector-field">
-              <label className="rd-inspector-label">الحقل المرتبط</label>
+              <label className="rd-inspector-label">{labels.rd_insp_label_bound_field}</label>
               <input
                 className="rd-inspector-input"
                 type="text"
@@ -329,7 +335,7 @@ export default function Inspector({ element, onUpdate, canEdit }: InspectorProps
             </div>
 
             <div className="rd-inspector-field">
-              <label className="rd-inspector-label">التجميع</label>
+              <label className="rd-inspector-label">{labels.rd_agg_heading}</label>
               <select
                 className="rd-inspector-select"
                 value={cfg.agg}
@@ -349,7 +355,7 @@ export default function Inspector({ element, onUpdate, canEdit }: InspectorProps
 
             {cfg.groupByField && (
               <div className="rd-inspector-field">
-                <label className="rd-inspector-label">التقسيم حسب</label>
+                <label className="rd-inspector-label">{labels.rd_insp_label_group_by}</label>
                 <div className="rd-inspector-color-row">
                   <input
                     className="rd-inspector-input"
@@ -369,7 +375,7 @@ export default function Inspector({ element, onUpdate, canEdit }: InspectorProps
                       })
                     }
                   >
-                    إزالة
+                    {labels.rd_remove_btn}
                   </button>
                 </div>
               </div>
@@ -379,7 +385,7 @@ export default function Inspector({ element, onUpdate, canEdit }: InspectorProps
 
         {(cfg.kind === "table" || cfg.kind === "chart") && (
           <p className="rd-inspector-placeholder">
-            سيتم الدعم في مرحلة لاحقة.
+            {labels.rd_insp_coming_soon}
           </p>
         )}
       </div>

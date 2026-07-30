@@ -2,7 +2,7 @@
 // renderers (document / deck / xlsx) all read `computeSampleLineage`, so proving
 // the model is correct proves the numbers every output shows.
 
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { computeSampleLineage, buildSampleDocument, buildSampleDeck, type SampleReportInput } from "./sampleReport";
 import { makeRow, makeManifest, makeSampleMaster } from "./reportTestFixtures";
@@ -72,17 +72,50 @@ describe("computeSampleLineage", () => {
 });
 
 describe("sample renderers", () => {
-  it("document renders the drawn image ids and is a self-contained HTML doc", () => {
-    const html = buildSampleDocument(input());
+  it("document renders the drawn image ids and is a self-contained HTML doc", async () => {
+    const html = await buildSampleDocument(input());
     expect(html.startsWith("<!DOCTYPE html>")).toBe(true);
     expect(html).toContain("IMG-1");
     expect(html).toContain("تقرير العينة");
   });
 
-  it("deck renders slides with the RNG seed and month label", () => {
-    const html = buildSampleDeck(input());
+  it("deck renders slides with the RNG seed and month label", async () => {
+    const html = await buildSampleDeck(input());
     expect(html).toContain("class=\"slide");
     expect(html).toContain("seed-1");
     expect(html).toContain("يونيو 2026");
+  });
+});
+
+// ─── Golden snapshot (P3-7) ────────────────────────────────────────────────────
+// Byte-identical proof that adding `await yieldToMain()` breaks inside these
+// builders (main-thread chunking, P3-7) changed ONLY timing, never output.
+// If either snapshot ever needs updating for a real content change, that
+// change must be deliberate and reviewed on its own — never used to paper
+// over an unintended regression introduced by a chunking edit.
+describe("sample renderers — golden snapshot (P3-7 chunking safety)", () => {
+  // formatIssueDate() defaults to `new Date()` (today's real date), so this
+  // byte-identity pin is only reproducible if the clock is frozen to the
+  // instant the snapshot was actually captured — otherwise it silently
+  // breaks on every day rollover (2026-07-30 CI run vs the 2026-07-29
+  // capture date). Frozen at UTC noon so local-timezone date rollover
+  // doesn't shift the captured calendar day either.
+  beforeEach(() => {
+    // toFake: ["Date"] only — these builders themselves `await yieldToMain()`
+    // (a real `setTimeout`) as part of P3-7's chunking; faking `setTimeout`
+    // too would hang those awaits forever without an explicit timer advance.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-07-29T12:00:00.000Z"));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("document output is byte-identical", async () => {
+    expect(await buildSampleDocument(input())).toMatchSnapshot();
+  });
+
+  it("deck output is byte-identical", async () => {
+    expect(await buildSampleDeck(input())).toMatchSnapshot();
   });
 });

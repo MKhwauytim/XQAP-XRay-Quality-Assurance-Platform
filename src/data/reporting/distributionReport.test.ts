@@ -1,7 +1,7 @@
 // Data-correctness tests for the distribution report model (Wave 3). The three
 // renderers (document / deck / xlsx) all read `computeDistributionModel`.
 
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { computeDistributionModel, buildDistributionDocument, buildDistributionDeck } from "./distributionReport";
 import { makeRow, makeDistribution } from "./reportTestFixtures";
@@ -52,16 +52,48 @@ describe("computeDistributionModel", () => {
 });
 
 describe("distribution renderers", () => {
-  it("document uses display names and is a self-contained HTML doc", () => {
-    const html = buildDistributionDocument(data(), "6-June-2026", { u1: "أحمد", u2: "سارة" });
+  it("document uses display names and is a self-contained HTML doc", async () => {
+    const html = await buildDistributionDocument(data(), "6-June-2026", { u1: "أحمد", u2: "سارة" });
     expect(html.startsWith("<!DOCTYPE html>")).toBe(true);
     expect(html).toContain("أحمد");
     expect(html).toContain("تقرير التوزيع");
   });
 
-  it("deck renders slides with the completion figure", () => {
-    const html = buildDistributionDeck(data(), "6-June-2026");
+  it("deck renders slides with the completion figure", async () => {
+    const html = await buildDistributionDeck(data(), "6-June-2026");
     expect(html).toContain("class=\"slide");
     expect(html).toContain("يونيو 2026");
+  });
+});
+
+// ─── Golden snapshot (P3-7) ────────────────────────────────────────────────────
+// Byte-identical proof that adding `await yieldToMain()` breaks inside these
+// builders (main-thread chunking, P3-7) changed ONLY timing, never output.
+// If either snapshot ever needs updating for a real content change, that
+// change must be deliberate and reviewed on its own — never used to paper
+// over an unintended regression introduced by a chunking edit.
+describe("distribution renderers — golden snapshot (P3-7 chunking safety)", () => {
+  // formatIssueDate() defaults to `new Date()` (today's real date), so this
+  // byte-identity pin is only reproducible if the clock is frozen to the
+  // instant the snapshot was actually captured — otherwise it silently
+  // breaks on every day rollover. Frozen at UTC noon so local-timezone date
+  // rollover doesn't shift the captured calendar day either.
+  beforeEach(() => {
+    // toFake: ["Date"] only — these builders themselves `await yieldToMain()`
+    // (a real `setTimeout`) as part of P3-7's chunking; faking `setTimeout`
+    // too would hang those awaits forever without an explicit timer advance.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-07-29T12:00:00.000Z"));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("document output is byte-identical", async () => {
+    expect(await buildDistributionDocument(data(), "6-June-2026", { u1: "أحمد", u2: "سارة" })).toMatchSnapshot();
+  });
+
+  it("deck output is byte-identical", async () => {
+    expect(await buildDistributionDeck(data(), "6-June-2026", { u1: "أحمد", u2: "سارة" })).toMatchSnapshot();
   });
 });

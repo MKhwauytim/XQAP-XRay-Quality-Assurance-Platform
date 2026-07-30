@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { X, Save } from "lucide-react";
 import type { DirectoryHandleLike } from "../../../../data/storage/fileSystemAccess";
 import type { ExecutiveReportInput } from "../../../../data/reporting/executiveReportTypes";
@@ -55,12 +55,24 @@ export default function DeckDesignCustomizer({ execInput, employeeDisplayNames, 
     return () => window.removeEventListener("message", onMessage as EventListener);
   }, []);
 
-  const html = useMemo(() => {
-    if (!ready) return null;
-    return buildExecutiveDeckV2(execInput, employeeDisplayNames, {
+  // P3-7: buildExecutiveDeckV2 is now async (main-thread-chunked), so this can
+  // no longer be a plain `useMemo` — it needs the same cancellation-guarded
+  // `useEffect` pattern already used above for `loadDeckStyleChoices`.
+  const [html, setHtml] = useState<string | null>(null);
+  useEffect(() => {
+    // Guard-only, no setState here (react-hooks/set-state-in-effect):
+    // `html` already starts `null` and there is no path back to `!ready`
+    // once `loadDeckStyleChoices` resolves, so skipping the effect body is
+    // enough — no stale-state reset needed.
+    if (!ready) return;
+    let cancelled = false;
+    void buildExecutiveDeckV2(execInput, employeeDisplayNames, {
       variantPreview: true,
       styleChoices: loadedChoices ?? {},
+    }).then((result) => {
+      if (!cancelled) setHtml(result);
     });
+    return () => { cancelled = true; };
   }, [ready, execInput, employeeDisplayNames, loadedChoices]);
 
   async function handleSave() {

@@ -4,7 +4,7 @@ import type { ManagedLoginUser } from "../../auth/userManagement";
 import type { DistributionEntry, DistributionEvent } from "./distributionTypes";
 import { getStageKey } from "../population/stageHelpers";
 import { hamiltonApportionment } from "../sampling/apportionment";
-import { createEventId, computeDaysRemainingForDeadline } from "./distributionLog";
+import { buildAssignEvent, computeDaysRemainingForDeadline } from "./distributionLog";
 
 export function isAssignableSampleRole(user: ManagedLoginUser): boolean {
   return user.role === "employee" || user.role === "supervisor";
@@ -193,32 +193,28 @@ export function calculateBulkAssignment(params: {
         : undefined;
 
       for (let i = 0; i < certCount && certIdx < certRows.length; i++, certIdx++) {
-        events.push({
-          eventId: createEventId(),
-          eventType: "assigned",
+        events.push(buildAssignEvent({
           xrayImageId: certRows[certIdx].xrayImageId,
           assignedTo: emp.username,
-          eventAt: now.toISOString(),
           eventBy: operatorUsername,
           notes: "تعيين تلقائي (CertScan)",
           dailyQuota: i === 0 ? dailyQuota : undefined,
           daysRemainingAtAssignment: i === 0 && daysRemaining != null ? daysRemaining : undefined,
-        });
+          eventAt: now.toISOString(),
+        }));
       }
 
       for (let i = 0; i < normCount && normIdx < normalRows.length; i++, normIdx++) {
-        events.push({
-          eventId: createEventId(),
-          eventType: "assigned",
+        events.push(buildAssignEvent({
           xrayImageId: normalRows[normIdx].xrayImageId,
           assignedTo: emp.username,
-          eventAt: now.toISOString(),
           eventBy: operatorUsername,
           notes: "تعيين تلقائي",
           // Only attach quota to first normal event if no cert events carried it
           dailyQuota: (certCount === 0 && i === 0) ? dailyQuota : undefined,
           daysRemainingAtAssignment: (certCount === 0 && i === 0 && daysRemaining != null) ? daysRemaining : undefined,
-        });
+          eventAt: now.toISOString(),
+        }));
       }
     }
   }

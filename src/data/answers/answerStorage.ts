@@ -252,6 +252,32 @@ export async function reopenItemAnswer(
   });
 }
 
+/**
+ * Set (or clear, on an empty/whitespace-only string) a supervisor coaching
+ * note on one item (P2-2). Independent of the referral/replacement/reopen
+ * `reviewNotes`/`DecisionEvent` trail — never touches those files or types.
+ * Idempotent no-op when the item doesn't exist yet (mirrors reopenItemAnswer):
+ * a note can only attach to an item the employee has already saved/submitted.
+ */
+export async function setItemQualityNote(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  username: string,
+  xrayImageId: string,
+  qualityNote: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  return updateEmployeeAnswerFile(directoryHandle, monthFolderName, username, (file) => {
+    const item = file.items.find((i) => i.xrayImageId === xrayImageId);
+    if (!item) return file; // idempotent no-op — no saved answer to annotate yet
+    const trimmed = qualityNote.trim();
+    const updated: ItemAnswer = { ...item, qualityNote: trimmed.length > 0 ? trimmed : undefined };
+    return {
+      ...file,
+      items: file.items.map((i) => (i.xrayImageId === xrayImageId ? updated : i)),
+    };
+  });
+}
+
 /** Idempotently append a referral request to the originating employee's personal file. */
 export async function appendReferralToEmployee(
   directoryHandle: DirectoryHandleLike,

@@ -157,15 +157,15 @@ function makeMaliciousExecInput(): {
 }
 
 describe("buildExecutiveReport (executive document) — XSS escaping", () => {
-  it("never renders injected markup as live HTML", () => {
+  it("never renders injected markup as live HTML", async () => {
     const { input, employeeDisplayNames } = makeMaliciousExecInput();
-    const html = buildExecutiveReport(input, employeeDisplayNames);
+    const html = await buildExecutiveReport(input, employeeDisplayNames);
     expect(findLiveInjection(html)).toBeNull();
   });
 
-  it("renders the injected port name escaped (marker + escaped <script> present)", () => {
+  it("renders the injected port name escaped (marker + escaped <script> present)", async () => {
     const { input, employeeDisplayNames } = makeMaliciousExecInput();
-    const html = buildExecutiveReport(input, employeeDisplayNames);
+    const html = await buildExecutiveReport(input, employeeDisplayNames);
     expect(html).toContain(XSS_MARKER);
     expect(html).toContain("&lt;script&gt;");
     expect(html).not.toContain("<script>alert");
@@ -183,9 +183,9 @@ describe("buildExecutiveDeck (v1 deck) — XSS escaping (periodId regression, v4
 });
 
 describe("buildExecutiveDeckV2 (deck2) — XSS escaping", () => {
-  it("escapes injected data but keeps its own legitimate <script> nav chrome", () => {
+  it("escapes injected data but keeps its own legitimate <script> nav chrome", async () => {
     const { input, employeeDisplayNames } = makeMaliciousExecInput();
-    const html = buildExecutiveDeckV2(input, employeeDisplayNames);
+    const html = await buildExecutiveDeckV2(input, employeeDisplayNames);
     expect(findLiveInjection(html)).toBeNull();
     expect(html).toContain(XSS_MARKER);
     expect(html).toContain("&lt;script&gt;");

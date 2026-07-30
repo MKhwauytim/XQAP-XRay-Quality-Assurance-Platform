@@ -343,7 +343,7 @@ describe("workflow · answer (saveEmployeeAnswers + read-back)", () => {
 
 // ── Stage 6: report ─────────────────────────────────────────────────────────
 describe("workflow · report (buildExecutiveReport + buildManagementReport)", () => {
-  it("happy: builds Arabic RTL reports carrying the pipeline data", () => {
+  it("happy: builds Arabic RTL reports carrying the pipeline data", async () => {
     const input = {
       monthFolderName: "5-May-2026",
       populationRows: a.preparedRows,
@@ -353,7 +353,7 @@ describe("workflow · report (buildExecutiveReport + buildManagementReport)", ()
       template: null,
       config: DEFAULT_EXEC_CONFIG,
     };
-    const exec = buildExecutiveReport(input);
+    const exec = await buildExecutiveReport(input);
     const mgmt = buildManagementReport(input);
 
     expect(exec.length).toBeGreaterThan(1000);
@@ -364,7 +364,7 @@ describe("workflow · report (buildExecutiveReport + buildManagementReport)", ()
     expect(mgmt).toContain(String(a.preparedRows.length));
   });
 
-  it("failure: an empty population renders without throwing (empty-state)", () => {
+  it("failure: an empty population renders without throwing (empty-state)", async () => {
     const emptyInput = {
       monthFolderName: "5-May-2026",
       populationRows: [] as PreparedPopulationRow[],
@@ -374,8 +374,8 @@ describe("workflow · report (buildExecutiveReport + buildManagementReport)", ()
       template: null,
       config: DEFAULT_EXEC_CONFIG,
     };
-    expect(() => buildExecutiveReport(emptyInput)).not.toThrow();
+    const exec = await buildExecutiveReport(emptyInput);
     expect(() => buildManagementReport(emptyInput)).not.toThrow();
-    expect(buildExecutiveReport(emptyInput).length).toBeGreaterThan(500);
+    expect(exec.length).toBeGreaterThan(500);
   });
 });

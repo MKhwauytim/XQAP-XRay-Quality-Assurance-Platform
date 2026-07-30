@@ -6,6 +6,8 @@ import {
   Type,
 } from "lucide-react";
 import type { Element } from "../../../../../data/reportDesigner/reportTypes";
+import { useLabels } from "../../../../../data/labels/useLabels";
+import type { Labels } from "../../../../../data/labels/labelsStore";
 import Inspector from "./Inspector";
 
 interface VizPanelProps {
@@ -19,19 +21,23 @@ interface VizPanelProps {
 
 const SW = 1.8;
 
-const VIZ_TYPES: Array<{
+function vizTypes(labels: Labels): Array<{
   label: string;
   icon: React.ReactNode;
   draggable: boolean;
   key: "text" | "shape" | "image" | "line";
-}> = [
-  { label: "نص", icon: <Type size={22} strokeWidth={SW} />, draggable: true, key: "text" },
-  { label: "شكل", icon: <Square size={22} strokeWidth={SW} />, draggable: true, key: "shape" },
-  { label: "صورة", icon: <Image size={22} strokeWidth={SW} />, draggable: false, key: "image" },
-  { label: "خط", icon: <Minus size={22} strokeWidth={SW} />, draggable: true, key: "line" },
-];
+}> {
+  return [
+    { label: labels.rd_viz_label_text, icon: <Type size={22} strokeWidth={SW} />, draggable: true, key: "text" },
+    { label: labels.rd_viz_label_shape, icon: <Square size={22} strokeWidth={SW} />, draggable: true, key: "shape" },
+    { label: labels.rd_viz_label_image, icon: <Image size={22} strokeWidth={SW} />, draggable: false, key: "image" },
+    { label: labels.rd_shape_line, icon: <Minus size={22} strokeWidth={SW} />, draggable: true, key: "line" },
+  ];
+}
 
 export default function VizPanel({ selectedElement, onAddElement, onImageSelected, onUpdate, canEdit }: VizPanelProps) {
+  const labels = useLabels();
+  const VIZ_TYPES = vizTypes(labels);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   function handleImageFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -57,7 +63,7 @@ export default function VizPanel({ selectedElement, onAddElement, onImageSelecte
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <div className="rd-panel-header">
-        <span>التصورات</span>
+        <span>{labels.rd_viz_panel_title}</span>
       </div>
       <div className="rd-viz-grid">
         {VIZ_TYPES.map((t) => (
@@ -90,7 +96,7 @@ export default function VizPanel({ selectedElement, onAddElement, onImageSelecte
       />
       <div className="rd-format-section">
         <div className="rd-panel-header">
-          <span>التنسيق</span>
+          <span>{labels.rd_format_label}</span>
         </div>
         <Inspector element={selectedElement} onUpdate={handleInspectorUpdate} canEdit={canEdit} />
       </div>

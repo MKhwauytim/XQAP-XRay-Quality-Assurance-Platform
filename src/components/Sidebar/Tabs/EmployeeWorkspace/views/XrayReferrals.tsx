@@ -61,8 +61,8 @@ import {
 import { submitReopenRequest } from "../../../../../data/referral/requestReopen";
 import type { ReferralRequest, ReplacementRequest } from "../../../../../data/referral/referralTypes";
 import { useLabels } from "../../../../../data/labels/useLabels";
-import { formatStageLabel } from "../../Population/components/helpers";
-import type { PreparedPopulationRow } from "../../Population/processing/populationProcessingTypes";
+import { formatStageLabel } from "../../../../../data/population/stageHelpers";
+import type { PreparedPopulationRow } from "../../../../../data/population/populationTypes";
 import {
   QueueToolbar,
   SelectionActionBar,

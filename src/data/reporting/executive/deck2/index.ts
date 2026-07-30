@@ -16,7 +16,7 @@ import { setActiveStyleChoices } from "./slideKit";
 import { SECTION_THREE_CSS } from "./section3";
 import { esc } from "../primitives";
 import { icon } from "../ui/icons";
-import { openOrDownload } from "../../htmlReport";
+import { openReportWindow, writeReportToWindow } from "../../htmlReport";
 import { SOURCE_REVISIONS_CSS, sourceRevisionsFooterHtml } from "../../sourceRevisions";
 import { ARABIC_FONT_FACE_CSS } from "../../../../branding/fonts";
 import type { ExecutiveReportInput } from "../../executiveReportTypes";
@@ -410,41 +410,99 @@ ${footerNote}
 </html>`;
 }
 
-export function buildExecutiveDeckV2(
-  input: ExecutiveReportInput,
-  employeeDisplayNames: Record<string, string> = {},
-  opts?: { variantPreview?: boolean; styleChoices?: Record<string, number> },
-): string {
-  const variantPreview = opts?.variantPreview ?? false;
-  setActiveStyleChoices(opts?.styleChoices ?? null);
+/**
+ * Reentrancy guard (P3-7). `buildDeckV2Slides` is now chunked with
+ * `await yieldToMain()` breaks, so a build can yield the event loop mid-
+ * render. `activeStyleChoices` in `slideKit.ts` is a single MODULE-LEVEL
+ * variable, set once at the top of a build and read by every slide's
+ * `renderVariants()` call throughout that build (see `setActiveStyleChoices`'s
+ * own doc comment there) — its previous "reports are always built
+ * synchronously in one JS turn, so no cross-call interference is possible"
+ * invariant no longer holds once yields are in the mix: a second concurrent
+ * `buildExecutiveDeckV2` call (e.g. a double-click, or two report flows
+ * overlapping) could start while a first call is paused at a yield, call
+ * `setActiveStyleChoices` with ITS OWN choices, and corrupt the first call's
+ * remaining slides with the wrong style choices once it resumes.
+ *
+ * `deckBuildQueue` serializes concurrent callers so at most one build's
+ * style-choice window is ever open at a time — the same "one promise chain
+ * per resource, gate-based" idiom `withFallbackLock` in
+ * `src/data/storage/webLocks.ts` already uses for cross-tab/cross-call
+ * serialization, adapted here to a single implicit in-module resource (this
+ * function has exactly one thing to serialize, so no resource-name `Map` is
+ * needed). A second caller queues behind the first and only starts its own
+ * `setActiveStyleChoices` once the first call's `finally` has reset it to
+ * `null` and released the gate — verified by
+ * `deck2.test.ts`'s "concurrent-call reentrancy guard" test, which fires two
+ * overlapping builds with DIFFERENT `styleChoices` and asserts each call's
+ * output reflects only its own choice.
+ */
+let deckBuildQueue: Promise<unknown> = Promise.resolve();
+
+async function withDeckBuildLock<T>(callback: () => Promise<T>): Promise<T> {
+  const previous = deckBuildQueue;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const next = previous.then(() => gate);
+  deckBuildQueue = next;
+
+  await previous.catch(() => undefined);
   try {
-    const model = buildReportModel(input, employeeDisplayNames);
-    const slides = buildDeckV2Slides(
-      model,
-      new Date(),
-      variantPreview,
-      input.sourceRevisions,
-      input.monthFolderName,
-    );
-    return buildDeckV2Html(
-      slides,
-      formatMonthFolderShortLabel(input.monthFolderName),
-      variantPreview,
-      sourceRevisionsFooterHtml(input.sourceRevisions, esc),
-    );
+    return await callback();
   } finally {
-    setActiveStyleChoices(null);
+    release();
+    // Drop the queue back to a fresh resolved promise once no one is queued
+    // behind us, mirroring `withFallbackLock`'s own map-entry cleanup.
+    if (deckBuildQueue === next) {
+      deckBuildQueue = Promise.resolve();
+    }
   }
 }
 
-export function openExecutiveDeckV2(
+export async function buildExecutiveDeckV2(
+  input: ExecutiveReportInput,
+  employeeDisplayNames: Record<string, string> = {},
+  opts?: { variantPreview?: boolean; styleChoices?: Record<string, number> },
+): Promise<string> {
+  return withDeckBuildLock(async () => {
+    const variantPreview = opts?.variantPreview ?? false;
+    setActiveStyleChoices(opts?.styleChoices ?? null);
+    try {
+      const model = buildReportModel(input, employeeDisplayNames);
+      const slides = await buildDeckV2Slides(
+        model,
+        new Date(),
+        variantPreview,
+        input.sourceRevisions,
+        input.monthFolderName,
+      );
+      return buildDeckV2Html(
+        slides,
+        formatMonthFolderShortLabel(input.monthFolderName),
+        variantPreview,
+        sourceRevisionsFooterHtml(input.sourceRevisions, esc),
+      );
+    } finally {
+      setActiveStyleChoices(null);
+    }
+  });
+}
+
+/**
+ * Opens the target tab synchronously (still inside the click's user gesture,
+ * P3-7) BEFORE the now-chunked `buildExecutiveDeckV2` build runs, then writes
+ * the finished HTML in once ready — same pattern as `openSampleReport`/
+ * `openDistributionDocument`/`openManagementDeck`/`openExecutiveReport`.
+ */
+export async function openExecutiveDeckV2(
   input: ExecutiveReportInput,
   employeeDisplayNames: Record<string, string> = {},
   styleChoices?: Record<string, number>,
-): void {
-  openOrDownload(
-    buildExecutiveDeckV2(input, employeeDisplayNames, { styleChoices }),
-    `العرض_التنفيذي_${input.monthFolderName}.html`,
-  );
+): Promise<void> {
+  const reportWindow = openReportWindow();
+  const html = await buildExecutiveDeckV2(input, employeeDisplayNames, { styleChoices });
+  writeReportToWindow(reportWindow, html, `العرض_التنفيذي_${input.monthFolderName}.html`);
 }
 

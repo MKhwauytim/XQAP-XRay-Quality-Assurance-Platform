@@ -21,13 +21,16 @@ const LOADING_HTML = `<!DOCTYPE html><html lang="ar" dir="rtl"><body style="marg
 let input: ExecutiveReportInput | null = null;
 const cache: { v1?: string; v2?: string } = {};
 
-function deckHtml(which: "v2" | "v1"): string {
+// P3-7: buildExecutiveDeckV2 is now async (main-thread-chunked with
+// `await yieldToMain()` breaks) — deckHtml awaits it and caches the resolved
+// string, same as before.
+async function deckHtml(which: "v2" | "v1"): Promise<string> {
   input ??= buildPreviewInput();
   if (which === "v2") {
     // Always request variant-preview mode here: this dev tool's whole purpose
     // is style-variant exploration (see deck2/index.ts's `variantPreview` opt).
     // Production callers (once deck2 is wired into the real app) omit `opts`.
-    cache.v2 ??= buildExecutiveDeckV2(input, {}, { variantPreview: true });
+    cache.v2 ??= await buildExecutiveDeckV2(input, {}, { variantPreview: true });
     return cache.v2;
   }
   cache.v1 ??= buildExecutiveDeck(input);
@@ -42,11 +45,14 @@ function show(which: "v2" | "v1"): void {
     return;
   }
   frame.srcdoc = LOADING_HTML;
-  // Let the placeholder paint before the (synchronous) model + deck build.
+  // Let the placeholder paint before the (still effectively synchronous for
+  // v1, now chunked for v2) model + deck build.
   setTimeout(() => {
-    const t0 = performance.now();
-    frame.srcdoc = deckHtml(which);
-    console.info(`[deck-preview] built ${which} in ${Math.round(performance.now() - t0)}ms`);
+    void (async () => {
+      const t0 = performance.now();
+      frame.srcdoc = await deckHtml(which);
+      console.info(`[deck-preview] built ${which} in ${Math.round(performance.now() - t0)}ms`);
+    })();
   }, 30);
 }
 

@@ -26,7 +26,12 @@ const VIEWER_JS = `(function(){
     var a=document.createElement('a');
     a.href='#'+p.id;
     var num=String(i+1).padStart(2,'0');
-    a.innerHTML='<span>'+p.dataset.title+'</span><b>'+num+'</b>';
+    var span=document.createElement('span');
+    span.textContent=p.dataset.title;
+    var b=document.createElement('b');
+    b.textContent=num;
+    a.appendChild(span);
+    a.appendChild(b);
     toc.appendChild(a);
   });
   var links=[].slice.call(toc.querySelectorAll('a'));

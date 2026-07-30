@@ -71,7 +71,7 @@ export default function Sidebar({
       id="app-sidebar"
       ref={mobileFocusTrapRef}
       className={`sidebar ${isCollapsed ? "collapsed" : ""}${isMobileOpen ? " mobile-open" : ""}`}
-      aria-label="القائمة الجانبية"
+      aria-label={L.sidebar_aria_label}
       role={isMobileOpen ? "dialog" : undefined}
       aria-modal={isMobileOpen ? true : undefined}
     >
@@ -79,11 +79,11 @@ export default function Sidebar({
         <img
           className="sidebar-logo"
           src={ZATCA_LOGO_URL}
-          alt="هيئة الزكاة والضريبة والجمارك"
+          alt={L.sidebar_logo_alt}
           onError={hideBrokenLogo}
         />
         <div className="sidebar-title-wrap">
-          <span className="sidebar-kicker">نظام جودة الأشعة</span>
+          <span className="sidebar-kicker">{L.sidebar_kicker}</span>
           <p className="sidebar-title">{L.sidebar_title}</p>
           <p className="sidebar-subtitle">{L.sidebar_subtitle}</p>
         </div>
@@ -92,7 +92,7 @@ export default function Sidebar({
           type="button"
           className="sidebar-mobile-close"
           onClick={onMobileClose}
-          aria-label="إغلاق قائمة التنقل"
+          aria-label={L.sidebar_mobile_close_aria}
         >
           <X size={20} aria-hidden />
         </button>
@@ -100,15 +100,15 @@ export default function Sidebar({
           type="button"
           className="sidebar-collapse-button"
           onClick={onToggleCollapse}
-          aria-label={isCollapsed ? "توسيع القائمة" : "طي القائمة"}
-          title={isCollapsed ? "توسيع القائمة" : "طي القائمة"}
+          aria-label={isCollapsed ? L.sidebar_expand_label : L.sidebar_collapse_label}
+          title={isCollapsed ? L.sidebar_expand_label : L.sidebar_collapse_label}
         >
           <CollapseIcon isCollapsed={isCollapsed} />
         </button>
       </div>
 
-      <nav className="sidebar-nav" aria-label="تبويبات النظام">
-        {!isCollapsed && <div className="sidebar-nav-heading">إدارة النظام</div>}
+      <nav className="sidebar-nav" aria-label={L.sidebar_nav_aria}>
+        {!isCollapsed && <div className="sidebar-nav-heading">{L.sidebar_nav_heading}</div>}
         {tabs.map((tab) => {
           const isActive = activeTabId === tab.id;
           // Sub-tab visibility is decided solely by the permission matrix, applied

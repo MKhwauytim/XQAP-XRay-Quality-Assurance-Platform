@@ -2,6 +2,31 @@ export const DEFAULT_LABELS = {
   // Sidebar
   sidebar_title:   "لوحة الإدارة",
   sidebar_subtitle: "مسارات العمل الرئيسية",
+  sidebar_aria_label:        "القائمة الجانبية",
+  sidebar_logo_alt:          "هيئة الزكاة والضريبة والجمارك",
+  sidebar_kicker:            "نظام جودة الأشعة",
+  sidebar_mobile_close_aria: "إغلاق قائمة التنقل",
+  sidebar_expand_label:      "توسيع القائمة",
+  sidebar_collapse_label:    "طي القائمة",
+  sidebar_nav_aria:          "تبويبات النظام",
+  sidebar_nav_heading:       "إدارة النظام",
+
+  // AdminToolbar (P3-6) — first-ever label wiring for this file
+  toolbar_role_admin:         "الإدارة",
+  toolbar_role_manager:       "المدير",
+  toolbar_role_supervisor:    "المشرف",
+  toolbar_role_employee:      "الموظف",
+  toolbar_role_guest:         "ضيف",
+  toolbar_mode_kicker:        "الوضع الحالي",
+  toolbar_mode_demo:          "وضع العرض (قراءة فقط)",
+  toolbar_mode_value:         "وضع {role}",
+  toolbar_preview_flag:       "معاينة",
+  toolbar_workspace_title:    "مساحة العمل: {name}",
+  toolbar_preview_role_label: "معاينة الدور",
+  toolbar_preview_role_aria:  "معاينة الأدوار",
+  toolbar_user_title:         "المستخدم: {name}",
+  toolbar_feedback_label:     "التواصل والاقتراحات",
+  toolbar_logout_btn:         "تسجيل الخروج",
 
   // Settings page
   page_settings_eyebrow:  "إدارة النظام",
@@ -21,6 +46,7 @@ export const DEFAULT_LABELS = {
   dt_search_placeholder:     "بحث في جميع الأعمدة...",
   dt_clear_filters:          "مسح التصفية",
   dt_export_xlsx:            "تصدير XLSX",
+  dt_exporting:              "جارٍ التصدير...",
   dt_columns_button:         "الأعمدة",
   dt_columns_title:          "الأعمدة",
   dt_columns_hint:           "اسحب للترتيب · انقر لإخفاء/إظهار",
@@ -103,6 +129,20 @@ export const DEFAULT_LABELS = {
   xray_results_no_months: "لا توجد أشهر معالجة لعرض نتائج فحص الأشعة.",
   xray_results_no_rows:   "لا توجد نتائج فحص محفوظة للشهر المحدد.",
 
+  // Supervisor quality note on an item answer (P2-2) — independent of the
+  // referral/replacement/reopen reviewNotes/DecisionEvent approval trail.
+  col_quality_note:                "ملاحظة الجودة",
+  ew_quality_note_add:             "إضافة ملاحظة",
+  ew_quality_note_panel_title:     "ملاحظة الجودة (إشراف)",
+  ew_quality_note_hint:            "ملاحظة إشرافية مستقلة لأغراض التوجيه — لا تُستخدم لاعتماد أو رفض أي طلب.",
+  ew_quality_note_placeholder:     "أضف ملاحظة إشرافية اختيارية حول جودة هذه العينة...",
+  ew_quality_note_save:            "حفظ الملاحظة",
+  ew_quality_note_saving:          "جارٍ الحفظ...",
+  ew_quality_note_saved:           "تم حفظ ملاحظة الجودة.",
+  ew_quality_note_no_answer:       "لا توجد إجابة محفوظة بعد لإضافة ملاحظة عليها.",
+  ew_quality_note_empty_readonly:  "لا توجد ملاحظة جودة لهذه العينة.",
+  ew_quality_note_denied:          "لا تملك صلاحية إضافة ملاحظات الجودة، أو أن مساحة العمل للقراءة فقط.",
+
   // Population — sampling & processing guards
   sample_redraw_blocked: "لا يمكن إعادة سحب العينة بعد بدء التوزيع: يوجد سجل توزيع فعّال لهذا الشهر، وإعادة السحب ستؤدي إلى فقدان التعيينات والإجابات المسجلة.",
 
@@ -138,7 +178,10 @@ export const DEFAULT_LABELS = {
   archive_month_action_kicker:      "إدارة الشهر",
   archive_month_closed_badge:       "مُقفل",
   archive_close_month_confirm:      "سيتم إقفال الشهر ومنع أي تعديل على بياناته (العينات، التوزيع، الإجابات، الإحالات). هل أنت متأكد؟",
+  archive_close_month_confirm_pending: "تنبيه: لا يزال هناك {pending} تعييناً غير مكتمل في توزيع هذا الشهر. سيتم إقفال الشهر رغم ذلك ومنع أي تعديل على بياناته.",
   archive_reopen_month_confirm:     "سيتم إعادة فتح الشهر والسماح بالتعديل مجدداً. يتطلب ذكر السبب.",
+  archive_distribution_completed_label: "مكتمل",
+  archive_distribution_pending_label:   "معلّق",
   archive_close_note_placeholder:   "ملاحظة الإقفال (اختياري)",
   archive_reopen_reason_placeholder: "سبب إعادة الفتح (إلزامي)",
   msg_month_closed_write_blocked:   "هذا الشهر مُقفل — لا يمكن حفظ أي تعديل. تواصل مع مدير النظام لإعادة فتحه.",
@@ -292,6 +335,8 @@ export const DEFAULT_LABELS = {
   app_workspace_aria:        "مساحة العمل",
   app_no_tabs_title:         "لا توجد تبويبات متاحة",
   app_no_tabs_desc_prefix:   "لا توجد صفحات مفعلة لهذا الدور حالياً:",
+  app_mobile_nav_aria:       "فتح قائمة التنقل",
+  app_mobile_nav_label:      "القائمة",
 
   // ── WorkspaceGate — C6 (Batch 2) label coverage audit ──
   wsgate_view_passcode_error:  "رمز غير صحيح.",
@@ -411,6 +456,131 @@ export const DEFAULT_LABELS = {
   um_action_type_month_closed:               "إقفال شهر",
   um_action_type_month_reopened:             "إعادة فتح شهر",
   um_action_type_backup_restored:            "استرجاع نسخة احتياطية",
+
+  // ── ReportDesigner — label-system integration (P2-4) ──
+  // index.tsx / EditorHost
+  rd_edit_denied_msg:        "لا تملك صلاحية تعديل تصاميم التقارير، أو أن مساحة العمل للقراءة فقط.",
+  rd_new_element_name:       "عنصر جديد",
+  rd_default_text_content:   "نص",
+  rd_default_image_name:     "صورة",
+  rd_page_default_name:      "صفحة {n}",
+  rd_list_edit_denied_title: "يتطلب تعديل التصاميم صلاحية التعديل ومساحة عمل قابلة للكتابة.",
+  rd_index_load_error:       "خطأ غير متوقع عند تحميل القائمة.",
+  rd_page_title:             "مصمم التقارير",
+  rd_no_workspace_msg:       "الرجاء اختيار مجلد العمل أولاً.",
+  rd_name_required_error:    "الرجاء إدخال اسم للتقرير.",
+  rd_open_error:             "تعذّر تحميل التقرير. ربما تم حذف الملف.",
+  rd_page_eyebrow:           "تصميم التقارير",
+  rd_page_subtitle:          "صمّم تقارير مخصصة — صفحات وعناصر ومخططات من بيانات الشهر المعالج.",
+  rd_new_report_btn:         "+ تقرير جديد",
+  rd_report_name_placeholder: "اسم التقرير",
+  rd_creating_label:         "جاري الإنشاء...",
+  rd_create_btn:             "إنشاء",
+  rd_cancel_btn:             "إلغاء",
+  rd_empty_title:            "لا توجد تقارير محفوظة بعد",
+  rd_empty_desc:             "أنشئ أول تقرير مخصص لبدء تصميم صفحاته وعناصره.",
+  rd_open_aria:              "فتح {name}",
+  rd_thumb_loading:          "جاري التحميل…",
+  rd_ellipsis:               "…",
+  rd_open_btn:                "فتح",
+  rd_delete_btn:              "حذف",
+  rd_delete_dialog_title:    "حذف التقرير",
+  rd_delete_dialog_message:  "هل أنت متأكد من حذف هذا التقرير؟ لا يمكن التراجع عن هذا الإجراء.",
+
+  // Shared aggregation-type labels (FieldDropDialog picker options, Inspector's KPI
+  // aggregation select, and KpiRenderer's own AGG_LABELS where the wording matches).
+  rd_agg_none:              "بدون تجميع",
+  rd_agg_count:             "عدد",
+  rd_agg_distinct_count:    "عدد مميز",
+  rd_agg_sum:               "مجموع",
+  rd_agg_avg:               "متوسط",
+  rd_agg_min:               "أدنى قيمة",
+  rd_agg_max:               "أقصى قيمة",
+  rd_agg_percent_of_total:  "نسبة من الإجمالي",
+  // KpiRenderer's compact aggregation badge uses shorter wording for min/max/percent
+  // than the picker/inspector options above — kept as distinct keys, not a dedup.
+  rd_agg_badge_min:         "أدنى",
+  rd_agg_badge_max:         "أقصى",
+  rd_agg_badge_percent:     "نسبة",
+  rd_agg_heading:           "التجميع",
+  rd_role_dimension:        "بُعد",
+  rd_role_measure:          "مقياس",
+
+  // FieldDropDialog
+  rd_field_dialog_aria: "إعدادات الحقل: {field}",
+  rd_add_btn:           "إضافة",
+
+  // Inspector
+  rd_insp_heading_element:     "العنصر",
+  rd_insp_label_name:          "الاسم",
+  rd_insp_heading_geometry:    "الموضع والحجم",
+  rd_insp_label_x:             "س",
+  rd_insp_label_y:             "ص",
+  rd_insp_label_w:             "عرض",
+  rd_insp_label_h:             "ارتفاع",
+  rd_insp_heading_style:       "المظهر",
+  rd_insp_label_fill:          "لون الخلفية",
+  rd_insp_label_border_color:  "لون الحدود",
+  rd_insp_label_border_width:  "سمك الحدود",
+  rd_insp_label_text_color:    "لون النص",
+  rd_insp_label_font_size:     "حجم الخط",
+  rd_insp_label_font_weight:   "وزن الخط",
+  rd_insp_label_padding:       "حشوة",
+  rd_insp_label_opacity:       "شفافية (0–1)",
+  rd_insp_label_text_align:    "محاذاة النص",
+  rd_align_right:              "يمين",
+  rd_align_center:             "وسط",
+  rd_align_left:               "يسار",
+  rd_insp_heading_content:     "المحتوى",
+  rd_insp_label_text:          "النص",
+  rd_insp_label_shape_type:    "نوع الشكل",
+  rd_shape_rect:               "مستطيل",
+  rd_shape_line:               "خط",
+  rd_shape_ellipse:            "بيضاوي",
+  rd_shape_divider:            "فاصل",
+  rd_insp_image_note:          "صورة — لا يمكن تغييرها من هنا.",
+  rd_insp_label_bound_field:   "الحقل المرتبط",
+  rd_insp_label_group_by:      "التقسيم حسب",
+  rd_remove_btn:               "إزالة",
+  rd_insp_coming_soon:         "سيتم الدعم في مرحلة لاحقة.",
+
+  // Ribbon
+  rd_back_title:            "العودة للقائمة",
+  rd_back_btn:              "رجوع",
+  rd_page_size_label:       "حجم الصفحة",
+  rd_page_word:             "الصفحة",
+  rd_toggle_fields_title:   "إظهار/إخفاء لوحة الحقول",
+  rd_fields_label:          "الحقول",
+  rd_toggle_format_title:   "إظهار/إخفاء لوحة التنسيق",
+  rd_format_label:          "التنسيق",
+  rd_saving_label:          "جاري الحفظ...",
+  rd_autosave_failed:       "تعذّر الحفظ التلقائي",
+  rd_save_btn:              "حفظ",
+  rd_print_btn:             "طباعة",
+
+  // PagesBar
+  rd_delete_page_aria:  "حذف {name}",
+  rd_delete_page_title: "حذف الصفحة",
+  rd_add_page_title:    "إضافة صفحة",
+  rd_add_page_btn:      "+ صفحة",
+
+  // VizPanel
+  rd_viz_label_text:  "نص",
+  rd_viz_label_shape: "شكل",
+  rd_viz_label_image: "صورة",
+  rd_viz_panel_title: "التصورات",
+
+  // KpiRenderer
+  rd_bool_yes:    "نعم",
+  rd_bool_no:     "لا",
+  rd_more_suffix: "أخرى",
+
+  // FieldsPanel
+  rd_fields_search_placeholder: "بحث في الحقول...",
+  rd_fields_search_aria:        "بحث في الحقول",
+  rd_fields_dimensions_label:   "أبعاد ({count})",
+  rd_fields_measures_label:     "مقاييس ({count})",
+  rd_fields_no_match:           "لا توجد حقول مطابقة",
 } as const;
 
 export type LabelKey = keyof typeof DEFAULT_LABELS;

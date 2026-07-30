@@ -1587,13 +1587,6 @@ export default function PopulationTab() {
             onApplyBulkAssignment={handleApplyBulkAssignment}
           />
         ) : null}
-
-        {currentPhase > 4 ? (
-          <section className="placeholder-phase">
-            <h2>{PHASES[currentPhase - 1]?.title ?? ""}</h2>
-            <p>سيتم تطوير هذه المرحلة لاحقاً.</p>
-          </section>
-        ) : null}
       </main>
 
       <PopulationPhaseFooter

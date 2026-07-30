@@ -65,22 +65,22 @@ describe("source revisions appear in sample builder output (B2)", () => {
     sourceRevisions: { "sample.master.json": 5, "population.final.json": 9 },
   };
 
-  test("the sample DOCUMENT prints the source-revision block", () => {
-    const html = buildSampleDocument(input);
+  test("the sample DOCUMENT prints the source-revision block", async () => {
+    const html = await buildSampleDocument(input);
     expect(html).toContain(SOURCE_REVISIONS_LABEL_AR);
     expect(html).toContain("sample.master.json");
     expect(html).toContain("مراجعة 5");
     expect(html).toContain("مراجعة 9");
   });
 
-  test("the sample DECK prints the source-revision block", () => {
-    const html = buildSampleDeck(input);
+  test("the sample DECK prints the source-revision block", async () => {
+    const html = await buildSampleDeck(input);
     expect(html).toContain(SOURCE_REVISIONS_LABEL_AR);
     expect(html).toContain("population.final.json");
   });
 
-  test("omitting sourceRevisions renders no footer (backward compatible)", () => {
-    const html = buildSampleDocument({ ...input, sourceRevisions: undefined });
+  test("omitting sourceRevisions renders no footer (backward compatible)", async () => {
+    const html = await buildSampleDocument({ ...input, sourceRevisions: undefined });
     expect(html).not.toContain(SOURCE_REVISIONS_LABEL_AR);
   });
 });

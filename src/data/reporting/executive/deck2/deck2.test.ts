@@ -1,5 +1,5 @@
 // src/data/reporting/executive/deck2/deck2.test.ts
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_EXEC_CONFIG } from "../../executiveReportTypes";
 import type { ExecutiveReportInput } from "../../executiveReportTypes";
 import type { PreparedPopulationRow } from "../../../population/populationTypes";
@@ -74,15 +74,15 @@ describe("buildExecutiveDeckV2 — production path (no opts)", () => {
   // production and preview mode (CSS is static and unconditional; only the
   // switcher's DOM markup and client script are gated on variantPreview). A
   // bare substring check would false-positive on that CSS text alone.
-  it("never emits variant-switcher DOM markup when opts is omitted", () => {
-    const html = buildExecutiveDeckV2(input([popRow(), popRow({ xrayImageId: "XR-2" })]));
+  it("never emits variant-switcher DOM markup when opts is omitted", async () => {
+    const html = await buildExecutiveDeckV2(input([popRow(), popRow({ xrayImageId: "XR-2" })]));
     expect(html).not.toContain('<div class="v2-variant-stack"');
     expect(html).not.toContain('<div class="v2-variant-switcher"');
     expect(html).not.toContain("__deck-style-choices");
   });
 
-  it("never emits variant-switcher DOM markup when variantPreview is explicitly false", () => {
-    const html = buildExecutiveDeckV2(
+  it("never emits variant-switcher DOM markup when variantPreview is explicitly false", async () => {
+    const html = await buildExecutiveDeckV2(
       input([popRow(), popRow({ xrayImageId: "XR-2" })]),
       {},
       { variantPreview: false },
@@ -91,32 +91,32 @@ describe("buildExecutiveDeckV2 — production path (no opts)", () => {
     expect(html).not.toContain("__deck-style-choices");
   });
 
-  it("produces byte-identical output for the same input regardless of the opts param shape", () => {
+  it("produces byte-identical output for the same input regardless of the opts param shape", async () => {
     const fixture = input([popRow(), popRow({ xrayImageId: "XR-2" })]);
-    const a = buildExecutiveDeckV2(fixture);
-    const b = buildExecutiveDeckV2(fixture, {}, { variantPreview: false });
+    const a = await buildExecutiveDeckV2(fixture);
+    const b = await buildExecutiveDeckV2(fixture, {}, { variantPreview: false });
     expect(a).toBe(b);
   });
 
-  it("renders the source-revisions footer when the input carries revisions (B2)", () => {
+  it("renders the source-revisions footer when the input carries revisions (B2)", async () => {
     const fixture = {
       ...input([popRow()]),
       sourceRevisions: { "population.final.json": 7, "sample.master.json": 3 },
     };
-    const html = buildExecutiveDeckV2(fixture);
+    const html = await buildExecutiveDeckV2(fixture);
     expect(html).toContain("population.final.json");
     expect(html).toContain("مراجعة 7");
     expect(html).toContain("مراجعة 3");
   });
 
-  it("does not render artificial blank or ghost table rows", () => {
-    const html = buildExecutiveDeckV2(input([popRow()]));
+  it("does not render artificial blank or ghost table rows", async () => {
+    const html = await buildExecutiveDeckV2(input([popRow()]));
     expect(html).not.toContain('class="v2-ghost"');
     expect(html).not.toContain('class="v2-blank"');
   });
 
-  it("includes an accessible full-screen presentation control", () => {
-    const html = buildExecutiveDeckV2(input([popRow()]));
+  it("includes an accessible full-screen presentation control", async () => {
+    const html = await buildExecutiveDeckV2(input([popRow()]));
     expect(html).toContain('id="deck-fullscreen-button"');
     expect(html).toContain('aria-label="ملء الشاشة"');
     expect(html).toContain("root.requestFullscreen || root.webkitRequestFullscreen");
@@ -127,8 +127,8 @@ describe("buildExecutiveDeckV2 — production path (no opts)", () => {
     expect(html).toMatch(/@media print\{[\s\S]*?\.btn-fullscreen\{display:none!important;\}/);
   });
 
-  it("replaces the fullscreen scroll-stack with single-slide presentation CSS", () => {
-    const html = buildExecutiveDeckV2(input([popRow()]));
+  it("replaces the fullscreen scroll-stack with single-slide presentation CSS", async () => {
+    const html = await buildExecutiveDeckV2(input([popRow()]));
     expect(html).toContain("body.deck-fullscreen .slide{display:none;margin:0;}");
     expect(html).toContain("body.deck-fullscreen .slide.deck-slide-active{");
     expect(html).toContain(".btn-slide-nav,.deck-slide-counter{display:none;}");
@@ -138,11 +138,11 @@ describe("buildExecutiveDeckV2 — production path (no opts)", () => {
     );
   });
 
-  it("uses the configurable Arabic labels for the full-screen control", () => {
+  it("uses the configurable Arabic labels for the full-screen control", async () => {
     setLabel("exec_deck_fullscreen_enter", "عرض موسّع");
     setLabel("exec_deck_fullscreen_exit", "إنهاء العرض الموسّع");
     try {
-      const html = buildExecutiveDeckV2(input([popRow()]));
+      const html = await buildExecutiveDeckV2(input([popRow()]));
       expect(html).toContain('aria-label="عرض موسّع"');
       expect(html).toContain('data-exit-label="إنهاء العرض الموسّع"');
     } finally {
@@ -151,15 +151,15 @@ describe("buildExecutiveDeckV2 — production path (no opts)", () => {
     }
   });
 
-  it("uses an icon-only expand/compress fullscreen button instead of a text label", () => {
-    const html = buildExecutiveDeckV2(input([popRow()]));
+  it("uses an icon-only expand/compress fullscreen button instead of a text label", async () => {
+    const html = await buildExecutiveDeckV2(input([popRow()]));
     expect(html).toContain('class="btn-fullscreen-icon btn-fullscreen-icon-expand"');
     expect(html).toContain('class="btn-fullscreen-icon btn-fullscreen-icon-compress"');
     expect(html).not.toContain(">ملء الشاشة</button>");
   });
 
-  it("renders single-slide presentation navigation elements and script", () => {
-    const html = buildExecutiveDeckV2(input([popRow()]));
+  it("renders single-slide presentation navigation elements and script", async () => {
+    const html = await buildExecutiveDeckV2(input([popRow()]));
     expect(html).toContain('id="deck-slide-prev"');
     expect(html).toContain('id="deck-slide-next"');
     expect(html).toContain('id="deck-slide-counter"');
@@ -171,16 +171,16 @@ describe("buildExecutiveDeckV2 — production path (no opts)", () => {
     expect(html).toContain("e.key === 'ArrowRight'");
   });
 
-  it("renders the slide counter with dir=\"ltr\" so the N / M numerals don't reverse in this RTL report", () => {
-    const html = buildExecutiveDeckV2(input([popRow()]));
+  it("renders the slide counter with dir=\"ltr\" so the N / M numerals don't reverse in this RTL report", async () => {
+    const html = await buildExecutiveDeckV2(input([popRow()]));
     expect(html).toContain('id="deck-slide-counter" dir="ltr"');
   });
 
-  it("uses the configurable Arabic labels for the slide prev/next controls", () => {
+  it("uses the configurable Arabic labels for the slide prev/next controls", async () => {
     setLabel("exec_deck_slideshow_prev", "الشريحة السابقة (مخصص)");
     setLabel("exec_deck_slideshow_next", "الشريحة التالية (مخصص)");
     try {
-      const html = buildExecutiveDeckV2(input([popRow()]));
+      const html = await buildExecutiveDeckV2(input([popRow()]));
       expect(html).toContain('aria-label="الشريحة السابقة (مخصص)"');
       expect(html).toContain('aria-label="الشريحة التالية (مخصص)"');
     } finally {
@@ -189,11 +189,11 @@ describe("buildExecutiveDeckV2 — production path (no opts)", () => {
     }
   });
 
-  it("does not force-scroll on initial page load, only after a real fullscreen session ends", () => {
+  it("does not force-scroll on initial page load, only after a real fullscreen session ends", async () => {
     // everActivated guard: sync() runs once unconditionally at script init,
     // before the user has ever entered fullscreen. Without the guard, that
     // initial call fell into the "just exited" branch and scrolled to slide 0.
-    const html = buildExecutiveDeckV2(input([popRow()]));
+    const html = await buildExecutiveDeckV2(input([popRow()]));
     expect(html).toContain("var everActivated = false;");
     expect(html).toContain("everActivated = true;");
     expect(html).toMatch(
@@ -201,25 +201,25 @@ describe("buildExecutiveDeckV2 — production path (no opts)", () => {
     );
   });
 
-  it("excludes per-slide controls (e.g. the print-include toggle) from the click-to-advance handler", () => {
-    const html = buildExecutiveDeckV2(input([popRow()]));
+  it("excludes per-slide controls (e.g. the print-include toggle) from the click-to-advance handler", async () => {
+    const html = await buildExecutiveDeckV2(input([popRow()]));
     expect(html).toContain(
       "e.target.closest('.btn-slide-nav, .deck-slide-counter, #deck-fullscreen-button, .slide-controls')",
     );
   });
 
-  it("omits the footer entirely when no revisions are supplied", () => {
+  it("omits the footer entirely when no revisions are supplied", async () => {
     // Match markup, not the bare substring — SOURCE_REVISIONS_CSS always ships
     // the `.srev-file` selector text (same false-positive noted above for the
     // variant-stack CSS).
-    const html = buildExecutiveDeckV2(input([popRow()]));
+    const html = await buildExecutiveDeckV2(input([popRow()]));
     expect(html).not.toContain('<span class="srev-file"');
   });
 });
 
 describe("buildExecutiveDeckV2 — preview mode", () => {
-  it("emits exactly one variant-stack per slide with 4 panels each, and DECK_VARIANT_SCRIPT", () => {
-    const html = buildExecutiveDeckV2(
+  it("emits exactly one variant-stack per slide with 4 panels each, and DECK_VARIANT_SCRIPT", async () => {
+    const html = await buildExecutiveDeckV2(
       input([popRow(), popRow({ xrayImageId: "XR-2" })]),
       {},
       { variantPreview: true },
@@ -238,11 +238,11 @@ describe("buildExecutiveDeckV2 — preview mode", () => {
 });
 
 describe("visual overhaul — new slides & structures", () => {
-  it("hides the مؤشرات الشهر slide from the generated deck (owner request 2026-07-20)", () => {
+  it("hides the مؤشرات الشهر slide from the generated deck (owner request 2026-07-20)", async () => {
     // SHOW_MONTH_NUMBERS_SLIDE in slides.ts gates this off — the slide is
     // dormant, not deleted. This locks in the hidden state so a future edit
     // doesn't silently flip it back on.
-    const html = buildExecutiveDeckV2(input([popRow(), popRow({ xrayImageId: "XR-2" })]));
+    const html = await buildExecutiveDeckV2(input([popRow(), popRow({ xrayImageId: "XR-2" })]));
     expect(html).not.toContain('id="slide-month-numbers"');
     // Match the rendered heading/TOC tags, not the bare Arabic phrase — the
     // CSS's own section-header comment (theme.ts, same convention every other
@@ -278,12 +278,12 @@ describe("visual overhaul — new slides & structures", () => {
     expect(html).toContain("v2-port-col");
   });
 
-  it("renders the closing provenance slide, elevating source revisions into a designed block", () => {
+  it("renders the closing provenance slide, elevating source revisions into a designed block", async () => {
     const withRev = {
       ...input([popRow()]),
       sourceRevisions: { "population.final.json": 7, "sample.master.json": 3 },
     };
-    const html = buildExecutiveDeckV2(withRev);
+    const html = await buildExecutiveDeckV2(withRev);
     expect(html).toContain('id="slide-closing"');
     // Match the markup tag, not the bare class — the CSS block ships the
     // `.v2-prov-item` selector text unconditionally (same false-positive as the
@@ -292,17 +292,17 @@ describe("visual overhaul — new slides & structures", () => {
     expect(html).toContain("population.final.json");
     expect(html).toContain("مراجعة 7");
     // graceful empty state when no revisions
-    const html2 = buildExecutiveDeckV2(input([popRow()]));
+    const html2 = await buildExecutiveDeckV2(input([popRow()]));
     expect(html2).toContain('id="slide-closing"');
     expect(html2).toContain('<div class="v2-prov-empty"');
     expect(html2).not.toContain('<div class="v2-prov-item"');
   });
 
-  it("section separators are a pure title card — number, name, تعريف, nothing else (2026-07-25)", () => {
+  it("section separators are a pure title card — number, name, تعريف, nothing else (2026-07-25)", async () => {
     // The results funnel and the v2-sep-extra/v2-sep-stat side column were
     // removed per the owner's request: a separator should carry no figures,
     // only the section identity and its one-sentence definition.
-    const html = buildExecutiveDeckV2(input([popRow(), popRow({ xrayImageId: "XR-2" })]));
+    const html = await buildExecutiveDeckV2(input([popRow(), popRow({ xrayImageId: "XR-2" })]));
     expect(html).not.toContain("v2-sep-extra");
     expect(html).not.toContain("v2-sep-stat");
     expect(html).not.toContain("v2-sep-takeaway");
@@ -310,8 +310,8 @@ describe("visual overhaul — new slides & structures", () => {
     expect(html).toContain("v2-sep-watermark");
   });
 
-  it("paints in-cell proportional data bars in the port tables (background only)", () => {
-    const html = buildExecutiveDeckV2(
+  it("paints in-cell proportional data bars in the port tables (background only)", async () => {
+    const html = await buildExecutiveDeckV2(
       input([
         popRow({ portName: "ميناء أ" }),
         popRow({ xrayImageId: "XR-2", portName: "ميناء ب" }),
@@ -321,8 +321,8 @@ describe("visual overhaul — new slides & structures", () => {
     expect(html).toContain("--w:");
   });
 
-  it("renders four tone-coded TOC cards each with a key figure (مؤشرات الشهر's card is hidden along with its slide)", () => {
-    const html = buildExecutiveDeckV2(input([popRow()]));
+  it("renders four tone-coded TOC cards each with a key figure (مؤشرات الشهر's card is hidden along with its slide)", async () => {
+    const html = await buildExecutiveDeckV2(input([popRow()]));
     const cards = (html.match(/class="v2-toc-card /g) ?? []).length;
     // المعجم + القسم 1 + القسم 2 + القسم 3 (التحاليل المتقدمة, added 2026-07-25).
     // The count tracks sections that actually render pages — a section whose
@@ -334,8 +334,8 @@ describe("visual overhaul — new slides & structures", () => {
 });
 
 describe("stage×port grid slides", () => {
-  it("renders both new slide titles and the الإجمالي totals row in production output", () => {
-    const html = buildExecutiveDeckV2(
+  it("renders both new slide titles and the الإجمالي totals row in production output", async () => {
+    const html = await buildExecutiveDeckV2(
       input([
         popRow({ stage: "المستوى الأول", portName: "ميناء أ" }),
         popRow({ xrayImageId: "XR-2", stage: "المستوى الأول", portName: "ميناء ب", xrayLevelOneResult: "اشتباه", xrayLevelTwoResult: "اشتباه" }),
@@ -347,8 +347,8 @@ describe("stage×port grid slides", () => {
     expect(html).toContain('id="slide-stage-port-sample"');
   });
 
-  it("each stage card's totals row shows the pinned stage population alongside the summed سليمة/اشتباه", () => {
-    const html = buildExecutiveDeckV2(
+  it("each stage card's totals row shows the pinned stage population alongside the summed سليمة/اشتباه", async () => {
+    const html = await buildExecutiveDeckV2(
       input([
         popRow({ stage: "المستوى الأول", portName: "ميناء أ", xrayLevelOneResult: "سليمة", xrayLevelTwoResult: "سليمة" }),
         popRow({ xrayImageId: "XR-2", stage: "المستوى الأول", portName: "ميناء ب", xrayLevelOneResult: "اشتباه", xrayLevelTwoResult: "اشتباه" }),
@@ -368,9 +368,9 @@ describe("stage×port grid slides", () => {
 });
 
 describe("closing slide — data-source attribution + embedded Arabic font", () => {
-  it("shows the risk-agency base source with the row count, and BI as absent when never provided", () => {
+  it("shows the risk-agency base source with the row count, and BI as absent when never provided", async () => {
     // Default popRow has biEnrichmentStatus "BI Not Provided" and biMatched false.
-    const html = buildExecutiveDeckV2(input([popRow(), popRow({ xrayImageId: "XR-2" })]));
+    const html = await buildExecutiveDeckV2(input([popRow(), popRow({ xrayImageId: "XR-2" })]));
     expect(html).toContain("بيانات وكالة المخاطر");
     expect(html).toContain("المصدر الأساسي");
     expect(html).toContain("بيانات ذكاء الأعمال");
@@ -378,8 +378,8 @@ describe("closing slide — data-source attribution + embedded Arabic font", () 
     expect(html).toContain('<div class="v2-src-card off"');
   });
 
-  it("shows BI as provided with the enriched-row count when the processor matched rows", () => {
-    const html = buildExecutiveDeckV2(
+  it("shows BI as provided with the enriched-row count when the processor matched rows", async () => {
+    const html = await buildExecutiveDeckV2(
       input([
         popRow({ biEnrichmentStatus: "BI Matched", biMatched: true }),
         popRow({ xrayImageId: "XR-2" }),
@@ -390,17 +390,17 @@ describe("closing slide — data-source attribution + embedded Arabic font", () 
     expect(html).not.toContain("غير مُقدَّم هذا الشهر");
   });
 
-  it("embeds the IBM Plex Sans Arabic @font-face (base64 woff2) in the report HTML", () => {
-    const html = buildExecutiveDeckV2(input([popRow()]));
+  it("embeds the IBM Plex Sans Arabic @font-face (base64 woff2) in the report HTML", async () => {
+    const html = await buildExecutiveDeckV2(input([popRow()]));
     expect(html).toContain("@font-face");
     expect(html).toContain('font-family:"IBM Plex Sans Arabic"');
     expect(html).toContain("base64");
     expect(html).toContain('format("woff2")');
   });
 
-  it("renders a deterministic seeded cover mesh SVG on the cover slide", () => {
-    const a = buildExecutiveDeckV2(input([popRow()]));
-    const b = buildExecutiveDeckV2(input([popRow()]));
+  it("renders a deterministic seeded cover mesh SVG on the cover slide", async () => {
+    const a = await buildExecutiveDeckV2(input([popRow()]));
+    const b = await buildExecutiveDeckV2(input([popRow()]));
     expect(a).toContain('class="v2-cover-mesh"');
     // Same month key → byte-identical deck output (mesh + patterns are seeded).
     expect(a).toBe(b);
@@ -422,7 +422,7 @@ describe("slide-risk-stages fan-out — Ledger/Briefing/Grid (2026-07-25 fan-out
     expect(html).toContain("v2-prop-bar");
   });
 
-  it('Ledger slot (data-variant-index="1") has no chart markup, adds the «ما يقيسه» column, and carries the two-basis footnote row', () => {
+  it('Ledger slot (data-variant-index="1") has no chart markup and carries the two-basis footnote row', () => {
     const model = buildReportModel(
       input([popRow({ stage: "المستوى الأول" }), popRow({ xrayImageId: "XR-2", stage: "المستوى الثالث" })]),
     );
@@ -442,26 +442,16 @@ describe("slide-risk-stages fan-out — Ledger/Briefing/Grid (2026-07-25 fan-out
     expect(panel1).not.toContain("v2-cbar");
     expect(panel1).toContain('<div class="v2-level-table-card">');
 
-    // New «ما يقيسه» column, sourced from RISK_LEVELS[i].measures — resolved
-    // BY IDENTITY (levelIndexForStage), not by this row's position in
-    // `stages`. This fixture's `stages` array is [المستوى الأول, المستوى
-    // الثالث] — level 2 has ZERO rows and is entirely absent, so the second
-    // row is level 3 shifted into array position 1. Pre-2026-07-28, this
-    // assertion actually pinned the BUG: it expected level 2's «ما يقيسه»
-    // text (RISK_LEVELS[1]) on a row that is really about level 3, because
-    // the table paired by loop position instead of by the stage's own
-    // identity. The correct pairing is level 3's own text.
-    expect(panel1).toContain("<th>ما يقيسه</th>");
-    expect(panel1).toContain("انفراد الفحص بالاشتباه دون مؤشرات أخرى.");
-    expect(panel1).toContain("ما تلتقطه الفرق الأمنية الأخرى ولا يلتقطه الفحص.");
-    expect(panel1).not.toContain("ما يلتقطه محرك المخاطر ولا يلتقطه الفحص.");
+    // Rows are resolved BY IDENTITY (levelIndexForStage), not by this row's
+    // position in `stages` — see the level-identity-resolution describe
+    // block below for dedicated regression coverage of that pairing.
 
-    // New tfoot footnote row: colspan across all 8 columns, two-basis caveat
+    // New tfoot footnote row: colspan across all 7 columns, two-basis caveat
     // worded to agree with LEVEL_DRAW_WEIGHTS's own doc comment. Class is on
     // the <tr> (theme.ts's selectors are scoped tfoot tr.v2-lg-footnote td;
     // the pre-2026-07-28 bug put it on the <td> instead, so the caveat
     // styling never applied and the row rendered as a second bold totals row).
-    expect(panel1).toContain('<tr class="v2-lg-footnote"><td colspan="8">');
+    expect(panel1).toContain('<tr class="v2-lg-footnote"><td colspan="7">');
     expect(panel1).toContain("الأساسان مختلفان ولا يجمعان إلى 100%");
 
     // Every stage's real population/sample figures must still appear in the table.
@@ -554,26 +544,30 @@ describe("levelFiguresTable byte-identity characterization — SUPERSEDED 2026-0
   // Re-captured 2026-07-28 (review fix): the previous pin locked in the
   // level-identity mispairing bug — row 2 (المستوى الثالث, the only stage at
   // array position 1 since المستوى الثاني has zero rows and never appears in
-  // `stages`) was shown with tone "blue"/ordinal "2"/«ما يقيسه»/وزن العينة
-  // all borrowed from المستوى الثاني (RISK_LEVELS[1]/STAGE_TONES[1]) purely
-  // because it sat at loop position 1. The table now resolves each row's
-  // tone/ordinal/«ما يقيسه»/وزن العينة BY the stage's own identity
-  // (levelIndexForStage in slides.ts), so row 2 correctly shows المستوى
-  // الثالث's own tone ("green"), ordinal ("3"), text, and weight ("30%").
-  // The footnote row's class also moved from the <td> to the <tr> (Finding 2
-  // fix — theme.ts's CSS selectors were always scoped to the <tr>).
+  // `stages`) was shown with tone "blue"/ordinal "2"/وزن العينة all borrowed
+  // from المستوى الثاني (RISK_LEVELS[1]/STAGE_TONES[1]) purely because it sat
+  // at loop position 1. The table now resolves each row's tone/ordinal/وزن
+  // العينة BY the stage's own identity (levelIndexForStage in slides.ts), so
+  // row 2 correctly shows المستوى الثالث's own tone ("green"), ordinal ("3"),
+  // and weight ("30%"). The footnote row's class also moved from the <td> to
+  // the <tr> (Finding 2 fix — theme.ts's CSS selectors were always scoped to
+  // the <tr>).
+  // Re-captured again 2026-07-29 (owner request, this date's edit log): the
+  // «ما يقيسه» column was removed — the definition already appears on each
+  // level's own card and on slide-glossary-levels's Ledger table, so this
+  // figures-only table dropped it. Column count 8 → 7; footnote colspan
+  // 8 → 7 to match.
   const EXPECTED_PANEL1 =
     `data-variant-index="1"><div class="v2-sys-ledger v2-lg-risk-stages"><div class="v2-risk-layout">\n` +
     `    <div class="v2-level-table-card">\n` +
     `    <table class="deck-table">\n` +
     `      <thead><tr>\n` +
-    `        <th></th><th>المستوى</th><th>ما يقيسه</th><th>وزن العينة</th><th>من المجتمع</th>\n` +
+    `        <th></th><th>المستوى</th><th>وزن العينة</th><th>من المجتمع</th>\n` +
     `        <th>صورة</th><th>العيّنة</th><th>تغطية العيّنة</th>\n` +
     `      </tr></thead>\n` +
     `      <tbody><tr>\n` +
     `        <td><span class="v2-level-row-num gold">1</span></td>\n` +
     `        <td>المستوى الأول</td>\n` +
-    `        <td>انفراد الفحص بالاشتباه دون مؤشرات أخرى.</td>\n` +
     `        <td>100%</td>\n` +
     `        <td>50%</td>\n` +
     `        <td>1</td>\n` +
@@ -582,7 +576,6 @@ describe("levelFiguresTable byte-identity characterization — SUPERSEDED 2026-0
     `      </tr><tr>\n` +
     `        <td><span class="v2-level-row-num green">3</span></td>\n` +
     `        <td>المستوى الثالث</td>\n` +
-    `        <td>ما تلتقطه الفرق الأمنية الأخرى ولا يلتقطه الفحص.</td>\n` +
     `        <td>30%</td>\n` +
     `        <td>50%</td>\n` +
     `        <td>1</td>\n` +
@@ -590,9 +583,9 @@ describe("levelFiguresTable byte-identity characterization — SUPERSEDED 2026-0
     `        <td>0.0%</td>\n` +
     `      </tr></tbody>\n` +
     `      <tfoot><tr>\n` +
-    `        <td></td><td>الإجمالي</td><td></td><td>—</td><td>100%</td>\n` +
+    `        <td></td><td>الإجمالي</td><td>—</td><td>100%</td>\n` +
     `        <td>2</td><td>0</td><td>0.0%</td>\n` +
-    `      </tr><tr class="v2-lg-footnote"><td colspan="8">وزن المستوى الأول نسبة من مجتمعه (حصر شامل)؛ وبقية الأوزان حصص من حصة العدد الثابت — الأساسان مختلفان ولا يجمعان إلى 100%</td></tr></tfoot>\n` +
+    `      </tr><tr class="v2-lg-footnote"><td colspan="7">وزن المستوى الأول نسبة من مجتمعه (حصر شامل)؛ وبقية الأوزان حصص من حصة العدد الثابت — الأساسان مختلفان ولا يجمعان إلى 100%</td></tr></tfoot>\n` +
     `    </table>\n` +
     `  </div>\n` +
     `  </div></div></div><div class="v2-variant-panel" `;
@@ -632,7 +625,7 @@ describe("slide-risk-stages level-identity resolution — regression for the 202
     );
   }
 
-  it("Ledger table: each row's ordinal/tone/«ما يقيسه»/وزن العينة match its OWN level, not its array position", () => {
+  it("Ledger table: each row's ordinal/tone/وزن العينة match its OWN level, not its array position", () => {
     const model = reversedGapModel();
     expect(model.population.byStage.map((s) => s.stageLabel)).toEqual(["المستوى الرابع", "المستوى الثاني"]);
 
@@ -642,16 +635,14 @@ describe("slide-risk-stages level-identity resolution — regression for the 202
     const panel1 = html.slice(start, end);
 
     // Row 1 (array position 0) is المستوى الرابع (level 4): ordinal "4",
-    // tone "coral", its own «ما يقيسه» text and 30% weight — NOT level 1's
-    // gold/"1"/100% that position-based indexing would have produced.
+    // tone "coral", 30% weight — NOT level 1's gold/"1"/100% that
+    // position-based indexing would have produced.
     expect(panel1).toContain('<span class="v2-level-row-num coral">4</span>');
-    expect(panel1).toContain("ما ثبت فواته بضبط أمني أو باكتشاف خارجي.");
     // Row 2 (array position 1) is المستوى الثاني (level 2): ordinal "2",
-    // tone "blue", its own text and 40% weight — NOT level 2's OWN identity
-    // borrowed correctly here would coincidentally look unchanged only if
-    // the old code were right; assert it explicitly instead of by omission.
+    // tone "blue", 40% weight — NOT level 2's OWN identity borrowed
+    // correctly here would coincidentally look unchanged only if the old
+    // code were right; assert it explicitly instead of by omission.
     expect(panel1).toContain('<span class="v2-level-row-num blue">2</span>');
-    expect(panel1).toContain("ما يلتقطه محرك المخاطر ولا يلتقطه الفحص.");
 
     const row1 = panel1.slice(panel1.indexOf("المستوى الرابع") - 200, panel1.indexOf("المستوى الرابع") + 300);
     expect(row1).toContain(">30%<");
@@ -688,26 +679,26 @@ describe("slide-risk-stages level-identity resolution — regression for the 202
     const end = html.indexOf('data-variant-index="2"');
     const panel1 = html.slice(start, end);
     expect(panel1).toContain('<span class="v2-level-row-num neutral">—</span>');
-    // The «ما يقيسه» / وزن العينة cells fall back to "—", never a borrowed
-    // level's real text/number.
+    // The وزن العينة cell falls back to "—", never a borrowed level's real
+    // number.
     expect(panel1).toContain("<td>—</td>");
   });
 });
 
 describe("style choices — production selection + backward compatibility (2026-07-25)", () => {
-  it("with no styleChoices opt, output is byte-identical to today (regression guard)", () => {
-    const a = buildExecutiveDeckV2(input([popRow(), popRow({ xrayImageId: "XR-2" })]));
-    const b = buildExecutiveDeckV2(input([popRow(), popRow({ xrayImageId: "XR-2" })]), {}, {});
+  it("with no styleChoices opt, output is byte-identical to today (regression guard)", async () => {
+    const a = await buildExecutiveDeckV2(input([popRow(), popRow({ xrayImageId: "XR-2" })]));
+    const b = await buildExecutiveDeckV2(input([popRow(), popRow({ xrayImageId: "XR-2" })]), {}, {});
     expect(a).toBe(b);
   });
 
-  it("with styleChoices selecting slot 1 for slide-risk-stages, production output renders variant 1's markup instead of variant 0's", () => {
+  it("with styleChoices selecting slot 1 for slide-risk-stages, production output renders variant 1's markup instead of variant 0's", async () => {
     const fixture = input([
       popRow({ stage: "المستوى الأول" }),
       popRow({ xrayImageId: "XR-2", stage: "المستوى الثالث" }),
     ]);
-    const defaultHtml = buildExecutiveDeckV2(fixture);
-    const customHtml = buildExecutiveDeckV2(fixture, {}, { styleChoices: { "slide-risk-stages": 1 } });
+    const defaultHtml = await buildExecutiveDeckV2(fixture);
+    const customHtml = await buildExecutiveDeckV2(fixture, {}, { styleChoices: { "slide-risk-stages": 1 } });
 
     // NOTE: the deck's static CSS (theme.ts) always defines .v2-level-table-card/
     // .v2-risk-tile-grid rules regardless of which variant is selected — all 4 variants' CSS
@@ -727,20 +718,24 @@ describe("style choices — production selection + backward compatibility (2026-
     expect(customHtml).toContain('class="v2-toc-card ');
   });
 
-  it("an out-of-range or unknown slide id in styleChoices is ignored (falls back to variant 0), never throws", () => {
+  it("an out-of-range or unknown slide id in styleChoices is ignored (falls back to variant 0), never throws", async () => {
     const fixture = input([popRow()]);
-    expect(() =>
+    // P3-7: buildExecutiveDeckV2 is now async, so "never throws" is checked via
+    // `.resolves` (the promise settling, not rejecting) rather than a bare
+    // synchronous `.not.toThrow()`, which only proves the call itself doesn't
+    // throw before its first `await` — not that the build never rejects.
+    await expect(
       buildExecutiveDeckV2(fixture, {}, { styleChoices: { "slide-risk-stages": 99, "no-such-slide": 2 } }),
-    ).not.toThrow();
-    const html = buildExecutiveDeckV2(fixture, {}, { styleChoices: { "slide-risk-stages": 99 } });
+    ).resolves.toBeTypeOf("string");
+    const html = await buildExecutiveDeckV2(fixture, {}, { styleChoices: { "slide-risk-stages": 99 } });
     expect(html).toContain('<div class="v2-risk-tile-grid">'); // fell back to variant 0, not a crash or an out-of-bounds undefined render
   });
 
-  it("preview mode: the variant-switcher label matches the pre-selected panel (regression — the label used to be hardcoded '1 / 4' regardless of the saved choice)", () => {
+  it("preview mode: the variant-switcher label matches the pre-selected panel (regression — the label used to be hardcoded '1 / 4' regardless of the saved choice)", async () => {
     const fixture = input([popRow(), popRow({ xrayImageId: "XR-2" })]);
 
     // No saved choice → panel 0 is pre-selected → label reads "1 / 4".
-    const defaultHtml = buildExecutiveDeckV2(fixture, {}, { variantPreview: true });
+    const defaultHtml = await buildExecutiveDeckV2(fixture, {}, { variantPreview: true });
     const defaultSwitcherStart = defaultHtml.indexOf('data-for="slide-risk-stages"');
     expect(defaultSwitcherStart).toBeGreaterThan(-1);
     expect(defaultHtml.slice(defaultSwitcherStart, defaultSwitcherStart + 300)).toContain(
@@ -748,7 +743,7 @@ describe("style choices — production selection + backward compatibility (2026-
     );
 
     // Saved choice selects slot 2 (0-based) → panel 2 is pre-selected → label must read "3 / 4", not "1 / 4".
-    const customHtml = buildExecutiveDeckV2(fixture, {}, {
+    const customHtml = await buildExecutiveDeckV2(fixture, {}, {
       variantPreview: true,
       styleChoices: { "slide-risk-stages": 2 },
     });
@@ -763,13 +758,13 @@ describe("style choices — production selection + backward compatibility (2026-
 });
 
 describe("variant-choice family-key resolution (2026-07-25, deck2-design-systems fix)", () => {
-  it("resolves a choice saved under a paginated slide's FAMILY key (no trailing page number) regardless of the exact page id being rendered", () => {
+  it("resolves a choice saved under a paginated slide's FAMILY key (no trailing page number) regardless of the exact page id being rendered", async () => {
     // slide-port-population-N is the always-suffixed convention (page+1, starting at 1).
     const fixture = input([
       popRow({ portName: "ميناء أ" }),
       popRow({ xrayImageId: "XR-2", portName: "ميناء ب" }),
     ]);
-    const html = buildExecutiveDeckV2(fixture, {}, {
+    const html = await buildExecutiveDeckV2(fixture, {}, {
       variantPreview: true,
       styleChoices: { "slide-port-population": 1 },
     });
@@ -782,9 +777,9 @@ describe("variant-choice family-key resolution (2026-07-25, deck2-design-systems
     expect(stackOpenTag).toContain('data-active-index="1"');
   });
 
-  it("an exact per-page-id saved choice still wins over a family-key choice for that same page (backward compatibility)", () => {
+  it("an exact per-page-id saved choice still wins over a family-key choice for that same page (backward compatibility)", async () => {
     const fixture = input([popRow(), popRow({ xrayImageId: "XR-2" })]);
-    const html = buildExecutiveDeckV2(fixture, {}, {
+    const html = await buildExecutiveDeckV2(fixture, {}, {
       variantPreview: true,
       styleChoices: { "slide-port-population": 1, "slide-port-population-1": 2 },
     });
@@ -793,9 +788,9 @@ describe("variant-choice family-key resolution (2026-07-25, deck2-design-systems
     expect(stackOpenTag).toContain('data-active-index="2"');
   });
 
-  it("non-paginated slides are unaffected (family key equals the exact id, a no-op)", () => {
+  it("non-paginated slides are unaffected (family key equals the exact id, a no-op)", async () => {
     const fixture = input([popRow()]);
-    const html = buildExecutiveDeckV2(fixture, {}, {
+    const html = await buildExecutiveDeckV2(fixture, {}, {
       variantPreview: true,
       styleChoices: { "slide-cover": 2 },
     });
@@ -1519,5 +1514,110 @@ describe("slide-glossary-1 fan-out — Ledger/Briefing/Grid (2026-07-25 fan-out 
     expect(panel3Cards).toBe(panel0Cards);
     expect(panel3).toContain("مجتمع الفحص");
     expect(panel3).toContain("الاشتباه الفائت");
+  });
+});
+
+// ─── Golden snapshot (P3-7) ────────────────────────────────────────────────────
+// Byte-identical proof that adding `await yieldToMain()` breaks inside
+// `buildDeckV2Slides`'s 4 page-building loops (main-thread chunking, P3-7)
+// changed ONLY timing, never output. If this snapshot ever needs updating for
+// a real content change, that change must be deliberate and reviewed on its
+// own — never used to paper over an unintended regression introduced by a
+// chunking edit.
+describe("buildExecutiveDeckV2 — golden snapshot (P3-7 chunking safety)", () => {
+  // The cover slide's "تاريخ الإصدار" stamps `new Date()` (today's real
+  // date), so this byte-identity pin is only reproducible if the clock is
+  // frozen to the instant the snapshot was actually captured — otherwise it
+  // silently breaks on every day rollover. Frozen at UTC noon so
+  // local-timezone date rollover doesn't shift the captured calendar day.
+  beforeEach(() => {
+    // toFake: ["Date"] only — buildExecutiveDeckV2 itself `await
+    // yieldToMain()`s (a real `setTimeout`) as part of P3-7's chunking, and
+    // this same file's reentrancy-guard tests below depend on real
+    // `setTimeout`-based interleaving; faking `setTimeout` too would hang
+    // those awaits forever without an explicit timer advance.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-07-29T12:00:00.000Z"));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("production output is byte-identical", async () => {
+    const html = await buildExecutiveDeckV2(
+      input([
+        popRow({ stage: "المستوى الأول", portName: "منفذ أ", portType: "منفذ بري" }),
+        popRow({ xrayImageId: "XR-2", stage: "المستوى الثاني", portName: "منفذ ب", portType: "منفذ بحري", xrayLevelOneResult: "اشتباه", xrayLevelTwoResult: "اشتباه" }),
+      ]),
+    );
+    expect(html).toMatchSnapshot();
+  });
+});
+
+// ─── Reentrancy guard (P3-7) ───────────────────────────────────────────────────
+// `buildDeckV2Slides` now yields the main thread mid-build via
+// `await yieldToMain()`, so a second `buildExecutiveDeckV2` call can start
+// while a first one is paused at a yield. `activeStyleChoices` in
+// `slideKit.ts` is a single MODULE-LEVEL variable read by every slide's
+// `renderVariants()` call during its (now-interruptible) render — without a
+// reentrancy guard serializing concurrent callers, an interleaved second call
+// could overwrite `activeStyleChoices` mid-way through the first call's
+// build, corrupting its output with the wrong style choices. This test fires
+// two overlapping builds with DIFFERENT `styleChoices` and asserts each
+// call's output reflects ONLY its own choice — never the other call's, never
+// a mix of both.
+describe("buildExecutiveDeckV2 — concurrent-call reentrancy guard (P3-7)", () => {
+  it("two overlapping calls with different styleChoices each render their own choice, never interleaved or mixed", async () => {
+    const fixtureA = input([
+      popRow({ stage: "المستوى الأول", portName: "منفذ سباق ألف" }),
+      popRow({ xrayImageId: "XR-2", stage: "المستوى الثالث", portName: "منفذ سباق ألف" }),
+    ]);
+    const fixtureB = input([
+      popRow({ xrayImageId: "YB-1", stage: "المستوى الأول", portName: "منفذ سباق باء" }),
+      popRow({ xrayImageId: "YB-2", stage: "المستوى الثالث", portName: "منفذ سباق باء" }),
+    ]);
+
+    // Fired back-to-back with NO await in between, so both are genuinely
+    // in-flight together — call B starts while call A may still be mid-build
+    // behind one of its `await yieldToMain()` breaks.
+    const promiseA = buildExecutiveDeckV2(fixtureA, {}, { styleChoices: { "slide-risk-stages": 1 } });
+    const promiseB = buildExecutiveDeckV2(fixtureB, {}, { styleChoices: { "slide-risk-stages": 3 } });
+    const [htmlA, htmlB] = await Promise.all([promiseA, promiseB]);
+
+    // NOTE: the deck's static CSS (theme.ts) always defines every variant's
+    // selector text (`.v2-lg-risk-stages`/`.v2-bf-risk-stages`/
+    // `.v2-gd-risk-stages`/`.v2-risk-tile-grid`) regardless of which variant
+    // is selected — all 4 variants' CSS ships in every production-mode
+    // report, only the markup differs (same false-positive noted throughout
+    // this file's other style-choice tests). Assertions below therefore match
+    // the HTML *markup* opening tag, never a bare class-name substring.
+
+    // Call A asked for variant 1 (Ledger) on slide-risk-stages — its own
+    // output must show variant 1's markup wrapper, not variant 0's or 3's.
+    expect(htmlA).toContain('<div class="v2-sys-ledger v2-lg-risk-stages">');
+    expect(htmlA).not.toContain('<div class="v2-risk-tile-grid">');
+    expect(htmlA).not.toContain('<div class="v2-sys-grid v2-gd-risk-stages">');
+
+    // Call B asked for variant 3 (Grid) — its own output must show variant
+    // 3's markup wrapper, not variant 0's or variant 1's.
+    expect(htmlB).toContain('<div class="v2-sys-grid v2-gd-risk-stages">');
+    expect(htmlB).not.toContain('<div class="v2-risk-tile-grid">');
+    expect(htmlB).not.toContain('<div class="v2-sys-ledger v2-lg-risk-stages">');
+
+    // Each call's own population rows appear in its own output only (on the
+    // port-population page, unrelated to the styleChoices-targeted slide) —
+    // proves the two builds weren't just isolated on this one slide by
+    // coincidence, but never cross-contaminated at all.
+    expect(htmlA).toContain("منفذ سباق ألف");
+    expect(htmlA).not.toContain("منفذ سباق باء");
+    expect(htmlB).toContain("منفذ سباق باء");
+    expect(htmlB).not.toContain("منفذ سباق ألف");
+
+    // A subsequent, non-overlapping call with NO styleChoices must see the
+    // guard fully released (activeStyleChoices reset to null) — proves the
+    // queue doesn't wedge or leak the last caller's choices forward.
+    const htmlDefault = await buildExecutiveDeckV2(fixtureA);
+    expect(htmlDefault).toContain('<div class="v2-risk-tile-grid">');
+    expect(htmlDefault).not.toContain('<div class="v2-level-table-card">');
   });
 });

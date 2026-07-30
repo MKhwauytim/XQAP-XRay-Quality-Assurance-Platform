@@ -264,6 +264,82 @@ describe("DataTable — B11 hardening", () => {
   });
 });
 
+// P1-2 — keyboard accessibility for the row-click/expand interaction: a row with
+// onRowClick must be focusable and activatable from the keyboard (Enter/Space),
+// without double-firing when the key event originates from an interactive child
+// (e.g. the row-select checkbox some consumers render inside a column).
+describe("DataTable — keyboard accessibility (P1-2)", () => {
+  it("a row with onRowClick is keyboard-focusable and marks aria-selected", () => {
+    renderTable({ onRowClick: vi.fn(), expandedKey: "1" });
+    const row = screen.getByText("أحمد").closest("tr")!;
+    expect(row).toHaveAttribute("tabindex", "0");
+    expect(row).toHaveAttribute("aria-selected", "true");
+
+    const otherRow = screen.getByText("سالم").closest("tr")!;
+    expect(otherRow).toHaveAttribute("aria-selected", "false");
+  });
+
+  it("a row without onRowClick is not made keyboard-focusable", () => {
+    renderTable();
+    const row = screen.getByText("أحمد").closest("tr")!;
+    expect(row).not.toHaveAttribute("tabindex");
+    expect(row).not.toHaveAttribute("aria-selected");
+  });
+
+  it("Enter and Space on a focused row trigger onRowClick, same as a click", () => {
+    const onRowClick = vi.fn();
+    renderTable({ onRowClick });
+    const row = screen.getByText("أحمد").closest("tr")!;
+
+    fireEvent.keyDown(row, { key: "Enter" });
+    expect(onRowClick).toHaveBeenCalledTimes(1);
+    expect(onRowClick).toHaveBeenLastCalledWith(ROWS[0]);
+
+    fireEvent.keyDown(row, { key: " " });
+    expect(onRowClick).toHaveBeenCalledTimes(2);
+
+    fireEvent.click(row);
+    expect(onRowClick).toHaveBeenCalledTimes(3);
+  });
+
+  it("pressing Space on an interactive child (row-select checkbox) does not also fire onRowClick", () => {
+    const onRowClick = vi.fn();
+    const columnsWithCheckbox: DataTableCol<Row>[] = [
+      {
+        id: "select",
+        label: "تحديد",
+        accessor: () => "",
+      },
+      ...COLUMNS,
+    ];
+    render(
+      <DataTable<Row>
+        columns={columnsWithCheckbox}
+        rows={ROWS}
+        getRowKey={(r) => r.id}
+        renderCell={(col, row) =>
+          col.id === "select" ? (
+            <input
+              type="checkbox"
+              aria-label={`تحديد ${row.id}`}
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : (
+            <span>{col.accessor(row)}</span>
+          )
+        }
+        storageKey="test-datatable-checkbox"
+        exportFileName="test-export.xlsx"
+        onRowClick={onRowClick}
+      />,
+    );
+
+    const checkbox = screen.getByLabelText("تحديد 1");
+    fireEvent.keyDown(checkbox, { key: " " });
+    expect(onRowClick).not.toHaveBeenCalled();
+  });
+});
+
 describe("looksLikeNumber — B11 bound on the plain-digit alternative", () => {
   it("still matches short magnitudes, decimals, percentages, and thousand-separated numbers", () => {
     expect(looksLikeNumber("123456")).toBe(true);

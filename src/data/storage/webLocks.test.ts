@@ -1,6 +1,10 @@
-import { expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 
 import { withResourceLock } from "./webLocks";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 test("same-resource calls run serially, never interleaved", async () => {
   const events: string[] = [];
@@ -38,4 +42,35 @@ test("releases the lock even when the callback throws", async () => {
   // Lock must be free now — a second acquire resolves.
   const after = await withResourceLock("res-c", async () => "ok");
   expect(after).toBe("ok");
+});
+
+test("native LockManager: delegates with the xray: name prefix and exclusive mode", async () => {
+  const request = vi.fn(
+    async (_name: string, _options: { mode: "exclusive" }, callback: () => Promise<unknown>) =>
+      callback()
+  );
+  vi.stubGlobal("navigator", { locks: { request } });
+
+  const value = await withResourceLock("res-native", async () => 7);
+
+  expect(value).toBe(7);
+  expect(request).toHaveBeenCalledTimes(1);
+  const [name, options, callback] = request.mock.calls[0];
+  expect(name).toBe("xray:res-native");
+  expect(options).toEqual({ mode: "exclusive" });
+  expect(typeof callback).toBe("function");
+});
+
+test("native LockManager: propagates exceptions from the callback", async () => {
+  const request = vi.fn(
+    async (_name: string, _options: { mode: "exclusive" }, callback: () => Promise<unknown>) =>
+      callback()
+  );
+  vi.stubGlobal("navigator", { locks: { request } });
+
+  await expect(
+    withResourceLock("res-native-err", async () => {
+      throw new Error("native boom");
+    })
+  ).rejects.toThrow("native boom");
 });
