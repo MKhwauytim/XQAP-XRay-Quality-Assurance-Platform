@@ -5,3 +5,11 @@
 *.tsx text
 *.css text
 *.json text
+
+# Force LF regardless of local core.autocrlf: this file is read via Vite's
+# `?raw` loader (src/branding/organization.ts) and its literal bytes —
+# including line endings — are embedded verbatim into generated report HTML.
+# Without a pinned eol, a Windows checkout with autocrlf=true silently bakes
+# CRLF into that embedded SVG, which then mismatches any golden snapshot test
+# run against a Linux (LF) checkout, e.g. CI (2026-07-29 edit log).
+*.svg text eol=lf
