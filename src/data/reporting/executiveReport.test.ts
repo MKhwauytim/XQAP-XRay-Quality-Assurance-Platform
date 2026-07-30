@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import { buildExecutiveReport } from "./executiveReport";
@@ -117,6 +117,22 @@ describe("executive report html", () => {
 // change, that change must be deliberate and reviewed on its own — never used
 // to paper over an unintended regression introduced by a chunking edit.
 describe("executive report html — golden snapshot (P3-7 chunking safety)", () => {
+  // formatIssueDate() defaults to `new Date()` (today's real date), so this
+  // byte-identity pin is only reproducible if the clock is frozen to the
+  // instant the snapshot was actually captured — otherwise it silently
+  // breaks on every day rollover. Frozen at UTC noon so local-timezone date
+  // rollover doesn't shift the captured calendar day either.
+  beforeEach(() => {
+    // toFake: ["Date"] only — these builders themselves `await yieldToMain()`
+    // (a real `setTimeout`) as part of P3-7's chunking; faking `setTimeout`
+    // too would hang those awaits forever without an explicit timer advance.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-07-29T12:00:00.000Z"));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("output is byte-identical", async () => {
     const html = await buildExecutiveReport({
       monthFolderName: "6-June-2026",

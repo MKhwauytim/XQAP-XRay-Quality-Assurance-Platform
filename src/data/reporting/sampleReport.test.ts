@@ -2,7 +2,7 @@
 // renderers (document / deck / xlsx) all read `computeSampleLineage`, so proving
 // the model is correct proves the numbers every output shows.
 
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { computeSampleLineage, buildSampleDocument, buildSampleDeck, type SampleReportInput } from "./sampleReport";
 import { makeRow, makeManifest, makeSampleMaster } from "./reportTestFixtures";
@@ -94,6 +94,23 @@ describe("sample renderers", () => {
 // change must be deliberate and reviewed on its own — never used to paper
 // over an unintended regression introduced by a chunking edit.
 describe("sample renderers — golden snapshot (P3-7 chunking safety)", () => {
+  // formatIssueDate() defaults to `new Date()` (today's real date), so this
+  // byte-identity pin is only reproducible if the clock is frozen to the
+  // instant the snapshot was actually captured — otherwise it silently
+  // breaks on every day rollover (2026-07-30 CI run vs the 2026-07-29
+  // capture date). Frozen at UTC noon so local-timezone date rollover
+  // doesn't shift the captured calendar day either.
+  beforeEach(() => {
+    // toFake: ["Date"] only — these builders themselves `await yieldToMain()`
+    // (a real `setTimeout`) as part of P3-7's chunking; faking `setTimeout`
+    // too would hang those awaits forever without an explicit timer advance.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-07-29T12:00:00.000Z"));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("document output is byte-identical", async () => {
     expect(await buildSampleDocument(input())).toMatchSnapshot();
   });

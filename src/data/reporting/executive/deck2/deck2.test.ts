@@ -1,5 +1,5 @@
 // src/data/reporting/executive/deck2/deck2.test.ts
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_EXEC_CONFIG } from "../../executiveReportTypes";
 import type { ExecutiveReportInput } from "../../executiveReportTypes";
 import type { PreparedPopulationRow } from "../../../population/populationTypes";
@@ -1525,6 +1525,24 @@ describe("slide-glossary-1 fan-out — Ledger/Briefing/Grid (2026-07-25 fan-out 
 // own — never used to paper over an unintended regression introduced by a
 // chunking edit.
 describe("buildExecutiveDeckV2 — golden snapshot (P3-7 chunking safety)", () => {
+  // The cover slide's "تاريخ الإصدار" stamps `new Date()` (today's real
+  // date), so this byte-identity pin is only reproducible if the clock is
+  // frozen to the instant the snapshot was actually captured — otherwise it
+  // silently breaks on every day rollover. Frozen at UTC noon so
+  // local-timezone date rollover doesn't shift the captured calendar day.
+  beforeEach(() => {
+    // toFake: ["Date"] only — buildExecutiveDeckV2 itself `await
+    // yieldToMain()`s (a real `setTimeout`) as part of P3-7's chunking, and
+    // this same file's reentrancy-guard tests below depend on real
+    // `setTimeout`-based interleaving; faking `setTimeout` too would hang
+    // those awaits forever without an explicit timer advance.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-07-29T12:00:00.000Z"));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("production output is byte-identical", async () => {
     const html = await buildExecutiveDeckV2(
       input([
