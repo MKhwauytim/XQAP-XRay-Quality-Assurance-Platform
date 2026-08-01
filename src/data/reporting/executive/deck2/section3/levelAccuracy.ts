@@ -85,6 +85,13 @@ type LevelStats = {
    *  its half-width card. */
   detection: number | null;
   rankable: boolean;
+  /** Whether detection's OWN (smaller) denominator — `correctSuspicion +
+   *  missedSuspicion` — clears the sufficiency cut, independently of
+   *  `rankable` (gated on `evaluable`, accuracy's own denominator). A port can
+   *  have plenty of evaluable decisions yet very few confirmed-suspicion ones,
+   *  so detection must be suppressed on ITS OWN thin base even when accuracy
+   *  is shown. */
+  detectionRankable: boolean;
 };
 
 type LevelAccuracyRow = {
@@ -124,6 +131,7 @@ function statsOf(counts: LevelCounts): LevelStats {
     accuracy: rateOf(counts.correctClean + counts.correctSuspicion, evaluable),
     detection: rateOf(counts.correctSuspicion, counts.correctSuspicion + counts.missedSuspicion),
     rankable: isRankable(band(evaluable)),
+    detectionRankable: isRankable(band(counts.correctSuspicion + counts.missedSuspicion)),
   };
 }
 
@@ -208,7 +216,11 @@ function accuracyCell(s: LevelStats): string {
 }
 
 function detectionTooltip(row: LevelAccuracyRow): string {
-  const show = (s: LevelStats) => (s.rankable ? fmtPct(s.detection) : "—");
+  // Gated on `detectionRankable` (detection's OWN correctSuspicion+
+  // missedSuspicion base), NOT `rankable` (accuracy's evaluable base) — a
+  // port can clear the accuracy cut while its confirmed-suspicion base stays
+  // too thin to publish a detection rate (2026-07-30 fix).
+  const show = (s: LevelStats) => (s.detectionRankable ? fmtPct(s.detection) : "—");
   return `دقة اكتشاف الاشتباه — المستوى الأول: ${show(row.l1)} · المستوى الثاني: ${show(row.l2)}`;
 }
 

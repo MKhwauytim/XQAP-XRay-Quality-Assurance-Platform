@@ -86,8 +86,17 @@ type MarkStratum = {
   rankable: boolean;
   /** Accuracy %, or null when the arm is empty OR below the sufficiency cut. */
   accuracy: number | null;
-  /** Suspicion-detection %, gated identically. */
+  /** Suspicion-detection %, gated on `detectionRankable` — ITS OWN
+   *  (correctSusp + missedSusp) base, NOT `rankable`/`n` (see that field's
+   *  doc comment). */
   detection: number | null;
+  /** Whether detection's OWN (smaller) denominator — `correctSusp +
+   *  missedSusp` — clears the sufficiency cut, independently of `rankable`
+   *  (gated on `n`, accuracy's own denominator). An arm can have plenty of
+   *  evaluated images yet very few confirmed-suspicion ones, so detection must
+   *  be suppressed on ITS OWN thin base even when accuracy is shown
+   *  (2026-07-30 fix). */
+  detectionRankable: boolean;
 };
 
 /** Fold one arm's rows into its tally. Every rate goes through `rateOf`, so a
@@ -122,6 +131,7 @@ function foldStratum(
   }
   const n = rows.length;
   const rankable = isRankable(band(n));
+  const detectionRankable = isRankable(band(outcomes.correctSusp + outcomes.missedSusp));
   return {
     label,
     caption,
@@ -131,7 +141,8 @@ function foldStratum(
     outcomes,
     rankable,
     accuracy: rankable ? rateOf(accurate, n) : null,
-    detection: rankable ? rateOf(outcomes.correctSusp, outcomes.correctSusp + outcomes.missedSusp) : null,
+    detection: detectionRankable ? rateOf(outcomes.correctSusp, outcomes.correctSusp + outcomes.missedSusp) : null,
+    detectionRankable,
   };
 }
 
@@ -344,7 +355,10 @@ function ledgerMarkTable(present: MarkStratum, absent: MarkStratum, recorded: nu
   const combinedAccuracy = combinedRankable ? rateOf(present.accurate + absent.accurate, combinedN) : null;
   const combinedCS = present.outcomes.correctSusp + absent.outcomes.correctSusp;
   const combinedMS = present.outcomes.missedSusp + absent.outcomes.missedSusp;
-  const combinedDetection = combinedRankable ? rateOf(combinedCS, combinedCS + combinedMS) : null;
+  // Gated on the POOLED detection base's OWN band, not `combinedRankable`
+  // (which reads `combinedN`) — same own-denominator discipline as
+  // `foldStratum`'s `detectionRankable` (2026-07-30 fix).
+  const combinedDetection = isRankable(band(combinedCS + combinedMS)) ? rateOf(combinedCS, combinedCS + combinedMS) : null;
   const combinedCounts = OUTCOME_CLASSES.map((c) => present.outcomes[c.key] + absent.outcomes[c.key]);
   const totalsRow =
     `<tr><td>الإجمالي</td><td>${fmtNum(combinedN)}</td><td>${pctCell(combinedAccuracy)}</td><td>${pctCell(combinedDetection)}</td>` +
@@ -462,10 +476,15 @@ function briefingMarkLedeAndRank(present: MarkStratum, absent: MarkStratum, supp
  * arm's OWN n (`outcomeShare`, shared with `outcomeBar`/`ledgerMarkTable`
  * above) — never a raw count, since a `metricMatrix` column has one shared
  * domain and raw counts would need a `[0,max]` domain instead of `[0,100]`.
- * An unrankable arm's accuracy/detection are already null from `foldStratum`,
- * and `outcomeShare` is null too under the same `!s.rankable` check — so an
- * ungated arm's row is null across ALL SIX columns together, never a mix of
- * some real, some missing.
+ * An unrankable arm's accuracy is already null from `foldStratum`, and
+ * `outcomeShare` is null too under the same `!s.rankable` check, so those five
+ * columns are null together. كشف الاشتباه is gated SEPARATELY, on
+ * `detectionRankable` (2026-07-30 fix) — its own, usually smaller,
+ * `correctSusp + missedSusp` base — so it CAN read "—" on a row whose other
+ * five columns still show real figures (an arm can clear the accuracy cut
+ * while its confirmed-suspicion base stays too thin to publish a detection
+ * rate); it is never gated more loosely than that, only possibly more
+ * strictly.
  */
 function gridMarkMatrix(present: MarkStratum, absent: MarkStratum): string {
   const arms: MarkStratum[] = [present, absent];

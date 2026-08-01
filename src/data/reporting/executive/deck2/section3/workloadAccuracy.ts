@@ -19,12 +19,20 @@
 //     page is worded as "volume causes low accuracy".
 //   • Every rate goes through `rateOf` → `null` on a zero denominator, rendered
 //     as a muted "—" and NEVER as a fake 0%.
-//   • Every rate is gated by `isRankable(band(evaluable))` — ports under the
-//     data-sufficiency cut render "—" instead of a number and are excluded from
-//     every superlative/trend claim. The totals row is gated on the SAME rule
-//     against the summed evaluable count.
+//   • Every rate is gated by `isRankable(band(n))` against ITS OWN denominator
+//     — accuracy against `evaluable` (`rankable`), the missed-suspicion rate
+//     against its own, smaller `correctSuspicion + missedSuspicion` base
+//     (`missedRankable`), NOT `evaluable` (2026-07-30 fix: a port can have
+//     plenty of evaluable decisions yet very few confirmed-suspicion ones, so
+//     gating the missed-suspicion rate on `evaluable` used to let a thin-base
+//     percentage through unsuppressed). Ports under the relevant cut render
+//     "—" instead of a number and are excluded from every superlative/trend
+//     claim. Each totals row is gated on the SAME rule against its own summed
+//     base.
 //   • العيّنة (the evaluable base) is printed for every port, so no percentage
-//     is ever shown without its denominator. (Column was labelled `ن` —
+//     is ever shown without its denominator visible somewhere on the row —
+//     though the missed-suspicion rate's OWN (smaller) denominator is not a
+//     separate column; see `missedRankable` above. (Column was labelled `ن` —
 //     owner, 2026-07-25: "ن is shit just say العينة".)
 //
 // ── Accuracy source ─────────────────────────────────────────────────────────
@@ -97,6 +105,13 @@ type WorkloadPortRow = {
   correctSuspicion: number;
   missedSuspicion: number;
   rankable: boolean;
+  /** Whether the MISSED-SUSPICION rate's own (smaller) denominator
+   *  (`correctSuspicion + missedSuspicion`) clears the sufficiency cut —
+   *  independent of `rankable`, which is gated on `evaluable` (the accuracy
+   *  rate's own denominator). A port can have plenty of evaluable decisions
+   *  yet very few confirmed-suspicion ones, so the missed-suspicion rate must
+   *  be suppressed on ITS OWN thin base even when accuracy is shown. */
+  missedRankable: boolean;
 };
 
 /**
@@ -127,6 +142,7 @@ function collectWorkloadRows(model: ReportModel): WorkloadPortRow[] {
       correctSuspicion: p.correctSuspicion,
       missedSuspicion: p.missedSuspicion,
       rankable: isRankable(band(p.evaluable)),
+      missedRankable: isRankable(band(p.correctSuspicion + p.missedSuspicion)),
     });
   }
   for (const [name, count] of workload) {
@@ -140,6 +156,7 @@ function collectWorkloadRows(model: ReportModel): WorkloadPortRow[] {
       correctSuspicion: 0,
       missedSuspicion: 0,
       rankable: isRankable(band(0)),
+      missedRankable: isRankable(band(0)),
     });
   }
 
@@ -202,7 +219,7 @@ function tableCard(title: string, rows: WorkloadPortRow[], variant: "land" | "se
       ? rows
           .map((p) => {
             const accuracy = p.rankable ? threshCell(accuracyOf(p), ACCURACY_TARGET) : MUTED_CELL;
-            const missed = p.rankable ? missedCell(missedRateOf(p)) : MUTED_CELL;
+            const missed = p.missedRankable ? missedCell(missedRateOf(p)) : MUTED_CELL;
             return (
               `<tr><td>${esc(p.name)}</td>` +
               barCell(fmtNum(p.workload), (p.workload / maxWorkload) * 100, variant === "land" ? "green" : "blue") +
@@ -220,11 +237,13 @@ function tableCard(title: string, rows: WorkloadPortRow[], variant: "land" | "se
   const totCorrect = sum((p) => p.correct);
   const totCS = sum((p) => p.correctSuspicion);
   const totMS = sum((p) => p.missedSuspicion);
-  // The totals row obeys the SAME sufficiency gate as the per-port rows, read
-  // against the summed evaluable base.
+  // The totals row obeys the SAME sufficiency gate as the per-port rows —
+  // accuracy read against the summed evaluable base, the missed-suspicion
+  // rate read against ITS OWN summed (smaller) base, independently.
   const totRankable = isRankable(band(totEvaluable));
+  const totMissedRankable = isRankable(band(totCS + totMS));
   const totAccuracy = totRankable ? pctCell(rateOf(totCorrect, totEvaluable)) : pctCell(null);
-  const totMissed = totRankable ? pctCell(rateOf(totMS, totCS + totMS)) : pctCell(null);
+  const totMissed = totMissedRankable ? pctCell(rateOf(totMS, totCS + totMS)) : pctCell(null);
   const totalsRow =
     `<tr><td>الإجمالي</td><td>${fmtNum(totWorkload)}</td>` +
     `<td>${totAccuracy}</td><td>${totMissed}</td><td>${fmtNum(totEvaluable)}</td></tr>`;
@@ -262,7 +281,7 @@ function ledgerWorkloadTable(
   const trs = rows
     .map((p, i) => {
       const accuracy = p.rankable ? threshCell(accuracyOf(p), ACCURACY_TARGET) : MUTED_CELL;
-      const missed = p.rankable ? missedCell(missedRateOf(p)) : MUTED_CELL;
+      const missed = p.missedRankable ? missedCell(missedRateOf(p)) : MUTED_CELL;
       return (
         `<tr><td>${ledgerIdx(i)}${esc(p.name)}</td>` +
         barCell(fmtNum(p.workload), (p.workload / maxWorkload) * 100, variant === "land" ? "green" : "blue") +
@@ -280,8 +299,9 @@ function ledgerWorkloadTable(
   const totCS = sum((p) => p.correctSuspicion);
   const totMS = sum((p) => p.missedSuspicion);
   const totRankable = isRankable(band(totEvaluable));
+  const totMissedRankable = isRankable(band(totCS + totMS));
   const totAccuracy = totRankable ? pctCell(rateOf(totCorrect, totEvaluable)) : pctCell(null);
-  const totMissed = totRankable ? pctCell(rateOf(totMS, totCS + totMS)) : pctCell(null);
+  const totMissed = totMissedRankable ? pctCell(rateOf(totMS, totCS + totMS)) : pctCell(null);
   const totalsRow =
     `<tr><td>الإجمالي</td><td>${fmtNum(totWorkload)}</td>` +
     `<td>${totAccuracy}</td><td>${totMissed}</td><td>${fmtNum(totEvaluable)}</td></tr>`;
@@ -346,7 +366,7 @@ function briefingWorkloadRank(landChunk: WorkloadPortRow[], seaChunk: WorkloadPo
   const totMS = sum((p) => p.missedSuspicion);
   const totRankable = isRankable(band(totEvaluable));
   const pooledAccuracy = totRankable ? rateOf(totCorrect, totEvaluable) : null;
-  const pooledMissed = totRankable ? rateOf(totMS, totCS + totMS) : null;
+  const pooledMissed = isRankable(band(totCS + totMS)) ? rateOf(totMS, totCS + totMS) : null;
 
   const supportStrip = briefingSupport([
     { iconName: "chart", value: fmtNum(totWorkload), label: "إجمالي حجم الصور" },
@@ -420,7 +440,7 @@ function gridWorkloadMatrix(
   compact: boolean,
 ): string {
   const accuracy = (p: WorkloadPortRow) => (p.rankable ? accuracyOf(p) : null);
-  const missed = (p: WorkloadPortRow) => (p.rankable ? missedRateOf(p) : null);
+  const missed = (p: WorkloadPortRow) => (p.missedRankable ? missedRateOf(p) : null);
   const matrix = metricMatrix(
     {
       rowLabels: rows.map((p) => p.name),

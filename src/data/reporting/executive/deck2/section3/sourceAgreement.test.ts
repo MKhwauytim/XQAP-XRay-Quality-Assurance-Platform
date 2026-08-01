@@ -145,6 +145,50 @@ function knownProfile(count = 20): {
   return { rows, reviews };
 }
 
+/**
+ * 20 images extending `knownProfile` with real manual/opposite/liveMeans
+ * results (`knownProfile` leaves those three permanently null — "BI never
+ * provided" — which is realistic for most months but can't exercise the new
+ * levels×teams grid's real percentages). The L1/L2/reviewer patterns are
+ * IDENTICAL to `knownProfile` (same seeds), so every existing assertion about
+ * those three sources keeps holding; only the three BI-sourced fields are
+ * newly populated:
+ *   • manual    = سليمة on the first 16 images, اشتباه on the last 4
+ *   • opposite  = سليمة on the first 10 images, اشتباه on the last 10
+ *   • liveMeans = سليمة on the first 5 images,  اشتباه on the last 15
+ * Exact resulting agreement rates are read off the built model in each test
+ * (same "guard the fixture against drift" pattern `knownProfile`'s own tests
+ * use), not hand-derived here.
+ */
+function knownTeamsProfile(count = 20): {
+  rows: PreparedPopulationRow[];
+  reviews: Map<string, Result>;
+} {
+  const rows: PreparedPopulationRow[] = [];
+  const reviews = new Map<string, Result>();
+  for (let i = 0; i < count; i++) {
+    const id = `XR-${i + 1}`;
+    const manual: Result = i < 16 ? "سليمة" : "اشتباه";
+    const opposite: Result = i < 10 ? "سليمة" : "اشتباه";
+    const liveMeans: Result = i < 5 ? "سليمة" : "اشتباه";
+    rows.push(
+      popRow({
+        xrayImageId: id,
+        sourceRowNumber: i + 1,
+        xrayLevelOneResult: "سليمة",
+        xrayLevelTwoResult: i < 15 ? "سليمة" : "اشتباه",
+        otherResults: {
+          manual: { result: manual, code: null, employeeId: null },
+          opposite: { result: opposite, code: null, employeeId: null },
+          liveMeans: { result: liveMeans, code: null, employeeId: null },
+        },
+      }),
+    );
+    reviews.set(id, i < 18 ? "سليمة" : "اشتباه");
+  }
+  return { rows, reviews };
+}
+
 function render(inp: ExecutiveReportInput): string {
   return sourceAgreementSlide(buildReportModel(inp), 12, 24, false);
 }
@@ -206,10 +250,21 @@ describe("sourceAgreementSlide — the two facts the page must not misrepresent"
       "التفتيش اليدوي",
       "التفتيش المعاكس",
       "الوسائل الحية",
-      "المراجع (المعيار)",
     ]) {
       expect(html).toContain(label);
     }
+    // "المراجع (المعيار)" is no longer shown on the default view (2026-07-28
+    // rework: the reviewer card compares both levels against the reviewer
+    // without ever spelling out this specific compound label as a row header
+    // of its own) — it still appears in the Ledger/Briefing variants, which
+    // still walk all 15 source pairs including reviewer pairs.
+    const preview = sourceAgreementSlide(
+      buildReportModel(input(rows, { sample: true, reviews })),
+      12,
+      24,
+      true,
+    );
+    expect(preview).toContain("المراجع (المعيار)");
   });
 });
 
@@ -244,53 +299,101 @@ describe("sourceAgreementSlide — honest empty states", () => {
     expect(countOf(html, MUTED_RATE_CELL)).toBe(5);
     // …and the totals row too (pctCell's muted form).
     expect(html).toContain('<td><span class="insuff">—</span></td>');
-    // The one pair that does NOT involve the reviewer still reports (20 images).
-    expect(html).toContain(">75%</text>");
+    // The one pair that does NOT involve the reviewer (level1↔level2) is the
+    // standalone stat callout, not the grid — it still reports (20 images).
+    const statStart = html.indexOf('class="s3sa-lvl-stat"');
+    expect(statStart).toBeGreaterThan(-1);
+    expect(html.slice(statStart, html.indexOf("</div>", statStart) + "</div>".length)).toContain("75.0%");
   });
 });
 
 describe("sourceAgreementSlide — rates, gating and ن", () => {
-  it("prints the known pair agreement percentages in the matrix and the reviewer table", () => {
-    const { rows, reviews } = knownProfile();
+  it("prints the known level×team agreement percentages in the new grid, level1×level2 in the stat callout, and keeps level×reviewer in the reviewer table only", () => {
+    const { rows, reviews } = knownTeamsProfile();
     const model = buildReportModel(input(rows, { sample: true, reviews }));
 
     // Guard the fixture itself against drift in the aggregate layer.
-    const pair = model.resultComparison.crossTeamMatrix.find(
-      (c) => c.sourceA === "levelOne" && c.sourceB === "levelTwo",
-    )!;
-    expect(pair.comparable).toBe(20);
-    expect(pair.agree).toBe(15);
-    expect(pair.agreementRate).toBe(75);
+    const find = (a: string, b: string) =>
+      model.resultComparison.crossTeamMatrix.find(
+        (c) => (c.sourceA === a && c.sourceB === b) || (c.sourceA === b && c.sourceB === a),
+      )!;
+    expect(find("levelOne", "manual").agreementRate).toBe(80);
+    expect(find("levelOne", "opposite").agreementRate).toBe(50);
+    expect(find("levelOne", "liveMeans").agreementRate).toBe(25);
+    expect(find("levelTwo", "manual").agreementRate).toBe(95);
+    expect(find("levelTwo", "opposite").agreementRate).toBe(75);
+    expect(find("levelTwo", "liveMeans").agreementRate).toBe(50);
+    expect(find("levelOne", "levelTwo").agreementRate).toBe(75);
 
     const html = sourceAgreementSlide(model, 12, 24, false);
-    expect(html).toContain(">75%</text>"); // L1 × L2
-    expect(html).toContain(">90%</text>"); // L1 × reviewer
-    expect(html).toContain(">85%</text>"); // L2 × reviewer
-    // The reviewer table renders the same figures at one decimal.
+
+    // The level×team cells render as real heatmap percentages.
+    for (const pct of [80, 50, 25, 95, 75]) {
+      expect(html).toContain(`>${pct}%</text>`);
+    }
+
+    // level1↔level2 is the standalone stat callout, NOT a grid cell.
+    const statStart = html.indexOf('class="s3sa-lvl-stat"');
+    expect(statStart).toBeGreaterThan(-1);
+    expect(html.slice(statStart, html.indexOf("</div>", statStart) + "</div>".length)).toContain("75.0%");
+
+    // level×reviewer numbers stay in the reviewer table only — never
+    // re-added to the new grid (the reviewer card next to it already
+    // covers them).
     expect(html).toContain("90.0%");
     expect(html).toContain("85.0%");
+    expect(html).not.toContain(">90%</text>");
+    expect(html).not.toContain(">85%</text>");
     // Below-target rows carry the alert glyph, so status is never colour-alone.
     expect(html).toContain('<td class="v2-bar-cell warn"');
     expect(html).toContain('class="v2-cell-flag"');
   });
 
-  it("suppresses a pair below the sufficiency cut but still shows its ن", () => {
+  it("suppresses the level1↔level2 stat below the sufficiency cut but still shows its count", () => {
     // 5 comparable images → band "insufficient" → not rankable.
     const { rows } = knownProfile(5);
     const html = render(input(rows));
-    expect(html).not.toContain(">100%</text>");
-    expect(html).not.toContain("<td>100%</td>");
-    expect(html).toContain(">—</text>");
-    // ن is still disclosed for that suppressed pair.
-    expect(html).toContain("<td>5</td>");
+    const statStart = html.indexOf('class="s3sa-lvl-stat"');
+    expect(statStart).toBeGreaterThan(-1);
+    const statHtml = html.slice(statStart, html.indexOf("</div>", statStart) + "</div>".length);
+    expect(statHtml).toContain('class="insuff"');
+    expect(statHtml).not.toContain("100.0%");
+    expect(statHtml).toContain("5 صورة");
   });
 
-  it("shows the rate again once the pair reaches the rankable band", () => {
+  it("shows the level1↔level2 stat rate again once the pair reaches the rankable band", () => {
     // 10 comparable images → band "limited" → rankable.
     const { rows } = knownProfile(10);
     const html = render(input(rows));
+    const statStart = html.indexOf('class="s3sa-lvl-stat"');
+    const statHtml = html.slice(statStart, html.indexOf("</div>", statStart) + "</div>".length);
+    expect(statHtml).toContain("100.0%");
+    expect(statHtml).toContain("10 صورة");
+  });
+
+  it("suppresses a level×team grid cell below the sufficiency cut but still shows its ن", () => {
+    // 5 comparable images → band "insufficient" → not rankable, for every pair.
+    const { rows } = knownTeamsProfile(5);
+    const html = render(input(rows));
+    expect(html).not.toContain("<td>100%</td>");
+    expect(html).toContain(">—</text>");
+    // ن is still disclosed for the suppressed level×team cells.
+    const countsStart = html.indexOf("عدد الصور القابلة للمقارنة");
+    expect(countsStart).toBeGreaterThan(-1);
+    expect(html.slice(countsStart, html.indexOf("</table>", countsStart) + "</table>".length)).toContain(
+      "<td>5</td>",
+    );
+  });
+
+  it("shows a level×team grid cell's rate again once it reaches the rankable band", () => {
+    // 10 comparable images → band "limited" → rankable.
+    const { rows } = knownTeamsProfile(10);
+    const html = render(input(rows));
     expect(html).toContain(">100%</text>");
-    expect(html).toContain("<td>10</td>");
+    const countsStart = html.indexOf("عدد الصور القابلة للمقارنة");
+    expect(html.slice(countsStart, html.indexOf("</table>", countsStart) + "</table>".length)).toContain(
+      "<td>10</td>",
+    );
   });
 
   it("renders no rows at all without throwing when the month is empty", () => {
@@ -327,6 +430,7 @@ describe("sourceAgreementSlide — structure & determinism", () => {
     expect(SOURCE_AGREEMENT_CSS).toContain(".s3sa-split");
     expect(SOURCE_AGREEMENT_CSS).toContain(".s3sa-ngrid");
     expect(SOURCE_AGREEMENT_CSS).toContain(".s3sa-foot");
+    expect(SOURCE_AGREEMENT_CSS).toContain(".s3sa-lvl-stat");
     expect(SOURCE_AGREEMENT_CSS).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
   });
 });
@@ -610,16 +714,42 @@ describe("sourceAgreementSlide — Grid (panel 3)", () => {
     expect(panel).toContain("عدد الصور القابلة للمقارنة");
   });
 
+  it("renders the same levels×teams matrix as the default view: 2×3 grid with real names, no numeric axis, plus the level1↔2 stat", () => {
+    const { rows, reviews } = knownTeamsProfile();
+    const html = renderPreview(input(rows, { sample: true, reviews }));
+    const panel = panelSlice(html, 3);
+    const matrixStart = panel.indexOf('class="v2-gd-panel matrix"');
+    expect(matrixStart).toBeGreaterThan(-1);
+    const reviewerStart = panel.indexOf('class="v2-gd-panel reviewer"');
+    expect(reviewerStart).toBeGreaterThan(matrixStart);
+    const matrixHtml = panel.slice(matrixStart, reviewerStart);
+
+    for (const label of [
+      "المستوى الأول",
+      "المستوى الثاني",
+      "التفتيش اليدوي",
+      "التفتيش المعاكس",
+      "الوسائل الحية",
+    ]) {
+      expect(matrixHtml).toContain(label);
+    }
+    // No bare numeric column headers left over from the old 6×6 design.
+    expect(matrixHtml).not.toMatch(/>[1-6]<\/text>/);
+    expect(matrixHtml).toContain('class="s3sa-lvl-stat"');
+    // The reviewer is not a column here — already covered by the reviewer panel.
+    expect(matrixHtml).not.toContain("المراجع (المعيار)");
+  });
+
   it("the reviewer matrix has the right shape: 5 source rows × 4 metric columns with the plan's column names", () => {
     const { rows, reviews } = knownProfile();
     const html = renderPreview(input(rows, { sample: true, reviews }));
     const panel = panelSlice(html, 3);
 
-    // Isolate the reviewer-matrix panel specifically — the HEATMAP panel
-    // legitimately lists all 6 sources (including "المراجع (المعيار)") in
-    // its own sr-table, so a whole-panel substring check would be a false
-    // negative/positive either way. The reviewer panel starts at its own
-    // gridPanel title text.
+    // Isolate the reviewer-matrix panel specifically — checking the whole
+    // panel HTML (heatmap panel + reviewer panel together) would be a false
+    // negative/positive either way for assertions scoped to just one of the
+    // two sub-panels. The reviewer panel starts at its own gridPanel title
+    // text.
     const revStart = panel.indexOf('class="v2-gd-panel reviewer"');
     expect(revStart).toBeGreaterThan(-1);
     const revHtml = panel.slice(revStart);
