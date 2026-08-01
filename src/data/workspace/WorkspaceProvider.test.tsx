@@ -1,9 +1,15 @@
 /* @vitest-environment jsdom */
+import { useState } from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createMemoryDirectory } from "../storage/memoryDirectory";
 import { DEFAULT_LABELS } from "../labels/labelsStore";
+import {
+  createEmptyUserManagementState,
+  getManagedLoginUsers,
+  writeUserManagementState,
+} from "../../auth/userManagement";
 import { emptyLoadedFiles } from "./WorkspaceContext";
 import { WorkspacePicker } from "./WorkspaceGate";
 import { WorkspaceProvider } from "./WorkspaceProvider";
@@ -51,6 +57,65 @@ function ClearWorkspaceButton() {
       clear
     </button>
   );
+}
+
+function RefreshPermissionsProbe() {
+  const { status, refreshPermissions } = useWorkspace();
+  const [usernames, setUsernames] = useState(() =>
+    getManagedLoginUsers().map((u) => u.username).join(","),
+  );
+  return (
+    <div>
+      <output data-testid="status">{status}</output>
+      <output data-testid="usernames">{usernames}</output>
+      <button
+        type="button"
+        onClick={() => {
+          void refreshPermissions().then(() => {
+            setUsernames(getManagedLoginUsers().map((u) => u.username).join(","));
+          });
+        }}
+      >
+        refresh
+      </button>
+    </div>
+  );
+}
+
+function diskFileWithUser(username: string) {
+  return {
+    manifest: null,
+    sampleMaster: null,
+    sampleDistribution: null,
+    usersPermissions: {
+      metadata: {
+        schemaVersion: 1,
+        revision: 1,
+        contentHash: "x",
+        writtenAt: "2026-01-01T00:00:00.000Z",
+      },
+      data: {
+        users: [
+          {
+            id: "u-refreshed",
+            username,
+            displayName: "Refreshed User",
+            passwordHash: { algorithm: "argon2id" as const, encoded: "x" },
+            role: "employee" as const,
+            isActive: true,
+            hasCertScanLicense: false,
+            createdAt: "2026-01-01T00:00:00.000Z",
+            createdBy: "admin",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+            updatedBy: "admin",
+          },
+        ],
+        roles: [],
+        permissions: [],
+        featurePermissions: [],
+      },
+    },
+  };
 }
 
 describe("remembered workspace fallback", () => {
@@ -230,5 +295,75 @@ describe("usersHydrated", () => {
     fireEvent.click(screen.getByRole("button", { name: "clear" }));
 
     expect(screen.getByText("not_selected:false")).toBeInTheDocument();
+  });
+});
+
+describe("refreshPermissions", () => {
+  afterEach(cleanup);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    writeUserManagementState(createEmptyUserManagementState(), false);
+    mocks.isFileSystemAccessSupported.mockReturnValue(true);
+    mocks.clearLastWorkspace.mockResolvedValue(undefined);
+    mocks.ensureDirectoryPermission.mockResolvedValue(true);
+    mocks.queryDirectoryPermission.mockResolvedValue("granted");
+  });
+
+  it("re-syncs users from disk on demand without flipping status away from ready", async () => {
+    const handle = createMemoryDirectory("refresh-permissions-workspace");
+    mocks.loadLastWorkspace.mockResolvedValue({
+      directoryHandle: handle,
+      directoryName: handle.name,
+      savedAt: new Date().toISOString(),
+    });
+    mocks.checkWorkspaceStructure.mockResolvedValue({
+      status: "ready",
+      missingItems: [],
+      invalidItems: [],
+      message: "ready",
+    });
+    mocks.loadWorkspaceFiles.mockResolvedValueOnce(emptyLoadedFiles);
+
+    render(
+      <WorkspaceProvider>
+        <RefreshPermissionsProbe />
+      </WorkspaceProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("ready"));
+
+    // Simulate an admin editing users.permissions.json elsewhere: the next
+    // disk read returns a different roster than what's already in memory.
+    mocks.loadWorkspaceFiles.mockResolvedValueOnce(diskFileWithUser("refreshed-user"));
+
+    fireEvent.click(screen.getByRole("button", { name: "refresh" }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("usernames")).toHaveTextContent("refreshed-user"),
+    );
+    // Must never have flipped through a non-"ready" status -- that would mean
+    // WorkspaceGate briefly unmounted the whole app for its full-screen
+    // spinner, which is exactly what refreshPermissions (unlike
+    // reloadWorkspace) is meant to avoid for a silent background/manual sync.
+    expect(screen.getByTestId("status")).toHaveTextContent("ready");
+  });
+
+  it("is a no-op when no workspace is connected", async () => {
+    mocks.loadLastWorkspace.mockResolvedValue(null);
+
+    render(
+      <WorkspaceProvider>
+        <RefreshPermissionsProbe />
+      </WorkspaceProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("not_selected"));
+
+    const callsBefore = mocks.loadWorkspaceFiles.mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "refresh" }));
+    await Promise.resolve();
+
+    expect(mocks.loadWorkspaceFiles.mock.calls.length).toBe(callsBefore);
   });
 });

@@ -27,6 +27,7 @@ import {
 import type { ReferralRequest, ReopenRequest, ReplacementRequest } from "../../../../../../data/referral/referralTypes";
 import { loadSampleMaster } from "../../../../../../data/sampling/sampleStorage";
 import type { DirectoryHandleLike } from "../../../../../../data/storage/fileSystemAccess";
+import { subscribeToDataRefresh } from "../../../../../../data/workspace/dataRefreshSignal";
 import { isReferral, isReplacement, requestKind, type CardRequest } from "./requestKind";
 
 export type LoadState = "idle" | "loading" | "ready" | "error";
@@ -139,6 +140,11 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- async data load; setState fires inside loadData's async callback, not synchronously in the effect body
   useEffect(() => { void loadData(); }, [loadData]);
+
+  // Re-fetch on the app-wide refresh signal (manual toolbar button + 5-minute
+  // auto-refresh) so a request submitted/approved by someone else -- or on
+  // another machine -- shows up without navigating away and back.
+  useEffect(() => subscribeToDataRefresh(loadData), [loadData]);
 
   // Approve/deny delegate to the domain module in data/referral/approveReferral.ts,
   // which owns the idempotency re-check (bug #1), the ownership re-check (bug #2),

@@ -8,6 +8,7 @@ import * as passwordCrypto from "./passwordCrypto";
 import { writeLastLoginUsername } from "./loginPersistence";
 import { VIEWER_USERNAME } from "./authConfig";
 import { WorkspaceProvider } from "../data/workspace/WorkspaceProvider";
+import * as dataRefreshSignal from "../data/workspace/dataRefreshSignal";
 import { createMemoryDirectory } from "../data/storage/memoryDirectory";
 import type { AuthSession } from "./authTypes";
 import {
@@ -58,6 +59,64 @@ function renderAuthGate() {
       <AuthGate>{() => <div>authenticated</div>}</AuthGate>
     </WorkspaceProvider>,
   );
+}
+
+const NON_SEED_USERNAME = "ahmed.salem";
+
+function buildUsersPermissionsFile(usernames: string[]): UsersPermissionsFile {
+  const now = "2026-07-01T00:00:00.000Z";
+  return {
+    metadata: {
+      schemaVersion: WORKSPACE_SCHEMA_VERSION,
+      fileType: "users.permissions",
+      revision: 1,
+      createdAt: now,
+      createdBy: "admin",
+      updatedAt: now,
+      updatedBy: "admin",
+      contentHash: "test-hash",
+    },
+    data: {
+      users: usernames.map((username, index) => ({
+        id: `user-${index}-${username}`,
+        username,
+        displayName: username,
+        passwordHash: { algorithm: "argon2id" as const, encoded: "x" },
+        role: "employee" as const,
+        isActive: true,
+        hasCertScanLicense: false,
+        createdAt: now,
+        createdBy: "admin",
+        updatedAt: now,
+        updatedBy: "admin",
+      })),
+      roles: [],
+      permissions: [],
+      featurePermissions: [],
+    },
+  };
+}
+
+function mockReadyWorkspace(name: string, diskUsernames: string[]) {
+  const handle = createMemoryDirectory(name);
+  mocks.loadLastWorkspace.mockResolvedValue({
+    directoryHandle: handle,
+    directoryName: handle.name,
+    savedAt: new Date().toISOString(),
+  });
+  mocks.checkWorkspaceStructure.mockResolvedValue({
+    status: "ready",
+    missingItems: [],
+    invalidItems: [],
+    message: "ready",
+  });
+  mocks.loadWorkspaceFiles.mockResolvedValue({
+    manifest: null,
+    usersPermissions: buildUsersPermissionsFile(diskUsernames),
+    sampleMaster: null,
+    sampleDistribution: null,
+  });
+  return handle;
 }
 
 beforeEach(() => {
@@ -142,64 +201,6 @@ describe("AuthGate — login form", () => {
 });
 
 describe("AuthGate — startup session-hydration race (B2)", () => {
-  const NON_SEED_USERNAME = "ahmed.salem";
-
-  function buildUsersPermissionsFile(usernames: string[]): UsersPermissionsFile {
-    const now = "2026-07-01T00:00:00.000Z";
-    return {
-      metadata: {
-        schemaVersion: WORKSPACE_SCHEMA_VERSION,
-        fileType: "users.permissions",
-        revision: 1,
-        createdAt: now,
-        createdBy: "admin",
-        updatedAt: now,
-        updatedBy: "admin",
-        contentHash: "test-hash",
-      },
-      data: {
-        users: usernames.map((username, index) => ({
-          id: `user-${index}-${username}`,
-          username,
-          displayName: username,
-          passwordHash: { algorithm: "argon2id" as const, encoded: "x" },
-          role: "employee" as const,
-          isActive: true,
-          hasCertScanLicense: false,
-          createdAt: now,
-          createdBy: "admin",
-          updatedAt: now,
-          updatedBy: "admin",
-        })),
-        roles: [],
-        permissions: [],
-        featurePermissions: [],
-      },
-    };
-  }
-
-  function mockReadyWorkspace(name: string, diskUsernames: string[]) {
-    const handle = createMemoryDirectory(name);
-    mocks.loadLastWorkspace.mockResolvedValue({
-      directoryHandle: handle,
-      directoryName: handle.name,
-      savedAt: new Date().toISOString(),
-    });
-    mocks.checkWorkspaceStructure.mockResolvedValue({
-      status: "ready",
-      missingItems: [],
-      invalidItems: [],
-      message: "ready",
-    });
-    mocks.loadWorkspaceFiles.mockResolvedValue({
-      manifest: null,
-      usersPermissions: buildUsersPermissionsFile(diskUsernames),
-      sampleMaster: null,
-      sampleDistribution: null,
-    });
-    return handle;
-  }
-
   beforeEach(() => {
     // Simulate a fresh module load: the in-memory user-management runtime
     // state has not been synced from any workspace yet, so getManagedLoginUsers()
@@ -292,5 +293,87 @@ describe("AuthGate — startup session-hydration race (B2)", () => {
     await waitFor(() => {
       expect(screen.getByLabelText("اسم المستخدم")).toBeInTheDocument();
     });
+  });
+});
+
+describe("AuthGate — permission auto-refresh", () => {
+  const AUTO_REFRESH_INTERVAL_MS = 5 * 60_000;
+
+  beforeEach(() => {
+    userManagement.writeUserManagementState(
+      userManagement.createEmptyUserManagementState(),
+      false,
+    );
+  });
+
+  afterEach(() => {
+    userManagement.writeUserManagementState(
+      userManagement.createEmptyUserManagementState(),
+      false,
+    );
+  });
+
+  it("schedules a 5-minute interval that re-syncs users/permissions from disk for a real session", async () => {
+    vi.spyOn(authSession, "readRealSession").mockReturnValue({
+      role: "employee",
+      username: NON_SEED_USERNAME,
+      loginAt: new Date().toISOString(),
+    });
+    mockReadyWorkspace("auto-refresh-real-session", [NON_SEED_USERNAME]);
+    const setIntervalSpy = vi.spyOn(window, "setInterval");
+
+    renderAuthGate();
+
+    await waitFor(() => expect(mocks.loadWorkspaceFiles).toHaveBeenCalled());
+    const callsAfterHydration = mocks.loadWorkspaceFiles.mock.calls.length;
+
+    // The interval-registering effect depends on `workspaceStatus` flipping to
+    // "ready", which lands in a render/effect pass after loadWorkspaceFiles is
+    // merely invoked -- poll rather than asserting immediately, so this isn't
+    // racy under load.
+    let refreshCall: ReturnType<typeof setIntervalSpy.mock.calls.find>;
+    await waitFor(() => {
+      refreshCall = setIntervalSpy.mock.calls.find(
+        (call) => call[1] === AUTO_REFRESH_INTERVAL_MS,
+      );
+      expect(refreshCall).toBeDefined();
+    });
+
+    const dataRefreshSpy = vi.fn();
+    const unsubscribe = dataRefreshSignal.subscribeToDataRefresh(dataRefreshSpy);
+
+    // Fire the scheduled callback directly rather than racing real 5-minute
+    // timers -- what matters here is that the interval this effect registers
+    // actually triggers another disk read, not exactly when it fires.
+    (refreshCall![0] as () => void)();
+
+    await waitFor(() =>
+      expect(mocks.loadWorkspaceFiles.mock.calls.length).toBeGreaterThan(callsAfterHydration),
+    );
+    // The same tick must also broadcast the app-wide data-refresh signal, so
+    // every mounted view (assigned samples, referrals, notifications, ...)
+    // re-reads its own workspace data -- not just the user-management state.
+    expect(dataRefreshSpy).toHaveBeenCalled();
+    unsubscribe();
+  });
+
+  it("does not schedule an auto-refresh for a demo/viewer session", async () => {
+    vi.spyOn(authSession, "readRealSession").mockReturnValue({
+      role: "admin",
+      username: VIEWER_USERNAME,
+      loginAt: new Date().toISOString(),
+      mode: "demo",
+    });
+    mockReadyWorkspace("auto-refresh-demo-skipped", [NON_SEED_USERNAME]);
+    const setIntervalSpy = vi.spyOn(window, "setInterval");
+
+    renderAuthGate();
+
+    await waitFor(() => expect(screen.getByText("authenticated")).toBeInTheDocument());
+
+    const refreshCall = setIntervalSpy.mock.calls.find(
+      (call) => call[1] === AUTO_REFRESH_INTERVAL_MS,
+    );
+    expect(refreshCall).toBeUndefined();
   });
 });

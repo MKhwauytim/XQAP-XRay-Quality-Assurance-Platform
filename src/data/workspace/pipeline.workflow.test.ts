@@ -102,8 +102,8 @@ const SAMPLING_RULES: StageSamplingRule[] = [
 ];
 
 const ALLOCATIONS: EmployeeStageAllocation[] = [
-  { username: "jamila.ghamdi", stageKey: "first", method: "percentage", value: 50, isActive: true },
-  { username: "hatem.oraini", stageKey: "first", method: "percentage", value: 50, isActive: true },
+  { username: "jalgahamdi", stageKey: "first", method: "percentage", value: 50, isActive: true },
+  { username: "hihaloraini", stageKey: "first", method: "percentage", value: 50, isActive: true },
 ];
 
 type Artifacts = {

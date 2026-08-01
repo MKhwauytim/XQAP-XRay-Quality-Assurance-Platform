@@ -95,13 +95,13 @@ const DEMO_SAMPLING_RULES: StageSamplingRule[] = [
   },
 ];
 
-// Four of the five default managed users are assignable (employee/supervisor);
-// the fifth (manager) never receives direct assignments in the real UI either.
+// Four of the six default managed users are assignable (employee/supervisor);
+// the other two (manager) never receive direct assignments in the real UI either.
 const DEMO_ALLOCATIONS: EmployeeStageAllocation[] = [
-  { username: "jamila.ghamdi",   stageKey: "first", method: "percentage", value: 35, isActive: true },
-  { username: "hatem.oraini",    stageKey: "first", method: "percentage", value: 30, isActive: true },
-  { username: "salman.hajji",    stageKey: "first", method: "percentage", value: 20, isActive: true },
-  { username: "mohammed.otaibi", stageKey: "first", method: "percentage", value: 15, isActive: true },
+  { username: "jalgahamdi",  stageKey: "first", method: "percentage", value: 35, isActive: true },
+  { username: "hihaloraini", stageKey: "first", method: "percentage", value: 30, isActive: true },
+  { username: "saalhijji",   stageKey: "first", method: "percentage", value: 20, isActive: true },
+  { username: "malrogi",     stageKey: "first", method: "percentage", value: 15, isActive: true },
 ];
 
 function buildDemoPopulationRow(seq: number, port: DemoPort): PreparedPopulationRow {

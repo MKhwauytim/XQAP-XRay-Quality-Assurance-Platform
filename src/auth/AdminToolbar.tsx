@@ -1,17 +1,19 @@
 import "./AdminToolbar.css";
-import { useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Briefcase,
   Eye,
   FolderOpen,
   HelpCircle,
   LogOut,
+  RefreshCw,
   ShieldCheck,
   UserRound,
   UserCog,
 } from "lucide-react";
 import type { AuthRole, AuthSession } from "./authTypes";
 import { getManagedLoginUsers } from "./userManagement";
+import { broadcastDataRefresh } from "../data/workspace/dataRefreshSignal";
 import { useWorkspace } from "../data/workspace/useWorkspace";
 import { GlobalMonthSelector } from "../components/GlobalMonthSelector/GlobalMonthSelector";
 import { useLabels, type Labels } from "../data/labels/useLabels";
@@ -68,13 +70,44 @@ export function AdminToolbar({
   const effectiveRole: AuthRole = isRealAdmin && previewRole ? previewRole : session.role;
   const isImpersonating = effectiveRole !== session.role;
 
-  const { directoryHandle } = useWorkspace();
+  const { directoryHandle, refreshPermissions } = useWorkspace();
   const workspaceName = directoryHandle?.name ?? null;
 
   const displayName = useMemo(() => {
     const match = getManagedLoginUsers().find((u) => u.username === session.username);
     return match?.displayName || session.username;
   }, [session.username]);
+
+  // Manual "refresh now" control: re-syncs users/roles/permissions from disk
+  // (see WorkspaceProvider.refreshPermissions) AND broadcasts the app-wide
+  // dataRefreshSignal so every mounted view re-reads its own workspace data
+  // (assigned samples, referrals/approvals, notifications, ...) — so an
+  // admin's edit or another employee's action reaches this session without
+  // waiting for the 5-minute auto-refresh in AuthGate or a full page reload.
+  const [refreshState, setRefreshState] = useState<"idle" | "running" | "success" | "failed">("idle");
+  const refreshResetTimer = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (refreshResetTimer.current !== null) window.clearTimeout(refreshResetTimer.current);
+    };
+  }, []);
+
+  const handleRefresh = useCallback(async () => {
+    if (refreshState === "running") return;
+    setRefreshState("running");
+    const ok = await refreshPermissions();
+    broadcastDataRefresh();
+    setRefreshState(ok ? "success" : "failed");
+    if (refreshResetTimer.current !== null) window.clearTimeout(refreshResetTimer.current);
+    refreshResetTimer.current = window.setTimeout(() => setRefreshState("idle"), 2000);
+  }, [refreshPermissions, refreshState]);
+
+  const refreshTitle =
+    refreshState === "running" ? labels.toolbar_refresh_running
+    : refreshState === "success" ? labels.toolbar_refresh_success
+    : refreshState === "failed" ? labels.toolbar_refresh_failed
+    : labels.toolbar_refresh_label;
 
   return (
     <div
@@ -135,6 +168,22 @@ export function AdminToolbar({
             <UserRound size={15} className="auth-toolbar-user-icon" aria-hidden />
             <span className="auth-toolbar-user-name">{displayName}</span>
           </span>
+        )}
+        {!isDemo && (
+          <button
+            type="button"
+            className={`auth-toolbar-refresh${refreshState !== "idle" ? ` is-${refreshState}` : ""}`}
+            onClick={() => void handleRefresh()}
+            disabled={refreshState === "running"}
+            aria-label={refreshTitle}
+            title={refreshTitle}
+          >
+            <RefreshCw
+              size={16}
+              aria-hidden
+              className={refreshState === "running" ? "auth-toolbar-refresh-icon is-spinning" : "auth-toolbar-refresh-icon"}
+            />
+          </button>
         )}
         {isRealAdmin && (
           <button

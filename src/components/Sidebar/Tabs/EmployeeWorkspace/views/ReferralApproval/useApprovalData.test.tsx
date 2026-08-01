@@ -15,6 +15,7 @@ import {
   updateReferralStatus,
 } from "../../../../../../data/referral/referralStorage";
 import type { ReferralRequest } from "../../../../../../data/referral/referralTypes";
+import { broadcastDataRefresh } from "../../../../../../data/workspace/dataRefreshSignal";
 import { useApprovalData } from "./useApprovalData";
 
 // Mutable so a test can flip the app-wide selection mid-flight; reset in afterEach.
@@ -133,5 +134,24 @@ describe("useApprovalData deny-flow regressions", () => {
     });
     expect(result.current.loadState).toBe("ready");
     expect(result.current.referrals).toHaveLength(0);
+  });
+
+  it("picks up a request appended to disk by someone else once the app-wide refresh signal fires", async () => {
+    setupSupervisor();
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+
+    const { result } = renderHook(() => useApprovalData(root));
+    await waitFor(() => expect(result.current.loadState).toBe("ready"));
+    expect(result.current.referrals).toHaveLength(0);
+
+    // Simulate another reviewer/employee submitting a referral directly to
+    // disk, with no local action in this hook instance to trigger a reload.
+    await appendReferralRequest(root, "4-april-2026", mockReferral("req-4", "4-april-2026"));
+
+    act(() => {
+      broadcastDataRefresh();
+    });
+
+    await waitFor(() => expect(result.current.referrals).toHaveLength(1));
   });
 });

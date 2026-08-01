@@ -16,6 +16,7 @@ import {
   shouldShowBanner,
   type AppNotification,
 } from "../../data/notifications/notificationTypes";
+import { subscribeToDataRefresh } from "../../data/workspace/dataRefreshSignal";
 import "./NotificationBanner.css";
 
 const POLL_INTERVAL_MS = 60_000;
@@ -58,9 +59,13 @@ export function NotificationBanner({ session, directoryHandle }: Props) {
     const onFocus = () => void reload();
     window.addEventListener("focus", onFocus);
     const interval = window.setInterval(() => void reload(), POLL_INTERVAL_MS);
+    // Also react instantly to the app-wide refresh signal (manual toolbar
+    // button + 5-minute auto-refresh) instead of waiting up to POLL_INTERVAL_MS.
+    const unsubscribeDataRefresh = subscribeToDataRefresh(() => void reload());
     return () => {
       window.removeEventListener("focus", onFocus);
       window.clearInterval(interval);
+      unsubscribeDataRefresh();
     };
   }, [audience, directoryHandle, reload]);
 

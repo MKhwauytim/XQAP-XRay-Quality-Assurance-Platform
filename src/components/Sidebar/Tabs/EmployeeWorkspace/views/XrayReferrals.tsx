@@ -15,6 +15,7 @@ import type { FieldAnswer, ItemAnswer } from "../../../../../data/answers/answer
 import {
   loadOrDeriveDistributionCurrent,
 } from "../../../../../data/distribution/distributionStorage";
+import { subscribeToDataRefresh } from "../../../../../data/workspace/dataRefreshSignal";
 import type { DistributionEntry } from "../../../../../data/distribution/distributionTypes";
 import {
   executeReplacement,
@@ -397,6 +398,11 @@ export default function XrayReferrals({ directoryHandle }: Props) {
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- async data load; setState fires inside loadData's async callback, not synchronously in the effect body
   useEffect(() => { void loadData(); }, [loadData]);
+
+  // Re-fetch on the app-wide refresh signal (manual toolbar button + 5-minute
+  // auto-refresh) so a referral/reassignment made by someone else -- or on
+  // another machine -- shows up without navigating away and back.
+  useEffect(() => subscribeToDataRefresh(loadData), [loadData]);
 
   async function handleTplSelect(id: string): Promise<void> {
     await applyTemplate(id, canSetTemplate);

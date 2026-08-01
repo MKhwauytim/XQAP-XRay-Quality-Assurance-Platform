@@ -26,6 +26,11 @@ export const DEFAULT_LABELS = {
   toolbar_preview_role_aria:  "معاينة الأدوار",
   toolbar_user_title:         "المستخدم: {name}",
   toolbar_feedback_label:     "التواصل والاقتراحات",
+  toolbar_refresh_btn:        "تحديث",
+  toolbar_refresh_label:      "تحديث كل البيانات (العينات، الإحالات، الإشعارات، الصلاحيات) من مساحة العمل",
+  toolbar_refresh_running:    "جارٍ التحديث...",
+  toolbar_refresh_success:    "تم التحديث",
+  toolbar_refresh_failed:     "تعذر التحديث",
   toolbar_logout_btn:         "تسجيل الخروج",
 
   // Settings page

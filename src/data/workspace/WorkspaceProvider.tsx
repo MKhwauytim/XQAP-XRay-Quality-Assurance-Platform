@@ -252,6 +252,17 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     }
   }, [directoryHandle]);
 
+  const refreshPermissions = useCallback(async (): Promise<boolean> => {
+    if (!directoryHandle) return false;
+    try {
+      const files = await loadWorkspaceFiles(directoryHandle);
+      applyDiskUsers(files);
+      return true;
+    } catch {
+      return false;
+    }
+  }, [directoryHandle]);
+
   const createInitialStructure = useCallback(
     async (username: string): Promise<void> => {
       if (!directoryHandle) {
@@ -360,6 +371,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       selectWorkspace,
       reconnectWorkspace,
       reloadWorkspace,
+      refreshPermissions,
       createInitialStructure,
       clearWorkspace,
       enterDemoWorkspace
@@ -377,6 +389,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       selectWorkspace,
       reconnectWorkspace,
       reloadWorkspace,
+      refreshPermissions,
       createInitialStructure,
       clearWorkspace,
       enterDemoWorkspace

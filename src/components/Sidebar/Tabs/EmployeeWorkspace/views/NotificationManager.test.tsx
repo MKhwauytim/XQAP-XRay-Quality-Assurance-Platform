@@ -95,7 +95,8 @@ describe("NotificationManager loading/error hardening", () => {
     render(<NotificationManager directoryHandle={{} as DirectoryHandleLike} />);
 
     // Default seed audience (isNotificationAudienceRole = employee | supervisor):
-    // mohammed.otaibi (supervisor) + jamila.ghamdi/hatem.oraini/salman.hajji (employee) = 4.
+    // malrogi (supervisor) + jalgahamdi/hihaloraini/saalhijji (employee) = 4.
+    // (the two manager seed users, amonem and mkhuwaytim, are not audience-eligible.)
     await waitFor(() => expect(screen.getByText("0 من 4 اطّلعوا")).toBeInTheDocument());
     expect(screen.getByText("جميلة الغامدي")).toBeInTheDocument();
 
@@ -103,7 +104,7 @@ describe("NotificationManager loading/error hardening", () => {
     // User Management tab. Previously: audienceUsers was `useMemo(fn, [])` — a
     // one-time snapshot that could never observe this without a full remount.
     const updatedUsers = initialState.users.map((u) =>
-      u.username === "jamila.ghamdi" ? { ...u, isActive: false } : u
+      u.username === "jalgahamdi" ? { ...u, isActive: false } : u
     );
     act(() => {
       writeUserManagementState({ ...initialState, users: updatedUsers }, true);

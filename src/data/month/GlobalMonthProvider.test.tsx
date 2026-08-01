@@ -33,6 +33,7 @@ function makeWrapper(directoryHandle: DirectoryHandleLike | null) {
     selectWorkspace: async () => {},
     reconnectWorkspace: async () => {},
     reloadWorkspace: async () => {},
+    refreshPermissions: async () => false,
     createInitialStructure: async () => {},
     clearWorkspace: () => {},
     enterDemoWorkspace: async () => {},

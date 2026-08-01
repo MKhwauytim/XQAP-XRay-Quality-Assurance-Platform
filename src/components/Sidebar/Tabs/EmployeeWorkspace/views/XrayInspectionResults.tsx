@@ -32,6 +32,7 @@ import {
 } from "../../../../../data/referral/referralStorage";
 import type { ReferralRequest, ReplacementRequest } from "../../../../../data/referral/referralTypes";
 import { loadAdminBrowsePreset, loadUserBrowsePreset } from "../../../../../data/preferences/browsePresetStorage";
+import { subscribeToDataRefresh } from "../../../../../data/workspace/dataRefreshSignal";
 import { loadSampleMaster } from "../../../../../data/sampling/sampleStorage";
 import { loadTemplate } from "../../../../../data/templates/templateStorage";
 import { loadInspectionTemplateSelection } from "../../../../../data/templates/templateSelectionStorage";
@@ -277,6 +278,10 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
     }, 0);
     return () => window.clearTimeout(timer);
   }, [loadData]);
+
+  // Re-fetch on the app-wide refresh signal (manual toolbar button + 5-minute
+  // auto-refresh) so results/movements recorded elsewhere show up here too.
+  useEffect(() => subscribeToDataRefresh(loadData), [loadData]);
 
   // Pure filter over the raw audit-log state loadData already fetched — buildAuditRows
   // itself takes `mode` and returns [] outright for "active", so re-deriving this on

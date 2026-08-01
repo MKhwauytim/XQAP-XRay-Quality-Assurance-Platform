@@ -34,6 +34,18 @@ export type WorkspaceContextValue = {
   selectWorkspace: () => Promise<void>;
   reconnectWorkspace: () => Promise<void>;
   reloadWorkspace: () => Promise<void>;
+  /**
+   * Re-reads ONLY `3-user-data/users.permissions.json` from disk and re-syncs
+   * it into the in-memory user-management state (users/roles/permissions),
+   * without touching `status`/`loadedFiles` — unlike `reloadWorkspace`, this
+   * never flips `status` to "checking", so WorkspaceGate never unmounts the
+   * app to show its full-screen spinner. Used for the manual "refresh
+   * permissions" button and the periodic auto-refresh: both need this to be
+   * invisible/non-disruptive since they can fire while someone is mid-task.
+   * Returns false (no-op) when there's no connected workspace, or when the
+   * read fails (e.g. transient permission loss).
+   */
+  refreshPermissions: () => Promise<boolean>;
   createInitialStructure: (username: string) => Promise<void>;
   clearWorkspace: () => void;
   /** Mount a read-only, in-memory demo workspace (the viewer account). */

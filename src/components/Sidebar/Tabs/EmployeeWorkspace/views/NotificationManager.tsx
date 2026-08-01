@@ -20,6 +20,7 @@ import {
   isNotificationAudienceRole,
   type AppNotification,
 } from "../../../../../data/notifications/notificationTypes";
+import { subscribeToDataRefresh } from "../../../../../data/workspace/dataRefreshSignal";
 import "./NotificationManager.css";
 
 type Props = { directoryHandle: DirectoryHandleLike };
@@ -85,6 +86,11 @@ export default function NotificationManager({ directoryHandle }: Props) {
   // Load on mount / workspace change.
   // eslint-disable-next-line react-hooks/set-state-in-effect -- async data load; setState fires inside reload's async callback, not synchronously in the effect body
   useEffect(() => { void reload(); }, [reload]);
+
+  // Re-fetch on the app-wide refresh signal (manual toolbar button + 5-minute
+  // auto-refresh) so a notification posted from another session shows up here
+  // without waiting for a remount.
+  useEffect(() => subscribeToDataRefresh(reload), [reload]);
 
   // Re-derive the must-accept audience whenever the managed-user roster changes
   // (a user added/deactivated elsewhere) instead of freezing it at first mount.

@@ -3,6 +3,7 @@ import { expect, test } from "vitest";
 import type { AuthRole } from "./authTypes";
 import {
   createDefaultFeaturePermissions,
+  createDefaultManagedUsers,
   createDefaultPermissions,
   createManagedUser,
   FEATURE_TAB_LOOKUP,
@@ -195,4 +196,19 @@ test("export-archive and view-employee-stats are removed (zero consumers)", () =
   expect(TAB_FEATURE_MAP["employee-workspace"]).not.toContain("view-employee-stats");
   expect(FEATURE_TAB_LOOKUP["export-archive"]).toBeUndefined();
   expect(FEATURE_TAB_LOOKUP["view-employee-stats"]).toBeUndefined();
+});
+
+// ── Default managed-user roster ─────────────────────────────────────────────
+
+test("createDefaultManagedUsers seeds the real employee roster (name/username/role)", () => {
+  const users = createDefaultManagedUsers();
+  const byUsername = new Map(users.map((u) => [u.username, u]));
+
+  expect(byUsername.get("hihaloraini")).toMatchObject({ displayName: "حاتم العريني", role: "employee" });
+  expect(byUsername.get("saalhijji")).toMatchObject({ displayName: "سلمان الحجي", role: "employee" });
+  expect(byUsername.get("malrogi")).toMatchObject({ displayName: "محمد العتيبي", role: "supervisor" });
+  expect(byUsername.get("jalgahamdi")).toMatchObject({ displayName: "جميلة الغامدي", role: "employee" });
+  expect(byUsername.get("amonem")).toMatchObject({ displayName: "عبدالاله المنعم", role: "manager" });
+  expect(byUsername.get("mkhuwaytim")).toMatchObject({ displayName: "محمد الخويتم", role: "manager" });
+  expect(users).toHaveLength(6);
 });

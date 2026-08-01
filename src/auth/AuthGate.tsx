@@ -52,6 +52,7 @@ import {
   type ManagedLoginUser
 } from "./userManagement";
 import { ORGANIZATION_PATH_TEXT, ZATCA_LOGO_URL } from "../branding/organization";
+import { broadcastDataRefresh } from "../data/workspace/dataRefreshSignal";
 import { DEMO_WORKSPACE_NAME } from "../data/workspace/demoWorkspace";
 import { useWorkspace } from "../data/workspace/useWorkspace";
 import { syncUserManagementToDisk } from "../data/workspace/userSync";
@@ -131,7 +132,8 @@ export default function AuthGate({ children }: AuthGateProps) {
     status: workspaceStatus,
     usersHydrated,
     selectWorkspace,
-    clearWorkspace
+    clearWorkspace,
+    refreshPermissions
   } = useWorkspace();
   const [session, setSession] = useState<AuthSession | null>(getInitialSession);
   const [managedUsers, setManagedUsers] = useState<ManagedLoginUser[]>(() =>
@@ -306,6 +308,27 @@ export default function AuthGate({ children }: AuthGateProps) {
       window.removeEventListener("pagehide", handlePageHide);
     };
   }, [session]);
+
+  // Auto-refresh (every 5 minutes from sign-in): re-syncs users/roles/permissions
+  // from 3-user-data/users.permissions.json AND broadcasts dataRefreshSignal so
+  // every mounted view re-reads its own workspace data (assigned samples,
+  // referrals/approvals, notifications, ...) -- so an admin's edit or another
+  // employee's action reaches an already-open session without requiring the
+  // manual refresh button (AdminToolbar) or a full page reload.
+  // Interval restarts on login/logout and whenever the workspace connection
+  // itself changes; refreshPermissions() is a no-op while no workspace is ready.
+  useEffect(() => {
+    if (!session || session.mode === "demo") return;
+    if (workspaceStatus !== "ready" || !directoryHandle) return;
+
+    const AUTO_REFRESH_INTERVAL_MS = 5 * 60_000;
+    const id = window.setInterval(() => {
+      void refreshPermissions();
+      broadcastDataRefresh();
+    }, AUTO_REFRESH_INTERVAL_MS);
+
+    return () => window.clearInterval(id);
+  }, [session, workspaceStatus, directoryHandle, refreshPermissions]);
 
   const logout = useCallback((): void => {
     if (isDemoSessionRef.current) {
