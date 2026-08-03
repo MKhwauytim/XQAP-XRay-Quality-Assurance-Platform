@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import { createMemoryDirectory } from "../storage/memoryDirectory";
 import { loadEmployeeAnswers, loadAllEmployeeFiles, saveEmployeeAnswers, setItemQualityNote, upsertItemAnswer } from "./answerStorage";
+import { getSampleEmployeeDir } from "../workspace/workspacePaths";
 import type { ItemAnswer } from "./answerTypes";
 
 const MONTH = "5-may-2026";
@@ -109,10 +110,8 @@ describe("loadAllEmployeeFiles — concurrency-safe (Task 5)", () => {
     const root = createMemoryDirectory();
     const month = "5-May-2026";
     await saveEmployeeAnswers(root, month, "goodemployee", []);
-    const dir = await root.getDirectoryHandle("2-samples", { create: true })
-      .then((d) => d.getDirectoryHandle(month, { create: true }))
-      .then((d) => d.getDirectoryHandle("1-main", { create: true }))
-      .then((d) => d.getDirectoryHandle("employee-answers", { create: true }));
+    // Write corrupt file to the same directory loadAllEmployeeFiles actually reads from
+    const dir = await getSampleEmployeeDir(root, month, true);
     const handle = await dir.getFileHandle("bademployee.answers.json", { create: true });
     const writable = await handle.createWritable!();
     await writable.write("{not valid json");
