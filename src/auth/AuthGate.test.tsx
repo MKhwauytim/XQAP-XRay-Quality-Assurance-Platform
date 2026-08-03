@@ -297,6 +297,114 @@ describe("AuthGate — startup session-hydration race (B2)", () => {
   });
 });
 
+describe("AuthGate — usersHydrated render gate (P1 item 4)", () => {
+  beforeEach(() => {
+    userManagement.writeUserManagementState(
+      userManagement.createEmptyUserManagementState(),
+      false,
+    );
+  });
+
+  afterEach(() => {
+    userManagement.writeUserManagementState(
+      userManagement.createEmptyUserManagementState(),
+      false,
+    );
+  });
+
+  it("shows a loading gate (not the authenticated UI) while status is ready but usersHydrated hasn't caught up, then renders once it has", async () => {
+    const persistedSession: AuthSession = {
+      role: "employee",
+      username: NON_SEED_USERNAME,
+      loginAt: new Date().toISOString(),
+    };
+    vi.spyOn(authSession, "readRealSession").mockReturnValue(persistedSession);
+
+    const handle = createMemoryDirectory("hydration-gate");
+    mocks.loadLastWorkspace.mockResolvedValue({
+      directoryHandle: handle,
+      directoryName: handle.name,
+      savedAt: new Date().toISOString(),
+    });
+    mocks.checkWorkspaceStructure.mockResolvedValue({
+      status: "ready",
+      missingItems: [],
+      invalidItems: [],
+      message: "ready",
+    });
+
+    let resolveLoadWorkspaceFiles!: (value: Awaited<ReturnType<typeof mocks.loadWorkspaceFiles>>) => void;
+    mocks.loadWorkspaceFiles.mockReturnValue(
+      new Promise((resolve) => {
+        resolveLoadWorkspaceFiles = resolve;
+      }),
+    );
+
+    renderAuthGate();
+
+    // status has not reached "ready" yet at first paint -- unchanged, pre-existing behavior.
+    expect(screen.getByText("authenticated")).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(mocks.loadWorkspaceFiles).toHaveBeenCalled();
+    });
+
+    // status IS "ready" now, but usersHydrated hasn't caught up (loadWorkspaceFiles
+    // is still pending) -- the gate must be active: authenticated content and the
+    // admin toolbar are both hidden.
+    await waitFor(() => {
+      expect(screen.queryByText("authenticated")).not.toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("admin-toolbar-stub")).not.toBeInTheDocument();
+    expect(screen.getByText("جارٍ التحميل…")).toBeInTheDocument();
+
+    resolveLoadWorkspaceFiles({
+      manifest: null,
+      usersPermissions: buildUsersPermissionsFile([NON_SEED_USERNAME]),
+      sampleMaster: null,
+      sampleDistribution: null,
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("authenticated")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("admin-toolbar-stub")).toBeInTheDocument();
+  });
+
+  it("never gates an exempt (demo) session", async () => {
+    const demoSession: AuthSession = {
+      role: "admin",
+      username: VIEWER_USERNAME,
+      loginAt: new Date().toISOString(),
+      mode: "demo",
+    };
+    vi.spyOn(authSession, "readRealSession").mockReturnValue(demoSession);
+
+    const handle = createMemoryDirectory("hydration-gate-demo-exempt");
+    mocks.loadLastWorkspace.mockResolvedValue({
+      directoryHandle: handle,
+      directoryName: handle.name,
+      savedAt: new Date().toISOString(),
+    });
+    mocks.checkWorkspaceStructure.mockResolvedValue({
+      status: "ready",
+      missingItems: [],
+      invalidItems: [],
+      message: "ready",
+    });
+    mocks.loadWorkspaceFiles.mockReturnValue(new Promise(() => {})); // never resolves
+
+    renderAuthGate();
+
+    await waitFor(() => {
+      expect(mocks.loadWorkspaceFiles).toHaveBeenCalled();
+    });
+
+    // Even with hydration never completing, an exempt session must stay visible.
+    expect(screen.getByText("authenticated")).toBeInTheDocument();
+  });
+});
+
 describe("AuthGate — activity log wiring (Task 1 double-permission-prompt fix)", () => {
   beforeEach(() => {
     userManagement.writeUserManagementState(

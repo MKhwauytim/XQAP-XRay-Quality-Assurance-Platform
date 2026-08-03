@@ -38,6 +38,12 @@
   font-family: var(--auth-font) !important;
 }
 
+.auth-hydrating-gate {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+}
+
 /* ── Root: full-screen background ───────────────────────── */
 
 .auth-root {
