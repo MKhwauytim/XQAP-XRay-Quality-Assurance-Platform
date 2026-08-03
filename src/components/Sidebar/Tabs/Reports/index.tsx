@@ -180,8 +180,12 @@ function ReportsContent() {
   // built for, so switching sub-tabs away from "kpi" and back does not
   // rebuild it from scratch -- loadExecInput is the heaviest read path in
   // this tab (population + sample + all employee files + template +
-  // distribution). Unset (null) on a genuine handle/month change or a
-  // build failure, so those cases still rebuild correctly.
+  // distribution). A stale ref value never causes a false cache hit: a
+  // handle/month change means the key comparison below simply fails to
+  // match, and a build failure leaves the ref untouched (not matching
+  // either), so both cases still trigger a rebuild -- only the
+  // `!directoryHandle || !selectedMonth` branch explicitly sets it back to
+  // null.
   const kpiModelBuiltForRef = useRef<{ directoryHandle: typeof directoryHandle; month: string } | null>(null);
   const [exporting, setExporting] = useState<"document" | "deck" | "xlsx" | null>(null);
   const [pbiExporting, setPbiExporting] = useState(false);

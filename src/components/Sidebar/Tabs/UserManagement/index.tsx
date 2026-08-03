@@ -189,7 +189,6 @@ export default function UserManagementTab() {
     if (section !== "activity") return;
     if (activityLoadedForRef.current === directoryHandle) return;
     let cancelled = false;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync loading indicator before async activity-log read; necessary to show spinner while data fetches
     setIsActivityLoading(true);
     void readAuthActivityLog()
       .then((entries) => {

@@ -793,6 +793,57 @@ describe("Reports KPI model cache — no rebuild on plain section switch-back", 
       await Promise.resolve();
     });
     expect(populationStorageSpies.loadMonthPopulationFinal).toHaveBeenCalledTimes(1);
+
+    // The cached model itself must still be intact after the switch-back too --
+    // a regression that skipped the rebuild but still nulled `model` (e.g. by
+    // moving the `setModel(null)` above the `alreadyBuilt` check) would leave
+    // `loadMonthPopulationFinal`'s call count untouched while the dashboard
+    // silently reverted to its "no model" empty state, which the assertion
+    // above alone would not catch.
+    expect(screen.getByRole("button", { name: /فتح العرض التنفيذي/ })).toBeInTheDocument();
+  });
+
+  it("invalidates the cache and rebuilds the KPI model when the selected month genuinely changes", async () => {
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    (globalThis as { __testDir?: DirectoryHandleLike }).__testDir = root;
+
+    const { rerender } = render(<ReportsTab />);
+
+    await act(async () => {
+      deferredManifestFor("4-april-2026").resolve(mockManifest(1));
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(screen.getByText("1 صورة")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("tab", { name: "مؤشرات" }));
+    await act(async () => {
+      deferredFor("4-april-2026").resolve(mockPop(1));
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(populationStorageSpies.loadMonthPopulationFinal).toHaveBeenCalledTimes(1);
+    });
+    expect(screen.getByRole("button", { name: /فتح العرض التنفيذي/ })).toBeInTheDocument();
+
+    // Flip the app-wide month selection while still on the "kpi" sub-tab -- a
+    // genuine handle/month change, unlike the plain switch-away-and-back above.
+    globalMonthMock.state.selection = { kind: "existing", month: 5, year: 2026, folderName: "5-may-2026" };
+    rerender(<ReportsTab />);
+
+    await act(async () => {
+      deferredManifestFor("5-may-2026").resolve(mockManifest(2));
+      deferredFor("5-may-2026").resolve(mockPop(2));
+      await Promise.resolve();
+    });
+
+    // The cached ref no longer matches the new month, so the model must be
+    // rebuilt -- proving the cache doesn't over-skip and get stuck on stale data.
+    await waitFor(() => {
+      expect(populationStorageSpies.loadMonthPopulationFinal).toHaveBeenCalledTimes(2);
+    });
+    expect(populationStorageSpies.loadMonthPopulationFinal).toHaveBeenNthCalledWith(2, root, "5-may-2026");
   });
 });
 
