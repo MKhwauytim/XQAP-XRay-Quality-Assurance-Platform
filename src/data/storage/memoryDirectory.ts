@@ -34,9 +34,20 @@ export interface MemoryDirectoryOptions {
    * "granted" (the user accepts the prompt).
    */
   writePermissionRequestOutcome?: SimulatedPermissionState;
+  /**
+   * Opt-in, defaults to false so the other ~160 existing test files that build
+   * a memory directory are completely unaffected. When true, every `getFile()`
+   * call on a handle from this tree appends its full path (relative to the
+   * root, "/"-joined) to a read log retrievable via `getReadLog(dir)`. Used to
+   * assert acceptance criteria like "this load performed no read of
+   * population.final.json" that can't be distinguished from "read it and
+   * discarded it" by inspecting returned values alone.
+   */
+  trackReads?: boolean;
 }
 
 type SharedPermission = { state: SimulatedPermissionState; requestOutcome: SimulatedPermissionState };
+type ReadLogState = { entries: string[] };
 
 // Every handle derived from the same createMemoryDirectory() call (root and all
 // descendants) shares one SharedPermission, mirroring how a real File System
@@ -45,6 +56,10 @@ type SharedPermission = { state: SimulatedPermissionState; requestOutcome: Simul
 // session reconnecting the same on-disk workspace read-only) without needing a
 // second constructor parameter threaded through every call site.
 const permissionRegistry = new WeakMap<DirectoryHandleLike, SharedPermission>();
+
+// Same sharing shape as permissionRegistry, but only populated when
+// `trackReads` is enabled (see MemoryDirectoryOptions.trackReads).
+const readLogRegistry = new WeakMap<DirectoryHandleLike, ReadLogState>();
 
 /**
  * Test-only: change the simulated write-permission state of a handle returned
@@ -62,6 +77,21 @@ export function setSimulatedWritePermission(
   permission.requestOutcome = requestOutcome;
 }
 
+/**
+ * Test-only: full-path read log for a handle created with `{ trackReads: true }`
+ * (root or any descendant obtained from it). Empty array when tracking wasn't
+ * enabled. Returns a snapshot copy, not a live reference.
+ */
+export function getReadLog(dir: DirectoryHandleLike): string[] {
+  return [...(readLogRegistry.get(dir)?.entries ?? [])];
+}
+
+/** Test-only: clear the read log in place (e.g. between phases of one test). */
+export function clearReadLog(dir: DirectoryHandleLike): void {
+  const state = readLogRegistry.get(dir);
+  if (state) state.entries = [];
+}
+
 type MemoryNode = {
   files: Map<string, { content: string }>;
   dirs: Map<string, MemoryNode>;
@@ -74,12 +104,15 @@ function createNode(): MemoryNode {
 function makeFileHandle(
   name: string,
   node: MemoryNode,
-  permission: SharedPermission
+  permission: SharedPermission,
+  path: string,
+  readLog: ReadLogState | null
 ): FileHandleLike {
   return {
     kind: "file",
     name,
     getFile: async () => {
+      readLog?.entries.push(path);
       const entry = node.files.get(name);
       const content = entry ? entry.content : "";
       return new File([content], name, { type: "application/json" });
@@ -110,7 +143,9 @@ function makeFileHandle(
 function makeDirectoryHandle(
   name: string,
   node: MemoryNode,
-  permission: SharedPermission
+  permission: SharedPermission,
+  path: string,
+  readLog: ReadLogState | null
 ): DirectoryHandleLike {
   // Build with extra `values` for in-memory iteration support, then cast
   const handle = {
@@ -133,7 +168,7 @@ function makeDirectoryHandle(
       if (!exists) {
         node.files.set(fileName, { content: "" });
       }
-      return makeFileHandle(fileName, node, permission);
+      return makeFileHandle(fileName, node, permission, path ? `${path}/${fileName}` : fileName, readLog);
     },
     getDirectoryHandle: async (dirName: string, options?: { create?: boolean }) => {
       let child = node.dirs.get(dirName);
@@ -147,7 +182,7 @@ function makeDirectoryHandle(
         child = createNode();
         node.dirs.set(dirName, child);
       }
-      return makeDirectoryHandle(dirName, child, permission);
+      return makeDirectoryHandle(dirName, child, permission, path ? `${path}/${dirName}` : dirName, readLog);
     },
     removeEntry: async (entryName: string, options?: { recursive?: boolean }) => {
       if (node.files.has(entryName)) {
@@ -186,6 +221,7 @@ function makeDirectoryHandle(
   };
   const typedHandle = handle as DirectoryHandleLike;
   permissionRegistry.set(typedHandle, permission);
+  if (readLog) readLogRegistry.set(typedHandle, readLog);
   return typedHandle;
 }
 
@@ -197,5 +233,6 @@ export function createMemoryDirectory(
     state: options.initialWritePermission ?? "granted",
     requestOutcome: options.writePermissionRequestOutcome ?? "granted"
   };
-  return makeDirectoryHandle(name, createNode(), permission);
+  const readLog: ReadLogState | null = options.trackReads ? { entries: [] } : null;
+  return makeDirectoryHandle(name, createNode(), permission, "", readLog);
 }

@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { createMemoryDirectory, setSimulatedWritePermission } from "./memoryDirectory";
+import { createMemoryDirectory, setSimulatedWritePermission, getReadLog, clearReadLog } from "./memoryDirectory";
 
 test("missing file getFileHandle throws a NotFoundError", async () => {
   const dir = createMemoryDirectory("root");
@@ -115,4 +115,53 @@ test("setSimulatedWritePermission flips an already-connected handle's state afte
 
 test("setSimulatedWritePermission is a no-op on a handle that isn't a memory directory", () => {
   expect(() => setSimulatedWritePermission({} as never, "denied")).not.toThrow();
+});
+
+// ── Read-log harness (Large-Population Performance Proposal, Phase A characterization) ──
+
+test("read log is empty by default (trackReads off) even after reads", async () => {
+  const dir = createMemoryDirectory("root");
+  const handle = await dir.getFileHandle("a.json", { create: true });
+  await handle.getFile();
+  expect(getReadLog(dir)).toEqual([]);
+});
+
+test("trackReads: true records the full relative path of every getFile() call", async () => {
+  const dir = createMemoryDirectory("root", { trackReads: true });
+  const sub = await dir.getDirectoryHandle("2-processed", { create: true });
+  const handle = await sub.getFileHandle("population.final.json", { create: true });
+  await handle.getFile();
+  await handle.getFile();
+
+  expect(getReadLog(dir)).toEqual([
+    "2-processed/population.final.json",
+    "2-processed/population.final.json",
+  ]);
+});
+
+test("read log is shared and visible from any handle in the tree, root or descendant", async () => {
+  const dir = createMemoryDirectory("root", { trackReads: true });
+  const sub = await dir.getDirectoryHandle("raw", { create: true });
+  const handle = await sub.getFileHandle("risk.raw.json", { create: true });
+  await handle.getFile();
+
+  expect(getReadLog(sub)).toEqual(["raw/risk.raw.json"]);
+});
+
+test("clearReadLog resets the log in place without needing a new directory", async () => {
+  const dir = createMemoryDirectory("root", { trackReads: true });
+  const handle = await dir.getFileHandle("a.json", { create: true });
+  await handle.getFile();
+  expect(getReadLog(dir)).toEqual(["a.json"]);
+
+  clearReadLog(dir);
+  expect(getReadLog(dir)).toEqual([]);
+
+  await handle.getFile();
+  expect(getReadLog(dir)).toEqual(["a.json"]);
+});
+
+test("getReadLog/clearReadLog are no-ops on a handle that isn't a memory directory", () => {
+  expect(getReadLog({} as never)).toEqual([]);
+  expect(() => clearReadLog({} as never)).not.toThrow();
 });
