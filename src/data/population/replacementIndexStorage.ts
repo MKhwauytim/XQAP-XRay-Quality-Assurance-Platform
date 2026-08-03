@@ -173,15 +173,18 @@ export async function rebuildReplacementIndex(
       }
 
       const dir = await getReplacementIndexDir(directoryHandle, monthFolderName, true);
-      const bucketEntries: ReplacementIndexBucketEntry[] = [];
-      for (const tier of ALL_TIERS) {
-        for (const stageKey of ALL_STAGE_KEYS) {
+      const tierStagePairs = ALL_TIERS.flatMap((tier) =>
+        ALL_STAGE_KEYS.map((stageKey) => ({ tier, stageKey }))
+      );
+      const bucketResults = await Promise.all(
+        tierStagePairs.map(async ({ tier, stageKey }): Promise<ReplacementIndexBucketEntry | null> => {
           const fileName = bucketFileName(tier, stageKey);
           const rows = buckets.get(`${tier}::${stageKey}`);
           if (rows && rows.length > 0) {
             await safeWriteJson(dir, fileName, rows);
-            bucketEntries.push({ tier, stageKey, fileName, rowCount: rows.length });
-          } else if (dir.removeEntry) {
+            return { tier, stageKey, fileName, rowCount: rows.length };
+          }
+          if (dir.removeEntry) {
             // Best-effort: a bucket that shrank to zero rows on a reprocess is
             // simply not referenced by the new manifest, so a leftover file is
             // harmless — but remove it anyway to avoid stale-data confusion.
@@ -191,8 +194,12 @@ export async function rebuildReplacementIndex(
               // ignore — not referenced by the manifest either way
             }
           }
-        }
-      }
+          return null;
+        })
+      );
+      const bucketEntries: ReplacementIndexBucketEntry[] = bucketResults.filter(
+        (entry): entry is ReplacementIndexBucketEntry => entry !== null
+      );
 
       return await casLoop<{ ok: true } | { ok: false; error: string }>(
         async (writeToken) => {

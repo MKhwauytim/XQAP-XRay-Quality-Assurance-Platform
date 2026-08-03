@@ -196,3 +196,27 @@ describe("rebuildReplacementIndex + read path", () => {
     expect(bucketFileName("Certscan", "first")).not.toBe(bucketFileName("Certscan", "second"));
   });
 });
+
+describe("rebuildReplacementIndex — parallel bucket writes (Task 4)", () => {
+  it("writes all non-empty buckets and preserves tier-major bucket order in the manifest", async () => {
+    const root = createMemoryDirectory();
+    await seedMonth(root);
+    const rows = [
+      makeRow("a", "المستوى الأول", "PortA", "Certscan"),
+      makeRow("b", "المستوى الثاني", "PortA", "Certscan"),
+      makeRow("c", "المستوى الأول", "PortA", "NonCertscan"),
+    ];
+
+    const result = await rebuildReplacementIndex(root, MONTH, rows, undefined, 1, "admin");
+    expect(result.ok).toBe(true);
+
+    const manifest = await loadReplacementIndexManifest(root, MONTH);
+    expect(manifest).not.toBeNull();
+    if (!manifest) return;
+    // Tier-major order: all Certscan buckets before all NonCertscan buckets,
+    // and within each tier, stage keys in ALL_STAGE_KEYS order.
+    const order = manifest.buckets.map((b) => `${b.tier}::${b.stageKey}`);
+    expect(order).toEqual(["Certscan::first", "Certscan::second", "NonCertscan::first"]);
+    expect(manifest.totalIndexedRows).toBe(3);
+  });
+});
