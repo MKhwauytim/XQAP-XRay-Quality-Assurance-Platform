@@ -204,6 +204,36 @@ async function readProjectedEventIds(directory: DirectoryHandleLike): Promise<Se
   return new Set(projected?.events.map((event) => event.eventId) ?? []);
 }
 
+type DistributionLogStamp = { revision: number; writeToken: string | undefined };
+
+/**
+ * Cheap alternative to loadDistributionLog for callers that only need to
+ * compare revision/writeToken (both live entirely in the compatibility log
+ * files, never in the immutable event directory -- see
+ * mergeDistributionLogSources). Skips the full event-directory scan.
+ */
+async function readDistributionLogStamp(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<DistributionLogStamp> {
+  const currentDir = await openOptionalDirectory(() =>
+    getDistributionDir(directoryHandle, monthFolderName, false)
+  );
+  const legacyDir = await openOptionalDirectory(() =>
+    getLegacyDistributionDir(directoryHandle, monthFolderName)
+  );
+  const currentLog = normalizeCompatibilityLog(
+    await readCompatibilityLog(currentDir, `Corrupt distribution compatibility log: ${LOG_FILE}`)
+  );
+  const legacyLog = normalizeCompatibilityLog(
+    await readCompatibilityLog(legacyDir, `Corrupt legacy distribution log: ${LOG_FILE}`)
+  );
+  return {
+    revision: Math.max(currentLog.revision, legacyLog.revision),
+    writeToken: selectWriteToken(currentLog, legacyLog),
+  };
+}
+
 /** Envelope revision of `distribution.current.json` for report-to-revision linkage (B2). */
 export async function loadDistributionCurrentRevision(
   directoryHandle: DirectoryHandleLike,
@@ -286,8 +316,8 @@ export async function appendDistributionEvents(
         events: preserveAppendedBatchOrder(existing.events, events, ids, projectedIds),
       };
       await safeWriteJson(dir, LOG_FILE, updated);
-      const verify = await loadDistributionLog(directoryHandle, monthFolderName);
-      if (verify.revision === nextRevision && verify._writeToken === writeToken) {
+      const verify = await readDistributionLogStamp(directoryHandle, monthFolderName);
+      if (verify.revision === nextRevision && verify.writeToken === writeToken) {
         return {
           done: true,
           result: { ok: true as const },
@@ -295,8 +325,8 @@ export async function appendDistributionEvents(
           // same base revision and clobbered our commit after this read-back.
           verify: async () => {
             options?.onProgress?.({ phase: "verification", completed: events.length, total: events.length });
-            const recheck = await loadDistributionLog(directoryHandle, monthFolderName);
-            return recheck.revision === nextRevision && recheck._writeToken === writeToken;
+            const recheck = await readDistributionLogStamp(directoryHandle, monthFolderName);
+            return recheck.revision === nextRevision && recheck.writeToken === writeToken;
           },
         };
       }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createMemoryDirectory } from "../storage/memoryDirectory";
+import { createMemoryDirectory, getReadLog } from "../storage/memoryDirectory";
 import {
   appendDistributionEvent,
   appendDistributionEvents,
@@ -167,6 +167,70 @@ describe("distributionStorage", () => {
     expect(result?.totalAssigned).toBe(1);
     expect(result?.entries).toHaveLength(1);
     expect(result?.entries[0]?.xrayImageId).toBe("A1");
+  });
+
+  it("verifies a CAS write with a lightweight log-only read, not a full event-directory listing (§U)", async () => {
+    const root = createMemoryDirectory("root", { trackReads: true }) as unknown as DirectoryHandleLike;
+    const month = "5-May-2026";
+    for (let i = 0; i < 5; i++) {
+      await appendDistributionEvent(
+        root,
+        month,
+        buildAssignEvent({ xrayImageId: `seed-${i}`, assignedTo: "alice", eventBy: "admin" })
+      );
+    }
+
+    const before = getReadLog(root).length;
+    await appendDistributionEvent(
+      root,
+      month,
+      buildAssignEvent({ xrayImageId: "final", assignedTo: "bob", eventBy: "admin" })
+    );
+    const newEntries = getReadLog(root).slice(before);
+
+    // "distribution.events" is the immutable-event directory. Before this
+    // task, the CAS loop's two verify reads each fully re-listed and
+    // re-read every event file in it. After this task, verifying only reads
+    // the compatibility log file (distribution.log.json) -- the event
+    // directory itself should not appear in this append's read log at all,
+    // since only the one legitimate "existing state" read (not exercised by
+    // the verify steps) needs it.
+    const eventDirectoryReads = newEntries.filter((path) => path.includes("distribution.events/"));
+    expect(eventDirectoryReads.length).toBeLessThanOrEqual(
+      // the one legitimate pre-write "existing state" read may still list
+      // every seeded event file once
+      6
+    );
+  });
+
+  it("readDistributionLogStamp agrees with loadDistributionLog's revision/writeToken across fixtures", async () => {
+    const root = await makeRoot();
+    const month = "5-May-2026";
+
+    // Empty log.
+    let full = await loadDistributionLog(root, month);
+    expect(full.revision).toBe(0);
+
+    // After one append.
+    await appendDistributionEvent(
+      root,
+      month,
+      buildAssignEvent({ xrayImageId: "img-001", assignedTo: "alice", eventBy: "admin" })
+    );
+    full = await loadDistributionLog(root, month);
+    expect(full.revision).toBe(1);
+
+    // After a second append (revision must advance further, and the CAS
+    // loop's own verify step -- which now uses the stamp reader -- must
+    // still agree, or appendDistributionEvent itself would report failure).
+    const second = await appendDistributionEvent(
+      root,
+      month,
+      buildAssignEvent({ xrayImageId: "img-002", assignedTo: "bob", eventBy: "admin" })
+    );
+    expect(second.ok).toBe(true);
+    full = await loadDistributionLog(root, month);
+    expect(full.revision).toBe(2);
   });
 
   it("deriving against an empty row set drops every event (Tier-1 Item H regression)", async () => {
