@@ -945,12 +945,19 @@ describe("Reports sub-tab mount preservation (§T)", () => {
 
 describe("Reports — lazy report-builder imports (§N)", () => {
   it("does not evaluate the report-builder modules just from rendering the tab", async () => {
-    // Each of these 7 modules is dynamically imported only inside a click
-    // handler after this fix -- render alone must not trigger their
-    // top-level module code. We assert on a Vitest module-mock call marker
-    // rather than bundle inspection, since this is a unit-test-level proxy
-    // for "not statically imported" (a true startup-eval measurement needs
-    // a real build + DevTools profile, out of scope for a unit test).
+    // What this test actually guards against: a future regression where one of
+    // these builder functions gets CALLED eagerly (e.g. from a render-time effect)
+    // instead of only from a click handler. It does NOT and CANNOT detect
+    // static-vs-dynamic import timing -- `vi.mock` intercepts the module the same
+    // way whether index.tsx imports it statically at the top of the file or
+    // dynamically via `await import(...)` inside a handler, and the assertions
+    // below are on invocation (was the function called?), not module evaluation
+    // (was the module's top-level code executed?). This test would pass
+    // identically against a hypothetical pre-fix version that imported all 7
+    // modules statically, as long as none of them called their function outside
+    // a click handler. A true startup-eval measurement needs a real build +
+    // DevTools profile (or a build-output static-import grep, as done for the
+    // whole-branch review), out of scope for a unit test.
     const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
     (globalThis as { __testDir?: DirectoryHandleLike }).__testDir = root;
 
