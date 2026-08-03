@@ -1,11 +1,12 @@
 /* eslint-disable react-refresh/only-export-components */
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { LayoutDashboard } from "lucide-react";
 import type { SidebarTabModule } from "../tabTypes";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
 import { usePermissions } from "../../../../auth/usePermissions";
 import { tabAllowedRoles } from "../../../../auth/tabCatalog";
 import { AccessDenied } from "../../../PermissionGuard";
+import { touchVisitedTabs } from "../../../../app/visitedTabs";
 import TemplateBuilderTab from "../TemplateBuilder";
 import XrayReferrals from "./views/XrayReferrals";
 import XrayInspectionResults from "./views/XrayInspectionResults";
@@ -54,6 +55,18 @@ export default function EmployeeWorkspaceTab() {
   const { directoryHandle } = useWorkspace();
   const { can, canAccessTab } = usePermissions();
   const [activeSubTab, setActiveSubTab] = useState<WorkspaceSubTab>(SUB_TAB_XRAY_REFERRALS);
+  // Once a sub-tab has been the active tab, keep it mounted (hidden, not
+  // unmounted) so switching back doesn't re-trigger its own data load — §T.
+  // Adjusted during render (not in an effect) per React's "adjusting state
+  // during render" pattern — mirrors ReportsTab's Report Designer gate —
+  // avoiding both react-hooks/set-state-in-effect and the extra
+  // effect-driven render pass a useEffect version would add.
+  const [visitedSubTabs, setVisitedSubTabs] = useState<Set<WorkspaceSubTab>>(
+    () => new Set([activeSubTab])
+  );
+  if (!visitedSubTabs.has(activeSubTab)) {
+    setVisitedSubTabs((prev) => touchVisitedTabs(prev, activeSubTab));
+  }
 
   // Keep sidebar in sync whenever the active subtab changes
   useEffect(() => {
@@ -72,6 +85,25 @@ export default function EmployeeWorkspaceTab() {
     return () => window.removeEventListener("pop-set-subtab", handler as EventListener);
   }, []);
 
+  // Stable element references (recomputed only when directoryHandle changes)
+  // so switching activeSubTab back and forth — which re-renders
+  // EmployeeWorkspaceTab — doesn't also re-invoke each visited view's own
+  // render on every unrelated re-render; React bails out of re-rendering a
+  // child subtree when the exact same element reference is passed again.
+  const xrayReferralsElement = useMemo(
+    () => (directoryHandle ? <XrayReferrals directoryHandle={directoryHandle} /> : null),
+    [directoryHandle]
+  );
+  const referralApprovalElement = useMemo(
+    () => (directoryHandle ? <ReferralApproval directoryHandle={directoryHandle} /> : null),
+    [directoryHandle]
+  );
+  const xrayResultsElement = useMemo(
+    () => (directoryHandle ? <XrayInspectionResults directoryHandle={directoryHandle} /> : null),
+    [directoryHandle]
+  );
+  const inspectionFormElement = useMemo(() => <TemplateBuilderTab />, []);
+
   if (!directoryHandle) {
     return (
       <section className="ew-page">
@@ -80,42 +112,39 @@ export default function EmployeeWorkspaceTab() {
     );
   }
 
-  if (activeSubTab === SUB_TAB_XRAY_REFERRALS) {
-    if (
-      !canAccessTab("ew/xray-referrals") ||
-      (!can("submit-answers") &&
-        !can("submit-referrals") &&
-        !can("request-replacement") &&
-        !can("view-all-entries"))
-    ) {
-      return <AccessDenied />;
-    }
-    return <XrayReferrals directoryHandle={directoryHandle} />;
-  }
+  const canViewXrayReferrals =
+    canAccessTab("ew/xray-referrals") &&
+    (can("submit-answers") ||
+      can("submit-referrals") ||
+      can("request-replacement") ||
+      can("view-all-entries"));
+  const canViewReferralApproval =
+    canAccessTab("ew/referral-approval") &&
+    (can("approve-referrals") || can("approve-replacements") || can("ew.reopenAnswer"));
+  const canViewXrayResults = canAccessTab("ew/xray-results");
+  const canViewInspectionForm = canAccessTab("ew/inspection-form");
 
-  if (activeSubTab === SUB_TAB_REFERRAL_APPROVAL) {
-    if (
-      !canAccessTab("ew/referral-approval") ||
-      (!can("approve-referrals") && !can("approve-replacements") && !can("ew.reopenAnswer"))
-    ) {
-      return <AccessDenied />;
-    }
-    return <ReferralApproval directoryHandle={directoryHandle} />;
-  }
+  const activeAllowed =
+    (activeSubTab === SUB_TAB_XRAY_REFERRALS && canViewXrayReferrals) ||
+    (activeSubTab === SUB_TAB_REFERRAL_APPROVAL && canViewReferralApproval) ||
+    (activeSubTab === SUB_TAB_XRAY_RESULTS && canViewXrayResults) ||
+    (activeSubTab === SUB_TAB_INSPECTION_FORM && canViewInspectionForm);
 
-  if (activeSubTab === SUB_TAB_XRAY_RESULTS) {
-    if (!canAccessTab("ew/xray-results")) {
-      return <AccessDenied />;
-    }
-    return <XrayInspectionResults directoryHandle={directoryHandle} />;
-  }
-
-  if (activeSubTab === SUB_TAB_INSPECTION_FORM) {
-    if (!canAccessTab("ew/inspection-form")) {
-      return <AccessDenied />;
-    }
-    return <TemplateBuilderTab />;
-  }
-
-  return <XrayReferrals directoryHandle={directoryHandle} />;
+  return (
+    <>
+      {visitedSubTabs.has(SUB_TAB_XRAY_REFERRALS) && canViewXrayReferrals && (
+        <div hidden={activeSubTab !== SUB_TAB_XRAY_REFERRALS}>{xrayReferralsElement}</div>
+      )}
+      {visitedSubTabs.has(SUB_TAB_REFERRAL_APPROVAL) && canViewReferralApproval && (
+        <div hidden={activeSubTab !== SUB_TAB_REFERRAL_APPROVAL}>{referralApprovalElement}</div>
+      )}
+      {visitedSubTabs.has(SUB_TAB_XRAY_RESULTS) && canViewXrayResults && (
+        <div hidden={activeSubTab !== SUB_TAB_XRAY_RESULTS}>{xrayResultsElement}</div>
+      )}
+      {visitedSubTabs.has(SUB_TAB_INSPECTION_FORM) && canViewInspectionForm && (
+        <div hidden={activeSubTab !== SUB_TAB_INSPECTION_FORM}>{inspectionFormElement}</div>
+      )}
+      {!activeAllowed && <AccessDenied />}
+    </>
+  );
 }
