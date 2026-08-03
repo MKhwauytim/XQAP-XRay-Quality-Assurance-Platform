@@ -14,7 +14,12 @@ function groupRows(
   const groups = new Map<string, ExecutiveReportRow[]>();
   for (const row of rows) {
     const key = keyFor(row);
-    groups.set(key, [...(groups.get(key) ?? []), row]);
+    const bucket = groups.get(key);
+    if (bucket) {
+      bucket.push(row);
+    } else {
+      groups.set(key, [row]);
+    }
   }
   return groups;
 }
