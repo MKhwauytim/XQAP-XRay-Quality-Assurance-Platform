@@ -134,3 +134,36 @@ describe("authActivityLog", () => {
     expect(result.value.revision).toBeGreaterThan(10);
   });
 });
+
+describe("configureAuthActivityLogWorkspace — deferred until login (Task 1)", () => {
+  beforeEach(() => {
+    resetAuthActivityLogForTests();
+  });
+
+  it("does not log any session when configured with no active session", async () => {
+    // Note: configureAuthActivityLogWorkspace's queueFlush()/flushMemoryToWorkspace()
+    // unconditionally calls getActivityAuditDir(true), so the 5-system/audit folder
+    // (and an activity.log.json with an empty entries array) IS created on disk even
+    // with zero pending entries — that write itself is what needs a "readwrite" grant.
+    // The property this test actually characterizes is that no *session* gets logged
+    // absent a real sign-in, which is what the AuthGate.tsx fix relies on: deferring
+    // this call to applySession()/demo-login moves that readwrite trigger from an
+    // automatic page-load effect to a real user-initiated login action.
+    const root = createMemoryDirectory();
+    configureAuthActivityLogWorkspace(root);
+    await waitForAuthActivityLogFlush();
+
+    const entries = await readAuthActivityLog();
+    expect(entries).toEqual([]);
+  });
+
+  it("writes to disk once a real login session starts after the workspace is configured", async () => {
+    const root = createMemoryDirectory();
+    configureAuthActivityLogWorkspace(root);
+    startAuthActivitySession({ role: "employee", username: "alice", loginAt: new Date().toISOString() });
+    await waitForAuthActivityLogFlush();
+
+    const entries = await readAuthActivityLog();
+    expect(entries.map((e) => e.username)).toEqual(["alice"]);
+  });
+});
