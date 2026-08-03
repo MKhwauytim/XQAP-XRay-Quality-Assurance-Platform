@@ -172,17 +172,18 @@ type AppendOnlyCacheEntry<T = unknown> = {
 // File System Access API and this repo's memoryDirectory.ts test double, so a
 // cache keyed on a leaf handle would never hit.
 //
-// Plain Map, not WeakMap: the data-refresh signal below (5-minute
-// auto-refresh timer in AuthGate.tsx, manual refresh button in
-// AdminToolbar.tsx) needs a genuine "clear every cached root" operation, and
-// a WeakMap cannot be enumerated or cleared wholesale by design -- there is
-// no placeholder-free way to implement that with a WeakMap. Trade-off: a
+// Plain Map, not WeakMap: the manual-refresh data-refresh signal below
+// (AdminToolbar.tsx's refresh button only -- the periodic 5-minute
+// auto-refresh in AuthGate.tsx deliberately does NOT trigger this, see the
+// subscription below) needs a genuine "clear every cached root" operation,
+// and a WeakMap cannot be enumerated or cleared wholesale by design -- there
+// is no placeholder-free way to implement that with a WeakMap. Trade-off: a
 // disconnected workspace's cache entries are not individually
 // garbage-collected -- they persist until the next no-argument "clear all"
-// (which happens periodically via the refresh signal) or an explicit
-// resetAppendOnlyDirectoryCache(root) call, rather than becoming
-// automatically collectible. Acceptable because this app has exactly one
-// active workspace root at a time.
+// (which now only happens on an explicit manual refresh, not periodically)
+// or an explicit resetAppendOnlyDirectoryCache(root) call, rather than
+// becoming automatically collectible. Acceptable because this app has
+// exactly one active workspace root at a time, and switching roots is rare.
 let appendOnlyCache = new Map<DirectoryHandleLike, Map<string, AppendOnlyCacheEntry>>();
 
 let statsEntries = 0;
