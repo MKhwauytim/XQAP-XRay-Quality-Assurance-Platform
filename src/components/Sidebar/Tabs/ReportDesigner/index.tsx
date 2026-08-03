@@ -118,6 +118,22 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack, canEdit 
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally scoped to `doc` only; `performSave` is recreated every render and adding it as a dep would restart the debounce timer on each render instead of only on doc changes
   }, [doc]);
 
+  // Flush any pending autosave on TRUE unmount only (empty deps -- this
+  // effect's cleanup runs exactly once, unlike the `[doc]` effect above
+  // whose cleanup also fires on every keystroke). Without this, an edit
+  // made <800ms before navigating away (e.g. clicking "رجوع") or the
+  // component otherwise unmounting is silently discarded.
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current !== null) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+        void performSave(pendingDocRef.current);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately empty: this must run its cleanup exactly once, on unmount, not on every doc/performSave identity change
+  }, []);
+
   async function performSave(docToSave: ReportDocument) {
     if (!canEdit) {
       setSaveError(labels.rd_edit_denied_msg);
