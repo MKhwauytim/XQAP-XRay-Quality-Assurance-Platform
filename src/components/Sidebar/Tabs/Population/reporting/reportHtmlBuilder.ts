@@ -4,6 +4,7 @@ import type {
   RiskStageDistributionRow,
   WorkbookReceiptReport
 } from "./reportTypes";
+import { SOMAR_SANS_WOFF } from "../../../../../branding/somarFonts";
 
 function escapeHtml(value: unknown): string {
   return String(value ?? "")
@@ -1128,6 +1129,24 @@ function buildCss(): string {
   `;
 }
 
+/**
+ * @font-face block for the report's "Somar" family. buildCss()'s body rule
+ * references "Somar"/"Somar Sans" but this standalone-exported HTML has no
+ * network access to the app's own embedded fonts once saved to disk -- so
+ * without this, both named families silently fell back to Segoe UI/Tahoma.
+ * font-display: block matches the existing report/deck convention (theme.ts's
+ * EXEC_CSS) for self-contained exports with no network fetch to avoid
+ * blocking on.
+ */
+function buildSomarFontFaceCss(): string {
+  return (
+    `@font-face{font-family:"Somar";src:url("${SOMAR_SANS_WOFF.regular}") format("woff");font-weight:400;font-style:normal;font-display:block;}` +
+    `@font-face{font-family:"Somar";src:url("${SOMAR_SANS_WOFF.bold}") format("woff");font-weight:700;font-style:normal;font-display:block;}` +
+    `@font-face{font-family:"Somar";src:url("${SOMAR_SANS_WOFF.medium}") format("woff");font-weight:500;font-style:normal;font-display:block;}` +
+    `@font-face{font-family:"Somar";src:url("${SOMAR_SANS_WOFF.light}") format("woff");font-weight:300;font-style:normal;font-display:block;}`
+  );
+}
+
 export function buildPopulationReportHtml(data: PopulationReportData): string {
   return `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -1135,7 +1154,7 @@ export function buildPopulationReportHtml(data: PopulationReportData): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>${escapeHtml(data.title)}</title>
-  <style>${buildCss()}</style>
+  <style>${buildSomarFontFaceCss()}${buildCss()}</style>
 </head>
 <body>
   ${buildToolbar(data)}
