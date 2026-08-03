@@ -1,33 +1,3 @@
-/* ── Somar Sans ────────────────────────────────────────────── */
-@font-face {
-  font-family: "Somar Sans";
-  src: url("./assets/fonts/SomarSans-Light.woff") format("woff");
-  font-weight: 300;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Somar Sans";
-  src: url("./assets/fonts/SomarSans-Regular.woff") format("woff");
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Somar Sans";
-  src: url("./assets/fonts/SomarSans-Medium.woff") format("woff");
-  font-weight: 500;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Somar Sans";
-  src: url("./assets/fonts/SomarSans-Bold.woff") format("woff");
-  font-weight: 700;
-  font-style: normal;
-  font-display: swap;
-}
-
 /* ═══════════════════════════════════════════════════════════
    X-Ray QC Product Tokens
    Quiet RTL enterprise surface for daily operational work

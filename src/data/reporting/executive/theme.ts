@@ -5,17 +5,17 @@
 //         improved metrics, chips, bar rows, page numbers, and notice states.
 
 // Fonts are embedded as base64 data URIs so exported reports stay self-contained
-// even when the HTML file is moved away from the app folder.
-import somarRegular from "../../../assets/fonts/SomarSans-Regular.woff?inline";
-import somarBold from "../../../assets/fonts/SomarSans-Bold.woff?inline";
-import somarMedium from "../../../assets/fonts/SomarSans-Medium.woff?inline";
-import somarLight from "../../../assets/fonts/SomarSans-Light.woff?inline";
+// even when the HTML file is moved away from the app folder. Single-sourced
+// from src/branding/somarFonts.ts (§Q) -- the live app embeds the same 4
+// files under its own family name/font-display via that module too, instead
+// of each side carrying its own independent copy.
+import { SOMAR_SANS_WOFF } from "../../../branding/somarFonts";
 
 export const EXEC_CSS = `
-@font-face{font-family:"Somar";src:url("${somarRegular}") format("woff");font-weight:400;font-style:normal;font-display:block;}
-@font-face{font-family:"Somar";src:url("${somarBold}") format("woff");font-weight:700;font-style:normal;font-display:block;}
-@font-face{font-family:"Somar";src:url("${somarMedium}") format("woff");font-weight:500;font-style:normal;font-display:block;}
-@font-face{font-family:"Somar";src:url("${somarLight}") format("woff");font-weight:300;font-style:normal;font-display:block;}
+@font-face{font-family:"Somar";src:url("${SOMAR_SANS_WOFF.regular}") format("woff");font-weight:400;font-style:normal;font-display:block;}
+@font-face{font-family:"Somar";src:url("${SOMAR_SANS_WOFF.bold}") format("woff");font-weight:700;font-style:normal;font-display:block;}
+@font-face{font-family:"Somar";src:url("${SOMAR_SANS_WOFF.medium}") format("woff");font-weight:500;font-style:normal;font-display:block;}
+@font-face{font-family:"Somar";src:url("${SOMAR_SANS_WOFF.light}") format("woff");font-weight:300;font-style:normal;font-display:block;}
 :root{
   --navy:#062846;
   --navy-2:#0a3456;
