@@ -4,6 +4,7 @@ import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/re
 import AuthGate from "./AuthGate";
 import * as userManagement from "./userManagement";
 import * as authSession from "./authSession";
+import * as authActivityLog from "./authActivityLog";
 import * as passwordCrypto from "./passwordCrypto";
 import { writeLastLoginUsername } from "./loginPersistence";
 import { VIEWER_USERNAME } from "./authConfig";
@@ -292,6 +293,47 @@ describe("AuthGate — startup session-hydration race (B2)", () => {
 
     await waitFor(() => {
       expect(screen.getByLabelText("اسم المستخدم")).toBeInTheDocument();
+    });
+  });
+});
+
+describe("AuthGate — activity log wiring (Task 1 double-permission-prompt fix)", () => {
+  beforeEach(() => {
+    userManagement.writeUserManagementState(
+      userManagement.createEmptyUserManagementState(),
+      false,
+    );
+  });
+
+  afterEach(() => {
+    userManagement.writeUserManagementState(
+      userManagement.createEmptyUserManagementState(),
+      false,
+    );
+  });
+
+  it("wires the activity log workspace for a session that survived a page reload, even though neither applySession() nor the demo-login effect ever runs", async () => {
+    // Regression coverage for the reload-continuation gap: getInitialSession()
+    // (via readRealSession()) can already return a real session on first
+    // render -- before any explicit login happened -- so applySession() is
+    // never called, and the demo-login effect's `!session` guard is false.
+    // Only the session-gated effect (`if (!session) return;`) can wire the
+    // activity log workspace in for this path.
+    const persistedSession: AuthSession = {
+      role: "employee",
+      username: NON_SEED_USERNAME,
+      loginAt: new Date().toISOString(),
+    };
+    vi.spyOn(authSession, "readRealSession").mockReturnValue(persistedSession);
+    const handle = mockReadyWorkspace("reload-continuation-wires-activity-log", [NON_SEED_USERNAME]);
+    const configureSpy = vi.spyOn(authActivityLog, "configureAuthActivityLogWorkspace");
+
+    renderAuthGate();
+
+    expect(screen.getByText("authenticated")).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(configureSpy).toHaveBeenCalledWith(handle);
     });
   });
 });

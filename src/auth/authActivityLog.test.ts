@@ -146,13 +146,20 @@ describe("configureAuthActivityLogWorkspace — deferred until login (Task 1)", 
     // (and an activity.log.json with an empty entries array) IS created on disk even
     // with zero pending entries — that write itself is what needs a "readwrite" grant.
     // The property this test actually characterizes is that no *session* gets logged
-    // absent a real sign-in, which is what the AuthGate.tsx fix relies on: deferring
-    // this call to applySession()/demo-login moves that readwrite trigger from an
-    // automatic page-load effect to a real user-initiated login action.
+    // absent a real sign-in, which is what the AuthGate.tsx fix relies on: it only
+    // calls configureAuthActivityLogWorkspace from an effect gated on `session` being
+    // truthy, moving that readwrite trigger from an automatic page-load effect to the
+    // moment a session actually exists (fresh login, demo login, or reload-continued).
     const root = createMemoryDirectory();
     configureAuthActivityLogWorkspace(root);
     await waitForAuthActivityLogFlush();
 
+    // Prove the flush actually ran (the audit folder was created) rather than merely
+    // asserting an empty result that would also be true if the flush never happened.
+    const auditRoot = await root.getDirectoryHandle("5-system", { create: false });
+    expect(auditRoot).toBeTruthy();
+
+    // ...but no session was logged into it.
     const entries = await readAuthActivityLog();
     expect(entries).toEqual([]);
   });

@@ -181,15 +181,21 @@ export default function AuthGate({ children }: AuthGateProps) {
   // Derive whether there are any active users (to decide which form to show)
   const hasConfiguredUsers = managedUsers.some((user) => user.isActive);
 
-  // Deliberately NOT configured here on workspace-ready. Configuring the
-  // activity log workspace immediately triggers a disk write (queueFlush
-  // inside configureAuthActivityLogWorkspace), which requires "readwrite"
-  // permission — a second, separate File System Access prompt from the
-  // "read" grant already obtained when the workspace connects. There is
-  // nothing to log before a real session exists (AuthActivityLogEntry
-  // always requires a signed-in username), so wiring the workspace in is
-  // deferred to applySession() below and the demo auto-login effect, at the
-  // moment a real login actually happens.
+  useEffect(() => {
+    if (!session) return;
+    // Deferred until a session exists — configuring the activity log
+    // workspace immediately triggers a disk write (queueFlush inside
+    // configureAuthActivityLogWorkspace), which requires "readwrite"
+    // permission, a separate File System Access prompt from "read". There's
+    // nothing to log before a session exists, so this waits for one —
+    // covering fresh logins, demo logins, AND a session that survives a
+    // page reload (getInitialSession() can already be non-null on first
+    // render, before workspaceStatus catches up to "ready" — this effect's
+    // own dependency array re-fires it once that happens too).
+    configureAuthActivityLogWorkspace(
+      workspaceStatus === "ready" ? directoryHandle : null
+    );
+  }, [session, directoryHandle, workspaceStatus]);
 
   // Auto-login for the demo/viewer account: when the picker mounts the in-memory
   // demo workspace, enter the read-only demo session directly — no login form.
@@ -206,16 +212,11 @@ export default function AuthGate({ children }: AuthGateProps) {
       };
       // LOG-01: register the session with the authSession module too, so
       // permission checks (usePermissions → readSession) agree with the UI.
-      // Wire the activity log to this workspace now too — see applySession()
-      // above for why this is deferred to real-login time.
-      configureAuthActivityLogWorkspace(
-        workspaceStatus === "ready" ? directoryHandle : null
-      );
       writeSession(demoSession);
       // eslint-disable-next-line react-hooks/set-state-in-effect -- derive the demo session from the mounted demo workspace; guarded by !session so it settles in one step
       setSession(demoSession);
     }
-  }, [directoryHandle, session, workspaceStatus]);
+  }, [directoryHandle, session]);
 
   useEffect(() => {
     return subscribeToUserManagementChanges(() => {
@@ -435,14 +436,6 @@ export default function AuthGate({ children }: AuthGateProps) {
   }
 
   function applySession(nextSession: AuthSession): void {
-    // Wire the activity log to this workspace now, at the moment a real
-    // session starts — not eagerly on workspace-ready (see removed effect
-    // above). This is the first point a "readwrite" permission prompt for
-    // the activity log is actually justified, since writeSession() below
-    // calls startAuthActivitySession(), the first real log-worthy event.
-    configureAuthActivityLogWorkspace(
-      workspaceStatus === "ready" ? directoryHandle : null
-    );
     writeSession(nextSession);
     setSession(nextSession);
     setLogoutNotice("");
