@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ReportDesignerTab from "../ReportDesigner";
 import { AlertTriangle, BarChart2, BarChart3, Building2, Check, ClipboardList, Database, Download, FileStack, FileText, Filter, FolderOpen, Globe, History, Presentation, Settings2, User, Users, X } from "lucide-react";
 
@@ -176,6 +176,13 @@ function ReportsContent() {
   const [model, setModel] = useState<ReportModel | null>(null);
   const [modelError, setModelError] = useState<"no-population" | "build-error" | null>(null);
   const [modelLoading, setModelLoading] = useState(false);
+  // Remembers which (directoryHandle, month) pair the current `model` was
+  // built for, so switching sub-tabs away from "kpi" and back does not
+  // rebuild it from scratch -- loadExecInput is the heaviest read path in
+  // this tab (population + sample + all employee files + template +
+  // distribution). Unset (null) on a genuine handle/month change or a
+  // build failure, so those cases still rebuild correctly.
+  const kpiModelBuiltForRef = useRef<{ directoryHandle: typeof directoryHandle; month: string } | null>(null);
   const [exporting, setExporting] = useState<"document" | "deck" | "xlsx" | null>(null);
   const [pbiExporting, setPbiExporting] = useState(false);
   const [pbiResult, setPbiResult] = useState<ExportManifest | null>(null);
@@ -266,13 +273,24 @@ function ReportsContent() {
     };
   }, [directoryHandle, selectedMonth]);
 
-  // Build the live analytics model ONCE per month while the dashboard is open.
+  // Build the live analytics model ONCE per (directoryHandle, month) while the
+  // dashboard is open -- and keep it cached (not nulled) across a plain
+  // switch away from "kpi" and back, so returning to the dashboard is
+  // instant instead of re-running the heaviest read path in this tab.
   useEffect(() => {
-    if (section !== "kpi" || !directoryHandle || !selectedMonth) {
+    if (section !== "kpi") return;
+    if (!directoryHandle || !selectedMonth) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- sync-clear when dashboard closed / no month
       setModel(null);
+      kpiModelBuiltForRef.current = null;
       return;
     }
+    const alreadyBuilt =
+      kpiModelBuiltForRef.current !== null &&
+      kpiModelBuiltForRef.current.directoryHandle === directoryHandle &&
+      kpiModelBuiltForRef.current.month === selectedMonth;
+    if (alreadyBuilt) return;
+
     let cancelled = false;
     setModelLoading(true);
     setModel(null);
@@ -284,6 +302,7 @@ function ReportsContent() {
         if (!execInput) { setModel(null); setModelError("no-population"); return; }
         const builtModel = buildReportModel(execInput, buildDisplayNameMap());
         setModel(builtModel);
+        kpiModelBuiltForRef.current = { directoryHandle, month: selectedMonth };
         // §L Tier 2: backfill the studied-count chip from the model we just
         // built instead of a separate loadAllEmployeeFiles read -- only
         // available once the KPI dashboard has actually been opened.

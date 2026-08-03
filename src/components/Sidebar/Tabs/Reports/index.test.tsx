@@ -761,6 +761,41 @@ describe("Reports executive-deck export — style choices loaded before export (
   });
 });
 
+describe("Reports KPI model cache — no rebuild on plain section switch-back", () => {
+  it("does not rebuild the KPI model when switching away from 'kpi' and back with nothing changed", async () => {
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    (globalThis as { __testDir?: DirectoryHandleLike }).__testDir = root;
+
+    render(<ReportsTab />);
+
+    await act(async () => {
+      deferredManifestFor("4-april-2026").resolve(mockManifest(1));
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(screen.getByText("1 صورة")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("tab", { name: "مؤشرات" }));
+    await act(async () => {
+      deferredFor("4-april-2026").resolve(mockPop(1));
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(populationStorageSpies.loadMonthPopulationFinal).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent.click(screen.getByRole("tab", { name: "التقارير" }));
+    fireEvent.click(screen.getByRole("tab", { name: "مؤشرات" }));
+
+    // Give an (incorrect) rebuild a chance to fire before asserting it didn't.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(populationStorageSpies.loadMonthPopulationFinal).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("Reports sub-tab mount preservation (§T)", () => {
   afterEach(cleanup);
 
