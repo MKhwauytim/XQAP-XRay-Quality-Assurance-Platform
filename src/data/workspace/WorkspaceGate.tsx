@@ -233,6 +233,7 @@ type WorkspaceGateProps = {
 export function WorkspaceGate({ session, children }: WorkspaceGateProps) {
   const {
     status,
+    usersHydrated,
     message,
     missingItems,
     invalidItems,
@@ -253,13 +254,31 @@ export function WorkspaceGate({ session, children }: WorkspaceGateProps) {
     );
   }
 
-  // Workspace is ready — render the full app + (admin-only) first-run checklist
-  if (status === "ready") {
+  // Workspace is ready — render the full app + (admin-only) first-run checklist.
+  // Also wait for usersHydrated: status flips to "ready" before the workspace's
+  // real disk-synced permission matrix has been synced into memory (see
+  // WorkspaceProvider.applyWorkspaceHandle), so rendering on status alone lets
+  // AppContent briefly compute its tab list from stale/default permissions —
+  // the role-menu-flash bug. AuthGate already gates an analogous race on this
+  // same flag (see its usersHydrated effect).
+  if (status === "ready" && usersHydrated) {
     return (
       <>
         {children}
         <FirstRunChecklist session={session} />
       </>
+    );
+  }
+
+  // status is "ready" but usersHydrated hasn't caught up yet — show a brief,
+  // neutral loading state instead of children computed from stale permissions.
+  if (status === "ready" && !usersHydrated) {
+    return (
+      <div className="workspace-gate" dir="rtl">
+        <div className="workspace-gate-card">
+          <div className="workspace-gate-spinner" aria-hidden="true" />
+        </div>
+      </div>
     );
   }
 
