@@ -8,7 +8,7 @@
 // via a pure useMemo filter (buildAuditRows takes `mode` as a plain filter). This
 // test proves no additional directory reads happen when only the view mode changes.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createMemoryDirectory } from "../../../../../data/storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../../../../../data/storage/fileSystemAccess";
 import { clearSession, writeSession } from "../../../../../auth/authSession";
@@ -29,6 +29,7 @@ import type { PreparedPopulationRow } from "../../../../../data/population/popul
 import { loadEmployeeAnswers, upsertItemAnswer } from "../../../../../data/answers/answerStorage";
 import type { ItemAnswer } from "../../../../../data/answers/answerTypes";
 import { DEFAULT_LABELS } from "../../../../../data/labels/labelsStore";
+import { broadcastDataRefresh } from "../../../../../data/workspace/dataRefreshSignal";
 import XrayInspectionResults from "./XrayInspectionResults";
 
 const MONTH = "5-may-2026";
@@ -271,6 +272,47 @@ describe("XrayInspectionResults quality note (P2-2)", () => {
     expect(screen.queryByRole("button", { name: DEFAULT_LABELS.ew_quality_note_save })).not.toBeInTheDocument();
 
     // Data-layer confirmation: no note was ever persisted for this item.
+    const file = await loadEmployeeAnswers(root, MONTH, "emp-1");
+    const item = file.items.find((i) => i.xrayImageId === "IMG-ACTIVE");
+    expect(item?.qualityNote).toBeUndefined();
+  });
+});
+
+describe("XrayInspectionResults background data-refresh vs. an open quality-note editor", () => {
+  it("does not discard an in-progress, unsaved quality note when the app-wide data-refresh signal fires (5-minute auto-refresh / manual toolbar button)", async () => {
+    writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = await seedActiveEntryWithAnswer();
+    render(<XrayInspectionResults directoryHandle={root} />);
+
+    await waitFor(() => expect(screen.getAllByText("IMG-ACTIVE").length).toBeGreaterThan(0));
+
+    fireEvent.click(screen.getByRole("row", { name: /IMG-ACTIVE/ }));
+
+    const textarea = await screen.findByPlaceholderText(DEFAULT_LABELS.ew_quality_note_placeholder);
+    fireEvent.change(textarea, { target: { value: "مسودة ملاحظة غير محفوظة" } });
+    expect((textarea as HTMLTextAreaElement).value).toBe("مسودة ملاحظة غير محفوظة");
+
+    // Simulate the app-wide data-refresh signal (AuthGate's 5-minute timer or the
+    // manual toolbar refresh button) firing while the quality-note editor is still
+    // open with an unsaved draft.
+    act(() => {
+      broadcastDataRefresh();
+    });
+
+    // Previously: loadData's unconditional setLoadState("loading") + setExpandedRowKey(null)
+    // unmounted the whole results table (replacing it with the loading placeholder) and
+    // collapsed the expanded row, so QualityNoteEditor's local draft state was destroyed.
+    expect(screen.queryByText(DEFAULT_LABELS.xray_results_loading)).not.toBeInTheDocument();
+
+    // Let the silent refresh's async reload settle, then confirm the row is still
+    // expanded and the draft survived untouched.
+    await waitFor(() => expect(screen.getAllByText("IMG-ACTIVE").length).toBeGreaterThan(0));
+    const textareaAfter = await screen.findByPlaceholderText(DEFAULT_LABELS.ew_quality_note_placeholder);
+    expect((textareaAfter as HTMLTextAreaElement).value).toBe("مسودة ملاحظة غير محفوظة");
+
+    // Data-layer confirmation: the unsaved draft was never persisted by the refresh.
     const file = await loadEmployeeAnswers(root, MONTH, "emp-1");
     const item = file.items.find((i) => i.xrayImageId === "IMG-ACTIVE");
     expect(item?.qualityNote).toBeUndefined();
