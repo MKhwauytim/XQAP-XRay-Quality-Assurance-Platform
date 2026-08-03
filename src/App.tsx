@@ -21,7 +21,6 @@ import {
   createDailyAdminBackupIfDue,
 } from "./data/backup/backupStorage";
 import { listMonthFolders } from "./data/population/populationStorage";
-import { GlobalMonthProvider } from "./data/month/GlobalMonthProvider";
 import { getLabels } from "./data/labels/labelsStore";
 import { useLabels } from "./data/labels/useLabels";
 import { useWorkspace } from "./data/workspace/useWorkspace";
@@ -323,17 +322,15 @@ function NoAvailableTabs({ role }: { role: AuthSession["role"] }) {
 function App() {
   return (
     <WorkspacePicker>
-      <GlobalMonthProvider>
-        <AuthGate>
-          {(session) => (
-            <WorkspaceGate session={session}>
-              {/* key on role so switching the admin role-preview remounts the app,
-                  forcing components that read the session once at mount to re-read it. */}
-              <AppContent key={session.role} session={session} />
-            </WorkspaceGate>
-          )}
-        </AuthGate>
-      </GlobalMonthProvider>
+      <AuthGate>
+        {(session) => (
+          <WorkspaceGate session={session}>
+            {/* key on role so switching the admin role-preview remounts the app,
+                forcing components that read the session once at mount to re-read it. */}
+            <AppContent key={session.role} session={session} />
+          </WorkspaceGate>
+        )}
+      </AuthGate>
     </WorkspacePicker>
   );
 }

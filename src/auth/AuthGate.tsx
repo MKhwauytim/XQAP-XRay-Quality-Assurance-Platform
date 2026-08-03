@@ -58,6 +58,7 @@ import { useWorkspace } from "../data/workspace/useWorkspace";
 import { syncUserManagementToDisk } from "../data/workspace/userSync";
 import { logRejection } from "../data/storage/errorLogger";
 import { LoadingState } from "../components/StateViews/StateViews";
+import { GlobalMonthProvider } from "../data/month/GlobalMonthProvider";
 
 type AuthGateProps = {
   children: ReactNode | ((session: AuthSession) => ReactNode);
@@ -596,7 +597,7 @@ export default function AuthGate({ children }: AuthGateProps) {
       : session;
 
     return (
-      <>
+      <GlobalMonthProvider>
         <AdminToolbar
           session={session}
           previewRole={previewRole}
@@ -606,7 +607,7 @@ export default function AuthGate({ children }: AuthGateProps) {
         />
 
         {renderAuthenticatedChildren(effectiveSession)}
-      </>
+      </GlobalMonthProvider>
     );
   }
 

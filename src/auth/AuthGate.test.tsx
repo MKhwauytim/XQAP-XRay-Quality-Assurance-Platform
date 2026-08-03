@@ -11,6 +11,8 @@ import { VIEWER_USERNAME } from "./authConfig";
 import { WorkspaceProvider } from "../data/workspace/WorkspaceProvider";
 import * as dataRefreshSignal from "../data/workspace/dataRefreshSignal";
 import { createMemoryDirectory } from "../data/storage/memoryDirectory";
+import * as populationStorage from "../data/population/populationStorage";
+import { useGlobalMonth } from "../data/month/useGlobalMonth";
 import type { AuthSession } from "./authTypes";
 import {
   WORKSPACE_SCHEMA_VERSION,
@@ -402,6 +404,45 @@ describe("AuthGate — usersHydrated render gate (P1 item 4)", () => {
 
     // Even with hydration never completing, an exempt session must stay visible.
     expect(screen.getByText("authenticated")).toBeInTheDocument();
+  });
+});
+
+describe("AuthGate — GlobalMonthProvider moved inside (P2 item 5)", () => {
+  it("does not list month folders before a session exists, and provides GlobalMonthContext once authenticated", async () => {
+    const listMonthFoldersSpy = vi.spyOn(populationStorage, "listMonthFolders");
+    listMonthFoldersSpy.mockResolvedValue([]);
+
+    const persistedSession: AuthSession = {
+      role: "employee",
+      username: NON_SEED_USERNAME,
+      loginAt: new Date().toISOString(),
+    };
+    vi.spyOn(authSession, "readRealSession").mockReturnValue(persistedSession);
+    mockReadyWorkspace("global-month-inside-authgate", [NON_SEED_USERNAME]);
+
+    function MonthConsumer() {
+      const { months } = useGlobalMonth();
+      return <div data-testid="month-count">{months.length}</div>;
+    }
+
+    render(
+      <WorkspaceProvider>
+        <AuthGate>{() => <MonthConsumer />}</AuthGate>
+      </WorkspaceProvider>,
+    );
+
+    // At first paint (before the workspace even reaches "ready"), no session
+    // is authenticated from this component's own perspective as far as
+    // month-listing is concerned -- listMonthFolders must not have fired yet
+    // purely because a workspace happened to reconnect.
+    expect(listMonthFoldersSpy).not.toHaveBeenCalled();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("month-count")).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(listMonthFoldersSpy).toHaveBeenCalled();
+    });
   });
 });
 
