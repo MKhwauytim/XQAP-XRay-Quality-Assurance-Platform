@@ -276,45 +276,52 @@ async function saveMonthRunLocked(
       await ensureFolder(monthDir, "sample");
       await ensureFolder(monthDir, "reports");
 
-      // Copy source xlsx files as-is
-      if (params.riskSourceFile) {
-        const buf = await params.riskSourceFile.arrayBuffer();
-        const ext = params.riskSourceFile.name.split(".").pop() ?? "xlsx";
-        await saveBinaryFile(rawDir, `risk.source.${ext}`, buf);
-      }
-      if (params.biSourceFile) {
-        const buf = await params.biSourceFile.arrayBuffer();
-        const ext = params.biSourceFile.name.split(".").pop() ?? "xlsx";
-        await saveBinaryFile(rawDir, `bi.source.${ext}`, buf);
-      }
+      // Copy source xlsx files and write raw JSON — these four writes target
+      // disjoint files with no data dependency on each other, so they run
+      // concurrently. Each conditional branch is wrapped in an IIFE so
+      // Promise.all can await a uniform array regardless of which conditions
+      // are true.
+      await Promise.all([
+        (async () => {
+          if (!params.riskSourceFile) return;
+          const buf = await params.riskSourceFile.arrayBuffer();
+          const ext = params.riskSourceFile.name.split(".").pop() ?? "xlsx";
+          await saveBinaryFile(rawDir, `risk.source.${ext}`, buf);
+        })(),
+        (async () => {
+          if (!params.biSourceFile) return;
+          const buf = await params.biSourceFile.arrayBuffer();
+          const ext = params.biSourceFile.name.split(".").pop() ?? "xlsx";
+          await saveBinaryFile(rawDir, `bi.source.${ext}`, buf);
+        })(),
+        (async () => {
+          if (riskRawRows.length === 0) return;
+          const supersedes = await archiveExistingRaw(rawDir, "risk");
+          const riskRaw: MonthRawData = {
+            sourceFileName: riskFileName ?? "unknown",
+            importedAt: now,
+            importedBy: username,
+            supersedes,
+            rows: riskRawRows
+          };
+          await safeWriteJson(rawDir, "risk.raw.json", riskRaw);
+        })(),
+        (async () => {
+          if (biRawRows.length === 0) return;
+          const supersedes = await archiveExistingRaw(rawDir, "bi");
+          const biRaw: MonthRawData = {
+            sourceFileName: biFileName ?? "unknown",
+            importedAt: now,
+            importedBy: username,
+            supersedes,
+            rows: biRawRows
+          };
+          await safeWriteJson(rawDir, "bi.raw.json", biRaw);
+        })(),
+      ]);
 
-      // Save risk raw JSON — archive any prior import first (A5, immutable raw).
-      if (riskRawRows.length > 0) {
-        const supersedes = await archiveExistingRaw(rawDir, "risk");
-        const riskRaw: MonthRawData = {
-          sourceFileName: riskFileName ?? "unknown",
-          importedAt: now,
-          importedBy: username,
-          supersedes,
-          rows: riskRawRows
-        };
-        await safeWriteJson(rawDir, "risk.raw.json", riskRaw);
-      }
-
-      // Save BI raw JSON — archive any prior import first (A5, immutable raw).
-      if (biRawRows.length > 0) {
-        const supersedes = await archiveExistingRaw(rawDir, "bi");
-        const biRaw: MonthRawData = {
-          sourceFileName: biFileName ?? "unknown",
-          importedAt: now,
-          importedBy: username,
-          supersedes,
-          rows: biRawRows
-        };
-        await safeWriteJson(rawDir, "bi.raw.json", biRaw);
-      }
-
-      // Save processed population
+      // Save processed population. Must complete before the replacement-index
+      // rebuild below, which reads this file's envelope revision back.
       const finalData: PopulationFinalData = {
         sourceMonthFolder: monthFolderName,
         processedAt: now,
@@ -326,37 +333,43 @@ async function saveMonthRunLocked(
       };
       await safeWriteJson(processedDir, "population.final.json", finalData);
 
-      // Best-effort, non-fatal: a replacement-candidate lookup index (deliberate
-      // exception to the pending large-population performance proposal's phase
-      // sequence — see docs/edit logs/2026-07-22.md v59.0). Its failure must never
-      // sink an otherwise-successful population save; the replacement flow falls
-      // back to a full-population read when the index is missing or stale.
-      try {
-        const sourceRevision = await readEnvelopeRevision(processedDir, "population.final.json");
-        if (sourceRevision !== null) {
-          const config = await loadPopulationConfig(directoryHandle);
-          await rebuildReplacementIndex(
-            directoryHandle,
-            monthFolderName,
-            processedRows as PreparedPopulationRow[],
-            config.stageMappings,
-            sourceRevision,
-            username
-          );
-        }
-      } catch (error) {
-        logError("population:rebuild-replacement-index", error);
-      }
+      await Promise.all([
+        (async () => {
+          // Best-effort, non-fatal: a replacement-candidate lookup index
+          // (deliberate exception to the pending large-population performance
+          // proposal's phase sequence — see docs/edit logs/2026-07-22.md
+          // v59.0). Its failure must never sink an otherwise-successful
+          // population save; the replacement flow falls back to a
+          // full-population read when the index is missing or stale.
+          try {
+            const sourceRevision = await readEnvelopeRevision(processedDir, "population.final.json");
+            if (sourceRevision !== null) {
+              const config = await loadPopulationConfig(directoryHandle);
+              await rebuildReplacementIndex(
+                directoryHandle,
+                monthFolderName,
+                processedRows as PreparedPopulationRow[],
+                config.stageMappings,
+                sourceRevision,
+                username
+              );
+            }
+          } catch (error) {
+            logError("population:rebuild-replacement-index", error);
+          }
+        })(),
+        (async () => {
+          if (!params.processingSummary) return;
+          const summaryData: ProcessingSummaryData = {
+            ...params.processingSummary,
+            savedAt: now,
+          };
+          await safeWriteJson(processedDir, "processing.summary.json", summaryData);
+        })(),
+      ]);
 
-      if (params.processingSummary) {
-        const summaryData: ProcessingSummaryData = {
-          ...params.processingSummary,
-          savedAt: now,
-        };
-        await safeWriteJson(processedDir, "processing.summary.json", summaryData);
-      }
-
-      // Save month manifest
+      // Save month manifest — must be last: it records totals/paths that
+      // depend on every write above having committed.
       const manifest: MonthManifestData = {
         monthFolderName,
         month,
@@ -708,9 +721,109 @@ export type MonthEditData = {
   manifest: MonthManifestData | null;
 };
 
-export async function loadMonthForEditing(
+// ── Focused loaders (Large-Population Performance Proposal, Phase A step 1) ────
+// Each is independently callable and independently fault-tolerant (a read
+// failure for one never blanks another's result) -- the property Phase A's
+// upcoming opt-in MonthLoadScope needs to fetch only what a screen actually
+// requires. loadMonthForEditing (below) composes all five and must remain
+// byte-identical to its pre-extraction output for every existing caller.
+
+export async function loadMonthManifest(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string
+): Promise<MonthManifestData | null> {
+  try {
+    const monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, false);
+    const result = await safeReadJson<MonthManifestData>(monthDir, "month.manifest.json");
+    return result.ok ? result.value : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function loadProcessingSummary(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<ProcessingSummaryData | null> {
+  try {
+    const monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, false);
+    const processedDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false });
+    const result = await safeReadJson<ProcessingSummaryData>(processedDir, "processing.summary.json");
+    return result.ok ? result.value : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function loadRawDataset(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  source: "risk" | "bi"
+): Promise<Array<Record<string, unknown>>> {
+  try {
+    const monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, false);
+    const rawDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.raw, { create: false });
+    const fileName = source === "risk" ? "risk.raw.json" : "bi.raw.json";
+    const result = await safeReadJson<MonthRawData>(rawDir, fileName);
+    return result.ok ? (result.value.rows ?? []) : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function loadMonthSampleState(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<SampleMasterData | null> {
+  try {
+    const monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, false);
+    const sampleDir = await resolveSampleDir(directoryHandle, monthFolderName, monthDir);
+    if (!sampleDir) return null;
+    const result = await safeReadJson<SampleMasterData>(sampleDir, "sample.master.json");
+    return result.ok ? result.value : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function loadMonthDistributionState(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  sampleRows: SampleMasterData["rows"] | null | undefined
+): Promise<DistributionCurrentData | null> {
+  if (!sampleRows) return null;
+  return loadOrDeriveDistributionCurrent(directoryHandle, monthFolderName, sampleRows);
+}
+
+/**
+ * Which pieces of a month's edit data to load. Every field defaults to "don't
+ * load" when a caller passes a partial scope object -- omitting the whole
+ * `scope` argument is the only way to get today's always-load-everything
+ * behavior (see FULL_MONTH_LOAD_SCOPE below), so every pre-existing call site
+ * that never passed a third argument keeps working byte-for-byte unchanged.
+ */
+export type MonthLoadScope = {
+  population?: boolean;
+  summary?: boolean;
+  /** Also gated by the existing manifest-status check regardless of this flag. */
+  raw?: boolean;
+  sample?: boolean;
+  /** Implies loading sample data too (distribution is derived from sample rows). */
+  distribution?: boolean;
+};
+
+const FULL_MONTH_LOAD_SCOPE: Required<MonthLoadScope> = {
+  population: true,
+  summary: true,
+  raw: true,
+  sample: true,
+  distribution: true,
+};
+
+export async function loadMonthForEditing(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  scope: MonthLoadScope = FULL_MONTH_LOAD_SCOPE
 ): Promise<MonthEditData> {
   const empty: MonthEditData = {
     populationRows: null,
@@ -725,8 +838,6 @@ export async function loadMonthForEditing(
   };
 
   try {
-    const monthDir = await getPopulationMonthDir(directoryHandle, monthFolderName, false);
-
     // Read the manifest first (small, fast) to decide whether the two raw
     // import files are worth reading at all -- they can each hold up to the
     // full 200k-400k row population for the month. A2026-07-22 perf finding:
@@ -737,66 +848,31 @@ export async function loadMonthForEditing(
     // that only applies while the month is still awaiting processing. A
     // missing/unreadable manifest keeps the previous always-attempt behavior
     // (safe fallback -- never skip on uncertainty).
-    const manifestResult = await safeReadJson<MonthManifestData>(monthDir, "month.manifest.json");
-    const manifest = manifestResult?.ok ? manifestResult.value : null;
-    const needsRawWorkbooks = !manifest || manifest.status === "raw-saved";
+    const manifest = await loadMonthManifest(directoryHandle, monthFolderName);
+    const needsRawWorkbooks = (scope.raw ?? false) && (!manifest || manifest.status === "raw-saved");
+    const wantsSample = (scope.sample ?? false) || (scope.distribution ?? false);
 
-    const [popBundle, summaryBundle, rawBundle, sampleBundle] = await Promise.all([
-      monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false })
-        .then((dir) => safeReadJson<PopulationFinalData>(dir, "population.final.json"))
-        .catch(() => null),
-      monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false })
-        .then((dir) => safeReadJson<ProcessingSummaryData>(dir, "processing.summary.json"))
-        .catch(() => null),
+    const [popData, processingSummary, rawRows, sampleData] = await Promise.all([
+      scope.population ? loadMonthPopulationFinal(directoryHandle, monthFolderName) : Promise.resolve(null),
+      scope.summary ? loadProcessingSummary(directoryHandle, monthFolderName) : Promise.resolve(null),
       needsRawWorkbooks
-        ? monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.raw, { create: false })
-            .then(async (dir) => {
-              const [risk, bi] = await Promise.all([
-                safeReadJson<MonthRawData>(dir, "risk.raw.json"),
-                safeReadJson<MonthRawData>(dir, "bi.raw.json"),
-              ]);
-              return { risk, bi };
-            })
-            .catch(() => null)
-        : Promise.resolve(null),
-      resolveSampleDir(directoryHandle, monthFolderName, monthDir)
-        .then((dir) =>
-          dir ? safeReadJson<SampleMasterData>(dir, "sample.master.json") : null
-        ),
+        ? Promise.all([
+            loadRawDataset(directoryHandle, monthFolderName, "risk"),
+            loadRawDataset(directoryHandle, monthFolderName, "bi"),
+          ])
+        : Promise.resolve([[], []] as [Array<Record<string, unknown>>, Array<Record<string, unknown>>]),
+      wantsSample ? loadMonthSampleState(directoryHandle, monthFolderName) : Promise.resolve(null),
     ]);
 
-    let populationRows: Array<Record<string, unknown>> | null = null;
-    let certScanRows = 0;
-    let nonCertScanRows = 0;
-    if (popBundle?.ok) {
-      populationRows = popBundle.value.rows;
-      certScanRows = popBundle.value.certScanRows;
-      nonCertScanRows = popBundle.value.nonCertScanRows;
-    }
-
-    const riskRawRows: Array<Record<string, unknown>> =
-      rawBundle?.risk?.ok ? (rawBundle.risk.value.rows ?? []) : [];
-    const biRawRows: Array<Record<string, unknown>> =
-      rawBundle?.bi?.ok ? (rawBundle.bi.value.rows ?? []) : [];
-
-    const processingSummary: ProcessingSummaryData | null =
-      summaryBundle?.ok ? summaryBundle.value : null;
-
-    const sampleData: SampleMasterData | null =
-      sampleBundle?.ok ? sampleBundle.value : null;
-
-    const distributionCurrent: DistributionCurrentData | null = sampleData
-      ? await loadOrDeriveDistributionCurrent(
-          directoryHandle,
-          monthFolderName,
-          sampleData.rows
-        )
+    const [riskRawRows, biRawRows] = rawRows;
+    const distributionCurrent = (scope.distribution ?? false)
+      ? await loadMonthDistributionState(directoryHandle, monthFolderName, sampleData?.rows)
       : null;
 
     return {
-      populationRows,
-      certScanRows,
-      nonCertScanRows,
+      populationRows: popData?.rows ?? null,
+      certScanRows: popData?.certScanRows ?? 0,
+      nonCertScanRows: popData?.nonCertScanRows ?? 0,
       riskRawRows,
       biRawRows,
       processingSummary,

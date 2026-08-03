@@ -1,13 +1,15 @@
 import { expect, it, test } from "vitest";
 
-import { createMemoryDirectory } from "../storage/memoryDirectory";
+import { createMemoryDirectory, getReadLog, clearReadLog } from "../storage/memoryDirectory";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { WorkspacePermissionError } from "../storage/workspaceWriteAccess";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { saveMonthRun, loadAllSampleRows, loadBrowseRows, updateMonthStatus, loadMonthForEditing } from "./populationStorage";
 import { loadReplacementBucket, loadReplacementIndexManifest } from "./replacementIndexStorage";
 import { saveSampleMaster } from "../sampling/sampleStorage";
-import type { MonthManifestData, MonthRawData, PopulationFinalData } from "./monthTypes";
+import { appendDistributionEvent } from "../distribution/distributionStorage";
+import { buildAssignEvent } from "../distribution/distributionLog";
+import type { MonthManifestData, MonthRawData, PopulationFinalData, ProcessingSummaryData } from "./monthTypes";
 import type { SampleMasterData } from "../sampling/sampleTypes";
 import { getPopulationMonthDir, POPULATION_SUBFOLDERS } from "../workspace/workspacePaths";
 
@@ -169,6 +171,151 @@ test("loadMonthForEditing still attempts raw reads when the manifest itself is m
 
   expect(data.manifest).toBeNull();
   expect(data.riskRawRows).toHaveLength(1);
+});
+
+// Phase A (Large-Population Performance Proposal) regression lock: Reports/index.tsx's
+// generate("sample"|"sample-xlsx"|"sample-deck") calls `loadMonthForEditing(directoryHandle,
+// selectedMonth)` with NO scope argument, then falls back to `populationRows ?? []` -- a scope
+// change that stopped loading population for this call site would silently degrade to an empty
+// array, not throw, so a real regression here would only surface as a blank/empty exported
+// report, not a test failure anywhere else. This pins the exact no-scope call shape that call
+// site depends on: it must keep returning the full population for a processed+sampled month.
+test("loadMonthForEditing with no scope argument returns non-empty populationRows for a processed+sampled month (Reports/index.tsx:382 contract)", async () => {
+  const dir = createMemoryDirectory();
+  await saveMonthRun({ directoryHandle: dir, ...baseParams });
+  await saveSampleMaster(dir, "5-may-2026", makeSample());
+
+  const { populationRows, sampleData } = await loadMonthForEditing(dir, "5-may-2026");
+
+  expect(sampleData).not.toBeNull();
+  expect(populationRows).not.toBeNull();
+  expect(populationRows).toHaveLength(1);
+  expect((populationRows ?? [])[0]?.xrayImageId).toBe("A001");
+});
+
+// MonthLoadScope (Phase A step 2): each requested piece reads exactly its own
+// file(s) and nothing more, and an unrequested piece performs NO read at all --
+// the property "an employee landing on a screen that only needs sample data
+// never reads population.final.json/risk.raw.json/bi.raw.json" depends on.
+test("MonthLoadScope: an empty scope reads nothing but the manifest", async () => {
+  const dir = createMemoryDirectory("root", { trackReads: true });
+  await saveMonthRun({ directoryHandle: dir, ...baseParams });
+  await saveSampleMaster(dir, "5-may-2026", makeSample());
+  // saveMonthRun/saveSampleMaster's own safeWriteJson verify-read-back leaves entries
+  // here too -- clear so the log below reflects only loadMonthForEditing's own reads.
+  clearReadLog(dir);
+
+  const data = await loadMonthForEditing(dir, "5-may-2026", {});
+
+  expect(data.populationRows).toBeNull();
+  expect(data.processingSummary).toBeNull();
+  expect(data.sampleData).toBeNull();
+  expect(data.distributionCurrent).toBeNull();
+  expect(data.riskRawRows).toEqual([]);
+  expect(data.biRawRows).toEqual([]);
+  expect(getReadLog(dir)).toEqual(["1-population/5-may-2026/month.manifest.json"]);
+});
+
+test("MonthLoadScope: { summary: true } reads only the manifest + processing.summary.json", async () => {
+  const dir = createMemoryDirectory("root", { trackReads: true });
+  await saveMonthRun({
+    directoryHandle: dir,
+    ...baseParams,
+    processingSummary: {
+      removedRows: [],
+      duplicateRows: [],
+      invalidResultRows: [],
+      summary: { riskOriginalRows: 1, validRiskIdRows: 1, invalidRiskIdRows: 0, duplicateRiskIdRows: 0, rowsAfterDeduplication: 1, removedInvalidResultRows: 0, finalPreparedPopulationRows: 1, certScanRows: 0, nonCertScanRows: 1, certScanPercentage: 0, nonCertScanPercentage: 100, biProvided: false, biMatchedRows: 0, biUnmatchedRows: 0, biMatchPercentage: 0, totalBiFilledFields: 0, biFieldFillSummary: [] },
+    },
+  });
+  clearReadLog(dir); // discard saveMonthRun's own verify-read-back entries
+
+  const data = await loadMonthForEditing(dir, "5-may-2026", { summary: true });
+
+  expect(data.processingSummary).not.toBeNull();
+  expect(data.populationRows).toBeNull();
+  expect(data.sampleData).toBeNull();
+  expect(getReadLog(dir)).toEqual([
+    "1-population/5-may-2026/month.manifest.json",
+    "1-population/5-may-2026/2-processed/processing.summary.json",
+  ]);
+});
+
+test("MonthLoadScope: { sample: true, distribution: true } reads manifest + sample, never population/raw", async () => {
+  const dir = createMemoryDirectory("root", { trackReads: true });
+  await saveMonthRun({ directoryHandle: dir, ...baseParams });
+  await saveSampleMaster(dir, "5-may-2026", makeSample());
+  // loadOrDeriveDistributionCurrent returns null for zero events (nothing assigned yet) --
+  // append one so this test exercises a genuinely non-null distribution, not just the
+  // no-assignments-yet null case (which the empty-scope test above already covers).
+  await appendDistributionEvent(
+    dir,
+    "5-may-2026",
+    buildAssignEvent({ xrayImageId: "A001", assignedTo: "employee-1", eventBy: "admin" }),
+  );
+  clearReadLog(dir); // discard the setup calls' own verify-read-back entries
+
+  const data = await loadMonthForEditing(dir, "5-may-2026", { sample: true, distribution: true });
+
+  expect(data.sampleData?.rows).toEqual([{ xrayImageId: "A001" }]);
+  expect(data.distributionCurrent).not.toBeNull();
+  expect(data.populationRows).toBeNull();
+  expect(data.riskRawRows).toEqual([]);
+  const readLog = getReadLog(dir);
+  expect(readLog).toContain("1-population/5-may-2026/month.manifest.json");
+  expect(readLog.some((path) => path.includes("population.final.json"))).toBe(false);
+  expect(readLog.some((path) => path.includes("risk.raw.json") || path.includes("bi.raw.json"))).toBe(false);
+});
+
+test("MonthLoadScope: { raw: true } still honors the manifest-status gate (A1) -- no read once processed", async () => {
+  const dir = createMemoryDirectory("root", { trackReads: true });
+  await saveMonthRun({ directoryHandle: dir, ...baseParams }); // leaves status "processed-saved"
+  clearReadLog(dir); // discard saveMonthRun's own verify-read-back entries
+
+  const data = await loadMonthForEditing(dir, "5-may-2026", { raw: true });
+
+  expect(data.riskRawRows).toEqual([]);
+  expect(data.biRawRows).toEqual([]);
+  const readLog = getReadLog(dir);
+  expect(readLog.some((path) => path.includes("raw.json"))).toBe(false);
+});
+
+// Regression guard (2026-08-01 architect review, Phase A): corruption must stay
+// explicit under a partial MonthLoadScope -- a corrupt population.final.json that a
+// scope never asked to read must not be silently reinterpreted as "not yet
+// processed", and a corrupt file that WAS requested must still resolve to null
+// (the existing missing-vs-corrupt safe fallback), never throw or return `[]`
+// masquerading as a genuinely empty population.
+async function corruptPopulationFinalJson(dir: DirectoryHandleLike): Promise<void> {
+  const monthDir = await getPopulationMonthDir(dir, "5-may-2026", true);
+  const processedDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: true });
+  const handle = await processedDir.getFileHandle("population.final.json", { create: true });
+  const writable = await handle.createWritable!();
+  await writable.write("{ this is not valid json");
+  await writable.close();
+}
+
+test("a corrupt population.final.json that scope never requested does not misrepresent the month as unprocessed", async () => {
+  const dir = createMemoryDirectory();
+  await saveMonthRun({ directoryHandle: dir, ...baseParams }); // leaves status "processed-saved"
+  await corruptPopulationFinalJson(dir);
+
+  const data = await loadMonthForEditing(dir, "5-may-2026", { summary: true });
+
+  expect(data.populationRows).toBeNull();
+  expect(data.manifest?.status).toBe("processed-saved"); // manifest itself is untouched, still readable
+});
+
+test("a corrupt population.final.json that scope DOES request resolves to null, not [] or a throw", async () => {
+  const dir = createMemoryDirectory();
+  await saveMonthRun({ directoryHandle: dir, ...baseParams });
+  await corruptPopulationFinalJson(dir);
+
+  const data = await loadMonthForEditing(dir, "5-may-2026", { population: true });
+
+  expect(data.populationRows).toBeNull();
+  expect(data.certScanRows).toBe(0);
+  expect(data.nonCertScanRows).toBe(0);
 });
 
 test("loadBrowseRows reads only the selected month unless all months are requested", async () => {
@@ -386,4 +533,63 @@ it("loadAllSampleRows falls back to legacy sample path when getSampleMainDir thr
   // Assert
   expect(rows.length).toBeGreaterThan(0);
   expect(rows[0].xrayImageId).toBe("LEGACY001");
+});
+
+// Task 3 (parallelize saveMonthRunLocked's independent writes): end-state
+// characterization -- exercises every write saveMonthRunLocked now fires
+// concurrently (risk.raw.json + bi.raw.json in the first Promise.all group,
+// the replacement-index rebuild + processing.summary.json in the second) and
+// confirms each one's *content* landed correctly. Passes against both the
+// pre-refactor sequential code and the post-refactor concurrent code -- it
+// asserts only on final on-disk state, never on write ordering.
+test("saveMonthRun writes all expected files and the manifest reflects the final state, regardless of write ordering", async () => {
+  const dir = createMemoryDirectory();
+  const result = await saveMonthRun({
+    directoryHandle: dir,
+    ...baseParams,
+    biRawRows: [{ id: "B001", port: "بحري" }],
+    processingSummary: {
+      removedRows: [],
+      duplicateRows: [],
+      invalidResultRows: [],
+      summary: { riskOriginalRows: 1, validRiskIdRows: 1, invalidRiskIdRows: 0, duplicateRiskIdRows: 0, rowsAfterDeduplication: 1, removedInvalidResultRows: 0, finalPreparedPopulationRows: 1, certScanRows: 0, nonCertScanRows: 1, certScanPercentage: 0, nonCertScanPercentage: 100, biProvided: false, biMatchedRows: 0, biUnmatchedRows: 0, biMatchPercentage: 0, totalBiFilledFields: 0, biFieldFillSummary: [] },
+    },
+  });
+
+  expect(result.ok).toBe(true);
+  if (!result.ok) return;
+
+  const monthDir = await getPopulationMonthDir(dir, "5-may-2026", false);
+  const manifestResult = await safeReadJson<MonthManifestData>(monthDir, "month.manifest.json");
+  expect(manifestResult.ok).toBe(true);
+  if (!manifestResult.ok) return;
+  expect(manifestResult.value.totalProcessedRows).toBe(1);
+  expect(manifestResult.value.totalRawRows).toBe(1);
+  expect(manifestResult.value.processingSummaryFile).toBe(`${POPULATION_SUBFOLDERS.processed}/processing.summary.json`);
+
+  const rawDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.raw, { create: false });
+  const riskRaw = await safeReadJson<MonthRawData>(rawDir, "risk.raw.json");
+  const biRaw = await safeReadJson<MonthRawData>(rawDir, "bi.raw.json");
+  expect(riskRaw.ok).toBe(true);
+  expect(biRaw.ok).toBe(true);
+  if (riskRaw.ok) expect(riskRaw.value.rows).toHaveLength(1);
+  if (biRaw.ok) expect(biRaw.value.rows).toHaveLength(1);
+
+  const processedDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false });
+  const finalData = await safeReadJson<PopulationFinalData>(processedDir, "population.final.json");
+  expect(finalData.ok).toBe(true);
+  if (finalData.ok) {
+    expect(finalData.value.rows).toHaveLength(1);
+    expect(finalData.value.nonCertScanRows).toBe(1);
+  }
+
+  const summaryResult = await safeReadJson<ProcessingSummaryData>(processedDir, "processing.summary.json");
+  expect(summaryResult.ok).toBe(true);
+  if (summaryResult.ok) {
+    expect(summaryResult.value.summary.finalPreparedPopulationRows).toBe(1);
+  }
+
+  const indexManifest = await loadReplacementIndexManifest(dir, "5-may-2026");
+  expect(indexManifest).not.toBeNull();
+  expect(indexManifest?.totalIndexedRows).toBe(1);
 });
