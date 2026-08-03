@@ -5,13 +5,18 @@
 // had no cancellation guard: if a slow load for a PREVIOUSLY selected month resolved after a
 // FASTER load for a NEWER selection, the stale result would silently overwrite the fresher
 // chip data. This test forces that exact ordering deterministically (rather than relying on
-// jsdom's incidental scheduling) by mocking `loadMonthPopulationFinal` to return a
-// per-month-controlled deferred promise, then resolving the newer month's promise BEFORE the
-// older month's — the precise inversion the `cancelled` flag guard exists to defend against.
+// jsdom's incidental scheduling) by mocking `loadMonthManifest` (the effect's lightweight data
+// source as of the §L fix below) to return a per-month-controlled deferred promise, then
+// resolving the newer month's promise BEFORE the older month's — the precise inversion the
+// `cancelled` flag guard exists to defend against. (Originally written against
+// `loadMonthPopulationFinal`, before §L replaced the effect's full-population read with a
+// manifest read — see the "lightweight manifest read" describe block further down.)
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { DirectoryHandleLike } from "../../../../data/storage/fileSystemAccess";
-import type { PopulationFinalData } from "../../../../data/population/monthTypes";
+import type { MonthManifestData, PopulationFinalData } from "../../../../data/population/monthTypes";
+import type { SampleMasterData } from "../../../../data/sampling/sampleTypes";
+import type { EmployeeAnswerFile } from "../../../../data/answers/answerTypes";
 import { createMemoryDirectory } from "../../../../data/storage/memoryDirectory";
 
 // Mutable module-level state so the test can flip the app-wide month selection mid-flight
@@ -128,6 +133,8 @@ vi.mock("../../../../data/workspace/useWorkspace", () => ({
 
 // Per-month controlled ("deferred") population loads — lets the test resolve the OLDER
 // month's promise strictly AFTER the newer one, forcing the exact race order under test.
+// Still used by loadExecInput's own (unchanged) loadMonthPopulationFinal call once the KPI
+// dashboard is opened — the meta effect itself no longer calls this (§L fix below).
 const deferreds = vi.hoisted(
   () =>
     new Map<
@@ -149,11 +156,72 @@ function deferredFor(month: string) {
   return entry;
 }
 
+// §L — the meta effect's lightweight data source. Same per-month deferred-promise
+// control as `deferredFor` above, but for `loadMonthManifest` (now what feeds the
+// population-count chip instead of the full population read).
+const manifestDeferreds = vi.hoisted(
+  () =>
+    new Map<
+      string,
+      { promise: Promise<MonthManifestData | null>; resolve: (v: MonthManifestData | null) => void }
+    >()
+);
+
+function deferredManifestFor(month: string) {
+  let entry = manifestDeferreds.get(month);
+  if (!entry) {
+    let resolve!: (v: MonthManifestData | null) => void;
+    const promise = new Promise<MonthManifestData | null>((res) => {
+      resolve = res;
+    });
+    entry = { promise, resolve };
+    manifestDeferreds.set(month, entry);
+  }
+  return entry;
+}
+
+// Hoisted spy handles for the two populationStorage functions the meta effect and
+// loadExecInput care about — kept as directly-assertable `vi.fn()`s (rather than
+// anonymous closures inline in the mock factory below) so tests can assert on
+// call presence/absence (§L: the meta effect must call loadMonthManifest but NOT
+// loadMonthPopulationFinal).
+const populationStorageSpies = vi.hoisted(() => ({
+  loadMonthPopulationFinal: vi.fn((_dir: unknown, month: string) => deferredFor(month).promise),
+  loadMonthManifest: vi.fn((_dir: unknown, month: string) => deferredManifestFor(month).promise),
+}));
+
 vi.mock("../../../../data/population/populationStorage", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../../data/population/populationStorage")>();
   return {
     ...actual,
-    loadMonthPopulationFinal: vi.fn((_dir: unknown, month: string) => deferredFor(month).promise),
+    loadMonthPopulationFinal: populationStorageSpies.loadMonthPopulationFinal,
+    loadMonthManifest: populationStorageSpies.loadMonthManifest,
+  };
+});
+
+// §L — loadSampleMaster / loadAllEmployeeFiles spies. Default to "no sample / no
+// employee data yet" (matching the real behavior against an empty memory
+// directory), so every pre-existing test's assumptions are unchanged. Only the
+// new "studied count from the KPI model" test below overrides these to exercise
+// a non-zero `kpis.studiedImages` through the real buildReportModel pipeline.
+const sampleAnswerSpies = vi.hoisted(() => ({
+  loadSampleMaster: vi.fn(async (_dir: unknown, _month: string): Promise<SampleMasterData | null> => null),
+  loadAllEmployeeFiles: vi.fn(async (_dir: unknown, _month: string): Promise<EmployeeAnswerFile[]> => []),
+}));
+
+vi.mock("../../../../data/sampling/sampleStorage", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../../data/sampling/sampleStorage")>();
+  return {
+    ...actual,
+    loadSampleMaster: sampleAnswerSpies.loadSampleMaster,
+  };
+});
+
+vi.mock("../../../../data/answers/answerStorage", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../../data/answers/answerStorage")>();
+  return {
+    ...actual,
+    loadAllEmployeeFiles: sampleAnswerSpies.loadAllEmployeeFiles,
   };
 });
 
@@ -175,12 +243,22 @@ import ReportsTab from "./index";
 afterEach(() => {
   cleanup();
   deferreds.clear();
+  manifestDeferreds.clear();
   globalMonthMock.state.selection = { kind: "existing", month: 4, year: 2026, folderName: "4-april-2026" };
   permissionsMock.state = { can: true, canMutate: true };
   pbiExportMock.impl.mockClear();
   authSessionMock.state.role = null;
   deckStyleChoicesMock.impl.mockClear();
   deckExportMock.impl.mockClear();
+  populationStorageSpies.loadMonthPopulationFinal.mockClear();
+  populationStorageSpies.loadMonthManifest.mockClear();
+  // Reset (not just clear) — a test may have overridden these with a persistent
+  // `.mockResolvedValue(...)`/`.mockImplementation(...)` (the studied-count test
+  // below); restore the "no sample / no employee data" default for every other test.
+  sampleAnswerSpies.loadSampleMaster.mockReset();
+  sampleAnswerSpies.loadSampleMaster.mockImplementation(async () => null);
+  sampleAnswerSpies.loadAllEmployeeFiles.mockReset();
+  sampleAnswerSpies.loadAllEmployeeFiles.mockImplementation(async () => []);
   delete (globalThis as { __testDir?: DirectoryHandleLike }).__testDir;
 });
 
@@ -196,13 +274,33 @@ function mockPop(rowCount: number): PopulationFinalData {
   };
 }
 
+// §L — the population-count chip now comes from the manifest's cheap
+// totalProcessedRows field instead of a full population.final.json read.
+function mockManifest(totalProcessedRows: number): MonthManifestData {
+  return {
+    monthFolderName: "x",
+    month: 1,
+    year: 2026,
+    processedAt: new Date().toISOString(),
+    processedBy: "tester",
+    riskFileName: null,
+    biFileName: null,
+    certScanUsed: false,
+    templateVersion: null,
+    rngSeed: null,
+    totalRawRows: totalProcessedRows,
+    totalProcessedRows,
+    status: "processed-saved",
+  };
+}
+
 describe("Reports month-summary chips — staleness guard (I-1)", () => {
   it("keeps the newer month's chip data even when the OLDER month's load resolves LATER", async () => {
     const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
     (globalThis as { __testDir?: DirectoryHandleLike }).__testDir = root;
 
     const { rerender } = render(<ReportsTab />);
-    // Mount starts a load for April; it is now suspended on deferredFor("4-april-2026").
+    // Mount starts a load for April; it is now suspended on deferredManifestFor("4-april-2026").
 
     // Flip the global-month selection to May and rerender — this runs the cleanup for
     // April's effect (cancelled = true in the fix) and starts a fresh load for May.
@@ -211,7 +309,7 @@ describe("Reports month-summary chips — staleness guard (I-1)", () => {
 
     // Resolve MAY (the current selection) FIRST.
     await act(async () => {
-      deferredFor("5-may-2026").resolve(mockPop(20));
+      deferredManifestFor("5-may-2026").resolve(mockManifest(20));
       await Promise.resolve();
     });
 
@@ -223,7 +321,7 @@ describe("Reports month-summary chips — staleness guard (I-1)", () => {
     // Without the cancelled-flag guard, this late completion would clobber the chip with
     // April's stale data.
     await act(async () => {
-      deferredFor("4-april-2026").resolve(mockPop(5));
+      deferredManifestFor("4-april-2026").resolve(mockManifest(5));
       await Promise.resolve();
       await Promise.resolve();
     });
@@ -231,6 +329,106 @@ describe("Reports month-summary chips — staleness guard (I-1)", () => {
     // The chip must still reflect May's data — April's late resolution must be a no-op.
     expect(screen.getByText("20 صورة")).toBeInTheDocument();
     expect(screen.queryByText("5 صورة")).not.toBeInTheDocument();
+  });
+});
+
+// §L — Fix: the month-meta effect stops loading the full population + every
+// employee's answer file just to populate the header chips (population count now
+// comes from the manifest's totalProcessedRows; studied count is backfilled from
+// the KPI dashboard's own model once it builds, instead of a dedicated
+// loadAllEmployeeFiles read).
+describe("Reports month-summary chips — lightweight manifest read, no employee-files read (§L)", () => {
+  it("uses loadMonthManifest (not loadMonthPopulationFinal/loadAllEmployeeFiles) for the population chip on landing", async () => {
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    (globalThis as { __testDir?: DirectoryHandleLike }).__testDir = root;
+
+    render(<ReportsTab />);
+
+    await act(async () => {
+      deferredManifestFor("4-april-2026").resolve(mockManifest(345));
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("345 صورة")).toBeInTheDocument();
+    });
+
+    expect(populationStorageSpies.loadMonthManifest).toHaveBeenCalledWith(root, "4-april-2026");
+    // The meta effect must not touch the heavy full-population or all-employee-files reads —
+    // those only happen once the "kpi" sub-tab (never opened in this test) builds its model.
+    expect(populationStorageSpies.loadMonthPopulationFinal).not.toHaveBeenCalled();
+    expect(sampleAnswerSpies.loadAllEmployeeFiles).not.toHaveBeenCalled();
+  });
+
+  it("shows the studied-count chip as '—' until the KPI dashboard builds its model, then reflects model.sample.studied", async () => {
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    (globalThis as { __testDir?: DirectoryHandleLike }).__testDir = root;
+
+    // A single population row that is both sampled and answered (submitted) —
+    // gives buildReportModel a deterministic, non-zero kpis.studiedImages to
+    // backfill the chip with, distinguishing "wired to the real model" from a
+    // coincidental zero.
+    const sampleFixture: SampleMasterData = {
+      rngSeed: "seed",
+      totalRequested: 1,
+      totalActual: 1,
+      certScanRequested: 0,
+      nonCertScanRequested: 1,
+      certScanActual: 0,
+      nonCertScanActual: 1,
+      portAllocations: [],
+      stageAllocations: [],
+      drawnAt: new Date().toISOString(),
+      drawnBy: "tester",
+      rows: mockPop(1).rows as unknown as SampleMasterData["rows"],
+    };
+    const employeeFilesFixture: EmployeeAnswerFile[] = [
+      {
+        username: "emp1",
+        monthFolderName: "4-april-2026",
+        items: [
+          {
+            xrayImageId: "img-0",
+            templateId: "t1",
+            templateVersion: 1,
+            answers: [],
+            lastSavedAt: new Date().toISOString(),
+            submittedAt: new Date().toISOString(),
+            answeredBy: "emp1",
+            status: "submitted",
+          },
+        ],
+      },
+    ];
+    sampleAnswerSpies.loadSampleMaster.mockResolvedValue(sampleFixture);
+    sampleAnswerSpies.loadAllEmployeeFiles.mockResolvedValue(employeeFilesFixture);
+
+    const { container } = render(<ReportsTab />);
+    const studiedChip = () => container.querySelector(".rh-chip-ans");
+
+    await act(async () => {
+      deferredManifestFor("4-april-2026").resolve(mockManifest(1));
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("1 صورة")).toBeInTheDocument();
+    });
+
+    // Before the KPI dashboard has ever built a model, the studied chip is a bare "—".
+    expect(studiedChip()?.textContent).toBe("—");
+
+    // Navigate to the KPI dashboard — this triggers the model-building effect, which
+    // needs loadMonthPopulationFinal (still deferred/controlled separately).
+    fireEvent.click(screen.getByRole("tab", { name: "مؤشرات" }));
+    await act(async () => {
+      deferredFor("4-april-2026").resolve(mockPop(1));
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(studiedChip()?.textContent).toBe("1 مدروسة");
+    });
   });
 });
 

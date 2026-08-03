@@ -6,7 +6,7 @@ import { AlertTriangle, BarChart2, BarChart3, Building2, Check, ClipboardList, D
 import type { SidebarTabModule } from "../tabTypes";
 import { loadOrDeriveDistributionCurrentForRead, loadDistributionCurrentRevision } from "../../../../data/distribution/distributionStorage";
 import { logRejection } from "../../../../data/storage/errorLogger";
-import { loadMonthPopulationFinal, loadMonthForEditing, loadMonthPopulationFinalRevision } from "../../../../data/population/populationStorage";
+import { loadMonthPopulationFinal, loadMonthForEditing, loadMonthPopulationFinalRevision, loadMonthManifest } from "../../../../data/population/populationStorage";
 import { useGlobalMonth } from "../../../../data/month/useGlobalMonth";
 import type { SourceRevisions } from "../../../../data/reporting/sourceRevisions";
 import { formatMonthFolderShortLabel } from "../../../../data/population/monthFolder";
@@ -196,7 +196,10 @@ function ReportsContent() {
     return () => window.removeEventListener("pop-set-subtab", handler as EventListener);
   }, []);
 
-  // Load lightweight meta for the month bar chips
+  // Load lightweight meta for the month bar chips (§L Tier 1/2: manifest
+  // instead of the full population, no employee-files read at all --
+  // studiedCount is sourced from the KPI model below once it's built,
+  // matching the pattern that model already uses to defer its own cost).
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- sync null-clear when workspace or month is deselected; synchronizes with external workspace state
     if (!directoryHandle || !selectedMonth) { setMonthMeta(null); return; }
@@ -204,27 +207,16 @@ function ReportsContent() {
     setMonthMeta(null);
     void (async () => {
       try {
-        const [pop, sample] = await Promise.all([
-          loadMonthPopulationFinal(directoryHandle, selectedMonth),
+        const [manifest, sample] = await Promise.all([
+          loadMonthManifest(directoryHandle, selectedMonth),
           loadSampleMaster(directoryHandle, selectedMonth),
         ]);
         if (cancelled) return;
-        const popRows = pop ? (pop.rows as unknown as PreparedPopulationRow[]) : [];
-        const employeeFiles = sample ? await loadAllEmployeeFiles(directoryHandle, selectedMonth) : [];
-        if (cancelled) return;
-        const submittedIds = new Set(
-          employeeFiles.flatMap((file) =>
-            file.items
-              .filter((item) => item.status === "submitted")
-              .map((item) => item.xrayImageId)
-          )
-        );
-        const answered = submittedIds.size;
         setMonthMeta({
           folderName: selectedMonth,
-          populationCount: popRows.length,
+          populationCount: manifest?.totalProcessedRows ?? null,
           sampleCount: sample ? sample.rows.length : null,
-          studiedCount: answered > 0 ? answered : null,
+          studiedCount: null,
         });
       } catch {
         if (!cancelled) {
@@ -290,7 +282,16 @@ function ReportsContent() {
         const execInput = await loadExecInput();
         if (cancelled) return;
         if (!execInput) { setModel(null); setModelError("no-population"); return; }
-        setModel(buildReportModel(execInput, buildDisplayNameMap()));
+        const builtModel = buildReportModel(execInput, buildDisplayNameMap());
+        setModel(builtModel);
+        // §L Tier 2: backfill the studied-count chip from the model we just
+        // built instead of a separate loadAllEmployeeFiles read -- only
+        // available once the KPI dashboard has actually been opened.
+        setMonthMeta((current) =>
+          current && current.folderName === selectedMonth
+            ? { ...current, studiedCount: builtModel.sample.studied }
+            : current
+        );
       } catch (err) {
         if (!cancelled) {
           setModel(null);
