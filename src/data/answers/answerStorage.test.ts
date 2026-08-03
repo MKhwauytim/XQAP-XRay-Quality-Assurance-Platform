@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import { createMemoryDirectory } from "../storage/memoryDirectory";
-import { loadEmployeeAnswers, setItemQualityNote, upsertItemAnswer } from "./answerStorage";
+import { loadEmployeeAnswers, loadAllEmployeeFiles, saveEmployeeAnswers, setItemQualityNote, upsertItemAnswer } from "./answerStorage";
 import type { ItemAnswer } from "./answerTypes";
 
 const MONTH = "5-may-2026";
@@ -88,5 +88,37 @@ describe("setItemQualityNote (P2-2)", () => {
     expect(file.referralRequests ?? []).toHaveLength(0);
     expect(file.replacementRequests ?? []).toHaveLength(0);
     expect(file.reopenRequests ?? []).toHaveLength(0);
+  });
+});
+
+describe("loadAllEmployeeFiles — concurrency-safe (Task 5)", () => {
+  test("reads all employee answer files under load, in parallel", async () => {
+    const root = createMemoryDirectory();
+    const month = "5-May-2026";
+    for (let i = 0; i < 15; i++) {
+      await saveEmployeeAnswers(root, month, `employee${i}`, []);
+    }
+    const files = await loadAllEmployeeFiles(root, month);
+    expect(files).toHaveLength(15);
+    expect(files.map((f) => f.username).sort()).toEqual(
+      Array.from({ length: 15 }, (_, i) => `employee${i}`).sort()
+    );
+  });
+
+  test("skips a corrupt employee file instead of throwing", async () => {
+    const root = createMemoryDirectory();
+    const month = "5-May-2026";
+    await saveEmployeeAnswers(root, month, "goodemployee", []);
+    const dir = await root.getDirectoryHandle("2-samples", { create: true })
+      .then((d) => d.getDirectoryHandle(month, { create: true }))
+      .then((d) => d.getDirectoryHandle("1-main", { create: true }))
+      .then((d) => d.getDirectoryHandle("employee-answers", { create: true }));
+    const handle = await dir.getFileHandle("bademployee.answers.json", { create: true });
+    const writable = await handle.createWritable!();
+    await writable.write("{not valid json");
+    await writable.close();
+
+    const files = await loadAllEmployeeFiles(root, month);
+    expect(files.map((f) => f.username)).toEqual(["goodemployee"]);
   });
 });

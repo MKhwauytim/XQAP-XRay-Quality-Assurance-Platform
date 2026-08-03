@@ -2,6 +2,7 @@ import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
 import { logError } from "../storage/errorLogger";
+import { readJsonDirectory } from "../storage/directoryScan";
 import { ensureMonthWritable } from "../population/monthLock";
 import type {
   EmployeeAnswerFile,
@@ -13,26 +14,6 @@ import type { ReferralRequest, ReopenRequest, ReplacementRequest } from "../refe
 import { getPopulationMonthDir, getSampleEmployeeDir, safeWorkspaceFilePart } from "../workspace/workspacePaths";
 
 const ANSWERS_FOLDER = "employee-answers";
-
-type DirectoryEntryLike = { name: string; kind: string };
-
-function getDirectoryEntries(dir: DirectoryHandleLike): AsyncIterable<DirectoryEntryLike> | null {
-  const d = dir as DirectoryHandleLike & {
-    values?: () => AsyncIterable<DirectoryEntryLike>;
-    entries?: () => AsyncIterable<[string, DirectoryEntryLike]>;
-    [Symbol.asyncIterator]?: () => AsyncIterator<DirectoryEntryLike>;
-  };
-  if (typeof d.values === "function") return d.values.call(d);
-  if (typeof d.entries === "function") {
-    return {
-      async *[Symbol.asyncIterator]() {
-        for await (const [, entry] of d.entries!.call(d)) yield entry;
-      },
-    };
-  }
-  if (typeof d[Symbol.asyncIterator] === "function") return d as AsyncIterable<DirectoryEntryLike>;
-  return null;
-}
 
 async function getAnswersDir(
   directoryHandle: DirectoryHandleLike,
@@ -342,15 +323,11 @@ export async function loadAllEmployeeFiles(
 ): Promise<EmployeeAnswerFile[]> {
   try {
     const dir = await getAnswersDir(directoryHandle, monthFolderName);
-    const results: EmployeeAnswerFile[] = [];
-    const iterable = getDirectoryEntries(dir);
-    if (!iterable) return results;
-    for await (const entry of iterable) {
-      if (entry.kind !== "file" || !entry.name.endsWith(".answers.json")) continue;
-      const r = await safeReadJson<EmployeeAnswerFile>(dir, entry.name);
-      if (r.ok) results.push(r.value);
-    }
-    return results;
+    const { values } = await readJsonDirectory<EmployeeAnswerFile>(dir, {
+      suffix: ".answers.json",
+      onUnreadable: "skip",
+    });
+    return values;
   } catch (err) {
     logError("answerStorage:loadAllEmployeeFiles", err instanceof Error ? err : new Error(String(err)));
     return [];
