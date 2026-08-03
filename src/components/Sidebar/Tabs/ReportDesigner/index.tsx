@@ -116,6 +116,7 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack, canEdit 
         clearTimeout(saveTimerRef.current);
       }
     };
+    // Deliberately does not null saveTimerRef.current after clearing -- the unmount-flush effect below relies on it staying non-null to distinguish "pending and cancelled by unmount" from "already fired."
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally scoped to `doc` only; `performSave` is recreated every render and adding it as a dep would restart the debounce timer on each render instead of only on doc changes
   }, [doc]);
 

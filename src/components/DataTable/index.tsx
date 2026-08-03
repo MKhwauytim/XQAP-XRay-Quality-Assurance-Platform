@@ -350,8 +350,11 @@ export default function DataTable<TRow>({
 
   // Flush the pending debounced column-config write on tab close/backgrounding
   // (registry-driven -- covers pagehide/visibilitychange, which unmount alone
-  // doesn't) and on unmount, so a resize/reorder made <800ms before either
-  // event isn't silently discarded.
+  // doesn't) and on unmount, so a debounce-routed change (reorder, show/hide,
+  // date-format, reset-to-default, or auto-fit) made <800ms before either
+  // event isn't silently discarded. Drag-resize is NOT covered by this --
+  // handleResizeMouseDown's onUp persists via onColConfigChange immediately
+  // on mouseup, bypassing the debounce entirely, so it was never at risk.
   useEffect(() => {
     const unregister = registerPendingSaveFlush(() => {
       if (colChangeDebouncerRef.current !== null && pendingColCfgRef.current !== null && onColConfigChangeRef.current) {
