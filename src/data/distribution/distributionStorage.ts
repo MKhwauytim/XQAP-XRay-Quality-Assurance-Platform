@@ -265,7 +265,7 @@ export async function appendDistributionEvent(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
   event: DistributionEvent
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<{ ok: true; log: DistributionLog } | { ok: false; error: string }> {
   return appendDistributionEvents(directoryHandle, monthFolderName, [event]);
 }
 
@@ -275,10 +275,12 @@ export async function appendDistributionEvents(
   monthFolderName: string,
   events: DistributionEvent[],
   options?: AppendDistributionEventsOptions
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<{ ok: true; log: DistributionLog } | { ok: false; error: string }> {
   // Month lock gate — before the CAS loop so a closed month rejects loudly.
   await ensureMonthWritable(directoryHandle, monthFolderName);
-  if (events.length === 0) return { ok: true };
+  if (events.length === 0) {
+    return { ok: true, log: await loadDistributionLog(directoryHandle, monthFolderName) };
+  }
   const ids = new Set<string>();
   for (const event of events) {
     if (ids.has(event.eventId)) {
@@ -299,7 +301,7 @@ export async function appendDistributionEvents(
   }
 
   options?.onProgress?.({ phase: "projection", completed: events.length, total: events.length });
-  const result = await casLoop<{ ok: true } | { ok: false; error: string }>(
+  const result = await casLoop<{ ok: true; log: DistributionLog } | { ok: false; error: string }>(
     async (writeToken) => {
       const dir = await getDistributionDir(directoryHandle, monthFolderName);
       const projectedIds = await readProjectedEventIds(dir);
@@ -320,7 +322,7 @@ export async function appendDistributionEvents(
       if (verify.revision === nextRevision && verify.writeToken === writeToken) {
         return {
           done: true,
-          result: { ok: true as const },
+          result: { ok: true as const, log: updated },
           // Delayed re-read guards against a concurrent machine that read the
           // same base revision and clobbered our commit after this read-back.
           verify: async () => {

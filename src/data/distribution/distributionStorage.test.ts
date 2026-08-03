@@ -103,7 +103,7 @@ describe("distributionStorage", () => {
       onProgress: (update) => progress.push(update),
     });
 
-    expect(result).toEqual({ ok: true });
+    expect(result.ok).toBe(true);
     expect(progress.filter((update) => update.phase === "events").map((update) => update.completed))
       .toEqual(Array.from({ length: 10 }, (_, index) => index));
     expect(progress.at(-1)).toEqual({ phase: "complete", completed: 9, total: 9 });
@@ -119,7 +119,7 @@ describe("distributionStorage", () => {
       appendDistributionEvent(root, month, first),
       appendDistributionEvent(root, month, second),
     ]);
-    expect(results).toEqual([{ ok: true }, { ok: true }]);
+    expect(results.map((r) => r.ok)).toEqual([true, true]);
     const log = await loadDistributionLog(root, month);
     expect(log.events.map((event) => event.eventId).sort()).toEqual([first.eventId, second.eventId].sort());
     expect(log.eventSetId).toMatch(/^2:/);
@@ -231,6 +231,22 @@ describe("distributionStorage", () => {
     expect(second.ok).toBe(true);
     full = await loadDistributionLog(root, month);
     expect(full.revision).toBe(2);
+  });
+
+  it("returns the up-to-date log on success, so callers don't need a fresh read (§U step 2)", async () => {
+    const root = await makeRoot();
+    const month = "5-May-2026";
+    const result = await appendDistributionEvent(
+      root,
+      month,
+      buildAssignEvent({ xrayImageId: "img-001", assignedTo: "alice", eventBy: "admin" })
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const freshRead = await loadDistributionLog(root, month);
+    expect(result.log.events).toEqual(freshRead.events);
+    expect(result.log.revision).toBe(freshRead.revision);
   });
 
   it("deriving against an empty row set drops every event (Tier-1 Item H regression)", async () => {
