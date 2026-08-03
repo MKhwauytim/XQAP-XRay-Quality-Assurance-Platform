@@ -4,7 +4,7 @@ import ReportDesignerTab from "../ReportDesigner";
 import { AlertTriangle, BarChart2, BarChart3, Building2, Check, ClipboardList, Database, Download, FileStack, FileText, Filter, FolderOpen, Globe, History, Presentation, Settings2, User, Users, X } from "lucide-react";
 
 import type { SidebarTabModule } from "../tabTypes";
-import { loadOrDeriveDistributionCurrent, loadDistributionCurrentRevision } from "../../../../data/distribution/distributionStorage";
+import { loadOrDeriveDistributionCurrentForRead, loadDistributionCurrentRevision } from "../../../../data/distribution/distributionStorage";
 import { logRejection } from "../../../../data/storage/errorLogger";
 import { loadMonthPopulationFinal, loadMonthForEditing, loadMonthPopulationFinalRevision } from "../../../../data/population/populationStorage";
 import { useGlobalMonth } from "../../../../data/month/useGlobalMonth";
@@ -254,7 +254,7 @@ function ReportsContent() {
       ? await loadTemplate(directoryHandle, templateSelection.templateId)
       : null;
     const distribution = sample
-      ? await loadOrDeriveDistributionCurrent(directoryHandle, selectedMonth, sample.rows)
+      ? await loadOrDeriveDistributionCurrentForRead(directoryHandle, selectedMonth, sample.rows)
       : null;
     // B2: cite the exact source-file revisions this report was built from.
     const sourceRevisions = collectRevisions([
@@ -407,7 +407,7 @@ function ReportsContent() {
         }
       } else if (type === "distribution" || type === "distribution-xlsx" || type === "distribution-deck") {
         const sample = await loadSampleMaster(directoryHandle, selectedMonth);
-        const data = sample ? await loadOrDeriveDistributionCurrent(directoryHandle, selectedMonth, sample.rows) : null;
+        const data = sample ? await loadOrDeriveDistributionCurrentForRead(directoryHandle, selectedMonth, sample.rows) : null;
         if (!data) { showToast("error", "لم يتم العثور على بيانات توزيع لهذا الشهر."); return; }
         const names = buildDisplayNameMap();
         const [distSampleRev, distCurrentRev] = await Promise.all([
