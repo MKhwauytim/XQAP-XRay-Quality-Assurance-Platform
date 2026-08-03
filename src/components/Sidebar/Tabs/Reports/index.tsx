@@ -928,7 +928,7 @@ function ReportsContent() {
         <div className="rh-month-chips">
           <span className="rh-chip rh-chip-pop">
             <Database size={12} />
-            {monthMeta ? `${fmtNum(monthMeta.populationCount)} صورة` : "—"}
+            {monthMeta?.populationCount != null ? `${fmtNum(monthMeta.populationCount)} صورة` : "—"}
           </span>
           <span className="rh-chip rh-chip-samp">
             <Filter size={12} />
