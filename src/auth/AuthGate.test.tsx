@@ -408,35 +408,83 @@ describe("AuthGate — usersHydrated render gate (P1 item 4)", () => {
 });
 
 describe("AuthGate — GlobalMonthProvider moved inside (P2 item 5)", () => {
-  it("does not list month folders before a session exists, and provides GlobalMonthContext once authenticated", async () => {
+  it("does not list month folders while a workspace is connected but no one has logged in yet, then lists them once login actually succeeds", async () => {
     const listMonthFoldersSpy = vi.spyOn(populationStorage, "listMonthFolders");
     listMonthFoldersSpy.mockResolvedValue([]);
 
-    const persistedSession: AuthSession = {
-      role: "employee",
-      username: NON_SEED_USERNAME,
-      loginAt: new Date().toISOString(),
-    };
-    vi.spyOn(authSession, "readRealSession").mockReturnValue(persistedSession);
-    mockReadyWorkspace("global-month-inside-authgate", [NON_SEED_USERNAME]);
+    // No persisted session -- this file's default beforeEach already sets
+    // this, but it's restated here because it's load-bearing for the
+    // scenario: the workspace below connects (auto-reconnect, independent of
+    // authentication) while `session` stays null, exactly like a real user
+    // sitting on the login screen with a previously-used workspace folder.
+    vi.spyOn(authSession, "readRealSession").mockReturnValue(null);
+
+    const password = "correct horse battery staple";
+    vi.spyOn(userManagement, "getManagedLoginUsers").mockReturnValue([
+      {
+        id: "u1",
+        username: NON_SEED_USERNAME,
+        displayName: "Ahmed Salem",
+        role: "employee",
+        passwordHash: { algorithm: "argon2id", encoded: "x" },
+        isActive: true,
+        hasCertScanLicense: false,
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+    ]);
+    vi.spyOn(passwordCrypto, "verifyPasswordHash").mockResolvedValue(true);
+
+    // The workspace reaches "ready" + hydrated on its own, with no session
+    // involved at all -- the exact pre-login condition the fix targets.
+    mockReadyWorkspace("global-month-pre-login-workspace", [NON_SEED_USERNAME]);
 
     function MonthConsumer() {
       const { months } = useGlobalMonth();
       return <div data-testid="month-count">{months.length}</div>;
     }
 
+    // AdminToolbar is stubbed file-wide (see the vi.mock at the top of this
+    // file), so this only proves the render-prop `children` path receives
+    // GlobalMonthContext -- the AdminToolbar -> GlobalMonthSelector path is
+    // presumed covered by GlobalMonthSelector's own dedicated tests.
     render(
       <WorkspaceProvider>
         <AuthGate>{() => <MonthConsumer />}</AuthGate>
       </WorkspaceProvider>,
     );
 
-    // At first paint (before the workspace even reaches "ready"), no session
-    // is authenticated from this component's own perspective as far as
-    // month-listing is concerned -- listMonthFolders must not have fired yet
-    // purely because a workspace happened to reconnect.
-    expect(listMonthFoldersSpy).not.toHaveBeenCalled();
+    // Login form showing confirms session is genuinely null at this point.
+    await waitFor(() => {
+      expect(screen.getByLabelText("اسم المستخدم")).toBeInTheDocument();
+    });
 
+    // Let the already-connected workspace fully settle to ready/hydrated
+    // while still logged out.
+    await waitFor(() => {
+      expect(mocks.loadWorkspaceFiles).toHaveBeenCalled();
+    });
+
+    // Still pre-login: GlobalMonthProvider isn't mounted anywhere in the
+    // tree yet (it now lives inside AuthGate's authenticated branch), so
+    // listMonthFolders must not have fired despite the workspace being
+    // fully connected.
+    expect(listMonthFoldersSpy).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("month-count")).not.toBeInTheDocument();
+
+    // Now actually log in through the real UI, the same way
+    // "AuthGate — login form" does.
+    fireEvent.change(screen.getByLabelText("اسم المستخدم"), {
+      target: { value: NON_SEED_USERNAME },
+    });
+    fireEvent.change(screen.getByLabelText("كلمة المرور"), {
+      target: { value: password },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "دخول" }));
+
+    // Once login succeeds, AuthGate mounts GlobalMonthProvider around the
+    // authenticated children, and it lists months for the workspace that
+    // was already sitting connected in the background.
     await waitFor(() => {
       expect(screen.getByTestId("month-count")).toBeInTheDocument();
     });
