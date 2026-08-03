@@ -36,4 +36,28 @@ describe("dataRefreshSignal", () => {
 
     expect(callback).not.toHaveBeenCalled();
   });
+
+  it("passes 'manual' as the default source when broadcastDataRefresh is called with no argument", () => {
+    const spy = vi.fn();
+    const unsubscribe = subscribeToDataRefresh(spy);
+    broadcastDataRefresh();
+    expect(spy).toHaveBeenCalledWith("manual");
+    unsubscribe();
+  });
+
+  it("passes the explicit source through to subscribers", () => {
+    const spy = vi.fn();
+    const unsubscribe = subscribeToDataRefresh(spy);
+    broadcastDataRefresh("periodic");
+    expect(spy).toHaveBeenCalledWith("periodic");
+    unsubscribe();
+  });
+
+  it("still supports zero-arg subscriber callbacks (existing consumers ignore the source)", () => {
+    const spy = vi.fn<() => void>();
+    const unsubscribe = subscribeToDataRefresh(spy);
+    broadcastDataRefresh("periodic");
+    expect(spy).toHaveBeenCalled();
+    unsubscribe();
+  });
 });

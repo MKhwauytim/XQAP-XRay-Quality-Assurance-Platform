@@ -97,7 +97,7 @@ export function AdminToolbar({
     if (refreshState === "running") return;
     setRefreshState("running");
     const ok = await refreshPermissions();
-    broadcastDataRefresh();
+    broadcastDataRefresh("manual");
     setRefreshState(ok ? "success" : "failed");
     if (refreshResetTimer.current !== null) window.clearTimeout(refreshResetTimer.current);
     refreshResetTimer.current = window.setTimeout(() => setRefreshState("idle"), 2000);

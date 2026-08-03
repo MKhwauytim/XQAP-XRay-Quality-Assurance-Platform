@@ -336,7 +336,7 @@ export default function AuthGate({ children }: AuthGateProps) {
     const AUTO_REFRESH_INTERVAL_MS = 5 * 60_000;
     const id = window.setInterval(() => {
       void refreshPermissions();
-      broadcastDataRefresh();
+      broadcastDataRefresh("periodic");
     }, AUTO_REFRESH_INTERVAL_MS);
 
     return () => window.clearInterval(id);

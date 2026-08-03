@@ -16,13 +16,30 @@
 
 const DATA_REFRESH_EVENT_NAME = "xray-data-refresh";
 
-export function broadcastDataRefresh(): void {
-  window.dispatchEvent(new Event(DATA_REFRESH_EVENT_NAME));
+/**
+ * "manual" -- the admin toolbar's explicit refresh button; an admin asked
+ * for a hard refresh, so subscribers may treat this as license to discard
+ * any local cache entirely.
+ * "periodic" -- the 5-minute auto-refresh timer; subscribers should re-read
+ * their own data, but a subscriber holding a cache with its own correct
+ * invalidation (e.g. the append-only directory cache) should NOT wholesale-
+ * reset on this source -- that would defeat the cache for no correctness
+ * benefit.
+ */
+export type DataRefreshSource = "manual" | "periodic";
+
+export function broadcastDataRefresh(source: DataRefreshSource = "manual"): void {
+  window.dispatchEvent(new CustomEvent<DataRefreshSource>(DATA_REFRESH_EVENT_NAME, { detail: source }));
 }
 
-export function subscribeToDataRefresh(callback: () => void): () => void {
-  window.addEventListener(DATA_REFRESH_EVENT_NAME, callback);
+export function subscribeToDataRefresh(
+  callback: (source: DataRefreshSource) => void
+): () => void {
+  const handler = (event: Event) => {
+    callback((event as CustomEvent<DataRefreshSource>).detail);
+  };
+  window.addEventListener(DATA_REFRESH_EVENT_NAME, handler);
   return () => {
-    window.removeEventListener(DATA_REFRESH_EVENT_NAME, callback);
+    window.removeEventListener(DATA_REFRESH_EVENT_NAME, handler);
   };
 }
