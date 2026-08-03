@@ -112,6 +112,49 @@ vi.mock("../../../../data/powerbiExport/exportManager", () => ({
   runPowerBiExport: () => pbiExportMock.impl(),
 }));
 
+// §N — the three report-builder modules index.tsx now dynamically `import()`s
+// per-branch (distribution/sample/executive document+xlsx+deck builders) are
+// mocked here so the lazy-import regression test below (and any future test
+// that clicks an export/generate button for these branches) never touches the
+// real report-building code or triggers a real download in jsdom. Follows the
+// same explicit-args wrapper shape as `deckExportMock` above.
+const distributionReportSpies = vi.hoisted(() => ({
+  buildDistributionXlsx: vi.fn((_data: unknown, _month: unknown, _names: unknown, _revisions: unknown) => undefined),
+  openDistributionDocument: vi.fn(async (_data: unknown, _month: unknown, _names: unknown, _revisions: unknown) => undefined),
+  openDistributionDeck: vi.fn(async (_data: unknown, _month: unknown, _names: unknown, _revisions: unknown) => undefined),
+}));
+
+vi.mock("../../../../data/reporting/distributionReport", () => ({
+  buildDistributionXlsx: (data: unknown, month: unknown, names: unknown, revisions: unknown) =>
+    distributionReportSpies.buildDistributionXlsx(data, month, names, revisions),
+  openDistributionDocument: (data: unknown, month: unknown, names: unknown, revisions: unknown) =>
+    distributionReportSpies.openDistributionDocument(data, month, names, revisions),
+  openDistributionDeck: (data: unknown, month: unknown, names: unknown, revisions: unknown) =>
+    distributionReportSpies.openDistributionDeck(data, month, names, revisions),
+}));
+
+const sampleReportSpies = vi.hoisted(() => ({
+  buildSampleXlsx: vi.fn((_input: unknown) => undefined),
+  openSampleReport: vi.fn(async (_input: unknown) => undefined),
+  openSampleDeck: vi.fn(async (_input: unknown) => undefined),
+}));
+
+vi.mock("../../../../data/reporting/sampleReport", () => ({
+  buildSampleXlsx: (input: unknown) => sampleReportSpies.buildSampleXlsx(input),
+  openSampleReport: (input: unknown) => sampleReportSpies.openSampleReport(input),
+  openSampleDeck: (input: unknown) => sampleReportSpies.openSampleDeck(input),
+}));
+
+const executiveReportSpies = vi.hoisted(() => ({
+  openExecutiveReport: vi.fn(async (_execInput: unknown, _names: unknown) => undefined),
+  buildExecutiveXlsx: vi.fn((_execInput: unknown, _names: unknown) => undefined),
+}));
+
+vi.mock("../../../../data/reporting/executiveReport", () => ({
+  openExecutiveReport: (execInput: unknown, names: unknown) => executiveReportSpies.openExecutiveReport(execInput, names),
+  buildExecutiveXlsx: (execInput: unknown, names: unknown) => executiveReportSpies.buildExecutiveXlsx(execInput, names),
+}));
+
 vi.mock("../../../../data/month/useGlobalMonth", () => ({
   useGlobalMonth: () => ({
     months: [
@@ -250,6 +293,14 @@ afterEach(() => {
   authSessionMock.state.role = null;
   deckStyleChoicesMock.impl.mockClear();
   deckExportMock.impl.mockClear();
+  distributionReportSpies.buildDistributionXlsx.mockClear();
+  distributionReportSpies.openDistributionDocument.mockClear();
+  distributionReportSpies.openDistributionDeck.mockClear();
+  sampleReportSpies.buildSampleXlsx.mockClear();
+  sampleReportSpies.openSampleReport.mockClear();
+  sampleReportSpies.openSampleDeck.mockClear();
+  executiveReportSpies.openExecutiveReport.mockClear();
+  executiveReportSpies.buildExecutiveXlsx.mockClear();
   populationStorageSpies.loadMonthPopulationFinal.mockClear();
   populationStorageSpies.loadMonthManifest.mockClear();
   // Reset (not just clear) — a test may have overridden these with a persistent
@@ -889,5 +940,31 @@ describe("Reports sub-tab mount preservation (§T)", () => {
     reportDesignerMountCount.count = 0;
     render(<ReportsTab />);
     expect(screen.queryByTestId("report-designer-stub")).not.toBeInTheDocument();
+  });
+});
+
+describe("Reports — lazy report-builder imports (§N)", () => {
+  it("does not evaluate the report-builder modules just from rendering the tab", async () => {
+    // Each of these 7 modules is dynamically imported only inside a click
+    // handler after this fix -- render alone must not trigger their
+    // top-level module code. We assert on a Vitest module-mock call marker
+    // rather than bundle inspection, since this is a unit-test-level proxy
+    // for "not statically imported" (a true startup-eval measurement needs
+    // a real build + DevTools profile, out of scope for a unit test).
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    (globalThis as { __testDir?: DirectoryHandleLike }).__testDir = root;
+
+    render(<ReportsTab />);
+
+    await act(async () => {
+      deferredManifestFor("4-april-2026").resolve(mockManifest(1));
+      await Promise.resolve();
+    });
+
+    // None of the 7 builder modules' mocked factory functions should have
+    // been touched yet -- only rendering happened, no export was clicked.
+    expect(distributionReportSpies.buildDistributionXlsx).not.toHaveBeenCalled();
+    expect(sampleReportSpies.buildSampleXlsx).not.toHaveBeenCalled();
+    expect(executiveReportSpies.openExecutiveReport).not.toHaveBeenCalled();
   });
 });

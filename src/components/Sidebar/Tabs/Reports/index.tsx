@@ -11,13 +11,6 @@ import { useGlobalMonth } from "../../../../data/month/useGlobalMonth";
 import type { SourceRevisions } from "../../../../data/reporting/sourceRevisions";
 import { formatMonthFolderShortLabel } from "../../../../data/population/monthFolder";
 import type { PreparedPopulationRow } from "../../../../data/population/populationTypes";
-import { buildDistributionXlsx, openDistributionDocument, openDistributionDeck } from "../../../../data/reporting/distributionReport";
-import { buildSampleXlsx, openSampleReport, openSampleDeck } from "../../../../data/reporting/sampleReport";
-import { openExecutiveReport, buildExecutiveXlsx } from "../../../../data/reporting/executiveReport";
-import { openExecutiveDeckV2 } from "../../../../data/reporting/executive/deck2";
-import { openManagementReport } from "../../../../data/reporting/management/managementReport";
-import { openManagementDeck } from "../../../../data/reporting/management/managementDeck";
-import { buildManagementWorkbook } from "../../../../data/reporting/management/managementWorkbook";
 import { useLabels } from "../../../../data/labels/useLabels";
 import { buildReportModel } from "../../../../data/reporting/executive/model/reportModel";
 import type { ReportModel } from "../../../../data/reporting/executive/model/reportModel";
@@ -37,7 +30,6 @@ import { useWorkspace } from "../../../../data/workspace/useWorkspace";
 import { readSession } from "../../../../auth/authSession";
 import { loadDeckStyleChoices } from "../../../../data/reporting/executive/deck2/styleChoices";
 import DeckDesignCustomizer from "./DeckDesignCustomizer";
-import { runPowerBiExport } from "../../../../data/powerbiExport/exportManager";
 import type { ExportManifest } from "../../../../data/powerbiExport/exportTypes";
 import "./Reports.css";
 
@@ -346,13 +338,16 @@ function ReportsContent() {
       if (!execInput) { showToast("error", "لم يتم العثور على بيانات المجتمع. يجب معالجة المجتمع أولاً."); return; }
       const names = buildDisplayNameMap();
       if (kind === "document") {
+        const { openExecutiveReport } = await import("../../../../data/reporting/executiveReport");
         await openExecutiveReport(execInput, names);
         showToast("ok", "تم فتح التقرير التفصيلي.");
       } else if (kind === "deck") {
         const saved = directoryHandle ? await loadDeckStyleChoices(directoryHandle) : null;
+        const { openExecutiveDeckV2 } = await import("../../../../data/reporting/executive/deck2");
         await openExecutiveDeckV2(execInput, names, saved?.choices);
         showToast("ok", "تم فتح العرض التنفيذي.");
       } else {
+        const { buildExecutiveXlsx } = await import("../../../../data/reporting/executiveReport");
         buildExecutiveXlsx(execInput, names);
         showToast("ok", "تم تنزيل بيانات التقرير (Excel).");
       }
@@ -385,6 +380,7 @@ function ReportsContent() {
     setPbiResult(null);
     setPbiError(null);
     try {
+      const { runPowerBiExport } = await import("../../../../data/powerbiExport/exportManager");
       const manifest = await runPowerBiExport(directoryHandle, selectedMonth);
       setPbiResult(manifest);
     } catch (err) {
@@ -420,12 +416,15 @@ function ReportsContent() {
           ]),
         };
         if (type === "sample-xlsx") {
+          const { buildSampleXlsx } = await import("../../../../data/reporting/sampleReport");
           buildSampleXlsx(sampleInput);
           showToast("ok", "تم تنزيل ملف Excel.");
         } else if (type === "sample-deck") {
+          const { openSampleDeck } = await import("../../../../data/reporting/sampleReport");
           await openSampleDeck(sampleInput);
           showToast("ok", "تم فتح عرض العينة. استخدم أمر الطباعة للحفظ بصيغة PDF.");
         } else {
+          const { openSampleReport } = await import("../../../../data/reporting/sampleReport");
           await openSampleReport(sampleInput);
           showToast("ok", "تم فتح تقرير العينة التفصيلي. استخدم أمر الطباعة للحفظ بصيغة PDF.");
         }
@@ -443,12 +442,15 @@ function ReportsContent() {
           ["distribution.current.json", distCurrentRev],
         ]);
         if (type === "distribution-xlsx") {
+          const { buildDistributionXlsx } = await import("../../../../data/reporting/distributionReport");
           buildDistributionXlsx(data, selectedMonth, names, distRevisions);
           showToast("ok", "تم تنزيل ملف Excel.");
         } else if (type === "distribution-deck") {
+          const { openDistributionDeck } = await import("../../../../data/reporting/distributionReport");
           await openDistributionDeck(data, selectedMonth, names, distRevisions);
           showToast("ok", "تم فتح عرض التوزيع. استخدم أمر الطباعة للحفظ بصيغة PDF.");
         } else {
+          const { openDistributionDocument } = await import("../../../../data/reporting/distributionReport");
           await openDistributionDocument(data, selectedMonth, names, distRevisions);
           showToast("ok", "تم فتح تقرير التوزيع التفصيلي. استخدم أمر الطباعة للحفظ بصيغة PDF.");
         }
@@ -457,13 +459,16 @@ function ReportsContent() {
         if (!execInput) { showToast("error", "لم يتم العثور على بيانات المجتمع. يجب معالجة المجتمع أولاً."); return; }
         const names = buildDisplayNameMap();
         if (type === "executive-xlsx") {
+          const { buildExecutiveXlsx } = await import("../../../../data/reporting/executiveReport");
           buildExecutiveXlsx(execInput, names);
           showToast("ok", "تم تنزيل ملف بيانات التقرير (Excel).");
         } else if (type === "executive-deck") {
           const saved = directoryHandle ? await loadDeckStyleChoices(directoryHandle) : null;
+          const { openExecutiveDeckV2 } = await import("../../../../data/reporting/executive/deck2");
           await openExecutiveDeckV2(execInput, names, saved?.choices);
           showToast("ok", "تم فتح العرض التنفيذي. استخدم أمر الطباعة للحفظ بصيغة PDF.");
         } else {
+          const { openExecutiveReport } = await import("../../../../data/reporting/executiveReport");
           await openExecutiveReport(execInput, names);
           showToast("ok", "تم فتح التقرير التفصيلي. استخدم أمر الطباعة للحفظ بصيغة PDF.");
         }
@@ -472,12 +477,15 @@ function ReportsContent() {
         if (!execInput) { showToast("error", labels.mgmt_card_toast_no_population); return; }
         const names = buildDisplayNameMap();
         if (type === "management-xlsx") {
+          const { buildManagementWorkbook } = await import("../../../../data/reporting/management/managementWorkbook");
           buildManagementWorkbook(execInput, names);
           showToast("ok", "تم تنزيل ملف بيانات الإدارة (Excel).");
         } else if (type === "management-deck") {
+          const { openManagementDeck } = await import("../../../../data/reporting/management/managementDeck");
           await openManagementDeck(execInput, names);
           showToast("ok", "تم فتح عرض الإدارة. استخدم أمر الطباعة للحفظ بصيغة PDF.");
         } else {
+          const { openManagementReport } = await import("../../../../data/reporting/management/managementReport");
           openManagementReport(execInput, names);
           showToast("ok", labels.mgmt_card_toast_opened);
         }
