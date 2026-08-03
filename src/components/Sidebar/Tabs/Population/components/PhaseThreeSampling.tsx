@@ -5,11 +5,10 @@ import type { PopulationConfig, StageSamplingRule } from "../../../../../data/po
 import { formatNumber, getStageKey } from "./helpers";
 import SummaryCard from "./SummaryCard";
 import { useState } from "react";
-import { AlertTriangle, CheckCircle2, Info, Lock, ShieldCheck, Unlock } from "lucide-react";
+import { AlertTriangle, Info, Lock, Unlock } from "lucide-react";
 import { usePermissions } from "../../../../../auth/usePermissions";
 import { getLabels } from "../../../../../data/labels/labelsStore";
 import { formatMonthFolderShortLabel } from "../../../../../data/population/monthFolder";
-import { evaluateApprovalEligibility, isSelfApproval } from "../../../../../data/sampling/sampleApprovalRules";
 
 type SaveMessage = { type: "ok" | "error"; text: string } | null;
 
@@ -23,8 +22,6 @@ type PhaseThreeSamplingProps = {
   userRole: string;
   currentUsername: string;
   priorMonthAdvisory: SamplingPlanPriorMonthAdvisory | null;
-  sampleNeedsApproval: boolean;
-  isApprovingSample: boolean;
   /** B13: gates the "سحب العينات وحفظها" (draw sample) button — already combines
    *  permission + closed-month + in-flight-month-load in index.tsx, matching the
    *  canDrawSample used by its own handler-side check (handleDrawSample). */
@@ -39,7 +36,6 @@ type PhaseThreeSamplingProps = {
    * input just silently reverted to its previous value on the next render.
    */
   processingMessage: string;
-  onApproveSample: () => void;
   onConfigChange: (config: PopulationConfig) => void;
   onSampleSeedChange: (seed: string) => void;
   onDrawSample: () => void;
@@ -89,107 +85,6 @@ function SwitchingAdvisory({ advisory }: { advisory: SamplingPlanPriorMonthAdvis
   );
 }
 
-/** B1: four-eyes approval panel — shown after a sample is drawn. */
-function SampleApprovalPanel({
-  sample,
-  userRole,
-  currentUsername,
-  needsApproval,
-  isApproving,
-  onApprove,
-}: {
-  sample: SampleMasterData;
-  userRole: string;
-  currentUsername: string;
-  needsApproval: boolean;
-  isApproving: boolean;
-  onApprove: () => void;
-}) {
-  const L = getLabels();
-  const isSelf = isSelfApproval(currentUsername, sample.drawnBy);
-  const eligibility = evaluateApprovalEligibility(userRole, currentUsername, sample.drawnBy);
-  const canApproveNow = eligibility.allowed;
-  const canApproveRole = eligibility.allowed || eligibility.reason === "self-approval-blocked";
-
-  if (sample.approval) {
-    const a = sample.approval;
-    return (
-      <div className="sample-approval-panel approved" role="status" style={approvalBoxStyle("#059669")}>
-        <div style={approvalTitleStyle}>
-          <ShieldCheck size={16} aria-hidden /> {L.sample_approval_section_title}
-        </div>
-        <p style={{ margin: "6px 0 0", display: "flex", alignItems: "center", gap: 6 }}>
-          <CheckCircle2 size={15} style={{ color: "#059669" }} aria-hidden />
-          {fillTemplate(L.sample_approval_state, {
-            user: a.approvedBy,
-            role: a.role,
-            date: new Date(a.approvedAt).toLocaleString("ar-SA-u-nu-latn"),
-          })}
-        </p>
-        {a.note ? (
-          <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--p-muted)" }}>
-            {L.sample_approval_note_label}: {a.note}
-          </p>
-        ) : null}
-      </div>
-    );
-  }
-
-  // No approval recorded. If this is a legacy/previous-session sample (needsApproval
-  // false) show the legacy note; otherwise show the pending-approval gate + action.
-  if (!needsApproval) {
-    return (
-      <div className="sample-approval-panel legacy" role="status" style={approvalBoxStyle("#64748b")}>
-        <div style={approvalTitleStyle}>
-          <ShieldCheck size={16} aria-hidden /> {L.sample_approval_section_title}
-        </div>
-        <p style={{ margin: "6px 0 0", fontSize: 13, color: "var(--p-muted)" }}>
-          {L.sample_approval_legacy_note}
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="sample-approval-panel pending" role="status" style={approvalBoxStyle("#d97706")}>
-      <div style={approvalTitleStyle}>
-        <AlertTriangle size={16} aria-hidden /> {L.sample_approval_section_title}
-      </div>
-      <p style={{ margin: "6px 0 0" }}>{L.sample_approval_intro}</p>
-      <p style={{ margin: "4px 0 8px", fontWeight: 700, color: "#b45309" }}>
-        {L.sample_approval_pending}
-      </p>
-      <button
-        type="button"
-        className="primary-action"
-        onClick={onApprove}
-        disabled={isApproving || !canApproveNow}
-        title={!canApproveNow
-          ? (isSelf ? L.sample_approve_self_blocked : L.sample_approve_no_permission)
-          : ""}
-      >
-        {isApproving ? L.sample_approving : L.sample_approve_btn}
-      </button>
-      {!canApproveNow ? (
-        <p style={{ margin: "6px 0 0", fontSize: 12, color: "#b45309" }}>
-          {isSelf && canApproveRole ? L.sample_approve_self_blocked : L.sample_approve_no_permission}
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
-const approvalTitleStyle = { display: "flex", alignItems: "center", gap: 8, fontWeight: 700 } as const;
-function approvalBoxStyle(color: string) {
-  return {
-    margin: "14px 0",
-    padding: "12px 16px",
-    borderRadius: 10,
-    border: `1px solid ${color}`,
-    background: `${color}14`,
-  } as const;
-}
-
 const STAGE_LABELS: Record<string, string> = {
   first:  "المستوى الأول",
   second: "المستوى الثاني",
@@ -204,15 +99,10 @@ export default function PhaseThreeSampling({
   sampleDrawResult,
   sampleSaveMessage,
   config,
-  userRole,
-  currentUsername,
   priorMonthAdvisory,
-  sampleNeedsApproval,
-  isApprovingSample,
   canDrawSample,
   canConfigureSample,
   processingMessage,
-  onApproveSample,
   onConfigChange,
   onSampleSeedChange,
   onDrawSample
@@ -426,7 +316,13 @@ export default function PhaseThreeSampling({
             type="button"
             className="primary-action"
             onClick={onDrawSample}
-            disabled={isDrawingSample || populationRows.length === 0 || !canDrawSample}
+            // Not gated on populationRows.length === 0: under Phase A demand-gated loading,
+            // an empty array here can mean "genuinely no population" OR "not loaded in this
+            // view's scope yet" (see index.tsx's ensurePopulationLoaded) -- those look
+            // identical from this component's props alone. onDrawSample's own handler
+            // resolves the ambiguity (fetching on demand) and surfaces the same Arabic
+            // error message this button used to pre-empt if population turns out missing.
+            disabled={isDrawingSample || !canDrawSample}
             title={!canDrawSample ? "لا تملك صلاحية سحب العينة، أو أن الشهر مغلق، أو أن بيانات الشهر قيد التحميل." : undefined}
           >
             {isDrawingSample ? "جاري سحب العينات..." : "سحب العينات وحفظها"}
@@ -448,17 +344,6 @@ export default function PhaseThreeSampling({
           </div>
         )}
       </div>
-
-      {sampleDrawResult && (
-        <SampleApprovalPanel
-          sample={sampleDrawResult}
-          userRole={userRole}
-          currentUsername={currentUsername}
-          needsApproval={sampleNeedsApproval}
-          isApproving={isApprovingSample}
-          onApprove={onApproveSample}
-        />
-      )}
 
       {sampleDrawResult && <SampleResultReport data={sampleDrawResult} />}
     </section>

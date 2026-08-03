@@ -27,39 +27,17 @@ import {
   updateMonthStatus,
 } from "../../../../data/population/populationStorage";
 import {
-  appendDistributionEvent,
-  appendDistributionEvents,
   loadDistributionLog,
   loadOrDeriveDistributionCurrent,
-  saveDistributionCurrent,
-  type DistributionWriteProgress,
 } from "../../../../data/distribution/distributionStorage";
 import { loadAllEmployeeFiles } from "../../../../data/answers/answerStorage";
 import { scanReferentialIntegrity, type OrphanScanResult } from "../../../../data/integrity/orphanScan";
-import {
-  buildAssignEvent,
-  buildCompletedEvent,
-  buildReassignEvent,
-  buildReplacementRequestedEvent,
-  deriveCurrentDistribution
-} from "../../../../data/distribution/distributionLog";
-import type {
-  DistributionCurrentData,
-  DistributionEvent
-} from "../../../../data/distribution/distributionTypes";
 import { drawSample } from "../../../../data/sampling/sampleAlgorithm";
-import { approveSampleMaster, loadSampleMaster, saveSampleMaster } from "../../../../data/sampling/sampleStorage";
+import { loadSampleMaster, saveSampleMaster } from "../../../../data/sampling/sampleStorage";
 import { buildSamplingPlan, saveSamplingPlan } from "../../../../data/sampling/samplingPlanStorage";
 import type { SamplingPlanPriorMonthAdvisory } from "../../../../data/sampling/samplingPlanStorage";
 import { loadPriorMonthAdvisory } from "../../../../data/sampling/switchingRuleAdvisory";
-import {
-  evaluateApprovalEligibility,
-  buildSampleApproval,
-  isDistributionAllowed,
-  sampleRequiresApproval,
-} from "../../../../data/sampling/sampleApprovalRules";
 import type { SampleMasterData } from "../../../../data/sampling/sampleTypes";
-import { writeEmployeeXlsx } from "../../../../data/answers/employeeXlsx";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
 import { useGlobalMonth } from "../../../../data/month/useGlobalMonth";
 
@@ -97,14 +75,15 @@ import "./Population.css";
 import { ConfirmDialog } from "../../../../components/ConfirmDialog/ConfirmDialog";
 import BrowseDataView from "./BrowseDataView";
 import {
-  buildAssignedEntryMap,
-  buildLoadedMonthState,
-  distributionErrorText,
+  computeMonthLoadScope,
   isSupportedExcelFile,
   PHASES,
+  reconstructedPopulation,
   sourceFileMetadata,
   stableHash
 } from "./populationWorkflowHelpers";
+import { useMonthLoad, type LoadedMonthState } from "./useMonthLoad";
+import { useDistributionActions } from "./useDistributionActions";
 import {
   PopulationHeader,
   PopulationPhaseFooter,
@@ -133,24 +112,6 @@ export const tabConfig: SidebarTabModule["tabConfig"] = {
 };
 
 type SaveMessage = { type: "ok" | "error"; text: string } | null;
-type DistributionProgressState = { percent: number; message: string } | null;
-
-function distributionProgressFromWrite(progress: DistributionWriteProgress): Exclude<DistributionProgressState, null> {
-  if (progress.phase === "events") {
-    const ratio = progress.total === 0 ? 1 : progress.completed / progress.total;
-    return {
-      percent: 5 + Math.round(ratio * 65),
-      message: `جارٍ حفظ التعيينات (${progress.completed.toLocaleString("ar-SA")} من ${progress.total.toLocaleString("ar-SA")})...`,
-    };
-  }
-  if (progress.phase === "projection") {
-    return { percent: 74, message: "جارٍ تحديث سجل التوزيع المجمع..." };
-  }
-  if (progress.phase === "verification") {
-    return { percent: 82, message: "جارٍ التحقق من سلامة الحفظ..." };
-  }
-  return { percent: 86, message: "تم حفظ التعيينات، جارٍ تحديث حالة الشهر..." };
-}
 
 type SubTab = "process" | "browse";
 
@@ -223,7 +184,25 @@ export default function PopulationTab() {
   // window the in-memory population/sample/distribution still belong to the
   // PREVIOUS month while saveMonth/saveYear already point at the new one, so
   // every mutating capability is withdrawn until the load resolves (CRITICAL 1).
-  const [isLoadingMonthData, setIsLoadingMonthData] = useState(false);
+  // Owned by useMonthLoad (extracted for check:complexity's max-lines-per-function
+  // budget); applyLoadedState/resetWizardState below still own every OTHER field.
+  const { isLoadingMonthData, hasUnsavedSessionWorkRef } = useMonthLoad({
+    directoryHandle,
+    globalMonth,
+    registerMonthChangeGuard,
+    // population/raw (each up to ~400k rows) are gated by sub-tab + the viewer's
+    // OWN capability -- not computeWizardCapabilities' gated values below (circular
+    // here, and those gates are about WRITE capability, not read/display need).
+    computeScope: () =>
+      computeMonthLoadScope({
+        activeSubTab,
+        canDrawSample: canMutate("draw-sample"),
+        canProcessPopulation: canMutate("process-population"),
+      }),
+    applyLoadedState,
+    resetWizardState,
+    onLoadError: (message) => setProcessingMessage(message),
+  });
   const { canUploadData, canProcessPopulation, canConfigureSample, canDrawSample, canDistributeSamples, canBulkAssign, canViewBrowse, canExportReports, canUploadNow, canProcessNow, canExportNow } = computeWizardCapabilities(can, canMutate, selectedMonthClosed, isLoadingMonthData);
   const [config, setConfig] = useState<PopulationConfig>(DEFAULT_POPULATION_CONFIG);
   const [settingsModalMode, setSettingsModalMode] = useState<"mapping" | "processing" | null>(null);
@@ -271,59 +250,34 @@ export default function PopulationTab() {
     const handler = (e: CustomEvent<MonthFolderInfo>) => {
       setActiveSubTab("process");
       window.dispatchEvent(new CustomEvent("pop-subtab-changed", { detail: "process" }));
-      // The auto-load effect reacts to the selection change (guard included).
+      // useMonthLoad's auto-load effect reacts to the selection change (guard included).
       setGlobalMonth(e.detail.folderName);
     };
     window.addEventListener("pop-load-month", handler as EventListener);
     return () => window.removeEventListener("pop-load-month", handler as EventListener);
   }, [setGlobalMonth]);
 
-  async function handleLoadExistingMonth(info: MonthFolderInfo, token: number): Promise<void> {
-    if (!directoryHandle) return;
-    setIsLoadingMonthData(true);
-    try {
-      hasUnsavedSessionWorkRef.current = false;
-      const data = await loadMonthForEditing(directoryHandle, info.folderName);
-      if (token !== loadMonthTokenRef.current) return; // superseded by a newer month selection
-      const loaded = buildLoadedMonthState(data);
-      setRiskWorkbookResult(loaded.riskWorkbook);
-      setBiWorkbookResult(loaded.biWorkbook);
-      setPopulationProcessingResult(loaded.population);
-      setSampleDrawResult(loaded.sample);
-      // Loaded from disk → not a this-session draw, so the four-eyes gate treats it
-      // as approved-by-legacy (B1) and does not block distribution of existing months.
-      setSampleNeedsApproval(false);
-      setDistributionCurrent(loaded.distribution);
+  /** useMonthLoad's success path: apply a freshly loaded month's data. */
+  function applyLoadedState(loaded: LoadedMonthState): void {
+    setRiskWorkbookResult(loaded.riskWorkbook);
+    setBiWorkbookResult(loaded.biWorkbook);
+    setPopulationProcessingResult(loaded.population);
+    setSampleDrawResult(loaded.sample);
+    setDistributionCurrent(loaded.distribution);
 
-      if (loaded.phase) {
-        setCurrentPhase(loaded.phase.current);
-        setCompletedPhaseIds(loaded.phase.completed);
-      }
-    } finally {
-      if (token === loadMonthTokenRef.current) setIsLoadingMonthData(false);
+    if (loaded.phase) {
+      setCurrentPhase(loaded.phase.current);
+      setCompletedPhaseIds(loaded.phase.completed);
     }
   }
 
-  // Unsaved in-session work (parsed uploads not yet auto-saved) — switching the
-  // global month would discard it, so the provider asks for confirmation first.
-  const hasUnsavedSessionWorkRef = useRef(false);
-  useEffect(
-    () =>
-      registerMonthChangeGuard(() =>
-        hasUnsavedSessionWorkRef.current ? getLabels().gm_month_switch_confirm : null
-      ),
-    [registerMonthChangeGuard]
-  );
-
-  /** Clean Phase-1 state targeting the (pending) global month. */
-  function resetForNewMonth(): void {
-    hasUnsavedSessionWorkRef.current = false;
-    // Clear unconditionally: a stale existing-month load may still be
-    // in-flight (its token already invalidated by the caller), in which case
-    // its own `finally` will skip clearing this flag once it resolves — so a
-    // clean new-month state must clear it here itself, or the wizard would be
-    // stuck permanently "loading" (CRITICAL — I-2 follow-up regression).
-    setIsLoadingMonthData(false);
+  /**
+   * Clean Phase-1 state targeting the (pending) global month, or a failed
+   * existing-month load's fallback. Called by useMonthLoad, which separately
+   * owns (and unconditionally clears, per the CRITICAL I-2 follow-up) the
+   * isLoadingMonthData/hasUnsavedSessionWorkRef fields it keeps to itself.
+   */
+  function resetWizardState(): void {
     setUploads({
       riskAgencyData: { file: null, source: null },
       businessIntelligenceData: { file: null, source: null },
@@ -332,7 +286,6 @@ export default function PopulationTab() {
     setBiWorkbookResult(null);
     setPopulationProcessingResult(null);
     setSampleDrawResult(null);
-    setSampleNeedsApproval(false);
     setDistributionCurrent(null);
     setSaveToDiskMessage(null);
     setSampleSaveMessage(null);
@@ -344,41 +297,24 @@ export default function PopulationTab() {
     setPendingReprocessSave(null);
   }
 
-  // The global month IS the wizard's month: selecting an existing month loads it
-  // from disk; selecting a pending (new) month resets to a clean import flow.
-  const loadMonthTokenRef = useRef(0);
-  const loadedFolderRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!directoryHandle || globalMonth.kind === "none") return;
-    if (loadedFolderRef.current === globalMonth.folderName) return;
-    loadedFolderRef.current = globalMonth.folderName;
-    if (globalMonth.kind === "existing") {
-      const targetFolder = globalMonth.folderName;
-      const token = ++loadMonthTokenRef.current;
-      void handleLoadExistingMonth({
-        month: globalMonth.month,
-        year: globalMonth.year,
-        folderName: globalMonth.folderName,
-      }, token).catch((error) => {
-        // Guarded on the token so a STALE (superseded) rejection can never
-        // wipe a newer load's already-committed, successful data.
-        if (token !== loadMonthTokenRef.current) return;
-        // A rejected load leaves the previous month's data under this month's
-        // header. Reset to a clean empty state, surface the failure, and clear
-        // the stamp so re-selecting the same month retries the load (CRITICAL 1b).
-        logError("population:auto-load-month", error);
-        resetForNewMonth();
-        setProcessingMessage("تعذر تحميل بيانات الشهر — أعد المحاولة");
-        if (loadedFolderRef.current === targetFolder) loadedFolderRef.current = null;
-      });
-    } else {
-      // Invalidate any in-flight existing-month load so it can never resolve
-      // later and commit its stale data over this clean new-month reset.
-      ++loadMonthTokenRef.current;
-      resetForNewMonth();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- handleLoadExistingMonth/resetForNewMonth are stable per render cycle; keying on folderName prevents load loops
-  }, [directoryHandle, globalMonth]);
+  // Lazy top-up for the one field computeMonthLoadScope may have deferred. Returns
+  // the already-loaded result if present; otherwise fetches population + summary
+  // (real summary preferred over reconstructedPopulation's row-count fallback) for
+  // the current month, guarded by the same wizardFolderRef epoch check
+  // handleProcessPopulation uses against a month switch mid-flight.
+  async function ensurePopulationLoaded(): Promise<PopulationProcessingResult | null> {
+    if (populationProcessingResult) return populationProcessingResult;
+    if (!directoryHandle || globalMonth.kind !== "existing") return null;
+    const epochFolder = wizardFolderRef.current;
+    const data = await loadMonthForEditing(directoryHandle, globalMonth.folderName, {
+      population: true,
+      summary: true,
+    });
+    if (wizardFolderRef.current !== epochFolder) return null; // superseded by a month switch
+    const population = reconstructedPopulation(data);
+    if (population) setPopulationProcessingResult(population);
+    return population;
+  }
 
   async function handleConfigChange(newConfig: PopulationConfig) {
     if (!canConfigureSample) {
@@ -449,28 +385,38 @@ export default function PopulationTab() {
     useState<SampleMasterData | null>(null);
   const [sampleSaveMessage, setSampleSaveMessage] =
     useState<SaveMessage>(null);
-  // B1 four-eyes gate: a sample drawn in THIS session must be approved by a second
-  // person before distribution. Legacy/previous-session samples (loaded from disk,
-  // flag stays false) are treated as approved-by-legacy so existing months aren't bricked.
-  const [sampleNeedsApproval, setSampleNeedsApproval] = useState(false);
-  // Reload-safe gate: a new-era sample (samplingAlgorithmVersion stamped) without an
-  // approval requires one even when loaded from disk in a fresh session.
-  const effectiveSampleNeedsApproval =
-    sampleNeedsApproval ||
-    (sampleDrawResult ? sampleRequiresApproval(sampleDrawResult) : false);
-  const [isApprovingSample, setIsApprovingSample] = useState(false);
   // B4 switching-rule advisory computed for the currently-selected month.
   const [priorMonthAdvisory, setPriorMonthAdvisory] =
     useState<SamplingPlanPriorMonthAdvisory | null>(null);
   // B3 referential-integrity orphan scan for the selected month (Phase 2 view).
   const [orphanScan, setOrphanScan] = useState<OrphanScanResult | null>(null);
 
-  // Phase 4 — distribution
-  const [distributionCurrent, setDistributionCurrent] =
-    useState<DistributionCurrentData | null>(null);
-  const [distributionMessage, setDistributionMessage] = useState<SaveMessage>(null);
-  const [isDistributing, setIsDistributing] = useState(false);
-  const [distributionProgress, setDistributionProgress] = useState<DistributionProgressState>(null);
+  // Phase 4 — distribution (state + mutating handlers extracted to
+  // useDistributionActions.ts to stay under check:complexity's
+  // max-lines-per-function budget; see that file's header comment)
+  const {
+    distributionCurrent,
+    setDistributionCurrent,
+    distributionMessage,
+    setDistributionMessage,
+    isDistributing,
+    distributionProgress,
+    handleAssign,
+    handleReassign,
+    handleMarkComplete,
+    handleRequestReplacement,
+    handleApplyBulkAssignment,
+  } = useDistributionActions({
+    directoryHandle,
+    sampleDrawResult,
+    saveMonth,
+    saveYear,
+    canDistributeSamples,
+    canBulkAssign,
+    currentUsername: sessionRef.current?.username ?? "unknown",
+    currentRole: sessionRef.current?.role ?? "unknown",
+    onDistributionChanged: () => setMonthRefreshKey((k) => k + 1),
+  });
 
   const [uploads, setUploads] = useState<Record<UploadKey, UploadState>>({
     riskAgencyData: { file: null, source: null },
@@ -494,6 +440,19 @@ export default function PopulationTab() {
   const [certScanPasteText, setCertScanPasteText] = useState("");
   const [populationProcessingResult, setPopulationProcessingResult] =
     useState<PopulationProcessingResult | null>(null);
+
+  // Proactively top up population on landing at Phase 3 with it still missing --
+  // covers "loaded while on Browse, switched to Process" for the stage-count display
+  // AND draw-button reachability, not just handleDrawSample's own on-click top-up.
+  // Gated on activeSubTab === "process": phase alone (from manifest.status, always
+  // loaded) can already read 3 while still on Browse; fetching population in the
+  // background for a pure-browse user would reintroduce the read this feature defers.
+  useEffect(() => {
+    if (activeSubTab !== "process" || currentPhase !== 3 || populationProcessingResult) return;
+    if (!canDrawSample && !canProcessPopulation) return;
+    void ensurePopulationLoaded();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fresh closure each render; its own body already guards re-fetching via populationProcessingResult
+  }, [activeSubTab, currentPhase, populationProcessingResult, canDrawSample, canProcessPopulation]);
 
   // B3: compute the orphan scan for the selected month when the Phase 2 report is
   // visible. Best-effort — any load failure clears the scan (section renders nothing).
@@ -977,7 +936,11 @@ export default function PopulationTab() {
       return;
     }
 
-    if (!populationProcessingResult) {
+    // Phase A step 3d: a viewer whose scope deferred population (never drew/
+    // processed before, no capability at load time -- but canDrawSample just
+    // passed above, so they DO hold it now) gets it fetched here on demand.
+    const population = await ensurePopulationLoaded();
+    if (!population) {
       setSampleSaveMessage({
         type: "error",
         text: "يجب تنفيذ معالجة المجتمع أولاً قبل سحب العينة."
@@ -1004,7 +967,7 @@ export default function PopulationTab() {
       setSampleDrawResult(null);
       const username = sessionRef.current?.username ?? "unknown";
       const drawResult = drawSample(
-        populationProcessingResult.preparedRows,
+        population.preparedRows,
         { rngSeed: sampleSeed, samplingRules: config.samplingRules, stageMappings: config.stageMappings },
         username
       );
@@ -1015,8 +978,6 @@ export default function PopulationTab() {
       }
 
       setSampleDrawResult(drawResult.data);
-      // B1: a freshly-drawn sample requires four-eyes approval before distribution.
-      setSampleNeedsApproval(!drawResult.data.approval);
 
       if (directoryHandle) {
         const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
@@ -1035,7 +996,7 @@ export default function PopulationTab() {
             const advisory = await loadPriorMonthAdvisory(directoryHandle, monthFolderName);
             const plan = buildSamplingPlan({
               monthFolderName,
-              populationRows: populationProcessingResult.preparedRows,
+              populationRows: population.preparedRows,
               sampleData: drawResult.data,
               createdBy: username,
               priorMonthAdvisory: advisory,
@@ -1094,311 +1055,6 @@ export default function PopulationTab() {
     }
   }
 
-  // B1: four-eyes sample-release approval. Available to supervisor/manager/admin who
-  // is NOT the drawer; admin may self-approve but an explicit warning note is recorded.
-  async function handleApproveSample(): Promise<void> {
-    if (!canDrawSample) {
-      setSampleSaveMessage({ type: "error", text: "لا تملك صلاحية اعتماد العينة، أو أن مساحة العمل للقراءة فقط." });
-      return;
-    }
-    if (isLoadingMonthData) {
-      setSampleSaveMessage({ type: "error", text: "جارٍ تحميل بيانات الشهر — انتظر حتى يكتمل التحميل." });
-      return;
-    }
-    if (!directoryHandle || !sampleDrawResult) {
-      setSampleSaveMessage({ type: "error", text: getLabels().sample_approve_no_sample });
-      return;
-    }
-    const role = sessionRef.current?.role ?? "guest";
-    const username = sessionRef.current?.username ?? "unknown";
-    const eligibility = evaluateApprovalEligibility(role, username, sampleDrawResult.drawnBy);
-    if (!eligibility.allowed) {
-      setSampleSaveMessage({
-        type: "error",
-        text: eligibility.reason === "self-approval-blocked"
-          ? getLabels().sample_approve_self_blocked
-          : getLabels().sample_approve_no_permission,
-      });
-      return;
-    }
-    setIsApprovingSample(true);
-    setSampleSaveMessage(null);
-    try {
-      const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
-      const approval = buildSampleApproval({
-        approvedBy: username,
-        role,
-        drawnBy: sampleDrawResult.drawnBy,
-        approvedAt: new Date().toISOString(),
-        selfApprovalNote: getLabels().sample_approve_admin_self_note,
-      });
-      const result = await approveSampleMaster(directoryHandle, monthFolderName, approval);
-      if (result.ok) {
-        setSampleDrawResult(result.data);
-        setSampleNeedsApproval(false);
-        void appendWorkspaceAction(directoryHandle, {
-          actor: username,
-          actorRole: role,
-          action: "sample-drawn",
-          monthFolderName,
-          target: sampleDrawResult.drawnBy,
-          details: { event: "sample-approved", selfApproval: eligibility.selfApproval },
-        });
-        setSampleSaveMessage({ type: "ok", text: getLabels().sample_approve_done });
-      } else {
-        setSampleSaveMessage({ type: "error", text: result.error });
-      }
-    } catch (error) {
-      if (error instanceof MonthClosedError) {
-        setSampleSaveMessage({ type: "error", text: getLabels().msg_month_closed_write_blocked });
-      } else {
-        logError("population:approve-sample", error);
-        setSampleSaveMessage({ type: "error", text: "حدث خطأ غير متوقع أثناء اعتماد العينة." });
-      }
-    } finally {
-      setIsApprovingSample(false);
-    }
-  }
-
-  async function refreshDistribution(monthFolderName: string): Promise<void> {
-    if (!directoryHandle) return;
-    let sampleRows = sampleDrawResult?.rows ?? [];
-    const log = await loadDistributionLog(directoryHandle, monthFolderName);
-
-    // Guard: never derive against an empty row set while events exist — a
-    // zeroed derive would PERSIST an empty snapshot + zeroed employee mirrors
-    // (visible data loss). Fall back to the on-disk sample master.
-    if (sampleRows.length === 0 && log.events.length > 0) {
-      const master = await loadSampleMaster(directoryHandle, monthFolderName);
-      sampleRows = master?.rows ?? [];
-      if (sampleRows.length === 0) {
-        logError(
-          "population:refresh-distribution",
-          new Error(`Refusing to persist zeroed distribution.current for ${monthFolderName}`)
-        );
-        setDistributionMessage({ type: "error", text: getLabels().msg_distribution_refresh_no_sample });
-        return; // keep the existing on-disk snapshot untouched
-      }
-    }
-
-    // Stamp logRevision so the next loadOrDeriveDistributionCurrent takes the fast path.
-    const current: DistributionCurrentData = {
-      ...deriveCurrentDistribution(log, sampleRows),
-      logRevision: log.revision,
-    };
-    setDistributionCurrent(current);
-    await saveDistributionCurrent(directoryHandle, monthFolderName, current);
-    setMonthRefreshKey((k) => k + 1);
-  }
-
-  async function handleAssign(
-    xrayImageId: string,
-    assignedTo: string
-  ): Promise<void> {
-    if (!canDistributeSamples) {
-      setDistributionMessage({ type: "error", text: "لا تملك صلاحية توزيع العينات." });
-      return;
-    }
-    if (!directoryHandle || !sampleDrawResult) return;
-    setIsDistributing(true);
-    setDistributionMessage(null);
-    const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
-    const username = sessionRef.current?.username ?? "unknown";
-    const event = buildAssignEvent({ xrayImageId, assignedTo, eventBy: username });
-    try {
-      const result = await appendDistributionEvent(
-        directoryHandle,
-        monthFolderName,
-        event
-      );
-      if (result.ok) {
-        await updateMonthStatus(directoryHandle, monthFolderName, "distributed");
-        await refreshDistribution(monthFolderName);
-        setDistributionMessage({ type: "ok", text: "تم التعيين." });
-      } else {
-        setDistributionMessage({ type: "error", text: result.error });
-      }
-    } catch (error) {
-      setDistributionMessage({ type: "error", text: distributionErrorText(error, getLabels().msg_month_closed_write_blocked) });
-    } finally {
-      setIsDistributing(false);
-    }
-  }
-
-  async function handleReassign(
-    xrayImageId: string,
-    reassignedTo: string
-  ): Promise<void> {
-    if (!canDistributeSamples) {
-      setDistributionMessage({ type: "error", text: "لا تملك صلاحية إعادة توزيع العينات." });
-      return;
-    }
-    if (!directoryHandle || !sampleDrawResult) return;
-    const existing = distributionCurrent?.entries.find(
-      (e) => e.xrayImageId === xrayImageId
-    );
-    // A completed row is terminal for reassignment: moving it would either be
-    // dropped by the derivation guard or lose the submitted answer. Require the
-    // reopen flow first.
-    if (existing?.status === "completed") {
-      setDistributionMessage({
-        type: "error",
-        text: "لا يمكن إعادة تعيين عينة مكتملة — يجب إعادة فتحها أولاً عبر مسار إعادة الفتح.",
-      });
-      return;
-    }
-    setIsDistributing(true);
-    setDistributionMessage(null);
-    const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
-    const username = sessionRef.current?.username ?? "unknown";
-    const event = buildReassignEvent({
-      xrayImageId,
-      assignedTo: existing?.assignedTo ?? reassignedTo,
-      reassignedTo,
-      eventBy: username
-    });
-    try {
-      const result = await appendDistributionEvent(
-        directoryHandle,
-        monthFolderName,
-        event
-      );
-      if (result.ok) {
-        await refreshDistribution(monthFolderName);
-        setDistributionMessage({ type: "ok", text: "تم إعادة التعيين." });
-      } else {
-        setDistributionMessage({ type: "error", text: result.error });
-      }
-    } catch (error) {
-      setDistributionMessage({ type: "error", text: distributionErrorText(error, getLabels().msg_month_closed_write_blocked) });
-    } finally {
-      setIsDistributing(false);
-    }
-  }
-
-  async function handleMarkComplete(xrayImageId: string): Promise<void> {
-    if (!canDistributeSamples) {
-      setDistributionMessage({ type: "error", text: "لا تملك صلاحية تعديل حالة التوزيع." });
-      return;
-    }
-    if (!directoryHandle || !sampleDrawResult) return;
-    setIsDistributing(true);
-    setDistributionMessage(null);
-    const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
-    const username = sessionRef.current?.username ?? "unknown";
-    const existing = distributionCurrent?.entries.find(
-      (e) => e.xrayImageId === xrayImageId
-    );
-    const event = buildCompletedEvent({
-      xrayImageId,
-      assignedTo: existing?.assignedTo ?? username,
-      eventBy: username
-    });
-    try {
-      const result = await appendDistributionEvent(
-        directoryHandle,
-        monthFolderName,
-        event
-      );
-      if (result.ok) {
-        await refreshDistribution(monthFolderName);
-        setDistributionMessage({ type: "ok", text: "تم تعليم الصف كمكتمل." });
-      } else {
-        setDistributionMessage({ type: "error", text: result.error });
-      }
-    } catch (error) {
-      setDistributionMessage({ type: "error", text: distributionErrorText(error, getLabels().msg_month_closed_write_blocked) });
-    } finally {
-      setIsDistributing(false);
-    }
-  }
-
-  async function handleRequestReplacement(xrayImageId: string): Promise<void> {
-    if (!canDistributeSamples) {
-      setDistributionMessage({ type: "error", text: "لا تملك صلاحية طلب الاستبدال من شاشة التوزيع." });
-      return;
-    }
-    if (!directoryHandle || !sampleDrawResult) return;
-    setIsDistributing(true);
-    setDistributionMessage(null);
-    const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
-    const username = sessionRef.current?.username ?? "unknown";
-    const existing = distributionCurrent?.entries.find(
-      (e) => e.xrayImageId === xrayImageId
-    );
-    const event = buildReplacementRequestedEvent({
-      xrayImageId,
-      assignedTo: existing?.assignedTo ?? username,
-      eventBy: username
-    });
-    try {
-      const result = await appendDistributionEvent(
-        directoryHandle,
-        monthFolderName,
-        event
-      );
-      if (result.ok) {
-        await refreshDistribution(monthFolderName);
-        setDistributionMessage({ type: "ok", text: "تم تسجيل طلب الاستبدال." });
-      } else {
-        setDistributionMessage({ type: "error", text: result.error });
-      }
-    } catch (error) {
-      setDistributionMessage({ type: "error", text: distributionErrorText(error, getLabels().msg_month_closed_write_blocked) });
-    } finally {
-      setIsDistributing(false);
-    }
-  }
-
-  async function handleApplyBulkAssignment(events: DistributionEvent[]): Promise<void> {
-    if (!canBulkAssign) {
-      setDistributionMessage({ type: "error", text: "لا تملك صلاحية التوزيع الجماعي." });
-      return;
-    }
-    if (!directoryHandle || !sampleDrawResult) return;
-    setIsDistributing(true);
-    setDistributionMessage(null);
-    setDistributionProgress({ percent: 2, message: "جارٍ تجهيز ملفات التعيينات للحفظ..." });
-    const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
-    try {
-      const result = await appendDistributionEvents(
-        directoryHandle,
-        monthFolderName,
-        events,
-        {
-          onProgress: (progress) => setDistributionProgress(distributionProgressFromWrite(progress)),
-        }
-      );
-      if (result.ok) {
-        setDistributionProgress({ percent: 88, message: "جارٍ تحديث حالة الشهر..." });
-        await updateMonthStatus(directoryHandle, monthFolderName, "distributed");
-        void appendWorkspaceAction(directoryHandle, {
-          actor: sessionRef.current?.username ?? "unknown",
-          actorRole: sessionRef.current?.role ?? "unknown",
-          action: "distribution-bulk-assigned",
-          monthFolderName,
-          details: { events: events.length },
-        });
-        setDistributionProgress({ percent: 92, message: "جارٍ بناء ملخص التوزيع النهائي..." });
-        await refreshDistribution(monthFolderName);
-        // Build per-employee entry lists then write one XLSX per employee (fire-and-forget).
-        const assignedMap = buildAssignedEntryMap(events, sampleDrawResult.rows);
-        for (const [emp, empEntries] of assignedMap) {
-          void writeEmployeeXlsx(directoryHandle, monthFolderName, emp, empEntries).catch(() => undefined);
-        }
-        setDistributionProgress({ percent: 100, message: "اكتمل حفظ التوزيع بنجاح." });
-        setDistributionMessage({ type: "ok", text: "تم تطبيق وحفظ التوزيع الجماعي بنجاح." });
-      } else {
-        setDistributionMessage({ type: "error", text: result.error });
-      }
-    } catch (error) {
-      setDistributionMessage({ type: "error", text: distributionErrorText(error, getLabels().msg_month_closed_write_blocked) });
-    } finally {
-      setIsDistributing(false);
-      setDistributionProgress(null);
-    }
-  }
-
   async function moveToNextPhase(): Promise<void> {
     if (currentPhase === 1) {
       await processPhaseOneAndMoveNext();
@@ -1414,15 +1070,6 @@ export default function PopulationTab() {
     }
     if (currentPhase === 3 && !sampleDrawResult) {
       setProcessingMessage("يجب إتمام سحب العينة أولاً قبل الانتقال إلى التوزيع.");
-      return;
-    }
-    // B1: four-eyes gate — a sample drawn this session must carry an approval before
-    // distribution. Legacy/previous-session samples (sampleNeedsApproval=false) pass.
-    if (
-      currentPhase === 3 &&
-      !isDistributionAllowed({ approval: sampleDrawResult?.approval, needsApproval: effectiveSampleNeedsApproval })
-    ) {
-      setSampleSaveMessage({ type: "error", text: getLabels().sample_gate_blocked });
       return;
     }
 
@@ -1553,12 +1200,9 @@ export default function PopulationTab() {
             userRole={sessionRef.current?.role ?? "employee"}
             currentUsername={sessionRef.current?.username ?? "unknown"}
             priorMonthAdvisory={priorMonthAdvisory}
-            sampleNeedsApproval={effectiveSampleNeedsApproval}
-            isApprovingSample={isApprovingSample}
             canDrawSample={canDrawSample}
             canConfigureSample={canConfigureSample}
             processingMessage={processingMessage}
-            onApproveSample={() => { void handleApproveSample(); }}
             onConfigChange={handleConfigChange}
             onSampleSeedChange={setSampleSeed}
             onDrawSample={() => { void handleDrawSample(); }}
