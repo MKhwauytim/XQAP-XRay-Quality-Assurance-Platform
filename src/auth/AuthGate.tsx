@@ -335,6 +335,12 @@ export default function AuthGate({ children }: AuthGateProps) {
 
     const AUTO_REFRESH_INTERVAL_MS = 5 * 60_000;
     const id = window.setInterval(() => {
+      // A backgrounded/minimized tab has nothing on screen that benefits from
+      // this tick -- skip the disk read and the fan-out signal entirely
+      // rather than paying their cost for no visible effect. The interval
+      // itself keeps running on its normal cadence; a later tick does the
+      // real work once the tab is visible again.
+      if (document.hidden) return;
       void refreshPermissions();
       broadcastDataRefresh("periodic");
     }, AUTO_REFRESH_INTERVAL_MS);

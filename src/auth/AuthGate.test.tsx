@@ -1,6 +1,6 @@
 /* @vitest-environment jsdom */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, cleanup, act } from "@testing-library/react";
 import AuthGate from "./AuthGate";
 import * as userManagement from "./userManagement";
 import * as authSession from "./authSession";
@@ -593,6 +593,46 @@ describe("AuthGate — permission auto-refresh", () => {
     // every mounted view (assigned samples, referrals, notifications, ...)
     // re-reads its own workspace data -- not just the user-management state.
     expect(dataRefreshSpy).toHaveBeenCalled();
+    unsubscribe();
+  });
+
+  it("skips the periodic tick's work entirely while the tab is hidden", async () => {
+    vi.spyOn(authSession, "readRealSession").mockReturnValue({
+      role: "employee",
+      username: NON_SEED_USERNAME,
+      loginAt: new Date().toISOString(),
+    });
+    mockReadyWorkspace("auto-refresh-hidden-tab", [NON_SEED_USERNAME]);
+    const setIntervalSpy = vi.spyOn(window, "setInterval");
+
+    renderAuthGate();
+
+    await waitFor(() => expect(mocks.loadWorkspaceFiles).toHaveBeenCalled());
+    const callsAfterHydration = mocks.loadWorkspaceFiles.mock.calls.length;
+
+    let refreshCall: ReturnType<typeof setIntervalSpy.mock.calls.find>;
+    await waitFor(() => {
+      refreshCall = setIntervalSpy.mock.calls.find(
+        (call) => call[1] === AUTO_REFRESH_INTERVAL_MS,
+      );
+      expect(refreshCall).toBeDefined();
+    });
+
+    const dataRefreshSpy = vi.fn();
+    const unsubscribe = dataRefreshSignal.subscribeToDataRefresh(dataRefreshSpy);
+
+    vi.spyOn(document, "hidden", "get").mockReturnValue(true);
+
+    // Fire the scheduled callback directly while the tab is "hidden".
+    (refreshCall![0] as () => void)();
+
+    // Give any (incorrect) refresh a chance to fire before asserting it didn't.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mocks.loadWorkspaceFiles.mock.calls.length).toBe(callsAfterHydration);
+    expect(dataRefreshSpy).not.toHaveBeenCalled();
+
     unsubscribe();
   });
 
