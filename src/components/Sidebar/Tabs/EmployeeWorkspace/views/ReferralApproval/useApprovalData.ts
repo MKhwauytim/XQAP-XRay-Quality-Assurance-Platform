@@ -4,7 +4,7 @@ import { usePermissions } from "../../../../../../auth/usePermissions";
 import { readUserManagementState } from "../../../../../../auth/userManagement";
 import { appendWorkspaceAction } from "../../../../../../data/audit/actionLog";
 import { getLabels } from "../../../../../../data/labels/labelsStore";
-import { loadOrDeriveDistributionCurrent } from "../../../../../../data/distribution/distributionStorage";
+import { loadOrDeriveDistributionCurrentForRead } from "../../../../../../data/distribution/distributionStorage";
 import type { DistributionEntry } from "../../../../../../data/distribution/distributionTypes";
 import { useGlobalMonth } from "../../../../../../data/month/useGlobalMonth";
 import { MonthClosedError } from "../../../../../../data/population/monthLock";
@@ -112,7 +112,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
       const sample = await loadSampleMaster(directoryHandle, selMonth);
       const detailMap: Record<string, DistributionEntry | PreparedPopulationRow> = {};
       if (sample) {
-        const distribution = await loadOrDeriveDistributionCurrent(directoryHandle, selMonth, sample.rows);
+        const distribution = await loadOrDeriveDistributionCurrentForRead(directoryHandle, selMonth, sample.rows);
         for (const row of sample.rows) detailMap[row.xrayImageId] = row;
         for (const entry of distribution?.entries ?? []) detailMap[entry.xrayImageId] = entry;
       }
