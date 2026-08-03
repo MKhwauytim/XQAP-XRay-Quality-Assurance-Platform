@@ -92,6 +92,43 @@ describe("readJsonDirectory", () => {
     }
   });
 
+  it("reports LOWEST-index failure even when higher-index errors settle first (delay-induced race)", async () => {
+    const inner = createMemoryDirectory();
+    // Three files: a-corrupt (index 0, slow), b-good (index 1), c-corrupt (index 2, fast).
+    // If implementation was "first-to-settle-wins", it would report c-corrupt.
+    // Correct implementation should report a-corrupt (lowest index).
+    await writeRawFile(inner, "a-corrupt.widget.json", "{bad1");
+    await safeWriteJson<Widget>(inner, "b-good.widget.json", { id: "good" });
+    await writeRawFile(inner, "c-corrupt.widget.json", "{bad2");
+
+    const tracked: DirectoryHandleLike = {
+      ...inner,
+      getFileHandle: async (name: string, options?: { create?: boolean }) => {
+        const handle = await inner.getFileHandle(name, options);
+        return {
+          ...handle,
+          getFile: async () => {
+            // a-corrupt (index 0) gets a long delay; c-corrupt (index 2) is fast.
+            // This makes c-corrupt settle BEFORE a-corrupt, testing that we still
+            // report the lower index.
+            if (name === "a-corrupt.widget.json") {
+              await new Promise((resolve) => setTimeout(resolve, 30));
+            }
+            return await handle.getFile();
+          },
+        };
+      },
+    };
+
+    await expect(
+      readJsonDirectory<Widget>(tracked, {
+        suffix: ".widget.json",
+        onUnreadable: "throw",
+        unreadableError: (name) => name,
+      })
+    ).rejects.toThrow("a-corrupt.widget.json");
+  });
+
   it("defaults to DIRECTORY_READ_CONCURRENCY and never exceeds it", async () => {
     const inner = createMemoryDirectory();
     for (let i = 0; i < 20; i++) {

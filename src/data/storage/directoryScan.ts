@@ -34,10 +34,11 @@ function rawEntries(dir: DirectoryHandleLike): AsyncIterable<RawEntry> | null {
 
 /**
  * Materialized directory listing (names + kind only -- no file content is
- * read). Materializing before any content read starts is what makes
- * readJsonDirectory's index-assigned result ordering possible; it is not a
- * new cost versus the sequential loops it replaces, which already walk the
- * same listing.
+ * read). Materializing before any content read starts enables stable,
+ * deterministic ordering in readJsonDirectory independent of concurrent-read
+ * settlement order or the underlying directory API's unspecified iteration
+ * order. Not a new cost versus sequential loops, which already walk the
+ * listing.
  */
 export async function listDirectoryEntries(dir: DirectoryHandleLike): Promise<JsonDirectoryEntryLike[]> {
   const iterable = rawEntries(dir);
@@ -60,19 +61,25 @@ export type ReadJsonDirectoryOptions = {
 };
 
 export type ReadJsonDirectoryResult<T> = {
-  /** Listing order, unreadable entries removed (or all present when
-   *  onUnreadable === "throw", since any failure aborts the whole read). */
+  /** Name-sorted order (ascending, by filename), unreadable entries removed
+   *  (or all present when onUnreadable === "throw", since any failure aborts
+   *  the whole read). Sorted for deterministic ordering independent of
+   *  concurrent-read completion order or underlying directory API iteration
+   *  order. */
   values: T[];
   /** Names of the entries that produced `values`, index-aligned with it. */
   fileNames: string[];
-  /** Every matching name in the listing, including ones that failed to read. */
+  /** Every matching name in the listing (also name-sorted), including ones
+   *  that failed to read. */
   matchedNames: string[];
 };
 
 /**
- * Read every JSON file in `dir` matching `suffix`, with bounded concurrency,
- * preserving directory-listing order in the result regardless of which
- * worker finishes first.
+ * Read every JSON file in `dir` matching `suffix`, with bounded concurrency.
+ * Results are sorted by filename (ascending) for deterministic ordering
+ * regardless of which worker finishes first or the underlying directory
+ * API's iteration order. Matching entry names in matchedNames are also
+ * sorted to enable deterministic failure reporting.
  */
 export async function readJsonDirectory<T>(
   dir: DirectoryHandleLike,
