@@ -25,6 +25,7 @@ import {
   isUsernameAvailable,
   normalizeUsername,
   readUserManagementState,
+  subscribeToUserManagementChanges,
   writeUserManagementState,
   type FeaturePermission,
   type ManagedLoginUser,
@@ -41,6 +42,7 @@ import {
 } from "../../../../data/audit/actionLog";
 import { getLabels } from "../../../../data/labels/labelsStore";
 import { syncUserManagementToDisk } from "../../../../data/workspace/userSync";
+import type { DirectoryHandleLike } from "../../../../data/storage/fileSystemAccess";
 import type { SidebarTabModule } from "../tabTypes";
 
 import "./UserManagement.css";
@@ -158,10 +160,33 @@ export default function UserManagementTab() {
   const { directoryHandle } = useWorkspace();
   const savingToDiskRef = useRef(false);
   const pendingStateRef = useRef<UserManagementState | null>(null);
+  // Remembers which directoryHandle each section's data was last successfully
+  // loaded for, so switching sections back and forth within one mounted
+  // UserManagementTab instance does not re-fetch on every switch -- only on
+  // first visit or a genuine workspace change. `undefined` = never loaded.
+  const activityLoadedForRef = useRef<DirectoryHandleLike | null | undefined>(undefined);
+  const actionsLoadedForRef = useRef<DirectoryHandleLike | null | undefined>(undefined);
 
   const canEdit = canMutate("manage-users");
   const canEditPermissions = canMutate("edit-permissions");
   const canResetPasswords = canMutate("reset-passwords");
+
+  // Keep local `state` in lockstep with the shared runtime user-management
+  // state (mirrors App.tsx / usePermissions.ts / NotificationManager.tsx /
+  // WorkspaceGate.tsx, which all subscribe the same way). Without this, a
+  // concurrent admin's disk change picked up via refreshPermissions() (manual
+  // toolbar refresh or AuthGate's 5-minute auto-refresh) only updated the
+  // shared module state -- this tab's own `state` stayed stale, so the next
+  // edit here (`persistState`) would spread that stale snapshot and overwrite
+  // the other admin's change on disk with no conflict indication. Draft-only
+  // local state (`identityEdits`, `resetPasswords`, `form`) lives outside
+  // `UserManagementState` and is keyed by user id, so resyncing `state` here
+  // cannot discard an in-progress, unsaved draft.
+  useEffect(() => {
+    return subscribeToUserManagementChanges(() => {
+      setState(readUserManagementState());
+    });
+  }, []);
 
   useEffect(() => {
     window.dispatchEvent(new CustomEvent("pop-subtab-changed", { detail: section }));
@@ -180,12 +205,16 @@ export default function UserManagementTab() {
 
   useEffect(() => {
     if (section !== "activity") return;
+    if (activityLoadedForRef.current === directoryHandle) return;
     let cancelled = false;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- sync loading indicator before async activity-log read; necessary to show spinner while data fetches
     setIsActivityLoading(true);
     void readAuthActivityLog()
       .then((entries) => {
-        if (!cancelled) setActivityEntries(entries);
+        if (!cancelled) {
+          setActivityEntries(entries);
+          activityLoadedForRef.current = directoryHandle;
+        }
       })
       .catch(logRejection("userManagement:readAuthActivityLog"))
       .finally(() => {
@@ -206,11 +235,15 @@ export default function UserManagementTab() {
       setIsActionsLoading(false);
       return;
     }
+    if (actionsLoadedForRef.current === directoryHandle) return;
     let cancelled = false;
     setIsActionsLoading(true);
     void readWorkspaceActions(directoryHandle)
       .then((entries) => {
-        if (!cancelled) setActionEntries(entries);
+        if (!cancelled) {
+          setActionEntries(entries);
+          actionsLoadedForRef.current = directoryHandle;
+        }
       })
       .catch(logRejection("userManagement:readWorkspaceActions"))
       .finally(() => {
