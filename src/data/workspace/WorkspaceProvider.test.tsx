@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   loadLastWorkspace: vi.fn(),
   loadWorkspaceFiles: vi.fn(),
   queryDirectoryPermission: vi.fn(),
+  selectWorkspaceDirectory: vi.fn(),
 }));
 
 vi.mock("../storage/fileSystemAccess", async (importOriginal) => ({
@@ -32,6 +33,7 @@ vi.mock("../storage/fileSystemAccess", async (importOriginal) => ({
   isFileSystemAccessSupported: mocks.isFileSystemAccessSupported,
   loadWorkspaceFiles: mocks.loadWorkspaceFiles,
   queryDirectoryPermission: mocks.queryDirectoryPermission,
+  selectWorkspaceDirectory: mocks.selectWorkspaceDirectory,
 }));
 
 vi.mock("./workspacePersistence", async (importOriginal) => ({
@@ -55,6 +57,15 @@ function ClearWorkspaceButton() {
   return (
     <button type="button" onClick={clearWorkspace}>
       clear
+    </button>
+  );
+}
+
+function SelectWorkspaceButton() {
+  const { selectWorkspace } = useWorkspace();
+  return (
+    <button type="button" onClick={() => { void selectWorkspace(); }}>
+      select
     </button>
   );
 }
@@ -172,7 +183,7 @@ describe("remembered workspace fallback", () => {
     expect(mocks.loadLastWorkspace).not.toHaveBeenCalled();
   });
 
-  it("shows a reconnect button and requests read access from its click", async () => {
+  it("shows a reconnect button and requests readwrite access from its click (§S: one grant, not two)", async () => {
     const handle = createMemoryDirectory("remembered-workspace");
     mocks.loadLastWorkspace.mockResolvedValue({
       directoryHandle: handle,
@@ -193,7 +204,31 @@ describe("remembered workspace fallback", () => {
     fireEvent.click(reconnect);
 
     await waitFor(() => {
-      expect(mocks.ensureDirectoryPermission).toHaveBeenCalledWith(handle, "read");
+      expect(mocks.ensureDirectoryPermission).toHaveBeenCalledWith(handle, "readwrite");
+    });
+  });
+
+  it("requests readwrite in the same picker interaction when attaching a workspace for the first time (§S)", async () => {
+    const handle = createMemoryDirectory("new-workspace");
+    mocks.loadLastWorkspace.mockResolvedValue(null);
+    mocks.selectWorkspaceDirectory.mockResolvedValue(handle);
+    mocks.checkWorkspaceStructure.mockResolvedValue({
+      status: "missing_structure",
+      missingItems: ["1-population"],
+      invalidItems: [],
+      message: "missing",
+    });
+
+    render(
+      <WorkspaceProvider>
+        <SelectWorkspaceButton />
+      </WorkspaceProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "select" }));
+
+    await waitFor(() => {
+      expect(mocks.selectWorkspaceDirectory).toHaveBeenCalledWith("readwrite");
     });
   });
 });

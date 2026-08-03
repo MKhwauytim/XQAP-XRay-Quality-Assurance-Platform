@@ -173,11 +173,11 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     try {
       setStatus("checking");
       setMessage(`جار إعادة الاتصال بمساحة العمل: ${persisted.directoryName}.`);
-      const hasReadPermission = await ensureDirectoryPermission(
+      const hasReadWritePermission = await ensureDirectoryPermission(
         persisted.directoryHandle,
-        "read"
+        "readwrite"
       );
-      if (!hasReadPermission) {
+      if (!hasReadWritePermission) {
         setPendingReconnect(true);
         setStatus("not_selected");
         setMessage(getLabels().wsgate_picker_reconnect_msg);
@@ -206,7 +206,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       setStatus("checking");
       setMessage("جار اختيار وفحص مجلد مساحة العمل.");
 
-      const handle = await selectWorkspaceDirectory("read");
+      const handle = await selectWorkspaceDirectory("readwrite");
       await applyWorkspaceHandle(handle);
     } catch (error) {
       if (isAbortError(error)) {
