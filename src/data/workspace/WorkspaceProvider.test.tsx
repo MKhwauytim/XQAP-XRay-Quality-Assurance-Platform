@@ -183,6 +183,30 @@ describe("remembered workspace fallback", () => {
     expect(mocks.loadLastWorkspace).not.toHaveBeenCalled();
   });
 
+  it("falls through to the reconnect flow when the remembered grant covers only 'read' (§S: the auto-restore query itself must ask for 'readwrite', not 'read')", async () => {
+    const handle = createMemoryDirectory("read-only-granted-workspace");
+    mocks.loadLastWorkspace.mockResolvedValue({
+      directoryHandle: handle,
+      directoryName: handle.name,
+      savedAt: new Date().toISOString(),
+    });
+    // A handle whose browser-remembered grant covers only "read" (e.g. a
+    // workspace attached before this fix): querying "read" alone would
+    // report "granted" and silently auto-restore, then hit a second prompt
+    // at the first write -- exactly the double-prompt bug §S closes.
+    mocks.queryDirectoryPermission.mockImplementation((_handle, mode) =>
+      Promise.resolve(mode === "read" ? "granted" : "prompt"),
+    );
+
+    render(<WorkspaceProvider><WorkspaceState /></WorkspaceProvider>);
+
+    await waitFor(() =>
+      expect(mocks.queryDirectoryPermission).toHaveBeenCalledWith(handle, "readwrite"),
+    );
+    // Falls through to the reconnect button instead of silently auto-restoring.
+    expect(screen.getByText("not_selected:true")).toBeInTheDocument();
+  });
+
   it("shows a reconnect button and requests readwrite access from its click (§S: one grant, not two)", async () => {
     const handle = createMemoryDirectory("remembered-workspace");
     mocks.loadLastWorkspace.mockResolvedValue({

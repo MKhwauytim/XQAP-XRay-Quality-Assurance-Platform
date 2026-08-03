@@ -269,7 +269,17 @@ export async function appendDistributionEvent(
   return appendDistributionEvents(directoryHandle, monthFolderName, [event]);
 }
 
-/** Append events to the distribution log using a CAS retry loop. */
+/**
+ * Append events to the distribution log using a CAS retry loop.
+ *
+ * The returned `log` reflects exactly what THIS call durably wrote. This app
+ * is backend-free (see CLAUDE.md) and provides no strict multi-device event
+ * ordering guarantee: another machine's event file written in the narrow
+ * window between this call's own pre-write read and its verify step won't be
+ * reflected in the returned `log` — though it will be picked up on the next
+ * fresh read, since `distribution.current.json` is a rebuildable cache, not
+ * a source of truth.
+ */
 export async function appendDistributionEvents(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
@@ -322,7 +332,12 @@ export async function appendDistributionEvents(
       if (verify.revision === nextRevision && verify.writeToken === writeToken) {
         return {
           done: true,
-          result: { ok: true as const, log: updated },
+          // `updated` (written to disk above) intentionally keeps the PRE-append
+          // eventSetId for on-disk consistency at write time (see the field's
+          // write site above) — but callers of THIS return value reasonably
+          // expect `log` to reflect the just-appended events, so return a
+          // corrected copy here rather than mutating `updated` itself.
+          result: { ok: true as const, log: { ...updated, eventSetId: distributionEventSetId(updated.events) } },
           // Delayed re-read guards against a concurrent machine that read the
           // same base revision and clobbered our commit after this read-back.
           verify: async () => {

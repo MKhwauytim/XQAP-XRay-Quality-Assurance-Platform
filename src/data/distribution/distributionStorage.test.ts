@@ -9,7 +9,7 @@ import {
   saveDistributionCurrent,
 } from "./distributionStorage";
 import { DERIVE_VERSION, buildAssignEvent, deriveCurrentDistribution } from "./distributionLog";
-import { writeImmutableDistributionEvent } from "./distributionEventStore";
+import { distributionEventSetId, writeImmutableDistributionEvent } from "./distributionEventStore";
 import type { DistributionCurrentData } from "./distributionTypes";
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
@@ -123,6 +123,28 @@ describe("distributionStorage", () => {
     const log = await loadDistributionLog(root, month);
     expect(log.events.map((event) => event.eventId).sort()).toEqual([first.eventId, second.eventId].sort());
     expect(log.eventSetId).toMatch(/^2:/);
+  });
+
+  it("returns a log whose eventSetId reflects the just-appended events, not the pre-append state (finding 3)", async () => {
+    const root = await makeRoot();
+    const month = "5-May-2026";
+    const first = buildAssignEvent({ xrayImageId: "img-200", assignedTo: "alice", eventBy: "admin" });
+
+    const firstResult = await appendDistributionEvent(root, month, first);
+    expect(firstResult.ok).toBe(true);
+    if (!firstResult.ok) return;
+    // Freshly appended into a log that started empty -- must NOT still read
+    // as the pre-append (empty) eventSetId.
+    expect(firstResult.log.eventSetId).toBe(distributionEventSetId(firstResult.log.events));
+    expect(firstResult.log.eventSetId).toMatch(/^1:/);
+
+    const second = buildAssignEvent({ xrayImageId: "img-201", assignedTo: "bob", eventBy: "admin" });
+    const secondResult = await appendDistributionEvent(root, month, second);
+    expect(secondResult.ok).toBe(true);
+    if (!secondResult.ok) return;
+    // Must reflect BOTH events, not just the pre-append single-event state.
+    expect(secondResult.log.eventSetId).toBe(distributionEventSetId(secondResult.log.events));
+    expect(secondResult.log.eventSetId).toMatch(/^2:/);
   });
 
   it("ignores a cached snapshot without deriveVersion and re-derives", async () => {

@@ -175,13 +175,16 @@ export default function PopulationTab() {
   // "already loaded" guard; keeping it mounted-but-hidden once visited,
   // instead of unmounting on every sub-tab switch, avoids re-loading its
   // full dataset (up to ~400k rows) every time — §M/§T.
+  // Adjusted during render (not in an effect) per React's "adjusting state
+  // during render" pattern — mirrors EmployeeWorkspaceTab's and ReportsTab's
+  // identical fix — avoiding both react-hooks/set-state-in-effect and the
+  // extra effect-driven render pass a useEffect version would add.
   const [visitedSubTabs, setVisitedSubTabs] = useState<Set<SubTab>>(
     () => new Set([activeSubTab])
   );
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- mirrors App.tsx's touchTabMountLru effect: the visited set changes in response to navigation
+  if (!visitedSubTabs.has(activeSubTab)) {
     setVisitedSubTabs((prev) => touchVisitedTabs(prev, activeSubTab));
-  }, [activeSubTab]);
+  }
   const {
     selection: globalMonth,
     setSelectedMonth: setGlobalMonth,
@@ -232,6 +235,24 @@ export default function PopulationTab() {
 
   // Month picker state
   const [monthRefreshKey, setMonthRefreshKey] = useState(0);
+
+  // Stable element reference (recomputed only when its own inputs change) so
+  // switching activeSubTab back and forth — which re-renders PopulationTab on
+  // every Excel-import/wizard/distribution progress tick — doesn't also
+  // re-invoke BrowseDataView's own render while it's hidden; React bails out
+  // of re-rendering a child subtree when the exact same element reference is
+  // passed again. Mirrors EmployeeWorkspaceTab's identical fix.
+  const browseElement = useMemo(
+    () => (
+      <BrowseDataView
+        directoryHandle={directoryHandle}
+        refreshKey={monthRefreshKey}
+        username={sessionRef.current?.username ?? "unknown"}
+        config={config}
+      />
+    ),
+    [directoryHandle, monthRefreshKey, config]
+  );
 
   // Load cumulative CertScan data from workspace on mount
   useEffect(() => {
@@ -1113,14 +1134,7 @@ export default function PopulationTab() {
           afterward, so switching away and back doesn't re-load the full
           dataset; §M/§T) ── */}
       {visitedSubTabs.has("browse") && canViewBrowse && (
-        <div hidden={activeSubTab !== "browse"}>
-          <BrowseDataView
-            directoryHandle={directoryHandle}
-            refreshKey={monthRefreshKey}
-            username={sessionRef.current?.username ?? "unknown"}
-            config={config}
-          />
-        </div>
+        <div hidden={activeSubTab !== "browse"}>{browseElement}</div>
       )}
       {activeSubTab === "browse" && !canViewBrowse && (
         <div className="placeholder-phase">

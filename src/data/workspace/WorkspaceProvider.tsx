@@ -134,9 +134,15 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
         }
 
         setMessage(`جار إعادة الاتصال بمساحة العمل: ${persisted.directoryName}.`);
+        // §S: query "readwrite", not "read" -- this app never does read-only
+        // work, so a handle whose browser-remembered grant covers only "read"
+        // must fall through to the reconnect button below (which prompts for
+        // "readwrite" inside a real user gesture) rather than silently
+        // auto-restoring here and then hitting a second prompt at the first
+        // write. This query never itself prompts.
         const permission = await queryDirectoryPermission(
           persisted.directoryHandle,
-          "read"
+          "readwrite"
         );
         if (permission !== "granted") {
           setDirectoryHandle(persisted.directoryHandle);
