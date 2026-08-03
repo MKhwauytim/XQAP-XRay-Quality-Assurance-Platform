@@ -167,57 +167,73 @@ export async function checkWorkspaceStructure(
   const missingItems: string[] = [];
   const invalidItems: string[] = [];
 
+  // Every check below is independent -- none depends on another's result,
+  // only on accumulating into missingItems/invalidItems -- so they run
+  // concurrently (Promise.allSettled, not Promise.all: one missing folder
+  // must not abort the rest of the scan) instead of one network round trip
+  // at a time. Results are reassembled in the exact same category order the
+  // sequential code produced, so the returned arrays stay byte-identical to
+  // before -- only the round trips now overlap (§V).
   const allTopFolders = [
     ...REQUIRED_WORKSPACE_FOLDERS,
     ...TOP_LEVEL_DATA_FOLDERS
   ];
-  for (const folderName of allTopFolders) {
-    try {
-      await directoryHandle.getDirectoryHandle(folderName, { create: false });
-    } catch {
-      missingItems.push(folderName);
-    }
-  }
+  const topFolderResults = await Promise.allSettled(
+    allTopFolders.map((folderName) =>
+      directoryHandle.getDirectoryHandle(folderName, { create: false })
+    )
+  );
+  topFolderResults.forEach((result, index) => {
+    if (result.status === "rejected") missingItems.push(allTopFolders[index]);
+  });
 
-  try {
-    const systemHandle = await directoryHandle.getDirectoryHandle(
-      WORKSPACE_FILE_NAMES.systemFolder,
-      { create: false }
+  // If the .system folder itself is missing, it's already recorded above
+  // (it's one of allTopFolders) -- this only needs to run when it exists.
+  const systemHandle = await directoryHandle
+    .getDirectoryHandle(WORKSPACE_FILE_NAMES.systemFolder, { create: false })
+    .catch(() => null);
+
+  if (systemHandle) {
+    const systemSubfolderResults = await Promise.allSettled(
+      SYSTEM_SUBFOLDERS.map((folderName) =>
+        systemHandle.getDirectoryHandle(folderName, { create: false })
+      )
     );
-
-    for (const folderName of SYSTEM_SUBFOLDERS) {
-      try {
-        await systemHandle.getDirectoryHandle(folderName, { create: false });
-      } catch {
-        missingItems.push(`${WORKSPACE_FILE_NAMES.systemFolder}/${folderName}`);
+    systemSubfolderResults.forEach((result, index) => {
+      if (result.status === "rejected") {
+        missingItems.push(`${WORKSPACE_FILE_NAMES.systemFolder}/${SYSTEM_SUBFOLDERS[index]}`);
       }
-    }
-  } catch {
-    // The .system folder itself is already checked above.
+    });
   }
 
-  const requiredFileLocations = [
-    { dir: await getSystemRoot(directoryHandle, false).catch(() => null), fileName: WORKSPACE_FILE_NAMES.manifest },
-    { dir: await getUserDataRoot(directoryHandle, false).catch(() => null), fileName: WORKSPACE_FILE_NAMES.usersPermissions },
-  ];
+  const requiredFileLocations = await Promise.all([
+    getSystemRoot(directoryHandle, false)
+      .then((dir) => ({ dir, fileName: WORKSPACE_FILE_NAMES.manifest }))
+      .catch(() => ({ dir: null as DirectoryHandleLike | null, fileName: WORKSPACE_FILE_NAMES.manifest })),
+    getUserDataRoot(directoryHandle, false)
+      .then((dir) => ({ dir, fileName: WORKSPACE_FILE_NAMES.usersPermissions }))
+      .catch(() => ({ dir: null as DirectoryHandleLike | null, fileName: WORKSPACE_FILE_NAMES.usersPermissions })),
+  ]);
 
-  for (const item of requiredFileLocations) {
-    if (!item.dir) {
-      missingItems.push(item.fileName);
-      continue;
-    }
-
-    const result = await readJsonFile<JsonEnvelope<unknown>>(item.dir, item.fileName);
-
-    if (!result.ok) {
-      if (result.reason === "missing") missingItems.push(item.fileName);
-      else invalidItems.push(item.fileName);
-      continue;
-    }
-
-    if (!isJsonEnvelope(result.file) || result.file.metadata.schemaVersion !== WORKSPACE_SCHEMA_VERSION) {
-      invalidItems.push(item.fileName);
-    }
+  const fileCheckResults = await Promise.all(
+    requiredFileLocations.map(async (item) => {
+      if (!item.dir) return { fileName: item.fileName, outcome: "missing" as const };
+      const result = await readJsonFile<JsonEnvelope<unknown>>(item.dir, item.fileName);
+      if (!result.ok) {
+        return {
+          fileName: item.fileName,
+          outcome: result.reason === "missing" ? ("missing" as const) : ("invalid" as const),
+        };
+      }
+      if (!isJsonEnvelope(result.file) || result.file.metadata.schemaVersion !== WORKSPACE_SCHEMA_VERSION) {
+        return { fileName: item.fileName, outcome: "invalid" as const };
+      }
+      return { fileName: item.fileName, outcome: "ok" as const };
+    })
+  );
+  for (const { fileName, outcome } of fileCheckResults) {
+    if (outcome === "missing") missingItems.push(fileName);
+    else if (outcome === "invalid") invalidItems.push(fileName);
   }
 
   if (missingItems.length > 0) {

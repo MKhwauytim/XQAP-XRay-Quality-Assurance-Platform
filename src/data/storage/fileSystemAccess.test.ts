@@ -18,6 +18,55 @@ test("workspace checks require read permission only", async () => {
   expect(queryPermission).toHaveBeenCalledWith({ mode: "read" });
 });
 
+test("checkWorkspaceStructure preserves item order across categories after parallelizing (§V)", async () => {
+  const dir = createMemoryDirectory();
+  // Present: 1-population, 4-reports, 5-system (with "audit" + "backups" subfolders).
+  // Missing: 2-samples, 3-user-data, 6-templates (top folders); "locks" (system
+  // subfolder); both required files -- deliberately spread across all three
+  // checked categories to prove the concatenated order survives parallelizing.
+  await dir.getDirectoryHandle("1-population", { create: true });
+  await dir.getDirectoryHandle("4-reports", { create: true });
+  const system = await dir.getDirectoryHandle("5-system", { create: true });
+  await system.getDirectoryHandle("audit", { create: true });
+  await system.getDirectoryHandle("backups", { create: true });
+
+  const result = await checkWorkspaceStructure(dir);
+
+  expect(result.missingItems).toEqual([
+    "2-samples",
+    "3-user-data",
+    "6-templates",
+    "5-system/locks",
+    "workspace.manifest.json",
+    "users.permissions.json",
+  ]);
+});
+
+test("checkWorkspaceStructure checks top-level folders concurrently, not one at a time (§V)", async () => {
+  const inner = createMemoryDirectory();
+  let current = 0;
+  let peak = 0;
+  const tracked = {
+    ...inner,
+    getDirectoryHandle: async (name: string, options?: { create?: boolean }) => {
+      current += 1;
+      peak = Math.max(peak, current);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      try {
+        return await inner.getDirectoryHandle(name, options);
+      } finally {
+        current -= 1;
+      }
+    },
+  };
+
+  await checkWorkspaceStructure(tracked);
+
+  // 6 top-level folders are checked in the first phase -- if they still ran
+  // one at a time, peak would never exceed 1.
+  expect(peak).toBeGreaterThan(1);
+});
+
 test("writeJsonFile produces a .bak snapshot on the second write", async () => {
   const dir = createMemoryDirectory();
   await writeJsonFile(dir, "x.json", { a: 1 });
