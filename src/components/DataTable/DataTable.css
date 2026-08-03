@@ -372,6 +372,63 @@
   background: var(--c-success-tint-selected);
 }
 
+/* Task 6: rows with an outstanding referral/replacement request ("pending"),
+   or that were actually replaced ("resolved"), are shown with a distinct
+   color instead of being hidden from the queue. --c-warning-bg/--c-info-bg
+   mirror the same amber/blue tones already used elsewhere in this app for
+   "awaiting approval" and "resolved/complete-swap" states respectively. */
+.dt-tr.dt-tr--pending,
+.dt-tr.dt-tr--pending:nth-child(even) {
+  background: var(--c-warning-bg);
+}
+.dt-tr.dt-tr--pending:hover,
+.dt-tr.dt-tr--pending:nth-child(even):hover {
+  background: var(--c-warning-border);
+}
+.dt-tr.dt-tr--pending.selected,
+.dt-tr.dt-tr--pending.selected:nth-child(even) {
+  background: var(--c-warning-border);
+  box-shadow: inset 3px 0 0 var(--c-warning);
+}
+.dt-tr.dt-tr--pending .dt-td.dt-sticky-col,
+.dt-tr.dt-tr--pending:nth-child(even) .dt-td.dt-sticky-col {
+  background: var(--c-warning-bg);
+}
+.dt-tr.dt-tr--pending:hover .dt-td.dt-sticky-col,
+.dt-tr.dt-tr--pending:nth-child(even):hover .dt-td.dt-sticky-col {
+  background: var(--c-warning-border);
+}
+.dt-tr.dt-tr--pending.selected .dt-td.dt-sticky-col,
+.dt-tr.dt-tr--pending.selected:nth-child(even) .dt-td.dt-sticky-col {
+  background: var(--c-warning-border);
+}
+
+.dt-tr.dt-tr--resolved,
+.dt-tr.dt-tr--resolved:nth-child(even) {
+  background: var(--c-info-bg);
+}
+.dt-tr.dt-tr--resolved:hover,
+.dt-tr.dt-tr--resolved:nth-child(even):hover {
+  background: var(--c-info-border);
+}
+.dt-tr.dt-tr--resolved.selected,
+.dt-tr.dt-tr--resolved.selected:nth-child(even) {
+  background: var(--c-info-border);
+  box-shadow: inset 3px 0 0 var(--c-info);
+}
+.dt-tr.dt-tr--resolved .dt-td.dt-sticky-col,
+.dt-tr.dt-tr--resolved:nth-child(even) .dt-td.dt-sticky-col {
+  background: var(--c-info-bg);
+}
+.dt-tr.dt-tr--resolved:hover .dt-td.dt-sticky-col,
+.dt-tr.dt-tr--resolved:nth-child(even):hover .dt-td.dt-sticky-col {
+  background: var(--c-info-border);
+}
+.dt-tr.dt-tr--resolved.selected .dt-td.dt-sticky-col,
+.dt-tr.dt-tr--resolved.selected:nth-child(even) .dt-td.dt-sticky-col {
+  background: var(--c-info-border);
+}
+
 .dt-td:first-child { border-inline-end: none; text-align: right; }
 
 /* B5: numeric columns (explicit `isNumeric` or auto-detected from sampled

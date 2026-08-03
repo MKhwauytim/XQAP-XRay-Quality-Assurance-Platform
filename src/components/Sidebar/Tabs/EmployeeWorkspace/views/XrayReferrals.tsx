@@ -57,7 +57,9 @@ import {
   appendReferralRequest,
   appendReplacementRequest,
   getPendingReferralIds,
+  getPendingReplacementIds,
   loadReferralLog,
+  loadReplacementLog,
 } from "../../../../../data/referral/referralStorage";
 import { submitReopenRequest } from "../../../../../data/referral/requestReopen";
 import type { ReferralRequest, ReplacementRequest } from "../../../../../data/referral/referralTypes";
@@ -116,6 +118,22 @@ type ReferralModalState = {
   source: "selected" | "filtered";
 } | null;
 
+// Task 6: rows with an outstanding referral/replacement request, or that were
+// actually replaced, are no longer hidden from the queue — they're shown with
+// a distinct color instead. Pure helper (no closure state beyond its params),
+// so it lives at module scope alongside the other pure helpers in this file.
+function rowStatusClass(
+  entry: DistributionEntry,
+  pendingReferralIds: Set<string>,
+  pendingReplacementIds: Set<string>
+): string | undefined {
+  if (entry.status === "replaced") return "dt-tr--resolved";
+  if (pendingReferralIds.has(entry.xrayImageId) || pendingReplacementIds.has(entry.xrayImageId)) {
+    return "dt-tr--pending";
+  }
+  return undefined;
+}
+
 export default function XrayReferrals({ directoryHandle }: Props) {
   const session  = readSession();
   const username = session?.username ?? "";
@@ -141,6 +159,8 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   const selMonth = globalMonth.kind === "existing" ? globalMonth.folderName : "";
   const [entries, setEntries]       = useState<DistributionEntry[]>([]);
   const [allEntries, setAllEntries] = useState<DistributionEntry[]>([]);
+  const [pendingReferralIds, setPendingReferralIds] = useState<Set<string>>(new Set());
+  const [pendingReplacementIds, setPendingReplacementIds] = useState<Set<string>>(new Set());
   const [tplIndex, setTplIndex]     = useState<Array<{ templateId: string; templateName: string; version: number }>>([]);
   const [selTplId, setSelTplId]     = useState("");
   const [activeTpl, setActiveTpl]   = useState<TemplateSchema | null>(null);
@@ -328,22 +348,34 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     }
   }, [selMonth]);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (opts?: { silent?: boolean }) => {
     // Invalidate any in-flight load first — even the no-month early return must
     // stale older loads, or a truthy→"" selMonth transition would let an in-flight
     // load commit stale rows over the empty-ready state.
     const token = ++loadTokenRef.current;
     if (!selMonth) return;
-    setLoadState("loading");
-    setSelEntryId(null);
-    setSelectedIds(new Set());
+    // `silent` is set only by the background/manual data-refresh signal below, never
+    // by a real month/user change. Flipping loadState to "loading" unmounts the whole
+    // detail-panel block (see the `loadState === "ready" || "idle"` render gate further
+    // down), and clearing selEntryId/selectedIds drops whatever selection was active —
+    // together they force-close an employee's open inspection form and, with it, any
+    // in-progress answer draft InspectionPanel is holding in local state but hasn't
+    // saved yet. A silent refresh must re-fetch and swap the underlying rows in place
+    // while leaving the current selection and panel mounted.
+    const silent = opts?.silent ?? false;
+    if (!silent) {
+      setLoadState("loading");
+      setSelEntryId(null);
+      setSelectedIds(new Set());
+    }
     try {
       // Load sample.master first — its rows are the only ones needed for the
       // distribution derivation. population.final.json is NOT loaded here;
       // it is loaded lazily only when the replacement dialog opens.
-      const [sample, referralLog] = await Promise.all([
+      const [sample, referralLog, replacementLog] = await Promise.all([
         loadSampleMaster(directoryHandle, selMonth),
         loadReferralLog(directoryHandle, selMonth),
+        loadReplacementLog(directoryHandle, selMonth),
       ]);
       const sampleRows = (sample?.rows ?? []) as PreparedPopulationRow[];
       const dist = await loadOrDeriveDistributionCurrent(directoryHandle, selMonth, sampleRows);
@@ -352,20 +384,16 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         : await loadEmployeeSampleMirror(directoryHandle, selMonth, username);
       const all = dist?.entries ?? personalMirror?.entries ?? [];
 
-      // Samples with a pending outgoing referral are hidden from the requesting employee
-      const pendingIds = canSeeAll ? new Set<string>() : getPendingReferralIds(referralLog, username);
+      const pendingReferralIds = canSeeAll ? new Set<string>() : getPendingReferralIds(referralLog, username);
+      const pendingReplacementIds = canSeeAll ? new Set<string>() : getPendingReplacementIds(replacementLog, username);
 
-      // Filter over `all` (fresh derived dist first; the personal mirror is only
-      // the fallback baked into `all` when dist is null). Preferring the mirror
-      // here would show a stale snapshot even when a fresh derivation exists.
+      // No longer excludes pending/replaced rows — they're shown with a
+      // distinct color instead (see rowStatusClass below, wired into
+      // getRowClassName in the render). Only the assignedTo/canSeeAll scoping
+      // remains a real filter.
       const visible = canSeeAll
         ? all
-        : all.filter(
-            (e) =>
-              e.assignedTo === username &&
-              e.status !== "replaced" &&
-              !pendingIds.has(e.xrayImageId)
-          );
+        : all.filter((e) => e.assignedTo === username);
 
       // Extract frozen daily quota for the current employee.
       const quota: PersonalQuota = dist?.quotas?.[username]
@@ -386,12 +414,23 @@ export default function XrayReferrals({ directoryHandle }: Props) {
 
       setAllEntries(all);
       setEntries(visible);
+      setPendingReferralIds(pendingReferralIds);
+      setPendingReplacementIds(pendingReplacementIds);
       setSampleMaster(sample);
       setMyQuota(quota);
       setAnswers(answerItems);
       setLoadState("ready");
-    } catch {
-      if (token === loadTokenRef.current) setLoadState("error");
+    } catch (err) {
+      if (token !== loadTokenRef.current) return;
+      // A silent background refresh must not force-close an open inspection form on
+      // a transient read hiccup — log it for observability and leave the current
+      // selection/panel exactly as it was; the next successful refresh (or manual
+      // navigation) will recover the data.
+      if (silent) {
+        logError("xrayReferrals:loadData:silentRefresh", err);
+        return;
+      }
+      setLoadState("error");
     }
   }, [directoryHandle, selMonth, username, canSeeAll]);
   /* eslint-enable react-hooks/preserve-manual-memoization */
@@ -401,8 +440,10 @@ export default function XrayReferrals({ directoryHandle }: Props) {
 
   // Re-fetch on the app-wide refresh signal (manual toolbar button + 5-minute
   // auto-refresh) so a referral/reassignment made by someone else -- or on
-  // another machine -- shows up without navigating away and back.
-  useEffect(() => subscribeToDataRefresh(loadData), [loadData]);
+  // another machine -- shows up without navigating away and back. Passed silently
+  // so it never force-closes an employee's currently open inspection form (see the
+  // `silent` handling inside loadData above).
+  useEffect(() => subscribeToDataRefresh(() => { void loadData({ silent: true }); }), [loadData]);
 
   async function handleTplSelect(id: string): Promise<void> {
     await applyTemplate(id, canSetTemplate);
@@ -840,7 +881,9 @@ export default function XrayReferrals({ directoryHandle }: Props) {
               expandedKey={selEntryId}
               onRowClick={(e) => setSelEntryId(e.xrayImageId)}
               getRowClassName={(entry) =>
-                isStudyCompleted(entry, answersMap) ? "dt-tr--completed" : undefined
+                isStudyCompleted(entry, answersMap)
+                  ? "dt-tr--completed"
+                  : rowStatusClass(entry, pendingReferralIds, pendingReplacementIds)
               }
               toolbarEndExtra={
                 canSeeAll ? (

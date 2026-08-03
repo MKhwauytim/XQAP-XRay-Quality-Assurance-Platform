@@ -10,7 +10,7 @@
 // the real component against a memory workspace and assert the control is simply
 // absent, not merely "would fail if clicked".
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createMemoryDirectory } from "../../../../../data/storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../../../../../data/storage/fileSystemAccess";
 import { clearSession, writeSession } from "../../../../../auth/authSession";
@@ -22,12 +22,20 @@ import {
 import { saveSampleMaster } from "../../../../../data/sampling/sampleStorage";
 import type { SampleMasterData } from "../../../../../data/sampling/sampleTypes";
 import { appendDistributionEvents } from "../../../../../data/distribution/distributionStorage";
-import { buildAssignEvent } from "../../../../../data/distribution/distributionLog";
+import { buildAssignEvent, buildReplacedEvent } from "../../../../../data/distribution/distributionLog";
 import { upsertItemAnswer } from "../../../../../data/answers/answerStorage";
+import {
+  appendReferralRequest,
+  appendReplacementRequest,
+} from "../../../../../data/referral/referralStorage";
 import type { ItemAnswer } from "../../../../../data/answers/answerTypes";
 import type { PreparedPopulationRow } from "../../../../../data/population/populationTypes";
 import { clearErrors, getRecentErrors } from "../../../../../data/storage/errorLogger";
 import { getReplacementCandidatesIndexed } from "../../../../../data/distribution/replacementCandidateLookup";
+import { broadcastDataRefresh } from "../../../../../data/workspace/dataRefreshSignal";
+import { saveTemplate } from "../../../../../data/templates/templateStorage";
+import { saveInspectionTemplateSelection } from "../../../../../data/templates/templateSelectionStorage";
+import type { TemplateSchema } from "../../../../../data/templates/templateTypes";
 import XrayReferrals from "./XrayReferrals";
 
 const MONTH = "5-may-2026";
@@ -259,5 +267,160 @@ describe("XrayReferrals replacement-candidate lookup error handling", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(screen.getByText("الموصى بها (0)")).toBeInTheDocument();
     expect(screen.getByText("كل البدائل (0)")).toBeInTheDocument();
+  });
+});
+
+describe("XrayReferrals background data-refresh vs. an open inspection form", () => {
+  it("does not discard an in-progress, unsaved answer draft when the app-wide data-refresh signal fires (5-minute auto-refresh / manual toolbar button)", async () => {
+    writeSession({ role: "employee", username: "emp-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root");
+    await seedAssignedSample(root, "emp-1");
+
+    // Seed and select an inspection template with one free-text field so the
+    // detail panel renders an editable input to type an unsaved draft into.
+    const template: TemplateSchema = {
+      templateId: "tmpl-draft-test",
+      templateName: "قالب الاختبار",
+      version: 1,
+      createdAt: new Date().toISOString(),
+      createdBy: "admin",
+      updatedAt: new Date().toISOString(),
+      updatedBy: "admin",
+      fields: [{ fieldId: "note", label: "ملاحظة", type: "text", required: false, options: [] }],
+    };
+    const savedTpl = await saveTemplate(root, template);
+    if (!savedTpl.ok) throw new Error(`seed template failed: ${savedTpl.error}`);
+    const savedSelection = await saveInspectionTemplateSelection(root, {
+      templateId: template.templateId,
+      updatedAt: new Date().toISOString(),
+      updatedBy: "admin",
+    });
+    if (!savedSelection.ok) throw new Error(`seed template selection failed: ${savedSelection.error}`);
+
+    render(<XrayReferrals directoryHandle={root} />);
+
+    await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
+
+    // Waited for explicitly: the detail panel's field only appears once the
+    // auto-select-first-row effect commits and the seeded template finishes loading.
+    const noteInput = await waitFor(() => screen.getByLabelText("ملاحظة")) as HTMLInputElement;
+    fireEvent.change(noteInput, { target: { value: "مسودة غير محفوظة" } });
+    expect(noteInput.value).toBe("مسودة غير محفوظة");
+
+    // Simulate the app-wide data-refresh signal (AuthGate's 5-minute timer or the
+    // manual toolbar refresh button) firing while the form is still open and unsaved.
+    act(() => {
+      broadcastDataRefresh();
+    });
+
+    // Previously: loadData's unconditional setLoadState("loading") + setSelEntryId(null)
+    // unmounted the whole detail-panel block, so the "جاري التحميل..." placeholder briefly
+    // took over and the panel remounted from scratch afterward, wiping the draft above.
+    expect(screen.queryByText("جاري التحميل...")).not.toBeInTheDocument();
+
+    // Let the silent refresh's async reload settle, then confirm the draft survived.
+    await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
+    const noteInputAfter = screen.getByLabelText("ملاحظة") as HTMLInputElement;
+    expect(noteInputAfter.value).toBe("مسودة غير محفوظة");
+  });
+});
+
+// Locates the <tr> for a given xrayImageId's cell among possibly multiple text
+// matches on the page (the same id can also render inside the detail panel).
+function findRowByXrayImageId(id: string): HTMLElement {
+  const matches = screen.getAllByText(id);
+  const row = matches.map((el) => el.closest("tr")).find((tr): tr is HTMLTableRowElement => tr !== null);
+  if (!row) throw new Error(`no <tr> found containing "${id}"`);
+  return row;
+}
+
+describe("XrayReferrals pending/resolved row coloring (Task 6)", () => {
+  it("shows a row with a pending referral request instead of hiding it (Task 6)", async () => {
+    writeSession({ role: "employee", username: "emp-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root");
+    await seedAssignedSample(root, "emp-1");
+
+    // Previously: getPendingReferralIds hid this row entirely from the queue.
+    const referralResult = await appendReferralRequest(root, MONTH, {
+      requestId: "ref-1",
+      monthFolderName: MONTH,
+      fromEmployee: "emp-1",
+      toEmployee: "emp-2",
+      xrayImageIds: ["IMG-1"],
+      reason: "test reason",
+      requestedAt: new Date().toISOString(),
+      requestedBy: "emp-1",
+      status: "pending",
+    });
+    if (!referralResult.ok) throw new Error(`seed referral failed: ${referralResult.error}`);
+
+    render(<XrayReferrals directoryHandle={root} />);
+
+    await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
+
+    const row = findRowByXrayImageId("IMG-1");
+    expect(row).toHaveClass("dt-tr--pending");
+  });
+
+  it("shows a row with a pending replacement request instead of hiding it (Task 6)", async () => {
+    writeSession({ role: "employee", username: "emp-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root");
+    await seedAssignedSample(root, "emp-1");
+
+    // Non-recommended replace path — files a pending ReplacementRequest with no
+    // equivalent filter existing before this task.
+    const replacementResult = await appendReplacementRequest(root, MONTH, {
+      requestId: "rep-1",
+      monthFolderName: MONTH,
+      employeeUsername: "emp-1",
+      originalXrayImageId: "IMG-1",
+      replacementXrayImageId: "IMG-2",
+      reason: "blurry",
+      requestedAt: new Date().toISOString(),
+      requestedBy: "emp-1",
+      status: "pending",
+    });
+    if (!replacementResult.ok) throw new Error(`seed replacement failed: ${replacementResult.error}`);
+
+    render(<XrayReferrals directoryHandle={root} />);
+
+    await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
+
+    const row = findRowByXrayImageId("IMG-1");
+    expect(row).toHaveClass("dt-tr--pending");
+  });
+
+  it("shows a resolved (replaced) row with a distinct color, not hidden", async () => {
+    writeSession({ role: "employee", username: "emp-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root");
+    await seedAssignedSample(root, "emp-1");
+
+    // Previously: `all.filter(... e.status !== "replaced" ...)` hid this row
+    // for the assigned employee entirely.
+    const replaceEventResult = await appendDistributionEvents(root, MONTH, [
+      buildReplacedEvent({
+        xrayImageId: "IMG-1",
+        assignedTo: "emp-1",
+        replacedById: "IMG-2",
+        eventBy: "emp-1",
+      }),
+    ]);
+    if (!replaceEventResult.ok) throw new Error(`seed replaced event failed: ${replaceEventResult.error}`);
+
+    render(<XrayReferrals directoryHandle={root} />);
+
+    await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
+
+    const row = findRowByXrayImageId("IMG-1");
+    expect(row).toHaveClass("dt-tr--resolved");
+    expect(row).not.toHaveClass("dt-tr--pending");
   });
 });

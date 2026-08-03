@@ -86,6 +86,18 @@ export function getPendingReferralIds(log: ReferralLog, fromEmployee: string): S
   return ids;
 }
 
+/** Returns the set of xrayImageIds (the ORIGINAL, being-replaced id) that are
+ *  currently in a pending replacement request from the given employee. */
+export function getPendingReplacementIds(log: ReplacementLog, employeeUsername: string): Set<string> {
+  const ids = new Set<string>();
+  for (const req of log.requests) {
+    if (req.employeeUsername === employeeUsername && req.status === "pending") {
+      ids.add(req.originalXrayImageId);
+    }
+  }
+  return ids;
+}
+
 // ── Replacement requests ──────────────────────────────────────────────────────
 
 /** Append a replacement request to the requesting employee's personal file (no shared file, no conflicts). */

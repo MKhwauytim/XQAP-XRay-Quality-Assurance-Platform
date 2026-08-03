@@ -9,8 +9,9 @@ import {
   appendReplacementRequest,
   loadReplacementLog,
   updateReplacementStatus,
+  getPendingReplacementIds,
 } from "./referralStorage";
-import type { ReferralRequest, ReplacementRequest } from "./referralTypes";
+import type { ReferralRequest, ReplacementLog, ReplacementRequest } from "./referralTypes";
 
 describe("referralStorage", () => {
   const mockReferral = (id: string, from: string, to: string, status: ReferralRequest["status"] = "pending"): ReferralRequest => ({
@@ -218,5 +219,57 @@ describe("replacement requests in referralStorage", () => {
     // First-wins: earliest decision (denied) stands; later approval is in history.
     expect(log.requests[0].status).toBe("denied");
     expect(log.requests[0].history).toHaveLength(2);
+  });
+});
+
+describe("getPendingReplacementIds (Task 6)", () => {
+  it("returns the originalXrayImageId of pending replacement requests for the given employee", () => {
+    const log: ReplacementLog = {
+      monthFolderName: "5-May-2026",
+      revision: 0,
+      requests: [
+        {
+          requestId: "r1",
+          monthFolderName: "5-May-2026",
+          employeeUsername: "alice",
+          originalXrayImageId: "img-1",
+          replacementXrayImageId: "img-2",
+          reason: "test",
+          requestedAt: new Date().toISOString(),
+          requestedBy: "alice",
+          status: "pending",
+        },
+        {
+          requestId: "r2",
+          monthFolderName: "5-May-2026",
+          employeeUsername: "alice",
+          originalXrayImageId: "img-3",
+          replacementXrayImageId: "img-4",
+          reason: "test",
+          requestedAt: new Date().toISOString(),
+          requestedBy: "alice",
+          status: "approved",
+        },
+        {
+          requestId: "r3",
+          monthFolderName: "5-May-2026",
+          employeeUsername: "bob",
+          originalXrayImageId: "img-5",
+          replacementXrayImageId: "img-6",
+          reason: "test",
+          requestedAt: new Date().toISOString(),
+          requestedBy: "bob",
+          status: "pending",
+        },
+      ],
+    };
+
+    const ids = getPendingReplacementIds(log, "alice");
+    expect(ids).toEqual(new Set(["img-1"]));
+  });
+
+  it("returns an empty set when the employee has no pending replacement requests", () => {
+    const log: ReplacementLog = { monthFolderName: "5-May-2026", revision: 0, requests: [] };
+    expect(getPendingReplacementIds(log, "alice")).toEqual(new Set());
   });
 });
