@@ -62,9 +62,18 @@ test("checkWorkspaceStructure checks top-level folders concurrently, not one at 
 
   await checkWorkspaceStructure(tracked);
 
-  // 6 top-level folders are checked in the first phase -- if they still ran
-  // one at a time, peak would never exceed 1.
-  expect(peak).toBeGreaterThan(1);
+  // `tracked` only wraps getDirectoryHandle on the top-level directoryHandle
+  // object, so it also counts the required-file-root phase's 2 concurrent
+  // getSystemRoot/getUserDataRoot calls (both resolve via that same object) --
+  // but that phase alone can only ever reach a peak of 2. The top-folder
+  // phase is the only one that can reach all 6 of allTopFolders (6 entries:
+  // REQUIRED_WORKSPACE_FOLDERS, TOP_LEVEL_DATA_FOLDERS is currently empty)
+  // concurrently, so >= 6 can only pass if that phase specifically still runs
+  // concurrently -- a >1 threshold would stay green even if just the
+  // top-folder loop (the one with the most items, and the one this task's
+  // commit specifically calls out as the network-share win) regressed back to
+  // sequential, since the file-root phase's peak of 2 would still clear it.
+  expect(peak).toBeGreaterThanOrEqual(6);
 });
 
 test("writeJsonFile produces a .bak snapshot on the second write", async () => {
