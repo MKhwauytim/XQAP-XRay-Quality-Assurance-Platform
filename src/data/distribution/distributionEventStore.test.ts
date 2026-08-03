@@ -64,3 +64,40 @@ describe("immutable distribution event store", () => {
     expect(loaded.events.map((event) => event.xrayImageId)).toEqual(["old", "new"]);
   });
 });
+
+describe("loadImmutableDistributionEvents — concurrency-safe (Task 4)", () => {
+  it("reads a large batch of events and returns them sorted, regardless of read concurrency", async () => {
+    const root = createMemoryDirectory();
+    const dir = await getSampleMainDir(root, "5-May-2026", true);
+    const events = Array.from({ length: 25 }, (_, i) =>
+      buildAssignEvent({
+        xrayImageId: `img-${i}`,
+        assignedTo: "alice",
+        eventBy: "admin",
+      })
+    ).map((event, i) => ({ ...event, eventAt: `2026-05-01T${String(10 + (i % 14)).padStart(2, "0")}:00:00.000Z` }));
+
+    for (const event of events) {
+      await writeImmutableDistributionEvent(dir, event);
+    }
+
+    const loaded = await loadImmutableDistributionEvents(dir);
+    expect(loaded).toHaveLength(25);
+    const sortedIds = [...events]
+      .sort((a, b) => a.eventAt.localeCompare(b.eventAt) || a.eventId.localeCompare(b.eventId))
+      .map((e) => e.eventId);
+    expect(loaded.map((e) => e.eventId)).toEqual(sortedIds);
+  });
+
+  it("still throws when an event file is corrupt", async () => {
+    const root = createMemoryDirectory();
+    const dir = await getSampleMainDir(root, "5-May-2026", true);
+    const eventsDir = await dir.getDirectoryHandle("distribution.events", { create: true });
+    const handle = await eventsDir.getFileHandle("00000000-0000-4000-8000-000000000000.json", { create: true });
+    const writable = await handle.createWritable!();
+    await writable.write("{not valid json");
+    await writable.close();
+
+    await expect(loadImmutableDistributionEvents(dir)).rejects.toThrow(/Cannot read immutable distribution event/);
+  });
+});

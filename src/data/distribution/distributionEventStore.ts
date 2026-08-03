@@ -1,27 +1,9 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { readJsonDirectory } from "../storage/directoryScan";
 import type { DistributionEvent } from "./distributionTypes";
 
 export const DISTRIBUTION_EVENTS_DIR = "distribution.events";
-
-type DirectoryEntryLike = { kind: "file" | "directory"; name: string };
-
-function getDirectoryEntries(dir: DirectoryHandleLike): AsyncIterable<DirectoryEntryLike> | null {
-  const candidate = dir as DirectoryHandleLike & {
-    values?: () => AsyncIterable<DirectoryEntryLike>;
-    entries?: () => AsyncIterable<[string, DirectoryEntryLike]>;
-    [Symbol.asyncIterator]?: () => AsyncIterator<DirectoryEntryLike>;
-  };
-  if (candidate.values) return candidate.values();
-  if (candidate.entries) {
-    const entries = candidate.entries();
-    return (async function* () {
-      for await (const [, entry] of entries) yield entry;
-    })();
-  }
-  if (candidate[Symbol.asyncIterator]) return candidate as AsyncIterable<DirectoryEntryLike>;
-  return null;
-}
 
 function eventFileName(eventId: string): string {
   // Generated event ids are UUID-based. Rejecting instead of sanitizing avoids
@@ -88,18 +70,12 @@ export async function loadImmutableDistributionEvents(
     return [];
   }
 
-  const entries = getDirectoryEntries(eventsDir);
-  if (!entries) return [];
-  const events: DistributionEvent[] = [];
-  for await (const entry of entries) {
-    if (entry.kind !== "file" || !entry.name.endsWith(".json")) continue;
-    const result = await safeReadJson<DistributionEvent>(eventsDir, entry.name);
-    if (!result.ok) {
-      throw new Error(`Cannot read immutable distribution event: ${entry.name}`);
-    }
-    events.push(result.value);
-  }
-  return events.sort((a, b) => a.eventAt.localeCompare(b.eventAt) || a.eventId.localeCompare(b.eventId));
+  const { values } = await readJsonDirectory<DistributionEvent>(eventsDir, {
+    suffix: ".json",
+    onUnreadable: "throw",
+    unreadableError: (name) => `Cannot read immutable distribution event: ${name}`,
+  });
+  return values.sort((a, b) => a.eventAt.localeCompare(b.eventAt) || a.eventId.localeCompare(b.eventId));
 }
 
 export function distributionEventSetId(events: DistributionEvent[]): string {
