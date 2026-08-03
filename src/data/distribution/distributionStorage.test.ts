@@ -8,9 +8,11 @@ import {
   saveDistributionCurrent,
 } from "./distributionStorage";
 import { DERIVE_VERSION, buildAssignEvent, deriveCurrentDistribution } from "./distributionLog";
+import { writeImmutableDistributionEvent } from "./distributionEventStore";
 import type { DistributionCurrentData } from "./distributionTypes";
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import { getSampleMainDir } from "../workspace/workspacePaths";
 
 function makeRow(id: string): PreparedPopulationRow {
   return {
@@ -186,5 +188,29 @@ describe("distributionStorage", () => {
     const zeroed = deriveCurrentDistribution(log, []);
     expect(zeroed.entries).toHaveLength(0);
     expect(zeroed.totalAssigned).toBe(0);
+  });
+});
+
+describe("readCurrentDistributionSource via incremental cache (Task: §H Layer 2)", () => {
+  it("produces the same merged, sorted event list on a warm cache as a cold read", async () => {
+    const root = await makeRoot();
+    const month = "5-May-2026";
+    const dir = await getSampleMainDir(root, month, true);
+    const e1 = { ...buildAssignEvent({ xrayImageId: "A1", assignedTo: "alice", eventBy: "admin" }), eventAt: "2026-05-01T09:00:00.000Z" };
+    const e2 = { ...buildAssignEvent({ xrayImageId: "A2", assignedTo: "bob", eventBy: "admin" }), eventAt: "2026-05-01T10:00:00.000Z" };
+    await writeImmutableDistributionEvent(dir, e1);
+    await writeImmutableDistributionEvent(dir, e2);
+
+    const cold = await loadDistributionLog(root, month);
+    // Second call is a warm-cache hit for e1/e2 -- add a third event first so
+    // this call also exercises the "only new files read" incremental path.
+    const e3 = { ...buildAssignEvent({ xrayImageId: "A3", assignedTo: "carol", eventBy: "admin" }), eventAt: "2026-05-01T08:00:00.000Z" }; // earlier than e1/e2
+    await writeImmutableDistributionEvent(dir, e3);
+    const warm = await loadDistributionLog(root, month);
+
+    expect(warm.events.map((e) => e.eventId)).toEqual(
+      [e3, e1, e2].map((e) => e.eventId) // sorted by eventAt: e3 (08:00) < e1 (09:00) < e2 (10:00)
+    );
+    expect(cold.events.map((e) => e.eventId).sort()).toEqual([e1.eventId, e2.eventId].sort());
   });
 });

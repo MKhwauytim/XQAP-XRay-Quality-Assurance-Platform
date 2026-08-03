@@ -9,12 +9,13 @@ import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { readEnvelopeRevision, safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { logError, logRejection } from "../storage/errorLogger";
 import { casLoop } from "../storage/casLoop";
+import { readAppendOnlyDirectory } from "../storage/directoryScan";
 import { ensureMonthWritable } from "../population/monthLock";
 import { syncSampleMirrors } from "../samples/sampleMirrorStorage";
 import { getPopulationMonthDir, getSampleMainDir } from "../workspace/workspacePaths";
 import {
+  DISTRIBUTION_EVENTS_DIR,
   distributionEventSetId,
-  loadImmutableDistributionEvents,
   mergeDistributionEvents,
   writeImmutableDistributionEvent,
 } from "./distributionEventStore";
@@ -110,9 +111,25 @@ async function readCurrentDistributionSource(
   );
   // Existing immutable event directories are strict: corrupt/unreadable files
   // propagate so no caller can derive a silently incomplete snapshot.
-  const immutableEvents = directory
-    ? await loadImmutableDistributionEvents(directory)
-    : [];
+  if (!directory) return { currentLog, immutableEvents: [] };
+  let eventsDir: DirectoryHandleLike;
+  try {
+    eventsDir = await directory.getDirectoryHandle(DISTRIBUTION_EVENTS_DIR, { create: false });
+  } catch {
+    return { currentLog, immutableEvents: [] };
+  }
+  const { values } = await readAppendOnlyDirectory<DistributionEvent>(eventsDir, {
+    suffix: ".json",
+    onUnreadable: "throw",
+    unreadableError: (name) => `Cannot read immutable distribution event: ${name}`,
+    scope: { root: directoryHandle, path: `${monthFolderName}/1-main/${DISTRIBUTION_EVENTS_DIR}` },
+  });
+  // Re-sort: the fold is order-sensitive, and a new event with an earlier
+  // eventAt than a cached one must still land in the right place -- the
+  // cache's own internal order is by-filename, not by-eventAt.
+  const immutableEvents = [...values].sort(
+    (a, b) => a.eventAt.localeCompare(b.eventAt) || a.eventId.localeCompare(b.eventId)
+  );
   return { currentLog, immutableEvents };
 }
 

@@ -1,8 +1,15 @@
 import { describe, it, expect } from "vitest";
-import { createMemoryDirectory } from "./memoryDirectory";
+import { createMemoryDirectory, getReadLog, clearReadLog } from "./memoryDirectory";
 import { safeWriteJson } from "./safeWrite";
 import type { DirectoryHandleLike, FileHandleLike } from "./fileSystemAccess";
-import { listDirectoryEntries, readJsonDirectory, DIRECTORY_READ_CONCURRENCY } from "./directoryScan";
+import {
+  listDirectoryEntries,
+  readJsonDirectory,
+  DIRECTORY_READ_CONCURRENCY,
+  readAppendOnlyDirectory,
+  resetAppendOnlyDirectoryCache,
+  __appendOnlyCacheStatsForTests,
+} from "./directoryScan";
 
 type Widget = { id: string };
 
@@ -213,5 +220,94 @@ describe("readJsonDirectory", () => {
 
     const negative = await readJsonDirectory<Widget>(dir, { suffix: ".widget.json", onUnreadable: "skip", concurrency: -3 });
     expect(negative.values.map((w) => w.id)).toEqual(["only"]);
+  });
+});
+
+describe("readAppendOnlyDirectory (Task: incremental cache)", () => {
+  it("cold read reads every matching file once", async () => {
+    resetAppendOnlyDirectoryCache();
+    const root = createMemoryDirectory("root", { trackReads: true });
+    const dir = await root.getDirectoryHandle("events", { create: true });
+    await safeWriteJson<Widget>(dir, "a.widget.json", { id: "a" });
+    await safeWriteJson<Widget>(dir, "b.widget.json", { id: "b" });
+
+    clearReadLog(root);
+    const result = await readAppendOnlyDirectory<Widget>(dir, {
+      suffix: ".widget.json",
+      onUnreadable: "skip",
+      scope: { root, path: "events" },
+    });
+    expect(result.values.map((w) => w.id).sort()).toEqual(["a", "b"]);
+    expect(getReadLog(root)).toHaveLength(2);
+  });
+
+  it("warm read with no new files performs zero file reads", async () => {
+    resetAppendOnlyDirectoryCache();
+    const root = createMemoryDirectory("root", { trackReads: true });
+    const dir = await root.getDirectoryHandle("events", { create: true });
+    await safeWriteJson<Widget>(dir, "a.widget.json", { id: "a" });
+
+    await readAppendOnlyDirectory<Widget>(dir, { suffix: ".widget.json", onUnreadable: "skip", scope: { root, path: "events" } });
+    clearReadLog(root);
+    const result = await readAppendOnlyDirectory<Widget>(dir, { suffix: ".widget.json", onUnreadable: "skip", scope: { root, path: "events" } });
+    expect(result.values.map((w) => w.id)).toEqual(["a"]);
+    expect(getReadLog(root)).toHaveLength(0);
+  });
+
+  it("reads only the new file when one is added between calls", async () => {
+    resetAppendOnlyDirectoryCache();
+    const root = createMemoryDirectory("root", { trackReads: true });
+    const dir = await root.getDirectoryHandle("events", { create: true });
+    await safeWriteJson<Widget>(dir, "a.widget.json", { id: "a" });
+    await readAppendOnlyDirectory<Widget>(dir, { suffix: ".widget.json", onUnreadable: "skip", scope: { root, path: "events" } });
+
+    await safeWriteJson<Widget>(dir, "b.widget.json", { id: "b" });
+    clearReadLog(root);
+    const result = await readAppendOnlyDirectory<Widget>(dir, { suffix: ".widget.json", onUnreadable: "skip", scope: { root, path: "events" } });
+    expect(result.values.map((w) => w.id).sort()).toEqual(["a", "b"]);
+    expect(getReadLog(root)).toHaveLength(1);
+  });
+
+  it("full re-reads when a previously-seen file disappears (restore/rename)", async () => {
+    resetAppendOnlyDirectoryCache();
+    const root = createMemoryDirectory("root", { trackReads: true });
+    const dir = await root.getDirectoryHandle("events", { create: true });
+    await safeWriteJson<Widget>(dir, "a.widget.json", { id: "a" });
+    await safeWriteJson<Widget>(dir, "b.widget.json", { id: "b" });
+    await readAppendOnlyDirectory<Widget>(dir, { suffix: ".widget.json", onUnreadable: "skip", scope: { root, path: "events" } });
+
+    await dir.removeEntry?.("a.widget.json");
+    const before = __appendOnlyCacheStatsForTests().fullRereads;
+    const result = await readAppendOnlyDirectory<Widget>(dir, { suffix: ".widget.json", onUnreadable: "skip", scope: { root, path: "events" } });
+    expect(result.values.map((w) => w.id)).toEqual(["b"]);
+    expect(__appendOnlyCacheStatsForTests().fullRereads).toBe(before + 1);
+  });
+
+  it("two different workspace roots with the same path never share cache entries", async () => {
+    resetAppendOnlyDirectoryCache();
+    const rootA = createMemoryDirectory("A");
+    const rootB = createMemoryDirectory("B");
+    const dirA = await rootA.getDirectoryHandle("events", { create: true });
+    const dirB = await rootB.getDirectoryHandle("events", { create: true });
+    await safeWriteJson<Widget>(dirA, "a.widget.json", { id: "only-in-a" });
+    await safeWriteJson<Widget>(dirB, "b.widget.json", { id: "only-in-b" });
+
+    const resultA = await readAppendOnlyDirectory<Widget>(dirA, { suffix: ".widget.json", onUnreadable: "skip", scope: { root: rootA, path: "events" } });
+    const resultB = await readAppendOnlyDirectory<Widget>(dirB, { suffix: ".widget.json", onUnreadable: "skip", scope: { root: rootB, path: "events" } });
+    expect(resultA.values.map((w) => w.id)).toEqual(["only-in-a"]);
+    expect(resultB.values.map((w) => w.id)).toEqual(["only-in-b"]);
+  });
+
+  it("resetAppendOnlyDirectoryCache forces the next read to be a full re-read", async () => {
+    resetAppendOnlyDirectoryCache();
+    const root = createMemoryDirectory("root", { trackReads: true });
+    const dir = await root.getDirectoryHandle("events", { create: true });
+    await safeWriteJson<Widget>(dir, "a.widget.json", { id: "a" });
+    await readAppendOnlyDirectory<Widget>(dir, { suffix: ".widget.json", onUnreadable: "skip", scope: { root, path: "events" } });
+
+    resetAppendOnlyDirectoryCache(root);
+    clearReadLog(root);
+    await readAppendOnlyDirectory<Widget>(dir, { suffix: ".widget.json", onUnreadable: "skip", scope: { root, path: "events" } });
+    expect(getReadLog(root)).toHaveLength(1);
   });
 });
