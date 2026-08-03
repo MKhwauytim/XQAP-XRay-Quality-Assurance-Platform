@@ -3,7 +3,7 @@ import { CalendarOff, StickyNote } from "lucide-react";
 import { readSession } from "../../../../../auth/authSession";
 import { usePermissions } from "../../../../../auth/usePermissions";
 import { PageHeader } from "../../../../../components/PageHeader/PageHeader";
-import { logRejection } from "../../../../../data/storage/errorLogger";
+import { logError, logRejection } from "../../../../../data/storage/errorLogger";
 import { EmptyState, ErrorState, LoadingState } from "../../../../../components/StateViews/StateViews";
 import DataTable, {
   type CellMeta,
@@ -22,8 +22,8 @@ import {
 } from "../../../../../data/answers/answerStorage";
 import type { ItemAnswer } from "../../../../../data/answers/answerTypes";
 import {
-  loadDistributionLog,
-  loadOrDeriveDistributionCurrent,
+  loadDistributionLogForRead,
+  loadOrDeriveDistributionCurrentForRead,
 } from "../../../../../data/distribution/distributionStorage";
 import type { DistributionEntry, DistributionEvent } from "../../../../../data/distribution/distributionTypes";
 import {
@@ -209,12 +209,22 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
   // Load-token guard (mirrors useApprovalData): a slow load for a previously
   // selected month must not clobber a later selection or the falsy-reset above.
   const loadTokenRef = useRef(0);
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (opts?: { silent?: boolean }) => {
     const token = ++loadTokenRef.current;
     if (!selectedMonth) return;
-    setLoadState("loading");
-    setExpandedRowKey(null);
-    setQualityNoteError(null);
+    // `silent` is set only by the background/manual data-refresh signal below, never
+    // by a real month/user change. Flipping loadState to "loading" unmounts the results
+    // DataTable entirely (see the `loadState === "ready"` render gate below), and resetting
+    // expandedRowKey/qualityNoteError force-collapses whatever row a supervisor has open —
+    // discarding an in-progress, unsaved QualityNoteEditor draft (its local useState is
+    // never autosaved). A silent refresh must re-fetch and swap rows in place while leaving
+    // the expanded panel and its draft exactly as they were.
+    const silent = opts?.silent ?? false;
+    if (!silent) {
+      setLoadState("loading");
+      setExpandedRowKey(null);
+      setQualityNoteError(null);
+    }
     try {
       const [sampleMaster, selection, referralLog, replacementLog] = await Promise.all([
         loadSampleMaster(directoryHandle, selectedMonth),
@@ -223,12 +233,12 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
         loadReplacementLog(directoryHandle, selectedMonth),
       ]);
 
-      const distribution = await loadOrDeriveDistributionCurrent(
+      const distribution = await loadOrDeriveDistributionCurrentForRead(
         directoryHandle,
         selectedMonth,
         sampleMaster?.rows ?? []
       );
-      const log = await loadDistributionLog(directoryHandle, selectedMonth);
+      const log = await loadDistributionLogForRead(directoryHandle, selectedMonth);
 
       const activeTemplate = selection?.templateId
         ? await loadTemplate(directoryHandle, selection.templateId)
@@ -267,8 +277,17 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
       setAuditReferralRequests(referralLog.requests);
       setAuditReplacementRequests(replacementLog.requests);
       setLoadState("ready");
-    } catch {
-      if (token === loadTokenRef.current) setLoadState("error");
+    } catch (err) {
+      if (token !== loadTokenRef.current) return;
+      // A silent background refresh must not force-close an open quality-note editor
+      // (or the row it belongs to) on a transient read hiccup — log it for observability
+      // and leave the current expanded row/draft exactly as it was; the next successful
+      // refresh (or manual navigation) will recover the data.
+      if (silent) {
+        logError("xrayInspectionResults:loadData:silentRefresh", err);
+        return;
+      }
+      setLoadState("error");
     }
   }, [canSeeAll, directoryHandle, selectedMonth, username]);
 
@@ -280,8 +299,10 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
   }, [loadData]);
 
   // Re-fetch on the app-wide refresh signal (manual toolbar button + 5-minute
-  // auto-refresh) so results/movements recorded elsewhere show up here too.
-  useEffect(() => subscribeToDataRefresh(loadData), [loadData]);
+  // auto-refresh) so results/movements recorded elsewhere show up here too. Passed
+  // silently so it never force-collapses a supervisor's currently open quality-note
+  // editor (see the `silent` handling inside loadData above).
+  useEffect(() => subscribeToDataRefresh(() => { void loadData({ silent: true }); }), [loadData]);
 
   // Pure filter over the raw audit-log state loadData already fetched — buildAuditRows
   // itself takes `mode` and returns [] outright for "active", so re-deriving this on

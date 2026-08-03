@@ -14,6 +14,7 @@ import { getLabels } from "../../../../../data/labels/labelsStore";
 import type { FieldAnswer, ItemAnswer } from "../../../../../data/answers/answerTypes";
 import {
   loadOrDeriveDistributionCurrent,
+  loadOrDeriveDistributionCurrentForRead,
 } from "../../../../../data/distribution/distributionStorage";
 import { subscribeToDataRefresh } from "../../../../../data/workspace/dataRefreshSignal";
 import type { DistributionEntry } from "../../../../../data/distribution/distributionTypes";
@@ -378,7 +379,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         loadReplacementLog(directoryHandle, selMonth),
       ]);
       const sampleRows = (sample?.rows ?? []) as PreparedPopulationRow[];
-      const dist = await loadOrDeriveDistributionCurrent(directoryHandle, selMonth, sampleRows);
+      const dist = await loadOrDeriveDistributionCurrentForRead(directoryHandle, selMonth, sampleRows);
       const personalMirror = canSeeAll
         ? null
         : await loadEmployeeSampleMirror(directoryHandle, selMonth, username);
