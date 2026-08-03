@@ -25,7 +25,6 @@ import {
   isUsernameAvailable,
   normalizeUsername,
   readUserManagementState,
-  subscribeToUserManagementChanges,
   writeUserManagementState,
   type FeaturePermission,
   type ManagedLoginUser,
@@ -170,23 +169,6 @@ export default function UserManagementTab() {
   const canEdit = canMutate("manage-users");
   const canEditPermissions = canMutate("edit-permissions");
   const canResetPasswords = canMutate("reset-passwords");
-
-  // Keep local `state` in lockstep with the shared runtime user-management
-  // state (mirrors App.tsx / usePermissions.ts / NotificationManager.tsx /
-  // WorkspaceGate.tsx, which all subscribe the same way). Without this, a
-  // concurrent admin's disk change picked up via refreshPermissions() (manual
-  // toolbar refresh or AuthGate's 5-minute auto-refresh) only updated the
-  // shared module state -- this tab's own `state` stayed stale, so the next
-  // edit here (`persistState`) would spread that stale snapshot and overwrite
-  // the other admin's change on disk with no conflict indication. Draft-only
-  // local state (`identityEdits`, `resetPasswords`, `form`) lives outside
-  // `UserManagementState` and is keyed by user id, so resyncing `state` here
-  // cannot discard an in-progress, unsaved draft.
-  useEffect(() => {
-    return subscribeToUserManagementChanges(() => {
-      setState(readUserManagementState());
-    });
-  }, []);
 
   useEffect(() => {
     window.dispatchEvent(new CustomEvent("pop-subtab-changed", { detail: section }));
