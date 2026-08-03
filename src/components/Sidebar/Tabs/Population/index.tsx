@@ -70,6 +70,7 @@ import {
 import { getLabels } from "../../../../data/labels/labelsStore";
 import { MonthClosedError } from "../../../../data/population/monthLock";
 import { appendWorkspaceAction } from "../../../../data/audit/actionLog";
+import { touchVisitedTabs } from "../../../../app/visitedTabs";
 
 import "./Population.css";
 import { ConfirmDialog } from "../../../../components/ConfirmDialog/ConfirmDialog";
@@ -170,6 +171,17 @@ export default function PopulationTab() {
   const { can, canMutate } = usePermissions();
   const sessionRef = useRef(readSession());
   const [activeSubTab, setActiveSubTab] = useState<SubTab>("process");
+  // Browse owns its own data-load effect (BrowseDataView) with no
+  // "already loaded" guard; keeping it mounted-but-hidden once visited,
+  // instead of unmounting on every sub-tab switch, avoids re-loading its
+  // full dataset (up to ~400k rows) every time — §M/§T.
+  const [visitedSubTabs, setVisitedSubTabs] = useState<Set<SubTab>>(
+    () => new Set([activeSubTab])
+  );
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mirrors App.tsx's touchTabMountLru effect: the visited set changes in response to navigation
+    setVisitedSubTabs((prev) => touchVisitedTabs(prev, activeSubTab));
+  }, [activeSubTab]);
   const {
     selection: globalMonth,
     setSelectedMonth: setGlobalMonth,
@@ -1097,21 +1109,24 @@ export default function PopulationTab() {
   return (
     <section className="population-page" aria-label="إدارة بيانات الأشعة">
 
-      {/* ── Browse sub-tab ── */}
-      {activeSubTab === "browse" && (
-        canViewBrowse ? (
+      {/* ── Browse sub-tab (mounted once visited, hidden — not unmounted —
+          afterward, so switching away and back doesn't re-load the full
+          dataset; §M/§T) ── */}
+      {visitedSubTabs.has("browse") && canViewBrowse && (
+        <div hidden={activeSubTab !== "browse"}>
           <BrowseDataView
             directoryHandle={directoryHandle}
             refreshKey={monthRefreshKey}
             username={sessionRef.current?.username ?? "unknown"}
             config={config}
           />
-        ) : (
-          <div className="placeholder-phase">
-            <h2>غير مصرح</h2>
-            <p>لا تملك صلاحية استعراض البيانات.</p>
-          </div>
-        )
+        </div>
+      )}
+      {activeSubTab === "browse" && !canViewBrowse && (
+        <div className="placeholder-phase">
+          <h2>غير مصرح</h2>
+          <p>لا تملك صلاحية استعراض البيانات.</p>
+        </div>
       )}
 
       {/* ── Process sub-tab ── */}
