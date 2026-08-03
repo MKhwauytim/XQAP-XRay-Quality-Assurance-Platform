@@ -22,6 +22,7 @@ import {
   type PageSizePreset,
 } from "../../../../data/reportDesigner/reportTypes";
 import type { Rect } from "../../../../data/reportDesigner/geometry";
+import { registerPendingSaveFlush } from "../../../../data/storage/pendingSaveFlush";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
 import type { DirectoryHandleLike } from "../../../../data/storage/fileSystemAccess";
 import { ConfirmDialog } from "../../../ConfirmDialog/ConfirmDialog";
@@ -118,20 +119,30 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack, canEdit 
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally scoped to `doc` only; `performSave` is recreated every render and adding it as a dep would restart the debounce timer on each render instead of only on doc changes
   }, [doc]);
 
-  // Flush any pending autosave on TRUE unmount only (empty deps -- this
-  // effect's cleanup runs exactly once, unlike the `[doc]` effect above
-  // whose cleanup also fires on every keystroke). Without this, an edit
-  // made <800ms before navigating away (e.g. clicking "رجوع") or the
-  // component otherwise unmounting is silently discarded.
+  // Flush any pending autosave on TRUE unmount (empty deps -- this effect's
+  // cleanup runs exactly once, unlike the `[doc]` effect above whose cleanup
+  // also fires on every keystroke) AND register with the app-wide flush
+  // registry for the tab-close/backgrounding case, which unmount alone
+  // doesn't cover. Without this, an edit made <800ms before navigating away
+  // (e.g. clicking "رجوع"), or before the tab is closed/hidden, is silently
+  // discarded.
   useEffect(() => {
+    const unregister = registerPendingSaveFlush(() => {
+      if (saveTimerRef.current !== null) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+        void performSave(pendingDocRef.current);
+      }
+    });
     return () => {
+      unregister();
       if (saveTimerRef.current !== null) {
         clearTimeout(saveTimerRef.current);
         saveTimerRef.current = null;
         void performSave(pendingDocRef.current);
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately empty: this must run its cleanup exactly once, on unmount, not on every doc/performSave identity change
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately empty: register once on mount, unregister + flush exactly once on unmount
   }, []);
 
   async function performSave(docToSave: ReportDocument) {

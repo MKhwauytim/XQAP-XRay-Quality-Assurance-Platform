@@ -12,6 +12,7 @@ import {
 } from "react";
 import * as XLSX from "xlsx";
 import { useLabels } from "../../data/labels/useLabels";
+import { registerPendingSaveFlush } from "../../data/storage/pendingSaveFlush";
 import Pagination from "../Pagination/Pagination";
 import { DATA_PAGE_SIZE, clampPage, pageSlice } from "../Pagination/paginationUtils";
 import "./DataTable.css";
@@ -251,6 +252,9 @@ export default function DataTable<TRow>({
 
   // Debounce timer ref for onColConfigChange
   const colChangeDebouncerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Pending-config ref so a tab-close/backgrounding flush (registered below)
+  // can see the latest config even though it fires outside setColCfg's closure.
+  const pendingColCfgRef = useRef<ColConfig | null>(null);
   const [colPickerOpen, setColPickerOpen]       = useState(false);
   const [colPickerAnchorRect, setColPickerAnchorRect] = useState<DOMRect | null>(null);
   const [openFilterCol, setOpenFilterCol]       = useState<string | null>(null);
@@ -314,8 +318,13 @@ export default function DataTable<TRow>({
   function setColCfg(c: ColConfig): void {
     setColCfgState(c);
     if (onColConfigChange) {
+      pendingColCfgRef.current = c;
       if (colChangeDebouncerRef.current) clearTimeout(colChangeDebouncerRef.current);
-      colChangeDebouncerRef.current = setTimeout(() => { onColConfigChange(c); }, 800);
+      colChangeDebouncerRef.current = setTimeout(() => {
+        colChangeDebouncerRef.current = null;
+        pendingColCfgRef.current = null;
+        onColConfigChange(c);
+      }, 800);
     }
   }
 
@@ -327,6 +336,33 @@ export default function DataTable<TRow>({
       setColCfgState(initialColConfig);
     }
   }, [initialColConfig]);
+
+  // Flush the pending debounced column-config write on tab close/backgrounding
+  // (registry-driven -- covers pagehide/visibilitychange, which unmount alone
+  // doesn't) and on unmount, so a resize/reorder made <800ms before either
+  // event isn't silently discarded.
+  useEffect(() => {
+    const unregister = registerPendingSaveFlush(() => {
+      if (colChangeDebouncerRef.current !== null && pendingColCfgRef.current !== null && onColConfigChange) {
+        clearTimeout(colChangeDebouncerRef.current);
+        colChangeDebouncerRef.current = null;
+        const pending = pendingColCfgRef.current;
+        pendingColCfgRef.current = null;
+        onColConfigChange(pending);
+      }
+    });
+    return () => {
+      unregister();
+      if (colChangeDebouncerRef.current !== null && pendingColCfgRef.current !== null && onColConfigChange) {
+        clearTimeout(colChangeDebouncerRef.current);
+        colChangeDebouncerRef.current = null;
+        const pending = pendingColCfgRef.current;
+        pendingColCfgRef.current = null;
+        onColConfigChange(pending);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately empty: register once on mount, unregister + flush exactly once on unmount; onColConfigChange is read fresh via closure at flush time, not a reactive dependency this effect needs to re-run for
+  }, []);
 
   // Close filter menu when table scrolls (button has moved, position would be stale).
   // Also track scrollTop + container height for row virtualisation.
