@@ -343,10 +343,9 @@ function getBrowseDisplayValue(
 
 function rowMatchesSearch(
   row: BrowseRow,
-  search: string,
+  normalizedSearch: string,
   stageMappings?: PopulationConfig["stageMappings"]
 ): boolean {
-  const normalizedSearch = search.trim().toLowerCase();
   if (!normalizedSearch) {
     return true;
   }
@@ -410,6 +409,8 @@ export default function BrowseDataView({
   );
   const [draggedColumnKey, setDraggedColumnKey] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
   const [openFilterColumn, setOpenFilterColumn] = useState<string | null>(null);
   const [colPickerOpen, setColPickerOpen] = useState(false);
@@ -509,10 +510,10 @@ export default function BrowseDataView({
 
   // ── Filtered table rows ──
   const searchFilteredRows = useMemo(
-    () => search.trim()
-      ? monthFilteredRows.filter((row) => rowMatchesSearch(row, search, config.stageMappings))
+    () => debouncedSearch
+      ? monthFilteredRows.filter((row) => rowMatchesSearch(row, debouncedSearch, config.stageMappings))
       : monthFilteredRows,
-    [monthFilteredRows, search, config.stageMappings]
+    [monthFilteredRows, debouncedSearch, config.stageMappings]
   );
   const filteredRows = useMemo(
     () => Object.values(columnFilters).some((values) => values.length > 0)
@@ -633,7 +634,9 @@ export default function BrowseDataView({
   }
 
   function clearAllTableFilters(): void {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     setSearch("");
+    setDebouncedSearch("");
     setColumnFilters({});
     setOpenFilterColumn(null);
     setPageState({ rowsKey: rowsPageKey, page: 1 });
@@ -736,7 +739,16 @@ export default function BrowseDataView({
               className="bv-search"
               placeholder="بحث في جميع الأعمدة..."
               value={search}
-              onChange={(e) => { setSearch(e.target.value); setPageState({ rowsKey: rowsPageKey, page: 1 }); }}
+              onChange={(e) => {
+                const v = e.target.value;
+                setSearch(v);
+                setPageState({ rowsKey: rowsPageKey, page: 1 });
+                if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+                searchDebounceRef.current = setTimeout(
+                  () => setDebouncedSearch(v.trim().toLowerCase()),
+                  200
+                );
+              }}
             />
             <span className="bv-row-count">
               {filteredRows.length.toLocaleString("ar-SA-u-nu-latn")} صف
