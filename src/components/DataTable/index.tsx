@@ -255,6 +255,17 @@ export default function DataTable<TRow>({
   // Pending-config ref so a tab-close/backgrounding flush (registered below)
   // can see the latest config even though it fires outside setColCfg's closure.
   const pendingColCfgRef = useRef<ColConfig | null>(null);
+  // Latest-ref for onColConfigChange: the flush-registration effect below has an
+  // empty dep array (it must register/unregister exactly once), so it can't close
+  // over the prop directly without going stale across re-renders that pass a new
+  // onColConfigChange identity (e.g. a caller's inline handler closing over
+  // directoryHandle/username). Kept fresh every render (same idiom as
+  // useFocusTrap's onEscapeRef / useCanvasInteractions' onElementChangeRef) so the
+  // flush callback always reads the current value via the ref instead.
+  const onColConfigChangeRef = useRef(onColConfigChange);
+  useEffect(() => {
+    onColConfigChangeRef.current = onColConfigChange;
+  });
   const [colPickerOpen, setColPickerOpen]       = useState(false);
   const [colPickerAnchorRect, setColPickerAnchorRect] = useState<DOMRect | null>(null);
   const [openFilterCol, setOpenFilterCol]       = useState<string | null>(null);
@@ -343,25 +354,31 @@ export default function DataTable<TRow>({
   // event isn't silently discarded.
   useEffect(() => {
     const unregister = registerPendingSaveFlush(() => {
-      if (colChangeDebouncerRef.current !== null && pendingColCfgRef.current !== null && onColConfigChange) {
+      if (colChangeDebouncerRef.current !== null && pendingColCfgRef.current !== null && onColConfigChangeRef.current) {
         clearTimeout(colChangeDebouncerRef.current);
         colChangeDebouncerRef.current = null;
         const pending = pendingColCfgRef.current;
         pendingColCfgRef.current = null;
-        onColConfigChange(pending);
+        onColConfigChangeRef.current(pending);
       }
     });
     return () => {
       unregister();
-      if (colChangeDebouncerRef.current !== null && pendingColCfgRef.current !== null && onColConfigChange) {
+      if (colChangeDebouncerRef.current !== null && pendingColCfgRef.current !== null && onColConfigChangeRef.current) {
         clearTimeout(colChangeDebouncerRef.current);
         colChangeDebouncerRef.current = null;
         const pending = pendingColCfgRef.current;
         pendingColCfgRef.current = null;
-        onColConfigChange(pending);
+        onColConfigChangeRef.current(pending);
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately empty: register once on mount, unregister + flush exactly once on unmount; onColConfigChange is read fresh via closure at flush time, not a reactive dependency this effect needs to re-run for
+    // Deliberately empty deps: register once on mount, unregister + flush exactly
+    // once on unmount. No exhaustive-deps suppression needed -- everything read
+    // above is a ref (colChangeDebouncerRef, pendingColCfgRef, onColConfigChangeRef)
+    // or the stable registerPendingSaveFlush import, neither of which the rule
+    // requires as a dependency. onColConfigChangeRef.current is always the latest
+    // prop value (synced every render by the effect above), so this effect never
+    // needs onColConfigChange itself as a dependency to stay correct.
   }, []);
 
   // Close filter menu when table scrolls (button has moved, position would be stale).
