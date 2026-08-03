@@ -490,10 +490,10 @@ export function createDefaultManagedUsers(): ManagedLoginUser[] {
     hasCertScanLicense?: boolean;
   }> = [
     { id: "default-user-mohammed-otaibi", username: "malrogi", displayName: "محمد العتيبي", role: "supervisor", hasCertScanLicense: true },
-    { id: "default-user-jamila-ghamdi", username: "jalgahamdi", displayName: "جميلة الغامدي", role: "employee" },
+    { id: "default-user-jamila-ghamdi", username: "jalgahamdi", displayName: "جميلة الغامدي", role: "employee", hasCertScanLicense: true },
     { id: "default-user-hatem-oraini", username: "hihaloraini", displayName: "حاتم العريني", role: "employee" },
     { id: "default-user-salman-hajji", username: "saalhijji", displayName: "سلمان الحجي", role: "employee" },
-    { id: "default-user-abdulilah-moneim", username: "amonem", displayName: "عبدالاله المنعم", role: "manager", hasCertScanLicense: true },
+    { id: "default-user-abdulilah-moneim", username: "amonem", displayName: "عبدالاله المنعم", role: "manager" },
     { id: "default-user-mohammed-khuwaytim", username: "mkhuwaytim", displayName: "محمد الخويتم", role: "manager" },
   ];
 

@@ -212,3 +212,9 @@ test("createDefaultManagedUsers seeds the real employee roster (name/username/ro
   expect(byUsername.get("mkhuwaytim")).toMatchObject({ displayName: "محمد الخويتم", role: "manager" });
   expect(users).toHaveLength(6);
 });
+
+test("createDefaultManagedUsers grants CertScan license to exactly محمد العتيبي and جميلة الغامدي", () => {
+  const users = createDefaultManagedUsers();
+  const licensed = users.filter((u) => u.hasCertScanLicense).map((u) => u.displayName).sort();
+  expect(licensed).toEqual(["جميلة الغامدي", "محمد العتيبي"].sort());
+});

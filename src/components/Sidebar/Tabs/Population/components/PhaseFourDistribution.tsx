@@ -119,7 +119,11 @@ export default function PhaseFourDistribution({
           stageKey: sKey,
           method: existing?.method || "percentage",
           value: existing?.value !== undefined ? existing.value : 0,
-          isActive: existing?.isActive || false,
+          // Default to enabled at every level until an admin explicitly turns
+          // an employee off for a given level -- `??` only falls back when
+          // there's no saved allocation yet, so an explicit prior `false` is
+          // still respected.
+          isActive: existing?.isActive ?? true,
           maxWorkload: existing?.maxWorkload
         });
       }
