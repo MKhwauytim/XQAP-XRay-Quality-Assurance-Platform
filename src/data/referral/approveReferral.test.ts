@@ -262,6 +262,47 @@ describe("approveReferral", () => {
     expect(refLog.requests[0]!.reviewedBy).toBe("sup1"); // unchanged
   });
 
+  it("still detects a competing decision written between load and persist, after Task 2's dedupe primitives exist (regression guard)", async () => {
+    // Two supervisors race to approve the SAME pending referral request
+    // concurrently. approveReferral's own reads (loadReferralLog,
+    // loadDistributionLog, loadAllSupervisorDecisions) are never routed
+    // through Task 2's dedupeInFlight/...ForRead wrappers -- this test
+    // proves that guarantee holds by exercising the real cross-reviewer
+    // guard (steps 1, 5a "cross-reviewer guard", and 5c "first-wins
+    // reconciliation" in approveReferral's docblock) under genuine
+    // concurrent execution. Regardless of how the two calls interleave,
+    // exactly one supervisor's decision may become authoritative -- the
+    // other must always be rejected as already-reviewed, never both ok:true.
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    await seed(root);
+
+    const [r1, r2] = await Promise.all([
+      approveReferral({
+        directoryHandle: root, monthFolderName: MONTH, requestId: REQ_ID, reviewedBy: "sup1",
+      }),
+      approveReferral({
+        directoryHandle: root, monthFolderName: MONTH, requestId: REQ_ID, reviewedBy: "sup2",
+      }),
+    ]);
+
+    const results = [r1, r2];
+    const oks = results.filter((r) => r.ok);
+    const rejected = results.filter((r) => !r.ok);
+    expect(oks).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]).toMatchObject({ ok: false, code: "already-reviewed" });
+
+    // Exactly one reviewer's decision is authoritative in the merged log.
+    const refLog = await loadReferralLog(root, MONTH);
+    expect(["sup1", "sup2"]).toContain(refLog.requests[0]!.reviewedBy);
+
+    // Ownership converges to the requested target regardless of which
+    // reassign batch physically landed first.
+    const finalLog = await loadDistributionLog(root, MONTH);
+    const finalCurrent = deriveCurrentDistribution(finalLog, [makeRow("A1"), makeRow("A2")]);
+    expect(finalCurrent.entries.every((e) => e.assignedTo === "emp2")).toBe(true);
+  });
+
   it("ownership drift aborts all with no events emitted", async () => {
     const root = createMemoryDirectory("root") as DirectoryHandleLike;
     await seed(root, "emp3"); // samples belong to emp3, request claims emp1

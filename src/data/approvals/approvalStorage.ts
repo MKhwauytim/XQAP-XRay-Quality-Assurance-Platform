@@ -5,6 +5,7 @@ import { withResourceLock } from "../storage/webLocks";
 import { simpleHash } from "../storage/jsonEnvelope";
 import { readJsonDirectory } from "../storage/directoryScan";
 import { ensureMonthWritable } from "../population/monthLock";
+import { bumpWorkspaceEpoch } from "../storage/inFlightReads";
 import type { DecisionEvent, DecisionEventKind, SupervisorDecisionFile } from "./approvalTypes";
 import { getPopulationMonthDir, getSampleApprovalsDir, safeWorkspaceFilePart } from "../workspace/workspacePaths";
 
@@ -131,6 +132,7 @@ export async function appendDecisionEvent(
         await safeWriteJson(appDir, fileName, updated);
         const verify = await loadSupervisorDecisions(directoryHandle, monthFolderName, supervisorUsername);
         if (verify.revision === nextRevision && verify._writeToken === writeToken) {
+          bumpWorkspaceEpoch(directoryHandle, monthFolderName);
           return {
             done: true,
             result: { ok: true as const },

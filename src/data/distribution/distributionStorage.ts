@@ -19,6 +19,7 @@ import {
   mergeDistributionEvents,
   writeImmutableDistributionEvent,
 } from "./distributionEventStore";
+import { dedupeInFlight, workspaceScopeId, bumpWorkspaceEpoch, workspaceEpoch } from "../storage/inFlightReads";
 
 const LOG_FILE = "distribution.log.json";
 const CURRENT_FILE = "distribution.current.json";
@@ -304,6 +305,7 @@ export async function appendDistributionEvents(
     { conflictError: "تعارض في الكتابة: لم يتمكن النظام من حفظ الأحداث بعد عدة محاولات." }
   );
   if (result.ok) {
+    bumpWorkspaceEpoch(directoryHandle, monthFolderName);
     options?.onProgress?.({ phase: "complete", completed: events.length, total: events.length });
   }
   return result;
@@ -422,4 +424,27 @@ export async function loadOrDeriveDistributionCurrent(
     logError("distribution:load-or-derive", error);
     return null;
   }
+}
+
+/** Deduped sibling of loadDistributionLog for READ-ONLY call sites only.
+ *  Never use this for a fresh-read-before-write correctness check -- see the
+ *  exclusion list in this task's plan doc / the parent implementation plan. */
+export function loadDistributionLogForRead(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<DistributionLog> {
+  const key = `${workspaceScopeId(directoryHandle)}|${monthFolderName}|${workspaceEpoch(directoryHandle, monthFolderName)}|dist-log`;
+  return dedupeInFlight(key, () => loadDistributionLog(directoryHandle, monthFolderName));
+}
+
+/** Deduped sibling of loadOrDeriveDistributionCurrent for READ-ONLY call
+ *  sites only. Never use this for a fresh-read-before-write correctness
+ *  check. */
+export function loadOrDeriveDistributionCurrentForRead(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  sampleRows: PreparedPopulationRow[]
+): Promise<DistributionCurrentData | null> {
+  const key = `${workspaceScopeId(directoryHandle)}|${monthFolderName}|${workspaceEpoch(directoryHandle, monthFolderName)}|dist-current`;
+  return dedupeInFlight(key, () => loadOrDeriveDistributionCurrent(directoryHandle, monthFolderName, sampleRows));
 }

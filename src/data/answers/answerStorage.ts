@@ -4,6 +4,7 @@ import { casLoop } from "../storage/casLoop";
 import { logError } from "../storage/errorLogger";
 import { readJsonDirectory } from "../storage/directoryScan";
 import { ensureMonthWritable } from "../population/monthLock";
+import { bumpWorkspaceEpoch } from "../storage/inFlightReads";
 import type {
   EmployeeAnswerFile,
   ItemAnswer,
@@ -148,6 +149,7 @@ async function updateEmployeeAnswerFile(
       await safeWriteJson(dir, answerFileName(username), updated);
       const verify = await loadEmployeeAnswers(directoryHandle, monthFolderName, username);
       if (verify.revision === nextRevision && verify._writeToken === writeToken) {
+        bumpWorkspaceEpoch(directoryHandle, monthFolderName);
         return {
           done: true,
           result: { ok: true as const },
