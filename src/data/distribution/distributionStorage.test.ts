@@ -5,6 +5,7 @@ import {
   appendDistributionEvents,
   loadDistributionLog,
   loadOrDeriveDistributionCurrent,
+  loadOrDeriveDistributionCurrentForRead,
   saveDistributionCurrent,
 } from "./distributionStorage";
 import { DERIVE_VERSION, buildAssignEvent, deriveCurrentDistribution } from "./distributionLog";
@@ -212,5 +213,61 @@ describe("readCurrentDistributionSource via incremental cache (Task: §H Layer 2
       [e3, e1, e2].map((e) => e.eventId) // sorted by eventAt: e3 (08:00) < e1 (09:00) < e2 (10:00)
     );
     expect(cold.events.map((e) => e.eventId).sort()).toEqual([e1.eventId, e2.eventId].sort());
+  });
+});
+
+describe("loadOrDeriveDistributionCurrentForRead dedupe key (final-review Fix 3)", () => {
+  it("two concurrent calls with different-length sampleRows for the same (root, month, epoch) do not share a result", async () => {
+    // Regression for the final whole-branch review's Fix 3: the dedupe key used
+    // to omit sampleRows entirely, so two overlapping ForRead callers racing on
+    // the same (root, month, epoch) but with different sampleRows (e.g. one
+    // caller's sample-master read transiently failed and fell back to []) would
+    // collapse onto a single dedupeInFlight() promise -- the loser silently
+    // receiving a result derived from the WINNER's sampleRows instead of its own.
+    const root = await makeRoot();
+    const month = "5-May-2026";
+    await appendDistributionEvent(
+      root,
+      month,
+      buildAssignEvent({ xrayImageId: "A1", assignedTo: "alice", eventBy: "admin" })
+    );
+
+    // Kicked off together (no await in between) so both hit dedupeInFlight
+    // while the first call's read is still in flight -- exactly the race this
+    // key is meant to guard against.
+    const [withRow, withoutRow] = await Promise.all([
+      loadOrDeriveDistributionCurrentForRead(root, month, [makeRow("A1")]),
+      loadOrDeriveDistributionCurrentForRead(root, month, []),
+    ]);
+
+    // Same as deriveCurrentDistribution's documented behavior above: a row
+    // present in sampleRows keeps its event; an empty sampleRows set drops it.
+    expect(withRow?.entries).toHaveLength(1);
+    expect(withRow?.entries[0]?.xrayImageId).toBe("A1");
+    expect(withRow?.totalAssigned).toBe(1);
+
+    expect(withoutRow?.entries).toHaveLength(0);
+    expect(withoutRow?.totalAssigned).toBe(0);
+  });
+
+  it("two concurrent calls with the SAME-length sampleRows still coalesce into one derivation (dedupe still works)", async () => {
+    const root = await makeRoot();
+    const month = "5-May-2026";
+    await appendDistributionEvent(
+      root,
+      month,
+      buildAssignEvent({ xrayImageId: "A1", assignedTo: "alice", eventBy: "admin" })
+    );
+
+    const [first, second] = await Promise.all([
+      loadOrDeriveDistributionCurrentForRead(root, month, [makeRow("A1")]),
+      loadOrDeriveDistributionCurrentForRead(root, month, [makeRow("A1")]),
+    ]);
+
+    // Same key (same length) -> same coalesced promise/result, per the whole
+    // point of dedupeInFlight -- this fix only widens the key by row COUNT, it
+    // must not defeat coalescing for the common same-shape-race case.
+    expect(first).toBe(second);
+    expect(first?.entries).toHaveLength(1);
   });
 });

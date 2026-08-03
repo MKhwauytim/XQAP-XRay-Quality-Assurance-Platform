@@ -439,12 +439,14 @@ export function loadDistributionLogForRead(
 
 /** Deduped sibling of loadOrDeriveDistributionCurrent for READ-ONLY call
  *  sites only. Never use this for a fresh-read-before-write correctness
- *  check. */
+ *  check. All callers should pass sampleRows sourced from the same
+ *  sample.master.json for a given month -- the dedupe key below only
+ *  cheaply discriminates by row count, not full content identity. */
 export function loadOrDeriveDistributionCurrentForRead(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
   sampleRows: PreparedPopulationRow[]
 ): Promise<DistributionCurrentData | null> {
-  const key = `${workspaceScopeId(directoryHandle)}|${monthFolderName}|${workspaceEpoch(directoryHandle, monthFolderName)}|dist-current`;
+  const key = `${workspaceScopeId(directoryHandle)}|${monthFolderName}|${workspaceEpoch(directoryHandle, monthFolderName)}|dist-current|${sampleRows.length}`;
   return dedupeInFlight(key, () => loadOrDeriveDistributionCurrent(directoryHandle, monthFolderName, sampleRows));
 }

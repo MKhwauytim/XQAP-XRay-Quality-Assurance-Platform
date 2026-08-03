@@ -294,11 +294,14 @@ export async function readAppendOnlyDirectory<T>(
 // or periodic refresh. subscribeToDataRefresh is a plain
 // window.addEventListener wrapper (see dataRefreshSignal.ts) with no React
 // dependency, so calling it here at module scope -- rather than from inside
-// a component effect -- is safe; the `typeof window` guard mirrors the same
-// pattern already used at module scope elsewhere in this directory (see
-// workspaceWriteAccess.ts, fileSystemAccess.ts, safeWrite.ts) to keep this
-// module importable from a non-browser context (e.g. Vitest's "node" test
-// environment) without throwing.
+// a component effect -- is safe. The `typeof window` guard idiom itself is
+// precedented elsewhere in this directory (workspaceWriteAccess.ts,
+// fileSystemAccess.ts, safeWrite.ts) -- but only inside function bodies,
+// invoked on demand; this is the first case of it gating an unconditional
+// module-init side effect here. That's intentional: the cache needs to
+// start listening as soon as the module loads, not on first call, and the
+// guard keeps this module importable from a non-browser context (e.g.
+// Vitest's "node" test environment) without throwing.
 if (typeof window !== "undefined") {
   subscribeToDataRefresh(() => resetAppendOnlyDirectoryCache());
 }
