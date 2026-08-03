@@ -157,6 +157,19 @@ vi.mock("../../../../data/population/populationStorage", async (importOriginal) 
   };
 });
 
+// §T — Reports sub-tab mount preservation. Stubs the (heavy, unrelated) Report
+// Designer tab with a mount-counting stub so the new describe block below can
+// assert on mount/hide behavior of `ReportsTab`'s wrapper without pulling in
+// the real designer's own effects/dependencies.
+const reportDesignerMountCount = vi.hoisted(() => ({ count: 0 }));
+
+vi.mock("../ReportDesigner", () => ({
+  default: () => {
+    reportDesignerMountCount.count += 1;
+    return <div data-testid="report-designer-stub" />;
+  },
+}));
+
 import ReportsTab from "./index";
 
 afterEach(() => {
@@ -547,5 +560,50 @@ describe("Reports executive-deck export — style choices loaded before export (
     //    (no third arg) would make this `undefined` instead.
     const [, , forwardedChoices] = deckExportMock.impl.mock.calls[0];
     expect(forwardedChoices).toEqual({ "exec-cover": 2 });
+  });
+});
+
+describe("Reports sub-tab mount preservation (§T)", () => {
+  afterEach(cleanup);
+
+  it("keeps Report Designer mounted (hidden, not unmounted) after the first visit", async () => {
+    reportDesignerMountCount.count = 0;
+    render(<ReportsTab />);
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("sidebar-subtab-changed", {
+          detail: { parentTabId: "reports", subTabId: "report-designer" },
+        })
+      );
+    });
+    expect(await screen.findByTestId("report-designer-stub")).toBeInTheDocument();
+    expect(reportDesignerMountCount.count).toBe(1);
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("sidebar-subtab-changed", {
+          detail: { parentTabId: "reports", subTabId: "reports" },
+        })
+      );
+    });
+    const stub = screen.getByTestId("report-designer-stub");
+    expect(stub.parentElement).toHaveAttribute("hidden");
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("sidebar-subtab-changed", {
+          detail: { parentTabId: "reports", subTabId: "report-designer" },
+        })
+      );
+    });
+    // Switching back must NOT remount it.
+    expect(reportDesignerMountCount.count).toBe(1);
+  });
+
+  it("does not mount Report Designer before it has ever been visited", () => {
+    reportDesignerMountCount.count = 0;
+    render(<ReportsTab />);
+    expect(screen.queryByTestId("report-designer-stub")).not.toBeInTheDocument();
   });
 });

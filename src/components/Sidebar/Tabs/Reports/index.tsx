@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import ReportDesignerTab from "../ReportDesigner";
 import { AlertTriangle, BarChart2, BarChart3, Building2, Check, ClipboardList, Database, Download, FileStack, FileText, Filter, FolderOpen, Globe, History, Presentation, Settings2, User, Users, X } from "lucide-react";
 
@@ -1207,6 +1207,20 @@ function ReportsContent() {
 // Wrapper that handles sub-tab routing for "مصمم التقارير" sub-tab.
 export default function ReportsTab() {
   const [activeSubTab, setActiveSubTab] = useState("reports");
+  // Once Report Designer has been opened, keep it mounted (hidden, not
+  // unmounted) so switching back to it doesn't lose in-progress canvas
+  // edits and doesn't re-trigger ReportsContent's own reload on the way
+  // back — §T. ReportsContent itself is the initial/default view, so it's
+  // always mounted from the start; only Report Designer needs a visited gate.
+  // Derived from activeSubTab, but needs to "stick" across later renders once
+  // true, so it can't be plain derivation — computed here (render body, not
+  // an effect) per React's "adjusting state during render" pattern, guarded
+  // so it only ever setState once (avoids react-hooks/set-state-in-effect
+  // and the extra effect-driven render pass a useEffect version would add).
+  const [visitedReportDesigner, setVisitedReportDesigner] = useState(activeSubTab === "report-designer");
+  if (activeSubTab === "report-designer" && !visitedReportDesigner) {
+    setVisitedReportDesigner(true);
+  }
   const handleSubTabEvent = useCallback((e: Event) => {
     const { parentTabId, subTabId } = (e as CustomEvent<{ parentTabId: string; subTabId: string }>).detail;
     if (parentTabId === "reports") setActiveSubTab(subTabId);
@@ -1215,13 +1229,28 @@ export default function ReportsTab() {
     window.addEventListener("sidebar-subtab-changed", handleSubTabEvent);
     return () => window.removeEventListener("sidebar-subtab-changed", handleSubTabEvent);
   }, [handleSubTabEvent]);
-
-  if (activeSubTab === "report-designer") {
-    return (
+  // Stable element reference (created once, never recomputed) so switching
+  // `activeSubTab` back and forth — which re-renders ReportsTab — doesn't
+  // also re-invoke ReportDesignerTab's own render on every unrelated
+  // re-render; React bails out of re-rendering a child subtree when the
+  // exact same element reference is passed again.
+  const reportDesignerElement = useMemo(
+    () => (
       <TabGuard tabId="reports/report-designer">
         <ReportDesignerTab />
       </TabGuard>
-    );
-  }
-  return <ReportsContent />;
+    ),
+    []
+  );
+
+  return (
+    <>
+      <div hidden={activeSubTab === "report-designer"}>
+        <ReportsContent />
+      </div>
+      {visitedReportDesigner && (
+        <div hidden={activeSubTab !== "report-designer"}>{reportDesignerElement}</div>
+      )}
+    </>
+  );
 }
