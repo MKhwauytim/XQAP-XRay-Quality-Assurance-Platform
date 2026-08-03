@@ -31,7 +31,7 @@ describe("listDirectoryEntries", () => {
 });
 
 describe("readJsonDirectory", () => {
-  it("reads every matching file and returns values in listing order, filtered by suffix", async () => {
+  it("reads every matching file and returns values in name-sorted order, filtered by suffix", async () => {
     const dir = createMemoryDirectory();
     await safeWriteJson<Widget>(dir, "alice.widget.json", { id: "alice" });
     await safeWriteJson<Widget>(dir, "bob.widget.json", { id: "bob" });
@@ -41,6 +41,18 @@ describe("readJsonDirectory", () => {
     expect(result.values.map((w) => w.id).sort()).toEqual(["alice", "bob"]);
     expect(result.fileNames.sort()).toEqual(["alice.widget.json", "bob.widget.json"]);
     expect(result.matchedNames.sort()).toEqual(["alice.widget.json", "bob.widget.json"]);
+  });
+
+  it("returns success-path results in name-sorted order regardless of write order", async () => {
+    const dir = createMemoryDirectory();
+    // Written c, a, b -- result must come back a, b, c (name-sorted), not write order.
+    await safeWriteJson<Widget>(dir, "c.widget.json", { id: "c" });
+    await safeWriteJson<Widget>(dir, "a.widget.json", { id: "a" });
+    await safeWriteJson<Widget>(dir, "b.widget.json", { id: "b" });
+
+    const result = await readJsonDirectory<Widget>(dir, { suffix: ".widget.json", onUnreadable: "skip" });
+    expect(result.values.map((w) => w.id)).toEqual(["a", "b", "c"]);
+    expect(result.fileNames).toEqual(["a.widget.json", "b.widget.json", "c.widget.json"]);
   });
 
   it("returns fileNames index-aligned with values", async () => {
@@ -190,5 +202,16 @@ describe("readJsonDirectory", () => {
 
     await readJsonDirectory<Widget>(tracked, { suffix: ".widget.json", onUnreadable: "skip", concurrency: 2 });
     expect(peak).toBeLessThanOrEqual(2);
+  });
+
+  it("clamps a zero or negative concurrency to 1 instead of silently returning an empty result", async () => {
+    const dir = createMemoryDirectory();
+    await safeWriteJson<Widget>(dir, "only.widget.json", { id: "only" });
+
+    const zero = await readJsonDirectory<Widget>(dir, { suffix: ".widget.json", onUnreadable: "skip", concurrency: 0 });
+    expect(zero.values.map((w) => w.id)).toEqual(["only"]);
+
+    const negative = await readJsonDirectory<Widget>(dir, { suffix: ".widget.json", onUnreadable: "skip", concurrency: -3 });
+    expect(negative.values.map((w) => w.id)).toEqual(["only"]);
   });
 });

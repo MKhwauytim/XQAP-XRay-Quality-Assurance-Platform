@@ -120,7 +120,10 @@ export async function readJsonDirectory<T>(
     }
   }
 
-  const workerCount = Math.min(options.concurrency ?? DIRECTORY_READ_CONCURRENCY, matched.length || 1);
+  // Clamp to >= 1: a zero/negative concurrency would otherwise start no
+  // workers, silently returning an empty result indistinguishable from "the
+  // directory is empty" instead of reading anything.
+  const workerCount = Math.max(1, Math.min(options.concurrency ?? DIRECTORY_READ_CONCURRENCY, matched.length || 1));
   await Promise.all(Array.from({ length: workerCount }, () => worker()));
 
   if (state.firstFailure) {
