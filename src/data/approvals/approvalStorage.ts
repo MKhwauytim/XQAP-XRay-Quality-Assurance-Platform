@@ -3,6 +3,7 @@ import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
 import { withResourceLock } from "../storage/webLocks";
 import { simpleHash } from "../storage/jsonEnvelope";
+import { readJsonDirectory } from "../storage/directoryScan";
 import { ensureMonthWritable } from "../population/monthLock";
 import type { DecisionEvent, DecisionEventKind, SupervisorDecisionFile } from "./approvalTypes";
 import { getPopulationMonthDir, getSampleApprovalsDir, safeWorkspaceFilePart } from "../workspace/workspacePaths";
@@ -28,26 +29,6 @@ export function verifyDecisionChain(events: DecisionEvent[]): number | null {
     if (recorded === undefined) continue; // legacy / pre-B5 event — not chained
     if (recorded !== hashDecisionEvent(events[i - 1])) return i;
   }
-  return null;
-}
-
-type DirectoryEntryLike = { name: string; kind: string };
-
-function getDirectoryEntries(dir: DirectoryHandleLike): AsyncIterable<DirectoryEntryLike> | null {
-  const d = dir as DirectoryHandleLike & {
-    values?: () => AsyncIterable<DirectoryEntryLike>;
-    entries?: () => AsyncIterable<[string, DirectoryEntryLike]>;
-    [Symbol.asyncIterator]?: () => AsyncIterator<DirectoryEntryLike>;
-  };
-  if (typeof d.values === "function") return d.values.call(d);
-  if (typeof d.entries === "function") {
-    return {
-      async *[Symbol.asyncIterator]() {
-        for await (const [, entry] of d.entries!.call(d)) yield entry;
-      },
-    };
-  }
-  if (typeof d[Symbol.asyncIterator] === "function") return d as AsyncIterable<DirectoryEntryLike>;
   return null;
 }
 
@@ -101,15 +82,11 @@ export async function loadAllSupervisorDecisions(
 ): Promise<SupervisorDecisionFile[]> {
   try {
     const appDir = await getApprovalsDir(directoryHandle, monthFolderName);
-    const results: SupervisorDecisionFile[] = [];
-    const iterable = getDirectoryEntries(appDir);
-    if (!iterable) return results;
-    for await (const entry of iterable) {
-      if (entry.kind !== "file" || !entry.name.endsWith(".decisions.json")) continue;
-      const r = await safeReadJson<SupervisorDecisionFile>(appDir, entry.name);
-      if (r.ok) results.push(r.value);
-    }
-    return results;
+    const { values } = await readJsonDirectory<SupervisorDecisionFile>(appDir, {
+      suffix: ".decisions.json",
+      onUnreadable: "skip",
+    });
+    return values;
   } catch {
     return [];
   }

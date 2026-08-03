@@ -5,10 +5,12 @@ import {
   appendDecisionEvent,
   effectiveDecision,
   hashDecisionEvent,
+  loadAllSupervisorDecisions,
   loadSupervisorDecisions,
   mergeDecisionHistory,
   verifyDecisionChain,
 } from "./approvalStorage";
+import { getSampleApprovalsDir } from "../workspace/workspacePaths";
 
 describe("approvalStorage decision events", () => {
   it("appends a decision event and persists it", async () => {
@@ -149,5 +151,47 @@ describe("B5 decision hash-chaining (tamper-evident)", () => {
       { requestId: "b", kind: "referral" as const, status: "denied" as const, reviewedBy: "s", reviewedAt: "2026-07-02T10:00:00.000Z" },
     ];
     expect(verifyDecisionChain(legacy)).toBeNull();
+  });
+});
+
+describe("loadAllSupervisorDecisions — concurrency-safe (Task 6)", () => {
+  it("reads all supervisor decision files under load, in parallel", async () => {
+    const root = createMemoryDirectory();
+    const month = "5-May-2026";
+    for (let i = 0; i < 10; i++) {
+      await appendDecisionEvent(root, month, `supervisor${i}`, {
+        requestId: `req-${i}`,
+        kind: "referral",
+        status: "approved",
+        reviewedBy: `supervisor${i}`,
+        reviewedAt: new Date().toISOString(),
+      });
+    }
+    const files = await loadAllSupervisorDecisions(root, month);
+    expect(files).toHaveLength(10);
+    expect(files.map((f) => f.supervisorUsername).sort()).toEqual(
+      Array.from({ length: 10 }, (_, i) => `supervisor${i}`).sort()
+    );
+  });
+
+  it("skips a corrupt decision file instead of throwing", async () => {
+    const root = createMemoryDirectory();
+    const month = "5-May-2026";
+    await appendDecisionEvent(root, month, "goodsupervisor", {
+      requestId: "req-good",
+      kind: "referral",
+      status: "approved",
+      reviewedBy: "goodsupervisor",
+      reviewedAt: new Date().toISOString(),
+    });
+    // Write corrupt file to the same directory loadAllSupervisorDecisions actually reads from
+    const dir = await getSampleApprovalsDir(root, month, true);
+    const handle = await dir.getFileHandle("badsupervisor.decisions.json", { create: true });
+    const writable = await handle.createWritable!();
+    await writable.write("{not valid json");
+    await writable.close();
+
+    const files = await loadAllSupervisorDecisions(root, month);
+    expect(files.map((f) => f.supervisorUsername)).toEqual(["goodsupervisor"]);
   });
 });
