@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { LayoutDashboard } from "lucide-react";
 import type { SidebarTabModule } from "../tabTypes";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
@@ -7,6 +7,8 @@ import { usePermissions } from "../../../../auth/usePermissions";
 import { tabAllowedRoles } from "../../../../auth/tabCatalog";
 import { AccessDenied } from "../../../PermissionGuard";
 import { touchVisitedTabs } from "../../../../app/visitedTabs";
+import { useLabels } from "../../../../data/labels/useLabels";
+import { LoadingState } from "../../../StateViews/StateViews";
 import TemplateBuilderTab from "../TemplateBuilder";
 import XrayReferrals from "./views/XrayReferrals";
 import XrayInspectionResults from "./views/XrayInspectionResults";
@@ -54,6 +56,7 @@ export const tabConfig: SidebarTabModule["tabConfig"] = {
 export default function EmployeeWorkspaceTab() {
   const { directoryHandle } = useWorkspace();
   const { can, canAccessTab } = usePermissions();
+  const labels = useLabels();
   const [activeSubTab, setActiveSubTab] = useState<WorkspaceSubTab>(SUB_TAB_XRAY_REFERRALS);
   // Once a sub-tab has been the active tab, keep it mounted (hidden, not
   // unmounted) so switching back doesn't re-trigger its own data load — §T.
@@ -142,7 +145,11 @@ export default function EmployeeWorkspaceTab() {
         <div hidden={activeSubTab !== SUB_TAB_XRAY_RESULTS}>{xrayResultsElement}</div>
       )}
       {visitedSubTabs.has(SUB_TAB_INSPECTION_FORM) && canViewInspectionForm && (
-        <div hidden={activeSubTab !== SUB_TAB_INSPECTION_FORM}>{inspectionFormElement}</div>
+        <div hidden={activeSubTab !== SUB_TAB_INSPECTION_FORM}>
+          <Suspense fallback={<LoadingState label={labels.app_tab_loading} />}>
+            {inspectionFormElement}
+          </Suspense>
+        </div>
       )}
       {!activeAllowed && <AccessDenied />}
     </>
