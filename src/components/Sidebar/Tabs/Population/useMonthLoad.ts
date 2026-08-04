@@ -9,9 +9,42 @@ import {
   loadMonthForEditing,
   type MonthLoadScope,
 } from "../../../../data/population/populationStorage";
+import {
+  registerBootSources,
+  markBootSourceLoading,
+  markBootSourceLoaded,
+  markBootSourceError,
+} from "../../../../data/workspace/bootProgress";
 import { buildLoadedMonthState } from "./populationWorkflowHelpers";
 
 export type LoadedMonthState = ReturnType<typeof buildLoadedMonthState>;
+
+type BootSourceDescriptor = { key: string; labelEn: string; labelAr: string };
+
+/**
+ * Named on-disk sources this hook's single `loadMonthForEditing` call actually
+ * reads, given `scope` -- kept in lockstep with `computeMonthLoadScope`
+ * (`populationWorkflowHelpers.ts`): the manifest and `summary`/`sample`/
+ * `distribution` are always read regardless of scope, `population`/`raw` only
+ * when the caller's scope includes them (see `MonthLoadScope`). Feeds the
+ * post-login boot-progress checklist (`src/data/workspace/bootProgress.ts`) so
+ * a viewer can see which real files this load actually touched -- this is pure
+ * reporting, it never changes what `loadMonthForEditing` itself fetches.
+ */
+function monthLoadBootSources(scope: MonthLoadScope): BootSourceDescriptor[] {
+  return [
+    { key: "population_manifest", labelEn: "month.manifest.json", labelAr: "بيانات الشهر" },
+    { key: "population_summary", labelEn: "processing.summary.json", labelAr: "ملخص المعالجة" },
+    { key: "population_sample", labelEn: "sample.master.json", labelAr: "العينة" },
+    { key: "population_distribution", labelEn: "distribution.current.json", labelAr: "التوزيع" },
+    ...(scope.population
+      ? [{ key: "population_final", labelEn: "population.final.json", labelAr: "بيانات المجتمع المعالجة" }]
+      : []),
+    ...(scope.raw
+      ? [{ key: "population_raw", labelEn: "risk.raw.json / bi.raw.json", labelAr: "البيانات الخام" }]
+      : []),
+  ];
+}
 
 /**
  * Owns the "which month is loaded, and is a load in flight" concern for the
@@ -82,11 +115,21 @@ export function useMonthLoad(params: {
   ): Promise<void> {
     if (!directoryHandle) return;
     setIsLoadingMonthData(true);
+    let bootSources: BootSourceDescriptor[] = [];
     try {
       hasUnsavedSessionWorkRef.current = false;
-      const data = await loadMonthForEditing(directoryHandle, info.folderName, computeScope());
+      const scope = computeScope();
+      bootSources = monthLoadBootSources(scope);
+      registerBootSources(bootSources);
+      bootSources.forEach((source) => markBootSourceLoading(source.key));
+      const data = await loadMonthForEditing(directoryHandle, info.folderName, scope);
+      bootSources.forEach((source) => markBootSourceLoaded(source.key));
       if (token !== loadMonthTokenRef.current) return; // superseded by a newer month selection
       applyLoadedState(buildLoadedMonthState(data));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      bootSources.forEach((source) => markBootSourceError(source.key, message));
+      throw error;
     } finally {
       if (token === loadMonthTokenRef.current) setIsLoadingMonthData(false);
     }
