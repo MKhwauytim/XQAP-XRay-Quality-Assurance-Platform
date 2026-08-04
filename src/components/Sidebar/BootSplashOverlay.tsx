@@ -64,16 +64,23 @@ type BootSessionLatch = {
   shown: boolean;
   /**
    * `resetGeneration` (bootProgress.ts) observed at the moment this latch was
-   * armed for a NEW session (i.e. `bootSessionKey` just changed). `null` for
-   * the very first session, which has no previous session's data to guard
-   * against. Step 1/2 below stay inert until `resetGeneration` exceeds this --
-   * see their gating comment for why a plain "does entries look stale" check
-   * isn't enough on its own.
+   * armed -- on EVERY arm, not just a session change: `BootSplashOverlay`
+   * itself can remount with the shared store already holding a PREVIOUS
+   * session's data (the admin role-preview switch remounts `AppContent` via
+   * `key={session.role}`; logout->login remounts it via AuthGate), so "this
+   * is the very first arm, nothing to guard against" is never actually true
+   * in production, only in a from-scratch app load with an empty store --
+   * and arming with the CURRENT generation handles that case identically
+   * anyway (there's nothing stale to wait out, so the very next reset, which
+   * App.tsx's layout effect fires unconditionally on every mount, clears the
+   * gate almost immediately). Step 1/2 below stay inert until
+   * `resetGeneration` exceeds this -- see their gating comment for why a
+   * plain "does entries look stale" check isn't enough on its own.
    */
-  staleGeneration: number | null;
+  staleGeneration: number;
 };
 
-function armLatch(key: string, staleGeneration: number | null): BootSessionLatch {
+function armLatch(key: string, staleGeneration: number): BootSessionLatch {
   return { key, timedOut: false, dismissed: false, shown: false, staleGeneration };
 }
 
@@ -137,15 +144,24 @@ export function BootSplashOverlay({
   minVisibleMs = 600,
 }: BootSplashOverlayProps): ReactElement {
   const { entries, allLoaded, resetGeneration } = useBootProgress();
-  const [latch, setLatch] = useState<BootSessionLatch>(() => armLatch(bootSessionKey, null));
+  // Armed with the CURRENT resetGeneration, not a `null`/"no guard needed"
+  // sentinel -- see the `staleGeneration` field's doc comment for why even
+  // this component's very first mount can't assume the store is this
+  // session's own.
+  const [latch, setLatch] = useState<BootSessionLatch>(() => armLatch(bootSessionKey, resetGeneration));
   // `shownAt` deliberately lives in a ref, not `latch` state: it only needs
   // to be READ later (by the dismissal effect below), never to itself
   // trigger a re-render, and a ref lets the stamping effect avoid a
   // synchronous setState call in its own body (react-hooks/set-state-in-
   // effect) entirely, rather than needing an eslint-disable to route around
-  // it. Keyed by session so a later session change can't read a previous
-  // session's stale timestamp.
-  const shownAtRef = useRef<{ key: string; shownAt: number } | null>(null);
+  // it. Keyed by BOTH `bootSessionKey` and `staleGeneration` -- the key
+  // string alone is not unique across genuinely distinct sessions (a
+  // workspace switch A -> B -> A within one login regenerates the identical
+  // `username:loginAt:workspaceName` string), which would let a returning
+  // session silently reuse a stale timestamp and bypass the floor entirely.
+  // `staleGeneration` is a fresh, monotonically-increasing value captured at
+  // every arm, so it disambiguates even a string collision.
+  const shownAtRef = useRef<{ key: string; staleGeneration: number; shownAt: number } | null>(null);
 
   // The session-arming transition (below) is derived during render, on state
   // THIS component owns, so a stale `dismissed`/`timedOut` from the PREVIOUS
@@ -175,9 +191,10 @@ export function BootSplashOverlay({
   // was (re)armed is the one check that can't be fooled by same-commit
   // render timing -- it stays false across as many renders as it takes,
   // however many that turns out to be, until the real reset call actually
-  // runs. `null` (the very first session) means there's no previous session
-  // to guard against, so Step 1/2 apply immediately.
-  const dataIsFresh = session.staleGeneration === null || resetGeneration > session.staleGeneration;
+  // runs. Applies uniformly to every arm, including this component's very
+  // first mount (`staleGeneration` doc comment explains why that mount
+  // can't skip the guard either).
+  const dataIsFresh = resetGeneration > session.staleGeneration;
 
   // Step 1: has this session's overlay actually been visible at least once?
   // Uses the exact same predicate as `showOverlay` below -- deliberately NOT
@@ -205,10 +222,10 @@ export function BootSplashOverlay({
   // against `minVisibleMs`'s multi-hundred-millisecond scale.
   useEffect(() => {
     if (!session.shown) return;
-    if (shownAtRef.current?.key !== bootSessionKey) {
-      shownAtRef.current = { key: bootSessionKey, shownAt: Date.now() };
+    if (shownAtRef.current?.key !== bootSessionKey || shownAtRef.current?.staleGeneration !== session.staleGeneration) {
+      shownAtRef.current = { key: bootSessionKey, staleGeneration: session.staleGeneration, shownAt: Date.now() };
     }
-  }, [bootSessionKey, session.shown]);
+  }, [bootSessionKey, session.shown, session.staleGeneration]);
 
   // Dismisses once the session has (a) actually been shown, (b) run its
   // course, AND (c) been visible for at least `minVisibleMs` -- see the
@@ -226,7 +243,10 @@ export function BootSplashOverlay({
   // a macrotask, which is what the rule is actually asking for.
   useEffect(() => {
     if (session.dismissed) return;
-    const shownAt = shownAtRef.current?.key === bootSessionKey ? shownAtRef.current.shownAt : null;
+    const shownAt =
+      shownAtRef.current?.key === bootSessionKey && shownAtRef.current?.staleGeneration === session.staleGeneration
+        ? shownAtRef.current.shownAt
+        : null;
     if (shownAt === null) return;
     const ranItsCourse = session.timedOut || (allLoaded && entries.length > 0);
     if (!ranItsCourse) return;
@@ -237,7 +257,16 @@ export function BootSplashOverlay({
       );
     }, remaining);
     return () => window.clearTimeout(timer);
-  }, [bootSessionKey, session.shown, session.dismissed, session.timedOut, allLoaded, entries, minVisibleMs]);
+  }, [
+    bootSessionKey,
+    session.shown,
+    session.dismissed,
+    session.timedOut,
+    session.staleGeneration,
+    allLoaded,
+    entries,
+    minVisibleMs,
+  ]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {

@@ -257,4 +257,51 @@ describe("bootProgress", () => {
     expect(first.result.current.entries[0].status).toBe("loaded");
     expect(second.result.current.entries[0].status).toBe("loaded");
   });
+
+  // BootSplashOverlay.tsx relies on resetGeneration being a monotonic counter
+  // incremented ONLY by resetBootProgress -- it's the one signal a consumer
+  // can use to tell "the store has genuinely been reset since I last looked"
+  // apart from "the store happens to currently look empty/fresh," which
+  // register/mark calls alone can't distinguish. These tests pin that
+  // contract down directly, at the store level, rather than only indirectly
+  // through the overlay's own tests.
+  it("resetGeneration starts at some baseline and increases by exactly one per resetBootProgress call", () => {
+    const { result } = renderHook(() => useBootProgress());
+    const baseline = result.current.resetGeneration;
+
+    act(() => {
+      resetBootProgress();
+    });
+    expect(result.current.resetGeneration).toBe(baseline + 1);
+
+    act(() => {
+      resetBootProgress();
+    });
+    expect(result.current.resetGeneration).toBe(baseline + 2);
+  });
+
+  it("resetGeneration does NOT change on registerBootSources/markBootSource* calls -- only resetBootProgress moves it", () => {
+    const { result } = renderHook(() => useBootProgress());
+    const baseline = result.current.resetGeneration;
+
+    act(() => {
+      registerBootSources([{ key: "a", labelEn: "a.json", labelAr: "أ" }]);
+      markBootSourceLoading("a");
+      markBootSourceLoaded("a");
+      markBootSourceError("a", "x");
+    });
+
+    expect(result.current.resetGeneration).toBe(baseline);
+  });
+
+  it("a second subscribed hook instance sees the same resetGeneration (shared module-level counter)", () => {
+    const first = renderHook(() => useBootProgress());
+    const second = renderHook(() => useBootProgress());
+
+    act(() => {
+      resetBootProgress();
+    });
+
+    expect(first.result.current.resetGeneration).toBe(second.result.current.resetGeneration);
+  });
 });

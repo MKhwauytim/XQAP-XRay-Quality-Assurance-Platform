@@ -50,18 +50,51 @@ function overlay(bootSessionKey: string, timeoutMs?: number, minVisibleMs = 0) {
   );
 }
 
+// Mounts, then simulates App.tsx's own useLayoutEffect -- which always calls
+// resetBootProgress() once, right after mount, before any child's own
+// registration effect runs. BootSplashOverlay's dataIsFresh gate now
+// requires this to have happened even on the component's own first mount
+// (a real regression found by an independent review: the component CAN
+// remount in production with the shared store still holding a previous
+// session's data -- the admin role-preview switch remounts AppContent via
+// `key={session.role}`, and logout->login remounts it via AuthGate -- so
+// "this is the very first arm, nothing to guard against" was never actually
+// safe to assume). Callers register sources AFTER this returns, mirroring
+// the real order: reset, then the landing tab's own mount effect registers.
 function renderOverlay(timeoutMs?: number, bootSessionKey = SESSION_ONE, minVisibleMs = 0) {
-  return render(overlay(bootSessionKey, timeoutMs, minVisibleMs));
+  const result = render(overlay(bootSessionKey, timeoutMs, minVisibleMs));
+  act(() => {
+    resetBootProgress();
+  });
+  return result;
+}
+
+// Advances a session already on screen to a NEW one, in the real production
+// order: the session-key prop changes first (App.tsx's reset lives in a
+// useLayoutEffect keyed on the very same identity, so it always fires
+// strictly after this component observes the new key, never before), THEN
+// the reset lands. Callers register the new session's sources afterward.
+function rerenderNewSession(
+  rerender: (ui: ReturnType<typeof overlay>) => void,
+  bootSessionKey: string,
+  timeoutMs?: number,
+  minVisibleMs = 0
+) {
+  rerender(overlay(bootSessionKey, timeoutMs, minVisibleMs));
+  act(() => {
+    resetBootProgress();
+  });
 }
 
 describe("BootSplashOverlay", () => {
   it("keeps the real app mounted underneath the checklist while a source is still loading", () => {
-    registerBootSources([
-      { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
-    ]);
-    markBootSourceLoading("population");
-
     renderOverlay();
+    act(() => {
+      registerBootSources([
+        { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
+      ]);
+      markBootSourceLoading("population");
+    });
 
     // Assert the app's PRESENCE, not the overlay's absence -- the whole
     // point of this overlay is that it sits on top of an app that is
@@ -71,26 +104,28 @@ describe("BootSplashOverlay", () => {
   });
 
   it("shows the real on-disk file name (labelEn) alongside the Arabic label (labelAr) for each source", () => {
-    registerBootSources([
-      { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
-    ]);
-    markBootSourceLoading("population");
-
     renderOverlay();
+    act(() => {
+      registerBootSources([
+        { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
+      ]);
+      markBootSourceLoading("population");
+    });
 
     expect(screen.getByText("بيانات السكان")).toBeInTheDocument();
     expect(screen.getByText("population.final.json")).toBeInTheDocument();
   });
 
   it("clears the overlay once every registered source has loaded, while the app stays mounted", () => {
-    registerBootSources([
-      { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
-      { key: "sample", labelAr: "بيانات العينة", labelEn: "sample.master.json" },
-    ]);
-    markBootSourceLoading("population");
-    markBootSourceLoading("sample");
-
     renderOverlay();
+    act(() => {
+      registerBootSources([
+        { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
+        { key: "sample", labelAr: "بيانات العينة", labelEn: "sample.master.json" },
+      ]);
+      markBootSourceLoading("population");
+      markBootSourceLoading("sample");
+    });
     expect(screen.getByTestId("boot-splash-overlay")).toBeInTheDocument();
 
     act(() => {
@@ -108,12 +143,13 @@ describe("BootSplashOverlay", () => {
   });
 
   it("clears the overlay after timeoutMs even when a source never finishes loading", () => {
-    registerBootSources([
-      { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
-    ]);
-    markBootSourceLoading("population"); // deliberately never resolved in this test
-
     renderOverlay(50);
+    act(() => {
+      registerBootSources([
+        { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
+      ]);
+      markBootSourceLoading("population"); // deliberately never resolved in this test
+    });
     expect(screen.getByTestId("boot-splash-overlay")).toBeInTheDocument();
 
     act(() => {
@@ -125,11 +161,12 @@ describe("BootSplashOverlay", () => {
   });
 
   it("does not clear the overlay before timeoutMs elapses while sources are still pending", () => {
-    vi.useFakeTimers();
-    registerBootSources([
-      { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
-    ]);
     renderOverlay(1000);
+    act(() => {
+      registerBootSources([
+        { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
+      ]);
+    });
 
     act(() => {
       vi.advanceTimersByTime(500);
@@ -139,14 +176,15 @@ describe("BootSplashOverlay", () => {
   });
 
   it("shows an error indicator for a failed source without blocking the overlay from later clearing", () => {
-    registerBootSources([
-      { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
-      { key: "sample", labelAr: "بيانات العينة", labelEn: "sample.master.json" },
-    ]);
-    markBootSourceLoading("population");
-    markBootSourceLoading("sample");
-
     const { container } = renderOverlay();
+    act(() => {
+      registerBootSources([
+        { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
+        { key: "sample", labelAr: "بيانات العينة", labelEn: "sample.master.json" },
+      ]);
+      markBootSourceLoading("population");
+      markBootSourceLoading("sample");
+    });
 
     act(() => {
       markBootSourceError("population", "الملف غير موجود");
@@ -178,12 +216,13 @@ describe("BootSplashOverlay", () => {
   // user is already working in.
 
   it("stays hidden when a LATER, unrelated registration re-populates the store mid-session", () => {
-    registerBootSources([
-      { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
-    ]);
-    markBootSourceLoading("population");
-
     renderOverlay();
+    act(() => {
+      registerBootSources([
+        { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
+      ]);
+      markBootSourceLoading("population");
+    });
     expect(screen.getByTestId("boot-splash-overlay")).toBeInTheDocument();
 
     act(() => {
@@ -209,12 +248,13 @@ describe("BootSplashOverlay", () => {
   });
 
   it("shows again for a genuinely new boot session (fresh login / workspace switch)", () => {
-    registerBootSources([
-      { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
-    ]);
-    markBootSourceLoading("population");
-
     const { rerender } = renderOverlay();
+    act(() => {
+      registerBootSources([
+        { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
+      ]);
+      markBootSourceLoading("population");
+    });
     act(() => {
       markBootSourceLoaded("population");
     });
@@ -223,17 +263,11 @@ describe("BootSplashOverlay", () => {
     });
     expect(screen.queryByTestId("boot-splash-overlay")).not.toBeInTheDocument();
 
-    // A new session: the session-key prop changes FIRST (real production
-    // ordering -- App.tsx's own reset lives in a useLayoutEffect keyed on the
-    // very same identity, so it always fires strictly after this component
-    // observes the new key, never before -- see the dedicated C-A regression
-    // test below for that ordering pinned down explicitly). Then the reset
-    // lands, then the new session's landing tab registers its own sources
-    // from its own mount effect.
-    rerender(overlay(SESSION_TWO));
-    act(() => {
-      resetBootProgress();
-    });
+    // A new session: the session-key prop changes first, then the reset
+    // lands (real production ordering -- see rerenderNewSession), then the
+    // new session's landing tab registers its own sources from its own
+    // mount effect.
+    rerenderNewSession(rerender, SESSION_TWO);
     act(() => {
       registerBootSources([
         { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
@@ -245,13 +279,13 @@ describe("BootSplashOverlay", () => {
   });
 
   it("re-arms the timeout on a new boot session instead of inheriting a spent one", () => {
-    vi.useFakeTimers();
-    registerBootSources([
-      { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
-    ]);
-    markBootSourceLoading("population"); // deliberately never resolved
-
     const { rerender } = renderOverlay(50);
+    act(() => {
+      registerBootSources([
+        { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
+      ]);
+      markBootSourceLoading("population"); // deliberately never resolved
+    });
     expect(screen.getByTestId("boot-splash-overlay")).toBeInTheDocument();
 
     act(() => {
@@ -263,13 +297,7 @@ describe("BootSplashOverlay", () => {
     // its children's contents change), so a mount-scoped timeout could only
     // ever fire once -- leaving every later session with a permanently-spent
     // safety valve AND a permanently-suppressed checklist.
-    //
-    // Real production ordering: the session-key prop changes first, the reset
-    // lands after (same reasoning as the test above).
-    rerender(overlay(SESSION_TWO, 50));
-    act(() => {
-      resetBootProgress();
-    });
+    rerenderNewSession(rerender, SESSION_TWO, 50);
     act(() => {
       registerBootSources([
         { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
@@ -287,23 +315,22 @@ describe("BootSplashOverlay", () => {
   });
 
   it("shows again for a new boot session even when the store reset lands AFTER the key change lands (real production ordering, C-A regression)", () => {
-    // The test above ("shows again for a genuinely new boot session") resets
-    // the store BEFORE re-rendering with the new key -- but that is NOT how
-    // production actually orders these two things. App.tsx's reset runs in a
-    // useLayoutEffect, which by definition fires AFTER the render in which
-    // `bootSessionKey` changes, not before it. At the moment this component
-    // re-renders with SESSION_TWO, the store still holds SESSION_ONE's (fully
-    // loaded) entries -- if the per-session latch used that stale data to
-    // decide it had "already run its course," the checklist would never open
-    // for the new session at all, silently reproducing the original
-    // never-shows bug in a different place. This test reproduces the real
-    // ordering to prove that can't happen.
-    registerBootSources([
-      { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
-    ]);
-    markBootSourceLoading("population");
-
+    // The store reset lives in App.tsx's useLayoutEffect, which by
+    // definition fires AFTER the render in which `bootSessionKey` changes,
+    // not before it. At the moment this component re-renders with
+    // SESSION_TWO, the store still holds SESSION_ONE's (fully loaded)
+    // entries -- if the per-session latch used that stale data to decide it
+    // had "already run its course," the checklist would never open for the
+    // new session at all, silently reproducing the original never-shows bug
+    // in a different place. This test pins that ordering down explicitly,
+    // asserting the intermediate (still-stale) state before the reset lands.
     const { rerender } = renderOverlay();
+    act(() => {
+      registerBootSources([
+        { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
+      ]);
+      markBootSourceLoading("population");
+    });
     act(() => {
       markBootSourceLoaded("population");
     });
@@ -334,6 +361,38 @@ describe("BootSplashOverlay", () => {
     expect(screen.getByTestId("boot-splash-overlay")).toBeInTheDocument();
   });
 
+  it("shows again after a REMOUNT with the store still holding the previous session's non-terminal data (regression: staleGeneration must not skip the guard on mount)", () => {
+    // A remount (admin role-preview switch via App.tsx's `key={session.role}`,
+    // or logout->login via AuthGate) is a fresh BootSplashOverlay instance --
+    // `useState`'s initializer runs again. If it treated that as "nothing to
+    // guard against," it would latch `shown` off whatever the shared store
+    // (module-level, outlives any one component instance) still holds from
+    // the session that was just torn down -- exactly the bug this component
+    // was built to prevent, just moved to the mount path instead of a
+    // same-instance session change.
+    const { unmount } = renderOverlay();
+    act(() => {
+      registerBootSources([
+        { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
+      ]);
+      markBootSourceLoading("population"); // left non-terminal, deliberately never loaded
+    });
+    unmount();
+    // The store is untouched by unmount -- it's module state, not component
+    // state -- so it still holds the "population: loading" entry here.
+
+    renderOverlay(); // a fresh instance; its OWN resetBootProgress() call is what must clear this
+    expect(screen.queryByTestId("boot-splash-overlay")).not.toBeInTheDocument();
+
+    act(() => {
+      registerBootSources([
+        { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
+      ]);
+      markBootSourceLoading("population");
+    });
+    expect(screen.getByTestId("boot-splash-overlay")).toBeInTheDocument();
+  });
+
   // ── Minimum-visible-duration floor ──────────────────────────────────────────
   // The always-registered sources (month.manifest.json, processing.summary.json,
   // sample.master.json, distribution.current.json) are small, already-optimized
@@ -344,13 +403,13 @@ describe("BootSplashOverlay", () => {
   // see what's loading" despite nothing being functionally broken.
 
   it("keeps the checklist visible for at least minVisibleMs even when every source finishes loading immediately", () => {
-    vi.useFakeTimers();
-    registerBootSources([
-      { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
-    ]);
-    markBootSourceLoading("population");
-
     renderOverlay(undefined, SESSION_ONE, 600);
+    act(() => {
+      registerBootSources([
+        { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
+      ]);
+      markBootSourceLoading("population");
+    });
     expect(screen.getByTestId("boot-splash-overlay")).toBeInTheDocument();
 
     act(() => {
@@ -372,13 +431,13 @@ describe("BootSplashOverlay", () => {
   });
 
   it("dismisses immediately once minVisibleMs has already elapsed by the time loading finishes", () => {
-    vi.useFakeTimers();
-    registerBootSources([
-      { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
-    ]);
-    markBootSourceLoading("population");
-
     renderOverlay(undefined, SESSION_ONE, 600);
+    act(() => {
+      registerBootSources([
+        { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
+      ]);
+      markBootSourceLoading("population");
+    });
     expect(screen.getByTestId("boot-splash-overlay")).toBeInTheDocument();
 
     act(() => {
