@@ -321,7 +321,7 @@ export default function AuthGate({ children }: AuthGateProps) {
     };
   }, [session]);
 
-  // Auto-refresh (every 5 minutes from sign-in): re-syncs users/roles/permissions
+  // Auto-refresh (every 3 minutes from sign-in): re-syncs users/roles/permissions
   // from 3-user-data/users.permissions.json AND broadcasts dataRefreshSignal so
   // every mounted view re-reads its own workspace data (assigned samples,
   // referrals/approvals, notifications, ...) -- so an admin's edit or another
@@ -333,7 +333,7 @@ export default function AuthGate({ children }: AuthGateProps) {
     if (!session || session.mode === "demo") return;
     if (workspaceStatus !== "ready" || !directoryHandle) return;
 
-    const AUTO_REFRESH_INTERVAL_MS = 5 * 60_000;
+    const AUTO_REFRESH_INTERVAL_MS = 3 * 60_000;
     const id = window.setInterval(() => {
       // A backgrounded/minimized tab has nothing on screen that benefits from
       // this tick -- skip the disk read and the fan-out signal entirely

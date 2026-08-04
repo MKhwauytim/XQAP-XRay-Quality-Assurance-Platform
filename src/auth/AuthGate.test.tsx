@@ -536,7 +536,7 @@ describe("AuthGate — activity log wiring (Task 1 double-permission-prompt fix)
 });
 
 describe("AuthGate — permission auto-refresh", () => {
-  const AUTO_REFRESH_INTERVAL_MS = 5 * 60_000;
+  const AUTO_REFRESH_INTERVAL_MS = 3 * 60_000;
 
   beforeEach(() => {
     userManagement.writeUserManagementState(
@@ -552,7 +552,7 @@ describe("AuthGate — permission auto-refresh", () => {
     );
   });
 
-  it("schedules a 5-minute interval that re-syncs users/permissions from disk for a real session", async () => {
+  it("schedules a 3-minute interval that re-syncs users/permissions from disk for a real session", async () => {
     vi.spyOn(authSession, "readRealSession").mockReturnValue({
       role: "employee",
       username: NON_SEED_USERNAME,
@@ -581,7 +581,7 @@ describe("AuthGate — permission auto-refresh", () => {
     const dataRefreshSpy = vi.fn();
     const unsubscribe = dataRefreshSignal.subscribeToDataRefresh(dataRefreshSpy);
 
-    // Fire the scheduled callback directly rather than racing real 5-minute
+    // Fire the scheduled callback directly rather than racing real 3-minute
     // timers -- what matters here is that the interval this effect registers
     // actually triggers another disk read, not exactly when it fires.
     (refreshCall![0] as () => void)();

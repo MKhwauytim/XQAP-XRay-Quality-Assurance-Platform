@@ -4,7 +4,7 @@
  * everything else that reads workspace disk state (samples, distribution,
  * referrals/replacements/reopens, notifications, answers, ...).
  *
- * Broadcast by the manual refresh button (AdminToolbar) and the 5-minute
+ * Broadcast by the manual refresh button (AdminToolbar) and the 3-minute
  * auto-refresh timer (AuthGate); any view that loads workspace data on mount
  * can subscribe to re-run its own load function when this fires, so an
  * action taken by another user/tab/machine (a reassigned sample, a posted
@@ -20,7 +20,7 @@ const DATA_REFRESH_EVENT_NAME = "xray-data-refresh";
  * "manual" -- the admin toolbar's explicit refresh button; an admin asked
  * for a hard refresh, so subscribers may treat this as license to discard
  * any local cache entirely.
- * "periodic" -- the 5-minute auto-refresh timer; subscribers should re-read
+ * "periodic" -- the 3-minute auto-refresh timer; subscribers should re-read
  * their own data, but a subscriber holding a cache with its own correct
  * invalidation (e.g. the append-only directory cache) should NOT wholesale-
  * reset on this source -- that would defeat the cache for no correctness

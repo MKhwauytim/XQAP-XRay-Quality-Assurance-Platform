@@ -201,6 +201,14 @@ export default function PopulationTab() {
   // every mutating capability is withdrawn until the load resolves (CRITICAL 1).
   // Owned by useMonthLoad (extracted for check:complexity's max-lines-per-function
   // budget); applyLoadedState/resetWizardState below still own every OTHER field.
+  // Sync extension (Task 6): true while a mutating wizard operation (processing,
+  // drawing/saving a sample, distributing) is writing its own not-yet-persisted
+  // result into a field the periodic/manual background-refresh subscriber inside
+  // useMonthLoad would also overwrite -- reassigned below, after every flag it
+  // reads is declared, same "plain ref updated every render" idiom as
+  // wizardFolderRef further down. Read only via `.current`, never as a dependency,
+  // so useMonthLoad's subscriber effect isn't forced to resubscribe on every tick.
+  const isWizardBusyRef = useRef(false);
   const { isLoadingMonthData, hasUnsavedSessionWorkRef } = useMonthLoad({
     directoryHandle,
     globalMonth,
@@ -216,6 +224,7 @@ export default function PopulationTab() {
       }),
     applyLoadedState,
     resetWizardState,
+    isWizardBusyRef,
     onLoadError: (message) => setProcessingMessage(message),
   });
   const { canUploadData, canProcessPopulation, canConfigureSample, canDrawSample, canDistributeSamples, canBulkAssign, canViewBrowse, canExportReports, canUploadNow, canProcessNow, canExportNow } = computeWizardCapabilities(can, canMutate, selectedMonthClosed, isLoadingMonthData);
@@ -460,6 +469,13 @@ export default function PopulationTab() {
   const [processingMessage, setProcessingMessage] = useState("");
   const [isProcessingWorkbooks, setIsProcessingWorkbooks] = useState(false);
   const [isProcessingPopulation, setIsProcessingPopulation] = useState(false);
+
+  // Sync extension (Task 6): every flag isWizardBusyRef needs to combine is
+  // now in scope -- reassigned on every render (isWizardBusyRef itself is
+  // declared up near the useMonthLoad call, above), same "plain ref updated
+  // every render" pattern as wizardFolderRef further down.
+  isWizardBusyRef.current =
+    isProcessingWorkbooks || isProcessingPopulation || isDrawingSample || isSavingToDisk || isDistributing;
 
   // Progress indicators
   const [processingProgressMessage, setProcessingProgressMessage] = useState("");
