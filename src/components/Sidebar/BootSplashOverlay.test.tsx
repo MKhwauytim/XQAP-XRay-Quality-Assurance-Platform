@@ -28,12 +28,19 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function renderOverlay(timeoutMs?: number) {
-  return render(
-    <BootSplashOverlay timeoutMs={timeoutMs}>
+const SESSION_ONE = "amal:2026-08-04T09:00:00.000Z:workspace-a";
+const SESSION_TWO = "amal:2026-08-04T14:30:00.000Z:workspace-a";
+
+function overlay(bootSessionKey: string, timeoutMs?: number) {
+  return (
+    <BootSplashOverlay bootSessionKey={bootSessionKey} timeoutMs={timeoutMs}>
       <div data-testid="app-content">التطبيق يعمل</div>
-    </BootSplashOverlay>,
+    </BootSplashOverlay>
   );
+}
+
+function renderOverlay(timeoutMs?: number, bootSessionKey = SESSION_ONE) {
+  return render(overlay(bootSessionKey, timeoutMs));
 }
 
 describe("BootSplashOverlay", () => {
@@ -143,5 +150,125 @@ describe("BootSplashOverlay", () => {
     });
 
     expect(screen.queryByTestId("boot-splash-overlay")).not.toBeInTheDocument();
+  });
+
+  // ── Exactly once per boot session ──────────────────────────────────────────
+  // The store behind useBootProgress is app-wide and long-lived: useMonthLoad
+  // re-registers on every genuine month switch, and XrayReferrals registers on
+  // its own first mount (often long after login, when the user first navigates
+  // to Employee Workspace). Neither may put the checklist back over an app the
+  // user is already working in.
+
+  it("stays hidden when a LATER, unrelated registration re-populates the store mid-session", () => {
+    registerBootSources([
+      { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
+    ]);
+    markBootSourceLoading("population");
+
+    renderOverlay();
+    expect(screen.getByTestId("boot-splash-overlay")).toBeInTheDocument();
+
+    act(() => {
+      markBootSourceLoaded("population");
+    });
+    expect(screen.queryByTestId("boot-splash-overlay")).not.toBeInTheDocument();
+
+    // Minutes later, some other tab the user has just navigated to registers
+    // its own sources for the first time. Same boot session -- the checklist
+    // is spent and must not cover the running app again.
+    act(() => {
+      registerBootSources([
+        { key: "referrals_sample_master", labelAr: "العينة الرئيسية", labelEn: "sample.master.json" },
+      ]);
+      markBootSourceLoading("referrals_sample_master");
+    });
+
+    expect(screen.queryByTestId("boot-splash-overlay")).not.toBeInTheDocument();
+    expect(screen.getByTestId("app-content")).toBeInTheDocument();
+  });
+
+  it("shows again for a genuinely new boot session (fresh login / workspace switch)", () => {
+    registerBootSources([
+      { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
+    ]);
+    markBootSourceLoading("population");
+
+    const { rerender } = renderOverlay();
+    act(() => {
+      markBootSourceLoaded("population");
+    });
+    expect(screen.queryByTestId("boot-splash-overlay")).not.toBeInTheDocument();
+
+    // A new session: App.tsx clears the store, then the new session's landing
+    // tab registers its own sources from its own mount effect.
+    act(() => {
+      resetBootProgress();
+    });
+    rerender(overlay(SESSION_TWO));
+    act(() => {
+      registerBootSources([
+        { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
+      ]);
+      markBootSourceLoading("population");
+    });
+
+    expect(screen.getByTestId("boot-splash-overlay")).toBeInTheDocument();
+  });
+
+  it("re-arms the timeout on a new boot session instead of inheriting a spent one", () => {
+    vi.useFakeTimers();
+    registerBootSources([
+      { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
+    ]);
+    markBootSourceLoading("population"); // deliberately never resolved
+
+    const { rerender } = renderOverlay(50);
+    expect(screen.getByTestId("boot-splash-overlay")).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(50);
+    });
+    expect(screen.queryByTestId("boot-splash-overlay")).not.toBeInTheDocument();
+
+    // This component is never remounted across a login/workspace switch (only
+    // its children's contents change), so a mount-scoped timeout could only
+    // ever fire once -- leaving every later session with a permanently-spent
+    // safety valve AND a permanently-suppressed checklist.
+    act(() => {
+      resetBootProgress();
+    });
+    rerender(overlay(SESSION_TWO, 50));
+    act(() => {
+      registerBootSources([
+        { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
+      ]);
+      markBootSourceLoading("population"); // again never resolved
+    });
+    expect(screen.getByTestId("boot-splash-overlay")).toBeInTheDocument();
+
+    // ...and the fresh session's own grace period still bounds it.
+    act(() => {
+      vi.advanceTimersByTime(50);
+    });
+    expect(screen.queryByTestId("boot-splash-overlay")).not.toBeInTheDocument();
+    expect(screen.getByTestId("app-content")).toBeInTheDocument();
+  });
+
+  it("does not retire the checklist off the vacuously-loaded empty store it starts every boot with", () => {
+    // Nothing registered yet -- allLoaded is vacuously true. If that counted as
+    // "the checklist ran its course", the landing tab's registration a moment
+    // later (its own mount effect, always after this component's first render)
+    // would arrive to a permanently-dismissed overlay.
+    renderOverlay();
+    expect(screen.queryByTestId("boot-splash-overlay")).not.toBeInTheDocument();
+
+    act(() => {
+      registerBootSources([
+        { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
+      ]);
+      markBootSourceLoading("population");
+    });
+
+    expect(screen.getByTestId("boot-splash-overlay")).toBeInTheDocument();
   });
 });

@@ -311,8 +311,13 @@ export function AppContent({ session }: AppContentProps) {
             mounted underneath -- this is a purely visual overlay, not a gate --
             so every tab's own effects (including the boot-source registration
             they self-report) run on schedule whether or not the checklist is
-            still showing. */}
-        <BootSplashOverlay>
+            still showing. `bootSessionKey` is the same session+workspace
+            identity used for the reset above -- it is what tells the overlay a
+            genuinely new boot session has begun, so the checklist shows exactly
+            once per session and a later tab registering its own sources
+            mid-session can never bring it back. It is deliberately NOT a React
+            `key`: that would remount every child on a session change. */}
+        <BootSplashOverlay bootSessionKey={autoBackupAttemptKey}>
           {allowedTabs.map((tab) =>
             mountedTabIds.includes(tab.id) ? (
               <div
