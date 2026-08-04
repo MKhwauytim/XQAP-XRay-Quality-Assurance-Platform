@@ -274,4 +274,59 @@ describe("useMonthLoad — boot-progress reporting", () => {
     });
     await waitFor(() => expect(result.current.allLoaded).toBe(true));
   });
+
+  it("a superseded load's REJECTION never marks the checklist error on the newer load's behalf", async () => {
+    // Mirror of the success-path test above, for the catch branch: A's late
+    // rejection must not stamp B's still-in-flight keys "error" -- error is
+    // terminal too (allLoaded semantics), so a stray stamp here would falsely
+    // dismiss the checklist while B is genuinely still loading fresh data.
+    const workspaceA = makeDirectoryHandle("workspace-a");
+    const workspaceB = makeDirectoryHandle("workspace-b");
+    const rejectA: { current: (() => void) | null } = { current: null };
+    const releaseB: { current: (() => void) | null } = { current: null };
+    const gateA = new Promise<void>((_resolve, reject) => { rejectA.current = () => reject(new Error("disk read failed")); });
+    const gateB = new Promise<void>((resolve) => { releaseB.current = resolve; });
+
+    vi.mocked(loadMonthForEditing)
+      .mockImplementationOnce(async (dir) => {
+        loadCalls.list.push(dir);
+        await gateA;
+        return emptyMonthEditData;
+      })
+      .mockImplementationOnce(async (dir) => {
+        loadCalls.list.push(dir);
+        await gateB;
+        return emptyMonthEditData;
+      });
+
+    const { result } = renderHook(() => useBootProgress());
+    const onLoadError = vi.fn();
+    const { rerender } = renderMonthLoad(workspaceA, { onLoadError });
+    await waitFor(() => expect(loadCalls.list).toHaveLength(1));
+
+    act(() => rerender({ directoryHandle: workspaceB }));
+    await waitFor(() => expect(loadCalls.list).toHaveLength(2));
+    await waitFor(() => expect(result.current.entries.every((entry) => entry.status === "loading")).toBe(true));
+
+    // A rejects late. The existing failure-handling side effects (reset,
+    // onLoadError) are already guarded on the token elsewhere and must not
+    // fire for a superseded rejection -- confirms that guard is untouched --
+    // and A's boot-progress keys must stay exactly "loading", not flip to
+    // "error", since B is still legitimately loading them.
+    await act(async () => {
+      rejectA.current?.();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(onLoadError).not.toHaveBeenCalled();
+    expect(result.current.entries.every((entry) => entry.status === "loading")).toBe(true);
+    expect(result.current.allLoaded).toBe(false);
+
+    // The surviving (newer) load still reports normally once it finishes.
+    await act(async () => {
+      releaseB.current?.();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await waitFor(() => expect(result.current.allLoaded).toBe(true));
+  });
 });
