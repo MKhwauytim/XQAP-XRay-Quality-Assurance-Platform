@@ -14,17 +14,7 @@ import type {
 
 import { RISK_COLUMN_ALIASES } from "../riskData/riskDataColumns";
 import { BI_COLUMN_ALIASES } from "../biData/biDataColumns";
-
-function normalizeText(value: unknown): string {
-  return String(value ?? "").trim().replace(/\s+/g, " ");
-}
-
-function normalizeArabicText(value: unknown): string {
-  return normalizeText(value)
-    .replace(/[أإآ]/g, "ا")
-    .replace(/ة/g, "ه")
-    .replace(/ى/g, "ي");
-}
+import { normalizeText, normalizeArabicText } from "./textNormalization";
 
 const EXCLUDED_SOURCE_COLUMNS: string[] = []; // Configure columns here to exclude from exports if needed
 
