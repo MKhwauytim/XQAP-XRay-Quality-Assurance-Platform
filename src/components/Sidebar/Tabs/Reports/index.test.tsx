@@ -351,12 +351,41 @@ describe("Reports month-summary chips — staleness guard (I-1)", () => {
     (globalThis as { __testDir?: DirectoryHandleLike }).__testDir = root;
 
     const { rerender } = render(<ReportsTab />);
-    // Mount starts a load for April; it is now suspended on deferredManifestFor("4-april-2026").
+    // §N — `ReportsTab` (this file's default import) is `lazy(() =>
+    // import("./TabView"))`, and this render() has no wrapping <Suspense>, so the
+    // FIRST render commits nothing: React defers the whole tree until the dynamic
+    // import resolves, which happens asynchronously (at least one microtask tick
+    // later), not synchronously inside this render() call. If we flipped the month
+    // to May right here (as this test used to, pre-§N), the real TabView would not
+    // have mounted yet — its April meta-load effect would never have started, so
+    // resolving deferredManifestFor("4-april-2026") later would be a no-op for a
+    // reason that has nothing to do with the stale-response guard, and the test's
+    // closing assertions would pass vacuously (they'd pass even with the guard
+    // deleted). So: explicitly wait for the real, lazy-loaded component to mount
+    // AND for its April load to genuinely start before touching the month
+    // selection — mirrors the awaiting pattern the §T mount-preservation tests use
+    // (`await screen.findByTestId(...)`) to cross this same lazy boundary. A longer
+    // explicit timeout is used here (not the default 1000ms) because crossing the
+    // dynamic import() boundary is the one wait in this file that is not just
+    // waiting on a mocked promise — it is measurably slower and was the source of
+    // this test's observed full-suite flakiness.
+    await waitFor(
+      () => {
+        expect(populationStorageSpies.loadMonthManifest).toHaveBeenCalledWith(root, "4-april-2026");
+      },
+      { timeout: 5000 }
+    );
 
     // Flip the global-month selection to May and rerender — this runs the cleanup for
     // April's effect (cancelled = true in the fix) and starts a fresh load for May.
     globalMonthMock.state.selection = { kind: "existing", month: 5, year: 2026, folderName: "5-may-2026" };
     rerender(<ReportsTab />);
+
+    // Confirm May's load has genuinely started too, before resolving anything —
+    // same reasoning as the April wait above, applied to the post-mount rerender.
+    await waitFor(() => {
+      expect(populationStorageSpies.loadMonthManifest).toHaveBeenCalledWith(root, "5-may-2026");
+    });
 
     // Resolve MAY (the current selection) FIRST.
     await act(async () => {
