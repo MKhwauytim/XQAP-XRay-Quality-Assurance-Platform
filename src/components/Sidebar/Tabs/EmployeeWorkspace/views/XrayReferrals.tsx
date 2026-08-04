@@ -154,6 +154,12 @@ type BootSourceDescriptor = { key: string; labelEn: string; labelAr: string };
  * `EmployeeAnswerFile`, see answerStorage.ts) and per-supervisor
  * `*.decisions.json` files, just folded differently, so representing them as
  * two separate "loading" entries would misrepresent them as distinct reads.
+ * Its `labelEn` names both current on-disk folders relative to the month's
+ * sample root -- `2-samples/{month}/2-employees/` (getSampleEmployeeDir, via
+ * answerStorage.ts's loadAllEmployeeFiles) and `2-samples/{month}/3-approvals/`
+ * (getSampleApprovalsDir, via approvalStorage.ts's loadAllSupervisorDecisions),
+ * per workspacePaths.ts's SAMPLE_SUBFOLDERS. Both have unnumbered legacy
+ * fallbacks the loaders still read; the label names the current layout.
  * `referrals_sample_mirror` is only included for personal-scope users
  * (`!canSeeAll`) -- oversight users never call `loadEmployeeSampleMirror`
  * (see loadData below), matching that same branch exactly.
@@ -163,7 +169,7 @@ function referralsBootSources(username: string, canSeeAll: boolean): BootSourceD
     { key: "referrals_sample_master", labelEn: "sample.master.json", labelAr: "العينة الرئيسية" },
     {
       key: "referrals_requests",
-      labelEn: "employee-answers/*.answers.json + *.decisions.json",
+      labelEn: "2-employees/*.answers.json + 3-approvals/*.decisions.json",
       labelAr: "طلبات الإحالة والاستبدال",
     },
     { key: "referrals_distribution", labelEn: "distribution.current.json", labelAr: "توزيع العينات" },

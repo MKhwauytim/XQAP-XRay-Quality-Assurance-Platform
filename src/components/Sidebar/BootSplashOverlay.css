@@ -4,15 +4,33 @@
    while named on-disk sources registered via bootProgress.ts
    are still loading. Visual precedent: the first-run checklist
    in WorkspaceGate.css, adapted from a floating card to a
-   full-screen cover since this blocks the whole app, not a
-   corner of it.
+   full-area cover since this blocks the whole tab content,
+   not a corner of it.
+
+   `position: absolute`, NOT `fixed`: the overlay is rendered
+   inside `.app-workspace` (App.css), which is already
+   `position: relative` and occupies grid-column 1 only. That
+   makes this cover exactly the tab-content area -- what
+   App.tsx's own comment claims it covers. `fixed` would
+   position against the viewport regardless of DOM nesting,
+   and at z-index 20000 it would sit over the Sidebar and over
+   AdminToolbar (z-index 1000, rendered higher up the tree in
+   AuthGate.tsx), hiding the logout button and breaking the
+   VIS-01 invariant that the toolbar stays clickable.
    ========================================================= */
 
 .boot-splash-overlay {
-  position: fixed;
+  position: absolute;
   inset: 0;
   z-index: 20000;
   display: grid;
+  /* The cover spans all of .app-workspace, which scrolls and can be several
+     screens tall -- but the card must center on what the user can SEE, not on
+     the full scroll height, or a tall landing tab leaves them staring at an
+     opaque cover with the checklist parked far below the fold. Capping the
+     (single) grid row at one screen keeps the card centered on screen for tall
+     content and changes nothing at all when the workspace is shorter. */
+  grid-template-rows: min(100%, calc(100vh - var(--topbar-height, 56px)));
   place-items: center;
   padding: 24px;
   background: linear-gradient(150deg, #071528 0%, #0C1E38 55%, var(--c-navy, #0E2444) 100%);
