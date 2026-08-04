@@ -6,8 +6,8 @@
  * The single hardened HTML-escaping primitive for the whole reporting layer
  * (audit C-08). Encodes `& < > " '` — the full set needed to neutralise both
  * element- and attribute-context injection (a lone `'` can break out of a
- * single-quoted attribute). `htmlReport.escHtml` and the charts' `escText`
- * delegate here so every builder shares one strictness level.
+ * single-quoted attribute). The charts' `escText` delegates here so every
+ * builder shares one strictness level.
  */
 export function esc(s: string | null | undefined): string {
   return (s ?? "")
