@@ -132,10 +132,16 @@ function StatusMark({ status }: { status: BootSourceEntry["status"] }) {
  * The `timeoutMs` timer is the safety valve for a source that never reaches a
  * terminal status -- one stuck file can't lock the user out of the app --
  * mirroring the "error is terminal" allLoaded semantics in bootProgress.ts.
- * It is armed per boot session, not per mount: this component mounts once for
- * the whole app session and is never remounted on login/workspace switch, so a
- * mount-scoped timer could only ever fire once and every later session would
- * inherit a permanently-spent safety valve.
+ * It is armed per boot session (keyed on `bootSessionKey`), not per mount.
+ * This component DOES remount in real usage -- the admin role-preview switch
+ * remounts `AppContent` via `key={session.role}` (App.tsx), and a logout ->
+ * login cycle remounts it via AuthGate -- and a genuine remount already gets
+ * a fresh timer for free (a brand-new `useState`/`useEffect` instance). The
+ * per-session (not per-mount) re-arming below is what covers a session
+ * change that does NOT happen to remount the component -- currently a
+ * defensive contract guarantee more than a proven-reachable production path,
+ * but the component's correctness must not depend on "a remount will always
+ * bail us out" holding forever.
  */
 export function BootSplashOverlay({
   children,

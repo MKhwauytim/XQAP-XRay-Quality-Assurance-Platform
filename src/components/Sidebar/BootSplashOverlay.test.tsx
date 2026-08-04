@@ -293,10 +293,11 @@ describe("BootSplashOverlay", () => {
     });
     expect(screen.queryByTestId("boot-splash-overlay")).not.toBeInTheDocument();
 
-    // This component is never remounted across a login/workspace switch (only
-    // its children's contents change), so a mount-scoped timeout could only
-    // ever fire once -- leaving every later session with a permanently-spent
-    // safety valve AND a permanently-suppressed checklist.
+    // A same-instance session change (this test's `rerenderNewSession`, no
+    // remount) is the case per-session re-arming exists for -- a genuine
+    // remount would already get a fresh timer for free. A mount-scoped-only
+    // timeout would leave a same-instance session change with a
+    // permanently-spent safety valve AND a permanently-suppressed checklist.
     rerenderNewSession(rerender, SESSION_TWO, 50);
     act(() => {
       registerBootSources([
