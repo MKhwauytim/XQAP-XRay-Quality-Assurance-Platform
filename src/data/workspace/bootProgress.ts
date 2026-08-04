@@ -18,7 +18,7 @@
  * not hang the whole boot screen forever and lock the user out of the app.
  */
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 
 export type BootSourceStatus = "pending" | "loading" | "loaded" | "error";
 
@@ -37,12 +37,23 @@ type Subscriber = () => void;
 const sources = new Map<BootSourceKey, BootSourceEntry>();
 const subscribers = new Set<Subscriber>();
 
+function computeEntries(): BootSourceEntry[] {
+  return Array.from(sources.values());
+}
+
+// Cached, not recomputed per read: useSyncExternalStore's getSnapshot must
+// return a referentially-stable value between notifications, or React sees a
+// "new" snapshot on every render and re-renders forever. Refreshed exactly
+// once per notify() -- the only place `sources` ever mutates.
+let cachedEntries: BootSourceEntry[] = computeEntries();
+
 function notify(): void {
+  cachedEntries = computeEntries();
   subscribers.forEach((fn) => fn());
 }
 
 function getEntries(): BootSourceEntry[] {
-  return Array.from(sources.values());
+  return cachedEntries;
 }
 
 function isTerminal(status: BootSourceStatus): boolean {
@@ -98,31 +109,21 @@ function subscribe(fn: Subscriber): () => void {
   return () => subscribers.delete(fn);
 }
 
-/** React hook -- subscribes to the store, re-renders on any registration/status change. */
+/**
+ * React hook -- subscribes to the store, re-renders on any registration/status
+ * change. Built on useSyncExternalStore specifically (not useState+useEffect)
+ * because that pairing has a real gap: the useState initializer captures a
+ * snapshot at first render, but subscribing only happens later in useEffect --
+ * and per React's own child-before-parent effect ordering, that runs AFTER a
+ * child's own mount effect (Population's useMonthLoad.ts, Employee
+ * Workspace's XrayReferrals.tsx both register/mark sources from their own
+ * mount effects) has already published and found zero subscribers. That
+ * update is lost outright. useSyncExternalStore has no such gap: React
+ * re-reads getSnapshot() itself around the subscribe, so a publish that lands
+ * between this component's render and its subscription is never missed.
+ */
 export function useBootProgress(): { entries: BootSourceEntry[]; allLoaded: boolean } {
-  const [entries, setEntries] = useState<BootSourceEntry[]>(() => getEntries());
-  useEffect(() => {
-    // Re-read the snapshot INSIDE the subscribing effect, not just in the
-    // useState initializer above. The initializer runs during the first
-    // render; this effect runs strictly later -- and per React's own
-    // child-before-parent effect ordering, it runs AFTER the landing tab's
-    // own mount effect has already called registerBootSources +
-    // markBootSourceLoading (Population's useMonthLoad.ts, Employee
-    // Workspace's XrayReferrals.tsx -- both descendants of the component
-    // that renders the checklist). Those calls' notify() fire while this
-    // hook still has no subscriber, so without this re-read they are lost
-    // outright: `entries` would stay [] forever, `[].every(...)` is
-    // vacuously true, and the checklist would never show at all.
-    //
-    // This is the "subscribe for updates from an external system" case the
-    // set-state-in-effect rule explicitly allows for, just with the store's
-    // missed-update gap closed: exactly one extra render per mount, never a
-    // cascade (the deps array is empty, and the value read is the same
-    // snapshot the subscription itself would deliver).
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- external-store snapshot re-read, see above
-    setEntries(getEntries());
-    return subscribe(() => setEntries(getEntries()));
-  }, []);
+  const entries = useSyncExternalStore(subscribe, getEntries);
   const allLoaded = entries.every((entry) => isTerminal(entry.status));
   return { entries, allLoaded };
 }
