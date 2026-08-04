@@ -366,12 +366,18 @@ export async function buildDistributionDeck(
   });
 }
 
-export function buildDistributionXlsx(
+// XLSX export — Sheet 2 (assignments) row-array construction is chunked with
+// a main-thread yield between chunks (same idiom as DataTable/index.tsx and
+// BrowseDataView.tsx) so a large distribution doesn't block the UI thread for
+// the whole build.
+const EXPORT_CHUNK_SIZE = 1000;
+
+export async function buildDistributionXlsx(
   data: DistributionCurrentData,
   monthFolderName: string,
   employeeDisplayNames: Record<string, string> = {},
   sourceRevisions?: SourceRevisions,
-): void {
+): Promise<void> {
   const m = computeDistributionModel(data, monthFolderName, employeeDisplayNames);
   const nameOf = (u: string): string => employeeDisplayNames[u] ?? u;
 
@@ -393,14 +399,22 @@ export function buildDistributionXlsx(
   ];
 
   // Sheet 2 — Assignments (all rows).
+  const assignmentRows: (string | number)[][] = [];
+  for (let i = 0; i < data.entries.length; i += EXPORT_CHUNK_SIZE) {
+    const chunk = data.entries.slice(i, i + EXPORT_CHUNK_SIZE);
+    for (const e of chunk) {
+      assignmentRows.push([
+        e.xrayImageId, nameOf(e.assignedTo), statusLabel(e.status), e.lastEventAt,
+        e.row.portName ?? "", e.row.stage ?? "", e.row.certScanStatus, e.row.biEnrichmentStatus,
+        e.row.xrayLevelOneResult, e.row.xrayLevelTwoResult, e.replacedById ?? "",
+        e.row.xrayEntryDate ?? "", e.row.declarationNumber ?? "", e.row.movementType ?? "", e.row.riskMessage ?? "",
+      ]);
+    }
+    if (data.entries.length > EXPORT_CHUNK_SIZE) await yieldToMain();
+  }
   const assignments: (string | number)[][] = [
     ["رقم الأشعة", "الموظف", "الحالة", "آخر حدث", "المنفذ", "المستوى", "CertScan", "مصدر BI", "م.أول", "م.ثاني", "رقم الإحالة", "تاريخ الدخول", "رقم البيان", "نوع الحركة", "رسالة Risk"],
-    ...data.entries.map((e) => [
-      e.xrayImageId, nameOf(e.assignedTo), statusLabel(e.status), e.lastEventAt,
-      e.row.portName ?? "", e.row.stage ?? "", e.row.certScanStatus, e.row.biEnrichmentStatus,
-      e.row.xrayLevelOneResult, e.row.xrayLevelTwoResult, e.replacedById ?? "",
-      e.row.xrayEntryDate ?? "", e.row.declarationNumber ?? "", e.row.movementType ?? "", e.row.riskMessage ?? "",
-    ]),
+    ...assignmentRows,
   ];
 
   // Sheet 3 — Per-employee breakdown.

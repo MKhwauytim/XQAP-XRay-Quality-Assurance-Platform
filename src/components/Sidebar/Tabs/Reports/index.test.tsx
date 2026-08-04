@@ -119,7 +119,7 @@ vi.mock("../../../../data/powerbiExport/exportManager", () => ({
 // real report-building code or triggers a real download in jsdom. Follows the
 // same explicit-args wrapper shape as `deckExportMock` above.
 const distributionReportSpies = vi.hoisted(() => ({
-  buildDistributionXlsx: vi.fn((_data: unknown, _month: unknown, _names: unknown, _revisions: unknown) => undefined),
+  buildDistributionXlsx: vi.fn(async (_data: unknown, _month: unknown, _names: unknown, _revisions: unknown) => undefined),
   openDistributionDocument: vi.fn(async (_data: unknown, _month: unknown, _names: unknown, _revisions: unknown) => undefined),
   openDistributionDeck: vi.fn(async (_data: unknown, _month: unknown, _names: unknown, _revisions: unknown) => undefined),
 }));
@@ -134,7 +134,7 @@ vi.mock("../../../../data/reporting/distributionReport", () => ({
 }));
 
 const sampleReportSpies = vi.hoisted(() => ({
-  buildSampleXlsx: vi.fn((_input: unknown) => undefined),
+  buildSampleXlsx: vi.fn(async (_input: unknown) => undefined),
   openSampleReport: vi.fn(async (_input: unknown) => undefined),
   openSampleDeck: vi.fn(async (_input: unknown) => undefined),
 }));

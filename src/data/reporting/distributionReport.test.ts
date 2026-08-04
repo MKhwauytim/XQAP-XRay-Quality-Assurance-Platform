@@ -2,9 +2,30 @@
 // renderers (document / deck / xlsx) all read `computeDistributionModel`.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as XLSX from "xlsx";
 
-import { computeDistributionModel, buildDistributionDocument, buildDistributionDeck } from "./distributionReport";
+import { computeDistributionModel, buildDistributionDocument, buildDistributionDeck, buildDistributionXlsx } from "./distributionReport";
 import { makeRow, makeDistribution } from "./reportTestFixtures";
+import { yieldToMain } from "../storage/yieldToMain";
+import type { DistributionStatus } from "../distribution/distributionTypes";
+
+// The vendored xlsx module namespace is frozen (ESM), so `vi.spyOn` can't
+// replace writeFile. Partial-mock the module: keep the real `utils` (the
+// export builds a real workbook) but stub `writeFile` so no download is
+// attempted in the test environment and the built workbook can be inspected.
+// Same idiom as DataTable/index.test.tsx.
+vi.mock("xlsx", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("xlsx")>();
+  return { ...actual, writeFile: vi.fn() };
+});
+
+// Wrap the real `yieldToMain` in a spy (keep its actual setTimeout-based
+// behavior) so tests below can assert the chunked XLSX export actually
+// yields the main thread for a population above EXPORT_CHUNK_SIZE.
+vi.mock("../storage/yieldToMain", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../storage/yieldToMain")>();
+  return { ...actual, yieldToMain: vi.fn(actual.yieldToMain) };
+});
 
 function data() {
   return makeDistribution([
@@ -95,5 +116,55 @@ describe("distribution renderers — golden snapshot (P3-7 chunking safety)", ()
 
   it("deck output is byte-identical", async () => {
     expect(await buildDistributionDeck(data(), "6-June-2026", { u1: "أحمد", u2: "سارة" })).toMatchSnapshot();
+  });
+});
+
+// ─── buildDistributionXlsx chunked yielding (Task 2, P3-7 follow-up) ──────────
+// Proves the "التعيينات" (Sheet 2) row loop actually yields the main thread
+// for a population above EXPORT_CHUNK_SIZE, and that chunking the row-array
+// build didn't drop or duplicate any rows across a chunk boundary.
+describe("buildDistributionXlsx — chunked yielding", () => {
+  function bigData(n: number) {
+    const entries: Array<{ id: string; assignedTo: string; status: DistributionStatus; row: ReturnType<typeof makeRow> }> = [];
+    for (let i = 1; i <= n; i++) {
+      entries.push({
+        id: `IMG-${i}`,
+        assignedTo: i % 2 === 0 ? "u1" : "u2",
+        status: "pending",
+        row: makeRow(`IMG-${i}`, "منفذ أ"),
+      });
+    }
+    return makeDistribution(entries, { totalAssigned: n, totalPending: n });
+  }
+
+  beforeEach(() => {
+    vi.mocked(XLSX.writeFile).mockClear();
+    vi.mocked(yieldToMain).mockClear();
+  });
+
+  it("yields the main thread at least once for a population above EXPORT_CHUNK_SIZE", async () => {
+    await buildDistributionXlsx(bigData(1500), "6-June-2026", { u1: "أحمد", u2: "سارة" });
+    expect(vi.mocked(yieldToMain).mock.calls.length).toBeGreaterThan(0);
+    expect(vi.mocked(XLSX.writeFile)).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not yield for a population at or below EXPORT_CHUNK_SIZE", async () => {
+    await buildDistributionXlsx(bigData(1000), "6-June-2026", { u1: "أحمد", u2: "سارة" });
+    expect(vi.mocked(yieldToMain).mock.calls.length).toBe(0);
+  });
+
+  it("chunked row-build output has no drops/duplicates across the chunk boundary", async () => {
+    const n = 2500; // spans 3 chunks of EXPORT_CHUNK_SIZE (1000)
+    await buildDistributionXlsx(bigData(n), "6-June-2026", { u1: "أحمد", u2: "سارة" });
+    const wb = vi.mocked(XLSX.writeFile).mock.calls[0]![0] as XLSX.WorkBook;
+    const sheet = wb.Sheets["التعيينات"]!;
+    const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1 });
+    expect(rows.length).toBe(n + 1); // header + n data rows, no drops/dupes
+    expect(rows[1]![0]).toBe("IMG-1");
+    expect(rows[1000]![0]).toBe("IMG-1000"); // last row of chunk 1
+    expect(rows[1001]![0]).toBe("IMG-1001"); // first row of chunk 2
+    expect(rows[n]![0]).toBe(`IMG-${n}`); // last row overall
+    const ids = rows.slice(1).map((r) => (r as unknown[])[0]);
+    expect(new Set(ids).size).toBe(n); // no duplicate xrayImageId
   });
 });

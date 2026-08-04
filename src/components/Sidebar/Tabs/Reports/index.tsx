@@ -417,7 +417,7 @@ function ReportsContent() {
         };
         if (type === "sample-xlsx") {
           const { buildSampleXlsx } = await import("../../../../data/reporting/sampleReport");
-          buildSampleXlsx(sampleInput);
+          await buildSampleXlsx(sampleInput);
           showToast("ok", "تم تنزيل ملف Excel.");
         } else if (type === "sample-deck") {
           const { openSampleDeck } = await import("../../../../data/reporting/sampleReport");
@@ -443,7 +443,7 @@ function ReportsContent() {
         ]);
         if (type === "distribution-xlsx") {
           const { buildDistributionXlsx } = await import("../../../../data/reporting/distributionReport");
-          buildDistributionXlsx(data, selectedMonth, names, distRevisions);
+          await buildDistributionXlsx(data, selectedMonth, names, distRevisions);
           showToast("ok", "تم تنزيل ملف Excel.");
         } else if (type === "distribution-deck") {
           const { openDistributionDeck } = await import("../../../../data/reporting/distributionReport");
