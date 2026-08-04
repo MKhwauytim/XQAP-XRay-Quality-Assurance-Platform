@@ -254,6 +254,51 @@ describe("BootSplashOverlay", () => {
     expect(screen.getByTestId("app-content")).toBeInTheDocument();
   });
 
+  it("shows again for a new boot session even when the store reset lands AFTER the key change lands (real production ordering, C-A regression)", () => {
+    // The test above ("shows again for a genuinely new boot session") resets
+    // the store BEFORE re-rendering with the new key -- but that is NOT how
+    // production actually orders these two things. App.tsx's reset runs in a
+    // useLayoutEffect, which by definition fires AFTER the render in which
+    // `bootSessionKey` changes, not before it. At the moment this component
+    // re-renders with SESSION_TWO, the store still holds SESSION_ONE's (fully
+    // loaded) entries -- if the per-session latch used that stale data to
+    // decide it had "already run its course," the checklist would never open
+    // for the new session at all, silently reproducing the original
+    // never-shows bug in a different place. This test reproduces the real
+    // ordering to prove that can't happen.
+    registerBootSources([
+      { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
+    ]);
+    markBootSourceLoading("population");
+
+    const { rerender } = renderOverlay();
+    act(() => {
+      markBootSourceLoaded("population");
+    });
+    expect(screen.queryByTestId("boot-splash-overlay")).not.toBeInTheDocument();
+
+    // Real ordering: the new session's key lands on this component FIRST,
+    // while the store still holds the previous session's stale, fully-loaded
+    // entries -- the reset hasn't run yet.
+    rerender(overlay(SESSION_TWO));
+    expect(screen.queryByTestId("boot-splash-overlay")).not.toBeInTheDocument();
+
+    // THEN the reset lands (App.tsx's useLayoutEffect), clearing the store...
+    act(() => {
+      resetBootProgress();
+    });
+    // ...and only then does the new session's landing tab register its own
+    // sources from its own mount effect.
+    act(() => {
+      registerBootSources([
+        { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
+      ]);
+      markBootSourceLoading("population");
+    });
+
+    expect(screen.getByTestId("boot-splash-overlay")).toBeInTheDocument();
+  });
+
   it("does not retire the checklist off the vacuously-loaded empty store it starts every boot with", () => {
     // Nothing registered yet -- allLoaded is vacuously true. If that counted as
     // "the checklist ran its course", the landing tab's registration a moment

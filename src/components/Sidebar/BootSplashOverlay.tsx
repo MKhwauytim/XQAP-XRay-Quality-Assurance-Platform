@@ -39,10 +39,23 @@ type BootSessionLatch = {
   timedOut: boolean;
   /** This session's checklist already ran its course; it must never return. */
   dismissed: boolean;
+  /**
+   * This session's overlay has actually been visibly rendered at least once.
+   * Required before `dismissed` can latch true -- see the render-time logic
+   * below for why: at the exact render where `bootSessionKey` changes, the
+   * shared bootProgress store still holds the PREVIOUS session's (usually
+   * fully-loaded) entries, since the reset that clears it (App.tsx's
+   * useLayoutEffect) hasn't run yet. Without this gate, a brand-new session's
+   * freshly-armed latch would read that stale "everything loaded" data and
+   * dismiss itself on the spot, before its own landing tab ever got a chance
+   * to register anything -- silently reproducing the original never-shows
+   * bug, just relocated from the store to this component.
+   */
+  shown: boolean;
 };
 
 function armLatch(key: string): BootSessionLatch {
-  return { key, timedOut: false, dismissed: false };
+  return { key, timedOut: false, dismissed: false, shown: false };
 }
 
 const STATUS_TITLE: Record<BootSourceEntry["status"], string> = {
@@ -104,16 +117,31 @@ export function BootSplashOverlay({ children, bootSessionKey, timeoutMs = 8000 }
   // App.tsx's removed copy had: that one reached through resetBootProgress()
   // into *another* already-mounted component's state.)
   let session = latch.key === bootSessionKey ? latch : armLatch(bootSessionKey);
-  // `entries.length > 0` is load-bearing: an empty registry reports `allLoaded`
-  // vacuously true, and that is precisely the state at the start of every boot
-  // -- before the landing tab's own mount effect has registered anything.
-  // Latching off it would retire the checklist a frame before it could ever
-  // appear, silently re-creating the exact "never shows" bug this component
-  // was just fixed for.
+
+  // Step 1: has this session's overlay actually been visible at least once?
+  // Uses the exact same predicate as `showOverlay` below -- deliberately NOT
+  // gated on `entries.length`, since this asks "would the user have seen it,"
+  // not "has real loading genuinely started."
+  const visibleNow = !session.dismissed && !session.timedOut && !allLoaded;
+  if (visibleNow && !session.shown) {
+    session = { ...session, shown: true };
+  }
+
+  // Step 2: retire the session once it has BOTH actually been shown AND has
+  // now run its course. `entries.length > 0` is load-bearing on its own too:
+  // an empty registry reports `allLoaded` vacuously true, which is precisely
+  // the state at the very start of every boot, before the landing tab's own
+  // mount effect has registered anything -- without this, `ranItsCourse`
+  // alone could still be satisfied by a genuinely empty, fresh registry.
+  // Requiring `session.shown` first is what stops a brand-new session's
+  // just-armed latch from reading the PREVIOUS session's stale, not-yet-reset
+  // store (see the `shown` field's doc comment above) and dismissing itself
+  // before its own landing tab ever got a chance to register anything.
   const ranItsCourse = session.timedOut || (allLoaded && entries.length > 0);
-  if (!session.dismissed && ranItsCourse) {
+  if (session.shown && !session.dismissed && ranItsCourse) {
     session = { ...session, dismissed: true };
   }
+
   if (session !== latch) setLatch(session);
 
   useEffect(() => {

@@ -192,7 +192,14 @@ export function useMonthLoad(params: {
         logError("population:silent-reload-month", error);
         return;
       }
-      bootSources.forEach((source) => markBootSourceError(source.key, message));
+      // Staleness check FIRST, mirroring the success path above: a
+      // superseded load's rejection must not touch the shared boot-progress
+      // store either -- it would show a false failure on keys the newer,
+      // still-pending load has already re-registered and is midway through
+      // re-loading fresh.
+      if (token === loadMonthTokenRef.current) {
+        bootSources.forEach((source) => markBootSourceError(source.key, message));
+      }
       throw error;
     } finally {
       if (!silent && token === loadMonthTokenRef.current) {

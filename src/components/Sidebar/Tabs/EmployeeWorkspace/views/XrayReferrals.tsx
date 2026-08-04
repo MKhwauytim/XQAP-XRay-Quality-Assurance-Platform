@@ -472,9 +472,13 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       );
       const answerItems = files.flatMap((f) => f.items);
 
-      if (isInitialLoad) bootSources.forEach((source) => markBootSourceLoaded(source.key));
-
+      // Staleness check FIRST: a superseded load must not touch the shared
+      // boot-progress store at all -- marking its keys "loaded" would show
+      // the checklist ticking off sources the newer, still-pending load is
+      // about to re-read from scratch.
       if (token !== loadTokenRef.current) return; // superseded by a newer month selection
+
+      if (isInitialLoad) bootSources.forEach((source) => markBootSourceLoaded(source.key));
 
       setAllEntries(all);
       setEntries(visible);
@@ -485,7 +489,12 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       setAnswers(answerItems);
       setLoadState("ready");
     } catch (err) {
-      if (isInitialLoad) {
+      // Staleness check FIRST, mirroring the success path above: a
+      // superseded load's rejection must not touch the shared boot-progress
+      // store either -- it would show a false failure on keys the newer,
+      // still-pending load has already re-registered and is midway through
+      // re-loading fresh.
+      if (isInitialLoad && token === loadTokenRef.current) {
         const message = err instanceof Error ? err.message : String(err);
         bootSources.forEach((source) => markBootSourceError(source.key, message));
       }
