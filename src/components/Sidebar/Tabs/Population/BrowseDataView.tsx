@@ -420,7 +420,7 @@ function rowMatchesColumnFilters(
 
 function safeExportFileName(value: string): string {
   // eslint-disable-next-line no-control-regex -- intentionally strips ASCII control characters (U+0000-U+001F) from file names
-  return value.replace(/[<>:"/\\|?* -]+/g, "-").replace(/\s+/g, "_");
+  return value.replace(/[<>:"/\\|?*\u0000-\u001F]+/g, "-").replace(/\s+/g, "_");
 }
 
 // Same yieldToMain idiom used by populationProcessor.ts / riskDataWorkbook.ts —
