@@ -8,6 +8,7 @@ import type { MonthManifestData, MonthRawData, PopulationFinalData } from "../po
 import type { SampleMasterData } from "../sampling/sampleTypes";
 import type { DirectoryHandleLike, FileHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson, safeWriteJsonText } from "../storage/safeWrite";
+import { mapWithConcurrency } from "../storage/concurrency";
 import { withWorkspaceWriteAccess } from "../storage/workspaceWriteAccess";
 import { logError } from "../storage/errorLogger";
 import { exportLabelsSnapshot } from "../workspace/labelsSnapshot";
@@ -1028,9 +1029,7 @@ export async function loadArchiveStatus(
   directoryHandle: DirectoryHandleLike,
   months: MonthFolderInfo[]
 ): Promise<MonthArchiveStatus[]> {
-  const statuses: MonthArchiveStatus[] = [];
-
-  for (const month of months) {
+  return mapWithConcurrency(months, 4, async (month) => {
     const manifest = await loadMonthJson<MonthManifestData>(directoryHandle, month.folderName, ["month.manifest.json"]);
 
     // Prefer the manifest's own totalProcessedRows/status for the population
@@ -1064,7 +1063,7 @@ export async function loadArchiveStatus(
     const answerFiles = await loadAllEmployeeFiles(directoryHandle, month.folderName);
     const answerItems = answerFiles.reduce((sum, file) => sum + (file.items?.length ?? 0), 0);
 
-    statuses.push({
+    return {
       folderName: month.folderName,
       month: month.month,
       year: month.year,
@@ -1086,8 +1085,6 @@ export async function loadArchiveStatus(
       distributionPending: distribution?.totalPending ?? 0,
       answerFiles: answerFiles.length,
       answerItems,
-    });
-  }
-
-  return statuses;
+    };
+  });
 }

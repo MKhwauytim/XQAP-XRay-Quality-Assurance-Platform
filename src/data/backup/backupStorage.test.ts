@@ -182,6 +182,33 @@ function wrapDirDenyingXlsxWrites(real: DirectoryHandleLike): DirectoryHandleLik
   return wrapped;
 }
 
+/**
+ * Wraps a real memory directory so any getDirectoryHandle call for a folder
+ * name present in `delayMsByFolder` awaits that many ms before delegating to
+ * the real handle -- lets a test make loadArchiveStatus's per-month reads
+ * (loadMonthJson repeatedly calls getMonthDir/getSampleMainDir, each of which
+ * re-enters getDirectoryHandle(monthFolderName)) complete in a DELIBERATELY
+ * different order than the input `months` array, to prove mapWithConcurrency
+ * (Task 2) returns results in input order rather than completion order.
+ */
+function wrapDirWithDelay(
+  real: DirectoryHandleLike,
+  delayMsByFolder: Record<string, number>
+): DirectoryHandleLike {
+  const wrapped: DirectoryHandleLike = {
+    ...real,
+    getDirectoryHandle: async (dirName: string, options?: { create?: boolean }) => {
+      const delay = delayMsByFolder[dirName];
+      if (delay) {
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+      const child = await real.getDirectoryHandle(dirName, options);
+      return wrapDirWithDelay(child, delayMsByFolder);
+    },
+  };
+  return wrapped;
+}
+
 describe("archive population path compatibility", () => {
   it("loads current numbered population folders and exports their rows", async () => {
     const root = makeRoot();
@@ -516,5 +543,54 @@ describe("loadArchiveStatus — distribution completed/pending surfacing (P2-1)"
       distributionCompleted: 0,
       distributionPending: 0,
     });
+  });
+});
+
+describe("loadArchiveStatus — result order survives out-of-order completion (Task 2)", () => {
+  it("returns statuses in input `months` order even when an earlier month's reads finish last", async () => {
+    const root = makeRoot();
+    const months = [
+      { folderName: "1-january-2026", month: 1, year: 2026 },
+      { folderName: "2-february-2026", month: 2, year: 2026 },
+      { folderName: "3-march-2026", month: 3, year: 2026 },
+    ];
+
+    for (const m of months) {
+      const populationRoot = await root.getDirectoryHandle("1-population", { create: true });
+      const monthDir = await populationRoot.getDirectoryHandle(m.folderName, { create: true });
+      await safeWriteJson(monthDir, "month.manifest.json", {
+        monthFolderName: m.folderName,
+        month: m.month,
+        year: m.year,
+        processedAt: "2026-01-31T10:00:00.000Z",
+        processedBy: "admin",
+        riskFileName: "risk.xlsx",
+        biFileName: null,
+        certScanUsed: false,
+        templateVersion: null,
+        rngSeed: null,
+        totalRawRows: m.month,
+        totalProcessedRows: m.month,
+        status: "processed-saved",
+      });
+    }
+
+    // Deliberately reversed relative to input order: months[0]'s reads are the
+    // SLOWEST and months[2]'s the FASTEST, so under real concurrency months[2]
+    // finishes first -- exactly the scenario a naive "push as each resolves"
+    // implementation would get wrong. This may pass even against the current
+    // (pre-Task-2) sequential loop, since a strictly sequential for-loop can
+    // never observe out-of-order completion in the first place -- that's
+    // expected; the value here is regression protection once concurrency lands.
+    const delayed = wrapDirWithDelay(root, {
+      [months[0]!.folderName]: 30,
+      [months[1]!.folderName]: 15,
+      [months[2]!.folderName]: 2,
+    });
+
+    const statuses = await loadArchiveStatus(delayed, months);
+
+    expect(statuses.map((s) => s.folderName)).toEqual(months.map((m) => m.folderName));
+    expect(statuses.map((s) => s.totalProcessedRows)).toEqual([1, 2, 3]);
   });
 });
