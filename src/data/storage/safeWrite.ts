@@ -62,6 +62,35 @@ async function readText(
   }
 }
 
+/**
+ * Public wrapper around this module's own transient-NotReadableError-retry
+ * read path (see NOT_READABLE_RETRY_DELAYS_MS above), for callers outside
+ * this file that read raw file text directly (not through safeReadJson's
+ * envelope parsing) and want the same tolerance.
+ *
+ * Added for src/data/backup/backupStorage.ts's copyAllJsonFiles/
+ * restoreJsonTree: their own readTextFile previously had no retry at all, so
+ * a file that was briefly unreadable while another write was mid-flight (a
+ * concurrent safeWriteJson elsewhere, a sync client, antivirus) failed the
+ * whole backup/restore immediately instead of getting the same short,
+ * bounded retry safeReadJson already gets. Widening that walk's concurrency
+ * from 1 to 8 (mapWithConcurrency) made this more likely to be hit in
+ * practice by increasing how many file handles are open at once, which is
+ * what surfaced it as a real user-facing NotReadableError.
+ *
+ * Same contract as readText: returns null for a missing file, retries a
+ * transient NotReadableError with the same bounded backoff, and still
+ * throws once retries are exhausted (or for any other error) — a genuinely
+ * failed read must keep failing the caller rather than silently producing a
+ * partial backup/restore.
+ */
+export async function readFileTextWithRetry(
+  dir: DirectoryHandleLike,
+  name: string
+): Promise<string | null> {
+  return readText(dir, name);
+}
+
 async function writeText(
   dir: DirectoryHandleLike,
   name: string,

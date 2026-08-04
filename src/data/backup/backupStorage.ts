@@ -7,7 +7,7 @@ import type { MonthFolderInfo } from "../population/monthFolder";
 import type { MonthManifestData, MonthRawData, PopulationFinalData } from "../population/monthTypes";
 import type { SampleMasterData } from "../sampling/sampleTypes";
 import type { DirectoryHandleLike, FileHandleLike } from "../storage/fileSystemAccess";
-import { safeReadJson, safeWriteJson, safeWriteJsonText } from "../storage/safeWrite";
+import { readFileTextWithRetry, safeReadJson, safeWriteJson, safeWriteJsonText } from "../storage/safeWrite";
 import { mapWithConcurrency } from "../storage/concurrency";
 import { withWorkspaceWriteAccess } from "../storage/workspaceWriteAccess";
 import { logError } from "../storage/errorLogger";
@@ -247,15 +247,16 @@ async function writeBinaryFile(dir: DirectoryHandleLike, fileName: string, conte
   return true;
 }
 
+// Delegates to safeWrite.ts's readFileTextWithRetry so this walk gets the
+// same short, bounded NotReadableError retry safeReadJson already has (see
+// that function's doc comment for why: a transient "could not be read" is
+// expected background noise while the workspace is live, and got materially
+// more likely to be hit once the walk below went from 1 concurrent file read
+// to 8). A missing file still resolves to null; an exhausted retry (or any
+// other error) still throws and must propagate — see isNotFoundError's
+// comment below for why a NotReadableError must not be silently swallowed.
 async function readTextFile(dir: DirectoryHandleLike, fileName: string): Promise<string | null> {
-  try {
-    const fh = await dir.getFileHandle(fileName, { create: false });
-    const file = await fh.getFile();
-    return file.text();
-  } catch (error) {
-    if (isNotFoundError(error)) return null;
-    throw error;
-  }
+  return readFileTextWithRetry(dir, fileName);
 }
 
 function sanitizeFilePart(value: string): string {
@@ -349,7 +350,10 @@ async function writeRowsAsChunkedXlsx(params: {
 // creates and then removes a {file}.tmp, mutating a directory mid-enumeration.
 // Chromium can then reject a follow-up lookup with NotFoundError. A
 // NotReadableError is different: the entry still exists but cannot currently be
-// read, so it must propagate rather than silently producing a partial backup.
+// read. readTextFile (above) now retries a transient NotReadableError with the
+// same bounded backoff safeReadJson uses (via safeWrite.ts's
+// readFileTextWithRetry) before giving up — but once that retry is exhausted,
+// it must still propagate rather than silently producing a partial backup.
 function isNotFoundError(error: unknown): boolean {
   return Boolean(
     error && typeof error === "object" && (error as { name?: string }).name === "NotFoundError"

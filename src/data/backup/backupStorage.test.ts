@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { createMemoryDirectory, setSimulatedWritePermission } from "../storage/memoryDirectory";
 import type { DirectoryHandleLike, FileHandleLike } from "../storage/fileSystemAccess";
-import { safeWriteJson } from "../storage/safeWrite";
+import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { WorkspacePermissionError } from "../storage/workspaceWriteAccess";
 import { getSampleMainDir, getSystemRoot, getUserDataRoot } from "../workspace/workspacePaths";
 import { WORKSPACE_FILE_NAMES } from "../workspace/workspaceDefaults";
@@ -307,6 +307,58 @@ function wrapDirFailingFileWrite(
     getDirectoryHandle: async (dirName: string, options?: { create?: boolean }) => {
       const child = await real.getDirectoryHandle(dirName, options);
       return wrapDirFailingFileWrite(child, failingFileName);
+    },
+  };
+  return wrapped;
+}
+
+function flakyNotReadableError(): Error {
+  // Mirrors the real Chromium DOMException text for this condition (and the
+  // exact wording the user reported hitting during a real backup).
+  const error = new Error(
+    "The requested file could not be read, typically due to permissions problems that have occurred after a reference to file was acquired."
+  );
+  error.name = "NotReadableError";
+  return error;
+}
+
+/**
+ * Wraps a real memory directory so any READ (options.create falsy)
+ * getFileHandle lookup for `flakyFileName` returns a handle whose getFile()
+ * throws a NotReadableError-shaped error the first `state.remainingFailures`
+ * times it is called (across this wrapper and any of its recursively-wrapped
+ * subdirectories, via the shared `state` object), then delegates to the real
+ * handle -- lets a test simulate the transient "could not be read" condition
+ * that backupStorage.ts's readTextFile now retries via safeWrite.ts's
+ * readFileTextWithRetry. Pass `Number.POSITIVE_INFINITY` as
+ * remainingFailures to simulate a NotReadableError that never clears, to
+ * prove an exhausted retry still fails the whole backup/restore instead of
+ * being silently swallowed.
+ */
+function wrapDirWithFlakyFileRead(
+  real: DirectoryHandleLike,
+  flakyFileName: string,
+  state: { remainingFailures: number }
+): DirectoryHandleLike {
+  const wrapped: DirectoryHandleLike = {
+    ...real,
+    getFileHandle: async (fileName: string, options?: { create?: boolean }) => {
+      const handle = await real.getFileHandle(fileName, options);
+      if (options?.create || fileName !== flakyFileName) return handle;
+      return {
+        ...handle,
+        getFile: async (): Promise<File> => {
+          if (state.remainingFailures > 0) {
+            state.remainingFailures -= 1;
+            throw flakyNotReadableError();
+          }
+          return handle.getFile();
+        },
+      } as FileHandleLike;
+    },
+    getDirectoryHandle: async (dirName: string, options?: { create?: boolean }) => {
+      const child = await real.getDirectoryHandle(dirName, options);
+      return wrapDirWithFlakyFileRead(child, flakyFileName, state);
     },
   };
   return wrapped;
@@ -924,5 +976,73 @@ describe("createBackup — backup.complete.json written last (Task 4)", () => {
     await expect(
       backupDir.getFileHandle("backup.complete.json", { create: false })
     ).resolves.toBeDefined();
+  });
+});
+
+describe("createBackup — transient NotReadableError recovery (readTextFile retry)", () => {
+  it("completes the backup after a transiently unreadable file's read succeeds on retry", async () => {
+    const root = makeRoot();
+    await safeWriteJson(root, "a-file.json", { value: "a" });
+    await safeWriteJson(root, "b-file.json", { value: "b" });
+    await safeWriteJson(root, "c-file.json", { value: "c" });
+
+    // b-file's read throws NotReadableError twice (matching
+    // NOT_READABLE_RETRY_DELAYS_MS = [20, 60] in safeWrite.ts, i.e. 2
+    // retries available) before succeeding on the 3rd attempt -- simulating
+    // the transient "could not be read" window a concurrent write, sync
+    // client, or antivirus scan can open up. This is exactly the report:
+    // the user's exact NotReadableError message, hit during a real backup
+    // after the copy walk went from 1 concurrent file read to 8 (widening
+    // the window in which this transient condition gets landed on).
+    const flaky = wrapDirWithFlakyFileRead(root, "b-file.json", { remainingFailures: 2 });
+
+    const result = await createBackup(flaky, [], "admin", "manual");
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const relevant = result.manifest.jsonFilesBackedUp.filter((f) =>
+      ["a-file.json", "b-file.json", "c-file.json"].includes(f)
+    );
+    expect(relevant.sort()).toEqual(["a-file.json", "b-file.json", "c-file.json"]);
+
+    // The retry must have recovered the REAL content, not silently skipped
+    // or substituted the file.
+    const systemDir = await getSystemRoot(root, false);
+    const backupsDir = await systemDir.getDirectoryHandle("backups", { create: false });
+    const backupDir = await backupsDir.getDirectoryHandle(result.folderName, { create: false });
+    const jsonDir = await backupDir.getDirectoryHandle("json", { create: false });
+    const copied = await safeReadJson<{ value: string }>(jsonDir, "b-file.json");
+    expect(copied.ok && copied.value.value).toBe("b");
+  });
+});
+
+describe("createBackup — persistent NotReadableError still fails the backup (retry does not mask real failures)", () => {
+  it("reports ok:false and does not produce a partial backup when a file's read never recovers", async () => {
+    const root = makeRoot();
+    await safeWriteJson(root, "a-file.json", { value: "a" });
+    await safeWriteJson(root, "b-file.json", { value: "b" });
+    await safeWriteJson(root, "c-file.json", { value: "c" });
+
+    // b-file's read NEVER succeeds -- the retry budget is exhausted and the
+    // error must still propagate. A genuinely failed read (permissions
+    // denied, corrupt handle, etc.) must keep failing the backup loud
+    // rather than retrying forever or silently producing a partial backup.
+    const flaky = wrapDirWithFlakyFileRead(root, "b-file.json", {
+      remainingFailures: Number.POSITIVE_INFINITY,
+    });
+
+    const result = await createBackup(flaky, [], "admin", "manual");
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatch(/NotReadable|permission/i);
+
+    // No partial backup: backup.manifest.json (written only after the whole
+    // json copy walk completes) must not exist for this attempt, so
+    // loadBackupHistory (which only counts folders with a readable manifest)
+    // must not report it -- confirming the failure was not silently
+    // swallowed into an incomplete-but-"successful" backup.
+    const history = await loadBackupHistory(root);
+    expect(history).toEqual([]);
   });
 });
