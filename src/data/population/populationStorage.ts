@@ -1,5 +1,5 @@
 import type { DirectoryHandleLike, FileHandleLike } from "../storage/fileSystemAccess";
-import { safeWriteJson, safeWriteJsonText, safeReadJson, readEnvelopeRevision } from "../storage/safeWrite";
+import { safeWriteJson, safeWriteJsonText, safeReadJson, readEnvelopeRevision, readFileTextWithRetry } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
 import { mapWithConcurrency } from "../storage/concurrency";
 import { withResourceLock } from "../storage/webLocks";
@@ -615,6 +615,34 @@ export async function loadMonthPopulationFinal(
       "population.final.json"
     );
     return result.ok ? result.value : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Raw (unparsed) file text of `population.final.json` -- the worker-owned Population
+ * Browse query path (Phase B, large-population perf proposal) hands this straight to
+ * `usePopulationBrowseWorker().loadRawJson` so the MAIN thread never runs `JSON.parse`
+ * over what can be a 200k-400k row file; only the dedicated query worker
+ * (`src/workers/populationQueryWorker.ts`) parses it, off the main thread.
+ *
+ * Deliberately does NOT reuse `safeReadJson` here: `safeReadJson` also returns
+ * `rawText`, but it gets there by calling `unwrap(JSON.parse(...))` first -- i.e. it
+ * already pays the exact main-thread parse cost this accessor exists to avoid. This
+ * calls the lower-level `readFileTextWithRetry` (text-only, no parse) instead.
+ *
+ * Returns null when the file doesn't exist yet (e.g. an unprocessed/pending month),
+ * matching `loadMonthPopulationFinal`'s null-on-missing contract.
+ */
+export async function loadMonthPopulationFinalRawText(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<string | null> {
+  try {
+    const monthDir = await getMonthDir(directoryHandle, monthFolderName);
+    const processedDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false });
+    return await readFileTextWithRetry(processedDir, "population.final.json");
   } catch {
     return null;
   }

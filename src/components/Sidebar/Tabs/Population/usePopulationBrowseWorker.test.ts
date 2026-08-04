@@ -101,6 +101,42 @@ describe("usePopulationBrowseWorker", () => {
     expect(result.current.isLoaded).toBe(true);
   });
 
+  it("loadRawJson threads stageMappings/monthFolder into the posted request when given options, and omits them entirely when not", () => {
+    const { result } = renderHook(() => usePopulationBrowseWorker());
+    const instance = workerInstances[0];
+    const stageMappings = { first: ["1"], second: ["2"], third: ["3"], fourth: ["4"] };
+
+    act(() => {
+      result.current.loadRawJson("RAW_JSON", { stageMappings, monthFolder: "5-may-2026" });
+    });
+    expect(instance.posted).toEqual([
+      { type: "load", requestId: 1, rawJsonText: "RAW_JSON", stageMappings, monthFolder: "5-may-2026" },
+    ]);
+
+    act(() => {
+      result.current.loadRawJson("RAW_JSON_2");
+    });
+    // Omitting `options` entirely must post the exact same shape as before this
+    // option existed -- no stray `stageMappings`/`monthFolder` keys.
+    expect(instance.posted[1]).toEqual({ type: "load", requestId: 2, rawJsonText: "RAW_JSON_2" });
+  });
+
+  it("totalRows is set from a matching 'loaded' response's totalRows, and stays null before the first load", () => {
+    const { result } = renderHook(() => usePopulationBrowseWorker());
+    const instance = workerInstances[0];
+
+    expect(result.current.totalRows).toBeNull();
+
+    act(() => {
+      result.current.loadRawJson("RAW_JSON");
+    });
+    act(() => {
+      respond(instance, { type: "loaded", requestId: 1, totalRows: 12345 });
+    });
+
+    expect(result.current.totalRows).toBe(12345);
+  });
+
   it("runQuery resolves with the query result on a matching result response", async () => {
     const { result } = renderHook(() => usePopulationBrowseWorker());
     const instance = workerInstances[0];

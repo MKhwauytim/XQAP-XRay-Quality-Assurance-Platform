@@ -140,6 +140,119 @@ describe("populationQueryWorker — handleWorkerMessage", () => {
     expect(queryAfterSecondLoad.response.result.pageRows.map((row) => row["xrayImageId"])).toEqual(["z"]);
   });
 
+  // ── Task 4: display-parity threading (the CRITICAL gap flagged when this worker
+  // first shipped in Task 2 — see this file's earlier "Deliberately does NOT
+  // special-case..." comment, now replaced). Confirms that a search for a stage's
+  // DISPLAYED Arabic label finds rows whose RAW stored stage value is merely an
+  // alias (e.g. "1"), and that a raw month-folder value participates in search
+  // under its short Arabic display label too — both are real regressions the old
+  // generic-only formatter would have silently introduced relative to the
+  // pre-worker inline BrowseDataView.tsx implementation.
+  it("load with stageMappings: a search for a stage's canonical Arabic label matches rows whose raw stage is only an alias", () => {
+    const rows = [
+      { xrayImageId: "1", stage: "1" }, // "1" is a first-stage alias, not the canonical label
+      { xrayImageId: "2", stage: "SECOND STAGE" }, // second-stage alias
+      { xrayImageId: "3", stage: "غير معروف" } // unmapped -- falls back to raw text
+    ];
+    const stageMappings = {
+      first: ["1", "المستوى الأول"],
+      second: ["SECOND STAGE", "المستوى الثاني"],
+      third: ["المستوى الثالث"],
+      fourth: ["المستوى الرابع"]
+    };
+
+    const loadOutcome = handleWorkerMessage(createInitialWorkerState(), {
+      type: "load",
+      requestId: 1,
+      rawJsonText: rawPopulationJson(rows),
+      stageMappings
+    });
+
+    const queryOutcome = handleWorkerMessage(loadOutcome.state, {
+      type: "query",
+      requestId: 2,
+      // A user searching would type what they SEE in the table, i.e. the
+      // canonical Arabic label -- not the raw alias actually stored on disk.
+      params: baseQueryParams({ search: "المستوى الأول" })
+    });
+
+    expect(queryOutcome.response.type).toBe("result");
+    if (queryOutcome.response.type !== "result") throw new Error("expected result response");
+    expect(queryOutcome.response.result.pageRows.map((row) => row["xrayImageId"])).toEqual(["1"]);
+
+    // Same check for the second-stage alias.
+    const secondQuery = handleWorkerMessage(loadOutcome.state, {
+      type: "query",
+      requestId: 3,
+      params: baseQueryParams({ search: "المستوى الثاني" })
+    });
+    if (secondQuery.response.type !== "result") throw new Error("expected result response");
+    expect(secondQuery.response.result.pageRows.map((row) => row["xrayImageId"])).toEqual(["2"]);
+  });
+
+  it("load without stageMappings: 'stage' falls back to a raw passthrough (no aliasing applied)", () => {
+    const rows = [{ xrayImageId: "1", stage: "1" }];
+    const loadOutcome = handleWorkerMessage(createInitialWorkerState(), {
+      type: "load",
+      requestId: 1,
+      rawJsonText: rawPopulationJson(rows)
+      // stageMappings omitted entirely.
+    });
+
+    const queryOutcome = handleWorkerMessage(loadOutcome.state, {
+      type: "query",
+      requestId: 2,
+      params: baseQueryParams({ search: "المستوى الأول" })
+    });
+    if (queryOutcome.response.type !== "result") throw new Error("expected result response");
+    expect(queryOutcome.response.result.totalRows).toBe(0);
+
+    // The raw alias itself still matches, same as the generic formatter would.
+    const rawSearch = handleWorkerMessage(loadOutcome.state, {
+      type: "query",
+      requestId: 3,
+      params: baseQueryParams({ search: "1" })
+    });
+    if (rawSearch.response.type !== "result") throw new Error("expected result response");
+    expect(rawSearch.response.result.totalRows).toBe(1);
+  });
+
+  it("load with monthFolder: every row gets _monthFolder/_month/_year attached, and search matches the short Arabic month label", () => {
+    const rows = [{ xrayImageId: "1", portName: "Jeddah" }];
+    const loadOutcome = handleWorkerMessage(createInitialWorkerState(), {
+      type: "load",
+      requestId: 1,
+      rawJsonText: rawPopulationJson(rows),
+      monthFolder: "5-may-2026"
+    });
+
+    expect(loadOutcome.state.cachedRows).toEqual([
+      { xrayImageId: "1", portName: "Jeddah", _monthFolder: "5-may-2026", _month: 5, _year: 2026 }
+    ]);
+
+    // A user searching would type the short Arabic month/year label shown in the
+    // "الشهر المصدر" column ("مايو 2026"), not the raw English folder-name value
+    // ("5-may-2026") actually stored on the synthesized row.
+    const queryOutcome = handleWorkerMessage(loadOutcome.state, {
+      type: "query",
+      requestId: 2,
+      params: baseQueryParams({ search: "مايو" })
+    });
+    if (queryOutcome.response.type !== "result") throw new Error("expected result response");
+    expect(queryOutcome.response.result.pageRows.map((row) => row["xrayImageId"])).toEqual(["1"]);
+  });
+
+  it("load without monthFolder: rows are cached exactly as parsed, with no _monthFolder/_month/_year attached", () => {
+    const rows = [{ xrayImageId: "1", portName: "Jeddah" }];
+    const loadOutcome = handleWorkerMessage(createInitialWorkerState(), {
+      type: "load",
+      requestId: 1,
+      rawJsonText: rawPopulationJson(rows)
+    });
+
+    expect(loadOutcome.state.cachedRows).toEqual(rows);
+  });
+
   it("a failed load does not clobber a previously successful load's cached rows", () => {
     const goodRows = [{ xrayImageId: "keep-me" }];
 

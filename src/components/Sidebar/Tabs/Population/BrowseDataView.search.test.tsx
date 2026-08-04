@@ -20,6 +20,34 @@ import BrowseDataView from "./BrowseDataView";
 
 const MONTH_FOLDER = "5-may-2026";
 
+// BrowseDataView now owns its search/filter/sort/paginate work via a real Web
+// Worker (Phase B, large-population perf proposal). Vitest's node/jsdom
+// environment cannot run a real DedicatedWorker (same limitation documented in
+// Population.wizard.test.tsx / populationQueryWorker.test.ts), so the Vite
+// `?worker&inline` import is mocked with a stub that runs the SAME exported pure
+// `handleWorkerMessage` the real worker uses (src/workers/populationQueryWorker.ts)
+// on a microtask, rather than a no-op — a no-op stub would leave the component
+// permanently stuck awaiting a "loaded"/"result" response that never arrives.
+vi.mock("../../../../workers/populationQueryWorker?worker&inline", async () => {
+  const { createInitialWorkerState, handleWorkerMessage } = await import("../../../../workers/populationQueryWorker");
+  return {
+    default: class PopulationQueryWorkerStub {
+      onmessage: ((ev: MessageEvent) => void) | null = null;
+      private state = createInitialWorkerState();
+      postMessage(request: unknown): void {
+        Promise.resolve().then(() => {
+          const { state, response } = handleWorkerMessage(this.state, request as never);
+          this.state = state;
+          this.onmessage?.({ data: response } as MessageEvent);
+        });
+      }
+      terminate(): void {}
+      addEventListener(): void {}
+      removeEventListener(): void {}
+    },
+  };
+});
+
 vi.mock("../../../../data/month/useGlobalMonth", () => ({
   useGlobalMonth: () => ({
     months: [{ month: 5, year: 2026, folderName: MONTH_FOLDER }],

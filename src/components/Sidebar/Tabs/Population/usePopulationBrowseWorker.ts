@@ -8,11 +8,28 @@ import type {
   PopulationQueryParams,
   PopulationQueryResult,
 } from "../../../../data/population/populationQuery";
+// Type-only import — erased at compile time, so this doesn't add anything to this
+// (main-thread) hook file's runtime bundle; only used to type `loadRawJson`'s new
+// optional display-parity argument (see populationQueryWorkerTypes.ts's "load" doc
+// comment for why the worker needs this).
+import type { StageAliasMappings } from "../../../../data/population/populationConfig";
 import PopulationQueryWorker from "../../../../workers/populationQueryWorker?worker&inline";
 
+export type LoadRawJsonOptions = {
+  /** Threaded through to the worker so its own display-value formatter can special-case "stage". */
+  stageMappings?: StageAliasMappings;
+  /** Threaded through to the worker so every cached row gets _monthFolder/_month/_year attached. */
+  monthFolder?: string;
+};
+
 export type UsePopulationBrowseWorkerResult = {
-  /** Fire a "load" request — does not itself return anything; watch `isLoaded`. */
-  loadRawJson: (rawJsonText: string) => void;
+  /**
+   * Fire a "load" request — does not itself return anything; watch `isLoaded`.
+   * `options` is optional and purely additive (see LoadRawJsonOptions / the "load"
+   * request's own doc comment in populationQueryWorkerTypes.ts) — omitting it posts
+   * the exact same request shape as before this option existed.
+   */
+  loadRawJson: (rawJsonText: string, options?: LoadRawJsonOptions) => void;
   /** Fire a "query" request. Resolves `null` if superseded by a later `runQuery` call. */
   runQuery: (
     params: PopulationQueryParams
@@ -20,6 +37,16 @@ export type UsePopulationBrowseWorkerResult = {
   isLoaded: boolean;
   isQuerying: boolean;
   error: string | null;
+  /**
+   * Total row count from the most recent "loaded" response (unaffected by any
+   * search/filter — the whole point is that it changes ONLY when a fresh
+   * `loadRawJson` actually lands, unlike a query result's `totalRows`, which
+   * reflects whatever search/filter params that particular query happened to
+   * carry). `null` before the first successful load. Added for Task 4 /
+   * BrowseDataView, which needs "is this dataset empty at all" independent of
+   * the user's current search/filter state.
+   */
+  totalRows: number | null;
 };
 
 /**
@@ -58,6 +85,7 @@ export function usePopulationBrowseWorker(): UsePopulationBrowseWorkerResult {
   const [isLoaded, setIsLoaded] = useState(false);
   const [isQuerying, setIsQuerying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [totalRows, setTotalRows] = useState<number | null>(null);
 
   useEffect(() => {
     const worker = new PopulationQueryWorker();
@@ -68,7 +96,10 @@ export function usePopulationBrowseWorker(): UsePopulationBrowseWorkerResult {
       const isCurrent = response.requestId === requestIdRef.current;
 
       if (response.type === "loaded") {
-        if (isCurrent) setIsLoaded(true);
+        if (isCurrent) {
+          setIsLoaded(true);
+          setTotalRows(response.totalRows);
+        }
         return;
       }
 
@@ -103,7 +134,7 @@ export function usePopulationBrowseWorker(): UsePopulationBrowseWorkerResult {
     };
   }, []);
 
-  const loadRawJson = useCallback((rawJsonText: string) => {
+  const loadRawJson = useCallback((rawJsonText: string, options?: LoadRawJsonOptions) => {
     const worker = workerRef.current;
     if (!worker) return;
     const requestId = ++requestIdRef.current;
@@ -111,6 +142,11 @@ export function usePopulationBrowseWorker(): UsePopulationBrowseWorkerResult {
       type: "load",
       requestId,
       rawJsonText,
+      // Conditionally spread rather than always including (possibly undefined) keys,
+      // so a caller that omits `options` entirely posts the exact same request shape
+      // pre-Task-4 callers/tests already assert on.
+      ...(options?.stageMappings ? { stageMappings: options.stageMappings } : {}),
+      ...(options?.monthFolder ? { monthFolder: options.monthFolder } : {}),
     };
     worker.postMessage(request);
   }, []);
@@ -138,5 +174,5 @@ export function usePopulationBrowseWorker(): UsePopulationBrowseWorkerResult {
     []
   );
 
-  return { loadRawJson, runQuery, isLoaded, isQuerying, error };
+  return { loadRawJson, runQuery, isLoaded, isQuerying, error, totalRows };
 }

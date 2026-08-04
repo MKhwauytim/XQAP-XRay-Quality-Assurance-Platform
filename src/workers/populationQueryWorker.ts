@@ -1,6 +1,8 @@
 import { unwrap } from "../data/storage/jsonEnvelope";
 import type { PopulationFinalData } from "../data/population/monthTypes";
 import { runPopulationQuery } from "../data/population/populationQuery";
+import { formatMonthFolderShortLabel, parseMonthFolderName } from "../data/population/monthFolder";
+import type { StageAliasMappings } from "../data/population/populationConfig";
 import type { PopulationQueryWorkerRequest, PopulationQueryWorkerResponse } from "./populationQueryWorkerTypes";
 
 // This worker never receives a DirectoryHandleLike/FileSystemDirectoryHandle — the
@@ -10,19 +12,17 @@ import type { PopulationQueryWorkerRequest, PopulationQueryWorkerResponse } from
 
 export type PopulationQueryWorkerState = {
   cachedRows: Array<Record<string, unknown>> | null;
+  /** Set from the "load" request's optional `stageMappings` (see populationQueryWorkerTypes.ts). */
+  stageMappings: StageAliasMappings | undefined;
 };
 
 export function createInitialWorkerState(): PopulationQueryWorkerState {
-  return { cachedRows: null };
+  return { cachedRows: null, stageMappings: undefined };
 }
 
 // Generic display-value formatting mirroring BrowseDataView.tsx's `formatBrowseCellValue`
 // default branch (empty -> "—", arrays joined with an Arabic comma, booleans -> نعم/لا,
-// otherwise String(value)). Deliberately does NOT special-case the "stage" column
-// (stage-mapping labels) or "_monthFolder" (month-folder short labels) the way
-// BrowseDataView's real getBrowseDisplayValue does — those depend on caller-supplied
-// config (PopulationConfig.stageMappings) that isn't part of this task's protocol.
-// A later task threading full display parity into the worker can extend this.
+// otherwise String(value)).
 function formatDisplayValue(value: unknown): string {
   if (value === null || value === undefined || value === "") {
     return "—";
@@ -39,8 +39,87 @@ function formatDisplayValue(value: unknown): string {
   return String(value);
 }
 
-function getGenericDisplayValue(row: Record<string, unknown>, key: string): string {
+// ── Stage-alias display parity (Task 4) ─────────────────────────────────────────
+// Worker-local copy of src/data/population/stageHelpers.ts's normalizeStageToken /
+// getStageKey / STAGE_LABELS_AR logic. NOT imported directly: stageHelpers.ts pulls
+// its DEFAULT_STAGE_MAPPINGS constant from populationConfig.ts, a file whose other
+// exports (safeReadJson, casLoop, withResourceLock, getPopulationRoot) assume a
+// main-thread Window/File-System-Access-API context this DedicatedWorker doesn't
+// have. Duplicating this small, pure slice avoids dragging that dependency graph
+// into the worker bundle -- the same "defined locally per-file rather than shared
+// across tab boundaries" idiom BrowseDataView.tsx already uses for its yieldToMain.
+// Keep in sync with stageHelpers.ts by hand; both are covered by their own tests.
+const WORKER_STAGE_KEYS = ["first", "second", "third", "fourth"] as const;
+const WORKER_STAGE_LABELS_AR: Record<(typeof WORKER_STAGE_KEYS)[number], string> = {
+  first: "المستوى الأول",
+  second: "المستوى الثاني",
+  third: "المستوى الثالث",
+  fourth: "المستوى الرابع",
+};
+
+function normalizeStageToken(value: string): string {
+  return value
+    .trim()
+    .replace(/[أإآ]/g, "ا")
+    .replace(/ى/g, "ي")
+    .replace(/ة/g, "ه")
+    .replace(/[ـ]/g, "")
+    .replace(/[\s_]+/g, "_")
+    .toUpperCase();
+}
+
+function formatStageLabelForWorker(stage: unknown, stageMappings: StageAliasMappings | undefined): string {
+  const text = String(stage ?? "");
+  if (!stageMappings) {
+    return text;
+  }
+  const normalized = normalizeStageToken(text.trim());
+  for (const stageKey of WORKER_STAGE_KEYS) {
+    const aliases = stageMappings[stageKey] ?? [];
+    if (aliases.some((alias) => normalizeStageToken(alias) === normalized)) {
+      return WORKER_STAGE_LABELS_AR[stageKey];
+    }
+  }
+  return text;
+}
+
+// Mirrors BrowseDataView.tsx's real getBrowseDisplayValue: special-cases "stage"
+// (alias -> canonical Arabic label) and "_monthFolder" (folder name -> short Arabic
+// month/year label) ahead of the generic fallback, so this worker's own search/
+// filter/sort matching stays behaviorally identical to the pre-worker inline
+// implementation for these two columns -- the CRITICAL gap flagged when this worker
+// first shipped (Task 2) and resolved here (Task 4). When `stageMappings` is not
+// supplied (older/other callers that don't thread it through "load"), the "stage"
+// branch degenerates to a raw passthrough, matching the previous generic-formatter
+// behavior for that call shape.
+function getWorkerDisplayValue(
+  row: Record<string, unknown>,
+  key: string,
+  stageMappings: StageAliasMappings | undefined
+): string {
+  if (key === "stage") {
+    return formatStageLabelForWorker(row[key], stageMappings);
+  }
+  if (key === "_monthFolder") {
+    return formatMonthFolderShortLabel(String(row[key] ?? ""));
+  }
   return formatDisplayValue(row[key]);
+}
+
+// Mirrors populationStorage.ts's appendMonthInfo — attaches the constant
+// _monthFolder/_month/_year fields a single-month "load" request's rows would
+// otherwise be missing (see populationQueryWorkerTypes.ts's "load" doc comment).
+function attachMonthFolderInfo(
+  row: Record<string, unknown>,
+  monthFolder: string
+): Record<string, unknown> {
+  const info = parseMonthFolderName(monthFolder);
+  return {
+    ...row,
+    _monthFolder: monthFolder,
+    _month: info?.month ?? null,
+    _year: info?.year ?? null,
+  };
 }
 
 /**
@@ -61,8 +140,14 @@ export function handleWorkerMessage(
       // safeWriteJson; `unwrap` also tolerates legacy bare (un-enveloped) JSON, same
       // as safeReadJson does on the main thread.
       const data = unwrap<PopulationFinalData>(parsed);
-      const rows = Array.isArray(data?.rows) ? data.rows : [];
-      const nextState: PopulationQueryWorkerState = { cachedRows: rows };
+      const baseRows = Array.isArray(data?.rows) ? data.rows : [];
+      const rows = request.monthFolder
+        ? baseRows.map((row) => attachMonthFolderInfo(row, request.monthFolder!))
+        : baseRows;
+      const nextState: PopulationQueryWorkerState = {
+        cachedRows: rows,
+        stageMappings: request.stageMappings
+      };
       return {
         state: nextState,
         response: { type: "loaded", requestId: request.requestId, totalRows: rows.length }
@@ -73,7 +158,11 @@ export function handleWorkerMessage(
       if (!state.cachedRows) {
         throw new Error("لا توجد بيانات محمّلة بعد — يجب إرسال طلب تحميل قبل الاستعلام.");
       }
-      const result = runPopulationQuery(state.cachedRows, request.params, getGenericDisplayValue);
+      const result = runPopulationQuery(
+        state.cachedRows,
+        request.params,
+        (row, key) => getWorkerDisplayValue(row, key, state.stageMappings)
+      );
       return {
         state,
         response: { type: "result", requestId: request.requestId, result }

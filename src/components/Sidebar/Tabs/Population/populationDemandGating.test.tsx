@@ -23,6 +23,16 @@ vi.mock("../../../../workers/workbookWorker?worker&inline", () => ({
   },
 }));
 
+vi.mock("../../../../workers/populationQueryWorker?worker&inline", () => ({
+  default: class PopulationQueryWorkerStub {
+    onmessage: ((ev: MessageEvent) => void) | null = null;
+    postMessage(): void {}
+    terminate(): void {}
+    addEventListener(): void {}
+    removeEventListener(): void {}
+  },
+}));
+
 const permissionsMock = vi.hoisted(() => ({
   // Defaults to a view-only role (no draw-sample/process-population) --
   // the exact population the original perf complaint targeted.
