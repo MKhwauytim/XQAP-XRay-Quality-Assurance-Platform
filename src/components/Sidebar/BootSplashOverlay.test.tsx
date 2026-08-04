@@ -20,6 +20,13 @@ import { BootSplashOverlay } from "./BootSplashOverlay";
 
 beforeEach(() => {
   resetBootProgress();
+  // Global, not opt-in per test: dismissal always routes through a
+  // window.setTimeout now (even a 0ms one, when the minVisibleMs floor has
+  // already elapsed) so the effect that calls it never calls setState
+  // synchronously in its own body (react-hooks/set-state-in-effect). Every
+  // test that expects a dismissal must advance past that timer explicitly --
+  // see the `act(() => vi.advanceTimersByTime(0))` calls below.
+  vi.useFakeTimers();
 });
 
 afterEach(() => {
@@ -31,16 +38,20 @@ afterEach(() => {
 const SESSION_ONE = "amal:2026-08-04T09:00:00.000Z:workspace-a";
 const SESSION_TWO = "amal:2026-08-04T14:30:00.000Z:workspace-a";
 
-function overlay(bootSessionKey: string, timeoutMs?: number) {
+// minVisibleMs defaults to 0 here (unlike the component's own 600ms default)
+// so every test not specifically about the floor can keep asserting on
+// immediate dismissal -- only the dedicated minVisibleMs tests below pass a
+// non-zero value.
+function overlay(bootSessionKey: string, timeoutMs?: number, minVisibleMs = 0) {
   return (
-    <BootSplashOverlay bootSessionKey={bootSessionKey} timeoutMs={timeoutMs}>
+    <BootSplashOverlay bootSessionKey={bootSessionKey} timeoutMs={timeoutMs} minVisibleMs={minVisibleMs}>
       <div data-testid="app-content">التطبيق يعمل</div>
     </BootSplashOverlay>
   );
 }
 
-function renderOverlay(timeoutMs?: number, bootSessionKey = SESSION_ONE) {
-  return render(overlay(bootSessionKey, timeoutMs));
+function renderOverlay(timeoutMs?: number, bootSessionKey = SESSION_ONE, minVisibleMs = 0) {
+  return render(overlay(bootSessionKey, timeoutMs, minVisibleMs));
 }
 
 describe("BootSplashOverlay", () => {
@@ -86,13 +97,17 @@ describe("BootSplashOverlay", () => {
       markBootSourceLoaded("population");
       markBootSourceLoaded("sample");
     });
+    // Dismissal is routed through a (possibly 0ms) setTimeout -- see the
+    // top-of-file beforeEach comment.
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
 
     expect(screen.queryByTestId("boot-splash-overlay")).not.toBeInTheDocument();
     expect(screen.getByTestId("app-content")).toBeInTheDocument();
   });
 
   it("clears the overlay after timeoutMs even when a source never finishes loading", () => {
-    vi.useFakeTimers();
     registerBootSources([
       { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
     ]);
@@ -148,6 +163,9 @@ describe("BootSplashOverlay", () => {
     act(() => {
       markBootSourceLoaded("sample");
     });
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
 
     expect(screen.queryByTestId("boot-splash-overlay")).not.toBeInTheDocument();
   });
@@ -170,6 +188,9 @@ describe("BootSplashOverlay", () => {
 
     act(() => {
       markBootSourceLoaded("population");
+    });
+    act(() => {
+      vi.advanceTimersByTime(0);
     });
     expect(screen.queryByTestId("boot-splash-overlay")).not.toBeInTheDocument();
 
@@ -197,14 +218,22 @@ describe("BootSplashOverlay", () => {
     act(() => {
       markBootSourceLoaded("population");
     });
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
     expect(screen.queryByTestId("boot-splash-overlay")).not.toBeInTheDocument();
 
-    // A new session: App.tsx clears the store, then the new session's landing
-    // tab registers its own sources from its own mount effect.
+    // A new session: the session-key prop changes FIRST (real production
+    // ordering -- App.tsx's own reset lives in a useLayoutEffect keyed on the
+    // very same identity, so it always fires strictly after this component
+    // observes the new key, never before -- see the dedicated C-A regression
+    // test below for that ordering pinned down explicitly). Then the reset
+    // lands, then the new session's landing tab registers its own sources
+    // from its own mount effect.
+    rerender(overlay(SESSION_TWO));
     act(() => {
       resetBootProgress();
     });
-    rerender(overlay(SESSION_TWO));
     act(() => {
       registerBootSources([
         { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
@@ -234,10 +263,13 @@ describe("BootSplashOverlay", () => {
     // its children's contents change), so a mount-scoped timeout could only
     // ever fire once -- leaving every later session with a permanently-spent
     // safety valve AND a permanently-suppressed checklist.
+    //
+    // Real production ordering: the session-key prop changes first, the reset
+    // lands after (same reasoning as the test above).
+    rerender(overlay(SESSION_TWO, 50));
     act(() => {
       resetBootProgress();
     });
-    rerender(overlay(SESSION_TWO, 50));
     act(() => {
       registerBootSources([
         { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
@@ -275,6 +307,9 @@ describe("BootSplashOverlay", () => {
     act(() => {
       markBootSourceLoaded("population");
     });
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
     expect(screen.queryByTestId("boot-splash-overlay")).not.toBeInTheDocument();
 
     // Real ordering: the new session's key lands on this component FIRST,
@@ -297,6 +332,70 @@ describe("BootSplashOverlay", () => {
     });
 
     expect(screen.getByTestId("boot-splash-overlay")).toBeInTheDocument();
+  });
+
+  // ── Minimum-visible-duration floor ──────────────────────────────────────────
+  // The always-registered sources (month.manifest.json, processing.summary.json,
+  // sample.master.json, distribution.current.json) are small, already-optimized
+  // reads that routinely finish in well under 100ms -- confirmed directly via
+  // instrumented tracing of a real sign-in, not assumed. Without a floor, the
+  // checklist renders and dismisses correctly (per every test above) but is
+  // gone before a user could ever read it, functionally reproducing "I don't
+  // see what's loading" despite nothing being functionally broken.
+
+  it("keeps the checklist visible for at least minVisibleMs even when every source finishes loading immediately", () => {
+    vi.useFakeTimers();
+    registerBootSources([
+      { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
+    ]);
+    markBootSourceLoading("population");
+
+    renderOverlay(undefined, SESSION_ONE, 600);
+    expect(screen.getByTestId("boot-splash-overlay")).toBeInTheDocument();
+
+    act(() => {
+      markBootSourceLoaded("population");
+    });
+    // Loaded, but the floor hasn't elapsed yet -- must still be showing.
+    expect(screen.getByTestId("boot-splash-overlay")).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(300); // short of the 600ms floor
+    });
+    expect(screen.getByTestId("boot-splash-overlay")).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(300); // now past the floor (600ms since shown)
+    });
+    expect(screen.queryByTestId("boot-splash-overlay")).not.toBeInTheDocument();
+    expect(screen.getByTestId("app-content")).toBeInTheDocument();
+  });
+
+  it("dismisses immediately once minVisibleMs has already elapsed by the time loading finishes", () => {
+    vi.useFakeTimers();
+    registerBootSources([
+      { key: "population", labelAr: "بيانات السكان", labelEn: "population.final.json" },
+    ]);
+    markBootSourceLoading("population");
+
+    renderOverlay(undefined, SESSION_ONE, 600);
+    expect(screen.getByTestId("boot-splash-overlay")).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(700); // past the floor while STILL loading
+    });
+    expect(screen.getByTestId("boot-splash-overlay")).toBeInTheDocument();
+
+    // The floor has already been satisfied -- finishing now dismisses on the
+    // very next macrotask (a 0ms setTimeout, not truly synchronous -- see the
+    // top-of-file beforeEach comment), no additional real wait required.
+    act(() => {
+      markBootSourceLoaded("population");
+    });
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    expect(screen.queryByTestId("boot-splash-overlay")).not.toBeInTheDocument();
   });
 
   it("does not retire the checklist off the vacuously-loaded empty store it starts every boot with", () => {

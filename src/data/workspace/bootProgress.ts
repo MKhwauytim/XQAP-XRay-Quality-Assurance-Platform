@@ -37,6 +37,11 @@ type Subscriber = () => void;
 const sources = new Map<BootSourceKey, BootSourceEntry>();
 const subscribers = new Set<Subscriber>();
 
+// Bumped by every resetBootProgress() call -- see `useBootProgress`'s
+// `resetGeneration` field for why a consumer needs this, distinct from just
+// comparing `entries`/`allLoaded`.
+let resetGeneration = 0;
+
 function computeEntries(): BootSourceEntry[] {
   return Array.from(sources.values());
 }
@@ -54,6 +59,10 @@ function notify(): void {
 
 function getEntries(): BootSourceEntry[] {
   return cachedEntries;
+}
+
+function getResetGeneration(): number {
+  return resetGeneration;
 }
 
 function isTerminal(status: BootSourceStatus): boolean {
@@ -100,6 +109,7 @@ export function markBootSourceError(key: BootSourceKey, error: string): void {
 
 /** Clears all registered sources. Call on logout or workspace switch so a stale role's checklist doesn't bleed into the next session. */
 export function resetBootProgress(): void {
+  resetGeneration++;
   sources.clear();
   notify();
 }
@@ -121,9 +131,22 @@ function subscribe(fn: Subscriber): () => void {
  * update is lost outright. useSyncExternalStore has no such gap: React
  * re-reads getSnapshot() itself around the subscribe, so a publish that lands
  * between this component's render and its subscription is never missed.
+ *
+ * `resetGeneration` exists specifically for a caller (BootSplashOverlay) that
+ * needs to know not just CURRENT `entries`/`allLoaded`, but whether those
+ * values reflect a genuinely-fresh reset -- `entries`/`allLoaded` alone can't
+ * distinguish "this session's own reset already landed" from "the previous
+ * session's leftover data, reset call not run yet," and a component-local
+ * `bootSessionKey`-changed check can't either: React can re-render a
+ * component multiple times in the same commit before an effect (where the
+ * actual reset call lives) has run at all, so by the time a consumer's own
+ * "is my key up to date" check passes, the STORE itself may still be stale.
+ * A monotonic counter, incremented only inside `resetBootProgress` itself, is
+ * the one signal that can't lie about this.
  */
-export function useBootProgress(): { entries: BootSourceEntry[]; allLoaded: boolean } {
+export function useBootProgress(): { entries: BootSourceEntry[]; allLoaded: boolean; resetGeneration: number } {
   const entries = useSyncExternalStore(subscribe, getEntries);
+  const generation = useSyncExternalStore(subscribe, getResetGeneration);
   const allLoaded = entries.every((entry) => isTerminal(entry.status));
-  return { entries, allLoaded };
+  return { entries, allLoaded, resetGeneration: generation };
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactElement, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { AlertTriangle, Check } from "lucide-react";
 
 import { useBootProgress, type BootSourceEntry } from "../../data/workspace/bootProgress";
@@ -25,6 +25,20 @@ type BootSplashOverlayProps = {
    * out of the app for good. Re-armed per boot session.
    */
   timeoutMs?: number;
+  /**
+   * Floor on how long the checklist stays visible once it first appears,
+   * even if every source finishes loading sooner. Without this, the always-
+   * registered sources (month.manifest.json, processing.summary.json,
+   * sample.master.json, distribution.current.json -- all small, already-
+   * optimized reads) routinely finish in well under 100ms, so the checklist
+   * flashes and is gone before a user can read a single line of it -- the
+   * app then just looks like it opened instantly, with nothing shown. This
+   * was confirmed directly (not assumed): instrumented tracing of a real
+   * sign-in showed registration through every source finishing loaded in
+   * one synchronous burst, with no perceptible gap in between. Re-armed per
+   * boot session, same as `timeoutMs`.
+   */
+  minVisibleMs?: number;
 };
 
 /**
@@ -41,21 +55,26 @@ type BootSessionLatch = {
   dismissed: boolean;
   /**
    * This session's overlay has actually been visibly rendered at least once.
-   * Required before `dismissed` can latch true -- see the render-time logic
-   * below for why: at the exact render where `bootSessionKey` changes, the
-   * shared bootProgress store still holds the PREVIOUS session's (usually
-   * fully-loaded) entries, since the reset that clears it (App.tsx's
-   * useLayoutEffect) hasn't run yet. Without this gate, a brand-new session's
-   * freshly-armed latch would read that stale "everything loaded" data and
-   * dismiss itself on the spot, before its own landing tab ever got a chance
-   * to register anything -- silently reproducing the original never-shows
-   * bug, just relocated from the store to this component.
+   * Also what `showOverlay` itself is keyed on (not `!allLoaded` directly --
+   * see there for why): a one-way latch that, once true, stays true even
+   * after `allLoaded` flips back to true, which is what lets the minimum-
+   * visible-duration floor below hold the overlay open past the moment
+   * loading genuinely finishes.
    */
   shown: boolean;
+  /**
+   * `resetGeneration` (bootProgress.ts) observed at the moment this latch was
+   * armed for a NEW session (i.e. `bootSessionKey` just changed). `null` for
+   * the very first session, which has no previous session's data to guard
+   * against. Step 1/2 below stay inert until `resetGeneration` exceeds this --
+   * see their gating comment for why a plain "does entries look stale" check
+   * isn't enough on its own.
+   */
+  staleGeneration: number | null;
 };
 
-function armLatch(key: string): BootSessionLatch {
-  return { key, timedOut: false, dismissed: false, shown: false };
+function armLatch(key: string, staleGeneration: number | null): BootSessionLatch {
+  return { key, timedOut: false, dismissed: false, shown: false, staleGeneration };
 }
 
 const STATUS_TITLE: Record<BootSourceEntry["status"], string> = {
@@ -97,6 +116,12 @@ function StatusMark({ status }: { status: BootSourceEntry["status"] }) {
  * run its course, and any later re-registration is ignored until
  * `bootSessionKey` says a genuinely new session has begun.
  *
+ * `minVisibleMs` floors how soon "run its course" can retire it -- the
+ * always-registered sources are small, fast reads that routinely finish
+ * before a user could read a single line, so without a floor the checklist
+ * would functionally never be visible at all despite rendering correctly
+ * (confirmed directly via instrumented tracing, not assumed).
+ *
  * The `timeoutMs` timer is the safety valve for a source that never reaches a
  * terminal status -- one stuck file can't lock the user out of the app --
  * mirroring the "error is terminal" allLoaded semantics in bootProgress.ts.
@@ -105,44 +130,114 @@ function StatusMark({ status }: { status: BootSourceEntry["status"] }) {
  * mount-scoped timer could only ever fire once and every later session would
  * inherit a permanently-spent safety valve.
  */
-export function BootSplashOverlay({ children, bootSessionKey, timeoutMs = 8000 }: BootSplashOverlayProps): ReactElement {
-  const { entries, allLoaded } = useBootProgress();
-  const [latch, setLatch] = useState<BootSessionLatch>(() => armLatch(bootSessionKey));
+export function BootSplashOverlay({
+  children,
+  bootSessionKey,
+  timeoutMs = 8000,
+  minVisibleMs = 600,
+}: BootSplashOverlayProps): ReactElement {
+  const { entries, allLoaded, resetGeneration } = useBootProgress();
+  const [latch, setLatch] = useState<BootSessionLatch>(() => armLatch(bootSessionKey, null));
+  // `shownAt` deliberately lives in a ref, not `latch` state: it only needs
+  // to be READ later (by the dismissal effect below), never to itself
+  // trigger a re-render, and a ref lets the stamping effect avoid a
+  // synchronous setState call in its own body (react-hooks/set-state-in-
+  // effect) entirely, rather than needing an eslint-disable to route around
+  // it. Keyed by session so a later session change can't read a previous
+  // session's stale timestamp.
+  const shownAtRef = useRef<{ key: string; shownAt: number } | null>(null);
 
-  // Both transitions are derived during render, on state THIS component owns,
-  // so `showOverlay` below already reads the settled values -- a stale
-  // dismissed/timedOut from the PREVIOUS session can never suppress the new
-  // session's checklist even for a single frame. (This is React's documented
-  // "adjusting state during render" pattern. It does NOT have the defect
-  // App.tsx's removed copy had: that one reached through resetBootProgress()
-  // into *another* already-mounted component's state.)
-  let session = latch.key === bootSessionKey ? latch : armLatch(bootSessionKey);
+  // The session-arming transition (below) is derived during render, on state
+  // THIS component owns, so a stale `dismissed`/`timedOut` from the PREVIOUS
+  // session can never suppress the new session's checklist even for a single
+  // frame. (This is React's documented "adjusting state during render"
+  // pattern. It does NOT have the defect App.tsx's removed copy had: that one
+  // reached through resetBootProgress() into *another* already-mounted
+  // component's state.) `dismissed` itself is set later, from an effect --
+  // see there for why.
+  let session = latch.key === bootSessionKey ? latch : armLatch(bootSessionKey, resetGeneration);
+
+  // `dataIsFresh` gates ALL of Step 1/2 below, not just the dismissal check.
+  // A naive "does `latch.key` already match `bootSessionKey`" check is NOT
+  // enough on its own: React can re-render this component multiple times
+  // within the same commit before ANY effect runs (the "adjusting state
+  // during render" pattern above does exactly that), so `latch.key` can
+  // already equal the new `bootSessionKey` on a render where `entries`/
+  // `allLoaded` STILL reflect the previous session -- the actual reset call
+  // lives in App.tsx's useLayoutEffect, a separate, later commit. That stale
+  // data can take either shape, and both are wrong to act on: fully loaded
+  // (allLoaded=true) would incorrectly satisfy `ranItsCourse` for a session
+  // that hasn't started; still mid-load (allLoaded=false, e.g. one source
+  // stuck loading forever) would incorrectly satisfy `visibleNow` and latch
+  // `shown` true off data that isn't this session's own. `resetGeneration`
+  // (bootProgress.ts) is incremented ONLY inside `resetBootProgress` itself,
+  // so comparing against the generation observed at the moment this latch
+  // was (re)armed is the one check that can't be fooled by same-commit
+  // render timing -- it stays false across as many renders as it takes,
+  // however many that turns out to be, until the real reset call actually
+  // runs. `null` (the very first session) means there's no previous session
+  // to guard against, so Step 1/2 apply immediately.
+  const dataIsFresh = session.staleGeneration === null || resetGeneration > session.staleGeneration;
 
   // Step 1: has this session's overlay actually been visible at least once?
   // Uses the exact same predicate as `showOverlay` below -- deliberately NOT
-  // gated on `entries.length`, since this asks "would the user have seen it,"
-  // not "has real loading genuinely started."
-  const visibleNow = !session.dismissed && !session.timedOut && !allLoaded;
+  // gated on `entries.length`, since this asks "would the user have seen
+  // it," not "has real loading genuinely started." Pure boolean derivation
+  // only -- `shownAt` itself is stamped in an effect further down, not here:
+  // `Date.now()` is an impure call and React requires render to stay pure/
+  // idempotent (react-hooks/purity lint rule), so it can't be called during
+  // render at all, StrictMode double-render or not.
+  const visibleNow = dataIsFresh && !session.dismissed && !session.timedOut && !allLoaded;
   if (visibleNow && !session.shown) {
     session = { ...session, shown: true };
   }
 
-  // Step 2: retire the session once it has BOTH actually been shown AND has
-  // now run its course. `entries.length > 0` is load-bearing on its own too:
-  // an empty registry reports `allLoaded` vacuously true, which is precisely
-  // the state at the very start of every boot, before the landing tab's own
-  // mount effect has registered anything -- without this, `ranItsCourse`
-  // alone could still be satisfied by a genuinely empty, fresh registry.
-  // Requiring `session.shown` first is what stops a brand-new session's
-  // just-armed latch from reading the PREVIOUS session's stale, not-yet-reset
-  // store (see the `shown` field's doc comment above) and dismissing itself
-  // before its own landing tab ever got a chance to register anything.
-  const ranItsCourse = session.timedOut || (allLoaded && entries.length > 0);
-  if (session.shown && !session.dismissed && ranItsCourse) {
-    session = { ...session, dismissed: true };
-  }
-
   if (session !== latch) setLatch(session);
+
+  // Stamps `shownAtRef` the first moment `shown` is true for this session --
+  // see the comment on Step 1 above for why this can't happen during render
+  // instead. A ref write, not a `setLatch` call, so this effect body has no
+  // synchronous setState to trip react-hooks/set-state-in-effect on -- there
+  // is nothing here for React to re-render in response to; the dismissal
+  // effect below simply reads the ref fresh whenever IT runs. The gap
+  // between the render that flips `shown` and this effect running is a
+  // single commit, well under a millisecond in practice -- negligible
+  // against `minVisibleMs`'s multi-hundred-millisecond scale.
+  useEffect(() => {
+    if (!session.shown) return;
+    if (shownAtRef.current?.key !== bootSessionKey) {
+      shownAtRef.current = { key: bootSessionKey, shownAt: Date.now() };
+    }
+  }, [bootSessionKey, session.shown]);
+
+  // Dismisses once the session has (a) actually been shown, (b) run its
+  // course, AND (c) been visible for at least `minVisibleMs` -- see the
+  // prop's doc comment for why (c) exists: without it, the always-registered
+  // sources finish loading fast enough that the checklist is gone before a
+  // user can read it. Runs entirely in an effect, for the same purity reason
+  // as the stamping effect above -- measuring elapsed time needs Date.now().
+  // `entries.length > 0` is load-bearing on its own too: an empty registry
+  // reports `allLoaded` vacuously true, which is precisely the state at the
+  // very start of every boot, before the landing tab's own mount effect has
+  // registered anything. The `setLatch` call is always routed through
+  // `window.setTimeout` -- even when the floor has already elapsed and the
+  // delay is 0 -- so this effect never calls setState synchronously in its
+  // own body (react-hooks/set-state-in-effect); a 0ms timer still defers to
+  // a macrotask, which is what the rule is actually asking for.
+  useEffect(() => {
+    if (session.dismissed) return;
+    const shownAt = shownAtRef.current?.key === bootSessionKey ? shownAtRef.current.shownAt : null;
+    if (shownAt === null) return;
+    const ranItsCourse = session.timedOut || (allLoaded && entries.length > 0);
+    if (!ranItsCourse) return;
+    const remaining = Math.max(0, minVisibleMs - (Date.now() - shownAt));
+    const timer = window.setTimeout(() => {
+      setLatch((current) =>
+        current.key === bootSessionKey && !current.dismissed ? { ...current, dismissed: true } : current
+      );
+    }, remaining);
+    return () => window.clearTimeout(timer);
+  }, [bootSessionKey, session.shown, session.dismissed, session.timedOut, allLoaded, entries, minVisibleMs]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -155,7 +250,17 @@ export function BootSplashOverlay({ children, bootSessionKey, timeoutMs = 8000 }
     return () => window.clearTimeout(timer);
   }, [bootSessionKey, timeoutMs]);
 
-  const showOverlay = !session.dismissed && !session.timedOut && !allLoaded;
+  // Deliberately NOT `!allLoaded` here (that was the pre-floor formula): once
+  // real loading finishes, `allLoaded` flips true immediately, regardless of
+  // whether the floor has elapsed -- checking it directly would hide the
+  // overlay the instant data is ready, silently bypassing `minVisibleMs`
+  // entirely. `session.shown` is the right term instead: a one-way latch that
+  // only ever becomes true once there was genuinely something to show (same
+  // "before any registration, stay hidden" guarantee `visibleNow` already
+  // provided), and -- unlike `allLoaded` -- doesn't flip back off the moment
+  // loading completes, leaving `dismissed` (which DOES already account for
+  // the floor) as the sole thing that hides it again.
+  const showOverlay = session.shown && !session.dismissed && !session.timedOut;
 
   return (
     <>
