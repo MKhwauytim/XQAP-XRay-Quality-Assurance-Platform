@@ -209,6 +209,36 @@ function wrapDirWithDelay(
   return wrapped;
 }
 
+/**
+ * Wraps a real memory directory so any getFileHandle call for a file name
+ * present in `delayMsByFile` awaits that many ms before delegating to the
+ * real handle -- lets a test make copyAllJsonFiles's per-file read+write
+ * round trips (readTextFile/writeTextFile both call getFileHandle) complete
+ * in a DELIBERATELY different order than collectJsonFileEntries' listing
+ * order, to prove mapWithConcurrency (Task 3) keeps jsonFilesBackedUp
+ * index-addressed (listing order) rather than completion order.
+ */
+function wrapDirWithFileDelay(
+  real: DirectoryHandleLike,
+  delayMsByFile: Record<string, number>
+): DirectoryHandleLike {
+  const wrapped: DirectoryHandleLike = {
+    ...real,
+    getFileHandle: async (fileName: string, options?: { create?: boolean }) => {
+      const delay = delayMsByFile[fileName];
+      if (delay) {
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+      return real.getFileHandle(fileName, options);
+    },
+    getDirectoryHandle: async (dirName: string, options?: { create?: boolean }) => {
+      const child = await real.getDirectoryHandle(dirName, options);
+      return wrapDirWithFileDelay(child, delayMsByFile);
+    },
+  };
+  return wrapped;
+}
+
 describe("archive population path compatibility", () => {
   it("loads current numbered population folders and exports their rows", async () => {
     const root = makeRoot();
@@ -592,5 +622,36 @@ describe("loadArchiveStatus — result order survives out-of-order completion (T
 
     expect(statuses.map((s) => s.folderName)).toEqual(months.map((m) => m.folderName));
     expect(statuses.map((s) => s.totalProcessedRows)).toEqual([1, 2, 3]);
+  });
+});
+
+describe("createBackup — jsonFilesBackedUp order survives out-of-order completion (Task 3)", () => {
+  it("keeps jsonFilesBackedUp in the walk's listing order even when an earlier file's copy finishes last", async () => {
+    const root = makeRoot();
+    await safeWriteJson(root, "a-file.json", { value: "a" });
+    await safeWriteJson(root, "b-file.json", { value: "b" });
+    await safeWriteJson(root, "c-file.json", { value: "c" });
+
+    // Deliberately reversed relative to listing order: a-file's copy is the
+    // SLOWEST and c-file's the FASTEST, so under real concurrency c-file
+    // finishes first -- exactly the scenario a naive "push as each resolves"
+    // implementation would get wrong. This may pass even against the current
+    // (pre-Task-3) sequential walk, since a strictly sequential loop can
+    // never observe out-of-order completion in the first place -- that's
+    // expected; the value here is regression protection once concurrency lands.
+    const delayed = wrapDirWithFileDelay(root, {
+      "a-file.json": 30,
+      "b-file.json": 15,
+      "c-file.json": 2,
+    });
+
+    const result = await createBackup(delayed, [], "admin", "manual");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const relevant = result.manifest.jsonFilesBackedUp.filter((f) =>
+      ["a-file.json", "b-file.json", "c-file.json"].includes(f)
+    );
+    expect(relevant).toEqual(["a-file.json", "b-file.json", "c-file.json"]);
   });
 });

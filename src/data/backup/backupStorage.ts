@@ -378,12 +378,37 @@ async function tryGetDirectory(
   }
 }
 
-async function copyJsonTree(params: {
+type PendingJsonCopy = {
+  sourceDir: DirectoryHandleLike;
+  targetDir: DirectoryHandleLike;
+  fileName: string;
+  relativePath: string;
+};
+
+// Recursively walks sourceDir and returns a FLAT list of every .json file to
+// copy (creating the mirrored target directory structure as it goes) instead
+// of copying eagerly as it walks. Each directory's listing is already fully
+// materialized by collectEntries before this function descends into it (see
+// collectEntries above), so — unlike Task 4's restore walk — this has no
+// live-async-iterator hazard; it is safe to let the whole tree walk finish
+// before any file is actually copied.
+//
+// That's deliberate: it lets copyAllJsonFiles hand the ENTIRE tree to ONE
+// mapWithConcurrency(..., 8, ...) call below, rather than one call per
+// directory level. The plan explicitly flagged per-directory semaphores as a
+// hazard — concurrent recursive calls would each open their own pool of up
+// to 8 workers, so two sibling directories walked "at once" could drive real
+// concurrency to 8 x 8 = 64 in-flight file operations instead of 8. This
+// function itself does no I/O concurrently (ensureDir/collectEntries calls
+// are cheap relative to a full read+write round trip), so flattening first
+// keeps the budget honest regardless of how deep or wide the tree is.
+async function collectJsonFileEntries(params: {
   sourceDir: DirectoryHandleLike;
   targetDir: DirectoryHandleLike;
   sourcePath: string;
-  copied: string[];
-}): Promise<void> {
+}): Promise<PendingJsonCopy[]> {
+  const pending: PendingJsonCopy[] = [];
+
   for (const entry of await collectEntries(params.sourceDir)) {
     if (entry.kind === "directory") {
       if (
@@ -395,49 +420,51 @@ async function copyJsonTree(params: {
       const sourceChild = await tryGetDirectory(params.sourceDir, entry.name);
       if (!sourceChild) continue;
       const targetChild = await ensureDir(params.targetDir, entry.name);
-      await copyJsonTree({
+      const nested = await collectJsonFileEntries({
         sourceDir: sourceChild,
         targetDir: targetChild,
         sourcePath: params.sourcePath ? `${params.sourcePath}/${entry.name}` : entry.name,
-        copied: params.copied,
       });
+      pending.push(...nested);
       continue;
     }
 
     if (entry.kind !== "file" || !entry.name.endsWith(".json")) continue;
-    const text = await readTextFile(params.sourceDir, entry.name);
-    if (text === null) continue;
-    const wrote = await writeTextFile(params.targetDir, entry.name, text);
-    if (wrote) params.copied.push(params.sourcePath ? `${params.sourcePath}/${entry.name}` : entry.name);
+    pending.push({
+      sourceDir: params.sourceDir,
+      targetDir: params.targetDir,
+      fileName: entry.name,
+      relativePath: params.sourcePath ? `${params.sourcePath}/${entry.name}` : entry.name,
+    });
   }
+
+  return pending;
 }
 
 async function copyAllJsonFiles(directoryHandle: DirectoryHandleLike, backupDir: DirectoryHandleLike): Promise<string[]> {
   const jsonDir = await ensureDir(backupDir, "json");
-  const copied: string[] = [];
+  const pending = await collectJsonFileEntries({
+    sourceDir: directoryHandle,
+    targetDir: jsonDir,
+    sourcePath: "",
+  });
 
-  for (const entry of await collectEntries(directoryHandle)) {
-    if (entry.kind === "directory") {
-      const sourceChild = await tryGetDirectory(directoryHandle, entry.name);
-      if (!sourceChild) continue;
-      const targetChild = await ensureDir(jsonDir, entry.name);
-      await copyJsonTree({
-        sourceDir: sourceChild,
-        targetDir: targetChild,
-        sourcePath: entry.name,
-        copied,
-      });
-      continue;
-    }
+  // Index-addressed via mapWithConcurrency (budget 8; no locks involved on
+  // this path) so jsonFilesBackedUp keeps the walk's listing order — and
+  // therefore a deterministic manifest — even though the 8 workers below
+  // finish their individual read+write round trips in whatever order the
+  // underlying I/O actually completes. A null result marks an entry that was
+  // listed but turned out not to be copyable (source disappeared mid-walk,
+  // or the target handle had no createWritable) and is filtered out below,
+  // exactly as the old .push()-only-on-success code did.
+  const results = await mapWithConcurrency(pending, 8, async (entry) => {
+    const text = await readTextFile(entry.sourceDir, entry.fileName);
+    if (text === null) return null;
+    const wrote = await writeTextFile(entry.targetDir, entry.fileName, text);
+    return wrote ? entry.relativePath : null;
+  });
 
-    if (entry.kind !== "file" || !entry.name.endsWith(".json")) continue;
-    const text = await readTextFile(directoryHandle, entry.name);
-    if (text === null) continue;
-    const wrote = await writeTextFile(jsonDir, entry.name, text);
-    if (wrote) copied.push(entry.name);
-  }
-
-  return copied;
+  return results.filter((path): path is string => path !== null);
 }
 
 async function restoreJsonTree(params: {
