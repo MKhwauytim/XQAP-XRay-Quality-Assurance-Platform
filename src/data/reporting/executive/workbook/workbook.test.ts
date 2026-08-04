@@ -269,5 +269,15 @@ describe("buildExecutiveWorkbookObject — chunked yielding", () => {
     expect(rows[n]![0]).toBe(`XR-${n}`); // last row overall
     const ids = rows.slice(1).map((r) => (r as unknown[])[0]);
     expect(new Set(ids).size).toBe(n); // no duplicate xrayImageId
+
+    // The same n=2500/3-chunk fixture also exercises rawRiskSheet and
+    // resultComparisonSheet (both population-scale, both chunked the same
+    // way) -- confirm neither dropped/duplicated rows either, not just that
+    // yieldToMain fired for the batch as a whole.
+    const rawRiskRows = readSheet(wb, SHEET_NAMES.rawRisk);
+    expect(rawRiskRows.length).toBe(n + 1); // header + n, every row has rawRow set
+
+    const comparisonRows = readSheet(wb, SHEET_NAMES.resultComparison);
+    expect(comparisonRows.length).toBe(n + 1); // header + n, one comparison row per image
   });
 });

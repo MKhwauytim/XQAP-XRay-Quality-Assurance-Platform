@@ -20,10 +20,15 @@ function escapeCell(value: unknown): string {
   return str;
 }
 
-// Yields CSV pieces (BOM+header first, then one "\n"-prefixed row per row) so
-// a large export can be streamed without ever building the whole string in
-// memory at once. `toCsvString` (below) is the synchronous convenience
-// wrapper kept for existing callers/tests — it just joins every chunk.
+// Yields CSV pieces (BOM+header first, then one "\n"-prefixed row per row).
+// exportWriter.ts's buildCsvContent consumes this to yield the main thread
+// periodically while accumulating — the accumulated buffer is still written
+// as one string, so peak memory is unchanged; the win is main-thread
+// responsiveness, not memory. `toCsvString` (below) is a synchronous
+// convenience wrapper with no production callers of its own — it's kept
+// deliberately, as the golden byte-equivalence oracle for this generator
+// (its 13 pre-existing tests pin the exact BOM/quoting/formula-injection
+// output `toCsvChunks` must still produce).
 export function* toCsvChunks(
   headers: string[],
   rows: Record<string, unknown>[]
