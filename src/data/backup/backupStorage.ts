@@ -497,24 +497,41 @@ type PendingJsonRestore = {
 // stays a single flat list rather than one mapWithConcurrency pool per
 // directory level, so nested recursion here can never multiply the caller's
 // concurrency budget.
+//
+// Unlike the backup-side collectJsonFileEntries, a missing subdirectory here
+// is NOT silently tolerated the same way (F1): the backup side walks a live,
+// mutating workspace where a directory disappearing mid-enumeration is
+// expected, but the restore side walks an already-completed, immutable
+// backup snapshot — a missing subdirectory there means something is
+// genuinely wrong (e.g. a concurrent pruneAutoBackups/sync client touched the
+// backup folder mid-restore). tryGetDirectory returning null is therefore
+// recorded as a skipped path (surfaced up to the caller) instead of just
+// `continue`d past, so the caller can detect and report a partial restore
+// rather than silently reporting full success.
 async function collectJsonRestoreEntries(params: {
   sourceDir: DirectoryHandleLike;
   targetDir: DirectoryHandleLike;
   sourcePath: string;
-}): Promise<PendingJsonRestore[]> {
+}): Promise<{ pending: PendingJsonRestore[]; skippedPaths: string[] }> {
   const pending: PendingJsonRestore[] = [];
+  const skippedPaths: string[] = [];
 
   for (const entry of await collectEntries(params.sourceDir)) {
     if (entry.kind === "directory") {
+      const relativePath = params.sourcePath ? `${params.sourcePath}/${entry.name}` : entry.name;
       const sourceChild = await tryGetDirectory(params.sourceDir, entry.name);
-      if (!sourceChild) continue;
+      if (!sourceChild) {
+        skippedPaths.push(relativePath);
+        continue;
+      }
       const targetChild = await ensureDir(params.targetDir, entry.name);
       const nested = await collectJsonRestoreEntries({
         sourceDir: sourceChild,
         targetDir: targetChild,
-        sourcePath: params.sourcePath ? `${params.sourcePath}/${entry.name}` : entry.name,
+        sourcePath: relativePath,
       });
-      pending.push(...nested);
+      pending.push(...nested.pending);
+      skippedPaths.push(...nested.skippedPaths);
       continue;
     }
 
@@ -527,7 +544,7 @@ async function collectJsonRestoreEntries(params: {
     });
   }
 
-  return pending;
+  return { pending, skippedPaths };
 }
 
 // Was previously a live `for await (const entry of iterable)` walk directly
@@ -548,12 +565,18 @@ async function restoreJsonTree(params: {
   targetDir: DirectoryHandleLike;
   sourcePath: string;
   restored: string[];
+  /** Mirrors `restored`'s out-param calling convention: the caller passes an
+   *  array in, this function pushes into it. Populated from
+   *  collectJsonRestoreEntries' skippedPaths (F1) — a subdirectory that could
+   *  not be reached during the restore walk. */
+  skipped: string[];
 }): Promise<void> {
-  const pending = await collectJsonRestoreEntries({
+  const { pending, skippedPaths } = await collectJsonRestoreEntries({
     sourceDir: params.sourceDir,
     targetDir: params.targetDir,
     sourcePath: params.sourcePath,
   });
+  params.skipped.push(...skippedPaths);
 
   // Index-addressed via mapWithConcurrency so params.restored keeps the walk's
   // listing order — and therefore a deterministic restoredFiles list — even
@@ -1065,14 +1088,42 @@ export async function restoreBackupSnapshot(params: {
       });
 
       const restored: string[] = [];
+      const skipped: string[] = [];
       await restoreJsonTree({
         sourceDir: jsonDir,
         targetDir: params.directoryHandle,
         sourcePath: "",
         restored,
+        skipped,
       });
 
-      await systemDir.removeEntry?.(RESTORE_INPROGRESS_FILE);
+      // F1: a subdirectory that collectJsonRestoreEntries could not reach
+      // while walking an already-completed, immutable backup snapshot means
+      // that subtree was silently dropped from the restore — this is a
+      // partial restore, not a success. Leave RESTORE_INPROGRESS_FILE in
+      // place (same "deliberately left behind on failure" contract as the
+      // comment above its write documents) instead of removing it, and
+      // report failure instead of `{ ok: true, ... }`.
+      if (skipped.length > 0) {
+        return {
+          ok: false,
+          error: `اكتملت الاستعادة جزئياً فقط: تعذر الوصول إلى ${skipped.length} مجلد فرعي داخل نسخة النسخ الاحتياطي أثناء الاستعادة.`,
+        };
+      }
+
+      // F2: guard/wrap the sentinel removal the same way pruneAutoBackups
+      // guards its own removeEntry calls above — removeEntry is optional on
+      // DirectoryHandleLike, and a throw here must not turn an otherwise
+      // successful restore into a reported failure (it would be caught by
+      // this function's own outer catch below). Only reachable once
+      // skipped.length === 0.
+      if (systemDir.removeEntry) {
+        try {
+          await systemDir.removeEntry(RESTORE_INPROGRESS_FILE);
+        } catch (error) {
+          logError("backup:restore-sentinel-remove", error);
+        }
+      }
 
       return { ok: true, restoredFiles: restored, rollbackFolderName: rollback.folderName };
     });
@@ -1159,6 +1210,14 @@ export async function loadArchiveStatus(
   directoryHandle: DirectoryHandleLike,
   months: MonthFolderInfo[]
 ): Promise<MonthArchiveStatus[]> {
+  // F4 (documentation only, no behavior change): each of these 4 concurrent
+  // month-workers calls loadAllEmployeeFiles below, which itself goes through
+  // readJsonDirectory -> readNamedJsonFiles (src/data/storage/directoryScan.ts),
+  // whose own internal pool defaults to DIRECTORY_READ_CONCURRENCY = 8. So the
+  // effective peak concurrent file reads this function can drive is 4 x 8 = 32,
+  // not the 4 a reader would assume from this call alone. Read-only, so no
+  // integrity risk — the plan's scope did not budget for capping nested pools,
+  // so the values are left as-is; this is just making the multiplication explicit.
   return mapWithConcurrency(months, 4, async (month) => {
     const manifest = await loadMonthJson<MonthManifestData>(directoryHandle, month.folderName, ["month.manifest.json"]);
 

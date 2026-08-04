@@ -40,7 +40,8 @@ describe("mapWithConcurrency", () => {
     // once one of 0/1 finishes. No item past what was already in flight when
     // the error occurred should ever start.
     expect(started.length).toBeLessThan(10);
-    expect(completed.length).toBeLessThan(started.length + 1);
+    expect(started).toEqual([0, 1, 2]);
+    expect(completed).toEqual([0, 1]);
   });
 
   it("clamps limit to item count and to a minimum of 1", async () => {

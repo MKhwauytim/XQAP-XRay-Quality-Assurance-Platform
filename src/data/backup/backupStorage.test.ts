@@ -312,6 +312,35 @@ function wrapDirFailingFileWrite(
   return wrapped;
 }
 
+/**
+ * Wraps a real memory directory so any READ lookup (options.create falsy) of
+ * `missingDirName` throws a NotFoundError-shaped error instead of delegating
+ * to the real handle -- lets a test simulate a backup subdirectory that
+ * disappeared out from under an in-progress restore (e.g. another tab's
+ * pruneAutoBackups, or a network-share sync client) without touching
+ * memoryDirectory.ts. CREATE lookups (targetDir's ensureDir calls during the
+ * restore walk) pass straight through, so only the restore-side READ of this
+ * one subdirectory name is affected (F1 repro).
+ */
+function wrapDirMissingSubdirectory(
+  real: DirectoryHandleLike,
+  missingDirName: string
+): DirectoryHandleLike {
+  const wrapped: DirectoryHandleLike = {
+    ...real,
+    getDirectoryHandle: async (dirName: string, options?: { create?: boolean }) => {
+      if (dirName === missingDirName && !options?.create) {
+        const error = new Error(`Simulated missing directory: ${missingDirName}`);
+        error.name = "NotFoundError";
+        throw error;
+      }
+      const child = await real.getDirectoryHandle(dirName, options);
+      return wrapDirMissingSubdirectory(child, missingDirName);
+    },
+  };
+  return wrapped;
+}
+
 describe("archive population path compatibility", () => {
   it("loads current numbered population folders and exports their rows", async () => {
     const root = makeRoot();
@@ -833,6 +862,43 @@ describe("restoreBackupSnapshot — restore.inprogress.json survives an interrup
     const systemDir = await getSystemRoot(root, false);
     await expect(
       systemDir.getFileHandle("restore.inprogress.json", { create: false })
+    ).resolves.toBeDefined();
+  });
+});
+
+describe("restoreBackupSnapshot — partial-restore detection when a backup subdirectory is missing (F1)", () => {
+  it("reports ok:false and leaves restore.inprogress.json in place when a nested backup subdirectory cannot be read", async () => {
+    const root = makeRoot();
+    const systemDir = await getSystemRoot(root, true);
+    const backupsDir = await systemDir.getDirectoryHandle("backups", { create: true });
+    const backupDir = await backupsDir.getDirectoryHandle("seed-backup", { create: true });
+    const jsonDir = await backupDir.getDirectoryHandle("json", { create: true });
+    await safeWriteJson(jsonDir, "top-file.json", { value: "top" });
+    const subDir = await jsonDir.getDirectoryHandle("missing-during-restore", { create: true });
+    await safeWriteJson(subDir, "nested-file.json", { value: "nested" });
+
+    // Simulates another tab's pruneAutoBackups (or a sync client) deleting
+    // this subdirectory out from under the restore walk -- the walk must NOT
+    // silently drop the whole subtree and report success (F1).
+    const missing = wrapDirMissingSubdirectory(root, "missing-during-restore");
+
+    const result = await restoreBackupSnapshot({
+      directoryHandle: missing,
+      months: [],
+      backupFolderName: "seed-backup",
+      username: "admin",
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    // Concise Arabic partial-restore message, not a raw browser NotFoundError.
+    expect(result.error).toMatch(/جزئ/);
+
+    // The sentinel must survive: its whole purpose is making an interrupted
+    // (here: partial) restore detectable on a later check.
+    const systemDirCheck = await getSystemRoot(root, false);
+    await expect(
+      systemDirCheck.getFileHandle("restore.inprogress.json", { create: false })
     ).resolves.toBeDefined();
   });
 });
