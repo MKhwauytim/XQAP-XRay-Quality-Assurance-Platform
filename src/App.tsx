@@ -14,6 +14,7 @@ import {
   type RolePermission
 } from "./auth/userManagement";
 import Sidebar from "./components/Sidebar/Sidebar";
+import { BootSplashOverlay } from "./components/Sidebar/BootSplashOverlay";
 import { SIDEBAR_TABS } from "./components/Sidebar/Tabs/tabRegistry";
 import { FeedbackWidget } from "./components/FeedbackWidget/FeedbackWidget";
 import { NotificationBanner } from "./components/NotificationBanner/NotificationBanner";
@@ -24,6 +25,7 @@ import { listMonthFolders } from "./data/population/populationStorage";
 import { getLabels } from "./data/labels/labelsStore";
 import { useLabels } from "./data/labels/useLabels";
 import { useWorkspace } from "./data/workspace/useWorkspace";
+import { resetBootProgress } from "./data/workspace/bootProgress";
 import {
   WorkspaceGate,
   WorkspacePicker
@@ -49,6 +51,27 @@ export function AppContent({ session }: AppContentProps) {
   const [autoBackupNotice, setAutoBackupNotice] = useState<string | null>(null);
   const [autoBackupRunning, setAutoBackupRunning] = useState(false);
   const autoBackupAttemptKey = `${session.username}:${session.loginAt}:${directoryHandle?.name ?? ""}`;
+
+  // Post-login "data source checklist" (bootProgress.ts) is cleared once per
+  // boot session -- a fresh login or a workspace switch -- reusing the same
+  // session+workspace identity key as the auto-backup attempt above. This
+  // must run synchronously during render, NOT inside a useEffect: the landing
+  // tab (Population's useMonthLoad, Employee's XrayReferrals) registers its
+  // own boot sources from ITS OWN mount effect, and React fires child effects
+  // before parent effects within the same commit -- a useEffect here would
+  // run AFTER that registration and wipe the sources right after they're set.
+  // Guarding with state (compare-then-reset, evaluated during render) is
+  // React's documented pattern for reacting to an identity change without an
+  // extra effect round-trip ("Adjusting some state when a prop changes"):
+  // the setState call below immediately re-renders this component before any
+  // descendant renders, let alone mounts, so the reset always wins the race
+  // against a child's registration. (A ref is deliberately NOT used here --
+  // this repo's lint config forbids reading/writing ref.current during render.)
+  const [bootProgressResetKey, setBootProgressResetKey] = useState<string | null>(null);
+  if (bootProgressResetKey !== autoBackupAttemptKey) {
+    setBootProgressResetKey(autoBackupAttemptKey);
+    resetBootProgress();
+  }
 
   useEffect(() => {
     return subscribeToUserManagementChanges(() => {
@@ -278,28 +301,37 @@ export function AppContent({ session }: AppContentProps) {
           <span>{labels.app_mobile_nav_label}</span>
         </button>
         {allowedTabs.length === 0 && <NoAvailableTabs role={session.role} />}
-        {allowedTabs.map((tab) =>
-          mountedTabIds.includes(tab.id) ? (
-            <div
-              key={tab.id}
-              hidden={tab.id !== activeTabId}
-              aria-hidden={tab.id !== activeTabId}
-            >
-              {/* Per-tab boundary: a crash in one tab shows its own recovery UI
-                  without unmounting the shell or the other mounted tabs. The root
-                  boundary in main.tsx remains as the last-resort catch-all.
-                  Suspense is created fresh per tab.id inside this .map(), so each
-                  mounted tab (mountedTabIds can hold up to 3 at once) gets its own
-                  independent boundary -- one tab's pending lazy chunk can never
-                  blank an already-loaded sibling tab that's also mounted-hidden. */}
-              <ErrorBoundary>
-                <Suspense fallback={<LoadingState label={labels.app_tab_loading} />}>
-                  <tab.TabComponent />
-                </Suspense>
-              </ErrorBoundary>
-            </div>
-          ) : null
-        )}
+        {/* Post-login checklist overlay: covers only the tab-content area (not
+            the sidebar/toolbar chrome above/around it) while the landing tab's
+            own registered boot sources are still loading. Children are ALWAYS
+            mounted underneath -- this is a purely visual overlay, not a gate --
+            so every tab's own effects (including the boot-source registration
+            they self-report) run on schedule whether or not the checklist is
+            still showing. */}
+        <BootSplashOverlay>
+          {allowedTabs.map((tab) =>
+            mountedTabIds.includes(tab.id) ? (
+              <div
+                key={tab.id}
+                hidden={tab.id !== activeTabId}
+                aria-hidden={tab.id !== activeTabId}
+              >
+                {/* Per-tab boundary: a crash in one tab shows its own recovery UI
+                    without unmounting the shell or the other mounted tabs. The root
+                    boundary in main.tsx remains as the last-resort catch-all.
+                    Suspense is created fresh per tab.id inside this .map(), so each
+                    mounted tab (mountedTabIds can hold up to 3 at once) gets its own
+                    independent boundary -- one tab's pending lazy chunk can never
+                    blank an already-loaded sibling tab that's also mounted-hidden. */}
+                <ErrorBoundary>
+                  <Suspense fallback={<LoadingState label={labels.app_tab_loading} />}>
+                    <tab.TabComponent />
+                  </Suspense>
+                </ErrorBoundary>
+              </div>
+            ) : null
+          )}
+        </BootSplashOverlay>
       </section>
 
       <FeedbackWidget />
