@@ -130,6 +130,14 @@ describe("useMonthLoad — periodic/manual background refresh (Sync extension, T
     expect(applyLoadedState.mock.calls[1][0].distribution).toEqual(distributionCurrentData);
   });
 
+  // Observed intermittently timing out when run alongside many other test files
+  // under heavy full-suite CPU contention (6/6 clean in isolation, repeatedly).
+  // The underlying async chain -- subscriber tick -> handleLoadExistingMonth ->
+  // loadMock.fn -- is correct and fast on its own; this is purely a test-
+  // infrastructure timing margin, not a product bug. Both the test's own
+  // timeout AND its waitFor's timeout need raising together -- raising only
+  // the waitFor left the surrounding `it()`'s own default timeout as the
+  // tighter, still-failing bound.
   it("also reloads on a 'manual' source event (matches XrayReferrals.tsx/XrayInspectionResults.tsx: neither view distinguishes the two sources)", async () => {
     loadMock.fn.mockResolvedValue(emptyMonthEditData);
     const workspace = makeDirectoryHandle("ws-manual");
@@ -141,8 +149,8 @@ describe("useMonthLoad — periodic/manual background refresh (Sync extension, T
       broadcastDataRefresh("manual");
     });
 
-    await waitFor(() => expect(loadMock.fn).toHaveBeenCalledTimes(2));
-  });
+    await waitFor(() => expect(loadMock.fn).toHaveBeenCalledTimes(2), { timeout: 8000 });
+  }, 10000);
 
   it("skips the tick entirely while unsaved in-session work (parsed uploads not yet auto-saved) is pending", async () => {
     loadMock.fn.mockResolvedValue(emptyMonthEditData);
