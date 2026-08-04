@@ -101,7 +101,21 @@ function subscribe(fn: Subscriber): () => void {
 /** React hook -- subscribes to the store, re-renders on any registration/status change. */
 export function useBootProgress(): { entries: BootSourceEntry[]; allLoaded: boolean } {
   const [entries, setEntries] = useState<BootSourceEntry[]>(() => getEntries());
-  useEffect(() => subscribe(() => setEntries(getEntries())), []);
+  useEffect(() => {
+    // Re-read the snapshot INSIDE the subscribing effect, not just in the
+    // useState initializer above. The initializer runs during the first
+    // render; this effect runs strictly later -- and per React's own
+    // child-before-parent effect ordering, it runs AFTER the landing tab's
+    // own mount effect has already called registerBootSources +
+    // markBootSourceLoading (Population's useMonthLoad.ts, Employee
+    // Workspace's XrayReferrals.tsx -- both descendants of the component
+    // that renders the checklist). Those calls' notify() fire while this
+    // hook still has no subscriber, so without this re-read they are lost
+    // outright: `entries` would stay [] forever, `[].every(...)` is
+    // vacuously true, and the checklist would never show at all.
+    setEntries(getEntries());
+    return subscribe(() => setEntries(getEntries()));
+  }, []);
   const allLoaded = entries.every((entry) => isTerminal(entry.status));
   return { entries, allLoaded };
 }

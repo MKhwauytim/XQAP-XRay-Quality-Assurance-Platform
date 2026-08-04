@@ -1,4 +1,5 @@
 /* @vitest-environment jsdom */
+import { useEffect } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 
@@ -14,6 +15,28 @@ import {
 afterEach(() => {
   resetBootProgress();
 });
+
+/**
+ * Reproduces the REAL post-login ordering: the code that registers/marks the
+ * sources publishes BEFORE the checklist hook has subscribed.
+ *
+ * In production the hook lives on a parent (`BootSplashOverlay`) while the
+ * registering code lives in a child's own mount effect (`useMonthLoad.ts`,
+ * `XrayReferrals.tsx`) -- and React runs child effects before parent effects,
+ * so the publish always lands before the subscribe. Declaring the registering
+ * effect BEFORE `useBootProgress` here produces that exact order, while
+ * `useBootProgress`'s `useState` initializer has already captured the (still
+ * empty) store during render.
+ */
+function useRegisterBeforeSubscribeHarness() {
+  useEffect(() => {
+    registerBootSources([
+      { key: "population_summary", labelEn: "processing.summary.json", labelAr: "ملخص المعالجة" },
+    ]);
+    markBootSourceLoading("population_summary");
+  }, []);
+  return useBootProgress();
+}
 
 describe("bootProgress", () => {
   it("registers sources initialized as pending", () => {
@@ -190,6 +213,36 @@ describe("bootProgress", () => {
       registerBootSources([{ key: "a", labelEn: "a.json", labelAr: "أ" }]);
     });
     expect(result.current.entries[0].status).toBe("pending");
+  });
+
+  it("sees a registration published BEFORE it subscribed -- the real post-login ordering (C1 regression)", () => {
+    // Every other test in this file happens to subscribe FIRST and publish
+    // second, which is the exact OPPOSITE of how the store is used in
+    // production -- that is why they all stayed green while the checklist
+    // never actually showed for a real user. Without the snapshot re-read
+    // inside `useBootProgress`'s subscribing effect, the notify() fired by the
+    // harness's registration below lands with zero subscribers and is lost:
+    // `entries` stays [] forever and `[].every(...)` reports `allLoaded` as
+    // vacuously true from the very first render.
+    const { result } = renderHook(() => useRegisterBeforeSubscribeHarness());
+
+    expect(result.current.entries).toHaveLength(1);
+    expect(result.current.entries[0].status).toBe("loading");
+    expect(result.current.allLoaded).toBe(false);
+  });
+
+  it("sees sources registered before it was ever rendered (useState-initializer path)", () => {
+    // Companion to the ordering regression above, covering the other half of
+    // the same guarantee: a hook mounted LATE (e.g. an overlay that re-mounts
+    // after the landing tab has long since registered) must also start from
+    // the live store, not from an empty list.
+    registerBootSources([{ key: "a", labelEn: "a.json", labelAr: "أ" }]);
+    markBootSourceLoading("a");
+
+    const { result } = renderHook(() => useBootProgress());
+
+    expect(result.current.entries).toHaveLength(1);
+    expect(result.current.allLoaded).toBe(false);
   });
 
   it("a second subscribed hook instance sees the same updates (shared module-level store)", () => {
