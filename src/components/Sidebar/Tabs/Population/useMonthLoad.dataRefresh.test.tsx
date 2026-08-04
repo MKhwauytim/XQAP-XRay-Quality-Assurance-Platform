@@ -130,27 +130,29 @@ describe("useMonthLoad — periodic/manual background refresh (Sync extension, T
     expect(applyLoadedState.mock.calls[1][0].distribution).toEqual(distributionCurrentData);
   });
 
-  // Observed intermittently timing out when run alongside many other test files
-  // under heavy full-suite CPU contention (6/6 clean in isolation, repeatedly).
-  // The underlying async chain -- subscriber tick -> handleLoadExistingMonth ->
-  // loadMock.fn -- is correct and fast on its own; this is purely a test-
-  // infrastructure timing margin, not a product bug. Both the test's own
-  // timeout AND its waitFor's timeout need raising together -- raising only
-  // the waitFor left the surrounding `it()`'s own default timeout as the
-  // tighter, still-failing bound.
+  // The subscriber's own in-flight-load guard (loadInFlightRef, useMonthLoad.ts)
+  // legitimately drops a refresh tick that arrives while a load is still in
+  // flight -- so this test must wait for the INITIAL load to fully settle
+  // (isLoadingMonthData back to false) before broadcasting, exactly like the
+  // sibling "periodic" test above already does. Skipping that wait made the
+  // test race real, deterministic application logic and lose intermittently;
+  // that was once misdiagnosed as CPU-contention flakiness and "fixed" by
+  // widening both timeouts (since reverted -- widened timeouts only hid the
+  // race and would have made a genuine future regression take 10s to fail).
   it("also reloads on a 'manual' source event (matches XrayReferrals.tsx/XrayInspectionResults.tsx: neither view distinguishes the two sources)", async () => {
     loadMock.fn.mockResolvedValue(emptyMonthEditData);
     const workspace = makeDirectoryHandle("ws-manual");
-    renderMonthLoad(workspace);
+    const { result } = renderMonthLoad(workspace);
 
     await waitFor(() => expect(loadMock.fn).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(result.current.isLoadingMonthData).toBe(false));
 
     act(() => {
       broadcastDataRefresh("manual");
     });
 
-    await waitFor(() => expect(loadMock.fn).toHaveBeenCalledTimes(2), { timeout: 8000 });
-  }, 10000);
+    await waitFor(() => expect(loadMock.fn).toHaveBeenCalledTimes(2));
+  });
 
   it("skips the tick entirely while unsaved in-session work (parsed uploads not yet auto-saved) is pending", async () => {
     loadMock.fn.mockResolvedValue(emptyMonthEditData);
