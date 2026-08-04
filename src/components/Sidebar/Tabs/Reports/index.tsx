@@ -348,7 +348,7 @@ function ReportsContent() {
         showToast("ok", "تم فتح العرض التنفيذي.");
       } else {
         const { buildExecutiveXlsx } = await import("../../../../data/reporting/executiveReport");
-        buildExecutiveXlsx(execInput, names);
+        await buildExecutiveXlsx(execInput, names);
         showToast("ok", "تم تنزيل بيانات التقرير (Excel).");
       }
     } catch {
@@ -460,7 +460,7 @@ function ReportsContent() {
         const names = buildDisplayNameMap();
         if (type === "executive-xlsx") {
           const { buildExecutiveXlsx } = await import("../../../../data/reporting/executiveReport");
-          buildExecutiveXlsx(execInput, names);
+          await buildExecutiveXlsx(execInput, names);
           showToast("ok", "تم تنزيل ملف بيانات التقرير (Excel).");
         } else if (type === "executive-deck") {
           const saved = directoryHandle ? await loadDeckStyleChoices(directoryHandle) : null;

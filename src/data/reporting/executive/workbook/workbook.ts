@@ -10,6 +10,13 @@ import {
   SOURCE_REVISIONS_SHEET_NAME_AR,
   hasSourceRevisions,
 } from "../../sourceRevisions";
+import { yieldToMain } from "../../../storage/yieldToMain";
+
+// Population-scale sheet builders (rowSheet, rawRiskSheet, resultComparisonSheet)
+// chunk their row-array construction with a main-thread yield between chunks
+// (same idiom as distributionReport.ts/sampleReport.ts) so a large population
+// doesn't block the UI thread for the whole build.
+const EXPORT_CHUNK_SIZE = 1000;
 
 /**
  * Deliverable C — The Workbook (design spec §7).
@@ -279,53 +286,61 @@ function reviewerName(model: ReportModel, username: string | null): Cell {
  * All image rows (processed). Inspector columns carry IDs; the reviewer column
  * carries the display name (§3.4). Other-team columns carry result + employee id.
  */
-function rowSheet(model: ReportModel): Cell[][] {
-  return [
-    [
-      "رقم الأشعة", "المنفذ", "المرحلة",
-      "م.أول (مفتش)", "م.ثاني (مفتش)", "نتيجة م.أول", "نتيجة م.ثاني", "نتيجة الصورة",
-      "في العينة", "المراجع (اسم)", "حالة التوزيع", "نتيجة المراجعة", "حالة الإجابة",
-      "يدوي (نتيجة)", "معاكس (نتيجة)", "معاكس (موظف)", "وسائل حية (نتيجة)", "وسائل حية (موظف)",
-      "هل يوجد صورة", "سبب عدم وجود الصورة", "هل يوجد تحديد", "مستوى جودة الصورة",
-      "سبب انخفاض الجودة", "تقييم الاشتباه", "الأصناف المشبوهة", "آلية التهريب المحتملة",
-      "تاريخ التعيين", "تاريخ التسليم",
-      "دقيق", "م.أول دقيق", "م.ثاني دقيق", "تصنيف التحقق",
-    ],
-    ...model.rows.map((r) => [
-      r.xrayImageId,
-      text(r.portName),
-      text(r.stage),
-      id(r.levelOneEmployeeId),
-      id(r.levelTwoEmployeeId),
-      result(r.levelOneResult),
-      result(r.levelTwoResult),
-      result(r.imageResult),
-      r.selectedInSample ? "نعم" : "لا",
-      reviewerName(model, r.assignedTo),
-      text(r.distributionStatus),
-      result(r.expertResult),
-      text(r.answerStatus),
-      result(r.otherResults.manual.result),
-      result(r.otherResults.opposite.result),
-      id(r.otherResults.opposite.employeeId),
-      result(r.otherResults.liveMeans.result),
-      id(r.otherResults.liveMeans.employeeId),
-      yesNo(r.imageAvailable),
-      text(r.noImageReason),
-      yesNo(r.hasMarking),
-      text(r.imageQuality),
-      text(r.lowQualityReason),
-      text(r.suspicionLevel),
-      text(r.suspectedTypes),
-      text(r.smuggleMethod),
-      text(r.assignedAt),
-      text(r.submittedAt),
-      yesNo(r.imageResultAccurate),
-      yesNo(r.levelOneAccurate),
-      yesNo(r.levelTwoAccurate),
-      text(r.verificationCategory),
-    ]),
+async function rowSheet(model: ReportModel): Promise<Cell[][]> {
+  const header: Cell[] = [
+    "رقم الأشعة", "المنفذ", "المرحلة",
+    "م.أول (مفتش)", "م.ثاني (مفتش)", "نتيجة م.أول", "نتيجة م.ثاني", "نتيجة الصورة",
+    "في العينة", "المراجع (اسم)", "حالة التوزيع", "نتيجة المراجعة", "حالة الإجابة",
+    "يدوي (نتيجة)", "معاكس (نتيجة)", "معاكس (موظف)", "وسائل حية (نتيجة)", "وسائل حية (موظف)",
+    "هل يوجد صورة", "سبب عدم وجود الصورة", "هل يوجد تحديد", "مستوى جودة الصورة",
+    "سبب انخفاض الجودة", "تقييم الاشتباه", "الأصناف المشبوهة", "آلية التهريب المحتملة",
+    "تاريخ التعيين", "تاريخ التسليم",
+    "دقيق", "م.أول دقيق", "م.ثاني دقيق", "تصنيف التحقق",
   ];
+
+  const body: Cell[][] = [];
+  for (let i = 0; i < model.rows.length; i += EXPORT_CHUNK_SIZE) {
+    const chunk = model.rows.slice(i, i + EXPORT_CHUNK_SIZE);
+    for (const r of chunk) {
+      body.push([
+        r.xrayImageId,
+        text(r.portName),
+        text(r.stage),
+        id(r.levelOneEmployeeId),
+        id(r.levelTwoEmployeeId),
+        result(r.levelOneResult),
+        result(r.levelTwoResult),
+        result(r.imageResult),
+        r.selectedInSample ? "نعم" : "لا",
+        reviewerName(model, r.assignedTo),
+        text(r.distributionStatus),
+        result(r.expertResult),
+        text(r.answerStatus),
+        result(r.otherResults.manual.result),
+        result(r.otherResults.opposite.result),
+        id(r.otherResults.opposite.employeeId),
+        result(r.otherResults.liveMeans.result),
+        id(r.otherResults.liveMeans.employeeId),
+        yesNo(r.imageAvailable),
+        text(r.noImageReason),
+        yesNo(r.hasMarking),
+        text(r.imageQuality),
+        text(r.lowQualityReason),
+        text(r.suspicionLevel),
+        text(r.suspectedTypes),
+        text(r.smuggleMethod),
+        text(r.assignedAt),
+        text(r.submittedAt),
+        yesNo(r.imageResultAccurate),
+        yesNo(r.levelOneAccurate),
+        yesNo(r.levelTwoAccurate),
+        text(r.verificationCategory),
+      ]);
+    }
+    if (model.rows.length > EXPORT_CHUNK_SIZE) await yieldToMain();
+  }
+
+  return [header, ...body];
 }
 
 /**
@@ -333,7 +348,7 @@ function rowSheet(model: ReportModel): Cell[][] {
  * sheet name / row number for traceability. Column order is the union of all
  * raw keys encountered (stable first-seen order).
  */
-function rawRiskSheet(rows: PreparedPopulationRow[]): Cell[][] {
+async function rawRiskSheet(rows: PreparedPopulationRow[]): Promise<Cell[][]> {
   const keys: string[] = [];
   const seen = new Set<string>();
   for (const row of rows) {
@@ -351,20 +366,26 @@ function rawRiskSheet(rows: PreparedPopulationRow[]): Cell[][] {
   }
 
   const header: Cell[] = ["ورقة المصدر", "رقم صف المصدر", ...keys];
-  const body: Cell[][] = rows.map((row) => {
-    const raw = row.rawRow ?? {};
-    return [
-      text(row.sourceSheetName),
-      row.sourceRowNumber,
-      ...keys.map((key): Cell => {
-        const value = raw[key];
-        if (value === null || value === undefined || value === "") return "";
-        if (typeof value === "number") return value;
-        if (typeof value === "boolean") return value ? "نعم" : "لا";
-        return String(value);
-      }),
-    ];
-  });
+  const body: Cell[][] = [];
+  for (let i = 0; i < rows.length; i += EXPORT_CHUNK_SIZE) {
+    const chunk = rows.slice(i, i + EXPORT_CHUNK_SIZE);
+    for (const row of chunk) {
+      const raw = row.rawRow ?? {};
+      body.push([
+        text(row.sourceSheetName),
+        row.sourceRowNumber,
+        ...keys.map((key): Cell => {
+          const value = raw[key];
+          if (value === null || value === undefined || value === "") return "";
+          if (typeof value === "number") return value;
+          if (typeof value === "boolean") return value ? "نعم" : "لا";
+          return String(value);
+        }),
+      ]);
+    }
+    if (rows.length > EXPORT_CHUNK_SIZE) await yieldToMain();
+  }
+
   return [header, ...body];
 }
 
@@ -434,10 +455,10 @@ function factTableSheet(model: ReportModel): Cell[][] {
  * non-review team's agreement-with-reviewer. Codes are pulled from the raw
  * population row (the report-row type drops codes); employee ids from the row.
  */
-function resultComparisonSheet(
+async function resultComparisonSheet(
   model: ReportModel,
   popById: Map<string, PreparedPopulationRow>
-): Cell[][] {
+): Promise<Cell[][]> {
   const header: Cell[] = [
     "رقم الأشعة",
     "المنفذ",
@@ -450,25 +471,31 @@ function resultComparisonSheet(
     ...NON_REVIEW_SOURCES.map((s) => `توافق ${SOURCE_LABELS[s]} مع المراجعة`),
   ];
 
-  const body: Cell[][] = model.resultComparison.images.map((img) => {
-    const pop = popById.get(img.xrayImageId);
-    const other = pop?.otherResults;
-    return [
-      img.xrayImageId,
-      text(img.portName),
-      ...ALL_SOURCES.map((s) => result(img.results[s])),
-      text(other?.manual.code ?? null),
-      text(other?.opposite.code ?? null),
-      id(other?.opposite.employeeId ?? null),
-      text(other?.liveMeans.code ?? null),
-      id(other?.liveMeans.employeeId ?? null),
-      ...NON_REVIEW_SOURCES.map((s): Cell => {
-        const agrees = img.agreesWithReview[s];
-        if (agrees === null || agrees === undefined) return DASH;
-        return agrees ? "متوافق" : "مختلف";
-      }),
-    ];
-  });
+  const images = model.resultComparison.images;
+  const body: Cell[][] = [];
+  for (let i = 0; i < images.length; i += EXPORT_CHUNK_SIZE) {
+    const chunk = images.slice(i, i + EXPORT_CHUNK_SIZE);
+    for (const img of chunk) {
+      const pop = popById.get(img.xrayImageId);
+      const other = pop?.otherResults;
+      body.push([
+        img.xrayImageId,
+        text(img.portName),
+        ...ALL_SOURCES.map((s) => result(img.results[s])),
+        text(other?.manual.code ?? null),
+        text(other?.opposite.code ?? null),
+        id(other?.opposite.employeeId ?? null),
+        text(other?.liveMeans.code ?? null),
+        id(other?.liveMeans.employeeId ?? null),
+        ...NON_REVIEW_SOURCES.map((s): Cell => {
+          const agrees = img.agreesWithReview[s];
+          if (agrees === null || agrees === undefined) return DASH;
+          return agrees ? "متوافق" : "مختلف";
+        }),
+      ]);
+    }
+    if (images.length > EXPORT_CHUNK_SIZE) await yieldToMain();
+  }
 
   return [header, ...body];
 }
@@ -568,10 +595,10 @@ function crossTeamSheet(model: ReportModel): Cell[][] {
  * Build the executive workbook in-memory and return the SheetJS workbook. Pure;
  * does no I/O. `buildExecutiveWorkbook` wraps it and writes the file.
  */
-export function buildExecutiveWorkbookObject(
+export async function buildExecutiveWorkbookObject(
   input: ExecutiveReportInput,
   employeeDisplayNames: Record<string, string> = {}
-): XLSX.WorkBook {
+): Promise<XLSX.WorkBook> {
   const model = buildReportModel(input, employeeDisplayNames);
   const popById = new Map<string, PreparedPopulationRow>();
   for (const row of input.populationRows) {
@@ -589,14 +616,14 @@ export function buildExecutiveWorkbookObject(
   append(SHEET_NAMES.stages, stageSheet(model));
   append(SHEET_NAMES.imageQuality, imageQualitySheet(model));
   append(SHEET_NAMES.resultQuality, resultQualitySheet(model));
-  append(SHEET_NAMES.rows, rowSheet(model));
+  append(SHEET_NAMES.rows, await rowSheet(model));
 
   // Raw → analytical chain (§7).
-  append(SHEET_NAMES.rawRisk, rawRiskSheet(input.populationRows));
+  append(SHEET_NAMES.rawRisk, await rawRiskSheet(input.populationRows));
   append(SHEET_NAMES.rawBi, rawBiSheet());
   append(SHEET_NAMES.exclusions, exclusionsSheet());
   append(SHEET_NAMES.factTable, factTableSheet(model));
-  append(SHEET_NAMES.resultComparison, resultComparisonSheet(model, popById));
+  append(SHEET_NAMES.resultComparison, await resultComparisonSheet(model, popById));
   append(SHEET_NAMES.employeeByPort, employeeByPortSheet(model));
   append(SHEET_NAMES.errorAnalysis, errorAnalysisSheet(model));
   append(SHEET_NAMES.crossTeam, crossTeamSheet(model));
@@ -617,10 +644,10 @@ export function buildExecutiveWorkbookObject(
  * Build and download the executive workbook (`.xlsx`). Replaces the legacy
  * `buildExecutiveXlsx`; the Reports tab calls through the re-exported name.
  */
-export function buildExecutiveWorkbook(
+export async function buildExecutiveWorkbook(
   input: ExecutiveReportInput,
   employeeDisplayNames: Record<string, string> = {}
-): void {
-  const wb = buildExecutiveWorkbookObject(input, employeeDisplayNames);
+): Promise<void> {
+  const wb = await buildExecutiveWorkbookObject(input, employeeDisplayNames);
   XLSX.writeFile(wb, `التقرير_التنفيذي_${input.monthFolderName}.xlsx`);
 }

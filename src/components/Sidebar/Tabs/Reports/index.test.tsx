@@ -147,7 +147,7 @@ vi.mock("../../../../data/reporting/sampleReport", () => ({
 
 const executiveReportSpies = vi.hoisted(() => ({
   openExecutiveReport: vi.fn(async (_execInput: unknown, _names: unknown) => undefined),
-  buildExecutiveXlsx: vi.fn((_execInput: unknown, _names: unknown) => undefined),
+  buildExecutiveXlsx: vi.fn(async (_execInput: unknown, _names: unknown) => undefined),
 }));
 
 vi.mock("../../../../data/reporting/executiveReport", () => ({
