@@ -61,14 +61,16 @@ test("createDefaultPermissions defines reports/kpi for every role", () => {
 test("C1 regression: 4 formerly-inherited sub-tabs keep their effective access for all roles", () => {
   // These 4 sub-tabs previously had NO explicit rows and resolved via parent-tab
   // inheritance (population / reports). C1 removed that fallback and baked the
-  // effective values into explicit rows. EXPECTED = the pre-change effective access;
-  // getRolePermission (no fallback) must still return exactly these — 20 assertions.
+  // effective values into explicit rows. getRolePermission (no fallback) must
+  // still return exactly the shipped default matrix — 20 assertions. guest/
+  // employee/supervisor were later scoped down from "view" to "none" on all 4
+  // (population defaults were narrowed to manager+admin only).
   const perms = createDefaultPermissions();
   const EXPECTED: Record<string, Record<AuthRole, PermissionLevel>> = {
-    "population/process": { guest: "view", employee: "view", supervisor: "view", manager: "edit", admin: "edit" },
-    "population/browse":  { guest: "view", employee: "view", supervisor: "view", manager: "edit", admin: "edit" },
-    "reports/reports":    { guest: "none", employee: "none", supervisor: "view", manager: "edit", admin: "edit" },
-    "reports/kpi":        { guest: "none", employee: "none", supervisor: "view", manager: "edit", admin: "edit" },
+    "population/process": { guest: "none", employee: "none", supervisor: "none", manager: "edit", admin: "edit" },
+    "population/browse":  { guest: "none", employee: "none", supervisor: "none", manager: "edit", admin: "edit" },
+    "reports/reports":    { guest: "none", employee: "none", supervisor: "none", manager: "edit", admin: "edit" },
+    "reports/kpi":        { guest: "none", employee: "none", supervisor: "none", manager: "edit", admin: "edit" },
   };
   for (const [tabId, roleMap] of Object.entries(EXPECTED)) {
     for (const role of ALL_ROLES) {
@@ -106,14 +108,14 @@ test("post-notification feature defaults enabled for admin + manager only (defen
   expect(hasFeature(feats, "guest", "post-notification")).toBe(false);
 });
 
-test("reports/kpi defaults: supervisor view, manager+admin edit, others none", () => {
+test("reports/kpi defaults: manager+admin edit, others none", () => {
   const perms = createDefaultPermissions();
   const accessFor = (role: AuthRole) => getRolePermission(perms, role, KPI_TAB_ID);
 
   expect(accessFor("admin")).toBe("edit");
   expect(accessFor("manager")).toBe("edit");
-  // Supervisor keeps "view" — it now actually works after the dead-cell fix.
-  expect(accessFor("supervisor")).toBe("view");
+  // Supervisor was scoped down from "view" to "none".
+  expect(accessFor("supervisor")).toBe("none");
   expect(accessFor("employee")).toBe("none");
   expect(accessFor("guest")).toBe("none");
 });

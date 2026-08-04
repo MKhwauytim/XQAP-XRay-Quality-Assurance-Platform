@@ -80,7 +80,22 @@ describe("getMutationCapability", () => {
     ).toEqual({ allowed: false, reason: "unknown-feature" });
   });
 
-  it("allows archive maintenance only for an editable, writable manager", () => {
+  it("allows archive maintenance only for an editable, writable role", () => {
+    // Manager's default archive PAGE access was scoped down to "none" (was
+    // "edit") -- the archive.createBackup FEATURE flag stays enabled for
+    // manager, but the page-permission gate now denies it first. Admin keeps
+    // both, so it's the "allowed" case here.
+    expect(
+      getMutationCapability({
+        role: "admin",
+        featureId: "archive.createBackup",
+        permissions,
+        featurePermissions,
+        isReadOnly: false,
+        workspaceReady: true,
+      })
+    ).toEqual({ allowed: true, reason: null });
+
     expect(
       getMutationCapability({
         role: "manager",
@@ -90,7 +105,7 @@ describe("getMutationCapability", () => {
         isReadOnly: false,
         workspaceReady: true,
       })
-    ).toEqual({ allowed: true, reason: null });
+    ).toEqual({ allowed: false, reason: "page-not-editable" });
 
     expect(
       getMutationCapability({

@@ -158,12 +158,27 @@ async function seedAssignedSample(
 }
 
 describe("XrayReferrals permission gating (render vs handler)", () => {
+  // Default supervisor permissions no longer disable submit-answers (a live
+  // workspace's own permission edits, since reflected as the new default —
+  // supervisor now CAN submit). Both tests below specifically exercise the
+  // "bulk-assigned supervisor who cannot submit answers" shape from the
+  // synthesis finding regardless of what the ambient default happens to be,
+  // so they override submit-answers explicitly on top of the default base —
+  // same pattern as the request-replacement override test further down.
+  function supervisorCannotSubmitAnswersState() {
+    const base = createEmptyUserManagementState();
+    const featurePermissions: FeaturePermission[] = [
+      ...base.featurePermissions.filter(
+        (f) => !(f.role === "supervisor" && f.featureId === "submit-answers")
+      ),
+      { role: "supervisor", featureId: "submit-answers", enabled: false },
+    ];
+    return { ...base, featurePermissions };
+  }
+
   it("keeps the inspection form read-only when the role cannot submit answers, even for the user's own sample (bulk-assigned supervisor)", async () => {
-    // Default supervisor permissions: submit-answers is disabled while
-    // view-all-entries/request-replacement/ew.reopenAnswer remain enabled — the
-    // exact "bulk-assigned supervisor" shape from the synthesis finding.
     writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
-    writeUserManagementState(createEmptyUserManagementState(), false);
+    writeUserManagementState(supervisorCannotSubmitAnswersState(), false);
 
     const root = createMemoryDirectory("root");
     await seedAssignedSample(root, "sup-1");
@@ -179,7 +194,7 @@ describe("XrayReferrals permission gating (render vs handler)", () => {
 
   it("hides the self-service reopen-request button when the role cannot submit answers", async () => {
     writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
-    writeUserManagementState(createEmptyUserManagementState(), false);
+    writeUserManagementState(supervisorCannotSubmitAnswersState(), false);
 
     const root = createMemoryDirectory("root");
     await seedAssignedSample(root, "sup-1");
