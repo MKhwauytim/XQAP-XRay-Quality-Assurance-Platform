@@ -4,7 +4,7 @@ import { createMemoryDirectory, getReadLog, clearReadLog } from "../storage/memo
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { WorkspacePermissionError } from "../storage/workspaceWriteAccess";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
-import { saveMonthRun, loadAllSampleRows, loadBrowseRows, updateMonthStatus, loadMonthForEditing } from "./populationStorage";
+import { saveMonthRun, loadAllPopulationRows, loadAllSampleRows, loadAllRawRows, loadBrowseRows, updateMonthStatus, loadMonthForEditing } from "./populationStorage";
 import { loadReplacementBucket, loadReplacementIndexManifest } from "./replacementIndexStorage";
 import { saveSampleMaster } from "../sampling/sampleStorage";
 import { appendDistributionEvent } from "../distribution/distributionStorage";
@@ -533,6 +533,109 @@ it("loadAllSampleRows falls back to legacy sample path when getSampleMainDir thr
   // Assert
   expect(rows.length).toBeGreaterThan(0);
   expect(rows[0].xrayImageId).toBe("LEGACY001");
+});
+
+// Phase B Task 5 (parallelize the "all months" browse-aggregation loop with
+// mapWithConcurrency): wraps every file read inside `monthFolderName`'s subtree
+// with an artificial delay, so that month's read is guaranteed to be the LAST
+// one to actually resolve even though it is earlier in listMonthFolders'
+// chronological order (and therefore earlier in the `months` array these
+// functions iterate). Used below to prove loadAllPopulationRows /
+// loadAllSampleRows / loadAllRawRows merge by month-list INDEX, not by
+// whichever month's read happens to finish first once parallelized.
+function delayReadsForMonth(
+  dir: DirectoryHandleLike,
+  monthFolderName: string,
+  delayMs: number
+): DirectoryHandleLike {
+  function wrap(handle: DirectoryHandleLike, insideTarget: boolean): DirectoryHandleLike {
+    return {
+      ...handle,
+      getDirectoryHandle: async (name: string, options?: { create?: boolean }) => {
+        const child = await handle.getDirectoryHandle(name, options);
+        return wrap(child, insideTarget || name === monthFolderName);
+      },
+      getFileHandle: async (name: string, options?: { create?: boolean }) => {
+        const fh = await handle.getFileHandle(name, options);
+        if (!insideTarget) return fh;
+        return {
+          ...fh,
+          getFile: async () => {
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+            return fh.getFile();
+          },
+        };
+      },
+    };
+  }
+  return wrap(dir, false);
+}
+
+// Characterization test (write BEFORE parallelizing, per the plan): proves the
+// dedup semantics loadAllPopulationRows must preserve once its sequential loop
+// becomes a mapWithConcurrency fan-out -- for the same xrayImageId appearing in
+// two different months, the chronologically LATER month's row always wins the
+// Map merge, regardless of which month's underlying file read actually
+// resolves first. The 5-may-2026 read is deliberately delayed past the
+// 6-june-2026 read to force the "wrong" completion order a naive
+// (non-index-addressed) concurrent rewrite could get wrong.
+test("loadAllPopulationRows: the chronologically later month wins a duplicate xrayImageId, even when its read resolves before the earlier month's (index-addressed merge order)", async () => {
+  const dir = createMemoryDirectory();
+  await saveMonthRun({ directoryHandle: dir, ...baseParams }); // 5-may-2026, A001 / NonCertscan
+  await saveMonthRun({
+    directoryHandle: dir,
+    ...baseParams,
+    month: 6,
+    processedRows: [{ xrayImageId: "A001", certScanStatus: "CertScan" }],
+  }); // 6-june-2026, same id, different data
+
+  const delayed = delayReadsForMonth(dir, "5-may-2026", 30);
+
+  const rows = await loadAllPopulationRows(delayed);
+  const merged = rows.filter((row) => row.xrayImageId === "A001");
+
+  expect(merged).toHaveLength(1); // deduped, not two entries
+  expect(merged[0]?._monthFolder).toBe("6-june-2026");
+  expect(merged[0]?.certScanStatus).toBe("CertScan");
+});
+
+// Same index-addressed-order property, but for the flat-concatenation shape
+// shared by loadAllSampleRows/loadAllRawRows (no dedup -- every month's rows
+// are appended, in month-list order). Delaying the earlier month's read must
+// not let its rows land after the later month's in the final array.
+test("loadAllSampleRows: rows stay in month-chronological order even when the earlier month's read resolves last", async () => {
+  const dir = createMemoryDirectory();
+  await saveMonthRun({ directoryHandle: dir, ...baseParams }); // 5-may-2026
+  await saveSampleMaster(dir, "5-may-2026", { ...makeSample(), rows: [{ xrayImageId: "A001" } as never] });
+  await saveMonthRun({
+    directoryHandle: dir,
+    ...baseParams,
+    month: 6,
+    processedRows: [{ xrayImageId: "B001", certScanStatus: "NonCertscan" }],
+  }); // 6-june-2026
+  await saveSampleMaster(dir, "6-june-2026", { ...makeSample(), rows: [{ xrayImageId: "B001" } as never] });
+
+  const delayed = delayReadsForMonth(dir, "5-may-2026", 30);
+
+  const rows = await loadAllSampleRows(delayed);
+  expect(rows.map((row) => row.xrayImageId)).toEqual(["A001", "B001"]);
+});
+
+test("loadAllRawRows: rows stay in month-chronological order even when the earlier month's read resolves last", async () => {
+  const dir = createMemoryDirectory();
+  await saveMonthRun({ directoryHandle: dir, ...baseParams, riskRawRows: [{ id: "R-MAY" }] }); // 5-may-2026
+  await saveMonthRun({
+    directoryHandle: dir,
+    ...baseParams,
+    month: 6,
+    riskRawRows: [{ id: "R-JUNE" }],
+    processedRows: [{ xrayImageId: "B001", certScanStatus: "NonCertscan" }],
+  }); // 6-june-2026
+
+  const delayed = delayReadsForMonth(dir, "5-may-2026", 30);
+
+  const rows = await loadAllRawRows(delayed, "risk");
+  expect(rows.map((row) => row.id)).toEqual(["R-MAY", "R-JUNE"]);
 });
 
 // Task 3 (parallelize saveMonthRunLocked's independent writes): end-state

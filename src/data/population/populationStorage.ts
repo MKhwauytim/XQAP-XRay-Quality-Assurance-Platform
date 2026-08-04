@@ -1,6 +1,7 @@
 import type { DirectoryHandleLike, FileHandleLike } from "../storage/fileSystemAccess";
 import { safeWriteJson, safeWriteJsonText, safeReadJson, readEnvelopeRevision } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
+import { mapWithConcurrency } from "../storage/concurrency";
 import { withResourceLock } from "../storage/webLocks";
 import { withWorkspaceWriteAccess } from "../storage/workspaceWriteAccess";
 import { logError } from "../storage/errorLogger";
@@ -570,19 +571,32 @@ export async function loadAllPopulationRows(
   const months = await listMonthFolders(directoryHandle);
   const seen = new Map<string, BrowseRow>(); // xrayImageId → latest row
 
-  for (const info of months) {
+  // Index-addressed via mapWithConcurrency (budget 4 -- each read here is a
+  // full population.final.json, heavier than loadArchiveStatus's per-employee
+  // files, so this stays below its 4-8 range at 4) so the fold below still
+  // walks months in listMonthFolders' chronological order -- and therefore a
+  // later month still overwrites an earlier month's duplicate xrayImageId in
+  // `seen` -- regardless of which month's file read actually finishes first.
+  // See populationStorage.test.ts's "the chronologically later month wins..."
+  // characterization test.
+  const perMonthRows = await mapWithConcurrency(months, 4, async (info): Promise<BrowseRow[]> => {
     try {
       const monthDir = await getMonthDir(directoryHandle, info.folderName);
       const processedDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false });
       const result = await safeReadJson<{ rows: Array<Record<string, unknown>> }>(processedDir, "population.final.json");
-      if (!result.ok) continue;
-      for (const row of result.value.rows ?? []) {
-        const id = String(row["xrayImageId"] ?? "");
-        if (!id) continue;
-        seen.set(id, appendMonthInfo(row, info));
-      }
+      if (!result.ok) return [];
+      return (result.value.rows ?? []).map((row) => appendMonthInfo(row, info));
     } catch (error) {
       logError("loadAllPopulationRows", error);
+      return [];
+    }
+  });
+
+  for (const monthRows of perMonthRows) {
+    for (const row of monthRows) {
+      const id = String(row["xrayImageId"] ?? "");
+      if (!id) continue;
+      seen.set(id, row);
     }
   }
 
@@ -624,23 +638,29 @@ export async function loadAllSampleRows(
   directoryHandle: DirectoryHandleLike
 ): Promise<BrowseRow[]> {
   const months = await listMonthFolders(directoryHandle);
-  const rows: BrowseRow[] = [];
 
-  for (const info of months) {
+  // Index-addressed via mapWithConcurrency (budget 4) so the flat
+  // concatenation below still walks months in listMonthFolders' chronological
+  // order, regardless of which month's sample.master.json read actually
+  // finishes first. See populationStorage.test.ts's "rows stay in
+  // month-chronological order..." characterization test.
+  const perMonthRows = await mapWithConcurrency(months, 4, async (info): Promise<BrowseRow[]> => {
     try {
       const monthDir = await getMonthDir(directoryHandle, info.folderName);
       const sampleDir = await resolveSampleDir(directoryHandle, info.folderName, monthDir);
-      if (!sampleDir) continue;
+      if (!sampleDir) return [];
       const result = await safeReadJson<{ rows: Array<Record<string, unknown>> }>(
         sampleDir,
         "sample.master.json"
       );
-      if (!result.ok) continue;
-      rows.push(...(result.value.rows ?? []).map((row) => appendMonthInfo(row, info)));
-    } catch { /* skip inaccessible */ }
-  }
+      if (!result.ok) return [];
+      return (result.value.rows ?? []).map((row) => appendMonthInfo(row, info));
+    } catch {
+      return [];
+    }
+  });
 
-  return rows;
+  return perMonthRows.flat();
 }
 
 export async function loadAllRawRows(
@@ -648,10 +668,11 @@ export async function loadAllRawRows(
   source: "risk" | "bi"
 ): Promise<BrowseRow[]> {
   const months = await listMonthFolders(directoryHandle);
-  const rows: BrowseRow[] = [];
   const fileName = source === "risk" ? "risk.raw.json" : "bi.raw.json";
 
-  for (const info of months) {
+  // Index-addressed via mapWithConcurrency (budget 4) -- same ordering
+  // rationale as loadAllSampleRows above.
+  const perMonthRows = await mapWithConcurrency(months, 4, async (info): Promise<BrowseRow[]> => {
     try {
       const monthDir = await getMonthDir(directoryHandle, info.folderName);
       const rawDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.raw, { create: false });
@@ -659,12 +680,14 @@ export async function loadAllRawRows(
         rawDir,
         fileName
       );
-      if (!result.ok) continue;
-      rows.push(...(result.value.rows ?? []).map((row) => appendMonthInfo(row, info)));
-    } catch { /* skip inaccessible */ }
-  }
+      if (!result.ok) return [];
+      return (result.value.rows ?? []).map((row) => appendMonthInfo(row, info));
+    } catch {
+      return [];
+    }
+  });
 
-  return rows;
+  return perMonthRows.flat();
 }
 
 export async function loadBrowseRows(
