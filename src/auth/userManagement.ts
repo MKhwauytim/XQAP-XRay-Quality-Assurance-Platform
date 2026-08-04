@@ -52,8 +52,6 @@ const DEFAULT_USER_PASSWORD_HASH: PasswordHashRecord = {
   encoded: "$argon2id$v=19$m=19456,t=2,p=1$eHJheS1kZWZhdWx0LTIwMjY$2ZptFPutF/hZRmAofMUHA8cUE3Tq/A743hoOJO74PWY"
 };
 
-export const DEFAULT_USER_TEMP_PASSWORD = "Xray@2026";
-
 // ── Runtime state & event ─────────────────────────────────────────────────────
 
 const CHANGE_EVENT_NAME = "xray-user-management-change";
@@ -694,13 +692,4 @@ export function persistUserPasswordHash(
     updatedAt: new Date().toISOString(),
   };
   writeUserManagementState({ ...state, users }, true);
-}
-
-export function getPublicManagedUsers(): Array<{
-  username: string;
-  displayName: string;
-}> {
-  return getManagedLoginUsers()
-    .filter((u) => u.isActive)
-    .map((u) => ({ username: u.username, displayName: u.displayName }));
 }

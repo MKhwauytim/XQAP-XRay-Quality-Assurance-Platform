@@ -36,40 +36,6 @@ export function kpiCard({ label, value, sub, tone = "" }: KpiCardOpts): string {
   </div>`;
 }
 
-type BarRowOpts = { label: string; value: number | null; max: number; tone?: "good" | "risk" | "blue" | "" };
-export function barRow({ label, value, max, tone = "" }: BarRowOpts): string {
-  const pct = (value === null || max === 0) ? 0 : Math.min(100, (value / max) * 100);
-  return `<div class="xr-bar-row">
-    <span>${esc(label)}</span>
-    <div class="xr-bar-track"><div class="xr-bar-fill${tone ? " " + tone : ""}" style="width:${pct.toFixed(1)}%"></div></div>
-    <b>${value === null ? "—" : fmtPct(value)}</b>
-  </div>`;
-}
-
-export function badgeHtml(status: "excellent" | "stable" | "monitor" | "priority" | "insufficient" | string): string {
-  const labels: Record<string, string> = {
-    excellent: "ممتاز", stable: "مستقر", monitor: "متابعة", priority: "أولوية", insufficient: "بيانات غير كافية",
-  };
-  const CSS_CLASS: Record<string, string> = {
-    excellent: "excellent",
-    stable: "stable",
-    monitor: "monitor",
-    priority: "priority",
-    insufficient: "insufficient",
-  };
-  return `<span class="xr-badge ${CSS_CLASS[status] ?? "insufficient"}">${esc(labels[status] ?? status)}</span>`;
-}
-
-export function heatCell(pct: number | null): string {
-  if (pct === null) return `<span class="xr-heat-cell xr-heat-insuff">—</span>`;
-  const cls = pct >= 90 ? "xr-heat-high" : pct >= 75 ? "xr-heat-mid" : "xr-heat-low";
-  return `<span class="xr-heat-cell ${cls}">${fmtPct(pct)}</span>`;
-}
-
-export function statPill({ label, value }: { label: string; value: string }): string {
-  return `<div class="xr-stat-pill"><span class="xr-stat-pill-label">${esc(label)}</span><b class="xr-stat-pill-value">${esc(value)}</b></div>`;
-}
-
 type TableOpts = { headers: string[]; rows: (string | number | null)[][]; totalRow?: (string | number | null)[] };
 export function dataTable({ headers, rows, totalRow }: TableOpts): string {
   const th = headers.map(h => `<th>${esc(String(h))}</th>`).join("");
@@ -80,12 +46,4 @@ export function dataTable({ headers, rows, totalRow }: TableOpts): string {
     ? `<tr class="total-row">${totalRow.map(c => `<td>${c === null ? "" : esc(String(c))}</td>`).join("")}</tr>`
     : "";
   return `<div class="xr-table-wrap"><table class="xr-table"><thead><tr>${th}</tr></thead><tbody>${trs}${tot}</tbody></table></div>`;
-}
-
-export function noticeBox(text: string): string {
-  return `<div class="xr-notice">${esc(text)}</div>`;
-}
-
-export function pagePanel(title: string, body: string): string {
-  return `<div class="xr-panel"><div class="xr-panel-title">${esc(title)}</div>${body}</div>`;
 }

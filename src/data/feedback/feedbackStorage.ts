@@ -115,16 +115,6 @@ async function mutateFeedback(
   }
 }
 
-export async function saveFeedback(
-  dir: DirectoryHandleLike,
-  messages: FeedbackMessage[]
-): Promise<void> {
-  // Full replace of the list, but still routed through the CAS protocol so it
-  // participates in the same revision/token handshake as submit/reply (a
-  // non-participating writer would be invisible to their conflict detection).
-  await mutateFeedback(dir, () => messages);
-}
-
 export async function submitFeedback(
   dir: DirectoryHandleLike,
   payload: { from: string; role: string; category: FeedbackCategory; text: string }
