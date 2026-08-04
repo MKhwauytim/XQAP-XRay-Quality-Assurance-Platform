@@ -17,6 +17,7 @@ import type { PreparedPopulationRow } from "../population/populationTypes";
 import type { SampleMasterData } from "../sampling/sampleTypes";
 import type { MonthManifestData } from "../population/monthTypes";
 import { openReportWindow, writeOrCloseOnFailure } from "./htmlReport";
+import { yieldToMain } from "../storage/yieldToMain";
 import { fmtNum, fmtPct } from "./executive/primitives";
 import {
   page,
@@ -186,14 +187,6 @@ export function computeSampleLineage(input: SampleReportInput): SampleLineage {
 // ─── Document (A4 portrait) ───────────────────────────────────────────────────
 
 const SAMPLE_RAILS = ["الاستلام", "المعالجة", "الطبقات", "العينة"];
-
-/**
- * Yields a turn to the main thread (P3-7). Same convention as
- * `Population/processing/populationProcessor.ts` and the biData/riskData
- * workbook parsers — a bare `setTimeout(resolve, 0)`, not a shared import
- * (there isn't one; every yielding module keeps its own copy).
- */
-const yieldToMain = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 async function sampleDocPages(m: SampleLineage, issueDate: string, previewRows: (string | number | null)[][]): Promise<string> {
   const pages: string[] = [];

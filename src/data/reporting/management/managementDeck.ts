@@ -19,6 +19,7 @@ import { buildDeckViewer, formatMonthLabel } from "../shared/reportChrome";
 import { openReportWindow, writeOrCloseOnFailure } from "../htmlReport";
 import { sourceRevisionsFooterHtml } from "../sourceRevisions";
 import type { ExecutiveReportInput } from "../executiveReportTypes";
+import { yieldToMain } from "../../storage/yieldToMain";
 
 const BAND_LABELS: Record<DataSufficiencyBand, string> = {
   sufficient: "بيانات كافية",
@@ -40,14 +41,6 @@ function titleSlide(m: ReportModel, monthLabel: string): string {
   </div>
 </section>`;
 }
-
-/**
- * Yields a turn to the main thread (P3-7). Same convention as
- * `sampleReport.ts`/`distributionReport.ts`/`Population/processing/populationProcessor.ts`
- * — a bare `setTimeout(resolve, 0)`, not a shared import (there isn't one;
- * every yielding module keeps its own copy).
- */
-const yieldToMain = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 async function managementDeckSlides(m: ReportModel): Promise<string> {
   const slides: string[] = [];

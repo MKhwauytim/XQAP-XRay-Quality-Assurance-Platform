@@ -22,16 +22,9 @@ import {
 } from "./shared";
 import { dataTable } from "./pagination";
 import { employeeClose, portAccuracyClose } from "./narrative";
+import { yieldToMain } from "../../../storage/yieldToMain";
 
 const TABS = ["الجزء الرابع", "الجزء الأول", "الجزء الثاني", "الجزء الثالث", "الجزء الخامس"];
-
-/**
- * Yields a turn to the main thread (P3-7). Same convention as
- * `sampleReport.ts`/`distributionReport.ts`/`management/managementDeck.ts` —
- * a bare `setTimeout(resolve, 0)`, not a shared import (there isn't one;
- * every yielding module keeps its own copy).
- */
-const yieldToMain = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 const UNMAPPED_TITLE = "هوية المفتش غير مرتبطة (لم تتم مطابقة BI)";
 const UNMAPPED_DETAIL =

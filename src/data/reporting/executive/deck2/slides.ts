@@ -61,6 +61,7 @@ import {
 } from "./slideKit";
 import type { BriefingRankItem, BriefingTone, CellTone, NavSectionKey, PortPopRow, SlideBuilder } from "./slideKit";
 import { sectionThreeBuilders } from "./section3";
+import { yieldToMain } from "../../../storage/yieldToMain";
 
 // The slide kit is the single source of truth for these two, but they were
 // public from `slides.ts` before the kit existed — re-exported so any existing
@@ -3572,14 +3573,6 @@ export function closingSlide(
  *  any of it. Do not delete monthInNumbersSlide/summaryPortTable while this
  *  is false; they are dormant, not dead code. */
 const SHOW_MONTH_NUMBERS_SLIDE = false;
-
-/**
- * Yields a turn to the main thread (P3-7). Same convention as
- * `sampleReport.ts`/`distributionReport.ts`/`management/managementDeck.ts`/
- * `executive/document/index.ts` — a bare `setTimeout(resolve, 0)`, not a
- * shared import (there isn't one; every yielding module keeps its own copy).
- */
-const yieldToMain = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 export async function buildDeckV2Slides(
   model: ReportModel,

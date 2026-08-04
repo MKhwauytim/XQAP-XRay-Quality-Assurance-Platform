@@ -15,6 +15,7 @@ import * as XLSX from "xlsx";
 
 import type { DistributionCurrentData } from "../distribution/distributionTypes";
 import { openReportWindow, writeOrCloseOnFailure } from "./htmlReport";
+import { yieldToMain } from "../storage/yieldToMain";
 import { esc, fmtNum, fmtPct } from "./executive/primitives";
 import { page, pageHeader, kpi, kpiStrip, panel } from "./executive/document/shared";
 import { dataTable, paginateRows } from "./executive/document/pagination";
@@ -147,14 +148,6 @@ function rotate<T>(arr: T[], by: number): T[] {
 function pad(n: number): string {
   return String(n).padStart(2, "0");
 }
-
-/**
- * Yields a turn to the main thread (P3-7). Same convention as
- * `Population/processing/populationProcessor.ts` and the biData/riskData
- * workbook parsers — a bare `setTimeout(resolve, 0)`, not a shared import
- * (there isn't one; every yielding module keeps its own copy).
- */
-const yieldToMain = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 async function distributionDocPages(m: DistributionModel, issueDate: string, detailRows: (string | number | null)[][]): Promise<string> {
   const pages: string[] = [];

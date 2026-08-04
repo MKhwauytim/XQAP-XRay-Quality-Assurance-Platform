@@ -31,18 +31,11 @@ import {
   buildExclusions,
   buildPriorityActions,
 } from "./partRisk";
+import { yieldToMain } from "../../../storage/yieldToMain";
 
 function pad(n: number): string {
   return String(n).padStart(2, "0");
 }
-
-/**
- * Yields a turn to the main thread (P3-7). Same convention as
- * `sampleReport.ts`/`distributionReport.ts`/`management/managementDeck.ts` —
- * a bare `setTimeout(resolve, 0)`, not a shared import (there isn't one;
- * every yielding module keeps its own copy).
- */
-const yieldToMain = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 /**
  * Build every Document page in order, returning the joined HTML slides.
