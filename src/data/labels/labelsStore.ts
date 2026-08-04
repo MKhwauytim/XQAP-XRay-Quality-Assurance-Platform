@@ -11,6 +11,9 @@ export const DEFAULT_LABELS = {
   sidebar_nav_aria:          "تبويبات النظام",
   sidebar_nav_heading:       "إدارة النظام",
 
+  // Tab lazy-loading
+  app_tab_loading: "جارٍ التحميل…",
+
   // AdminToolbar (P3-6) — first-ever label wiring for this file
   toolbar_role_admin:         "الإدارة",
   toolbar_role_manager:       "المدير",
