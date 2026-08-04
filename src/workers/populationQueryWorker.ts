@@ -175,8 +175,16 @@ export function handleWorkerMessage(
     const unhandled: never = request;
     throw new Error(`Unknown population-query worker request: ${JSON.stringify(unhandled)}`);
   } catch (err) {
+    // A failed "load" must drop whatever was cached from a PRIOR successful load
+    // rather than leaving it in place: BrowseDataView's error surface only stays
+    // up until the next query succeeds, and without this a query against a
+    // failed month would silently succeed against the previous month's rows --
+    // clearing the error UI and, worse, latently risking one month's data
+    // rendering under a different month's header. A failed "query" leaves the
+    // cache untouched (it was already valid; the query itself failed).
+    const nextState = request.type === "load" ? { ...state, cachedRows: null } : state;
     return {
-      state,
+      state: nextState,
       response: {
         type: "error",
         requestId: request.requestId,

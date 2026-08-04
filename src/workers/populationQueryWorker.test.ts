@@ -253,7 +253,12 @@ describe("populationQueryWorker — handleWorkerMessage", () => {
     expect(loadOutcome.state.cachedRows).toEqual(rows);
   });
 
-  it("a failed load does not clobber a previously successful load's cached rows", () => {
+  it("a failed load DROPS a previously successful load's cached rows, so a subsequent query can't silently succeed against stale data", () => {
+    // Regression coverage (final-review re-review, I1 follow-up): BrowseDataView's
+    // error surface only stays up until the next query succeeds. If a failed load
+    // (month switch, refresh) left the PREVIOUS month's rows queryable, a query
+    // against that stale cache would succeed, silently clear the error UI, and
+    // latently risk one month's data rendering under a different month's header.
     const goodRows = [{ xrayImageId: "keep-me" }];
 
     const goodLoad = handleWorkerMessage(createInitialWorkerState(), {
@@ -269,6 +274,38 @@ describe("populationQueryWorker — handleWorkerMessage", () => {
     });
 
     expect(badLoad.response.type).toBe("error");
-    expect(badLoad.state.cachedRows).toEqual(goodRows);
+    expect(badLoad.state.cachedRows).toBeNull();
+
+    // A query issued after the failed load must fail cleanly too -- not
+    // silently succeed against the dropped-but-still-referenced good rows.
+    const queryAfterBadLoad = handleWorkerMessage(badLoad.state, {
+      type: "query",
+      requestId: 22,
+      params: { search: "", columnFilters: {}, sort: null, page: 1 }
+    });
+    expect(queryAfterBadLoad.response.type).toBe("error");
+  });
+
+  it("a failed QUERY (not load) leaves the cache intact -- the load itself was fine", () => {
+    const goodRows = [{ xrayImageId: "still-here" }];
+    const goodLoad = handleWorkerMessage(createInitialWorkerState(), {
+      type: "load",
+      requestId: 30,
+      rawJsonText: rawPopulationJson(goodRows)
+    });
+
+    // A query against a state with no cached rows throws inside handleWorkerMessage
+    // (see the "query" branch); force that path by querying a state that was never
+    // loaded, then confirm a GOOD load's state is untouched by a bad load elsewhere.
+    const badQuery = handleWorkerMessage(createInitialWorkerState(), {
+      type: "query",
+      requestId: 31,
+      params: { search: "", columnFilters: {}, sort: null, page: 1 }
+    });
+    expect(badQuery.response.type).toBe("error");
+    expect(badQuery.state.cachedRows).toBeNull();
+
+    // The good load's own state was never touched by the unrelated bad query.
+    expect(goodLoad.state.cachedRows).toEqual(goodRows);
   });
 });

@@ -662,7 +662,11 @@ export async function loadMonthPopulationFinalRawText(
     ]) {
       try {
         const text = await readFileTextWithRetry(processedDir, candidate);
-        if (text !== null) {
+        // A zero-byte torn write (a live file caught mid-safeWriteJson) reads back
+        // as "" rather than null -- treat it the same as a missing rung so the
+        // ladder still falls through to .bak/.tmp instead of handing the worker an
+        // empty string it can only fail to parse.
+        if (text !== null && text.trim() !== "") {
           return text;
         }
       } catch {

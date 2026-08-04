@@ -955,7 +955,7 @@ export default function BrowseDataView({
       // honest handler for a genuinely interrupted collection — a failed query
       // (worker "error" response) also resolves null and lands here.
       if (!complete) {
-        window.alert("تم إلغاء التصدير بسبب تغيير في البحث أو التصفية أثناء التصدير — حاول مرة أخرى.");
+        window.alert("تعذّر إكمال التصدير بسبب خطأ أثناء قراءة البيانات — حاول مرة أخرى.");
         return;
       }
 
