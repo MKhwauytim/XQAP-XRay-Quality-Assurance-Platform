@@ -225,4 +225,53 @@ describe("useMonthLoad — boot-progress reporting", () => {
     expect(result.current.entries.every((entry) => entry.status === "error")).toBe(true);
     expect(result.current.entries.every((entry) => entry.error === "disk read failed")).toBe(true);
   });
+
+  it("a superseded load never marks the checklist loaded on the newer load's behalf", async () => {
+    const workspaceA = makeDirectoryHandle("workspace-a");
+    const workspaceB = makeDirectoryHandle("workspace-b");
+    const releaseA: { current: (() => void) | null } = { current: null };
+    const releaseB: { current: (() => void) | null } = { current: null };
+    const gateA = new Promise<void>((resolve) => { releaseA.current = resolve; });
+    const gateB = new Promise<void>((resolve) => { releaseB.current = resolve; });
+
+    vi.mocked(loadMonthForEditing)
+      .mockImplementationOnce(async (dir) => {
+        loadCalls.list.push(dir);
+        await gateA;
+        return emptyMonthEditData;
+      })
+      .mockImplementationOnce(async (dir) => {
+        loadCalls.list.push(dir);
+        await gateB;
+        return emptyMonthEditData;
+      });
+
+    const { result } = renderHook(() => useBootProgress());
+    const { rerender } = renderMonthLoad(workspaceA);
+    await waitFor(() => expect(loadCalls.list).toHaveLength(1));
+
+    // Switching workspace supersedes A's still-in-flight load and starts B's,
+    // which re-registers the same keys (back to pending, then loading).
+    act(() => rerender({ directoryHandle: workspaceB }));
+    await waitFor(() => expect(loadCalls.list).toHaveLength(2));
+    await waitFor(() => expect(result.current.entries.every((entry) => entry.status === "loading")).toBe(true));
+
+    // A resolves late. Its data is correctly discarded by the token check --
+    // and its boot-progress keys must be discarded with it, or the checklist
+    // would tick off sources that B is still in the middle of reading.
+    await act(async () => {
+      releaseA.current?.();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(result.current.entries.every((entry) => entry.status === "loading")).toBe(true);
+    expect(result.current.allLoaded).toBe(false);
+
+    // The surviving (newer) load still reports normally once it finishes.
+    await act(async () => {
+      releaseB.current?.();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await waitFor(() => expect(result.current.allLoaded).toBe(true));
+  });
 });

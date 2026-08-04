@@ -98,6 +98,16 @@ export function useMonthLoad(params: {
   const { directoryHandle, globalMonth, registerMonthChangeGuard, computeScope, applyLoadedState, resetWizardState, onLoadError, isWizardBusyRef } = params;
 
   const [isLoadingMonthData, setIsLoadingMonthData] = useState(false);
+  // Mirrors `isLoadingMonthData` exactly, updated synchronously at each of that
+  // state's three call sites. The background-refresh subscriber below reads
+  // THIS, never the state: reading the state would have forced that effect to
+  // list `isLoadingMonthData` as a dependency purely to avoid a stale closure,
+  // which tore down and re-subscribed the listener on every load transition --
+  // and left a real (if sub-millisecond) window, between the state commit and
+  // the re-subscribe actually running, in which an external broadcast would
+  // still observe the OLD closured value. A ref has no such window and removes
+  // the churn that created it.
+  const loadInFlightRef = useRef(false);
 
   // Unsaved in-session work (parsed uploads not yet auto-saved) -- switching the
   // global month would discard it, so the provider asks for confirmation first.
@@ -121,6 +131,7 @@ export function useMonthLoad(params: {
     // its own `finally` will skip clearing this flag once it resolves — so a
     // clean new-month state must clear it here itself, or the wizard would be
     // stuck permanently "loading" (CRITICAL — I-2 follow-up regression).
+    loadInFlightRef.current = false;
     setIsLoadingMonthData(false);
     resetWizardState();
   }
@@ -140,7 +151,10 @@ export function useMonthLoad(params: {
     // data in place without any of that, mirroring XrayReferrals.tsx/
     // XrayInspectionResults.tsx's identical `{ silent: true }` handling.
     const silent = opts?.silent ?? false;
-    if (!silent) setIsLoadingMonthData(true);
+    if (!silent) {
+      loadInFlightRef.current = true;
+      setIsLoadingMonthData(true);
+    }
     let bootSources: BootSourceDescriptor[] = [];
     try {
       if (!silent) hasUnsavedSessionWorkRef.current = false;
@@ -155,8 +169,12 @@ export function useMonthLoad(params: {
         bootSources.forEach((source) => markBootSourceLoading(source.key));
       }
       const data = await loadMonthForEditing(directoryHandle, info.folderName, scope);
-      if (!silent) bootSources.forEach((source) => markBootSourceLoaded(source.key));
+      // Staleness check FIRST: a superseded load must not touch the shared
+      // boot-progress store at all. Marking its keys "loaded" would show the
+      // checklist ticking off sources the newer, still-pending load is about to
+      // re-read from scratch.
       if (token !== loadMonthTokenRef.current) return; // superseded by a newer month selection
+      if (!silent) bootSources.forEach((source) => markBootSourceLoaded(source.key));
       const loaded = buildLoadedMonthState(data);
       // A silent refresh must not snap the wizard back to whatever phase the
       // on-disk manifest currently records -- the user may already have
@@ -177,7 +195,10 @@ export function useMonthLoad(params: {
       bootSources.forEach((source) => markBootSourceError(source.key, message));
       throw error;
     } finally {
-      if (!silent && token === loadMonthTokenRef.current) setIsLoadingMonthData(false);
+      if (!silent && token === loadMonthTokenRef.current) {
+        loadInFlightRef.current = false;
+        setIsLoadingMonthData(false);
+      }
     }
   }
 
@@ -245,7 +266,15 @@ export function useMonthLoad(params: {
         // "win" the latest-wins race and make that load's own result get
         // silently discarded once it resolves. Skip; the next tick will
         // catch up once it's done.
-        if (isLoadingMonthData) return;
+        //
+        // Known, accepted tradeoff: that "next tick" only exists for the
+        // periodic 3-minute timer. A user's MANUAL refresh-button press that
+        // lands during an in-flight load is dropped outright, with no retry --
+        // they get the in-flight load's own (near-identical, moments-old)
+        // result and have to press again for anything newer. Deliberate: the
+        // alternative (queueing the tick) reintroduces the token race this
+        // guard exists to prevent, for a case that already resolves itself.
+        if (loadInFlightRef.current) return;
         // Unsaved in-session work (parsed uploads not yet auto-saved) has
         // already diverged from disk -- overwriting it here with no
         // confirmation would silently discard it.
@@ -267,8 +296,8 @@ export function useMonthLoad(params: {
           { silent: true }
         );
       }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- handleLoadExistingMonth is stable per render cycle (same rationale as the effect above); isWizardBusyRef is a ref object, deliberately excluded so its .current is always read fresh rather than closed over
-    [directoryHandle, globalMonth, isLoadingMonthData]
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- handleLoadExistingMonth is stable per render cycle (same rationale as the effect above); isWizardBusyRef/loadInFlightRef are ref objects, deliberately excluded so their .current is always read fresh rather than closed over
+    [directoryHandle, globalMonth]
   );
 
   return { isLoadingMonthData, hasUnsavedSessionWorkRef };
