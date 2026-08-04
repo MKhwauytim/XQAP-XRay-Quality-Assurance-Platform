@@ -624,7 +624,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         if (!deadStillEligible || replacementTaken) {
           setReplacementError(STALE_MSG);
           setStatusMsg({ type: "error", text: STALE_MSG });
-          await loadData();
+          await loadData({ silent: true });
           return;
         }
 
@@ -645,7 +645,13 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         if (result.ok) setSampleMaster(result.updatedSample);
         setReplacementDialog(null);
         setStatusMsg({ type: "ok", text: "تم استبدال العينة وإسناد البديل." });
-        await loadData();
+        // Silent: this refresh follows a successful action already reflected in
+        // local state (setSampleMaster/setReplacementDialog above) — it must
+        // update the underlying rows in place, not flash the loading state or
+        // force-close the panel the way the periodic/manual refresh signal would
+        // if it weren't passed { silent: true } either (see loadData's own
+        // docblock further up).
+        await loadData({ silent: true });
         setSelEntryId(replacement.xrayImageId);
       } else {
         // Non-recommended — requires supervisor approval.
@@ -669,7 +675,11 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         }
         setReplacementDialog(null);
         setStatusMsg({ type: "ok", text: "تم إرسال طلب الاستبدال — بانتظار موافقة المشرف." });
-        await loadData();
+        // Silent for the same reason as the recommended-replacement branch above —
+        // this is a background refresh after an already-successful write, not a
+        // month/user change, so it must not flash the loading state or force-close
+        // the currently open inspection panel.
+        await loadData({ silent: true });
       }
     } finally {
       setReplacementBusy(false);
@@ -726,7 +736,11 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       setReferralModal(null);
       clearSelection();
       setStatusMsg({ type: "ok", text: `تم إرسال طلب الإحالة لـ ${toEmployee} — بانتظار موافقة المشرف.` });
-      await loadData();
+      // Silent — same reasoning as handleReplace's post-success reloads: this
+      // follows an already-successful write, not a month/user change, so it must
+      // refresh the queue in place instead of flashing the loading state or
+      // force-closing whatever inspection panel is currently open.
+      await loadData({ silent: true });
     } else {
       setStatusMsg({ type: "error", text: result.error });
     }
