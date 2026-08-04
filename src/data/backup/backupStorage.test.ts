@@ -239,6 +239,79 @@ function wrapDirWithFileDelay(
   return wrapped;
 }
 
+/** Seeds a backup folder directly under 5-system/backups/{folderName}/json/
+ *  with the given flat files (name -> value), bypassing createBackup so a
+ *  test can control the restore source's exact file layout without paying
+ *  for a real backup-creation walk first. */
+async function seedBackupJsonFiles(
+  root: DirectoryHandleLike,
+  folderName: string,
+  files: Record<string, unknown>
+): Promise<void> {
+  const systemDir = await getSystemRoot(root, true);
+  const backupsDir = await systemDir.getDirectoryHandle("backups", { create: true });
+  const backupDir = await backupsDir.getDirectoryHandle(folderName, { create: true });
+  const jsonDir = await backupDir.getDirectoryHandle("json", { create: true });
+  for (const [name, value] of Object.entries(files)) {
+    await safeWriteJson(jsonDir, name, value);
+  }
+}
+
+/**
+ * Wraps a real memory directory so any getFileHandle(name, { create: true })
+ * call for a file name present in `watch` appends that name to `log`, in call
+ * order -- lets a test prove one write happened strictly before another (e.g.
+ * a sentinel file written before any of the actual restored data files)
+ * without mocking this module's write helpers directly.
+ */
+function wrapDirLoggingFileWrites(
+  real: DirectoryHandleLike,
+  log: string[],
+  watch: Set<string>
+): DirectoryHandleLike {
+  const wrapped: DirectoryHandleLike = {
+    ...real,
+    getFileHandle: async (fileName: string, options?: { create?: boolean }) => {
+      if (options?.create && watch.has(fileName)) {
+        log.push(fileName);
+      }
+      return real.getFileHandle(fileName, options);
+    },
+    getDirectoryHandle: async (dirName: string, options?: { create?: boolean }) => {
+      const child = await real.getDirectoryHandle(dirName, options);
+      return wrapDirLoggingFileWrites(child, log, watch);
+    },
+  };
+  return wrapped;
+}
+
+/**
+ * Wraps a real memory directory so any getFileHandle(name, { create: true })
+ * call for `failingFileName` throws instead of delegating to the real handle
+ * -- lets a test simulate the restore walk failing partway through writing
+ * one specific file, to prove restore.inprogress.json survives an
+ * interrupted restore (the whole point of the sentinel).
+ */
+function wrapDirFailingFileWrite(
+  real: DirectoryHandleLike,
+  failingFileName: string
+): DirectoryHandleLike {
+  const wrapped: DirectoryHandleLike = {
+    ...real,
+    getFileHandle: async (fileName: string, options?: { create?: boolean }) => {
+      if (options?.create && fileName === failingFileName) {
+        throw new Error(`Simulated write failure for ${failingFileName}`);
+      }
+      return real.getFileHandle(fileName, options);
+    },
+    getDirectoryHandle: async (dirName: string, options?: { create?: boolean }) => {
+      const child = await real.getDirectoryHandle(dirName, options);
+      return wrapDirFailingFileWrite(child, failingFileName);
+    },
+  };
+  return wrapped;
+}
+
 describe("archive population path compatibility", () => {
   it("loads current numbered population folders and exports their rows", async () => {
     const root = makeRoot();
@@ -653,5 +726,137 @@ describe("createBackup — jsonFilesBackedUp order survives out-of-order complet
       ["a-file.json", "b-file.json", "c-file.json"].includes(f)
     );
     expect(relevant).toEqual(["a-file.json", "b-file.json", "c-file.json"]);
+  });
+});
+
+describe("restoreBackupSnapshot — restoredFiles order survives out-of-order completion (Task 4)", () => {
+  it("keeps restoredFiles in the walk's listing order even when an earlier file's restore finishes last", async () => {
+    const root = makeRoot();
+    await seedBackupJsonFiles(root, "seed-backup", {
+      "a-file.json": { value: "a" },
+      "b-file.json": { value: "b" },
+      "c-file.json": { value: "c" },
+    });
+
+    // Deliberately reversed relative to listing order: a-file's restore is the
+    // SLOWEST and c-file's the FASTEST, so under real concurrency c-file
+    // finishes first -- exactly the scenario a naive "push as each resolves"
+    // implementation would get wrong. Mirrors the Task 3 jsonFilesBackedUp
+    // order test above, but for the restore direction (restoreJsonTree used
+    // to be a strictly sequential live-async-iterator walk, which could never
+    // observe out-of-order completion in the first place).
+    const delayed = wrapDirWithFileDelay(root, {
+      "a-file.json": 30,
+      "b-file.json": 15,
+      "c-file.json": 2,
+    });
+
+    const result = await restoreBackupSnapshot({
+      directoryHandle: delayed,
+      months: [],
+      backupFolderName: "seed-backup",
+      username: "admin",
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const relevant = result.restoredFiles.filter((f) =>
+      ["a-file.json", "b-file.json", "c-file.json"].includes(f)
+    );
+    expect(relevant).toEqual(["a-file.json", "b-file.json", "c-file.json"]);
+  });
+});
+
+describe("restoreBackupSnapshot — restore.inprogress.json sentinel (Task 4)", () => {
+  it("writes restore.inprogress.json before any data file is restored, and removes it after a successful restore", async () => {
+    const root = makeRoot();
+    await seedBackupJsonFiles(root, "seed-backup", {
+      "a-file.json": { value: "a" },
+      "b-file.json": { value: "b" },
+      "c-file.json": { value: "c" },
+    });
+
+    const log: string[] = [];
+    const watch = new Set(["restore.inprogress.json", "a-file.json", "b-file.json", "c-file.json"]);
+    const logged = wrapDirLoggingFileWrites(root, log, watch);
+
+    const result = await restoreBackupSnapshot({
+      directoryHandle: logged,
+      months: [],
+      backupFolderName: "seed-backup",
+      username: "admin",
+    });
+
+    expect(result.ok).toBe(true);
+
+    // The sentinel's own write is fully awaited to completion before
+    // restoreJsonTree (and therefore any of its concurrent workers) even
+    // starts, so it must be the very first watched write logged.
+    expect(log[0]).toBe("restore.inprogress.json");
+    expect(log.slice(1).sort()).toEqual(["a-file.json", "b-file.json", "c-file.json"]);
+
+    // Removed after successful completion.
+    const systemDir = await getSystemRoot(root, false);
+    await expect(
+      systemDir.getFileHandle("restore.inprogress.json", { create: false })
+    ).rejects.toMatchObject({ name: "NotFoundError" });
+  });
+});
+
+describe("restoreBackupSnapshot — restore.inprogress.json survives an interrupted restore (Task 4)", () => {
+  it("leaves restore.inprogress.json behind when the restore walk throws partway through", async () => {
+    const root = makeRoot();
+    await seedBackupJsonFiles(root, "seed-backup", {
+      "a-file.json": { value: "a" },
+      "b-file.json": { value: "b" },
+      "c-file.json": { value: "c" },
+    });
+
+    // Simulates the restore walk being interrupted partway through -- b-file's
+    // write throws, so the whole restore fails, and restore.inprogress.json
+    // (written before the walk started) must be left behind: that's the
+    // detectability property the sentinel exists for.
+    const failing = wrapDirFailingFileWrite(root, "b-file.json");
+
+    const result = await restoreBackupSnapshot({
+      directoryHandle: failing,
+      months: [],
+      backupFolderName: "seed-backup",
+      username: "admin",
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatch(/b-file\.json/);
+
+    const systemDir = await getSystemRoot(root, false);
+    await expect(
+      systemDir.getFileHandle("restore.inprogress.json", { create: false })
+    ).resolves.toBeDefined();
+  });
+});
+
+describe("createBackup — backup.complete.json written last (Task 4)", () => {
+  it("writes backup.complete.json only after backup.manifest.json has already been written", async () => {
+    const root = makeRoot();
+
+    const log: string[] = [];
+    const watch = new Set(["backup.manifest.json", "backup.complete.json"]);
+    const logged = wrapDirLoggingFileWrites(root, log, watch);
+
+    const result = await createBackup(logged, [], "admin", "manual");
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(log).toEqual(["backup.manifest.json", "backup.complete.json"]);
+
+    const systemDir = await getSystemRoot(root, false);
+    const backupsDir = await systemDir.getDirectoryHandle("backups", { create: false });
+    const backupDir = await backupsDir.getDirectoryHandle(result.folderName, { create: false });
+    await expect(
+      backupDir.getFileHandle("backup.complete.json", { create: false })
+    ).resolves.toBeDefined();
   });
 });

@@ -29,6 +29,19 @@ const BACKUPS_FOLDER = SYSTEM_FOLDER_NAMES.backups;
 const LEGACY_SYSTEM_ROOT = ".system";
 const AUTO_STATE_FILE = "auto-backup-state.json";
 const AUTO_SETTINGS_FILE = "auto-backup-settings.json";
+// Sentinel (new — no "write-before, remove-after" precedent exists elsewhere
+// in this codebase yet): written directly under 5-system/ (not inside any one
+// backup folder) since it marks the WHOLE WORKSPACE as mid-restore, not a
+// single backup's own content. See restoreBackupSnapshot for the write/remove
+// sequencing and why this is what makes an interrupted restore detectable.
+const RESTORE_INPROGRESS_FILE = "restore.inprogress.json";
+// Sentinel (new): lives alongside backup.manifest.json inside a single backup
+// folder. backup.manifest.json is already, informally, written last today and
+// already treated by loadBackupHistory/pruneAutoBackups as "this backup
+// doesn't count if missing/unreadable" — this is an explicit, additional,
+// purpose-built signal alongside that existing informal one, not a
+// replacement for it.
+const BACKUP_COMPLETE_FILE = "backup.complete.json";
 const EXCEL_MAX_ROWS = 1_048_576;
 const XLSX_ROWS_PER_PART = 25_000;
 const XLSX_CELLS_PER_PART = 250_000;
@@ -467,34 +480,95 @@ async function copyAllJsonFiles(directoryHandle: DirectoryHandleLike, backupDir:
   return results.filter((path): path is string => path !== null);
 }
 
+type PendingJsonRestore = {
+  sourceDir: DirectoryHandleLike;
+  targetDir: DirectoryHandleLike;
+  fileName: string;
+  relativePath: string;
+};
+
+// Mirrors collectJsonFileEntries's two-phase shape above (see its comment):
+// a non-concurrent flattening pass that walks the WHOLE source tree into one
+// ordered list (creating the mirrored target directory structure as it goes),
+// so restoreJsonTree below never has to hold a live async iterator open across
+// a concurrent await. Each directory's listing is materialized via
+// collectEntries (inheriting its NotFoundError tolerance for a directory that
+// changes mid-enumeration), and — like the copy side — this deliberately
+// stays a single flat list rather than one mapWithConcurrency pool per
+// directory level, so nested recursion here can never multiply the caller's
+// concurrency budget.
+async function collectJsonRestoreEntries(params: {
+  sourceDir: DirectoryHandleLike;
+  targetDir: DirectoryHandleLike;
+  sourcePath: string;
+}): Promise<PendingJsonRestore[]> {
+  const pending: PendingJsonRestore[] = [];
+
+  for (const entry of await collectEntries(params.sourceDir)) {
+    if (entry.kind === "directory") {
+      const sourceChild = await tryGetDirectory(params.sourceDir, entry.name);
+      if (!sourceChild) continue;
+      const targetChild = await ensureDir(params.targetDir, entry.name);
+      const nested = await collectJsonRestoreEntries({
+        sourceDir: sourceChild,
+        targetDir: targetChild,
+        sourcePath: params.sourcePath ? `${params.sourcePath}/${entry.name}` : entry.name,
+      });
+      pending.push(...nested);
+      continue;
+    }
+
+    if (entry.kind !== "file" || !entry.name.endsWith(".json")) continue;
+    pending.push({
+      sourceDir: params.sourceDir,
+      targetDir: params.targetDir,
+      fileName: entry.name,
+      relativePath: params.sourcePath ? `${params.sourcePath}/${entry.name}` : entry.name,
+    });
+  }
+
+  return pending;
+}
+
+// Was previously a live `for await (const entry of iterable)` walk directly
+// over getDirectoryEntries(sourceDir), restoring each file inline as the walk
+// visited it (including recursing into subdirectories mid-loop). Holding a
+// live async iterator open across concurrent awaits is unsafe, so this now
+// materializes the whole tree first via collectJsonRestoreEntries (no
+// concurrency, see its comment), THEN fans the flat, ordered list out with a
+// SINGLE top-level mapWithConcurrency call.
+//
+// Budget 4: each write takes a Web Lock via safeWriteJsonText, keyed per
+// `${targetDir.name}/${fileName}` — restoring distinct filenames into
+// distinct directories means these locks essentially never contend with each
+// other. The budget caps concurrent Web Lock acquisitions/handles, it is not
+// there to prevent lock contention.
 async function restoreJsonTree(params: {
   sourceDir: DirectoryHandleLike;
   targetDir: DirectoryHandleLike;
   sourcePath: string;
   restored: string[];
 }): Promise<void> {
-  const iterable = getDirectoryEntries(params.sourceDir);
-  if (!iterable) return;
+  const pending = await collectJsonRestoreEntries({
+    sourceDir: params.sourceDir,
+    targetDir: params.targetDir,
+    sourcePath: params.sourcePath,
+  });
 
-  for await (const entry of iterable) {
-    if (entry.kind === "directory") {
-      const sourceChild = await params.sourceDir.getDirectoryHandle(entry.name, { create: false });
-      const targetChild = await ensureDir(params.targetDir, entry.name);
-      await restoreJsonTree({
-        sourceDir: sourceChild,
-        targetDir: targetChild,
-        sourcePath: params.sourcePath ? `${params.sourcePath}/${entry.name}` : entry.name,
-        restored: params.restored,
-      });
-      continue;
-    }
+  // Index-addressed via mapWithConcurrency so params.restored keeps the walk's
+  // listing order — and therefore a deterministic restoredFiles list — even
+  // though the workers below finish their individual read+write round trips in
+  // whatever order the underlying I/O actually completes. A null result marks
+  // an entry that was listed but whose source text disappeared before it could
+  // be read (source changed mid-walk) and is filtered out below.
+  const results = await mapWithConcurrency(pending, 4, async (entry) => {
+    const text = await readTextFile(entry.sourceDir, entry.fileName);
+    if (text === null) return null;
+    await safeWriteJsonText(entry.targetDir, entry.fileName, text);
+    return entry.relativePath;
+  });
 
-    if (entry.kind !== "file" || !entry.name.endsWith(".json")) continue;
-    const text = await readTextFile(params.sourceDir, entry.name);
-    if (text === null) continue;
-    await safeWriteJsonText(params.targetDir, entry.name, text);
-    params.restored.push(params.sourcePath ? `${params.sourcePath}/${entry.name}` : entry.name);
-  }
+  params.restored.push(...results.filter((path): path is string => path !== null));
 }
 
 type LocatedJson<T> =
@@ -846,6 +920,19 @@ export async function createBackup(
       };
 
       await safeWriteJson(backupDir, "backup.manifest.json", manifest);
+
+      // Sentinel: written LAST among this backup folder's own content writes
+      // (after the json copy walk, the optional xlsx export, and the manifest
+      // itself), so its presence means backupDir was fully, successfully
+      // written. Deliberately precedes the automatic-mode bookkeeping below
+      // (AUTO_STATE_FILE, pruneAutoBackups) — those touch the PARENT backups
+      // directory and a best-effort "which backup ran last" pointer, not this
+      // backup folder's own content, so a failure there must not retroactively
+      // make an otherwise-complete backup look unfinished.
+      await safeWriteJson(backupDir, BACKUP_COMPLETE_FILE, {
+        completedAt: now.toISOString(),
+      });
+
       if (mode === "automatic") {
         const settings = await loadAutoBackupSettings(directoryHandle);
         // casLoop EXEMPTION (documented, not routed): AUTO_STATE_FILE is a
@@ -963,6 +1050,20 @@ export async function restoreBackupSnapshot(params: {
         return { ok: false, error: `تعذر إنشاء نسخة الرجوع قبل الاستعادة: ${rollback.error}` };
       }
 
+      // Sentinel (new, no prior precedent elsewhere in this codebase): written
+      // BEFORE the destructive restore walk starts, removed only once that
+      // walk has completed successfully. If restoreJsonTree throws partway
+      // through, this file is deliberately left behind — do NOT wrap the
+      // removal in a `finally`. Its continued presence is what makes an
+      // interrupted restore detectable on a later check, since the walk
+      // itself has no other way to report "I stopped halfway" once its
+      // rejection has already unwound past this function.
+      const systemDir = await getSystemRoot(params.directoryHandle, true);
+      await safeWriteJson(systemDir, RESTORE_INPROGRESS_FILE, {
+        startedAt: new Date().toISOString(),
+        startedBy: params.username,
+      });
+
       const restored: string[] = [];
       await restoreJsonTree({
         sourceDir: jsonDir,
@@ -970,6 +1071,8 @@ export async function restoreBackupSnapshot(params: {
         sourcePath: "",
         restored,
       });
+
+      await systemDir.removeEntry?.(RESTORE_INPROGRESS_FILE);
 
       return { ok: true, restoredFiles: restored, rollbackFolderName: rollback.folderName };
     });
