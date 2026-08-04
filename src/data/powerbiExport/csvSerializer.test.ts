@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { toCsvString } from "./csvSerializer";
+import { toCsvString, toCsvChunks } from "./csvSerializer";
 
 describe("toCsvString", () => {
   it("produces UTF-8 BOM header + comma-separated header row", () => {
@@ -77,5 +77,13 @@ describe("toCsvString", () => {
     const result = toCsvString(["v"], [{ v: "ميناء" }]);
     expect(result).toContain("ميناء");
     expect(result).not.toContain("'ميناء");
+  });
+
+  it("toCsvChunks yields the same content as toCsvString, split into pieces", () => {
+    const headers = ["a", "b"];
+    const rows = [{ a: "1", b: "2" }, { a: "3", b: "4" }];
+    const chunks = [...toCsvChunks(headers, rows)];
+    expect(chunks.join("")).toBe(toCsvString(headers, rows));
+    expect(chunks.length).toBeGreaterThan(0);
   });
 });

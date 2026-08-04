@@ -1,8 +1,33 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { withWorkspaceWriteAccess } from "../storage/workspaceWriteAccess";
+import { yieldToMain } from "../storage/yieldToMain";
 import { getSystemRoot, SYSTEM_FOLDER_NAMES } from "../workspace/workspacePaths";
-import { toCsvString } from "./csvSerializer";
+import { toCsvChunks } from "./csvSerializer";
 import type { ExportManifest, ExportFileResult } from "./exportTypes";
+
+// CSV rows are accumulated from `toCsvChunks` (one chunk per row, plus the
+// header) into a single buffer before the actual file write, yielding the
+// main thread every N chunks so a large export doesn't freeze the UI while
+// the string is being built — same idiom as EXPORT_CHUNK_SIZE in
+// sampleReport.ts/distributionReport.ts.
+const CSV_CHUNK_YIELD_INTERVAL = 500;
+
+async function buildCsvContent(
+  headers: string[],
+  rows: Record<string, unknown>[]
+): Promise<string> {
+  let content = "";
+  let sinceYield = 0;
+  for (const chunk of toCsvChunks(headers, rows)) {
+    content += chunk;
+    sinceYield += 1;
+    if (sinceYield >= CSV_CHUNK_YIELD_INTERVAL) {
+      await yieldToMain();
+      sinceYield = 0;
+    }
+  }
+  return content;
+}
 
 async function getExportDir(root: DirectoryHandleLike, month: string): Promise<DirectoryHandleLike> {
   const sys = await getSystemRoot(root, true);
@@ -28,7 +53,7 @@ export async function writeCsvExport(
     const files: ExportFileResult[] = [];
 
     for (const exp of exports) {
-      const csv = toCsvString(exp.headers, exp.rows);
+      const csv = await buildCsvContent(exp.headers, exp.rows);
       await writeTextFile(dir, exp.fileName, csv);
       files.push({ fileName: exp.fileName, rowCount: exp.rows.length });
     }

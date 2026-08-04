@@ -20,14 +20,23 @@ function escapeCell(value: unknown): string {
   return str;
 }
 
+// Yields CSV pieces (BOM+header first, then one "\n"-prefixed row per row) so
+// a large export can be streamed without ever building the whole string in
+// memory at once. `toCsvString` (below) is the synchronous convenience
+// wrapper kept for existing callers/tests — it just joins every chunk.
+export function* toCsvChunks(
+  headers: string[],
+  rows: Record<string, unknown>[]
+): Generator<string> {
+  yield "﻿" + headers.join(",");
+  for (const row of rows) {
+    yield "\n" + headers.map((h) => escapeCell(row[h])).join(",");
+  }
+}
+
 export function toCsvString(
   headers: string[],
   rows: Record<string, unknown>[]
 ): string {
-  const lines: string[] = [];
-  lines.push(headers.join(","));
-  for (const row of rows) {
-    lines.push(headers.map((h) => escapeCell(row[h])).join(","));
-  }
-  return "﻿" + lines.join("\n");
+  return [...toCsvChunks(headers, rows)].join("");
 }
