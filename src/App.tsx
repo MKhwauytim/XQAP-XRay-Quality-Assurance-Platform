@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, X, LayoutGrid, Menu } from "lucide-react";
 
-import { EmptyState } from "./components/StateViews/StateViews";
+import { EmptyState, LoadingState } from "./components/StateViews/StateViews";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
 import AuthGate from "./auth/AuthGate";
@@ -36,7 +36,7 @@ type AppContentProps = {
   session: AuthSession;
 };
 
-function AppContent({ session }: AppContentProps) {
+export function AppContent({ session }: AppContentProps) {
   const { directoryHandle, status: workspaceStatus } = useWorkspace();
   const labels = useLabels();
   const [selectedTabId, setSelectedTabId] = useState("");
@@ -287,9 +287,15 @@ function AppContent({ session }: AppContentProps) {
             >
               {/* Per-tab boundary: a crash in one tab shows its own recovery UI
                   without unmounting the shell or the other mounted tabs. The root
-                  boundary in main.tsx remains as the last-resort catch-all. */}
+                  boundary in main.tsx remains as the last-resort catch-all.
+                  Suspense is created fresh per tab.id inside this .map(), so each
+                  mounted tab (mountedTabIds can hold up to 3 at once) gets its own
+                  independent boundary -- one tab's pending lazy chunk can never
+                  blank an already-loaded sibling tab that's also mounted-hidden. */}
               <ErrorBoundary>
-                <tab.TabComponent />
+                <Suspense fallback={<LoadingState label={labels.app_tab_loading} />}>
+                  <tab.TabComponent />
+                </Suspense>
               </ErrorBoundary>
             </div>
           ) : null

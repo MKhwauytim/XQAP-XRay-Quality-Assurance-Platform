@@ -1,6 +1,6 @@
 /* @vitest-environment jsdom */
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, waitFor, cleanup, act } from "@testing-library/react";
+import { render, waitFor, cleanup, act, screen } from "@testing-library/react";
 import UserManagementTab from "./index";
 import * as authSession from "../../../../auth/authSession";
 import * as usePermissionsModule from "../../../../auth/usePermissions";
@@ -44,6 +44,16 @@ function switchSection(subTabId: string) {
   });
 }
 
+// UserManagementTab's default export is now `lazy(() => import("./TabView"))`
+// (N2 tab-level code splitting) -- the first render always suspends (no
+// Suspense ancestor here, mirroring ReportDesigner/TemplateBuilder's own
+// isolated component tests), so its "pop-set-subtab" listener isn't attached
+// yet on the tick right after render(). Without this wait, switchSection()
+// below dispatches to no listener and the section-switch never happens.
+async function waitForMount() {
+  await screen.findByRole("heading", { level: 1, name: "إدارة المستخدمين والصلاحيات" });
+}
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -59,6 +69,7 @@ describe("UserManagementTab — activity/actions section-switch skip-guard", () 
       .mockResolvedValue([]);
 
     render(<UserManagementTab />);
+    await waitForMount();
     switchSection("activity");
     await waitFor(() => expect(readSpy).toHaveBeenCalledTimes(1));
 
@@ -81,6 +92,7 @@ describe("UserManagementTab — activity/actions section-switch skip-guard", () 
       .mockResolvedValue([]);
 
     render(<UserManagementTab />);
+    await waitForMount();
     switchSection("actions");
     await waitFor(() => expect(readSpy).toHaveBeenCalledTimes(1));
 
@@ -103,6 +115,7 @@ describe("UserManagementTab — activity/actions section-switch skip-guard", () 
       .mockResolvedValue([]);
 
     const { rerender } = render(<UserManagementTab />);
+    await waitForMount();
     switchSection("actions");
     await waitFor(() => expect(readSpy).toHaveBeenCalledTimes(1));
 
