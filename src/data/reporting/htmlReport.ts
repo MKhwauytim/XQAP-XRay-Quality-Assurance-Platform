@@ -1,18 +1,5 @@
 // Shared utility for building self-contained Arabic RTL HTML reports
 
-import { esc } from "./executive/primitives";
-
-/**
- * Backwards-compatible alias for the single hardened escaping primitive
- * (`esc`, audit C-08). Previously this had its own weaker implementation that
- * did not encode `'`; it now delegates so every report builder escapes at the
- * same strictness. `str` is typed `string` for callers, but `esc` also tolerates
- * null/undefined.
- */
-export function escHtml(str: string): string {
-  return esc(str);
-}
-
 /**
  * Opens `html` in a new tab via `document.write`, falling back to a file
  * download if the popup is blocked. Deliberately does NOT use
