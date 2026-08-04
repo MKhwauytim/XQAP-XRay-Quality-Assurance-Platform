@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ReportDesignerTab from "../ReportDesigner";
 import { AlertTriangle, BarChart2, BarChart3, Building2, Check, ClipboardList, Database, Download, FileStack, FileText, Filter, FolderOpen, Globe, History, Presentation, Settings2, User, Users, X } from "lucide-react";
 
@@ -22,6 +22,7 @@ import { getManagedLoginUsers } from "../../../../auth/userManagement";
 import { tabAllowedRoles } from "../../../../auth/tabCatalog";
 import { usePermissions } from "../../../../auth/usePermissions";
 import { TabGuard } from "../../../PermissionGuard";
+import { LoadingState } from "../../../StateViews/StateViews";
 import { loadSampleMaster, loadSampleMasterRevision } from "../../../../data/sampling/sampleStorage";
 import { loadAllEmployeeFiles } from "../../../../data/answers/answerStorage";
 import { loadTemplate } from "../../../../data/templates/templateStorage";
@@ -1238,6 +1239,7 @@ function ReportsContent() {
 
 // Wrapper that handles sub-tab routing for "مصمم التقارير" sub-tab.
 export default function ReportsTab() {
+  const labels = useLabels();
   const [activeSubTab, setActiveSubTab] = useState("reports");
   // Once Report Designer has been opened, keep it mounted (hidden, not
   // unmounted) so switching back to it doesn't lose in-progress canvas
@@ -1269,10 +1271,12 @@ export default function ReportsTab() {
   const reportDesignerElement = useMemo(
     () => (
       <TabGuard tabId="reports/report-designer">
-        <ReportDesignerTab />
+        <Suspense fallback={<LoadingState label={labels.app_tab_loading} />}>
+          <ReportDesignerTab />
+        </Suspense>
       </TabGuard>
     ),
-    []
+    [labels]
   );
 
   return (
