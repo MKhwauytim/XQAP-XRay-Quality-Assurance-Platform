@@ -634,6 +634,18 @@ export async function loadMonthPopulationFinal(
  *
  * Returns null when the file doesn't exist yet (e.g. an unprocessed/pending month),
  * matching `loadMonthPopulationFinal`'s null-on-missing contract.
+ *
+ * Recovery ladder (I1): skipping `safeReadJson` also skipped its `.bak` -> `.tmp`
+ * fallback, so a lost/unreadable live file degraded straight to "no data" even with
+ * a perfectly good snapshot sitting next to it. The ladder below restores the SPIRIT
+ * of that recovery at raw-text level: live -> `.bak` -> `.tmp`, same order
+ * `safeReadJson` uses. DELIBERATE, DOCUMENTED GAP: `safeReadJson` also falls back
+ * when the live file is present but *unparseable*, and validates the envelope's
+ * contentHash — both require a `JSON.parse` of the whole file on the main thread,
+ * which is the exact cost this accessor exists to avoid. So a present-but-corrupt
+ * live file is still handed to the worker as-is; the worker's parse fails, it
+ * answers with an "error" response, and `BrowseDataView` surfaces that to the user
+ * (rather than spinning forever, which is what it used to do).
  */
 export async function loadMonthPopulationFinalRawText(
   directoryHandle: DirectoryHandleLike,
@@ -642,7 +654,26 @@ export async function loadMonthPopulationFinalRawText(
   try {
     const monthDir = await getMonthDir(directoryHandle, monthFolderName);
     const processedDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false });
-    return await readFileTextWithRetry(processedDir, "population.final.json");
+
+    for (const candidate of [
+      "population.final.json",
+      "population.final.json.bak",
+      "population.final.json.tmp"
+    ]) {
+      try {
+        const text = await readFileTextWithRetry(processedDir, candidate);
+        if (text !== null) {
+          return text;
+        }
+      } catch {
+        // A read that fails outright (permissions, exhausted NotReadableError
+        // retries) is treated the same as a missing file HERE, and only here:
+        // the next rung of the ladder may still hold a usable copy. If every
+        // rung fails the caller still gets null, exactly as before.
+      }
+    }
+
+    return null;
   } catch {
     return null;
   }

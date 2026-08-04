@@ -199,6 +199,126 @@ describe("usePopulationBrowseWorker", () => {
     expect(result.current.isQuerying).toBe(false);
   });
 
+  // C2 regression (unit level): BrowseDataView posts "load" and then, in the very
+  // same tick, "query" — no real worker can answer the load before that happens.
+  // Gating the "loaded" response on a counter shared with queries therefore threw
+  // the load's own reply away, leaving isLoaded/totalRows unset forever and Browse
+  // showing its "no data" empty state over a perfectly good month.
+  it("applies a 'loaded' response even when a query was already posted after the load", async () => {
+    const { result } = renderHook(() => usePopulationBrowseWorker());
+    const instance = workerInstances[0];
+
+    act(() => {
+      result.current.loadRawJson("RAW_JSON");
+      result.current.runQuery(baseParams());
+    });
+
+    expect(instance.posted.map((request) => request.requestId)).toEqual([1, 2]);
+
+    // The load's reply (requestId 1) arrives after query 2 was already posted.
+    act(() => {
+      respond(instance, { type: "loaded", requestId: 1, totalRows: 42 });
+    });
+
+    expect(result.current.isLoaded).toBe(true);
+    expect(result.current.totalRows).toBe(42);
+  });
+
+  // C1 regression (unit level): two callers asking two different, simultaneously
+  // valid questions of the same worker must not invalidate each other's answers.
+  it("queries on different lanes never supersede each other", async () => {
+    const { result } = renderHook(() => usePopulationBrowseWorker());
+    const instance = workerInstances[0];
+
+    // Both posted in the same commit, "table" first — exactly what happens when a
+    // filter toggle re-runs BrowseDataView's main query effect AND its filter
+    // dropdown preview effect.
+    let tableQuery!: Promise<PopulationQueryResult<Record<string, unknown>> | null>;
+    let previewQuery!: Promise<PopulationQueryResult<Record<string, unknown>> | null>;
+    act(() => {
+      tableQuery = result.current.runQuery(baseParams(), "table");
+      previewQuery = result.current.runQuery(baseParams({ page: 2 }), "preview");
+    });
+
+    const tableResult = fakeResult(7);
+    const previewResult = fakeResult(9);
+    act(() => {
+      respond(instance, { type: "result", requestId: 1, result: tableResult });
+      respond(instance, { type: "result", requestId: 2, result: previewResult });
+    });
+
+    // The table's reply came back while a LATER request (the preview's) existed —
+    // it must still be delivered in full, not nulled out as "superseded".
+    await expect(tableQuery).resolves.toEqual(tableResult);
+    await expect(previewQuery).resolves.toEqual(previewResult);
+  });
+
+  it("still supersedes within a single lane, so fast typing only applies the last keystroke's result", async () => {
+    const { result } = renderHook(() => usePopulationBrowseWorker());
+    const instance = workerInstances[0];
+
+    let first!: Promise<PopulationQueryResult<Record<string, unknown>> | null>;
+    let second!: Promise<PopulationQueryResult<Record<string, unknown>> | null>;
+    act(() => {
+      first = result.current.runQuery(baseParams({ search: "a" }), "table");
+      second = result.current.runQuery(baseParams({ search: "ab" }), "table");
+    });
+
+    act(() => {
+      respond(instance, { type: "result", requestId: 1, result: fakeResult(1) });
+    });
+    await expect(first).resolves.toBeNull();
+
+    const latest = fakeResult(2);
+    act(() => {
+      respond(instance, { type: "result", requestId: 2, result: latest });
+    });
+    await expect(second).resolves.toEqual(latest);
+  });
+
+  it("surfaces a load failure (no pending query resolver) through `error`", async () => {
+    const { result } = renderHook(() => usePopulationBrowseWorker());
+    const instance = workerInstances[0];
+
+    act(() => {
+      result.current.loadRawJson("NOT_JSON");
+      result.current.runQuery(baseParams());
+    });
+
+    act(() => {
+      respond(instance, { type: "error", requestId: 1, error: "تعذّر تحليل الملف" });
+    });
+
+    // Without this, a corrupt population.final.json left BrowseDataView spinning
+    // forever with nothing to show the user.
+    expect(result.current.error).toBe("تعذّر تحليل الملف");
+  });
+
+  it("a fresh loadRawJson clears the previous dataset's stats and any previous error", async () => {
+    const { result } = renderHook(() => usePopulationBrowseWorker());
+    const instance = workerInstances[0];
+
+    act(() => {
+      result.current.loadRawJson("RAW_JSON");
+    });
+    act(() => {
+      respond(instance, { type: "loaded", requestId: 1, totalRows: 5 });
+    });
+    act(() => {
+      respond(instance, { type: "error", requestId: 1, error: "boom" });
+    });
+    expect(result.current.totalRows).toBe(5);
+    expect(result.current.error).toBe("boom");
+
+    act(() => {
+      result.current.loadRawJson("RAW_JSON_2");
+    });
+
+    expect(result.current.isLoaded).toBe(false);
+    expect(result.current.totalRows).toBeNull();
+    expect(result.current.error).toBeNull();
+  });
+
   it("an error response sets `error` without crashing, and resolves the pending query promise with null", async () => {
     const { result } = renderHook(() => usePopulationBrowseWorker());
     const instance = workerInstances[0];

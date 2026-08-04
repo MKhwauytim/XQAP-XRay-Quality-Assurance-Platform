@@ -4,7 +4,7 @@ import { createMemoryDirectory, getReadLog, clearReadLog } from "../storage/memo
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { WorkspacePermissionError } from "../storage/workspaceWriteAccess";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
-import { saveMonthRun, loadAllPopulationRows, loadAllSampleRows, loadAllRawRows, loadBrowseRows, updateMonthStatus, loadMonthForEditing } from "./populationStorage";
+import { saveMonthRun, loadAllPopulationRows, loadAllSampleRows, loadAllRawRows, loadBrowseRows, updateMonthStatus, loadMonthForEditing, loadMonthPopulationFinalRawText } from "./populationStorage";
 import { loadReplacementBucket, loadReplacementIndexManifest } from "./replacementIndexStorage";
 import { saveSampleMaster } from "../sampling/sampleStorage";
 import { appendDistributionEvent } from "../distribution/distributionStorage";
@@ -695,4 +695,50 @@ test("saveMonthRun writes all expected files and the manifest reflects the final
   const indexManifest = await loadReplacementIndexManifest(dir, "5-may-2026");
   expect(indexManifest).not.toBeNull();
   expect(indexManifest?.totalIndexedRows).toBe(1);
+});
+
+// I1: loadMonthPopulationFinalRawText deliberately bypasses safeReadJson (it exists
+// precisely to avoid safeReadJson's main-thread JSON.parse of a 200k-400k row file),
+// which also bypassed safeReadJson's live -> .bak -> .tmp recovery ladder. These
+// characterize the raw-text-level ladder that restores it.
+async function processedDirOf(dir: DirectoryHandleLike): Promise<DirectoryHandleLike> {
+  const monthDir = await getPopulationMonthDir(dir, "5-may-2026", false);
+  return monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false });
+}
+
+test("loadMonthPopulationFinalRawText returns the live population.final.json text", async () => {
+  const dir = createMemoryDirectory();
+  await saveMonthRun({ directoryHandle: dir, ...baseParams });
+
+  const rawText = await loadMonthPopulationFinalRawText(dir, "5-may-2026");
+  expect(rawText).not.toBeNull();
+  expect(JSON.parse(rawText as string)).toBeTruthy();
+});
+
+test("loadMonthPopulationFinalRawText falls back to the .bak snapshot when the live file is gone", async () => {
+  const dir = createMemoryDirectory();
+  await saveMonthRun({ directoryHandle: dir, ...baseParams });
+
+  const processedDir = await processedDirOf(dir);
+  // Seed a .bak the way a previous safe write would have left one, then lose the
+  // live file (the exact scenario safeReadJson's ladder exists for).
+  const liveText = (await loadMonthPopulationFinalRawText(dir, "5-may-2026")) as string;
+  const bakHandle = await processedDir.getFileHandle("population.final.json.bak", { create: true });
+  const writable = await bakHandle.createWritable!();
+  await writable.write(liveText);
+  await writable.close();
+  await processedDir.removeEntry?.("population.final.json");
+
+  const recovered = await loadMonthPopulationFinalRawText(dir, "5-may-2026");
+  expect(recovered).toBe(liveText);
+});
+
+test("loadMonthPopulationFinalRawText still returns null when neither the live file nor any snapshot exists", async () => {
+  const dir = createMemoryDirectory();
+  await saveMonthRun({ directoryHandle: dir, ...baseParams });
+
+  const processedDir = await processedDirOf(dir);
+  await processedDir.removeEntry?.("population.final.json");
+
+  expect(await loadMonthPopulationFinalRawText(dir, "5-may-2026")).toBeNull();
 });

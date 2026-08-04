@@ -25,7 +25,7 @@ import {
 import { useGlobalMonth } from "../../../../data/month/useGlobalMonth";
 import { useLabels } from "../../../../data/labels/useLabels";
 import { PageHeader } from "../../../../components/PageHeader/PageHeader";
-import { EmptyState, LoadingState } from "../../../../components/StateViews/StateViews";
+import { EmptyState, ErrorState, LoadingState } from "../../../../components/StateViews/StateViews";
 import Pagination from "../../../../components/Pagination/Pagination";
 import { DATA_PAGE_SIZE } from "../../../../components/Pagination/paginationUtils";
 import { formatStageLabel } from "./components/helpers";
@@ -36,7 +36,27 @@ import {
   type PopulationQuerySort,
   type PopulationQueryResult
 } from "../../../../data/population/populationQuery";
-import { usePopulationBrowseWorker } from "./usePopulationBrowseWorker";
+import {
+  usePopulationBrowseWorker,
+  type PopulationQueryLane
+} from "./usePopulationBrowseWorker";
+
+// ── Query lanes ───────────────────────────────────────────────────────────────
+// This view asks the ONE query worker three simultaneously-valid questions, each
+// with its own independent "latest request wins" lifetime. They must not share a
+// staleness lane: they can (and routinely do) fire in the same React commit —
+// toggling a filter checkbox changes `columnFilters`, a dependency of both the
+// main query effect and the filter-preview effect — and a shared "latest wins"
+// slot then lets whichever posted last silently invalidate the other's answer.
+// That is exactly the bug that made filtering appear to do nothing: the preview's
+// later request made the main table's own result look stale, so it was dropped.
+// See usePopulationBrowseWorker's doc comment for the full model.
+const MAIN_QUERY_LANE: PopulationQueryLane = "browse-main";
+const FILTER_PREVIEW_QUERY_LANE: PopulationQueryLane = "browse-filter-preview";
+// Export walks every page of ITS OWN captured params; it must neither be
+// interrupted by, nor interrupt, the live table/dropdown the user keeps using
+// while the export runs.
+const EXPORT_QUERY_LANE: PopulationQueryLane = "browse-export";
 
 // ── Browse sub-tab ────────────────────────────────────────────────────────────
 const BROWSE_COLUMNS: { key: string; label: string; default: boolean }[] = [
@@ -637,7 +657,7 @@ export default function BrowseDataView({
 
     async function run(): Promise<void> {
       const result = useWorkerPath
-        ? await worker.runQuery(params)
+        ? await worker.runQuery(params, MAIN_QUERY_LANE)
         : runPopulationQuery(
             filterRowsByMonth(rows, showAllMonths, globalFolder),
             params,
@@ -695,6 +715,17 @@ export default function BrowseDataView({
   );
   const total = useWorkerPath ? worker.totalRows ?? 0 : monthFilteredRows.length;
 
+  // ── Load/query failure surface (worker path only) ──
+  // The worker answers a request it can't fulfil (unparseable population.final.json,
+  // a query issued before any successful load) with an "error" response. Before this
+  // was read here, that response went nowhere: `loading` is only ever cleared by a
+  // successful query result, so a corrupt file left Browse spinning forever with no
+  // indication of what happened. Derived, not stored in state — no extra effect, and
+  // it clears itself the moment a fresh `loadRawJson` or a successful query lands
+  // (see usePopulationBrowseWorker). The fallback path has its own catch → empty
+  // rows, so it never has a worker error to show.
+  const browseError = useWorkerPath ? worker.error : null;
+
   const browseColumns = useMemo(
     () => buildBrowseColumns(queryResult.pageRows),
     [queryResult.pageRows]
@@ -749,8 +780,8 @@ export default function BrowseDataView({
     do {
       const result = await queryOne({ ...params, page: pageNum });
       if (!result) {
-        // Superseded (worker "latest wins" staleness guard) — stop; caller decides
-        // how to treat a partial/interrupted collection.
+        // Superseded within this caller's own query lane, or the query failed —
+        // stop; caller decides how to treat a partial/interrupted collection.
         return { rows: collected, complete: false };
       }
       collected.push(...(result.pageRows as BrowseRow[]));
@@ -776,7 +807,7 @@ export default function BrowseDataView({
     void collectMatchingRows(
       { search: debouncedSearch, columnFilters: filtersExceptOpenColumn, sort: null },
       FILTER_PREVIEW_MAX_PAGES,
-      (queryParams) => worker.runQuery(queryParams)
+      (queryParams) => worker.runQuery(queryParams, FILTER_PREVIEW_QUERY_LANE)
     ).then(({ rows: sampleRows }) => {
       if (cancelled) return;
       const preview = buildBrowseFilterOptionPreview(
@@ -909,7 +940,7 @@ export default function BrowseDataView({
         Number.POSITIVE_INFINITY,
         (queryParams) =>
           useWorkerPath
-            ? worker.runQuery(queryParams)
+            ? worker.runQuery(queryParams, EXPORT_QUERY_LANE)
             : runPopulationQuery(
                 filterRowsByMonth(rows, showAllMonths, globalFolder),
                 queryParams,
@@ -917,6 +948,12 @@ export default function BrowseDataView({
               )
       );
 
+      // Export runs on its own query lane, so a filter/search change mid-export no
+      // longer supersedes it (it completes against the params captured at click
+      // time — what the user actually asked to export, and it no longer breaks the
+      // live table by superseding ITS queries either). This guard stays as the
+      // honest handler for a genuinely interrupted collection — a failed query
+      // (worker "error" response) also resolves null and lands here.
       if (!complete) {
         window.alert("تم إلغاء التصدير بسبب تغيير في البحث أو التصفية أثناء التصدير — حاول مرة أخرى.");
         return;
@@ -996,9 +1033,16 @@ export default function BrowseDataView({
         </div>
       </div>
 
-      {loading && <LoadingState label={showAllMonths ? "جاري تحميل بيانات جميع الأشهر..." : "جاري تحميل بيانات الشهر المحدد..."} />}
+      {browseError && (
+        <ErrorState
+          title="تعذّر تحميل بيانات هذا الشهر"
+          description={`تعذّرت قراءة ملف المجتمع النهائي أو الاستعلام عنه. ${browseError}`}
+        />
+      )}
 
-      {!loading && total === 0 && (
+      {!browseError && loading && <LoadingState label={showAllMonths ? "جاري تحميل بيانات جميع الأشهر..." : "جاري تحميل بيانات الشهر المحدد..."} />}
+
+      {!browseError && !loading && total === 0 && (
         <EmptyState
           icon={<Database />}
           title="لا توجد بيانات محفوظة لهذا المصدر بعد"
@@ -1006,7 +1050,7 @@ export default function BrowseDataView({
         />
       )}
 
-      {!loading && total > 0 && (
+      {!browseError && !loading && total > 0 && (
         <div className="bv-table-view">
           {/* Toolbar */}
           <div className="bv-table-toolbar">

@@ -32,28 +32,14 @@ const MONTH_FOLDER = "5-may-2026";
 // Worker (Phase B, large-population perf proposal). Vitest's node/jsdom
 // environment cannot run a real DedicatedWorker (same limitation documented in
 // Population.wizard.test.tsx / populationQueryWorker.test.ts), so the Vite
-// `?worker&inline` import is mocked with a stub that runs the SAME exported pure
-// `handleWorkerMessage` the real worker uses (src/workers/populationQueryWorker.ts)
-// on a microtask, rather than a no-op — a no-op stub would leave the component
-// permanently stuck awaiting a "loaded"/"result" response that never arrives.
+// `?worker&inline` import is mocked with the shared stub that runs the SAME
+// exported pure `handleWorkerMessage` the real worker uses, on a **macrotask**
+// and serially — see populationQueryWorkerTestStub.ts for why a microtask reply
+// (what this mock used to do) is impossible for a real worker and hid two
+// Critical staleness bugs.
 vi.mock("../../../../workers/populationQueryWorker?worker&inline", async () => {
-  const { createInitialWorkerState, handleWorkerMessage } = await import("../../../../workers/populationQueryWorker");
-  return {
-    default: class PopulationQueryWorkerStub {
-      onmessage: ((ev: MessageEvent) => void) | null = null;
-      private state = createInitialWorkerState();
-      postMessage(request: unknown): void {
-        Promise.resolve().then(() => {
-          const { state, response } = handleWorkerMessage(this.state, request as never);
-          this.state = state;
-          this.onmessage?.({ data: response } as MessageEvent);
-        });
-      }
-      terminate(): void {}
-      addEventListener(): void {}
-      removeEventListener(): void {}
-    },
-  };
+  const { createPopulationQueryWorkerStubClass } = await import("./populationQueryWorkerTestStub");
+  return { default: createPopulationQueryWorkerStubClass() };
 });
 
 vi.mock("../../../../data/month/useGlobalMonth", () => ({
