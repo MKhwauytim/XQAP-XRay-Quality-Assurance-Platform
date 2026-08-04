@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, X, LayoutGrid, Menu } from "lucide-react";
 
 import { EmptyState, LoadingState } from "./components/StateViews/StateViews";
@@ -54,24 +54,28 @@ export function AppContent({ session }: AppContentProps) {
 
   // Post-login "data source checklist" (bootProgress.ts) is cleared once per
   // boot session -- a fresh login or a workspace switch -- reusing the same
-  // session+workspace identity key as the auto-backup attempt above. This
-  // must run synchronously during render, NOT inside a useEffect: the landing
-  // tab (Population's useMonthLoad, Employee's XrayReferrals) registers its
-  // own boot sources from ITS OWN mount effect, and React fires child effects
-  // before parent effects within the same commit -- a useEffect here would
-  // run AFTER that registration and wipe the sources right after they're set.
-  // Guarding with state (compare-then-reset, evaluated during render) is
-  // React's documented pattern for reacting to an identity change without an
-  // extra effect round-trip ("Adjusting some state when a prop changes"):
-  // the setState call below immediately re-renders this component before any
-  // descendant renders, let alone mounts, so the reset always wins the race
-  // against a child's registration. (A ref is deliberately NOT used here --
-  // this repo's lint config forbids reading/writing ref.current during render.)
-  const [bootProgressResetKey, setBootProgressResetKey] = useState<string | null>(null);
-  if (bootProgressResetKey !== autoBackupAttemptKey) {
-    setBootProgressResetKey(autoBackupAttemptKey);
+  // session+workspace identity key as the auto-backup attempt above.
+  //
+  // useLayoutEffect, NOT useEffect: the landing tab (Population's useMonthLoad,
+  // Employee's XrayReferrals) registers its own boot sources from ITS OWN
+  // mount effect, and React fires child effects before parent effects within
+  // the same commit -- a plain useEffect here would run AFTER that
+  // registration and wipe the sources right after they're set. Layout effects
+  // are a separate, earlier phase: ALL of them across the whole tree (still
+  // child-before-parent among themselves) run before ANY passive effect
+  // anywhere in the tree, so this reset still finishes before a descendant's
+  // useEffect-based registerBootSources call even though this component is the
+  // outermost parent.
+  //
+  // Doing it during render instead (the "adjusting state when a prop changes"
+  // pattern this used to use) was a genuine render-purity violation:
+  // resetBootProgress() -> notify() synchronously setStates a DIFFERENT,
+  // already-mounted component (BootSplashOverlay), which React rightly warns
+  // about and StrictMode's double-render reproduces on sight. An effect is
+  // also allowed to run twice, which render is not.
+  useLayoutEffect(() => {
     resetBootProgress();
-  }
+  }, [autoBackupAttemptKey]);
 
   useEffect(() => {
     return subscribeToUserManagementChanges(() => {

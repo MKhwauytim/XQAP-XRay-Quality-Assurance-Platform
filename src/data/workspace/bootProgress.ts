@@ -113,6 +113,13 @@ export function useBootProgress(): { entries: BootSourceEntry[]; allLoaded: bool
     // hook still has no subscriber, so without this re-read they are lost
     // outright: `entries` would stay [] forever, `[].every(...)` is
     // vacuously true, and the checklist would never show at all.
+    //
+    // This is the "subscribe for updates from an external system" case the
+    // set-state-in-effect rule explicitly allows for, just with the store's
+    // missed-update gap closed: exactly one extra render per mount, never a
+    // cascade (the deps array is empty, and the value read is the same
+    // snapshot the subscription itself would deliver).
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- external-store snapshot re-read, see above
     setEntries(getEntries());
     return subscribe(() => setEntries(getEntries()));
   }, []);
