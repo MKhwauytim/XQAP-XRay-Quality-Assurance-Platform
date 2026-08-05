@@ -17,6 +17,7 @@ import type { PreparedPopulationRow } from "../population/populationTypes";
 import type { SampleMasterData } from "../sampling/sampleTypes";
 import type { MonthManifestData } from "../population/monthTypes";
 import { openReportWindow, writeOrCloseOnFailure } from "./htmlReport";
+import { yieldToMain } from "../storage/yieldToMain";
 import { fmtNum, fmtPct } from "./executive/primitives";
 import {
   page,
@@ -186,14 +187,6 @@ export function computeSampleLineage(input: SampleReportInput): SampleLineage {
 // ─── Document (A4 portrait) ───────────────────────────────────────────────────
 
 const SAMPLE_RAILS = ["الاستلام", "المعالجة", "الطبقات", "العينة"];
-
-/**
- * Yields a turn to the main thread (P3-7). Same convention as
- * `Population/processing/populationProcessor.ts` and the biData/riskData
- * workbook parsers — a bare `setTimeout(resolve, 0)`, not a shared import
- * (there isn't one; every yielding module keeps its own copy).
- */
-const yieldToMain = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 async function sampleDocPages(m: SampleLineage, issueDate: string, previewRows: (string | number | null)[][]): Promise<string> {
   const pages: string[] = [];
@@ -461,7 +454,13 @@ export async function buildSampleDeck(input: SampleReportInput): Promise<string>
   });
 }
 
-export function buildSampleXlsx(input: SampleReportInput): void {
+// XLSX export — Sheet 2 (received) row-array construction is chunked with a
+// main-thread yield between chunks (same idiom as DataTable/index.tsx and
+// BrowseDataView.tsx) so a large population doesn't block the UI thread for
+// the whole build.
+const EXPORT_CHUNK_SIZE = 1000;
+
+export async function buildSampleXlsx(input: SampleReportInput): Promise<void> {
   const m = computeSampleLineage(input);
   const { populationRows, sample } = input;
   const sampledIds = new Set(sample.rows.map((r) => r.xrayImageId));
@@ -495,13 +494,21 @@ export function buildSampleXlsx(input: SampleReportInput): void {
   ];
 
   // Sheet 2 — Received (full population as ingested markers).
+  const receivedRows: (string | number)[][] = [];
+  for (let i = 0; i < populationRows.length; i += EXPORT_CHUNK_SIZE) {
+    const chunk = populationRows.slice(i, i + EXPORT_CHUNK_SIZE);
+    for (const r of chunk) {
+      receivedRows.push([
+        r.xrayImageId, r.portName ?? "", r.stage ?? "", r.certScanStatus, r.biEnrichmentStatus,
+        r.xrayLevelOneResult, r.xrayLevelTwoResult, sampledIds.has(r.xrayImageId) ? "نعم" : "لا",
+        r.xrayEntryDate ?? "", r.declarationNumber ?? "",
+      ]);
+    }
+    if (populationRows.length > EXPORT_CHUNK_SIZE) await yieldToMain();
+  }
   const received: (string | number)[][] = [
     ["رقم الأشعة", "المنفذ", "المستوى", "CertScan", "مصدر BI", "م.أول", "م.ثاني", "في العينة", "تاريخ الدخول", "رقم البيان"],
-    ...populationRows.map((r) => [
-      r.xrayImageId, r.portName ?? "", r.stage ?? "", r.certScanStatus, r.biEnrichmentStatus,
-      r.xrayLevelOneResult, r.xrayLevelTwoResult, sampledIds.has(r.xrayImageId) ? "نعم" : "لا",
-      r.xrayEntryDate ?? "", r.declarationNumber ?? "",
-    ]),
+    ...receivedRows,
   ];
 
   // Sheet 3 — Processed classification.

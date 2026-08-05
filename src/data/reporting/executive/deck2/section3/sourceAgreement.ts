@@ -811,7 +811,7 @@ export function sourceAgreementSlide(
 export const SOURCE_AGREEMENT_CSS = `
 /* ── Section 3 · source-agreement page ─────────────────────────────────────── */
 .s3sa{display:flex;flex-direction:column;gap:9px;height:100%;min-height:0;}
-/* Wider left column: the matrix carries 15 values, the reviewer table 5 rows. */
+/* Wider left column: the levels×teams grid + counts table, the reviewer table 5 rows. */
 .s3sa-split{grid-template-columns:1.15fr .85fr;gap:16px;flex:1;min-height:0;height:auto;}
 .s3sa-col{background:linear-gradient(180deg,rgba(14,50,84,.55),rgba(7,32,58,.68));}
 .s3sa-col .v2-port-col-head .v2-port-col-icon{

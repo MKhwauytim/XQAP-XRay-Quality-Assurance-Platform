@@ -1,0 +1,947 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Role Data Map · X-Ray QC</title>
+<style>
+  :root {
+    --bg: #eef1f5;
+    --bg-raised: #ffffff;
+    --bg-sunken: #e3e8ee;
+    --text: #141b26;
+    --text-dim: #56637a;
+    --border: #d3dbe6;
+    --accent: #0e8a9c;
+    --accent-soft: #d8f0f2;
+    --write: #a8650a;
+    --write-soft: #f7e8d2;
+    --shadow: 0 1px 2px rgba(20, 27, 38, 0.06);
+    --radius: 10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0a121e;
+      --bg-raised: #101a2c;
+      --bg-sunken: #0d1626;
+      --text: #e7edf6;
+      --text-dim: #8ea0bb;
+      --border: #1e2c44;
+      --accent: #57d6e6;
+      --accent-soft: #123640;
+      --write: #f2a85c;
+      --write-soft: #3a2a10;
+      --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0a121e;
+    --bg-raised: #101a2c;
+    --bg-sunken: #0d1626;
+    --text: #e7edf6;
+    --text-dim: #8ea0bb;
+    --border: #1e2c44;
+    --accent: #57d6e6;
+    --accent-soft: #123640;
+    --write: #f2a85c;
+    --write-soft: #3a2a10;
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  }
+  :root[data-theme="light"] {
+    --bg: #eef1f5;
+    --bg-raised: #ffffff;
+    --bg-sunken: #e3e8ee;
+    --text: #141b26;
+    --text-dim: #56637a;
+    --border: #d3dbe6;
+    --accent: #0e8a9c;
+    --accent-soft: #d8f0f2;
+    --write: #a8650a;
+    --write-soft: #f7e8d2;
+    --shadow: 0 1px 2px rgba(20, 27, 38, 0.06);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: ui-sans-serif, "Segoe UI", system-ui, sans-serif;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection { background: var(--accent-soft); }
+
+  .mono {
+    font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", "SF Mono", Consolas, monospace;
+  }
+
+  a { color: var(--accent); }
+  a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  header.top {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(6px);
+    border-bottom: 1px solid var(--border);
+  }
+  .topbar {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0.85rem 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    overflow-x: auto;
+  }
+  .brand {
+    font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", "SF Mono", Consolas, monospace;
+    font-weight: 700;
+    font-size: 0.92rem;
+    letter-spacing: -0.01em;
+    color: var(--text);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .brand span { color: var(--accent); }
+  nav.jumplinks {
+    display: flex;
+    gap: 1.1rem;
+    white-space: nowrap;
+  }
+  nav.jumplinks a {
+    font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", "SF Mono", Consolas, monospace;
+    font-size: 0.78rem;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    text-decoration: none;
+    padding: 0.2rem 0;
+    border-bottom: 2px solid transparent;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  nav.jumplinks a:hover { color: var(--text); border-color: var(--border); }
+
+  main {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 2.4rem 1.5rem 5rem;
+  }
+
+  .hero {
+    max-width: 62ch;
+    margin-bottom: 2.6rem;
+  }
+  .eyebrow {
+    font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", "SF Mono", Consolas, monospace;
+    font-size: 0.78rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 0.6rem;
+  }
+  h1 {
+    font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", "SF Mono", Consolas, monospace;
+    font-size: 2rem;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+    text-wrap: balance;
+    margin: 0 0 0.8rem;
+  }
+  .hero p { color: var(--text-dim); margin: 0 0 0.5rem; max-width: 58ch; }
+  .hero code { font-size: 0.9em; }
+
+  section { margin-bottom: 3.4rem; scroll-margin-top: 5rem; }
+  h2 {
+    font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", "SF Mono", Consolas, monospace;
+    font-size: 1.28rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    display: flex;
+    align-items: baseline;
+    gap: 0.7rem;
+    margin: 0 0 1.1rem;
+    padding-bottom: 0.6rem;
+    border-bottom: 1px solid var(--border);
+  }
+  h2 .num { color: var(--text-dim); font-weight: 400; font-size: 0.9rem; }
+  h3 {
+    font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", "SF Mono", Consolas, monospace;
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin: 0 0 0.6rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  p { max-width: 68ch; }
+  .lede { color: var(--text-dim); max-width: 68ch; margin-top: -0.4rem; }
+
+  code {
+    font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", "SF Mono", Consolas, monospace;
+    background: var(--bg-sunken);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.05em 0.4em;
+    font-size: 0.88em;
+  }
+
+  /* step-wedge clearance indicator */
+  .wedge {
+    display: inline-flex;
+    gap: 2px;
+    vertical-align: middle;
+  }
+  .wedge i {
+    display: block;
+    width: 14px;
+    height: 18px;
+    border-radius: 2px;
+    background: color-mix(in srgb, var(--accent) calc(var(--step) * 18%), var(--bg-sunken));
+    border: 1px solid var(--border);
+  }
+  .wedge i.on {
+    border-color: var(--accent);
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
+
+  .role-card {
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 1.6rem 1.7rem 1.8rem;
+  }
+  .role-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.8rem;
+    margin-bottom: 0.3rem;
+  }
+  .role-name {
+    font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", "SF Mono", Consolas, monospace;
+    font-size: 1.15rem;
+    font-weight: 700;
+  }
+  .role-tag {
+    font-size: 0.78rem;
+    color: var(--text-dim);
+  }
+  .scope-note {
+    display: inline-block;
+    margin-top: 0.6rem;
+    margin-bottom: 1.2rem;
+    font-size: 0.85rem;
+    padding: 0.4rem 0.7rem;
+    border-radius: 6px;
+    background: var(--accent-soft);
+    color: var(--text);
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  }
+  .scope-note b { color: var(--accent); }
+
+  .diagram-wrap {
+    overflow: hidden;
+    position: relative;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-sunken);
+    padding: 0.6rem 0.4rem;
+    height: 340px;
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+  }
+  .diagram-wrap.grabbing { cursor: grabbing; }
+  .diagram-wrap .pan-layer {
+    display: inline-block;
+    transform-origin: 0 0;
+    will-change: transform;
+  }
+  .diagram-controls {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 5;
+    display: flex;
+    gap: 4px;
+  }
+  .diagram-controls button {
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg-raised);
+    color: var(--text);
+    cursor: pointer;
+    font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", "SF Mono", Consolas, monospace;
+    font-size: 14px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: var(--shadow);
+  }
+  .diagram-controls button:hover { background: var(--bg-sunken); }
+  .diagram-hint {
+    margin: 0.4rem 0 0;
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    opacity: 0.75;
+  }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.88rem;
+  }
+  .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; }
+  th, td {
+    text-align: left;
+    padding: 0.55rem 0.8rem;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  thead th {
+    font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", "SF Mono", Consolas, monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    background: var(--bg-sunken);
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover { background: var(--bg-sunken); }
+  td.cell-edit { color: var(--write); font-weight: 600; }
+  td.cell-view { color: var(--accent); font-weight: 600; }
+  td.cell-none { color: var(--text-dim); }
+  td.cell-dash { color: var(--text-dim); opacity: 0.5; }
+  tbody th {
+    font-family: ui-sans-serif, "Segoe UI", system-ui, sans-serif;
+    font-weight: 600;
+    background: transparent;
+    text-transform: none;
+    letter-spacing: 0;
+    color: var(--text);
+  }
+
+  .legend {
+    display: flex;
+    gap: 1.4rem;
+    flex-wrap: wrap;
+    margin: 1rem 0 1.6rem;
+    font-size: 0.82rem;
+    color: var(--text-dim);
+  }
+  .legend span { display: inline-flex; align-items: center; gap: 0.4rem; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .dot.read { background: var(--accent); }
+  .dot.write { background: var(--write); }
+  .legend .divider { width: 1px; align-self: stretch; background: var(--border); }
+  .swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; border: 1px solid rgba(0,0,0,0.15); }
+  .swatch.hot { background: #dc2626; }
+  .swatch.warm { background: #d97706; }
+  .swatch.cool { background: #16a34a; }
+
+  .badge {
+    display: inline-block;
+    font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", "SF Mono", Consolas, monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.02em;
+    padding: 0.15rem 0.55rem;
+    border-radius: 20px;
+    white-space: nowrap;
+    border: 1px solid transparent;
+  }
+  .badge.b-unfixed { background: color-mix(in srgb, #dc2626 16%, transparent); color: #dc2626; border-color: color-mix(in srgb, #dc2626 40%, transparent); }
+  .badge.b-partial { background: color-mix(in srgb, #d97706 16%, transparent); color: #d97706; border-color: color-mix(in srgb, #d97706 40%, transparent); }
+  .badge.b-fixed { background: color-mix(in srgb, #16a34a 16%, transparent); color: #16a34a; border-color: color-mix(in srgb, #16a34a 40%, transparent); }
+  .badge.b-design { background: var(--bg-sunken); color: var(--text-dim); border-color: var(--border); }
+
+  .citation {
+    font-size: 0.85rem;
+    background: var(--bg-sunken);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.9rem 1.1rem;
+    margin: 1rem 0 1.4rem;
+    color: var(--text-dim);
+  }
+  .citation b { color: var(--text); }
+
+  .grid-2 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1rem;
+  }
+  .storage-card {
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.1rem 1.3rem;
+  }
+  .storage-card h3 { margin-bottom: 0.8rem; }
+  .storage-card dl { margin: 0; }
+  .storage-card dt {
+    font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", "SF Mono", Consolas, monospace;
+    font-size: 0.83rem;
+    color: var(--text);
+    margin-top: 0.7rem;
+  }
+  .storage-card dt:first-child { margin-top: 0; }
+  .storage-card dd { margin: 0.15rem 0 0; color: var(--text-dim); font-size: 0.85rem; }
+
+  .notes {
+    display: grid;
+    gap: 0.9rem;
+  }
+  .note {
+    border-left: 3px solid var(--accent);
+    background: var(--bg-raised);
+    border-radius: 0 8px 8px 0;
+    padding: 0.8rem 1.1rem;
+    font-size: 0.9rem;
+  }
+  .note b { color: var(--text); }
+
+  footer {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 1.5rem;
+    color: var(--text-dim);
+    font-size: 0.8rem;
+    border-top: 1px solid var(--border);
+  }
+
+  @media (max-width: 640px) {
+    h1 { font-size: 1.5rem; }
+    .role-card { padding: 1.2rem; }
+  }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="topbar">
+    <div class="brand">role<span>::</span>data-map</div>
+    <nav class="jumplinks">
+      <a href="#overview">Overview</a>
+      <a href="#boot">Boot</a>
+      <a href="#matrix">Matrix</a>
+      <a href="#guest">Guest</a>
+      <a href="#employee">Employee</a>
+      <a href="#supervisor">Supervisor</a>
+      <a href="#manager">Manager</a>
+      <a href="#admin">Admin</a>
+      <a href="#storage">Storage</a>
+      <a href="#network">Network cost</a>
+      <a href="#notes">Notes</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="hero" id="overview">
+    <p class="eyebrow">x-ray-quality-app-v1 · reference diagram</p>
+    <h1>What each role loads, reads, and writes</h1>
+    <p>No backend — every read and write below lands either in the browser (<code>sessionStorage</code> / <code>localStorage</code>) or as JSON files inside the user-picked workspace folder. Role controls what a session can reach; a single feature flag, <code>view-all-entries</code>, decides whether that reach is "my own records" or "every employee's."</p>
+    <p>Five roles, escalating clearance, read left→right below like a QC step-wedge: <span class="wedge" aria-hidden="true"><i class="on" style="--step:1"></i><i style="--step:2"></i><i style="--step:3"></i><i style="--step:4"></i><i style="--step:5"></i></span> <code class="mono">guest → employee → supervisor → manager → admin</code>.</p>
+  </div>
+
+  <section id="boot">
+    <h2><span class="num">01</span> Boot sequence — same for every role</h2>
+    <p class="lede">Runs once per session load, before any role-specific tab renders. The workspace directory and the managed-user list are always read before login is even checked.</p>
+    <div class="diagram-wrap">
+      <div class="diagram-controls">
+        <button type="button" data-zoom="out" aria-label="Zoom out">−</button>
+        <button type="button" data-zoom="reset" aria-label="Reset view">⟲</button>
+        <button type="button" data-zoom="in" aria-label="Zoom in">+</button>
+      </div>
+<pre class="mermaid">
+flowchart LR
+    A(["App loads"]) --> B{"Workspace folder<br/>remembered?"}
+    B -- "no" --> C["WorkspacePicker<br/>choose folder / Alt+A,T demo"]
+    B -- "yes, silent check" --> D["checkWorkspaceStructure()"]
+    C --> D
+    D --> E["loadWorkspaceFiles()<br/>workspace.manifest.json + users.permissions.json"]
+    E --> F["syncUsersFromDisk()<br/>in-memory user + permission state"]
+    F --> G["AuthGate<br/>read sessionStorage: xray_auth_session_v1"]
+    G --> H{"session valid &amp;<br/>user still active?"}
+    H -- "no" --> I["Login form"]
+    I --> G
+    H -- "yes" --> J["WorkspaceGate ready<br/>(usersHydrated)"]
+    J --> K["GlobalMonthProvider<br/>list 1-population/ folders,<br/>resolve xray_global_month_v1"]
+    K --> L["AppContent<br/>filter tabs by role + permissions,<br/>load labels from localStorage"]
+    L --> Q["BootSplashOverlay<br/>checklist UI over tab content,<br/>shown once per boot session<br/>(key = user + loginAt + workspace)"]
+    Q --> M(["role-specific tabs render — see below"])
+    G -. background .-> N["activity.log.json<br/>heartbeat every 60s"]
+    L -. every 3 min .-> O["re-read users.permissions.json<br/>+ broadcast refresh to every open tab"]
+    L -. manager / admin only .-> P["daily auto-backup check<br/>→ copies EVERY json in the workspace"]
+
+    classDef netHot fill:#dc2626,stroke:#7f1d1d,color:#ffffff;
+    classDef netWarm fill:#d97706,stroke:#78350f,color:#ffffff;
+    classDef netCool fill:#16a34a,stroke:#14532d,color:#ffffff;
+    class D netCool
+    class N netWarm
+    class O,P netHot
+    class Q netCool
+</pre>
+    <p class="diagram-hint">🖱 drag to pan · scroll or +/− to zoom · double-click or ⟲ to reset</p>
+    <p class="lede" style="margin-top:0.9rem; font-size:0.85rem;">Colored nodes are the ones that get materially worse on a UNC workspace — full breakdown in <a href="#network">§ Network cost</a>. <code>BootSplashOverlay</code> is new (in-flight as of this revision) — it's a pure UI reflection of loads already happening elsewhere (Population, XrayReferrals report into it via an in-memory pub/sub store), so it adds zero extra disk I/O regardless of workspace location — shown to every role, not gated.</p>
+  </section>
+
+  <section id="matrix">
+    <h2><span class="num">02</span> Tab access by role</h2>
+    <p class="lede">Ceiling (code) vs. default (permission matrix) sometimes differ — see the footnote. Admin always resolves to edit. <b>Resynced against the live workspace's permission matrix</b> — the defaults below got noticeably stricter across the board.</p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Tab</th><th>Guest</th><th>Employee</th><th>Supervisor</th><th>Manager</th><th>Admin</th></tr>
+        </thead>
+        <tbody>
+          <tr><th>population</th><td class="cell-none">none†</td><td class="cell-none">none†</td><td class="cell-none">none†</td><td class="cell-edit">edit</td><td class="cell-edit">edit</td></tr>
+          <tr><th>employee-workspace</th><td class="cell-none">none†</td><td class="cell-edit">edit</td><td class="cell-edit">edit*</td><td class="cell-edit">edit*</td><td class="cell-edit">edit</td></tr>
+          <tr><th>ew/notifications</th><td class="cell-none">none†</td><td class="cell-none">banner only</td><td class="cell-none">banner only</td><td class="cell-edit">edit</td><td class="cell-edit">edit</td></tr>
+          <tr><th>reports (+kpi)</th><td class="cell-none">none†</td><td class="cell-dash">—</td><td class="cell-none">none†</td><td class="cell-edit">edit</td><td class="cell-edit">edit</td></tr>
+          <tr><th>archive</th><td class="cell-none">none†</td><td class="cell-dash">—</td><td class="cell-none">none†</td><td class="cell-none">none†</td><td class="cell-edit">edit</td></tr>
+          <tr><th>user-management</th><td class="cell-dash">—</td><td class="cell-dash">—</td><td class="cell-dash">—</td><td class="cell-dash">—</td><td class="cell-edit">edit</td></tr>
+          <tr><th>settings</th><td class="cell-none">none†</td><td class="cell-dash">—</td><td class="cell-dash">—</td><td class="cell-dash">—</td><td class="cell-edit">edit</td></tr>
+          <tr><th>change-log</th><td class="cell-dash">—</td><td class="cell-dash">—</td><td class="cell-dash">—</td><td class="cell-dash">—</td><td class="cell-edit">edit</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="lede" style="margin-top:0.9rem; font-size:0.85rem;">* per-sub-tab: supervisor gets <code>inspection-form</code> = none by default; manager gets <code>xray-referrals</code> = none by default. † code ceiling permits the tab, but the default permission matrix denies it — reachable only if an admin grants it explicitly. This now covers <code>population</code> for guest/employee/supervisor and <code>employee-workspace</code>/<code>ew/notifications</code> for guest — the tab catalog's own ceiling was never role-restrictive there, only the default grant is.</p>
+  </section>
+
+  <div class="legend">
+    <span><i class="dot read"></i> reads a file</span>
+    <span><i class="dot write"></i> writes a file</span>
+    <span class="divider" aria-hidden="true"></span>
+    <span><i class="swatch hot"></i> heaviest on a UNC/network workspace</span>
+    <span><i class="swatch warm"></i> recurring or fans out per employee</span>
+    <span><i class="swatch cool"></i> already optimized for this — see <a href="#network">§network cost</a></span>
+  </div>
+
+  <section id="guest">
+    <div class="role-card">
+      <div class="role-head">
+        <span class="role-name">GUEST <span class="wedge" aria-hidden="true"><i class="on" style="--step:1"></i><i style="--step:2"></i><i style="--step:3"></i><i style="--step:4"></i><i style="--step:5"></i></span></span>
+        <span class="role-tag">no default tabs — grant-only</span>
+      </div>
+      <p class="scope-note">Since the permission-matrix resync, <code>population</code> — guest's last remaining default view — dropped to <b>none</b> too. Every tab's ceiling still technically permits guest (only <code>user-management</code>/<code>change-log</code> hard-exclude it), but the default grant is <b>none</b> everywhere now. A guest session opens to zero readable data until an admin grants a specific tab.</p>
+      <div class="diagram-wrap">
+        <div class="diagram-controls">
+          <button type="button" data-zoom="out" aria-label="Zoom out">−</button>
+          <button type="button" data-zoom="reset" aria-label="Reset view">⟲</button>
+          <button type="button" data-zoom="in" aria-label="Zoom in">+</button>
+        </div>
+        <div class="pan-layer">
+<pre class="mermaid">
+flowchart LR
+  G0["guest logs in"] --> G1{"any tab granted<br/>by an admin?"}
+  G1 -- "no (default)" --> G2(["no reads, no writes —<br/>every tab ceiling-eligible,<br/>every default = none"])
+  G1 -- "yes, granted" --> G3["reads only whatever was granted —<br/>same file set as that tab's role card above"]
+</pre>
+        </div>
+      </div>
+      <p class="diagram-hint">🖱 drag to pan · scroll or +/− to zoom · double-click or ⟲ to reset</p>
+    </div>
+  </section>
+
+  <section id="employee">
+    <div class="role-card">
+      <div class="role-head">
+        <span class="role-name">EMPLOYEE <span class="wedge" aria-hidden="true"><i style="--step:1"></i><i class="on" style="--step:2"></i><i style="--step:3"></i><i style="--step:4"></i><i style="--step:5"></i></span></span>
+        <span class="role-tag">own records only</span>
+      </div>
+      <p class="scope-note"><b>view-all-entries = false</b> — every read and write below is hard-filtered to <code>assignedTo === username</code> / the employee's own answer file, both by feature flag and by component-level filters. Since the resync, <code>population</code> and <code>ew/xray-results</code> also dropped to none by default — <code>xray-referrals</code> and the notification banner are what's left.</p>
+      <div class="diagram-wrap">
+        <div class="diagram-controls">
+          <button type="button" data-zoom="out" aria-label="Zoom out">−</button>
+          <button type="button" data-zoom="reset" aria-label="Reset view">⟲</button>
+          <button type="button" data-zoom="in" aria-label="Zoom in">+</button>
+        </div>
+        <div class="pan-layer">
+<pre class="mermaid">
+flowchart LR
+  subgraph T["Employee — tabs"]
+    E2["ew / xray-referrals (edit, own only)"]
+    E4["notification banner"]
+  end
+  subgraph R["reads"]
+    R1["sample.master.json"]
+    R2["distribution.current.json"]
+    R3["user.samples.json — own mirror"]
+    R4["user.answers.json — own"]
+    R5["templates + template.selection.json"]
+    R6["notifications.json — filtered to me"]
+  end
+  subgraph W["writes"]
+    W1["upsertItemAnswer<br/>→ user.answers.json"]
+    W2["appendReferralRequest /<br/>appendReplacementRequest<br/>→ own answers.json"]
+    W3["submitReopenRequest<br/>→ queued (or instant if enabled)"]
+    W4["acceptNotification<br/>→ own entry in notifications.json"]
+  end
+  E2 --> R1 & R2 & R3 & R4 & R5
+  E4 --> R6
+  E2 --> W1 & W2 & W3
+  E4 --> W4
+</pre>
+        </div>
+      </div>
+      <p class="diagram-hint">🖱 drag to pan · scroll or +/− to zoom · double-click or ⟲ to reset</p>
+    </div>
+  </section>
+
+  <section id="supervisor">
+    <div class="role-card">
+      <div class="role-head">
+        <span class="role-name">SUPERVISOR <span class="wedge" aria-hidden="true"><i style="--step:1"></i><i style="--step:2"></i><i class="on" style="--step:3"></i><i style="--step:4"></i><i style="--step:5"></i></span></span>
+        <span class="role-tag">all employees, first cross-visibility role</span>
+      </div>
+      <p class="scope-note"><b>view-all-entries = true</b> — still reads every employee's files, not just its own, within <code>employee-workspace</code>. But the resync pulled <code>population</code>, <code>reports</code> (+ <code>kpi</code>, <code>report-designer</code>), and <code>archive</code> all down to none by default — supervisor's entire default footprint is now the three <code>employee-workspace</code> sub-tabs below.</p>
+      <div class="diagram-wrap">
+        <div class="diagram-controls">
+          <button type="button" data-zoom="out" aria-label="Zoom out">−</button>
+          <button type="button" data-zoom="reset" aria-label="Reset view">⟲</button>
+          <button type="button" data-zoom="in" aria-label="Zoom in">+</button>
+        </div>
+        <div class="pan-layer">
+<pre class="mermaid">
+flowchart LR
+  subgraph T["Supervisor — tabs"]
+    S2["ew / xray-referrals (edit, ALL employees)"]
+    S3["ew / xray-results (view, ALL employees)"]
+    S4["ew / referral-approval (edit)"]
+  end
+  subgraph R["reads"]
+    R1["sample.master.json"]
+    R2["distribution.current.json"]
+    R3["loadAllEmployeeFiles()<br/>every user's answers.json"]
+    R4["referral + replacement + reopen logs<br/>(all employees)"]
+  end
+  subgraph W["writes"]
+    W1["appendDecisionEvent<br/>→ supervisor.decisions.json"]
+    W2["approve/deny referral,<br/>replacement, reopen<br/>→ target user.answers.json"]
+    W3["setItemQualityNote<br/>→ target user.answers.json"]
+  end
+  S2 --> R1 & R2
+  S3 --> R3
+  S4 --> R4
+  S4 --> W1 & W2
+  S2 --> W3
+
+  classDef netWarm fill:#d97706,stroke:#78350f,color:#ffffff;
+  class R3,R4 netWarm
+</pre>
+        </div>
+      </div>
+      <p class="diagram-hint">🖱 drag to pan · scroll or +/− to zoom · double-click or ⟲ to reset</p>
+      <p class="lede" style="margin-top:0.9rem; font-size:0.85rem;"><code>reports</code>, <code>report-designer</code>, and <code>archive</code> still exist for supervisor the moment an admin grants them — same reads as the Manager card below, minus edit.</p>
+    </div>
+  </section>
+
+  <section id="manager">
+    <div class="role-card">
+      <div class="role-head">
+        <span class="role-name">MANAGER <span class="wedge" aria-hidden="true"><i style="--step:1"></i><i style="--step:2"></i><i style="--step:3"></i><i class="on" style="--step:4"></i><i style="--step:5"></i></span></span>
+        <span class="role-tag">population + reports pipeline, all-employee approvals</span>
+      </div>
+      <p class="scope-note">Full population pipeline and reports stay <b>edit</b> by default, untouched by the resync. But <code>employee-workspace</code>'s <code>xray-referrals</code> sub-tab and the whole <code>archive</code> tab both dropped to none for manager — the manual backup UI now needs an admin grant too. The <em>automatic</em> daily backup (boot sequence, above) still fires regardless — it's a role check in <code>App.tsx</code>, not gated by this tab.</p>
+      <div class="diagram-wrap">
+        <div class="diagram-controls">
+          <button type="button" data-zoom="out" aria-label="Zoom out">−</button>
+          <button type="button" data-zoom="reset" aria-label="Reset view">⟲</button>
+          <button type="button" data-zoom="in" aria-label="Zoom in">+</button>
+        </div>
+        <div class="pan-layer">
+<pre class="mermaid">
+flowchart LR
+  subgraph T["Manager — tabs (edit unless noted)"]
+    M1["population — full pipeline"]
+    M2["employee-workspace — 3 of 4 sub-tabs<br/>(xray-referrals none by default)"]
+    M3["ew / notifications — Notification Manager"]
+    M4["reports — all sub-tabs"]
+  end
+  subgraph R["reads"]
+    R1["config.json, certscan.global.json,<br/>raw + processed population"]
+    R2["same all-employee reads as supervisor,<br/>minus xray-referrals"]
+    R3["notifications.json — full list<br/>+ acceptance rollup"]
+  end
+  subgraph W["writes"]
+    W1["saveMonthRun, saveSampleMaster,<br/>appendDistributionEvent…"]
+    W2["postNotification<br/>→ notifications.json"]
+    W3["approve/deny referral, replacement,<br/>reopen + manage inspection templates"]
+    W5["report-designer edit<br/>→ 4-reports/designs/"]
+  end
+  M1 --> R1
+  M2 --> R2
+  M3 --> R3
+  M1 --> W1
+  M3 --> W2
+  M2 --> W3
+  M4 --> W5
+
+  classDef netWarm fill:#d97706,stroke:#78350f,color:#ffffff;
+  class R2 netWarm
+</pre>
+        </div>
+      </div>
+      <p class="diagram-hint">🖱 drag to pan · scroll or +/− to zoom · double-click or ⟲ to reset</p>
+    </div>
+  </section>
+
+  <section id="admin">
+    <div class="role-card">
+      <div class="role-head">
+        <span class="role-name">ADMIN <span class="wedge" aria-hidden="true"><i style="--step:1"></i><i style="--step:2"></i><i style="--step:3"></i><i style="--step:4"></i><i class="on" style="--step:5"></i></span></span>
+        <span class="role-tag">unrestricted — every tab, always edit</span>
+      </div>
+      <p class="scope-note">The only role that can write <code>users.permissions.json</code> and the only one whose settings changes touch <code>localStorage</code>. <code>change-log</code> is the one tab that never touches the workspace at all — it's a build-time virtual module over the repo's own docs.</p>
+      <div class="diagram-wrap">
+        <div class="diagram-controls">
+          <button type="button" data-zoom="out" aria-label="Zoom out">−</button>
+          <button type="button" data-zoom="reset" aria-label="Reset view">⟲</button>
+          <button type="button" data-zoom="in" aria-label="Zoom in">+</button>
+        </div>
+        <div class="pan-layer">
+<pre class="mermaid">
+flowchart LR
+  subgraph T["Admin — every tab, always edit"]
+    A1["population"]
+    A2["employee-workspace"]
+    A3["ew / notifications"]
+    A4["reports"]
+    A5["archive"]
+    A6["user-management<br/>(users / permissions / activity / actions)"]
+    A7["settings"]
+    A8["change-log"]
+  end
+  subgraph R["reads"]
+    R1["users.permissions.json"]
+    R2["activity.log.json"]
+    R3["actions.log.json + yearly archives"]
+    R4["localStorage: xray_custom_labels_v1"]
+    R5["virtual:edit-log<br/>compiled from repo docs, NOT workspace"]
+  end
+  subgraph W["writes"]
+    W1["syncUserManagementToDisk<br/>→ users.permissions.json"]
+    W2["setLabel / resetLabel<br/>→ localStorage +<br/>best-effort labels.snapshot.json"]
+    W3["restoreBackup<br/>(optional re-import users/labels)"]
+    W4["all manager-level pipeline<br/>+ workspace writes"]
+  end
+  A6 --> R1 & R2 & R3
+  A7 --> R4
+  A8 --> R5
+  A6 --> W1
+  A7 --> W2
+  A5 --> W3
+  A1 --> W4
+  A2 --> W4
+
+  classDef netHot fill:#dc2626,stroke:#7f1d1d,color:#ffffff;
+  class W3 netHot
+</pre>
+        </div>
+      </div>
+      <p class="diagram-hint">🖱 drag to pan · scroll or +/− to zoom · double-click or ⟲ to reset</p>
+    </div>
+  </section>
+
+  <section id="storage">
+    <h2><span class="num">03</span> Where it actually lives</h2>
+    <p class="lede">Two layers, never mixed: browser storage for the auth/UX layer, the workspace folder for every business record.</p>
+    <div class="grid-2">
+      <div class="storage-card">
+        <h3>Browser — sessionStorage</h3>
+        <dl>
+          <dt>xray_auth_session_v1</dt>
+          <dd>Login session. Survives reload, clears on tab/browser close, 7-day TTL guard.</dd>
+          <dt>xray_global_month_v1</dt>
+          <dd>App-wide selected month, resolved against the workspace's actual month folders on change.</dd>
+        </dl>
+      </div>
+      <div class="storage-card">
+        <h3>Browser — localStorage</h3>
+        <dl>
+          <dt>xray_custom_labels_v1</dt>
+          <dd>Admin label overrides, merged over DEFAULT_LABELS at module init — loads even before login.</dd>
+          <dt>xray_last_login_username_v1</dt>
+          <dd>Remembered username for the login form only.</dd>
+        </dl>
+      </div>
+      <div class="storage-card">
+        <h3>In-memory only</h3>
+        <dl>
+          <dt>userManagement runtime state</dt>
+          <dd>Users + tab/feature permissions. Rehydrated from disk every load — never persisted to a browser key itself.</dd>
+          <dt>error log ring buffer</dt>
+          <dd>Last 50 silent-catch entries, admin-visible in Settings, lost on reload.</dd>
+        </dl>
+      </div>
+      <div class="storage-card">
+        <h3>Workspace folder — numbered roots</h3>
+        <dl>
+          <dt>1-population/ … 2-samples/</dt>
+          <dd>Raw + processed population per month; sample master, distribution events, per-employee mirrors + answers, per-supervisor decisions.</dd>
+          <dt>3-user-data/ … 6-templates/</dt>
+          <dd>users.permissions.json · report designs · audit logs, notifications, backups, presets · inspection templates.</dd>
+        </dl>
+      </div>
+    </div>
+  </section>
+
+  <section id="network">
+    <h2><span class="num">04</span> UNC / network-share cost</h2>
+    <p class="lede">The File System Access API never tells the page whether a workspace folder is local or a UNC path — there's no <code>handle.isRemote</code> to check. What the app can control is how many separate round trips each operation makes, and that's exactly what got fixed this week after a production report of the workspace living on a network share.</p>
+
+    <div class="citation">
+      <b>Why it's structurally slow, not just unlucky:</b> Chromium's own File System Access tracker (issue 40899722) measured 1,000 small file operations at <b>142s on a Windows network share</b> vs. <b>3.4s local on macOS</b> — roughly 40× slower. Every JSON file this app touches is exactly that kind of small-file operation, and <code>safeWriteJson</code> turns one logical write into <b>7 of them</b> (<code>.bak</code> write, <code>.tmp</code> write, <code>.tmp</code> verify-read, live-file commit, live-file verify-read, pre-read, cleanup delete) — a deliberate crash-safety trade-off, not an oversight.
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Operation</th><th>Scaling</th><th>Fires on</th><th>Status</th></tr>
+        </thead>
+        <tbody>
+          <tr><th>safeWriteJson stage/verify/commit</th><td>fixed ~7 ops per write</td><td>every write, everywhere</td><td><span class="badge b-design">by design</span></td></tr>
+          <tr><th>CAS-loop retries (shared files)</th><td>up to 10 attempts, linear backoff</td><td>contested writes to a shared file</td><td><span class="badge b-design">bounded, not latency-aware</span></td></tr>
+          <tr><th>checkWorkspaceStructure()</th><td>was ~12 sequential round trips</td><td>every workspace attach / reload</td><td><span class="badge b-fixed">fixed — parallelized</span></td></tr>
+          <tr><th>3-min permission refresh</th><td>fans out to every mounted tab/view</td><td>every 3 min, per open view</td><td><span class="badge b-design">working as designed</span></td></tr>
+          <tr><th>60s activity heartbeat</th><td>1 CAS-routed write per tick</td><td>every 60s, whole session</td><td><span class="badge b-design">working as designed</span></td></tr>
+          <tr><th>loadAllEmployeeFiles() fan-out</th><td>linear in employee count</td><td>supervisor+ opening results/reports/approvals</td><td><span class="badge b-partial">partial — 8-way concurrent, was sequential</span></td></tr>
+          <tr><th>Distribution event-log reads</th><td>was 4× full scan per append</td><td>every distribution action</td><td><span class="badge b-fixed">mostly fixed — 1× cold + incremental cache</span></td></tr>
+          <tr><th>Population/month load</th><td>full monolith on Process; paged worker on Browse</td><td>gated by role capability</td><td><span class="badge b-fixed">Phase A + B shipped, Phase C not</span></td></tr>
+          <tr><th>createBackup / daily auto-backup</th><td>every JSON file in the whole workspace, unbounded by age</td><td>manual (admin only by default now) + daily auto-check for manager/admin regardless</td><td><span class="badge b-partial">partial — 8-way parallel, scope still unbounded</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p style="margin-top:1.2rem; font-size:0.9rem; color:var(--text-dim); max-width:70ch;">Net effect: a workspace that's been running long enough to accumulate a lot of <code>distribution.events/*.json</code> files (one per assignment/replacement/reassignment/reopen — potentially 1,000+ in an active month) makes <b>backup</b> the single heaviest whole-workspace operation, and <b>loadAllEmployeeFiles</b> the heaviest thing supervisor/manager/admin trigger just by opening a tab. Both are already parallelized (8-way); neither is bounded in scope. The safe-write tax (item 1) is universal and untouched on purpose — it's what keeps a write from corrupting a file if the network drops mid-save, which matters more on an unreliable share, not less.</p>
+
+    <p style="margin-top:0.8rem; font-size:0.85rem; color:var(--text-dim); max-width:70ch;">This isn't a hypothetical — <code>docs/superpowers/specs/2026-08-03-distribution-performance-and-workflow-design.md</code> (Part 4, §S–§V) was written from an actual "workspace folder is a UNC/network-share path, takes forever" production report, and ~20 commits have shipped against it. Two items remain deliberately deferred: relaxing <code>safeWriteJson</code>'s verify cycle, and consolidating one-file-per-event distribution writes — both need their own risk review before touching.</p>
+  </section>
+
+  <section id="notes">
+    <h2><span class="num">05</span> Cross-cutting notes</h2>
+    <div class="notes">
+      <div class="note"><b>One flag decides "mine" vs. "everyone's."</b> <code>FEATURE_DEFAULTS["view-all-entries"]</code> is false for guest/employee, true for supervisor/manager/admin — every own-vs-all fork in the diagrams above traces back to this single flag.</div>
+      <div class="note"><b>All writes are staged.</b> Every JSON read/write above routes through <code>safeReadJson</code>/<code>safeWriteJson</code> (temp-write → verify → commit, with a <code>.bak</code> kept). Files with more than one possible writer — <code>users.permissions.json</code>, <code>notifications.json</code>, <code>designs.index.json</code>, <code>*.decisions.json</code>, <code>actions.log.json</code> — add a CAS loop plus a Web Lock on top.</div>
+      <div class="note"><b>Notifications is two different UIs, not one gated tab.</b> Employee/supervisor get the read-and-accept <code>NotificationBanner</code> in the app shell; manager/admin get the full <code>NotificationManager</code> sidebar tab (post + monitor). Both read the same <code>notifications.json</code>.</div>
+      <div class="note"><b>Settings' code ceiling is wider than its default grant.</b> Guest is technically inside the tab's allowed-roles list, but the default permission matrix sets guest → none — it only becomes reachable if an admin grants it by hand.</div>
+      <div class="note"><b>The latest resync leans toward "deny by default, grant explicitly."</b> <code>population</code>, <code>reports</code>, and <code>archive</code> all moved from view-by-default to none-by-default for the roles below admin/manager — guest lost its only default tab entirely, and supervisor's default footprint shrank to just its three <code>employee-workspace</code> sub-tabs. Every ceiling stayed the same; only the starting grant tightened. Read the tab matrix's † marks as "available on request," not "unavailable."</div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  Built from a code-level trace of AuthGate, App.tsx, tabCatalog.ts, WorkspaceProvider, and each tab's storage calls — x-ray-quality-app-v1, 2026-08-04. Network-cost section cross-checked against docs/superpowers/specs/2026-08-03-distribution-performance-and-workflow-design.md and git log. Revised same day against ~25 further commits: the permission-matrix resync (36cdd6ee) and the new BootSplashOverlay boot-progress checklist.
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+<script>
+(function () {
+  var MIN_SCALE = 0.4, MAX_SCALE = 4, STEP = 0.2;
+  var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function initPanZoom(wrap) {
+    var svg = wrap.querySelector("svg");
+    if (!svg) return;
+
+    var scale = 1, x = 0, y = 0;
+    var panning = false, startX = 0, startY = 0, startPanX = 0, startPanY = 0;
+
+    function apply(withTransition) {
+      svg.style.transition = withTransition && !reduceMotion ? "transform 0.18s ease" : "none";
+      svg.style.transform = "translate(" + x + "px, " + y + "px) scale(" + scale + ")";
+      svg.style.transformOrigin = "0 0";
+      svg.style.display = "block";
+    }
+
+    function clampScale(s) { return Math.min(MAX_SCALE, Math.max(MIN_SCALE, s)); }
+
+    wrap.setAttribute("tabindex", "0");
+
+    wrap.addEventListener("pointerdown", function (e) {
+      if (e.target.closest(".diagram-controls")) return;
+      panning = true;
+      wrap.classList.add("grabbing");
+      startX = e.clientX; startY = e.clientY;
+      startPanX = x; startPanY = y;
+      try { wrap.setPointerCapture(e.pointerId); } catch (err) {}
+    });
+    wrap.addEventListener("pointermove", function (e) {
+      if (!panning) return;
+      x = startPanX + (e.clientX - startX);
+      y = startPanY + (e.clientY - startY);
+      apply(false);
+    });
+    function endPan() { panning = false; wrap.classList.remove("grabbing"); }
+    wrap.addEventListener("pointerup", endPan);
+    wrap.addEventListener("pointerleave", endPan);
+    wrap.addEventListener("pointercancel", endPan);
+
+    wrap.addEventListener("wheel", function (e) {
+      e.preventDefault();
+      var rect = wrap.getBoundingClientRect();
+      var cx = e.clientX - rect.left, cy = e.clientY - rect.top;
+      var prevScale = scale;
+      scale = clampScale(scale + (e.deltaY > 0 ? -STEP : STEP));
+      x = cx - (cx - x) * (scale / prevScale);
+      y = cy - (cy - y) * (scale / prevScale);
+      apply(false);
+    }, { passive: false });
+
+    wrap.addEventListener("dblclick", function () { scale = 1; x = 0; y = 0; apply(true); });
+
+    wrap.addEventListener("keydown", function (e) {
+      var moved = true, step = 40;
+      if (e.key === "ArrowLeft") x += step;
+      else if (e.key === "ArrowRight") x -= step;
+      else if (e.key === "ArrowUp") y += step;
+      else if (e.key === "ArrowDown") y -= step;
+      else if (e.key === "+" || e.key === "=") scale = clampScale(scale + STEP);
+      else if (e.key === "-") scale = clampScale(scale - STEP);
+      else if (e.key === "0") { scale = 1; x = 0; y = 0; }
+      else moved = false;
+      if (moved) { e.preventDefault(); apply(true); }
+    });
+
+    var controls = wrap.querySelector(".diagram-controls");
+    if (controls) {
+      var inBtn = controls.querySelector('[data-zoom="in"]');
+      var outBtn = controls.querySelector('[data-zoom="out"]');
+      var resetBtn = controls.querySelector('[data-zoom="reset"]');
+      if (inBtn) inBtn.addEventListener("click", function () { scale = clampScale(scale + STEP); apply(true); });
+      if (outBtn) outBtn.addEventListener("click", function () { scale = clampScale(scale - STEP); apply(true); });
+      if (resetBtn) resetBtn.addEventListener("click", function () { scale = 1; x = 0; y = 0; apply(true); });
+    }
+
+    apply(false);
+  }
+
+  function initAll() {
+    if (typeof mermaid !== 'undefined') {
+      mermaid.contentLoaded();
+    }
+    setTimeout(function() {
+      var wraps = document.querySelectorAll(".diagram-wrap");
+      for (var i = 0; i < wraps.length; i++) initPanZoom(wraps[i]);
+    }, 500);
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initAll);
+  } else {
+    initAll();
+  }
+})();
+</script>
+</body>
+</html>

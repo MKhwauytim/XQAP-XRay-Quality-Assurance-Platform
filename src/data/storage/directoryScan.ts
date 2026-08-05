@@ -172,17 +172,18 @@ type AppendOnlyCacheEntry<T = unknown> = {
 // File System Access API and this repo's memoryDirectory.ts test double, so a
 // cache keyed on a leaf handle would never hit.
 //
-// Plain Map, not WeakMap: the data-refresh signal below (5-minute
-// auto-refresh timer in AuthGate.tsx, manual refresh button in
-// AdminToolbar.tsx) needs a genuine "clear every cached root" operation, and
-// a WeakMap cannot be enumerated or cleared wholesale by design -- there is
-// no placeholder-free way to implement that with a WeakMap. Trade-off: a
+// Plain Map, not WeakMap: the manual-refresh data-refresh signal below
+// (AdminToolbar.tsx's refresh button only -- the periodic 5-minute
+// auto-refresh in AuthGate.tsx deliberately does NOT trigger this, see the
+// subscription below) needs a genuine "clear every cached root" operation,
+// and a WeakMap cannot be enumerated or cleared wholesale by design -- there
+// is no placeholder-free way to implement that with a WeakMap. Trade-off: a
 // disconnected workspace's cache entries are not individually
 // garbage-collected -- they persist until the next no-argument "clear all"
-// (which happens periodically via the refresh signal) or an explicit
-// resetAppendOnlyDirectoryCache(root) call, rather than becoming
-// automatically collectible. Acceptable because this app has exactly one
-// active workspace root at a time.
+// (which now only happens on an explicit manual refresh, not periodically)
+// or an explicit resetAppendOnlyDirectoryCache(root) call, rather than
+// becoming automatically collectible. Acceptable because this app has
+// exactly one active workspace root at a time, and switching roots is rare.
 let appendOnlyCache = new Map<DirectoryHandleLike, Map<string, AppendOnlyCacheEntry>>();
 
 let statsEntries = 0;
@@ -288,10 +289,10 @@ export async function readAppendOnlyDirectory<T>(
   return { values, fileNames, matchedNames };
 }
 
-// Module-init side effect: purge the whole cache on manual refresh (
-// AdminToolbar.tsx) / the 5-minute auto-refresh (AuthGate.tsx). This makes
-// "refresh" mean what users expect -- nothing stays stale past an explicit
-// or periodic refresh. subscribeToDataRefresh is a plain
+// Module-init side effect: purge the whole cache on manual refresh
+// (AdminToolbar.tsx) only -- see the source check below for why the
+// periodic auto-refresh (AuthGate.tsx) is deliberately excluded.
+// subscribeToDataRefresh is a plain
 // window.addEventListener wrapper (see dataRefreshSignal.ts) with no React
 // dependency, so calling it here at module scope -- rather than from inside
 // a component effect -- is safe. The `typeof window` guard idiom itself is
@@ -303,5 +304,12 @@ export async function readAppendOnlyDirectory<T>(
 // guard keeps this module importable from a non-browser context (e.g.
 // Vitest's "node" test environment) without throwing.
 if (typeof window !== "undefined") {
-  subscribeToDataRefresh(() => resetAppendOnlyDirectoryCache());
+  // Only the manual admin refresh wholesale-resets this cache. The periodic
+  // 5-minute auto-refresh (AuthGate.tsx) does NOT -- this cache's own
+  // per-file name-diff invalidation (see readAppendOnlyDirectory above) is
+  // already correct, so a periodic wholesale reset only pays full re-read
+  // cost every 5 minutes with no correctness benefit.
+  subscribeToDataRefresh((source) => {
+    if (source === "manual") resetAppendOnlyDirectoryCache();
+  });
 }

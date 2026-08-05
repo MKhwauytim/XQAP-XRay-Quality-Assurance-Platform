@@ -57,6 +57,8 @@ import { DEMO_WORKSPACE_NAME } from "../data/workspace/demoWorkspace";
 import { useWorkspace } from "../data/workspace/useWorkspace";
 import { syncUserManagementToDisk } from "../data/workspace/userSync";
 import { logRejection } from "../data/storage/errorLogger";
+import { LoadingState } from "../components/StateViews/StateViews";
+import { GlobalMonthProvider } from "../data/month/GlobalMonthProvider";
 
 type AuthGateProps = {
   children: ReactNode | ((session: AuthSession) => ReactNode);
@@ -319,7 +321,7 @@ export default function AuthGate({ children }: AuthGateProps) {
     };
   }, [session]);
 
-  // Auto-refresh (every 5 minutes from sign-in): re-syncs users/roles/permissions
+  // Auto-refresh (every 3 minutes from sign-in): re-syncs users/roles/permissions
   // from 3-user-data/users.permissions.json AND broadcasts dataRefreshSignal so
   // every mounted view re-reads its own workspace data (assigned samples,
   // referrals/approvals, notifications, ...) -- so an admin's edit or another
@@ -331,10 +333,16 @@ export default function AuthGate({ children }: AuthGateProps) {
     if (!session || session.mode === "demo") return;
     if (workspaceStatus !== "ready" || !directoryHandle) return;
 
-    const AUTO_REFRESH_INTERVAL_MS = 5 * 60_000;
+    const AUTO_REFRESH_INTERVAL_MS = 3 * 60_000;
     const id = window.setInterval(() => {
+      // A backgrounded/minimized tab has nothing on screen that benefits from
+      // this tick -- skip the disk read and the fan-out signal entirely
+      // rather than paying their cost for no visible effect. The interval
+      // itself keeps running on its normal cadence; a later tick does the
+      // real work once the tab is visible again.
+      if (document.hidden) return;
       void refreshPermissions();
-      broadcastDataRefresh();
+      broadcastDataRefresh("periodic");
     }, AUTO_REFRESH_INTERVAL_MS);
 
     return () => window.clearInterval(id);
@@ -562,6 +570,28 @@ export default function AuthGate({ children }: AuthGateProps) {
   }
 
   if (session) {
+    // Mirrors WorkspaceGate's identical usersHydrated race guard one layer
+    // down (WorkspaceGate.tsx:264,275-283): status flips to "ready" before
+    // the workspace's real disk-synced user list has been synced into
+    // memory, so rendering AdminToolbar/children on session+status alone
+    // can briefly show a since-revoked identity's UI before the deferred
+    // re-validation effect above (line ~253) clears it. Exempt sessions
+    // (bootstrap admin, demo) are never subject to that re-validation, so
+    // they are never gated here either. Bounded to workspaceStatus ===
+    // "ready" specifically (not bare !usersHydrated) so a session with no
+    // workspace connected at all is never stuck behind this gate.
+    if (
+      !isExemptFromManagedUserValidation(session) &&
+      workspaceStatus === "ready" &&
+      !usersHydrated
+    ) {
+      return (
+        <div className="auth-hydrating-gate" dir="rtl">
+          <LoadingState />
+        </div>
+      );
+    }
+
     // Only a real admin may impersonate other roles. The effective session (with the
     // role swapped) is what the rest of the app sees; identity/username stay real.
     const isRealAdmin = session.role === ADMIN_ROLE;
@@ -573,7 +603,7 @@ export default function AuthGate({ children }: AuthGateProps) {
       : session;
 
     return (
-      <>
+      <GlobalMonthProvider>
         <AdminToolbar
           session={session}
           previewRole={previewRole}
@@ -583,7 +613,7 @@ export default function AuthGate({ children }: AuthGateProps) {
         />
 
         {renderAuthenticatedChildren(effectiveSession)}
-      </>
+      </GlobalMonthProvider>
     );
   }
 

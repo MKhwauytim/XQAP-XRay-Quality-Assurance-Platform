@@ -7,7 +7,8 @@ import type { MonthFolderInfo } from "../population/monthFolder";
 import type { MonthManifestData, MonthRawData, PopulationFinalData } from "../population/monthTypes";
 import type { SampleMasterData } from "../sampling/sampleTypes";
 import type { DirectoryHandleLike, FileHandleLike } from "../storage/fileSystemAccess";
-import { safeReadJson, safeWriteJson, safeWriteJsonText } from "../storage/safeWrite";
+import { readFileTextWithRetry, safeReadJson, safeWriteJson, safeWriteJsonText } from "../storage/safeWrite";
+import { mapWithConcurrency } from "../storage/concurrency";
 import { withWorkspaceWriteAccess } from "../storage/workspaceWriteAccess";
 import { logError } from "../storage/errorLogger";
 import { exportLabelsSnapshot } from "../workspace/labelsSnapshot";
@@ -28,6 +29,19 @@ const BACKUPS_FOLDER = SYSTEM_FOLDER_NAMES.backups;
 const LEGACY_SYSTEM_ROOT = ".system";
 const AUTO_STATE_FILE = "auto-backup-state.json";
 const AUTO_SETTINGS_FILE = "auto-backup-settings.json";
+// Sentinel (new — no "write-before, remove-after" precedent exists elsewhere
+// in this codebase yet): written directly under 5-system/ (not inside any one
+// backup folder) since it marks the WHOLE WORKSPACE as mid-restore, not a
+// single backup's own content. See restoreBackupSnapshot for the write/remove
+// sequencing and why this is what makes an interrupted restore detectable.
+const RESTORE_INPROGRESS_FILE = "restore.inprogress.json";
+// Sentinel (new): lives alongside backup.manifest.json inside a single backup
+// folder. backup.manifest.json is already, informally, written last today and
+// already treated by loadBackupHistory/pruneAutoBackups as "this backup
+// doesn't count if missing/unreadable" — this is an explicit, additional,
+// purpose-built signal alongside that existing informal one, not a
+// replacement for it.
+const BACKUP_COMPLETE_FILE = "backup.complete.json";
 const EXCEL_MAX_ROWS = 1_048_576;
 const XLSX_ROWS_PER_PART = 25_000;
 const XLSX_CELLS_PER_PART = 250_000;
@@ -233,15 +247,16 @@ async function writeBinaryFile(dir: DirectoryHandleLike, fileName: string, conte
   return true;
 }
 
+// Delegates to safeWrite.ts's readFileTextWithRetry so this walk gets the
+// same short, bounded NotReadableError retry safeReadJson already has (see
+// that function's doc comment for why: a transient "could not be read" is
+// expected background noise while the workspace is live, and got materially
+// more likely to be hit once the walk below went from 1 concurrent file read
+// to 8). A missing file still resolves to null; an exhausted retry (or any
+// other error) still throws and must propagate — see isNotFoundError's
+// comment below for why a NotReadableError must not be silently swallowed.
 async function readTextFile(dir: DirectoryHandleLike, fileName: string): Promise<string | null> {
-  try {
-    const fh = await dir.getFileHandle(fileName, { create: false });
-    const file = await fh.getFile();
-    return file.text();
-  } catch (error) {
-    if (isNotFoundError(error)) return null;
-    throw error;
-  }
+  return readFileTextWithRetry(dir, fileName);
 }
 
 function sanitizeFilePart(value: string): string {
@@ -335,7 +350,10 @@ async function writeRowsAsChunkedXlsx(params: {
 // creates and then removes a {file}.tmp, mutating a directory mid-enumeration.
 // Chromium can then reject a follow-up lookup with NotFoundError. A
 // NotReadableError is different: the entry still exists but cannot currently be
-// read, so it must propagate rather than silently producing a partial backup.
+// read. readTextFile (above) now retries a transient NotReadableError with the
+// same bounded backoff safeReadJson uses (via safeWrite.ts's
+// readFileTextWithRetry) before giving up — but once that retry is exhausted,
+// it must still propagate rather than silently producing a partial backup.
 function isNotFoundError(error: unknown): boolean {
   return Boolean(
     error && typeof error === "object" && (error as { name?: string }).name === "NotFoundError"
@@ -377,12 +395,37 @@ async function tryGetDirectory(
   }
 }
 
-async function copyJsonTree(params: {
+type PendingJsonCopy = {
+  sourceDir: DirectoryHandleLike;
+  targetDir: DirectoryHandleLike;
+  fileName: string;
+  relativePath: string;
+};
+
+// Recursively walks sourceDir and returns a FLAT list of every .json file to
+// copy (creating the mirrored target directory structure as it goes) instead
+// of copying eagerly as it walks. Each directory's listing is already fully
+// materialized by collectEntries before this function descends into it (see
+// collectEntries above), so — unlike Task 4's restore walk — this has no
+// live-async-iterator hazard; it is safe to let the whole tree walk finish
+// before any file is actually copied.
+//
+// That's deliberate: it lets copyAllJsonFiles hand the ENTIRE tree to ONE
+// mapWithConcurrency(..., 8, ...) call below, rather than one call per
+// directory level. The plan explicitly flagged per-directory semaphores as a
+// hazard — concurrent recursive calls would each open their own pool of up
+// to 8 workers, so two sibling directories walked "at once" could drive real
+// concurrency to 8 x 8 = 64 in-flight file operations instead of 8. This
+// function itself does no I/O concurrently (ensureDir/collectEntries calls
+// are cheap relative to a full read+write round trip), so flattening first
+// keeps the budget honest regardless of how deep or wide the tree is.
+async function collectJsonFileEntries(params: {
   sourceDir: DirectoryHandleLike;
   targetDir: DirectoryHandleLike;
   sourcePath: string;
-  copied: string[];
-}): Promise<void> {
+}): Promise<PendingJsonCopy[]> {
+  const pending: PendingJsonCopy[] = [];
+
   for (const entry of await collectEntries(params.sourceDir)) {
     if (entry.kind === "directory") {
       if (
@@ -394,79 +437,165 @@ async function copyJsonTree(params: {
       const sourceChild = await tryGetDirectory(params.sourceDir, entry.name);
       if (!sourceChild) continue;
       const targetChild = await ensureDir(params.targetDir, entry.name);
-      await copyJsonTree({
+      const nested = await collectJsonFileEntries({
         sourceDir: sourceChild,
         targetDir: targetChild,
         sourcePath: params.sourcePath ? `${params.sourcePath}/${entry.name}` : entry.name,
-        copied: params.copied,
       });
+      pending.push(...nested);
       continue;
     }
 
     if (entry.kind !== "file" || !entry.name.endsWith(".json")) continue;
-    const text = await readTextFile(params.sourceDir, entry.name);
-    if (text === null) continue;
-    const wrote = await writeTextFile(params.targetDir, entry.name, text);
-    if (wrote) params.copied.push(params.sourcePath ? `${params.sourcePath}/${entry.name}` : entry.name);
+    pending.push({
+      sourceDir: params.sourceDir,
+      targetDir: params.targetDir,
+      fileName: entry.name,
+      relativePath: params.sourcePath ? `${params.sourcePath}/${entry.name}` : entry.name,
+    });
   }
+
+  return pending;
 }
 
 async function copyAllJsonFiles(directoryHandle: DirectoryHandleLike, backupDir: DirectoryHandleLike): Promise<string[]> {
   const jsonDir = await ensureDir(backupDir, "json");
-  const copied: string[] = [];
+  const pending = await collectJsonFileEntries({
+    sourceDir: directoryHandle,
+    targetDir: jsonDir,
+    sourcePath: "",
+  });
 
-  for (const entry of await collectEntries(directoryHandle)) {
+  // Index-addressed via mapWithConcurrency (budget 8; no locks involved on
+  // this path) so jsonFilesBackedUp keeps the walk's listing order — and
+  // therefore a deterministic manifest — even though the 8 workers below
+  // finish their individual read+write round trips in whatever order the
+  // underlying I/O actually completes. A null result marks an entry that was
+  // listed but turned out not to be copyable (source disappeared mid-walk,
+  // or the target handle had no createWritable) and is filtered out below,
+  // exactly as the old .push()-only-on-success code did.
+  const results = await mapWithConcurrency(pending, 8, async (entry) => {
+    const text = await readTextFile(entry.sourceDir, entry.fileName);
+    if (text === null) return null;
+    const wrote = await writeTextFile(entry.targetDir, entry.fileName, text);
+    return wrote ? entry.relativePath : null;
+  });
+
+  return results.filter((path): path is string => path !== null);
+}
+
+type PendingJsonRestore = {
+  sourceDir: DirectoryHandleLike;
+  targetDir: DirectoryHandleLike;
+  fileName: string;
+  relativePath: string;
+};
+
+// Mirrors collectJsonFileEntries's two-phase shape above (see its comment):
+// a non-concurrent flattening pass that walks the WHOLE source tree into one
+// ordered list (creating the mirrored target directory structure as it goes),
+// so restoreJsonTree below never has to hold a live async iterator open across
+// a concurrent await. Each directory's listing is materialized via
+// collectEntries (inheriting its NotFoundError tolerance for a directory that
+// changes mid-enumeration), and — like the copy side — this deliberately
+// stays a single flat list rather than one mapWithConcurrency pool per
+// directory level, so nested recursion here can never multiply the caller's
+// concurrency budget.
+//
+// Unlike the backup-side collectJsonFileEntries, a missing subdirectory here
+// is NOT silently tolerated the same way (F1): the backup side walks a live,
+// mutating workspace where a directory disappearing mid-enumeration is
+// expected, but the restore side walks an already-completed, immutable
+// backup snapshot — a missing subdirectory there means something is
+// genuinely wrong (e.g. a concurrent pruneAutoBackups/sync client touched the
+// backup folder mid-restore). tryGetDirectory returning null is therefore
+// recorded as a skipped path (surfaced up to the caller) instead of just
+// `continue`d past, so the caller can detect and report a partial restore
+// rather than silently reporting full success.
+async function collectJsonRestoreEntries(params: {
+  sourceDir: DirectoryHandleLike;
+  targetDir: DirectoryHandleLike;
+  sourcePath: string;
+}): Promise<{ pending: PendingJsonRestore[]; skippedPaths: string[] }> {
+  const pending: PendingJsonRestore[] = [];
+  const skippedPaths: string[] = [];
+
+  for (const entry of await collectEntries(params.sourceDir)) {
     if (entry.kind === "directory") {
-      const sourceChild = await tryGetDirectory(directoryHandle, entry.name);
-      if (!sourceChild) continue;
-      const targetChild = await ensureDir(jsonDir, entry.name);
-      await copyJsonTree({
+      const relativePath = params.sourcePath ? `${params.sourcePath}/${entry.name}` : entry.name;
+      const sourceChild = await tryGetDirectory(params.sourceDir, entry.name);
+      if (!sourceChild) {
+        skippedPaths.push(relativePath);
+        continue;
+      }
+      const targetChild = await ensureDir(params.targetDir, entry.name);
+      const nested = await collectJsonRestoreEntries({
         sourceDir: sourceChild,
         targetDir: targetChild,
-        sourcePath: entry.name,
-        copied,
+        sourcePath: relativePath,
       });
+      pending.push(...nested.pending);
+      skippedPaths.push(...nested.skippedPaths);
       continue;
     }
 
     if (entry.kind !== "file" || !entry.name.endsWith(".json")) continue;
-    const text = await readTextFile(directoryHandle, entry.name);
-    if (text === null) continue;
-    const wrote = await writeTextFile(jsonDir, entry.name, text);
-    if (wrote) copied.push(entry.name);
+    pending.push({
+      sourceDir: params.sourceDir,
+      targetDir: params.targetDir,
+      fileName: entry.name,
+      relativePath: params.sourcePath ? `${params.sourcePath}/${entry.name}` : entry.name,
+    });
   }
 
-  return copied;
+  return { pending, skippedPaths };
 }
 
+// Was previously a live `for await (const entry of iterable)` walk directly
+// over getDirectoryEntries(sourceDir), restoring each file inline as the walk
+// visited it (including recursing into subdirectories mid-loop). Holding a
+// live async iterator open across concurrent awaits is unsafe, so this now
+// materializes the whole tree first via collectJsonRestoreEntries (no
+// concurrency, see its comment), THEN fans the flat, ordered list out with a
+// SINGLE top-level mapWithConcurrency call.
+//
+// Budget 4: each write takes a Web Lock via safeWriteJsonText, keyed per
+// `${targetDir.name}/${fileName}` — restoring distinct filenames into
+// distinct directories means these locks essentially never contend with each
+// other. The budget caps concurrent Web Lock acquisitions/handles, it is not
+// there to prevent lock contention.
 async function restoreJsonTree(params: {
   sourceDir: DirectoryHandleLike;
   targetDir: DirectoryHandleLike;
   sourcePath: string;
   restored: string[];
+  /** Mirrors `restored`'s out-param calling convention: the caller passes an
+   *  array in, this function pushes into it. Populated from
+   *  collectJsonRestoreEntries' skippedPaths (F1) — a subdirectory that could
+   *  not be reached during the restore walk. */
+  skipped: string[];
 }): Promise<void> {
-  const iterable = getDirectoryEntries(params.sourceDir);
-  if (!iterable) return;
+  const { pending, skippedPaths } = await collectJsonRestoreEntries({
+    sourceDir: params.sourceDir,
+    targetDir: params.targetDir,
+    sourcePath: params.sourcePath,
+  });
+  params.skipped.push(...skippedPaths);
 
-  for await (const entry of iterable) {
-    if (entry.kind === "directory") {
-      const sourceChild = await params.sourceDir.getDirectoryHandle(entry.name, { create: false });
-      const targetChild = await ensureDir(params.targetDir, entry.name);
-      await restoreJsonTree({
-        sourceDir: sourceChild,
-        targetDir: targetChild,
-        sourcePath: params.sourcePath ? `${params.sourcePath}/${entry.name}` : entry.name,
-        restored: params.restored,
-      });
-      continue;
-    }
+  // Index-addressed via mapWithConcurrency so params.restored keeps the walk's
+  // listing order — and therefore a deterministic restoredFiles list — even
+  // though the workers below finish their individual read+write round trips in
+  // whatever order the underlying I/O actually completes. A null result marks
+  // an entry that was listed but whose source text disappeared before it could
+  // be read (source changed mid-walk) and is filtered out below.
+  const results = await mapWithConcurrency(pending, 4, async (entry) => {
+    const text = await readTextFile(entry.sourceDir, entry.fileName);
+    if (text === null) return null;
+    await safeWriteJsonText(entry.targetDir, entry.fileName, text);
+    return entry.relativePath;
+  });
 
-    if (entry.kind !== "file" || !entry.name.endsWith(".json")) continue;
-    const text = await readTextFile(params.sourceDir, entry.name);
-    if (text === null) continue;
-    await safeWriteJsonText(params.targetDir, entry.name, text);
-    params.restored.push(params.sourcePath ? `${params.sourcePath}/${entry.name}` : entry.name);
-  }
+  params.restored.push(...results.filter((path): path is string => path !== null));
 }
 
 type LocatedJson<T> =
@@ -818,6 +947,19 @@ export async function createBackup(
       };
 
       await safeWriteJson(backupDir, "backup.manifest.json", manifest);
+
+      // Sentinel: written LAST among this backup folder's own content writes
+      // (after the json copy walk, the optional xlsx export, and the manifest
+      // itself), so its presence means backupDir was fully, successfully
+      // written. Deliberately precedes the automatic-mode bookkeeping below
+      // (AUTO_STATE_FILE, pruneAutoBackups) — those touch the PARENT backups
+      // directory and a best-effort "which backup ran last" pointer, not this
+      // backup folder's own content, so a failure there must not retroactively
+      // make an otherwise-complete backup look unfinished.
+      await safeWriteJson(backupDir, BACKUP_COMPLETE_FILE, {
+        completedAt: now.toISOString(),
+      });
+
       if (mode === "automatic") {
         const settings = await loadAutoBackupSettings(directoryHandle);
         // casLoop EXEMPTION (documented, not routed): AUTO_STATE_FILE is a
@@ -935,13 +1077,57 @@ export async function restoreBackupSnapshot(params: {
         return { ok: false, error: `تعذر إنشاء نسخة الرجوع قبل الاستعادة: ${rollback.error}` };
       }
 
+      // Sentinel (new, no prior precedent elsewhere in this codebase): written
+      // BEFORE the destructive restore walk starts, removed only once that
+      // walk has completed successfully. If restoreJsonTree throws partway
+      // through, this file is deliberately left behind — do NOT wrap the
+      // removal in a `finally`. Its continued presence is what makes an
+      // interrupted restore detectable on a later check, since the walk
+      // itself has no other way to report "I stopped halfway" once its
+      // rejection has already unwound past this function.
+      const systemDir = await getSystemRoot(params.directoryHandle, true);
+      await safeWriteJson(systemDir, RESTORE_INPROGRESS_FILE, {
+        startedAt: new Date().toISOString(),
+        startedBy: params.username,
+      });
+
       const restored: string[] = [];
+      const skipped: string[] = [];
       await restoreJsonTree({
         sourceDir: jsonDir,
         targetDir: params.directoryHandle,
         sourcePath: "",
         restored,
+        skipped,
       });
+
+      // F1: a subdirectory that collectJsonRestoreEntries could not reach
+      // while walking an already-completed, immutable backup snapshot means
+      // that subtree was silently dropped from the restore — this is a
+      // partial restore, not a success. Leave RESTORE_INPROGRESS_FILE in
+      // place (same "deliberately left behind on failure" contract as the
+      // comment above its write documents) instead of removing it, and
+      // report failure instead of `{ ok: true, ... }`.
+      if (skipped.length > 0) {
+        return {
+          ok: false,
+          error: `اكتملت الاستعادة جزئياً فقط: تعذر الوصول إلى ${skipped.length} مجلد فرعي داخل نسخة النسخ الاحتياطي أثناء الاستعادة.`,
+        };
+      }
+
+      // F2: guard/wrap the sentinel removal the same way pruneAutoBackups
+      // guards its own removeEntry calls above — removeEntry is optional on
+      // DirectoryHandleLike, and a throw here must not turn an otherwise
+      // successful restore into a reported failure (it would be caught by
+      // this function's own outer catch below). Only reachable once
+      // skipped.length === 0.
+      if (systemDir.removeEntry) {
+        try {
+          await systemDir.removeEntry(RESTORE_INPROGRESS_FILE);
+        } catch (error) {
+          logError("backup:restore-sentinel-remove", error);
+        }
+      }
 
       return { ok: true, restoredFiles: restored, rollbackFolderName: rollback.folderName };
     });
@@ -1028,9 +1214,15 @@ export async function loadArchiveStatus(
   directoryHandle: DirectoryHandleLike,
   months: MonthFolderInfo[]
 ): Promise<MonthArchiveStatus[]> {
-  const statuses: MonthArchiveStatus[] = [];
-
-  for (const month of months) {
+  // F4 (documentation only, no behavior change): each of these 4 concurrent
+  // month-workers calls loadAllEmployeeFiles below, which itself goes through
+  // readJsonDirectory -> readNamedJsonFiles (src/data/storage/directoryScan.ts),
+  // whose own internal pool defaults to DIRECTORY_READ_CONCURRENCY = 8. So the
+  // effective peak concurrent file reads this function can drive is 4 x 8 = 32,
+  // not the 4 a reader would assume from this call alone. Read-only, so no
+  // integrity risk — the plan's scope did not budget for capping nested pools,
+  // so the values are left as-is; this is just making the multiplication explicit.
+  return mapWithConcurrency(months, 4, async (month) => {
     const manifest = await loadMonthJson<MonthManifestData>(directoryHandle, month.folderName, ["month.manifest.json"]);
 
     // Prefer the manifest's own totalProcessedRows/status for the population
@@ -1064,7 +1256,7 @@ export async function loadArchiveStatus(
     const answerFiles = await loadAllEmployeeFiles(directoryHandle, month.folderName);
     const answerItems = answerFiles.reduce((sum, file) => sum + (file.items?.length ?? 0), 0);
 
-    statuses.push({
+    return {
       folderName: month.folderName,
       month: month.month,
       year: month.year,
@@ -1086,8 +1278,6 @@ export async function loadArchiveStatus(
       distributionPending: distribution?.totalPending ?? 0,
       answerFiles: answerFiles.length,
       answerItems,
-    });
-  }
-
-  return statuses;
+    };
+  });
 }

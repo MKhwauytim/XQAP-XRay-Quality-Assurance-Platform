@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, X, LayoutGrid, Menu } from "lucide-react";
 
-import { EmptyState } from "./components/StateViews/StateViews";
+import { EmptyState, LoadingState } from "./components/StateViews/StateViews";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
 import AuthGate from "./auth/AuthGate";
@@ -14,6 +14,7 @@ import {
   type RolePermission
 } from "./auth/userManagement";
 import Sidebar from "./components/Sidebar/Sidebar";
+import { BootSplashOverlay } from "./components/Sidebar/BootSplashOverlay";
 import { SIDEBAR_TABS } from "./components/Sidebar/Tabs/tabRegistry";
 import { FeedbackWidget } from "./components/FeedbackWidget/FeedbackWidget";
 import { NotificationBanner } from "./components/NotificationBanner/NotificationBanner";
@@ -21,10 +22,10 @@ import {
   createDailyAdminBackupIfDue,
 } from "./data/backup/backupStorage";
 import { listMonthFolders } from "./data/population/populationStorage";
-import { GlobalMonthProvider } from "./data/month/GlobalMonthProvider";
 import { getLabels } from "./data/labels/labelsStore";
 import { useLabels } from "./data/labels/useLabels";
 import { useWorkspace } from "./data/workspace/useWorkspace";
+import { resetBootProgress } from "./data/workspace/bootProgress";
 import {
   WorkspaceGate,
   WorkspacePicker
@@ -37,7 +38,7 @@ type AppContentProps = {
   session: AuthSession;
 };
 
-function AppContent({ session }: AppContentProps) {
+export function AppContent({ session }: AppContentProps) {
   const { directoryHandle, status: workspaceStatus } = useWorkspace();
   const labels = useLabels();
   const [selectedTabId, setSelectedTabId] = useState("");
@@ -50,6 +51,31 @@ function AppContent({ session }: AppContentProps) {
   const [autoBackupNotice, setAutoBackupNotice] = useState<string | null>(null);
   const [autoBackupRunning, setAutoBackupRunning] = useState(false);
   const autoBackupAttemptKey = `${session.username}:${session.loginAt}:${directoryHandle?.name ?? ""}`;
+
+  // Post-login "data source checklist" (bootProgress.ts) is cleared once per
+  // boot session -- a fresh login or a workspace switch -- reusing the same
+  // session+workspace identity key as the auto-backup attempt above.
+  //
+  // useLayoutEffect, NOT useEffect: the landing tab (Population's useMonthLoad,
+  // Employee's XrayReferrals) registers its own boot sources from ITS OWN
+  // mount effect, and React fires child effects before parent effects within
+  // the same commit -- a plain useEffect here would run AFTER that
+  // registration and wipe the sources right after they're set. Layout effects
+  // are a separate, earlier phase: ALL of them across the whole tree (still
+  // child-before-parent among themselves) run before ANY passive effect
+  // anywhere in the tree, so this reset still finishes before a descendant's
+  // useEffect-based registerBootSources call even though this component is the
+  // outermost parent.
+  //
+  // Doing it during render instead (the "adjusting state when a prop changes"
+  // pattern this used to use) was a genuine render-purity violation:
+  // resetBootProgress() -> notify() synchronously setStates a DIFFERENT,
+  // already-mounted component (BootSplashOverlay), which React rightly warns
+  // about and StrictMode's double-render reproduces on sight. An effect is
+  // also allowed to run twice, which render is not.
+  useLayoutEffect(() => {
+    resetBootProgress();
+  }, [autoBackupAttemptKey]);
 
   useEffect(() => {
     return subscribeToUserManagementChanges(() => {
@@ -279,22 +305,42 @@ function AppContent({ session }: AppContentProps) {
           <span>{labels.app_mobile_nav_label}</span>
         </button>
         {allowedTabs.length === 0 && <NoAvailableTabs role={session.role} />}
-        {allowedTabs.map((tab) =>
-          mountedTabIds.includes(tab.id) ? (
-            <div
-              key={tab.id}
-              hidden={tab.id !== activeTabId}
-              aria-hidden={tab.id !== activeTabId}
-            >
-              {/* Per-tab boundary: a crash in one tab shows its own recovery UI
-                  without unmounting the shell or the other mounted tabs. The root
-                  boundary in main.tsx remains as the last-resort catch-all. */}
-              <ErrorBoundary>
-                <tab.TabComponent />
-              </ErrorBoundary>
-            </div>
-          ) : null
-        )}
+        {/* Post-login checklist overlay: covers only the tab-content area (not
+            the sidebar/toolbar chrome above/around it) while the landing tab's
+            own registered boot sources are still loading. Children are ALWAYS
+            mounted underneath -- this is a purely visual overlay, not a gate --
+            so every tab's own effects (including the boot-source registration
+            they self-report) run on schedule whether or not the checklist is
+            still showing. `bootSessionKey` is the same session+workspace
+            identity used for the reset above -- it is what tells the overlay a
+            genuinely new boot session has begun, so the checklist shows exactly
+            once per session and a later tab registering its own sources
+            mid-session can never bring it back. It is deliberately NOT a React
+            `key`: that would remount every child on a session change. */}
+        <BootSplashOverlay bootSessionKey={autoBackupAttemptKey}>
+          {allowedTabs.map((tab) =>
+            mountedTabIds.includes(tab.id) ? (
+              <div
+                key={tab.id}
+                hidden={tab.id !== activeTabId}
+                aria-hidden={tab.id !== activeTabId}
+              >
+                {/* Per-tab boundary: a crash in one tab shows its own recovery UI
+                    without unmounting the shell or the other mounted tabs. The root
+                    boundary in main.tsx remains as the last-resort catch-all.
+                    Suspense is created fresh per tab.id inside this .map(), so each
+                    mounted tab (mountedTabIds can hold up to 3 at once) gets its own
+                    independent boundary -- one tab's pending lazy chunk can never
+                    blank an already-loaded sibling tab that's also mounted-hidden. */}
+                <ErrorBoundary>
+                  <Suspense fallback={<LoadingState label={labels.app_tab_loading} />}>
+                    <tab.TabComponent />
+                  </Suspense>
+                </ErrorBoundary>
+              </div>
+            ) : null
+          )}
+        </BootSplashOverlay>
       </section>
 
       <FeedbackWidget />
@@ -323,17 +369,15 @@ function NoAvailableTabs({ role }: { role: AuthSession["role"] }) {
 function App() {
   return (
     <WorkspacePicker>
-      <GlobalMonthProvider>
-        <AuthGate>
-          {(session) => (
-            <WorkspaceGate session={session}>
-              {/* key on role so switching the admin role-preview remounts the app,
-                  forcing components that read the session once at mount to re-read it. */}
-              <AppContent key={session.role} session={session} />
-            </WorkspaceGate>
-          )}
-        </AuthGate>
-      </GlobalMonthProvider>
+      <AuthGate>
+        {(session) => (
+          <WorkspaceGate session={session}>
+            {/* key on role so switching the admin role-preview remounts the app,
+                forcing components that read the session once at mount to re-read it. */}
+            <AppContent key={session.role} session={session} />
+          </WorkspaceGate>
+        )}
+      </AuthGate>
     </WorkspacePicker>
   );
 }

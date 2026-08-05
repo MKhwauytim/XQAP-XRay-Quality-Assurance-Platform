@@ -241,10 +241,6 @@ export function setActiveStyleChoices(choices: Record<string, number> | null): v
   activeStyleChoices = choices;
 }
 
-export function getActiveStyleChoices(): Record<string, number> | null {
-  return activeStyleChoices;
-}
-
 /**
  * Strips a trailing `-<digits>` page-number suffix, e.g. `slide-port-population-3`
  * → `slide-port-population`. Paginated builders use 3 different suffix

@@ -1,6 +1,7 @@
 import type { DirectoryHandleLike, FileHandleLike } from "../storage/fileSystemAccess";
-import { safeWriteJson, safeWriteJsonText, safeReadJson, readEnvelopeRevision } from "../storage/safeWrite";
+import { safeWriteJson, safeWriteJsonText, safeReadJson, readEnvelopeRevision, readFileTextWithRetry } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
+import { mapWithConcurrency } from "../storage/concurrency";
 import { withResourceLock } from "../storage/webLocks";
 import { withWorkspaceWriteAccess } from "../storage/workspaceWriteAccess";
 import { logError } from "../storage/errorLogger";
@@ -570,19 +571,32 @@ export async function loadAllPopulationRows(
   const months = await listMonthFolders(directoryHandle);
   const seen = new Map<string, BrowseRow>(); // xrayImageId → latest row
 
-  for (const info of months) {
+  // Index-addressed via mapWithConcurrency (budget 4 -- each read here is a
+  // full population.final.json, heavier than loadArchiveStatus's per-employee
+  // files, so this stays below its 4-8 range at 4) so the fold below still
+  // walks months in listMonthFolders' chronological order -- and therefore a
+  // later month still overwrites an earlier month's duplicate xrayImageId in
+  // `seen` -- regardless of which month's file read actually finishes first.
+  // See populationStorage.test.ts's "the chronologically later month wins..."
+  // characterization test.
+  const perMonthRows = await mapWithConcurrency(months, 4, async (info): Promise<BrowseRow[]> => {
     try {
       const monthDir = await getMonthDir(directoryHandle, info.folderName);
       const processedDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false });
       const result = await safeReadJson<{ rows: Array<Record<string, unknown>> }>(processedDir, "population.final.json");
-      if (!result.ok) continue;
-      for (const row of result.value.rows ?? []) {
-        const id = String(row["xrayImageId"] ?? "");
-        if (!id) continue;
-        seen.set(id, appendMonthInfo(row, info));
-      }
+      if (!result.ok) return [];
+      return (result.value.rows ?? []).map((row) => appendMonthInfo(row, info));
     } catch (error) {
       logError("loadAllPopulationRows", error);
+      return [];
+    }
+  });
+
+  for (const monthRows of perMonthRows) {
+    for (const row of monthRows) {
+      const id = String(row["xrayImageId"] ?? "");
+      if (!id) continue;
+      seen.set(id, row);
     }
   }
 
@@ -606,6 +620,69 @@ export async function loadMonthPopulationFinal(
   }
 }
 
+/**
+ * Raw (unparsed) file text of `population.final.json` -- the worker-owned Population
+ * Browse query path (Phase B, large-population perf proposal) hands this straight to
+ * `usePopulationBrowseWorker().loadRawJson` so the MAIN thread never runs `JSON.parse`
+ * over what can be a 200k-400k row file; only the dedicated query worker
+ * (`src/workers/populationQueryWorker.ts`) parses it, off the main thread.
+ *
+ * Deliberately does NOT reuse `safeReadJson` here: `safeReadJson` also returns
+ * `rawText`, but it gets there by calling `unwrap(JSON.parse(...))` first -- i.e. it
+ * already pays the exact main-thread parse cost this accessor exists to avoid. This
+ * calls the lower-level `readFileTextWithRetry` (text-only, no parse) instead.
+ *
+ * Returns null when the file doesn't exist yet (e.g. an unprocessed/pending month),
+ * matching `loadMonthPopulationFinal`'s null-on-missing contract.
+ *
+ * Recovery ladder (I1): skipping `safeReadJson` also skipped its `.bak` -> `.tmp`
+ * fallback, so a lost/unreadable live file degraded straight to "no data" even with
+ * a perfectly good snapshot sitting next to it. The ladder below restores the SPIRIT
+ * of that recovery at raw-text level: live -> `.bak` -> `.tmp`, same order
+ * `safeReadJson` uses. DELIBERATE, DOCUMENTED GAP: `safeReadJson` also falls back
+ * when the live file is present but *unparseable*, and validates the envelope's
+ * contentHash — both require a `JSON.parse` of the whole file on the main thread,
+ * which is the exact cost this accessor exists to avoid. So a present-but-corrupt
+ * live file is still handed to the worker as-is; the worker's parse fails, it
+ * answers with an "error" response, and `BrowseDataView` surfaces that to the user
+ * (rather than spinning forever, which is what it used to do).
+ */
+export async function loadMonthPopulationFinalRawText(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<string | null> {
+  try {
+    const monthDir = await getMonthDir(directoryHandle, monthFolderName);
+    const processedDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false });
+
+    for (const candidate of [
+      "population.final.json",
+      "population.final.json.bak",
+      "population.final.json.tmp"
+    ]) {
+      try {
+        const text = await readFileTextWithRetry(processedDir, candidate);
+        // A zero-byte torn write (a live file caught mid-safeWriteJson) reads back
+        // as "" rather than null -- treat it the same as a missing rung so the
+        // ladder still falls through to .bak/.tmp instead of handing the worker an
+        // empty string it can only fail to parse.
+        if (text !== null && text.trim() !== "") {
+          return text;
+        }
+      } catch {
+        // A read that fails outright (permissions, exhausted NotReadableError
+        // retries) is treated the same as a missing file HERE, and only here:
+        // the next rung of the ladder may still hold a usable copy. If every
+        // rung fails the caller still gets null, exactly as before.
+      }
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 /** Envelope revision of `population.final.json` for report-to-revision linkage (B2). */
 export async function loadMonthPopulationFinalRevision(
   directoryHandle: DirectoryHandleLike,
@@ -624,23 +701,29 @@ export async function loadAllSampleRows(
   directoryHandle: DirectoryHandleLike
 ): Promise<BrowseRow[]> {
   const months = await listMonthFolders(directoryHandle);
-  const rows: BrowseRow[] = [];
 
-  for (const info of months) {
+  // Index-addressed via mapWithConcurrency (budget 4) so the flat
+  // concatenation below still walks months in listMonthFolders' chronological
+  // order, regardless of which month's sample.master.json read actually
+  // finishes first. See populationStorage.test.ts's "rows stay in
+  // month-chronological order..." characterization test.
+  const perMonthRows = await mapWithConcurrency(months, 4, async (info): Promise<BrowseRow[]> => {
     try {
       const monthDir = await getMonthDir(directoryHandle, info.folderName);
       const sampleDir = await resolveSampleDir(directoryHandle, info.folderName, monthDir);
-      if (!sampleDir) continue;
+      if (!sampleDir) return [];
       const result = await safeReadJson<{ rows: Array<Record<string, unknown>> }>(
         sampleDir,
         "sample.master.json"
       );
-      if (!result.ok) continue;
-      rows.push(...(result.value.rows ?? []).map((row) => appendMonthInfo(row, info)));
-    } catch { /* skip inaccessible */ }
-  }
+      if (!result.ok) return [];
+      return (result.value.rows ?? []).map((row) => appendMonthInfo(row, info));
+    } catch {
+      return [];
+    }
+  });
 
-  return rows;
+  return perMonthRows.flat();
 }
 
 export async function loadAllRawRows(
@@ -648,10 +731,11 @@ export async function loadAllRawRows(
   source: "risk" | "bi"
 ): Promise<BrowseRow[]> {
   const months = await listMonthFolders(directoryHandle);
-  const rows: BrowseRow[] = [];
   const fileName = source === "risk" ? "risk.raw.json" : "bi.raw.json";
 
-  for (const info of months) {
+  // Index-addressed via mapWithConcurrency (budget 4) -- same ordering
+  // rationale as loadAllSampleRows above.
+  const perMonthRows = await mapWithConcurrency(months, 4, async (info): Promise<BrowseRow[]> => {
     try {
       const monthDir = await getMonthDir(directoryHandle, info.folderName);
       const rawDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.raw, { create: false });
@@ -659,12 +743,14 @@ export async function loadAllRawRows(
         rawDir,
         fileName
       );
-      if (!result.ok) continue;
-      rows.push(...(result.value.rows ?? []).map((row) => appendMonthInfo(row, info)));
-    } catch { /* skip inaccessible */ }
-  }
+      if (!result.ok) return [];
+      return (result.value.rows ?? []).map((row) => appendMonthInfo(row, info));
+    } catch {
+      return [];
+    }
+  });
 
-  return rows;
+  return perMonthRows.flat();
 }
 
 export async function loadBrowseRows(

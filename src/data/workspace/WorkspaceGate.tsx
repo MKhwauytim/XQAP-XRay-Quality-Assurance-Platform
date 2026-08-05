@@ -465,7 +465,11 @@ function FirstRunChecklist({ session }: { session: AuthSession }) {
   // Keep the user/permission steps live.
   useEffect(() => subscribeToUserManagementChanges(() => setTick((t) => t + 1)), []);
 
-  // Load the month count; refresh when the tab regains focus (e.g. after an import).
+  // Load the month count; refresh when the tab becomes visible again (e.g.
+  // after an import in another tab). visibilitychange alone is used here --
+  // not also a "focus" listener -- because in normal single-tab-per-window
+  // usage the two fire together for the same user action (switching back to
+  // this tab), so a second listener only doubled the read for no benefit.
   useEffect(() => {
     if (!isAdmin || !directoryHandle) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- clear when not applicable
@@ -483,12 +487,13 @@ function FirstRunChecklist({ session }: { session: AuthSession }) {
         });
     };
     refresh();
-    window.addEventListener("focus", refresh);
-    document.addEventListener("visibilitychange", refresh);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
       cancelled = true;
-      window.removeEventListener("focus", refresh);
-      document.removeEventListener("visibilitychange", refresh);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [isAdmin, directoryHandle]);
 

@@ -1,6 +1,6 @@
 /* @vitest-environment jsdom */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, cleanup, act } from "@testing-library/react";
 import AuthGate from "./AuthGate";
 import * as userManagement from "./userManagement";
 import * as authSession from "./authSession";
@@ -11,6 +11,8 @@ import { VIEWER_USERNAME } from "./authConfig";
 import { WorkspaceProvider } from "../data/workspace/WorkspaceProvider";
 import * as dataRefreshSignal from "../data/workspace/dataRefreshSignal";
 import { createMemoryDirectory } from "../data/storage/memoryDirectory";
+import * as populationStorage from "../data/population/populationStorage";
+import { useGlobalMonth } from "../data/month/useGlobalMonth";
 import type { AuthSession } from "./authTypes";
 import {
   WORKSPACE_SCHEMA_VERSION,
@@ -297,6 +299,201 @@ describe("AuthGate — startup session-hydration race (B2)", () => {
   });
 });
 
+describe("AuthGate — usersHydrated render gate (P1 item 4)", () => {
+  beforeEach(() => {
+    userManagement.writeUserManagementState(
+      userManagement.createEmptyUserManagementState(),
+      false,
+    );
+  });
+
+  afterEach(() => {
+    userManagement.writeUserManagementState(
+      userManagement.createEmptyUserManagementState(),
+      false,
+    );
+  });
+
+  it("shows a loading gate (not the authenticated UI) while status is ready but usersHydrated hasn't caught up, then renders once it has", async () => {
+    const persistedSession: AuthSession = {
+      role: "employee",
+      username: NON_SEED_USERNAME,
+      loginAt: new Date().toISOString(),
+    };
+    vi.spyOn(authSession, "readRealSession").mockReturnValue(persistedSession);
+
+    const handle = createMemoryDirectory("hydration-gate");
+    mocks.loadLastWorkspace.mockResolvedValue({
+      directoryHandle: handle,
+      directoryName: handle.name,
+      savedAt: new Date().toISOString(),
+    });
+    mocks.checkWorkspaceStructure.mockResolvedValue({
+      status: "ready",
+      missingItems: [],
+      invalidItems: [],
+      message: "ready",
+    });
+
+    let resolveLoadWorkspaceFiles!: (value: Awaited<ReturnType<typeof mocks.loadWorkspaceFiles>>) => void;
+    mocks.loadWorkspaceFiles.mockReturnValue(
+      new Promise((resolve) => {
+        resolveLoadWorkspaceFiles = resolve;
+      }),
+    );
+
+    renderAuthGate();
+
+    // status has not reached "ready" yet at first paint -- unchanged, pre-existing behavior.
+    expect(screen.getByText("authenticated")).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(mocks.loadWorkspaceFiles).toHaveBeenCalled();
+    });
+
+    // status IS "ready" now, but usersHydrated hasn't caught up (loadWorkspaceFiles
+    // is still pending) -- the gate must be active: authenticated content and the
+    // admin toolbar are both hidden.
+    await waitFor(() => {
+      expect(screen.queryByText("authenticated")).not.toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("admin-toolbar-stub")).not.toBeInTheDocument();
+    expect(screen.getByText("جارٍ التحميل…")).toBeInTheDocument();
+
+    resolveLoadWorkspaceFiles({
+      manifest: null,
+      usersPermissions: buildUsersPermissionsFile([NON_SEED_USERNAME]),
+      sampleMaster: null,
+      sampleDistribution: null,
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("authenticated")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("admin-toolbar-stub")).toBeInTheDocument();
+  });
+
+  it("never gates an exempt (demo) session", async () => {
+    const demoSession: AuthSession = {
+      role: "admin",
+      username: VIEWER_USERNAME,
+      loginAt: new Date().toISOString(),
+      mode: "demo",
+    };
+    vi.spyOn(authSession, "readRealSession").mockReturnValue(demoSession);
+
+    const handle = createMemoryDirectory("hydration-gate-demo-exempt");
+    mocks.loadLastWorkspace.mockResolvedValue({
+      directoryHandle: handle,
+      directoryName: handle.name,
+      savedAt: new Date().toISOString(),
+    });
+    mocks.checkWorkspaceStructure.mockResolvedValue({
+      status: "ready",
+      missingItems: [],
+      invalidItems: [],
+      message: "ready",
+    });
+    mocks.loadWorkspaceFiles.mockReturnValue(new Promise(() => {})); // never resolves
+
+    renderAuthGate();
+
+    await waitFor(() => {
+      expect(mocks.loadWorkspaceFiles).toHaveBeenCalled();
+    });
+
+    // Even with hydration never completing, an exempt session must stay visible.
+    expect(screen.getByText("authenticated")).toBeInTheDocument();
+  });
+});
+
+describe("AuthGate — GlobalMonthProvider moved inside (P2 item 5)", () => {
+  it("does not list month folders while a workspace is connected but no one has logged in yet, then lists them once login actually succeeds", async () => {
+    const listMonthFoldersSpy = vi.spyOn(populationStorage, "listMonthFolders");
+    listMonthFoldersSpy.mockResolvedValue([]);
+
+    // No persisted session -- this file's default beforeEach already sets
+    // this, but it's restated here because it's load-bearing for the
+    // scenario: the workspace below connects (auto-reconnect, independent of
+    // authentication) while `session` stays null, exactly like a real user
+    // sitting on the login screen with a previously-used workspace folder.
+    vi.spyOn(authSession, "readRealSession").mockReturnValue(null);
+
+    const password = "correct horse battery staple";
+    vi.spyOn(userManagement, "getManagedLoginUsers").mockReturnValue([
+      {
+        id: "u1",
+        username: NON_SEED_USERNAME,
+        displayName: "Ahmed Salem",
+        role: "employee",
+        passwordHash: { algorithm: "argon2id", encoded: "x" },
+        isActive: true,
+        hasCertScanLicense: false,
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+    ]);
+    vi.spyOn(passwordCrypto, "verifyPasswordHash").mockResolvedValue(true);
+
+    // The workspace reaches "ready" + hydrated on its own, with no session
+    // involved at all -- the exact pre-login condition the fix targets.
+    mockReadyWorkspace("global-month-pre-login-workspace", [NON_SEED_USERNAME]);
+
+    function MonthConsumer() {
+      const { months } = useGlobalMonth();
+      return <div data-testid="month-count">{months.length}</div>;
+    }
+
+    // AdminToolbar is stubbed file-wide (see the vi.mock at the top of this
+    // file), so this only proves the render-prop `children` path receives
+    // GlobalMonthContext -- the AdminToolbar -> GlobalMonthSelector path is
+    // presumed covered by GlobalMonthSelector's own dedicated tests.
+    render(
+      <WorkspaceProvider>
+        <AuthGate>{() => <MonthConsumer />}</AuthGate>
+      </WorkspaceProvider>,
+    );
+
+    // Login form showing confirms session is genuinely null at this point.
+    await waitFor(() => {
+      expect(screen.getByLabelText("اسم المستخدم")).toBeInTheDocument();
+    });
+
+    // Let the already-connected workspace fully settle to ready/hydrated
+    // while still logged out.
+    await waitFor(() => {
+      expect(mocks.loadWorkspaceFiles).toHaveBeenCalled();
+    });
+
+    // Still pre-login: GlobalMonthProvider isn't mounted anywhere in the
+    // tree yet (it now lives inside AuthGate's authenticated branch), so
+    // listMonthFolders must not have fired despite the workspace being
+    // fully connected.
+    expect(listMonthFoldersSpy).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("month-count")).not.toBeInTheDocument();
+
+    // Now actually log in through the real UI, the same way
+    // "AuthGate — login form" does.
+    fireEvent.change(screen.getByLabelText("اسم المستخدم"), {
+      target: { value: NON_SEED_USERNAME },
+    });
+    fireEvent.change(screen.getByLabelText("كلمة المرور"), {
+      target: { value: password },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "دخول" }));
+
+    // Once login succeeds, AuthGate mounts GlobalMonthProvider around the
+    // authenticated children, and it lists months for the workspace that
+    // was already sitting connected in the background.
+    await waitFor(() => {
+      expect(screen.getByTestId("month-count")).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(listMonthFoldersSpy).toHaveBeenCalled();
+    });
+  });
+});
+
 describe("AuthGate — activity log wiring (Task 1 double-permission-prompt fix)", () => {
   beforeEach(() => {
     userManagement.writeUserManagementState(
@@ -339,7 +536,7 @@ describe("AuthGate — activity log wiring (Task 1 double-permission-prompt fix)
 });
 
 describe("AuthGate — permission auto-refresh", () => {
-  const AUTO_REFRESH_INTERVAL_MS = 5 * 60_000;
+  const AUTO_REFRESH_INTERVAL_MS = 3 * 60_000;
 
   beforeEach(() => {
     userManagement.writeUserManagementState(
@@ -355,7 +552,7 @@ describe("AuthGate — permission auto-refresh", () => {
     );
   });
 
-  it("schedules a 5-minute interval that re-syncs users/permissions from disk for a real session", async () => {
+  it("schedules a 3-minute interval that re-syncs users/permissions from disk for a real session", async () => {
     vi.spyOn(authSession, "readRealSession").mockReturnValue({
       role: "employee",
       username: NON_SEED_USERNAME,
@@ -384,7 +581,7 @@ describe("AuthGate — permission auto-refresh", () => {
     const dataRefreshSpy = vi.fn();
     const unsubscribe = dataRefreshSignal.subscribeToDataRefresh(dataRefreshSpy);
 
-    // Fire the scheduled callback directly rather than racing real 5-minute
+    // Fire the scheduled callback directly rather than racing real 3-minute
     // timers -- what matters here is that the interval this effect registers
     // actually triggers another disk read, not exactly when it fires.
     (refreshCall![0] as () => void)();
@@ -396,6 +593,46 @@ describe("AuthGate — permission auto-refresh", () => {
     // every mounted view (assigned samples, referrals, notifications, ...)
     // re-reads its own workspace data -- not just the user-management state.
     expect(dataRefreshSpy).toHaveBeenCalled();
+    unsubscribe();
+  });
+
+  it("skips the periodic tick's work entirely while the tab is hidden", async () => {
+    vi.spyOn(authSession, "readRealSession").mockReturnValue({
+      role: "employee",
+      username: NON_SEED_USERNAME,
+      loginAt: new Date().toISOString(),
+    });
+    mockReadyWorkspace("auto-refresh-hidden-tab", [NON_SEED_USERNAME]);
+    const setIntervalSpy = vi.spyOn(window, "setInterval");
+
+    renderAuthGate();
+
+    await waitFor(() => expect(mocks.loadWorkspaceFiles).toHaveBeenCalled());
+    const callsAfterHydration = mocks.loadWorkspaceFiles.mock.calls.length;
+
+    let refreshCall: ReturnType<typeof setIntervalSpy.mock.calls.find>;
+    await waitFor(() => {
+      refreshCall = setIntervalSpy.mock.calls.find(
+        (call) => call[1] === AUTO_REFRESH_INTERVAL_MS,
+      );
+      expect(refreshCall).toBeDefined();
+    });
+
+    const dataRefreshSpy = vi.fn();
+    const unsubscribe = dataRefreshSignal.subscribeToDataRefresh(dataRefreshSpy);
+
+    vi.spyOn(document, "hidden", "get").mockReturnValue(true);
+
+    // Fire the scheduled callback directly while the tab is "hidden".
+    (refreshCall![0] as () => void)();
+
+    // Give any (incorrect) refresh a chance to fire before asserting it didn't.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mocks.loadWorkspaceFiles.mock.calls.length).toBe(callsAfterHydration);
+    expect(dataRefreshSpy).not.toHaveBeenCalled();
+
     unsubscribe();
   });
 

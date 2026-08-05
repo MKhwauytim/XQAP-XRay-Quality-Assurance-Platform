@@ -15,6 +15,7 @@ import * as XLSX from "xlsx";
 
 import type { DistributionCurrentData } from "../distribution/distributionTypes";
 import { openReportWindow, writeOrCloseOnFailure } from "./htmlReport";
+import { yieldToMain } from "../storage/yieldToMain";
 import { esc, fmtNum, fmtPct } from "./executive/primitives";
 import { page, pageHeader, kpi, kpiStrip, panel } from "./executive/document/shared";
 import { dataTable, paginateRows } from "./executive/document/pagination";
@@ -147,14 +148,6 @@ function rotate<T>(arr: T[], by: number): T[] {
 function pad(n: number): string {
   return String(n).padStart(2, "0");
 }
-
-/**
- * Yields a turn to the main thread (P3-7). Same convention as
- * `Population/processing/populationProcessor.ts` and the biData/riskData
- * workbook parsers — a bare `setTimeout(resolve, 0)`, not a shared import
- * (there isn't one; every yielding module keeps its own copy).
- */
-const yieldToMain = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 async function distributionDocPages(m: DistributionModel, issueDate: string, detailRows: (string | number | null)[][]): Promise<string> {
   const pages: string[] = [];
@@ -373,12 +366,18 @@ export async function buildDistributionDeck(
   });
 }
 
-export function buildDistributionXlsx(
+// XLSX export — Sheet 2 (assignments) row-array construction is chunked with
+// a main-thread yield between chunks (same idiom as DataTable/index.tsx and
+// BrowseDataView.tsx) so a large distribution doesn't block the UI thread for
+// the whole build.
+const EXPORT_CHUNK_SIZE = 1000;
+
+export async function buildDistributionXlsx(
   data: DistributionCurrentData,
   monthFolderName: string,
   employeeDisplayNames: Record<string, string> = {},
   sourceRevisions?: SourceRevisions,
-): void {
+): Promise<void> {
   const m = computeDistributionModel(data, monthFolderName, employeeDisplayNames);
   const nameOf = (u: string): string => employeeDisplayNames[u] ?? u;
 
@@ -400,14 +399,22 @@ export function buildDistributionXlsx(
   ];
 
   // Sheet 2 — Assignments (all rows).
+  const assignmentRows: (string | number)[][] = [];
+  for (let i = 0; i < data.entries.length; i += EXPORT_CHUNK_SIZE) {
+    const chunk = data.entries.slice(i, i + EXPORT_CHUNK_SIZE);
+    for (const e of chunk) {
+      assignmentRows.push([
+        e.xrayImageId, nameOf(e.assignedTo), statusLabel(e.status), e.lastEventAt,
+        e.row.portName ?? "", e.row.stage ?? "", e.row.certScanStatus, e.row.biEnrichmentStatus,
+        e.row.xrayLevelOneResult, e.row.xrayLevelTwoResult, e.replacedById ?? "",
+        e.row.xrayEntryDate ?? "", e.row.declarationNumber ?? "", e.row.movementType ?? "", e.row.riskMessage ?? "",
+      ]);
+    }
+    if (data.entries.length > EXPORT_CHUNK_SIZE) await yieldToMain();
+  }
   const assignments: (string | number)[][] = [
     ["رقم الأشعة", "الموظف", "الحالة", "آخر حدث", "المنفذ", "المستوى", "CertScan", "مصدر BI", "م.أول", "م.ثاني", "رقم الإحالة", "تاريخ الدخول", "رقم البيان", "نوع الحركة", "رسالة Risk"],
-    ...data.entries.map((e) => [
-      e.xrayImageId, nameOf(e.assignedTo), statusLabel(e.status), e.lastEventAt,
-      e.row.portName ?? "", e.row.stage ?? "", e.row.certScanStatus, e.row.biEnrichmentStatus,
-      e.row.xrayLevelOneResult, e.row.xrayLevelTwoResult, e.replacedById ?? "",
-      e.row.xrayEntryDate ?? "", e.row.declarationNumber ?? "", e.row.movementType ?? "", e.row.riskMessage ?? "",
-    ]),
+    ...assignmentRows,
   ];
 
   // Sheet 3 — Per-employee breakdown.

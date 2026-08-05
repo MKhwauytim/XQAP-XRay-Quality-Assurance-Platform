@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { createMemoryDirectory, setSimulatedWritePermission } from "../storage/memoryDirectory";
 import type { DirectoryHandleLike, FileHandleLike } from "../storage/fileSystemAccess";
-import { safeWriteJson } from "../storage/safeWrite";
+import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { WorkspacePermissionError } from "../storage/workspaceWriteAccess";
 import { getSampleMainDir, getSystemRoot, getUserDataRoot } from "../workspace/workspacePaths";
 import { WORKSPACE_FILE_NAMES } from "../workspace/workspaceDefaults";
@@ -177,6 +177,217 @@ function wrapDirDenyingXlsxWrites(real: DirectoryHandleLike): DirectoryHandleLik
     getDirectoryHandle: async (dirName: string, options?: { create?: boolean }) => {
       const child = await real.getDirectoryHandle(dirName, options);
       return wrapDirDenyingXlsxWrites(child);
+    },
+  };
+  return wrapped;
+}
+
+/**
+ * Wraps a real memory directory so any getDirectoryHandle call for a folder
+ * name present in `delayMsByFolder` awaits that many ms before delegating to
+ * the real handle -- lets a test make loadArchiveStatus's per-month reads
+ * (loadMonthJson repeatedly calls getMonthDir/getSampleMainDir, each of which
+ * re-enters getDirectoryHandle(monthFolderName)) complete in a DELIBERATELY
+ * different order than the input `months` array, to prove mapWithConcurrency
+ * (Task 2) returns results in input order rather than completion order.
+ */
+function wrapDirWithDelay(
+  real: DirectoryHandleLike,
+  delayMsByFolder: Record<string, number>
+): DirectoryHandleLike {
+  const wrapped: DirectoryHandleLike = {
+    ...real,
+    getDirectoryHandle: async (dirName: string, options?: { create?: boolean }) => {
+      const delay = delayMsByFolder[dirName];
+      if (delay) {
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+      const child = await real.getDirectoryHandle(dirName, options);
+      return wrapDirWithDelay(child, delayMsByFolder);
+    },
+  };
+  return wrapped;
+}
+
+/**
+ * Wraps a real memory directory so any getFileHandle call for a file name
+ * present in `delayMsByFile` awaits that many ms before delegating to the
+ * real handle -- lets a test make copyAllJsonFiles's per-file read+write
+ * round trips (readTextFile/writeTextFile both call getFileHandle) complete
+ * in a DELIBERATELY different order than collectJsonFileEntries' listing
+ * order, to prove mapWithConcurrency (Task 3) keeps jsonFilesBackedUp
+ * index-addressed (listing order) rather than completion order.
+ */
+function wrapDirWithFileDelay(
+  real: DirectoryHandleLike,
+  delayMsByFile: Record<string, number>
+): DirectoryHandleLike {
+  const wrapped: DirectoryHandleLike = {
+    ...real,
+    getFileHandle: async (fileName: string, options?: { create?: boolean }) => {
+      const delay = delayMsByFile[fileName];
+      if (delay) {
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+      return real.getFileHandle(fileName, options);
+    },
+    getDirectoryHandle: async (dirName: string, options?: { create?: boolean }) => {
+      const child = await real.getDirectoryHandle(dirName, options);
+      return wrapDirWithFileDelay(child, delayMsByFile);
+    },
+  };
+  return wrapped;
+}
+
+/** Seeds a backup folder directly under 5-system/backups/{folderName}/json/
+ *  with the given flat files (name -> value), bypassing createBackup so a
+ *  test can control the restore source's exact file layout without paying
+ *  for a real backup-creation walk first. */
+async function seedBackupJsonFiles(
+  root: DirectoryHandleLike,
+  folderName: string,
+  files: Record<string, unknown>
+): Promise<void> {
+  const systemDir = await getSystemRoot(root, true);
+  const backupsDir = await systemDir.getDirectoryHandle("backups", { create: true });
+  const backupDir = await backupsDir.getDirectoryHandle(folderName, { create: true });
+  const jsonDir = await backupDir.getDirectoryHandle("json", { create: true });
+  for (const [name, value] of Object.entries(files)) {
+    await safeWriteJson(jsonDir, name, value);
+  }
+}
+
+/**
+ * Wraps a real memory directory so any getFileHandle(name, { create: true })
+ * call for a file name present in `watch` appends that name to `log`, in call
+ * order -- lets a test prove one write happened strictly before another (e.g.
+ * a sentinel file written before any of the actual restored data files)
+ * without mocking this module's write helpers directly.
+ */
+function wrapDirLoggingFileWrites(
+  real: DirectoryHandleLike,
+  log: string[],
+  watch: Set<string>
+): DirectoryHandleLike {
+  const wrapped: DirectoryHandleLike = {
+    ...real,
+    getFileHandle: async (fileName: string, options?: { create?: boolean }) => {
+      if (options?.create && watch.has(fileName)) {
+        log.push(fileName);
+      }
+      return real.getFileHandle(fileName, options);
+    },
+    getDirectoryHandle: async (dirName: string, options?: { create?: boolean }) => {
+      const child = await real.getDirectoryHandle(dirName, options);
+      return wrapDirLoggingFileWrites(child, log, watch);
+    },
+  };
+  return wrapped;
+}
+
+/**
+ * Wraps a real memory directory so any getFileHandle(name, { create: true })
+ * call for `failingFileName` throws instead of delegating to the real handle
+ * -- lets a test simulate the restore walk failing partway through writing
+ * one specific file, to prove restore.inprogress.json survives an
+ * interrupted restore (the whole point of the sentinel).
+ */
+function wrapDirFailingFileWrite(
+  real: DirectoryHandleLike,
+  failingFileName: string
+): DirectoryHandleLike {
+  const wrapped: DirectoryHandleLike = {
+    ...real,
+    getFileHandle: async (fileName: string, options?: { create?: boolean }) => {
+      if (options?.create && fileName === failingFileName) {
+        throw new Error(`Simulated write failure for ${failingFileName}`);
+      }
+      return real.getFileHandle(fileName, options);
+    },
+    getDirectoryHandle: async (dirName: string, options?: { create?: boolean }) => {
+      const child = await real.getDirectoryHandle(dirName, options);
+      return wrapDirFailingFileWrite(child, failingFileName);
+    },
+  };
+  return wrapped;
+}
+
+function flakyNotReadableError(): Error {
+  // Mirrors the real Chromium DOMException text for this condition (and the
+  // exact wording the user reported hitting during a real backup).
+  const error = new Error(
+    "The requested file could not be read, typically due to permissions problems that have occurred after a reference to file was acquired."
+  );
+  error.name = "NotReadableError";
+  return error;
+}
+
+/**
+ * Wraps a real memory directory so any READ (options.create falsy)
+ * getFileHandle lookup for `flakyFileName` returns a handle whose getFile()
+ * throws a NotReadableError-shaped error the first `state.remainingFailures`
+ * times it is called (across this wrapper and any of its recursively-wrapped
+ * subdirectories, via the shared `state` object), then delegates to the real
+ * handle -- lets a test simulate the transient "could not be read" condition
+ * that backupStorage.ts's readTextFile now retries via safeWrite.ts's
+ * readFileTextWithRetry. Pass `Number.POSITIVE_INFINITY` as
+ * remainingFailures to simulate a NotReadableError that never clears, to
+ * prove an exhausted retry still fails the whole backup/restore instead of
+ * being silently swallowed.
+ */
+function wrapDirWithFlakyFileRead(
+  real: DirectoryHandleLike,
+  flakyFileName: string,
+  state: { remainingFailures: number }
+): DirectoryHandleLike {
+  const wrapped: DirectoryHandleLike = {
+    ...real,
+    getFileHandle: async (fileName: string, options?: { create?: boolean }) => {
+      const handle = await real.getFileHandle(fileName, options);
+      if (options?.create || fileName !== flakyFileName) return handle;
+      return {
+        ...handle,
+        getFile: async (): Promise<File> => {
+          if (state.remainingFailures > 0) {
+            state.remainingFailures -= 1;
+            throw flakyNotReadableError();
+          }
+          return handle.getFile();
+        },
+      } as FileHandleLike;
+    },
+    getDirectoryHandle: async (dirName: string, options?: { create?: boolean }) => {
+      const child = await real.getDirectoryHandle(dirName, options);
+      return wrapDirWithFlakyFileRead(child, flakyFileName, state);
+    },
+  };
+  return wrapped;
+}
+
+/**
+ * Wraps a real memory directory so any READ lookup (options.create falsy) of
+ * `missingDirName` throws a NotFoundError-shaped error instead of delegating
+ * to the real handle -- lets a test simulate a backup subdirectory that
+ * disappeared out from under an in-progress restore (e.g. another tab's
+ * pruneAutoBackups, or a network-share sync client) without touching
+ * memoryDirectory.ts. CREATE lookups (targetDir's ensureDir calls during the
+ * restore walk) pass straight through, so only the restore-side READ of this
+ * one subdirectory name is affected (F1 repro).
+ */
+function wrapDirMissingSubdirectory(
+  real: DirectoryHandleLike,
+  missingDirName: string
+): DirectoryHandleLike {
+  const wrapped: DirectoryHandleLike = {
+    ...real,
+    getDirectoryHandle: async (dirName: string, options?: { create?: boolean }) => {
+      if (dirName === missingDirName && !options?.create) {
+        const error = new Error(`Simulated missing directory: ${missingDirName}`);
+        error.name = "NotFoundError";
+        throw error;
+      }
+      const child = await real.getDirectoryHandle(dirName, options);
+      return wrapDirMissingSubdirectory(child, missingDirName);
     },
   };
   return wrapped;
@@ -516,5 +727,322 @@ describe("loadArchiveStatus — distribution completed/pending surfacing (P2-1)"
       distributionCompleted: 0,
       distributionPending: 0,
     });
+  });
+});
+
+describe("loadArchiveStatus — result order survives out-of-order completion (Task 2)", () => {
+  it("returns statuses in input `months` order even when an earlier month's reads finish last", async () => {
+    const root = makeRoot();
+    const months = [
+      { folderName: "1-january-2026", month: 1, year: 2026 },
+      { folderName: "2-february-2026", month: 2, year: 2026 },
+      { folderName: "3-march-2026", month: 3, year: 2026 },
+    ];
+
+    for (const m of months) {
+      const populationRoot = await root.getDirectoryHandle("1-population", { create: true });
+      const monthDir = await populationRoot.getDirectoryHandle(m.folderName, { create: true });
+      await safeWriteJson(monthDir, "month.manifest.json", {
+        monthFolderName: m.folderName,
+        month: m.month,
+        year: m.year,
+        processedAt: "2026-01-31T10:00:00.000Z",
+        processedBy: "admin",
+        riskFileName: "risk.xlsx",
+        biFileName: null,
+        certScanUsed: false,
+        templateVersion: null,
+        rngSeed: null,
+        totalRawRows: m.month,
+        totalProcessedRows: m.month,
+        status: "processed-saved",
+      });
+    }
+
+    // Deliberately reversed relative to input order: months[0]'s reads are the
+    // SLOWEST and months[2]'s the FASTEST, so under real concurrency months[2]
+    // finishes first -- exactly the scenario a naive "push as each resolves"
+    // implementation would get wrong. This may pass even against the current
+    // (pre-Task-2) sequential loop, since a strictly sequential for-loop can
+    // never observe out-of-order completion in the first place -- that's
+    // expected; the value here is regression protection once concurrency lands.
+    const delayed = wrapDirWithDelay(root, {
+      [months[0]!.folderName]: 30,
+      [months[1]!.folderName]: 15,
+      [months[2]!.folderName]: 2,
+    });
+
+    const statuses = await loadArchiveStatus(delayed, months);
+
+    expect(statuses.map((s) => s.folderName)).toEqual(months.map((m) => m.folderName));
+    expect(statuses.map((s) => s.totalProcessedRows)).toEqual([1, 2, 3]);
+  });
+});
+
+describe("createBackup — jsonFilesBackedUp order survives out-of-order completion (Task 3)", () => {
+  it("keeps jsonFilesBackedUp in the walk's listing order even when an earlier file's copy finishes last", async () => {
+    const root = makeRoot();
+    await safeWriteJson(root, "a-file.json", { value: "a" });
+    await safeWriteJson(root, "b-file.json", { value: "b" });
+    await safeWriteJson(root, "c-file.json", { value: "c" });
+
+    // Deliberately reversed relative to listing order: a-file's copy is the
+    // SLOWEST and c-file's the FASTEST, so under real concurrency c-file
+    // finishes first -- exactly the scenario a naive "push as each resolves"
+    // implementation would get wrong. This may pass even against the current
+    // (pre-Task-3) sequential walk, since a strictly sequential loop can
+    // never observe out-of-order completion in the first place -- that's
+    // expected; the value here is regression protection once concurrency lands.
+    const delayed = wrapDirWithFileDelay(root, {
+      "a-file.json": 30,
+      "b-file.json": 15,
+      "c-file.json": 2,
+    });
+
+    const result = await createBackup(delayed, [], "admin", "manual");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const relevant = result.manifest.jsonFilesBackedUp.filter((f) =>
+      ["a-file.json", "b-file.json", "c-file.json"].includes(f)
+    );
+    expect(relevant).toEqual(["a-file.json", "b-file.json", "c-file.json"]);
+  });
+});
+
+describe("restoreBackupSnapshot — restoredFiles order survives out-of-order completion (Task 4)", () => {
+  it("keeps restoredFiles in the walk's listing order even when an earlier file's restore finishes last", async () => {
+    const root = makeRoot();
+    await seedBackupJsonFiles(root, "seed-backup", {
+      "a-file.json": { value: "a" },
+      "b-file.json": { value: "b" },
+      "c-file.json": { value: "c" },
+    });
+
+    // Deliberately reversed relative to listing order: a-file's restore is the
+    // SLOWEST and c-file's the FASTEST, so under real concurrency c-file
+    // finishes first -- exactly the scenario a naive "push as each resolves"
+    // implementation would get wrong. Mirrors the Task 3 jsonFilesBackedUp
+    // order test above, but for the restore direction (restoreJsonTree used
+    // to be a strictly sequential live-async-iterator walk, which could never
+    // observe out-of-order completion in the first place).
+    const delayed = wrapDirWithFileDelay(root, {
+      "a-file.json": 30,
+      "b-file.json": 15,
+      "c-file.json": 2,
+    });
+
+    const result = await restoreBackupSnapshot({
+      directoryHandle: delayed,
+      months: [],
+      backupFolderName: "seed-backup",
+      username: "admin",
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const relevant = result.restoredFiles.filter((f) =>
+      ["a-file.json", "b-file.json", "c-file.json"].includes(f)
+    );
+    expect(relevant).toEqual(["a-file.json", "b-file.json", "c-file.json"]);
+  });
+});
+
+describe("restoreBackupSnapshot — restore.inprogress.json sentinel (Task 4)", () => {
+  it("writes restore.inprogress.json before any data file is restored, and removes it after a successful restore", async () => {
+    const root = makeRoot();
+    await seedBackupJsonFiles(root, "seed-backup", {
+      "a-file.json": { value: "a" },
+      "b-file.json": { value: "b" },
+      "c-file.json": { value: "c" },
+    });
+
+    const log: string[] = [];
+    const watch = new Set(["restore.inprogress.json", "a-file.json", "b-file.json", "c-file.json"]);
+    const logged = wrapDirLoggingFileWrites(root, log, watch);
+
+    const result = await restoreBackupSnapshot({
+      directoryHandle: logged,
+      months: [],
+      backupFolderName: "seed-backup",
+      username: "admin",
+    });
+
+    expect(result.ok).toBe(true);
+
+    // The sentinel's own write is fully awaited to completion before
+    // restoreJsonTree (and therefore any of its concurrent workers) even
+    // starts, so it must be the very first watched write logged.
+    expect(log[0]).toBe("restore.inprogress.json");
+    expect(log.slice(1).sort()).toEqual(["a-file.json", "b-file.json", "c-file.json"]);
+
+    // Removed after successful completion.
+    const systemDir = await getSystemRoot(root, false);
+    await expect(
+      systemDir.getFileHandle("restore.inprogress.json", { create: false })
+    ).rejects.toMatchObject({ name: "NotFoundError" });
+  });
+});
+
+describe("restoreBackupSnapshot — restore.inprogress.json survives an interrupted restore (Task 4)", () => {
+  it("leaves restore.inprogress.json behind when the restore walk throws partway through", async () => {
+    const root = makeRoot();
+    await seedBackupJsonFiles(root, "seed-backup", {
+      "a-file.json": { value: "a" },
+      "b-file.json": { value: "b" },
+      "c-file.json": { value: "c" },
+    });
+
+    // Simulates the restore walk being interrupted partway through -- b-file's
+    // write throws, so the whole restore fails, and restore.inprogress.json
+    // (written before the walk started) must be left behind: that's the
+    // detectability property the sentinel exists for.
+    const failing = wrapDirFailingFileWrite(root, "b-file.json");
+
+    const result = await restoreBackupSnapshot({
+      directoryHandle: failing,
+      months: [],
+      backupFolderName: "seed-backup",
+      username: "admin",
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatch(/b-file\.json/);
+
+    const systemDir = await getSystemRoot(root, false);
+    await expect(
+      systemDir.getFileHandle("restore.inprogress.json", { create: false })
+    ).resolves.toBeDefined();
+  });
+});
+
+describe("restoreBackupSnapshot — partial-restore detection when a backup subdirectory is missing (F1)", () => {
+  it("reports ok:false and leaves restore.inprogress.json in place when a nested backup subdirectory cannot be read", async () => {
+    const root = makeRoot();
+    const systemDir = await getSystemRoot(root, true);
+    const backupsDir = await systemDir.getDirectoryHandle("backups", { create: true });
+    const backupDir = await backupsDir.getDirectoryHandle("seed-backup", { create: true });
+    const jsonDir = await backupDir.getDirectoryHandle("json", { create: true });
+    await safeWriteJson(jsonDir, "top-file.json", { value: "top" });
+    const subDir = await jsonDir.getDirectoryHandle("missing-during-restore", { create: true });
+    await safeWriteJson(subDir, "nested-file.json", { value: "nested" });
+
+    // Simulates another tab's pruneAutoBackups (or a sync client) deleting
+    // this subdirectory out from under the restore walk -- the walk must NOT
+    // silently drop the whole subtree and report success (F1).
+    const missing = wrapDirMissingSubdirectory(root, "missing-during-restore");
+
+    const result = await restoreBackupSnapshot({
+      directoryHandle: missing,
+      months: [],
+      backupFolderName: "seed-backup",
+      username: "admin",
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    // Concise Arabic partial-restore message, not a raw browser NotFoundError.
+    expect(result.error).toMatch(/جزئ/);
+
+    // The sentinel must survive: its whole purpose is making an interrupted
+    // (here: partial) restore detectable on a later check.
+    const systemDirCheck = await getSystemRoot(root, false);
+    await expect(
+      systemDirCheck.getFileHandle("restore.inprogress.json", { create: false })
+    ).resolves.toBeDefined();
+  });
+});
+
+describe("createBackup — backup.complete.json written last (Task 4)", () => {
+  it("writes backup.complete.json only after backup.manifest.json has already been written", async () => {
+    const root = makeRoot();
+
+    const log: string[] = [];
+    const watch = new Set(["backup.manifest.json", "backup.complete.json"]);
+    const logged = wrapDirLoggingFileWrites(root, log, watch);
+
+    const result = await createBackup(logged, [], "admin", "manual");
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(log).toEqual(["backup.manifest.json", "backup.complete.json"]);
+
+    const systemDir = await getSystemRoot(root, false);
+    const backupsDir = await systemDir.getDirectoryHandle("backups", { create: false });
+    const backupDir = await backupsDir.getDirectoryHandle(result.folderName, { create: false });
+    await expect(
+      backupDir.getFileHandle("backup.complete.json", { create: false })
+    ).resolves.toBeDefined();
+  });
+});
+
+describe("createBackup — transient NotReadableError recovery (readTextFile retry)", () => {
+  it("completes the backup after a transiently unreadable file's read succeeds on retry", async () => {
+    const root = makeRoot();
+    await safeWriteJson(root, "a-file.json", { value: "a" });
+    await safeWriteJson(root, "b-file.json", { value: "b" });
+    await safeWriteJson(root, "c-file.json", { value: "c" });
+
+    // b-file's read throws NotReadableError twice (matching
+    // NOT_READABLE_RETRY_DELAYS_MS = [20, 60] in safeWrite.ts, i.e. 2
+    // retries available) before succeeding on the 3rd attempt -- simulating
+    // the transient "could not be read" window a concurrent write, sync
+    // client, or antivirus scan can open up. This is exactly the report:
+    // the user's exact NotReadableError message, hit during a real backup
+    // after the copy walk went from 1 concurrent file read to 8 (widening
+    // the window in which this transient condition gets landed on).
+    const flaky = wrapDirWithFlakyFileRead(root, "b-file.json", { remainingFailures: 2 });
+
+    const result = await createBackup(flaky, [], "admin", "manual");
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const relevant = result.manifest.jsonFilesBackedUp.filter((f) =>
+      ["a-file.json", "b-file.json", "c-file.json"].includes(f)
+    );
+    expect(relevant.sort()).toEqual(["a-file.json", "b-file.json", "c-file.json"]);
+
+    // The retry must have recovered the REAL content, not silently skipped
+    // or substituted the file.
+    const systemDir = await getSystemRoot(root, false);
+    const backupsDir = await systemDir.getDirectoryHandle("backups", { create: false });
+    const backupDir = await backupsDir.getDirectoryHandle(result.folderName, { create: false });
+    const jsonDir = await backupDir.getDirectoryHandle("json", { create: false });
+    const copied = await safeReadJson<{ value: string }>(jsonDir, "b-file.json");
+    expect(copied.ok && copied.value.value).toBe("b");
+  });
+});
+
+describe("createBackup — persistent NotReadableError still fails the backup (retry does not mask real failures)", () => {
+  it("reports ok:false and does not produce a partial backup when a file's read never recovers", async () => {
+    const root = makeRoot();
+    await safeWriteJson(root, "a-file.json", { value: "a" });
+    await safeWriteJson(root, "b-file.json", { value: "b" });
+    await safeWriteJson(root, "c-file.json", { value: "c" });
+
+    // b-file's read NEVER succeeds -- the retry budget is exhausted and the
+    // error must still propagate. A genuinely failed read (permissions
+    // denied, corrupt handle, etc.) must keep failing the backup loud
+    // rather than retrying forever or silently producing a partial backup.
+    const flaky = wrapDirWithFlakyFileRead(root, "b-file.json", {
+      remainingFailures: Number.POSITIVE_INFINITY,
+    });
+
+    const result = await createBackup(flaky, [], "admin", "manual");
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatch(/NotReadable|permission/i);
+
+    // No partial backup: backup.manifest.json (written only after the whole
+    // json copy walk completes) must not exist for this attempt, so
+    // loadBackupHistory (which only counts folders with a readable manifest)
+    // must not report it -- confirming the failure was not silently
+    // swallowed into an incomplete-but-"successful" backup.
+    const history = await loadBackupHistory(root);
+    expect(history).toEqual([]);
   });
 });

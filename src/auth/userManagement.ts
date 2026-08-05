@@ -52,8 +52,6 @@ const DEFAULT_USER_PASSWORD_HASH: PasswordHashRecord = {
   encoded: "$argon2id$v=19$m=19456,t=2,p=1$eHJheS1kZWZhdWx0LTIwMjY$2ZptFPutF/hZRmAofMUHA8cUE3Tq/A743hoOJO74PWY"
 };
 
-export const DEFAULT_USER_TEMP_PASSWORD = "Xray@2026";
-
 // ── Runtime state & event ─────────────────────────────────────────────────────
 
 const CHANGE_EVENT_NAME = "xray-user-management-change";
@@ -310,9 +308,9 @@ const FEATURE_DEFAULTS: Record<string, Partial<Record<AuthRole, boolean>>> = {
   "approve-replacements": { guest: false, employee: false, supervisor: true,  manager: true  },
   "view-all-entries":     { guest: false, employee: false, supervisor: true,  manager: true  },
   "submit-referrals":     { guest: false, employee: true,  supervisor: true,  manager: false },
-  "request-replacement":  { guest: false, employee: true,  supervisor: true,  manager: true  },
-  "submit-answers":       { guest: false, employee: true,  supervisor: false, manager: false },
-  "configure-referral-columns": { guest: false, employee: false, supervisor: true, manager: true },
+  "request-replacement":  { guest: false, employee: true,  supervisor: true,  manager: false },
+  "submit-answers":       { guest: false, employee: true,  supervisor: true,  manager: false },
+  "configure-referral-columns": { guest: false, employee: false, supervisor: false, manager: true },
   "ew.reopenAnswer":      { guest: false, employee: false, supervisor: true,  manager: true  },
   "upload-data":          { guest: false, employee: false, supervisor: false, manager: true  },
   "process-population":   { guest: false, employee: false, supervisor: false, manager: true  },
@@ -341,36 +339,37 @@ const FEATURE_DEFAULTS: Record<string, Partial<Record<AuthRole, boolean>>> = {
 
 export function createDefaultPermissions(): RolePermission[] {
   return [
-    // Guest — read-only on population only
-    { role: "guest",      tabId: "population",         access: "view" },
+    // Guest — no default access to population (was "view"; scoped down)
+    { role: "guest",      tabId: "population",         access: "none" },
     { role: "guest",      tabId: "employee-workspace", access: "none" },
     { role: "guest",      tabId: "reports",            access: "none" },
     { role: "guest",      tabId: "reports/report-designer", access: "none" },
     { role: "guest",      tabId: "archive",            access: "none" },
     { role: "guest",      tabId: "user-management",    access: "none" },
     { role: "guest",      tabId: "settings",           access: "none" },
-    // Employee
-    { role: "employee",   tabId: "population",         access: "view" },
+    // Employee — no default access to population (was "view"; scoped down)
+    { role: "employee",   tabId: "population",         access: "none" },
     { role: "employee",   tabId: "employee-workspace", access: "edit" },
     { role: "employee",   tabId: "reports",            access: "none" },
     { role: "employee",   tabId: "reports/report-designer", access: "none" },
     { role: "employee",   tabId: "archive",            access: "none" },
     { role: "employee",   tabId: "user-management",    access: "none" },
     { role: "employee",   tabId: "settings",           access: "none" },
-    // Supervisor
-    { role: "supervisor", tabId: "population",         access: "view" },
+    // Supervisor — population/reports/archive default to "none" (was "view"; scoped down)
+    { role: "supervisor", tabId: "population",         access: "none" },
     { role: "supervisor", tabId: "employee-workspace", access: "edit" },
-    { role: "supervisor", tabId: "reports",            access: "view" },
-    { role: "supervisor", tabId: "reports/report-designer", access: "view" },
-    { role: "supervisor", tabId: "archive",            access: "view" },
+    { role: "supervisor", tabId: "reports",            access: "none" },
+    { role: "supervisor", tabId: "reports/report-designer", access: "none" },
+    { role: "supervisor", tabId: "archive",            access: "none" },
     { role: "supervisor", tabId: "user-management",    access: "none" },
     { role: "supervisor", tabId: "settings",           access: "none" },
-    // Manager — full access except user-management (admin-only by default)
+    // Manager — full access except user-management and archive (archive was
+    // "edit"; scoped down) (admin-only by default)
     { role: "manager",    tabId: "population",         access: "edit" },
     { role: "manager",    tabId: "employee-workspace", access: "edit" },
     { role: "manager",    tabId: "reports",            access: "edit" },
     { role: "manager",    tabId: "reports/report-designer", access: "edit" },
-    { role: "manager",    tabId: "archive",            access: "edit" },
+    { role: "manager",    tabId: "archive",            access: "none" },
     { role: "manager",    tabId: "user-management",    access: "none" },
     // Settings is code-gated to guest + admin (see TAB_ROLE_CEILINGS); manager
     // has no access, so the shipped default is "none" to match reality.
@@ -392,8 +391,8 @@ export function createDefaultPermissions(): RolePermission[] {
     { role: "admin",      tabId: "user-management/activity",            access: "edit" },
     { role: "admin",      tabId: "user-management/actions",             access: "edit" },
     { role: "admin",      tabId: "settings",                access: "edit" },
-    // Manager — full access to EW sub-tabs
-    { role: "manager",    tabId: "ew/xray-referrals",       access: "edit" },
+    // Manager — full access to EW sub-tabs except xray-referrals (was "edit"; scoped down)
+    { role: "manager",    tabId: "ew/xray-referrals",       access: "none" },
     { role: "manager",    tabId: "ew/xray-results",         access: "edit" },
     { role: "manager",    tabId: "ew/referral-approval",    access: "edit" },
     { role: "manager",    tabId: "ew/inspection-form",      access: "edit" },
@@ -402,13 +401,14 @@ export function createDefaultPermissions(): RolePermission[] {
     // dead end (TemplateBuilder renders its own access-denied empty state for it). "none" hides
     // the sidebar entry instead of linking to a page that can never do anything for this role.
     { role: "supervisor", tabId: "ew/xray-referrals",       access: "edit" },
-    { role: "supervisor", tabId: "ew/xray-results",         access: "edit" },
+    { role: "supervisor", tabId: "ew/xray-results",         access: "view" },
     { role: "supervisor", tabId: "ew/referral-approval",    access: "edit" },
     { role: "supervisor", tabId: "ew/inspection-form",      access: "none" },
     // Employee — restricted EW sub-tabs; inspection-form is "none" for the same dead-end reason
-    // (manage-inspection-template also defaults off for employees).
+    // (manage-inspection-template also defaults off for employees). xray-results was "view";
+    // scoped down to "none".
     { role: "employee",   tabId: "ew/xray-referrals",       access: "edit" },
-    { role: "employee",   tabId: "ew/xray-results",         access: "view" },
+    { role: "employee",   tabId: "ew/xray-results",         access: "none" },
     { role: "employee",   tabId: "ew/referral-approval",    access: "none" },
     { role: "employee",   tabId: "ew/inspection-form",      access: "none" },
     // Guest — no EW sub-tab access
@@ -432,24 +432,26 @@ export function createDefaultPermissions(): RolePermission[] {
     // Sub-tabs that formerly relied on parent-tab inheritance (موروث) — now explicit.
     // Values baked from the pre-removal effective access (parent population / reports rows),
     // so the inheritance fallback can be deleted with zero functional change (see C1 test).
-    { role: "guest",      tabId: "population/process",       access: "view" },
-    { role: "employee",   tabId: "population/process",       access: "view" },
-    { role: "supervisor", tabId: "population/process",       access: "view" },
+    // guest/employee/supervisor were "view" on both population sub-tabs; scoped down to "none".
+    { role: "guest",      tabId: "population/process",       access: "none" },
+    { role: "employee",   tabId: "population/process",       access: "none" },
+    { role: "supervisor", tabId: "population/process",       access: "none" },
     { role: "manager",    tabId: "population/process",       access: "edit" },
     { role: "admin",      tabId: "population/process",       access: "edit" },
-    { role: "guest",      tabId: "population/browse",        access: "view" },
-    { role: "employee",   tabId: "population/browse",        access: "view" },
-    { role: "supervisor", tabId: "population/browse",        access: "view" },
+    { role: "guest",      tabId: "population/browse",        access: "none" },
+    { role: "employee",   tabId: "population/browse",        access: "none" },
+    { role: "supervisor", tabId: "population/browse",        access: "none" },
     { role: "manager",    tabId: "population/browse",        access: "edit" },
     { role: "admin",      tabId: "population/browse",        access: "edit" },
+    // supervisor was "view" on both reports sub-tabs; scoped down to "none".
     { role: "guest",      tabId: "reports/reports",          access: "none" },
     { role: "employee",   tabId: "reports/reports",          access: "none" },
-    { role: "supervisor", tabId: "reports/reports",          access: "view" },
+    { role: "supervisor", tabId: "reports/reports",          access: "none" },
     { role: "manager",    tabId: "reports/reports",          access: "edit" },
     { role: "admin",      tabId: "reports/reports",          access: "edit" },
     { role: "guest",      tabId: "reports/kpi",              access: "none" },
     { role: "employee",   tabId: "reports/kpi",              access: "none" },
-    { role: "supervisor", tabId: "reports/kpi",              access: "view" },
+    { role: "supervisor", tabId: "reports/kpi",              access: "none" },
     { role: "manager",    tabId: "reports/kpi",              access: "edit" },
     { role: "admin",      tabId: "reports/kpi",              access: "edit" },
   ];
@@ -694,13 +696,4 @@ export function persistUserPasswordHash(
     updatedAt: new Date().toISOString(),
   };
   writeUserManagementState({ ...state, users }, true);
-}
-
-export function getPublicManagedUsers(): Array<{
-  username: string;
-  displayName: string;
-}> {
-  return getManagedLoginUsers()
-    .filter((u) => u.isActive)
-    .map((u) => ({ username: u.username, displayName: u.displayName }));
 }

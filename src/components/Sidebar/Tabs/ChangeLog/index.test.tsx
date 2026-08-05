@@ -16,6 +16,13 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+// ChangeLog/index.tsx is now `lazy(() => import("./TabView"))` (N2 tab-level
+// code splitting) -- the first render always suspends (no Suspense ancestor
+// here, mirroring ReportDesigner/TemplateBuilder's own isolated component
+// tests), so every test must await the lazy chunk resolving before making any
+// assertions. renderChangeLog() below does that once via a stable, always-
+// present title, so callers can keep the rest of their assertions synchronous.
+
 const FIXTURE = [
   "## v3 — 2026-07-20 — Change (auth): scope example, heading and table check",
   "",
@@ -52,7 +59,11 @@ afterEach(cleanup);
 
 async function renderChangeLog() {
   const { default: ChangeLogTab } = await import("./index");
-  return render(<ChangeLogTab />);
+  const result = render(<ChangeLogTab />);
+  // Wait for the lazy TabView chunk to resolve and mount before returning --
+  // the page's h1 title is stable across every fixture used below.
+  await screen.findByRole("heading", { level: 1, name: "سجل الإصدارات" });
+  return result;
 }
 
 describe("ChangeLog markdown rendering", () => {

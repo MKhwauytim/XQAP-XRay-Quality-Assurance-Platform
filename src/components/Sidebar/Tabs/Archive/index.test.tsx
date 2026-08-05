@@ -213,7 +213,7 @@ describe("Archive role-based mutation gating", () => {
     expect(screen.queryByText("الإجراءات")).not.toBeInTheDocument();
   });
 
-  it("supervisor: stays read-only (page access is view, one notch short of the edit canMutate requires)", async () => {
+  it("supervisor: stays read-only (page access defaults to none)", async () => {
     vi.mocked(loadArchiveStatus).mockResolvedValue([makeStatus()]);
     vi.mocked(loadBackupHistory).mockResolvedValue([makeHistoryItem()]);
     loginAs("supervisor");
@@ -227,7 +227,7 @@ describe("Archive role-based mutation gating", () => {
     expect(screen.queryByText("الإجراءات")).not.toBeInTheDocument();
   });
 
-  it("manager: can create a backup but not restore one or close/reopen a month", async () => {
+  it("manager: stays read-only (archive page access was scoped down from edit to none)", async () => {
     vi.mocked(loadArchiveStatus).mockResolvedValue([makeStatus()]);
     vi.mocked(loadBackupHistory).mockResolvedValue([makeHistoryItem()]);
     loginAs("manager");
@@ -235,8 +235,12 @@ describe("Archive role-based mutation gating", () => {
     render(<ArchiveTab />);
     await screen.findByText("معالج");
 
-    expect(screen.getByRole("button", { name: "نسخ احتياطي الآن" })).not.toBeDisabled();
-    expect(screen.getByText(L.backup_include_xlsx_option)).toBeInTheDocument();
+    // Manager's default archive.createBackup FEATURE flag stays enabled, but
+    // the archive PAGE permission was scoped down to "none" -- canMutate's
+    // page-editable check now denies manager here, same as every other
+    // non-admin role.
+    expect(screen.getByRole("button", { name: "نسخ احتياطي الآن" })).toBeDisabled();
+    expect(screen.queryByText(L.backup_include_xlsx_option)).not.toBeInTheDocument();
 
     expect(screen.getByRole("button", { name: "استعادة" })).toBeDisabled();
     expect(screen.queryByText("الإجراءات")).not.toBeInTheDocument();

@@ -1,4 +1,4 @@
-import type { ComponentType, ReactNode } from "react";
+import type { ComponentType, LazyExoticComponent, ReactNode } from "react";
 import type { AuthRole } from "../../../auth/authTypes";
 
 export type SidebarSubTab = {
@@ -13,11 +13,11 @@ export type SidebarTabDefinition = {
   order: number;
   allowedRoles: readonly AuthRole[];
   icon: ReactNode;
-  TabComponent: ComponentType;
+  TabComponent: ComponentType | LazyExoticComponent<ComponentType>;
   subTabs?: SidebarSubTab[];
 };
 
 export type SidebarTabModule = {
-  default: ComponentType;
+  default: ComponentType | LazyExoticComponent<ComponentType>;
   tabConfig?: Omit<SidebarTabDefinition, "TabComponent">;
 };

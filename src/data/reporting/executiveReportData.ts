@@ -400,8 +400,3 @@ export function fmtPct(n: number | null, decimals = 1): string {
   if (n === null) return "—";
   return `${n.toFixed(decimals)}%`;
 }
-
-export function fmtK(n: number): string {
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
-  return String(n);
-}

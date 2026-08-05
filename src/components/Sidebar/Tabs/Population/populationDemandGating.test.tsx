@@ -23,6 +23,17 @@ vi.mock("../../../../workers/workbookWorker?worker&inline", () => ({
   },
 }));
 
+// PopulationTab keeps BrowseDataView mounted, so this suite spawns the Browse
+// query worker even though it asserts nothing about Browse's contents. It uses
+// the SAME shared realistic stub as the BrowseDataView suites (macrotask reply,
+// serial drain, real `handleWorkerMessage`) rather than a no-op: a no-op stub
+// leaves Browse permanently awaiting a "loaded"/"result" that never arrives,
+// which is a latent trap for whoever later adds a Browse assertion here.
+vi.mock("../../../../workers/populationQueryWorker?worker&inline", async () => {
+  const { createPopulationQueryWorkerStubClass } = await import("./populationQueryWorkerTestStub");
+  return { default: createPopulationQueryWorkerStubClass() };
+});
+
 const permissionsMock = vi.hoisted(() => ({
   // Defaults to a view-only role (no draw-sample/process-population) --
   // the exact population the original perf complaint targeted.

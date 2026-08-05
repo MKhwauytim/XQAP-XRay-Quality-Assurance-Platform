@@ -18,7 +18,6 @@ import {
   WORKSPACE_SCHEMA_VERSION,
   type JsonEnvelope,
   type WorkspaceLoadedFiles,
-  type WorkspaceStatus,
   type WorkspaceStructureCheckResult
 } from "../workspace/workspaceTypes";
 import { detectWorkspaceSchema, initializeWorkspaceSchemaMetadata } from "../workspace/workspaceSchema";
@@ -447,12 +446,6 @@ export async function writeJsonFile<TFile>(
   value: TFile
 ): Promise<void> {
   await safeWriteJson(directoryHandle, fileName, value);
-}
-
-export function getStatusFromStructureResult(
-  result: WorkspaceStructureCheckResult
-): WorkspaceStatus {
-  return result.status;
 }
 
 function isNotFoundError(error: unknown): boolean {

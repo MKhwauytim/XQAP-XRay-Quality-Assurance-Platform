@@ -5,9 +5,11 @@
 // previous write was still in flight was dropped on the floor -- not queued,
 // not retried, just silently lost. Since disk is the sole roster persistence
 // (SEC-01 users.permissions.json), that meant a rapid second admin edit could
-// vanish permanently. `coalesceToLatest` (exported from ./index) replaces the
-// skip-guard: a call that arrives mid-write only overwrites a "pending" slot,
-// and the in-flight call drains it (and anything even newer) once it settles.
+// vanish permanently. `coalesceToLatest` (exported from ./TabView, alongside
+// its consumer -- ./index is now just the thin lazy-loading tab shell)
+// replaces the skip-guard: a call that arrives mid-write only overwrites a
+// "pending" slot, and the in-flight call drains it (and anything even newer)
+// once it settles.
 //
 // These tests exercise `coalesceToLatest` directly with a controllable mock
 // writer instead of rendering the full tab, so the "two/three rapid
@@ -15,7 +17,7 @@
 // promise) rather than dependent on real disk-write timing.
 import { describe, expect, it, vi } from "vitest";
 
-import { coalesceToLatest } from "./index";
+import { coalesceToLatest } from "./TabView";
 
 function deferred<T = void>(): {
   promise: Promise<T>;

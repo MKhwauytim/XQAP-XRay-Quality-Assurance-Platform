@@ -17,6 +17,12 @@ import {
   loadOrDeriveDistributionCurrentForRead,
 } from "../../../../../data/distribution/distributionStorage";
 import { subscribeToDataRefresh } from "../../../../../data/workspace/dataRefreshSignal";
+import {
+  registerBootSources,
+  markBootSourceLoading,
+  markBootSourceLoaded,
+  markBootSourceError,
+} from "../../../../../data/workspace/bootProgress";
 import type { DistributionEntry } from "../../../../../data/distribution/distributionTypes";
 import {
   executeReplacement,
@@ -133,6 +139,45 @@ function rowStatusClass(
     return "dt-tr--pending";
   }
   return undefined;
+}
+
+type BootSourceDescriptor = { key: string; labelEn: string; labelAr: string };
+
+/**
+ * Named on-disk sources `loadData`'s single fetch pass below actually reads
+ * for this user -- feeds the post-login boot-progress checklist
+ * (`src/data/workspace/bootProgress.ts`) so a viewer can see which real files
+ * this landing sub-tab's own load touched. Pure reporting: it never changes
+ * what `loadData` fetches. `referrals_requests` covers BOTH `loadReferralLog`
+ * and `loadReplacementLog` -- they read the exact same underlying per-employee
+ * `*.answers.json` (referralRequests/replacementRequests live on
+ * `EmployeeAnswerFile`, see answerStorage.ts) and per-supervisor
+ * `*.decisions.json` files, just folded differently, so representing them as
+ * two separate "loading" entries would misrepresent them as distinct reads.
+ * Its `labelEn` names both current on-disk folders relative to the month's
+ * sample root -- `2-samples/{month}/2-employees/` (getSampleEmployeeDir, via
+ * answerStorage.ts's loadAllEmployeeFiles) and `2-samples/{month}/3-approvals/`
+ * (getSampleApprovalsDir, via approvalStorage.ts's loadAllSupervisorDecisions),
+ * per workspacePaths.ts's SAMPLE_SUBFOLDERS. Both have unnumbered legacy
+ * fallbacks the loaders still read; the label names the current layout.
+ * `referrals_sample_mirror` is only included for personal-scope users
+ * (`!canSeeAll`) -- oversight users never call `loadEmployeeSampleMirror`
+ * (see loadData below), matching that same branch exactly.
+ */
+function referralsBootSources(username: string, canSeeAll: boolean): BootSourceDescriptor[] {
+  return [
+    { key: "referrals_sample_master", labelEn: "sample.master.json", labelAr: "العينة الرئيسية" },
+    {
+      key: "referrals_requests",
+      labelEn: "2-employees/*.answers.json + 3-approvals/*.decisions.json",
+      labelAr: "طلبات الإحالة والاستبدال",
+    },
+    { key: "referrals_distribution", labelEn: "distribution.current.json", labelAr: "توزيع العينات" },
+    ...(canSeeAll
+      ? []
+      : [{ key: "referrals_sample_mirror", labelEn: `${username}.samples.json`, labelAr: "نسخة عيناتي" }]),
+    { key: "referrals_answers", labelEn: `${username}.answers.json`, labelAr: "إجاباتي" },
+  ];
 }
 
 export default function XrayReferrals({ directoryHandle }: Props) {
@@ -332,6 +377,15 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   // Bug (load-token): guards a slow load for a previously-selected month from
   // clobbering a later selection — including the truthy→"" empty transition.
   const loadTokenRef = useRef(0);
+  // Boot-progress reporting: only the very first data-fetching pass of this
+  // component's lifetime reports to the post-login checklist (bootProgress.ts)
+  // -- every later call (a real month switch, which also re-runs the mount
+  // effect below since loadData's identity changes with selMonth; the
+  // post-action reloads inside handleReopenAnswer/handleRequestReopen, which
+  // pass no options and are therefore non-silent too; and every
+  // `{ silent: true }` background/action refresh) must never re-flicker a
+  // checklist the user is already long past.
+  const bootReportedRef = useRef(false);
 
   // No selected on-disk month (empty workspace or a pending new month) → clear the
   // loaded queue and land in the ready/empty state (sibling to the load-token guard).
@@ -364,6 +418,13 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     // saved yet. A silent refresh must re-fetch and swap the underlying rows in place
     // while leaving the current selection and panel mounted.
     const silent = opts?.silent ?? false;
+    const isInitialLoad = !bootReportedRef.current;
+    if (isInitialLoad) bootReportedRef.current = true;
+    const bootSources = isInitialLoad ? referralsBootSources(username, canSeeAll) : [];
+    if (isInitialLoad) {
+      registerBootSources(bootSources);
+      bootSources.forEach((source) => markBootSourceLoading(source.key));
+    }
     if (!silent) {
       setLoadState("loading");
       setSelEntryId(null);
@@ -411,7 +472,13 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       );
       const answerItems = files.flatMap((f) => f.items);
 
+      // Staleness check FIRST: a superseded load must not touch the shared
+      // boot-progress store at all -- marking its keys "loaded" would show
+      // the checklist ticking off sources the newer, still-pending load is
+      // about to re-read from scratch.
       if (token !== loadTokenRef.current) return; // superseded by a newer month selection
+
+      if (isInitialLoad) bootSources.forEach((source) => markBootSourceLoaded(source.key));
 
       setAllEntries(all);
       setEntries(visible);
@@ -422,6 +489,15 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       setAnswers(answerItems);
       setLoadState("ready");
     } catch (err) {
+      // Staleness check FIRST, mirroring the success path above: a
+      // superseded load's rejection must not touch the shared boot-progress
+      // store either -- it would show a false failure on keys the newer,
+      // still-pending load has already re-registered and is midway through
+      // re-loading fresh.
+      if (isInitialLoad && token === loadTokenRef.current) {
+        const message = err instanceof Error ? err.message : String(err);
+        bootSources.forEach((source) => markBootSourceError(source.key, message));
+      }
       if (token !== loadTokenRef.current) return;
       // A silent background refresh must not force-close an open inspection form on
       // a transient read hiccup — log it for observability and leave the current
@@ -624,7 +700,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         if (!deadStillEligible || replacementTaken) {
           setReplacementError(STALE_MSG);
           setStatusMsg({ type: "error", text: STALE_MSG });
-          await loadData();
+          await loadData({ silent: true });
           return;
         }
 
@@ -645,7 +721,13 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         if (result.ok) setSampleMaster(result.updatedSample);
         setReplacementDialog(null);
         setStatusMsg({ type: "ok", text: "تم استبدال العينة وإسناد البديل." });
-        await loadData();
+        // Silent: this refresh follows a successful action already reflected in
+        // local state (setSampleMaster/setReplacementDialog above) — it must
+        // update the underlying rows in place, not flash the loading state or
+        // force-close the panel the way the periodic/manual refresh signal would
+        // if it weren't passed { silent: true } either (see loadData's own
+        // docblock further up).
+        await loadData({ silent: true });
         setSelEntryId(replacement.xrayImageId);
       } else {
         // Non-recommended — requires supervisor approval.
@@ -669,7 +751,11 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         }
         setReplacementDialog(null);
         setStatusMsg({ type: "ok", text: "تم إرسال طلب الاستبدال — بانتظار موافقة المشرف." });
-        await loadData();
+        // Silent for the same reason as the recommended-replacement branch above —
+        // this is a background refresh after an already-successful write, not a
+        // month/user change, so it must not flash the loading state or force-close
+        // the currently open inspection panel.
+        await loadData({ silent: true });
       }
     } finally {
       setReplacementBusy(false);
@@ -726,7 +812,11 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       setReferralModal(null);
       clearSelection();
       setStatusMsg({ type: "ok", text: `تم إرسال طلب الإحالة لـ ${toEmployee} — بانتظار موافقة المشرف.` });
-      await loadData();
+      // Silent — same reasoning as handleReplace's post-success reloads: this
+      // follows an already-successful write, not a month/user change, so it must
+      // refresh the queue in place instead of flashing the loading state or
+      // force-closing whatever inspection panel is currently open.
+      await loadData({ silent: true });
     } else {
       setStatusMsg({ type: "error", text: result.error });
     }

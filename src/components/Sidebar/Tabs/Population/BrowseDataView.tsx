@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import * as XLSX from "xlsx";
-import { Database, Settings2 } from "lucide-react";
+import { Database, Settings2, ChevronUp, ChevronDown } from "lucide-react";
 
 import { readSession } from "../../../../auth/authSession";
 import {
   loadBrowseRows,
+  loadMonthPopulationFinalRawText,
   type BrowseDatasetKind,
   type BrowseRow
 } from "../../../../data/population/populationStorage";
@@ -18,16 +19,44 @@ import {
   loadAdminBrowsePreset,
   loadUserBrowsePreset,
   saveAdminBrowseDatasetPreset,
+  type BrowseDatasetPreset,
   type UserBrowsePresetFile
 } from "../../../../data/preferences/browsePresetStorage";
 import { useGlobalMonth } from "../../../../data/month/useGlobalMonth";
 import { useLabels } from "../../../../data/labels/useLabels";
 import { PageHeader } from "../../../../components/PageHeader/PageHeader";
-import { EmptyState, LoadingState } from "../../../../components/StateViews/StateViews";
+import { EmptyState, ErrorState, LoadingState } from "../../../../components/StateViews/StateViews";
 import Pagination from "../../../../components/Pagination/Pagination";
-import { DATA_PAGE_SIZE, clampPage, pageSlice } from "../../../../components/Pagination/paginationUtils";
+import { DATA_PAGE_SIZE } from "../../../../components/Pagination/paginationUtils";
 import { formatStageLabel } from "./components/helpers";
 import { buildBrowseFilterOptionPreview } from "./browseFilterOptions";
+import {
+  runPopulationQuery,
+  type PopulationQueryParams,
+  type PopulationQuerySort,
+  type PopulationQueryResult
+} from "../../../../data/population/populationQuery";
+import {
+  usePopulationBrowseWorker,
+  type PopulationQueryLane
+} from "./usePopulationBrowseWorker";
+
+// ── Query lanes ───────────────────────────────────────────────────────────────
+// This view asks the ONE query worker three simultaneously-valid questions, each
+// with its own independent "latest request wins" lifetime. They must not share a
+// staleness lane: they can (and routinely do) fire in the same React commit —
+// toggling a filter checkbox changes `columnFilters`, a dependency of both the
+// main query effect and the filter-preview effect — and a shared "latest wins"
+// slot then lets whichever posted last silently invalidate the other's answer.
+// That is exactly the bug that made filtering appear to do nothing: the preview's
+// later request made the main table's own result look stale, so it was dropped.
+// See usePopulationBrowseWorker's doc comment for the full model.
+const MAIN_QUERY_LANE: PopulationQueryLane = "browse-main";
+const FILTER_PREVIEW_QUERY_LANE: PopulationQueryLane = "browse-filter-preview";
+// Export walks every page of ITS OWN captured params; it must neither be
+// interrupted by, nor interrupt, the live table/dropdown the user keeps using
+// while the export runs.
+const EXPORT_QUERY_LANE: PopulationQueryLane = "browse-export";
 
 // ── Browse sub-tab ────────────────────────────────────────────────────────────
 const BROWSE_COLUMNS: { key: string; label: string; default: boolean }[] = [
@@ -262,6 +291,37 @@ function defaultColumnOrderKeys(
   return [...curatedPresent, ...remaining];
 }
 
+// Resolves column order/visibility once for a freshly-loaded dataset, from a
+// representative row sample (see this file's own "fresh load" doc comment near
+// COLUMNS_INIT below for why only a sample — not the full row set — is available for
+// the worker-backed "population" path). A module-level pure function (not a
+// component closure) so it needs no entry in any effect's dependency array.
+function resolveColumnsAndVisibility(
+  dataset: BrowseDatasetKind,
+  sampleRows: BrowseRow[],
+  datasetPreset: BrowseDatasetPreset | undefined
+): { columnOrder: string[]; visibleCols: Set<string> } {
+  const nextColumns = buildBrowseColumns(sampleRows);
+  const nextOrder = mergeColumnOrder(datasetPreset?.columnOrder, defaultColumnOrderKeys(dataset, nextColumns));
+  const nextVisible = resolveVisibleColumns(dataset, nextColumns, datasetPreset?.visibleColumns);
+  return { columnOrder: nextOrder, visibleCols: nextVisible };
+}
+
+// Same "all months" narrowing BrowseDataView has always applied to its loaded rows —
+// extracted to a module-level function (rather than a component-scoped useMemo) so it
+// can be called synchronously mid-effect with whichever `rows` value is current at
+// that point (see the query effect below), not just the value React has already
+// committed to state.
+function filterRowsByMonth(
+  rows: BrowseRow[],
+  showAllMonths: boolean,
+  globalFolder: string | null
+): BrowseRow[] {
+  return showAllMonths || !globalFolder
+    ? rows
+    : rows.filter((row) => row._monthFolder === globalFolder);
+}
+
 const BROWSE_DATASETS: Array<{
   id: BrowseDatasetKind;
   label: string;
@@ -325,6 +385,14 @@ function formatBrowseCellValue(value: unknown): string {
   return String(value);
 }
 
+// The real (main-thread) display-value formatter — used directly for: per-page cell
+// rendering (both paths, always correct since it's a plain function call over at
+// most DATA_PAGE_SIZE rows), the fallback (non-worker) path's search/filter/sort
+// query, and the fallback path's column-filter dropdown preview. For the
+// worker-backed "population" path, this SAME special-casing is mirrored inside the
+// worker itself (src/workers/populationQueryWorker.ts's getWorkerDisplayValue) since
+// a function can't cross postMessage — see this file's PR/commit notes for the full
+// rationale (Task 4's CRITICAL gap).
 function getBrowseDisplayValue(
   row: BrowseRow,
   key: string,
@@ -343,10 +411,9 @@ function getBrowseDisplayValue(
 
 function rowMatchesSearch(
   row: BrowseRow,
-  search: string,
+  normalizedSearch: string,
   stageMappings?: PopulationConfig["stageMappings"]
 ): boolean {
-  const normalizedSearch = search.trim().toLowerCase();
   if (!normalizedSearch) {
     return true;
   }
@@ -381,6 +448,34 @@ function safeExportFileName(value: string): string {
 const yieldToMain = () => new Promise((resolve) => setTimeout(resolve, 0));
 const EXPORT_CHUNK_SIZE = 1000;
 
+// Bounded page-scan cap for the worker-backed path's per-column filter dropdown
+// preview (see collectMatchingRows below): a single query already returns
+// DATA_PAGE_SIZE rows, and this scans up to FILTER_PREVIEW_MAX_PAGES of them (search
+// + every OTHER active column filter applied, this column's own filter excluded) to
+// collect up to DATA_PAGE_SIZE *distinct* display values. Low-cardinality categorical
+// columns (stage, portType, certScanStatus, ...) are found in the first page with
+// overwhelming probability; this bound exists only to avoid an unbounded scan across
+// a 200k+ row dataset for a dropdown preview that's already documented in its own UI
+// copy ("عرض أول 100 قيمة...") as a non-exhaustive preview, not a promise of
+// completeness. The fallback (non-worker, smaller-dataset) path does a true
+// unbounded scan instead — see fallbackFilterOptions below — since it already holds
+// the full row array in memory with no extra cost.
+const FILTER_PREVIEW_MAX_PAGES = 5;
+
+// Single-column sort cycle: none -> ascending -> descending -> none.
+function cycleSort(current: PopulationQuerySort, column: string): PopulationQuerySort {
+  if (!current || current.column !== column) {
+    return { column, direction: "asc" };
+  }
+  if (current.direction === "asc") {
+    return { column, direction: "desc" };
+  }
+  return null;
+}
+
+const EMPTY_QUERY_RESULT: PopulationQueryResult<BrowseRow> = { pageRows: [], totalRows: 0, totalPages: 1 };
+const EMPTY_FILTER_PREVIEW = { options: [] as string[], truncated: false };
+
 export default function BrowseDataView({
   directoryHandle,
   refreshKey,
@@ -398,8 +493,27 @@ export default function BrowseDataView({
   const [showAllMonths, setShowAllMonths] = useState(false);
   const globalFolder = globalMonth.kind === "none" ? null : globalMonth.folderName;
   const [dataset, setDataset] = useState<BrowseDatasetKind>("population");
-  const [rows, setRows] = useState<BrowseRow[]>([]);
+
+  // Worker-backed path: scoped to the "population" dataset viewed at a single month
+  // (per Task 4's brief — the proposal's stated concern is specifically the large
+  // 200k-400k row single-month population.final.json file). Every other case keeps
+  // the pre-Task-4 main-thread loadBrowseRows + synchronous runPopulationQuery path:
+  //  - "sample"/"risk-raw"/"bi-raw" datasets stay comfortably small (a sample is at
+  //    most the drawn portion of a population; risk/BI raw rows are the imported
+  //    Excel row counts for one month, not the processed/deduplicated population) —
+  //    no large-population perf concern to solve for them.
+  //  - "population" with "عرض كل الشهور" (show all months) checked uses
+  //    loadAllPopulationRows, which merges/dedupes rows across every month's own
+  //    file — a fundamentally different, multi-file operation the worker's
+  //    single-JSON-blob "load" contract has no equivalent for.
+  const useWorkerPath = dataset === "population" && !showAllMonths && globalFolder != null;
+
+  const worker = usePopulationBrowseWorker();
+
+  const [rows, setRows] = useState<BrowseRow[]>([]); // fallback (non-worker) path only
   const [loading, setLoading] = useState(false);
+  const [loadGeneration, setLoadGeneration] = useState(0);
+  const columnsInitializedRef = useRef(false);
   const browsePresetRef = useRef<UserBrowsePresetFile | null>(null);
   const [isPresetLoaded, setIsPresetLoaded] = useState(false);
   const [visibleCols, setVisibleCols] = useState<Set<string>>(
@@ -410,20 +524,35 @@ export default function BrowseDataView({
   );
   const [draggedColumnKey, setDraggedColumnKey] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
+  const [sort, setSort] = useState<PopulationQuerySort>(null);
   const [openFilterColumn, setOpenFilterColumn] = useState<string | null>(null);
   const [colPickerOpen, setColPickerOpen] = useState(false);
-  const rowsPageKey = `${rows.length}:${rows[0]?._monthFolder ?? ""}:${rows[0]?.xrayImageId ?? ""}:${rows.at(-1)?._monthFolder ?? ""}:${rows.at(-1)?.xrayImageId ?? ""}`;
-  const [pageState, setPageState] = useState<{ rowsKey: string; page: number }>(() => ({ rowsKey: rowsPageKey, page: 1 }));
+  const [page, setPage] = useState(1);
+  const [queryResult, setQueryResult] = useState<PopulationQueryResult<BrowseRow>>(EMPTY_QUERY_RESULT);
+  const [workerFilterPreview, setWorkerFilterPreview] = useState(EMPTY_FILTER_PREVIEW);
 
   useEffect(() => {
     if (!directoryHandle) {
       browsePresetRef.current = null;
-      const id = setTimeout(() => setIsPresetLoaded(true), 0);
-      return () => clearTimeout(id);
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync (no directory yet, nothing to await)
+      setIsPresetLoaded(true);
+      return;
     }
 
-    const loadingId = setTimeout(() => setIsPresetLoaded(false), 0);
+    // Was previously `setTimeout(() => setIsPresetLoaded(false), 0)` — a macrotask
+    // racing the Promise.all microtask chain below. In a fast environment (an
+    // in-memory test workspace, or a small/cached preset file in production) the
+    // promise chain's `.finally(() => setIsPresetLoaded(true))` can settle BEFORE
+    // this queued setTimeout callback runs, since microtasks always drain ahead of
+    // macrotasks — so the deferred "false" fired LAST, clobbering the already-correct
+    // "true" back to "false" forever (the query effect below never re-satisfies its
+    // `isPresetLoaded` guard once that happens). Setting synchronously here removes
+    // the race entirely; it's the same "sync loading indicator before async work"
+    // pattern the load effect below already uses.
+    setIsPresetLoaded(false);
     const workspaceHandle = directoryHandle as Parameters<typeof loadUserBrowsePreset>[0];
     void Promise.all([
       loadAdminBrowsePreset(workspaceHandle),
@@ -444,106 +573,261 @@ export default function BrowseDataView({
         browsePresetRef.current = emptyPreset;
       })
       .finally(() => setIsPresetLoaded(true));
-    return () => clearTimeout(loadingId);
   }, [directoryHandle, username]);
 
+  // ── Load: reads the dataset's rows (worker path: raw text only, handed to the
+  // query worker; fallback path: fully parsed rows, as before) whenever the dataset
+  // identity changes. Bumps `loadGeneration` once the new data is in place (worker:
+  // once `loadRawJson` has been posted; fallback: once `rows` is set) — the query
+  // effect below is gated on `loadGeneration` so it never queries stale data left
+  // over from a previous dataset/month.
   useEffect(() => {
     if (!directoryHandle || !isPresetLoaded) return;
+    columnsInitializedRef.current = false;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- sync loading indicator before async browse row load; necessary to show spinner while data fetches
     setLoading(true);
-    loadBrowseRows(
-      directoryHandle as Parameters<typeof loadBrowseRows>[0],
-      dataset,
-      showAllMonths ? undefined : globalFolder ?? undefined
-    )
-      .then((nextRows) => {
-        const nextColumns = buildBrowseColumns(nextRows);
-        const datasetPreset = browsePresetRef.current?.browseData[dataset];
-        const nextOrder = mergeColumnOrder(
-          datasetPreset?.columnOrder,
-          defaultColumnOrderKeys(dataset, nextColumns)
-        );
-        const nextVisible = resolveVisibleColumns(
-          dataset,
-          nextColumns,
-          datasetPreset?.visibleColumns
-        );
+    // a fresh load always starts back at page 1, same as the pre-Task-4 rowsKey-derived reset this replaces
+    setPage(1);
+    let cancelled = false;
 
-        setRows(nextRows);
-        setColumnOrder(nextOrder);
-        setVisibleCols(nextVisible);
-      })
-      .catch(() => setRows([]))
-      .finally(() => setLoading(false));
-  }, [dataset, directoryHandle, globalFolder, isPresetLoaded, refreshKey, showAllMonths]);
+    if (useWorkerPath) {
+      void loadMonthPopulationFinalRawText(
+        directoryHandle as Parameters<typeof loadMonthPopulationFinalRawText>[0],
+        globalFolder as string
+      )
+        .then((rawText) => rawText ?? JSON.stringify({ rows: [] }))
+        .catch(() => JSON.stringify({ rows: [] }))
+        .then((rawText) => {
+          if (cancelled) return;
+          worker.loadRawJson(rawText, {
+            stageMappings: config.stageMappings,
+            monthFolder: globalFolder as string
+          });
+          setLoadGeneration((generation) => generation + 1);
+        });
+    } else {
+      loadBrowseRows(
+        directoryHandle as Parameters<typeof loadBrowseRows>[0],
+        dataset,
+        showAllMonths ? undefined : globalFolder ?? undefined
+      )
+        .then((nextRows) => {
+          if (cancelled) return;
+          setRows(nextRows);
+        })
+        .catch(() => {
+          if (!cancelled) setRows([]);
+        })
+        .finally(() => {
+          if (!cancelled) setLoadGeneration((generation) => generation + 1);
+        });
+    }
 
-  const monthFilteredRows = useMemo(
-    () =>
-      showAllMonths || !globalFolder
-        ? rows
-        : rows.filter((row) => row._monthFolder === globalFolder),
-    [rows, showAllMonths, globalFolder]
-  );
-  // LINT-01c: Instead of a setState-in-effect, reset column filters by
-  // deriving the key from `dataset` and using it as a React key on the
-  // filter container (see BrowseDataView render). Here we set state
-  // safely inside a microtask to avoid the synchronous-setState lint error.
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- worker.loadRawJson is useCallback([])-stable; including the whole `worker` object would re-run this effect every render (usePopulationBrowseWorker returns a fresh object each render)
+  }, [dataset, directoryHandle, globalFolder, isPresetLoaded, refreshKey, showAllMonths, useWorkerPath, config.stageMappings, worker.loadRawJson]);
+
+  // LINT-01c: dataset-scoped UI reset (filters/sort/open-dropdown), deferred to a
+  // microtask to avoid a synchronous setState-in-effect lint error. Search is
+  // deliberately NOT reset here (matches the pre-Task-4 behavior: search persists
+  // across a dataset switch, only column filters/sort/the open dropdown do not).
   useEffect(() => {
     const id = setTimeout(() => {
       setColumnFilters({});
       setOpenFilterColumn(null);
+      setSort(null);
     }, 0);
     return () => clearTimeout(id);
   }, [dataset]);
 
-  // ── Derived stats ──
-  const total = monthFilteredRows.length;
+  // ── Query: runs search/filter/sort/paginate — via the worker for the
+  // worker-backed path, or synchronously via the same pure runPopulationQuery
+  // (Task 1) for the fallback path, using the REAL getBrowseDisplayValue directly
+  // (no display-parity gap possible there, since it's a plain in-process call, not
+  // a postMessage round trip). Column order/visible-columns are resolved from the
+  // first result of a fresh load only (columnsInitializedRef), so later
+  // reactive re-queries (typing in search, toggling a filter) never clobber the
+  // user's own column reordering/visibility choices mid-session.
+  useEffect(() => {
+    if (!directoryHandle || !isPresetLoaded || loadGeneration === 0) return;
+    let cancelled = false;
+    const params: PopulationQueryParams = { search: debouncedSearch, columnFilters, sort, page };
 
-  const browseColumns = useMemo(() => buildBrowseColumns(rows), [rows]);
+    async function run(): Promise<void> {
+      const result = useWorkerPath
+        ? await worker.runQuery(params, MAIN_QUERY_LANE)
+        : runPopulationQuery(
+            filterRowsByMonth(rows, showAllMonths, globalFolder),
+            params,
+            (row, key) => getBrowseDisplayValue(row, key, config.stageMappings)
+          );
+
+      if (cancelled || !result) return;
+
+      const typedResult = result as PopulationQueryResult<BrowseRow>;
+      setQueryResult(typedResult);
+
+      if (!columnsInitializedRef.current) {
+        columnsInitializedRef.current = true;
+        const { columnOrder: nextOrder, visibleCols: nextVisible } = resolveColumnsAndVisibility(
+          dataset,
+          typedResult.pageRows,
+          browsePresetRef.current?.browseData[dataset]
+        );
+        setColumnOrder(nextOrder);
+        setVisibleCols(nextVisible);
+      }
+
+      setLoading(false);
+    }
+
+    void run();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- worker.runQuery is useCallback([])-stable; see the load effect's identical note above
+  }, [
+    directoryHandle,
+    isPresetLoaded,
+    loadGeneration,
+    useWorkerPath,
+    rows,
+    debouncedSearch,
+    columnFilters,
+    sort,
+    page,
+    config.stageMappings,
+    worker.runQuery,
+    dataset,
+    showAllMonths,
+    globalFolder
+  ]);
+
+  // ── Derived stats ──
+  // Unfiltered dataset size (worker path: from the worker's own "loaded" response,
+  // independent of the user's current search/filter — see usePopulationBrowseWorker's
+  // totalRows doc comment; fallback path: the pre-Task-4 monthFilteredRows.length).
+  const monthFilteredRows = useMemo(
+    () => filterRowsByMonth(rows, showAllMonths, globalFolder),
+    [rows, showAllMonths, globalFolder]
+  );
+  const total = useWorkerPath ? worker.totalRows ?? 0 : monthFilteredRows.length;
+
+  // ── Load/query failure surface (worker path only) ──
+  // The worker answers a request it can't fulfil (unparseable population.final.json,
+  // a query issued before any successful load) with an "error" response. Before this
+  // was read here, that response went nowhere: `loading` is only ever cleared by a
+  // successful query result, so a corrupt file left Browse spinning forever with no
+  // indication of what happened. Derived, not stored in state — no extra effect, and
+  // it clears itself the moment a fresh `loadRawJson` or a successful query lands
+  // (see usePopulationBrowseWorker). The fallback path has its own catch → empty
+  // rows, so it never has a worker error to show.
+  const browseError = useWorkerPath ? worker.error : null;
+
+  const browseColumns = useMemo(
+    () => buildBrowseColumns(queryResult.pageRows),
+    [queryResult.pageRows]
+  );
   const orderedColumns = useMemo(
     () => orderBrowseColumns(browseColumns, columnOrder),
     [browseColumns, columnOrder]
   );
   const activeCols = orderedColumns.filter((c) => visibleCols.has(c.key));
   const activeDataset = BROWSE_DATASETS.find((item) => item.id === dataset) ?? BROWSE_DATASETS[0]!;
-
-  // ── Filtered table rows ──
-  const searchFilteredRows = useMemo(
-    () => search.trim()
-      ? monthFilteredRows.filter((row) => rowMatchesSearch(row, search, config.stageMappings))
-      : monthFilteredRows,
-    [monthFilteredRows, search, config.stageMappings]
-  );
-  const filteredRows = useMemo(
-    () => Object.values(columnFilters).some((values) => values.length > 0)
-      ? searchFilteredRows.filter((row) =>
-          rowMatchesColumnFilters(row, columnFilters, undefined, config.stageMappings)
-        )
-      : searchFilteredRows,
-    [columnFilters, searchFilteredRows, config.stageMappings]
-  );
-  const requestedPage = pageState.rowsKey === rowsPageKey ? pageState.page : 1;
-  const page = clampPage(requestedPage, filteredRows.length, DATA_PAGE_SIZE);
-  const pagedRows = useMemo(() => pageSlice(filteredRows, page), [filteredRows, page]);
   const activeFilterCount = Object.values(columnFilters).filter((values) => values.length > 0).length;
-  const openFilterValues = useMemo(() => {
-    if (!openFilterColumn) return { options: [] as string[], truncated: false };
-    // Build the option list from rows filtered by every OTHER active column
-    // filter (and search) but NOT this column's own filter. Reusing the fully
-    // filtered `filteredRows` here caused a "single-select collapse": once a
-    // value was checked, `filteredRows` was already restricted to rows
-    // matching that value, so every other option vanished from the dropdown.
-    const rowsForOpenColumn = searchFilteredRows.filter((row) =>
-      rowMatchesColumnFilters(row, columnFilters, openFilterColumn, config.stageMappings)
-    );
+
+  // ── Column-filter dropdown option preview ──
+  // Fallback path: exact pre-Task-4 behavior — an unbounded scan over the full
+  // in-memory row set (cheap; these datasets are all small — see useWorkerPath's own
+  // doc comment above).
+  const fallbackFilterOptions = useMemo(() => {
+    if (useWorkerPath || !openFilterColumn) return EMPTY_FILTER_PREVIEW;
+    const rowsForOpenColumn = monthFilteredRows
+      .filter((row) => (debouncedSearch ? rowMatchesSearch(row, debouncedSearch, config.stageMappings) : true))
+      .filter((row) => rowMatchesColumnFilters(row, columnFilters, openFilterColumn, config.stageMappings));
     return buildBrowseFilterOptionPreview(
       rowsForOpenColumn,
       columnFilters[openFilterColumn] ?? [],
       (row) => getBrowseDisplayValue(row, openFilterColumn, config.stageMappings),
       compareBrowseFilterOptions,
-      DATA_PAGE_SIZE,
+      DATA_PAGE_SIZE
     );
-  }, [openFilterColumn, columnFilters, searchFilteredRows, config.stageMappings]);
+  }, [useWorkerPath, openFilterColumn, monthFilteredRows, debouncedSearch, columnFilters, config.stageMappings]);
+
+  // Fetches every row matching `params` (not just one page) by looping the same
+  // query primitive across pages, up to `maxPages` (Number.POSITIVE_INFINITY for "no
+  // cap" — used by export, which needs the complete matching set). Shared by both
+  // export and the worker path's filter-dropdown preview (that one bounded — see
+  // FILTER_PREVIEW_MAX_PAGES below). `queryOne` abstracts over the worker (async) vs
+  // fallback (sync, wrapped as a resolved value) query call so this loop doesn't
+  // need to know which path it's running under.
+  async function collectMatchingRows(
+    params: Pick<PopulationQueryParams, "search" | "columnFilters" | "sort">,
+    maxPages: number,
+    queryOne: (
+      queryParams: PopulationQueryParams
+    ) => Promise<PopulationQueryResult<Record<string, unknown>> | null> | PopulationQueryResult<Record<string, unknown>>
+  ): Promise<{ rows: BrowseRow[]; complete: boolean }> {
+    const collected: BrowseRow[] = [];
+    let pageNum = 1;
+    // Uninitialized: the do-while body always runs at least once and always
+    // assigns this before the condition (which reads it) is ever checked, so
+    // an initial placeholder value would only ever be dead code.
+    let totalPages: number;
+
+    do {
+      const result = await queryOne({ ...params, page: pageNum });
+      if (!result) {
+        // Superseded within this caller's own query lane, or the query failed —
+        // stop; caller decides how to treat a partial/interrupted collection.
+        return { rows: collected, complete: false };
+      }
+      collected.push(...(result.pageRows as BrowseRow[]));
+      totalPages = result.totalPages;
+      pageNum += 1;
+      if (collected.length % 1000 === 0) {
+        await yieldToMain();
+      }
+    } while (pageNum <= totalPages && pageNum <= maxPages);
+
+    return { rows: collected, complete: pageNum > totalPages };
+  }
+
+  // Worker path: bounded async page-scan (see FILTER_PREVIEW_MAX_PAGES above).
+  useEffect(() => {
+    if (!useWorkerPath || !openFilterColumn || loadGeneration === 0) {
+      return;
+    }
+    let cancelled = false;
+    const filtersExceptOpenColumn = { ...columnFilters };
+    delete filtersExceptOpenColumn[openFilterColumn];
+
+    void collectMatchingRows(
+      { search: debouncedSearch, columnFilters: filtersExceptOpenColumn, sort: null },
+      FILTER_PREVIEW_MAX_PAGES,
+      (queryParams) => worker.runQuery(queryParams, FILTER_PREVIEW_QUERY_LANE)
+    ).then(({ rows: sampleRows }) => {
+      if (cancelled) return;
+      const preview = buildBrowseFilterOptionPreview(
+        sampleRows,
+        columnFilters[openFilterColumn] ?? [],
+        (row) => getBrowseDisplayValue(row, openFilterColumn, config.stageMappings),
+        compareBrowseFilterOptions,
+        DATA_PAGE_SIZE
+      );
+      setWorkerFilterPreview(preview);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- worker.runQuery is useCallback([])-stable
+  }, [useWorkerPath, openFilterColumn, loadGeneration, debouncedSearch, columnFilters, config.stageMappings]);
+
+  const openFilterValues = useWorkerPath ? workerFilterPreview : fallbackFilterOptions;
+
   function saveCurrentPreset(nextOrder: string[], nextVisible: Set<string>): void {
     if (!directoryHandle) {
       return;
@@ -603,8 +887,13 @@ export default function BrowseDataView({
     event.dataTransfer.dropEffect = "move";
   }
 
+  function handleSortClick(columnKey: string): void {
+    setSort((current) => cycleSort(current, columnKey));
+    setPage(1);
+  }
+
   function toggleColumnFilterValue(columnKey: string, value: string): void {
-    setPageState({ rowsKey: rowsPageKey, page: 1 });
+    setPage(1);
     setColumnFilters((current) => {
       const selected = new Set(current[columnKey] ?? []);
       if (selected.has(value)) {
@@ -624,7 +913,7 @@ export default function BrowseDataView({
   }
 
   function clearColumnFilter(columnKey: string): void {
-    setPageState({ rowsKey: rowsPageKey, page: 1 });
+    setPage(1);
     setColumnFilters((current) => {
       const next = { ...current };
       delete next[columnKey];
@@ -633,26 +922,53 @@ export default function BrowseDataView({
   }
 
   function clearAllTableFilters(): void {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     setSearch("");
+    setDebouncedSearch("");
     setColumnFilters({});
     setOpenFilterColumn(null);
-    setPageState({ rowsKey: rowsPageKey, page: 1 });
+    setPage(1);
   }
 
   async function exportFilteredRowsToXlsx(): Promise<void> {
     if (isExporting) return;
     setIsExporting(true);
     try {
+      const exportParams = { search: debouncedSearch, columnFilters, sort };
+      const { rows: allMatchingRows, complete } = await collectMatchingRows(
+        exportParams,
+        Number.POSITIVE_INFINITY,
+        (queryParams) =>
+          useWorkerPath
+            ? worker.runQuery(queryParams, EXPORT_QUERY_LANE)
+            : runPopulationQuery(
+                filterRowsByMonth(rows, showAllMonths, globalFolder),
+                queryParams,
+                (row, key) => getBrowseDisplayValue(row, key, config.stageMappings)
+              )
+      );
+
+      // Export runs on its own query lane, so a filter/search change mid-export no
+      // longer supersedes it (it completes against the params captured at click
+      // time — what the user actually asked to export, and it no longer breaks the
+      // live table by superseding ITS queries either). This guard stays as the
+      // honest handler for a genuinely interrupted collection — a failed query
+      // (worker "error" response) also resolves null and lands here.
+      if (!complete) {
+        window.alert("تعذّر إكمال التصدير بسبب خطأ أثناء قراءة البيانات — حاول مرة أخرى.");
+        return;
+      }
+
       const header = activeCols.map((column) => column.label);
       const body: string[][] = [];
-      for (let i = 0; i < filteredRows.length; i += EXPORT_CHUNK_SIZE) {
-        const chunk = filteredRows.slice(i, i + EXPORT_CHUNK_SIZE);
+      for (let i = 0; i < allMatchingRows.length; i += EXPORT_CHUNK_SIZE) {
+        const chunk = allMatchingRows.slice(i, i + EXPORT_CHUNK_SIZE);
         for (const row of chunk) {
           body.push(
             activeCols.map((column) => getBrowseDisplayValue(row, column.key, config.stageMappings))
           );
         }
-        if (filteredRows.length > EXPORT_CHUNK_SIZE) {
+        if (allMatchingRows.length > EXPORT_CHUNK_SIZE) {
           await yieldToMain();
         }
       }
@@ -717,9 +1033,16 @@ export default function BrowseDataView({
         </div>
       </div>
 
-      {loading && <LoadingState label={showAllMonths ? "جاري تحميل بيانات جميع الأشهر..." : "جاري تحميل بيانات الشهر المحدد..."} />}
+      {browseError && (
+        <ErrorState
+          title="تعذّر تحميل بيانات هذا الشهر"
+          description={`تعذّرت قراءة ملف المجتمع النهائي أو الاستعلام عنه. ${browseError}`}
+        />
+      )}
 
-      {!loading && total === 0 && (
+      {!browseError && loading && <LoadingState label={showAllMonths ? "جاري تحميل بيانات جميع الأشهر..." : "جاري تحميل بيانات الشهر المحدد..."} />}
+
+      {!browseError && !loading && total === 0 && (
         <EmptyState
           icon={<Database />}
           title="لا توجد بيانات محفوظة لهذا المصدر بعد"
@@ -727,7 +1050,7 @@ export default function BrowseDataView({
         />
       )}
 
-      {!loading && total > 0 && (
+      {!browseError && !loading && total > 0 && (
         <div className="bv-table-view">
           {/* Toolbar */}
           <div className="bv-table-toolbar">
@@ -736,10 +1059,19 @@ export default function BrowseDataView({
               className="bv-search"
               placeholder="بحث في جميع الأعمدة..."
               value={search}
-              onChange={(e) => { setSearch(e.target.value); setPageState({ rowsKey: rowsPageKey, page: 1 }); }}
+              onChange={(e) => {
+                const v = e.target.value;
+                setSearch(v);
+                setPage(1);
+                if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+                searchDebounceRef.current = setTimeout(
+                  () => setDebouncedSearch(v.trim().toLowerCase()),
+                  200
+                );
+              }}
             />
             <span className="bv-row-count">
-              {filteredRows.length.toLocaleString("ar-SA-u-nu-latn")} صف
+              {queryResult.totalRows.toLocaleString("ar-SA-u-nu-latn")} صف
               {(search || activeFilterCount > 0) && ` من ${total.toLocaleString("ar-SA-u-nu-latn")}`}
             </span>
             <button
@@ -824,6 +1156,27 @@ export default function BrowseDataView({
                         </span>
                         <button
                           type="button"
+                          className={`bv-sort-btn${sort?.column === c.key ? " active" : ""}`}
+                          aria-label={
+                            sort?.column === c.key
+                              ? `ترتيب حسب ${c.label} (${sort.direction === "asc" ? "تصاعدي" : "تنازلي"})`
+                              : `ترتيب حسب ${c.label}`
+                          }
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleSortClick(c.key);
+                          }}
+                          onMouseDown={(event) => event.stopPropagation()}
+                          draggable={false}
+                        >
+                          {sort?.column === c.key ? (
+                            sort.direction === "asc" ? <ChevronUp size={13} /> : <ChevronDown size={13} />
+                          ) : (
+                            <ChevronUp size={13} className="bv-sort-btn-idle-icon" />
+                          )}
+                        </button>
+                        <button
+                          type="button"
                           className={`bv-filter-btn${columnFilters[c.key]?.length ? " active" : ""}`}
                           aria-label={`تصفية ${c.label}`}
                           onClick={(event) => {
@@ -878,7 +1231,7 @@ export default function BrowseDataView({
                 </tr>
               </thead>
               <tbody>
-                {pagedRows.map((row, i) => (
+                {queryResult.pageRows.map((row, i) => (
                   <tr key={`${page}-${i}`} className={i % 2 === 0 ? "bv-row-even" : ""}>
                     {activeCols.map((c) => {
                       const val = getBrowseDisplayValue(row, c.key, config.stageMappings);
@@ -891,8 +1244,8 @@ export default function BrowseDataView({
           </div>
           <Pagination
             page={page}
-            totalItems={filteredRows.length}
-            onPageChange={(nextPage) => setPageState({ rowsKey: rowsPageKey, page: nextPage })}
+            totalItems={queryResult.totalRows}
+            onPageChange={(nextPage) => setPage(nextPage)}
           />
         </div>
       )}

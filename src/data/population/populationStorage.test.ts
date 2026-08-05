@@ -4,7 +4,7 @@ import { createMemoryDirectory, getReadLog, clearReadLog } from "../storage/memo
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { WorkspacePermissionError } from "../storage/workspaceWriteAccess";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
-import { saveMonthRun, loadAllSampleRows, loadBrowseRows, updateMonthStatus, loadMonthForEditing } from "./populationStorage";
+import { saveMonthRun, loadAllPopulationRows, loadAllSampleRows, loadAllRawRows, loadBrowseRows, updateMonthStatus, loadMonthForEditing, loadMonthPopulationFinalRawText } from "./populationStorage";
 import { loadReplacementBucket, loadReplacementIndexManifest } from "./replacementIndexStorage";
 import { saveSampleMaster } from "../sampling/sampleStorage";
 import { appendDistributionEvent } from "../distribution/distributionStorage";
@@ -535,6 +535,109 @@ it("loadAllSampleRows falls back to legacy sample path when getSampleMainDir thr
   expect(rows[0].xrayImageId).toBe("LEGACY001");
 });
 
+// Phase B Task 5 (parallelize the "all months" browse-aggregation loop with
+// mapWithConcurrency): wraps every file read inside `monthFolderName`'s subtree
+// with an artificial delay, so that month's read is guaranteed to be the LAST
+// one to actually resolve even though it is earlier in listMonthFolders'
+// chronological order (and therefore earlier in the `months` array these
+// functions iterate). Used below to prove loadAllPopulationRows /
+// loadAllSampleRows / loadAllRawRows merge by month-list INDEX, not by
+// whichever month's read happens to finish first once parallelized.
+function delayReadsForMonth(
+  dir: DirectoryHandleLike,
+  monthFolderName: string,
+  delayMs: number
+): DirectoryHandleLike {
+  function wrap(handle: DirectoryHandleLike, insideTarget: boolean): DirectoryHandleLike {
+    return {
+      ...handle,
+      getDirectoryHandle: async (name: string, options?: { create?: boolean }) => {
+        const child = await handle.getDirectoryHandle(name, options);
+        return wrap(child, insideTarget || name === monthFolderName);
+      },
+      getFileHandle: async (name: string, options?: { create?: boolean }) => {
+        const fh = await handle.getFileHandle(name, options);
+        if (!insideTarget) return fh;
+        return {
+          ...fh,
+          getFile: async () => {
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+            return fh.getFile();
+          },
+        };
+      },
+    };
+  }
+  return wrap(dir, false);
+}
+
+// Characterization test (write BEFORE parallelizing, per the plan): proves the
+// dedup semantics loadAllPopulationRows must preserve once its sequential loop
+// becomes a mapWithConcurrency fan-out -- for the same xrayImageId appearing in
+// two different months, the chronologically LATER month's row always wins the
+// Map merge, regardless of which month's underlying file read actually
+// resolves first. The 5-may-2026 read is deliberately delayed past the
+// 6-june-2026 read to force the "wrong" completion order a naive
+// (non-index-addressed) concurrent rewrite could get wrong.
+test("loadAllPopulationRows: the chronologically later month wins a duplicate xrayImageId, even when its read resolves before the earlier month's (index-addressed merge order)", async () => {
+  const dir = createMemoryDirectory();
+  await saveMonthRun({ directoryHandle: dir, ...baseParams }); // 5-may-2026, A001 / NonCertscan
+  await saveMonthRun({
+    directoryHandle: dir,
+    ...baseParams,
+    month: 6,
+    processedRows: [{ xrayImageId: "A001", certScanStatus: "CertScan" }],
+  }); // 6-june-2026, same id, different data
+
+  const delayed = delayReadsForMonth(dir, "5-may-2026", 30);
+
+  const rows = await loadAllPopulationRows(delayed);
+  const merged = rows.filter((row) => row.xrayImageId === "A001");
+
+  expect(merged).toHaveLength(1); // deduped, not two entries
+  expect(merged[0]?._monthFolder).toBe("6-june-2026");
+  expect(merged[0]?.certScanStatus).toBe("CertScan");
+});
+
+// Same index-addressed-order property, but for the flat-concatenation shape
+// shared by loadAllSampleRows/loadAllRawRows (no dedup -- every month's rows
+// are appended, in month-list order). Delaying the earlier month's read must
+// not let its rows land after the later month's in the final array.
+test("loadAllSampleRows: rows stay in month-chronological order even when the earlier month's read resolves last", async () => {
+  const dir = createMemoryDirectory();
+  await saveMonthRun({ directoryHandle: dir, ...baseParams }); // 5-may-2026
+  await saveSampleMaster(dir, "5-may-2026", { ...makeSample(), rows: [{ xrayImageId: "A001" } as never] });
+  await saveMonthRun({
+    directoryHandle: dir,
+    ...baseParams,
+    month: 6,
+    processedRows: [{ xrayImageId: "B001", certScanStatus: "NonCertscan" }],
+  }); // 6-june-2026
+  await saveSampleMaster(dir, "6-june-2026", { ...makeSample(), rows: [{ xrayImageId: "B001" } as never] });
+
+  const delayed = delayReadsForMonth(dir, "5-may-2026", 30);
+
+  const rows = await loadAllSampleRows(delayed);
+  expect(rows.map((row) => row.xrayImageId)).toEqual(["A001", "B001"]);
+});
+
+test("loadAllRawRows: rows stay in month-chronological order even when the earlier month's read resolves last", async () => {
+  const dir = createMemoryDirectory();
+  await saveMonthRun({ directoryHandle: dir, ...baseParams, riskRawRows: [{ id: "R-MAY" }] }); // 5-may-2026
+  await saveMonthRun({
+    directoryHandle: dir,
+    ...baseParams,
+    month: 6,
+    riskRawRows: [{ id: "R-JUNE" }],
+    processedRows: [{ xrayImageId: "B001", certScanStatus: "NonCertscan" }],
+  }); // 6-june-2026
+
+  const delayed = delayReadsForMonth(dir, "5-may-2026", 30);
+
+  const rows = await loadAllRawRows(delayed, "risk");
+  expect(rows.map((row) => row.id)).toEqual(["R-MAY", "R-JUNE"]);
+});
+
 // Task 3 (parallelize saveMonthRunLocked's independent writes): end-state
 // characterization -- exercises every write saveMonthRunLocked now fires
 // concurrently (risk.raw.json + bi.raw.json in the first Promise.all group,
@@ -592,4 +695,50 @@ test("saveMonthRun writes all expected files and the manifest reflects the final
   const indexManifest = await loadReplacementIndexManifest(dir, "5-may-2026");
   expect(indexManifest).not.toBeNull();
   expect(indexManifest?.totalIndexedRows).toBe(1);
+});
+
+// I1: loadMonthPopulationFinalRawText deliberately bypasses safeReadJson (it exists
+// precisely to avoid safeReadJson's main-thread JSON.parse of a 200k-400k row file),
+// which also bypassed safeReadJson's live -> .bak -> .tmp recovery ladder. These
+// characterize the raw-text-level ladder that restores it.
+async function processedDirOf(dir: DirectoryHandleLike): Promise<DirectoryHandleLike> {
+  const monthDir = await getPopulationMonthDir(dir, "5-may-2026", false);
+  return monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: false });
+}
+
+test("loadMonthPopulationFinalRawText returns the live population.final.json text", async () => {
+  const dir = createMemoryDirectory();
+  await saveMonthRun({ directoryHandle: dir, ...baseParams });
+
+  const rawText = await loadMonthPopulationFinalRawText(dir, "5-may-2026");
+  expect(rawText).not.toBeNull();
+  expect(JSON.parse(rawText as string)).toBeTruthy();
+});
+
+test("loadMonthPopulationFinalRawText falls back to the .bak snapshot when the live file is gone", async () => {
+  const dir = createMemoryDirectory();
+  await saveMonthRun({ directoryHandle: dir, ...baseParams });
+
+  const processedDir = await processedDirOf(dir);
+  // Seed a .bak the way a previous safe write would have left one, then lose the
+  // live file (the exact scenario safeReadJson's ladder exists for).
+  const liveText = (await loadMonthPopulationFinalRawText(dir, "5-may-2026")) as string;
+  const bakHandle = await processedDir.getFileHandle("population.final.json.bak", { create: true });
+  const writable = await bakHandle.createWritable!();
+  await writable.write(liveText);
+  await writable.close();
+  await processedDir.removeEntry?.("population.final.json");
+
+  const recovered = await loadMonthPopulationFinalRawText(dir, "5-may-2026");
+  expect(recovered).toBe(liveText);
+});
+
+test("loadMonthPopulationFinalRawText still returns null when neither the live file nor any snapshot exists", async () => {
+  const dir = createMemoryDirectory();
+  await saveMonthRun({ directoryHandle: dir, ...baseParams });
+
+  const processedDir = await processedDirOf(dir);
+  await processedDir.removeEntry?.("population.final.json");
+
+  expect(await loadMonthPopulationFinalRawText(dir, "5-may-2026")).toBeNull();
 });

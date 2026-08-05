@@ -109,6 +109,49 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
         loadReplacementLog(directoryHandle, selMonth),
         loadReopenLog(directoryHandle, selMonth),
       ]);
+
+      // Cross-month pending gap: the reviewer's own global month selector is a
+      // browsing convenience (persisted per-tab in sessionStorage, unaffected by
+      // other users' work — see authSession's SEC-02 note) with no bearing on
+      // which month a request belongs to. approve/deny already act on
+      // request.monthFolderName, never selMonth (see approveReferral/
+      // approveReplacement/approveReopen below), so a request submitted for a
+      // month other than whichever one the reviewer's own session happens to be
+      // pinned to was previously invisible here with zero indication anything
+      // was pending — while the exact same request still showed up as a plain
+      // row in the read-only, all-months "السجل" history tab. That combination
+      // ("the request is logged somewhere, but there's no accept/deny for it")
+      // is indistinguishable from a real approval-UI bug to the reviewer. Pull
+      // in PENDING-only requests from every other known month so the review
+      // queue is never silently empty just because of where the month picker
+      // happens to sit. Decided (approved/denied) requests stay scoped to
+      // selMonth only — already fully covered by the History tab — so the extra
+      // reads stay proportional to "what still needs a decision" rather than
+      // duplicating full cross-month history on every load.
+      const otherMonths = months.map((m) => m.folderName).filter((name) => name !== selMonth);
+      const otherMonthPending = await Promise.all(
+        otherMonths.map(async (month) => {
+          try {
+            const [r, p, o] = await Promise.all([
+              loadReferralLog(directoryHandle, month),
+              loadReplacementLog(directoryHandle, month),
+              loadReopenLog(directoryHandle, month),
+            ]);
+            return {
+              referrals: r.requests.filter((x) => x.status === "pending"),
+              replacements: p.requests.filter((x) => x.status === "pending"),
+              reopens: o.requests.filter((x) => x.status === "pending"),
+            };
+          } catch {
+            // One unreadable month must not blank out every other month's queue.
+            return { referrals: [], replacements: [], reopens: [] };
+          }
+        })
+      );
+      const crossMonthReferrals = otherMonthPending.flatMap((entry) => entry.referrals);
+      const crossMonthReplacements = otherMonthPending.flatMap((entry) => entry.replacements);
+      const crossMonthReopens = otherMonthPending.flatMap((entry) => entry.reopens);
+
       const sample = await loadSampleMaster(directoryHandle, selMonth);
       const detailMap: Record<string, DistributionEntry | PreparedPopulationRow> = {};
       if (sample) {
@@ -118,15 +161,19 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
       }
       if (token !== loadTokenRef.current) return; // superseded by a newer month selection
 
+      const allReferrals = [...refLog.requests, ...crossMonthReferrals];
+      const allReplacements = [...repLog.requests, ...crossMonthReplacements];
+      const allReopens = [...reoLog.requests, ...crossMonthReopens];
+
       const visibleReferrals = canApproveReferrals
-        ? refLog.requests
-        : refLog.requests.filter((r) => r.fromEmployee === username);
+        ? allReferrals
+        : allReferrals.filter((r) => r.fromEmployee === username);
       const visibleReplacements = canApproveReplacements
-        ? repLog.requests
-        : repLog.requests.filter((r) => r.employeeUsername === username);
+        ? allReplacements
+        : allReplacements.filter((r) => r.employeeUsername === username);
       const visibleReopens = canApproveReopens
-        ? reoLog.requests
-        : reoLog.requests.filter((r) => r.employeeUsername === username || r.requestedBy === username);
+        ? allReopens
+        : allReopens.filter((r) => r.employeeUsername === username || r.requestedBy === username);
 
       setSampleDetails(detailMap);
       setReferrals(visibleReferrals);
@@ -136,7 +183,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
     } catch {
       if (token === loadTokenRef.current) setLoadState("error");
     }
-  }, [directoryHandle, selMonth, username, canApproveReferrals, canApproveReplacements, canApproveReopens]);
+  }, [directoryHandle, selMonth, username, months, canApproveReferrals, canApproveReplacements, canApproveReopens]);
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- async data load; setState fires inside loadData's async callback, not synchronously in the effect body
   useEffect(() => { void loadData(); }, [loadData]);

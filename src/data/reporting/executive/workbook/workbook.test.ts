@@ -1,10 +1,21 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as XLSX from "xlsx";
 
 import { DEFAULT_EXEC_CONFIG } from "../../executiveReportTypes";
 import type { ExecutiveReportInput } from "../../executiveReportTypes";
 import type { PreparedPopulationRow } from "../../../population/populationTypes";
 import { buildExecutiveWorkbookObject, SHEET_NAMES } from "./workbook";
+import { yieldToMain } from "../../../storage/yieldToMain";
+
+// Wrap the real `yieldToMain` in a spy (keep its actual setTimeout-based
+// behavior) so the chunked-yielding tests below can assert the population-scale
+// sheet builders (rowSheet, rawRiskSheet, resultComparisonSheet) actually yield
+// the main thread for a population above EXPORT_CHUNK_SIZE. Same idiom as
+// sampleReport.test.ts / distributionReport.test.ts (Task 2, P3-7 follow-up).
+vi.mock("../../../storage/yieldToMain", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../storage/yieldToMain")>();
+  return { ...actual, yieldToMain: vi.fn(actual.yieldToMain) };
+});
 
 // ─── Fixture builders ──────────────────────────────────────────────────────────
 
@@ -95,11 +106,22 @@ function seededInput(): ExecutiveReportInput {
   ]);
 }
 
+/** `n` distinct population rows, for chunked-yielding tests (Task 3, P3-7). */
+function bigInput(n: number): ExecutiveReportInput {
+  const rows = Array.from({ length: n }, (_, i) =>
+    popRow({
+      xrayImageId: `XR-${i + 1}`,
+      rawRow: { "رقم الأشعة": `XR-${i + 1}`, "المنفذ": "منفذ الاختبار" },
+    })
+  );
+  return input(rows);
+}
+
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe("buildExecutiveWorkbook", () => {
-  it("builds and contains every expected sheet", () => {
-    const wb = buildExecutiveWorkbookObject(seededInput());
+  it("builds and contains every expected sheet", async () => {
+    const wb = await buildExecutiveWorkbookObject(seededInput());
     const expected = Object.values(SHEET_NAMES);
     for (const name of expected) {
       expect(wb.SheetNames, `missing sheet ${name}`).toContain(name);
@@ -107,8 +129,8 @@ describe("buildExecutiveWorkbook", () => {
     expect(wb.SheetNames).toHaveLength(expected.length);
   });
 
-  it("emits two decision-fact-table rows per population row (L1 + L2)", () => {
-    const wb = buildExecutiveWorkbookObject(seededInput());
+  it("emits two decision-fact-table rows per population row (L1 + L2)", async () => {
+    const wb = await buildExecutiveWorkbookObject(seededInput());
     const rows = readSheet(wb, SHEET_NAMES.factTable);
     // header + 2 rows × 2 decisions = 1 + 4
     expect(rows.length).toBe(5);
@@ -118,8 +140,8 @@ describe("buildExecutiveWorkbook", () => {
     expect(body.filter((r) => r[levelCol] === "المستوى الثاني")).toHaveLength(2);
   });
 
-  it("result comparison has one row per image with all six source columns", () => {
-    const wb = buildExecutiveWorkbookObject(seededInput());
+  it("result comparison has one row per image with all six source columns", async () => {
+    const wb = await buildExecutiveWorkbookObject(seededInput());
     const rows = readSheet(wb, SHEET_NAMES.resultComparison);
     expect(rows.length).toBe(3); // header + 2 images
     const header = rows[0] as string[];
@@ -135,8 +157,8 @@ describe("buildExecutiveWorkbook", () => {
     }
   });
 
-  it("comparison shows — for a source that did not act, not 0%", () => {
-    const wb = buildExecutiveWorkbookObject(seededInput());
+  it("comparison shows — for a source that did not act, not 0%", async () => {
+    const wb = await buildExecutiveWorkbookObject(seededInput());
     const rows = readSheet(wb, SHEET_NAMES.resultComparison);
     const header = rows[0] as string[];
     const liveCol = header.indexOf("الوسائل الحية (نتيجة)");
@@ -144,9 +166,9 @@ describe("buildExecutiveWorkbook", () => {
     expect(rows[1]![liveCol]).toBe("—");
   });
 
-  it("inspector columns carry — when BI did not map (no fabricated names)", () => {
+  it("inspector columns carry — when BI did not map (no fabricated names)", async () => {
     // All inspector ids null → employee-by-port shows the unmapped empty state.
-    const wb = buildExecutiveWorkbookObject(input([popRow({ xrayImageId: "XR-1" })]));
+    const wb = await buildExecutiveWorkbookObject(input([popRow({ xrayImageId: "XR-1" })]));
     const empRows = readSheet(wb, SHEET_NAMES.employeeByPort);
     const note = String(empRows[1]?.[0] ?? "");
     expect(note).toContain("هوية المفتش غير مرتبطة");
@@ -158,8 +180,8 @@ describe("buildExecutiveWorkbook", () => {
     expect(imageRows[1]![l1Col]).toBe("—");
   });
 
-  it("inspector columns carry the BI id when mapped", () => {
-    const wb = buildExecutiveWorkbookObject(seededInput());
+  it("inspector columns carry the BI id when mapped", async () => {
+    const wb = await buildExecutiveWorkbookObject(seededInput());
     const factRows = readSheet(wb, SHEET_NAMES.factTable);
     const header = factRows[0] as string[];
     const idCol = header.indexOf("معرّف المفتش");
@@ -168,11 +190,11 @@ describe("buildExecutiveWorkbook", () => {
     expect(ids).toContain("E-200");
   });
 
-  it("never prints 0% for a null-denominator agreement metric", () => {
+  it("never prints 0% for a null-denominator agreement metric", async () => {
     // No reviewer result anywhere → every reviewer-agreement rate is null and
     // must render as a blank cell (not 0, not "0%"). Count columns (comparable,
     // agree, disagree) are TRUE zeros and may legitimately render 0 (§3.7).
-    const wb = buildExecutiveWorkbookObject(seededInput());
+    const wb = await buildExecutiveWorkbookObject(seededInput());
     const cross = readSheet(wb, SHEET_NAMES.crossTeam);
     const reviewerHeader = cross[0] as string[];
     const rateCol = reviewerHeader.indexOf("نسبة التوافق%");
@@ -188,8 +210,8 @@ describe("buildExecutiveWorkbook", () => {
     }
   });
 
-  it("raw-risk sheet carries source sheet / row + the raw keys", () => {
-    const wb = buildExecutiveWorkbookObject(seededInput());
+  it("raw-risk sheet carries source sheet / row + the raw keys", async () => {
+    const wb = await buildExecutiveWorkbookObject(seededInput());
     const rows = readSheet(wb, SHEET_NAMES.rawRisk);
     const header = rows[0] as string[];
     expect(header).toContain("ورقة المصدر");
@@ -197,8 +219,8 @@ describe("buildExecutiveWorkbook", () => {
     expect(header).toContain("رقم الأشعة");
   });
 
-  it("raw-BI and exclusions sheets carry the spec-compliant unavailable notes", () => {
-    const wb = buildExecutiveWorkbookObject(seededInput());
+  it("raw-BI and exclusions sheets carry the spec-compliant unavailable notes", async () => {
+    const wb = await buildExecutiveWorkbookObject(seededInput());
     const bi = readSheet(wb, SHEET_NAMES.rawBi);
     expect(String(bi[0]?.[0] ?? "")).toContain("بيانات BI غير متاحة");
     const exclusions = readSheet(wb, SHEET_NAMES.exclusions);
@@ -206,12 +228,56 @@ describe("buildExecutiveWorkbook", () => {
     expect(joined).toContain("processing.summary.json");
   });
 
-  it("resolves reviewer display names in the reviewer column", () => {
+  it("resolves reviewer display names in the reviewer column", async () => {
     const inp = input([
       popRow({ xrayImageId: "XR-1", levelOneEmployee: "E-1", levelTwoEmployee: "E-2" }),
     ]);
     // assignedTo comes from distribution; with none, reviewer column is — — fine.
-    const wb = buildExecutiveWorkbookObject(inp, { "user-1": "محمد" });
+    const wb = await buildExecutiveWorkbookObject(inp, { "user-1": "محمد" });
     expect(wb.SheetNames).toContain(SHEET_NAMES.rows);
+  });
+});
+
+// ─── buildExecutiveWorkbookObject chunked yielding (Task 3, P3-7 follow-up) ───
+// Proves the 3 population-scale sheet builders (rows, raw-risk, result
+// comparison) actually yield the main thread for a population above
+// EXPORT_CHUNK_SIZE, and that chunking their row-array builds didn't drop or
+// duplicate any rows across a chunk boundary.
+describe("buildExecutiveWorkbookObject — chunked yielding", () => {
+  beforeEach(() => {
+    vi.mocked(yieldToMain).mockClear();
+  });
+
+  it("yields the main thread at least once for a population above EXPORT_CHUNK_SIZE", async () => {
+    await buildExecutiveWorkbookObject(bigInput(1500));
+    expect(vi.mocked(yieldToMain).mock.calls.length).toBeGreaterThan(0);
+  });
+
+  it("does not yield for a population at or below EXPORT_CHUNK_SIZE", async () => {
+    await buildExecutiveWorkbookObject(bigInput(1000));
+    expect(vi.mocked(yieldToMain).mock.calls.length).toBe(0);
+  });
+
+  it("chunked rows-sheet output has no drops/duplicates across the chunk boundary", async () => {
+    const n = 2500; // spans 3 chunks of EXPORT_CHUNK_SIZE (1000)
+    const wb = await buildExecutiveWorkbookObject(bigInput(n));
+    const rows = readSheet(wb, SHEET_NAMES.rows);
+    expect(rows.length).toBe(n + 1); // header + n data rows, no drops/dupes
+    expect(rows[1]![0]).toBe("XR-1");
+    expect(rows[1000]![0]).toBe("XR-1000"); // last row of chunk 1
+    expect(rows[1001]![0]).toBe("XR-1001"); // first row of chunk 2
+    expect(rows[n]![0]).toBe(`XR-${n}`); // last row overall
+    const ids = rows.slice(1).map((r) => (r as unknown[])[0]);
+    expect(new Set(ids).size).toBe(n); // no duplicate xrayImageId
+
+    // The same n=2500/3-chunk fixture also exercises rawRiskSheet and
+    // resultComparisonSheet (both population-scale, both chunked the same
+    // way) -- confirm neither dropped/duplicated rows either, not just that
+    // yieldToMain fired for the batch as a whole.
+    const rawRiskRows = readSheet(wb, SHEET_NAMES.rawRisk);
+    expect(rawRiskRows.length).toBe(n + 1); // header + n, every row has rawRow set
+
+    const comparisonRows = readSheet(wb, SHEET_NAMES.resultComparison);
+    expect(comparisonRows.length).toBe(n + 1); // header + n, one comparison row per image
   });
 });

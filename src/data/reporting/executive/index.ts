@@ -14,10 +14,7 @@ import { esc } from "./primitives";
 import { sourceRevisionsFooterHtml } from "../sourceRevisions";
 import type { ExecutiveReportInput } from "../executiveReportTypes";
 import { formatMonthFolderShortLabel } from "../../population/monthFolder";
-
-function formatIssueDate(d = new Date()): string {
-  return `${String(d.getDate()).padStart(2, "0")} / ${String(d.getMonth() + 1).padStart(2, "0")} / ${d.getFullYear()}`;
-}
+import { formatIssueDate } from "../shared/reportChrome";
 
 export async function buildExecutiveReport(
   input: ExecutiveReportInput,

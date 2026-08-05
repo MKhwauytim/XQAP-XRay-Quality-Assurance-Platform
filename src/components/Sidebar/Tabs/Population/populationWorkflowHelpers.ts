@@ -1,5 +1,5 @@
 import type { DistributionEntry, DistributionEvent } from "../../../../data/distribution/distributionTypes";
-import type { MonthEditData } from "../../../../data/population/populationStorage";
+import type { MonthEditData, MonthLoadScope } from "../../../../data/population/populationStorage";
 import { MonthClosedError } from "../../../../data/population/monthLock";
 import type { BiWorkbookResult, NormalizedBiRow } from "./biData/biDataTypes";
 import type { NormalizedRiskRow, RiskWorkbookResult } from "./riskData/riskDataTypes";
@@ -43,6 +43,48 @@ export function stableHash(value: unknown): string {
     hash = ((hash << 5) + hash) ^ text.charCodeAt(index);
   }
   return (hash >>> 0).toString(36);
+}
+
+/**
+ * Large-Population Performance Proposal, Phase A step 3: what a wizard month-load
+ * should actually fetch, given the active sub-tab and the viewer's own capabilities.
+ *
+ * `summary`/`sample`/`distribution` are always requested regardless of sub-tab or
+ * capability -- they're small, never row-scaled governance files, and the phase
+ * stepper/status bar need them to render correctly even for a Browse-only viewer
+ * who later switches back to "process" without reselecting the month (there is no
+ * separate lazy top-up for these three; only `population` gets one, via
+ * `ensurePopulationLoaded` in index.tsx, because only `population`/`raw` can each
+ * hold up to ~400k rows -- the two fields actually worth deferring).
+ *
+ * `population` loads only on the "process" sub-tab, and only for a viewer who can
+ * actually act on it (draw a sample, or reprocess) -- a view-only employee/guest,
+ * the exact population the original perf complaint was about, never pays for it.
+ * This intentionally drops the proposal doc's literal "or the month has no sample
+ * yet" clause: knowing sample-existence ahead of the load would need its own
+ * look-ahead read, and every role that can act on a not-yet-sampled month already
+ * holds draw-sample/process-population capability, so the clause added no coverage
+ * this simpler capability-only check doesn't already provide.
+ *
+ * `raw` is requested whenever `population` is (a viewer who may reprocess may also
+ * need the originally-uploaded workbook for Phase 1/2 display); `loadMonthForEditing`
+ * itself still applies its own independent manifest-status gate on top (A1 perf
+ * finding), so this never re-reads the two raw files for an already-processed month.
+ */
+export function computeMonthLoadScope(params: {
+  activeSubTab: "process" | "browse";
+  canDrawSample: boolean;
+  canProcessPopulation: boolean;
+}): MonthLoadScope {
+  const needsPopulation =
+    params.activeSubTab === "process" && (params.canDrawSample || params.canProcessPopulation);
+  return {
+    summary: true,
+    sample: true,
+    distribution: true,
+    population: needsPopulation,
+    raw: needsPopulation,
+  };
 }
 
 export function isSupportedExcelFile(file: File): boolean {
@@ -97,7 +139,7 @@ function fallbackProcessingSummary(data: MonthEditData): PopulationProcessingRes
   };
 }
 
-function reconstructedPopulation(data: MonthEditData): PopulationProcessingResult | null {
+export function reconstructedPopulation(data: MonthEditData): PopulationProcessingResult | null {
   if (!data.populationRows) return null;
   return {
     preparedRows: data.populationRows as unknown as PreparedPopulationRow[],
@@ -108,12 +150,37 @@ function reconstructedPopulation(data: MonthEditData): PopulationProcessingResul
   };
 }
 
+/**
+ * Phase derivation must not depend solely on `data.populationRows`: under Phase A's
+ * opt-in MonthLoadScope, a screen can legitimately load sample/distribution/summary
+ * without population, and must still report the month's true phase rather than
+ * regressing an already-processed/sampled month back toward phase 1.
+ *
+ * `data.manifest.status` is always loaded regardless of scope (see
+ * `loadMonthForEditing`), so it's the scope-independent source of truth here --
+ * checked ahead of the data-presence heuristics below for that reason. Sample/
+ * distribution presence is still checked FIRST, though: `saveSampleMaster`/
+ * `updateMonthStatus("sampled")` are two separate, non-atomic writes in the wizard's
+ * draw-sample handler, so a real (rare) partial-failure state can have a sample file
+ * on disk while the manifest status write itself lagged -- in that case the file that
+ * actually exists should win over a stale status string.
+ */
+function derivePhase(data: MonthEditData): { current: number; completed: number[] } | null {
+  if (data.distributionCurrent || data.sampleData) {
+    return { current: 4, completed: [1, 2, 3] };
+  }
+  const status = data.manifest?.status;
+  if (status === "sampled" || status === "distributed" || status === "closed") {
+    return { current: 4, completed: [1, 2, 3] };
+  }
+  if (status === "processed-saved" || data.processingSummary || data.populationRows) {
+    return { current: 3, completed: [1, 2] };
+  }
+  return null;
+}
+
 export function buildLoadedMonthState(data: MonthEditData) {
-  const phase = data.distributionCurrent || data.sampleData
-    ? { current: 4, completed: [1, 2, 3] }
-    : data.populationRows
-      ? { current: 3, completed: [1, 2] }
-      : null;
+  const phase = derivePhase(data);
   return {
     riskWorkbook: reconstructedRiskWorkbook(data.riskRawRows),
     biWorkbook: reconstructedBiWorkbook(data.biRawRows),

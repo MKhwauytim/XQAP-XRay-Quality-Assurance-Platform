@@ -12,6 +12,7 @@ import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/re
 import * as XLSX from "xlsx";
 import DataTable, { type DataTableCol } from "./index";
 import { looksLikeNumber } from "./utils";
+import { __clearPendingSaveFlushesForTests } from "../../data/storage/pendingSaveFlush";
 
 // The vendored xlsx module namespace is frozen (ESM), so `vi.spyOn` can't replace writeFile.
 // Partial-mock the module: keep the real `utils` (the export builds a real sheet) but stub
@@ -337,6 +338,82 @@ describe("DataTable — keyboard accessibility (P1-2)", () => {
     const checkbox = screen.getByLabelText("تحديد 1");
     fireEvent.keyDown(checkbox, { key: " " });
     expect(onRowClick).not.toHaveBeenCalled();
+  });
+});
+
+// Finding 1 (final whole-branch review, 2026-08-03) — the pending-save flush
+// path (registerPendingSaveFlush + pendingColCfgRef + onColConfigChangeRef,
+// see index.tsx) had zero test coverage, including the exact stale-closure
+// bug the v59.161 fix round closed there. Both tests below trigger a
+// column-config change via the column-visibility picker (the same
+// interaction the "hides a column via the column-visibility picker" test
+// above already uses), matching this file's established pattern rather than
+// inventing a new one.
+describe("DataTable — pending column-config save flush (pagehide/visibilitychange)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    __clearPendingSaveFlushesForTests();
+  });
+
+  it("flushes the pending config on pagehide before the 800ms debounce elapses, and does not double-fire once it would have", () => {
+    const onColConfigChange = vi.fn();
+    renderTable({ onColConfigChange });
+
+    // Trigger a column-config change: open the picker, hide the "note" column.
+    fireEvent.click(screen.getByRole("button", { name: /^الأعمدة/ }));
+    const hideButtons = screen.getAllByTitle("إخفاء");
+    fireEvent.click(hideButtons[2]!);
+
+    // Debounce hasn't elapsed yet — nothing persisted so far.
+    expect(onColConfigChange).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(500);
+    expect(onColConfigChange).not.toHaveBeenCalled();
+
+    // Tab is backgrounded/closed before the remaining ~300ms elapses.
+    window.dispatchEvent(new Event("pagehide"));
+
+    expect(onColConfigChange).toHaveBeenCalledTimes(1);
+    expect(onColConfigChange.mock.calls[0]![0].hidden).toContain("note");
+
+    // Advance well past the point the original 800ms timer would have fired
+    // on its own — the flush already cleared it, so this must not double-fire.
+    vi.advanceTimersByTime(1000);
+    expect(onColConfigChange).toHaveBeenCalledTimes(1);
+  });
+
+  it("flushes via the LATEST onColConfigChange prop, not a stale mount-time closure", () => {
+    const onColConfigChangeA = vi.fn();
+    const onColConfigChangeB = vi.fn();
+
+    const { rerender } = renderTable({ onColConfigChange: onColConfigChangeA });
+
+    fireEvent.click(screen.getByRole("button", { name: /^الأعمدة/ }));
+    const hideButtons = screen.getAllByTitle("إخفاء");
+    fireEvent.click(hideButtons[2]!);
+
+    // Re-render the SAME mounted instance with a new onColConfigChange identity
+    // (mirrors a caller like XrayReferrals.tsx passing a fresh inline handler
+    // that closes over a changed directoryHandle/username) before the flush fires.
+    rerender(
+      <DataTable<Row>
+        columns={COLUMNS}
+        rows={ROWS}
+        getRowKey={(r) => r.id}
+        renderCell={(col, row) => <span>{col.accessor(row)}</span>}
+        storageKey="test-datatable"
+        exportFileName="test-export.xlsx"
+        onColConfigChange={onColConfigChangeB}
+      />,
+    );
+
+    window.dispatchEvent(new Event("pagehide"));
+
+    expect(onColConfigChangeB).toHaveBeenCalledTimes(1);
+    expect(onColConfigChangeA).not.toHaveBeenCalled();
   });
 });
 

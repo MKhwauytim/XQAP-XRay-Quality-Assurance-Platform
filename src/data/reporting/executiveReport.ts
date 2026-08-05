@@ -10,9 +10,9 @@ export { buildExecutiveReport, openExecutiveReport } from "./executive/index";
  * chain). The signature is unchanged so the Reports tab keeps working; pass an
  * optional username→display-name map for reviewer columns when available.
  */
-export function buildExecutiveXlsx(
+export async function buildExecutiveXlsx(
   input: ExecutiveReportInput,
   employeeDisplayNames?: Record<string, string>
-): void {
-  buildExecutiveWorkbook(input, employeeDisplayNames);
+): Promise<void> {
+  await buildExecutiveWorkbook(input, employeeDisplayNames);
 }

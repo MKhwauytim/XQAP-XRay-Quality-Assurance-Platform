@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { X, Save } from "lucide-react";
 import type { DirectoryHandleLike } from "../../../../data/storage/fileSystemAccess";
 import type { ExecutiveReportInput } from "../../../../data/reporting/executiveReportTypes";
-import { buildExecutiveDeckV2 } from "../../../../data/reporting/executive/deck2";
 import { loadDeckStyleChoices, saveDeckStyleChoices } from "../../../../data/reporting/executive/deck2/styleChoices";
 import { readSession } from "../../../../auth/authSession";
 
@@ -58,6 +57,12 @@ export default function DeckDesignCustomizer({ execInput, employeeDisplayNames, 
   // P3-7: buildExecutiveDeckV2 is now async (main-thread-chunked), so this can
   // no longer be a plain `useMemo` — it needs the same cancellation-guarded
   // `useEffect` pattern already used above for `loadDeckStyleChoices`.
+  // The `executive/deck2` import is also dynamic here now, for the same
+  // startup-eval reason as `Reports/index.tsx`'s other conversions (§N) —
+  // this was previously a static top-level import, which alone kept the
+  // whole `deck2` module graph (including the two largest files in the
+  // repo) in the eager boot path regardless of those other conversions,
+  // since this component is itself statically imported by `Reports/index.tsx`.
   const [html, setHtml] = useState<string | null>(null);
   useEffect(() => {
     // Guard-only, no setState here (react-hooks/set-state-in-effect):
@@ -66,12 +71,14 @@ export default function DeckDesignCustomizer({ execInput, employeeDisplayNames, 
     // enough — no stale-state reset needed.
     if (!ready) return;
     let cancelled = false;
-    void buildExecutiveDeckV2(execInput, employeeDisplayNames, {
-      variantPreview: true,
-      styleChoices: loadedChoices ?? {},
-    }).then((result) => {
+    void (async () => {
+      const { buildExecutiveDeckV2 } = await import("../../../../data/reporting/executive/deck2");
+      const result = await buildExecutiveDeckV2(execInput, employeeDisplayNames, {
+        variantPreview: true,
+        styleChoices: loadedChoices ?? {},
+      });
       if (!cancelled) setHtml(result);
-    });
+    })();
     return () => { cancelled = true; };
   }, [ready, execInput, employeeDisplayNames, loadedChoices]);
 

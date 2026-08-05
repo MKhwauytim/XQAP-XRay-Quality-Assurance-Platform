@@ -15,6 +15,7 @@ import type {
   PreparedPopulationRow,
   RemovedPopulationRow
 } from "./populationProcessingTypes";
+import { normalizeText, normalizeArabicText } from "./textNormalization";
 
 type PreparedDraftRow = {
   stage: string | null;
@@ -183,17 +184,6 @@ const BI_FILLABLE_FIELDS: Array<{
     label: "تاريخ الحركة هجري"
   }
 ];
-
-function normalizeText(value: unknown): string {
-  return String(value ?? "").trim().replace(/\s+/g, " ");
-}
-
-function normalizeArabicText(value: unknown): string {
-  return normalizeText(value)
-    .replace(/[أإآ]/g, "ا")
-    .replace(/ة/g, "ه")
-    .replace(/ى/g, "ي");
-}
 
 export function normalizeXrayId(value: unknown): string {
   return normalizeText(value).toUpperCase();

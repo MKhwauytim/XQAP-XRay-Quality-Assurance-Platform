@@ -18,18 +18,21 @@ import type { ReferralRequest } from "../../../../../../data/referral/referralTy
 import { broadcastDataRefresh } from "../../../../../../data/workspace/dataRefreshSignal";
 import { useApprovalData } from "./useApprovalData";
 
-// Mutable so a test can flip the app-wide selection mid-flight; reset in afterEach.
+// Mutable so a test can flip the app-wide selection (or the known-months list)
+// mid-flight; reset in afterEach.
 const globalMonthMock = vi.hoisted(() => {
   type MockSelection =
     | { kind: "existing"; month: number; year: number; folderName: string }
     | { kind: "pending"; month: number; year: number; folderName: string };
+  type MockMonthInfo = { month: number; year: number; folderName: string };
   const APRIL: MockSelection = { kind: "existing", month: 4, year: 2026, folderName: "4-april-2026" };
-  return { APRIL, state: { selection: APRIL as MockSelection } };
+  const APRIL_ONLY: MockMonthInfo[] = [{ month: 4, year: 2026, folderName: "4-april-2026" }];
+  return { APRIL, APRIL_ONLY, state: { selection: APRIL as MockSelection, months: APRIL_ONLY } };
 });
 
 vi.mock("../../../../../../data/month/useGlobalMonth", () => ({
   useGlobalMonth: () => ({
-    months: [{ month: 4, year: 2026, folderName: "4-april-2026" }],
+    months: globalMonthMock.state.months,
     selection: globalMonthMock.state.selection,
     isSelectedMonthClosed: false,
     setSelectedMonth: () => true,
@@ -51,6 +54,7 @@ vi.mock("../../../../../../data/workspace/useWorkspace", () => ({
 afterEach(() => {
   clearSession();
   globalMonthMock.state.selection = globalMonthMock.APRIL;
+  globalMonthMock.state.months = globalMonthMock.APRIL_ONLY;
 });
 
 function setupSupervisor(): void {
@@ -153,5 +157,53 @@ describe("useApprovalData deny-flow regressions", () => {
     });
 
     await waitFor(() => expect(result.current.referrals).toHaveLength(1));
+  });
+
+  it("surfaces a pending reassignment (referral) request from a month other than the reviewer's own global month selection (Bug 2 regression)", async () => {
+    setupSupervisor();
+    // The reviewer's own session is pinned to April (see setupSupervisor/globalMonthMock
+    // default), but the workspace also has a May folder — e.g. the employee who
+    // submitted the request has since moved on to a newer month while the reviewer's
+    // browser tab, per authSession's SEC-02 note, kept its own month selection across
+    // reloads. Before the fix, useApprovalData's loadData only ever queried selMonth
+    // ("4-april-2026"), so a request submitted for "5-may-2026" was invisible in the
+    // review queue with zero indication anything was pending -- even though
+    // approveReferral already always acts on request.monthFolderName, not selMonth,
+    // so the request WAS fully actionable the moment a reviewer could reach it.
+    globalMonthMock.state.months = [
+      { month: 4, year: 2026, folderName: "4-april-2026" },
+      { month: 5, year: 2026, folderName: "5-may-2026" },
+    ];
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    const mayReq = mockReferral("req-may-1", "5-may-2026");
+    await appendReferralRequest(root, "5-may-2026", mayReq);
+
+    const { result } = renderHook(() => useApprovalData(root));
+    await waitFor(() => expect(result.current.loadState).toBe("ready"));
+
+    // Visible in the merged review queue, with the right home month preserved
+    // (approve/deny below must still target May, never April).
+    await waitFor(() => expect(result.current.referrals).toHaveLength(1));
+    expect(result.current.referrals[0].requestId).toBe("req-may-1");
+    expect(result.current.referrals[0].monthFolderName).toBe("5-may-2026");
+    expect(result.current.requests.some((r) => r.requestId === "req-may-1")).toBe(true);
+    // The reviewer is authorized to act on it (canReviewRequest routes purely on
+    // request kind + permission, never on whether it matches selMonth) -- this is
+    // the same boolean RequestCard's showActions gates the موافقة/رفض buttons on,
+    // so this is precisely "the accept/deny option appears" for a cross-month
+    // pending reassignment request.
+    expect(result.current.canReviewRequest(mayReq)).toBe(true);
+
+    // Deciding it targets May (its own month) even though the reviewer's own UI
+    // selection never left April -- exercising the same request.monthFolderName
+    // write path the pre-existing "writes the decision to the request's own
+    // month..." test covers, now reached via the fixed review queue instead of a
+    // hand-constructed request object.
+    const outcome = await result.current.denyReferral(mayReq, "wrong employee");
+    expect(outcome.ok).toBe(true);
+    const mayLog = await loadReferralLog(root, "5-may-2026");
+    expect(mayLog.requests[0].status).toBe("denied");
+    const aprilLog = await loadReferralLog(root, "4-april-2026");
+    expect(aprilLog.requests).toHaveLength(0);
   });
 });

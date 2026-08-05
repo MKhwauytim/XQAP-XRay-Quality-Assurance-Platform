@@ -18,9 +18,6 @@
 import arabic400 from "@fontsource/ibm-plex-sans-arabic/files/ibm-plex-sans-arabic-arabic-400-normal.woff2?inline";
 import arabic700 from "@fontsource/ibm-plex-sans-arabic/files/ibm-plex-sans-arabic-arabic-700-normal.woff2?inline";
 
-/** The embedded font-family name — reference this in font stacks. */
-export const ARABIC_FONT_FAMILY = "IBM Plex Sans Arabic";
-
 /**
  * Two `@font-face` rules (400 + 700) with the woff2 payloads inlined as
  * base64 data URIs. Prepend this to any `<style>` block (report or app) that

@@ -19,7 +19,7 @@
 // against the pre-fix code (only the checked value survives) and passes
 // against the fix.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createMemoryDirectory } from "../../../../data/storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../../../../data/storage/fileSystemAccess";
 import { saveMonthRun } from "../../../../data/population/populationStorage";
@@ -27,6 +27,20 @@ import { DEFAULT_POPULATION_CONFIG } from "../../../../data/population/populatio
 import BrowseDataView from "./BrowseDataView";
 
 const MONTH_FOLDER = "5-may-2026";
+
+// BrowseDataView now owns its search/filter/sort/paginate work via a real Web
+// Worker (Phase B, large-population perf proposal). Vitest's node/jsdom
+// environment cannot run a real DedicatedWorker (same limitation documented in
+// Population.wizard.test.tsx / populationQueryWorker.test.ts), so the Vite
+// `?worker&inline` import is mocked with the shared stub that runs the SAME
+// exported pure `handleWorkerMessage` the real worker uses, on a **macrotask**
+// and serially — see populationQueryWorkerTestStub.ts for why a microtask reply
+// (what this mock used to do) is impossible for a real worker and hid two
+// Critical staleness bugs.
+vi.mock("../../../../workers/populationQueryWorker?worker&inline", async () => {
+  const { createPopulationQueryWorkerStubClass } = await import("./populationQueryWorkerTestStub");
+  return { default: createPopulationQueryWorkerStubClass() };
+});
 
 vi.mock("../../../../data/month/useGlobalMonth", () => ({
   useGlobalMonth: () => ({
@@ -94,9 +108,14 @@ describe("BrowseDataView — per-column filter option list (B12 task 1)", () => 
     const header = within(columnHeader);
 
     // Sanity check: before checking anything, all three ports are listed.
-    expect(header.getByText("ميناء الأول")).toBeTruthy();
-    expect(header.getByText("ميناء الثاني")).toBeTruthy();
-    expect(header.getByText("ميناء الثالث")).toBeTruthy();
+    // The dropdown's option list is now populated via an async worker query
+    // (Phase B) rather than a synchronous in-process scan, so this must await
+    // the response instead of asserting immediately after the click.
+    await waitFor(() => {
+      expect(header.getByText("ميناء الأول")).toBeTruthy();
+      expect(header.getByText("ميناء الثاني")).toBeTruthy();
+      expect(header.getByText("ميناء الثالث")).toBeTruthy();
+    });
 
     // Check ONE value ("ميناء الأول").
     const firstOptionCheckbox = header.getByText("ميناء الأول").closest("label")?.querySelector("input");
@@ -105,14 +124,15 @@ describe("BrowseDataView — per-column filter option list (B12 task 1)", () => 
     }
     fireEvent.click(firstOptionCheckbox);
 
-    // The checked value stays listed (and checked)...
-    const recheckedOption = header.getByText("ميناء الأول").closest("label")?.querySelector("input");
-    expect(recheckedOption).toHaveProperty("checked", true);
-
-    // ...and, critically, the OTHER two values must remain listed too —
-    // this is the exact case the single-select collapse bug broke.
-    expect(header.getByText("ميناء الثاني")).toBeTruthy();
-    expect(header.getByText("ميناء الثالث")).toBeTruthy();
+    // The checked value stays listed (and checked); the OTHER two values must
+    // remain listed too — this is the exact case the single-select collapse
+    // bug broke. The preview re-query after checking a box is also async.
+    await waitFor(() => {
+      const recheckedOption = header.getByText("ميناء الأول").closest("label")?.querySelector("input");
+      expect(recheckedOption).toHaveProperty("checked", true);
+      expect(header.getByText("ميناء الثاني")).toBeTruthy();
+      expect(header.getByText("ميناء الثالث")).toBeTruthy();
+    });
 
     // The table itself must still show all three rows (no column filter
     // narrowed the visible dataset from checking a dropdown box alone — the

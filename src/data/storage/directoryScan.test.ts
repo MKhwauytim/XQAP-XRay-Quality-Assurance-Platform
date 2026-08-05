@@ -1,3 +1,4 @@
+/* @vitest-environment jsdom */
 import { describe, it, expect } from "vitest";
 import { createMemoryDirectory, getReadLog, clearReadLog } from "./memoryDirectory";
 import { safeWriteJson } from "./safeWrite";
@@ -10,6 +11,7 @@ import {
   resetAppendOnlyDirectoryCache,
   __appendOnlyCacheStatsForTests,
 } from "./directoryScan";
+import { broadcastDataRefresh } from "../workspace/dataRefreshSignal";
 
 type Widget = { id: string };
 
@@ -306,6 +308,24 @@ describe("readAppendOnlyDirectory (Task: incremental cache)", () => {
     await readAppendOnlyDirectory<Widget>(dir, { suffix: ".widget.json", onUnreadable: "skip", scope: { root, path: "events" } });
 
     resetAppendOnlyDirectoryCache(root);
+    clearReadLog(root);
+    await readAppendOnlyDirectory<Widget>(dir, { suffix: ".widget.json", onUnreadable: "skip", scope: { root, path: "events" } });
+    expect(getReadLog(root)).toHaveLength(1);
+  });
+
+  it("resets the cache on a manual data-refresh broadcast but not a periodic one", async () => {
+    resetAppendOnlyDirectoryCache();
+    const root = createMemoryDirectory("root", { trackReads: true });
+    const dir = await root.getDirectoryHandle("events", { create: true });
+    await safeWriteJson<Widget>(dir, "a.widget.json", { id: "a" });
+    await readAppendOnlyDirectory<Widget>(dir, { suffix: ".widget.json", onUnreadable: "skip", scope: { root, path: "events" } });
+
+    broadcastDataRefresh("periodic");
+    clearReadLog(root);
+    await readAppendOnlyDirectory<Widget>(dir, { suffix: ".widget.json", onUnreadable: "skip", scope: { root, path: "events" } });
+    expect(getReadLog(root)).toHaveLength(0);
+
+    broadcastDataRefresh("manual");
     clearReadLog(root);
     await readAppendOnlyDirectory<Widget>(dir, { suffix: ".widget.json", onUnreadable: "skip", scope: { root, path: "events" } });
     expect(getReadLog(root)).toHaveLength(1);

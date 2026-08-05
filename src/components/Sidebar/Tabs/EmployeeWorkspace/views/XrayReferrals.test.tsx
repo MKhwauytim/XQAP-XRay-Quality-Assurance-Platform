@@ -10,7 +10,7 @@
 // the real component against a memory workspace and assert the control is simply
 // absent, not merely "would fail if clicked".
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { createMemoryDirectory } from "../../../../../data/storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../../../../../data/storage/fileSystemAccess";
 import { clearSession, writeSession } from "../../../../../auth/authSession";
@@ -33,6 +33,11 @@ import type { PreparedPopulationRow } from "../../../../../data/population/popul
 import { clearErrors, getRecentErrors } from "../../../../../data/storage/errorLogger";
 import { getReplacementCandidatesIndexed } from "../../../../../data/distribution/replacementCandidateLookup";
 import { broadcastDataRefresh } from "../../../../../data/workspace/dataRefreshSignal";
+import {
+  resetBootProgress,
+  useBootProgress,
+  type BootSourceEntry,
+} from "../../../../../data/workspace/bootProgress";
 import { saveTemplate } from "../../../../../data/templates/templateStorage";
 import { saveInspectionTemplateSelection } from "../../../../../data/templates/templateSelectionStorage";
 import type { TemplateSchema } from "../../../../../data/templates/templateTypes";
@@ -82,6 +87,7 @@ afterEach(() => {
   cleanup();
   clearSession();
   vi.unstubAllGlobals();
+  resetBootProgress();
 });
 
 function makeRow(id: string): PreparedPopulationRow {
@@ -152,12 +158,27 @@ async function seedAssignedSample(
 }
 
 describe("XrayReferrals permission gating (render vs handler)", () => {
+  // Default supervisor permissions no longer disable submit-answers (a live
+  // workspace's own permission edits, since reflected as the new default —
+  // supervisor now CAN submit). Both tests below specifically exercise the
+  // "bulk-assigned supervisor who cannot submit answers" shape from the
+  // synthesis finding regardless of what the ambient default happens to be,
+  // so they override submit-answers explicitly on top of the default base —
+  // same pattern as the request-replacement override test further down.
+  function supervisorCannotSubmitAnswersState() {
+    const base = createEmptyUserManagementState();
+    const featurePermissions: FeaturePermission[] = [
+      ...base.featurePermissions.filter(
+        (f) => !(f.role === "supervisor" && f.featureId === "submit-answers")
+      ),
+      { role: "supervisor", featureId: "submit-answers", enabled: false },
+    ];
+    return { ...base, featurePermissions };
+  }
+
   it("keeps the inspection form read-only when the role cannot submit answers, even for the user's own sample (bulk-assigned supervisor)", async () => {
-    // Default supervisor permissions: submit-answers is disabled while
-    // view-all-entries/request-replacement/ew.reopenAnswer remain enabled — the
-    // exact "bulk-assigned supervisor" shape from the synthesis finding.
     writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
-    writeUserManagementState(createEmptyUserManagementState(), false);
+    writeUserManagementState(supervisorCannotSubmitAnswersState(), false);
 
     const root = createMemoryDirectory("root");
     await seedAssignedSample(root, "sup-1");
@@ -173,7 +194,7 @@ describe("XrayReferrals permission gating (render vs handler)", () => {
 
   it("hides the self-service reopen-request button when the role cannot submit answers", async () => {
     writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
-    writeUserManagementState(createEmptyUserManagementState(), false);
+    writeUserManagementState(supervisorCannotSubmitAnswersState(), false);
 
     const root = createMemoryDirectory("root");
     await seedAssignedSample(root, "sup-1");
@@ -422,5 +443,218 @@ describe("XrayReferrals pending/resolved row coloring (Task 6)", () => {
     const row = findRowByXrayImageId("IMG-1");
     expect(row).toHaveClass("dt-tr--resolved");
     expect(row).not.toHaveClass("dt-tr--pending");
+  });
+});
+
+describe("XrayReferrals post-success reloads (Bug 1 regression)", () => {
+  // Shared template + selection so the detail panel renders an editable input to
+  // type an unsaved draft into — mirrors the existing background-refresh-vs-draft
+  // test above, but exercises the *action's own* post-success reload instead of
+  // the periodic/manual data-refresh signal.
+  async function seedDraftableTemplate(root: DirectoryHandleLike): Promise<void> {
+    const template: TemplateSchema = {
+      templateId: "tmpl-draft-test",
+      templateName: "قالب الاختبار",
+      version: 1,
+      createdAt: new Date().toISOString(),
+      createdBy: "admin",
+      updatedAt: new Date().toISOString(),
+      updatedBy: "admin",
+      fields: [{ fieldId: "note", label: "ملاحظة", type: "text", required: false, options: [] }],
+    };
+    const savedTpl = await saveTemplate(root, template);
+    if (!savedTpl.ok) throw new Error(`seed template failed: ${savedTpl.error}`);
+    const savedSelection = await saveInspectionTemplateSelection(root, {
+      templateId: template.templateId,
+      updatedAt: new Date().toISOString(),
+      updatedBy: "admin",
+    });
+    if (!savedSelection.ok) throw new Error(`seed template selection failed: ${savedSelection.error}`);
+  }
+
+  it("does not flash the loading state or discard an unsaved draft after successfully submitting a reassignment ('إسناد لموظف آخر') request", async () => {
+    writeSession({ role: "employee", username: "emp-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root");
+    await seedAssignedSample(root, "emp-1");
+    await seedDraftableTemplate(root);
+
+    render(<XrayReferrals directoryHandle={root} />);
+
+    await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
+
+    const noteInput = (await waitFor(() => screen.getByLabelText("ملاحظة"))) as HTMLInputElement;
+    fireEvent.change(noteInput, { target: { value: "مسودة غير محفوظة" } });
+    expect(noteInput.value).toBe("مسودة غير محفوظة");
+
+    const reassignButton = await waitFor(() => screen.getByRole("button", { name: "إسناد لموظف آخر" }));
+    fireEvent.click(reassignButton);
+
+    const toEmployeeSelect = (await waitFor(() => screen.getByLabelText(/الموظف المستلم/))) as HTMLSelectElement;
+    // Any default managed user other than "emp-1" works — "jalgahamdi" is one of
+    // createEmptyUserManagementState's seeded default employees.
+    fireEvent.change(toEmployeeSelect, { target: { value: "jalgahamdi" } });
+    const reasonInput = screen.getByLabelText(/سبب الإحالة/);
+    fireEvent.change(reasonInput, { target: { value: "بحاجة لمراجعة موظف آخر" } });
+    fireEvent.click(screen.getByRole("button", { name: "إرسال طلب الإحالة" }));
+
+    // Before the fix: handleReferralRequest's post-success `await loadData()` (no
+    // `{ silent: true }`) flipped loadState to "loading", unmounting the whole
+    // detail-panel block and force-closing the just-typed draft above — the exact
+    // "refresh that's supposed to be silent" the user reported.
+    expect(screen.queryByText("جاري التحميل...")).not.toBeInTheDocument();
+
+    await waitFor(() =>
+      expect(screen.getByText(/تم إرسال طلب الإحالة لـ jalgahamdi/)).toBeInTheDocument()
+    );
+    const noteInputAfter = screen.getByLabelText("ملاحظة") as HTMLInputElement;
+    expect(noteInputAfter.value).toBe("مسودة غير محفوظة");
+  });
+
+  it("does not flash the loading state or discard an unsaved draft after successfully applying a recommended (auto-approved) sample replacement", async () => {
+    writeSession({ role: "employee", username: "emp-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root");
+    await seedAssignedSample(root, "emp-1");
+    await seedDraftableTemplate(root);
+
+    const replacementRow = makeRow("IMG-2");
+    getReplacementCandidatesIndexedMock.mockResolvedValue({ recommended: [replacementRow], all: [] });
+
+    render(<XrayReferrals directoryHandle={root} />);
+
+    await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
+
+    const noteInput = (await waitFor(() => screen.getByLabelText("ملاحظة"))) as HTMLInputElement;
+    fireEvent.change(noteInput, { target: { value: "مسودة غير محفوظة" } });
+
+    const replaceButton = await waitFor(() => screen.getByRole("button", { name: "استبدال العينة" }));
+    fireEvent.click(replaceButton);
+
+    const dialog = await waitFor(() => screen.getByRole("dialog"));
+    fireEvent.change(within(dialog).getByLabelText(/سبب الاستبدال/), {
+      target: { value: "صورة غير واضحة" },
+    });
+    // "الموصى بها" (recommended) tab is selected by default since state.recommended
+    // is non-empty — its row action is "اختيار" and takes the immediate,
+    // no-approval-needed branch of handleReplace (fromRecommended === true).
+    fireEvent.click(within(dialog).getByRole("button", { name: "اختيار" }));
+
+    // Before the fix: handleReplace's post-success `await loadData()` (no
+    // `{ silent: true }`) flipped loadState to "loading", unmounting the whole
+    // detail-panel block and force-closing the just-typed draft above.
+    expect(screen.queryByText("جاري التحميل...")).not.toBeInTheDocument();
+
+    await waitFor(() =>
+      expect(screen.getByText("تم استبدال العينة وإسناد البديل.")).toBeInTheDocument()
+    );
+    // Deliberate selection change, not a bug: handleReplace intentionally moves
+    // selEntryId onto the new replacement row afterward, so a fresh (empty) panel
+    // for IMG-2 replacing IMG-1's is the correct outcome here — this test's job
+    // is only to confirm that transition happens without ever flashing the
+    // "loading" gate (checked above, and still true once everything settles).
+    await waitFor(() => expect(screen.getAllByText("IMG-2").length).toBeGreaterThan(0));
+    expect(screen.queryByText("جاري التحميل...")).not.toBeInTheDocument();
+  });
+});
+
+// Boot-progress instrumentation: loadData's existing fetch pass (sample.master,
+// referral/replacement requests, distribution, and this user's own sample-mirror
+// / answers files) must report to the post-login source checklist (bootProgress.ts)
+// on its initial mount pass only — never on a later month switch, post-action
+// reload, or the { silent: true } periodic/manual data-refresh — without changing
+// what loadData itself fetches. See referralsBootSources in XrayReferrals.tsx.
+describe("XrayReferrals boot-progress reporting (initial load only)", () => {
+  it("registers and marks loaded the referral-queue sources on the initial mount for a personal-scope employee", async () => {
+    writeSession({ role: "employee", username: "emp-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root");
+    await seedAssignedSample(root, "emp-1");
+
+    const { result } = renderHook(() => useBootProgress());
+    render(<XrayReferrals directoryHandle={root} />);
+
+    await waitFor(() => expect(result.current.allLoaded).toBe(true));
+
+    const keys = result.current.entries.map((entry) => entry.key);
+    expect(keys).toEqual([
+      "referrals_sample_master",
+      "referrals_requests",
+      "referrals_distribution",
+      "referrals_sample_mirror",
+      "referrals_answers",
+    ]);
+    expect(result.current.entries.every((entry) => entry.status === "loaded")).toBe(true);
+    // Real on-disk file names, not a "{username}" placeholder pattern.
+    expect(result.current.entries.find((e) => e.key === "referrals_sample_mirror")?.labelEn).toBe(
+      "emp-1.samples.json"
+    );
+    expect(result.current.entries.find((e) => e.key === "referrals_answers")?.labelEn).toBe(
+      "emp-1.answers.json"
+    );
+  });
+
+  it("omits referrals_sample_mirror for an oversight (view-all-entries) role, matching loadData's own canSeeAll branch", async () => {
+    // Default supervisor permissions include view-all-entries: true (see the
+    // permission-gating describe block above), which is what makes loadData skip
+    // loadEmployeeSampleMirror entirely.
+    writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root");
+    await seedAssignedSample(root, "sup-1");
+
+    const { result } = renderHook(() => useBootProgress());
+    render(<XrayReferrals directoryHandle={root} />);
+
+    await waitFor(() => expect(result.current.allLoaded).toBe(true));
+
+    const keys = result.current.entries.map((entry) => entry.key);
+    expect(keys).toEqual([
+      "referrals_sample_master",
+      "referrals_requests",
+      "referrals_distribution",
+      "referrals_answers",
+    ]);
+    expect(keys).not.toContain("referrals_sample_mirror");
+  });
+
+  it("never re-touches the boot-progress store on the silent background data-refresh, so a checklist the user is already past can't re-flicker", async () => {
+    writeSession({ role: "employee", username: "emp-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root");
+    await seedAssignedSample(root, "emp-1");
+
+    // Records every entries snapshot this hook ever renders with — including
+    // ones this test doesn't explicitly wait for — so a regression that removes
+    // the initial-mount gate (letting the silent refresh call registerBootSources/
+    // markBootSourceLoading again) shows up as extra history entries even if the
+    // final terminal state happens to look identical to before.
+    const history: BootSourceEntry[][] = [];
+    renderHook(() => {
+      const { entries } = useBootProgress();
+      history.push(entries.map((entry) => ({ ...entry })));
+      return entries;
+    });
+    render(<XrayReferrals directoryHandle={root} />);
+
+    await waitFor(() =>
+      expect(history[history.length - 1]?.every((entry) => entry.status === "loaded")).toBe(true)
+    );
+    const checkpoint = history.length;
+
+    // Simulate the app-wide data-refresh signal (AuthGate's periodic timer or the
+    // manual toolbar button) — XrayReferrals' own subscription always passes
+    // { silent: true } to loadData for this signal (see the component).
+    act(() => {
+      broadcastDataRefresh();
+    });
+    await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
+
+    expect(history.length).toBe(checkpoint);
   });
 });

@@ -1,0 +1,307 @@
+/* @vitest-environment jsdom */
+import { useEffect } from "react";
+import { afterEach, describe, expect, it } from "vitest";
+import { act, renderHook } from "@testing-library/react";
+
+import {
+  markBootSourceError,
+  markBootSourceLoaded,
+  markBootSourceLoading,
+  registerBootSources,
+  resetBootProgress,
+  useBootProgress,
+} from "./bootProgress";
+
+afterEach(() => {
+  resetBootProgress();
+});
+
+/**
+ * Reproduces the REAL post-login ordering: the code that registers/marks the
+ * sources publishes BEFORE the checklist hook has subscribed.
+ *
+ * In production the hook lives on a parent (`BootSplashOverlay`) while the
+ * registering code lives in a child's own mount effect (`useMonthLoad.ts`,
+ * `XrayReferrals.tsx`) -- and React runs child effects before parent effects,
+ * so the publish always lands before the subscribe. Declaring the registering
+ * effect BEFORE `useBootProgress` here produces that exact order, while
+ * `useBootProgress`'s `useState` initializer has already captured the (still
+ * empty) store during render.
+ */
+function useRegisterBeforeSubscribeHarness() {
+  useEffect(() => {
+    registerBootSources([
+      { key: "population_summary", labelEn: "processing.summary.json", labelAr: "ملخص المعالجة" },
+    ]);
+    markBootSourceLoading("population_summary");
+  }, []);
+  return useBootProgress();
+}
+
+describe("bootProgress", () => {
+  it("registers sources initialized as pending", () => {
+    const { result } = renderHook(() => useBootProgress());
+
+    act(() => {
+      registerBootSources([
+        { key: "population_summary", labelEn: "population.final.json", labelAr: "بيانات المجتمع المعالجة" },
+        { key: "employee_samples", labelEn: "main.samples.json", labelAr: "عينات الموظفين" },
+      ]);
+    });
+
+    expect(result.current.entries).toHaveLength(2);
+    expect(result.current.entries.every((entry) => entry.status === "pending")).toBe(true);
+    expect(result.current.allLoaded).toBe(false);
+  });
+
+  it("transitions a source through loading -> loaded and re-renders the hook", () => {
+    const { result } = renderHook(() => useBootProgress());
+
+    act(() => {
+      registerBootSources([
+        { key: "population_summary", labelEn: "population.final.json", labelAr: "بيانات المجتمع المعالجة" },
+      ]);
+    });
+
+    act(() => {
+      markBootSourceLoading("population_summary");
+    });
+    expect(result.current.entries[0].status).toBe("loading");
+
+    act(() => {
+      markBootSourceLoaded("population_summary");
+    });
+    expect(result.current.entries[0].status).toBe("loaded");
+    expect(result.current.entries[0].error).toBeUndefined();
+  });
+
+  it("markBootSourceError sets status to error and records the message", () => {
+    const { result } = renderHook(() => useBootProgress());
+
+    act(() => {
+      registerBootSources([{ key: "risk_raw", labelEn: "risk.raw.json", labelAr: "بيانات المخاطر الخام" }]);
+    });
+
+    act(() => {
+      markBootSourceError("risk_raw", "تعذر القراءة");
+    });
+
+    expect(result.current.entries[0].status).toBe("error");
+    expect(result.current.entries[0].error).toBe("تعذر القراءة");
+  });
+
+  it("clears a stale error when the source later starts loading again", () => {
+    const { result } = renderHook(() => useBootProgress());
+
+    act(() => {
+      registerBootSources([{ key: "risk_raw", labelEn: "risk.raw.json", labelAr: "بيانات المخاطر الخام" }]);
+      markBootSourceError("risk_raw", "تعذر القراءة");
+    });
+    expect(result.current.entries[0].error).toBe("تعذر القراءة");
+
+    act(() => {
+      markBootSourceLoading("risk_raw");
+    });
+    expect(result.current.entries[0].status).toBe("loading");
+    expect(result.current.entries[0].error).toBeUndefined();
+  });
+
+  it("allLoaded is false while any registered entry is still pending or loading", () => {
+    const { result } = renderHook(() => useBootProgress());
+
+    act(() => {
+      registerBootSources([
+        { key: "a", labelEn: "a.json", labelAr: "أ" },
+        { key: "b", labelEn: "b.json", labelAr: "ب" },
+      ]);
+    });
+
+    act(() => {
+      markBootSourceLoaded("a");
+    });
+    expect(result.current.allLoaded).toBe(false);
+
+    act(() => {
+      markBootSourceLoading("b");
+    });
+    expect(result.current.allLoaded).toBe(false);
+  });
+
+  it("allLoaded becomes true once every registered entry reaches loaded", () => {
+    const { result } = renderHook(() => useBootProgress());
+
+    act(() => {
+      registerBootSources([
+        { key: "a", labelEn: "a.json", labelAr: "أ" },
+        { key: "b", labelEn: "b.json", labelAr: "ب" },
+      ]);
+    });
+
+    act(() => {
+      markBootSourceLoaded("a");
+      markBootSourceLoaded("b");
+    });
+
+    expect(result.current.allLoaded).toBe(true);
+  });
+
+  it("an error entry does NOT block allLoaded -- a failed source must not hang the checklist forever", () => {
+    const { result } = renderHook(() => useBootProgress());
+
+    act(() => {
+      registerBootSources([
+        { key: "a", labelEn: "a.json", labelAr: "أ" },
+        { key: "b", labelEn: "b.json", labelAr: "ب" },
+      ]);
+    });
+
+    act(() => {
+      markBootSourceLoaded("a");
+      markBootSourceError("b", "فشل التحميل");
+    });
+
+    expect(result.current.allLoaded).toBe(true);
+    expect(result.current.entries.find((entry) => entry.key === "b")?.status).toBe("error");
+  });
+
+  it("allLoaded is vacuously true when nothing has been registered", () => {
+    const { result } = renderHook(() => useBootProgress());
+    expect(result.current.entries).toHaveLength(0);
+    expect(result.current.allLoaded).toBe(true);
+  });
+
+  it("resetBootProgress clears all entries back to empty", () => {
+    const { result } = renderHook(() => useBootProgress());
+
+    act(() => {
+      registerBootSources([{ key: "a", labelEn: "a.json", labelAr: "أ" }]);
+      markBootSourceLoaded("a");
+    });
+    expect(result.current.entries).toHaveLength(1);
+
+    act(() => {
+      resetBootProgress();
+    });
+    expect(result.current.entries).toHaveLength(0);
+    expect(result.current.allLoaded).toBe(true);
+  });
+
+  it("marking a status on a key that was never registered is a defensive no-op", () => {
+    const { result } = renderHook(() => useBootProgress());
+
+    expect(() => {
+      act(() => {
+        markBootSourceLoading("never_registered");
+        markBootSourceLoaded("never_registered");
+        markBootSourceError("never_registered", "x");
+      });
+    }).not.toThrow();
+
+    expect(result.current.entries).toHaveLength(0);
+  });
+
+  it("re-registering an already-registered key resets its status back to pending", () => {
+    const { result } = renderHook(() => useBootProgress());
+
+    act(() => {
+      registerBootSources([{ key: "a", labelEn: "a.json", labelAr: "أ" }]);
+      markBootSourceLoaded("a");
+    });
+    expect(result.current.entries[0].status).toBe("loaded");
+
+    act(() => {
+      registerBootSources([{ key: "a", labelEn: "a.json", labelAr: "أ" }]);
+    });
+    expect(result.current.entries[0].status).toBe("pending");
+  });
+
+  it("sees a registration published BEFORE it subscribed -- the real post-login ordering (C1 regression)", () => {
+    // Every other test in this file happens to subscribe FIRST and publish
+    // second, which is the exact OPPOSITE of how the store is used in
+    // production -- that is why they all stayed green while the checklist
+    // never actually showed for a real user. Without the snapshot re-read
+    // inside `useBootProgress`'s subscribing effect, the notify() fired by the
+    // harness's registration below lands with zero subscribers and is lost:
+    // `entries` stays [] forever and `[].every(...)` reports `allLoaded` as
+    // vacuously true from the very first render.
+    const { result } = renderHook(() => useRegisterBeforeSubscribeHarness());
+
+    expect(result.current.entries).toHaveLength(1);
+    expect(result.current.entries[0].status).toBe("loading");
+    expect(result.current.allLoaded).toBe(false);
+  });
+
+  it("sees sources registered before it was ever rendered (useState-initializer path)", () => {
+    // Companion to the ordering regression above, covering the other half of
+    // the same guarantee: a hook mounted LATE (e.g. an overlay that re-mounts
+    // after the landing tab has long since registered) must also start from
+    // the live store, not from an empty list.
+    registerBootSources([{ key: "a", labelEn: "a.json", labelAr: "أ" }]);
+    markBootSourceLoading("a");
+
+    const { result } = renderHook(() => useBootProgress());
+
+    expect(result.current.entries).toHaveLength(1);
+    expect(result.current.allLoaded).toBe(false);
+  });
+
+  it("a second subscribed hook instance sees the same updates (shared module-level store)", () => {
+    const first = renderHook(() => useBootProgress());
+    const second = renderHook(() => useBootProgress());
+
+    act(() => {
+      registerBootSources([{ key: "a", labelEn: "a.json", labelAr: "أ" }]);
+      markBootSourceLoaded("a");
+    });
+
+    expect(first.result.current.entries[0].status).toBe("loaded");
+    expect(second.result.current.entries[0].status).toBe("loaded");
+  });
+
+  // BootSplashOverlay.tsx relies on resetGeneration being a monotonic counter
+  // incremented ONLY by resetBootProgress -- it's the one signal a consumer
+  // can use to tell "the store has genuinely been reset since I last looked"
+  // apart from "the store happens to currently look empty/fresh," which
+  // register/mark calls alone can't distinguish. These tests pin that
+  // contract down directly, at the store level, rather than only indirectly
+  // through the overlay's own tests.
+  it("resetGeneration starts at some baseline and increases by exactly one per resetBootProgress call", () => {
+    const { result } = renderHook(() => useBootProgress());
+    const baseline = result.current.resetGeneration;
+
+    act(() => {
+      resetBootProgress();
+    });
+    expect(result.current.resetGeneration).toBe(baseline + 1);
+
+    act(() => {
+      resetBootProgress();
+    });
+    expect(result.current.resetGeneration).toBe(baseline + 2);
+  });
+
+  it("resetGeneration does NOT change on registerBootSources/markBootSource* calls -- only resetBootProgress moves it", () => {
+    const { result } = renderHook(() => useBootProgress());
+    const baseline = result.current.resetGeneration;
+
+    act(() => {
+      registerBootSources([{ key: "a", labelEn: "a.json", labelAr: "أ" }]);
+      markBootSourceLoading("a");
+      markBootSourceLoaded("a");
+      markBootSourceError("a", "x");
+    });
+
+    expect(result.current.resetGeneration).toBe(baseline);
+  });
+
+  it("a second subscribed hook instance sees the same resetGeneration (shared module-level counter)", () => {
+    const first = renderHook(() => useBootProgress());
+    const second = renderHook(() => useBootProgress());
+
+    act(() => {
+      resetBootProgress();
+    });
+
+    expect(first.result.current.resetGeneration).toBe(second.result.current.resetGeneration);
+  });
+});
