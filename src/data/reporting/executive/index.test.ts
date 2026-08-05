@@ -18,13 +18,7 @@ vi.mock("./document/index", () => ({
 
 import { openExecutiveReport } from "./index";
 import { DEFAULT_EXEC_CONFIG } from "../executiveReportTypes";
-
-function makeFakeReportWindow() {
-  return {
-    document: { open: vi.fn(), write: vi.fn(), close: vi.fn() },
-    close: vi.fn(),
-  };
-}
+import { makeFakeReportWindow } from "../reportTestFixtures";
 
 describe("openExecutiveReport — abandoned-window regression (P3-7 build-failure gap)", () => {
   it("closes the already-opened report window instead of leaving it permanently blank when the HTML build throws", async () => {

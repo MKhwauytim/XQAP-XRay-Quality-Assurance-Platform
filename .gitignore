@@ -30,3 +30,4 @@ testsprite_tests\tmp\config.json
 # Tool / analysis artifacts
 lint-report.json
 testsprite_tests/tmp/
+.superpowers/

@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>خطة تحسين الأداء — محلي مقابل UNC</title>
+<style>
+  :root {
+    --bg: #eef2f6;
+    --bg-raised: #ffffff;
+    --bg-sunken: #e4e9f0;
+    --text: #10151f;
+    --text-dim: #52607a;
+    --border: #d4dce6;
+    --accent: #2452c8;
+    --accent-soft: #dde6fb;
+    --good: #16a34a;
+    --good-soft: #dcf5e3;
+    --warn: #d97706;
+    --warn-soft: #fbead0;
+    --bad: #dc2626;
+    --bad-soft: #fbdcdc;
+    --shadow: 0 1px 2px rgba(16, 21, 31, 0.06);
+    --radius: 14px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b1220;
+      --bg-raised: #121a2b;
+      --bg-sunken: #0e1626;
+      --text: #e8edf6;
+      --text-dim: #93a1ba;
+      --border: #223049;
+      --accent: #6f97ff;
+      --accent-soft: #17234a;
+      --good: #34d16f;
+      --good-soft: #12301d;
+      --warn: #f2a85c;
+      --warn-soft: #3a2810;
+      --bad: #f2545c;
+      --bad-soft: #3a1416;
+      --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0b1220; --bg-raised: #121a2b; --bg-sunken: #0e1626;
+    --text: #e8edf6; --text-dim: #93a1ba; --border: #223049;
+    --accent: #6f97ff; --accent-soft: #17234a;
+    --good: #34d16f; --good-soft: #12301d;
+    --warn: #f2a85c; --warn-soft: #3a2810;
+    --bad: #f2545c; --bad-soft: #3a1416;
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  }
+  :root[data-theme="light"] {
+    --bg: #eef2f6; --bg-raised: #ffffff; --bg-sunken: #e4e9f0;
+    --text: #10151f; --text-dim: #52607a; --border: #d4dce6;
+    --accent: #2452c8; --accent-soft: #dde6fb;
+    --good: #16a34a; --good-soft: #dcf5e3;
+    --warn: #d97706; --warn-soft: #fbead0;
+    --bad: #dc2626; --bad-soft: #fbdcdc;
+    --shadow: 0 1px 2px rgba(16, 21, 31, 0.06);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    direction: rtl;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Dubai", "Segoe UI", Tahoma, "Segoe UI Historic", sans-serif;
+    line-height: 1.75;
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection { background: var(--accent-soft); }
+
+  a { color: var(--accent); }
+  button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+
+  .num-ltr { direction: ltr; unicode-bidi: isolate; font-variant-numeric: tabular-nums; }
+
+  main { max-width: 980px; margin: 0 auto; padding: 0 1.4rem; }
+
+  .slide { padding: 3.2rem 0; border-bottom: 1px solid var(--border); }
+  .slide:last-of-type { border-bottom: none; }
+  .slide.tinted { background: var(--bg-raised); border-radius: var(--radius); padding: 3rem 2rem; margin: 0 -0.4rem; box-shadow: var(--shadow); border-bottom: none; }
+
+  .eyebrow {
+    font-size: 0.85rem; letter-spacing: 0.02em; color: var(--accent);
+    font-weight: 700; margin: 0 0 0.7rem;
+  }
+  h1 {
+    font-size: 2.3rem; font-weight: 800; margin: 0 0 1rem; text-wrap: balance; line-height: 1.35;
+  }
+  h2 {
+    font-size: 1.7rem; font-weight: 800; margin: 0 0 0.8rem; text-wrap: balance;
+  }
+  h3 { font-size: 1.15rem; font-weight: 700; margin: 0 0 0.5rem; }
+  p { color: var(--text-dim); max-width: 62ch; font-size: 1.02rem; }
+  .lede { font-size: 1.15rem; color: var(--text-dim); max-width: 60ch; }
+
+  /* ── cover ── */
+  .cover { text-align: center; padding: 4rem 0 3.5rem; }
+  .cover h1 { font-size: 2.7rem; max-width: 18ch; margin: 0 auto 1.1rem; }
+  .cover .lede { max-width: 52ch; margin: 0 auto; }
+  .cover-meta {
+    margin-top: 2rem; display: flex; justify-content: center; gap: 1.6rem; flex-wrap: wrap;
+    font-size: 0.85rem; color: var(--text-dim);
+  }
+  .cover-meta span { display: inline-flex; align-items: center; gap: 0.4rem; }
+
+  /* ── part divider ── */
+  .part-divider {
+    text-align: center; padding: 2.6rem 0 1.6rem;
+  }
+  .part-divider .tag {
+    display: inline-block; font-size: 0.85rem; font-weight: 700; color: var(--accent);
+    background: var(--accent-soft); padding: 0.35rem 1rem; border-radius: 20px; margin-bottom: 0.9rem;
+  }
+  .part-divider h2 { font-size: 2rem; }
+
+  /* ── flow explainer ── */
+  .flow {
+    display: flex; align-items: center; justify-content: center; gap: 0.8rem;
+    flex-wrap: wrap; margin: 2rem 0; font-size: 1rem;
+  }
+  .flow-node {
+    background: var(--bg-raised); border: 1px solid var(--border); border-radius: 12px;
+    padding: 1rem 1.3rem; text-align: center; box-shadow: var(--shadow); min-width: 130px;
+  }
+  .flow-node .icon { font-size: 1.8rem; display: block; margin-bottom: 0.3rem; }
+  .flow-node.good { border-color: color-mix(in srgb, var(--good) 45%, var(--border)); }
+  .flow-node.bad { border-color: color-mix(in srgb, var(--bad) 45%, var(--border)); }
+  .flow-arrow { font-size: 1.4rem; color: var(--text-dim); }
+  .flow-branch { display: flex; flex-direction: column; gap: 0.6rem; }
+
+  /* ── big compare ── */
+  .compare-wrap { margin: 2rem 0 1rem; }
+  .compare-bars { display: grid; gap: 0.9rem; }
+  .compare-row { display: grid; grid-template-columns: 150px 1fr; align-items: center; gap: 1rem; }
+  .compare-row .label { font-weight: 700; display: flex; align-items: center; gap: 0.5rem; justify-content: flex-end; font-size: 1.05rem; }
+  .compare-track { background: var(--bg-sunken); border-radius: 10px; height: 46px; position: relative; overflow: hidden; border: 1px solid var(--border); }
+  .compare-fill { height: 100%; border-radius: 10px; display: flex; align-items: center; padding: 0 1rem; color: #fff; font-weight: 800; font-size: 1.15rem; white-space: nowrap; }
+  .compare-fill.good { background: var(--good); }
+  .compare-fill.bad { background: var(--bad); }
+  .compare-callout {
+    text-align: center; margin-top: 1.6rem; font-size: 1.5rem; font-weight: 800; color: var(--bad);
+  }
+  .compare-callout .num-ltr { font-size: 1.9rem; }
+  .source-note { text-align: center; font-size: 0.8rem; color: var(--text-dim); margin-top: 0.6rem; }
+
+  /* ── cause grid ── */
+  .cause-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 0.9rem; margin-top: 1.6rem; }
+  .cause-card {
+    background: var(--bg-raised); border: 1px solid var(--border); border-radius: 12px;
+    padding: 1.1rem 1.2rem; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 0.6rem;
+  }
+  .cause-card .top-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.6rem; }
+  .cause-card .icon { font-size: 1.5rem; }
+  .cause-card .title { font-weight: 700; font-size: 0.98rem; flex: 1; }
+  .chip {
+    font-size: 0.72rem; font-weight: 700; padding: 0.22rem 0.65rem; border-radius: 20px; white-space: nowrap;
+  }
+  .chip.good { background: var(--good-soft); color: var(--good); }
+  .chip.warn { background: var(--warn-soft); color: var(--warn); }
+  .chip.bad { background: var(--bad-soft); color: var(--bad); }
+  .chip.neutral { background: var(--bg-sunken); color: var(--text-dim); }
+
+  /* ── plan cards ── */
+  .plan-card {
+    background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 1.6rem 1.8rem; box-shadow: var(--shadow); margin-bottom: 1.3rem;
+  }
+  .plan-card.needs-design { border-style: dashed; border-color: color-mix(in srgb, var(--warn) 55%, var(--border)); }
+  .plan-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 0.8rem; flex-wrap: wrap; }
+  .plan-title { display: flex; align-items: center; gap: 0.6rem; font-size: 1.2rem; font-weight: 800; }
+  .plan-title .icon { font-size: 1.5rem; }
+  .plan-section { margin-top: 0.8rem; }
+  .plan-section .k { font-size: 0.78rem; font-weight: 700; color: var(--accent); margin-bottom: 0.2rem; }
+  .plan-section p { margin: 0; font-size: 0.95rem; max-width: none; }
+  .plan-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.2rem; margin-top: 1rem; }
+  .old-new { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 0.7rem; margin-top: 1rem; }
+  .old-new .box { border-radius: 10px; padding: 0.7rem 0.9rem; font-size: 0.88rem; }
+  .old-new .old { background: var(--bad-soft); color: var(--text); }
+  .old-new .new { background: var(--good-soft); color: var(--text); }
+  .old-new .box .k { font-weight: 700; font-size: 0.72rem; display: block; margin-bottom: 0.25rem; }
+  .old-new .arrow { font-size: 1.3rem; color: var(--text-dim); }
+
+  .rating { display: flex; align-items: center; gap: 0.7rem; min-width: 190px; }
+  .rating-track { flex: 1; height: 12px; border-radius: 7px; background: var(--bg-sunken); overflow: hidden; border: 1px solid var(--border); }
+  .rating-fill { height: 100%; border-radius: 7px; }
+  .rating[data-tier="high"] .rating-fill { background: var(--bad); }
+  .rating[data-tier="mid"] .rating-fill { background: var(--warn); }
+  .rating[data-tier="low"] .rating-fill { background: var(--text-dim); }
+  .rating-label { font-weight: 800; font-size: 1.05rem; white-space: nowrap; }
+  .rating-max { color: var(--text-dim); font-weight: 400; font-size: 0.82rem; }
+
+  /* ── ranking ── */
+  .rank-list { display: grid; gap: 0.7rem; margin-top: 1.6rem; }
+  .rank-row { display: grid; grid-template-columns: 26px 1fr auto; align-items: center; gap: 0.9rem; }
+  .rank-row .pos { font-weight: 800; color: var(--text-dim); text-align: center; }
+  .rank-row .name { font-weight: 700; font-size: 0.95rem; }
+  .rank-row .bar-wrap { grid-column: 1 / -1; }
+  .rank-track { background: var(--bg-sunken); border-radius: 8px; height: 26px; border: 1px solid var(--border); overflow: hidden; }
+  .rank-fill { height: 100%; display: flex; align-items: center; padding: 0 0.8rem; color: #fff; font-weight: 800; font-size: 0.85rem; }
+
+  /* ── deferred ── */
+  .deferred-card {
+    background: var(--bg-sunken); border: 1px dashed var(--border); border-radius: 12px;
+    padding: 1.1rem 1.3rem; margin-bottom: 0.8rem;
+  }
+  .deferred-card h3 { font-size: 1rem; margin-bottom: 0.3rem; }
+  .deferred-card p { font-size: 0.9rem; margin: 0; }
+
+  .pending-note {
+    background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+    border-radius: 12px; padding: 1.1rem 1.3rem; font-size: 0.95rem;
+  }
+  .pending-note b { color: var(--accent); }
+
+  /* ── tech tiers (part 3) ── */
+  .tier-header { display: flex; align-items: center; gap: 0.7rem; margin: 2.2rem 0 1.1rem; }
+  .tier-header .dotcue { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+  .tier-header.high .dotcue { background: var(--bad); }
+  .tier-header.mid .dotcue { background: var(--warn); }
+  .tier-header.low .dotcue { background: var(--text-dim); }
+  .tier-header h3 { margin: 0; font-size: 1.15rem; }
+  .tier-header .count { color: var(--text-dim); font-size: 0.85rem; }
+
+  .verdict-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 0.8rem; }
+  .verdict-card {
+    background: var(--bg-sunken); border: 1px solid var(--border); border-radius: 12px;
+    padding: 1rem 1.2rem; display: flex; flex-direction: column; gap: 0.5rem;
+  }
+  .verdict-top { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; }
+  .verdict-name { font-weight: 700; font-size: 0.95rem; display: flex; align-items: center; gap: 0.5rem; }
+  .verdict-card p { margin: 0; font-size: 0.85rem; }
+  .verdict-rating { display: flex; align-items: center; gap: 0.4rem; font-weight: 800; font-size: 0.85rem; color: var(--text-dim); flex-shrink: 0; }
+
+  .process-note {
+    background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+    border-radius: 12px; padding: 1.1rem 1.3rem; font-size: 0.92rem; margin-bottom: 1.6rem;
+  }
+  .process-note b { color: var(--accent); }
+  .process-flow { display: flex; align-items: center; justify-content: center; gap: 0.6rem; margin-top: 0.9rem; flex-wrap: wrap; font-size: 0.85rem; }
+  .process-flow .step { background: var(--bg-raised); border: 1px solid var(--border); border-radius: 20px; padding: 0.35rem 0.9rem; font-weight: 700; }
+  .process-flow .arrow { color: var(--text-dim); }
+
+  .scope-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1.4rem; }
+  .scope-box { border-radius: 12px; padding: 1.1rem 1.3rem; }
+  .scope-box.done { background: var(--good-soft); }
+  .scope-box.todo { background: var(--bg-sunken); }
+  .scope-box h3 { font-size: 0.95rem; }
+  .scope-box ul { margin: 0.4rem 0 0; padding-inline-start: 1.2rem; font-size: 0.88rem; color: var(--text-dim); }
+
+  footer { max-width: 980px; margin: 0 auto; padding: 2rem 1.4rem 3rem; color: var(--text-dim); font-size: 0.82rem; text-align: center; }
+
+  @media (max-width: 640px) {
+    h1 { font-size: 1.7rem; }
+    .cover h1 { font-size: 2rem; }
+    .compare-row { grid-template-columns: 1fr; text-align: center; }
+    .compare-row .label { justify-content: center; }
+    .plan-grid { grid-template-columns: 1fr; }
+    .old-new { grid-template-columns: 1fr; }
+    .old-new .arrow { display: none; }
+    .scope-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<main>
+
+  <div class="cover">
+    <p class="eyebrow">تحليل أداء — تطبيق ضمان جودة الأشعة</p>
+    <h1>لماذا يتجمّد التطبيق عند استخدام مجلد شبكي (UNC)؟</h1>
+    <p class="lede">مقارنة مرئية بين العمل من قرص الجهاز نفسه، والعمل عبر مجلد شبكي — وخطة تحسين مقترحة، بدون أي تنفيذ فعلي حتى الآن.</p>
+    <div class="cover-meta">
+      <span>🔎 تحليل من الكود الفعلي</span>
+      <span>🚫 بدون أي تغيير على التطبيق</span>
+      <span>💬 قابل للنقاش والتعديل</span>
+    </div>
+  </div>
+
+  <div class="part-divider">
+    <span class="tag">الجزء الأول — التشخيص</span>
+    <h2>لماذا يحدث هذا أصلًا؟</h2>
+  </div>
+
+  <section class="slide">
+    <h2>لا يوجد "خادم" — كل شيء عبارة عن ملفات</h2>
+    <p>هذا التطبيق لا يتصل بأي خادم مركزي يستجيب فورًا. كل ما تراه على الشاشة يُقرأ من ملف على القرص، وكل ما تحفظه يُكتب في ملف — إمّا على قرص جهازك مباشرة، أو عبر الشبكة إلى مجلد بعيد.</p>
+    <div class="flow">
+      <div class="flow-node"><span class="icon">🖥️</span>المتصفح</div>
+      <span class="flow-arrow">⟵</span>
+      <div class="flow-node"><span class="icon">📁</span>نظام الملفات</div>
+      <span class="flow-arrow">⟵</span>
+      <div class="flow-branch">
+        <div class="flow-node good"><span class="icon">⚡</span>قرص محلي</div>
+        <div class="flow-node bad"><span class="icon">🌐</span>مجلد شبكي (UNC)</div>
+      </div>
+    </div>
+    <p style="text-align:center; max-width:56ch; margin:0 auto;">كل حفظ أو قراءة = رحلة فعلية للملف، وليست مجرد "طلب سريع" كما في التطبيقات المعتادة. الفرق بين المسارين ليس بسيطًا — إنه الفرق بين تطبيق سلس وتطبيق يتجمّد.</p>
+  </section>
+
+  <section class="slide tinted">
+    <h2>المقارنة الكبرى: محلي مقابل شبكي</h2>
+    <p class="lede">قياس فعلي لعدد 1000 عملية ملف صغيرة (نفس نوع العمليات التي يقوم بها هذا التطبيق باستمرار) — من تقارير أخطاء متصفح Chromium، وهو نفس المتصفح الذي يعمل عليه التطبيق.</p>
+    <div class="compare-wrap">
+      <div class="compare-bars">
+        <div class="compare-row">
+          <div class="label">⚡ القرص المحلي</div>
+          <div class="compare-track">
+            <div class="compare-fill good" style="width:6%"><span class="num-ltr">3.4s</span></div>
+          </div>
+        </div>
+        <div class="compare-row">
+          <div class="label">🌐 المجلد الشبكي</div>
+          <div class="compare-track">
+            <div class="compare-fill bad" style="width:100%"><span class="num-ltr">142s</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="compare-callout">أبطأ بنحو <span class="num-ltr">40×</span></div>
+      <p class="source-note">المصدر: Chromium Issue Tracker #40899722 — قياس File System Access API، ويندوز (شبكي) مقابل macOS (محلي)</p>
+    </div>
+  </section>
+
+  <section class="slide">
+    <h2>خريطة الأسباب — ماذا يزداد سوءًا فعليًا على الشبكة؟</h2>
+    <p class="lede">تسعة أنماط فعلية داخل كود التطبيق، من الأخف إلى الأثقل. الألوان: <span class="chip good" style="vertical-align:middle;">تم إصلاحه</span> <span class="chip warn" style="vertical-align:middle;">حسب التصميم</span> <span class="chip bad" style="vertical-align:middle;">الأثقل</span></p>
+    <div class="cause-grid">
+      <div class="cause-card">
+        <div class="top-row"><span class="icon">💾</span><span class="chip neutral">متعمّد</span></div>
+        <div class="title">كل عملية حفظ = 7 عمليات قرص فعلية بدل 1</div>
+        <p style="margin:0;font-size:0.85rem;">لحماية البيانات من التلف عند انقطاع الاتصال أثناء الحفظ — قرار مقصود.</p>
+      </div>
+      <div class="cause-card">
+        <div class="top-row"><span class="icon">🔁</span><span class="chip neutral">محدود</span></div>
+        <div class="title">إعادة المحاولة عند تعارض الكتابة — حتى 10 مرات</div>
+        <p style="margin:0;font-size:0.85rem;">لا يتكيّف مع بطء الشبكة الفعلي — جدول ثابت.</p>
+      </div>
+      <div class="cause-card">
+        <div class="top-row"><span class="icon">🗂️</span><span class="chip good">تم إصلاحه ✓</span></div>
+        <div class="title">فحص هيكل مساحة العمل عند كل فتح</div>
+        <p style="margin:0;font-size:0.85rem;">كان يحدث بالتتابع، أصبح يحدث بالتوازي.</p>
+      </div>
+      <div class="cause-card">
+        <div class="top-row"><span class="icon">🔐</span><span class="chip warn">حسب التصميم</span></div>
+        <div class="title">تحديث الصلاحيات كل 3 دقائق — لكل تبويب مفتوح</div>
+        <p style="margin:0;font-size:0.85rem;">كل تبويب مفتوح يعيد القراءة بشكل مستقل.</p>
+      </div>
+      <div class="cause-card">
+        <div class="top-row"><span class="icon">💓</span><span class="chip warn">حسب التصميم</span></div>
+        <div class="title">نبضة سجل النشاط كل 60 ثانية</div>
+        <p style="margin:0;font-size:0.85rem;">طوال مدة الجلسة المفتوحة.</p>
+      </div>
+      <div class="cause-card">
+        <div class="top-row"><span class="icon">👥</span><span class="chip warn">تحسّن جزئي</span></div>
+        <div class="title">قراءة ملف كل موظف بشكل منفصل</div>
+        <p style="margin:0;font-size:0.85rem;">أصبحت متوازية، لكنها ما زالت تتكرر مع عدد الموظفين.</p>
+      </div>
+      <div class="cause-card">
+        <div class="top-row"><span class="icon">📜</span><span class="chip good">تحسّن معظمه ✓</span></div>
+        <div class="title">سجل أحداث التوزيع — ملف واحد لكل حدث</div>
+        <p style="margin:0;font-size:0.85rem;">كان يُعاد مسحه بالكامل 4 مرات لكل حدث، أصبح مرة واحدة فقط.</p>
+      </div>
+      <div class="cause-card">
+        <div class="top-row"><span class="icon">📊</span><span class="chip warn">تحسّن جزئي</span></div>
+        <div class="title">تحميل بيانات السكان الكاملة</div>
+        <p style="margin:0;font-size:0.85rem;">حتى 400 ألف صف — جزء منها أصبح في خيط منفصل، والباقي لا يزال كاملًا.</p>
+      </div>
+      <div class="cause-card">
+        <div class="top-row"><span class="icon">🗄️</span><span class="chip bad">الأثقل</span></div>
+        <div class="title">النسخ الاحتياطي ينسخ كل شيء بلا حدود</div>
+        <p style="margin:0;font-size:0.85rem;">كل ملف JSON في كامل مساحة العمل، في كل نسخة احتياطية.</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="part-divider">
+    <span class="tag">الجزء الثاني — خطة التحسين</span>
+    <h2>ما الذي يمكن تحسينه، ولماذا نبدأ بهذا الترتيب؟</h2>
+    <p class="lede" style="margin:0.8rem auto 0;">كل عنصر يحمل تقييمًا من 1 إلى 10 يمثل <b>الأولوية</b> (التكرار × الأثر) — الأعلى يعني الأَولى بالتنفيذ. هذه خطة للنقاش والمراجعة فقط — <b>لم يُنفَّذ منها شيء بعد</b>.</p>
+  </div>
+
+  <!-- Plan card 1 -->
+  <section class="slide" style="border-bottom:none; padding-bottom:0.5rem;">
+    <div class="plan-card">
+      <div class="plan-head">
+        <div class="plan-title"><span class="icon">🔄</span> إعادة تحميل كامل بيانات السكان مع كل إجراء فردي</div>
+        <div class="rating" data-tier="high">
+          <div class="rating-track"><div class="rating-fill" style="width:90%"></div></div>
+          <span class="rating-label num-ltr">9<span class="rating-max">/10</span></span>
+        </div>
+      </div>
+      <div class="plan-grid">
+        <div class="plan-section"><div class="k">لماذا</div><p>أي عملية تعيين أو استبدال أو إتمام واحدة تجعل تبويب "تصفح البيانات" — حتى لو كان مغلقًا وغير ظاهر — يعيد قراءة وتحليل ملف السكان بالكامل، وقد يصل إلى 400 ألف صف.</p></div>
+        <div class="plan-section"><div class="k">كيف (اتجاه مقترح)</div><p>فصل إشارة تحديث "المعالجة" عن إشارة تحديث "التصفح"، بحيث لا يُعاد التحميل إلا عند فتح تبويب التصفح فعليًا.</p></div>
+      </div>
+      <div class="old-new">
+        <div class="box old"><span class="k">القديم</span>25 عملية تعيين يدوية = 25 قراءة كاملة للملف الضخم</div>
+        <div class="arrow">⟸</div>
+        <div class="box new"><span class="k">الجديد</span>25 عملية تعيين = صفر قراءات إضافية حتى يُفتح التصفح فعليًا</div>
+      </div>
+    </div>
+
+    <!-- Plan card 2 -->
+    <div class="plan-card">
+      <div class="plan-head">
+        <div class="plan-title"><span class="icon">☑️</span> لا يوجد إجراء جماعي في المراجعة اليدوية</div>
+        <div class="rating" data-tier="mid">
+          <div class="rating-track"><div class="rating-fill" style="width:70%"></div></div>
+          <span class="rating-label num-ltr">7<span class="rating-max">/10</span></span>
+        </div>
+      </div>
+      <div class="plan-grid">
+        <div class="plan-section"><div class="k">لماذا</div><p>كل صف في المراجعة اليدوية يُعامَل بشكل منفصل تمامًا — لا تحديد متعدد، ولا "تطبيق على المحدد".</p></div>
+        <div class="plan-section"><div class="k">كيف (اتجاه مقترح)</div><p>إضافة تحديد متعدد بمربعات اختيار، وزر واحد "تطبيق على المحدد" يستخدم آلية الكتابة الجماعية الموجودة أصلًا في التوزيع الجماعي.</p></div>
+      </div>
+      <div class="old-new">
+        <div class="box old"><span class="k">القديم</span>مراجعة 15 صفًا يدويًا = 15 عملية كتابة منفصلة</div>
+        <div class="arrow">⟸</div>
+        <div class="box new"><span class="k">الجديد</span>15 صفًا محددًا = عملية كتابة واحدة فقط</div>
+      </div>
+    </div>
+
+    <!-- Plan card 3 -->
+    <div class="plan-card">
+      <div class="plan-head">
+        <div class="plan-title"><span class="icon">📄</span> جلب ملف لا يُستخدم غالبًا (نسخة العينة الشخصية)</div>
+        <div class="rating" data-tier="mid">
+          <div class="rating-track"><div class="rating-fill" style="width:60%"></div></div>
+          <span class="rating-label num-ltr">6<span class="rating-max">/10</span></span>
+        </div>
+      </div>
+      <div class="plan-grid">
+        <div class="plan-section"><div class="k">لماذا</div><p>عند فتح تبويب "طلبات الأشعة"، يُجلب ملف نسخة العينات الخاص بالموظف دائمًا — لكنه لا يُستخدم فعليًا إلا إذا فشلت القراءة الأساسية (نادر الحدوث).</p></div>
+        <div class="plan-section"><div class="k">كيف (اتجاه مقترح)</div><p>تأجيل قراءة هذا الملف الاحتياطي حتى تفشل القراءة الأساسية فعليًا، بدل جلبه بالتوازي في كل مرة.</p></div>
+      </div>
+      <div class="old-new">
+        <div class="box old"><span class="k">القديم</span>3 ملفات تُقرأ دائمًا مع كل فتح للتبويب</div>
+        <div class="arrow">⟸</div>
+        <div class="box new"><span class="k">الجديد</span>ملفان فقط، والثالث عند الحاجة الفعلية فقط</div>
+      </div>
+    </div>
+
+    <!-- Plan card 4 -->
+    <div class="plan-card">
+      <div class="plan-head">
+        <div class="plan-title"><span class="icon">🧠</span> إعادة قراءة بيانات موجودة بالفعل في الذاكرة</div>
+        <div class="rating" data-tier="mid">
+          <div class="rating-track"><div class="rating-fill" style="width:50%"></div></div>
+          <span class="rating-label num-ltr">5<span class="rating-max">/10</span></span>
+        </div>
+      </div>
+      <div class="plan-grid">
+        <div class="plan-section"><div class="k">لماذا</div><p>فحص "البيانات اليتيمة" يعيد جلب ملف العينة الرئيسية وحالة التوزيع من القرص — رغم وجودهما بالفعل في ذاكرة الصفحة من التحميل الأول لنفس الصفحة.</p></div>
+        <div class="plan-section"><div class="k">كيف (اتجاه مقترح)</div><p>تمرير البيانات الموجودة في الذاكرة مباشرة إلى الفحص، بدل إعادة الجلب من الصفر.</p></div>
+      </div>
+      <div class="old-new">
+        <div class="box old"><span class="k">القديم</span>قراءتان إضافيتان مع كل ظهور لمرحلة الفحص</div>
+        <div class="arrow">⟸</div>
+        <div class="box new"><span class="k">الجديد</span>صفر قراءات إضافية — نفس البيانات المحمّلة أصلًا</div>
+      </div>
+    </div>
+
+    <!-- Plan card 5 -->
+    <div class="plan-card">
+      <div class="plan-head">
+        <div class="plan-title"><span class="icon">🔀</span> تكرار جلب نفس الملف بين "معالجة" و"تصفح"</div>
+        <div class="rating" data-tier="mid">
+          <div class="rating-track"><div class="rating-fill" style="width:50%"></div></div>
+          <span class="rating-label num-ltr">5<span class="rating-max">/10</span></span>
+        </div>
+      </div>
+      <div class="plan-grid">
+        <div class="plan-section"><div class="k">لماذا</div><p>التبديل بين تبويبَي "معالجة" و"تصفح" لنفس الشهر يعيد قراءة وتحليل نفس ملف السكان الضخم من الصفر — مرتين لنفس البيانات بالضبط.</p></div>
+        <div class="plan-section"><div class="k">كيف (اتجاه مقترح)</div><p>إعادة استخدام البيانات المحمّلة مسبقًا في أحد التبويبين بدل قراءة الملف من جديد عند أول انتقال.</p></div>
+      </div>
+      <div class="old-new">
+        <div class="box old"><span class="k">القديم</span>قراءتان وتحليلان كاملان لنفس الملف الضخم</div>
+        <div class="arrow">⟸</div>
+        <div class="box new"><span class="k">الجديد</span>قراءة وتحليل واحد فقط، يُعاد استخدامه</div>
+      </div>
+    </div>
+
+    <!-- Plan card 6 -->
+    <div class="plan-card">
+      <div class="plan-head">
+        <div class="plan-title"><span class="icon">👥</span> إعادة جلب ملفات كل الموظفين في كل فتح تبويب</div>
+        <div class="rating" data-tier="mid">
+          <div class="rating-track"><div class="rating-fill" style="width:60%"></div></div>
+          <span class="rating-label num-ltr">6<span class="rating-max">/10</span></span>
+        </div>
+      </div>
+      <div class="plan-grid">
+        <div class="plan-section"><div class="k">لماذا</div><p>تبويبات النتائج والتقارير والموافقات تعيد قراءة ملف كل موظف من القرص في كل مرة تُفتح فيها — حتى لو لم يتغيّر شيء خلال آخر 3 دقائق، وهي نفس مدة دورة التحديث الدوري أصلًا.</p></div>
+        <div class="plan-section"><div class="k">كيف (اتجاه مقترح)</div><p>تخزين مؤقت قصير المدى يُعاد التحقق منه فقط عند إشارة التحديث الدوري، بدل إعادة الجلب الكامل مع كل تنقل بين التبويبات.</p></div>
+      </div>
+      <div class="old-new">
+        <div class="box old"><span class="k">القديم</span>قراءة كل ملفات الموظفين مع كل فتح تبويب</div>
+        <div class="arrow">⟸</div>
+        <div class="box new"><span class="k">الجديد</span>قراءة واحدة كل 3 دقائق، تُشارَك بين كل التبويبات</div>
+      </div>
+    </div>
+
+    <!-- Plan card 7 - needs design -->
+    <div class="plan-card needs-design">
+      <div class="plan-head">
+        <div class="plan-title"><span class="icon">🗄️</span> نطاق النسخ الاحتياطي غير محدود</div>
+        <div class="rating" data-tier="high">
+          <div class="rating-track"><div class="rating-fill" style="width:80%"></div></div>
+          <span class="rating-label num-ltr">8<span class="rating-max">/10</span></span>
+        </div>
+      </div>
+      <div class="plan-grid">
+        <div class="plan-section"><div class="k">لماذا</div><p>كل نسخة احتياطية — يدوية أو يومية — تنسخ كل ملف JSON في كامل مساحة العمل بلا أي حد، وأكبرها ملفات أحداث التوزيع التي قد تتجاوز 1000 ملف في شهر نشط واحد.</p></div>
+        <div class="plan-section"><div class="k">كيف (اتجاه مقترح، يحتاج تصميمًا منفصلًا)</div><p>تقييد النسخ للأشهر النشطة فقط، أو نسخ تراكمي يحفظ فقط ما تغيّر منذ آخر نسخة.</p></div>
+      </div>
+      <p style="margin-top:0.9rem; font-size:0.85rem;"><span class="chip warn">⚠ يحتاج مراجعة تصميم منفصلة</span> — الأثر كبير، لكنه غير جاهز للتنفيذ المباشر مثل العناصر الأخرى أعلاه.</p>
+    </div>
+  </section>
+
+  <section class="slide tinted">
+    <h2>ترتيب الأولوية</h2>
+    <p class="lede">نفس السبعة عناصر أعلاه، مرتّبة من الأعلى أولوية إلى الأقل.</p>
+    <div class="rank-list">
+      <div class="rank-row">
+        <div class="pos num-ltr">1</div>
+        <div class="name">إعادة تحميل كامل السكان مع كل إجراء فردي</div>
+        <div class="num-ltr" style="font-weight:800;">9</div>
+        <div class="bar-wrap"><div class="rank-track"><div class="rank-fill" style="width:90%; background:var(--bad);"></div></div></div>
+      </div>
+      <div class="rank-row">
+        <div class="pos num-ltr">2</div>
+        <div class="name">نطاق النسخ الاحتياطي غير محدود <span class="chip warn" style="font-size:0.65rem;">يحتاج تصميم</span></div>
+        <div class="num-ltr" style="font-weight:800;">8</div>
+        <div class="bar-wrap"><div class="rank-track"><div class="rank-fill" style="width:80%; background:var(--bad);"></div></div></div>
+      </div>
+      <div class="rank-row">
+        <div class="pos num-ltr">3</div>
+        <div class="name">لا يوجد إجراء جماعي في المراجعة اليدوية</div>
+        <div class="num-ltr" style="font-weight:800;">7</div>
+        <div class="bar-wrap"><div class="rank-track"><div class="rank-fill" style="width:70%; background:var(--warn);"></div></div></div>
+      </div>
+      <div class="rank-row">
+        <div class="pos num-ltr">4</div>
+        <div class="name">جلب ملف لا يُستخدم غالبًا (نسخة العينة الشخصية)</div>
+        <div class="num-ltr" style="font-weight:800;">6</div>
+        <div class="bar-wrap"><div class="rank-track"><div class="rank-fill" style="width:60%; background:var(--warn);"></div></div></div>
+      </div>
+      <div class="rank-row">
+        <div class="pos num-ltr">5</div>
+        <div class="name">إعادة جلب ملفات كل الموظفين في كل فتح تبويب</div>
+        <div class="num-ltr" style="font-weight:800;">6</div>
+        <div class="bar-wrap"><div class="rank-track"><div class="rank-fill" style="width:60%; background:var(--warn);"></div></div></div>
+      </div>
+      <div class="rank-row">
+        <div class="pos num-ltr">6</div>
+        <div class="name">إعادة قراءة بيانات موجودة بالفعل في الذاكرة</div>
+        <div class="num-ltr" style="font-weight:800;">5</div>
+        <div class="bar-wrap"><div class="rank-track"><div class="rank-fill" style="width:50%; background:var(--warn);"></div></div></div>
+      </div>
+      <div class="rank-row">
+        <div class="pos num-ltr">7</div>
+        <div class="name">تكرار جلب نفس الملف بين "معالجة" و"تصفح"</div>
+        <div class="num-ltr" style="font-weight:800;">5</div>
+        <div class="bar-wrap"><div class="rank-track"><div class="rank-fill" style="width:50%; background:var(--warn);"></div></div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <h2>عنصران يحتاجان مراجعة مخاطر منفصلة</h2>
+    <p class="lede">هذان العنصران معروفان مسبقًا وموثّقان في مواصفات التطبيق نفسها — ليسا جزءًا من الترتيب أعلاه لأنهما يحتاجان قرارًا منفصلًا بسبب حساسيتهما.</p>
+    <div class="deferred-card">
+      <h3>⚠️ تخفيف "دورة التحقق المزدوج" عند كل حفظ</h3>
+      <p>أكبر أثر محتمل في كامل التطبيق (تقليل نصف عمليات القرص تقريبًا لكل حفظ) — لكنه يمسّ حماية البيانات عند انقطاع الشبكة أثناء الحفظ. قرار مؤجَّل عمدًا لحين مراجعة مخاطر مخصصة.</p>
+    </div>
+    <div class="deferred-card">
+      <h3>⚠️ دمج ملفات أحداث التوزيع المتعددة في ملف واحد</h3>
+      <p>يقلل أكبر عملية نسخ احتياطي في التطبيق (العنصر رقم 2 في الترتيب أعلاه)، لكنه يغيّر بنية بيانات أساسية ويحتاج مراجعة مخاطر مخصصة أيضًا.</p>
+    </div>
+  </section>
+
+  <div class="part-divider">
+    <span class="tag">الجزء الثالث — تقنيات المتصفح الممكنة</span>
+    <h2>ماذا يقدّم المتصفح نفسه كأداة؟</h2>
+    <p class="lede" style="margin:0.8rem auto 0;">15 تقنية أو أسلوبًا مختلفًا، بُحثت فعليًا وقُيّمت مقابل وضع التطبيق الحالي (لا طبقة تخزين مؤقت من أي نوع اليوم) — بعضها يستحق الأولوية، وبعضها الآخر لا يناسب هذا التطبيق إطلاقًا، وهذا بحد ذاته نتيجة مفيدة.</p>
+  </div>
+
+  <section class="slide">
+    <div class="process-note">
+      <b>🤝 كيف أُجري هذا البحث:</b> بالتعاون بين ثلاثة نماذج ذكاء اصطناعي مختلفة، كل واحد بدور مختلف — بحث حقيقي على الإنترنت، ليس تخمينًا.
+      <div class="process-flow">
+        <span class="step">Fable — يوجّه البحث</span><span class="arrow">⟵</span>
+        <span class="step">Sonnet — يبحث فعليًا على الإنترنت</span><span class="arrow">⟵</span>
+        <span class="step">Opus — يحلّل ويقيّم مقابل الوضع الحالي</span>
+      </div>
+    </div>
+
+    <div class="tier-header high">
+      <span class="dotcue"></span><h3>🔴 الأولوية العالية</h3><span class="count">4 عناصر — تقييم 8 وما فوق</span>
+    </div>
+    <div class="plan-card">
+      <div class="plan-head">
+        <div class="plan-title"><span class="icon">🗂️</span> ذاكرة مؤقتة لمقابض المجلدات داخل الجلسة</div>
+        <div class="rating" data-tier="high"><div class="rating-track"><div class="rating-fill" style="width:90%"></div></div><span class="rating-label num-ltr">9<span class="rating-max">/10</span></span></div>
+      </div>
+      <div class="plan-grid">
+        <div class="plan-section"><div class="k">لماذا</div><p>كل قراءة أو كتابة اليوم تعيد الوصول إلى المجلد من الجذر من جديد — قراءة ملف موظف واحد تمرّ بأربع مكالمات منفصلة، في كل مرة، لكل مستخدم.</p></div>
+        <div class="plan-section"><div class="k">كيف</div><p>الاحتفاظ بمقابض المجلدات التي سبق الوصول إليها طوال الجلسة، مع إبطالها فورًا عند أي خطأ بدل افتراض أن الملف مفقود.</p></div>
+      </div>
+      <div class="old-new">
+        <div class="box old"><span class="k">القديم</span>إعادة الوصول للمجلد من الجذر في كل عملية</div>
+        <div class="arrow">⟸</div>
+        <div class="box new"><span class="k">الجديد</span>توفير 2 إلى 4 رحلات شبكية في كل عملية</div>
+      </div>
+    </div>
+
+    <div class="plan-card">
+      <div class="plan-head">
+        <div class="plan-title"><span class="icon">📦</span> المرحلة ج — تقسيم ملف السكان حسب المنفذ</div>
+        <div class="rating" data-tier="high"><div class="rating-track"><div class="rating-fill" style="width:80%"></div></div><span class="rating-label num-ltr">8<span class="rating-max">/10</span></span></div>
+      </div>
+      <div class="plan-grid">
+        <div class="plan-section"><div class="k">لماذا</div><p>ملف السكان ما زال ملفًا واحدًا ضخمًا لكل شهر — أي شاشة تحتاج بعض الصفوف تدفع ثمن كل الصفوف. هذه هي المرحلة المعتمدة أصلًا في خطة التطبيق، ولم تُنفَّذ بعد.</p></div>
+        <div class="plan-section"><div class="k">كيف</div><p>تقسيمه إلى فهرس صغير + ملفات أجزاء لكل منفذ، مع ذاكرة مؤقتة محدودة الحجم تحتفظ بالأجزاء الأخيرة المستخدمة فقط.</p></div>
+      </div>
+      <div class="old-new">
+        <div class="box old"><span class="k">القديم</span>قراءة الملف كاملًا مهما كانت حاجة الشاشة</div>
+        <div class="arrow">⟸</div>
+        <div class="box new"><span class="k">الجديد</span>القراءة تتناسب مع ما تعرضه الشاشة فقط</div>
+      </div>
+    </div>
+
+    <div class="plan-card">
+      <div class="plan-head">
+        <div class="plan-title"><span class="icon">✅</span> فحص سريع للتغيّر قبل إعادة القراءة الكاملة</div>
+        <div class="rating" data-tier="high"><div class="rating-track"><div class="rating-fill" style="width:80%"></div></div><span class="rating-label num-ltr">8<span class="rating-max">/10</span></span></div>
+      </div>
+      <div class="plan-grid">
+        <div class="plan-section"><div class="k">لماذا</div><p>التحديث الدوري اليوم يعيد قراءة وتحليل كل ملف بالكامل كل مرة، سواء تغيّر شيء أم لا.</p></div>
+        <div class="plan-section"><div class="k">كيف</div><p>فحص الحجم وتاريخ آخر تعديل فقط أولًا (رخيص جدًا)، ولا تحدث القراءة الكاملة إلا عند وجود اختلاف فعلي.</p></div>
+      </div>
+      <div class="old-new">
+        <div class="box old"><span class="k">القديم</span>قراءة كاملة لكل ملف في كل دورة تحديث</div>
+        <div class="arrow">⟸</div>
+        <div class="box new"><span class="k">الجديد</span>فحص رخيص أولًا، وقراءة كاملة فقط عند التغيّر</div>
+      </div>
+    </div>
+
+    <div class="plan-card">
+      <div class="plan-head">
+        <div class="plan-title"><span class="icon">📡</span> إشارة تحديث حقيقية بين تبويبات المتصفح</div>
+        <div class="rating" data-tier="high"><div class="rating-track"><div class="rating-fill" style="width:80%"></div></div><span class="rating-label num-ltr">8<span class="rating-max">/10</span></span></div>
+      </div>
+      <div class="plan-grid">
+        <div class="plan-section"><div class="k">لماذا</div><p>إشارة التحديث الحالية لا تغادر التبويب الذي أطلقها — تبويبان على نفس الجهاز لا يعلم أحدهما بكتابة الآخر إلا عبر التحديث الدوري.</p></div>
+        <div class="plan-section"><div class="k">كيف</div><p>إضافة قناة بث بسيطة بين التبويبات (BroadcastChannel) تُبلغ الآخرين فورًا بالملف الذي تغيّر.</p></div>
+      </div>
+      <div class="old-new">
+        <div class="box old"><span class="k">القديم</span>تبويب آخر لا يعلم إلا عند دورته الدورية</div>
+        <div class="arrow">⟸</div>
+        <div class="box new"><span class="k">الجديد</span>يعلم خلال ثانية واحدة تقريبًا</div>
+      </div>
+    </div>
+
+    <div class="tier-header mid">
+      <span class="dotcue"></span><h3>🟠 الأولوية المتوسطة</h3><span class="count">4 عناصر — تقييم 4 إلى 7</span>
+    </div>
+    <div class="plan-card">
+      <div class="plan-head">
+        <div class="plan-title"><span class="icon">📚</span> أرشفة ودمج ملفات الأحداث المتزايدة</div>
+        <div class="rating" data-tier="mid"><div class="rating-track"><div class="rating-fill" style="width:70%"></div></div><span class="rating-label num-ltr">7<span class="rating-max">/10</span></span></div>
+      </div>
+      <div class="plan-grid">
+        <div class="plan-section"><div class="k">لماذا</div><p>ملفات أحداث التوزيع تتراكم بلا حدود، وكلفة سرد مجلد على الشبكة تزداد مع كل ملف جديد فيه.</p></div>
+        <div class="plan-section"><div class="k">كيف</div><p>نقل الأحداث المدموجة بالكامل إلى أرشيف مؤرَّخ (بلا حذف أبدًا)، وتوسيع نفس النمط للإشعارات وسجل الإجراءات.</p></div>
+      </div>
+      <div class="old-new">
+        <div class="box old"><span class="k">القديم</span>مجلد أحداث ينمو بلا حدود إلى الأبد</div>
+        <div class="arrow">⟸</div>
+        <div class="box new"><span class="k">الجديد</span>كلفة سرد المجلد تبقى ثابتة طوال عمر مساحة العمل</div>
+      </div>
+    </div>
+
+    <div class="plan-card">
+      <div class="plan-head">
+        <div class="plan-title"><span class="icon">📈</span> المرحلة د — معالجة تدريجية للتقارير والتصدير</div>
+        <div class="rating" data-tier="mid"><div class="rating-track"><div class="rating-fill" style="width:60%"></div></div><span class="rating-label num-ltr">6<span class="rating-max">/10</span></span></div>
+      </div>
+      <div class="plan-grid">
+        <div class="plan-section"><div class="k">لماذا</div><p>حتى بعد تقسيم التخزين (المرحلة ج)، ستظل التقارير والتصدير وتجميع المؤشرات تسحب كل شيء إلى الذاكرة دفعة واحدة.</p></div>
+        <div class="plan-section"><div class="k">كيف</div><p>معالجة كل جزء ثم تحريره والانتقال للتالي، بدل تحميل كل شيء أولًا. تعتمد على إنجاز المرحلة ج أولًا.</p></div>
+      </div>
+      <div class="old-new">
+        <div class="box old"><span class="k">القديم</span>تحميل كل البيانات في الذاكرة قبل البدء بالتقرير</div>
+        <div class="arrow">⟸</div>
+        <div class="box new"><span class="k">الجديد</span>ذاكرة محدودة ثابتة مهما كبر حجم الشهر</div>
+      </div>
+    </div>
+
+    <div class="plan-card">
+      <div class="plan-head">
+        <div class="plan-title"><span class="icon">🔖</span> فهرس جانبي لأرقام المراجعات</div>
+        <div class="rating" data-tier="mid"><div class="rating-track"><div class="rating-fill" style="width:50%"></div></div><span class="rating-label num-ltr">5<span class="rating-max">/10</span></span></div>
+      </div>
+      <div class="plan-grid">
+        <div class="plan-section"><div class="k">لماذا</div><p>الطريقة الوحيدة اليوم لمعرفة هل تغيّر ملف هي قراءته كاملًا. مهدر جدًا للملفات الكبيرة.</p></div>
+        <div class="plan-section"><div class="k">كيف</div><p>ملف جانبي صغير يسرد رقم مراجعة كل ملف في مجلد الشهر — يُحدَّث مع كل كتابة، ويُعامَل كتلميح لا كمرجع نهائي.</p></div>
+      </div>
+      <div class="old-new">
+        <div class="box old"><span class="k">القديم</span>قراءة كاملة لكل ملف لمعرفة هل تغيّر</div>
+        <div class="arrow">⟸</div>
+        <div class="box new"><span class="k">الجديد</span>قراءة صغيرة واحدة للفهرس تجيب عن كل الملفات</div>
+      </div>
+    </div>
+
+    <div class="plan-card">
+      <div class="plan-head">
+        <div class="plan-title"><span class="icon">🔮</span> تحميل استباقي خفيف للأشهر المجاورة</div>
+        <div class="rating" data-tier="mid"><div class="rating-track"><div class="rating-fill" style="width:40%"></div></div><span class="rating-label num-ltr">4<span class="rating-max">/10</span></span></div>
+      </div>
+      <div class="plan-grid">
+        <div class="plan-section"><div class="k">لماذا</div><p>في الأرشيف، النقرة التالية الأرجح هي الشهر المجاور — تحميل بياناته الوصفية الصغيرة فقط أثناء الخمول يجعلها تبدو فورية.</p></div>
+        <div class="plan-section"><div class="k">كيف</div><p>جلب البيانات الوصفية فقط (لا بيانات السكان الكاملة)، ويُهمَل الناتج إن انتقل المستخدم لغير ذلك.</p></div>
+      </div>
+      <p style="margin-top:0.9rem; font-size:0.85rem;"><span class="chip warn">⚠ تخمين قد يكون خاطئًا</span> — كلفة حقيقية على شبكة بطيئة إن أخطأ التخمين؛ يُؤجَّل حتى تتوفر المرحلة ج.</p>
+    </div>
+
+    <div class="tier-header low">
+      <span class="dotcue"></span><h3>⚪ لا يُنصح به حاليًا</h3><span class="count">7 عناصر — تقييم 1 إلى 3، مع السبب</span>
+    </div>
+    <div class="verdict-grid">
+      <div class="verdict-card">
+        <div class="verdict-top"><div class="verdict-name">🪞 نسخة محلية مرآة (OPFS)</div><div class="verdict-rating num-ltr">3/10</div></div>
+        <p>أعلى سقف نظري للسرعة، لكنها نسخة ثانية من البيانات قابلة للتقادم بصمت — تُدرَس فقط بعد قياس المرحلة ج وثبوت عدم كفايتها.</p>
+      </div>
+      <div class="verdict-card">
+        <div class="verdict-top"><div class="verdict-name">💽 ذاكرة IndexedDB مؤقتة</div><div class="verdict-rating num-ltr">3/10</div></div>
+        <p>مؤجّلة مسبقًا في مواصفات التطبيق نفسها — فائدتها ضيقة: فقط إعادة فتح نفس الملف غير المتغيّر على نفس الجهاز.</p>
+      </div>
+      <div class="verdict-card">
+        <div class="verdict-top"><div class="verdict-name">🧵 SharedWorker لمقابض مشتركة</div><div class="verdict-rating num-ltr">3/10</div></div>
+        <p>يكرّر ما تحققه آلية الأقفال الحالية أصلًا، ولا يقدّم شيئًا لمشكلة الأجهزة المتعددة، وهي المشكلة الحقيقية هنا.</p>
+      </div>
+      <div class="verdict-card">
+        <div class="verdict-top"><div class="verdict-name">🗜️ ضغط الملفات (gzip)</div><div class="verdict-rating num-ltr">2/10</div></div>
+        <p>يحل مشكلة غير مثبتة (حجم النقل)، بينما المشكلة الفعلية هي عدد الرحلات — ويفقد إمكانية قراءة الملفات مباشرة كنص.</p>
+      </div>
+      <div class="verdict-card">
+        <div class="verdict-top"><div class="verdict-name">👁️ FileSystemObserver</div><div class="verdict-rating num-ltr">2/10</div></div>
+        <p>الحالة الوحيدة المفيدة لها (تعديل جهاز آخر) هي بالضبط الحالة الموثَّقة بأنها غير موثوقة على مجلدات الشبكة.</p>
+      </div>
+      <div class="verdict-card">
+        <div class="verdict-top"><div class="verdict-name">🔗 دمج تلقائي (CRDT)</div><div class="verdict-rating num-ltr">2/10</div></div>
+        <p>يحل مشكلة غير موجودة عمليًا — النمط الحالي (ملف لكل حدث) يحقق نفس الضمان يدويًا وبلا أي تكلفة على حجم التطبيق.</p>
+      </div>
+      <div class="verdict-card">
+        <div class="verdict-top"><div class="verdict-name">🛰️ Service Worker / Cache API</div><div class="verdict-rating num-ltr">1/10</div></div>
+        <p>غير قابل للتطبيق إطلاقًا — لا يعمل عند فتح ملف مباشرة، والتطبيق يوزَّع كملف واحد بلا خادم عمدًا.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide tinted">
+    <h2>الترتيب الشامل — كل العناصر معًا</h2>
+    <p class="lede">22 عنصرًا من الجزأين الثاني والثالث، مرتّبة من الأعلى أولوية إلى الأقل.</p>
+    <div class="rank-list">
+      <div class="rank-row"><div class="pos num-ltr">1</div><div class="name">إعادة تحميل كامل السكان مع كل إجراء فردي</div><div class="num-ltr" style="font-weight:800;">9</div><div class="bar-wrap"><div class="rank-track"><div class="rank-fill" style="width:90%;background:var(--bad);"></div></div></div></div>
+      <div class="rank-row"><div class="pos num-ltr">1</div><div class="name">ذاكرة مؤقتة لمقابض المجلدات داخل الجلسة</div><div class="num-ltr" style="font-weight:800;">9</div><div class="bar-wrap"><div class="rank-track"><div class="rank-fill" style="width:90%;background:var(--bad);"></div></div></div></div>
+      <div class="rank-row"><div class="pos num-ltr">3</div><div class="name">نطاق النسخ الاحتياطي غير محدود <span class="chip warn" style="font-size:0.6rem;">يحتاج تصميم</span></div><div class="num-ltr" style="font-weight:800;">8</div><div class="bar-wrap"><div class="rank-track"><div class="rank-fill" style="width:80%;background:var(--bad);"></div></div></div></div>
+      <div class="rank-row"><div class="pos num-ltr">3</div><div class="name">المرحلة ج — تقسيم ملف السكان حسب المنفذ</div><div class="num-ltr" style="font-weight:800;">8</div><div class="bar-wrap"><div class="rank-track"><div class="rank-fill" style="width:80%;background:var(--bad);"></div></div></div></div>
+      <div class="rank-row"><div class="pos num-ltr">3</div><div class="name">فحص سريع للتغيّر قبل إعادة القراءة الكاملة</div><div class="num-ltr" style="font-weight:800;">8</div><div class="bar-wrap"><div class="rank-track"><div class="rank-fill" style="width:80%;background:var(--bad);"></div></div></div></div>
+      <div class="rank-row"><div class="pos num-ltr">3</div><div class="name">إشارة تحديث حقيقية بين تبويبات المتصفح</div><div class="num-ltr" style="font-weight:800;">8</div><div class="bar-wrap"><div class="rank-track"><div class="rank-fill" style="width:80%;background:var(--bad);"></div></div></div></div>
+      <div class="rank-row"><div class="pos num-ltr">7</div><div class="name">لا يوجد إجراء جماعي في المراجعة اليدوية</div><div class="num-ltr" style="font-weight:800;">7</div><div class="bar-wrap"><div class="rank-track"><div class="rank-fill" style="width:70%;background:var(--warn);"></div></div></div></div>
+      <div class="rank-row"><div class="pos num-ltr">7</div><div class="name">أرشفة ودمج ملفات الأحداث المتزايدة</div><div class="num-ltr" style="font-weight:800;">7</div><div class="bar-wrap"><div class="rank-track"><div class="rank-fill" style="width:70%;background:var(--warn);"></div></div></div></div>
+      <div class="rank-row"><div class="pos num-ltr">9</div><div class="name">جلب ملف لا يُستخدم غالبًا (نسخة العينة الشخصية)</div><div class="num-ltr" style="font-weight:800;">6</div><div class="bar-wrap"><div class="rank-track"><div class="rank-fill" style="width:60%;background:var(--warn);"></div></div></div></div>
+      <div class="rank-row"><div class="pos num-ltr">9</div><div class="name">إعادة جلب ملفات كل الموظفين في كل فتح تبويب</div><div class="num-ltr" style="font-weight:800;">6</div><div class="bar-wrap"><div class="rank-track"><div class="rank-fill" style="width:60%;background:var(--warn);"></div></div></div></div>
+      <div class="rank-row"><div class="pos num-ltr">9</div><div class="name">المرحلة د — معالجة تدريجية للتقارير والتصدير</div><div class="num-ltr" style="font-weight:800;">6</div><div class="bar-wrap"><div class="rank-track"><div class="rank-fill" style="width:60%;background:var(--warn);"></div></div></div></div>
+      <div class="rank-row"><div class="pos num-ltr">12</div><div class="name">إعادة قراءة بيانات موجودة بالفعل في الذاكرة</div><div class="num-ltr" style="font-weight:800;">5</div><div class="bar-wrap"><div class="rank-track"><div class="rank-fill" style="width:50%;background:var(--warn);"></div></div></div></div>
+      <div class="rank-row"><div class="pos num-ltr">12</div><div class="name">تكرار جلب نفس الملف بين "معالجة" و"تصفح"</div><div class="num-ltr" style="font-weight:800;">5</div><div class="bar-wrap"><div class="rank-track"><div class="rank-fill" style="width:50%;background:var(--warn);"></div></div></div></div>
+      <div class="rank-row"><div class="pos num-ltr">12</div><div class="name">فهرس جانبي لأرقام المراجعات</div><div class="num-ltr" style="font-weight:800;">5</div><div class="bar-wrap"><div class="rank-track"><div class="rank-fill" style="width:50%;background:var(--warn);"></div></div></div></div>
+      <div class="rank-row"><div class="pos num-ltr">15</div><div class="name">تحميل استباقي خفيف للأشهر المجاورة</div><div class="num-ltr" style="font-weight:800;">4</div><div class="bar-wrap"><div class="rank-track"><div class="rank-fill" style="width:40%;background:var(--text-dim);"></div></div></div></div>
+      <div class="rank-row"><div class="pos num-ltr">16</div><div class="name">نسخة محلية مرآة (OPFS)</div><div class="num-ltr" style="font-weight:800;">3</div><div class="bar-wrap"><div class="rank-track"><div class="rank-fill" style="width:30%;background:var(--text-dim);"></div></div></div></div>
+      <div class="rank-row"><div class="pos num-ltr">16</div><div class="name">ذاكرة IndexedDB مؤقتة</div><div class="num-ltr" style="font-weight:800;">3</div><div class="bar-wrap"><div class="rank-track"><div class="rank-fill" style="width:30%;background:var(--text-dim);"></div></div></div></div>
+      <div class="rank-row"><div class="pos num-ltr">16</div><div class="name">SharedWorker لمقابض مشتركة</div><div class="num-ltr" style="font-weight:800;">3</div><div class="bar-wrap"><div class="rank-track"><div class="rank-fill" style="width:30%;background:var(--text-dim);"></div></div></div></div>
+      <div class="rank-row"><div class="pos num-ltr">19</div><div class="name">ضغط الملفات (gzip)</div><div class="num-ltr" style="font-weight:800;">2</div><div class="bar-wrap"><div class="rank-track"><div class="rank-fill" style="width:20%;background:var(--text-dim);"></div></div></div></div>
+      <div class="rank-row"><div class="pos num-ltr">19</div><div class="name">FileSystemObserver</div><div class="num-ltr" style="font-weight:800;">2</div><div class="bar-wrap"><div class="rank-track"><div class="rank-fill" style="width:20%;background:var(--text-dim);"></div></div></div></div>
+      <div class="rank-row"><div class="pos num-ltr">19</div><div class="name">دمج تلقائي (CRDT)</div><div class="num-ltr" style="font-weight:800;">2</div><div class="bar-wrap"><div class="rank-track"><div class="rank-fill" style="width:20%;background:var(--text-dim);"></div></div></div></div>
+      <div class="rank-row"><div class="pos num-ltr">22</div><div class="name">Service Worker / Cache API</div><div class="num-ltr" style="font-weight:800;">1</div><div class="bar-wrap"><div class="rank-track"><div class="rank-fill" style="width:10%;background:var(--text-dim);"></div></div></div></div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <h2>نطاق هذا التحليل</h2>
+    <div class="scope-grid">
+      <div class="scope-box done">
+        <h3>✅ تم تدقيقه بعمق</h3>
+        <ul><li>تبويب "السكان" (Population) — معالجة، تصفح، توزيع</li><li>تبويب "طلبات الأشعة" (نمط واحد محدد)</li></ul>
+      </div>
+      <div class="scope-box todo">
+        <h3>⏳ لم يُدقَّق بعد بنفس العمق</h3>
+        <ul><li>الإشعارات</li><li>التقارير ومصمم التقارير</li><li>الأرشيف</li><li>إدارة المستخدمين</li><li>الإعدادات</li></ul>
+      </div>
+    </div>
+    <p style="margin-top:1rem; font-size:0.85rem; color:var(--text-dim);">الجزء الثالث (تقنيات المتصفح) شامل لكل التطبيق ولا يقتصر على تبويب بعينه — 15 تقنية بُحثت فعليًا على الإنترنت وقُيّمت مقابل الوضع الحالي.</p>
+    <p style="margin-top:1.4rem; font-size:0.95rem;"><b>هذا مستند خطة فقط.</b> لا يوجد أي تنفيذ فعلي حتى الآن — كل عنصر أعلاه قابل للنقاش والتعديل قبل البدء بأي تغيير.</p>
+  </section>
+
+</main>
+
+<footer>
+  مبني على تدقيق فعلي للكود (الجزآن الأول والثاني) + بحث فعلي على الإنترنت بمشاركة Fable وSonnet وOpus (الجزء الثالث) — x-ray-quality-app-v1، 2026-08-04.
+</footer>
+</body>
+</html>

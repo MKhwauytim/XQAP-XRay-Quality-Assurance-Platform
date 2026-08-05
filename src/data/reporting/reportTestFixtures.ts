@@ -2,11 +2,25 @@
 // / management). Pure data + factory functions — NO test-framework imports — so
 // it type-checks under `tsc -b` and is only ever imported by *.test.ts files
 // (tree-shaken out of the app bundle, like xssPayloads.ts).
+//
+// Exception: `makeFakeReportWindow` imports `vi` from vitest, since every one of
+// its 6 call sites is itself a *.test.ts file — same tree-shaking guarantee applies.
+
+import { vi } from "vitest";
 
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import type { SampleMasterData } from "../sampling/sampleTypes";
 import type { DistributionCurrentData, DistributionStatus } from "../distribution/distributionTypes";
 import type { MonthManifestData } from "../population/monthTypes";
+
+/** A minimal fake `window` returned by `window.open()` in report-builder tests. */
+export function makeFakeReportWindow() {
+  return {
+    opener: undefined as unknown,
+    document: { open: vi.fn(), write: vi.fn(), close: vi.fn() },
+    close: vi.fn(),
+  };
+}
 
 /** A minimal valid `PreparedPopulationRow`; override any field per test. */
 export function makeRow(

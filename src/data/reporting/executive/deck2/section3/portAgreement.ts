@@ -496,8 +496,8 @@ function gridAgreementMatrix(
  * tables, and continuation pages carry the "(تابع)" suffix in their title and
  * headline so a page pulled out of context still reads correctly.
  *
- * NOTE: this is the PER-PORT view. The overall 6×6 source-agreement matrix is a
- * separate section-3 page — nothing here duplicates it.
+ * NOTE: this is the PER-PORT view. The overall 2×3 levels×teams source-agreement
+ * grid (`sourceAgreement.ts`) is a separate section-3 page — nothing here duplicates it.
  */
 export function portAgreementSlideBuilders(model: ReportModel, variantPreview: boolean): SlideBuilder[] {
   const { land, sea } = collectPortAgreementRows(model);
