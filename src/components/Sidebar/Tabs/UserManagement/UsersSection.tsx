@@ -10,7 +10,7 @@ import {
 import { getLabels } from "../../../../data/labels/labelsStore";
 import type { UserFormState } from "./userForm";
 import Pagination from "../../../../components/Pagination/Pagination";
-import { clampPage, pageSlice } from "../../../../components/Pagination/paginationUtils";
+import { clampPage, pageSlice } from "../../../../utils/paginationUtils";
 
 type IdentityDraft = { username: string; displayName: string };
 

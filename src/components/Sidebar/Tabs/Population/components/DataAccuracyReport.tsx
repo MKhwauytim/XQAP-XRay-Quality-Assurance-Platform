@@ -6,7 +6,7 @@ import type { NormalizedBiRow } from "../biData/biDataTypes";
 import { makeBiMatchKey } from "../processing/populationProcessor";
 import type { OrphanScanResult } from "../../../../../data/integrity/orphanScan";
 import Pagination from "../../../../../components/Pagination/Pagination";
-import { clampPage, pageSlice } from "../../../../../components/Pagination/paginationUtils";
+import { clampPage, pageSlice } from "../../../../../utils/paginationUtils";
 import "./DataAccuracyReport.css";
 
 // ── column mapping definition ─────────────────────────────────────────────────

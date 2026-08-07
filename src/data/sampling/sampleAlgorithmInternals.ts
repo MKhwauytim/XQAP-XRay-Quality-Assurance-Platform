@@ -1,4 +1,5 @@
 import type { PreparedPopulationRow } from "../population/populationTypes";
+import { stripRawRow } from "../population/populationTypes";
 import { getStageKey } from "../population/stageHelpers";
 import type { StageAliasMappings, StageSamplingRule } from "../population/populationConfig";
 import { hamiltonApportionment } from "./apportionment";
@@ -420,7 +421,15 @@ function successfulResult(
     stageAllocations,
     drawnAt: new Date().toISOString(),
     drawnBy: username,
-    rows
+    // B5 (disk-bloat fix): `handleDrawSample` can run this draw on the
+    // freshly-processed, not-yet-saved in-memory population rows, which still
+    // carry `rawRow` (the full original Excel row) for the live "export
+    // processed population" / BI-enrichment consumers upstream. Strip it here
+    // so it never lands in sample.master.json regardless of which rows were
+    // passed in — population.final.json already strips it independently
+    // (Tabs/Population/index.tsx's commitSaveToDisk), this is the equivalent
+    // guard for the sample-draw write path this module owns.
+    rows: rows.map(stripRawRow)
   };
   return { ok: true, data };
 }

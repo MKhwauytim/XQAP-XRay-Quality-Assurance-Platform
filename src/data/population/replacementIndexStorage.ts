@@ -20,8 +20,10 @@ import type { StageAliasMappings } from "./populationConfig";
 import { getStageKey, resolveStageMappings, type StageCountKey } from "./stageHelpers";
 import {
   REPLACEMENT_INDEX_FORMAT_VERSION,
+  toReplacementIndexRow,
   type ReplacementIndexBucketEntry,
   type ReplacementIndexManifest,
+  type ReplacementIndexRow,
 } from "./replacementIndexTypes";
 
 const REPLACEMENT_INDEX_FOLDER = "replacement-index";
@@ -110,10 +112,10 @@ export async function loadReplacementBucket(
   monthFolderName: string,
   tier: CertScanMatchStatus,
   stageKey: StageCountKey
-): Promise<PreparedPopulationRow[] | null> {
+): Promise<ReplacementIndexRow[] | null> {
   try {
     const dir = await getReplacementIndexDir(directoryHandle, monthFolderName, false);
-    const result = await safeReadJson<PreparedPopulationRow[]>(dir, bucketFileName(tier, stageKey));
+    const result = await safeReadJson<ReplacementIndexRow[]>(dir, bucketFileName(tier, stageKey));
     return result.ok ? result.value : null;
   } catch {
     return null;
@@ -160,15 +162,23 @@ export async function rebuildReplacementIndex(
       // Single left-to-right pass, insertion-ordered accumulator: capSeeded's
       // Fisher-Yates draw downstream is order-sensitive, so bucket contents
       // must preserve original population row order, never be re-sorted.
-      const buckets = new Map<string, PreparedPopulationRow[]>();
+      //
+      // Buckets store the slim ReplacementIndexRow projection, not the full
+      // row — storing full PreparedPopulationRow objects made this index a
+      // full second copy of the population on disk (measured: 132 MB for a
+      // 70k-row month, essentially the whole population.final.json). The full
+      // row is resolved from population.final.json by xrayImageId only once a
+      // candidate is actually chosen (see replacementCandidateLookup.ts).
+      const buckets = new Map<string, ReplacementIndexRow[]>();
       for (const row of processedRows) {
         const stageKey = getStageKey(row.stage, stageMappings);
         const key = `${row.certScanStatus}::${stageKey}`;
+        const slimRow = toReplacementIndexRow(row);
         const bucket = buckets.get(key);
         if (bucket) {
-          bucket.push(row);
+          bucket.push(slimRow);
         } else {
-          buckets.set(key, [row]);
+          buckets.set(key, [slimRow]);
         }
       }
 

@@ -4,7 +4,7 @@ import { Check, Clock, Megaphone, Pin, Send } from "lucide-react";
 import { PageHeader } from "../../../../PageHeader/PageHeader";
 import { EmptyState, ErrorState, LoadingState } from "../../../../StateViews/StateViews";
 import Pagination from "../../../../Pagination/Pagination";
-import { clampPage, pageSlice } from "../../../../Pagination/paginationUtils";
+import { clampPage, pageSlice } from "../../../../../utils/paginationUtils";
 import type { DirectoryHandleLike } from "../../../../../data/storage/fileSystemAccess";
 import { usePermissions } from "../../../../../auth/usePermissions";
 import { getManagedLoginUsers, subscribeToUserManagementChanges } from "../../../../../auth/userManagement";

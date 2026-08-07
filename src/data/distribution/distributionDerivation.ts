@@ -1,4 +1,6 @@
 import type { PreparedPopulationRow } from "../population/populationTypes";
+import { toEmployeeMirrorRowStub } from "../population/populationTypes";
+
 import { parseMonthFolderName } from "../population/monthFolder";
 import type {
   DistributionEntry,
@@ -163,7 +165,9 @@ export function foldDistributionEvents(
       ...transition,
       lastEventAt: event.eventAt,
       lastEventId: event.eventId,
-      row
+      // B5: only the employee-mirror stub is stored here now, not the full
+      // PreparedPopulationRow — see the docblock on DistributionEntry.row.
+      row: toEmployeeMirrorRowStub(row)
     });
   }
 

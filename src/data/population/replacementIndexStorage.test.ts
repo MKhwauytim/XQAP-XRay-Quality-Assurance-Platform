@@ -86,6 +86,13 @@ describe("rebuildReplacementIndex + read path", () => {
 
     const certFirst = await loadReplacementBucket(root, MONTH, "Certscan", "first");
     expect(certFirst?.map((r) => r.xrayImageId)).toEqual(["c1", "c2"]);
+    // The whole point of this index: a bucket row must NOT be a full
+    // PreparedPopulationRow copy — only the slim selection/display fields.
+    // Regression guard against re-introducing the full-population-sized
+    // index measured on real data (132 MB for a 70k-row month).
+    expect(Object.keys(certFirst?.[0] ?? {}).sort()).toEqual(
+      ["certScanStatus", "plateOrContainerNumber", "portName", "stage", "xrayEntryDate", "xrayImageId"].sort()
+    );
 
     const nonCertUnknown = await loadReplacementBucket(root, MONTH, "NonCertscan", "unknown");
     expect(nonCertUnknown?.map((r) => r.xrayImageId)).toEqual(["n1"]);

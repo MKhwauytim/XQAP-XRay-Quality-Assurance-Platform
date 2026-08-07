@@ -69,9 +69,13 @@ export function buildExclusionSets(
 
 /** A row is eligible as a replacement for `entry` when it has a valid id, isn't
  *  the dead row itself, isn't already sampled/owned, and shares the dead row's
- *  CertScan tier. Exported for reuse by the indexed candidate-lookup path. */
+ *  CertScan tier. Exported for reuse by the indexed candidate-lookup path.
+ *  Deliberately typed against a minimal `Pick`, not the full `PreparedPopulationRow`
+ *  — the indexed path only ever has the slim `ReplacementIndexRow` projection
+ *  available (see `replacementIndexTypes.ts`), and eligibility never needs more
+ *  than these two fields. */
 export function isEligibleCandidate(
-  row: PreparedPopulationRow,
+  row: Pick<PreparedPopulationRow, "xrayImageId" | "certScanStatus">,
   entry: DistributionEntry,
   sampleIds: Set<string>,
   ownedIds: Set<string>

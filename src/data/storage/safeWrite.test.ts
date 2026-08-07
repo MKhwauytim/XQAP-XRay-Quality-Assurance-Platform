@@ -397,6 +397,46 @@ test("concurrent writes to different files do not block each other logically", a
   expect(b.ok && b.value.v).toBe("b");
 });
 
+// The engine's max-string-length RangeError is worded differently depending on
+// context: the browser/Chromium's JSON.stringify throws "Invalid string
+// length", but Node's throws "Cannot create a string longer than 0x1fffffe8
+// characters". isStringLengthError must recognize both (classified by
+// error.name, like casLoop.ts, plus a message test tolerant of either
+// wording) so the streamed fallback engages regardless of engine — matching
+// only the browser wording left the streamed path dead under Node and made a
+// large write fail outright instead of falling back.
+test.each([
+  ["browser/Chromium wording", "Invalid string length"],
+  ["Node wording", "Cannot create a string longer than 0x1fffffe8 characters"],
+])(
+  "a RangeError with %s falls back to the streamed write path",
+  async (_label, message) => {
+    const dir = createMemoryDirectory();
+    const realStringify = JSON.stringify;
+    let threw = false;
+    const stringifySpy = (value: unknown, ...rest: unknown[]) => {
+      if (!threw) {
+        threw = true;
+        throw new RangeError(message);
+      }
+      return (realStringify as (...args: unknown[]) => string)(value, ...rest);
+    };
+    JSON.stringify = stringifySpy as typeof JSON.stringify;
+    try {
+      await safeWriteJson(dir, "big.json", { hello: "world" });
+    } finally {
+      JSON.stringify = realStringify;
+    }
+
+    const result = await safeReadJson<{ hello: string }>(dir, "big.json");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.hello).toBe("world");
+      expect(result.recoveredFromBak).toBe(false);
+    }
+  }
+);
+
 // The streamed write path removes V8's "Invalid string length" ceiling by never
 // materializing the whole serialized envelope. We can't allocate a >512 MB
 // string in a unit test, so we force the path with a tiny size override and

@@ -2,6 +2,7 @@ import js from '@eslint/js'
 import globals from 'globals'
 import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
+import reactCompiler from 'eslint-plugin-react-compiler'
 import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
@@ -15,11 +16,27 @@ export default defineConfig([
       reactHooks.configs.flat.recommended,
       reactRefresh.configs.vite,
     ],
+    plugins: {
+      'react-compiler': reactCompiler,
+    },
     languageOptions: {
       globals: globals.browser,
     },
     rules: {
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+      // Informational, not a correctness rule: it reports components the React
+      // Compiler declined to optimize because a `react-hooks/*` rule was
+      // disabled somewhere inside them. This codebase has ~9 such components
+      // with deliberate, individually-justified disables (latest-value refs
+      // that are reassigned every render, and synchronous state resets in
+      // effects). Those components are correct and still work — they simply
+      // don't get auto-memoized, which is the pre-compiler status quo.
+      //
+      // Left as 'error' it fails `lint:ci` (`--max-warnings 0`) over a
+      // trade-off that was made knowingly, so it is off. Re-enable it if the
+      // disables are ever removed; it is genuinely useful for finding
+      // components that are accidentally opting out of optimization.
+      'react-compiler/react-compiler': 'off',
     },
   },
   {

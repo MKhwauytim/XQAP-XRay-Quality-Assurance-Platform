@@ -132,13 +132,26 @@ function parseValidJson(text: string | null): unknown | null {
 // to avoid doubling parse cost for population.final.json-sized writes.
 const VERIFY_SIZE_LIMIT = 512 * 1024; // 512 KB
 
-// A RangeError thrown by JSON.stringify when its output would exceed V8's max
-// string length ("Invalid string length"). When this is hit, fall back to the
-// streamed write path, which never materializes the whole serialization.
+// A RangeError thrown by JSON.stringify when its output would exceed the
+// engine's max string length. When this is hit, fall back to the streamed
+// write path, which never materializes the whole serialization.
+//
+// Classified by error.name (like casLoop.ts does — see its comment), not by
+// matching the whole message: V8's wording for this differs by context.
+// Chromium/the browser's JSON.stringify throws "Invalid string length", but
+// under Node the same failure reads "Cannot create a string longer than
+// 0x1fffffe8 characters". Matching only the browser wording left the
+// streaming fallback dead under Node — the write just failed outright. Both
+// known wordings are tolerated here so detection is robust regardless of
+// engine.
 function isStringLengthError(error: unknown): boolean {
+  if (!(error instanceof RangeError) && errorName(error) !== "RangeError") {
+    return false;
+  }
+  const message = error instanceof Error ? error.message : String(error);
   return (
-    error instanceof RangeError &&
-    /invalid string length/i.test(error.message)
+    /invalid string length/i.test(message) ||
+    /string longer than/i.test(message)
   );
 }
 

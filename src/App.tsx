@@ -21,7 +21,9 @@ import { NotificationBanner } from "./components/NotificationBanner/Notification
 import {
   createDailyAdminBackupIfDue,
 } from "./data/backup/backupStorage";
-import { listMonthFolders } from "./data/population/populationStorage";
+import { useQueryClient } from "@tanstack/react-query";
+import { monthFoldersQueryOptions } from "./data/query/monthFoldersQuery";
+import { useQueryRefreshBridge } from "./data/query/queryRefreshBridge";
 import { getLabels } from "./data/labels/labelsStore";
 import { useLabels } from "./data/labels/useLabels";
 import { useWorkspace } from "./data/workspace/useWorkspace";
@@ -41,6 +43,8 @@ type AppContentProps = {
 export function AppContent({ session }: AppContentProps) {
   const { directoryHandle, status: workspaceStatus } = useWorkspace();
   const labels = useLabels();
+  const queryClient = useQueryClient();
+  useQueryRefreshBridge(queryClient);
   const [selectedTabId, setSelectedTabId] = useState("");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
@@ -146,7 +150,7 @@ export function AppContent({ session }: AppContentProps) {
     }, 0);
     void (async () => {
       try {
-        const months = await listMonthFolders(directoryHandle);
+        const months = await queryClient.fetchQuery(monthFoldersQueryOptions(directoryHandle));
         const result = await createDailyAdminBackupIfDue(directoryHandle, months, session.username);
         if (cancelled) return;
         if (result.ok && "skipped" in result) {
@@ -173,7 +177,7 @@ export function AppContent({ session }: AppContentProps) {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [autoBackupAttemptKey, directoryHandle, session.mode, session.role, session.username, workspaceStatus]);
+  }, [autoBackupAttemptKey, directoryHandle, session.mode, session.role, session.username, workspaceStatus, queryClient]);
 
   // A2: when no explicit tab is selected (or the previous selection is no longer
   // allowed), employees land on their workspace rather than whatever tab happens to

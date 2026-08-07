@@ -53,7 +53,7 @@ npm run check:bundle-size    # dist/index.html raw/gzip release budget
 npm run count-lines -- --quiet  # whole-repo line count (excludes docs/edit logs/; --with-edit-logs for the old basis)
 npm run editlog -- --tier=2 "…"  # generate a daily edit-log entry skeleton (see above)
 npm run preview         # Preview the built file
-npm run test:run        # Vitest, 1619 tests / 193 files as of v59.201
+npm run test:run        # Vitest, 1635 tests / 194 files as of v61.0
 npm run test            # Vitest watch mode
 npx vitest run src/data/sampling/sampleAlgorithm.test.ts  # run a single test file
 ```

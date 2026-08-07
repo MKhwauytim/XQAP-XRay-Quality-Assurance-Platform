@@ -5,7 +5,7 @@ import { useLabels } from "../../../../../../data/labels/useLabels";
 import { ModalPortal } from "../../../../../ModalPortal/ModalPortal";
 import RequestCard from "./RequestCard";
 import Pagination from "../../../../../../components/Pagination/Pagination";
-import { clampPage, pageSlice } from "../../../../../../components/Pagination/paginationUtils";
+import { clampPage, pageSlice } from "../../../../../../utils/paginationUtils";
 import { isReferral, isReplacement, type CardRequest } from "./requestKind";
 import type { DistributionEntry } from "../../../../../../data/distribution/distributionTypes";
 import type { PreparedPopulationRow } from "../../../../../../data/population/populationTypes";

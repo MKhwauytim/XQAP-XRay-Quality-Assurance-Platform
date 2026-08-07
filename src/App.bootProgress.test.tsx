@@ -12,6 +12,7 @@
 // rather than by reaching into the store's internals.
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import type { AuthRole, AuthSession } from "./auth/authTypes";
 import {
@@ -78,6 +79,19 @@ function makeSession(role: AuthRole, loginAt: string): AuthSession {
   return { username: "test-user", role, loginAt };
 }
 
+// AppContent now reads useQueryClient() (rework W5's app-wide TanStack Query
+// cache + refresh bridge), which needs a QueryClientProvider ancestor. Tests
+// that `rerender` must reuse the SAME QueryClient/wrapper across renders --
+// rerendering `<AppContent .../>` bare would swap out the provider itself,
+// unmounting it rather than just updating the session prop.
+function wrapAppContent(session: AuthSession, client: QueryClient) {
+  return (
+    <QueryClientProvider client={client}>
+      <AppContent session={session} />
+    </QueryClientProvider>
+  );
+}
+
 // Render-purity guard for EVERY test below. resetBootProgress() -> notify()
 // synchronously setStates BootSplashOverlay -- a different, already-mounted
 // component -- so performing it during AppContent's own render trips React's
@@ -112,7 +126,7 @@ describe("AppContent boot-progress reset ordering", () => {
       markBootSourceLoading(SOURCE.key);
     };
 
-    render(<AppContent session={makeSession("manager", "2026-08-04T10:00:00.000Z")} />);
+    render(wrapAppContent(makeSession("manager", "2026-08-04T10:00:00.000Z"), new QueryClient()));
 
     // If the reset ran in a plain useEffect it would fire AFTER this child's
     // own mount effect (React runs child effects before parent effects) and
@@ -128,15 +142,16 @@ describe("AppContent boot-progress reset ordering", () => {
       markBootSourceLoading(SOURCE.key);
     };
 
+    const client = new QueryClient();
     const { rerender } = render(
-      <AppContent session={makeSession("manager", "2026-08-04T10:00:00.000Z")} />,
+      wrapAppContent(makeSession("manager", "2026-08-04T10:00:00.000Z"), client),
     );
     expect(screen.getByTestId("boot-splash-overlay")).toBeInTheDocument();
 
     // Same tab stays mounted (so it never re-registers); only the session
     // identity changes. The previous session's still-"loading" source must not
     // survive into the new one.
-    rerender(<AppContent session={makeSession("manager", "2026-08-04T11:30:00.000Z")} />);
+    rerender(wrapAppContent(makeSession("manager", "2026-08-04T11:30:00.000Z"), client));
 
     expect(screen.queryByTestId("boot-splash-overlay")).not.toBeInTheDocument();
   });
@@ -150,10 +165,11 @@ describe("AppContent boot-progress reset ordering", () => {
       markBootSourceLoading(SOURCE.key);
     };
 
+    const client = new QueryClient();
     const { rerender } = render(
-      <AppContent session={makeSession("manager", "2026-08-04T10:00:00.000Z")} />,
+      wrapAppContent(makeSession("manager", "2026-08-04T10:00:00.000Z"), client),
     );
-    rerender(<AppContent session={makeSession("manager", "2026-08-04T11:30:00.000Z")} />);
+    rerender(wrapAppContent(makeSession("manager", "2026-08-04T11:30:00.000Z"), client));
     expect(screen.queryByTestId("boot-splash-overlay")).not.toBeInTheDocument();
 
     act(() => {

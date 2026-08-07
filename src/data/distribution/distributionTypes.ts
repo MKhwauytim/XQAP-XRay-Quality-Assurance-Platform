@@ -1,4 +1,4 @@
-import type { PreparedPopulationRow } from "../population/populationTypes";
+import type { EmployeeMirrorRowStub } from "../population/populationTypes";
 
 export type DistributionEventType =
   | "assigned"
@@ -78,7 +78,24 @@ export type DistributionEntry = {
    * conservatively (see findLateEvent in distributionDerivation.ts).
    */
   lastEventId?: string;
-  row: PreparedPopulationRow;
+  /**
+   * B5 (disk-bloat fix): new writes (`foldDistributionEvents` in
+   * distributionDerivation.ts) only stamp `EMPLOYEE_MIRROR_STUB_FIELDS` here —
+   * every field an employee-facing sample view actually renders — instead of
+   * the full `PreparedPopulationRow`. This is what's inlined into
+   * `distribution.current.json`, `main.samples.json`, and every
+   * `{username}.samples.json` mirror; `xrayImageId` above is the join key back
+   * to the full row in `population.final.json` / `sample.master.json` for
+   * anything that needs more (replacement eligibility, reporting, etc — those
+   * already load population/sample data separately, never through this field).
+   *
+   * Migration (B5/step 4): `EmployeeMirrorRowStub` is a strict subset (`Pick`)
+   * of `PreparedPopulationRow`, so it's structurally satisfied by BOTH shapes —
+   * an old on-disk entry that still carries the full inlined row reads back
+   * fine here unchanged; only new writes are smaller. Never rewritten/migrated
+   * in place.
+   */
+  row: EmployeeMirrorRowStub;
 };
 
 /** Per-employee quota bookkeeping used to resume deriveEmployeeQuotas incrementally (perf: fold-checkpoint). */

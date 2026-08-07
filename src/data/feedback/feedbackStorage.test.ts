@@ -80,6 +80,24 @@ describe("feedbackStorage", () => {
     expect(after.some((m) => m.from === "new")).toBe(true);
   });
 
+  it("writes new feedback under 5-system/feedback/, not the legacy workspace-root folder", async () => {
+    const root = makeRoot();
+    await submitFeedback(root, { from: "sara", role: "employee", category: "suggestion", text: "اقتراح" });
+
+    const systemDir = await root.getDirectoryHandle("5-system", { create: false });
+    const feedbackDir = await systemDir.getDirectoryHandle(SYSTEM_FOLDER_NAMES.feedback, {
+      create: false,
+    });
+    const handle = await feedbackDir.getFileHandle("messages.json", { create: false });
+    const text = await (await handle.getFile()).text();
+    expect(text).toContain("اقتراح");
+
+    // Nothing was ever written to the legacy root-level folder for a fresh workspace.
+    await expect(
+      root.getDirectoryHandle(SYSTEM_FOLDER_NAMES.feedback, { create: false })
+    ).rejects.toThrow();
+  });
+
   it("survives two concurrent submits without losing either (cross-machine CAS)", async () => {
     const root = makeRoot();
     // Two users on two PCs submit at the same instant. Each read the list, each

@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Check, ClipboardList } from "lucide-react";
 import Pagination from "../../../../../components/Pagination/Pagination";
-import { DATA_PAGE_SIZE, clampPage, pageSlice } from "../../../../../components/Pagination/paginationUtils";
+import { DATA_PAGE_SIZE, clampPage, pageSlice } from "../../../../../utils/paginationUtils";
 
 type HighlightType = "port" | "sn" | null;
 

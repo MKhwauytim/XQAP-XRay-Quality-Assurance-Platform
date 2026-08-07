@@ -21,6 +21,8 @@ import {
 } from "../../../../../auth/userManagement";
 import { saveSampleMaster } from "../../../../../data/sampling/sampleStorage";
 import type { SampleMasterData } from "../../../../../data/sampling/sampleTypes";
+import { safeWriteJson } from "../../../../../data/storage/safeWrite";
+import { getPopulationMonthDir, POPULATION_SUBFOLDERS } from "../../../../../data/workspace/workspacePaths";
 import { appendDistributionEvents } from "../../../../../data/distribution/distributionStorage";
 import { buildAssignEvent, buildReplacedEvent } from "../../../../../data/distribution/distributionLog";
 import { upsertItemAnswer } from "../../../../../data/answers/answerStorage";
@@ -145,6 +147,23 @@ function makeSample(rows: PreparedPopulationRow[]): SampleMasterData {
 }
 
 /** Seeds one sample row assigned (pending, no answer yet) to `username`. */
+/** Seeds population.final.json directly (bypassing the full saveMonthRun flow,
+ *  which needs far more params than this test cares about) so
+ *  handleReplace's post-selection full-row resolution has something to find. */
+async function seedPopulationFinal(root: DirectoryHandleLike, rows: PreparedPopulationRow[]): Promise<void> {
+  const monthDir = await getPopulationMonthDir(root, MONTH, true);
+  const processedDir = await monthDir.getDirectoryHandle(POPULATION_SUBFOLDERS.processed, { create: true });
+  await safeWriteJson(processedDir, "population.final.json", {
+    sourceMonthFolder: MONTH,
+    processedAt: new Date().toISOString(),
+    processedBy: "admin",
+    totalRows: rows.length,
+    certScanRows: rows.filter((r) => r.certScanStatus === "Certscan").length,
+    nonCertScanRows: rows.filter((r) => r.certScanStatus === "NonCertscan").length,
+    rows,
+  });
+}
+
 async function seedAssignedSample(
   root: DirectoryHandleLike,
   username: string,
@@ -522,6 +541,12 @@ describe("XrayReferrals post-success reloads (Bug 1 regression)", () => {
 
     const replacementRow = makeRow("IMG-2");
     getReplacementCandidatesIndexedMock.mockResolvedValue({ recommended: [replacementRow], all: [] });
+    // The candidate lookup is mocked (this test targets loadData refresh timing,
+    // not the lookup itself), but handleReplace's immediate-replace path now
+    // resolves the FULL row from population.final.json by id before executing
+    // (the candidate list only ever carries the slim replacement-index
+    // projection) — so the chosen candidate must actually exist there.
+    await seedPopulationFinal(root, [replacementRow]);
 
     render(<XrayReferrals directoryHandle={root} />);
 

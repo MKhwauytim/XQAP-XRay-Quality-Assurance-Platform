@@ -1,6 +1,7 @@
 /* @vitest-environment jsdom */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
 import { createMemoryDirectory } from "../storage/memoryDirectory";
@@ -39,9 +40,11 @@ function makeWrapper(directoryHandle: DirectoryHandleLike | null) {
     enterDemoWorkspace: async () => {},
   } as WorkspaceContextValue;
   return ({ children }: { children: ReactNode }) => (
-    <WorkspaceContext.Provider value={workspaceValue}>
-      <GlobalMonthProvider>{children}</GlobalMonthProvider>
-    </WorkspaceContext.Provider>
+    <QueryClientProvider client={new QueryClient()}>
+      <WorkspaceContext.Provider value={workspaceValue}>
+        <GlobalMonthProvider>{children}</GlobalMonthProvider>
+      </WorkspaceContext.Provider>
+    </QueryClientProvider>
   );
 }
 

@@ -2,7 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 
 import { useWorkspace } from "../workspace/useWorkspace";
 import { logError } from "../storage/errorLogger";
-import { listMonthFolders } from "../population/populationStorage";
+// The app-wide singleton is imported directly rather than read via
+// `useQueryClient()`. There is exactly one client and no SSR, so the hook buys
+// nothing but couples this provider — and every test that renders a subtree
+// containing it — to `QueryClientProvider` placement. That coupling silently
+// broke ten AuthGate tests with "No QueryClient set" the first time this
+// provider started using Query.
+import { queryClient } from "../query/queryClient";
+import { monthFoldersQueryOptions, invalidateMonthFolders } from "../query/monthFoldersQuery";
 import { isMonthClosed } from "../population/monthLock";
 import { formatMonthFolderName, type MonthFolderInfo } from "../population/monthFolder";
 import { GlobalMonthContext, type MonthChangeGuard } from "./GlobalMonthContext";
@@ -53,7 +60,7 @@ export function GlobalMonthProvider({ children }: { children: ReactNode }) {
       setSelection({ kind: "none" });
       return;
     }
-    void listMonthFolders(directoryHandle)
+    void queryClient.fetchQuery(monthFoldersQueryOptions(directoryHandle))
       .then((list) => {
         if (cancelled) return;
         setMonths(list);
@@ -129,7 +136,13 @@ export function GlobalMonthProvider({ children }: { children: ReactNode }) {
   const refreshMonths = useCallback(async () => {
     if (!directoryHandle) return;
     try {
-      const list = await listMonthFolders(directoryHandle);
+      // A caller of refreshMonths() (e.g. after closing/reopening a month, or
+      // after a restore) wants the actual current disk state, not whatever
+      // this tab last cached -- invalidate before fetching so this counts as
+      // the same kind of deliberate "hard refresh" the manual toolbar button
+      // performs, rather than being served stale data by `staleTime: Infinity`.
+      await invalidateMonthFolders(queryClient, directoryHandle);
+      const list = await queryClient.fetchQuery(monthFoldersQueryOptions(directoryHandle));
       setMonths(list);
       setSelection((prev) => {
         const next = reconcileSelection(list, prev);

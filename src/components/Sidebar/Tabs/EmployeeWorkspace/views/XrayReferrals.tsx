@@ -28,6 +28,8 @@ import {
   executeReplacement,
 } from "../../../../../data/distribution/replacement";
 import { getReplacementCandidatesIndexed } from "../../../../../data/distribution/replacementCandidateLookup";
+import { loadMonthPopulationFinal } from "../../../../../data/population/populationStorage";
+import type { ReplacementIndexRow } from "../../../../../data/population/replacementIndexTypes";
 import { loadPopulationConfig, type StageAliasMappings } from "../../../../../data/population/populationConfig";
 import { useGlobalMonth } from "../../../../../data/month/useGlobalMonth";
 import {
@@ -116,8 +118,8 @@ export type PersonalStats = {
 export type PersonalQuota = { dailyQuota: number; daysRemaining: number; sampleCount: number } | null;
 export type ReplacementDialogState = {
   entry: DistributionEntry;
-  recommended: PreparedPopulationRow[];
-  all: PreparedPopulationRow[];
+  recommended: ReplacementIndexRow[];
+  all: ReplacementIndexRow[];
 } | null;
 type ReferralModalState = {
   /** IDs to transfer — either manually selected or from current filter. */
@@ -661,7 +663,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
 
   async function handleReplace(
     entry: DistributionEntry,
-    replacement: PreparedPopulationRow,
+    replacement: ReplacementIndexRow,
     reason: string,
     fromRecommended: boolean
   ): Promise<void> {
@@ -704,12 +706,28 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           return;
         }
 
+        // The candidate list only ever carries the slim replacement-index
+        // projection (see replacementIndexTypes.ts) — the sample master needs
+        // the FULL population row, so resolve it here by id. This is the one
+        // full-population read on the immediate-replace path, and it's paid
+        // for exactly one row (the chosen candidate), never the whole pool.
+        const population = await loadMonthPopulationFinal(directoryHandle, selMonth);
+        const fullReplacementRow = (population?.rows ?? []).find(
+          (r) => (r as PreparedPopulationRow).xrayImageId === replacement.xrayImageId
+        ) as PreparedPopulationRow | undefined;
+        if (!fullReplacementRow) {
+          setReplacementError(STALE_MSG);
+          setStatusMsg({ type: "error", text: STALE_MSG });
+          await loadData({ silent: true });
+          return;
+        }
+
         // Immediate replacement — no approval needed.
         const result = await executeReplacement({
           directoryHandle,
           monthFolderName: selMonth,
           deadEntry: entry,
-          replacementRow: replacement,
+          replacementRow: fullReplacementRow,
           reason,
           eventBy: username,
         });

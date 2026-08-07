@@ -20,10 +20,10 @@ import {
 } from "../../../../../../components/DataTable/utils";
 import InspectionPanel from "../../../../../../components/InspectionPanel";
 import Pagination from "../../../../../../components/Pagination/Pagination";
-import { clampPage, pageSlice } from "../../../../../../components/Pagination/paginationUtils";
+import { clampPage, pageSlice } from "../../../../../../utils/paginationUtils";
 import { useLabels, type Labels } from "../../../../../../data/labels/useLabels";
 import { formatStageLabel } from "../../../../../../data/population/stageHelpers";
-import type { PreparedPopulationRow } from "../../../../../../data/population/populationTypes";
+import type { ReplacementIndexRow } from "../../../../../../data/population/replacementIndexTypes";
 import type { PersonalStats, PersonalQuota, ReplacementDialogState } from "../XrayReferrals";
 
 // ── Column definitions ────────────────────────────────────────────────────────
@@ -524,7 +524,7 @@ export function ReplacementDialog({
   error: string | null;
   busy: boolean;
   onClose: () => void;
-  onSelect: (row: PreparedPopulationRow, reason: string, fromRecommended: boolean) => void;
+  onSelect: (row: ReplacementIndexRow, reason: string, fromRecommended: boolean) => void;
 }) {
   const [tab, setTab] = useState<"recommended" | "all">(
     state.recommended.length > 0 ? "recommended" : "all"
