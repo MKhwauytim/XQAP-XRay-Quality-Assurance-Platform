@@ -91,8 +91,23 @@ test("golden fixture: sampled-and-distributed month — full loadMonthForEditing
   // Re-derive independently via loadOrDeriveDistributionCurrent to prove
   // loadMonthForEditing's embedded distribution derivation agrees with the
   // standalone helper Reports/index.tsx uses for the distribution report path.
+  //
+  // `derivedAt` is deliberately excluded. The cache write is fire-and-forget
+  // (it is ~18.8 MB for a real month, so awaiting it put a multi-megabyte
+  // write on the hot path — see distributionStorage.ts), which means a second
+  // immediate call may re-derive rather than read the just-persisted cache and
+  // therefore stamps a fresh timestamp, typically 1 ms later. That is the
+  // documented wasteful-but-correct race. What this test actually pins is that
+  // the two derivations agree on the *distribution state itself*, not that
+  // they happened in the same millisecond.
   const independentDistribution = await loadOrDeriveDistributionCurrent(dir, "5-may-2026", data.sampleData!.rows);
-  expect(data.distributionCurrent).toEqual(independentDistribution);
+  const withoutDerivedAt = ({ derivedAt, ...rest }: { derivedAt?: string }) => {
+    void derivedAt;
+    return rest;
+  };
+  expect(withoutDerivedAt(data.distributionCurrent!)).toEqual(
+    withoutDerivedAt(independentDistribution!),
+  );
 });
 
 // Regression pin for the "phase-derivation trap" the 2026-08-01 architect review flagged:

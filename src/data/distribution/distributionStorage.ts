@@ -558,15 +558,26 @@ async function tryResumeFromCheckpoint(
     },
   };
 
-  // Awaited (not fire-and-forget): this write is ONE small JSON file — never
-  // proportional to event count, so it's never the O(events) bottleneck this
-  // task targets — and awaiting it removes a real race where a second,
-  // near-simultaneous loadOrDeriveDistributionCurrent call could read a
-  // not-yet-persisted cache and redundantly recompute (still correct, but
-  // wastefully, and with a fresh derivedAt that no longer matches the
-  // in-flight sibling call's result). A write failure still must not prevent
-  // returning the freshly-derived in-memory result to the caller.
-  await saveDistributionCurrent(directoryHandle, monthFolderName, withRevision).catch(
+  // NOT awaited. An earlier revision of this code awaited the write, on the
+  // assumption that it is "ONE small JSON file, never proportional to event
+  // count". Benchmarking against a real 8,000-event month disproved that:
+  // `distribution.current.json` measured **18.8 MB**, because every entry
+  // embeds a full population row (the copy-don't-reference amplification
+  // tracked separately). Awaiting therefore put a multi-megabyte write on the
+  // hot path and made warm re-derive ~6.7x SLOWER than before the checkpoint
+  // work — the opposite of this change's purpose.
+  //
+  // Fire-and-forget is safe here because the cache and its checkpoint are a
+  // pure optimization, never a correctness input: a stale or missing cache
+  // only costs a fuller fold on the next read, and `tryResumeFromCheckpoint`
+  // already validates revision/eventSetId/offsets before trusting anything.
+  // The race this previously guarded against (a sibling call recomputing
+  // against a not-yet-persisted cache) is wasteful, not incorrect.
+  //
+  // Failures are surfaced through the error ring buffer rather than swallowed.
+  // Once entries reference rows instead of embedding them, this file becomes
+  // small enough that awaiting could be reconsidered — re-measure first.
+  void saveDistributionCurrent(directoryHandle, monthFolderName, withRevision).catch(
     logRejection("distribution:cache-write")
   );
   return withRevision;
@@ -657,11 +668,12 @@ export async function loadOrDeriveDistributionCurrent(
       foldCheckpoint,
     };
 
-    // Awaited (not fire-and-forget) — see the identical rationale on
-    // tryResumeFromCheckpoint's save above: this is one small JSON file, not
-    // proportional to event count, and awaiting it avoids a near-simultaneous
-    // caller reading a not-yet-persisted cache and needlessly recomputing.
-    await saveDistributionCurrent(directoryHandle, monthFolderName, withRevision).catch(
+    // NOT awaited — see the measured rationale on the sibling save above.
+    // `distribution.current.json` is ~18.8 MB for an 8,000-event month because
+    // entries embed full rows, so awaiting it puts a multi-megabyte write on
+    // the hot path. The cache and checkpoint are an optimization, never a
+    // correctness input.
+    void saveDistributionCurrent(directoryHandle, monthFolderName, withRevision).catch(
       logRejection("distribution:cache-write")
     );
 
