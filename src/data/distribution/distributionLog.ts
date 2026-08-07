@@ -2,11 +2,13 @@ import type { PreparedPopulationRow } from "../population/populationTypes";
 import type {
   DistributionCurrentData,
   DistributionEvent,
-  DistributionLog
+  DistributionLog,
+  QuotaFacts
 } from "./distributionTypes";
 import { logError } from "../storage/errorLogger";
 import {
-  deriveEmployeeQuotas,
+  deriveEmployeeQuotasWithFacts,
+  findLateEvent,
   foldDistributionEvents,
   summarizeDistribution
 } from "./distributionDerivation";
@@ -189,6 +191,19 @@ export function deriveCurrentDistribution(
   log: DistributionLog,
   sampleRows: PreparedPopulationRow[]
 ): DistributionCurrentData {
+  return deriveCurrentDistributionWithFacts(log, sampleRows).current;
+}
+
+/**
+ * Same computation as deriveCurrentDistribution, but also returns the quota
+ * accumulator facts (perf: fold-checkpoint) so a caller (distributionStorage.ts)
+ * can persist them as part of a resumable checkpoint instead of recomputing
+ * quotas from the full event history on every subsequent load.
+ */
+export function deriveCurrentDistributionWithFacts(
+  log: DistributionLog,
+  sampleRows: PreparedPopulationRow[]
+): { current: DistributionCurrentData; quotaFacts: QuotaFacts } {
   const { entries, droppedEventIds, droppedImageIds } = foldDistributionEvents(
     log.events,
     sampleRows,
@@ -207,10 +222,10 @@ export function deriveCurrentDistribution(
     );
   }
 
-  const quotas = deriveEmployeeQuotas(log.events, droppedEventIds, log.monthFolderName);
+  const { quotas, facts } = deriveEmployeeQuotasWithFacts(log.events, droppedEventIds, log.monthFolderName);
   const summary = summarizeDistribution(entries);
 
-  return {
+  const current: DistributionCurrentData = {
     monthFolderName: log.monthFolderName,
     // Stamped here (not by callers) so every derived snapshot carries the
     // revision it came from — the mirror monotonic guard in syncSampleMirrors
@@ -224,4 +239,81 @@ export function deriveCurrentDistribution(
     entries,
     quotas,
   };
+
+  return { current, quotaFacts: facts };
+}
+
+export type DistributionIncrementalResult = {
+  current: DistributionCurrentData;
+  quotaFacts: QuotaFacts;
+  /**
+   * True when an out-of-order ("late") event was detected relative to
+   * `previous`. When true, `current`/`quotaFacts` are just `previous`/
+   * `previousQuotaFacts` echoed back unchanged — the caller MUST discard its
+   * checkpoint and perform a full refold from the complete event list instead
+   * of trusting this result. See findLateEvent's doc comment for why patching
+   * in place is never safe here.
+   */
+  requiresFullRefold: boolean;
+};
+
+/**
+ * Resumable sibling of deriveCurrentDistribution (perf: fold-checkpoint).
+ * Folds only `newEvents` on top of `previous`'s already-derived entries and
+ * `previousQuotaFacts`, instead of refolding the entire event history. Safe
+ * only when none of `newEvents` predates what `previous` already reflects for
+ * the same xrayImageId (see findLateEvent) — callers must check
+ * `requiresFullRefold` and fall back to deriveCurrentDistributionWithFacts
+ * with the COMPLETE event list when it is true.
+ */
+export function deriveCurrentDistributionIncremental(
+  previous: DistributionCurrentData,
+  previousQuotaFacts: QuotaFacts,
+  newEvents: DistributionEvent[],
+  sampleRows: PreparedPopulationRow[]
+): DistributionIncrementalResult {
+  if (newEvents.length === 0) {
+    return { current: previous, quotaFacts: previousQuotaFacts, requiresFullRefold: false };
+  }
+
+  if (findLateEvent(previous.entries, newEvents)) {
+    return { current: previous, quotaFacts: previousQuotaFacts, requiresFullRefold: true };
+  }
+
+  const resumeEntries = new Map(previous.entries.map((entry) => [entry.xrayImageId, entry]));
+  const { entries, droppedEventIds, droppedImageIds } = foldDistributionEvents(
+    newEvents,
+    sampleRows,
+    EVENT_SCHEMA_VERSION,
+    resumeEntries
+  );
+
+  if (droppedEventIds.size > 0) {
+    logError(
+      "distribution:derive",
+      new Error(
+        `Dropped ${droppedEventIds.size} illegal/unknown event(s) targeting terminal (replaced/completed) or uninterpretable row(s): ${[...droppedImageIds].join(", ")}.`
+      )
+    );
+  }
+
+  const { quotas, facts } = deriveEmployeeQuotasWithFacts(
+    newEvents,
+    droppedEventIds,
+    previous.monthFolderName,
+    previousQuotaFacts
+  );
+  const summary = summarizeDistribution(entries);
+
+  const current: DistributionCurrentData = {
+    monthFolderName: previous.monthFolderName,
+    logRevision: previous.logRevision,
+    deriveVersion: DERIVE_VERSION,
+    derivedAt: new Date().toISOString(),
+    ...summary,
+    entries,
+    quotas,
+  };
+
+  return { current, quotaFacts: facts, requiresFullRefold: false };
 }

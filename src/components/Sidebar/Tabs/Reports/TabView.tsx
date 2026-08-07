@@ -139,7 +139,6 @@ function ReportsContent() {
   const canExportReports = can("export-reports");
   const isAdmin = readSession()?.role === "admin";
   const [customizerOpen, setCustomizerOpen] = useState(false);
-  const [customizerInput, setCustomizerInput] = useState<{ execInput: ExecutiveReportInput; names: Record<string, string> } | null>(null);
   const [monthMeta, setMonthMeta] = useState<MonthMeta | null>(null);
   const [section, setSection] = useState<ReportsSection>("reports");
   const [generating, setGenerating] = useState<ReportType | null>(null);
@@ -343,15 +342,20 @@ function ReportsContent() {
     }
   }
 
-  async function handleOpenCustomizer(): Promise<void> {
+  // P0 perf fix: this used to `await loadExecInput()` (full population +
+  // sample + distribution + all employee files) before ever opening the
+  // dialog, which is why opening the customizer measured ~30 minutes on the
+  // owner's 500k-row / ~9,000-sample workspace. The dialog itself only
+  // presents style *choices* -- it doesn't need real month data to render
+  // those -- so opening is now synchronous and the heavy load is deferred
+  // into DeckDesignCustomizer, behind an explicit user-triggered preview
+  // action (see that component).
+  function handleOpenCustomizer(): void {
     if (!directoryHandle || !selectedMonth) return;
     if (!canMutate("export-reports")) {
       showToast("error", "لا تملك صلاحية تصدير التقارير.");
       return;
     }
-    const execInput = await loadExecInput();
-    if (!execInput) { showToast("error", "لم يتم العثور على بيانات المجتمع. يجب معالجة المجتمع أولاً."); return; }
-    setCustomizerInput({ execInput, names: buildDisplayNameMap() });
     setCustomizerOpen(true);
   }
 
@@ -653,7 +657,7 @@ function ReportsContent() {
               className="rh-btn"
               disabled={exporting !== null || !selectedMonth || !canExportReports}
               title="تخصيص تصميم العرض التنفيذي (للمدير فقط)"
-              onClick={() => { void handleOpenCustomizer(); }}
+              onClick={() => { handleOpenCustomizer(); }}
             >
               <Settings2 size={15} strokeWidth={2} />
               تخصيص تصميم العرض
@@ -996,7 +1000,7 @@ function ReportsContent() {
                     disabled={busy || !selectedMonth || !canExportReports}
                     title="تخصيص تصميم العرض التنفيذي (للمدير فقط)"
                     aria-label="تخصيص التصميم"
-                    onClick={() => { void handleOpenCustomizer(); }}
+                    onClick={() => { handleOpenCustomizer(); }}
                   >
                     <Settings2 size={15} strokeWidth={2} />
                   </button>
@@ -1208,10 +1212,10 @@ function ReportsContent() {
         </>
       )}
     </section>
-    {customizerOpen && customizerInput && directoryHandle ? (
+    {customizerOpen && directoryHandle ? (
       <DeckDesignCustomizer
-        execInput={customizerInput.execInput}
-        employeeDisplayNames={customizerInput.names}
+        loadExecInput={loadExecInput}
+        buildDisplayNameMap={buildDisplayNameMap}
         directoryHandle={directoryHandle}
         canMutate={canMutate}
         onClose={() => setCustomizerOpen(false)}

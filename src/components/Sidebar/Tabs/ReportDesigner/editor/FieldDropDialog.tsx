@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useFocusTrap } from "../../../../../hooks/useFocusTrap";
+import { ModalPortal } from "../../../../ModalPortal/ModalPortal";
 import { useLabels } from "../../../../../data/labels/useLabels";
 import type { FieldRole } from "../../../../../data/reportDesigner/query/fieldCatalog";
 import type { Aggregation } from "../../../../../data/reportDesigner/reportTypes";
@@ -60,7 +61,8 @@ export default function FieldDropDialog({
   const top  = Math.min(screenY + 12, window.innerHeight - DIALOG_H - 12);
 
   return (
-    /* backdrop – click outside to cancel */
+    <ModalPortal>
+    {/* backdrop – click outside to cancel */}
     <div
       style={{ position: "fixed", inset: 0, zIndex: 10000 }}
       onMouseDown={onCancel}
@@ -182,5 +184,6 @@ export default function FieldDropDialog({
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }

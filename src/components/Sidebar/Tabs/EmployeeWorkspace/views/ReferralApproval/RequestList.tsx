@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
-import { X } from "lucide-react";
+import { ArrowDownUp, X } from "lucide-react";
 import { useFocusTrap } from "../../../../../../hooks/useFocusTrap";
+import { useLabels } from "../../../../../../data/labels/useLabels";
+import { ModalPortal } from "../../../../../ModalPortal/ModalPortal";
 import RequestCard from "./RequestCard";
 import Pagination from "../../../../../../components/Pagination/Pagination";
 import { clampPage, pageSlice } from "../../../../../../components/Pagination/paginationUtils";
@@ -24,6 +26,7 @@ type Props = {
 };
 
 export default function RequestList({ requests, bulkEnabled, userDisplayMap, sampleDetails, canReview, onApprove, onDeny, onBulk }: Props) {
+  const L = useLabels();
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkAction, setBulkAction] = useState<"approve" | "deny" | null>(null);
@@ -83,6 +86,11 @@ export default function RequestList({ requests, bulkEnabled, userDisplayMap, sam
 
   return (
     <div className="ew-referral-list">
+      <div className="ew-sort-indicator">
+        <ArrowDownUp size={13} aria-hidden />
+        <span>{bulkEnabled ? L.approval_sort_oldest_first : L.approval_sort_newest_first}</span>
+      </div>
+
       {bulkEnabled && selected.size > 0 && (
         <div className="ew-bulk-bar">
           <span className="ew-bulk-bar-count">تم تحديد {selected.size} طلب</span>
@@ -93,10 +101,12 @@ export default function RequestList({ requests, bulkEnabled, userDisplayMap, sam
       )}
 
       {bulkResult && (
-        <div className={bulkResult.every((o) => o.ok) ? "ew-msg-ok" : "ew-msg-error"} role="status">
-          {bulkResult.filter((o) => o.ok).length} نجحت، {bulkResult.filter((o) => !o.ok).length} فشلت
-          {bulkResult.some((o) => !o.ok) && `: ${bulkResult.filter((o) => !o.ok).map((o) => o.error).join(" — ")}`}
-          <button type="button" aria-label="إغلاق" style={{ float: "left", background: "none", border: "none", cursor: "pointer" }} onClick={() => setBulkResult(null)}>
+        <div className={`${bulkResult.every((o) => o.ok) ? "ew-msg-ok" : "ew-msg-error"} ew-msg-dismissible`} role="status">
+          <span>
+            {bulkResult.filter((o) => o.ok).length} نجحت، {bulkResult.filter((o) => !o.ok).length} فشلت
+            {bulkResult.some((o) => !o.ok) && `: ${bulkResult.filter((o) => !o.ok).map((o) => o.error).join(" — ")}`}
+          </span>
+          <button type="button" className="ew-msg-dismiss-btn" aria-label="إغلاق" onClick={() => setBulkResult(null)}>
             <X size={14} />
           </button>
         </div>
@@ -127,6 +137,7 @@ export default function RequestList({ requests, bulkEnabled, userDisplayMap, sam
       />
 
       {bulkAction && (
+        <ModalPortal>
         <div ref={bulkDialogRef} className="ew-modal-backdrop" role="dialog" aria-modal="true">
           <div className="ew-replace-modal">
             <div className="ew-replace-header">
@@ -153,6 +164,7 @@ export default function RequestList({ requests, bulkEnabled, userDisplayMap, sam
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
     </div>
   );

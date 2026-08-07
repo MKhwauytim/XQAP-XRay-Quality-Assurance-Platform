@@ -9,6 +9,12 @@ import { AlertTriangle, Info, Lock, Unlock } from "lucide-react";
 import { usePermissions } from "../../../../../auth/usePermissions";
 import { getLabels } from "../../../../../data/labels/labelsStore";
 import { formatMonthFolderShortLabel } from "../../../../../data/population/monthFolder";
+// Reuse the algorithm's own floor/cap logic (single source of truth) so the
+// running total shown here before the draw matches what drawStageSample will
+// actually use — see B (sampling config UI) task 1: the total must reflect the
+// *effective* per-stage target (after minRequiredCount is applied), not the
+// raw entered values, or the running total would understate what actually gets drawn.
+import { configuredTarget } from "../../../../../data/sampling/sampleAlgorithmInternals";
 
 type SaveMessage = { type: "ok" | "error"; text: string } | null;
 
@@ -118,6 +124,26 @@ export default function PhaseThreeSampling({
     fourth: populationRows.filter((r) => getStageKey(r.stage, config.stageMappings) === "fourth").length
   };
 
+  const L = getLabels();
+
+  // Precompute each stage's effective target (mirrors configuredTarget, the
+  // exact function drawStageSample uses) BEFORE rendering the cards, so the
+  // running total below can sum the numbers that will actually be drawn —
+  // not the raw entered values, which is what let the owner's requested total
+  // silently balloon before (floor override applied only after the draw ran).
+  const stageComputations = config.samplingRules.map((rule) => {
+    const size = stageCounts[rule.stageKey];
+    const calculatedCount =
+      rule.method === "percentage" ? Math.round((rule.value / 100) * size) : rule.value;
+    const finalCount = configuredTarget(rule, size);
+    const insufficientPopulation = rule.minRequiredCount > 0 && size < rule.minRequiredCount;
+    const floorOverridden =
+      rule.minRequiredCount > 0 && !insufficientPopulation && calculatedCount < rule.minRequiredCount;
+    return { rule, size, calculatedCount, finalCount, insufficientPopulation, floorOverridden };
+  });
+  const runningTotal = stageComputations.reduce((sum, c) => sum + c.finalCount, 0);
+  const overriddenStages = stageComputations.filter((c) => c.floorOverridden);
+
   const handleRuleChange = (
     stageKey: "first" | "second" | "third" | "fourth",
     field: keyof StageSamplingRule,
@@ -143,28 +169,52 @@ export default function PhaseThreeSampling({
 
       <SwitchingAdvisory advisory={priorMonthAdvisory} />
 
+      {/* Running total across all stage cards, visible BEFORE the draw is triggered
+          (previously the summed total first appeared in SampleResultReport, i.e.
+          after the draw already ran — B task 1, owner-reported "requested 7,000, got
+          ~9,000"). Reflects each stage's *effective* target (after any floor
+          override), matching what drawStageSample will actually draw. */}
+      <div
+        className={`sampling-running-total${overriddenStages.length > 0 ? " has-override" : ""}`}
+        role="status"
+        style={{
+          margin: "12px 0",
+          padding: "12px 16px",
+          borderRadius: 10,
+          border: `1px solid ${overriddenStages.length > 0 ? "#d97706" : "var(--p-border, #cbd5e1)"}`,
+          background: overriddenStages.length > 0 ? "rgba(217,119,6,.08)" : "rgba(14,165,233,.06)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700, fontSize: 16 }}>
+          {overriddenStages.length > 0 && <AlertTriangle size={16} aria-hidden />}
+          {L.sampling_running_total_label}: <strong>{formatNumber(runningTotal)}</strong>
+        </div>
+        <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--p-muted)" }}>
+          {L.sampling_running_total_note}
+        </p>
+        {overriddenStages.map(({ rule, calculatedCount, finalCount }) => (
+          <p key={rule.stageKey} className="sampling-warn" role="alert" style={{ margin: "6px 0 0" }}>
+            {fillTemplate(L.sampling_floor_override_warning, {
+              stage: STAGE_LABELS[rule.stageKey],
+              entered: String(calculatedCount),
+              effective: String(finalCount),
+              minRequired: String(rule.minRequiredCount),
+            })}
+          </p>
+        ))}
+      </div>
+
       <div className="sampling-config-panel">
         <div className="sampling-stage-rules">
-          {config.samplingRules.map((rule) => {
-            const size = stageCounts[rule.stageKey];
-            const calculatedCount =
-              rule.method === "percentage"
-                ? Math.round((rule.value / 100) * size)
-                : rule.value;
-
+          {stageComputations.map(({ rule, size, finalCount, insufficientPopulation, floorOverridden }) => {
             let warnMessage = "";
-            let finalCount = calculatedCount;
-            if (rule.minRequiredCount > 0) {
-              if (size < rule.minRequiredCount) {
-                finalCount = size;
-                warnMessage = `تنبيه: المجتمع المتاح (${size}) أقل من الحد الأدنى (${rule.minRequiredCount}). سيتم سحب 100%.`;
-              } else if (calculatedCount < rule.minRequiredCount) {
-                finalCount = rule.minRequiredCount;
-                warnMessage = `تم تطبيق الحد الأدنى (${rule.minRequiredCount}) بدلاً من القيمة المدخلة.`;
-              }
+            if (insufficientPopulation) {
+              warnMessage = `تنبيه: المجتمع المتاح (${size}) أقل من الحد الأدنى (${rule.minRequiredCount}). سيتم سحب 100%.`;
+            } else if (floorOverridden) {
+              warnMessage = `تم تطبيق الحد الأدنى (${rule.minRequiredCount}) بدلاً من القيمة المدخلة — راجع التنبيه أعلى الصفحة.`;
             }
 
-            const isAutoLocked = rule.stageKey === "first" || (rule.minRequiredCount > 0 && size < rule.minRequiredCount);
+            const isAutoLocked = rule.stageKey === "first" || insufficientPopulation;
             const isLockedState = (rule.isLocked || isAutoLocked) && !isAdminUnlocked;
             return (
               <div

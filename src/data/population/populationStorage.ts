@@ -1,5 +1,12 @@
 import type { DirectoryHandleLike, FileHandleLike } from "../storage/fileSystemAccess";
-import { safeWriteJson, safeWriteJsonText, safeReadJson, readEnvelopeRevision, readFileTextWithRetry } from "../storage/safeWrite";
+import {
+  safeWriteJson,
+  safeWriteJsonText,
+  safeReadJson,
+  readEnvelopeRevision,
+  readFileTextWithRetry,
+  type SafeWriteProgressPhase,
+} from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
 import { mapWithConcurrency } from "../storage/concurrency";
 import { withResourceLock } from "../storage/webLocks";
@@ -160,6 +167,15 @@ export type SaveMonthRunParams = {
    * confirmation. Pass true once the user has explicitly confirmed the overwrite.
    */
   confirmedOverwrite?: boolean;
+  /**
+   * B task 2 — optional observability hook for the largest write in this batch
+   * (population.final.json, the one most likely to run 10-15 minutes on a big
+   * population). Fired with the safeWriteJson phase so the Population save UI
+   * can show progress past the point where processPopulation's own (in-memory,
+   * already-100%) progress bar would otherwise go silent. Optional: omitting it
+   * changes nothing about the write itself.
+   */
+  onSaveProgress?: (phase: SafeWriteProgressPhase) => void;
 };
 
 export type SaveMonthRunResult = {
@@ -332,7 +348,7 @@ async function saveMonthRunLocked(
         nonCertScanRows,
         rows: processedRows
       };
-      await safeWriteJson(processedDir, "population.final.json", finalData);
+      await safeWriteJson(processedDir, "population.final.json", finalData, params.onSaveProgress);
 
       await Promise.all([
         (async () => {

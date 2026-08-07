@@ -270,10 +270,36 @@ async function verifyStreamedFile(
   return simpleHash(text) === expected.fileHash;
 }
 
+// Observability only (B task 2) — the write itself is unchanged; these are
+// fired around the same steps safeWriteJson already performs (up to 5 full-file
+// passes for files over VERIFY_SIZE_LIMIT: .bak snapshot, stage .tmp, verify
+// staged, commit live, verify committed). Population.final.json-sized writes can
+// take 10-15 minutes on a slow disk; before this, the UI's progress bar tracked
+// only processPopulation's in-memory chunking, which finishes first — the write
+// then ran invisibly past 100%. Optional and additive: existing call sites that
+// don't pass a callback see no behavior change.
+export type SafeWriteProgressPhase =
+  | "backing-up"
+  | "staging"
+  | "verifying-staged"
+  | "committing"
+  | "verifying-committed";
+
+export type SafeWriteProgressCallback = (phase: SafeWriteProgressPhase) => void;
+
+function reportProgress(onProgress: SafeWriteProgressCallback | undefined, phase: SafeWriteProgressPhase): void {
+  try {
+    onProgress?.(phase);
+  } catch {
+    // A misbehaving UI callback must never abort or corrupt the write it's observing.
+  }
+}
+
 export async function safeWriteJson<T>(
   dir: DirectoryHandleLike,
   fileName: string,
-  value: T
+  value: T,
+  onProgress?: SafeWriteProgressCallback
 ): Promise<void> {
   assertWritableMode();
 
@@ -322,29 +348,34 @@ export async function safeWriteJson<T>(
 
       // 1. Snapshot the current good file to .bak (the rollback source).
       if (parsedCurrent) {
+        reportProgress(onProgress, "backing-up");
         await writeText(dir, `${fileName}.bak`, current as string);
       }
 
       // 2. Stage the streamed content in a temp file and verify the exact bytes
       //    landed BEFORE overwriting the live file.
+      reportProgress(onProgress, "staging");
       const stagedInfo = await streamEnvelopeToFile(
         dir,
         tmpName,
         data,
         buildMetadata
       );
+      reportProgress(onProgress, "verifying-staged");
       if (!(await verifyStreamedFile(dir, tmpName, stagedInfo))) {
         await removeQuietly(dir, tmpName);
         throw new Error(`Safe-write staging failed for ${fileName}.`);
       }
 
       // 3. Commit to the live file (re-stream, no giant string), then re-verify.
+      reportProgress(onProgress, "committing");
       const liveInfo = await streamEnvelopeToFile(
         dir,
         fileName,
         data,
         buildMetadata
       );
+      reportProgress(onProgress, "verifying-committed");
       if (!(await verifyStreamedFile(dir, fileName, liveInfo))) {
         const bak = await readText(dir, `${fileName}.bak`);
         if (parseValidJson(bak) !== null) {
@@ -392,12 +423,15 @@ export async function safeWriteJson<T>(
 
     // 1. Snapshot the current good file to .bak (the rollback source).
     if (parsedCurrent) {
+      reportProgress(onProgress, "backing-up");
       await writeText(dir, `${fileName}.bak`, current as string);
     }
 
     // 2. Stage the new content in a temp file and verify it landed intact
     //    BEFORE overwriting the live file.
+    reportProgress(onProgress, "staging");
     await writeText(dir, tmpName, serialized);
+    reportProgress(onProgress, "verifying-staged");
     const staged = await readText(dir, tmpName);
     const stagedOk = skipVerify
       ? staged === serialized
@@ -408,7 +442,9 @@ export async function safeWriteJson<T>(
     }
 
     // 3. Commit the verified content to the live file, then re-verify.
+    reportProgress(onProgress, "committing");
     await writeText(dir, fileName, serialized);
+    reportProgress(onProgress, "verifying-committed");
     const verify = await readText(dir, fileName);
     const verifyOk = skipVerify
       ? verify === serialized

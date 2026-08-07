@@ -214,7 +214,14 @@ export function drawLegacySample(
     drawnRows, allocations, [], counters);
 }
 
-function configuredTarget(rule: StageSamplingRule, available: number): number {
+/**
+ * The per-stage target after applying `minRequiredCount` as a floor and capping
+ * at `available` (never draw more than exists). Exported so UI code (Phase 3's
+ * running-total display, B-owner config panel) can show the *effective* target
+ * — the number this module will actually use — rather than re-deriving its own
+ * copy of the floor logic and risking drift from the real draw.
+ */
+export function configuredTarget(rule: StageSamplingRule, available: number): number {
   let target = rule.method === "percentage" ? Math.round((rule.value / 100) * available) : rule.value;
   if (rule.minRequiredCount > 0) {
     target = available < rule.minRequiredCount ? available : Math.max(target, rule.minRequiredCount);

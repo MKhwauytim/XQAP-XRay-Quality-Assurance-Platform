@@ -72,7 +72,7 @@ describe("authSession", () => {
   });
 
   describe("demo sessions (LOG-01)", () => {
-    // authSession runs in a node test env where sessionStorage is undefined;
+    // authSession runs in a node test env where localStorage is undefined;
     // stub a minimal Storage so persistence behavior is observable.
     const backing = new Map<string, string>();
     const fakeStorage = {
@@ -83,7 +83,7 @@ describe("authSession", () => {
 
     beforeEach(() => {
       backing.clear();
-      vi.stubGlobal("sessionStorage", fakeStorage);
+      vi.stubGlobal("localStorage", fakeStorage);
     });
 
     afterEach(() => {
@@ -103,7 +103,7 @@ describe("authSession", () => {
       // Permission consumers (usePermissions → readSession) must see it…
       expect(readSession()).toEqual(demo);
       expect(readRealSession()).toEqual(demo);
-      // …but nothing may reach sessionStorage.
+      // …but nothing may reach localStorage.
       expect(backing.size).toBe(0);
     });
 
@@ -125,6 +125,25 @@ describe("authSession", () => {
       writeSession(demo);
       expect(backing.size).toBe(0);
       expect(readSession()).toEqual(demo);
+    });
+
+    it("survives a simulated browser restart — module state reset but localStorage retained (B task 3)", async () => {
+      const real: AuthSession = {
+        username: "restart_user",
+        role: "manager",
+        loginAt: new Date().toISOString(),
+      };
+      writeSession(real);
+      expect(backing.size).toBe(1);
+
+      // Simulate a full browser restart: re-import the module fresh (its
+      // module-level runtimeSession variable is gone, exactly like a new page
+      // load) while `localStorage` — unlike sessionStorage — keeps its contents
+      // across the restart. writeSession's switch from sessionStorage to
+      // localStorage (SEC-02 relaxation) is what makes this pass.
+      vi.resetModules();
+      const fresh = await import("./authSession");
+      expect(fresh.readRealSession()).toEqual(real);
     });
   });
 

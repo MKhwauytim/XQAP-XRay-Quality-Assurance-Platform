@@ -1,29 +1,35 @@
 import type { PreparedPopulationRow } from "../population/populationTypes";
-import { DERIVE_VERSION, deriveCurrentDistribution } from "./distributionLog";
+import {
+  DERIVE_VERSION,
+  deriveCurrentDistributionIncremental,
+  deriveCurrentDistributionWithFacts,
+} from "./distributionLog";
 import type {
   DistributionCurrentData,
   DistributionEvent,
+  DistributionFoldCheckpoint,
   DistributionLog
 } from "./distributionTypes";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { readEnvelopeRevision, safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { logError, logRejection } from "../storage/errorLogger";
 import { casLoop } from "../storage/casLoop";
-import { readAppendOnlyDirectory } from "../storage/directoryScan";
+import { listDirectoryEntries, readAppendOnlyDirectory, readNamedJsonFiles } from "../storage/directoryScan";
 import { ensureMonthWritable } from "../population/monthLock";
 import { syncSampleMirrors } from "../samples/sampleMirrorStorage";
 import { getPopulationMonthDir, getSampleMainDir } from "../workspace/workspacePaths";
 import {
   DISTRIBUTION_EVENTS_DIR,
+  appendDistributionEventSegment,
   distributionEventSetId,
+  distributionEventSetIdFromIds,
   mergeDistributionEvents,
-  writeImmutableDistributionEvent,
+  readDistributionEventSegmentDelta,
 } from "./distributionEventStore";
 import { dedupeInFlight, workspaceScopeId, bumpWorkspaceEpoch, workspaceEpoch } from "../storage/inFlightReads";
 
 const LOG_FILE = "distribution.log.json";
 const CURRENT_FILE = "distribution.current.json";
-const IMMUTABLE_EVENT_WRITE_CONCURRENCY = 4;
 
 export type DistributionWriteProgress =
   | { phase: "events"; completed: number; total: number }
@@ -33,28 +39,23 @@ type AppendDistributionEventsOptions = {
   onProgress?: (progress: DistributionWriteProgress) => void;
 };
 
-async function writeImmutableEventBatch(
+/**
+ * Durably write a whole event batch in ONE segment append (see
+ * appendDistributionEventSegment) instead of one file per event. This
+ * collapses what used to be ~10 File System Access operations PER EVENT (a
+ * pre-write existence check, safeWriteJson's stage/verify/commit cycle, and a
+ * post-write read-back verify) into a small constant number of operations for
+ * the entire batch — the whole point of the per-writer-session segment
+ * layout (see distributionEventStore.ts's module docs).
+ */
+async function writeDistributionEventBatch(
   directory: DirectoryHandleLike,
   events: DistributionEvent[],
   onProgress?: AppendDistributionEventsOptions["onProgress"]
 ): Promise<void> {
-  let nextIndex = 0;
-  let completed = 0;
-  onProgress?.({ phase: "events", completed, total: events.length });
-
-  async function worker(): Promise<void> {
-    while (nextIndex < events.length) {
-      const event = events[nextIndex];
-      nextIndex += 1;
-      if (!event) return;
-      await writeImmutableDistributionEvent(directory, event);
-      completed += 1;
-      onProgress?.({ phase: "events", completed, total: events.length });
-    }
-  }
-
-  const workerCount = Math.min(IMMUTABLE_EVENT_WRITE_CONCURRENCY, events.length);
-  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  onProgress?.({ phase: "events", completed: 0, total: events.length });
+  await appendDistributionEventSegment(directory, events);
+  onProgress?.({ phase: "events", completed: events.length, total: events.length });
 }
 
 async function getDistributionDir(
@@ -99,10 +100,17 @@ async function readCompatibilityLog(
   return null;
 }
 
+type CheckpointScanMeta = {
+  /** Byte size of every segment file seen in this scan (name -> current size). */
+  segmentOffsets: Record<string, number>;
+  /** Every legacy one-file-per-event *.json name seen in this scan. */
+  legacyEventFileNames: string[];
+};
+
 async function readCurrentDistributionSource(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string
-): Promise<Pick<DistributionLogSources, "currentLog" | "immutableEvents">> {
+): Promise<Pick<DistributionLogSources, "currentLog" | "immutableEvents"> & CheckpointScanMeta> {
   const directory = await openOptionalDirectory(() =>
     getDistributionDir(directoryHandle, monthFolderName, false)
   );
@@ -112,26 +120,43 @@ async function readCurrentDistributionSource(
   );
   // Existing immutable event directories are strict: corrupt/unreadable files
   // propagate so no caller can derive a silently incomplete snapshot.
-  if (!directory) return { currentLog, immutableEvents: [] };
+  if (!directory) {
+    return { currentLog, immutableEvents: [], segmentOffsets: {}, legacyEventFileNames: [] };
+  }
   let eventsDir: DirectoryHandleLike;
+  let legacyValues: DistributionEvent[];
+  let legacyEventFileNames: string[];
   try {
     eventsDir = await directory.getDirectoryHandle(DISTRIBUTION_EVENTS_DIR, { create: false });
+    const { values } = await readAppendOnlyDirectory<DistributionEvent>(eventsDir, {
+      suffix: ".json",
+      onUnreadable: "throw",
+      unreadableError: (name) => `Cannot read immutable distribution event: ${name}`,
+      scope: { root: directoryHandle, path: `${monthFolderName}/1-main/${DISTRIBUTION_EVENTS_DIR}` },
+    });
+    legacyValues = values;
+    legacyEventFileNames = (await listDirectoryEntries(eventsDir))
+      .filter((entry) => entry.kind === "file" && entry.name.endsWith(".json"))
+      .map((entry) => entry.name)
+      .sort((a, b) => a.localeCompare(b));
   } catch {
-    return { currentLog, immutableEvents: [] };
+    return { currentLog, immutableEvents: [], segmentOffsets: {}, legacyEventFileNames: [] };
   }
-  const { values } = await readAppendOnlyDirectory<DistributionEvent>(eventsDir, {
-    suffix: ".json",
-    onUnreadable: "throw",
-    unreadableError: (name) => `Cannot read immutable distribution event: ${name}`,
-    scope: { root: directoryHandle, path: `${monthFolderName}/1-main/${DISTRIBUTION_EVENTS_DIR}` },
-  });
+  // Legacy one-file-per-event immutable files are still read and merged in —
+  // never rewritten or deleted, since another machine on an older build may
+  // still be writing them (see distributionEventStore.ts). New writes go to
+  // per-writer-session NDJSON segments instead; a full cold read here is the
+  // simplest correct thing for this "give me every event" API — callers that
+  // care about avoiding a full re-read on every load use the fold-checkpoint
+  // path in loadOrDeriveDistributionCurrent instead.
+  const segmentDelta = await readDistributionEventSegmentDelta(directory, {});
   // Re-sort: the fold is order-sensitive, and a new event with an earlier
   // eventAt than a cached one must still land in the right place -- the
   // cache's own internal order is by-filename, not by-eventAt.
-  const immutableEvents = [...values].sort(
+  const immutableEvents = [...legacyValues, ...segmentDelta.events].sort(
     (a, b) => a.eventAt.localeCompare(b.eventAt) || a.eventId.localeCompare(b.eventId)
   );
-  return { currentLog, immutableEvents };
+  return { currentLog, immutableEvents, segmentOffsets: segmentDelta.offsets, legacyEventFileNames };
 }
 
 async function readLegacyDistributionLog(
@@ -261,6 +286,24 @@ export async function loadDistributionLog(
   return mergeDistributionLogSources(monthFolderName, { ...current, legacyLog });
 }
 
+/**
+ * Sibling of loadDistributionLog that also surfaces the raw scan metadata
+ * (segment byte offsets, legacy file names) needed to build a fresh
+ * fold-checkpoint (perf) — used only by loadOrDeriveDistributionCurrent's
+ * cold/full-refold path, so building that checkpoint doesn't require a
+ * SECOND, redundant directory scan on top of the one this function already
+ * does.
+ */
+async function loadDistributionLogWithCheckpointMeta(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<{ log: DistributionLog } & CheckpointScanMeta> {
+  const current = await readCurrentDistributionSource(directoryHandle, monthFolderName);
+  const legacyLog = await readLegacyDistributionLog(directoryHandle, monthFolderName);
+  const log = mergeDistributionLogSources(monthFolderName, { ...current, legacyLog });
+  return { log, segmentOffsets: current.segmentOffsets, legacyEventFileNames: current.legacyEventFileNames };
+}
+
 export async function appendDistributionEvent(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
@@ -303,9 +346,7 @@ export async function appendDistributionEvents(
   // projection is updated. Distinct writers therefore do not share a target.
   const eventDir = await getDistributionDir(directoryHandle, monthFolderName);
   try {
-    // These files are independent, so a small bounded pool reduces large-batch
-    // save time without creating an unbounded burst against the workspace disk.
-    await writeImmutableEventBatch(eventDir, events, options?.onProgress);
+    await writeDistributionEventBatch(eventDir, events, options?.onProgress);
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
@@ -409,20 +450,151 @@ function hasQuotaForAssignedEmployees(
 }
 
 /**
+ * Read only what changed since `checkpoint` was recorded (perf: fold-
+ * checkpoint) — the small compatibility-log file(s) in full (cheap
+ * regardless of event count, since they're always ONE file read each), plus
+ * only the NEW legacy per-event files (name-diff) and NEW segment tail bytes
+ * (byte-offset diff, never lastModified — see readSegmentTails). Returns
+ * `null` when the distribution directory doesn't exist yet at all.
+ */
+async function readNewEventsSinceCheckpoint(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  checkpoint: DistributionFoldCheckpoint
+): Promise<{ newEvents: DistributionEvent[]; segmentOffsets: Record<string, number>; legacyEventFileNames: string[] } | null> {
+  const directory = await openOptionalDirectory(() => getDistributionDir(directoryHandle, monthFolderName, false));
+  if (!directory) return null;
+
+  const legacyDir = await openOptionalDirectory(() => getLegacyDistributionDir(directoryHandle, monthFolderName));
+  const currentCompatLog = normalizeCompatibilityLog(
+    await readCompatibilityLog(directory, `Corrupt distribution compatibility log: ${LOG_FILE}`)
+  );
+  const legacyCompatLog = normalizeCompatibilityLog(
+    await readCompatibilityLog(legacyDir, `Corrupt legacy distribution log: ${LOG_FILE}`)
+  );
+  const compatEvents =
+    currentCompatLog.events.length > 0
+      ? mergeDistributionEvents(currentCompatLog.events, legacyCompatLog.events)
+      : mergeDistributionEvents(legacyCompatLog.events, currentCompatLog.events);
+
+  const knownIds = new Set(checkpoint.knownEventIds);
+  const newCompatEvents = compatEvents.filter((event) => !knownIds.has(event.eventId));
+
+  let legacyEventFileNames = checkpoint.legacyEventFileNames;
+  let newLegacyImmutable: DistributionEvent[] = [];
+  try {
+    const eventsDir = await directory.getDirectoryHandle(DISTRIBUTION_EVENTS_DIR, { create: false });
+    const listing = await listDirectoryEntries(eventsDir);
+    legacyEventFileNames = listing
+      .filter((entry) => entry.kind === "file" && entry.name.endsWith(".json"))
+      .map((entry) => entry.name)
+      .sort((a, b) => a.localeCompare(b));
+    const knownNames = new Set(checkpoint.legacyEventFileNames);
+    const newNames = legacyEventFileNames.filter((name) => !knownNames.has(name));
+    if (newNames.length > 0) {
+      const { values } = await readNamedJsonFiles<DistributionEvent>(eventsDir, newNames, {
+        onUnreadable: "throw",
+        unreadableError: (name) => `Cannot read immutable distribution event: ${name}`,
+      });
+      newLegacyImmutable = values;
+    }
+  } catch {
+    // No events directory yet — nothing legacy to read.
+  }
+
+  const segmentDelta = await readDistributionEventSegmentDelta(directory, checkpoint.segmentOffsets);
+
+  const dedupedById = new Map<string, DistributionEvent>();
+  for (const event of [...newCompatEvents, ...newLegacyImmutable, ...segmentDelta.events]) {
+    dedupedById.set(event.eventId, event);
+  }
+  const newEvents = [...dedupedById.values()].sort(
+    (a, b) => a.eventAt.localeCompare(b.eventAt) || a.eventId.localeCompare(b.eventId)
+  );
+
+  return { newEvents, segmentOffsets: segmentDelta.offsets, legacyEventFileNames };
+}
+
+/**
+ * Attempt the fast, incremental fold-checkpoint path (perf): read only what
+ * changed since `checkpoint`, fold just those new events on top of `cached`,
+ * and persist the extended checkpoint. Returns `null` when the checkpoint
+ * can't be trusted (a late/out-of-order event was found) — the caller must
+ * fall back to a full refold using the complete event list in that case;
+ * never patch a checkpoint in place on a late event (see findLateEvent).
+ */
+async function tryResumeFromCheckpoint(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  cached: DistributionCurrentData,
+  checkpoint: DistributionFoldCheckpoint,
+  sampleRows: PreparedPopulationRow[]
+): Promise<DistributionCurrentData | null> {
+  const delta = await readNewEventsSinceCheckpoint(directoryHandle, monthFolderName, checkpoint);
+  if (!delta) return cached; // no distribution directory at all — cache stands as-is.
+  if (delta.newEvents.length === 0) return cached; // nothing changed since the checkpoint.
+
+  const incremental = deriveCurrentDistributionIncremental(
+    cached,
+    checkpoint.quotaFacts,
+    delta.newEvents,
+    sampleRows
+  );
+  if (incremental.requiresFullRefold) return null;
+
+  const knownEventIds = [...new Set([...checkpoint.knownEventIds, ...delta.newEvents.map((event) => event.eventId)])].sort();
+  const stamp = await readDistributionLogStamp(directoryHandle, monthFolderName);
+
+  const withRevision: DistributionCurrentData = {
+    ...incremental.current,
+    logRevision: stamp.revision,
+    eventSetId: distributionEventSetIdFromIds(knownEventIds),
+    foldCheckpoint: {
+      segmentOffsets: delta.segmentOffsets,
+      legacyEventFileNames: delta.legacyEventFileNames,
+      knownEventIds,
+      quotaFacts: incremental.quotaFacts,
+      deriveVersion: DERIVE_VERSION,
+    },
+  };
+
+  // Awaited (not fire-and-forget): this write is ONE small JSON file — never
+  // proportional to event count, so it's never the O(events) bottleneck this
+  // task targets — and awaiting it removes a real race where a second,
+  // near-simultaneous loadOrDeriveDistributionCurrent call could read a
+  // not-yet-persisted cache and redundantly recompute (still correct, but
+  // wastefully, and with a fresh derivedAt that no longer matches the
+  // in-flight sibling call's result). A write failure still must not prevent
+  // returning the freshly-derived in-memory result to the caller.
+  await saveDistributionCurrent(directoryHandle, monthFolderName, withRevision).catch(
+    logRejection("distribution:cache-write")
+  );
+  return withRevision;
+}
+
+/**
  * Load or derive the current distribution state.
  *
- * Strategy:
- * - Merge the legacy compatibility log with immutable event files (source of
- *   truth for events written by current clients).
- * - Load the cached current snapshot.
- * - If the cache's `logRevision` matches the log's `revision`, the cache is
- *   fresh and is returned as-is (fast path).
- * - If stale or absent, re-derive from the log, persist the new cache, and
- *   return the derived result.
+ * Fast path (fold-checkpoint, perf): when the cached snapshot carries a
+ * `foldCheckpoint` from this derive algorithm version, read only what
+ * changed since it was recorded (small compat-log files in full, plus only
+ * NEW legacy event files / NEW segment bytes — see
+ * readNewEventsSinceCheckpoint) and fold just the delta on top of the cached
+ * entries. This is what turns a fresh page load from O(every event ever
+ * written) file reads into O(events written since the last checkpoint).
  *
- * `eventSetId` invalidates a cache when a concurrent immutable file appears
- * without a matching compatibility-log revision. This prevents silent event
- * omission; it does not claim a distributed ordering/transaction guarantee.
+ * That fast path is skipped (falls through to the full path below) when: no
+ * usable checkpoint exists yet, the derive algorithm version changed, or an
+ * out-of-order ("late") event is detected relative to the checkpoint — the
+ * fold is not commutative, so a late event can only be handled correctly by
+ * discarding the checkpoint and refolding from scratch (see findLateEvent).
+ *
+ * Full path (unchanged in spirit from before this task):
+ * - Merge the legacy compatibility log with every immutable event file and
+ *   segment (full read).
+ * - If the cache's `logRevision`/`eventSetId` already match, return it as-is.
+ * - Otherwise re-derive from the full log, persist a fresh checkpoint
+ *   alongside the new cache, and return the derived result.
  */
 export async function loadOrDeriveDistributionCurrent(
   directoryHandle: DirectoryHandleLike,
@@ -430,12 +602,27 @@ export async function loadOrDeriveDistributionCurrent(
   sampleRows: PreparedPopulationRow[]
 ): Promise<DistributionCurrentData | null> {
   try {
-    const log = await loadDistributionLog(directoryHandle, monthFolderName);
+    const cached = await loadDistributionCurrent(directoryHandle, monthFolderName);
+    const checkpoint = cached?.foldCheckpoint;
+    const canResume =
+      !!cached &&
+      cached.deriveVersion === DERIVE_VERSION &&
+      !!checkpoint &&
+      checkpoint.deriveVersion === DERIVE_VERSION;
+
+    if (canResume) {
+      const resumed = await tryResumeFromCheckpoint(directoryHandle, monthFolderName, cached, checkpoint!, sampleRows);
+      if (resumed) return resumed;
+      // null => a late event was found; fall through to a full, safe refold.
+    }
+
+    const { log, segmentOffsets, legacyEventFileNames } = await loadDistributionLogWithCheckpointMeta(
+      directoryHandle,
+      monthFolderName
+    );
     if (log.events.length === 0) {
       return null;
     }
-
-    const cached = await loadDistributionCurrent(directoryHandle, monthFolderName);
 
     // Fast path: cache is valid only if it was produced by the current
     // derivation algorithm (deriveVersion) for this exact log revision.
@@ -451,16 +638,30 @@ export async function loadOrDeriveDistributionCurrent(
       return cached;
     }
 
-    // Slow path: re-derive and update cache
-    const derived = deriveCurrentDistribution(log, sampleRows);
+    // Slow path: re-derive and update cache. segmentOffsets/legacyEventFileNames
+    // come from the SAME scan loadDistributionLogWithCheckpointMeta already did
+    // above -- no second directory re-scan needed to seed the fresh checkpoint.
+    const { current: derived, quotaFacts } = deriveCurrentDistributionWithFacts(log, sampleRows);
+    const knownEventIds = [...new Set(log.events.map((event) => event.eventId))].sort();
+    const foldCheckpoint: DistributionFoldCheckpoint = {
+      segmentOffsets,
+      legacyEventFileNames,
+      knownEventIds,
+      quotaFacts,
+      deriveVersion: DERIVE_VERSION,
+    };
     const withRevision: DistributionCurrentData = {
       ...derived,
       logRevision: log.revision,
-      eventSetId: log.eventSetId
+      eventSetId: log.eventSetId,
+      foldCheckpoint,
     };
 
-    // Best-effort cache write — don't block on errors, but log for observability.
-    void saveDistributionCurrent(directoryHandle, monthFolderName, withRevision).catch(
+    // Awaited (not fire-and-forget) — see the identical rationale on
+    // tryResumeFromCheckpoint's save above: this is one small JSON file, not
+    // proportional to event count, and awaiting it avoids a near-simultaneous
+    // caller reading a not-yet-persisted cache and needlessly recomputing.
+    await saveDistributionCurrent(directoryHandle, monthFolderName, withRevision).catch(
       logRejection("distribution:cache-write")
     );
 

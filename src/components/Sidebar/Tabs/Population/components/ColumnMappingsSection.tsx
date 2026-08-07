@@ -5,6 +5,7 @@ import type {
   MappingTemplate,
   PopulationConfig,
 } from "../../../../../data/population/populationConfig";
+import { DelimitedListInput } from "./DelimitedListInput";
 
 export type PendingFieldRemoval = {
   kind: "system" | "custom";
@@ -149,23 +150,19 @@ export function ColumnMappingsSection({
               </button>
             </div>
             {/* Risk column aliases */}
-            <input
-              type="text"
+            <DelimitedListInput
               className="save-disk-input"
               placeholder="أسماء الأعمدة في ملف المخاطر..."
-              value={(template.columnMappings[field.key] || []).join(", ")}
-              onChange={(e) => handleMappingChange(field.key, e.target.value)}
+              value={template.columnMappings[field.key] || []}
+              onCommit={(aliases) => handleMappingChange(field.key, aliases.join(", "))}
               style={{ borderColor: "#fca5a5" }}
             />
             {/* BI column aliases */}
-            <input
-              type="text"
+            <DelimitedListInput
               className="save-disk-input"
               placeholder="أسماء الأعمدة في ملف BI... (اتركه فارغاً لاستخدام نفس أعمدة المخاطر)"
-              value={((template.biColumnMappings ?? {})[field.key] || []).join(
-                ", ",
-              )}
-              onChange={(e) => handleBiMappingChange(field.key, e.target.value)}
+              value={(template.biColumnMappings ?? {})[field.key] || []}
+              onCommit={(aliases) => handleBiMappingChange(field.key, aliases.join(", "))}
               style={{ borderColor: "#93c5fd" }}
             />
             <button
@@ -244,22 +241,18 @@ export function ColumnMappingsSection({
                 حقل مخصص
               </span>
             </div>
-            <input
-              type="text"
+            <DelimitedListInput
               className="save-disk-input"
               placeholder="أعمدة ملف المخاطر..."
-              value={(template.columnMappings[field.key] || []).join(", ")}
-              onChange={(e) => handleMappingChange(field.key, e.target.value)}
+              value={template.columnMappings[field.key] || []}
+              onCommit={(aliases) => handleMappingChange(field.key, aliases.join(", "))}
               style={{ borderColor: "#fca5a5" }}
             />
-            <input
-              type="text"
+            <DelimitedListInput
               className="save-disk-input"
               placeholder="أعمدة ملف BI..."
-              value={((template.biColumnMappings ?? {})[field.key] || []).join(
-                ", ",
-              )}
-              onChange={(e) => handleBiMappingChange(field.key, e.target.value)}
+              value={(template.biColumnMappings ?? {})[field.key] || []}
+              onCommit={(aliases) => handleBiMappingChange(field.key, aliases.join(", "))}
               style={{ borderColor: "#93c5fd" }}
             />
                     <button

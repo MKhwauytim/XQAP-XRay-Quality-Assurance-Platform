@@ -41,9 +41,13 @@ describe("MappingSettingsModal behavior wiring", () => {
       />,
     );
 
-    fireEvent.change(screen.getByPlaceholderText("أسماء الأعمدة في ملف المخاطر..."), {
-      target: { value: "Risk ID" },
-    });
+    const riskAliasInput = screen.getByPlaceholderText(
+      "أسماء الأعمدة في ملف المخاطر...",
+    );
+    fireEvent.change(riskAliasInput, { target: { value: "Risk ID" } });
+    // The alias inputs commit on blur (Task 1 fix), not on every keystroke — a raw `change`
+    // alone must not reach onConfigChange, otherwise the trailing-comma bug is back.
+    fireEvent.blur(riskAliasInput);
     expect(onConfigChange).toHaveBeenLastCalledWith(
       expect.objectContaining({
         mappingTemplates: expect.arrayContaining([
@@ -55,9 +59,9 @@ describe("MappingSettingsModal behavior wiring", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "ترجمة المستويات" }));
-    fireEvent.change(screen.getByLabelText("المستوى الأول"), {
-      target: { value: "FIRST, 1" },
-    });
+    const stageInput = screen.getByLabelText("المستوى الأول");
+    fireEvent.change(stageInput, { target: { value: "FIRST, 1" } });
+    fireEvent.blur(stageInput);
     expect(onConfigChange).toHaveBeenLastCalledWith(
       expect.objectContaining({
         stageMappings: expect.objectContaining({ first: ["FIRST", "1"] }),

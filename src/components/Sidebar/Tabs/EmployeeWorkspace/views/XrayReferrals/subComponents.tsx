@@ -5,6 +5,7 @@
 import { useMemo, useState } from "react";
 import { X, AlertTriangle, RotateCw } from "lucide-react";
 import { useFocusTrap } from "../../../../../../hooks/useFocusTrap";
+import { ModalPortal } from "../../../../../ModalPortal/ModalPortal";
 import { readUserManagementState } from "../../../../../../auth/userManagement";
 import type { FieldAnswer, ItemAnswer } from "../../../../../../data/answers/answerTypes";
 import type { DistributionEntry } from "../../../../../../data/distribution/distributionTypes";
@@ -305,6 +306,7 @@ export function ReferralRequestModal({
   }
 
   return (
+    <ModalPortal>
     <div ref={dialogRef} className="ew-modal-backdrop" role="dialog" aria-modal="true">
       <div className="ew-replace-modal">
         <div className="ew-replace-header">
@@ -392,6 +394,7 @@ export function ReferralRequestModal({
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }
 
@@ -538,6 +541,7 @@ export function ReplacementDialog({
   const isRecommended = tab === "recommended";
 
   return (
+    <ModalPortal>
     <div ref={dialogRef} className="ew-modal-backdrop" role="dialog" aria-modal="true">
       <div className="ew-replace-modal">
         <div className="ew-replace-header">
@@ -629,5 +633,6 @@ export function ReplacementDialog({
         <Pagination page={safePage} totalItems={rows.length} onPageChange={setPage} itemLabel="بديل" />
       </div>
     </div>
+    </ModalPortal>
   );
 }

@@ -26,6 +26,51 @@ async function readRaw(
   return file.text();
 }
 
+test("B task 2: optional onProgress callback reports staging/verifying/committing phases in order, without an onProgress-less write throwing", async () => {
+  const dir = createMemoryDirectory();
+
+  // Existing call sites that omit the callback must behave exactly as before.
+  await safeWriteJson(dir, "no-callback.json", { a: 1 });
+  const plain = await safeReadJson<{ a: number }>(dir, "no-callback.json");
+  expect(plain.ok).toBe(true);
+
+  // First write: no prior file, so no "backing-up" phase.
+  const phases: string[] = [];
+  await safeWriteJson(dir, "a.json", { hello: "world" }, (phase) => phases.push(phase));
+  expect(phases).toEqual(["staging", "verifying-staged", "committing", "verifying-committed"]);
+
+  // Second write: a prior valid file exists, so "backing-up" fires first.
+  const phases2: string[] = [];
+  await safeWriteJson(dir, "a.json", { hello: "again" }, (phase) => phases2.push(phase));
+  expect(phases2).toEqual([
+    "backing-up",
+    "staging",
+    "verifying-staged",
+    "committing",
+    "verifying-committed",
+  ]);
+
+  const result = await safeReadJson<{ hello: string }>(dir, "a.json");
+  expect(result.ok).toBe(true);
+  if (result.ok) expect(result.value.hello).toBe("again");
+});
+
+test("B task 2: onProgress fires on the streamed large-payload path too, and a throwing callback does not corrupt the write", async () => {
+  const dir = createMemoryDirectory();
+  __setStreamingForcedSizeLimitForTests(10); // force the streamed path for a tiny payload
+
+  const phases: string[] = [];
+  await safeWriteJson(dir, "big.json", { text: "x".repeat(200) }, (phase) => {
+    phases.push(phase);
+    if (phase === "staging") throw new Error("misbehaving UI callback");
+  });
+  expect(phases).toEqual(["staging", "verifying-staged", "committing", "verifying-committed"]);
+
+  const result = await safeReadJson<{ text: string }>(dir, "big.json");
+  expect(result.ok).toBe(true);
+  if (result.ok) expect(result.value.text).toBe("x".repeat(200));
+});
+
 test("write then read round-trips an object", async () => {
   const dir = createMemoryDirectory();
   await safeWriteJson(dir, "a.json", { hello: "world" });

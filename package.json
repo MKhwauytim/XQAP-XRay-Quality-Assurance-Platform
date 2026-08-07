@@ -1,7 +1,7 @@
 {
   "name": "x-ray-quality-app",
   "private": true,
-  "version": "59.199.0",
+  "version": "60.0.0",
   "type": "module",
   "engines": {
     "node": ">=22 <23"
@@ -20,7 +20,8 @@
     "check:bundle-size": "node scripts/check-bundle-size.mjs",
     "check:release": "node scripts/check-release-consistency.mjs",
     "check:vendor": "node scripts/check-vendor-integrity.mjs",
-    "count-lines": "node scripts/count-lines.mjs"
+    "count-lines": "node scripts/count-lines.mjs",
+    "editlog": "node scripts/editlog.mjs"
   },
   "dependencies": {
     "@fontsource/ibm-plex-sans-arabic": "^5.2.9",

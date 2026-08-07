@@ -16,6 +16,7 @@ import { tabAllowedRoles } from "../../../../auth/tabCatalog";
 import { usePermissions } from "../../../../auth/usePermissions";
 import type { UsePermissionsResult } from "../../../../auth/usePermissions";
 import { logError, logRejection } from "../../../../data/storage/errorLogger";
+import type { SafeWriteProgressPhase } from "../../../../data/storage/safeWrite";
 import { currentMonthFolderInfo, formatMonthFolderName, formatMonthFolderShortLabel } from "../../../../data/population/monthFolder";
 import type { MonthFolderInfo } from "../../../../data/population/monthFolder";
 import {
@@ -414,6 +415,12 @@ export default function PopulationTab() {
 
   const [isSavingToDisk, setIsSavingToDisk] = useState(false);
   const [saveToDiskMessage, setSaveToDiskMessage] = useState<SaveMessage>(null);
+  // B task 2: the write-phase progress for population.final.json (the largest
+  // file in the save batch), surfaced so "جاري الحفظ التلقائي..." doesn't sit
+  // unchanged for the 10-15 minutes safeWriteJson's own passes (backup, stage,
+  // verify, commit, verify) can take on a big population — see safeWrite.ts's
+  // SafeWriteProgressPhase.
+  const [saveProgressPhase, setSaveProgressPhase] = useState<SafeWriteProgressPhase | null>(null);
   // Pending re-process save awaiting user confirmation (month already has a drawn sample).
   const [pendingReprocessSave, setPendingReprocessSave] = useState<{
     processingResult: PopulationProcessingResult;
@@ -904,10 +911,12 @@ export default function PopulationTab() {
     const username = sessionRef.current?.username ?? "unknown";
     setIsSavingToDisk(true);
     setSaveToDiskMessage(null);
+    setSaveProgressPhase(null);
 
     try {
       const result = await saveMonthRun({
         directoryHandle,
+        onSaveProgress: (phase) => setSaveProgressPhase(phase),
         month: saveMonth,
         year: saveYear,
         username,
@@ -971,6 +980,7 @@ export default function PopulationTab() {
       });
     } finally {
       setIsSavingToDisk(false);
+      setSaveProgressPhase(null);
     }
   }
 
@@ -1222,6 +1232,7 @@ export default function PopulationTab() {
             processingProgressPercent={processingProgressPercent}
             monthLabel={formatMonthFolderShortLabel(formatMonthFolderName(saveMonth, saveYear))}
             isSavingToDisk={isSavingToDisk}
+            saveProgressPhase={saveProgressPhase}
             saveToDiskMessage={saveToDiskMessage}
             hasDiskWorkspace={Boolean(directoryHandle)}
             orphanScan={orphanScan}

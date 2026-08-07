@@ -303,7 +303,15 @@ export const DEFAULT_EXPORT_COLUMNS: ExportColumnSetting[] = [
   { fieldKey: "movementType", exportHeader: "نوع الحركة", isEnabled: true, order: 12 },
   { fieldKey: "reportNumber", exportHeader: "رقم المحضر", isEnabled: true, order: 13 },
   { fieldKey: "targetedByRiskEngine", exportHeader: "مستهدف من محرك المخاطر", isEnabled: true, order: 14 },
-  { fieldKey: "riskMessage", exportHeader: "رسالة المخاطر", isEnabled: true, order: 15 }
+  { fieldKey: "riskMessage", exportHeader: "رسالة المخاطر", isEnabled: true, order: 15 },
+  { fieldKey: "declarationDate", exportHeader: "تاريخ البيان", isEnabled: true, order: 16 },
+  { fieldKey: "certScanStatus", exportHeader: "حالة CertScan", isEnabled: true, order: 17 },
+  { fieldKey: "certScanSnippet", exportHeader: "مقطع تطابق CertScan", isEnabled: true, order: 18 },
+  { fieldKey: "originalCertScanSnippet", exportHeader: "المقطع الأصلي لمطابقة CertScan", isEnabled: true, order: 19 },
+  { fieldKey: "biEnrichmentStatus", exportHeader: "حالة إثراء BI", isEnabled: true, order: 20 },
+  { fieldKey: "biMatched", exportHeader: "تمت مطابقة BI", isEnabled: true, order: 21 },
+  { fieldKey: "levelOneEmployee", exportHeader: "موظف المستوى الأول", isEnabled: true, order: 22 },
+  { fieldKey: "levelTwoEmployee", exportHeader: "موظف المستوى الثاني", isEnabled: true, order: 23 }
 ];
 
 export const DEFAULT_SAMPLING_RULES: StageSamplingRule[] = [
@@ -323,7 +331,13 @@ export const DEFAULT_SAMPLING_RULES: StageSamplingRule[] = [
     method: "exact",
     value: 2500,
     isLocked: false,
-    minRequiredCount: 2500,
+    // No floor by default (fix: previously defaulted equal to `value`, so
+    // lowering `value` alone was silently overridden back up by
+    // configuredTarget's Math.max(target, minRequiredCount) — the owner-reported
+    // "total exceeds what I requested" bug). Existing saved configs that already
+    // have minRequiredCount > 0 are untouched; this only changes what a *new*
+    // config starts with.
+    minRequiredCount: 0,
     certScanPercentage: 0,
     certScanExactCount: 0,
     certScanMethod: "percentage",
@@ -334,7 +348,7 @@ export const DEFAULT_SAMPLING_RULES: StageSamplingRule[] = [
     method: "exact",
     value: 1875,
     isLocked: false,
-    minRequiredCount: 1875,
+    minRequiredCount: 0,
     certScanPercentage: 0,
     certScanExactCount: 0,
     certScanMethod: "percentage",
@@ -345,7 +359,7 @@ export const DEFAULT_SAMPLING_RULES: StageSamplingRule[] = [
     method: "exact",
     value: 1875,
     isLocked: false,
-    minRequiredCount: 1875,
+    minRequiredCount: 0,
     certScanPercentage: 0,
     certScanExactCount: 0,
     certScanMethod: "percentage",

@@ -70,7 +70,44 @@ export type DistributionEntry = {
   status: DistributionStatus;
   replacedById: string | null;
   lastEventAt: string;
+  /**
+   * eventId of the event that produced lastEventAt (perf: fold-checkpoint
+   * resumability). Used only as an (eventAt, eventId) tie-break to detect a
+   * "late" event arriving after this entry was folded -- an entry produced
+   * before this field existed reads as undefined, which callers must treat
+   * conservatively (see findLateEvent in distributionDerivation.ts).
+   */
+  lastEventId?: string;
   row: PreparedPopulationRow;
+};
+
+/** Per-employee quota bookkeeping used to resume deriveEmployeeQuotas incrementally (perf: fold-checkpoint). */
+export type QuotaFacts = {
+  assignmentCounts: Record<string, number>;
+  firstAssignments: Record<string, DistributionEvent>;
+  latestStoredQuotas: Record<string, DistributionEvent>;
+};
+
+/**
+ * Persisted fold-acceleration checkpoint (perf). Lets loadOrDeriveDistributionCurrent
+ * skip re-reading every distribution event file on a fresh page load -- it only
+ * needs to read what has changed since this checkpoint was written. See
+ * distributionStorage.ts's tryResumeFromCheckpoint for the read-and-verify path,
+ * and distributionDerivation.ts's findLateEvent for the correctness guard that
+ * forces a full refold instead of trusting this checkpoint when an
+ * out-of-order event is detected.
+ */
+export type DistributionFoldCheckpoint = {
+  /** Byte size already folded, per distribution.events/*.ndjson segment file name. */
+  segmentOffsets: Record<string, number>;
+  /** Names of legacy one-file-per-event *.json files already folded into this checkpoint. */
+  legacyEventFileNames: string[];
+  /** Every eventId already folded into this checkpoint (sorted). Used to id-diff the small compatibility-log file, and to extend eventSetId without re-reading every event file. */
+  knownEventIds: string[];
+  /** Quota accumulator state, resumable across checkpoint extensions. */
+  quotaFacts: QuotaFacts;
+  /** Fold/derive algorithm version this checkpoint was built with; a mismatch forces a full refold. */
+  deriveVersion: number;
 };
 
 export type DistributionCurrentData = {
@@ -89,4 +126,6 @@ export type DistributionCurrentData = {
   entries: DistributionEntry[];
   /** Daily quotas per employee, derived from assignment date through the monthly deadline. */
   quotas?: Record<string, EmployeeQuota>;
+  /** Fold-checkpoint acceleration state (perf). Absent means the next load does a full refold. */
+  foldCheckpoint?: DistributionFoldCheckpoint;
 };

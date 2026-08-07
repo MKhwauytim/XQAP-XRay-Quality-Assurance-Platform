@@ -159,3 +159,86 @@ describe("PhaseThreeSampling — draw-sample button render-time permission gate 
     );
   });
 });
+
+describe("PhaseThreeSampling — running total shown before the draw (B task 1)", () => {
+  function makeRows(stageText: string, count: number, prefix: string): PreparedPopulationRow[] {
+    return Array.from({ length: count }, (_, i) => makeRow(`${prefix}-${i}`, stageText));
+  }
+
+  it("sums the EFFECTIVE (post-floor) targets across stages, not the raw entered values", () => {
+    // Second stage: entered value (10, exact) is below its floor (50) — the
+    // effective/drawn count is 50, not 10. Third stage: no floor, effective = entered (20).
+    const secondRule = makeRule({
+      stageKey: "second",
+      method: "exact",
+      value: 10,
+      minRequiredCount: 50,
+    });
+    const thirdRule = makeRule({
+      stageKey: "third",
+      method: "exact",
+      value: 20,
+      minRequiredCount: 0,
+    });
+    const rows = [
+      ...makeRows("SECOND", 100, "S"),
+      ...makeRows("THIRD", 100, "T"),
+    ];
+    render(
+      <PhaseThreeSampling
+        {...baseProps({
+          populationRows: rows,
+          config: { ...DEFAULT_POPULATION_CONFIG, samplingRules: [secondRule, thirdRule] },
+        })}
+      />
+    );
+
+    // Running total = 50 (floored second stage) + 20 (third stage) = 70, not 10 + 20 = 30.
+    expect(screen.getByText((_, node) => node?.textContent === "إجمالي العينة المتوقع (كل المستويات): 70")).toBeInTheDocument();
+  });
+
+  it("shows an explicit override warning naming the stage, entered value, and effective value", () => {
+    const secondRule = makeRule({
+      stageKey: "second",
+      method: "exact",
+      value: 10,
+      minRequiredCount: 50,
+    });
+    const rows = makeRows("SECOND", 100, "S");
+    render(
+      <PhaseThreeSampling
+        {...baseProps({
+          populationRows: rows,
+          config: { ...DEFAULT_POPULATION_CONFIG, samplingRules: [secondRule] },
+        })}
+      />
+    );
+
+    const alerts = screen.getAllByRole("alert");
+    const overrideAlert = alerts.find((el) => el.textContent?.includes("المستوى الثاني"));
+    expect(overrideAlert).toBeDefined();
+    expect(overrideAlert?.textContent).toContain("10");
+    expect(overrideAlert?.textContent).toContain("50");
+  });
+
+  it("does not show an override warning when no stage's minRequiredCount overrides its entered value", () => {
+    const secondRule = makeRule({
+      stageKey: "second",
+      method: "exact",
+      value: 60,
+      minRequiredCount: 50,
+    });
+    const rows = makeRows("SECOND", 100, "S");
+    render(
+      <PhaseThreeSampling
+        {...baseProps({
+          populationRows: rows,
+          config: { ...DEFAULT_POPULATION_CONFIG, samplingRules: [secondRule] },
+        })}
+      />
+    );
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByText((_, node) => node?.textContent === "إجمالي العينة المتوقع (كل المستويات): 60")).toBeInTheDocument();
+  });
+});

@@ -7,7 +7,7 @@ Organized by purpose. Complete version history lives in `edit logs/`, with exact
 | Folder | What lives there |
 |---|---|
 | [`edit logs/`](edit%20logs/) | Complete code change history, organized as one Markdown file per date and linked to the in-app Change Log |
-| [`architecture/`](architecture/) | How the system works: [`data-system-report.md`](architecture/data-system-report.md) (**authoritative disk-layout & file reference**), [`SECURITY_MODEL.md`](architecture/SECURITY_MODEL.md) (advisory-only trust model, risk acceptance), [`DATA_PIPELINE_REWORK_2026-07-14.md`](architecture/DATA_PIPELINE_REWORK_2026-07-14.md) (integrity-layer design record), [`LARGE_POPULATION_PERFORMANCE_PROPOSAL_2026-07-22.md`](architecture/LARGE_POPULATION_PERFORMANCE_PROPOSAL_2026-07-22.md) (proposed 200k–400k row loading/partitioning plan) |
+| [`architecture/`](architecture/) | How the system works: [`DATA_SYSTEM_FULL_MAP.md`](architecture/DATA_SYSTEM_FULL_MAP.md) (**start here** — every artifact indexed by lifecycle, by screen, by folder, and by writer/reader), [`data-system-report.md`](architecture/data-system-report.md) (**authoritative disk-layout & file reference**), [`SECURITY_MODEL.md`](architecture/SECURITY_MODEL.md) (advisory-only trust model, risk acceptance), [`DATA_PIPELINE_REWORK_2026-07-14.md`](architecture/DATA_PIPELINE_REWORK_2026-07-14.md) (integrity-layer design record), [`LARGE_POPULATION_PERFORMANCE_PROPOSAL_2026-07-22.md`](architecture/LARGE_POPULATION_PERFORMANCE_PROPOSAL_2026-07-22.md) (proposed 200k–400k row loading/partitioning plan) |
 | [`product/`](product/) | What the product is: [`PRODUCT_PAGES.md`](product/PRODUCT_PAGES.md) (every page/tab described), [`GAP_ANALYSIS.md`](product/GAP_ANALYSIS.md) (incomplete features rated by impact), [`PRODUCT_SPECIFICATION.md`](product/PRODUCT_SPECIFICATION.md), [`RELEASE_CHECKLIST.md`](product/RELEASE_CHECKLIST.md) |
 | [`audit/`](audit/) | Audit reports & fix-wave records (2026-06 → 2026-07), newest: [`FULL_REVISION_2026-07-17.md`](audit/FULL_REVISION_2026-07-17.md) |
 | [`research/`](research/) | External grounding: [`PIPELINE_RESEARCH_2026-07-14.md`](research/PIPELINE_RESEARCH_2026-07-14.md) (ISO 2859/ALCOA+/ISO 15489 gap table), [`VISUAL_LIBRARIES_2026-07-14.md`](research/VISUAL_LIBRARIES_2026-07-14.md) (visual-library evaluation) |
@@ -30,5 +30,5 @@ Organized by purpose. Complete version history lives in `edit logs/`, with exact
 
 ## Conventions
 
-- Every code edit is logged in today's `edit logs/YYYY-MM-DD.md` file (before/after, semver-lite) **before** it is applied — see CLAUDE.md.
+- Every code edit is logged in today's `edit logs/YYYY-MM-DD.md` file (semver-lite), written **after** the edit is applied, at a tier matched to its blast radius — generate the entry with `npm run editlog -- --tier=N "Category (scope): …"`. See CLAUDE.md for the tier ladder.
 - Audit and plan documents are immutable history: they keep the file paths that were true when written; this index and CLAUDE.md always point at current paths.

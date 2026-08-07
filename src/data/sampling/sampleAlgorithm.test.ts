@@ -221,6 +221,37 @@ test("drawSample with stage-specific rules draws correct counts", () => {
   expect(secondStageDrawn).toHaveLength(5);
 });
 
+test("CertScan percentage is a split WITHIN the stage target, never additional to it (owner requirement, B task 1)", () => {
+  // Owner-reported bug: "the 25% is suppose to be part of the number i require
+  // not Above it". Verify drawStageSample never draws more than the configured
+  // stage target regardless of the CertScan quota configured on top of it.
+  const rows = makeRows("بري", 100, 100).map((r) => ({ ...r, stage: "SECOND_STAGE" }));
+  const samplingRules: StageSamplingRule[] = [
+    {
+      stageKey: "second",
+      method: "exact",
+      value: 50,
+      isLocked: false,
+      minRequiredCount: 0,
+      certScanPercentage: 25, // must mean "25% of the 50", not "50 + 25% extra"
+      certScanExactCount: 0,
+      certScanMethod: "percentage",
+      certScanStrategy: "preferred",
+    },
+  ];
+
+  const result = drawSample(rows, { rngSeed: "certscan-within-total", samplingRules }, "user");
+  expect(result.ok).toBe(true);
+  if (!result.ok) return;
+
+  // The total actually drawn must equal the configured target exactly — not
+  // target + certScan quota.
+  expect(result.data.totalActual).toBe(50);
+  expect(result.data.certScanActual + result.data.nonCertScanActual).toBe(50);
+  // CertScan is a subset of the 50, never additional records on top of it.
+  expect(result.data.certScanActual).toBeLessThanOrEqual(50);
+});
+
 test("drawSample rejects a population whose stage values match none of the four configured stages", () => {
   // Population exists (100 rows) but every row's `stage` text is not one of the
   // DEFAULT_STAGE_MAPPINGS aliases (e.g. the Excel source uses "Level 1" wording

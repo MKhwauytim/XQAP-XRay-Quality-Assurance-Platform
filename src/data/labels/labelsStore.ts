@@ -208,6 +208,12 @@ export const DEFAULT_LABELS = {
   msg_referral_decision_retry:  "تم نقل العينات لكن تعذر حفظ قرار الاعتماد — اضغط اعتماد مرة أخرى لإكمال التسجيل (لن يتكرر النقل).",
   referral_review_saving:       "جارٍ حفظ القرار…",
 
+  // Approval request list — explicit sort-order indicator (the pending queue
+  // sorts oldest-first so nothing waits unseen, decided tabs sort newest-first
+  // for a recent-activity feed; both are visible now instead of silent).
+  approval_sort_oldest_first: "الأقدم أولاً",
+  approval_sort_newest_first: "الأحدث أولاً",
+
   // Reopen-for-correction (Tier-1 Item D)
   ip_reopen_btn:                "إعادة فتح للتصحيح",
   ip_reopen_reason_placeholder: "سبب إعادة الفتح (إلزامي)",
@@ -589,6 +595,11 @@ export const DEFAULT_LABELS = {
   rd_fields_dimensions_label:   "أبعاد ({count})",
   rd_fields_measures_label:     "مقاييس ({count})",
   rd_fields_no_match:           "لا توجد حقول مطابقة",
+
+  // Sampling running total (Phase 3) — shown before the draw is triggered
+  sampling_running_total_label:      "إجمالي العينة المتوقع (كل المستويات)",
+  sampling_running_total_note:       "هذا الإجمالي يعكس القيم الفعلية بعد تطبيق أي حد أدنى، وليس القيم المُدخلة فقط.",
+  sampling_floor_override_warning:   "تنبيه: {stage} — القيمة المُدخلة تُنتج {entered} سجلاً فقط، لكن تم رفعها إلى {effective} بسبب الحد الأدنى المطلوب ({minRequired}). هذا الفارق مُضاف إلى الإجمالي الكلي أدناه.",
 } as const;
 
 export type LabelKey = keyof typeof DEFAULT_LABELS;

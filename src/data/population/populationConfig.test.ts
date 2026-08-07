@@ -5,11 +5,29 @@ import {
   savePopulationConfig,
   loadPopulationConfig,
   DEFAULT_POPULATION_CONFIG,
+  DEFAULT_SAMPLING_RULES,
 } from "./populationConfig";
 
 function makeRoot(): DirectoryHandleLike {
   return createMemoryDirectory("root") as unknown as DirectoryHandleLike;
 }
+
+// B (sampling config UI) task 1: DEFAULT_SAMPLING_RULES previously defaulted
+// minRequiredCount equal to `value` for stages 2-4, so lowering a stage's `value`
+// alone was silently overridden back up by configuredTarget's
+// Math.max(target, minRequiredCount) — the owner-reported "requested 7,000, got
+// ~9,000" bug. New configs must not floor by default; existing saved configs on
+// disk are untouched by this default (loadPopulationConfig never rewrites a
+// loaded config's rule values), so this only guards what a *fresh* config starts
+// with.
+describe("DEFAULT_SAMPLING_RULES — no silent floor on new configs", () => {
+  it("does not default minRequiredCount equal to value for stages 2-4", () => {
+    for (const rule of DEFAULT_SAMPLING_RULES) {
+      if (rule.stageKey === "first") continue; // stage 1 is intentionally locked at 100%
+      expect(rule.minRequiredCount).toBe(0);
+    }
+  });
+});
 
 describe("populationConfig — CAS-protected save", () => {
   it("saves and reloads a config", async () => {

@@ -6,6 +6,7 @@ import { readSession } from "../../../../auth/authSession";
 import { tabAllowedRoles } from "../../../../auth/tabCatalog";
 import { usePermissions } from "../../../../auth/usePermissions";
 import { useFocusTrap } from "../../../../hooks/useFocusTrap";
+import { ModalPortal } from "../../../../components/ModalPortal/ModalPortal";
 import { PageHeader } from "../../../../components/PageHeader/PageHeader";
 import { formatMonthFolderShortLabel } from "../../../../data/population/monthFolder";
 import {
@@ -682,6 +683,7 @@ function MonthLockDialog({
   const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onClose });
 
   return (
+    <ModalPortal>
     <div ref={dialogRef} className="arc-modal-backdrop" role="dialog" aria-modal="true">
       <div className="arc-restore-modal">
         <div className="arc-restore-header">
@@ -734,6 +736,7 @@ function MonthLockDialog({
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }
 
@@ -767,6 +770,7 @@ function RestoreDialog({
   const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onClose });
 
   return (
+    <ModalPortal>
     <div ref={dialogRef} className="arc-modal-backdrop" role="dialog" aria-modal="true">
       <div className="arc-restore-modal">
         <div className="arc-restore-header">
@@ -846,5 +850,6 @@ function RestoreDialog({
         )}
       </div>
     </div>
+    </ModalPortal>
   );
 }

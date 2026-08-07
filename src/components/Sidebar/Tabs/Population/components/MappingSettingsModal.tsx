@@ -1,6 +1,8 @@
 import { Settings2, X } from "lucide-react";
 import { ConfirmDialog } from "../../../../ConfirmDialog/ConfirmDialog";
+import { ModalPortal } from "../../../../ModalPortal/ModalPortal";
 import type { PopulationConfig } from "../../../../../data/population/populationConfig";
+import { AliasOverlapWarningBanner } from "./AliasOverlapWarningBanner";
 import { ColumnMappingsSection } from "./ColumnMappingsSection";
 import {
   ExportColumnsSection,
@@ -42,6 +44,7 @@ export default function MappingSettingsModal({
   if (!isOpen) return null;
 
   return (
+    <ModalPortal>
     <div
       style={{
         position: "fixed",
@@ -51,7 +54,7 @@ export default function MappingSettingsModal({
         display: "flex",
         justifyContent: "center",
         alignItems: "center",
-        zIndex: 1000,
+        zIndex: 10020,
         direction: "rtl",
       }}
     >
@@ -116,6 +119,11 @@ export default function MappingSettingsModal({
         )}
 
         <div style={{ padding: "20px", overflowY: "auto", flex: 1 }}>
+          {(controller.activeTab === "mappings" ||
+            controller.activeTab === "stages") && (
+            <AliasOverlapWarningBanner warnings={controller.aliasOverlapWarnings} />
+          )}
+
           {controller.activeTab === "mappings" && (
             <ColumnMappingsSection
               config={config}
@@ -234,5 +242,6 @@ export default function MappingSettingsModal({
         onCancel={() => controller.setPendingRemoval(null)}
       />
     </div>
+    </ModalPortal>
   );
 }

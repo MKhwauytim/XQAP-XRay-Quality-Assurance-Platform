@@ -2,12 +2,24 @@ import type { RiskWorkbookResult } from "../riskData/riskDataTypes";
 import type { BiWorkbookResult } from "../biData/biDataTypes";
 import type { PopulationProcessingResult } from "../processing/populationProcessingTypes";
 import type { OrphanScanResult } from "../../../../../data/integrity/orphanScan";
+import type { SafeWriteProgressPhase } from "../../../../../data/storage/safeWrite";
 import DataAccuracyReport, { OrphanScanSection } from "./DataAccuracyReport";
 import PopulationProcessingReport from "./PopulationProcessingReport";
 import { AlertTriangle, Check, FolderOpen, X } from "lucide-react";
 import CertScanGrid from "./CertScanGrid";
 
 type SaveMessage = { type: "ok" | "error"; text: string } | null;
+
+// B task 2: Arabic label per safeWriteJson phase, shown while the auto-save is
+// past processPopulation's own 100% and into the (previously invisible)
+// multi-pass disk write for population.final.json.
+const SAVE_PROGRESS_LABELS: Record<SafeWriteProgressPhase, string> = {
+  "backing-up": "جاري نسخ النسخة الاحتياطية...",
+  staging: "جاري تجهيز الملف الجديد...",
+  "verifying-staged": "جاري التحقق من الملف المُجهّز...",
+  committing: "جاري كتابة الملف النهائي على القرص...",
+  "verifying-committed": "جاري التحقق النهائي من الملف المحفوظ...",
+};
 
 type PhaseTwoReportAndProcessingProps = {
   riskWorkbookResult: RiskWorkbookResult | null;
@@ -20,6 +32,10 @@ type PhaseTwoReportAndProcessingProps = {
   processingProgressPercent?: number;
   monthLabel: string;
   isSavingToDisk: boolean;
+  /** B task 2: current safeWriteJson phase for the in-flight auto-save, or null
+   *  when not saving / not yet reported. Optional so existing callers/tests that
+   *  don't pass it keep working (falls back to the generic "saving" message). */
+  saveProgressPhase?: SafeWriteProgressPhase | null;
   saveToDiskMessage: SaveMessage;
   hasDiskWorkspace: boolean;
   /** B3 referential-integrity orphan scan for the saved month, or null when unavailable. */
@@ -50,6 +66,7 @@ export default function PhaseTwoReportAndProcessing({
   processingProgressPercent = 0,
   monthLabel,
   isSavingToDisk,
+  saveProgressPhase = null,
   saveToDiskMessage,
   hasDiskWorkspace,
   orphanScan = null,
@@ -89,7 +106,9 @@ export default function PhaseTwoReportAndProcessing({
             <span className="phase2-month-label">شهر الحفظ</span>
             <strong className="phase2-month-current">{monthLabel}</strong>
             {isSavingToDisk && (
-              <span className="phase2-save-msg" role="status">⏳ جاري الحفظ التلقائي...</span>
+              <span className="phase2-save-msg" role="status">
+                ⏳ {saveProgressPhase ? SAVE_PROGRESS_LABELS[saveProgressPhase] : "جاري الحفظ التلقائي..."}
+              </span>
             )}
             {saveToDiskMessage && !isSavingToDisk && (
               <span
