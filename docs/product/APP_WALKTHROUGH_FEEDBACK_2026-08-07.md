@@ -11,7 +11,34 @@ workspace JSON ≈ **319,165 KB (~312 MB)** — roughly **11× amplification**, 
 
 ## Status — what has shipped
 
-**v60.0 (2026-08-07)** fixed the P0 slice. See that entry in `docs/edit logs/2026-08-07.md`.
+**v60.0 → v63.0 (2026-08-07)**, all on branch `rework/p0-fixes`. Full detail per version in
+`docs/edit logs/2026-08-07.md`.
+
+### Measured on the owner's real data (Risk.xlsx + BI.xlsx → 8,000-event month)
+
+| | Before | After |
+|---|---|---|
+| Distribution save — filesystem ops | **192,063** | **78** |
+| Cold load (page reload) — ops | **32,023** | **30** |
+| Files on disk | **16,046** | **49** |
+| Workspace size | **384.9 MB** | **184 MB** |
+| `replacement-index` bucket | 137.7 MB | 15.4 MB |
+| Test suite | 1,619 | 1,667 |
+
+> Operation counts are faithful. **Absolute wall-clock is not a browser prediction** — the
+> benchmark uses `node:fs`, which has no equivalent of Chromium's `createWritable()` swap-file
+> pipeline. That pipeline is where the 3–6 hours actually went, and the op-count collapse is what
+> translates.
+
+### Still open
+
+| Item | Why |
+|---|---|
+| **W7 (CertScan ~30 vs ~30,000)** | Needs the owner's CertScan paste + port names. Code reading cannot resolve a data-shape mismatch |
+| **C6 backfill policy** | Product decision, not implementation. Recommendation: **under-fill and report** — silent substitution would misrepresent stratum composition in an audit context |
+| **R1 remainder** | Narrower than first reported: per-risk-level counts already existed. Gap is coarse manifest totals instead of the granular risk-vs-BI split already in `ProcessingSummary` |
+| **R4, R5** | Not started. R4 was correctly gated behind R1–R3 |
+| **W37** | Deferred by the owner: *"this is advanced stuff leave it for last thing"* |
 
 | Item | Status |
 |---|---|
