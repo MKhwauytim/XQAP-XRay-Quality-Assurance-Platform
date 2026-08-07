@@ -229,8 +229,8 @@ export function calculateExecutiveKPIs(
   const overallAccuracy = validStudied > 0 ? ((correctSuspicious + correctClean) / validStudied) * 100 : null;
 
   const expertSuspicious = correctSuspicious + missedSuspicious;
-  const suspiciousDetectionRate = expertSuspicious > 0 ? (correctSuspicious / expertSuspicious) * 100 : null;
-  const missedSuspicionRate = expertSuspicious > 0 ? (missedSuspicious / expertSuspicious) * 100 : null;
+  const suspiciousDetectionRateByImage = expertSuspicious > 0 ? (correctSuspicious / expertSuspicious) * 100 : null;
+  const missedSuspicionRateByImage = expertSuspicious > 0 ? (missedSuspicious / expertSuspicious) * 100 : null;
 
   const originalSuspicious = correctSuspicious + excessSuspicious;
   const suspicionPrecision = originalSuspicious > 0 ? (correctSuspicious / originalSuspicious) * 100 : null;
@@ -240,8 +240,8 @@ export function calculateExecutiveKPIs(
   const excessSuspicionRate = originalSuspicious > 0 ? (excessSuspicious / originalSuspicious) * 100 : null;
 
   const balancedQualityScore =
-    suspiciousDetectionRate !== null && cleanConfirmationRate !== null
-      ? (suspiciousDetectionRate + cleanConfirmationRate) / 2
+    suspiciousDetectionRateByImage !== null && cleanConfirmationRate !== null
+      ? (suspiciousDetectionRateByImage + cleanConfirmationRate) / 2
       : null;
 
   // Level accuracy
@@ -306,8 +306,8 @@ export function calculateExecutiveKPIs(
     cleanCount,
     suspicionRate,
     overallAccuracy,
-    suspiciousDetectionRate,
-    missedSuspicionRate,
+    suspiciousDetectionRateByImage,
+    missedSuspicionRateByImage,
     suspicionPrecision,
     cleanConfirmationRate,
     excessSuspicionRate,
@@ -364,9 +364,9 @@ export function generateNarrativeFindings(
   }
 
   // Quality risk
-  if (kpis.missedSuspicionRate !== null && kpis.missedSuspicionRate > config.maximumMissedSuspicionRate) {
+  if (kpis.missedSuspicionRateByImage !== null && kpis.missedSuspicionRateByImage > config.maximumMissedSuspicionRate) {
     findings.push(
-      `تجاوزت نسبة الاشتباه الفائت ${fmtPct(kpis.missedSuspicionRate)} الحد المقبول (${fmtPct(config.maximumMissedSuspicionRate)})، وهو مؤشر خطر يستوجب مراجعة الصور المصنفة سليمة والتحقق من دقتها.`
+      `تجاوزت نسبة الاشتباه الفائت ${fmtPct(kpis.missedSuspicionRateByImage)} الحد المقبول (${fmtPct(config.maximumMissedSuspicionRate)})، وهو مؤشر خطر يستوجب مراجعة الصور المصنفة سليمة والتحقق من دقتها.`
     );
   }
 

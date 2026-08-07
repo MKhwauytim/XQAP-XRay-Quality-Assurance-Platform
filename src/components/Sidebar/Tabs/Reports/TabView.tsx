@@ -2,7 +2,8 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type React
 import ReportDesignerTab from "../ReportDesigner";
 import { AlertTriangle, BarChart2, Building2, Check, ClipboardList, Database, Download, FileStack, FileText, Filter, FolderOpen, Globe, History, Presentation, Settings2, User, Users, X } from "lucide-react";
 
-import { loadOrDeriveDistributionCurrentForRead, loadDistributionCurrentRevision } from "../../../../data/distribution/distributionStorage";
+import { loadOrDeriveDistributionCurrentForRead, loadDistributionCurrentRevision, loadDistributionLog } from "../../../../data/distribution/distributionStorage";
+import { loadReplacementLog, loadReferralLog } from "../../../../data/referral/referralStorage";
 import { logRejection } from "../../../../data/storage/errorLogger";
 import { loadMonthPopulationFinal, loadMonthForEditing, loadMonthPopulationFinalRevision, loadMonthManifest } from "../../../../data/population/populationStorage";
 import { useGlobalMonth } from "../../../../data/month/useGlobalMonth";
@@ -462,9 +463,29 @@ function ReportsContent() {
           showToast("ok", "تم فتح التقرير التفصيلي. استخدم أمر الطباعة للحفظ بصيغة PDF.");
         }
       } else if (type === "management" || type === "management-xlsx" || type === "management-deck") {
-        const execInput = await loadExecInput();
-        if (!execInput) { showToast("error", labels.mgmt_card_toast_no_population); return; }
+        const baseInput = await loadExecInput();
+        if (!baseInput) { showToast("error", labels.mgmt_card_toast_no_population); return; }
         const names = buildDisplayNameMap();
+        // R3 (management report): the folded `distribution.current.json` only
+        // keeps the CURRENT status per image, so reassignment counts and
+        // replacement reasons are read separately here — from the raw event
+        // history (reassignment count) and the referral/replacement request
+        // stores (reasons persist there independently of the distribution
+        // fold, see `ExecutiveReportInput.replacementReasons`'s doc comment).
+        const [distLog, replacementLog, referralLog] = await Promise.all([
+          loadDistributionLog(directoryHandle, selectedMonth),
+          loadReplacementLog(directoryHandle, selectedMonth),
+          loadReferralLog(directoryHandle, selectedMonth),
+        ]);
+        const replacementReasons: Record<string, string> = {};
+        for (const r of replacementLog.requests) {
+          if (r.status === "approved") replacementReasons[r.originalXrayImageId] = r.reason;
+        }
+        for (const r of referralLog.requests) {
+          if (r.status !== "approved") continue;
+          for (const id of r.xrayImageIds) replacementReasons[id] ??= r.reason;
+        }
+        const execInput = { ...baseInput, distributionEvents: distLog.events, replacementReasons };
         if (type === "management-xlsx") {
           const { buildManagementWorkbook } = await import("../../../../data/reporting/management/managementWorkbook");
           buildManagementWorkbook(execInput, names);
@@ -475,7 +496,7 @@ function ReportsContent() {
           showToast("ok", "تم فتح عرض الإدارة. استخدم أمر الطباعة للحفظ بصيغة PDF.");
         } else {
           const { openManagementReport } = await import("../../../../data/reporting/management/managementReport");
-          openManagementReport(execInput, names);
+          await openManagementReport(execInput, names);
           showToast("ok", labels.mgmt_card_toast_opened);
         }
       }
@@ -612,10 +633,10 @@ function ReportsContent() {
 
     // Port accuracy ranked bar.
     const portBars = model.portAccuracy
-      .filter((p) => p.accuracy != null)
-      .sort((a, b) => (b.accuracy ?? 0) - (a.accuracy ?? 0))
+      .filter((p) => p.accuracyByDecision != null)
+      .sort((a, b) => (b.accuracyByDecision ?? 0) - (a.accuracyByDecision ?? 0))
       .slice(0, 8)
-      .map((p) => ({ label: p.key, value: Math.round(p.accuracy ?? 0) }));
+      .map((p) => ({ label: p.key, value: Math.round(p.accuracyByDecision ?? 0) }));
 
     // Outcome donut (error-mix).
     const t = model.errorAnalysis.totals;
@@ -779,8 +800,8 @@ function ReportsContent() {
                     <tr key={p.key}>
                       <td>{p.key}</td>
                       <td>{fmtCount(p.evaluable)}</td>
-                      <td>{fmtPct(p.accuracy)}</td>
-                      <td>{fmtPct(p.missedSuspicionRate)}</td>
+                      <td>{fmtPct(p.accuracyByDecision)}</td>
+                      <td>{fmtPct(p.missedSuspicionRateByDecision)}</td>
                       <td><span className={`rh-band-pill rh-band-${p.band}`}>{BAND_LABELS_AR[p.band]}</span></td>
                     </tr>
                   ))}

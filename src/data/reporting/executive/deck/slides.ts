@@ -236,8 +236,8 @@ export function verdictSlide(model: ReportModel, num: number, total: number): st
 
 // ── Slide 6 — Where we're strong / weak (ports) ────────────────────────────
 export function portsSlide(model: ReportModel, num: number, total: number): string {
-  const ports = [...model.portAccuracy].sort((a, b) => (b.accuracy ?? -1) - (a.accuracy ?? -1));
-  const rankable = ports.filter((p) => isRankable(p.band) && p.accuracy !== null);
+  const ports = [...model.portAccuracy].sort((a, b) => (b.accuracyByDecision ?? -1) - (a.accuracyByDecision ?? -1));
+  const rankable = ports.filter((p) => isRankable(p.band) && p.accuracyByDecision !== null);
   if (rankable.length === 0) {
     return slide({
       id: "slide-ports",
@@ -256,15 +256,15 @@ export function portsSlide(model: ReportModel, num: number, total: number): stri
   }
   const top = rankable.slice(0, 5);
   const bottom = rankable.slice(-5).reverse();
-  const bars = rankable.slice(0, 8).map((p) => ({ label: p.key, value: p.accuracy as number }));
+  const bars = rankable.slice(0, 8).map((p) => ({ label: p.key, value: p.accuracyByDecision as number }));
   const left = heroChart(rankedBar(bars, { width: 400 }), {
     caption: "ترتيب الدقة (المنافذ الكافية فقط)",
   });
   const right = miniTable({
     headers: ["المنفذ", "الدقة", "الفائت"],
     rows: [
-      ...top.slice(0, 3).map((p) => [p.key, fmtPct(p.accuracy), fmtPct(p.missedSuspicionRate)]),
-      ...bottom.slice(0, 2).map((p) => [p.key, fmtPct(p.accuracy), fmtPct(p.missedSuspicionRate)]),
+      ...top.slice(0, 3).map((p) => [p.key, fmtPct(p.accuracyByDecision), fmtPct(p.missedSuspicionRateByDecision)]),
+      ...bottom.slice(0, 2).map((p) => [p.key, fmtPct(p.accuracyByDecision), fmtPct(p.missedSuspicionRateByDecision)]),
     ],
   });
   return slide({

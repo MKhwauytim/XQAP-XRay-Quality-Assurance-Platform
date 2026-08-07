@@ -167,8 +167,8 @@ function kpiSheet(model: ReportModel): Cell[][] {
     ["نسبة الاشتباه%", pct(k.suspicionRate)],
     [],
     ["دقة نتيجة الصورة%", pct(k.overallAccuracy)],
-    ["قوة اكتشاف الاشتباه%", pct(k.suspiciousDetectionRate)],
-    ["اشتباه فائت%", pct(k.missedSuspicionRate)],
+    ["قوة اكتشاف الاشتباه%", pct(k.suspiciousDetectionRateByImage)],
+    ["اشتباه فائت%", pct(k.missedSuspicionRateByImage)],
     ["دقة الاشتباه (الخصوصية)%", pct(k.suspicionPrecision)],
     ["مؤشر الجودة المتوازن%", pct(k.balancedQualityScore)],
     ["دقة المستوى الأول%", pct(k.levelOneAccuracy)],
@@ -196,30 +196,57 @@ function kpiSheet(model: ReportModel): Cell[][] {
   ];
 }
 
+/**
+ * Population columns (المجتمع..إنجاز%) come from `model.population.byPort`
+ * (IMAGE grain — a population-scope description). دقة%/اكتشاف الاشتباه%/
+ * اشتباه فائت% and دقة م.أول%/دقة م.ثاني% come from `model.portAccuracy` and
+ * `model.portAccuracyByLevel` (DECISION grain) instead — they used to read
+ * `PortProfile.accuracyByImage`/`suspiciousDetectionRateByImage`/`missedSuspicionRateByImage`/
+ * `levelOneAccuracy`/`levelTwoAccuracy`, the image grain's OWN structurally
+ * different figures. That is precisely the bug this sheet used to ship: the
+ * SAME port could read "90% دقة" here and a different number on the
+ * document's/deck's port-accuracy pages in the SAME generation run (see the
+ * 2026-08-07 edit log's golden-master fixture). التصنيف (`status`) is
+ * unaffected by this change — `buildPortProfiles` already derives it from the
+ * decision grain internally (see `executiveKpiProfiles.ts`).
+ */
 function portSheet(model: ReportModel): Cell[][] {
+  const decisionByPort = new Map(model.portAccuracy.map((p) => [p.key, p]));
+  const levelByPort = new Map<string, { l1?: number | null; l2?: number | null }>();
+  for (const entry of model.portAccuracyByLevel) {
+    const cur = levelByPort.get(entry.portName) ?? {};
+    if (entry.level === "LEVEL_1") cur.l1 = entry.accuracyByDecisionLevel;
+    else cur.l2 = entry.accuracyByDecisionLevel;
+    levelByPort.set(entry.portName, cur);
+  }
+
   return [
     [
       "المنفذ", "المجتمع", "سليمة", "اشتباه", "نسبة الاشتباه%", "العينة", "التغطية%",
       "مدروسة", "إنجاز%", "دقة%", "اكتشاف الاشتباه%", "اشتباه فائت%",
       "دقة م.أول%", "دقة م.ثاني%", "التصنيف",
     ],
-    ...model.population.byPort.map((p) => [
-      text(p.portName),
-      p.population,
-      p.clean,
-      p.suspicious,
-      pct(p.suspicionRate),
-      p.sampleSize,
-      pct(p.coverage),
-      p.studied,
-      pct(p.completionRate),
-      pct(p.accuracy),
-      pct(p.suspiciousDetectionRate),
-      pct(p.missedSuspicionRate),
-      pct(p.levelOneAccuracy),
-      pct(p.levelTwoAccuracy),
-      text(p.status),
-    ]),
+    ...model.population.byPort.map((p) => {
+      const dec = decisionByPort.get(p.portName);
+      const lvl = levelByPort.get(p.portName);
+      return [
+        text(p.portName),
+        p.population,
+        p.clean,
+        p.suspicious,
+        pct(p.suspicionRate),
+        p.sampleSize,
+        pct(p.coverage),
+        p.studied,
+        pct(p.completionRate),
+        pct(dec?.accuracyByDecision ?? null),
+        pct(dec?.detectionRate ?? null),
+        pct(dec?.missedSuspicionRateByDecision ?? null),
+        pct(lvl?.l1 ?? null),
+        pct(lvl?.l2 ?? null),
+        text(p.status),
+      ];
+    }),
   ];
 }
 
@@ -266,8 +293,8 @@ function resultQualitySheet(model: ReportModel): Cell[][] {
   return [
     ["المؤشر", "القيمة"],
     ["دقة نتيجة الصورة%", pct(k.overallAccuracy)],
-    ["قوة اكتشاف الاشتباه%", pct(k.suspiciousDetectionRate)],
-    ["اشتباه فائت%", pct(k.missedSuspicionRate)],
+    ["قوة اكتشاف الاشتباه%", pct(k.suspiciousDetectionRateByImage)],
+    ["اشتباه فائت%", pct(k.missedSuspicionRateByImage)],
     ["دقة الاشتباه%", pct(k.suspicionPrecision)],
     ["اشتباه مكتشف", k.correctSuspicious],
     ["سليمة مؤكدة", k.correctClean],

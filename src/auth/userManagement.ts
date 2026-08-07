@@ -121,6 +121,11 @@ export const MANAGED_FEATURE_GROUPS: readonly FeatureGroup[] = [
         description: "طلب استبدال عينة من مجتمع الأشعة",
       },
       {
+        id: "bulk-reassign-referrals",
+        label: "إعادة تعيين العينات دفعة واحدة",
+        description: "تحديد عدة عينات — يدوياً أو حسب التصفية الحالية — وإعادة تعيينها لموظف آخر دفعة واحدة من قائمة الإحالات",
+      },
+      {
         id: "submit-answers",
         label: "تقديم إجابات الفحص",
         description: "ملء نموذج الفحص وتقديم الإجابات",
@@ -269,7 +274,7 @@ const ALL_FEATURE_IDS = MANAGED_FEATURE_GROUPS.flatMap((g) =>
 /** Maps each tab to the feature IDs that belong to it. */
 export const TAB_FEATURE_MAP: Readonly<Record<string, readonly string[]>> = {
   "population":         ["upload-data", "process-population", "configure-sample", "draw-sample", "distribute-samples", "bulk-assign", "view-browse", "unlock-sampling-stage"],
-  "employee-workspace": ["approve-referrals", "approve-replacements", "view-all-entries", "submit-referrals", "request-replacement", "submit-answers", "configure-referral-columns", "ew.reopenAnswer", "manage-inspection-template", "employee-reopen-instant"],
+  "employee-workspace": ["approve-referrals", "approve-replacements", "view-all-entries", "submit-referrals", "request-replacement", "bulk-reassign-referrals", "submit-answers", "configure-referral-columns", "ew.reopenAnswer", "manage-inspection-template", "employee-reopen-instant"],
   // post-notification is rendered on the ew/notifications top-level tab (NotificationManager),
   // never on employee-workspace -- cascading it against employee-workspace let can()/
   // getMutationCapability() authorize posting off employee-workspace's edit access even when
@@ -309,6 +314,7 @@ const FEATURE_DEFAULTS: Record<string, Partial<Record<AuthRole, boolean>>> = {
   "view-all-entries":     { guest: false, employee: false, supervisor: true,  manager: true  },
   "submit-referrals":     { guest: false, employee: true,  supervisor: true,  manager: false },
   "request-replacement":  { guest: false, employee: true,  supervisor: true,  manager: false },
+  "bulk-reassign-referrals": { guest: false, employee: false, supervisor: true, manager: true },
   "submit-answers":       { guest: false, employee: true,  supervisor: true,  manager: false },
   "configure-referral-columns": { guest: false, employee: false, supervisor: false, manager: true },
   "ew.reopenAnswer":      { guest: false, employee: false, supervisor: true,  manager: true  },

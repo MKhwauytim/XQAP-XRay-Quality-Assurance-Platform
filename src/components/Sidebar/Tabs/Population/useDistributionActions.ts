@@ -3,6 +3,7 @@ import { useState } from "react";
 import type { DirectoryHandleLike } from "../../../../data/storage/fileSystemAccess";
 import { formatMonthFolderName } from "../../../../data/population/monthFolder";
 import { updateMonthStatus } from "../../../../data/population/populationStorage";
+import { closeMonth, isMonthClosed, SYSTEM_AUTO_LOCK_ACTOR } from "../../../../data/population/monthLock";
 import {
   appendDistributionEvent,
   appendDistributionEvents,
@@ -82,6 +83,9 @@ export function useDistributionActions(params: {
   currentUsername: string;
   currentRole: string;
   onDistributionChanged: () => void;
+  /** Owner requirement: bumps the global-month lock-check tick so `isSelectedMonthClosed`
+   *  reflects an auto-lock immediately instead of waiting for the 30s TTL/next navigation. */
+  refreshGlobalMonths?: () => Promise<void>;
 }) {
   const {
     directoryHandle,
@@ -93,6 +97,7 @@ export function useDistributionActions(params: {
     currentUsername,
     currentRole,
     onDistributionChanged,
+    refreshGlobalMonths,
   } = params;
 
   const [distributionCurrent, setDistributionCurrent] =
@@ -132,7 +137,45 @@ export function useDistributionActions(params: {
     };
     setDistributionCurrent(current);
     await saveDistributionCurrent(directoryHandle, monthFolderName, current);
+    void autoLockWhenFullyDistributed(monthFolderName, current, sampleRows);
     onDistributionChanged();
+  }
+
+  /**
+   * Owner requirement (2026-08-07): "once for a month i finish uploading and
+   * distributing sample ... it get locked same as phase 3 in which it auto
+   * lock". Every sample row now carrying a distribution entry (assigned,
+   * regardless of completion status) is "distribution finished" in the
+   * owner's sense — mirrors Phase 3's own auto-advance-to-sampled pattern.
+   * Best-effort and idempotent: `closeMonth` no-ops on an already-closed
+   * month, so calling this on every refresh once fully distributed is safe.
+   * Stamps `SYSTEM_AUTO_LOCK_ACTOR` as `closedBy` so the UI can distinguish
+   * this from a person manually closing the month (Archive tab / this tab's
+   * own admin unlock affordance).
+   */
+  async function autoLockWhenFullyDistributed(
+    monthFolderName: string,
+    current: DistributionCurrentData,
+    sampleRows: SampleMasterData["rows"]
+  ): Promise<void> {
+    if (!directoryHandle) return;
+    if (sampleRows.length === 0 || current.entries.length < sampleRows.length) return;
+    try {
+      if (await isMonthClosed(directoryHandle, monthFolderName)) return;
+      const result = await closeMonth(
+        directoryHandle,
+        monthFolderName,
+        SYSTEM_AUTO_LOCK_ACTOR,
+        "إقفال تلقائي بعد اكتمال توزيع كل عناصر العينة."
+      );
+      if (result.ok) {
+        void refreshGlobalMonths?.();
+      } else {
+        logError("population:auto-lock-month", new Error(result.error));
+      }
+    } catch (error) {
+      logError("population:auto-lock-month", error);
+    }
   }
 
   async function handleAssign(

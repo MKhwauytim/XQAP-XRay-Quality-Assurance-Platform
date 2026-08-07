@@ -38,3 +38,19 @@ if (typeof HTMLElement !== "undefined") {
 afterEach(() => {
   queryClient.clear();
 });
+
+// Browser storage is module-global and survives across test FILES in a shared
+// worker, so one file's leftovers become the next file's hidden preconditions.
+// This bit more than it used to: the auth session moved from sessionStorage to
+// localStorage (owner-approved SEC-02 relaxation), and DataTable column presets
+// live in storage too -- a stale preset that hides a column makes a later
+// file's "click the checkbox, expect a dialog" test fail with a confusing
+// "unable to find role=dialog", far from the actual cause.
+//
+// Clearing both between tests makes every file start from the same known
+// empty state. A test that needs a specific stored value sets it in its own
+// setup, which is where that intent belongs anyway.
+afterEach(() => {
+  try { localStorage.clear(); } catch { /* storage unavailable in this env */ }
+  try { sessionStorage.clear(); } catch { /* storage unavailable in this env */ }
+});

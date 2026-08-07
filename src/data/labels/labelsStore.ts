@@ -179,6 +179,9 @@ export const DEFAULT_LABELS = {
   population_reprocess_confirm_title: "إعادة معالجة شهر يحتوي عينة",
   population_reprocess_confirm_message: "توجد عينة مسحوبة لهذا الشهر بالفعل. حفظ نتائج المعالجة الجديدة سيجعل العينة الحالية غير متطابقة مع المجتمع الجديد. هل تريد المتابعة والحفظ؟",
   population_reprocess_cancelled: "تم إلغاء الحفظ — بقيت بيانات الشهر السابقة دون تغيير.",
+  population_locked_summary_corrupt: "الشهر مُقفل والملخص المحفوظ لهذا الشهر تالف — لا يمكن عرض التقرير دون إعادة معالجة المجتمع بعد إعادة فتح الشهر.",
+  population_locked_summary_missing: "الشهر مُقفل ولا يوجد ملخص محفوظ لهذا الشهر (شهر أقدم من هذه الميزة) — لا يمكن عرض التقرير دون إعادة معالجة المجتمع بعد إعادة فتح الشهر.",
+  population_locked_report_notice: "الشهر مُقفل — هذا التقرير مبني على الملخص المحفوظ فقط، دون قراءة بيانات المجتمع الكاملة.",
 
   // Month close-out / lock (Tier-1 Item A)
   archive_close_month_btn:          "إقفال الشهر",
@@ -194,6 +197,9 @@ export const DEFAULT_LABELS = {
   archive_reopen_reason_placeholder: "سبب إعادة الفتح (إلزامي)",
   msg_month_closed_write_blocked:   "هذا الشهر مُقفل — لا يمكن حفظ أي تعديل. تواصل مع مدير النظام لإعادة فتحه.",
   msg_month_closed_banner:          "هذا الشهر مُقفل. البيانات للعرض فقط.",
+  msg_month_closed_note_auto_lock:  "— أُقفل تلقائياً بعد اكتمال توزيع العينة.",
+  msg_month_closed_note_closed_by:  "— أُقفل بواسطة {user}.",
+  archive_reopen_month_in_progress: "جاري إعادة الفتح...",
 
   // User deletion guard (Tier-1 Item B)
   um_delete_checking:            "جاري التحقق من تعيينات المستخدم...",

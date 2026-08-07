@@ -1,11 +1,20 @@
-import { expect, test } from "vitest";
+import { beforeEach, describe, expect, it, test } from "vitest";
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import type { EmployeeStageAllocation } from "../population/populationConfig";
 import type { ManagedLoginUser } from "../../auth/userManagement";
 import type { PasswordHashRecord } from "../../auth/passwordCrypto";
+import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import type { DistributionEntry } from "./distributionTypes";
-import { calculateBulkAssignment } from "./bulkAssignment";
-import { EVENT_SCHEMA_VERSION } from "./distributionLog";
+import { calculateBulkAssignment, executeBulkReassignment, planBulkReassignment } from "./bulkAssignment";
+import { EVENT_SCHEMA_VERSION, buildAssignEvent, buildCompletedEvent } from "./distributionLog";
+import { createMemoryDirectory } from "../storage/memoryDirectory";
+import { safeWriteJson } from "../storage/safeWrite";
+import { saveSampleMaster } from "../sampling/sampleStorage";
+import type { SampleMasterData } from "../sampling/sampleTypes";
+import { appendDistributionEvents, loadDistributionLog } from "./distributionStorage";
+import { getPopulationMonthDir } from "../workspace/workspacePaths";
+import type { MonthManifestData } from "../population/monthTypes";
+import { MonthClosedError, closeMonth, invalidateMonthLockCache } from "../population/monthLock";
 
 function makeUser(
   username: string,
@@ -283,4 +292,226 @@ test("calculateBulkAssignment stamps every generated event with the current even
   for (const event of result.events) {
     expect(event.eventSchemaVersion).toBe(EVENT_SCHEMA_VERSION);
   }
+});
+
+// ── planBulkReassignment / executeBulkReassignment ──────────────────────────
+// Oversight-role bulk reassignment: an already-distributed selection (manual
+// or "everything matching the current filter") moved to a single employee in
+// one action, through the same append-only distribution event log.
+
+describe("planBulkReassignment", () => {
+  it("categorizes every row: eligible, or skipped with the specific reason", () => {
+    const entries: DistributionEntry[] = [
+      makeEntry("img-pending", "pending", "emp1"),
+      makeEntry("img-completed", "completed", "emp1"),
+      makeEntry("img-replaced", "replaced", "emp1"),
+      makeEntry("img-already-target", "pending", "emp2"),
+    ];
+
+    const plan = planBulkReassignment(
+      entries,
+      ["img-pending", "img-completed", "img-replaced", "img-already-target", "img-missing"],
+      "emp2"
+    );
+
+    expect(plan.eligible).toEqual([{ xrayImageId: "img-pending", assignedTo: "emp1" }]);
+    expect(plan.skipped).toEqual(
+      expect.arrayContaining([
+        { xrayImageId: "img-completed", reason: "terminal-completed" },
+        { xrayImageId: "img-replaced", reason: "terminal-replaced" },
+        { xrayImageId: "img-already-target", reason: "already-assigned-to-target" },
+        { xrayImageId: "img-missing", reason: "not-found" },
+      ])
+    );
+    expect(plan.skipped).toHaveLength(4);
+  });
+
+  it("treats a replacement-requested row as still eligible for reassignment", () => {
+    const entries: DistributionEntry[] = [makeEntry("img-1", "replacement-requested", "emp1")];
+    const plan = planBulkReassignment(entries, ["img-1"], "emp2");
+    expect(plan.eligible).toEqual([{ xrayImageId: "img-1", assignedTo: "emp1" }]);
+    expect(plan.skipped).toHaveLength(0);
+  });
+});
+
+function makeSample(rows: PreparedPopulationRow[]): SampleMasterData {
+  return {
+    rngSeed: "seed",
+    totalRequested: rows.length,
+    totalActual: rows.length,
+    certScanRequested: 0,
+    nonCertScanRequested: 0,
+    certScanActual: 0,
+    nonCertScanActual: rows.length,
+    portAllocations: [],
+    stageAllocations: [],
+    drawnAt: new Date().toISOString(),
+    drawnBy: "admin",
+    rows,
+  };
+}
+
+const MONTH = "5-May-2026";
+
+async function makeRoot() {
+  return createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+}
+
+describe("executeBulkReassignment", () => {
+  beforeEach(() => {
+    invalidateMonthLockCache();
+  });
+
+  it("reassigns exactly the requested (eligible) rows and reports none skipped", async () => {
+    const root = await makeRoot();
+    const rows = [makeRow("A1", "SECOND_STAGE", "NonCertscan"), makeRow("A2", "SECOND_STAGE", "NonCertscan")];
+    await saveSampleMaster(root, MONTH, makeSample(rows));
+    await appendDistributionEvents(root, MONTH, [
+      buildAssignEvent({ xrayImageId: "A1", assignedTo: "emp1", eventBy: "admin" }),
+      buildAssignEvent({ xrayImageId: "A2", assignedTo: "emp1", eventBy: "admin" }),
+    ]);
+
+    const result = await executeBulkReassignment({
+      directoryHandle: root,
+      monthFolderName: MONTH,
+      xrayImageIds: ["A1", "A2"],
+      reassignedTo: "emp2",
+      eventBy: "sup1",
+      reason: "إعادة توزيع العمل",
+      sourceRequestId: "batch-1",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.appliedIds.sort()).toEqual(["A1", "A2"]);
+    expect(result.alreadyAppliedIds).toEqual([]);
+    expect(result.skipped).toEqual([]);
+
+    const log = await loadDistributionLog(root, MONTH);
+    const reassigns = log.events.filter((e) => e.eventType === "reassigned");
+    expect(reassigns).toHaveLength(2);
+    expect(reassigns.every((e) => e.reassignedTo === "emp2" && e.sourceRequestId === "batch-1")).toBe(true);
+  });
+
+  it("reassigns only the eligible subset of a mixed selection and reports the rest as skipped with reasons (partial-failure reporting)", async () => {
+    const root = await makeRoot();
+    const rows = [makeRow("A1", "SECOND_STAGE", "NonCertscan"), makeRow("A2", "SECOND_STAGE", "NonCertscan")];
+    await saveSampleMaster(root, MONTH, makeSample(rows));
+    await appendDistributionEvents(root, MONTH, [
+      buildAssignEvent({ xrayImageId: "A1", assignedTo: "emp1", eventBy: "admin" }),
+      buildAssignEvent({ xrayImageId: "A2", assignedTo: "emp1", eventBy: "admin" }),
+    ]);
+    // A1 is completed — terminal, must not be reassigned (would orphan its answer).
+    await appendDistributionEvents(root, MONTH, [
+      buildCompletedEvent({ xrayImageId: "A1", assignedTo: "emp1", eventBy: "emp1" }),
+    ]);
+
+    const result = await executeBulkReassignment({
+      directoryHandle: root,
+      monthFolderName: MONTH,
+      xrayImageIds: ["A1", "A2", "does-not-exist"],
+      reassignedTo: "emp2",
+      eventBy: "sup1",
+      sourceRequestId: "batch-2",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.appliedIds).toEqual(["A2"]);
+    expect(result.skipped).toEqual(
+      expect.arrayContaining([
+        { xrayImageId: "A1", reason: "terminal-completed" },
+        { xrayImageId: "does-not-exist", reason: "not-found" },
+      ])
+    );
+
+    const log = await loadDistributionLog(root, MONTH);
+    const reassigns = log.events.filter((e) => e.eventType === "reassigned");
+    expect(reassigns).toHaveLength(1);
+    expect(reassigns[0]!.xrayImageId).toBe("A2");
+  });
+
+  it("is idempotent on retry: a repeated call with the same sourceRequestId re-emits nothing for ids already durably reassigned", async () => {
+    const root = await makeRoot();
+    const rows = [makeRow("A1", "SECOND_STAGE", "NonCertscan"), makeRow("A2", "SECOND_STAGE", "NonCertscan")];
+    await saveSampleMaster(root, MONTH, makeSample(rows));
+    await appendDistributionEvents(root, MONTH, [
+      buildAssignEvent({ xrayImageId: "A1", assignedTo: "emp1", eventBy: "admin" }),
+      buildAssignEvent({ xrayImageId: "A2", assignedTo: "emp1", eventBy: "admin" }),
+    ]);
+
+    const first = await executeBulkReassignment({
+      directoryHandle: root,
+      monthFolderName: MONTH,
+      xrayImageIds: ["A1", "A2"],
+      reassignedTo: "emp2",
+      eventBy: "sup1",
+      sourceRequestId: "batch-retry",
+    });
+    expect(first.ok).toBe(true);
+    expect(first.appliedIds.sort()).toEqual(["A1", "A2"]);
+
+    const before = (await loadDistributionLog(root, MONTH)).events.length;
+
+    // Simulated retry after a UI-level failure/re-click — same batch id.
+    const second = await executeBulkReassignment({
+      directoryHandle: root,
+      monthFolderName: MONTH,
+      xrayImageIds: ["A1", "A2"],
+      reassignedTo: "emp2",
+      eventBy: "sup1",
+      sourceRequestId: "batch-retry",
+    });
+
+    expect(second.ok).toBe(true);
+    expect(second.appliedIds).toEqual([]);
+    expect(second.alreadyAppliedIds.sort()).toEqual(["A1", "A2"]);
+    // No new events written — replay guard recognized both ids as already applied.
+    expect((await loadDistributionLog(root, MONTH)).events).toHaveLength(before);
+  });
+
+  it("rejects with MonthClosedError and writes nothing when the month is closed (month-lock rejection)", async () => {
+    const root = await makeRoot();
+    const rows = [makeRow("A1", "SECOND_STAGE", "NonCertscan")];
+    await saveSampleMaster(root, MONTH, makeSample(rows));
+    await appendDistributionEvents(root, MONTH, [
+      buildAssignEvent({ xrayImageId: "A1", assignedTo: "emp1", eventBy: "admin" }),
+    ]);
+
+    const monthDir = await getPopulationMonthDir(root, MONTH, true);
+    const manifest: MonthManifestData = {
+      monthFolderName: MONTH, month: 5, year: 2026,
+      processedAt: new Date().toISOString(), processedBy: "admin",
+      riskFileName: null, biFileName: null, certScanUsed: false,
+      templateVersion: null, rngSeed: null, totalRawRows: 0, totalProcessedRows: 1,
+      status: "distributed",
+    };
+    await safeWriteJson(monthDir, "month.manifest.json", manifest);
+    await closeMonth(root, MONTH, "admin");
+
+    const before = (await loadDistributionLog(root, MONTH)).events.length;
+    await expect(
+      executeBulkReassignment({
+        directoryHandle: root,
+        monthFolderName: MONTH,
+        xrayImageIds: ["A1"],
+        reassignedTo: "emp2",
+        eventBy: "sup1",
+        sourceRequestId: "batch-closed",
+      })
+    ).rejects.toThrow(MonthClosedError);
+
+    expect((await loadDistributionLog(root, MONTH)).events).toHaveLength(before);
+  });
+
+  it("no-ops cleanly when xrayImageIds is empty", async () => {
+    const root = await makeRoot();
+    const result = await executeBulkReassignment({
+      directoryHandle: root,
+      monthFolderName: MONTH,
+      xrayImageIds: [],
+      reassignedTo: "emp2",
+      eventBy: "sup1",
+      sourceRequestId: "batch-empty",
+    });
+    expect(result).toEqual({ ok: true, appliedIds: [], alreadyAppliedIds: [], skipped: [] });
+  });
 });

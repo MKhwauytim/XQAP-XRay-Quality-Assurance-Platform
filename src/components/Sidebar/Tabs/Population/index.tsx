@@ -69,7 +69,9 @@ import {
 } from "../../../../data/population/populationConfig";
 
 import { getLabels } from "../../../../data/labels/labelsStore";
-import { MonthClosedError } from "../../../../data/population/monthLock";
+import { MonthClosedError, reopenMonth } from "../../../../data/population/monthLock";
+import type { MonthManifestData } from "../../../../data/population/monthTypes";
+import type { PopulationAggregateLoadResult } from "../../../../data/population/populationAggregate";
 import { appendWorkspaceAction } from "../../../../data/audit/actionLog";
 import { touchVisitedTabs } from "../../../../app/visitedTabs";
 
@@ -87,6 +89,7 @@ import {
 import { useMonthLoad, type LoadedMonthState } from "./useMonthLoad";
 import { useDistributionActions } from "./useDistributionActions";
 import {
+  ClosedMonthBanner,
   PopulationHeader,
   PopulationPhaseFooter,
   PopulationStatusBar,
@@ -193,6 +196,16 @@ export default function PopulationTab() {
     registerMonthChangeGuard,
     isSelectedMonthClosed,
   } = useGlobalMonth();
+  // Owner requirement (2026-08-07): the selected month's manifest + persisted
+  // aggregate, kept in sync with useMonthLoad's applyLoadedState below so the
+  // closed-month banner can distinguish a system auto-lock from a person
+  // manually closing the month, and so Phase 2's report can render a locked
+  // month from the aggregate alone (zero population.final.json/risk.raw.json/
+  // bi.raw.json reads).
+  const [selectedMonthManifest, setSelectedMonthManifest] = useState<MonthManifestData | null>(null);
+  const [populationLocked, setPopulationLocked] = useState(false);
+  const [populationAggregate, setPopulationAggregate] = useState<PopulationAggregateLoadResult | null>(null);
+  const [isUnlockingMonth, setIsUnlockingMonth] = useState(false);
   // Month close-out (Tier-1 Item A): a closed month is view-only — draw and
   // distribution capabilities are withdrawn regardless of role permissions.
   const selectedMonthClosed = isSelectedMonthClosed;
@@ -307,6 +320,9 @@ export default function PopulationTab() {
     setPopulationProcessingResult(loaded.population);
     setSampleDrawResult(loaded.sample);
     setDistributionCurrent(loaded.distribution);
+    setSelectedMonthManifest(loaded.manifest);
+    setPopulationLocked(loaded.populationLocked);
+    setPopulationAggregate(loaded.populationAggregate);
 
     if (loaded.phase) {
       setCurrentPhase(loaded.phase.current);
@@ -330,6 +346,9 @@ export default function PopulationTab() {
     setPopulationProcessingResult(null);
     setSampleDrawResult(null);
     setDistributionCurrent(null);
+    setSelectedMonthManifest(null);
+    setPopulationLocked(false);
+    setPopulationAggregate(null);
     setSaveToDiskMessage(null);
     setSampleSaveMessage(null);
     setDistributionMessage(null);
@@ -465,6 +484,7 @@ export default function PopulationTab() {
     currentUsername: sessionRef.current?.username ?? "unknown",
     currentRole: sessionRef.current?.role ?? "unknown",
     onDistributionChanged: () => setMonthRefreshKey((k) => k + 1),
+    refreshGlobalMonths: refreshMonths,
   });
 
   const [uploads, setUploads] = useState<Record<UploadKey, UploadState>>({
@@ -1114,6 +1134,25 @@ export default function PopulationTab() {
     }
   }
 
+  // Owner requirement: admin unlock affordance directly in this tab (the
+  // mechanism itself — reopenMonth — is unchanged; this only calls it).
+  async function handleUnlockMonth(): Promise<void> {
+    if (!directoryHandle || !canMutate("archive.closeMonth")) return;
+    const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
+    setIsUnlockingMonth(true);
+    try {
+      const result = await reopenMonth(directoryHandle, monthFolderName, sessionRef.current?.username ?? "unknown");
+      if (result.ok) {
+        await refreshMonths();
+        setMonthRefreshKey((k) => k + 1);
+      } else {
+        setProcessingMessage(result.error);
+      }
+    } finally {
+      setIsUnlockingMonth(false);
+    }
+  }
+
   async function moveToNextPhase(): Promise<void> {
     if (currentPhase === 1) {
       await processPhaseOneAndMoveNext();
@@ -1180,16 +1219,19 @@ export default function PopulationTab() {
         month={saveMonth}
         year={saveYear}
         population={populationProcessingResult}
+        populationAggregate={populationAggregate}
         sample={sampleDrawResult}
         distribution={distributionCurrent}
         biWorkbook={biWorkbookResult}
       />
-      {/* ── Closed-month banner (Tier-1 Item A) ── */}
-      {selectedMonthClosed ? (
-        <div className="upload-warning" role="status">
-          {getLabels().msg_month_closed_banner}
-        </div>
-      ) : null}
+      {/* ── Closed-month banner (Tier-1 Item A + owner's system/person-lock distinction) ── */}
+      <ClosedMonthBanner
+        visible={selectedMonthClosed}
+        manifest={selectedMonthManifest}
+        canUnlock={canMutate("archive.closeMonth")}
+        isUnlocking={isUnlockingMonth}
+        onUnlock={() => { void handleUnlockMonth(); }}
+      />
 
       {/* ── Horizontal Stepper ── */}
       <PopulationStepper
@@ -1238,6 +1280,8 @@ export default function PopulationTab() {
             orphanScan={orphanScan}
             canProcess={canProcessNow}
             canExport={canExportNow}
+            populationLocked={populationLocked}
+            populationAggregate={populationAggregate}
             onCertScanPasteTextChange={handleCertScanChange}
             onProcessPopulation={handleProcessPopulation}
             onExportPopulation={handleExportPopulation}

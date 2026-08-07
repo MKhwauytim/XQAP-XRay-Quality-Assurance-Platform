@@ -1,16 +1,30 @@
-import type { PopulationProcessingResult } from "../processing/populationProcessingTypes";
+import type { ProcessingSummary } from "../processing/populationProcessingTypes";
 import { formatNumber, formatPercentage } from "./helpers";
 import SummaryCard from "./SummaryCard";
 
+/** The handful of preview-row fields this component's table actually renders —
+ *  intentionally narrower than `PreparedPopulationRow` so both a live, freshly
+ *  processed result AND a locked month's persisted aggregate (which only ever
+ *  carries this stub, see `POPULATION_AGGREGATE_PREVIEW_FIELDS`) can feed it. */
+export type PopulationReportPreviewRow = {
+  xrayImageId: string;
+  sourceRowNumber: number;
+  portName: string | null;
+  stage: string | null;
+  xrayLevelOneResult: string;
+  xrayLevelTwoResult: string;
+  certScanStatus: string;
+};
+
 type PopulationProcessingReportProps = {
-  result: PopulationProcessingResult;
+  summary: ProcessingSummary;
+  previewRows: PopulationReportPreviewRow[];
 };
 
 export default function PopulationProcessingReport({
-  result
+  summary,
+  previewRows
 }: PopulationProcessingReportProps) {
-  const summary = result.summary;
-  const previewRows = result.preparedRows.slice(0, 10);
 
   const totalExcludedAfterProcessing =
     summary.duplicateRiskIdRows +

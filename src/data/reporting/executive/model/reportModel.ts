@@ -63,6 +63,10 @@ export type ReportModel = {
     replaced: number;
   };
   portAccuracy: Aggregates["byPort"];
+  /** Decision-per-level fold, keyed on (portName, decisionLevel) — see
+   *  `Aggregates.byPortAndLevel`'s doc comment. Single source for the deck2
+   *  level-accuracy page AND the executive workbook's per-level port columns. */
+  portAccuracyByLevel: Aggregates["byPortAndLevel"];
   imageQuality: {
     availabilityRate: number | null;
     markingRate: number | null;
@@ -233,8 +237,8 @@ export function buildReportModel(
       monthFolderName: input.monthFolderName,
       findings: generateNarrativeFindings(kpis, input.config),
       overallAccuracy: kpis.overallAccuracy,
-      detectionRate: kpis.suspiciousDetectionRate,
-      missedSuspicionRate: kpis.missedSuspicionRate,
+      detectionRate: kpis.suspiciousDetectionRateByImage,
+      missedSuspicionRate: kpis.missedSuspicionRateByImage,
       falseSuspicionRate: kpis.excessSuspicionRate,
       completionRate: kpis.completionRate,
     },
@@ -264,6 +268,7 @@ export function buildReportModel(
       replaced: dist?.totalReplaced ?? 0,
     },
     portAccuracy: aggregates.byPort,
+    portAccuracyByLevel: aggregates.byPortAndLevel,
     imageQuality: {
       availabilityRate: kpis.imageAvailabilityRate,
       markingRate: kpis.markingRate,

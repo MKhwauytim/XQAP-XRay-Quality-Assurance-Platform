@@ -23,8 +23,10 @@ import { saveSampleMaster } from "../../../../../data/sampling/sampleStorage";
 import type { SampleMasterData } from "../../../../../data/sampling/sampleTypes";
 import { safeWriteJson } from "../../../../../data/storage/safeWrite";
 import { getPopulationMonthDir, POPULATION_SUBFOLDERS } from "../../../../../data/workspace/workspacePaths";
-import { appendDistributionEvents } from "../../../../../data/distribution/distributionStorage";
-import { buildAssignEvent, buildReplacedEvent } from "../../../../../data/distribution/distributionLog";
+import { appendDistributionEvents, loadDistributionLog } from "../../../../../data/distribution/distributionStorage";
+import { buildAssignEvent, buildCompletedEvent, buildReplacedEvent } from "../../../../../data/distribution/distributionLog";
+import { closeMonth, invalidateMonthLockCache } from "../../../../../data/population/monthLock";
+import type { MonthManifestData } from "../../../../../data/population/monthTypes";
 import { upsertItemAnswer } from "../../../../../data/answers/answerStorage";
 import {
   appendReferralRequest,
@@ -681,5 +683,195 @@ describe("XrayReferrals boot-progress reporting (initial load only)", () => {
     await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
 
     expect(history.length).toBe(checkpoint);
+  });
+});
+
+// ── Bulk reassignment (oversight roles) ─────────────────────────────────────
+// The capability gap this feature closes: a supervisor/manager filtering their
+// queue to a category and reassigning all (or part) of it to another employee
+// in one action, instead of one row at a time. Covers: select-all-filtered vs
+// manual selection staying distinct, the reassignment going through the real
+// distribution event log, month-lock rejection, permission gating, and
+// partial-failure (skip) reporting.
+describe("XrayReferrals bulk reassignment (oversight roles)", () => {
+  beforeEach(() => {
+    invalidateMonthLockCache();
+  });
+
+  /** Two rows, both assigned (pending) to `assignee` — distinct ids so the
+   *  DataTable global search can filter down to just one of them. */
+  async function seedTwoAssignedSamples(root: DirectoryHandleLike, assignee: string): Promise<void> {
+    await saveSampleMaster(root, MONTH, makeSample([makeRow("IMG-1"), makeRow("IMG-2")]));
+    const result = await appendDistributionEvents(root, MONTH, [
+      buildAssignEvent({ xrayImageId: "IMG-1", assignedTo: assignee, eventBy: "admin" }),
+      buildAssignEvent({ xrayImageId: "IMG-2", assignedTo: assignee, eventBy: "admin" }),
+    ]);
+    if (!result.ok) throw new Error(`seed failed: ${result.error}`);
+  }
+
+  function supervisorWithBulkReassignDisabled() {
+    const base = createEmptyUserManagementState();
+    const featurePermissions: FeaturePermission[] = [
+      ...base.featurePermissions.filter(
+        (f) => !(f.role === "supervisor" && f.featureId === "bulk-reassign-referrals")
+      ),
+      { role: "supervisor", featureId: "bulk-reassign-referrals", enabled: false },
+    ];
+    return { ...base, featurePermissions };
+  }
+
+  it("shows per-row checkboxes and the bulk-reassign bar for an oversight role with the feature enabled (default)", async () => {
+    writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root");
+    await seedTwoAssignedSamples(root, "sup-1");
+
+    render(<XrayReferrals directoryHandle={root} />);
+
+    await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
+    expect(screen.getAllByText("IMG-2").length).toBeGreaterThan(0);
+
+    expect(screen.getAllByRole("checkbox").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText("0 محددة يدوياً")).toBeInTheDocument();
+    // filteredCount comes from DataTable's onFilteredRowsChange, which commits
+    // one tick after the rows themselves first render.
+    await waitFor(() => expect(screen.getByText(/2 مطابقة للتصفية\/البحث الحالي/)).toBeInTheDocument());
+  });
+
+  it("hides per-row checkboxes and the bulk-reassign bar when bulk-reassign-referrals is disabled for the role (render-boundary permission gating)", async () => {
+    writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(supervisorWithBulkReassignDisabled(), false);
+
+    const root = createMemoryDirectory("root");
+    await seedTwoAssignedSamples(root, "sup-1");
+
+    render(<XrayReferrals directoryHandle={root} />);
+
+    await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
+
+    expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
+    expect(screen.queryByText(/محددة يدوياً/)).not.toBeInTheDocument();
+  });
+
+  it("select-all-filtered stays distinct from a manual page selection and reassigns only the filtered subset (select-all-filtered vs select-page + the reassignment event path)", async () => {
+    writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root");
+    await seedTwoAssignedSamples(root, "sup-1");
+
+    render(<XrayReferrals directoryHandle={root} />);
+    await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
+
+    // Narrow the active filter to IMG-2 only.
+    const search = screen.getByPlaceholderText("بحث في جميع الأعمدة...");
+    fireEvent.change(search, { target: { value: "IMG-2" } });
+    await waitFor(() => expect(screen.getByText(/1 مطابقة للتصفية\/البحث الحالي/)).toBeInTheDocument());
+
+    // "تحديد الكل المطابق" must select exactly the filtered set (1), never both rows.
+    fireEvent.click(screen.getByRole("button", { name: "تحديد الكل المطابق" }));
+    await waitFor(() => expect(screen.getByText("1 محددة يدوياً")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "إعادة تعيين المحدد (1)" }));
+
+    const dialog = await waitFor(() => screen.getByRole("dialog"));
+    expect(within(dialog).getByText(/العينات المحددة يدوياً \(1\)/)).toBeInTheDocument();
+
+    fireEvent.change(within(dialog).getByLabelText(/الموظف المستلم/), { target: { value: "jalgahamdi" } });
+    await waitFor(() =>
+      expect(within(dialog).getByText(/سيتم إعادة تعيين 1 عينة إلى jalgahamdi/)).toBeInTheDocument()
+    );
+    fireEvent.click(within(dialog).getByLabelText(/أؤكد مراجعة الملخص/));
+    fireEvent.click(within(dialog).getByRole("button", { name: "تنفيذ إعادة التعيين" }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/تم إعادة تعيين 1 عينة إلى jalgahamdi/)).toBeInTheDocument()
+    );
+
+    const log = await loadDistributionLog(root, MONTH);
+    const reassigns = log.events.filter((e) => e.eventType === "reassigned");
+    expect(reassigns).toHaveLength(1);
+    expect(reassigns[0]!.xrayImageId).toBe("IMG-2");
+    expect(reassigns[0]!.reassignedTo).toBe("jalgahamdi");
+  });
+
+  it("reports skipped rows with their reason and only reassigns the eligible subset (partial-failure reporting)", async () => {
+    writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root");
+    await seedTwoAssignedSamples(root, "sup-1");
+    // IMG-1 is completed — terminal, must be excluded from the bulk reassignment.
+    const completedResult = await appendDistributionEvents(root, MONTH, [
+      buildCompletedEvent({ xrayImageId: "IMG-1", assignedTo: "sup-1", eventBy: "sup-1" }),
+    ]);
+    if (!completedResult.ok) throw new Error(`seed failed: ${completedResult.error}`);
+
+    render(<XrayReferrals directoryHandle={root} />);
+    await waitFor(() => expect(screen.getAllByText("IMG-2").length).toBeGreaterThan(0));
+
+    fireEvent.click(screen.getByRole("button", { name: /إعادة تعيين الكل المطابق للتصفية/ }));
+
+    const dialog = await waitFor(() => screen.getByRole("dialog"));
+    fireEvent.change(within(dialog).getByLabelText(/الموظف المستلم/), { target: { value: "jalgahamdi" } });
+
+    await waitFor(() =>
+      expect(within(dialog).getByText(/سيتم إعادة تعيين 1 عينة إلى jalgahamdi/)).toBeInTheDocument()
+    );
+    expect(within(dialog).getByText(/لن يتم تضمين 1 عينة/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/مكتملة — تحتاج إعادة فتح أولاً/)).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByLabelText(/أؤكد مراجعة الملخص/));
+    fireEvent.click(within(dialog).getByRole("button", { name: "تنفيذ إعادة التعيين" }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/تم إعادة تعيين 1 عينة إلى jalgahamdi — تم تخطي 1 عينة/)).toBeInTheDocument()
+    );
+
+    const log = await loadDistributionLog(root, MONTH);
+    const reassigns = log.events.filter((e) => e.eventType === "reassigned");
+    expect(reassigns).toHaveLength(1);
+    expect(reassigns[0]!.xrayImageId).toBe("IMG-2");
+  });
+
+  it("surfaces a closed month inside the modal instead of throwing, and writes nothing (month-lock rejection)", async () => {
+    writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root");
+    await seedTwoAssignedSamples(root, "sup-1");
+
+    const monthDir = await getPopulationMonthDir(root, MONTH, true);
+    const manifest: MonthManifestData = {
+      monthFolderName: MONTH, month: 5, year: 2026,
+      processedAt: new Date().toISOString(), processedBy: "admin",
+      riskFileName: null, biFileName: null, certScanUsed: false,
+      templateVersion: null, rngSeed: null, totalRawRows: 0, totalProcessedRows: 2,
+      status: "distributed",
+    };
+    await safeWriteJson(monthDir, "month.manifest.json", manifest);
+    await closeMonth(root, MONTH, "admin");
+
+    render(<XrayReferrals directoryHandle={root} />);
+    await waitFor(() => expect(screen.getAllByText("IMG-2").length).toBeGreaterThan(0));
+
+    fireEvent.click(screen.getByRole("button", { name: /إعادة تعيين الكل المطابق للتصفية/ }));
+    const dialog = await waitFor(() => screen.getByRole("dialog"));
+    fireEvent.change(within(dialog).getByLabelText(/الموظف المستلم/), { target: { value: "jalgahamdi" } });
+    await waitFor(() =>
+      expect(within(dialog).getByText(/سيتم إعادة تعيين 2 عينة إلى jalgahamdi/)).toBeInTheDocument()
+    );
+    fireEvent.click(within(dialog).getByLabelText(/أؤكد مراجعة الملخص/));
+    fireEvent.click(within(dialog).getByRole("button", { name: "تنفيذ إعادة التعيين" }));
+
+    await waitFor(() =>
+      expect(within(dialog).getByText(/هذا الشهر مُقفل/)).toBeInTheDocument()
+    );
+    // Modal stays open (safely retryable), not silently closed.
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    const log = await loadDistributionLog(root, MONTH);
+    expect(log.events.filter((e) => e.eventType === "reassigned")).toHaveLength(0);
   });
 });

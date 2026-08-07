@@ -66,12 +66,12 @@ export function buildErrorAnalysis(model: ReportModel, pageNo: string): string {
 export function buildPriorityActions(model: ReportModel, pageNo: string): string {
   const ports = model.portAccuracy
     .filter((p) => isRankable(p.band))
-    .sort((a, b) => (b.missedSuspicionRate ?? -1) - (a.missedSuspicionRate ?? -1));
+    .sort((a, b) => (b.missedSuspicionRateByDecision ?? -1) - (a.missedSuspicionRateByDecision ?? -1));
   const rows = ports.slice(0, 10).map((p) => [
     p.key,
-    fmtPct(p.missedSuspicionRate),
-    fmtPct(p.accuracy),
-    p.missedSuspicionRate !== null && p.missedSuspicionRate > 5 ? "إجراء فوري" : "متابعة",
+    fmtPct(p.missedSuspicionRateByDecision),
+    fmtPct(p.accuracyByDecision),
+    p.missedSuspicionRateByDecision !== null && p.missedSuspicionRateByDecision > 5 ? "إجراء فوري" : "متابعة",
   ]);
 
   const actionCards = model.actions
@@ -81,8 +81,8 @@ export function buildPriorityActions(model: ReportModel, pageNo: string): string
 
   const body = `${pageHeader({ iconName: "flag", eyebrow: "الجزء الخامس · الإجراءات", title: "الأولويات والإجراءات", subtitle: "ما يحتاج قرارًا من القيادة" })}
     ${kpiStrip([
-      kpi({ label: "منافذ تحتاج إجراء", value: fmtNum(ports.filter((p) => (p.missedSuspicionRate ?? 0) > 5).length), tone: "coral" }),
-      kpi({ label: "منافذ للمتابعة", value: fmtNum(ports.filter((p) => (p.missedSuspicionRate ?? 0) <= 5).length), tone: "blue" }),
+      kpi({ label: "منافذ تحتاج إجراء", value: fmtNum(ports.filter((p) => (p.missedSuspicionRateByDecision ?? 0) > 5).length), tone: "coral" }),
+      kpi({ label: "منافذ للمتابعة", value: fmtNum(ports.filter((p) => (p.missedSuspicionRateByDecision ?? 0) <= 5).length), tone: "blue" }),
       kpi({ label: "اشتباه فائت إجمالي", value: fmtNum(model.errorAnalysis.totals.missedSuspicion), tone: "gold" }),
     ], 3)}
     <div class="grid grid-2 page-fill" style="margin-top:14px">

@@ -70,6 +70,36 @@ describe("computeDistributionModel", () => {
     expect(m.completionRate).toBeNull();
     expect(m.employees).toEqual([]);
   });
+
+  it("groups entries by stage/level (section 1) and by port (section 2), each with a per-employee breakdown (R2)", () => {
+    const m = computeDistributionModel(data(), "6-June-2026", { u1: "أحمد", u2: "سارة" });
+
+    // All four fixture rows share the same `stage` ("المستوى الثاني"), so byStage collapses to one bucket.
+    expect(m.byStage).toHaveLength(1);
+    expect(m.byStage[0]!.key).toBe("المستوى الثاني");
+    expect(m.byStage[0]!.totalAssigned).toBe(4);
+    expect(m.byStage[0]!.totalCompleted).toBe(1);
+    expect(m.byStage[0]!.completionRate).toBeCloseTo(25, 5);
+    expect(m.byStage[0]!.employees.map((e) => e.username)).toEqual(["u1", "u2"]); // both took 2
+
+    // Two ports in the fixture ("منفذ أ": u1 x2, "منفذ ب": u2 x2).
+    expect(m.byPort.map((b) => b.key).sort()).toEqual(["منفذ أ", "منفذ ب"]);
+    const portA = m.byPort.find((b) => b.key === "منفذ أ")!;
+    expect(portA.totalAssigned).toBe(2);
+    expect(portA.employees).toEqual([
+      { username: "u1", displayName: "أحمد", assigned: 2, completed: 1, completionRate: 50 },
+    ]);
+    const portB = m.byPort.find((b) => b.key === "منفذ ب")!;
+    expect(portB.totalAssigned).toBe(2);
+    expect(portB.totalCompleted).toBe(0);
+    expect(portB.employees[0]!.username).toBe("u2");
+  });
+
+  it("byStage/byPort are empty arrays (not undefined) when nothing is assigned", () => {
+    const m = computeDistributionModel(makeDistribution([], { totalAssigned: 0 }), "6-June-2026");
+    expect(m.byStage).toEqual([]);
+    expect(m.byPort).toEqual([]);
+  });
 });
 
 describe("distribution renderers", () => {

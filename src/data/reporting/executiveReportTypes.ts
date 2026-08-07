@@ -4,6 +4,7 @@ import type { SampleMasterData } from "../sampling/sampleTypes";
 import type { DistributionCurrentData } from "../distribution/distributionTypes";
 import type { EmployeeAnswerFile } from "../answers/answerTypes";
 import type { TemplateSchema } from "../templates/templateTypes";
+import type { DistributionEvent } from "../distribution/distributionTypes";
 import type { SourceRevisions } from "./sourceRevisions";
 
 export type VerificationCategory =
@@ -75,11 +76,30 @@ export type PortProfile = {
   coverage: number;
   studied: number;
   completionRate: number;
-  accuracy: number | null;
-  suspiciousDetectionRate: number | null;
-  missedSuspicionRate: number | null;
-  levelOneAccuracy: number | null;
-  levelTwoAccuracy: number | null;
+  /** IMAGE grain (L1 ∨ L2 combined verdict, one tally per image) — a
+   *  population-scope description of "how accurate were the images at this
+   *  port", NOT a target/threshold figure. `status` below is derived from the
+   *  DECISION grain instead (`ReportModel.portAccuracy`), so this field is
+   *  never named `.accuracy` — see `KeyedAccuracy.accuracyByDecision`'s doc
+   *  comment (`executive/model/aggregates.ts`) for why the three port-accuracy
+   *  grains on `ReportModel` must never share a field name. */
+  accuracyByImage: number | null;
+  /** IMAGE grain — see the doc comment on `accuracyByImage` above (and
+   *  `KeyedAccuracy.accuracyByDecision`'s doc comment in `aggregates.ts`) for
+   *  why this cannot share a field name with the DECISION-grain figures
+   *  (`KeyedAccuracy.suspiciousDetectionRateByDecision` does not exist as a
+   *  named field — the decision grain's equivalent is `detectionRate` — but
+   *  `missedSuspicionRate` DOES collide across all three port-accuracy grains,
+   *  which is exactly the naming hazard this suffix closes). */
+  suspiciousDetectionRateByImage: number | null;
+  missedSuspicionRateByImage: number | null;
+  /** Decision-grain status (target/threshold compliance) — computed from
+   *  `ReportModel.portAccuracy` (decision-combined), NOT from this profile's
+   *  own `accuracyByImage`. See the 2026-08-07 edit log: the narrative
+   *  "priority ports" callout used to cite the image-grain figure while every
+   *  other target-facing page in the report cites the decision grain, so a
+   *  port could read "excellent" in the narrative while reading "below
+   *  target" on the port-comparison page for the exact same generation run. */
   status: "excellent" | "stable" | "monitor" | "priority" | "insufficient";
 };
 
@@ -110,8 +130,10 @@ export type ExecutiveKPIs = {
   cleanCount: number;
   suspicionRate: number;
   overallAccuracy: number | null;
-  suspiciousDetectionRate: number | null;
-  missedSuspicionRate: number | null;
+  /** IMAGE grain — see `PortProfile.suspiciousDetectionRateByImage`'s doc
+   *  comment for why the port-accuracy grains must never share a field name. */
+  suspiciousDetectionRateByImage: number | null;
+  missedSuspicionRateByImage: number | null;
   suspicionPrecision: number | null;
   cleanConfirmationRate: number | null;
   excessSuspicionRate: number | null;
@@ -224,4 +246,25 @@ export type ExecutiveReportInput = {
    * captured at load time. Optional — legacy callers omit it and the footer renders nothing.
    */
   sourceRevisions?: SourceRevisions;
+  /**
+   * Raw distribution event history for the month (R3, management report).
+   * `DistributionCurrentData.entries` is a folded snapshot — it keeps only the
+   * CURRENT status per image, so a value like "how many times was this image
+   * reassigned" is lost once folded. This is the compatibility-log projection
+   * (`distribution.log.json`, see `loadDistributionLog`) read purely for
+   * report-time counting; it is never re-folded into distribution state here.
+   * Optional — omitted callers (sample/distribution/executive reports) simply
+   * don't get reassignment counts.
+   */
+  distributionEvents?: DistributionEvent[];
+  /**
+   * xrayImageId → the reason recorded on its approved replacement/referral
+   * request (R3, management report: "replacement counts with reasons shown").
+   * Sourced from `ReplacementLog`/`ReferralLog` (`src/data/referral/`), which
+   * persist `reason` independently of the distribution event fold — the fold
+   * itself drops `DistributionEvent.notes`, so this is read from the original
+   * request records instead of the folded distribution snapshot. Optional —
+   * omitted callers show replaced images without a reason.
+   */
+  replacementReasons?: Record<string, string>;
 };

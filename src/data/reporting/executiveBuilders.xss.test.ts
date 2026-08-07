@@ -196,9 +196,9 @@ describe("buildExecutiveDeckV2 (deck2) — XSS escaping", () => {
 });
 
 describe("buildManagementReport (C2 management report) — XSS escaping", () => {
-  it("escapes injected port names and reviewer display names", () => {
+  it("escapes injected port names and reviewer display names", async () => {
     const { input, employeeDisplayNames } = makeMaliciousExecInput();
-    const html = buildManagementReport(input, employeeDisplayNames);
+    const html = await buildManagementReport(input, employeeDisplayNames);
     expect(findLiveInjection(html)).toBeNull();
     expect(html).toContain(XSS_MARKER);
     expect(html).toContain("&lt;script&gt;");

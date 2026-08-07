@@ -3,9 +3,11 @@ import type { BiWorkbookResult } from "../biData/biDataTypes";
 import type { PopulationProcessingResult } from "../processing/populationProcessingTypes";
 import type { OrphanScanResult } from "../../../../../data/integrity/orphanScan";
 import type { SafeWriteProgressPhase } from "../../../../../data/storage/safeWrite";
+import type { PopulationAggregateLoadResult } from "../../../../../data/population/populationAggregate";
+import { useLabels } from "../../../../../data/labels/useLabels";
 import DataAccuracyReport, { OrphanScanSection } from "./DataAccuracyReport";
 import PopulationProcessingReport from "./PopulationProcessingReport";
-import { AlertTriangle, Check, FolderOpen, X } from "lucide-react";
+import { AlertTriangle, Check, FolderOpen, Lock, X } from "lucide-react";
 import CertScanGrid from "./CertScanGrid";
 
 type SaveMessage = { type: "ok" | "error"; text: string } | null;
@@ -49,6 +51,12 @@ type PhaseTwoReportAndProcessingProps = {
    *  workspace so it is not gated on closed-month, matching handleExportPopulation's
    *  existing handler-side check). */
   canExport: boolean;
+  /** True once the month is locked (owner requirement) — population.final.json/
+   *  risk.raw.json/bi.raw.json were deliberately never re-read; the processing
+   *  report below renders from `populationAggregate` instead. */
+  populationLocked?: boolean;
+  /** The persisted aggregate for a locked month, or null while unlocked/not yet loaded. */
+  populationAggregate?: PopulationAggregateLoadResult | null;
   onCertScanPasteTextChange: (value: string) => void;
   onProcessPopulation: () => void;
   onExportPopulation: () => void;
@@ -72,24 +80,42 @@ export default function PhaseTwoReportAndProcessing({
   orphanScan = null,
   canProcess,
   canExport,
+  populationLocked = false,
+  populationAggregate = null,
   onCertScanPasteTextChange,
   onProcessPopulation,
   onExportPopulation,
   onExportPhaseReport,
 }: PhaseTwoReportAndProcessingProps) {
+  const labels = useLabels();
 
-  // Show placeholder only when there is absolutely nothing to display
-  if (!riskWorkbookResult && !populationProcessingResult) {
+  // Show placeholder only when there is absolutely nothing to display —
+  // a locked month with an aggregate loaded counts as "something to display".
+  if (!riskWorkbookResult && !populationProcessingResult && !(populationLocked && populationAggregate?.status === "ok")) {
     return (
       <section className="placeholder-phase">
         <h2>تقرير البيانات والمعالجة</h2>
-        <p>لم يتم تجهيز التقرير المصغر بعد.</p>
+        {populationLocked && populationAggregate && populationAggregate.status !== "ok" ? (
+          <div className="upload-warning" role="alert">
+            <Lock size={14} style={{ verticalAlign: "middle", marginInlineEnd: 4 }} />
+            {populationAggregate.status === "corrupt"
+              ? labels.population_locked_summary_corrupt
+              : labels.population_locked_summary_missing}
+          </div>
+        ) : (
+          <p>لم يتم تجهيز التقرير المصغر بعد.</p>
+        )}
       </section>
     );
   }
 
-  const loadedFromDisk = !riskWorkbookResult && populationProcessingResult !== null;
+  const loadedFromDisk = !riskWorkbookResult && (populationProcessingResult !== null || populationLocked);
   const hasBi = riskWorkbookResult !== null && biWorkbookResult !== null;
+  const reportData = populationProcessingResult
+    ? { summary: populationProcessingResult.summary, previewRows: populationProcessingResult.preparedRows.slice(0, 10) }
+    : populationLocked && populationAggregate?.status === "ok"
+      ? { summary: populationAggregate.aggregate.summary, previewRows: populationAggregate.aggregate.previewRows }
+      : null;
 
   return (
     <section className="report-processing-phase" aria-label="تقرير البيانات والمعالجة">
@@ -195,7 +221,7 @@ export default function PhaseTwoReportAndProcessing({
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                   <path d="M8 5v14l11-7z" />
                 </svg>
-                {populationProcessingResult ? "إعادة معالجة المجتمع" : "معالجة المجتمع"}
+                {reportData ? "إعادة معالجة المجتمع" : "معالجة المجتمع"}
               </>
             )}
           </button>
@@ -244,8 +270,16 @@ export default function PhaseTwoReportAndProcessing({
           </div>
         )}
 
-        {populationProcessingResult && !isProcessingPopulation ? (
-          <PopulationProcessingReport result={populationProcessingResult} />
+        {reportData && !isProcessingPopulation ? (
+          <>
+            {populationLocked && (
+              <div className="upload-warning" role="status">
+                <Lock size={13} style={{ verticalAlign: "middle", marginInlineEnd: 4 }} />
+                {labels.population_locked_report_notice}
+              </div>
+            )}
+            <PopulationProcessingReport summary={reportData.summary} previewRows={reportData.previewRows} />
+          </>
         ) : !isProcessingPopulation ? (
           <div className="processing-placeholder">
             <p>لم يتم تنفيذ معالجة المجتمع بعد.</p>

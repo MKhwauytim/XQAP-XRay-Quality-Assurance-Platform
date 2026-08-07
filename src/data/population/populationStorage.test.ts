@@ -12,6 +12,7 @@ import { buildAssignEvent } from "../distribution/distributionLog";
 import type { MonthManifestData, MonthRawData, PopulationFinalData, ProcessingSummaryData } from "./monthTypes";
 import type { SampleMasterData } from "../sampling/sampleTypes";
 import { getPopulationMonthDir, POPULATION_SUBFOLDERS } from "../workspace/workspacePaths";
+import { closeMonth } from "./monthLock";
 
 const baseParams = {
   month: 5,
@@ -278,6 +279,63 @@ test("MonthLoadScope: { raw: true } still honors the manifest-status gate (A1) -
   expect(data.biRawRows).toEqual([]);
   const readLog = getReadLog(dir);
   expect(readLog.some((path) => path.includes("raw.json"))).toBe(false);
+});
+
+// Owner requirement (2026-08-07): "إدارة بيانات الأشعة once data is processed
+// and finished ... it never load the population or raw it read the static the
+// final output ... since its already done and sit in stone" -- once a month is
+// LOCKED, loadMonthForEditing must perform ZERO reads of population.final.json/
+// risk.raw.json/bi.raw.json even when the caller's scope explicitly asks for
+// them, and must instead read the persisted aggregate.
+test("Locked month: { population: true, raw: true } reads manifest + aggregate only, never population/raw files", async () => {
+  const dir = createMemoryDirectory("root", { trackReads: true });
+  const summary: ProcessingSummaryData["summary"] = {
+    riskOriginalRows: 1, validRiskIdRows: 1, invalidRiskIdRows: 0, duplicateRiskIdRows: 0,
+    rowsAfterDeduplication: 1, removedInvalidResultRows: 0, finalPreparedPopulationRows: 1,
+    certScanRows: 0, nonCertScanRows: 1, certScanPercentage: 0, nonCertScanPercentage: 100,
+    biProvided: false, biMatchedRows: 0, biUnmatchedRows: 0, biMatchPercentage: 0,
+    totalBiFilledFields: 0, biFieldFillSummary: [],
+  };
+  await saveMonthRun({
+    directoryHandle: dir,
+    ...baseParams,
+    processingSummary: { removedRows: [], duplicateRows: [], invalidResultRows: [], summary },
+  });
+  const closeResult = await closeMonth(dir, "5-may-2026", "test-admin");
+  expect(closeResult.ok).toBe(true);
+  clearReadLog(dir); // discard setup's own writes/verify-reads
+
+  const data = await loadMonthForEditing(dir, "5-may-2026", { population: true, raw: true, summary: true });
+
+  expect(data.populationLocked).toBe(true);
+  expect(data.populationRows).toBeNull();
+  expect(data.riskRawRows).toEqual([]);
+  expect(data.biRawRows).toEqual([]);
+  expect(data.populationAggregate?.status).toBe("ok");
+  if (data.populationAggregate?.status === "ok") {
+    expect(data.populationAggregate.aggregate.summary.finalPreparedPopulationRows).toBe(1);
+  }
+
+  const readLog = getReadLog(dir);
+  expect(readLog.some((path) => path.includes("population.final.json"))).toBe(false);
+  expect(readLog.some((path) => path.includes("risk.raw.json") || path.includes("bi.raw.json"))).toBe(false);
+  expect(readLog.some((path) => path.includes("population.aggregate.json"))).toBe(true);
+});
+
+test("Locked month with no aggregate on disk (pre-feature month): populationAggregate reports 'missing', never falls back to reading rows", async () => {
+  const dir = createMemoryDirectory("root", { trackReads: true });
+  await saveMonthRun({ directoryHandle: dir, ...baseParams }); // no processingSummary -> no aggregate written
+  const closeResult = await closeMonth(dir, "5-may-2026", "test-admin");
+  expect(closeResult.ok).toBe(true);
+  clearReadLog(dir);
+
+  const data = await loadMonthForEditing(dir, "5-may-2026", { population: true });
+
+  expect(data.populationLocked).toBe(true);
+  expect(data.populationRows).toBeNull();
+  expect(data.populationAggregate?.status).toBe("missing");
+  const readLog = getReadLog(dir);
+  expect(readLog.some((path) => path.includes("population.final.json"))).toBe(false);
 });
 
 // Regression guard (2026-08-01 architect review, Phase A): corruption must stay

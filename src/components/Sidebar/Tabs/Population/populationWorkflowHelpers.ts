@@ -187,7 +187,13 @@ export function buildLoadedMonthState(data: MonthEditData) {
     population: reconstructedPopulation(data),
     sample: data.sampleData,
     distribution: data.distributionCurrent,
-    phase
+    phase,
+    manifest: data.manifest,
+    // Owner requirement: for a locked month, `population` above is always
+    // null (loadMonthForEditing deliberately skips the row read) — the tab
+    // renders from these two instead of falling back to any row read.
+    populationLocked: data.populationLocked,
+    populationAggregate: data.populationAggregate,
   };
 }
 

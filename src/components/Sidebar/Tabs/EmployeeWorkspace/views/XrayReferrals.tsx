@@ -27,6 +27,7 @@ import type { DistributionEntry } from "../../../../../data/distribution/distrib
 import {
   executeReplacement,
 } from "../../../../../data/distribution/replacement";
+import { executeBulkReassignment } from "../../../../../data/distribution/bulkAssignment";
 import { getReplacementCandidatesIndexed } from "../../../../../data/distribution/replacementCandidateLookup";
 import { loadMonthPopulationFinal } from "../../../../../data/population/populationStorage";
 import type { ReplacementIndexRow } from "../../../../../data/population/replacementIndexTypes";
@@ -78,6 +79,8 @@ import type { PreparedPopulationRow } from "../../../../../data/population/popul
 import {
   QueueToolbar,
   SelectionActionBar,
+  BulkReassignSelectionBar,
+  BulkReassignModal,
   SampleDetailPanel,
   ReferralRequestModal,
   StatusBadge,
@@ -122,9 +125,22 @@ export type ReplacementDialogState = {
   all: ReplacementIndexRow[];
 } | null;
 type ReferralModalState = {
-  /** IDs to transfer — either manually selected or from current filter. */
+  /** IDs to transfer. Always manually selected (single-row "reassign" action or
+   * the personal multi-select bar) — this flow has no "everything currently
+   * filtered" entry point, unlike BulkReassignModalState below. */
+  xrayImageIds: string[];
+} | null;
+
+// Exported so subComponents.tsx's BulkReassignModal can `import type` it back.
+export type BulkReassignModalState = {
+  /** IDs to reassign — either manually selected or every row currently
+   * matching the active filter/search (all pages, not just the visible one). */
   xrayImageIds: string[];
   source: "selected" | "filtered";
+  /** Idempotency key, stable across retries of the same confirm click so a
+   * partial-failure retry never re-emits reassignment events already durably
+   * written for this batch (see executeBulkReassignment's replay guard). */
+  sourceRequestId: string;
 } | null;
 
 // Task 6: rows with an outstanding referral/replacement request, or that were
@@ -193,6 +209,10 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   const canConfigureColumns = canMutate("configure-referral-columns");
   const canRequestReplacement = canMutate("request-replacement");
   const canSubmitReferrals = canMutate("submit-referrals");
+  // Oversight-only: select rows (manually or via the active filter) and reassign
+  // them to another employee in one action, going through the same distribution
+  // event log as every other mutation (see executeBulkReassignment).
+  const canBulkReassignReferrals = canMutate("bulk-reassign-referrals");
   const canSubmitAnswers = canMutate("submit-answers");
   const canReopenAnswer = canMutate("ew.reopenAnswer");
   // Batch B: when enabled for this role, the employee's self-service reopen request
@@ -227,6 +247,9 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [filteredTableEntries, setFilteredTableEntries] = useState<DistributionEntry[]>([]);
   const [referralModal, setReferralModal] = useState<ReferralModalState>(null);
+  const [bulkReassignModal, setBulkReassignModal] = useState<BulkReassignModalState>(null);
+  const [bulkReassignBusy, setBulkReassignBusy] = useState(false);
+  const [bulkReassignError, setBulkReassignError] = useState<string | null>(null);
 
   // Function declaration (hoisted) — safe to reference from the mount effect
   // below even though it appears earlier in source, with no TDZ/identity
@@ -291,6 +314,11 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     return m;
   }, [answers]);
 
+  // O(1) entry lookup by xrayImageId — built once per `entries` change instead
+  // of an `entries.find()` per selected id (was O(n×m): every id in a
+  // referral/bulk-reassign selection re-scanned the full entries array).
+  const entriesById = useMemo(() => new Map(entries.map((e) => [e.xrayImageId, e])), [entries]);
+
   /* eslint-disable react-hooks/preserve-manual-memoization -- React Compiler can't prove
      stageMappings/canSeeAll/answersMap/username are stable across renders (they come from
      useState/session/derived useMemo values that are safe in practice); these hooks keep
@@ -311,10 +339,12 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       }
       return col;
     });
-    // Checkbox column only for personal-scope users — oversight users have no referral actions.
-    // The accessor returns a stable empty string; actual checked state is read from
+    // Checkbox column: personal-scope users always get it (referral requests);
+    // oversight (canSeeAll) users get it only when permitted to bulk-reassign —
+    // otherwise they have no selection-driven action to take on it. The
+    // accessor returns a stable empty string; actual checked state is read from
     // selectedIds inside renderCell so this memo doesn't re-create on every checkbox tick.
-    if (canSeeAll) return mapped;
+    if (canSeeAll && !canBulkReassignReferrals) return mapped;
     const selectCol: DataTableCol<DistributionEntry> = {
       id: SELECT_COL_ID,
       label: "",
@@ -323,7 +353,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       accessor: () => "",
     };
     return [selectCol, ...mapped];
-  }, [baseColumns, stageMappings, canSeeAll, answersMap]);
+  }, [baseColumns, stageMappings, canSeeAll, canBulkReassignReferrals, answersMap]);
 
   const effectiveColConfig = useMemo(
     () => colPreset ?? loadLocalColConfig() ?? buildDefaultColConfig(columns),
@@ -840,6 +870,71 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     }
   }
 
+  // ── Bulk reassignment handler (oversight roles) ────────────────────────────
+
+  function openBulkReassignModal(xrayImageIds: string[], source: "selected" | "filtered"): void {
+    if (xrayImageIds.length === 0) return;
+    setBulkReassignError(null);
+    setBulkReassignModal({
+      xrayImageIds,
+      source,
+      sourceRequestId: `bulk-reassign-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    });
+  }
+
+  async function handleBulkReassignConfirm(toEmployee: string, reason: string): Promise<void> {
+    // Handler-boundary check — mirrors every other mutating handler in this
+    // file (render-boundary gating alone is not enough: the modal that calls
+    // this could in principle be reopened from stale state).
+    if (!canBulkReassignReferrals) {
+      setBulkReassignError("لا تملك صلاحية إعادة التعيين الجماعي، أو أن مساحة العمل للقراءة فقط.");
+      return;
+    }
+    if (!bulkReassignModal || !selMonth) return;
+    setBulkReassignBusy(true);
+    setBulkReassignError(null);
+    try {
+      const result = await executeBulkReassignment({
+        directoryHandle,
+        monthFolderName: selMonth,
+        xrayImageIds: bulkReassignModal.xrayImageIds,
+        reassignedTo: toEmployee,
+        eventBy: username,
+        reason: reason || undefined,
+        sourceRequestId: bulkReassignModal.sourceRequestId,
+      });
+      if (!result.ok) {
+        // Keep the modal open with the same sourceRequestId — a retry only
+        // re-emits whatever this attempt did not durably write (see
+        // executeBulkReassignment's replay guard), so re-clicking "confirm" is
+        // always safe.
+        setBulkReassignError(result.error ?? "حدث خطأ غير متوقع أثناء إعادة التعيين.");
+        return;
+      }
+      const appliedTotal = result.appliedIds.length + result.alreadyAppliedIds.length;
+      const skippedTotal = result.skipped.length;
+      setBulkReassignModal(null);
+      clearSelection();
+      setStatusMsg({
+        type: "ok",
+        text: skippedTotal > 0
+          ? `تم إعادة تعيين ${appliedTotal} عينة إلى ${toEmployee} — تم تخطي ${skippedTotal} عينة (راجع ملخص الحوار السابق لسبب كل حالة).`
+          : `تم إعادة تعيين ${appliedTotal} عينة إلى ${toEmployee}.`,
+      });
+      // Silent — follows an already-successful write, not a month/user change;
+      // must refresh the queue in place rather than flashing the loading state.
+      await loadData({ silent: true });
+    } catch (error) {
+      setBulkReassignError(
+        error instanceof MonthClosedError
+          ? getLabels().msg_month_closed_write_blocked
+          : error instanceof Error ? error.message : "خطأ غير معروف"
+      );
+    } finally {
+      setBulkReassignBusy(false);
+    }
+  }
+
   // ── Cell renderer ──────────────────────────────────────────────────────────
 
   function renderCell(
@@ -935,6 +1030,20 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       {loadState === "error"   && <p className="ew-empty">تعذر تحميل البيانات.</p>}
 
       {(loadState === "ready" || loadState === "idle") && (() => {
+        // True whenever the `columns` memo actually prepended the select-checkbox
+        // column (personal-scope users always; oversight users only when permitted
+        // to bulk-reassign — see the `columns` memo above).
+        const hasSelectColumn = columns[0]?.id === SELECT_COL_ID;
+        // Bug fix: SELECT_COL_ID is `alwaysVisible: true`, but DataTable's own
+        // default-column-config builder (used whenever no saved preset exists yet —
+        // i.e. every first-time user) only marks a column visible if its id is in
+        // `defaultVisible`; `alwaysVisible` only affects column ORDER, not whether
+        // it's filtered out of `visibleCols`. DEFAULT_VISIBLE never listed the select
+        // column, so on a fresh workspace the checkbox column was silently hidden for
+        // BOTH the personal referral-selection flow and this new oversight bulk-reassign
+        // flow until a user happened to open "الأعمدة" and turn it on manually — a real
+        // contributor to the reported "not able to do that" gap.
+        const defaultVisibleCols = hasSelectColumn ? [SELECT_COL_ID, ...DEFAULT_VISIBLE] : DEFAULT_VISIBLE;
         const selectableVisibleIds = filteredTableEntries
           .filter((e) => e.status !== "replaced")
           .map((e) => e.xrayImageId);
@@ -943,6 +1052,10 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           canSubmitReferrals &&
           entries.length > 0 &&
           selectedIds.size > 0;
+        const showBulkReassignBar =
+          canSeeAll &&
+          canBulkReassignReferrals &&
+          entries.length > 0;
         const tableEl = (
           <div className="ew-ref-queue">
             {showSelectionBar && (
@@ -951,9 +1064,19 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                 visibleCount={selectableVisibleIds.length}
                 onReferSelected={() => {
                   if (selectedIds.size === 0) return;
-                  setReferralModal({ xrayImageIds: [...selectedIds], source: "selected" });
+                  setReferralModal({ xrayImageIds: [...selectedIds] });
                 }}
                 onSelectVisible={() => selectAll(selectableVisibleIds)}
+                onClear={clearSelection}
+              />
+            )}
+            {showBulkReassignBar && (
+              <BulkReassignSelectionBar
+                selectedCount={selectedIds.size}
+                filteredCount={selectableVisibleIds.length}
+                onReassignSelected={() => openBulkReassignModal([...selectedIds], "selected")}
+                onReassignFiltered={() => openBulkReassignModal(selectableVisibleIds, "filtered")}
+                onSelectAllFiltered={() => selectAll(selectableVisibleIds)}
                 onClear={clearSelection}
               />
             )}
@@ -963,9 +1086,9 @@ export default function XrayReferrals({ directoryHandle }: Props) {
               getRowKey={(e) => e.xrayImageId}
               renderCell={renderCell}
               storageKey={COL_KEY}
-              defaultVisible={DEFAULT_VISIBLE}
+              defaultVisible={defaultVisibleCols}
               density="compact"
-              stickyColumnIds={canSeeAll ? ["xrayImageId", "answerStatus"] : [SELECT_COL_ID, "xrayImageId", "answerStatus"]}
+              stickyColumnIds={hasSelectColumn ? [SELECT_COL_ID, "xrayImageId", "answerStatus"] : ["xrayImageId", "answerStatus"]}
               isAdmin={canSeeAll}
               canConfigureColumns={canConfigureColumns}
               initialColConfig={colPreset}
@@ -1040,7 +1163,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                   }
                   onReassign={
                     canSubmitReferrals && selEntry.assignedTo === username && selEntry.status === "pending"
-                      ? (entry) => setReferralModal({ xrayImageIds: [entry.xrayImageId], source: "selected" })
+                      ? (entry) => setReferralModal({ xrayImageIds: [entry.xrayImageId] })
                       : undefined
                   }
                   onReopen={
@@ -1085,7 +1208,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         <ReferralRequestModal
           xrayImageIds={referralModal.xrayImageIds}
           entries={referralModal.xrayImageIds
-            .map((id) => entries.find((entry) => entry.xrayImageId === id))
+            .map((id) => entriesById.get(id))
             .filter((entry): entry is DistributionEntry => Boolean(entry))}
           visibleColumns={visiblePreviewColumns}
           dateFmt={effectiveColConfig.dateFmt}
@@ -1095,6 +1218,22 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           onSubmit={(toEmployee, reason) =>
             void handleReferralRequest(toEmployee, reason, referralModal.xrayImageIds)
           }
+        />
+      ) : null}
+
+      {bulkReassignModal ? (
+        <BulkReassignModal
+          state={bulkReassignModal}
+          entries={entries}
+          currentUser={username}
+          busy={bulkReassignBusy}
+          error={bulkReassignError}
+          onClose={() => {
+            if (bulkReassignBusy) return;
+            setBulkReassignModal(null);
+            setBulkReassignError(null);
+          }}
+          onConfirm={(toEmployee, reason) => { void handleBulkReassignConfirm(toEmployee, reason); }}
         />
       ) : null}
     </section>
