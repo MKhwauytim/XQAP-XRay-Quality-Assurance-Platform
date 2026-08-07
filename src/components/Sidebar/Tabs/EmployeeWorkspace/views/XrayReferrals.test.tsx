@@ -89,6 +89,11 @@ beforeEach(() => {
   // role=dialog" — nothing that points at the real cause. Establish the state
   // this file needs rather than inheriting whatever ran before it.
   setReadOnlyMode(false);
+  // `monthLock` memoises open/closed state in a module-level cache. Tests here
+  // close a month mid-file, so a cache entry left by a previous test makes the
+  // month-lock assertions depend on execution order. Clear it so each test sees
+  // the workspace it actually seeded.
+  invalidateMonthLockCache();
   // Default: graceful, non-throwing lookup — individual tests override with
   // mockRejectedValueOnce where the error path itself is under test.
   getReplacementCandidatesIndexedMock.mockReset().mockResolvedValue({ recommended: [], all: [] });

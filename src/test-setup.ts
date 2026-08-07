@@ -2,6 +2,7 @@ import { expect } from "vitest";
 import * as matchers from "@testing-library/jest-dom/matchers";
 import { afterEach } from "vitest";
 import { queryClient } from "./data/query/queryClient";
+import { configure } from "@testing-library/dom";
 
 expect.extend(matchers);
 
@@ -54,3 +55,15 @@ afterEach(() => {
   try { localStorage.clear(); } catch { /* storage unavailable in this env */ }
   try { sessionStorage.clear(); } catch { /* storage unavailable in this env */ }
 });
+
+// Testing Library's default async timeout is 1s. That is ample when a file runs
+// alone, but this suite runs ~199 files across parallel workers, and under that
+// CPU contention a legitimate re-render can take longer -- producing failures
+// that move between whichever timing-sensitive test happened to be unlucky
+// (observed at roughly 1 run in 3, in different files each time).
+//
+// The assertions themselves were correct and already used `waitFor`; only the
+// budget was too tight. Raising it removes the flake without weakening any
+// assertion -- a test that is genuinely broken still fails, it just gets a fair
+// chance to settle first.
+configure({ asyncUtilTimeout: 5000 });
