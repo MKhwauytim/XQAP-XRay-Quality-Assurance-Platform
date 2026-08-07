@@ -17,7 +17,7 @@ import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { ensureMonthWritable } from "../population/monthLock";
 import { getSampleMainDir } from "../workspace/workspacePaths";
-import type { SampleMasterData } from "./sampleTypes";
+import type { CertScanShortfall, SampleMasterData } from "./sampleTypes";
 
 const SAMPLING_PLAN_FILE = "sampling.plan.json";
 
@@ -134,6 +134,15 @@ export type SamplingPlan = {
    * readers must treat a missing field as "no advisory recorded".
    */
   priorMonthAdvisory?: SamplingPlanPriorMonthAdvisory;
+  /**
+   * CertScan shortfalls detected during this draw (owner decision, 2026-08): a
+   * stratum short on CertScan under-fills rather than silently backfilling from
+   * NonCertscan — this makes that under-fill self-describing on disk for an
+   * auditor reading the plan later, not just visible in the UI at draw time.
+   * Mirrors `SampleMasterData.certScanShortfalls`. Empty when none occurred;
+   * absent on plans written before this field existed.
+   */
+  certScanShortfalls?: CertScanShortfall[];
 };
 
 const DEFAULT_QUALITY_THRESHOLD_NOTE =
@@ -224,6 +233,7 @@ export function buildSamplingPlan(params: {
     ...(params.priorMonthAdvisory
       ? { priorMonthAdvisory: params.priorMonthAdvisory }
       : {}),
+    certScanShortfalls: sampleData.certScanShortfalls ?? [],
   };
 }
 

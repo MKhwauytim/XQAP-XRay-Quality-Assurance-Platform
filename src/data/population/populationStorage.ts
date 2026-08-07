@@ -21,7 +21,7 @@ import type {
   ProcessingSummaryData,
   SourceFileMetadata,
 } from "./monthTypes";
-import type { SampleMasterData } from "../sampling/sampleTypes";
+import type { CertScanShortfall, SampleMasterData } from "../sampling/sampleTypes";
 import type { DistributionCurrentData } from "../distribution/distributionTypes";
 import { loadOrDeriveDistributionCurrent } from "../distribution/distributionStorage";
 import { loadSampleMaster } from "../sampling/sampleStorage";
@@ -131,6 +131,15 @@ export type SamplingProof = {
   totalActual: number;
   certScanActual: number;
   nonCertScanActual: number;
+  /**
+   * CertScan shortfalls detected during the draw (owner decision, 2026-08): a
+   * stratum short on CertScan under-fills rather than silently backfilling from
+   * NonCertscan; this mirrors `SampleMasterData.certScanShortfalls` so the
+   * shortfall is self-describing in the proof document too, not only in the
+   * sample master / sampling plan. Optional — absent on proofs written before
+   * this field existed, and omitted by callers that don't pass it.
+   */
+  certScanShortfalls?: CertScanShortfall[];
 };
 
 export async function saveSamplingProof(

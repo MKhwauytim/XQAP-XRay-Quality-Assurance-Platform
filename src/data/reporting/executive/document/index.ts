@@ -31,6 +31,8 @@ import {
   buildExclusions,
   buildPriorityActions,
 } from "./partRisk";
+import { buildAccountabilitySection, buildCoverageSection } from "./partCoverageAccountability";
+import { buildEmployeeRowListingPages } from "./partEmployeeRows";
 import { yieldToMain } from "../../../storage/yieldToMain";
 
 function pad(n: number): string {
@@ -52,8 +54,13 @@ export async function buildDocumentSlides(model: ReportModel, issueDate: string)
     { title: "الجزء الثالث: التطابق", blurb: "هل تتفق الفرق الأخرى مع أحكام المستويين؟", pages: [] },
     { title: "الجزء الرابع: المساءلة", blurb: "من الأدق بين المفتشين، ومن يحتاج دعمًا؟", pages: [] },
     { title: "الجزء الخامس: المخاطر والإجراءات", blurb: "ما الأولويات، وما الإجراء المطلوب من الإدارة؟", pages: [] },
+    // R4 (owner requirement — the executive report is "the mix of تقرير العينة
+    // و تقرير التوزيع و تقرير الإدارة"): operational coverage (R2) + operational
+    // accountability (R3) + the R5 per-employee row listing, appended LAST so
+    // Parts 1-5's existing page numbers/content stay untouched.
+    { title: "الجزء السادس: التغطية والمساءلة التشغيلية", blurb: "من أنجز ماذا أين، ولمن الصفوف المفصّلة؟", pages: [] },
   ];
-  const [tocPart1, tocPart2, tocPart3, tocPart4, tocPart5] = toc;
+  const [tocPart1, tocPart2, tocPart3, tocPart4, tocPart5, tocPart6] = toc;
 
   // ── Front matter — TOC content is filled in at the end once real numbers are known ──
   pages.push(buildCover(model, issueDate));
@@ -175,7 +182,35 @@ export async function buildDocumentSlides(model: ReportModel, issueDate: string)
   await yieldToMain();
   pages.push(buildExclusions(model, pad(n))); tocPart5!.pages.push({ n: pad(n), t: "الاستبعادات" }); n += 1;
   await yieldToMain();
-  pages.push(buildAppendix(model, pad(n))); tocPart5!.pages.push({ n: pad(n), t: "المنهجية والملاحق" });
+  pages.push(buildAppendix(model, pad(n))); tocPart5!.pages.push({ n: pad(n), t: "المنهجية والملاحق" }); n += 1;
+  await yieldToMain();
+
+  // ── Part 6 — Coverage & Accountability (R4 composite + R5 row listing) ──
+  pages.push(divider({
+    id: "page-p6", dataTitle: "غلاف الجزء السادس", partLabel: "الجزء السادس", title: "التغطية والمساءلة التشغيلية",
+    subtitle: "توزيع الإنجاز حسب المستوى/المنفذ، تقدّم الموظفين والاستبدالات، وقوائم الصفوف لكل موظف.",
+    iconName: "flag", pageNo: pad(n), dividerNum: "6",
+    toc: [
+      { n: pad(n + 1), t: "التغطية التشغيلية" },
+      { n: pad(n + 2), t: "المساءلة التشغيلية" },
+      { n: pad(n + 3), t: "قوائم الصفوف لكل موظف" },
+    ],
+  }));
+  await yieldToMain();
+  n += 1;
+  pages.push(buildCoverageSection(model, pad(n))); tocPart6!.pages.push({ n: pad(n), t: "التغطية التشغيلية" }); n += 1;
+  await yieldToMain();
+  pages.push(buildAccountabilitySection(model, pad(n))); tocPart6!.pages.push({ n: pad(n), t: "المساءلة التشغيلية" }); n += 1;
+  await yieldToMain();
+  const empRowsStart = n;
+  const empRows = await buildEmployeeRowListingPages(model, n);
+  pages.push(...empRows.html);
+  n = empRows.nextPageNo;
+  const empRowsEnd = n - 1;
+  if (empRows.html.length > 0) {
+    const range = empRowsEnd > empRowsStart ? `${pad(empRowsStart)}–${pad(empRowsEnd)}` : pad(empRowsStart);
+    tocPart6!.pages.push({ n: range, t: "قوائم الصفوف لكل موظف" });
+  }
 
   pages[tocSlot] = buildToc(toc);
 

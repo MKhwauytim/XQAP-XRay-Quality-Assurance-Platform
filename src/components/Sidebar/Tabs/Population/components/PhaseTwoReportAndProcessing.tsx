@@ -9,6 +9,7 @@ import DataAccuracyReport, { OrphanScanSection } from "./DataAccuracyReport";
 import PopulationProcessingReport from "./PopulationProcessingReport";
 import { AlertTriangle, Check, FolderOpen, Lock, X } from "lucide-react";
 import CertScanGrid from "./CertScanGrid";
+import CertScanMatchPreviewPanel from "./CertScanMatchPreviewPanel";
 
 type SaveMessage = { type: "ok" | "error"; text: string } | null;
 
@@ -196,6 +197,13 @@ export default function PhaseTwoReportAndProcessing({
         </div>
 
         <CertScanGrid initialText={certScanPasteText || undefined} onDataChange={onCertScanPasteTextChange} />
+
+        {riskWorkbookResult && !loadedFromDisk && (
+          <CertScanMatchPreviewPanel
+            riskRows={riskWorkbookResult.rows}
+            certScanPasteText={certScanPasteText}
+          />
+        )}
 
         <div className="proc-action-panel">
           <button

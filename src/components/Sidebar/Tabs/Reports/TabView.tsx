@@ -389,7 +389,7 @@ function ReportsContent() {
     setGenerating(type);
     try {
       if (type === "sample" || type === "sample-xlsx" || type === "sample-deck") {
-        const { populationRows, sampleData, manifest } = await loadMonthForEditing(directoryHandle, selectedMonth);
+        const { populationRows, sampleData, manifest, processingSummary } = await loadMonthForEditing(directoryHandle, selectedMonth);
         if (!sampleData) { showToast("error", "لم يتم العثور على بيانات عينة لهذا الشهر."); return; }
         const [samplePopRev, sampleMasterRev] = await Promise.all([
           loadMonthPopulationFinalRevision(directoryHandle, selectedMonth),
@@ -400,6 +400,9 @@ function ReportsContent() {
           manifest,
           populationRows: (populationRows ?? []) as unknown as PreparedPopulationRow[],
           sample: sampleData,
+          // R1: granular Risk/BI before-after breakdown, already loaded by
+          // loadMonthForEditing's default scope — read verbatim, never recomputed.
+          processingSummary: processingSummary?.summary ?? null,
           sourceRevisions: collectRevisions([
             ["population.final.json", samplePopRev],
             ["sample.master.json", sampleMasterRev],

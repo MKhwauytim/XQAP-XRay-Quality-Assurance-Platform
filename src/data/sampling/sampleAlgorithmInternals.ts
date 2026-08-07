@@ -5,6 +5,7 @@ import type { StageAliasMappings, StageSamplingRule } from "../population/popula
 import { hamiltonApportionment } from "./apportionment";
 import { createRng, drawWithoutReplacement, hashSeedString } from "./rng";
 import type {
+  CertScanShortfall,
   PortAllocation,
   SampleConfig,
   SampleDrawResult,
@@ -41,6 +42,7 @@ type StageDraw = {
   rows: PreparedPopulationRow[];
   allocations: PortAllocation[];
   counters: DrawCounters;
+  shortfalls: CertScanShortfall[];
 };
 
 const STAGE_KEYS: StageKey[] = ["first", "second", "third", "fourth"];
@@ -211,8 +213,14 @@ export function drawLegacySample(
   const spillover = spillAndReconcile(groups, allocations, drawnRows, config.totalSampleSize, rng);
   counters.certActual += spillover.extraCert;
   counters.nonCertActual += spillover.extraNonCert;
+  // No shortfall detection needed here: legacyPortDraw's certScanQuota comes from
+  // a Hamilton split of {certRows.length, nonCertRows.length} whose total seats
+  // (`allocated`) can never exceed the sum of those two sizes, so the cert share
+  // can never be apportioned above certRows.length — unlike the stage path's
+  // `percentage`/`exact` methods, which set their CertScan target independently
+  // of what's actually available in that stratum.
   return successfulResult(config.rngSeed, username, algorithmVersion, config.totalSampleSize,
-    drawnRows, allocations, [], counters);
+    drawnRows, allocations, [], counters, []);
 }
 
 /**
@@ -228,6 +236,24 @@ export function configuredTarget(rule: StageSamplingRule, available: number): nu
     target = available < rule.minRequiredCount ? available : Math.max(target, rule.minRequiredCount);
   }
   return Math.min(target, available);
+}
+
+/**
+ * The CertScan target a stage's rule *would* request, before any availability
+ * cap is applied — mirrors the `target`/`certScanExactCount` values `drawStage`
+ * derives internally. Exported so Phase 3 can warn about a CertScan shortfall
+ * BEFORE the draw runs (owner decision, 2026-08): compare this against the
+ * stage's actual CertScan row count to estimate the same gap
+ * `detectStageCertShortfall`/`stagePortDraw` will report after the draw. This is
+ * a stage-level estimate only (the real draw further splits by port), so it can
+ * under-count a `percentage`-method shortfall that only appears once a specific
+ * port's quota is apportioned — it exists to catch the common case early, not to
+ * replace the authoritative post-draw `certScanShortfalls` on the result.
+ */
+export function certScanConfiguredTarget(rule: StageSamplingRule, effectiveTarget: number): number {
+  return rule.certScanMethod === "percentage"
+    ? Math.round((rule.certScanPercentage / 100) * effectiveTarget)
+    : rule.certScanExactCount;
 }
 
 function buildStagePlan(rows: PreparedPopulationRow[], config: StageConfig): StagePlan {
@@ -307,7 +333,7 @@ function stagePortDraw(
   groups: Map<string, PreparedPopulationRow[]>,
   rule: StageSamplingRule,
   rng: Rng
-): { allocation: PortAllocation; rows: PreparedPopulationRow[]; counters: DrawCounters } {
+): { allocation: PortAllocation; rows: PreparedPopulationRow[]; counters: DrawCounters; shortfall: CertScanShortfall | null } {
   const portRows = groups.get(portName)!;
   const certRows = portRows.filter((row) => row.certScanStatus === "Certscan");
   const nonCertRows = portRows.filter((row) => row.certScanStatus === "NonCertscan");
@@ -322,6 +348,20 @@ function stagePortDraw(
     nonCertScanQuota += certScanQuota - actualCertQuota;
   }
   const drawnNonCert = drawWithoutReplacement(nonCertRows, Math.min(nonCertScanQuota, nonCertRows.length), rng);
+  // Detection only (owner decision, 2026-08): certScanQuota can exceed certRows.length
+  // when the `percentage` method's per-port share of `allocated` outpaces that port's
+  // actual CertScan pool — the draw already under-fills correctly above (actualCertQuota
+  // caps it), this just records the gap instead of letting it pass silently.
+  const shortfall: CertScanShortfall | null = certScanQuota > certRows.length
+    ? {
+        stageKey: rule.stageKey,
+        stageLabel: STAGE_LABELS[rule.stageKey],
+        portName,
+        requestedCertScanQuota: certScanQuota,
+        actualCertScanDrawn: drawnCert.length,
+        availableCertScanRows: certRows.length
+      }
+    : null;
   return {
     rows: [...drawnCert, ...drawnNonCert],
     counters: {
@@ -341,7 +381,34 @@ function stagePortDraw(
       actualCertScanDrawn: drawnCert.length,
       actualNonCertScanDrawn: drawnNonCert.length,
       actualTotalDrawn: drawnCert.length + drawnNonCert.length
-    }
+    },
+    shortfall
+  };
+}
+
+/**
+ * Stage-wide CertScan shortfall check (detection only): an `exact` CertScan
+ * target is capped to the stage's whole CertScan pool by {@link exactCertTarget}
+ * *before* per-port apportionment runs, so no single port's request ever exceeds
+ * its own pool in that path — the shortfall, if any, only shows up here, at the
+ * stage total, not per-port. `percentage`-method shortfalls surface per-port
+ * instead (see `stagePortDraw`), since a port's request isn't known until its
+ * allocated quota is apportioned.
+ */
+function detectStageCertShortfall(
+  rule: StageSamplingRule,
+  stageRows: PreparedPopulationRow[]
+): CertScanShortfall | null {
+  if (rule.certScanMethod !== "exact" || rule.certScanExactCount <= 0) return null;
+  const availableCertScanRows = stageRows.filter((row) => row.certScanStatus === "Certscan").length;
+  if (rule.certScanExactCount <= availableCertScanRows) return null;
+  return {
+    stageKey: rule.stageKey,
+    stageLabel: STAGE_LABELS[rule.stageKey],
+    portName: null,
+    requestedCertScanQuota: rule.certScanExactCount,
+    actualCertScanDrawn: availableCertScanRows,
+    availableCertScanRows
   };
 }
 
@@ -355,16 +422,20 @@ function drawStage(stageRows: PreparedPopulationRow[], target: number, rule: Sta
   const rows: PreparedPopulationRow[] = [];
   const allocations: PortAllocation[] = [];
   const counters = emptyCounters();
+  const shortfalls: CertScanShortfall[] = [];
+  const stageShortfall = detectStageCertShortfall(rule, stageRows);
+  if (stageShortfall) shortfalls.push(stageShortfall);
   for (const entry of apportioned) {
     const draw = stagePortDraw(entry.key, entry.allocated, stageRows, portKeys, groups, rule, rng);
     rows.push(...draw.rows);
     allocations.push(draw.allocation);
     addCounters(counters, draw.counters);
+    if (draw.shortfall) shortfalls.push(draw.shortfall);
   }
   const spillover = spillAndReconcile(groups, allocations, rows, target, rng);
   counters.certActual += spillover.extraCert;
   counters.nonCertActual += spillover.extraNonCert;
-  return { rows, allocations, counters };
+  return { rows, allocations, counters, shortfalls };
 }
 
 function mergePortAllocations(target: Map<string, PortAllocation>, additions: PortAllocation[]): void {
@@ -406,7 +477,8 @@ function successfulResult(
   rows: PreparedPopulationRow[],
   portAllocations: PortAllocation[],
   stageAllocations: StageAllocation[],
-  counters: DrawCounters
+  counters: DrawCounters,
+  certScanShortfalls: CertScanShortfall[]
 ): SampleDrawResult {
   const data: SampleMasterData = {
     rngSeed,
@@ -419,6 +491,7 @@ function successfulResult(
     nonCertScanActual: counters.nonCertActual,
     portAllocations,
     stageAllocations,
+    certScanShortfalls,
     drawnAt: new Date().toISOString(),
     drawnBy: username,
     // B5 (disk-bloat fix): `handleDrawSample` can run this draw on the
@@ -455,6 +528,7 @@ export function drawStageSample(
   const portAllocations = new Map<string, PortAllocation>();
   const stageAllocations: StageAllocation[] = [];
   const counters = emptyCounters();
+  const certScanShortfalls: CertScanShortfall[] = [];
   let totalRequested = 0;
   for (const stageKey of STAGE_KEYS) {
     const stageRows = rows.filter((row) => plan.rowStageKeys.get(row.xrayImageId) === stageKey);
@@ -466,7 +540,8 @@ export function drawStageSample(
     addCounters(counters, draw.counters);
     stageAllocations.push(stageAllocation(stageKey, stageRows.length, target, draw.rows));
     mergePortAllocations(portAllocations, draw.allocations);
+    certScanShortfalls.push(...draw.shortfalls);
   }
   return successfulResult(config.rngSeed, username, algorithmVersion, totalRequested,
-    allRows, Array.from(portAllocations.values()), stageAllocations, counters);
+    allRows, Array.from(portAllocations.values()), stageAllocations, counters, certScanShortfalls);
 }

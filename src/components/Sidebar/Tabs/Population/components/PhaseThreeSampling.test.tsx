@@ -227,6 +227,12 @@ describe("PhaseThreeSampling — running total shown before the draw (B task 1)"
       method: "exact",
       value: 60,
       minRequiredCount: 50,
+      // All rows in this fixture are NonCertscan (see makeRow) — a nonzero
+      // certScanPercentage here would correctly trigger the (unrelated)
+      // CertScan-shortfall pre-draw warning and defeat this test's "no alert
+      // at all" assertion below. Zero it out to isolate the floor-override
+      // behaviour this test actually targets.
+      certScanPercentage: 0,
     });
     const rows = makeRows("SECOND", 100, "S");
     render(

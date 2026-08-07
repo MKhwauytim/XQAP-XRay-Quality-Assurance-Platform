@@ -606,6 +606,16 @@ export const DEFAULT_LABELS = {
   sampling_running_total_label:      "إجمالي العينة المتوقع (كل المستويات)",
   sampling_running_total_note:       "هذا الإجمالي يعكس القيم الفعلية بعد تطبيق أي حد أدنى، وليس القيم المُدخلة فقط.",
   sampling_floor_override_warning:   "تنبيه: {stage} — القيمة المُدخلة تُنتج {entered} سجلاً فقط، لكن تم رفعها إلى {effective} بسبب الحد الأدنى المطلوب ({minRequired}). هذا الفارق مُضاف إلى الإجمالي الكلي أدناه.",
+
+  // CertScan shortfall (Phase 3 pre-draw estimate + post-draw report). A stratum
+  // short on CertScan under-fills rather than silently substituting NonCertscan
+  // rows — these labels make that under-fill visible instead of invisible.
+  sampling_certscan_shortfall_predraw_title:  "تنبيه: نقص متوقع في سجلات CertScan",
+  sampling_certscan_shortfall_predraw_row:    "{stage}: مطلوب {requested} سجل CertScan لكن المتاح فعلياً {available} فقط — سيتم سحب {available} كحد أقصى ولن يُعوَّض النقص من سجلات عادية.",
+  sampling_certscan_shortfall_result_title:   "نقص في سجلات CertScan (لم يتم التعويض)",
+  sampling_certscan_shortfall_result_intro:   "الأعداد التالية أقل من المطلوب لأن عدد سجلات CertScan المتاحة كان غير كافٍ. لم يتم سحب سجلات عادية بدلاً منها للحفاظ على دقة تكوين العينة.",
+  sampling_certscan_shortfall_result_row_port:  "{stage} — ميناء {port}: المطلوب {requested}، المسحوب فعلياً {actual}، المتاح {available}.",
+  sampling_certscan_shortfall_result_row_stage: "{stage} (على مستوى المرحلة كاملة): المطلوب {requested}، المسحوب فعلياً {actual}، المتاح {available}.",
 } as const;
 
 export type LabelKey = keyof typeof DEFAULT_LABELS;

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as XLSX from "xlsx";
 
 import { computeSampleLineage, buildSampleDocument, buildSampleDeck, buildSampleXlsx, type SampleReportInput } from "./sampleReport";
-import { makeRow, makeManifest, makeSampleMaster } from "./reportTestFixtures";
+import { makeRow, makeManifest, makeSampleMaster, makeProcessingSummary } from "./reportTestFixtures";
 import { yieldToMain } from "../storage/yieldToMain";
 import type { PortAllocation } from "../sampling/sampleTypes";
 
@@ -78,6 +78,15 @@ describe("computeSampleLineage", () => {
     expect(m.fulfillment).toBeCloseTo((2 / 4) * 100, 5);
   });
 
+  it("carries the granular processing summary through verbatim, keyed null when omitted (R1)", () => {
+    const withoutSummary = computeSampleLineage(input());
+    expect(withoutSummary.processing).toBeNull();
+
+    const summary = makeProcessingSummary();
+    const withSummary = computeSampleLineage({ ...input(), processingSummary: summary });
+    expect(withSummary.processing).toBe(summary); // read verbatim, never recomputed
+  });
+
   it("returns null coverage when the processed denominator is empty", () => {
     const empty: SampleReportInput = {
       monthFolderName: "6-June-2026",
@@ -104,6 +113,31 @@ describe("sample renderers", () => {
     expect(html).toContain("class=\"slide");
     expect(html).toContain("seed-1");
     expect(html).toContain("يونيو 2026");
+  });
+
+  it("document lists every drawn row, not just a 60-row preview (R5)", async () => {
+    const rows = Array.from({ length: 90 }, (_, i) => makeRow(`IMG-${i + 1}`, "منفذ أ"));
+    const sample = makeSampleMaster(rows, { totalRequested: 90, totalActual: 90 });
+    const html = await buildSampleDocument({
+      monthFolderName: "6-June-2026", manifest: makeManifest({ totalRawRows: 90, totalProcessedRows: 90 }),
+      populationRows: rows, sample,
+    });
+    expect(html).toContain("IMG-1<");
+    expect(html).toContain("IMG-90<");
+  });
+
+  it("document renders separate Risk/BI processing pages plus the merged page when a processing summary is supplied (R1)", async () => {
+    const html = await buildSampleDocument({ ...input(), processingSummary: makeProcessingSummary() });
+    expect(html).toContain("قبل وبعد المعالجة — Risk");
+    expect(html).toContain("قبل وبعد المعالجة — BI");
+    expect(html).toContain("من الخام إلى المعالج (مُدمج)");
+    expect(html).toContain("declarationNumber");
+  });
+
+  it("document falls back to the coarse merged-only flow when no processing summary is supplied (R1 back-compat)", async () => {
+    const html = await buildSampleDocument(input());
+    expect(html).not.toContain("قبل وبعد المعالجة — Risk");
+    expect(html).not.toContain("قبل وبعد المعالجة — BI");
   });
 });
 

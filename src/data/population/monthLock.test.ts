@@ -267,7 +267,18 @@ describe("monthLock", () => {
     await closeMonth(root, MONTH, "admin");
 
     setReadOnlyMode(true);
-    await expect(ensureMonthWritable(root, MONTH)).resolves.toBeUndefined();
+    try {
+      await expect(ensureMonthWritable(root, MONTH)).resolves.toBeUndefined();
+    } finally {
+      // `readOnlyMode` is a MODULE-GLOBAL that outlives this file in a shared
+      // worker. Leaking it true makes every later test file run against a
+      // read-only workspace, so any component gated on `canMutate` silently
+      // stops rendering — and the failure surfaces somewhere unrelated (it
+      // showed up as "unable to find role=dialog" in XrayReferrals' bulk
+      // reassignment tests). Reset in `finally` so a failing assertion above
+      // still cannot poison the rest of the suite.
+      setReadOnlyMode(false);
+    }
   });
 
   // Delayed-verify regression coverage.

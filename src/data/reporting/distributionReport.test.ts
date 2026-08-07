@@ -110,6 +110,14 @@ describe("distribution renderers", () => {
     expect(html).toContain("تقرير التوزيع");
   });
 
+  it("full-detail table includes level and both level answers per row (R5)", async () => {
+    const html = await buildDistributionDocument(data(), "6-June-2026", { u1: "أحمد", u2: "سارة" });
+    expect(html).toContain("<th>المستوى</th>");
+    expect(html).toContain("<th>م.أول</th>");
+    expect(html).toContain("<th>م.ثاني</th>");
+    expect(html).toContain("المستوى الثاني"); // the fixture rows' stage value
+  });
+
   it("deck renders slides with the completion figure", async () => {
     const html = await buildDistributionDeck(data(), "6-June-2026");
     expect(html).toContain("class=\"slide");

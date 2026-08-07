@@ -1,8 +1,8 @@
 import type { NormalizedBiRow } from "../biData/biDataTypes";
 import type { NormalizedRiskRow } from "../riskData/riskDataTypes";
 import {
-  normalizeCertScanPortName,
-  normalizeCertScanXrayId,
+  buildCertScanPortIndex,
+  matchXrayIdAgainstPortEntries,
   parseCertScanPasteText
 } from "./certScanParser";
 import type {
@@ -197,7 +197,11 @@ function hasValue(value: unknown): boolean {
   return !isBlank(value);
 }
 
-function isValidXrayImageId(value: string | null): boolean {
+// Exported so the pre-processing CertScan match preview (certScanMatchPreview.ts)
+// can build the exact same candidate-row set (valid ID + first-seen dedup) that
+// processPopulation matches CertScan against — the preview would otherwise risk
+// drifting from real processing and reporting a misleading denominator.
+export function isValidXrayImageId(value: string | null): boolean {
   const normalizedId = normalizeXrayId(value);
 
   if (INVALID_ID_VALUES.has(normalizedId)) {
@@ -562,62 +566,19 @@ function enrichDraftRowFromBi(params: {
   };
 }
 
-function groupCertScanByPort(
-  entries: CertScanEntry[]
-): Map<string, CertScanEntry[]> {
-  const map = new Map<string, CertScanEntry[]>();
-
-  for (const entry of entries) {
-    const key = normalizeCertScanPortName(entry.portName);
-    const currentEntries = map.get(key) ?? [];
-
-    currentEntries.push(entry);
-    map.set(key, currentEntries);
-  }
-
-  return map;
-}
-
 function matchCertScan(params: {
   xrayImageId: string;
   portName: string | null;
-  certScanByPort: Map<string, CertScanEntry[]>;
+  entriesByPopulationPort: Map<string, CertScanEntry[]>;
 }): CertScanMatchResult {
-  const { xrayImageId, portName, certScanByPort } = params;
+  const { xrayImageId, portName, entriesByPopulationPort } = params;
 
-  const portKey = normalizeCertScanPortName(portName);
-  const entries = certScanByPort.get(portKey) ?? [];
+  const portKey = normalizeText(portName);
+  const entries = entriesByPopulationPort.get(portKey) ?? [];
 
-  if (entries.length === 0) {
-    return {
-      certScanStatus: "NonCertscan",
-      certScanSnippet: null,
-      originalCertScanSnippet: null
-    };
-  }
+  const snippetMatch = matchXrayIdAgainstPortEntries(xrayImageId, entries);
 
-  const cleanedXrayId = normalizeCertScanXrayId(xrayImageId);
-
-  const matchedSnippets: string[] = [];
-  const matchedOriginalSerials: string[] = [];
-
-  for (const entry of entries) {
-    const entryMatchedSnippets = entry.snippets.filter((snippet) =>
-      cleanedXrayId.includes(snippet)
-    );
-
-    if (entryMatchedSnippets.length > 0) {
-      matchedSnippets.push(...entryMatchedSnippets);
-      matchedOriginalSerials.push(entry.originalSystemSerialNumber);
-    }
-  }
-
-  const uniqueMatchedSnippets = Array.from(new Set(matchedSnippets));
-  const uniqueMatchedOriginalSerials = Array.from(
-    new Set(matchedOriginalSerials)
-  );
-
-  if (uniqueMatchedSnippets.length === 0) {
+  if (!snippetMatch.matched) {
     return {
       certScanStatus: "NonCertscan",
       certScanSnippet: null,
@@ -627,8 +588,8 @@ function matchCertScan(params: {
 
   return {
     certScanStatus: "Certscan",
-    certScanSnippet: uniqueMatchedSnippets.join(" | "),
-    originalCertScanSnippet: uniqueMatchedOriginalSerials.join(" | ")
+    certScanSnippet: snippetMatch.snippet,
+    originalCertScanSnippet: snippetMatch.originalSerial
   };
 }
 
@@ -658,7 +619,6 @@ export async function processPopulation(
   await yieldToMain();
 
   const certScanEntries = parseCertScanPasteText(certScanPasteText);
-  const certScanByPort = groupCertScanByPort(certScanEntries);
 
   onProgress?.("تحليل بيانات ذكاء الأعمال...", 10);
   await yieldToMain();
@@ -724,6 +684,15 @@ export async function processPopulation(
     }
   }
 
+  // Port index is built from the deduplicated population's own port names —
+  // not just the raw CertScan port list — so port-name alignment (and the
+  // exact/normalized/fuzzy tier disclosed for each) reflects the actual
+  // population being matched against, not just what happens to be in the paste.
+  const { entriesByPopulationPort: certScanByPort } = buildCertScanPortIndex(
+    certScanEntries,
+    deduplicatedRows.map((row) => row.portName)
+  );
+
   const preparedRows: PreparedPopulationRow[] = [];
 
   let biMatchedRows = 0;
@@ -776,7 +745,7 @@ export async function processPopulation(
       const certScanMatch = matchCertScan({
         xrayImageId: enrichment.row.xrayImageId,
         portName: enrichment.row.portName,
-        certScanByPort
+        entriesByPopulationPort: certScanByPort
       });
 
       if (certScanMatch.certScanStatus === "Certscan") {

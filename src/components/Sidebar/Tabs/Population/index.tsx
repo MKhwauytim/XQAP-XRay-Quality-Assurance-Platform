@@ -1120,6 +1120,7 @@ export default function PopulationTab() {
           totalActual: drawResult.data.totalActual,
           certScanActual: drawResult.data.certScanActual,
           nonCertScanActual: drawResult.data.nonCertScanActual,
+          certScanShortfalls: drawResult.data.certScanShortfalls ?? [],
         });
       }
     } catch (error) {

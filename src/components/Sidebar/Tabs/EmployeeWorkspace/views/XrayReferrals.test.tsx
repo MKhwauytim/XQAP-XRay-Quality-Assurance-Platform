@@ -46,6 +46,7 @@ import { saveTemplate } from "../../../../../data/templates/templateStorage";
 import { saveInspectionTemplateSelection } from "../../../../../data/templates/templateSelectionStorage";
 import type { TemplateSchema } from "../../../../../data/templates/templateTypes";
 import XrayReferrals from "./XrayReferrals";
+import { setReadOnlyMode } from "../../../../../data/storage/readOnlyMode";
 
 const MONTH = "5-may-2026";
 
@@ -82,6 +83,12 @@ class ResizeObserverStub {
 
 beforeEach(() => {
   vi.stubGlobal("ResizeObserver", ResizeObserverStub);
+  // `readOnlyMode` is a module-global that outlives a test file in a shared
+  // worker. If any earlier file leaves it true, every `canMutate`-gated control
+  // here silently stops rendering and the failure reads as "unable to find
+  // role=dialog" — nothing that points at the real cause. Establish the state
+  // this file needs rather than inheriting whatever ran before it.
+  setReadOnlyMode(false);
   // Default: graceful, non-throwing lookup — individual tests override with
   // mockRejectedValueOnce where the error path itself is under test.
   getReplacementCandidatesIndexedMock.mockReset().mockResolvedValue({ recommended: [], all: [] });
@@ -560,7 +567,7 @@ describe("XrayReferrals post-success reloads (Bug 1 regression)", () => {
     const replaceButton = await waitFor(() => screen.getByRole("button", { name: "استبدال العينة" }));
     fireEvent.click(replaceButton);
 
-    const dialog = await waitFor(() => screen.getByRole("dialog"));
+    const dialog = await waitFor(() => screen.getByRole("dialog"), { timeout: 5000 });
     fireEvent.change(within(dialog).getByLabelText(/سبب الاستبدال/), {
       target: { value: "صورة غير واضحة" },
     });
@@ -775,7 +782,7 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "إعادة تعيين المحدد (1)" }));
 
-    const dialog = await waitFor(() => screen.getByRole("dialog"));
+    const dialog = await waitFor(() => screen.getByRole("dialog"), { timeout: 5000 });
     expect(within(dialog).getByText(/العينات المحددة يدوياً \(1\)/)).toBeInTheDocument();
 
     fireEvent.change(within(dialog).getByLabelText(/الموظف المستلم/), { target: { value: "jalgahamdi" } });
@@ -813,7 +820,7 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /إعادة تعيين الكل المطابق للتصفية/ }));
 
-    const dialog = await waitFor(() => screen.getByRole("dialog"));
+    const dialog = await waitFor(() => screen.getByRole("dialog"), { timeout: 5000 });
     fireEvent.change(within(dialog).getByLabelText(/الموظف المستلم/), { target: { value: "jalgahamdi" } });
 
     await waitFor(() =>
@@ -857,7 +864,7 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
     await waitFor(() => expect(screen.getAllByText("IMG-2").length).toBeGreaterThan(0));
 
     fireEvent.click(screen.getByRole("button", { name: /إعادة تعيين الكل المطابق للتصفية/ }));
-    const dialog = await waitFor(() => screen.getByRole("dialog"));
+    const dialog = await waitFor(() => screen.getByRole("dialog"), { timeout: 5000 });
     fireEvent.change(within(dialog).getByLabelText(/الموظف المستلم/), { target: { value: "jalgahamdi" } });
     await waitFor(() =>
       expect(within(dialog).getByText(/سيتم إعادة تعيين 2 عينة إلى jalgahamdi/)).toBeInTheDocument()

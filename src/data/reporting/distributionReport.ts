@@ -309,8 +309,8 @@ async function distributionDocPages(m: DistributionModel, issueDate: string, det
     await yieldToMain();
   }
 
-  // Full detail (paginated).
-  const detailHeaders = ["رقم الأشعة", "الموظف", "المنفذ", "CertScan", "الحالة", "آخر حدث"];
+  // Full detail (paginated) — R5: level + both level answers, per employee row.
+  const detailHeaders = ["رقم الأشعة", "الموظف", "المنفذ", "المستوى", "CertScan", "م.أول", "م.ثاني", "الحالة", "آخر حدث"];
   const detailChunks = paginateRows({ headers: detailHeaders, rows: detailRows, rowsPerPage: 22 });
   for (let i = 0; i < detailChunks.length; i++) {
     const chunk = detailChunks[i];
@@ -455,10 +455,15 @@ async function distributionDeckSlides(m: DistributionModel): Promise<string> {
 
 // ─── Public string builders ───────────────────────────────────────────────────
 
+// R5 (2026-08-07 owner requirement — "port name level answers date etc per
+// employee"): the full-detail table already listed every row, but was
+// missing the risk level and both level results ("answers"). Added here
+// rather than recomputed — every field comes straight off `e.row`, the same
+// `PreparedPopulationRow` the sample/executive editions already read.
 function detailRowsFor(data: DistributionCurrentData, names: Record<string, string>): (string | number | null)[][] {
   return data.entries.map((e) => [
-    e.xrayImageId, names[e.assignedTo] ?? e.assignedTo, e.row.portName ?? "—",
-    e.row.certScanStatus, statusLabel(e.status), e.lastEventAt,
+    e.xrayImageId, names[e.assignedTo] ?? e.assignedTo, e.row.portName ?? "—", e.row.stage ?? "—",
+    e.row.certScanStatus, e.row.xrayLevelOneResult, e.row.xrayLevelTwoResult, statusLabel(e.status), e.lastEventAt,
   ]);
 }
 
