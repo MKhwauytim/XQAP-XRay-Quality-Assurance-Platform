@@ -264,6 +264,22 @@ export const MANAGED_FEATURE_GROUPS: readonly FeatureGroup[] = [
       },
     ],
   },
+  {
+    groupId: "adhoc-import",
+    label: "استيراد بيانات مخصص",
+    features: [
+      {
+        id: "adhoc-import.ingest",
+        label: "رفع ومعالجة ملف مخصص",
+        description: "رفع ملف إكسل مستقل خارج مسار معالجة المجتمع المعتاد ومطابقة أعمدته",
+      },
+      {
+        id: "adhoc-import.assign",
+        label: "تعيين صفوف مخصصة للموظفين",
+        description: "تعيين صفوف من ملف مستورد يدوياً لموظف عبر سجل التوزيع القياسي",
+      },
+    ],
+  },
 ] as const;
 
 // Flat list of all feature IDs — used internally for defaults/normalization
@@ -285,6 +301,7 @@ export const TAB_FEATURE_MAP: Readonly<Record<string, readonly string[]>> = {
   "reports":            ["export-reports", "report-designer.edit"],
   "archive":            ["archive.closeMonth", "archive.createBackup", "archive.restoreBackup"],
   "settings":           ["view-error-log", "edit-interface-labels"],
+  "adhoc-import":       ["adhoc-import.ingest", "adhoc-import.assign"],
 };
 
 /** Reverse lookup: feature ID → parent tab ID. */
@@ -339,6 +356,10 @@ const FEATURE_DEFAULTS: Record<string, Partial<Record<AuthRole, boolean>>> = {
   "report-designer.edit": { guest: false, employee: false, supervisor: false, manager: true },
   "view-error-log":       { guest: false, employee: false, supervisor: false, manager: false },
   "edit-interface-labels": { guest: false, employee: false, supervisor: false, manager: false },
+  // Admin-only feature by design (the tab itself is admin-only — see tabCatalog.ts);
+  // no non-admin role gets it by default, matching manage-users/reset-passwords above.
+  "adhoc-import.ingest":  { guest: false, employee: false, supervisor: false, manager: false },
+  "adhoc-import.assign":  { guest: false, employee: false, supervisor: false, manager: false },
 };
 
 // ── Default creators ──────────────────────────────────────────────────────────
@@ -353,6 +374,7 @@ export function createDefaultPermissions(): RolePermission[] {
     { role: "guest",      tabId: "archive",            access: "none" },
     { role: "guest",      tabId: "user-management",    access: "none" },
     { role: "guest",      tabId: "settings",           access: "none" },
+    { role: "guest",      tabId: "adhoc-import",       access: "none" },
     // Employee — no default access to population (was "view"; scoped down)
     { role: "employee",   tabId: "population",         access: "none" },
     { role: "employee",   tabId: "employee-workspace", access: "edit" },
@@ -361,6 +383,7 @@ export function createDefaultPermissions(): RolePermission[] {
     { role: "employee",   tabId: "archive",            access: "none" },
     { role: "employee",   tabId: "user-management",    access: "none" },
     { role: "employee",   tabId: "settings",           access: "none" },
+    { role: "employee",   tabId: "adhoc-import",       access: "none" },
     // Supervisor — population/reports/archive default to "none" (was "view"; scoped down)
     { role: "supervisor", tabId: "population",         access: "none" },
     { role: "supervisor", tabId: "employee-workspace", access: "edit" },
@@ -369,6 +392,7 @@ export function createDefaultPermissions(): RolePermission[] {
     { role: "supervisor", tabId: "archive",            access: "none" },
     { role: "supervisor", tabId: "user-management",    access: "none" },
     { role: "supervisor", tabId: "settings",           access: "none" },
+    { role: "supervisor", tabId: "adhoc-import",       access: "none" },
     // Manager — full access except user-management and archive (archive was
     // "edit"; scoped down) (admin-only by default)
     { role: "manager",    tabId: "population",         access: "edit" },
@@ -380,6 +404,10 @@ export function createDefaultPermissions(): RolePermission[] {
     // Settings is code-gated to guest + admin (see TAB_ROLE_CEILINGS); manager
     // has no access, so the shipped default is "none" to match reality.
     { role: "manager",    tabId: "settings",           access: "none" },
+    // Ad-hoc import (owner requirement, 2026-08) — admin-only page (see tabCatalog.ts's
+    // ADMIN_ONLY ceiling), so managers get no default access even though they otherwise
+    // have broad population/reports edit rights.
+    { role: "manager",    tabId: "adhoc-import",       access: "none" },
     // Admin (bootstrap) — always full, locked in normalizer
     { role: "admin",      tabId: "population",              access: "edit" },
     { role: "admin",      tabId: "employee-workspace",      access: "edit" },
@@ -397,6 +425,7 @@ export function createDefaultPermissions(): RolePermission[] {
     { role: "admin",      tabId: "user-management/activity",            access: "edit" },
     { role: "admin",      tabId: "user-management/actions",             access: "edit" },
     { role: "admin",      tabId: "settings",                access: "edit" },
+    { role: "admin",      tabId: "adhoc-import",            access: "edit" },
     // Manager — full access to EW sub-tabs except xray-referrals (was "edit"; scoped down)
     { role: "manager",    tabId: "ew/xray-referrals",       access: "none" },
     { role: "manager",    tabId: "ew/xray-results",         access: "edit" },

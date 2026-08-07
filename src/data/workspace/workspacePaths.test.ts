@@ -38,6 +38,7 @@ test("POPULATION_SUBFOLDERS, SAMPLE_SUBFOLDERS, SYSTEM_FOLDER_NAMES, REPORTS_SUB
     userPresets: "user-presets",
     feedback: "feedback",
     notifications: "notifications",
+    adhocImports: "adhoc-imports",
   });
   expect(REPORTS_SUBFOLDERS).toEqual({ designs: "designs" });
 });

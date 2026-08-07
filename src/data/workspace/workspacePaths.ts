@@ -28,6 +28,14 @@ export const SYSTEM_FOLDER_NAMES = {
   userPresets: "user-presets",
   feedback: "feedback",
   notifications: "notifications",
+  /**
+   * Ad-hoc population imports (owner requirement, 2026-08): admin-uploaded
+   * one-off Excel files reviewed/assigned outside the regular Population
+   * pipeline. Deliberately NOT under `1-population/{month}/` — that folder
+   * is reserved for the real monthly risk/BI ingest and month-lock/manifest
+   * machinery. See `src/data/adhocImport/`.
+   */
+  adhocImports: "adhoc-imports",
 } as const;
 
 export const REPORTS_SUBFOLDERS = {
@@ -143,6 +151,15 @@ export async function getTemplatesRoot(
   create = true
 ): Promise<DirectoryHandleLike> {
   return getRoot(directoryHandle, WORKSPACE_ROOTS.templates, LEGACY_WORKSPACE_ROOTS.templates, create);
+}
+
+/** `5-system/adhoc-imports/` — see `SYSTEM_FOLDER_NAMES.adhocImports`. */
+export async function getAdhocImportsDir(
+  directoryHandle: DirectoryHandleLike,
+  create = true
+): Promise<DirectoryHandleLike> {
+  const systemRoot = await getSystemRoot(directoryHandle, create);
+  return systemRoot.getDirectoryHandle(SYSTEM_FOLDER_NAMES.adhocImports, { create });
 }
 
 export function safeWorkspaceFilePart(value: string): string {

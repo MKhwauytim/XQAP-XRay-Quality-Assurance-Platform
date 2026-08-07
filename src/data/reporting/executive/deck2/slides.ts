@@ -61,6 +61,7 @@ import {
 } from "./slideKit";
 import type { BriefingRankItem, BriefingTone, CellTone, NavSectionKey, PortPopRow, SlideBuilder } from "./slideKit";
 import { sectionThreeBuilders } from "./section3";
+import { sectionFourBuilders } from "./section4";
 import { yieldToMain } from "../../../storage/yieldToMain";
 
 // The slide kit is the single source of truth for these two, but they were
@@ -3634,9 +3635,17 @@ export async function buildDeckV2Slides(
   // complete no-op: zero pages, zero TOC rows, page numbering unchanged.
   const sectionThree: SlideBuilder[] = sectionThreeBuilders(model, variantPreview);
 
+  // Section 4 — التغطية والمساءلة التشغيلية: R4 deck parity (2026-08-08),
+  // assembled entirely in section4/index.ts — same "assembled elsewhere,
+  // counted/numbered/TOC'd here" contract as section 3. Unlike section 3,
+  // this section's builder list is never empty (its pages render an honest
+  // empty state instead of being omitted when no distribution exists yet —
+  // see coverage.ts/accountability.ts), so its TOC row below is unconditional.
+  const sectionFour: SlideBuilder[] = sectionFourBuilders(model, variantPreview);
+
   // Page order: cover(1) · toc(2) · [month-in-numbers(3) — currently hidden,
   // see SHOW_MONTH_NUMBERS_SLIDE] · glossary(N) · section 1 · section 2 ·
-  // section 3 · closing(last).
+  // section 3 · section 4 · closing(last).
   const summaryPageCount = SHOW_MONTH_NUMBERS_SLIDE ? 1 : 0;
   const total =
     2 +
@@ -3645,6 +3654,7 @@ export async function buildDeckV2Slides(
     sectionOne.length +
     sectionTwo.length +
     sectionThree.length +
+    sectionFour.length +
     1; // +cover+toc(+summary), +closing
   const glossaryStart = 3 + summaryPageCount;
   const glossaryEnd = glossaryStart - 1 + glossaryBuilders.length;
@@ -3654,6 +3664,8 @@ export async function buildDeckV2Slides(
   const sectionTwoEnd = sectionTwoStart + sectionTwo.length - 1;
   const sectionThreeStart = sectionTwoEnd + 1;
   const sectionThreeEnd = sectionThreeStart + sectionThree.length - 1;
+  const sectionFourStart = sectionThreeEnd + 1;
+  const sectionFourEnd = sectionFourStart + sectionFour.length - 1;
   const closingNum = total;
 
   const accuracyFig =
@@ -3722,6 +3734,20 @@ export async function buildDeckV2Slides(
           },
         ]
       : []),
+    // Unconditional (unlike section 3's row above): section 4's builder list
+    // is never empty — see the `sectionFour` declaration's doc comment.
+    {
+      title: "القسم الرابع — التغطية والمساءلة التشغيلية",
+      goal: "من وُزِّعت عليه العيّنة، ومدى إنجازه، وأسباب الاستبدال، وعدد إعادة التعيين.",
+      range:
+        sectionFourEnd > sectionFourStart
+          ? `${pad(sectionFourStart)}–${pad(sectionFourEnd)}`
+          : pad(sectionFourStart),
+      iconName: "layers",
+      tone: "blue",
+      figure: fmtNum(sectionFour.length),
+      figureLabel: "صفحة",
+    },
   ];
 
   const slides: string[] = [
@@ -3750,6 +3776,11 @@ export async function buildDeckV2Slides(
     await yieldToMain();
   }
   for (const build of sectionThree) {
+    slides.push(build(num, total));
+    num += 1;
+    await yieldToMain();
+  }
+  for (const build of sectionFour) {
     slides.push(build(num, total));
     num += 1;
     await yieldToMain();

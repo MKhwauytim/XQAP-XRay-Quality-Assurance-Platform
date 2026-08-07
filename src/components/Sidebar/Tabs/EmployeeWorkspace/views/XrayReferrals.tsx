@@ -39,6 +39,10 @@ import {
 import { loadEmployeeSampleMirror } from "../../../../../data/samples/sampleMirrorStorage";
 import type { SampleMasterData } from "../../../../../data/sampling/sampleTypes";
 import {
+  loadAdhocEntriesForEmployeeView,
+  type AdhocDistributionEntry,
+} from "../../../../../data/adhocImport/adhocImportEmployeeView";
+import {
   loadTemplate,
   loadTemplateIndex,
 } from "../../../../../data/templates/templateStorage";
@@ -195,7 +199,14 @@ function referralsBootSources(username: string, canSeeAll: boolean): BootSourceD
       ? []
       : [{ key: "referrals_sample_mirror", labelEn: `${username}.samples.json`, labelAr: "نسخة عيناتي" }]),
     { key: "referrals_answers", labelEn: `${username}.answers.json`, labelAr: "إجاباتي" },
+    { key: "referrals_adhoc", labelEn: "adhoc-imports.index.json", labelAr: "الاستيرادات اليدوية" },
   ];
+}
+
+/** True for a row assigned through an ad-hoc import rather than the real
+ *  monthly sampling pipeline — see `adhocImportEmployeeView.ts`. */
+function isAdhocEntry(entry: DistributionEntry): entry is AdhocDistributionEntry {
+  return typeof (entry as AdhocDistributionEntry).adhocImportId === "string";
 }
 
 export default function XrayReferrals({ directoryHandle }: Props) {
@@ -466,17 +477,26 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       // Load sample.master first — its rows are the only ones needed for the
       // distribution derivation. population.final.json is NOT loaded here;
       // it is loaded lazily only when the replacement dialog opens.
-      const [sample, referralLog, replacementLog] = await Promise.all([
+      const [sample, referralLog, replacementLog, adhocEntries] = await Promise.all([
         loadSampleMaster(directoryHandle, selMonth),
         loadReferralLog(directoryHandle, selMonth),
         loadReplacementLog(directoryHandle, selMonth),
+        // THE GAP fix: ad-hoc-imported assignments live in a synthetic
+        // `2-samples/adhoc-{importId}/` folder, never the selected month's own
+        // sample.master.json — merged in here so an employee can see them
+        // alongside their real assignments. Degrades to [] on any failure; see
+        // adhocImportEmployeeView.ts's docblock for the cost bound.
+        loadAdhocEntriesForEmployeeView(directoryHandle, username, canSeeAll).catch((err) => {
+          logError("xrayReferrals:loadAdhocEntries", err);
+          return [];
+        }),
       ]);
       const sampleRows = (sample?.rows ?? []) as PreparedPopulationRow[];
       const dist = await loadOrDeriveDistributionCurrentForRead(directoryHandle, selMonth, sampleRows);
       const personalMirror = canSeeAll
         ? null
         : await loadEmployeeSampleMirror(directoryHandle, selMonth, username);
-      const all = dist?.entries ?? personalMirror?.entries ?? [];
+      const all = [...(dist?.entries ?? personalMirror?.entries ?? []), ...adhocEntries];
 
       const pendingReferralIds = canSeeAll ? new Set<string>() : getPendingReferralIds(referralLog, username);
       const pendingReplacementIds = canSeeAll ? new Set<string>() : getPendingReplacementIds(replacementLog, username);
@@ -843,7 +863,15 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       setStatusMsg({ type: "error", text: "لا تملك صلاحية تقديم الإحالات، أو أن مساحة العمل للقراءة فقط." });
       return;
     }
-    if (!selMonth || xrayImageIds.length === 0) return;
+    if (!selMonth) return;
+    if (xrayImageIds.length === 0) {
+      // A click must never be a silent no-op: the referral modal can in
+      // principle be confirmed after its underlying selection emptied out
+      // from under it (e.g. a background refresh dropped the selected rows).
+      setReferralModal(null);
+      setStatusMsg({ type: "error", text: "لم يتبقَّ أي عينة محددة لإحالتها — تم إلغاء الطلب." });
+      return;
+    }
     const request: ReferralRequest = {
       requestId: `ref-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       monthFolderName: selMonth,
@@ -873,7 +901,20 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   // ── Bulk reassignment handler (oversight roles) ────────────────────────────
 
   function openBulkReassignModal(xrayImageIds: string[], source: "selected" | "filtered"): void {
-    if (xrayImageIds.length === 0) return;
+    if (xrayImageIds.length === 0) {
+      // A click must never be a silent no-op — both bulk-reassign buttons are
+      // already `disabled` when their respective count is 0, but this guard
+      // stays as defense-in-depth against a state race (e.g. the underlying
+      // selection/filtered set emptying out between render and click), so it
+      // must explain itself instead of doing nothing.
+      setStatusMsg({
+        type: "error",
+        text: source === "selected"
+          ? "لا توجد عينات محددة يدوياً لإعادة تعيينها."
+          : "لا توجد عينات مطابقة للتصفية/البحث الحالي لإعادة تعيينها.",
+      });
+      return;
+    }
     setBulkReassignError(null);
     setBulkReassignModal({
       xrayImageIds,
@@ -956,7 +997,16 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       );
     }
     if (col.id === "xrayImageId") {
-      return <span className="dt-mono">{entry.xrayImageId}</span>;
+      return (
+        <span className="dt-mono ew-xray-id-cell">
+          {entry.xrayImageId}
+          {isAdhocEntry(entry) && (
+            <span className="ew-adhoc-badge" title={`${L.badge_adhoc_import_title}: ${entry.adhocFileName}`}>
+              {L.badge_adhoc_import}
+            </span>
+          )}
+        </span>
+      );
     }
     if (col.id === "answerStatus") {
       const answer = answersMap.get(`${entry.xrayImageId}::${entry.assignedTo}`);
@@ -1063,7 +1113,13 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                 selectedCount={selectedIds.size}
                 visibleCount={selectableVisibleIds.length}
                 onReferSelected={() => {
-                  if (selectedIds.size === 0) return;
+                  // Defense-in-depth: the button is already `disabled` when
+                  // selectedIds is empty, but a click must never be a silent
+                  // no-op if it's somehow reached anyway.
+                  if (selectedIds.size === 0) {
+                    setStatusMsg({ type: "error", text: "لا توجد عينات محددة يدوياً لإحالتها." });
+                    return;
+                  }
                   setReferralModal({ xrayImageIds: [...selectedIds] });
                 }}
                 onSelectVisible={() => selectAll(selectableVisibleIds)}

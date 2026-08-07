@@ -47,6 +47,11 @@ import { saveInspectionTemplateSelection } from "../../../../../data/templates/t
 import type { TemplateSchema } from "../../../../../data/templates/templateTypes";
 import XrayReferrals from "./XrayReferrals";
 import { setReadOnlyMode } from "../../../../../data/storage/readOnlyMode";
+import { ensureAdhocSampleMaster, assignAdhocRowsToEmployee } from "../../../../../data/adhocImport/adhocImportAssignment";
+import type { AdhocImportRecord, AdhocImportRow } from "../../../../../data/adhocImport/adhocImportTypes";
+import { adhocMonthFolderName } from "../../../../../data/adhocImport/adhocImportTypes";
+import { getSampleMainDir } from "../../../../../data/workspace/workspacePaths";
+import type { NormalizedRiskRow } from "../../Population/riskData/riskDataTypes";
 
 const MONTH = "5-may-2026";
 
@@ -625,6 +630,7 @@ describe("XrayReferrals boot-progress reporting (initial load only)", () => {
       "referrals_distribution",
       "referrals_sample_mirror",
       "referrals_answers",
+      "referrals_adhoc",
     ]);
     expect(result.current.entries.every((entry) => entry.status === "loaded")).toBe(true);
     // Real on-disk file names, not a "{username}" placeholder pattern.
@@ -657,6 +663,7 @@ describe("XrayReferrals boot-progress reporting (initial load only)", () => {
       "referrals_requests",
       "referrals_distribution",
       "referrals_answers",
+      "referrals_adhoc",
     ]);
     expect(keys).not.toContain("referrals_sample_mirror");
   });
@@ -885,5 +892,202 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
 
     const log = await loadDistributionLog(root, MONTH);
     expect(log.events.filter((e) => e.eventType === "reassigned")).toHaveLength(0);
+  });
+
+  it("keeps a manual bulk-reassign selection intact across an intervening silent background refresh (data-refresh signal fires between selection and click)", async () => {
+    writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root");
+    await seedTwoAssignedSamples(root, "sup-1");
+
+    render(<XrayReferrals directoryHandle={root} />);
+    await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
+    // Wait for the filtered count to settle before selecting, same as the
+    // other tests in this file — the filtered/selectable count itself commits
+    // one tick after the rows first render.
+    await waitFor(() => expect(screen.getByText(/2 مطابقة للتصفية\/البحث الحالي/)).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "تحديد الكل المطابق" }));
+    await waitFor(() => expect(screen.getByText("2 محددة يدوياً")).toBeInTheDocument());
+
+    // A background/periodic data-refresh signal fires here — e.g. the
+    // 3-minute auto-refresh timer, or another tab/device writing a change —
+    // strictly BETWEEN the user's selection and their click. loadData's
+    // `silent` path (see XrayReferrals.tsx) must re-fetch and swap rows in
+    // place without touching selectedIds; only the non-silent path (a real
+    // month/user change) is allowed to reset the selection.
+    await act(async () => {
+      broadcastDataRefresh("periodic");
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // The selection must have survived the silent refresh — the bar still
+    // reports both rows selected, not zero.
+    await waitFor(() => expect(screen.getByText("2 محددة يدوياً")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "إعادة تعيين المحدد (2)" }));
+
+    const dialog = await waitFor(() => screen.getByRole("dialog"), { timeout: 5000 });
+    expect(within(dialog).getByText(/العينات المحددة يدوياً \(2\)/)).toBeInTheDocument();
+
+    fireEvent.change(within(dialog).getByLabelText(/الموظف المستلم/), { target: { value: "jalgahamdi" } });
+    await waitFor(() =>
+      expect(within(dialog).getByText(/سيتم إعادة تعيين 2 عينة إلى jalgahamdi/)).toBeInTheDocument()
+    );
+    fireEvent.click(within(dialog).getByLabelText(/أؤكد مراجعة الملخص/));
+    fireEvent.click(within(dialog).getByRole("button", { name: "تنفيذ إعادة التعيين" }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/تم إعادة تعيين 2 عينة إلى jalgahamdi/)).toBeInTheDocument()
+    );
+
+    const log2 = await loadDistributionLog(root, MONTH);
+    const reassigns = log2.events.filter((e) => e.eventType === "reassigned");
+    expect(reassigns).toHaveLength(2);
+    expect(reassigns.map((e) => e.xrayImageId).sort()).toEqual(["IMG-1", "IMG-2"]);
+  });
+
+  it("opens the bulk-reassign-all-filtered dialog immediately once the filtered row set is on screen, with no race window where the button is unresponsive (regression for the DataTable filtered-rows notification lag)", async () => {
+    writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root");
+    await seedTwoAssignedSamples(root, "sup-1");
+
+    render(<XrayReferrals directoryHandle={root} />);
+    // Deliberately do NOT wait for the "N مطابقة للتصفية" count text — only
+    // for the rows themselves to appear, then click immediately. Before the
+    // DataTable fix (reporting filtered rows via a layout effect instead of a
+    // passive effect), `selectableVisibleIds` could still be its stale/empty
+    // initial value at this exact moment, leaving the button disabled or the
+    // handler's internal empty-selection guard silently no-op the click.
+    await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
+    expect(screen.getAllByText("IMG-2").length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("button", { name: /إعادة تعيين الكل المطابق للتصفية/ }));
+
+    const dialog = await waitFor(() => screen.getByRole("dialog"), { timeout: 5000 });
+    expect(within(dialog).getByText(/كل العينات المطابقة للتصفية الحالية \(2\)/)).toBeInTheDocument();
+  });
+});
+
+// ── THE GAP fix: ad-hoc-imported assignments must be visible here too ──────
+// (see src/data/adhocImport/adhocImportEmployeeView.ts). These render the real
+// component against a memory workspace exactly like the suites above, seeding
+// an ad-hoc assignment through the SAME event-sourced path the AdhocImport tab
+// uses (ensureAdhocSampleMaster + assignAdhocRowsToEmployee), not a stub.
+
+function mappedAdhocRow(xrayImageId: string, sourceRowNumber = 2): NormalizedRiskRow {
+  return {
+    movementType: "s1",
+    portCode: null, portName: "ميناء جدة", portType: "بحري",
+    movementNumber: null, movementDate: null, movementHijriDate: null,
+    declarationNumber: "DEC-1", transitDeclarationNumber: null, declarationDate: null, declarationHijriDate: null,
+    manifestNumber: null, manifestType: null, manifestDate: null,
+    plateOrContainerNumber: null, finalDestination: null,
+    entryDate: null, exitDate: null,
+    chassisNumber: null, reportNumber: null, hasReport: false,
+    xrayLevelOneResult: "سليمة", xrayLevelTwoResult: "اشتباه",
+    inspectorResult: null, oppositeInspectorResult: null, liveMeansResult: null,
+    xrayImageId, xrayEntryDate: null,
+    targetedByRiskEngine: null, riskMessage: null, stage: "المستوى الأول",
+    sourceSheetName: "s1", sourceRowNumber,
+  };
+}
+
+function adhocImportRow(xrayImageId: string, sourceRowNumber = 2): AdhocImportRow {
+  return {
+    rowKey: `s1:${sourceRowNumber}`,
+    mapped: mappedAdhocRow(xrayImageId, sourceRowNumber),
+    validation: { valid: true },
+    excludedByAdmin: false,
+    assigned: false,
+    assignedTo: null,
+    assignedAt: null,
+    namespacedXrayImageId: null,
+  };
+}
+
+function makeAdhocRecord(importId: string, rows: AdhocImportRow[]): AdhocImportRecord {
+  return {
+    importId,
+    fileName: `${importId}.xlsx`,
+    importedBy: "admin",
+    importedAt: "2026-08-07T10:00:00.000Z",
+    status: "open",
+    rows,
+  };
+}
+
+describe("XrayReferrals — ad-hoc import visibility (THE GAP fix)", () => {
+  it("shows an ad-hoc-imported assignment alongside the month's real samples, visually tagged as ad-hoc", async () => {
+    writeSession({ role: "employee", username: "emp-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root");
+    await seedAssignedSample(root, "emp-1", "IMG-1");
+
+    const record = makeAdhocRecord("adh-1", [adhocImportRow("XR-1")]);
+    await ensureAdhocSampleMaster(root, record);
+    const assigned = await assignAdhocRowsToEmployee(root, record, ["s1:2"], "emp-1", "admin");
+    expect(assigned.ok).toBe(true);
+
+    render(<XrayReferrals directoryHandle={root} />);
+
+    // The real monthly sample renders...
+    await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
+    // ...and the ad-hoc row appears too, carrying the visible "استيراد يدوي" badge —
+    // exactly once (the real row above must NOT be tagged as ad-hoc).
+    await waitFor(() => expect(screen.getAllByText("ADHOC-adh-1-XR-1").length).toBeGreaterThan(0));
+    expect(screen.getAllByText("استيراد يدوي")).toHaveLength(1);
+  });
+
+  it("does not show an ad-hoc row from an import with no assignment for the current user", async () => {
+    writeSession({ role: "employee", username: "emp-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root");
+    await seedAssignedSample(root, "emp-1", "IMG-1");
+
+    const record = makeAdhocRecord("adh-2", [adhocImportRow("XR-9")]);
+    await ensureAdhocSampleMaster(root, record);
+    // Assigned to someone else entirely.
+    await assignAdhocRowsToEmployee(root, record, ["s1:2"], "emp-2", "admin");
+
+    render(<XrayReferrals directoryHandle={root} />);
+
+    await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
+    expect(screen.queryByText("ADHOC-adh-2-XR-9")).not.toBeInTheDocument();
+  });
+
+  it("still renders the month's real assignments when an ad-hoc store is corrupt (degrades, never blanks the page)", async () => {
+    writeSession({ role: "employee", username: "emp-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root");
+    await seedAssignedSample(root, "emp-1", "IMG-1");
+
+    const record = makeAdhocRecord("adh-3", [adhocImportRow("XR-1")]);
+    await ensureAdhocSampleMaster(root, record);
+    const assigned = await assignAdhocRowsToEmployee(root, record, ["s1:2"], "emp-1", "admin");
+    expect(assigned.ok).toBe(true);
+
+    // Corrupt the ad-hoc import's sample.master.json with no valid .bak to recover from.
+    const badDir = await getSampleMainDir(root, adhocMonthFolderName("adh-3"), true);
+    const handle = await badDir.getFileHandle("sample.master.json", { create: true });
+    const writable = await handle.createWritable!();
+    await writable.write("{not valid json");
+    await writable.close();
+
+    render(<XrayReferrals directoryHandle={root} />);
+
+    // The real month's own assignment must still render...
+    await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
+    // ...and the load must not have fallen into the hard error state.
+    expect(screen.queryByText("تعذر تحميل البيانات.")).not.toBeInTheDocument();
+    // The corrupt ad-hoc row itself is simply absent, not crashing the page.
+    expect(screen.queryByText("ADHOC-adh-3-XR-1")).not.toBeInTheDocument();
   });
 });

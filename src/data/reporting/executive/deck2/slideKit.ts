@@ -188,6 +188,16 @@ export const NAV_SECTIONS = {
   section1: "القسم 1 — مجتمع الفحص",
   section2: "القسم 2 — نتائج فحص الجودة",
   section3: "القسم 3 — التحاليل المتقدمة",
+  /** R4 deck parity (2026-08-08) — coverage + accountability, see
+   *  `deck2/section4/index.ts`. Deliberately NOT added to `sideRail`'s tabs
+   *  list below: that list is rendered on EVERY content slide via `v2Slide`,
+   *  so adding a 5th entry there would change the printed rail markup on
+   *  every already-shipped slide in sections 1-3 too — the same blast radius
+   *  `cover`/`toc`/`summary`/`closing` already accept by not appearing in
+   *  that list either (none of those four sections is in the rail). Section
+   *  4's slides still render the rail (via `data-section="section4"`) —
+   *  it just shows no currently-active tab, exactly like those four sections. */
+  section4: "القسم 4 — التغطية والمساءلة التشغيلية",
   closing: "مصدر البيانات",
 } as const;
 export type NavSectionKey = keyof typeof NAV_SECTIONS;

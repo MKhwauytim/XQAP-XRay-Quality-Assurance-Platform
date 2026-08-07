@@ -1623,6 +1623,30 @@
   font-weight: 500;
 }
 
+/* ── Ad-hoc import badge (THE GAP fix) — flags a row assigned through an
+   admin's one-off Excel import (2-samples/adhoc-{id}/) rather than the real
+   monthly sampling pipeline. Info-blue, distinct from the amber quality-note
+   badge above and the status pills used elsewhere in this file. */
+
+.ew-xray-id-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ew-adhoc-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--c-info-bg);
+  color: var(--c-info);
+  border: 1px solid var(--c-info-border);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .ew-quality-note-panel {
   display: flex;
   flex-direction: column;

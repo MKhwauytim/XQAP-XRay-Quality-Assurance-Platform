@@ -3,6 +3,7 @@ import {
   Fragment,
   forwardRef,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -474,8 +475,23 @@ export default function DataTable<TRow>({
   // get a fresh array identity on every render when a consumer passes an
   // unstable rowMatchesFilter; emitting each time loops consumers that store
   // the rows in state.
+  //
+  // useLayoutEffect (not useEffect) is deliberate: this notification calls a
+  // consumer-supplied callback (typically a parent setState, e.g. XrayReferrals'
+  // `setFilteredTableEntries`) that other click handlers in the parent read
+  // synchronously at click time (e.g. "reassign all filtered"/"select all
+  // filtered" buttons). filteredRows itself is already computed synchronously
+  // during THIS render via useMemo above; the only reason a consumer's mirrored
+  // state could ever lag behind what's on screen is if forwarding it runs in a
+  // passive effect, which React defers relative to the parent's own commit and
+  // to real user input. A layout effect still fires after this component's own
+  // commit, but React flushes any state update it triggers synchronously before
+  // the browser paints or yields to the next event — so by the time rows are
+  // visible on screen, a filtered-rows-dependent parent action is guaranteed to
+  // observe the up-to-date set instead of an empty/stale one. See
+  // XrayReferrals.tsx's openBulkReassignModal for the concrete bug this closes.
   const lastEmittedRowsRef = useRef<TRow[] | null>(null);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!onFilteredRowsChange) return;
     const prev = lastEmittedRowsRef.current;
     const unchanged =
