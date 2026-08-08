@@ -52,6 +52,16 @@ function switchSection(subTabId: string) {
 // below dispatches to no listener and the section-switch never happens.
 async function waitForMount() {
   await screen.findByRole("heading", { level: 1, name: "إدارة المستخدمين والصلاحيات" });
+  // The heading being in the DOM only proves the lazy chunk rendered — effects
+  // run afterwards. `switchSection` dispatches `pop-set-subtab` on `window`, so
+  // if it fires before the tab's subscribing effect has been flushed, the event
+  // lands with no listener attached: the section never switches and the
+  // subsequent load never happens. That lost only under parallel-worker
+  // contention, surfacing as an intermittent "expected readAuthActivityLog to
+  // be called 1 times, but got 0". Flush pending effects before any dispatch.
+  await act(async () => {
+    await Promise.resolve();
+  });
 }
 
 afterEach(() => {
