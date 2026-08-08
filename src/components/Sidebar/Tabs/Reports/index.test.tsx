@@ -934,6 +934,15 @@ describe("Reports sub-tab mount preservation (§T)", () => {
     reportDesignerMountCount.count = 0;
     render(<ReportsTab />);
 
+    // Wait for the first paint before dispatching. `ReportsTab` subscribes to
+    // `sidebar-subtab-changed` from an effect, and dispatching synchronously
+    // after `render()` can fire the event before React has flushed that effect —
+    // the listener isn't attached yet, the sub-tab never switches, and the
+    // assertion below fails against the default (empty) view. That race only
+    // lost under parallel-worker contention, which is why it surfaced as an
+    // intermittent, order-dependent failure rather than a consistent one.
+    await waitFor(() => expect(document.querySelector(".rh-page")).toBeTruthy());
+
     act(() => {
       window.dispatchEvent(
         new CustomEvent("sidebar-subtab-changed", {
