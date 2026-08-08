@@ -20,6 +20,36 @@ export type AdhocDistributionEntry = DistributionEntry & {
   adhocFileName: string;
 };
 
+/** True when this entry came from an ad-hoc import rather than the real pipeline. */
+export function isAdhocEntry(
+  entry: DistributionEntry,
+): entry is AdhocDistributionEntry {
+  return typeof (entry as Partial<AdhocDistributionEntry>).adhocImportId === "string";
+}
+
+/**
+ * The workspace "month folder" that owns this entry's writes.
+ *
+ * Employee views render the union of the selected month's own entries and every
+ * ad-hoc import's entries, but those two live in **different** stores:
+ * `2-samples/{month}/` versus `2-samples/adhoc-{importId}/`. Every write for a
+ * row — its answer, and any referral/replacement/reopen request — must land in
+ * the store the row actually came from.
+ *
+ * Routing on the entry (rather than on the globally-selected month) is what
+ * keeps that honest. Writing an ad-hoc row into the real month would contaminate
+ * a genuine audit trail with rows from an unrelated population, and writing a
+ * real row into an ad-hoc store would silently lose it. Both are worse than the
+ * read-only state this replaces, so callers should resolve the folder through
+ * here rather than reaching for `selMonth` directly.
+ */
+export function monthFolderForEntry(
+  entry: DistributionEntry,
+  selectedMonthFolder: string,
+): string {
+  return isAdhocEntry(entry) ? adhocMonthFolderName(entry.adhocImportId) : selectedMonthFolder;
+}
+
 /**
  * Loads distribution entries for every ad-hoc import that has at least one
  * assignment (THE GAP fix, 2026-08): EmployeeWorkspace's real-month views only

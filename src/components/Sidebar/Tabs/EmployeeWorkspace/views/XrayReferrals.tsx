@@ -42,6 +42,7 @@ import {
   loadAdhocEntriesForEmployeeView,
   type AdhocDistributionEntry,
 } from "../../../../../data/adhocImport/adhocImportEmployeeView";
+import { monthFolderForEntry } from "../../../../../data/adhocImport/adhocImportEmployeeView";
 import {
   loadTemplate,
   loadTemplateIndex,
@@ -330,6 +331,27 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   // referral/bulk-reassign selection re-scanned the full entries array).
   const entriesById = useMemo(() => new Map(entries.map((e) => [e.xrayImageId, e])), [entries]);
 
+  /**
+   * The workspace folder that owns a given row's writes.
+   *
+   * This view renders the union of the selected month's entries and every
+   * ad-hoc import's entries, and those live in different stores. Every write
+   * (answer, referral/replacement/reopen request, and the fresh pre-write read
+   * that guards against double-assignment) must target the store the row
+   * actually came from — routing on the ROW, never on the globally-selected
+   * month. Writing an ad-hoc row into the real month would contaminate a real
+   * audit trail with an unrelated population; the reverse would silently lose
+   * the write.
+   *
+   * Falls back to the selected month for an unknown id, which is the correct
+   * conservative default: a real row is the only thing that can be missing from
+   * `entriesById` while still being actionable.
+   */
+  const folderForRow = useCallback((xrayImageId: string): string => {
+    const entry = entriesById.get(xrayImageId);
+    return entry && selMonth ? monthFolderForEntry(entry, selMonth) : (selMonth ?? "");
+  }, [entriesById, selMonth]);
+
   /* eslint-disable react-hooks/preserve-manual-memoization -- React Compiler can't prove
      stageMappings/canSeeAll/answersMap/username are stable across renders (they come from
      useState/session/derived useMemo values that are safe in practice); these hooks keep
@@ -596,7 +618,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       status: "submitted",
     };
     try {
-      const result = await upsertItemAnswer(directoryHandle, selMonth, forUser, item);
+      const result = await upsertItemAnswer(directoryHandle, folderForRow(xrayImageId), forUser, item);
       if (result.ok) {
         setAnswers((prev) => [
           ...prev.filter((a) => !(a.xrayImageId === xrayImageId && a.answeredBy === forUser)),
@@ -734,9 +756,10 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         // still replacement-eligible, and (b) the chosen replacement is not
         // already sampled or owned — otherwise a concurrent action already used
         // one side and committing would double-assign / orphan.
-        const freshSample = await loadSampleMaster(directoryHandle, selMonth);
+        const rowFolder = folderForRow(entry.xrayImageId);
+        const freshSample = await loadSampleMaster(directoryHandle, rowFolder);
         const freshRows = (freshSample?.rows ?? []) as PreparedPopulationRow[];
-        const freshDist = await loadOrDeriveDistributionCurrent(directoryHandle, selMonth, freshRows);
+        const freshDist = await loadOrDeriveDistributionCurrent(directoryHandle, rowFolder, freshRows);
         const STALE_MSG = "البيانات تغيّرت، حدّث الصفحة";
 
         const freshDead = freshDist?.entries.find((e) => e.xrayImageId === entry.xrayImageId);
@@ -811,7 +834,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           requestedBy: username,
           status: "pending",
         };
-        const result = await appendReplacementRequest(directoryHandle, selMonth, request);
+        const result = await appendReplacementRequest(directoryHandle, folderForRow(entry.xrayImageId), request);
         if (!result.ok) {
           setReplacementError(result.error);
           setStatusMsg({ type: "error", text: result.error });
@@ -872,9 +895,25 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       setStatusMsg({ type: "error", text: "لم يتبقَّ أي عينة محددة لإحالتها — تم إلغاء الطلب." });
       return;
     }
+    // A referral request is ONE record covering many rows, so every row in it
+    // must belong to the same store. A selection can legitimately span the real
+    // month and an ad-hoc import (both render in this table), and splitting the
+    // request silently would produce two records the supervisor sees as one
+    // action — with a partial approval leaving half the rows in limbo. Refuse
+    // the mixed case explicitly and let the user send them separately.
+    const targetFolders = new Set(xrayImageIds.map(folderForRow));
+    if (targetFolders.size > 1) {
+      setStatusMsg({
+        type: "error",
+        text: "لا يمكن إحالة عينات من الشهر الحالي ومن استيراد يدوي في طلب واحد — أرسل كل مجموعة على حدة.",
+      });
+      return;
+    }
+    const referralFolder = targetFolders.values().next().value ?? selMonth;
+
     const request: ReferralRequest = {
       requestId: `ref-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      monthFolderName: selMonth,
+      monthFolderName: referralFolder,
       fromEmployee: username,
       toEmployee,
       xrayImageIds,
@@ -883,7 +922,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       requestedBy: username,
       status: "pending",
     };
-    const result = await appendReferralRequest(directoryHandle, selMonth, request);
+    const result = await appendReferralRequest(directoryHandle, referralFolder, request);
     if (result.ok) {
       setReferralModal(null);
       clearSelection();
