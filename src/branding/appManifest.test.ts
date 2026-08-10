@@ -49,14 +49,14 @@ describe("buildAppManifest", () => {
     expect(manifest.id).toBe("xqap");
   });
 
-  it("declares 192, 512 and maskable 512 icons as inline data URIs", () => {
-    const sizes = manifest.icons.map((icon) => `${icon.sizes}:${icon.purpose}`);
-    expect(sizes).toContain("192x192:any");
-    expect(sizes).toContain("512x512:any");
-    expect(sizes).toContain("512x512:maskable");
+  it("declares any-size and maskable icons as inline SVG data URIs", () => {
+    const purposes = manifest.icons.map((icon) => icon.purpose);
+    expect(purposes.filter((purpose) => purpose === "any")).toHaveLength(2);
+    expect(purposes.filter((purpose) => purpose === "maskable")).toHaveLength(1);
     for (const icon of manifest.icons) {
-      expect(icon.src.startsWith("data:image/png;base64,")).toBe(true);
-      expect(icon.type).toBe("image/png");
+      expect(icon.sizes).toBe("any");
+      expect(icon.type).toBe("image/svg+xml");
+      expect(icon.src.startsWith("data:image/svg+xml;charset=utf-8,")).toBe(true);
     }
   });
 });

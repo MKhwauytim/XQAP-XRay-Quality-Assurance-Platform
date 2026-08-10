@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="ZATCA X-ray quality shield mark">
+  <!-- Full-detail mark: shield silhouette clipped over closely spaced 45deg diagonal stripes, blue-to-green gradient. -->
+  <defs>
+    <linearGradient id="shieldGradient" gradientUnits="userSpaceOnUse" x1="96" y1="480" x2="416" y2="64">
+      <stop offset="0%" stop-color="#29A3D3" />
+      <stop offset="50%" stop-color="#3FB6AE" />
+      <stop offset="100%" stop-color="#5CB947" />
+    </linearGradient>
+    <clipPath id="shieldClip">
+      <path d="M96 64 L416 64 L416 280 C416 380 350 440 256 480 C162 440 96 380 96 280 Z" />
+    </clipPath>
+  </defs>
+  <g clip-path="url(#shieldClip)">
+    <g stroke="url(#shieldGradient)" stroke-width="11" stroke-linecap="butt">
+    <line x1="-980" y1="420" x2="420" y2="-980" />
+    <line x1="-954" y1="446" x2="446" y2="-954" />
+    <line x1="-928" y1="472" x2="472" y2="-928" />
+    <line x1="-902" y1="498" x2="498" y2="-902" />
+    <line x1="-876" y1="524" x2="524" y2="-876" />
+    <line x1="-850" y1="550" x2="550" y2="-850" />
+    <line x1="-824" y1="576" x2="576" y2="-824" />
+    <line x1="-798" y1="602" x2="602" y2="-798" />
+    <line x1="-772" y1="628" x2="628" y2="-772" />
+    <line x1="-746" y1="654" x2="654" y2="-746" />
+    <line x1="-720" y1="680" x2="680" y2="-720" />
+    <line x1="-694" y1="706" x2="706" y2="-694" />
+    <line x1="-668" y1="732" x2="732" y2="-668" />
+    <line x1="-642" y1="758" x2="758" y2="-642" />
+    <line x1="-616" y1="784" x2="784" y2="-616" />
+    <line x1="-590" y1="810" x2="810" y2="-590" />
+    <line x1="-564" y1="836" x2="836" y2="-564" />
+    <line x1="-538" y1="862" x2="862" y2="-538" />
+    <line x1="-512" y1="888" x2="888" y2="-512" />
+    <line x1="-486" y1="914" x2="914" y2="-486" />
+    <line x1="-460" y1="940" x2="940" y2="-460" />
+    <line x1="-434" y1="966" x2="966" y2="-434" />
+    <line x1="-408" y1="992" x2="992" y2="-408" />
+    <line x1="-382" y1="1018" x2="1018" y2="-382" />
+    <line x1="-356" y1="1044" x2="1044" y2="-356" />
+    <line x1="-330" y1="1070" x2="1070" y2="-330" />
+    <line x1="-304" y1="1096" x2="1096" y2="-304" />
+    <line x1="-278" y1="1122" x2="1122" y2="-278" />
+    <line x1="-252" y1="1148" x2="1148" y2="-252" />
+    <line x1="-226" y1="1174" x2="1174" y2="-226" />
+    <line x1="-200" y1="1200" x2="1200" y2="-200" />
+    <line x1="-174" y1="1226" x2="1226" y2="-174" />
+    <line x1="-148" y1="1252" x2="1252" y2="-148" />
+    <line x1="-122" y1="1278" x2="1278" y2="-122" />
+    <line x1="-96" y1="1304" x2="1304" y2="-96" />
+    <line x1="-70" y1="1330" x2="1330" y2="-70" />
+    <line x1="-44" y1="1356" x2="1356" y2="-44" />
+    <line x1="-18" y1="1382" x2="1382" y2="-18" />
+    <line x1="8" y1="1408" x2="1408" y2="8" />
+    <line x1="34" y1="1434" x2="1434" y2="34" />
+    <line x1="60" y1="1460" x2="1460" y2="60" />
+    </g>
+  </g>
+</svg>

@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="ZATCA X-ray quality shield mark">
+  <!-- Compact mark: fewer, thicker diagonal stripes so the shield still reads clearly at 16-32px favicon sizes. -->
+  <defs>
+    <linearGradient id="shieldGradient" gradientUnits="userSpaceOnUse" x1="96" y1="480" x2="416" y2="64">
+      <stop offset="0%" stop-color="#29A3D3" />
+      <stop offset="50%" stop-color="#3FB6AE" />
+      <stop offset="100%" stop-color="#5CB947" />
+    </linearGradient>
+    <clipPath id="shieldClip">
+      <path d="M96 64 L416 64 L416 280 C416 380 350 440 256 480 C162 440 96 380 96 280 Z" />
+    </clipPath>
+  </defs>
+  <g clip-path="url(#shieldClip)">
+    <g stroke="url(#shieldGradient)" stroke-width="30" stroke-linecap="butt">
+    <line x1="-980" y1="420" x2="420" y2="-980" />
+    <line x1="-918" y1="482" x2="482" y2="-918" />
+    <line x1="-856" y1="544" x2="544" y2="-856" />
+    <line x1="-794" y1="606" x2="606" y2="-794" />
+    <line x1="-732" y1="668" x2="668" y2="-732" />
+    <line x1="-670" y1="730" x2="730" y2="-670" />
+    <line x1="-608" y1="792" x2="792" y2="-608" />
+    <line x1="-546" y1="854" x2="854" y2="-546" />
+    <line x1="-484" y1="916" x2="916" y2="-484" />
+    <line x1="-422" y1="978" x2="978" y2="-422" />
+    <line x1="-360" y1="1040" x2="1040" y2="-360" />
+    <line x1="-298" y1="1102" x2="1102" y2="-298" />
+    <line x1="-236" y1="1164" x2="1164" y2="-236" />
+    <line x1="-174" y1="1226" x2="1226" y2="-174" />
+    <line x1="-112" y1="1288" x2="1288" y2="-112" />
+    <line x1="-50" y1="1350" x2="1350" y2="-50" />
+    <line x1="12" y1="1412" x2="1412" y2="12" />
+    </g>
+  </g>
+</svg>
