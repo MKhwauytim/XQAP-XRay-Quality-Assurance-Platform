@@ -1,5 +1,6 @@
 import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
+import react, { reactCompilerPreset } from "@vitejs/plugin-react";
+import babel from "@rolldown/plugin-babel";
 import { viteSingleFile } from "vite-plugin-singlefile";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -20,7 +21,23 @@ const pkg = JSON.parse(
 const editLogTotalVersions = countVersionHeadings(readDailyEditLogs());
 
 export default defineConfig({
-  plugins: [react(), viteSingleFile(), deckStyleChoicesPlugin(), editLogTruncatePlugin()],
+  plugins: [
+    react(),
+    // React Compiler (stable as of React 19): auto-memoizes components/hooks
+    // at build time, zero runtime bundle cost -- de-risks decomposing the
+    // repo's several 700-1400-line components (CLAUDE.md/W8.10) without a
+    // manual useMemo/useCallback/React.memo audit pass. This "Vite 8" build is
+    // rolldown-powered (@vitejs/plugin-react v6 transforms JSX via oxc, not
+    // babel), so the compiler is wired in as a separate babel pass over the
+    // same rolldown pipeline via @rolldown/plugin-babel + reactCompilerPreset
+    // -- the officially documented route for this plugin/Vite version, not
+    // the classic `react({ babel: { plugins: [...] } })` v4-era API (which
+    // this version's `Options` type no longer accepts).
+    babel({ presets: [reactCompilerPreset()] }),
+    viteSingleFile(),
+    deckStyleChoicesPlugin(),
+    editLogTruncatePlugin(),
+  ],
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
     __EDIT_LOG_TOTAL_VERSIONS__: String(editLogTotalVersions),

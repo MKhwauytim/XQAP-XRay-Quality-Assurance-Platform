@@ -1,0 +1,102 @@
+.adhoc-import-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.25rem;
+}
+
+.adhoc-import-scope-note {
+  font-size: 0.8rem;
+  color: var(--color-text-muted, #6b7280);
+  margin: 0;
+}
+
+.adhoc-import-error {
+  background: var(--color-danger-bg, #fee2e2);
+  color: var(--color-danger, #b91c1c);
+  border: 1px solid var(--color-danger, #b91c1c);
+  border-radius: 8px;
+  padding: 0.6rem 0.9rem;
+  font-size: 0.85rem;
+}
+
+.adhoc-import-notice {
+  background: var(--color-success-bg, #dcfce7);
+  color: var(--color-success, #15803d);
+  border: 1px solid var(--color-success, #15803d);
+  border-radius: 8px;
+  padding: 0.6rem 0.9rem;
+  font-size: 0.85rem;
+}
+
+.adhoc-import-empty {
+  color: var(--color-text-muted, #6b7280);
+  font-size: 0.9rem;
+}
+
+.adhoc-import-upload-card,
+.adhoc-import-list-card,
+.adhoc-import-detail {
+  background: var(--color-surface, #fff);
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 12px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.adhoc-import-upload-card {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.adhoc-import-list-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.adhoc-import-list-table th,
+.adhoc-import-list-table td {
+  padding: 0.5rem 0.75rem;
+  text-align: start;
+  border-bottom: 1px solid var(--color-border, #e5e7eb);
+}
+
+.adhoc-import-list-row {
+  cursor: pointer;
+}
+
+.adhoc-import-list-row:hover {
+  background: var(--color-surface-hover, #f9fafb);
+}
+
+.adhoc-import-detail-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.adhoc-import-detail-toolbar h2 {
+  font-size: 1rem;
+  margin: 0;
+  flex: 1;
+}
+
+.adhoc-import-review-note {
+  font-size: 0.8rem;
+  color: var(--color-text-muted, #6b7280);
+  margin: 0;
+}
+
+.adhoc-import-assign-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--color-border, #e5e7eb);
+}

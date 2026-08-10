@@ -53,6 +53,16 @@ vi.mock("../../../../data/workspace/useWorkspace", () => ({
   useWorkspace: () => ({ directoryHandle: (globalThis as { __testDir?: DirectoryHandleLike }).__testDir ?? null }),
 }));
 
+// Task 2 perf fix: `ExecutiveRowsProvider` (shared KPI-tile data load) now wraps
+// both the design-list view and EditorHost unconditionally, and it calls
+// useGlobalMonth() eagerly regardless of whether any design on screen has a KPI
+// element -- so this component tree requires GlobalMonthProvider context even
+// though none of these fixtures use KPI elements. Mocked here the same way
+// Reports/index.test.tsx mocks it, rather than pulling in the real provider.
+vi.mock("../../../../data/month/useGlobalMonth", () => ({
+  useGlobalMonth: () => ({ selection: { kind: "none" } }),
+}));
+
 import ReportDesigner from "./index";
 
 afterEach(() => {

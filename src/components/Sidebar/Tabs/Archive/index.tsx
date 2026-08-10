@@ -1,11 +1,13 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Archive, X } from "lucide-react";
 
 import { readSession } from "../../../../auth/authSession";
 import { tabAllowedRoles } from "../../../../auth/tabCatalog";
 import { usePermissions } from "../../../../auth/usePermissions";
 import { useFocusTrap } from "../../../../hooks/useFocusTrap";
+import { ModalPortal } from "../../../../components/ModalPortal/ModalPortal";
 import { PageHeader } from "../../../../components/PageHeader/PageHeader";
 import { formatMonthFolderShortLabel } from "../../../../data/population/monthFolder";
 import {
@@ -22,7 +24,7 @@ import {
   type BackupHistoryItem,
   type MonthArchiveStatus,
 } from "../../../../data/backup/backupStorage";
-import { listMonthFolders } from "../../../../data/population/populationStorage";
+import { monthFoldersQueryOptions, invalidateMonthFolders } from "../../../../data/query/monthFoldersQuery";
 import { closeMonth, reopenMonth } from "../../../../data/population/monthLock";
 import { appendWorkspaceAction } from "../../../../data/audit/actionLog";
 import { syncUsersFromDisk } from "../../../../auth/userManagement";
@@ -73,6 +75,7 @@ function fillTemplate(template: string, vars: Record<string, string>): string {
 export default function ArchiveTab() {
   const { directoryHandle } = useWorkspace();
   const { refreshMonths } = useGlobalMonth();
+  const queryClient = useQueryClient();
   const session = readSession();
   const { canMutate } = usePermissions();
   const username = session?.username ?? "unknown";
@@ -118,7 +121,13 @@ export default function ArchiveTab() {
     const token = ++refreshTokenRef.current;
     setIsLoading(true);
     try {
-      const months = await listMonthFolders(directoryHandle);
+      // Archive's refresh() is always a deliberate "show me the current
+      // state" moment (mount, manual تحديث button, or right after this tab's
+      // own backup/restore/close/reopen mutation) — invalidate before
+      // fetching so `staleTime: Infinity` never serves another consumer's
+      // (or this component's own earlier) cached month list here.
+      await invalidateMonthFolders(queryClient, directoryHandle);
+      const months = await queryClient.fetchQuery(monthFoldersQueryOptions(directoryHandle));
       const [statusList, backupHistory, state, settings] = await Promise.all([
         loadArchiveStatus(directoryHandle, months),
         loadBackupHistory(directoryHandle),
@@ -142,7 +151,7 @@ export default function ArchiveTab() {
         setIsLoading(false);
       }
     }
-  }, [directoryHandle]);
+  }, [directoryHandle, queryClient]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -156,7 +165,7 @@ export default function ArchiveTab() {
     setIsBackingUp(true);
     setMessage(null);
     try {
-      const months = await listMonthFolders(directoryHandle);
+      const months = await queryClient.fetchQuery(monthFoldersQueryOptions(directoryHandle));
       const result = await createBackup(directoryHandle, months, username, "manual", {
         includeXlsxExports,
       });
@@ -241,7 +250,7 @@ export default function ArchiveTab() {
     setMessage(null);
     setDialogError(null);
     try {
-      const months = await listMonthFolders(directoryHandle);
+      const months = await queryClient.fetchQuery(monthFoldersQueryOptions(directoryHandle));
       const result = await restoreBackupSnapshot({
         directoryHandle,
         months,
@@ -682,6 +691,7 @@ function MonthLockDialog({
   const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onClose });
 
   return (
+    <ModalPortal>
     <div ref={dialogRef} className="arc-modal-backdrop" role="dialog" aria-modal="true">
       <div className="arc-restore-modal">
         <div className="arc-restore-header">
@@ -734,6 +744,7 @@ function MonthLockDialog({
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }
 
@@ -767,6 +778,7 @@ function RestoreDialog({
   const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onClose });
 
   return (
+    <ModalPortal>
     <div ref={dialogRef} className="arc-modal-backdrop" role="dialog" aria-modal="true">
       <div className="arc-restore-modal">
         <div className="arc-restore-header">
@@ -846,5 +858,6 @@ function RestoreDialog({
         )}
       </div>
     </div>
+    </ModalPortal>
   );
 }

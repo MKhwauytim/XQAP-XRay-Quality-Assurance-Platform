@@ -500,7 +500,7 @@ describe("Reports month-summary chips — lightweight manifest read, no employee
 
     // Navigate to the KPI dashboard — this triggers the model-building effect, which
     // needs loadMonthPopulationFinal (still deferred/controlled separately).
-    fireEvent.click(screen.getByRole("tab", { name: "مؤشرات" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "مؤشرات" }));
     await act(async () => {
       deferredFor("4-april-2026").resolve(mockPop(1));
       await Promise.resolve();
@@ -519,7 +519,7 @@ describe("Reports month-summary chips — lightweight manifest read, no employee
 // handler-time gate (`canMutate`, re-checked defensively even if a control were
 // somehow left enabled), plus the digit-format and pending-month polish items.
 describe("Reports export permission gating (B5)", () => {
-  it("disables every export/generate control and explains why when the role cannot export (can=false)", () => {
+  it("disables every export/generate control and explains why when the role cannot export (can=false)", async () => {
     const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
     (globalThis as { __testDir?: DirectoryHandleLike }).__testDir = root;
     permissionsMock.state = { can: false, canMutate: false };
@@ -527,7 +527,7 @@ describe("Reports export permission gating (B5)", () => {
     const { container } = render(<ReportsTab />);
 
     // Power BI card's button — the one with the real disk write.
-    const pbiButton = screen.getByRole("button", { name: "تصدير" });
+    const pbiButton = await screen.findByRole("button", { name: "تصدير" });
     expect(pbiButton).toBeDisabled();
     expect(pbiButton).toHaveAttribute("title", "لا تملك صلاحية تصدير التقارير.");
 
@@ -552,7 +552,7 @@ describe("Reports export permission gating (B5)", () => {
 
     render(<ReportsTab />);
 
-    const pbiButton = screen.getByRole("button", { name: "تصدير" });
+    const pbiButton = await screen.findByRole("button", { name: "تصدير" });
     // can=true keeps the render-time gate open (the control is usable-looking)...
     expect(pbiButton).not.toBeDisabled();
 
@@ -573,7 +573,7 @@ describe("Reports export permission gating (B5)", () => {
 
     render(<ReportsTab />);
 
-    fireEvent.click(screen.getByRole("button", { name: "تصدير" }));
+    fireEvent.click(await screen.findByRole("button", { name: "تصدير" }));
 
     await waitFor(() => {
       expect(pbiExportMock.impl).toHaveBeenCalledTimes(1);
@@ -589,7 +589,7 @@ describe("Reports export permission gating (B5)", () => {
     expect(fileListItem?.textContent ?? "").not.toMatch(/[٠-٩]/); // Arabic-Indic digit range
   });
 
-  it("explains a disabled pending-month control as 'not processed yet' rather than the generic no-month message", () => {
+  it("explains a disabled pending-month control as 'not processed yet' rather than the generic no-month message", async () => {
     const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
     (globalThis as { __testDir?: DirectoryHandleLike }).__testDir = root;
     permissionsMock.state = { can: true, canMutate: true };
@@ -597,7 +597,7 @@ describe("Reports export permission gating (B5)", () => {
 
     const { container } = render(<ReportsTab />);
 
-    const pbiButton = screen.getByRole("button", { name: "تصدير" });
+    const pbiButton = await screen.findByRole("button", { name: "تصدير" });
     expect(pbiButton).toBeDisabled();
     expect(pbiButton).toHaveAttribute(
       "title",
@@ -642,7 +642,7 @@ describe("Reports KPI dashboard — admin-only design-customizer gate (D1)", () 
       await Promise.resolve();
     });
 
-    fireEvent.click(screen.getByRole("tab", { name: "مؤشرات" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "مؤشرات" }));
 
     // A genuinely discriminating check: if `isAdmin` were hardcoded `true` this would
     // still pass, but the paired "non-admin" test below would then fail to observe
@@ -664,7 +664,7 @@ describe("Reports KPI dashboard — admin-only design-customizer gate (D1)", () 
       await Promise.resolve();
     });
 
-    fireEvent.click(screen.getByRole("tab", { name: "مؤشرات" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "مؤشرات" }));
 
     // Confirm the dashboard itself actually mounted (a control that is NOT
     // admin-gated) before trusting the customizer button's absence — otherwise an
@@ -689,7 +689,7 @@ describe("Reports KPI dashboard — admin-only design-customizer gate (D1)", () 
       await Promise.resolve();
     });
 
-    fireEvent.click(screen.getByRole("tab", { name: "مؤشرات" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "مؤشرات" }));
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /فتح العرض التنفيذي/ })).toBeInTheDocument();
@@ -714,7 +714,7 @@ describe("Reports KPI dashboard — admin-only design-customizer gate (D1)", () 
       await Promise.resolve();
     });
 
-    fireEvent.click(screen.getByRole("tab", { name: "مؤشرات" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "مؤشرات" }));
 
     const customizerButton = await screen.findByRole("button", { name: /تخصيص تصميم العرض/ });
     // can=true keeps the render-time gate open (the control is usable-looking)...
@@ -751,7 +751,16 @@ describe("Reports card — admin-only design-customizer button on the default 'r
     });
 
     // No tab click — this is the default render, exactly what the owner saw.
-    const featuredCard = container.querySelector(".rh-card-featured") as HTMLElement;
+    // Wait for the card to exist before handing it to `within()`. A single
+    // microtask flush after resolving the deferred is not enough under
+    // parallel-worker contention: `querySelector` then returns null and
+    // `within(null)` throws "Expected container to be an Element ... but got
+    // null" -- an error that says nothing about the real cause.
+    const featuredCard = await waitFor(() => {
+      const el = container.querySelector(".rh-card-featured");
+      expect(el).toBeTruthy();
+      return el as HTMLElement;
+    });
     expect(within(featuredCard).getByRole("button", { name: /تخصيص التصميم/ })).toBeInTheDocument();
   });
 
@@ -767,7 +776,16 @@ describe("Reports card — admin-only design-customizer button on the default 'r
       await Promise.resolve();
     });
 
-    const featuredCard = container.querySelector(".rh-card-featured") as HTMLElement;
+    // Wait for the card to exist before handing it to `within()`. A single
+    // microtask flush after resolving the deferred is not enough under
+    // parallel-worker contention: `querySelector` then returns null and
+    // `within(null)` throws "Expected container to be an Element ... but got
+    // null" -- an error that says nothing about the real cause.
+    const featuredCard = await waitFor(() => {
+      const el = container.querySelector(".rh-card-featured");
+      expect(el).toBeTruthy();
+      return el as HTMLElement;
+    });
     // Confirm the card itself rendered (a non-gated control) before trusting the
     // customizer button's absence.
     expect(within(featuredCard).getByRole("button", { name: "التصدير" })).toBeInTheDocument();
@@ -786,7 +804,16 @@ describe("Reports card — admin-only design-customizer button on the default 'r
       await Promise.resolve();
     });
 
-    const featuredCard = container.querySelector(".rh-card-featured") as HTMLElement;
+    // Wait for the card to exist before handing it to `within()`. A single
+    // microtask flush after resolving the deferred is not enough under
+    // parallel-worker contention: `querySelector` then returns null and
+    // `within(null)` throws "Expected container to be an Element ... but got
+    // null" -- an error that says nothing about the real cause.
+    const featuredCard = await waitFor(() => {
+      const el = container.querySelector(".rh-card-featured");
+      expect(el).toBeTruthy();
+      return el as HTMLElement;
+    });
     fireEvent.click(within(featuredCard).getByRole("button", { name: /تخصيص التصميم/ }));
 
     await waitFor(() => {
@@ -816,7 +843,16 @@ describe("Reports executive-deck export — style choices loaded before export (
 
     // Executive is the featured card; switch its format toggle to "deck" (defaults
     // to "document"), then trigger its "التصدير" button — this is generate("executive-deck").
-    const featuredCard = container.querySelector(".rh-card-featured") as HTMLElement;
+    // Wait for the card to exist before handing it to `within()`. A single
+    // microtask flush after resolving the deferred is not enough under
+    // parallel-worker contention: `querySelector` then returns null and
+    // `within(null)` throws "Expected container to be an Element ... but got
+    // null" -- an error that says nothing about the real cause.
+    const featuredCard = await waitFor(() => {
+      const el = container.querySelector(".rh-card-featured");
+      expect(el).toBeTruthy();
+      return el as HTMLElement;
+    });
     fireEvent.click(within(featuredCard).getByTitle("عرض تقديمي تفاعلي (HTML)"));
     fireEvent.click(within(featuredCard).getByRole("button", { name: "التصدير" }));
 
@@ -856,7 +892,7 @@ describe("Reports KPI model cache — no rebuild on plain section switch-back", 
       expect(screen.getByText("1 صورة")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("tab", { name: "مؤشرات" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "مؤشرات" }));
     await act(async () => {
       deferredFor("4-april-2026").resolve(mockPop(1));
       await Promise.resolve();
@@ -865,8 +901,8 @@ describe("Reports KPI model cache — no rebuild on plain section switch-back", 
       expect(populationStorageSpies.loadMonthPopulationFinal).toHaveBeenCalledTimes(1);
     });
 
-    fireEvent.click(screen.getByRole("tab", { name: "التقارير" }));
-    fireEvent.click(screen.getByRole("tab", { name: "مؤشرات" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "التقارير" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "مؤشرات" }));
 
     // Give an (incorrect) rebuild a chance to fire before asserting it didn't.
     await act(async () => {
@@ -897,7 +933,7 @@ describe("Reports KPI model cache — no rebuild on plain section switch-back", 
       expect(screen.getByText("1 صورة")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("tab", { name: "مؤشرات" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "مؤشرات" }));
     await act(async () => {
       deferredFor("4-april-2026").resolve(mockPop(1));
       await Promise.resolve();
@@ -933,6 +969,15 @@ describe("Reports sub-tab mount preservation (§T)", () => {
   it("keeps Report Designer mounted (hidden, not unmounted) after the first visit", async () => {
     reportDesignerMountCount.count = 0;
     render(<ReportsTab />);
+
+    // Wait for the first paint before dispatching. `ReportsTab` subscribes to
+    // `sidebar-subtab-changed` from an effect, and dispatching synchronously
+    // after `render()` can fire the event before React has flushed that effect —
+    // the listener isn't attached yet, the sub-tab never switches, and the
+    // assertion below fails against the default (empty) view. That race only
+    // lost under parallel-worker contention, which is why it surfaced as an
+    // intermittent, order-dependent failure rather than a consistent one.
+    await waitFor(() => expect(document.querySelector(".rh-page")).toBeTruthy());
 
     act(() => {
       window.dispatchEvent(

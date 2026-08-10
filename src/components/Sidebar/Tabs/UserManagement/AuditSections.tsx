@@ -6,7 +6,7 @@ import { getLabels, type LabelKey } from "../../../../data/labels/labelsStore";
 import { RoleBadge } from "./UserManagementShared";
 import { formatDateTime, formatDuration } from "./userManagementFormatters";
 import Pagination from "../../../../components/Pagination/Pagination";
-import { clampPage, pageSlice } from "../../../../components/Pagination/paginationUtils";
+import { clampPage, pageSlice } from "../../../../utils/paginationUtils";
 
 const ACTION_TYPE_LABEL_KEYS: Record<WorkspaceActionType, LabelKey> = {
   "user-deleted": "um_action_type_user_deleted",

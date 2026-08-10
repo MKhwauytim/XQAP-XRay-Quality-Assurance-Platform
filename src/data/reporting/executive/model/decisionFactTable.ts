@@ -156,6 +156,133 @@ export function buildDecisionRecords(
   return records;
 }
 
+// ── Unified aggregation entry point (2026-08-07) ────────────────────────────
+//
+// Three grains of "accuracy" exist in this report and must never be computed
+// by independent folds again (see the 2026-08-07 edit log for the bug this
+// fixes — a "port accuracy" figure that silently disagreed between the
+// executive document/workbook and deck2/management editions for the SAME
+// port in the SAME generation run):
+//
+//   - "decision": each `DecisionRecord` (L1 and L2 tallied SEPARATELY, one
+//     record per decision) contributes to whatever bucket `keyOf` returns.
+//     Whether this reads as "combined" (L1+L2 land in the same bucket, e.g.
+//     `keyOf = r => r.portName`) or "per-level" (L1/L2 land in separate
+//     buckets, e.g. `keyOf = r => \`${r.portName}|${r.decisionLevel}\``) is
+//     entirely the caller's choice of key — there is no separate code path
+//     for the two, because there is no real difference in the FOLD, only in
+//     the GROUPING. This is what every target/threshold/rank decision in the
+//     report is keyed to (master spec: audit scope is L1/L2, scored
+//     independently).
+//   - "image": L1 and L2 are first collapsed to ONE outcome per
+//     `xrayImageId` — an image reads "اشتباه" if EITHER level flagged it,
+//     the same OR-combination `buildExecutiveReportRows` uses for
+//     `ExecutiveReportRow.imageResult` — then tallied once per image. This
+//     is the grain for POPULATION-scope profiles ("how many images at this
+//     port, how accurate were they as a population"), never for
+//     target/threshold decisions: it structurally cannot see a level that
+//     individually fails while the other level happens to catch the same
+//     case (proven by the golden-master fixture in the edit log — a port
+//     scoring 100% "excellent" at image grain while its own L1 decisions
+//     scored 0% detection and the decision-combined grain scored 75%/"below
+//     target").
+//
+// A record's `outcomeClass === null` (no reviewer verdict) is excluded at
+// EVERY grain — the single evaluability rule from `classifyOutcome`, applied
+// once here instead of re-derived per fold site.
+export type Counts = {
+  evaluable: number;
+  correctClean: number;
+  correctSuspicion: number;
+  missedSuspicion: number;
+  falseSuspicion: number;
+};
+
+export function emptyCounts(): Counts {
+  return { evaluable: 0, correctClean: 0, correctSuspicion: 0, missedSuspicion: 0, falseSuspicion: 0 };
+}
+
+export function tallyOutcome(counts: Counts, outcome: OutcomeClass): void {
+  if (outcome === null) return;
+  counts.evaluable += 1;
+  if (outcome === "correct-clean") counts.correctClean += 1;
+  else if (outcome === "correct-suspicion") counts.correctSuspicion += 1;
+  else if (outcome === "missed-suspicion") counts.missedSuspicion += 1;
+  else if (outcome === "false-suspicion") counts.falseSuspicion += 1;
+}
+
+export function sumCounts(all: Counts[]): Counts {
+  return all.reduce((acc, c) => {
+    acc.evaluable += c.evaluable;
+    acc.correctClean += c.correctClean;
+    acc.correctSuspicion += c.correctSuspicion;
+    acc.missedSuspicion += c.missedSuspicion;
+    acc.falseSuspicion += c.falseSuspicion;
+    return acc;
+  }, emptyCounts());
+}
+
+export type AggregationGrain = "decision" | "image";
+
+/**
+ * Collapse L1+L2 `DecisionRecord`s (grouped by `xrayImageId`) into one
+ * synthetic combined-verdict record per image, matching
+ * `buildExecutiveReportRows`'s `imageResult` OR-combination exactly:
+ * "اشتباه" if EITHER level said so. `outcomeClass` is re-derived via
+ * `classifyOutcome` against the SAME `studyReviewResult` both level records
+ * already carry (identical for L1/L2 of one row), so the evaluability gate
+ * (reviewer verdict present) is preserved automatically — no separate
+ * "verified" flag is needed.
+ */
+function collapseToImageRecords(records: DecisionRecord[]): DecisionRecord[] {
+  const byImage = new Map<string, { l1?: DecisionRecord; l2?: DecisionRecord }>();
+  for (const rec of records) {
+    const entry = byImage.get(rec.xrayImageId) ?? {};
+    if (rec.decisionLevel === "LEVEL_1") entry.l1 = rec;
+    else entry.l2 = rec;
+    byImage.set(rec.xrayImageId, entry);
+  }
+  const combined: DecisionRecord[] = [];
+  for (const { l1, l2 } of byImage.values()) {
+    const base = l1 ?? l2;
+    if (!base) continue;
+    const employeeDecision: ResultValue =
+      l1?.employeeDecision === "اشتباه" || l2?.employeeDecision === "اشتباه" ? "اشتباه" : "سليمة";
+    combined.push({
+      ...base,
+      employeeDecision,
+      outcomeClass: classifyOutcome(employeeDecision, base.studyReviewResult),
+    });
+  }
+  return combined;
+}
+
+/**
+ * The single fold every port/stage/movement/level accuracy aggregate in the
+ * report goes through. `keyOf` receives a `DecisionRecord` — for `"image"`
+ * grain, the SYNTHETIC combined-verdict record (see `collapseToImageRecords`),
+ * so `keyOf` never needs to know which grain it was called with; the grouping
+ * key (whether it includes `decisionLevel` or not) is the only thing that
+ * distinguishes "combined" from "per-level" callers at `"decision"` grain.
+ */
+export function aggregateDecisions(
+  records: DecisionRecord[],
+  grain: AggregationGrain,
+  keyOf: (record: DecisionRecord) => string | null,
+  fallbackKey = "غير محدد"
+): Map<string, Counts> {
+  const source = grain === "image" ? collapseToImageRecords(records) : records;
+  const map = new Map<string, Counts>();
+  for (const rec of source) {
+    if (rec.outcomeClass === null) continue;
+    const key = keyOf(rec) ?? fallbackKey;
+    const counts = map.get(key) ?? emptyCounts();
+    tallyOutcome(counts, rec.outcomeClass);
+    map.set(key, counts);
+  }
+  return map;
+}
+
 /**
  * Build the per-image six-source comparison panel. Every image gets one record
  * carrying all six sources; `agreesWithReview` is only populated where both that

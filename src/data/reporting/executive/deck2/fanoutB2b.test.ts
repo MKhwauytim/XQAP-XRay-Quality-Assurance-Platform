@@ -166,9 +166,9 @@ function portAcc(key: string, c: Counts): KeyedAccuracy {
   return {
     key,
     ...c,
-    accuracy: rate(c.correctClean + c.correctSuspicion, c.evaluable),
+    accuracyByDecision: rate(c.correctClean + c.correctSuspicion, c.evaluable),
     detectionRate: rate(c.correctSuspicion, reviewerSuspicious),
-    missedSuspicionRate: rate(c.missedSuspicion, reviewerSuspicious),
+    missedSuspicionRateByDecision: rate(c.missedSuspicion, reviewerSuspicious),
     suspicionDecisionAccuracy: rate(c.correctSuspicion, c.correctSuspicion + c.falseSuspicion),
     falseSuspicionRate: rate(c.falseSuspicion, c.correctClean + c.falseSuspicion),
     band: band(c.evaluable),

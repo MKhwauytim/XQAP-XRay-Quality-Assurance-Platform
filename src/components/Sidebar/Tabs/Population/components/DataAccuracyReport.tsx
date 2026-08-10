@@ -1,12 +1,11 @@
 import { useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, ChevronRight } from "lucide-react";
-import * as XLSX from "xlsx";
 import type { NormalizedRiskRow } from "../riskData/riskDataTypes";
 import type { NormalizedBiRow } from "../biData/biDataTypes";
 import { makeBiMatchKey } from "../processing/populationProcessor";
 import type { OrphanScanResult } from "../../../../../data/integrity/orphanScan";
 import Pagination from "../../../../../components/Pagination/Pagination";
-import { clampPage, pageSlice } from "../../../../../components/Pagination/paginationUtils";
+import { clampPage, pageSlice } from "../../../../../utils/paginationUtils";
 import "./DataAccuracyReport.css";
 
 // ── column mapping definition ─────────────────────────────────────────────────
@@ -341,29 +340,6 @@ export default function DataAccuracyReport({
   function handleSearch(v: string) { setSearch(v);    setPageState({ resultKey: resultPageKey, page: 1 }); }
   function handleFilter(v: string) { setColFilter(v); setPageState({ resultKey: resultPageKey, page: 1 }); }
 
-  function handleExportExcel() {
-    // Sheet 1: column accuracy summary
-    const summaryRows = result.colStats.map(col => ({
-      "العمود":        col.label,
-      "متطابق":        col.matched,
-      "مختلف":         col.mismatched,
-      "دقة (%)":       col.accuracy,
-    }));
-
-    // Sheet 2: all mismatches (full, not paginated)
-    const detailRows = result.mismatches.map(m => ({
-      "معرف الأشعة":         m.xrayImageId,
-      "العمود":              m.colLabel,
-      "قيمة وكالة المخاطر":  m.riskValue ?? "",
-      "قيمة BI":             m.biValue ?? "",
-    }));
-
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), "دقة الأعمدة");
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(detailRows),  "تفاصيل الاختلافات");
-    XLSX.writeFile(wb, "تقرير_دقة_البيانات.xlsx");
-  }
-
   const accColor100 = accColor(result.overallAccuracy);
 
   return (
@@ -462,18 +438,6 @@ export default function DataAccuracyReport({
             ))}
           </select>
           <span className="dar-count-chip">{filtered.length.toLocaleString("ar-SA-u-nu-latn")} اختلاف</span>
-          <button
-            type="button"
-            className="dar-export-btn"
-            onClick={handleExportExcel}
-            title="تصدير كل البيانات إلى Excel"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-              <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-            </svg>
-            تصدير Excel
-          </button>
         </div>
 
         {filtered.length === 0 ? (

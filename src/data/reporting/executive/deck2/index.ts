@@ -14,6 +14,9 @@ import { setActiveStyleChoices } from "./slideKit";
 // never contend for one stylesheet. Placed after DECK_V2_CSS so a page can
 // still override a shared component default where it deliberately needs to.
 import { SECTION_THREE_CSS } from "./section3";
+// Section 4 (R4 deck parity, 2026-08-08) follows the same per-section CSS
+// convention as section 3 — see that import's own comment above.
+import { SECTION_FOUR_CSS } from "./section4";
 import { esc } from "../primitives";
 import { icon } from "../ui/icons";
 import { openReportWindow, writeOrCloseOnFailure } from "../../htmlReport";
@@ -363,7 +366,7 @@ export function buildDeckV2Html(
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>العرض التنفيذي — ${esc(monthLabel)}</title>
-<style>${ARABIC_FONT_FACE_CSS}${DECK_CSS}${DECK_V2_CSS}${SECTION_THREE_CSS}${SOURCE_REVISIONS_CSS}</style>
+<style>${ARABIC_FONT_FACE_CSS}${DECK_CSS}${DECK_V2_CSS}${SECTION_THREE_CSS}${SECTION_FOUR_CSS}${SOURCE_REVISIONS_CSS}</style>
 </head>
 <body>
 <nav class="deck-nav" id="deck-nav" aria-label="التنقّل بين أقسام العرض">

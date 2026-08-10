@@ -83,7 +83,7 @@ export type ReadJsonDirectoryResult<T> = {
  * returned index-aligned values/fileNames, so callers that need name-sorted
  * output must pass a pre-sorted `names` array (both current callers do).
  */
-async function readNamedJsonFiles<T>(
+export async function readNamedJsonFiles<T>(
   dir: DirectoryHandleLike,
   names: string[],
   options: Pick<ReadJsonDirectoryOptions, "onUnreadable" | "unreadableError" | "concurrency">
@@ -287,6 +287,66 @@ export async function readAppendOnlyDirectory<T>(
     }
   }
   return { values, fileNames, matchedNames };
+}
+
+export type SegmentTailOptions = {
+  suffix: string;
+  /** Byte offset already consumed per file name; a name missing from this map defaults to 0 (read from the start). */
+  knownOffsets: Record<string, number>;
+};
+
+export type SegmentTailResult = {
+  /** New tail text per file name that grew past its known offset. A file with
+   *  no new bytes (unchanged size, or shrunk -- treated as no-op, never
+   *  negative-length-read) is simply absent from this map. */
+  tailTextByName: Map<string, string>;
+  /** Current byte size for every matched file, whether or not it grew --
+   *  callers persist this verbatim as the new knownOffsets for next time. */
+  sizeByName: Map<string, number>;
+  /** Every matching file name in the current listing, name-sorted. */
+  matchedNames: string[];
+};
+
+/**
+ * Read only the bytes appended past each file's previously-known offset, for
+ * GENUINELY append-only, monotonically-growing files (distribution event
+ * segments -- see distributionEventStore.ts). This is the size-diff sibling
+ * of readAppendOnlyDirectory's name-diff: a name-diff is wrong here because a
+ * segment file's CONTENT keeps growing under an unchanged name, so a bare
+ * "have I seen this name before" check would silently miss every line
+ * appended after the first sighting.
+ *
+ * `File.size` (byte length) is obtained from getFile() without reading file
+ * content, and is monotonic and clock-skew-immune for an append-only file --
+ * unlike `lastModified`, which is wall-clock and unsynchronized across
+ * machines on a network share. `Blob.slice(offset)` then reads only the tail
+ * bytes. Both are used here for exactly that reason: change detection and
+ * partial reads must not depend on any clock.
+ */
+export async function readSegmentTails(
+  dir: DirectoryHandleLike,
+  options: SegmentTailOptions
+): Promise<SegmentTailResult> {
+  const entries = await listDirectoryEntries(dir);
+  const matchedNames = entries
+    .filter((entry) => entry.kind === "file" && entry.name.endsWith(options.suffix))
+    .map((entry) => entry.name)
+    .sort((a, b) => a.localeCompare(b));
+
+  const tailTextByName = new Map<string, string>();
+  const sizeByName = new Map<string, number>();
+
+  for (const name of matchedNames) {
+    const handle = await dir.getFileHandle(name, { create: false });
+    const file = await handle.getFile();
+    sizeByName.set(name, file.size);
+    const knownOffset = options.knownOffsets[name] ?? 0;
+    if (file.size <= knownOffset) continue;
+    const tail = file.slice(knownOffset);
+    tailTextByName.set(name, await tail.text());
+  }
+
+  return { tailTextByName, sizeByName, matchedNames };
 }
 
 // Module-init side effect: purge the whole cache on manual refresh

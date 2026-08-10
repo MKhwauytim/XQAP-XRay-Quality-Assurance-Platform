@@ -2,7 +2,8 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type React
 import ReportDesignerTab from "../ReportDesigner";
 import { AlertTriangle, BarChart2, Building2, Check, ClipboardList, Database, Download, FileStack, FileText, Filter, FolderOpen, Globe, History, Presentation, Settings2, User, Users, X } from "lucide-react";
 
-import { loadOrDeriveDistributionCurrentForRead, loadDistributionCurrentRevision } from "../../../../data/distribution/distributionStorage";
+import { loadOrDeriveDistributionCurrentForRead, loadDistributionCurrentRevision, loadDistributionLog } from "../../../../data/distribution/distributionStorage";
+import { loadReplacementLog, loadReferralLog } from "../../../../data/referral/referralStorage";
 import { logRejection } from "../../../../data/storage/errorLogger";
 import { loadMonthPopulationFinal, loadMonthForEditing, loadMonthPopulationFinalRevision, loadMonthManifest } from "../../../../data/population/populationStorage";
 import { useGlobalMonth } from "../../../../data/month/useGlobalMonth";
@@ -139,7 +140,6 @@ function ReportsContent() {
   const canExportReports = can("export-reports");
   const isAdmin = readSession()?.role === "admin";
   const [customizerOpen, setCustomizerOpen] = useState(false);
-  const [customizerInput, setCustomizerInput] = useState<{ execInput: ExecutiveReportInput; names: Record<string, string> } | null>(null);
   const [monthMeta, setMonthMeta] = useState<MonthMeta | null>(null);
   const [section, setSection] = useState<ReportsSection>("reports");
   const [generating, setGenerating] = useState<ReportType | null>(null);
@@ -343,15 +343,20 @@ function ReportsContent() {
     }
   }
 
-  async function handleOpenCustomizer(): Promise<void> {
+  // P0 perf fix: this used to `await loadExecInput()` (full population +
+  // sample + distribution + all employee files) before ever opening the
+  // dialog, which is why opening the customizer measured ~30 minutes on the
+  // owner's 500k-row / ~9,000-sample workspace. The dialog itself only
+  // presents style *choices* -- it doesn't need real month data to render
+  // those -- so opening is now synchronous and the heavy load is deferred
+  // into DeckDesignCustomizer, behind an explicit user-triggered preview
+  // action (see that component).
+  function handleOpenCustomizer(): void {
     if (!directoryHandle || !selectedMonth) return;
     if (!canMutate("export-reports")) {
       showToast("error", "لا تملك صلاحية تصدير التقارير.");
       return;
     }
-    const execInput = await loadExecInput();
-    if (!execInput) { showToast("error", "لم يتم العثور على بيانات المجتمع. يجب معالجة المجتمع أولاً."); return; }
-    setCustomizerInput({ execInput, names: buildDisplayNameMap() });
     setCustomizerOpen(true);
   }
 
@@ -384,7 +389,7 @@ function ReportsContent() {
     setGenerating(type);
     try {
       if (type === "sample" || type === "sample-xlsx" || type === "sample-deck") {
-        const { populationRows, sampleData, manifest } = await loadMonthForEditing(directoryHandle, selectedMonth);
+        const { populationRows, sampleData, manifest, processingSummary } = await loadMonthForEditing(directoryHandle, selectedMonth);
         if (!sampleData) { showToast("error", "لم يتم العثور على بيانات عينة لهذا الشهر."); return; }
         const [samplePopRev, sampleMasterRev] = await Promise.all([
           loadMonthPopulationFinalRevision(directoryHandle, selectedMonth),
@@ -395,6 +400,9 @@ function ReportsContent() {
           manifest,
           populationRows: (populationRows ?? []) as unknown as PreparedPopulationRow[],
           sample: sampleData,
+          // R1: granular Risk/BI before-after breakdown, already loaded by
+          // loadMonthForEditing's default scope — read verbatim, never recomputed.
+          processingSummary: processingSummary?.summary ?? null,
           sourceRevisions: collectRevisions([
             ["population.final.json", samplePopRev],
             ["sample.master.json", sampleMasterRev],
@@ -458,9 +466,29 @@ function ReportsContent() {
           showToast("ok", "تم فتح التقرير التفصيلي. استخدم أمر الطباعة للحفظ بصيغة PDF.");
         }
       } else if (type === "management" || type === "management-xlsx" || type === "management-deck") {
-        const execInput = await loadExecInput();
-        if (!execInput) { showToast("error", labels.mgmt_card_toast_no_population); return; }
+        const baseInput = await loadExecInput();
+        if (!baseInput) { showToast("error", labels.mgmt_card_toast_no_population); return; }
         const names = buildDisplayNameMap();
+        // R3 (management report): the folded `distribution.current.json` only
+        // keeps the CURRENT status per image, so reassignment counts and
+        // replacement reasons are read separately here — from the raw event
+        // history (reassignment count) and the referral/replacement request
+        // stores (reasons persist there independently of the distribution
+        // fold, see `ExecutiveReportInput.replacementReasons`'s doc comment).
+        const [distLog, replacementLog, referralLog] = await Promise.all([
+          loadDistributionLog(directoryHandle, selectedMonth),
+          loadReplacementLog(directoryHandle, selectedMonth),
+          loadReferralLog(directoryHandle, selectedMonth),
+        ]);
+        const replacementReasons: Record<string, string> = {};
+        for (const r of replacementLog.requests) {
+          if (r.status === "approved") replacementReasons[r.originalXrayImageId] = r.reason;
+        }
+        for (const r of referralLog.requests) {
+          if (r.status !== "approved") continue;
+          for (const id of r.xrayImageIds) replacementReasons[id] ??= r.reason;
+        }
+        const execInput = { ...baseInput, distributionEvents: distLog.events, replacementReasons };
         if (type === "management-xlsx") {
           const { buildManagementWorkbook } = await import("../../../../data/reporting/management/managementWorkbook");
           buildManagementWorkbook(execInput, names);
@@ -471,7 +499,7 @@ function ReportsContent() {
           showToast("ok", "تم فتح عرض الإدارة. استخدم أمر الطباعة للحفظ بصيغة PDF.");
         } else {
           const { openManagementReport } = await import("../../../../data/reporting/management/managementReport");
-          openManagementReport(execInput, names);
+          await openManagementReport(execInput, names);
           showToast("ok", labels.mgmt_card_toast_opened);
         }
       }
@@ -608,10 +636,10 @@ function ReportsContent() {
 
     // Port accuracy ranked bar.
     const portBars = model.portAccuracy
-      .filter((p) => p.accuracy != null)
-      .sort((a, b) => (b.accuracy ?? 0) - (a.accuracy ?? 0))
+      .filter((p) => p.accuracyByDecision != null)
+      .sort((a, b) => (b.accuracyByDecision ?? 0) - (a.accuracyByDecision ?? 0))
       .slice(0, 8)
-      .map((p) => ({ label: p.key, value: Math.round(p.accuracy ?? 0) }));
+      .map((p) => ({ label: p.key, value: Math.round(p.accuracyByDecision ?? 0) }));
 
     // Outcome donut (error-mix).
     const t = model.errorAnalysis.totals;
@@ -653,7 +681,7 @@ function ReportsContent() {
               className="rh-btn"
               disabled={exporting !== null || !selectedMonth || !canExportReports}
               title="تخصيص تصميم العرض التنفيذي (للمدير فقط)"
-              onClick={() => { void handleOpenCustomizer(); }}
+              onClick={() => { handleOpenCustomizer(); }}
             >
               <Settings2 size={15} strokeWidth={2} />
               تخصيص تصميم العرض
@@ -775,8 +803,8 @@ function ReportsContent() {
                     <tr key={p.key}>
                       <td>{p.key}</td>
                       <td>{fmtCount(p.evaluable)}</td>
-                      <td>{fmtPct(p.accuracy)}</td>
-                      <td>{fmtPct(p.missedSuspicionRate)}</td>
+                      <td>{fmtPct(p.accuracyByDecision)}</td>
+                      <td>{fmtPct(p.missedSuspicionRateByDecision)}</td>
                       <td><span className={`rh-band-pill rh-band-${p.band}`}>{BAND_LABELS_AR[p.band]}</span></td>
                     </tr>
                   ))}
@@ -996,7 +1024,7 @@ function ReportsContent() {
                     disabled={busy || !selectedMonth || !canExportReports}
                     title="تخصيص تصميم العرض التنفيذي (للمدير فقط)"
                     aria-label="تخصيص التصميم"
-                    onClick={() => { void handleOpenCustomizer(); }}
+                    onClick={() => { handleOpenCustomizer(); }}
                   >
                     <Settings2 size={15} strokeWidth={2} />
                   </button>
@@ -1208,10 +1236,10 @@ function ReportsContent() {
         </>
       )}
     </section>
-    {customizerOpen && customizerInput && directoryHandle ? (
+    {customizerOpen && directoryHandle ? (
       <DeckDesignCustomizer
-        execInput={customizerInput.execInput}
-        employeeDisplayNames={customizerInput.names}
+        loadExecInput={loadExecInput}
+        buildDisplayNameMap={buildDisplayNameMap}
         directoryHandle={directoryHandle}
         canMutate={canMutate}
         onClose={() => setCustomizerOpen(false)}

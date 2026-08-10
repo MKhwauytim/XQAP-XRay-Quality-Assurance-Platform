@@ -61,6 +61,26 @@ type EmployeeStat = {
   completionRate: number | null;
 };
 
+/** Per-employee counts within one grouping bucket (a stage/level or a port). */
+type BucketEmployeeStat = {
+  username: string;
+  displayName: string;
+  assigned: number;
+  completed: number;
+  completionRate: number | null;
+};
+
+/** A grouping bucket (per-stage/level or per-port) listing every employee who
+ *  took samples in it and how many (R2: "section 1 per stage, section 2 per port"). */
+export type DistributionBucket = {
+  key: string;
+  label: string;
+  totalAssigned: number;
+  totalCompleted: number;
+  completionRate: number | null;
+  employees: BucketEmployeeStat[];
+};
+
 export type DistributionModel = {
   monthFolderName: string;
   monthLabel: string;
@@ -72,9 +92,47 @@ export type DistributionModel = {
   totalRequested: number;
   completionRate: number | null;
   employees: EmployeeStat[];
+  /** Section 1 — per stage/level, each listing all employees and their sample counts. */
+  byStage: DistributionBucket[];
+  /** Section 2 — per port, each listing all employees and their sample counts. */
+  byPort: DistributionBucket[];
   /** Replacement/replaced entries surfaced as event-log highlights. */
   highlights: Array<{ xrayImageId: string; assignedTo: string; displayName: string; status: string; portName: string; lastEventAt: string; replacedById: string | null }>;
 };
+
+/** Group distribution entries into per-key buckets (stage or port), each with
+ *  a per-employee breakdown. Bucket order: highest total first (ties → key
+ *  ascending, for deterministic output). Employee order within a bucket:
+ *  highest assigned first (ties → username ascending). */
+function groupEntries(
+  entries: DistributionCurrentData["entries"],
+  keyOf: (e: DistributionCurrentData["entries"][number]) => string,
+  nameOf: (u: string) => string,
+): DistributionBucket[] {
+  const buckets = new Map<string, Map<string, BucketEmployeeStat>>();
+  for (const e of entries) {
+    const key = keyOf(e) || "غير محدد";
+    let empMap = buckets.get(key);
+    if (!empMap) { empMap = new Map(); buckets.set(key, empMap); }
+    let stat = empMap.get(e.assignedTo);
+    if (!stat) {
+      stat = { username: e.assignedTo, displayName: nameOf(e.assignedTo), assigned: 0, completed: 0, completionRate: null };
+      empMap.set(e.assignedTo, stat);
+    }
+    stat.assigned++;
+    if (e.status === "completed") stat.completed++;
+  }
+  return [...buckets.entries()]
+    .map(([key, empMap]) => {
+      const employees = [...empMap.values()]
+        .map((s) => ({ ...s, completionRate: ratePct(s.completed, s.assigned) }))
+        .sort((a, b) => b.assigned - a.assigned || a.username.localeCompare(b.username));
+      const totalAssigned = employees.reduce((s, e) => s + e.assigned, 0);
+      const totalCompleted = employees.reduce((s, e) => s + e.completed, 0);
+      return { key, label: key, totalAssigned, totalCompleted, completionRate: ratePct(totalCompleted, totalAssigned), employees };
+    })
+    .sort((a, b) => b.totalAssigned - a.totalAssigned || a.key.localeCompare(b.key));
+}
 
 export function computeDistributionModel(
   data: DistributionCurrentData,
@@ -131,6 +189,8 @@ export function computeDistributionModel(
     totalRequested,
     completionRate: ratePct(data.totalCompleted, data.totalAssigned),
     employees,
+    byStage: groupEntries(data.entries, (e) => e.row.stage ?? "غير محدد", nameOf),
+    byPort: groupEntries(data.entries, (e) => e.row.portName ?? "غير محدد", nameOf),
     highlights,
   };
 }
@@ -147,6 +207,26 @@ function rotate<T>(arr: T[], by: number): T[] {
 
 function pad(n: number): string {
   return String(n).padStart(2, "0");
+}
+
+/** Render one grouping bucket (a stage/level or a port) as a panel: bucket
+ *  totals in the panel title, then a per-employee table. Used by both the
+ *  R2 "section 1 per stage" and "section 2 per port" document pages. */
+function bucketPanel(bucket: DistributionBucket, iconName: string): string {
+  return panel(
+    `${bucket.label} — ${fmtNum(bucket.totalAssigned)} صورة، ${fmtPct(bucket.completionRate)} إنجاز`,
+    dataTable({
+      headers: ["الموظف", "المعيّنة", "المكتملة", "الإنجاز"],
+      rows: bucket.employees.map((e) => [e.displayName, fmtNum(e.assigned), fmtNum(e.completed), fmtPct(e.completionRate)]),
+      totalRow: ["المجموع", fmtNum(bucket.totalAssigned), fmtNum(bucket.totalCompleted), fmtPct(bucket.completionRate)],
+    }),
+    { iconName },
+  );
+}
+
+function bucketSectionBody(buckets: DistributionBucket[], emptyNote: string): string {
+  if (buckets.length === 0) return `<div class="d-empty">${emptyNote}</div>`;
+  return buckets.map((b) => bucketPanel(b, "layers")).join("\n");
 }
 
 async function distributionDocPages(m: DistributionModel, issueDate: string, detailRows: (string | number | null)[][]): Promise<string> {
@@ -175,7 +255,25 @@ async function distributionDocPages(m: DistributionModel, issueDate: string, det
   }));
   await yieldToMain();
 
-  // Page 2 — per-employee breakdown (paginated).
+  // Section 1 — per stage/level (R2): each level lists every employee and
+  // how many samples they took in it.
+  pages.push(page({
+    id: "d-by-stage", title: "القسم 1 — حسب المستوى", pageNo: "02", railTabs: rotate(DIST_RAILS, 1),
+    body: `${pageHeader({ iconName: "layers", eyebrow: "القسم 1", title: "التوزيع حسب المستوى", subtitle: "لكل مستوى: الموظفون الذين أخذوا صوراً منه وعددها وحالة الإنجاز." })}
+      ${bucketSectionBody(m.byStage, "لا توجد بيانات توزيع بعد.")}`,
+  }));
+  await yieldToMain();
+
+  // Section 2 — per port (R2): each port lists every employee and how many
+  // samples they took in it.
+  pages.push(page({
+    id: "d-by-port", title: "القسم 2 — حسب المنفذ", pageNo: "03", railTabs: rotate(DIST_RAILS, 1),
+    body: `${pageHeader({ iconName: "port", eyebrow: "القسم 2", title: "التوزيع حسب المنفذ", subtitle: "لكل منفذ: الموظفون الذين أخذوا صوراً منه وعددها وحالة الإنجاز." })}
+      ${bucketSectionBody(m.byPort, "لا توجد بيانات توزيع بعد.")}`,
+  }));
+  await yieldToMain();
+
+  // Per-employee breakdown across the whole month (paginated).
   const empHeaders = ["الموظف", "الحصة اليومية", "الإجمالي", "قيد الانتظار", "مكتمل", "طلب استبدال", "مستبدل", "الإنجاز"];
   const empRows = m.employees.map((e) => [
     e.displayName, e.dailyQuota === null ? null : fmtNum(e.dailyQuota), fmtNum(e.total),
@@ -186,7 +284,7 @@ async function distributionDocPages(m: DistributionModel, issueDate: string, det
     fmtNum(m.totalRequested), fmtNum(m.totalReplaced), fmtPct(m.completionRate),
   ];
   const empChunks = paginateRows({ headers: empHeaders, rows: empRows, rowsPerPage: 18, totalRow: empTotal });
-  let pageNo = 2;
+  let pageNo = 4;
   for (let i = 0; i < empChunks.length; i++) {
     const chunk = empChunks[i];
     pages.push(page({
@@ -211,8 +309,8 @@ async function distributionDocPages(m: DistributionModel, issueDate: string, det
     await yieldToMain();
   }
 
-  // Full detail (paginated).
-  const detailHeaders = ["رقم الأشعة", "الموظف", "المنفذ", "CertScan", "الحالة", "آخر حدث"];
+  // Full detail (paginated) — R5: level + both level answers, per employee row.
+  const detailHeaders = ["رقم الأشعة", "الموظف", "المنفذ", "المستوى", "CertScan", "م.أول", "م.ثاني", "الحالة", "آخر حدث"];
   const detailChunks = paginateRows({ headers: detailHeaders, rows: detailRows, rowsPerPage: 22 });
   for (let i = 0; i < detailChunks.length; i++) {
     const chunk = detailChunks[i];
@@ -244,9 +342,17 @@ function titleSlide(m: DistributionModel): string {
 </section>`;
 }
 
+/** Top-8 bucket ranking table used by the stage/port deck slides (R2). */
+function bucketMiniTable(buckets: DistributionBucket[]): string {
+  return miniTable({
+    headers: ["المستوى/المنفذ", "المعيّنة", "المكتملة", "الإنجاز"],
+    rows: buckets.slice(0, 8).map((b) => [b.label, fmtNum(b.totalAssigned), fmtNum(b.totalCompleted), fmtPct(b.completionRate)]),
+  });
+}
+
 async function distributionDeckSlides(m: DistributionModel): Promise<string> {
   const slides: string[] = [];
-  const total = 4;
+  const total = 6;
   slides.push(titleSlide(m));
   await yieldToMain();
 
@@ -283,10 +389,34 @@ async function distributionDeckSlides(m: DistributionModel): Promise<string> {
   }));
   await yieldToMain();
 
-  // 3 — per-employee load.
+  // 3 — section 1: per stage/level (R2).
+  slides.push(slide({
+    id: "d-deck-stage", title: "القسم 1 — حسب المستوى", num: 3, total,
+    eyebrow: "القسم 1", iconName: "layers",
+    headline: "التوزيع والإنجاز حسب المستوى",
+    body: m.byStage.length === 0
+      ? `<div class="deck-empty"><span class="deck-empty-icon">${icon("alert", 36)}</span><b>لا توجد بيانات</b><span>لم تُوزَّع أي صور بعد.</span></div>`
+      : bucketMiniTable(m.byStage),
+    decision: "يوضح إنجاز كل مستوى على حدة ومدى تمثيل الموظفين فيه.",
+  }));
+  await yieldToMain();
+
+  // 4 — section 2: per port (R2).
+  slides.push(slide({
+    id: "d-deck-port", title: "القسم 2 — حسب المنفذ", num: 4, total,
+    eyebrow: "القسم 2", iconName: "port",
+    headline: "التوزيع والإنجاز حسب المنفذ",
+    body: m.byPort.length === 0
+      ? `<div class="deck-empty"><span class="deck-empty-icon">${icon("alert", 36)}</span><b>لا توجد بيانات</b><span>لم تُوزَّع أي صور بعد.</span></div>`
+      : bucketMiniTable(m.byPort),
+    decision: "يبرز المنافذ الأعلى حملاً ومدى تقدّم الإنجاز فيها.",
+  }));
+  await yieldToMain();
+
+  // 5 — per-employee load.
   const topEmp = m.employees.slice(0, 8);
   slides.push(slide({
-    id: "d-deck-emp", title: "أحمال الموظفين", num: 3, total,
+    id: "d-deck-emp", title: "أحمال الموظفين", num: 5, total,
     eyebrow: "التعيينات", iconName: "users",
     headline: "التوزيع والإنجاز لكل موظف",
     body: topEmp.length === 0
@@ -303,9 +433,9 @@ async function distributionDeckSlides(m: DistributionModel): Promise<string> {
   }));
   await yieldToMain();
 
-  // 4 — replacement activity.
+  // 6 — replacement activity.
   slides.push(slide({
-    id: "d-deck-repl", title: "الاستبدالات", num: 4, total,
+    id: "d-deck-repl", title: "الاستبدالات", num: 6, total,
     eyebrow: "سجل الأحداث", iconName: "flag",
     headline: "نشاط الاستبدال",
     body: kpiBand([
@@ -325,10 +455,15 @@ async function distributionDeckSlides(m: DistributionModel): Promise<string> {
 
 // ─── Public string builders ───────────────────────────────────────────────────
 
+// R5 (2026-08-07 owner requirement — "port name level answers date etc per
+// employee"): the full-detail table already listed every row, but was
+// missing the risk level and both level results ("answers"). Added here
+// rather than recomputed — every field comes straight off `e.row`, the same
+// `PreparedPopulationRow` the sample/executive editions already read.
 function detailRowsFor(data: DistributionCurrentData, names: Record<string, string>): (string | number | null)[][] {
   return data.entries.map((e) => [
-    e.xrayImageId, names[e.assignedTo] ?? e.assignedTo, e.row.portName ?? "—",
-    e.row.certScanStatus, statusLabel(e.status), e.lastEventAt,
+    e.xrayImageId, names[e.assignedTo] ?? e.assignedTo, e.row.portName ?? "—", e.row.stage ?? "—",
+    e.row.certScanStatus, e.row.xrayLevelOneResult, e.row.xrayLevelTwoResult, statusLabel(e.status), e.lastEventAt,
   ]);
 }
 
@@ -439,11 +574,25 @@ export async function buildDistributionXlsx(
     ...m.highlights.map((h) => [h.xrayImageId, h.displayName, statusLabel(h.status)]),
   ];
 
+  // Sheet 5 — Section 1: per stage/level (R2).
+  const byStageSheet: (string | number)[][] = [
+    ["المستوى", "الموظف", "المعيّنة", "المكتملة", "الإنجاز٪"],
+    ...m.byStage.flatMap((b) => b.employees.map((e) => [b.label, e.displayName, e.assigned, e.completed, pctCell(e.completionRate)])),
+  ];
+
+  // Sheet 6 — Section 2: per port (R2).
+  const byPortSheet: (string | number)[][] = [
+    ["المنفذ", "الموظف", "المعيّنة", "المكتملة", "الإنجاز٪"],
+    ...m.byPort.flatMap((b) => b.employees.map((e) => [b.label, e.displayName, e.assigned, e.completed, pctCell(e.completionRate)])),
+  ];
+
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(baseline), "الأساس — ملخص");
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(assignments), "التعيينات");
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(perEmployee), "حسب الموظف");
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(statusSummary), "الحالة والأحداث");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(byStageSheet), "1 · حسب المستوى");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(byPortSheet), "2 · حسب المنفذ");
   if (hasSourceRevisions(sourceRevisions)) {
     XLSX.utils.book_append_sheet(
       wb,

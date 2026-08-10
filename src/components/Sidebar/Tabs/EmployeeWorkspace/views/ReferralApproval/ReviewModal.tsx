@@ -3,6 +3,7 @@ import { X } from "lucide-react";
 
 import { useFocusTrap } from "../../../../../../hooks/useFocusTrap";
 import { useLabels } from "../../../../../../data/labels/useLabels";
+import { ModalPortal } from "../../../../../ModalPortal/ModalPortal";
 
 type Props = {
   title: string;
@@ -36,6 +37,7 @@ export default function ReviewModal({ title, description, isApprove, onClose, on
   }
 
   return (
+    <ModalPortal>
     <div ref={dialogRef} className="ew-modal-backdrop" role="dialog" aria-modal="true">
       <div className="ew-replace-modal">
         <div className="ew-replace-header">
@@ -71,5 +73,6 @@ export default function ReviewModal({ title, description, isApprove, onClose, on
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }

@@ -6,13 +6,11 @@ import type {
   StageAliasMappings,
   StageKey,
 } from "../../../../../data/population/populationConfig";
-
-const STAGE_LABELS: Record<StageKey, string> = {
-  first: "المستوى الأول",
-  second: "المستوى الثاني",
-  third: "المستوى الثالث",
-  fourth: "المستوى الرابع",
-};
+import { DelimitedListInput } from "./DelimitedListInput";
+import {
+  SHEET_DERIVED_FIELD_KEYS,
+  STAGE_KEY_LABELS as STAGE_LABELS,
+} from "./mappingSettingsConfig";
 
 export function StageMappingsSection({
   stageMappings,
@@ -32,11 +30,10 @@ export function StageMappingsSection({
       {(Object.keys(STAGE_LABELS) as StageKey[]).map((stageKey) => (
         <label key={stageKey} className="save-disk-label">
           {STAGE_LABELS[stageKey]}
-          <input
-            type="text"
+          <DelimitedListInput
             className="save-disk-input"
-            value={(stageMappings[stageKey] ?? []).join(", ")}
-            onChange={(event) => onChange(stageKey, event.target.value)}
+            value={stageMappings[stageKey] ?? []}
+            onCommit={(aliases) => onChange(stageKey, aliases.join(", "))}
           />
         </label>
       ))}
@@ -132,20 +129,18 @@ export function WorkbookSheetsSection({
       )}
       <label className="save-disk-label">
         أنماط أسماء أوراق المخاطر (Risk Sheet Patterns)
-        <input
-          type="text"
+        <DelimitedListInput
           className="save-disk-input"
-          value={template.sheetPatterns.risk.join(", ")}
-          onChange={(event) => onPatternChange("risk", event.target.value)}
+          value={template.sheetPatterns.risk}
+          onCommit={(aliases) => onPatternChange("risk", aliases.join(", "))}
         />
       </label>
       <label className="save-disk-label">
         أنماط أسماء أوراق ذكاء الأعمال (BI Sheet Patterns)
-        <input
-          type="text"
+        <DelimitedListInput
           className="save-disk-input"
-          value={template.sheetPatterns.bi.join(", ")}
-          onChange={(event) => onPatternChange("bi", event.target.value)}
+          value={template.sheetPatterns.bi}
+          onCommit={(aliases) => onPatternChange("bi", aliases.join(", "))}
         />
       </label>
     </div>
@@ -321,6 +316,7 @@ function ColumnHints({
       <div style={{ display: "grid", gap: "6px" }}>
         {fields.map((field) => {
           const matches = hints[field.key] ?? [];
+          const isSheetDerived = SHEET_DERIVED_FIELD_KEYS.has(field.key);
           return (
             <div
               key={field.key}
@@ -330,11 +326,19 @@ function ColumnHints({
                 {field.label}
               </span>
               <span
-                style={{ color: matches.length > 0 ? "#166534" : "#b45309" }}
+                style={{
+                  color: isSheetDerived
+                    ? "#1d4ed8"
+                    : matches.length > 0
+                      ? "#166534"
+                      : "#b45309",
+                }}
               >
-                {matches.length > 0
-                  ? matches.join("، ")
-                  : "لم يتم العثور على تطابق واضح"}
+                {isSheetDerived
+                  ? "يُشتق تلقائياً من اسم ورقة العمل، وليس من عمود"
+                  : matches.length > 0
+                    ? matches.join("، ")
+                    : "لم يتم العثور على تطابق واضح"}
               </span>
             </div>
           );

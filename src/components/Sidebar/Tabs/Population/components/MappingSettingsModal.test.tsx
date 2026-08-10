@@ -41,9 +41,13 @@ describe("MappingSettingsModal behavior wiring", () => {
       />,
     );
 
-    fireEvent.change(screen.getByPlaceholderText("أسماء الأعمدة في ملف المخاطر..."), {
-      target: { value: "Risk ID" },
-    });
+    const riskAliasInput = screen.getByPlaceholderText(
+      "أسماء الأعمدة في ملف المخاطر...",
+    );
+    fireEvent.change(riskAliasInput, { target: { value: "Risk ID" } });
+    // The alias inputs commit on blur (Task 1 fix), not on every keystroke — a raw `change`
+    // alone must not reach onConfigChange, otherwise the trailing-comma bug is back.
+    fireEvent.blur(riskAliasInput);
     expect(onConfigChange).toHaveBeenLastCalledWith(
       expect.objectContaining({
         mappingTemplates: expect.arrayContaining([
@@ -55,9 +59,9 @@ describe("MappingSettingsModal behavior wiring", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "ترجمة المستويات" }));
-    fireEvent.change(screen.getByLabelText("المستوى الأول"), {
-      target: { value: "FIRST, 1" },
-    });
+    const stageInput = screen.getByLabelText("المستوى الأول");
+    fireEvent.change(stageInput, { target: { value: "FIRST, 1" } });
+    fireEvent.blur(stageInput);
     expect(onConfigChange).toHaveBeenLastCalledWith(
       expect.objectContaining({
         stageMappings: expect.objectContaining({ first: ["FIRST", "1"] }),
@@ -111,5 +115,31 @@ describe("MappingSettingsModal behavior wiring", () => {
 
     rerender(<MappingSettingsModal isOpen mode="processing" {...props} />);
     expect(screen.getByRole("heading", { name: "إعدادات المعالجة" })).toBeTruthy();
+  });
+
+  it("W3/W14: processing mode surfaces the CertScan paste zone and the RNG seed field, and routes their edits out", () => {
+    const onCertScanPasteTextChange = vi.fn();
+    const onSampleSeedChange = vi.fn();
+    render(
+      <MappingSettingsModal
+        isOpen
+        mode="processing"
+        onClose={vi.fn()}
+        config={compactConfig()}
+        onConfigChange={vi.fn()}
+        certScanPasteText=""
+        onCertScanPasteTextChange={onCertScanPasteTextChange}
+        sampleSeed="seed-123"
+        onSampleSeedChange={onSampleSeedChange}
+      />,
+    );
+
+    // CertScan grid (relocated from Phase 2 — W3).
+    expect(screen.getByLabelText("منطقة لصق بيانات CertScan")).toBeTruthy();
+
+    // RNG seed field (relocated from Phase 3 — W14).
+    const seedInput = screen.getByDisplayValue("seed-123") as HTMLInputElement;
+    fireEvent.change(seedInput, { target: { value: "seed-456" } });
+    expect(onSampleSeedChange).toHaveBeenCalledWith("seed-456");
   });
 });

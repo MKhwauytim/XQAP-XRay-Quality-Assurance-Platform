@@ -3,6 +3,7 @@ import {
   Fragment,
   forwardRef,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -11,10 +12,11 @@ import {
   type ReactNode,
 } from "react";
 import * as XLSX from "xlsx";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { useLabels } from "../../data/labels/useLabels";
 import { registerPendingSaveFlush } from "../../data/storage/pendingSaveFlush";
 import Pagination from "../Pagination/Pagination";
-import { DATA_PAGE_SIZE, clampPage, pageSlice } from "../Pagination/paginationUtils";
+import { DATA_PAGE_SIZE, clampPage, pageSlice } from "../../utils/paginationUtils";
 import "./DataTable.css";
 import {
   type DateFormatMode,
@@ -321,8 +323,6 @@ export default function DataTable<TRow>({
     totalFr: number;
     tableW: number;
   } | null>(null);
-  const [scrollTop, setScrollTop]             = useState(0);
-  const [containerHeight, setContainerHeight] = useState(600);
   const rowsPageKey = `${rows.length}:${rows[0] ? getRowKey(rows[0]) : ""}:${rows.at(-1) ? getRowKey(rows.at(-1)!) : ""}`;
   const [pageState, setPageState] = useState<{ rowsKey: string; page: number }>(() => ({ rowsKey: rowsPageKey, page: 1 }));
 
@@ -385,28 +385,15 @@ export default function DataTable<TRow>({
   }, []);
 
   // Close filter menu when table scrolls (button has moved, position would be stale).
-  // Also track scrollTop + container height for row virtualisation.
+  // Row virtualisation itself (viewport size + scroll-position tracking, including
+  // its own ResizeObserver on the scroll container) is now owned by
+  // `rowVirtualizer` below.
   useEffect(() => {
     const el = tableWrapRef.current;
     if (!el) return;
-    let raf: number | null = null;
-    const handleScroll = () => {
-      setOpenFilterCol(null);
-      if (raf !== null) return;
-      raf = requestAnimationFrame(() => {
-        raf = null;
-        setScrollTop(el.scrollTop);
-      });
-    };
-    const ro = new ResizeObserver(() => setContainerHeight(el.clientHeight));
+    const handleScroll = () => setOpenFilterCol(null);
     el.addEventListener("scroll", handleScroll, { passive: true });
-    ro.observe(el);
-    setContainerHeight(el.clientHeight);
-    return () => {
-      el.removeEventListener("scroll", handleScroll);
-      ro.disconnect();
-      if (raf !== null) cancelAnimationFrame(raf);
-    };
+    return () => el.removeEventListener("scroll", handleScroll);
   }, []);
 
   // Reconcile the persisted column order with the current column set:
@@ -475,17 +462,36 @@ export default function DataTable<TRow>({
 
   function changePage(nextPage: number): void {
     setPageState({ rowsKey: rowsPageKey, page: nextPage });
-    const tableWrap = tableWrapRef.current;
-    if (tableWrap) tableWrap.scrollTop = 0;
-    setScrollTop(0);
+    // `scrollToOffset` updates the virtualizer's own tracked scroll position
+    // synchronously (not just the DOM), which a raw `tableWrap.scrollTop = 0`
+    // can't rely on -- jsdom (this component's tests) never dispatches the
+    // native `scroll` event on a programmatic scrollTop write, and even in a
+    // real browser that event is asynchronous, so the virtualizer would
+    // render one stale frame at the old window before catching up.
+    rowVirtualizer.scrollToOffset(0);
   }
 
   // LOG-03: only notify when the visible rows actually changed. filteredRows can
   // get a fresh array identity on every render when a consumer passes an
   // unstable rowMatchesFilter; emitting each time loops consumers that store
   // the rows in state.
+  //
+  // useLayoutEffect (not useEffect) is deliberate: this notification calls a
+  // consumer-supplied callback (typically a parent setState, e.g. XrayReferrals'
+  // `setFilteredTableEntries`) that other click handlers in the parent read
+  // synchronously at click time (e.g. "reassign all filtered"/"select all
+  // filtered" buttons). filteredRows itself is already computed synchronously
+  // during THIS render via useMemo above; the only reason a consumer's mirrored
+  // state could ever lag behind what's on screen is if forwarding it runs in a
+  // passive effect, which React defers relative to the parent's own commit and
+  // to real user input. A layout effect still fires after this component's own
+  // commit, but React flushes any state update it triggers synchronously before
+  // the browser paints or yields to the next event — so by the time rows are
+  // visible on screen, a filtered-rows-dependent parent action is guaranteed to
+  // observe the up-to-date set instead of an empty/stale one. See
+  // XrayReferrals.tsx's openBulkReassignModal for the concrete bug this closes.
   const lastEmittedRowsRef = useRef<TRow[] | null>(null);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!onFilteredRowsChange) return;
     const prev = lastEmittedRowsRef.current;
     const unchanged =
@@ -499,11 +505,39 @@ export default function DataTable<TRow>({
 
   // Virtual window — only render rows within (+ overscan beyond) the scroll viewport.
   // Keep this aligned with DataTable.css padding; compact mode intentionally reduces row height.
+  // TanStack Virtual (not a hand-rolled scrollTop/ResizeObserver calculation
+  // -- rework W5.6): chosen specifically for RTL. react-window's RTL support
+  // is documented-broken and its v2 drops RTL from `List` entirely; TanStack
+  // Virtual's RTL gap is horizontal-only, which doesn't apply to vertical row
+  // virtualization. Row height is fixed per density mode, so a plain
+  // `estimateSize` (no per-row `measureElement` dynamic sizing) is exact, not
+  // an estimate in practice.
   const VROW_H  = density === "compact" ? 34 : 40;
   const OVERSCAN = 8;
 
-  const vRawStart = Math.max(0, Math.floor(scrollTop / VROW_H) - OVERSCAN);
-  const vRawEnd   = Math.min(pageRows.length, Math.ceil((scrollTop + containerHeight) / VROW_H) + OVERSCAN);
+  // `useVirtualizer` intentionally returns non-memoizable functions
+  // (`scrollToOffset`, etc.); this component reads them straight from the
+  // hook's return value on every render rather than caching them, so the
+  // Compiler skipping memoization for this scope is exactly the correct,
+  // safe behavior here -- not a bug to fix.
+  // eslint-disable-next-line react-hooks/incompatible-library
+  const rowVirtualizer = useVirtualizer({
+    count: pageRows.length,
+    getScrollElement: () => tableWrapRef.current,
+    estimateSize: () => VROW_H,
+    overscan: OVERSCAN,
+    // Matches the previous hand-rolled implementation's own `useState(600)`
+    // fallback: before the virtualizer's internal ResizeObserver has fired
+    // its first real measurement (mount, or any environment where
+    // ResizeObserver never fires -- notably jsdom in this component's tests,
+    // which stub it as a no-op), a 0-height scroll container would otherwise
+    // compute an empty visible range and render nothing.
+    initialRect: { width: 0, height: 600 },
+  });
+
+  const virtualItems = rowVirtualizer.getVirtualItems();
+  const vRawStart = virtualItems.length ? virtualItems[0]!.index : 0;
+  const vRawEnd   = virtualItems.length ? virtualItems[virtualItems.length - 1]!.index + 1 : 0;
 
   // Always include the expanded row in the slice so it is never unmounted while open.
   const expandedIdx = expandedKey != null
@@ -682,9 +716,7 @@ export default function DataTable<TRow>({
       totalFr: tFr,
       tableW,
     };
-    // eslint-disable-next-line react-hooks/immutability -- cursor change is a valid DOM side-effect in a mouse-event handler, not during render
     document.body.style.cursor     = "col-resize";
-    // eslint-disable-next-line react-hooks/immutability -- same as above
     document.body.style.userSelect = "none";
 
     function onMove(ev: MouseEvent): void {

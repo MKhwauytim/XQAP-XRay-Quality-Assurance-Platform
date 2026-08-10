@@ -354,7 +354,10 @@ describe("workflow · report (buildExecutiveReport + buildManagementReport)", ()
       config: DEFAULT_EXEC_CONFIG,
     };
     const exec = await buildExecutiveReport(input);
-    const mgmt = buildManagementReport(input);
+    // `buildManagementReport` became async when the management editions moved
+    // off the executive accuracy model onto their own progress model. Without
+    // the await this asserted against a Promise and silently passed nothing.
+    const mgmt = await buildManagementReport(input);
 
     expect(exec.length).toBeGreaterThan(1000);
     expect(exec).toContain('dir="rtl"');
@@ -375,7 +378,9 @@ describe("workflow · report (buildExecutiveReport + buildManagementReport)", ()
       config: DEFAULT_EXEC_CONFIG,
     };
     const exec = await buildExecutiveReport(emptyInput);
-    expect(() => buildManagementReport(emptyInput)).not.toThrow();
+    // `.not.toThrow()` on an async call is vacuous — the promise rejects after
+    // the call returns, so it could never fail. Assert on the resolved value.
+    await expect(buildManagementReport(emptyInput)).resolves.toBeTypeOf("string");
     expect(exec.length).toBeGreaterThan(500);
   });
 });

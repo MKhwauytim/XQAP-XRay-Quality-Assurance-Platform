@@ -1,5 +1,12 @@
 import type { DirectoryHandleLike, FileHandleLike } from "../storage/fileSystemAccess";
-import { safeWriteJson, safeWriteJsonText, safeReadJson, readEnvelopeRevision, readFileTextWithRetry } from "../storage/safeWrite";
+import {
+  safeWriteJson,
+  safeWriteJsonText,
+  safeReadJson,
+  readEnvelopeRevision,
+  readFileTextWithRetry,
+  type SafeWriteProgressPhase,
+} from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
 import { mapWithConcurrency } from "../storage/concurrency";
 import { withResourceLock } from "../storage/webLocks";
@@ -14,13 +21,19 @@ import type {
   ProcessingSummaryData,
   SourceFileMetadata,
 } from "./monthTypes";
-import type { SampleMasterData } from "../sampling/sampleTypes";
+import type { CertScanShortfall, SampleMasterData } from "../sampling/sampleTypes";
 import type { DistributionCurrentData } from "../distribution/distributionTypes";
 import { loadOrDeriveDistributionCurrent } from "../distribution/distributionStorage";
 import { loadSampleMaster } from "../sampling/sampleStorage";
 import { loadPopulationConfig } from "./populationConfig";
 import { rebuildReplacementIndex } from "./replacementIndexStorage";
 import type { PreparedPopulationRow } from "./populationTypes";
+import {
+  buildPopulationAggregate,
+  loadPopulationAggregate,
+  savePopulationAggregate,
+  type PopulationAggregateLoadResult,
+} from "./populationAggregate";
 import {
   getPopulationMonthDir,
   getPopulationRoot,
@@ -118,6 +131,15 @@ export type SamplingProof = {
   totalActual: number;
   certScanActual: number;
   nonCertScanActual: number;
+  /**
+   * CertScan shortfalls detected during the draw (owner decision, 2026-08): a
+   * stratum short on CertScan under-fills rather than silently backfilling from
+   * NonCertscan; this mirrors `SampleMasterData.certScanShortfalls` so the
+   * shortfall is self-describing in the proof document too, not only in the
+   * sample master / sampling plan. Optional — absent on proofs written before
+   * this field existed, and omitted by callers that don't pass it.
+   */
+  certScanShortfalls?: CertScanShortfall[];
 };
 
 export async function saveSamplingProof(
@@ -160,6 +182,15 @@ export type SaveMonthRunParams = {
    * confirmation. Pass true once the user has explicitly confirmed the overwrite.
    */
   confirmedOverwrite?: boolean;
+  /**
+   * B task 2 — optional observability hook for the largest write in this batch
+   * (population.final.json, the one most likely to run 10-15 minutes on a big
+   * population). Fired with the safeWriteJson phase so the Population save UI
+   * can show progress past the point where processPopulation's own (in-memory,
+   * already-100%) progress bar would otherwise go silent. Optional: omitting it
+   * changes nothing about the write itself.
+   */
+  onSaveProgress?: (phase: SafeWriteProgressPhase) => void;
 };
 
 export type SaveMonthRunResult = {
@@ -332,7 +363,7 @@ async function saveMonthRunLocked(
         nonCertScanRows,
         rows: processedRows
       };
-      await safeWriteJson(processedDir, "population.final.json", finalData);
+      await safeWriteJson(processedDir, "population.final.json", finalData, params.onSaveProgress);
 
       await Promise.all([
         (async () => {
@@ -366,6 +397,27 @@ async function saveMonthRunLocked(
             savedAt: now,
           };
           await safeWriteJson(processedDir, "processing.summary.json", summaryData);
+        })(),
+        (async () => {
+          // Best-effort, non-fatal — same contract as the replacement-index
+          // rebuild above: a persisted month aggregate (owner requirement)
+          // lets the Population tab render an already-processed/locked month
+          // with zero reads of population.final.json/risk.raw.json/bi.raw.json.
+          // Its failure must never sink an otherwise-successful population
+          // save; the tab falls back to an explicit "missing aggregate"
+          // recovery prompt on next open rather than silently re-reading rows.
+          if (!params.processingSummary) return;
+          try {
+            const aggregate = buildPopulationAggregate({
+              monthFolderName,
+              computedBy: username,
+              summary: params.processingSummary.summary,
+              preparedRows: processedRows as PreparedPopulationRow[],
+            });
+            await savePopulationAggregate(directoryHandle, monthFolderName, aggregate);
+          } catch (error) {
+            logError("population:save-aggregate", error);
+          }
         })(),
       ]);
 
@@ -805,6 +857,22 @@ export type MonthEditData = {
   sampleData: SampleMasterData | null;
   distributionCurrent: DistributionCurrentData | null;
   manifest: MonthManifestData | null;
+  /**
+   * True when this month's manifest reports `status === "closed"` — the
+   * owner-mandated lock. When true, `populationRows`/`riskRawRows`/
+   * `biRawRows` above are deliberately NOT fetched even if the caller's
+   * `MonthLoadScope` asked for them (see `loadMonthForEditing`); the Population
+   * tab must render from `populationAggregate` below instead.
+   */
+  populationLocked: boolean;
+  /**
+   * Populated only when `populationLocked` is true and the caller's scope
+   * requested population data. `status: "ok"` carries the persisted aggregate
+   * to render from; `"missing"`/`"corrupt"` tell the caller to show the
+   * explicit reprocessing-recovery prompt instead of silently falling back to
+   * a row read (owner requirement — no silent fallback).
+   */
+  populationAggregate: PopulationAggregateLoadResult | null;
 };
 
 // ── Focused loaders (Large-Population Performance Proposal, Phase A step 1) ────
@@ -920,7 +988,9 @@ export async function loadMonthForEditing(
     processingSummary: null,
     sampleData: null,
     distributionCurrent: null,
-    manifest: null
+    manifest: null,
+    populationLocked: false,
+    populationAggregate: null,
   };
 
   try {
@@ -937,17 +1007,30 @@ export async function loadMonthForEditing(
     const manifest = await loadMonthManifest(directoryHandle, monthFolderName);
     const needsRawWorkbooks = (scope.raw ?? false) && (!manifest || manifest.status === "raw-saved");
     const wantsSample = (scope.sample ?? false) || (scope.distribution ?? false);
+    // Owner requirement (2026-08-07): a LOCKED month is frozen history — the
+    // Population tab must never re-read population.final.json/risk.raw.json/
+    // bi.raw.json for it, regardless of what the caller's scope asked for. It
+    // reads the persisted aggregate instead (populationAggregate.ts). A
+    // missing/unreadable manifest is NOT treated as locked — same fail-open
+    // stance as monthLock.ts's isMonthClosed, since this is governance, not a
+    // security boundary.
+    const populationLocked = manifest?.status === "closed";
+    const wantsPopulation = (scope.population ?? false) && !populationLocked;
+    const wantsRaw = needsRawWorkbooks && !populationLocked;
 
-    const [popData, processingSummary, rawRows, sampleData] = await Promise.all([
-      scope.population ? loadMonthPopulationFinal(directoryHandle, monthFolderName) : Promise.resolve(null),
+    const [popData, processingSummary, rawRows, sampleData, aggregateResult] = await Promise.all([
+      wantsPopulation ? loadMonthPopulationFinal(directoryHandle, monthFolderName) : Promise.resolve(null),
       scope.summary ? loadProcessingSummary(directoryHandle, monthFolderName) : Promise.resolve(null),
-      needsRawWorkbooks
+      wantsRaw
         ? Promise.all([
             loadRawDataset(directoryHandle, monthFolderName, "risk"),
             loadRawDataset(directoryHandle, monthFolderName, "bi"),
           ])
         : Promise.resolve([[], []] as [Array<Record<string, unknown>>, Array<Record<string, unknown>>]),
       wantsSample ? loadMonthSampleState(directoryHandle, monthFolderName) : Promise.resolve(null),
+      populationLocked && (scope.population ?? false)
+        ? loadPopulationAggregate(directoryHandle, monthFolderName)
+        : Promise.resolve(null),
     ]);
 
     const [riskRawRows, biRawRows] = rawRows;
@@ -964,7 +1047,9 @@ export async function loadMonthForEditing(
       processingSummary,
       sampleData,
       distributionCurrent,
-      manifest
+      manifest,
+      populationLocked,
+      populationAggregate: aggregateResult,
     };
   } catch {
     return empty;

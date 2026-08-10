@@ -34,6 +34,10 @@ import type { ReferralRequest, ReplacementRequest } from "../../../../../data/re
 import { loadAdminBrowsePreset, loadUserBrowsePreset } from "../../../../../data/preferences/browsePresetStorage";
 import { subscribeToDataRefresh } from "../../../../../data/workspace/dataRefreshSignal";
 import { loadSampleMaster } from "../../../../../data/sampling/sampleStorage";
+import {
+  loadAdhocEntriesForEmployeeView,
+  type AdhocDistributionEntry,
+} from "../../../../../data/adhocImport/adhocImportEmployeeView";
 import { loadTemplate } from "../../../../../data/templates/templateStorage";
 import { loadInspectionTemplateSelection } from "../../../../../data/templates/templateSelectionStorage";
 import { getFieldsForPhase, getTemplatePhases } from "../../../../../data/templates/templateRuntime";
@@ -226,11 +230,19 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
       setQualityNoteError(null);
     }
     try {
-      const [sampleMaster, selection, referralLog, replacementLog] = await Promise.all([
+      const [sampleMaster, selection, referralLog, replacementLog, adhocEntries] = await Promise.all([
         loadSampleMaster(directoryHandle, selectedMonth),
         loadInspectionTemplateSelection(directoryHandle),
         loadReferralLog(directoryHandle, selectedMonth),
         loadReplacementLog(directoryHandle, selectedMonth),
+        // THE GAP fix: ad-hoc-imported assignments live in a synthetic
+        // `2-samples/adhoc-{importId}/` folder, never the selected month's own
+        // sample.master.json — merged in below so an employee's results view
+        // includes them. Degrades to [] on any failure.
+        loadAdhocEntriesForEmployeeView(directoryHandle, username, canSeeAll).catch((err) => {
+          logError("xrayInspectionResults:loadAdhocEntries", err);
+          return [];
+        }),
       ]);
 
       const distribution = await loadOrDeriveDistributionCurrentForRead(
@@ -245,7 +257,7 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
         : null;
 
       const movementById = buildMovementMap(log.events);
-      const entries = (distribution?.entries ?? [])
+      const entries = [...(distribution?.entries ?? []), ...adhocEntries]
         .map((entry) => ({
           entry,
           movement: buildMovementInfo(entry, movementById.get(entry.xrayImageId)),
@@ -429,7 +441,18 @@ export default function XrayInspectionResults({ directoryHandle }: Props) {
     if (meta.isDate || looksLikeDate(value)) {
       return <span className="dt-cell">{formatDate(value, meta.dateFmt)}</span>;
     }
-    if (column.id === "xrayImageId") return <span className="dt-mono">{value}</span>;
+    if (column.id === "xrayImageId") {
+      return (
+        <span className="dt-mono ew-xray-id-cell">
+          {value}
+          {isAdhocEntry(row.entry) && (
+            <span className="ew-adhoc-badge" title={`${L.badge_adhoc_import_title}: ${row.entry.adhocFileName}`}>
+              {L.badge_adhoc_import}
+            </span>
+          )}
+        </span>
+      );
+    }
     return <span className="dt-cell">{value}</span>;
   }
 
@@ -830,6 +853,12 @@ function buildMovementInfo(
     at: null,
     by: null,
   };
+}
+
+/** True for a row assigned through an ad-hoc import rather than the real
+ *  monthly sampling pipeline — see `adhocImportEmployeeView.ts`. */
+function isAdhocEntry(entry: DistributionEntry): entry is AdhocDistributionEntry {
+  return typeof (entry as AdhocDistributionEntry).adhocImportId === "string";
 }
 
 function isVisibleToUser(

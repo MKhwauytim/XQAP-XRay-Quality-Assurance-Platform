@@ -5,10 +5,15 @@
 import { useMemo, useState } from "react";
 import { X, AlertTriangle, RotateCw } from "lucide-react";
 import { useFocusTrap } from "../../../../../../hooks/useFocusTrap";
+import { ModalPortal } from "../../../../../ModalPortal/ModalPortal";
 import { readUserManagementState } from "../../../../../../auth/userManagement";
 import type { FieldAnswer, ItemAnswer } from "../../../../../../data/answers/answerTypes";
 import type { DistributionEntry } from "../../../../../../data/distribution/distributionTypes";
-import { isAssignableSampleRole } from "../../../../../../data/distribution/bulkAssignment";
+import {
+  isAssignableSampleRole,
+  planBulkReassignment,
+  type BulkReassignSkipReason,
+} from "../../../../../../data/distribution/bulkAssignment";
 import type { StageAliasMappings } from "../../../../../../data/population/populationConfig";
 import type { TemplateSchema } from "../../../../../../data/templates/templateTypes";
 import type { ColConfig, DataTableCol } from "../../../../../../components/DataTable";
@@ -19,11 +24,11 @@ import {
 } from "../../../../../../components/DataTable/utils";
 import InspectionPanel from "../../../../../../components/InspectionPanel";
 import Pagination from "../../../../../../components/Pagination/Pagination";
-import { clampPage, pageSlice } from "../../../../../../components/Pagination/paginationUtils";
+import { clampPage, pageSlice } from "../../../../../../utils/paginationUtils";
 import { useLabels, type Labels } from "../../../../../../data/labels/useLabels";
 import { formatStageLabel } from "../../../../../../data/population/stageHelpers";
-import type { PreparedPopulationRow } from "../../../../../../data/population/populationTypes";
-import type { PersonalStats, PersonalQuota, ReplacementDialogState } from "../XrayReferrals";
+import type { ReplacementIndexRow } from "../../../../../../data/population/replacementIndexTypes";
+import type { PersonalStats, PersonalQuota, ReplacementDialogState, BulkReassignModalState } from "../XrayReferrals";
 
 // ── Column definitions ────────────────────────────────────────────────────────
 
@@ -223,6 +228,245 @@ export function SelectionActionBar({
   );
 }
 
+// ── Bulk reassignment (oversight roles) ────────────────────────────────────────
+
+/**
+ * Oversight-only selection bar (supervisor/manager/admin). Distinct from
+ * SelectionActionBar (personal referral-request flow) both in wording and in
+ * offering TWO separate counts/actions, per the owner's reported workflow
+ * ("assign all my samples... or part of it... or a certain category I filter
+ * to"): a manually-checked selection, and the FULL set currently matching the
+ * active filter/search (not just the current page — `filteredCount` is fed
+ * from DataTable's `onFilteredRowsChange`, which already reports the whole
+ * filtered set pre-pagination). The two numbers and two buttons are shown
+ * side by side so acting on "everything currently filtered" is never
+ * conflated with "only what I've ticked".
+ */
+export function BulkReassignSelectionBar({
+  selectedCount,
+  filteredCount,
+  onReassignSelected,
+  onReassignFiltered,
+  onSelectAllFiltered,
+  onClear,
+}: {
+  selectedCount: number;
+  filteredCount: number;
+  onReassignSelected: () => void;
+  onReassignFiltered: () => void;
+  onSelectAllFiltered: () => void;
+  onClear: () => void;
+}) {
+  const selectedLabel = selectedCount.toLocaleString("ar-SA-u-nu-latn");
+  const filteredLabel = filteredCount.toLocaleString("ar-SA-u-nu-latn");
+
+  return (
+    <div className="ew-selection-bar" role="region" aria-label="إجراءات إعادة التعيين الجماعي">
+      <strong>{selectedLabel} محددة يدوياً</strong>
+      <span>{filteredLabel} مطابقة للتصفية/البحث الحالي (كل الصفحات)</span>
+      <div className="ew-selection-actions">
+        <button
+          type="button"
+          className="ew-btn-referral"
+          disabled={selectedCount === 0}
+          onClick={onReassignSelected}
+        >
+          إعادة تعيين المحدد ({selectedLabel})
+        </button>
+        <button
+          type="button"
+          className="ew-btn-referral"
+          disabled={filteredCount === 0}
+          onClick={onReassignFiltered}
+        >
+          إعادة تعيين الكل المطابق للتصفية ({filteredLabel})
+        </button>
+        <button type="button" className="ew-btn-secondary ew-btn-sm" onClick={onSelectAllFiltered} disabled={filteredCount === 0}>
+          تحديد الكل المطابق
+        </button>
+        <button type="button" className="ew-btn-secondary ew-btn-sm" onClick={onClear} disabled={selectedCount === 0}>
+          إلغاء التحديد
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const BULK_REASSIGN_SKIP_LABELS: Record<BulkReassignSkipReason, string> = {
+  "not-found": "غير موجودة في التوزيع الحالي",
+  "terminal-completed": "مكتملة — تحتاج إعادة فتح أولاً",
+  "terminal-replaced": "مستبدلة",
+  "already-assigned-to-target": "معيّنة للموظف المستهدف بالفعل",
+};
+
+export function BulkReassignModal({
+  state,
+  entries,
+  currentUser,
+  busy,
+  error,
+  onClose,
+  onConfirm,
+}: {
+  state: Exclude<BulkReassignModalState, null>;
+  entries: DistributionEntry[];
+  currentUser: string;
+  busy: boolean;
+  error: string | null;
+  onClose: () => void;
+  onConfirm: (toEmployee: string, reason: string) => void;
+}) {
+  const [toEmployee, setToEmployee] = useState("");
+  const [reason, setReason] = useState("");
+  const [confirmed, setConfirmed] = useState(false);
+  const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onClose });
+
+  const employees = readUserManagementState()
+    .users.filter((u) => u.isActive && u.username !== currentUser && isAssignableSampleRole(u))
+    .sort((a, b) => a.displayName.localeCompare(b.displayName, "ar"));
+
+  // Recomputed with the SAME pure planner the executor uses (bulkAssignment.ts's
+  // planBulkReassignment) — the dialog and the actual write can never disagree
+  // about what is eligible, since they share one implementation.
+  const plan = useMemo(
+    () => (toEmployee ? planBulkReassignment(entries, state.xrayImageIds, toEmployee) : null),
+    [entries, state.xrayImageIds, toEmployee]
+  );
+
+  const skipCounts = useMemo(() => {
+    const m = new Map<BulkReassignSkipReason, number>();
+    for (const s of plan?.skipped ?? []) m.set(s.reason, (m.get(s.reason) ?? 0) + 1);
+    return [...m.entries()];
+  }, [plan]);
+
+  const fromBreakdown = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const row of plan?.eligible ?? []) m.set(row.assignedTo, (m.get(row.assignedTo) ?? 0) + 1);
+    return [...m.entries()].sort((a, b) => b[1] - a[1]);
+  }, [plan]);
+
+  const eligibleCount = plan?.eligible.length ?? 0;
+  const canSubmit = toEmployee.trim() !== "" && confirmed && eligibleCount > 0 && !busy;
+
+  function handleSubmit(): void {
+    if (!canSubmit) return;
+    onConfirm(toEmployee, reason.trim());
+  }
+
+  const sourceLabel = state.source === "filtered"
+    ? `كل العينات المطابقة للتصفية الحالية (${state.xrayImageIds.length.toLocaleString("ar-SA-u-nu-latn")})`
+    : `العينات المحددة يدوياً (${state.xrayImageIds.length.toLocaleString("ar-SA-u-nu-latn")})`;
+
+  return (
+    <ModalPortal>
+    <div ref={dialogRef} className="ew-modal-backdrop" role="dialog" aria-modal="true">
+      <div className="ew-replace-modal">
+        <div className="ew-replace-header">
+          <div>
+            <h3>إعادة تعيين جماعي</h3>
+            <p>{sourceLabel}</p>
+          </div>
+          <button type="button" className="ew-modal-close" onClick={onClose} aria-label="إغلاق"><X size={16} /></button>
+        </div>
+
+        <div className="ew-replace-reason">
+          <label className="ew-field-label" htmlFor="bulk-reassign-to-emp">
+            الموظف المستلم <span className="ew-required">*</span>
+          </label>
+          <select
+            id="bulk-reassign-to-emp"
+            className="ew-select"
+            value={toEmployee}
+            onChange={(e) => { setToEmployee(e.target.value); setConfirmed(false); }}
+          >
+            <option value="">اختر موظفاً...</option>
+            {employees.map((u) => (
+              <option key={u.username} value={u.username}>
+                {u.displayName} ({u.username})
+              </option>
+            ))}
+          </select>
+
+          <label className="ew-field-label" htmlFor="bulk-reassign-reason" style={{ marginTop: 12 }}>
+            سبب إعادة التعيين (اختياري)
+          </label>
+          <textarea
+            id="bulk-reassign-reason"
+            className="ew-input ew-textarea"
+            rows={2}
+            placeholder="اذكر سبب إعادة التعيين الجماعي..."
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+          />
+        </div>
+
+        {toEmployee && plan && (
+          <div className="ew-replace-reason" style={{ paddingTop: 4 }}>
+            {/* One plain-text node (no nested <strong>) so the exact wording is
+               reliably matchable in tests without a custom textContent matcher. */}
+            <p>{`سيتم إعادة تعيين ${eligibleCount.toLocaleString("ar-SA-u-nu-latn")} عينة إلى ${toEmployee}.`}</p>
+            {fromBreakdown.length > 0 && (
+              <ul className="ew-referral-ids-list" style={{ listStyle: "none", padding: 0, margin: "6px 0" }}>
+                {fromBreakdown.map(([from, count]) => (
+                  <li key={from}>
+                    من: <strong>{from}</strong> — {count.toLocaleString("ar-SA-u-nu-latn")}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {skipCounts.length > 0 && (
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginTop: 8, padding: "8px 12px", background: "var(--c-warning-bg)", border: "1px solid var(--c-warning-border)", borderRadius: 8, fontSize: 12, color: "var(--c-warning)" }}>
+                <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 2 }} />
+                <div>
+                  <div>لن يتم تضمين {plan.skipped.length.toLocaleString("ar-SA-u-nu-latn")} عينة:</div>
+                  <ul style={{ margin: "4px 0 0", paddingInlineStart: 18 }}>
+                    {skipCounts.map(([reasonKey, count]) => (
+                      <li key={reasonKey}>
+                        {BULK_REASSIGN_SKIP_LABELS[reasonKey]} — {count.toLocaleString("ar-SA-u-nu-latn")}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            )}
+            {eligibleCount === 0 && (
+              <p className="ew-replace-error" role="alert">لا توجد عينات صالحة لإعادة التعيين ضمن هذا الاختيار.</p>
+            )}
+            <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10, fontSize: 13 }}>
+              <input
+                type="checkbox"
+                checked={confirmed}
+                onChange={(e) => setConfirmed(e.target.checked)}
+                disabled={eligibleCount === 0}
+              />
+              أؤكد مراجعة الملخص أعلاه ورغبتي بإعادة التعيين
+            </label>
+          </div>
+        )}
+
+        {error ? (
+          <div className="ew-replace-reason" style={{ paddingTop: 0 }}>
+            <p className="ew-replace-error" role="alert">{error}</p>
+          </div>
+        ) : null}
+
+        <div className="ew-replace-reason" style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8, paddingBottom: 16 }}>
+          <button type="button" className="ew-btn-secondary" onClick={onClose}>إلغاء</button>
+          <button
+            type="button"
+            className="ew-btn-primary"
+            disabled={!canSubmit}
+            onClick={handleSubmit}
+          >
+            {busy ? "جاري التنفيذ..." : error ? "إعادة المحاولة" : "تنفيذ إعادة التعيين"}
+          </button>
+        </div>
+      </div>
+    </div>
+    </ModalPortal>
+  );
+}
+
 export function SampleDetailPanel({
   entry,
   template,
@@ -305,6 +549,7 @@ export function ReferralRequestModal({
   }
 
   return (
+    <ModalPortal>
     <div ref={dialogRef} className="ew-modal-backdrop" role="dialog" aria-modal="true">
       <div className="ew-replace-modal">
         <div className="ew-replace-header">
@@ -392,6 +637,7 @@ export function ReferralRequestModal({
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }
 
@@ -521,7 +767,7 @@ export function ReplacementDialog({
   error: string | null;
   busy: boolean;
   onClose: () => void;
-  onSelect: (row: PreparedPopulationRow, reason: string, fromRecommended: boolean) => void;
+  onSelect: (row: ReplacementIndexRow, reason: string, fromRecommended: boolean) => void;
 }) {
   const [tab, setTab] = useState<"recommended" | "all">(
     state.recommended.length > 0 ? "recommended" : "all"
@@ -538,6 +784,7 @@ export function ReplacementDialog({
   const isRecommended = tab === "recommended";
 
   return (
+    <ModalPortal>
     <div ref={dialogRef} className="ew-modal-backdrop" role="dialog" aria-modal="true">
       <div className="ew-replace-modal">
         <div className="ew-replace-header">
@@ -629,5 +876,6 @@ export function ReplacementDialog({
         <Pagination page={safePage} totalItems={rows.length} onPageChange={setPage} itemLabel="بديل" />
       </div>
     </div>
+    </ModalPortal>
   );
 }

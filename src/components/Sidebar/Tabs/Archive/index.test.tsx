@@ -31,6 +31,7 @@
 // drift from it.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { clearSession, writeSession } from "../../../../auth/authSession";
 import type { AuthRole } from "../../../../auth/authTypes";
@@ -91,6 +92,20 @@ import { closeMonth, reopenMonth } from "../../../../data/population/monthLock";
 import { appendWorkspaceAction } from "../../../../data/audit/actionLog";
 
 const L = getLabels();
+
+// A fresh QueryClient per render -- ArchiveTab now sources its month list
+// through the shared TanStack Query cache (rework W5), which the app-wide
+// QueryClientProvider normally supplies. `testDir` is one stable object
+// across every test in this file, so reusing a single QueryClient would leak
+// a `['monthFolders', 'archive-test-root']` cache entry between tests that
+// otherwise re-mock `listMonthFolders` independently per case.
+function renderArchiveTab() {
+  return render(
+    <QueryClientProvider client={new QueryClient()}>
+      <ArchiveTab />
+    </QueryClientProvider>
+  );
+}
 
 const DEFAULT_AUTO_SETTINGS: AutoBackupSettings = {
   frequency: "daily",
@@ -184,7 +199,7 @@ describe("Archive role-based mutation gating", () => {
     vi.mocked(loadBackupHistory).mockResolvedValue([makeHistoryItem()]);
     loginAs("guest");
 
-    render(<ArchiveTab />);
+    renderArchiveTab();
     await screen.findByText("معالج"); // wait for the async refresh() to settle
 
     const backupBtn = screen.getByRole("button", { name: "نسخ احتياطي الآن" });
@@ -204,7 +219,7 @@ describe("Archive role-based mutation gating", () => {
     vi.mocked(loadBackupHistory).mockResolvedValue([makeHistoryItem()]);
     loginAs("employee");
 
-    render(<ArchiveTab />);
+    renderArchiveTab();
     await screen.findByText("معالج");
 
     expect(screen.getByRole("button", { name: "نسخ احتياطي الآن" })).toBeDisabled();
@@ -218,7 +233,7 @@ describe("Archive role-based mutation gating", () => {
     vi.mocked(loadBackupHistory).mockResolvedValue([makeHistoryItem()]);
     loginAs("supervisor");
 
-    render(<ArchiveTab />);
+    renderArchiveTab();
     await screen.findByText("معالج");
 
     expect(screen.getByRole("button", { name: "نسخ احتياطي الآن" })).toBeDisabled();
@@ -232,7 +247,7 @@ describe("Archive role-based mutation gating", () => {
     vi.mocked(loadBackupHistory).mockResolvedValue([makeHistoryItem()]);
     loginAs("manager");
 
-    render(<ArchiveTab />);
+    renderArchiveTab();
     await screen.findByText("معالج");
 
     // Manager's default archive.createBackup FEATURE flag stays enabled, but
@@ -251,7 +266,7 @@ describe("Archive role-based mutation gating", () => {
     vi.mocked(loadBackupHistory).mockResolvedValue([makeHistoryItem()]);
     loginAs("admin");
 
-    render(<ArchiveTab />);
+    renderArchiveTab();
     await screen.findByText("معالج");
 
     expect(screen.getByRole("button", { name: "نسخ احتياطي الآن" })).not.toBeDisabled();
@@ -291,7 +306,7 @@ describe("Archive status badges + row actions per manifestStatus (admin)", () =>
     vi.mocked(loadArchiveStatus).mockResolvedValue(rows);
     loginAs("admin");
 
-    const { container } = render(<ArchiveTab />);
+    const { container } = renderArchiveTab();
     await waitFor(() => {
       expect(container.querySelectorAll(".arc-table tbody tr").length).toBe(6);
     });
@@ -340,7 +355,7 @@ describe("Archive dialog error paths (item 1)", () => {
     });
     loginAs("admin");
 
-    render(<ArchiveTab />);
+    renderArchiveTab();
     fireEvent.click(await screen.findByRole("button", { name: "استعادة" }));
 
     const dialog = screen.getByRole("dialog");
@@ -371,7 +386,7 @@ describe("Archive dialog error paths (item 1)", () => {
     });
     loginAs("admin");
 
-    render(<ArchiveTab />);
+    renderArchiveTab();
     fireEvent.click(await screen.findByRole("button", { name: L.archive_close_month_btn }));
 
     const dialog = screen.getByRole("dialog");
@@ -400,7 +415,7 @@ describe("Archive dialog error paths (item 1)", () => {
     });
     loginAs("admin");
 
-    render(<ArchiveTab />);
+    renderArchiveTab();
     fireEvent.click(await screen.findByRole("button", { name: L.archive_reopen_month_btn }));
 
     const dialog = screen.getByRole("dialog");
@@ -425,7 +440,7 @@ describe("Archive per-month table — distribution completed/pending breakdown (
     ]);
     loginAs("admin");
 
-    const { container } = render(<ArchiveTab />);
+    const { container } = renderArchiveTab();
     await screen.findByText("معالج");
 
     const breakdown = container.querySelector(".arc-distribution-breakdown");
@@ -443,7 +458,7 @@ describe("Archive close-month confirm — pending count interpolation (P2-1)", (
     ]);
     loginAs("admin");
 
-    render(<ArchiveTab />);
+    renderArchiveTab();
     fireEvent.click(await screen.findByRole("button", { name: L.archive_close_month_btn }));
 
     const dialog = screen.getByRole("dialog");
@@ -457,7 +472,7 @@ describe("Archive close-month confirm — pending count interpolation (P2-1)", (
     ]);
     loginAs("admin");
 
-    render(<ArchiveTab />);
+    renderArchiveTab();
     fireEvent.click(await screen.findByRole("button", { name: L.archive_close_month_btn }));
 
     const dialog = screen.getByRole("dialog");

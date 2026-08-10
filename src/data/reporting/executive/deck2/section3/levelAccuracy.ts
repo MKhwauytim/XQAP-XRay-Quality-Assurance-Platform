@@ -29,7 +29,7 @@
 //   below target, and the الفارق figure carries an explicit +/− sign.
 
 import { band, isRankable } from "../../model/dataSufficiency";
-import type { DecisionLevel, OutcomeClass } from "../../model/decisionFactTable";
+import type { PortLevelAccuracy } from "../../model/aggregates";
 import type { ReportModel } from "../../model/reportModel";
 import { esc, fmtNum, fmtPct } from "../../primitives";
 import { icon } from "../../ui/icons";
@@ -105,13 +105,6 @@ function emptyCounts(): LevelCounts {
   return { correctClean: 0, correctSuspicion: 0, missedSuspicion: 0, falseSuspicion: 0 };
 }
 
-function tally(counts: LevelCounts, outcome: Exclude<OutcomeClass, null>): void {
-  if (outcome === "correct-clean") counts.correctClean += 1;
-  else if (outcome === "correct-suspicion") counts.correctSuspicion += 1;
-  else if (outcome === "missed-suspicion") counts.missedSuspicion += 1;
-  else counts.falseSuspicion += 1;
-}
-
 function sumCounts(all: LevelCounts[]): LevelCounts {
   return all.reduce((acc, c) => {
     acc.correctClean += c.correctClean;
@@ -135,40 +128,55 @@ function statsOf(counts: LevelCounts): LevelStats {
   };
 }
 
-type PortBucket = { name: string; sea: boolean } & Record<DecisionLevel, LevelCounts>;
+function statsFromPortLevel(entry: PortLevelAccuracy | undefined): LevelStats {
+  const counts: LevelCounts = entry
+    ? {
+        correctClean: entry.correctClean,
+        correctSuspicion: entry.correctSuspicion,
+        missedSuspicion: entry.missedSuspicion,
+        falseSuspicion: entry.falseSuspicion,
+      }
+    : emptyCounts();
+  return statsOf(counts);
+}
 
 /**
- * Fold `model.factTable` on (portName, decisionLevel).
- *
- * Records with `outcomeClass === null` are skipped — the reviewer recorded no
- * verdict for that image, so scoring the inspection decision against nothing
- * would invent an outcome. This is the SAME filter `aggregates.foldBy` applies
- * when it builds `model.portAccuracy`, which is why L1 + L2 counts here
- * reconcile exactly with that aggregate (asserted in the tests).
+ * Build this page's rows from `model.portAccuracyByLevel` — the shared
+ * decision-per-level fold (`aggregates.ts`'s `foldByPortAndLevel`, itself a
+ * thin wrapper over `decisionFactTable.ts`'s `aggregateDecisions`). This page
+ * used to run its OWN fold directly over `model.factTable`; that was the
+ * THIRD independent implementation of the same L1/L2-per-port tally the
+ * 2026-08-07 unification removed (see the edit log) — `statsOf` here just
+ * re-derives the presentation-layer rates (`accuracy`/`detection`/`rankable`)
+ * from the shared fold's raw counts, so L1 + L2 here still reconciles exactly
+ * with `model.portAccuracy` (asserted in the tests) without a second count
+ * loop over the fact table.
  */
 function collectLevelAccuracyRows(model: ReportModel): {
   land: LevelAccuracyRow[];
   sea: LevelAccuracyRow[];
 } {
-  const buckets = new Map<string, PortBucket>();
+  const seaByPort = new Map<string, boolean>();
   for (const rec of model.factTable) {
-    if (rec.outcomeClass === null) continue;
     const name = rec.portName ?? UNKNOWN_PORT;
-    let bucket = buckets.get(name);
-    if (!bucket) {
-      bucket = {
-        name,
-        sea: (rec.portType ?? "").includes("بحري"),
-        LEVEL_1: emptyCounts(),
-        LEVEL_2: emptyCounts(),
-      };
-      buckets.set(name, bucket);
-    }
-    tally(bucket[rec.decisionLevel], rec.outcomeClass);
+    if (!seaByPort.has(name)) seaByPort.set(name, (rec.portType ?? "").includes("بحري"));
   }
 
-  const all: LevelAccuracyRow[] = [...buckets.values()]
-    .map((b) => ({ name: b.name, sea: b.sea, l1: statsOf(b.LEVEL_1), l2: statsOf(b.LEVEL_2) }))
+  const byPort = new Map<string, { l1?: PortLevelAccuracy; l2?: PortLevelAccuracy }>();
+  for (const entry of model.portAccuracyByLevel) {
+    const bucket = byPort.get(entry.portName) ?? {};
+    if (entry.level === "LEVEL_1") bucket.l1 = entry;
+    else bucket.l2 = entry;
+    byPort.set(entry.portName, bucket);
+  }
+
+  const all: LevelAccuracyRow[] = [...byPort.entries()]
+    .map(([name, b]) => ({
+      name,
+      sea: seaByPort.get(name) ?? false,
+      l1: statsFromPortLevel(b.l1),
+      l2: statsFromPortLevel(b.l2),
+    }))
     // Busiest ports first. The name tiebreak is a plain codepoint compare (not
     // `localeCompare`) so the order cannot drift with the host's ICU data —
     // this deck must be byte-deterministic for the same model.

@@ -25,17 +25,34 @@ import {
   loadReplacementIndexManifest,
   rebuildReplacementIndex,
 } from "../population/replacementIndexStorage";
-import type { ReplacementIndexManifest } from "../population/replacementIndexTypes";
+import type { ReplacementIndexManifest, ReplacementIndexRow } from "../population/replacementIndexTypes";
 import {
   buildExclusionSets,
   capSeeded,
   getReplacementCandidates,
   isEligibleCandidate,
   REPLACEMENT_POOL_LIMIT,
-  type ReplacementCandidates,
 } from "./replacement";
 
 const ALL_STAGE_KEYS: readonly StageCountKey[] = ["first", "second", "third", "fourth", "unknown"];
+
+/**
+ * The indexed candidate lookup only ever has the slim `ReplacementIndexRow`
+ * projection available from disk (the whole point of the index is to avoid
+ * reading the full population). When the index is missing/stale and this
+ * falls back to `getReplacementCandidates` (a full population scan already in
+ * memory), the full `PreparedPopulationRow[]` it returns is structurally a
+ * superset of `ReplacementIndexRow[]` and is returned as-is — no projection
+ * needed there, since those rows were never persisted to the index. Either
+ * way, callers must treat the result as the slim shape: resolve the FULL row
+ * from `population.final.json` by `xrayImageId` only once a candidate is
+ * actually chosen (see `XrayReferrals.tsx`'s `handleReplace` and
+ * `approveReferral.ts`'s `approveReplacement`), never for the whole pool.
+ */
+export type IndexedReplacementCandidates = {
+  recommended: ReplacementIndexRow[];
+  all: ReplacementIndexRow[];
+};
 
 export async function getReplacementCandidatesIndexed(
   directoryHandle: DirectoryHandleLike,
@@ -45,7 +62,7 @@ export async function getReplacementCandidatesIndexed(
   allEntries: DistributionEntry[],
   stageMappings?: Partial<StageAliasMappings>,
   builtBy = "system"
-): Promise<ReplacementCandidates> {
+): Promise<IndexedReplacementCandidates> {
   const sourceRevision = await loadMonthPopulationFinalRevision(directoryHandle, monthFolderName);
   const liveHash = computeStageMappingsHash(stageMappings);
   const manifest =
@@ -109,7 +126,7 @@ async function loadBucketOrThrowIfExpected(
   tier: PreparedPopulationRow["certScanStatus"],
   stageKey: StageCountKey,
   expectedBucketKeys: ReadonlySet<string>
-): Promise<PreparedPopulationRow[]> {
+): Promise<ReplacementIndexRow[]> {
   const bucket = await loadReplacementBucket(directoryHandle, monthFolderName, tier, stageKey);
   if (bucket) return bucket;
   if (expectedBucketKeys.has(`${tier}::${stageKey}`)) {
@@ -126,7 +143,7 @@ async function readFromIndex(
   allEntries: DistributionEntry[],
   stageMappings: Partial<StageAliasMappings> | undefined,
   manifest: ReplacementIndexManifest
-): Promise<ReplacementCandidates | null> {
+): Promise<IndexedReplacementCandidates | null> {
   try {
     const rng = createRng(hashSeedString(`${sampleMaster.rngSeed}:${entry.xrayImageId}`));
     const { sampleIds, ownedIds } = buildExclusionSets(sampleMaster, allEntries);
@@ -152,7 +169,7 @@ async function readFromIndex(
     // almost entirely pre-sampled (e.g. "first" under the default sampling
     // rules) while still showing a large raw count, which would pick the
     // wrong cascade winner and silently under-return candidates.
-    let winner: { stageKey: StageCountKey; rows: PreparedPopulationRow[] } | null = null;
+    let winner: { stageKey: StageCountKey; rows: ReplacementIndexRow[] } | null = null;
     for (const stageKey of ALL_STAGE_KEYS) {
       if (stageKey === deadStageKey) continue;
       const bucket = await loadBucketOrThrowIfExpected(

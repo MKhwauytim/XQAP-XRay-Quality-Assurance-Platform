@@ -17,6 +17,8 @@ import {
 import type { PendingFieldRemoval } from "./ColumnMappingsSection";
 import type { MappingSettingsTab } from "./MappingSettingsTabBar";
 import {
+  buildAliasFieldGroups,
+  findAliasOverlaps,
   mergeMappingAliases,
   normalizeWorkflowOrders,
   parseMappingAliases,
@@ -140,6 +142,7 @@ export function useMappingSettingsController({
   ];
   const riskSheetNames = processingContext?.riskSheetNames ?? [];
   const biSheetNames = processingContext?.biSheetNames ?? [];
+  const aliasOverlapWarnings = findAliasOverlaps(buildAliasFieldGroups(config));
 
   const updateTemplate = (patch: Partial<MappingTemplate>) => {
     onConfigChange({
@@ -447,6 +450,7 @@ export function useMappingSettingsController({
     dataSourceCards,
     riskSheetNames,
     biSheetNames,
+    aliasOverlapWarnings,
     handleApplyDetectedWorkbookSettings,
     handleMappingChange,
     handleBiMappingChange,

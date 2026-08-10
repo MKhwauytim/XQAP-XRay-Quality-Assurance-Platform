@@ -32,6 +32,8 @@ const emptyMonthEditData: MonthEditData = {
   sampleData: null,
   distributionCurrent: null,
   manifest: null,
+  populationLocked: false,
+  populationAggregate: null,
 };
 
 // A distinguishable snapshot whose distributionCurrent presence derives phase

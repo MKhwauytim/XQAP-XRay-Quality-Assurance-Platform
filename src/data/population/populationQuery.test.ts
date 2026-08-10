@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { runPopulationQuery, type PopulationQueryParams } from "./populationQuery";
-import { DATA_PAGE_SIZE } from "../../components/Pagination/paginationUtils";
+import { DATA_PAGE_SIZE } from "../../utils/paginationUtils";
 
 type Row = Record<string, unknown>;
 

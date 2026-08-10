@@ -1,11 +1,14 @@
 import type { PreparedPopulationRow } from "../population/populationTypes";
+import { toEmployeeMirrorRowStub } from "../population/populationTypes";
+
 import { parseMonthFolderName } from "../population/monthFolder";
 import type {
   DistributionEntry,
   DistributionEvent,
   DistributionEventType,
   DistributionStatus,
-  EmployeeQuota
+  EmployeeQuota,
+  QuotaFacts
 } from "./distributionTypes";
 
 export type FoldResult = {
@@ -108,13 +111,25 @@ function recordDroppedEvent(result: FoldResult, event: DistributionEvent): void 
   result.droppedImageIds.add(event.xrayImageId);
 }
 
+/**
+ * Fold `events` into `entries`, optionally resuming from a prior fold's
+ * accumulator map (perf: fold-checkpoint). `resumeEntries`, when given, is
+ * copied (never mutated in place) so the caller's own cached snapshot stays
+ * intact if this call is later discarded (e.g. a late event forces a full
+ * refold instead). Callers resuming from a checkpoint MUST have already
+ * verified via findLateEvent (below) that none of `events` predates what
+ * `resumeEntries` already reflects for the same xrayImageId -- this function
+ * itself does not re-check that, since by the time it runs the caller has
+ * committed to either the resumed path or the full-refold path.
+ */
 export function foldDistributionEvents(
   events: DistributionEvent[],
   sampleRows: PreparedPopulationRow[],
-  supportedSchemaVersion: number
+  supportedSchemaVersion: number,
+  resumeEntries?: ReadonlyMap<string, DistributionEntry>
 ): FoldResult {
   const rows = new Map(sampleRows.map((row) => [row.xrayImageId, row]));
-  const entries = new Map<string, DistributionEntry>();
+  const entries = new Map<string, DistributionEntry>(resumeEntries ?? []);
   const result: FoldResult = {
     entries: [],
     droppedEventIds: new Set<string>(),
@@ -149,7 +164,10 @@ export function foldDistributionEvents(
       xrayImageId: event.xrayImageId,
       ...transition,
       lastEventAt: event.eventAt,
-      row
+      lastEventId: event.eventId,
+      // B5: only the employee-mirror stub is stored here now, not the full
+      // PreparedPopulationRow — see the docblock on DistributionEntry.row.
+      row: toEmployeeMirrorRowStub(row)
     });
   }
 
@@ -157,21 +175,73 @@ export function foldDistributionEvents(
   return result;
 }
 
+/**
+ * Correctness guard for the fold-checkpoint resume path (perf). The fold is
+ * NOT commutative: it enforces legal terminal-state transitions per
+ * xrayImageId, so folding new events on top of a resumed accumulator is only
+ * valid when every new event for an already-known image sorts AFTER that
+ * image's last-folded event. On a shared network-share workspace with
+ * several machines, an older event can legitimately surface later (a
+ * straggling immutable file write, a slow sync). When that happens for an
+ * image this checkpoint already has an entry for, resuming would silently
+ * risk folding out of order -- the caller MUST discard the checkpoint and
+ * refold everything from scratch instead of patching in place.
+ *
+ * Returns the first out-of-order event found (for logging), or null when
+ * `newEvents` is safe to fold on top of `priorEntries` as-is.
+ */
+export function findLateEvent(
+  priorEntries: readonly DistributionEntry[],
+  newEvents: readonly DistributionEvent[]
+): DistributionEvent | null {
+  const byImage = new Map(priorEntries.map((entry) => [entry.xrayImageId, entry]));
+  for (const event of newEvents) {
+    const existing = byImage.get(event.xrayImageId);
+    if (existing && isEventEarlierThanEntry(event, existing)) return event;
+  }
+  return null;
+}
+
+function isEventEarlierThanEntry(event: DistributionEvent, entry: DistributionEntry): boolean {
+  const eventAtCmp = event.eventAt.localeCompare(entry.lastEventAt);
+  if (eventAtCmp < 0) return true;
+  if (eventAtCmp > 0) return false;
+  // Equal timestamp: fall back to the same eventId tie-break the merge/sort
+  // order uses everywhere else in this module. A missing lastEventId means
+  // `entry` predates this field (an older checkpoint format) -- treat that as
+  // unknown order and conservatively call it late, so the caller pays for one
+  // safe full refold rather than risk a silent misordering.
+  if (!entry.lastEventId) return true;
+  return event.eventId.localeCompare(entry.lastEventId) < 0;
+}
+
 export function deriveEmployeeQuotas(
   events: DistributionEvent[],
   droppedEventIds: ReadonlySet<string>,
   monthFolderName: string
 ): Record<string, EmployeeQuota> | undefined {
-  const { assignmentCounts, firstAssignments, latestStoredQuotas } = collectAssignmentFacts(
-    events,
-    droppedEventIds
-  );
+  return deriveEmployeeQuotasWithFacts(events, droppedEventIds, monthFolderName).quotas;
+}
+
+/**
+ * Same computation as deriveEmployeeQuotas, but resumable (perf: fold-
+ * checkpoint) and returning the accumulator facts alongside the result so a
+ * caller can persist them and extend with only NEW assigned events next time,
+ * instead of re-scanning the full event history on every load.
+ */
+export function deriveEmployeeQuotasWithFacts(
+  events: DistributionEvent[],
+  droppedEventIds: ReadonlySet<string>,
+  monthFolderName: string,
+  resumeFacts?: QuotaFacts
+): { quotas: Record<string, EmployeeQuota> | undefined; facts: QuotaFacts } {
+  const facts = collectAssignmentFacts(events, droppedEventIds, resumeFacts);
   const quotas: Record<string, EmployeeQuota> = {};
   const monthInfo = parseMonthFolderName(monthFolderName);
-  for (const [username, firstAssignment] of Object.entries(firstAssignments)) {
-    const sampleCount = assignmentCounts[username] ?? 0;
+  for (const [username, firstAssignment] of Object.entries(facts.firstAssignments)) {
+    const sampleCount = facts.assignmentCounts[username] ?? 0;
     if (sampleCount <= 0) continue;
-    const daysRemaining = assignmentDaysRemaining(firstAssignment, latestStoredQuotas[username], monthInfo);
+    const daysRemaining = assignmentDaysRemaining(firstAssignment, facts.latestStoredQuotas[username], monthInfo);
     if (daysRemaining === undefined) continue;
     quotas[username] = {
       username,
@@ -181,13 +251,17 @@ export function deriveEmployeeQuotas(
       assignedAt: firstAssignment.eventAt
     };
   }
-  return Object.keys(quotas).length > 0 ? quotas : undefined;
+  return { quotas: Object.keys(quotas).length > 0 ? quotas : undefined, facts };
 }
 
-function collectAssignmentFacts(events: DistributionEvent[], droppedEventIds: ReadonlySet<string>) {
-  const assignmentCounts: Record<string, number> = {};
-  const firstAssignments: Record<string, DistributionEvent> = {};
-  const latestStoredQuotas: Record<string, DistributionEvent> = {};
+function collectAssignmentFacts(
+  events: DistributionEvent[],
+  droppedEventIds: ReadonlySet<string>,
+  resumeFacts?: QuotaFacts
+): QuotaFacts {
+  const assignmentCounts: Record<string, number> = { ...(resumeFacts?.assignmentCounts ?? {}) };
+  const firstAssignments: Record<string, DistributionEvent> = { ...(resumeFacts?.firstAssignments ?? {}) };
+  const latestStoredQuotas: Record<string, DistributionEvent> = { ...(resumeFacts?.latestStoredQuotas ?? {}) };
   for (const event of events) {
     if (event.eventType !== "assigned" || droppedEventIds.has(event.eventId)) continue;
     firstAssignments[event.assignedTo] ??= event;

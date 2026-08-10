@@ -27,7 +27,7 @@ import { useLabels } from "../../../../data/labels/useLabels";
 import { PageHeader } from "../../../../components/PageHeader/PageHeader";
 import { EmptyState, ErrorState, LoadingState } from "../../../../components/StateViews/StateViews";
 import Pagination from "../../../../components/Pagination/Pagination";
-import { DATA_PAGE_SIZE } from "../../../../components/Pagination/paginationUtils";
+import { DATA_PAGE_SIZE } from "../../../../utils/paginationUtils";
 import { formatStageLabel } from "./components/helpers";
 import { buildBrowseFilterOptionPreview } from "./browseFilterOptions";
 import {

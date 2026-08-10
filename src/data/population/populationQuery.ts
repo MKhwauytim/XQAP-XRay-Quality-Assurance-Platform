@@ -8,7 +8,7 @@
 // Zero React/worker/postMessage dependencies by design — importable from the main thread today and
 // from a Web Worker once later Phase B tasks wire one up.
 
-import { DATA_PAGE_SIZE, clampPage, pageSlice } from "../../components/Pagination/paginationUtils";
+import { DATA_PAGE_SIZE, clampPage, pageSlice } from "../../utils/paginationUtils";
 
 export type PopulationQuerySort = { column: string; direction: "asc" | "desc" } | null;
 

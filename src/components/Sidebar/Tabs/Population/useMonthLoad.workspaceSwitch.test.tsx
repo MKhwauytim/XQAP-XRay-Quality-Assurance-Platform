@@ -26,6 +26,8 @@ const emptyMonthEditData: MonthEditData = {
   sampleData: null,
   distributionCurrent: null,
   manifest: null,
+  populationLocked: false,
+  populationAggregate: null,
 };
 
 vi.mock("../../../../data/population/populationStorage", async (importOriginal) => {

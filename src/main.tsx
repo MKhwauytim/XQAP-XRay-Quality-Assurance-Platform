@@ -1,9 +1,11 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { QueryClientProvider } from "@tanstack/react-query";
 
 import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { WorkspaceProvider } from "./data/workspace/WorkspaceProvider";
+import { queryClient } from "./data/query/queryClient";
 import { ARABIC_FONT_FACE_CSS } from "./branding/fonts";
 import { SOMAR_SANS_APP_FONT_FACE_CSS } from "./branding/somarFonts";
 
@@ -36,9 +38,11 @@ if (!rootElement) {
 createRoot(rootElement).render(
   <StrictMode>
     <ErrorBoundary>
-      <WorkspaceProvider>
-        <App />
-      </WorkspaceProvider>
+      <QueryClientProvider client={queryClient}>
+        <WorkspaceProvider>
+          <App />
+        </WorkspaceProvider>
+      </QueryClientProvider>
     </ErrorBoundary>
   </StrictMode>
 );

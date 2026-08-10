@@ -62,6 +62,10 @@ function renderTable(props: Partial<React.ComponentProps<typeof DataTable<Row>>>
   );
 }
 
+// `offsetHeight` is stubbed globally to a realistic nonzero value in
+// test-setup.ts (jsdom does no layout, and TanStack Virtual's row
+// virtualization needs a nonzero viewport to render any rows) -- no
+// per-file override needed here.
 beforeEach(() => {
   vi.stubGlobal("ResizeObserver", ResizeObserverStub);
 });

@@ -13,6 +13,7 @@ import { buildAggregates, buildCrossTeamMatrix } from "./aggregates";
 import { buildReportModel } from "./reportModel";
 import type { ExecutiveReportInput } from "../../executiveReportTypes";
 import type { PreparedPopulationRow } from "../../../population/populationTypes";
+import { makeDistribution } from "../../reportTestFixtures";
 
 const PERIOD = "مايو 2026";
 
@@ -578,5 +579,28 @@ describe("buildReportModel", () => {
     expect(model.resultComparison.images[0].results.manual).toBe("اشتباه");
     expect(model.resultComparison.images[0].results.opposite).toBe("سليمة");
     expect(model.resultComparison.images[0].results.liveMeans).toBeNull();
+  });
+
+  // R4 (executive composite, 2026-08-07): distributionCoverage/accountabilityProgress
+  // reuse computeDistributionModel/computeManagementModel verbatim — proving the
+  // ReportModel exposes them (not re-deriving the fold logic, that's R2/R3's job).
+  it("distributionCoverage/accountabilityProgress are null when no distribution exists yet", () => {
+    const model = buildReportModel(input([popRow()]));
+    expect(model.distributionCoverage).toBeNull();
+    expect(model.accountabilityProgress).toBeNull();
+  });
+
+  it("distributionCoverage/accountabilityProgress fold the distribution when present", () => {
+    const row = popRow();
+    const distribution = makeDistribution([
+      { id: row.xrayImageId, assignedTo: "reviewer-1", status: "completed", row },
+    ]);
+    const model = buildReportModel({ ...input([row]), distribution }, { "reviewer-1": "المراجع الأول" });
+    expect(model.distributionCoverage).not.toBeNull();
+    expect(model.distributionCoverage!.byStage.length).toBeGreaterThan(0);
+    expect(model.distributionCoverage!.byPort[0]!.employees[0]!.displayName).toBe("المراجع الأول");
+    expect(model.accountabilityProgress).not.toBeNull();
+    expect(model.accountabilityProgress!.replacements.total).toBe(0);
+    expect(model.accountabilityProgress!.reassignments.total).toBe(0);
   });
 });

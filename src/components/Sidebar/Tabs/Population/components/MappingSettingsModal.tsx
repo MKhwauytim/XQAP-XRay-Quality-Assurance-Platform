@@ -1,6 +1,8 @@
 import { Settings2, X } from "lucide-react";
 import { ConfirmDialog } from "../../../../ConfirmDialog/ConfirmDialog";
+import { ModalPortal } from "../../../../ModalPortal/ModalPortal";
 import type { PopulationConfig } from "../../../../../data/population/populationConfig";
+import { AliasOverlapWarningBanner } from "./AliasOverlapWarningBanner";
 import { ColumnMappingsSection } from "./ColumnMappingsSection";
 import {
   ExportColumnsSection,
@@ -9,6 +11,7 @@ import {
 } from "./MappingSettingsSecondarySections";
 import { MappingSettingsTabBar } from "./MappingSettingsTabBar";
 import { ProcessingWorkflowSection } from "./ProcessingWorkflowSection";
+import CertScanGrid from "./CertScanGrid";
 import {
   type MappingSettingsProcessingContext,
   useMappingSettingsController,
@@ -21,6 +24,15 @@ type MappingSettingsModalProps = {
   onConfigChange: (config: PopulationConfig) => void;
   mode?: "mapping" | "processing";
   processingContext?: MappingSettingsProcessingContext;
+  /** W3: CertScan ports/snippets is workspace-global config, so it lives here (processing
+   *  mode) rather than as a standalone step in the Phase 2 flow. Optional so existing
+   *  "mapping" mode callers/tests that never touch CertScan keep working unchanged. */
+  certScanPasteText?: string;
+  onCertScanPasteTextChange?: (value: string) => void;
+  /** W14: the sampling RNG seed, previously edited inline on Phase 3. The draw itself still
+   *  reads this same value — only its edit control moved. */
+  sampleSeed?: string;
+  onSampleSeedChange?: (seed: string) => void;
 };
 
 export default function MappingSettingsModal({
@@ -30,6 +42,10 @@ export default function MappingSettingsModal({
   onConfigChange,
   mode = "mapping",
   processingContext,
+  certScanPasteText = "",
+  onCertScanPasteTextChange,
+  sampleSeed = "",
+  onSampleSeedChange,
 }: MappingSettingsModalProps) {
   const controller = useMappingSettingsController({
     isOpen,
@@ -42,6 +58,7 @@ export default function MappingSettingsModal({
   if (!isOpen) return null;
 
   return (
+    <ModalPortal>
     <div
       style={{
         position: "fixed",
@@ -51,7 +68,7 @@ export default function MappingSettingsModal({
         display: "flex",
         justifyContent: "center",
         alignItems: "center",
-        zIndex: 1000,
+        zIndex: 10020,
         direction: "rtl",
       }}
     >
@@ -116,6 +133,46 @@ export default function MappingSettingsModal({
         )}
 
         <div style={{ padding: "20px", overflowY: "auto", flex: 1 }}>
+          {mode === "processing" && (
+            <div
+              className="processing-settings-quick-section"
+              style={{
+                display: "grid",
+                gap: "16px",
+                marginBottom: "20px",
+                paddingBottom: "20px",
+                borderBottom: "1px solid var(--population-border)",
+              }}
+            >
+              <div>
+                <h3 style={{ margin: "0 0 8px", fontSize: "15px" }}>قائمة CertScan</h3>
+                <p style={{ margin: "0 0 10px", fontSize: "12px", color: "var(--population-muted)" }}>
+                  الصق قائمة منافذ CertScan هنا — تُستخدم في معالجة كل شهر وتتراكم تلقائياً.
+                </p>
+                <CertScanGrid
+                  initialText={certScanPasteText || undefined}
+                  onDataChange={(value) => onCertScanPasteTextChange?.(value)}
+                />
+              </div>
+
+              <label className="save-disk-label">
+                رمز التوزيع العشوائي - يمكن تعديله لإعادة إنتاج نفس العينة
+                <input
+                  id="sample-seed"
+                  type="text"
+                  className="save-disk-input"
+                  value={sampleSeed}
+                  onChange={(event) => onSampleSeedChange?.(event.target.value)}
+                />
+              </label>
+            </div>
+          )}
+
+          {(controller.activeTab === "mappings" ||
+            controller.activeTab === "stages") && (
+            <AliasOverlapWarningBanner warnings={controller.aliasOverlapWarnings} />
+          )}
+
           {controller.activeTab === "mappings" && (
             <ColumnMappingsSection
               config={config}
@@ -234,5 +291,6 @@ export default function MappingSettingsModal({
         onCancel={() => controller.setPendingRemoval(null)}
       />
     </div>
+    </ModalPortal>
   );
 }

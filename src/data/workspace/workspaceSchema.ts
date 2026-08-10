@@ -25,16 +25,6 @@ export type WorkspaceSchemaDetection = {
   metadata: WorkspaceSchemaMetadata | null;
 };
 
-export type WorkspaceMigrationPlan = {
-  from: WorkspaceLayoutKind;
-  toSchemaVersion: typeof WORKSPACE_LAYOUT_SCHEMA_VERSION;
-  dryRun: boolean;
-  backupRequired: true;
-  alreadyApplied: boolean;
-  actions: string[];
-  blockingIssues: string[];
-};
-
 export class WorkspaceMigrationError extends Error {
   readonly code: "backup_required" | "empty_workspace" | "validation_failed";
 
@@ -96,31 +86,6 @@ export async function detectWorkspaceSchema(root: DirectoryHandleLike): Promise<
   };
 }
 
-export async function planWorkspaceSchemaMigration(
-  root: DirectoryHandleLike,
-  dryRun = true
-): Promise<WorkspaceMigrationPlan> {
-  const detected = await detectWorkspaceSchema(root);
-  const alreadyApplied = detected.metadata?.schemaVersion === WORKSPACE_LAYOUT_SCHEMA_VERSION
-    && detected.metadata.layout === detected.layout;
-  const blockingIssues = detected.layout === "empty"
-    ? ["No current or legacy workspace roots were found."]
-    : detected.layout === "current" && detected.missingCurrentRoots.length > 0
-      ? [`Current workspace layout is incomplete: ${detected.missingCurrentRoots.join(", ")}`]
-      : [];
-  return {
-    from: detected.layout,
-    toSchemaVersion: WORKSPACE_LAYOUT_SCHEMA_VERSION,
-    dryRun,
-    backupRequired: true,
-    alreadyApplied,
-    actions: alreadyApplied
-      ? []
-      : ["Record validated workspace layout metadata without moving or deleting legacy data."],
-    blockingIssues,
-  };
-}
-
 /** Stamp a newly created, empty-of-business-data workspace. No backup is needed. */
 export async function initializeWorkspaceSchemaMetadata(
   root: DirectoryHandleLike,
@@ -153,65 +118,4 @@ export async function initializeWorkspaceSchemaMetadata(
     throw new WorkspaceMigrationError("validation_failed", "New workspace schema metadata verification failed.");
   }
   return verify;
-}
-
-/**
- * Records an explicit schema/layout marker after a caller-confirmed backup.
- *
- * This intentionally does not move legacy directories: copying/moving a whole
- * workspace is not atomic in the File System Access API. Legacy and mixed
- * layouts remain readable, while a future migration tool can use this marker
- * as its validated starting point. Re-running with matching metadata is a
- * no-op, so interrupted workflows are safe to resume.
- */
-export async function migrateWorkspaceSchema(params: {
-  root: DirectoryHandleLike;
-  migratedBy: string;
-  backupId?: string;
-  backupConfirmed?: boolean;
-  dryRun?: boolean;
-}): Promise<WorkspaceMigrationPlan> {
-  const dryRun = params.dryRun ?? true;
-  const plan = await planWorkspaceSchemaMigration(params.root, dryRun);
-  if (dryRun) return plan;
-  if (plan.blockingIssues.length > 0) {
-    throw new WorkspaceMigrationError(
-      plan.from === "empty" ? "empty_workspace" : "validation_failed",
-      plan.blockingIssues.join(" ")
-    );
-  }
-  if (plan.alreadyApplied) return plan;
-  if (!params.backupConfirmed || !params.backupId?.trim()) {
-    throw new WorkspaceMigrationError(
-      "backup_required",
-      "A verified backup id is required before workspace schema metadata is written."
-    );
-  }
-
-  const detected = await detectWorkspaceSchema(params.root);
-  if (detected.layout === "empty") {
-    throw new WorkspaceMigrationError("empty_workspace", "Workspace layout changed during migration.");
-  }
-  const now = new Date().toISOString();
-  const metadata: WorkspaceSchemaMetadata = {
-    schemaVersion: WORKSPACE_LAYOUT_SCHEMA_VERSION,
-    layout: detected.layout,
-    detectedAt: now,
-    migratedAt: now,
-    migratedBy: params.migratedBy,
-    backupId: params.backupId.trim(),
-    legacyReadersRequired: detected.layout !== "current",
-  };
-  const systemDir = await getSystemRoot(params.root, false);
-  await safeWriteJson(systemDir, WORKSPACE_SCHEMA_METADATA_FILE, metadata);
-
-  const verify = await detectWorkspaceSchema(params.root);
-  if (
-    verify.metadata?.schemaVersion !== WORKSPACE_LAYOUT_SCHEMA_VERSION
-    || verify.metadata.layout !== detected.layout
-    || verify.metadata.backupId !== metadata.backupId
-  ) {
-    throw new WorkspaceMigrationError("validation_failed", "Workspace schema metadata verification failed.");
-  }
-  return { ...plan, alreadyApplied: true, actions: [] };
 }

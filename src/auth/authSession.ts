@@ -13,13 +13,18 @@ const VALID_ROLES: AuthRole[] = ["guest", "employee", "supervisor", "manager", "
 let runtimeSession: AuthSession | null = null;
 let runtimePreviewRole: AuthRole | null = null;
 
-// SEC-02: the session is persisted to sessionStorage (not localStorage) so it
-// survives a page reload but auto-clears when the tab/browser closes. This is a
-// UX convenience, not a security control — with the client-only trust model a
-// user can still forge this object (see SEC-01 / CLAUDE.md security note).
+// SEC-02 (deliberately relaxed, 2026-08-07): the session is persisted to
+// localStorage — not sessionStorage — so it survives a full browser restart, not
+// just a page reload. This is a UX convenience, not a security control — with the
+// client-only trust model a user can still forge this object (see SEC-01 /
+// CLAUDE.md security note). The owner explicitly accepted the unattended-machine
+// risk (a closed browser no longer logs the user out) in exchange for not having
+// to re-login after every restart. The 7-day TTL guard (SESSION_TTL_MS, checked
+// in isExpired) is unchanged and still bounds how long a persisted session is
+// honored. See docs/architecture/SECURITY_MODEL.md for the recorded rationale.
 function sessionStore(): Storage | null {
   try {
-    return typeof sessionStorage === "undefined" ? null : sessionStorage;
+    return typeof localStorage === "undefined" ? null : localStorage;
   } catch {
     return null;
   }

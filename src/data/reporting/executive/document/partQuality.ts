@@ -46,20 +46,20 @@ export function buildAccuracyHeadline(model: ReportModel, pageNo: string): strin
 }
 
 export function buildAccuracyByPort(model: ReportModel, pageNo: string): string {
-  const ports = [...model.portAccuracy].sort((a, b) => (b.accuracy ?? -1) - (a.accuracy ?? -1));
-  const rankable = ports.filter((p) => isRankable(p.band) && p.accuracy !== null);
+  const ports = [...model.portAccuracy].sort((a, b) => (b.accuracyByDecision ?? -1) - (a.accuracyByDecision ?? -1));
+  const rankable = ports.filter((p) => isRankable(p.band) && p.accuracyByDecision !== null);
   const best = rankable[0]?.key ?? null;
   const weakest = rankable.length > 0 ? rankable[rankable.length - 1].key : null;
   const insufficient = ports.filter((p) => !isRankable(p.band)).length;
 
-  const bars = rankable.slice(0, 8).map((p) => ({ label: p.key, value: p.accuracy as number }));
+  const bars = rankable.slice(0, 8).map((p) => ({ label: p.key, value: p.accuracyByDecision as number }));
   const rows = ports.map((p) => [
     p.key,
     fmtNum(p.evaluable),
     fmtNum(p.correctSuspicion + p.missedSuspicion),
     isRankable(p.band) ? fmtPct(p.detectionRate) : null,
-    isRankable(p.band) ? fmtPct(p.accuracy) : null,
-    isRankable(p.band) ? fmtPct(p.missedSuspicionRate) : null,
+    isRankable(p.band) ? fmtPct(p.accuracyByDecision) : null,
+    isRankable(p.band) ? fmtPct(p.missedSuspicionRateByDecision) : null,
     bandChip(p.band),
   ]);
 

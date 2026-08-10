@@ -24,6 +24,10 @@ import type { ReviewerKpiModel, ReviewerReferralInput } from "./reviewerKpis";
 import { band } from "./dataSufficiency";
 import type { DataSufficiencyBand } from "./dataSufficiency";
 import { formatMonthFolderShortLabel } from "../../../population/monthFolder";
+import { computeDistributionModel } from "../../distributionReport";
+import type { DistributionBucket } from "../../distributionReport";
+import { computeManagementModel } from "../../management/managementModel";
+import type { ManagementBucket, ManagementModel } from "../../management/managementModel";
 
 /**
  * The single typed analytical artifact (design spec §3.6) — the in-memory
@@ -62,7 +66,35 @@ export type ReportModel = {
     pending: number;
     replaced: number;
   };
+  /**
+   * R4 (executive composite, 2026-08-07 owner requirement — "التقرير التنفيذي
+   * is supposed to be the mix of تقرير العينة و تقرير التوزيع و تقرير الإدارة"):
+   * the R2 distribution-report coverage buckets (per stage/level, per port),
+   * reused VERBATIM via `computeDistributionModel` — never refolded here.
+   * `null` when no distribution exists yet for the month (nothing to show).
+   */
+  distributionCoverage: { byStage: DistributionBucket[]; byPort: DistributionBucket[] } | null;
+  /**
+   * R4: the R3 management-report accountability figures (per-employee
+   * progress buckets, replacement records/reasons, reassignment count),
+   * reused VERBATIM via `computeManagementModel` — never refolded here.
+   * Reassignment counts and replacement reasons need `distributionEvents` /
+   * `replacementReasons` on the input; when the caller omits them (the plain
+   * executive-report path does), `computeManagementModel` degrades
+   * gracefully (reassignments read 0, reasons read `null`) rather than lying
+   * with a recomputed guess. `null` when no distribution exists yet.
+   */
+  accountabilityProgress: {
+    byStage: ManagementBucket[];
+    byPort: ManagementBucket[];
+    replacements: ManagementModel["replacements"];
+    reassignments: ManagementModel["reassignments"];
+  } | null;
   portAccuracy: Aggregates["byPort"];
+  /** Decision-per-level fold, keyed on (portName, decisionLevel) — see
+   *  `Aggregates.byPortAndLevel`'s doc comment. Single source for the deck2
+   *  level-accuracy page AND the executive workbook's per-level port columns. */
+  portAccuracyByLevel: Aggregates["byPortAndLevel"];
   imageQuality: {
     availabilityRate: number | null;
     markingRate: number | null;
@@ -227,14 +259,37 @@ export function buildReportModel(
 
   const dist = input.distribution;
 
+  // R4: reuse R2/R3's pure model functions verbatim — no re-derivation of
+  // per-employee coverage/progress logic here (that would risk a THIRD fold
+  // of the same data, the exact hazard the accuracy-fold unification already
+  // fixed once for this report family).
+  const distributionCoverage = dist
+    ? (() => {
+        const m = computeDistributionModel(dist, input.monthFolderName, employeeDisplayNames);
+        return { byStage: m.byStage, byPort: m.byPort };
+      })()
+    : null;
+  const accountabilityProgress = dist
+    ? (() => {
+        const m = computeManagementModel(
+          dist,
+          input.monthFolderName,
+          employeeDisplayNames,
+          input.distributionEvents ?? [],
+          input.replacementReasons ?? {},
+        );
+        return { byStage: m.byStage, byPort: m.byPort, replacements: m.replacements, reassignments: m.reassignments };
+      })()
+    : null;
+
   return {
     summary: {
       periodId,
       monthFolderName: input.monthFolderName,
       findings: generateNarrativeFindings(kpis, input.config),
       overallAccuracy: kpis.overallAccuracy,
-      detectionRate: kpis.suspiciousDetectionRate,
-      missedSuspicionRate: kpis.missedSuspicionRate,
+      detectionRate: kpis.suspiciousDetectionRateByImage,
+      missedSuspicionRate: kpis.missedSuspicionRateByImage,
       falseSuspicionRate: kpis.excessSuspicionRate,
       completionRate: kpis.completionRate,
     },
@@ -263,7 +318,10 @@ export function buildReportModel(
       pending: dist?.totalPending ?? 0,
       replaced: dist?.totalReplaced ?? 0,
     },
+    distributionCoverage,
+    accountabilityProgress,
     portAccuracy: aggregates.byPort,
+    portAccuracyByLevel: aggregates.byPortAndLevel,
     imageQuality: {
       availabilityRate: kpis.imageAvailabilityRate,
       markingRate: kpis.markingRate,

@@ -14,6 +14,22 @@ import {
   loadReplacementIndexManifest,
   rebuildReplacementIndex,
 } from "../population/replacementIndexStorage";
+import { toReplacementIndexRow } from "../population/replacementIndexTypes";
+
+/** The indexed path only ever returns the slim replacement-index projection
+ *  (see replacementIndexTypes.ts) — never the full PreparedPopulationRow the
+ *  raw getReplacementCandidates() full-scan returns when index buckets ARE
+ *  used. Projects `expected` down to the same shape before comparing so these
+ *  "equivalence with the full-scan path" tests assert what they mean: same
+ *  candidates, same order — not byte-identical row objects. */
+function toIndexShape(
+  candidates: ReturnType<typeof getReplacementCandidates>
+): { recommended: ReturnType<typeof toReplacementIndexRow>[]; all: ReturnType<typeof toReplacementIndexRow>[] } {
+  return {
+    recommended: candidates.recommended.map(toReplacementIndexRow),
+    all: candidates.all.map(toReplacementIndexRow),
+  };
+}
 
 const MONTH = "5-may-2026";
 
@@ -319,7 +335,9 @@ describe("getReplacementCandidatesIndexed", () => {
       const expected = getReplacementCandidates(entry, rows, sampleMaster, [entry]);
       const result = await getReplacementCandidatesIndexed(root, MONTH, entry, sampleMaster, [entry]);
 
-      expect(result).toEqual(expected);
+      // Golden-master: same candidate ids, same order, same seeded selection —
+      // just projected down to the slim shape the index actually stores.
+      expect(result).toEqual(toIndexShape(expected));
     });
 
     it("cascade case", async () => {

@@ -2,6 +2,7 @@ import { type ReactNode } from "react";
 import { AlertTriangle } from "lucide-react";
 
 import { useFocusTrap } from "../../hooks/useFocusTrap";
+import { ModalPortal } from "../ModalPortal/ModalPortal";
 import "./ConfirmDialog.css";
 
 /**
@@ -40,6 +41,7 @@ export function ConfirmDialog({
   if (!open) return null;
 
   return (
+    <ModalPortal>
     <div
       className="confirm-dialog-backdrop"
       role="presentation"
@@ -82,5 +84,6 @@ export function ConfirmDialog({
         </div>
       </section>
     </div>
+    </ModalPortal>
   );
 }

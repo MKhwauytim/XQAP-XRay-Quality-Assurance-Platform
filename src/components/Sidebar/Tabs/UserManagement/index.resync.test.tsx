@@ -63,6 +63,17 @@ describe("UserManagementTab re-syncs with the shared runtime user-management sta
     // the first assertion.
     expect(await screen.findByDisplayValue(firstUser.displayName)).toBeInTheDocument();
 
+    // Flush pending effects before broadcasting below. The assertion above only
+    // proves the lazy chunk rendered into the DOM — `subscribeToUserManagement
+    // Changes` is registered from an effect, which React runs afterwards. A
+    // broadcast landing in that window has no listener attached, so the
+    // component never re-syncs and the wait below times out. That only lost
+    // under parallel-worker contention, which is why it presented as an
+    // intermittent, order-dependent failure.
+    await act(async () => {
+      await Promise.resolve();
+    });
+
     // Simulate refreshPermissions() (manual refresh button / AuthGate's
     // 5-minute auto-refresh) picking up another admin's concurrent disk
     // change: a second managed user now exists, pushed into the shared

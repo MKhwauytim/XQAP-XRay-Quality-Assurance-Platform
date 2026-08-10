@@ -1091,7 +1091,7 @@ body.theme-light .slide.title-slide .title-classify{background:rgba(244,180,0,.1
     <div class="slide-eyebrow">
       <span class="slide-eyebrow-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M19 12H5"/><path d="M11 6l-6 6 6 6"/></svg></span>
       <span>من العينة إلى التوزيع</span>
-      <span class="slide-num" dir="ltr">01 / 04</span>
+      <span class="slide-num" dir="ltr">01 / 06</span>
     </div>
     <div class="slide-headline">حالة توزيع العينة الحالية</div>
     
@@ -1124,7 +1124,7 @@ body.theme-light .slide.title-slide .title-classify{background:rgba(244,180,0,.1
     <div class="slide-eyebrow">
       <span class="slide-eyebrow-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M4 18a8 8 0 1 1 16 0"/><path d="M12 18l4-5"/><circle cx="12" cy="18" r="1.2"/></svg></span>
       <span>المتابعة</span>
-      <span class="slide-num" dir="ltr">02 / 04</span>
+      <span class="slide-num" dir="ltr">02 / 06</span>
     </div>
     <div class="slide-headline">نسبة الإنجاز الإجمالية</div>
     
@@ -1140,12 +1140,46 @@ body.theme-light .slide.title-slide .title-classify{background:rgba(244,180,0,.1
     <span class="foot-text">يحدد ما إذا كان الإيقاع الحالي يفي بالموعد النهائي الشهري.</span>
   </div>
 </section>
+<section class="slide" id="d-deck-stage" data-title="القسم 1 — حسب المستوى">
+  <div class="slide-inner">
+    <div class="slide-eyebrow">
+      <span class="slide-eyebrow-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l8 4-8 4-8-4 8-4z"/><path d="M4 12l8 4 8-4"/><path d="M4 16l8 4 8-4"/></svg></span>
+      <span>القسم 1</span>
+      <span class="slide-num" dir="ltr">03 / 06</span>
+    </div>
+    <div class="slide-headline">التوزيع والإنجاز حسب المستوى</div>
+    
+    <div class="slide-body"><table class="deck-table"><thead><tr><th>المستوى/المنفذ</th><th>المعيّنة</th><th>المكتملة</th><th>الإنجاز</th></tr></thead><tbody><tr><td>المستوى الثاني</td><td>4</td><td>1</td><td>25.0%</td></tr></tbody></table></div>
+  </div>
+  <div class="slide-footer">
+    <span class="foot-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5"/></svg></span>
+    <span class="foot-label">القرار المدعوم</span>
+    <span class="foot-text">يوضح إنجاز كل مستوى على حدة ومدى تمثيل الموظفين فيه.</span>
+  </div>
+</section>
+<section class="slide" id="d-deck-port" data-title="القسم 2 — حسب المنفذ">
+  <div class="slide-inner">
+    <div class="slide-eyebrow">
+      <span class="slide-eyebrow-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M5 21V8l7-4 7 4v13"/><path d="M5 21h14"/><path d="M9 21v-6h6v6"/></svg></span>
+      <span>القسم 2</span>
+      <span class="slide-num" dir="ltr">04 / 06</span>
+    </div>
+    <div class="slide-headline">التوزيع والإنجاز حسب المنفذ</div>
+    
+    <div class="slide-body"><table class="deck-table"><thead><tr><th>المستوى/المنفذ</th><th>المعيّنة</th><th>المكتملة</th><th>الإنجاز</th></tr></thead><tbody><tr><td>منفذ أ</td><td>2</td><td>1</td><td>50.0%</td></tr><tr><td>منفذ ب</td><td>2</td><td>0</td><td>0.0%</td></tr></tbody></table></div>
+  </div>
+  <div class="slide-footer">
+    <span class="foot-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5"/></svg></span>
+    <span class="foot-label">القرار المدعوم</span>
+    <span class="foot-text">يبرز المنافذ الأعلى حملاً ومدى تقدّم الإنجاز فيها.</span>
+  </div>
+</section>
 <section class="slide" id="d-deck-emp" data-title="أحمال الموظفين">
   <div class="slide-inner">
     <div class="slide-eyebrow">
       <span class="slide-eyebrow-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M4 20c0-2.8 2.2-5 5-5s5 2.2 5 5"/><path d="M16 4.5a3 3 0 0 1 0 6.5"/><path d="M15 15.2c2.3.4 4 2.4 4 4.8"/></svg></span>
       <span>التعيينات</span>
-      <span class="slide-num" dir="ltr">03 / 04</span>
+      <span class="slide-num" dir="ltr">05 / 06</span>
     </div>
     <div class="slide-headline">التوزيع والإنجاز لكل موظف</div>
     
@@ -1162,7 +1196,7 @@ body.theme-light .slide.title-slide .title-classify{background:rgba(244,180,0,.1
     <div class="slide-eyebrow">
       <span class="slide-eyebrow-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5"/></svg></span>
       <span>سجل الأحداث</span>
-      <span class="slide-num" dir="ltr">04 / 04</span>
+      <span class="slide-num" dir="ltr">06 / 06</span>
     </div>
     <div class="slide-headline">نشاط الاستبدال</div>
     
@@ -1925,6 +1959,33 @@ tbody tr:hover{background:rgba(244,180,0,.04);}
     <div class="page-no">01</div>
   </div>
 </section>
+<section class="page" id="d-by-stage" data-title="القسم 1 — حسب المستوى">
+  <div class="right-rail">
+    <div class="rail-main">التقرير التنفيذي <em>لضمان جودة الأشعة</em></div>
+    <div class="rail-tab active">التعيينات</div><div class="rail-tab">الموظفون</div><div class="rail-tab">الحالة</div><div class="rail-tab">الأساس</div>
+  </div>
+  <div class="page-inner">
+<div class="doc-eyebrow"><span class="doc-eyebrow-icon"><svg viewBox="0 0 24 24" width="18" height="18" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l8 4-8 4-8-4 8-4z"/><path d="M4 12l8 4 8-4"/><path d="M4 16l8 4 8-4"/></svg></span><span>القسم 1</span></div>
+    <h2 class="section-title">التوزيع حسب المستوى</h2>
+    <div class="section-subtitle">لكل مستوى: الموظفون الذين أخذوا صوراً منه وعددها وحالة الإنجاز.</div>
+      <div class="card doc-panel"><div class="panel-title doc-panel-title"><span><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l8 4-8 4-8-4 8-4z"/><path d="M4 12l8 4 8-4"/><path d="M4 16l8 4 8-4"/></svg></span>المستوى الثاني — 4 صورة، 25.0% إنجاز</div><div class="table-wrap"><table><thead><tr><th>الموظف</th><th>المعيّنة</th><th>المكتملة</th><th>الإنجاز</th></tr></thead><tbody><tr><td>أحمد</td><td>2</td><td>1</td><td>50.0%</td></tr><tr><td>سارة</td><td>2</td><td>0</td><td>0.0%</td></tr><tr class="total-row"><td>المجموع</td><td>4</td><td>1</td><td>25.0%</td></tr></tbody></table></div></div>
+    <div class="page-no">02</div>
+  </div>
+</section>
+<section class="page" id="d-by-port" data-title="القسم 2 — حسب المنفذ">
+  <div class="right-rail">
+    <div class="rail-main">التقرير التنفيذي <em>لضمان جودة الأشعة</em></div>
+    <div class="rail-tab active">التعيينات</div><div class="rail-tab">الموظفون</div><div class="rail-tab">الحالة</div><div class="rail-tab">الأساس</div>
+  </div>
+  <div class="page-inner">
+<div class="doc-eyebrow"><span class="doc-eyebrow-icon"><svg viewBox="0 0 24 24" width="18" height="18" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M5 21V8l7-4 7 4v13"/><path d="M5 21h14"/><path d="M9 21v-6h6v6"/></svg></span><span>القسم 2</span></div>
+    <h2 class="section-title">التوزيع حسب المنفذ</h2>
+    <div class="section-subtitle">لكل منفذ: الموظفون الذين أخذوا صوراً منه وعددها وحالة الإنجاز.</div>
+      <div class="card doc-panel"><div class="panel-title doc-panel-title"><span><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l8 4-8 4-8-4 8-4z"/><path d="M4 12l8 4 8-4"/><path d="M4 16l8 4 8-4"/></svg></span>منفذ أ — 2 صورة، 50.0% إنجاز</div><div class="table-wrap"><table><thead><tr><th>الموظف</th><th>المعيّنة</th><th>المكتملة</th><th>الإنجاز</th></tr></thead><tbody><tr><td>أحمد</td><td>2</td><td>1</td><td>50.0%</td></tr><tr class="total-row"><td>المجموع</td><td>2</td><td>1</td><td>50.0%</td></tr></tbody></table></div></div>
+<div class="card doc-panel"><div class="panel-title doc-panel-title"><span><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l8 4-8 4-8-4 8-4z"/><path d="M4 12l8 4 8-4"/><path d="M4 16l8 4 8-4"/></svg></span>منفذ ب — 2 صورة، 0.0% إنجاز</div><div class="table-wrap"><table><thead><tr><th>الموظف</th><th>المعيّنة</th><th>المكتملة</th><th>الإنجاز</th></tr></thead><tbody><tr><td>سارة</td><td>2</td><td>0</td><td>0.0%</td></tr><tr class="total-row"><td>المجموع</td><td>2</td><td>0</td><td>0.0%</td></tr></tbody></table></div></div>
+    <div class="page-no">03</div>
+  </div>
+</section>
 <section class="page" id="d-emp-0" data-title="توزيع الموظفين">
   <div class="right-rail">
     <div class="rail-main">التقرير التنفيذي <em>لضمان جودة الأشعة</em></div>
@@ -1935,7 +1996,7 @@ tbody tr:hover{background:rgba(244,180,0,.04);}
     <h2 class="section-title">التعيينات لكل موظف</h2>
     <div class="section-subtitle">الحصة اليومية، والإجمالي المكلَّف، وحالة الإنجاز لكل موظف.</div>
         <div class="card doc-panel"><div class="panel-title doc-panel-title"><span><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M4 20c0-2.8 2.2-5 5-5s5 2.2 5 5"/><path d="M16 4.5a3 3 0 0 1 0 6.5"/><path d="M15 15.2c2.3.4 4 2.4 4 4.8"/></svg></span>الموظفون (2)</div><div class="table-wrap"><table><thead><tr><th>الموظف</th><th>الحصة اليومية</th><th>الإجمالي</th><th>قيد الانتظار</th><th>مكتمل</th><th>طلب استبدال</th><th>مستبدل</th><th>الإنجاز</th></tr></thead><tbody><tr><td>أحمد</td><td>5</td><td>2</td><td>1</td><td>1</td><td>0</td><td>0</td><td>50.0%</td></tr><tr><td>سارة</td><td><span class="insuff">—</span></td><td>2</td><td>0</td><td>0</td><td>1</td><td>1</td><td>0.0%</td></tr><tr class="total-row"><td>المجموع</td><td></td><td>4</td><td>1</td><td>1</td><td>1</td><td>1</td><td>25.0%</td></tr></tbody></table></div></div>
-    <div class="page-no">02</div>
+    <div class="page-no">04</div>
   </div>
 </section>
 <section class="page" id="d-highlights" data-title="أبرز أحداث الاستبدال">
@@ -1948,7 +2009,7 @@ tbody tr:hover{background:rgba(244,180,0,.04);}
     <h2 class="section-title">أبرز أحداث الاستبدال</h2>
     <div class="section-subtitle">الصور التي طُلب استبدالها أو استُبدلت في الحالة الحالية.</div>
         <div class="card doc-panel"><div class="panel-title doc-panel-title"><span><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5"/></svg></span>الاستبدالات</div><div class="table-wrap"><table><thead><tr><th>رقم الأشعة</th><th>الموظف</th><th>المنفذ</th><th>الحالة</th><th>البديل</th><th>آخر حدث</th></tr></thead><tbody><tr><td>IMG-3</td><td>سارة</td><td>منفذ ب</td><td>طلب استبدال</td><td>—</td><td>2026-07-05T00:00:00.000Z</td></tr><tr><td>IMG-4</td><td>سارة</td><td>منفذ ب</td><td>مستبدل</td><td>IMG-9</td><td>2026-07-05T00:00:00.000Z</td></tr></tbody></table></div></div>
-    <div class="page-no">03</div>
+    <div class="page-no">05</div>
   </div>
 </section>
 <section class="page" id="d-detail-0" data-title="تفاصيل التوزيع">
@@ -1960,8 +2021,8 @@ tbody tr:hover{background:rgba(244,180,0,.04);}
 <div class="doc-eyebrow"><span class="doc-eyebrow-icon"><svg viewBox="0 0 24 24" width="18" height="18" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l8 4-8 4-8-4 8-4z"/><path d="M4 12l8 4 8-4"/><path d="M4 16l8 4 8-4"/></svg></span><span>المرحلة 4</span></div>
     <h2 class="section-title">تفاصيل التوزيع الكاملة</h2>
     <div class="section-subtitle">4 صف موزَّع.</div>
-        <div class="card doc-panel"><div class="panel-title doc-panel-title"><span><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l8 4-8 4-8-4 8-4z"/><path d="M4 12l8 4 8-4"/><path d="M4 16l8 4 8-4"/></svg></span>كل الصفوف</div><div class="table-wrap"><table><thead><tr><th>رقم الأشعة</th><th>الموظف</th><th>المنفذ</th><th>CertScan</th><th>الحالة</th><th>آخر حدث</th></tr></thead><tbody><tr><td>IMG-1</td><td>أحمد</td><td>منفذ أ</td><td>NonCertscan</td><td>مكتمل</td><td>2026-07-05T00:00:00.000Z</td></tr><tr><td>IMG-2</td><td>أحمد</td><td>منفذ أ</td><td>NonCertscan</td><td>قيد الانتظار</td><td>2026-07-05T00:00:00.000Z</td></tr><tr><td>IMG-3</td><td>سارة</td><td>منفذ ب</td><td>NonCertscan</td><td>طلب استبدال</td><td>2026-07-05T00:00:00.000Z</td></tr><tr><td>IMG-4</td><td>سارة</td><td>منفذ ب</td><td>NonCertscan</td><td>مستبدل</td><td>2026-07-05T00:00:00.000Z</td></tr></tbody></table></div></div>
-    <div class="page-no">04</div>
+        <div class="card doc-panel"><div class="panel-title doc-panel-title"><span><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l8 4-8 4-8-4 8-4z"/><path d="M4 12l8 4 8-4"/><path d="M4 16l8 4 8-4"/></svg></span>كل الصفوف</div><div class="table-wrap"><table><thead><tr><th>رقم الأشعة</th><th>الموظف</th><th>المنفذ</th><th>المستوى</th><th>CertScan</th><th>م.أول</th><th>م.ثاني</th><th>الحالة</th><th>آخر حدث</th></tr></thead><tbody><tr><td>IMG-1</td><td>أحمد</td><td>منفذ أ</td><td>المستوى الثاني</td><td>NonCertscan</td><td>اشتباه</td><td>اشتباه</td><td>مكتمل</td><td>2026-07-05T00:00:00.000Z</td></tr><tr><td>IMG-2</td><td>أحمد</td><td>منفذ أ</td><td>المستوى الثاني</td><td>NonCertscan</td><td>اشتباه</td><td>اشتباه</td><td>قيد الانتظار</td><td>2026-07-05T00:00:00.000Z</td></tr><tr><td>IMG-3</td><td>سارة</td><td>منفذ ب</td><td>المستوى الثاني</td><td>NonCertscan</td><td>اشتباه</td><td>اشتباه</td><td>طلب استبدال</td><td>2026-07-05T00:00:00.000Z</td></tr><tr><td>IMG-4</td><td>سارة</td><td>منفذ ب</td><td>المستوى الثاني</td><td>NonCertscan</td><td>اشتباه</td><td>اشتباه</td><td>مستبدل</td><td>2026-07-05T00:00:00.000Z</td></tr></tbody></table></div></div>
+    <div class="page-no">06</div>
   </div>
 </section>
 

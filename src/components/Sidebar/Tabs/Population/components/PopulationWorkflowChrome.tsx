@@ -1,11 +1,64 @@
-import { Check } from "lucide-react";
+import { Check, LockOpen } from "lucide-react";
 import { PageHeader } from "../../../../../components/PageHeader/PageHeader";
 import type { DistributionCurrentData } from "../../../../../data/distribution/distributionTypes";
 import type { SampleMasterData } from "../../../../../data/sampling/sampleTypes";
+import type { PopulationAggregateLoadResult } from "../../../../../data/population/populationAggregate";
+import type { MonthManifestData } from "../../../../../data/population/monthTypes";
+import { SYSTEM_AUTO_LOCK_ACTOR } from "../../../../../data/population/monthLock";
+import { getLabels } from "../../../../../data/labels/labelsStore";
 import type { BiWorkbookResult } from "../biData/biDataTypes";
 import type { PopulationProcessingResult } from "../processing/populationProcessingTypes";
 import { PHASES } from "../populationWorkflowHelpers";
 import { getPhaseStatus } from "./helpers";
+
+/**
+ * Owner requirement (2026-08-07): the closed-month banner distinguishes a
+ * SYSTEM auto-lock (post-distribution, see `useDistributionActions.ts`'s
+ * `autoLockWhenFullyDistributed`) from a PERSON manually closing the month,
+ * and offers an admin unlock affordance right here (calls the pre-existing,
+ * unmodified `reopenMonth` via the caller's `onUnlock`). Pulled out of
+ * `PopulationTab` itself purely to stay under `check:complexity`'s
+ * per-function complexity budget.
+ */
+export function ClosedMonthBanner({
+  visible,
+  manifest,
+  canUnlock,
+  isUnlocking,
+  onUnlock
+}: {
+  visible: boolean;
+  manifest: MonthManifestData | null;
+  canUnlock: boolean;
+  isUnlocking: boolean;
+  onUnlock: () => void;
+}) {
+  if (!visible) return null;
+  const labels = getLabels();
+  const closedBy = manifest?.closedBy;
+  const lockNote = closedBy === SYSTEM_AUTO_LOCK_ACTOR
+    ? labels.msg_month_closed_note_auto_lock
+    : closedBy
+      ? labels.msg_month_closed_note_closed_by.replace("{user}", closedBy)
+      : "";
+  return (
+    <div className="upload-warning" role="status">
+      <span>{labels.msg_month_closed_banner} {lockNote}</span>
+      {canUnlock && (
+        <button
+          type="button"
+          className="header-settings-btn"
+          style={{ marginInlineStart: 10 }}
+          onClick={onUnlock}
+          disabled={isUnlocking}
+        >
+          <LockOpen size={13} style={{ verticalAlign: "middle", marginInlineEnd: 4 }} />
+          {isUnlocking ? labels.archive_reopen_month_in_progress : labels.archive_reopen_month_btn}
+        </button>
+      )}
+    </div>
+  );
+}
 
 export function PopulationHeader({
   canConfigure,
@@ -54,6 +107,7 @@ export function PopulationStatusBar({
   month,
   year,
   population,
+  populationAggregate = null,
   sample,
   distribution,
   biWorkbook
@@ -61,16 +115,24 @@ export function PopulationStatusBar({
   month: number;
   year: number;
   population: PopulationProcessingResult | null;
+  /** Owner requirement: fallback source for the "المجتمع" chip on a locked
+   *  month, where `population` is deliberately never populated with row data. */
+  populationAggregate?: PopulationAggregateLoadResult | null;
   sample: SampleMasterData | null;
   distribution: DistributionCurrentData | null;
   biWorkbook: BiWorkbookResult | null;
 }) {
+  const populationRowCount = population
+    ? population.preparedRows.length
+    : populationAggregate?.status === "ok"
+      ? populationAggregate.aggregate.summary.finalPreparedPopulationRows
+      : null;
   return (
     <div className="population-status-bar" aria-label="حالة معالجة المجتمع">
       <span className="status-bar-label">الحالة:</span>
       <StatusChip label="الشهر" value={`${month}/${year}`} state="" />
-      <StatusChip label="المجتمع" state={population ? "ok" : "idle"}
-        value={population ? `${population.preparedRows.length.toLocaleString("ar-SA-u-nu-latn")} صف` : "—"} />
+      <StatusChip label="المجتمع" state={populationRowCount !== null ? "ok" : "idle"}
+        value={populationRowCount !== null ? `${populationRowCount.toLocaleString("ar-SA-u-nu-latn")} صف` : "—"} />
       <StatusChip label="العينة" state={sample ? "ok" : "idle"}
         value={sample ? `${sample.totalActual.toLocaleString("ar-SA-u-nu-latn")} عنصر` : "—"} />
       <StatusChip label="التوزيع" state={distribution && distribution.totalAssigned > 0 ? "ok" : "idle"}

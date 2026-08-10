@@ -1,6 +1,6 @@
 import { useState } from "react";
 import "./Pagination.css";
-import { DATA_PAGE_SIZE, clampPage } from "./paginationUtils";
+import { DATA_PAGE_SIZE, clampPage } from "../../utils/paginationUtils";
 
 type PaginationProps = {
   page: number;

@@ -11,7 +11,7 @@ import {
 } from "../../data/feedback/feedbackStorage";
 import { useWorkspace } from "../../data/workspace/useWorkspace";
 import Pagination from "../Pagination/Pagination";
-import { clampPage, pageSlice } from "../Pagination/paginationUtils";
+import { clampPage, pageSlice } from "../../utils/paginationUtils";
 import "./FeedbackWidget.css";
 
 const CATEGORY_LABELS: Record<FeedbackCategory, string> = {

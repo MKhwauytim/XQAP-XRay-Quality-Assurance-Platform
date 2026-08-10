@@ -116,6 +116,11 @@ export const DEFAULT_LABELS = {
   status_pending:   "لم تُبدأ",
   status_replaced:  "مستبدلة",
   value_empty:      "—",
+  // Ad-hoc import visibility badge (EmployeeWorkspace views) — distinguishes a
+  // row that came from an admin's one-off Excel import (2-samples/adhoc-{id}/)
+  // from a row drawn by the real monthly sampling pipeline.
+  badge_adhoc_import:       "استيراد يدوي",
+  badge_adhoc_import_title: "من ملف مستورد يدوياً",
   label_month:      "الشهر",
   // Global month selector (top toolbar)
   gm_label:                "الشهر",
@@ -179,6 +184,9 @@ export const DEFAULT_LABELS = {
   population_reprocess_confirm_title: "إعادة معالجة شهر يحتوي عينة",
   population_reprocess_confirm_message: "توجد عينة مسحوبة لهذا الشهر بالفعل. حفظ نتائج المعالجة الجديدة سيجعل العينة الحالية غير متطابقة مع المجتمع الجديد. هل تريد المتابعة والحفظ؟",
   population_reprocess_cancelled: "تم إلغاء الحفظ — بقيت بيانات الشهر السابقة دون تغيير.",
+  population_locked_summary_corrupt: "الشهر مُقفل والملخص المحفوظ لهذا الشهر تالف — لا يمكن عرض التقرير دون إعادة معالجة المجتمع بعد إعادة فتح الشهر.",
+  population_locked_summary_missing: "الشهر مُقفل ولا يوجد ملخص محفوظ لهذا الشهر (شهر أقدم من هذه الميزة) — لا يمكن عرض التقرير دون إعادة معالجة المجتمع بعد إعادة فتح الشهر.",
+  population_locked_report_notice: "الشهر مُقفل — هذا التقرير مبني على الملخص المحفوظ فقط، دون قراءة بيانات المجتمع الكاملة.",
 
   // Month close-out / lock (Tier-1 Item A)
   archive_close_month_btn:          "إقفال الشهر",
@@ -194,6 +202,9 @@ export const DEFAULT_LABELS = {
   archive_reopen_reason_placeholder: "سبب إعادة الفتح (إلزامي)",
   msg_month_closed_write_blocked:   "هذا الشهر مُقفل — لا يمكن حفظ أي تعديل. تواصل مع مدير النظام لإعادة فتحه.",
   msg_month_closed_banner:          "هذا الشهر مُقفل. البيانات للعرض فقط.",
+  msg_month_closed_note_auto_lock:  "— أُقفل تلقائياً بعد اكتمال توزيع العينة.",
+  msg_month_closed_note_closed_by:  "— أُقفل بواسطة {user}.",
+  archive_reopen_month_in_progress: "جاري إعادة الفتح...",
 
   // User deletion guard (Tier-1 Item B)
   um_delete_checking:            "جاري التحقق من تعيينات المستخدم...",
@@ -207,6 +218,12 @@ export const DEFAULT_LABELS = {
   msg_referral_stale_ownership: "تعذر الاعتماد — بعض العينات لم تعد معيّنة للموظف الطالب: {ids}. حدّث الصفحة وراجع الطلب.",
   msg_referral_decision_retry:  "تم نقل العينات لكن تعذر حفظ قرار الاعتماد — اضغط اعتماد مرة أخرى لإكمال التسجيل (لن يتكرر النقل).",
   referral_review_saving:       "جارٍ حفظ القرار…",
+
+  // Approval request list — explicit sort-order indicator (the pending queue
+  // sorts oldest-first so nothing waits unseen, decided tabs sort newest-first
+  // for a recent-activity feed; both are visible now instead of silent).
+  approval_sort_oldest_first: "الأقدم أولاً",
+  approval_sort_newest_first: "الأحدث أولاً",
 
   // Reopen-for-correction (Tier-1 Item D)
   ip_reopen_btn:                "إعادة فتح للتصحيح",
@@ -589,6 +606,73 @@ export const DEFAULT_LABELS = {
   rd_fields_dimensions_label:   "أبعاد ({count})",
   rd_fields_measures_label:     "مقاييس ({count})",
   rd_fields_no_match:           "لا توجد حقول مطابقة",
+
+  // Sampling running total (Phase 3) — shown before the draw is triggered
+  sampling_running_total_label:      "إجمالي العينة المتوقع (كل المستويات)",
+  sampling_running_total_note:       "هذا الإجمالي يعكس القيم الفعلية بعد تطبيق أي حد أدنى، وليس القيم المُدخلة فقط.",
+  sampling_floor_override_warning:   "تنبيه: {stage} — القيمة المُدخلة تُنتج {entered} سجلاً فقط، لكن تم رفعها إلى {effective} بسبب الحد الأدنى المطلوب ({minRequired}). هذا الفارق مُضاف إلى الإجمالي الكلي أدناه.",
+
+  // CertScan shortfall (Phase 3 pre-draw estimate + post-draw report). A stratum
+  // short on CertScan under-fills rather than silently substituting NonCertscan
+  // rows — these labels make that under-fill visible instead of invisible.
+  sampling_certscan_shortfall_predraw_title:  "تنبيه: نقص متوقع في سجلات CertScan",
+  sampling_certscan_shortfall_predraw_row:    "{stage}: مطلوب {requested} سجل CertScan لكن المتاح فعلياً {available} فقط — سيتم سحب {available} كحد أقصى ولن يُعوَّض النقص من سجلات عادية.",
+  sampling_certscan_shortfall_result_title:   "نقص في سجلات CertScan (لم يتم التعويض)",
+  sampling_certscan_shortfall_result_intro:   "الأعداد التالية أقل من المطلوب لأن عدد سجلات CertScan المتاحة كان غير كافٍ. لم يتم سحب سجلات عادية بدلاً منها للحفاظ على دقة تكوين العينة.",
+  sampling_certscan_shortfall_result_row_port:  "{stage} — ميناء {port}: المطلوب {requested}، المسحوب فعلياً {actual}، المتاح {available}.",
+  sampling_certscan_shortfall_result_row_stage: "{stage} (على مستوى المرحلة كاملة): المطلوب {requested}، المسحوب فعلياً {actual}، المتاح {available}.",
+
+  // Ad-hoc import tab (owner requirement, 2026-08) — a separate admin-only page for
+  // uploading a one-off Excel file (not the regular monthly Population pipeline) and
+  // assigning its rows to employees. See src/data/adhocImport/.
+  page_adhoc_import_eyebrow:        "استيراد خارج المسار المعتاد",
+  page_adhoc_import_title:          "استيراد بيانات مخصص",
+  page_adhoc_import_subtitle:       "ارفع ملف إكسل مستقل خارج مسار معالجة المجتمع المعتاد وعيّن صفوفه للموظفين مباشرة.",
+  adhoc_import_upload_label:        "اختر ملف إكسل",
+  adhoc_import_upload_button:       "رفع ومعالجة",
+  adhoc_import_uploading:           "جارٍ المعالجة...",
+  adhoc_import_no_workspace:        "اختر مساحة عمل أولاً.",
+  adhoc_import_denied:              "لا تملك صلاحية استخدام هذه الصفحة.",
+  adhoc_import_choose_file_first:   "اختر ملفاً أولاً.",
+  adhoc_import_parse_failed:        "تعذّرت قراءة الملف: {error}",
+  adhoc_import_save_failed:         "تعذّر حفظ الاستيراد: {error}",
+  adhoc_import_list_title:          "عمليات الاستيراد السابقة",
+  adhoc_import_list_empty:          "لا توجد عمليات استيراد بعد.",
+  adhoc_import_col_file_name:       "اسم الملف",
+  adhoc_import_col_imported_by:     "بواسطة",
+  adhoc_import_col_imported_at:     "تاريخ الاستيراد",
+  adhoc_import_col_status:          "الحالة",
+  adhoc_import_col_total_rows:      "إجمالي الصفوف",
+  adhoc_import_col_valid_rows:      "صفوف صالحة",
+  adhoc_import_col_assigned_rows:   "صفوف مُعيَّنة",
+  adhoc_import_status_open:         "مفتوح",
+  adhoc_import_status_closed:       "مُغلق",
+  adhoc_import_close_button:        "إغلاق الاستيراد",
+  adhoc_import_reopen_button:       "إعادة فتح",
+  adhoc_import_close_confirm:       "إغلاق الاستيراد يمنع أي تعيين جديد لصفوفه. متابعة؟",
+  adhoc_import_back_to_list:        "رجوع للقائمة",
+  adhoc_import_review_title:        "مراجعة الصفوف — {fileName}",
+  adhoc_import_review_note:         "الأعمدة مطابقة تلقائياً حسب إعدادات مطابقة الأعمدة في إدارة بيانات الأشعة. الصفوف غير الصالحة (بلا معرّف أشعة أو نتيجة مستوى غير صحيحة) مستبعدة تلقائياً ولا يمكن تعيينها.",
+  adhoc_import_col_row_key:         "الصف المصدر",
+  adhoc_import_col_validation:      "الصلاحية",
+  adhoc_import_col_excluded:        "استبعاد",
+  adhoc_import_col_assigned_to:     "مُعيَّن إلى",
+  adhoc_import_validation_valid:    "صالح",
+  adhoc_import_validation_invalid:  "غير صالح: {reason}",
+  adhoc_import_assigned_badge:      "مُعيَّن",
+  adhoc_import_select_all:          "تحديد كل الصفوف الصالحة غير المعيَّنة",
+  adhoc_import_clear_selection:     "إلغاء التحديد",
+  adhoc_import_selected_count:      "المحدد: {count}",
+  adhoc_import_assign_to_label:     "تعيين إلى موظف",
+  adhoc_import_assign_button:       "تعيين المحدد",
+  adhoc_import_assigning:           "جارٍ التعيين...",
+  adhoc_import_assign_choose_employee: "اختر موظفاً أولاً.",
+  adhoc_import_assign_choose_rows:     "حدد صفاً واحداً على الأقل.",
+  adhoc_import_assign_closed:          "هذا الاستيراد مُغلق.",
+  adhoc_import_assign_failed:          "تعذّر التعيين: {error}",
+  adhoc_import_assign_success:         "تم تعيين {count} صف بنجاح.",
+  adhoc_import_assign_skipped:         "({count} صف كان مُعيَّناً بالفعل وتم تجاوزه.)",
+  adhoc_import_scope_note:             "لا يُكتب أي شيء داخل مجلد الشهر المعالج الحقيقي (1-population) — بيانات هذا الاستيراد معزولة تماماً عن مجتمع الأشهر الرسمية.",
 } as const;
 
 export type LabelKey = keyof typeof DEFAULT_LABELS;

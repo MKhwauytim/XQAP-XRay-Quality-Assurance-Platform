@@ -864,6 +864,24 @@ tbody tr:hover{background:rgba(244,180,0,.04);}
                 <span class="toc-row-num">28</span>
               </div>
         </div>
+      </div><div class="card">
+        <div class="panel-title">الجزء السادس: التغطية والمساءلة التشغيلية</div>
+        <div class="toc-part-blurb">من أنجز ماذا أين، ولمن الصفوف المفصّلة؟</div>
+        <div class="toc-rows">
+          <div class="toc-row">
+                <span class="toc-row-title">التغطية التشغيلية</span>
+                <span class="toc-row-leader" aria-hidden="true"></span>
+                <span class="toc-row-num">30</span>
+              </div><div class="toc-row">
+                <span class="toc-row-title">المساءلة التشغيلية</span>
+                <span class="toc-row-leader" aria-hidden="true"></span>
+                <span class="toc-row-num">31</span>
+              </div><div class="toc-row">
+                <span class="toc-row-title">قوائم الصفوف لكل موظف</span>
+                <span class="toc-row-leader" aria-hidden="true"></span>
+                <span class="toc-row-num">32</span>
+              </div>
+        </div>
       </div></div>
     <div class="page-no">02</div>
   </div>
@@ -1892,6 +1910,73 @@ tbody tr:hover{background:rgba(244,180,0,.04);}
     </div>
     <div class="info doc-note"><span class="doc-note-icon"><svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l9 16H3l9-16z"/><path d="M12 10v4"/><path d="M12 17.5v.5"/></svg></span><span>تُحتسب نسب التطابق فقط حيث تتوفر نتيجة لكلا المصدرين؛ القيم الناقصة تُعرض &quot;—&quot;.</span></div>
     <div class="page-no">28</div>
+  </div>
+</section>
+<section class="page" id="page-p6" data-title="غلاف الجزء السادس">
+  <div class="right-rail">
+    <div class="rail-main">التقرير التنفيذي <em>لضمان جودة الأشعة</em></div>
+    <div class="rail-tab active">الجزء الأول</div><div class="rail-tab">الجزء الثاني</div><div class="rail-tab">الجزء الثالث</div><div class="rail-tab">الجزء الرابع</div><div class="rail-tab">الجزء الخامس</div>
+  </div>
+  <div class="page-inner big-divider" style="--divider-num:'6'">
+    <div class="divider-top">
+      <span class="shield" aria-hidden="true"></span>
+      <span>هيئة الزكاة والضريبة والجمارك — إدارة ضمان جودة الأشعة اللاحقة</span>
+    </div>
+    <div class="divider-center">
+      <div class="icon"><svg viewBox="0 0 24 24" width="52" height="52" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5"/></svg></div>
+      <div class="kicker">الجزء السادس</div>
+      <h1>التغطية والمساءلة التشغيلية</h1>
+      <div class="rule"></div>
+      <p class="lead">توزيع الإنجاز حسب المستوى/المنفذ، تقدّم الموظفين والاستبدالات، وقوائم الصفوف لكل موظف.</p>
+    </div>
+    <div class="divider-toc"><div class="toc-chip"><span class="n">30</span><span class="t">التغطية التشغيلية</span></div><div class="toc-chip"><span class="n">31</span><span class="t">المساءلة التشغيلية</span></div><div class="toc-chip"><span class="n">32</span><span class="t">قوائم الصفوف لكل موظف</span></div></div>
+    <div class="page-no">29</div>
+  </div>
+</section>
+<section class="page" id="page-coverage" data-title="التغطية التشغيلية">
+  <div class="right-rail">
+    <div class="rail-main">التقرير التنفيذي <em>لضمان جودة الأشعة</em></div>
+    <div class="rail-tab active">الجزء السادس</div>
+  </div>
+  <div class="page-inner">
+<div class="doc-eyebrow"><span class="doc-eyebrow-icon"><svg viewBox="0 0 24 24" width="18" height="18" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l8 4-8 4-8-4 8-4z"/><path d="M4 12l8 4 8-4"/><path d="M4 16l8 4 8-4"/></svg></span><span>الجزء السادس · التغطية والمساءلة التشغيلية</span></div>
+    <h2 class="section-title">التغطية التشغيلية</h2>
+    <div class="section-subtitle">توزيع العينة وإنجازها حسب المستوى والمنفذ — من تقرير التوزيع (R2)، بلا إعادة احتساب.</div><div class="notice-centered doc-empty">
+    <div class="doc-empty-icon"><svg viewBox="0 0 24 24" width="30" height="30" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l9 16H3l9-16z"/><path d="M12 10v4"/><path d="M12 17.5v.5"/></svg></div>
+    <div><b>لا يوجد توزيع لهذا الشهر بعد.</b><br><span class="muted">يُبنى هذا القسم من بيانات تقرير التوزيع — وزّع العينة أولاً ليظهر هنا.</span></div>
+  </div>
+    <div class="page-no">30</div>
+  </div>
+</section>
+<section class="page" id="page-accountability" data-title="المساءلة التشغيلية">
+  <div class="right-rail">
+    <div class="rail-main">التقرير التنفيذي <em>لضمان جودة الأشعة</em></div>
+    <div class="rail-tab active">الجزء السادس</div>
+  </div>
+  <div class="page-inner">
+<div class="doc-eyebrow"><span class="doc-eyebrow-icon"><svg viewBox="0 0 24 24" width="18" height="18" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5"/></svg></span><span>الجزء السادس · التغطية والمساءلة التشغيلية</span></div>
+    <h2 class="section-title">المساءلة التشغيلية</h2>
+    <div class="section-subtitle">تقدّم الموظفين، أسباب الاستبدال، وعدد إعادة التعيين — من تقرير الإدارة (R3)، بلا إعادة احتساب.</div><div class="notice-centered doc-empty">
+    <div class="doc-empty-icon"><svg viewBox="0 0 24 24" width="30" height="30" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l9 16H3l9-16z"/><path d="M12 10v4"/><path d="M12 17.5v.5"/></svg></div>
+    <div><b>لا يوجد توزيع لهذا الشهر بعد.</b><br><span class="muted">يُبنى هذا القسم من بيانات تقرير الإدارة — وزّع العينة أولاً ليظهر هنا.</span></div>
+  </div>
+    <div class="page-no">31</div>
+  </div>
+</section>
+<section class="page" id="page-emp-rows" data-title="قوائم الصفوف لكل موظف">
+  <div class="right-rail">
+    <div class="rail-main">التقرير التنفيذي <em>لضمان جودة الأشعة</em></div>
+    <div class="rail-tab active">الجزء السادس</div>
+  </div>
+  <div class="page-inner">
+<div class="doc-eyebrow"><span class="doc-eyebrow-icon"><svg viewBox="0 0 24 24" width="18" height="18" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/></svg></span><span>الجزء السادس · قوائم الصفوف</span></div>
+    <h2 class="section-title">قوائم الصفوف لكل موظف</h2>
+    <div class="section-subtitle">رقم الأشعة، المنفذ، المستوى، الإجابة، والتاريخ لكل صف روجع.</div>
+        <div class="notice-centered doc-empty">
+    <div class="doc-empty-icon"><svg viewBox="0 0 24 24" width="30" height="30" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><path d="M12 4l9 16H3l9-16z"/><path d="M12 10v4"/><path d="M12 17.5v.5"/></svg></div>
+    <div><b>لا توجد صفوف مرتبطة بموظف هذا الشهر.</b><br><span class="muted">4 صف بلا موظف معروف (مراجعة لم تُسجَّل بواسطة مستخدم).</span></div>
+  </div>
+    <div class="page-no">32</div>
   </div>
 </section>
 

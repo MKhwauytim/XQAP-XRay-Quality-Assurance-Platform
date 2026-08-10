@@ -27,7 +27,10 @@ import type { DistributionEntry } from "../../../../../data/distribution/distrib
 import {
   executeReplacement,
 } from "../../../../../data/distribution/replacement";
+import { executeBulkReassignment } from "../../../../../data/distribution/bulkAssignment";
 import { getReplacementCandidatesIndexed } from "../../../../../data/distribution/replacementCandidateLookup";
+import { loadMonthPopulationFinal } from "../../../../../data/population/populationStorage";
+import type { ReplacementIndexRow } from "../../../../../data/population/replacementIndexTypes";
 import { loadPopulationConfig, type StageAliasMappings } from "../../../../../data/population/populationConfig";
 import { useGlobalMonth } from "../../../../../data/month/useGlobalMonth";
 import {
@@ -35,6 +38,11 @@ import {
 } from "../../../../../data/sampling/sampleStorage";
 import { loadEmployeeSampleMirror } from "../../../../../data/samples/sampleMirrorStorage";
 import type { SampleMasterData } from "../../../../../data/sampling/sampleTypes";
+import {
+  loadAdhocEntriesForEmployeeView,
+  type AdhocDistributionEntry,
+} from "../../../../../data/adhocImport/adhocImportEmployeeView";
+import { monthFolderForEntry } from "../../../../../data/adhocImport/adhocImportEmployeeView";
 import {
   loadTemplate,
   loadTemplateIndex,
@@ -76,6 +84,8 @@ import type { PreparedPopulationRow } from "../../../../../data/population/popul
 import {
   QueueToolbar,
   SelectionActionBar,
+  BulkReassignSelectionBar,
+  BulkReassignModal,
   SampleDetailPanel,
   ReferralRequestModal,
   StatusBadge,
@@ -116,13 +126,26 @@ export type PersonalStats = {
 export type PersonalQuota = { dailyQuota: number; daysRemaining: number; sampleCount: number } | null;
 export type ReplacementDialogState = {
   entry: DistributionEntry;
-  recommended: PreparedPopulationRow[];
-  all: PreparedPopulationRow[];
+  recommended: ReplacementIndexRow[];
+  all: ReplacementIndexRow[];
 } | null;
 type ReferralModalState = {
-  /** IDs to transfer — either manually selected or from current filter. */
+  /** IDs to transfer. Always manually selected (single-row "reassign" action or
+   * the personal multi-select bar) — this flow has no "everything currently
+   * filtered" entry point, unlike BulkReassignModalState below. */
+  xrayImageIds: string[];
+} | null;
+
+// Exported so subComponents.tsx's BulkReassignModal can `import type` it back.
+export type BulkReassignModalState = {
+  /** IDs to reassign — either manually selected or every row currently
+   * matching the active filter/search (all pages, not just the visible one). */
   xrayImageIds: string[];
   source: "selected" | "filtered";
+  /** Idempotency key, stable across retries of the same confirm click so a
+   * partial-failure retry never re-emits reassignment events already durably
+   * written for this batch (see executeBulkReassignment's replay guard). */
+  sourceRequestId: string;
 } | null;
 
 // Task 6: rows with an outstanding referral/replacement request, or that were
@@ -177,7 +200,14 @@ function referralsBootSources(username: string, canSeeAll: boolean): BootSourceD
       ? []
       : [{ key: "referrals_sample_mirror", labelEn: `${username}.samples.json`, labelAr: "نسخة عيناتي" }]),
     { key: "referrals_answers", labelEn: `${username}.answers.json`, labelAr: "إجاباتي" },
+    { key: "referrals_adhoc", labelEn: "adhoc-imports.index.json", labelAr: "الاستيرادات اليدوية" },
   ];
+}
+
+/** True for a row assigned through an ad-hoc import rather than the real
+ *  monthly sampling pipeline — see `adhocImportEmployeeView.ts`. */
+function isAdhocEntry(entry: DistributionEntry): entry is AdhocDistributionEntry {
+  return typeof (entry as AdhocDistributionEntry).adhocImportId === "string";
 }
 
 export default function XrayReferrals({ directoryHandle }: Props) {
@@ -191,6 +221,10 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   const canConfigureColumns = canMutate("configure-referral-columns");
   const canRequestReplacement = canMutate("request-replacement");
   const canSubmitReferrals = canMutate("submit-referrals");
+  // Oversight-only: select rows (manually or via the active filter) and reassign
+  // them to another employee in one action, going through the same distribution
+  // event log as every other mutation (see executeBulkReassignment).
+  const canBulkReassignReferrals = canMutate("bulk-reassign-referrals");
   const canSubmitAnswers = canMutate("submit-answers");
   const canReopenAnswer = canMutate("ew.reopenAnswer");
   // Batch B: when enabled for this role, the employee's self-service reopen request
@@ -225,6 +259,9 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [filteredTableEntries, setFilteredTableEntries] = useState<DistributionEntry[]>([]);
   const [referralModal, setReferralModal] = useState<ReferralModalState>(null);
+  const [bulkReassignModal, setBulkReassignModal] = useState<BulkReassignModalState>(null);
+  const [bulkReassignBusy, setBulkReassignBusy] = useState(false);
+  const [bulkReassignError, setBulkReassignError] = useState<string | null>(null);
 
   // Function declaration (hoisted) — safe to reference from the mount effect
   // below even though it appears earlier in source, with no TDZ/identity
@@ -289,6 +326,32 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     return m;
   }, [answers]);
 
+  // O(1) entry lookup by xrayImageId — built once per `entries` change instead
+  // of an `entries.find()` per selected id (was O(n×m): every id in a
+  // referral/bulk-reassign selection re-scanned the full entries array).
+  const entriesById = useMemo(() => new Map(entries.map((e) => [e.xrayImageId, e])), [entries]);
+
+  /**
+   * The workspace folder that owns a given row's writes.
+   *
+   * This view renders the union of the selected month's entries and every
+   * ad-hoc import's entries, and those live in different stores. Every write
+   * (answer, referral/replacement/reopen request, and the fresh pre-write read
+   * that guards against double-assignment) must target the store the row
+   * actually came from — routing on the ROW, never on the globally-selected
+   * month. Writing an ad-hoc row into the real month would contaminate a real
+   * audit trail with an unrelated population; the reverse would silently lose
+   * the write.
+   *
+   * Falls back to the selected month for an unknown id, which is the correct
+   * conservative default: a real row is the only thing that can be missing from
+   * `entriesById` while still being actionable.
+   */
+  const folderForRow = useCallback((xrayImageId: string): string => {
+    const entry = entriesById.get(xrayImageId);
+    return entry && selMonth ? monthFolderForEntry(entry, selMonth) : (selMonth ?? "");
+  }, [entriesById, selMonth]);
+
   /* eslint-disable react-hooks/preserve-manual-memoization -- React Compiler can't prove
      stageMappings/canSeeAll/answersMap/username are stable across renders (they come from
      useState/session/derived useMemo values that are safe in practice); these hooks keep
@@ -309,10 +372,12 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       }
       return col;
     });
-    // Checkbox column only for personal-scope users — oversight users have no referral actions.
-    // The accessor returns a stable empty string; actual checked state is read from
+    // Checkbox column: personal-scope users always get it (referral requests);
+    // oversight (canSeeAll) users get it only when permitted to bulk-reassign —
+    // otherwise they have no selection-driven action to take on it. The
+    // accessor returns a stable empty string; actual checked state is read from
     // selectedIds inside renderCell so this memo doesn't re-create on every checkbox tick.
-    if (canSeeAll) return mapped;
+    if (canSeeAll && !canBulkReassignReferrals) return mapped;
     const selectCol: DataTableCol<DistributionEntry> = {
       id: SELECT_COL_ID,
       label: "",
@@ -321,7 +386,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       accessor: () => "",
     };
     return [selectCol, ...mapped];
-  }, [baseColumns, stageMappings, canSeeAll, answersMap]);
+  }, [baseColumns, stageMappings, canSeeAll, canBulkReassignReferrals, answersMap]);
 
   const effectiveColConfig = useMemo(
     () => colPreset ?? loadLocalColConfig() ?? buildDefaultColConfig(columns),
@@ -434,17 +499,26 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       // Load sample.master first — its rows are the only ones needed for the
       // distribution derivation. population.final.json is NOT loaded here;
       // it is loaded lazily only when the replacement dialog opens.
-      const [sample, referralLog, replacementLog] = await Promise.all([
+      const [sample, referralLog, replacementLog, adhocEntries] = await Promise.all([
         loadSampleMaster(directoryHandle, selMonth),
         loadReferralLog(directoryHandle, selMonth),
         loadReplacementLog(directoryHandle, selMonth),
+        // THE GAP fix: ad-hoc-imported assignments live in a synthetic
+        // `2-samples/adhoc-{importId}/` folder, never the selected month's own
+        // sample.master.json — merged in here so an employee can see them
+        // alongside their real assignments. Degrades to [] on any failure; see
+        // adhocImportEmployeeView.ts's docblock for the cost bound.
+        loadAdhocEntriesForEmployeeView(directoryHandle, username, canSeeAll).catch((err) => {
+          logError("xrayReferrals:loadAdhocEntries", err);
+          return [];
+        }),
       ]);
       const sampleRows = (sample?.rows ?? []) as PreparedPopulationRow[];
       const dist = await loadOrDeriveDistributionCurrentForRead(directoryHandle, selMonth, sampleRows);
       const personalMirror = canSeeAll
         ? null
         : await loadEmployeeSampleMirror(directoryHandle, selMonth, username);
-      const all = dist?.entries ?? personalMirror?.entries ?? [];
+      const all = [...(dist?.entries ?? personalMirror?.entries ?? []), ...adhocEntries];
 
       const pendingReferralIds = canSeeAll ? new Set<string>() : getPendingReferralIds(referralLog, username);
       const pendingReplacementIds = canSeeAll ? new Set<string>() : getPendingReplacementIds(replacementLog, username);
@@ -544,7 +618,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       status: "submitted",
     };
     try {
-      const result = await upsertItemAnswer(directoryHandle, selMonth, forUser, item);
+      const result = await upsertItemAnswer(directoryHandle, folderForRow(xrayImageId), forUser, item);
       if (result.ok) {
         setAnswers((prev) => [
           ...prev.filter((a) => !(a.xrayImageId === xrayImageId && a.answeredBy === forUser)),
@@ -661,7 +735,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
 
   async function handleReplace(
     entry: DistributionEntry,
-    replacement: PreparedPopulationRow,
+    replacement: ReplacementIndexRow,
     reason: string,
     fromRecommended: boolean
   ): Promise<void> {
@@ -682,9 +756,10 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         // still replacement-eligible, and (b) the chosen replacement is not
         // already sampled or owned — otherwise a concurrent action already used
         // one side and committing would double-assign / orphan.
-        const freshSample = await loadSampleMaster(directoryHandle, selMonth);
+        const rowFolder = folderForRow(entry.xrayImageId);
+        const freshSample = await loadSampleMaster(directoryHandle, rowFolder);
         const freshRows = (freshSample?.rows ?? []) as PreparedPopulationRow[];
-        const freshDist = await loadOrDeriveDistributionCurrent(directoryHandle, selMonth, freshRows);
+        const freshDist = await loadOrDeriveDistributionCurrent(directoryHandle, rowFolder, freshRows);
         const STALE_MSG = "البيانات تغيّرت، حدّث الصفحة";
 
         const freshDead = freshDist?.entries.find((e) => e.xrayImageId === entry.xrayImageId);
@@ -704,12 +779,28 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           return;
         }
 
+        // The candidate list only ever carries the slim replacement-index
+        // projection (see replacementIndexTypes.ts) — the sample master needs
+        // the FULL population row, so resolve it here by id. This is the one
+        // full-population read on the immediate-replace path, and it's paid
+        // for exactly one row (the chosen candidate), never the whole pool.
+        const population = await loadMonthPopulationFinal(directoryHandle, selMonth);
+        const fullReplacementRow = (population?.rows ?? []).find(
+          (r) => (r as PreparedPopulationRow).xrayImageId === replacement.xrayImageId
+        ) as PreparedPopulationRow | undefined;
+        if (!fullReplacementRow) {
+          setReplacementError(STALE_MSG);
+          setStatusMsg({ type: "error", text: STALE_MSG });
+          await loadData({ silent: true });
+          return;
+        }
+
         // Immediate replacement — no approval needed.
         const result = await executeReplacement({
           directoryHandle,
           monthFolderName: selMonth,
           deadEntry: entry,
-          replacementRow: replacement,
+          replacementRow: fullReplacementRow,
           reason,
           eventBy: username,
         });
@@ -743,7 +834,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           requestedBy: username,
           status: "pending",
         };
-        const result = await appendReplacementRequest(directoryHandle, selMonth, request);
+        const result = await appendReplacementRequest(directoryHandle, folderForRow(entry.xrayImageId), request);
         if (!result.ok) {
           setReplacementError(result.error);
           setStatusMsg({ type: "error", text: result.error });
@@ -795,10 +886,34 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       setStatusMsg({ type: "error", text: "لا تملك صلاحية تقديم الإحالات، أو أن مساحة العمل للقراءة فقط." });
       return;
     }
-    if (!selMonth || xrayImageIds.length === 0) return;
+    if (!selMonth) return;
+    if (xrayImageIds.length === 0) {
+      // A click must never be a silent no-op: the referral modal can in
+      // principle be confirmed after its underlying selection emptied out
+      // from under it (e.g. a background refresh dropped the selected rows).
+      setReferralModal(null);
+      setStatusMsg({ type: "error", text: "لم يتبقَّ أي عينة محددة لإحالتها — تم إلغاء الطلب." });
+      return;
+    }
+    // A referral request is ONE record covering many rows, so every row in it
+    // must belong to the same store. A selection can legitimately span the real
+    // month and an ad-hoc import (both render in this table), and splitting the
+    // request silently would produce two records the supervisor sees as one
+    // action — with a partial approval leaving half the rows in limbo. Refuse
+    // the mixed case explicitly and let the user send them separately.
+    const targetFolders = new Set(xrayImageIds.map(folderForRow));
+    if (targetFolders.size > 1) {
+      setStatusMsg({
+        type: "error",
+        text: "لا يمكن إحالة عينات من الشهر الحالي ومن استيراد يدوي في طلب واحد — أرسل كل مجموعة على حدة.",
+      });
+      return;
+    }
+    const referralFolder = targetFolders.values().next().value ?? selMonth;
+
     const request: ReferralRequest = {
       requestId: `ref-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      monthFolderName: selMonth,
+      monthFolderName: referralFolder,
       fromEmployee: username,
       toEmployee,
       xrayImageIds,
@@ -807,7 +922,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       requestedBy: username,
       status: "pending",
     };
-    const result = await appendReferralRequest(directoryHandle, selMonth, request);
+    const result = await appendReferralRequest(directoryHandle, referralFolder, request);
     if (result.ok) {
       setReferralModal(null);
       clearSelection();
@@ -819,6 +934,84 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       await loadData({ silent: true });
     } else {
       setStatusMsg({ type: "error", text: result.error });
+    }
+  }
+
+  // ── Bulk reassignment handler (oversight roles) ────────────────────────────
+
+  function openBulkReassignModal(xrayImageIds: string[], source: "selected" | "filtered"): void {
+    if (xrayImageIds.length === 0) {
+      // A click must never be a silent no-op — both bulk-reassign buttons are
+      // already `disabled` when their respective count is 0, but this guard
+      // stays as defense-in-depth against a state race (e.g. the underlying
+      // selection/filtered set emptying out between render and click), so it
+      // must explain itself instead of doing nothing.
+      setStatusMsg({
+        type: "error",
+        text: source === "selected"
+          ? "لا توجد عينات محددة يدوياً لإعادة تعيينها."
+          : "لا توجد عينات مطابقة للتصفية/البحث الحالي لإعادة تعيينها.",
+      });
+      return;
+    }
+    setBulkReassignError(null);
+    setBulkReassignModal({
+      xrayImageIds,
+      source,
+      sourceRequestId: `bulk-reassign-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    });
+  }
+
+  async function handleBulkReassignConfirm(toEmployee: string, reason: string): Promise<void> {
+    // Handler-boundary check — mirrors every other mutating handler in this
+    // file (render-boundary gating alone is not enough: the modal that calls
+    // this could in principle be reopened from stale state).
+    if (!canBulkReassignReferrals) {
+      setBulkReassignError("لا تملك صلاحية إعادة التعيين الجماعي، أو أن مساحة العمل للقراءة فقط.");
+      return;
+    }
+    if (!bulkReassignModal || !selMonth) return;
+    setBulkReassignBusy(true);
+    setBulkReassignError(null);
+    try {
+      const result = await executeBulkReassignment({
+        directoryHandle,
+        monthFolderName: selMonth,
+        xrayImageIds: bulkReassignModal.xrayImageIds,
+        reassignedTo: toEmployee,
+        eventBy: username,
+        reason: reason || undefined,
+        sourceRequestId: bulkReassignModal.sourceRequestId,
+      });
+      if (!result.ok) {
+        // Keep the modal open with the same sourceRequestId — a retry only
+        // re-emits whatever this attempt did not durably write (see
+        // executeBulkReassignment's replay guard), so re-clicking "confirm" is
+        // always safe.
+        setBulkReassignError(result.error ?? "حدث خطأ غير متوقع أثناء إعادة التعيين.");
+        return;
+      }
+      const appliedTotal = result.appliedIds.length + result.alreadyAppliedIds.length;
+      const skippedTotal = result.skipped.length;
+      setBulkReassignModal(null);
+      clearSelection();
+      setStatusMsg({
+        type: "ok",
+        text: skippedTotal > 0
+          ? `تم إعادة تعيين ${appliedTotal} عينة إلى ${toEmployee} — تم تخطي ${skippedTotal} عينة (راجع ملخص الحوار السابق لسبب كل حالة).`
+          : `تم إعادة تعيين ${appliedTotal} عينة إلى ${toEmployee}.`,
+      });
+      // Silent — follows an already-successful write, not a month/user change;
+      // must refresh the queue in place rather than flashing the loading state.
+      await loadData({ silent: true });
+    } catch (error) {
+      setBulkReassignError(
+        error instanceof MonthClosedError
+          ? getLabels().msg_month_closed_write_blocked
+          : error instanceof Error ? error.message : "خطأ غير معروف"
+      );
+    } finally {
+      setBulkReassignBusy(false);
     }
   }
 
@@ -843,7 +1036,16 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       );
     }
     if (col.id === "xrayImageId") {
-      return <span className="dt-mono">{entry.xrayImageId}</span>;
+      return (
+        <span className="dt-mono ew-xray-id-cell">
+          {entry.xrayImageId}
+          {isAdhocEntry(entry) && (
+            <span className="ew-adhoc-badge" title={`${L.badge_adhoc_import_title}: ${entry.adhocFileName}`}>
+              {L.badge_adhoc_import}
+            </span>
+          )}
+        </span>
+      );
     }
     if (col.id === "answerStatus") {
       const answer = answersMap.get(`${entry.xrayImageId}::${entry.assignedTo}`);
@@ -917,6 +1119,20 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       {loadState === "error"   && <p className="ew-empty">تعذر تحميل البيانات.</p>}
 
       {(loadState === "ready" || loadState === "idle") && (() => {
+        // True whenever the `columns` memo actually prepended the select-checkbox
+        // column (personal-scope users always; oversight users only when permitted
+        // to bulk-reassign — see the `columns` memo above).
+        const hasSelectColumn = columns[0]?.id === SELECT_COL_ID;
+        // Bug fix: SELECT_COL_ID is `alwaysVisible: true`, but DataTable's own
+        // default-column-config builder (used whenever no saved preset exists yet —
+        // i.e. every first-time user) only marks a column visible if its id is in
+        // `defaultVisible`; `alwaysVisible` only affects column ORDER, not whether
+        // it's filtered out of `visibleCols`. DEFAULT_VISIBLE never listed the select
+        // column, so on a fresh workspace the checkbox column was silently hidden for
+        // BOTH the personal referral-selection flow and this new oversight bulk-reassign
+        // flow until a user happened to open "الأعمدة" and turn it on manually — a real
+        // contributor to the reported "not able to do that" gap.
+        const defaultVisibleCols = hasSelectColumn ? [SELECT_COL_ID, ...DEFAULT_VISIBLE] : DEFAULT_VISIBLE;
         const selectableVisibleIds = filteredTableEntries
           .filter((e) => e.status !== "replaced")
           .map((e) => e.xrayImageId);
@@ -925,6 +1141,10 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           canSubmitReferrals &&
           entries.length > 0 &&
           selectedIds.size > 0;
+        const showBulkReassignBar =
+          canSeeAll &&
+          canBulkReassignReferrals &&
+          entries.length > 0;
         const tableEl = (
           <div className="ew-ref-queue">
             {showSelectionBar && (
@@ -932,10 +1152,26 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                 selectedCount={selectedIds.size}
                 visibleCount={selectableVisibleIds.length}
                 onReferSelected={() => {
-                  if (selectedIds.size === 0) return;
-                  setReferralModal({ xrayImageIds: [...selectedIds], source: "selected" });
+                  // Defense-in-depth: the button is already `disabled` when
+                  // selectedIds is empty, but a click must never be a silent
+                  // no-op if it's somehow reached anyway.
+                  if (selectedIds.size === 0) {
+                    setStatusMsg({ type: "error", text: "لا توجد عينات محددة يدوياً لإحالتها." });
+                    return;
+                  }
+                  setReferralModal({ xrayImageIds: [...selectedIds] });
                 }}
                 onSelectVisible={() => selectAll(selectableVisibleIds)}
+                onClear={clearSelection}
+              />
+            )}
+            {showBulkReassignBar && (
+              <BulkReassignSelectionBar
+                selectedCount={selectedIds.size}
+                filteredCount={selectableVisibleIds.length}
+                onReassignSelected={() => openBulkReassignModal([...selectedIds], "selected")}
+                onReassignFiltered={() => openBulkReassignModal(selectableVisibleIds, "filtered")}
+                onSelectAllFiltered={() => selectAll(selectableVisibleIds)}
                 onClear={clearSelection}
               />
             )}
@@ -945,9 +1181,9 @@ export default function XrayReferrals({ directoryHandle }: Props) {
               getRowKey={(e) => e.xrayImageId}
               renderCell={renderCell}
               storageKey={COL_KEY}
-              defaultVisible={DEFAULT_VISIBLE}
+              defaultVisible={defaultVisibleCols}
               density="compact"
-              stickyColumnIds={canSeeAll ? ["xrayImageId", "answerStatus"] : [SELECT_COL_ID, "xrayImageId", "answerStatus"]}
+              stickyColumnIds={hasSelectColumn ? [SELECT_COL_ID, "xrayImageId", "answerStatus"] : ["xrayImageId", "answerStatus"]}
               isAdmin={canSeeAll}
               canConfigureColumns={canConfigureColumns}
               initialColConfig={colPreset}
@@ -1022,7 +1258,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                   }
                   onReassign={
                     canSubmitReferrals && selEntry.assignedTo === username && selEntry.status === "pending"
-                      ? (entry) => setReferralModal({ xrayImageIds: [entry.xrayImageId], source: "selected" })
+                      ? (entry) => setReferralModal({ xrayImageIds: [entry.xrayImageId] })
                       : undefined
                   }
                   onReopen={
@@ -1067,7 +1303,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         <ReferralRequestModal
           xrayImageIds={referralModal.xrayImageIds}
           entries={referralModal.xrayImageIds
-            .map((id) => entries.find((entry) => entry.xrayImageId === id))
+            .map((id) => entriesById.get(id))
             .filter((entry): entry is DistributionEntry => Boolean(entry))}
           visibleColumns={visiblePreviewColumns}
           dateFmt={effectiveColConfig.dateFmt}
@@ -1077,6 +1313,22 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           onSubmit={(toEmployee, reason) =>
             void handleReferralRequest(toEmployee, reason, referralModal.xrayImageIds)
           }
+        />
+      ) : null}
+
+      {bulkReassignModal ? (
+        <BulkReassignModal
+          state={bulkReassignModal}
+          entries={entries}
+          currentUser={username}
+          busy={bulkReassignBusy}
+          error={bulkReassignError}
+          onClose={() => {
+            if (bulkReassignBusy) return;
+            setBulkReassignModal(null);
+            setBulkReassignError(null);
+          }}
+          onConfirm={(toEmployee, reason) => { void handleBulkReassignConfirm(toEmployee, reason); }}
         />
       ) : null}
     </section>

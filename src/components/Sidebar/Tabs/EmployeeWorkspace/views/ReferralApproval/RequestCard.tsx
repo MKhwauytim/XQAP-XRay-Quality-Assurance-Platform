@@ -28,7 +28,13 @@ type Props = {
   onToggleSelect: () => void;
 };
 
-function getDetailRow(detail: SampleDetail | undefined): PreparedPopulationRow | undefined {
+// B5: DistributionEntry.row is now the (smaller) employee-mirror stub, not the
+// full PreparedPopulationRow -- this chip only ever reads portName/stage/
+// plateOrContainerNumber, all of which are on both shapes, so the return type
+// only needs to promise that common subset rather than the full row.
+function getDetailRow(
+  detail: SampleDetail | undefined
+): Pick<PreparedPopulationRow, "portName" | "stage" | "plateOrContainerNumber"> | undefined {
   if (!detail) return undefined;
   return "row" in detail ? detail.row : detail;
 }

@@ -36,6 +36,7 @@ import PagesBar from "./editor/PagesBar";
 import FieldsPanel from "./editor/FieldsPanel";
 import FieldDropDialog, { type AggChoice } from "./editor/FieldDropDialog";
 import PrintView from "./PrintView";
+import { ExecutiveRowsProvider } from "./renderers/ExecutiveRowsProvider";
 import type { FieldRole } from "../../../../data/reportDesigner/query/fieldCatalog";
 import "./ReportDesigner.css";
 
@@ -357,7 +358,14 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack, canEdit 
   }
 
   return (
-    <>
+    // Task 2 perf fix: hoists the executive-rows load (population + sample +
+    // distribution + all employee files + template → buildExecutiveReportRows)
+    // to ONE shared load per (directoryHandle, month) here, above both the
+    // editing Canvas and PrintView -- every KpiRenderer on the canvas (and
+    // every page's Canvas in the print view) now reads the same result via
+    // `useExecutiveRows()` instead of each tile independently re-running the
+    // whole read+build in its own effect.
+    <ExecutiveRowsProvider>
       <div
         className={`rd-pbi-layout${!showFields ? " rd-fields-hidden" : ""}${!showFormat ? " rd-format-hidden" : ""}`}
         style={{ height: "calc(100vh - 52px)" }}
@@ -505,7 +513,7 @@ function EditorHost({ initialDoc, directoryHandle, currentUser, onBack, canEdit 
         />
       )}
       {showPrint && <PrintView doc={doc} onClose={() => setShowPrint(false)} />}
-    </>
+    </ExecutiveRowsProvider>
   );
 }
 
@@ -690,6 +698,11 @@ export default function ReportDesigner() {
   }
 
   return (
+    // Design-list thumbnails also render Canvas/KpiRenderer (view mode), so
+    // they need the same shared-load provider as EditorHost -- otherwise a
+    // KPI element inside a thumbnail would read the context's default `null`
+    // forever (no provider above it) instead of loading data at all.
+    <ExecutiveRowsProvider>
     <div className="rd-root" dir="rtl">
       <PageHeader
         eyebrow={labels.rd_page_eyebrow}
@@ -856,5 +869,6 @@ export default function ReportDesigner() {
         onCancel={() => setConfirmDeleteId(null)}
       />
     </div>
+    </ExecutiveRowsProvider>
   );
 }

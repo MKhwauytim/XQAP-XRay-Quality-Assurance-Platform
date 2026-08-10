@@ -16,6 +16,7 @@ import { tabAllowedRoles } from "../../../../auth/tabCatalog";
 import { usePermissions } from "../../../../auth/usePermissions";
 import type { UsePermissionsResult } from "../../../../auth/usePermissions";
 import { logError, logRejection } from "../../../../data/storage/errorLogger";
+import type { SafeWriteProgressPhase } from "../../../../data/storage/safeWrite";
 import { currentMonthFolderInfo, formatMonthFolderName, formatMonthFolderShortLabel } from "../../../../data/population/monthFolder";
 import type { MonthFolderInfo } from "../../../../data/population/monthFolder";
 import {
@@ -47,8 +48,6 @@ import { exportPopulationProcessingResult } from "./processing/populationExporte
 import { processPopulation } from "./processing/populationProcessor";
 import type { PopulationProcessingResult } from "./processing/populationProcessingTypes";
 
-import { exportPopulationReport } from "./reporting/reportExporter";
-
 import type { RiskWorkbookResult } from "./riskData/riskDataTypes";
 
 import WorkbookWorker from "../../../../workers/workbookWorker?worker&inline";
@@ -68,7 +67,9 @@ import {
 } from "../../../../data/population/populationConfig";
 
 import { getLabels } from "../../../../data/labels/labelsStore";
-import { MonthClosedError } from "../../../../data/population/monthLock";
+import { MonthClosedError, reopenMonth } from "../../../../data/population/monthLock";
+import type { MonthManifestData } from "../../../../data/population/monthTypes";
+import type { PopulationAggregateLoadResult } from "../../../../data/population/populationAggregate";
 import { appendWorkspaceAction } from "../../../../data/audit/actionLog";
 import { touchVisitedTabs } from "../../../../app/visitedTabs";
 
@@ -86,6 +87,7 @@ import {
 import { useMonthLoad, type LoadedMonthState } from "./useMonthLoad";
 import { useDistributionActions } from "./useDistributionActions";
 import {
+  ClosedMonthBanner,
   PopulationHeader,
   PopulationPhaseFooter,
   PopulationStatusBar,
@@ -192,6 +194,16 @@ export default function PopulationTab() {
     registerMonthChangeGuard,
     isSelectedMonthClosed,
   } = useGlobalMonth();
+  // Owner requirement (2026-08-07): the selected month's manifest + persisted
+  // aggregate, kept in sync with useMonthLoad's applyLoadedState below so the
+  // closed-month banner can distinguish a system auto-lock from a person
+  // manually closing the month, and so Phase 2's report can render a locked
+  // month from the aggregate alone (zero population.final.json/risk.raw.json/
+  // bi.raw.json reads).
+  const [selectedMonthManifest, setSelectedMonthManifest] = useState<MonthManifestData | null>(null);
+  const [populationLocked, setPopulationLocked] = useState(false);
+  const [populationAggregate, setPopulationAggregate] = useState<PopulationAggregateLoadResult | null>(null);
+  const [isUnlockingMonth, setIsUnlockingMonth] = useState(false);
   // Month close-out (Tier-1 Item A): a closed month is view-only — draw and
   // distribution capabilities are withdrawn regardless of role permissions.
   const selectedMonthClosed = isSelectedMonthClosed;
@@ -306,6 +318,9 @@ export default function PopulationTab() {
     setPopulationProcessingResult(loaded.population);
     setSampleDrawResult(loaded.sample);
     setDistributionCurrent(loaded.distribution);
+    setSelectedMonthManifest(loaded.manifest);
+    setPopulationLocked(loaded.populationLocked);
+    setPopulationAggregate(loaded.populationAggregate);
 
     if (loaded.phase) {
       setCurrentPhase(loaded.phase.current);
@@ -329,6 +344,9 @@ export default function PopulationTab() {
     setPopulationProcessingResult(null);
     setSampleDrawResult(null);
     setDistributionCurrent(null);
+    setSelectedMonthManifest(null);
+    setPopulationLocked(false);
+    setPopulationAggregate(null);
     setSaveToDiskMessage(null);
     setSampleSaveMessage(null);
     setDistributionMessage(null);
@@ -414,6 +432,12 @@ export default function PopulationTab() {
 
   const [isSavingToDisk, setIsSavingToDisk] = useState(false);
   const [saveToDiskMessage, setSaveToDiskMessage] = useState<SaveMessage>(null);
+  // B task 2: the write-phase progress for population.final.json (the largest
+  // file in the save batch), surfaced so "جاري الحفظ التلقائي..." doesn't sit
+  // unchanged for the 10-15 minutes safeWriteJson's own passes (backup, stage,
+  // verify, commit, verify) can take on a big population — see safeWrite.ts's
+  // SafeWriteProgressPhase.
+  const [saveProgressPhase, setSaveProgressPhase] = useState<SafeWriteProgressPhase | null>(null);
   // Pending re-process save awaiting user confirmation (month already has a drawn sample).
   const [pendingReprocessSave, setPendingReprocessSave] = useState<{
     processingResult: PopulationProcessingResult;
@@ -458,6 +482,7 @@ export default function PopulationTab() {
     currentUsername: sessionRef.current?.username ?? "unknown",
     currentRole: sessionRef.current?.role ?? "unknown",
     onDistributionChanged: () => setMonthRefreshKey((k) => k + 1),
+    refreshGlobalMonths: refreshMonths,
   });
 
   const [uploads, setUploads] = useState<Record<UploadKey, UploadState>>({
@@ -502,6 +527,31 @@ export default function PopulationTab() {
     void ensurePopulationLoaded();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fresh closure each render; its own body already guards re-fetching via populationProcessingResult
   }, [activeSubTab, currentPhase, populationProcessingResult, canDrawSample, canProcessPopulation]);
+
+  // W9: auto-process on arriving at Phase 2 with a freshly-read workbook still
+  // unprocessed — the owner should not have to press "معالجة المجتمع" for the
+  // very first run. Guarded by object-identity on riskWorkbookResult (not just
+  // "!populationProcessingResult", which a FAILED attempt would leave true
+  // forever and retry on every render) so this fires at most once per distinct
+  // parsed workbook. A month already processed/loaded from disk reconstructs
+  // populationProcessingResult directly (see reconstructedPopulation), so this
+  // never re-runs for it. handleProcessPopulation itself still owns every
+  // permission/closed-month/in-flight check — canProcessNow here is only an
+  // additional render-time gate so the effect doesn't even attempt a call the
+  // handler would reject anyway. Manual re-process ("إعادة معالجة المجتمع")
+  // stays available and does not go through this effect at all.
+  const autoProcessAttemptedForRef = useRef<RiskWorkbookResult | null>(null);
+  useEffect(() => {
+    if (activeSubTab !== "process" || currentPhase !== 2) return;
+    if (!riskWorkbookResult) return;
+    if (populationProcessingResult) return;
+    if (isProcessingPopulation || isLoadingMonthData) return;
+    if (!canProcessNow) return;
+    if (autoProcessAttemptedForRef.current === riskWorkbookResult) return;
+    autoProcessAttemptedForRef.current = riskWorkbookResult;
+    void handleProcessPopulation();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- handleProcessPopulation is a fresh closure every render; the ref guard above (not a dependency) is what actually prevents repeat firing
+  }, [activeSubTab, currentPhase, riskWorkbookResult, populationProcessingResult, isProcessingPopulation, isLoadingMonthData, canProcessNow]);
 
   // B3: compute the orphan scan for the selected month when the Phase 2 report is
   // visible. Best-effort — any load failure clears the scan (section renders nothing).
@@ -676,7 +726,14 @@ export default function PopulationTab() {
     setProcessingMessage("");
   }
 
-  async function processPhaseOneAndMoveNext(): Promise<void> {
+  // W4/W10 (cheap half of the requested upload→process→compare restructure): this
+  // used to both parse the uploaded workbook(s) AND immediately advance to Phase 2
+  // in the same click. It now only parses, so the raw-file summary (rendered by
+  // PhaseOneUpload once riskWorkbookResult/biWorkbookResult are set) is visible on
+  // THIS page first — matching the owner's requested "upload sources, see general
+  // info below them" flow. moveToNextPhase's generic phase-1 branch below performs
+  // the actual advance once this has already run (a second "التالي" press).
+  async function parsePhaseOneWorkbooks(): Promise<void> {
     if (!canUploadData) {
       setUploadError("لا تملك صلاحية قراءة ملفات البيانات.");
       return;
@@ -722,10 +779,8 @@ export default function PopulationTab() {
           setBiWorkbookResult(msg.biResult);
           hasUnsavedSessionWorkRef.current = true;
           if (msg.warning) setProcessingMessage(msg.warning);
-          setCompletedPhaseIds((prev) =>
-            prev.includes(1) ? prev : [...prev, 1]
-          );
-          setCurrentPhase(2);
+          // No longer advances the phase here — see this function's header
+          // comment. Stays on Phase 1 so the raw-file summary renders.
           cleanup();
         } else {
           setProcessingMessage(
@@ -847,29 +902,6 @@ export default function PopulationTab() {
     );
   }
 
-  function handleExportPhaseTwoReport(): void {
-    if (isLoadingMonthData) {
-      setProcessingMessage("جارٍ تحميل بيانات الشهر — انتظر حتى يكتمل التحميل قبل التصدير.");
-      return;
-    }
-    if (!canExportReports) {
-      setProcessingMessage("لا تملك صلاحية تصدير التقارير.");
-      return;
-    }
-
-    if (!riskWorkbookResult) {
-      setProcessingMessage("لا توجد بيانات وكالة مخاطر جاهزة لتصدير التقرير.");
-      return;
-    }
-
-    exportPopulationReport({
-      scope: "phase-2",
-      riskWorkbookResult,
-      biWorkbookResult,
-      populationProcessingResult
-    });
-  }
-
   async function performSaveToDisk(
     processingResult: PopulationProcessingResult,
     riskResult: RiskWorkbookResult
@@ -904,10 +936,12 @@ export default function PopulationTab() {
     const username = sessionRef.current?.username ?? "unknown";
     setIsSavingToDisk(true);
     setSaveToDiskMessage(null);
+    setSaveProgressPhase(null);
 
     try {
       const result = await saveMonthRun({
         directoryHandle,
+        onSaveProgress: (phase) => setSaveProgressPhase(phase),
         month: saveMonth,
         year: saveYear,
         username,
@@ -971,6 +1005,7 @@ export default function PopulationTab() {
       });
     } finally {
       setIsSavingToDisk(false);
+      setSaveProgressPhase(null);
     }
   }
 
@@ -1090,6 +1125,7 @@ export default function PopulationTab() {
           totalActual: drawResult.data.totalActual,
           certScanActual: drawResult.data.certScanActual,
           nonCertScanActual: drawResult.data.nonCertScanActual,
+          certScanShortfalls: drawResult.data.certScanShortfalls ?? [],
         });
       }
     } catch (error) {
@@ -1104,9 +1140,31 @@ export default function PopulationTab() {
     }
   }
 
+  // Owner requirement: admin unlock affordance directly in this tab (the
+  // mechanism itself — reopenMonth — is unchanged; this only calls it).
+  async function handleUnlockMonth(): Promise<void> {
+    if (!directoryHandle || !canMutate("archive.closeMonth")) return;
+    const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
+    setIsUnlockingMonth(true);
+    try {
+      const result = await reopenMonth(directoryHandle, monthFolderName, sessionRef.current?.username ?? "unknown");
+      if (result.ok) {
+        await refreshMonths();
+        setMonthRefreshKey((k) => k + 1);
+      } else {
+        setProcessingMessage(result.error);
+      }
+    } finally {
+      setIsUnlockingMonth(false);
+    }
+  }
+
   async function moveToNextPhase(): Promise<void> {
-    if (currentPhase === 1) {
-      await processPhaseOneAndMoveNext();
+    if (currentPhase === 1 && !riskWorkbookResult) {
+      // First "التالي" press on Phase 1: parse only, stay put so the raw-file
+      // summary shows. A second press (riskWorkbookResult now set) falls
+      // through to the generic advance below, same as every other phase.
+      await parsePhaseOneWorkbooks();
       return;
     }
 
@@ -1170,16 +1228,19 @@ export default function PopulationTab() {
         month={saveMonth}
         year={saveYear}
         population={populationProcessingResult}
+        populationAggregate={populationAggregate}
         sample={sampleDrawResult}
         distribution={distributionCurrent}
         biWorkbook={biWorkbookResult}
       />
-      {/* ── Closed-month banner (Tier-1 Item A) ── */}
-      {selectedMonthClosed ? (
-        <div className="upload-warning" role="status">
-          {getLabels().msg_month_closed_banner}
-        </div>
-      ) : null}
+      {/* ── Closed-month banner (Tier-1 Item A + owner's system/person-lock distinction) ── */}
+      <ClosedMonthBanner
+        visible={selectedMonthClosed}
+        manifest={selectedMonthManifest}
+        canUnlock={canMutate("archive.closeMonth")}
+        isUnlocking={isUnlockingMonth}
+        onUnlock={() => { void handleUnlockMonth(); }}
+      />
 
       {/* ── Horizontal Stepper ── */}
       <PopulationStepper
@@ -1207,6 +1268,8 @@ export default function PopulationTab() {
             onPickFile={pickExcelFile}
             onClearFile={clearSelectedFile}
             onFallbackFileChange={handleFallbackFileChange}
+            riskWorkbookResult={riskWorkbookResult}
+            biWorkbookResult={biWorkbookResult}
           />
         ) : null}
 
@@ -1222,15 +1285,16 @@ export default function PopulationTab() {
             processingProgressPercent={processingProgressPercent}
             monthLabel={formatMonthFolderShortLabel(formatMonthFolderName(saveMonth, saveYear))}
             isSavingToDisk={isSavingToDisk}
+            saveProgressPhase={saveProgressPhase}
             saveToDiskMessage={saveToDiskMessage}
             hasDiskWorkspace={Boolean(directoryHandle)}
             orphanScan={orphanScan}
             canProcess={canProcessNow}
             canExport={canExportNow}
-            onCertScanPasteTextChange={handleCertScanChange}
+            populationLocked={populationLocked}
+            populationAggregate={populationAggregate}
             onProcessPopulation={handleProcessPopulation}
             onExportPopulation={handleExportPopulation}
-            onExportPhaseReport={handleExportPhaseTwoReport}
           />
         ) : null}
 
@@ -1249,7 +1313,6 @@ export default function PopulationTab() {
             canConfigureSample={canConfigureSample}
             processingMessage={processingMessage}
             onConfigChange={handleConfigChange}
-            onSampleSeedChange={setSampleSeed}
             onDrawSample={() => { void handleDrawSample(); }}
           />
         ) : null}
@@ -1294,6 +1357,10 @@ export default function PopulationTab() {
         mode={settingsModalMode ?? "mapping"}
         config={config}
         onConfigChange={handleConfigChange}
+        certScanPasteText={certScanPasteText}
+        onCertScanPasteTextChange={handleCertScanChange}
+        sampleSeed={sampleSeed}
+        onSampleSeedChange={setSampleSeed}
         processingContext={{
           riskFileName: uploads.riskAgencyData.file?.name ?? null,
           biFileName: uploads.businessIntelligenceData.file?.name ?? null,

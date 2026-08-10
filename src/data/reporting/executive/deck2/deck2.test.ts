@@ -321,14 +321,16 @@ describe("visual overhaul — new slides & structures", () => {
     expect(html).toContain("--w:");
   });
 
-  it("renders four tone-coded TOC cards each with a key figure (مؤشرات الشهر's card is hidden along with its slide)", async () => {
+  it("renders five tone-coded TOC cards each with a key figure (مؤشرات الشهر's card is hidden along with its slide)", async () => {
     const html = await buildExecutiveDeckV2(input([popRow()]));
     const cards = (html.match(/class="v2-toc-card /g) ?? []).length;
-    // المعجم + القسم 1 + القسم 2 + القسم 3 (التحاليل المتقدمة, added 2026-07-25).
-    // The count tracks sections that actually render pages — a section whose
-    // builder list is empty contributes no card, which is what kept this at 3
-    // while section 3 was still scaffolding.
-    expect(cards).toBe(4);
+    // المعجم + القسم 1 + القسم 2 + القسم 3 (التحاليل المتقدمة, added
+    // 2026-07-25) + القسم 4 (التغطية والمساءلة التشغيلية, R4 deck parity,
+    // added 2026-08-08 — unlike section 3, its card is unconditional, since
+    // its builder list is never empty: coverage/accountability always render,
+    // falling back to an empty state instead of being omitted when no
+    // distribution exists yet).
+    expect(cards).toBe(5);
     expect(html).toContain("v2-toc-figure");
   });
 });

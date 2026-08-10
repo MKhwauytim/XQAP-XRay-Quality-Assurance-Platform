@@ -17,7 +17,8 @@ via the File System Access API.
   validation and permission check.
 - Read or edit the app's `localStorage` entries (managed users, role→tab permission matrix,
   label overrides) to grant themselves a different role or unlock hidden tabs.
-- Read the session token in `sessionStorage` or forge one.
+- Read the session token in `localStorage` or forge one (see §6(d) — persisted across browser
+  restarts since 2026-08-07, previously `sessionStorage`).
 
 **The auth layer (`src/auth/`) is a UX/role-routing guard, not a trust boundary.** It exists to
 give each role an appropriately scoped, uncluttered UI and to prevent accidental cross-role
@@ -81,11 +82,12 @@ local user can read or edit via devtools with no server round-trip to catch the 
   matrix. Editing this can self-elevate a role or unlock hidden tabs. Changes broadcast via a
   custom DOM event (`subscribeToUserManagementChanges`) so the UI reacts immediately, but there
   is no integrity check on the stored value itself.
-- **`sessionStorage["xray_auth_session_v1"]`** — the current session. Survives a reload,
-  auto-clears when the tab/browser closes, and carries a 7-day TTL as a secondary guard on
-  read-back. This is a UX convenience (avoid re-login on refresh), **not** a security control —
-  a forged or replayed session value would be accepted the same as a real one, since there is no
-  server to validate it against.
+- **`localStorage["xray_auth_session_v1"]`** — the current session. As of 2026-08-07 this
+  survives a full browser restart, not just a reload (previously `sessionStorage`, which
+  auto-cleared when the tab/browser closed — see §6(c) for the accepted-risk rationale). It still
+  carries a 7-day TTL as a secondary guard on read-back. This is a UX convenience (avoid re-login
+  after closing the browser), **not** a security control — a forged or replayed session value
+  would be accepted the same as a real one, since there is no server to validate it against.
 - **Workspace JSON files** (`1-population/`, `2-samples/`, etc.) — protected against
   *accidental* corruption by the safe-write layer (`safeWriteJson`/`safeReadJson`: snapshot →
   `.bak`, stage in `.tmp`, verify, commit, re-verify) and versioned via `JsonEnvelope`, but this
@@ -157,3 +159,39 @@ append-only audit trail — but these are voluntary alignments, not compliance. 
 
 **Accepted by:** XQAP maintainers (data-pipeline rework, Wave B7)
 **Date:** 2026-07-14
+
+### (d) SEC-02 relaxation: session persists across browser restarts (2026-08-07)
+
+The session (`src/auth/authSession.ts`) was moved from `sessionStorage` to `localStorage`. This
+is a **deliberate, owner-accepted relaxation** of the original SEC-02 posture (§4), not a silent
+divergence — recorded here per that request.
+
+**What changed:** previously, closing the tab or browser cleared the session (`sessionStorage`
+auto-clears on close), so an unattended, still-logged-in machine would self-logout the next time
+the browser fully closed. Now the session survives a full restart — a user (or anyone with access
+to the machine) who leaves the browser open, or later reopens it, resumes the same session without
+re-entering a passcode, until the unchanged 7-day TTL (`SESSION_TTL_MS` in `authSession.ts`)
+expires on next read-back.
+
+**Why:** the owner explicitly requested this — re-login after every browser/machine restart was
+judged more disruptive than the added unattended-machine exposure, for this app's actual usage
+pattern (small trusted team, local machines).
+
+**What did NOT change:**
+- The 7-day TTL guard is still enforced on every read (`isExpired` in `authSession.ts`) — a
+  persisted session older than 7 days is still discarded and treated as logged-out.
+- Demo/viewer-mode sessions (`mode: "demo"`) are still never persisted — `writeSession` explicitly
+  clears storage instead of writing for a demo session, so a read-only demo identity still cannot
+  survive a reload and attach to a real workspace (LOG-01, unchanged).
+- This does not change the trust boundary described in §1: the session was already forgeable by
+  anyone with local/devtools access even under `sessionStorage`; this relaxation extends the
+  *window* during which an unattended session remains valid, it does not create a new class of
+  exposure.
+
+**Residual risk (accepted):** a machine left unlocked and unattended for up to 7 days keeps an
+authenticated session usable by whoever sits down at it, instead of requiring a fresh login after
+each browser close. Mitigate operationally (screen lock, physical access control) — the app layer
+cannot enforce this without a backend session store, which is out of scope (§1).
+
+**Accepted by:** XQAP owner (explicit request, sampling-config/session-persistence work item)
+**Date:** 2026-08-07

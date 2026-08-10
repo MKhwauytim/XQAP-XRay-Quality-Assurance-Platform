@@ -39,6 +39,18 @@ export function manifestLockKey(monthFolderName: string): string {
 const MANIFEST_FILE = "month.manifest.json";
 const DEFAULT_CACHE_TTL_MS = 30_000;
 
+/**
+ * Sentinel `closedBy` value stamped by the automatic post-distribution lock
+ * (owner requirement, 2026-08-07 — see `useDistributionActions.ts`'s
+ * `refreshDistribution`), as opposed to a real username stamped by a person
+ * closing the month manually from the Archive tab or the Population tab's own
+ * unlock/lock affordance. Purely a naming convention on the existing
+ * `closedBy` field — `closeMonth`/`reopenMonth` themselves are unchanged; a
+ * caller simply passes this string in place of a username. No real user can
+ * collide with it (not a valid login username).
+ */
+export const SYSTEM_AUTO_LOCK_ACTOR = "__system_auto_lock__";
+
 export class MonthClosedError extends Error {
   readonly monthFolderName: string;
   constructor(monthFolderName: string) {

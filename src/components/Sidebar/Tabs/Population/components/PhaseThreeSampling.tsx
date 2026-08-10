@@ -1,5 +1,5 @@
 import type { PreparedPopulationRow } from "../../../../../data/population/populationTypes";
-import type { SampleMasterData } from "../../../../../data/sampling/sampleTypes";
+import type { CertScanShortfall, SampleMasterData } from "../../../../../data/sampling/sampleTypes";
 import type { SamplingPlanPriorMonthAdvisory } from "../../../../../data/sampling/samplingPlanStorage";
 import type { PopulationConfig, StageSamplingRule } from "../../../../../data/population/populationConfig";
 import { formatNumber, getStageKey } from "./helpers";
@@ -9,6 +9,15 @@ import { AlertTriangle, Info, Lock, Unlock } from "lucide-react";
 import { usePermissions } from "../../../../../auth/usePermissions";
 import { getLabels } from "../../../../../data/labels/labelsStore";
 import { formatMonthFolderShortLabel } from "../../../../../data/population/monthFolder";
+// Reuse the algorithm's own floor/cap logic (single source of truth) so the
+// running total shown here before the draw matches what drawStageSample will
+// actually use — see B (sampling config UI) task 1: the total must reflect the
+// *effective* per-stage target (after minRequiredCount is applied), not the
+// raw entered values, or the running total would understate what actually gets drawn.
+// certScanConfiguredTarget mirrors the CertScan target math drawStage uses
+// internally, so the pre-draw shortfall estimate below can never drift from
+// what the real draw will actually request.
+import { configuredTarget, certScanConfiguredTarget } from "../../../../../data/sampling/sampleAlgorithmInternals";
 
 type SaveMessage = { type: "ok" | "error"; text: string } | null;
 
@@ -37,7 +46,6 @@ type PhaseThreeSamplingProps = {
    */
   processingMessage: string;
   onConfigChange: (config: PopulationConfig) => void;
-  onSampleSeedChange: (seed: string) => void;
   onDrawSample: () => void;
 };
 
@@ -104,7 +112,6 @@ export default function PhaseThreeSampling({
   canConfigureSample,
   processingMessage,
   onConfigChange,
-  onSampleSeedChange,
   onDrawSample
 }: PhaseThreeSamplingProps) {
   const { canMutate } = usePermissions();
@@ -117,6 +124,48 @@ export default function PhaseThreeSampling({
     third:  populationRows.filter((r) => getStageKey(r.stage, config.stageMappings) === "third").length,
     fourth: populationRows.filter((r) => getStageKey(r.stage, config.stageMappings) === "fourth").length
   };
+
+  // CertScan pool available per stage — used only for the pre-draw shortfall
+  // estimate below, never to change what the draw itself does.
+  const certScanAvailableByStage = {
+    first:  populationRows.filter((r) => getStageKey(r.stage, config.stageMappings) === "first" && r.certScanStatus === "Certscan").length,
+    second: populationRows.filter((r) => getStageKey(r.stage, config.stageMappings) === "second" && r.certScanStatus === "Certscan").length,
+    third:  populationRows.filter((r) => getStageKey(r.stage, config.stageMappings) === "third" && r.certScanStatus === "Certscan").length,
+    fourth: populationRows.filter((r) => getStageKey(r.stage, config.stageMappings) === "fourth" && r.certScanStatus === "Certscan").length
+  };
+
+  const L = getLabels();
+
+  // Precompute each stage's effective target (mirrors configuredTarget, the
+  // exact function drawStageSample uses) BEFORE rendering the cards, so the
+  // running total below can sum the numbers that will actually be drawn —
+  // not the raw entered values, which is what let the owner's requested total
+  // silently balloon before (floor override applied only after the draw ran).
+  const stageComputations = config.samplingRules.map((rule) => {
+    const size = stageCounts[rule.stageKey];
+    const calculatedCount =
+      rule.method === "percentage" ? Math.round((rule.value / 100) * size) : rule.value;
+    const finalCount = configuredTarget(rule, size);
+    const insufficientPopulation = rule.minRequiredCount > 0 && size < rule.minRequiredCount;
+    const floorOverridden =
+      rule.minRequiredCount > 0 && !insufficientPopulation && calculatedCount < rule.minRequiredCount;
+    // CertScan shortfall estimate (owner decision, 2026-08): compares the
+    // stage-level CertScan request against the stage-level CertScan pool —
+    // the real draw further splits by port, so this can under-count a
+    // percentage-method shortfall that only appears once a specific port's
+    // quota is apportioned. It exists to catch the common case BEFORE the
+    // draw runs, not to replace the authoritative post-draw report.
+    const certScanAvailable = certScanAvailableByStage[rule.stageKey];
+    const certScanRequested = certScanConfiguredTarget(rule, finalCount);
+    const certScanShortfallEstimate = certScanRequested > certScanAvailable;
+    return {
+      rule, size, calculatedCount, finalCount, insufficientPopulation, floorOverridden,
+      certScanAvailable, certScanRequested, certScanShortfallEstimate
+    };
+  });
+  const runningTotal = stageComputations.reduce((sum, c) => sum + c.finalCount, 0);
+  const overriddenStages = stageComputations.filter((c) => c.floorOverridden);
+  const certScanShortfallStages = stageComputations.filter((c) => c.certScanShortfallEstimate);
 
   const handleRuleChange = (
     stageKey: "first" | "second" | "third" | "fourth",
@@ -143,28 +192,84 @@ export default function PhaseThreeSampling({
 
       <SwitchingAdvisory advisory={priorMonthAdvisory} />
 
+      {/* Running total across all stage cards, visible BEFORE the draw is triggered
+          (previously the summed total first appeared in SampleResultReport, i.e.
+          after the draw already ran — B task 1, owner-reported "requested 7,000, got
+          ~9,000"). Reflects each stage's *effective* target (after any floor
+          override), matching what drawStageSample will actually draw. */}
+      <div
+        className={`sampling-running-total${overriddenStages.length > 0 ? " has-override" : ""}`}
+        role="status"
+        style={{
+          margin: "12px 0",
+          padding: "12px 16px",
+          borderRadius: 10,
+          border: `1px solid ${overriddenStages.length > 0 ? "#d97706" : "var(--p-border, #cbd5e1)"}`,
+          background: overriddenStages.length > 0 ? "rgba(217,119,6,.08)" : "rgba(14,165,233,.06)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700, fontSize: 16 }}>
+          {overriddenStages.length > 0 && <AlertTriangle size={16} aria-hidden />}
+          {L.sampling_running_total_label}: <strong>{formatNumber(runningTotal)}</strong>
+        </div>
+        <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--p-muted)" }}>
+          {L.sampling_running_total_note}
+        </p>
+        {overriddenStages.map(({ rule, calculatedCount, finalCount }) => (
+          <p key={rule.stageKey} className="sampling-warn" role="alert" style={{ margin: "6px 0 0" }}>
+            {fillTemplate(L.sampling_floor_override_warning, {
+              stage: STAGE_LABELS[rule.stageKey],
+              entered: String(calculatedCount),
+              effective: String(finalCount),
+              minRequired: String(rule.minRequiredCount),
+            })}
+          </p>
+        ))}
+      </div>
+
+      {/* CertScan shortfall estimate, visible BEFORE the draw runs (owner decision,
+          2026-08): a stratum short on CertScan under-fills rather than silently
+          backfilling from NonCertscan — this warns as early as possible instead of
+          the operator only discovering it after the draw, in SampleResultReport. */}
+      {certScanShortfallStages.length > 0 && (
+        <div
+          className="sampling-certscan-shortfall-warning has-override"
+          role="alert"
+          style={{
+            margin: "12px 0",
+            padding: "12px 16px",
+            borderRadius: 10,
+            border: "1px solid #d97706",
+            background: "rgba(217,119,6,.08)",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700, fontSize: 16 }}>
+            <AlertTriangle size={16} aria-hidden />
+            {L.sampling_certscan_shortfall_predraw_title}
+          </div>
+          {certScanShortfallStages.map(({ rule, certScanRequested, certScanAvailable }) => (
+            <p key={rule.stageKey} style={{ margin: "6px 0 0" }}>
+              {fillTemplate(L.sampling_certscan_shortfall_predraw_row, {
+                stage: STAGE_LABELS[rule.stageKey],
+                requested: String(certScanRequested),
+                available: String(certScanAvailable),
+              })}
+            </p>
+          ))}
+        </div>
+      )}
+
       <div className="sampling-config-panel">
         <div className="sampling-stage-rules">
-          {config.samplingRules.map((rule) => {
-            const size = stageCounts[rule.stageKey];
-            const calculatedCount =
-              rule.method === "percentage"
-                ? Math.round((rule.value / 100) * size)
-                : rule.value;
-
+          {stageComputations.map(({ rule, size, finalCount, insufficientPopulation, floorOverridden }) => {
             let warnMessage = "";
-            let finalCount = calculatedCount;
-            if (rule.minRequiredCount > 0) {
-              if (size < rule.minRequiredCount) {
-                finalCount = size;
-                warnMessage = `تنبيه: المجتمع المتاح (${size}) أقل من الحد الأدنى (${rule.minRequiredCount}). سيتم سحب 100%.`;
-              } else if (calculatedCount < rule.minRequiredCount) {
-                finalCount = rule.minRequiredCount;
-                warnMessage = `تم تطبيق الحد الأدنى (${rule.minRequiredCount}) بدلاً من القيمة المدخلة.`;
-              }
+            if (insufficientPopulation) {
+              warnMessage = `تنبيه: المجتمع المتاح (${size}) أقل من الحد الأدنى (${rule.minRequiredCount}). سيتم سحب 100%.`;
+            } else if (floorOverridden) {
+              warnMessage = `تم تطبيق الحد الأدنى (${rule.minRequiredCount}) بدلاً من القيمة المدخلة — راجع التنبيه أعلى الصفحة.`;
             }
 
-            const isAutoLocked = rule.stageKey === "first" || (rule.minRequiredCount > 0 && size < rule.minRequiredCount);
+            const isAutoLocked = rule.stageKey === "first" || insufficientPopulation;
             const isLockedState = (rule.isLocked || isAutoLocked) && !isAdminUnlocked;
             return (
               <div
@@ -295,22 +400,15 @@ export default function PhaseThreeSampling({
           })}
         </div>
 
-        {/* RNG Seed + trigger */}
+        {/* W14: the RNG seed edit control moved to إعدادات المعالجة (MappingSettingsModal,
+            mode="processing") — this still drives the draw below via the sampleSeed prop,
+            only its edit UI relocated. A compact read-only reference stays here so the
+            operator can see which seed a draw will use / did use without leaving the page. */}
         <div className="sampling-rng-row">
-          <label className="save-disk-label" style={{ flex: 1 }}>
-            رمز التوزيع العشوائي - يمكن تعديله لإعادة إنتاج نفس العينة
-            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <input
-                id="sample-seed"
-                type="text"
-                value={sampleSeed}
-                className="sampling-rng-input"
-                style={{ flex: 1 }}
-                disabled={isDrawingSample}
-                onChange={(e) => onSampleSeedChange(e.target.value)}
-              />
-            </div>
-          </label>
+          <span className="sampling-rng-current" style={{ flex: 1, fontSize: 12, color: "var(--p-muted)" }}>
+            رمز التوزيع العشوائي الحالي: <code>{sampleSeed}</code>
+            {" — "}يمكن تعديله من إعدادات المعالجة
+          </span>
 
           <button
             type="button"
@@ -350,10 +448,61 @@ export default function PhaseThreeSampling({
   );
 }
 
+/**
+ * Prominent post-draw shortfall banner (owner decision, 2026-08). The owner's
+ * original experience was seeing "20" and "10" in the result with no
+ * explanation — this names each affected stratum, what was requested vs. what
+ * was actually drawn, and why (insufficient CertScan rows available), so that
+ * gap can never again pass unnoticed.
+ */
+function CertScanShortfallReport({ shortfalls }: { shortfalls: CertScanShortfall[] }) {
+  if (shortfalls.length === 0) return null;
+  const L = getLabels();
+  return (
+    <div
+      className="sample-certscan-shortfall-report"
+      role="alert"
+      style={{
+        margin: "0 0 16px",
+        padding: "12px 16px",
+        borderRadius: 10,
+        border: "1px solid #d97706",
+        background: "rgba(217,119,6,.08)",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700, fontSize: 16 }}>
+        <AlertTriangle size={16} aria-hidden />
+        {L.sampling_certscan_shortfall_result_title}
+      </div>
+      <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--p-muted)" }}>
+        {L.sampling_certscan_shortfall_result_intro}
+      </p>
+      {shortfalls.map((s, i) => (
+        <p key={`${s.stageKey}-${s.portName ?? "stage"}-${i}`} className="sampling-warn" role="alert" style={{ margin: "6px 0 0" }}>
+          {fillTemplate(
+            s.portName === null
+              ? L.sampling_certscan_shortfall_result_row_stage
+              : L.sampling_certscan_shortfall_result_row_port,
+            {
+              stage: s.stageLabel,
+              port: s.portName ?? "",
+              requested: String(s.requestedCertScanQuota),
+              actual: String(s.actualCertScanDrawn),
+              available: String(s.availableCertScanRows),
+            }
+          )}
+        </p>
+      ))}
+    </div>
+  );
+}
+
 function SampleResultReport({ data }: { data: SampleMasterData }) {
   return (
     <section className="sample-result-section" aria-label="نتائج العينة">
       <h3>نتائج سحب عينة المستويات المشتركة</h3>
+
+      <CertScanShortfallReport shortfalls={data.certScanShortfalls ?? []} />
 
       <div className="sample-kpi-grid">
         <SummaryCard label="المستهدف الكلي"       value={data.totalRequested} />

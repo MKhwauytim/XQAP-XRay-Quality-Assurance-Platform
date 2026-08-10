@@ -124,8 +124,8 @@ describe("management deck — XSS escaping", () => {
 });
 
 describe("management document — XSS escaping", () => {
-  it("escapes injected port names, reviewer names and the month label", () => {
+  it("escapes injected port names, reviewer names and the month label", async () => {
     const { input, names } = maliciousExecInput();
-    assertSafe(buildManagementReport(input, names));
+    assertSafe(await buildManagementReport(input, names));
   });
 });

@@ -54,16 +54,16 @@ export function buildEmployeeOverview(model: ReportModel, pageNo: string): strin
 
   // Aggregate per inspector across levels/ports from employeeByPort.
   const byInspector = aggregateByInspector(model.employeeByPort);
-  const rankable = byInspector.filter((e) => isRankable(e.band) && e.accuracy !== null);
-  const ranked = [...rankable].sort((a, b) => (b.accuracy as number) - (a.accuracy as number));
+  const rankable = byInspector.filter((e) => isRankable(e.band) && e.accuracyByDecision !== null);
+  const ranked = [...rankable].sort((a, b) => (b.accuracyByDecision as number) - (a.accuracyByDecision as number));
   const best = ranked[0]?.inspectorId ?? null;
-  const avgAccuracy = avg(rankable.map((e) => e.accuracy as number));
+  const avgAccuracy = avg(rankable.map((e) => e.accuracyByDecision as number));
 
-  const bars = ranked.slice(0, 8).map((e) => ({ label: e.inspectorId, value: e.accuracy as number }));
+  const bars = ranked.slice(0, 8).map((e) => ({ label: e.inspectorId, value: e.accuracyByDecision as number }));
   const rows = byInspector.map((e) => [
     e.inspectorId,
     fmtNum(e.evaluable),
-    isRankable(e.band) ? fmtPct(e.accuracy) : null,
+    isRankable(e.band) ? fmtPct(e.accuracyByDecision) : null,
     isRankable(e.band) ? fmtPct(e.detectionRate) : null,
     bandChip(e.band),
   ]);
@@ -98,14 +98,14 @@ export function buildAccuracyByDecision(model: ReportModel, pageNo: string): str
   const byInspector = aggregateByInspector(model.employeeByPort).filter((e) => isRankable(e.band));
   const points = byInspector.map((e) => ({
     label: e.inspectorId,
-    x: e.accuracy ?? 0,
+    x: e.accuracyByDecision ?? 0,
     y: e.detectionRate ?? 0,
   }));
   const rows = byInspector.map((e) => [
     e.inspectorId,
-    isRankable(e.band) ? fmtPct(e.accuracy) : null,
+    isRankable(e.band) ? fmtPct(e.accuracyByDecision) : null,
     isRankable(e.band) ? fmtPct(e.detectionRate) : null,
-    isRankable(e.band) ? fmtPct(e.missedSuspicionRate) : null,
+    isRankable(e.band) ? fmtPct(e.missedSuspicionRateByDecision) : null,
   ]);
 
   const t = model.errorAnalysis.totals;
@@ -153,8 +153,8 @@ export async function buildPerPortPages(model: ReportModel, startPageNo: number)
       const body = `${header}
         ${kpiStrip([
           kpi({ label: "قرارات قابلة للتقييم", value: portAcc ? fmtNum(portAcc.evaluable) : "—", tone: "slate" }),
-          kpi({ label: "دقة المنفذ", value: portAcc && isRankable(portAcc.band) ? fmtPct(portAcc.accuracy) : "—", tone: "gold" }),
-          kpi({ label: "اشتباه فائت", value: portAcc && isRankable(portAcc.band) ? fmtPct(portAcc.missedSuspicionRate) : "—", tone: "coral" }),
+          kpi({ label: "دقة المنفذ", value: portAcc && isRankable(portAcc.band) ? fmtPct(portAcc.accuracyByDecision) : "—", tone: "gold" }),
+          kpi({ label: "اشتباه فائت", value: portAcc && isRankable(portAcc.band) ? fmtPct(portAcc.missedSuspicionRateByDecision) : "—", tone: "coral" }),
         ], 3)}
         ${emptyState(UNMAPPED_TITLE, UNMAPPED_DETAIL)}
         ${executiveClose(employeeClose(false, 0, null))}`;
@@ -176,13 +176,17 @@ export async function buildPerPortPages(model: ReportModel, startPageNo: number)
         isRankable(e.band) ? fmtPct(e.missedSuspicionRate) : null,
         bandChip(e.band),
       ]);
+      // NOTE: `e` here is `EmployeeByPortLevel` (AccuracyMetrics & {...}), not
+      // `KeyedAccuracy` — it intentionally keeps the generic `accuracy` /
+      // `missedSuspicionRate` names, matching how `EmployeeByPortLevel.accuracy`
+      // was left unrenamed by the original accuracy-grain split.
 
     const body = `${header}
       ${kpiStrip([
         kpi({ label: "قرارات قابلة للتقييم", value: portAcc ? fmtNum(portAcc.evaluable) : "—", tone: "slate" }),
         kpi({ label: "عدد المفتشين", value: fmtNum(new Set(inspectors.map((e) => e.inspectorId)).size), tone: "blue" }),
-        kpi({ label: "دقة المنفذ", value: portAcc && isRankable(portAcc.band) ? fmtPct(portAcc.accuracy) : "—", tone: "gold" }),
-        kpi({ label: "اشتباه فائت", value: portAcc && isRankable(portAcc.band) ? fmtPct(portAcc.missedSuspicionRate) : "—", tone: "coral" }),
+        kpi({ label: "دقة المنفذ", value: portAcc && isRankable(portAcc.band) ? fmtPct(portAcc.accuracyByDecision) : "—", tone: "gold" }),
+        kpi({ label: "اشتباه فائت", value: portAcc && isRankable(portAcc.band) ? fmtPct(portAcc.missedSuspicionRateByDecision) : "—", tone: "coral" }),
       ], 4)}
       <div class="grid grid-2" style="margin-top:14px">
         ${panel("المستوى الأول", dataTable({ headers: ["المفتش", "قرارات", "الدقة", "الكشف", "فائت", "الحالة"], rows: inspectorRows(l1) }), { iconName: "layers" })}
@@ -191,7 +195,7 @@ export async function buildPerPortPages(model: ReportModel, startPageNo: number)
       ${insufficientPort ? noteBox("بيانات هذا المنفذ غير كافية للترتيب؛ تُعرض الأرقام للوصف فقط.") : ""}
       ${executiveClose({
         shows: portAcc && isRankable(portAcc.band)
-          ? `دقة المنفذ ${fmtPct(portAcc.accuracy)} مع اشتباه فائت ${fmtPct(portAcc.missedSuspicionRate)}.`
+          ? `دقة المنفذ ${fmtPct(portAcc.accuracyByDecision)} مع اشتباه فائت ${fmtPct(portAcc.missedSuspicionRateByDecision)}.`
           : "بيانات المنفذ غير كافية لاستخلاص دقة موثوقة.",
         matters: "أداء المفتشين على مستوى المنفذ يوجّه الدعم المحلي.",
         action: insufficientPort ? "زيادة حجم العينة على هذا المنفذ قبل اتخاذ قرارات." : "متابعة المفتشين الأقل دقة على هذا المنفذ.",
@@ -205,20 +209,20 @@ export async function buildPerPortPages(model: ReportModel, startPageNo: number)
 
 export function buildPortComparison(model: ReportModel, pageNo: string): string {
   const ports = [...model.portAccuracy];
-  const rankable = ports.filter((p) => isRankable(p.band) && p.accuracy !== null);
-  const ranked = [...rankable].sort((a, b) => (b.accuracy as number) - (a.accuracy as number));
+  const rankable = ports.filter((p) => isRankable(p.band) && p.accuracyByDecision !== null);
+  const ranked = [...rankable].sort((a, b) => (b.accuracyByDecision as number) - (a.accuracyByDecision as number));
   const strongest = ranked[0]?.key ?? null;
   const weakest = ranked.length > 0 ? ranked[ranked.length - 1].key : null;
   const insufficient = ports.filter((p) => !isRankable(p.band)).length;
-  const highestMissed = [...rankable].sort((a, b) => (b.missedSuspicionRate ?? -1) - (a.missedSuspicionRate ?? -1))[0]?.key ?? null;
+  const highestMissed = [...rankable].sort((a, b) => (b.missedSuspicionRateByDecision ?? -1) - (a.missedSuspicionRateByDecision ?? -1))[0]?.key ?? null;
 
-  const bars = ranked.slice(0, 8).map((p) => ({ label: p.key, value: p.accuracy as number }));
+  const bars = ranked.slice(0, 8).map((p) => ({ label: p.key, value: p.accuracyByDecision as number }));
   const rows = ports.map((p) => [
     p.key,
     fmtNum(p.evaluable),
-    isRankable(p.band) ? fmtPct(p.accuracy) : null,
+    isRankable(p.band) ? fmtPct(p.accuracyByDecision) : null,
     isRankable(p.band) ? fmtPct(p.detectionRate) : null,
-    isRankable(p.band) ? fmtPct(p.missedSuspicionRate) : null,
+    isRankable(p.band) ? fmtPct(p.missedSuspicionRateByDecision) : null,
     isRankable(p.band) ? fmtPct(p.falseSuspicionRate) : null,
     bandChip(p.band),
   ]);
@@ -266,9 +270,9 @@ function aggregateByInspector(byPort: EmployeeByPortLevel[]): InspectorAgg[] {
       key: inspectorId,
       inspectorId,
       ...c,
-      accuracy,
+      accuracyByDecision: accuracy,
       detectionRate,
-      missedSuspicionRate,
+      missedSuspicionRateByDecision: missedSuspicionRate,
       suspicionDecisionAccuracy,
       falseSuspicionRate,
       band: b as InspectorAgg["band"],

@@ -22,10 +22,36 @@ The current workspace layout uses numbered roots, with legacy fallbacks still su
 | `2-samples/` | Sample master files, distribution log/current snapshot, main sample mirrors, per-employee sample mirrors, answers, referral/replacement requests, supervisor approval decisions. |
 | `3-user-data/` | Workspace user/permission files when initialized through workspace defaults. |
 | `4-reports/` | Generated/report artifacts when report flows write to the workspace. |
-| `5-system/` | Backups, browse/table presets, automatic-backup settings/state, activity audit log, notification center, internal system files. |
+| `5-system/` | Backups, browse/table presets, automatic-backup settings/state, activity audit log, notification center, user feedback log, internal system files. |
 | `6-templates/` | Inspection templates and template index/selection files. |
 
 Legacy folders still read when present: `Population/`, `.system/`, and `templates/`.
+
+### Folder-numbering convention
+
+The `1-` … `6-` prefixes on the workspace roots (and the same pattern one level down, e.g.
+`1-population/{month}/1-raw/` → `2-processed/`, or `2-samples/{month}/1-main/` → `2-employees/` →
+`3-approvals/`) mark **ordered pipeline stages** — folders a reader should think of as steps in a
+sequence (raw import before processed output; the main draw before per-employee mirrors before
+approvals). Numbering only earns its place when there is a real before/after relationship to convey.
+
+**Unordered collections stay unprefixed.** `5-system/`'s children — `audit/`, `backups/`,
+`notifications/`, `user-presets/`, `feedback/` — are siblings with no sequence between them, so none
+of them get a number; `SYSTEM_FOLDER_NAMES` in `src/data/workspace/workspacePaths.ts` lists them
+verbatim. `4-reports/designs/` is the same idea one level down.
+
+`feedback/` used to be an exception: it lived directly at the workspace root (an undocumented 7th
+top-level folder, breaking the `1-`…`6-` convention every other module already followed) instead of
+nesting under `5-system/` alongside audit/notifications/presets. This was corrected in
+`src/data/feedback/feedbackStorage.ts` — new feedback is written under `5-system/feedback/`. Reads
+still fall back to the legacy root-level `feedback/` folder for workspaces that predate the fix, and
+the legacy file is never deleted, only superseded.
+
+Do **not** rename any existing root to fix a similar inconsistency without a migration path:
+workspace layout migration (`detectWorkspaceSchema`/`initializeWorkspaceSchemaMetadata` in
+`src/data/workspace/workspaceSchema.ts`) only stamps a validated layout marker — it deliberately
+never moves or deletes folders, because the File System Access API cannot make a whole-workspace
+move atomic. A root rename with no safe apply path is worse than a documented exception.
 
 `5-system/workspace.schema.json` records the validated layout kind (`current`, `legacy`, or
 `mixed`), schema version, migration actor/time, verified backup id, and whether legacy readers are
@@ -229,6 +255,7 @@ Both files use `safeWriteJson` / `safeReadJson` and the `JsonEnvelope` schema-ve
 | `{templateId}.json` | `6-templates/` | Inspection template schema and fields. |
 | `template.selection.json` | `6-templates/` | Selected active inspection template. |
 | `deck2.style-choices.json` | `6-templates/` | Global (not per-month), admin-set per-slide design-variant choice (0-3) for the executive deck v2's presentation styling — which of each slide's 4 style variants renders in production. Shared, multi-admin file: same CAS contract (`revision` + `_writeToken`, verified on read-back) as `template.selection.json`. |
+| `messages.json` | `5-system/feedback/` | Shared user feedback log (suggestions/issues/inquiries + admin replies), CAS-protected (`revision` + `_writeToken`). Reads fall back to a legacy root-level `feedback/messages.json` for workspaces predating the move under `5-system/`; that legacy file is never deleted, only superseded once a write lands in the new location. |
 | `admin-shared.browse-preset.json` | `5-system/user-presets/` | Shared/admin table column preferences. |
 | `{username}.browse-preset.json` | `5-system/user-presets/` | User-specific table column preferences. |
 | `backup.manifest.json` and copied JSON data files | `5-system/backups/{timestamp}/` | Manual/automatic restorable snapshots. Routine backups do not rebuild redundant XLSX exports; spreadsheet generation is an explicit compatibility option. |

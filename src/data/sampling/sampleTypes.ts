@@ -31,6 +31,32 @@ export type StageAllocation = {
 };
 
 /**
+ * Detection-only record (owner decision, 2026-08): when a stratum cannot reach
+ * its configured CertScan target because too few CertScan rows exist, the draw
+ * under-fills rather than silently backfilling from NonCertscan rows — a silent
+ * substitution would misrepresent the stratum composition of a sample that feeds
+ * audit/statistical claims. This record makes that under-fill visible instead of
+ * invisible: it never changes what gets drawn, it only reports the gap.
+ *
+ * `portName: null` marks a stage-wide shortfall detected before per-port
+ * apportionment (an `exact` CertScan target that already exceeds the whole
+ * stage's available CertScan pool). A non-null `portName` is a per-port
+ * shortfall detected during that port's draw (the `percentage` method, whose
+ * per-port request isn't known until the port's allocated quota is apportioned).
+ */
+export type CertScanShortfall = {
+  stageKey: "first" | "second" | "third" | "fourth";
+  stageLabel: string;
+  portName: string | null;
+  /** CertScan rows requested for this stratum before capping to what's available. */
+  requestedCertScanQuota: number;
+  /** CertScan rows actually drawn (capped at `availableCertScanRows`). */
+  actualCertScanDrawn: number;
+  /** Size of the CertScan-eligible pool this stratum could draw from. */
+  availableCertScanRows: number;
+};
+
+/**
  * Four-eyes sample-release record (A3). Optional and absent on legacy files —
  * a missing `approval` means "approved-by-legacy" so old months keep working.
  * Wave B gates the UI on this field; the data layer only stores it.
@@ -58,6 +84,12 @@ export type SampleMasterData = {
   nonCertScanActual: number;
   portAllocations: PortAllocation[];
   stageAllocations: StageAllocation[];
+  /**
+   * CertScan shortfalls detected during this draw (see {@link CertScanShortfall}).
+   * Empty when every configured CertScan target was fully met. Absent only on
+   * legacy sample masters written before this field existed.
+   */
+  certScanShortfalls?: CertScanShortfall[];
   drawnAt: string;
   drawnBy: string;
   /** Four-eyes release approval (A3). Absent = approved-by-legacy. */

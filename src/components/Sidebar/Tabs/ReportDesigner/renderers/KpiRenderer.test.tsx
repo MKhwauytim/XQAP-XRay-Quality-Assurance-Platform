@@ -2,18 +2,26 @@
 // B6 — digit locale: the headline KPI number and the groupBy-breakdown counts must render
 // with Latin digits ("ar-SA-u-nu-latn"), matching the rest of the app, instead of the
 // Arabic-Indic digits plain "ar-SA" yields.
+//
+// KpiRenderer no longer loads its own data (Task 2 perf fix) -- it reads the
+// shared executive rows from `ExecutiveRowsProvider` via `useExecutiveRows()`,
+// so every render here needs that provider as an ancestor. See
+// `executiveRowsContext.test.tsx` for the shared-load-happens-once and
+// template-passthrough coverage.
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import KpiRenderer from "./KpiRenderer";
+import { ExecutiveRowsProvider } from "./ExecutiveRowsProvider";
 import type { Element, KpiConfig } from "../../../../../data/reportDesigner/reportTypes";
 
 // A row count large enough that Arabic-Indic ("١٢٬٣٤٥") and Latin ("12,345") renderings
 // are unmistakably different (thousands separator present).
 const rows = vi.hoisted(() => Array.from({ length: 12345 }, (_, i) => ({ xrayImageId: `img-${i}`, portName: "A" })));
 
+const FAKE_DIRECTORY_HANDLE = vi.hoisted(() => ({}));
 vi.mock("../../../../../data/workspace/useWorkspace", () => ({
-  useWorkspace: () => ({ directoryHandle: {} }),
+  useWorkspace: () => ({ directoryHandle: FAKE_DIRECTORY_HANDLE }),
 }));
 vi.mock("../../../../../data/month/useGlobalMonth", () => ({
   useGlobalMonth: () => ({ selection: { kind: "existing", folderName: "5-may-2026" } }),
@@ -25,10 +33,16 @@ vi.mock("../../../../../data/sampling/sampleStorage", () => ({
   loadSampleMaster: vi.fn().mockResolvedValue(null),
 }));
 vi.mock("../../../../../data/distribution/distributionStorage", () => ({
-  loadOrDeriveDistributionCurrent: vi.fn().mockResolvedValue(null),
+  loadOrDeriveDistributionCurrentForRead: vi.fn().mockResolvedValue(null),
 }));
 vi.mock("../../../../../data/answers/answerStorage", () => ({
   loadAllEmployeeFiles: vi.fn().mockResolvedValue([]),
+}));
+vi.mock("../../../../../data/templates/templateSelectionStorage", () => ({
+  loadInspectionTemplateSelection: vi.fn().mockResolvedValue(null),
+}));
+vi.mock("../../../../../data/templates/templateStorage", () => ({
+  loadTemplate: vi.fn().mockResolvedValue(null),
 }));
 // buildExecutiveReportRows normally derives rows from population/sample/distribution —
 // mocked here to hand KpiRenderer a fixed-size row set regardless of its (irrelevant, all
@@ -53,7 +67,11 @@ function kpiElement(config: KpiConfig): Element {
 describe("KpiRenderer — B6 digit locale", () => {
   it("renders the headline number with Latin digits, not Arabic-Indic", async () => {
     const element = kpiElement({ kind: "kpi", dataSourceId: "population", valueField: "xrayImageId", agg: "count" });
-    render(<KpiRenderer element={element} />);
+    render(
+      <ExecutiveRowsProvider>
+        <KpiRenderer element={element} />
+      </ExecutiveRowsProvider>
+    );
 
     await waitFor(() => {
       expect(screen.getByText("12,345")).toBeInTheDocument();
@@ -71,7 +89,11 @@ describe("KpiRenderer — B6 digit locale", () => {
       groupByField: "portName",
       groupByLabel: "المنفذ",
     });
-    render(<KpiRenderer element={element} />);
+    render(
+      <ExecutiveRowsProvider>
+        <KpiRenderer element={element} />
+      </ExecutiveRowsProvider>
+    );
 
     await waitFor(() => {
       // Single group ("A") holds all of `rows` → its breakdown-row count.

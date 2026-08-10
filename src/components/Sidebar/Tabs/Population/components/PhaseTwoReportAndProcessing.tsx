@@ -2,12 +2,26 @@ import type { RiskWorkbookResult } from "../riskData/riskDataTypes";
 import type { BiWorkbookResult } from "../biData/biDataTypes";
 import type { PopulationProcessingResult } from "../processing/populationProcessingTypes";
 import type { OrphanScanResult } from "../../../../../data/integrity/orphanScan";
+import type { SafeWriteProgressPhase } from "../../../../../data/storage/safeWrite";
+import type { PopulationAggregateLoadResult } from "../../../../../data/population/populationAggregate";
+import { useLabels } from "../../../../../data/labels/useLabels";
 import DataAccuracyReport, { OrphanScanSection } from "./DataAccuracyReport";
 import PopulationProcessingReport from "./PopulationProcessingReport";
-import { AlertTriangle, Check, FolderOpen, X } from "lucide-react";
-import CertScanGrid from "./CertScanGrid";
+import { AlertTriangle, Check, FolderOpen, Lock, X } from "lucide-react";
+import CertScanMatchPreviewPanel from "./CertScanMatchPreviewPanel";
 
 type SaveMessage = { type: "ok" | "error"; text: string } | null;
+
+// B task 2: Arabic label per safeWriteJson phase, shown while the auto-save is
+// past processPopulation's own 100% and into the (previously invisible)
+// multi-pass disk write for population.final.json.
+const SAVE_PROGRESS_LABELS: Record<SafeWriteProgressPhase, string> = {
+  "backing-up": "جاري نسخ النسخة الاحتياطية...",
+  staging: "جاري تجهيز الملف الجديد...",
+  "verifying-staged": "جاري التحقق من الملف المُجهّز...",
+  committing: "جاري كتابة الملف النهائي على القرص...",
+  "verifying-committed": "جاري التحقق النهائي من الملف المحفوظ...",
+};
 
 type PhaseTwoReportAndProcessingProps = {
   riskWorkbookResult: RiskWorkbookResult | null;
@@ -20,6 +34,10 @@ type PhaseTwoReportAndProcessingProps = {
   processingProgressPercent?: number;
   monthLabel: string;
   isSavingToDisk: boolean;
+  /** B task 2: current safeWriteJson phase for the in-flight auto-save, or null
+   *  when not saving / not yet reported. Optional so existing callers/tests that
+   *  don't pass it keep working (falls back to the generic "saving" message). */
+  saveProgressPhase?: SafeWriteProgressPhase | null;
   saveToDiskMessage: SaveMessage;
   hasDiskWorkspace: boolean;
   /** B3 referential-integrity orphan scan for the saved month, or null when unavailable. */
@@ -33,10 +51,14 @@ type PhaseTwoReportAndProcessingProps = {
    *  workspace so it is not gated on closed-month, matching handleExportPopulation's
    *  existing handler-side check). */
   canExport: boolean;
-  onCertScanPasteTextChange: (value: string) => void;
+  /** True once the month is locked (owner requirement) — population.final.json/
+   *  risk.raw.json/bi.raw.json were deliberately never re-read; the processing
+   *  report below renders from `populationAggregate` instead. */
+  populationLocked?: boolean;
+  /** The persisted aggregate for a locked month, or null while unlocked/not yet loaded. */
+  populationAggregate?: PopulationAggregateLoadResult | null;
   onProcessPopulation: () => void;
   onExportPopulation: () => void;
-  onExportPhaseReport: () => void;
 };
 
 export default function PhaseTwoReportAndProcessing({
@@ -50,29 +72,46 @@ export default function PhaseTwoReportAndProcessing({
   processingProgressPercent = 0,
   monthLabel,
   isSavingToDisk,
+  saveProgressPhase = null,
   saveToDiskMessage,
   hasDiskWorkspace,
   orphanScan = null,
   canProcess,
   canExport,
-  onCertScanPasteTextChange,
+  populationLocked = false,
+  populationAggregate = null,
   onProcessPopulation,
   onExportPopulation,
-  onExportPhaseReport,
 }: PhaseTwoReportAndProcessingProps) {
+  const labels = useLabels();
 
-  // Show placeholder only when there is absolutely nothing to display
-  if (!riskWorkbookResult && !populationProcessingResult) {
+  // Show placeholder only when there is absolutely nothing to display —
+  // a locked month with an aggregate loaded counts as "something to display".
+  if (!riskWorkbookResult && !populationProcessingResult && !(populationLocked && populationAggregate?.status === "ok")) {
     return (
       <section className="placeholder-phase">
         <h2>تقرير البيانات والمعالجة</h2>
-        <p>لم يتم تجهيز التقرير المصغر بعد.</p>
+        {populationLocked && populationAggregate && populationAggregate.status !== "ok" ? (
+          <div className="upload-warning" role="alert">
+            <Lock size={14} style={{ verticalAlign: "middle", marginInlineEnd: 4 }} />
+            {populationAggregate.status === "corrupt"
+              ? labels.population_locked_summary_corrupt
+              : labels.population_locked_summary_missing}
+          </div>
+        ) : (
+          <p>لم يتم تجهيز التقرير المصغر بعد.</p>
+        )}
       </section>
     );
   }
 
-  const loadedFromDisk = !riskWorkbookResult && populationProcessingResult !== null;
+  const loadedFromDisk = !riskWorkbookResult && (populationProcessingResult !== null || populationLocked);
   const hasBi = riskWorkbookResult !== null && biWorkbookResult !== null;
+  const reportData = populationProcessingResult
+    ? { summary: populationProcessingResult.summary, previewRows: populationProcessingResult.preparedRows.slice(0, 10) }
+    : populationLocked && populationAggregate?.status === "ok"
+      ? { summary: populationAggregate.aggregate.summary, previewRows: populationAggregate.aggregate.previewRows }
+      : null;
 
   return (
     <section className="report-processing-phase" aria-label="تقرير البيانات والمعالجة">
@@ -89,7 +128,9 @@ export default function PhaseTwoReportAndProcessing({
             <span className="phase2-month-label">شهر الحفظ</span>
             <strong className="phase2-month-current">{monthLabel}</strong>
             {isSavingToDisk && (
-              <span className="phase2-save-msg" role="status">⏳ جاري الحفظ التلقائي...</span>
+              <span className="phase2-save-msg" role="status">
+                ⏳ {saveProgressPhase ? SAVE_PROGRESS_LABELS[saveProgressPhase] : "جاري الحفظ التلقائي..."}
+              </span>
             )}
             {saveToDiskMessage && !isSavingToDisk && (
               <span
@@ -140,17 +181,24 @@ export default function PhaseTwoReportAndProcessing({
         <OrphanScanSection scan={orphanScan} />
       </div>
 
-      {/* ── Step B: CertScan + Processing ── */}
+      {/* ── Step B: Processing ── */}
       <section className="processing-workspace" aria-label="المعالجة">
         <div className="phase2-substep-header" style={{ marginBottom: "14px" }}>
           <div className="phase2-substep-badge">ب</div>
           <div className="processing-workspace-header">
-            <h3>CertScan والمعالجة</h3>
-            <p>الصق قائمة CertScan، ثم شغّل معالجة المجتمع.</p>
+            <h3>المعالجة</h3>
+            <p>
+              شغّل معالجة المجتمع. قائمة CertScan تُدار الآن من إعدادات المعالجة (شهرية ومتراكمة).
+            </p>
           </div>
         </div>
 
-        <CertScanGrid initialText={certScanPasteText || undefined} onDataChange={onCertScanPasteTextChange} />
+        {riskWorkbookResult && !loadedFromDisk && (
+          <CertScanMatchPreviewPanel
+            riskRows={riskWorkbookResult.rows}
+            certScanPasteText={certScanPasteText}
+          />
+        )}
 
         <div className="proc-action-panel">
           <button
@@ -176,27 +224,13 @@ export default function PhaseTwoReportAndProcessing({
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                   <path d="M8 5v14l11-7z" />
                 </svg>
-                {populationProcessingResult ? "إعادة معالجة المجتمع" : "معالجة المجتمع"}
+                {reportData ? "إعادة معالجة المجتمع" : "معالجة المجتمع"}
               </>
             )}
           </button>
 
           {populationProcessingResult && !isProcessingPopulation && (
             <div className="proc-export-row">
-              <button
-                type="button"
-                className="proc-export-btn"
-                onClick={onExportPhaseReport}
-                disabled={!canExport}
-                title={!canExport ? "لا تملك صلاحية تصدير التقارير." : "تصدير تقرير المعالجة"}
-              >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                  <polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/>
-                  <line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>
-                </svg>
-                تقرير المعالجة
-              </button>
               <button
                 type="button"
                 className="proc-export-btn primary"
@@ -225,8 +259,22 @@ export default function PhaseTwoReportAndProcessing({
           </div>
         )}
 
-        {populationProcessingResult && !isProcessingPopulation ? (
-          <PopulationProcessingReport result={populationProcessingResult} />
+        {reportData && !isProcessingPopulation ? (
+          <>
+            {populationLocked && (
+              <div className="upload-warning" role="status">
+                <Lock size={13} style={{ verticalAlign: "middle", marginInlineEnd: 4 }} />
+                {labels.population_locked_report_notice}
+              </div>
+            )}
+            <PopulationProcessingReport
+              summary={reportData.summary}
+              previewRows={reportData.previewRows}
+              removedRows={populationProcessingResult?.removedRows}
+              duplicateRows={populationProcessingResult?.duplicateRows}
+              invalidResultRows={populationProcessingResult?.invalidResultRows}
+            />
+          </>
         ) : !isProcessingPopulation ? (
           <div className="processing-placeholder">
             <p>لم يتم تنفيذ معالجة المجتمع بعد.</p>

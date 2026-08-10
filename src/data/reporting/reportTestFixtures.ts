@@ -8,7 +8,7 @@
 
 import { vi } from "vitest";
 
-import type { PreparedPopulationRow } from "../population/populationTypes";
+import type { PreparedPopulationRow, ProcessingSummary } from "../population/populationTypes";
 import type { SampleMasterData } from "../sampling/sampleTypes";
 import type { DistributionCurrentData, DistributionStatus } from "../distribution/distributionTypes";
 import type { MonthManifestData } from "../population/monthTypes";
@@ -114,6 +114,32 @@ export function makeSampleMaster(
     drawnAt: "2026-07-02T00:00:00.000Z",
     drawnBy: "admin",
     rows,
+    ...overrides,
+  };
+}
+
+/** A minimal valid `ProcessingSummary` (R1 granular Risk/BI before-after breakdown). */
+export function makeProcessingSummary(overrides: Partial<ProcessingSummary> = {}): ProcessingSummary {
+  return {
+    riskOriginalRows: 5,
+    validRiskIdRows: 4,
+    invalidRiskIdRows: 1,
+    duplicateRiskIdRows: 1,
+    rowsAfterDeduplication: 3,
+    removedInvalidResultRows: 0,
+    finalPreparedPopulationRows: 3,
+    certScanRows: 2,
+    nonCertScanRows: 1,
+    certScanPercentage: (2 / 3) * 100,
+    nonCertScanPercentage: (1 / 3) * 100,
+    biProvided: true,
+    biMatchedRows: 2,
+    biUnmatchedRows: 1,
+    biMatchPercentage: (2 / 3) * 100,
+    totalBiFilledFields: 6,
+    biFieldFillSummary: [
+      { fieldName: "declarationNumber", riskEmptyBefore: 3, filledFromBi: 2, stillEmptyAfter: 1, fillPercentage: (2 / 3) * 100 },
+    ],
     ...overrides,
   };
 }

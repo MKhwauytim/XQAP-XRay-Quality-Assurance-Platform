@@ -13,7 +13,7 @@
 
 import * as XLSX from "xlsx";
 
-import type { PreparedPopulationRow } from "../population/populationTypes";
+import type { PreparedPopulationRow, ProcessingSummary } from "../population/populationTypes";
 import type { SampleMasterData } from "../sampling/sampleTypes";
 import type { MonthManifestData } from "../population/monthTypes";
 import { openReportWindow, writeOrCloseOnFailure } from "./htmlReport";
@@ -61,6 +61,16 @@ export type SampleReportInput = {
   sample: SampleMasterData;
   /** Report-to-revision linkage (B2). Optional; footer/sheet render nothing when omitted. */
   sourceRevisions?: SourceRevisions;
+  /**
+   * R1 remainder (2026-08-07 owner requirement): the granular before/after
+   * processing breakdown, Risk and BI counted separately — `processing.summary.json`
+   * / `population.aggregate.json`'s `summary` field, read verbatim (never
+   * recomputed here). Optional so callers on months predating this field, or
+   * a month whose processing summary failed to persist, still render the
+   * coarse raw/processed page exactly as before — no silent fallback that
+   * fabricates numbers.
+   */
+  processingSummary?: ProcessingSummary | null;
 };
 
 // ─── Lineage model (pure) ─────────────────────────────────────────────────────
@@ -116,6 +126,9 @@ export type SampleLineage = {
   fulfillment: number | null;
   ports: SamplePortStat[];
   stages: SampleMasterData["stageAllocations"];
+  /** R1: granular Risk/BI before-after breakdown, `null` when unavailable
+   *  (see `SampleReportInput.processingSummary`'s doc comment). */
+  processing: ProcessingSummary | null;
 };
 
 /** Fold the raw inputs into the lineage model consumed by all three renderers. */
@@ -181,6 +194,7 @@ export function computeSampleLineage(input: SampleReportInput): SampleLineage {
     fulfillment: ratePct(sample.totalActual, sample.totalRequested),
     ports,
     stages: sample.stageAllocations,
+    processing: input.processingSummary ?? null,
   };
 }
 
@@ -190,10 +204,11 @@ const SAMPLE_RAILS = ["الاستلام", "المعالجة", "الطبقات", 
 
 async function sampleDocPages(m: SampleLineage, issueDate: string, previewRows: (string | number | null)[][]): Promise<string> {
   const pages: string[] = [];
+  let n = 1;
 
   // Page 1 — lineage overview.
   pages.push(page({
-    id: "s-overview", title: "لمحة المسار", pageNo: "01", railTabs: SAMPLE_RAILS,
+    id: "s-overview", title: "لمحة المسار", pageNo: pad(n++), railTabs: SAMPLE_RAILS,
     body: `${pageHeader({ iconName: "layers", eyebrow: "تقرير العينة", title: `المسار الكامل للعينة — ${m.monthLabel}`, subtitle: `البذرة: ${m.rngSeed} — سُحبت بواسطة: ${m.drawnBy} — تاريخ الإصدار: ${issueDate}` })}
       ${kpiStrip([
         kpi({ label: "البيانات الخام", value: fmtNum(m.rawRows), sub: "قبل المعالجة", tone: "slate" }),
@@ -214,10 +229,57 @@ async function sampleDocPages(m: SampleLineage, issueDate: string, previewRows: 
   }));
   await yieldToMain();
 
-  // Page 2 — received vs processed.
+  // R1 (2026-08-07): granular before/after breakdown, Risk and BI counted
+  // SEPARATELY — only rendered when `processing.summary.json` was supplied
+  // (older months / a failed persist keep the coarse-only flow below
+  // byte-identical to pre-R1 output). Page 2 (next) is the MERGED view.
+  if (m.processing) {
+    const p = m.processing;
+    pages.push(page({
+      id: "s-processing-risk", title: "المعالجة — بيانات المخاطر (Risk)", pageNo: pad(n++), railTabs: rotate(SAMPLE_RAILS, 1),
+      body: `${pageHeader({ iconName: "scan", eyebrow: "المرحلة 1–2 · Risk", title: "قبل وبعد المعالجة — Risk", subtitle: "خط أنابيب صفوف Risk من الاستلام حتى المجتمع النهائي المُعالَج، منفصلاً عن BI." })}
+        ${kpiStrip([
+          kpi({ label: "قبل المعالجة", value: fmtNum(p.riskOriginalRows), sub: "صفوف Risk الأصلية", tone: "slate" }),
+          kpi({ label: "بعد المعالجة", value: fmtNum(p.finalPreparedPopulationRows), sub: "المجتمع النهائي", tone: "blue" }),
+          kpi({ label: "CertScan", value: fmtNum(p.certScanRows), sub: fmtPct(p.certScanPercentage), tone: "gold" }),
+          kpi({ label: "NonCertScan", value: fmtNum(p.nonCertScanRows), sub: fmtPct(p.nonCertScanPercentage), tone: "green" }),
+        ])}
+        ${panel("خط أنابيب Risk (قبل ← بعد)", dataTable({
+          headers: ["الخطوة", "الوصف", "العدد"],
+          rows: [
+            ["1 · قبل", "الصفوف الأصلية كما وردت من ملف Risk", fmtNum(p.riskOriginalRows)],
+            ["2 · صالحة", "صفوف بمعرّف أشعة صالح", fmtNum(p.validRiskIdRows)],
+            ["2 · محذوف", "صفوف بمعرّف أشعة غير صالح", fmtNum(p.invalidRiskIdRows)],
+            ["3 · محذوف", "صفوف مكررة", fmtNum(p.duplicateRiskIdRows)],
+            ["3 · بعد", "بعد إزالة التكرار", fmtNum(p.rowsAfterDeduplication)],
+            ["4 · محذوف", "نتائج مستوى غير صالحة", fmtNum(p.removedInvalidResultRows)],
+            ["4 · بعد", "المجتمع النهائي المُعالَج (Risk)", fmtNum(p.finalPreparedPopulationRows)],
+          ],
+        }), { iconName: "arrow" })}`,
+    }));
+    await yieldToMain();
+
+    pages.push(page({
+      id: "s-processing-bi", title: "المعالجة — إثراء BI", pageNo: pad(n++), railTabs: rotate(SAMPLE_RAILS, 1),
+      body: `${pageHeader({ iconName: "layers", eyebrow: "المرحلة 1–2 · BI", title: "قبل وبعد المعالجة — BI", subtitle: p.biProvided ? "إثراء صفوف Risk المطابقة ببيانات BI." : "لم يُرفع ملف BI لهذا الشهر." })}
+        ${p.biProvided ? `${kpiStrip([
+          kpi({ label: "مطابقة BI", value: fmtNum(p.biMatchedRows), sub: fmtPct(p.biMatchPercentage), tone: "blue" }),
+          kpi({ label: "غير مطابقة", value: fmtNum(p.biUnmatchedRows), tone: "coral" }),
+          kpi({ label: "حقول مُعبّأة من BI", value: fmtNum(p.totalBiFilledFields), tone: "gold" }),
+        ])}
+        ${p.biFieldFillSummary.length > 0 ? panel("تعبئة الحقول من BI حسب الحقل", dataTable({
+          headers: ["الحقل", "فارغ قبل BI", "عُبّئ من BI", "لا يزال فارغاً", "نسبة التعبئة"],
+          rows: p.biFieldFillSummary.map((f) => [f.fieldName, fmtNum(f.riskEmptyBefore), fmtNum(f.filledFromBi), fmtNum(f.stillEmptyAfter), fmtPct(f.fillPercentage)]),
+        }), { iconName: "layers" }) : ""}`
+          : panel("BI", `<div class="d-empty">لا تتوفر بيانات BI لهذا الشهر — كل الصفوف من مصدر Risk فقط.</div>`, { iconName: "layers" })}`,
+    }));
+    await yieldToMain();
+  }
+
+  // Page 2 (merged) — received vs processed, Risk + BI combined.
   pages.push(page({
-    id: "s-processing", title: "الاستلام والمعالجة", pageNo: "02", railTabs: rotate(SAMPLE_RAILS, 1),
-    body: `${pageHeader({ iconName: "scan", eyebrow: "المرحلة 1–2", title: "من الخام إلى المعالج", subtitle: "ما الذي استُلم، وكيف تمت معالجته وتصنيف مصدره." })}
+    id: "s-processing", title: "الاستلام والمعالجة", pageNo: pad(n++), railTabs: rotate(SAMPLE_RAILS, 1),
+    body: `${pageHeader({ iconName: "scan", eyebrow: "المرحلة 1–2 · مُدمج", title: "من الخام إلى المعالج (مُدمج)", subtitle: "ما الذي استُلم، وكيف تمت معالجته وتصنيف مصدره — Risk وBI مُدمجين." })}
       ${kpiStrip([
         kpi({ label: "خام", value: fmtNum(m.rawRows), tone: "slate" }),
         kpi({ label: "معالج", value: fmtNum(m.processedRows), tone: "blue" }),
@@ -251,7 +313,7 @@ async function sampleDocPages(m: SampleLineage, issueDate: string, previewRows: 
     fmtNum(m.certScanActual), fmtNum(m.nonCertScanActual), fmtNum(m.totalActual), fmtPct(m.coverage),
   ];
   const portChunks = paginateRows({ headers: portHeaders, rows: portRows, rowsPerPage: 18, totalRow: portTotal });
-  let pageNo = 3;
+  let pageNo = n;
   for (let i = 0; i < portChunks.length; i++) {
     const chunk = portChunks[i];
     pages.push(page({
@@ -284,15 +346,16 @@ async function sampleDocPages(m: SampleLineage, issueDate: string, previewRows: 
   }));
   await yieldToMain();
 
-  // Drawn sample preview (paginated).
-  const sampleHeaders = ["رقم الأشعة", "المنفذ", "المستوى", "CertScan", "مصدر BI", "م.أول", "م.ثاني"];
+  // Drawn sample — the FULL list (R5), not a preview: every row with port
+  // name, level, CertScan, BI source, both level results, and entry date.
+  const sampleHeaders = ["رقم الأشعة", "المنفذ", "المستوى", "CertScan", "مصدر BI", "م.أول", "م.ثاني", "تاريخ الدخول"];
   const sampleChunks = paginateRows({ headers: sampleHeaders, rows: previewRows, rowsPerPage: 20 });
   for (let i = 0; i < sampleChunks.length; i++) {
     const chunk = sampleChunks[i];
     pages.push(page({
       id: `s-drawn-${i}`, title: i === 0 ? "الصفوف المسحوبة" : `الصفوف المسحوبة (${i + 1})`,
       pageNo: pad(pageNo++), railTabs: rotate(SAMPLE_RAILS, 3),
-      body: `${pageHeader({ iconName: "check", eyebrow: "المرحلة 4", title: "الصفوف المسحوبة للدراسة", subtitle: `عرض ${fmtNum(previewRows.length)} صف من العينة النهائية.` })}
+      body: `${pageHeader({ iconName: "check", eyebrow: "المرحلة 4", title: "الصفوف المسحوبة للدراسة", subtitle: `${fmtNum(previewRows.length)} صف — العينة النهائية كاملة.` })}
         ${panel("العينة النهائية", chunk, { iconName: "check" })}`,
     }));
     await yieldToMain();
@@ -428,9 +491,13 @@ function emptyBody(): string {
 
 export async function buildSampleDocument(input: SampleReportInput): Promise<string> {
   const m = computeSampleLineage(input);
-  const preview: (string | number | null)[][] = input.sample.rows.slice(0, 60).map((r) => [
+  // R5 (2026-08-07): list every drawn row, not just a 60-row preview — the
+  // owner's ask is "the document version shows the samples itself". The page
+  // loop below is already paginated + `yieldToMain()`-chunked (P3-7), so a
+  // large sample no longer needs an artificial cap to stay responsive.
+  const preview: (string | number | null)[][] = input.sample.rows.map((r) => [
     r.xrayImageId, r.portName ?? "—", r.stage ?? "—", r.certScanStatus,
-    r.biEnrichmentStatus, r.xrayLevelOneResult, r.xrayLevelTwoResult,
+    r.biEnrichmentStatus, r.xrayLevelOneResult, r.xrayLevelTwoResult, r.xrayEntryDate ?? "—",
   ]);
   return buildDocViewer({
     slides: await sampleDocPages(m, formatIssueDate(), preview),

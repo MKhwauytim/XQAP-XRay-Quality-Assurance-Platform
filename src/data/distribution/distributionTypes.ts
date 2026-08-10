@@ -1,4 +1,4 @@
-import type { PreparedPopulationRow } from "../population/populationTypes";
+import type { EmployeeMirrorRowStub } from "../population/populationTypes";
 
 export type DistributionEventType =
   | "assigned"
@@ -70,7 +70,61 @@ export type DistributionEntry = {
   status: DistributionStatus;
   replacedById: string | null;
   lastEventAt: string;
-  row: PreparedPopulationRow;
+  /**
+   * eventId of the event that produced lastEventAt (perf: fold-checkpoint
+   * resumability). Used only as an (eventAt, eventId) tie-break to detect a
+   * "late" event arriving after this entry was folded -- an entry produced
+   * before this field existed reads as undefined, which callers must treat
+   * conservatively (see findLateEvent in distributionDerivation.ts).
+   */
+  lastEventId?: string;
+  /**
+   * B5 (disk-bloat fix): new writes (`foldDistributionEvents` in
+   * distributionDerivation.ts) only stamp `EMPLOYEE_MIRROR_STUB_FIELDS` here —
+   * every field an employee-facing sample view actually renders — instead of
+   * the full `PreparedPopulationRow`. This is what's inlined into
+   * `distribution.current.json`, `main.samples.json`, and every
+   * `{username}.samples.json` mirror; `xrayImageId` above is the join key back
+   * to the full row in `population.final.json` / `sample.master.json` for
+   * anything that needs more (replacement eligibility, reporting, etc — those
+   * already load population/sample data separately, never through this field).
+   *
+   * Migration (B5/step 4): `EmployeeMirrorRowStub` is a strict subset (`Pick`)
+   * of `PreparedPopulationRow`, so it's structurally satisfied by BOTH shapes —
+   * an old on-disk entry that still carries the full inlined row reads back
+   * fine here unchanged; only new writes are smaller. Never rewritten/migrated
+   * in place.
+   */
+  row: EmployeeMirrorRowStub;
+};
+
+/** Per-employee quota bookkeeping used to resume deriveEmployeeQuotas incrementally (perf: fold-checkpoint). */
+export type QuotaFacts = {
+  assignmentCounts: Record<string, number>;
+  firstAssignments: Record<string, DistributionEvent>;
+  latestStoredQuotas: Record<string, DistributionEvent>;
+};
+
+/**
+ * Persisted fold-acceleration checkpoint (perf). Lets loadOrDeriveDistributionCurrent
+ * skip re-reading every distribution event file on a fresh page load -- it only
+ * needs to read what has changed since this checkpoint was written. See
+ * distributionStorage.ts's tryResumeFromCheckpoint for the read-and-verify path,
+ * and distributionDerivation.ts's findLateEvent for the correctness guard that
+ * forces a full refold instead of trusting this checkpoint when an
+ * out-of-order event is detected.
+ */
+export type DistributionFoldCheckpoint = {
+  /** Byte size already folded, per distribution.events/*.ndjson segment file name. */
+  segmentOffsets: Record<string, number>;
+  /** Names of legacy one-file-per-event *.json files already folded into this checkpoint. */
+  legacyEventFileNames: string[];
+  /** Every eventId already folded into this checkpoint (sorted). Used to id-diff the small compatibility-log file, and to extend eventSetId without re-reading every event file. */
+  knownEventIds: string[];
+  /** Quota accumulator state, resumable across checkpoint extensions. */
+  quotaFacts: QuotaFacts;
+  /** Fold/derive algorithm version this checkpoint was built with; a mismatch forces a full refold. */
+  deriveVersion: number;
 };
 
 export type DistributionCurrentData = {
@@ -89,4 +143,6 @@ export type DistributionCurrentData = {
   entries: DistributionEntry[];
   /** Daily quotas per employee, derived from assignment date through the monthly deadline. */
   quotas?: Record<string, EmployeeQuota>;
+  /** Fold-checkpoint acceleration state (perf). Absent means the next load does a full refold. */
+  foldCheckpoint?: DistributionFoldCheckpoint;
 };

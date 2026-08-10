@@ -8,6 +8,7 @@
 // regression here fails loudly instead of silently reopening the freeze for employees.
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import type { AuthRole } from "./auth/authTypes";
 import type { AuthSession } from "./auth/authTypes";
@@ -87,6 +88,16 @@ function makeSession(role: AuthRole): AuthSession {
   };
 }
 
+// AppContent reads useQueryClient() (rework W5) -- needs a QueryClientProvider
+// ancestor, which the real app root normally supplies via main.tsx.
+function renderAppContent(session: AuthSession) {
+  return render(
+    <QueryClientProvider client={new QueryClient()}>
+      <AppContent session={session} />
+    </QueryClientProvider>
+  );
+}
+
 afterEach(() => {
   cleanup();
   vi.mocked(hasRolePermission).mockReturnValue(true);
@@ -94,7 +105,7 @@ afterEach(() => {
 
 describe("App landing tab (A2) + initial tab-mount LRU", () => {
   test("employee lands on employee-workspace, never mounting Population on first render", () => {
-    render(<AppContent session={makeSession("employee")} />);
+    renderAppContent(makeSession("employee"));
 
     expect(screen.getByText("EW-TAB-CONTENT")).toBeInTheDocument();
     expect(screen.queryByText("POP-TAB-CONTENT")).not.toBeInTheDocument();
@@ -104,7 +115,7 @@ describe("App landing tab (A2) + initial tab-mount LRU", () => {
   test.each<AuthRole>(["guest", "supervisor", "manager", "admin"])(
     "%s lands on the first allowed tab (population, order 10) unaffected by A2",
     (role) => {
-      render(<AppContent session={makeSession(role)} />);
+      renderAppContent(makeSession(role));
 
       expect(screen.getByText("POP-TAB-CONTENT")).toBeInTheDocument();
       expect(screen.queryByText("EW-TAB-CONTENT")).not.toBeInTheDocument();
@@ -115,7 +126,7 @@ describe("App landing tab (A2) + initial tab-mount LRU", () => {
   test("employee falls back to the first allowed tab when employee-workspace is permission-denied (A2's ?? allowedTabs[0] branch)", () => {
     vi.mocked(hasRolePermission).mockImplementation((_permissions, _role, tabId) => tabId !== "employee-workspace");
 
-    render(<AppContent session={makeSession("employee")} />);
+    renderAppContent(makeSession("employee"));
 
     expect(screen.getByText("POP-TAB-CONTENT")).toBeInTheDocument();
     expect(screen.queryByText("EW-TAB-CONTENT")).not.toBeInTheDocument();

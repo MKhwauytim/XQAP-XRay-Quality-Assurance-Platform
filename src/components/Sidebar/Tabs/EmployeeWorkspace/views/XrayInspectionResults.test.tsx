@@ -318,3 +318,65 @@ describe("XrayInspectionResults background data-refresh vs. an open quality-note
     expect(item?.qualityNote).toBeUndefined();
   });
 });
+
+// ── THE GAP fix: ad-hoc-imported assignments must be visible in results too ──
+// (see src/data/adhocImport/adhocImportEmployeeView.ts).
+describe("XrayInspectionResults — ad-hoc import visibility (THE GAP fix)", () => {
+  it("shows an ad-hoc-imported assignment tagged with the ad-hoc badge, alongside the month's real results", async () => {
+    writeSession({ role: "employee", username: "emp-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root");
+    await saveSampleMaster(root, MONTH, makeSample([makeRow("IMG-ACTIVE")]));
+    const assignResult = await appendDistributionEvents(root, MONTH, [
+      buildAssignEvent({ xrayImageId: "IMG-ACTIVE", assignedTo: "emp-1", eventBy: "admin" }),
+    ]);
+    if (!assignResult.ok) throw new Error(`seed assign failed: ${assignResult.error}`);
+
+    const { ensureAdhocSampleMaster, assignAdhocRowsToEmployee } = await import(
+      "../../../../../data/adhocImport/adhocImportAssignment"
+    );
+    const record = {
+      importId: "adh-1",
+      fileName: "adh-1.xlsx",
+      importedBy: "admin",
+      importedAt: new Date().toISOString(),
+      status: "open" as const,
+      rows: [
+        {
+          rowKey: "s1:2",
+          mapped: {
+            movementType: "s1",
+            portCode: null, portName: "ميناء جدة", portType: "بحري",
+            movementNumber: null, movementDate: null, movementHijriDate: null,
+            declarationNumber: "DEC-1", transitDeclarationNumber: null, declarationDate: null, declarationHijriDate: null,
+            manifestNumber: null, manifestType: null, manifestDate: null,
+            plateOrContainerNumber: null, finalDestination: null,
+            entryDate: null, exitDate: null,
+            chassisNumber: null, reportNumber: null, hasReport: false,
+            xrayLevelOneResult: "سليمة" as const, xrayLevelTwoResult: "اشتباه" as const,
+            inspectorResult: null, oppositeInspectorResult: null, liveMeansResult: null,
+            xrayImageId: "XR-1", xrayEntryDate: null,
+            targetedByRiskEngine: null, riskMessage: null, stage: "المستوى الأول",
+            sourceSheetName: "s1", sourceRowNumber: 2,
+          },
+          validation: { valid: true as const },
+          excludedByAdmin: false,
+          assigned: false,
+          assignedTo: null,
+          assignedAt: null,
+          namespacedXrayImageId: null,
+        },
+      ],
+    };
+    await ensureAdhocSampleMaster(root, record);
+    const assigned = await assignAdhocRowsToEmployee(root, record, ["s1:2"], "emp-1", "admin");
+    expect(assigned.ok).toBe(true);
+
+    render(<XrayInspectionResults directoryHandle={root} />);
+
+    await waitFor(() => expect(screen.getAllByText("IMG-ACTIVE").length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getAllByText("ADHOC-adh-1-XR-1").length).toBeGreaterThan(0));
+    expect(screen.getAllByText("استيراد يدوي")).toHaveLength(1);
+  });
+});

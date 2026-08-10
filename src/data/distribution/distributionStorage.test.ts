@@ -8,8 +8,13 @@ import {
   loadOrDeriveDistributionCurrentForRead,
   saveDistributionCurrent,
 } from "./distributionStorage";
-import { DERIVE_VERSION, buildAssignEvent, deriveCurrentDistribution } from "./distributionLog";
-import { distributionEventSetId, writeImmutableDistributionEvent } from "./distributionEventStore";
+import { DERIVE_VERSION, buildAssignEvent, buildCompletedEvent, deriveCurrentDistribution } from "./distributionLog";
+import {
+  appendDistributionEventSegment,
+  distributionEventSetId,
+  loadImmutableDistributionEvents,
+  writeImmutableDistributionEvent,
+} from "./distributionEventStore";
 import type { DistributionCurrentData } from "./distributionTypes";
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
@@ -104,8 +109,15 @@ describe("distributionStorage", () => {
     });
 
     expect(result.ok).toBe(true);
+    // The whole batch is durably written in ONE segment-file append (the
+    // perf fix this task implements — see distributionEventStore.ts's
+    // appendDistributionEventSegment), not one write per event, so progress
+    // for the "events" phase is necessarily just a before/after pair rather
+    // than one update per event. Fine-grained per-event progress is
+    // structurally incompatible with writing the whole batch in a single
+    // call — that's the whole point of the change.
     expect(progress.filter((update) => update.phase === "events").map((update) => update.completed))
-      .toEqual(Array.from({ length: 10 }, (_, index) => index));
+      .toEqual([0, 9]);
     expect(progress.at(-1)).toEqual({ phase: "complete", completed: 9, total: 9 });
   });
 
@@ -371,5 +383,156 @@ describe("loadOrDeriveDistributionCurrentForRead dedupe key (final-review Fix 3)
     // must not defeat coalescing for the common same-shape-race case.
     expect(first).toBe(second);
     expect(first?.entries).toHaveLength(1);
+  });
+});
+
+describe("segment-based event writes (perf: replaces one-file-per-event durability)", () => {
+  it("writes a whole batch in a single segment file, not one file per event", async () => {
+    const root = await makeRoot();
+    const month = "5-May-2026";
+    const events = Array.from({ length: 12 }, (_, i) =>
+      buildAssignEvent({ xrayImageId: `img-${i}`, assignedTo: "alice", eventBy: "admin" })
+    );
+
+    const result = await appendDistributionEvents(root, month, events);
+    expect(result.ok).toBe(true);
+
+    const dir = await getSampleMainDir(root, month, true);
+    const eventsDir = await dir.getDirectoryHandle("distribution.events", { create: false });
+    const names: string[] = [];
+    for await (const entry of (eventsDir as unknown as { values: () => AsyncIterable<{ name: string; kind: string }> }).values()) {
+      names.push(entry.name);
+    }
+    const segmentFiles = names.filter((n) => n.endsWith(".ndjson"));
+    const legacyFiles = names.filter((n) => n.endsWith(".json"));
+
+    // The whole 12-event batch landed in ONE segment file, not 12 separate
+    // per-event files -- this is the actual perf win under test.
+    expect(segmentFiles).toHaveLength(1);
+    expect(legacyFiles).toHaveLength(0);
+
+    const log = await loadDistributionLog(root, month);
+    expect(log.events).toHaveLength(12);
+    expect(log.events.map((e) => e.xrayImageId).sort()).toEqual(events.map((e) => e.xrayImageId).sort());
+  });
+
+  it("still reads and merges legacy one-file-per-event immutable events alongside new segment writes", async () => {
+    const root = await makeRoot();
+    const month = "5-May-2026";
+    const dir = await getSampleMainDir(root, month, true);
+
+    const legacyEvent = buildAssignEvent({ xrayImageId: "legacy-1", assignedTo: "alice", eventBy: "admin" });
+    await writeImmutableDistributionEvent(dir, legacyEvent);
+
+    const segmentEvent = buildAssignEvent({ xrayImageId: "segment-1", assignedTo: "bob", eventBy: "admin" });
+    await appendDistributionEventSegment(dir, [segmentEvent], { deviceId: "device-x", sessionId: "session-y" });
+
+    const log = await loadDistributionLog(root, month);
+    expect(log.events.map((e) => e.xrayImageId).sort()).toEqual(["legacy-1", "segment-1"]);
+
+    // The legacy per-event file itself is untouched -- never rewritten or
+    // deleted, since another machine on an older build may still read it.
+    const legacyEvents = await loadImmutableDistributionEvents(dir);
+    expect(legacyEvents).toEqual([legacyEvent]);
+  });
+});
+
+describe("fold-checkpoint persistence (perf: O(new events) instead of O(all events) on a fresh load)", () => {
+  it("a second load after new events only reads the new bytes, not every historical segment byte", async () => {
+    const root = createMemoryDirectory("root", { trackReads: true }) as unknown as DirectoryHandleLike;
+    const month = "5-May-2026";
+    const rows: PreparedPopulationRow[] = Array.from({ length: 20 }, (_, i) => makeRow(`img-${i}`));
+
+    for (let i = 0; i < 15; i++) {
+      await appendDistributionEvent(
+        root,
+        month,
+        buildAssignEvent({ xrayImageId: `img-${i}`, assignedTo: "alice", eventBy: "admin" })
+      );
+    }
+
+    const first = await loadOrDeriveDistributionCurrent(root, month, rows);
+    expect(first?.foldCheckpoint).toBeDefined();
+    expect(first?.entries).toHaveLength(15);
+
+    for (let i = 15; i < 20; i++) {
+      await appendDistributionEvent(
+        root,
+        month,
+        buildAssignEvent({ xrayImageId: `img-${i}`, assignedTo: "bob", eventBy: "admin" })
+      );
+    }
+
+    const before = getReadLog(root).length;
+    const second = await loadOrDeriveDistributionCurrent(root, month, rows);
+    const newReads = getReadLog(root).slice(before);
+    const eventDirectoryReads = newReads.filter((path) => path.includes("distribution.events/"));
+
+    expect(second?.entries).toHaveLength(20);
+    // Bounded by the small number of writer segments touched, not by the
+    // (now 20) total historical events -- this is the actual perf claim
+    // under test: a fresh derive after new events reads the NEW bytes, not
+    // everything ever written.
+    expect(eventDirectoryReads.length).toBeLessThanOrEqual(4);
+  });
+
+  it("an out-of-order event arriving after the checkpoint forces a full refold that still matches a from-scratch derivation", async () => {
+    const root = await makeRoot();
+    const month = "5-May-2026";
+    const rows = [makeRow("A1"), makeRow("A2")];
+
+    await appendDistributionEvent(
+      root,
+      month,
+      { ...buildAssignEvent({ xrayImageId: "A1", assignedTo: "alice", eventBy: "admin" }), eventAt: "2026-05-01T10:00:00.000Z" }
+    );
+    await appendDistributionEvent(
+      root,
+      month,
+      { ...buildCompletedEvent({ xrayImageId: "A1", assignedTo: "alice", eventBy: "alice" }), eventAt: "2026-05-01T11:00:00.000Z" }
+    );
+
+    const first = await loadOrDeriveDistributionCurrent(root, month, rows);
+    expect(first?.entries.find((e) => e.xrayImageId === "A1")?.status).toBe("completed");
+
+    // A straggling event from another machine surfaces with an eventAt
+    // EARLIER than what the checkpoint already folded for A1 -- exactly the
+    // scenario findLateEvent exists to catch on a shared network-share
+    // workspace with several machines.
+    const dir = await getSampleMainDir(root, month, true);
+    const lateEvent = {
+      ...buildAssignEvent({ xrayImageId: "A2", assignedTo: "carol", eventBy: "admin" }),
+      eventAt: "2026-05-01T09:00:00.000Z",
+    };
+    await writeImmutableDistributionEvent(dir, lateEvent);
+    // Backdate A1's own next event too, forcing the late-detection specifically
+    // against an image the checkpoint already has an entry for.
+    const straggler = {
+      ...buildAssignEvent({ xrayImageId: "A1", assignedTo: "dave", eventBy: "admin" }),
+      eventAt: "2026-05-01T05:00:00.000Z",
+    };
+    await writeImmutableDistributionEvent(dir, straggler);
+
+    const second = await loadOrDeriveDistributionCurrent(root, month, rows);
+
+    // The from-scratch fold of the FULL event set is the ground truth this
+    // must match -- straggler (05:00, assign) predates A1's completion
+    // (11:00), so it must NOT resurrect A1 to pending; it's still dropped by
+    // the same terminal-state guard the golden-master test above exercises,
+    // just reached via a forced full refold instead of a resumed one.
+    const log = await loadDistributionLog(root, month);
+    const groundTruth = deriveCurrentDistribution(log, rows);
+    // Compare only the fold OUTCOME (entries/quotas/totals), not
+    // volatile/storage-layer-only fields (derivedAt, foldCheckpoint,
+    // eventSetId, logRevision) that legitimately differ between a bare
+    // deriveCurrentDistribution call and loadOrDeriveDistributionCurrent's
+    // stamped result.
+    expect(second?.entries).toEqual(groundTruth.entries);
+    expect(second?.quotas).toEqual(groundTruth.quotas);
+    expect(second?.totalAssigned).toBe(groundTruth.totalAssigned);
+    expect(second?.totalCompleted).toBe(groundTruth.totalCompleted);
+    expect(second?.totalReplaced).toBe(groundTruth.totalReplaced);
+    expect(second?.totalPending).toBe(groundTruth.totalPending);
+    expect(second?.entries.find((e) => e.xrayImageId === "A1")?.status).toBe("completed");
   });
 });

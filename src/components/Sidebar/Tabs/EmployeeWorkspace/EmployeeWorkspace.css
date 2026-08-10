@@ -238,6 +238,28 @@
   font-weight: 600;
 }
 
+/* Modifier for ew-msg-ok/ew-msg-error variants that carry an inline dismiss
+   button — logical-property flex layout instead of `float: left`, which was
+   wrong in this RTL app (it pinned the button to the visual left regardless
+   of reading direction rather than to the trailing/"end" side). */
+.ew-msg-dismissible {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.ew-msg-dismiss-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  cursor: pointer;
+}
+
 /* ── Controls ──────────────────────────────────────────────── */
 
 .ew-controls {
@@ -530,7 +552,11 @@
 .ew-modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 700;
+  /* Portaled to document.body via ModalPortal (see src/components/ModalPortal) —
+     needs to clear other body-level fixed chrome (FeedbackWidget z-index 1200,
+     mobile-nav 1100), so it uses the same tier as the app's other full-screen
+     modal overlays (Archive.css/Reports.css: 10020). */
+  z-index: 10020;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1597,6 +1623,30 @@
   font-weight: 500;
 }
 
+/* ── Ad-hoc import badge (THE GAP fix) — flags a row assigned through an
+   admin's one-off Excel import (2-samples/adhoc-{id}/) rather than the real
+   monthly sampling pipeline. Info-blue, distinct from the amber quality-note
+   badge above and the status pills used elsewhere in this file. */
+
+.ew-xray-id-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ew-adhoc-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--c-info-bg);
+  color: var(--c-info);
+  border: 1px solid var(--c-info-border);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .ew-quality-note-panel {
   display: flex;
   flex-direction: column;
@@ -1833,7 +1883,7 @@
   transition: background 160ms ease;
 }
 
-.ew-btn-deny:hover { background: #FECACA /* no-token: one-off */; }
+.ew-btn-deny:hover { background: var(--c-danger-border); }
 
 /* ── Inline referral button ────────────────────────────────── */
 
@@ -1850,7 +1900,7 @@
   transition: background 160ms ease, border-color 160ms ease;
 }
 
-.ew-btn-referral-inline:hover { background: var(--c-sky-light, #E1EFFE /* no-token: one-off */); border-color: var(--c-sky, #1E6FBA /* no-token: one-off */); }
+.ew-btn-referral-inline:hover { background: var(--c-sky-light); border-color: var(--c-sky); }
 
 /* ── Approval view tabs (المراجعة / السجل) ────────────────── */
 
@@ -1872,6 +1922,21 @@
 
 .ew-approval-view-tab:hover { color: var(--c-navy); }
 .ew-approval-view-tab.active { color: var(--c-navy); border-color: var(--c-sky); }
+
+/* ── Sort-order indicator (اعتماد الطلبات list) ────────────
+   The pending queue sorts oldest-first (nothing waits unseen) while decided
+   tabs sort newest-first (recent-activity feed); this makes the otherwise
+   silent switch visible instead of assuming the reviewer already knows. ── */
+
+.ew-sort-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: var(--sp-3);
+  color: var(--c-ink-3);
+  font-size: 12px;
+  font-weight: 600;
+}
 
 /* ── Summary bar (status-count chips) ─────────────────────── */
 

@@ -1,18 +1,9 @@
-import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 import type { Element, KpiConfig } from "../../../../../data/reportDesigner/reportTypes";
-import { useWorkspace } from "../../../../../data/workspace/useWorkspace";
-import { loadMonthPopulationFinal } from "../../../../../data/population/populationStorage";
-import { loadSampleMaster } from "../../../../../data/sampling/sampleStorage";
-import { loadOrDeriveDistributionCurrent } from "../../../../../data/distribution/distributionStorage";
-import { loadAllEmployeeFiles } from "../../../../../data/answers/answerStorage";
-import { buildExecutiveReportRows } from "../../../../../data/reporting/executiveReportData";
-import { DEFAULT_EXEC_CONFIG } from "../../../../../data/reporting/executiveReportTypes";
-import type { PreparedPopulationRow } from "../../../../../data/population/populationTypes";
 import { aggregate } from "../../../../../data/reportDesigner/query/aggregations";
-import { useGlobalMonth } from "../../../../../data/month/useGlobalMonth";
 import { useLabels } from "../../../../../data/labels/useLabels";
 import type { Labels } from "../../../../../data/labels/labelsStore";
+import { useExecutiveRows } from "./executiveRowsContext";
 
 function aggBadgeLabels(labels: Labels): Record<string, string> {
   return {
@@ -68,56 +59,6 @@ function computeResult(rows: Array<Record<string, unknown>>, config: KpiConfig, 
   // All other aggregations delegate to the shared report-designer aggregator so
   // KPI cards match the rest of the report engine exactly.
   return { kind: "number", value: aggregate(config.agg, vals) };
-}
-
-/**
- * Loads the globally selected month and builds the executive report rows the same way the
- * Power BI export does (`buildExecutiveReportRows`). The KPI field catalog mirrors
- * `ExecutiveReportRow`, so feeding raw `population.final.json` rows made most
- * fields silently compute 0 — this hook feeds the real, enriched rows instead.
- */
-function useExecutiveRows(): Array<Record<string, unknown>> | null {
-  const { directoryHandle } = useWorkspace();
-  const { selection } = useGlobalMonth();
-  const monthFolder = selection.kind === "existing" ? selection.folderName : null;
-  const [rows, setRows] = useState<Array<Record<string, unknown>> | null>(null);
-
-  useEffect(() => {
-    if (!directoryHandle || !monthFolder) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync reset so a pending/none selection never shows a previous month's KPIs
-      setRows(null);
-      return;
-    }
-    const root = directoryHandle;
-    const month = monthFolder;
-    let cancelled = false;
-    async function load() {
-      const populationData = await loadMonthPopulationFinal(root, month);
-      const sample = await loadSampleMaster(root, month);
-      const sampleRows = sample?.rows ?? [];
-      const distribution = await loadOrDeriveDistributionCurrent(root, month, sampleRows);
-      const employeeFiles = await loadAllEmployeeFiles(root, month);
-      if (cancelled) return;
-
-      const execRows = buildExecutiveReportRows({
-        monthFolderName: month,
-        populationRows: (populationData?.rows ?? []) as PreparedPopulationRow[],
-        sample: sample ?? null,
-        distribution: distribution ?? null,
-        employeeFiles,
-        template: null,
-        config: DEFAULT_EXEC_CONFIG,
-      });
-
-      if (!cancelled) {
-        setRows(execRows.map((r) => r as Record<string, unknown>));
-      }
-    }
-    void load();
-    return () => { cancelled = true; };
-  }, [directoryHandle, monthFolder]);
-
-  return rows;
 }
 
 interface KpiRendererProps {
