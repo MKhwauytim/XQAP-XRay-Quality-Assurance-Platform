@@ -80,6 +80,16 @@
   color: var(--app-muted, #6b7280);
 }
 
+.storage-reset-error {
+  margin: 10px 0 0;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--c-danger-soft, #fef2f2);
+  color: var(--c-danger-text, #991b1b);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
 .storage-section > button {
   margin-top: 16px;
   padding: 6px 14px;

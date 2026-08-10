@@ -6,6 +6,7 @@ import {
   type PersistenceState,
 } from "../../../../data/storage/storageRegistry";
 import { isFileOrigin } from "../../../../data/workspace/originDetection";
+import { logError } from "../../../../data/storage/errorLogger";
 import { useLabels } from "../../../../data/labels/useLabels";
 import "./StorageSection.css";
 
@@ -30,6 +31,7 @@ export function StorageSection() {
   const [estimate, setEstimate] = useState<Estimate>(null);
   const [foreignDbs, setForeignDbs] = useState<string[]>([]);
   const [persistence, setPersistence] = useState<PersistenceState>(getPersistenceState());
+  const [resetFailed, setResetFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -65,12 +67,18 @@ export function StorageSection() {
 
   async function handleReset() {
     if (!window.confirm(labels.storage_reset_confirm)) return;
+    setResetFailed(false);
     try {
       await clearOwnedStorage();
-    } catch {
-      // Best-effort: localStorage/sessionStorage keys are still cleared even
-      // if an indexedDB deletion fails or the API is unavailable in the
-      // current environment.
+    } catch (error) {
+      // clearOwnedStorage's own localStorage/sessionStorage removal already
+      // succeeded by this point (it guards those internally) -- what can
+      // still reject here is the IndexedDB workspace-handle deletion. That
+      // is a partial failure against the promise made in
+      // storage_reset_confirm ("ارتباط مجلد العمل" will be cleared), so it
+      // must be diagnosable rather than silently swallowed.
+      logError("StorageSection.handleReset", error);
+      setResetFailed(true);
     }
   }
 
@@ -116,6 +124,12 @@ export function StorageSection() {
             ))}
           </ul>
         </>
+      )}
+
+      {resetFailed && (
+        <p className="storage-reset-error" role="alert">
+          {labels.storage_reset_partial_failure}
+        </p>
       )}
 
       <button type="button" onClick={() => void handleReset()}>

@@ -691,6 +691,7 @@ export const DEFAULT_LABELS = {
   storage_foreign_dbs_note:            "هذه لا تخص هذا التطبيق ولن يتم المساس بها.",
   storage_reset_button:                "مسح إعدادات التطبيق",
   storage_reset_confirm:               "سيتم مسح الجلسة والتسميات المخصصة وارتباط مجلد العمل. لن يتم حذف أي ملف من مجلد العمل على القرص. هل تريد المتابعة؟",
+  storage_reset_partial_failure:       "تم مسح بعض إعدادات التطبيق، لكن تعذر مسح ارتباط مجلد العمل بالكامل. راجع سجل الأخطاء الأخيرة لمزيد من التفاصيل.",
 } as const;
 
 export type LabelKey = keyof typeof DEFAULT_LABELS;
