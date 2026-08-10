@@ -326,8 +326,26 @@ describe("storage key coverage", () => {
 
     expect(unregistered).toEqual([]);
   });
+
+  // Without this, the test above passes vacuously if the regex or the
+  // registry lookup silently stops matching anything.
+  it("actually detects an unregistered key", () => {
+    const sample = 'localStorage.setItem("some_other_app_key", value);';
+    const found = [...sample.matchAll(STORAGE_CALL)].map((m) => m[1]);
+    expect(found).toEqual(["some_other_app_key"]);
+    expect(isRegistered("some_other_app_key")).toBe(false);
+    expect(isRegistered("xray_auth_session_v1")).toBe(true);
+  });
+
+  it("scans a non-empty set of source files", () => {
+    const files = globSync("src/**/*.{ts,tsx}", { exclude: (p) => p.includes(".test.") });
+    expect(files.length).toBeGreaterThan(100);
+  });
 });
 ```
+
+Note: `STORAGE_CALL` uses the `g` flag, so reset `STORAGE_CALL.lastIndex = 0` between
+`matchAll` uses if you refactor it into a shared helper.
 
 - [ ] **Step 2: Run it**
 
@@ -728,15 +746,37 @@ describe("StorageSection", () => {
     expect(row?.querySelector("button")).toBeNull();
   });
 
-  it("asks for confirmation before clearing", async () => {
+  it("clears nothing when the confirmation is declined", async () => {
+    localStorage.setItem("xray_auth_session_v1", "session-token");
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+
     render(<StorageSection />);
     const button = await screen.findByRole("button", {
       name: DEFAULT_LABELS.storage_reset_button,
     });
     button.click();
+
     expect(confirmSpy).toHaveBeenCalledWith(DEFAULT_LABELS.storage_reset_confirm);
-    expect(localStorage.getItem("xray_auth_session_v1")).toBeNull();
+    // Declined: the key must survive.
+    expect(localStorage.getItem("xray_auth_session_v1")).toBe("session-token");
+    confirmSpy.mockRestore();
+  });
+
+  it("clears owned keys but not foreign ones when confirmed", async () => {
+    localStorage.setItem("xray_auth_session_v1", "session-token");
+    localStorage.setItem("kanban-fs-state", "foreign");
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(<StorageSection />);
+    const button = await screen.findByRole("button", {
+      name: DEFAULT_LABELS.storage_reset_button,
+    });
+    button.click();
+    await vi.waitFor(() => {
+      expect(localStorage.getItem("xray_auth_session_v1")).toBeNull();
+    });
+
+    expect(localStorage.getItem("kanban-fs-state")).toBe("foreign");
     confirmSpy.mockRestore();
   });
 });
