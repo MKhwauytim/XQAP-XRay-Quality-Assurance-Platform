@@ -68,10 +68,8 @@ function baseProps(overrides: Partial<Props> = {}): Props {
     orphanScan: null,
     canProcess: true,
     canExport: true,
-    onCertScanPasteTextChange: vi.fn(),
     onProcessPopulation: vi.fn(),
     onExportPopulation: vi.fn(),
-    onExportPhaseReport: vi.fn(),
     ...overrides,
   };
 }
@@ -83,10 +81,6 @@ describe("PhaseTwoReportAndProcessing — render-time permission gate (B13 task 
     render(<PhaseTwoReportAndProcessing {...baseProps()} />);
     const processButton = screen.getByRole("button", { name: /إعادة معالجة المجتمع/ });
     expect(processButton).not.toBeDisabled();
-
-    const exportReportButton = screen.getByRole("button", { name: "تقرير المعالجة" });
-    expect(exportReportButton).not.toBeDisabled();
-    expect(exportReportButton.getAttribute("title")).toBe("تصدير تقرير المعالجة");
 
     const exportExcelButton = screen.getByRole("button", { name: "تصدير Excel" });
     expect(exportExcelButton).not.toBeDisabled();
@@ -107,12 +101,14 @@ describe("PhaseTwoReportAndProcessing — render-time permission gate (B13 task 
     const processButton = screen.getByRole("button", { name: /إعادة معالجة المجتمع/ });
     expect(processButton).not.toBeDisabled();
 
-    const exportReportButton = screen.getByRole("button", { name: "تقرير المعالجة" });
-    expect(exportReportButton).toBeDisabled();
-    expect(exportReportButton.getAttribute("title")).toBe("لا تملك صلاحية تصدير التقارير.");
-
     const exportExcelButton = screen.getByRole("button", { name: "تصدير Excel" });
     expect(exportExcelButton).toBeDisabled();
     expect(exportExcelButton.getAttribute("title")).toBe("لا تملك صلاحية تصدير التقارير.");
+  });
+
+  it("W3/W8: no longer renders the CertScan grid or the removed تقرير المعالجة button in the Phase 2 flow", () => {
+    render(<PhaseTwoReportAndProcessing {...baseProps()} />);
+    expect(screen.queryByRole("button", { name: "تقرير المعالجة" })).toBeNull();
+    expect(screen.queryByLabelText("منطقة لصق بيانات CertScan")).toBeNull();
   });
 });

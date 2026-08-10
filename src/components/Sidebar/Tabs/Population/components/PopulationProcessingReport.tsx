@@ -1,4 +1,6 @@
-import type { ProcessingSummary } from "../processing/populationProcessingTypes";
+import { useState } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
+import type { ProcessingSummary, RemovedPopulationRow } from "../processing/populationProcessingTypes";
 import { formatNumber, formatPercentage } from "./helpers";
 import SummaryCard from "./SummaryCard";
 
@@ -19,11 +21,97 @@ export type PopulationReportPreviewRow = {
 type PopulationProcessingReportProps = {
   summary: ProcessingSummary;
   previewRows: PopulationReportPreviewRow[];
+  /** W8: per-row detail for excluded-during-processing rows, previously only
+   *  reachable via the removed "تقرير المعالجة" HTML export (which never actually
+   *  showed per-row detail — only aggregate counts). Sourced directly from the
+   *  in-memory processing result, no extra reads. Undefined for a locked month
+   *  rendered from `populationAggregate` (which never carries these lists) —
+   *  the section renders nothing in that case. */
+  removedRows?: RemovedPopulationRow[];
+  duplicateRows?: RemovedPopulationRow[];
+  invalidResultRows?: RemovedPopulationRow[];
 };
+
+const DROPPED_ROWS_DISPLAY_CAP = 50;
+
+function droppedRowKey(droppedRow: RemovedPopulationRow, index: number): string {
+  return `${droppedRow.xrayImageId ?? "—"}-${droppedRow.sourceRowNumber ?? index}-${index}`;
+}
+
+/** W8: collapsible per-row drill-down for one exclusion category (invalid ID,
+ *  duplicate, invalid level result). Renders nothing when there are no rows. */
+function DroppedRowsCategory({ title, rows }: { title: string; rows: RemovedPopulationRow[] }) {
+  const [open, setOpen] = useState(false);
+  if (rows.length === 0) return null;
+  const shown = rows.slice(0, DROPPED_ROWS_DISPLAY_CAP);
+  const extra = rows.length - shown.length;
+  return (
+    <div className="dropped-rows-category">
+      <button
+        type="button"
+        className="dropped-rows-head"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+      >
+        <span>{title}</span>
+        <span className="dropped-rows-count">{formatNumber(rows.length)}</span>
+        {open ? <ChevronUp size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
+      </button>
+      {open && (
+        <div className="dropped-rows-table" role="table">
+          <div className="dropped-rows-row dropped-rows-header" role="row">
+            <span>معرف الأشعة</span>
+            <span>اسم المنفذ</span>
+            <span>رقم الصف المصدر</span>
+            <span>الورقة المصدر</span>
+            <span>السبب</span>
+          </div>
+          {shown.map((droppedRow, index) => (
+            <div key={droppedRowKey(droppedRow, index)} className="dropped-rows-row" role="row">
+              <span>{droppedRow.xrayImageId ?? "—"}</span>
+              <span>{droppedRow.portName ?? "—"}</span>
+              <span>{droppedRow.sourceRowNumber ?? "—"}</span>
+              <span>{droppedRow.sourceSheetName ?? "—"}</span>
+              <span>{droppedRow.reason}</span>
+            </div>
+          ))}
+          {extra > 0 && (
+            <p className="dropped-rows-more">+{formatNumber(extra)} صفاً إضافياً — التصدير الكامل متاح عبر زر تصدير Excel أعلاه.</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** W8: wraps the three exclusion categories; renders nothing when nothing was excluded. */
+function DroppedRowsSection({
+  removedRows,
+  duplicateRows,
+  invalidResultRows,
+}: {
+  removedRows?: RemovedPopulationRow[];
+  duplicateRows?: RemovedPopulationRow[];
+  invalidResultRows?: RemovedPopulationRow[];
+}) {
+  const hasAny =
+    (removedRows?.length ?? 0) + (duplicateRows?.length ?? 0) + (invalidResultRows?.length ?? 0) > 0;
+  if (!hasAny) return null;
+  return (
+    <div className="dropped-rows-section">
+      <h4>تفاصيل الصفوف المستبعدة</h4>
+      <DroppedRowsCategory title="معرفات غير صالحة" rows={removedRows ?? []} />
+      <DroppedRowsCategory title="مكررات مستبعدة" rows={duplicateRows ?? []} />
+      <DroppedRowsCategory title="نتائج مستوى غير صالحة" rows={invalidResultRows ?? []} />
+    </div>
+  );
+}
 
 export default function PopulationProcessingReport({
   summary,
-  previewRows
+  removedRows,
+  duplicateRows,
+  invalidResultRows,
 }: PopulationProcessingReportProps) {
 
   const totalExcludedAfterProcessing =
@@ -111,40 +199,11 @@ export default function PopulationProcessingReport({
         </div>
       </div>
 
-      <div className="prepared-preview-section">
-        <h4>معاينة المجتمع النهائي</h4>
-
-        {previewRows.length > 0 ? (
-          <div className="prepared-preview-table">
-            <div className="prepared-preview-header">
-              <span>معرف الأشعة</span>
-              <span>اسم المنفذ</span>
-              <span>المستوى</span>
-              <span>المستوى الأول</span>
-              <span>المستوى الثاني</span>
-              <span>CertScan</span>
-            </div>
-
-            {previewRows.map((row) => (
-              <div
-                key={`${row.xrayImageId}-${row.sourceRowNumber}`}
-                className="prepared-preview-row"
-              >
-                <span>{row.xrayImageId}</span>
-                <span>{row.portName ?? ""}</span>
-                <span>{row.stage ?? ""}</span>
-                <span>{row.xrayLevelOneResult}</span>
-                <span>{row.xrayLevelTwoResult}</span>
-                <span>{row.certScanStatus}</span>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="processing-placeholder">
-            <p>لا توجد صفوف نهائية بعد تطبيق شروط المعالجة.</p>
-          </div>
-        )}
-      </div>
+      <DroppedRowsSection
+        removedRows={removedRows}
+        duplicateRows={duplicateRows}
+        invalidResultRows={invalidResultRows}
+      />
     </section>
   );
 }

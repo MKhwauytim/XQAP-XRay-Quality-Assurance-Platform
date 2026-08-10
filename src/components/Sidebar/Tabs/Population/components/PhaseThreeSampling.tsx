@@ -46,7 +46,6 @@ type PhaseThreeSamplingProps = {
    */
   processingMessage: string;
   onConfigChange: (config: PopulationConfig) => void;
-  onSampleSeedChange: (seed: string) => void;
   onDrawSample: () => void;
 };
 
@@ -113,7 +112,6 @@ export default function PhaseThreeSampling({
   canConfigureSample,
   processingMessage,
   onConfigChange,
-  onSampleSeedChange,
   onDrawSample
 }: PhaseThreeSamplingProps) {
   const { canMutate } = usePermissions();
@@ -402,22 +400,15 @@ export default function PhaseThreeSampling({
           })}
         </div>
 
-        {/* RNG Seed + trigger */}
+        {/* W14: the RNG seed edit control moved to إعدادات المعالجة (MappingSettingsModal,
+            mode="processing") — this still drives the draw below via the sampleSeed prop,
+            only its edit UI relocated. A compact read-only reference stays here so the
+            operator can see which seed a draw will use / did use without leaving the page. */}
         <div className="sampling-rng-row">
-          <label className="save-disk-label" style={{ flex: 1 }}>
-            رمز التوزيع العشوائي - يمكن تعديله لإعادة إنتاج نفس العينة
-            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <input
-                id="sample-seed"
-                type="text"
-                value={sampleSeed}
-                className="sampling-rng-input"
-                style={{ flex: 1 }}
-                disabled={isDrawingSample}
-                onChange={(e) => onSampleSeedChange(e.target.value)}
-              />
-            </div>
-          </label>
+          <span className="sampling-rng-current" style={{ flex: 1, fontSize: 12, color: "var(--p-muted)" }}>
+            رمز التوزيع العشوائي الحالي: <code>{sampleSeed}</code>
+            {" — "}يمكن تعديله من إعدادات المعالجة
+          </span>
 
           <button
             type="button"

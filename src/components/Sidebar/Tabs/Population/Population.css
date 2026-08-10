@@ -763,6 +763,71 @@
   color: var(--p-info);
 }
 
+/* W4/W10: raw-file summary shown on Phase 1 beneath the upload cards, before
+   the second "التالي" press advances to processing + comparison. */
+.raw-file-summary-section {
+  margin-top: var(--sp-4);
+  padding: var(--sp-4);
+  border: 1px solid var(--population-border);
+  border-radius: var(--p-radius-md);
+  background: var(--population-bg-card);
+}
+
+.raw-file-summary-section h3 {
+  margin: 0 0 var(--sp-3);
+  font-size: 14px;
+}
+
+.raw-file-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--sp-3);
+}
+
+.raw-file-summary-card {
+  border: 1px solid var(--population-border);
+  border-radius: var(--p-radius-sm, 8px);
+  padding: var(--sp-3);
+  background: var(--p-surface-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.raw-file-summary-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12.5px;
+  color: var(--population-muted);
+}
+
+.raw-file-summary-sheets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.raw-file-summary-sheet-chip {
+  font-size: 11.5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--p-info-bg);
+  color: var(--p-info);
+}
+
+.raw-file-summary-unknown {
+  margin: 4px 0 0;
+  font-size: 11.5px;
+  color: var(--p-warning);
+}
+
+.raw-file-summary-hint {
+  margin: var(--sp-3) 0 0;
+  font-size: 12px;
+  color: var(--population-muted);
+}
+
 .msg-success,
 .save-disk-success {
   border: 1px solid var(--p-success-border);
@@ -1279,6 +1344,82 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ================================================================
+   W8: dropped-rows drill-down (relocated from the removed "تقرير المعالجة"
+   export button — see PopulationProcessingReport.tsx)
+   ================================================================ */
+
+.dropped-rows-section {
+  margin-top: var(--sp-4);
+}
+
+.dropped-rows-section h4 {
+  margin: 0 0 var(--sp-3);
+  color: var(--p-primary);
+  font-size: 14px;
+  font-weight: var(--p-bold);
+}
+
+.dropped-rows-category {
+  border: 1px solid var(--p-border-light);
+  border-radius: var(--p-radius-md);
+  background: var(--p-surface);
+  margin-bottom: var(--sp-2);
+  overflow: hidden;
+}
+
+.dropped-rows-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: var(--p-bold);
+  color: var(--p-text-secondary);
+}
+
+.dropped-rows-count {
+  margin-inline-start: auto;
+  color: var(--p-primary);
+}
+
+.dropped-rows-table {
+  overflow-x: auto;
+  border-top: 1px solid var(--p-border-light);
+}
+
+.dropped-rows-row {
+  display: grid;
+  grid-template-columns:
+    minmax(150px, 1.2fr)
+    minmax(140px, 1fr)
+    minmax(110px, 0.7fr)
+    minmax(120px, 0.9fr)
+    minmax(160px, 1.3fr);
+  gap: var(--sp-3);
+  min-width: 760px;
+  padding: var(--sp-2) var(--sp-3);
+  align-items: center;
+  font-size: 12.5px;
+  color: var(--p-text-secondary);
+}
+
+.dropped-rows-header {
+  background: var(--p-surface-soft);
+  color: var(--p-primary);
+  font-weight: var(--p-bold);
+}
+
+.dropped-rows-more {
+  margin: var(--sp-2) var(--sp-3);
+  font-size: 12px;
+  color: var(--p-muted, var(--p-text-secondary));
 }
 
 /* ================================================================

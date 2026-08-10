@@ -1,5 +1,7 @@
 import type { ChangeEvent, RefObject } from "react";
 import FileUploadCard from "./FileUploadCard";
+import type { RiskWorkbookResult } from "../riskData/riskDataTypes";
+import type { BiWorkbookResult } from "../biData/biDataTypes";
 
 type UploadKey = "riskAgencyData" | "businessIntelligenceData";
 
@@ -29,7 +31,55 @@ type PhaseOneUploadProps = {
     uploadKey: UploadKey,
     event: ChangeEvent<HTMLInputElement>
   ) => void;
+  /**
+   * W4/W10: once the workbook(s) are parsed (first "التالي" press — see
+   * index.tsx's parsePhaseOneWorkbooks/moveToNextPhase), general information
+   * read from the raw files is shown here, beneath the upload cards, before the
+   * user presses "التالي" again to actually advance and process. Optional/null
+   * before parsing (or for callers/tests that don't exercise this path).
+   */
+  riskWorkbookResult?: RiskWorkbookResult | null;
+  biWorkbookResult?: BiWorkbookResult | null;
 };
+
+function formatCount(n: number): string {
+  return n.toLocaleString("ar-SA-u-nu-latn");
+}
+
+/** W4/W10: compact raw-file receipt — sheet/row counts read straight from the
+ *  already-parsed workbook result, no extra reads or processing. */
+function RawFileSummaryCard({
+  title,
+  result,
+}: {
+  title: string;
+  result: RiskWorkbookResult | BiWorkbookResult;
+}) {
+  return (
+    <div className="raw-file-summary-card">
+      <strong>{title}</strong>
+      <div className="raw-file-summary-stats">
+        <span>الصفوف الأصلية: {formatCount(result.totalOriginalRows)}</span>
+        <span>الصفوف المقبولة: {formatCount(result.totalNormalizedRows)}</span>
+        <span>مستبعدة (بلا معرف أشعة): {formatCount(result.totalExcludedMissingXrayIdCount)}</span>
+      </div>
+      {result.sheetSummaries.length > 0 && (
+        <div className="raw-file-summary-sheets">
+          {result.sheetSummaries.map((sheet) => (
+            <span key={sheet.sheetName} className="raw-file-summary-sheet-chip">
+              {sheet.sheetName}: {formatCount(sheet.normalizedRowCount)}
+            </span>
+          ))}
+        </div>
+      )}
+      {result.unknownSheetNames.length > 0 && (
+        <p className="raw-file-summary-unknown">
+          أوراق غير معروفة (غير مدرجة في المجتمع): {result.unknownSheetNames.join("، ")}
+        </p>
+      )}
+    </div>
+  );
+}
 
 const RISK_AGENCY_INFO_ITEMS = [
   "هذا هو الملف الأساسي المطلوب للانتقال إلى المعالجة.",
@@ -63,7 +113,9 @@ export default function PhaseOneUpload({
   businessIntelligenceInputRef,
   onPickFile,
   onClearFile,
-  onFallbackFileChange
+  onFallbackFileChange,
+  riskWorkbookResult = null,
+  biWorkbookResult = null
 }: PhaseOneUploadProps) {
   return (
     <section className="upload-phase" aria-label="رفع البيانات">
@@ -120,6 +172,26 @@ export default function PhaseOneUpload({
       {isProcessingWorkbooks ? (
         <div className="processing-note" role="status">
           جاري قراءة الملفات وتحضير التقرير المصغر...
+        </div>
+      ) : null}
+
+      {/* W4/W10: general information from the raw files, shown beneath the
+          sources once parsed — before the user presses "التالي" again to
+          process and move on to the comparison. */}
+      {(riskWorkbookResult || biWorkbookResult) && !isProcessingWorkbooks ? (
+        <div className="raw-file-summary-section" aria-label="معلومات عامة عن الملفات المرفوعة">
+          <h3>معلومات عامة عن الملفات المرفوعة</h3>
+          <div className="raw-file-summary-grid">
+            {riskWorkbookResult && (
+              <RawFileSummaryCard title="بيانات وكالة المخاطر" result={riskWorkbookResult} />
+            )}
+            {biWorkbookResult && (
+              <RawFileSummaryCard title="بيانات ذكاء الأعمال" result={biWorkbookResult} />
+            )}
+          </div>
+          <p className="raw-file-summary-hint">
+            اضغط "التالي" مرة أخرى لمعالجة المجتمع وعرض تقرير المقارنة.
+          </p>
         </div>
       ) : null}
 

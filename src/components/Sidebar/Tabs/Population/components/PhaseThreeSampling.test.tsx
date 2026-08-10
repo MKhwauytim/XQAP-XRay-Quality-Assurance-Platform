@@ -97,7 +97,6 @@ function baseProps(overrides: Partial<Props> = {}): Props {
     canConfigureSample: true,
     processingMessage: "",
     onConfigChange: vi.fn(),
-    onSampleSeedChange: vi.fn(),
     onDrawSample: vi.fn(),
     ...overrides,
   };

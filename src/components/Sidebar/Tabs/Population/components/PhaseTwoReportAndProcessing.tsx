@@ -8,7 +8,6 @@ import { useLabels } from "../../../../../data/labels/useLabels";
 import DataAccuracyReport, { OrphanScanSection } from "./DataAccuracyReport";
 import PopulationProcessingReport from "./PopulationProcessingReport";
 import { AlertTriangle, Check, FolderOpen, Lock, X } from "lucide-react";
-import CertScanGrid from "./CertScanGrid";
 import CertScanMatchPreviewPanel from "./CertScanMatchPreviewPanel";
 
 type SaveMessage = { type: "ok" | "error"; text: string } | null;
@@ -58,10 +57,8 @@ type PhaseTwoReportAndProcessingProps = {
   populationLocked?: boolean;
   /** The persisted aggregate for a locked month, or null while unlocked/not yet loaded. */
   populationAggregate?: PopulationAggregateLoadResult | null;
-  onCertScanPasteTextChange: (value: string) => void;
   onProcessPopulation: () => void;
   onExportPopulation: () => void;
-  onExportPhaseReport: () => void;
 };
 
 export default function PhaseTwoReportAndProcessing({
@@ -83,10 +80,8 @@ export default function PhaseTwoReportAndProcessing({
   canExport,
   populationLocked = false,
   populationAggregate = null,
-  onCertScanPasteTextChange,
   onProcessPopulation,
   onExportPopulation,
-  onExportPhaseReport,
 }: PhaseTwoReportAndProcessingProps) {
   const labels = useLabels();
 
@@ -186,17 +181,17 @@ export default function PhaseTwoReportAndProcessing({
         <OrphanScanSection scan={orphanScan} />
       </div>
 
-      {/* ── Step B: CertScan + Processing ── */}
+      {/* ── Step B: Processing ── */}
       <section className="processing-workspace" aria-label="المعالجة">
         <div className="phase2-substep-header" style={{ marginBottom: "14px" }}>
           <div className="phase2-substep-badge">ب</div>
           <div className="processing-workspace-header">
-            <h3>CertScan والمعالجة</h3>
-            <p>الصق قائمة CertScan، ثم شغّل معالجة المجتمع.</p>
+            <h3>المعالجة</h3>
+            <p>
+              شغّل معالجة المجتمع. قائمة CertScan تُدار الآن من إعدادات المعالجة (شهرية ومتراكمة).
+            </p>
           </div>
         </div>
-
-        <CertScanGrid initialText={certScanPasteText || undefined} onDataChange={onCertScanPasteTextChange} />
 
         {riskWorkbookResult && !loadedFromDisk && (
           <CertScanMatchPreviewPanel
@@ -238,20 +233,6 @@ export default function PhaseTwoReportAndProcessing({
             <div className="proc-export-row">
               <button
                 type="button"
-                className="proc-export-btn"
-                onClick={onExportPhaseReport}
-                disabled={!canExport}
-                title={!canExport ? "لا تملك صلاحية تصدير التقارير." : "تصدير تقرير المعالجة"}
-              >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                  <polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/>
-                  <line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>
-                </svg>
-                تقرير المعالجة
-              </button>
-              <button
-                type="button"
                 className="proc-export-btn primary"
                 onClick={onExportPopulation}
                 disabled={!canExport}
@@ -286,7 +267,13 @@ export default function PhaseTwoReportAndProcessing({
                 {labels.population_locked_report_notice}
               </div>
             )}
-            <PopulationProcessingReport summary={reportData.summary} previewRows={reportData.previewRows} />
+            <PopulationProcessingReport
+              summary={reportData.summary}
+              previewRows={reportData.previewRows}
+              removedRows={populationProcessingResult?.removedRows}
+              duplicateRows={populationProcessingResult?.duplicateRows}
+              invalidResultRows={populationProcessingResult?.invalidResultRows}
+            />
           </>
         ) : !isProcessingPopulation ? (
           <div className="processing-placeholder">

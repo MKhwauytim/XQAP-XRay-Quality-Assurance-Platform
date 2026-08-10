@@ -7,9 +7,10 @@
 // checks in index.tsx are unchanged and remain the authoritative reject path.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import PhaseOneUpload from "./PhaseOneUpload";
+import type { RiskWorkbookResult } from "../riskData/riskDataTypes";
 
 type Props = ComponentProps<typeof PhaseOneUpload>;
 
@@ -54,5 +55,28 @@ describe("PhaseOneUpload — render-time permission gate for the file-picker (B1
     );
     expect(grid.style.pointerEvents).toBe("none");
     expect(grid.style.opacity).toBe("0.55");
+  });
+});
+
+describe("PhaseOneUpload — raw-file summary (W4/W10)", () => {
+  it("happy: shows a general-information summary once the risk workbook is parsed", () => {
+    const riskWorkbookResult: RiskWorkbookResult = {
+      rows: [],
+      sheetSummaries: [
+        { sheetName: "بري", movementType: "بري", originalRowCount: 12, normalizedRowCount: 10, excludedMissingXrayIdCount: 2 },
+      ],
+      unknownSheetNames: [],
+      totalOriginalRows: 12,
+      totalNormalizedRows: 10,
+      totalExcludedMissingXrayIdCount: 2,
+    };
+    render(<PhaseOneUpload {...baseProps({ riskWorkbookResult })} />);
+    expect(screen.getByText("معلومات عامة عن الملفات المرفوعة")).toBeTruthy();
+    expect(screen.getByText("الصفوف المقبولة: 10")).toBeTruthy();
+  });
+
+  it("failure: renders nothing extra before any workbook has been parsed", () => {
+    render(<PhaseOneUpload {...baseProps()} />);
+    expect(screen.queryByText("معلومات عامة عن الملفات المرفوعة")).toBeNull();
   });
 });

@@ -48,8 +48,6 @@ import { exportPopulationProcessingResult } from "./processing/populationExporte
 import { processPopulation } from "./processing/populationProcessor";
 import type { PopulationProcessingResult } from "./processing/populationProcessingTypes";
 
-import { exportPopulationReport } from "./reporting/reportExporter";
-
 import type { RiskWorkbookResult } from "./riskData/riskDataTypes";
 
 import WorkbookWorker from "../../../../workers/workbookWorker?worker&inline";
@@ -530,6 +528,31 @@ export default function PopulationTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fresh closure each render; its own body already guards re-fetching via populationProcessingResult
   }, [activeSubTab, currentPhase, populationProcessingResult, canDrawSample, canProcessPopulation]);
 
+  // W9: auto-process on arriving at Phase 2 with a freshly-read workbook still
+  // unprocessed — the owner should not have to press "معالجة المجتمع" for the
+  // very first run. Guarded by object-identity on riskWorkbookResult (not just
+  // "!populationProcessingResult", which a FAILED attempt would leave true
+  // forever and retry on every render) so this fires at most once per distinct
+  // parsed workbook. A month already processed/loaded from disk reconstructs
+  // populationProcessingResult directly (see reconstructedPopulation), so this
+  // never re-runs for it. handleProcessPopulation itself still owns every
+  // permission/closed-month/in-flight check — canProcessNow here is only an
+  // additional render-time gate so the effect doesn't even attempt a call the
+  // handler would reject anyway. Manual re-process ("إعادة معالجة المجتمع")
+  // stays available and does not go through this effect at all.
+  const autoProcessAttemptedForRef = useRef<RiskWorkbookResult | null>(null);
+  useEffect(() => {
+    if (activeSubTab !== "process" || currentPhase !== 2) return;
+    if (!riskWorkbookResult) return;
+    if (populationProcessingResult) return;
+    if (isProcessingPopulation || isLoadingMonthData) return;
+    if (!canProcessNow) return;
+    if (autoProcessAttemptedForRef.current === riskWorkbookResult) return;
+    autoProcessAttemptedForRef.current = riskWorkbookResult;
+    void handleProcessPopulation();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- handleProcessPopulation is a fresh closure every render; the ref guard above (not a dependency) is what actually prevents repeat firing
+  }, [activeSubTab, currentPhase, riskWorkbookResult, populationProcessingResult, isProcessingPopulation, isLoadingMonthData, canProcessNow]);
+
   // B3: compute the orphan scan for the selected month when the Phase 2 report is
   // visible. Best-effort — any load failure clears the scan (section renders nothing).
   useEffect(() => {
@@ -703,7 +726,14 @@ export default function PopulationTab() {
     setProcessingMessage("");
   }
 
-  async function processPhaseOneAndMoveNext(): Promise<void> {
+  // W4/W10 (cheap half of the requested upload→process→compare restructure): this
+  // used to both parse the uploaded workbook(s) AND immediately advance to Phase 2
+  // in the same click. It now only parses, so the raw-file summary (rendered by
+  // PhaseOneUpload once riskWorkbookResult/biWorkbookResult are set) is visible on
+  // THIS page first — matching the owner's requested "upload sources, see general
+  // info below them" flow. moveToNextPhase's generic phase-1 branch below performs
+  // the actual advance once this has already run (a second "التالي" press).
+  async function parsePhaseOneWorkbooks(): Promise<void> {
     if (!canUploadData) {
       setUploadError("لا تملك صلاحية قراءة ملفات البيانات.");
       return;
@@ -749,10 +779,8 @@ export default function PopulationTab() {
           setBiWorkbookResult(msg.biResult);
           hasUnsavedSessionWorkRef.current = true;
           if (msg.warning) setProcessingMessage(msg.warning);
-          setCompletedPhaseIds((prev) =>
-            prev.includes(1) ? prev : [...prev, 1]
-          );
-          setCurrentPhase(2);
+          // No longer advances the phase here — see this function's header
+          // comment. Stays on Phase 1 so the raw-file summary renders.
           cleanup();
         } else {
           setProcessingMessage(
@@ -872,29 +900,6 @@ export default function PopulationTab() {
       biWorkbookResult,
       config.exportTemplates[0]?.columns
     );
-  }
-
-  function handleExportPhaseTwoReport(): void {
-    if (isLoadingMonthData) {
-      setProcessingMessage("جارٍ تحميل بيانات الشهر — انتظر حتى يكتمل التحميل قبل التصدير.");
-      return;
-    }
-    if (!canExportReports) {
-      setProcessingMessage("لا تملك صلاحية تصدير التقارير.");
-      return;
-    }
-
-    if (!riskWorkbookResult) {
-      setProcessingMessage("لا توجد بيانات وكالة مخاطر جاهزة لتصدير التقرير.");
-      return;
-    }
-
-    exportPopulationReport({
-      scope: "phase-2",
-      riskWorkbookResult,
-      biWorkbookResult,
-      populationProcessingResult
-    });
   }
 
   async function performSaveToDisk(
@@ -1155,8 +1160,11 @@ export default function PopulationTab() {
   }
 
   async function moveToNextPhase(): Promise<void> {
-    if (currentPhase === 1) {
-      await processPhaseOneAndMoveNext();
+    if (currentPhase === 1 && !riskWorkbookResult) {
+      // First "التالي" press on Phase 1: parse only, stay put so the raw-file
+      // summary shows. A second press (riskWorkbookResult now set) falls
+      // through to the generic advance below, same as every other phase.
+      await parsePhaseOneWorkbooks();
       return;
     }
 
@@ -1260,6 +1268,8 @@ export default function PopulationTab() {
             onPickFile={pickExcelFile}
             onClearFile={clearSelectedFile}
             onFallbackFileChange={handleFallbackFileChange}
+            riskWorkbookResult={riskWorkbookResult}
+            biWorkbookResult={biWorkbookResult}
           />
         ) : null}
 
@@ -1283,10 +1293,8 @@ export default function PopulationTab() {
             canExport={canExportNow}
             populationLocked={populationLocked}
             populationAggregate={populationAggregate}
-            onCertScanPasteTextChange={handleCertScanChange}
             onProcessPopulation={handleProcessPopulation}
             onExportPopulation={handleExportPopulation}
-            onExportPhaseReport={handleExportPhaseTwoReport}
           />
         ) : null}
 
@@ -1305,7 +1313,6 @@ export default function PopulationTab() {
             canConfigureSample={canConfigureSample}
             processingMessage={processingMessage}
             onConfigChange={handleConfigChange}
-            onSampleSeedChange={setSampleSeed}
             onDrawSample={() => { void handleDrawSample(); }}
           />
         ) : null}
@@ -1350,6 +1357,10 @@ export default function PopulationTab() {
         mode={settingsModalMode ?? "mapping"}
         config={config}
         onConfigChange={handleConfigChange}
+        certScanPasteText={certScanPasteText}
+        onCertScanPasteTextChange={handleCertScanChange}
+        sampleSeed={sampleSeed}
+        onSampleSeedChange={setSampleSeed}
         processingContext={{
           riskFileName: uploads.riskAgencyData.file?.name ?? null,
           biFileName: uploads.businessIntelligenceData.file?.name ?? null,
