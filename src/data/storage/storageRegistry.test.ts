@@ -114,3 +114,107 @@ describe("storage persistence", () => {
     Object.defineProperty(navigator, "storage", { value: original, configurable: true });
   });
 });
+
+import { probeStoragePersisted, wasStoragePreviouslyPersisted } from "./storageRegistry";
+
+describe("probeStoragePersisted (Finding 2 — side-effect-free persistence read)", () => {
+  it("returns true when the browser reports persisted storage", async () => {
+    const original = navigator.storage;
+    Object.defineProperty(navigator, "storage", {
+      value: { persisted: async () => true },
+      configurable: true,
+    });
+
+    await expect(probeStoragePersisted()).resolves.toBe(true);
+
+    Object.defineProperty(navigator, "storage", { value: original, configurable: true });
+  });
+
+  it("returns false when the browser reports no persisted storage, without granting it", async () => {
+    let persistCalls = 0;
+    const original = navigator.storage;
+    Object.defineProperty(navigator, "storage", {
+      value: {
+        persisted: async () => false,
+        persist: async () => {
+          persistCalls += 1;
+          return true;
+        },
+      },
+      configurable: true,
+    });
+
+    await expect(probeStoragePersisted()).resolves.toBe(false);
+    // The whole point of a "probe" is that it never calls .persist() itself.
+    expect(persistCalls).toBe(0);
+
+    Object.defineProperty(navigator, "storage", { value: original, configurable: true });
+  });
+
+  it("returns null when navigator.storage.persisted is unavailable", async () => {
+    const original = navigator.storage;
+    Object.defineProperty(navigator, "storage", { value: undefined, configurable: true });
+
+    await expect(probeStoragePersisted()).resolves.toBeNull();
+
+    Object.defineProperty(navigator, "storage", { value: original, configurable: true });
+  });
+
+  it("returns null instead of throwing when persisted() rejects", async () => {
+    const original = navigator.storage;
+    Object.defineProperty(navigator, "storage", {
+      value: { persisted: async () => { throw new Error("boom"); } },
+      configurable: true,
+    });
+
+    await expect(probeStoragePersisted()).resolves.toBeNull();
+
+    Object.defineProperty(navigator, "storage", { value: original, configurable: true });
+  });
+});
+
+describe("wasStoragePreviouslyPersisted", () => {
+  // `persistenceState` is a module-level singleton mutated by
+  // requestStoragePersistence() in other tests in this file, so each test
+  // here first forces it to a known non-"granted" value via a real call --
+  // rather than asserting its ambient value -- so these are correct
+  // regardless of what ran before them (e.g. under --shuffle).
+  it("resolves true from a live probe even when the runtime state is not 'granted'", async () => {
+    // This is the exact scenario Finding 2 describes: a reload restores the
+    // workspace without re-running requestStoragePersistence(), so the
+    // module-local runtime state never reaches "granted" on its own -- only
+    // a direct probe of the browser can recover the truth.
+    const original = navigator.storage;
+    Object.defineProperty(navigator, "storage", {
+      value: { persisted: async () => false, persist: async () => false },
+      configurable: true,
+    });
+    await requestStoragePersistence();
+    expect(getPersistenceState()).toBe("denied");
+
+    Object.defineProperty(navigator, "storage", {
+      value: { persisted: async () => true },
+      configurable: true,
+    });
+
+    await expect(wasStoragePreviouslyPersisted()).resolves.toBe(true);
+
+    Object.defineProperty(navigator, "storage", { value: original, configurable: true });
+  });
+
+  it("resolves false when neither the runtime state nor the probe indicate persistence", async () => {
+    const original = navigator.storage;
+    Object.defineProperty(navigator, "storage", {
+      value: { persisted: async () => false, persist: async () => false },
+      configurable: true,
+    });
+    await requestStoragePersistence();
+    expect(getPersistenceState()).toBe("denied");
+
+    Object.defineProperty(navigator, "storage", { value: undefined, configurable: true });
+
+    await expect(wasStoragePreviouslyPersisted()).resolves.toBe(false);
+
+    Object.defineProperty(navigator, "storage", { value: original, configurable: true });
+  });
+});

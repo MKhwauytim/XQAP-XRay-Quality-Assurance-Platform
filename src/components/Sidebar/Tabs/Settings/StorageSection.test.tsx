@@ -6,6 +6,26 @@ import { DEFAULT_LABELS } from "../../../../data/labels/labelsStore";
 import { clearErrors, getRecentErrors } from "../../../../data/storage/errorLogger";
 import * as storageRegistry from "../../../../data/storage/storageRegistry";
 
+// StorageSection's reset button is gated by canMutate("view-error-log")
+// (Finding 3: the reset is destructive and the Settings tab allows the
+// guest role, so it must not be reachable ungated). Mocked the same way
+// ErrorLogSection.test.tsx mocks it, to avoid needing a WorkspaceContext
+// provider just to exercise usePermissions' workspaceReady check.
+const permissionsMock = vi.hoisted(() => ({ canMutate: true }));
+vi.mock("../../../../auth/usePermissions", () => ({
+  usePermissions: () => ({
+    canMutate: (featureId: string) =>
+      featureId === "view-error-log" ? permissionsMock.canMutate : false,
+  }),
+}));
+
+// File-wide default so every describe block below (which each define their
+// own navigator.storage/indexedDB setup) doesn't also have to remember to
+// reset this.
+beforeEach(() => {
+  permissionsMock.canMutate = true;
+});
+
 describe("StorageSection", () => {
   afterEach(() => {
     cleanup();
@@ -169,5 +189,133 @@ describe("StorageSection - reset failure is observable, not swallowed", () => {
     ).toBeInTheDocument();
 
     confirmSpy.mockRestore();
+  });
+});
+
+describe("StorageSection - Finding 3: reset is capability-gated", () => {
+  beforeEach(() => {
+    Object.defineProperty(navigator, "storage", {
+      value: {
+        estimate: async () => ({ usage: 5_000_000, quota: 100_000_000 }),
+        persisted: async () => true,
+      },
+      configurable: true,
+    });
+    Object.defineProperty(globalThis, "indexedDB", {
+      value: { databases: async () => [] },
+      configurable: true,
+    });
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("disables the reset button when the role lacks the capability", async () => {
+    permissionsMock.canMutate = false;
+
+    render(<StorageSection />);
+    const button = await screen.findByRole("button", {
+      name: DEFAULT_LABELS.storage_reset_button,
+    });
+
+    expect(button).toBeDisabled();
+  });
+
+  it("never prompts for confirmation or clears storage when clicked without the capability (handler boundary)", async () => {
+    permissionsMock.canMutate = false;
+    localStorage.setItem("xray_auth_session_v1", "session-token");
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(<StorageSection />);
+    const button = await screen.findByRole("button", {
+      name: DEFAULT_LABELS.storage_reset_button,
+    });
+    // A disabled button's onClick is unreachable via a real user click in a
+    // browser, but jsdom still allows firing it programmatically -- assert
+    // the handler itself refuses, not just that the button is visually off.
+    button.click();
+
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(localStorage.getItem("xray_auth_session_v1")).toBe("session-token");
+    confirmSpy.mockRestore();
+  });
+
+  it("enables the reset button and allows reset when the role has the capability", async () => {
+    permissionsMock.canMutate = true;
+    localStorage.setItem("xray_auth_session_v1", "session-token");
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(<StorageSection />);
+    const button = await screen.findByRole("button", {
+      name: DEFAULT_LABELS.storage_reset_button,
+    });
+    expect(button).not.toBeDisabled();
+
+    button.click();
+    await vi.waitFor(() => {
+      expect(localStorage.getItem("xray_auth_session_v1")).toBeNull();
+    });
+    confirmSpy.mockRestore();
+  });
+});
+
+describe("StorageSection - Finding 2: persistence state reflects a reload, not just this tab's runtime state", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("shows persistent when navigator.storage.persisted() resolves true, even though getPersistenceState() is still 'unknown' on a fresh reload", async () => {
+    // Simulates the normal case: a page reload restores the workspace via
+    // saveLastWorkspace's own reconnect path, which never calls
+    // requestStoragePersistence() again -- so the in-tab runtime state
+    // (getPersistenceState()) is "unknown", exactly as it is at import time
+    // in this test file. Only the direct browser probe can tell the truth.
+    Object.defineProperty(navigator, "storage", {
+      value: { persisted: async () => true },
+      configurable: true,
+    });
+    Object.defineProperty(globalThis, "indexedDB", {
+      value: { databases: async () => [] },
+      configurable: true,
+    });
+    expect(storageRegistry.getPersistenceState()).toBe("unknown");
+
+    render(<StorageSection />);
+
+    expect(
+      await screen.findByText(DEFAULT_LABELS.storage_persistence_granted)
+    ).toBeInTheDocument();
+  });
+
+  it("shows non-persistent when the probe resolves false", async () => {
+    Object.defineProperty(navigator, "storage", {
+      value: { persisted: async () => false },
+      configurable: true,
+    });
+    Object.defineProperty(globalThis, "indexedDB", {
+      value: { databases: async () => [] },
+      configurable: true,
+    });
+
+    render(<StorageSection />);
+
+    expect(
+      await screen.findByText(DEFAULT_LABELS.storage_persistence_denied)
+    ).toBeInTheDocument();
+  });
+
+  it("falls back to getPersistenceState() when the probe itself is unavailable", async () => {
+    Object.defineProperty(navigator, "storage", { value: undefined, configurable: true });
+    Object.defineProperty(globalThis, "indexedDB", { value: undefined, configurable: true });
+    expect(storageRegistry.getPersistenceState()).toBe("unknown");
+
+    render(<StorageSection />);
+
+    // No persisted() to call -> falls back to the runtime state ("unknown"),
+    // which renders as the same copy as "denied".
+    expect(
+      await screen.findByText(DEFAULT_LABELS.storage_persistence_denied)
+    ).toBeInTheDocument();
   });
 });

@@ -18,6 +18,19 @@ vi.mock("../../auth/authConfig", () => ({
 const persistenceMock = vi.hoisted(() => ({ state: "unknown" as "granted" | "denied" | "unsupported" | "unknown" }));
 vi.mock("../storage/storageRegistry", () => ({
   getPersistenceState: () => persistenceMock.state,
+  // Mirrors the real storageRegistry.wasStoragePreviouslyPersisted: "granted"
+  // short-circuits to true, otherwise falls back to navigator.storage.persisted()
+  // (absent in jsdom by default, so it resolves false in these tests).
+  wasStoragePreviouslyPersisted: async () => {
+    if (persistenceMock.state === "granted") return true;
+    const storage = typeof navigator === "undefined" ? undefined : navigator.storage;
+    if (!storage || typeof storage.persisted !== "function") return false;
+    try {
+      return await storage.persisted();
+    } catch {
+      return false;
+    }
+  },
 }));
 
 const originMock = vi.hoisted(() => ({ isFile: false }));

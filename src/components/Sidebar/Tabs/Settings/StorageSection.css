@@ -98,10 +98,16 @@
   cursor: pointer;
   font-size: 0.85rem;
   background: var(--c-danger, #ef4444);
-  color: #fff;
+  color: var(--c-surface, #fff);
   transition: background 0.15s;
 }
 
 .storage-section > button:hover {
-  background: #dc2626;
+  background: var(--c-danger-strong, #dc2626);
+}
+
+.storage-section > button:disabled {
+  opacity: 0.5;
+  cursor: default;
+  pointer-events: none;
 }

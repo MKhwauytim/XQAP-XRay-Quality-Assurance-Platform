@@ -13,7 +13,7 @@ import { listMonthFolders } from "../population/populationStorage";
 import { getLabels } from "../labels/labelsStore";
 import { useLabels } from "../labels/useLabels";
 import { useFocusTrap } from "../../hooks/useFocusTrap";
-import { getPersistenceState } from "../storage/storageRegistry";
+import { wasStoragePreviouslyPersisted } from "../storage/storageRegistry";
 import { isFileOrigin } from "./originDetection";
 import { useWorkspace } from "./useWorkspace";
 
@@ -27,38 +27,6 @@ import "./WorkspaceGate.css";
 type WorkspacePickerProps = {
   children: ReactNode;
 };
-
-/**
- * Best-effort signal that this browser origin has held persistent storage
- * before — the only thing `requestStoragePersistence` (called after every
- * successful workspace save, see workspacePersistence.ts) leaves behind that
- * outlives a full page reload. `getPersistenceState()` alone only reflects
- * *this* tab's session (it resets to "unknown" on reload), so it is combined
- * with a direct, side-effect-free `navigator.storage.persisted()` read —
- * unlike `requestStoragePersistence()`, this never calls `.persist()`, so it
- * cannot itself grant persistence for a genuine first-time visitor.
- *
- * This is a heuristic, not a certainty: a full "clear site data" wipes the
- * persisted flag along with everything else, so that specific loss path
- * still looks like a first run. It is the best signal available without
- * introducing new storage of our own.
- *
- * Only meaningful on a served (http/https) origin. On `file://` — this app's
- * primary deployment mode, see `isFileOrigin` — `navigator.storage.persist`
- * is unsupported (and `navigator.storage` may be absent entirely), so this
- * always resolves false there. Callers must branch on `isFileOrigin()`
- * *before* relying on this function; see the effect below.
- */
-async function wasStoragePreviouslyPersisted(): Promise<boolean> {
-  if (getPersistenceState() === "granted") return true;
-  const storage = typeof navigator === "undefined" ? undefined : navigator.storage;
-  if (!storage || typeof storage.persisted !== "function") return false;
-  try {
-    return await storage.persisted();
-  } catch {
-    return false;
-  }
-}
 
 export function WorkspacePicker({ children }: WorkspacePickerProps) {
   const {

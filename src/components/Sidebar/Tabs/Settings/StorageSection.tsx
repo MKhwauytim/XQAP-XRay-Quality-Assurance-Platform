@@ -3,11 +3,13 @@ import {
   STORAGE_REGISTRY,
   clearOwnedStorage,
   getPersistenceState,
+  probeStoragePersisted,
   type PersistenceState,
 } from "../../../../data/storage/storageRegistry";
 import { isFileOrigin } from "../../../../data/workspace/originDetection";
 import { logError } from "../../../../data/storage/errorLogger";
 import { useLabels } from "../../../../data/labels/useLabels";
+import { usePermissions } from "../../../../auth/usePermissions";
 import "./StorageSection.css";
 
 type Estimate = { usage: number; quota: number } | null;
@@ -28,6 +30,17 @@ function persistenceLabelKey(state: PersistenceState) {
 
 export function StorageSection() {
   const labels = useLabels();
+  // Finding 3: the reset wipes the session (signs everyone out), all label
+  // overrides, and the workspace-folder link — a destructive, persistent
+  // action. "settings" allows the guest role for read-only viewing, so this
+  // must be capability-gated at both the render and handler boundaries (see
+  // CLAUDE.md's canMutate convention), the same as the sibling
+  // ErrorLogSection's clear-log button. Reusing "view-error-log" rather than
+  // adding a new capability id: it already gates the only other destructive,
+  // browser-storage-clearing action in this same Settings tab, defaults to
+  // admin-only, and needs no new permission-matrix row.
+  const { canMutate } = usePermissions();
+  const canReset = canMutate("view-error-log");
   const [estimate, setEstimate] = useState<Estimate>(null);
   const [foreignDbs, setForeignDbs] = useState<string[]>([]);
   const [persistence, setPersistence] = useState<PersistenceState>(getPersistenceState());
@@ -57,7 +70,21 @@ export function StorageSection() {
         // databases() unsupported; the foreign list stays empty
       }
 
-      if (!cancelled) setPersistence(getPersistenceState());
+      // Finding 2: `getPersistenceState()` alone only reflects this tab's
+      // in-memory runtime state, which resets to "unknown" on every reload —
+      // it is set to "granted" only inside requestStoragePersistence(),
+      // called from saveLastWorkspace(). A reload with a restored workspace
+      // (the normal case) would otherwise always read as "unknown" ->
+      // rendered as "denied", even when the browser actually granted
+      // persistence in an earlier session. Probe the browser directly first
+      // (the same side-effect-free check WorkspaceGate uses) and only fall
+      // back to the runtime state when the probe itself is unavailable.
+      const probed = await probeStoragePersisted();
+      if (!cancelled) {
+        if (probed === true) setPersistence("granted");
+        else if (probed === false) setPersistence("denied");
+        else setPersistence(getPersistenceState());
+      }
     })();
 
     return () => {
@@ -66,6 +93,7 @@ export function StorageSection() {
   }, []);
 
   async function handleReset() {
+    if (!canReset) return;
     if (!window.confirm(labels.storage_reset_confirm)) return;
     setResetFailed(false);
     try {
@@ -132,7 +160,12 @@ export function StorageSection() {
         </p>
       )}
 
-      <button type="button" onClick={() => void handleReset()}>
+      <button
+        type="button"
+        onClick={() => void handleReset()}
+        disabled={!canReset}
+        title={!canReset ? labels.storage_reset_denied_title : undefined}
+      >
         {labels.storage_reset_button}
       </button>
     </section>

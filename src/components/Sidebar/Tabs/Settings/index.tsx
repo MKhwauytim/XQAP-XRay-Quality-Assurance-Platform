@@ -409,6 +409,7 @@ function SettingsPage() {
   // never automatically — offer to restore from it.
   const [restoreOffer, setRestoreOffer] = useState(false);
   const [restoring, setRestoring] = useState(false);
+  const [restoreFailed, setRestoreFailed] = useState(false);
 
   useEffect(() => {
     if (!directoryHandle || !canEditLabels) {
@@ -430,9 +431,20 @@ function SettingsPage() {
   async function handleRestoreLabels() {
     if (!directoryHandle || restoring) return;
     setRestoring(true);
+    setRestoreFailed(false);
     try {
-      await importLabelsSnapshot(directoryHandle);
-      setRestoreOffer(false);
+      // Finding 4: importLabelsSnapshot never throws -- it catches internally
+      // and returns 0 on a missing/unreadable snapshot. Unconditionally
+      // clearing the offer here would make a failed read look identical to
+      // success: the offer just vanishes with nothing restored. Only treat a
+      // positive applied-count as success (consistent with the reset flow's
+      // storage_reset_partial_failure handling one file over).
+      const applied = await importLabelsSnapshot(directoryHandle);
+      if (applied > 0) {
+        setRestoreOffer(false);
+      } else {
+        setRestoreFailed(true);
+      }
     } finally {
       setRestoring(false);
     }
@@ -535,6 +547,11 @@ function SettingsPage() {
             <p className="settings-restore-notice-body" dir="rtl">
               {labels.storage_labels_lost_body}
             </p>
+            {restoreFailed && (
+              <p className="settings-restore-notice-error" role="alert" dir="rtl">
+                {labels.storage_labels_restore_failed}
+              </p>
+            )}
             <button
               type="button"
               className="settings-restore-btn"

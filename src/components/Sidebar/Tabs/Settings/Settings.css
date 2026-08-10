@@ -356,13 +356,23 @@
   line-height: 1.65;
 }
 
+.settings-restore-notice-error {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: var(--r-sm, 6px);
+  background: var(--c-danger-bg, #FEE2E2);
+  color: var(--c-danger, #991B1B);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .settings-restore-btn {
   align-self: flex-start;
   padding: 8px 18px;
   border: none;
   border-radius: var(--r-sm, 8px);
   background: var(--c-navy, #0F2744);
-  color: #FFFFFF;
+  color: var(--c-surface, #FFFFFF);
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
@@ -371,7 +381,7 @@
 }
 
 .settings-restore-btn:hover {
-  background: #162F56;
+  background: var(--c-navy-2, #162F56);
 }
 
 .settings-restore-btn:disabled {

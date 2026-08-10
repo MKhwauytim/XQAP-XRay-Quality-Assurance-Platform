@@ -158,3 +158,48 @@ export async function requestStoragePersistence(): Promise<PersistenceState> {
   }
   return persistenceState;
 }
+
+/**
+ * Side-effect-free read of whether this origin currently holds persistent
+ * storage, via `navigator.storage.persisted()`. Unlike
+ * `requestStoragePersistence()`, this never calls `.persist()`, so it cannot
+ * itself grant persistence for a genuine first-time visitor.
+ *
+ * Returns `null` when the probe itself is unavailable (no `navigator.storage`,
+ * or no `.persisted` method, or the call throws) so callers can distinguish
+ * "we don't know" from "we asked and it said no" and fall back to
+ * `getPersistenceState()` accordingly.
+ */
+export async function probeStoragePersisted(): Promise<boolean | null> {
+  const storage = typeof navigator === "undefined" ? undefined : navigator.storage;
+  if (!storage || typeof storage.persisted !== "function") return null;
+  try {
+    return await storage.persisted();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Best-effort signal that this browser origin has held persistent storage
+ * before — the only thing `requestStoragePersistence()` (called after every
+ * successful workspace save, see `workspacePersistence.ts`) leaves behind
+ * that outlives a full page reload. `getPersistenceState()` alone only
+ * reflects *this* tab's session (it resets to "unknown" on reload), so it is
+ * combined with `probeStoragePersisted()`.
+ *
+ * This is a heuristic, not a certainty: a full "clear site data" wipes the
+ * persisted flag along with everything else, so that specific loss path
+ * still looks like a first run. It is the best signal available without
+ * introducing new storage of our own.
+ *
+ * Only meaningful on a served (http/https) origin. On `file://` —
+ * this app's primary deployment mode, see `isFileOrigin` — the underlying
+ * API is typically unsupported (and `navigator.storage` may be absent
+ * entirely), so this always resolves false there. Callers on that origin
+ * should branch on `isFileOrigin()` rather than rely on this function.
+ */
+export async function wasStoragePreviouslyPersisted(): Promise<boolean> {
+  if (persistenceState === "granted") return true;
+  return (await probeStoragePersisted()) === true;
+}

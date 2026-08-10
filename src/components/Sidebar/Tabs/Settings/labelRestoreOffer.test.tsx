@@ -132,6 +132,32 @@ describe("SettingsPage — label-override restore offer effect", () => {
     });
   });
 
+  it("finding 4: keeps the offer and surfaces a failure message when importLabelsSnapshot restores nothing", async () => {
+    // importLabelsSnapshot never throws -- it catches internally and resolves
+    // 0 on a missing/unreadable snapshot file. A naive `await; setRestoreOffer(false)`
+    // would make this look identical to success (offer just vanishes). Assert
+    // the offer survives and a failure message appears instead.
+    vi.spyOn(labelsSnapshot, "readLabelsSnapshotOverrideCount").mockResolvedValue(2);
+    const importSpy = vi.spyOn(labelsSnapshot, "importLabelsSnapshot").mockResolvedValue(0);
+
+    renderSettings();
+
+    await waitFor(() => {
+      expect(screen.getByText(RESTORE_TITLE)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: RESTORE_BUTTON }));
+
+    await waitFor(() => {
+      expect(importSpy).toHaveBeenCalledTimes(1);
+    });
+    // The offer must still be visible -- nothing was actually restored.
+    expect(screen.getByText(RESTORE_TITLE)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("تعذرت استعادة التسميات — لم يتم العثور على نسخة صالحة في مجلد العمل، أو تعذرت قراءتها. راجع سجل الأخطاء الأخيرة لمزيد من التفاصيل.")).toBeInTheDocument();
+    });
+  });
+
   it("does not offer a restore without a workspace directory handle", async () => {
     const readSpy = vi.spyOn(labelsSnapshot, "readLabelsSnapshotOverrideCount").mockResolvedValue(5);
 

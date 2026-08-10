@@ -1,7 +1,7 @@
 export const DEFAULT_LABELS = {
   // App identity
   app_display_name:                    "نظام متابعة أعمال فحص صور الأشعة",
-  app_description:                     "تطبيق محلي لمعالجة بيانات جودة الأشعة وتجهيز مجتمع العينة من ملفات Excel — الهيئة العامة للزكاة والضريبة والجمارك.",
+  app_description:                     "تطبيق محلي لمعالجة بيانات جودة الأشعة وتجهيز مجتمع العينة من ملفات Excel — هيئة الزكاة والضريبة والجمارك.",
 
   // Sidebar
   sidebar_title:   "لوحة الإدارة",
@@ -684,6 +684,7 @@ export const DEFAULT_LABELS = {
   storage_labels_lost_title:           "تم فقد التسميات المخصصة",
   storage_labels_lost_body:            "لم تعد التسميات المخصصة موجودة في هذا المتصفح، لكن توجد نسخة محفوظة في مجلد العمل.",
   storage_labels_restore_button:       "استعادة التسميات من مجلد العمل",
+  storage_labels_restore_failed:       "تعذرت استعادة التسميات — لم يتم العثور على نسخة صالحة في مجلد العمل، أو تعذرت قراءتها. راجع سجل الأخطاء الأخيرة لمزيد من التفاصيل.",
   storage_section_title:               "حالة التخزين في المتصفح",
   storage_quota_label:                 "المساحة المستخدمة",
   storage_persistence_granted:         "التخزين دائم — لن يحذفه المتصفح تلقائياً.",
@@ -696,6 +697,11 @@ export const DEFAULT_LABELS = {
   storage_reset_button:                "مسح إعدادات التطبيق",
   storage_reset_confirm:               "سيتم مسح الجلسة والتسميات المخصصة وارتباط مجلد العمل. لن يتم حذف أي ملف من مجلد العمل على القرص. هل تريد المتابعة؟",
   storage_reset_partial_failure:       "تم مسح بعض إعدادات التطبيق، لكن تعذر مسح ارتباط مجلد العمل بالكامل. راجع سجل الأخطاء الأخيرة لمزيد من التفاصيل.",
+  storage_reset_denied_title:          "لا تملك صلاحية مسح إعدادات التطبيق",
+
+  // ── About section — author attribution (design spec §5.2) ──
+  about_author_label:                  "المطوّر",
+  about_author_name:                   "محمد الخويتم — Mkhuwaytim",
 } as const;
 
 export type LabelKey = keyof typeof DEFAULT_LABELS;
