@@ -45,8 +45,9 @@ function composeIconUri(rawSvg: string, paddingRatio: number, size = 512): strin
  * and zatca-shield-compact.svg (SVG source, ?raw-imported — see
  * organization.ts for the same pattern).
  *
- * These are declared as `sizes: "any"` / `type: "image/svg+xml"` in
- * appManifest.ts rather than rasterized to PNG at fixed pixel sizes:
+ * These are declared with concrete square `sizes` (`"192x192"` / `"512x512"`)
+ * and `type: "image/svg+xml"` in appManifest.ts rather than rasterized to PNG
+ * at fixed pixel sizes:
  *   - No rasterizer dependency: package.json stays untouched and `npm ci`
  *     keeps working offline (see vendor/README.md for why that matters here).
  *   - Bundle budget: the build has ~243 kB of raw headroom against a 3.6 MB
@@ -65,6 +66,15 @@ export const APP_ICONS = {
   icon512: composeIconUri(shieldRaw, 0.12),
   /** 20% padding keeps all shield content inside the ~80% "safe zone" circle that OS icon masks crop to. */
   icon512Maskable: composeIconUri(shieldRaw, 0.2),
-  /** Compact (fewer, thicker stripes) variant, tight padding, for the browser-tab favicon where the full-detail mark would smudge. */
+  /**
+   * Compact (fewer, thicker stripes) variant, tight padding, for the
+   * browser-tab favicon where the full-detail mark would smudge.
+   *
+   * Has one manual downstream consumer: the `<link rel="icon">` literal in
+   * index.html, which cannot import this TS module and hand-mirrors this
+   * exact output instead. If this composition ever changes (artwork,
+   * padding, or size), regenerate that literal too — see the sync comment
+   * above the `<link>` tag in index.html for the other half of this note.
+   */
   faviconSvg: composeIconUri(shieldCompactRaw, 0.08, 96),
 } as const;

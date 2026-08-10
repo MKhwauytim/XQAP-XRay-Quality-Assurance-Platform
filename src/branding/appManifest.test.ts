@@ -69,4 +69,24 @@ describe("buildAppManifest", () => {
       expect(w).toBe(h);
     }
   });
+
+  it("gives each composed icon's outer <svg> explicit width/height matching its declared sizes, so it never falls back to the 150x150 CSS default for a viewBox-only SVG", () => {
+    for (const icon of manifest.icons) {
+      const [, expectedSide] = /^(\d+)x\d+$/.exec(icon.sizes) ?? [];
+      expect(expectedSide, `icon with sizes "${icon.sizes}" should be a concrete WxH`).toBeDefined();
+
+      const encodedSvg = icon.src.slice("data:image/svg+xml;charset=utf-8,".length);
+      const svgMarkup = decodeURIComponent(encodedSvg);
+      const rootTagMatch = /^<svg\b[^>]*>/.exec(svgMarkup);
+      expect(rootTagMatch, "outer <svg> tag not found in decoded icon markup").not.toBeNull();
+      const rootTag = rootTagMatch![0];
+
+      const widthMatch = /\bwidth="(\d+)"/.exec(rootTag);
+      const heightMatch = /\bheight="(\d+)"/.exec(rootTag);
+      expect(widthMatch, `no explicit width attribute on outer <svg> for sizes "${icon.sizes}"`).not.toBeNull();
+      expect(heightMatch, `no explicit height attribute on outer <svg> for sizes "${icon.sizes}"`).not.toBeNull();
+      expect(widthMatch![1]).toBe(expectedSide);
+      expect(heightMatch![1]).toBe(expectedSide);
+    }
+  });
 });
