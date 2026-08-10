@@ -43,6 +43,7 @@ import type { SidebarTabModule } from "../tabTypes";
 import "./Settings.css";
 import { PageHeader } from "../../../../components/PageHeader/PageHeader";
 import { ErrorLogSection } from "./ErrorLogSection";
+import { StorageSection } from "./StorageSection";
 import { AboutSection } from "./AboutSection";
 import { usePermissions } from "../../../../auth/usePermissions";
 
@@ -547,6 +548,7 @@ function SettingsPage() {
       )}
 
       <ErrorLogSection />
+      <StorageSection />
       <AboutSection />
     </div>
   );

@@ -680,6 +680,17 @@ export const DEFAULT_LABELS = {
   storage_labels_lost_title:           "تم فقد التسميات المخصصة",
   storage_labels_lost_body:            "لم تعد التسميات المخصصة موجودة في هذا المتصفح، لكن توجد نسخة محفوظة في مجلد العمل.",
   storage_labels_restore_button:       "استعادة التسميات من مجلد العمل",
+  storage_section_title:               "حالة التخزين في المتصفح",
+  storage_quota_label:                 "المساحة المستخدمة",
+  storage_persistence_granted:         "التخزين دائم — لن يحذفه المتصفح تلقائياً.",
+  storage_persistence_denied:          "التخزين مؤقت — قد يحذفه المتصفح عند امتلاء القرص.",
+  storage_persistence_unsupported:     "المتصفح لا يدعم التخزين الدائم.",
+  storage_shared_origin_warning:       "التطبيق يعمل من ملف محلي، ويشارك مساحة التخزين مع أي صفحة محلية أخرى على هذا الجهاز. مسح بيانات المتصفح من أي تطبيق آخر سيمسح إعدادات هذا التطبيق أيضاً. بيانات العمل في مجلد العمل على القرص غير متأثرة.",
+  storage_owned_keys_title:            "ما يحفظه هذا التطبيق",
+  storage_foreign_dbs_title:           "قواعد بيانات تخص تطبيقات أخرى",
+  storage_foreign_dbs_note:            "هذه لا تخص هذا التطبيق ولن يتم المساس بها.",
+  storage_reset_button:                "مسح إعدادات التطبيق",
+  storage_reset_confirm:               "سيتم مسح الجلسة والتسميات المخصصة وارتباط مجلد العمل. لن يتم حذف أي ملف من مجلد العمل على القرص. هل تريد المتابعة؟",
 } as const;
 
 export type LabelKey = keyof typeof DEFAULT_LABELS;

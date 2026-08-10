@@ -1,0 +1,97 @@
+/* ── StorageSection — browser storage health panel ─────────────────────────── */
+
+.storage-section {
+  margin-top: 24px;
+  padding: 16px;
+  border: 1px solid var(--app-border, #e5e7eb);
+  border-radius: 8px;
+  background: var(--app-surface, #fff);
+  direction: rtl;
+}
+
+.storage-section h2 {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--app-text, #111827);
+}
+
+.storage-section h3 {
+  margin: 16px 0 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--app-text, #111827);
+}
+
+.storage-quota,
+.storage-persistence {
+  margin: 4px 0;
+  font-size: 0.85rem;
+  color: var(--app-muted, #6b7280);
+}
+
+.storage-warning {
+  margin: 10px 0;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--c-warning-soft, #fffbeb);
+  color: var(--c-warning-text, #92400e);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.storage-note {
+  margin: 2px 0 8px;
+  font-size: 0.8rem;
+  color: var(--app-muted, #6b7280);
+}
+
+.storage-owned,
+.storage-foreign {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.storage-owned li,
+.storage-foreign li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--app-surface-soft, #f9fafb);
+  border: 1px solid var(--app-border, #e5e7eb);
+  font-size: 0.82rem;
+}
+
+.storage-owned code,
+.storage-foreign code {
+  font-family: monospace;
+  color: var(--app-primary, #2563eb);
+  word-break: break-all;
+}
+
+.storage-owned span {
+  color: var(--app-muted, #6b7280);
+}
+
+.storage-section > button {
+  margin-top: 16px;
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-size: 0.85rem;
+  background: var(--c-danger, #ef4444);
+  color: #fff;
+  transition: background 0.15s;
+}
+
+.storage-section > button:hover {
+  background: #dc2626;
+}
