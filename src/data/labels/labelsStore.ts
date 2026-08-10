@@ -1,4 +1,7 @@
 export const DEFAULT_LABELS = {
+  // App identity
+  app_display_name:                    "نظام متابعة أعمال فحص صور الأشعة",
+
   // Sidebar
   sidebar_title:   "لوحة الإدارة",
   sidebar_subtitle: "مسارات العمل الرئيسية",

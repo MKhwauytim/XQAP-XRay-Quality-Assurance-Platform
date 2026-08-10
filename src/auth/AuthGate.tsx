@@ -59,6 +59,7 @@ import { syncUserManagementToDisk } from "../data/workspace/userSync";
 import { logRejection } from "../data/storage/errorLogger";
 import { LoadingState } from "../components/StateViews/StateViews";
 import { GlobalMonthProvider } from "../data/month/GlobalMonthProvider";
+import { useLabels } from "../data/labels/useLabels";
 
 type AuthGateProps = {
   children: ReactNode | ((session: AuthSession) => ReactNode);
@@ -137,6 +138,7 @@ export default function AuthGate({ children }: AuthGateProps) {
     clearWorkspace,
     refreshPermissions
   } = useWorkspace();
+  const labels = useLabels();
   const [session, setSession] = useState<AuthSession | null>(getInitialSession);
   const [managedUsers, setManagedUsers] = useState<ManagedLoginUser[]>(() =>
     getManagedLoginUsers()
@@ -633,7 +635,7 @@ export default function AuthGate({ children }: AuthGateProps) {
                 onError={handleLogoError}
               />
             </div>
-            <h1>نظام معالجة بيانات الأشعة</h1>
+            <h1>{labels.app_display_name}</h1>
             <p>منصة فحص صور الأشعة</p>
           </div>
           <div className="auth-brand-footer">
