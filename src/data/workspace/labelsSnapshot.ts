@@ -64,3 +64,36 @@ export async function importLabelsSnapshot(directoryHandle: DirectoryHandleLike)
     return 0;
   }
 }
+
+/**
+ * Read-only peek at the workspace snapshot's override count — used to decide
+ * whether to *offer* a restore, without applying anything. Never throws.
+ */
+export async function readLabelsSnapshotOverrideCount(
+  directoryHandle: DirectoryHandleLike
+): Promise<number> {
+  try {
+    const userDataDir = await getUserDataRoot(directoryHandle, false);
+    const result = await safeReadJson<LabelsSnapshotData>(userDataDir, LABELS_SNAPSHOT_FILE);
+    if (!result.ok) return 0;
+    return Object.keys(result.value.overrides).length;
+  } catch (error) {
+    logError("labels:read-snapshot-count", error);
+    return 0;
+  }
+}
+
+export type LabelRestoreCheck = {
+  localOverrideCount: number;
+  snapshotOverrideCount: number;
+};
+
+/**
+ * Label overrides live only in localStorage, which a neighbouring app on the
+ * shared file:// origin can wipe. When they vanish but the workspace snapshot
+ * still holds some, that is a loss worth offering to undo — as opposed to a
+ * first run or a deliberate reset, where the snapshot is empty too.
+ */
+export function shouldOfferLabelRestore(check: LabelRestoreCheck): boolean {
+  return check.localOverrideCount === 0 && check.snapshotOverrideCount > 0;
+}

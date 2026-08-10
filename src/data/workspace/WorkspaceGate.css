@@ -33,6 +33,17 @@
   background: linear-gradient(90deg, var(--c-navy, #0F2744) 0%, var(--c-sky, #1E6FBA) 60%, #5EB8FF 100%);
 }
 
+.workspace-gate-notice {
+  margin-bottom: 16px;
+  padding: 28px 32px;
+  border-color: var(--c-warning-border, #FDE68A);
+  background: var(--c-warning-bg, #FFFBEB);
+}
+
+.workspace-gate-notice .workspace-gate-icon {
+  color: var(--c-warning, #92400E);
+}
+
 .workspace-gate-icon {
   width: 68px;
   height: 68px;

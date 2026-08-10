@@ -13,6 +13,7 @@ import { listMonthFolders } from "../population/populationStorage";
 import { getLabels } from "../labels/labelsStore";
 import { useLabels } from "../labels/useLabels";
 import { useFocusTrap } from "../../hooks/useFocusTrap";
+import { getPersistenceState } from "../storage/storageRegistry";
 import { useWorkspace } from "./useWorkspace";
 
 import "./WorkspaceGate.css";
@@ -25,6 +26,32 @@ import "./WorkspaceGate.css";
 type WorkspacePickerProps = {
   children: ReactNode;
 };
+
+/**
+ * Best-effort signal that this browser origin has held persistent storage
+ * before — the only thing `requestStoragePersistence` (called after every
+ * successful workspace save, see workspacePersistence.ts) leaves behind that
+ * outlives a full page reload. `getPersistenceState()` alone only reflects
+ * *this* tab's session (it resets to "unknown" on reload), so it is combined
+ * with a direct, side-effect-free `navigator.storage.persisted()` read —
+ * unlike `requestStoragePersistence()`, this never calls `.persist()`, so it
+ * cannot itself grant persistence for a genuine first-time visitor.
+ *
+ * This is a heuristic, not a certainty: a full "clear site data" wipes the
+ * persisted flag along with everything else, so that specific loss path
+ * still looks like a first run. It is the best signal available without
+ * introducing new storage of our own.
+ */
+async function wasStoragePreviouslyPersisted(): Promise<boolean> {
+  if (getPersistenceState() === "granted") return true;
+  const storage = typeof navigator === "undefined" ? undefined : navigator.storage;
+  if (!storage || typeof storage.persisted !== "function") return false;
+  try {
+    return await storage.persisted();
+  } catch {
+    return false;
+  }
+}
 
 export function WorkspacePicker({ children }: WorkspacePickerProps) {
   const {
@@ -53,6 +80,41 @@ export function WorkspacePicker({ children }: WorkspacePickerProps) {
     onEscape: closeViewModal,
     enabled: isViewModalOpen,
   });
+
+  // Detects a lost workspace handle (evicted/cleared storage) as distinct
+  // from a genuine first run, so the notice below never shows to someone who
+  // has simply never picked a folder. See `wasStoragePreviouslyPersisted`.
+  //
+  // `sawCheckingRef` filters out the transient pre-effect "not_selected"
+  // value useState starts with (before WorkspaceProvider's own restore effect
+  // has even run) — only a "checking" -> "not_selected" transition is a real
+  // resolution. `resolvedOnceRef` makes the probe fire only for that FIRST
+  // automatic resolution: any later "not_selected" (e.g. the user cancelling
+  // the folder dialog, or explicitly picking a different workspace via
+  // WorkspaceGate's "pick another" button) is a deliberate action, not a loss,
+  // and must never re-trigger the notice.
+  const [suspectHandleLoss, setSuspectHandleLoss] = useState(false);
+  const sawCheckingRef = useRef(false);
+  const resolvedOnceRef = useRef(false);
+
+  useEffect(() => {
+    if (status === "checking") sawCheckingRef.current = true;
+  }, [status]);
+
+  useEffect(() => {
+    if (status !== "not_selected" || pendingReconnect) return;
+    if (!sawCheckingRef.current) return;
+    if (resolvedOnceRef.current) return;
+    resolvedOnceRef.current = true;
+
+    let cancelled = false;
+    void wasStoragePreviouslyPersisted().then((persisted) => {
+      if (!cancelled && persisted) setSuspectHandleLoss(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [status, pendingReconnect]);
 
   useEffect(() => {
     if (status !== "not_selected") return;
@@ -136,6 +198,13 @@ export function WorkspacePicker({ children }: WorkspacePickerProps) {
   if (status === "not_selected") {
     return (
       <div className="workspace-gate" dir="rtl">
+        {!pendingReconnect && suspectHandleLoss && (
+          <div className="workspace-gate-card workspace-gate-notice">
+            <div className="workspace-gate-icon"><AlertTriangle size={40} /></div>
+            <h2>{labels.storage_handle_lost_title}</h2>
+            <p>{labels.storage_handle_lost_body}</p>
+          </div>
+        )}
         <div className="workspace-gate-card">
           <div className="workspace-gate-icon"><Folder size={40} /></div>
           <h2>{labels.wsgate_picker_title}</h2>

@@ -673,6 +673,11 @@ export const DEFAULT_LABELS = {
   adhoc_import_assign_success:         "تم تعيين {count} صف بنجاح.",
   adhoc_import_assign_skipped:         "({count} صف كان مُعيَّناً بالفعل وتم تجاوزه.)",
   adhoc_import_scope_note:             "لا يُكتب أي شيء داخل مجلد الشهر المعالج الحقيقي (1-population) — بيانات هذا الاستيراد معزولة تماماً عن مجتمع الأشهر الرسمية.",
+  storage_handle_lost_title:           "تم فقد الارتباط بمجلد العمل",
+  storage_handle_lost_body:            "لم يعد المتصفح يحتفظ بالإذن للوصول إلى مجلد العمل المحفوظ. لم يتم حذف أي بيانات — الملفات على القرص كما هي. اختر المجلد مرة أخرى للمتابعة.",
+  storage_labels_lost_title:           "تم فقد التسميات المخصصة",
+  storage_labels_lost_body:            "لم تعد التسميات المخصصة موجودة في هذا المتصفح، لكن توجد نسخة محفوظة في مجلد العمل.",
+  storage_labels_restore_button:       "استعادة التسميات من مجلد العمل",
 } as const;
 
 export type LabelKey = keyof typeof DEFAULT_LABELS;

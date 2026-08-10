@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { useState, useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { tabAllowedRoles } from "../../../../auth/tabCatalog";
 import type { ReactNode } from "react";
 import {
@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import {
   DEFAULT_LABELS,
+  getCustomLabelOverrides,
   getLabels,
   isCustomized,
   resetAllLabels,
@@ -32,7 +33,12 @@ import {
 } from "../../../../data/labels/labelsStore";
 import { useLabels } from "../../../../data/labels/useLabels";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
-import { exportLabelsSnapshot } from "../../../../data/workspace/labelsSnapshot";
+import {
+  exportLabelsSnapshot,
+  importLabelsSnapshot,
+  readLabelsSnapshotOverrideCount,
+  shouldOfferLabelRestore,
+} from "../../../../data/workspace/labelsSnapshot";
 import type { SidebarTabModule } from "../tabTypes";
 import "./Settings.css";
 import { PageHeader } from "../../../../components/PageHeader/PageHeader";
@@ -388,12 +394,48 @@ function LabelRow({
 // ── settings page ─────────────────────────────────────────────────────────────
 
 function SettingsPage() {
-  useLabels(); // re-render when any label changes
+  const labels = useLabels(); // re-render when any label changes
   const [confirmReset, setConfirmReset] = useState(false);
   const [openSections, setOpenSections] = useState<Set<string>>(() => new Set());
   const { directoryHandle } = useWorkspace();
   const { canMutate } = usePermissions();
   const canEditLabels = canMutate("edit-interface-labels");
+
+  // Label overrides live only in localStorage, which a neighbouring app on
+  // the shared file:// origin can wipe. Detect that loss (as opposed to a
+  // first run, or a deliberate reset) by comparing what is left locally
+  // against the workspace's own snapshot, and — only on an explicit click,
+  // never automatically — offer to restore from it.
+  const [restoreOffer, setRestoreOffer] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+
+  useEffect(() => {
+    if (!directoryHandle || !canEditLabels) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setRestoreOffer(false);
+      return;
+    }
+    let cancelled = false;
+    void readLabelsSnapshotOverrideCount(directoryHandle).then((snapshotOverrideCount) => {
+      if (cancelled) return;
+      const localOverrideCount = Object.keys(getCustomLabelOverrides()).length;
+      setRestoreOffer(shouldOfferLabelRestore({ localOverrideCount, snapshotOverrideCount }));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [directoryHandle, canEditLabels]);
+
+  async function handleRestoreLabels() {
+    if (!directoryHandle || restoring) return;
+    setRestoring(true);
+    try {
+      await importLabelsSnapshot(directoryHandle);
+      setRestoreOffer(false);
+    } finally {
+      setRestoring(false);
+    }
+  }
 
   function handleResetAll() {
     if (!canEditLabels) return;
@@ -481,6 +523,28 @@ function SettingsPage() {
           })}
         </div>
       </div>
+
+      {restoreOffer && (
+        <div className="settings-restore-section">
+          <div className="settings-restore-notice">
+            <div className="settings-restore-notice-header">
+              <AlertTriangle size={20} />
+              <h2>{labels.storage_labels_lost_title}</h2>
+            </div>
+            <p className="settings-restore-notice-body" dir="rtl">
+              {labels.storage_labels_lost_body}
+            </p>
+            <button
+              type="button"
+              className="settings-restore-btn"
+              onClick={handleRestoreLabels}
+              disabled={restoring}
+            >
+              {labels.storage_labels_restore_button}
+            </button>
+          </div>
+        </div>
+      )}
 
       <ErrorLogSection />
       <AboutSection />
