@@ -25,16 +25,28 @@ export type AppManifest = {
 
 const BRAND_NAVY = "#17365d";
 
-const DESCRIPTION =
-  "تطبيق محلي لمعالجة بيانات جودة الأشعة وتجهيز مجتمع العينة من ملفات Excel — الهيئة العامة للزكاة والضريبة والجمارك.";
-
 /**
- * `scope` is the directory containing the document. A trailing-file scope would
- * exclude the app from its own navigations.
+ * `scope` is the directory containing the document (origin + pathname,
+ * truncated at the last `/`), never the document itself and never the
+ * query/fragment. A trailing-file scope would exclude the app from its own
+ * navigations; leaking `search`/`hash` into scope would produce a bogus,
+ * non-directory value. Parsed via `URL` rather than string-slicing the raw
+ * href, since a naive `lastIndexOf("/")` over the whole href can land inside
+ * a query string (`?next=/dashboard`) or drop the host entirely for a bare
+ * origin with no path. Falls back to the raw href if it isn't a parseable
+ * URL — `registerAppManifest` must never throw into app start.
  */
 function scopeFrom(href: string): string {
-  const lastSlash = href.lastIndexOf("/");
-  return lastSlash === -1 ? href : href.slice(0, lastSlash + 1);
+  let url: URL;
+  try {
+    url = new URL(href);
+  } catch {
+    return href;
+  }
+  const path = url.pathname;
+  const lastSlash = path.lastIndexOf("/");
+  const directory = lastSlash === -1 ? "/" : path.slice(0, lastSlash + 1);
+  return url.origin + directory;
 }
 
 export function buildAppManifest(location: { href: string }): AppManifest {
@@ -42,7 +54,7 @@ export function buildAppManifest(location: { href: string }): AppManifest {
     id: "xqap",
     name: getLabels().app_display_name,
     short_name: "XQAP",
-    description: DESCRIPTION,
+    description: getLabels().app_description,
     start_url: location.href,
     scope: scopeFrom(location.href),
     display: "standalone",
