@@ -49,14 +49,24 @@ describe("buildAppManifest", () => {
     expect(manifest.id).toBe("xqap");
   });
 
-  it("declares any-size and maskable icons as inline SVG data URIs", () => {
+  it("declares concrete square sizes and maskable icons as inline SVG data URIs", () => {
     const purposes = manifest.icons.map((icon) => icon.purpose);
     expect(purposes.filter((purpose) => purpose === "any")).toHaveLength(2);
     expect(purposes.filter((purpose) => purpose === "maskable")).toHaveLength(1);
+    expect(manifest.icons.map((icon) => icon.sizes)).toEqual(["192x192", "512x512", "512x512"]);
     for (const icon of manifest.icons) {
-      expect(icon.sizes).toBe("any");
       expect(icon.type).toBe("image/svg+xml");
       expect(icon.src.startsWith("data:image/svg+xml;charset=utf-8,")).toBe(true);
+    }
+  });
+
+  it("declares every icon size as square (or 'any')", () => {
+    for (const icon of manifest.icons) {
+      if (icon.sizes === "any") continue;
+      const match = /^(\d+)x(\d+)$/.exec(icon.sizes);
+      expect(match).not.toBeNull();
+      const [, w, h] = match!;
+      expect(w).toBe(h);
     }
   });
 });

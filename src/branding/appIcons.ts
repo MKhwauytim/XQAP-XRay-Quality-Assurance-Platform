@@ -31,7 +31,7 @@ function composeIconUri(rawSvg: string, paddingRatio: number, size = 512): strin
   const pad = size * paddingRatio;
   const contentSize = size - pad * 2;
   const { x, y, width, height } = SHIELD_BOUNDS;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}">
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
   <rect width="${size}" height="${size}" fill="${BRAND_NAVY}" />
   <svg x="${pad}" y="${pad}" width="${contentSize}" height="${contentSize}" viewBox="${x} ${y} ${width} ${height}" preserveAspectRatio="xMidYMid meet">
     ${innerMarkup(rawSvg)}
@@ -60,8 +60,8 @@ function composeIconUri(rawSvg: string, paddingRatio: number, size = 512): strin
  * back to an untested format here.
  */
 export const APP_ICONS = {
-  /** Full shield on navy, 12% padding. Also used for the 192px slot — the source is vector, so one asset covers both raster-era sizes. */
-  icon192: composeIconUri(shieldRaw, 0.12),
+  /** Full shield on navy, 12% padding, composed at its own 192x192 intrinsic size so the declared and decoded sizes agree. */
+  icon192: composeIconUri(shieldRaw, 0.12, 192),
   icon512: composeIconUri(shieldRaw, 0.12),
   /** 20% padding keeps all shield content inside the ~80% "safe zone" circle that OS icon masks crop to. */
   icon512Maskable: composeIconUri(shieldRaw, 0.2),
