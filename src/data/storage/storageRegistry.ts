@@ -123,3 +123,38 @@ export async function clearOwnedStorage(): Promise<void> {
     )
   );
 }
+
+export type PersistenceState = "granted" | "denied" | "unsupported" | "unknown";
+
+let persistenceState: PersistenceState = "unknown";
+
+export function getPersistenceState(): PersistenceState {
+  return persistenceState;
+}
+
+/**
+ * Asks the browser to make this origin's storage persistent, so the saved
+ * workspace handle survives disk pressure. Called only after a workspace has
+ * been saved: asking before the user has committed to anything makes denial
+ * more likely, and denial is sticky.
+ *
+ * A denial is not an error. Storage simply stays best-effort.
+ */
+export async function requestStoragePersistence(): Promise<PersistenceState> {
+  const storage = typeof navigator === "undefined" ? undefined : navigator.storage;
+  if (!storage || typeof storage.persist !== "function") {
+    persistenceState = "unsupported";
+    return persistenceState;
+  }
+
+  try {
+    if (typeof storage.persisted === "function" && (await storage.persisted())) {
+      persistenceState = "granted";
+      return persistenceState;
+    }
+    persistenceState = (await storage.persist()) ? "granted" : "denied";
+  } catch {
+    persistenceState = "denied";
+  }
+  return persistenceState;
+}

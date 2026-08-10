@@ -1,4 +1,5 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import { requestStoragePersistence } from "../storage/storageRegistry";
 
 const DB_NAME = "xray-quality-app-persistence";
 const DB_VERSION = 1;
@@ -56,6 +57,11 @@ export async function saveLastWorkspace(directoryHandle: DirectoryHandleLike): P
   } finally {
     db.close();
   }
+
+  // The handle is now the only link back to the user's folder. Ask the browser
+  // to stop treating this origin's storage as evictable, now that the user has
+  // committed to a workspace. A refusal changes nothing.
+  void requestStoragePersistence();
 }
 
 export async function loadLastWorkspace(): Promise<PersistedWorkspace | null> {

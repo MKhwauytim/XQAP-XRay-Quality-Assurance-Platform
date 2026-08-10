@@ -56,3 +56,61 @@ describe("storageRegistry", () => {
     expect(sessionStorage.getItem("other_app_state")).toBe("keep me too");
   });
 });
+
+import { requestStoragePersistence, getPersistenceState } from "./storageRegistry";
+
+describe("storage persistence", () => {
+  it("reports unsupported when the API is absent", async () => {
+    const original = navigator.storage;
+    Object.defineProperty(navigator, "storage", { value: undefined, configurable: true });
+
+    await expect(requestStoragePersistence()).resolves.toBe("unsupported");
+    expect(getPersistenceState()).toBe("unsupported");
+
+    Object.defineProperty(navigator, "storage", { value: original, configurable: true });
+  });
+
+  it("reports granted when the browser grants persistence", async () => {
+    const original = navigator.storage;
+    Object.defineProperty(navigator, "storage", {
+      value: { persisted: async () => false, persist: async () => true },
+      configurable: true,
+    });
+
+    await expect(requestStoragePersistence()).resolves.toBe("granted");
+
+    Object.defineProperty(navigator, "storage", { value: original, configurable: true });
+  });
+
+  it("reports denied without throwing when the browser refuses", async () => {
+    const original = navigator.storage;
+    Object.defineProperty(navigator, "storage", {
+      value: { persisted: async () => false, persist: async () => false },
+      configurable: true,
+    });
+
+    await expect(requestStoragePersistence()).resolves.toBe("denied");
+
+    Object.defineProperty(navigator, "storage", { value: original, configurable: true });
+  });
+
+  it("does not re-request once already persisted", async () => {
+    let persistCalls = 0;
+    const original = navigator.storage;
+    Object.defineProperty(navigator, "storage", {
+      value: {
+        persisted: async () => true,
+        persist: async () => {
+          persistCalls += 1;
+          return true;
+        },
+      },
+      configurable: true,
+    });
+
+    await expect(requestStoragePersistence()).resolves.toBe("granted");
+    expect(persistCalls).toBe(0);
+
+    Object.defineProperty(navigator, "storage", { value: original, configurable: true });
+  });
+});
