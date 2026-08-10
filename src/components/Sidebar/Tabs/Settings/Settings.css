@@ -316,3 +316,66 @@
   from { opacity: 0; transform: translateY(-3px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+
+/* ── Label-override restore offer (loss recovery) ─────────────────────────── */
+
+.settings-restore-section {
+  margin-bottom: 24px;
+}
+
+.settings-restore-notice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 18px 22px;
+  background: var(--c-warning-bg, #FFFBEB);
+  border: 1px solid var(--c-warning-border, #FDE68A);
+  border-radius: var(--r-md, 12px);
+  box-shadow: var(--sh-xs, 0 1px 3px rgba(13, 31, 50, 0.06));
+}
+
+.settings-restore-notice-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--c-warning, #92400E);
+}
+
+.settings-restore-notice-header h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--c-navy, #0F2744);
+}
+
+.settings-restore-notice-body {
+  margin: 0;
+  font-size: 13px;
+  color: var(--c-ink-2, #33475B);
+  line-height: 1.65;
+}
+
+.settings-restore-btn {
+  align-self: flex-start;
+  padding: 8px 18px;
+  border: none;
+  border-radius: var(--r-sm, 8px);
+  background: var(--c-navy, #0F2744);
+  color: #FFFFFF;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background-color 180ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.settings-restore-btn:hover {
+  background: #162F56;
+}
+
+.settings-restore-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+  pointer-events: none;
+}

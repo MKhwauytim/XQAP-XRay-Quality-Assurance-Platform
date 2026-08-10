@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { AlertTriangle, Check, Folder, FolderArchive, Keyboard, Rocket, Wrench, X, XCircle } from "lucide-react";
+import { AlertTriangle, Check, Folder, FolderArchive, Info, Keyboard, Rocket, Wrench, X, XCircle } from "lucide-react";
 
 import type { AuthSession } from "../../auth/authTypes";
 import { ADMIN_SHORTCUT_KEYS, VIEWER_PASSWORD } from "../../auth/authConfig";
@@ -14,6 +14,7 @@ import { getLabels } from "../labels/labelsStore";
 import { useLabels } from "../labels/useLabels";
 import { useFocusTrap } from "../../hooks/useFocusTrap";
 import { getPersistenceState } from "../storage/storageRegistry";
+import { isFileOrigin } from "./originDetection";
 import { useWorkspace } from "./useWorkspace";
 
 import "./WorkspaceGate.css";
@@ -41,6 +42,12 @@ type WorkspacePickerProps = {
  * persisted flag along with everything else, so that specific loss path
  * still looks like a first run. It is the best signal available without
  * introducing new storage of our own.
+ *
+ * Only meaningful on a served (http/https) origin. On `file://` — this app's
+ * primary deployment mode, see `isFileOrigin` — `navigator.storage.persist`
+ * is unsupported (and `navigator.storage` may be absent entirely), so this
+ * always resolves false there. Callers must branch on `isFileOrigin()`
+ * *before* relying on this function; see the effect below.
  */
 async function wasStoragePreviouslyPersisted(): Promise<boolean> {
   if (getPersistenceState() === "granted") return true;
@@ -93,7 +100,23 @@ export function WorkspacePicker({ children }: WorkspacePickerProps) {
   // the folder dialog, or explicitly picking a different workspace via
   // WorkspaceGate's "pick another" button) is a deliberate action, not a loss,
   // and must never re-trigger the notice.
-  const [suspectHandleLoss, setSuspectHandleLoss] = useState(false);
+  //
+  // "handleNotice" carries which of two things to show, since the two
+  // origins this app runs from can support genuinely different confidence
+  // levels:
+  //   - "lost"    — a served origin where `wasStoragePreviouslyPersisted()`
+  //                 resolved true: persistence was granted before, so a
+  //                 "not_selected" resolution now really is a lost handle.
+  //   - "unknown" — a `file://` origin (this app's primary deployment mode).
+  //                 `navigator.storage.persist`/`.persisted()` is unsupported
+  //                 there, and any marker of our own that could distinguish
+  //                 "handle evicted" from "first run" would live in the same
+  //                 storage a wipe erases along with the handle — so the two
+  //                 cases are genuinely indistinguishable here. Rather than
+  //                 guessing (and risking a false "you lost your workspace"
+  //                 claim to a first-time user), this shows copy that is
+  //                 true either way. See `storage_handle_unknown_*` labels.
+  const [handleNotice, setHandleNotice] = useState<"none" | "lost" | "unknown">("none");
   const sawCheckingRef = useRef(false);
   const resolvedOnceRef = useRef(false);
 
@@ -107,9 +130,18 @@ export function WorkspacePicker({ children }: WorkspacePickerProps) {
     if (resolvedOnceRef.current) return;
     resolvedOnceRef.current = true;
 
+    if (isFileOrigin()) {
+      // Synchronous by necessity: unlike the served-origin branch below,
+      // there is no async persistence probe to await here — the origin
+      // itself is what decides the outcome, and it's already known.
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- resolves this single first checking -> not_selected transition, gated by resolvedOnceRef
+      setHandleNotice("unknown");
+      return;
+    }
+
     let cancelled = false;
     void wasStoragePreviouslyPersisted().then((persisted) => {
-      if (!cancelled && persisted) setSuspectHandleLoss(true);
+      if (!cancelled && persisted) setHandleNotice("lost");
     });
     return () => {
       cancelled = true;
@@ -198,11 +230,18 @@ export function WorkspacePicker({ children }: WorkspacePickerProps) {
   if (status === "not_selected") {
     return (
       <div className="workspace-gate" dir="rtl">
-        {!pendingReconnect && suspectHandleLoss && (
+        {!pendingReconnect && handleNotice === "lost" && (
           <div className="workspace-gate-card workspace-gate-notice">
             <div className="workspace-gate-icon"><AlertTriangle size={40} /></div>
             <h2>{labels.storage_handle_lost_title}</h2>
             <p>{labels.storage_handle_lost_body}</p>
+          </div>
+        )}
+        {!pendingReconnect && handleNotice === "unknown" && (
+          <div className="workspace-gate-card workspace-gate-notice workspace-gate-notice-info">
+            <div className="workspace-gate-icon"><Info size={40} /></div>
+            <h2>{labels.storage_handle_unknown_title}</h2>
+            <p>{labels.storage_handle_unknown_body}</p>
           </div>
         )}
         <div className="workspace-gate-card">

@@ -44,6 +44,17 @@
   color: var(--c-warning, #92400E);
 }
 
+/* Neutral variant: origins (file://) where a loss can't be distinguished
+   from a genuine first run — informational, not a warning. */
+.workspace-gate-notice-info {
+  border-color: var(--c-border, #D6E2EF);
+  background: var(--c-surface-2, #F4F7FB);
+}
+
+.workspace-gate-notice-info .workspace-gate-icon {
+  color: var(--c-sky, #1E6FBA);
+}
+
 .workspace-gate-icon {
   width: 68px;
   height: 68px;
