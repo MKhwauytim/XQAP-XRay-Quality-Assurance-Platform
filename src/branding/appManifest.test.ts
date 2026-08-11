@@ -49,14 +49,14 @@ describe("buildAppManifest", () => {
     expect(manifest.id).toBe("xqap");
   });
 
-  it("declares concrete square sizes and maskable icons as inline SVG data URIs", () => {
+  it("declares concrete square sizes and maskable icons as inline PNG data URIs", () => {
     const purposes = manifest.icons.map((icon) => icon.purpose);
     expect(purposes.filter((purpose) => purpose === "any")).toHaveLength(2);
     expect(purposes.filter((purpose) => purpose === "maskable")).toHaveLength(1);
     expect(manifest.icons.map((icon) => icon.sizes)).toEqual(["192x192", "512x512", "512x512"]);
     for (const icon of manifest.icons) {
-      expect(icon.type).toBe("image/svg+xml");
-      expect(icon.src.startsWith("data:image/svg+xml;charset=utf-8,")).toBe(true);
+      expect(icon.type).toBe("image/png");
+      expect(icon.src.startsWith("data:image/png;base64,")).toBe(true);
     }
   });
 
@@ -70,23 +70,29 @@ describe("buildAppManifest", () => {
     }
   });
 
-  it("gives each composed icon's outer <svg> explicit width/height matching its declared sizes, so it never falls back to the 150x150 CSS default for a viewBox-only SVG", () => {
+  /**
+   * Chrome's manifest icon pipeline does not accept SVG (verified via
+   * DevTools -> Application -> Manifest on a properly served origin: every
+   * SVG manifest icon was reported "failed to load"). The committed PNGs
+   * must actually decode to their declared pixel size — not merely start
+   * with the right MIME prefix, which is exactly the kind of check that let
+   * a 1x1 placeholder PNG slip through previously. Read the real width and
+   * height straight out of the PNG's IHDR chunk (bytes 16-19 = width,
+   * 20-23 = height, big-endian) after base64-decoding.
+   */
+  it("decodes each committed PNG icon's real pixel dimensions to match its declared sizes", () => {
     for (const icon of manifest.icons) {
       const [, expectedSide] = /^(\d+)x\d+$/.exec(icon.sizes) ?? [];
       expect(expectedSide, `icon with sizes "${icon.sizes}" should be a concrete WxH`).toBeDefined();
 
-      const encodedSvg = icon.src.slice("data:image/svg+xml;charset=utf-8,".length);
-      const svgMarkup = decodeURIComponent(encodedSvg);
-      const rootTagMatch = /^<svg\b[^>]*>/.exec(svgMarkup);
-      expect(rootTagMatch, "outer <svg> tag not found in decoded icon markup").not.toBeNull();
-      const rootTag = rootTagMatch![0];
+      const base64 = icon.src.slice("data:image/png;base64,".length);
+      const bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
+      const view = new DataView(bytes.buffer);
+      const width = view.getUint32(16, false);
+      const height = view.getUint32(20, false);
 
-      const widthMatch = /\bwidth="(\d+)"/.exec(rootTag);
-      const heightMatch = /\bheight="(\d+)"/.exec(rootTag);
-      expect(widthMatch, `no explicit width attribute on outer <svg> for sizes "${icon.sizes}"`).not.toBeNull();
-      expect(heightMatch, `no explicit height attribute on outer <svg> for sizes "${icon.sizes}"`).not.toBeNull();
-      expect(widthMatch![1]).toBe(expectedSide);
-      expect(heightMatch![1]).toBe(expectedSide);
+      expect(width).toBe(Number(expectedSide));
+      expect(height).toBe(Number(expectedSide));
     }
   });
 });

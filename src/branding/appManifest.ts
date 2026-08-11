@@ -5,7 +5,7 @@ import { APP_ICONS } from "./appIcons";
 export type AppManifestIcon = {
   src: string;
   sizes: string;
-  type: "image/svg+xml";
+  type: "image/png";
   purpose: "any" | "maskable";
 };
 
@@ -64,9 +64,9 @@ export function buildAppManifest(location: { href: string }): AppManifest {
     theme_color: BRAND_NAVY,
     background_color: BRAND_NAVY,
     icons: [
-      { src: APP_ICONS.icon192, sizes: "192x192", type: "image/svg+xml", purpose: "any" },
-      { src: APP_ICONS.icon512, sizes: "512x512", type: "image/svg+xml", purpose: "any" },
-      { src: APP_ICONS.icon512Maskable, sizes: "512x512", type: "image/svg+xml", purpose: "maskable" },
+      { src: APP_ICONS.icon192, sizes: "192x192", type: "image/png", purpose: "any" },
+      { src: APP_ICONS.icon512, sizes: "512x512", type: "image/png", purpose: "any" },
+      { src: APP_ICONS.icon512Maskable, sizes: "512x512", type: "image/png", purpose: "maskable" },
     ],
   };
 }
