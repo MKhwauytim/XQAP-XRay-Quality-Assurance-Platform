@@ -9,7 +9,7 @@ Opening the file by double-click (`file://` origin) works fully:
 - The workspace folder picker works.
 - The app cannot be installed to the home screen.
 
-Browsers ignore a web app manifest entirely on a `file://` origin, so even though the manifest is embedded, no install option or app-launcher entry is offered.
+Installation can never be offered on `file://`: Chrome requires a secure origin (HTTPS or `localhost`) to install a PWA, and `file://` is not one — each `file:` URL is its own unique opaque origin, so even the manifest's `data:` URI icons cannot load there. Because there is no possible benefit, the app deliberately skips injecting the `<link rel="manifest">` element at all on a `file://` origin (`registerAppManifest()` in `src/branding/appManifest.ts`), rather than injecting one the browser can never honor.
 
 ## Installable hosting (HTTPS or localhost)
 

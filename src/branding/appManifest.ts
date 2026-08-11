@@ -1,4 +1,5 @@
 import { getLabels } from "../data/labels/labelsStore";
+import { isFileOrigin } from "../data/workspace/originDetection";
 import { APP_ICONS } from "./appIcons";
 
 export type AppManifestIcon = {
@@ -78,14 +79,27 @@ export function buildAppManifest(location: { href: string }): AppManifest {
  * install. A blob: URL inherits the document origin, so start_url resolves
  * same-origin. This keeps dist/ a single index.html either way.
  *
- * On a file:// origin the browser ignores the manifest entirely — that is the
- * intended silent degradation, not an error.
+ * On a file:// origin this function skips injection entirely (see the guard
+ * below) rather than letting the browser discover the manifest is unusable
+ * on its own — that is the intended silent degradation, not an error.
  *
  * This is the ONLY function that knows how the manifest reaches the browser.
  * If blob: manifests prove unreliable, replace this body and nothing else.
  */
 export function registerAppManifest(): void {
   try {
+    // Installation requires a secure origin (HTTPS or localhost); `file://`
+    // is never one, so Chrome refuses to install regardless of what we
+    // inject. Worse, each `file:` URL is its own unique opaque origin, so
+    // the manifest's `data:` URI icons can never be fetched from it even for
+    // display purposes. Injecting the manifest here would produce nothing
+    // but console noise and misleading DevTools warnings ("Page is not
+    // served from a secure origin", icon load failures) with no possible
+    // benefit — so skip it outright rather than let the browser discover
+    // that on its own.
+    if (isFileOrigin()) {
+      return;
+    }
     const manifest = buildAppManifest(window.location);
     const blob = new Blob([JSON.stringify(manifest)], {
       type: "application/manifest+json",
