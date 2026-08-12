@@ -49,8 +49,10 @@
 }
 
 .ew-split--right .dt-table-wrap {
-  height: 100%;
-  min-height: 0;
+  /* `.ew-ref-queue` is a flex column now (see above); `.dt-table-wrap`'s own
+     `flex: 1 1 0` there already claims the remaining height within the fixed
+     `--ew-inspection-row-height` container, so this only needs to drop the
+     component-level default max-height cap, not re-assert a height. */
   max-height: none;
 }
 
@@ -904,11 +906,27 @@
   gap: var(--sp-2);
 }
 
+/* Flex column, not a 2-row CSS grid: `.ew-ref-queue` hosts either 2 children
+   (dt-toolbar + dt-table-wrap, DataTable renders a Fragment so both are direct
+   children here) or 3 (a selection/bulk-reassign bar prepended ahead of them,
+   see XrayReferrals.tsx's showSelectionBar/showBulkReassignBar). A fixed
+   `grid-template-rows: auto minmax(0, 1fr)` only had slots for 2 rows, so the
+   3rd child (the ACTUAL table toolbar, in the 3-child case) fell through into
+   an implicit auto row while the bar — now sized for the flexible 1fr track —
+   stretched to fill the container and rendered on top of it. A flex column
+   stacks any number of preceding bars in normal flow; only `.dt-table-wrap`
+   (the sole item that should consume the remaining space) opts into growing,
+   via `flex: 1 1 0` set alongside its `min-height: 0` below. */
 .ew-ref-queue {
   min-width: 0;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   gap: var(--sp-2);
+}
+
+.ew-ref-queue .dt-table-wrap {
+  flex: 1 1 0;
+  min-height: 0;
 }
 
 .ew-ref-queue .dt-toolbar {

@@ -71,14 +71,25 @@ export default function NotificationManager({ directoryHandle }: Props) {
   // renders (e.g. every keystroke in the post composer).
   const [audienceUsers, setAudienceUsers] = useState<AudienceUser[]>(computeAudienceUsers);
 
-  const reload = useCallback(async () => {
-    setLoadState("loading");
+  const reload = useCallback(async (opts?: { silent?: boolean }) => {
+    // `silent` is set only by the background/manual data-refresh signal below,
+    // never by a real mount/workspace change. Flipping loadState to "loading"
+    // unmounts the whole notification list (see the `loadState === "ready"`
+    // render gate further down) -- a silent refresh must re-fetch and swap
+    // the underlying rows in place instead. Mirrors XrayReferrals.tsx's
+    // silent-refresh pattern.
+    const silent = opts?.silent ?? false;
+    if (!silent) setLoadState("loading");
     try {
       const list = await loadNotifications(directoryHandle);
       setNotifications(sortNewestFirst(list));
       setLoadState("ready");
     } catch (error) {
       logError("notificationManager:loadNotifications", error);
+      // A silent background refresh must not blank a previously rendered
+      // notification list on a transient read hiccup -- it's already logged
+      // above for observability; leave the current state exactly as it was.
+      if (silent) return;
       setLoadState("error");
     }
   }, [directoryHandle]);
@@ -89,8 +100,13 @@ export default function NotificationManager({ directoryHandle }: Props) {
 
   // Re-fetch on the app-wide refresh signal (manual toolbar button + 5-minute
   // auto-refresh) so a notification posted from another session shows up here
-  // without waiting for a remount.
-  useEffect(() => subscribeToDataRefresh(reload), [reload]);
+  // without waiting for a remount. Passed silently so it never blanks the
+  // list mid-refresh (see the `silent` handling inside `reload` above).
+  // Rewritten as an explicit lambda rather than `subscribeToDataRefresh(reload)`:
+  // the subscription invokes its callback with the bare `DataRefreshSource`
+  // string as its first argument, which would otherwise land in `opts` and
+  // make `opts?.silent` undefined -- silently defeating the silent refresh.
+  useEffect(() => subscribeToDataRefresh(() => { void reload({ silent: true }); }), [reload]);
 
   // Re-derive the must-accept audience whenever the managed-user roster changes
   // (a user added/deactivated elsewhere) instead of freezing it at first mount.

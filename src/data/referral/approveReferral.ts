@@ -27,6 +27,7 @@ import {
   appendDistributionEvents,
   loadDistributionLog,
   loadOrDeriveDistributionCurrent,
+  refreshDistributionCacheAfterWrite,
 } from "../distribution/distributionStorage";
 import { buildReassignEvent, deriveCurrentDistribution } from "../distribution/distributionLog";
 import { executeReplacement } from "../distribution/replacement";
@@ -134,6 +135,10 @@ export async function approveReferral(params: {
       return { ok: false, code: "dist-failed", error: distResult.error };
     }
 
+    // A6b: refresh the derived cache + employee sample mirrors after the
+    // append, now that pure reads no longer persist them. Swallows its own
+    // failure by contract.
+    await refreshDistributionCacheAfterWrite(directoryHandle, monthFolderName, sample.rows);
   }
 
   // Do not record an approved decision unless replaying all persisted events

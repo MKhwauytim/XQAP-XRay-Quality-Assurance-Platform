@@ -6,7 +6,7 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import PopulationProcessingReport from "./PopulationProcessingReport";
+import PopulationProcessingReport, { type PopulationReportPreviewRow } from "./PopulationProcessingReport";
 import type { ProcessingSummary, RemovedPopulationRow } from "../processing/populationProcessingTypes";
 
 function makeSummary(): ProcessingSummary {
@@ -42,6 +42,18 @@ function makeRemovedRow(overrides: Partial<RemovedPopulationRow> = {}): RemovedP
   };
 }
 
+function makePreviewRows(count: number): PopulationReportPreviewRow[] {
+  return Array.from({ length: count }, (_, i) => ({
+    xrayImageId: `XR-${i + 1}`,
+    sourceRowNumber: i + 1,
+    portName: "ميناء جدة",
+    stage: "first",
+    xrayLevelOneResult: "سليمة",
+    xrayLevelTwoResult: "سليمة",
+    certScanStatus: "Certscan",
+  }));
+}
+
 afterEach(cleanup);
 
 describe("PopulationProcessingReport — dropped-rows drill-down (W8)", () => {
@@ -65,5 +77,101 @@ describe("PopulationProcessingReport — dropped-rows drill-down (W8)", () => {
   it("failure: renders no drill-down section at all when nothing was excluded", () => {
     render(<PopulationProcessingReport summary={makeSummary()} previewRows={[]} />);
     expect(screen.queryByText("تفاصيل الصفوف المستبعدة")).not.toBeInTheDocument();
+  });
+});
+
+describe("PopulationProcessingReport — final-population preview (2026-08-12)", () => {
+  it("happy: shows only 10 example rows per page even when more rows are available, and pagination advances to the next 10", () => {
+    render(<PopulationProcessingReport summary={makeSummary()} previewRows={makePreviewRows(25)} />);
+
+    expect(screen.getByText("معاينة المجتمع النهائي")).toBeInTheDocument();
+    // Page 1: XR-1..XR-10 shown, XR-11 not yet.
+    expect(screen.getByText("XR-1")).toBeInTheDocument();
+    expect(screen.getByText("XR-10")).toBeInTheDocument();
+    expect(screen.queryByText("XR-11")).not.toBeInTheDocument();
+    expect(screen.getByText(/عرض 1 إلى 10 من 25/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "الصفحة التالية" }));
+
+    // Page 2: XR-11..XR-20 shown, XR-1 and XR-21 not.
+    expect(screen.getByText("XR-11")).toBeInTheDocument();
+    expect(screen.getByText("XR-20")).toBeInTheDocument();
+    expect(screen.queryByText("XR-1")).not.toBeInTheDocument();
+    expect(screen.queryByText("XR-21")).not.toBeInTheDocument();
+  });
+
+  it("failure: renders nothing when there are no preview rows", () => {
+    render(<PopulationProcessingReport summary={makeSummary()} previewRows={[]} />);
+    expect(screen.queryByText("معاينة المجتمع النهائي")).not.toBeInTheDocument();
+  });
+
+  it("does not add new statistics -- the preview summary strip reuses existing ProcessingSummary fields only", () => {
+    render(<PopulationProcessingReport summary={makeSummary()} previewRows={makePreviewRows(1)} />);
+    // finalPreparedPopulationRows/certScanRows/nonCertScanRows from makeSummary(): 7/3/4.
+    expect(screen.getAllByText("7").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("3").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("4").length).toBeGreaterThan(0);
+  });
+
+  it("bug repro: renders the raw stage enum as its Arabic label instead of the stored code (owner report 2026-08-12)", () => {
+    const rows: PopulationReportPreviewRow[] = [
+      {
+        xrayImageId: "XR-1",
+        sourceRowNumber: 1,
+        portName: "ميناء جدة",
+        stage: "THIRD_STAGE",
+        xrayLevelOneResult: "سليمة",
+        xrayLevelTwoResult: "سليمة",
+        certScanStatus: "Certscan",
+      },
+    ];
+    render(<PopulationProcessingReport summary={makeSummary()} previewRows={rows} />);
+
+    expect(screen.getByText("المستوى الثالث")).toBeInTheDocument();
+    expect(screen.queryByText("THIRD_STAGE")).not.toBeInTheDocument();
+  });
+
+  it("bug repro: a bare CertScan=0 with certScanProvided:false renders a 'not provided' note instead of a percentage (owner report 2026-08-12, 60,971 rows / 0 CertScan)", () => {
+    const summary = { ...makeSummary(), certScanRows: 0, certScanProvided: false };
+    render(<PopulationProcessingReport summary={summary} previewRows={[]} />);
+
+    expect(screen.getByText(/لم يتم توفير قائمة أجهزة CertScan لهذا التشغيل/)).toBeInTheDocument();
+    expect(screen.queryByText(/^CertScan: /)).not.toBeInTheDocument();
+  });
+
+  it("shows the normal CertScan/NonCertScan percentages when certScanProvided is true, even at 0 matched rows", () => {
+    const summary = { ...makeSummary(), certScanRows: 0, certScanProvided: true };
+    render(<PopulationProcessingReport summary={summary} previewRows={[]} />);
+
+    expect(screen.getByText(/^CertScan: /)).toBeInTheDocument();
+    expect(screen.queryByText(/لم يتم توفير قائمة أجهزة CertScan/)).not.toBeInTheDocument();
+  });
+
+  it("falls back to the normal percentages when certScanProvided is undefined (older aggregate/report builder that predates the field)", () => {
+    render(<PopulationProcessingReport summary={makeSummary()} previewRows={[]} />);
+    expect(screen.getByText(/^CertScan: /)).toBeInTheDocument();
+  });
+
+  it("respects custom stageMappings overrides passed down from the active population config", () => {
+    const rows: PopulationReportPreviewRow[] = [
+      {
+        xrayImageId: "XR-1",
+        sourceRowNumber: 1,
+        portName: "ميناء جدة",
+        stage: "CUSTOM_THIRD",
+        xrayLevelOneResult: "سليمة",
+        xrayLevelTwoResult: "سليمة",
+        certScanStatus: "Certscan",
+      },
+    ];
+    render(
+      <PopulationProcessingReport
+        summary={makeSummary()}
+        previewRows={rows}
+        stageMappings={{ third: ["CUSTOM_THIRD"] }}
+      />,
+    );
+
+    expect(screen.getByText("المستوى الثالث")).toBeInTheDocument();
   });
 });

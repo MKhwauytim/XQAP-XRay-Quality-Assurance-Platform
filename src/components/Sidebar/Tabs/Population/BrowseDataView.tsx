@@ -714,6 +714,13 @@ export default function BrowseDataView({
     [rows, showAllMonths, globalFolder]
   );
   const total = useWorkerPath ? worker.totalRows ?? 0 : monthFilteredRows.length;
+  // A10: a reload after the first successful load (refreshKey bump, dataset/month
+  // switch) -- distinct from the initial `loading` (which has no prior rows to
+  // dim). The worker path's `total` can drop to 0 the instant a reload starts
+  // (loadRawJson resets totalRows synchronously, see usePopulationBrowseWorker),
+  // so this -- not `total` -- is what the render below gates on to avoid a false
+  // "no data" flash for a dataset that still has rows in `queryResult`.
+  const isRefreshing = loading && loadGeneration > 0;
 
   // ── Load/query failure surface (worker path only) ──
   // The worker answers a request it can't fulfil (unparseable population.final.json,
@@ -1040,8 +1047,24 @@ export default function BrowseDataView({
         />
       )}
 
-      {!browseError && loading && <LoadingState label={showAllMonths ? "جاري تحميل بيانات جميع الأشهر..." : "جاري تحميل بيانات الشهر المحدد..."} />}
+      {/* A10 (perf/sync enhancement 2026-08-12): blank only on the very first
+          load for this component's lifetime (loadGeneration === 0). A later
+          reload (refreshKey bump, dataset/month switch) instead keeps
+          queryResult's already-rendered rows on screen -- see the load
+          effect's own comment: it never clears `rows`/`queryResult` when a
+          reload starts, only when the reload's own new data lands -- and
+          renders a dimmed overlay instead of unmounting the table (F24). */}
+      {!browseError && loading && loadGeneration === 0 && (
+        <LoadingState label={showAllMonths ? "جاري تحميل بيانات جميع الأشهر..." : "جاري تحميل بيانات الشهر المحدد..."} />
+      )}
 
+      {/* NOT gated on loadGeneration: the load effect above early-returns while
+          `!directoryHandle || !isPresetLoaded`, leaving loading=false and
+          loadGeneration=0 -- gating this on loadGeneration would render an
+          empty panel instead of the empty state in exactly that window, which
+          A1 makes the manager's landing view. `!loading` is sufficient to
+          exclude both the initial load and a refresh, since isRefreshing
+          implies loading. */}
       {!browseError && !loading && total === 0 && (
         <EmptyState
           icon={<Database />}
@@ -1050,8 +1073,13 @@ export default function BrowseDataView({
         />
       )}
 
-      {!browseError && !loading && total > 0 && (
-        <div className="bv-table-view">
+      {!browseError && loadGeneration > 0 && (isRefreshing || total > 0) && (
+        <div className={`bv-table-view${isRefreshing ? " bv-table-view-refreshing" : ""}`} aria-busy={isRefreshing}>
+          {isRefreshing && (
+            <div className="bv-table-refresh-overlay" role="status" aria-live="polite">
+              جاري التحديث...
+            </div>
+          )}
           {/* Toolbar */}
           <div className="bv-table-toolbar">
             <input

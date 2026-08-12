@@ -46,12 +46,25 @@ export type NormalizedRiskRow = {
   sourceRowNumber: number;
 };
 
+/**
+ * Populated only when a sheet parsed at least one row but accepted zero of
+ * them (every row excluded for a missing xray ID) — the "silent 0" failure
+ * mode. Names the header candidates the xrayImageId alias list looked for
+ * versus the headers actually present in the sheet, so the diagnosis is
+ * visible in the UI instead of requiring a screenshot from the owner.
+ */
+export type ZeroXrayIdDiagnostic = {
+  candidateHeaders: string[];
+  presentHeaders: string[];
+};
+
 export type RiskSheetSummary = {
   sheetName: string;
   movementType: string;
   originalRowCount: number;
   normalizedRowCount: number;
   excludedMissingXrayIdCount: number;
+  zeroIdDiagnostic?: ZeroXrayIdDiagnostic;
 };
 
 export type RiskWorkbookResult = {

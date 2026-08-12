@@ -22,16 +22,13 @@ const reportComponentPath = resolve(
  *
  * W11 (2026-08-10): the owner asked for the "معاينة المجتمع النهائي" preview
  * table itself to be removed from PopulationProcessingReport (it read
- * already-in-memory rows just to show a handful of samples nobody needed) --
- * `PopulationReportPreviewRow`/`previewRows` stay in the component's prop
- * type for API compatibility with callers still building `reportData`, but
- * nothing in the component destructures or renders `previewRows` anymore, so
- * this scan is expected to find zero `row.<field>` accesses. The pattern is
- * kept (rather than deleted) so a FUTURE preview table reintroduced here
- * still gets the same missing-field enforcement.
+ * already-in-memory rows just to show a handful of samples nobody needed).
+ * 2026-08-12: the owner asked for a smaller version back -- a compact summary
+ * strip plus 10 paginated example rows -- so the table (and its `row.<field>`
+ * accesses) are back, still confined to exactly `POPULATION_AGGREGATE_PREVIEW_FIELDS`.
  */
 describe("POPULATION_AGGREGATE_PREVIEW_FIELDS contract", () => {
-  it("covers every `row.<field>` access in PopulationProcessingReport (none currently — W11 removed the preview table)", () => {
+  it("covers every `row.<field>` access in PopulationProcessingReport", () => {
     const source = readFileSync(reportComponentPath, "utf-8");
     const accessed = new Set<string>();
     const pattern = /\brow\.([a-zA-Z_][a-zA-Z0-9_]*)/g;

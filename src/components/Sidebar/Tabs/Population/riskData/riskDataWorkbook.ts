@@ -1,10 +1,12 @@
 import * as XLSX from "xlsx";
 import { normalizeRiskRow } from "./riskDataNormalizer";
+import { RISK_COLUMN_ALIASES } from "./riskDataColumns";
 import type {
   NormalizedRiskRow,
   RiskSheetSummary,
   RiskSourceRow,
-  RiskWorkbookResult
+  RiskWorkbookResult,
+  ZeroXrayIdDiagnostic
 } from "./riskDataTypes";
 import { worksheetToSourceRows } from "../workbook/worksheetRows";
 
@@ -38,6 +40,34 @@ function detectMovementType(sheetName: string, customPatterns?: string[]): strin
   // sheet name as the movement type keeps the rows auditable and avoids forcing
   // users to maintain an exhaustive sheet-name allowlist.
   return sheetName;
+}
+
+/**
+ * B14: guard against the "silent 0" failure mode — a sheet that parsed rows
+ * but accepted none of them because every candidate xrayImageId header the
+ * alias list looked for is absent from what the sheet actually has (a stale
+ * saved mapping, or header noise the normalizer doesn't strip). Only called
+ * when normalizedRowCount is 0 with originalRowCount > 0, so it's a rare
+ * diagnostic path, not per-row overhead. Mirrors biDataWorkbook.ts's copy.
+ */
+function buildZeroXrayIdDiagnostic(
+  sourceRows: { row: RiskSourceRow }[],
+  columnMappings?: Record<string, string[]>
+): ZeroXrayIdDiagnostic {
+  const candidateHeaders =
+    columnMappings?.xrayImageId ?? RISK_COLUMN_ALIASES.xrayImageId;
+
+  const presentHeaders = new Set<string>();
+  for (const { row } of sourceRows.slice(0, 50)) {
+    for (const header of Object.keys(row)) {
+      presentHeaders.add(header);
+    }
+  }
+
+  return {
+    candidateHeaders: [...candidateHeaders],
+    presentHeaders: Array.from(presentHeaders)
+  };
 }
 
 const yieldToMain = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -134,7 +164,10 @@ export async function processRiskWorkbook(
       movementType,
       originalRowCount: sourceRows.length,
       normalizedRowCount: validRows.length,
-      excludedMissingXrayIdCount
+      excludedMissingXrayIdCount,
+      ...(validRows.length === 0 && sourceRows.length > 0
+        ? { zeroIdDiagnostic: buildZeroXrayIdDiagnostic(sourceRows, columnMappings) }
+        : {})
     });
   }
 

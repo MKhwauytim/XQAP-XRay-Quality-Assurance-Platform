@@ -4,6 +4,7 @@ import { usePermissions } from "../../../../../../auth/usePermissions";
 import { readUserManagementState } from "../../../../../../auth/userManagement";
 import { appendWorkspaceAction } from "../../../../../../data/audit/actionLog";
 import { getLabels } from "../../../../../../data/labels/labelsStore";
+import { logError } from "../../../../../../data/storage/errorLogger";
 import { loadOrDeriveDistributionCurrentForRead } from "../../../../../../data/distribution/distributionStorage";
 import type { DistributionEntry } from "../../../../../../data/distribution/distributionTypes";
 import { useGlobalMonth } from "../../../../../../data/month/useGlobalMonth";
@@ -19,11 +20,7 @@ import {
   type ApprovalResult,
   type DenyResult,
 } from "../../../../../../data/referral/approveReferral";
-import {
-  loadReferralLog,
-  loadReopenLog,
-  loadReplacementLog,
-} from "../../../../../../data/referral/referralStorage";
+import { loadRequestLogs } from "../../../../../../data/referral/referralStorage";
 import type { ReferralRequest, ReopenRequest, ReplacementRequest } from "../../../../../../data/referral/referralTypes";
 import { loadSampleMaster } from "../../../../../../data/sampling/sampleStorage";
 import type { DirectoryHandleLike } from "../../../../../../data/storage/fileSystemAccess";
@@ -96,19 +93,22 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
     }
   }, [selMonth]);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (opts?: { silent?: boolean }) => {
     // Invalidate any in-flight load first — even the no-month early return must
     // stale older loads, or a truthy→"" selMonth transition would let an in-flight
     // load commit stale rows over the empty-ready state.
     const token = ++loadTokenRef.current;
     if (!selMonth) return;
-    setLoadState("loading");
+    // `silent` is set only by the background/manual data-refresh signal (and by
+    // the post-decision reloads below), never by a real month/user change.
+    // Flipping loadState to "loading" unmounts the whole ready-state list —
+    // see the render gate in index.tsx — so a silent refresh must re-fetch and
+    // swap the underlying rows in place without ever blanking the view.
+    const silent = opts?.silent ?? false;
+    if (!silent) setLoadState("loading");
     try {
-      const [refLog, repLog, reoLog] = await Promise.all([
-        loadReferralLog(directoryHandle, selMonth),
-        loadReplacementLog(directoryHandle, selMonth),
-        loadReopenLog(directoryHandle, selMonth),
-      ]);
+      const { referrals: refLog, replacements: repLog, reopens: reoLog } =
+        await loadRequestLogs(directoryHandle, selMonth);
 
       // Cross-month pending gap: the reviewer's own global month selector is a
       // browsing convenience (persisted per-tab in sessionStorage, unaffected by
@@ -132,11 +132,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
       const otherMonthPending = await Promise.all(
         otherMonths.map(async (month) => {
           try {
-            const [r, p, o] = await Promise.all([
-              loadReferralLog(directoryHandle, month),
-              loadReplacementLog(directoryHandle, month),
-              loadReopenLog(directoryHandle, month),
-            ]);
+            const { referrals: r, replacements: p, reopens: o } = await loadRequestLogs(directoryHandle, month);
             return {
               referrals: r.requests.filter((x) => x.status === "pending"),
               replacements: p.requests.filter((x) => x.status === "pending"),
@@ -180,8 +176,18 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
       setReplacements(visibleReplacements);
       setReopens(visibleReopens);
       setLoadState("ready");
-    } catch {
-      if (token === loadTokenRef.current) setLoadState("error");
+    } catch (err) {
+      if (token !== loadTokenRef.current) return;
+      // A silent background refresh must not blank a previously rendered
+      // review queue on a transient read hiccup — log it for observability
+      // and leave the current state exactly as it was; the next successful
+      // refresh (or manual navigation) will recover the data. Mirrors
+      // XrayReferrals.tsx's silent-refresh error handling.
+      if (silent) {
+        logError("useApprovalData:loadData:silentRefresh", err);
+        return;
+      }
+      setLoadState("error");
     }
   }, [directoryHandle, selMonth, username, months, canApproveReferrals, canApproveReplacements, canApproveReopens]);
 
@@ -190,8 +196,14 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
 
   // Re-fetch on the app-wide refresh signal (manual toolbar button + 5-minute
   // auto-refresh) so a request submitted/approved by someone else -- or on
-  // another machine -- shows up without navigating away and back.
-  useEffect(() => subscribeToDataRefresh(loadData), [loadData]);
+  // another machine -- shows up without navigating away and back. Passed
+  // silently so it never blanks the review queue mid-refresh (see the
+  // `silent` handling inside loadData above). Rewritten as an explicit lambda
+  // rather than `subscribeToDataRefresh(loadData)`: the subscription invokes
+  // its callback with the bare `DataRefreshSource` string as its first
+  // argument, which would otherwise land in `opts` and make `opts?.silent`
+  // undefined -- silently defeating the silent-refresh behaviour.
+  useEffect(() => subscribeToDataRefresh(() => { void loadData({ silent: true }); }), [loadData]);
 
   // Approve/deny delegate to the domain module in data/referral/approveReferral.ts,
   // which owns the idempotency re-check (bug #1), the ownership re-check (bug #2),
@@ -199,7 +211,12 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
   // already-applied distribution events). Every call here is keyed off
   // request.monthFolderName, never the UI's selected month (bug #3).
 
-  async function approveReferral(request: ReferralRequest, notes: string): Promise<OpResult> {
+  // `opts.reload` defaults to true (the single-item interactive path always
+  // reconciles). `bulkDecision` below passes `{ reload: false }` so a
+  // multi-item bulk run reloads once after the whole loop instead of once
+  // per item (A3) — the reload itself is always silent so it never blanks
+  // the list that's already on screen mid-bulk-run.
+  async function approveReferral(request: ReferralRequest, notes: string, opts?: { reload?: boolean }): Promise<OpResult> {
     if (!canApproveReferrals) return { ok: false, error: "لا تملك صلاحية اعتماد الإحالات، أو أن مساحة العمل للقراءة فقط." };
     try {
       const result = await approveReferralDomain({
@@ -218,7 +235,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
           target: request.requestId,
           details: { samples: request.xrayImageIds.length, toEmployee: request.toEmployee },
         });
-        await loadData();
+        if (opts?.reload ?? true) await loadData({ silent: true });
         return { ok: true };
       }
       return { ok: false, error: approvalErrorMsg(result) };
@@ -227,7 +244,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
     }
   }
 
-  async function denyReferral(request: ReferralRequest, notes: string): Promise<OpResult> {
+  async function denyReferral(request: ReferralRequest, notes: string, opts?: { reload?: boolean }): Promise<OpResult> {
     if (!canApproveReferrals) return { ok: false, error: "لا تملك صلاحية رفض الإحالات، أو أن مساحة العمل للقراءة فقط." };
     try {
       const result = await denyReferralDomain({
@@ -245,7 +262,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
           monthFolderName: request.monthFolderName,
           target: request.requestId,
         });
-        await loadData();
+        if (opts?.reload ?? true) await loadData({ silent: true });
         return { ok: true };
       }
       return { ok: false, error: denyErrorMsg(result) };
@@ -254,7 +271,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
     }
   }
 
-  async function approveReplacement(request: ReplacementRequest, notes: string): Promise<OpResult> {
+  async function approveReplacement(request: ReplacementRequest, notes: string, opts?: { reload?: boolean }): Promise<OpResult> {
     if (!canApproveReplacements) return { ok: false, error: "لا تملك صلاحية اعتماد الاستبدالات، أو أن مساحة العمل للقراءة فقط." };
     try {
       const result = await approveReplacementDomain({
@@ -273,7 +290,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
           target: request.requestId,
           details: { original: request.originalXrayImageId, replacement: request.replacementXrayImageId },
         });
-        await loadData();
+        if (opts?.reload ?? true) await loadData({ silent: true });
         return { ok: true };
       }
       return { ok: false, error: approvalErrorMsg(result) };
@@ -282,7 +299,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
     }
   }
 
-  async function denyReplacement(request: ReplacementRequest, notes: string): Promise<OpResult> {
+  async function denyReplacement(request: ReplacementRequest, notes: string, opts?: { reload?: boolean }): Promise<OpResult> {
     if (!canApproveReplacements) return { ok: false, error: "لا تملك صلاحية رفض الاستبدالات، أو أن مساحة العمل للقراءة فقط." };
     try {
       const result = await denyReplacementDomain({
@@ -300,7 +317,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
           monthFolderName: request.monthFolderName,
           target: request.requestId,
         });
-        await loadData();
+        if (opts?.reload ?? true) await loadData({ silent: true });
         return { ok: true };
       }
       return { ok: false, error: denyErrorMsg(result) };
@@ -309,7 +326,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
     }
   }
 
-  async function approveReopen(request: ReopenRequest, notes: string): Promise<OpResult> {
+  async function approveReopen(request: ReopenRequest, notes: string, opts?: { reload?: boolean }): Promise<OpResult> {
     if (!canApproveReopens) return { ok: false, error: "لا تملك صلاحية اعتماد إعادة الفتح، أو أن مساحة العمل للقراءة فقط." };
     try {
       const result = await approveReopenDomain({
@@ -329,7 +346,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
           target: request.requestId,
           details: { xrayImageId: request.xrayImageId, employee: request.employeeUsername },
         });
-        await loadData();
+        if (opts?.reload ?? true) await loadData({ silent: true });
         return { ok: true };
       }
       return { ok: false, error: approvalErrorMsg(result) };
@@ -338,7 +355,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
     }
   }
 
-  async function denyReopen(request: ReopenRequest, notes: string): Promise<OpResult> {
+  async function denyReopen(request: ReopenRequest, notes: string, opts?: { reload?: boolean }): Promise<OpResult> {
     if (!canApproveReopens) return { ok: false, error: "لا تملك صلاحية رفض إعادة الفتح، أو أن مساحة العمل للقراءة فقط." };
     try {
       const result = await denyReopenDomain({
@@ -356,7 +373,7 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
           monthFolderName: request.monthFolderName,
           target: request.requestId,
         });
-        await loadData();
+        if (opts?.reload ?? true) await loadData({ silent: true });
         return { ok: true };
       }
       return { ok: false, error: denyErrorMsg(result) };
@@ -376,18 +393,18 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
     return canApproveReopens;
   }
 
-  async function approve(request: CardRequest, notes: string): Promise<OpResult> {
+  async function approve(request: CardRequest, notes: string, opts?: { reload?: boolean }): Promise<OpResult> {
     if (!canReviewRequest(request)) return { ok: false, error: "لا تملك صلاحية اعتماد هذا الطلب، أو أن مساحة العمل للقراءة فقط." };
-    if (isReferral(request)) return approveReferral(request, notes);
-    if (isReplacement(request)) return approveReplacement(request, notes);
-    return approveReopen(request, notes);
+    if (isReferral(request)) return approveReferral(request, notes, opts);
+    if (isReplacement(request)) return approveReplacement(request, notes, opts);
+    return approveReopen(request, notes, opts);
   }
 
-  async function deny(request: CardRequest, notes: string): Promise<OpResult> {
+  async function deny(request: CardRequest, notes: string, opts?: { reload?: boolean }): Promise<OpResult> {
     if (!canReviewRequest(request)) return { ok: false, error: "لا تملك صلاحية رفض هذا الطلب، أو أن مساحة العمل للقراءة فقط." };
-    if (isReferral(request)) return denyReferral(request, notes);
-    if (isReplacement(request)) return denyReplacement(request, notes);
-    return denyReopen(request, notes);
+    if (isReferral(request)) return denyReferral(request, notes, opts);
+    if (isReplacement(request)) return denyReplacement(request, notes, opts);
+    return denyReopen(request, notes, opts);
   }
 
   function describeRequestShort(request: CardRequest): string {
@@ -400,19 +417,34 @@ export function useApprovalData(directoryHandle: DirectoryHandleLike) {
     return `إعادة فتح ${request.xrayImageId}`;
   }
 
-  /** Bulk decision over a mixed-kind selection — each row routed to its kind. */
+  /**
+   * Bulk decision over a mixed-kind selection — each row routed to its kind.
+   *
+   * A3: each per-item approve/deny call is told not to reload (F11 — the six
+   * approve/deny functions used to reload after every single item, so an
+   * N-item bulk run fired N full reloads, each of which used to blank the
+   * progress modal mid-run). The single reload happens once, after the whole
+   * loop, in a `finally` — so a mid-loop throw still reconciles the list
+   * against whatever partially applied before it failed.
+   */
   async function bulkDecision(
     selected: CardRequest[], action: "approve" | "deny", notes: string
   ): Promise<BulkOutcome[]> {
     const outcomes: BulkOutcome[] = [];
-    for (const request of selected) {
-      const result = action === "approve" ? await approve(request, notes) : await deny(request, notes);
-      outcomes.push({
-        requestId: request.requestId,
-        label: describeRequestShort(request),
-        ok: result.ok,
-        error: result.ok ? undefined : result.error,
-      });
+    try {
+      for (const request of selected) {
+        const result = action === "approve"
+          ? await approve(request, notes, { reload: false })
+          : await deny(request, notes, { reload: false });
+        outcomes.push({
+          requestId: request.requestId,
+          label: describeRequestShort(request),
+          ok: result.ok,
+          error: result.ok ? undefined : result.error,
+        });
+      }
+    } finally {
+      await loadData({ silent: true });
     }
     return outcomes;
   }

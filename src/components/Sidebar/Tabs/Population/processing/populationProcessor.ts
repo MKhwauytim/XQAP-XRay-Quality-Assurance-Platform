@@ -16,6 +16,7 @@ import type {
   RemovedPopulationRow
 } from "./populationProcessingTypes";
 import { normalizeText, normalizeArabicText } from "./textNormalization";
+import { attachLazyRawRow } from "../../../../../data/population/populationTypes";
 
 type PreparedDraftRow = {
   stage: string | null;
@@ -241,22 +242,48 @@ function excelSerialToIso(serial: number): string | null {
 /**
  * Normalize diverse date representations to YYYY-MM-DD.
  * Handles: DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY, DDMMMYYYY, DD/MMM/YYYY,
- * Excel serial numbers, and already-ISO dates.
+ * Excel serial numbers (optionally with a fractional time-of-day part),
+ * datetime strings ("2026-05-01 18:04:11", with or without fractional
+ * seconds), JS `Date` objects (SheetJS can hand these back when a workbook
+ * reader opts into `cellDates: true`, even though this app's own workbook
+ * readers currently pass `cellDates: false`), and already-ISO dates.
  */
-export function normalizeDate(value: string | null): string | null {
-  if (!value) return null;
-  const raw = String(value).trim();
+export function normalizeDate(value: string | number | Date | null): string | null {
+  if (value === null || value === undefined) return null;
+
+  // Already a parsed Date (e.g. from a SheetJS reader with cellDates: true) —
+  // read its calendar fields directly rather than round-tripping through a string.
+  if (value instanceof Date) {
+    if (isNaN(value.getTime())) return null;
+    return `${value.getFullYear()}-${pad2(value.getMonth() + 1)}-${pad2(value.getDate())}`;
+  }
+
+  // A genuine numeric Excel serial passed as a JS number rather than a string
+  // (guarded to the same plausible range as the string form below).
+  if (typeof value === "number") {
+    if (Number.isFinite(value) && value >= 25000 && value <= 60000) {
+      return excelSerialToIso(Math.floor(value)) ?? String(value);
+    }
+    return String(value);
+  }
+
+  const raw = value.trim();
   if (!raw) return null;
 
-  // Already ISO: YYYY-MM-DD
+  // Already ISO: YYYY-MM-DD, optionally followed by a time-of-day component
+  // ("2026-05-01 18:04:11" or "2026-05-16 09:14:30.000000" with fractional
+  // seconds) — the field is a date, so the time is simply dropped.
   if (/^\d{4}-\d{2}-\d{2}/.test(raw)) {
     const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
     if (m) return `${m[1]}-${m[2]}-${m[3]}`;
   }
 
-  // Excel serial number (pure number in plausible range 25000–60000 ≈ 1968–2064)
-  if (/^\d{4,5}$/.test(raw)) {
-    const n = parseInt(raw, 10);
+  // Excel serial number, optionally with a fractional time-of-day part
+  // (pure number in plausible range 25000–60000 ≈ 1968–2064). The range guard
+  // keeps a genuine numeric ID from being mistaken for a serial date.
+  const serialMatch = raw.match(/^(\d{4,5})(?:\.\d+)?$/);
+  if (serialMatch) {
+    const n = parseInt(serialMatch[1], 10);
     if (n >= 25000 && n <= 60000) return excelSerialToIso(n) ?? raw;
   }
 
@@ -319,20 +346,33 @@ export function normalizeResultValue(
   if (normalizedValue === "1") return "سليمة";
   if (normalizedValue === "2") return "اشتباه";
 
+  // Leading numeric code with a parenthesised label, e.g. "2 (اشتباه)" /
+  // "1 (سليمة)". The agency's own numeric code is its authoritative encoding,
+  // so it takes precedence over whatever text follows in parentheses.
+  const leadingCodeMatch = normalizedValue.match(/^(\d+)\s*\(/);
+  if (leadingCodeMatch) {
+    if (leadingCodeMatch[1] === "1") return "سليمة";
+    if (leadingCodeMatch[1] === "2") return "اشتباه";
+  }
+
   // English codes
   const upper = normalizedValue.toUpperCase();
   if (upper === "CLEAR" || upper === "OK" || upper === "PASS") return "سليمة";
   if (upper === "ALERT" || upper === "FAIL" || upper === "SUSPECT") return "اشتباه";
 
-  // Arabic text — match on prefix substring (handles "سليمة - 123" etc.)
-  if (
-    normalizedValue.includes("سليم") ||
-    normalizedValue.includes("نظيف") ||
-    normalizedValue.includes("مقبول")
-  ) {
-    return "سليمة";
-  }
-
+  // Arabic text — match on substring (handles "سليمة - 123" etc.).
+  //
+  // IMPORTANT — check اشتباه (suspect) BEFORE سليم (clear). Real BI values can
+  // be compound and contain BOTH tokens, e.g. "نتيجة اشتباه -مبدئي (سليمة)"
+  // ("suspicion result — preliminary (clear)"). Neither docs/reference/
+  // APP_AUDIT_MODEL.md nor DEPARTMENT_GLOSSARY.md explicitly defines what a
+  // compound value like this means (an initial suspicion later cleared, vs.
+  // still a recorded suspicion) — checked both and the ambiguity is not
+  // resolved there. Checking سليم first used to let a value the risk agency
+  // recorded as اشتباه silently resolve to سليمة, which is a wrong audit
+  // outcome, not a cosmetic bug. Given the ambiguity, this picks the SAFE
+  // reading for an audit app: never let a recorded suspicion be silently
+  // downgraded to "clear", so اشتباه wins whenever both tokens are present.
   if (
     normalizedValue.includes("اشتباه") ||
     normalizedValue.includes("مريب") ||
@@ -341,7 +381,78 @@ export function normalizeResultValue(
     return "اشتباه";
   }
 
+  if (
+    normalizedValue.includes("سليم") ||
+    normalizedValue.includes("نظيف") ||
+    normalizedValue.includes("مقبول")
+  ) {
+    return "سليمة";
+  }
+
   return null;
+}
+
+const DIAGNOSTIC_RAW_VALUE_MAX_LENGTH = 40;
+
+/**
+ * How many dropped rows get a per-row diagnostic reason before falling back to
+ * the shared constant below. The report surfaces at most 3 examples per cause
+ * bucket, so this is generous; the cap exists purely to bound allocation on a
+ * wholesale-drop month (see the OOM guard at the invalid-level push site).
+ */
+const DIAGNOSTIC_DETAILED_ROW_LIMIT = 50;
+
+/**
+ * Shared, interned fallback used once DIAGNOSTIC_DETAILED_ROW_LIMIT is hit.
+ * Deliberately carries no `[L1]`/`[L2]` tag so it lands in the report's
+ * "other" bucket rather than misattributing a cause it did not measure.
+ */
+const INVALID_LEVEL_REASON_UNDETAILED = "Invalid level result (تفاصيل إضافية محذوفة)";
+
+/** Truncates a raw offending value for inclusion in a dropped-row diagnostic
+ *  reason — long free-text cells (or an entire merged paragraph landing in the
+ *  wrong column) must not blow up the reason string or the exported report. */
+function truncateForDiagnostics(raw: string | null): string {
+  if (raw === null) return "<فارغ/غير موجود>";
+  const collapsed = raw.replace(/\s+/g, " ").trim();
+  if (collapsed.length === 0) return "<فارغ/غير موجود>";
+  return collapsed.length > DIAGNOSTIC_RAW_VALUE_MAX_LENGTH
+    ? `${collapsed.slice(0, DIAGNOSTIC_RAW_VALUE_MAX_LENGTH)}…`
+    : collapsed;
+}
+
+/**
+ * Builds a self-diagnosing reason for a row dropped by the "valid L1 and L2
+ * required" gate (see the test "a row missing valid L1 or L2 is still
+ * excluded" and `decisionFactTable.ts`'s "population entry requires valid L1
+ * and L2" — this is a deliberate, tested invariant, not a bug). Historically
+ * this only recorded the fixed string "Invalid level 1 or level 2 result",
+ * which gave a 100%-drop report no way to distinguish "the level-1 column
+ * isn't recognized at all" from "a handful of rows have a genuinely garbled
+ * value" — the two have very different fixes (alias list vs. source data).
+ *
+ * The `[L1]` / `[L2]` / `[L1+L2]` tag is a stable, parseable prefix —
+ * `PopulationProcessingReport.tsx`'s "most common cause" summary reads it
+ * back out. Keep the tag format in sync if this changes.
+ */
+function describeInvalidLevelReason(params: {
+  levelOneRaw: string | null;
+  levelOneValid: boolean;
+  levelTwoRaw: string | null;
+  levelTwoValid: boolean;
+}): string {
+  const { levelOneRaw, levelOneValid, levelTwoRaw, levelTwoValid } = params;
+  const tag = !levelOneValid && !levelTwoValid ? "L1+L2" : !levelOneValid ? "L1" : "L2";
+
+  const parts: string[] = [];
+  if (!levelOneValid) {
+    parts.push(`xrayLevelOneResult="${truncateForDiagnostics(levelOneRaw)}"`);
+  }
+  if (!levelTwoValid) {
+    parts.push(`xrayLevelTwoResult="${truncateForDiagnostics(levelTwoRaw)}"`);
+  }
+
+  return `Invalid level result [${tag}]: ${parts.join("; ")}`;
 }
 
 function createRemovedRow(
@@ -464,6 +575,16 @@ function enrichDraftRowFromBi(params: {
   biEnrichmentStatus: BiEnrichmentStatus;
   biMatched: boolean;
   biFilledFields: string[];
+  /**
+   * B7 (OOM fix, 2026-08-12): the raw-row keys BI actually added or
+   * overrode, kept separate from `draftRow.rawRow` (never copied here) so the
+   * caller can attach them as a lazy accessor instead of eagerly building a
+   * full duplicate raw row per matched row. `null` when nothing was added —
+   * distinct from `{}` only in that the caller treats both the same, but
+   * `null` avoids allocating an empty object on the (very common) unmatched
+   * path.
+   */
+  rawRowExtras: Record<string, unknown> | null;
 } {
   const { draftRow, biMatch, biProvided, fieldSummaryMap } = params;
 
@@ -472,7 +593,8 @@ function enrichDraftRowFromBi(params: {
       row: draftRow,
       biEnrichmentStatus: "BI Not Provided",
       biMatched: false,
-      biFilledFields: []
+      biFilledFields: [],
+      rawRowExtras: null
     };
   }
 
@@ -492,15 +614,26 @@ function enrichDraftRowFromBi(params: {
       row: draftRow,
       biEnrichmentStatus: "BI Not Matched",
       biMatched: false,
-      biFilledFields: []
+      biFilledFields: [],
+      rawRowExtras: null
     };
   }
 
   const filledFields: string[] = [];
-  const enrichedRawRow = { ...draftRow.rawRow };
+  // B7 (OOM fix, 2026-08-12): only the keys BI actually fills get collected
+  // here — `draftRow.rawRow` itself is never spread/copied. Equivalent to the
+  // old `{ ...draftRow.rawRow, ...filteredBiKeys }` merge, just deferred:
+  // see `attachLazyRawRow` in populationTypes.ts for where the two are
+  // actually combined (lazily, at read time).
+  const rawRowExtras: Record<string, unknown> = {};
+  const baseRawRow = draftRow.rawRow;
   for (const [key, val] of Object.entries(biMatch.row.rawRow ?? {})) {
-    if (val !== null && val !== undefined && (enrichedRawRow[key] === null || enrichedRawRow[key] === undefined || enrichedRawRow[key] === "")) {
-      enrichedRawRow[key] = val;
+    const baseVal = baseRawRow[key];
+    if (
+      val !== null && val !== undefined &&
+      (baseVal === null || baseVal === undefined || baseVal === "")
+    ) {
+      rawRowExtras[key] = val;
     }
   }
   const biRow = biMatch.row;
@@ -511,7 +644,9 @@ function enrichDraftRowFromBi(params: {
 
   const enrichedRow: PreparedDraftRow = {
     ...draftRow,
-    rawRow: enrichedRawRow,
+    // rawRow deliberately left as draftRow's own (unmerged) rawRow here —
+    // the caller attaches the lazily-merged view via attachLazyRawRow using
+    // rawRowExtras returned below, rather than merging eagerly on this object.
     levelOneEmployee: biRow.levelOneEmployee ?? draftRow.levelOneEmployee ?? null,
     levelTwoEmployee: biRow.levelTwoEmployee ?? draftRow.levelTwoEmployee ?? null,
 
@@ -562,7 +697,8 @@ function enrichDraftRowFromBi(params: {
     row: enrichedRow,
     biEnrichmentStatus: "BI Matched",
     biMatched: true,
-    biFilledFields: filledFields
+    biFilledFields: filledFields,
+    rawRowExtras: Object.keys(rawRowExtras).length > 0 ? rawRowExtras : null
   };
 }
 
@@ -736,8 +872,30 @@ export async function processPopulation(
       );
 
       if (!levelOneResult || !levelTwoResult) {
+        // OOM guard (2026-08-12): describeInvalidLevelReason builds a UNIQUE
+        // string per row. The previous fixed reason was one interned literal
+        // shared by every dropped row, so on a month where the level columns
+        // fail wholesale — the exact case this diagnostic exists for — the
+        // tagged version allocated one fresh string per dropped row and blew
+        // the heap on a 500k-row population.
+        //
+        // The report only ever renders 3 examples per bucket, so per-row
+        // detail beyond the first DIAGNOSTIC_DETAILED_ROW_LIMIT is pure waste:
+        // past that point fall back to the shared constant. Row objects are
+        // still pushed unconditionally, because every summary count is derived
+        // from these arrays' `.length`.
         invalidResultRows.push(
-          createRemovedRow("Invalid level 1 or level 2 result", enrichment.row)
+          createRemovedRow(
+            invalidResultRows.length < DIAGNOSTIC_DETAILED_ROW_LIMIT
+              ? describeInvalidLevelReason({
+                  levelOneRaw: enrichment.row.xrayLevelOneResult,
+                  levelOneValid: levelOneResult !== null,
+                  levelTwoRaw: enrichment.row.xrayLevelTwoResult,
+                  levelTwoValid: levelTwoResult !== null
+                })
+              : INVALID_LEVEL_REASON_UNDETAILED,
+            enrichment.row
+          )
         );
         continue;
       }
@@ -754,7 +912,7 @@ export async function processPopulation(
         nonCertScanRows += 1;
       }
 
-      preparedRows.push({
+      const preparedRow: PreparedPopulationRow = {
         stage: enrichment.row.stage,
         xrayImageId: enrichment.row.xrayImageId,
         xrayEntryDate: enrichment.row.xrayEntryDate,
@@ -821,10 +979,14 @@ export async function processPopulation(
         biMatched: enrichment.biMatched,
         biFilledFields: enrichment.biFilledFields,
 
-        rawRow: enrichment.row.rawRow,
+        // rawRow attached below via attachLazyRawRow (B7, OOM fix 2026-08-12):
+        // avoids eagerly copying/merging the full raw row for every row.
+        rawRow: undefined,
         sourceSheetName: enrichment.row.sourceSheetName,
         sourceRowNumber: enrichment.row.sourceRowNumber
-      });
+      };
+      attachLazyRawRow(preparedRow, enrichment.row.rawRow, enrichment.rawRowExtras);
+      preparedRows.push(preparedRow);
     }
 
     onProgress?.(
@@ -857,6 +1019,11 @@ export async function processPopulation(
 
       certScanRows,
       nonCertScanRows,
+      // W-owner-2026-08-12c: `certScanEntries` is the parsed result of
+      // `certScanPasteText` (empty when nothing was pasted, or when the paste
+      // had no rows / unrecognized headers) -- entries.length > 0 means at
+      // least one usable CertScan device reference existed for this run.
+      certScanProvided: certScanEntries.length > 0,
       certScanPercentage:
         finalPreparedPopulationRows === 0
           ? 0

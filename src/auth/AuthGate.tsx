@@ -52,7 +52,6 @@ import {
   type ManagedLoginUser
 } from "./userManagement";
 import { ORGANIZATION_PATH_TEXT, ZATCA_LOGO_URL } from "../branding/organization";
-import { broadcastDataRefresh } from "../data/workspace/dataRefreshSignal";
 import { DEMO_WORKSPACE_NAME } from "../data/workspace/demoWorkspace";
 import { useWorkspace } from "../data/workspace/useWorkspace";
 import { syncUserManagementToDisk } from "../data/workspace/userSync";
@@ -60,6 +59,7 @@ import { logRejection } from "../data/storage/errorLogger";
 import { LoadingState } from "../components/StateViews/StateViews";
 import { GlobalMonthProvider } from "../data/month/GlobalMonthProvider";
 import { useLabels } from "../data/labels/useLabels";
+import { SyncTick } from "../data/workspace/SyncTick";
 
 type AuthGateProps = {
   children: ReactNode | ((session: AuthSession) => ReactNode);
@@ -323,28 +323,32 @@ export default function AuthGate({ children }: AuthGateProps) {
     };
   }, [session]);
 
-  // Auto-refresh (every 3 minutes from sign-in): re-syncs users/roles/permissions
-  // from 3-user-data/users.permissions.json AND broadcasts dataRefreshSignal so
-  // every mounted view re-reads its own workspace data (assigned samples,
-  // referrals/approvals, notifications, ...) -- so an admin's edit or another
-  // employee's action reaches an already-open session without requiring the
-  // manual refresh button (AdminToolbar) or a full page reload.
+  // Auto-refresh (every 45s from sign-in, §2 of the perf/sync spec):
+  // re-syncs users/roles/permissions from 3-user-data/users.permissions.json.
   // Interval restarts on login/logout and whenever the workspace connection
   // itself changes; refreshPermissions() is a no-op while no workspace is ready.
+  //
+  // The DATA half of the old tick (broadcastDataRefresh("periodic")) has
+  // moved to <SyncTick/> (rendered below, inside GlobalMonthProvider) as a
+  // change-set-driven probe (§4.2) -- AuthGate itself cannot compute that
+  // change set because it is the PARENT of GlobalMonthProvider and so cannot
+  // call useGlobalMonth() to learn which month to probe (F17). Permissions
+  // stay on this separate, UNGATED interval deliberately: an admin revoking
+  // access must propagate even on a tick whose data change set is empty --
+  // "permissions" was never one of §4.2's data families and never should be.
   useEffect(() => {
     if (!session || session.mode === "demo") return;
     if (workspaceStatus !== "ready" || !directoryHandle) return;
 
-    const AUTO_REFRESH_INTERVAL_MS = 3 * 60_000;
+    const AUTO_REFRESH_INTERVAL_MS = 45_000;
     const id = window.setInterval(() => {
       // A backgrounded/minimized tab has nothing on screen that benefits from
-      // this tick -- skip the disk read and the fan-out signal entirely
-      // rather than paying their cost for no visible effect. The interval
-      // itself keeps running on its normal cadence; a later tick does the
-      // real work once the tab is visible again.
+      // this tick -- skip the disk read entirely rather than paying its cost
+      // for no visible effect. The interval itself keeps running on its
+      // normal cadence; a later tick does the real work once the tab is
+      // visible again.
       if (document.hidden) return;
       void refreshPermissions();
-      broadcastDataRefresh("periodic");
     }, AUTO_REFRESH_INTERVAL_MS);
 
     return () => window.clearInterval(id);
@@ -606,6 +610,16 @@ export default function AuthGate({ children }: AuthGateProps) {
 
     return (
       <GlobalMonthProvider>
+        {/* Headless -- computes the §4.2 change set for the selected month and
+            broadcasts only what changed. Rendered here (not in AuthGate's own
+            body) because it needs useGlobalMonth(), which only exists below
+            this provider -- see the doc comment above the permissions
+            interval and SyncTick.tsx's own module doc for the full F17
+            rationale. Session mode/workspace-readiness gating happens inside
+            SyncTick itself via useWorkspace()/useGlobalMonth() returning
+            null/"none" when not ready, mirroring the permissions effect
+            above. */}
+        <SyncTick />
         <AdminToolbar
           session={session}
           previewRole={previewRole}

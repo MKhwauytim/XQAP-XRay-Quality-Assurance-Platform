@@ -1,5 +1,5 @@
 import { describe, expect, test, it } from "vitest";
-import { processPopulation, normalizeDate } from "./populationProcessor";
+import { processPopulation, normalizeDate, normalizeResultValue } from "./populationProcessor";
 import type { RiskWorkbookResult } from "../riskData/riskDataTypes";
 import type { BiWorkbookResult } from "../biData/biDataTypes";
 import type { PopulationProcessingInput } from "./populationProcessingTypes";
@@ -129,6 +129,35 @@ describe("processPopulation async processing and column preservation", () => {
     expect(progressSteps[progressSteps.length - 1].percent).toBe(100);
   });
 
+  test("summary.certScanProvided is false and certScanRows is 0 when no CertScan reference text is supplied (owner report 2026-08-12: bare 0 must be distinguishable from 'matched none')", async () => {
+    const input: PopulationProcessingInput = {
+      riskWorkbookResult: mockRiskResult,
+      biWorkbookResult: mockBiResult,
+      certScanPasteText: ""
+    };
+
+    const result = await processPopulation(input);
+
+    expect(result.summary.certScanProvided).toBe(false);
+    expect(result.summary.certScanRows).toBe(0);
+  });
+
+  test("summary.certScanProvided is true once a parseable CertScan paste is supplied, independent of whether it actually matches this row's port/serial", async () => {
+    const input: PopulationProcessingInput = {
+      riskWorkbookResult: mockRiskResult,
+      biWorkbookResult: mockBiResult,
+      certScanPasteText: "Port Name\tSystem S/N\nمنفذ آخر\tXYZ98765"
+    };
+
+    const result = await processPopulation(input);
+
+    expect(result.summary.certScanProvided).toBe(true);
+    // This row's port ("البطحاء") doesn't align with the pasted port ("منفذ آخر"),
+    // so it still ends up NonCertScan -- certScanProvided being true is about
+    // whether a usable reference list existed, not whether this row matched it.
+    expect(result.summary.certScanRows).toBe(0);
+  });
+
   test("carries previously-dropped risk fields (manifest, movement, transit declaration, hijri dates, destination, entry/exit) through to the final prepared row", async () => {
     const input: PopulationProcessingInput = {
       riskWorkbookResult: mockRiskResult,
@@ -202,6 +231,81 @@ describe("processPopulation async processing and column preservation", () => {
 
     // Check BI custom column was merged
     expect(preparedRow.rawRow!["اسم الشركة الناقلة"]).toBe("الشركة السريعة");
+  });
+
+  // B7 (OOM fix, 2026-08-12): pins the memory-relevant structure behind the
+  // rawRow lazy-merge. A 130k-risk + 247k-BI month legitimately holds both
+  // full row sets in memory simultaneously (see 301e84d4's BI truthiness-bug
+  // fix) — copying the full raw row again for every prepared row doubled the
+  // dominant cost and caused a browser-tab OOM. These tests would fail if a
+  // future change reintroduces an eager `{ ...rawRow }` copy on this path.
+  describe("rawRow memory structure (B7)", () => {
+    test("a row provided but not matched by BI has a prepared rawRow that is the SAME object reference as the source risk row's rawRow (no copy)", async () => {
+      const biUnrelatedRow: BiWorkbookResult = {
+        ...mockBiResult,
+        rows: [
+          {
+            ...mockBiResult.rows[0],
+            xrayImageId: "SOME-OTHER-ID",
+            rawRow: { "اسم الشركة الناقلة": "شركة أخرى" }
+          }
+        ]
+      };
+
+      const input: PopulationProcessingInput = {
+        riskWorkbookResult: mockRiskResult,
+        biWorkbookResult: biUnrelatedRow,
+        certScanPasteText: ""
+      };
+
+      const result = await processPopulation(input);
+      const preparedRow = result.preparedRows[0];
+
+      expect(preparedRow).toBeDefined();
+      expect(preparedRow.biMatched).toBe(false);
+      // Identity, not just deep equality -- proves no `{ ...rawRow }` copy happened.
+      expect(preparedRow.rawRow).toBe(mockRiskResult.rows[0].rawRow);
+    });
+
+    test("a row with no BI provided at all has a prepared rawRow that is the SAME object reference as the source risk row's rawRow (no copy)", async () => {
+      const input: PopulationProcessingInput = {
+        riskWorkbookResult: mockRiskResult,
+        biWorkbookResult: null,
+        certScanPasteText: ""
+      };
+
+      const result = await processPopulation(input);
+      const preparedRow = result.preparedRows[0];
+
+      expect(preparedRow).toBeDefined();
+      expect(preparedRow.biMatched).toBe(false);
+      expect(preparedRow.rawRow).toBe(mockRiskResult.rows[0].rawRow);
+    });
+
+    test("a BI-matched row's prepared rawRow does not mutate the source risk row's own rawRow object", async () => {
+      const input: PopulationProcessingInput = {
+        riskWorkbookResult: mockRiskResult,
+        biWorkbookResult: mockBiResult,
+        certScanPasteText: ""
+      };
+
+      const result = await processPopulation(input);
+      const preparedRow = result.preparedRows[0];
+
+      expect(preparedRow.biMatched).toBe(true);
+      // The merged view sees the BI-only column...
+      expect(preparedRow.rawRow!["اسم الشركة الناقلة"]).toBe("الشركة السريعة");
+      // ...but the original risk row object handed in by the caller must stay
+      // untouched -- if this ever fails, some code path started merging BI
+      // data into the base object in place instead of via a separate delta.
+      expect(mockRiskResult.rows[0].rawRow).not.toHaveProperty("اسم الشركة الناقلة");
+      expect(Object.keys(mockRiskResult.rows[0].rawRow!)).toEqual([
+        "معرف الأشعة",
+        "اسم المنفذ",
+        "رقم لوحة الشاحنة",
+        "اسم السائق"
+      ]);
+    });
   });
 
   test("carries the three other-team risk results into otherResults (normalized)", async () => {
@@ -335,6 +439,130 @@ describe("processPopulation async processing and column preservation", () => {
     expect(result.preparedRows.length).toBe(0);
     expect(result.invalidResultRows.length).toBe(1);
   });
+
+  test("a row with a valid level 2 and an absent level 1 is still excluded, per the documented 'population entry requires valid L1 and L2' invariant (decisionFactTable.ts, and the 'other teams do not rescue it' test above) — this is NOT the bug to fix on a guess", async () => {
+    const riskAbsentL1: RiskWorkbookResult = {
+      ...mockRiskResult,
+      rows: [
+        {
+          ...mockRiskResult.rows[0],
+          xrayLevelOneResult: null,
+          xrayLevelTwoResult: "اشتباه"
+        }
+      ]
+    };
+
+    const input: PopulationProcessingInput = {
+      riskWorkbookResult: riskAbsentL1,
+      biWorkbookResult: null,
+      certScanPasteText: ""
+    };
+
+    const result = await processPopulation(input);
+
+    expect(result.preparedRows.length).toBe(0);
+    expect(result.invalidResultRows.length).toBe(1);
+    // Diagnostic: the dropped-row reason must identify WHICH field failed
+    // (level 1, not level 2) and record the raw offending value so a
+    // 100%-drop report is self-diagnosing instead of a bare count.
+    expect(result.invalidResultRows[0].reason).toMatch(/^Invalid level result \[L1\]:/);
+    expect(result.invalidResultRows[0].reason).toContain("xrayLevelOneResult=");
+    expect(result.invalidResultRows[0].reason).not.toContain("xrayLevelTwoResult=");
+  });
+
+  test("stops building per-row diagnostic strings past the cap, so a wholesale-drop month cannot exhaust the heap (OOM regression guard)", async () => {
+    // The tagged reason is a UNIQUE string per row; the reason it replaced was
+    // one interned literal. On a real 500k-row month where the level columns
+    // fail wholesale, building one fresh string per dropped row exhausted the
+    // heap — an OOM caused by the very diagnostic meant to explain the drop.
+    const DROPPED = 120; // > DIAGNOSTIC_DETAILED_ROW_LIMIT (50)
+    const riskManyInvalid: RiskWorkbookResult = {
+      ...mockRiskResult,
+      rows: Array.from({ length: DROPPED }, (_, i) => ({
+        ...mockRiskResult.rows[0],
+        xrayImageId: `X-OOM-${i}`,
+        xrayLevelOneResult: null,
+        xrayLevelTwoResult: "اشتباه"
+      }))
+    };
+
+    const result = await processPopulation({
+      riskWorkbookResult: riskManyInvalid,
+      biWorkbookResult: null,
+      certScanPasteText: ""
+    });
+
+    // Every dropped row is still counted — summary totals derive from .length.
+    expect(result.invalidResultRows.length).toBe(DROPPED);
+
+    // The first rows keep full detail (what the report's examples render).
+    expect(result.invalidResultRows[0].reason).toMatch(/^Invalid level result \[L1\]:/);
+
+    // Past the cap the reason is the SHARED constant — asserted by reference
+    // identity, which is the property that actually bounds allocation.
+    const tail = result.invalidResultRows.slice(60).map((r) => r.reason);
+    const distinctTailReasons = new Set(tail);
+    expect(distinctTailReasons.size).toBe(1);
+    expect(tail[0]).not.toMatch(/^Invalid level result \[L1\]:/);
+    expect(tail.every((reason) => reason === tail[0])).toBe(true);
+  });
+
+  test("diagnostic reason carries the raw unrecognized value (truncated) for a garbled level 2 cell, tagged [L2]", async () => {
+    const longGarbledValue = "قيمة غير معروفة تماماً ولا تطابق أي نمط معروف على الإطلاق مهما طالت";
+    const riskGarbledL2: RiskWorkbookResult = {
+      ...mockRiskResult,
+      rows: [
+        {
+          ...mockRiskResult.rows[0],
+          xrayLevelOneResult: "سليمة",
+          xrayLevelTwoResult: longGarbledValue
+        }
+      ]
+    };
+
+    const input: PopulationProcessingInput = {
+      riskWorkbookResult: riskGarbledL2,
+      biWorkbookResult: null,
+      certScanPasteText: ""
+    };
+
+    const result = await processPopulation(input);
+
+    expect(result.invalidResultRows.length).toBe(1);
+    const reason = result.invalidResultRows[0].reason;
+    expect(reason).toMatch(/^Invalid level result \[L2\]:/);
+    expect(reason).toContain("xrayLevelTwoResult=");
+    // Truncated, not the full raw string, and not "empty/missing".
+    expect(reason).not.toContain(longGarbledValue);
+    expect(reason).not.toContain("فارغ/غير موجود");
+  });
+
+  test("diagnostic reason is tagged [L1+L2] when both levels fail", async () => {
+    const riskBothInvalid: RiskWorkbookResult = {
+      ...mockRiskResult,
+      rows: [
+        {
+          ...mockRiskResult.rows[0],
+          xrayLevelOneResult: null,
+          xrayLevelTwoResult: null
+        }
+      ]
+    };
+
+    const input: PopulationProcessingInput = {
+      riskWorkbookResult: riskBothInvalid,
+      biWorkbookResult: null,
+      certScanPasteText: ""
+    };
+
+    const result = await processPopulation(input);
+
+    expect(result.invalidResultRows.length).toBe(1);
+    const reason = result.invalidResultRows[0].reason;
+    expect(reason).toMatch(/^Invalid level result \[L1\+L2\]:/);
+    expect(reason).toContain("xrayLevelOneResult=");
+    expect(reason).toContain("xrayLevelTwoResult=");
+  });
 });
 
 describe("normalizeDate", () => {
@@ -375,5 +603,87 @@ describe("normalizeDate", () => {
   it("returns null for empty/null input, unchanged", () => {
     expect(normalizeDate(null)).toBeNull();
     expect(normalizeDate("")).toBeNull();
+  });
+
+  // Table-driven coverage for every shape the owner reported seeing in real
+  // BI/risk imports: Excel serials (string and numeric-typed), datetime
+  // strings with and without fractional seconds, JS Date objects (in case a
+  // future/alternate workbook reader hands one back), the existing
+  // slash/dash/Arabic-month formats, and a value that must pass through
+  // untouched.
+  const cases: Array<[string, string | number | Date | null, string | null]> = [
+    // Excel serial numbers, as strings (how they arrive today via
+    // riskDataNormalizer's String(value) conversion of a raw numeric cell).
+    ["excel serial string, mid-range (45814 -> 2025-06-05)", "45814", "2025-06-05"],
+    ["excel serial string, lower boundary (25000)", "25000", "1968-06-10"],
+    ["excel serial string, upper boundary (60000)", "60000", "2064-04-07"],
+    ["excel serial string with fractional time-of-day part", "45814.6136", "2025-06-05"],
+    // Excel serial numbers, as an actual JS number (not pre-stringified).
+    ["excel serial as JS number", 45814, "2025-06-05"],
+    ["excel serial as JS number with fractional time-of-day part", 45814.25, "2025-06-05"],
+    // A number outside the plausible serial range must not be reinterpreted —
+    // it is presumably a genuine numeric ID, not a date.
+    ["out-of-range number is left as its string form, not treated as a serial", 99999999, "99999999"],
+    // A 5-digit string outside the plausible range: same guard, string form.
+    ["out-of-range 5-digit numeric string is returned raw, not a serial", "99999", "99999"],
+    // Datetime strings: keep the date, drop the time.
+    ["datetime string with seconds", "2026-05-01 18:04:11", "2026-05-01"],
+    ["datetime string with fractional seconds", "2026-05-16 09:14:30.000000", "2026-05-16"],
+    // JS Date object input (defensive: some SheetJS configurations return these).
+    ["JS Date object", new Date(2026, 4, 16), "2026-05-16"],
+    // Formats the existing helper already handled, kept as a regression net.
+    ["slash-separated day-first", "25/12/2025", "2025-12-25"],
+    ["dash-separated day-first", "25-12-2025", "2025-12-25"],
+    ["dot-separated day-first", "25.12.2025", "2025-12-25"],
+    ["mixed DDMmmYYYY", "12Dec2025", "2025-12-12"],
+    ["Arabic month name", "12 ديسمبر 2025", "2025-12-12"],
+    ["already ISO, no time", "2026-05-01", "2026-05-01"],
+    // A value that must still pass through untouched: no recognizable format.
+    ["unrecognized free text passes through unchanged", "N/A", "N/A"],
+    ["null input", null, null]
+  ];
+
+  it.each(cases)("%s", (_label, input, expected) => {
+    expect(normalizeDate(input)).toBe(expected);
+  });
+});
+
+describe("normalizeResultValue", () => {
+  const cases: Array<[string, string | null, "سليمة" | "اشتباه" | null]> = [
+    // Plain numeric codes.
+    ["numeric code 1 -> سليمة", "1", "سليمة"],
+    ["numeric code 2 -> اشتباه", "2", "اشتباه"],
+    // Leading numeric code with a parenthesised label — the agency's own
+    // numeric code is authoritative, checked ahead of the text.
+    ["numeric-code form '1 (سليمة)'", "1 (سليمة)", "سليمة"],
+    ["numeric-code form '2 (اشتباه)'", "2 (اشتباه)", "اشتباه"],
+    ["numeric-code form with English label", "2 (Suspect)", "اشتباه"],
+    // English codes.
+    ["English CLEAR", "CLEAR", "سليمة"],
+    ["English OK", "ok", "سليمة"],
+    ["English PASS", "Pass", "سليمة"],
+    ["English ALERT", "ALERT", "اشتباه"],
+    ["English FAIL", "fail", "اشتباه"],
+    ["English SUSPECT", "Suspect", "اشتباه"],
+    // Plain Arabic text.
+    ["plain سليمة", "سليمة", "سليمة"],
+    ["plain اشتباه", "اشتباه", "اشتباه"],
+    ["سليمة with trailing code", "سليمة - 123", "سليمة"],
+    ["نظيف synonym", "نظيف", "سليمة"],
+    ["مقبول synonym", "مقبول", "سليمة"],
+    ["مريب synonym", "مريب", "اشتباه"],
+    ["مشبوه synonym", "مشبوه", "اشتباه"],
+    // THE precedence-bug case: a compound value containing BOTH tokens must
+    // resolve to اشتباه (the safe audit reading — never silently downgrade a
+    // recorded suspicion to "clear"), not سليمة.
+    ["compound value with BOTH tokens resolves to اشتباه (regression guard for the precedence bug)", "نتيجة اشتباه -مبدئي (سليمة)", "اشتباه"],
+    // Values that must not match anything.
+    ["unrecognized text returns null", "غير معروف", null],
+    ["empty string returns null", "", null],
+    ["null input returns null", null, null]
+  ];
+
+  it.each(cases)("%s", (_label, input, expected) => {
+    expect(normalizeResultValue(input)).toBe(expected);
   });
 });

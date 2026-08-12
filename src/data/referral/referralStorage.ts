@@ -11,6 +11,8 @@ import {
   loadAllSupervisorDecisions,
   mergeDecisionHistory,
 } from "../approvals/approvalStorage";
+import type { SupervisorDecisionFile } from "../approvals/approvalTypes";
+import { dedupeInFlight, workspaceScopeId, workspaceEpoch } from "../storage/inFlightReads";
 import type {
   ReferralLog,
   ReferralRequest,
@@ -20,6 +22,7 @@ import type {
   ReplacementLog,
   ReplacementRequest,
 } from "./referralTypes";
+import type { EmployeeAnswerFile } from "../answers/answerTypes";
 
 // ── Referral requests ─────────────────────────────────────────────────────────
 
@@ -33,29 +36,84 @@ export async function appendReferralRequest(
 }
 
 /**
+ * One shared scan backing all three request logs (referral, replacement,
+ * reopen) for a month — A4. Previously each of `loadReferralLog` /
+ * `loadReplacementLog` / `loadReopenLog` independently re-scanned both the
+ * per-employee answers directory and the per-supervisor decisions directory
+ * (six directory scans for three concurrent callers instead of two). This
+ * performs the two underlying scans exactly once and folds all three kinds
+ * from that single pair of results.
+ *
+ * Wrapped in `dedupeInFlight` (mirroring `loadDistributionLogForRead` in
+ * `distributionStorage.ts`) so concurrent per-kind callers within one load
+ * pass — e.g. `Promise.all([loadReferralLog, loadReplacementLog,
+ * loadReopenLog])` — share a single underlying scan rather than each
+ * delegating export independently awaiting its own copy.
+ *
+ * Failure-domain note: `loadAllEmployeeFiles` and `loadAllSupervisorDecisions`
+ * already degrade independently to `[]` on their own read/list failure, and
+ * each uses `onUnreadable: "skip"` internally so one corrupt file only drops
+ * that file. Calling them once here and reusing the result for all three
+ * kinds does not collapse that — the per-file skip behaviour lives inside
+ * `readJsonDirectory`, not in how many times the caller invokes these
+ * functions.
+ */
+export async function loadRequestLogs(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<{ referrals: ReferralLog; replacements: ReplacementLog; reopens: ReopenLog }> {
+  const key = `${workspaceScopeId(directoryHandle)}|${monthFolderName}|${workspaceEpoch(directoryHandle, monthFolderName)}|request-logs`;
+  return dedupeInFlight(key, async () => {
+    const [empFiles, allDecisions] = await Promise.all([
+      loadAllEmployeeFiles(directoryHandle, monthFolderName),
+      loadAllSupervisorDecisions(directoryHandle, monthFolderName),
+    ]);
+
+    return {
+      referrals: buildLog(monthFolderName, empFiles, allDecisions, "referral", (f) => f.referralRequests ?? []),
+      replacements: buildLog(monthFolderName, empFiles, allDecisions, "replacement", (f) => f.replacementRequests ?? []),
+      reopens: buildLog(monthFolderName, empFiles, allDecisions, "reopen", (f) => f.reopenRequests ?? []),
+    };
+  });
+}
+
+function buildLog<TRequest extends { requestId: string }>(
+  monthFolderName: string,
+  empFiles: EmployeeAnswerFile[],
+  allDecisions: SupervisorDecisionFile[],
+  kind: "referral" | "replacement" | "reopen",
+  pick: (f: EmployeeAnswerFile) => TRequest[]
+): { monthFolderName: string; revision: number; requests: TRequest[] } {
+  const allRequests = empFiles.flatMap(pick);
+
+  const requests = allRequests.map((r) => {
+    const history = mergeDecisionHistory(allDecisions, kind, r.requestId);
+    const latest = effectiveDecision(history);
+    // Cast is safe: TRequest is instantiated per-call-site to the concrete
+    // request type matching `kind` (referral/replacement/reopen), all of
+    // which share `status`/`reviewedBy`/`reviewedAt`/`reviewNotes`/`history`
+    // as (optional) fields — the generic bound just can't express that.
+    return (latest
+      ? { ...r, status: latest.status, reviewedBy: latest.reviewedBy, reviewedAt: latest.reviewedAt, reviewNotes: latest.reviewNotes, history }
+      : { ...r, history }) as TRequest;
+  });
+
+  return { monthFolderName, revision: 0, requests };
+}
+
+/**
  * Aggregate all employee files and supervisor decision files into a single ReferralLog.
  * Requests are joined with supervisor decisions to produce the effective status.
+ *
+ * Thin delegating wrapper over `loadRequestLogs` (A4) — kept for callers that
+ * only need one kind; error handling and return shape are unchanged.
  */
 export async function loadReferralLog(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string
 ): Promise<ReferralLog> {
-  const [empFiles, allDecisions] = await Promise.all([
-    loadAllEmployeeFiles(directoryHandle, monthFolderName),
-    loadAllSupervisorDecisions(directoryHandle, monthFolderName),
-  ]);
-
-  const allRequests = empFiles.flatMap((f) => f.referralRequests ?? []);
-
-  const requests = allRequests.map((r) => {
-    const history = mergeDecisionHistory(allDecisions, "referral", r.requestId);
-    const latest = effectiveDecision(history);
-    return latest
-      ? { ...r, status: latest.status, reviewedBy: latest.reviewedBy, reviewedAt: latest.reviewedAt, reviewNotes: latest.reviewNotes, history }
-      : { ...r, history };
-  });
-
-  return { monthFolderName, revision: 0, requests };
+  const { referrals } = await loadRequestLogs(directoryHandle, monthFolderName);
+  return referrals;
 }
 
 /** Write a supervisor approval/denial to the supervisor's own decisions file. */
@@ -112,27 +170,16 @@ export async function appendReplacementRequest(
 /**
  * Aggregate all employee files and supervisor decision files into a single ReplacementLog.
  * Requests are joined with supervisor decisions to produce the effective status.
+ *
+ * Thin delegating wrapper over `loadRequestLogs` (A4) — error handling and
+ * return shape are unchanged.
  */
 export async function loadReplacementLog(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string
 ): Promise<ReplacementLog> {
-  const [empFiles, allDecisions] = await Promise.all([
-    loadAllEmployeeFiles(directoryHandle, monthFolderName),
-    loadAllSupervisorDecisions(directoryHandle, monthFolderName),
-  ]);
-
-  const allRequests = empFiles.flatMap((f) => f.replacementRequests ?? []);
-
-  const requests = allRequests.map((r) => {
-    const history = mergeDecisionHistory(allDecisions, "replacement", r.requestId);
-    const latest = effectiveDecision(history);
-    return latest
-      ? { ...r, status: latest.status, reviewedBy: latest.reviewedBy, reviewedAt: latest.reviewedAt, reviewNotes: latest.reviewNotes, history }
-      : { ...r, history };
-  });
-
-  return { monthFolderName, revision: 0, requests };
+  const { replacements } = await loadRequestLogs(directoryHandle, monthFolderName);
+  return replacements;
 }
 
 /** Write a supervisor approval/denial to the supervisor's own decisions file. */
@@ -166,27 +213,16 @@ export async function appendReopenRequest(
 /**
  * Aggregate all employee files and supervisor decision files into a single ReopenLog.
  * Requests are joined with supervisor decisions to produce the effective status.
+ *
+ * Thin delegating wrapper over `loadRequestLogs` (A4) — error handling and
+ * return shape are unchanged.
  */
 export async function loadReopenLog(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string
 ): Promise<ReopenLog> {
-  const [empFiles, allDecisions] = await Promise.all([
-    loadAllEmployeeFiles(directoryHandle, monthFolderName),
-    loadAllSupervisorDecisions(directoryHandle, monthFolderName),
-  ]);
-
-  const allRequests = empFiles.flatMap((f) => f.reopenRequests ?? []);
-
-  const requests = allRequests.map((r) => {
-    const history = mergeDecisionHistory(allDecisions, "reopen", r.requestId);
-    const latest = effectiveDecision(history);
-    return latest
-      ? { ...r, status: latest.status, reviewedBy: latest.reviewedBy, reviewedAt: latest.reviewedAt, reviewNotes: latest.reviewNotes, history }
-      : { ...r, history };
-  });
-
-  return { monthFolderName, revision: 0, requests };
+  const { reopens } = await loadRequestLogs(directoryHandle, monthFolderName);
+  return reopens;
 }
 
 /** Write a supervisor approval/denial to the supervisor's own decisions file. */

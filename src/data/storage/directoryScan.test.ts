@@ -5,6 +5,7 @@ import { safeWriteJson } from "./safeWrite";
 import type { DirectoryHandleLike, FileHandleLike } from "./fileSystemAccess";
 import {
   listDirectoryEntries,
+  listDirectoryEntriesWithSize,
   readJsonDirectory,
   DIRECTORY_READ_CONCURRENCY,
   readAppendOnlyDirectory,
@@ -329,5 +330,58 @@ describe("readAppendOnlyDirectory (Task: incremental cache)", () => {
     clearReadLog(root);
     await readAppendOnlyDirectory<Widget>(dir, { suffix: ".widget.json", onUnreadable: "skip", scope: { root, path: "events" } });
     expect(getReadLog(root)).toHaveLength(1);
+  });
+});
+
+describe("listDirectoryEntriesWithSize (A7, F21's sized-listing helper)", () => {
+  it("returns name and byte size for every matching file, sorted by name", async () => {
+    const dir = createMemoryDirectory();
+    await writeRawFile(dir, "b.answers.json", "0123456789"); // 10 bytes
+    await writeRawFile(dir, "a.answers.json", "01"); // 2 bytes
+    await dir.getDirectoryHandle("subdir", { create: true }); // must be ignored
+
+    const sized = await listDirectoryEntriesWithSize(dir, ".answers.json");
+
+    expect(sized).toEqual([
+      { name: "a.answers.json", size: 2 },
+      { name: "b.answers.json", size: 10 },
+    ]);
+  });
+
+  it("detects a request appended into an EXISTING file via a larger size -- the case a name-only diff misses (F21)", async () => {
+    const dir = createMemoryDirectory();
+    await writeRawFile(dir, "alice.answers.json", "short");
+
+    const before = await listDirectoryEntriesWithSize(dir, ".answers.json");
+    expect(before).toEqual([{ name: "alice.answers.json", size: "short".length }]);
+
+    // Same file NAME, more content appended -- a name-diff (listDirectoryEntries)
+    // would report this tick as "nothing new".
+    await writeRawFile(dir, "alice.answers.json", "a much longer body than before");
+
+    const after = await listDirectoryEntriesWithSize(dir, ".answers.json");
+    expect(after[0]?.size).toBeGreaterThan(before[0]?.size ?? 0);
+  });
+
+  it("returns an empty array when nothing matches the suffix", async () => {
+    const dir = createMemoryDirectory();
+    await writeRawFile(dir, "unrelated.txt", "x");
+    expect(await listDirectoryEntriesWithSize(dir, ".answers.json")).toEqual([]);
+  });
+
+  it("costs exactly one getFileHandle/getFile round trip per matched file, no content read of unmatched files", async () => {
+    const root = createMemoryDirectory("root", { trackReads: true });
+    await writeRawFile(root, "a.answers.json", "aa");
+    await writeRawFile(root, "b.answers.json", "bb");
+    await writeRawFile(root, "ignored.txt", "zz");
+    clearReadLog(root);
+
+    const sized = await listDirectoryEntriesWithSize(root, ".answers.json");
+
+    expect(sized).toHaveLength(2);
+    // getFile() is what memoryDirectory's trackReads instruments -- exactly
+    // one call per matched file, and the unmatched file is never touched.
+    expect(getReadLog(root)).toHaveLength(2);
+    expect(getReadLog(root).every((path) => path.endsWith(".answers.json"))).toBe(true);
   });
 });

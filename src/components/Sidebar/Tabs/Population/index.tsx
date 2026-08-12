@@ -18,6 +18,7 @@ import type { UsePermissionsResult } from "../../../../auth/usePermissions";
 import { logError, logRejection } from "../../../../data/storage/errorLogger";
 import type { SafeWriteProgressPhase } from "../../../../data/storage/safeWrite";
 import { currentMonthFolderInfo, formatMonthFolderName, formatMonthFolderShortLabel } from "../../../../data/population/monthFolder";
+import { stripRawRow } from "../../../../data/population/populationTypes";
 import type { MonthFolderInfo } from "../../../../data/population/monthFolder";
 import {
   saveMonthRun,
@@ -27,12 +28,7 @@ import {
   saveSamplingProof,
   updateMonthStatus,
 } from "../../../../data/population/populationStorage";
-import {
-  loadDistributionLog,
-  loadOrDeriveDistributionCurrent,
-} from "../../../../data/distribution/distributionStorage";
-import { loadAllEmployeeFiles } from "../../../../data/answers/answerStorage";
-import { scanReferentialIntegrity, type OrphanScanResult } from "../../../../data/integrity/orphanScan";
+import { loadDistributionLog } from "../../../../data/distribution/distributionStorage";
 import { drawSample } from "../../../../data/sampling/sampleAlgorithm";
 import { loadSampleMaster, saveSampleMaster } from "../../../../data/sampling/sampleStorage";
 import { buildSamplingPlan, saveSamplingPlan } from "../../../../data/sampling/samplingPlanStorage";
@@ -172,7 +168,21 @@ export default function PopulationTab() {
   const { directoryHandle } = useWorkspace();
   const { can, canMutate } = usePermissions();
   const sessionRef = useRef(readSession());
-  const [activeSubTab, setActiveSubTab] = useState<SubTab>("process");
+  // A1 (perf/sync enhancement 2026-08-12): land on "browse" only when BOTH
+  // clauses hold. can("view-browse") is required or the user lands on the
+  // "غير مصرح" placeholder below. The capability clause is required because
+  // BrowseDataView reads the month's entire population.final on mount with
+  // no already-loaded guard, while computeMonthLoadScope only ever requests
+  // `population`/`raw` for the "process" sub-tab -- so an unconditional
+  // browse landing would charge a viewer without draw-sample/process-population
+  // a multi-MB UNC read they pay nothing for today. For a manager/admin who
+  // does hold one of those capabilities, landing on browse is a net win: it
+  // avoids the per-tick population reload the "process" sub-tab would trigger.
+  const [activeSubTab, setActiveSubTab] = useState<SubTab>(() =>
+    can("view-browse") && (canMutate("draw-sample") || canMutate("process-population"))
+      ? "browse"
+      : "process"
+  );
   // Browse owns its own data-load effect (BrowseDataView) with no
   // "already loaded" guard; keeping it mounted-but-hidden once visited,
   // instead of unmounting on every sub-tab switch, avoids re-loading its
@@ -454,9 +464,6 @@ export default function PopulationTab() {
   // B4 switching-rule advisory computed for the currently-selected month.
   const [priorMonthAdvisory, setPriorMonthAdvisory] =
     useState<SamplingPlanPriorMonthAdvisory | null>(null);
-  // B3 referential-integrity orphan scan for the selected month (Phase 2 view).
-  const [orphanScan, setOrphanScan] = useState<OrphanScanResult | null>(null);
-
   // Phase 4 — distribution (state + mutating handlers extracted to
   // useDistributionActions.ts to stay under check:complexity's
   // max-lines-per-function budget; see that file's header comment)
@@ -552,49 +559,6 @@ export default function PopulationTab() {
     void handleProcessPopulation();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- handleProcessPopulation is a fresh closure every render; the ref guard above (not a dependency) is what actually prevents repeat firing
   }, [activeSubTab, currentPhase, riskWorkbookResult, populationProcessingResult, isProcessingPopulation, isLoadingMonthData, canProcessNow]);
-
-  // B3: compute the orphan scan for the selected month when the Phase 2 report is
-  // visible. Best-effort — any load failure clears the scan (section renders nothing).
-  useEffect(() => {
-    if (!directoryHandle || currentPhase !== 2 || !populationProcessingResult) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync clear when preconditions unmet
-      setOrphanScan(null);
-      return;
-    }
-    let cancelled = false;
-    const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
-    const populationRows = populationProcessingResult.preparedRows;
-    void (async () => {
-      try {
-        const sample = await loadSampleMaster(directoryHandle, monthFolderName);
-        const distribution = sample
-          ? await loadOrDeriveDistributionCurrent(directoryHandle, monthFolderName, sample.rows)
-          : null;
-        const employeeFiles = await loadAllEmployeeFiles(directoryHandle, monthFolderName);
-        if (cancelled) return;
-        const answersIds: string[] = [];
-        const approvalsIds: string[] = [];
-        for (const file of employeeFiles) {
-          for (const item of file.items) answersIds.push(item.xrayImageId);
-          for (const req of file.referralRequests ?? []) approvalsIds.push(...req.xrayImageIds);
-          for (const req of file.replacementRequests ?? []) {
-            approvalsIds.push(req.originalXrayImageId, req.replacementXrayImageId);
-          }
-        }
-        const scan = scanReferentialIntegrity({
-          populationIds: populationRows.map((r) => r.xrayImageId),
-          sampleIds: (sample?.rows ?? []).map((r) => r.xrayImageId),
-          distributionIds: (distribution?.entries ?? []).map((e) => e.xrayImageId),
-          answersIds,
-          approvalsIds,
-        });
-        if (!cancelled) setOrphanScan(scan);
-      } catch {
-        if (!cancelled) setOrphanScan(null);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [directoryHandle, currentPhase, populationProcessingResult, saveMonth, saveYear, monthRefreshKey]);
 
   const isPhaseOneComplete = useMemo(
     () => Boolean(uploads.riskAgencyData.file),
@@ -954,9 +918,14 @@ export default function PopulationTab() {
         biRawRows: biWorkbookResult
           ? (biWorkbookResult.rows as Array<Record<string, unknown>>)
           : [],
-        // Strip rawRow before persisting — raw data is already in risk.raw.json
+        // Strip rawRow before persisting — raw data is already in risk.raw.json.
+        // B7 (OOM fix, 2026-08-12): `rawRow` may be a lazily-computed BI-merge
+        // accessor (populationTypes.ts's attachLazyRawRow); destructuring it out
+        // by name here would force that merge across the whole population right
+        // as it's at its largest. stripRawRow() enumerates keys instead and never
+        // touches the accessor's getter.
         processedRows: processingResult.preparedRows.map(
-          ({ rawRow: _rawRow, ...rest }) => rest
+          (row) => stripRawRow(row)
         ) as Array<Record<string, unknown>>,
         certScanRows: processingResult.summary.certScanRows,
         nonCertScanRows: processingResult.summary.nonCertScanRows,
@@ -1288,11 +1257,11 @@ export default function PopulationTab() {
             saveProgressPhase={saveProgressPhase}
             saveToDiskMessage={saveToDiskMessage}
             hasDiskWorkspace={Boolean(directoryHandle)}
-            orphanScan={orphanScan}
             canProcess={canProcessNow}
             canExport={canExportNow}
             populationLocked={populationLocked}
             populationAggregate={populationAggregate}
+            stageMappings={config.stageMappings}
             onProcessPopulation={handleProcessPopulation}
             onExportPopulation={handleExportPopulation}
           />

@@ -19,6 +19,7 @@ import {
 } from "../../../../../auth/userManagement";
 import type { AppNotification } from "../../../../../data/notifications/notificationTypes";
 import { loadNotifications, postNotification } from "../../../../../data/notifications/notificationStorage";
+import { broadcastDataRefresh } from "../../../../../data/workspace/dataRefreshSignal";
 import NotificationManager from "./NotificationManager";
 
 vi.mock("../../../../../data/notifications/notificationStorage", () => ({
@@ -112,6 +113,88 @@ describe("NotificationManager loading/error hardening", () => {
 
     await waitFor(() => expect(screen.getByText("0 من 3 اطّلعوا")).toBeInTheDocument());
     expect(screen.queryByText("جميلة الغامدي")).not.toBeInTheDocument();
+  });
+});
+
+// A2 — a background/manual refresh must never blank a previously rendered list.
+describe("NotificationManager silent refresh (A2)", () => {
+  it("keeps the previously rendered notification list mounted (same DOM node) across a periodic refresh, and never shows LoadingState", async () => {
+    writeSession({ role: "manager", username: "mgr-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const notification: AppNotification = {
+      id: "n1",
+      message: "رسالة أولى",
+      postedBy: "mgr-1",
+      postedAt: new Date().toISOString(),
+      acceptances: [],
+    };
+    loadNotificationsMock.mockResolvedValue([notification]);
+
+    render(<NotificationManager directoryHandle={{} as DirectoryHandleLike} />);
+    await waitFor(() => expect(screen.getByText("رسالة أولى")).toBeInTheDocument());
+
+    // Hold a reference to the actual rendered list item -- a naive silent-flag
+    // no-op (opts.silent landing on the event's source string, exactly like the
+    // `subscribeToDataRefresh(reload)` bug this guards against) would flip
+    // loadState to "loading", unmount the whole `<ul>` under the mutually
+    // exclusive `loadState === "loading"` / `loadState === "ready"` render
+    // gates, and hand back a freshly created node on the next render even if
+    // the content ends up identical.
+    const listItemBefore = screen.getByText("رسالة أولى").closest("li");
+    expect(listItemBefore).not.toBeNull();
+
+    const secondNotification: AppNotification = {
+      id: "n2",
+      message: "رسالة ثانية",
+      postedBy: "mgr-1",
+      postedAt: new Date().toISOString(),
+      acceptances: [],
+    };
+    loadNotificationsMock.mockResolvedValue([secondNotification, notification]);
+
+    act(() => {
+      broadcastDataRefresh("periodic");
+    });
+
+    await waitFor(() => expect(screen.getByText("رسالة ثانية")).toBeInTheDocument());
+    expect(screen.queryByText("جارٍ التحميل…")).not.toBeInTheDocument();
+    expect(screen.queryByText("تعذر تحميل الإشعارات.")).not.toBeInTheDocument();
+
+    // The pre-existing item's DOM node was never destroyed and recreated.
+    const listItemAfter = screen.getByText("رسالة أولى").closest("li");
+    expect(listItemAfter).toBe(listItemBefore);
+  });
+
+  it("keeps the previously rendered list and shows no error state when a silent background refresh's read fails", async () => {
+    writeSession({ role: "manager", username: "mgr-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const notification: AppNotification = {
+      id: "n1",
+      message: "رسالة موجودة",
+      postedBy: "mgr-1",
+      postedAt: new Date().toISOString(),
+      acceptances: [],
+    };
+    loadNotificationsMock.mockResolvedValue([notification]);
+
+    render(<NotificationManager directoryHandle={{} as DirectoryHandleLike} />);
+    await waitFor(() => expect(screen.getByText("رسالة موجودة")).toBeInTheDocument());
+
+    loadNotificationsMock.mockRejectedValueOnce(new Error("transient UNC hiccup"));
+
+    act(() => {
+      broadcastDataRefresh("periodic");
+    });
+
+    // Give the rejected silent reload a tick to settle.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+
+    expect(screen.getByText("رسالة موجودة")).toBeInTheDocument();
+    expect(screen.queryByText("تعذر تحميل الإشعارات.")).not.toBeInTheDocument();
   });
 });
 

@@ -164,12 +164,65 @@ export function toEmployeeMirrorRowStub(row: PreparedPopulationRow): EmployeeMir
  * (which still carry `rawRow`), and without this strip that would land
  * `rawRow` in `sample.master.json` and, downstream, in every distribution/
  * mirror file derived from it.
+ *
+ * B7 (OOM fix, 2026-08-12): `rawRow` may be a lazily-computed accessor
+ * property (see `attachLazyRawRow` below) rather than a plain data property —
+ * `processPopulation` defers the BI-merge until something actually reads
+ * `rawRow`, specifically so bulk strip operations like this one never force
+ * that merge across the whole population. Do NOT read `row.rawRow` here (not
+ * even for a truthiness check) — that alone would materialize every row's
+ * merged object right as the population is at its largest. Enumerate own keys
+ * instead, which never touches the accessor's getter.
  */
 export function stripRawRow(row: PreparedPopulationRow): PreparedPopulationRow {
-  if (!row.rawRow) return row;
-  const rest = { ...row };
-  delete rest.rawRow;
+  if (!Object.prototype.hasOwnProperty.call(row, "rawRow")) return row;
+  const rest = {} as PreparedPopulationRow;
+  for (const key of Object.keys(row) as (keyof PreparedPopulationRow)[]) {
+    if (key === "rawRow") continue;
+    (rest as Record<string, unknown>)[key] = row[key];
+  }
   return rest;
+}
+
+/**
+ * B7 (OOM fix, 2026-08-12): attaches `rawRow` to a freshly-built
+ * `PreparedPopulationRow` as a lazy, uncached accessor instead of a plain
+ * data property. Only `populationProcessor.ts` calls this, right after
+ * building each row.
+ *
+ * Why: `enrichDraftRowFromBi` used to eagerly build the BI-merged `rawRow` by
+ * spreading the risk row's full raw record and overlaying any BI-filled
+ * extras — a brand-new, full-size copy of the raw row for every BI-matched
+ * row. With a 130k-row risk sheet and a 247k-row BI sheet both legitimately
+ * resident (see the BI truthiness-bug fix in 301e84d4), that copy doubled the
+ * standing memory cost of the already-dominant `rawRow` field and was the
+ * proximate cause of a browser-tab OOM during Phase 2 processing.
+ *
+ * `base` is the SAME object reference as the source risk row's `rawRow` — it
+ * is never copied here. `extras` holds only the keys BI actually added or
+ * overrode (a small delta, not a full row). The two are merged into a new
+ * object only when something reads `.rawRow`, and every read recomputes
+ * fresh rather than caching, so a one-off export or report build doesn't
+ * permanently re-inflate the row's resident size afterward. Consumers that
+ * only need to know "does this row have unmapped raw data at all" without
+ * needing the values (`stripRawRow` above) must never touch `.rawRow` itself.
+ */
+export function attachLazyRawRow(
+  row: PreparedPopulationRow,
+  base: Record<string, unknown> | undefined,
+  extras: Record<string, unknown> | null
+): void {
+  if (!extras || Object.keys(extras).length === 0) {
+    row.rawRow = base;
+    return;
+  }
+  Object.defineProperty(row, "rawRow", {
+    enumerable: true,
+    configurable: true,
+    get(): Record<string, unknown> {
+      return { ...(base ?? {}), ...extras };
+    }
+  });
 }
 
 export type RemovedPopulationRow = {
@@ -203,6 +256,14 @@ export type ProcessingSummary = {
   nonCertScanRows: number;
   certScanPercentage: number;
   nonCertScanPercentage: number;
+  /** W-owner-2026-08-12c: whether any CertScan device entries were successfully
+   *  parsed from the pasted reference text (`certScanEntries.length > 0` in
+   *  `populationProcessor.ts`) — distinguishes "no CertScan reference supplied
+   *  for this run" from "supplied but matched zero rows", which a bare
+   *  `certScanRows: 0` cannot. Optional: older persisted aggregates / report
+   *  fixtures/builders that predate this field simply omit it, and UI consumers
+   *  must treat `undefined` as "unknown", not as either true or false. */
+  certScanProvided?: boolean;
 
   biProvided: boolean;
   biMatchedRows: number;

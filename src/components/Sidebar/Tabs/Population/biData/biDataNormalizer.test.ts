@@ -168,4 +168,91 @@ describe("normalizeBiRow", () => {
     expect(second.portName).toBe("ميناء ب");
     expect(second.xrayImageId).toBe("X-2");
   });
+
+  // Owner-reported bug (2026-08-12): the real BI.xlsx parses 246,627 rows and
+  // accepts 0 — every row excluded as "مستبعدة (بلا معرف أشعة)" on all four
+  // sheets. These headers/values are the exact hard evidence gathered by
+  // reading the owner's actual workbook with the vendored xlsx package
+  // (fixtures only here — the real file is never read from disk in a test).
+  describe("owner-reported BI xrayImageId 0-accepted bug (2026-08-12)", () => {
+    const realSheetFixtures: { sheetName: string; header: string; value: string }[] = [
+      { sheetName: "بري صادر", header: "معرف الأشعة", value: "202605090023680130" },
+      { sheetName: "بحري صادر", header: "XRAY_SCAN_ID", value: "6186202605020023" },
+      { sheetName: "بري وارد", header: "معرف الأشعة", value: "66202605010001" },
+      { sheetName: "بحري وارد", header: "رقم صورة الأشعة", value: "30B9202605010002" }
+    ];
+
+    it("resolves xrayImageId from the DEFAULT alias table for all four real sheet headers (proves the defaults are NOT the gap)", () => {
+      for (const { sheetName, header, value } of realSheetFixtures) {
+        const result = normalizeBiRow({
+          sourceRow: { [header]: value },
+          source: sheetName,
+          sourceSheetName: sheetName,
+          sourceRowNumber: 1
+        });
+
+        expect(result.xrayImageId).toBe(value);
+      }
+    });
+
+    it("reproduces the exact reported symptom (valid, non-empty ID string present, still resolves to null) when the header carries diacritic/zero-width copy-paste noise the pre-fix normalizer did not strip", () => {
+      // Same construction as riskDataNormalizer.test.ts's 2026-08-12 case:
+      // a fatha (U+064B) after every letter plus a ZWNJ (U+200C) inside the
+      // word — the kind of noise a header copy-pasted from a diacritized
+      // source document can carry. Built with String.fromCodePoint (not
+      // literal invisible characters) so the no-irregular-whitespace lint
+      // rule doesn't flag this file.
+      const fatha = String.fromCodePoint(0x064b);
+      const zwnj = String.fromCodePoint(0x200c);
+      const base = "معرف الأشعة";
+      const withNoise = base
+        .split("")
+        .map((ch) => (ch === " " ? ch : ch + fatha))
+        .join("")
+        .replace("الأشعة", "ال" + zwnj + "أشعة");
+
+      const result = normalizeBiRow({
+        sourceRow: { [withNoise]: "202605090023680130" },
+        source: "بري صادر",
+        sourceSheetName: "بري صادر",
+        sourceRowNumber: 1
+      });
+
+      // With the DIACRITIC_AND_ZERO_WIDTH_PATTERN stripping now applied to
+      // biDataNormalizer.ts's normalizeHeader (mirroring the fix already
+      // shipped in riskDataNormalizer.ts on 2026-08-12), this resolves
+      // correctly instead of silently returning null.
+      expect(result.xrayImageId).toBe("202605090023680130");
+    });
+  });
+});
+
+describe("empty saved alias list falls back to defaults (owner 2026-08-12: BI 246,627 parsed / 0 accepted)", () => {
+  it("resolves xrayImageId from the default aliases when the saved mapping carries an empty list", () => {
+    // The regression: `aliases.xrayImageId || BI_COLUMN_ALIASES.xrayImageId`
+    // returned `[]` because an empty array is truthy, so the normalizer
+    // searched ZERO headers and every row was excluded as missing an ID --
+    // matching the empty "الأعمدة التي بحث عنها النظام" list in the report.
+    const result = normalizeBiRow({
+      sourceRow: { "معرف الأشعة": "202605090023680130", "اسم المنفذ": "البطحاء" },
+      source: "بري وارد",
+      sourceSheetName: "بري وارد",
+      sourceRowNumber: 2,
+      columnMappings: { xrayImageId: [] }
+    });
+
+    expect(result.xrayImageId).toBe("202605090023680130");
+  });
+
+  it("still honours a non-empty saved mapping over the defaults", () => {
+    const result = normalizeBiRow({
+      sourceRow: { "عمود مخصص": "XYZ-123", "معرف الأشعة": "SHOULD-NOT-WIN" },
+      source: "بري وارد",
+      sourceSheetName: "بري وارد",
+      sourceRowNumber: 2,
+      columnMappings: { xrayImageId: ["عمود مخصص"] }
+    });
+
+    expect(result.xrayImageId).toBe("XYZ-123");
+  });
 });

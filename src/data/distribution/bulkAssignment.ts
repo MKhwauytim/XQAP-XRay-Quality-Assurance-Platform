@@ -11,6 +11,7 @@ import {
   appendDistributionEvents,
   loadDistributionLog,
   loadOrDeriveDistributionCurrent,
+  refreshDistributionCacheAfterWrite,
 } from "./distributionStorage";
 
 export function isAssignableSampleRole(user: ManagedLoginUser): boolean {
@@ -411,6 +412,12 @@ export async function executeBulkReassignment(params: {
       error: result.error,
     };
   }
+
+  // A6b: reads no longer persist the derived cache, so a write flow must
+  // refresh it (and, through saveDistributionCurrent, every employee sample
+  // mirror) itself. Swallows its own failure by contract — the cache is an
+  // optimization, never a correctness input.
+  await refreshDistributionCacheAfterWrite(directoryHandle, monthFolderName, sample.rows);
 
   return {
     ok: true,

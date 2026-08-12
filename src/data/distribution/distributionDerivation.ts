@@ -2,6 +2,7 @@ import type { PreparedPopulationRow } from "../population/populationTypes";
 import { toEmployeeMirrorRowStub } from "../population/populationTypes";
 
 import { parseMonthFolderName } from "../population/monthFolder";
+import { logError } from "../storage/errorLogger";
 import type {
   DistributionEntry,
   DistributionEvent,
@@ -135,6 +136,27 @@ export function foldDistributionEvents(
     droppedEventIds: new Set<string>(),
     droppedImageIds: new Set<string>()
   };
+
+  // A6e (H3): make an otherwise-silent mass-absorption visible. `rows` empty
+  // while real events exist means every one of them is about to hit the bare
+  // `continue` just below (before recordDroppedEvent, so it is neither
+  // reported in droppedEventIds nor logged there) — this is the same
+  // condition loadOrDeriveDistributionCurrent's entry gate (A6d) exists to
+  // stop before it ever reaches this function on the normal path, but this
+  // module is also callable directly (deriveCurrentDistribution and friends
+  // in distributionLog.ts), so the visibility net stays here too. Logged
+  // once per call, not per event -- one call already means N identical
+  // silent drops, not N distinct problems. Deliberately NOT converted into a
+  // per-event recordDroppedEvent call: that would change droppedEventIds,
+  // which feeds deriveEmployeeQuotasWithFacts and would alter quota output
+  // on this deterministic-by-contract surface (see the module's own
+  // snapshot-first testing convention).
+  if (rows.size === 0 && events.length > 0) {
+    logError(
+      "distribution:fold-no-rows",
+      new Error(`foldDistributionEvents: ${events.length} event(s) supplied with an empty sample-row set`)
+    );
+  }
 
   for (const event of events) {
     const row = rows.get(event.xrayImageId);

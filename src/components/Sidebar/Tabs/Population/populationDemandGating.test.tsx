@@ -37,12 +37,18 @@ vi.mock("../../../../workers/populationQueryWorker?worker&inline", async () => {
 const permissionsMock = vi.hoisted(() => ({
   // Defaults to a view-only role (no draw-sample/process-population) --
   // the exact population the original perf complaint targeted.
-  state: { canDrawSample: false, canProcessPopulation: false },
+  // canViewBrowse defaults true; the two capability-holding tests below flip
+  // it false so A1's landing rule (perf/sync enhancement 2026-08-12) --
+  // can("view-browse") && (draw-sample || process-population) -- keeps them
+  // on the "process" sub-tab, which is what this suite's computeScope
+  // assertions are actually about (steps 3c/3d), not A1's landing choice
+  // itself (covered separately by Population.landingSubTab.test.tsx).
+  state: { canDrawSample: false, canProcessPopulation: false, canViewBrowse: true },
 }));
 
 vi.mock("../../../../auth/usePermissions", () => ({
   usePermissions: () => ({
-    can: () => true,
+    can: (featureId: string) => (featureId === "view-browse" ? permissionsMock.state.canViewBrowse : true),
     canMutate: (featureId: string) => {
       if (featureId === "draw-sample") return permissionsMock.state.canDrawSample;
       if (featureId === "process-population") return permissionsMock.state.canProcessPopulation;
@@ -106,7 +112,7 @@ class ResizeObserverStub {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
-  permissionsMock.state = { canDrawSample: false, canProcessPopulation: false };
+  permissionsMock.state = { canDrawSample: false, canProcessPopulation: false, canViewBrowse: true };
   monthMock.state.selection = { kind: "existing", month: 5, year: 2026, folderName: FOLDER };
   workspaceMock.state.directoryHandle = null;
   capturedScopes.calls = [];
@@ -194,7 +200,7 @@ async function seedProcessedMonthWithSampleableRow(): Promise<DirectoryHandleLik
 describe("Population wizard — demand-gated load scope (Phase A steps 3c/3d)", () => {
   it("a view-only role (no draw/process capability) never requests population/raw", async () => {
     vi.stubGlobal("ResizeObserver", ResizeObserverStub);
-    permissionsMock.state = { canDrawSample: false, canProcessPopulation: false };
+    permissionsMock.state = { canDrawSample: false, canProcessPopulation: false, canViewBrowse: true };
     const dir = await seedProcessedMonth();
     workspaceMock.state.directoryHandle = dir;
 
@@ -215,7 +221,13 @@ describe("Population wizard — demand-gated load scope (Phase A steps 3c/3d)", 
 
   it("a role with draw-sample capability DOES request population/raw", async () => {
     vi.stubGlobal("ResizeObserver", ResizeObserverStub);
-    permissionsMock.state = { canDrawSample: true, canProcessPopulation: false };
+    // canViewBrowse: false -- otherwise A1's landing rule (perf/sync
+    // enhancement 2026-08-12) would land this draw-sample-capable viewer on
+    // "browse" by default, and computeMonthLoadScope only ever requests
+    // population/raw for the "process" sub-tab (see populationWorkflowHelpers.ts).
+    // A1's own landing behavior is covered by Population.landingSubTab.test.tsx;
+    // this test is about the process-sub-tab + capability combination itself.
+    permissionsMock.state = { canDrawSample: true, canProcessPopulation: false, canViewBrowse: false };
     const dir = await seedProcessedMonth();
     workspaceMock.state.directoryHandle = dir;
 
@@ -236,7 +248,8 @@ describe("Population wizard — demand-gated load scope (Phase A steps 3c/3d)", 
 
   it("a role with process-population capability DOES request population/raw", async () => {
     vi.stubGlobal("ResizeObserver", ResizeObserverStub);
-    permissionsMock.state = { canDrawSample: false, canProcessPopulation: true };
+    // canViewBrowse: false -- see the identical note on the draw-sample test above.
+    permissionsMock.state = { canDrawSample: false, canProcessPopulation: true, canViewBrowse: false };
     const dir = await seedProcessedMonth();
     workspaceMock.state.directoryHandle = dir;
 
@@ -261,14 +274,16 @@ function populationChipText(): string | null {
 describe("Population wizard — ensurePopulationLoaded top-up (Phase A step 3d)", () => {
   it("a draw-capable manager who loaded a month while on Browse still gets population on demand when switching to Process", async () => {
     vi.stubGlobal("ResizeObserver", ResizeObserverStub);
-    permissionsMock.state = { canDrawSample: true, canProcessPopulation: false };
+    // canViewBrowse: false -- keeps activeSubTab's A1 (perf/sync enhancement
+    // 2026-08-12) lazy initializer landing on "process" despite draw-sample
+    // being held, so the very first auto-load effect firing on mount cannot
+    // be made to see "browse" in time; deferring the real month selection
+    // until after the manual subtab-switch dispatch below is the only way to
+    // genuinely exercise a browse-scoped load.
+    permissionsMock.state = { canDrawSample: true, canProcessPopulation: false, canViewBrowse: false };
     const dir = await seedProcessedMonth();
     workspaceMock.state.directoryHandle = dir;
 
-    // Start with no month selected yet -- activeSubTab's hardcoded initial value
-    // ("process") means the very first auto-load effect firing on mount cannot be
-    // made to see "browse" in time; deferring the real month selection until after
-    // the subtab switch is the only way to genuinely exercise a browse-scoped load.
     monthMock.state.selection = { kind: "none" };
     const { rerender } = render(<PopulationTab />);
 
@@ -309,7 +324,9 @@ describe("Population wizard — ensurePopulationLoaded top-up (Phase A step 3d)"
 describe("Population wizard — Phase 3 -> Phase 4 transition (Task 5: approval gate removed)", () => {
   it("moves from phase 3 to phase 4 even when the sample has not been approved", async () => {
     vi.stubGlobal("ResizeObserver", ResizeObserverStub);
-    permissionsMock.state = { canDrawSample: true, canProcessPopulation: false };
+    // canViewBrowse: false so this test's process-phase UI (draw button, phase
+    // stepper) is what activeSubTab lands on -- see the identical A1 note above.
+    permissionsMock.state = { canDrawSample: true, canProcessPopulation: false, canViewBrowse: false };
     const dir = await seedProcessedMonthWithSampleableRow();
     workspaceMock.state.directoryHandle = dir;
 

@@ -7,11 +7,18 @@
  * change -- four directory reads for one piece of data that changes rarely
  * (only when a month is created/renamed/archived).
  *
- * Query key is `['monthFolders', directoryHandle.name]`. `directoryHandle`
- * itself isn't a stable primitive, but within one workspace connection it's
- * a single stable object whose `.name` (the picked root folder's name) is a
- * reasonable proxy -- consistent with how the rest of the app already keys
- * workspace-scoped state (see `WorkspaceGate.tsx`'s dismiss-key pattern).
+ * Query key is `['monthFolders', workspaceScopeId(directoryHandle)]`.
+ * Re-keyed from the earlier `directoryHandle.name` (H6, perf/sync spec §7.1
+ * A7 commit 1b): `workspaceScopeId` is the SAME per-root id
+ * `dedupeInFlight`/`workspaceEpoch` already use (inFlightReads.ts), which is
+ * also what `queryRefreshBridge.ts`'s scoped invalidation keys off of -- a
+ * query keyed on a different identity falls outside that scoped
+ * invalidation and would go permanently stale after the bridge stopped
+ * doing a blanket `invalidateQueries()` on every tick.
+ *
+ * `directoryHandle` itself isn't a stable primitive, but within one
+ * workspace connection it's a single stable object -- consistent with how
+ * `workspaceScopeId` is defined (a WeakMap keyed on handle identity).
  *
  * Call sites keep their own existing effect/token/cancellation structure and
  * simply swap a direct `listMonthFolders(directoryHandle)` call for
@@ -25,9 +32,10 @@ import { queryOptions, useQuery, type QueryClient } from "@tanstack/react-query"
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { listMonthFolders } from "../population/populationStorage";
 import type { MonthFolderInfo } from "../population/monthFolder";
+import { workspaceScopeId } from "../storage/inFlightReads";
 
 export function monthFoldersQueryKey(directoryHandle: DirectoryHandleLike | null): readonly unknown[] {
-  return ["monthFolders", directoryHandle?.name ?? null] as const;
+  return ["monthFolders", directoryHandle ? workspaceScopeId(directoryHandle) : null] as const;
 }
 
 export function monthFoldersQueryOptions(directoryHandle: DirectoryHandleLike | null) {

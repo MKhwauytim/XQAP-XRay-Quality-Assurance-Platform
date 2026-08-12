@@ -52,8 +52,15 @@ vi.mock("../../../../workers/workbookWorker?worker&inline", () => ({
   },
 }));
 
+// draw-sample/process-population excluded so A1's landing rule (perf/sync
+// enhancement 2026-08-12) keeps this suite on the "process" sub-tab where
+// its status-chip/loading-banner assertions live — see
+// Population.browseMountPreservation.test.tsx's identical note.
 vi.mock("../../../../auth/usePermissions", () => ({
-  usePermissions: () => ({ can: () => true, canMutate: () => true }),
+  usePermissions: () => ({
+    can: () => true,
+    canMutate: (featureId: string) => featureId !== "draw-sample" && featureId !== "process-population",
+  }),
 }));
 
 const APRIL_FOLDER = "4-april-2026";

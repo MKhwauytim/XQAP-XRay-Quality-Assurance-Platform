@@ -1,12 +1,35 @@
 import * as XLSX from "xlsx";
 import { normalizeBiRow } from "./biDataNormalizer";
+import { BI_COLUMN_ALIASES } from "./biDataColumns";
 import type {
   BiSheetSummary,
   BiSourceRow,
   BiWorkbookResult,
-  NormalizedBiRow
+  NormalizedBiRow,
+  ZeroXrayIdDiagnostic
 } from "./biDataTypes";
 import { worksheetToSourceRows } from "../workbook/worksheetRows";
+
+// Same diacritic/zero-width character class stripped in biDataNormalizer.ts's
+// header lookup — kept identical here so a sheet-name match (not just a
+// column-header match) is equally immune to copy-paste noise. Written with
+// explicit \u escapes (not literal invisible characters) so the
+// no-irregular-whitespace lint rule doesn't flag the source file itself.
+const DIACRITIC_AND_ZERO_WIDTH_RANGES = [
+  [0x064b, 0x065f], // Arabic diacritics (تشكيل)
+  [0x200b, 0x200f], // ZWSP, ZWNJ, ZWJ, LRM, RLM
+  [0xfeff, 0xfeff]  // BOM / zero-width no-break space
+] as const;
+
+const DIACRITIC_AND_ZERO_WIDTH_PATTERN = new RegExp(
+  "[" +
+    DIACRITIC_AND_ZERO_WIDTH_RANGES.map(
+      ([start, end]) =>
+        `\\u${start.toString(16).padStart(4, "0")}-\\u${end.toString(16).padStart(4, "0")}`
+    ).join("") +
+  "]",
+  "g"
+);
 
 function normalizeArabicText(value: string): string {
   return value
@@ -16,6 +39,7 @@ function normalizeArabicText(value: string): string {
     .replace(/ى/g, "ي")
     .replace(/ة/g, "ه")
     .replace(/[ـ]/g, "")
+    .replace(DIACRITIC_AND_ZERO_WIDTH_PATTERN, "")
     .toLowerCase();
 }
 
@@ -43,6 +67,34 @@ function detectBiSource(sheetName: string, customPatterns?: string[]): string | 
   // No pattern matched — process the sheet anyway using its own name as the source.
   // This handles files where sheet names don't follow the standard naming convention.
   return sheetName;
+}
+
+/**
+ * B14: guard against the "silent 0" failure mode — a sheet that parsed rows
+ * but accepted none of them because every candidate xrayImageId header the
+ * alias list looked for is absent from what the sheet actually has (a stale
+ * saved mapping, or header noise the normalizer doesn't strip). Only called
+ * when normalizedRowCount is 0 with originalRowCount > 0, so it's a rare
+ * diagnostic path, not per-row overhead.
+ */
+function buildZeroXrayIdDiagnostic(
+  sourceRows: { row: BiSourceRow }[],
+  columnMappings?: Record<string, string[]>
+): ZeroXrayIdDiagnostic {
+  const candidateHeaders =
+    columnMappings?.xrayImageId ?? BI_COLUMN_ALIASES.xrayImageId;
+
+  const presentHeaders = new Set<string>();
+  for (const { row } of sourceRows.slice(0, 50)) {
+    for (const header of Object.keys(row)) {
+      presentHeaders.add(header);
+    }
+  }
+
+  return {
+    candidateHeaders: [...candidateHeaders],
+    presentHeaders: Array.from(presentHeaders)
+  };
 }
 
 const yieldToMain = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -141,7 +193,10 @@ export async function processBiWorkbook(
       source,
       originalRowCount: sourceRows.length,
       normalizedRowCount: validRows.length,
-      excludedMissingXrayIdCount
+      excludedMissingXrayIdCount,
+      ...(validRows.length === 0 && sourceRows.length > 0
+        ? { zeroIdDiagnostic: buildZeroXrayIdDiagnostic(sourceRows, columnMappings) }
+        : {})
     });
   }
 
