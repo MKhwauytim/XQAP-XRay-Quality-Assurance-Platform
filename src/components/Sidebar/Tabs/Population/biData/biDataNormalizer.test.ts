@@ -226,3 +226,33 @@ describe("normalizeBiRow", () => {
     });
   });
 });
+
+describe("empty saved alias list falls back to defaults (owner 2026-08-12: BI 246,627 parsed / 0 accepted)", () => {
+  it("resolves xrayImageId from the default aliases when the saved mapping carries an empty list", () => {
+    // The regression: `aliases.xrayImageId || BI_COLUMN_ALIASES.xrayImageId`
+    // returned `[]` because an empty array is truthy, so the normalizer
+    // searched ZERO headers and every row was excluded as missing an ID --
+    // matching the empty "الأعمدة التي بحث عنها النظام" list in the report.
+    const result = normalizeBiRow({
+      sourceRow: { "معرف الأشعة": "202605090023680130", "اسم المنفذ": "البطحاء" },
+      source: "بري وارد",
+      sourceSheetName: "بري وارد",
+      sourceRowNumber: 2,
+      columnMappings: { xrayImageId: [] }
+    });
+
+    expect(result.xrayImageId).toBe("202605090023680130");
+  });
+
+  it("still honours a non-empty saved mapping over the defaults", () => {
+    const result = normalizeBiRow({
+      sourceRow: { "عمود مخصص": "XYZ-123", "معرف الأشعة": "SHOULD-NOT-WIN" },
+      source: "بري وارد",
+      sourceSheetName: "بري وارد",
+      sourceRowNumber: 2,
+      columnMappings: { xrayImageId: ["عمود مخصص"] }
+    });
+
+    expect(result.xrayImageId).toBe("XYZ-123");
+  });
+});

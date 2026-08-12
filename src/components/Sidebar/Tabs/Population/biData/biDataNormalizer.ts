@@ -30,6 +30,21 @@ const DIACRITIC_AND_ZERO_WIDTH_PATTERN = new RegExp(
   "g"
 );
 
+
+/**
+ * Alias-list fallback that treats an EMPTY list as "not configured".
+ *
+ * The previous `aliases.x || BI_COLUMN_ALIASES.x` is a JS trap: an empty array is
+ * truthy, so a saved column mapping carrying `[]` for a field resolved to `[]`
+ * rather than the defaults — the normalizer then searched ZERO headers and
+ * rejected every row as missing that field. That is exactly how the owner's
+ * BI.xlsx reported 246,627 parsed / 0 accepted with an empty "searched for"
+ * list in the zero-accepted diagnostic (2026-08-12).
+ */
+function aliasesFor(configured: readonly string[] | undefined, fallback: readonly string[]): readonly string[] {
+  return configured && configured.length > 0 ? configured : fallback;
+}
+
 function normalizeArabicText(value: string): string {
   return value
     .trim()
@@ -100,133 +115,133 @@ export function normalizeBiRow(params: {
   return {
     source,
 
-    xrayImageId: getFirstAvailableValue(lookup, aliases.xrayImageId || BI_COLUMN_ALIASES.xrayImageId),
+    xrayImageId: getFirstAvailableValue(lookup, aliasesFor(aliases.xrayImageId, BI_COLUMN_ALIASES.xrayImageId)),
     xrayEntryDate: getFirstAvailableValue(
       lookup,
-      aliases.xrayEntryDate || BI_COLUMN_ALIASES.xrayEntryDate
+      aliasesFor(aliases.xrayEntryDate, BI_COLUMN_ALIASES.xrayEntryDate)
     ),
 
-    portType: getFirstAvailableValue(lookup, aliases.portType || BI_COLUMN_ALIASES.portType),
-    portCode: getFirstAvailableValue(lookup, aliases.portCode || BI_COLUMN_ALIASES.portCode),
-    portName: getFirstAvailableValue(lookup, aliases.portName || BI_COLUMN_ALIASES.portName),
+    portType: getFirstAvailableValue(lookup, aliasesFor(aliases.portType, BI_COLUMN_ALIASES.portType)),
+    portCode: getFirstAvailableValue(lookup, aliasesFor(aliases.portCode, BI_COLUMN_ALIASES.portCode)),
+    portName: getFirstAvailableValue(lookup, aliasesFor(aliases.portName, BI_COLUMN_ALIASES.portName)),
 
     movementNumber: getFirstAvailableValue(
       lookup,
-      aliases.movementNumber || BI_COLUMN_ALIASES.movementNumber
+      aliasesFor(aliases.movementNumber, BI_COLUMN_ALIASES.movementNumber)
     ),
     movementDate: getFirstAvailableValue(
       lookup,
-      aliases.movementDate || BI_COLUMN_ALIASES.movementDate
+      aliasesFor(aliases.movementDate, BI_COLUMN_ALIASES.movementDate)
     ),
     movementHijriDate: getFirstAvailableValue(
       lookup,
-      aliases.movementHijriDate || BI_COLUMN_ALIASES.movementHijriDate
+      aliasesFor(aliases.movementHijriDate, BI_COLUMN_ALIASES.movementHijriDate)
     ),
 
     declarationNumber: getFirstAvailableValue(
       lookup,
-      aliases.declarationNumber || BI_COLUMN_ALIASES.declarationNumber
+      aliasesFor(aliases.declarationNumber, BI_COLUMN_ALIASES.declarationNumber)
     ),
     preliminaryDeclarationNumber: getFirstAvailableValue(
       lookup,
-      aliases.preliminaryDeclarationNumber || BI_COLUMN_ALIASES.preliminaryDeclarationNumber
+      aliasesFor(aliases.preliminaryDeclarationNumber, BI_COLUMN_ALIASES.preliminaryDeclarationNumber)
     ),
     declarationDate: getFirstAvailableValue(
       lookup,
-      aliases.declarationDate || BI_COLUMN_ALIASES.declarationDate
+      aliasesFor(aliases.declarationDate, BI_COLUMN_ALIASES.declarationDate)
     ),
     declarationHijriDate: getFirstAvailableValue(
       lookup,
-      aliases.declarationHijriDate || BI_COLUMN_ALIASES.declarationHijriDate
+      aliasesFor(aliases.declarationHijriDate, BI_COLUMN_ALIASES.declarationHijriDate)
     ),
 
     inboundOutboundType: getFirstAvailableValue(
       lookup,
-      aliases.inboundOutboundType || BI_COLUMN_ALIASES.inboundOutboundType
+      aliasesFor(aliases.inboundOutboundType, BI_COLUMN_ALIASES.inboundOutboundType)
     ),
     declarationType: getFirstAvailableValue(
       lookup,
-      aliases.declarationType || BI_COLUMN_ALIASES.declarationType
+      aliasesFor(aliases.declarationType, BI_COLUMN_ALIASES.declarationType)
     ),
     declarationStatus: getFirstAvailableValue(
       lookup,
-      aliases.declarationStatus || BI_COLUMN_ALIASES.declarationStatus
+      aliasesFor(aliases.declarationStatus, BI_COLUMN_ALIASES.declarationStatus)
     ),
 
     plateOrContainerNumber: getFirstAvailableValue(
       lookup,
-      aliases.plateOrContainerNumber || BI_COLUMN_ALIASES.plateOrContainerNumber
+      aliasesFor(aliases.plateOrContainerNumber, BI_COLUMN_ALIASES.plateOrContainerNumber)
     ),
     chassisNumber: getFirstAvailableValue(
       lookup,
-      aliases.chassisNumber || BI_COLUMN_ALIASES.chassisNumber
+      aliasesFor(aliases.chassisNumber, BI_COLUMN_ALIASES.chassisNumber)
     ),
 
-    governance: getFirstAvailableValue(lookup, aliases.governance || BI_COLUMN_ALIASES.governance),
+    governance: getFirstAvailableValue(lookup, aliasesFor(aliases.governance, BI_COLUMN_ALIASES.governance)),
 
     levelOneEmployee: getFirstAvailableValue(
       lookup,
-      aliases.levelOneEmployee || BI_COLUMN_ALIASES.levelOneEmployee
+      aliasesFor(aliases.levelOneEmployee, BI_COLUMN_ALIASES.levelOneEmployee)
     ),
     levelTwoEmployee: getFirstAvailableValue(
       lookup,
-      aliases.levelTwoEmployee || BI_COLUMN_ALIASES.levelTwoEmployee
+      aliasesFor(aliases.levelTwoEmployee, BI_COLUMN_ALIASES.levelTwoEmployee)
     ),
 
     levelOneResultCode: getFirstAvailableValue(
       lookup,
-      aliases.levelOneResultCode || BI_COLUMN_ALIASES.levelOneResultCode
+      aliasesFor(aliases.levelOneResultCode, BI_COLUMN_ALIASES.levelOneResultCode)
     ),
     levelTwoResultCode: getFirstAvailableValue(
       lookup,
-      aliases.levelTwoResultCode || BI_COLUMN_ALIASES.levelTwoResultCode
+      aliasesFor(aliases.levelTwoResultCode, BI_COLUMN_ALIASES.levelTwoResultCode)
     ),
 
     levelOneResult: getFirstAvailableValue(
       lookup,
-      aliases.levelOneResult || BI_COLUMN_ALIASES.levelOneResult
+      aliasesFor(aliases.levelOneResult, BI_COLUMN_ALIASES.levelOneResult)
     ),
     levelTwoResult: getFirstAvailableValue(
       lookup,
-      aliases.levelTwoResult || BI_COLUMN_ALIASES.levelTwoResult
+      aliasesFor(aliases.levelTwoResult, BI_COLUMN_ALIASES.levelTwoResult)
     ),
 
     manualInspectionResultCode: getFirstAvailableValue(
       lookup,
-      aliases.manualInspectionResultCode || BI_COLUMN_ALIASES.manualInspectionResultCode
+      aliasesFor(aliases.manualInspectionResultCode, BI_COLUMN_ALIASES.manualInspectionResultCode)
     ),
     manualInspectionResult: getFirstAvailableValue(
       lookup,
-      aliases.manualInspectionResult || BI_COLUMN_ALIASES.manualInspectionResult
+      aliasesFor(aliases.manualInspectionResult, BI_COLUMN_ALIASES.manualInspectionResult)
     ),
 
     oppositeInspectionEmployee: getFirstAvailableValue(
       lookup,
-      aliases.oppositeInspectionEmployee || BI_COLUMN_ALIASES.oppositeInspectionEmployee
+      aliasesFor(aliases.oppositeInspectionEmployee, BI_COLUMN_ALIASES.oppositeInspectionEmployee)
     ),
     oppositeInspectionResultCode: getFirstAvailableValue(
       lookup,
-      aliases.oppositeInspectionResultCode || BI_COLUMN_ALIASES.oppositeInspectionResultCode
+      aliasesFor(aliases.oppositeInspectionResultCode, BI_COLUMN_ALIASES.oppositeInspectionResultCode)
     ),
     oppositeInspectionResult: getFirstAvailableValue(
       lookup,
-      aliases.oppositeInspectionResult || BI_COLUMN_ALIASES.oppositeInspectionResult
+      aliasesFor(aliases.oppositeInspectionResult, BI_COLUMN_ALIASES.oppositeInspectionResult)
     ),
 
     liveMeansEmployee: getFirstAvailableValue(
       lookup,
-      aliases.liveMeansEmployee || BI_COLUMN_ALIASES.liveMeansEmployee
+      aliasesFor(aliases.liveMeansEmployee, BI_COLUMN_ALIASES.liveMeansEmployee)
     ),
     liveMeansResultCode: getFirstAvailableValue(
       lookup,
-      aliases.liveMeansResultCode || BI_COLUMN_ALIASES.liveMeansResultCode
+      aliasesFor(aliases.liveMeansResultCode, BI_COLUMN_ALIASES.liveMeansResultCode)
     ),
     liveMeansResult: getFirstAvailableValue(
       lookup,
-      aliases.liveMeansResult || BI_COLUMN_ALIASES.liveMeansResult
+      aliasesFor(aliases.liveMeansResult, BI_COLUMN_ALIASES.liveMeansResult)
     ),
 
-    notes: getFirstAvailableValue(lookup, aliases.notes || BI_COLUMN_ALIASES.notes),
+    notes: getFirstAvailableValue(lookup, aliasesFor(aliases.notes, BI_COLUMN_ALIASES.notes)),
 
     rawRow: sourceRow,
     sourceSheetName,

@@ -27,6 +27,21 @@ const DIACRITIC_AND_ZERO_WIDTH_PATTERN = new RegExp(
   "g"
 );
 
+
+/**
+ * Alias-list fallback that treats an EMPTY list as "not configured".
+ *
+ * The previous `aliases.x || RISK_COLUMN_ALIASES.x` is a JS trap: an empty array is
+ * truthy, so a saved column mapping carrying `[]` for a field resolved to `[]`
+ * rather than the defaults — the normalizer then searched ZERO headers and
+ * rejected every row as missing that field. That is exactly how the owner's
+ * BI.xlsx reported 246,627 parsed / 0 accepted with an empty "searched for"
+ * list in the zero-accepted diagnostic (2026-08-12).
+ */
+function aliasesFor(configured: readonly string[] | undefined, fallback: readonly string[]): readonly string[] {
+  return configured && configured.length > 0 ? configured : fallback;
+}
+
 function normalizeArabicText(value: string): string {
   return value
     .trim()
@@ -96,74 +111,74 @@ export function normalizeRiskRow(params: {
 
   const reportNumber = getFirstAvailableValue(
     lookup,
-    aliases.reportNumber || RISK_COLUMN_ALIASES.reportNumber
+    aliasesFor(aliases.reportNumber, RISK_COLUMN_ALIASES.reportNumber)
   );
 
   return {
     movementType,
 
-    portCode: getFirstAvailableValue(lookup, aliases.portCode || RISK_COLUMN_ALIASES.portCode),
-    portName: getFirstAvailableValue(lookup, aliases.portName || RISK_COLUMN_ALIASES.portName),
-    portType: getFirstAvailableValue(lookup, aliases.portType || RISK_COLUMN_ALIASES.portType),
+    portCode: getFirstAvailableValue(lookup, aliasesFor(aliases.portCode, RISK_COLUMN_ALIASES.portCode)),
+    portName: getFirstAvailableValue(lookup, aliasesFor(aliases.portName, RISK_COLUMN_ALIASES.portName)),
+    portType: getFirstAvailableValue(lookup, aliasesFor(aliases.portType, RISK_COLUMN_ALIASES.portType)),
 
     movementNumber: getFirstAvailableValue(
       lookup,
-      aliases.movementNumber || RISK_COLUMN_ALIASES.movementNumber
+      aliasesFor(aliases.movementNumber, RISK_COLUMN_ALIASES.movementNumber)
     ),
     movementDate: getFirstAvailableValue(
       lookup,
-      aliases.movementDate || RISK_COLUMN_ALIASES.movementDate
+      aliasesFor(aliases.movementDate, RISK_COLUMN_ALIASES.movementDate)
     ),
     movementHijriDate: getFirstAvailableValue(
       lookup,
-      aliases.movementHijriDate || RISK_COLUMN_ALIASES.movementHijriDate
+      aliasesFor(aliases.movementHijriDate, RISK_COLUMN_ALIASES.movementHijriDate)
     ),
 
     declarationNumber: getFirstAvailableValue(
       lookup,
-      aliases.declarationNumber || RISK_COLUMN_ALIASES.declarationNumber
+      aliasesFor(aliases.declarationNumber, RISK_COLUMN_ALIASES.declarationNumber)
     ),
     transitDeclarationNumber: getFirstAvailableValue(
       lookup,
-      aliases.transitDeclarationNumber || RISK_COLUMN_ALIASES.transitDeclarationNumber
+      aliasesFor(aliases.transitDeclarationNumber, RISK_COLUMN_ALIASES.transitDeclarationNumber)
     ),
     declarationDate: getFirstAvailableValue(
       lookup,
-      aliases.declarationDate || RISK_COLUMN_ALIASES.declarationDate
+      aliasesFor(aliases.declarationDate, RISK_COLUMN_ALIASES.declarationDate)
     ),
     declarationHijriDate: getFirstAvailableValue(
       lookup,
-      aliases.declarationHijriDate || RISK_COLUMN_ALIASES.declarationHijriDate
+      aliasesFor(aliases.declarationHijriDate, RISK_COLUMN_ALIASES.declarationHijriDate)
     ),
 
     manifestNumber: getFirstAvailableValue(
       lookup,
-      aliases.manifestNumber || RISK_COLUMN_ALIASES.manifestNumber
+      aliasesFor(aliases.manifestNumber, RISK_COLUMN_ALIASES.manifestNumber)
     ),
     manifestType: getFirstAvailableValue(
       lookup,
-      aliases.manifestType || RISK_COLUMN_ALIASES.manifestType
+      aliasesFor(aliases.manifestType, RISK_COLUMN_ALIASES.manifestType)
     ),
     manifestDate: getFirstAvailableValue(
       lookup,
-      aliases.manifestDate || RISK_COLUMN_ALIASES.manifestDate
+      aliasesFor(aliases.manifestDate, RISK_COLUMN_ALIASES.manifestDate)
     ),
 
     plateOrContainerNumber: getFirstAvailableValue(
       lookup,
-      aliases.plateOrContainerNumber || RISK_COLUMN_ALIASES.plateOrContainerNumber
+      aliasesFor(aliases.plateOrContainerNumber, RISK_COLUMN_ALIASES.plateOrContainerNumber)
     ),
     finalDestination: getFirstAvailableValue(
       lookup,
-      aliases.finalDestination || RISK_COLUMN_ALIASES.finalDestination
+      aliasesFor(aliases.finalDestination, RISK_COLUMN_ALIASES.finalDestination)
     ),
 
-    entryDate: getFirstAvailableValue(lookup, aliases.entryDate || RISK_COLUMN_ALIASES.entryDate),
-    exitDate: getFirstAvailableValue(lookup, aliases.exitDate || RISK_COLUMN_ALIASES.exitDate),
+    entryDate: getFirstAvailableValue(lookup, aliasesFor(aliases.entryDate, RISK_COLUMN_ALIASES.entryDate)),
+    exitDate: getFirstAvailableValue(lookup, aliasesFor(aliases.exitDate, RISK_COLUMN_ALIASES.exitDate)),
 
     chassisNumber: getFirstAvailableValue(
       lookup,
-      aliases.chassisNumber || RISK_COLUMN_ALIASES.chassisNumber
+      aliasesFor(aliases.chassisNumber, RISK_COLUMN_ALIASES.chassisNumber)
     ),
 
     reportNumber,
@@ -171,43 +186,43 @@ export function normalizeRiskRow(params: {
 
     xrayLevelOneResult: getFirstAvailableValue(
       lookup,
-      aliases.xrayLevelOneResult || RISK_COLUMN_ALIASES.xrayLevelOneResult
+      aliasesFor(aliases.xrayLevelOneResult, RISK_COLUMN_ALIASES.xrayLevelOneResult)
     ),
     xrayLevelTwoResult: getFirstAvailableValue(
       lookup,
-      aliases.xrayLevelTwoResult || RISK_COLUMN_ALIASES.xrayLevelTwoResult
+      aliasesFor(aliases.xrayLevelTwoResult, RISK_COLUMN_ALIASES.xrayLevelTwoResult)
     ),
     inspectorResult: getFirstAvailableValue(
       lookup,
-      aliases.inspectorResult || RISK_COLUMN_ALIASES.inspectorResult
+      aliasesFor(aliases.inspectorResult, RISK_COLUMN_ALIASES.inspectorResult)
     ),
     oppositeInspectorResult: getFirstAvailableValue(
       lookup,
-      aliases.oppositeInspectorResult || RISK_COLUMN_ALIASES.oppositeInspectorResult
+      aliasesFor(aliases.oppositeInspectorResult, RISK_COLUMN_ALIASES.oppositeInspectorResult)
     ),
     liveMeansResult: getFirstAvailableValue(
       lookup,
-      aliases.liveMeansResult || RISK_COLUMN_ALIASES.liveMeansResult
+      aliasesFor(aliases.liveMeansResult, RISK_COLUMN_ALIASES.liveMeansResult)
     ),
 
     xrayImageId: getFirstAvailableValue(
       lookup,
-      aliases.xrayImageId || RISK_COLUMN_ALIASES.xrayImageId
+      aliasesFor(aliases.xrayImageId, RISK_COLUMN_ALIASES.xrayImageId)
     ),
     xrayEntryDate: getFirstAvailableValue(
       lookup,
-      aliases.xrayEntryDate || RISK_COLUMN_ALIASES.xrayEntryDate
+      aliasesFor(aliases.xrayEntryDate, RISK_COLUMN_ALIASES.xrayEntryDate)
     ),
 
     targetedByRiskEngine: getFirstAvailableValue(
       lookup,
-      aliases.targetedByRiskEngine || RISK_COLUMN_ALIASES.targetedByRiskEngine
+      aliasesFor(aliases.targetedByRiskEngine, RISK_COLUMN_ALIASES.targetedByRiskEngine)
     ),
     riskMessage: getFirstAvailableValue(
       lookup,
-      aliases.riskMessage || RISK_COLUMN_ALIASES.riskMessage
+      aliasesFor(aliases.riskMessage, RISK_COLUMN_ALIASES.riskMessage)
     ),
-    stage: getFirstAvailableValue(lookup, aliases.stage || RISK_COLUMN_ALIASES.stage),
+    stage: getFirstAvailableValue(lookup, aliasesFor(aliases.stage, RISK_COLUMN_ALIASES.stage)),
 
     rawRow: sourceRow,
     sourceSheetName,
