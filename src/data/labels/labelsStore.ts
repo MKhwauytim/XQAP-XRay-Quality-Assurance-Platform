@@ -1,7 +1,6 @@
 export const DEFAULT_LABELS = {
   // App identity
   app_display_name:                    "نظام متابعة أعمال فحص صور الأشعة",
-  app_description:                     "تطبيق محلي لمعالجة بيانات جودة الأشعة وتجهيز مجتمع العينة من ملفات Excel — هيئة الزكاة والضريبة والجمارك.",
 
   // Sidebar
   sidebar_title:   "لوحة الإدارة",
