@@ -18,6 +18,7 @@ import {
   appendDistributionEvent,
   loadDistributionLog,
   loadOrDeriveDistributionCurrent,
+  refreshDistributionCacheAfterWrite,
 } from "../distribution/distributionStorage";
 import { buildReopenedEvent } from "../distribution/distributionLog";
 import { loadSampleMaster } from "../sampling/sampleStorage";
@@ -105,6 +106,11 @@ export async function reopenSubmittedAnswer(params: {
       if (!eventResult.ok) {
         return { ok: false, error: eventResult.error };
       }
+
+      // A6b: refresh the derived cache + employee sample mirrors after the
+      // append, now that pure reads no longer persist them. Swallows its own
+      // failure by contract.
+      await refreshDistributionCacheAfterWrite(directoryHandle, monthFolderName, sample?.rows ?? []);
     }
   }
 

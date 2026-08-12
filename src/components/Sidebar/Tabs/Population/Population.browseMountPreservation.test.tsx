@@ -30,9 +30,19 @@ vi.mock("../../../../data/workspace/useWorkspace", () => ({
   useWorkspace: () => ({ directoryHandle: null }),
 }));
 
-// Grant every feature so no permission gate hides the Browse sub-tab.
+// Grant every feature so no permission gate hides the Browse sub-tab. Excludes
+// draw-sample/process-population specifically: A1 (perf/sync enhancement
+// 2026-08-12) now lands on "browse" by default when both view-browse AND
+// (draw-sample OR process-population) hold, which would make this suite's
+// "never mounts Browse until the user visits it" assertion false from the
+// very first render — unrelated to what this suite actually tests (mount
+// preservation across a switch-away-and-back), so the landing rule is kept
+// off here and exercised separately in Population.landingSubTab.test.tsx.
 vi.mock("../../../../auth/usePermissions", () => ({
-  usePermissions: () => ({ can: () => true, canMutate: () => true }),
+  usePermissions: () => ({
+    can: () => true,
+    canMutate: (featureId: string) => featureId !== "draw-sample" && featureId !== "process-population",
+  }),
 }));
 
 // Global month context: no workspace in this test -- selection none, no months.

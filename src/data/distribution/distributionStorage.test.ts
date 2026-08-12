@@ -335,9 +335,14 @@ describe("loadOrDeriveDistributionCurrentForRead dedupe key (final-review Fix 3)
     // Regression for the final whole-branch review's Fix 3: the dedupe key used
     // to omit sampleRows entirely, so two overlapping ForRead callers racing on
     // the same (root, month, epoch) but with different sampleRows (e.g. one
-    // caller's sample-master read transiently failed and fell back to []) would
-    // collapse onto a single dedupeInFlight() promise -- the loser silently
-    // receiving a result derived from the WINNER's sampleRows instead of its own.
+    // caller's sample-master read transiently returned a narrower row set)
+    // would collapse onto a single dedupeInFlight() promise -- the loser
+    // silently receiving a result derived from the WINNER's sampleRows instead
+    // of its own. Uses [A1] vs [A1, A2] rather than [] vs [A1] because an EMPTY
+    // sampleRows set against a month that already has events now hits A6d's
+    // entry gate (H3) and returns null by design -- a different, deliberate
+    // behavior this suite covers separately; this test's own concern (row-
+    // shape isolation between concurrent callers) doesn't need the empty case.
     const root = await makeRoot();
     const month = "5-May-2026";
     await appendDistributionEvent(
@@ -349,19 +354,21 @@ describe("loadOrDeriveDistributionCurrentForRead dedupe key (final-review Fix 3)
     // Kicked off together (no await in between) so both hit dedupeInFlight
     // while the first call's read is still in flight -- exactly the race this
     // key is meant to guard against.
-    const [withRow, withoutRow] = await Promise.all([
+    const [withOneRow, withTwoRows] = await Promise.all([
       loadOrDeriveDistributionCurrentForRead(root, month, [makeRow("A1")]),
-      loadOrDeriveDistributionCurrentForRead(root, month, []),
+      loadOrDeriveDistributionCurrentForRead(root, month, [makeRow("A1"), makeRow("A2")]),
     ]);
 
-    // Same as deriveCurrentDistribution's documented behavior above: a row
-    // present in sampleRows keeps its event; an empty sampleRows set drops it.
-    expect(withRow?.entries).toHaveLength(1);
-    expect(withRow?.entries[0]?.xrayImageId).toBe("A1");
-    expect(withRow?.totalAssigned).toBe(1);
+    // Both callers see the same event (A1 assigned), regardless of which
+    // extra, event-less row the other happened to carry -- proving the
+    // wider key kept the two derivations from bleeding into each other.
+    expect(withOneRow?.entries).toHaveLength(1);
+    expect(withOneRow?.entries[0]?.xrayImageId).toBe("A1");
+    expect(withOneRow?.totalAssigned).toBe(1);
 
-    expect(withoutRow?.entries).toHaveLength(0);
-    expect(withoutRow?.totalAssigned).toBe(0);
+    expect(withTwoRows?.entries).toHaveLength(1);
+    expect(withTwoRows?.entries[0]?.xrayImageId).toBe("A1");
+    expect(withTwoRows?.totalAssigned).toBe(1);
   });
 
   it("two concurrent calls with the SAME-length sampleRows still coalesce into one derivation (dedupe still works)", async () => {

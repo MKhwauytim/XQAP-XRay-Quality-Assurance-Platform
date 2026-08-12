@@ -236,8 +236,16 @@ type DistributionLogStamp = { revision: number; writeToken: string | undefined }
  * compare revision/writeToken (both live entirely in the compatibility log
  * files, never in the immutable event directory -- see
  * mergeDistributionLogSources). Skips the full event-directory scan.
+ *
+ * Exported (A9) so the sync tick (SyncTick.tsx) can use it as the cheap
+ * `distribution` family change probe (§4.2 of the perf/sync spec) without
+ * paying for a full event-directory scan every tick. Its load-bearing
+ * property: `revision` is bumped only by appendDistributionEvents, never by
+ * saveDistributionCurrent (a cache write) -- see the "readDistributionLogStamp
+ * agrees ..." test below for the read/write split this depends on, and the
+ * "revision only advances on an event append" test that guards it directly.
  */
-async function readDistributionLogStamp(
+export async function readDistributionLogStamp(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string
 ): Promise<DistributionLogStamp> {
@@ -528,7 +536,8 @@ async function tryResumeFromCheckpoint(
   monthFolderName: string,
   cached: DistributionCurrentData,
   checkpoint: DistributionFoldCheckpoint,
-  sampleRows: PreparedPopulationRow[]
+  sampleRows: PreparedPopulationRow[],
+  persistCache: boolean
 ): Promise<DistributionCurrentData | null> {
   const delta = await readNewEventsSinceCheckpoint(directoryHandle, monthFolderName, checkpoint);
   if (!delta) return cached; // no distribution directory at all — cache stands as-is.
@@ -558,14 +567,18 @@ async function tryResumeFromCheckpoint(
     },
   };
 
-  // NOT awaited. An earlier revision of this code awaited the write, on the
-  // assumption that it is "ONE small JSON file, never proportional to event
-  // count". Benchmarking against a real 8,000-event month disproved that:
-  // `distribution.current.json` measured **18.8 MB**, because every entry
-  // embeds a full population row (the copy-don't-reference amplification
-  // tracked separately). Awaiting therefore put a multi-megabyte write on the
-  // hot path and made warm re-derive ~6.7x SLOWER than before the checkpoint
-  // work — the opposite of this change's purpose.
+  // NOT awaited (when persistCache is true — see loadOrDeriveDistributionCurrent's
+  // opts parameter, A6a). An earlier revision of this code awaited the write,
+  // on the assumption that it is "ONE small JSON file, never proportional to
+  // event count". Benchmarking against a real 8,000-event month disproved
+  // that at the time: `distribution.current.json` measured **18.8 MB**. That
+  // figure predates B5 (see populationTypes.ts's EmployeeMirrorRowStub):
+  // entries used to embed a full population row each; since B5 they embed
+  // only a 17-field stub. 18.8 MB is therefore an upper bound from the
+  // pre-B5 format, not a current measurement — awaiting was never
+  // re-benchmarked after B5 landed, so the fire-and-forget write stays the
+  // conservative choice below rather than being reverted on an unverified
+  // assumption that the file is now small.
   //
   // Fire-and-forget is safe here because the cache and its checkpoint are a
   // pure optimization, never a correctness input: a stale or missing cache
@@ -575,16 +588,105 @@ async function tryResumeFromCheckpoint(
   // against a not-yet-persisted cache) is wasteful, not incorrect.
   //
   // Failures are surfaced through the error ring buffer rather than swallowed.
-  // Once entries reference rows instead of embedding them, this file becomes
-  // small enough that awaiting could be reconsidered — re-measure first.
-  void saveDistributionCurrent(directoryHandle, monthFolderName, withRevision).catch(
-    logRejection("distribution:cache-write")
-  );
+  //
+  // A6a: this call only fires when the caller opted into persisting (the
+  // default). Read-only callers (loadOrDeriveDistributionCurrentForRead, and
+  // any caller that explicitly passes { persistCache: false }) never reach
+  // this line — see the persistCache guard around this call site.
+  if (persistCache) {
+    void saveDistributionCurrent(directoryHandle, monthFolderName, withRevision).catch(
+      logRejection("distribution:cache-write")
+    );
+  }
   return withRevision;
+}
+
+export type LoadOrDeriveDistributionCurrentOptions = {
+  /**
+   * Whether a successful derive may write `distribution.current.json` /
+   * sample mirrors back to disk. Defaults to `true`. A6 (perf/sync spec):
+   * `loadOrDeriveDistributionCurrentForRead` and other provably pure-read
+   * call sites pass `false` so opening a month to *read* it stops generating
+   * N peers' worth of byte-identical multi-MB writes (F3). Write flows that
+   * need the cache/mirrors refreshed after a real mutation must call
+   * `refreshDistributionCacheAfterWrite` explicitly instead of relying on
+   * this function's own persist — see that helper's doc comment (A6b, F18).
+   */
+  persistCache?: boolean;
+};
+
+/** Same key shape the dedupeInFlight callers below use (workspaceScopeId |
+ *  month | epoch — see loadOrDeriveDistributionCurrentForRead's key), plus
+ *  the same `sampleRows.length` discriminator that key already appends.
+ *  Required for the same reason it's required there (see the "final-review
+ *  Fix 3" regression test in distributionStorage.test.ts): two concurrent
+ *  callers for the same (root, month, epoch) can legitimately pass
+ *  differently-shaped sampleRows (e.g. one caller's sample-master read
+ *  transiently fell back to `[]`), and must never share a memoized result
+ *  derived from the OTHER caller's rows. */
+function deriveMemoKey(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  sampleRows: PreparedPopulationRow[]
+): string {
+  return `${workspaceScopeId(directoryHandle)}|${monthFolderName}|${workspaceEpoch(directoryHandle, monthFolderName)}|${sampleRows.length}`;
+}
+
+/**
+ * Session-scoped derive memo (A6c). Bounds the accepted regression from A6a:
+ * once readers stop persisting the cache, a month whose ON-DISK cache is
+ * unusable (a DERIVE_VERSION bump, or a late-event full refold —
+ * tryResumeFromCheckpoint returning null below) would otherwise pay a full,
+ * expensive re-fold on EVERY component mount within a session, not just
+ * once. This in-memory map makes that once per (workspace, month, epoch).
+ *
+ * Honest caveat (spec §7.2 item 10 / H1-adjacent): the memo is keyed on
+ * `workspaceEpoch`, which only advances on a WRITE performed by *this tab*
+ * (see inFlightReads.ts). A change committed by another machine/tab between
+ * this memo being populated and read back is NOT reflected until something
+ * bumps the epoch — normally the sync tick (SyncTick.tsx), which calls
+ * `bumpWorkspaceEpoch` when its distribution-family probe detects a revision
+ * change. Within one sync interval, a session can therefore read a
+ * memoized-stale derivation on a month whose on-disk cache was never usable
+ * to begin with. This mirrors the file's own long-standing comment that the
+ * cache/checkpoint are "an optimization, never a correctness input" — the
+ * memo inherits that same guarantee, not a stronger one. Capped at 2 entries
+ * (current + previously viewed month) so a long session touching many
+ * months doesn't grow this unboundedly.
+ */
+const DERIVE_MEMO_CAP = 2;
+const deriveMemo: { key: string; value: DistributionCurrentData }[] = [];
+
+function getDeriveMemo(key: string): DistributionCurrentData | undefined {
+  return deriveMemo.find((entry) => entry.key === key)?.value;
+}
+
+function setDeriveMemo(key: string, value: DistributionCurrentData): void {
+  const existingIndex = deriveMemo.findIndex((entry) => entry.key === key);
+  if (existingIndex >= 0) deriveMemo.splice(existingIndex, 1);
+  deriveMemo.push({ key, value });
+  while (deriveMemo.length > DERIVE_MEMO_CAP) deriveMemo.shift();
+}
+
+export function __clearDeriveMemoForTests(): void {
+  deriveMemo.length = 0;
 }
 
 /**
  * Load or derive the current distribution state.
+ *
+ * Entry gate (A6d / H3): when `sampleRows` is empty but events already exist
+ * for this month (compat-log revision > 0), returns `null` immediately
+ * instead of resuming or refolding. `sampleRows: []` most often means
+ * `sample.master.json` failed to load or hasn't been drawn yet — folding
+ * real events against it would silently drop every one of them (the bare
+ * `continue` in foldDistributionEvents, before recordDroppedEvent — see
+ * distributionDerivation.ts), and on the fold-checkpoint resume path that
+ * loss gets baked permanently into an advancing checkpoint. Gating here,
+ * before `tryResumeFromCheckpoint` can run at all, is what keeps that
+ * absorption from ever reaching disk. `null` is the safe shape every caller
+ * already tolerates (XrayReferrals.tsx, useApprovalData.ts,
+ * adhocImportEmployeeView.ts all already fall back to it).
  *
  * Fast path (fold-checkpoint, perf): when the cached snapshot carries a
  * `foldCheckpoint` from this derive algorithm version, read only what
@@ -599,6 +701,12 @@ async function tryResumeFromCheckpoint(
  * out-of-order ("late") event is detected relative to the checkpoint — the
  * fold is not commutative, so a late event can only be handled correctly by
  * discarding the checkpoint and refolding from scratch (see findLateEvent).
+ * When there was NO on-disk checkpoint to resume from at all, the
+ * session-scoped derive memo (A6c, above) is checked before paying for a
+ * full log read — see its own doc comment for the staleness this accepts. A
+ * late event detected ON this call is, by construction, fresher information
+ * than the memo could hold, so that specific fallthrough bypasses the memo
+ * and always does a real full refold.
  *
  * Full path (unchanged in spirit from before this task):
  * - Merge the legacy compatibility log with every immutable event file and
@@ -610,9 +718,22 @@ async function tryResumeFromCheckpoint(
 export async function loadOrDeriveDistributionCurrent(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
-  sampleRows: PreparedPopulationRow[]
+  sampleRows: PreparedPopulationRow[],
+  opts?: LoadOrDeriveDistributionCurrentOptions
 ): Promise<DistributionCurrentData | null> {
+  const persistCache = opts?.persistCache ?? true;
   try {
+    if (sampleRows.length === 0) {
+      const stamp = await readDistributionLogStamp(directoryHandle, monthFolderName);
+      if (stamp.revision > 0) {
+        logError(
+          "distribution:no-sample-rows",
+          new Error(`${monthFolderName}: events exist but sample.master is empty/missing`)
+        );
+        return null;
+      }
+    }
+
     const cached = await loadDistributionCurrent(directoryHandle, monthFolderName);
     const checkpoint = cached?.foldCheckpoint;
     const canResume =
@@ -620,11 +741,28 @@ export async function loadOrDeriveDistributionCurrent(
       cached.deriveVersion === DERIVE_VERSION &&
       !!checkpoint &&
       checkpoint.deriveVersion === DERIVE_VERSION;
+    const memoKey = deriveMemoKey(directoryHandle, monthFolderName, sampleRows);
 
     if (canResume) {
-      const resumed = await tryResumeFromCheckpoint(directoryHandle, monthFolderName, cached, checkpoint!, sampleRows);
-      if (resumed) return resumed;
-      // null => a late event was found; fall through to a full, safe refold.
+      const resumed = await tryResumeFromCheckpoint(
+        directoryHandle, monthFolderName, cached, checkpoint!, sampleRows, persistCache
+      );
+      if (resumed) {
+        setDeriveMemo(memoKey, resumed);
+        return resumed;
+      }
+      // null => a late event was found on THIS read, straight from disk --
+      // strictly fresher information than anything the memo could hold, so
+      // fall through to a full, safe refold WITHOUT consulting the memo
+      // (see the branch below, which only checks it when there was no
+      // checkpoint to resume from in the first place).
+    } else {
+      // A6c: no usable on-disk cache at all (fresh month, or a
+      // DERIVE_VERSION bump). Before paying for a full log read, check
+      // whether this exact (workspace, month, epoch, row-shape) was already
+      // derived earlier in this session.
+      const memoHit = getDeriveMemo(memoKey);
+      if (memoHit) return memoHit;
     }
 
     const { log, segmentOffsets, legacyEventFileNames } = await loadDistributionLogWithCheckpointMeta(
@@ -646,6 +784,7 @@ export async function loadOrDeriveDistributionCurrent(
       cached.eventSetId === log.eventSetId &&
       hasQuotaForAssignedEmployees(cached, log)
     ) {
+      setDeriveMemo(memoKey, cached);
       return cached;
     }
 
@@ -667,15 +806,21 @@ export async function loadOrDeriveDistributionCurrent(
       eventSetId: log.eventSetId,
       foldCheckpoint,
     };
+    setDeriveMemo(memoKey, withRevision);
 
-    // NOT awaited — see the measured rationale on the sibling save above.
-    // `distribution.current.json` is ~18.8 MB for an 8,000-event month because
-    // entries embed full rows, so awaiting it puts a multi-megabyte write on
-    // the hot path. The cache and checkpoint are an optimization, never a
-    // correctness input.
-    void saveDistributionCurrent(directoryHandle, monthFolderName, withRevision).catch(
-      logRejection("distribution:cache-write")
-    );
+    // NOT awaited (when persistCache) — see the measured rationale on the
+    // sibling save above. `distribution.current.json` measured ~18.8 MB for
+    // an 8,000-event month under the PRE-B5 format, where entries embedded
+    // full rows; since B5 entries embed only a 17-field
+    // EmployeeMirrorRowStub, so that figure is an upper bound, not a current
+    // measurement (see the sibling comment above tryResumeFromCheckpoint's
+    // save for the full note). The cache and checkpoint remain an
+    // optimization, never a correctness input.
+    if (persistCache) {
+      void saveDistributionCurrent(directoryHandle, monthFolderName, withRevision).catch(
+        logRejection("distribution:cache-write")
+      );
+    }
 
     return withRevision;
   } catch (error) {
@@ -683,6 +828,37 @@ export async function loadOrDeriveDistributionCurrent(
     // missing-file cases are handled quietly inside the loaders above.
     logError("distribution:load-or-derive", error);
     return null;
+  }
+}
+
+/**
+ * Write-path helper (A6b, F18). `saveDistributionCurrent` has exactly one
+ * non-read caller in the whole tree (useDistributionActions.ts) — every other
+ * write flow that appends distribution events (bulk assignment, referral
+ * approval/replacement, ad-hoc import assignment, reopen) historically relied
+ * on the NEXT reader's fire-and-forget cache write (tryResumeFromCheckpoint /
+ * loadOrDeriveDistributionCurrent above) to refresh both the cache and every
+ * employee's sample mirror (syncSampleMirrors is only reachable from
+ * saveDistributionCurrent — see distributionStorage.ts's own import). Now
+ * that reads default to not persisting for *pure* read call sites, any write
+ * flow that does NOT call this explicitly after a successful event append
+ * would freeze its own cache and mirrors indefinitely.
+ *
+ * Deliberately swallows its own failure (logged, never thrown): this is a
+ * cache/mirror refresh, not a correctness input, and a closed month
+ * legitimately rejects it today via `ensureMonthWritable` inside
+ * `saveDistributionCurrent` (ensureMonthWritable → MonthClosedError) — that
+ * is expected, not a bug this helper needs to work around.
+ */
+export async function refreshDistributionCacheAfterWrite(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string,
+  sampleRows: PreparedPopulationRow[]
+): Promise<void> {
+  try {
+    await loadOrDeriveDistributionCurrent(directoryHandle, monthFolderName, sampleRows, { persistCache: true });
+  } catch (error) {
+    logError("distribution:refresh-after-write", error);
   }
 }
 
@@ -701,12 +877,19 @@ export function loadDistributionLogForRead(
  *  sites only. Never use this for a fresh-read-before-write correctness
  *  check. All callers should pass sampleRows sourced from the same
  *  sample.master.json for a given month -- the dedupe key below only
- *  cheaply discriminates by row count, not full content identity. */
+ *  cheaply discriminates by row count, not full content identity.
+ *
+ *  A6a: always passes `{ persistCache: false }` — a read must never write
+ *  `distribution.current.json` / sample mirrors back to disk (F3). Write
+ *  flows must call `refreshDistributionCacheAfterWrite` explicitly instead
+ *  (A6b). */
 export function loadOrDeriveDistributionCurrentForRead(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
   sampleRows: PreparedPopulationRow[]
 ): Promise<DistributionCurrentData | null> {
   const key = `${workspaceScopeId(directoryHandle)}|${monthFolderName}|${workspaceEpoch(directoryHandle, monthFolderName)}|dist-current|${sampleRows.length}`;
-  return dedupeInFlight(key, () => loadOrDeriveDistributionCurrent(directoryHandle, monthFolderName, sampleRows));
+  return dedupeInFlight(key, () =>
+    loadOrDeriveDistributionCurrent(directoryHandle, monthFolderName, sampleRows, { persistCache: false })
+  );
 }

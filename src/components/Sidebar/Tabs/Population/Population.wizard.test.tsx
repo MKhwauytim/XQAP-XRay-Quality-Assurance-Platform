@@ -29,9 +29,16 @@ vi.mock("../../../../data/workspace/useWorkspace", () => ({
   useWorkspace: () => ({ directoryHandle: null }),
 }));
 
-// Grant every feature so no permission gate hides wizard controls.
+// Grant every feature so no permission gate hides wizard controls. Excludes
+// draw-sample/process-population so A1's landing rule (perf/sync enhancement
+// 2026-08-12) keeps this suite on the "process" sub-tab, where the phase
+// stepper this suite asserts on actually renders — see
+// Population.browseMountPreservation.test.tsx's identical note.
 vi.mock("../../../../auth/usePermissions", () => ({
-  usePermissions: () => ({ can: () => true, canMutate: () => true }),
+  usePermissions: () => ({
+    can: () => true,
+    canMutate: (featureId: string) => featureId !== "draw-sample" && featureId !== "process-population",
+  }),
 }));
 
 // Global month context: no workspace in this test → selection none, no months.

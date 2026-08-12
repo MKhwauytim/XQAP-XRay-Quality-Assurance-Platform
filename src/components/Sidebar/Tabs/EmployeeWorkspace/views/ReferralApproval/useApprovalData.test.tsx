@@ -12,11 +12,21 @@ import {
 import {
   appendReferralRequest,
   loadReferralLog,
+  loadRequestLogs,
   updateReferralStatus,
 } from "../../../../../../data/referral/referralStorage";
 import type { ReferralRequest } from "../../../../../../data/referral/referralTypes";
 import { broadcastDataRefresh } from "../../../../../../data/workspace/dataRefreshSignal";
 import { useApprovalData } from "./useApprovalData";
+
+// A2/A3 tests need to count/interrupt individual `loadRequestLogs` calls
+// (one per `loadData` invocation, since `globalMonthMock` below has exactly
+// one known month — no cross-month scans) without changing its real
+// behaviour by default.
+vi.mock("../../../../../../data/referral/referralStorage", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../../../../data/referral/referralStorage")>();
+  return { ...actual, loadRequestLogs: vi.fn(actual.loadRequestLogs) };
+});
 
 // Mutable so a test can flip the app-wide selection (or the known-months list)
 // mid-flight; reset in afterEach.
@@ -205,5 +215,137 @@ describe("useApprovalData deny-flow regressions", () => {
     expect(mayLog.requests[0].status).toBe("denied");
     const aprilLog = await loadReferralLog(root, "4-april-2026");
     expect(aprilLog.requests).toHaveLength(0);
+  });
+});
+
+// A2 — silent refresh must never blank the review queue.
+describe("useApprovalData silent refresh (A2)", () => {
+  it("never flips loadState to 'loading' when the app-wide refresh signal fires (regression: the no-op bug where opts became the source string)", async () => {
+    setupSupervisor();
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    await appendReferralRequest(root, "4-april-2026", mockReferral("req-a2-1", "4-april-2026"));
+
+    // Records every loadState value seen across every render, including
+    // transient ones that would be invisible from a post-hoc `result.current`
+    // snapshot alone -- a naive silent-flag no-op (opts.silent landing on the
+    // event's source string, `dataRefreshSignal.ts:35-40`) would flip through
+    // "loading" here exactly as an un-silenced reload does.
+    const seenLoadStates: string[] = [];
+    const { result } = renderHook(() => {
+      const data = useApprovalData(root);
+      seenLoadStates.push(data.loadState);
+      return data;
+    });
+    await waitFor(() => expect(result.current.loadState).toBe("ready"));
+    await waitFor(() => expect(result.current.referrals).toHaveLength(1));
+
+    seenLoadStates.length = 0; // only care about states seen from here on
+    await appendReferralRequest(root, "4-april-2026", mockReferral("req-a2-2", "4-april-2026"));
+
+    act(() => {
+      broadcastDataRefresh("periodic");
+    });
+
+    await waitFor(() => expect(result.current.referrals).toHaveLength(2));
+    expect(seenLoadStates).not.toContain("loading");
+    expect(seenLoadStates).not.toContain("error");
+  });
+
+  it("keeps prior data and stays 'ready' when a silent background refresh's read fails", async () => {
+    setupSupervisor();
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    await appendReferralRequest(root, "4-april-2026", mockReferral("req-a2-3", "4-april-2026"));
+
+    const { result } = renderHook(() => useApprovalData(root));
+    await waitFor(() => expect(result.current.loadState).toBe("ready"));
+    await waitFor(() => expect(result.current.referrals).toHaveLength(1));
+
+    vi.mocked(loadRequestLogs).mockRejectedValueOnce(new Error("transient UNC hiccup"));
+
+    act(() => {
+      broadcastDataRefresh("periodic");
+    });
+
+    // Give the rejected silent reload a tick to settle, then assert nothing
+    // was blanked or flipped to an error state -- the failed read is logged
+    // and swallowed, exactly like XrayReferrals.tsx's silent-refresh path.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(result.current.loadState).toBe("ready");
+    expect(result.current.referrals).toHaveLength(1);
+    expect(result.current.referrals[0].requestId).toBe("req-a2-3");
+  });
+});
+
+// A3 — bulkDecision reloads once after the loop, not once per item.
+describe("useApprovalData bulkDecision reload count (A3)", () => {
+  // Uses "deny" throughout, mirroring the existing deny-flow tests above --
+  // approve additionally requires a sample.master.json fixture (approveReferral's
+  // ownership/replay checks), which is orthogonal to what A3 is verifying here
+  // (reload count, not approval mechanics).
+  it("triggers exactly one reload for a 5-item bulk denial", async () => {
+    setupSupervisor();
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    const reqs = Array.from({ length: 5 }, (_, i) => mockReferral(`req-bulk-${i}`, "4-april-2026"));
+    for (const r of reqs) await appendReferralRequest(root, "4-april-2026", r);
+
+    const { result } = renderHook(() => useApprovalData(root));
+    await waitFor(() => expect(result.current.loadState).toBe("ready"));
+    await waitFor(() => expect(result.current.referrals).toHaveLength(5));
+
+    const countBefore = vi.mocked(loadRequestLogs).mock.calls.length;
+    await act(async () => {
+      const outcomes = await result.current.bulkDecision(reqs, "deny", "bulk note");
+      expect(outcomes).toHaveLength(5);
+      expect(outcomes.every((o) => o.ok)).toBe(true);
+    });
+    const countAfter = vi.mocked(loadRequestLogs).mock.calls.length;
+
+    expect(countAfter - countBefore).toBe(1);
+  });
+
+  it("a single deny still triggers exactly one reload (unchanged interactive path)", async () => {
+    setupSupervisor();
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    const req = mockReferral("req-single-1", "4-april-2026");
+    await appendReferralRequest(root, "4-april-2026", req);
+
+    const { result } = renderHook(() => useApprovalData(root));
+    await waitFor(() => expect(result.current.loadState).toBe("ready"));
+    await waitFor(() => expect(result.current.referrals).toHaveLength(1));
+
+    const countBefore = vi.mocked(loadRequestLogs).mock.calls.length;
+    const outcome = await result.current.denyReferral(req, "ok");
+    expect(outcome.ok).toBe(true);
+    const countAfter = vi.mocked(loadRequestLogs).mock.calls.length;
+
+    expect(countAfter - countBefore).toBe(1);
+  });
+
+  it("still triggers exactly one reload when one item in the bulk selection fails (the finally path)", async () => {
+    setupSupervisor();
+    const root = createMemoryDirectory("root") as unknown as DirectoryHandleLike;
+    const reqs = Array.from({ length: 3 }, (_, i) => mockReferral(`req-mix-${i}`, "4-april-2026"));
+    for (const r of reqs) await appendReferralRequest(root, "4-april-2026", r);
+    // req-mix-1 is already decided by another reviewer before the bulk run --
+    // its deny() call resolves { ok: false } (idempotency guard) rather than
+    // throwing, but the bulk loop must still reach the single trailing reload
+    // exactly once regardless of the per-item outcome.
+    await updateReferralStatus(root, "4-april-2026", "req-mix-1", {
+      status: "approved", reviewedBy: "sup-2", reviewedAt: new Date().toISOString(),
+    });
+
+    const { result } = renderHook(() => useApprovalData(root));
+    await waitFor(() => expect(result.current.loadState).toBe("ready"));
+    await waitFor(() => expect(result.current.referrals).toHaveLength(3));
+
+    const countBefore = vi.mocked(loadRequestLogs).mock.calls.length;
+    const outcomes = await result.current.bulkDecision(reqs, "deny", "bulk note");
+    expect(outcomes.filter((o) => o.ok)).toHaveLength(2);
+    expect(outcomes.filter((o) => !o.ok)).toHaveLength(1);
+    const countAfter = vi.mocked(loadRequestLogs).mock.calls.length;
+
+    expect(countAfter - countBefore).toBe(1);
   });
 });

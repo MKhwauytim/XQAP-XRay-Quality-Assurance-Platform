@@ -172,7 +172,21 @@ export default function PopulationTab() {
   const { directoryHandle } = useWorkspace();
   const { can, canMutate } = usePermissions();
   const sessionRef = useRef(readSession());
-  const [activeSubTab, setActiveSubTab] = useState<SubTab>("process");
+  // A1 (perf/sync enhancement 2026-08-12): land on "browse" only when BOTH
+  // clauses hold. can("view-browse") is required or the user lands on the
+  // "غير مصرح" placeholder below. The capability clause is required because
+  // BrowseDataView reads the month's entire population.final on mount with
+  // no already-loaded guard, while computeMonthLoadScope only ever requests
+  // `population`/`raw` for the "process" sub-tab -- so an unconditional
+  // browse landing would charge a viewer without draw-sample/process-population
+  // a multi-MB UNC read they pay nothing for today. For a manager/admin who
+  // does hold one of those capabilities, landing on browse is a net win: it
+  // avoids the per-tick population reload the "process" sub-tab would trigger.
+  const [activeSubTab, setActiveSubTab] = useState<SubTab>(() =>
+    can("view-browse") && (canMutate("draw-sample") || canMutate("process-population"))
+      ? "browse"
+      : "process"
+  );
   // Browse owns its own data-load effect (BrowseDataView) with no
   // "already loaded" guard; keeping it mounted-but-hidden once visited,
   // instead of unmounting on every sub-tab switch, avoids re-loading its
@@ -567,8 +581,13 @@ export default function PopulationTab() {
     void (async () => {
       try {
         const sample = await loadSampleMaster(directoryHandle, monthFolderName);
+        // A6a: the orphan scan is a pure read — it must not fire the
+        // fire-and-forget multi-MB cache write that used to make every reader
+        // a writer.
         const distribution = sample
-          ? await loadOrDeriveDistributionCurrent(directoryHandle, monthFolderName, sample.rows)
+          ? await loadOrDeriveDistributionCurrent(directoryHandle, monthFolderName, sample.rows, {
+              persistCache: false,
+            })
           : null;
         const employeeFiles = await loadAllEmployeeFiles(directoryHandle, monthFolderName);
         if (cancelled) return;

@@ -289,6 +289,39 @@ export async function readAppendOnlyDirectory<T>(
   return { values, fileNames, matchedNames };
 }
 
+export type SizedDirectoryEntry = { name: string; size: number };
+
+/**
+ * Sized listing (§4.2 of the perf/sync spec, F21): for every file matching
+ * `suffix`, return its name AND byte size -- `listDirectoryEntries` alone
+ * (`{name, kind}` only) can detect a NEW file appearing, but cannot detect a
+ * request appended into an EXISTING, larger file (e.g. a new referral
+ * request landing inside an already-present `{user}.answers.json`). Costs
+ * one `getFileHandle` + `getFile()` per matched file -- the same mechanism
+ * `readSegmentTails` above already uses and for the same reason it prefers
+ * `size` over `lastModified`: `File.size` is obtained without reading file
+ * content, and is clock-skew-immune, unlike wall-clock `lastModified` on an
+ * unsynchronized network share. This is NOT a free listing -- callers doing
+ * an unchanged-tick round-trip budget (the sync tick) must count these calls.
+ */
+export async function listDirectoryEntriesWithSize(
+  dir: DirectoryHandleLike,
+  suffix: string
+): Promise<SizedDirectoryEntry[]> {
+  const entries = await listDirectoryEntries(dir);
+  const matched = entries
+    .filter((entry) => entry.kind === "file" && entry.name.endsWith(suffix))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const out: SizedDirectoryEntry[] = [];
+  for (const entry of matched) {
+    const handle = await dir.getFileHandle(entry.name, { create: false });
+    const file = await handle.getFile();
+    out.push({ name: entry.name, size: file.size });
+  }
+  return out;
+}
+
 export type SegmentTailOptions = {
   suffix: string;
   /** Byte offset already consumed per file name; a name missing from this map defaults to 0 (read from the start). */

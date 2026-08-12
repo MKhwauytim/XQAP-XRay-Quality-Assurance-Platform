@@ -3,7 +3,7 @@ import type { PreparedPopulationRow } from "../population/populationTypes";
 import type { SampleMasterData } from "../sampling/sampleTypes";
 import { loadSampleMaster, saveSampleMaster } from "../sampling/sampleStorage";
 import { buildAssignEvent } from "../distribution/distributionLog";
-import { appendDistributionEvents, loadOrDeriveDistributionCurrent } from "../distribution/distributionStorage";
+import { appendDistributionEvents, loadOrDeriveDistributionCurrent, refreshDistributionCacheAfterWrite } from "../distribution/distributionStorage";
 import type { NormalizedRiskRow } from "../../components/Sidebar/Tabs/Population/riskData/riskDataTypes";
 import { adhocMonthFolderName, type AdhocImportRecord, type AdhocImportRow } from "./adhocImportTypes";
 import { saveAdhocImportRecord } from "./adhocImportStorage";
@@ -215,6 +215,11 @@ export async function assignAdhocRowsToEmployee(
   if (!appendResult.ok) {
     return { ok: false, error: appendResult.error };
   }
+
+  // A6b: refresh the derived cache + employee sample mirrors after the append,
+  // now that pure reads no longer persist them. Swallows its own failure by
+  // contract.
+  await refreshDistributionCacheAfterWrite(directoryHandle, monthFolderName, sampleRows);
 
   const assignedAt = sharedEventAt;
   const nextRows: AdhocImportRow[] = record.rows.map((r) => {

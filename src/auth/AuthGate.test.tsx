@@ -9,7 +9,6 @@ import * as passwordCrypto from "./passwordCrypto";
 import { writeLastLoginUsername } from "./loginPersistence";
 import { VIEWER_USERNAME } from "./authConfig";
 import { WorkspaceProvider } from "../data/workspace/WorkspaceProvider";
-import * as dataRefreshSignal from "../data/workspace/dataRefreshSignal";
 import { createMemoryDirectory } from "../data/storage/memoryDirectory";
 import * as populationStorage from "../data/population/populationStorage";
 import { useGlobalMonth } from "../data/month/useGlobalMonth";
@@ -536,7 +535,13 @@ describe("AuthGate — activity log wiring (Task 1 double-permission-prompt fix)
 });
 
 describe("AuthGate — permission auto-refresh", () => {
-  const AUTO_REFRESH_INTERVAL_MS = 3 * 60_000;
+  // 45s per §2 of the perf/sync spec (A7 commit 2), down from the old 3
+  // minutes. As of that same change, this interval's callback ONLY calls
+  // refreshPermissions() -- it no longer broadcasts dataRefreshSignal itself
+  // (see SyncTick.tsx, rendered inside GlobalMonthProvider, for the granular
+  // change-set-driven broadcast that replaced it; F17 explains why that
+  // couldn't stay inside this same interval).
+  const AUTO_REFRESH_INTERVAL_MS = 45_000;
 
   beforeEach(() => {
     userManagement.writeUserManagementState(
@@ -578,10 +583,7 @@ describe("AuthGate — permission auto-refresh", () => {
       expect(refreshCall).toBeDefined();
     });
 
-    const dataRefreshSpy = vi.fn();
-    const unsubscribe = dataRefreshSignal.subscribeToDataRefresh(dataRefreshSpy);
-
-    // Fire the scheduled callback directly rather than racing real 3-minute
+    // Fire the scheduled callback directly rather than racing real 45s
     // timers -- what matters here is that the interval this effect registers
     // actually triggers another disk read, not exactly when it fires.
     (refreshCall![0] as () => void)();
@@ -589,11 +591,6 @@ describe("AuthGate — permission auto-refresh", () => {
     await waitFor(() =>
       expect(mocks.loadWorkspaceFiles.mock.calls.length).toBeGreaterThan(callsAfterHydration),
     );
-    // The same tick must also broadcast the app-wide data-refresh signal, so
-    // every mounted view (assigned samples, referrals, notifications, ...)
-    // re-reads its own workspace data -- not just the user-management state.
-    expect(dataRefreshSpy).toHaveBeenCalled();
-    unsubscribe();
   });
 
   it("skips the periodic tick's work entirely while the tab is hidden", async () => {
@@ -618,9 +615,6 @@ describe("AuthGate — permission auto-refresh", () => {
       expect(refreshCall).toBeDefined();
     });
 
-    const dataRefreshSpy = vi.fn();
-    const unsubscribe = dataRefreshSignal.subscribeToDataRefresh(dataRefreshSpy);
-
     vi.spyOn(document, "hidden", "get").mockReturnValue(true);
 
     // Fire the scheduled callback directly while the tab is "hidden".
@@ -631,9 +625,6 @@ describe("AuthGate — permission auto-refresh", () => {
       await Promise.resolve();
     });
     expect(mocks.loadWorkspaceFiles.mock.calls.length).toBe(callsAfterHydration);
-    expect(dataRefreshSpy).not.toHaveBeenCalled();
-
-    unsubscribe();
   });
 
   it("does not schedule an auto-refresh for a demo/viewer session", async () => {

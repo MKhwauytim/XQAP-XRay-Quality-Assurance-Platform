@@ -3158,7 +3158,23 @@ select.save-disk-input {
 }
 
 /* ── Table view ── */
-.bv-table-view { padding: 0 28px 40px; }
+.bv-table-view { padding: 0 28px 40px; position: relative; }
+/* A10 (perf/sync enhancement 2026-08-12): dims the previously-rendered rows
+   instead of unmounting them while a background reload (refreshKey bump,
+   dataset/month switch) is in flight -- see BrowseDataView's loadGeneration
+   comment for why this must never fully blank once data has rendered once. */
+.bv-table-view-refreshing .bv-table-scroll { opacity: 0.5; pointer-events: none; transition: opacity 0.15s; }
+.bv-table-refresh-overlay {
+  position: absolute;
+  inset-inline-start: 28px;
+  top: 0;
+  font-size: 12.5px;
+  color: var(--p-muted);
+  background: var(--c-surface);
+  padding: 2px var(--sp-2);
+  border-radius: 6px;
+  z-index: 5;
+}
 .bv-table-toolbar {
   display: flex;
   align-items: center;

@@ -26,7 +26,10 @@ export async function runPowerBiExport(
   const populationData = await loadMonthPopulationFinal(root, month);
   const sample = await loadSampleMaster(root, month);
   const sampleRows = sample?.rows ?? [];
-  const distribution = await loadOrDeriveDistributionCurrent(root, month, sampleRows);
+  // A6a: export is a pure read — never persist the derived cache from here.
+  const distribution = await loadOrDeriveDistributionCurrent(root, month, sampleRows, {
+    persistCache: false,
+  });
   const employeeFiles = await loadAllEmployeeFiles(root, month);
 
   const execRows = buildExecutiveReportRows({
