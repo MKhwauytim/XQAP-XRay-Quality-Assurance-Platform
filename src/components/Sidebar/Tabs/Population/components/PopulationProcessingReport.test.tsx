@@ -112,4 +112,66 @@ describe("PopulationProcessingReport — final-population preview (2026-08-12)",
     expect(screen.getAllByText("3").length).toBeGreaterThan(0);
     expect(screen.getAllByText("4").length).toBeGreaterThan(0);
   });
+
+  it("bug repro: renders the raw stage enum as its Arabic label instead of the stored code (owner report 2026-08-12)", () => {
+    const rows: PopulationReportPreviewRow[] = [
+      {
+        xrayImageId: "XR-1",
+        sourceRowNumber: 1,
+        portName: "ميناء جدة",
+        stage: "THIRD_STAGE",
+        xrayLevelOneResult: "سليمة",
+        xrayLevelTwoResult: "سليمة",
+        certScanStatus: "Certscan",
+      },
+    ];
+    render(<PopulationProcessingReport summary={makeSummary()} previewRows={rows} />);
+
+    expect(screen.getByText("المستوى الثالث")).toBeInTheDocument();
+    expect(screen.queryByText("THIRD_STAGE")).not.toBeInTheDocument();
+  });
+
+  it("bug repro: a bare CertScan=0 with certScanProvided:false renders a 'not provided' note instead of a percentage (owner report 2026-08-12, 60,971 rows / 0 CertScan)", () => {
+    const summary = { ...makeSummary(), certScanRows: 0, certScanProvided: false };
+    render(<PopulationProcessingReport summary={summary} previewRows={[]} />);
+
+    expect(screen.getByText(/لم يتم توفير قائمة أجهزة CertScan لهذا التشغيل/)).toBeInTheDocument();
+    expect(screen.queryByText(/^CertScan: /)).not.toBeInTheDocument();
+  });
+
+  it("shows the normal CertScan/NonCertScan percentages when certScanProvided is true, even at 0 matched rows", () => {
+    const summary = { ...makeSummary(), certScanRows: 0, certScanProvided: true };
+    render(<PopulationProcessingReport summary={summary} previewRows={[]} />);
+
+    expect(screen.getByText(/^CertScan: /)).toBeInTheDocument();
+    expect(screen.queryByText(/لم يتم توفير قائمة أجهزة CertScan/)).not.toBeInTheDocument();
+  });
+
+  it("falls back to the normal percentages when certScanProvided is undefined (older aggregate/report builder that predates the field)", () => {
+    render(<PopulationProcessingReport summary={makeSummary()} previewRows={[]} />);
+    expect(screen.getByText(/^CertScan: /)).toBeInTheDocument();
+  });
+
+  it("respects custom stageMappings overrides passed down from the active population config", () => {
+    const rows: PopulationReportPreviewRow[] = [
+      {
+        xrayImageId: "XR-1",
+        sourceRowNumber: 1,
+        portName: "ميناء جدة",
+        stage: "CUSTOM_THIRD",
+        xrayLevelOneResult: "سليمة",
+        xrayLevelTwoResult: "سليمة",
+        certScanStatus: "Certscan",
+      },
+    ];
+    render(
+      <PopulationProcessingReport
+        summary={makeSummary()}
+        previewRows={rows}
+        stageMappings={{ third: ["CUSTOM_THIRD"] }}
+      />,
+    );
+
+    expect(screen.getByText("المستوى الثالث")).toBeInTheDocument();
+  });
 });

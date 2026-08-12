@@ -5,6 +5,8 @@ import { formatNumber, formatPercentage } from "./helpers";
 import SummaryCard from "./SummaryCard";
 import Pagination from "../../../../../components/Pagination/Pagination";
 import { clampPage, pageSlice } from "../../../../../utils/paginationUtils";
+import { formatStageLabel } from "../../../../../data/population/stageHelpers";
+import type { StageAliasMappings } from "../../../../../data/population/populationConfig";
 
 /** The handful of preview-row fields this component's table actually renders —
  *  intentionally narrower than `PreparedPopulationRow` so both a live, freshly
@@ -23,6 +25,12 @@ export type PopulationReportPreviewRow = {
 type PopulationProcessingReportProps = {
   summary: ProcessingSummary;
   previewRows: PopulationReportPreviewRow[];
+  /** W-owner-2026-08-12b: active stage alias mappings (defaults + admin overrides)
+   *  used to render `previewRows[].stage` as its Arabic label (e.g. "المستوى
+   *  الثالث") instead of the raw stored enum (e.g. "THIRD_STAGE"). Optional so
+   *  existing callers/tests that predate this fix keep compiling; when omitted,
+   *  `formatStageLabel` falls back to its own default mappings. */
+  stageMappings?: Partial<StageAliasMappings>;
   /** W8: per-row detail for excluded-during-processing rows, previously only
    *  reachable via the removed "تقرير المعالجة" HTML export (which never actually
    *  showed per-row detail — only aggregate counts). Sourced directly from the
@@ -220,9 +228,11 @@ const PREVIEW_PAGE_SIZE = 10;
 function PreparedPopulationPreviewSection({
   summary,
   previewRows,
+  stageMappings,
 }: {
   summary: ProcessingSummary;
   previewRows: PopulationReportPreviewRow[];
+  stageMappings?: Partial<StageAliasMappings>;
 }) {
   const [page, setPage] = useState(1);
   if (previewRows.length === 0) return null;
@@ -254,7 +264,7 @@ function PreparedPopulationPreviewSection({
           <div key={`${row.xrayImageId}-${row.sourceRowNumber}`} className="prepared-preview-row">
             <span>{row.xrayImageId}</span>
             <span>{row.portName ?? ""}</span>
-            <span>{row.stage ?? ""}</span>
+            <span>{formatStageLabel(row.stage, stageMappings)}</span>
             <span>{row.xrayLevelOneResult}</span>
             <span>{row.xrayLevelTwoResult}</span>
             <span>{row.certScanStatus}</span>
@@ -276,6 +286,7 @@ function PreparedPopulationPreviewSection({
 export default function PopulationProcessingReport({
   summary,
   previewRows,
+  stageMappings,
   removedRows,
   duplicateRows,
   invalidResultRows,
@@ -323,8 +334,17 @@ export default function PopulationProcessingReport({
       <div className="processing-detail-grid">
         <article className="processing-detail-card">
           <h4>نسب CertScan</h4>
-          <p>CertScan: {formatPercentage(summary.certScanPercentage)}</p>
-          <p>NonCertScan: {formatPercentage(summary.nonCertScanPercentage)}</p>
+          {summary.certScanProvided === false ? (
+            <p className="certscan-not-provided-note">
+              لم يتم توفير قائمة أجهزة CertScan لهذا التشغيل — القيمة صفر لأن المطابقة لم تُجرَ
+              أصلاً، وليست لأن المطابقة فشلت. أضف قائمة CertScan من إعدادات المعالجة لتفعيل التصنيف.
+            </p>
+          ) : (
+            <>
+              <p>CertScan: {formatPercentage(summary.certScanPercentage)}</p>
+              <p>NonCertScan: {formatPercentage(summary.nonCertScanPercentage)}</p>
+            </>
+          )}
         </article>
 
         <article className="processing-detail-card">
@@ -366,7 +386,7 @@ export default function PopulationProcessingReport({
         </div>
       </div>
 
-      <PreparedPopulationPreviewSection summary={summary} previewRows={previewRows} />
+      <PreparedPopulationPreviewSection summary={summary} previewRows={previewRows} stageMappings={stageMappings} />
 
       <DroppedRowsSection
         removedRows={removedRows}

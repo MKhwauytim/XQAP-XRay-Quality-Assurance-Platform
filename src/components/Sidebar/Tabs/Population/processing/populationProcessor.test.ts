@@ -129,6 +129,35 @@ describe("processPopulation async processing and column preservation", () => {
     expect(progressSteps[progressSteps.length - 1].percent).toBe(100);
   });
 
+  test("summary.certScanProvided is false and certScanRows is 0 when no CertScan reference text is supplied (owner report 2026-08-12: bare 0 must be distinguishable from 'matched none')", async () => {
+    const input: PopulationProcessingInput = {
+      riskWorkbookResult: mockRiskResult,
+      biWorkbookResult: mockBiResult,
+      certScanPasteText: ""
+    };
+
+    const result = await processPopulation(input);
+
+    expect(result.summary.certScanProvided).toBe(false);
+    expect(result.summary.certScanRows).toBe(0);
+  });
+
+  test("summary.certScanProvided is true once a parseable CertScan paste is supplied, independent of whether it actually matches this row's port/serial", async () => {
+    const input: PopulationProcessingInput = {
+      riskWorkbookResult: mockRiskResult,
+      biWorkbookResult: mockBiResult,
+      certScanPasteText: "Port Name\tSystem S/N\nمنفذ آخر\tXYZ98765"
+    };
+
+    const result = await processPopulation(input);
+
+    expect(result.summary.certScanProvided).toBe(true);
+    // This row's port ("البطحاء") doesn't align with the pasted port ("منفذ آخر"),
+    // so it still ends up NonCertScan -- certScanProvided being true is about
+    // whether a usable reference list existed, not whether this row matched it.
+    expect(result.summary.certScanRows).toBe(0);
+  });
+
   test("carries previously-dropped risk fields (manifest, movement, transit declaration, hijri dates, destination, entry/exit) through to the final prepared row", async () => {
     const input: PopulationProcessingInput = {
       riskWorkbookResult: mockRiskResult,

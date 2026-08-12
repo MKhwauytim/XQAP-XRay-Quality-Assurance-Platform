@@ -3,6 +3,7 @@ import type { BiWorkbookResult } from "../biData/biDataTypes";
 import type { PopulationProcessingResult } from "../processing/populationProcessingTypes";
 import type { SafeWriteProgressPhase } from "../../../../../data/storage/safeWrite";
 import type { PopulationAggregateLoadResult } from "../../../../../data/population/populationAggregate";
+import type { StageAliasMappings } from "../../../../../data/population/populationConfig";
 import { useLabels } from "../../../../../data/labels/useLabels";
 import DataAccuracyReport from "./DataAccuracyReport";
 import PopulationProcessingReport from "./PopulationProcessingReport";
@@ -54,6 +55,11 @@ type PhaseTwoReportAndProcessingProps = {
   populationLocked?: boolean;
   /** The persisted aggregate for a locked month, or null while unlocked/not yet loaded. */
   populationAggregate?: PopulationAggregateLoadResult | null;
+  /** W-owner-2026-08-12b: active stage alias mappings, threaded down to
+   *  `PopulationProcessingReport` so its "معاينة المجتمع النهائي" preview can
+   *  render the Arabic stage label instead of the raw stored enum. Sourced
+   *  from `index.tsx`'s already-loaded `config.stageMappings` — no new disk read. */
+  stageMappings?: Partial<StageAliasMappings>;
   onProcessPopulation: () => void;
   onExportPopulation: () => void;
 };
@@ -76,6 +82,7 @@ export default function PhaseTwoReportAndProcessing({
   canExport,
   populationLocked = false,
   populationAggregate = null,
+  stageMappings,
   onProcessPopulation,
   onExportPopulation,
 }: PhaseTwoReportAndProcessingProps) {
@@ -272,6 +279,7 @@ export default function PhaseTwoReportAndProcessing({
             <PopulationProcessingReport
               summary={reportData.summary}
               previewRows={reportData.previewRows}
+              stageMappings={stageMappings}
               removedRows={populationProcessingResult?.removedRows}
               duplicateRows={populationProcessingResult?.duplicateRows}
               invalidResultRows={populationProcessingResult?.invalidResultRows}

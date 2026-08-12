@@ -1281,6 +1281,20 @@
   font-weight: var(--p-medium);
 }
 
+/* W-owner-2026-08-12c: distinguishes "no CertScan reference supplied" from a
+   bare zero, which reads identically to "matched none". */
+.certscan-not-provided-note {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--p-warning-border);
+  background: var(--p-warning-bg);
+  color: var(--p-warning);
+  border-radius: var(--p-radius-sm);
+  font-size: 12.5px;
+  font-weight: var(--p-medium);
+  line-height: 1.5;
+}
+
 /* BI + preview tables */
 .bi-fill-summary-table,
 .prepared-preview-table {

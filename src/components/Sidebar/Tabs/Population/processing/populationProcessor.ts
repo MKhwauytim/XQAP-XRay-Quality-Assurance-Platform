@@ -989,6 +989,11 @@ export async function processPopulation(
 
       certScanRows,
       nonCertScanRows,
+      // W-owner-2026-08-12c: `certScanEntries` is the parsed result of
+      // `certScanPasteText` (empty when nothing was pasted, or when the paste
+      // had no rows / unrecognized headers) -- entries.length > 0 means at
+      // least one usable CertScan device reference existed for this run.
+      certScanProvided: certScanEntries.length > 0,
       certScanPercentage:
         finalPreparedPopulationRows === 0
           ? 0

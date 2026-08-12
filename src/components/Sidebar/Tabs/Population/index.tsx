@@ -1255,6 +1255,7 @@ export default function PopulationTab() {
             canExport={canExportNow}
             populationLocked={populationLocked}
             populationAggregate={populationAggregate}
+            stageMappings={config.stageMappings}
             onProcessPopulation={handleProcessPopulation}
             onExportPopulation={handleExportPopulation}
           />

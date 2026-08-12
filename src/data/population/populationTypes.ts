@@ -203,6 +203,14 @@ export type ProcessingSummary = {
   nonCertScanRows: number;
   certScanPercentage: number;
   nonCertScanPercentage: number;
+  /** W-owner-2026-08-12c: whether any CertScan device entries were successfully
+   *  parsed from the pasted reference text (`certScanEntries.length > 0` in
+   *  `populationProcessor.ts`) — distinguishes "no CertScan reference supplied
+   *  for this run" from "supplied but matched zero rows", which a bare
+   *  `certScanRows: 0` cannot. Optional: older persisted aggregates / report
+   *  fixtures/builders that predate this field simply omit it, and UI consumers
+   *  must treat `undefined` as "unknown", not as either true or false. */
+  certScanProvided?: boolean;
 
   biProvided: boolean;
   biMatchedRows: number;
