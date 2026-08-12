@@ -1,6 +1,35 @@
 import { BI_COLUMN_ALIASES } from "./biDataColumns";
 import type { BiSourceRow, NormalizedBiRow } from "./biDataTypes";
 
+// Optional-vowel diacritics (تشكيل, U+064B-U+065F), zero-width/directional
+// marks (ZWSP/ZWNJ/ZWJ/LRM/RLM, U+200B-U+200F), and a BOM/ZWNBSP (U+FEFF)
+// that can survive a copy-paste from a diacritized document into a header
+// cell. None of these change a header's meaning, so stripping them is the
+// same risk-free character-folding class as the alef/ta-marbuta
+// normalization below. This mirrors the fix applied to riskDataNormalizer.ts
+// on 2026-08-12 (see the CLAUDE.md edit log for that date), which never
+// propagated to this file's independent copy of the same normalizer — the
+// gap that let a BI workbook with this noise in its header row reject every
+// single row with "مستبعدة (بلا معرف أشعة)" while the Risk file, reading
+// header text from the same source system, was already immune. Written with
+// explicit \u escapes (not literal invisible characters) so the
+// no-irregular-whitespace lint rule doesn't flag the source file itself.
+const DIACRITIC_AND_ZERO_WIDTH_RANGES = [
+  [0x064b, 0x065f], // Arabic diacritics (تشكيل)
+  [0x200b, 0x200f], // ZWSP, ZWNJ, ZWJ, LRM, RLM
+  [0xfeff, 0xfeff]  // BOM / zero-width no-break space
+] as const;
+
+const DIACRITIC_AND_ZERO_WIDTH_PATTERN = new RegExp(
+  "[" +
+    DIACRITIC_AND_ZERO_WIDTH_RANGES.map(
+      ([start, end]) =>
+        `\\u${start.toString(16).padStart(4, "0")}-\\u${end.toString(16).padStart(4, "0")}`
+    ).join("") +
+  "]",
+  "g"
+);
+
 function normalizeArabicText(value: string): string {
   return value
     .trim()
@@ -9,6 +38,7 @@ function normalizeArabicText(value: string): string {
     .replace(/ى/g, "ي")
     .replace(/ة/g, "ه")
     .replace(/[ـ]/g, "")
+    .replace(DIACRITIC_AND_ZERO_WIDTH_PATTERN, "")
     .toLowerCase();
 }
 

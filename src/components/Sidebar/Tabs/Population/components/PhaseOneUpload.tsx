@@ -72,6 +72,17 @@ function RawFileSummaryCard({
           ))}
         </div>
       )}
+      {result.sheetSummaries
+        .filter((sheet) => sheet.zeroIdDiagnostic)
+        .map((sheet) => (
+          <p key={`${sheet.sheetName}-zero-id`} className="raw-file-summary-unknown" role="alert">
+            تحذير: ورقة "{sheet.sheetName}" استبعدت كل صفوفها ({formatCount(sheet.originalRowCount)})
+            بسبب عدم العثور على معرف أشعة. الأعمدة التي بحث عنها النظام:{" "}
+            {sheet.zeroIdDiagnostic!.candidateHeaders.join("، ")}. الأعمدة الموجودة فعلياً في الورقة:{" "}
+            {sheet.zeroIdDiagnostic!.presentHeaders.join("، ") || "لا توجد أعمدة"}.
+            تحقّق من إعدادات تعيين الأعمدة (Mapping Settings) فقد تكون تشير إلى عمود غير موجود في هذه الورقة.
+          </p>
+        ))}
       {result.unknownSheetNames.length > 0 && (
         <p className="raw-file-summary-unknown">
           أوراق غير معروفة (غير مدرجة في المجتمع): {result.unknownSheetNames.join("، ")}
