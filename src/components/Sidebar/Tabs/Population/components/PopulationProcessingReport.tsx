@@ -3,6 +3,8 @@ import { ChevronDown, ChevronUp } from "lucide-react";
 import type { ProcessingSummary, RemovedPopulationRow } from "../processing/populationProcessingTypes";
 import { formatNumber, formatPercentage } from "./helpers";
 import SummaryCard from "./SummaryCard";
+import Pagination from "../../../../../components/Pagination/Pagination";
+import { clampPage, pageSlice } from "../../../../../utils/paginationUtils";
 
 /** The handful of preview-row fields this component's table actually renders —
  *  intentionally narrower than `PreparedPopulationRow` so both a live, freshly
@@ -36,6 +38,103 @@ const DROPPED_ROWS_DISPLAY_CAP = 50;
 
 function droppedRowKey(droppedRow: RemovedPopulationRow, index: number): string {
   return `${droppedRow.xrayImageId ?? "—"}-${droppedRow.sourceRowNumber ?? index}-${index}`;
+}
+
+/** Reads back the `[L1]` / `[L2]` / `[L1+L2]` tag `populationProcessor.ts`'s
+ *  `describeInvalidLevelReason` stamps on every dropped-for-invalid-level-result
+ *  row. Keep this regex in sync with that function's tag format. */
+const INVALID_LEVEL_REASON_TAG = /^Invalid level result \[(L1\+L2|L1|L2)\]:\s*(.*)$/;
+
+const INVALID_LEVEL_CAUSE_LABELS: Record<"L1" | "L2" | "L1+L2", string> = {
+  L1: "المستوى الأول فقط (غير صالح/غير موجود)",
+  L2: "المستوى الثاني فقط (غير صالح/غير موجود)",
+  "L1+L2": "المستوى الأول والثاني معاً (غير صالحين/غير موجودين)",
+};
+
+type InvalidLevelCauseSummary = {
+  tag: "L1" | "L2" | "L1+L2";
+  label: string;
+  count: number;
+  examples: string[];
+};
+
+/** W8-diag: groups the invalid-level-result drops by which field(s) actually
+ *  failed, so a 100%-drop run (the real-world bug this was built for — see
+ *  the 2026-08-12 edit log) tells the user "every row is missing المستوى
+ *  الأول" instead of just a bare count. Falls back to an "other" bucket for
+ *  any reason string that predates the tagged format (e.g. a locked month's
+ *  persisted aggregate saved before this change shipped). */
+function summarizeInvalidLevelCauses(rows: RemovedPopulationRow[]): InvalidLevelCauseSummary[] {
+  const buckets = new Map<string, { count: number; examples: string[] }>();
+
+  // Deliberately NOT named `row`: populationAggregate.contract.test.ts scans
+  // this file for `row.<field>` accesses and requires every one to exist on
+  // POPULATION_AGGREGATE_PREVIEW_FIELDS (a Pick of PreparedPopulationRow).
+  // These are RemovedPopulationRow, a different type — `reason` is not and
+  // cannot be a preview field. Renaming keeps that contract strict rather than
+  // giving it an exclusion list that would silently rot.
+  for (const removed of rows) {
+    const match = removed.reason.match(INVALID_LEVEL_REASON_TAG);
+    const tag = (match?.[1] as "L1" | "L2" | "L1+L2" | undefined) ?? "other";
+    const detail = match?.[2] ?? removed.reason;
+
+    const bucket = buckets.get(tag) ?? { count: 0, examples: [] };
+    bucket.count += 1;
+    if (bucket.examples.length < 3 && detail) {
+      bucket.examples.push(detail);
+    }
+    buckets.set(tag, bucket);
+  }
+
+  const known: InvalidLevelCauseSummary[] = (["L1", "L2", "L1+L2"] as const)
+    .filter((tag) => buckets.has(tag))
+    .map((tag) => ({
+      tag,
+      label: INVALID_LEVEL_CAUSE_LABELS[tag],
+      count: buckets.get(tag)!.count,
+      examples: buckets.get(tag)!.examples,
+    }));
+
+  const other = buckets.get("other");
+  if (other) {
+    known.push({
+      tag: "L1+L2",
+      label: "سبب آخر (تنسيق قديم)",
+      count: other.count,
+      examples: other.examples,
+    });
+  }
+
+  return known.sort((a, b) => b.count - a.count);
+}
+
+/** Renders the top invalid-level-result causes above the per-row drill-down —
+ *  this is the "what's the single most common reason" answer a raw dropped-row
+ *  table can't give at a glance. Renders nothing when there's nothing to
+ *  summarize. */
+function InvalidLevelCauseSummarySection({ rows }: { rows: RemovedPopulationRow[] }) {
+  if (rows.length === 0) return null;
+  const causes = summarizeInvalidLevelCauses(rows);
+  if (causes.length === 0) return null;
+
+  return (
+    <div className="invalid-level-cause-summary">
+      <h5>أكثر أسباب استبعاد نتائج المستوى شيوعاً</h5>
+      <ul>
+        {causes.map((cause) => (
+          <li key={cause.tag + cause.label}>
+            <span className="invalid-level-cause-label">{cause.label}</span>
+            <span className="invalid-level-cause-count">{formatNumber(cause.count)} صف</span>
+            {cause.examples.length > 0 && (
+              <span className="invalid-level-cause-examples">
+                أمثلة: {cause.examples.join(" — ")}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 /** W8: collapsible per-row drill-down for one exclusion category (invalid ID,
@@ -102,13 +201,81 @@ function DroppedRowsSection({
       <h4>تفاصيل الصفوف المستبعدة</h4>
       <DroppedRowsCategory title="معرفات غير صالحة" rows={removedRows ?? []} />
       <DroppedRowsCategory title="مكررات مستبعدة" rows={duplicateRows ?? []} />
+      <InvalidLevelCauseSummarySection rows={invalidResultRows ?? []} />
       <DroppedRowsCategory title="نتائج مستوى غير صالحة" rows={invalidResultRows ?? []} />
+    </div>
+  );
+}
+
+const PREVIEW_PAGE_SIZE = 10;
+
+/**
+ * Compact "معاينة المجتمع النهائي" preview (owner requirement, 2026-08-12):
+ * a small summary strip reusing already-computed `ProcessingSummary` figures
+ * (no new statistics) plus 10 example rows at a time, paged with the shared
+ * `Pagination` component. Renders nothing when there are no preview rows —
+ * a locked month whose aggregate predates this feature, or a freshly
+ * processed month with zero final rows, both fall through here silently.
+ */
+function PreparedPopulationPreviewSection({
+  summary,
+  previewRows,
+}: {
+  summary: ProcessingSummary;
+  previewRows: PopulationReportPreviewRow[];
+}) {
+  const [page, setPage] = useState(1);
+  if (previewRows.length === 0) return null;
+
+  const safePage = clampPage(page, previewRows.length, PREVIEW_PAGE_SIZE);
+  const shown = pageSlice(previewRows, safePage, PREVIEW_PAGE_SIZE);
+
+  return (
+    <div className="prepared-preview-section">
+      <h4>معاينة المجتمع النهائي</h4>
+
+      <div className="processing-summary-grid prepared-preview-stats">
+        <SummaryCard label="المجتمع النهائي" value={summary.finalPreparedPopulationRows} />
+        <SummaryCard label="CertScan" value={summary.certScanRows} />
+        <SummaryCard label="NonCertScan" value={summary.nonCertScanRows} />
+      </div>
+
+      <div className="prepared-preview-table">
+        <div className="prepared-preview-header">
+          <span>معرف الأشعة</span>
+          <span>اسم المنفذ</span>
+          <span>المستوى</span>
+          <span>المستوى الأول</span>
+          <span>المستوى الثاني</span>
+          <span>CertScan</span>
+        </div>
+
+        {shown.map((row) => (
+          <div key={`${row.xrayImageId}-${row.sourceRowNumber}`} className="prepared-preview-row">
+            <span>{row.xrayImageId}</span>
+            <span>{row.portName ?? ""}</span>
+            <span>{row.stage ?? ""}</span>
+            <span>{row.xrayLevelOneResult}</span>
+            <span>{row.xrayLevelTwoResult}</span>
+            <span>{row.certScanStatus}</span>
+          </div>
+        ))}
+      </div>
+
+      <Pagination
+        page={safePage}
+        totalItems={previewRows.length}
+        onPageChange={setPage}
+        pageSize={PREVIEW_PAGE_SIZE}
+        itemLabel="صف"
+      />
     </div>
   );
 }
 
 export default function PopulationProcessingReport({
   summary,
+  previewRows,
   removedRows,
   duplicateRows,
   invalidResultRows,
@@ -198,6 +365,8 @@ export default function PopulationProcessingReport({
           ))}
         </div>
       </div>
+
+      <PreparedPopulationPreviewSection summary={summary} previewRows={previewRows} />
 
       <DroppedRowsSection
         removedRows={removedRows}

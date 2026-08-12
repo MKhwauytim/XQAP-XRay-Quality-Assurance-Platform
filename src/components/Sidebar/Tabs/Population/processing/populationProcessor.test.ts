@@ -1,5 +1,5 @@
 import { describe, expect, test, it } from "vitest";
-import { processPopulation, normalizeDate } from "./populationProcessor";
+import { processPopulation, normalizeDate, normalizeResultValue } from "./populationProcessor";
 import type { RiskWorkbookResult } from "../riskData/riskDataTypes";
 import type { BiWorkbookResult } from "../biData/biDataTypes";
 import type { PopulationProcessingInput } from "./populationProcessingTypes";
@@ -335,6 +335,93 @@ describe("processPopulation async processing and column preservation", () => {
     expect(result.preparedRows.length).toBe(0);
     expect(result.invalidResultRows.length).toBe(1);
   });
+
+  test("a row with a valid level 2 and an absent level 1 is still excluded, per the documented 'population entry requires valid L1 and L2' invariant (decisionFactTable.ts, and the 'other teams do not rescue it' test above) — this is NOT the bug to fix on a guess", async () => {
+    const riskAbsentL1: RiskWorkbookResult = {
+      ...mockRiskResult,
+      rows: [
+        {
+          ...mockRiskResult.rows[0],
+          xrayLevelOneResult: null,
+          xrayLevelTwoResult: "اشتباه"
+        }
+      ]
+    };
+
+    const input: PopulationProcessingInput = {
+      riskWorkbookResult: riskAbsentL1,
+      biWorkbookResult: null,
+      certScanPasteText: ""
+    };
+
+    const result = await processPopulation(input);
+
+    expect(result.preparedRows.length).toBe(0);
+    expect(result.invalidResultRows.length).toBe(1);
+    // Diagnostic: the dropped-row reason must identify WHICH field failed
+    // (level 1, not level 2) and record the raw offending value so a
+    // 100%-drop report is self-diagnosing instead of a bare count.
+    expect(result.invalidResultRows[0].reason).toMatch(/^Invalid level result \[L1\]:/);
+    expect(result.invalidResultRows[0].reason).toContain("xrayLevelOneResult=");
+    expect(result.invalidResultRows[0].reason).not.toContain("xrayLevelTwoResult=");
+  });
+
+  test("diagnostic reason carries the raw unrecognized value (truncated) for a garbled level 2 cell, tagged [L2]", async () => {
+    const longGarbledValue = "قيمة غير معروفة تماماً ولا تطابق أي نمط معروف على الإطلاق مهما طالت";
+    const riskGarbledL2: RiskWorkbookResult = {
+      ...mockRiskResult,
+      rows: [
+        {
+          ...mockRiskResult.rows[0],
+          xrayLevelOneResult: "سليمة",
+          xrayLevelTwoResult: longGarbledValue
+        }
+      ]
+    };
+
+    const input: PopulationProcessingInput = {
+      riskWorkbookResult: riskGarbledL2,
+      biWorkbookResult: null,
+      certScanPasteText: ""
+    };
+
+    const result = await processPopulation(input);
+
+    expect(result.invalidResultRows.length).toBe(1);
+    const reason = result.invalidResultRows[0].reason;
+    expect(reason).toMatch(/^Invalid level result \[L2\]:/);
+    expect(reason).toContain("xrayLevelTwoResult=");
+    // Truncated, not the full raw string, and not "empty/missing".
+    expect(reason).not.toContain(longGarbledValue);
+    expect(reason).not.toContain("فارغ/غير موجود");
+  });
+
+  test("diagnostic reason is tagged [L1+L2] when both levels fail", async () => {
+    const riskBothInvalid: RiskWorkbookResult = {
+      ...mockRiskResult,
+      rows: [
+        {
+          ...mockRiskResult.rows[0],
+          xrayLevelOneResult: null,
+          xrayLevelTwoResult: null
+        }
+      ]
+    };
+
+    const input: PopulationProcessingInput = {
+      riskWorkbookResult: riskBothInvalid,
+      biWorkbookResult: null,
+      certScanPasteText: ""
+    };
+
+    const result = await processPopulation(input);
+
+    expect(result.invalidResultRows.length).toBe(1);
+    const reason = result.invalidResultRows[0].reason;
+    expect(reason).toMatch(/^Invalid level result \[L1\+L2\]:/);
+    expect(reason).toContain("xrayLevelOneResult=");
+    expect(reason).toContain("xrayLevelTwoResult=");
+  });
 });
 
 describe("normalizeDate", () => {
@@ -375,5 +462,87 @@ describe("normalizeDate", () => {
   it("returns null for empty/null input, unchanged", () => {
     expect(normalizeDate(null)).toBeNull();
     expect(normalizeDate("")).toBeNull();
+  });
+
+  // Table-driven coverage for every shape the owner reported seeing in real
+  // BI/risk imports: Excel serials (string and numeric-typed), datetime
+  // strings with and without fractional seconds, JS Date objects (in case a
+  // future/alternate workbook reader hands one back), the existing
+  // slash/dash/Arabic-month formats, and a value that must pass through
+  // untouched.
+  const cases: Array<[string, string | number | Date | null, string | null]> = [
+    // Excel serial numbers, as strings (how they arrive today via
+    // riskDataNormalizer's String(value) conversion of a raw numeric cell).
+    ["excel serial string, mid-range (45814 -> 2025-06-05)", "45814", "2025-06-05"],
+    ["excel serial string, lower boundary (25000)", "25000", "1968-06-10"],
+    ["excel serial string, upper boundary (60000)", "60000", "2064-04-07"],
+    ["excel serial string with fractional time-of-day part", "45814.6136", "2025-06-05"],
+    // Excel serial numbers, as an actual JS number (not pre-stringified).
+    ["excel serial as JS number", 45814, "2025-06-05"],
+    ["excel serial as JS number with fractional time-of-day part", 45814.25, "2025-06-05"],
+    // A number outside the plausible serial range must not be reinterpreted —
+    // it is presumably a genuine numeric ID, not a date.
+    ["out-of-range number is left as its string form, not treated as a serial", 99999999, "99999999"],
+    // A 5-digit string outside the plausible range: same guard, string form.
+    ["out-of-range 5-digit numeric string is returned raw, not a serial", "99999", "99999"],
+    // Datetime strings: keep the date, drop the time.
+    ["datetime string with seconds", "2026-05-01 18:04:11", "2026-05-01"],
+    ["datetime string with fractional seconds", "2026-05-16 09:14:30.000000", "2026-05-16"],
+    // JS Date object input (defensive: some SheetJS configurations return these).
+    ["JS Date object", new Date(2026, 4, 16), "2026-05-16"],
+    // Formats the existing helper already handled, kept as a regression net.
+    ["slash-separated day-first", "25/12/2025", "2025-12-25"],
+    ["dash-separated day-first", "25-12-2025", "2025-12-25"],
+    ["dot-separated day-first", "25.12.2025", "2025-12-25"],
+    ["mixed DDMmmYYYY", "12Dec2025", "2025-12-12"],
+    ["Arabic month name", "12 ديسمبر 2025", "2025-12-12"],
+    ["already ISO, no time", "2026-05-01", "2026-05-01"],
+    // A value that must still pass through untouched: no recognizable format.
+    ["unrecognized free text passes through unchanged", "N/A", "N/A"],
+    ["null input", null, null]
+  ];
+
+  it.each(cases)("%s", (_label, input, expected) => {
+    expect(normalizeDate(input)).toBe(expected);
+  });
+});
+
+describe("normalizeResultValue", () => {
+  const cases: Array<[string, string | null, "سليمة" | "اشتباه" | null]> = [
+    // Plain numeric codes.
+    ["numeric code 1 -> سليمة", "1", "سليمة"],
+    ["numeric code 2 -> اشتباه", "2", "اشتباه"],
+    // Leading numeric code with a parenthesised label — the agency's own
+    // numeric code is authoritative, checked ahead of the text.
+    ["numeric-code form '1 (سليمة)'", "1 (سليمة)", "سليمة"],
+    ["numeric-code form '2 (اشتباه)'", "2 (اشتباه)", "اشتباه"],
+    ["numeric-code form with English label", "2 (Suspect)", "اشتباه"],
+    // English codes.
+    ["English CLEAR", "CLEAR", "سليمة"],
+    ["English OK", "ok", "سليمة"],
+    ["English PASS", "Pass", "سليمة"],
+    ["English ALERT", "ALERT", "اشتباه"],
+    ["English FAIL", "fail", "اشتباه"],
+    ["English SUSPECT", "Suspect", "اشتباه"],
+    // Plain Arabic text.
+    ["plain سليمة", "سليمة", "سليمة"],
+    ["plain اشتباه", "اشتباه", "اشتباه"],
+    ["سليمة with trailing code", "سليمة - 123", "سليمة"],
+    ["نظيف synonym", "نظيف", "سليمة"],
+    ["مقبول synonym", "مقبول", "سليمة"],
+    ["مريب synonym", "مريب", "اشتباه"],
+    ["مشبوه synonym", "مشبوه", "اشتباه"],
+    // THE precedence-bug case: a compound value containing BOTH tokens must
+    // resolve to اشتباه (the safe audit reading — never silently downgrade a
+    // recorded suspicion to "clear"), not سليمة.
+    ["compound value with BOTH tokens resolves to اشتباه (regression guard for the precedence bug)", "نتيجة اشتباه -مبدئي (سليمة)", "اشتباه"],
+    // Values that must not match anything.
+    ["unrecognized text returns null", "غير معروف", null],
+    ["empty string returns null", "", null],
+    ["null input returns null", null, null]
+  ];
+
+  it.each(cases)("%s", (_label, input, expected) => {
+    expect(normalizeResultValue(input)).toBe(expected);
   });
 });

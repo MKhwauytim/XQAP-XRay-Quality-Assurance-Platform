@@ -65,7 +65,6 @@ function baseProps(overrides: Partial<Props> = {}): Props {
     isSavingToDisk: false,
     saveToDiskMessage: null,
     hasDiskWorkspace: true,
-    orphanScan: null,
     canProcess: true,
     canExport: true,
     onProcessPopulation: vi.fn(),
@@ -110,5 +109,15 @@ describe("PhaseTwoReportAndProcessing — render-time permission gate (B13 task 
     render(<PhaseTwoReportAndProcessing {...baseProps()} />);
     expect(screen.queryByRole("button", { name: "تقرير المعالجة" })).toBeNull();
     expect(screen.queryByLabelText("منطقة لصق بيانات CertScan")).toBeNull();
+  });
+
+  it("2026-08-12: no longer renders the referential-integrity orphan-scan section, and the rest of the processing report still renders", () => {
+    render(<PhaseTwoReportAndProcessing {...baseProps()} />);
+    expect(screen.queryByLabelText("فحص السلامة المرجعية")).toBeNull();
+    expect(screen.queryByText(/فحص السلامة المرجعية/)).toBeNull();
+    // Nothing else in the Phase 2 report regressed: the processing summary
+    // still renders alongside the removed section.
+    expect(screen.getByText("المجتمع النهائي")).toBeInTheDocument();
+    expect(screen.getByText("CertScan")).toBeInTheDocument();
   });
 });

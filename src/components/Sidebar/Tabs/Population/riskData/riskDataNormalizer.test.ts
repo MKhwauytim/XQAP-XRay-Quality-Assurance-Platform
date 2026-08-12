@@ -167,6 +167,37 @@ describe("normalizeRiskRow", () => {
     expect(result.portName).toBeNull();
   });
 
+  it("normalizes headers carrying diacritics and zero-width marks so a copy-pasted alias header still matches (2026-08-12 diagnostic hardening)", () => {
+    // Built with String.fromCodePoint instead of embedding the literal
+    // combining marks in source (the no-irregular-whitespace lint rule flags
+    // literal zero-width characters in a source file). Inserts a fatha
+    // (U+064B) after every letter of "نتيجة المستوى الأول" plus a ZWNJ
+    // (U+200C) in the middle of "المستوى" — the kind of noise a header
+    // copy-pasted from a diacritized Word document can carry, which an
+    // exact-match alias lookup would otherwise silently fail on.
+    const fatha = String.fromCodePoint(0x064b);
+    const zwnj = String.fromCodePoint(0x200c);
+    const base = "نتيجة المستوى الأول";
+    const withNoise = base
+      .split("")
+      .map((ch) => (ch === " " ? ch : ch + fatha))
+      .join("")
+      .replace("المستوى", "الم" + zwnj + "ستوى");
+
+    const sourceRow: RiskSourceRow = {
+      [withNoise]: "اشتباه"
+    };
+
+    const result = normalizeRiskRow({
+      sourceRow,
+      movementType: "بري",
+      sourceSheetName: "Sheet1",
+      sourceRowNumber: 1
+    });
+
+    expect(result.xrayLevelOneResult).toBe("اشتباه");
+  });
+
   it("resolves fields independently per row when normalizing multiple rows in sequence (shared-lookup isolation)", () => {
     // Guards against a hoisting bug where the lookup Map might accidentally
     // be reused/mutated across rows instead of rebuilt per row.

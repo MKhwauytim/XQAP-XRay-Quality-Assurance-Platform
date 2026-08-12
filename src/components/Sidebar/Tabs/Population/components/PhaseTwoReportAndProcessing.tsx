@@ -1,11 +1,10 @@
 import type { RiskWorkbookResult } from "../riskData/riskDataTypes";
 import type { BiWorkbookResult } from "../biData/biDataTypes";
 import type { PopulationProcessingResult } from "../processing/populationProcessingTypes";
-import type { OrphanScanResult } from "../../../../../data/integrity/orphanScan";
 import type { SafeWriteProgressPhase } from "../../../../../data/storage/safeWrite";
 import type { PopulationAggregateLoadResult } from "../../../../../data/population/populationAggregate";
 import { useLabels } from "../../../../../data/labels/useLabels";
-import DataAccuracyReport, { OrphanScanSection } from "./DataAccuracyReport";
+import DataAccuracyReport from "./DataAccuracyReport";
 import PopulationProcessingReport from "./PopulationProcessingReport";
 import { AlertTriangle, Check, FolderOpen, Lock, X } from "lucide-react";
 import CertScanMatchPreviewPanel from "./CertScanMatchPreviewPanel";
@@ -40,8 +39,6 @@ type PhaseTwoReportAndProcessingProps = {
   saveProgressPhase?: SafeWriteProgressPhase | null;
   saveToDiskMessage: SaveMessage;
   hasDiskWorkspace: boolean;
-  /** B3 referential-integrity orphan scan for the saved month, or null when unavailable. */
-  orphanScan?: OrphanScanResult | null;
   /** B13: render-time gate for the process button — process-population permission combined
    *  with the closed-month and month-loading flags (index.tsx's canProcessNow), matching
    *  Phase 4's canDistribute pattern. */
@@ -75,7 +72,6 @@ export default function PhaseTwoReportAndProcessing({
   saveProgressPhase = null,
   saveToDiskMessage,
   hasDiskWorkspace,
-  orphanScan = null,
   canProcess,
   canExport,
   populationLocked = false,
@@ -107,8 +103,16 @@ export default function PhaseTwoReportAndProcessing({
 
   const loadedFromDisk = !riskWorkbookResult && (populationProcessingResult !== null || populationLocked);
   const hasBi = riskWorkbookResult !== null && biWorkbookResult !== null;
+  // W-owner-2026-08-12: the live (freshly processed) path passes the FULL
+  // in-memory preparedRows array rather than a fixed slice -- it costs nothing
+  // extra (preparedRows already exists in memory from processing) and lets
+  // PopulationProcessingReport paginate through it 10 rows at a time. The
+  // locked-month aggregate path stays capped at its persisted 10 rows
+  // (`PREVIEW_ROW_COUNT` in populationAggregate.ts) -- that snapshot is written
+  // to disk specifically so a locked month never has to re-read the full
+  // population, so there is no larger array available to page through there.
   const reportData = populationProcessingResult
-    ? { summary: populationProcessingResult.summary, previewRows: populationProcessingResult.preparedRows.slice(0, 10) }
+    ? { summary: populationProcessingResult.summary, previewRows: populationProcessingResult.preparedRows }
     : populationLocked && populationAggregate?.status === "ok"
       ? { summary: populationAggregate.aggregate.summary, previewRows: populationAggregate.aggregate.previewRows }
       : null;
@@ -177,8 +181,6 @@ export default function PhaseTwoReportAndProcessing({
             biRows={biWorkbookResult.rows}
           />
         ) : null}
-        {/* B3: referential-integrity orphan scan — independent of BI availability. */}
-        <OrphanScanSection scan={orphanScan} />
       </div>
 
       {/* ── Step B: Processing ── */}

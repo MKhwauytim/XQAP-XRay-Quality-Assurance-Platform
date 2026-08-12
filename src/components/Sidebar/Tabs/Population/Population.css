@@ -1422,6 +1422,55 @@
   color: var(--p-muted, var(--p-text-secondary));
 }
 
+/* 2026-08-12 diagnostic: "most common cause" summary for invalid-level-result
+   drops — sits above the raw per-row drill-down (`.dropped-rows-category`),
+   see PopulationProcessingReport.tsx's InvalidLevelCauseSummarySection. */
+.invalid-level-cause-summary {
+  border: 1px solid var(--p-border-light);
+  border-radius: var(--p-radius-md);
+  background: var(--p-surface-soft);
+  padding: var(--sp-3);
+  margin-bottom: var(--sp-2);
+}
+
+.invalid-level-cause-summary h5 {
+  margin: 0 0 var(--sp-2);
+  color: var(--p-primary);
+  font-size: 13px;
+  font-weight: var(--p-bold);
+}
+
+.invalid-level-cause-summary ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.invalid-level-cause-summary li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-2);
+  font-size: 12.5px;
+}
+
+.invalid-level-cause-label {
+  color: var(--p-text-primary, var(--p-primary));
+  font-weight: var(--p-bold);
+}
+
+.invalid-level-cause-count {
+  color: var(--p-primary);
+}
+
+.invalid-level-cause-examples {
+  color: var(--p-muted, var(--p-text-secondary));
+  font-size: 12px;
+}
+
 /* ================================================================
    Save to Disk (Phase 2 Step D)
    ================================================================ */

@@ -27,12 +27,7 @@ import {
   saveSamplingProof,
   updateMonthStatus,
 } from "../../../../data/population/populationStorage";
-import {
-  loadDistributionLog,
-  loadOrDeriveDistributionCurrent,
-} from "../../../../data/distribution/distributionStorage";
-import { loadAllEmployeeFiles } from "../../../../data/answers/answerStorage";
-import { scanReferentialIntegrity, type OrphanScanResult } from "../../../../data/integrity/orphanScan";
+import { loadDistributionLog } from "../../../../data/distribution/distributionStorage";
 import { drawSample } from "../../../../data/sampling/sampleAlgorithm";
 import { loadSampleMaster, saveSampleMaster } from "../../../../data/sampling/sampleStorage";
 import { buildSamplingPlan, saveSamplingPlan } from "../../../../data/sampling/samplingPlanStorage";
@@ -468,9 +463,6 @@ export default function PopulationTab() {
   // B4 switching-rule advisory computed for the currently-selected month.
   const [priorMonthAdvisory, setPriorMonthAdvisory] =
     useState<SamplingPlanPriorMonthAdvisory | null>(null);
-  // B3 referential-integrity orphan scan for the selected month (Phase 2 view).
-  const [orphanScan, setOrphanScan] = useState<OrphanScanResult | null>(null);
-
   // Phase 4 — distribution (state + mutating handlers extracted to
   // useDistributionActions.ts to stay under check:complexity's
   // max-lines-per-function budget; see that file's header comment)
@@ -566,54 +558,6 @@ export default function PopulationTab() {
     void handleProcessPopulation();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- handleProcessPopulation is a fresh closure every render; the ref guard above (not a dependency) is what actually prevents repeat firing
   }, [activeSubTab, currentPhase, riskWorkbookResult, populationProcessingResult, isProcessingPopulation, isLoadingMonthData, canProcessNow]);
-
-  // B3: compute the orphan scan for the selected month when the Phase 2 report is
-  // visible. Best-effort — any load failure clears the scan (section renders nothing).
-  useEffect(() => {
-    if (!directoryHandle || currentPhase !== 2 || !populationProcessingResult) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync clear when preconditions unmet
-      setOrphanScan(null);
-      return;
-    }
-    let cancelled = false;
-    const monthFolderName = formatMonthFolderName(saveMonth, saveYear);
-    const populationRows = populationProcessingResult.preparedRows;
-    void (async () => {
-      try {
-        const sample = await loadSampleMaster(directoryHandle, monthFolderName);
-        // A6a: the orphan scan is a pure read — it must not fire the
-        // fire-and-forget multi-MB cache write that used to make every reader
-        // a writer.
-        const distribution = sample
-          ? await loadOrDeriveDistributionCurrent(directoryHandle, monthFolderName, sample.rows, {
-              persistCache: false,
-            })
-          : null;
-        const employeeFiles = await loadAllEmployeeFiles(directoryHandle, monthFolderName);
-        if (cancelled) return;
-        const answersIds: string[] = [];
-        const approvalsIds: string[] = [];
-        for (const file of employeeFiles) {
-          for (const item of file.items) answersIds.push(item.xrayImageId);
-          for (const req of file.referralRequests ?? []) approvalsIds.push(...req.xrayImageIds);
-          for (const req of file.replacementRequests ?? []) {
-            approvalsIds.push(req.originalXrayImageId, req.replacementXrayImageId);
-          }
-        }
-        const scan = scanReferentialIntegrity({
-          populationIds: populationRows.map((r) => r.xrayImageId),
-          sampleIds: (sample?.rows ?? []).map((r) => r.xrayImageId),
-          distributionIds: (distribution?.entries ?? []).map((e) => e.xrayImageId),
-          answersIds,
-          approvalsIds,
-        });
-        if (!cancelled) setOrphanScan(scan);
-      } catch {
-        if (!cancelled) setOrphanScan(null);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [directoryHandle, currentPhase, populationProcessingResult, saveMonth, saveYear, monthRefreshKey]);
 
   const isPhaseOneComplete = useMemo(
     () => Boolean(uploads.riskAgencyData.file),
@@ -1307,7 +1251,6 @@ export default function PopulationTab() {
             saveProgressPhase={saveProgressPhase}
             saveToDiskMessage={saveToDiskMessage}
             hasDiskWorkspace={Boolean(directoryHandle)}
-            orphanScan={orphanScan}
             canProcess={canProcessNow}
             canExport={canExportNow}
             populationLocked={populationLocked}
