@@ -16,6 +16,7 @@ import type {
   RemovedPopulationRow
 } from "./populationProcessingTypes";
 import { normalizeText, normalizeArabicText } from "./textNormalization";
+import { attachLazyRawRow } from "../../../../../data/population/populationTypes";
 
 type PreparedDraftRow = {
   stage: string | null;
@@ -574,6 +575,16 @@ function enrichDraftRowFromBi(params: {
   biEnrichmentStatus: BiEnrichmentStatus;
   biMatched: boolean;
   biFilledFields: string[];
+  /**
+   * B7 (OOM fix, 2026-08-12): the raw-row keys BI actually added or
+   * overrode, kept separate from `draftRow.rawRow` (never copied here) so the
+   * caller can attach them as a lazy accessor instead of eagerly building a
+   * full duplicate raw row per matched row. `null` when nothing was added —
+   * distinct from `{}` only in that the caller treats both the same, but
+   * `null` avoids allocating an empty object on the (very common) unmatched
+   * path.
+   */
+  rawRowExtras: Record<string, unknown> | null;
 } {
   const { draftRow, biMatch, biProvided, fieldSummaryMap } = params;
 
@@ -582,7 +593,8 @@ function enrichDraftRowFromBi(params: {
       row: draftRow,
       biEnrichmentStatus: "BI Not Provided",
       biMatched: false,
-      biFilledFields: []
+      biFilledFields: [],
+      rawRowExtras: null
     };
   }
 
@@ -602,15 +614,26 @@ function enrichDraftRowFromBi(params: {
       row: draftRow,
       biEnrichmentStatus: "BI Not Matched",
       biMatched: false,
-      biFilledFields: []
+      biFilledFields: [],
+      rawRowExtras: null
     };
   }
 
   const filledFields: string[] = [];
-  const enrichedRawRow = { ...draftRow.rawRow };
+  // B7 (OOM fix, 2026-08-12): only the keys BI actually fills get collected
+  // here — `draftRow.rawRow` itself is never spread/copied. Equivalent to the
+  // old `{ ...draftRow.rawRow, ...filteredBiKeys }` merge, just deferred:
+  // see `attachLazyRawRow` in populationTypes.ts for where the two are
+  // actually combined (lazily, at read time).
+  const rawRowExtras: Record<string, unknown> = {};
+  const baseRawRow = draftRow.rawRow;
   for (const [key, val] of Object.entries(biMatch.row.rawRow ?? {})) {
-    if (val !== null && val !== undefined && (enrichedRawRow[key] === null || enrichedRawRow[key] === undefined || enrichedRawRow[key] === "")) {
-      enrichedRawRow[key] = val;
+    const baseVal = baseRawRow[key];
+    if (
+      val !== null && val !== undefined &&
+      (baseVal === null || baseVal === undefined || baseVal === "")
+    ) {
+      rawRowExtras[key] = val;
     }
   }
   const biRow = biMatch.row;
@@ -621,7 +644,9 @@ function enrichDraftRowFromBi(params: {
 
   const enrichedRow: PreparedDraftRow = {
     ...draftRow,
-    rawRow: enrichedRawRow,
+    // rawRow deliberately left as draftRow's own (unmerged) rawRow here —
+    // the caller attaches the lazily-merged view via attachLazyRawRow using
+    // rawRowExtras returned below, rather than merging eagerly on this object.
     levelOneEmployee: biRow.levelOneEmployee ?? draftRow.levelOneEmployee ?? null,
     levelTwoEmployee: biRow.levelTwoEmployee ?? draftRow.levelTwoEmployee ?? null,
 
@@ -672,7 +697,8 @@ function enrichDraftRowFromBi(params: {
     row: enrichedRow,
     biEnrichmentStatus: "BI Matched",
     biMatched: true,
-    biFilledFields: filledFields
+    biFilledFields: filledFields,
+    rawRowExtras: Object.keys(rawRowExtras).length > 0 ? rawRowExtras : null
   };
 }
 
@@ -886,7 +912,7 @@ export async function processPopulation(
         nonCertScanRows += 1;
       }
 
-      preparedRows.push({
+      const preparedRow: PreparedPopulationRow = {
         stage: enrichment.row.stage,
         xrayImageId: enrichment.row.xrayImageId,
         xrayEntryDate: enrichment.row.xrayEntryDate,
@@ -953,10 +979,14 @@ export async function processPopulation(
         biMatched: enrichment.biMatched,
         biFilledFields: enrichment.biFilledFields,
 
-        rawRow: enrichment.row.rawRow,
+        // rawRow attached below via attachLazyRawRow (B7, OOM fix 2026-08-12):
+        // avoids eagerly copying/merging the full raw row for every row.
+        rawRow: undefined,
         sourceSheetName: enrichment.row.sourceSheetName,
         sourceRowNumber: enrichment.row.sourceRowNumber
-      });
+      };
+      attachLazyRawRow(preparedRow, enrichment.row.rawRow, enrichment.rawRowExtras);
+      preparedRows.push(preparedRow);
     }
 
     onProgress?.(

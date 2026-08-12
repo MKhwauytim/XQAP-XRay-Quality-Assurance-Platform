@@ -18,6 +18,7 @@ import type { UsePermissionsResult } from "../../../../auth/usePermissions";
 import { logError, logRejection } from "../../../../data/storage/errorLogger";
 import type { SafeWriteProgressPhase } from "../../../../data/storage/safeWrite";
 import { currentMonthFolderInfo, formatMonthFolderName, formatMonthFolderShortLabel } from "../../../../data/population/monthFolder";
+import { stripRawRow } from "../../../../data/population/populationTypes";
 import type { MonthFolderInfo } from "../../../../data/population/monthFolder";
 import {
   saveMonthRun,
@@ -917,9 +918,14 @@ export default function PopulationTab() {
         biRawRows: biWorkbookResult
           ? (biWorkbookResult.rows as Array<Record<string, unknown>>)
           : [],
-        // Strip rawRow before persisting — raw data is already in risk.raw.json
+        // Strip rawRow before persisting — raw data is already in risk.raw.json.
+        // B7 (OOM fix, 2026-08-12): `rawRow` may be a lazily-computed BI-merge
+        // accessor (populationTypes.ts's attachLazyRawRow); destructuring it out
+        // by name here would force that merge across the whole population right
+        // as it's at its largest. stripRawRow() enumerates keys instead and never
+        // touches the accessor's getter.
         processedRows: processingResult.preparedRows.map(
-          ({ rawRow: _rawRow, ...rest }) => rest
+          (row) => stripRawRow(row)
         ) as Array<Record<string, unknown>>,
         certScanRows: processingResult.summary.certScanRows,
         nonCertScanRows: processingResult.summary.nonCertScanRows,

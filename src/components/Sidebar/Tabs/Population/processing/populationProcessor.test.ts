@@ -233,6 +233,81 @@ describe("processPopulation async processing and column preservation", () => {
     expect(preparedRow.rawRow!["اسم الشركة الناقلة"]).toBe("الشركة السريعة");
   });
 
+  // B7 (OOM fix, 2026-08-12): pins the memory-relevant structure behind the
+  // rawRow lazy-merge. A 130k-risk + 247k-BI month legitimately holds both
+  // full row sets in memory simultaneously (see 301e84d4's BI truthiness-bug
+  // fix) — copying the full raw row again for every prepared row doubled the
+  // dominant cost and caused a browser-tab OOM. These tests would fail if a
+  // future change reintroduces an eager `{ ...rawRow }` copy on this path.
+  describe("rawRow memory structure (B7)", () => {
+    test("a row provided but not matched by BI has a prepared rawRow that is the SAME object reference as the source risk row's rawRow (no copy)", async () => {
+      const biUnrelatedRow: BiWorkbookResult = {
+        ...mockBiResult,
+        rows: [
+          {
+            ...mockBiResult.rows[0],
+            xrayImageId: "SOME-OTHER-ID",
+            rawRow: { "اسم الشركة الناقلة": "شركة أخرى" }
+          }
+        ]
+      };
+
+      const input: PopulationProcessingInput = {
+        riskWorkbookResult: mockRiskResult,
+        biWorkbookResult: biUnrelatedRow,
+        certScanPasteText: ""
+      };
+
+      const result = await processPopulation(input);
+      const preparedRow = result.preparedRows[0];
+
+      expect(preparedRow).toBeDefined();
+      expect(preparedRow.biMatched).toBe(false);
+      // Identity, not just deep equality -- proves no `{ ...rawRow }` copy happened.
+      expect(preparedRow.rawRow).toBe(mockRiskResult.rows[0].rawRow);
+    });
+
+    test("a row with no BI provided at all has a prepared rawRow that is the SAME object reference as the source risk row's rawRow (no copy)", async () => {
+      const input: PopulationProcessingInput = {
+        riskWorkbookResult: mockRiskResult,
+        biWorkbookResult: null,
+        certScanPasteText: ""
+      };
+
+      const result = await processPopulation(input);
+      const preparedRow = result.preparedRows[0];
+
+      expect(preparedRow).toBeDefined();
+      expect(preparedRow.biMatched).toBe(false);
+      expect(preparedRow.rawRow).toBe(mockRiskResult.rows[0].rawRow);
+    });
+
+    test("a BI-matched row's prepared rawRow does not mutate the source risk row's own rawRow object", async () => {
+      const input: PopulationProcessingInput = {
+        riskWorkbookResult: mockRiskResult,
+        biWorkbookResult: mockBiResult,
+        certScanPasteText: ""
+      };
+
+      const result = await processPopulation(input);
+      const preparedRow = result.preparedRows[0];
+
+      expect(preparedRow.biMatched).toBe(true);
+      // The merged view sees the BI-only column...
+      expect(preparedRow.rawRow!["اسم الشركة الناقلة"]).toBe("الشركة السريعة");
+      // ...but the original risk row object handed in by the caller must stay
+      // untouched -- if this ever fails, some code path started merging BI
+      // data into the base object in place instead of via a separate delta.
+      expect(mockRiskResult.rows[0].rawRow).not.toHaveProperty("اسم الشركة الناقلة");
+      expect(Object.keys(mockRiskResult.rows[0].rawRow!)).toEqual([
+        "معرف الأشعة",
+        "اسم المنفذ",
+        "رقم لوحة الشاحنة",
+        "اسم السائق"
+      ]);
+    });
+  });
+
   test("carries the three other-team risk results into otherResults (normalized)", async () => {
     const riskOnly: RiskWorkbookResult = {
       ...mockRiskResult,
