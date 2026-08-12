@@ -393,6 +393,21 @@ export function normalizeResultValue(
 
 const DIAGNOSTIC_RAW_VALUE_MAX_LENGTH = 40;
 
+/**
+ * How many dropped rows get a per-row diagnostic reason before falling back to
+ * the shared constant below. The report surfaces at most 3 examples per cause
+ * bucket, so this is generous; the cap exists purely to bound allocation on a
+ * wholesale-drop month (see the OOM guard at the invalid-level push site).
+ */
+const DIAGNOSTIC_DETAILED_ROW_LIMIT = 50;
+
+/**
+ * Shared, interned fallback used once DIAGNOSTIC_DETAILED_ROW_LIMIT is hit.
+ * Deliberately carries no `[L1]`/`[L2]` tag so it lands in the report's
+ * "other" bucket rather than misattributing a cause it did not measure.
+ */
+const INVALID_LEVEL_REASON_UNDETAILED = "Invalid level result (تفاصيل إضافية محذوفة)";
+
 /** Truncates a raw offending value for inclusion in a dropped-row diagnostic
  *  reason — long free-text cells (or an entire merged paragraph landing in the
  *  wrong column) must not blow up the reason string or the exported report. */
@@ -831,14 +846,28 @@ export async function processPopulation(
       );
 
       if (!levelOneResult || !levelTwoResult) {
+        // OOM guard (2026-08-12): describeInvalidLevelReason builds a UNIQUE
+        // string per row. The previous fixed reason was one interned literal
+        // shared by every dropped row, so on a month where the level columns
+        // fail wholesale — the exact case this diagnostic exists for — the
+        // tagged version allocated one fresh string per dropped row and blew
+        // the heap on a 500k-row population.
+        //
+        // The report only ever renders 3 examples per bucket, so per-row
+        // detail beyond the first DIAGNOSTIC_DETAILED_ROW_LIMIT is pure waste:
+        // past that point fall back to the shared constant. Row objects are
+        // still pushed unconditionally, because every summary count is derived
+        // from these arrays' `.length`.
         invalidResultRows.push(
           createRemovedRow(
-            describeInvalidLevelReason({
-              levelOneRaw: enrichment.row.xrayLevelOneResult,
-              levelOneValid: levelOneResult !== null,
-              levelTwoRaw: enrichment.row.xrayLevelTwoResult,
-              levelTwoValid: levelTwoResult !== null
-            }),
+            invalidResultRows.length < DIAGNOSTIC_DETAILED_ROW_LIMIT
+              ? describeInvalidLevelReason({
+                  levelOneRaw: enrichment.row.xrayLevelOneResult,
+                  levelOneValid: levelOneResult !== null,
+                  levelTwoRaw: enrichment.row.xrayLevelTwoResult,
+                  levelTwoValid: levelTwoResult !== null
+                })
+              : INVALID_LEVEL_REASON_UNDETAILED,
             enrichment.row
           )
         );

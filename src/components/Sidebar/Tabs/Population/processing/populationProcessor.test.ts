@@ -366,6 +366,43 @@ describe("processPopulation async processing and column preservation", () => {
     expect(result.invalidResultRows[0].reason).not.toContain("xrayLevelTwoResult=");
   });
 
+  test("stops building per-row diagnostic strings past the cap, so a wholesale-drop month cannot exhaust the heap (OOM regression guard)", async () => {
+    // The tagged reason is a UNIQUE string per row; the reason it replaced was
+    // one interned literal. On a real 500k-row month where the level columns
+    // fail wholesale, building one fresh string per dropped row exhausted the
+    // heap — an OOM caused by the very diagnostic meant to explain the drop.
+    const DROPPED = 120; // > DIAGNOSTIC_DETAILED_ROW_LIMIT (50)
+    const riskManyInvalid: RiskWorkbookResult = {
+      ...mockRiskResult,
+      rows: Array.from({ length: DROPPED }, (_, i) => ({
+        ...mockRiskResult.rows[0],
+        xrayImageId: `X-OOM-${i}`,
+        xrayLevelOneResult: null,
+        xrayLevelTwoResult: "اشتباه"
+      }))
+    };
+
+    const result = await processPopulation({
+      riskWorkbookResult: riskManyInvalid,
+      biWorkbookResult: null,
+      certScanPasteText: ""
+    });
+
+    // Every dropped row is still counted — summary totals derive from .length.
+    expect(result.invalidResultRows.length).toBe(DROPPED);
+
+    // The first rows keep full detail (what the report's examples render).
+    expect(result.invalidResultRows[0].reason).toMatch(/^Invalid level result \[L1\]:/);
+
+    // Past the cap the reason is the SHARED constant — asserted by reference
+    // identity, which is the property that actually bounds allocation.
+    const tail = result.invalidResultRows.slice(60).map((r) => r.reason);
+    const distinctTailReasons = new Set(tail);
+    expect(distinctTailReasons.size).toBe(1);
+    expect(tail[0]).not.toMatch(/^Invalid level result \[L1\]:/);
+    expect(tail.every((reason) => reason === tail[0])).toBe(true);
+  });
+
   test("diagnostic reason carries the raw unrecognized value (truncated) for a garbled level 2 cell, tagged [L2]", async () => {
     const longGarbledValue = "قيمة غير معروفة تماماً ولا تطابق أي نمط معروف على الإطلاق مهما طالت";
     const riskGarbledL2: RiskWorkbookResult = {
