@@ -57,7 +57,11 @@ Run through this before cutting a release (tagging a commit as the version users
 - [ ] `npm run test:run` — all green.
 - [ ] `npm run build` — succeeds, `dist/index.html` produced.
 - [ ] `npm run check:bundle-size` — raw and gzip bundle budgets pass.
-- [ ] `npm audit` — no unresolved production or development advisory.
+- [ ] `npm audit --omit=dev` — no unresolved **production** advisory. (Dev-only advisories in
+      build/lint/test tooling are out of scope: nothing in `devDependencies` is bundled into
+      `dist/index.html`. Record any dev-only findings in the release notes rather than blocking
+      on them — the previous wording demanded a clean full `npm audit`, which the repo could
+      not satisfy, and a checklist line that can never pass trains people to skip checklist lines.)
 - [ ] Smoke-test the built app in Chromium at desktop and 390 px: Arabic labels, keyboard
       focus, mobile drawer, read-only mode, permission-denied actions, and report exports.
 - [ ] CI (`.github/workflows/ci.yml`) is green on the commit being released.

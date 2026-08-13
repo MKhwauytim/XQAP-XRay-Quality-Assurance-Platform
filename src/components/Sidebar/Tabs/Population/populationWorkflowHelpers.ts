@@ -1,6 +1,8 @@
 import type { DistributionEntry, DistributionEvent } from "../../../../data/distribution/distributionTypes";
 import type { MonthEditData, MonthLoadScope } from "../../../../data/population/populationStorage";
 import { MonthClosedError } from "../../../../data/population/monthLock";
+import { logError } from "../../../../data/storage/errorLogger";
+import { getLabels } from "../../../../data/labels/labelsStore";
 import type { BiWorkbookResult, NormalizedBiRow } from "./biData/biDataTypes";
 import type { NormalizedRiskRow, RiskWorkbookResult } from "./riskData/riskDataTypes";
 import type {
@@ -223,5 +225,11 @@ export function buildAssignedEntryMap(
 
 export function distributionErrorText(error: unknown, monthClosedText: string): string {
   if (error instanceof MonthClosedError) return monthClosedText;
-  return error instanceof Error ? error.message : "خطأ غير معروف";
+  // Only thrown exceptions reach here — domain-level failures carry their own
+  // Arabic text through the `result.ok === false` branch at every call site.
+  // Those exception messages are internal English (safeWrite validation text,
+  // "Browser cannot write ..."), which has no place in an Arabic UI; the raw
+  // detail goes to the admin error log instead of the user's screen.
+  logError("distribution:action-failed", error);
+  return getLabels().msg_unexpected_write_error;
 }

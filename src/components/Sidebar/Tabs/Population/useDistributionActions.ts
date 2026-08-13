@@ -27,7 +27,7 @@ import { loadSampleMaster } from "../../../../data/sampling/sampleStorage";
 import type { SampleMasterData } from "../../../../data/sampling/sampleTypes";
 import { writeEmployeeXlsx } from "../../../../data/answers/employeeXlsx";
 import { getLabels } from "../../../../data/labels/labelsStore";
-import { logError } from "../../../../data/storage/errorLogger";
+import { logError, logRejection } from "../../../../data/storage/errorLogger";
 import { appendWorkspaceAction } from "../../../../data/audit/actionLog";
 import { buildAssignedEntryMap, distributionErrorText } from "./populationWorkflowHelpers";
 
@@ -367,7 +367,7 @@ export function useDistributionActions(params: {
         // Build per-employee entry lists then write one XLSX per employee (fire-and-forget).
         const assignedMap = buildAssignedEntryMap(events, sampleDrawResult.rows);
         for (const [emp, empEntries] of assignedMap) {
-          void writeEmployeeXlsx(directoryHandle, monthFolderName, emp, empEntries).catch(() => undefined);
+          void writeEmployeeXlsx(directoryHandle, monthFolderName, emp, empEntries).catch(logRejection(`distribution:write-employee-xlsx:${emp}`));
         }
         setDistributionProgress({ percent: 100, message: "اكتمل حفظ التوزيع بنجاح." });
         setDistributionMessage({ type: "ok", text: "تم تطبيق وحفظ التوزيع الجماعي بنجاح." });
