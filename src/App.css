@@ -22,6 +22,13 @@
     var(--app-canvas-tint),
     var(--app-bg);
   color: var(--c-ink);
+  /* direction: ltr here is DELIBERATE and load-bearing — it is not an RTL bug.
+     It pins the grid column order so .app-workspace takes column 1 and .sidebar
+     takes column 2, putting content on the physical left and the sidebar on the
+     physical right. Every text-bearing descendant re-declares direction: rtl.
+     A new child of .app-shell MUST set its own dir/direction — it will not
+     inherit RTL from here. (The dir="rtl" attribute on this same <main> in
+     App.tsx is inert: this declaration wins over the attribute.) */
   direction: ltr;
 
   transition: grid-template-columns var(--t-slow) var(--ease-spring);

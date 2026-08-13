@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { getLabels } from "../data/labels/labelsStore";
 import { usePermissions } from "../auth/usePermissions";
 import type { PermissionLevel } from "../auth/userManagement";
 
@@ -56,12 +57,12 @@ export function AccessDenied() {
         />
       </svg>
       <strong style={{ fontSize: "1.1rem", color: "var(--app-text, #111)" }}>
-        غير مصرح
+        {getLabels().access_denied_title}
       </strong>
       <p style={{ margin: 0, fontSize: "0.9rem" }}>
-        لا تملك صلاحية الوصول إلى هذا القسم.
+        {getLabels().access_denied_body}
         <br />
-        تواصل مع مسؤول النظام إذا كنت بحاجة لهذا الوصول.
+        {getLabels().access_denied_hint}
       </p>
     </div>
   );

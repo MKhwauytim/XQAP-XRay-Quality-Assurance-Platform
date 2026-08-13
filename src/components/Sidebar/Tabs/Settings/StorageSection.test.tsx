@@ -73,7 +73,6 @@ describe("StorageSection", () => {
 
   it("clears nothing when the confirmation is declined", async () => {
     localStorage.setItem("xray_auth_session_v1", "session-token");
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
 
     render(<StorageSection />);
     const button = await screen.findByRole("button", {
@@ -81,28 +80,38 @@ describe("StorageSection", () => {
     });
     button.click();
 
-    expect(confirmSpy).toHaveBeenCalledWith(DEFAULT_LABELS.storage_reset_confirm);
+    // UIX-02: the app's own RTL ConfirmDialog, not native window.confirm.
+    expect(
+      await screen.findByText(DEFAULT_LABELS.storage_reset_confirm)
+    ).toBeInTheDocument();
+    (
+      await screen.findByRole("button", {
+        name: DEFAULT_LABELS.confirm_dialog_default_cancel,
+      })
+    ).click();
+
     // Declined: the key must survive.
     expect(localStorage.getItem("xray_auth_session_v1")).toBe("session-token");
-    confirmSpy.mockRestore();
   });
 
   it("clears owned keys but not foreign ones when confirmed", async () => {
     localStorage.setItem("xray_auth_session_v1", "session-token");
     localStorage.setItem("kanban-fs-state", "foreign");
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
-
     render(<StorageSection />);
     const button = await screen.findByRole("button", {
       name: DEFAULT_LABELS.storage_reset_button,
     });
     button.click();
+    (
+      await screen.findByRole("button", {
+        name: DEFAULT_LABELS.confirm_dialog_default_ok,
+      })
+    ).click();
     await vi.waitFor(() => {
       expect(localStorage.getItem("xray_auth_session_v1")).toBeNull();
     });
 
     expect(localStorage.getItem("kanban-fs-state")).toBe("foreign");
-    confirmSpy.mockRestore();
   });
 });
 
@@ -168,13 +177,16 @@ describe("StorageSection - reset failure is observable, not swallowed", () => {
   it("logs to the error ring buffer and shows a visible message when clearOwnedStorage rejects", async () => {
     const boom = new Error("indexedDB.deleteDatabase blocked");
     vi.spyOn(storageRegistry, "clearOwnedStorage").mockRejectedValueOnce(boom);
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
-
     render(<StorageSection />);
     const button = await screen.findByRole("button", {
       name: DEFAULT_LABELS.storage_reset_button,
     });
     button.click();
+    (
+      await screen.findByRole("button", {
+        name: DEFAULT_LABELS.confirm_dialog_default_ok,
+      })
+    ).click();
 
     // Finding 2: the failure must be diagnosable via the existing error log,
     // not a fully silent catch.
@@ -187,8 +199,6 @@ describe("StorageSection - reset failure is observable, not swallowed", () => {
     expect(
       await screen.findByText(DEFAULT_LABELS.storage_reset_partial_failure)
     ).toBeInTheDocument();
-
-    confirmSpy.mockRestore();
   });
 });
 
@@ -225,8 +235,6 @@ describe("StorageSection - Finding 3: reset is capability-gated", () => {
   it("never prompts for confirmation or clears storage when clicked without the capability (handler boundary)", async () => {
     permissionsMock.canMutate = false;
     localStorage.setItem("xray_auth_session_v1", "session-token");
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
-
     render(<StorageSection />);
     const button = await screen.findByRole("button", {
       name: DEFAULT_LABELS.storage_reset_button,
@@ -236,16 +244,16 @@ describe("StorageSection - Finding 3: reset is capability-gated", () => {
     // the handler itself refuses, not just that the button is visually off.
     button.click();
 
-    expect(confirmSpy).not.toHaveBeenCalled();
+    // The confirmation must not even open without the capability.
+    expect(
+      screen.queryByText(DEFAULT_LABELS.storage_reset_confirm)
+    ).not.toBeInTheDocument();
     expect(localStorage.getItem("xray_auth_session_v1")).toBe("session-token");
-    confirmSpy.mockRestore();
   });
 
   it("enables the reset button and allows reset when the role has the capability", async () => {
     permissionsMock.canMutate = true;
     localStorage.setItem("xray_auth_session_v1", "session-token");
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
-
     render(<StorageSection />);
     const button = await screen.findByRole("button", {
       name: DEFAULT_LABELS.storage_reset_button,
@@ -253,10 +261,14 @@ describe("StorageSection - Finding 3: reset is capability-gated", () => {
     expect(button).not.toBeDisabled();
 
     button.click();
+    (
+      await screen.findByRole("button", {
+        name: DEFAULT_LABELS.confirm_dialog_default_ok,
+      })
+    ).click();
     await vi.waitFor(() => {
       expect(localStorage.getItem("xray_auth_session_v1")).toBeNull();
     });
-    confirmSpy.mockRestore();
   });
 });
 

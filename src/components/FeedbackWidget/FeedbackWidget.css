@@ -32,8 +32,12 @@
   top: 68px;
   inset-inline-end: 24px;
   z-index: 1200;
-  width: 380px;
-  max-height: 560px;
+  /* Clamped to the viewport: the panel is position: fixed, so body's
+     overflow-x: hidden does NOT clip it and no scrollbar is created — an
+     unclamped 380px panel simply hung off-screen on a phone with no way to
+     reach the cut-off part. Measured at 320px wide: right edge landed at 404px. */
+  width: min(380px, calc(100vw - 32px));
+  max-height: min(560px, calc(100vh - 88px));
   background: var(--c-surface, #fff);
   border: 1px solid var(--c-border, #D6E2EF);
   border-radius: 16px;

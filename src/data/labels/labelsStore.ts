@@ -228,6 +228,29 @@ export const DEFAULT_LABELS = {
   approval_sort_oldest_first: "الأقدم أولاً",
   approval_sort_newest_first: "الأحدث أولاً",
 
+  // Shared app chrome — crash screen, access denial, data-view states, confirms
+  errbound_title:               "حدث خطأ غير متوقع",
+  errbound_retry_btn:           "المحاولة مجدداً",
+  errbound_reload_btn:          "إعادة تحميل الصفحة",
+  access_denied_title:          "غير مصرح",
+  access_denied_body:           "لا تملك صلاحية الوصول إلى هذا القسم.",
+  access_denied_hint:           "تواصل مع مسؤول النظام إذا كنت بحاجة لهذا الوصول.",
+  state_error_default_title:    "تعذّر عرض هذه البيانات",
+  confirm_dialog_default_title: "تأكيد الإجراء",
+  confirm_dialog_default_ok:    "تأكيد",
+  confirm_dialog_default_cancel: "إلغاء",
+
+  // Inspection panel — form chrome and validation
+  ip_submit_btn:                "تقديم",
+  ip_submitting:                "جارٍ التقديم…",
+  ip_next_phase_btn:            "المرحلة التالية",
+  ip_msg_missing_required_submit: "أكمل جميع الحقول الإلزامية قبل التقديم.",
+  ip_msg_missing_required_phase:  "أكمل الحقول الإلزامية في هذه المرحلة قبل الانتقال.",
+  ip_no_template_msg:           "اختر نموذجاً لعرض حقول الفحص.",
+  ip_no_visible_fields_msg:     "لا توجد حقول ظاهرة في هذه المرحلة.",
+  ip_select_placeholder:        "اختر...",
+  ip_field_required_error:      "هذا الحقل إلزامي.",
+
   // Reopen-for-correction (Tier-1 Item D)
   ip_reopen_btn:                "إعادة فتح للتصحيح",
   ip_reopen_reason_placeholder: "سبب إعادة الفتح (إلزامي)",

@@ -4,6 +4,7 @@ import { AlertTriangle } from "lucide-react";
 import { useFocusTrap } from "../../hooks/useFocusTrap";
 import { ModalPortal } from "../ModalPortal/ModalPortal";
 import "./ConfirmDialog.css";
+import { getLabels } from "../../data/labels/labelsStore";
 
 /**
  * Shared confirmation dialog for destructive / irreversible actions (UIX-02).
@@ -28,10 +29,10 @@ type ConfirmDialogProps = {
 
 export function ConfirmDialog({
   open,
-  title = "تأكيد الإجراء",
+  title = getLabels().confirm_dialog_default_title,
   message,
-  confirmLabel = "تأكيد",
-  cancelLabel = "إلغاء",
+  confirmLabel = getLabels().confirm_dialog_default_ok,
+  cancelLabel = getLabels().confirm_dialog_default_cancel,
   danger = false,
   onConfirm,
   onCancel

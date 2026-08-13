@@ -32,10 +32,47 @@ const repoRoot = path.resolve(__dirname, "..");
 // (or an equivalent documented exception) in the same commit — never to
 // silence an accidental regression.
 const BASELINE = {
-  "src/components/Sidebar/Tabs/EmployeeWorkspace/EmployeeWorkspace.css": 10,
+  // The four files of the original B4 sweep. Their literals are documented
+  // `/* no-token: one-off */` exceptions.
+  "src/components/Sidebar/Tabs/EmployeeWorkspace/EmployeeWorkspace.css": 7,
   "src/components/Sidebar/Tabs/Reports/Reports.css": 29,
   "src/components/DataTable/DataTable.css": 3,
-  "src/components/Sidebar/Tabs/Population/Population.css": 16
+  "src/components/Sidebar/Tabs/Population/Population.css": 16,
+
+  // Extended 2026-08-13. The original sweep only ever covered the four files
+  // above, so CI was green while ~800 un-tokenized literals sat outside the
+  // guard's view and kept growing. These entries are NOT a claim that these
+  // files are clean — they are a ratchet pinning each file at its current
+  // count so the drift cannot get worse. Lower a number when you tokenize a
+  // file; raise one only alongside a documented exception in the same commit.
+  "src/App.css": 3,
+  "src/auth/AdminToolbar.css": 12,
+  "src/auth/AuthGate.css": 47,
+  "src/components/ConfirmDialog/ConfirmDialog.css": 2,
+  "src/components/FeedbackWidget/FeedbackWidget.css": 74,
+  "src/components/GlobalMonthSelector/GlobalMonthSelector.css": 15,
+  "src/components/InspectionPanel/InspectionPanel.css": 67,
+  "src/components/NotificationBanner/NotificationBanner.css": 8,
+  "src/components/PageHeader/PageHeader.css": 3,
+  "src/components/Pagination/Pagination.css": 8,
+  "src/components/Sidebar/BootSplashOverlay.css": 21,
+  "src/components/Sidebar/Sidebar.css": 10,
+  "src/components/Sidebar/Tabs/AdhocImport/AdhocImport.css": 14,
+  "src/components/Sidebar/Tabs/Archive/Archive.css": 101,
+  "src/components/Sidebar/Tabs/ChangeLog/ChangeLog.css": 1,
+  "src/components/Sidebar/Tabs/EmployeeWorkspace/views/NotificationManager.css": 9,
+  "src/components/Sidebar/Tabs/Population/components/DataAccuracyReport.css": 80,
+  "src/components/Sidebar/Tabs/ReportDesigner/ReportDesigner.css": 87,
+  "src/components/Sidebar/Tabs/Settings/ErrorLogSection.css": 21,
+  "src/components/Sidebar/Tabs/Settings/Settings.css": 61,
+  "src/components/Sidebar/Tabs/Settings/StorageSection.css": 17,
+  "src/components/Sidebar/Tabs/TemplateBuilder/TemplateBuilder.css": 38,
+  "src/components/Sidebar/Tabs/UserManagement/UserManagement.css": 99,
+  "src/data/workspace/WorkspaceGate.css": 63,
+  "src/styles/primitives.css": 2
+
+  // src/index.css is deliberately EXCLUDED: it is the token source of truth,
+  // so raw hex literals there are the definitions the other files consume.
 };
 
 const HEX_RE = /#[0-9a-fA-F]{3,8}\b/g;

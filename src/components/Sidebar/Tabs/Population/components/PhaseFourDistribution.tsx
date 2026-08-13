@@ -513,6 +513,7 @@ export default function PhaseFourDistribution({
               <input
                 id="manual-xray-search"
                 type="search"
+                aria-label="بحث بمعرف الأشعة"
                 value={manualSearch}
                 onChange={(e) => setManualSearch(e.target.value)}
                 placeholder="بحث بمعرف الأشعة..."

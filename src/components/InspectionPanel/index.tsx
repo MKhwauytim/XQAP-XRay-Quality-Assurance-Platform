@@ -53,6 +53,11 @@ export default function InspectionPanel({
     return m;
   });
   const [validationMsg, setValidationMsg] = useState<string | null>(null);
+  // Guards the async disk write behind the primary action: without it a
+  // double-click (or an impatient re-click during a slow workspace write) fires
+  // onSave twice concurrently. Every other mutating action in the app tracks a
+  // busy flag the same way.
+  const [submitting, setSubmitting] = useState(false);
   const [touchedRequiredIds, setTouchedRequiredIds] = useState<Set<string>>(new Set());
   // Reopen confirm block. Tracks WHICH reopen action's reason field is open:
   // "direct" = supervisor direct reopen (Tier-1 Item D, onReopen);
@@ -132,7 +137,7 @@ export default function InspectionPanel({
     return getVisibleRequiredFields(template, safeActivePhaseId, ans)
       .filter((field) => !isAnswerFilled(field, ans[field.fieldId]));
   }, [template, safeActivePhaseId, ans]);
-  const primaryActionLabel = isLastPhase ? "تقديم" : "المرحلة التالية";
+  const primaryActionLabel = isLastPhase ? getLabels().ip_submit_btn : getLabels().ip_next_phase_btn;
 
   function collect(): FieldAnswer[] {
     if (!template) return [];
@@ -142,17 +147,24 @@ export default function InspectionPanel({
     }));
   }
 
-  function submitStudy(): void {
+  async function submitStudy(): Promise<void> {
     if (!template) return;
+    if (submitting) return;
     if (missingRequiredFields.length > 0) {
       const firstMissing = missingRequiredFields[0]!;
       setActivePhaseId(firstMissing.phaseId);
       setTouchedRequiredIds(new Set(missingRequiredFields.map(({ field }) => field.fieldId)));
-      setValidationMsg("أكمل جميع الحقول الإلزامية قبل التقديم.");
+      setValidationMsg(getLabels().ip_msg_missing_required_submit);
       return;
     }
     setValidationMsg(null);
-    void onSave(collect());
+    setSubmitting(true);
+    try {
+      await onSave(collect());
+    } finally {
+      // Always clears, so a rejected save cannot leave the button stuck.
+      setSubmitting(false);
+    }
   }
 
   function goToNextPhase(): void {
@@ -161,7 +173,7 @@ export default function InspectionPanel({
       setTouchedRequiredIds(
         new Set(currentPhaseMissingRequiredFields.map((field) => field.fieldId))
       );
-      setValidationMsg("أكمل الحقول الإلزامية في هذه المرحلة قبل الانتقال.");
+      setValidationMsg(getLabels().ip_msg_missing_required_phase);
       return;
     }
     const nextPhase = phases[activePhaseIndex + 1];
@@ -172,7 +184,7 @@ export default function InspectionPanel({
 
   function handlePrimaryAction(): void {
     if (isLastPhase) {
-      submitStudy();
+      void submitStudy();
       return;
     }
     goToNextPhase();
@@ -198,7 +210,7 @@ export default function InspectionPanel({
 
       <div className="ip-form-body">
         {!template ? (
-          <p className="ip-no-template">اختر نموذجاً لعرض حقول الفحص.</p>
+          <p className="ip-no-template">{getLabels().ip_no_template_msg}</p>
         ) : isSubmitted || readonly ? (
           <ReadOnlyView template={template} ans={ans} />
         ) : (
@@ -288,8 +300,9 @@ export default function InspectionPanel({
               type="button"
               className="ip-btn ip-btn--primary"
               onClick={handlePrimaryAction}
+              disabled={submitting}
             >
-              {primaryActionLabel}
+              {submitting ? getLabels().ip_submitting : primaryActionLabel}
             </button>
           </div>
           <div className="ip-footer-actions">
@@ -382,7 +395,7 @@ function EditView({
 
   if (fields.length === 0) {
     return (
-      <p className="ip-no-template">لا توجد حقول ظاهرة في هذه المرحلة.</p>
+      <p className="ip-no-template">{getLabels().ip_no_visible_fields_msg}</p>
     );
   }
 
@@ -482,7 +495,7 @@ function FormField({
           value={String(value)}
           onChange={(e) => onChange(e.target.value)}
         >
-          <option value="">اختر...</option>
+          <option value="">{getLabels().ip_select_placeholder}</option>
           {field.options.map((o) => (
             <option key={o} value={o}>
               {o}
@@ -508,7 +521,7 @@ function FormField({
           </datalist>
         </>
       ) : null}
-      {invalid ? <span className="ip-field-error">هذا الحقل إلزامي.</span> : null}
+      {invalid ? <span className="ip-field-error">{getLabels().ip_field_required_error}</span> : null}
     </div>
   );
 }
@@ -521,7 +534,7 @@ function formatAnswerValue(
 ): string {
   if (field.type === "empty") return "—";
   if (value === undefined || value === "") return "—";
-  if (typeof value === "boolean") return value ? "نعم" : "لا";
+  if (typeof value === "boolean") return value ? getLabels().rd_bool_yes : getLabels().rd_bool_no;
   return String(value);
 }
 
