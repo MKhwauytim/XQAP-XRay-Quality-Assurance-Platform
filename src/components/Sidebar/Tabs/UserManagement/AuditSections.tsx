@@ -15,7 +15,7 @@ const ACTION_TYPE_LABEL_KEYS: Record<WorkspaceActionType, LabelKey> = {
   "feature-permission-changed": "um_action_type_feature_permission_changed",
   "sample-drawn": "um_action_type_sample_drawn",
   "distribution-bulk-assigned": "um_action_type_distribution_bulk_assigned",
-  "distribution-bulk-reassign-requested": "um_action_type_distribution_bulk_reassign_requested",
+  "referral-requested": "um_action_type_referral_requested",
   "referral-approved": "um_action_type_referral_approved",
   "referral-denied": "um_action_type_referral_denied",
   "replacement-approved": "um_action_type_replacement_approved",

@@ -27,36 +27,33 @@
  */
 
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
-import {
-  planBulkReassignment,
-  type BulkReassignSkip,
-} from "../distribution/bulkAssignment";
+import { planReassignment, type ReassignSkip } from "./planReassignment";
 import { loadOrDeriveDistributionCurrent } from "../distribution/distributionStorage";
 import { ensureMonthWritable } from "../population/monthLock";
 import { loadSampleMaster } from "../sampling/sampleStorage";
 import { appendReferralRequest } from "./referralStorage";
 import type { ReferralRequest } from "./referralTypes";
 
-export type BulkReassignRequestGroup = {
+export type ReassignRequestGroup = {
   requestId: string;
   fromEmployee: string;
   xrayImageIds: string[];
 };
 
-export type BulkReassignRequestResult = {
+export type ReassignRequestResult = {
   ok: boolean;
   /** One pending referral request per source employee. */
-  createdRequests: BulkReassignRequestGroup[];
-  skipped: BulkReassignSkip[];
+  createdRequests: ReassignRequestGroup[];
+  skipped: ReassignSkip[];
   error?: string;
 };
 
 /** Stable per-owner request id — see the module docblock's idempotency note. */
-export function bulkReassignRequestId(sourceRequestId: string, fromEmployee: string): string {
+export function reassignRequestId(sourceRequestId: string, fromEmployee: string): string {
   return `${sourceRequestId}--${fromEmployee}`;
 }
 
-export async function submitBulkReassignmentRequests(params: {
+export async function submitReassignmentRequests(params: {
   directoryHandle: DirectoryHandleLike;
   monthFolderName: string;
   xrayImageIds: string[];
@@ -64,7 +61,7 @@ export async function submitBulkReassignmentRequests(params: {
   requestedBy: string;
   reason?: string;
   sourceRequestId: string;
-}): Promise<BulkReassignRequestResult> {
+}): Promise<ReassignRequestResult> {
   const {
     directoryHandle,
     monthFolderName,
@@ -108,7 +105,7 @@ export async function submitBulkReassignmentRequests(params: {
     };
   }
 
-  const plan = planBulkReassignment(current.entries, xrayImageIds, reassignedTo);
+  const plan = planReassignment(current.entries, xrayImageIds, reassignedTo);
   if (plan.eligible.length === 0) {
     return { ok: true, createdRequests: [], skipped: plan.skipped };
   }
@@ -121,12 +118,12 @@ export async function submitBulkReassignmentRequests(params: {
   }
 
   const requestedAt = new Date().toISOString();
-  const createdRequests: BulkReassignRequestGroup[] = [];
+  const createdRequests: ReassignRequestGroup[] = [];
   // Sorted so the generated ids do not depend on Map insertion order (which
   // follows the caller's selection order) — a retry must produce the same ids.
   for (const fromEmployee of [...byOwner.keys()].sort()) {
     const ids = byOwner.get(fromEmployee) ?? [];
-    const requestId = bulkReassignRequestId(sourceRequestId, fromEmployee);
+    const requestId = reassignRequestId(sourceRequestId, fromEmployee);
     const request: ReferralRequest = {
       requestId,
       monthFolderName,
@@ -134,8 +131,8 @@ export async function submitBulkReassignmentRequests(params: {
       toEmployee: reassignedTo,
       xrayImageIds: ids,
       reason: reason?.trim()
-        ? `إعادة تعيين جماعية بطلب من ${requestedBy} — ${reason.trim()}`
-        : `إعادة تعيين جماعية بطلب من ${requestedBy}`,
+        ? `إحالة بطلب من ${requestedBy} — ${reason.trim()}`
+        : `إحالة بطلب من ${requestedBy}`,
       requestedAt,
       requestedBy,
       status: "pending",

@@ -9,11 +9,11 @@ import { ModalPortal } from "../../../../../ModalPortal/ModalPortal";
 import { readUserManagementState } from "../../../../../../auth/userManagement";
 import type { FieldAnswer, ItemAnswer } from "../../../../../../data/answers/answerTypes";
 import type { DistributionEntry } from "../../../../../../data/distribution/distributionTypes";
+import { isAssignableSampleRole } from "../../../../../../data/distribution/bulkAssignment";
 import {
-  isAssignableSampleRole,
-  planBulkReassignment,
-  type BulkReassignSkipReason,
-} from "../../../../../../data/distribution/bulkAssignment";
+  planReassignment,
+  type ReassignSkipReason,
+} from "../../../../../../data/referral/planReassignment";
 import type { StageAliasMappings } from "../../../../../../data/population/populationConfig";
 import type { TemplateSchema } from "../../../../../../data/templates/templateTypes";
 import type { ColConfig, DataTableCol } from "../../../../../../components/DataTable";
@@ -28,7 +28,7 @@ import { clampPage, pageSlice } from "../../../../../../utils/paginationUtils";
 import { useLabels, type Labels } from "../../../../../../data/labels/useLabels";
 import { formatStageLabel } from "../../../../../../data/population/stageHelpers";
 import type { ReplacementIndexRow } from "../../../../../../data/population/replacementIndexTypes";
-import type { PersonalStats, PersonalQuota, ReplacementDialogState, BulkReassignModalState } from "../XrayReferrals";
+import type { PersonalStats, PersonalQuota, ReplacementDialogState, ReassignModalState } from "../XrayReferrals";
 
 // ── Column definitions ────────────────────────────────────────────────────────
 
@@ -292,7 +292,7 @@ export function BulkReassignSelectionBar({
   );
 }
 
-const BULK_REASSIGN_SKIP_LABELS: Record<BulkReassignSkipReason, string> = {
+const REASSIGN_SKIP_LABELS: Record<ReassignSkipReason, string> = {
   "not-found": "غير موجودة في التوزيع الحالي",
   "terminal-completed": "مكتملة — تحتاج إعادة فتح أولاً",
   "terminal-replaced": "مستبدلة",
@@ -306,7 +306,7 @@ const BULK_REASSIGN_SKIP_LABELS: Record<BulkReassignSkipReason, string> = {
  * differ; the eligibility planning, the request that gets written, and the
  * approval it goes through are identical, so they must not be able to drift.
  */
-export function BulkReassignModal({
+export function ReassignModal({
   state,
   entries,
   visibleColumns,
@@ -318,7 +318,7 @@ export function BulkReassignModal({
   onClose,
   onConfirm,
 }: {
-  state: Exclude<BulkReassignModalState, null>;
+  state: Exclude<ReassignModalState, null>;
   entries: DistributionEntry[];
   /** Columns/format/answers backing the per-sample preview under each id. */
   visibleColumns: DataTableCol<DistributionEntry>[];
@@ -344,16 +344,16 @@ export function BulkReassignModal({
     .users.filter((u) => u.isActive && u.username !== currentUser && isAssignableSampleRole(u))
     .sort((a, b) => a.displayName.localeCompare(b.displayName, "ar"));
 
-  // Recomputed with the SAME pure planner the executor uses (bulkAssignment.ts's
-  // planBulkReassignment) — the dialog and the actual write can never disagree
+  // Recomputed with the SAME pure planner the submit path uses
+  // (referral/planReassignment.ts) — the dialog and the actual write can never disagree
   // about what is eligible, since they share one implementation.
   const plan = useMemo(
-    () => (toEmployee ? planBulkReassignment(entries, state.xrayImageIds, toEmployee) : null),
+    () => (toEmployee ? planReassignment(entries, state.xrayImageIds, toEmployee) : null),
     [entries, state.xrayImageIds, toEmployee]
   );
 
   const skipCounts = useMemo(() => {
-    const m = new Map<BulkReassignSkipReason, number>();
+    const m = new Map<ReassignSkipReason, number>();
     for (const s of plan?.skipped ?? []) m.set(s.reason, (m.get(s.reason) ?? 0) + 1);
     return [...m.entries()];
   }, [plan]);
@@ -385,7 +385,7 @@ export function BulkReassignModal({
       <div className="ew-replace-modal">
         <div className="ew-replace-header">
           <div>
-            <h3>إعادة تعيين جماعي</h3>
+            <h3>إسناد لموظف آخر</h3>
             <p>{sourceLabel}</p>
           </div>
           <button type="button" className="ew-modal-close" onClick={onClose} aria-label="إغلاق"><X size={16} /></button>
@@ -410,13 +410,13 @@ export function BulkReassignModal({
           </select>
 
           <label className="ew-field-label" htmlFor="bulk-reassign-reason" style={{ marginTop: 12 }}>
-            سبب إعادة التعيين <span className="ew-required">*</span>
+            سبب الإحالة <span className="ew-required">*</span>
           </label>
           <textarea
             id="bulk-reassign-reason"
             className="ew-input ew-textarea"
             rows={2}
-            placeholder="اذكر سبب إعادة التعيين..."
+            placeholder="اذكر سبب الإحالة..."
             value={reason}
             onChange={(e) => setReason(e.target.value)}
           />
@@ -459,7 +459,7 @@ export function BulkReassignModal({
           <div className="ew-replace-reason" style={{ paddingTop: 4 }}>
             {/* One plain-text node (no nested <strong>) so the exact wording is
                reliably matchable in tests without a custom textContent matcher. */}
-            <p>{`سيتم إرسال طلب إعادة تعيين ${eligibleCount.toLocaleString("ar-SA-u-nu-latn")} عينة إلى ${toEmployee} — بانتظار الاعتماد.`}</p>
+            <p>{`سيتم إرسال طلب إحالة ${eligibleCount.toLocaleString("ar-SA-u-nu-latn")} عينة إلى ${toEmployee} — بانتظار الاعتماد.`}</p>
             {fromBreakdown.length > 1 && (
               <p style={{ fontSize: 12, opacity: 0.8, margin: "4px 0 0" }}>
                 {`سيُنشأ طلب منفصل لكل موظف مصدر (${fromBreakdown.length.toLocaleString("ar-SA-u-nu-latn")} طلبات) ليعتمدها المشرف كلٌّ على حدة.`}
@@ -482,7 +482,7 @@ export function BulkReassignModal({
                   <ul style={{ margin: "4px 0 0", paddingInlineStart: 18 }}>
                     {skipCounts.map(([reasonKey, count]) => (
                       <li key={reasonKey}>
-                        {BULK_REASSIGN_SKIP_LABELS[reasonKey]} — {count.toLocaleString("ar-SA-u-nu-latn")}
+                        {REASSIGN_SKIP_LABELS[reasonKey]} — {count.toLocaleString("ar-SA-u-nu-latn")}
                       </li>
                     ))}
                   </ul>
@@ -490,7 +490,7 @@ export function BulkReassignModal({
               </div>
             )}
             {eligibleCount === 0 && (
-              <p className="ew-replace-error" role="alert">لا توجد عينات صالحة لإعادة التعيين ضمن هذا الاختيار.</p>
+              <p className="ew-replace-error" role="alert">لا توجد عينات صالحة للإحالة ضمن هذا الاختيار.</p>
             )}
             <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10, fontSize: 13 }}>
               <input
@@ -499,7 +499,7 @@ export function BulkReassignModal({
                 onChange={(e) => setConfirmed(e.target.checked)}
                 disabled={eligibleCount === 0}
               />
-              أؤكد مراجعة الملخص أعلاه ورغبتي بإرسال الطلب للاعتماد
+              أؤكد مراجعة الملخص أعلاه ورغبتي بإرسال طلب الإحالة
             </label>
           </div>
         )}
@@ -518,7 +518,7 @@ export function BulkReassignModal({
             disabled={!canSubmit}
             onClick={handleSubmit}
           >
-            {busy ? "جاري الإرسال..." : error ? "إعادة المحاولة" : "إرسال الطلب للاعتماد"}
+            {busy ? "جاري الإرسال..." : error ? "إعادة المحاولة" : "إرسال طلب الإحالة"}
           </button>
         </div>
       </div>

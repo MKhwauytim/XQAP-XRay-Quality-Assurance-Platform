@@ -535,13 +535,13 @@ describe("XrayReferrals post-success reloads (Bug 1 regression)", () => {
     // Any default managed user other than "emp-1" works — "jalgahamdi" is one of
     // createEmptyUserManagementState's seeded default employees.
     fireEvent.change(toEmployeeSelect, { target: { value: "jalgahamdi" } });
-    const reasonInput = screen.getByLabelText(/سبب إعادة التعيين/);
+    const reasonInput = screen.getByLabelText(/سبب الإحالة/);
     fireEvent.change(reasonInput, { target: { value: "بحاجة لمراجعة موظف آخر" } });
     await waitFor(() =>
-      expect(screen.getByText(/سيتم إرسال طلب إعادة تعيين 1 عينة إلى jalgahamdi/)).toBeInTheDocument()
+      expect(screen.getByText(/سيتم إرسال طلب إحالة 1 عينة إلى jalgahamdi/)).toBeInTheDocument()
     );
     fireEvent.click(screen.getByLabelText(/أؤكد مراجعة الملخص/));
-    fireEvent.click(screen.getByRole("button", { name: "إرسال الطلب للاعتماد" }));
+    fireEvent.click(screen.getByRole("button", { name: "إرسال طلب الإحالة" }));
 
     // Before the fix: the submit handler's post-success `await loadData()` (no
     // `{ silent: true }`) flipped loadState to "loading", unmounting the whole
@@ -550,7 +550,7 @@ describe("XrayReferrals post-success reloads (Bug 1 regression)", () => {
     expect(screen.queryByText("جاري التحميل...")).not.toBeInTheDocument();
 
     await waitFor(() =>
-      expect(screen.getByText(/تم إرسال طلب إعادة تعيين 1 عينة إلى jalgahamdi/)).toBeInTheDocument()
+      expect(screen.getByText(/تم إرسال طلب إحالة 1 عينة إلى jalgahamdi/)).toBeInTheDocument()
     );
     const noteInputAfter = screen.getByLabelText("ملاحظة") as HTMLInputElement;
     expect(noteInputAfter.value).toBe("مسودة غير محفوظة");
@@ -805,14 +805,14 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
 
     fireEvent.change(within(dialog).getByLabelText(/الموظف المستلم/), { target: { value: "jalgahamdi" } });
     await waitFor(() =>
-      expect(within(dialog).getByText(/سيتم إرسال طلب إعادة تعيين 1 عينة إلى jalgahamdi/)).toBeInTheDocument()
+      expect(within(dialog).getByText(/سيتم إرسال طلب إحالة 1 عينة إلى jalgahamdi/)).toBeInTheDocument()
     );
-    fireEvent.change(within(dialog).getByLabelText(/سبب إعادة التعيين/), { target: { value: "إعادة توزيع العمل" } });
+    fireEvent.change(within(dialog).getByLabelText(/سبب الإحالة/), { target: { value: "إعادة توزيع العمل" } });
     fireEvent.click(within(dialog).getByLabelText(/أؤكد مراجعة الملخص/));
-    fireEvent.click(within(dialog).getByRole("button", { name: "إرسال الطلب للاعتماد" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "إرسال طلب الإحالة" }));
 
     await waitFor(() =>
-      expect(screen.getByText(/تم إرسال طلب إعادة تعيين 1 عينة إلى jalgahamdi/)).toBeInTheDocument()
+      expect(screen.getByText(/تم إرسال طلب إحالة 1 عينة إلى jalgahamdi/)).toBeInTheDocument()
     );
 
     // Nothing is applied until the request is approved — the record is the outcome.
@@ -847,17 +847,17 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
     fireEvent.change(within(dialog).getByLabelText(/الموظف المستلم/), { target: { value: "jalgahamdi" } });
 
     await waitFor(() =>
-      expect(within(dialog).getByText(/سيتم إرسال طلب إعادة تعيين 1 عينة إلى jalgahamdi/)).toBeInTheDocument()
+      expect(within(dialog).getByText(/سيتم إرسال طلب إحالة 1 عينة إلى jalgahamdi/)).toBeInTheDocument()
     );
     expect(within(dialog).getByText(/لن يتم تضمين 1 عينة/)).toBeInTheDocument();
     expect(within(dialog).getByText(/مكتملة — تحتاج إعادة فتح أولاً/)).toBeInTheDocument();
 
-    fireEvent.change(within(dialog).getByLabelText(/سبب إعادة التعيين/), { target: { value: "إعادة توزيع العمل" } });
+    fireEvent.change(within(dialog).getByLabelText(/سبب الإحالة/), { target: { value: "إعادة توزيع العمل" } });
     fireEvent.click(within(dialog).getByLabelText(/أؤكد مراجعة الملخص/));
-    fireEvent.click(within(dialog).getByRole("button", { name: "إرسال الطلب للاعتماد" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "إرسال طلب الإحالة" }));
 
     await waitFor(() =>
-      expect(screen.getByText(/تم إرسال طلب إعادة تعيين 1 عينة إلى jalgahamdi.*تم تخطي 1 عينة/)).toBeInTheDocument()
+      expect(screen.getByText(/تم إرسال طلب إحالة 1 عينة إلى jalgahamdi.*تم تخطي 1 عينة/)).toBeInTheDocument()
     );
 
     const log = await loadDistributionLog(root, MONTH);
@@ -893,11 +893,11 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
     const dialog = await waitFor(() => screen.getByRole("dialog"), { timeout: 5000 });
     fireEvent.change(within(dialog).getByLabelText(/الموظف المستلم/), { target: { value: "jalgahamdi" } });
     await waitFor(() =>
-      expect(within(dialog).getByText(/سيتم إرسال طلب إعادة تعيين 2 عينة إلى jalgahamdi/)).toBeInTheDocument()
+      expect(within(dialog).getByText(/سيتم إرسال طلب إحالة 2 عينة إلى jalgahamdi/)).toBeInTheDocument()
     );
-    fireEvent.change(within(dialog).getByLabelText(/سبب إعادة التعيين/), { target: { value: "إعادة توزيع العمل" } });
+    fireEvent.change(within(dialog).getByLabelText(/سبب الإحالة/), { target: { value: "إعادة توزيع العمل" } });
     fireEvent.click(within(dialog).getByLabelText(/أؤكد مراجعة الملخص/));
-    fireEvent.click(within(dialog).getByRole("button", { name: "إرسال الطلب للاعتماد" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "إرسال طلب الإحالة" }));
 
     await waitFor(() =>
       expect(within(dialog).getByText(/هذا الشهر مُقفل/)).toBeInTheDocument()
@@ -949,14 +949,14 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
 
     fireEvent.change(within(dialog).getByLabelText(/الموظف المستلم/), { target: { value: "jalgahamdi" } });
     await waitFor(() =>
-      expect(within(dialog).getByText(/سيتم إرسال طلب إعادة تعيين 2 عينة إلى jalgahamdi/)).toBeInTheDocument()
+      expect(within(dialog).getByText(/سيتم إرسال طلب إحالة 2 عينة إلى jalgahamdi/)).toBeInTheDocument()
     );
-    fireEvent.change(within(dialog).getByLabelText(/سبب إعادة التعيين/), { target: { value: "إعادة توزيع العمل" } });
+    fireEvent.change(within(dialog).getByLabelText(/سبب الإحالة/), { target: { value: "إعادة توزيع العمل" } });
     fireEvent.click(within(dialog).getByLabelText(/أؤكد مراجعة الملخص/));
-    fireEvent.click(within(dialog).getByRole("button", { name: "إرسال الطلب للاعتماد" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "إرسال طلب الإحالة" }));
 
     await waitFor(() =>
-      expect(screen.getByText(/تم إرسال طلب إعادة تعيين 2 عينة إلى jalgahamdi/)).toBeInTheDocument()
+      expect(screen.getByText(/تم إرسال طلب إحالة 2 عينة إلى jalgahamdi/)).toBeInTheDocument()
     );
 
     const log2 = await loadDistributionLog(root, MONTH);
@@ -1007,13 +1007,13 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
 
       const dialog = await waitFor(() => screen.getByRole("dialog"), { timeout: 5000 });
       fireEvent.change(within(dialog).getByLabelText(/الموظف المستلم/), { target: { value: "jalgahamdi" } });
-      fireEvent.change(within(dialog).getByLabelText(/سبب إعادة التعيين/), { target: { value: "توحيد المسار" } });
+      fireEvent.change(within(dialog).getByLabelText(/سبب الإحالة/), { target: { value: "توحيد المسار" } });
       await waitFor(() =>
-        expect(within(dialog).getByText(/سيتم إرسال طلب إعادة تعيين/)).toBeInTheDocument()
+        expect(within(dialog).getByText(/سيتم إرسال طلب إحالة/)).toBeInTheDocument()
       );
       fireEvent.click(within(dialog).getByLabelText(/أؤكد مراجعة الملخص/));
-      fireEvent.click(within(dialog).getByRole("button", { name: "إرسال الطلب للاعتماد" }));
-      await waitFor(() => expect(screen.getByText(/تم إرسال طلب إعادة تعيين/)).toBeInTheDocument());
+      fireEvent.click(within(dialog).getByRole("button", { name: "إرسال طلب الإحالة" }));
+      await waitFor(() => expect(screen.getByText(/تم إرسال طلب إحالة/)).toBeInTheDocument());
 
       const referrals = await loadReferralLog(root, MONTH);
       expect(referrals.requests).toHaveLength(1);
@@ -1060,21 +1060,21 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
     const dialog = await waitFor(() => screen.getByRole("dialog"), { timeout: 5000 });
     fireEvent.change(within(dialog).getByLabelText(/الموظف المستلم/), { target: { value: "jalgahamdi" } });
     await waitFor(() =>
-      expect(within(dialog).getByText(/سيتم إرسال طلب إعادة تعيين 2 عينة إلى jalgahamdi/)).toBeInTheDocument()
+      expect(within(dialog).getByText(/سيتم إرسال طلب إحالة 2 عينة إلى jalgahamdi/)).toBeInTheDocument()
     );
-    fireEvent.change(within(dialog).getByLabelText(/سبب إعادة التعيين/), { target: { value: "إعادة توزيع العمل" } });
+    fireEvent.change(within(dialog).getByLabelText(/سبب الإحالة/), { target: { value: "إعادة توزيع العمل" } });
     fireEvent.click(within(dialog).getByLabelText(/أؤكد مراجعة الملخص/));
-    fireEvent.click(within(dialog).getByRole("button", { name: "إرسال الطلب للاعتماد" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "إرسال طلب الإحالة" }));
 
     await waitFor(() =>
-      expect(screen.getByText(/تم إرسال طلب إعادة تعيين 2 عينة إلى jalgahamdi/)).toBeInTheDocument()
+      expect(screen.getByText(/تم إرسال طلب إحالة 2 عينة إلى jalgahamdi/)).toBeInTheDocument()
     );
 
     // appendWorkspaceAction is fire-and-forget, so poll the log rather than
     // assuming it has landed by the time the status message renders.
     await waitFor(async () => {
       const actions = await readWorkspaceActions(root);
-      const entry = actions.find((a) => a.action === "distribution-bulk-reassign-requested");
+      const entry = actions.find((a) => a.action === "referral-requested");
       expect(entry).toBeDefined();
       expect(entry!.actor).toBe("sup-1");
       expect(entry!.target).toBe("jalgahamdi");
@@ -1102,15 +1102,15 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
     // The dialog must say the click submits a request, not that it moves samples.
     await waitFor(() =>
       expect(
-        within(dialog).getByText(/سيتم إرسال طلب إعادة تعيين 2 عينة إلى jalgahamdi — بانتظار الاعتماد/)
+        within(dialog).getByText(/سيتم إرسال طلب إحالة 2 عينة إلى jalgahamdi — بانتظار الاعتماد/)
       ).toBeInTheDocument()
     );
-    fireEvent.change(within(dialog).getByLabelText(/سبب إعادة التعيين/), { target: { value: "إعادة توزيع العمل" } });
+    fireEvent.change(within(dialog).getByLabelText(/سبب الإحالة/), { target: { value: "إعادة توزيع العمل" } });
     fireEvent.click(within(dialog).getByLabelText(/أؤكد مراجعة الملخص/));
-    fireEvent.click(within(dialog).getByRole("button", { name: "إرسال الطلب للاعتماد" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "إرسال طلب الإحالة" }));
 
     await waitFor(() =>
-      expect(screen.getByText(/بانتظار الاعتماد في صفحة اعتماد الطلبات/)).toBeInTheDocument()
+      expect(screen.getByText(/بانتظار موافقة المشرف/)).toBeInTheDocument()
     );
 
     // Nothing moved: the samples still belong to emp-a until someone approves.
@@ -1126,7 +1126,7 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
 
     await waitFor(async () => {
       const actions = await readWorkspaceActions(root);
-      expect(actions.some((a) => a.action === "distribution-bulk-reassign-requested")).toBe(true);
+      expect(actions.some((a) => a.action === "referral-requested")).toBe(true);
     });
   });
 });

@@ -1,10 +1,10 @@
-import { describe, expect, it, test } from "vitest";
+import { expect, test } from "vitest";
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import type { EmployeeStageAllocation } from "../population/populationConfig";
 import type { ManagedLoginUser } from "../../auth/userManagement";
 import type { PasswordHashRecord } from "../../auth/passwordCrypto";
 import type { DistributionEntry } from "./distributionTypes";
-import { calculateBulkAssignment, planBulkReassignment } from "./bulkAssignment";
+import { calculateBulkAssignment } from "./bulkAssignment";
 import { EVENT_SCHEMA_VERSION } from "./distributionLog";
 
 function makeUser(
@@ -283,44 +283,4 @@ test("calculateBulkAssignment stamps every generated event with the current even
   for (const event of result.events) {
     expect(event.eventSchemaVersion).toBe(EVENT_SCHEMA_VERSION);
   }
-});
-
-// ── planBulkReassignment ────────────────────────────────────────────────────
-// Oversight-role bulk reassignment: an already-distributed selection (manual
-// or "everything matching the current filter") moved to a single employee in
-// one action, through the same append-only distribution event log.
-
-describe("planBulkReassignment", () => {
-  it("categorizes every row: eligible, or skipped with the specific reason", () => {
-    const entries: DistributionEntry[] = [
-      makeEntry("img-pending", "pending", "emp1"),
-      makeEntry("img-completed", "completed", "emp1"),
-      makeEntry("img-replaced", "replaced", "emp1"),
-      makeEntry("img-already-target", "pending", "emp2"),
-    ];
-
-    const plan = planBulkReassignment(
-      entries,
-      ["img-pending", "img-completed", "img-replaced", "img-already-target", "img-missing"],
-      "emp2"
-    );
-
-    expect(plan.eligible).toEqual([{ xrayImageId: "img-pending", assignedTo: "emp1" }]);
-    expect(plan.skipped).toEqual(
-      expect.arrayContaining([
-        { xrayImageId: "img-completed", reason: "terminal-completed" },
-        { xrayImageId: "img-replaced", reason: "terminal-replaced" },
-        { xrayImageId: "img-already-target", reason: "already-assigned-to-target" },
-        { xrayImageId: "img-missing", reason: "not-found" },
-      ])
-    );
-    expect(plan.skipped).toHaveLength(4);
-  });
-
-  it("treats a replacement-requested row as still eligible for reassignment", () => {
-    const entries: DistributionEntry[] = [makeEntry("img-1", "replacement-requested", "emp1")];
-    const plan = planBulkReassignment(entries, ["img-1"], "emp2");
-    expect(plan.eligible).toEqual([{ xrayImageId: "img-1", assignedTo: "emp1" }]);
-    expect(plan.skipped).toHaveLength(0);
-  });
 });

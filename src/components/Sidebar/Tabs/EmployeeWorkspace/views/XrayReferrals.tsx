@@ -27,7 +27,7 @@ import type { DistributionEntry } from "../../../../../data/distribution/distrib
 import {
   executeReplacement,
 } from "../../../../../data/distribution/replacement";
-import { submitBulkReassignmentRequests } from "../../../../../data/referral/bulkReassignRequest";
+import { submitReassignmentRequests } from "../../../../../data/referral/submitReassignment";
 import { appendWorkspaceAction } from "../../../../../data/audit/actionLog";
 import { getReplacementCandidatesIndexed } from "../../../../../data/distribution/replacementCandidateLookup";
 import { loadMonthPopulationFinal } from "../../../../../data/population/populationStorage";
@@ -85,7 +85,7 @@ import {
   QueueToolbar,
   SelectionActionBar,
   BulkReassignSelectionBar,
-  BulkReassignModal,
+  ReassignModal,
   SampleDetailPanel,
   StatusBadge,
   ReferralStatsStrip,
@@ -128,8 +128,8 @@ export type ReplacementDialogState = {
   recommended: ReplacementIndexRow[];
   all: ReplacementIndexRow[];
 } | null;
-// Exported so subComponents.tsx's BulkReassignModal can `import type` it back.
-export type BulkReassignModalState = {
+// Exported so subComponents.tsx's ReassignModal can `import type` it back.
+export type ReassignModalState = {
   /** IDs to reassign. The three entry points differ ONLY in how this list is
    * built — one sample from the inspection panel, a manual multi-select, or
    * every row currently matching the filter/search (all pages, not just the
@@ -139,7 +139,7 @@ export type BulkReassignModalState = {
   source: "single" | "selected" | "filtered";
   /** Idempotency key, stable across retries of the same confirm click so a
    * partial-failure retry never creates a second copy of a request already
-   * durably written for this batch (see submitBulkReassignmentRequests). */
+   * durably written for this batch (see submitReassignmentRequests). */
   sourceRequestId: string;
 } | null;
 
@@ -218,7 +218,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   const canSubmitReferrals = canMutate("submit-referrals");
   // Oversight-only: select rows (manually or via the active filter) and request
   // their reassignment to another employee in one action, through the same
-  // approval flow as إحالة and استبدال (see submitBulkReassignmentRequests).
+  // approval flow as إحالة and استبدال (see submitReassignmentRequests).
   const canBulkReassignReferrals = canMutate("bulk-reassign-referrals");
   const canSubmitAnswers = canMutate("submit-answers");
   const canReopenAnswer = canMutate("ew.reopenAnswer");
@@ -253,9 +253,9 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   const [myQuota, setMyQuota]         = useState<PersonalQuota>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [filteredTableEntries, setFilteredTableEntries] = useState<DistributionEntry[]>([]);
-  const [bulkReassignModal, setBulkReassignModal] = useState<BulkReassignModalState>(null);
-  const [bulkReassignBusy, setBulkReassignBusy] = useState(false);
-  const [bulkReassignError, setBulkReassignError] = useState<string | null>(null);
+  const [reassignModal, setReassignModal] = useState<ReassignModalState>(null);
+  const [reassignBusy, setReassignBusy] = useState(false);
+  const [reassignError, setReassignError] = useState<string | null>(null);
 
   // Function declaration (hoisted) — safe to reference from the mount effect
   // below even though it appears earlier in source, with no TDZ/identity
@@ -872,7 +872,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
 
   // ── Reassignment handler (shared by all three sample-choosing methods) ─────
 
-  function openBulkReassignModal(
+  function openReassignModal(
     xrayImageIds: string[],
     source: "single" | "selected" | "filtered"
   ): void {
@@ -885,13 +885,13 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       setStatusMsg({
         type: "error",
         text: source === "filtered"
-          ? "لا توجد عينات مطابقة للتصفية/البحث الحالي لإعادة تعيينها."
-          : "لا توجد عينات محددة لإعادة تعيينها.",
+          ? "لا توجد عينات مطابقة للتصفية/البحث الحالي لإحالتها."
+          : "لا توجد عينات محددة لإحالتها.",
       });
       return;
     }
-    setBulkReassignError(null);
-    setBulkReassignModal({
+    setReassignError(null);
+    setReassignModal({
       xrayImageIds,
       source,
       // Only ever reached from a click (the two bar buttons and the inspection
@@ -906,7 +906,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     });
   }
 
-  async function handleBulkReassignConfirm(toEmployee: string, reason: string): Promise<void> {
+  async function handleReassignConfirm(toEmployee: string, reason: string): Promise<void> {
     // Handler-boundary check — mirrors every other mutating handler in this
     // file (render-boundary gating alone is not enough: the modal that calls
     // this could in principle be reopened from stale state). Either capability
@@ -914,12 +914,12 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     // `submit-referrals`, the oversight bar `bulk-reassign-referrals`), and
     // both land here.
     if (!canSubmitReferrals && !canBulkReassignReferrals) {
-      setBulkReassignError("لا تملك صلاحية إعادة تعيين العينات، أو أن مساحة العمل للقراءة فقط.");
+      setReassignError("لا تملك صلاحية إحالة العينات، أو أن مساحة العمل للقراءة فقط.");
       return;
     }
-    if (!bulkReassignModal || !selMonth) return;
-    setBulkReassignBusy(true);
-    setBulkReassignError(null);
+    if (!reassignModal || !selMonth) return;
+    setReassignBusy(true);
+    setReassignError(null);
     try {
       // ALWAYS a request, never a direct write — identical to إحالة (referral)
       // and استبدال (replacement). The submitter's own permissions decide
@@ -934,7 +934,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       // by construction. The old per-row referral path rejected such a
       // selection outright, which is a worse answer than splitting it.
       const byFolder = new Map<string, string[]>();
-      for (const id of bulkReassignModal.xrayImageIds) {
+      for (const id of reassignModal.xrayImageIds) {
         const folder = folderForRow(id);
         const bucket = byFolder.get(folder);
         if (bucket) bucket.push(id);
@@ -944,7 +944,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       const createdRequests: { fromEmployee: string; xrayImageIds: string[] }[] = [];
       let skippedTotal = 0;
       for (const folder of [...byFolder.keys()].sort()) {
-        const requested = await submitBulkReassignmentRequests({
+        const requested = await submitReassignmentRequests({
           directoryHandle,
           monthFolderName: folder,
           xrayImageIds: byFolder.get(folder) ?? [],
@@ -953,12 +953,12 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           reason,
           // Namespaced per folder so ids stay unique across stores while
           // remaining stable across retries of this same confirm click.
-          sourceRequestId: `${bulkReassignModal.sourceRequestId}::${folder}`,
+          sourceRequestId: `${reassignModal.sourceRequestId}::${folder}`,
         });
         if (!requested.ok) {
           // The modal keeps its sourceRequestId, and already-written requests
           // de-duplicate by id, so re-clicking "confirm" is always safe.
-          setBulkReassignError(requested.error ?? "حدث خطأ غير متوقع أثناء إرسال طلب إعادة التعيين.");
+          setReassignError(requested.error ?? "حدث خطأ غير متوقع أثناء إرسال طلب إعادة التعيين.");
           return;
         }
         createdRequests.push(...requested.createdRequests);
@@ -967,23 +967,23 @@ export default function XrayReferrals({ directoryHandle }: Props) {
 
       const requestedTotal = createdRequests.reduce((sum, g) => sum + g.xrayImageIds.length, 0);
       if (requestedTotal === 0) {
-        setBulkReassignError("لا توجد عينات مؤهلة لإعادة التعيين ضمن هذا التحديد.");
+        setReassignError("لا توجد عينات مؤهلة للإحالة ضمن هذا التحديد.");
         return;
       }
       void appendWorkspaceAction(directoryHandle, {
         actor: username,
         actorRole: role,
-        action: "distribution-bulk-reassign-requested",
+        action: "referral-requested",
         monthFolderName: selMonth,
         target: toEmployee,
         details: {
           samples: requestedTotal,
           requests: createdRequests.length,
           skipped: skippedTotal,
-          source: bulkReassignModal.source,
+          source: reassignModal.source,
         },
       });
-      setBulkReassignModal(null);
+      setReassignModal(null);
       clearSelection();
       const requestCountText = createdRequests.length > 1
         ? ` (${createdRequests.length} طلبات — طلب لكل موظف مصدر)`
@@ -991,20 +991,20 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       setStatusMsg({
         type: "ok",
         text: skippedTotal > 0
-          ? `تم إرسال طلب إعادة تعيين ${requestedTotal} عينة إلى ${toEmployee}${requestCountText} — بانتظار الاعتماد في صفحة اعتماد الطلبات. تم تخطي ${skippedTotal} عينة.`
-          : `تم إرسال طلب إعادة تعيين ${requestedTotal} عينة إلى ${toEmployee}${requestCountText} — بانتظار الاعتماد في صفحة اعتماد الطلبات.`,
+          ? `تم إرسال طلب إحالة ${requestedTotal} عينة إلى ${toEmployee}${requestCountText} — بانتظار موافقة المشرف. تم تخطي ${skippedTotal} عينة.`
+          : `تم إرسال طلب إحالة ${requestedTotal} عينة إلى ${toEmployee}${requestCountText} — بانتظار موافقة المشرف.`,
       });
       // Silent — follows an already-successful write, not a month/user change;
       // must refresh the queue in place rather than flashing the loading state.
       await loadData({ silent: true });
     } catch (error) {
-      setBulkReassignError(
+      setReassignError(
         error instanceof MonthClosedError
           ? getLabels().msg_month_closed_write_blocked
           : error instanceof Error ? error.message : "خطأ غير معروف"
       );
     } finally {
-      setBulkReassignBusy(false);
+      setReassignBusy(false);
     }
   }
 
@@ -1152,7 +1152,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                     setStatusMsg({ type: "error", text: "لا توجد عينات محددة يدوياً لإحالتها." });
                     return;
                   }
-                  openBulkReassignModal([...selectedIds], "selected");
+                  openReassignModal([...selectedIds], "selected");
                 }}
                 onSelectVisible={() => selectAll(selectableVisibleIds)}
                 onClear={clearSelection}
@@ -1162,8 +1162,8 @@ export default function XrayReferrals({ directoryHandle }: Props) {
               <BulkReassignSelectionBar
                 selectedCount={selectedIds.size}
                 filteredCount={selectableVisibleIds.length}
-                onReassignSelected={() => openBulkReassignModal([...selectedIds], "selected")}
-                onReassignFiltered={() => openBulkReassignModal(selectableVisibleIds, "filtered")}
+                onReassignSelected={() => openReassignModal([...selectedIds], "selected")}
+                onReassignFiltered={() => openReassignModal(selectableVisibleIds, "filtered")}
                 onSelectAllFiltered={() => selectAll(selectableVisibleIds)}
                 onClear={clearSelection}
               />
@@ -1251,7 +1251,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                   }
                   onReassign={
                     canSubmitReferrals && selEntry.assignedTo === username && selEntry.status === "pending"
-                      ? (entry) => openBulkReassignModal([entry.xrayImageId], "single")
+                      ? (entry) => openReassignModal([entry.xrayImageId], "single")
                       : undefined
                   }
                   onReopen={
@@ -1292,22 +1292,22 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         />
       ) : null}
 
-      {bulkReassignModal ? (
-        <BulkReassignModal
-          state={bulkReassignModal}
+      {reassignModal ? (
+        <ReassignModal
+          state={reassignModal}
           entries={entries}
           visibleColumns={visiblePreviewColumns}
           dateFmt={effectiveColConfig.dateFmt}
           answersMap={answersMap}
           currentUser={username}
-          busy={bulkReassignBusy}
-          error={bulkReassignError}
+          busy={reassignBusy}
+          error={reassignError}
           onClose={() => {
-            if (bulkReassignBusy) return;
-            setBulkReassignModal(null);
-            setBulkReassignError(null);
+            if (reassignBusy) return;
+            setReassignModal(null);
+            setReassignError(null);
           }}
-          onConfirm={(toEmployee, reason) => { void handleBulkReassignConfirm(toEmployee, reason); }}
+          onConfirm={(toEmployee, reason) => { void handleReassignConfirm(toEmployee, reason); }}
         />
       ) : null}
     </section>

@@ -9,7 +9,7 @@ import { buildAssignEvent, buildCompletedEvent } from "../distribution/distribut
 import { invalidateMonthLockCache } from "../population/monthLock";
 import { loadReferralLog } from "./referralStorage";
 import { approveReferral } from "./approveReferral";
-import { bulkReassignRequestId, submitBulkReassignmentRequests } from "./bulkReassignRequest";
+import { reassignRequestId, submitReassignmentRequests } from "./submitReassignment";
 
 const MONTH = "5-May-2026";
 
@@ -73,7 +73,7 @@ async function seed(ids: Array<[string, string]>): Promise<DirectoryHandleLike> 
   return root;
 }
 
-describe("submitBulkReassignmentRequests", () => {
+describe("submitReassignmentRequests", () => {
   beforeEach(() => {
     invalidateMonthLockCache();
   });
@@ -81,7 +81,7 @@ describe("submitBulkReassignmentRequests", () => {
   it("creates pending referral requests instead of moving samples, one per source employee", async () => {
     const root = await seed([["A1", "emp1"], ["A2", "emp1"], ["A3", "emp2"]]);
 
-    const result = await submitBulkReassignmentRequests({
+    const result = await submitReassignmentRequests({
       directoryHandle: root,
       monthFolderName: MONTH,
       xrayImageIds: ["A1", "A2", "A3"],
@@ -93,8 +93,8 @@ describe("submitBulkReassignmentRequests", () => {
 
     expect(result.ok).toBe(true);
     expect(result.createdRequests).toEqual([
-      { requestId: bulkReassignRequestId("batch-1", "emp1"), fromEmployee: "emp1", xrayImageIds: ["A1", "A2"] },
-      { requestId: bulkReassignRequestId("batch-1", "emp2"), fromEmployee: "emp2", xrayImageIds: ["A3"] },
+      { requestId: reassignRequestId("batch-1", "emp1"), fromEmployee: "emp1", xrayImageIds: ["A1", "A2"] },
+      { requestId: reassignRequestId("batch-1", "emp2"), fromEmployee: "emp2", xrayImageIds: ["A3"] },
     ]);
 
     // Nothing is applied until a supervisor approves.
@@ -115,7 +115,7 @@ describe("submitBulkReassignmentRequests", () => {
     ]);
     if (!completed.ok) throw new Error(completed.error);
 
-    const result = await submitBulkReassignmentRequests({
+    const result = await submitReassignmentRequests({
       directoryHandle: root,
       monthFolderName: MONTH,
       xrayImageIds: ["A1", "A2", "nope"],
@@ -146,8 +146,8 @@ describe("submitBulkReassignmentRequests", () => {
       sourceRequestId: "batch-3",
     };
 
-    await submitBulkReassignmentRequests(params);
-    const second = await submitBulkReassignmentRequests(params);
+    await submitReassignmentRequests(params);
+    const second = await submitReassignmentRequests(params);
 
     expect(second.ok).toBe(true);
     const referrals = await loadReferralLog(root, MONTH);
@@ -157,7 +157,7 @@ describe("submitBulkReassignmentRequests", () => {
   it("produces requests the normal approval path can approve, which then applies the move", async () => {
     const root = await seed([["A1", "emp1"], ["A2", "emp1"]]);
 
-    const submitted = await submitBulkReassignmentRequests({
+    const submitted = await submitReassignmentRequests({
       directoryHandle: root,
       monthFolderName: MONTH,
       xrayImageIds: ["A1", "A2"],
