@@ -31,7 +31,9 @@ import { upsertItemAnswer } from "../../../../../data/answers/answerStorage";
 import {
   appendReferralRequest,
   appendReplacementRequest,
+  loadReferralLog,
 } from "../../../../../data/referral/referralStorage";
+import { readWorkspaceActions } from "../../../../../data/audit/actionLog";
 import type { ItemAnswer } from "../../../../../data/answers/answerTypes";
 import type { PreparedPopulationRow } from "../../../../../data/population/populationTypes";
 import { clearErrors, getRecentErrors } from "../../../../../data/storage/errorLogger";
@@ -739,6 +741,19 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
     return { ...base, featurePermissions };
   }
 
+  /** Can bulk-reassign but cannot approve referrals — the case that must be
+   *  routed through the approval queue rather than applied directly. */
+  function bulkReassignerWithoutApproval() {
+    const base = createEmptyUserManagementState();
+    const featurePermissions: FeaturePermission[] = [
+      ...base.featurePermissions.filter(
+        (f) => !(f.role === "supervisor" && f.featureId === "approve-referrals")
+      ),
+      { role: "supervisor", featureId: "approve-referrals", enabled: false },
+    ];
+    return { ...base, featurePermissions };
+  }
+
   it("shows per-row checkboxes and the bulk-reassign bar for an oversight role with the feature enabled (default)", async () => {
     writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
     writeUserManagementState(createEmptyUserManagementState(), false);
@@ -970,6 +985,88 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
 
     const dialog = await waitFor(() => screen.getByRole("dialog"), { timeout: 5000 });
     expect(within(dialog).getByText(/كل العينات المطابقة للتصفية الحالية \(2\)/)).toBeInTheDocument();
+  });
+
+  it("records a direct bulk reassignment in the workspace action log (governance trail for a move that bypasses the approval queue)", async () => {
+    writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root");
+    await seedTwoAssignedSamples(root, "sup-1");
+
+    render(<XrayReferrals directoryHandle={root} />);
+    await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
+
+    fireEvent.click(screen.getByRole("button", { name: /إعادة تعيين الكل المطابق للتصفية/ }));
+    const dialog = await waitFor(() => screen.getByRole("dialog"), { timeout: 5000 });
+    fireEvent.change(within(dialog).getByLabelText(/الموظف المستلم/), { target: { value: "jalgahamdi" } });
+    await waitFor(() =>
+      expect(within(dialog).getByText(/سيتم إعادة تعيين 2 عينة إلى jalgahamdi/)).toBeInTheDocument()
+    );
+    fireEvent.click(within(dialog).getByLabelText(/أؤكد مراجعة الملخص/));
+    fireEvent.click(within(dialog).getByRole("button", { name: "تنفيذ إعادة التعيين" }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/تم إعادة تعيين 2 عينة إلى jalgahamdi/)).toBeInTheDocument()
+    );
+
+    // appendWorkspaceAction is fire-and-forget, so poll the log rather than
+    // assuming it has landed by the time the status message renders.
+    await waitFor(async () => {
+      const actions = await readWorkspaceActions(root);
+      const entry = actions.find((a) => a.action === "distribution-bulk-reassigned");
+      expect(entry).toBeDefined();
+      expect(entry!.actor).toBe("sup-1");
+      expect(entry!.target).toBe("jalgahamdi");
+      expect(entry!.details?.samples).toBe(2);
+    });
+  });
+
+  it("routes the bulk reassignment for supervisor approval — instead of applying it — when the actor cannot approve referrals", async () => {
+    writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(bulkReassignerWithoutApproval(), false);
+
+    const root = createMemoryDirectory("root");
+    await seedTwoAssignedSamples(root, "emp-a");
+
+    render(<XrayReferrals directoryHandle={root} />);
+    // The samples belong to another employee, so switch the oversight view off
+    // "my samples only" before they are on screen at all.
+    fireEvent.click(await waitFor(() => screen.getByRole("button", { name: "الكل" })));
+    await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
+
+    fireEvent.click(screen.getByRole("button", { name: /إعادة تعيين الكل المطابق للتصفية/ }));
+    const dialog = await waitFor(() => screen.getByRole("dialog"), { timeout: 5000 });
+    fireEvent.change(within(dialog).getByLabelText(/الموظف المستلم/), { target: { value: "jalgahamdi" } });
+
+    // The dialog must say which of the two outcomes the click produces.
+    await waitFor(() =>
+      expect(
+        within(dialog).getByText(/سيتم إرسال طلب إعادة تعيين 2 عينة إلى jalgahamdi — بانتظار موافقة المشرف/)
+      ).toBeInTheDocument()
+    );
+    fireEvent.click(within(dialog).getByLabelText(/أؤكد مراجعة الملخص/));
+    fireEvent.click(within(dialog).getByRole("button", { name: "إرسال الطلب للمشرف" }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/بانتظار موافقة المشرف/)).toBeInTheDocument()
+    );
+
+    // Nothing moved: the samples still belong to emp-a until someone approves.
+    const log = await loadDistributionLog(root, MONTH);
+    expect(log.events.filter((e) => e.eventType === "reassigned")).toHaveLength(0);
+
+    const referrals = await loadReferralLog(root, MONTH);
+    expect(referrals.requests).toHaveLength(1);
+    expect(referrals.requests[0]!.status).toBe("pending");
+    expect(referrals.requests[0]!.fromEmployee).toBe("emp-a");
+    expect(referrals.requests[0]!.toEmployee).toBe("jalgahamdi");
+    expect(referrals.requests[0]!.xrayImageIds.sort()).toEqual(["IMG-1", "IMG-2"]);
+
+    await waitFor(async () => {
+      const actions = await readWorkspaceActions(root);
+      expect(actions.some((a) => a.action === "distribution-bulk-reassign-requested")).toBe(true);
+    });
   });
 });
 

@@ -28,6 +28,8 @@ import {
   executeReplacement,
 } from "../../../../../data/distribution/replacement";
 import { executeBulkReassignment } from "../../../../../data/distribution/bulkAssignment";
+import { submitBulkReassignmentRequests } from "../../../../../data/referral/bulkReassignRequest";
+import { appendWorkspaceAction } from "../../../../../data/audit/actionLog";
 import { getReplacementCandidatesIndexed } from "../../../../../data/distribution/replacementCandidateLookup";
 import { loadMonthPopulationFinal } from "../../../../../data/population/populationStorage";
 import type { ReplacementIndexRow } from "../../../../../data/population/replacementIndexTypes";
@@ -225,6 +227,12 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   // them to another employee in one action, going through the same distribution
   // event log as every other mutation (see executeBulkReassignment).
   const canBulkReassignReferrals = canMutate("bulk-reassign-referrals");
+  // Whether this user may enact the move themselves or must route it for review.
+  // Holding `approve-referrals` IS the authority the approval step asks for, so
+  // requiring those users to approve their own request would be a no-op round
+  // trip (same rule as `employee-reopen-instant` for self-service reopen).
+  // Everyone else's bulk reassignment becomes pending referral requests.
+  const canApproveReferrals = canMutate("approve-referrals");
   const canSubmitAnswers = canMutate("submit-answers");
   const canReopenAnswer = canMutate("ew.reopenAnswer");
   // Batch B: when enabled for this role, the employee's self-service reopen request
@@ -975,6 +983,53 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     setBulkReassignBusy(true);
     setBulkReassignError(null);
     try {
+      if (!canApproveReferrals) {
+        // Route for oversight instead of applying — see the capability comment
+        // above and submitBulkReassignmentRequests' module docblock.
+        const requested = await submitBulkReassignmentRequests({
+          directoryHandle,
+          monthFolderName: selMonth,
+          xrayImageIds: bulkReassignModal.xrayImageIds,
+          reassignedTo: toEmployee,
+          requestedBy: username,
+          reason: reason || undefined,
+          sourceRequestId: bulkReassignModal.sourceRequestId,
+        });
+        if (!requested.ok) {
+          // Same retry contract as the direct path: the modal keeps its
+          // sourceRequestId, and already-written requests de-duplicate by id.
+          setBulkReassignError(requested.error ?? "حدث خطأ غير متوقع أثناء إرسال طلب إعادة التعيين.");
+          return;
+        }
+        const requestedTotal = requested.createdRequests.reduce((sum, g) => sum + g.xrayImageIds.length, 0);
+        if (requestedTotal === 0) {
+          setBulkReassignError("لا توجد عينات مؤهلة لإعادة التعيين ضمن هذا التحديد.");
+          return;
+        }
+        void appendWorkspaceAction(directoryHandle, {
+          actor: username,
+          actorRole: role,
+          action: "distribution-bulk-reassign-requested",
+          monthFolderName: selMonth,
+          target: toEmployee,
+          details: {
+            samples: requestedTotal,
+            requests: requested.createdRequests.length,
+            skipped: requested.skipped.length,
+            source: bulkReassignModal.source,
+          },
+        });
+        setBulkReassignModal(null);
+        clearSelection();
+        setStatusMsg({
+          type: "ok",
+          text: requested.skipped.length > 0
+            ? `تم إرسال طلب إعادة تعيين ${requestedTotal} عينة إلى ${toEmployee} (${requested.createdRequests.length} طلب) — بانتظار موافقة المشرف. تم تخطي ${requested.skipped.length} عينة.`
+            : `تم إرسال طلب إعادة تعيين ${requestedTotal} عينة إلى ${toEmployee} (${requested.createdRequests.length} طلب) — بانتظار موافقة المشرف.`,
+        });
+        await loadData({ silent: true });
+        return;
+      }
       const result = await executeBulkReassignment({
         directoryHandle,
         monthFolderName: selMonth,
@@ -994,6 +1049,25 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       }
       const appliedTotal = result.appliedIds.length + result.alreadyAppliedIds.length;
       const skippedTotal = result.skipped.length;
+      // Governance record for a move that bypasses the approval queue — mirrors
+      // the Population tab's `distribution-bulk-assigned` entry. Best-effort by
+      // contract (appendWorkspaceAction never throws), so it never blocks or
+      // fails an already-durable distribution write.
+      if (result.appliedIds.length > 0) {
+        void appendWorkspaceAction(directoryHandle, {
+          actor: username,
+          actorRole: role,
+          action: "distribution-bulk-reassigned",
+          monthFolderName: selMonth,
+          target: toEmployee,
+          details: {
+            samples: result.appliedIds.length,
+            skipped: skippedTotal,
+            source: bulkReassignModal.source,
+            reason: reason || null,
+          },
+        });
+      }
       setBulkReassignModal(null);
       clearSelection();
       setStatusMsg({
@@ -1324,6 +1398,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           currentUser={username}
           busy={bulkReassignBusy}
           error={bulkReassignError}
+          requiresApproval={!canApproveReferrals}
           onClose={() => {
             if (bulkReassignBusy) return;
             setBulkReassignModal(null);

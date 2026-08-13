@@ -305,6 +305,7 @@ export function BulkReassignModal({
   currentUser,
   busy,
   error,
+  requiresApproval = false,
   onClose,
   onConfirm,
 }: {
@@ -313,6 +314,11 @@ export function BulkReassignModal({
   currentUser: string;
   busy: boolean;
   error: string | null;
+  /** True when the actor lacks `approve-referrals`, so confirming creates
+   *  pending referral requests instead of moving the samples immediately. The
+   *  wording must say which of the two will happen BEFORE the click — the two
+   *  outcomes are not interchangeable to the person confirming. */
+  requiresApproval?: boolean;
   onClose: () => void;
   onConfirm: (toEmployee: string, reason: string) => void;
 }) {
@@ -404,7 +410,14 @@ export function BulkReassignModal({
           <div className="ew-replace-reason" style={{ paddingTop: 4 }}>
             {/* One plain-text node (no nested <strong>) so the exact wording is
                reliably matchable in tests without a custom textContent matcher. */}
-            <p>{`سيتم إعادة تعيين ${eligibleCount.toLocaleString("ar-SA-u-nu-latn")} عينة إلى ${toEmployee}.`}</p>
+            <p>{requiresApproval
+              ? `سيتم إرسال طلب إعادة تعيين ${eligibleCount.toLocaleString("ar-SA-u-nu-latn")} عينة إلى ${toEmployee} — بانتظار موافقة المشرف.`
+              : `سيتم إعادة تعيين ${eligibleCount.toLocaleString("ar-SA-u-nu-latn")} عينة إلى ${toEmployee}.`}</p>
+            {requiresApproval && fromBreakdown.length > 1 && (
+              <p style={{ fontSize: 12, opacity: 0.8, margin: "4px 0 0" }}>
+                {`سيُنشأ طلب منفصل لكل موظف مصدر (${fromBreakdown.length.toLocaleString("ar-SA-u-nu-latn")} طلبات) ليعتمدها المشرف كلٌّ على حدة.`}
+              </p>
+            )}
             {fromBreakdown.length > 0 && (
               <ul className="ew-referral-ids-list" style={{ listStyle: "none", padding: 0, margin: "6px 0" }}>
                 {fromBreakdown.map(([from, count]) => (
@@ -439,7 +452,9 @@ export function BulkReassignModal({
                 onChange={(e) => setConfirmed(e.target.checked)}
                 disabled={eligibleCount === 0}
               />
-              أؤكد مراجعة الملخص أعلاه ورغبتي بإعادة التعيين
+              {requiresApproval
+                ? "أؤكد مراجعة الملخص أعلاه ورغبتي بإرسال الطلب للمشرف"
+                : "أؤكد مراجعة الملخص أعلاه ورغبتي بإعادة التعيين"}
             </label>
           </div>
         )}
@@ -458,7 +473,11 @@ export function BulkReassignModal({
             disabled={!canSubmit}
             onClick={handleSubmit}
           >
-            {busy ? "جاري التنفيذ..." : error ? "إعادة المحاولة" : "تنفيذ إعادة التعيين"}
+            {busy
+              ? "جاري التنفيذ..."
+              : error
+                ? "إعادة المحاولة"
+                : requiresApproval ? "إرسال الطلب للمشرف" : "تنفيذ إعادة التعيين"}
           </button>
         </div>
       </div>
