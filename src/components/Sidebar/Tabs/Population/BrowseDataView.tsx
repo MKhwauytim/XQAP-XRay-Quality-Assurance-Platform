@@ -781,6 +781,33 @@ export default function BrowseDataView({
     ) => Promise<PopulationQueryResult<Record<string, unknown>> | null> | PopulationQueryResult<Record<string, unknown>>
   ): Promise<{ rows: BrowseRow[]; complete: boolean }> {
     const collected: BrowseRow[] = [];
+
+    // Phase 1.6: when the caller wants *everything* (the XLSX export passes
+    // maxPages = Infinity), ask for it in one query instead of walking pages.
+    //
+    // runPopulationQuery is stateless — each call re-runs search → filter →
+    // sort → slice over the whole dataset — so page-walking an unbounded
+    // collection re-sorted the entire month once per 100 rows. On a 400k-row
+    // month that is ~4,000 full sorts and ~1.6e9 row visits to produce one file.
+    // The bounded filter-preview path (FILTER_PREVIEW_MAX_PAGES) deliberately
+    // keeps paging: it wants an early exit after a few pages, not the full set.
+    if (maxPages === Infinity) {
+      // MAX_SAFE_INTEGER, not Infinity: `pageSlice` computes
+      // `(page - 1) * pageSize`, and `0 * Infinity` is NaN — which `Array.slice`
+      // coerces to 0 for both bounds and quietly returns an EMPTY array. A
+      // finite sentinel takes the same "one page holds everything" branch
+      // without that trap.
+      const result = await queryOne({
+        ...params,
+        page: 1,
+        pageSize: Number.MAX_SAFE_INTEGER,
+      });
+      if (!result) {
+        return { rows: collected, complete: false };
+      }
+      return { rows: result.pageRows as BrowseRow[], complete: true };
+    }
+
     let pageNum = 1;
     // Uninitialized: the do-while body always runs at least once and always
     // assigns this before the condition (which reads it) is ever checked, so

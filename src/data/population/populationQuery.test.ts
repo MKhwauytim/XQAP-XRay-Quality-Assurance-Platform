@@ -249,3 +249,125 @@ describe("runPopulationQuery — empty rows edge case", () => {
     expect(result.totalPages).toBe(1);
   });
 });
+
+// --- Golden master (Slice 0) -----------------------------------------------
+// runPopulationQuery feeds the Browse XLSX export, which is deterministic by
+// contract: same rows + same params must yield the same rows in the same order,
+// tie-breaks included. This pins the full ordered output for a fixed input so
+// any semantic drift shows up as a diff rather than as a silently different
+// export. Recorded BEFORE the pageSize change, and unchanged by it.
+
+describe("runPopulationQuery — golden master", () => {
+  // Deliberately includes duplicate sort keys (to exercise the index
+  // tiebreaker), an empty value (to exercise the "—" display), and a numeric
+  // column stored as strings (to exercise the numeric-vs-locale comparison).
+  const goldenRows: Row[] = [
+    { id: "r1", port: "بري", stage: "2", weight: "10" },
+    { id: "r2", port: "جوي", stage: "1", weight: "9" },
+    { id: "r3", port: "بري", stage: "2", weight: "100" },
+    { id: "r4", port: "بحري", stage: "1", weight: "" },
+    { id: "r5", port: "بري", stage: "1", weight: "9" },
+  ];
+
+  it("pins unsorted, unfiltered order", () => {
+    const result = runPopulationQuery(goldenRows, baseParams(), displayValueGetter);
+    expect(result.pageRows.map((r) => r.id)).toEqual(["r1", "r2", "r3", "r4", "r5"]);
+    expect(result.totalRows).toBe(5);
+  });
+
+  it("pins numeric-aware ascending sort with a stable tiebreak", () => {
+    const result = runPopulationQuery(
+      goldenRows,
+      baseParams({ sort: { column: "weight", direction: "asc" } }),
+      displayValueGetter
+    );
+    // "" renders as "—", which is non-numeric, so it compares by locale against
+    // the numeric strings and lands first. Among the numerics 9 < 10 < 100, and
+    // the two 9s (r2, r5) keep their original relative order.
+    expect(result.pageRows.map((r) => r.id)).toEqual(["r4", "r2", "r5", "r1", "r3"]);
+  });
+
+  it("pins descending sort (tiebreak stays ascending by original index)", () => {
+    const result = runPopulationQuery(
+      goldenRows,
+      baseParams({ sort: { column: "weight", direction: "desc" } }),
+      displayValueGetter
+    );
+    // Mirror of the ascending order EXCEPT the equal pair: r2 before r5 in both
+    // directions, because the index tiebreaker is applied after the direction
+    // flip rather than being reversed with it.
+    expect(result.pageRows.map((r) => r.id)).toEqual(["r3", "r1", "r2", "r5", "r4"]);
+  });
+
+  it("pins search + column filter + sort composed together", () => {
+    const result = runPopulationQuery(
+      goldenRows,
+      baseParams({
+        columnFilters: { port: ["بري"] },
+        sort: { column: "weight", direction: "asc" },
+      }),
+      displayValueGetter
+    );
+    expect(result.pageRows.map((r) => r.id)).toEqual(["r5", "r1", "r3"]);
+    expect(result.totalRows).toBe(3);
+  });
+});
+
+// --- Phase 1.6: pageSize ----------------------------------------------------
+
+describe("runPopulationQuery — pageSize", () => {
+  const rows: Row[] = Array.from({ length: 250 }, (_, i) => ({
+    id: `r${i}`,
+    port: i % 2 === 0 ? "بري" : "جوي",
+  }));
+
+  it("defaults to DATA_PAGE_SIZE when omitted", () => {
+    const result = runPopulationQuery(rows, baseParams(), displayValueGetter);
+    expect(result.pageRows).toHaveLength(DATA_PAGE_SIZE);
+    expect(result.totalPages).toBe(3);
+  });
+
+  it("returns every matching row in one page when given a large pageSize", () => {
+    const result = runPopulationQuery(
+      rows,
+      baseParams({ pageSize: Number.MAX_SAFE_INTEGER }),
+      displayValueGetter
+    );
+    expect(result.pageRows).toHaveLength(250);
+    expect(result.totalPages).toBe(1);
+    expect(result.totalRows).toBe(250);
+  });
+
+  it("applies filters before paging, so a full page is the filtered set", () => {
+    const result = runPopulationQuery(
+      rows,
+      baseParams({ columnFilters: { port: ["بري"] }, pageSize: Number.MAX_SAFE_INTEGER }),
+      displayValueGetter
+    );
+    expect(result.pageRows).toHaveLength(125);
+    expect(result.pageRows.every((r) => r.port === "بري")).toBe(true);
+  });
+
+  it("an Infinity pageSize would silently return nothing — guards the sentinel choice", () => {
+    // `pageSlice` computes (page - 1) * pageSize; 0 * Infinity is NaN, and
+    // Array.slice coerces NaN to 0 for both bounds. This documents exactly why
+    // the export passes Number.MAX_SAFE_INTEGER instead.
+    const result = runPopulationQuery(
+      rows,
+      baseParams({ pageSize: Infinity }),
+      displayValueGetter
+    );
+    expect(result.pageRows).toHaveLength(0);
+  });
+
+  it("ignores a non-positive pageSize and falls back to the default", () => {
+    for (const bad of [0, -1]) {
+      const result = runPopulationQuery(
+        rows,
+        baseParams({ pageSize: bad }),
+        displayValueGetter
+      );
+      expect(result.pageRows).toHaveLength(DATA_PAGE_SIZE);
+    }
+  });
+});
