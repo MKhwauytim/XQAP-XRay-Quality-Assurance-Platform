@@ -1,236 +1,243 @@
 /* @vitest-environment jsdom */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, cleanup } from "@testing-library/react";
+import { render, cleanup, act } from "@testing-library/react";
 
-import { createMemoryDirectory, getReadLog } from "../storage/memoryDirectory";
-import { safeWriteJson } from "../storage/safeWrite";
-import type { DirectoryHandleLike, FileHandleLike } from "../storage/fileSystemAccess";
-import {
-  getPopulationMonthDir,
-  getSampleApprovalsDir,
-  getSampleEmployeeDir,
-  getSystemRoot,
-  SYSTEM_FOLDER_NAMES,
-} from "./workspacePaths";
-import { appendDistributionEvent } from "../distribution/distributionStorage";
-import { buildAssignEvent } from "../distribution/distributionLog";
-import {
-  ALL_DATA_REFRESH_FAMILIES,
-  subscribeToDataChange,
-} from "./dataRefreshSignal";
-import { __clearInFlightForTests } from "../storage/inFlightReads";
-
-async function writeRawFile(dir: DirectoryHandleLike, name: string, content: string): Promise<void> {
-  const handle: FileHandleLike = await dir.getFileHandle(name, { create: true });
-  const writable = await handle.createWritable!();
-  await writable.write(content);
-  await writable.close();
-}
+import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
+import type { GlobalMonthSelection } from "../month/globalMonthLogic";
+import type { WorkspaceStatus } from "./workspaceTypes";
 
 const MONTH = "5-May-2026";
 
-async function makeRoot(trackReads = false) {
-  return createMemoryDirectory("sync-tick-root", { trackReads }) as unknown as DirectoryHandleLike;
+// SyncTick is now nothing but the AUTOMATIC trigger of runSync() -- the probe
+// itself is covered in workspaceSync.test.tsx. These tests assert the trigger's
+// contract: one timer, installed under the right conditions, never running
+// while the tab is hidden, and coalesced against the SHARED last-run stamp so a
+// manual button press suppresses an immediately following focus run.
+const mocks = vi.hoisted(() => ({
+  workspace: {
+    directoryHandle: { name: "root" } as unknown as DirectoryHandleLike | null,
+    status: "ready" as WorkspaceStatus,
+    refreshPermissions: vi.fn(async () => true),
+  },
+  selection: { kind: "existing", folderName: "5-May-2026", month: 5, year: 2026 } as GlobalMonthSelection,
+  runSync: vi.fn(async (_options: { manual?: boolean; monthFolderName: string | null }) => ({
+    ran: true,
+    ok: true,
+    changed: new Set<string>(),
+    broadcast: false,
+  })),
+  lastSyncStartedAt: 0,
+}));
+
+vi.mock("./useWorkspace", () => ({
+  useWorkspace: () => mocks.workspace,
+}));
+vi.mock("../month/useGlobalMonth", () => ({
+  useGlobalMonth: () => ({ selection: mocks.selection }),
+}));
+vi.mock("./workspaceSync", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./workspaceSync")>()),
+  runSync: mocks.runSync,
+  getLastSyncStartedAt: () => mocks.lastSyncStartedAt,
+}));
+
+import { SyncTick } from "./SyncTick";
+import {
+  SYNC_TICK_INTERVAL_MS,
+  FOCUS_COALESCE_WINDOW_MS,
+  refreshSyncIntervalFromDisk,
+  __resetWorkspaceSyncStateForTests,
+} from "./workspaceSync";
+import { createMemoryDirectory } from "../storage/memoryDirectory";
+import { saveSyncIntervalMs } from "./syncSettings";
+
+function findTick(spy: { mock: { calls: unknown[][] } }): (() => void) | undefined {
+  const call = spy.mock.calls.find((entry) => entry[1] === SYNC_TICK_INTERVAL_MS);
+  return call?.[0] as (() => void) | undefined;
 }
 
-async function seedNotification(root: DirectoryHandleLike): Promise<void> {
-  const systemDir = await getSystemRoot(root, true);
-  const notificationsDir = await systemDir.getDirectoryHandle(SYSTEM_FOLDER_NAMES.notifications, { create: true });
-  await safeWriteJson(notificationsDir, "notifications.json", {
-    revision: 1,
-    updatedAt: new Date().toISOString(),
-    notifications: [{ id: "n1", message: "hi", postedBy: "admin", postedAt: new Date().toISOString(), acceptances: [] }],
-  });
-}
-
-describe("SyncTick runSyncTick — change-set probe (§4.2 / A7)", () => {
-  let runSyncTick: typeof import("./SyncTick").runSyncTick;
-  let resetState: typeof import("./SyncTick").__resetSyncTickStateForTests;
-
-  beforeEach(async () => {
-    __clearInFlightForTests();
-    const mod = await import("./SyncTick");
-    runSyncTick = mod.runSyncTick;
-    resetState = mod.__resetSyncTickStateForTests;
-    resetState();
-  });
-
-  afterEach(() => {
-    resetState();
-  });
-
-  it("the first probe for a (workspace, month) establishes a baseline and reports no change", async () => {
-    const root = await makeRoot();
-    const changed = await runSyncTick(root, MONTH);
-    expect(changed.size).toBe(0);
-  });
-
-  it("two consecutive ticks over a genuinely unchanged month report an empty change set", async () => {
-    const root = await makeRoot();
-    await runSyncTick(root, MONTH); // baseline
-    const changed = await runSyncTick(root, MONTH);
-    expect(changed.size).toBe(0);
-  });
-
-  it("the staleness test: a posted notification AND an appended answers-file request are both detected, with NO distribution change", async () => {
-    const root = await makeRoot();
-    await runSyncTick(root, MONTH); // baseline (empty workspace)
-
-    await seedNotification(root);
-    const answersDir = await getSampleEmployeeDir(root, MONTH, true);
-    await writeRawFile(answersDir, "alice.answers.json", JSON.stringify({ requests: ["r1"] }));
-
-    const changed = await runSyncTick(root, MONTH);
-
-    expect(changed.has("notifications")).toBe(true);
-    expect(changed.has("requests")).toBe(true);
-    expect(changed.has("answers")).toBe(true);
-    // No distribution event was appended anywhere -- must NOT be reported.
-    expect(changed.has("distribution")).toBe(false);
-  });
-
-  it("an appended request inside an EXISTING answers file (same name, larger size) is detected -- the case a name-only diff misses (F21)", async () => {
-    const root = await makeRoot();
-    const answersDir = await getSampleEmployeeDir(root, MONTH, true);
-    await writeRawFile(answersDir, "alice.answers.json", "short");
-    await runSyncTick(root, MONTH); // baseline with the short file present
-
-    await writeRawFile(answersDir, "alice.answers.json", "a much longer body appended later");
-    const changed = await runSyncTick(root, MONTH);
-
-    expect(changed.has("answers")).toBe(true);
-    expect(changed.has("requests")).toBe(true);
-  });
-
-  it("a distribution event append is reported as the distribution family only (not requests/answers/notifications)", async () => {
-    const root = await makeRoot();
-    await runSyncTick(root, MONTH);
-
-    await appendDistributionEvent(
-      root,
-      MONTH,
-      buildAssignEvent({ xrayImageId: "img-1", assignedTo: "alice", eventBy: "admin" })
-    );
-    const changed = await runSyncTick(root, MONTH);
-
-    expect([...changed]).toEqual(["distribution"]);
-  });
-
-  it("a manifest revision change (e.g. month lock/unlock) is reported as the manifest family", async () => {
-    const root = await makeRoot();
-    const monthDir = await getPopulationMonthDir(root, MONTH, true);
-    await safeWriteJson(monthDir, "month.manifest.json", { monthFolderName: MONTH });
-    await runSyncTick(root, MONTH);
-
-    await safeWriteJson(monthDir, "month.manifest.json", { monthFolderName: MONTH, locked: true });
-    const changed = await runSyncTick(root, MONTH);
-
-    expect(changed.has("manifest")).toBe(true);
-  });
-
-  it("an approvals-dir change is reported as requests only, not answers", async () => {
-    const root = await makeRoot();
-    await runSyncTick(root, MONTH);
-
-    const approvalsDir = await getSampleApprovalsDir(root, MONTH, true);
-    await writeRawFile(approvalsDir, "supervisor1.json", JSON.stringify({ decisions: [] }));
-    const changed = await runSyncTick(root, MONTH);
-
-    expect(changed.has("requests")).toBe(true);
-    expect(changed.has("answers")).toBe(false);
-  });
-
-  it("broadcasts a periodic change-set event only when something changed, and broadcasts nothing on an unchanged tick", async () => {
-    const root = await makeRoot();
-    await runSyncTick(root, MONTH); // baseline
-
-    const spy = vi.fn();
-    const unsubscribe = subscribeToDataChange(ALL_DATA_REFRESH_FAMILIES, spy);
-
-    await runSyncTick(root, MONTH); // still unchanged
-    expect(spy).not.toHaveBeenCalled();
-
-    await seedNotification(root);
-    await runSyncTick(root, MONTH); // now changed
-    expect(spy).toHaveBeenCalledTimes(1);
-    expect(spy).toHaveBeenCalledWith(
-      expect.objectContaining({ source: "periodic", changed: expect.any(Set) })
-    );
-
-    unsubscribe();
-  });
-
-  it("round-trip budget: an unchanged tick issues no more than 2+1+2+N+M+1 getFileHandle/getFile calls, and reads no file larger than the notifications file", async () => {
-    const root = createMemoryDirectory("sync-tick-budget", { trackReads: true }) as unknown as DirectoryHandleLike;
-    await seedNotification(root);
-    const answersDir = await getSampleEmployeeDir(root, MONTH, true);
-    await writeRawFile(answersDir, "alice.answers.json", "aaaa");
-    await writeRawFile(answersDir, "bob.answers.json", "bbbb");
-    const approvalsDir = await getSampleApprovalsDir(root, MONTH, true);
-    await writeRawFile(approvalsDir, "carol.json", "cccc");
-    const monthDir = await getPopulationMonthDir(root, MONTH, true);
-    await safeWriteJson(monthDir, "month.manifest.json", { monthFolderName: MONTH });
-
-    await runSyncTick(root, MONTH); // baseline, not measured
-
-    const before = getReadLog(root).length;
-    await runSyncTick(root, MONTH); // the tick under measurement
-    const reads = getReadLog(root).length - before;
-
-    // N=2 answers files, M=1 approvals file -> budget = 2+1+2+2+1+1 = 9.
-    expect(reads).toBeLessThanOrEqual(9);
-  });
-});
-
-describe("SyncTick component — interval cadence, focus coalescing, and permissions independence", () => {
+describe("SyncTick — the single automatic trigger", () => {
   beforeEach(() => {
-    vi.useFakeTimers();
+    mocks.workspace.directoryHandle = { name: "root" } as unknown as DirectoryHandleLike;
+    mocks.workspace.status = "ready";
+    mocks.selection = { kind: "existing", folderName: MONTH, month: 5, year: 2026 } as GlobalMonthSelection;
+    mocks.lastSyncStartedAt = 0;
+    mocks.runSync.mockClear();
+    mocks.workspace.refreshPermissions.mockClear();
   });
 
   afterEach(() => {
     cleanup();
-    vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
-  it("registers a single interval at SYNC_TICK_INTERVAL_MS while a workspace and month are selected", async () => {
-    vi.resetModules();
-    vi.doMock("./useWorkspace", () => ({
-      useWorkspace: () => ({ directoryHandle: { name: "root" } }),
-    }));
-    vi.doMock("../month/useGlobalMonth", () => ({
-      useGlobalMonth: () => ({ selection: { kind: "existing", folderName: MONTH, month: 5, year: 2026 } }),
-    }));
+  it("registers a single interval at SYNC_TICK_INTERVAL_MS while a workspace and month are selected", () => {
     const setIntervalSpy = vi.spyOn(window, "setInterval");
-
-    const { SyncTick, SYNC_TICK_INTERVAL_MS } = await import("./SyncTick");
     render(<SyncTick />);
 
-    const call = setIntervalSpy.mock.calls.find((c) => c[1] === SYNC_TICK_INTERVAL_MS);
-    expect(call).toBeDefined();
-
-    vi.doUnmock("./useWorkspace");
-    vi.doUnmock("../month/useGlobalMonth");
-    vi.resetModules();
+    const matching = setIntervalSpy.mock.calls.filter((c) => c[1] === SYNC_TICK_INTERVAL_MS);
+    expect(matching).toHaveLength(1);
   });
 
-  it("does not register an interval when no month is selected", async () => {
-    vi.resetModules();
-    vi.doMock("./useWorkspace", () => ({
-      useWorkspace: () => ({ directoryHandle: { name: "root" } }),
-    }));
-    vi.doMock("../month/useGlobalMonth", () => ({
-      useGlobalMonth: () => ({ selection: { kind: "none" } }),
-    }));
+  it("still registers the interval with NO month selected — permission propagation must not depend on a month (the folded-in AuthGate interval)", () => {
+    mocks.selection = { kind: "none" } as GlobalMonthSelection;
     const setIntervalSpy = vi.spyOn(window, "setInterval");
-
-    const { SyncTick, SYNC_TICK_INTERVAL_MS } = await import("./SyncTick");
     render(<SyncTick />);
 
-    const call = setIntervalSpy.mock.calls.find((c) => c[1] === SYNC_TICK_INTERVAL_MS);
-    expect(call).toBeUndefined();
+    const tick = findTick(setIntervalSpy);
+    expect(tick).toBeDefined();
 
-    vi.doUnmock("./useWorkspace");
-    vi.doUnmock("../month/useGlobalMonth");
-    vi.resetModules();
+    tick!();
+    expect(mocks.runSync).toHaveBeenCalledWith(
+      expect.objectContaining({ monthFolderName: null, refreshPermissions: mocks.workspace.refreshPermissions })
+    );
+  });
+
+  it("does not register an interval when the workspace is not ready", () => {
+    mocks.workspace.status = "idle" as WorkspaceStatus;
+    const setIntervalSpy = vi.spyOn(window, "setInterval");
+    render(<SyncTick />);
+
+    expect(findTick(setIntervalSpy)).toBeUndefined();
+  });
+
+  it("does not register an interval for a disabled (demo/viewer) session", () => {
+    const setIntervalSpy = vi.spyOn(window, "setInterval");
+    render(<SyncTick enabled={false} />);
+
+    expect(findTick(setIntervalSpy)).toBeUndefined();
+  });
+
+  it("runs the shared runSync in AUTOMATIC mode, passing the selected month and refreshPermissions", () => {
+    const setIntervalSpy = vi.spyOn(window, "setInterval");
+    render(<SyncTick />);
+
+    findTick(setIntervalSpy)!();
+
+    expect(mocks.runSync).toHaveBeenCalledTimes(1);
+    const options = mocks.runSync.mock.calls[0]![0];
+    expect(options.manual).toBeUndefined();
+    expect(options.monthFolderName).toBe(MONTH);
+  });
+
+  it("skips the automatic run entirely while the tab is hidden", () => {
+    const setIntervalSpy = vi.spyOn(window, "setInterval");
+    render(<SyncTick />);
+    vi.spyOn(document, "hidden", "get").mockReturnValue(true);
+
+    findTick(setIntervalSpy)!();
+
+    expect(mocks.runSync).not.toHaveBeenCalled();
+  });
+
+  it("runs once on hidden->visible, but coalesces against the SHARED last-run stamp (a manual press suppresses it)", () => {
+    render(<SyncTick />);
+
+    // A run (of either trigger — e.g. the manual button) just happened.
+    mocks.lastSyncStartedAt = Date.now();
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(mocks.runSync).not.toHaveBeenCalled();
+
+    // Outside the coalescing window, the focus run is allowed through.
+    mocks.lastSyncStartedAt = Date.now() - FOCUS_COALESCE_WINDOW_MS - 1;
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(mocks.runSync).toHaveBeenCalledTimes(1);
+  });
+
+  it("tears the interval and the visibility listener down on unmount", () => {
+    const clearIntervalSpy = vi.spyOn(window, "clearInterval");
+    const removeSpy = vi.spyOn(document, "removeEventListener");
+    const view = render(<SyncTick />);
+    view.unmount();
+
+    expect(clearIntervalSpy).toHaveBeenCalled();
+    expect(removeSpy).toHaveBeenCalledWith("visibilitychange", expect.any(Function));
+  });
+});
+
+// ── admin-configurable cadence ────────────────────────────────────────────────
+// The cadence is stored in the workspace (`syncSettings.ts`) and delivered to
+// this component by the sync run itself, so these tests use a REAL memory
+// workspace as the directory handle rather than the bare `{ name: "root" }`
+// stub above.
+describe("SyncTick — re-arms at the workspace's configured cadence", () => {
+  beforeEach(() => {
+    __resetWorkspaceSyncStateForTests();
+    mocks.workspace.status = "ready";
+    mocks.selection = { kind: "existing", folderName: MONTH, month: 5, year: 2026 } as GlobalMonthSelection;
+    mocks.lastSyncStartedAt = 0;
+    mocks.runSync.mockClear();
+  });
+
+  afterEach(() => {
+    cleanup();
+    __resetWorkspaceSyncStateForTests();
+    vi.restoreAllMocks();
+  });
+
+  it("installs the timer at the stored cadence on mount, not at the 45s default", async () => {
+    const root = createMemoryDirectory("cadence-root") as unknown as DirectoryHandleLike;
+    await saveSyncIntervalMs(root, 120_000, "admin");
+    mocks.workspace.directoryHandle = root;
+
+    const setIntervalSpy = vi.spyOn(window, "setInterval");
+    render(<SyncTick />);
+    // Let the on-mount disk read settle and React flush the re-render.
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(setIntervalSpy.mock.calls.some((call) => call[1] === 120_000)).toBe(true);
+  });
+
+  it("re-arms the IN-FLIGHT interval when another client changes the cadence mid-session — no remount, no page reload", async () => {
+    const root = createMemoryDirectory("live-rearm-root") as unknown as DirectoryHandleLike;
+    mocks.workspace.directoryHandle = root;
+
+    const setIntervalSpy = vi.spyOn(window, "setInterval");
+    const clearIntervalSpy = vi.spyOn(window, "clearInterval");
+    render(<SyncTick />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // Starts at the default, because nothing is stored yet.
+    expect(setIntervalSpy.mock.calls.some((call) => call[1] === SYNC_TICK_INTERVAL_MS)).toBe(true);
+    expect(setIntervalSpy.mock.calls.some((call) => call[1] === 300_000)).toBe(false);
+    const clearsBefore = clearIntervalSpy.mock.calls.length;
+
+    // Another admin, on another machine, writes a new cadence; this client
+    // learns about it on its next sync run (here: driven directly, exactly as
+    // the timer would).
+    await saveSyncIntervalMs(root, 300_000, "other-admin");
+    await act(async () => {
+      await refreshSyncIntervalFromDisk(root);
+    });
+
+    expect(setIntervalSpy.mock.calls.some((call) => call[1] === 300_000)).toBe(true);
+    // The old timer was torn down rather than left running alongside the new one.
+    expect(clearIntervalSpy.mock.calls.length).toBeGreaterThan(clearsBefore);
+  });
+
+  it("keeps exactly one timer armed after a cadence change", async () => {
+    const root = createMemoryDirectory("single-timer-root") as unknown as DirectoryHandleLike;
+    mocks.workspace.directoryHandle = root;
+
+    render(<SyncTick />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const setIntervalSpy = vi.spyOn(window, "setInterval");
+    await saveSyncIntervalMs(root, 60_000, "admin");
+    await act(async () => {
+      await refreshSyncIntervalFromDisk(root);
+    });
+
+    // Exactly one new interval installed for the new cadence.
+    expect(setIntervalSpy.mock.calls.filter((call) => call[1] === 60_000)).toHaveLength(1);
   });
 });

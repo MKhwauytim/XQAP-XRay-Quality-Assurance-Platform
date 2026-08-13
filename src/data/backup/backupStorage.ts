@@ -2,7 +2,12 @@ import * as XLSX from "xlsx";
 
 import type { EmployeeAnswerFile } from "../answers/answerTypes";
 import { loadAllEmployeeFiles } from "../answers/answerStorage";
-import type { DistributionCurrentData } from "../distribution/distributionTypes";
+import {
+  DISTRIBUTION_EVENTS_DIR,
+  DISTRIBUTION_EVENT_SEGMENT_SUFFIX,
+  mergeDistributionEvents,
+} from "../distribution/distributionEventStore";
+import type { DistributionCurrentData, DistributionEvent } from "../distribution/distributionTypes";
 import type { MonthFolderInfo } from "../population/monthFolder";
 import type { MonthManifestData, MonthRawData, PopulationFinalData } from "../population/monthTypes";
 import type { SampleMasterData } from "../sampling/sampleTypes";
@@ -42,6 +47,10 @@ const RESTORE_INPROGRESS_FILE = "restore.inprogress.json";
 // purpose-built signal alongside that existing informal one, not a
 // replacement for it.
 const BACKUP_COMPLETE_FILE = "backup.complete.json";
+/** Derived, rebuildable fold cache — never restored, and dropped when its events change under it. */
+const DISTRIBUTION_CURRENT_FILE = "distribution.current.json";
+/** Legacy full-event compatibility projection — restored only into a workspace that has none. */
+const DISTRIBUTION_LOG_FILE = "distribution.log.json";
 const EXCEL_MAX_ROWS = 1_048_576;
 const XLSX_ROWS_PER_PART = 25_000;
 const XLSX_CELLS_PER_PART = 250_000;
@@ -383,6 +392,58 @@ async function collectEntries(dir: DirectoryHandleLike): Promise<DirectoryEntryL
   return entries;
 }
 
+/**
+ * The workspace file families that belong in a restorable snapshot.
+ *
+ * Both the backup walk and the restore walk gate on this ONE predicate, so the
+ * two can never drift into capturing a family that cannot be put back.
+ *
+ * Why `.ndjson` needs its own clause rather than being caught by a looser
+ * "contains .json" test: `"x.ndjson".endsWith(".json")` is FALSE — the char
+ * before `json` is `d`, not `.`. That is precisely how every distribution event
+ * segment silently escaped both walks. A substring test would have "fixed" it by
+ * also sweeping in `.json.bak` / `.json.tmp` / `.ndjson.bak` — safeWrite's
+ * rollback and staging siblings, which are deliberately NOT snapshot payload:
+ * restoring a stale `.bak` over a good file is exactly the corruption the safe
+ * write layer exists to prevent. Suffix equality keeps all three excluded.
+ */
+function isSnapshotPayloadFile(name: string): boolean {
+  return name.endsWith(".json") || isSegmentFile(name);
+}
+
+/** An append-only distribution event segment — never rewritten, never deleted. */
+function isSegmentFile(name: string): boolean {
+  return name.endsWith(DISTRIBUTION_EVENT_SEGMENT_SUFFIX);
+}
+
+/** Local NDJSON codec — distributionEventStore's own is module-private. */
+function parseSegmentLines(text: string, segmentName: string): DistributionEvent[] {
+  const events: DistributionEvent[] = [];
+  for (const line of text.split("\n")) {
+    if (line.length === 0) continue;
+    try {
+      events.push(JSON.parse(line) as DistributionEvent);
+    } catch {
+      throw new Error(`Cannot parse distribution event segment: ${segmentName}`);
+    }
+  }
+  return events;
+}
+
+function encodeSegmentLines(events: DistributionEvent[]): string {
+  return events.map((event) => `${JSON.stringify(event)}\n`).join("");
+}
+
+async function fileExists(dir: DirectoryHandleLike, fileName: string): Promise<boolean> {
+  try {
+    await dir.getFileHandle(fileName, { create: false });
+    return true;
+  } catch (error) {
+    if (isNotFoundError(error)) return false;
+    throw error;
+  }
+}
+
 async function tryGetDirectory(
   dir: DirectoryHandleLike,
   name: string
@@ -446,7 +507,7 @@ async function collectJsonFileEntries(params: {
       continue;
     }
 
-    if (entry.kind !== "file" || !entry.name.endsWith(".json")) continue;
+    if (entry.kind !== "file" || !isSnapshotPayloadFile(entry.name)) continue;
     pending.push({
       sourceDir: params.sourceDir,
       targetDir: params.targetDir,
@@ -476,12 +537,65 @@ async function copyAllJsonFiles(directoryHandle: DirectoryHandleLike, backupDir:
   // exactly as the old .push()-only-on-success code did.
   const results = await mapWithConcurrency(pending, 8, async (entry) => {
     const text = await readTextFile(entry.sourceDir, entry.fileName);
-    if (text === null) return null;
+    if (text === null) {
+      // A last-write-wins JSON file that vanishes between the listing and the
+      // read is expected churn on a live workspace (safeWriteJson's .tmp
+      // appears and disappears constantly), and dropping it is recoverable —
+      // the next backup catches it. An event SEGMENT is different: it is
+      // append-only and never deleted, so it cannot legitimately disappear
+      // mid-walk, and silently omitting one drops events that exist nowhere
+      // else in the snapshot while the manifest still reports a clean backup.
+      // Fail the whole backup instead; assertBackupComplete then refuses the
+      // partial folder at restore time rather than folding a truncated history
+      // into the live log.
+      if (isSegmentFile(entry.fileName)) {
+        throw new Error(`تعذّرت قراءة سجل أحداث التوزيع أثناء النسخ الاحتياطي: ${entry.relativePath}`);
+      }
+      return null;
+    }
     const wrote = await writeTextFile(entry.targetDir, entry.fileName, text);
+    if (!wrote && isSegmentFile(entry.fileName)) {
+      throw new Error(`تعذّرت كتابة سجل أحداث التوزيع أثناء النسخ الاحتياطي: ${entry.relativePath}`);
+    }
     return wrote ? entry.relativePath : null;
   });
 
   return results.filter((path): path is string => path !== null);
+}
+
+/**
+ * How one backed-up file is put back. A backup snapshot is NOT uniformly
+ * last-write-wins: the distribution log is event-sourced, and three of its file
+ * families need semantics that a blind overwrite would get wrong.
+ *
+ *  - `replace` — the long-standing behavior, and still correct for every
+ *    last-write-wins file (population, samples, templates, answers, users…).
+ *  - `merge-events` — `*.ndjson` event segments. Segments are append-only and
+ *    immutable per writer session, so the backup's copy and the live copy are
+ *    both prefixes of the same truth, and either may hold events the other
+ *    lacks: the backup carries events deleted/truncated since it was taken, the
+ *    live file carries everything appended after. Overwriting would destroy the
+ *    newer events; skipping would fail to repair the older ones. Only a union
+ *    can lose neither, so the two sides are merged by `eventId`.
+ *  - `restore-if-absent` — `distribution.log.json`, the legacy full-event
+ *    compatibility projection. It is CAS-protected and monotonically revisioned,
+ *    so writing the backup's older revision over a newer live one both rolls the
+ *    revision backwards and drops events. Every event it holds is also durable in
+ *    the event segments / per-event files, which ARE restored, so leaving a live
+ *    projection alone loses nothing — while restoring it into a workspace that
+ *    has none still covers full disaster recovery.
+ *  - `skip-derived` — `distribution.current.json`, documented as a rebuildable
+ *    cache. Restoring it is never necessary and is actively dangerous: it embeds
+ *    a `foldCheckpoint` of per-segment BYTE OFFSETS, and a merge above may have
+ *    rewritten those very segments. See invalidateDistributionCaches.
+ */
+type RestoreAction = "replace" | "merge-events" | "restore-if-absent" | "skip-derived";
+
+function restoreActionFor(fileName: string): RestoreAction {
+  if (fileName.endsWith(DISTRIBUTION_EVENT_SEGMENT_SUFFIX)) return "merge-events";
+  if (fileName === DISTRIBUTION_CURRENT_FILE) return "skip-derived";
+  if (fileName === DISTRIBUTION_LOG_FILE) return "restore-if-absent";
+  return "replace";
 }
 
 type PendingJsonRestore = {
@@ -489,6 +603,14 @@ type PendingJsonRestore = {
   targetDir: DirectoryHandleLike;
   fileName: string;
   relativePath: string;
+  action: RestoreAction;
+  /**
+   * For `merge-events` entries only: the target directory holding the
+   * `distribution.current.json` derived from these segments — i.e. the PARENT of
+   * `distribution.events/`, not the segment's own directory. Carried down from
+   * the walk because the flat pending list has no other way back up the tree.
+   */
+  cacheDir: DirectoryHandleLike | null;
 };
 
 // Mirrors collectJsonFileEntries's two-phase shape above (see its comment):
@@ -516,6 +638,8 @@ async function collectJsonRestoreEntries(params: {
   sourceDir: DirectoryHandleLike;
   targetDir: DirectoryHandleLike;
   sourcePath: string;
+  /** Inherited from the parent of a `distribution.events/` directory; null everywhere else. */
+  cacheDir: DirectoryHandleLike | null;
 }): Promise<{ pending: PendingJsonRestore[]; skippedPaths: string[] }> {
   const pending: PendingJsonRestore[] = [];
   const skippedPaths: string[] = [];
@@ -533,22 +657,103 @@ async function collectJsonRestoreEntries(params: {
         sourceDir: sourceChild,
         targetDir: targetChild,
         sourcePath: relativePath,
+        // Descending INTO distribution.events/ is the moment the current
+        // directory becomes "the place the fold cache for these segments
+        // lives" — capture it here, since the flat pending list below cannot
+        // walk back up to it later.
+        cacheDir: entry.name === DISTRIBUTION_EVENTS_DIR ? params.targetDir : params.cacheDir,
       });
       pending.push(...nested.pending);
       skippedPaths.push(...nested.skippedPaths);
       continue;
     }
 
-    if (entry.kind !== "file" || !entry.name.endsWith(".json")) continue;
+    if (entry.kind !== "file" || !isSnapshotPayloadFile(entry.name)) continue;
+    const action = restoreActionFor(entry.name);
+    // Dropped at collection time rather than in the executor: a derived cache is
+    // not a restore that "failed", so it must not reach the pending list at all
+    // and must never be reported as either restored or skipped.
+    if (action === "skip-derived") continue;
     pending.push({
       sourceDir: params.sourceDir,
       targetDir: params.targetDir,
       fileName: entry.name,
       relativePath: params.sourcePath ? `${params.sourcePath}/${entry.name}` : entry.name,
+      action,
+      cacheDir: params.cacheDir,
     });
   }
 
   return { pending, skippedPaths };
+}
+
+/**
+ * Union the backup's copy of one event segment with the live one, keyed by
+ * `eventId`. Returns whether the live file actually changed.
+ *
+ * `mergeDistributionEvents` is the codebase's existing dedupe/merge primitive —
+ * deliberately reused rather than reimplemented. Passing the LIVE side first
+ * keeps the live file's own line order as the base and appends only ids the live
+ * file lacks. It throws when one id carries conflicting content on the two
+ * sides, which is a genuine integrity contradiction (two different events minted
+ * under one id) and must surface as a failed restore rather than a silent pick.
+ */
+async function mergeEventSegment(
+  targetDir: DirectoryHandleLike,
+  fileName: string,
+  backupText: string
+): Promise<boolean> {
+  const backupEvents = parseSegmentLines(backupText, fileName);
+  const liveText = await readTextFile(targetDir, fileName);
+  const liveEvents = liveText === null ? [] : parseSegmentLines(liveText, fileName);
+
+  const merged = mergeDistributionEvents(liveEvents, backupEvents);
+  // The backup added nothing this segment did not already hold — leave the bytes
+  // (and therefore any fold checkpoint keyed on this segment's size) untouched.
+  if (liveText !== null && merged.length === liveEvents.length) return false;
+
+  const text = encodeSegmentLines(merged);
+  if (!(await writeTextFile(targetDir, fileName, text))) return false;
+  // Same reasoning as the append path's post-close size check: on a UNC/SMB
+  // share a close() that returned can still have landed short, and a truncated
+  // segment is silent event loss.
+  const readBack = await readTextFile(targetDir, fileName);
+  if (readBack !== text) {
+    throw new Error(`Distribution event segment restore verification failed: ${fileName}`);
+  }
+  return true;
+}
+
+/**
+ * Drop the fold cache for every directory whose segments the restore rewrote.
+ *
+ * `distribution.current.json` carries a `foldCheckpoint.segmentOffsets` map of
+ * per-segment BYTE offsets meaning "already folded up to here". A merge above
+ * can grow a segment and shift where its lines sit, which would leave those
+ * offsets pointing into the middle of a line — the incremental reader would then
+ * either mis-parse or skip real events, with a cache that claims to be current.
+ * Deleting the cache costs one full re-derive on the next load and is the only
+ * state in which the cache cannot be newer than the events behind it.
+ *
+ * Best-effort per file, mirroring pruneAutoBackups: a cache that cannot be
+ * removed must not fail an otherwise-complete restore, and its absence is
+ * always recoverable.
+ */
+async function invalidateDistributionCaches(dirs: Iterable<DirectoryHandleLike>): Promise<void> {
+  for (const dir of dirs) {
+    if (!dir.removeEntry) continue;
+    for (const name of [
+      DISTRIBUTION_CURRENT_FILE,
+      `${DISTRIBUTION_CURRENT_FILE}.bak`,
+      `${DISTRIBUTION_CURRENT_FILE}.tmp`,
+    ]) {
+      try {
+        await dir.removeEntry(name);
+      } catch (error) {
+        if (!isNotFoundError(error)) logError("backup:restore-cache-invalidate", error);
+      }
+    }
+  }
 }
 
 // Was previously a live `for await (const entry of iterable)` walk directly
@@ -579,6 +784,7 @@ async function restoreJsonTree(params: {
     sourceDir: params.sourceDir,
     targetDir: params.targetDir,
     sourcePath: params.sourcePath,
+    cacheDir: null,
   });
   params.skipped.push(...skippedPaths);
 
@@ -587,15 +793,47 @@ async function restoreJsonTree(params: {
   // though the workers below finish their individual read+write round trips in
   // whatever order the underlying I/O actually completes. A null result marks
   // an entry that was listed but whose source text disappeared before it could
-  // be read (source changed mid-walk) and is filtered out below.
+  // be read (source changed mid-walk), or one this restore deliberately left
+  // alone, and is filtered out below.
   const results = await mapWithConcurrency(pending, 4, async (entry) => {
     const text = await readTextFile(entry.sourceDir, entry.fileName);
-    if (text === null) return null;
+    if (text === null) {
+      // Mirror of the backup side: the restore source is an already-completed,
+      // immutable snapshot, so a segment listed there but unreadable is a real
+      // fault, not churn — and skipping it would silently under-restore the
+      // event history while still reporting success.
+      if (isSegmentFile(entry.fileName)) {
+        throw new Error(`تعذّرت قراءة سجل أحداث التوزيع من النسخة الاحتياطية: ${entry.relativePath}`);
+      }
+      return null;
+    }
+
+    if (entry.action === "merge-events") {
+      const changed = await mergeEventSegment(entry.targetDir, entry.fileName, text);
+      // Only a segment that actually gained lines invalidates the fold cache —
+      // a no-op restore must not cost every month a full re-derive.
+      return changed ? { path: entry.relativePath, cacheDir: entry.cacheDir } : null;
+    }
+
+    if (entry.action === "restore-if-absent" && (await fileExists(entry.targetDir, entry.fileName))) {
+      return null;
+    }
+
     await safeWriteJsonText(entry.targetDir, entry.fileName, text);
-    return entry.relativePath;
+    return { path: entry.relativePath, cacheDir: null };
   });
 
-  params.restored.push(...results.filter((path): path is string => path !== null));
+  const applied = results.filter((result): result is { path: string; cacheDir: DirectoryHandleLike | null } => result !== null);
+  params.restored.push(...applied.map((result) => result.path));
+
+  // Handle identity is stable per directory across one walk (collectJsonRestoreEntries
+  // hands every entry in a directory the same handle object), so a Set dedupes
+  // to one invalidation per month rather than one per segment.
+  const cacheDirs = new Set<DirectoryHandleLike>();
+  for (const result of applied) {
+    if (result.cacheDir) cacheDirs.add(result.cacheDir);
+  }
+  await invalidateDistributionCaches(cacheDirs);
 }
 
 type LocatedJson<T> =
@@ -1058,6 +1296,40 @@ export async function saveAutoBackupSettings(
   }
 }
 
+/**
+ * Refuse to restore from a backup folder that was never finished.
+ *
+ * Both signals are written only after the whole copy walk has succeeded —
+ * `backup.manifest.json` last among the content writes, `backup.complete.json`
+ * immediately after it — so either one missing means the backup stopped partway
+ * and its `json/` tree is a partial view of the workspace.
+ *
+ * This is deliberately a hard refusal rather than a warning. Backups created
+ * before the completion sentinel existed (pre-2026-08-04) are therefore no
+ * longer restorable through this path; their `json/` tree can still be copied
+ * back by hand. That trade is taken knowingly: the alternative is accepting a
+ * snapshot that cannot be distinguished from a complete one, which under
+ * merge-events semantics would fold a truncated event history into the live log.
+ */
+async function assertBackupComplete(
+  backupDir: DirectoryHandleLike,
+  folderName: string
+): Promise<void> {
+  const manifest = await safeReadJson<BackupManifest>(backupDir, "backup.manifest.json");
+  if (!manifest.ok) {
+    throw new Error(
+      `النسخة الاحتياطية "${folderName}" غير مكتملة: ملف backup.manifest.json مفقود أو تالف، `
+      + `ما يعني أن عملية النسخ توقفت قبل نهايتها. تعذّرت الاستعادة منها.`
+    );
+  }
+  if (!(await fileExists(backupDir, BACKUP_COMPLETE_FILE))) {
+    throw new Error(
+      `النسخة الاحتياطية "${folderName}" غير مكتملة: علامة الاكتمال backup.complete.json مفقودة. `
+      + `تعذّرت الاستعادة منها.`
+    );
+  }
+}
+
 export async function restoreBackupSnapshot(params: {
   directoryHandle: DirectoryHandleLike;
   months: MonthFolderInfo[];
@@ -1071,6 +1343,11 @@ export async function restoreBackupSnapshot(params: {
     return await withWorkspaceWriteAccess(params.directoryHandle, async () => {
       const backupsDir = await getBackupsDir(params.directoryHandle);
       const sourceBackupDir = await backupsDir.getDirectoryHandle(params.backupFolderName, { create: false });
+      // Before ANY mutation — no rollback backup, no sentinel, no walk. An
+      // interrupted backup restores a tree that merely looks whole, and with
+      // merge-events semantics a truncated segment set would be quietly merged
+      // in as if it were the full history.
+      await assertBackupComplete(sourceBackupDir, params.backupFolderName);
       const jsonDir = await sourceBackupDir.getDirectoryHandle("json", { create: false });
       const rollback = await createBackup(params.directoryHandle, params.months, params.username, "pre-restore");
       if (!rollback.ok) {
@@ -1210,6 +1487,38 @@ function populationStageReached(manifest: MonthManifestData | null): boolean {
   return effectiveStatus !== "raw-saved";
 }
 
+/**
+ * Whether the month holds any distribution EVENT files at all — `*.ndjson`
+ * segments or the legacy per-event `*.json` files.
+ *
+ * `distribution.current.json` alone is not an honest answer to "does this month
+ * have a distribution": it is a rebuildable cache, so it can be absent while a
+ * complete event history exists — after a restore invalidates it, on a machine
+ * that has never folded the month, or if it was cleared by hand. Reporting
+ * "no distribution" there would tell an operator their assignments are gone at
+ * exactly the moment they are checking whether a restore worked.
+ *
+ * Only a directory LISTING, and only reached when the cache is already absent,
+ * so the common path pays nothing. Row counts above stay cache-derived (they
+ * would need a full fold) and read 0 until the month is next loaded.
+ */
+async function hasDistributionEventFiles(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<boolean> {
+  try {
+    const mainDir = await getSampleMainDir(directoryHandle, monthFolderName, false);
+    const eventsDir = await tryGetDirectory(mainDir, DISTRIBUTION_EVENTS_DIR);
+    if (!eventsDir) return false;
+    return (await collectEntries(eventsDir)).some(
+      (entry) => entry.kind === "file" && isSnapshotPayloadFile(entry.name)
+    );
+  } catch (error) {
+    if (isMissingWorkspaceLocation(error)) return false;
+    throw error;
+  }
+}
+
 export async function loadArchiveStatus(
   directoryHandle: DirectoryHandleLike,
   months: MonthFolderInfo[]
@@ -1265,7 +1574,10 @@ export async function loadArchiveStatus(
       hasRawRisk: Boolean(riskRaw),
       hasRawBi: Boolean(biRaw),
       hasSample: Boolean(sample),
-      hasDistribution: Boolean(distribution),
+      // Short-circuits: the listing is only paid for when the derived cache is
+      // absent, which is the only case where the cache alone would lie.
+      hasDistribution:
+        Boolean(distribution) || (await hasDistributionEventFiles(directoryHandle, month.folderName)),
       hasAnswers: answerFiles.length > 0,
       manifestStatus: manifest?.status ?? null,
       totalProcessedRows,

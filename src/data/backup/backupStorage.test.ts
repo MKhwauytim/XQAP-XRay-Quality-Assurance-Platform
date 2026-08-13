@@ -255,6 +255,29 @@ async function seedBackupJsonFiles(
   for (const [name, value] of Object.entries(files)) {
     await safeWriteJson(jsonDir, name, value);
   }
+  await markBackupComplete(backupDir);
+}
+
+/**
+ * A hand-built backup fixture has to carry the same completion evidence
+ * createBackup writes, or restoreBackupSnapshot now (correctly) refuses it as an
+ * interrupted backup before it ever reaches the walk under test.
+ */
+async function markBackupComplete(backupDir: DirectoryHandleLike): Promise<void> {
+  await safeWriteJson(backupDir, "backup.manifest.json", {
+    createdAt: "2026-05-31T10:00:00.000Z",
+    createdBy: "admin",
+    mode: "manual",
+    monthsFolders: [],
+    jsonFilesBackedUp: [],
+    xlsxFilesBackedUp: [],
+    datasets: [],
+    rowLimitPerWorkbookPart: 25_000,
+    excelSheetRowLimit: 1_048_576,
+  });
+  await safeWriteJson(backupDir, "backup.complete.json", {
+    completedAt: "2026-05-31T10:00:00.000Z",
+  });
 }
 
 /**
@@ -928,6 +951,7 @@ describe("restoreBackupSnapshot — partial-restore detection when a backup subd
     await safeWriteJson(jsonDir, "top-file.json", { value: "top" });
     const subDir = await jsonDir.getDirectoryHandle("missing-during-restore", { create: true });
     await safeWriteJson(subDir, "nested-file.json", { value: "nested" });
+    await markBackupComplete(backupDir);
 
     // Simulates another tab's pruneAutoBackups (or a sync client) deleting
     // this subdirectory out from under the restore walk -- the walk must NOT

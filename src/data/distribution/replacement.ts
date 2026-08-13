@@ -16,6 +16,7 @@
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import type { DistributionEntry } from "./distributionTypes";
 import type { SampleMasterData } from "../sampling/sampleTypes";
+import { userFacingErrorText } from "../storage/writeErrorText";
 import { getStageKey } from "../population/stageHelpers";
 import type { StageAliasMappings } from "../population/populationConfig";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
@@ -229,7 +230,10 @@ export async function executeReplacement(params: {
   if (!eventsResult.ok) {
     return {
       ok: false,
-      error: `تمت إضافة البديل للعينة لكن فشل تسجيل الحدث — يُرجى المحاولة مرة أخرى: ${eventsResult.error}`,
+      // The wrapper sentence is Arabic, so the interpolated detail has to be
+      // mapped here — at the caller the whole string would already look Arabic
+      // and pass through with the raw DOMException text still embedded in it.
+      error: `تمت إضافة البديل للعينة لكن فشل تسجيل الحدث — يُرجى المحاولة مرة أخرى: ${userFacingErrorText(eventsResult.error, "replacement:append-events")}`,
       partialSampleWrite: true,
     };
   }

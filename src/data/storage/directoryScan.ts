@@ -1,6 +1,13 @@
-import type { DirectoryHandleLike } from "./fileSystemAccess";
+import type { DirectoryHandleLike, FileHandleLike } from "./fileSystemAccess";
 import { safeReadJson } from "./safeWrite";
 import { subscribeToDataRefresh } from "../workspace/dataRefreshSignal";
+import { logError } from "./errorLogger";
+import {
+  TRANSIENT_WRITE_RETRY_DELAYS_MS,
+  isNotFoundError,
+  isNotReadableError,
+  waitFor,
+} from "./transientFileErrors";
 
 /**
  * Bounded read fan-out for directory scans. The write side
@@ -15,6 +22,19 @@ export const DIRECTORY_READ_CONCURRENCY = 8;
 export type JsonDirectoryEntryLike = { name: string; kind: "file" | "directory" };
 
 type RawEntry = { kind: "file" | "directory"; name: string };
+
+/**
+ * The entries yielded by `FileSystemDirectoryHandle.values()` ARE handles --
+ * the enumeration already materialized them, so a file entry can be read
+ * without a second `getFileHandle()` lookup. `RawEntry` is deliberately typed
+ * as the narrow `{name, kind}` shape the listing consumers need, so this is
+ * the one place that widens it again.
+ */
+function asFileHandle(entry: RawEntry): FileHandleLike | null {
+  if (entry.kind !== "file") return null;
+  const candidate = entry as RawEntry & Partial<FileHandleLike>;
+  return typeof candidate.getFile === "function" ? (candidate as FileHandleLike) : null;
+}
 
 function rawEntries(dir: DirectoryHandleLike): AsyncIterable<RawEntry> | null {
   const candidate = dir as DirectoryHandleLike & {
@@ -173,9 +193,9 @@ type AppendOnlyCacheEntry<T = unknown> = {
 // cache keyed on a leaf handle would never hit.
 //
 // Plain Map, not WeakMap: the manual-refresh data-refresh signal below
-// (AdminToolbar.tsx's refresh button only -- the periodic 5-minute
-// auto-refresh in AuthGate.tsx deliberately does NOT trigger this, see the
-// subscription below) needs a genuine "clear every cached root" operation,
+// (AdminToolbar.tsx's refresh button only -- the automatic 45s sync run in
+// SyncTick.tsx deliberately does NOT trigger this, see the subscription
+// below) needs a genuine "clear every cached root" operation,
 // and a WeakMap cannot be enumerated or cleared wholesale by design -- there
 // is no placeholder-free way to implement that with a WeakMap. Trade-off: a
 // disconnected workspace's cache entries are not individually
@@ -289,6 +309,130 @@ export async function readAppendOnlyDirectory<T>(
   return { values, fileNames, matchedNames };
 }
 
+/* ------------------------------------------------------------------ *
+ * Enumerate-then-open tolerance (UNC/SMB)
+ * ------------------------------------------------------------------ */
+
+/**
+ * Every "list the directory, then re-open each entry by name" loop below has a
+ * gap between the two steps. On a shared folder another machine can rename,
+ * remove, or finish writing an entry inside that gap, and this client's
+ * directory view can also simply lag behind the server's. Either way the open
+ * raises `NotFoundError` (or `NotReadableError`) for a name the listing just
+ * reported.
+ *
+ * That is a NORMAL condition on a share, not a failure of the enumeration. It
+ * previously propagated as a bare Chromium DOMException — the un-Arabic
+ * "A requested file or directory could not be found at the time an operation was
+ * processed." users reported — and aborted the remaining entries with it.
+ *
+ * Retry policy is deliberately NOT uniform across the two call sites, because
+ * the cost of a wrong answer is not uniform either. See each function.
+ */
+const VANISHED_ENTRY_RETRY_DELAYS_MS = TRANSIENT_WRITE_RETRY_DELAYS_MS.slice(
+  0,
+  2
+) as readonly number[];
+
+export { VANISHED_ENTRY_RETRY_DELAYS_MS };
+
+/**
+ * Retries left for ONE call of `readSegmentTails`, shared across every entry it
+ * opens rather than granted per entry. A per-entry ladder would multiply the
+ * worst-case wait by the segment count (one segment per writer device-session,
+ * so it grows with the number of machines using the workspace); a per-call
+ * budget bounds a whole-directory outage at ~80 ms of added latency no matter
+ * how many segments are listed.
+ */
+export const SEGMENT_TAIL_VANISH_RETRY_BUDGET = 2;
+
+type VanishRetryBudget = { remaining: number };
+
+/** A matched listing entry, carrying the handle the enumeration already produced. */
+type MatchedFileEntry = { name: string; handle: FileHandleLike | null };
+
+/**
+ * Name-sorted listing of the files matching `suffix`, each paired with the
+ * handle its enumeration yielded.
+ *
+ * UNC/SMB COST (the reason this exists): every "list, then re-open each entry by
+ * name" loop paid TWO round trips per matched file — `getFileHandle(name)` and
+ * then `getFile()`. The `getFileHandle` half is pure waste: `values()` already
+ * handed back the handle. Reusing it halves the per-file cost of the sync
+ * tick's sized listing (run every tick by every client, over every employee's
+ * answers/decisions file) and of the distribution segment-tail read. Directory
+ * APIs that yield bare `{name, kind}` records (older shims, hand-written test
+ * doubles) still work — `handle` is simply `null` and the by-name open is used.
+ */
+async function listMatchingFileEntries(
+  dir: DirectoryHandleLike,
+  suffix: string
+): Promise<MatchedFileEntry[]> {
+  const iterable = rawEntries(dir);
+  if (!iterable) return [];
+  const matched: MatchedFileEntry[] = [];
+  for await (const entry of iterable) {
+    if (entry.kind !== "file" || !entry.name.endsWith(suffix)) continue;
+    matched.push({ name: entry.name, handle: asFileHandle(entry) });
+  }
+  return matched.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Reads a listed entry via `read`. Resolves to `null` — never throws — when the
+ * entry has vanished (or stayed invisible for the whole budget). Any other
+ * failure (permission denied, quota, a genuinely corrupt handle) still
+ * propagates: those are not "the share moved on", and silently dropping them
+ * would hand callers a short listing that looks like real data.
+ *
+ * The first attempt uses the handle the enumeration already produced (one round
+ * trip). Only a RETRY re-opens by name — deliberately, because the point of
+ * retrying is to get the share to re-resolve the entry, which a handle that has
+ * already failed will not do.
+ */
+async function readListedEntry<T>(
+  dir: DirectoryHandleLike,
+  entry: MatchedFileEntry,
+  read: (file: File) => Promise<T>,
+  budget: VanishRetryBudget | null
+): Promise<T | null> {
+  let handle = entry.handle;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      handle ??= await dir.getFileHandle(entry.name, { create: false });
+      return await read(await handle.getFile());
+    } catch (error) {
+      if (!isNotFoundError(error) && !isNotReadableError(error)) throw error;
+      const canRetry =
+        budget !== null &&
+        budget.remaining > 0 &&
+        attempt < VANISHED_ENTRY_RETRY_DELAYS_MS.length;
+      if (!canRetry) return null;
+      budget.remaining -= 1;
+      handle = null;
+      await waitFor(VANISHED_ENTRY_RETRY_DELAYS_MS[attempt]!);
+    }
+  }
+}
+
+/**
+ * One log line per call, not per entry: a share that loses sight of a directory
+ * loses sight of every name in it at once, and 200 identical entries would
+ * evict the whole 50-entry error ring buffer (errorLogger.ts) that the admin
+ * error view reads.
+ */
+function logVanishedEntries(context: string, dir: DirectoryHandleLike, names: string[]): void {
+  if (names.length === 0) return;
+  logError(
+    context,
+    new Error(
+      `Skipped ${names.length} listed entr${names.length === 1 ? "y" : "ies"} that could not be ` +
+        `opened in "${dir.name}" (present in the listing, NotFound/NotReadable on open — ` +
+        `renamed, removed, or not yet visible on a shared folder): ${names.join(", ")}`
+    )
+  );
+}
+
 export type SizedDirectoryEntry = { name: string; size: number };
 
 /**
@@ -296,29 +440,41 @@ export type SizedDirectoryEntry = { name: string; size: number };
  * `suffix`, return its name AND byte size -- `listDirectoryEntries` alone
  * (`{name, kind}` only) can detect a NEW file appearing, but cannot detect a
  * request appended into an EXISTING, larger file (e.g. a new referral
- * request landing inside an already-present `{user}.answers.json`). Costs
- * one `getFileHandle` + `getFile()` per matched file -- the same mechanism
- * `readSegmentTails` above already uses and for the same reason it prefers
- * `size` over `lastModified`: `File.size` is obtained without reading file
- * content, and is clock-skew-immune, unlike wall-clock `lastModified` on an
- * unsynchronized network share. This is NOT a free listing -- callers doing
- * an unchanged-tick round-trip budget (the sync tick) must count these calls.
+ * request landing inside an already-present `{user}.answers.json`). It prefers
+ * `size` over `lastModified` because `File.size` is obtained without reading
+ * file content, and is clock-skew-immune, unlike wall-clock `lastModified` on
+ * an unsynchronized network share.
+ *
+ * Costs ONE `getFile()` per matched file on the success path -- the handle comes
+ * from the enumeration itself (`listMatchingFileEntries`), so the second
+ * `getFileHandle()` round trip this used to pay per file is gone. It is still
+ * NOT a free listing: callers budgeting the unchanged-tick round trips (the
+ * sync tick) must count one operation per matched file.
  */
 export async function listDirectoryEntriesWithSize(
   dir: DirectoryHandleLike,
   suffix: string
 ): Promise<SizedDirectoryEntry[]> {
-  const entries = await listDirectoryEntries(dir);
-  const matched = entries
-    .filter((entry) => entry.kind === "file" && entry.name.endsWith(suffix))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  const matched = await listMatchingFileEntries(dir, suffix);
 
   const out: SizedDirectoryEntry[] = [];
+  const vanished: string[] = [];
   for (const entry of matched) {
-    const handle = await dir.getFileHandle(entry.name, { create: false });
-    const file = await handle.getFile();
-    out.push({ name: entry.name, size: file.size });
+    // No retry budget here (`null`), unlike readSegmentTails. This runs on every
+    // sync tick over every answers/decisions file in the workspace, and the
+    // value it produces is a change-detection signature, not data: dropping one
+    // entry makes this tick's signature differ from the last, which at worst
+    // reports the family as "changed" and triggers one extra refresh. Paying a
+    // retry ladder per entry to avoid that would let one flaky share stall
+    // every tick in proportion to the number of employees.
+    const size = await readListedEntry(dir, entry, async (file) => file.size, null);
+    if (size === null) {
+      vanished.push(entry.name);
+      continue;
+    }
+    out.push({ name: entry.name, size });
   }
+  logVanishedEntries("directoryScan:sized-listing", dir, vanished);
   return out;
 }
 
@@ -360,24 +516,48 @@ export async function readSegmentTails(
   dir: DirectoryHandleLike,
   options: SegmentTailOptions
 ): Promise<SegmentTailResult> {
-  const entries = await listDirectoryEntries(dir);
-  const matchedNames = entries
-    .filter((entry) => entry.kind === "file" && entry.name.endsWith(options.suffix))
-    .map((entry) => entry.name)
-    .sort((a, b) => a.localeCompare(b));
+  const matched = await listMatchingFileEntries(dir, options.suffix);
+  const matchedNames = matched.map((entry) => entry.name);
 
   const tailTextByName = new Map<string, string>();
   const sizeByName = new Map<string, number>();
 
-  for (const name of matchedNames) {
-    const handle = await dir.getFileHandle(name, { create: false });
-    const file = await handle.getFile();
-    sizeByName.set(name, file.size);
+  // Shared across every segment in this call — see
+  // SEGMENT_TAIL_VANISH_RETRY_BUDGET. A short retry IS warranted here (unlike
+  // the sized listing above) because this feeds distribution event folding, and
+  // is reached from inside appendDistributionEvents' casLoop: silently folding
+  // without a segment that is merely invisible for a few milliseconds would let
+  // an append decide against state that is missing real events.
+  const budget: VanishRetryBudget = { remaining: SEGMENT_TAIL_VANISH_RETRY_BUDGET };
+  const vanished: string[] = [];
+
+  for (const entry of matched) {
+    const name = entry.name;
     const knownOffset = options.knownOffsets[name] ?? 0;
-    if (file.size <= knownOffset) continue;
-    const tail = file.slice(knownOffset);
-    tailTextByName.set(name, await tail.text());
+    const read = await readListedEntry(
+      dir,
+      entry,
+      async (file) => ({
+        size: file.size,
+        // A shrunk or unchanged file yields no tail — never a negative-length read.
+        tail: file.size > knownOffset ? await file.slice(knownOffset).text() : null,
+      }),
+      budget
+    );
+    if (read === null) {
+      // Deliberately no sizeByName entry: callers persist sizeByName as the
+      // next call's knownOffsets, and recording a size for a segment whose
+      // bytes were never read would mark unread events as already consumed.
+      // Leaving it out keeps the caller's existing offset for this name, so the
+      // next read picks the segment up exactly where it left off.
+      vanished.push(name);
+      continue;
+    }
+    sizeByName.set(name, read.size);
+    if (read.tail !== null) tailTextByName.set(name, read.tail);
   }
+
+  logVanishedEntries("directoryScan:segment-tails", dir, vanished);
 
   return { tailTextByName, sizeByName, matchedNames };
 }
@@ -397,11 +577,12 @@ export async function readSegmentTails(
 // guard keeps this module importable from a non-browser context (e.g.
 // Vitest's "node" test environment) without throwing.
 if (typeof window !== "undefined") {
-  // Only the manual admin refresh wholesale-resets this cache. The periodic
-  // 5-minute auto-refresh (AuthGate.tsx) does NOT -- this cache's own
-  // per-file name-diff invalidation (see readAppendOnlyDirectory above) is
-  // already correct, so a periodic wholesale reset only pays full re-read
-  // cost every 5 minutes with no correctness benefit.
+  // Only the manual admin refresh wholesale-resets this cache. The automatic
+  // 45s sync run (SyncTick.tsx -> runSync in workspaceSync.ts) does NOT --
+  // this cache's own per-file name-diff invalidation (see
+  // readAppendOnlyDirectory above) is already correct, so an automatic
+  // wholesale reset only pays full re-read cost every 45s with no
+  // correctness benefit.
   subscribeToDataRefresh((source) => {
     if (source === "manual") resetAppendOnlyDirectoryCache();
   });

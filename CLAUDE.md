@@ -110,7 +110,7 @@ Both previously documented drifts have since been **fixed in code**. **`4-report
 |------|------|
 | `src/main.tsx` | React root; mounts `App` |
 | `src/App.tsx` | Auth gate → role/permission tab filtering → `BootSplashOverlay` → active tab |
-| `src/auth/AuthGate.tsx` | Login, session restore, the 3-minute auto-refresh timer |
+| `src/auth/AuthGate.tsx` | Login, session restore (the auto-refresh timer lives in `SyncTick.tsx`) |
 | `src/components/Sidebar/Tabs/tabRegistry.ts` | Auto-discovers tabs via `import.meta.glob("./*/index.tsx")` |
 | `src/auth/tabCatalog.ts` | Source of truth for tab ids, Arabic labels, role ceilings |
 | `src/data/workspace/workspacePaths.ts` | Every on-disk path; never hard-code folder names |
@@ -227,7 +227,8 @@ Dev preview: `npm run dev` → `http://localhost:5173/deck-preview.html` renders
 
 Two plain pub/sub stores, no state library:
 
-- `src/data/workspace/dataRefreshSignal.ts` — a "re-read your data" broadcast from the AdminToolbar refresh button (`"manual"`) and a 3-minute auto-refresh timer (`"periodic"`), so another user's action shows up without a page reload. Any view that loads workspace data on mount subscribes. **A refresh must never clobber unsaved local draft state** — that has already been a real bug.
+- `src/data/workspace/workspaceSync.ts` — **the one sync path**. `runSync({ manual })` re-syncs permissions from disk, probes the selected month for per-family changes, and broadcasts `dataRefreshSignal.ts`. It has exactly two triggers: the 45s automatic timer in `SyncTick.tsx` (delta-only — an empty change set broadcasts nothing) and the AdminToolbar refresh button (`manual: true` — always broadcasts, preserving the full cache purge). One module-level in-flight guard is shared by both; don't add a third refresh path or a second timer.
+- `src/data/workspace/dataRefreshSignal.ts` — the "re-read your data" broadcast itself (`"manual"` / `"periodic"` + change set), so another user's action shows up without a page reload. Any view that loads workspace data on mount subscribes. **A refresh must never clobber unsaved local draft state** — that has already been a real bug.
 - `src/data/workspace/bootProgress.ts` + `BootSplashOverlay` — the post-login data-source checklist, keyed by session+workspace. Children always mount under the overlay so their own effects can register boot sources; a source left in `error` deliberately does not block `allLoaded`. This area is effect-timing-sensitive and regressed five times in a row (v59.190–v59.197), every round caught by review rather than by self-testing — including after real-browser confirmation. Change it test-first and get it reviewed.
 
 ### Labels / localization

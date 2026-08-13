@@ -43,6 +43,7 @@ import type { SidebarTabModule } from "../tabTypes";
 import "./Settings.css";
 import { PageHeader } from "../../../../components/PageHeader/PageHeader";
 import { AdminAccountSection } from "./AdminAccountSection";
+import { SyncIntervalSection } from "./SyncIntervalSection";
 import { ErrorLogSection } from "./ErrorLogSection";
 import { StorageSection } from "./StorageSection";
 import { AboutSection } from "./AboutSection";
@@ -566,6 +567,7 @@ function SettingsPage() {
       )}
 
       <AdminAccountSection />
+      <SyncIntervalSection />
       <ErrorLogSection />
       <StorageSection />
       <AboutSection />

@@ -44,6 +44,21 @@ export const DEFAULT_LABELS = {
   page_settings_title:    "إعدادات النظام",
   page_settings_subtitle: "تخصيص تسميات النظام — تُطبَّق فورياً في جميع أنحاء التطبيق",
 
+  // Settings → automatic sync interval (admin only)
+  settings_sync_title:           "فترة المزامنة التلقائية",
+  settings_sync_note:            "تحدد كل كم ثانية يقوم النظام تلقائياً بإعادة قراءة الصلاحيات والبيانات من مساحة العمل. يُحفظ الإعداد في مساحة العمل، فينطبق على كل الأجهزة التي تفتح المجلد نفسه.",
+  settings_sync_current:         "الفترة الحالية: {seconds} ثانية",
+  settings_sync_field:           "الفترة (بالثواني)",
+  settings_sync_range_hint:      "القيمة المسموحة من {min} إلى {max} ثانية.",
+  settings_sync_invalid:         "قيمة غير صالحة — أدخل عدداً صحيحاً من {min} إلى {max} ثانية.",
+  settings_sync_save:            "حفظ الفترة",
+  settings_sync_saving:          "جارٍ الحفظ…",
+  settings_sync_saved:           "تم حفظ فترة المزامنة — ستُطبَّق على بقية الأجهزة خلال دورة مزامنة واحدة.",
+  settings_sync_save_failed:     "تعذّر حفظ فترة المزامنة في مساحة العمل.",
+  settings_sync_no_workspace:    "لا توجد مساحة عمل متصلة لحفظ هذا الإعداد.",
+  settings_sync_no_permission:   "لا تملك صلاحية تعديل فترة المزامنة.",
+  settings_sync_manual_note:     "لا يؤثر هذا الإعداد على زر التحديث اليدوي — يظل يعمل فوراً عند الضغط عليه.",
+
   // Employee workspace pages
   page_xray_referrals_eyebrow:      "مساحة عمل الفحص",
   page_xray_referrals_title:        "صور الأشعة المحالة",

@@ -4,8 +4,10 @@
  * everything else that reads workspace disk state (samples, distribution,
  * referrals/replacements/reopens, notifications, answers, ...).
  *
- * Broadcast by the manual refresh button (AdminToolbar) and the sync tick
- * (`SyncTick.tsx`, rendered inside `AuthGate`'s `GlobalMonthProvider`); any
+ * Broadcast from exactly one place -- `runSync()` in `workspaceSync.ts`,
+ * whose two triggers are the manual refresh button (AdminToolbar) and the
+ * automatic 45s timer (`SyncTick.tsx`, rendered inside `AuthGate`'s
+ * `GlobalMonthProvider`); any
  * view that loads workspace data on mount can subscribe to re-run its own
  * load function when this fires, so an action taken by another
  * user/tab/machine (a reassigned sample, a posted notification, an approved

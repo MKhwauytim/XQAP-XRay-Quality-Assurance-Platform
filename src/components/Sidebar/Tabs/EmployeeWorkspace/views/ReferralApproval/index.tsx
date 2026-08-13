@@ -3,6 +3,7 @@ import { CalendarOff, X } from "lucide-react";
 import { PageHeader } from "../../../../../../components/PageHeader/PageHeader";
 import { EmptyState, ErrorState, LoadingState } from "../../../../../../components/StateViews/StateViews";
 import type { DirectoryHandleLike } from "../../../../../../data/storage/fileSystemAccess";
+import { userFacingErrorText } from "../../../../../../data/storage/writeErrorText";
 import { isReferral, isReplacement, type CardRequest } from "./requestKind";
 import RequestList from "./RequestList";
 import ReviewModal from "./ReviewModal";
@@ -43,13 +44,21 @@ export default function ReferralApproval({ directoryHandle }: Props) {
   async function handleApprove(request: CardRequest, notes: string): Promise<void> {
     const result = await approve(request, notes);
     setDialog(null);
-    setStatusMsg(result.ok ? { type: "ok", text: "تمت الموافقة على الطلب." } : { type: "error", text: result.error });
+    setStatusMsg(
+      result.ok
+        ? { type: "ok", text: "تمت الموافقة على الطلب." }
+        : { type: "error", text: userFacingErrorText(result.error, "referralApproval:approve") }
+    );
   }
 
   async function handleDeny(request: CardRequest, notes: string): Promise<void> {
     const result = await deny(request, notes);
     setDialog(null);
-    setStatusMsg(result.ok ? { type: "ok", text: "تم رفض الطلب." } : { type: "error", text: result.error });
+    setStatusMsg(
+      result.ok
+        ? { type: "ok", text: "تم رفض الطلب." }
+        : { type: "error", text: userFacingErrorText(result.error, "referralApproval:deny") }
+    );
   }
 
   async function handleBulk(selected: CardRequest[], action: "approve" | "deny", notes: string) {
