@@ -1,5 +1,6 @@
 import type { PreparedPopulationRow } from "../population/populationTypes";
 import { getStageKey } from "../population/stageHelpers";
+import type { StageAliasMappings } from "../population/stageHelpers";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { readEnvelopeRevision, safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
@@ -127,9 +128,10 @@ function incrementPortAllocations(
 
 function incrementStageAllocations(
   allocations: StageAllocation[],
-  row: PreparedPopulationRow
+  row: PreparedPopulationRow,
+  stageMappings?: Partial<StageAliasMappings>
 ): StageAllocation[] {
-  const stageKey = getStageKey(row.stage);
+  const stageKey = getStageKey(row.stage, stageMappings);
   if (stageKey === "unknown") {
     return allocations;
   }
@@ -222,7 +224,12 @@ export async function approveSampleMaster(
 export async function appendSampleRow(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
-  newRow: PreparedPopulationRow
+  newRow: PreparedPopulationRow,
+  // Must match the mappings the month was drawn under. Omitted, getStageKey falls
+  // back to DEFAULT_STAGE_MAPPINGS, so a workspace using custom stage aliases
+  // classifies the replacement row as "unknown" and silently drops it from
+  // stageAllocations — permanently under-counting the stage in every report.
+  stageMappings?: Partial<StageAliasMappings>
 ): Promise<{ ok: true; data: SampleMasterData } | { ok: false; error: string }> {
   // Month lock gate — before the CAS loop so a closed month rejects loudly.
   await ensureMonthWritable(directoryHandle, monthFolderName);
@@ -245,7 +252,7 @@ export async function appendSampleRow(
         certScanActual: current.certScanActual + (isCertScan ? 1 : 0),
         nonCertScanActual: current.nonCertScanActual + (isCertScan ? 0 : 1),
         portAllocations: incrementPortAllocations(current.portAllocations, newRow),
-        stageAllocations: incrementStageAllocations(current.stageAllocations, newRow),
+        stageAllocations: incrementStageAllocations(current.stageAllocations, newRow, stageMappings),
         rows: [...current.rows, newRow],
       };
       const writeResult = await saveSampleMaster(directoryHandle, monthFolderName, updated);

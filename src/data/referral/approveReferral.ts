@@ -32,6 +32,7 @@ import {
 import { buildReassignEvent, deriveCurrentDistribution } from "../distribution/distributionLog";
 import { executeReplacement } from "../distribution/replacement";
 import { loadMonthPopulationFinal } from "../population/populationStorage";
+import { loadPopulationConfig } from "../population/populationConfig";
 import { loadSampleMaster } from "../sampling/sampleStorage";
 import { reopenSubmittedAnswer } from "../answers/reopenAnswer";
 import {
@@ -285,6 +286,14 @@ export async function approveReplacement(params: {
       return { ok: false, code: "stale-ownership", staleIds: [fresh.originalXrayImageId] };
     }
 
+    // Stage aliases the month was drawn under — without them appendSampleRow
+    // classifies a custom-alias stage as "unknown" and drops it from
+    // stageAllocations. Best-effort: on config-load failure fall back to the
+    // defaults rather than failing an otherwise valid approval.
+    const stageMappings = await loadPopulationConfig(directoryHandle)
+      .then((cfg) => cfg.stageMappings)
+      .catch(() => undefined);
+
     // 4. Execute (sample append is idempotent; events carry the request id).
     const result = await executeReplacement({
       directoryHandle,
@@ -294,6 +303,7 @@ export async function approveReplacement(params: {
       reason: `استبدال معتمد — ${fresh.reason}`,
       eventBy: reviewedBy,
       sourceRequestId: fresh.requestId,
+      stageMappings,
     });
     if (!result.ok) {
       return { ok: false, code: "dist-failed", error: result.error };

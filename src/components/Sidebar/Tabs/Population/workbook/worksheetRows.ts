@@ -12,7 +12,7 @@ type SheetToJson = <T>(
   options: {
     header: 1;
     defval: null;
-    blankrows: false;
+    blankrows: boolean;
     raw: true;
   }
 ) => T[];
@@ -119,10 +119,16 @@ export function worksheetToSourceRows<TSourceRow extends Record<string, unknown>
   // Must run before sheet_to_json so large-number cells are already strings.
   preprocessLargeNumbers(worksheet);
 
+  // blankrows: true is load-bearing for sourceRowNumber. With blankrows: false,
+  // SheetJS drops fully blank rows before we ever see them, so `index` tracks a
+  // compacted array and every interior blank row shifts the reported row number of
+  // everything below it — sending the user to the wrong line in their spreadsheet
+  // when they follow a dropped-row diagnostic. The isNonEmptyRow filter below still
+  // discards the now-visible blank rows, after the index has been captured.
   const rawRows = utils.sheet_to_json<RawCell[]>(worksheet, {
     header: 1,
     defval: null,
-    blankrows: false,
+    blankrows: true,
     raw: true
   });
 
