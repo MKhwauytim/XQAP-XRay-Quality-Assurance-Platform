@@ -10,6 +10,22 @@
 // the real component against a memory workspace and assert the control is simply
 // absent, not merely "would fail if clicked".
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// The replacement-confirm path resolves the chosen candidate's full population row
+// through the query worker instead of parsing population.final.json on the main
+// thread (item 1.12), so this suite has to stand a worker up. Same WORKER BOUNDARY
+// limitation the Browse suites document: Vitest cannot run a real DedicatedWorker.
+// The shared stub is used rather than a bespoke fake because it runs the REAL
+// `handleWorkerMessage` on a macrotask, one message per tick — so the "load" then
+// "rowById" pair this path posts is exercised for behavior AND ordering, not just
+// stubbed out to a canned row.
+vi.mock("../../../../../workers/populationQueryWorker?worker&inline", async () => {
+  const { createPopulationQueryWorkerStubClass } = await import(
+    "../../Population/populationQueryWorkerTestStub"
+  );
+  return { default: createPopulationQueryWorkerStubClass() };
+});
+
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { createMemoryDirectory } from "../../../../../data/storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../../../../../data/storage/fileSystemAccess";

@@ -32,7 +32,7 @@ import { submitReassignmentRequests } from "../../../../../data/referral/submitR
 import { isReassignEligible } from "../../../../../data/referral/planReassignment";
 import { appendWorkspaceAction } from "../../../../../data/audit/actionLog";
 import { getReplacementCandidatesIndexed } from "../../../../../data/distribution/replacementCandidateLookup";
-import { loadMonthPopulationFinal } from "../../../../../data/population/populationStorage";
+import { findPopulationRowById } from "../../../../../data/population/populationRowLookup";
 import type { ReplacementIndexRow } from "../../../../../data/population/replacementIndexTypes";
 import { loadPopulationConfig, type StageAliasMappings } from "../../../../../data/population/populationConfig";
 import { useGlobalMonth } from "../../../../../data/month/useGlobalMonth";
@@ -799,10 +799,14 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         // the FULL population row, so resolve it here by id. This is the one
         // full-population read on the immediate-replace path, and it's paid
         // for exactly one row (the chosen candidate), never the whole pool.
-        const population = await loadMonthPopulationFinal(directoryHandle, selMonth);
-        const fullReplacementRow = (population?.rows ?? []).find(
-          (r) => (r as PreparedPopulationRow).xrayImageId === replacement.xrayImageId
-        ) as PreparedPopulationRow | undefined;
+        //
+        // The read still happens; the PARSE of it does not happen here (1.12).
+        // Parsing a large month on the main thread is the freeze users report on
+        // this exact click, so the file text goes to the query worker instead and
+        // only the one matching row comes back. A miss and a failure are both
+        // treated as "stale", exactly as the previous inline `.find()` was.
+        const lookup = await findPopulationRowById(directoryHandle, selMonth, replacement.xrayImageId);
+        const fullReplacementRow = lookup.ok ? lookup.row ?? undefined : undefined;
         if (!fullReplacementRow) {
           setReplacementError(STALE_MSG);
           setStatusMsg({ type: "error", text: STALE_MSG });

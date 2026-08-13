@@ -248,6 +248,16 @@ export async function approveReplacement(params: {
   if (!alreadyApplied) {
     // Resolve the replacement row from the population (reference, not copy);
     // legacy requests fall back to the stored row data.
+    //
+    // This one is DELIBERATELY still a main-thread read, unlike the employee-facing
+    // replacement confirm, which now resolves the row through the query worker
+    // (findPopulationRowById, item 1.12). Routing this call through a worker too
+    // would push Vite's `?worker&inline` import into the data layer's dependency
+    // graph, forcing a worker mock into every suite that merely imports this module
+    // — a lot of test churn for a supervisor-only approval path that is far colder
+    // than the employee's confirm click. The read disappears entirely once
+    // sample.master stores row stubs and the replacement index can answer this
+    // directly; until then it stays as-is on purpose.
     let replacementRow: PreparedPopulationRow | null = null;
     try {
       const population = await loadMonthPopulationFinal(directoryHandle, fresh.monthFolderName);

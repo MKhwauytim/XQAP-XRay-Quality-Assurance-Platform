@@ -169,8 +169,26 @@ export function handleWorkerMessage(
       };
     }
 
-    // Exhaustive per PopulationQueryWorkerRequest's discriminated union (only "load"
-    // and "query" exist); kept as a defensive fallback rather than relying on
+    if (request.type === "rowById") {
+      if (!state.cachedRows) {
+        throw new Error("لا توجد بيانات محمّلة بعد — يجب إرسال طلب تحميل قبل الاستعلام.");
+      }
+      // Exact match on the raw stored field, NOT on a display value: this resolves a
+      // row identity, and `xrayImageId` is stored as-is (no alias/label mapping like
+      // "stage" or "_monthFolder" has), so getWorkerDisplayValue would only add a
+      // String() round-trip and a chance of matching the wrong row.
+      const found = state.cachedRows.find((row) => row["xrayImageId"] === request.xrayImageId);
+      return {
+        state,
+        // `?? null` normalizes `find`'s undefined miss into the explicit null the
+        // response type documents — undefined would survive structuredClone as a
+        // present-but-undefined key and read as "absent" rather than "not found".
+        response: { type: "row", requestId: request.requestId, row: found ?? null }
+      };
+    }
+
+    // Exhaustive per PopulationQueryWorkerRequest's discriminated union (only "load",
+    // "query" and "rowById" exist); kept as a defensive fallback rather than relying on
     // unreachable-code inference alone.
     const unhandled: never = request;
     throw new Error(`Unknown population-query worker request: ${JSON.stringify(unhandled)}`);

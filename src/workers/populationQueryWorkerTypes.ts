@@ -36,9 +36,27 @@ export type PopulationQueryWorkerRequest =
       stageMappings?: StageAliasMappings;
       monthFolder?: string;
     }
-  | { type: "query"; requestId: number; params: PopulationQueryParams };
+  | { type: "query"; requestId: number; params: PopulationQueryParams }
+  /**
+   * Resolve ONE row by its `xrayImageId` against the loaded cache (item 1.12).
+   *
+   * Deliberately not expressed as a `"query"` with a search param: `runPopulationQuery`
+   * runs the whole search -> filter -> sort -> paginate pipeline and returns a page
+   * plus aggregate stats, all of which the single-row callers throw away. More to the
+   * point, its search matches on DISPLAY values across every column, so an id that
+   * happens to appear inside another row's text field would come back as a false
+   * positive. This is an exact-match lookup on one field and needs to stay one.
+   */
+  | { type: "rowById"; requestId: number; xrayImageId: string };
 
 export type PopulationQueryWorkerResponse =
   | { type: "loaded"; requestId: number; totalRows: number }
   | { type: "result"; requestId: number; result: PopulationQueryResult<Record<string, unknown>> }
+  /**
+   * Reply to `"rowById"`. `row: null` means "loaded fine, no such id" — a normal
+   * negative answer, distinct from an `"error"` reply (which means the lookup itself
+   * could not be performed). Callers act on the two differently: a missing row is the
+   * stale-candidate case the UI already has a message for, an error is not.
+   */
+  | { type: "row"; requestId: number; row: Record<string, unknown> | null }
   | { type: "error"; requestId: number; error: string };
