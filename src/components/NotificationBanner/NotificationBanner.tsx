@@ -60,7 +60,7 @@ export function NotificationBanner({ session, directoryHandle }: Props) {
     window.addEventListener("focus", onFocus);
     const interval = window.setInterval(() => void reload(), POLL_INTERVAL_MS);
     // Also react instantly to the app-wide refresh signal (manual toolbar
-    // button + 5-minute auto-refresh) instead of waiting up to POLL_INTERVAL_MS.
+    // button + the automatic 45s sync run) instead of waiting up to POLL_INTERVAL_MS.
     const unsubscribeDataRefresh = subscribeToDataRefresh(() => void reload());
     return () => {
       window.removeEventListener("focus", onFocus);

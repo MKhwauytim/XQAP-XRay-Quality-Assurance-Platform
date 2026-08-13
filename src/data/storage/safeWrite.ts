@@ -1,7 +1,40 @@
+/**
+ * The safe write/read layer every workspace file goes through (see CLAUDE.md).
+ *
+ * **"Absent on read" and "transient on write" are two different conditions.**
+ * They arrive as the same Chromium `NotFoundError` DOMException, and this
+ * module is where they are told apart:
+ *
+ * - Ordinary reads (`readText`, `safeReadJson`, `readEnvelopeRevision`,
+ *   `readFileTextWithRetry`, and the pre-write read of the existing file)
+ *   treat NotFoundError as **absence** and resolve to `null` immediately. That
+ *   is the correct and required behavior: absence is the normal answer for a
+ *   first write, for an optional file, and for safeReadJson's `.bak`/`.tmp`
+ *   fallback probes. Adding retries here would slow down every one of them.
+ * - Post-write **verification** read-backs opt in with
+ *   `readText(dir, name, { retryMissing: true })` (and `safeReadJson(…, {
+ *   retryMissing: true })`). There the file provably exists — this same call
+ *   just wrote and closed it — so NotFoundError can only mean the directory
+ *   listing on a UNC/SMB share has not caught up yet. Treating it as failure
+ *   made successful writes report as failures to real users.
+ * - Writes themselves (`writeText`) are wrapped in `retryTransientWrite`; they
+ *   rewrite whole content through a freshly-opened handle, so retrying is
+ *   idempotent.
+ *
+ * The retry ladder and the rationale live in `transientFileErrors.ts`.
+ * `NotReadableError` remains transient on both paths and is unrelated.
+ */
 import type { DirectoryHandleLike } from "./fileSystemAccess";
 import { assertWritableMode } from "./readOnlyMode";
 import { withResourceLock } from "./webLocks";
 import { withWorkspaceWriteAccess } from "./workspaceWriteAccess";
+import {
+  TRANSIENT_WRITE_RETRY_DELAYS_MS,
+  isNotFoundError,
+  isNotReadableError,
+  logExhaustedNotFound,
+  retryTransientWrite,
+} from "./transientFileErrors";
 import {
   ENVELOPE_SCHEMA_VERSION,
   createSimpleHasher,
@@ -22,14 +55,6 @@ function errorName(error: unknown): string | undefined {
   return error && typeof error === "object" ? (error as { name?: string }).name : undefined;
 }
 
-function isNotFound(error: unknown): boolean {
-  return errorName(error) === "NotFoundError";
-}
-
-function isNotReadable(error: unknown): boolean {
-  return errorName(error) === "NotReadableError";
-}
-
 // A handle can briefly become unreadable while another Chromium process swaps
 // a file. Retry that transient condition, but never reinterpret it as a missing
 // file: doing so would allow safeReadJson to return a stale .bak and could make
@@ -40,21 +65,63 @@ function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+type ReadTextOptions = {
+  /**
+   * Opt-in ONLY. Treats a `NotFoundError` as a transient share-visibility
+   * failure and retries it on TRANSIENT_WRITE_RETRY_DELAYS_MS before giving up
+   * and returning `null`.
+   *
+   * Set this exclusively on post-write **verification** read-backs, where the
+   * file provably exists because this same call just wrote and closed it, so
+   * "not found" can only mean the directory listing has not caught up (see
+   * transientFileErrors.ts's module doc for why that happens on UNC/SMB).
+   *
+   * It must stay off by default. Every ordinary read here is an absence probe:
+   * safeReadJson alone probes `{file}`, `{file}.bak` and `{file}.tmp` on a
+   * miss, safeWriteJson reads the pre-existing file before every first write,
+   * and dozens of optional-file loads across the app resolve to `null` by
+   * design. Retrying those would put ~630 ms of dead wait behind every one of
+   * them for no benefit whatsoever.
+   */
+  retryMissing?: boolean;
+};
+
 async function readText(
   dir: DirectoryHandleLike,
-  name: string
+  name: string,
+  options?: ReadTextOptions
 ): Promise<string | null> {
-  for (let attempt = 0; ; attempt += 1) {
+  const missingRetries = options?.retryMissing ? TRANSIENT_WRITE_RETRY_DELAYS_MS.length : 0;
+  let missingAttempts = 0;
+  let unreadableAttempts = 0;
+  let lastMissingError: unknown = null;
+  for (;;) {
     try {
       const handle = await dir.getFileHandle(name, { create: false });
       const file = await handle.getFile();
       return await file.text();
     } catch (error) {
-      if (isNotFound(error)) {
+      if (isNotFoundError(error)) {
+        if (missingAttempts < missingRetries) {
+          lastMissingError = error;
+          await wait(TRANSIENT_WRITE_RETRY_DELAYS_MS[missingAttempts]!);
+          missingAttempts += 1;
+          continue;
+        }
+        if (options?.retryMissing) {
+          await logExhaustedNotFound(
+            "safeWrite:verify-read-missing",
+            dir,
+            name,
+            missingAttempts + 1,
+            lastMissingError ?? error
+          );
+        }
         return null;
       }
-      if (isNotReadable(error) && attempt < NOT_READABLE_RETRY_DELAYS_MS.length) {
-        await wait(NOT_READABLE_RETRY_DELAYS_MS[attempt]!);
+      if (isNotReadableError(error) && unreadableAttempts < NOT_READABLE_RETRY_DELAYS_MS.length) {
+        await wait(NOT_READABLE_RETRY_DELAYS_MS[unreadableAttempts]!);
+        unreadableAttempts += 1;
         continue;
       }
       throw error;
@@ -91,18 +158,31 @@ export async function readFileTextWithRetry(
   return readText(dir, name);
 }
 
+/**
+ * Whole-content write. Idempotent by construction — it re-opens the handle with
+ * `{ create: true }` and writes the complete `content` every time — so a retry
+ * after a transient failure produces exactly the same end state as a first
+ * attempt. That is what makes it safe to wrap in retryTransientWrite: on a
+ * UNC/SMB share `getFileHandle`/`createWritable` can raise NotFoundError for a
+ * directory that is perfectly reachable a few milliseconds later.
+ */
 async function writeText(
   dir: DirectoryHandleLike,
   name: string,
   content: string
 ): Promise<void> {
-  const handle = await dir.getFileHandle(name, { create: true });
-  if (!handle.createWritable) {
-    throw new Error(`Browser cannot write ${name}.`);
-  }
-  const writable = await handle.createWritable();
-  await writable.write(content);
-  await writable.close();
+  await retryTransientWrite(
+    async () => {
+      const handle = await dir.getFileHandle(name, { create: true });
+      if (!handle.createWritable) {
+        throw new Error(`Browser cannot write ${name}.`);
+      }
+      const writable = await handle.createWritable();
+      await writable.write(content);
+      await writable.close();
+    },
+    { context: "safeWrite:writeText", dir, fileName: name }
+  );
 }
 
 async function removeQuietly(
@@ -276,7 +356,9 @@ async function verifyStreamedFile(
   fileName: string,
   expected: StreamedFileInfo
 ): Promise<boolean> {
-  const text = await readText(dir, fileName);
+  // Verification read-back of a file this call just closed — a "not found" here
+  // is share latency, not absence, so it gets the opt-in retry.
+  const text = await readText(dir, fileName, { retryMissing: true });
   if (text === null || text.length !== expected.fileLength) {
     return false;
   }
@@ -402,7 +484,7 @@ export async function safeWriteJson<T>(
         // verified before commit — promote it instead of losing the data.
         try {
           if (await verifyStreamedFile(dir, tmpName, stagedInfo)) {
-            const stagedText = await readText(dir, tmpName);
+            const stagedText = await readText(dir, tmpName, { retryMissing: true });
             if (stagedText !== null) {
               await writeText(dir, fileName, stagedText);
               if (await verifyStreamedFile(dir, fileName, stagedInfo)) {
@@ -445,7 +527,7 @@ export async function safeWriteJson<T>(
     reportProgress(onProgress, "staging");
     await writeText(dir, tmpName, serialized);
     reportProgress(onProgress, "verifying-staged");
-    const staged = await readText(dir, tmpName);
+    const staged = await readText(dir, tmpName, { retryMissing: true });
     const stagedOk = skipVerify
       ? staged === serialized
       : parseValidJson(staged) !== null;
@@ -458,7 +540,7 @@ export async function safeWriteJson<T>(
     reportProgress(onProgress, "committing");
     await writeText(dir, fileName, serialized);
     reportProgress(onProgress, "verifying-committed");
-    const verify = await readText(dir, fileName);
+    const verify = await readText(dir, fileName, { retryMissing: true });
     const verifyOk = skipVerify
       ? verify === serialized
       : parseValidJson(verify) !== null;
@@ -473,13 +555,13 @@ export async function safeWriteJson<T>(
       }
       // No usable .bak (first write, or .bak corrupt): the staged .tmp WAS
       // verified before commit — promote it instead of losing the data.
-      const staged2 = await readText(dir, tmpName);
+      const staged2 = await readText(dir, tmpName, { retryMissing: true });
       const staged2Ok = skipVerify
         ? staged2 === serialized
         : parseValidJson(staged2) !== null;
       if (staged2Ok) {
         await writeText(dir, fileName, staged2 as string);
-        const check = await readText(dir, fileName);
+        const check = await readText(dir, fileName, { retryMissing: true });
         const checkOk = skipVerify
           ? check === serialized
           : parseValidJson(check) !== null;
@@ -562,7 +644,7 @@ export async function safeWriteJsonText(
     }
 
     await writeText(dir, tmpName, normalized);
-    const staged = await readText(dir, tmpName);
+    const staged = await readText(dir, tmpName, { retryMissing: true });
     const stagedOk = skipVerify
       ? staged === normalized
       : parseValidJson(staged) !== null;
@@ -572,7 +654,7 @@ export async function safeWriteJsonText(
     }
 
     await writeText(dir, fileName, normalized);
-    const verify = await readText(dir, fileName);
+    const verify = await readText(dir, fileName, { retryMissing: true });
     const verifyOk = skipVerify
       ? verify === normalized
       : parseValidJson(verify) !== null;
@@ -616,11 +698,22 @@ export async function readEnvelopeRevision(
   return extract(parseValidJson(await readText(dir, `${fileName}.bak`)));
 }
 
+export type SafeReadJsonOptions = {
+  /**
+   * Opt-in, same contract and same warning as ReadTextOptions.retryMissing:
+   * only for reading back a file this caller just wrote. Applies to the live
+   * file read alone — the `.bak`/`.tmp` fallback probes below stay fast,
+   * because those are absence probes by design.
+   */
+  retryMissing?: boolean;
+};
+
 export async function safeReadJson<T>(
   dir: DirectoryHandleLike,
-  fileName: string
+  fileName: string,
+  options?: SafeReadJsonOptions
 ): Promise<SafeReadResult<T>> {
-  const live = await readText(dir, fileName);
+  const live = await readText(dir, fileName, { retryMissing: options?.retryMissing });
   const parsedLive = parseValidJson(live);
   if (parsedLive !== null) {
     return {

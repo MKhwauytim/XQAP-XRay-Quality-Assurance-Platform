@@ -604,12 +604,12 @@ describe("AuthGate — activity log wiring (Task 1 double-permission-prompt fix)
 });
 
 describe("AuthGate — permission auto-refresh", () => {
-  // 45s per §2 of the perf/sync spec (A7 commit 2), down from the old 3
-  // minutes. As of that same change, this interval's callback ONLY calls
-  // refreshPermissions() -- it no longer broadcasts dataRefreshSignal itself
-  // (see SyncTick.tsx, rendered inside GlobalMonthProvider, for the granular
-  // change-set-driven broadcast that replaced it; F17 explains why that
-  // couldn't stay inside this same interval).
+  // 45s per §2 of the perf/sync spec. AuthGate no longer owns an interval of
+  // its own: these are integration assertions over the ONE timer it now
+  // composes, the <SyncTick/> it renders inside GlobalMonthProvider, which
+  // calls the shared runSync() (workspaceSync.ts). With no month selected --
+  // the case here -- that run skips the data probe and re-syncs permissions
+  // only, which is why loadWorkspaceFiles is the observable effect.
   const AUTO_REFRESH_INTERVAL_MS = 45_000;
 
   beforeEach(() => {
@@ -626,7 +626,7 @@ describe("AuthGate — permission auto-refresh", () => {
     );
   });
 
-  it("schedules a 3-minute interval that re-syncs users/permissions from disk for a real session", async () => {
+  it("schedules a single 45s interval that re-syncs users/permissions from disk for a real session", async () => {
     vi.spyOn(authSession, "readRealSession").mockReturnValue({
       role: "employee",
       username: NON_SEED_USERNAME,

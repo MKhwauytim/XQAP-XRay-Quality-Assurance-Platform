@@ -4,6 +4,7 @@ import { readSession } from "../../../../../auth/authSession";
 import { usePermissions } from "../../../../../auth/usePermissions";
 import { PageHeader } from "../../../../../components/PageHeader/PageHeader";
 import { logError, logRejection } from "../../../../../data/storage/errorLogger";
+import { thrownErrorText, userFacingErrorText } from "../../../../../data/storage/writeErrorText";
 import {
   loadEmployeeAnswers,
   upsertItemAnswer,
@@ -284,7 +285,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     setStatusMsg(
       result.ok
         ? { type: "ok", text: "تم تعيين نموذج الفحص." }
-        : { type: "error", text: result.error }
+        : { type: "error", text: userFacingErrorText(result.error, "xrayReferrals:template-selection") }
     );
   }
 
@@ -631,14 +632,17 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         ]);
         setStatusMsg({ type: "ok", text: "تم التقديم." });
       } else {
-        setStatusMsg({ type: "error", text: result.error });
+        setStatusMsg({ type: "error", text: userFacingErrorText(result.error, "xrayReferrals:result") });
       }
     } catch (error) {
       setStatusMsg({
         type: "error",
+        // Raw thrown-error text is internal English (Chromium DOMException
+        // wording, safeWrite validation strings) and has no place in an Arabic
+        // UI -- map it, keep the detail in the admin error log.
         text: error instanceof MonthClosedError
           ? getLabels().msg_month_closed_write_blocked
-          : error instanceof Error ? error.message : "خطأ غير معروف",
+          : thrownErrorText(error),
       });
     }
   }
@@ -663,14 +667,17 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         setStatusMsg({ type: "ok", text: getLabels().msg_reopen_done });
         await loadData();
       } else {
-        setStatusMsg({ type: "error", text: result.error });
+        setStatusMsg({ type: "error", text: userFacingErrorText(result.error, "xrayReferrals:result") });
       }
     } catch (error) {
       setStatusMsg({
         type: "error",
+        // Raw thrown-error text is internal English (Chromium DOMException
+        // wording, safeWrite validation strings) and has no place in an Arabic
+        // UI -- map it, keep the detail in the admin error log.
         text: error instanceof MonthClosedError
           ? getLabels().msg_month_closed_write_blocked
-          : error instanceof Error ? error.message : "خطأ غير معروف",
+          : thrownErrorText(error),
       });
     }
   }
@@ -703,14 +710,17 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         });
         await loadData();
       } else {
-        setStatusMsg({ type: "error", text: result.error });
+        setStatusMsg({ type: "error", text: userFacingErrorText(result.error, "xrayReferrals:result") });
       }
     } catch (error) {
       setStatusMsg({
         type: "error",
+        // Raw thrown-error text is internal English (Chromium DOMException
+        // wording, safeWrite validation strings) and has no place in an Arabic
+        // UI -- map it, keep the detail in the admin error log.
         text: error instanceof MonthClosedError
           ? getLabels().msg_month_closed_write_blocked
-          : error instanceof Error ? error.message : "خطأ غير معروف",
+          : thrownErrorText(error),
       });
     }
   }
@@ -811,8 +821,8 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           stageMappings,
         });
         if (!result.ok) {
-          setReplacementError(result.error);
-          setStatusMsg({ type: "error", text: result.error });
+          setReplacementError(userFacingErrorText(result.error, "xrayReferrals:replace"));
+          setStatusMsg({ type: "error", text: userFacingErrorText(result.error, "xrayReferrals:result") });
           return;
         }
         if (result.ok) setSampleMaster(result.updatedSample);
@@ -842,8 +852,8 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         };
         const result = await appendReplacementRequest(directoryHandle, folderForRow(entry.xrayImageId), request);
         if (!result.ok) {
-          setReplacementError(result.error);
-          setStatusMsg({ type: "error", text: result.error });
+          setReplacementError(userFacingErrorText(result.error, "xrayReferrals:replace"));
+          setStatusMsg({ type: "error", text: userFacingErrorText(result.error, "xrayReferrals:result") });
           return;
         }
         setReplacementDialog(null);
@@ -854,6 +864,25 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         // the currently open inspection panel.
         await loadData({ silent: true });
       }
+    } catch (error) {
+      // This block used to be `try { … } finally { … }` with no catch at all.
+      // executeReplacement can throw rather than return `{ ok: false }` — its
+      // month-lock gate and its directory resolution both run outside
+      // appendDistributionEvents' inner try (distributionStorage.ts) — and so
+      // can loadSampleMaster / loadMonthPopulationFinal above. Every one of
+      // those became an unhandled promise rejection that left the user staring
+      // at a dialog with no message and no idea whether the replacement had
+      // been applied. Surface it in Arabic and keep the raw detail in the
+      // admin error log.
+      let text: string;
+      if (error instanceof MonthClosedError) {
+        text = getLabels().msg_month_closed_write_blocked;
+      } else {
+        logError("xrayReferrals:handleReplace", error);
+        text = getLabels().msg_unexpected_write_error;
+      }
+      setReplacementError(text);
+      setStatusMsg({ type: "error", text });
     } finally {
       setReplacementBusy(false);
     }

@@ -138,12 +138,13 @@ describe("user-management permission sections", () => {
       />
     );
 
-    // view-error-log + edit-interface-labels live on `settings` (guest + admin only),
+    // view-error-log, edit-interface-labels and settings.syncInterval live on `settings`
+    // (guest + admin only),
     // so employee/supervisor/manager get the permanent notice -- not the recoverable
     // "enable the page first" hint they used to get.
     const notices = screen.getAllByText(SYSTEM_RESTRICTED_LABEL);
-    // 3 admin-only user-management features x 4 roles + 2 settings features x 3 roles.
-    expect(notices).toHaveLength(18);
+    // 3 admin-only user-management features x 4 roles + 3 settings features x 3 roles.
+    expect(notices).toHaveLength(21);
     // guest keeps a real toggle for the settings features -- the ceiling allows it.
     expect(screen.getAllByRole("checkbox").length).toBeGreaterThan(0);
   });

@@ -44,7 +44,66 @@ export interface MemoryDirectoryOptions {
    * discarded it" by inspecting returned values alone.
    */
   trackReads?: boolean;
+  /**
+   * Opt-in fault injection (defaults to none, so every existing test is
+   * unaffected). See SimulatedFault — this is how a UNC/SMB share's transient
+   * NotFoundError is reproduced deterministically.
+   */
+  faults?: SimulatedFault[];
+  /**
+   * Opt-in operation log: records every getFileHandle / getDirectoryHandle /
+   * getFile / createWritable call against this tree, retrievable via
+   * `getOperationLog(dir)`. Needed to assert *how many* attempts an operation
+   * made — the difference between "an absent file resolved to null" and "an
+   * absent file resolved to null after burning the whole retry budget" is
+   * invisible in the returned value and only shows up as latency.
+   */
+  trackOperations?: boolean;
 }
+
+/**
+ * A deterministic stand-in for a flaky network share.
+ *
+ * The bug this exists for (see transientFileErrors.ts) is that on a UNC/SMB
+ * share, `getFileHandle` can raise NotFoundError for a file whose bytes are
+ * already durably written — the client's directory listing simply has not
+ * caught up. `times` is what makes that reproducible: throw for the first N
+ * matching calls, then behave normally, exactly like a listing that refreshes
+ * a few milliseconds later.
+ */
+export type SimulatedFault = {
+  /** Which handle method to fail. */
+  operation: "getFileHandle" | "getDirectoryHandle" | "getFile" | "createWritable";
+  /**
+   * Entry name to match. Omit to match every name. For `getFile` /
+   * `createWritable` this is the file handle's own name.
+   */
+  name?: string;
+  /**
+   * Match by name suffix instead of an exact name — for entries whose name is
+   * generated at runtime (the distribution event segments are
+   * `{deviceId}-{sessionId}.ndjson`, so only the suffix is knowable in a test).
+   */
+  nameSuffix?: string;
+  /** Only match calls with this `create` flag. Omit to match either. */
+  create?: boolean;
+  /** DOMException `name` to throw. Defaults to "NotFoundError". */
+  errorName?: string;
+  /**
+   * How many matching calls to fail before letting them through. Defaults to
+   * 1. Use `Number.POSITIVE_INFINITY` for a permanent failure.
+   */
+  times?: number;
+};
+
+type FaultState = { faults: SimulatedFault[]; consumed: number[] };
+type OperationLogState = { entries: OperationLogEntry[] };
+
+export type OperationLogEntry = {
+  operation: SimulatedFault["operation"];
+  name: string;
+  create?: boolean;
+};
 
 type SharedPermission = { state: SimulatedPermissionState; requestOutcome: SimulatedPermissionState };
 type ReadLogState = { entries: string[] };
@@ -92,6 +151,71 @@ export function clearReadLog(dir: DirectoryHandleLike): void {
   if (state) state.entries = [];
 }
 
+// Same whole-tree sharing as permissionRegistry: a fault plan describes the
+// simulated share, not one handle.
+const faultRegistry = new WeakMap<DirectoryHandleLike, FaultState>();
+const operationLogRegistry = new WeakMap<DirectoryHandleLike, OperationLogState>();
+
+/**
+ * Test-only: install (or replace) the fault plan for a tree after it was
+ * created. Installing faults *after* the seeding phase is usually what you
+ * want — it keeps `createMemoryDirectory` + fixture setup on the happy path and
+ * makes only the operation under test flaky.
+ */
+export function setSimulatedFaults(dir: DirectoryHandleLike, faults: SimulatedFault[]): void {
+  const state = faultRegistry.get(dir);
+  if (!state) return;
+  state.faults = faults;
+  state.consumed = faults.map(() => 0);
+}
+
+/** Test-only: remove every installed fault (equivalent to `setSimulatedFaults(dir, [])`). */
+export function clearSimulatedFaults(dir: DirectoryHandleLike): void {
+  setSimulatedFaults(dir, []);
+}
+
+/** Test-only: operation log for a tree created with `{ trackOperations: true }`. Snapshot copy. */
+export function getOperationLog(dir: DirectoryHandleLike): OperationLogEntry[] {
+  return [...(operationLogRegistry.get(dir)?.entries ?? [])];
+}
+
+/** Test-only: clear the operation log in place. */
+export function clearOperationLog(dir: DirectoryHandleLike): void {
+  const state = operationLogRegistry.get(dir);
+  if (state) state.entries = [];
+}
+
+function simulatedError(errorName: string, entryName: string): Error {
+  const error = new Error(`Simulated ${errorName} for "${entryName}".`);
+  error.name = errorName;
+  return error;
+}
+
+/**
+ * Records the call, then throws if a fault matches and still has budget left.
+ * Budget is consumed only when the fault actually fires, so `times: 1` means
+ * "the first matching call fails and every later one succeeds".
+ */
+function applyFaults(
+  faultState: FaultState | null,
+  operationLog: OperationLogState | null,
+  entry: OperationLogEntry
+): void {
+  operationLog?.entries.push(entry);
+  if (!faultState) return;
+  for (let index = 0; index < faultState.faults.length; index += 1) {
+    const fault = faultState.faults[index]!;
+    if (fault.operation !== entry.operation) continue;
+    if (fault.name !== undefined && fault.name !== entry.name) continue;
+    if (fault.nameSuffix !== undefined && !entry.name.endsWith(fault.nameSuffix)) continue;
+    if (fault.create !== undefined && fault.create !== (entry.create ?? false)) continue;
+    const limit = fault.times ?? 1;
+    if (faultState.consumed[index]! >= limit) continue;
+    faultState.consumed[index] += 1;
+    throw simulatedError(fault.errorName ?? "NotFoundError", entry.name);
+  }
+}
+
 type MemoryNode = {
   files: Map<string, { content: string }>;
   dirs: Map<string, MemoryNode>;
@@ -106,18 +230,22 @@ function makeFileHandle(
   node: MemoryNode,
   permission: SharedPermission,
   path: string,
-  readLog: ReadLogState | null
+  readLog: ReadLogState | null,
+  faultState: FaultState | null,
+  operationLog: OperationLogState | null
 ): FileHandleLike {
   return {
     kind: "file",
     name,
     getFile: async () => {
+      applyFaults(faultState, operationLog, { operation: "getFile", name });
       readLog?.entries.push(path);
       const entry = node.files.get(name);
       const content = entry ? entry.content : "";
       return new File([content], name, { type: "application/json" });
     },
     createWritable: async () => {
+      applyFaults(faultState, operationLog, { operation: "createWritable", name });
       // Mirrors the real File System Access API: createWritable() itself
       // requires (and re-checks) readwrite permission at call time — a handle
       // obtained while permission was "granted" doesn't stay valid forever.
@@ -145,13 +273,20 @@ function makeDirectoryHandle(
   node: MemoryNode,
   permission: SharedPermission,
   path: string,
-  readLog: ReadLogState | null
+  readLog: ReadLogState | null,
+  faultState: FaultState | null,
+  operationLog: OperationLogState | null
 ): DirectoryHandleLike {
   // Build with extra `values` for in-memory iteration support, then cast
   const handle = {
     kind: "directory" as const,
     name,
     getFileHandle: async (fileName: string, options?: { create?: boolean }) => {
+      applyFaults(faultState, operationLog, {
+        operation: "getFileHandle",
+        name: fileName,
+        create: options?.create ?? false,
+      });
       const exists = node.files.has(fileName);
       if (!exists && !options?.create) {
         throw notFound(fileName);
@@ -168,9 +303,22 @@ function makeDirectoryHandle(
       if (!exists) {
         node.files.set(fileName, { content: "" });
       }
-      return makeFileHandle(fileName, node, permission, path ? `${path}/${fileName}` : fileName, readLog);
+      return makeFileHandle(
+        fileName,
+        node,
+        permission,
+        path ? `${path}/${fileName}` : fileName,
+        readLog,
+        faultState,
+        operationLog
+      );
     },
     getDirectoryHandle: async (dirName: string, options?: { create?: boolean }) => {
+      applyFaults(faultState, operationLog, {
+        operation: "getDirectoryHandle",
+        name: dirName,
+        create: options?.create ?? false,
+      });
       let child = node.dirs.get(dirName);
       if (!child) {
         if (!options?.create) {
@@ -182,7 +330,15 @@ function makeDirectoryHandle(
         child = createNode();
         node.dirs.set(dirName, child);
       }
-      return makeDirectoryHandle(dirName, child, permission, path ? `${path}/${dirName}` : dirName, readLog);
+      return makeDirectoryHandle(
+        dirName,
+        child,
+        permission,
+        path ? `${path}/${dirName}` : dirName,
+        readLog,
+        faultState,
+        operationLog
+      );
     },
     removeEntry: async (entryName: string, options?: { recursive?: boolean }) => {
       if (node.files.has(entryName)) {
@@ -210,18 +366,44 @@ function makeDirectoryHandle(
       }
       return "granted";
     },
+    // Yields real HANDLES, exactly as FileSystemDirectoryHandle.values() does.
+    // The narrow `{name, kind}` records this used to yield made it impossible
+    // for a test to observe that a caller re-opened an already-enumerated entry
+    // by name — the extra round trip that costs the most on a UNC/SMB share.
+    // Enumeration itself is one operation for the whole directory (that is what
+    // the real API does), so no per-entry entry is logged here; the per-entry
+    // cost a caller pays shows up as `getFile` (handle reused) or
+    // `getFileHandle` + `getFile` (handle discarded and re-opened by name).
     values: async function* () {
       for (const [fileName] of node.files) {
-        yield { name: fileName, kind: "file" as const };
+        yield makeFileHandle(
+          fileName,
+          node,
+          permission,
+          path ? `${path}/${fileName}` : fileName,
+          readLog,
+          faultState,
+          operationLog
+        );
       }
-      for (const [dirName] of node.dirs) {
-        yield { name: dirName, kind: "directory" as const };
+      for (const [dirName, child] of node.dirs) {
+        yield makeDirectoryHandle(
+          dirName,
+          child,
+          permission,
+          path ? `${path}/${dirName}` : dirName,
+          readLog,
+          faultState,
+          operationLog
+        );
       }
     }
   };
   const typedHandle = handle as DirectoryHandleLike;
   permissionRegistry.set(typedHandle, permission);
   if (readLog) readLogRegistry.set(typedHandle, readLog);
+  if (faultState) faultRegistry.set(typedHandle, faultState);
+  if (operationLog) operationLogRegistry.set(typedHandle, operationLog);
   return typedHandle;
 }
 
@@ -234,5 +416,14 @@ export function createMemoryDirectory(
     requestOutcome: options.writePermissionRequestOutcome ?? "granted"
   };
   const readLog: ReadLogState | null = options.trackReads ? { entries: [] } : null;
-  return makeDirectoryHandle(name, createNode(), permission, "", readLog);
+  // Always allocated (even with no faults) so setSimulatedFaults can install a
+  // plan later — the common shape is "seed the fixture cleanly, then make one
+  // operation flaky". An empty plan costs one comparison-free early return per
+  // call, so trees that never inject faults are unaffected.
+  const faultState: FaultState = {
+    faults: options.faults ?? [],
+    consumed: (options.faults ?? []).map(() => 0),
+  };
+  const operationLog: OperationLogState | null = options.trackOperations ? { entries: [] } : null;
+  return makeDirectoryHandle(name, createNode(), permission, "", readLog, faultState, operationLog);
 }

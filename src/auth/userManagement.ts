@@ -289,6 +289,11 @@ export const MANAGED_FEATURE_GROUPS: readonly FeatureGroup[] = [
         description: "إنشاء تصاميم التقارير وتعديلها وحذفها",
       },
       {
+        id: "settings.syncInterval",
+        label: "تعديل فترة المزامنة التلقائية",
+        description: "تغيير عدد الثواني بين عمليات المزامنة التلقائية لكل الأجهزة",
+      },
+      {
         id: "edit-interface-labels",
         label: "تعديل تسميات الواجهة",
         description: "تعديل نصوص الواجهة واستعادة قيمها الافتراضية من صفحة الإعدادات",
@@ -332,7 +337,7 @@ export const TAB_FEATURE_MAP: Readonly<Record<string, readonly string[]>> = {
   "user-management":    ["manage-users", "reset-passwords", "edit-permissions"],
   "reports":            ["export-reports", "report-designer.edit"],
   "archive":            ["archive.closeMonth", "archive.createBackup", "archive.restoreBackup"],
-  "settings":           ["view-error-log", "edit-interface-labels"],
+  "settings":           ["view-error-log", "edit-interface-labels", "settings.syncInterval"],
   "adhoc-import":       ["adhoc-import.ingest", "adhoc-import.assign"],
 };
 
@@ -388,6 +393,9 @@ const FEATURE_DEFAULTS: Record<string, Partial<Record<AuthRole, boolean>>> = {
   "report-designer.edit": { guest: false, employee: false, supervisor: false, manager: true },
   "view-error-log":       { guest: false, employee: false, supervisor: false, manager: false },
   "edit-interface-labels": { guest: false, employee: false, supervisor: false, manager: false },
+  // Admin-only by default: the cadence is workspace-wide, so a single careless
+  // change affects every client on the shared folder.
+  "settings.syncInterval": { guest: false, employee: false, supervisor: false, manager: false },
   // Admin-only feature by design (the tab itself is admin-only — see tabCatalog.ts);
   // no non-admin role gets it by default, matching manage-users/reset-passwords above.
   "adhoc-import.ingest":  { guest: false, employee: false, supervisor: false, manager: false },

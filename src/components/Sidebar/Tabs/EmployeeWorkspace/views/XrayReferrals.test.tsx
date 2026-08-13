@@ -38,6 +38,7 @@ import type { ItemAnswer } from "../../../../../data/answers/answerTypes";
 import type { PreparedPopulationRow } from "../../../../../data/population/populationTypes";
 import { clearErrors, getRecentErrors } from "../../../../../data/storage/errorLogger";
 import { getReplacementCandidatesIndexed } from "../../../../../data/distribution/replacementCandidateLookup";
+import { executeReplacement } from "../../../../../data/distribution/replacement";
 import { broadcastDataRefresh } from "../../../../../data/workspace/dataRefreshSignal";
 import {
   resetBootProgress,
@@ -62,6 +63,26 @@ vi.mock("../../../../../data/distribution/replacementCandidateLookup", () => ({
 }));
 
 const getReplacementCandidatesIndexedMock = vi.mocked(getReplacementCandidatesIndexed);
+
+// Partial mock: every test below keeps the REAL executeReplacement (the spread
+// plus the delegating vi.fn), so only a test that explicitly installs a
+// `…Once` override sees different behaviour. Needed because handleReplace's
+// missing error boundary can only be exercised by making the call throw rather
+// than return `{ ok: false }` — and the throwing sites in distributionStorage
+// (its month-lock gate and directory resolution, both outside the inner try)
+// are not reachable through the memory workspace without also breaking the
+// reads handleReplace performs first.
+vi.mock("../../../../../data/distribution/replacement", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../../../data/distribution/replacement")>();
+  return {
+    ...actual,
+    executeReplacement: vi.fn((...args: Parameters<typeof actual.executeReplacement>) =>
+      actual.executeReplacement(...args)
+    ),
+  };
+});
+
+const executeReplacementMock = vi.mocked(executeReplacement);
 
 vi.mock("../../../../../data/month/useGlobalMonth", () => ({
   useGlobalMonth: () => ({
@@ -607,6 +628,59 @@ describe("XrayReferrals post-success reloads (Bug 1 regression)", () => {
     // "loading" gate (checked above, and still true once everything settles).
     await waitFor(() => expect(screen.getAllByText("IMG-2").length).toBeGreaterThan(0));
     expect(screen.queryByText("جاري التحميل...")).not.toBeInTheDocument();
+  });
+
+  // handleReplace used to be `try { … } finally { setReplacementBusy(false) }`
+  // with no catch at all. executeReplacement can throw rather than return
+  // `{ ok: false }` — its month-lock gate and its distribution-directory
+  // resolution both sit outside appendDistributionEvents' inner try — and every
+  // such throw became an unhandled promise rejection: the dialog simply went
+  // quiet, with no message and no way to tell whether the replacement had been
+  // applied. On a UNC share (the reported case) that was the common outcome.
+  it("shows an Arabic error and logs the detail when executeReplacement throws instead of returning a failure result", async () => {
+    writeSession({ role: "employee", username: "emp-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root");
+    await seedAssignedSample(root, "emp-1");
+    await seedDraftableTemplate(root);
+
+    const replacementRow = makeRow("IMG-2");
+    getReplacementCandidatesIndexedMock.mockResolvedValue({ recommended: [replacementRow], all: [] });
+    await seedPopulationFinal(root, [replacementRow]);
+
+    clearErrors();
+    const notFound = new Error(
+      "A requested file or directory could not be found at the time an operation was processed."
+    );
+    notFound.name = "NotFoundError";
+    executeReplacementMock.mockRejectedValueOnce(notFound);
+
+    render(<XrayReferrals directoryHandle={root} />);
+    await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
+
+    fireEvent.click(await waitFor(() => screen.getByRole("button", { name: "استبدال العينة" })));
+    const dialog = await waitFor(() => screen.getByRole("dialog"), { timeout: 5000 });
+    fireEvent.change(within(dialog).getByLabelText(/سبب الاستبدال/), {
+      target: { value: "صورة غير واضحة" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "اختيار" }));
+
+    // Arabic, generic, and shown — not silence, and not the raw DOMException.
+    await waitFor(() =>
+      expect(screen.getAllByText(/تعذّر إتمام العملية بسبب خطأ غير متوقع أثناء الحفظ/).length)
+        .toBeGreaterThan(0)
+    );
+    expect(screen.queryByText(/could not be found at the time an operation/)).not.toBeInTheDocument();
+
+    // The raw detail still reaches the admin error log for diagnosis.
+    expect(
+      getRecentErrors().some(
+        (entry) =>
+          entry.context === "xrayReferrals:handleReplace" &&
+          entry.message.includes("could not be found")
+      )
+    ).toBe(true);
   });
 });
 

@@ -13,8 +13,9 @@ import {
 } from "lucide-react";
 import type { AuthRole, AuthSession } from "./authTypes";
 import { getManagedLoginUsers } from "./userManagement";
-import { broadcastDataRefresh } from "../data/workspace/dataRefreshSignal";
+import { runSync } from "../data/workspace/workspaceSync";
 import { useWorkspace } from "../data/workspace/useWorkspace";
+import { useGlobalMonth } from "../data/month/useGlobalMonth";
 import { GlobalMonthSelector } from "../components/GlobalMonthSelector/GlobalMonthSelector";
 import { useLabels, type Labels } from "../data/labels/useLabels";
 
@@ -71,19 +72,26 @@ export function AdminToolbar({
   const isImpersonating = effectiveRole !== session.role;
 
   const { directoryHandle, refreshPermissions } = useWorkspace();
+  const { selection } = useGlobalMonth();
   const workspaceName = directoryHandle?.name ?? null;
+  const monthFolderName = selection.kind === "existing" ? selection.folderName : null;
 
   const displayName = useMemo(() => {
     const match = getManagedLoginUsers().find((u) => u.username === session.username);
     return match?.displayName || session.username;
   }, [session.username]);
 
-  // Manual "refresh now" control: re-syncs users/roles/permissions from disk
-  // (see WorkspaceProvider.refreshPermissions) AND broadcasts the app-wide
-  // dataRefreshSignal so every mounted view re-reads its own workspace data
-  // (assigned samples, referrals/approvals, notifications, ...) — so an
-  // admin's edit or another employee's action reaches this session without
-  // waiting for the 5-minute auto-refresh in AuthGate or a full page reload.
+  // Manual "refresh now" control — the MANUAL trigger of the app's one sync
+  // path (`workspaceSync.ts`): it calls exactly the same runSync() the 45s
+  // automatic tick in SyncTick.tsx calls, with `manual: true`. That flag
+  // re-syncs users/roles/permissions from disk (see
+  // WorkspaceProvider.refreshPermissions), probes the selected month, and
+  // then broadcasts the app-wide dataRefreshSignal UNCONDITIONALLY — even
+  // when the probe found nothing — so every mounted view re-reads its own
+  // workspace data (assigned samples, referrals/approvals, notifications,
+  // ...) and every cache is purged. Pressing refresh because something looks
+  // stale has to reliably fix it, which is why the manual path does not stop
+  // at an empty change set the way the automatic one does.
   const [refreshState, setRefreshState] = useState<"idle" | "running" | "success" | "failed">("idle");
   const refreshResetTimer = useRef<number | null>(null);
 
@@ -96,12 +104,16 @@ export function AdminToolbar({
   const handleRefresh = useCallback(async () => {
     if (refreshState === "running") return;
     setRefreshState("running");
-    const ok = await refreshPermissions();
-    broadcastDataRefresh("manual");
-    setRefreshState(ok ? "success" : "failed");
+    const result = await runSync({
+      manual: true,
+      directoryHandle,
+      monthFolderName,
+      refreshPermissions,
+    });
+    setRefreshState(result.ok ? "success" : "failed");
     if (refreshResetTimer.current !== null) window.clearTimeout(refreshResetTimer.current);
     refreshResetTimer.current = window.setTimeout(() => setRefreshState("idle"), 2000);
-  }, [refreshPermissions, refreshState]);
+  }, [directoryHandle, monthFolderName, refreshPermissions, refreshState]);
 
   const refreshTitle =
     refreshState === "running" ? labels.toolbar_refresh_running

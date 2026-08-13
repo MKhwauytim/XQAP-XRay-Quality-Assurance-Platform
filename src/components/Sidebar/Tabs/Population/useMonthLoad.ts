@@ -275,7 +275,7 @@ export function useMonthLoad(params: {
         // catch up once it's done.
         //
         // Known, accepted tradeoff: that "next tick" only exists for the
-        // periodic 3-minute timer. A user's MANUAL refresh-button press that
+        // automatic 45s timer. A user's MANUAL refresh-button press that
         // lands during an in-flight load is dropped outright, with no retry --
         // they get the in-flight load's own (near-identical, moments-old)
         // result and have to press again for anything newer. Deliberate: the

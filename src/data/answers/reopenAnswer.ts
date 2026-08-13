@@ -13,6 +13,7 @@
 
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { ensureMonthWritable } from "../population/monthLock";
+import { userFacingErrorText } from "../storage/writeErrorText";
 import { loadEmployeeAnswers, reopenItemAnswer } from "./answerStorage";
 import {
   appendDistributionEvent,
@@ -104,7 +105,10 @@ export async function reopenSubmittedAnswer(params: {
         })
       );
       if (!eventResult.ok) {
-        return { ok: false, error: eventResult.error };
+        return {
+          ok: false,
+          error: userFacingErrorText(eventResult.error, "reopenAnswer:append-event"),
+        };
       }
 
       // A6b: refresh the derived cache + employee sample mirrors after the

@@ -22,6 +22,8 @@ import {
   DISTRIBUTION_EVENTS_DIR,
   appendDistributionEventSegment,
   distributionEventSetId,
+  getDistributionDeviceId,
+  getDistributionSessionId,
   distributionEventSetIdFromIds,
   mergeDistributionEvents,
   readDistributionEventSegmentDelta,
@@ -51,10 +53,18 @@ type AppendDistributionEventsOptions = {
 async function writeDistributionEventBatch(
   directory: DirectoryHandleLike,
   events: DistributionEvent[],
+  scopeId: string,
   onProgress?: AppendDistributionEventsOptions["onProgress"]
 ): Promise<void> {
   onProgress?.({ phase: "events", completed: 0, total: events.length });
-  await appendDistributionEventSegment(directory, events);
+  // `scopeId` gives the "have I already written this segment" memo stable
+  // workspace+month identity — without it a workspace switch mid-session leaves
+  // a stale name-keyed hit that costs the whole retry ladder on the next append.
+  await appendDistributionEventSegment(directory, events, {
+    deviceId: getDistributionDeviceId(),
+    sessionId: getDistributionSessionId(),
+    scopeId,
+  });
   onProgress?.({ phase: "events", completed: events.length, total: events.length });
 }
 
@@ -245,16 +255,32 @@ type DistributionLogStamp = { revision: number; writeToken: string | undefined }
  * agrees ..." test below for the read/write split this depends on, and the
  * "revision only advances on an event append" test that guards it directly.
  */
+export type DistributionStampDirs = {
+  /** `2-samples/{month}/1-main`, or null when it does not exist. */
+  currentDir: DirectoryHandleLike | null;
+  /** The legacy `1-population/{month}` location, or null. */
+  legacyDir: DirectoryHandleLike | null;
+};
+
 export async function readDistributionLogStamp(
   directoryHandle: DirectoryHandleLike,
-  monthFolderName: string
+  monthFolderName: string,
+  /**
+   * Pre-resolved directories, for callers that have ALREADY opened them — the
+   * sync probe opens both for its other families, and on a UNC/SMB share
+   * re-resolving each one costs 3 and 2 `getDirectoryHandle` round trips
+   * respectively, every tick, on every client. Omit to resolve normally.
+   */
+  resolved?: DistributionStampDirs
 ): Promise<DistributionLogStamp> {
-  const currentDir = await openOptionalDirectory(() =>
-    getDistributionDir(directoryHandle, monthFolderName, false)
-  );
-  const legacyDir = await openOptionalDirectory(() =>
-    getLegacyDistributionDir(directoryHandle, monthFolderName)
-  );
+  const currentDir =
+    resolved !== undefined
+      ? resolved.currentDir
+      : await openOptionalDirectory(() => getDistributionDir(directoryHandle, monthFolderName, false));
+  const legacyDir =
+    resolved !== undefined
+      ? resolved.legacyDir
+      : await openOptionalDirectory(() => getLegacyDistributionDir(directoryHandle, monthFolderName));
   const currentLog = normalizeCompatibilityLog(
     await readCompatibilityLog(currentDir, `Corrupt distribution compatibility log: ${LOG_FILE}`)
   );
@@ -354,7 +380,12 @@ export async function appendDistributionEvents(
   // projection is updated. Distinct writers therefore do not share a target.
   const eventDir = await getDistributionDir(directoryHandle, monthFolderName);
   try {
-    await writeDistributionEventBatch(eventDir, events, options?.onProgress);
+    await writeDistributionEventBatch(
+      eventDir,
+      events,
+      `${workspaceScopeId(directoryHandle)}|${monthFolderName}`,
+      options?.onProgress
+    );
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }

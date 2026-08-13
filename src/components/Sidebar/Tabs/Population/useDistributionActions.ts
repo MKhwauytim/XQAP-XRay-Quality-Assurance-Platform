@@ -28,6 +28,7 @@ import type { SampleMasterData } from "../../../../data/sampling/sampleTypes";
 import { writeEmployeeXlsx } from "../../../../data/answers/employeeXlsx";
 import { getLabels } from "../../../../data/labels/labelsStore";
 import { logError, logRejection } from "../../../../data/storage/errorLogger";
+import { userFacingErrorText } from "../../../../data/storage/writeErrorText";
 import { appendWorkspaceAction } from "../../../../data/audit/actionLog";
 import { buildAssignedEntryMap, distributionErrorText } from "./populationWorkflowHelpers";
 
@@ -202,7 +203,7 @@ export function useDistributionActions(params: {
         await refreshDistribution(monthFolderName, result.log);
         setDistributionMessage({ type: "ok", text: "تم التعيين." });
       } else {
-        setDistributionMessage({ type: "error", text: result.error });
+        setDistributionMessage({ type: "error", text: userFacingErrorText(result.error, "distribution:action-result") });
       }
     } catch (error) {
       setDistributionMessage({ type: "error", text: distributionErrorText(error, getLabels().msg_month_closed_write_blocked) });
@@ -252,7 +253,7 @@ export function useDistributionActions(params: {
         await refreshDistribution(monthFolderName, result.log);
         setDistributionMessage({ type: "ok", text: "تم إعادة التعيين." });
       } else {
-        setDistributionMessage({ type: "error", text: result.error });
+        setDistributionMessage({ type: "error", text: userFacingErrorText(result.error, "distribution:action-result") });
       }
     } catch (error) {
       setDistributionMessage({ type: "error", text: distributionErrorText(error, getLabels().msg_month_closed_write_blocked) });
@@ -288,7 +289,7 @@ export function useDistributionActions(params: {
         await refreshDistribution(monthFolderName, result.log);
         setDistributionMessage({ type: "ok", text: "تم تعليم الصف كمكتمل." });
       } else {
-        setDistributionMessage({ type: "error", text: result.error });
+        setDistributionMessage({ type: "error", text: userFacingErrorText(result.error, "distribution:action-result") });
       }
     } catch (error) {
       setDistributionMessage({ type: "error", text: distributionErrorText(error, getLabels().msg_month_closed_write_blocked) });
@@ -324,7 +325,7 @@ export function useDistributionActions(params: {
         await refreshDistribution(monthFolderName, result.log);
         setDistributionMessage({ type: "ok", text: "تم تسجيل طلب الاستبدال." });
       } else {
-        setDistributionMessage({ type: "error", text: result.error });
+        setDistributionMessage({ type: "error", text: userFacingErrorText(result.error, "distribution:action-result") });
       }
     } catch (error) {
       setDistributionMessage({ type: "error", text: distributionErrorText(error, getLabels().msg_month_closed_write_blocked) });
@@ -372,7 +373,7 @@ export function useDistributionActions(params: {
         setDistributionProgress({ percent: 100, message: "اكتمل حفظ التوزيع بنجاح." });
         setDistributionMessage({ type: "ok", text: "تم تطبيق وحفظ التوزيع الجماعي بنجاح." });
       } else {
-        setDistributionMessage({ type: "error", text: result.error });
+        setDistributionMessage({ type: "error", text: userFacingErrorText(result.error, "distribution:action-result") });
       }
     } catch (error) {
       setDistributionMessage({ type: "error", text: distributionErrorText(error, getLabels().msg_month_closed_write_blocked) });
