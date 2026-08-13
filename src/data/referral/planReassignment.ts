@@ -28,6 +28,32 @@ export type ReassignPlan = {
 };
 
 /**
+ * Target-independent half of the eligibility rule: can this row move at all?
+ *
+ * Split out of `planReassignment` so the selection bar can count exactly what
+ * a click will request *before* a target employee has been chosen. The bar
+ * shows these counts on its buttons, so any drift between this predicate and
+ * the loop below would put a number on screen that the submit path then
+ * quietly reduces — which is precisely the "the buttons don't work great"
+ * complaint. `planReassignment` calls it rather than repeating the checks.
+ *
+ * `already-assigned-to-target` is deliberately NOT here: it needs a target, so
+ * it can only be reported once one is picked (the dialog does that).
+ */
+export function reassignBlockedReason(
+  entry: Pick<DistributionEntry, "status">
+): Extract<ReassignSkipReason, "terminal-completed" | "terminal-replaced"> | null {
+  if (entry.status === "completed") return "terminal-completed";
+  if (entry.status === "replaced") return "terminal-replaced";
+  return null;
+}
+
+/** Convenience wrapper for the counting call sites. */
+export function isReassignEligible(entry: Pick<DistributionEntry, "status">): boolean {
+  return reassignBlockedReason(entry) === null;
+}
+
+/**
  * Pure planning step, shared by the confirmation-dialog preview and the
  * executor below so both always agree on what will actually happen. Uses a
  * single Map lookup per id (O(n)) instead of Array#find per id (O(n×m)) —
@@ -55,12 +81,9 @@ export function planReassignment(
       skipped.push({ xrayImageId, reason: "not-found" });
       continue;
     }
-    if (entry.status === "completed") {
-      skipped.push({ xrayImageId, reason: "terminal-completed" });
-      continue;
-    }
-    if (entry.status === "replaced") {
-      skipped.push({ xrayImageId, reason: "terminal-replaced" });
+    const blocked = reassignBlockedReason(entry);
+    if (blocked) {
+      skipped.push({ xrayImageId, reason: blocked });
       continue;
     }
     if (entry.assignedTo === reassignedTo) {
