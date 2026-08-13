@@ -41,7 +41,8 @@ import {
   isEnvelope,
   simpleHash,
   streamJsonStringify,
-  validateEnvelope,
+  validateEnvelopeStructure,
+  verifyContentHash,
   wrap,
   unwrap,
   type JsonMetadata,
@@ -196,21 +197,52 @@ async function removeQuietly(
   }
 }
 
+// Above this size, a read validates the envelope's structure but does not
+// recompute its content hash.
+//
+// `hashJsonValue` re-serializes the whole payload, so the check costs O(payload)
+// and — measured on a 500k-row month — spends ~35s of blocked main thread on top
+// of a ~7s JSON.parse, i.e. the integrity check cost ~5x more than parsing the
+// file it checked. It ran on *every* parse with no threshold, so it was paid by
+// every replacement confirm, referral approval, report and export.
+//
+// What is retained: corruption that breaks JSON syntax is still caught by
+// JSON.parse, and a structurally invalid envelope is still rejected — both still
+// fall back to `.bak`. Small files (the contended, frequently-rewritten ones)
+// still get the full hash check, because at this size it is microseconds.
+// Large payloads instead rely on the write path's byte-exact read-back
+// comparison, which is a strictly stronger guarantee than re-hashing, and on
+// `verifyContentHash` being called explicitly by integrity scanning.
+const HASH_VERIFY_SIZE_LIMIT = 512 * 1024; // 512 KB
+
 function parseValidJson(text: string | null): unknown | null {
   if (text === null) {
     return null;
   }
   try {
     const parsed = JSON.parse(text);
-    return validateEnvelope(parsed) ? parsed : null;
+    if (!validateEnvelopeStructure(parsed)) {
+      return null;
+    }
+    if (text.length <= HASH_VERIFY_SIZE_LIMIT && !verifyContentHash(parsed)) {
+      return null;
+    }
+    return parsed;
   } catch {
     return null;
   }
 }
 
-// Large files still get a raw read-back comparison, but skip the extra JSON.parse
-// to avoid doubling parse cost for population.final.json-sized writes.
-const VERIFY_SIZE_LIMIT = 512 * 1024; // 512 KB
+// Phase 1.3 removed VERIFY_SIZE_LIMIT: read-back verification is now byte-exact
+// at every size, so there is no longer a threshold at which the check weakens.
+
+// Phase 1.10: above this size a file is written compact rather than 2-space
+// indented. Pretty-printing exists so a human can open a workspace file in a
+// text editor; that stops being useful long before 512 KB, and the indentation
+// measured 1.35x inflation on every byte written, read, hashed and sent over
+// the share. 64 KB keeps every genuinely hand-inspectable file readable while
+// taking the inflation off the mid-size contended files.
+const PRETTY_PRINT_SIZE_LIMIT = 64 * 1024; // 64 KB
 
 // A RangeError thrown by JSON.stringify when its output would exceed the
 // engine's max string length. When this is hit, fall back to the streamed
@@ -367,7 +399,7 @@ async function verifyStreamedFile(
 
 // Observability only (B task 2) — the write itself is unchanged; these are
 // fired around the same steps safeWriteJson already performs (up to 5 full-file
-// passes for files over VERIFY_SIZE_LIMIT: .bak snapshot, stage .tmp, verify
+// passes for a large file: .bak snapshot, stage .tmp, verify
 // staged, commit live, verify committed). Population.final.json-sized writes can
 // take 10-15 minutes on a slow disk; before this, the UI's progress bar tracked
 // only processPopulation's in-memory chunking, which finishes first — the write
@@ -511,10 +543,10 @@ export async function safeWriteJson<T>(
 
     // Small-file path (unchanged): pretty-print for readability when the compact
     // result is small enough to stay well under the ceiling; otherwise compact.
-    const skipVerify = compact.length > VERIFY_SIZE_LIMIT;
-    const serialized = skipVerify
-      ? `${compact}\n`
-      : `${JSON.stringify(nextValue, null, 2)}\n`;
+    const serialized =
+      compact.length > PRETTY_PRINT_SIZE_LIMIT
+        ? `${compact}\n`
+        : `${JSON.stringify(nextValue, null, 2)}\n`;
 
     // 1. Snapshot the current good file to .bak (the rollback source).
     if (parsedCurrent) {
@@ -528,9 +560,12 @@ export async function safeWriteJson<T>(
     await writeText(dir, tmpName, serialized);
     reportProgress(onProgress, "verifying-staged");
     const staged = await readText(dir, tmpName, { retryMissing: true });
-    const stagedOk = skipVerify
-      ? staged === serialized
-      : parseValidJson(staged) !== null;
+    // Phase 1.3: byte-exact comparison for every size, not just large files.
+    // The old small-file check was `does it parse` — which a *peer's* valid
+    // envelope also passes, so a concurrent writer's file could be accepted as
+    // our own. Comparing against the exact bytes we meant to write is strictly
+    // stronger and costs less (no parse, no re-hash).
+    const stagedOk = staged === serialized;
     if (!stagedOk) {
       await removeQuietly(dir, tmpName);
       throw new Error(`Safe-write staging failed for ${fileName}.`);
@@ -541,9 +576,7 @@ export async function safeWriteJson<T>(
     await writeText(dir, fileName, serialized);
     reportProgress(onProgress, "verifying-committed");
     const verify = await readText(dir, fileName, { retryMissing: true });
-    const verifyOk = skipVerify
-      ? verify === serialized
-      : parseValidJson(verify) !== null;
+    const verifyOk = verify === serialized;
     if (!verifyOk) {
       const bak = await readText(dir, `${fileName}.bak`);
       if (parseValidJson(bak) !== null) {
@@ -556,15 +589,11 @@ export async function safeWriteJson<T>(
       // No usable .bak (first write, or .bak corrupt): the staged .tmp WAS
       // verified before commit — promote it instead of losing the data.
       const staged2 = await readText(dir, tmpName, { retryMissing: true });
-      const staged2Ok = skipVerify
-        ? staged2 === serialized
-        : parseValidJson(staged2) !== null;
+      const staged2Ok = staged2 === serialized;
       if (staged2Ok) {
         await writeText(dir, fileName, staged2 as string);
         const check = await readText(dir, fileName, { retryMissing: true });
-        const checkOk = skipVerify
-          ? check === serialized
-          : parseValidJson(check) !== null;
+        const checkOk = check === serialized;
         if (checkOk) {
           await removeQuietly(dir, tmpName);
           return; // recovered — the write succeeded via promotion
@@ -604,12 +633,11 @@ export async function safeWriteJsonText(
     if (!isStringLengthError(error)) throw error;
   }
   let normalized: string | null = null;
-  let skipVerify = false;
   if (compact !== null && compact.length <= streamingForcedSizeLimit) {
-    skipVerify = compact.length > VERIFY_SIZE_LIMIT;
-    normalized = skipVerify
-      ? `${compact}\n`
-      : `${JSON.stringify(parsed, null, 2)}\n`;
+    normalized =
+      compact.length > PRETTY_PRINT_SIZE_LIMIT
+        ? `${compact}\n`
+        : `${JSON.stringify(parsed, null, 2)}\n`;
   }
   const tmpName = `${fileName}.tmp`;
 
@@ -645,9 +673,7 @@ export async function safeWriteJsonText(
 
     await writeText(dir, tmpName, normalized);
     const staged = await readText(dir, tmpName, { retryMissing: true });
-    const stagedOk = skipVerify
-      ? staged === normalized
-      : parseValidJson(staged) !== null;
+    const stagedOk = staged === normalized;
     if (!stagedOk) {
       await removeQuietly(dir, tmpName);
       throw new Error(`Safe-write staging failed for ${fileName}.`);
@@ -655,9 +681,7 @@ export async function safeWriteJsonText(
 
     await writeText(dir, fileName, normalized);
     const verify = await readText(dir, fileName, { retryMissing: true });
-    const verifyOk = skipVerify
-      ? verify === normalized
-      : parseValidJson(verify) !== null;
+    const verifyOk = verify === normalized;
     if (!verifyOk) {
       const bak = await readText(dir, `${fileName}.bak`);
       if (parseValidJson(bak) !== null) {

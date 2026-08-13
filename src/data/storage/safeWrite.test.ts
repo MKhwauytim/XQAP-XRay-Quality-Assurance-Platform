@@ -706,3 +706,63 @@ test("safeWriteJsonText streams large restore payloads and round-trips", async (
     expect(result.value.rows.map((r) => r.v)).toEqual([1, 2]);
   }
 });
+
+// --- Phase 1.1: content hash is size-gated on the read path -----------------
+// `hashJsonValue` re-serializes the whole payload, so verifying it on every
+// parse cost O(payload) and dominated large reads (~35s of a ~43s read on a
+// 500k-row month). These two tests pin the resulting contract: small payloads
+// still get the full check, large payloads are structurally validated only.
+
+async function writeTamperedEnvelope(
+  dir: ReturnType<typeof createMemoryDirectory>,
+  name: string,
+  data: unknown
+): Promise<void> {
+  // A structurally valid envelope whose contentHash does not match `data` —
+  // i.e. exactly what silent corruption or a hand-edit would produce.
+  const envelope = {
+    metadata: {
+      schemaVersion: 1,
+      revision: 1,
+      contentHash: "deadbeef",
+      writtenAt: new Date().toISOString(),
+    },
+    data,
+  };
+  const handle = await dir.getFileHandle(name, { create: true });
+  const writable = await handle.createWritable!();
+  await writable.write(JSON.stringify(envelope));
+  await writable.close();
+}
+
+test("1.1: a small payload with a mismatched content hash is still rejected", async () => {
+  const dir = createMemoryDirectory();
+  await writeTamperedEnvelope(dir, "small.json", { val: 1 });
+
+  const result = await safeReadJson<{ val: number }>(dir, "small.json");
+
+  // No valid live file and no .bak to recover from -> the read reports missing
+  // rather than handing back data whose hash does not match its header.
+  expect(result.ok).toBe(false);
+});
+
+test("1.1: a large payload is accepted without recomputing its content hash", async () => {
+  const dir = createMemoryDirectory();
+  // Comfortably over HASH_VERIFY_SIZE_LIMIT (512 KB) once serialized.
+  const rows = Array.from({ length: 20000 }, (_, i) => ({
+    xrayImageId: `XR-${i}`,
+    portName: "ميناء جدة الإسلامي",
+    stage: "stage-1",
+  }));
+  await writeTamperedEnvelope(dir, "large.json", { rows });
+
+  const result = await safeReadJson<{ rows: unknown[] }>(dir, "large.json");
+
+  // The hash is deliberately wrong; the read succeeds anyway because the
+  // payload is past the size gate. This is the behaviour change — asserted
+  // explicitly so it can never regress silently back to hashing every read.
+  expect(result.ok).toBe(true);
+  if (result.ok) {
+    expect(result.value.rows).toHaveLength(20000);
+  }
+});
