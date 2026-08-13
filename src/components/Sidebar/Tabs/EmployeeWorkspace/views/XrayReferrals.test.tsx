@@ -24,7 +24,7 @@ import type { SampleMasterData } from "../../../../../data/sampling/sampleTypes"
 import { safeWriteJson } from "../../../../../data/storage/safeWrite";
 import { getPopulationMonthDir, POPULATION_SUBFOLDERS } from "../../../../../data/workspace/workspacePaths";
 import { appendDistributionEvents, loadDistributionLog } from "../../../../../data/distribution/distributionStorage";
-import { buildAssignEvent, buildCompletedEvent, buildReplacedEvent } from "../../../../../data/distribution/distributionLog";
+import { buildAssignEvent, buildCompletedEvent, buildReassignEvent, buildReplacedEvent } from "../../../../../data/distribution/distributionLog";
 import { closeMonth, invalidateMonthLockCache } from "../../../../../data/population/monthLock";
 import type { MonthManifestData } from "../../../../../data/population/monthTypes";
 import { upsertItemAnswer } from "../../../../../data/answers/answerStorage";
@@ -798,7 +798,7 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
     fireEvent.click(screen.getByRole("button", { name: "تحديد الكل المطابق" }));
     await waitFor(() => expect(screen.getByText("1 محددة يدوياً")).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole("button", { name: "إعادة تعيين المحدد (1)" }));
+    fireEvent.click(screen.getByRole("button", { name: "إسناد المحدد (1)" }));
 
     const dialog = await waitFor(() => screen.getByRole("dialog"), { timeout: 5000 });
     expect(within(dialog).getByText(/العينات المحددة يدوياً \(1\)/)).toBeInTheDocument();
@@ -826,7 +826,7 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
     expect(referrals.requests[0]!.xrayImageIds).toEqual(["IMG-2"]);
   });
 
-  it("reports skipped rows with their reason and only reassigns the eligible subset (partial-failure reporting)", async () => {
+  it("counts only reassignable rows on the bar's buttons and never feeds a terminal row to the request (the button's number is what actually gets requested)", async () => {
     writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
     writeUserManagementState(createEmptyUserManagementState(), false);
 
@@ -841,7 +841,79 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
     render(<XrayReferrals directoryHandle={root} />);
     await waitFor(() => expect(screen.getAllByText("IMG-2").length).toBeGreaterThan(0));
 
-    fireEvent.click(screen.getByRole("button", { name: /إعادة تعيين الكل المطابق للتصفية/ }));
+    // Both rows match the filter, but only IMG-2 can move. The button must
+    // promise 1, not 2 — a count the submit path would then quietly reduce is
+    // exactly what made these buttons look broken. The raw filter total is
+    // still disclosed next to it, so nothing is hidden.
+    const filteredButton = await waitFor(() =>
+      screen.getByRole("button", { name: "إسناد الكل المطابق للتصفية (1)" })
+    );
+    expect(screen.getByText(/2 مطابقة للتصفية\/البحث الحالي.*1 قابلة للإسناد/)).toBeInTheDocument();
+
+    // "تحديد الكل المطابق" must not tick the completed row either.
+    fireEvent.click(screen.getByRole("button", { name: "تحديد الكل المطابق" }));
+    await waitFor(() => expect(screen.getByText("1 محددة يدوياً")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "إسناد المحدد (1)" })).toBeEnabled();
+
+    fireEvent.click(filteredButton);
+
+    const dialog = await waitFor(() => screen.getByRole("dialog"), { timeout: 5000 });
+    fireEvent.change(within(dialog).getByLabelText(/الموظف المستلم/), { target: { value: "jalgahamdi" } });
+
+    await waitFor(() =>
+      expect(within(dialog).getByText(/سيتم إرسال طلب إحالة 1 عينة إلى jalgahamdi/)).toBeInTheDocument()
+    );
+    // The terminal row never entered the id list, so there is nothing to skip
+    // and no warning to show — the count on the button was already the truth.
+    expect(within(dialog).queryByText(/لن يتم تضمين/)).not.toBeInTheDocument();
+    expect(within(dialog).getByText(/كل العينات المطابقة للتصفية الحالية \(1\)/)).toBeInTheDocument();
+
+    fireEvent.change(within(dialog).getByLabelText(/سبب الإحالة/), { target: { value: "إعادة توزيع العمل" } });
+    fireEvent.click(within(dialog).getByLabelText(/أؤكد مراجعة الملخص/));
+    fireEvent.click(within(dialog).getByRole("button", { name: "إرسال طلب الإحالة" }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/تم إرسال طلب إحالة 1 عينة إلى jalgahamdi/)).toBeInTheDocument()
+    );
+    expect(screen.queryByText(/تم تخطي/)).not.toBeInTheDocument();
+
+    const log = await loadDistributionLog(root, MONTH);
+    expect(log.events.filter((e) => e.eventType === "reassigned")).toHaveLength(0);
+
+    const referrals = await loadReferralLog(root, MONTH);
+    expect(referrals.requests).toHaveLength(1);
+    expect(referrals.requests[0]!.xrayImageIds).toEqual(["IMG-2"]);
+  });
+
+  it("keeps the skip report for what the bar's counts cannot know in advance — a row already owned by the chosen target", async () => {
+    // The planner's skip machinery is still load-bearing: 'already-assigned-to-target'
+    // depends on a target employee, which is only chosen inside the dialog, so it can
+    // never be reflected in a button count. This pins that the warning still renders
+    // and that the ineligible row is dropped from the written request.
+    writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root");
+    await seedTwoAssignedSamples(root, "sup-1");
+    // IMG-1 already belongs to the employee we are about to reassign to.
+    const moved = await appendDistributionEvents(root, MONTH, [
+      buildReassignEvent({
+        xrayImageId: "IMG-1",
+        assignedTo: "sup-1",
+        reassignedTo: "jalgahamdi",
+        eventBy: "sup-1",
+      }),
+    ]);
+    if (!moved.ok) throw new Error(`seed failed: ${moved.error}`);
+
+    render(<XrayReferrals directoryHandle={root} />);
+    // IMG-1 now belongs to jalgahamdi, so it is outside the default
+    // "المحالة لي" oversight view — widen to الكل to get both rows on screen.
+    fireEvent.click(await waitFor(() => screen.getByRole("button", { name: "الكل" })));
+    await waitFor(() => expect(screen.getAllByText("IMG-2").length).toBeGreaterThan(0));
+
+    // Both rows are pending, so the button legitimately counts 2 here.
+    fireEvent.click(await waitFor(() => screen.getByRole("button", { name: "إسناد الكل المطابق للتصفية (2)" })));
 
     const dialog = await waitFor(() => screen.getByRole("dialog"), { timeout: 5000 });
     fireEvent.change(within(dialog).getByLabelText(/الموظف المستلم/), { target: { value: "jalgahamdi" } });
@@ -850,7 +922,7 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
       expect(within(dialog).getByText(/سيتم إرسال طلب إحالة 1 عينة إلى jalgahamdi/)).toBeInTheDocument()
     );
     expect(within(dialog).getByText(/لن يتم تضمين 1 عينة/)).toBeInTheDocument();
-    expect(within(dialog).getByText(/مكتملة — تحتاج إعادة فتح أولاً/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/معيّنة للموظف المستهدف بالفعل/)).toBeInTheDocument();
 
     fireEvent.change(within(dialog).getByLabelText(/سبب الإحالة/), { target: { value: "إعادة توزيع العمل" } });
     fireEvent.click(within(dialog).getByLabelText(/أؤكد مراجعة الملخص/));
@@ -859,9 +931,6 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
     await waitFor(() =>
       expect(screen.getByText(/تم إرسال طلب إحالة 1 عينة إلى jalgahamdi.*تم تخطي 1 عينة/)).toBeInTheDocument()
     );
-
-    const log = await loadDistributionLog(root, MONTH);
-    expect(log.events.filter((e) => e.eventType === "reassigned")).toHaveLength(0);
 
     const referrals = await loadReferralLog(root, MONTH);
     expect(referrals.requests).toHaveLength(1);
@@ -889,7 +958,7 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
     render(<XrayReferrals directoryHandle={root} />);
     await waitFor(() => expect(screen.getAllByText("IMG-2").length).toBeGreaterThan(0));
 
-    fireEvent.click(screen.getByRole("button", { name: /إعادة تعيين الكل المطابق للتصفية/ }));
+    fireEvent.click(screen.getByRole("button", { name: /إسناد الكل المطابق للتصفية/ }));
     const dialog = await waitFor(() => screen.getByRole("dialog"), { timeout: 5000 });
     fireEvent.change(within(dialog).getByLabelText(/الموظف المستلم/), { target: { value: "jalgahamdi" } });
     await waitFor(() =>
@@ -942,7 +1011,7 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
     // reports both rows selected, not zero.
     await waitFor(() => expect(screen.getByText("2 محددة يدوياً")).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole("button", { name: "إعادة تعيين المحدد (2)" }));
+    fireEvent.click(screen.getByRole("button", { name: "إسناد المحدد (2)" }));
 
     const dialog = await waitFor(() => screen.getByRole("dialog"), { timeout: 5000 });
     expect(within(dialog).getByText(/العينات المحددة يدوياً \(2\)/)).toBeInTheDocument();
@@ -984,15 +1053,15 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
     await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
     expect(screen.getAllByText("IMG-2").length).toBeGreaterThan(0);
 
-    fireEvent.click(screen.getByRole("button", { name: /إعادة تعيين الكل المطابق للتصفية/ }));
+    fireEvent.click(screen.getByRole("button", { name: /إسناد الكل المطابق للتصفية/ }));
 
     const dialog = await waitFor(() => screen.getByRole("dialog"), { timeout: 5000 });
     expect(within(dialog).getByText(/كل العينات المطابقة للتصفية الحالية \(2\)/)).toBeInTheDocument();
   });
 
   it("produces the same request shape from all three sample-choosing methods (single sample, manual selection, whole filter)", async () => {
-    // The point of the unification: إسناد لموظف آخر, إعادة تعيين المحدد and
-    // إعادة تعيين الكل المطابق differ ONLY in how the id list is built. Any
+    // The point of the unification: إسناد لموظف آخر, إسناد المحدد and
+    // إسناد الكل المطابق differ ONLY in how the id list is built. Any
     // divergence in what they write is a regression.
     async function submitVia(open: () => void, expectedIds: string[]) {
       writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
@@ -1037,12 +1106,12 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
     // 2. A manual selection.
     await submitVia(() => {
       fireEvent.click(screen.getByRole("button", { name: "تحديد الكل المطابق" }));
-      fireEvent.click(screen.getByRole("button", { name: /إعادة تعيين المحدد/ }));
+      fireEvent.click(screen.getByRole("button", { name: /إسناد المحدد/ }));
     }, ["IMG-1", "IMG-2"]);
 
     // 3. Everything matching the current filter.
     await submitVia(() => {
-      fireEvent.click(screen.getByRole("button", { name: /إعادة تعيين الكل المطابق للتصفية/ }));
+      fireEvent.click(screen.getByRole("button", { name: /إسناد الكل المطابق للتصفية/ }));
     }, ["IMG-1", "IMG-2"]);
   });
 
@@ -1056,7 +1125,7 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
     render(<XrayReferrals directoryHandle={root} />);
     await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
 
-    fireEvent.click(screen.getByRole("button", { name: /إعادة تعيين الكل المطابق للتصفية/ }));
+    fireEvent.click(screen.getByRole("button", { name: /إسناد الكل المطابق للتصفية/ }));
     const dialog = await waitFor(() => screen.getByRole("dialog"), { timeout: 5000 });
     fireEvent.change(within(dialog).getByLabelText(/الموظف المستلم/), { target: { value: "jalgahamdi" } });
     await waitFor(() =>
@@ -1095,7 +1164,7 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
     fireEvent.click(await waitFor(() => screen.getByRole("button", { name: "الكل" })));
     await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
 
-    fireEvent.click(screen.getByRole("button", { name: /إعادة تعيين الكل المطابق للتصفية/ }));
+    fireEvent.click(screen.getByRole("button", { name: /إسناد الكل المطابق للتصفية/ }));
     const dialog = await waitFor(() => screen.getByRole("dialog"), { timeout: 5000 });
     fireEvent.change(within(dialog).getByLabelText(/الموظف المستلم/), { target: { value: "jalgahamdi" } });
 
@@ -1128,6 +1197,56 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
       const actions = await readWorkspaceActions(root);
       expect(actions.some((a) => a.action === "referral-requested")).toBe(true);
     });
+  });
+
+  it("gives a personal-scope employee the same one bar — including 'all matching the filter', which used to be an oversight-only capability", async () => {
+    // There were two bars: a personal one offering ONLY a manual selection and
+    // labelled إحالة المحدد, and an oversight one offering both methods under
+    // إعادة تعيين... Same dialog, same request, three names, and an arbitrary
+    // capability gap. One bar now serves both, so an employee can hand over a
+    // filtered slice of their own queue in one action.
+    writeSession({ role: "employee", username: "emp-1", loginAt: new Date().toISOString() });
+    writeUserManagementState(createEmptyUserManagementState(), false);
+
+    const root = createMemoryDirectory("root");
+    await seedTwoAssignedSamples(root, "emp-1");
+
+    render(<XrayReferrals directoryHandle={root} />);
+    await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
+
+    // The bar is visible with nothing selected (the old personal bar only
+    // appeared after a row was ticked, hiding its own select-all affordance).
+    expect(screen.getByText("0 محددة يدوياً")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "إسناد المحدد (0)" })).toBeDisabled();
+
+    const filteredButton = await waitFor(() =>
+      screen.getByRole("button", { name: "إسناد الكل المطابق للتصفية (2)" })
+    );
+    fireEvent.click(filteredButton);
+
+    const dialog = await waitFor(() => screen.getByRole("dialog"), { timeout: 5000 });
+    expect(within(dialog).getByRole("heading", { name: "إسناد لموظف آخر" })).toBeInTheDocument();
+    fireEvent.change(within(dialog).getByLabelText(/الموظف المستلم/), { target: { value: "jalgahamdi" } });
+    fireEvent.change(within(dialog).getByLabelText(/سبب الإحالة/), { target: { value: "إجازة" } });
+    await waitFor(() =>
+      expect(within(dialog).getByText(/سيتم إرسال طلب إحالة 2 عينة إلى jalgahamdi/)).toBeInTheDocument()
+    );
+    fireEvent.click(within(dialog).getByLabelText(/أؤكد مراجعة الملخص/));
+    fireEvent.click(within(dialog).getByRole("button", { name: "إرسال طلب الإحالة" }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/تم إرسال طلب إحالة 2 عينة إلى jalgahamdi/)).toBeInTheDocument()
+    );
+
+    const referrals = await loadReferralLog(root, MONTH);
+    expect(referrals.requests).toHaveLength(1);
+    expect(referrals.requests[0]!.status).toBe("pending");
+    expect(referrals.requests[0]!.fromEmployee).toBe("emp-1");
+    expect(referrals.requests[0]!.xrayImageIds.slice().sort()).toEqual(["IMG-1", "IMG-2"]);
+
+    // Still a request only — an employee cannot move their own work unilaterally.
+    const log = await loadDistributionLog(root, MONTH);
+    expect(log.events.filter((e) => e.eventType === "reassigned")).toHaveLength(0);
   });
 });
 

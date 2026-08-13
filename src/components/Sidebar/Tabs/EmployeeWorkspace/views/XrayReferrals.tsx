@@ -28,6 +28,7 @@ import {
   executeReplacement,
 } from "../../../../../data/distribution/replacement";
 import { submitReassignmentRequests } from "../../../../../data/referral/submitReassignment";
+import { isReassignEligible } from "../../../../../data/referral/planReassignment";
 import { appendWorkspaceAction } from "../../../../../data/audit/actionLog";
 import { getReplacementCandidatesIndexed } from "../../../../../data/distribution/replacementCandidateLookup";
 import { loadMonthPopulationFinal } from "../../../../../data/population/populationStorage";
@@ -83,8 +84,7 @@ import { formatStageLabel } from "../../../../../data/population/stageHelpers";
 import type { PreparedPopulationRow } from "../../../../../data/population/populationTypes";
 import {
   QueueToolbar,
-  SelectionActionBar,
-  BulkReassignSelectionBar,
+  ReassignSelectionBar,
   ReassignModal,
   SampleDetailPanel,
   StatusBadge,
@@ -220,6 +220,17 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   // their reassignment to another employee in one action, through the same
   // approval flow as إحالة and استبدال (see submitReassignmentRequests).
   const canBulkReassignReferrals = canMutate("bulk-reassign-referrals");
+  /**
+   * May this user file a reassignment (إسناد لموظف آخر) at all — from the
+   * inspection panel, a manual selection, or the whole active filter? Which
+   * permission answers that depends only on whose samples are in front of them:
+   * an oversight user is acting on other people's work (`bulk-reassign-referrals`),
+   * a personal-scope user on their own (`submit-referrals`). Beyond that the three
+   * entry points are one flow, so one flag gates the selection UI for all of them —
+   * previously the checkbox column could render for a personal-scope user who held
+   * no referral permission, giving them a selection with no action to take on it.
+   */
+  const canReassignSamples = canSeeAll ? canBulkReassignReferrals : canSubmitReferrals;
   const canSubmitAnswers = canMutate("submit-answers");
   const canReopenAnswer = canMutate("ew.reopenAnswer");
   // Batch B: when enabled for this role, the employee's self-service reopen request
@@ -366,12 +377,12 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       }
       return col;
     });
-    // Checkbox column: personal-scope users always get it (referral requests);
-    // oversight (canSeeAll) users get it only when permitted to bulk-reassign —
-    // otherwise they have no selection-driven action to take on it. The
-    // accessor returns a stable empty string; actual checked state is read from
-    // selectedIds inside renderCell so this memo doesn't re-create on every checkbox tick.
-    if (canSeeAll && !canBulkReassignReferrals) return mapped;
+    // Checkbox column: rendered exactly when the user can act on a selection —
+    // the same flag that renders the selection bar, so a checkbox never appears
+    // without the button that consumes it. The accessor returns a stable empty
+    // string; actual checked state is read from selectedIds inside renderCell so
+    // this memo doesn't re-create on every checkbox tick.
+    if (!canReassignSamples) return mapped;
     const selectCol: DataTableCol<DistributionEntry> = {
       id: SELECT_COL_ID,
       label: "",
@@ -380,7 +391,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
       accessor: () => "",
     };
     return [selectCol, ...mapped];
-  }, [baseColumns, stageMappings, canSeeAll, canBulkReassignReferrals, answersMap]);
+  }, [baseColumns, stageMappings, canReassignSamples, answersMap]);
 
   const effectiveColConfig = useMemo(
     () => colPreset ?? loadLocalColConfig() ?? buildDefaultColConfig(columns),
@@ -1116,6 +1127,22 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         // column (personal-scope users always; oversight users only when permitted
         // to bulk-reassign — see the `columns` memo above).
         const hasSelectColumn = columns[0]?.id === SELECT_COL_ID;
+        // Everything the bar reports and acts on is filtered through the SAME
+        // eligibility predicate the submit path uses (referral/planReassignment.ts),
+        // so a button that says N requests exactly N. A completed or replaced row
+        // can never be reassigned — counting it, or feeding it to the dialog only
+        // for the planner to drop it again, is what made these buttons look broken.
+        const selectableVisibleIds = filteredTableEntries
+          .filter(isReassignEligible)
+          .map((e) => e.xrayImageId);
+        // Selected ids are kept across filter changes and silent refreshes on
+        // purpose (cross-page selection), so they are re-checked against the
+        // CURRENT entries here: a row that has since been completed, replaced or
+        // dropped from the month must not be counted or submitted.
+        const eligibleSelectedIds = [...selectedIds].filter((id) => {
+          const entry = entriesById.get(id);
+          return entry !== undefined && isReassignEligible(entry);
+        });
         // Bug fix: SELECT_COL_ID is `alwaysVisible: true`, but DataTable's own
         // default-column-config builder (used whenever no saved preset exists yet —
         // i.e. every first-time user) only marks a column visible if its id is in
@@ -1126,43 +1153,15 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         // flow until a user happened to open "الأعمدة" and turn it on manually — a real
         // contributor to the reported "not able to do that" gap.
         const defaultVisibleCols = hasSelectColumn ? [SELECT_COL_ID, ...DEFAULT_VISIBLE] : DEFAULT_VISIBLE;
-        const selectableVisibleIds = filteredTableEntries
-          .filter((e) => e.status !== "replaced")
-          .map((e) => e.xrayImageId);
-        const showSelectionBar =
-          !canSeeAll &&
-          canSubmitReferrals &&
-          entries.length > 0 &&
-          selectedIds.size > 0;
-        const showBulkReassignBar =
-          canSeeAll &&
-          canBulkReassignReferrals &&
-          entries.length > 0;
         const tableEl = (
           <div className="ew-ref-queue">
-            {showSelectionBar && (
-              <SelectionActionBar
+            {canReassignSamples && entries.length > 0 && (
+              <ReassignSelectionBar
                 selectedCount={selectedIds.size}
-                visibleCount={selectableVisibleIds.length}
-                onReferSelected={() => {
-                  // Defense-in-depth: the button is already `disabled` when
-                  // selectedIds is empty, but a click must never be a silent
-                  // no-op if it's somehow reached anyway.
-                  if (selectedIds.size === 0) {
-                    setStatusMsg({ type: "error", text: "لا توجد عينات محددة يدوياً لإحالتها." });
-                    return;
-                  }
-                  openReassignModal([...selectedIds], "selected");
-                }}
-                onSelectVisible={() => selectAll(selectableVisibleIds)}
-                onClear={clearSelection}
-              />
-            )}
-            {showBulkReassignBar && (
-              <BulkReassignSelectionBar
-                selectedCount={selectedIds.size}
-                filteredCount={selectableVisibleIds.length}
-                onReassignSelected={() => openReassignModal([...selectedIds], "selected")}
+                eligibleSelectedCount={eligibleSelectedIds.length}
+                filteredCount={filteredTableEntries.length}
+                eligibleFilteredCount={selectableVisibleIds.length}
+                onReassignSelected={() => openReassignModal(eligibleSelectedIds, "selected")}
                 onReassignFiltered={() => openReassignModal(selectableVisibleIds, "filtered")}
                 onSelectAllFiltered={() => selectAll(selectableVisibleIds)}
                 onClear={clearSelection}
@@ -1250,7 +1249,9 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                       : undefined
                   }
                   onReassign={
-                    canSubmitReferrals && selEntry.assignedTo === username && selEntry.status === "pending"
+                    // Same authority as the selection bar (see canReassignSamples):
+                    // the panel is just a third way to build the id list.
+                    canReassignSamples && selEntry.assignedTo === username && selEntry.status === "pending"
                       ? (entry) => openReassignModal([entry.xrayImageId], "single")
                       : undefined
                   }

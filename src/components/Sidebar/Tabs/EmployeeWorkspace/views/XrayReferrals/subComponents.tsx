@@ -188,103 +188,99 @@ export function QueueToolbar({
   );
 }
 
-export function SelectionActionBar({
-  selectedCount,
-  visibleCount,
-  onReferSelected,
-  onSelectVisible,
-  onClear,
-}: {
-  selectedCount: number;
-  visibleCount: number;
-  onReferSelected: () => void;
-  onSelectVisible: () => void;
-  onClear: () => void;
-}) {
-  const selectedLabel = selectedCount.toLocaleString("ar-SA-u-nu-latn");
-  const visibleLabel = visibleCount.toLocaleString("ar-SA-u-nu-latn");
-
-  return (
-    <div className="ew-selection-bar" role="region" aria-label="إجراءات العينات المحددة">
-      <strong>{selectedLabel} عينة محددة</strong>
-      <span>{visibleLabel} ظاهرة قابلة للتحديد</span>
-      <div className="ew-selection-actions">
-        <button
-          type="button"
-          className="ew-btn-referral"
-          disabled={selectedCount === 0}
-          onClick={onReferSelected}
-        >
-          إحالة المحدد
-        </button>
-        <button type="button" className="ew-btn-secondary ew-btn-sm" onClick={onSelectVisible}>
-          تحديد الظاهر
-        </button>
-        <button type="button" className="ew-btn-secondary ew-btn-sm" onClick={onClear}>
-          إلغاء التحديد
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ── Bulk reassignment (oversight roles) ────────────────────────────────────────
-
 /**
- * Oversight-only selection bar (supervisor/manager/admin). Distinct from
- * SelectionActionBar (personal referral-request flow) both in wording and in
- * offering TWO separate counts/actions, per the owner's reported workflow
- * ("assign all my samples... or part of it... or a certain category I filter
- * to"): a manually-checked selection, and the FULL set currently matching the
- * active filter/search (not just the current page — `filteredCount` is fed
- * from DataTable's `onFilteredRowsChange`, which already reports the whole
- * filtered set pre-pagination). The two numbers and two buttons are shown
- * side by side so acting on "everything currently filtered" is never
- * conflated with "only what I've ticked".
+ * The one selection bar for إسناد لموظف آخر, used by every role that may file a
+ * reassignment — personal-scope employees and oversight roles alike.
+ *
+ * There used to be two bars: a personal `SelectionActionBar` ("إحالة المحدد",
+ * manual selection only) and an oversight `BulkReassignSelectionBar` ("إعادة
+ * تعيين المحدد" / "إعادة تعيين الكل المطابق للتصفية"). They opened the same
+ * dialog and wrote the same request, so the split bought nothing and cost
+ * three different names for one action plus an arbitrary capability gap — only
+ * oversight roles could act on "everything matching the filter". One bar, one
+ * name, both selection methods for everyone who holds the permission.
+ *
+ * Two counts sit side by side so "everything currently filtered" is never
+ * conflated with "only what I've ticked". `filteredCount` is fed from
+ * DataTable's `onFilteredRowsChange`, which reports the whole filtered set
+ * pre-pagination, i.e. all pages — not the visible page.
+ *
+ * Every count on a *button* is an eligible count (see `planReassignment`):
+ * the number shown is the number of samples the click will actually request.
+ * The raw selection/filter totals are shown as context next to it when they
+ * differ, so nothing is hidden — but the button never promises a number the
+ * submit path will then quietly reduce.
  */
-export function BulkReassignSelectionBar({
+export function ReassignSelectionBar({
   selectedCount,
+  eligibleSelectedCount,
   filteredCount,
+  eligibleFilteredCount,
   onReassignSelected,
   onReassignFiltered,
   onSelectAllFiltered,
   onClear,
 }: {
+  /** Rows the user has ticked, including any now-ineligible ones. */
   selectedCount: number;
+  /** Of those, the ones a reassignment request can actually carry. */
+  eligibleSelectedCount: number;
+  /** Rows matching the active filter/search across all pages. */
   filteredCount: number;
+  /** Of those, the ones a reassignment request can actually carry. */
+  eligibleFilteredCount: number;
   onReassignSelected: () => void;
   onReassignFiltered: () => void;
   onSelectAllFiltered: () => void;
   onClear: () => void;
 }) {
-  const selectedLabel = selectedCount.toLocaleString("ar-SA-u-nu-latn");
-  const filteredLabel = filteredCount.toLocaleString("ar-SA-u-nu-latn");
+  const ar = (n: number) => n.toLocaleString("ar-SA-u-nu-latn");
 
   return (
-    <div className="ew-selection-bar" role="region" aria-label="إجراءات إعادة التعيين الجماعي">
-      <strong>{selectedLabel} محددة يدوياً</strong>
-      <span>{filteredLabel} مطابقة للتصفية/البحث الحالي (كل الصفحات)</span>
+    <div className="ew-selection-bar" role="region" aria-label="إجراءات إسناد العينات">
+      <strong>{ar(selectedCount)} محددة يدوياً</strong>
+      <span>
+        {ar(filteredCount)} مطابقة للتصفية/البحث الحالي (كل الصفحات)
+        {eligibleFilteredCount !== filteredCount
+          ? ` — ${ar(eligibleFilteredCount)} قابلة للإسناد`
+          : ""}
+      </span>
       <div className="ew-selection-actions">
         <button
           type="button"
           className="ew-btn-referral"
-          disabled={selectedCount === 0}
+          disabled={eligibleSelectedCount === 0}
+          title={
+            selectedCount > eligibleSelectedCount
+              ? `${ar(selectedCount - eligibleSelectedCount)} من العينات المحددة مكتملة أو مستبدلة — لا يمكن إسنادها`
+              : undefined
+          }
           onClick={onReassignSelected}
         >
-          إعادة تعيين المحدد ({selectedLabel})
+          إسناد المحدد ({ar(eligibleSelectedCount)})
         </button>
         <button
           type="button"
           className="ew-btn-referral"
-          disabled={filteredCount === 0}
+          disabled={eligibleFilteredCount === 0}
           onClick={onReassignFiltered}
         >
-          إعادة تعيين الكل المطابق للتصفية ({filteredLabel})
+          إسناد الكل المطابق للتصفية ({ar(eligibleFilteredCount)})
         </button>
-        <button type="button" className="ew-btn-secondary ew-btn-sm" onClick={onSelectAllFiltered} disabled={filteredCount === 0}>
+        <button
+          type="button"
+          className="ew-btn-secondary ew-btn-sm"
+          onClick={onSelectAllFiltered}
+          disabled={eligibleFilteredCount === 0}
+        >
           تحديد الكل المطابق
         </button>
-        <button type="button" className="ew-btn-secondary ew-btn-sm" onClick={onClear} disabled={selectedCount === 0}>
+        <button
+          type="button"
+          className="ew-btn-secondary ew-btn-sm"
+          onClick={onClear}
+          disabled={selectedCount === 0}
+        >
           إلغاء التحديد
         </button>
       </div>

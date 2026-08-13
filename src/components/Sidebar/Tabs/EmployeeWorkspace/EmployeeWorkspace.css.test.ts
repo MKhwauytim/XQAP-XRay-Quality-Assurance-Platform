@@ -9,10 +9,10 @@ import { fileURLToPath } from "node:url";
  * `DataTable` (src/components/DataTable/index.tsx) renders its root as a
  * React Fragment (`<>...</>`), not a wrapping <div> — so `.dt-toolbar` and
  * `.dt-table-wrap` land as DIRECT children of `.ew-ref-queue` alongside the
- * optional `.ew-selection-bar` (SelectionActionBar / BulkReassignSelectionBar)
- * XrayReferrals.tsx prepends ahead of it. That means `.ew-ref-queue` can hold
- * 2 children (no bar) or 3 (bar + toolbar + table-wrap) depending on
- * showSelectionBar/showBulkReassignBar.
+ * optional `.ew-selection-bar` (ReassignSelectionBar) XrayReferrals.tsx
+ * prepends ahead of it. That means `.ew-ref-queue` can hold 2 children (no
+ * bar) or 3 (bar + toolbar + table-wrap) depending on whether the current
+ * user may file a reassignment at all (`canReassignSamples`).
  *
  * `.ew-ref-queue` used to be `display: grid; grid-template-rows: auto
  * minmax(0, 1fr);` — exactly 2 explicit row tracks. With 3 children, CSS

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DistributionEntry } from "../distribution/distributionTypes";
-import { planReassignment } from "./planReassignment";
+import { isReassignEligible, planReassignment } from "./planReassignment";
 
 /** Minimal entry — planReassignment only reads status/assignedTo/xrayImageId. */
 function makeEntry(id: string, status: DistributionEntry["status"], assignedTo = "emp"): DistributionEntry {
@@ -49,5 +49,34 @@ describe("planReassignment", () => {
     const plan = planReassignment(entries, ["img-1"], "emp2");
     expect(plan.eligible).toEqual([{ xrayImageId: "img-1", assignedTo: "emp1" }]);
     expect(plan.skipped).toHaveLength(0);
+  });
+});
+
+describe("isReassignEligible", () => {
+  // The selection bar puts this predicate's count on its buttons, so it must
+  // agree with planReassignment for every status — a row the bar counts but the
+  // planner drops is a button that promises more than it delivers.
+  const statuses: DistributionEntry["status"][] = [
+    "pending",
+    "completed",
+    "replaced",
+    "replacement-requested",
+  ];
+
+  it("agrees with planReassignment on every distribution status (no drift between the count and the plan)", () => {
+    for (const status of statuses) {
+      const entry = makeEntry(`img-${status}`, status, "emp1");
+      // "emp2" is never the current owner here, so the only thing that can move
+      // a row out of `eligible` is the terminal-status rule this predicate owns.
+      const planned = planReassignment([entry], [entry.xrayImageId], "emp2").eligible.length === 1;
+      expect(isReassignEligible(entry)).toBe(planned);
+    }
+  });
+
+  it("blocks exactly the two terminal statuses", () => {
+    expect(isReassignEligible({ status: "pending" })).toBe(true);
+    expect(isReassignEligible({ status: "replacement-requested" })).toBe(true);
+    expect(isReassignEligible({ status: "completed" })).toBe(false);
+    expect(isReassignEligible({ status: "replaced" })).toBe(false);
   });
 });
