@@ -39,19 +39,39 @@ The hash uses Argon2id (`m=19456 KiB, t=2, p=1` — OWASP's 2026 baseline), whic
 deliberately memory- and time-hard to slow such attacks, but Argon2id raises the cost of
 cracking a weak passcode — it does not make a weak passcode safe.
 
+**Shipped defaults are deliberately weak (owner decision, 2026-08-13, v71.0).** The default
+bootstrap admin passcode is now `admin`, and every seeded managed user ships with the password
+`123`. These are convenience defaults for getting a new deployment usable, **not** protection:
+both are guessable in one attempt and the admin hash is in the bundle, so a build shipped with
+the defaults unchanged offers no credential barrier at all. Two things follow:
+
+- **Change the admin passcode before the app touches real data.** Settings → **حساب المدير**
+  now writes a per-workspace Argon2id hash (`adminAccount.passwordHash` in
+  `3-user-data/users.permissions.json`) that takes precedence over the bundled constant. The
+  section is visible only to a real (non-preview, non-demo) `admin` session.
+- **Reset each user's password from User Management** rather than leaving `123` in place. The
+  seed hash is shared by every default user, so one guessed password is all of them.
+
+Settings → **حساب المدير** also carries `adminAccount.allowUsernameLogin`: when on (the shipped
+default), `admin` can be typed into the ordinary sign-in form; when off, the bootstrap admin is
+reachable only through the hidden Alt+A → Alt+T shortcut. That switch is obscurity, not
+security — it changes discoverability, not what an attacker who knows the shortcut can do.
+
 **Passcode policy (accepted mitigation):**
 
 - The bootstrap admin passcode **must** be long and high-entropy (treat it like a root
   credential, not a login you'd reuse or write down casually) — it is the only real defense
-  against this exposure.
+  against this exposure. As of v71.0 the *shipped default* violates this on purpose; setting a
+  real passcode from Settings is what brings a deployment back into policy.
 - Legacy PBKDF2-SHA256 hashes (pre-2026-06-23 rotation) are still verified for backward
   compatibility and are transparently upgraded to Argon2id on next successful login
   (`needsRehash` → `persistUserPasswordHash`). Any account still on a legacy hash should be
   rotated to a strong passcode at the next opportunity to benefit from the stronger algorithm.
-- Rotating the bootstrap admin passcode requires generating a new Argon2id hash and updating
-  `BOOTSTRAP_ADMIN_PASSWORD_HASH` in `src/auth/authConfig.ts`, then rebuilding — see the comment
-  at `authConfig.ts:21-23` (dated 2026-06-23, referencing `docs/EDIT_LOG.md` v2) for the last
-  rotation.
+- Rotating the bootstrap admin passcode no longer requires a rebuild: an admin sets it from
+  Settings → **حساب المدير**, and the hash is stored per workspace. Changing the *shipped
+  fallback* still means regenerating `BOOTSTRAP_ADMIN_PASSWORD_HASH` in `src/auth/authConfig.ts`
+  and rebuilding; that fallback only applies to a workspace whose `adminAccount.passwordHash`
+  is still `null`.
 
 ## 3. Demo/viewer static passcode (TEC-06 — accepted by design)
 

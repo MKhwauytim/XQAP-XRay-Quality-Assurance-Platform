@@ -92,6 +92,14 @@ export async function syncUserManagementToDisk(
               featureId: f.featureId,
               enabled: f.enabled,
             })),
+            // SEC-01 applies here too: this is an Argon2id hash of the admin
+            // passcode, never the passcode itself.
+            adminAccount: {
+              passwordHash: next.adminAccount.passwordHash,
+              allowUsernameLogin: next.adminAccount.allowUsernameLogin,
+              updatedAt: next.adminAccount.updatedAt,
+              updatedBy: next.adminAccount.updatedBy,
+            },
           },
         };
 

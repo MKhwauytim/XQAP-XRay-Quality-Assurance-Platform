@@ -16,11 +16,18 @@ export const BOOTSTRAP_ADMIN_USERNAME = "admin";
 export const VIEWER_USERNAME = "viewer";
 export const VIEWER_PASSWORD = "view";
 
-// Rotated 2026-06-23: strong passcode, Argon2id (m=19456,t=2,p=1).
-// See docs/edit logs/2026-06-23.md v2.
+// Rotated 2026-08-13 (owner request): the shipped DEFAULT admin passcode is now
+// "admin" — Argon2id (m=19456,t=2,p=1).
+//
+// This is only the FALLBACK. Once an admin sets a passcode from the Settings tab
+// ("حساب المدير"), the workspace-stored hash in `UserManagementState.adminAccount`
+// wins and this constant is never consulted again for that workspace — see
+// `resolveAdminPasswordHash` in userManagement.ts.
+//
 // NOTE: this hash ships in the client bundle. Security here is advisory-only (no backend);
-// keep the passcode strong because the hash is offline-crackable by anyone with the build.
+// a trivially-guessable default passcode gives no protection at all against anyone who can
+// open the app, so change it from Settings before the app is used with real data.
 export const BOOTSTRAP_ADMIN_PASSWORD_HASH: PasswordHashRecord = {
   algorithm: "argon2id",
-  encoded: "$argon2id$v=19$m=19456,t=2,p=1$ptZbFeX582X4+1WJnQ53bw$xyPiz56XTjHm+9hpNiv1efZfLJGPMNZYW3mIT/7D3lI"
+  encoded: "$argon2id$v=19$m=19456,t=2,p=1$uRYUUaiwO/CalHp5WPGDvQ$X4tdyVAkKZvI3o/JSYqpLXFRYVmPdRX0gsupAzKjIs8"
 };

@@ -197,4 +197,28 @@ describe("getMutationCapability", () => {
       })
     ).toEqual({ allowed: false, reason: "page-not-editable" });
   });
+  it("refuses a feature whose parent page is outside the role's code ceiling, even with an edit row", () => {
+    // Only reachable via a hand-edited users.permissions.json (the UI renders this
+    // cell as a system restriction, not a toggle) -- it must still be refused.
+    const tampered = [
+      ...permissions.filter((p) => !(p.role === "manager" && p.tabId === "settings")),
+      { role: "manager" as const, tabId: "settings", access: "edit" as const },
+    ];
+    const tamperedFeatures = [
+      ...featurePermissions.filter(
+        (f) => !(f.role === "manager" && f.featureId === "view-error-log")
+      ),
+      { role: "manager" as const, featureId: "view-error-log", enabled: true },
+    ];
+    expect(
+      getMutationCapability({
+        role: "manager",
+        featureId: "view-error-log",
+        permissions: tampered,
+        featurePermissions: tamperedFeatures,
+        isReadOnly: false,
+        workspaceReady: true,
+      })
+    ).toEqual({ allowed: false, reason: "page-not-editable" });
+  });
 });

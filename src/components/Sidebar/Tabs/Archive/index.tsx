@@ -314,7 +314,10 @@ export default function ArchiveTab() {
             updatedAt: u.updatedAt,
           })),
           usersResult.file.data.permissions,
-          usersResult.file.data.featurePermissions
+          usersResult.file.data.featurePermissions,
+          // Restore the admin passcode / sign-in setting from the backup too;
+          // omitting it would silently reset the admin account to its defaults.
+          usersResult.file.data.adminAccount
         );
         setJustRestored(false);
         setMessage({

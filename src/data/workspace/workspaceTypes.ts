@@ -117,11 +117,24 @@ export type FeaturePermission = {
   enabled: boolean;
 };
 
+/**
+ * Bootstrap-admin account settings (passcode override + whether "admin" may be
+ * typed into the normal sign-in form). Optional: workspaces written before this
+ * field existed simply fall back to the shipped defaults.
+ */
+export type AdminAccountSettings = {
+  passwordHash: PasswordHashRecord | null;
+  allowUsernameLogin: boolean;
+  updatedAt: string | null;
+  updatedBy: string | null;
+};
+
 export type UsersPermissionsData = {
   users: ManagedUser[];
   roles: ManagedRole[];
   permissions: RolePermission[];
   featurePermissions?: FeaturePermission[];
+  adminAccount?: AdminAccountSettings;
 };
 
 export type UsersPermissionsFile = JsonEnvelope<UsersPermissionsData>;

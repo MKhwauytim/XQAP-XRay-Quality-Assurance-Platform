@@ -15,7 +15,6 @@ import { useFocusTrap } from "../hooks/useFocusTrap";
 import { AdminToolbar } from "./AdminToolbar";
 import {
   ADMIN_SHORTCUT_KEYS,
-  BOOTSTRAP_ADMIN_PASSWORD_HASH,
   BOOTSTRAP_ADMIN_USERNAME,
   VIEWER_USERNAME
 } from "./authConfig";
@@ -47,7 +46,9 @@ import {
   getManagedLoginUsers,
   normalizeUsername,
   persistUserPasswordHash,
+  readAdminAccount,
   readUserManagementState,
+  resolveAdminPasswordHash,
   subscribeToUserManagementChanges,
   type ManagedLoginUser
 } from "./userManagement";
@@ -183,8 +184,13 @@ export default function AuthGate({ children }: AuthGateProps) {
   });
   const isDemoSessionRef = useRef(false);
 
-  // Derive whether there are any active users (to decide which form to show)
+  // Derive whether there are any active users (to decide which form to show).
+  // The form also stays up when admin-username sign-in is enabled but no managed
+  // user is active yet — otherwise a workspace with zero users would have no way
+  // in except the hidden shortcut.
   const hasConfiguredUsers = managedUsers.some((user) => user.isActive);
+  const allowsAdminUsernameLogin = readAdminAccount().allowUsernameLogin;
+  const canShowLoginForm = hasConfiguredUsers || allowsAdminUsernameLogin;
 
   useEffect(() => {
     if (!session) return;
@@ -450,6 +456,14 @@ export default function AuthGate({ children }: AuthGateProps) {
     setMessageType(nextType);
   }
 
+  function registerFailedAttempt(): void {
+    const next = failedAttempts + 1;
+    setFailedAttempts(next);
+    if (next >= LOCKOUT_AFTER_ATTEMPTS) {
+      setLockoutUntil(Date.now() + LOCKOUT_DURATION_MS);
+    }
+  }
+
   function applySession(nextSession: AuthSession): void {
     writeSession(nextSession);
     setSession(nextSession);
@@ -465,16 +479,41 @@ export default function AuthGate({ children }: AuthGateProps) {
 
     const normalizedInput = normalizeUsername(selectedUsername);
 
+    // Bootstrap admin through the ordinary form (owner requirement, 2026-08-13):
+    // "admin" + the admin passcode signs in as the bootstrap superuser without
+    // the hidden Alt+A / Alt+T shortcut. Checked BEFORE the managed-user lookup
+    // so the reserved name always resolves to the bootstrap account. Admins can
+    // turn this off from Settings, which restores shortcut-only access.
+    if (
+      normalizedInput === BOOTSTRAP_ADMIN_USERNAME &&
+      readAdminAccount().allowUsernameLogin
+    ) {
+      const isPasscodeValid = await verifyPasswordHash(
+        password,
+        resolveAdminPasswordHash()
+      );
+
+      if (!isPasscodeValid) {
+        registerFailedAttempt();
+        showMessage(getLabels().auth_msg_invalid_credentials, "bad");
+        return;
+      }
+
+      applySession(createSession(ADMIN_ROLE, BOOTSTRAP_ADMIN_USERNAME));
+      clearLastLoginUsername();
+      setPassword("");
+      setFailedAttempts(0);
+      setLockoutUntil(null);
+      showMessage(getLabels().auth_msg_login_success, "ok");
+      return;
+    }
+
     const user = managedUsers.find(
       (item) => normalizeUsername(item.username) === normalizedInput
     );
 
     if (!user) {
-      const next = failedAttempts + 1;
-      setFailedAttempts(next);
-      if (next >= LOCKOUT_AFTER_ATTEMPTS) {
-        setLockoutUntil(Date.now() + LOCKOUT_DURATION_MS);
-      }
+      registerFailedAttempt();
       showMessage(getLabels().auth_msg_invalid_credentials, "bad");
       return;
     }
@@ -490,11 +529,7 @@ export default function AuthGate({ children }: AuthGateProps) {
     );
 
     if (!isPasswordValid) {
-      const next = failedAttempts + 1;
-      setFailedAttempts(next);
-      if (next >= LOCKOUT_AFTER_ATTEMPTS) {
-        setLockoutUntil(Date.now() + LOCKOUT_DURATION_MS);
-      }
+      registerFailedAttempt();
       showMessage(getLabels().auth_msg_invalid_credentials, "bad");
       return;
     }
@@ -533,7 +568,9 @@ export default function AuthGate({ children }: AuthGateProps) {
   async function loginAsBootstrapAdmin(): Promise<void> {
     const isPasscodeValid = await verifyPasswordHash(
       adminPasscode,
-      BOOTSTRAP_ADMIN_PASSWORD_HASH
+      // The workspace's own admin passcode once one has been set in Settings,
+      // otherwise the shipped default.
+      resolveAdminPasswordHash()
     );
 
     if (!isPasscodeValid) {
@@ -677,7 +714,13 @@ export default function AuthGate({ children }: AuthGateProps) {
               </div>
             )}
 
-            {hasConfiguredUsers ? (
+            {!hasConfiguredUsers && canShowLoginForm && (
+              <div className="auth-message bad" role="status">
+                {labels.auth_no_active_users}
+              </div>
+            )}
+
+            {canShowLoginForm ? (
               <form
                 className="auth-form"
                 autoComplete="off"

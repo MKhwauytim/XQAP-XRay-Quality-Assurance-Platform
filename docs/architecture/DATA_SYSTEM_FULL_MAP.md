@@ -100,7 +100,9 @@ Two important corrections to the common mental model:
     {supervisor}.decisions.json    hash-chained decision events (B5)
 
 3-user-data/
-  users.permissions.json       ← the only durable copy of users/roles/permissions
+  users.permissions.json       ← the only durable copy of users/roles/permissions,
+                                 plus `adminAccount` (bootstrap-admin passcode hash +
+                                 whether "admin" may sign in from the normal form)
   labels.snapshot.json         best-effort label mirror, written only at backup time
 
 4-reports/designs/
@@ -391,6 +393,7 @@ The heaviest writer in the app. Its four phases each own different artifacts.
 | Action | Artifacts written |
 |---|---|
 | Edit any Arabic label | `localStorage["xray_custom_labels_v1"]`, plus `labels.snapshot.json` when a workspace is connected |
+| حساب المدير — change the admin passcode / toggle admin-username sign-in (real admin only) | `users.permissions.json` (`adminAccount`) |
 
 ### Notification Center (`ew/notifications`)
 

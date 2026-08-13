@@ -64,4 +64,37 @@ describe("tab catalog", () => {
     expect(roleCeilingFor("reports/kpi")).not.toContain("employee");
     expect(roleCeilingFor("reports/report-designer")).not.toContain("guest");
   });
+
+  it("keeps reports and archive open to every role so the matrix column is not a dead control", () => {
+    // A ceiling that excludes a role turns that role's whole matrix row into a
+    // control an admin can click but that can never take effect. Nothing in the
+    // product requires reports/archive to be closed to employees, so the ceiling
+    // was widened and the decision now lives in the shipped matrix defaults
+    // (still "none") rather than in code.
+    for (const tabId of ["reports", "reports/reports", "archive"]) {
+      expect(roleCeilingFor(tabId), tabId).toContain("employee");
+    }
+  });
+
+  it("keeps the deliberate admin-only and settings ceilings intact", () => {
+    for (const tabId of [
+      "user-management",
+      "user-management/users",
+      "user-management/page-permissions",
+      "user-management/feature-permissions",
+      "user-management/activity",
+      "user-management/actions",
+      "change-log",
+      "adhoc-import",
+    ]) {
+      expect(roleCeilingFor(tabId), tabId).toEqual(["admin"]);
+    }
+    expect(roleCeilingFor("settings")).toEqual(["guest", "admin"]);
+  });
+
+  it("never excludes admin from any tab", () => {
+    for (const entry of TAB_CATALOG) {
+      expect(entry.allowedRoles, entry.id).toContain("admin");
+    }
+  });
 });

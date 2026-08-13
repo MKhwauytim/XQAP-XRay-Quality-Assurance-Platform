@@ -202,6 +202,75 @@ describe("AuthGate — login form", () => {
   });
 });
 
+describe("AuthGate — bootstrap admin through the normal sign-in form", () => {
+  const SEED_USER: userManagement.ManagedLoginUser = {
+    id: "u1", username: "testuser", displayName: "Test", role: "employee",
+    passwordHash: { algorithm: "argon2id", encoded: "x" },
+    isActive: true, hasCertScanLicense: false,
+    createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+  };
+
+  function submitLogin(username: string, password: string) {
+    fireEvent.change(screen.getByLabelText("اسم المستخدم"), { target: { value: username } });
+    fireEvent.change(screen.getByLabelText("كلمة المرور"), { target: { value: password } });
+    fireEvent.click(screen.getByRole("button", { name: "دخول" }));
+  }
+
+  beforeEach(() => {
+    vi.spyOn(userManagement, "getManagedLoginUsers").mockReturnValue([SEED_USER]);
+  });
+
+  it("signs in as the bootstrap admin when username sign-in is allowed", async () => {
+    vi.spyOn(userManagement, "readAdminAccount").mockReturnValue({
+      passwordHash: null, allowUsernameLogin: true, updatedAt: null, updatedBy: null,
+    });
+    const verify = vi.spyOn(passwordCrypto, "verifyPasswordHash").mockResolvedValue(true);
+
+    renderAuthGate();
+    submitLogin("admin", "admin");
+
+    await waitFor(() => {
+      expect(screen.getByText("authenticated")).toBeInTheDocument();
+    });
+    // The passcode was checked against the admin hash, not a managed user's —
+    // "admin" is never in the managed-users list.
+    expect(verify).toHaveBeenCalledWith("admin", userManagement.resolveAdminPasswordHash());
+  });
+
+  it("rejects a wrong admin passcode instead of falling through to the user lookup", async () => {
+    vi.spyOn(userManagement, "readAdminAccount").mockReturnValue({
+      passwordHash: null, allowUsernameLogin: true, updatedAt: null, updatedBy: null,
+    });
+    vi.spyOn(passwordCrypto, "verifyPasswordHash").mockResolvedValue(false);
+
+    renderAuthGate();
+    submitLogin("admin", "wrong");
+
+    await waitFor(() => {
+      expect(screen.getByText(/اسم المستخدم غير موجود/)).toBeInTheDocument();
+    });
+    expect(screen.queryByText("authenticated")).not.toBeInTheDocument();
+  });
+
+  it("refuses the admin username entirely once the setting is switched off", async () => {
+    vi.spyOn(userManagement, "readAdminAccount").mockReturnValue({
+      passwordHash: null, allowUsernameLogin: false, updatedAt: null, updatedBy: null,
+    });
+    // Would succeed if the bootstrap branch ran at all — the setting, not the
+    // passcode, is what must block it here.
+    const verify = vi.spyOn(passwordCrypto, "verifyPasswordHash").mockResolvedValue(true);
+
+    renderAuthGate();
+    submitLogin("admin", "admin");
+
+    await waitFor(() => {
+      expect(screen.getByText(/اسم المستخدم غير موجود/)).toBeInTheDocument();
+    });
+    expect(screen.queryByText("authenticated")).not.toBeInTheDocument();
+    expect(verify).not.toHaveBeenCalled();
+  });
+});
+
 describe("AuthGate — startup session-hydration race (B2)", () => {
   beforeEach(() => {
     // Simulate a fresh module load: the in-memory user-management runtime
