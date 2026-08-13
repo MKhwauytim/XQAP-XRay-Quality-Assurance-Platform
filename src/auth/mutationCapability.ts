@@ -4,6 +4,7 @@ import {
   FEATURE_TAB_LOOKUP,
   hasFeature,
   hasRolePermission,
+  isTabRestrictedForRole,
   type FeaturePermission,
   type RolePermission,
 } from "./userManagement";
@@ -42,6 +43,15 @@ export function getMutationCapability({
 }: MutationCapabilityInput): MutationCapability {
   const tabId = FEATURE_TAB_LOOKUP[featureId];
   if (!tabId) return { allowed: false, reason: "unknown-feature" };
+
+  // The code ceiling caps what the matrix can grant (canAccessTab enforces the same
+  // rule for navigation). Without this, a permission row that is outside the ceiling
+  // -- impossible to create in the UI, but reachable via a hand-edited
+  // users.permissions.json or a file written before a ceiling narrowed -- would still
+  // authorize mutations on a page the role can never actually open.
+  if (isTabRestrictedForRole(role, tabId)) {
+    return { allowed: false, reason: "page-not-editable" };
+  }
 
   if (!hasRolePermission(permissions, role, tabId, "edit")) {
     return { allowed: false, reason: "page-not-editable" };

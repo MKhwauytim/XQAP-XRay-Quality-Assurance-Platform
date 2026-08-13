@@ -455,6 +455,9 @@ function applyDiskUsers(files: WorkspaceLoadedFiles): void {
   syncUsersFromDisk(
     managedUsers,
     diskPermissions.length > 0 ? diskPermissions : undefined,
-    diskFeaturePermissions.length > 0 ? diskFeaturePermissions : undefined
+    diskFeaturePermissions.length > 0 ? diskFeaturePermissions : undefined,
+    // Absent on a workspace written before the admin-account block existed —
+    // syncUsersFromDisk falls back to the shipped defaults in that case.
+    diskData?.adminAccount
   );
 }

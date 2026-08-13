@@ -1,6 +1,7 @@
 import type { PasswordHashRecord } from "./passwordCrypto";
 import type { AuthRole, LoginUser } from "./authTypes";
-import { MANAGED_TABS } from "./tabCatalog";
+import { BOOTSTRAP_ADMIN_PASSWORD_HASH } from "./authConfig";
+import { MANAGED_TABS, roleCeilingFor as resolveRoleCeiling } from "./tabCatalog";
 export { MANAGED_TABS, roleCeilingFor, SUB_TAB_ROLE_CEILINGS, TAB_ROLE_CEILINGS } from "./tabCatalog";
 export type { ManagedTab } from "./tabCatalog";
 
@@ -41,15 +42,46 @@ export type FeatureGroup = {
   features: readonly FeatureDefinition[];
 };
 
+/**
+ * The bootstrap admin account's editable settings. Lives alongside users and
+ * permissions in `3-user-data/users.permissions.json`, so a passcode change
+ * follows the workspace across machines instead of being trapped in one
+ * browser's storage.
+ */
+export type AdminAccountSettings = {
+  /** `null` = still using the shipped default (see BOOTSTRAP_ADMIN_PASSWORD_HASH). */
+  passwordHash: PasswordHashRecord | null;
+  /**
+   * When true, "admin" can be typed into the normal sign-in form like any other
+   * username. When false, the only way in is the hidden Alt+A / Alt+T shortcut.
+   */
+  allowUsernameLogin: boolean;
+  updatedAt: string | null;
+  updatedBy: string | null;
+};
+
 export type UserManagementState = {
   users: ManagedLoginUser[];
   permissions: RolePermission[];
   featurePermissions: FeaturePermission[];
+  adminAccount: AdminAccountSettings;
 };
 
+/**
+ * What callers may hand to `writeUserManagementState` /
+ * `normalizeUserManagementState`: `adminAccount` is optional on the way in (the
+ * normalizer fills it from defaults) but always present on the way out.
+ */
+export type UserManagementStateInput = Omit<UserManagementState, "adminAccount"> & {
+  adminAccount?: AdminAccountSettings;
+};
+
+// Shipped default password for every seeded user: "123" (owner request,
+// 2026-08-13). Argon2id, m=19456,t=2,p=1. Advisory-only security model — this
+// is a convenience default meant to be changed per user from User Management.
 const DEFAULT_USER_PASSWORD_HASH: PasswordHashRecord = {
   algorithm: "argon2id",
-  encoded: "$argon2id$v=19$m=19456,t=2,p=1$eHJheS1kZWZhdWx0LTIwMjY$2ZptFPutF/hZRmAofMUHA8cUE3Tq/A743hoOJO74PWY"
+  encoded: "$argon2id$v=19$m=19456,t=2,p=1$BeVmV3uShU0Y0cJALo5tcw$ihvHPBcz3WBVYg9EmrgY5lg3bJQXLtf4OFCSYAqXaPA"
 };
 
 // ── Runtime state & event ─────────────────────────────────────────────────────
@@ -509,11 +541,24 @@ export function createDefaultFeaturePermissions(): FeaturePermission[] {
   return result;
 }
 
+export function createDefaultAdminAccount(): AdminAccountSettings {
+  return {
+    passwordHash: null,
+    // Owner requirement (2026-08-13): signing in as "admin" from the normal form
+    // works out of the box; an admin can switch it off in Settings to force the
+    // hidden shortcut instead.
+    allowUsernameLogin: true,
+    updatedAt: null,
+    updatedBy: null,
+  };
+}
+
 export function createEmptyUserManagementState(): UserManagementState {
   return {
     users: createDefaultManagedUsers(),
     permissions: createDefaultPermissions(),
     featurePermissions: createDefaultFeaturePermissions(),
+    adminAccount: createDefaultAdminAccount(),
   };
 }
 
@@ -571,6 +616,32 @@ export function hasRolePermission(
   return access === "edit";
 }
 
+/**
+ * True when `tabId`'s code ceiling (tabCatalog.ts) excludes `role` — i.e. no value
+ * an admin can pick in the permission matrix will ever open that page for that role.
+ * The User Management matrix uses this to render such a cell as a system-restriction
+ * notice rather than a toggle that silently does nothing.
+ */
+export function isTabRestrictedForRole(role: AuthRole, tabId: string): boolean {
+  const ceiling = resolveRoleCeiling(tabId);
+  return ceiling ? !ceiling.includes(role) : false;
+}
+
+/**
+ * The single authority for "can this role open this tab": the code ceiling first,
+ * then the permission matrix. `usePermissions.canAccessTab` is a thin wrapper around
+ * it, so a test that exercises this function is testing the real navigation gate.
+ */
+export function canRoleAccessTab(
+  permissions: RolePermission[],
+  role: AuthRole,
+  tabId: string,
+  minimumAccess: Exclude<PermissionLevel, "none"> = "view"
+): boolean {
+  if (isTabRestrictedForRole(role, tabId)) return false;
+  return hasRolePermission(permissions, role, tabId, minimumAccess);
+}
+
 export function hasFeature(
   featurePermissions: FeaturePermission[],
   role: AuthRole,
@@ -590,7 +661,7 @@ export function readUserManagementState(): UserManagementState {
 }
 
 export function writeUserManagementState(
-  state: UserManagementState,
+  state: UserManagementStateInput,
   notify = true
 ): void {
   runtimeUserManagementState = normalizeUserManagementState(state);
@@ -611,13 +682,17 @@ export function subscribeToUserManagementChanges(
 export function syncUsersFromDisk(
   diskUsers: ManagedLoginUser[],
   diskPermissions?: RolePermission[],
-  diskFeaturePermissions?: FeaturePermission[]
+  diskFeaturePermissions?: FeaturePermission[],
+  diskAdminAccount?: AdminAccountSettings
 ): void {
   writeUserManagementState(
     {
       users: diskUsers,
       permissions: diskPermissions ?? createDefaultPermissions(),
       featurePermissions: diskFeaturePermissions ?? createDefaultFeaturePermissions(),
+      // A workspace written before this field existed has no adminAccount block;
+      // fall back to the shipped defaults rather than wiping a later write.
+      adminAccount: diskAdminAccount ?? createDefaultAdminAccount(),
     },
     true
   );
@@ -626,7 +701,7 @@ export function syncUsersFromDisk(
 // ── Normalization ─────────────────────────────────────────────────────────────
 
 export function normalizeUserManagementState(
-  state: UserManagementState
+  state: UserManagementStateInput
 ): UserManagementState {
   // Fill any missing tab permissions from defaults
   const defaultPerms = createDefaultPermissions();
@@ -659,7 +734,59 @@ export function normalizeUserManagementState(
   });
 
   const users = state.users.length > 0 ? state.users : createDefaultManagedUsers();
-  return { users, permissions, featurePermissions };
+
+  // Tolerate a state object built before this field existed (older callers,
+  // older disk files, tests) rather than letting `undefined` reach the login path.
+  const defaultAdminAccount = createDefaultAdminAccount();
+  const rawAdminAccount = state.adminAccount;
+  const adminAccount: AdminAccountSettings = {
+    passwordHash: rawAdminAccount?.passwordHash ?? null,
+    allowUsernameLogin:
+      typeof rawAdminAccount?.allowUsernameLogin === "boolean"
+        ? rawAdminAccount.allowUsernameLogin
+        : defaultAdminAccount.allowUsernameLogin,
+    updatedAt: rawAdminAccount?.updatedAt ?? null,
+    updatedBy: rawAdminAccount?.updatedBy ?? null,
+  };
+
+  return { users, permissions, featurePermissions, adminAccount };
+}
+
+// ── Admin account helpers ─────────────────────────────────────────────────────
+
+export function readAdminAccount(): AdminAccountSettings {
+  return readUserManagementState().adminAccount;
+}
+
+/**
+ * The hash the bootstrap-admin passcode is checked against: the workspace's own
+ * hash once an admin has set one, otherwise the shipped default.
+ */
+export function resolveAdminPasswordHash(): PasswordHashRecord {
+  return readAdminAccount().passwordHash ?? BOOTSTRAP_ADMIN_PASSWORD_HASH;
+}
+
+/**
+ * Applies an admin-account change to the runtime state and returns the full new
+ * state, so the caller can persist it with `syncUserManagementToDisk` — this
+ * module never touches disk itself.
+ */
+export function updateAdminAccount(
+  changes: Partial<Pick<AdminAccountSettings, "passwordHash" | "allowUsernameLogin">>,
+  actor: string
+): UserManagementState {
+  const state = readUserManagementState();
+  const next: UserManagementState = {
+    ...state,
+    adminAccount: {
+      ...state.adminAccount,
+      ...changes,
+      updatedAt: new Date().toISOString(),
+      updatedBy: actor,
+    },
+  };
+  writeUserManagementState(next, true);
+  return readUserManagementState();
 }
 
 // ── User helpers ──────────────────────────────────────────────────────────────

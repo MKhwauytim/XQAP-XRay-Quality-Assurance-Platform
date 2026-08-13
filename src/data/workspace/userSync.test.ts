@@ -8,10 +8,12 @@ import { WORKSPACE_FILE_NAMES } from "./workspaceDefaults";
 import type { UsersPermissionsFile } from "./workspaceTypes";
 import { syncUserManagementToDisk } from "./userSync";
 import {
+  canRoleAccessTab,
   normalizeUserManagementState,
   readUserManagementState,
   writeUserManagementState,
 } from "../../auth/userManagement";
+import { getMutationCapability } from "../../auth/mutationCapability";
 import type { UserManagementState } from "../../auth/userManagement";
 
 function makeRoot(): DirectoryHandleLike {
@@ -34,6 +36,12 @@ const STATE: UserManagementState = {
   ],
   permissions: [{ role: "supervisor", tabId: "archive", access: "view" }],
   featurePermissions: [{ role: "supervisor", featureId: "approve-referrals", enabled: true }],
+  adminAccount: {
+    passwordHash: null,
+    allowUsernameLogin: true,
+    updatedAt: null,
+    updatedBy: null,
+  },
 };
 
 describe("syncUserManagementToDisk / featurePermissions round-trip (Tier-1 Item F verification)", () => {
@@ -127,6 +135,55 @@ describe("syncUserManagementToDisk / featurePermissions round-trip (Tier-1 Item 
       runtime.featurePermissions.some(
         (f) => f.role === "supervisor" && f.featureId === "approve-referrals" && f.enabled
       )
+    ).toBe(true);
+  });
+
+  it("round-trips a newly-grantable employee x reports/archive permission and it takes effect", async () => {
+    // These two used to be permanently inert for employees (code ceiling excluded
+    // the role), so the whole employee column was a dead control. Prove the grant
+    // now survives normalize -> disk -> read-back AND is honoured at runtime.
+    const root = makeRoot();
+    const granted: UserManagementState = normalizeUserManagementState({
+      ...STATE,
+      permissions: [
+        ...STATE.permissions,
+        { role: "employee", tabId: "reports", access: "edit" },
+        { role: "employee", tabId: "reports/reports", access: "view" },
+        { role: "employee", tabId: "archive", access: "edit" },
+      ],
+      featurePermissions: [
+        ...STATE.featurePermissions,
+        { role: "employee", featureId: "export-reports", enabled: true },
+      ],
+    });
+    await syncUserManagementToDisk(root, granted, "admin");
+
+    const userDataDir = await getUserDataRoot(root, false);
+    const result = await readJsonFile<UsersPermissionsFile>(
+      userDataDir,
+      WORKSPACE_FILE_NAMES.usersPermissions
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const reloaded = normalizeUserManagementState({
+      users: granted.users,
+      permissions: result.file.data.permissions,
+      featurePermissions: result.file.data.featurePermissions ?? [],
+    });
+
+    expect(canRoleAccessTab(reloaded.permissions, "employee", "reports", "edit")).toBe(true);
+    expect(canRoleAccessTab(reloaded.permissions, "employee", "reports/reports")).toBe(true);
+    expect(canRoleAccessTab(reloaded.permissions, "employee", "archive", "edit")).toBe(true);
+    expect(
+      getMutationCapability({
+        role: "employee",
+        featureId: "export-reports",
+        permissions: reloaded.permissions,
+        featurePermissions: reloaded.featurePermissions,
+        isReadOnly: false,
+        workspaceReady: true,
+      }).allowed
     ).toBe(true);
   });
 });

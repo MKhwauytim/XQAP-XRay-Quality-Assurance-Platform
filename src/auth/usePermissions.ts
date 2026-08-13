@@ -8,11 +8,12 @@ import {
   type MutationCapability,
 } from "./mutationCapability";
 import {
+  canRoleAccessTab,
   FEATURE_TAB_LOOKUP,
   hasFeature,
   hasRolePermission,
+  isTabRestrictedForRole,
   readUserManagementState,
-  roleCeilingFor,
   subscribeToUserManagementChanges,
   type FeaturePermission,
   type PermissionLevel,
@@ -80,19 +81,20 @@ export function usePermissions(): UsePermissionsResult {
   return {
     role,
     username,
-    canAccessTab: (tabId, min = "view") => {
+    canAccessTab: (tabId, min = "view") =>
       // B1 (sub-tab role ceilings): a tab or sub-tab's code-defined ceiling caps
       // what the matrix can ever grant, independent of its parent (e.g.
-      // reports/kpi vs. reports). This is enforced here so every consumer of
-      // canAccessTab/TabGuard gets it for free, not just the sidebar filter.
-      const ceiling = roleCeilingFor(tabId);
-      if (ceiling && !ceiling.includes(role)) return false;
-      return hasRolePermission(state.permissions, role, tabId, min);
-    },
+      // reports/kpi vs. reports). canRoleAccessTab owns that rule so every
+      // consumer of canAccessTab/TabGuard gets it for free, not just the sidebar.
+      canRoleAccessTab(state.permissions, role, tabId, min),
     can: (featureId) => {
       // Cascade: if the parent tab has no access, block the feature regardless
       // of what the feature toggle says.
       const tabId = FEATURE_TAB_LOOKUP[featureId];
+      // Same ceiling rule canAccessTab applies: a matrix row outside the tab's code
+      // ceiling can never open the page, so it must not light up the page's features
+      // either (getMutationCapability enforces the same for mutations).
+      if (tabId && isTabRestrictedForRole(role, tabId)) return false;
       if (tabId && !hasRolePermission(state.permissions, role, tabId)) {
         return false;
       }

@@ -11,7 +11,6 @@ export type TabCatalogEntry = ManagedTab & {
 };
 
 const ALL_ROLES = ["guest", "employee", "supervisor", "manager", "admin"] as const;
-const REPORT_ROLES = ["guest", "supervisor", "manager", "admin"] as const;
 const ADMIN_ONLY = ["admin"] as const;
 
 export const TAB_CATALOG: readonly TabCatalogEntry[] = [
@@ -24,11 +23,18 @@ export const TAB_CATALOG: readonly TabCatalogEntry[] = [
   { id: "ew/referral-approval", label: "اعتماد الطلبات", parentId: "employee-workspace", allowedRoles: ALL_ROLES },
   { id: "ew/inspection-form", label: "نموذج الفحص (مساحة العمل)", parentId: "employee-workspace", allowedRoles: ALL_ROLES },
   { id: "ew/notifications", label: "مركز الإشعارات", allowedRoles: ALL_ROLES },
-  { id: "reports", label: "إدارة التقارير", allowedRoles: REPORT_ROLES },
-  { id: "reports/reports", label: "التقارير", parentId: "reports", allowedRoles: REPORT_ROLES },
+  // Reports + Archive used to exclude "employee" from their code ceiling, which made
+  // the whole employee column of those matrix rows a dead control: an admin could
+  // click it but canAccessTab/App.tsx would still refuse. Nothing in the product
+  // requires reports or archive to be closed to employees -- the shipped matrix
+  // defaults still ship them as "none", so this only restores the admin's ability to
+  // grant them. (reports/kpi and reports/report-designer keep their own, narrower
+  // ceilings -- a sub-tab ceiling is independent of its parent's.)
+  { id: "reports", label: "إدارة التقارير", allowedRoles: ALL_ROLES },
+  { id: "reports/reports", label: "التقارير", parentId: "reports", allowedRoles: ALL_ROLES },
   { id: "reports/kpi", label: "مؤشرات الأداء", parentId: "reports", allowedRoles: ["supervisor", "manager", "admin"] },
   { id: "reports/report-designer", label: "مصمم التقارير", parentId: "reports", allowedRoles: ["supervisor", "manager", "admin"] },
-  { id: "archive", label: "إدارة الأرشيف", allowedRoles: REPORT_ROLES },
+  { id: "archive", label: "إدارة الأرشيف", allowedRoles: ALL_ROLES },
   { id: "user-management", label: "إدارة المستخدمين", allowedRoles: ADMIN_ONLY },
   { id: "user-management/users", label: "المستخدمون", parentId: "user-management", allowedRoles: ADMIN_ONLY },
   { id: "user-management/page-permissions", label: "صلاحيات الصفحات", parentId: "user-management", allowedRoles: ADMIN_ONLY },
