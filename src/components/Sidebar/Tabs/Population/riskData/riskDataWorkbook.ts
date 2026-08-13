@@ -1,4 +1,5 @@
 import * as XLSX from "xlsx";
+import { yieldToMain } from "../../../../../data/storage/yieldToMain";
 import { normalizeRiskRow } from "./riskDataNormalizer";
 import { RISK_COLUMN_ALIASES } from "./riskDataColumns";
 import type {
@@ -70,7 +71,6 @@ function buildZeroXrayIdDiagnostic(
   };
 }
 
-const yieldToMain = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 export async function processRiskWorkbook(
   file: File,

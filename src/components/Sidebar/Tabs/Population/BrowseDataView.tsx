@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
+import { yieldToMain } from "../../../../data/storage/yieldToMain";
 import * as XLSX from "xlsx";
 import { Database, Settings2, ChevronUp, ChevronDown } from "lucide-react";
 
@@ -445,7 +446,6 @@ function safeExportFileName(value: string): string {
 
 // Same yieldToMain idiom used by populationProcessor.ts / riskDataWorkbook.ts —
 // defined locally per-file rather than shared across tab boundaries.
-const yieldToMain = () => new Promise((resolve) => setTimeout(resolve, 0));
 const EXPORT_CHUNK_SIZE = 1000;
 
 // Bounded page-scan cap for the worker-backed path's per-column filter dropdown

@@ -1,4 +1,5 @@
 import { Eye, EyeOff, Maximize2 } from "lucide-react";
+import { yieldToMain } from "../../data/storage/yieldToMain";
 import {
   Fragment,
   forwardRef,
@@ -219,7 +220,6 @@ function compareFilterOptions(first: string, second: string): number {
 
 // Same yieldToMain idiom used by populationProcessor.ts / riskDataWorkbook.ts —
 // defined locally per-file rather than shared across tab boundaries.
-const yieldToMain = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 // ── Main component ────────────────────────────────────────────────────────────
 
