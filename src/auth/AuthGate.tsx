@@ -59,6 +59,7 @@ import { logRejection } from "../data/storage/errorLogger";
 import { LoadingState } from "../components/StateViews/StateViews";
 import { GlobalMonthProvider } from "../data/month/GlobalMonthProvider";
 import { useLabels } from "../data/labels/useLabels";
+import { getLabels } from "../data/labels/labelsStore";
 import { SyncTick } from "../data/workspace/SyncTick";
 
 type AuthGateProps = {
@@ -239,7 +240,7 @@ export default function AuthGate({ children }: AuthGateProps) {
         clearSession();
         // Notify on the next tick so the state updater stays side-effect-free.
         queueMicrotask(() =>
-          setLogoutNotice("تم تحديث صلاحياتك، يرجى تسجيل الدخول مجدداً")
+          setLogoutNotice(getLabels().auth_msg_permissions_updated)
         );
         return null;
       });
@@ -269,7 +270,7 @@ export default function AuthGate({ children }: AuthGateProps) {
 
       clearSession();
       queueMicrotask(() =>
-        setLogoutNotice("تم تحديث صلاحياتك، يرجى تسجيل الدخول مجدداً")
+        setLogoutNotice(getLabels().auth_msg_permissions_updated)
       );
       return null;
     });
@@ -302,7 +303,7 @@ export default function AuthGate({ children }: AuthGateProps) {
       // in state, drop to the login screen with a notice.
       if (readRealSession() === null) {
         setSession(null);
-        setLogoutNotice("انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً");
+        setLogoutNotice(getLabels().auth_msg_session_expired);
       }
     }, 60_000);
 
@@ -474,12 +475,12 @@ export default function AuthGate({ children }: AuthGateProps) {
       if (next >= LOCKOUT_AFTER_ATTEMPTS) {
         setLockoutUntil(Date.now() + LOCKOUT_DURATION_MS);
       }
-      showMessage("اسم المستخدم غير موجود أو كلمة المرور غير صحيحة.", "bad");
+      showMessage(getLabels().auth_msg_invalid_credentials, "bad");
       return;
     }
 
     if (!user.isActive) {
-      showMessage("هذا المستخدم غير مفعل.", "bad");
+      showMessage(getLabels().auth_msg_user_inactive, "bad");
       return;
     }
 
@@ -494,7 +495,7 @@ export default function AuthGate({ children }: AuthGateProps) {
       if (next >= LOCKOUT_AFTER_ATTEMPTS) {
         setLockoutUntil(Date.now() + LOCKOUT_DURATION_MS);
       }
-      showMessage("اسم المستخدم غير موجود أو كلمة المرور غير صحيحة.", "bad");
+      showMessage(getLabels().auth_msg_invalid_credentials, "bad");
       return;
     }
 
@@ -526,7 +527,7 @@ export default function AuthGate({ children }: AuthGateProps) {
     setPassword("");
     setFailedAttempts(0);
     setLockoutUntil(null);
-    showMessage("تم الدخول بنجاح.", "ok");
+    showMessage(getLabels().auth_msg_login_success, "ok");
   }
 
   async function loginAsBootstrapAdmin(): Promise<void> {
@@ -536,7 +537,7 @@ export default function AuthGate({ children }: AuthGateProps) {
     );
 
     if (!isPasscodeValid) {
-      showMessage("رمز مسؤول النظام غير صحيح.", "bad");
+      showMessage(getLabels().auth_msg_bad_admin_passcode, "bad");
       return;
     }
 
@@ -650,7 +651,7 @@ export default function AuthGate({ children }: AuthGateProps) {
               />
             </div>
             <h1>{labels.app_display_name}</h1>
-            <p>منصة فحص صور الأشعة</p>
+            <p>{labels.auth_tagline}</p>
           </div>
           <div className="auth-brand-footer">
             <div className="auth-org-path">{ORGANIZATION_PATH_TEXT}</div>
@@ -666,8 +667,8 @@ export default function AuthGate({ children }: AuthGateProps) {
         >
           <div className="auth-form-inner">
             <div className="auth-form-header">
-              <h2 id="authTitle">تسجيل الدخول</h2>
-              <p>أدخل بياناتك للمتابعة</p>
+              <h2 id="authTitle">{labels.auth_login_title}</h2>
+              <p>{labels.auth_login_subtitle}</p>
             </div>
 
             {logoutNotice && (
@@ -683,7 +684,7 @@ export default function AuthGate({ children }: AuthGateProps) {
                 onSubmit={loginAsEmployee}
               >
                 <label className="auth-field" htmlFor="authUsername">
-                  <span>اسم المستخدم</span>
+                  <span>{labels.auth_username_label}</span>
                   <div className="auth-input-wrap">
                     <span className="auth-input-icon" aria-hidden="true">
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -696,7 +697,7 @@ export default function AuthGate({ children }: AuthGateProps) {
                       type="text"
                       required
                       autoComplete="username"
-                      placeholder="أدخل اسم المستخدم"
+                      placeholder={labels.auth_username_placeholder}
                       value={selectedUsername}
                       onChange={(event) => {
                         setSelectedUsername(event.target.value);
@@ -706,7 +707,7 @@ export default function AuthGate({ children }: AuthGateProps) {
                 </label>
 
                 <label className="auth-field" htmlFor="authPassword">
-                  <span>كلمة المرور</span>
+                  <span>{labels.auth_password_label}</span>
                   <div className="auth-input-wrap">
                     <span className="auth-input-icon" aria-hidden="true">
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -719,7 +720,7 @@ export default function AuthGate({ children }: AuthGateProps) {
                       type={isPasswordVisible ? "text" : "password"}
                       required
                       autoComplete="current-password"
-                      placeholder="أدخل كلمة المرور"
+                      placeholder={labels.auth_password_placeholder}
                       value={password}
                       onChange={(event) => setPassword(event.target.value)}
                     />
@@ -727,7 +728,7 @@ export default function AuthGate({ children }: AuthGateProps) {
                       type="button"
                       className="auth-eye-toggle"
                       onClick={() => setIsPasswordVisible((current) => !current)}
-                      aria-label="إظهار أو إخفاء كلمة المرور"
+                      aria-label={labels.auth_password_toggle_aria}
                     >
                       {isPasswordVisible ? (
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -752,8 +753,8 @@ export default function AuthGate({ children }: AuthGateProps) {
                 >
                   <span>
                     {lockoutUntil !== null && lockoutSecondsLeft > 0
-                      ? `يُرجى الانتظار (${lockoutSecondsLeft}ث)`
-                      : "دخول"}
+                      ? labels.auth_lockout_wait.replace("{seconds}", String(lockoutSecondsLeft))
+                      : labels.auth_login_btn}
                   </span>
                   {!(lockoutUntil !== null && lockoutSecondsLeft > 0) && (
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -772,7 +773,7 @@ export default function AuthGate({ children }: AuthGateProps) {
             ) : (
               <div className="auth-form" aria-live="polite">
                 <div className="auth-message bad">
-                  لا يوجد مستخدمون مفعلون حالياً.
+                  {labels.auth_no_active_users}
                 </div>
               </div>
             )}
@@ -780,10 +781,10 @@ export default function AuthGate({ children }: AuthGateProps) {
             <footer className="auth-footer">
               <div className="auth-footer-actions">
                 <button type="button" className="auth-footer-change" onClick={() => { void selectWorkspace(); }}>
-                  تغيير المجلد
+                  {labels.auth_change_folder_btn}
                 </button>
                 <button type="button" onClick={logout}>
-                  مسح الجلسة
+                  {labels.auth_clear_session_btn}
                 </button>
                 <button
                   type="button"
@@ -792,7 +793,7 @@ export default function AuthGate({ children }: AuthGateProps) {
                     setSelectedUsername("");
                   }}
                 >
-                  نسيان المستخدم
+                  {labels.auth_forget_user_btn}
                 </button>
               </div>
             </footer>
@@ -810,17 +811,17 @@ export default function AuthGate({ children }: AuthGateProps) {
             aria-labelledby="adminPasscodeTitle"
             ref={adminModalRef}
           >
-            <h2 id="adminPasscodeTitle">دخول مسؤول النظام</h2>
+            <h2 id="adminPasscodeTitle">{labels.auth_admin_modal_title}</h2>
 
-            <p>أدخل رمز دخول مسؤول النظام.</p>
+            <p>{labels.auth_admin_modal_desc}</p>
 
             <input
               type="password"
-              aria-label="رمز مسؤول النظام"
+              aria-label={labels.auth_admin_passcode_aria}
               value={adminPasscode}
               onChange={(event) => setAdminPasscode(event.target.value)}
               onKeyDown={handleAdminModalKeyDown}
-              placeholder="رمز مسؤول النظام"
+              placeholder={labels.auth_admin_passcode_placeholder}
             />
 
             <div className="auth-modal-actions">

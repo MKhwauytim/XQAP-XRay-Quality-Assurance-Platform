@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Inbox, AlertTriangle } from "lucide-react";
+import { getLabels } from "../../data/labels/labelsStore";
 
 /**
  * Shared state-view surfaces for the three moments every data screen hits:
@@ -52,7 +53,7 @@ type LoadingStateProps = {
 };
 
 export function LoadingState({
-  label = "جارٍ التحميل…",
+  label = getLabels().app_tab_loading,
   bare = false
 }: LoadingStateProps) {
   return (
@@ -76,7 +77,7 @@ type ErrorStateProps = {
 };
 
 export function ErrorState({
-  title = "تعذّر عرض هذه البيانات",
+  title = getLabels().state_error_default_title,
   description,
   actions,
   bare = false

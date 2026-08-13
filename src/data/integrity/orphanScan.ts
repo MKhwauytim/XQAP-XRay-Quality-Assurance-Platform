@@ -8,8 +8,15 @@
  *                         current distribution entry
  *  - `sampleOrphans`    — sample rows whose id is absent from the population
  *
- * Pure and side-effect free so it is trivially unit-testable; the Data Accuracy view
- * loads the id sets and renders the result.
+ * Pure and side-effect free so it is trivially unit-testable.
+ *
+ * NOTE: as of v70.12.0 this function has NO non-test callers — no UI surfaces it.
+ * (The Data Accuracy view compares risk vs BI columns row-by-row and is unrelated
+ * to orphan ids.) It is retained as ready-to-wire B3 logic; do not assume an
+ * integrity scan runs anywhere in the app today. Whoever wires it up should also
+ * close the missing distribution->sample edge: the scan currently checks
+ * answers->distribution, approvals->distribution and sample->population, but not
+ * whether a distribution entry references a row that is still in the sample.
  */
 
 export type OrphanScanInput = {

@@ -149,13 +149,13 @@ describe("DataTable — RTL render + interactions (characterization)", () => {
 
     renderTable({ rows });
 
-    expect(screen.getByText(/عرض 1 إلى 100 من 150 صف/)).toBeInTheDocument();
+    expect(document.querySelector(".data-pagination-summary")).toHaveTextContent(/عرض 1 إلى 100 من 150 صف/);
     expect(screen.getByText("اسم 1")).toBeInTheDocument();
     expect(screen.queryByText("اسم 101")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "الصفحة التالية" }));
 
-    expect(screen.getByText(/عرض 101 إلى 150 من 150 صف/)).toBeInTheDocument();
+    expect(document.querySelector(".data-pagination-summary")).toHaveTextContent(/عرض 101 إلى 150 من 150 صف/);
     expect(screen.getByText("اسم 101")).toBeInTheDocument();
     expect(screen.queryByText("اسم 1")).not.toBeInTheDocument();
   });
@@ -188,13 +188,15 @@ describe("DataTable — RTL render + interactions (characterization)", () => {
 
     renderTable({ rows });
     fireEvent.click(screen.getByRole("button", { name: "الصفحة التالية" }));
-    expect(screen.getByText(/عرض 101 إلى 150 من 150 صف/)).toBeInTheDocument();
+    expect(document.querySelector(".data-pagination-summary")).toHaveTextContent(/عرض 101 إلى 150 من 150 صف/);
 
     fireEvent.change(screen.getByPlaceholderText("بحث في جميع الأعمدة..."), {
       target: { value: "مجموعة البحث" },
     });
 
-    await waitFor(() => expect(screen.getByText(/عرض 1 إلى 100 من 120 صف/)).toBeInTheDocument());
+    await waitFor(() =>
+      expect(document.querySelector(".data-pagination-summary")).toHaveTextContent(/عرض 1 إلى 100 من 120 صف/)
+    );
     expect(screen.getByText("اسم 1")).toBeInTheDocument();
   });
 

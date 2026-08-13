@@ -514,7 +514,7 @@ td.dt-td.dt-td--numeric {
 .dt-filter-head button {
   border: 0;
   background: transparent;
-  color: var(--c-sky);
+  color: var(--c-sky-text);
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;

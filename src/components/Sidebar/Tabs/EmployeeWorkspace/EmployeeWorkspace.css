@@ -1502,7 +1502,8 @@
   top: calc(100% + 6px);
   inset-inline-end: 0;
   z-index: 200;
-  width: 320px;
+  /* Clamped so the column-picker cannot overflow a narrow viewport. */
+  width: min(320px, calc(100vw - 32px));
   background: var(--c-surface);
   border: 1px solid var(--c-border);
   border-radius: var(--r-md, 12px);

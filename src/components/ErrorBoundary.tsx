@@ -2,6 +2,7 @@ import { Component } from "react";
 import type { ErrorInfo, ReactNode } from "react";
 import { AlertTriangle } from "lucide-react";
 import { logError } from "../data/storage/errorLogger";
+import { getLabels } from "../data/labels/labelsStore";
 
 type Props = { children: ReactNode };
 type State = { error: Error | null };
@@ -53,7 +54,7 @@ export class ErrorBoundary extends Component<Props, State> {
             <h1
               style={{ margin: "0 0 8px", fontSize: 20, color: "#17365d" }}
             >
-              حدث خطأ غير متوقع
+              {getLabels().errbound_title}
             </h1>
             <p
               style={{
@@ -63,7 +64,7 @@ export class ErrorBoundary extends Component<Props, State> {
                 lineHeight: 1.7,
               }}
             >
-              {error.message}
+              <bdi dir="ltr">{error.message}</bdi>
             </p>
             <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
               <button
@@ -77,7 +78,7 @@ export class ErrorBoundary extends Component<Props, State> {
                   fontSize: 14,
                 }}
               >
-                المحاولة مجدداً
+                {getLabels().errbound_retry_btn}
               </button>
               <button
                 onClick={() => window.location.reload()}
@@ -91,7 +92,7 @@ export class ErrorBoundary extends Component<Props, State> {
                   fontSize: 14,
                 }}
               >
-                إعادة تحميل الصفحة
+                {getLabels().errbound_reload_btn}
               </button>
             </div>
           </div>

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { X, Save, Eye } from "lucide-react";
 import { ModalPortal } from "../../../ModalPortal/ModalPortal";
+import { useFocusTrap } from "../../../../hooks/useFocusTrap";
 import type { DirectoryHandleLike } from "../../../../data/storage/fileSystemAccess";
 import type { ExecutiveReportInput } from "../../../../data/reporting/executiveReportTypes";
 import { loadDeckStyleChoices, saveDeckStyleChoices } from "../../../../data/reporting/executive/deck2/styleChoices";
@@ -115,9 +116,19 @@ export default function DeckDesignCustomizer({ loadExecInput, buildDisplayNameMa
     setStatus(result.ok ? { kind: "ok", text: "تم حفظ تخصيص التصميم." } : { kind: "error", text: result.error });
   }
 
+  // ModalPortal does not own focus/Escape — the caller wires it. This component
+  // only mounts while open, so the hook's default enabled: true is correct.
+  const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onClose });
+
   return (
     <ModalPortal>
-    <div className="rh-customizer-overlay" role="dialog" aria-modal="true" aria-label="تخصيص تصميم العرض التنفيذي">
+    <div
+      ref={dialogRef}
+      className="rh-customizer-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label="تخصيص تصميم العرض التنفيذي"
+    >
       <div className="rh-customizer-panel">
         <div className="rh-customizer-toolbar">
           <span className="rh-customizer-title">تخصيص تصميم العرض التنفيذي</span>

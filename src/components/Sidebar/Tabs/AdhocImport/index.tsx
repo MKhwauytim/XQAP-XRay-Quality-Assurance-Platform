@@ -9,6 +9,7 @@ import { readUserManagementState, type ManagedLoginUser } from "../../../../auth
 import { isAssignableSampleRole } from "../../../../data/distribution/bulkAssignment";
 import { PageHeader } from "../../../../components/PageHeader/PageHeader";
 import DataTable, { type DataTableCol } from "../../../../components/DataTable";
+import { ConfirmDialog } from "../../../ConfirmDialog/ConfirmDialog";
 import { useWorkspace } from "../../../../data/workspace/useWorkspace";
 import { useLabels } from "../../../../data/labels/useLabels";
 import { formatDateTime } from "../../../../utils/formatting";
@@ -217,9 +218,13 @@ export default function AdhocImportTab() {
     }
   }, [directoryHandle, selected, canAssign, assignTo, selectedRowKeys, operator, refreshIndex, L]);
 
-  const toggleImportStatus = useCallback(async () => {
+  // Closing a batch stops further assignment into it, so it keeps a confirmation
+  // step — now the app's own RTL ConfirmDialog rather than native window.confirm.
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false);
+
+  const applyImportStatusToggle = useCallback(async () => {
     if (!directoryHandle || !selected || !canIngest) return;
-    if (selected.status === "open" && !window.confirm(L.adhoc_import_close_confirm)) return;
+    setShowCloseConfirm(false);
     const nextStatus = selected.status === "open" ? "closed" : "open";
     const saved = await saveAdhocImportRecord(directoryHandle, {
       ...selected,
@@ -229,7 +234,7 @@ export default function AdhocImportTab() {
     });
     setSelected(saved);
     await refreshIndex();
-  }, [directoryHandle, selected, canIngest, operator, L, refreshIndex]);
+  }, [directoryHandle, selected, canIngest, operator, refreshIndex]);
 
   const rowColumns: DataTableCol<AdhocImportRow>[] = useMemo(() => [
     { id: "select", label: "", widthFr: 4, alwaysVisible: true, accessor: () => null },
@@ -318,12 +323,26 @@ export default function AdhocImportTab() {
             <button type="button" onClick={backToList}>{L.adhoc_import_back_to_list}</button>
             <h2>{fillTemplate(L.adhoc_import_review_title, { fileName: selected.fileName })}</h2>
             {canIngest && (
-              <button type="button" onClick={() => void toggleImportStatus()}>
+              <button
+                type="button"
+                onClick={() => {
+                  if (selected.status === "open") setShowCloseConfirm(true);
+                  else void applyImportStatusToggle();
+                }}
+              >
                 {selected.status === "open" ? L.adhoc_import_close_button : L.adhoc_import_reopen_button}
               </button>
             )}
           </div>
           <p className="adhoc-import-review-note">{L.adhoc_import_review_note}</p>
+
+          <ConfirmDialog
+            open={showCloseConfirm}
+            message={L.adhoc_import_close_confirm}
+            danger
+            onConfirm={() => void applyImportStatusToggle()}
+            onCancel={() => setShowCloseConfirm(false)}
+          />
 
           <DataTable<AdhocImportRow>
             columns={rowColumns}

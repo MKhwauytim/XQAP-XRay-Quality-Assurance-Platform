@@ -53,7 +53,7 @@ npm run check:bundle-size    # dist/index.html raw/gzip release budget
 npm run count-lines -- --quiet  # whole-repo line count (excludes docs/edit logs/; --with-edit-logs for the old basis)
 npm run editlog -- --tier=2 "…"  # generate a daily edit-log entry skeleton (see above)
 npm run preview         # Preview the built file
-npm run test:run        # Vitest, 1635 tests / 194 files as of v61.0
+npm run test:run        # Vitest, 1946 tests / 227 files as of v70.12.0
 npm run test            # Vitest watch mode
 npx vitest run src/data/sampling/sampleAlgorithm.test.ts  # run a single test file
 ```
@@ -64,7 +64,7 @@ Full pre-release gate sequence (version bump, docs sync, data-safety checks): `d
 
 ## Build & dependency gotchas
 
-- `vite-plugin-singlefile` inlines everything (`assetsInlineLimit` maxed, `cssCodeSplit: false`): v59.199 produces one portable `dist/index.html` (~2.98 MB, ~0.99 MB gzip; budget 3.6 MB / 1.3 MB). The ChangeLog virtual module aggregates `docs/edit logs/*.md` and is truncated to the newest 20 entries in production builds by `src/build/editLogTruncatePlugin.ts`. `npm run check:bundle-size` is the release budget.
+- `vite-plugin-singlefile` inlines everything (`assetsInlineLimit` maxed, `cssCodeSplit: false`): v70.12.0 produces one portable `dist/index.html` (~3.51 MB raw, ~1.17 MB gzip; budget 3.6 MB / 1.3 MB — only ~2.5% raw headroom remains, so re-run `check:bundle-size` before landing anything large). The ChangeLog virtual module aggregates `docs/edit logs/*.md` and is truncated to the newest 20 entries in production builds by `src/build/editLogTruncatePlugin.ts`. `npm run check:bundle-size` is the release budget.
 - Historical full-product revision snapshot (v56.2 fixes): `docs/audit/FULL_REVISION_2026-07-17.md`. The active forward-looking item is `docs/architecture/LARGE_POPULATION_PERFORMANCE_PROPOSAL_2026-07-22.md`, for populations above ~200k rows/month (paged repository reads, port-partitioned files, bounded LRU cache). **Phases A and B have shipped.** Phase A in v59.111–v59.114 (2026-08-01): focused month loaders, opt-in `MonthLoadScope`, sub-tab/capability demand gating. Phase B on 2026-08-04: worker-owned Population Browse paging (`src/workers/populationQueryWorker.ts`). **Phases C and D remain proposed and need owner approval** — the proposal doc's own header still reads `Status: proposed`, which now covers only those two. Phase C (port-partitioned storage) is additionally blocked on backup coordination. That sequence gates any finding marked **proposal-covered** in `docs/audit/APP_DATA_MANAGEMENT_AUDIT_2026-07-22.md`; don't implement those independently of the approved phase order.
 - `dist/` is intentionally just the single self-contained `index.html` — no other files. The `public/` folder is empty on purpose; anything dropped in it gets copied into `dist/` unchanged by Vite's default handling, which would break that guarantee. The desktop-shortcut "launch as app window" tooling (`create-desktop-shortcut.ps1` / `.bat` / `app-icon.ico`) that used to live there was removed 2026-07-20 — the app is distributed as a plain static file now, opened directly or served statically. `scripts/generate-app-icon.ps1` (dev-only, not shipped) still exists but is currently unused now that `app-icon.ico` is gone.
 - The `xlsx` dependency is **vendored** at `vendor/xlsx-0.20.3.tgz` (`package.json` points at `file:vendor/xlsx-0.20.3.tgz`) — originally sourced from the SheetJS CDN tarball (`https://cdn.sheetjs.com/xlsx-0.20.3/...`), not the npm registry. Vendoring means `npm ci` no longer needs network access to that CDN (required for CI, see `.github/workflows/ci.yml`). Don't "upgrade" it to the stale npm-registry `xlsx` package; see `vendor/README.md` for the upgrade procedure.
@@ -92,15 +92,15 @@ and path** — keep it in sync. Summary:
                     distribution.current.json (derived cache), main.samples.json
   {month}/…        per-employee sample mirrors, answers, referral/replacement, approvals
 3-user-data/       workspace user/permission files (when initialized via workspace defaults)
-4-reports/         created by workspace defaults but NEVER written to — see note below
+4-reports/         designs/ — Report Designer designs.index.json + {reportId}.json
 5-system/          workspace.schema.json, backups/, audit/, locks/, presets, notifications
 6-templates/       {templateId}.json, templates.index.json, template selection
-feedback/          undocumented 7th top-level root — see note below
+feedback/          legacy top-level root — read-only fallback; new writes go to 5-system/feedback/
 ```
 
-Month folder names follow `{month}-{MonthName-en}-{year}` (e.g. `5-May-2026`). Legacy roots remain readable; schema migration is dry-run/backup-first and never silently moves or deletes them. Roots are resolved through `workspacePaths.ts` — never hard-code a folder name.
+Month folder names follow `{month}-{MonthName-en}-{year}` (e.g. `5-May-2026`). Legacy roots remain readable. There is **no active schema migration**: `workspaceSchema.ts` only *detects* the layout and stamps `workspace.schema.json` on a brand-new workspace, so legacy/mixed layouts are read through permanent fallback paths in `workspacePaths.ts` and are never moved or deleted. Roots are resolved through `workspacePaths.ts` — never hard-code a folder name.
 
-Two known drifts between this layout and the code, both verified: **`4-reports/` stays empty** — it's created by `workspaceDefaults.ts`, but every report flow opens in a new tab or downloads via Blob, and `workspacePaths.ts` exposes only a `getReportsRoot` reader with no writer. **`feedback/` is a top-level root, not `5-system/feedback/`** — `feedbackStorage.ts`'s own doc comment claims the latter, but `FeedbackWidget.tsx` passes the workspace root handle rather than the system root, so the folder lands beside the numbered roots.
+Both previously documented drifts have since been **fixed in code**. **`4-reports/` is not empty** — Report Designer (`src/data/reportDesigner/storage/reportDesignStorage.ts`) writes `designs.index.json` (CAS-protected) and per-design `{reportId}.json` under `4-reports/designs/` via `getReportsRoot(..., true)`. **`feedback/` now writes under `5-system/feedback/`** — `feedbackStorage.ts` still *reads* the legacy top-level `feedback/` root so pre-existing workspaces keep working. See `docs/architecture/data-system-report.md` for the current picture.
 
 ## Architecture
 
@@ -147,7 +147,7 @@ Two known drifts between this layout and the code, both verified: **`4-reports/`
 | Answers | `src/data/answers/` | Per-employee per-month answer files |
 | Sample mirrors | `src/data/samples/` | Per-employee `*.samples.json` mirror storage — distinct from `sampling/` (the draw algorithm itself) |
 | Reporting | `src/data/reporting/` | Self-contained Arabic HTML report builders (sample + distribution + executive) |
-| Report Designer | `src/data/reportDesigner/` | Canvas geometry + design storage. In `query/`, only `fieldCatalog.ts` and `aggregations.ts` are live; `dataModel.ts`, `filters.ts` and `runQuery.ts` have **zero non-test callers** — abandoned scope the owner has approved for deletion. Don't build on them or "fix" their tests |
+| Report Designer | `src/data/reportDesigner/` | Canvas geometry + design storage. `query/` now contains only `fieldCatalog.ts` and `aggregations.ts`; the abandoned `dataModel.ts`/`filters.ts`/`runQuery.ts` query scope has been deleted — don't reintroduce it |
 | Power BI export | `src/data/powerbiExport/` | CSV export of population/sample/distribution/answer/executive rows for external BI ingestion |
 | Backup | `src/data/backup/` | Copy key files to `.system/backups/`, archive status check |
 | Approvals | `src/data/approvals/` | Referral approval records |
@@ -155,6 +155,7 @@ Two known drifts between this layout and the code, both verified: **`4-reports/`
 | Notifications | `src/data/notifications/` | Workspace-wide broadcast notifications + per-recipient acknowledgement (`ew/notifications` tab); single CAS-protected file |
 | Audit | `src/data/audit/` | CAS-protected action-log event history + archival |
 | Data integrity | `src/data/integrity/` | `orphanScan.ts` — referential-integrity check (B3) across the population → sample → distribution → answers/approvals `xrayImageId` chain |
+| Ad-hoc import | `src/data/adhocImport/` | Admin-uploaded one-off Excel imports, assigned outside the regular Population pipeline; synthesizes a `sample.master.json` for a synthetic month folder. Stored under `5-system/adhoc-imports/` |
 | Feedback | `src/data/feedback/` | User feedback records |
 | Labels | `src/data/labels/` | UI label overrides (`labelsStore.ts`) persisted to `localStorage`; `useLabels()` re-renders on change |
 | Preferences | `src/data/preferences/` | Browse preset storage |
@@ -192,6 +193,7 @@ Tabs are auto-discovered by `tabRegistry.ts`. Each top-level tab exports a defau
 | `user-management` | `Tabs/UserManagement/` | admin | 40 | `users`, `page-permissions`, `feature-permissions`, `activity`, `actions` |
 | `settings` | `Tabs/Settings/` | guest, admin | 95 | — |
 | `change-log` | `Tabs/ChangeLog/` | admin | 96 | — |
+| `adhoc-import` | `Tabs/AdhocImport/` | admin | 97 | — |
 
 `TemplateBuilder` and `ReportDesigner` no longer register standalone tabs — they render inside the sub-tabs noted above.
 

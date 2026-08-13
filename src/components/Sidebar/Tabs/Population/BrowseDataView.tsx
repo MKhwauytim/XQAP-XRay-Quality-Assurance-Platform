@@ -490,6 +490,9 @@ export default function BrowseDataView({
   const { selection: globalMonth } = useGlobalMonth();
   const labels = useLabels();
   const [isExporting, setIsExporting] = useState(false);
+  // Surfaced as an in-page role="alert" banner rather than window.alert (LTR,
+  // thread-blocking, unstyleable), matching the error pattern used elsewhere.
+  const [exportError, setExportError] = useState<string | null>(null);
   const [showAllMonths, setShowAllMonths] = useState(false);
   const globalFolder = globalMonth.kind === "none" ? null : globalMonth.folderName;
   const [dataset, setDataset] = useState<BrowseDatasetKind>("population");
@@ -939,6 +942,7 @@ export default function BrowseDataView({
 
   async function exportFilteredRowsToXlsx(): Promise<void> {
     if (isExporting) return;
+    setExportError(null);
     setIsExporting(true);
     try {
       const exportParams = { search: debouncedSearch, columnFilters, sort };
@@ -962,7 +966,7 @@ export default function BrowseDataView({
       // honest handler for a genuinely interrupted collection — a failed query
       // (worker "error" response) also resolves null and lands here.
       if (!complete) {
-        window.alert("تعذّر إكمال التصدير بسبب خطأ أثناء قراءة البيانات — حاول مرة أخرى.");
+        setExportError("تعذّر إكمال التصدير بسبب خطأ أثناء قراءة البيانات — حاول مرة أخرى.");
         return;
       }
 
@@ -1111,6 +1115,11 @@ export default function BrowseDataView({
             >
               {isExporting ? labels.dt_exporting : "تصدير XLSX"}
             </button>
+            {exportError && (
+              <span className="bv-export-error" role="alert">
+                {exportError}
+              </span>
+            )}
             {(search || activeFilterCount > 0) && (
               <button
                 type="button"

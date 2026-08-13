@@ -10,6 +10,7 @@ import { isFileOrigin } from "../../../../data/workspace/originDetection";
 import { logError } from "../../../../data/storage/errorLogger";
 import { useLabels } from "../../../../data/labels/useLabels";
 import { usePermissions } from "../../../../auth/usePermissions";
+import { ConfirmDialog } from "../../../ConfirmDialog/ConfirmDialog";
 import "./StorageSection.css";
 
 type Estimate = { usage: number; quota: number } | null;
@@ -92,9 +93,14 @@ export function StorageSection() {
     };
   }, []);
 
+  // UIX-02: the app's own RTL, token-styled ConfirmDialog rather than the native
+  // window.confirm (LTR, browser-chrome buttons) — this is the one destructive
+  // action that was still using the native dialog.
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+
   async function handleReset() {
     if (!canReset) return;
-    if (!window.confirm(labels.storage_reset_confirm)) return;
+    setShowResetConfirm(false);
     setResetFailed(false);
     try {
       await clearOwnedStorage();
@@ -162,12 +168,27 @@ export function StorageSection() {
 
       <button
         type="button"
-        onClick={() => void handleReset()}
+        onClick={() => {
+          // Capability check at the handler boundary, not just the disabled
+          // attribute: a disabled button can still be clicked programmatically,
+          // and without this the confirmation would open for a role that is
+          // not allowed to reset.
+          if (!canReset) return;
+          setShowResetConfirm(true);
+        }}
         disabled={!canReset}
         title={!canReset ? labels.storage_reset_denied_title : undefined}
       >
         {labels.storage_reset_button}
       </button>
+
+      <ConfirmDialog
+        open={showResetConfirm}
+        message={labels.storage_reset_confirm}
+        danger
+        onConfirm={() => void handleReset()}
+        onCancel={() => setShowResetConfirm(false)}
+      />
     </section>
   );
 }

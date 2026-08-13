@@ -1,6 +1,7 @@
 import { Settings2, X } from "lucide-react";
 import { ConfirmDialog } from "../../../../ConfirmDialog/ConfirmDialog";
 import { ModalPortal } from "../../../../ModalPortal/ModalPortal";
+import { useFocusTrap } from "../../../../../hooks/useFocusTrap";
 import type { PopulationConfig } from "../../../../../data/population/populationConfig";
 import { AliasOverlapWarningBanner } from "./AliasOverlapWarningBanner";
 import { ColumnMappingsSection } from "./ColumnMappingsSection";
@@ -55,6 +56,12 @@ export default function MappingSettingsModal({
     processingContext,
   });
 
+  // ModalPortal deliberately does not own focus/Escape behaviour — callers wire
+  // useFocusTrap themselves. Gated on isOpen because this hook runs above the
+  // early return below. No backdrop-click-to-close: this dialog edits mapping
+  // settings and a stray backdrop click would discard the user's input.
+  const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onClose, enabled: isOpen });
+
   if (!isOpen) return null;
 
   return (
@@ -73,6 +80,7 @@ export default function MappingSettingsModal({
       }}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="mapping-settings-title"

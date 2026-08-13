@@ -89,7 +89,7 @@ describe("PopulationProcessingReport — final-population preview (2026-08-12)",
     expect(screen.getByText("XR-1")).toBeInTheDocument();
     expect(screen.getByText("XR-10")).toBeInTheDocument();
     expect(screen.queryByText("XR-11")).not.toBeInTheDocument();
-    expect(screen.getByText(/عرض 1 إلى 10 من 25/)).toBeInTheDocument();
+    expect(document.querySelector(".data-pagination-summary")).toHaveTextContent(/عرض 1 إلى 10 من 25/);
 
     fireEvent.click(screen.getByRole("button", { name: "الصفحة التالية" }));
 

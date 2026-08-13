@@ -803,6 +803,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
           replacementRow: fullReplacementRow,
           reason,
           eventBy: username,
+          stageMappings,
         });
         if (!result.ok) {
           setReplacementError(result.error);

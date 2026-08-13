@@ -12,12 +12,13 @@ import {
 import { useWorkspace } from "../../data/workspace/useWorkspace";
 import Pagination from "../Pagination/Pagination";
 import { clampPage, pageSlice } from "../../utils/paginationUtils";
+import { getLabels } from "../../data/labels/labelsStore";
 import "./FeedbackWidget.css";
 
 const CATEGORY_LABELS: Record<FeedbackCategory, string> = {
-  suggestion: "اقتراح",
-  issue: "مشكلة",
-  inquiry: "استفسار",
+  suggestion: getLabels().fb_category_suggestion,
+  issue: getLabels().fb_category_issue,
+  inquiry: getLabels().fb_category_inquiry,
 };
 
 const CAN_MANAGE: AuthRole[] = ["manager", "admin"];
@@ -107,7 +108,7 @@ export function FeedbackWidget() {
       void refresh();
     } catch (err) {
       // B6: never fail silently — a CAS conflict surfaces its Arabic message.
-      setSubmitError(err instanceof Error ? err.message : "تعذّر حفظ الملاحظة — أعد المحاولة.");
+      setSubmitError(err instanceof Error ? err.message : getLabels().fb_submit_error_generic);
     } finally {
       setSubmitting(false);
     }
@@ -135,7 +136,7 @@ export function FeedbackWidget() {
       void refresh();
     } catch (err) {
       // B6: surface a CAS conflict instead of an unhandled rejection.
-      setSubmitError(err instanceof Error ? err.message : "تعذّر حفظ الرد — أعد المحاولة.");
+      setSubmitError(err instanceof Error ? err.message : getLabels().fb_reply_error_generic);
     } finally {
       setReplying(null);
     }
@@ -169,8 +170,8 @@ export function FeedbackWidget() {
         <button
           type="button"
           className="fb-fab"
-          aria-label="التواصل والاقتراحات"
-          title="التواصل والاقتراحات"
+          aria-label={getLabels().toolbar_feedback_label}
+          title={getLabels().toolbar_feedback_label}
           onClick={() => window.dispatchEvent(new CustomEvent("feedback:toggle"))}
         >
           <MessageCircle size={22} aria-hidden />
@@ -183,10 +184,10 @@ export function FeedbackWidget() {
           {/* Header */}
           <div className="fb-header">
             <div className="fb-header-text">
-              <h3>التواصل والاقتراحات</h3>
-              <p>{isManager ? "إدارة الرسائل والردود" : "أرسل ملاحظاتك للإدارة"}</p>
+              <h3>{getLabels().toolbar_feedback_label}</h3>
+              <p>{isManager ? getLabels().fb_subtitle_manager : getLabels().fb_subtitle_user}</p>
             </div>
-            <button className="fb-close" onClick={() => setOpen(false)} aria-label="إغلاق"><X size={16} /></button>
+            <button className="fb-close" onClick={() => setOpen(false)} aria-label={getLabels().fb_close_aria}><X size={16} /></button>
           </div>
 
           {/* Admin tabs */}
@@ -196,13 +197,13 @@ export function FeedbackWidget() {
                 className={`fb-tab${adminTab === "new" ? " active" : ""}`}
                 onClick={() => setAdminTab("new")}
               >
-                إرسال رسالة
+                {getLabels().fb_tab_new}
               </button>
               <button
                 className={`fb-tab${adminTab === "all" ? " active" : ""}`}
                 onClick={() => setAdminTab("all")}
               >
-                كل الرسائل {openCount > 0 && `(${openCount})`}
+                {getLabels().fb_tab_all} {openCount > 0 && `(${openCount})`}
               </button>
             </div>
           )}
@@ -216,7 +217,7 @@ export function FeedbackWidget() {
                   className={`fb-filter-btn${filter === f ? " active" : ""}`}
                   onClick={() => { setFilter(f); setAdminPage(1); }}
                 >
-                  {f === "open" ? "مفتوحة" : f === "resolved" ? "مغلقة" : "الكل"}
+                  {f === "open" ? getLabels().fb_filter_open : f === "resolved" ? getLabels().fb_filter_resolved : getLabels().fb_filter_all}
                 </button>
               ))}
             </div>
@@ -230,19 +231,19 @@ export function FeedbackWidget() {
                 {submitted ? (
                   <div className="fb-success">
                     <div className="fb-success-icon"><Check size={28} /></div>
-                    <h4>تم الإرسال بنجاح</h4>
-                    <p>سيتم مراجعة رسالتك من قبل الإدارة</p>
+                    <h4>{getLabels().fb_success_title}</h4>
+                    <p>{getLabels().fb_success_body}</p>
                     <button
                       className="fb-success-back"
                       onClick={() => setSubmitted(false)}
                     >
-                      إرسال رسالة أخرى
+                      {getLabels().fb_success_send_another}
                     </button>
                   </div>
                 ) : (
                   <div className="fb-form">
                     <div>
-                      <span className="fb-label">نوع الرسالة</span>
+                      <span className="fb-label">{getLabels().fb_message_type_label}</span>
                       <div className="fb-category-row">
                         {(["suggestion", "issue", "inquiry"] as FeedbackCategory[]).map((c) => (
                           <button
@@ -256,11 +257,11 @@ export function FeedbackWidget() {
                       </div>
                     </div>
                     <div>
-                      <label className="fb-label" htmlFor="fb-text">الرسالة</label>
+                      <label className="fb-label" htmlFor="fb-text">{getLabels().fb_message_label}</label>
                       <textarea
                         id="fb-text"
                         className="fb-textarea"
-                        placeholder="اكتب رسالتك هنا..."
+                        placeholder={getLabels().fb_message_placeholder}
                         value={text}
                         onChange={(e) => setText(e.target.value)}
                       />
@@ -270,7 +271,7 @@ export function FeedbackWidget() {
                       disabled={!text.trim() || submitting}
                       onClick={() => { void handleSubmit(); }}
                     >
-                      {submitting ? "جاري الإرسال..." : "إرسال"}
+                      {submitting ? getLabels().fb_submitting : getLabels().fb_submit_btn}
                     </button>
                     {submitError && (
                       <p className="fb-error" role="alert" style={{ color: "#dc2626", marginTop: 8, fontSize: 13 }}>
@@ -283,7 +284,7 @@ export function FeedbackWidget() {
                 {/* User's own message history */}
                 {!submitted && myMessages.length > 0 && (
                   <div style={{ marginTop: 20 }}>
-                    <span className="fb-label">رسائلي السابقة</span>
+                    <span className="fb-label">{getLabels().fb_my_messages_label}</span>
                     <div className="fb-msg-list" style={{ marginTop: 8 }}>
                       {pageSlice(myMessages, safeMyPage).map((msg) => (
                         <MessageCard
@@ -310,9 +311,9 @@ export function FeedbackWidget() {
             {isManager && adminTab === "all" && (
               <>
                 {loading ? (
-                  <p className="fb-empty">جاري التحميل...</p>
+                  <p className="fb-empty">{getLabels().fb_loading}</p>
                 ) : filteredMessages.length === 0 ? (
-                  <p className="fb-empty">لا توجد رسائل</p>
+                  <p className="fb-empty">{getLabels().fb_empty}</p>
                 ) : (
                   <>
                     <div className="fb-msg-list">
@@ -374,7 +375,7 @@ function MessageCard({
           {CATEGORY_LABELS[msg.category]}
         </span>
         {msg.status === "resolved" && (
-          <span className="fb-msg-badge resolved-badge">مغلقة</span>
+          <span className="fb-msg-badge resolved-badge">{getLabels().fb_resolved_badge}</span>
         )}
         <span className="fb-msg-time">{formatTime(msg.timestamp)}</span>
       </div>
@@ -395,7 +396,7 @@ function MessageCard({
         <div className="fb-reply-form">
           <textarea
             className="fb-reply-input"
-            placeholder="رد..."
+            placeholder={getLabels().fb_reply_placeholder}
             value={replyText}
             onChange={(e) => onReplyChange(e.target.value)}
             rows={1}
@@ -406,11 +407,11 @@ function MessageCard({
               disabled={!replyText.trim() || isSending}
               onClick={onReply}
             >
-              {isSending ? "..." : "رد"}
+              {isSending ? getLabels().fb_reply_sending : getLabels().fb_reply_btn}
             </button>
             {isAdmin && onResolve && (
               <button className="fb-resolve-btn" onClick={onResolve} disabled={isSending}>
-                إغلاق
+                {getLabels().fb_resolve_btn}
               </button>
             )}
           </div>

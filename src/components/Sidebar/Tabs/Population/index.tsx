@@ -114,6 +114,12 @@ type SaveMessage = { type: "ok" | "error"; text: string } | null;
 
 type SubTab = "process" | "browse";
 
+// The "pop-set-subtab" event is dispatched by the Sidebar for EVERY tab's sub-tab
+// clicks, not just Population's. Because App.tsx keeps up to 3 tabs mounted (hidden)
+// at once, this listener stays live while another tab is active and would otherwise
+// accept a foreign sub-tab id. Mirrors the guard used by the sibling tabs.
+const KNOWN_POPULATION_SUB_TABS = new Set<string>(["process", "browse"]);
+
 type WizardCapabilities = {
   canUploadData: boolean;
   canProcessPopulation: boolean;
@@ -297,8 +303,11 @@ export default function PopulationTab() {
 
   // Listen for sub-tab changes dispatched from the Sidebar
   useEffect(() => {
-    const handler = (e: CustomEvent<{ subTabId: SubTab }>) => {
-      setActiveSubTab(e.detail.subTabId);
+    const handler = (e: CustomEvent<{ subTabId: string }>) => {
+      const { subTabId } = e.detail;
+      if (KNOWN_POPULATION_SUB_TABS.has(subTabId)) {
+        setActiveSubTab(subTabId as SubTab);
+      }
     };
     window.addEventListener("pop-set-subtab", handler as EventListener);
     return () => window.removeEventListener("pop-set-subtab", handler as EventListener);

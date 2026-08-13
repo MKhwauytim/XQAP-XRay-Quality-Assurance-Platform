@@ -3595,3 +3595,15 @@ select.save-disk-input {
 .csmp-tier-normalized { background: var(--c-info-bg); color: var(--c-info); }
 .csmp-tier-fuzzy { background: var(--p-warning-bg); color: var(--p-warning); }
 .bv-table tr:hover td { background: var(--c-surface-2); }
+
+/* Inline export failure notice for the Browse view — replaces a native
+   window.alert so the message is RTL, token-styled and non-blocking. */
+.bv-export-error {
+  padding: 4px 10px;
+  border: 1px solid var(--c-danger-border);
+  border-radius: 6px;
+  background: var(--c-danger-bg);
+  color: var(--c-danger);
+  font-size: 12px;
+  font-weight: 700;
+}

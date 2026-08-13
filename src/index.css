@@ -25,6 +25,11 @@
 
   --c-sky:         var(--brand-digital);
   --c-sky-2:       #007FBA;
+  /* AA-compliant text variant of --c-sky. --c-sky (#009ADE) is 3.14:1 on white
+     and fails WCAG AA (4.5:1) for text under 18.66px; --c-sky-2 is 4.43:1 and
+     also fails. #00719F is 5.43:1. Use this for small sky-coloured TEXT only —
+     keep --c-sky for icons, borders, fills and accents, which need just 3:1. */
+  --c-sky-text:    #00719F;
   --c-sky-light:   #E5F5FB;
 
   --c-ink:         #0B1F33;

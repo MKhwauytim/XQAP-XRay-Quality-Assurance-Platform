@@ -52,6 +52,15 @@
   flex-wrap: wrap;
 }
 
+/* A file input sizes itself to its content (button chrome + filename), which
+   measured 343px here — and as a flex item with the default min-width: auto it
+   refuses to shrink below that, hanging 72px off a 320px viewport. Verified in
+   Chromium: this was the sole remaining source of horizontal page overflow. */
+.adhoc-import-upload-card input[type="file"] {
+  max-width: 100%;
+  min-width: 0;
+}
+
 .adhoc-import-list-table {
   width: 100%;
   border-collapse: collapse;

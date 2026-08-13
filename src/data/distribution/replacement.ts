@@ -165,8 +165,23 @@ export async function executeReplacement(params: {
   eventBy: string;
   /** Idempotency key stamped onto both emitted events (replay detection). */
   sourceRequestId?: string;
+  /**
+   * Stage alias overrides the month was drawn under. Forwarded to appendSampleRow
+   * so the replacement row lands in the right stage bucket; omitted, a workspace
+   * with custom aliases silently under-counts stageAllocations.
+   */
+  stageMappings?: Partial<StageAliasMappings>;
 }): Promise<ExecuteReplacementResult> {
-  const { directoryHandle, monthFolderName, deadEntry, replacementRow, reason, eventBy, sourceRequestId } = params;
+  const {
+    directoryHandle,
+    monthFolderName,
+    deadEntry,
+    replacementRow,
+    reason,
+    eventBy,
+    sourceRequestId,
+    stageMappings,
+  } = params;
 
   // Guard: dead row must not already be replaced or completed.
   if (deadEntry.status === "replaced" || deadEntry.status === "completed") {
@@ -177,7 +192,12 @@ export async function executeReplacement(params: {
   }
 
   // Step 1: append replacement row to sample master (idempotent — safe to retry).
-  const sampleResult = await appendSampleRow(directoryHandle, monthFolderName, replacementRow);
+  const sampleResult = await appendSampleRow(
+    directoryHandle,
+    monthFolderName,
+    replacementRow,
+    stageMappings
+  );
   if (!sampleResult.ok) {
     return { ok: false, error: sampleResult.error };
   }

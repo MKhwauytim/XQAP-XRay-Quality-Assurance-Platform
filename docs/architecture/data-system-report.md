@@ -101,6 +101,39 @@ global selection.
 | `distribution.events/{eventId}.json` | `2-samples/{month}/1-main/` | Immutable durable assignment event envelopes. |
 | `distribution.log.json` | `2-samples/{month}/1-main/` | Backward-compatible event-log projection. |
 | `distribution.current.json` | `2-samples/{month}/1-main/` | Derived current distribution snapshot. |
+
+### Cross-writer limitation (verified 2026-08-13)
+
+`risk.raw.json`, `bi.raw.json`, `population.final.json`, `processing.summary.json` and the **initial**
+`sample.master.json` draw are serialized only by `withResourceLock(...)`, which is a **Web Lock —
+same-origin, same-machine**. They are *not* CAS-protected. (`sample.master.json`'s later mutation paths —
+`approveSampleMaster`, `appendSampleRow` — and `distribution.log.json`, notifications, the action log and
+per-employee answers all *are* CAS-protected via `casLoop`.)
+
+Consequence on a shared or synced workspace folder: two admins processing or drawing **the same month**
+from **different machines** at the same time is last-write-wins for the processed output. Mitigating
+factors, all verified in code:
+
+- `archiveExistingRaw` copies the prior `risk.raw.json`/`bi.raw.json` to `{base}.raw.{ts}.superseded.json`
+  before every overwrite, so **the losing admin's raw import survives on disk** and
+  `population.final.json` is recomputable from it by re-processing.
+- `saveMonthRun` re-checks `sampleExists` *under the lock* and aborts pending `confirmedOverwrite`, so the
+  highest-consequence case — clobbering a population a sample already depends on — is guarded across
+  machines, because the check reads the shared file.
+- A sample redraw before any distribution event is behaviour the product deliberately permits; after the
+  first distribution event it is hard-blocked.
+
+So the residual exposure is a **confusing success banner and manual re-processing, not silent destruction
+of the only copy**. It is nonetheless a real limitation: **do not run concurrent processing or draws for
+one month from two machines.**
+
+Wrapping these files in `casLoop` was evaluated during the 2026-08-13 finalization pass and **deliberately
+deferred to the owner**: `population.final.json` is documented in-code at tens of MB and 10–15 minutes per
+write, and `casLoop` retries the whole attempt with a delayed full re-read, which would mean re-reading and
+potentially re-writing the largest file in the system on conflict. The cheaper eventual fix — a
+stale-revision pre-write check reusing the existing `readEnvelopeRevision`/`loadMonthPopulationFinalRevision`
+helpers, aborting with a `staleRevision` flag the caller confirms exactly as the existing `sampleExists`
+guard already does — needs a new UI confirmation branch plus tests and belongs in a planned release.
 | `main.samples.json` | `2-samples/{month}/1-main/` | Mirror of all assigned sample entries. |
 | `{username}.samples.json` | `2-samples/{month}/2-employees/` | Per-employee sample mirror. |
 | `{username}.answers.json` | `2-samples/{month}/2-employees/` | Employee answers plus referral/replacement requests for that employee. |
@@ -201,7 +234,7 @@ Each `population.final.json` row and each sampled `rows[]` item uses the process
 | `{username}.samples.json` | Employee mirror: `monthFolderName`, `username`, `updatedAt`, `sourceLogRevision`, `entries[]`. |
 | `{username}.answers.json` | `username`, `monthFolderName`, `revision`, `_writeToken`, `lastUpdatedAt`, `items[]`, `referralRequests[]`, `replacementRequests[]`. |
 | `items[]` | `xrayImageId`, `templateId`, `templateVersion`, `answers`, `lastSavedAt`, `submittedAt`, `answeredBy`, `status`. |
-| `{supervisor}.decisions.json` | `supervisorUsername`, `monthFolderName`, `referralDecisions[]`, `replacementDecisions[]`, `decisionEvents[]`, `lastUpdatedAt`. Each `decisionEvents[]` entry carries an optional `previousDecisionHash` (B5) — a djb2 hash of the immediately-preceding decision in the file, forming a tamper-EVIDENT chain (absent on the first/legacy events; no cryptographic non-repudiation — see `docs/SECURITY_MODEL.md` §6). |
+| `{supervisor}.decisions.json` | `supervisorUsername`, `monthFolderName`, `referralDecisions[]`, `replacementDecisions[]`, `decisionEvents[]`, `lastUpdatedAt`. Each `decisionEvents[]` entry carries an optional `previousDecisionHash` (B5) — a djb2 hash of the immediately-preceding decision in the file, forming a tamper-EVIDENT chain (absent on the first/legacy events; no cryptographic non-repudiation — see `docs/architecture/SECURITY_MODEL.md` §6). |
 | `activity.log.json` | `revision`, `updatedAt`, `entries[]`. |
 | activity `entries[]` | `id`, `username`, `role`, `signedInAt`, `lastSeenAt`, `signedOutAt`, `durationMs`, `closeReason`. |
 

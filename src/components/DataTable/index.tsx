@@ -766,6 +766,7 @@ export default function DataTable<TRow>({
           <input
             type="text"
             className="dt-search"
+            aria-label={L.dt_search_placeholder}
             placeholder={L.dt_search_placeholder}
             value={globalSearch}
             onChange={(e) => {
@@ -863,6 +864,7 @@ export default function DataTable<TRow>({
                 return (
                   <th
                     key={col.id}
+                    scope="col"
                     className={`dt-th${stickyMeta.has(col.id) ? " dt-sticky-col dt-sticky-head" : ""}${isNumeric ? " dt-th--numeric" : ""}`}
                     style={{ minWidth: headerMinWidth(col), ...getStickyStyle(col, true) }}
                     draggable

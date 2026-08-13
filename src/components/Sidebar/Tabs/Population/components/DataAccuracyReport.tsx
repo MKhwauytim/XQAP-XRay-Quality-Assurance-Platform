@@ -344,6 +344,7 @@ export default function DataAccuracyReport({
           <input
             type="text"
             className="dar-search-input"
+            aria-label="بحث بمعرف الأشعة أو القيمة"
             placeholder="بحث بمعرف الأشعة أو القيمة..."
             value={search}
             onChange={e => handleSearch(e.target.value)}

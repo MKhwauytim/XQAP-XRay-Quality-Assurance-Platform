@@ -104,7 +104,12 @@ export async function saveCertScanGlobal(
   try {
     const populationDir = await getPopulationRoot(directoryHandle, true);
     await safeWriteJson(populationDir, CERTSCAN_GLOBAL_FILE, { text, updatedAt: new Date().toISOString() });
-  } catch { /* ignore */ }
+  } catch (error) {
+    // Fire-and-forget autosave: the in-session value is unaffected, so this
+    // stays non-throwing. But a persistently failing autosave otherwise
+    // surfaces later as "my CertScan list vanished" with no trace anywhere.
+    logError("population:save-certscan-global", error);
+  }
 }
 
 export async function loadCertScanGlobal(
@@ -151,7 +156,13 @@ export async function saveSamplingProof(
   try {
     const sampleDir = await getSampleMainDir(directoryHandle, monthFolderName, true);
     await safeWriteJson(sampleDir, "sampling-proof.json", proof);
-  } catch { /* ignore */ }
+  } catch (error) {
+    // Non-throwing by design: the draw's own record (rngSeed, drawnAt, drawnBy,
+    // allocations) is already persisted in sample.master.json, so a lost proof
+    // document is a reproducibility annoyance rather than lost audit evidence.
+    // It must still be visible in the admin error log rather than vanishing.
+    logError("population:save-sampling-proof", error);
+  }
 }
 
 export type SaveMonthRunParams = {
