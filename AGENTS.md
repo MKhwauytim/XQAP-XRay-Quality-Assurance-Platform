@@ -19,7 +19,7 @@ npm run preview             # preview production build
 
 ## Build and platform constraints
 
-- `vite-plugin-singlefile` produces one portable `dist/index.html` (~3.04 MB, ~1.13 MB gzip in v56.2). The ChangeLog aggregates `docs/edit logs/*.md` and is truncated at build time.
+- `vite-plugin-singlefile` produces one portable `dist/index.html` (~3.04 MB, ~1.13 MB gzip in v56.2).
 - SheetJS is vendored at `vendor/xlsx-0.20.3.tgz`; `package.json` uses `file:vendor/xlsx-0.20.3.tgz`. Do not replace it with the stale npm-registry package. Follow `vendor/README.md` and update the reviewed checksum when upgrading.
 - Full workspace support requires the File System Access API (`showDirectoryPicker`), so use Chrome or Edge. Other browsers receive the unsupported-browser state.
 - TypeScript uses strict mode and `erasableSyntaxOnly`. `FileHandleLike.createWritable` is optional; guard it before calling.
@@ -93,7 +93,6 @@ Top-level tabs are auto-discovered by `tabRegistry.ts` through `import.meta.glob
 | `archive` | guest, supervisor, manager, admin | 30 |
 | `user-management` | admin | 40 |
 | `settings` | guest, admin | 95 |
-| `change-log` | admin | 96 |
 
 Template Builder is the Employee Workspace inspection-form surface. Report Designer is a Reports sub-tab. Do not register them as duplicate top-level tabs.
 

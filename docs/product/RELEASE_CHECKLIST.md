@@ -23,9 +23,9 @@ Run through this before cutting a release (tagging a commit as the version users
 
 - [ ] Skim the `docs/edit logs/` entries since the last release tag.
 - [ ] Summarize the major-version-worthy items (features, breaking changes, notable fixes) into
-      a short human-readable release note if one is being published externally. The in-app
-      ChangeLog tab already surfaces the full entry detail — this step is for anything shipped
-      outside the app itself (release notes page, announcement, etc.), skip it if there is none.
+      a short human-readable release note if one is being published externally. The full entry
+      detail lives in `docs/edit logs/` — this step is for anything shipped outside the app
+      itself (release notes page, announcement, etc.), skip it if there is none.
 
 ## 3. Build size
 
@@ -33,11 +33,8 @@ Run through this before cutting a release (tagging a commit as the version users
       Vite build output.
 - [ ] Compare against the last recorded size in `CLAUDE.md`'s "Build & dependency gotchas"
       section. If it moved meaningfully, update that note (`~X MB, ~Y kB gzip as of <date>`).
-- [ ] If the jump is unexpectedly large, check whether recent files in `docs/edit logs/` grew a lot since the
-      last release — the ChangeLog tab's build-time truncation (`src/build/editLogTruncatePlugin.ts`,
-      currently keeping the most recent 20 versions) bounds this, but a burst of very large
-      entries can still move the needle; consider whether the kept-version count still makes
-      sense.
+- [ ] If the jump is unexpectedly large, identify which module grew. `docs/edit logs/` is no
+      longer bundled into the build at all, so it cannot be the cause.
 
 ## 4. Docs sync
 

@@ -49,7 +49,6 @@ XQAP تطبيق ويب من صفحة واحدة (SPA)، مبني بالكامل 
 | **تصدير Power BI** | تصدير بصيغة CSV لبيانات العروضية والعيّنة والتوزيع والإجابات والتقرير التنفيذي، جاهزة للاستيراد المباشر في Power BI أو أي أداة BI خارجية. |
 | **إدارة المستخدمين** (User Management) | إنشاء وإدارة حسابات الموظفين والمشرفين والمدراء، مصفوفة صلاحيات التبويبات والميزات، سجل النشاط، وسجل الإجراءات الأخيرة. |
 | **الإعدادات** (Settings) | تخصيص أي نص/تسمية في الواجهة (تعريب قابل للتخصيص)، وعرض معلومات النظام والإصدار. |
-| **سجل التغييرات** (ChangeLog) | سجل تغييرات داخل التطبيق نفسه، مبني مباشرة من ملفات `docs/edit logs/` — كل إصدار وتاريخه وما تغيّر فيه. |
 
 ---
 
@@ -239,7 +238,6 @@ All without needing an IT team to run servers or databases — a folder on disk 
 | **Power BI Export** | CSV export of population, sample, distribution, answer, and executive-report rows, shaped for direct ingestion into Power BI or any other external BI tool. |
 | **User Management** | Create and manage employee/supervisor/manager accounts, the tab/feature permission matrix, an activity log, and a recent-actions audit trail. |
 | **Settings** | Override any UI label or string (customizable Arabic localization), and view system/version info. |
-| **ChangeLog** | An in-app changelog built directly from the `docs/edit logs/` history — every version, its date, and what changed. |
 
 ---
 

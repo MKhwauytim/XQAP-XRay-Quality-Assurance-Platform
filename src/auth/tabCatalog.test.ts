@@ -84,7 +84,6 @@ describe("tab catalog", () => {
       "user-management/feature-permissions",
       "user-management/activity",
       "user-management/actions",
-      "change-log",
       "adhoc-import",
     ]) {
       expect(roleCeilingFor(tabId), tabId).toEqual(["admin"]);

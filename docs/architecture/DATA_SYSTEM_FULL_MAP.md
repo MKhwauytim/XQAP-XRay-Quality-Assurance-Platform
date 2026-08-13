@@ -419,8 +419,7 @@ The heaviest writer in the app. Its four phases each own different artifacts.
 
 ### Surfaces that write nothing
 
-`ChangeLog` tab (renders the build-time virtual module), and the `reports` sub-tab's report
-generation itself — every edition is ephemeral.
+The `reports` sub-tab's report generation itself — every edition is ephemeral.
 
 ---
 ## Part VI — File catalog: hierarchy, contents, and relationships

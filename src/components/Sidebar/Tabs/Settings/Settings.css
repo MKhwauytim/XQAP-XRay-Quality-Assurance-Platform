@@ -124,11 +124,6 @@
   color: var(--c-navy, #0F2744);
 }
 
-.settings-about-note {
-  color: var(--c-ink-3, #5E7A96);
-  font-size: 12px;
-}
-
 /* ── Accordion section header ─────────────────────────────────────────────── */
 
 .settings-section-header {

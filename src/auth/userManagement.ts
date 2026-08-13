@@ -490,12 +490,6 @@ export function createDefaultPermissions(): RolePermission[] {
     { role: "supervisor", tabId: "ew/notifications",        access: "none" },
     { role: "manager",    tabId: "ew/notifications",        access: "edit" },
     { role: "admin",      tabId: "ew/notifications",        access: "edit" },
-    // Change log (version & edit history) — admin-only
-    { role: "guest",      tabId: "change-log",              access: "none" },
-    { role: "employee",   tabId: "change-log",              access: "none" },
-    { role: "supervisor", tabId: "change-log",              access: "none" },
-    { role: "manager",    tabId: "change-log",              access: "none" },
-    { role: "admin",      tabId: "change-log",              access: "edit" },
     // Sub-tabs that formerly relied on parent-tab inheritance (موروث) — now explicit.
     // Values baked from the pre-removal effective access (parent population / reports rows),
     // so the inheritance fallback can be deleted with zero functional change (see C1 test).

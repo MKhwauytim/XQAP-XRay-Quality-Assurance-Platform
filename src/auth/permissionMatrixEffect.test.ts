@@ -28,7 +28,7 @@ const ALL_FEATURE_IDS = Object.keys(FEATURE_TAB_LOOKUP);
 
 /** Exactly the role x tab cells the matrix is allowed to present as restricted. */
 const EXPECTED_RESTRICTED: ReadonlyArray<readonly [AuthRole, string]> = [
-  // Admin-only by design: user management, the change log and the ad-hoc importer.
+  // Admin-only by design: user management and the ad-hoc importer.
   ...(["guest", "employee", "supervisor", "manager"] as const).flatMap((role) =>
     [
       "user-management",
@@ -37,7 +37,6 @@ const EXPECTED_RESTRICTED: ReadonlyArray<readonly [AuthRole, string]> = [
       "user-management/feature-permissions",
       "user-management/activity",
       "user-management/actions",
-      "change-log",
       "adhoc-import",
     ].map((tabId) => [role, tabId] as const),
   ),

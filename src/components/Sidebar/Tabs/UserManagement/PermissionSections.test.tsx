@@ -64,11 +64,11 @@ describe("user-management permission sections", () => {
       />
     );
 
-    // user-management, change-log and adhoc-import are admin-only by design; the
-    // four managed role columns must read as restricted, with no clickable control.
+    // user-management and adhoc-import are admin-only by design; the four managed
+    // role columns must read as restricted, with no clickable control.
     expect(screen.getAllByText(SYSTEM_RESTRICTED_LABEL).length).toBeGreaterThanOrEqual(12);
     expect(screen.queryByRole("button", { name: /user-management:/ })).toBeNull();
-    expect(screen.queryByRole("button", { name: /change-log/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /adhoc-import/ })).toBeNull();
   });
 
   it("renders reports and archive as live, settable controls for employees", () => {

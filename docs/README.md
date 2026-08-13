@@ -1,6 +1,6 @@
 # Documentation Index — x-ray-quality-app
 
-Organized by purpose. Complete version history lives in `edit logs/`, with exactly one `YYYY-MM-DD.md` file per logged day. The app aggregates these files through `src/build/editLogTruncatePlugin.ts`.
+Organized by purpose. Complete version history lives in `edit logs/`, with exactly one `YYYY-MM-DD.md` file per logged day. These files are documentation only — the app no longer bundles or renders them.
 
 ## Sections
 

@@ -42,7 +42,6 @@ export const TAB_CATALOG: readonly TabCatalogEntry[] = [
   { id: "user-management/activity", label: "متابعة الأنشطة", parentId: "user-management", allowedRoles: ADMIN_ONLY },
   { id: "user-management/actions", label: "سجل الإجراءات", parentId: "user-management", allowedRoles: ADMIN_ONLY },
   { id: "settings", label: "إدارة الإعدادات", allowedRoles: ["guest", "admin"] },
-  { id: "change-log", label: "سجل الإصدارات", allowedRoles: ADMIN_ONLY },
   { id: "adhoc-import", label: "استيراد بيانات مخصص", allowedRoles: ADMIN_ONLY },
 ] as const;
 

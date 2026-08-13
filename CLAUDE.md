@@ -31,7 +31,7 @@ Tier 3's sweep is the **release** gate, not the per-edit gate. Running it on a t
 
 1. **Version** — semver-lite: major feature/refactor/architectural change bumps the whole number (v1 → v2); fix/tweak/hotfix bumps the decimal (v1.0 → v1.1). Write a major as `v60.0`, not `v60` — `check:release` compares against `package.json`'s first two segments and a bare `v60` can never match.
 2. **Date** — ISO (YYYY-MM-DD).
-3. **Category** — the title must start with `Fix:`, `Add:`, `Change:`, `Remove:`, `Refactor:`, `Security:`, `Docs:`, or `Chore:` (an optional `(scope):` may follow). The ChangeLog tab (`src/components/Sidebar/Tabs/ChangeLog/`) renders this as the entry title, so pick the category matching the *primary* action; when an entry mixes concerns, lead with whichever dominates.
+3. **Category** — the title must start with `Fix:`, `Add:`, `Change:`, `Remove:`, `Refactor:`, `Security:`, `Docs:`, or `Chore:` (an optional `(scope):` may follow). Pick the category matching the *primary* action; when an entry mixes concerns, lead with whichever dominates.
 4. **What changed**, plus **Why** at tier 2+.
 5. **File** — one `**File:**` block per touched file, all under the same version entry.
 6. **Lines** — one `**Lines:**` line per entry, generated. Tier 3 also carries the whole-repo total.
@@ -53,7 +53,7 @@ npm run check:bundle-size    # dist/index.html raw/gzip release budget
 npm run count-lines -- --quiet  # whole-repo line count (excludes docs/edit logs/; --with-edit-logs for the old basis)
 npm run editlog -- --tier=2 "…"  # generate a daily edit-log entry skeleton (see above)
 npm run preview         # Preview the built file
-npm run test:run        # Vitest, 1946 tests / 227 files as of v70.12.0
+npm run test:run        # Vitest, 1970 tests / 231 files as of v72.0.0
 npm run test            # Vitest watch mode
 npx vitest run src/data/sampling/sampleAlgorithm.test.ts  # run a single test file
 ```
@@ -64,7 +64,7 @@ Full pre-release gate sequence (version bump, docs sync, data-safety checks): `d
 
 ## Build & dependency gotchas
 
-- `vite-plugin-singlefile` inlines everything (`assetsInlineLimit` maxed, `cssCodeSplit: false`): v70.12.0 produces one portable `dist/index.html` (~3.51 MB raw, ~1.17 MB gzip; budget 3.6 MB / 1.3 MB — only ~2.5% raw headroom remains, so re-run `check:bundle-size` before landing anything large). The ChangeLog virtual module aggregates `docs/edit logs/*.md` and is truncated to the newest 20 entries in production builds by `src/build/editLogTruncatePlugin.ts`. `npm run check:bundle-size` is the release budget.
+- `vite-plugin-singlefile` inlines everything (`assetsInlineLimit` maxed, `cssCodeSplit: false`): v72.0.0 produces one portable `dist/index.html` (~3.34 MB raw, ~1.11 MB gzip; budget 3.6 MB / 1.3 MB — v72.0.0 recovered ~180 kB raw by dropping the bundled edit-log archive, but headroom is still finite, so re-run `check:bundle-size` before landing anything large). `npm run check:bundle-size` is the release budget.
 - Historical full-product revision snapshot (v56.2 fixes): `docs/audit/FULL_REVISION_2026-07-17.md`. The active forward-looking item is `docs/architecture/LARGE_POPULATION_PERFORMANCE_PROPOSAL_2026-07-22.md`, for populations above ~200k rows/month (paged repository reads, port-partitioned files, bounded LRU cache). **Phases A and B have shipped.** Phase A in v59.111–v59.114 (2026-08-01): focused month loaders, opt-in `MonthLoadScope`, sub-tab/capability demand gating. Phase B on 2026-08-04: worker-owned Population Browse paging (`src/workers/populationQueryWorker.ts`). **Phases C and D remain proposed and need owner approval** — the proposal doc's own header still reads `Status: proposed`, which now covers only those two. Phase C (port-partitioned storage) is additionally blocked on backup coordination. That sequence gates any finding marked **proposal-covered** in `docs/audit/APP_DATA_MANAGEMENT_AUDIT_2026-07-22.md`; don't implement those independently of the approved phase order.
 - `dist/` is intentionally just the single self-contained `index.html` — no other files. The `public/` folder is empty on purpose; anything dropped in it gets copied into `dist/` unchanged by Vite's default handling, which would break that guarantee. The desktop-shortcut "launch as app window" tooling (`create-desktop-shortcut.ps1` / `.bat` / `app-icon.ico`) that used to live there was removed 2026-07-20 — the app is distributed as a plain static file now, opened directly or served statically. `scripts/generate-app-icon.ps1` (dev-only, not shipped) still exists but is currently unused now that `app-icon.ico` is gone.
 - The `xlsx` dependency is **vendored** at `vendor/xlsx-0.20.3.tgz` (`package.json` points at `file:vendor/xlsx-0.20.3.tgz`) — originally sourced from the SheetJS CDN tarball (`https://cdn.sheetjs.com/xlsx-0.20.3/...`), not the npm registry. Vendoring means `npm ci` no longer needs network access to that CDN (required for CI, see `.github/workflows/ci.yml`). Don't "upgrade" it to the stale npm-registry `xlsx` package; see `vendor/README.md` for the upgrade procedure.
@@ -192,7 +192,6 @@ Tabs are auto-discovered by `tabRegistry.ts`. Each top-level tab exports a defau
 | `archive` | `Tabs/Archive/` | guest, supervisor, manager, admin | 30 | — |
 | `user-management` | `Tabs/UserManagement/` | admin | 40 | `users`, `page-permissions`, `feature-permissions`, `activity`, `actions` |
 | `settings` | `Tabs/Settings/` | guest, admin | 95 | — |
-| `change-log` | `Tabs/ChangeLog/` | admin | 96 | — |
 | `adhoc-import` | `Tabs/AdhocImport/` | admin | 97 | — |
 
 `TemplateBuilder` and `ReportDesigner` no longer register standalone tabs — they render inside the sub-tabs noted above.

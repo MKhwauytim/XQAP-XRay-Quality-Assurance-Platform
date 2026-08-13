@@ -51,9 +51,6 @@ Four sub-sections: **Users** (CRUD, roles, active flag, CertScan license, passwo
 ### 7. Settings (`settings`, guest/admin)
 Label customization center: ~11 collapsible groups of UI strings backed by the label store (localStorage + workspace snapshot), per-row and bulk reset; error-log viewer (in-memory ring buffer, admin feature-gated); about/version info.
 
-### 8. Change Log (`change-log`, admin)
-Versioned edit history aggregated from `docs/edit logs/*.md` (one file per date; truncated to recent versions in production builds): searchable, collapsible entries, newest first.
-
 ## Data flow at a glance
 
 ```
