@@ -1,18 +1,17 @@
 /**
- * Approval-routed variant of the oversight bulk reassignment.
+ * Oversight bulk reassignment, as a request.
  *
- * `executeBulkReassignment` (distribution/bulkAssignment.ts) applies the move
- * immediately — correct for a user who also holds `approve-referrals`, since
- * that is exactly the authority the approval step would ask for (same rule the
- * self-service reopen flow uses via `employee-reopen-instant`, and the same
- * shape as the Population tab's direct `handleReassign`).
+ * The bulk-reassign bar never writes distribution events. It creates the very
+ * same pending `ReferralRequest` records the per-row إحالة flow creates, which
+ * appear in `ew/referral-approval` and are applied by `approveReferral` once
+ * approved — exactly like استبدال (replacement) and إعادة الفتح (reopen).
  *
- * A user granted `bulk-reassign-referrals` WITHOUT `approve-referrals` must not
- * silently bypass oversight, so their action is turned into ordinary pending
- * referral requests instead: the very same `ReferralRequest` records the
- * per-row referral flow creates, appearing in `ew/referral-approval` and
- * applied by `approveReferral` on approval. Nothing is written to the
- * distribution event log here.
+ * This holds regardless of the submitter's permissions. Whether they can then
+ * approve their own request is a separate question answered by
+ * `approve-referrals`; it is never allowed to decide whether a reviewable
+ * record exists at all. In practice a supervisor often submits and approves
+ * seconds apart — the record of who asked, when, for which samples, and who
+ * decided is the deliverable, not the delay.
  *
  * A `ReferralRequest` carries exactly ONE `fromEmployee` (its record lives in
  * that employee's answers file, and `approveReferral`'s ownership check
@@ -33,6 +32,7 @@ import {
   type BulkReassignSkip,
 } from "../distribution/bulkAssignment";
 import { loadOrDeriveDistributionCurrent } from "../distribution/distributionStorage";
+import { ensureMonthWritable } from "../population/monthLock";
 import { loadSampleMaster } from "../sampling/sampleStorage";
 import { appendReferralRequest } from "./referralStorage";
 import type { ReferralRequest } from "./referralTypes";
@@ -79,6 +79,13 @@ export async function submitBulkReassignmentRequests(params: {
     return { ok: true, createdRequests: [], skipped: [] };
   }
 
+  // Fail fast on a closed month, before any group is written. The per-employee
+  // write is month-locked individually anyway, but that would surface as a raw
+  // error string mid-batch after some groups had already landed; letting
+  // MonthClosedError propagate here keeps the caller's existing typed handling
+  // (a friendly label) and guarantees an all-or-nothing submission.
+  await ensureMonthWritable(directoryHandle, monthFolderName);
+
   const sample = await loadSampleMaster(directoryHandle, monthFolderName);
   if (!sample) {
     return {
@@ -89,9 +96,8 @@ export async function submitBulkReassignmentRequests(params: {
     };
   }
 
-  // Fresh derivation, never the caller's rendered snapshot — same reasoning as
-  // executeBulkReassignment: a stale read is exactly what would route rows that
-  // have already moved.
+  // Fresh derivation, never the caller's rendered snapshot: a stale read is
+  // exactly what would route rows that have already moved.
   const current = await loadOrDeriveDistributionCurrent(directoryHandle, monthFolderName, sample.rows);
   if (!current) {
     return {

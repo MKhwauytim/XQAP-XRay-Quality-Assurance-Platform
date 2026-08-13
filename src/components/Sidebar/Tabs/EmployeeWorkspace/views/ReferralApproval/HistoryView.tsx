@@ -21,6 +21,11 @@ type HistoryRow = {
   reviewedBy?: string;
   reviewedAt?: string;
   history: ReferralRequest["history"];
+  /** Every sample the request covers. The `details` column can only carry a
+   *  count for a multi-sample request, so the ids themselves are listed in the
+   *  expanded row — a reassignment of 1,500+ samples is unauditable without
+   *  being able to see exactly which ones moved. */
+  xrayImageIds: string[];
 };
 
 type Props = {
@@ -37,6 +42,58 @@ const STATUS_OPTIONS = [
   { value: "approved", label: "مقبول" },
   { value: "denied", label: "مرفوض" },
 ];
+
+/** How many ids are rendered before the "show all" affordance. A bulk
+ *  reassignment can cover thousands of samples; rendering every chip up front
+ *  would stall the row expansion for a list nobody reads in full by default. */
+const ID_PREVIEW_LIMIT = 200;
+
+function SampleIdList({ ids }: { ids: string[] }) {
+  const [showAll, setShowAll] = useState(false);
+  const [copied, setCopied] = useState(false);
+  if (ids.length === 0) return null;
+  const shown = showAll ? ids : ids.slice(0, ID_PREVIEW_LIMIT);
+
+  async function copyAll(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(ids.join("\n"));
+      setCopied(true);
+    } catch {
+      // Clipboard access can be denied or unavailable; the ids stay on screen,
+      // so a failed copy is not worth an error banner.
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+        <strong style={{ fontSize: 13, color: "#334155" }}>
+          العينات ({ids.length.toLocaleString("ar-SA-u-nu-latn")})
+        </strong>
+        <button type="button" className="ew-btn-secondary ew-btn-sm" onClick={() => { void copyAll(); }}>
+          {copied ? "تم النسخ" : "نسخ كل المعرفات"}
+        </button>
+        {ids.length > ID_PREVIEW_LIMIT && (
+          <button type="button" className="ew-btn-secondary ew-btn-sm" onClick={() => setShowAll((v) => !v)}>
+            {showAll
+              ? "عرض أول 200 فقط"
+              : `عرض كل ${ids.length.toLocaleString("ar-SA-u-nu-latn")}`}
+          </button>
+        )}
+      </div>
+      <div className="ew-referral-ids-list" style={{ maxHeight: 220, overflowY: "auto" }}>
+        {shown.map((id) => (
+          <span key={id} className="ew-referral-id-chip dt-mono">{id}</span>
+        ))}
+      </div>
+      {!showAll && ids.length > ID_PREVIEW_LIMIT && (
+        <p style={{ margin: "6px 0 0", fontSize: 12, color: "#64748b" }}>
+          {`معروض ${ID_PREVIEW_LIMIT.toLocaleString("ar-SA-u-nu-latn")} من ${ids.length.toLocaleString("ar-SA-u-nu-latn")}.`}
+        </p>
+      )}
+    </div>
+  );
+}
 
 export default function HistoryView({ directoryHandle, username, canApproveReferrals, canApproveReplacements, canApproveReopens, userDisplayMap }: Props) {
   const [rows, setRows] = useState<HistoryRow[]>([]);
@@ -69,6 +126,7 @@ export default function HistoryView({ directoryHandle, username, canApproveRefer
                 details: `${r.xrayImageIds.length} عينة → ${userDisplayMap[r.toEmployee] ?? r.toEmployee}`,
                 reason: r.reason, status: r.status, requestedAt: r.requestedAt, requestedBy: r.requestedBy,
                 reviewedBy: r.reviewedBy, reviewedAt: r.reviewedAt, history: r.history,
+                xrayImageIds: r.xrayImageIds,
               });
             }
             for (const r of repLog.requests) {
@@ -79,6 +137,7 @@ export default function HistoryView({ directoryHandle, username, canApproveRefer
                 details: `${r.originalXrayImageId} → ${r.replacementXrayImageId}`,
                 reason: r.reason, status: r.status, requestedAt: r.requestedAt, requestedBy: r.requestedBy,
                 reviewedBy: r.reviewedBy, reviewedAt: r.reviewedAt, history: r.history,
+                xrayImageIds: [r.originalXrayImageId, r.replacementXrayImageId],
               });
             }
             for (const r of reoLog.requests) {
@@ -89,6 +148,7 @@ export default function HistoryView({ directoryHandle, username, canApproveRefer
                 details: `إعادة فتح: ${r.xrayImageId}`,
                 reason: r.reason, status: r.status, requestedAt: r.requestedAt, requestedBy: r.requestedBy,
                 reviewedBy: r.reviewedBy, reviewedAt: r.reviewedAt, history: r.history,
+                xrayImageIds: [r.xrayImageId],
               });
             }
           } catch {
@@ -145,6 +205,7 @@ export default function HistoryView({ directoryHandle, username, canApproveRefer
           <div style={{ padding: "10px 16px" }}>
             {row.reason && <p style={{ margin: "0 0 8px", fontSize: 13, color: "#475569" }}>السبب: {row.reason}</p>}
             <RequestTimeline requestedAt={row.requestedAt} requestedBy={row.requestedBy} history={row.history} userDisplayMap={userDisplayMap} />
+            <SampleIdList ids={row.xrayImageIds} />
           </div>
         )}
       />

@@ -575,7 +575,6 @@ export const DEFAULT_LABELS = {
   um_action_type_feature_permission_changed: "تغيير صلاحية ميزة",
   um_action_type_sample_drawn:               "سحب عينة",
   um_action_type_distribution_bulk_assigned: "توزيع جماعي",
-  um_action_type_distribution_bulk_reassigned: "إعادة تعيين جماعية",
   um_action_type_distribution_bulk_reassign_requested: "طلب إعادة تعيين جماعية",
   um_action_type_referral_approved:          "اعتماد إحالة",
   um_action_type_referral_denied:            "رفض إحالة",

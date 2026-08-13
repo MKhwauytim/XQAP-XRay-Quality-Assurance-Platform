@@ -741,19 +741,6 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
     return { ...base, featurePermissions };
   }
 
-  /** Can bulk-reassign but cannot approve referrals — the case that must be
-   *  routed through the approval queue rather than applied directly. */
-  function bulkReassignerWithoutApproval() {
-    const base = createEmptyUserManagementState();
-    const featurePermissions: FeaturePermission[] = [
-      ...base.featurePermissions.filter(
-        (f) => !(f.role === "supervisor" && f.featureId === "approve-referrals")
-      ),
-      { role: "supervisor", featureId: "approve-referrals", enabled: false },
-    ];
-    return { ...base, featurePermissions };
-  }
-
   it("shows per-row checkboxes and the bulk-reassign bar for an oversight role with the feature enabled (default)", async () => {
     writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
     writeUserManagementState(createEmptyUserManagementState(), false);
@@ -814,20 +801,24 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
 
     fireEvent.change(within(dialog).getByLabelText(/الموظف المستلم/), { target: { value: "jalgahamdi" } });
     await waitFor(() =>
-      expect(within(dialog).getByText(/سيتم إعادة تعيين 1 عينة إلى jalgahamdi/)).toBeInTheDocument()
+      expect(within(dialog).getByText(/سيتم إرسال طلب إعادة تعيين 1 عينة إلى jalgahamdi/)).toBeInTheDocument()
     );
     fireEvent.click(within(dialog).getByLabelText(/أؤكد مراجعة الملخص/));
-    fireEvent.click(within(dialog).getByRole("button", { name: "تنفيذ إعادة التعيين" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "إرسال الطلب للاعتماد" }));
 
     await waitFor(() =>
-      expect(screen.getByText(/تم إعادة تعيين 1 عينة إلى jalgahamdi/)).toBeInTheDocument()
+      expect(screen.getByText(/تم إرسال طلب إعادة تعيين 1 عينة إلى jalgahamdi/)).toBeInTheDocument()
     );
 
+    // Nothing is applied until the request is approved — the record is the outcome.
     const log = await loadDistributionLog(root, MONTH);
-    const reassigns = log.events.filter((e) => e.eventType === "reassigned");
-    expect(reassigns).toHaveLength(1);
-    expect(reassigns[0]!.xrayImageId).toBe("IMG-2");
-    expect(reassigns[0]!.reassignedTo).toBe("jalgahamdi");
+    expect(log.events.filter((e) => e.eventType === "reassigned")).toHaveLength(0);
+
+    const referrals = await loadReferralLog(root, MONTH);
+    expect(referrals.requests).toHaveLength(1);
+    expect(referrals.requests[0]!.status).toBe("pending");
+    expect(referrals.requests[0]!.toEmployee).toBe("jalgahamdi");
+    expect(referrals.requests[0]!.xrayImageIds).toEqual(["IMG-2"]);
   });
 
   it("reports skipped rows with their reason and only reassigns the eligible subset (partial-failure reporting)", async () => {
@@ -851,22 +842,24 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
     fireEvent.change(within(dialog).getByLabelText(/الموظف المستلم/), { target: { value: "jalgahamdi" } });
 
     await waitFor(() =>
-      expect(within(dialog).getByText(/سيتم إعادة تعيين 1 عينة إلى jalgahamdi/)).toBeInTheDocument()
+      expect(within(dialog).getByText(/سيتم إرسال طلب إعادة تعيين 1 عينة إلى jalgahamdi/)).toBeInTheDocument()
     );
     expect(within(dialog).getByText(/لن يتم تضمين 1 عينة/)).toBeInTheDocument();
     expect(within(dialog).getByText(/مكتملة — تحتاج إعادة فتح أولاً/)).toBeInTheDocument();
 
     fireEvent.click(within(dialog).getByLabelText(/أؤكد مراجعة الملخص/));
-    fireEvent.click(within(dialog).getByRole("button", { name: "تنفيذ إعادة التعيين" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "إرسال الطلب للاعتماد" }));
 
     await waitFor(() =>
-      expect(screen.getByText(/تم إعادة تعيين 1 عينة إلى jalgahamdi — تم تخطي 1 عينة/)).toBeInTheDocument()
+      expect(screen.getByText(/تم إرسال طلب إعادة تعيين 1 عينة إلى jalgahamdi.*تم تخطي 1 عينة/)).toBeInTheDocument()
     );
 
     const log = await loadDistributionLog(root, MONTH);
-    const reassigns = log.events.filter((e) => e.eventType === "reassigned");
-    expect(reassigns).toHaveLength(1);
-    expect(reassigns[0]!.xrayImageId).toBe("IMG-2");
+    expect(log.events.filter((e) => e.eventType === "reassigned")).toHaveLength(0);
+
+    const referrals = await loadReferralLog(root, MONTH);
+    expect(referrals.requests).toHaveLength(1);
+    expect(referrals.requests[0]!.xrayImageIds).toEqual(["IMG-2"]);
   });
 
   it("surfaces a closed month inside the modal instead of throwing, and writes nothing (month-lock rejection)", async () => {
@@ -894,10 +887,10 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
     const dialog = await waitFor(() => screen.getByRole("dialog"), { timeout: 5000 });
     fireEvent.change(within(dialog).getByLabelText(/الموظف المستلم/), { target: { value: "jalgahamdi" } });
     await waitFor(() =>
-      expect(within(dialog).getByText(/سيتم إعادة تعيين 2 عينة إلى jalgahamdi/)).toBeInTheDocument()
+      expect(within(dialog).getByText(/سيتم إرسال طلب إعادة تعيين 2 عينة إلى jalgahamdi/)).toBeInTheDocument()
     );
     fireEvent.click(within(dialog).getByLabelText(/أؤكد مراجعة الملخص/));
-    fireEvent.click(within(dialog).getByRole("button", { name: "تنفيذ إعادة التعيين" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "إرسال الطلب للاعتماد" }));
 
     await waitFor(() =>
       expect(within(dialog).getByText(/هذا الشهر مُقفل/)).toBeInTheDocument()
@@ -949,19 +942,21 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
 
     fireEvent.change(within(dialog).getByLabelText(/الموظف المستلم/), { target: { value: "jalgahamdi" } });
     await waitFor(() =>
-      expect(within(dialog).getByText(/سيتم إعادة تعيين 2 عينة إلى jalgahamdi/)).toBeInTheDocument()
+      expect(within(dialog).getByText(/سيتم إرسال طلب إعادة تعيين 2 عينة إلى jalgahamdi/)).toBeInTheDocument()
     );
     fireEvent.click(within(dialog).getByLabelText(/أؤكد مراجعة الملخص/));
-    fireEvent.click(within(dialog).getByRole("button", { name: "تنفيذ إعادة التعيين" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "إرسال الطلب للاعتماد" }));
 
     await waitFor(() =>
-      expect(screen.getByText(/تم إعادة تعيين 2 عينة إلى jalgahamdi/)).toBeInTheDocument()
+      expect(screen.getByText(/تم إرسال طلب إعادة تعيين 2 عينة إلى jalgahamdi/)).toBeInTheDocument()
     );
 
     const log2 = await loadDistributionLog(root, MONTH);
-    const reassigns = log2.events.filter((e) => e.eventType === "reassigned");
-    expect(reassigns).toHaveLength(2);
-    expect(reassigns.map((e) => e.xrayImageId).sort()).toEqual(["IMG-1", "IMG-2"]);
+    expect(log2.events.filter((e) => e.eventType === "reassigned")).toHaveLength(0);
+
+    const referrals = await loadReferralLog(root, MONTH);
+    expect(referrals.requests).toHaveLength(1);
+    expect(referrals.requests[0]!.xrayImageIds.slice().sort()).toEqual(["IMG-1", "IMG-2"]);
   });
 
   it("opens the bulk-reassign-all-filtered dialog immediately once the filtered row set is on screen, with no race window where the button is unresponsive (regression for the DataTable filtered-rows notification lag)", async () => {
@@ -987,7 +982,7 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
     expect(within(dialog).getByText(/كل العينات المطابقة للتصفية الحالية \(2\)/)).toBeInTheDocument();
   });
 
-  it("records a direct bulk reassignment in the workspace action log (governance trail for a move that bypasses the approval queue)", async () => {
+  it("records the bulk-reassign submission in the workspace action log (governance trail)", async () => {
     writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
     writeUserManagementState(createEmptyUserManagementState(), false);
 
@@ -1001,20 +996,20 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
     const dialog = await waitFor(() => screen.getByRole("dialog"), { timeout: 5000 });
     fireEvent.change(within(dialog).getByLabelText(/الموظف المستلم/), { target: { value: "jalgahamdi" } });
     await waitFor(() =>
-      expect(within(dialog).getByText(/سيتم إعادة تعيين 2 عينة إلى jalgahamdi/)).toBeInTheDocument()
+      expect(within(dialog).getByText(/سيتم إرسال طلب إعادة تعيين 2 عينة إلى jalgahamdi/)).toBeInTheDocument()
     );
     fireEvent.click(within(dialog).getByLabelText(/أؤكد مراجعة الملخص/));
-    fireEvent.click(within(dialog).getByRole("button", { name: "تنفيذ إعادة التعيين" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "إرسال الطلب للاعتماد" }));
 
     await waitFor(() =>
-      expect(screen.getByText(/تم إعادة تعيين 2 عينة إلى jalgahamdi/)).toBeInTheDocument()
+      expect(screen.getByText(/تم إرسال طلب إعادة تعيين 2 عينة إلى jalgahamdi/)).toBeInTheDocument()
     );
 
     // appendWorkspaceAction is fire-and-forget, so poll the log rather than
     // assuming it has landed by the time the status message renders.
     await waitFor(async () => {
       const actions = await readWorkspaceActions(root);
-      const entry = actions.find((a) => a.action === "distribution-bulk-reassigned");
+      const entry = actions.find((a) => a.action === "distribution-bulk-reassign-requested");
       expect(entry).toBeDefined();
       expect(entry!.actor).toBe("sup-1");
       expect(entry!.target).toBe("jalgahamdi");
@@ -1022,9 +1017,9 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
     });
   });
 
-  it("routes the bulk reassignment for supervisor approval — instead of applying it — when the actor cannot approve referrals", async () => {
+  it("creates a pending request against the CURRENT owner of the samples, applying nothing — even for a supervisor who can approve it themselves", async () => {
     writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
-    writeUserManagementState(bulkReassignerWithoutApproval(), false);
+    writeUserManagementState(createEmptyUserManagementState(), false);
 
     const root = createMemoryDirectory("root");
     await seedTwoAssignedSamples(root, "emp-a");
@@ -1039,17 +1034,17 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
     const dialog = await waitFor(() => screen.getByRole("dialog"), { timeout: 5000 });
     fireEvent.change(within(dialog).getByLabelText(/الموظف المستلم/), { target: { value: "jalgahamdi" } });
 
-    // The dialog must say which of the two outcomes the click produces.
+    // The dialog must say the click submits a request, not that it moves samples.
     await waitFor(() =>
       expect(
-        within(dialog).getByText(/سيتم إرسال طلب إعادة تعيين 2 عينة إلى jalgahamdi — بانتظار موافقة المشرف/)
+        within(dialog).getByText(/سيتم إرسال طلب إعادة تعيين 2 عينة إلى jalgahamdi — بانتظار الاعتماد/)
       ).toBeInTheDocument()
     );
     fireEvent.click(within(dialog).getByLabelText(/أؤكد مراجعة الملخص/));
-    fireEvent.click(within(dialog).getByRole("button", { name: "إرسال الطلب للمشرف" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "إرسال الطلب للاعتماد" }));
 
     await waitFor(() =>
-      expect(screen.getByText(/بانتظار موافقة المشرف/)).toBeInTheDocument()
+      expect(screen.getByText(/بانتظار الاعتماد في صفحة اعتماد الطلبات/)).toBeInTheDocument()
     );
 
     // Nothing moved: the samples still belong to emp-a until someone approves.
