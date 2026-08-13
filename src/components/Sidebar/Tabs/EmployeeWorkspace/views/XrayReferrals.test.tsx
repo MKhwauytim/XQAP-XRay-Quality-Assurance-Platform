@@ -535,18 +535,22 @@ describe("XrayReferrals post-success reloads (Bug 1 regression)", () => {
     // Any default managed user other than "emp-1" works — "jalgahamdi" is one of
     // createEmptyUserManagementState's seeded default employees.
     fireEvent.change(toEmployeeSelect, { target: { value: "jalgahamdi" } });
-    const reasonInput = screen.getByLabelText(/سبب الإحالة/);
+    const reasonInput = screen.getByLabelText(/سبب إعادة التعيين/);
     fireEvent.change(reasonInput, { target: { value: "بحاجة لمراجعة موظف آخر" } });
-    fireEvent.click(screen.getByRole("button", { name: "إرسال طلب الإحالة" }));
+    await waitFor(() =>
+      expect(screen.getByText(/سيتم إرسال طلب إعادة تعيين 1 عينة إلى jalgahamdi/)).toBeInTheDocument()
+    );
+    fireEvent.click(screen.getByLabelText(/أؤكد مراجعة الملخص/));
+    fireEvent.click(screen.getByRole("button", { name: "إرسال الطلب للاعتماد" }));
 
-    // Before the fix: handleReferralRequest's post-success `await loadData()` (no
+    // Before the fix: the submit handler's post-success `await loadData()` (no
     // `{ silent: true }`) flipped loadState to "loading", unmounting the whole
     // detail-panel block and force-closing the just-typed draft above — the exact
     // "refresh that's supposed to be silent" the user reported.
     expect(screen.queryByText("جاري التحميل...")).not.toBeInTheDocument();
 
     await waitFor(() =>
-      expect(screen.getByText(/تم إرسال طلب الإحالة لـ jalgahamdi/)).toBeInTheDocument()
+      expect(screen.getByText(/تم إرسال طلب إعادة تعيين 1 عينة إلى jalgahamdi/)).toBeInTheDocument()
     );
     const noteInputAfter = screen.getByLabelText("ملاحظة") as HTMLInputElement;
     expect(noteInputAfter.value).toBe("مسودة غير محفوظة");
@@ -803,6 +807,7 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
     await waitFor(() =>
       expect(within(dialog).getByText(/سيتم إرسال طلب إعادة تعيين 1 عينة إلى jalgahamdi/)).toBeInTheDocument()
     );
+    fireEvent.change(within(dialog).getByLabelText(/سبب إعادة التعيين/), { target: { value: "إعادة توزيع العمل" } });
     fireEvent.click(within(dialog).getByLabelText(/أؤكد مراجعة الملخص/));
     fireEvent.click(within(dialog).getByRole("button", { name: "إرسال الطلب للاعتماد" }));
 
@@ -847,6 +852,7 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
     expect(within(dialog).getByText(/لن يتم تضمين 1 عينة/)).toBeInTheDocument();
     expect(within(dialog).getByText(/مكتملة — تحتاج إعادة فتح أولاً/)).toBeInTheDocument();
 
+    fireEvent.change(within(dialog).getByLabelText(/سبب إعادة التعيين/), { target: { value: "إعادة توزيع العمل" } });
     fireEvent.click(within(dialog).getByLabelText(/أؤكد مراجعة الملخص/));
     fireEvent.click(within(dialog).getByRole("button", { name: "إرسال الطلب للاعتماد" }));
 
@@ -889,6 +895,7 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
     await waitFor(() =>
       expect(within(dialog).getByText(/سيتم إرسال طلب إعادة تعيين 2 عينة إلى jalgahamdi/)).toBeInTheDocument()
     );
+    fireEvent.change(within(dialog).getByLabelText(/سبب إعادة التعيين/), { target: { value: "إعادة توزيع العمل" } });
     fireEvent.click(within(dialog).getByLabelText(/أؤكد مراجعة الملخص/));
     fireEvent.click(within(dialog).getByRole("button", { name: "إرسال الطلب للاعتماد" }));
 
@@ -944,6 +951,7 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
     await waitFor(() =>
       expect(within(dialog).getByText(/سيتم إرسال طلب إعادة تعيين 2 عينة إلى jalgahamdi/)).toBeInTheDocument()
     );
+    fireEvent.change(within(dialog).getByLabelText(/سبب إعادة التعيين/), { target: { value: "إعادة توزيع العمل" } });
     fireEvent.click(within(dialog).getByLabelText(/أؤكد مراجعة الملخص/));
     fireEvent.click(within(dialog).getByRole("button", { name: "إرسال الطلب للاعتماد" }));
 
@@ -982,6 +990,62 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
     expect(within(dialog).getByText(/كل العينات المطابقة للتصفية الحالية \(2\)/)).toBeInTheDocument();
   });
 
+  it("produces the same request shape from all three sample-choosing methods (single sample, manual selection, whole filter)", async () => {
+    // The point of the unification: إسناد لموظف آخر, إعادة تعيين المحدد and
+    // إعادة تعيين الكل المطابق differ ONLY in how the id list is built. Any
+    // divergence in what they write is a regression.
+    async function submitVia(open: () => void, expectedIds: string[]) {
+      writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
+      writeUserManagementState(createEmptyUserManagementState(), false);
+      const root = createMemoryDirectory("root");
+      await seedTwoAssignedSamples(root, "sup-1");
+      render(<XrayReferrals directoryHandle={root} />);
+      await waitFor(() => expect(screen.getAllByText("IMG-1").length).toBeGreaterThan(0));
+      await waitFor(() => expect(screen.getByText(/2 مطابقة للتصفية/)).toBeInTheDocument());
+
+      open();
+
+      const dialog = await waitFor(() => screen.getByRole("dialog"), { timeout: 5000 });
+      fireEvent.change(within(dialog).getByLabelText(/الموظف المستلم/), { target: { value: "jalgahamdi" } });
+      fireEvent.change(within(dialog).getByLabelText(/سبب إعادة التعيين/), { target: { value: "توحيد المسار" } });
+      await waitFor(() =>
+        expect(within(dialog).getByText(/سيتم إرسال طلب إعادة تعيين/)).toBeInTheDocument()
+      );
+      fireEvent.click(within(dialog).getByLabelText(/أؤكد مراجعة الملخص/));
+      fireEvent.click(within(dialog).getByRole("button", { name: "إرسال الطلب للاعتماد" }));
+      await waitFor(() => expect(screen.getByText(/تم إرسال طلب إعادة تعيين/)).toBeInTheDocument());
+
+      const referrals = await loadReferralLog(root, MONTH);
+      expect(referrals.requests).toHaveLength(1);
+      const request = referrals.requests[0]!;
+      expect(request.status).toBe("pending");
+      expect(request.fromEmployee).toBe("sup-1");
+      expect(request.toEmployee).toBe("jalgahamdi");
+      expect(request.xrayImageIds.slice().sort()).toEqual(expectedIds);
+      expect(request.reason).toContain("توحيد المسار");
+      // No sample moves on submission, whichever entry point was used.
+      const log = await loadDistributionLog(root, MONTH);
+      expect(log.events.filter((e) => e.eventType === "reassigned")).toHaveLength(0);
+      cleanup();
+    }
+
+    // 1. One sample, from the inspection panel.
+    await submitVia(() => {
+      fireEvent.click(screen.getByRole("button", { name: "إسناد لموظف آخر" }));
+    }, ["IMG-1"]);
+
+    // 2. A manual selection.
+    await submitVia(() => {
+      fireEvent.click(screen.getByRole("button", { name: "تحديد الكل المطابق" }));
+      fireEvent.click(screen.getByRole("button", { name: /إعادة تعيين المحدد/ }));
+    }, ["IMG-1", "IMG-2"]);
+
+    // 3. Everything matching the current filter.
+    await submitVia(() => {
+      fireEvent.click(screen.getByRole("button", { name: /إعادة تعيين الكل المطابق للتصفية/ }));
+    }, ["IMG-1", "IMG-2"]);
+  });
+
   it("records the bulk-reassign submission in the workspace action log (governance trail)", async () => {
     writeSession({ role: "supervisor", username: "sup-1", loginAt: new Date().toISOString() });
     writeUserManagementState(createEmptyUserManagementState(), false);
@@ -998,6 +1062,7 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
     await waitFor(() =>
       expect(within(dialog).getByText(/سيتم إرسال طلب إعادة تعيين 2 عينة إلى jalgahamdi/)).toBeInTheDocument()
     );
+    fireEvent.change(within(dialog).getByLabelText(/سبب إعادة التعيين/), { target: { value: "إعادة توزيع العمل" } });
     fireEvent.click(within(dialog).getByLabelText(/أؤكد مراجعة الملخص/));
     fireEvent.click(within(dialog).getByRole("button", { name: "إرسال الطلب للاعتماد" }));
 
@@ -1040,6 +1105,7 @@ describe("XrayReferrals bulk reassignment (oversight roles)", () => {
         within(dialog).getByText(/سيتم إرسال طلب إعادة تعيين 2 عينة إلى jalgahamdi — بانتظار الاعتماد/)
       ).toBeInTheDocument()
     );
+    fireEvent.change(within(dialog).getByLabelText(/سبب إعادة التعيين/), { target: { value: "إعادة توزيع العمل" } });
     fireEvent.click(within(dialog).getByLabelText(/أؤكد مراجعة الملخص/));
     fireEvent.click(within(dialog).getByRole("button", { name: "إرسال الطلب للاعتماد" }));
 
