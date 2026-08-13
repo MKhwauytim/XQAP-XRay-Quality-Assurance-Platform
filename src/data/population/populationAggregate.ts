@@ -31,6 +31,10 @@ import { logError } from "../storage/errorLogger";
 import { getPopulationMonthDir } from "../workspace/workspacePaths";
 import { POPULATION_SUBFOLDERS } from "../workspace/workspacePaths";
 import type { PreparedPopulationRow, ProcessingSummary } from "./populationTypes";
+// Imported rather than reimplemented: `isSuspicion`'s definition of an
+// affirmative level-two result is a domain rule, and a second copy here would
+// let the persisted rate silently diverge from the one the advisory computes.
+import { computeSuspicionRate } from "../sampling/samplingPlanStorage";
 
 const AGGREGATE_FILE = "population.aggregate.json";
 const AGGREGATE_SCHEMA_VERSION = 1;
@@ -70,6 +74,21 @@ export type PopulationAggregate = {
   summary: ProcessingSummary;
   /** First `PREVIEW_ROW_COUNT` prepared rows, projected to preview fields. */
   previewRows: PopulationAggregatePreviewRow[];
+  /**
+   * Share of rows whose level-two result counts as a suspicion (Phase 1.8).
+   *
+   * This is the B4 switching-rule advisory's only input, and it is a ratio of
+   * two integers — but computing it required loading the *entire* prior month's
+   * `population.final.json`, one of the largest files in the workspace, on the
+   * path to drawing a sample. Persisting the scalar here (the file that exists
+   * precisely so a processed month is renderable without re-reading the row
+   * files) reduces that to a small read.
+   *
+   * Optional: aggregates written before this field existed omit it, and
+   * `loadPriorMonthAdvisory` falls back to the full-population computation for
+   * those months rather than reporting a wrong rate.
+   */
+  suspicionRate?: number | null;
 };
 
 function toPreviewRow(row: PreparedPopulationRow): PopulationAggregatePreviewRow {
@@ -93,6 +112,7 @@ export function buildPopulationAggregate(params: {
     computedBy: params.computedBy,
     summary: params.summary,
     previewRows: params.preparedRows.slice(0, PREVIEW_ROW_COUNT).map(toPreviewRow),
+    suspicionRate: computeSuspicionRate(params.preparedRows),
   };
 }
 
