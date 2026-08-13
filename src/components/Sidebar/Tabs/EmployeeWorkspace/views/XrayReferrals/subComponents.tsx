@@ -9,11 +9,11 @@ import { ModalPortal } from "../../../../../ModalPortal/ModalPortal";
 import { readUserManagementState } from "../../../../../../auth/userManagement";
 import type { FieldAnswer, ItemAnswer } from "../../../../../../data/answers/answerTypes";
 import type { DistributionEntry } from "../../../../../../data/distribution/distributionTypes";
+import { isAssignableSampleRole } from "../../../../../../data/distribution/bulkAssignment";
 import {
-  isAssignableSampleRole,
-  planBulkReassignment,
-  type BulkReassignSkipReason,
-} from "../../../../../../data/distribution/bulkAssignment";
+  planReassignment,
+  type ReassignSkipReason,
+} from "../../../../../../data/referral/planReassignment";
 import type { StageAliasMappings } from "../../../../../../data/population/populationConfig";
 import type { TemplateSchema } from "../../../../../../data/templates/templateTypes";
 import type { ColConfig, DataTableCol } from "../../../../../../components/DataTable";
@@ -28,7 +28,7 @@ import { clampPage, pageSlice } from "../../../../../../utils/paginationUtils";
 import { useLabels, type Labels } from "../../../../../../data/labels/useLabels";
 import { formatStageLabel } from "../../../../../../data/population/stageHelpers";
 import type { ReplacementIndexRow } from "../../../../../../data/population/replacementIndexTypes";
-import type { PersonalStats, PersonalQuota, ReplacementDialogState, BulkReassignModalState } from "../XrayReferrals";
+import type { PersonalStats, PersonalQuota, ReplacementDialogState, ReassignModalState } from "../XrayReferrals";
 
 // ── Column definitions ────────────────────────────────────────────────────────
 
@@ -129,7 +129,7 @@ export function pct(n: number, d: number): number {
   return d === 0 ? 0 : Math.round((n / d) * 100);
 }
 
-// ── ReferralRequestModal ──────────────────────────────────────────────────────
+// ── Reassignment request dialog (shared by every sample-choosing method) ──────
 
 export function QueueToolbar({
   labels,
@@ -292,24 +292,38 @@ export function BulkReassignSelectionBar({
   );
 }
 
-const BULK_REASSIGN_SKIP_LABELS: Record<BulkReassignSkipReason, string> = {
+const REASSIGN_SKIP_LABELS: Record<ReassignSkipReason, string> = {
   "not-found": "غير موجودة في التوزيع الحالي",
   "terminal-completed": "مكتملة — تحتاج إعادة فتح أولاً",
   "terminal-replaced": "مستبدلة",
   "already-assigned-to-target": "معيّنة للموظف المستهدف بالفعل",
 };
 
-export function BulkReassignModal({
+/**
+ * The single reassignment dialog for ALL three ways of choosing samples — one
+ * sample from the inspection panel ("إسناد لموظف آخر"), a manual multi-select,
+ * or every row matching the active filter. Only `state.source` and the id list
+ * differ; the eligibility planning, the request that gets written, and the
+ * approval it goes through are identical, so they must not be able to drift.
+ */
+export function ReassignModal({
   state,
   entries,
+  visibleColumns,
+  dateFmt,
+  answersMap,
   currentUser,
   busy,
   error,
   onClose,
   onConfirm,
 }: {
-  state: Exclude<BulkReassignModalState, null>;
+  state: Exclude<ReassignModalState, null>;
   entries: DistributionEntry[];
+  /** Columns/format/answers backing the per-sample preview under each id. */
+  visibleColumns: DataTableCol<DistributionEntry>[];
+  dateFmt: Record<string, DateFormatMode>;
+  answersMap: Map<string, ItemAnswer>;
   currentUser: string;
   busy: boolean;
   error: string | null;
@@ -319,22 +333,27 @@ export function BulkReassignModal({
   const [toEmployee, setToEmployee] = useState("");
   const [reason, setReason] = useState("");
   const [confirmed, setConfirmed] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onClose });
+  const entriesById = useMemo(
+    () => new Map(entries.map((entry) => [entry.xrayImageId, entry])),
+    [entries]
+  );
 
   const employees = readUserManagementState()
     .users.filter((u) => u.isActive && u.username !== currentUser && isAssignableSampleRole(u))
     .sort((a, b) => a.displayName.localeCompare(b.displayName, "ar"));
 
-  // Recomputed with the SAME pure planner the executor uses (bulkAssignment.ts's
-  // planBulkReassignment) — the dialog and the actual write can never disagree
+  // Recomputed with the SAME pure planner the submit path uses
+  // (referral/planReassignment.ts) — the dialog and the actual write can never disagree
   // about what is eligible, since they share one implementation.
   const plan = useMemo(
-    () => (toEmployee ? planBulkReassignment(entries, state.xrayImageIds, toEmployee) : null),
+    () => (toEmployee ? planReassignment(entries, state.xrayImageIds, toEmployee) : null),
     [entries, state.xrayImageIds, toEmployee]
   );
 
   const skipCounts = useMemo(() => {
-    const m = new Map<BulkReassignSkipReason, number>();
+    const m = new Map<ReassignSkipReason, number>();
     for (const s of plan?.skipped ?? []) m.set(s.reason, (m.get(s.reason) ?? 0) + 1);
     return [...m.entries()];
   }, [plan]);
@@ -346,16 +365,19 @@ export function BulkReassignModal({
   }, [plan]);
 
   const eligibleCount = plan?.eligible.length ?? 0;
-  const canSubmit = toEmployee.trim() !== "" && confirmed && eligibleCount > 0 && !busy;
+  const canSubmit = toEmployee.trim() !== "" && reason.trim() !== "" && confirmed && eligibleCount > 0 && !busy;
 
   function handleSubmit(): void {
     if (!canSubmit) return;
     onConfirm(toEmployee, reason.trim());
   }
 
+  const count = state.xrayImageIds.length.toLocaleString("ar-SA-u-nu-latn");
   const sourceLabel = state.source === "filtered"
-    ? `كل العينات المطابقة للتصفية الحالية (${state.xrayImageIds.length.toLocaleString("ar-SA-u-nu-latn")})`
-    : `العينات المحددة يدوياً (${state.xrayImageIds.length.toLocaleString("ar-SA-u-nu-latn")})`;
+    ? `كل العينات المطابقة للتصفية الحالية (${count})`
+    : state.source === "single"
+      ? "عينة واحدة من نموذج الفحص"
+      : `العينات المحددة يدوياً (${count})`;
 
   return (
     <ModalPortal>
@@ -363,7 +385,7 @@ export function BulkReassignModal({
       <div className="ew-replace-modal">
         <div className="ew-replace-header">
           <div>
-            <h3>إعادة تعيين جماعي</h3>
+            <h3>إسناد لموظف آخر</h3>
             <p>{sourceLabel}</p>
           </div>
           <button type="button" className="ew-modal-close" onClick={onClose} aria-label="إغلاق"><X size={16} /></button>
@@ -388,23 +410,61 @@ export function BulkReassignModal({
           </select>
 
           <label className="ew-field-label" htmlFor="bulk-reassign-reason" style={{ marginTop: 12 }}>
-            سبب إعادة التعيين (اختياري)
+            سبب الإحالة <span className="ew-required">*</span>
           </label>
           <textarea
             id="bulk-reassign-reason"
             className="ew-input ew-textarea"
             rows={2}
-            placeholder="اذكر سبب إعادة التعيين الجماعي..."
+            placeholder="اذكر سبب الإحالة..."
             value={reason}
             onChange={(e) => setReason(e.target.value)}
           />
+        </div>
+
+        <div className="ew-replace-reason" style={{ paddingTop: 8 }}>
+          <details className="ew-referral-ids-summary">
+            <summary>عرض معرفات العينات ({state.xrayImageIds.length.toLocaleString("ar-SA-u-nu-latn")})</summary>
+            <div className="ew-referral-ids-list">
+              {state.xrayImageIds.map((id) => {
+                const entry = entriesById.get(id);
+                const isExpanded = expandedId === id;
+                return (
+                  <div key={id} className="ew-referral-id-item">
+                    <button
+                      type="button"
+                      className={`dt-mono ew-referral-id-chip${isExpanded ? " active" : ""}`}
+                      onClick={() => setExpandedId((current) => (current === id ? null : id))}
+                      aria-expanded={isExpanded}
+                      title="عرض بيانات العينة"
+                    >
+                      {id}
+                    </button>
+                    {isExpanded && entry ? (
+                      <ReferralSamplePreview
+                        entry={entry}
+                        visibleColumns={visibleColumns}
+                        dateFmt={dateFmt}
+                        answersMap={answersMap}
+                      />
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          </details>
         </div>
 
         {toEmployee && plan && (
           <div className="ew-replace-reason" style={{ paddingTop: 4 }}>
             {/* One plain-text node (no nested <strong>) so the exact wording is
                reliably matchable in tests without a custom textContent matcher. */}
-            <p>{`سيتم إعادة تعيين ${eligibleCount.toLocaleString("ar-SA-u-nu-latn")} عينة إلى ${toEmployee}.`}</p>
+            <p>{`سيتم إرسال طلب إحالة ${eligibleCount.toLocaleString("ar-SA-u-nu-latn")} عينة إلى ${toEmployee} — بانتظار الاعتماد.`}</p>
+            {fromBreakdown.length > 1 && (
+              <p style={{ fontSize: 12, opacity: 0.8, margin: "4px 0 0" }}>
+                {`سيُنشأ طلب منفصل لكل موظف مصدر (${fromBreakdown.length.toLocaleString("ar-SA-u-nu-latn")} طلبات) ليعتمدها المشرف كلٌّ على حدة.`}
+              </p>
+            )}
             {fromBreakdown.length > 0 && (
               <ul className="ew-referral-ids-list" style={{ listStyle: "none", padding: 0, margin: "6px 0" }}>
                 {fromBreakdown.map(([from, count]) => (
@@ -422,7 +482,7 @@ export function BulkReassignModal({
                   <ul style={{ margin: "4px 0 0", paddingInlineStart: 18 }}>
                     {skipCounts.map(([reasonKey, count]) => (
                       <li key={reasonKey}>
-                        {BULK_REASSIGN_SKIP_LABELS[reasonKey]} — {count.toLocaleString("ar-SA-u-nu-latn")}
+                        {REASSIGN_SKIP_LABELS[reasonKey]} — {count.toLocaleString("ar-SA-u-nu-latn")}
                       </li>
                     ))}
                   </ul>
@@ -430,7 +490,7 @@ export function BulkReassignModal({
               </div>
             )}
             {eligibleCount === 0 && (
-              <p className="ew-replace-error" role="alert">لا توجد عينات صالحة لإعادة التعيين ضمن هذا الاختيار.</p>
+              <p className="ew-replace-error" role="alert">لا توجد عينات صالحة للإحالة ضمن هذا الاختيار.</p>
             )}
             <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10, fontSize: 13 }}>
               <input
@@ -439,7 +499,7 @@ export function BulkReassignModal({
                 onChange={(e) => setConfirmed(e.target.checked)}
                 disabled={eligibleCount === 0}
               />
-              أؤكد مراجعة الملخص أعلاه ورغبتي بإعادة التعيين
+              أؤكد مراجعة الملخص أعلاه ورغبتي بإرسال طلب الإحالة
             </label>
           </div>
         )}
@@ -458,7 +518,7 @@ export function BulkReassignModal({
             disabled={!canSubmit}
             onClick={handleSubmit}
           >
-            {busy ? "جاري التنفيذ..." : error ? "إعادة المحاولة" : "تنفيذ إعادة التعيين"}
+            {busy ? "جاري الإرسال..." : error ? "إعادة المحاولة" : "إرسال طلب الإحالة"}
           </button>
         </div>
       </div>
@@ -504,140 +564,6 @@ export function SampleDetailPanel({
       onReopen={onReopen}
       onRequestReopen={onRequestReopen}
     />
-  );
-}
-
-export function ReferralRequestModal({
-  xrayImageIds,
-  entries,
-  visibleColumns,
-  dateFmt,
-  answersMap,
-  currentUser,
-  onClose,
-  onSubmit,
-}: {
-  xrayImageIds: string[];
-  entries: DistributionEntry[];
-  visibleColumns: DataTableCol<DistributionEntry>[];
-  dateFmt: Record<string, DateFormatMode>;
-  answersMap: Map<string, ItemAnswer>;
-  currentUser: string;
-  onClose: () => void;
-  onSubmit: (toEmployee: string, reason: string) => void;
-}) {
-  const [toEmployee, setToEmployee] = useState("");
-  const [reason, setReason]         = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onClose });
-  const entriesById = useMemo(
-    () => new Map(entries.map((entry) => [entry.xrayImageId, entry])),
-    [entries]
-  );
-
-  const employees = readUserManagementState()
-    .users.filter((u) => u.isActive && u.username !== currentUser && isAssignableSampleRole(u))
-    .sort((a, b) => a.displayName.localeCompare(b.displayName, "ar"));
-
-  const canSubmit = toEmployee.trim() !== "" && reason.trim() !== "" && !submitting;
-
-  function handleSubmit(): void {
-    if (!canSubmit) return;
-    setSubmitting(true);
-    onSubmit(toEmployee, reason.trim());
-  }
-
-  return (
-    <ModalPortal>
-    <div ref={dialogRef} className="ew-modal-backdrop" role="dialog" aria-modal="true">
-      <div className="ew-replace-modal">
-        <div className="ew-replace-header">
-          <div>
-            <h3>إحالة العينات</h3>
-            <p>{xrayImageIds.length} عينة محددة للإحالة</p>
-          </div>
-          <button type="button" className="ew-modal-close" onClick={onClose} aria-label="إغلاق"><X size={16} /></button>
-        </div>
-
-        <div className="ew-replace-reason">
-          <label className="ew-field-label" htmlFor="ref-to-emp">
-            الموظف المستلم <span className="ew-required">*</span>
-          </label>
-          <select
-            id="ref-to-emp"
-            className="ew-select"
-            value={toEmployee}
-            onChange={(e) => setToEmployee(e.target.value)}
-          >
-            <option value="">اختر موظفاً...</option>
-            {employees.map((u) => (
-              <option key={u.username} value={u.username}>
-                {u.displayName} ({u.username})
-              </option>
-            ))}
-          </select>
-
-          <label className="ew-field-label" htmlFor="ref-reason" style={{ marginTop: 12 }}>
-            سبب الإحالة <span className="ew-required">*</span>
-          </label>
-          <textarea
-            id="ref-reason"
-            className="ew-input ew-textarea"
-            rows={3}
-            placeholder="اذكر سبب إحالة هذه العينات..."
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-          />
-        </div>
-
-        <div className="ew-replace-reason" style={{ paddingTop: 8 }}>
-          <details className="ew-referral-ids-summary">
-            <summary>عرض معرفات العينات ({xrayImageIds.length})</summary>
-            <div className="ew-referral-ids-list">
-              {xrayImageIds.map((id) => {
-                const entry = entriesById.get(id);
-                const isExpanded = expandedId === id;
-                return (
-                  <div key={id} className="ew-referral-id-item">
-                    <button
-                      type="button"
-                      className={`dt-mono ew-referral-id-chip${isExpanded ? " active" : ""}`}
-                      onClick={() => setExpandedId((current) => (current === id ? null : id))}
-                      aria-expanded={isExpanded}
-                      title="عرض بيانات العينة"
-                    >
-                      {id}
-                    </button>
-                    {isExpanded && entry ? (
-                      <ReferralSamplePreview
-                        entry={entry}
-                        visibleColumns={visibleColumns}
-                        dateFmt={dateFmt}
-                        answersMap={answersMap}
-                      />
-                    ) : null}
-                  </div>
-                );
-              })}
-            </div>
-          </details>
-        </div>
-
-        <div className="ew-replace-reason" style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8, paddingBottom: 16 }}>
-          <button type="button" className="ew-btn-secondary" onClick={onClose}>إلغاء</button>
-          <button
-            type="button"
-            className="ew-btn-primary"
-            disabled={!canSubmit}
-            onClick={handleSubmit}
-          >
-            {submitting ? "جاري الإرسال..." : "إرسال طلب الإحالة"}
-          </button>
-        </div>
-      </div>
-    </div>
-    </ModalPortal>
   );
 }
 

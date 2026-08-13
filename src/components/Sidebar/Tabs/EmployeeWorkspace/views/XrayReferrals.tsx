@@ -27,7 +27,8 @@ import type { DistributionEntry } from "../../../../../data/distribution/distrib
 import {
   executeReplacement,
 } from "../../../../../data/distribution/replacement";
-import { executeBulkReassignment } from "../../../../../data/distribution/bulkAssignment";
+import { submitReassignmentRequests } from "../../../../../data/referral/submitReassignment";
+import { appendWorkspaceAction } from "../../../../../data/audit/actionLog";
 import { getReplacementCandidatesIndexed } from "../../../../../data/distribution/replacementCandidateLookup";
 import { loadMonthPopulationFinal } from "../../../../../data/population/populationStorage";
 import type { ReplacementIndexRow } from "../../../../../data/population/replacementIndexTypes";
@@ -69,7 +70,6 @@ import {
   saveUserBrowseDatasetPreset,
 } from "../../../../../data/preferences/browsePresetStorage";
 import {
-  appendReferralRequest,
   appendReplacementRequest,
   getPendingReferralIds,
   getPendingReplacementIds,
@@ -77,7 +77,7 @@ import {
   loadReplacementLog,
 } from "../../../../../data/referral/referralStorage";
 import { submitReopenRequest } from "../../../../../data/referral/requestReopen";
-import type { ReferralRequest, ReplacementRequest } from "../../../../../data/referral/referralTypes";
+import type { ReplacementRequest } from "../../../../../data/referral/referralTypes";
 import { useLabels } from "../../../../../data/labels/useLabels";
 import { formatStageLabel } from "../../../../../data/population/stageHelpers";
 import type { PreparedPopulationRow } from "../../../../../data/population/populationTypes";
@@ -85,9 +85,8 @@ import {
   QueueToolbar,
   SelectionActionBar,
   BulkReassignSelectionBar,
-  BulkReassignModal,
+  ReassignModal,
   SampleDetailPanel,
-  ReferralRequestModal,
   StatusBadge,
   ReferralStatsStrip,
   ReplacementDialog,
@@ -129,22 +128,18 @@ export type ReplacementDialogState = {
   recommended: ReplacementIndexRow[];
   all: ReplacementIndexRow[];
 } | null;
-type ReferralModalState = {
-  /** IDs to transfer. Always manually selected (single-row "reassign" action or
-   * the personal multi-select bar) — this flow has no "everything currently
-   * filtered" entry point, unlike BulkReassignModalState below. */
+// Exported so subComponents.tsx's ReassignModal can `import type` it back.
+export type ReassignModalState = {
+  /** IDs to reassign. The three entry points differ ONLY in how this list is
+   * built — one sample from the inspection panel, a manual multi-select, or
+   * every row currently matching the filter/search (all pages, not just the
+   * visible one) — and then share one dialog, one submit path and one
+   * approval. `source` is presentation/audit metadata, never behaviour. */
   xrayImageIds: string[];
-} | null;
-
-// Exported so subComponents.tsx's BulkReassignModal can `import type` it back.
-export type BulkReassignModalState = {
-  /** IDs to reassign — either manually selected or every row currently
-   * matching the active filter/search (all pages, not just the visible one). */
-  xrayImageIds: string[];
-  source: "selected" | "filtered";
+  source: "single" | "selected" | "filtered";
   /** Idempotency key, stable across retries of the same confirm click so a
-   * partial-failure retry never re-emits reassignment events already durably
-   * written for this batch (see executeBulkReassignment's replay guard). */
+   * partial-failure retry never creates a second copy of a request already
+   * durably written for this batch (see submitReassignmentRequests). */
   sourceRequestId: string;
 } | null;
 
@@ -221,9 +216,9 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   const canConfigureColumns = canMutate("configure-referral-columns");
   const canRequestReplacement = canMutate("request-replacement");
   const canSubmitReferrals = canMutate("submit-referrals");
-  // Oversight-only: select rows (manually or via the active filter) and reassign
-  // them to another employee in one action, going through the same distribution
-  // event log as every other mutation (see executeBulkReassignment).
+  // Oversight-only: select rows (manually or via the active filter) and request
+  // their reassignment to another employee in one action, through the same
+  // approval flow as إحالة and استبدال (see submitReassignmentRequests).
   const canBulkReassignReferrals = canMutate("bulk-reassign-referrals");
   const canSubmitAnswers = canMutate("submit-answers");
   const canReopenAnswer = canMutate("ew.reopenAnswer");
@@ -258,10 +253,9 @@ export default function XrayReferrals({ directoryHandle }: Props) {
   const [myQuota, setMyQuota]         = useState<PersonalQuota>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [filteredTableEntries, setFilteredTableEntries] = useState<DistributionEntry[]>([]);
-  const [referralModal, setReferralModal] = useState<ReferralModalState>(null);
-  const [bulkReassignModal, setBulkReassignModal] = useState<BulkReassignModalState>(null);
-  const [bulkReassignBusy, setBulkReassignBusy] = useState(false);
-  const [bulkReassignError, setBulkReassignError] = useState<string | null>(null);
+  const [reassignModal, setReassignModal] = useState<ReassignModalState>(null);
+  const [reassignBusy, setReassignBusy] = useState(false);
+  const [reassignError, setReassignError] = useState<string | null>(null);
 
   // Function declaration (hoisted) — safe to reference from the mount effect
   // below even though it appears earlier in source, with no TDZ/identity
@@ -876,143 +870,141 @@ export default function XrayReferrals({ directoryHandle }: Props) {
     setSelectedIds(new Set());
   }
 
-  // ── Referral request handler ───────────────────────────────────────────────
+  // ── Reassignment handler (shared by all three sample-choosing methods) ─────
 
-  async function handleReferralRequest(
-    toEmployee: string,
-    reason: string,
-    xrayImageIds: string[]
-  ): Promise<void> {
-    if (!canSubmitReferrals) {
-      setStatusMsg({ type: "error", text: "لا تملك صلاحية تقديم الإحالات، أو أن مساحة العمل للقراءة فقط." });
-      return;
-    }
-    if (!selMonth) return;
+  function openReassignModal(
+    xrayImageIds: string[],
+    source: "single" | "selected" | "filtered"
+  ): void {
     if (xrayImageIds.length === 0) {
-      // A click must never be a silent no-op: the referral modal can in
-      // principle be confirmed after its underlying selection emptied out
-      // from under it (e.g. a background refresh dropped the selected rows).
-      setReferralModal(null);
-      setStatusMsg({ type: "error", text: "لم يتبقَّ أي عينة محددة لإحالتها — تم إلغاء الطلب." });
-      return;
-    }
-    // A referral request is ONE record covering many rows, so every row in it
-    // must belong to the same store. A selection can legitimately span the real
-    // month and an ad-hoc import (both render in this table), and splitting the
-    // request silently would produce two records the supervisor sees as one
-    // action — with a partial approval leaving half the rows in limbo. Refuse
-    // the mixed case explicitly and let the user send them separately.
-    const targetFolders = new Set(xrayImageIds.map(folderForRow));
-    if (targetFolders.size > 1) {
-      setStatusMsg({
-        type: "error",
-        text: "لا يمكن إحالة عينات من الشهر الحالي ومن استيراد يدوي في طلب واحد — أرسل كل مجموعة على حدة.",
-      });
-      return;
-    }
-    const referralFolder = targetFolders.values().next().value ?? selMonth;
-
-    const request: ReferralRequest = {
-      requestId: `ref-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      monthFolderName: referralFolder,
-      fromEmployee: username,
-      toEmployee,
-      xrayImageIds,
-      reason,
-      requestedAt: new Date().toISOString(),
-      requestedBy: username,
-      status: "pending",
-    };
-    const result = await appendReferralRequest(directoryHandle, referralFolder, request);
-    if (result.ok) {
-      setReferralModal(null);
-      clearSelection();
-      setStatusMsg({ type: "ok", text: `تم إرسال طلب الإحالة لـ ${toEmployee} — بانتظار موافقة المشرف.` });
-      // Silent — same reasoning as handleReplace's post-success reloads: this
-      // follows an already-successful write, not a month/user change, so it must
-      // refresh the queue in place instead of flashing the loading state or
-      // force-closing whatever inspection panel is currently open.
-      await loadData({ silent: true });
-    } else {
-      setStatusMsg({ type: "error", text: result.error });
-    }
-  }
-
-  // ── Bulk reassignment handler (oversight roles) ────────────────────────────
-
-  function openBulkReassignModal(xrayImageIds: string[], source: "selected" | "filtered"): void {
-    if (xrayImageIds.length === 0) {
-      // A click must never be a silent no-op — both bulk-reassign buttons are
-      // already `disabled` when their respective count is 0, but this guard
-      // stays as defense-in-depth against a state race (e.g. the underlying
+      // A click must never be a silent no-op — the buttons are already
+      // `disabled` when their respective count is 0, but this guard stays as
+      // defense-in-depth against a state race (e.g. the underlying
       // selection/filtered set emptying out between render and click), so it
       // must explain itself instead of doing nothing.
       setStatusMsg({
         type: "error",
-        text: source === "selected"
-          ? "لا توجد عينات محددة يدوياً لإعادة تعيينها."
-          : "لا توجد عينات مطابقة للتصفية/البحث الحالي لإعادة تعيينها.",
+        text: source === "filtered"
+          ? "لا توجد عينات مطابقة للتصفية/البحث الحالي لإحالتها."
+          : "لا توجد عينات محددة لإحالتها.",
       });
       return;
     }
-    setBulkReassignError(null);
-    setBulkReassignModal({
+    setReassignError(null);
+    setReassignModal({
       xrayImageIds,
       source,
+      // Only ever reached from a click (the two bar buttons and the inspection
+      // panel's "إسناد لموظف آخر"), never during render — but the compiler
+      // cannot see that now that a render-time prop callback forwards to it.
+      // The value must be random-and-unique, not a counter: it is the
+      // idempotency key a retry replays against, so a value that repeats after
+      // a page reload would make a genuinely new batch look like a replay and
+      // silently drop it.
+      // eslint-disable-next-line react-hooks/purity -- see above
       sourceRequestId: `bulk-reassign-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     });
   }
 
-  async function handleBulkReassignConfirm(toEmployee: string, reason: string): Promise<void> {
+  async function handleReassignConfirm(toEmployee: string, reason: string): Promise<void> {
     // Handler-boundary check — mirrors every other mutating handler in this
     // file (render-boundary gating alone is not enough: the modal that calls
-    // this could in principle be reopened from stale state).
-    if (!canBulkReassignReferrals) {
-      setBulkReassignError("لا تملك صلاحية إعادة التعيين الجماعي، أو أن مساحة العمل للقراءة فقط.");
+    // this could in principle be reopened from stale state). Either capability
+    // opens this dialog (the panel/personal entry points require
+    // `submit-referrals`, the oversight bar `bulk-reassign-referrals`), and
+    // both land here.
+    if (!canSubmitReferrals && !canBulkReassignReferrals) {
+      setReassignError("لا تملك صلاحية إحالة العينات، أو أن مساحة العمل للقراءة فقط.");
       return;
     }
-    if (!bulkReassignModal || !selMonth) return;
-    setBulkReassignBusy(true);
-    setBulkReassignError(null);
+    if (!reassignModal || !selMonth) return;
+    setReassignBusy(true);
+    setReassignError(null);
     try {
-      const result = await executeBulkReassignment({
-        directoryHandle,
-        monthFolderName: selMonth,
-        xrayImageIds: bulkReassignModal.xrayImageIds,
-        reassignedTo: toEmployee,
-        eventBy: username,
-        reason: reason || undefined,
-        sourceRequestId: bulkReassignModal.sourceRequestId,
-      });
-      if (!result.ok) {
-        // Keep the modal open with the same sourceRequestId — a retry only
-        // re-emits whatever this attempt did not durably write (see
-        // executeBulkReassignment's replay guard), so re-clicking "confirm" is
-        // always safe.
-        setBulkReassignError(result.error ?? "حدث خطأ غير متوقع أثناء إعادة التعيين.");
+      // ALWAYS a request, never a direct write — identical to إحالة (referral)
+      // and استبدال (replacement). The submitter's own permissions decide
+      // whether they can then approve it in ew/referral-approval; they never
+      // decide whether a reviewable record exists. That record (who asked, when,
+      // which samples, who decided, when) is the point of the flow, which is why
+      // it is kept even when the same person submits and approves seconds later.
+      //
+      // A selection can legitimately span the real month and an ad-hoc import
+      // (both render in this table) and each lives in its own store, so submit
+      // per store rather than refusing the mixed case: a request is per-folder
+      // by construction. The old per-row referral path rejected such a
+      // selection outright, which is a worse answer than splitting it.
+      const byFolder = new Map<string, string[]>();
+      for (const id of reassignModal.xrayImageIds) {
+        const folder = folderForRow(id);
+        const bucket = byFolder.get(folder);
+        if (bucket) bucket.push(id);
+        else byFolder.set(folder, [id]);
+      }
+
+      const createdRequests: { fromEmployee: string; xrayImageIds: string[] }[] = [];
+      let skippedTotal = 0;
+      for (const folder of [...byFolder.keys()].sort()) {
+        const requested = await submitReassignmentRequests({
+          directoryHandle,
+          monthFolderName: folder,
+          xrayImageIds: byFolder.get(folder) ?? [],
+          reassignedTo: toEmployee,
+          requestedBy: username,
+          reason,
+          // Namespaced per folder so ids stay unique across stores while
+          // remaining stable across retries of this same confirm click.
+          sourceRequestId: `${reassignModal.sourceRequestId}::${folder}`,
+        });
+        if (!requested.ok) {
+          // The modal keeps its sourceRequestId, and already-written requests
+          // de-duplicate by id, so re-clicking "confirm" is always safe.
+          setReassignError(requested.error ?? "حدث خطأ غير متوقع أثناء إرسال طلب إعادة التعيين.");
+          return;
+        }
+        createdRequests.push(...requested.createdRequests);
+        skippedTotal += requested.skipped.length;
+      }
+
+      const requestedTotal = createdRequests.reduce((sum, g) => sum + g.xrayImageIds.length, 0);
+      if (requestedTotal === 0) {
+        setReassignError("لا توجد عينات مؤهلة للإحالة ضمن هذا التحديد.");
         return;
       }
-      const appliedTotal = result.appliedIds.length + result.alreadyAppliedIds.length;
-      const skippedTotal = result.skipped.length;
-      setBulkReassignModal(null);
+      void appendWorkspaceAction(directoryHandle, {
+        actor: username,
+        actorRole: role,
+        action: "referral-requested",
+        monthFolderName: selMonth,
+        target: toEmployee,
+        details: {
+          samples: requestedTotal,
+          requests: createdRequests.length,
+          skipped: skippedTotal,
+          source: reassignModal.source,
+        },
+      });
+      setReassignModal(null);
       clearSelection();
+      const requestCountText = createdRequests.length > 1
+        ? ` (${createdRequests.length} طلبات — طلب لكل موظف مصدر)`
+        : "";
       setStatusMsg({
         type: "ok",
         text: skippedTotal > 0
-          ? `تم إعادة تعيين ${appliedTotal} عينة إلى ${toEmployee} — تم تخطي ${skippedTotal} عينة (راجع ملخص الحوار السابق لسبب كل حالة).`
-          : `تم إعادة تعيين ${appliedTotal} عينة إلى ${toEmployee}.`,
+          ? `تم إرسال طلب إحالة ${requestedTotal} عينة إلى ${toEmployee}${requestCountText} — بانتظار موافقة المشرف. تم تخطي ${skippedTotal} عينة.`
+          : `تم إرسال طلب إحالة ${requestedTotal} عينة إلى ${toEmployee}${requestCountText} — بانتظار موافقة المشرف.`,
       });
       // Silent — follows an already-successful write, not a month/user change;
       // must refresh the queue in place rather than flashing the loading state.
       await loadData({ silent: true });
     } catch (error) {
-      setBulkReassignError(
+      setReassignError(
         error instanceof MonthClosedError
           ? getLabels().msg_month_closed_write_blocked
           : error instanceof Error ? error.message : "خطأ غير معروف"
       );
     } finally {
-      setBulkReassignBusy(false);
+      setReassignBusy(false);
     }
   }
 
@@ -1160,7 +1152,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                     setStatusMsg({ type: "error", text: "لا توجد عينات محددة يدوياً لإحالتها." });
                     return;
                   }
-                  setReferralModal({ xrayImageIds: [...selectedIds] });
+                  openReassignModal([...selectedIds], "selected");
                 }}
                 onSelectVisible={() => selectAll(selectableVisibleIds)}
                 onClear={clearSelection}
@@ -1170,8 +1162,8 @@ export default function XrayReferrals({ directoryHandle }: Props) {
               <BulkReassignSelectionBar
                 selectedCount={selectedIds.size}
                 filteredCount={selectableVisibleIds.length}
-                onReassignSelected={() => openBulkReassignModal([...selectedIds], "selected")}
-                onReassignFiltered={() => openBulkReassignModal(selectableVisibleIds, "filtered")}
+                onReassignSelected={() => openReassignModal([...selectedIds], "selected")}
+                onReassignFiltered={() => openReassignModal(selectableVisibleIds, "filtered")}
                 onSelectAllFiltered={() => selectAll(selectableVisibleIds)}
                 onClear={clearSelection}
               />
@@ -1259,7 +1251,7 @@ export default function XrayReferrals({ directoryHandle }: Props) {
                   }
                   onReassign={
                     canSubmitReferrals && selEntry.assignedTo === username && selEntry.status === "pending"
-                      ? (entry) => setReferralModal({ xrayImageIds: [entry.xrayImageId] })
+                      ? (entry) => openReassignModal([entry.xrayImageId], "single")
                       : undefined
                   }
                   onReopen={
@@ -1300,36 +1292,22 @@ export default function XrayReferrals({ directoryHandle }: Props) {
         />
       ) : null}
 
-      {referralModal ? (
-        <ReferralRequestModal
-          xrayImageIds={referralModal.xrayImageIds}
-          entries={referralModal.xrayImageIds
-            .map((id) => entriesById.get(id))
-            .filter((entry): entry is DistributionEntry => Boolean(entry))}
+      {reassignModal ? (
+        <ReassignModal
+          state={reassignModal}
+          entries={entries}
           visibleColumns={visiblePreviewColumns}
           dateFmt={effectiveColConfig.dateFmt}
           answersMap={answersMap}
           currentUser={username}
-          onClose={() => setReferralModal(null)}
-          onSubmit={(toEmployee, reason) =>
-            void handleReferralRequest(toEmployee, reason, referralModal.xrayImageIds)
-          }
-        />
-      ) : null}
-
-      {bulkReassignModal ? (
-        <BulkReassignModal
-          state={bulkReassignModal}
-          entries={entries}
-          currentUser={username}
-          busy={bulkReassignBusy}
-          error={bulkReassignError}
+          busy={reassignBusy}
+          error={reassignError}
           onClose={() => {
-            if (bulkReassignBusy) return;
-            setBulkReassignModal(null);
-            setBulkReassignError(null);
+            if (reassignBusy) return;
+            setReassignModal(null);
+            setReassignError(null);
           }}
-          onConfirm={(toEmployee, reason) => { void handleBulkReassignConfirm(toEmployee, reason); }}
+          onConfirm={(toEmployee, reason) => { void handleReassignConfirm(toEmployee, reason); }}
         />
       ) : null}
     </section>

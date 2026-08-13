@@ -76,6 +76,7 @@ export type WorkspaceActionType =
   | "feature-permission-changed"
   | "sample-drawn"
   | "distribution-bulk-assigned"
+  | "referral-requested"
   | "referral-approved"
   | "referral-denied"
   | "replacement-approved"
