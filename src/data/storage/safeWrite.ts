@@ -23,6 +23,16 @@
  *
  * The retry ladder and the rationale live in `transientFileErrors.ts`.
  * `NotReadableError` remains transient on both paths and is unrelated.
+ *
+ * **The streamed path never holds a whole file as one string.** Serialization,
+ * verification, the `.bak` snapshot, the commit, the rollback and the `.tmp`
+ * promotion all move data in bounded windows, so a payload past V8's max string
+ * length (~536,870,888 UTF-16 code units) can still be written and verified
+ * byte-exactly. See the READ_SLICE_BYTES block below for how the read side
+ * works and why the hash domain did not have to change. What is *not* lifted:
+ * `safeReadJson` still returns a parsed value and therefore still needs the
+ * file as one string — reading such a file back is bounded by `JSON.parse`, not
+ * by this module.
  */
 import type { DirectoryHandleLike } from "./fileSystemAccess";
 import { assertWritableMode } from "./readOnlyMode";
@@ -39,7 +49,6 @@ import {
   ENVELOPE_SCHEMA_VERSION,
   createSimpleHasher,
   isEnvelope,
-  simpleHash,
   streamJsonStringify,
   validateEnvelopeStructure,
   verifyContentHash,
@@ -87,6 +96,39 @@ type ReadTextOptions = {
   retryMissing?: boolean;
 };
 
+/**
+ * Test seam simulating V8's max string length (`Invalid string length`).
+ *
+ * A real Chrome throws that RangeError out of `file.text()` once the decoded
+ * file exceeds ~536,870,888 UTF-16 code units. A unit test cannot allocate that
+ * (the memory-directory double stores file content as a JS string, so it cannot
+ * even hold such a file), so instead the ceiling is lowered: any `readText` of a
+ * file larger than this cap throws the same RangeError the engine would.
+ *
+ * That makes the whole-file-as-one-string read *impossible* at test size, so a
+ * write that still succeeds under the cap has provably never materialized the
+ * file as one string. Production never lowers it.
+ *
+ * The cap is compared against `file.size` (bytes) rather than decoded length —
+ * bytes >= code units for UTF-8, so it is the conservative side of the real
+ * limit and needs no decode to evaluate.
+ */
+let maxStringLengthForTests = Number.POSITIVE_INFINITY;
+
+/** @internal — test-only. Lower the simulated engine max string length. */
+export function __setMaxStringLengthForTests(limit: number): void {
+  maxStringLengthForTests = limit;
+}
+
+/** @internal — test-only. Restore the real (engine-imposed) ceiling. */
+export function __resetMaxStringLengthForTests(): void {
+  maxStringLengthForTests = Number.POSITIVE_INFINITY;
+}
+
+function stringLengthRangeError(name: string): RangeError {
+  return new RangeError(`Invalid string length (simulated ceiling) for ${name}.`);
+}
+
 async function readText(
   dir: DirectoryHandleLike,
   name: string,
@@ -100,6 +142,9 @@ async function readText(
     try {
       const handle = await dir.getFileHandle(name, { create: false });
       const file = await handle.getFile();
+      if (file.size > maxStringLengthForTests) {
+        throw stringLengthRangeError(name);
+      }
       return await file.text();
     } catch (error) {
       if (isNotFoundError(error)) {
@@ -157,6 +202,139 @@ export async function readFileTextWithRetry(
   name: string
 ): Promise<string | null> {
   return readText(dir, name);
+}
+
+// ── Chunked reading: the only way a file above V8's max string length is read ──
+//
+// `file.text()` decodes the whole file into ONE JavaScript string. Past
+// ~536,870,888 UTF-16 code units V8 cannot represent that string at all and
+// throws `RangeError: Invalid string length`. Real customer data is already at
+// 85% of that ceiling (a 573 MB bi.raw.json decodes to ~456M code units), and
+// the streamed write path used to verify its own output with exactly that call
+// — so the write that existed *because* the payload was too large to serialize
+// as one string then turned around and required it as one string on read-back.
+//
+// Everything below reads through `Blob.slice()` byte windows instead, so peak
+// memory is one window regardless of file size.
+//
+// Slicing happens on BYTE boundaries, which will land in the middle of a
+// multi-byte UTF-8 character (Arabic content guarantees it). A single streaming
+// `TextDecoder` carries the incomplete sequence across the window boundary, so
+// the concatenation of the emitted chunks is byte-for-byte what `file.text()`
+// would have returned — which is what keeps the existing text-domain
+// `simpleHash` / `fileLength` semantics intact rather than migrating them.
+const READ_SLICE_BYTES = 4 * 1024 * 1024;
+
+type ChunkSink = (chunk: string) => Promise<void> | void;
+
+/**
+ * Same NotFound/NotReadable retry ladder as `readText` (see its options doc),
+ * but stops at the `File` instead of decoding it. Returns null for a file that
+ * is genuinely absent.
+ */
+async function openFile(
+  dir: DirectoryHandleLike,
+  name: string,
+  options?: ReadTextOptions
+): Promise<File | null> {
+  const missingRetries = options?.retryMissing ? TRANSIENT_WRITE_RETRY_DELAYS_MS.length : 0;
+  let missingAttempts = 0;
+  let unreadableAttempts = 0;
+  let lastMissingError: unknown = null;
+  for (;;) {
+    try {
+      const handle = await dir.getFileHandle(name, { create: false });
+      return await handle.getFile();
+    } catch (error) {
+      if (isNotFoundError(error)) {
+        if (missingAttempts < missingRetries) {
+          lastMissingError = error;
+          await wait(TRANSIENT_WRITE_RETRY_DELAYS_MS[missingAttempts]!);
+          missingAttempts += 1;
+          continue;
+        }
+        if (options?.retryMissing) {
+          await logExhaustedNotFound(
+            "safeWrite:verify-read-missing",
+            dir,
+            name,
+            missingAttempts + 1,
+            lastMissingError ?? error
+          );
+        }
+        return null;
+      }
+      if (isNotReadableError(error) && unreadableAttempts < NOT_READABLE_RETRY_DELAYS_MS.length) {
+        await wait(NOT_READABLE_RETRY_DELAYS_MS[unreadableAttempts]!);
+        unreadableAttempts += 1;
+        continue;
+      }
+      throw error;
+    }
+  }
+}
+
+/**
+ * Feeds a file to `onChunk` as decoded text windows, never holding more than one
+ * window. Returns false when the file is missing (same "absent is not an error"
+ * contract as `readText`); any other failure still throws.
+ */
+async function streamFileChunks(
+  dir: DirectoryHandleLike,
+  name: string,
+  onChunk: ChunkSink,
+  options?: ReadTextOptions
+): Promise<boolean> {
+  let file = await openFile(dir, name, options);
+  if (file === null) {
+    return false;
+  }
+  const size = file.size;
+  const decoder = new TextDecoder("utf-8");
+  // One window, with the same bounded NotReadableError tolerance every other
+  // read here gets.
+  const readWindow = async (start: number, end: number): Promise<ArrayBuffer> => {
+    let unreadableAttempts = 0;
+    for (;;) {
+      try {
+        return await file!.slice(start, end).arrayBuffer();
+      } catch (error) {
+        if (
+          isNotReadableError(error) &&
+          unreadableAttempts < NOT_READABLE_RETRY_DELAYS_MS.length
+        ) {
+          await wait(NOT_READABLE_RETRY_DELAYS_MS[unreadableAttempts]!);
+          unreadableAttempts += 1;
+          // The handle can go stale while another process swaps the file; re-open
+          // it, but only adopt the replacement when it is still the same file by
+          // size — otherwise keep failing rather than splicing two versions.
+          const reopened = await openFile(dir, name, options);
+          if (reopened !== null && reopened.size === size) {
+            file = reopened;
+          }
+          continue;
+        }
+        throw error;
+      }
+    }
+  };
+  for (let offset = 0; offset < size; offset += READ_SLICE_BYTES) {
+    const buffer = await readWindow(offset, Math.min(offset + READ_SLICE_BYTES, size));
+    const text = decoder.decode(new Uint8Array(buffer), { stream: true });
+    if (text.length > 0) {
+      const pending = onChunk(text);
+      if (pending) await pending;
+    }
+  }
+  // Flush: emits U+FFFD for a truncated trailing sequence, exactly as
+  // `file.text()` would — a truncated file must fail verification, not be
+  // silently trimmed to a shorter valid string.
+  const tail = decoder.decode();
+  if (tail.length > 0) {
+    const pending = onChunk(tail);
+    if (pending) await pending;
+  }
+  return true;
 }
 
 /**
@@ -380,57 +558,192 @@ function streamValueToFile(
   });
 }
 
-// Verifies a streamed file by re-reading it and confirming its bytes exactly
-// match what was written (length + whole-file content hash), and returns that
-// verified text so a caller that needs the bytes doesn't have to read them a
-// second time. Returns null when the file is missing or does not match.
-// simpleHash walks the already-materialized read-back string without
-// allocating a new one.
-async function readVerifiedStreamedFile(
-  dir: DirectoryHandleLike,
-  fileName: string,
-  expected: StreamedFileInfo
-): Promise<string | null> {
-  // Verification read-back of a file this call just closed — a "not found" here
-  // is share latency, not absence, so it gets the opt-in retry.
-  const text = await readText(dir, fileName, { retryMissing: true });
-  if (text === null || text.length !== expected.fileLength) {
-    return null;
-  }
-  return simpleHash(text) === expected.fileHash ? text : null;
-}
-
+// Verifies a streamed file by re-reading it in bounded windows and folding the
+// SAME rolling hash `streamToFile` computed on the way out over the read-back
+// chunks. Byte-exact and unchanged in strength — length + whole-file content
+// hash over the identical text domain — but it never materializes the file as
+// one string, so it works at any size.
+//
+// (This is what used to be `readVerifiedStreamedFile`, which read the staged
+// file back with `file.text()` and therefore capped the entire streamed write
+// path at V8's max string length: the very limit that path exists to escape.)
 async function verifyStreamedFile(
   dir: DirectoryHandleLike,
   fileName: string,
   expected: StreamedFileInfo
 ): Promise<boolean> {
-  return (await readVerifiedStreamedFile(dir, fileName, expected)) !== null;
+  const hasher = createSimpleHasher();
+  let length = 0;
+  // Verification read-back of a file this call just closed — a "not found" here
+  // is share latency, not absence, so it gets the opt-in retry.
+  const found = await streamFileChunks(
+    dir,
+    fileName,
+    (chunk) => {
+      hasher.update(chunk);
+      length += chunk.length;
+    },
+    { retryMissing: true }
+  );
+  return found && length === expected.fileLength && hasher.digest() === expected.fileHash;
 }
 
-// Phase 1.4: commits an already-staged-and-verified file by writing the exact
-// verified text out again in bounded chunks, instead of re-running the whole
-// serialization (streamJsonStringify walks the entire object graph a second
-// time — for a large month that is the single most expensive step of the
-// write, and it produced bytes that were by construction identical to the .tmp
-// we had just proved correct).
+// Phase 1.4: commits an already-staged-and-verified file by copying its exact
+// bytes, instead of re-running the whole serialization (streamJsonStringify
+// walks the entire object graph a second time — for a large month that is the
+// single most expensive step of the write, and it produced bytes that were by
+// construction identical to the .tmp we had just proved correct).
 //
 // It is still a real write of the full content (there is no rename/copy
 // primitive on FileHandleLike, and `createWritable` accepts strings only), so
 // the commit is unchanged from disk's point of view: same chunk size, same
 // per-chunk hashing, same StreamedFileInfo used for the post-commit byte-exact
-// verification. Only the serialization is not repeated.
-function writeVerifiedTextStreamed(
+// verification. Only the serialization is not repeated — and, unlike the
+// previous version, the source bytes flow through in windows rather than as one
+// verified string.
+function copyFileStreamed(
   dir: DirectoryHandleLike,
-  fileName: string,
-  text: string
+  sourceName: string,
+  targetName: string
 ): Promise<StreamedFileInfo> {
-  return streamToFile(dir, fileName, async (emit) => {
-    for (let offset = 0; offset < text.length; offset += STREAM_FLUSH_AT) {
-      const p = emit(text.slice(offset, offset + STREAM_FLUSH_AT));
-      if (p) await p;
+  return streamToFile(dir, targetName, async (emit) => {
+    const found = await streamFileChunks(dir, sourceName, emit, { retryMissing: true });
+    if (!found) {
+      throw new Error(`Safe-write cannot copy missing file ${sourceName}.`);
     }
   });
+}
+
+// ── Oversized existing files ────────────────────────────────────────────────
+//
+// A file already on disk that is too large to hold as one string cannot be read
+// with `readText` at all, and `safeWriteJson` reads the existing file on EVERY
+// write (for the previous revision and for the `.bak` snapshot). Left alone
+// that would simply move the ceiling from "verify the file we just wrote" to
+// "re-save a month that was written once already".
+
+type ExistingFileRead =
+  | { kind: "missing" }
+  | { kind: "text"; text: string }
+  | { kind: "oversized" };
+
+async function readTextTolerant(
+  dir: DirectoryHandleLike,
+  name: string,
+  options?: ReadTextOptions
+): Promise<ExistingFileRead> {
+  try {
+    const text = await readText(dir, name, options);
+    return text === null ? { kind: "missing" } : { kind: "text", text };
+  } catch (error) {
+    if (!isStringLengthError(error)) throw error;
+    return { kind: "oversized" };
+  }
+}
+
+// The streamed writer emits `{"data":…,"metadata":{…}}` — metadata LAST, so a
+// bounded tail window is enough to recover it. Any file big enough to reach
+// this code was necessarily written by that path.
+const METADATA_TAIL_BYTES = 64 * 1024;
+
+function extractBalancedObject(text: string, start: number): string | null {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i += 1) {
+    const ch = text[i]!;
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{") depth += 1;
+    else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
+/**
+ * Envelope metadata of a file too large to parse, read from its tail.
+ *
+ * This is deliberately weaker than `parseValidJson`: the payload cannot be
+ * parsed, so "the file ends in a well-formed envelope header" is the strongest
+ * available statement about a pre-existing oversized file. It is used only to
+ * decide (a) the revision to continue from and (b) whether the file is worth
+ * snapshotting to `.bak` — never to accept unverified content as the result of
+ * a write. Every file this call writes is still verified byte-exactly.
+ */
+async function readOversizedEnvelopeMetadata(
+  dir: DirectoryHandleLike,
+  name: string
+): Promise<JsonMetadata | null> {
+  const file = await openFile(dir, name);
+  if (file === null || file.size === 0) return null;
+  const start = Math.max(0, file.size - METADATA_TAIL_BYTES);
+  const bytes = await file.slice(start, file.size).arrayBuffer();
+  // The window may begin mid-character; the resulting replacement character is
+  // harmless because only the `"metadata":` marker onwards is used.
+  const text = new TextDecoder("utf-8").decode(new Uint8Array(bytes));
+  const marker = '"metadata":';
+  const markerAt = text.lastIndexOf(marker);
+  if (markerAt < 0) return null;
+  const objectStart = text.indexOf("{", markerAt + marker.length);
+  if (objectStart < 0) return null;
+  const objectText = extractBalancedObject(text, objectStart);
+  if (objectText === null) return null;
+  try {
+    const metadata = JSON.parse(objectText) as JsonMetadata;
+    if (!validateEnvelopeStructure({ metadata, data: null })) return null;
+    return typeof metadata.revision === "number" ? metadata : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * `.bak` snapshot of the current live file. Takes the already-read text when it
+ * exists; falls back to a chunked copy for a file too large to hold as one
+ * string. Same rollback source either way.
+ */
+async function snapshotToBak(
+  dir: DirectoryHandleLike,
+  fileName: string,
+  currentText: string | null
+): Promise<void> {
+  if (currentText !== null) {
+    await writeText(dir, `${fileName}.bak`, currentText);
+    return;
+  }
+  await copyFileStreamed(dir, fileName, `${fileName}.bak`);
+}
+
+/**
+ * Rolls the live file back to its `.bak` snapshot. Returns false when there is
+ * no usable `.bak` (first write, or a corrupt snapshot), which is the caller's
+ * signal to try `.tmp` promotion instead.
+ */
+async function rollbackFromBak(
+  dir: DirectoryHandleLike,
+  fileName: string
+): Promise<boolean> {
+  const bakName = `${fileName}.bak`;
+  const bak = await readTextTolerant(dir, bakName);
+  if (bak.kind === "text") {
+    if (parseValidJson(bak.text) === null) return false;
+    await writeText(dir, fileName, bak.text);
+    return true;
+  }
+  if (bak.kind === "oversized") {
+    if ((await readOversizedEnvelopeMetadata(dir, bakName)) === null) return false;
+    await copyFileStreamed(dir, bakName, fileName);
+    return true;
+  }
+  return false;
 }
 
 // Observability only (B task 2) — the write itself is unchanged; these are
@@ -471,14 +784,24 @@ export async function safeWriteJson<T>(
   // Lock per directory+file so same-named files in different folders don't contend.
   await withWorkspaceWriteAccess(dir, () =>
     withResourceLock(directoryResourceKey(dir, fileName), async () => {
-    const current = await readText(dir, fileName);
+    const currentRead = await readTextTolerant(dir, fileName);
+    const current = currentRead.kind === "text" ? currentRead.text : null;
     const parsedCurrent = parseValidJson(current);
+    // An existing file past the engine's max string length cannot be read as
+    // one string, let alone JSON.parsed — recover its envelope header from the
+    // file's tail so a re-save neither restarts revision numbering nor skips
+    // the `.bak` snapshot.
+    const oversizedMetadata =
+      currentRead.kind === "oversized"
+        ? await readOversizedEnvelopeMetadata(dir, fileName)
+        : null;
+    const hasCurrent = parsedCurrent !== null || oversizedMetadata !== null;
     const previousRevision =
       parsedCurrent &&
       isEnvelope(parsedCurrent) &&
       typeof parsedCurrent.metadata.schemaVersion === "number"
         ? parsedCurrent.metadata.revision
-        : 0;
+        : (oversizedMetadata?.revision ?? 0);
     // Try to build the whole-envelope string. Pretty-printing inflates output,
     // so serialize compactly first and only re-indent when small enough. If even
     // the compact result would exceed V8's max string length, JSON.stringify
@@ -510,23 +833,27 @@ export async function safeWriteJson<T>(
           });
 
       // 1. Snapshot the current good file to .bak (the rollback source).
-      if (parsedCurrent) {
+      if (hasCurrent) {
         reportProgress(onProgress, "backing-up");
-        await writeText(dir, `${fileName}.bak`, current as string);
+        await snapshotToBak(dir, fileName, current);
       }
 
       // 2. Stage the streamed content in a temp file and verify the exact bytes
       //    landed BEFORE overwriting the live file.
       reportProgress(onProgress, "staging");
-      const stagedInfo = await streamEnvelopeToFile(
-        dir,
-        tmpName,
-        data,
-        buildMetadata
-      );
+      let stagedInfo: StreamedFileInfo;
+      try {
+        stagedInfo = await streamEnvelopeToFile(dir, tmpName, data, buildMetadata);
+      } catch (error) {
+        // A streamed write that dies part-way (quota, permission, a failing
+        // share) used to leave a partial .tmp behind — hundreds of MB of
+        // unusable bytes that nothing ever cleaned up, because the only
+        // cleanup paths were the ones reached *after* staging returned.
+        await removeQuietly(dir, tmpName);
+        throw error;
+      }
       reportProgress(onProgress, "verifying-staged");
-      const stagedText = await readVerifiedStreamedFile(dir, tmpName, stagedInfo);
-      if (stagedText === null) {
+      if (!(await verifyStreamedFile(dir, tmpName, stagedInfo))) {
         await removeQuietly(dir, tmpName);
         throw new Error(`Safe-write staging failed for ${fileName}.`);
       }
@@ -537,16 +864,14 @@ export async function safeWriteJson<T>(
       //    writtenAt, same metadata), so `stagedInfo` is the expected result
       //    for the post-commit byte-exact verification.
       reportProgress(onProgress, "committing");
-      const liveInfo = await writeVerifiedTextStreamed(dir, fileName, stagedText);
+      const liveInfo = await copyFileStreamed(dir, tmpName, fileName);
       reportProgress(onProgress, "verifying-committed");
       if (
         liveInfo.fileHash !== stagedInfo.fileHash ||
         liveInfo.fileLength !== stagedInfo.fileLength ||
         !(await verifyStreamedFile(dir, fileName, stagedInfo))
       ) {
-        const bak = await readText(dir, `${fileName}.bak`);
-        if (parseValidJson(bak) !== null) {
-          await writeText(dir, fileName, bak as string);
+        if (await rollbackFromBak(dir, fileName)) {
           await removeQuietly(dir, tmpName);
           throw new Error(
             `Safe-write validation failed for ${fileName}; rolled back to previous version.`
@@ -554,25 +879,20 @@ export async function safeWriteJson<T>(
         }
         // No usable .bak (first write, or .bak corrupt): the staged .tmp WAS
         // verified before commit — promote it instead of losing the data.
-        try {
-          // Re-read (rather than reusing the text held above) so promotion is
-          // driven by what is provably still on disk right now.
-          const survivingStaged = await readVerifiedStreamedFile(
-            dir,
-            tmpName,
-            stagedInfo
-          );
-          if (survivingStaged !== null) {
-            await writeText(dir, fileName, survivingStaged);
+        // Re-verify (rather than trusting the earlier check) so promotion is
+        // driven by what is provably still on disk right now.
+        if (await verifyStreamedFile(dir, tmpName, stagedInfo)) {
+          try {
+            await copyFileStreamed(dir, tmpName, fileName);
             if (await verifyStreamedFile(dir, fileName, stagedInfo)) {
               await removeQuietly(dir, tmpName);
               return; // recovered — the write succeeded via promotion
             }
+          } catch {
+            // Promotion is the last-resort recovery attempt; a failure here must
+            // still end in the "staged copy kept as .tmp" outcome below rather
+            // than masking it with the copy's own error.
           }
-        } catch (error) {
-          // A payload near V8's max string length can make the promotion
-          // read-back throw RangeError — fall through and keep the .tmp.
-          if (!isStringLengthError(error)) throw error;
         }
         // Promotion failed too: keep .tmp on disk as the survivor for recovery.
         throw new Error(
@@ -593,9 +913,11 @@ export async function safeWriteJson<T>(
         : `${JSON.stringify(nextValue, null, 2)}\n`;
 
     // 1. Snapshot the current good file to .bak (the rollback source).
-    if (parsedCurrent) {
+    //    `hasCurrent`, not `parsedCurrent`: a small payload can overwrite an
+    //    oversized existing file, and that file still deserves a snapshot.
+    if (hasCurrent) {
       reportProgress(onProgress, "backing-up");
-      await writeText(dir, `${fileName}.bak`, current as string);
+      await snapshotToBak(dir, fileName, current);
     }
 
     // 2. Stage the new content in a temp file and verify it landed intact
@@ -622,9 +944,7 @@ export async function safeWriteJson<T>(
     const verify = await readText(dir, fileName, { retryMissing: true });
     const verifyOk = verify === serialized;
     if (!verifyOk) {
-      const bak = await readText(dir, `${fileName}.bak`);
-      if (parseValidJson(bak) !== null) {
-        await writeText(dir, fileName, bak as string);
+      if (await rollbackFromBak(dir, fileName)) {
         await removeQuietly(dir, tmpName);
         throw new Error(
           `Safe-write validation failed for ${fileName}; rolled back to previous version.`
@@ -687,33 +1007,40 @@ export async function safeWriteJsonText(
 
   await withWorkspaceWriteAccess(dir, () =>
     withResourceLock(directoryResourceKey(dir, fileName), async () => {
-    const current = await readText(dir, fileName);
-    if (parseValidJson(current) !== null) {
-      await writeText(dir, `${fileName}.bak`, current as string);
+    const currentRead = await readTextTolerant(dir, fileName);
+    const current = currentRead.kind === "text" ? currentRead.text : null;
+    const hasCurrent =
+      parseValidJson(current) !== null ||
+      (currentRead.kind === "oversized" &&
+        (await readOversizedEnvelopeMetadata(dir, fileName)) !== null);
+    if (hasCurrent) {
+      await snapshotToBak(dir, fileName, current);
     }
 
     if (normalized === null) {
       // Streamed path: re-normalize the restore payload verbatim (it is already
       // a valid envelope or bare JSON) without ever building one giant string.
-      const stagedInfo = await streamValueToFile(dir, tmpName, parsed);
-      const stagedText = await readVerifiedStreamedFile(dir, tmpName, stagedInfo);
-      if (stagedText === null) {
+      let stagedInfo: StreamedFileInfo;
+      try {
+        stagedInfo = await streamValueToFile(dir, tmpName, parsed);
+      } catch (error) {
+        await removeQuietly(dir, tmpName); // never leave a partial .tmp behind
+        throw error;
+      }
+      if (!(await verifyStreamedFile(dir, tmpName, stagedInfo))) {
         await removeQuietly(dir, tmpName);
         throw new Error(`Safe-write staging failed for ${fileName}.`);
       }
 
       // Phase 1.4: commit the verified staged bytes instead of serializing the
       // restore payload a second time.
-      const liveInfo = await writeVerifiedTextStreamed(dir, fileName, stagedText);
+      const liveInfo = await copyFileStreamed(dir, tmpName, fileName);
       if (
         liveInfo.fileHash !== stagedInfo.fileHash ||
         liveInfo.fileLength !== stagedInfo.fileLength ||
         !(await verifyStreamedFile(dir, fileName, stagedInfo))
       ) {
-        const bak = await readText(dir, `${fileName}.bak`);
-        if (parseValidJson(bak) !== null) {
-          await writeText(dir, fileName, bak as string);
-        }
+        await rollbackFromBak(dir, fileName);
         await removeQuietly(dir, tmpName);
         throw new Error(`Safe-write validation failed for ${fileName}.`);
       }
@@ -734,10 +1061,7 @@ export async function safeWriteJsonText(
     const verify = await readText(dir, fileName, { retryMissing: true });
     const verifyOk = verify === normalized;
     if (!verifyOk) {
-      const bak = await readText(dir, `${fileName}.bak`);
-      if (parseValidJson(bak) !== null) {
-        await writeText(dir, fileName, bak as string);
-      }
+      await rollbackFromBak(dir, fileName);
       await removeQuietly(dir, tmpName);
       throw new Error(`Safe-write validation failed for ${fileName}.`);
     }
@@ -768,9 +1092,21 @@ export async function readEnvelopeRevision(
     }
     return null;
   };
-  const live = extract(parseValidJson(await readText(dir, fileName)));
+  // Oversize-tolerant: a file past the engine's max string length cannot be
+  // read (let alone parsed) as one string, but its envelope header still sits
+  // in a bounded tail window — and the whole point of this function is to
+  // return a revision without materializing the data.
+  const readOne = async (name: string): Promise<number | null> => {
+    const read = await readTextTolerant(dir, name);
+    if (read.kind === "text") return extract(parseValidJson(read.text));
+    if (read.kind === "oversized") {
+      return (await readOversizedEnvelopeMetadata(dir, name))?.revision ?? null;
+    }
+    return null;
+  };
+  const live = await readOne(fileName);
   if (live !== null) return live;
-  return extract(parseValidJson(await readText(dir, `${fileName}.bak`)));
+  return readOne(`${fileName}.bak`);
 }
 
 export type SafeReadJsonOptions = {
