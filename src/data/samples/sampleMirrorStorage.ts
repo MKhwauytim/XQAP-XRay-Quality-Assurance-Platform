@@ -1,47 +1,111 @@
 import type { DistributionCurrentData, DistributionEntry } from "../distribution/distributionTypes";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
-import {
-  getSampleEmployeeDir,
-  getSampleMainDir,
-  safeWorkspaceFilePart,
-} from "../workspace/workspacePaths";
+import { getSampleEmployeeDir, safeWorkspaceFilePart } from "../workspace/workspacePaths";
+import { listDirectoryEntries } from "../storage/directoryScan";
+import { mapWithConcurrency } from "../storage/concurrency";
+import { logError } from "../storage/errorLogger";
 import { listMonthFolders } from "../population/populationStorage";
 import { isMonthClosed } from "../population/monthLock";
 import { loadEmployeeAnswers } from "../answers/answerStorage";
 
-export type MainSamplesFile = {
+/**
+ * Frozen quota snapshot carried inside the per-employee mirror so an employee
+ * view can render "X of Y per day" from the mirror ALONE, without also loading
+ * the workspace-wide derived `distribution.current.json` (Design B).
+ *
+ * Copied verbatim from `current.quotas[username]` at projection time — it is a
+ * derived value like everything else in this file, not an independent record.
+ * OPTIONAL by contract: mirrors written before this field existed have no
+ * `quota`, and readers MUST fall back to the derived file in that case.
+ */
+export type EmployeeMirrorQuota = {
+  dailyQuota: number;
+  daysRemainingAtAssignment: number;
+  sampleCount: number;
+};
+
+export type EmployeeSamplesFile = {
   monthFolderName: string;
+  username: string;
   updatedAt: string;
   sourceLogRevision: number;
+  /** Absent on mirrors written before the quota field existed — see EmployeeMirrorQuota. */
+  quota?: EmployeeMirrorQuota;
   entries: DistributionEntry[];
 };
 
-export type EmployeeSamplesFile = MainSamplesFile & {
-  username: string;
-};
+const EMPLOYEE_MIRROR_SUFFIX = ".samples.json";
 
-const MAIN_SAMPLES_FILE = "main.samples.json";
+/** Bounded fan-out budget for the per-employee mirror writes. Each unit of
+ *  work is a safeReadJson-free write plus its read-back verify; unbounded
+ *  `Promise.all` over every assignee in a month was previously issuing an
+ *  unbounded number of concurrent File System Access operations. */
+const MIRROR_WRITE_CONCURRENCY = 8;
 
 function employeeSamplesFileName(username: string): string {
-  return `${safeWorkspaceFilePart(username)}.samples.json`;
+  return `${safeWorkspaceFilePart(username)}${EMPLOYEE_MIRROR_SUFFIX}`;
+}
+
+type ExistingMirror = { username: string; sourceLogRevision: number | null };
+
+/**
+ * Read every per-employee mirror already on disk for this month, keyed by FILE
+ * NAME (not username — two usernames can sanitize to the same file name, and
+ * the monotonic guard below is inherently per-file).
+ *
+ * Needed because the projection is a union write: an employee reassigned down
+ * to zero entries does not appear in `current.entries` at all, so the only way
+ * to learn they still hold a mirror that must be emptied is to look at the
+ * directory (bug F8).
+ */
+async function readExistingMirrors(
+  employeesDir: DirectoryHandleLike
+): Promise<Map<string, ExistingMirror>> {
+  const byFileName = new Map<string, ExistingMirror>();
+  let names: string[];
+  try {
+    names = (await listDirectoryEntries(employeesDir))
+      .filter((entry) => entry.kind === "file" && entry.name.endsWith(EMPLOYEE_MIRROR_SUFFIX))
+      .map((entry) => entry.name);
+  } catch (error) {
+    // A listing failure degrades this to the pre-union behaviour (employees in
+    // `current.entries` are still written) rather than failing the whole sync.
+    logError("sampleMirror:list-existing", error);
+    return byFileName;
+  }
+  const read = await mapWithConcurrency(names, MIRROR_WRITE_CONCURRENCY, async (fileName) => {
+    const result = await safeReadJson<Partial<EmployeeSamplesFile>>(employeesDir, fileName);
+    if (!result.ok || typeof result.value.username !== "string") {
+      // Corrupt/unreadable: we cannot recover the username, so it cannot join
+      // the union. It is already unreadable to the employee too.
+      return null;
+    }
+    return {
+      fileName,
+      username: result.value.username,
+      sourceLogRevision:
+        typeof result.value.sourceLogRevision === "number" ? result.value.sourceLogRevision : null,
+    };
+  });
+  for (const entry of read) {
+    if (entry) byFileName.set(entry.fileName, { username: entry.username, sourceLogRevision: entry.sourceLogRevision });
+  }
+  return byFileName;
 }
 
 /**
- * Read the `sourceLogRevision` already persisted in a mirror file, or null when
- * the file is absent/corrupt. Used by the monotonic write guard below.
+ * Regenerate the per-employee sample mirrors for a month.
+ *
+ * The mirror is a DERIVED PROJECTION, rewritten whole and never edited in
+ * place. The commit point is the distribution event log, so a crash partway
+ * through this fan-out leaves a stale cache — never wrong history.
+ *
+ * Union write (F8): the target set is (employees with a mirror on disk) ∪
+ * (employees present in `current.entries`). An employee who lost every entry
+ * gets an explicit empty-entries file, instead of silently keeping work they
+ * no longer own.
  */
-async function readMirrorRevision(
-  dir: DirectoryHandleLike,
-  fileName: string
-): Promise<number | null> {
-  const result = await safeReadJson<{ sourceLogRevision?: number }>(dir, fileName);
-  if (result.ok && typeof result.value.sourceLogRevision === "number") {
-    return result.value.sourceLogRevision;
-  }
-  return null;
-}
-
 export async function syncSampleMirrors(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
@@ -49,24 +113,7 @@ export async function syncSampleMirrors(
 ): Promise<void> {
   const updatedAt = new Date().toISOString();
   const sourceLogRevision = current.logRevision ?? 0;
-  const mainDir = await getSampleMainDir(directoryHandle, monthFolderName, true);
   const employeesDir = await getSampleEmployeeDir(directoryHandle, monthFolderName, true);
-
-  const mainFile: MainSamplesFile = {
-    monthFolderName,
-    updatedAt,
-    sourceLogRevision,
-    entries: current.entries,
-  };
-
-  // Monotonic guard: never let an older derivation (lower sourceLogRevision)
-  // clobber a mirror already written from a newer log revision. Two machines
-  // can derive concurrently; without this an out-of-order write would resurrect
-  // stale entries for readers of the mirror.
-  const existingMainRevision = await readMirrorRevision(mainDir, MAIN_SAMPLES_FILE);
-  if (existingMainRevision === null || existingMainRevision < sourceLogRevision) {
-    await safeWriteJson(mainDir, MAIN_SAMPLES_FILE, mainFile);
-  }
 
   const entriesByEmployee = new Map<string, DistributionEntry[]>();
   for (const entry of current.entries) {
@@ -75,21 +122,42 @@ export async function syncSampleMirrors(
     entriesByEmployee.set(entry.assignedTo, list);
   }
 
-  await Promise.all(
-    [...entriesByEmployee.entries()].map(async ([username, entries]) => {
+  const existingMirrors = await readExistingMirrors(employeesDir);
+  for (const { username } of existingMirrors.values()) {
+    if (!entriesByEmployee.has(username)) entriesByEmployee.set(username, []);
+  }
+
+  await mapWithConcurrency(
+    [...entriesByEmployee.entries()],
+    MIRROR_WRITE_CONCURRENCY,
+    async ([username, entries]) => {
       const fileName = employeeSamplesFileName(username);
-      const existingRevision = await readMirrorRevision(employeesDir, fileName);
+      // Monotonic guard: never let an older derivation (lower
+      // sourceLogRevision) clobber a mirror already written from a newer log
+      // revision. Two machines can derive concurrently; without this an
+      // out-of-order write would resurrect stale entries for readers.
+      const existingRevision = existingMirrors.get(fileName)?.sourceLogRevision ?? null;
       if (existingRevision !== null && existingRevision >= sourceLogRevision) {
         return; // a newer (or equal) derivation already wrote this mirror
       }
+      const quota = current.quotas?.[username];
       await safeWriteJson<EmployeeSamplesFile>(employeesDir, fileName, {
         monthFolderName,
         username,
         updatedAt,
         sourceLogRevision,
+        ...(quota
+          ? {
+              quota: {
+                dailyQuota: quota.dailyQuota,
+                daysRemainingAtAssignment: quota.daysRemainingAtAssignment,
+                sampleCount: quota.sampleCount,
+              },
+            }
+          : {}),
         entries,
       });
-    })
+    }
   );
 }
 

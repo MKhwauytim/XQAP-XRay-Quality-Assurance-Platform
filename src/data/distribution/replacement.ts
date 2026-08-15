@@ -24,6 +24,7 @@ import { createRng, drawWithoutReplacement, hashSeedString, type Rng } from "../
 import { appendSampleRow } from "../sampling/sampleStorage";
 import {
   appendDistributionEvents,
+  refreshDistributionCacheAfterWrite,
 } from "./distributionStorage";
 import {
   buildAssignEvent,
@@ -237,6 +238,18 @@ export async function executeReplacement(params: {
       partialSampleWrite: true,
     };
   }
+
+  // A6b/F20: refresh the derived cache + every employee sample mirror after the
+  // append, now that pure reads no longer persist them. Without this the
+  // replacement flow — the one flow that actually MOVES a row between rows/
+  // employees — left `distribution.current.json` and every `{username}.samples.json`
+  // stale until the next 45s sync tick. Swallows its own failure by contract;
+  // the sample master read back above is the freshest row set available here.
+  await refreshDistributionCacheAfterWrite(
+    directoryHandle,
+    monthFolderName,
+    sampleResult.data.rows
+  );
 
   return { ok: true, updatedSample: sampleResult.data };
 }

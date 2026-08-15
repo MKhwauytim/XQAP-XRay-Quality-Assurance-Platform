@@ -45,7 +45,7 @@ describe("bootProgress", () => {
     act(() => {
       registerBootSources([
         { key: "population_summary", labelEn: "population.final.json", labelAr: "بيانات المجتمع المعالجة" },
-        { key: "employee_samples", labelEn: "main.samples.json", labelAr: "عينات الموظفين" },
+        { key: "employee_samples", labelEn: "{username}.samples.json", labelAr: "عينات الموظفين" },
       ]);
     });
 

@@ -10,22 +10,31 @@ import type {
 } from "../distribution/distributionTypes";
 import type { EmployeeMirrorRowStub } from "../population/populationTypes";
 import { syncSampleMirrors } from "./sampleMirrorStorage";
-import type { EmployeeSamplesFile, MainSamplesFile } from "./sampleMirrorStorage";
+import type { EmployeeSamplesFile } from "./sampleMirrorStorage";
 
 /**
  * GOLDEN MASTER (Slice 0) — the `syncSampleMirrors` projection.
  *
  * `syncSampleMirrors` is the fan-out that turns one derived
- * `DistributionCurrentData` into `main.samples.json` plus one
- * `{username}.samples.json` per assignee. Employees read ONLY their mirror, so
- * the exact projected content — which entries land in which file, in what
- * order, with what surrounding fields — is the contract.
+ * `DistributionCurrentData` into one `{username}.samples.json` per assignee.
+ * Employees read ONLY their mirror, so the exact projected content — which
+ * entries land in which file, in what order, with what surrounding fields —
+ * is the contract.
  *
  * `updatedAt` is excluded from every assertion: it is `new Date().toISOString()`
  * and is the only non-deterministic field written.
  *
- * Values are recorded as OBSERVED. Where a value looks wrong, the comment says
- * so and the value is still the observed one.
+ * RE-RECORDED (Design B, items 2.1/2.2). Three deliberate projection changes
+ * versus the previous master, each asserted below:
+ *   1. `main.samples.json` is no longer written at all — it had zero readers
+ *      and cost a whole-month-sized file write on every distribution save.
+ *   2. The per-employee fan-out is now a UNION write over (mirrors already on
+ *      disk ∪ employees in `current.entries`), so an employee reassigned down
+ *      to zero entries gets an explicit empty-entries file instead of keeping a
+ *      stale one (bug F8).
+ *   3. Each mirror carries a frozen `quota` snapshot when
+ *      `current.quotas[username]` exists, so a reader needs no second file. It
+ *      is ABSENT when the derived state carries no quota — dual-read contract.
  */
 
 const MONTH = "5-May-2026";
@@ -70,7 +79,8 @@ function entry(
 
 function current(
   entries: DistributionEntry[],
-  logRevision?: number
+  logRevision?: number,
+  quotas?: DistributionCurrentData["quotas"]
 ): DistributionCurrentData {
   return {
     monthFolderName: MONTH,
@@ -81,15 +91,9 @@ function current(
     totalCompleted: entries.filter((e) => e.status === "completed").length,
     totalReplaced: entries.filter((e) => e.status === "replaced").length,
     totalPending: entries.filter((e) => e.status === "pending").length,
+    quotas,
     entries,
   };
-}
-
-async function readMain(root: DirectoryHandleLike): Promise<MainSamplesFile> {
-  const dir = await getSampleMainDir(root, MONTH, false);
-  const result = await safeReadJson<MainSamplesFile>(dir, "main.samples.json");
-  if (!result.ok) throw new Error("main.samples.json missing");
-  return result.value;
 }
 
 async function readEmployee(
@@ -114,11 +118,27 @@ async function listEmployeeFiles(root: DirectoryHandleLike): Promise<string[]> {
   return names.sort();
 }
 
+/** Every file name (any extension) directly under `1-main/`, or [] when absent. */
+async function listMainFiles(root: DirectoryHandleLike): Promise<string[]> {
+  let dir: DirectoryHandleLike;
+  try {
+    dir = await getSampleMainDir(root, MONTH, false);
+  } catch {
+    return [];
+  }
+  const iterable = (
+    dir as unknown as { values: () => AsyncIterable<{ name: string; kind: string }> }
+  ).values();
+  const names: string[] = [];
+  for await (const handle of iterable) names.push(handle.name);
+  return names.sort();
+}
+
 /**
  * Drops `updatedAt` — the only non-deterministic field written by
  * syncSampleMirrors (`new Date().toISOString()`).
  */
-function omitUpdatedAt<T extends MainSamplesFile>(file: T): Omit<T, "updatedAt"> {
+function omitUpdatedAt<T extends EmployeeSamplesFile>(file: T): Omit<T, "updatedAt"> {
   const copy: Partial<T> = { ...file };
   delete copy.updatedAt;
   return copy as Omit<T, "updatedAt">;
@@ -134,19 +154,14 @@ describe("syncSampleMirrors — golden master projection", () => {
     entry("img-5", "emp-a", "replaced"),
   ];
 
-  it("pins the main.samples.json projection", async () => {
+  it("CHANGED (2.1): no main.samples.json is written any more", async () => {
     const root = createMemoryDirectory("root") as DirectoryHandleLike;
     await syncSampleMirrors(root, MONTH, current(entries, 7));
 
-    const main = omitUpdatedAt(await readMain(root));
-    expect(main).toEqual({
-      monthFolderName: MONTH,
-      sourceLogRevision: 7,
-      // Every entry, in the exact order of `current.entries` — no filtering, no
-      // sorting, and no summary counters are carried across.
-      entries,
-    });
-    expect(Object.keys(main)).toEqual(["monthFolderName", "sourceLogRevision", "entries"]);
+    // Previously this projection wrote a whole-month `main.samples.json`
+    // mirror with zero readers. syncSampleMirrors no longer touches `1-main/`
+    // at all (it does not even create the directory).
+    expect(await listMainFiles(root)).toEqual([]);
   });
 
   it("pins the per-employee split: only that employee's entries, in source order", async () => {
@@ -162,6 +177,13 @@ describe("syncSampleMirrors — golden master projection", () => {
       sourceLogRevision: 7,
       entries: [entries[0], entries[2], entries[4]],
     });
+    // No `quota` key at all when the derived state carries no quotas.
+    expect(Object.keys(empA).sort()).toEqual([
+      "entries",
+      "monthFolderName",
+      "sourceLogRevision",
+      "username",
+    ]);
 
     const empB = omitUpdatedAt((await readEmployee(root, "emp-b.samples.json"))!);
     expect(empB).toEqual({
@@ -172,58 +194,97 @@ describe("syncSampleMirrors — golden master projection", () => {
     });
   });
 
+  it("CHANGED (2.2c): pins the frozen quota snapshot copied into the mirror", async () => {
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    await syncSampleMirrors(
+      root,
+      MONTH,
+      current([entry("img-1", "emp-a")], 3, {
+        "emp-a": {
+          username: "emp-a",
+          sampleCount: 12,
+          dailyQuota: 4,
+          daysRemainingAtAssignment: 3,
+          assignedAt: "2026-05-02T00:00:00.000Z",
+        },
+      })
+    );
+
+    const empA = omitUpdatedAt((await readEmployee(root, "emp-a.samples.json"))!);
+    // Exactly three fields are copied — `username` is redundant with the file's
+    // own `username`, and `assignedAt` is not needed to render a quota.
+    expect(empA.quota).toEqual({
+      dailyQuota: 4,
+      daysRemainingAtAssignment: 3,
+      sampleCount: 12,
+    });
+  });
+
+  it("CHANGED (2.2c): an employee with no quota entry gets NO quota key (dual-read)", async () => {
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    await syncSampleMirrors(
+      root,
+      MONTH,
+      current([entry("img-1", "emp-a"), entry("img-2", "emp-b")], 3, {
+        "emp-a": {
+          username: "emp-a",
+          sampleCount: 1,
+          dailyQuota: 1,
+          daysRemainingAtAssignment: 1,
+          assignedAt: "2026-05-02T00:00:00.000Z",
+        },
+      })
+    );
+
+    expect((await readEmployee(root, "emp-a.samples.json"))!.quota).toBeDefined();
+    expect((await readEmployee(root, "emp-b.samples.json"))!.quota).toBeUndefined();
+  });
+
   it("pins the missing-logRevision default of 0", async () => {
     const root = createMemoryDirectory("root") as DirectoryHandleLike;
     await syncSampleMirrors(root, MONTH, current([entry("img-1", "emp-a")]));
-    expect((await readMain(root)).sourceLogRevision).toBe(0);
     expect((await readEmployee(root, "emp-a.samples.json"))!.sourceLogRevision).toBe(0);
   });
 
-  it("SURPRISE: the main and employee monotonic guards use DIFFERENT comparisons at equal revisions", async () => {
+  it("pins the employee monotonic guard: an EQUAL revision is skipped", async () => {
     const root = createMemoryDirectory("root") as DirectoryHandleLike;
     await syncSampleMirrors(root, MONTH, current([entry("img-1", "emp-a")], 5));
 
     // Same revision, different content.
     await syncSampleMirrors(root, MONTH, current([entry("img-1", "emp-a", "completed")], 5));
 
-    // main: `existing < incoming` → an EQUAL revision is skipped.
-    expect((await readMain(root)).entries[0].status).toBe("pending");
-    // employee: `existing >= incoming` → return … also skipped. Same outcome
-    // here, but the two guards are written as each other's inverse rather than
-    // as one shared predicate, so they only agree by coincidence.
+    // `existing >= incoming` → skipped.
     expect((await readEmployee(root, "emp-a.samples.json"))!.entries[0].status).toBe("pending");
   });
 
-  it("pins that a newer revision overwrites both files", async () => {
+  it("pins that a newer revision overwrites the mirror", async () => {
     const root = createMemoryDirectory("root") as DirectoryHandleLike;
     await syncSampleMirrors(root, MONTH, current([entry("img-1", "emp-a")], 5));
     await syncSampleMirrors(root, MONTH, current([entry("img-1", "emp-a", "completed")], 6));
-    expect((await readMain(root)).entries[0].status).toBe("completed");
     expect((await readEmployee(root, "emp-a.samples.json"))!.entries[0].status).toBe("completed");
   });
 
-  it("SURPRISE: an employee who loses every entry keeps a STALE mirror file", async () => {
+  it("FIXED (F8): an employee who loses every entry gets an EMPTY mirror, not a stale one", async () => {
     const root = createMemoryDirectory("root") as DirectoryHandleLike;
     await syncSampleMirrors(root, MONTH, current([entry("img-1", "emp-a")], 5));
 
-    // Revision 6 reassigns everything away from emp-a. `entriesByEmployee` is
-    // built only from entries that exist, so emp-a is simply not visited — its
-    // mirror is never rewritten to an empty list and never deleted. The
-    // employee keeps seeing an assignment they no longer own.
+    // Revision 6 reassigns everything away from emp-a. The union write visits
+    // emp-a because a mirror for them already exists on disk, even though they
+    // appear nowhere in `current.entries`.
     await syncSampleMirrors(root, MONTH, current([entry("img-1", "emp-b")], 6));
 
-    const stale = (await readEmployee(root, "emp-a.samples.json"))!;
-    expect(stale.sourceLogRevision).toBe(5);
-    expect(stale.entries.map((e) => e.xrayImageId)).toEqual(["img-1"]);
-    // The main mirror, in contrast, is fully replaced.
-    expect((await readMain(root)).entries[0].assignedTo).toBe("emp-b");
+    const empA = (await readEmployee(root, "emp-a.samples.json"))!;
+    expect(empA.sourceLogRevision).toBe(6);
+    expect(empA.entries).toEqual([]);
+    // The file is emptied, never deleted — the mirror stays a stable read target.
+    expect(await listEmployeeFiles(root)).toEqual(["emp-a.samples.json", "emp-b.samples.json"]);
   });
 
-  it("pins the empty-distribution case: main written, no employee files", async () => {
+  it("pins the empty-distribution case: no employee files", async () => {
     const root = createMemoryDirectory("root") as DirectoryHandleLike;
     await syncSampleMirrors(root, MONTH, current([], 1));
-    expect((await readMain(root)).entries).toEqual([]);
     expect(await listEmployeeFiles(root)).toEqual([]);
+    expect(await listMainFiles(root)).toEqual([]);
   });
 
   it("pins the employee file-name sanitization", async () => {
@@ -251,8 +312,8 @@ describe("syncSampleMirrors — golden master projection", () => {
       MONTH,
       current([entry("img-1", "a/b"), entry("img-2", "a\\b")], 1)
     );
-    // Both map to "a_b.samples.json"; the writes race through Promise.all and
-    // one employee's mirror is overwritten by the other's. Only one file exists.
+    // Both map to "a_b.samples.json"; one employee's mirror is overwritten by
+    // the other's. Only one file exists. Unchanged by the union write.
     expect(await listEmployeeFiles(root)).toEqual(["a_b.samples.json"]);
     const survivor = (await readEmployee(root, "a_b.samples.json"))!;
     expect(survivor.entries).toHaveLength(1);
