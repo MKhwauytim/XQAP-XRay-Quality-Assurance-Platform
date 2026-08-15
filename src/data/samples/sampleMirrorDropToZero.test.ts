@@ -48,10 +48,14 @@ import { loadEmployeeSampleMirror } from "./sampleMirrorStorage";
  *   4. replacement          (executeReplacement) — this one did not refresh at
  *                            all before bug F20 was fixed.
  *
- * Flows 2–4 refresh through `refreshDistributionCacheAfterWrite`, whose inner
- * `saveDistributionCurrent` is deliberately fire-and-forget (see
- * distributionStorage.ts). The guarantee is therefore eventual, not
- * synchronous, so the assertions poll with `expectEmptyMirrorEventually`.
+ * Flows 2–4 refresh through `refreshDistributionCacheAfterWrite`, which as of
+ * Design B step 1 AWAITS its inner `saveDistributionCurrent`
+ * (`awaitCachePersist`, see distributionStorage.ts). The guarantee is
+ * therefore SYNCHRONOUS: when the flow's own promise resolves, the mirror on
+ * disk is already correct. These assertions used to poll (50 × 5 ms) because
+ * the write was fire-and-forget; they now assert ONCE, immediately, which is
+ * what makes them a real guard on that synchronicity — restore the
+ * fire-and-forget write and every one of them fails.
  */
 
 const MONTH = "5-May-2026";
@@ -150,30 +154,19 @@ async function seed(
 }
 
 /**
- * Flows 2–4 refresh mirrors through a fire-and-forget inner write, so poll
- * rather than assert once. Fails with the observed entry ids on timeout.
+ * Asserted ONCE, with no polling and no extra tick: the write flow's promise
+ * has already resolved by the time this runs, and the mirror refresh it drives
+ * is synchronous (see this file's header). The file must EXIST and be empty —
+ * not be deleted, and not be absent.
  */
-async function expectEmptyMirrorEventually(
+async function expectEmptyMirrorNow(
   root: DirectoryHandleLike,
   username: string
 ): Promise<void> {
-  let observed: string[] = ["<mirror missing>"];
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    const mirror = await loadEmployeeSampleMirror(root, MONTH, username);
-    if (mirror) {
-      observed = mirror.entries.map((e) => e.xrayImageId);
-      if (observed.length === 0) {
-        // The file must EXIST and be empty — not be deleted, and not be absent.
-        expect(mirror.username).toBe(username);
-        expect(mirror.entries).toEqual([]);
-        return;
-      }
-    }
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  throw new Error(
-    `mirror for ${username} never dropped to zero entries; still holds: ${observed.join(", ")}`
-  );
+  const mirror = await loadEmployeeSampleMirror(root, MONTH, username);
+  expect(mirror, `mirror for ${username} is missing entirely`).not.toBeNull();
+  expect(mirror!.username).toBe(username);
+  expect(mirror!.entries.map((e) => e.xrayImageId)).toEqual([]);
 }
 
 describe("per-employee mirror drop-to-zero contract", () => {
@@ -196,7 +189,7 @@ describe("per-employee mirror drop-to-zero contract", () => {
     ]);
     await persistDerivedDistribution(root, rows);
 
-    await expectEmptyMirrorEventually(root, GONE);
+    await expectEmptyMirrorNow(root, GONE);
     const keep = await loadEmployeeSampleMirror(root, MONTH, KEEP);
     expect(keep?.entries.map((e) => e.xrayImageId).sort()).toEqual(["A1", "A2"]);
   });
@@ -241,7 +234,7 @@ describe("per-employee mirror drop-to-zero contract", () => {
     });
     expect(result).toEqual({ ok: true });
 
-    await expectEmptyMirrorEventually(root, GONE);
+    await expectEmptyMirrorNow(root, GONE);
   });
 
   it("flow 3 — referral approval: the approved transfer empties the sender's mirror", async () => {
@@ -272,7 +265,7 @@ describe("per-employee mirror drop-to-zero contract", () => {
     });
     expect(result).toEqual({ ok: true, alreadyApplied: false });
 
-    await expectEmptyMirrorEventually(root, GONE);
+    await expectEmptyMirrorNow(root, GONE);
   });
 
   it("flow 4 — replacement: the replacement refresh empties a mirror that dropped to zero (F20)", async () => {
@@ -306,6 +299,6 @@ describe("per-employee mirror drop-to-zero contract", () => {
     });
     expect(result.ok).toBe(true);
 
-    await expectEmptyMirrorEventually(root, GONE);
+    await expectEmptyMirrorNow(root, GONE);
   });
 });

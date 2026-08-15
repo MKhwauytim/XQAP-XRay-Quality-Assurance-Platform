@@ -568,7 +568,8 @@ async function tryResumeFromCheckpoint(
   cached: DistributionCurrentData,
   checkpoint: DistributionFoldCheckpoint,
   sampleRows: PreparedPopulationRow[],
-  persistCache: boolean
+  persistCache: boolean,
+  awaitCachePersist: boolean
 ): Promise<DistributionCurrentData | null> {
   const delta = await readNewEventsSinceCheckpoint(directoryHandle, monthFolderName, checkpoint);
   if (!delta) return cached; // no distribution directory at all — cache stands as-is.
@@ -624,10 +625,15 @@ async function tryResumeFromCheckpoint(
   // default). Read-only callers (loadOrDeriveDistributionCurrentForRead, and
   // any caller that explicitly passes { persistCache: false }) never reach
   // this line — see the persistCache guard around this call site.
+  // Design B: `awaitCachePersist` is set ONLY by
+  // `refreshDistributionCacheAfterWrite` (see its docblock). It does not change
+  // *what* is written, only whether this function returns before or after the
+  // write settles — so no caller that does not opt in becomes newly blocking.
   if (persistCache) {
-    void saveDistributionCurrent(directoryHandle, monthFolderName, withRevision).catch(
+    const write = saveDistributionCurrent(directoryHandle, monthFolderName, withRevision).catch(
       logRejection("distribution:cache-write")
     );
+    if (awaitCachePersist) await write;
   }
   return withRevision;
 }
@@ -644,6 +650,30 @@ export type LoadOrDeriveDistributionCurrentOptions = {
    * this function's own persist — see that helper's doc comment (A6b, F18).
    */
   persistCache?: boolean;
+  /**
+   * Whether this call must not resolve until the cache + per-employee sample
+   * mirror writes have actually settled. Defaults to `false`, i.e. the
+   * historical fire-and-forget behaviour, so no existing caller becomes newly
+   * blocking. Only meaningful together with `persistCache: true`.
+   *
+   * Design B (step 1): `refreshDistributionCacheAfterWrite` opts in. The
+   * mirror `{username}.samples.json` is about to become the PRIMARY read for
+   * an employee's own queue, so "eventually correct" is not good enough for
+   * the four write flows that refresh through that helper — a view that
+   * re-reads immediately after a reopen / referral approval / replacement
+   * would otherwise paint the pre-refresh mirror.
+   *
+   * Awaiting is safe here specifically because `saveDistributionCurrent` is a
+   * leaf: it takes no lock this call already holds (its `safeWriteJson` /
+   * `syncSampleMirrors` locks are per-file and per-mirror, and every caller of
+   * `refreshDistributionCacheAfterWrite` has already finished its own
+   * `appendDistributionEvents` casLoop before calling it), and it never
+   * re-enters `loadOrDeriveDistributionCurrent`. The original fire-and-forget
+   * rationale was cost, not re-entrancy — see the measured note at the call
+   * sites — and cost is exactly what a write flow can afford to pay, unlike a
+   * read.
+   */
+  awaitCachePersist?: boolean;
 };
 
 /** Same key shape the dedupeInFlight callers below use (workspaceScopeId |
@@ -753,6 +783,7 @@ export async function loadOrDeriveDistributionCurrent(
   opts?: LoadOrDeriveDistributionCurrentOptions
 ): Promise<DistributionCurrentData | null> {
   const persistCache = opts?.persistCache ?? true;
+  const awaitCachePersist = opts?.awaitCachePersist ?? false;
   try {
     if (sampleRows.length === 0) {
       const stamp = await readDistributionLogStamp(directoryHandle, monthFolderName);
@@ -776,7 +807,7 @@ export async function loadOrDeriveDistributionCurrent(
 
     if (canResume) {
       const resumed = await tryResumeFromCheckpoint(
-        directoryHandle, monthFolderName, cached, checkpoint!, sampleRows, persistCache
+        directoryHandle, monthFolderName, cached, checkpoint!, sampleRows, persistCache, awaitCachePersist
       );
       if (resumed) {
         setDeriveMemo(memoKey, resumed);
@@ -847,10 +878,13 @@ export async function loadOrDeriveDistributionCurrent(
     // measurement (see the sibling comment above tryResumeFromCheckpoint's
     // save for the full note). The cache and checkpoint remain an
     // optimization, never a correctness input.
+    // `awaitCachePersist` (Design B, step 1): only the write-path helper opts
+    // in — see LoadOrDeriveDistributionCurrentOptions. Same write either way.
     if (persistCache) {
-      void saveDistributionCurrent(directoryHandle, monthFolderName, withRevision).catch(
+      const write = saveDistributionCurrent(directoryHandle, monthFolderName, withRevision).catch(
         logRejection("distribution:cache-write")
       );
+      if (awaitCachePersist) await write;
     }
 
     return withRevision;
@@ -880,6 +914,24 @@ export async function loadOrDeriveDistributionCurrent(
  * legitimately rejects it today via `ensureMonthWritable` inside
  * `saveDistributionCurrent` (ensureMonthWritable → MonthClosedError) — that
  * is expected, not a bug this helper needs to work around.
+ *
+ * SYNCHRONOUS BY CONTRACT (Design B, step 1). This helper awaits the cache +
+ * mirror write (`awaitCachePersist`), so when it resolves every
+ * `{username}.samples.json` for this month has been rewritten — or the failure
+ * has been logged. Previously the inner `saveDistributionCurrent` was
+ * fire-and-forget on both the checkpoint-resume and full-refold paths, making
+ * the guarantee through reopen / referral approval / replacement *eventual*:
+ * a view re-reading immediately after one of those flows could paint the
+ * pre-refresh mirror. That is not tolerable now that the mirror is the
+ * employee's primary read. Only this helper opts in; every read path keeps the
+ * old non-blocking behaviour.
+ *
+ * One residual gap, deliberately not closed here: if a concurrent writer has
+ * ALREADY persisted a cache carrying this exact log revision, the inner derive
+ * returns that cached snapshot without re-writing, so this helper can resolve
+ * while the other writer's own (fire-and-forget) mirror write is still in
+ * flight. Cross-machine write/write ordering needs a backend, which this app
+ * does not have.
  */
 export async function refreshDistributionCacheAfterWrite(
   directoryHandle: DirectoryHandleLike,
@@ -887,7 +939,10 @@ export async function refreshDistributionCacheAfterWrite(
   sampleRows: PreparedPopulationRow[]
 ): Promise<void> {
   try {
-    await loadOrDeriveDistributionCurrent(directoryHandle, monthFolderName, sampleRows, { persistCache: true });
+    await loadOrDeriveDistributionCurrent(directoryHandle, monthFolderName, sampleRows, {
+      persistCache: true,
+      awaitCachePersist: true,
+    });
   } catch (error) {
     logError("distribution:refresh-after-write", error);
   }

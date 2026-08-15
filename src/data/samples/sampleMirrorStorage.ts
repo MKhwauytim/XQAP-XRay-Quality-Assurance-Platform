@@ -37,6 +37,86 @@ export type EmployeeSamplesFile = {
 
 const EMPLOYEE_MIRROR_SUFFIX = ".samples.json";
 
+/**
+ * Derived side-index over the mirrors in `2-samples/{month}/2-employees/`
+ * (Design B, step 2). One read of this file replaces N full mirror parses for
+ * any consumer that only needs "which employee is at which source revision" —
+ * the monotonic guard in `syncSampleMirrors` below, and the sync tick's change
+ * probe.
+ *
+ * It is NEVER authoritative. Every consumer dual-reads: an absent, malformed,
+ * or listing-inconsistent index falls back to reading the mirrors themselves,
+ * which is always correct, only slower. Nothing is ever decided from the index
+ * that could not be decided from the files.
+ *
+ * The name deliberately does not end in `.samples.json` (nor `.answers.json`,
+ * which `answerStorage.ts` writes into this same folder), so no existing
+ * suffix-filtered listing picks it up as a mirror.
+ */
+const EMPLOYEE_MIRROR_INDEX_FILE = "_index.json";
+
+/**
+ * Keyed by FILE NAME, exactly like `readExistingMirrors` — two usernames can
+ * sanitize to the same file name (see the golden master's collision case), and
+ * the monotonic guard is inherently per-file. `username` is carried per entry
+ * so a consumer that wants the `username -> revision` view can build it without
+ * re-deriving the sanitization (and so a collision resolves the same way the
+ * files themselves resolve it: last writer wins).
+ */
+export type EmployeeMirrorIndexFile = {
+  monthFolderName: string;
+  updatedAt: string;
+  /**
+   * Non-null only while a projection is MID-FLIGHT. Set to the revision being
+   * written before the first mirror write, cleared after the last one.
+   *
+   * This is what keeps a crash mid-projection from turning the index into
+   * wrong data. Mirrors are written before the index is finalized, so a crash
+   * can leave a mirror at a revision the index has never heard of. A reader
+   * treats every entry's revision as `max(recorded, pendingRevision)` while
+   * this is set: over-stating the on-disk revision only makes the monotonic
+   * guard SKIP a write it could have made — and the derivation it would have
+   * skipped is by construction no newer than the interrupted one — whereas
+   * under-stating it would let an older derivation clobber a newer mirror.
+   */
+  pendingRevision: number | null;
+  mirrors: Record<string, { username: string; sourceLogRevision: number | null }>;
+};
+
+function isMirrorIndex(value: unknown): value is EmployeeMirrorIndexFile {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Partial<EmployeeMirrorIndexFile>;
+  if (typeof candidate.mirrors !== "object" || candidate.mirrors === null) return false;
+  if (candidate.pendingRevision !== null && typeof candidate.pendingRevision !== "number") return false;
+  return Object.values(candidate.mirrors).every(
+    (entry) =>
+      typeof entry === "object" &&
+      entry !== null &&
+      typeof (entry as { username?: unknown }).username === "string" &&
+      (typeof (entry as { sourceLogRevision?: unknown }).sourceLogRevision === "number" ||
+        (entry as { sourceLogRevision?: unknown }).sourceLogRevision === null)
+  );
+}
+
+/**
+ * Read the derived mirror index for a month, or `null` when it is absent or
+ * malformed. Exported for consumers that want the cheap `username -> revision`
+ * view (the sync tick's change probe); they MUST dual-read — see the type's
+ * docblock — and must treat `null` as "read the mirrors instead", never as
+ * "there are no mirrors".
+ */
+export async function readEmployeeMirrorIndex(
+  directoryHandle: DirectoryHandleLike,
+  monthFolderName: string
+): Promise<EmployeeMirrorIndexFile | null> {
+  try {
+    const dir = await getSampleEmployeeDir(directoryHandle, monthFolderName, false);
+    return await readMirrorIndexIn(dir);
+  } catch {
+    return null;
+  }
+}
+
 /** Bounded fan-out budget for the per-employee mirror writes. Each unit of
  *  work is a safeReadJson-free write plus its read-back verify; unbounded
  *  `Promise.all` over every assignee in a month was previously issuing an
@@ -48,6 +128,33 @@ function employeeSamplesFileName(username: string): string {
 }
 
 type ExistingMirror = { username: string; sourceLogRevision: number | null };
+
+/** Same read as `readEmployeeMirrorIndex`, against an already-resolved dir. */
+async function readMirrorIndexIn(
+  employeesDir: DirectoryHandleLike
+): Promise<EmployeeMirrorIndexFile | null> {
+  try {
+    const result = await safeReadJson<unknown>(employeesDir, EMPLOYEE_MIRROR_INDEX_FILE);
+    if (!result.ok || !isMirrorIndex(result.value)) return null;
+    return result.value;
+  } catch {
+    return null; // accelerator only — never fail a sync over it
+  }
+}
+
+/** The index may be used only when it describes exactly the mirror files that
+ *  are actually there — no missing entry, no entry for a vanished file. */
+function indexCoversListing(index: EmployeeMirrorIndexFile, fileNames: string[]): boolean {
+  const keys = Object.keys(index.mirrors);
+  if (keys.length !== fileNames.length) return false;
+  return fileNames.every((name) => index.mirrors[name] !== undefined);
+}
+
+function maxRevision(a: number | null, b: number | null): number | null {
+  if (a === null) return b;
+  if (b === null) return a;
+  return Math.max(a, b);
+}
 
 /**
  * Read every per-employee mirror already on disk for this month, keyed by FILE
@@ -74,6 +181,27 @@ async function readExistingMirrors(
     logError("sampleMirror:list-existing", error);
     return byFileName;
   }
+
+  // Fast path (step 2): one small read instead of N full mirror parses. Taken
+  // ONLY when the index covers exactly the mirrors the listing just reported —
+  // any file the index has not heard of, or any entry naming a file that is no
+  // longer there, means the index is stale and the mirrors are read instead.
+  // The listing is still needed either way; it is the index's own validator.
+  const index = await readMirrorIndexIn(employeesDir);
+  if (index && indexCoversListing(index, names)) {
+    for (const fileName of names) {
+      const entry = index.mirrors[fileName];
+      byFileName.set(fileName, {
+        username: entry.username,
+        // See EmployeeMirrorIndexFile.pendingRevision: while a projection is
+        // in flight the recorded revision is a LOWER bound on what may already
+        // be on disk, so raise it to the pending revision.
+        sourceLogRevision: maxRevision(entry.sourceLogRevision, index.pendingRevision),
+      });
+    }
+    return byFileName;
+  }
+
   const read = await mapWithConcurrency(names, MIRROR_WRITE_CONCURRENCY, async (fileName) => {
     const result = await safeReadJson<Partial<EmployeeSamplesFile>>(employeesDir, fileName);
     if (!result.ok || typeof result.value.username !== "string") {
@@ -127,6 +255,18 @@ export async function syncSampleMirrors(
     if (!entriesByEmployee.has(username)) entriesByEmployee.set(username, []);
   }
 
+  // Phase 1 of the index write: mark the projection in flight BEFORE any mirror
+  // is touched, carrying the revisions as they stand right now. A crash between
+  // here and phase 2 therefore leaves an index that over-states rather than
+  // under-states what is on disk — see EmployeeMirrorIndexFile.pendingRevision
+  // for why that direction is the safe one. Best-effort: a failure here must
+  // not stop the mirrors themselves being written, and only costs the next
+  // reader its fast path.
+  await writeMirrorIndex(employeesDir, monthFolderName, existingMirrors, sourceLogRevision);
+
+  /** File name -> the revision that will be on disk when this run finishes. */
+  const finalRevisions = new Map<string, ExistingMirror>(existingMirrors);
+
   await mapWithConcurrency(
     [...entriesByEmployee.entries()],
     MIRROR_WRITE_CONCURRENCY,
@@ -157,8 +297,42 @@ export async function syncSampleMirrors(
           : {}),
         entries,
       });
+      finalRevisions.set(fileName, { username, sourceLogRevision });
     }
   );
+
+  // Phase 2: commit the index. `pendingRevision` back to null, revisions now
+  // describing what this run actually left on disk (skipped files keep their
+  // higher existing revision, written files carry this run's).
+  await writeMirrorIndex(employeesDir, monthFolderName, finalRevisions, null);
+}
+
+/**
+ * Write the derived mirror index. Best-effort by contract: the index is a
+ * pure accelerator, so a failure is logged and swallowed — every consumer
+ * dual-reads and simply pays the N mirror parses instead.
+ */
+async function writeMirrorIndex(
+  employeesDir: DirectoryHandleLike,
+  monthFolderName: string,
+  mirrors: Map<string, ExistingMirror>,
+  pendingRevision: number | null
+): Promise<void> {
+  try {
+    await safeWriteJson<EmployeeMirrorIndexFile>(employeesDir, EMPLOYEE_MIRROR_INDEX_FILE, {
+      monthFolderName,
+      updatedAt: new Date().toISOString(),
+      pendingRevision,
+      mirrors: Object.fromEntries(
+        [...mirrors.entries()].map(([fileName, mirror]) => [
+          fileName,
+          { username: mirror.username, sourceLogRevision: mirror.sourceLogRevision },
+        ])
+      ),
+    });
+  } catch (error) {
+    logError("sampleMirror:write-index", error);
+  }
 }
 
 export async function loadEmployeeSampleMirror(

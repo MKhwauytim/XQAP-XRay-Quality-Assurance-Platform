@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createMemoryDirectory } from "../storage/memoryDirectory";
+import { clearReadLog, createMemoryDirectory, getReadLog } from "../storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { safeWriteJson } from "../storage/safeWrite";
 import { saveSampleMaster } from "../sampling/sampleStorage";
@@ -20,7 +20,7 @@ import { closeMonth, invalidateMonthLockCache } from "../population/monthLock";
 import { upsertItemAnswer } from "../answers/answerStorage";
 import type { ItemAnswer } from "../answers/answerTypes";
 import type { MonthManifestData } from "../population/monthTypes";
-import { getPopulationMonthDir } from "../workspace/workspacePaths";
+import { getPopulationMonthDir, getSampleEmployeeDir } from "../workspace/workspacePaths";
 import type { DistributionCurrentData, DistributionEntry } from "../distribution/distributionTypes";
 import { getUserWorkspaceFootprint, loadEmployeeSampleMirror, syncSampleMirrors } from "./sampleMirrorStorage";
 
@@ -189,6 +189,63 @@ describe("syncSampleMirrors monotonic guard", () => {
     const mirror = await loadEmployeeSampleMirror(root, MONTH_A, EMP);
     expect(mirror?.sourceLogRevision).toBe(5);
     expect(mirror?.entries[0]?.status).toBe("completed");
+  });
+});
+
+describe("2-employees/_index.json accelerator (Design B step 2)", () => {
+  /** All entries assigned to distinct employees, so the fan-out is N files. */
+  function manyEmployees(revision: number, count: number): DistributionCurrentData {
+    const entries = Array.from({ length: count }, (_, i) => ({
+      ...makeMirrorEntry(`A${i}`, "pending" as const),
+      assignedTo: `emp-${i}`,
+    }));
+    return makeCurrent(MONTH_A, revision, entries);
+  }
+
+  it("replaces the N mirror parses with ONE index read on the guard's read path", async () => {
+    const root = createMemoryDirectory("root", { trackReads: true }) as DirectoryHandleLike;
+    invalidateMonthLockCache();
+    await ensurePopulationMonthFolder(root, MONTH_A);
+
+    // First run: no index exists yet, so the mirrors are read (there are none).
+    await syncSampleMirrors(root, MONTH_A, manyEmployees(1, 6));
+
+    clearReadLog(root);
+    // Second run at the SAME revision: six mirrors are now on disk and the
+    // guard skips every one of them, so no mirror is written either. Every
+    // `{username}.samples.json` read left in the log would therefore be the
+    // guard's own — safeWriteJson's stage/commit read-backs cannot muddy it.
+    await syncSampleMirrors(root, MONTH_A, manyEmployees(1, 6));
+
+    const readsInEmployeesDir = getReadLog(root).filter((path) => path.includes("2-employees"));
+    expect(readsInEmployeesDir.filter((path) => path.endsWith("_index.json")).length).toBeGreaterThan(0);
+    // The load-bearing assertion: not one of the six mirrors was opened to
+    // decide the guard — one index read answered for all of them.
+    expect(readsInEmployeesDir.filter((path) => path.endsWith(".samples.json"))).toEqual([]);
+  });
+
+  it("falls back to reading the mirrors when the index is missing, and still guards correctly", async () => {
+    const root = createMemoryDirectory("root", { trackReads: true }) as DirectoryHandleLike;
+    invalidateMonthLockCache();
+    await ensurePopulationMonthFolder(root, MONTH_A);
+
+    await syncSampleMirrors(root, MONTH_A, makeCurrent(MONTH_A, 5, [makeMirrorEntry("A1", "pending")]));
+
+    // Simulate a workspace written before the index existed: blank it out so it
+    // no longer parses as an index at all.
+    const dir = await getSampleEmployeeDir(root, MONTH_A, false);
+    await safeWriteJson(dir, "_index.json", { nonsense: true });
+
+    clearReadLog(root);
+    // An OLDER derivation must still be rejected — via the mirror itself.
+    await syncSampleMirrors(root, MONTH_A, makeCurrent(MONTH_A, 3, [makeMirrorEntry("A1", "completed")]));
+
+    expect(
+      getReadLog(root).some((path) => path.includes("2-employees") && path.endsWith(".samples.json"))
+    ).toBe(true);
+    const mirror = await loadEmployeeSampleMirror(root, MONTH_A, EMP);
+    expect(mirror?.sourceLogRevision).toBe(5);
+    expect(mirror?.entries[0]?.status).toBe("pending");
   });
 });
 

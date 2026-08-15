@@ -2,15 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import { createMemoryDirectory } from "../storage/memoryDirectory";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
-import { safeReadJson } from "../storage/safeWrite";
+import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { getSampleEmployeeDir, getSampleMainDir } from "../workspace/workspacePaths";
 import type {
   DistributionCurrentData,
   DistributionEntry,
 } from "../distribution/distributionTypes";
 import type { EmployeeMirrorRowStub } from "../population/populationTypes";
-import { syncSampleMirrors } from "./sampleMirrorStorage";
-import type { EmployeeSamplesFile } from "./sampleMirrorStorage";
+import { syncSampleMirrors, readEmployeeMirrorIndex } from "./sampleMirrorStorage";
+import type { EmployeeSamplesFile, EmployeeMirrorIndexFile } from "./sampleMirrorStorage";
 
 /**
  * GOLDEN MASTER (Slice 0) — the `syncSampleMirrors` projection.
@@ -32,6 +32,10 @@ import type { EmployeeSamplesFile } from "./sampleMirrorStorage";
  *      disk ∪ employees in `current.entries`), so an employee reassigned down
  *      to zero entries gets an explicit empty-entries file instead of keeping a
  *      stale one (bug F8).
+ *   3a. (Design B step 2) The projection also writes a derived side-index,
+ *      `2-employees/_index.json`. It is ADDITIVE: no assertion below about the
+ *      mirrors themselves changed, and `listEmployeeFiles` does not see it
+ *      because the name deliberately does not end in `.samples.json`.
  *   3. Each mirror carries a frozen `quota` snapshot when
  *      `current.quotas[username]` exists, so a reader needs no second file. It
  *      is ABSENT when the derived state carries no quota — dual-read contract.
@@ -318,6 +322,121 @@ describe("syncSampleMirrors — golden master projection", () => {
     const survivor = (await readEmployee(root, "a_b.samples.json"))!;
     expect(survivor.entries).toHaveLength(1);
     expect(["a/b", "a\\b"]).toContain(survivor.username);
+  });
+
+  it("ADDED (step 2): pins the derived _index.json written alongside the mirrors", async () => {
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    await syncSampleMirrors(root, MONTH, current(entries, 7));
+
+    const index = (await readEmployeeMirrorIndex(root, MONTH))!;
+    expect(index.monthFolderName).toBe(MONTH);
+    // Committed, not mid-flight: the phase-2 write cleared the marker.
+    expect(index.pendingRevision).toBeNull();
+    // Keyed by FILE NAME (not username), same as readExistingMirrors.
+    expect(index.mirrors).toEqual({
+      "emp-a.samples.json": { username: "emp-a", sourceLogRevision: 7 },
+      "emp-b.samples.json": { username: "emp-b", sourceLogRevision: 7 },
+    });
+    // The index is NOT a mirror — no listing that filters on the mirror suffix
+    // can pick it up (this is what keeps answerStorage's own `.answers.json`
+    // scan of this same folder, and every assertion above, unaffected).
+    expect(await listEmployeeFiles(root)).toEqual(["emp-a.samples.json", "emp-b.samples.json"]);
+  });
+
+  it("ADDED (step 2): the index records the SKIPPED file's higher revision, not the incoming one", async () => {
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    await syncSampleMirrors(root, MONTH, current([entry("img-1", "emp-a")], 5));
+    // Equal revision → the monotonic guard skips the write (pinned above), so
+    // the index must keep saying 5 rather than adopting the incoming value.
+    await syncSampleMirrors(root, MONTH, current([entry("img-1", "emp-a", "completed")], 5));
+
+    const index = (await readEmployeeMirrorIndex(root, MONTH))!;
+    expect(index.mirrors["emp-a.samples.json"].sourceLogRevision).toBe(5);
+  });
+
+  it("ADDED (step 2): the index survives a sanitize collision the same way the files do", async () => {
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    await syncSampleMirrors(root, MONTH, current([entry("img-1", "a/b"), entry("img-2", "a\\b")], 1));
+
+    const index = (await readEmployeeMirrorIndex(root, MONTH))!;
+    // One file, therefore one index entry — the collision is not "fixed" by the
+    // index, which would make it disagree with the directory.
+    expect(Object.keys(index.mirrors)).toEqual(["a_b.samples.json"]);
+    expect(["a/b", "a\\b"]).toContain(index.mirrors["a_b.samples.json"].username);
+  });
+
+  it("ADDED (step 2): DUAL-READ — an index that disagrees with the listing is ignored, not trusted", async () => {
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    await syncSampleMirrors(root, MONTH, current([entry("img-1", "emp-a")], 5));
+
+    // Hand-write a stale index that both LIES about emp-a's revision (99, which
+    // would make the monotonic guard skip every future write forever) and fails
+    // to describe the directory (it names a mirror that does not exist).
+    const dir = await getSampleEmployeeDir(root, MONTH, false);
+    await safeWriteJson<EmployeeMirrorIndexFile>(dir, "_index.json", {
+      monthFolderName: MONTH,
+      updatedAt: "2026-05-06T00:00:00.000Z",
+      pendingRevision: null,
+      mirrors: {
+        "emp-a.samples.json": { username: "emp-a", sourceLogRevision: 99 },
+        "ghost.samples.json": { username: "ghost", sourceLogRevision: 99 },
+      },
+    });
+
+    // Coverage check fails → the mirrors themselves are read → revision 6 wins.
+    await syncSampleMirrors(root, MONTH, current([entry("img-1", "emp-a", "completed")], 6));
+    expect((await readEmployee(root, "emp-a.samples.json"))!.entries[0].status).toBe("completed");
+    // …and the index is rewritten to agree with the directory again.
+    expect((await readEmployeeMirrorIndex(root, MONTH))!.mirrors).toEqual({
+      "emp-a.samples.json": { username: "emp-a", sourceLogRevision: 6 },
+    });
+  });
+
+  it("ADDED (step 2): SURPRISE — a CONSISTENT index is trusted even when it lies", async () => {
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    await syncSampleMirrors(root, MONTH, current([entry("img-1", "emp-a")], 5));
+
+    // Same lie as above, but this time the index exactly covers the listing, so
+    // the coverage check passes and the mirrors are never opened. The guard
+    // therefore skips a write it should have made. This is the accepted trust
+    // boundary of an accelerator validated only against the directory listing:
+    // it can be wrong only if something OTHER than syncSampleMirrors wrote it,
+    // and the fallout is a stale mirror (recoverable on the next higher
+    // revision), never resurrected entries.
+    const dir = await getSampleEmployeeDir(root, MONTH, false);
+    await safeWriteJson<EmployeeMirrorIndexFile>(dir, "_index.json", {
+      monthFolderName: MONTH,
+      updatedAt: "2026-05-06T00:00:00.000Z",
+      pendingRevision: null,
+      mirrors: { "emp-a.samples.json": { username: "emp-a", sourceLogRevision: 99 } },
+    });
+
+    await syncSampleMirrors(root, MONTH, current([entry("img-1", "emp-a", "completed")], 6));
+    expect((await readEmployee(root, "emp-a.samples.json"))!.entries[0].status).toBe("pending");
+  });
+
+  it("ADDED (step 2): pendingRevision raises the guard's floor, so an interrupted run cannot be clobbered by an older one", async () => {
+    const root = createMemoryDirectory("root") as DirectoryHandleLike;
+    await syncSampleMirrors(root, MONTH, current([entry("img-1", "emp-a")], 5));
+
+    // Shape a crash mid-projection: mirrors may already be at revision 9, but
+    // the index still records 5 and is marked in-flight at 9.
+    const dir = await getSampleEmployeeDir(root, MONTH, false);
+    await safeWriteJson<EmployeeMirrorIndexFile>(dir, "_index.json", {
+      monthFolderName: MONTH,
+      updatedAt: "2026-05-06T00:00:00.000Z",
+      pendingRevision: 9,
+      mirrors: { "emp-a.samples.json": { username: "emp-a", sourceLogRevision: 5 } },
+    });
+
+    // An OLDER derivation (7 < 9) must not overwrite what the interrupted run
+    // may already have written.
+    await syncSampleMirrors(root, MONTH, current([entry("img-1", "emp-a", "completed")], 7));
+    expect((await readEmployee(root, "emp-a.samples.json"))!.entries[0].status).toBe("pending");
+
+    // A newer one (10 > 9) still gets through — the floor is not a permanent lock.
+    await syncSampleMirrors(root, MONTH, current([entry("img-1", "emp-a", "completed")], 10));
+    expect((await readEmployee(root, "emp-a.samples.json"))!.entries[0].status).toBe("completed");
   });
 
   it("pins the row stub carried into the mirror verbatim", async () => {
