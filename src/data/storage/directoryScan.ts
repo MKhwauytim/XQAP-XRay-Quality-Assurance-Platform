@@ -433,46 +433,121 @@ function logVanishedEntries(context: string, dir: DirectoryHandleLike, names: st
   );
 }
 
-export type SizedDirectoryEntry = { name: string; size: number };
+export type SizedDirectoryEntry = {
+  name: string;
+  size: number;
+  /**
+   * `File.lastModified` (epoch ms). Carried alongside `size` purely as a second
+   * change-detection axis -- never compared across machines, never used for
+   * ordering, so the clock-skew objection that rules `lastModified` out as a
+   * *timestamp* does not apply. See `listDirectoryEntriesWithSize`.
+   */
+  lastModified: number;
+};
+
+/**
+ * Run `work(index)` for every index in `[0, count)` with at most `concurrency`
+ * in flight. Rejections propagate (every worker promise is awaited, so no
+ * sibling rejection is left unhandled) -- deliberately fail-fast, no retry.
+ */
+async function forEachBounded(
+  count: number,
+  concurrency: number,
+  work: (index: number) => Promise<void>
+): Promise<void> {
+  const state = { nextIndex: 0 };
+  async function worker(): Promise<void> {
+    for (;;) {
+      const index = state.nextIndex;
+      if (index >= count) return;
+      state.nextIndex += 1;
+      await work(index);
+    }
+  }
+  // Clamp to >= 1 for the same reason readNamedJsonFiles does: zero workers
+  // would silently return "nothing" rather than reading anything.
+  const workerCount = Math.max(1, Math.min(concurrency, count || 1));
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+}
 
 /**
  * Sized listing (§4.2 of the perf/sync spec, F21): for every file matching
- * `suffix`, return its name AND byte size -- `listDirectoryEntries` alone
- * (`{name, kind}` only) can detect a NEW file appearing, but cannot detect a
- * request appended into an EXISTING, larger file (e.g. a new referral
- * request landing inside an already-present `{user}.answers.json`). It prefers
- * `size` over `lastModified` because `File.size` is obtained without reading
- * file content, and is clock-skew-immune, unlike wall-clock `lastModified` on
- * an unsynchronized network share.
+ * `suffix`, return its name, byte size AND mtime -- `listDirectoryEntries`
+ * alone (`{name, kind}` only) can detect a NEW file appearing, but cannot
+ * detect a request appended into an EXISTING file (e.g. a new referral request
+ * landing inside an already-present `{user}.answers.json`).
+ *
+ * WHY BOTH size AND lastModified. Size alone is blind to any edit that
+ * preserves byte length, which on a `JsonEnvelope` is not a corner case: the
+ * envelope's own `revision` going 9 -> 10, its `writtenAt` moving, its
+ * `contentHash` changing, or any same-width field edit all keep the file
+ * exactly as long. Such a tick's signature would be byte-identical to the
+ * previous one and the change would stay invisible until someone pressed the
+ * manual refresh button.
+ *
+ * The obvious fix -- read the envelope's `metadata.revision` per file -- was
+ * costed and rejected for this call site: `getFile()` yields a `File` WITHOUT
+ * transferring content, so `size`/`lastModified` are free, whereas reading even
+ * a bounded slice of the file is a second round trip per file, on every tick,
+ * on every client (~30 here), for every employee's answers file. That doubles
+ * the tick's dominant term on the UNC/SMB share this app is deployed on. And it
+ * buys nothing measurable: `revision` differs from `(size, lastModified)` only
+ * for two writes to one file that land in the same filesystem timestamp tick --
+ * a safe-write is several round trips long, so that window is not reachable in
+ * practice. `revision` IS still the signal for the single-file probes
+ * (`month.manifest.json`, `notifications.json`), where it costs one read total
+ * rather than one per employee.
  *
  * Costs ONE `getFile()` per matched file on the success path -- the handle comes
  * from the enumeration itself (`listMatchingFileEntries`), so the second
  * `getFileHandle()` round trip this used to pay per file is gone. It is still
  * NOT a free listing: callers budgeting the unchanged-tick round trips (the
  * sync tick) must count one operation per matched file.
+ *
+ * Those per-file opens are issued with bounded CONCURRENCY, not one after
+ * another. The count is unchanged -- what changes is that a workspace with N
+ * employees no longer serializes N share round trips into the tick's critical
+ * path (N x RTT becomes ceil(N / DIRECTORY_READ_CONCURRENCY) x RTT). Ordering
+ * is unaffected: results are placed by listing index, not settle order.
  */
 export async function listDirectoryEntriesWithSize(
   dir: DirectoryHandleLike,
   suffix: string
 ): Promise<SizedDirectoryEntry[]> {
   const matched = await listMatchingFileEntries(dir, suffix);
+  const slots: (SizedDirectoryEntry | null)[] = new Array(matched.length).fill(null);
 
-  const out: SizedDirectoryEntry[] = [];
-  const vanished: string[] = [];
-  for (const entry of matched) {
+  await forEachBounded(matched.length, DIRECTORY_READ_CONCURRENCY, async (index) => {
+    const entry = matched[index]!;
     // No retry budget here (`null`), unlike readSegmentTails. This runs on every
     // sync tick over every answers/decisions file in the workspace, and the
     // value it produces is a change-detection signature, not data: dropping one
     // entry makes this tick's signature differ from the last, which at worst
     // reports the family as "changed" and triggers one extra refresh. Paying a
     // retry ladder per entry to avoid that would let one flaky share stall
-    // every tick in proportion to the number of employees.
-    const size = await readListedEntry(dir, entry, async (file) => file.size, null);
-    if (size === null) {
-      vanished.push(entry.name);
+    // every tick in proportion to the number of employees. A tick that fails
+    // fails fast and is retried by the NEXT tick -- retries must never stack.
+    const stat = await readListedEntry(
+      dir,
+      entry,
+      async (file) => ({ size: file.size, lastModified: file.lastModified }),
+      null
+    );
+    if (stat === null) return; // slot stays null -> reported as vanished below
+    slots[index] = { name: entry.name, size: stat.size, lastModified: stat.lastModified };
+  });
+
+  // Both lists are built from the listing order, so neither the returned
+  // entries nor the logged vanished names depend on which open settled first.
+  const out: SizedDirectoryEntry[] = [];
+  const vanished: string[] = [];
+  for (let index = 0; index < matched.length; index += 1) {
+    const slot = slots[index];
+    if (slot === null) {
+      vanished.push(matched[index]!.name);
       continue;
     }
-    out.push({ name: entry.name, size });
+    out.push(slot);
   }
   logVanishedEntries("directoryScan:sized-listing", dir, vanished);
   return out;

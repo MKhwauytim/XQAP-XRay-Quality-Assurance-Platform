@@ -218,9 +218,28 @@ function applyFaults(
 }
 
 type MemoryNode = {
-  files: Map<string, { content: string }>;
+  files: Map<string, { content: string; lastModified: number }>;
   dirs: Map<string, MemoryNode>;
 };
+
+/**
+ * Per-file mtime for the double. A real file's `lastModified` is a property of
+ * the FILE (stamped when it was written) and is stable across reads; before
+ * this existed, every `getFile()` built a fresh `File` and therefore reported
+ * `Date.now()`, so any caller comparing mtimes across two reads of an untouched
+ * file saw them differ — the opposite of real behaviour. `listDirectoryEntries-
+ * WithSize` compares exactly that.
+ *
+ * Monotonic rather than a bare `Date.now()`: two writes inside one millisecond
+ * are routine in a test (and merely rare on disk), and a double that reported
+ * them as the same mtime would make a same-length rewrite undetectable in tests
+ * for reasons that have nothing to do with the code under test.
+ */
+let memoryMtimeClock = 0;
+function nextMemoryMtime(): number {
+  memoryMtimeClock = Math.max(Date.now(), memoryMtimeClock + 1);
+  return memoryMtimeClock;
+}
 
 function createNode(): MemoryNode {
   return { files: new Map(), dirs: new Map() };
@@ -243,7 +262,10 @@ function makeFileHandle(
       readLog?.entries.push(path);
       const entry = node.files.get(name);
       const content = entry ? entry.content : "";
-      return new File([content], name, { type: "application/json" });
+      return new File([content], name, {
+        type: "application/json",
+        lastModified: entry ? entry.lastModified : 0,
+      });
     },
     createWritable: async () => {
       applyFaults(faultState, operationLog, { operation: "createWritable", name });
@@ -262,7 +284,7 @@ function makeFileHandle(
           buffer += data;
         },
         close: async () => {
-          node.files.set(name, { content: buffer });
+          node.files.set(name, { content: buffer, lastModified: nextMemoryMtime() });
         }
       };
     }
@@ -302,7 +324,7 @@ function makeDirectoryHandle(
         throw writePermissionDenied(fileName);
       }
       if (!exists) {
-        node.files.set(fileName, { content: "" });
+        node.files.set(fileName, { content: "", lastModified: nextMemoryMtime() });
       }
       return makeFileHandle(
         fileName,

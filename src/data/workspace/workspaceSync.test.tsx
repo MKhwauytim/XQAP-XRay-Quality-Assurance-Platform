@@ -136,6 +136,33 @@ describe("runSync — change-set probe (§4.2 / A7)", () => {
     expect(changed.has("requests")).toBe(true);
   });
 
+  it("a SAME-LENGTH rewrite of an existing answers file is detected (size alone cannot see it)", async () => {
+    const root = makeRoot();
+    const answersDir = await getSampleEmployeeDir(root, MONTH, true);
+    // The realistic shape: a JsonEnvelope whose metadata.revision goes 9 -> 10
+    // while the file's byte length stays exactly the same.
+    await writeRawFile(answersDir, "alice.answers.json", '{"revision":09,"answer":"aaa"}');
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+
+    await writeRawFile(answersDir, "alice.answers.json", '{"revision":10,"answer":"bbb"}');
+    const { changed } = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+
+    expect(changed.has("answers")).toBe(true);
+    expect(changed.has("requests")).toBe(true);
+  });
+
+  it("a SAME-LENGTH rewrite of a supervisor decisions file is detected too", async () => {
+    const root = makeRoot();
+    const approvalsDir = await getSampleApprovalsDir(root, MONTH, true);
+    await writeRawFile(approvalsDir, "sup1.json", '{"revision":09,"decision":"aaa"}');
+    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline
+
+    await writeRawFile(approvalsDir, "sup1.json", '{"revision":10,"decision":"bbb"}');
+    const { changed } = await runSync({ directoryHandle: root, monthFolderName: MONTH });
+
+    expect(changed.has("requests")).toBe(true);
+  });
+
   it("a distribution event append is reported as the distribution family only", async () => {
     const root = makeRoot();
     await runSync({ directoryHandle: root, monthFolderName: MONTH });

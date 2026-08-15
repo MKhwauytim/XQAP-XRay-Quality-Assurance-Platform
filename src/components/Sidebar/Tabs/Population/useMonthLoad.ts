@@ -15,12 +15,22 @@ import {
   markBootSourceLoaded,
   markBootSourceError,
 } from "../../../../data/workspace/bootProgress";
-import { subscribeToDataRefresh } from "../../../../data/workspace/dataRefreshSignal";
+import {
+  subscribeToDataChange,
+  type DataRefreshFamily,
+} from "../../../../data/workspace/dataRefreshSignal";
 import { buildLoadedMonthState } from "./populationWorkflowHelpers";
 
 export type LoadedMonthState = ReturnType<typeof buildLoadedMonthState>;
 
 type BootSourceDescriptor = { key: string; labelEn: string; labelAr: string };
+
+/**
+ * The families whose change actually invalidates what `loadMonthForEditing`
+ * reads. Module-level (not rebuilt per render) so the subscription below is
+ * never torn down and re-established just because the array identity moved.
+ */
+const MONTH_LOAD_REFRESH_FAMILIES: readonly DataRefreshFamily[] = ["manifest", "distribution"];
 
 /**
  * Named on-disk sources this hook's single `loadMonthForEditing` call actually
@@ -257,16 +267,33 @@ export function useMonthLoad(params: {
   }, [directoryHandle, globalMonth]);
 
   // Re-fetch the CURRENTLY loaded month on the app-wide refresh signal (manual
-  // toolbar button + periodic auto-refresh, AuthGate.tsx) so a sample redraw,
-  // distribution action, or replacement made elsewhere -- another tab, another
-  // machine -- shows up without navigating away and back. Population was the
-  // only major view not wired into this signal; mirrors XrayReferrals.tsx/
-  // XrayInspectionResults.tsx's identical `{ silent: true }` pattern (both
-  // sources are treated the same way -- neither distinguishes "manual" from
-  // "periodic" there, so this doesn't either).
+  // toolbar button + the periodic sync tick, workspaceSync.ts) so a sample
+  // redraw, distribution action, or replacement made elsewhere -- another tab,
+  // another machine -- shows up without navigating away and back.
+  //
+  // Subscribed to the per-family CHANGE SET (§4.2), not to the bare signal.
+  // `loadMonthForEditing` reads month.manifest.json, processing.summary.json,
+  // sample.master.json and the derived distribution -- and, for an oversight
+  // user on the `process` sub-tab, population.final.json / the raw workbooks on
+  // top (`computeMonthLoadScope`). None of that is touched by a notification
+  // being posted, an employee answering an item, or a referral request landing
+  // in someone's answers file, yet the legacy bare subscription re-ran the
+  // whole load on every one of those ticks -- including the distribution
+  // derivation, which is the expensive part even when `population` is out of
+  // scope. `manual` still reaches this callback unconditionally
+  // (subscribeToDataChange's contract), so the discard-everything button is
+  // unchanged.
+  //
+  // KNOWN GAP, pre-existing and not introduced here: no probe family covers
+  // `sample.master.json`, so another user's RE-draw of an already-drawn month
+  // is not itself a broadcast trigger. Before this change such a redraw was
+  // picked up only incidentally -- when some unrelated family happened to
+  // change in the same tick. Closing it properly means adding a `sample`
+  // family probe in workspaceSync.ts (one extra small read per tick), which is
+  // a deliberate budget decision, not something to smuggle in here.
   useEffect(
     () =>
-      subscribeToDataRefresh(() => {
+      subscribeToDataChange(MONTH_LOAD_REFRESH_FAMILIES, () => {
         if (!directoryHandle || globalMonth.kind !== "existing") return;
         // A real (foreground) load is already in flight for this exact
         // target -- bumping loadMonthTokenRef here too would make this tick
