@@ -42,7 +42,9 @@ describe("immutable distribution event store", () => {
 
     const loaded = await loadDistributionLog(root, month);
     expect(loaded.events.map((event) => event.eventId).sort()).toEqual([first.eventId, second.eventId].sort());
-    expect(loaded.eventSetId).toMatch(/^2:/);
+    // Commutative event-set digest (v85): `d1:{count}:{xor}:{sum}` — the count
+    // segment is what used to be the whole string's leading number.
+    expect(loaded.eventSetId).toMatch(/^d1:2:/);
   });
 
   it("retains a legacy population log when new immutable events are introduced", async () => {

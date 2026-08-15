@@ -7,6 +7,7 @@ import {
   DISTRIBUTION_EVENT_SEGMENT_SUFFIX,
   mergeDistributionEvents,
 } from "../distribution/distributionEventStore";
+import { DISTRIBUTION_CHECKPOINT_FILE, loadDistributionLog } from "../distribution/distributionStorage";
 import type { DistributionCurrentData, DistributionEvent } from "../distribution/distributionTypes";
 import type { MonthFolderInfo } from "../population/monthFolder";
 import type { MonthManifestData, MonthRawData, PopulationFinalData } from "../population/monthTypes";
@@ -49,6 +50,13 @@ const RESTORE_INPROGRESS_FILE = "restore.inprogress.json";
 const BACKUP_COMPLETE_FILE = "backup.complete.json";
 /** Derived, rebuildable fold cache — never restored, and dropped when its events change under it. */
 const DISTRIBUTION_CURRENT_FILE = "distribution.current.json";
+// `DISTRIBUTION_CHECKPOINT_FILE` (imported from distributionStorage) is the
+// sidecar of the file above (v85): the fold checkpoint that used to be embedded
+// in it. Classified identically — derived, never restored, and dropped whenever
+// a restore rewrites the segments its byte offsets point into. Getting that
+// wrong is silent EVENT LOSS, not a stale-looking screen: a checkpoint left
+// behind after a merge grew a segment claims those bytes were already folded,
+// so the incremental reader skips straight past the real events in between.
 /** Legacy full-event compatibility projection — restored only into a workspace that has none. */
 const DISTRIBUTION_LOG_FILE = "distribution.log.json";
 const EXCEL_MAX_ROWS = 1_048_576;
@@ -584,16 +592,18 @@ async function copyAllJsonFiles(directoryHandle: DirectoryHandleLike, backupDir:
  *    the event segments / per-event files, which ARE restored, so leaving a live
  *    projection alone loses nothing — while restoring it into a workspace that
  *    has none still covers full disaster recovery.
- *  - `skip-derived` — `distribution.current.json`, documented as a rebuildable
- *    cache. Restoring it is never necessary and is actively dangerous: it embeds
- *    a `foldCheckpoint` of per-segment BYTE OFFSETS, and a merge above may have
- *    rewritten those very segments. See invalidateDistributionCaches.
+ *  - `skip-derived` — `distribution.current.json` and its v85 sidecar
+ *    `distribution.checkpoint.json`, both documented as rebuildable cache.
+ *    Restoring either is never necessary and is actively dangerous: the
+ *    checkpoint is a map of per-segment BYTE OFFSETS meaning "already folded up
+ *    to here", and a merge above may have rewritten those very segments. See
+ *    invalidateDistributionCaches.
  */
 type RestoreAction = "replace" | "merge-events" | "restore-if-absent" | "skip-derived";
 
 function restoreActionFor(fileName: string): RestoreAction {
   if (fileName.endsWith(DISTRIBUTION_EVENT_SEGMENT_SUFFIX)) return "merge-events";
-  if (fileName === DISTRIBUTION_CURRENT_FILE) return "skip-derived";
+  if (fileName === DISTRIBUTION_CURRENT_FILE || fileName === DISTRIBUTION_CHECKPOINT_FILE) return "skip-derived";
   if (fileName === DISTRIBUTION_LOG_FILE) return "restore-if-absent";
   return "replace";
 }
@@ -727,13 +737,15 @@ async function mergeEventSegment(
 /**
  * Drop the fold cache for every directory whose segments the restore rewrote.
  *
- * `distribution.current.json` carries a `foldCheckpoint.segmentOffsets` map of
- * per-segment BYTE offsets meaning "already folded up to here". A merge above
+ * `distribution.checkpoint.json` is a `segmentOffsets` map of per-segment BYTE
+ * offsets meaning "already folded up to here" (before v85 it was embedded in
+ * `distribution.current.json`, and legacy cache files still carry it inline —
+ * which is why BOTH names are deleted here, not just the new one). A merge above
  * can grow a segment and shift where its lines sit, which would leave those
  * offsets pointing into the middle of a line — the incremental reader would then
  * either mis-parse or skip real events, with a cache that claims to be current.
- * Deleting the cache costs one full re-derive on the next load and is the only
- * state in which the cache cannot be newer than the events behind it.
+ * Deleting both costs one full re-derive on the next load and is the only state
+ * in which the cache cannot be newer than the events behind it.
  *
  * Best-effort per file, mirroring pruneAutoBackups: a cache that cannot be
  * removed must not fail an otherwise-complete restore, and its absence is
@@ -746,6 +758,9 @@ async function invalidateDistributionCaches(dirs: Iterable<DirectoryHandleLike>)
       DISTRIBUTION_CURRENT_FILE,
       `${DISTRIBUTION_CURRENT_FILE}.bak`,
       `${DISTRIBUTION_CURRENT_FILE}.tmp`,
+      DISTRIBUTION_CHECKPOINT_FILE,
+      `${DISTRIBUTION_CHECKPOINT_FILE}.bak`,
+      `${DISTRIBUTION_CHECKPOINT_FILE}.tmp`,
     ]) {
       try {
         await dir.removeEntry(name);
@@ -1010,8 +1025,14 @@ async function exportMonthXlsx(params: {
   assertXlsxDatasetWithinLimit("sample-master", sample?.rows.length ?? 0);
   const distribution = await loadMonthJson<DistributionCurrentData>(directoryHandle, month.folderName, ["distribution.current.json"]);
   assertXlsxDatasetWithinLimit("distribution-current", distribution?.entries.length ?? 0);
-  const distributionLog = await loadMonthJson<{ events?: unknown[] }>(directoryHandle, month.folderName, ["distribution.log.json"]);
-  assertXlsxDatasetWithinLimit("distribution-log", distributionLog?.events?.length ?? 0);
+  // Read through the distribution loader rather than off `distribution.log.json`
+  // directly: since v85 that file is a CAS stamp whose event body is normally
+  // EMPTY (the events live in the immutable `distribution.events/` segments), so
+  // reading the raw file would silently export zero rows for every modern
+  // workspace. The loader merges projection + segments + legacy per-event files,
+  // which is what this dataset always meant to say.
+  const distributionLogEvents = (await loadDistributionLog(directoryHandle, month.folderName)).events;
+  assertXlsxDatasetWithinLimit("distribution-log", distributionLogEvents.length);
   const employeeFiles = await loadAllEmployeeFiles(directoryHandle, month.folderName);
   const answerItemCount = employeeFiles.reduce((sum, file) => sum + (file.items?.length ?? 0), 0);
   const answerFieldCount = employeeFiles.reduce(
@@ -1031,7 +1052,7 @@ async function exportMonthXlsx(params: {
     { name: "bi-raw", rows: (biRaw?.rows ?? []).map((row) => addMonth(flattenRecord(row), month)) },
     { name: "sample-master", rows: (sample?.rows ?? []).map((row) => addMonth(flattenRecord(row), month)) },
     { name: "distribution-current", rows: distributionRows(distribution, month) },
-    { name: "distribution-log", rows: (distributionLog?.events ?? []).map((event) => addMonth(flattenRecord(event), month)) },
+    { name: "distribution-log", rows: distributionLogEvents.map((event) => addMonth(flattenRecord(event), month)) },
     { name: "employee-answer-items", rows: answerItemRows(employeeFiles, month) },
     { name: "employee-answer-fields", rows: answerFieldRows(employeeFiles, month) },
   ];

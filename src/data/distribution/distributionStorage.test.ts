@@ -134,7 +134,7 @@ describe("distributionStorage", () => {
     expect(results.map((r) => r.ok)).toEqual([true, true]);
     const log = await loadDistributionLog(root, month);
     expect(log.events.map((event) => event.eventId).sort()).toEqual([first.eventId, second.eventId].sort());
-    expect(log.eventSetId).toMatch(/^2:/);
+    expect(log.eventSetId).toMatch(/^d1:2:/);
   });
 
   it("returns a log whose eventSetId reflects the just-appended events, not the pre-append state (finding 3)", async () => {
@@ -148,7 +148,8 @@ describe("distributionStorage", () => {
     // Freshly appended into a log that started empty -- must NOT still read
     // as the pre-append (empty) eventSetId.
     expect(firstResult.log.eventSetId).toBe(distributionEventSetId(firstResult.log.events));
-    expect(firstResult.log.eventSetId).toMatch(/^1:/);
+    // v85 digest shape: `d1:{count}:{xor}:{sum}`.
+    expect(firstResult.log.eventSetId).toMatch(/^d1:1:/);
 
     const second = buildAssignEvent({ xrayImageId: "img-201", assignedTo: "bob", eventBy: "admin" });
     const secondResult = await appendDistributionEvent(root, month, second);
@@ -156,7 +157,7 @@ describe("distributionStorage", () => {
     if (!secondResult.ok) return;
     // Must reflect BOTH events, not just the pre-append single-event state.
     expect(secondResult.log.eventSetId).toBe(distributionEventSetId(secondResult.log.events));
-    expect(secondResult.log.eventSetId).toMatch(/^2:/);
+    expect(secondResult.log.eventSetId).toMatch(/^d1:2:/);
   });
 
   it("ignores a cached snapshot without deriveVersion and re-derives", async () => {

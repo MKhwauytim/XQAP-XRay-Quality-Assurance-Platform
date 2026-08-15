@@ -309,6 +309,88 @@ describe("restore — derived distribution files never outrun their events", () 
     expect(await listNames(mainDir)).not.toContain("distribution.current.json");
   });
 
+  it("drops the live distribution.checkpoint.json sidecar when a segment actually changed", async () => {
+    // The single most dangerous file in a restore. Its segmentOffsets say
+    // "already folded up to this byte"; a merge that re-adds events shifts
+    // those bytes, so a checkpoint left behind makes the incremental reader
+    // skip straight past the re-added events — silent loss, with a cache that
+    // claims to be current. (Same reasoning as distribution.current.json above,
+    // but the checkpoint is now a SEPARATE file and has to be named separately
+    // in the delete list — classification here is by exact filename.)
+    const root = makeRoot();
+    const eventsDir = await getEventsDir(root);
+    const mainDir = await getSampleMainDir(root, month.folderName, true);
+    await writeRaw(eventsDir, "devA-s1.ndjson", toNdjson([event("e01"), event("e02")]));
+
+    const backup = await createBackup(root, [month], "admin", "manual");
+    expect(backup.ok).toBe(true);
+    if (!backup.ok) return;
+
+    await writeRaw(eventsDir, "devA-s1.ndjson", toNdjson([event("e01")]));
+    await safeWriteJson(mainDir, "distribution.current.json", {
+      monthFolderName: month.folderName,
+      entries: [],
+      eventSetId: "d1:1:aaaa:aaaa",
+    });
+    await safeWriteJson(mainDir, "distribution.checkpoint.json", {
+      segmentOffsets: { "devA-s1.ndjson": 999 },
+      legacyEventFileNames: [],
+      knownEventIds: ["e01"],
+      quotaFacts: { assignmentCounts: {}, firstAssignments: {}, latestStoredQuotas: {} },
+      deriveVersion: 2,
+      eventSetId: "d1:1:aaaa:aaaa",
+    });
+
+    const restored = await restoreBackupSnapshot({
+      directoryHandle: root,
+      months: [month],
+      backupFolderName: backup.folderName,
+      username: "admin",
+    });
+    expect(restored.ok).toBe(true);
+
+    expect(await segmentEventIds(root)).toEqual(["e01", "e02"]);
+    const names = await listNames(mainDir);
+    expect(names).not.toContain("distribution.checkpoint.json");
+    expect(names).not.toContain("distribution.current.json");
+  });
+
+  it("never restores a backed-up distribution.checkpoint.json over the live workspace", async () => {
+    // Derived state is skipped at collection time, so the backup's copy can
+    // never reintroduce byte offsets for a segment layout that no longer
+    // exists — not even into a workspace that currently has no checkpoint.
+    const root = makeRoot();
+    const eventsDir = await getEventsDir(root);
+    const mainDir = await getSampleMainDir(root, month.folderName, true);
+    await writeRaw(eventsDir, "devA-s1.ndjson", toNdjson([event("e01")]));
+    await safeWriteJson(mainDir, "distribution.checkpoint.json", {
+      segmentOffsets: { "devA-s1.ndjson": 123 },
+      legacyEventFileNames: [],
+      knownEventIds: ["e01"],
+      quotaFacts: { assignmentCounts: {}, firstAssignments: {}, latestStoredQuotas: {} },
+      deriveVersion: 2,
+      eventSetId: "d1:1:aaaa:aaaa",
+    });
+
+    const backup = await createBackup(root, [month], "admin", "manual");
+    expect(backup.ok).toBe(true);
+    if (!backup.ok) return;
+
+    await mainDir.removeEntry!("distribution.checkpoint.json");
+
+    const restored = await restoreBackupSnapshot({
+      directoryHandle: root,
+      months: [month],
+      backupFolderName: backup.folderName,
+      username: "admin",
+    });
+    expect(restored.ok).toBe(true);
+    expect(await listNames(mainDir)).not.toContain("distribution.checkpoint.json");
+    // …and it is not reported as a restored file either.
+    expect(restored.ok && restored.restoredFiles.some((path) => path.includes("distribution.checkpoint.json")))
+      .toBe(false);
+  });
+
   it("keeps a live distribution.current.json when the restore added no events", async () => {
     const root = makeRoot();
     const eventsDir = await getEventsDir(root);
