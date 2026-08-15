@@ -677,6 +677,125 @@ test("streamed total failure keeps the .tmp and safeReadJson recovers it", async
   }
 });
 
+// ── Phase 1.4: the commit copies the verified .tmp, it does not re-serialize ──
+//
+// The streamed path used to call streamEnvelopeToFile twice — once to stage the
+// .tmp and once again to commit the live file — walking the whole object graph
+// a second time to produce bytes that were, by construction, identical to the
+// .tmp it had just proved correct. `toJSON` on an instrumented leaf counts each
+// serialization pass; sampling the counter at each progress phase shows exactly
+// where the passes happen.
+function instrumentedPayload(): {
+  payload: { rows: { v: number }[]; marker: unknown };
+  serializations: () => number;
+} {
+  let count = 0;
+  const marker = {
+    toJSON() {
+      count += 1;
+      return { instrumented: true };
+    },
+  };
+  return {
+    payload: { rows: [{ v: 1 }, { v: 2 }, { v: 3 }], marker },
+    serializations: () => count,
+  };
+}
+
+test("1.4: a streamed write serializes the payload once — the commit copies the verified .tmp", async () => {
+  const dir = createMemoryDirectory();
+  __setStreamingForcedSizeLimitForTests(0);
+
+  const { payload, serializations } = instrumentedPayload();
+  const at: Record<string, number> = {};
+  await safeWriteJson(dir, "s.json", payload, (phase) => {
+    at[phase] = serializations();
+  });
+  const atEnd = serializations();
+
+  // Staging serializes the payload (streamEnvelopeToFile) — exactly one pass.
+  expect(at["verifying-staged"]! - at["staging"]!).toBe(1);
+  // The commit performs no serialization pass at all: it writes back the bytes
+  // verified in the staging step.
+  expect(at["verifying-committed"]! - at["committing"]!).toBe(0);
+  // Verification and cleanup add none either.
+  expect(atEnd).toBe(at["verifying-committed"]);
+
+  // …and the committed file is still byte-identical to the staged envelope.
+  const live = JSON.parse(await readRaw(dir, "s.json")) as {
+    metadata: { contentHash: string; revision: number };
+    data: { rows: { v: number }[]; marker: { instrumented: boolean } };
+  };
+  expect(live.data.rows.map((r) => r.v)).toEqual([1, 2, 3]);
+  expect(live.data.marker.instrumented).toBe(true);
+  expect(live.metadata.revision).toBe(1);
+  const result = await safeReadJson<{ rows: { v: number }[] }>(dir, "s.json");
+  expect(result.ok).toBe(true);
+  if (result.ok) expect(result.recoveredFromBak).toBe(false);
+});
+
+test("1.4: the streamed commit writes exactly the bytes that were staged and verified", async () => {
+  const base = createMemoryDirectory();
+  __setStreamingForcedSizeLimitForTests(0);
+
+  // Record what each file received, so the committed bytes can be compared with
+  // the staged bytes even after the .tmp is cleaned up. Arabic content is in the
+  // payload on purpose: a byte-range copy would corrupt multi-byte characters.
+  const written = new Map<string, string>();
+  const dir: DirectoryHandleLike = {
+    ...base,
+    getFileHandle: async (name, options) => {
+      const handle = await base.getFileHandle(name, options);
+      if (!handle.createWritable) return handle;
+      return {
+        ...handle,
+        createWritable: async () => {
+          const writable = await handle.createWritable!();
+          let buffer = "";
+          return {
+            write: async (data: string) => {
+              buffer += data;
+              await writable.write(data);
+            },
+            close: async () => {
+              written.set(name, buffer);
+              await writable.close();
+            },
+          };
+        },
+      } satisfies FileHandleLike;
+    },
+  };
+
+  await safeWriteJson(dir, "s.json", {
+    rows: Array.from({ length: 50 }, (_, i) => ({ i, note: `قياس-${i}` })),
+  });
+
+  expect(written.get("s.json.tmp")).toBeTruthy();
+  expect(written.get("s.json")).toBe(written.get("s.json.tmp"));
+  expect(await readRaw(base, "s.json")).toBe(written.get("s.json.tmp"));
+});
+
+test("1.4: safeWriteJsonText's streamed restore commits the normalized staged bytes", async () => {
+  const dir = createMemoryDirectory();
+  await safeWriteJson(dir, "a.json", { rows: [{ v: 1 }, { v: 2 }], note: "قياس" });
+  const text = await readRaw(dir, "a.json");
+
+  __setStreamingForcedSizeLimitForTests(0);
+  await safeWriteJsonText(dir, "b.json", text);
+
+  // The streamed restore path writes the compact re-normalization plus a
+  // trailing newline; the commit must reproduce it byte for byte.
+  expect(await readRaw(dir, "b.json")).toBe(`${JSON.stringify(JSON.parse(text))}\n`);
+
+  const result = await safeReadJson<{ rows: { v: number }[]; note: string }>(dir, "b.json");
+  expect(result.ok).toBe(true);
+  if (result.ok) {
+    expect(result.value.rows.map((r) => r.v)).toEqual([1, 2]);
+    expect(result.value.note).toBe("قياس");
+  }
+});
+
 test("successful writes still clean up the staged .tmp", async () => {
   const base = createMemoryDirectory();
   const removed: string[] = [];

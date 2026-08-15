@@ -26,7 +26,7 @@
  */
 import type { DirectoryHandleLike } from "./fileSystemAccess";
 import { assertWritableMode } from "./readOnlyMode";
-import { withResourceLock } from "./webLocks";
+import { directoryResourceKey, withResourceLock } from "./webLocks";
 import { withWorkspaceWriteAccess } from "./workspaceWriteAccess";
 import {
   TRANSIENT_WRITE_RETRY_DELAYS_MS,
@@ -381,20 +381,56 @@ function streamValueToFile(
 }
 
 // Verifies a streamed file by re-reading it and confirming its bytes exactly
-// match what was written (length + whole-file content hash). simpleHash walks
-// the already-materialized read-back string without allocating a new one.
+// match what was written (length + whole-file content hash), and returns that
+// verified text so a caller that needs the bytes doesn't have to read them a
+// second time. Returns null when the file is missing or does not match.
+// simpleHash walks the already-materialized read-back string without
+// allocating a new one.
+async function readVerifiedStreamedFile(
+  dir: DirectoryHandleLike,
+  fileName: string,
+  expected: StreamedFileInfo
+): Promise<string | null> {
+  // Verification read-back of a file this call just closed — a "not found" here
+  // is share latency, not absence, so it gets the opt-in retry.
+  const text = await readText(dir, fileName, { retryMissing: true });
+  if (text === null || text.length !== expected.fileLength) {
+    return null;
+  }
+  return simpleHash(text) === expected.fileHash ? text : null;
+}
+
 async function verifyStreamedFile(
   dir: DirectoryHandleLike,
   fileName: string,
   expected: StreamedFileInfo
 ): Promise<boolean> {
-  // Verification read-back of a file this call just closed — a "not found" here
-  // is share latency, not absence, so it gets the opt-in retry.
-  const text = await readText(dir, fileName, { retryMissing: true });
-  if (text === null || text.length !== expected.fileLength) {
-    return false;
-  }
-  return simpleHash(text) === expected.fileHash;
+  return (await readVerifiedStreamedFile(dir, fileName, expected)) !== null;
+}
+
+// Phase 1.4: commits an already-staged-and-verified file by writing the exact
+// verified text out again in bounded chunks, instead of re-running the whole
+// serialization (streamJsonStringify walks the entire object graph a second
+// time — for a large month that is the single most expensive step of the
+// write, and it produced bytes that were by construction identical to the .tmp
+// we had just proved correct).
+//
+// It is still a real write of the full content (there is no rename/copy
+// primitive on FileHandleLike, and `createWritable` accepts strings only), so
+// the commit is unchanged from disk's point of view: same chunk size, same
+// per-chunk hashing, same StreamedFileInfo used for the post-commit byte-exact
+// verification. Only the serialization is not repeated.
+function writeVerifiedTextStreamed(
+  dir: DirectoryHandleLike,
+  fileName: string,
+  text: string
+): Promise<StreamedFileInfo> {
+  return streamToFile(dir, fileName, async (emit) => {
+    for (let offset = 0; offset < text.length; offset += STREAM_FLUSH_AT) {
+      const p = emit(text.slice(offset, offset + STREAM_FLUSH_AT));
+      if (p) await p;
+    }
+  });
 }
 
 // Observability only (B task 2) — the write itself is unchanged; these are
@@ -434,7 +470,7 @@ export async function safeWriteJson<T>(
 
   // Lock per directory+file so same-named files in different folders don't contend.
   await withWorkspaceWriteAccess(dir, () =>
-    withResourceLock(`${dir.name}/${fileName}`, async () => {
+    withResourceLock(directoryResourceKey(dir, fileName), async () => {
     const current = await readText(dir, fileName);
     const parsedCurrent = parseValidJson(current);
     const previousRevision =
@@ -489,21 +525,25 @@ export async function safeWriteJson<T>(
         buildMetadata
       );
       reportProgress(onProgress, "verifying-staged");
-      if (!(await verifyStreamedFile(dir, tmpName, stagedInfo))) {
+      const stagedText = await readVerifiedStreamedFile(dir, tmpName, stagedInfo);
+      if (stagedText === null) {
         await removeQuietly(dir, tmpName);
         throw new Error(`Safe-write staging failed for ${fileName}.`);
       }
 
-      // 3. Commit to the live file (re-stream, no giant string), then re-verify.
+      // 3. Commit to the live file by copying the bytes we just verified —
+      //    Phase 1.4: no second serialization pass. The committed content is
+      //    identical to what re-streaming produced (same data, same captured
+      //    writtenAt, same metadata), so `stagedInfo` is the expected result
+      //    for the post-commit byte-exact verification.
       reportProgress(onProgress, "committing");
-      const liveInfo = await streamEnvelopeToFile(
-        dir,
-        fileName,
-        data,
-        buildMetadata
-      );
+      const liveInfo = await writeVerifiedTextStreamed(dir, fileName, stagedText);
       reportProgress(onProgress, "verifying-committed");
-      if (!(await verifyStreamedFile(dir, fileName, liveInfo))) {
+      if (
+        liveInfo.fileHash !== stagedInfo.fileHash ||
+        liveInfo.fileLength !== stagedInfo.fileLength ||
+        !(await verifyStreamedFile(dir, fileName, stagedInfo))
+      ) {
         const bak = await readText(dir, `${fileName}.bak`);
         if (parseValidJson(bak) !== null) {
           await writeText(dir, fileName, bak as string);
@@ -515,14 +555,18 @@ export async function safeWriteJson<T>(
         // No usable .bak (first write, or .bak corrupt): the staged .tmp WAS
         // verified before commit — promote it instead of losing the data.
         try {
-          if (await verifyStreamedFile(dir, tmpName, stagedInfo)) {
-            const stagedText = await readText(dir, tmpName, { retryMissing: true });
-            if (stagedText !== null) {
-              await writeText(dir, fileName, stagedText);
-              if (await verifyStreamedFile(dir, fileName, stagedInfo)) {
-                await removeQuietly(dir, tmpName);
-                return; // recovered — the write succeeded via promotion
-              }
+          // Re-read (rather than reusing the text held above) so promotion is
+          // driven by what is provably still on disk right now.
+          const survivingStaged = await readVerifiedStreamedFile(
+            dir,
+            tmpName,
+            stagedInfo
+          );
+          if (survivingStaged !== null) {
+            await writeText(dir, fileName, survivingStaged);
+            if (await verifyStreamedFile(dir, fileName, stagedInfo)) {
+              await removeQuietly(dir, tmpName);
+              return; // recovered — the write succeeded via promotion
             }
           }
         } catch (error) {
@@ -642,7 +686,7 @@ export async function safeWriteJsonText(
   const tmpName = `${fileName}.tmp`;
 
   await withWorkspaceWriteAccess(dir, () =>
-    withResourceLock(`${dir.name}/${fileName}`, async () => {
+    withResourceLock(directoryResourceKey(dir, fileName), async () => {
     const current = await readText(dir, fileName);
     if (parseValidJson(current) !== null) {
       await writeText(dir, `${fileName}.bak`, current as string);
@@ -652,13 +696,20 @@ export async function safeWriteJsonText(
       // Streamed path: re-normalize the restore payload verbatim (it is already
       // a valid envelope or bare JSON) without ever building one giant string.
       const stagedInfo = await streamValueToFile(dir, tmpName, parsed);
-      if (!(await verifyStreamedFile(dir, tmpName, stagedInfo))) {
+      const stagedText = await readVerifiedStreamedFile(dir, tmpName, stagedInfo);
+      if (stagedText === null) {
         await removeQuietly(dir, tmpName);
         throw new Error(`Safe-write staging failed for ${fileName}.`);
       }
 
-      const liveInfo = await streamValueToFile(dir, fileName, parsed);
-      if (!(await verifyStreamedFile(dir, fileName, liveInfo))) {
+      // Phase 1.4: commit the verified staged bytes instead of serializing the
+      // restore payload a second time.
+      const liveInfo = await writeVerifiedTextStreamed(dir, fileName, stagedText);
+      if (
+        liveInfo.fileHash !== stagedInfo.fileHash ||
+        liveInfo.fileLength !== stagedInfo.fileLength ||
+        !(await verifyStreamedFile(dir, fileName, stagedInfo))
+      ) {
         const bak = await readText(dir, `${fileName}.bak`);
         if (parseValidJson(bak) !== null) {
           await writeText(dir, fileName, bak as string);
