@@ -153,7 +153,7 @@ describe("drawSample — legacy path golden master", () => {
 
     expect(data).toEqual({
       rngSeed: "golden-seed-1",
-      samplingAlgorithmVersion: "1.0",
+      samplingAlgorithmVersion: "1.1",
       drawnBy: "tester",
       totalRequested: 9,
       totalActual: 9,
@@ -319,34 +319,31 @@ describe("drawSample — stage path golden master", () => {
       "بري-S2-N4",
       "بري-S2-N0",
       "بري-S2-N1",
-      "بري-S2-N3",
-      "بري-S2-N2",
       "Bبحري-S2-C0",
       "Bبحري-S2-N0",
-      "Bبحري-S2-N1",
-      "Bبحري-S2-N2",
-      // The last two بري stage-2 CertScan rows arrive via the spillover round,
-      // i.e. AFTER the other port's rows, breaking the per-port grouping.
-      "بري-S2-C0",
-      "بري-S2-C1",
       "بري-S3-C0",
       "بري-S3-C1",
-      "بري-S3-N1",
       "بري-S3-N0",
+      "بري-S3-N1",
     ]);
   });
 
-  it("SURPRISE: a `percentage` rule's raw value is compared against a ROW COUNT during stage redistribution", () => {
-    // Stage 2's rule is `method: "percentage", value: 25` — i.e. 25% of 12
-    // available rows = an effective target of 3. But
-    // `redistributeStageShortfall` reads `plan.configuredValues` (which is the
-    // raw `rule.value`, 25, regardless of method) and compares it against the
-    // 12 rows that exist, concluding stage 2 is 13 rows SHORT. It then hands
-    // stage 2 (and stage 3) the spare capacity to absorb that phantom
-    // shortfall, so both stages end up drawing their ENTIRE population:
-    // stage 2's target goes 3 → 12, stage 3's goes 3 → 4.
-    // See sampleAlgorithmInternals.ts:276-307 (redistributeStageShortfall) and
-    // :265/:271 where configuredValues is filled from `rule.value`.
+  it("resolves a `percentage` rule to a ROW COUNT before stage redistribution compares it", () => {
+    // Stage 2's rule is `method: "percentage", value: 25` — 25% of its 12
+    // available rows = a target of 3. `buildStagePlan` records that RESOLVED
+    // row count in plan.configuredValues (not the raw `25`), so
+    // `redistributeStageShortfall` compares like with like and sees no
+    // shortfall for stage 2 at all.
+    //
+    // The redistribution that does happen here is genuine: stage 4 is
+    // configured for 4 exact rows and has none, so 4 rows of shortfall are
+    // spread over the absorbers by configured weight (stage 2 weight 3, stage 3
+    // weight 3): stage 2 goes 3 → 6, stage 3 goes 3 → 4 (its whole population,
+    // which is all its 1-row spare capacity allows). The remaining 0 evaporate.
+    //
+    // Before the fix the raw 25 was compared against 12 available rows, so
+    // stage 2 was declared 13 rows short and both stages were inflated to their
+    // ENTIRE population (stage 2 target 12, stage 3 target 4, totalRequested 21).
     const result = drawSample(rows, config, "tester");
     if (!result.ok) throw new Error("draw failed");
 
@@ -364,23 +361,23 @@ describe("drawSample — stage path golden master", () => {
         stageKey: "second",
         stageLabel: "المستوى الثاني",
         populationSize: 12,
-        targetQuota: 12, // configured 25% of 12 → 3; inflated to 12 by redistribution
-        actualDrawn: 12,
-        certScanDrawn: 4,
-        nonCertScanDrawn: 8,
+        targetQuota: 6, // configured 25% of 12 → 3; +3 absorbed from stage 4
+        actualDrawn: 6,
+        certScanDrawn: 2,
+        nonCertScanDrawn: 4,
       },
       {
         stageKey: "third",
         stageLabel: "المستوى الثالث",
         populationSize: 4,
-        targetQuota: 4, // configured 3; +1 absorbed
+        targetQuota: 4, // configured 3; +1 absorbed (all its spare capacity)
         actualDrawn: 4,
         certScanDrawn: 2,
         nonCertScanDrawn: 2,
       },
     ]);
-    expect(result.data.totalRequested).toBe(21);
-    expect(result.data.totalActual).toBe(21);
+    expect(result.data.totalRequested).toBe(15);
+    expect(result.data.totalActual).toBe(15);
   });
 
   it("pins the merged port allocations and shortfalls for that draw", () => {
@@ -396,24 +393,24 @@ describe("drawSample — stage path golden master", () => {
         populationSize: 22,
         certScanCount: 9,
         nonCertScanCount: 13,
-        allocatedQuota: 15,
+        allocatedQuota: 11,
         certScanQuota: 7,
-        nonCertScanQuota: 8,
-        actualCertScanDrawn: 7,
-        actualNonCertScanDrawn: 8,
-        actualTotalDrawn: 15,
+        nonCertScanQuota: 4,
+        actualCertScanDrawn: 5,
+        actualNonCertScanDrawn: 6,
+        actualTotalDrawn: 11,
       },
       {
         portName: "بحري",
         populationSize: 10,
         certScanCount: 3,
         nonCertScanCount: 7,
-        allocatedQuota: 6,
+        allocatedQuota: 4,
         certScanQuota: 2,
-        nonCertScanQuota: 4,
+        nonCertScanQuota: 2,
         actualCertScanDrawn: 2,
-        actualNonCertScanDrawn: 4,
-        actualTotalDrawn: 6,
+        actualNonCertScanDrawn: 2,
+        actualTotalDrawn: 4,
       },
     ]);
 
@@ -437,10 +434,10 @@ describe("drawSample — stage path golden master", () => {
       rngSeed: result.data.rngSeed,
     }).toEqual({
       certScanRequested: 9,
-      nonCertScanRequested: 12,
-      certScanActual: 9,
-      nonCertScanActual: 12,
-      samplingAlgorithmVersion: "1.0",
+      nonCertScanRequested: 6,
+      certScanActual: 7,
+      nonCertScanActual: 8,
+      samplingAlgorithmVersion: "1.1",
       rngSeed: "golden-stage-1",
     });
   });

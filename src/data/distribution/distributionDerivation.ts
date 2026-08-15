@@ -16,7 +16,38 @@ export type FoldResult = {
   entries: DistributionEntry[];
   droppedEventIds: Set<string>;
   droppedImageIds: Set<string>;
+  /**
+   * Events whose `xrayImageId` is not in `sampleRows` at all. They cannot be
+   * folded (there is no row to attach an entry to) and are therefore absorbed
+   * — but absorbed VISIBLY: they used to vanish from both `droppedEventIds`
+   * and `droppedImageIds`, so nothing downstream could tell they existed, and
+   * an `assigned` event for a phantom image still inflated the employee's
+   * `sampleCount`/`dailyQuota` in `deriveEmployeeQuotasWithFacts`.
+   *
+   * Kept SEPARATE from `droppedEventIds` on purpose: that set means "a real
+   * sample row exists but this event was illegal/uninterpretable", it is what
+   * the aggregated `distribution:derive` warning counts, and widening it would
+   * change the meaning of an established output. Quota derivation excludes
+   * both sets (see {@link QuotaExcludedEvents}).
+   */
+  absentRowEventIds: Set<string>;
 };
+
+/**
+ * The event ids quota derivation must ignore. Pass a `FoldResult` (it is
+ * structurally assignable) so BOTH the illegal/unknown events and the
+ * absent-row events are excluded; a bare `ReadonlySet<string>` is still
+ * accepted for callers that have only an explicit drop list.
+ */
+export type QuotaExcludedEvents =
+  | ReadonlySet<string>
+  | { droppedEventIds: ReadonlySet<string>; absentRowEventIds: ReadonlySet<string> };
+
+function isExcludedEvent(excluded: QuotaExcludedEvents, eventId: string): boolean {
+  return "has" in excluded
+    ? excluded.has(eventId)
+    : excluded.droppedEventIds.has(eventId) || excluded.absentRowEventIds.has(eventId);
+}
 
 type EventTransition = {
   status: DistributionStatus;
@@ -134,23 +165,21 @@ export function foldDistributionEvents(
   const result: FoldResult = {
     entries: [],
     droppedEventIds: new Set<string>(),
-    droppedImageIds: new Set<string>()
+    droppedImageIds: new Set<string>(),
+    absentRowEventIds: new Set<string>()
   };
 
+  const absentImageIds = new Set<string>();
+
   // A6e (H3): make an otherwise-silent mass-absorption visible. `rows` empty
-  // while real events exist means every one of them is about to hit the bare
-  // `continue` just below (before recordDroppedEvent, so it is neither
-  // reported in droppedEventIds nor logged there) — this is the same
-  // condition loadOrDeriveDistributionCurrent's entry gate (A6d) exists to
-  // stop before it ever reaches this function on the normal path, but this
-  // module is also callable directly (deriveCurrentDistribution and friends
-  // in distributionLog.ts), so the visibility net stays here too. Logged
-  // once per call, not per event -- one call already means N identical
-  // silent drops, not N distinct problems. Deliberately NOT converted into a
-  // per-event recordDroppedEvent call: that would change droppedEventIds,
-  // which feeds deriveEmployeeQuotasWithFacts and would alter quota output
-  // on this deterministic-by-contract surface (see the module's own
-  // snapshot-first testing convention).
+  // while real events exist means every one of them is about to be absorbed
+  // by the absent-row branch below — this is the same condition
+  // loadOrDeriveDistributionCurrent's entry gate (A6d) exists to stop before
+  // it ever reaches this function on the normal path, but this module is also
+  // callable directly (deriveCurrentDistribution and friends in
+  // distributionLog.ts), so the visibility net stays here too. Logged once per
+  // call, not per event -- one call already means N identical silent drops,
+  // not N distinct problems.
   if (rows.size === 0 && events.length > 0) {
     logError(
       "distribution:fold-no-rows",
@@ -160,7 +189,15 @@ export function foldDistributionEvents(
 
   for (const event of events) {
     const row = rows.get(event.xrayImageId);
-    if (!row) continue;
+    if (!row) {
+      // No sample row for this image: nothing can be folded. Record it in its
+      // own set (NOT droppedEventIds — see the FoldResult docblock) so the
+      // caller can see it and so quota derivation stops counting a phantom
+      // `assigned` event toward the employee's sampleCount/dailyQuota.
+      result.absentRowEventIds.add(event.eventId);
+      absentImageIds.add(event.xrayImageId);
+      continue;
+    }
 
     const existing = entries.get(event.xrayImageId);
     if (isUnsupportedEvent(event, supportedSchemaVersion) || isIllegalTerminalTransition(existing, event)) {
@@ -191,6 +228,18 @@ export function foldDistributionEvents(
       // PreparedPopulationRow — see the docblock on DistributionEntry.row.
       row: toEmployeeMirrorRowStub(row)
     });
+  }
+
+  // Aggregated once per call, same as the drop reporting in distributionLog.ts.
+  // Skipped when the row set was empty — that case already logged above, and
+  // repeating it per-image would just restate the same single problem.
+  if (rows.size > 0 && result.absentRowEventIds.size > 0) {
+    logError(
+      "distribution:fold-absent-row",
+      new Error(
+        `foldDistributionEvents: ${result.absentRowEventIds.size} event(s) reference ${absentImageIds.size} xrayImageId(s) absent from the sample rows: ${[...absentImageIds].join(", ")}.`
+      )
+    );
   }
 
   result.entries = Array.from(entries.values());
@@ -239,10 +288,10 @@ function isEventEarlierThanEntry(event: DistributionEvent, entry: DistributionEn
 
 export function deriveEmployeeQuotas(
   events: DistributionEvent[],
-  droppedEventIds: ReadonlySet<string>,
+  excluded: QuotaExcludedEvents,
   monthFolderName: string
 ): Record<string, EmployeeQuota> | undefined {
-  return deriveEmployeeQuotasWithFacts(events, droppedEventIds, monthFolderName).quotas;
+  return deriveEmployeeQuotasWithFacts(events, excluded, monthFolderName).quotas;
 }
 
 /**
@@ -253,11 +302,11 @@ export function deriveEmployeeQuotas(
  */
 export function deriveEmployeeQuotasWithFacts(
   events: DistributionEvent[],
-  droppedEventIds: ReadonlySet<string>,
+  excluded: QuotaExcludedEvents,
   monthFolderName: string,
   resumeFacts?: QuotaFacts
 ): { quotas: Record<string, EmployeeQuota> | undefined; facts: QuotaFacts } {
-  const facts = collectAssignmentFacts(events, droppedEventIds, resumeFacts);
+  const facts = collectAssignmentFacts(events, excluded, resumeFacts);
   const quotas: Record<string, EmployeeQuota> = {};
   const monthInfo = parseMonthFolderName(monthFolderName);
   for (const [username, firstAssignment] of Object.entries(facts.firstAssignments)) {
@@ -278,14 +327,14 @@ export function deriveEmployeeQuotasWithFacts(
 
 function collectAssignmentFacts(
   events: DistributionEvent[],
-  droppedEventIds: ReadonlySet<string>,
+  excluded: QuotaExcludedEvents,
   resumeFacts?: QuotaFacts
 ): QuotaFacts {
   const assignmentCounts: Record<string, number> = { ...(resumeFacts?.assignmentCounts ?? {}) };
   const firstAssignments: Record<string, DistributionEvent> = { ...(resumeFacts?.firstAssignments ?? {}) };
   const latestStoredQuotas: Record<string, DistributionEvent> = { ...(resumeFacts?.latestStoredQuotas ?? {}) };
   for (const event of events) {
-    if (event.eventType !== "assigned" || droppedEventIds.has(event.eventId)) continue;
+    if (event.eventType !== "assigned" || isExcludedEvent(excluded, event.eventId)) continue;
     firstAssignments[event.assignedTo] ??= event;
     assignmentCounts[event.assignedTo] = (assignmentCounts[event.assignedTo] ?? 0) + 1;
     if (event.dailyQuota !== undefined && event.daysRemainingAtAssignment !== undefined) {

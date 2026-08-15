@@ -224,6 +224,25 @@ export function drawLegacySample(
 }
 
 /**
+ * A stage rule's configured target expressed in ROWS, before any availability
+ * cap or `minRequiredCount` floor is applied.
+ *
+ * `StageSamplingRule.value` is method-dependent: a percentage (0-100) when
+ * `method === "percentage"`, an absolute row count when `method === "exact"`
+ * (see populationConfig.ts). The percentage denominator is the stage's own
+ * available row count — the same denominator {@link configuredTarget} has
+ * always used — so "25% of level 2" means 25% of the level-2 rows that exist,
+ * not 25% of the whole population.
+ *
+ * Everything that compares a rule against a row count (the availability cap
+ * here, and `redistributeStageShortfall`'s shortfall/weight arithmetic) must go
+ * through this, otherwise a raw percentage gets compared against a row count.
+ */
+function configuredRowCount(rule: StageSamplingRule, available: number): number {
+  return rule.method === "percentage" ? Math.round((rule.value / 100) * available) : rule.value;
+}
+
+/**
  * The per-stage target after applying `minRequiredCount` as a floor and capping
  * at `available` (never draw more than exists). Exported so UI code (Phase 3's
  * running-total display, B-owner config panel) can show the *effective* target
@@ -231,7 +250,7 @@ export function drawLegacySample(
  * copy of the floor logic and risking drift from the real draw.
  */
 export function configuredTarget(rule: StageSamplingRule, available: number): number {
-  let target = rule.method === "percentage" ? Math.round((rule.value / 100) * available) : rule.value;
+  let target = configuredRowCount(rule, available);
   if (rule.minRequiredCount > 0) {
     target = available < rule.minRequiredCount ? available : Math.max(target, rule.minRequiredCount);
   }
@@ -268,7 +287,10 @@ function buildStagePlan(rows: PreparedPopulationRow[], config: StageConfig): Sta
     const rule = rulesByStage.get(stageKey);
     availableCounts.set(stageKey, available);
     effectiveTargets.set(stageKey, rule ? configuredTarget(rule, available) : 0);
-    configuredValues.set(stageKey, rule?.value ?? 0);
+    // Row count, never the raw `rule.value`: for a `percentage` rule the raw
+    // value is a percentage, and redistributeStageShortfall compares this
+    // against `available` (a row count) and weights absorbers by it.
+    configuredValues.set(stageKey, rule ? configuredRowCount(rule, available) : 0);
   }
   return { rowStageKeys, rulesByStage, effectiveTargets, availableCounts, configuredValues };
 }

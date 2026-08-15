@@ -204,7 +204,7 @@ export function deriveCurrentDistributionWithFacts(
   log: DistributionLog,
   sampleRows: PreparedPopulationRow[]
 ): { current: DistributionCurrentData; quotaFacts: QuotaFacts } {
-  const { entries, droppedEventIds, droppedImageIds } = foldDistributionEvents(
+  const { entries, droppedEventIds, droppedImageIds, absentRowEventIds } = foldDistributionEvents(
     log.events,
     sampleRows,
     EVENT_SCHEMA_VERSION
@@ -222,7 +222,13 @@ export function deriveCurrentDistributionWithFacts(
     );
   }
 
-  const { quotas, facts } = deriveEmployeeQuotasWithFacts(log.events, droppedEventIds, log.monthFolderName);
+  // Both exclusion sets: absent-row events were never folded into an entry, so
+  // counting them would inflate the employee's sampleCount/dailyQuota.
+  const { quotas, facts } = deriveEmployeeQuotasWithFacts(
+    log.events,
+    { droppedEventIds, absentRowEventIds },
+    log.monthFolderName
+  );
   const summary = summarizeDistribution(entries);
 
   const current: DistributionCurrentData = {
@@ -281,7 +287,7 @@ export function deriveCurrentDistributionIncremental(
   }
 
   const resumeEntries = new Map(previous.entries.map((entry) => [entry.xrayImageId, entry]));
-  const { entries, droppedEventIds, droppedImageIds } = foldDistributionEvents(
+  const { entries, droppedEventIds, droppedImageIds, absentRowEventIds } = foldDistributionEvents(
     newEvents,
     sampleRows,
     EVENT_SCHEMA_VERSION,
@@ -299,7 +305,7 @@ export function deriveCurrentDistributionIncremental(
 
   const { quotas, facts } = deriveEmployeeQuotasWithFacts(
     newEvents,
-    droppedEventIds,
+    { droppedEventIds, absentRowEventIds },
     previous.monthFolderName,
     previousQuotaFacts
   );

@@ -286,11 +286,13 @@ describe("foldDistributionEvents — golden master", () => {
     expect(result.entries[0]).toMatchObject({ status: "pending", assignedTo: "emp-a" });
   });
 
-  it("SURPRISE: an event for an unknown xrayImageId is silently absorbed — NOT reported as dropped", () => {
-    // distributionDerivation.ts:163 — `if (!row) continue;` happens BEFORE
-    // recordDroppedEvent, so the caller cannot tell these events existed. This
-    // matters downstream: deriveEmployeeQuotasWithFacts filters on
-    // droppedEventIds, so these still count toward an employee's quota (pinned
+  it("reports an event for an unknown xrayImageId in absentRowEventIds", () => {
+    // No sample row → nothing to fold, but the absorption is now VISIBLE: the
+    // event lands in its own `absentRowEventIds` set (and is logged via
+    // errorLogger). It stays OUT of droppedEventIds/droppedImageIds, which mean
+    // "a real row exists but this event was illegal/uninterpretable" and feed
+    // the aggregated distribution:derive warning. Quota derivation excludes
+    // both sets, so a phantom assignment no longer inflates a quota (pinned
     // separately below).
     const result = foldDistributionEvents(
       [evt("e1", "assigned", "ghost", "emp-a", "2026-05-04T08:00:00.000Z")],
@@ -298,6 +300,7 @@ describe("foldDistributionEvents — golden master", () => {
       1
     );
     expect(result.entries).toEqual([]);
+    expect([...result.absentRowEventIds]).toEqual(["e1"]);
     expect([...result.droppedEventIds]).toEqual([]);
     expect([...result.droppedImageIds]).toEqual([]);
   });
@@ -434,14 +437,17 @@ describe("foldDistributionEvents — golden master", () => {
       entries: [],
       droppedEventIds: new Set(),
       droppedImageIds: new Set(),
+      absentRowEventIds: new Set(),
     });
-    // Events with an empty row set: everything is absorbed (logged, not reported).
+    // Events with an empty row set: every event is absorbed as absent-row
+    // (logged once via the distribution:fold-no-rows key), never as dropped.
     const noRows = foldDistributionEvents(
       [evt("e1", "assigned", "img-1", "emp-a", "2026-05-04T08:00:00.000Z")],
       [],
       1
     );
     expect(noRows.entries).toEqual([]);
+    expect([...noRows.absentRowEventIds]).toEqual(["e1"]);
     expect([...noRows.droppedEventIds]).toEqual([]);
   });
 });
@@ -605,14 +611,33 @@ describe("deriveEmployeeQuotasWithFacts — golden master", () => {
     expect(quotas?.["emp-a"].sampleCount).toBe(2);
   });
 
-  it("SURPRISE: assignments for images absent from the sample still count toward quota", () => {
-    // Pairs with the fold behavior pinned above: an unknown xrayImageId is not
-    // added to droppedEventIds, so nothing filters it out here.
+  it("excludes assignments for images absent from the sample when the fold result is passed", () => {
+    // Pairs with the fold behavior pinned above. Passing the whole FoldResult
+    // (both exclusion sets) is what production does — the phantom assignment is
+    // filtered out, so emp-a has no countable assignment left and drops out of
+    // `quotas` entirely. Before the fix this returned sampleCount 1 and a
+    // dailyQuota derived from it.
     const events = [evt("a1", "assigned", "ghost", "emp-a", "2026-05-01T00:00:00.000Z")];
     const fold = foldDistributionEvents(events, [makeRow("img-1")], 1);
     expect(fold.entries).toEqual([]);
-    const { quotas } = deriveEmployeeQuotasWithFacts(events, fold.droppedEventIds, MONTH);
-    expect(quotas?.["emp-a"].sampleCount).toBe(1);
+    expect([...fold.absentRowEventIds]).toEqual(["a1"]);
+    expect(deriveEmployeeQuotasWithFacts(events, fold, MONTH).quotas).toBeUndefined();
+
+    // A bare Set is still accepted (callers holding only an explicit drop
+    // list), and then only that list is excluded — this is the pre-fix shape.
+    const legacy = deriveEmployeeQuotasWithFacts(events, fold.droppedEventIds, MONTH);
+    expect(legacy.quotas?.["emp-a"].sampleCount).toBe(1);
+  });
+
+  it("counts a real assignment while excluding a phantom one from the same employee", () => {
+    const events = [
+      evt("a1", "assigned", "img-1", "emp-a", "2026-05-01T00:00:00.000Z"),
+      evt("a2", "assigned", "ghost", "emp-a", "2026-05-01T00:00:00.000Z"),
+    ];
+    const fold = foldDistributionEvents(events, [makeRow("img-1")], 1);
+    const { quotas } = deriveEmployeeQuotasWithFacts(events, fold, MONTH);
+    // sampleCount 1, not 2 — and dailyQuota follows from the honest count.
+    expect(quotas?.["emp-a"]).toMatchObject({ sampleCount: 1, dailyQuota: 1 });
   });
 
   it("pins that dropped assignment events are excluded", () => {
