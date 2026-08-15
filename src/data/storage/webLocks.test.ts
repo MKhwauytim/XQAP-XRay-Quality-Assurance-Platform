@@ -1,6 +1,8 @@
 import { afterEach, expect, test, vi } from "vitest";
 
-import { withResourceLock } from "./webLocks";
+import type { DirectoryHandleLike } from "./fileSystemAccess";
+import { createMemoryDirectory } from "./memoryDirectory";
+import { directoryPath, directoryResourceKey, withResourceLock } from "./webLocks";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -73,4 +75,41 @@ test("native LockManager: propagates exceptions from the callback", async () => 
       throw new Error("native boom");
     })
   ).rejects.toThrow("native boom");
+});
+
+test("registered directory paths keep same-named folders off one lock", async () => {
+  const root = createMemoryDirectory("lock-root");
+  const may = await (
+    await (await root.getDirectoryHandle("2-samples", { create: true })).getDirectoryHandle(
+      "5-May-2026",
+      { create: true }
+    )
+  ).getDirectoryHandle("1-main", { create: true });
+  const june = await (
+    await (await root.getDirectoryHandle("2-samples", { create: true })).getDirectoryHandle(
+      "6-June-2026",
+      { create: true }
+    )
+  ).getDirectoryHandle("1-main", { create: true });
+
+  const events: string[] = [];
+  async function critical(dir: DirectoryHandleLike, tag: string): Promise<void> {
+    await withResourceLock(directoryResourceKey(dir, "sample.master.json"), async () => {
+      events.push(`${tag}:start`);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      events.push(`${tag}:end`);
+    });
+  }
+
+  await Promise.all([critical(may, "may"), critical(june, "june")]);
+
+  // Both leaves are named "1-main": under the old `dir.name` key these two
+  // months serialized against each other. They must now interleave.
+  expect(events).toEqual(["may:start", "june:start", "may:end", "june:end"]);
+});
+
+test("two files in the same directory still get distinct keys", async () => {
+  const dir = await createMemoryDirectory("k").getDirectoryHandle("1-main", { create: true });
+  expect(directoryResourceKey(dir, "a.json")).not.toBe(directoryResourceKey(dir, "b.json"));
+  expect(directoryPath(dir)).toBe("1-main");
 });

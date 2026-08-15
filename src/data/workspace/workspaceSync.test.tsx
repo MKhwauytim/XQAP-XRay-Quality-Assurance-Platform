@@ -545,7 +545,13 @@ describe("runSync — per-tick round-trip budget (UNC/SMB cost regression guard)
   it("scales at ONE operation per answers/decisions file, not two", async () => {
     const root = createMemoryDirectory("op-root", { trackOperations: true });
     await seedWorkspace(root, 10);
-    await runSync({ directoryHandle: root, monthFolderName: MONTH }); // baseline probe
+    // Two warm-up runs, not one: the first settles the probe stamps, the
+    // second settles the workspace-epoch bump that the first one's broadcast
+    // triggers (which invalidates the month-scoped directory-handle cache).
+    // Measuring on an unsettled cache would fold a one-off re-resolution into
+    // the marginal cost being compared.
+    await runSync({ directoryHandle: root, monthFolderName: MONTH });
+    await runSync({ directoryHandle: root, monthFolderName: MONTH });
 
     clearOperationLog(root);
     await runSync({ directoryHandle: root, monthFolderName: MONTH });
@@ -553,6 +559,7 @@ describe("runSync — per-tick round-trip budget (UNC/SMB cost regression guard)
 
     // Add ten more employees and re-measure the marginal cost.
     await seedWorkspace(root, 20);
+    await runSync({ directoryHandle: root, monthFolderName: MONTH });
     await runSync({ directoryHandle: root, monthFolderName: MONTH });
     clearOperationLog(root);
     await runSync({ directoryHandle: root, monthFolderName: MONTH });
@@ -574,14 +581,16 @@ describe("runSync — per-tick round-trip budget (UNC/SMB cost regression guard)
     await runSync({ directoryHandle: root, monthFolderName: MONTH });
     const opens = getOperationLog(root).filter((entry) => entry.operation === "getDirectoryHandle");
 
-    // 2-samples, {month}, 1-main, 2-employees, 3-approvals, 1-population,
-    // {month}, 5-system, notifications — nine, each exactly once. The three
-    // sample sub-dirs used to re-walk 2-samples/{month} independently, the
-    // manifest probe re-walked 1-population/{month}, and the cadence read
-    // re-opened 5-system: sixteen opens for the same nine directories.
-    expect(opens).toHaveLength(9);
+    // Was nine (2-samples, {month}, 1-main, 2-employees, 3-approvals,
+    // 1-population, {month}, 5-system, notifications), each exactly once —
+    // itself down from sixteen. The workspacePaths directory-handle cache
+    // (item 1.7) now serves every handle it hands out, so the five it owns
+    // (both roots, both {month} dirs, 5-system) cost nothing on a warm tick.
+    // What is left is the four this file resolves off an already-resolved
+    // parent handle itself, outside those getters.
+    expect(opens).toHaveLength(4);
     const distinct = new Set(opens.map((entry) => entry.name));
-    expect(distinct.size).toBe(opens.length - 1); // only "{month}" appears twice
+    expect(distinct.size).toBe(opens.length); // no directory opened twice
   });
 
   it("costs ONE operation to conclude the workspace has no stored cadence", async () => {
@@ -594,12 +603,13 @@ describe("runSync — per-tick round-trip budget (UNC/SMB cost regression guard)
     const log = getOperationLog(root);
 
     // With no month selected the ONLY disk work is the cadence read: one
-    // getDirectoryHandle for 5-system plus one getFileHandle that misses.
-    // safeReadJson would have probed .bak and .tmp as well — two extra opens
-    // per tick per client, permanently, on every workspace whose admin has
-    // never set a cadence (i.e. the default state).
+    // getFileHandle that misses. safeReadJson would have probed .bak and .tmp
+    // as well — two extra opens per tick per client, permanently, on every
+    // workspace whose admin has never set a cadence (i.e. the default state).
+    // The 5-system getDirectoryHandle that used to accompany it is now served
+    // from the workspacePaths directory-handle cache (item 1.7).
     expect(log.filter((entry) => entry.operation === "getFileHandle")).toHaveLength(1);
-    expect(log).toHaveLength(2);
+    expect(log).toHaveLength(1);
     expect(getSyncIntervalMs()).toBe(DEFAULT_SYNC_INTERVAL_MS);
   });
 });

@@ -2,6 +2,7 @@ import type {
   DirectoryHandleLike,
   FileHandleLike
 } from "./fileSystemAccess";
+import { registerDirectoryPath } from "./webLocks";
 
 function notFound(name: string): Error {
   const error = new Error(`Not found: ${name}`);
@@ -400,6 +401,11 @@ function makeDirectoryHandle(
     }
   };
   const typedHandle = handle as DirectoryHandleLike;
+  // Item 1.11: give every handle in a test tree the same full-path lock key a
+  // real workspace handle gets from `workspacePaths.ts`, so lock-contention
+  // behaviour is observable in tests. The root itself has an empty relative
+  // path, so it registers under its own name (the pre-registry fallback).
+  registerDirectoryPath(typedHandle, path || name);
   permissionRegistry.set(typedHandle, permission);
   if (readLog) readLogRegistry.set(typedHandle, readLog);
   if (faultState) faultRegistry.set(typedHandle, faultState);
