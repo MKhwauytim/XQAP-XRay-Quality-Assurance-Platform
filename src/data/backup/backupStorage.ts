@@ -13,7 +13,14 @@ import type { MonthFolderInfo } from "../population/monthFolder";
 import type { MonthManifestData, MonthRawData, PopulationFinalData } from "../population/monthTypes";
 import type { SampleMasterData } from "../sampling/sampleTypes";
 import type { DirectoryHandleLike, FileHandleLike } from "../storage/fileSystemAccess";
-import { readFileTextWithRetry, safeReadJson, safeWriteJson, safeWriteJsonText } from "../storage/safeWrite";
+import {
+  copyFileBytes,
+  isCompressedFileText,
+  readFileTextWithRetry,
+  safeReadJson,
+  safeWriteJson,
+  safeWriteJsonText,
+} from "../storage/safeWrite";
 import { mapWithConcurrency } from "../storage/concurrency";
 import { withWorkspaceWriteAccess } from "../storage/workspaceWriteAccess";
 import { logError } from "../storage/errorLogger";
@@ -545,6 +552,17 @@ async function copyAllJsonFiles(directoryHandle: DirectoryHandleLike, backupDir:
   // exactly as the old .push()-only-on-success code did.
   const results = await mapWithConcurrency(pending, 8, async (entry) => {
     const text = await readTextFile(entry.sourceDir, entry.fileName);
+    // A compressed workspace file is copied as BYTES. Its name is identical to a
+    // plain one's (the format lives in the file's first line, not its
+    // extension), so this is where the two are told apart on the backup walk —
+    // reading a gzip member as text and writing it back would silently corrupt
+    // the snapshot. Recognized from the text ALREADY read (the head line decodes
+    // losslessly even when the body does not), so this costs no extra I/O and
+    // still goes through readTextFile's transient-error retry.
+    if (isCompressedFileText(text)) {
+      await copyFileBytes(entry.sourceDir, entry.fileName, entry.targetDir, entry.fileName);
+      return entry.relativePath;
+    }
     if (text === null) {
       // A last-write-wins JSON file that vanishes between the listing and the
       // read is expected churn on a live workspace (safeWriteJson's .tmp
@@ -812,6 +830,19 @@ async function restoreJsonTree(params: {
   // alone, and is filtered out below.
   const results = await mapWithConcurrency(pending, 4, async (entry) => {
     const text = await readTextFile(entry.sourceDir, entry.fileName);
+    // Mirror of the backup side: a compressed snapshot file goes back as bytes.
+    // The restored file keeps the same NAME as the plain one it replaces, so a
+    // compressed and a plain copy of one logical file can never coexist — the
+    // byte copy overwrites the target whole, whichever format it held.
+    if (isCompressedFileText(text)) {
+      if (entry.action === "restore-if-absent" && (await fileExists(entry.targetDir, entry.fileName))) {
+        return null;
+      }
+      // `merge-events` never reaches here: event segments are `.ndjson`,
+      // append-only, and never written through the compressing path.
+      await copyFileBytes(entry.sourceDir, entry.fileName, entry.targetDir, entry.fileName);
+      return { path: entry.relativePath, cacheDir: null };
+    }
     if (text === null) {
       // Mirror of the backup side: the restore source is an already-completed,
       // immutable snapshot, so a segment listed there but unreadable is a real

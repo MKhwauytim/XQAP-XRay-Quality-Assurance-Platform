@@ -217,10 +217,46 @@ function applyFaults(
   }
 }
 
+/**
+ * File content is held as BYTES, not as a JS string.
+ *
+ * The double used to store a string, which made it structurally incapable of
+ * representing a gzip body: `String.fromCharCode`-ing arbitrary bytes through a
+ * UTF-8 round trip is lossy, so every compressed-file test would have been
+ * testing a corrupted fixture. Bytes are also what a real
+ * `FileSystemWritableFileStream` accepts and what a real `File` hands back.
+ *
+ * The string-shaped API is unchanged: `write("…")` UTF-8-encodes, and `getFile()`
+ * builds a real `File` over the stored bytes, so `file.text()` decodes exactly as
+ * before. Every pre-existing test that writes and reads text is unaffected.
+ */
 type MemoryNode = {
-  files: Map<string, { content: string; lastModified: number }>;
+  files: Map<string, { content: Uint8Array<ArrayBuffer>; lastModified: number }>;
   dirs: Map<string, MemoryNode>;
 };
+
+const EMPTY_CONTENT: Uint8Array<ArrayBuffer> = new Uint8Array(0);
+
+/** Accepts what a real writable stream accepts: text or any BufferSource. */
+function toBytes(data: string | BufferSource): Uint8Array<ArrayBuffer> {
+  if (typeof data === "string") return new TextEncoder().encode(data);
+  if (ArrayBuffer.isView(data)) {
+    return new Uint8Array(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength));
+  }
+  return new Uint8Array(data.slice(0));
+}
+
+function concatBytes(chunks: Uint8Array<ArrayBuffer>[]): Uint8Array<ArrayBuffer> {
+  let total = 0;
+  for (const chunk of chunks) total += chunk.byteLength;
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return out;
+}
 
 /**
  * Per-file mtime for the double. A real file's `lastModified` is a property of
@@ -261,7 +297,9 @@ function makeFileHandle(
       applyFaults(faultState, operationLog, { operation: "getFile", name });
       readLog?.entries.push(path);
       const entry = node.files.get(name);
-      const content = entry ? entry.content : "";
+      const content = entry ? entry.content : EMPTY_CONTENT;
+      // `new File([...])` snapshots the bytes it is given (Blob semantics), so a
+      // later write to this node cannot mutate a File a test is still reading.
       return new File([content], name, {
         type: "application/json",
         lastModified: entry ? entry.lastModified : 0,
@@ -278,13 +316,13 @@ function makeFileHandle(
       if (permission.state !== "granted") {
         throw writePermissionDenied(name);
       }
-      let buffer = "";
+      const chunks: Uint8Array<ArrayBuffer>[] = [];
       return {
-        write: async (data: string) => {
-          buffer += data;
+        write: async (data: string | BufferSource) => {
+          chunks.push(toBytes(data));
         },
         close: async () => {
-          node.files.set(name, { content: buffer, lastModified: nextMemoryMtime() });
+          node.files.set(name, { content: concatBytes(chunks), lastModified: nextMemoryMtime() });
         }
       };
     }
@@ -324,7 +362,7 @@ function makeDirectoryHandle(
         throw writePermissionDenied(fileName);
       }
       if (!exists) {
-        node.files.set(fileName, { content: "", lastModified: nextMemoryMtime() });
+        node.files.set(fileName, { content: EMPTY_CONTENT, lastModified: nextMemoryMtime() });
       }
       return makeFileHandle(
         fileName,

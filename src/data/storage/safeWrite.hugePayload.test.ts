@@ -33,6 +33,20 @@ import {
   safeReadJson,
   safeWriteJson,
 } from "./safeWrite";
+import { PLAIN_JSON_POLICY } from "./storagePolicy";
+
+/**
+ * Every write below pins `PLAIN_JSON_POLICY` explicitly.
+ *
+ * `bi.raw.json` is one of the names `storagePolicy.ts` compresses, and these
+ * tests are not about that: they are about the PLAIN streamed writer — the path
+ * any large file outside the policy table still takes, and the path that has to
+ * keep working for every workspace already on disk. The compressed writer has
+ * its own byte-exactness tests in safeWrite.compressed.test.ts. Pinning the
+ * policy is what keeps these two suites testing two different things instead of
+ * silently collapsing into one.
+ */
+const PLAIN = { policy: PLAIN_JSON_POLICY } as const;
 
 afterEach(() => {
   __resetMaxStringLengthForTests();
@@ -81,7 +95,7 @@ test("a streamed write above the max-string-length ceiling succeeds and stays by
   __setStreamingForcedSizeLimitForTests(0); // force the streamed path
   __setMaxStringLengthForTests(1024 * 1024); // "engine" cannot hold >1 MB strings
 
-  await safeWriteJson(dir, "bi.raw.json", payload);
+  await safeWriteJson(dir, "bi.raw.json", payload, PLAIN);
 
   const raw = await readRaw(dir, "bi.raw.json");
   // The file really is far past the injected ceiling and spans several 4 MB
@@ -113,14 +127,14 @@ test("re-saving a file that is already too large to read as one string keeps the
   __setMaxStringLengthForTests(1024 * 1024);
 
   const first = multiWindowPayload();
-  await safeWriteJson(dir, "bi.raw.json", first);
+  await safeWriteJson(dir, "bi.raw.json", first, PLAIN);
 
   // Second save: safeWriteJson reads the EXISTING file before every write (for
   // the previous revision and the .bak snapshot). That read is a whole-string
   // read too, so before this fix a re-save of an oversized month threw
   // RangeError before the streamed path was even reached.
   const second = { rows: [...first.rows, { i: -1, note: "صف إضافي" }] };
-  await safeWriteJson(dir, "bi.raw.json", second);
+  await safeWriteJson(dir, "bi.raw.json", second, PLAIN);
 
   const live = JSON.parse(await readRaw(dir, "bi.raw.json")) as {
     metadata: { revision: number };
@@ -189,7 +203,7 @@ test("chunked verification still catches a single mutated character, and cleans 
     return `${written.slice(0, at)}فياس${written.slice(at + 4)}`;
   });
 
-  await expect(safeWriteJson(dir, "bi.raw.json", multiWindowPayload())).rejects.toThrow(
+  await expect(safeWriteJson(dir, "bi.raw.json", multiWindowPayload(), PLAIN)).rejects.toThrow(
     "Safe-write staging failed"
   );
   expect(mutatedAt).toBeGreaterThan(5_000_000);
@@ -235,7 +249,7 @@ test("a streamed write that fails mid-stream leaves no orphaned .tmp", async () 
     },
   };
 
-  await expect(safeWriteJson(dir, "bi.raw.json", multiWindowPayload())).rejects.toThrow(
+  await expect(safeWriteJson(dir, "bi.raw.json", multiWindowPayload(), PLAIN)).rejects.toThrow(
     "Simulated quota exhaustion"
   );
   expect(flushes).toBeGreaterThan(3);

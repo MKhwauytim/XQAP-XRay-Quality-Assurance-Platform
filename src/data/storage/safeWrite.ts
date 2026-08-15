@@ -36,6 +36,24 @@
  */
 import type { DirectoryHandleLike } from "./fileSystemAccess";
 import { assertWritableMode } from "./readOnlyMode";
+import {
+  COMPRESSED_FORMAT_ID,
+  HEAD_PROBE_BYTES,
+  classifyHeadWindow,
+  isCompressionSupported,
+  readEnvelopeMetadata,
+  streamCompressedBody,
+  writeCompressedFile,
+  type CompressedHead,
+  type CompressedHeadInput,
+  type CompressedWriteResult,
+} from "./compressedEnvelope";
+import { decodePayloadColumns, encodePayloadColumns } from "./columnarPayload";
+import {
+  payloadQualifiesForCompression,
+  resolveStoragePolicy,
+  type StoragePolicy,
+} from "./storagePolicy";
 import { directoryResourceKey, withResourceLock } from "./webLocks";
 import { withWorkspaceWriteAccess } from "./workspaceWriteAccess";
 import {
@@ -173,6 +191,137 @@ async function readText(
       throw error;
     }
   }
+}
+
+/**
+ * What one file read produced, WITHOUT deciding what it means.
+ *
+ * `damaged` is a file that exists but cannot be read as the format its own first
+ * bytes claim — today only a compressed member whose gzip CRC32/ISIZE check
+ * failed. It is deliberately distinct from "missing": safeReadJson must fall
+ * through to `.bak`/`.tmp` for it (as it does for unparseable JSON) and must
+ * report `corrupt`, not `missing`.
+ */
+type FileContent =
+  | { kind: "plain"; text: string }
+  | { kind: "compressed"; head: CompressedHead; bodyText: string }
+  | { kind: "damaged" };
+
+/**
+ * Format-aware read: opens the file ONCE, classifies it from a bounded head
+ * window, and returns either its text or its decompressed body.
+ *
+ * The extra cost over `readText` for a plain file is a single `Blob.slice` of at
+ * most {@link HEAD_PROBE_BYTES} — and for the great majority of workspace files,
+ * which are smaller than that window, it is not even a second read of anything.
+ * That is the whole price of making dual read automatic everywhere instead of
+ * conditioning it on a policy table the reader would have to trust.
+ */
+async function readContent(
+  dir: DirectoryHandleLike,
+  name: string,
+  options?: ReadTextOptions
+): Promise<FileContent | null> {
+  let unreadableAttempts = 0;
+  for (;;) {
+    const file = await openFile(dir, name, options);
+    if (file === null) return null;
+    try {
+      const window = new Uint8Array(
+        await file.slice(0, Math.min(HEAD_PROBE_BYTES, file.size)).arrayBuffer()
+      );
+      const classified = classifyHeadWindow(window, file.size);
+      if (classified.kind === "compressed") {
+        const parts: string[] = [];
+        try {
+          await streamCompressedBody(file, classified.bodyStart, (chunk) => {
+            parts.push(chunk);
+          });
+        } catch {
+          // A rejection means "discard everything received" (see
+          // streamCompressedBody's contract) — never keep the partial body.
+          return { kind: "damaged" };
+        }
+        return { kind: "compressed", head: classified.head, bodyText: parts.join("") };
+      }
+      if (file.size > maxStringLengthForTests) {
+        throw stringLengthRangeError(name);
+      }
+      return { kind: "plain", text: await file.text() };
+    } catch (error) {
+      if (isNotReadableError(error) && unreadableAttempts < NOT_READABLE_RETRY_DELAYS_MS.length) {
+        await wait(NOT_READABLE_RETRY_DELAYS_MS[unreadableAttempts]!);
+        unreadableAttempts += 1;
+        continue;
+      }
+      throw error;
+    }
+  }
+}
+
+/**
+ * Which format a file on disk is in, with the same transient-error tolerance as
+ * every other read here.
+ *
+ * `compressedEnvelope.probeFileFormat` does the same classification, but through
+ * its own bare `getFileHandle` — it has no NotReadableError retry, because
+ * retries are this module's job. Everything inside safeWrite goes through this
+ * wrapper instead so a file that is briefly unreadable (a concurrent write, a
+ * sync client, antivirus) is retried rather than misreported.
+ */
+async function classifyFile(
+  dir: DirectoryHandleLike,
+  name: string,
+  options?: ReadTextOptions
+): Promise<{ kind: "missing" } | { kind: "plain" } | { kind: "compressed"; head: CompressedHead }> {
+  let unreadableAttempts = 0;
+  for (;;) {
+    const file = await openFile(dir, name, options);
+    if (file === null) return { kind: "missing" };
+    try {
+      const window = new Uint8Array(
+        await file.slice(0, Math.min(HEAD_PROBE_BYTES, file.size)).arrayBuffer()
+      );
+      const classified = classifyHeadWindow(window, file.size);
+      return classified.kind === "compressed"
+        ? { kind: "compressed", head: classified.head }
+        : { kind: "plain" };
+    } catch (error) {
+      if (isNotReadableError(error) && unreadableAttempts < NOT_READABLE_RETRY_DELAYS_MS.length) {
+        await wait(NOT_READABLE_RETRY_DELAYS_MS[unreadableAttempts]!);
+        unreadableAttempts += 1;
+        continue;
+      }
+      throw error;
+    }
+  }
+}
+
+/** Is this file stored in the compressed format? Missing counts as "no". */
+export async function isCompressedFile(
+  dir: DirectoryHandleLike,
+  fileName: string
+): Promise<boolean> {
+  return (await classifyFile(dir, fileName)).kind === "compressed";
+}
+
+/**
+ * Dual-read file text for callers outside this module that want the DECODED
+ * content of a file regardless of how it is framed — a compressed file yields
+ * its decompressed body, a plain file its verbatim text. Returns null for a
+ * missing or damaged file.
+ *
+ * Distinct from {@link readFileTextWithRetry}, which is deliberately raw: a
+ * caller copying bytes around (backup) must not decode, while a caller about to
+ * `JSON.parse` (the Population Browse worker feed) must.
+ */
+export async function readDecodedFileText(
+  dir: DirectoryHandleLike,
+  name: string
+): Promise<string | null> {
+  const content = await readContent(dir, name);
+  if (content === null || content.kind === "damaged") return null;
+  return content.kind === "compressed" ? content.bodyText : content.text;
 }
 
 /**
@@ -706,15 +855,68 @@ async function readOversizedEnvelopeMetadata(
 }
 
 /**
+ * Head line of a compressed file recovered from text that was decoded as if the
+ * file were plain.
+ *
+ * A compressed file read with `file.text()` comes back as its head line followed
+ * by mojibake: the head is pure JSON text and decodes losslessly, while the gzip
+ * member decodes to replacement characters. That is enough to recognize the
+ * format and recover `revision` without a second read — which is what keeps
+ * revision numbering continuous when a file crosses the policy's size gate in
+ * either direction and changes format.
+ *
+ * Returns null for anything that is not a well-formed compressed head, so a
+ * genuinely corrupt plain file is still treated as corrupt.
+ */
+function compressedHeadFromText(text: string | null): CompressedHead | null {
+  if (text === null || text.length === 0 || text.charCodeAt(0) !== 0x7b) return null;
+  // Bounded on purpose: a compact plain file's ONLY newline is the trailing one,
+  // so an unbounded indexOf would scan hundreds of megabytes to learn nothing.
+  // A valid head line is capped at HEAD_PROBE_BYTES bytes, and code units are
+  // never more numerous than bytes, so this window cannot miss one.
+  const head = text.slice(0, HEAD_PROBE_BYTES);
+  const newlineAt = head.indexOf("\n");
+  if (newlineAt < 0) return null;
+  try {
+    const parsed: unknown = JSON.parse(head.slice(0, newlineAt));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    if ((parsed as { format?: unknown }).format !== COMPRESSED_FORMAT_ID) return null;
+    if (!validateEnvelopeStructure({ metadata: parsed, data: null })) return null;
+    return parsed as CompressedHead;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Does this text — read as if the file were plain — actually come from a
+ * compressed file?
+ *
+ * For callers that already hold a file's raw text and need to know whether it
+ * must be treated as bytes instead (the backup and restore walks). Costs one
+ * `indexOf` and, at most, one small `JSON.parse`, and needs no extra read.
+ */
+export function isCompressedFileText(text: string | null): boolean {
+  return compressedHeadFromText(text) !== null;
+}
+
+/**
  * `.bak` snapshot of the current live file. Takes the already-read text when it
  * exists; falls back to a chunked copy for a file too large to hold as one
- * string. Same rollback source either way.
+ * string, and to a BYTE copy for a compressed one (decoding a gzip member as
+ * text and re-encoding it would not round-trip). Same rollback source either
+ * way.
  */
 async function snapshotToBak(
   dir: DirectoryHandleLike,
   fileName: string,
-  currentText: string | null
+  currentText: string | null,
+  currentIsCompressed = false
 ): Promise<void> {
+  if (currentIsCompressed) {
+    await copyFileBytes(dir, fileName, dir, `${fileName}.bak`);
+    return;
+  }
   if (currentText !== null) {
     await writeText(dir, `${fileName}.bak`, currentText);
     return;
@@ -732,6 +934,14 @@ async function rollbackFromBak(
   fileName: string
 ): Promise<boolean> {
   const bakName = `${fileName}.bak`;
+  // A compressed snapshot must be recognized before anything tries to read it as
+  // text, and put back as bytes.
+  const bakProbe = await classifyFile(dir, bakName);
+  if (bakProbe.kind === "compressed") {
+    if (!(await isRecoverableCompressedFile(dir, bakName))) return false;
+    await copyFileBytes(dir, bakName, dir, fileName);
+    return true;
+  }
   const bak = await readTextTolerant(dir, bakName);
   if (bak.kind === "text") {
     if (parseValidJson(bak.text) === null) return false;
@@ -771,13 +981,423 @@ function reportProgress(onProgress: SafeWriteProgressCallback | undefined, phase
   }
 }
 
+// ── Compressed files ────────────────────────────────────────────────────────
+//
+// A file whose name is listed in `storagePolicy.ts` (and whose payload is large
+// enough to be worth it) is written through `compressedEnvelope.ts`: a plain
+// UTF-8 head line carrying the envelope metadata, then a gzip member carrying
+// the body. The file NAME is unchanged, so nothing downstream has to learn a
+// second name for the same logical file — the format is self-describing, and
+// `classifyHeadWindow`'s four gates tell the two apart with no ambiguity.
+//
+// Dual read is permanent, not a migration window: every read below classifies
+// the file it opened and handles whichever format it finds. There is no
+// migration step, no rewrite-on-read, and a workspace may hold both forms of
+// different files (or of the same file across months) indefinitely.
+//
+// ── contentHash on a compressed file ────────────────────────────────────────
+//
+// The whole point of the head line is that it is readable in O(1), which means
+// it is written BEFORE the body it describes. A hash of the body therefore
+// cannot appear in it without serializing the payload twice — the single most
+// expensive step of the write, on exactly the files that made it expensive.
+//
+// So a compressed head carries only what is known upfront (schemaVersion,
+// revision, writtenAt, and any caller token such as casLoop's `_writeToken`),
+// and its `contentHash` is the empty-string sentinel below. Integrity is not
+// weakened by this:
+//
+//  - the write path verifies the staged and the committed file byte-exactly
+//    against the `bodyHash` + `bodyLength` `writeCompressedFile` already
+//    returned, plus the exact head-line bytes and the exact total file size;
+//  - gzip's own CRC32 + ISIZE trailer are checked by `DecompressionStream` on
+//    EVERY read, so a truncated or flipped byte is a hard read error rather
+//    than a short body — a guarantee the plain format never had;
+//  - and since v79 the plain format does not verify `contentHash` on read above
+//    512 KB either (see HASH_VERIFY_SIZE_LIMIT). Compressed files are, by the
+//    policy's size gate, exactly the files that were already past it.
+const COMPRESSED_CONTENT_HASH = "";
+
+const BYTE_COPY_SLICE_BYTES = 4 * 1024 * 1024;
+
+type BinaryWritable = {
+  write: (data: Uint8Array) => Promise<void>;
+  close: () => Promise<void>;
+};
+
+/**
+ * `WritableFileStreamLike.write` is typed `string`-only in this repo because
+ * nothing wrote bytes before compression existed; the real
+ * `FileSystemWritableFileStream` has always accepted a BufferSource. Widening
+ * the shared type would break every hand-written string-only test double, so the
+ * widening stays confined to the two call sites that need it (here and in
+ * `compressedEnvelope.ts`).
+ */
+async function openBinaryWritable(
+  dir: DirectoryHandleLike,
+  name: string
+): Promise<BinaryWritable> {
+  const handle = await dir.getFileHandle(name, { create: true });
+  // `createWritable` is optional on FileHandleLike (read-only handle, or a
+  // browser without the write half of the API) — guarded, never assumed.
+  if (!handle.createWritable) {
+    throw new Error(`Browser cannot write ${name}.`);
+  }
+  return (await handle.createWritable()) as unknown as BinaryWritable;
+}
+
+/**
+ * Byte-for-byte copy of one file to another, in bounded windows.
+ *
+ * The text-based copy paths above cannot be used for a compressed file: decoding
+ * a gzip member as UTF-8 and re-encoding it is lossy, so a `.bak` snapshot, a
+ * commit or a backup taken that way would be silent corruption. This moves the
+ * exact bytes and is therefore format-agnostic — it is equally correct for a
+ * plain JSON file, which is why the backup walk can use it without knowing which
+ * format it is holding.
+ *
+ * Idempotent (it rewrites the whole target through a freshly opened handle), so
+ * it is safe under `retryTransientWrite`. Throws when the source is missing.
+ */
+export async function copyFileBytes(
+  sourceDir: DirectoryHandleLike,
+  sourceName: string,
+  targetDir: DirectoryHandleLike,
+  targetName: string
+): Promise<number> {
+  return retryTransientWrite(
+    async () => {
+      const file = await openFile(sourceDir, sourceName, { retryMissing: true });
+      if (file === null) {
+        throw new Error(`Safe-write cannot copy missing file ${sourceName}.`);
+      }
+      const writable = await openBinaryWritable(targetDir, targetName);
+      try {
+        for (let offset = 0; offset < file.size; offset += BYTE_COPY_SLICE_BYTES) {
+          const end = Math.min(offset + BYTE_COPY_SLICE_BYTES, file.size);
+          const bytes = new Uint8Array(await file.slice(offset, end).arrayBuffer());
+          await writable.write(bytes);
+        }
+        await writable.close();
+      } catch (error) {
+        try {
+          await writable.close();
+        } catch {
+          // Best-effort: never mask the original failure with a close error.
+        }
+        throw error;
+      }
+      return file.size;
+    },
+    { context: "safeWrite:copyFileBytes", dir: targetDir, fileName: targetName }
+  );
+}
+
+/**
+ * Coalesces a token-sized chunk stream into ~{@link STREAM_FLUSH_AT} windows.
+ *
+ * `streamJsonStringify` yields one chunk per JSON token — a key, a comma, a
+ * brace — which is exactly right for a hasher and exactly wrong for a stream
+ * pipeline: every chunk handed to `writeCompressedFile` costs an encode, an
+ * enqueue and a trip through `CompressionStream`'s queue. Measured on an
+ * 80,000-row payload, feeding the raw token stream took **>20 s** while the gzip
+ * work itself was ~0.1 s; batching first brings the whole write back to the
+ * cost of the compression. The plain streamed writer already batches for the
+ * same reason (that is what STREAM_FLUSH_AT is), so this keeps the two paths
+ * feeding disk in the same size windows.
+ */
+function* coalesceChunks(chunks: Iterable<string>): Generator<string> {
+  let pending = "";
+  for (const chunk of chunks) {
+    pending += chunk;
+    if (pending.length >= STREAM_FLUSH_AT) {
+      yield pending;
+      pending = "";
+    }
+  }
+  if (pending.length > 0) yield pending;
+}
+
+type CompressedExpectation = {
+  /** The head object as stamped on disk, `format` key included. */
+  head: CompressedHead;
+  headBytes: number;
+  totalBytes: number;
+  bodyHash: string;
+  bodyLength: number;
+};
+
+function expectationFor(
+  head: CompressedHeadInput,
+  written: CompressedWriteResult
+): CompressedExpectation {
+  return {
+    head: { ...head, format: COMPRESSED_FORMAT_ID },
+    headBytes: written.headBytes,
+    totalBytes: written.totalBytes,
+    bodyHash: written.bodyHash,
+    bodyLength: written.bodyLength,
+  };
+}
+
+/**
+ * Byte-exact read-back verification of a compressed file — the compressed
+ * counterpart of `verifyStreamedFile`, and deliberately no weaker:
+ *
+ *  - total file size must equal what was written;
+ *  - the head line must be the same length in bytes AND parse to the same JSON
+ *    (same keys, same order, so the two are byte-identical);
+ *  - the body must inflate — gzip's CRC32/ISIZE are checked here — and fold to
+ *    the same rolling hash AND the same code-unit length as the text that was
+ *    compressed.
+ *
+ * Nothing here is a length-only check, and nothing materializes the file.
+ */
+async function verifyCompressedFile(
+  dir: DirectoryHandleLike,
+  fileName: string,
+  expected: CompressedExpectation
+): Promise<boolean> {
+  // Read-back of a file this call just closed: a "not found" is share latency,
+  // not absence, so it gets the opt-in retry.
+  const file = await openFile(dir, fileName, { retryMissing: true });
+  if (file === null || file.size !== expected.totalBytes) return false;
+
+  const window = new Uint8Array(
+    await file.slice(0, Math.min(HEAD_PROBE_BYTES, file.size)).arrayBuffer()
+  );
+  const classified = classifyHeadWindow(window, file.size);
+  if (classified.kind !== "compressed") return false;
+  if (classified.bodyStart !== expected.headBytes) return false;
+  if (JSON.stringify(classified.head) !== JSON.stringify(expected.head)) return false;
+
+  const hasher = createSimpleHasher();
+  let length = 0;
+  try {
+    await streamCompressedBody(file, classified.bodyStart, (chunk) => {
+      hasher.update(chunk);
+      length += chunk.length;
+    });
+  } catch {
+    // A damaged member (CompressedReadError) is a failed verification, not an
+    // exception to propagate — the caller's rollback ladder handles it.
+    return false;
+  }
+  return length === expected.bodyLength && hasher.digest() === expected.bodyHash;
+}
+
+/**
+ * Is this `.bak` a compressed file we could roll back to? Validating it means
+ * inflating the whole body (CRC32 included) without materializing it — the
+ * strongest statement available, and affordable because this only ever runs on
+ * the rollback path.
+ */
+async function isRecoverableCompressedFile(
+  dir: DirectoryHandleLike,
+  fileName: string
+): Promise<boolean> {
+  const file = await openFile(dir, fileName);
+  if (file === null) return false;
+  const window = new Uint8Array(
+    await file.slice(0, Math.min(HEAD_PROBE_BYTES, file.size)).arrayBuffer()
+  );
+  const classified = classifyHeadWindow(window, file.size);
+  if (classified.kind !== "compressed") return false;
+  try {
+    await streamCompressedBody(file, classified.bodyStart, () => {});
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * `readEnvelopeMetadata` with this module's transient-NotReadableError retry.
+ * It lives in `compressedEnvelope.ts`, which deliberately does no retrying —
+ * that is safeWrite's job, and the pre-write read of the existing file is
+ * exactly where a briefly unreadable file must not fail the whole save.
+ */
+async function readEnvelopeMetadataTolerant(
+  dir: DirectoryHandleLike,
+  fileName: string
+): Promise<Awaited<ReturnType<typeof readEnvelopeMetadata>>> {
+  let attempts = 0;
+  for (;;) {
+    try {
+      return await readEnvelopeMetadata(dir, fileName);
+    } catch (error) {
+      if (isNotReadableError(error) && attempts < NOT_READABLE_RETRY_DELAYS_MS.length) {
+        await wait(NOT_READABLE_RETRY_DELAYS_MS[attempts]!);
+        attempts += 1;
+        continue;
+      }
+      throw error;
+    }
+  }
+}
+
+/**
+ * The write half of the compressed path. Same ladder as the streamed plain path
+ * — `.bak` snapshot → stage `.tmp` → verify byte-exact → commit → re-verify →
+ * rollback, else promote the verified `.tmp` — with two differences:
+ *
+ *  - the `.bak` snapshot and the commit are BYTE copies, not text copies, so the
+ *    gzip member survives them intact (and the commit still does not re-run the
+ *    serialization or the compression);
+ *  - the existing file's revision comes from `readEnvelopeMetadata`, which reads
+ *    a bounded window of either format. That is what keeps revision numbering
+ *    continuous across a file's first compressed write — and, in the other
+ *    direction, across a month that shrinks below the policy's size gate and
+ *    goes back to plain JSON.
+ */
+async function writeCompressedJson<T>(
+  dir: DirectoryHandleLike,
+  fileName: string,
+  value: T,
+  policy: StoragePolicy,
+  onProgress: SafeWriteProgressCallback | undefined
+): Promise<void> {
+  const tmpName = `${fileName}.tmp`;
+  const existing = await readEnvelopeMetadataTolerant(dir, fileName);
+  const existingMetadata =
+    existing.kind === "compressed"
+      ? existing.metadata
+      : existing.kind === "plain"
+        ? existing.metadata
+        : null;
+  const hasCurrent = existingMetadata !== null;
+  const previousRevision =
+    typeof existingMetadata?.revision === "number" ? existingMetadata.revision : 0;
+
+  const data = isEnvelope(value) ? value.data : value;
+  const head: CompressedHeadInput = isEnvelope(value)
+    ? { ...value.metadata, contentHash: COMPRESSED_CONTENT_HASH }
+    : {
+        schemaVersion: ENVELOPE_SCHEMA_VERSION,
+        revision: previousRevision + 1,
+        contentHash: COMPRESSED_CONTENT_HASH,
+        writtenAt: new Date().toISOString(),
+      };
+  // Columnar encoding happens ONCE, before staging; the commit copies the bytes
+  // it produced rather than re-encoding them.
+  const payload = policy.columnar ? encodePayloadColumns(data) : data;
+
+  // 1. Snapshot the current good file (either format) to .bak.
+  if (hasCurrent) {
+    reportProgress(onProgress, "backing-up");
+    await copyFileBytes(dir, fileName, dir, `${fileName}.bak`);
+  }
+
+  // 2. Stage, then verify the exact bytes landed BEFORE touching the live file.
+  reportProgress(onProgress, "staging");
+  let staged: CompressedExpectation;
+  try {
+    staged = expectationFor(
+      head,
+      await writeCompressedFile(dir, tmpName, head, coalesceChunks(streamJsonStringify(payload)))
+    );
+  } catch (error) {
+    // Never leave a partial .tmp behind (same reasoning as the streamed path).
+    await removeQuietly(dir, tmpName);
+    throw error;
+  }
+  reportProgress(onProgress, "verifying-staged");
+  if (!(await verifyCompressedFile(dir, tmpName, staged))) {
+    await removeQuietly(dir, tmpName);
+    throw new Error(`Safe-write staging failed for ${fileName}.`);
+  }
+
+  // 3. Commit the verified bytes, then re-verify what actually landed live.
+  reportProgress(onProgress, "committing");
+  await copyFileBytes(dir, tmpName, dir, fileName);
+  reportProgress(onProgress, "verifying-committed");
+  if (!(await verifyCompressedFile(dir, fileName, staged))) {
+    if (await rollbackFromBak(dir, fileName)) {
+      await removeQuietly(dir, tmpName);
+      throw new Error(
+        `Safe-write validation failed for ${fileName}; rolled back to previous version.`
+      );
+    }
+    // No usable .bak: the staged .tmp WAS verified before the commit — promote
+    // it rather than lose the data, re-verifying against what is on disk now.
+    if (await verifyCompressedFile(dir, tmpName, staged)) {
+      try {
+        await copyFileBytes(dir, tmpName, dir, fileName);
+        if (await verifyCompressedFile(dir, fileName, staged)) {
+          await removeQuietly(dir, tmpName);
+          return; // recovered — the write succeeded via promotion
+        }
+      } catch {
+        // Promotion is the last-resort recovery attempt; its own failure must
+        // still end in the "staged copy kept as .tmp" outcome below.
+      }
+    }
+    throw new Error(
+      `Safe-write validation failed for ${fileName}; staged copy kept as ${tmpName}.`
+    );
+  }
+
+  // 4. Best-effort cleanup of the temp file.
+  await removeQuietly(dir, tmpName);
+}
+
+export type SafeWriteJsonOptions = {
+  /** Observability only — see SafeWriteProgressPhase. */
+  onProgress?: SafeWriteProgressCallback;
+  /**
+   * Overrides the per-file storage policy (`storagePolicy.ts`) for this one
+   * write. Pass `PLAIN_JSON_POLICY` to force plain JSON for a file the table
+   * would otherwise compress, or a compressing policy to opt a file in
+   * explicitly. Omitted, the table decides — and the table's default is plain.
+   */
+  policy?: StoragePolicy;
+};
+
+function normalizeWriteOptions(
+  options: SafeWriteProgressCallback | SafeWriteJsonOptions | undefined
+): SafeWriteJsonOptions {
+  if (typeof options === "function") return { onProgress: options };
+  return options ?? {};
+}
+
+/**
+ * Decides how this write is framed. Compression requires ALL of:
+ *  - an opt-in (the file's policy, or an explicit per-call override);
+ *  - a payload large enough to be worth it (`payloadQualifiesForCompression`);
+ *  - a runtime with native gzip streams — absent them the write silently and
+ *    correctly falls back to plain JSON rather than failing.
+ */
+function shouldCompress(
+  fileName: string,
+  value: unknown,
+  override: StoragePolicy | undefined
+): StoragePolicy | null {
+  const policy = override ?? resolveStoragePolicy(fileName);
+  if (!policy.compress) return null;
+  const data = isEnvelope(value) ? value.data : value;
+  if (!payloadQualifiesForCompression(data)) return null;
+  if (!isCompressionSupported()) return null;
+  return policy;
+}
+
 export async function safeWriteJson<T>(
   dir: DirectoryHandleLike,
   fileName: string,
   value: T,
-  onProgress?: SafeWriteProgressCallback
+  options?: SafeWriteProgressCallback | SafeWriteJsonOptions
 ): Promise<void> {
   assertWritableMode();
+
+  const { onProgress, policy: policyOverride } = normalizeWriteOptions(options);
+  const compressPolicy = shouldCompress(fileName, value, policyOverride);
+  if (compressPolicy) {
+    await withWorkspaceWriteAccess(dir, () =>
+      withResourceLock(directoryResourceKey(dir, fileName), () =>
+        writeCompressedJson(dir, fileName, value, compressPolicy, onProgress)
+      )
+    );
+    return;
+  }
 
   const tmpName = `${fileName}.tmp`;
 
@@ -795,13 +1415,22 @@ export async function safeWriteJson<T>(
       currentRead.kind === "oversized"
         ? await readOversizedEnvelopeMetadata(dir, fileName)
         : null;
-    const hasCurrent = parsedCurrent !== null || oversizedMetadata !== null;
+    // The live file may be COMPRESSED even though this write is a plain one —
+    // the same month re-saved below the policy's size gate, or a name dropped
+    // from the policy table. Its head line survives the text decode, so the
+    // revision continues and the snapshot is still taken (as bytes).
+    const currentCompressedHead =
+      parsedCurrent === null && oversizedMetadata === null
+        ? compressedHeadFromText(current)
+        : null;
+    const hasCurrent =
+      parsedCurrent !== null || oversizedMetadata !== null || currentCompressedHead !== null;
     const previousRevision =
       parsedCurrent &&
       isEnvelope(parsedCurrent) &&
       typeof parsedCurrent.metadata.schemaVersion === "number"
         ? parsedCurrent.metadata.revision
-        : (oversizedMetadata?.revision ?? 0);
+        : (oversizedMetadata?.revision ?? currentCompressedHead?.revision ?? 0);
     // Try to build the whole-envelope string. Pretty-printing inflates output,
     // so serialize compactly first and only re-indent when small enough. If even
     // the compact result would exceed V8's max string length, JSON.stringify
@@ -835,7 +1464,7 @@ export async function safeWriteJson<T>(
       // 1. Snapshot the current good file to .bak (the rollback source).
       if (hasCurrent) {
         reportProgress(onProgress, "backing-up");
-        await snapshotToBak(dir, fileName, current);
+        await snapshotToBak(dir, fileName, current, currentCompressedHead !== null);
       }
 
       // 2. Stage the streamed content in a temp file and verify the exact bytes
@@ -917,7 +1546,7 @@ export async function safeWriteJson<T>(
     //    oversized existing file, and that file still deserves a snapshot.
     if (hasCurrent) {
       reportProgress(onProgress, "backing-up");
-      await snapshotToBak(dir, fileName, current);
+      await snapshotToBak(dir, fileName, current, currentCompressedHead !== null);
     }
 
     // 2. Stage the new content in a temp file and verify it landed intact
@@ -1009,12 +1638,17 @@ export async function safeWriteJsonText(
     withResourceLock(directoryResourceKey(dir, fileName), async () => {
     const currentRead = await readTextTolerant(dir, fileName);
     const current = currentRead.kind === "text" ? currentRead.text : null;
+    // Same three cases as safeWriteJson's preamble: a parseable plain file, an
+    // oversized one recoverable from its tail, or a compressed one recognized
+    // from its head line (which must be snapshotted as bytes, not as text).
+    const currentCompressedHead = compressedHeadFromText(current);
     const hasCurrent =
       parseValidJson(current) !== null ||
+      currentCompressedHead !== null ||
       (currentRead.kind === "oversized" &&
         (await readOversizedEnvelopeMetadata(dir, fileName)) !== null);
     if (hasCurrent) {
-      await snapshotToBak(dir, fileName, current);
+      await snapshotToBak(dir, fileName, current, currentCompressedHead !== null);
     }
 
     if (normalized === null) {
@@ -1097,6 +1731,17 @@ export async function readEnvelopeRevision(
   // in a bounded tail window — and the whole point of this function is to
   // return a revision without materializing the data.
   const readOne = async (name: string): Promise<number | null> => {
+    // Compressed first, and NOT via the text path: its revision sits in the head
+    // line, reachable with one bounded slice whatever the file's size — and
+    // decoding a gzip member as text would find nothing to parse anyway.
+    const probe = await classifyFile(dir, name);
+    if (probe.kind === "compressed") {
+      return typeof probe.head.schemaVersion === "number" &&
+        typeof probe.head.revision === "number"
+        ? probe.head.revision
+        : null;
+    }
+    if (probe.kind === "missing") return null;
     const read = await readTextTolerant(dir, name);
     if (read.kind === "text") return extract(parseValidJson(read.text));
     if (read.kind === "oversized") {
@@ -1119,25 +1764,73 @@ export type SafeReadJsonOptions = {
   retryMissing?: boolean;
 };
 
+/**
+ * One read, either format. Returns the parsed payload plus the text it came
+ * from, or null when the file is missing, unreadable as this format, or fails
+ * validation.
+ *
+ * This is where dual read actually lives, and why it is permanent: the file is
+ * classified from its own first bytes, so a plain file written years ago and a
+ * compressed one written today go through the same call and produce the same
+ * shape. Columnar decoding is applied to whatever comes back — it keys off the
+ * payload's own discriminator, not off the framing, so a columnar array is
+ * decoded whether it arrived compressed or plain.
+ *
+ * `rawText` is the whole file for a plain file and the DECOMPRESSED BODY for a
+ * compressed one (the head line is metadata, and is returned parsed instead).
+ */
+type ReadPayload<T> = { value: T; rawText: string };
+
+async function readPayload<T>(
+  dir: DirectoryHandleLike,
+  fileName: string,
+  options?: ReadTextOptions
+): Promise<{ found: boolean; payload: ReadPayload<T> | null }> {
+  const content = await readContent(dir, fileName, options);
+  if (content === null) return { found: false, payload: null };
+  if (content.kind === "damaged") return { found: true, payload: null };
+  if (content.kind === "compressed") {
+    // The head line IS the envelope metadata; it is validated structurally, and
+    // the body's integrity comes from gzip's CRC32 (already checked by the
+    // inflate above) rather than from a contentHash it cannot carry.
+    if (!validateEnvelopeStructure({ metadata: content.head, data: null })) {
+      return { found: true, payload: null };
+    }
+    try {
+      const data: unknown = JSON.parse(content.bodyText);
+      return {
+        found: true,
+        payload: { value: decodePayloadColumns<T>(data), rawText: content.bodyText },
+      };
+    } catch {
+      return { found: true, payload: null };
+    }
+  }
+  const parsed = parseValidJson(content.text);
+  if (parsed === null) return { found: true, payload: null };
+  return {
+    found: true,
+    payload: { value: decodePayloadColumns<T>(unwrap<unknown>(parsed)), rawText: content.text },
+  };
+}
+
 export async function safeReadJson<T>(
   dir: DirectoryHandleLike,
   fileName: string,
   options?: SafeReadJsonOptions
 ): Promise<SafeReadResult<T>> {
-  const live = await readText(dir, fileName, { retryMissing: options?.retryMissing });
-  const parsedLive = parseValidJson(live);
-  if (parsedLive !== null) {
+  const live = await readPayload<T>(dir, fileName, { retryMissing: options?.retryMissing });
+  if (live.payload !== null) {
     return {
       ok: true,
-      value: unwrap<T>(parsedLive),
+      value: live.payload.value,
       recoveredFromBak: false,
-      rawText: live as string
+      rawText: live.payload.rawText
     };
   }
 
-  const bak = await readText(dir, `${fileName}.bak`);
-  const parsedBak = parseValidJson(bak);
-  if (parsedBak !== null) {
+  const bak = await readPayload<T>(dir, `${fileName}.bak`);
+  if (bak.payload !== null) {
     if (typeof window !== "undefined") {
       window.dispatchEvent(
         new CustomEvent("data:recovered-from-bak", { detail: { fileName } })
@@ -1145,18 +1838,17 @@ export async function safeReadJson<T>(
     }
     return {
       ok: true,
-      value: unwrap<T>(parsedBak),
+      value: bak.payload.value,
       recoveredFromBak: true,
-      rawText: bak as string
+      rawText: bak.payload.rawText
     };
   }
 
   // Last-resort fallback: a verified .tmp left behind by a failed commit (the
   // promotion path in safeWriteJson keeps it on total failure) — recover it
   // rather than losing the only good copy of the write.
-  const tmp = await readText(dir, `${fileName}.tmp`);
-  const parsedTmp = parseValidJson(tmp);
-  if (parsedTmp !== null) {
+  const tmp = await readPayload<T>(dir, `${fileName}.tmp`);
+  if (tmp.payload !== null) {
     if (typeof window !== "undefined") {
       window.dispatchEvent(
         new CustomEvent("data:recovered-from-bak", { detail: { fileName } })
@@ -1164,13 +1856,13 @@ export async function safeReadJson<T>(
     }
     return {
       ok: true,
-      value: unwrap<T>(parsedTmp),
+      value: tmp.payload.value,
       recoveredFromBak: true,
-      rawText: tmp as string
+      rawText: tmp.payload.rawText
     };
   }
 
-  if (live === null && bak === null && tmp === null) {
+  if (!live.found && !bak.found && !tmp.found) {
     return { ok: false, reason: "missing" };
   }
   return { ok: false, reason: "corrupt" };

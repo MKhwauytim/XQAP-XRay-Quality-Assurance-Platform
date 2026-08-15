@@ -1,4 +1,5 @@
 import { unwrap } from "../data/storage/jsonEnvelope";
+import { decodePayloadColumns } from "../data/storage/columnarPayload";
 import type { PopulationFinalData } from "../data/population/monthTypes";
 import { runPopulationQuery } from "../data/population/populationQuery";
 import { formatMonthFolderShortLabel, parseMonthFolderName } from "../data/population/monthFolder";
@@ -138,8 +139,16 @@ export function handleWorkerMessage(
       const parsed: unknown = JSON.parse(request.rawJsonText);
       // population.final.json is written as a JsonEnvelope (`{ metadata, data }`) by
       // safeWriteJson; `unwrap` also tolerates legacy bare (un-enveloped) JSON, same
-      // as safeReadJson does on the main thread.
-      const data = unwrap<PopulationFinalData>(parsed);
+      // as safeReadJson does on the main thread — which is also the shape a
+      // COMPRESSED file arrives in, since its metadata lives in the head line the
+      // main thread already consumed and only the body text is posted here.
+      //
+      // `decodePayloadColumns` then undoes the columnar row encoding when the file
+      // carries one. It is shape-driven and an identity for everything else, so a
+      // plain, legacy or hand-written payload passes through untouched. Doing it
+      // HERE rather than on the main thread is the whole point of this worker: the
+      // decode is O(rows) and belongs off the UI thread with the parse.
+      const data = decodePayloadColumns<PopulationFinalData>(unwrap<unknown>(parsed));
       const baseRows = Array.isArray(data?.rows) ? data.rows : [];
       const rows = request.monthFolder
         ? baseRows.map((row) => attachMonthFolderInfo(row, request.monthFolder!))
