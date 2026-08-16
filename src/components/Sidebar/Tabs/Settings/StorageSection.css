@@ -34,7 +34,8 @@
   margin: 10px 0;
   padding: 8px 12px;
   border-radius: 6px;
-  background: var(--c-warning-soft);
+  border: 1px solid var(--c-warning-border);
+  background: var(--c-surface);
   color: var(--c-warning-text);
   font-size: 0.82rem;
   line-height: 1.5;
@@ -84,7 +85,8 @@
   margin: 10px 0 0;
   padding: 8px 12px;
   border-radius: 6px;
-  background: var(--c-danger-soft);
+  border: 1px solid var(--c-danger-border);
+  background: var(--c-surface);
   color: var(--c-danger-text);
   font-size: 0.82rem;
   line-height: 1.5;

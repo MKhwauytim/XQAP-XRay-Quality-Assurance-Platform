@@ -565,9 +565,16 @@ export default function BrowseDataView({
     onEscape: () => setColPickerOpen(false),
     enabled: colPickerOpen
   });
+  // `resetKey` (not just `enabled`) because switching straight from column A's
+  // filter menu to column B's never passes `enabled` through `false`: the menu
+  // is rendered inside the open column's own `th`, so A's node is destroyed and
+  // a fresh one is built under B while the flag stays `true` throughout. Without
+  // a changing key the effect keeps A's now-detached node and the keyboard user
+  // is left with an inert Tab and focus pointed at nothing.
   const filterMenuFocusTrapRef = useFocusTrap<HTMLDivElement>({
     onEscape: () => setOpenFilterColumn(null),
-    enabled: openFilterColumn !== null
+    enabled: openFilterColumn !== null,
+    resetKey: openFilterColumn
   });
 
   useEffect(() => {
@@ -1234,7 +1241,13 @@ export default function BrowseDataView({
               <button
                 type="button"
                 className="bv-col-picker-btn"
-                onClick={() => setColPickerOpen((o) => !o)}
+                onClick={() => {
+                  // Mutually exclusive with the per-column filter menu, as in
+                  // DataTable: two floating panels open at once left two live
+                  // focus traps fighting over Tab and Escape.
+                  setColPickerOpen((o) => !o);
+                  setOpenFilterColumn(null);
+                }}
               >
                 <Settings2 size={14} style={{ verticalAlign: "middle", marginInlineEnd: 4 }} /> الأعمدة ({visibleCols.size})
               </button>
@@ -1323,6 +1336,7 @@ export default function BrowseDataView({
                           onClick={(event) => {
                             event.stopPropagation();
                             setOpenFilterColumn((current) => current === c.key ? null : c.key);
+                            setColPickerOpen(false);
                           }}
                           onMouseDown={(event) => event.stopPropagation()}
                           draggable={false}

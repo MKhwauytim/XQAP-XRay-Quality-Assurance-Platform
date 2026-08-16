@@ -342,12 +342,12 @@
 }
 
 .sidebar-nav-item.has-children {
-  padding-left: 12px;
+  padding-inline-end: 12px;
 }
 
 .sidebar-chevron {
-  margin-right: auto;
-  margin-left: 4px;
+  margin-inline-start: auto;
+  margin-inline-end: 4px;
   opacity: 0.4;
   flex-shrink: 0;
   color: var(--sb-text);
@@ -364,7 +364,7 @@
   flex-direction: column;
   gap: 2px;
   padding: 6px 0 10px 0;
-  border-right: 2px solid rgba(255, 255, 255, 0.10);
+  border-inline-start: 2px solid rgba(255, 255, 255, 0.10);
   margin: 2px 21px 4px 0;
 }
 

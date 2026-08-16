@@ -181,6 +181,7 @@ export default function TemplateBuilderTab() {
   const [isLoading, setIsLoading] = useState(false);
   /** Template awaiting delete confirmation; null when no dialog is open. */
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const pendingDeleteTemplate = index.templates.find((t) => t.templateId === pendingDeleteId) ?? null;
   const labels = useLabels();
 
   useEffect(() => {
@@ -381,7 +382,10 @@ export default function TemplateBuilderTab() {
         open={pendingDeleteId !== null}
         danger
         title={labels.tb_delete_confirm_title}
-        message={labels.tb_delete_confirm_message}
+        message={labels.tb_delete_confirm_message.replace(
+          "{name}",
+          pendingDeleteTemplate?.templateName ?? ""
+        )}
         confirmLabel={labels.tb_delete_confirm_ok}
         onCancel={() => setPendingDeleteId(null)}
         onConfirm={() => {

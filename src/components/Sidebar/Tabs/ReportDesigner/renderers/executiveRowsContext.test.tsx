@@ -52,6 +52,11 @@ vi.mock("../../../../../data/reporting/executiveReportData", () => ({
   buildExecutiveReportRows: (input: unknown) => buildExecutiveReportRows(input),
 }));
 
+const logError = vi.fn();
+vi.mock("../../../../../data/storage/errorLogger", () => ({
+  logError: (context: string, error: unknown) => logError(context, error),
+}));
+
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
@@ -102,5 +107,27 @@ describe("ExecutiveRowsProvider", () => {
     expect(buildExecutiveReportRows).toHaveBeenCalledWith(
       expect.objectContaining({ template: { templateId: "tmpl-1", fields: [] } })
     );
+  });
+
+  // Regression for the bare `void (async () => {...})()` with no `.catch`: a rejection used to
+  // become an unhandled promise rejection and every consumer sat at `rows === null` ("loading")
+  // forever. Proven against the pre-fix code: this test hangs waiting for the alert/"loading" exit
+  // and vitest reports an unhandled rejection instead of passing.
+  it("surfaces a load failure instead of spinning forever", async () => {
+    loadMonthPopulationFinal.mockRejectedValueOnce(new Error("boom"));
+
+    render(
+      <ExecutiveRowsProvider>
+        <Consumer label="tile" />
+      </ExecutiveRowsProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+    });
+
+    // No longer stuck at "loading" — the provider settles rows to [] so consumers exit isLoading.
+    expect(screen.getByTestId("tile")).not.toHaveTextContent("loading");
+    expect(logError).toHaveBeenCalledWith("reportDesigner:executiveRowsProvider", expect.any(Error));
   });
 });

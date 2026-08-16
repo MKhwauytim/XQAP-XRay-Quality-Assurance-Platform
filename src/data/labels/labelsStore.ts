@@ -192,8 +192,14 @@ export const DEFAULT_LABELS = {
   // Deleting an inspection template removes it from disk irreversibly. Until the
   // overlay audit this fired with no confirmation at all -- the only unconfirmed
   // destructive action in the app.
+  // The message previously reassured the reader about the SAFE consequence only
+  // (saved inspections are unaffected) and omitted the dangerous one:
+  // deleteTemplate() clears template.selection.json whenever it points at the
+  // template being deleted, which blanks the active inspection form for every
+  // employee workspace-wide until a new template is chosen. `{name}` is
+  // interpolated by the caller so the confirmation names its actual target.
   tb_delete_confirm_title:         "حذف النموذج",
-  tb_delete_confirm_message:       "سيتم حذف هذا النموذج نهائياً من مساحة العمل، ولا يمكن التراجع عن هذا الإجراء. النماذج المحذوفة لا تؤثر على عمليات التفتيش المحفوظة مسبقاً.",
+  tb_delete_confirm_message:       "سيتم حذف النموذج «{name}» نهائياً من مساحة العمل، ولا يمكن التراجع عن هذا الإجراء. عمليات التفتيش المحفوظة سابقاً بهذا النموذج تبقى كما هي دون تأثير. لكن إذا كان هذا هو النموذج المُفعّل حالياً في استمارة الفحص، فسيؤدي حذفه إلى مسح اختيار النموذج على مستوى مساحة العمل بالكامل، وستظهر استمارة الفحص فارغة لدى جميع الموظفين إلى أن يتم اختيار نموذج آخر.",
   tb_delete_confirm_ok:            "حذف نهائي",
   ew_draft_retained_notice:        "تم نقل هذه العينة من قائمتك (إحالة أو استبدال أثناء العمل عليها). إجاباتك غير المحفوظة لا تزال معروضة هنا — انسخها قبل الانتقال إلى عينة أخرى.",
 
@@ -748,6 +754,11 @@ export const DEFAULT_LABELS = {
   rd_bool_no:     "لا",
   rd_more_suffix: "أخرى",
 
+  // ExecutiveRowsProvider — surfaced when the shared KPI-tile data load rejects
+  // (previously an unhandled rejection left every tile at a perpetual "loading"
+  // state with no way to tell a real failure from a still-loading month).
+  rd_kpi_rows_load_error: "تعذّر تحميل بيانات مؤشرات الأداء لهذا الشهر. حاول تحديث الصفحة أو التحقق من الاتصال بمساحة العمل.",
+
   // FieldsPanel
   rd_fields_search_placeholder: "بحث في الحقول...",
   rd_fields_search_aria:        "بحث في الحقول",
@@ -942,6 +953,9 @@ export const DEFAULT_LABELS = {
   err_smp_005_draw_threw:              "حدث خطأ غير متوقع أثناء سحب العينة.",
   err_smp_006_no_sample_for_month:     "لا توجد بيانات عينة للشهر المحدد.",
   err_smp_007_save_master_threw:       "تعذر حفظ ملف العينة الرئيسي.",
+
+  // Report Designer — print preview overlay (accessible name of the dialog).
+  rd_print_view_aria:                  "معاينة الطباعة",
 } as const;
 
 export type LabelKey = keyof typeof DEFAULT_LABELS;

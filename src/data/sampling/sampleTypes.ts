@@ -77,6 +77,28 @@ export type SampleMasterData = {
    */
   samplingAlgorithmVersion?: string;
   totalRequested: number;
+  /**
+   * The number of images the sample CURRENTLY consists of — drawn rows minus
+   * rows retired by a replacement (see {@link SampleMasterData.replacedRowIds}).
+   * At draw time this equals `rows.length`; a replacement substitutes a row
+   * rather than enlarging the sample, so it leaves this number unchanged.
+   *
+   * Every consumer wants this "live" reading, not "rows ever drawn":
+   * `sampleReport.ts` divides it by `totalRequested` for the fulfilment percent
+   * (a substitution must not push it past 100%) and by the processed population
+   * for coverage; `samplingPlanStorage` uses it for `targetSampleFraction`; and
+   * `executiveReportData.calculateExecutiveKPIs` subtracts the submitted-answer
+   * count from it for `remainingImages` — a retired row can never be answered,
+   * so counting it here produces a phantom backlog exactly the size of the
+   * replacement count.
+   *
+   * **Legacy note.** Sample masters written before this field's semantics were
+   * fixed carry an inflated value (one per replacement performed under the old
+   * code). It is NOT recomputed on read: `sample.master.json` holds no record of
+   * which rows those replacements retired — that lives only in the immutable
+   * `distribution.events/` `replaced` events — so the value is left exactly as
+   * stored. Replacements performed from now on are counted correctly.
+   */
   totalActual: number;
   certScanRequested: number;
   nonCertScanRequested: number;
@@ -115,6 +137,18 @@ export type SampleMasterData = {
    * file — enough to diagnose the mapping gap without being a full audit log.
    */
   unmappedStageRawValues?: string[];
+  /**
+   * Ids of rows retired by a replacement — still present in `rows`, but no
+   * longer part of the sample under study.
+   *
+   * They are deliberately NOT removed from `rows`: that array is both the audit
+   * trail of the draw and the replacement dedup set (`buildExclusionSets` in
+   * `distribution/replacement.ts` excludes every id in it), so deleting a
+   * retired row would let a known-dead image be re-drawn as somebody else's
+   * replacement. Absent on legacy files and on months with no replacements —
+   * treat as `[]`.
+   */
+  replacedRowIds?: string[];
   rows: PreparedPopulationRow[];
 };
 

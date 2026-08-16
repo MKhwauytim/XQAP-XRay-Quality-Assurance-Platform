@@ -73,6 +73,17 @@ describe("FeedbackWidget — floating panel focus trap (finding 11)", () => {
     expect(dialog.contains(document.activeElement)).toBe(true);
   });
 
+  it("does not claim modality: the page behind the panel stays interactive", () => {
+    // Regression: the panel carried aria-modal="true" while rendering inline
+    // with no backdrop and no portal, so assistive tech was told the rest of
+    // the page was inert when every control on it was still reachable.
+    render(<FeedbackWidget />);
+    openPanel();
+
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.getAttribute("aria-modal")).toBeNull();
+  });
+
   it("closes the panel on Escape", () => {
     render(<FeedbackWidget />);
     openPanel();

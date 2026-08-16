@@ -375,6 +375,14 @@ export function ReassignModal({
 
   return (
     <ModalShell variant="ew" title="إسناد لموظف آخر" subtitle={sourceLabel} onClose={onClose}>
+      {/* Scroll body. `.ew-replace-modal` is a bounded flex column with
+          `overflow: hidden`, so without an internal scroller a long selection
+          (hundreds of sample ids, an expanded preview, a skip breakdown) simply
+          got clipped and the action row below was pushed out of reach. Same
+          shape as MappingSettingsModal's `{ flex: 1, overflowY: "auto" }` body.
+          `minHeight: 0` is what actually lets a flex item shrink below its
+          content height and scroll. */}
+      <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }} data-testid="reassign-modal-scroll">
       <div className="ew-replace-reason">
         <label className="ew-field-label" htmlFor="bulk-reassign-to-emp">
           الموظف المستلم <span className="ew-required">*</span>
@@ -493,6 +501,7 @@ export function ReassignModal({
           <p className="ew-replace-error" role="alert">{error}</p>
         </div>
       ) : null}
+      </div>
 
       <div className="ew-replace-reason" style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8, paddingBottom: 16 }}>
         <button type="button" className="ew-btn-secondary" onClick={onClose}>إلغاء</button>

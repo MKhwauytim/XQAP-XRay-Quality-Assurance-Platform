@@ -149,9 +149,30 @@ export default function FieldDropDialog({
           ))}
         </div>
 
-        {/* Actions */}
+        {/* Actions — Cancel first, i.e. rightmost in this RTL dialog, matching
+            ConfirmDialog and every other confirm-style dialog in the app. This
+            was the one dialog with the primary action on the right, so the
+            "safe" button sat where users had learned the destructive/committing
+            one is not. Cancel first also makes it the trap's initial focus, as
+            in ConfirmDialog. */}
         <div style={{ display: "flex", gap: 6 }}>
           <button
+            type="button"
+            style={{
+              padding: "6px 12px",
+              borderRadius: 4,
+              border: "1px solid #e1dfdd",
+              background: "#f3f2f1",
+              color: "#201f1e",
+              fontSize: 13,
+              cursor: "pointer",
+            }}
+            onClick={onCancel}
+          >
+            {labels.rd_cancel_btn}
+          </button>
+          <button
+            type="button"
             style={{
               flex: 1,
               padding: "6px 0",
@@ -166,20 +187,6 @@ export default function FieldDropDialog({
             onClick={() => onConfirm(selected)}
           >
             {labels.rd_add_btn}
-          </button>
-          <button
-            style={{
-              padding: "6px 12px",
-              borderRadius: 4,
-              border: "1px solid #e1dfdd",
-              background: "#f3f2f1",
-              color: "#201f1e",
-              fontSize: 13,
-              cursor: "pointer",
-            }}
-            onClick={onCancel}
-          >
-            {labels.rd_cancel_btn}
           </button>
         </div>
       </div>

@@ -47,7 +47,7 @@
   font-family: monospace;
   font-size: 14px;
   font-weight: 800;
-  color: var(--c-ink-2);
+  color: var(--c-navy-2);
   letter-spacing: 0.04em;
   word-break: break-all;
 }
@@ -111,7 +111,7 @@
 }
 
 .ip-chip-value {
-  color: var(--c-ink-2);
+  color: var(--c-navy-2);
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -228,7 +228,7 @@
 .ip-step-title {
   font-size: 12.5px;
   font-weight: 700;
-  color: var(--c-ink-2);
+  color: var(--c-navy-2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -269,7 +269,7 @@
 .ip-field-label {
   font-size: 13px;
   font-weight: 700;
-  color: var(--c-ink-2);
+  color: var(--c-navy-2);
 }
 
 .ip-required { color: var(--c-error); margin-inline-start: 2px; }
@@ -296,7 +296,7 @@
   border-radius: 8px;
   font-size: 14px;
   font-family: inherit;
-  color: var(--c-ink-2);
+  color: var(--c-navy-2);
   background: var(--c-surface);
   transition: border-color 0.15s;
   box-sizing: border-box;
@@ -351,7 +351,7 @@
 }
 
 .ip-answer-value {
-  color: var(--c-ink-2);
+  color: var(--c-navy-2);
   font-weight: 600;
   text-align: start;
 }
@@ -415,7 +415,7 @@
 
 .ip-btn--secondary {
   background: var(--c-surface);
-  color: var(--c-ink-2);
+  color: var(--c-navy-2);
   border: 1.5px solid var(--c-border-2);
 }
 .ip-btn--secondary:hover:not(:disabled) { background: var(--c-bg-2); }

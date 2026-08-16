@@ -3,6 +3,7 @@ import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
 import { withResourceLock } from "../storage/webLocks";
 import { getTemplatesRoot } from "../workspace/workspacePaths";
+import { clearInspectionTemplateSelectionIfMatches } from "./templateSelectionStorage";
 import type { TemplateIndex, TemplateSchema } from "./templateTypes";
 
 /**
@@ -100,7 +101,6 @@ async function saveTemplateFile(
 }
 
 const INDEX_FILE = "templates.index.json";
-const SELECTION_FILE = "template.selection.json";
 
 async function getTemplatesDir(
   directoryHandle: DirectoryHandleLike
@@ -196,17 +196,19 @@ export async function deleteTemplate(
       // Clear the active inspection-template selection if it points at the
       // template being deleted, so consumers (XrayReferrals, XrayInspectionResults,
       // Reports) don't keep silently referencing a dead templateId.
-      const selectionResult = await safeReadJson<{
-        templateId: string;
-        updatedAt: string;
-        updatedBy: string;
-      }>(dir, SELECTION_FILE);
-      if (selectionResult.ok && selectionResult.value.templateId === templateId) {
-        await safeWriteJson(dir, SELECTION_FILE, {
-          templateId: "",
-          updatedAt: new Date().toISOString(),
-          updatedBy: "system:deleteTemplate"
-        });
+      //
+      // `template.selection.json` is CAS-protected (revision + _writeToken).
+      // This used to be a raw safeWriteJson, which dropped both fields, rewound
+      // the revision counter and silently clobbered a concurrent admin's
+      // selection change — blanking the inspection form workspace-wide (P1-B).
+      // The match test now runs inside the CAS loop against a fresh read.
+      const cleared = await clearInspectionTemplateSelectionIfMatches(
+        directoryHandle,
+        templateId,
+        "system:deleteTemplate"
+      );
+      if (!cleared.ok) {
+        throw new Error(cleared.error);
       }
 
       await updateTemplateIndex(dir, (templates) =>

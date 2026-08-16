@@ -704,20 +704,28 @@ function MonthLockDialog({
         </div>
       ) : null}
 
-      <div className={`arc-restore-warning${isClose ? " is-danger" : ""}`}>
-        <strong>{folderName}</strong>
-        <p>{isClose ? L.archive_close_month_confirm : L.archive_reopen_month_confirm}</p>
-        {isClose && pendingCount > 0 ? (
-          <p>{fillTemplate(L.archive_close_month_confirm_pending, { pending: formatNumber(pendingCount) })}</p>
-        ) : null}
-      </div>
+      {/* Scroll body: `.arc-restore-modal` sets no height bound at all, so a
+          long confirmation body (the close-month warning plus the pending-count
+          line, at large text sizes or on a short/landscape viewport) grew the
+          panel past the viewport and carried the action row off-screen with it.
+          Bounding the body and scrolling it keeps the actions reachable —
+          ConfirmDialog does the same thing one level up, on the panel. */}
+      <div style={{ maxHeight: "min(52vh, 420px)", overflowY: "auto" }} data-testid="month-lock-scroll">
+        <div className={`arc-restore-warning${isClose ? " is-danger" : ""}`}>
+          <strong>{folderName}</strong>
+          <p>{isClose ? L.archive_close_month_confirm : L.archive_reopen_month_confirm}</p>
+          {isClose && pendingCount > 0 ? (
+            <p>{fillTemplate(L.archive_close_month_confirm_pending, { pending: formatNumber(pendingCount) })}</p>
+          ) : null}
+        </div>
 
-      <input
-        className="arc-restore-input"
-        value={note}
-        onChange={(event) => setNote(event.target.value)}
-        placeholder={isClose ? L.archive_close_note_placeholder : L.archive_reopen_reason_placeholder}
-      />
+        <input
+          className="arc-restore-input"
+          value={note}
+          onChange={(event) => setNote(event.target.value)}
+          placeholder={isClose ? L.archive_close_note_placeholder : L.archive_reopen_reason_placeholder}
+        />
+      </div>
 
       <div className="arc-restore-actions">
         <button type="button" className="arc-btn-secondary" onClick={onClose} disabled={busy}>

@@ -67,7 +67,7 @@ describe("TemplateBuilder delete confirmation", () => {
 
     // The whole point: the click opens a dialog, it does not touch the disk.
     expect(storageMock.deleteTemplate).not.toHaveBeenCalled();
-    expect(await screen.findByText(/سيتم حذف هذا النموذج نهائياً/)).toBeInTheDocument();
+    expect(await screen.findByText(/سيتم حذف النموذج «/)).toBeInTheDocument();
   });
 
   it("deletes only after the destructive action is confirmed", async () => {
@@ -89,7 +89,7 @@ describe("TemplateBuilder delete confirmation", () => {
     fireEvent.click(await screen.findByRole("button", { name: "إلغاء" }));
 
     await waitFor(() => {
-      expect(screen.queryByText(/سيتم حذف هذا النموذج نهائياً/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/سيتم حذف النموذج «/)).not.toBeInTheDocument();
     });
     expect(storageMock.deleteTemplate).not.toHaveBeenCalled();
   });

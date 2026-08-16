@@ -135,7 +135,13 @@ export default function RequestList({ requests, bulkEnabled, userDisplayMap, sam
           title={bulkAction === "approve" ? `تأكيد الموافقة على ${selectedRequests.length} طلب` : `تأكيد رفض ${selectedRequests.length} طلب`}
           onClose={() => setBulkAction(null)}
         >
-          <div className="ew-replace-reason">
+          {/* The selected-request list is unbounded (bulk approval routinely
+              covers dozens of requests) and `.ew-replace-modal` is a bounded
+              flex column with `overflow: hidden`, so without its own scroller
+              the list was clipped and the confirm/cancel row pushed out of
+              reach. `minHeight: 0` is what lets the flex item shrink and
+              scroll. */}
+          <div className="ew-replace-reason" style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
             <ul style={{ margin: "0 0 8px", paddingInlineStart: 18 }}>
               {selectedRequests.map((r) => <li key={r.requestId}>{describeSelected(r)}</li>)}
             </ul>
