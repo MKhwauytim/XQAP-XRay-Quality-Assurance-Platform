@@ -1,5 +1,5 @@
 import { getLabels } from "../labels/labelsStore";
-import { logError } from "./errorLogger";
+import { logCodedError, resolveErrorCode } from "./errorCodes";
 
 /**
  * The UI is Arabic and RTL (see CLAUDE.md). Domain-level failures returned as
@@ -39,8 +39,11 @@ export function containsArabic(text: string): boolean {
  */
 export function userFacingErrorText(error: string, context: string): string {
   if (containsArabic(error)) return error;
-  logError(context, new Error(error));
-  return getLabels().msg_unexpected_write_error;
+  // A plain string carries no error object to classify, so the generic
+  // XQ-IO-028 is the honest code here: "something failed and we could not tell
+  // what". It still gives the user something quotable and pins the log entry.
+  logCodedError(context, "XQ-IO-028", new Error(error));
+  return `${getLabels().msg_unexpected_write_error} (XQ-IO-028)`;
 }
 
 /**
@@ -53,7 +56,15 @@ export function userFacingErrorText(error: string, context: string): string {
  */
 export function thrownErrorText(error: unknown, context = "ui:thrown-error"): string {
   const message = error instanceof Error ? error.message : String(error ?? "");
-  if (message && containsArabic(message)) return message;
-  logError(context, error);
-  return getLabels().msg_unexpected_write_error;
+  const code = resolveErrorCode(error);
+  if (message && containsArabic(message)) {
+    // Deliberate Arabic domain text. Codes produced by `formatUserError` are
+    // already embedded in it, so only an externally classified code is added.
+    return code && !message.includes(code) ? `${message} (${code})` : message;
+  }
+  // Internal English (a DOMException, safeWrite's own validation text) still
+  // never reaches the screen — but the code that identifies it does, so the
+  // user can quote it and we can find the exact throw site.
+  logCodedError(context, code ?? "XQ-IO-028", error);
+  return `${getLabels().msg_unexpected_write_error} (${code ?? "XQ-IO-028"})`;
 }

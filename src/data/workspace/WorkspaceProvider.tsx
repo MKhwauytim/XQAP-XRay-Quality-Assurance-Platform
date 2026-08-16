@@ -23,8 +23,13 @@ import {
   type WorkspaceContextValue
 } from "./WorkspaceContext";
 import { createDemoWorkspace } from "./demoWorkspace";
-import { getLabels } from "../labels/labelsStore";
-import { logError } from "../storage/errorLogger";
+import {
+  errorCodeOf,
+  formatUserError,
+  logCodedError,
+  tagError,
+  type ErrorCode
+} from "../storage/errorCodes";
 import { setReadOnlyMode } from "../storage/readOnlyMode";
 import { WORKSPACE_PERMISSION_LOST_EVENT } from "../storage/workspaceWriteAccess";
 
@@ -150,7 +155,8 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
           setSelectedDirectoryName(persisted.directoryName);
           setPendingReconnect(true);
           setStatus("not_selected");
-          setMessage(getLabels().wsgate_picker_reconnect_msg);
+          logCodedError("workspace:restore-permission", "XQ-WS-015");
+          setMessage(formatUserError("XQ-WS-015"));
           return;
         }
         await applyWorkspaceHandle(persisted.directoryHandle, {
@@ -158,10 +164,11 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
           restored: true
         });
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (cancelled) return;
+        logCodedError("workspace:restore", "XQ-WS-014", error);
         setStatus("not_selected");
-        setMessage("لم يتم اختيار مساحة العمل بعد.");
+        setMessage(formatUserError("XQ-WS-014", error));
       });
 
     return () => {
@@ -173,7 +180,8 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     const persisted = await loadLastWorkspace().catch(() => null);
 
     if (!persisted) {
-      setMessage("اختر مجلد مساحة العمل يدوياً للمتابعة.");
+      logCodedError("workspace:reconnect", "XQ-WS-008");
+      setMessage(formatUserError("XQ-WS-008"));
       return;
     }
 
@@ -187,17 +195,19 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       if (!hasReadWritePermission) {
         setPendingReconnect(true);
         setStatus("not_selected");
-        setMessage(getLabels().wsgate_picker_reconnect_msg);
+        logCodedError("workspace:reconnect-permission", "XQ-WS-009");
+        setMessage(formatUserError("XQ-WS-009"));
         return;
       }
       await applyWorkspaceHandle(persisted.directoryHandle, {
         persist: false,
         restored: true
       });
-    } catch {
+    } catch (error) {
+      logCodedError("workspace:reconnect", "XQ-WS-010", error);
       setPendingReconnect(true);
       setStatus("not_selected");
-      setMessage(getLabels().wsgate_picker_reconnect_msg);
+      setMessage(formatUserError("XQ-WS-010", error));
     }
   }, [applyWorkspaceHandle]);
 
@@ -205,7 +215,8 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
   const selectWorkspace = useCallback(async (): Promise<void> => {
     if (!isFileSystemAccessSupported()) {
       setStatus("unsupported_browser");
-      setMessage("المتصفح الحالي لا يدعم File System Access API.");
+      logCodedError("workspace:select", "XQ-WS-001");
+      setMessage(formatUserError("XQ-WS-001"));
       return;
     }
 
@@ -218,7 +229,10 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     } catch (error) {
       if (isAbortError(error)) {
         setStatus("not_selected");
-        setMessage("لم يتم اختيار مجلد مساحة العمل.");
+        // Not a fault: the user dismissed the picker. Coded so the sentence on
+        // screen is still identifiable in a support report, not logged as an
+        // error, because nothing went wrong.
+        setMessage(formatUserError("XQ-WS-002"));
         return;
       }
 
@@ -232,17 +246,17 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       // The detail is now both logged (for the error-log panel, once a workspace
       // IS open) and appended to the on-screen message, which is the only
       // surface visible in this state.
-      logError("workspace:select", error);
-      const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+      logCodedError("workspace:select", "XQ-WS-003", error);
       setStatus("error");
-      setMessage(`حدث خطأ أثناء اختيار أو فحص مجلد مساحة العمل. (${detail})`);
+      setMessage(formatUserError("XQ-WS-003", error));
     }
   }, [applyWorkspaceHandle]);
 
   const reloadWorkspace = useCallback(async (): Promise<void> => {
     if (!directoryHandle) {
       setStatus("not_selected");
-      setMessage("لم يتم اختيار مساحة العمل بعد.");
+      logCodedError("workspace:reload", "XQ-WS-011");
+      setMessage(formatUserError("XQ-WS-011"));
       return;
     }
 
@@ -265,9 +279,10 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       } else {
         setLoadedFiles(emptyLoadedFiles);
       }
-    } catch {
+    } catch (error) {
+      logCodedError("workspace:reload", "XQ-WS-012", error);
       setStatus("error");
-      setMessage("حدث خطأ أثناء إعادة تحميل مساحة العمل.");
+      setMessage(formatUserError("XQ-WS-012", error));
     }
   }, [directoryHandle]);
 
@@ -277,7 +292,8 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       const files = await loadWorkspaceFiles(directoryHandle);
       applyDiskUsers(files);
       return true;
-    } catch {
+    } catch (error) {
+      logCodedError("workspace:refresh-permissions", "XQ-WS-013", error);
       return false;
     }
   }, [directoryHandle]);
@@ -286,7 +302,8 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     async (username: string): Promise<void> => {
       if (!directoryHandle) {
         setStatus("not_selected");
-        setMessage("يجب اختيار مجلد مساحة العمل قبل إنشاء البنية.");
+        logCodedError("workspace:create-structure", "XQ-WS-004");
+        setMessage(formatUserError("XQ-WS-004"));
         return;
       }
 
@@ -294,9 +311,17 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
         setStatus("checking");
         setMessage("جار إنشاء بنية مساحة العمل.");
 
-        await createWorkspaceStructure(directoryHandle, username);
+        // The three steps below used to share one catch that blamed write
+        // permissions unconditionally. Each now tags whatever it throws with
+        // its own code, so the message names the step that actually failed
+        // (and, via fileSystemAccess.ts, which part of step 1 it was).
+        await taggedStep("XQ-WS-005", () =>
+          createWorkspaceStructure(directoryHandle, username)
+        );
 
-        const result = await checkWorkspaceStructure(directoryHandle);
+        const result = await taggedStep("XQ-WS-006", () =>
+          checkWorkspaceStructure(directoryHandle)
+        );
 
         setStatus(result.status);
         setMissingItems(result.missingItems);
@@ -308,23 +333,24 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
         );
 
         if (result.status === "ready") {
-          const files = await loadWorkspaceFiles(directoryHandle);
+          const files = await taggedStep("XQ-WS-007", async () => {
+            const loaded = await loadWorkspaceFiles(directoryHandle);
+            applyDiskUsers(loaded);
+            return loaded;
+          });
           setLoadedFiles(files);
-          applyDiskUsers(files);
           setUsersHydrated(true);
         } else {
           setLoadedFiles(emptyLoadedFiles);
         }
       } catch (error) {
-        // This catch spans THREE steps -- createWorkspaceStructure,
-        // checkWorkspaceStructure and loadWorkspaceFiles -- but blamed write
-        // permissions unconditionally, so any failure in any of them sent the
-        // user to check folder permissions that were often fine. It also logged
-        // nothing, leaving no way to tell which step failed or why.
-        logError("workspace:create-structure", error);
-        const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+        // XQ-WS-005/006/007 identify which of the three steps threw; XQ-WS-018
+        // is the fallback for anything raised outside them. The old message
+        // claimed a write-permission cause it had never established.
+        const code: ErrorCode = errorCodeOf(error) ?? "XQ-WS-018";
+        logCodedError("workspace:create-structure", code, error);
         setStatus("error");
-        setMessage(`تعذر إنشاء بنية مساحة العمل. (${detail})`);
+        setMessage(formatUserError(code, error));
       }
     },
     [directoryHandle]
@@ -334,7 +360,14 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     setReadOnlyMode(false);
     setStatus("checking");
     setMessage("جارٍ تحضير وضع العرض التجريبي...");
-    const handle = await createDemoWorkspace();
+    // Observability only: the rejection still propagates exactly as before.
+    let handle;
+    try {
+      handle = await createDemoWorkspace();
+    } catch (error) {
+      logCodedError("workspace:demo", "XQ-WS-016", error);
+      throw error;
+    }
     await applyWorkspaceHandle(handle, { persist: false });
     setReadOnlyMode(true);
   }, [applyWorkspaceHandle]);
@@ -366,9 +399,8 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       if (!directoryHandle) return;
       setStatus("permission_denied");
       setLoadedFiles(emptyLoadedFiles);
-      setMessage(
-        "فُقد إذن الوصول إلى مساحة العمل. أعد اختيار المجلد لاستعادة الاتصال.",
-      );
+      logCodedError("workspace:permission-lost", "XQ-WS-017");
+      setMessage(formatUserError("XQ-WS-017"));
     };
 
     window.addEventListener(
@@ -427,6 +459,20 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       {children}
     </WorkspaceContext.Provider>
   );
+}
+
+/**
+ * Runs one step of a multi-step flow and stamps its error code onto whatever it
+ * throws. `tagError` mutates the existing error rather than wrapping it, so the
+ * error's identity, name, message and stack reach the outer catch untouched --
+ * this adds a label, it does not change what is thrown or how it is handled.
+ */
+async function taggedStep<T>(code: ErrorCode, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    throw tagError(error, code);
+  }
 }
 
 function isAbortError(error: unknown): boolean {

@@ -17,6 +17,7 @@ import type { PreparedPopulationRow } from "../population/populationTypes";
 import type { DistributionEntry } from "./distributionTypes";
 import type { SampleMasterData } from "../sampling/sampleTypes";
 import { userFacingErrorText } from "../storage/writeErrorText";
+import { codedMessage } from "../storage/errorCodes";
 import { getStageKey } from "../population/stageHelpers";
 import type { StageAliasMappings } from "../population/populationConfig";
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
@@ -189,7 +190,7 @@ export async function executeReplacement(params: {
   if (deadEntry.status === "replaced" || deadEntry.status === "completed") {
     return {
       ok: false,
-      error: `لا يمكن استبدال هذه العينة — الحالة الحالية: ${deadEntry.status}.`
+      error: codedMessage("XQ-DIST-004", { status: deadEntry.status })
     };
   }
 
@@ -234,7 +235,9 @@ export async function executeReplacement(params: {
       // The wrapper sentence is Arabic, so the interpolated detail has to be
       // mapped here — at the caller the whole string would already look Arabic
       // and pass through with the raw DOMException text still embedded in it.
-      error: `تمت إضافة البديل للعينة لكن فشل تسجيل الحدث — يُرجى المحاولة مرة أخرى: ${userFacingErrorText(eventsResult.error, "replacement:append-events")}`,
+      error: codedMessage("XQ-DIST-005", {
+        detail: userFacingErrorText(eventsResult.error, "replacement:append-events"),
+      }),
       partialSampleWrite: true,
     };
   }

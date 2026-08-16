@@ -74,6 +74,7 @@
  */
 import type { DirectoryHandleLike, FileHandleLike } from "./fileSystemAccess";
 import { assertWritableMode } from "./readOnlyMode";
+import { tagError, taggedError } from "./errorCodes";
 import { isNotFoundError } from "./transientFileErrors";
 import {
   createSimpleHasher,
@@ -184,7 +185,8 @@ export function isCompressionSupported(): boolean {
 
 function requireCompressionSupport(): void {
   if (!isCompressionSupported()) {
-    throw new Error(
+    throw taggedError(
+      "XQ-IO-025",
       "CompressionStream/DecompressionStream are unavailable in this runtime."
     );
   }
@@ -264,7 +266,7 @@ async function openWritable(
   // `createWritable` is optional on FileHandleLike (a read-only handle, or a
   // browser without the write half of the API) — always guarded before use.
   if (!handle.createWritable) {
-    throw new Error(`Browser cannot write ${fileName}.`);
+    throw taggedError("XQ-IO-026", `Browser cannot write ${fileName}.`);
   }
   return asBinaryWritable(await handle.createWritable());
 }
@@ -277,11 +279,15 @@ function buildHeadLine(head: CompressedHeadInput): Uint8Array {
   // delimiter, and a caller handing us a pre-serialized string would break the
   // format in a way that only shows up as an unreadable file much later.
   if (json.includes("\n")) {
-    throw new Error("Compressed head line must not contain a raw newline.");
+    throw taggedError(
+      "XQ-IO-023",
+      "Compressed head line must not contain a raw newline."
+    );
   }
   const bytes = new TextEncoder().encode(`${json}\n`);
   if (bytes.byteLength > HEAD_PROBE_BYTES) {
-    throw new Error(
+    throw taggedError(
+      "XQ-IO-024",
       `Compressed head line is ${bytes.byteLength} bytes, above the ${HEAD_PROBE_BYTES}-byte probe window.`
     );
   }
@@ -648,11 +654,14 @@ export async function streamCompressedBody(
     // Truncated member, flipped byte, CRC32 or ISIZE mismatch: all arrive here
     // as a stream error. Re-typed so a caller can tell "this file is damaged"
     // from "this browser cannot decompress".
-    throw new CompressedReadError(
-      `Compressed body of a workspace file failed to decompress: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-      { cause: error }
+    throw tagError(
+      new CompressedReadError(
+        `Compressed body of a workspace file failed to decompress: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        { cause: error }
+      ),
+      "XQ-IO-021"
     );
   }
   const tail = decoder.decode();
@@ -680,8 +689,11 @@ export async function streamFileText(
   if (classified.kind === "corrupt") {
     // Self-identified as this format but with no body to inflate. Same verdict
     // as a truncated member, reached without handing back a single chunk.
-    throw new CompressedReadError(
-      `Compressed workspace file ${fileName} ends at its head line: the gzip body is missing.`
+    throw tagError(
+      new CompressedReadError(
+        `Compressed workspace file ${fileName} ends at its head line: the gzip body is missing.`
+      ),
+      "XQ-IO-022"
     );
   }
   if (classified.kind === "compressed") {

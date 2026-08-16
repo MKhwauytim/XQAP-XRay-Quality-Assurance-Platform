@@ -56,7 +56,7 @@ import { ORGANIZATION_PATH_TEXT, ZATCA_LOGO_URL } from "../branding/organization
 import { DEMO_WORKSPACE_NAME } from "../data/workspace/demoWorkspace";
 import { useWorkspace } from "../data/workspace/useWorkspace";
 import { syncUserManagementToDisk } from "../data/workspace/userSync";
-import { logRejection } from "../data/storage/errorLogger";
+import { codedMessage, logCodedError } from "../data/storage/errorCodes";
 import { LoadingState } from "../components/StateViews/StateViews";
 import { GlobalMonthProvider } from "../data/month/GlobalMonthProvider";
 import { useLabels } from "../data/labels/useLabels";
@@ -245,7 +245,7 @@ export default function AuthGate({ children }: AuthGateProps) {
         clearSession();
         // Notify on the next tick so the state updater stays side-effect-free.
         queueMicrotask(() =>
-          setLogoutNotice(getLabels().auth_msg_permissions_updated)
+          setLogoutNotice(codedMessage("XQ-AUTH-005"))
         );
         return null;
       });
@@ -275,7 +275,7 @@ export default function AuthGate({ children }: AuthGateProps) {
 
       clearSession();
       queueMicrotask(() =>
-        setLogoutNotice(getLabels().auth_msg_permissions_updated)
+        setLogoutNotice(codedMessage("XQ-AUTH-005"))
       );
       return null;
     });
@@ -308,7 +308,7 @@ export default function AuthGate({ children }: AuthGateProps) {
       // in state, drop to the login screen with a notice.
       if (readRealSession() === null) {
         setSession(null);
-        setLogoutNotice(getLabels().auth_msg_session_expired);
+        setLogoutNotice(codedMessage("XQ-AUTH-004"));
       }
     }, 60_000);
 
@@ -472,7 +472,7 @@ export default function AuthGate({ children }: AuthGateProps) {
 
       if (!isPasscodeValid) {
         registerFailedAttempt();
-        showMessage(getLabels().auth_msg_invalid_credentials, "bad");
+        showMessage(codedMessage("XQ-AUTH-001"), "bad");
         return;
       }
 
@@ -491,12 +491,12 @@ export default function AuthGate({ children }: AuthGateProps) {
 
     if (!user) {
       registerFailedAttempt();
-      showMessage(getLabels().auth_msg_invalid_credentials, "bad");
+      showMessage(codedMessage("XQ-AUTH-001"), "bad");
       return;
     }
 
     if (!user.isActive) {
-      showMessage(getLabels().auth_msg_user_inactive, "bad");
+      showMessage(codedMessage("XQ-AUTH-002"), "bad");
       return;
     }
 
@@ -507,7 +507,7 @@ export default function AuthGate({ children }: AuthGateProps) {
 
     if (!isPasswordValid) {
       registerFailedAttempt();
-      showMessage(getLabels().auth_msg_invalid_credentials, "bad");
+      showMessage(codedMessage("XQ-AUTH-001"), "bad");
       return;
     }
 
@@ -525,10 +525,13 @@ export default function AuthGate({ children }: AuthGateProps) {
             directoryHandle,
             readUserManagementState(),
             user.username
-          ).catch(logRejection("authGate.persistRehash"));
+          ).catch((error: unknown) =>
+              logCodedError("authGate:persistRehash", "XQ-AUTH-007", error));
         }
-      } catch {
-        // ignore — login still succeeds with the existing hash
+      } catch (error) {
+        // Non-fatal: login still succeeds with the existing hash. Coded so the
+        // silent degradation is visible in the error log.
+        logCodedError("authGate:rehash", "XQ-AUTH-006", error);
       }
     }
 
@@ -551,7 +554,7 @@ export default function AuthGate({ children }: AuthGateProps) {
     );
 
     if (!isPasscodeValid) {
-      showMessage(getLabels().auth_msg_bad_admin_passcode, "bad");
+      showMessage(codedMessage("XQ-AUTH-003"), "bad");
       return;
     }
 

@@ -14,6 +14,7 @@ import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
 import { readEnvelopeRevision, safeReadJson, safeWriteJson } from "../storage/safeWrite";
 import { logError, logRejection } from "../storage/errorLogger";
 import { casLoop } from "../storage/casLoop";
+import { codedMessage, logCodedError } from "../storage/errorCodes";
 import { listDirectoryEntries, readAppendOnlyDirectory, readNamedJsonFiles } from "../storage/directoryScan";
 import { ensureMonthWritable } from "../population/monthLock";
 import { syncSampleMirrors } from "../samples/sampleMirrorStorage";
@@ -415,7 +416,10 @@ export async function appendDistributionEvents(
   const ids = new Set<string>();
   for (const event of events) {
     if (ids.has(event.eventId)) {
-      return { ok: false, error: `معرّف حدث مكرر: ${event.eventId}` };
+      return {
+        ok: false,
+        error: codedMessage("XQ-DIST-002", { eventId: event.eventId })
+      };
     }
     ids.add(event.eventId);
   }
@@ -431,7 +435,11 @@ export async function appendDistributionEvents(
       options?.onProgress
     );
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    logCodedError("distribution:append-events", "XQ-DIST-003", error);
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error)
+    };
   }
 
   options?.onProgress?.({ phase: "projection", completed: events.length, total: events.length });

@@ -1,4 +1,11 @@
 import { safeWriteJson } from "./safeWrite";
+import {
+  codedMessage,
+  logCodedError,
+  tagError,
+  taggedError,
+  type ErrorCode
+} from "./errorCodes";
 
 import {
   createDefaultUsersPermissions,
@@ -95,7 +102,10 @@ export async function selectWorkspaceDirectory(
   const picker = (window as FilePickerWindow).showDirectoryPicker;
 
   if (!picker) {
-    throw new Error("File System Access API is not supported in this browser.");
+    throw taggedError(
+      "XQ-FS-001",
+      "File System Access API is not supported in this browser."
+    );
   }
 
   return picker({
@@ -155,11 +165,12 @@ export async function checkWorkspaceStructure(
   );
 
   if (!hasReadPermission) {
+    logCodedError("fileSystemAccess:check-structure", "XQ-FS-002");
     return {
       status: "permission_denied",
       missingItems: [],
       invalidItems: [],
-      message: "لم يتم منح صلاحية قراءة مجلد مساحة العمل."
+      message: codedMessage("XQ-FS-002")
     };
   }
 
@@ -240,8 +251,7 @@ export async function checkWorkspaceStructure(
       status: "missing_structure",
       missingItems,
       invalidItems,
-      message:
-        "لم يتم العثور على بنية مساحة العمل المطلوبة. يمكن لمسؤول النظام إنشاء البنية."
+      message: codedMessage("XQ-FS-003")
     };
   }
 
@@ -250,8 +260,7 @@ export async function checkWorkspaceStructure(
       status: "invalid_structure",
       missingItems,
       invalidItems,
-      message:
-        "تم العثور على ملفات مساحة العمل، ولكن بعض الملفات غير صالحة أو غير متوافقة."
+      message: codedMessage("XQ-FS-004")
     };
   }
 
@@ -299,59 +308,92 @@ export async function createWorkspaceStructure(
   );
 
   if (!hasWritePermission) {
-    throw new Error("لم يتم منح صلاحية الكتابة لإنشاء بنية مساحة العمل.");
+    throw taggedError(
+      "XQ-FS-005",
+      "لم يتم منح صلاحية الكتابة لإنشاء بنية مساحة العمل."
+    );
   }
 
-  await directoryHandle.getDirectoryHandle(
-    WORKSPACE_FILE_NAMES.employeeAnswersFolder,
-    { create: true }
-  );
+  // Each phase below is tagged with its own code. Creating the folders, writing
+  // the manifest, writing the permissions file and stamping the schema fail for
+  // completely different reasons, and the caller previously saw one
+  // undifferentiated "check write permissions" message for all of them.
+  const systemHandle = await taggedStep("XQ-FS-006", async () => {
+    await directoryHandle.getDirectoryHandle(
+      WORKSPACE_FILE_NAMES.employeeAnswersFolder,
+      { create: true }
+    );
 
-  await directoryHandle.getDirectoryHandle(WORKSPACE_ROOTS.population, { create: true });
-  await directoryHandle.getDirectoryHandle(WORKSPACE_ROOTS.userData, { create: true });
-  await directoryHandle.getDirectoryHandle(WORKSPACE_ROOTS.reports, { create: true });
+    await directoryHandle.getDirectoryHandle(WORKSPACE_ROOTS.population, { create: true });
+    await directoryHandle.getDirectoryHandle(WORKSPACE_ROOTS.userData, { create: true });
+    await directoryHandle.getDirectoryHandle(WORKSPACE_ROOTS.reports, { create: true });
 
-  const systemHandle = await directoryHandle.getDirectoryHandle(
-    WORKSPACE_FILE_NAMES.systemFolder,
-    { create: true }
-  );
-
-  await systemHandle.getDirectoryHandle(WORKSPACE_FILE_NAMES.locksFolder, {
-    create: true
+    return directoryHandle.getDirectoryHandle(
+      WORKSPACE_FILE_NAMES.systemFolder,
+      { create: true }
+    );
   });
 
-  await systemHandle.getDirectoryHandle(WORKSPACE_FILE_NAMES.auditFolder, {
-    create: true
+  await taggedStep("XQ-FS-007", async () => {
+    await systemHandle.getDirectoryHandle(WORKSPACE_FILE_NAMES.locksFolder, {
+      create: true
+    });
+
+    await systemHandle.getDirectoryHandle(WORKSPACE_FILE_NAMES.auditFolder, {
+      create: true
+    });
+
+    await systemHandle.getDirectoryHandle(WORKSPACE_FILE_NAMES.backupsFolder, {
+      create: true
+    });
+
+    await directoryHandle.getDirectoryHandle(
+      WORKSPACE_FILE_NAMES.templatesFolder,
+      { create: true }
+    );
   });
 
-  await systemHandle.getDirectoryHandle(WORKSPACE_FILE_NAMES.backupsFolder, {
-    create: true
+  const userDataHandle = await taggedStep("XQ-FS-006", () =>
+    directoryHandle.getDirectoryHandle(WORKSPACE_ROOTS.userData, {
+      create: true
+    })
+  );
+
+  await taggedStep("XQ-FS-008", async () =>
+    writeJsonFile(
+      systemHandle,
+      WORKSPACE_FILE_NAMES.manifest,
+      await prepareFileForWrite(createDefaultWorkspaceManifest(username), username)
+    )
+  );
+
+  await taggedStep("XQ-FS-009", async () =>
+    writeJsonFile(
+      userDataHandle,
+      WORKSPACE_FILE_NAMES.usersPermissions,
+      await prepareFileForWrite(createDefaultUsersPermissions(username), username)
+    )
+  );
+
+  await taggedStep("XQ-FS-010", async () => {
+    const schema = await detectWorkspaceSchema(directoryHandle);
+    if (schema.layout === "current" && schema.missingCurrentRoots.length === 0) {
+      await initializeWorkspaceSchemaMetadata(directoryHandle, username);
+    }
   });
+}
 
-  await directoryHandle.getDirectoryHandle(
-    WORKSPACE_FILE_NAMES.templatesFolder,
-    { create: true }
-  );
-
-  const userDataHandle = await directoryHandle.getDirectoryHandle(WORKSPACE_ROOTS.userData, {
-    create: true
-  });
-
-  await writeJsonFile(
-    systemHandle,
-    WORKSPACE_FILE_NAMES.manifest,
-    await prepareFileForWrite(createDefaultWorkspaceManifest(username), username)
-  );
-
-  await writeJsonFile(
-    userDataHandle,
-    WORKSPACE_FILE_NAMES.usersPermissions,
-    await prepareFileForWrite(createDefaultUsersPermissions(username), username)
-  );
-
-  const schema = await detectWorkspaceSchema(directoryHandle);
-  if (schema.layout === "current" && schema.missingCurrentRoots.length === 0) {
-    await initializeWorkspaceSchemaMetadata(directoryHandle, username);
+/**
+ * Runs one phase of `createWorkspaceStructure` and stamps its error code onto
+ * whatever it throws. `tagError` mutates the error in place rather than
+ * wrapping it, so name/message/stack/`instanceof` all reach the caller
+ * unchanged -- this is a label, not a rethrow of something different.
+ */
+async function taggedStep<T>(code: ErrorCode, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    throw tagError(error, code);
   }
 }
 
@@ -412,7 +454,7 @@ async function readAndParseJsonFile<TFile>(
       return {
         ok: false,
         reason: "invalid_json",
-        message: `الملف ${fileName} ليس ملف JSON صالح.`
+        message: codedMessage("XQ-FS-012", { file: fileName })
       };
     }
   } catch (error) {
@@ -420,7 +462,7 @@ async function readAndParseJsonFile<TFile>(
       return {
         ok: false,
         reason: "missing",
-        message: `الملف ${fileName} غير موجود.`
+        message: codedMessage("XQ-FS-011", { file: fileName })
       };
     }
 
@@ -428,14 +470,15 @@ async function readAndParseJsonFile<TFile>(
       return {
         ok: false,
         reason: "permission_denied",
-        message: `لا توجد صلاحية كافية لقراءة الملف ${fileName}.`
+        message: codedMessage("XQ-FS-013", { file: fileName })
       };
     }
 
+    logCodedError("fileSystemAccess:read-json", "XQ-FS-014", error);
     return {
       ok: false,
       reason: "read_failed",
-      message: `تعذر قراءة الملف ${fileName}.`
+      message: codedMessage("XQ-FS-014", { file: fileName })
     };
   }
 }
