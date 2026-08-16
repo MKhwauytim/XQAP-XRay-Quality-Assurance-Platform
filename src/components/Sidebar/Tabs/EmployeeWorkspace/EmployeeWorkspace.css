@@ -240,6 +240,20 @@
   font-weight: 600;
 }
 
+/* Non-destructive notice: the open inspection panel is showing a sample that
+   has left this user's queue while their unsaved answers are still in it
+   (ew_draft_retained_notice). Warning, not an error — nothing failed. */
+.ew-msg-warn {
+  margin-bottom: var(--sp-4);
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--c-warning-bg);
+  border: 1.5px solid var(--c-warning-border);
+  border-radius: var(--r-sm, 8px);
+  color: var(--c-warning);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
 /* Modifier for ew-msg-ok/ew-msg-error variants that carry an inline dismiss
    button — logical-property flex layout instead of `float: left`, which was
    wrong in this RTL app (it pinned the button to the visual left regardless

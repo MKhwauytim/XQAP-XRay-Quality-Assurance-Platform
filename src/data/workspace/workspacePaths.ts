@@ -46,6 +46,21 @@ export const REPORTS_SUBFOLDERS = {
   designs: "designs",
 } as const;
 
+/**
+ * A workspace root folder that is genuinely not there.
+ *
+ * Named `NotFoundError` on purpose: every optional-file reader in the data layer
+ * separates "absent" from "I could not read it" by that name (see
+ * `readOptionalJson` in safeWrite.ts), and a plain `Error` here forced them to
+ * treat a permission failure and an empty workspace identically. The message is
+ * unchanged — `backupStorage.ts` matches on its prefix.
+ */
+function missingWorkspaceFolder(name: string): Error {
+  const error = new Error(`Missing workspace folder: ${name}`);
+  error.name = "NotFoundError";
+  return error;
+}
+
 export const LEGACY_WORKSPACE_ROOTS = {
   population: "Population",
   system: ".system",
@@ -237,8 +252,12 @@ async function getRoot(
       let resolvedName = primaryName;
       try {
         handle = await directoryHandle.getDirectoryHandle(primaryName, { create: false });
-      } catch {
-        if (!legacyName) throw new Error(`Missing workspace folder: ${primaryName}`);
+      } catch (error) {
+        // "I could not look" is not "it is not there". A revoked grant or a
+        // transient share failure must reach the caller; only a genuine absence
+        // may fall through to the legacy name — or be reported as missing.
+        if (!isNotFoundError(error)) throw error;
+        if (!legacyName) throw missingWorkspaceFolder(primaryName);
         resolvedName = legacyName;
         handle = await directoryHandle.getDirectoryHandle(legacyName, { create: false });
       }

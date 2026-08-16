@@ -185,6 +185,12 @@ export const DEFAULT_LABELS = {
   ew_quality_note_empty_readonly:  "لا توجد ملاحظة جودة لهذه العينة.",
   ew_quality_note_denied:          "لا تملك صلاحية إضافة ملاحظات الجودة، أو أن مساحة العمل للقراءة فقط.",
 
+  // Shown when the open inspection panel's sample left this user's queue (a
+  // supervisor reassigned or replaced it) while unsaved answers were typed in.
+  // The panel is deliberately kept open instead of being swapped to another
+  // x-ray — losing typed work to a background refresh is never acceptable.
+  ew_draft_retained_notice:        "تم نقل هذه العينة من قائمتك (إحالة أو استبدال أثناء العمل عليها). إجاباتك غير المحفوظة لا تزال معروضة هنا — انسخها قبل الانتقال إلى عينة أخرى.",
+
   // Population — sampling & processing guards
   sample_redraw_blocked: "لا يمكن إعادة سحب العينة بعد بدء التوزيع: يوجد سجل توزيع فعّال لهذا الشهر، وإعادة السحب ستؤدي إلى فقدان التعيينات والإجابات المسجلة.",
 
@@ -905,6 +911,7 @@ export const DEFAULT_LABELS = {
   err_io_025_compression_unsupported:      "هذا المتصفح لا يدعم ضغط الملفات المطلوب.",
   err_io_026_no_createwritable_compressed: "المتصفح الحالي لا يسمح بالكتابة على هذا الملف.",
   err_io_027_not_found:                    "الملف أو المجلد المطلوب غير موجود.",
+  err_io_029_unreadable_not_absent:        "تعذّرت قراءة ملف موجود، وأُلغيت العملية بدلاً من الكتابة فوق بياناته.",
 
   err_auth_006_rehash_failed:          "تعذر تحديث تشفير كلمة المرور، وتم الإبقاء على التشفير السابق.",
   err_auth_007_rehash_persist_failed:  "تعذر حفظ تشفير كلمة المرور المحدّث في مساحة العمل.",

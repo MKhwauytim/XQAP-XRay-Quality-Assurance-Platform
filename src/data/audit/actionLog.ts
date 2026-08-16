@@ -14,7 +14,7 @@
  */
 
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
-import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { readOptionalJson, safeWriteJson } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
 import { withResourceLock } from "../storage/webLocks";
 import { simpleHash } from "../storage/jsonEnvelope";
@@ -130,39 +130,59 @@ async function getAuditDir(
   return systemDir.getDirectoryHandle(SYSTEM_FOLDER_NAMES.audit, { create });
 }
 
+/**
+ * The live action log, or an empty shell for a workspace that has none yet.
+ *
+ * **Throws when the log exists but could not be read.** This is the base read of
+ * an append-only read-modify-write: the empty shell is not a neutral starting
+ * point, it is a whole-file replacement that truncates the audit trail to the
+ * single entry being appended — and reports success. A missing audit folder is
+ * normal for a fresh workspace and still yields the shell; nothing else does.
+ */
 async function readLogFile(
   directoryHandle: DirectoryHandleLike
 ): Promise<WorkspaceActionLogFile> {
-  try {
-    const dir = await getAuditDir(directoryHandle, false);
-    const result = await safeReadJson<WorkspaceActionLogFile>(dir, ACTIONS_LOG_FILE);
-    if (result.ok) {
-      return {
-        revision: result.value.revision ?? 0,
-        _writeToken: result.value._writeToken,
-        updatedAt: result.value.updatedAt ?? new Date().toISOString(),
-        entries: Array.isArray(result.value.entries) ? result.value.entries : [],
-      };
-    }
-  } catch {
-    // Missing audit folder is normal for fresh workspaces.
+  const read = await readOptionalJson<WorkspaceActionLogFile>(
+    `audit:${ACTIONS_LOG_FILE}`,
+    [{ directory: () => getAuditDir(directoryHandle, false), fileName: ACTIONS_LOG_FILE }]
+  );
+  if (read.kind === "found") {
+    return {
+      revision: read.value.revision ?? 0,
+      _writeToken: read.value._writeToken,
+      updatedAt: read.value.updatedAt ?? new Date().toISOString(),
+      entries: Array.isArray(read.value.entries) ? read.value.entries : [],
+    };
   }
   return { revision: 0, updatedAt: new Date().toISOString(), entries: [] };
 }
 
-/** Read a per-year archive file, or an empty shell when absent. */
+/**
+ * Read a per-year archive file, or an empty shell when genuinely absent.
+ *
+ * **Throws when the archive exists but could not be read** — same reasoning as
+ * `readLogFile`, and with a sharper edge: `archiveOverflow` rewrites this file
+ * from what it returns, so an empty shell here would discard a whole year of
+ * archived actions and then let the live-log trim proceed. The throw is caught
+ * by `archiveOverflow`, which returns `false` and BLOCKS that trim, so no entry
+ * is dropped without being archived first.
+ */
 async function readArchiveFile(
   dir: DirectoryHandleLike,
   year: number
 ): Promise<WorkspaceActionArchiveFile> {
-  const result = await safeReadJson<WorkspaceActionArchiveFile>(dir, archiveFileName(year));
-  if (result.ok) {
+  const fileName = archiveFileName(year);
+  const read = await readOptionalJson<WorkspaceActionArchiveFile>(
+    `audit:${fileName}`,
+    [{ directory: async () => dir, fileName }]
+  );
+  if (read.kind === "found") {
     return {
       year,
-      revision: result.value.revision ?? 0,
-      updatedAt: result.value.updatedAt ?? new Date().toISOString(),
-      previousArchiveHash: result.value.previousArchiveHash,
-      entries: Array.isArray(result.value.entries) ? result.value.entries : [],
+      revision: read.value.revision ?? 0,
+      updatedAt: read.value.updatedAt ?? new Date().toISOString(),
+      previousArchiveHash: read.value.previousArchiveHash,
+      entries: Array.isArray(read.value.entries) ? read.value.entries : [],
     };
   }
   return { year, revision: 0, updatedAt: new Date().toISOString(), entries: [] };

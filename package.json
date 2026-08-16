@@ -1,7 +1,7 @@
 {
   "name": "x-ray-quality-app",
   "private": true,
-  "version": "92.0.0",
+  "version": "93.0.0",
   "type": "module",
   "engines": {
     "node": ">=22 <23"

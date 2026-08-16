@@ -1,5 +1,5 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
-import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { readOptionalJson, safeWriteJson } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
 import { logError } from "../storage/errorLogger";
 import { readJsonDirectory } from "../storage/directoryScan";
@@ -96,32 +96,39 @@ function withValueHistory(previous: ItemAnswer | undefined, next: ItemAnswer): I
   return { ...next, valueHistory: appendValueHistory(previous.valueHistory, entry) };
 }
 
+/**
+ * The employee's answer file, or an empty shell when they genuinely have none
+ * yet.
+ *
+ * **Throws when the file exists but could not be read.** This is the base read
+ * of `updateEmployeeAnswerFile`'s read-modify-write, and the empty shell is a
+ * whole-file replacement: substituting it for an unreadable file rewrote twenty
+ * answers as one — and took the referral / replacement / reopen requests stored
+ * in the same file with them — while returning `{ ok: true }`. Absence is the
+ * only condition that may produce the shell, so the two legacy locations below
+ * are probed for absence individually (a legacy folder that is genuinely not
+ * there is still `absent`) while any inconclusive outcome propagates.
+ *
+ * `fallThroughOnMissingFile: false` preserves the historical shape: the primary
+ * directory is opened with `{ create: true }`, so once it resolves, "no file
+ * here" is conclusive and the legacy probe would only add round trips per call.
+ * The legacy location is still consulted when the primary could not be opened.
+ */
 export async function loadEmployeeAnswers(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
   username: string
 ): Promise<EmployeeAnswerFile> {
-  try {
-    const dir = await getAnswersDir(directoryHandle, monthFolderName);
-    const result = await safeReadJson<EmployeeAnswerFile>(
-      dir,
-      answerFileName(username)
-    );
-    return result.ok
-      ? result.value
-      : emptyAnswerFile(username, monthFolderName);
-  } catch {
-    try {
-      const legacyDir = await getLegacyAnswersDir(directoryHandle, monthFolderName);
-      const result = await safeReadJson<EmployeeAnswerFile>(
-        legacyDir,
-        answerFileName(username)
-      );
-      return result.ok ? result.value : emptyAnswerFile(username, monthFolderName);
-    } catch {
-      return emptyAnswerFile(username, monthFolderName);
-    }
-  }
+  const fileName = answerFileName(username);
+  const read = await readOptionalJson<EmployeeAnswerFile>(
+    `answers:${monthFolderName}/${username}`,
+    [
+      { directory: () => getAnswersDir(directoryHandle, monthFolderName), fileName },
+      { directory: () => getLegacyAnswersDir(directoryHandle, monthFolderName), fileName },
+    ],
+    { fallThroughOnMissingFile: false }
+  );
+  return read.kind === "found" ? read.value : emptyAnswerFile(username, monthFolderName);
 }
 
 async function updateEmployeeAnswerFile(
@@ -136,6 +143,11 @@ async function updateEmployeeAnswerFile(
   return casLoop<{ ok: true } | { ok: false; error: string }>(
     async (writeToken) => {
       const dir = await getAnswersDir(directoryHandle, monthFolderName);
+      // ABORT, never truncate: an unreadable existing file throws out of
+      // loadEmployeeAnswers, casLoop catches it, retries the whole attempt (a
+      // NotReadableError is usually transient) and finally returns
+      // `{ ok: false, error }`. Nothing is written on that path — the old
+      // behaviour substituted an empty base here and reported success.
       const existing = await loadEmployeeAnswers(directoryHandle, monthFolderName, username);
       const nextRevision = (existing.revision ?? 0) + 1;
       const updated: EmployeeAnswerFile = {

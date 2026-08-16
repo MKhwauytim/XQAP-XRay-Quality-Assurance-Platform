@@ -109,15 +109,18 @@ export default function PhaseFourDistribution({
 
   const sampleRows = useMemo(() => sampleDrawResult?.rows ?? [], [sampleDrawResult]);
 
-  const stageSampleCounts = useMemo(
-    () => ({
-      first:  sampleRows.filter((r) => getStageKey(r.stage, config.stageMappings) === "first"),
-      second: sampleRows.filter((r) => getStageKey(r.stage, config.stageMappings) === "second"),
-      third:  sampleRows.filter((r) => getStageKey(r.stage, config.stageMappings) === "third"),
-      fourth: sampleRows.filter((r) => getStageKey(r.stage, config.stageMappings) === "fourth")
-    }),
-    [sampleRows, config.stageMappings]
-  );
+  // One classification pass instead of four `.filter()` sweeps — same buckets,
+  // same order within each bucket (rows are appended in sampleRows order).
+  const stageSampleCounts = useMemo(() => {
+    const buckets: Record<"first" | "second" | "third" | "fourth", typeof sampleRows> = {
+      first: [], second: [], third: [], fourth: []
+    };
+    for (const row of sampleRows) {
+      const stageKey = getStageKey(row.stage, config.stageMappings);
+      if (stageKey !== "unknown") buckets[stageKey].push(row);
+    }
+    return buckets;
+  }, [sampleRows, config.stageMappings]);
 
   const activeAllocations = useMemo(() => {
     const list: EmployeeStageAllocation[] = [];
@@ -176,8 +179,16 @@ export default function PhaseFourDistribution({
       summaryMap[emp.username] = { cert: 0, normal: 0, total: 0 };
     }
 
+    // Index once: this was a linear `sampleRows.find` per event, i.e. O(events x
+    // rows) on every recompute. Same lookup semantics (first row wins for a
+    // duplicated xrayImageId), constant time.
+    const rowById = new Map<string, (typeof sampleRows)[number]>();
+    for (const row of sampleRows) {
+      if (!rowById.has(row.xrayImageId)) rowById.set(row.xrayImageId, row);
+    }
+
     for (const evt of events) {
-      const row = sampleRows.find((r) => r.xrayImageId === evt.xrayImageId);
+      const row = rowById.get(evt.xrayImageId);
       const data = summaryMap[evt.assignedTo];
       if (data && row) {
         data.total += 1;

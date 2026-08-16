@@ -52,7 +52,8 @@ export default function CertScanMatchPreviewPanel({
   }
 
   const isSuspicious =
-    preview.totalMatchPercentage < 5 ||
+    preview.isSuspiciouslyLowMatch ||
+    preview.isImplausiblyHighMatch ||
     preview.populationOnlyPorts.length > 0 ||
     preview.pasteOnlyPorts.length > 0 ||
     preview.looseTierAlignments.length > 0;
@@ -89,8 +90,18 @@ export default function CertScanMatchPreviewPanel({
         <div className="csmp-warning-banner">
           <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
           <span>
-            {preview.totalMatchPercentage < 5 && preview.totalPopulationRows > 0 && (
+            {preview.isSuspiciouslyLowMatch && (
               <>نسبة المطابقة منخفضة جداً ({preview.totalMatchPercentage}%) — راجع أسماء المنافذ أدناه قبل المتابعة. </>
+            )}
+            {preview.isImplausiblyHighMatch && (
+              <>
+                نسبة المطابقة مرتفعة بشكل غير معقول ({preview.totalMatchPercentage}%):{" "}
+                {formatCount(preview.totalCertScanEntries)} جهاز في اللصق يطابق{" "}
+                {formatCount(preview.totalMatchedRows)} من أصل{" "}
+                {formatCount(preview.totalPopulationRows)} صف. هذا يعني غالباً أن الأرقام
+                التسلسلية الملصقة قصيرة جداً أو عامة جداً فطابقت صفوفاً لا تخص أجهزة CertScan —
+                وسيؤدي ذلك إلى تكوين عينة غير صحيح. راجع اللصق قبل المتابعة.{" "}
+              </>
             )}
             {preview.populationOnlyPorts.length > 0 && (
               <>

@@ -11,7 +11,7 @@
  */
 
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
-import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { readOptionalJson, safeWriteJson } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
 import { withResourceLock } from "../storage/webLocks";
 import { withWorkspaceWriteAccess } from "../storage/workspaceWriteAccess";
@@ -42,24 +42,35 @@ async function getNotificationsDir(
   return systemDir.getDirectoryHandle(SYSTEM_FOLDER_NAMES.notifications, { create });
 }
 
+/**
+ * The notifications file, or an empty shell for a workspace that has none yet.
+ *
+ * **Throws when the file exists but could not be read.** It is the base read of
+ * the CAS read-modify-write below, so an empty shell substituted for an
+ * unreadable file replaces every notification AND every recipient's
+ * acknowledgement with whatever this one write carries. A missing notifications
+ * folder is normal for a fresh workspace and still yields the shell; nothing
+ * else does.
+ */
 async function readNotificationsFile(
   directoryHandle: DirectoryHandleLike
 ): Promise<NotificationsFile> {
-  try {
-    const dir = await getNotificationsDir(directoryHandle, false);
-    const result = await safeReadJson<NotificationsFile>(dir, NOTIFICATIONS_FILE);
-    if (result.ok) {
-      return {
-        revision: result.value.revision ?? 0,
-        _writeToken: result.value._writeToken,
-        updatedAt: result.value.updatedAt ?? new Date().toISOString(),
-        notifications: Array.isArray(result.value.notifications)
-          ? result.value.notifications
-          : [],
-      };
-    }
-  } catch {
-    // Missing notifications folder is normal for fresh workspaces.
+  const read = await readOptionalJson<NotificationsFile>(
+    `notifications:${NOTIFICATIONS_FILE}`,
+    [{
+      directory: () => getNotificationsDir(directoryHandle, false),
+      fileName: NOTIFICATIONS_FILE,
+    }]
+  );
+  if (read.kind === "found") {
+    return {
+      revision: read.value.revision ?? 0,
+      _writeToken: read.value._writeToken,
+      updatedAt: read.value.updatedAt ?? new Date().toISOString(),
+      notifications: Array.isArray(read.value.notifications)
+        ? read.value.notifications
+        : [],
+    };
   }
   return { revision: 0, updatedAt: new Date().toISOString(), notifications: [] };
 }

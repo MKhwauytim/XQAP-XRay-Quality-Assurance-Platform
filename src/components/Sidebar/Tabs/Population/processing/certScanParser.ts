@@ -354,6 +354,95 @@ export function buildCertScanPortIndex(
   return { entriesByPopulationPort, alignment };
 }
 
+// ── X-ray ID segmentation (device-code anchoring) ──────────────────────────
+//
+// Snippet matching used to be a bare `cleanedXrayId.includes(snippet)`. That is
+// catastrophically wrong for the real ID shape, because every X-ray ID embeds
+// the scan date, so ANY pasted serial containing a 4-digit run that also occurs
+// in a date matches nearly the whole population. Measured on the owner's real
+// month (117,337 candidate rows): a pasted serial containing "2026" or "0260"
+// substring-matched 117,268 of them (99.94%). `certScanStatus` drives the
+// stratified CertScan/NonCertScan split in the draw, so the month's sample
+// composition was fabricated.
+//
+// The real IDs have exactly two shapes, both of which put the device code on a
+// segment boundary around the embedded 8-digit date:
+//
+//   A. [deviceCode][YYYYMMDD][sequence]
+//      96601PB04|20260501|0138,  6184|20260504|0021,  48|20260508|0419
+//
+//   B. [YYYYMMDD][deviceCode][sequence]
+//      20260509|002368|0130,  20260527|851530|0519
+//
+// So: split the ID at the first valid embedded date into `head` (before it) and
+// `tail` (after it), and require the snippet to be anchored at the start of one
+// of those two segments. A snippet is never matched against the date itself, and
+// never against the interior of the sequence number.
+//
+// Measured effect on the same real month, using every device code that actually
+// occurs in that month's IDs as the pasted serial list:
+//
+//   rule                     legitimate paste     serial "2026"     serial "0260"
+//   substring (old)                     20,315         117,268          117,268
+//   startsWith only                        174 (loses all of shape B)         0
+//   head/tail anchored (new)            20,239              10                10
+//
+// Every one of the 76 rows the old substring rule matched that the anchored rule
+// does not is a demonstrable coincidence inside the sequence digits — e.g. serial
+// `2366` "matching" `95|20260503|422366`, or `6184` "matching" `66|20260516|184616`.
+// No legitimate match relies on the substring behaviour.
+//
+// Anchoring on the *start of a segment* rather than requiring whole-segment
+// equality is deliberate: it keeps a serial family stem (`96601` pasted for the
+// device `96601PB04`) matching, so tightening this cannot introduce the
+// mirror-image false-negative bug. On the real month head-prefix and head-exact
+// score identically, so the looser of the two is the safe choice.
+
+/** First valid embedded `YYYYMMDD`; the year is bounded to 20xx as all real IDs are. */
+const XRAY_ID_EMBEDDED_DATE = /(20\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])/;
+
+const EMBEDDED_DATE_LENGTH = 8;
+
+export type XrayIdSegments = {
+  /** Everything before the embedded date — shape A's device code. Empty for shape B. */
+  head: string;
+  /** Everything after the embedded date — shape B's device code, then the sequence. */
+  tail: string;
+  /** False when no valid date could be located; `head` then holds the whole ID. */
+  hasEmbeddedDate: boolean;
+};
+
+/**
+ * Splits a cleaned X-ray ID around its first embedded `YYYYMMDD`.
+ *
+ * IDs with no parseable date (68 of the real month's 117,337 rows, 0.06%)
+ * degrade to `head` = the whole ID, so they still match by plain prefix rather
+ * than becoming permanently unmatchable.
+ */
+export function splitXrayIdSegments(cleanedXrayId: string): XrayIdSegments {
+  const match = XRAY_ID_EMBEDDED_DATE.exec(cleanedXrayId);
+
+  if (!match) {
+    return { head: cleanedXrayId, tail: "", hasEmbeddedDate: false };
+  }
+
+  return {
+    head: cleanedXrayId.slice(0, match.index),
+    tail: cleanedXrayId.slice(match.index + EMBEDDED_DATE_LENGTH),
+    hasEmbeddedDate: true
+  };
+}
+
+/** True when `snippet` is anchored at the start of the ID's head or tail segment. */
+function snippetAnchorsToSegment(segments: XrayIdSegments, snippet: string): boolean {
+  if (!snippet) return false;
+
+  return (
+    (segments.head !== "" && segments.head.startsWith(snippet)) ||
+    (segments.tail !== "" && segments.tail.startsWith(snippet))
+  );
+}
+
 export type SnippetMatchResult = {
   matched: boolean;
   snippet: string | null;
@@ -375,13 +464,14 @@ export function matchXrayIdAgainstPortEntries(
   }
 
   const cleanedXrayId = normalizeCertScanXrayId(xrayImageId);
+  const segments = splitXrayIdSegments(cleanedXrayId);
 
   const matchedSnippets: string[] = [];
   const matchedOriginalSerials: string[] = [];
 
   for (const entry of entries) {
     const entryMatchedSnippets = entry.snippets.filter((snippet) =>
-      cleanedXrayId.includes(snippet)
+      snippetAnchorsToSegment(segments, snippet)
     );
 
     if (entryMatchedSnippets.length > 0) {

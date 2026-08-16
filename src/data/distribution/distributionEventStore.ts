@@ -546,7 +546,12 @@ export async function readDistributionEventSegmentDelta(
   let eventsDir: DirectoryHandleLike;
   try {
     eventsDir = await distributionDir.getDirectoryHandle(DISTRIBUTION_EVENTS_DIR, { create: false });
-  } catch {
+  } catch (error) {
+    // Same rule as `eventFileName` below: reject, don't invent. "No events
+    // directory" is a real answer; "I could not open the events directory" is
+    // not, and returning an empty delta for it makes a month's whole event
+    // history disappear from every fold that reads through here.
+    if (!isNotFoundError(error)) throw error;
     return { events: [], offsets: { ...knownOffsets }, segmentNames: [] };
   }
 

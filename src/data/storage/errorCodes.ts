@@ -292,6 +292,10 @@ export const ERROR_CODES = {
     meaning: "unclassified write/read failure surfaced through the generic Arabic write-error message",
     labelKey: "msg_unexpected_write_error",
   },
+  "XQ-IO-029": {
+    meaning: "readOptionalJson: the file exists but could not be read, so no empty default was substituted",
+    labelKey: "err_io_029_unreadable_not_absent",
+  },
 
   // ── AUTH: login / session / permissions ──────────────────────────────────
   "XQ-AUTH-001": {

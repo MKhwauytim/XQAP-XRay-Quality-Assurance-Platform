@@ -1,5 +1,5 @@
 import type { DirectoryHandleLike } from "../storage/fileSystemAccess";
-import { safeReadJson, safeWriteJson } from "../storage/safeWrite";
+import { readOptionalJson, safeWriteJson } from "../storage/safeWrite";
 import { casLoop } from "../storage/casLoop";
 import { withResourceLock } from "../storage/webLocks";
 import { simpleHash } from "../storage/jsonEnvelope";
@@ -52,21 +52,30 @@ function decisionFileName(supervisorUsername: string): string {
   return `${safeWorkspaceFilePart(supervisorUsername)}.decisions.json`;
 }
 
+/**
+ * A supervisor's decision file, or an empty shell when they have made none yet.
+ *
+ * **Throws when the file exists but could not be read.** It is the base read of
+ * `recordDecision`'s read-modify-write, so an empty shell substituted for an
+ * unreadable file replaces the whole decision chain — its B5
+ * `previousDecisionHash` links included — and every already-approved request
+ * silently reverts to pending and becomes re-approvable, with the write
+ * reporting success. Only genuine absence produces the shell.
+ */
 export async function loadSupervisorDecisions(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
   supervisorUsername: string
 ): Promise<SupervisorDecisionFile> {
-  try {
-    const appDir = await getApprovalsDir(directoryHandle, monthFolderName);
-    const r = await safeReadJson<SupervisorDecisionFile>(appDir, decisionFileName(supervisorUsername));
-    if (r.ok) return r.value;
-  } catch { /* file may not exist yet */ }
-  try {
-    const legacyDir = await getLegacyApprovalsDir(directoryHandle, monthFolderName);
-    const r = await safeReadJson<SupervisorDecisionFile>(legacyDir, decisionFileName(supervisorUsername));
-    if (r.ok) return r.value;
-  } catch { /* legacy file may not exist */ }
+  const fileName = decisionFileName(supervisorUsername);
+  const read = await readOptionalJson<SupervisorDecisionFile>(
+    `approvals:${monthFolderName}/${supervisorUsername}`,
+    [
+      { directory: () => getApprovalsDir(directoryHandle, monthFolderName), fileName },
+      { directory: () => getLegacyApprovalsDir(directoryHandle, monthFolderName), fileName },
+    ]
+  );
+  if (read.kind === "found") return read.value;
   return {
     supervisorUsername,
     monthFolderName,

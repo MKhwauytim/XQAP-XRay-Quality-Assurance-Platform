@@ -69,19 +69,66 @@ function normalizeStageToken(value: string): string {
     .toUpperCase();
 }
 
+// Mirrors stageHelpers.ts's alias-index memoization (see the long comment there
+// for the invalidation argument). Without it every formatted cell re-normalized
+// all ~43 constant aliases, which is what made a full-month sort/filter pass
+// cost seconds. Cache keyed on the identity of the `stageMappings` object the
+// "load" request supplied, revalidated per hit against the four alias arrays by
+// reference and length, so a re-sent mapping table can never serve a stale
+// label. Keep in sync with stageHelpers.ts by hand.
+const WORKER_NO_ALIASES: readonly string[] = [];
+
+type WorkerStageAliasIndex = {
+  lookup: Map<string, (typeof WORKER_STAGE_KEYS)[number]>;
+  sources: readonly (readonly string[])[];
+  /** Lengths captured at build time — comparing `sources[i].length` would compare
+   *  the array to itself and see nothing when it is mutated in place. */
+  sourceLengths: readonly number[];
+};
+
+const workerStageAliasIndexCache = new WeakMap<object, WorkerStageAliasIndex>();
+
+function getWorkerStageAliasIndex(stageMappings: StageAliasMappings): WorkerStageAliasIndex {
+  const cached = workerStageAliasIndexCache.get(stageMappings);
+  if (cached) {
+    let fresh = true;
+    for (let i = 0; i < WORKER_STAGE_KEYS.length; i += 1) {
+      const current = stageMappings[WORKER_STAGE_KEYS[i]] ?? WORKER_NO_ALIASES;
+      if (current !== cached.sources[i] || current.length !== cached.sourceLengths[i]) {
+        fresh = false;
+        break;
+      }
+    }
+    if (fresh) return cached;
+  }
+
+  const lookup = new Map<string, (typeof WORKER_STAGE_KEYS)[number]>();
+  const sources: Array<readonly string[]> = [];
+  const sourceLengths: number[] = [];
+  for (const stageKey of WORKER_STAGE_KEYS) {
+    const aliases = stageMappings[stageKey] ?? WORKER_NO_ALIASES;
+    sources.push(aliases);
+    sourceLengths.push(aliases.length);
+    for (const alias of aliases) {
+      // First stage in first->fourth order wins, as the original early-returning
+      // loop did when the same alias appeared under two stages.
+      const normalized = normalizeStageToken(alias);
+      if (!lookup.has(normalized)) lookup.set(normalized, stageKey);
+    }
+  }
+  const built: WorkerStageAliasIndex = { lookup, sources, sourceLengths };
+  workerStageAliasIndexCache.set(stageMappings, built);
+  return built;
+}
+
 function formatStageLabelForWorker(stage: unknown, stageMappings: StageAliasMappings | undefined): string {
   const text = String(stage ?? "");
   if (!stageMappings) {
     return text;
   }
   const normalized = normalizeStageToken(text.trim());
-  for (const stageKey of WORKER_STAGE_KEYS) {
-    const aliases = stageMappings[stageKey] ?? [];
-    if (aliases.some((alias) => normalizeStageToken(alias) === normalized)) {
-      return WORKER_STAGE_LABELS_AR[stageKey];
-    }
-  }
-  return text;
+  const stageKey = getWorkerStageAliasIndex(stageMappings).lookup.get(normalized);
+  return stageKey ? WORKER_STAGE_LABELS_AR[stageKey] : text;
 }
 
 // Mirrors BrowseDataView.tsx's real getBrowseDisplayValue: special-cases "stage"

@@ -160,6 +160,8 @@ const PINNED_MEANINGS: Record<string, string> = {
     "file system reported NotFoundError for a path that should exist",
   "XQ-IO-028":
     "unclassified write/read failure surfaced through the generic Arabic write-error message",
+  "XQ-IO-029":
+    "readOptionalJson: the file exists but could not be read, so no empty default was substituted",
   "XQ-AUTH-001":
     "login rejected: unknown username or wrong password",
   "XQ-AUTH-002":

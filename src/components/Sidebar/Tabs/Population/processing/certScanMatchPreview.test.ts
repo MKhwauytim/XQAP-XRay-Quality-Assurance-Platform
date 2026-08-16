@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { computeCertScanMatchPreview } from "./certScanMatchPreview";
+import {
+  computeCertScanMatchPreview,
+  IMPLAUSIBLY_HIGH_MATCH_PERCENTAGE,
+  SUSPICIOUSLY_LOW_MATCH_PERCENTAGE
+} from "./certScanMatchPreview";
 import type { NormalizedRiskRow } from "../riskData/riskDataTypes";
+
+/**
+ * X-ray ID fixtures use the real shape `[deviceCode][YYYYMMDD][sequence]`
+ * (see `certScanParser.ts`), so what these tests assert about matching is what
+ * the real month actually does.
+ */
 
 function makeRow(overrides: Partial<NormalizedRiskRow>): NormalizedRiskRow {
   return {
@@ -53,9 +63,9 @@ describe("computeCertScanMatchPreview", () => {
     // "منفذ الرياض" has no taa-marbuta/alef-hamza/tatweel characters, so parsing
     // the paste doesn't alter its spelling at all — a genuine exact-tier match.
     const rows = [
-      makeRow({ xrayImageId: "IMG-SN12345-001", portName: "منفذ الرياض" }),
-      makeRow({ xrayImageId: "IMG-OTHERSERIAL-002", portName: "منفذ الرياض" }),
-      makeRow({ xrayImageId: "IMG-SN99999-003", portName: "منفذ الدمام" })
+      makeRow({ xrayImageId: "SN12345-20260504-0001", portName: "منفذ الرياض" }),
+      makeRow({ xrayImageId: "OTHER99-20260504-0002", portName: "منفذ الرياض" }),
+      makeRow({ xrayImageId: "SN99999-20260504-0003", portName: "منفذ الدمام" })
     ];
     const paste = "Port Name\tSystem S/N\nمنفذ الرياض\tSN-12345\nمنفذ الدمام\tSN-99999";
 
@@ -81,9 +91,9 @@ describe("computeCertScanMatchPreview", () => {
     // breakdown row should show tier: null with 0 matches, instantly explaining
     // "why did I only get a few matches when I expected thousands".
     const rows = [
-      makeRow({ xrayImageId: "IMG-AAA111-1", portName: "منفذ الدمام" }),
-      makeRow({ xrayImageId: "IMG-AAA222-2", portName: "منفذ الدمام" }),
-      makeRow({ xrayImageId: "IMG-AAA333-3", portName: "منفذ الدمام" })
+      makeRow({ xrayImageId: "AAA111-20260504-0001", portName: "منفذ الدمام" }),
+      makeRow({ xrayImageId: "AAA222-20260504-0002", portName: "منفذ الدمام" }),
+      makeRow({ xrayImageId: "AAA333-20260504-0003", portName: "منفذ الدمام" })
     ];
     // Deliberately unrelated port name string (not a spelling variant of "الدمام").
     const paste = "Port Name\tSystem S/N\nمركز الفحص الشرقي\tAAA111";
@@ -101,7 +111,7 @@ describe("computeCertScanMatchPreview", () => {
   });
 
   it("discloses a looser-than-exact port alignment via looseTierAlignments", () => {
-    const rows = [makeRow({ xrayImageId: "IMG-SN555-1", portName: "منفذ الدمام" })];
+    const rows = [makeRow({ xrayImageId: "SN555-20260504-0001", portName: "منفذ الدمام" })];
     // Paste names it with the "ميناء" descriptor instead of "منفذ" — fuzzy tier.
     const paste = "Port Name\tSystem S/N\nميناء الدمام\tSN-555";
 
@@ -113,10 +123,89 @@ describe("computeCertScanMatchPreview", () => {
     expect(preview.totalMatchedRows).toBe(1);
   });
 
+
+  // ── Part 1: the match-rate plausibility flags, in BOTH directions ────────
+  describe("match-rate plausibility flags", () => {
+    function rowsAtPort(port: string, n: number, device: string): NormalizedRiskRow[] {
+      return Array.from({ length: n }, (_, i) =>
+        makeRow({
+          portName: port,
+          xrayImageId: `${device}-20260504-${String(i + 1).padStart(4, "0")}`
+        })
+      );
+    }
+
+    it("flags an implausibly LOW match rate", () => {
+      // 1 of 100 rows carries the pasted device -> 1%.
+      const rows = [
+        ...rowsAtPort("منفذ الرياض", 1, "SN12345"),
+        ...rowsAtPort("منفذ الرياض", 99, "OTHER99")
+      ];
+      const preview = computeCertScanMatchPreview(
+        rows,
+        "Port Name\tSystem S/N\nمنفذ الرياض\tSN-12345"
+      );
+
+      expect(preview.totalMatchedRows).toBe(1);
+      expect(preview.totalMatchPercentage).toBeLessThan(SUSPICIOUSLY_LOW_MATCH_PERCENTAGE);
+      expect(preview.isSuspiciouslyLowMatch).toBe(true);
+      expect(preview.isImplausiblyHighMatch).toBe(false);
+    });
+
+    it("flags an implausibly HIGH match rate — the over-matching mirror image", () => {
+      // Every row carries the pasted device -> 100%. Before this flag existed,
+      // an over-matching paste produced a confidently-wrong preview with no
+      // warning at all, which is how a fabricated CertScan split could ship.
+      const rows = rowsAtPort("منفذ الرياض", 100, "SN12345");
+      const preview = computeCertScanMatchPreview(
+        rows,
+        "Port Name\tSystem S/N\nمنفذ الرياض\tSN-12345"
+      );
+
+      expect(preview.totalMatchedRows).toBe(100);
+      expect(preview.totalMatchPercentage).toBe(100);
+      expect(preview.isImplausiblyHighMatch).toBe(true);
+      expect(preview.isSuspiciouslyLowMatch).toBe(false);
+    });
+
+    it("leaves a plausible mid-range match rate unflagged in both directions", () => {
+      // 40% — comfortably clear of both thresholds, and above the 17.31% ceiling
+      // the real month's most generous legitimate paste produces.
+      const rows = [
+        ...rowsAtPort("منفذ الرياض", 40, "SN12345"),
+        ...rowsAtPort("منفذ الرياض", 60, "OTHER99")
+      ];
+      const preview = computeCertScanMatchPreview(
+        rows,
+        "Port Name\tSystem S/N\nمنفذ الرياض\tSN-12345"
+      );
+
+      expect(preview.totalMatchPercentage).toBe(40);
+      expect(preview.isSuspiciouslyLowMatch).toBe(false);
+      expect(preview.isImplausiblyHighMatch).toBe(false);
+    });
+
+    it("does not flag a low rate when there are no candidate population rows at all", () => {
+      // 0 rows -> percentage is a meaningless 0, not evidence of a bad paste.
+      const preview = computeCertScanMatchPreview(
+        [makeRow({ xrayImageId: "-" })],
+        "Port Name\tSystem S/N\nمنفذ الرياض\tSN-12345"
+      );
+
+      expect(preview.totalPopulationRows).toBe(0);
+      expect(preview.isSuspiciouslyLowMatch).toBe(false);
+      expect(preview.isImplausiblyHighMatch).toBe(false);
+    });
+
+    it("keeps the two thresholds ordered and non-overlapping", () => {
+      expect(SUSPICIOUSLY_LOW_MATCH_PERCENTAGE).toBeLessThan(IMPLAUSIBLY_HIGH_MATCH_PERCENTAGE);
+    });
+  });
+
   it("ignores rows with an invalid or duplicate X-ray ID, matching processPopulation's own candidate rules", () => {
     const rows = [
-      makeRow({ xrayImageId: "IMG-SN12345-1", portName: "منفذ جدة" }),
-      makeRow({ xrayImageId: "IMG-SN12345-1", portName: "منفذ جدة" }), // duplicate
+      makeRow({ xrayImageId: "SN12345-20260504-0001", portName: "منفذ جدة" }),
+      makeRow({ xrayImageId: "SN12345-20260504-0001", portName: "منفذ جدة" }), // duplicate
       makeRow({ xrayImageId: "-", portName: "منفذ جدة" }) // invalid
     ];
     const paste = "Port Name\tSystem S/N\nمنفذ جدة\tSN-12345";
