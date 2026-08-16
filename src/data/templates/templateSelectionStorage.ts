@@ -37,9 +37,21 @@ export async function loadInspectionTemplateSelection(
   }
 }
 
-export async function saveInspectionTemplateSelection(
+/**
+ * The one CAS read-modify-write path for `template.selection.json`.
+ *
+ * `apply` receives the freshly re-read selection (`null` when the file is
+ * absent or unreadable) on every attempt and returns the selection to persist,
+ * or `null` to leave the file untouched. Every writer of this file must go
+ * through here: a raw `safeWriteJson` drops `revision`/`_writeToken`, rewinding
+ * the counter and silently clobbering a concurrent admin's change (P1-B).
+ */
+async function casUpdateSelection(
   directoryHandle: DirectoryHandleLike,
-  selection: InspectionTemplateSelection
+  apply: (
+    existing: InspectionTemplateSelection | null
+  ) => Omit<InspectionTemplateSelection, "revision" | "_writeToken"> | null,
+  conflictError: string
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
     const dir = await getTemplatesDir(directoryHandle);
@@ -50,9 +62,12 @@ export async function saveInspectionTemplateSelection(
       casLoop<{ ok: true }>(
         async (writeToken) => {
           const existing = await safeReadJson<InspectionTemplateSelection>(dir, SELECTION_FILE);
+          const next = apply(existing.ok ? existing.value : null);
+          // Nothing to change — a no-op must not burn a revision.
+          if (next === null) return { done: true, result: { ok: true as const } };
           const nextRevision = (existing.ok ? existing.value.revision ?? 0 : 0) + 1;
           const updated: InspectionTemplateSelection = {
-            ...selection,
+            ...next,
             revision: nextRevision,
             _writeToken: writeToken,
           };
@@ -78,7 +93,7 @@ export async function saveInspectionTemplateSelection(
           }
           return { done: false };
         },
-        { conflictError: "تعذّر حفظ اختيار القالب: تعارض في الكتابة بعد عدة محاولات." }
+        { conflictError }
       )
     );
     if (!outcome.ok) {
@@ -91,4 +106,38 @@ export async function saveInspectionTemplateSelection(
       error: err instanceof Error ? err.message : "Unknown error"
     };
   }
+}
+
+export async function saveInspectionTemplateSelection(
+  directoryHandle: DirectoryHandleLike,
+  selection: InspectionTemplateSelection
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  return casUpdateSelection(
+    directoryHandle,
+    () => selection,
+    "تعذّر حفظ اختيار القالب: تعارض في الكتابة بعد عدة محاولات."
+  );
+}
+
+/**
+ * Clear the active selection, but only while it still points at `templateId`.
+ *
+ * The match test runs INSIDE the CAS loop against the freshly re-read file, so
+ * an admin who switched the selection to another template between the caller's
+ * read and this write is never blanked. Used by `deleteTemplate` so consumers
+ * (XrayReferrals, XrayInspectionResults, Reports) stop referencing a dead id.
+ */
+export async function clearInspectionTemplateSelectionIfMatches(
+  directoryHandle: DirectoryHandleLike,
+  templateId: string,
+  updatedBy: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  return casUpdateSelection(
+    directoryHandle,
+    (existing) =>
+      existing && existing.templateId === templateId
+        ? { templateId: "", updatedAt: new Date().toISOString(), updatedBy }
+        : null,
+    "تعذّر مسح اختيار القالب: تعارض في الكتابة بعد عدة محاولات."
+  );
 }

@@ -195,11 +195,16 @@ export async function executeReplacement(params: {
   }
 
   // Step 1: append replacement row to sample master (idempotent — safe to retry).
+  // The dead row's id is passed so the append is recorded as a SUBSTITUTION:
+  // the sample keeps the size it was drawn at instead of growing by one per
+  // replacement (P1-A). The dead row itself stays in `rows` — it is the audit
+  // trail and the dedup set `buildExclusionSets` reads.
   const sampleResult = await appendSampleRow(
     directoryHandle,
     monthFolderName,
     replacementRow,
-    stageMappings
+    stageMappings,
+    deadEntry.xrayImageId
   );
   if (!sampleResult.ok) {
     return { ok: false, error: sampleResult.error };

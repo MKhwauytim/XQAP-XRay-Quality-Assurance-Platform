@@ -2,10 +2,10 @@
 
 .admin-account-section {
   margin-top: 24px;
-  border: 1px solid var(--app-border, #e5e7eb);
+  border: 1px solid var(--app-border);
   border-radius: 8px;
   overflow: hidden;
-  background: var(--app-surface, #fff);
+  background: var(--app-surface);
 }
 
 .admin-account-header {
@@ -14,19 +14,19 @@
   gap: 8px;
   width: 100%;
   padding: 12px 16px;
-  background: var(--app-surface-soft, #f9fafb);
+  background: var(--app-surface-soft);
   border: none;
   cursor: pointer;
   font-size: 0.95rem;
   font-weight: 600;
-  color: var(--app-text, #111827);
+  color: var(--app-text);
   text-align: right;
   direction: rtl;
   transition: background 0.15s;
 }
 
 .admin-account-header:hover {
-  background: var(--c-surface-2, #f3f4f6);
+  background: var(--c-surface-2);
 }
 
 .admin-account-icon {
@@ -40,7 +40,7 @@
 .admin-account-badge {
   padding: 2px 8px;
   border-radius: 11px;
-  background: var(--c-warning, #f59e0b);
+  background: var(--c-warning);
   color: #fff;
   font-size: 0.72rem;
   font-weight: 700;
@@ -48,7 +48,7 @@
 }
 
 .admin-account-chevron {
-  color: var(--app-muted, #6b7280);
+  color: var(--app-muted);
   transform: rotate(90deg);
   transition: transform 0.2s;
   flex-shrink: 0;
@@ -72,7 +72,7 @@
 .admin-account-note,
 .admin-account-hint {
   margin: 0;
-  color: var(--app-muted, #6b7280);
+  color: var(--app-muted);
   font-size: 0.85rem;
   line-height: 1.7;
 }
@@ -82,7 +82,7 @@
   align-items: center;
   gap: 8px;
   font-size: 0.9rem;
-  color: var(--app-text, #111827);
+  color: var(--app-text);
   cursor: pointer;
 }
 
@@ -97,7 +97,7 @@
 }
 
 .admin-account-password {
-  border-top: 1px solid var(--app-border, #e5e7eb);
+  border-top: 1px solid var(--app-border);
   padding-top: 12px;
   display: flex;
   flex-direction: column;
@@ -107,7 +107,7 @@
 .admin-account-password h4 {
   margin: 0;
   font-size: 0.9rem;
-  color: var(--app-text, #111827);
+  color: var(--app-text);
 }
 
 .admin-account-password-fields {
@@ -121,7 +121,7 @@
   flex-direction: column;
   gap: 4px;
   font-size: 0.82rem;
-  color: var(--app-muted, #6b7280);
+  color: var(--app-muted);
   min-width: 200px;
   flex: 1;
 }
@@ -129,9 +129,9 @@
 .admin-account-password-fields input {
   padding: 7px 10px;
   border-radius: 6px;
-  border: 1px solid var(--app-border, #e5e7eb);
-  background: var(--app-surface, #fff);
-  color: var(--app-text, #111827);
+  border: 1px solid var(--app-border);
+  background: var(--app-surface);
+  color: var(--app-text);
   font-size: 0.9rem;
   direction: ltr;
 }
@@ -141,7 +141,7 @@
   padding: 7px 16px;
   border-radius: 6px;
   border: 1px solid transparent;
-  background: var(--app-primary, #2563eb);
+  background: var(--app-primary);
   color: #fff;
   cursor: pointer;
   font-size: 0.85rem;
@@ -159,9 +159,9 @@
 }
 
 .admin-account-feedback.ok {
-  color: var(--c-success, #16a34a);
+  color: var(--c-success);
 }
 
 .admin-account-feedback.error {
-  color: var(--c-danger, #ef4444);
+  color: var(--c-danger);
 }

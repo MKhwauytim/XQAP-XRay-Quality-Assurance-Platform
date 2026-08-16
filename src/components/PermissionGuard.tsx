@@ -35,7 +35,7 @@ export function AccessDenied() {
         justifyContent: "center",
         minHeight: "300px",
         gap: "12px",
-        color: "var(--app-text-muted, #6b7280)",
+        color: "var(--c-ink-3)",
         direction: "rtl",
         textAlign: "center",
         padding: "40px",
@@ -56,7 +56,7 @@ export function AccessDenied() {
           d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z"
         />
       </svg>
-      <strong style={{ fontSize: "1.1rem", color: "var(--app-text, #111)" }}>
+      <strong style={{ fontSize: "1.1rem", color: "var(--c-ink)" }}>
         {getLabels().access_denied_title}
       </strong>
       <p style={{ margin: 0, fontSize: "0.9rem" }}>

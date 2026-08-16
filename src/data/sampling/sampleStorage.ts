@@ -98,15 +98,25 @@ function isCertScanRow(row: PreparedPopulationRow): boolean {
   return row.certScanStatus === "Certscan";
 }
 
-function incrementPortAllocations(
+const clamp0 = (n: number): number => (n > 0 ? n : 0);
+
+/**
+ * Move a port's drawn counters by `delta` (+1 when a row joins the sample, -1
+ * when a replacement retires one). A `-1` against a port with no allocation row
+ * is a no-op rather than a negative count: every drawn row's port exists in
+ * `portAllocations`, so that can only happen on a hand-built or damaged file.
+ */
+function adjustPortAllocations(
   allocations: PortAllocation[],
-  row: PreparedPopulationRow
+  row: PreparedPopulationRow,
+  delta: 1 | -1
 ): PortAllocation[] {
   const isCertScan = isCertScanRow(row);
   const portName = row.portName ?? "غير محدد";
   const existing = allocations.find((item) => item.portName === portName);
 
   if (!existing) {
+    if (delta < 0) return allocations;
     return [
       ...allocations,
       {
@@ -128,19 +138,25 @@ function incrementPortAllocations(
     item.portName === portName
       ? {
           ...item,
-          actualCertScanDrawn:
-            item.actualCertScanDrawn + (isCertScan ? 1 : 0),
-          actualNonCertScanDrawn:
-            item.actualNonCertScanDrawn + (isCertScan ? 0 : 1),
-          actualTotalDrawn: item.actualTotalDrawn + 1,
+          actualCertScanDrawn: clamp0(
+            item.actualCertScanDrawn + (isCertScan ? delta : 0)
+          ),
+          actualNonCertScanDrawn: clamp0(
+            item.actualNonCertScanDrawn + (isCertScan ? 0 : delta)
+          ),
+          actualTotalDrawn: clamp0(item.actualTotalDrawn + delta),
         }
       : item
   );
 }
 
-function incrementStageAllocations(
+/** Stage counterpart of {@link adjustPortAllocations}. Rows whose stage does not
+ *  resolve under the month's mappings are skipped in BOTH directions, so an
+ *  unmapped stage never gains a phantom bucket and never goes negative. */
+function adjustStageAllocations(
   allocations: StageAllocation[],
   row: PreparedPopulationRow,
+  delta: 1 | -1,
   stageMappings?: Partial<StageAliasMappings>
 ): StageAllocation[] {
   const stageKey = getStageKey(row.stage, stageMappings);
@@ -151,6 +167,7 @@ function incrementStageAllocations(
   const existing = allocations.find((item) => item.stageKey === stageKey);
 
   if (!existing) {
+    if (delta < 0) return allocations;
     return [
       ...allocations,
       {
@@ -169,9 +186,11 @@ function incrementStageAllocations(
     item.stageKey === stageKey
       ? {
           ...item,
-          actualDrawn: item.actualDrawn + 1,
-          certScanDrawn: item.certScanDrawn + (isCertScan ? 1 : 0),
-          nonCertScanDrawn: item.nonCertScanDrawn + (isCertScan ? 0 : 1),
+          actualDrawn: clamp0(item.actualDrawn + delta),
+          certScanDrawn: clamp0(item.certScanDrawn + (isCertScan ? delta : 0)),
+          nonCertScanDrawn: clamp0(
+            item.nonCertScanDrawn + (isCertScan ? 0 : delta)
+          ),
         }
       : item
   );
@@ -232,7 +251,22 @@ export async function approveSampleMaster(
   );
 }
 
-/** Idempotently append a replacement row to the sample master using a CAS retry loop. */
+/**
+ * Idempotently append a replacement row to the sample master using a CAS retry
+ * loop, retiring the row it replaces.
+ *
+ * When `replacesXrayImageId` names a row already in the sample, the append is a
+ * SUBSTITUTION: the dead id is recorded in `replacedRowIds` and every drawn
+ * counter (`totalActual`, the CertScan split, port and stage allocations) moves
+ * the new row in and the dead row out, so the sample keeps the size it was
+ * drawn at. Without it the append is a plain enlargement — which is what every
+ * replacement used to do, inflating `totalActual` by one per replacement
+ * forever and giving the executive deck a phantom "remaining images" backlog
+ * exactly the size of the replacement count (P1-A).
+ *
+ * The dead row stays in `rows`: it is the audit trail and the dedup set that
+ * stops a known-dead image being re-drawn as somebody else's replacement.
+ */
 export async function appendSampleRow(
   directoryHandle: DirectoryHandleLike,
   monthFolderName: string,
@@ -241,7 +275,9 @@ export async function appendSampleRow(
   // back to DEFAULT_STAGE_MAPPINGS, so a workspace using custom stage aliases
   // classifies the replacement row as "unknown" and silently drops it from
   // stageAllocations — permanently under-counting the stage in every report.
-  stageMappings?: Partial<StageAliasMappings>
+  stageMappings?: Partial<StageAliasMappings>,
+  /** Id of the sample row this row replaces. Omit for a non-replacement append. */
+  replacesXrayImageId?: string
 ): Promise<{ ok: true; data: SampleMasterData } | { ok: false; error: string }> {
   // Month lock gate — before the CAS loop so a closed month rejects loudly.
   await ensureMonthWritable(directoryHandle, monthFolderName);
@@ -251,21 +287,57 @@ export async function appendSampleRow(
       if (!current) {
         return { done: true, result: { ok: false as const, error: codedMessage("XQ-SMP-006") } };
       }
-      if (current.rows.some((r) => r.xrayImageId === newRow.xrayImageId)) {
+      const retiredIds = current.replacedRowIds ?? [];
+      const appendsRow = !current.rows.some((r) => r.xrayImageId === newRow.xrayImageId);
+      // Retire only a row that is actually in the sample and not already
+      // retired, so a replayed replacement (the CAS loop, a crash-retry, or an
+      // approval re-run) can never double-count the substitution.
+      const deadRow =
+        replacesXrayImageId !== undefined && !retiredIds.includes(replacesXrayImageId)
+          ? current.rows.find((r) => r.xrayImageId === replacesXrayImageId) ?? null
+          : null;
+      if (!appendsRow && !deadRow) {
         return { done: true, result: { ok: true as const, data: current } };
       }
+
       const nextRevision = (current.revision ?? 0) + 1;
       const isCertScan = isCertScanRow(newRow);
+      const deadIsCertScan = deadRow ? isCertScanRow(deadRow) : false;
+
+      let portAllocations = current.portAllocations;
+      let stageAllocations = current.stageAllocations;
+      if (appendsRow) {
+        portAllocations = adjustPortAllocations(portAllocations, newRow, 1);
+        stageAllocations = adjustStageAllocations(stageAllocations, newRow, 1, stageMappings);
+      }
+      if (deadRow) {
+        portAllocations = adjustPortAllocations(portAllocations, deadRow, -1);
+        stageAllocations = adjustStageAllocations(stageAllocations, deadRow, -1, stageMappings);
+      }
+
+      const nextRows = appendsRow ? [...current.rows, newRow] : current.rows;
+      const nextRetiredIds = deadRow ? [...retiredIds, deadRow.xrayImageId] : retiredIds;
+
       const updated: SampleMasterData = {
         ...current,
         revision: nextRevision,
         _writeToken: writeToken,
-        totalActual: current.rows.length + 1,
-        certScanActual: current.certScanActual + (isCertScan ? 1 : 0),
-        nonCertScanActual: current.nonCertScanActual + (isCertScan ? 0 : 1),
-        portAllocations: incrementPortAllocations(current.portAllocations, newRow),
-        stageAllocations: incrementStageAllocations(current.stageAllocations, newRow, stageMappings),
-        rows: [...current.rows, newRow],
+        // "Rows the sample currently consists of" — see SampleMasterData.totalActual.
+        totalActual: nextRows.length - nextRetiredIds.length,
+        certScanActual:
+          current.certScanActual +
+          (appendsRow && isCertScan ? 1 : 0) -
+          (deadRow && deadIsCertScan ? 1 : 0),
+        nonCertScanActual:
+          current.nonCertScanActual +
+          (appendsRow && !isCertScan ? 1 : 0) -
+          (deadRow && !deadIsCertScan ? 1 : 0),
+        portAllocations,
+        stageAllocations,
+        // Omit the field entirely while no row has ever been retired, so an
+        // untouched month's file keeps the exact shape it was drawn with.
+        ...(nextRetiredIds.length > 0 ? { replacedRowIds: nextRetiredIds } : {}),
+        rows: nextRows,
       };
       const writeResult = await saveSampleMaster(directoryHandle, monthFolderName, updated);
       if (!writeResult.ok) {

@@ -93,4 +93,41 @@ describe("BrowseDataView — column filter menu focus trap (finding 11)", () => 
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: "تصفية المنفذ" })).not.toBeInTheDocument();
   });
+
+  it("re-arms the trap when switching directly from one column's menu to another", async () => {
+    // Regression: A→B never passed `enabled` through false, so the trap kept
+    // column A's detached node — focus was never moved into B's menu and Tab
+    // handling operated on an element no longer in the document.
+    await renderBrowse();
+
+    fireEvent.click(screen.getByRole("button", { name: "تصفية المنفذ" }));
+    expect(screen.getByRole("dialog", { name: "تصفية المنفذ" }).contains(document.activeElement)).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "تصفية معرف الأشعة" }));
+    const second = screen.getByRole("dialog", { name: "تصفية معرف الأشعة" });
+    expect(screen.queryByRole("dialog", { name: "تصفية المنفذ" })).not.toBeInTheDocument();
+    expect(second.contains(document.activeElement)).toBe(true);
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "تصفية معرف الأشعة" })).not.toBeInTheDocument();
+  });
+});
+
+describe("BrowseDataView — picker and filter menu are mutually exclusive", () => {
+  it("closes the column picker when a filter menu opens, and vice versa", async () => {
+    // Regression: both panels could be open at once, leaving two active focus
+    // traps on screen (DataTable already forbids this).
+    await renderBrowse();
+
+    fireEvent.click(screen.getByRole("button", { name: /^الأعمدة/ }));
+    expect(screen.getByRole("dialog", { name: "اختيار الأعمدة" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "تصفية المنفذ" }));
+    expect(screen.queryByRole("dialog", { name: "اختيار الأعمدة" })).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "تصفية المنفذ" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^الأعمدة/ }));
+    expect(screen.queryByRole("dialog", { name: "تصفية المنفذ" })).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "اختيار الأعمدة" })).toBeInTheDocument();
+  });
 });

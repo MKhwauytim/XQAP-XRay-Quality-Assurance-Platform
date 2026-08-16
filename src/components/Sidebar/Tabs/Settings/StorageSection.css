@@ -3,9 +3,9 @@
 .storage-section {
   margin-top: 24px;
   padding: 16px;
-  border: 1px solid var(--app-border, #e5e7eb);
+  border: 1px solid var(--app-border);
   border-radius: 8px;
-  background: var(--app-surface, #fff);
+  background: var(--app-surface);
   direction: rtl;
 }
 
@@ -13,29 +13,30 @@
   margin: 0 0 8px;
   font-size: 0.95rem;
   font-weight: 600;
-  color: var(--app-text, #111827);
+  color: var(--app-text);
 }
 
 .storage-section h3 {
   margin: 16px 0 6px;
   font-size: 0.85rem;
   font-weight: 600;
-  color: var(--app-text, #111827);
+  color: var(--app-text);
 }
 
 .storage-quota,
 .storage-persistence {
   margin: 4px 0;
   font-size: 0.85rem;
-  color: var(--app-muted, #6b7280);
+  color: var(--app-muted);
 }
 
 .storage-warning {
   margin: 10px 0;
   padding: 8px 12px;
   border-radius: 6px;
-  background: var(--c-warning-soft, #fffbeb);
-  color: var(--c-warning-text, #92400e);
+  border: 1px solid var(--c-warning-border);
+  background: var(--c-surface);
+  color: var(--c-warning-text);
   font-size: 0.82rem;
   line-height: 1.5;
 }
@@ -43,7 +44,7 @@
 .storage-note {
   margin: 2px 0 8px;
   font-size: 0.8rem;
-  color: var(--app-muted, #6b7280);
+  color: var(--app-muted);
 }
 
 .storage-owned,
@@ -64,28 +65,29 @@
   align-items: baseline;
   padding: 6px 10px;
   border-radius: 6px;
-  background: var(--app-surface-soft, #f9fafb);
-  border: 1px solid var(--app-border, #e5e7eb);
+  background: var(--app-surface-soft);
+  border: 1px solid var(--app-border);
   font-size: 0.82rem;
 }
 
 .storage-owned code,
 .storage-foreign code {
   font-family: monospace;
-  color: var(--app-primary, #2563eb);
+  color: var(--app-primary);
   word-break: break-all;
 }
 
 .storage-owned span {
-  color: var(--app-muted, #6b7280);
+  color: var(--app-muted);
 }
 
 .storage-reset-error {
   margin: 10px 0 0;
   padding: 8px 12px;
   border-radius: 6px;
-  background: var(--c-danger-soft, #fef2f2);
-  color: var(--c-danger-text, #991b1b);
+  border: 1px solid var(--c-danger-border);
+  background: var(--c-surface);
+  color: var(--c-danger-text);
   font-size: 0.82rem;
   line-height: 1.5;
 }
@@ -97,13 +99,13 @@
   border: 1px solid transparent;
   cursor: pointer;
   font-size: 0.85rem;
-  background: var(--c-danger, #ef4444);
-  color: var(--c-surface, #fff);
+  background: var(--c-danger);
+  color: var(--c-surface);
   transition: background 0.15s;
 }
 
 .storage-section > button:hover {
-  background: var(--c-danger-strong, #dc2626);
+  background: var(--c-danger-strong);
 }
 
 .storage-section > button:disabled {

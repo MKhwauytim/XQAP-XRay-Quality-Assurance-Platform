@@ -100,12 +100,31 @@ type DistributionLogSources = {
   immutableEvents: DistributionEvent[];
 };
 
+/**
+ * Open a directory that is legitimately allowed not to exist yet, WITHOUT
+ * laundering "I could not look" into "there is nothing there".
+ *
+ * This is the same contract the read below applies to files, and it has to be
+ * applied here too. The previous bare `catch { return null }` swallowed every
+ * failure — NotReadableError on a flaky share, NotAllowedError after a revoked
+ * grant, an I/O fault opening `2-samples` or `1-main` — and turned each of them
+ * into `{ events: [] }`. `loadDistributionLog` then reported ZERO events for a
+ * month with a full assignment history, the re-draw hard block read that as
+ * "nothing distributed yet", and `saveSampleMaster` overwrote sample.master.json,
+ * orphaning every assignment and answer in the month.
+ *
+ * The earlier fix for this bug class was applied one level down (see the
+ * `isNotFoundError` guard in the events read) and its regression test faulted
+ * only the leaf `distribution.events` directory — so this parent-level path kept
+ * the defect. Only a genuine NotFound may resolve to `null`.
+ */
 async function openOptionalDirectory(
   resolve: () => Promise<DirectoryHandleLike>
 ): Promise<DirectoryHandleLike | null> {
   try {
     return await resolve();
-  } catch {
+  } catch (error) {
+    if (!isNotFoundError(error)) throw error;
     return null;
   }
 }

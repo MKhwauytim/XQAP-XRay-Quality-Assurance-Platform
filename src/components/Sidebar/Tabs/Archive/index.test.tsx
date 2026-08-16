@@ -481,4 +481,27 @@ describe("Archive close-month confirm — pending count interpolation (P2-1)", (
       within(dialog).queryByText(L.archive_close_month_confirm_pending.replace("{pending}", "0"))
     ).not.toBeInTheDocument();
   });
+
+  it("scrolls its body internally so the action row can never be pushed off-screen", async () => {
+    // Regression: `.arc-restore-modal` bounds nothing, so a long confirmation
+    // body grew the panel past the viewport and took the confirm/cancel row
+    // with it. The body now scrolls inside a bounded container, as
+    // ConfirmDialog's panel does.
+    vi.mocked(loadArchiveStatus).mockResolvedValue([
+      makeStatus({ manifestStatus: "processed-saved", hasManifest: true, distributionPending: 17 }),
+    ]);
+    loginAs("admin");
+
+    renderArchiveTab();
+    fireEvent.click(await screen.findByRole("button", { name: L.archive_close_month_btn }));
+
+    const dialog = screen.getByRole("dialog");
+    const scroller = within(dialog).getByTestId("month-lock-scroll");
+    expect(scroller.style.overflowY).toBe("auto");
+    expect(scroller.style.maxHeight).not.toBe("");
+    // The warning text scrolls; the action buttons stay outside the scroller.
+    expect(scroller.contains(within(dialog).getByText(L.archive_close_month_confirm))).toBe(true);
+    const confirmButton = within(dialog).getAllByRole("button", { name: L.archive_close_month_btn })[0];
+    expect(scroller.contains(confirmButton)).toBe(false);
+  });
 });

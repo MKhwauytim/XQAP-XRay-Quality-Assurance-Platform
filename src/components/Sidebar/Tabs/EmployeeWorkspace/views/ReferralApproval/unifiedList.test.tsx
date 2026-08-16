@@ -1,6 +1,6 @@
 /* @vitest-environment jsdom */
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import RequestList from "./RequestList";
 import type { CardRequest } from "./requestKind";
 import type {
@@ -109,5 +109,30 @@ describe("unified approval list — all three request kinds", () => {
     const card = cards[0] as HTMLElement;
     expect(within(card).getByText("موافقة")).toBeTruthy();
     expect(within(card).getByText("رفض")).toBeTruthy();
+  });
+});
+
+describe("bulk confirm dialog — internal scroll", () => {
+  it("scrolls the selected-request list inside the modal, keeping the action row reachable", () => {
+    // Regression: the selected-request list is unbounded while
+    // `.ew-replace-modal` is a bounded flex column with `overflow: hidden`, so
+    // a large bulk selection clipped the list and pushed the confirm/cancel row
+    // out of the panel.
+    renderList([referral, replacement, reopen], true);
+
+    for (const checkbox of screen.getAllByRole("checkbox", { name: "تحديد الطلب" })) {
+      fireEvent.click(checkbox);
+    }
+    fireEvent.click(screen.getByRole("button", { name: "موافقة على المحدد" }));
+
+    const dialog = screen.getByRole("dialog");
+    const list = within(dialog).getByRole("list");
+    const scroller = list.parentElement as HTMLElement;
+    expect(scroller.style.overflowY).toBe("auto");
+    expect(scroller.style.minHeight).toBe("0px");
+
+    // The confirm/cancel row must live outside the scrolling body.
+    const confirm = within(dialog).getByRole("button", { name: "تأكيد الموافقة" });
+    expect(scroller.contains(confirm)).toBe(false);
   });
 });

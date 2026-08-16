@@ -10,6 +10,8 @@ import { loadTemplate } from "../../../../../data/templates/templateStorage";
 import { buildExecutiveReportRows } from "../../../../../data/reporting/executiveReportData";
 import { DEFAULT_EXEC_CONFIG } from "../../../../../data/reporting/executiveReportTypes";
 import type { PreparedPopulationRow } from "../../../../../data/population/populationTypes";
+import { logError } from "../../../../../data/storage/errorLogger";
+import { useLabels } from "../../../../../data/labels/useLabels";
 import { ExecutiveRowsContext, type ExecutiveRowsValue } from "./executiveRowsContext";
 
 /**
@@ -36,19 +38,23 @@ import { ExecutiveRowsContext, type ExecutiveRowsValue } from "./executiveRowsCo
 export function ExecutiveRowsProvider({ children }: { children: ReactNode }) {
   const { directoryHandle } = useWorkspace();
   const { selection } = useGlobalMonth();
+  const labels = useLabels();
   const monthFolder = selection.kind === "existing" ? selection.folderName : null;
   const [rows, setRows] = useState<ExecutiveRowsValue>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!directoryHandle || !monthFolder) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- sync reset so a pending/none selection never shows a previous month's KPIs
       setRows(null);
+      setLoadError(null);
       return;
     }
     const root = directoryHandle;
     const month = monthFolder;
     let cancelled = false;
     setRows(null);
+    setLoadError(null);
     void (async () => {
       const [populationData, sample, templateSelection] = await Promise.all([
         loadMonthPopulationFinal(root, month),
@@ -76,9 +82,26 @@ export function ExecutiveRowsProvider({ children }: { children: ReactNode }) {
       if (!cancelled) {
         setRows(execRows.map((r) => r as Record<string, unknown>));
       }
-    })();
+    })().catch((error: unknown) => {
+      // Previously a bare `void (async () => {...})()` with no `.catch` — a rejection here became
+      // an unhandled promise rejection and `rows` sat at `null` forever, which `KpiRenderer` reads
+      // as "still loading". Every KPI tile spun indefinitely instead of showing a failure.
+      if (cancelled) return;
+      logError("reportDesigner:executiveRowsProvider", error);
+      setRows([]);
+      setLoadError(labels.rd_kpi_rows_load_error);
+    });
     return () => { cancelled = true; };
-  }, [directoryHandle, monthFolder]);
+  }, [directoryHandle, monthFolder, labels.rd_kpi_rows_load_error]);
 
-  return <ExecutiveRowsContext.Provider value={rows}>{children}</ExecutiveRowsContext.Provider>;
+  return (
+    <ExecutiveRowsContext.Provider value={rows}>
+      {loadError && (
+        <div role="alert" style={{ padding: "6px 12px", fontSize: 12, color: "var(--c-danger)", background: "var(--c-danger-bg)" }}>
+          {loadError}
+        </div>
+      )}
+      {children}
+    </ExecutiveRowsContext.Provider>
+  );
 }

@@ -194,13 +194,20 @@ export function FeedbackWidget() {
         </button>
       )}
 
-      {/* Panel */}
+      {/* Panel.
+          Deliberately NOT `aria-modal="true"`: this is a floating, non-modal
+          panel — no backdrop, no portal, and the whole app behind it stays
+          fully interactive by design (you open it *while* working, to report
+          what you are looking at). Claiming modality told assistive tech the
+          rest of the page was inert when it was not, which is worse than
+          claiming nothing. Making it genuinely modal would mean adding a
+          backdrop and blocking the app, i.e. changing the product, not fixing
+          an a11y bug. Escape still closes it. */}
       {open && (
         <div
           className="fb-panel"
           ref={panelRef}
           role="dialog"
-          aria-modal="true"
           aria-labelledby="fbPanelTitle"
         >
           {/* Header */}

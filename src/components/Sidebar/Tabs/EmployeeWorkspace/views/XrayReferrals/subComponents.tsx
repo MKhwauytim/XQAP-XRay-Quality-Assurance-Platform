@@ -3,9 +3,8 @@
    sub-components and the pure helper functions/constants they (and the main XrayReferrals
    component) share. */
 import { useMemo, useState } from "react";
-import { X, AlertTriangle, RotateCw } from "lucide-react";
-import { useFocusTrap } from "../../../../../../hooks/useFocusTrap";
-import { ModalPortal } from "../../../../../ModalPortal/ModalPortal";
+import { AlertTriangle, RotateCw } from "lucide-react";
+import { ModalShell } from "../../../../../ModalShell/ModalShell";
 import { readUserManagementState } from "../../../../../../auth/userManagement";
 import type { FieldAnswer, ItemAnswer } from "../../../../../../data/answers/answerTypes";
 import type { DistributionEntry } from "../../../../../../data/distribution/distributionTypes";
@@ -330,7 +329,6 @@ export function ReassignModal({
   const [reason, setReason] = useState("");
   const [confirmed, setConfirmed] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onClose });
   const entriesById = useMemo(
     () => new Map(entries.map((entry) => [entry.xrayImageId, entry])),
     [entries]
@@ -376,150 +374,147 @@ export function ReassignModal({
       : `العينات المحددة يدوياً (${count})`;
 
   return (
-    <ModalPortal>
-    <div ref={dialogRef} className="ew-modal-backdrop" role="dialog" aria-modal="true">
-      <div className="ew-replace-modal">
-        <div className="ew-replace-header">
-          <div>
-            <h3>إسناد لموظف آخر</h3>
-            <p>{sourceLabel}</p>
-          </div>
-          <button type="button" className="ew-modal-close" onClick={onClose} aria-label="إغلاق"><X size={16} /></button>
-        </div>
+    <ModalShell variant="ew" title="إسناد لموظف آخر" subtitle={sourceLabel} onClose={onClose}>
+      {/* Scroll body. `.ew-replace-modal` is a bounded flex column with
+          `overflow: hidden`, so without an internal scroller a long selection
+          (hundreds of sample ids, an expanded preview, a skip breakdown) simply
+          got clipped and the action row below was pushed out of reach. Same
+          shape as MappingSettingsModal's `{ flex: 1, overflowY: "auto" }` body.
+          `minHeight: 0` is what actually lets a flex item shrink below its
+          content height and scroll. */}
+      <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }} data-testid="reassign-modal-scroll">
+      <div className="ew-replace-reason">
+        <label className="ew-field-label" htmlFor="bulk-reassign-to-emp">
+          الموظف المستلم <span className="ew-required">*</span>
+        </label>
+        <select
+          id="bulk-reassign-to-emp"
+          className="ew-select"
+          value={toEmployee}
+          onChange={(e) => { setToEmployee(e.target.value); setConfirmed(false); }}
+        >
+          <option value="">اختر موظفاً...</option>
+          {employees.map((u) => (
+            <option key={u.username} value={u.username}>
+              {u.displayName} ({u.username})
+            </option>
+          ))}
+        </select>
 
-        <div className="ew-replace-reason">
-          <label className="ew-field-label" htmlFor="bulk-reassign-to-emp">
-            الموظف المستلم <span className="ew-required">*</span>
-          </label>
-          <select
-            id="bulk-reassign-to-emp"
-            className="ew-select"
-            value={toEmployee}
-            onChange={(e) => { setToEmployee(e.target.value); setConfirmed(false); }}
-          >
-            <option value="">اختر موظفاً...</option>
-            {employees.map((u) => (
-              <option key={u.username} value={u.username}>
-                {u.displayName} ({u.username})
-              </option>
-            ))}
-          </select>
-
-          <label className="ew-field-label" htmlFor="bulk-reassign-reason" style={{ marginTop: 12 }}>
-            سبب الإحالة <span className="ew-required">*</span>
-          </label>
-          <textarea
-            id="bulk-reassign-reason"
-            className="ew-input ew-textarea"
-            rows={2}
-            placeholder="اذكر سبب الإحالة..."
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-          />
-        </div>
-
-        <div className="ew-replace-reason" style={{ paddingTop: 8 }}>
-          <details className="ew-referral-ids-summary">
-            <summary>عرض معرفات العينات ({state.xrayImageIds.length.toLocaleString("ar-SA-u-nu-latn")})</summary>
-            <div className="ew-referral-ids-list">
-              {state.xrayImageIds.map((id) => {
-                const entry = entriesById.get(id);
-                const isExpanded = expandedId === id;
-                return (
-                  <div key={id} className="ew-referral-id-item">
-                    <button
-                      type="button"
-                      className={`dt-mono ew-referral-id-chip${isExpanded ? " active" : ""}`}
-                      onClick={() => setExpandedId((current) => (current === id ? null : id))}
-                      aria-expanded={isExpanded}
-                      title="عرض بيانات العينة"
-                    >
-                      {id}
-                    </button>
-                    {isExpanded && entry ? (
-                      <ReferralSamplePreview
-                        entry={entry}
-                        visibleColumns={visibleColumns}
-                        dateFmt={dateFmt}
-                        answersMap={answersMap}
-                      />
-                    ) : null}
-                  </div>
-                );
-              })}
-            </div>
-          </details>
-        </div>
-
-        {toEmployee && plan && (
-          <div className="ew-replace-reason" style={{ paddingTop: 4 }}>
-            {/* One plain-text node (no nested <strong>) so the exact wording is
-               reliably matchable in tests without a custom textContent matcher. */}
-            <p>{`سيتم إرسال طلب إحالة ${eligibleCount.toLocaleString("ar-SA-u-nu-latn")} عينة إلى ${toEmployee} — بانتظار الاعتماد.`}</p>
-            {fromBreakdown.length > 1 && (
-              <p style={{ fontSize: 12, opacity: 0.8, margin: "4px 0 0" }}>
-                {`سيُنشأ طلب منفصل لكل موظف مصدر (${fromBreakdown.length.toLocaleString("ar-SA-u-nu-latn")} طلبات) ليعتمدها المشرف كلٌّ على حدة.`}
-              </p>
-            )}
-            {fromBreakdown.length > 0 && (
-              <ul className="ew-referral-ids-list" style={{ listStyle: "none", padding: 0, margin: "6px 0" }}>
-                {fromBreakdown.map(([from, count]) => (
-                  <li key={from}>
-                    من: <strong>{from}</strong> — {count.toLocaleString("ar-SA-u-nu-latn")}
-                  </li>
-                ))}
-              </ul>
-            )}
-            {skipCounts.length > 0 && (
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginTop: 8, padding: "8px 12px", background: "var(--c-warning-bg)", border: "1px solid var(--c-warning-border)", borderRadius: 8, fontSize: 12, color: "var(--c-warning)" }}>
-                <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 2 }} />
-                <div>
-                  <div>لن يتم تضمين {plan.skipped.length.toLocaleString("ar-SA-u-nu-latn")} عينة:</div>
-                  <ul style={{ margin: "4px 0 0", paddingInlineStart: 18 }}>
-                    {skipCounts.map(([reasonKey, count]) => (
-                      <li key={reasonKey}>
-                        {REASSIGN_SKIP_LABELS[reasonKey]} — {count.toLocaleString("ar-SA-u-nu-latn")}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-            )}
-            {eligibleCount === 0 && (
-              <p className="ew-replace-error" role="alert">لا توجد عينات صالحة للإحالة ضمن هذا الاختيار.</p>
-            )}
-            <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10, fontSize: 13 }}>
-              <input
-                type="checkbox"
-                checked={confirmed}
-                onChange={(e) => setConfirmed(e.target.checked)}
-                disabled={eligibleCount === 0}
-              />
-              أؤكد مراجعة الملخص أعلاه ورغبتي بإرسال طلب الإحالة
-            </label>
-          </div>
-        )}
-
-        {error ? (
-          <div className="ew-replace-reason" style={{ paddingTop: 0 }}>
-            <p className="ew-replace-error" role="alert">{error}</p>
-          </div>
-        ) : null}
-
-        <div className="ew-replace-reason" style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8, paddingBottom: 16 }}>
-          <button type="button" className="ew-btn-secondary" onClick={onClose}>إلغاء</button>
-          <button
-            type="button"
-            className="ew-btn-primary"
-            disabled={!canSubmit}
-            onClick={handleSubmit}
-          >
-            {busy ? "جاري الإرسال..." : error ? "إعادة المحاولة" : "إرسال طلب الإحالة"}
-          </button>
-        </div>
+        <label className="ew-field-label" htmlFor="bulk-reassign-reason" style={{ marginTop: 12 }}>
+          سبب الإحالة <span className="ew-required">*</span>
+        </label>
+        <textarea
+          id="bulk-reassign-reason"
+          className="ew-input ew-textarea"
+          rows={2}
+          placeholder="اذكر سبب الإحالة..."
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+        />
       </div>
-    </div>
-    </ModalPortal>
+
+      <div className="ew-replace-reason" style={{ paddingTop: 8 }}>
+        <details className="ew-referral-ids-summary">
+          <summary>عرض معرفات العينات ({state.xrayImageIds.length.toLocaleString("ar-SA-u-nu-latn")})</summary>
+          <div className="ew-referral-ids-list">
+            {state.xrayImageIds.map((id) => {
+              const entry = entriesById.get(id);
+              const isExpanded = expandedId === id;
+              return (
+                <div key={id} className="ew-referral-id-item">
+                  <button
+                    type="button"
+                    className={`dt-mono ew-referral-id-chip${isExpanded ? " active" : ""}`}
+                    onClick={() => setExpandedId((current) => (current === id ? null : id))}
+                    aria-expanded={isExpanded}
+                    title="عرض بيانات العينة"
+                  >
+                    {id}
+                  </button>
+                  {isExpanded && entry ? (
+                    <ReferralSamplePreview
+                      entry={entry}
+                      visibleColumns={visibleColumns}
+                      dateFmt={dateFmt}
+                      answersMap={answersMap}
+                    />
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        </details>
+      </div>
+
+      {toEmployee && plan && (
+        <div className="ew-replace-reason" style={{ paddingTop: 4 }}>
+          {/* One plain-text node (no nested <strong>) so the exact wording is
+             reliably matchable in tests without a custom textContent matcher. */}
+          <p>{`سيتم إرسال طلب إحالة ${eligibleCount.toLocaleString("ar-SA-u-nu-latn")} عينة إلى ${toEmployee} — بانتظار الاعتماد.`}</p>
+          {fromBreakdown.length > 1 && (
+            <p style={{ fontSize: 12, opacity: 0.8, margin: "4px 0 0" }}>
+              {`سيُنشأ طلب منفصل لكل موظف مصدر (${fromBreakdown.length.toLocaleString("ar-SA-u-nu-latn")} طلبات) ليعتمدها المشرف كلٌّ على حدة.`}
+            </p>
+          )}
+          {fromBreakdown.length > 0 && (
+            <ul className="ew-referral-ids-list" style={{ listStyle: "none", padding: 0, margin: "6px 0" }}>
+              {fromBreakdown.map(([from, count]) => (
+                <li key={from}>
+                  من: <strong>{from}</strong> — {count.toLocaleString("ar-SA-u-nu-latn")}
+                </li>
+              ))}
+            </ul>
+          )}
+          {skipCounts.length > 0 && (
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginTop: 8, padding: "8px 12px", background: "var(--c-warning-bg)", border: "1px solid var(--c-warning-border)", borderRadius: 8, fontSize: 12, color: "var(--c-warning)" }}>
+              <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 2 }} />
+              <div>
+                <div>لن يتم تضمين {plan.skipped.length.toLocaleString("ar-SA-u-nu-latn")} عينة:</div>
+                <ul style={{ margin: "4px 0 0", paddingInlineStart: 18 }}>
+                  {skipCounts.map(([reasonKey, count]) => (
+                    <li key={reasonKey}>
+                      {REASSIGN_SKIP_LABELS[reasonKey]} — {count.toLocaleString("ar-SA-u-nu-latn")}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
+          {eligibleCount === 0 && (
+            <p className="ew-replace-error" role="alert">لا توجد عينات صالحة للإحالة ضمن هذا الاختيار.</p>
+          )}
+          <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10, fontSize: 13 }}>
+            <input
+              type="checkbox"
+              checked={confirmed}
+              onChange={(e) => setConfirmed(e.target.checked)}
+              disabled={eligibleCount === 0}
+            />
+            أؤكد مراجعة الملخص أعلاه ورغبتي بإرسال طلب الإحالة
+          </label>
+        </div>
+      )}
+
+      {error ? (
+        <div className="ew-replace-reason" style={{ paddingTop: 0 }}>
+          <p className="ew-replace-error" role="alert">{error}</p>
+        </div>
+      ) : null}
+      </div>
+
+      <div className="ew-replace-reason" style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8, paddingBottom: 16 }}>
+        <button type="button" className="ew-btn-secondary" onClick={onClose}>إلغاء</button>
+        <button
+          type="button"
+          className="ew-btn-primary"
+          disabled={!canSubmit}
+          onClick={handleSubmit}
+        >
+          {busy ? "جاري الإرسال..." : error ? "إعادة المحاولة" : "إرسال طلب الإحالة"}
+        </button>
+      </div>
+    </ModalShell>
   );
 }
 
@@ -723,7 +718,6 @@ export function ReplacementDialog({
   );
   const [reason, setReason] = useState("");
   const [page, setPage] = useState(1);
-  const dialogRef = useFocusTrap<HTMLDivElement>({ onEscape: onClose });
   const rows = tab === "recommended" ? state.recommended : state.all;
   const safePage = clampPage(page, rows.length);
   const pagedRows = pageSlice(rows, safePage);
@@ -733,98 +727,87 @@ export function ReplacementDialog({
   const isRecommended = tab === "recommended";
 
   return (
-    <ModalPortal>
-    <div ref={dialogRef} className="ew-modal-backdrop" role="dialog" aria-modal="true">
-      <div className="ew-replace-modal">
-        <div className="ew-replace-header">
-          <div>
-            <h3>استبدال العينة</h3>
-            <p>
-              {state.entry.xrayImageId} · {stageLabel} · {state.entry.row.portName ?? "—"}
-            </p>
-          </div>
-          <button type="button" className="ew-modal-close" onClick={onClose} aria-label="إغلاق">
-            <X size={16} />
-          </button>
-        </div>
-
-        <div className="ew-replace-reason">
-          <label className="ew-field-label" htmlFor="replace-reason">
-            سبب الاستبدال <span className="ew-required">*</span>
-          </label>
-          <textarea
-            id="replace-reason"
-            className="ew-input ew-textarea"
-            rows={3}
-            placeholder="اذكر سبب طلب الاستبدال..."
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-          />
-          {!canSelect && (
-            <p className="ew-replace-reason-hint">يجب إدخال سبب الاستبدال قبل اختيار البديل.</p>
-          )}
-          {error ? (
-            <p className="ew-replace-error" role="alert">{error}</p>
-          ) : null}
-        </div>
-
-        <div className="ew-replace-tabs">
-          <button
-            type="button"
-            className={tab === "recommended" ? "active" : ""}
-            onClick={() => { setTab("recommended"); setPage(1); }}
-          >
-            الموصى بها ({state.recommended.length})
-          </button>
-          <button
-            type="button"
-            className={tab === "all" ? "active" : ""}
-            onClick={() => { setTab("all"); setPage(1); }}
-          >
-            كل البدائل ({state.all.length})
-          </button>
-        </div>
-
-        {!isRecommended && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "0 0 10px", padding: "8px 12px", background: "var(--c-warning-bg)", border: "1px solid var(--c-warning-border)", borderRadius: 8, fontSize: 12, color: "var(--c-warning)" }}>
-            <AlertTriangle size={14} style={{ flexShrink: 0 }} /> الاستبدال من هذه القائمة يحتاج موافقة المشرف — سيُرسل كطلب معلق في اعتماد الطلبات.
-          </div>
+    <ModalShell
+      variant="ew"
+      title="استبدال العينة"
+      subtitle={`${state.entry.xrayImageId} · ${stageLabel} · ${state.entry.row.portName ?? "—"}`}
+      onClose={onClose}
+    >
+      <div className="ew-replace-reason">
+        <label className="ew-field-label" htmlFor="replace-reason">
+          سبب الاستبدال <span className="ew-required">*</span>
+        </label>
+        <textarea
+          id="replace-reason"
+          className="ew-input ew-textarea"
+          rows={3}
+          placeholder="اذكر سبب طلب الاستبدال..."
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+        />
+        {!canSelect && (
+          <p className="ew-replace-reason-hint">يجب إدخال سبب الاستبدال قبل اختيار البديل.</p>
         )}
-
-        {rows.length === 0 ? (
-          <div className="ew-replace-empty">
-            لا توجد بدائل غير معينة في {tab === "recommended" ? "نفس المنفذ والمستوى" : "نفس المستوى"}.
-          </div>
-        ) : (
-          <div className="ew-replace-list">
-            {pagedRows.map((row) => (
-              <article key={row.xrayImageId} className="ew-replace-row">
-                <div>
-                  <strong>{row.xrayImageId}</strong>
-                  <span>
-                    {row.portName ?? "—"} · {formatStageLabel(row.stage, stageMappings)}
-                  </span>
-                  <span>
-                    {row.xrayEntryDate ? formatDate(row.xrayEntryDate, "date") : "—"} ·{" "}
-                    {row.plateOrContainerNumber ?? "—"}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  className={isRecommended ? "ew-btn-primary" : "ew-btn-warning"}
-                  disabled={!canSelect || busy}
-                  title={canSelect ? undefined : "أدخل سبب الاستبدال أولاً"}
-                  onClick={() => onSelect(row, reasonTrimmed, isRecommended)}
-                >
-                  {busy ? "جاري التنفيذ..." : isRecommended ? "اختيار" : "طلب استبدال"}
-                </button>
-              </article>
-            ))}
-          </div>
-        )}
-        <Pagination page={safePage} totalItems={rows.length} onPageChange={setPage} itemLabel="بديل" />
+        {error ? (
+          <p className="ew-replace-error" role="alert">{error}</p>
+        ) : null}
       </div>
-    </div>
-    </ModalPortal>
+
+      <div className="ew-replace-tabs">
+        <button
+          type="button"
+          className={tab === "recommended" ? "active" : ""}
+          onClick={() => { setTab("recommended"); setPage(1); }}
+        >
+          الموصى بها ({state.recommended.length})
+        </button>
+        <button
+          type="button"
+          className={tab === "all" ? "active" : ""}
+          onClick={() => { setTab("all"); setPage(1); }}
+        >
+          كل البدائل ({state.all.length})
+        </button>
+      </div>
+
+      {!isRecommended && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "0 0 10px", padding: "8px 12px", background: "var(--c-warning-bg)", border: "1px solid var(--c-warning-border)", borderRadius: 8, fontSize: 12, color: "var(--c-warning)" }}>
+          <AlertTriangle size={14} style={{ flexShrink: 0 }} /> الاستبدال من هذه القائمة يحتاج موافقة المشرف — سيُرسل كطلب معلق في اعتماد الطلبات.
+        </div>
+      )}
+
+      {rows.length === 0 ? (
+        <div className="ew-replace-empty">
+          لا توجد بدائل غير معينة في {tab === "recommended" ? "نفس المنفذ والمستوى" : "نفس المستوى"}.
+        </div>
+      ) : (
+        <div className="ew-replace-list">
+          {pagedRows.map((row) => (
+            <article key={row.xrayImageId} className="ew-replace-row">
+              <div>
+                <strong>{row.xrayImageId}</strong>
+                <span>
+                  {row.portName ?? "—"} · {formatStageLabel(row.stage, stageMappings)}
+                </span>
+                <span>
+                  {row.xrayEntryDate ? formatDate(row.xrayEntryDate, "date") : "—"} ·{" "}
+                  {row.plateOrContainerNumber ?? "—"}
+                </span>
+              </div>
+              <button
+                type="button"
+                className={isRecommended ? "ew-btn-primary" : "ew-btn-warning"}
+                disabled={!canSelect || busy}
+                title={canSelect ? undefined : "أدخل سبب الاستبدال أولاً"}
+                onClick={() => onSelect(row, reasonTrimmed, isRecommended)}
+              >
+                {busy ? "جاري التنفيذ..." : isRecommended ? "اختيار" : "طلب استبدال"}
+              </button>
+            </article>
+          ))}
+        </div>
+      )}
+      <Pagination page={safePage} totalItems={rows.length} onPageChange={setPage} itemLabel="بديل" />
+    </ModalShell>
   );
 }

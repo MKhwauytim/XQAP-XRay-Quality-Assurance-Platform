@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import { ArrowDownUp, X } from "lucide-react";
-import { useFocusTrap } from "../../../../../../hooks/useFocusTrap";
 import { useLabels } from "../../../../../../data/labels/useLabels";
-import { ModalPortal } from "../../../../../ModalPortal/ModalPortal";
+import { ModalShell } from "../../../../../ModalShell/ModalShell";
 import RequestCard from "./RequestCard";
 import Pagination from "../../../../../../components/Pagination/Pagination";
 import { clampPage, pageSlice } from "../../../../../../utils/paginationUtils";
@@ -35,12 +34,6 @@ export default function RequestList({ requests, bulkEnabled, userDisplayMap, sam
   const [bulkRunning, setBulkRunning] = useState(false);
   const requestsPageKey = `${requests.length}:${requests[0]?.requestId ?? ""}:${requests.at(-1)?.requestId ?? ""}`;
   const [pageState, setPageState] = useState<{ requestsKey: string; page: number }>(() => ({ requestsKey: requestsPageKey, page: 1 }));
-
-  // Focus-trap for the inline bulk-confirm modal (gated on bulkAction).
-  const bulkDialogRef = useFocusTrap<HTMLDivElement>({
-    onEscape: () => setBulkAction(null),
-    enabled: bulkAction !== null,
-  });
 
   // Bug #4: selection only makes sense on the pending queue — drop it whenever
   // the view switches to a decided (non-bulk) filter.
@@ -137,34 +130,36 @@ export default function RequestList({ requests, bulkEnabled, userDisplayMap, sam
       />
 
       {bulkAction && (
-        <ModalPortal>
-        <div ref={bulkDialogRef} className="ew-modal-backdrop" role="dialog" aria-modal="true">
-          <div className="ew-replace-modal">
-            <div className="ew-replace-header">
-              <h3>{bulkAction === "approve" ? `تأكيد الموافقة على ${selectedRequests.length} طلب` : `تأكيد رفض ${selectedRequests.length} طلب`}</h3>
-              <button type="button" className="ew-modal-close" onClick={() => setBulkAction(null)} aria-label="إغلاق"><X size={16} /></button>
-            </div>
-            <div className="ew-replace-reason">
-              <ul style={{ margin: "0 0 8px", paddingInlineStart: 18 }}>
-                {selectedRequests.map((r) => <li key={r.requestId}>{describeSelected(r)}</li>)}
-              </ul>
-              <label className="ew-field-label" htmlFor="bulk-notes">ملاحظة (اختياري، تُطبَّق على الكل)</label>
-              <textarea id="bulk-notes" className="ew-input ew-textarea" rows={2} value={bulkNotes} onChange={(e) => setBulkNotes(e.target.value)} />
-            </div>
-            <div className="ew-replace-reason" style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8, paddingBottom: 16 }}>
-              <button type="button" className="ew-btn-secondary" onClick={() => setBulkAction(null)} disabled={bulkRunning}>إلغاء</button>
-              <button
-                type="button"
-                className={bulkAction === "approve" ? "ew-btn-primary" : "ew-btn-deny"}
-                onClick={() => void confirmBulk()}
-                disabled={bulkRunning}
-              >
-                {bulkRunning ? "جارٍ التنفيذ…" : bulkAction === "approve" ? "تأكيد الموافقة" : "تأكيد الرفض"}
-              </button>
-            </div>
+        <ModalShell
+          variant="ew"
+          title={bulkAction === "approve" ? `تأكيد الموافقة على ${selectedRequests.length} طلب` : `تأكيد رفض ${selectedRequests.length} طلب`}
+          onClose={() => setBulkAction(null)}
+        >
+          {/* The selected-request list is unbounded (bulk approval routinely
+              covers dozens of requests) and `.ew-replace-modal` is a bounded
+              flex column with `overflow: hidden`, so without its own scroller
+              the list was clipped and the confirm/cancel row pushed out of
+              reach. `minHeight: 0` is what lets the flex item shrink and
+              scroll. */}
+          <div className="ew-replace-reason" style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+            <ul style={{ margin: "0 0 8px", paddingInlineStart: 18 }}>
+              {selectedRequests.map((r) => <li key={r.requestId}>{describeSelected(r)}</li>)}
+            </ul>
+            <label className="ew-field-label" htmlFor="bulk-notes">ملاحظة (اختياري، تُطبَّق على الكل)</label>
+            <textarea id="bulk-notes" className="ew-input ew-textarea" rows={2} value={bulkNotes} onChange={(e) => setBulkNotes(e.target.value)} />
           </div>
-        </div>
-        </ModalPortal>
+          <div className="ew-replace-reason" style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8, paddingBottom: 16 }}>
+            <button type="button" className="ew-btn-secondary" onClick={() => setBulkAction(null)} disabled={bulkRunning}>إلغاء</button>
+            <button
+              type="button"
+              className={bulkAction === "approve" ? "ew-btn-primary" : "ew-btn-deny"}
+              onClick={() => void confirmBulk()}
+              disabled={bulkRunning}
+            >
+              {bulkRunning ? "جارٍ التنفيذ…" : bulkAction === "approve" ? "تأكيد الموافقة" : "تأكيد الرفض"}
+            </button>
+          </div>
+        </ModalShell>
       )}
     </div>
   );

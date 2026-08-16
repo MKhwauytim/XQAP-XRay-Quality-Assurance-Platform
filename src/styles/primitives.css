@@ -4,6 +4,71 @@
    Tabs should consume these instead of re-rolling local button/card CSS.
    ═══════════════════════════════════════════════════════════ */
 
+/* ═══════════════════════════════════════════════════════════
+   Consolidation tokens (Phase 10 visual-consistency pass)
+
+   Every token below is an ALIAS onto an existing value in index.css or a
+   plain number. No new raw color is introduced here — index.css stays the
+   single source of truth for color, and `check:hex-literals` keeps this
+   file's literal count pinned.
+   ═══════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── Z-index scale ───────────────────────────────────────────
+     The audit found 25 distinct raw z-index values (0 … 20000) across 17
+     files with no documented order. These names capture the ORDER that
+     already ships; the numbers are unchanged from what each layer used, so
+     adopting a token never restacks anything.
+
+     Layer order, bottom to top:
+       local < sticky cells < sticky headers < popovers/dropdowns <
+       app chrome < sidebar < floating widget < modal < dialog < boot splash  */
+  --z-local:            1;    /* in-card stacking, decorative rails            */
+  --z-sticky-cell:      2;    /* sticky table header cell                      */
+  --z-sticky-corner:    3;    /* sticky row+column intersection cell           */
+  --z-sticky-header:    5;    /* sticky section header / in-panel toolbar      */
+  --z-sticky-toolbar:  10;    /* sticky toolbar above sticky headers           */
+  --z-popover:         60;    /* anchored popover (month selector)             */
+  --z-dropdown:       200;    /* column picker / column panel                  */
+  --z-dropdown-menu:  300;    /* filter menu, opens over a dropdown            */
+  --z-app-chrome:    1000;    /* admin toolbar, print overlay                  */
+  --z-sidebar:       1100;    /* sidebar drawer (mobile)                       */
+  --z-fab:           1190;    /* floating feedback button                      */
+  --z-fab-panel:     1200;    /* its expanded panel                            */
+  --z-canvas-active: 9000;    /* selected element inside the designer canvas   */
+  --z-toast:         9999;    /* transient toast, above page chrome            */
+  --z-modal:        10020;    /* full-screen modal backdrop                    */
+  --z-dialog:       11000;    /* confirm dialog, must clear modals             */
+  --z-boot-splash:  20000;    /* boot checklist, clears everything             */
+
+  /* ── Shape (4.4 Shape Consistency Lock) ──────────────────────
+     The documented rule for this product: controls and inputs 6px
+     (--r-sm), cards and panels 10px (--r-lg), modals 12px (--r-xl),
+     pills/avatars fully round. The audit found 50 distinct border-radius
+     declarations; these two names cover the "fully round" cases that were
+     spelled 999px / 99px / 50% ad hoc. */
+  --r-pill:   999px;
+  --r-circle: 50%;
+
+  /* ── Semantic color aliases ──────────────────────────────────
+     The audit found 31 custom properties referenced via var() that are
+     never defined anywhere, so each one silently rendered its inline
+     fallback (or, with no fallback, rendered an invalid value). These map
+     the surviving names onto the real tokens. */
+  --c-text:          var(--c-ink);
+  --c-text-muted:    var(--c-ink-3);
+  --c-bg:            var(--c-surface-2);
+  --c-bg-2:          var(--c-navy-soft);
+  --c-primary:       var(--c-navy-2);
+  --c-primary-dark:  var(--c-navy);
+  --c-error:         var(--c-danger);
+  --c-danger-soft:   var(--c-danger-bg);
+  --c-danger-text:   var(--c-danger);
+  --c-warning-soft:  var(--c-warning-bg);
+  --c-warning-text:  var(--c-warning);
+  --c-success-dark:  var(--c-success-strong);
+}
+
 /* ── Buttons ───────────────────────────────────────────────── */
 
 .ui-btn {
@@ -19,7 +84,7 @@
   border-radius: var(--r-sm);
 
   font-family: var(--font-sans);
-  font-size: 13px;
+  font-size: var(--fs-sm);
   font-weight: var(--fw-bold);
   line-height: 1.35;
   white-space: nowrap;
@@ -47,8 +112,8 @@
   box-shadow: var(--focus-ring);
 }
 
-.ui-btn--sm { min-height: 30px; padding: 6px 11px; font-size: 12px; }
-.ui-btn--lg { min-height: 44px; padding: 11px 22px; font-size: 14px; }
+.ui-btn--sm { min-height: 30px; padding: 6px 11px; font-size: var(--fs-xs); }
+.ui-btn--lg { min-height: 44px; padding: 11px 22px; font-size: var(--fs-base); }
 
 .ui-btn--primary {
   background: var(--sky-gradient, var(--c-sky));
@@ -70,7 +135,11 @@
 }
 .ui-btn--secondary:hover:not(:disabled) {
   border-color: var(--c-sky);
-  color: var(--c-sky);
+  /* --c-sky is 3.15:1 on white and 2.97:1 on --c-sky-light: fine for the
+     border (3:1 non-text) but a WCAG AA failure for this 13px label. Per the
+     rule documented on --c-sky-text in index.css, small sky-coloured TEXT
+     uses --c-sky-text (5.43:1 on white, 5.13:1 on --c-sky-light). */
+  color: var(--c-sky-text);
   background: var(--c-sky-light);
 }
 
@@ -170,19 +239,19 @@
 .ui-stat--danger::before  { background: var(--c-danger); }
 
 .ui-stat__label {
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-weight: var(--fw-semibold);
   color: var(--c-ink-3);
 }
 .ui-stat__value {
-  font-size: 28px;
+  font-size: var(--fs-2xl);
   font-weight: var(--fw-bold);
   line-height: 1.1;
   color: var(--c-ink);
   font-variant-numeric: tabular-nums;
 }
 .ui-stat__delta {
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-weight: var(--fw-semibold);
 }
 .ui-stat__delta--up   { color: var(--c-success); }
@@ -195,9 +264,9 @@
   align-items: center;
   gap: var(--sp-1);
   padding: 2px 9px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   border: 1px solid transparent;
-  font-size: 11px;
+  font-size: var(--fs-2xs);
   font-weight: var(--fw-bold);
   line-height: 1.6;
   white-space: nowrap;
@@ -227,7 +296,7 @@
   border-radius: var(--r-sm);
   background: var(--c-surface);
   color: var(--c-ink);
-  font-size: 13px;
+  font-size: var(--fs-sm);
   outline: none;
   transition: border-color var(--t-base) var(--ease-smooth),
               box-shadow var(--t-base) var(--ease-smooth);
@@ -259,9 +328,11 @@
 }
 .ui-section__eyebrow {
   margin: 0 0 var(--sp-1);
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-weight: var(--fw-semibold);
-  color: var(--c-sky);
+  /* 12px text: needs 4.5:1. --c-sky is 3.15:1 on white and fails; --c-sky-text
+     is 5.43:1. Matches .page-header-eyebrow, which already uses --c-sky-text. */
+  color: var(--c-sky-text);
 }
 .ui-section__title {
   margin: 0;
@@ -332,7 +403,7 @@
   height: 56px;
   margin-bottom: var(--sp-1);
 
-  border-radius: 50%;
+  border-radius: var(--r-circle);
   background: var(--c-surface-2);
   border: 1px solid var(--c-border);
   color: var(--c-ink-4);
@@ -346,14 +417,14 @@
 
 .ui-state__title {
   margin: 0;
-  font-size: 16px;
+  font-size: var(--fs-md);
   font-weight: var(--fw-bold);
   color: var(--c-ink);
 }
 .ui-state__body {
   margin: 0;
   max-width: 42ch;
-  font-size: 13px;
+  font-size: var(--fs-sm);
   line-height: 1.7;
   color: var(--c-ink-3);
 }
@@ -370,7 +441,7 @@
 .ui-spinner {
   width: 34px;
   height: 34px;
-  border-radius: 50%;
+  border-radius: var(--r-circle);
   border: 3px solid var(--c-border);
   border-top-color: var(--c-sky);
   animation: ui-spin 720ms linear infinite;

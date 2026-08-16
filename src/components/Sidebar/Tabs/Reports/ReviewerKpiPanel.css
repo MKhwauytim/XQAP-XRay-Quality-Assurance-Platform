@@ -8,7 +8,7 @@
   gap: var(--sp-4, 16px);
   background: var(--c-surface);
   border: 1px solid var(--c-border);
-  border-radius: var(--r-lg, 10px);
+  border-radius: var(--r-lg);
   box-shadow: var(--sh-xs);
   padding: var(--sp-4, 16px);
 }
@@ -32,7 +32,7 @@
   flex-direction: column;
   align-items: center;
   gap: var(--sp-2, 8px);
-  padding: var(--sp-8, 32px) var(--sp-5, 20px);
+  padding: var(--sp-8, 32px) var(--sp-5);
   text-align: center;
 }
 .rk-empty strong { font-size: 15px; font-weight: 800; color: var(--c-navy); }
@@ -101,14 +101,14 @@
 /* Toggle (reviewer / port) */
 .rk-toggle {
   display: inline-flex;
-  gap: var(--sp-1, 4px);
-  padding: var(--sp-1, 4px);
+  gap: var(--sp-1);
+  padding: var(--sp-1);
   background: var(--c-surface-2);
   border: 1px solid var(--c-border);
   border-radius: 10px;
 }
 .rk-toggle button {
-  padding: var(--sp-1, 4px) var(--sp-4, 16px);
+  padding: var(--sp-1) var(--sp-4, 16px);
   border: 0;
   border-radius: 7px;
   background: transparent;
@@ -135,7 +135,7 @@
   width: 100%;
   min-width: 720px;
   height: auto;
-  font-family: var(--font-sans, "Somar Sans", "Segoe UI", sans-serif);
+  font-family: var(--font-sans);
 }
 .rk-axis-label,
 .rk-axis-title,
@@ -160,7 +160,7 @@
   text-align: center;
   background: var(--c-surface-2);
   border: 1px dashed var(--c-border);
-  border-radius: var(--r-md, 8px);
+  border-radius: var(--r-md);
 }
 
 /* ── Legend ──────────────────────────────────────────────── */
@@ -168,7 +168,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--sp-3, 12px);
-  padding-top: var(--sp-1, 4px);
+  padding-top: var(--sp-1);
 }
 .rk-legend-item {
   display: inline-flex;

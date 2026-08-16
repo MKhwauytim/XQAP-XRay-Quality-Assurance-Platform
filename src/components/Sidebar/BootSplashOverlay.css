@@ -22,7 +22,7 @@
 .boot-splash-overlay {
   position: absolute;
   inset: 0;
-  z-index: 20000;
+  z-index: var(--z-boot-splash);
   display: grid;
   /* The cover spans all of .app-workspace, which scrolls and can be several
      screens tall -- but the card must center on what the user can SEE, not on
@@ -33,7 +33,7 @@
   grid-template-rows: min(100%, calc(100vh - var(--topbar-height, 56px)));
   place-items: center;
   padding: 24px;
-  background: linear-gradient(150deg, #071528 0%, #0C1E38 55%, var(--c-navy, #0E2444) 100%);
+  background: linear-gradient(150deg, #071528 0%, #0C1E38 55%, var(--c-navy) 100%);
 }
 
 .boot-splash-card {
@@ -41,9 +41,9 @@
   max-height: calc(100vh - 64px);
   overflow-y: auto;
   padding: 26px 24px 20px;
-  border-radius: var(--r-2xl, 16px);
-  background: var(--c-surface, #FFFFFF);
-  border: 1px solid var(--c-border, #DDE6EF);
+  border-radius: var(--r-2xl);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
   box-shadow: var(--sh-xl, 0 30px 72px rgba(13, 31, 50, 0.16));
 }
 
@@ -52,7 +52,7 @@
   margin-bottom: 16px;
   font-size: 15px;
   font-weight: 800;
-  color: var(--c-navy, #0E2444);
+  color: var(--c-navy);
   text-align: center;
 }
 
@@ -68,7 +68,7 @@
   align-items: center;
   gap: 12px;
   padding: 10px 6px;
-  border-top: 1px solid var(--c-surface-3, #F9F8F4);
+  border-top: 1px solid var(--c-surface-3);
 }
 
 .boot-splash-item:first-child {
@@ -82,33 +82,33 @@
   border-radius: 50%;
   display: grid;
   place-items: center;
-  background: var(--c-surface-3, #F9F8F4);
-  color: var(--c-ink-3, #50536F);
-  border: 1px solid var(--c-border, #DDE6EF);
+  background: var(--c-surface-3);
+  color: var(--c-ink-3);
+  border: 1px solid var(--c-border);
 }
 
 .boot-splash-item-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--c-ink-4, #8395AC);
+  background: var(--c-ink-4);
 }
 
 .boot-splash-item--loaded .boot-splash-item-mark {
-  background: var(--c-success, #004030);
+  background: var(--c-success);
   color: #FFFFFF;
   border-color: transparent;
 }
 
 .boot-splash-item--error .boot-splash-item-mark {
-  background: var(--c-danger, #9F1624);
+  background: var(--c-danger);
   color: #FFFFFF;
   border-color: transparent;
 }
 
 .boot-splash-item--loading .boot-splash-item-mark {
-  background: var(--c-sky-light, #E5F5FB);
-  border-color: var(--c-sky, #009ADE);
+  background: var(--c-sky-light);
+  border-color: var(--c-sky);
 }
 
 .boot-splash-item-body {
@@ -120,23 +120,23 @@
   display: block;
   font-size: 13.5px;
   font-weight: 700;
-  color: var(--c-ink, #0B1F33);
+  color: var(--c-ink);
 }
 
 .boot-splash-item--loaded .boot-splash-item-body strong {
-  color: var(--c-ink-3, #50536F);
+  color: var(--c-ink-3);
   text-decoration: line-through;
 }
 
 .boot-splash-item--error .boot-splash-item-body strong {
-  color: var(--c-danger, #9F1624);
+  color: var(--c-danger);
 }
 
 .boot-splash-item-body span {
   display: block;
   margin-top: 1px;
   font-size: 11px;
-  color: var(--c-ink-4, #8395AC);
+  color: var(--c-ink-4);
   font-family: "Consolas", "SFMono-Regular", Menlo, monospace;
   overflow-wrap: break-word;
 }

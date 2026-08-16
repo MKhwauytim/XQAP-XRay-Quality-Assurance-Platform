@@ -7,38 +7,38 @@
 
 .adhoc-import-scope-note {
   font-size: 0.8rem;
-  color: var(--color-text-muted, #6b7280);
+  color: var(--c-ink-3);
   margin: 0;
 }
 
 .adhoc-import-error {
-  background: var(--color-danger-bg, #fee2e2);
-  color: var(--color-danger, #b91c1c);
-  border: 1px solid var(--color-danger, #b91c1c);
+  background: var(--c-danger-bg);
+  color: var(--c-danger);
+  border: 1px solid var(--c-danger);
   border-radius: 8px;
   padding: 0.6rem 0.9rem;
   font-size: 0.85rem;
 }
 
 .adhoc-import-notice {
-  background: var(--color-success-bg, #dcfce7);
-  color: var(--color-success, #15803d);
-  border: 1px solid var(--color-success, #15803d);
+  background: var(--c-success-bg);
+  color: var(--c-success-strong);
+  border: 1px solid var(--c-success-strong);
   border-radius: 8px;
   padding: 0.6rem 0.9rem;
   font-size: 0.85rem;
 }
 
 .adhoc-import-empty {
-  color: var(--color-text-muted, #6b7280);
+  color: var(--c-ink-3);
   font-size: 0.9rem;
 }
 
 .adhoc-import-upload-card,
 .adhoc-import-list-card,
 .adhoc-import-detail {
-  background: var(--color-surface, #fff);
-  border: 1px solid var(--color-border, #e5e7eb);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
   border-radius: 12px;
   padding: 1rem;
   display: flex;
@@ -71,7 +71,7 @@
 .adhoc-import-list-table td {
   padding: 0.5rem 0.75rem;
   text-align: start;
-  border-bottom: 1px solid var(--color-border, #e5e7eb);
+  border-bottom: 1px solid var(--c-border);
 }
 
 .adhoc-import-list-row {
@@ -79,7 +79,7 @@
 }
 
 .adhoc-import-list-row:hover {
-  background: var(--color-surface-hover, #f9fafb);
+  background: var(--c-surface-2);
 }
 
 .adhoc-import-detail-toolbar {
@@ -97,7 +97,7 @@
 
 .adhoc-import-review-note {
   font-size: 0.8rem;
-  color: var(--color-text-muted, #6b7280);
+  color: var(--c-ink-3);
   margin: 0;
 }
 
@@ -107,5 +107,5 @@
   gap: 0.75rem;
   flex-wrap: wrap;
   padding-top: 0.5rem;
-  border-top: 1px solid var(--color-border, #e5e7eb);
+  border-top: 1px solid var(--c-border);
 }

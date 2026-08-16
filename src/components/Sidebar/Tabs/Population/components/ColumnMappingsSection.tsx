@@ -109,7 +109,7 @@ export function ColumnMappingsSection({
                 style={{
                   fontSize: "13px",
                   fontWeight: "600",
-                  color: "var(--population-text)",
+                  color: "var(--c-ink)",
                 }}
               >
                 {field.labelAr}
@@ -217,7 +217,7 @@ export function ColumnMappingsSection({
                 style={{
                   fontSize: "13px",
                   fontWeight: "600",
-                  color: "var(--population-text)",
+                  color: "var(--c-ink)",
                 }}
               >
                 {field.labelAr}

@@ -4,16 +4,16 @@
 
 /* ── Dark sidebar custom properties ───────────────────────── */
 .sidebar {
-  --sb-bg:         var(--brand-deep-bg, #0E2444);
-  --sb-bg-2:       var(--brand-deep-surface, #102C57);
+  --sb-bg:         var(--brand-deep-bg);
+  --sb-bg-2:       var(--brand-deep-surface);
   --sb-text:       rgba(255, 255, 255, 0.88);
   --sb-text-muted: rgba(249, 248, 244, 0.56);
   --sb-border:     rgba(217, 190, 158, 0.14);
   --sb-hover-bg:   rgba(255, 255, 255, 0.07);
   --sb-active-bg:  rgba(255, 255, 255, 0.12);
-  --sb-accent:     var(--brand-digital, #009ADE);
-  --sb-accent-2:   var(--brand-innovation, #10CFC9);
-  --sb-gold:       var(--brand-premium, #DAA328);
+  --sb-accent:     var(--brand-digital);
+  --sb-accent-2:   var(--brand-innovation);
+  --sb-gold:       var(--brand-premium);
   --sb-accent-sub: rgba(0, 154, 222, 0.18);
 }
 
@@ -133,7 +133,7 @@
   flex: 0 0 auto;
 
   border: 1px solid var(--sb-border);
-  border-radius: var(--r-sm, 8px);
+  border-radius: var(--r-sm);
 
   background: var(--sb-hover-bg);
   color: var(--sb-text);
@@ -206,7 +206,7 @@
   gap: var(--sp-3);
 
   border: 0;
-  border-radius: var(--r-sm, 8px);
+  border-radius: var(--r-sm);
 
   padding: 11px 13px;
 
@@ -342,12 +342,12 @@
 }
 
 .sidebar-nav-item.has-children {
-  padding-left: 12px;
+  padding-inline-end: 12px;
 }
 
 .sidebar-chevron {
-  margin-right: auto;
-  margin-left: 4px;
+  margin-inline-start: auto;
+  margin-inline-end: 4px;
   opacity: 0.4;
   flex-shrink: 0;
   color: var(--sb-text);
@@ -364,7 +364,7 @@
   flex-direction: column;
   gap: 2px;
   padding: 6px 0 10px 0;
-  border-right: 2px solid rgba(255, 255, 255, 0.10);
+  border-inline-start: 2px solid rgba(255, 255, 255, 0.10);
   margin: 2px 21px 4px 0;
 }
 
@@ -426,7 +426,7 @@
     inset-block: 0;
     inset-inline-start: 0;
     inset-inline-end: auto;
-    z-index: 1100;
+    z-index: var(--z-sidebar);
     width: min(88vw, 320px);
     min-height: 100dvh;
     max-height: 100dvh;
@@ -491,7 +491,7 @@
     place-items: center;
     padding: 0;
     border: 1px solid var(--sb-border);
-    border-radius: var(--r-sm, 8px);
+    border-radius: var(--r-sm);
     background: var(--sb-hover-bg);
     color: var(--sb-text);
     cursor: pointer;

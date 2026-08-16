@@ -103,6 +103,159 @@ describe("useFocusTrap", () => {
     expect(document.activeElement).toBe(trigger);
   });
 
+  it("re-arms on a new container when only `resetKey` changes", () => {
+    // Regression (defect 3): a panel that moves between DOM nodes while
+    // `enabled` stays true — BrowseDataView's per-column filter menu switching
+    // from column A straight to column B — left the trap holding the detached
+    // node, so Tab and focus handling operated on a node no longer in the page.
+    function Switcher() {
+      const [col, setCol] = useState<"a" | "b">("a");
+      const ref = useFocusTrap<HTMLDivElement>({ enabled: true, resetKey: col });
+      return (
+        <div>
+          <button type="button" onClick={() => setCol("b")}>
+            switch
+          </button>
+          {/* Two distinct host nodes, exactly one mounted at a time — the
+              shape of a filter menu that lives inside its own column's `th`.
+              Switching column tears the old node down and builds a new one. */}
+          {col === "a" ? (
+            <section>
+              <div ref={ref} role="dialog" aria-label="menu-a">
+                <button type="button">inside-a</button>
+              </div>
+            </section>
+          ) : (
+            <article>
+              <div ref={ref} role="dialog" aria-label="menu-b">
+                <button type="button">inside-b</button>
+              </div>
+            </article>
+          )}
+        </div>
+      );
+    }
+    render(<Switcher />);
+    expect(document.activeElement).toBe(screen.getByText("inside-a"));
+
+    fireEvent.click(screen.getByText("switch"));
+    // The trap must follow the rebuilt panel, not the node it first captured.
+    expect(document.activeElement).toBe(screen.getByText("inside-b"));
+  });
+
+  it("nested dialog: one Escape closes only the innermost trap", () => {
+    // Regression (defect 1): both traps listen on `document` in the capture
+    // phase, so `stopPropagation()` in the inner one cannot stop the outer
+    // sibling listener — one Escape closed both dialogs.
+    const outerEscape = vi.fn();
+    const innerEscape = vi.fn();
+
+    function Nested() {
+      const outerRef = useFocusTrap<HTMLDivElement>({ onEscape: outerEscape });
+      const [innerOpen, setInnerOpen] = useState(false);
+      const innerRef = useFocusTrap<HTMLDivElement>({
+        onEscape: innerEscape,
+        enabled: innerOpen,
+      });
+      return (
+        <div ref={outerRef} role="dialog" aria-label="outer">
+          <button type="button" onClick={() => setInnerOpen(true)}>
+            open inner
+          </button>
+          {innerOpen ? (
+            <div ref={innerRef} role="dialog" aria-label="inner">
+              <button type="button">inner control</button>
+            </div>
+          ) : null}
+        </div>
+      );
+    }
+
+    render(<Nested />);
+    fireEvent.click(screen.getByText("open inner"));
+
+    fireEvent.keyDown(screen.getByText("inner control"), { key: "Escape" });
+    expect(innerEscape).toHaveBeenCalledTimes(1);
+    expect(outerEscape).not.toHaveBeenCalled();
+  });
+
+  it("portalled dialogs: Escape reaches only the one opened last", () => {
+    // The ModalShell + ConfirmDialog pairing: both containers are portalled to
+    // <body>, so neither contains the other and only activation order can tell
+    // them apart.
+    const firstEscape = vi.fn();
+    const secondEscape = vi.fn();
+
+    function Sibling({
+      onEscape,
+      name,
+    }: {
+      onEscape: () => void;
+      name: string;
+    }) {
+      const ref = useFocusTrap<HTMLDivElement>({ onEscape });
+      return (
+        <div ref={ref} role="dialog" aria-label={name}>
+          <button type="button">{`${name} control`}</button>
+        </div>
+      );
+    }
+
+    function Pair() {
+      const [secondOpen, setSecondOpen] = useState(false);
+      return (
+        <div>
+          <Sibling name="first" onEscape={firstEscape} />
+          <button type="button" onClick={() => setSecondOpen(true)}>
+            open second
+          </button>
+          {secondOpen ? <Sibling name="second" onEscape={secondEscape} /> : null}
+        </div>
+      );
+    }
+
+    render(<Pair />);
+    fireEvent.click(screen.getByText("open second"));
+
+    fireEvent.keyDown(screen.getByText("second control"), { key: "Escape" });
+    expect(secondEscape).toHaveBeenCalledTimes(1);
+    expect(firstEscape).not.toHaveBeenCalled();
+  });
+
+  it("hands control back to the outer trap once the inner one closes", () => {
+    const outerEscape = vi.fn();
+
+    function Nested() {
+      const outerRef = useFocusTrap<HTMLDivElement>({ onEscape: outerEscape });
+      const [innerOpen, setInnerOpen] = useState(false);
+      const innerRef = useFocusTrap<HTMLDivElement>({
+        onEscape: () => setInnerOpen(false),
+        enabled: innerOpen,
+      });
+      return (
+        <div ref={outerRef} role="dialog" aria-label="outer">
+          <button type="button" onClick={() => setInnerOpen(true)}>
+            open inner
+          </button>
+          {innerOpen ? (
+            <div ref={innerRef} role="dialog" aria-label="inner">
+              <button type="button">inner control</button>
+            </div>
+          ) : null}
+        </div>
+      );
+    }
+
+    render(<Nested />);
+    fireEvent.click(screen.getByText("open inner"));
+    fireEvent.keyDown(screen.getByText("inner control"), { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "inner" })).toBeNull();
+    expect(outerEscape).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(screen.getByText("open inner"), { key: "Escape" });
+    expect(outerEscape).toHaveBeenCalledTimes(1);
+  });
+
   it("does not trap or move focus while disabled (enabled=false)", () => {
     function Disabled() {
       const ref = useFocusTrap<HTMLDivElement>({ enabled: false });
