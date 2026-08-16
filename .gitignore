@@ -8,7 +8,13 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
-dist
+# The release build is the product: one self-contained file, committed so it can
+# be downloaded and opened without a toolchain. Everything else Vite emits into
+# dist/ stays ignored — dist/ is meant to hold exactly this one file. Note the
+# `dist/*` rather than `dist`: git never descends into an excluded directory, so
+# a bare `dist` would make the negation below unreachable.
+dist/*
+!dist/index.html
 dist-ssr
 *.local
 .worktrees
