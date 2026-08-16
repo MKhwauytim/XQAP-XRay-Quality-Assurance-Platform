@@ -27,6 +27,8 @@ npm run editlog -- --tier=3 --append --sync-package "Refactor (sampling): ..."
 
 Tier 3's sweep is the **release** gate, not the per-edit gate. Running it on a three-line comment fix costs minutes and proves nothing about the change. `docs/product/RELEASE_CHECKLIST.md` is the authority when actually cutting a release.
 
+**`npm run build` is mandatory before pushing a branch or opening a PR — at every tier, including tier 1.** CI runs it, so a broken build fails there anyway; running it locally first just means you find out in 13 seconds instead of four minutes. It also catches a whole class of failure the test suite cannot: `vitest` transpiles per-file and never type-checks, so a missing export, a bad `?worker&inline` import, a circular import that only bites at module-eval time, or anything that breaks `vite-plugin-singlefile`'s inlining passes a fully green suite and dies at build. Pair it with `npm run typecheck` for the same reason — a green `test:run` has hidden real type errors in this repo.
+
 **Fields every entry keeps:**
 
 1. **Version** — semver-lite: major feature/refactor/architectural change bumps the whole number (v1 → v2); fix/tweak/hotfix bumps the decimal (v1.0 → v1.1). Write a major as `v60.0`, not `v60` — `check:release` compares against `package.json`'s first two segments and a bare `v60` can never match.
@@ -259,3 +261,5 @@ All UI strings that may need customization are stored in `src/data/labels/labels
 **See a change in the real app** → `npm run dev`. For the executive deck specifically, `http://localhost:5173/deck-preview.html` is far faster than driving the full report flow. The app needs Chrome/Edge for the File System Access API.
 
 **Before claiming done** → run the gates for your tier (see the ladder above), then write the edit-log entry with `npm run editlog`. Don't report a change as working on the strength of reading the code — this repo has a documented history of effect-timing and state-machine bugs surviving self-review, including after real-browser confirmation.
+
+**Before pushing a branch or opening a PR** → `npm run build` as well, whatever the tier. See the ladder note above for why a green `test:run` does not imply a working build.
