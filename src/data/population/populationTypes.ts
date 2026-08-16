@@ -217,7 +217,24 @@ export function attachLazyRawRow(
     return;
   }
   Object.defineProperty(row, "rawRow", {
-    enumerable: true,
+    // NON-enumerable, and that is what removes the save-path OOM.
+    //
+    // `JSON.stringify`, `streamJsonStringify` (jsonEnvelope.ts:86) and
+    // `Object.keys` all skip non-enumerable properties, so the getter is never
+    // invoked during a write and `rawRow` never reaches disk — which is exactly
+    // what `stripRawRow`'s defensive copy was buying, except the copy paid for
+    // it by duplicating the entire population.
+    //
+    // Measured on a realistic 45-field row: 300k prepared rows are ~626 MB, and
+    // `preparedRows.map(stripRawRow)` added ~490 MB on top while React still
+    // held the originals — ~1.8 GB at 500k rows, which kills the tab mid-save.
+    // With this flag the caller passes `preparedRows` straight through and the
+    // second array never exists.
+    //
+    // Direct access (`row.rawRow`) is unaffected — enumerability governs
+    // enumeration, not reads — so populationExporter.ts and columnMappingHints
+    // keep working unchanged.
+    enumerable: false,
     configurable: true,
     get(): Record<string, unknown> {
       return { ...(base ?? {}), ...extras };

@@ -23,7 +23,6 @@ import {
 } from "../../../../data/storage/errorCodes";
 import type { SafeWriteProgressPhase } from "../../../../data/storage/safeWrite";
 import { currentMonthFolderInfo, formatMonthFolderName, formatMonthFolderShortLabel } from "../../../../data/population/monthFolder";
-import { stripRawRow } from "../../../../data/population/populationTypes";
 import type { MonthFolderInfo } from "../../../../data/population/monthFolder";
 import {
   saveMonthRun,
@@ -1024,9 +1023,14 @@ export default function PopulationTab() {
         // by name here would force that merge across the whole population right
         // as it's at its largest. stripRawRow() enumerates keys instead and never
         // touches the accessor's getter.
-        processedRows: processingResult.preparedRows.map(
-          (row) => stripRawRow(row)
-        ) as Array<Record<string, unknown>>,
+        // No `.map(stripRawRow)`: `rawRow` is a NON-enumerable lazy accessor
+        // (attachLazyRawRow), so every serializer here already skips it and it
+        // never reaches disk. The map existed only to guarantee that, and it
+        // paid for the guarantee by building a second full copy of the
+        // population — ~490 MB on top of ~626 MB at 300k rows, both live at
+        // once because React still holds `preparedRows`. That duplication was
+        // the save-path OOM on a real month.
+        processedRows: processingResult.preparedRows as unknown as Array<Record<string, unknown>>,
         certScanRows: processingResult.summary.certScanRows,
         nonCertScanRows: processingResult.summary.nonCertScanRows,
         processingSummary: {
