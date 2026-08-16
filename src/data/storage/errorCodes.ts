@@ -394,6 +394,16 @@ export const ERROR_CODES = {
     meaning: "replacement row was added to the sample but writing the distribution events failed",
     labelKey: "err_dist_005_replacement_partial",
   },
+  "XQ-DIST-007": {
+    meaning:
+      "distribution events were durably written but the post-close read-back could not confirm the segment (share visibility lag); the projection was committed anyway because the bytes are on disk",
+    labelKey: "err_dist_007_write_unconfirmed",
+  },
+  "XQ-DIST-008": {
+    meaning:
+      "distribution event segment read back at the WRONG size after retries — a genuine bad write, not a visibility artefact",
+    labelKey: "err_dist_008_segment_size_mismatch",
+  },
   "XQ-DIST-006": {
     meaning: "distribution event file write: file handle exposes no createWritable",
     labelKey: "err_dist_006_no_createwritable",
